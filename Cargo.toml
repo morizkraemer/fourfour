@@ -1,0 +1,35 @@
+[package]
+name = "pioneer-usb-writer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Audio analysis
+stratum-dsp = "1.0.0"
+
+# Audio decoding
+symphonia = { version = "0.5", features = ["mp3", "flac", "wav", "aac", "pcm", "aiff"] }
+
+# Metadata reading
+lofty = "0.24"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+anyhow = "1"
+
+# Parallelism
+rayon = "1"
+
+# Progress bars
+indicatif = "0.17"
+
+# Binary writing (for ANLZ/PDB format)
+binrw = "0.15"
+
+# File hashing
+crc16 = "0.4"
+
+# Walkdir for scanning
+walkdir = "2"
