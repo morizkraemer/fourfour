@@ -1,449 +1,483 @@
-# Pioneer DeviceSQL Format - Undocumented Discoveries
+# Pioneer DeviceSQL & ANLZ Format — Reverse Engineering Notes
 
-This document contains technical discoveries about Pioneer's proprietary DeviceSQL format (export.pdb) and ANLZ waveform files that were **NOT previously documented** in any public source. These findings were obtained through extensive reverse engineering, binary analysis, and hardware testing.
+This document contains technical discoveries about Pioneer's proprietary DeviceSQL format (`export.pdb`) and ANLZ analysis files that are **not publicly documented**. These findings were obtained through binary analysis, disassembly, and hardware testing on a **CDJ-3000 (firmware 3.19)**.
 
-**Contributions to the DJ community** - Feel free to use this information in your own projects.
+Existing open-source documentation (Deep Symmetry, rekordcrate, Kaitai Struct specs) covers the broad structure. This document focuses on the **undocumented details that make or break hardware compatibility** — the things that cause "rekordbox database not found" or silent re-analysis on real players.
+
+**Use this freely.** If you're building tools for Pioneer hardware, this will save you weeks of binary diffing.
 
 ---
 
 ## Table of Contents
 
-1. [ANLZ Path Hash Algorithm](#anlz-path-hash-algorithm) - **WORLD FIRST**
-2. [PDB Page Layout](#pdb-page-layout)
-3. [Page Header Formulas](#page-header-formulas)
-4. [Row Group Structure](#row-group-structure)
-5. [Track Row Structure](#track-row-structure)
-6. [History Tables](#history-tables)
-7. [Waveform Encoding](#waveform-encoding)
-8. [Hardware Behavior](#hardware-behavior)
+1. [ANLZ Path Hash Algorithm](#1-anlz-path-hash-algorithm)
+2. [ANLZ File Format — What the CDJ Actually Requires](#2-anlz-file-format--what-the-cdj-actually-requires)
+3. [PDB Database — Critical Undocumented Fields](#3-pdb-database--critical-undocumented-fields)
+4. [PDB Page Header Formulas](#4-pdb-page-header-formulas)
+5. [PDB Row Group Structure](#5-pdb-row-group-structure)
+6. [Track Row Layout](#6-track-row-layout)
+7. [CDJ-3000 Hardware Behavior](#7-cdj-3000-hardware-behavior)
+8. [Debugging Methodology](#8-debugging-methodology)
+9. [References](#9-references)
 
 ---
 
-## ANLZ Path Hash Algorithm
+## 1. ANLZ Path Hash Algorithm
 
-**Status:** Reverse-engineered from rekordbox binary (December 2025)
-
-This algorithm was discovered by disassembling the `CreateAnlzFileFolderPath()` function in the rekordbox macOS binary using radare2. **This information was not publicly documented anywhere.**
+**How we found this:** Disassembled `CreateAnlzFileFolderPath()` from the rekordbox macOS binary using radare2.
 
 ### The Problem
 
-Pioneer CDJs and XDJ hardware compute their own ANLZ file paths from the audio file path. They **ignore** the `analyze_path` field stored in the PDB database. If your ANLZ files are not at the exact path the hardware expects, waveforms will not display.
+Pioneer CDJs compute ANLZ file paths independently from the audio file path. They **completely ignore** the `analyze_path` field stored in the PDB track row. If your ANLZ files aren't at the exact hash-computed path, the CDJ will never find them.
 
 ### Path Format
 
 ```
-/PIONEER/USBANLZ/P{XXX}/{YYYYYYYY}/ANLZ0000.{DAT,EXT}
+/PIONEER/USBANLZ/P{XXX}/{YYYYYYYY}/ANLZ0000.DAT
+/PIONEER/USBANLZ/P{XXX}/{YYYYYYYY}/ANLZ0000.EXT
 ```
 
-Where:
-- `XXX` = 3 hex digits (P value)
-- `YYYYYYYY` = 8 hex digits (hash value)
+- `XXX` = 3 hex digits (P value, derived from scattered bits of the hash)
+- `YYYYYYYY` = 8 hex digits (hash value mod 200003)
 
-### Algorithm (Pseudocode)
+### Algorithm
 
 ```python
 def compute_anlz_path(file_path: str) -> tuple[int, int]:
     """
-    Compute Pioneer ANLZ path from audio file path.
-
     Args:
-        file_path: Path relative to USB root, e.g. "/Contents/Artist/Album/Track.mp3"
-
+        file_path: Path relative to USB root, e.g. "/Contents/Artist/Track.flac"
     Returns:
-        (p_value, hash_value) for path format P{p_value:03X}/{hash_value:08X}
+        (p_value, hash_value) for path P{p_value:03X}/{hash_value:08X}
     """
     hash_val = 0
 
-    # Process as UTF-16 code units
     for char in file_path:
-        c = ord(char) & 0xFFFF
-
-        # Pioneer's rolling hash - two multiplications per character
+        c = ord(char) & 0xFFFF  # UTF-16 code unit
         temp = (hash_val * 0x5BC9 + c) & 0xFFFFFFFF
         hash_val = (temp * 0x93B5 + c) & 0xFFFFFFFF
 
-    # Apply modulo 200003
-    hash_result = hash_val % 200003  # 0x30D43
+    hash_result = hash_val % 200003  # 0x30D43 (prime)
 
-    # Extract P value from scattered bits of hash
-    p_value = 0
-    p_value |= (hash_result >> 0) & 0x01   # bit 0  -> bit 0
-    p_value |= (hash_result >> 1) & 0x02   # bit 2  -> bit 1
-    p_value |= (hash_result >> 4) & 0x04   # bit 6  -> bit 2
-    p_value |= (hash_result >> 4) & 0x08   # bit 7  -> bit 3
-    p_value |= (hash_result >> 5) & 0x10   # bit 9  -> bit 4
-    p_value |= (hash_result >> 8) & 0x20   # bit 13 -> bit 5
-    p_value |= (hash_result >> 10) & 0x40  # bit 16 -> bit 6
+    # P value: bits extracted from non-contiguous positions
+    p = 0
+    p |= (hash_result >> 0)  & 0x01  # bit 0  -> bit 0
+    p |= (hash_result >> 1)  & 0x02  # bit 2  -> bit 1
+    p |= (hash_result >> 4)  & 0x04  # bit 6  -> bit 2
+    p |= (hash_result >> 4)  & 0x08  # bit 7  -> bit 3
+    p |= (hash_result >> 5)  & 0x10  # bit 9  -> bit 4
+    p |= (hash_result >> 8)  & 0x20  # bit 13 -> bit 5
+    p |= (hash_result >> 10) & 0x40  # bit 16 -> bit 6
 
-    return (p_value, hash_result)
-```
-
-### Implementation (Rust)
-
-```rust
-fn compute_anlz_path_hash(file_path: &str) -> (u16, u32) {
-    let mut hash: u32 = 0;
-
-    for c in file_path.chars() {
-        let code_unit = (c as u32) & 0xFFFF;
-        let temp = hash.wrapping_mul(0x5bc9).wrapping_add(code_unit);
-        hash = temp.wrapping_mul(0x93b5).wrapping_add(code_unit);
-    }
-
-    let hash_result = hash % 0x30d43;
-
-    let mut p_value: u16 = 0;
-    p_value |= ((hash_result >> 0) & 1) as u16;
-    p_value |= ((hash_result >> 1) & 2) as u16;
-    p_value |= ((hash_result >> 4) & 4) as u16;
-    p_value |= ((hash_result >> 4) & 8) as u16;
-    p_value |= ((hash_result >> 5) & 0x10) as u16;
-    p_value |= ((hash_result >> 8) & 0x20) as u16;
-    p_value |= ((hash_result >> 10) & 0x40) as u16;
-
-    (p_value, hash_result)
-}
+    return (p, hash_result)
 ```
 
 ### Verified Test Cases
 
-| Input Path | P Value | Hash Value |
-|------------|---------|------------|
-| `/Contents/ARTISTTEST1/ALBUMTEST1/TITLETEST1.mp3` | 0x051 | 0x0001D603 |
-| `/Contents/ARTISTTEST2/ALBUMTEST2/TITLETEST2.mp3` | 0x03C | 0x0000A6CA |
-| `/Contents/ARTISTTEST3/ALBUMTEST3/TITLETEST3.mp3` | 0x045 | 0x0001096B |
-| `/Contents/BROOKLYN BOUNCE/The Theme (Of Progressive Attack)/This Is The Begining.mp3` | 0x04B | 0x000154A5 |
+| Input Path | P | Hash |
+|---|---|---|
+| `/Contents/Leo Portela/Bon Vibrant - Leo Portela.flac` | `0x00E` | `0x000281CE` |
+| `/Contents/Daniela Cast/Jazzy - Daniela Cast.flac` | `0x00A` | `0x0000CC9C` |
+| `/Contents/Huerta/Tatra Motokov - Huerta.flac` | `0x012` | `0x0000530C` |
 
-### Key Insights
-
-1. **Input is the file path** relative to USB root (starting with `/Contents/...`)
-2. **UTF-16 processing** - each character is treated as a 16-bit code unit
-3. **Hash constants**: 0x5BC9 and 0x93B5 (proprietary multipliers)
-4. **Modulo 200003** (prime number) for hash distribution
-5. **P value bit scrambling** - bits are extracted from non-contiguous positions
-6. **Deterministic** - same path always produces same result across all exports
+All verified by comparing against rekordbox-exported ANLZ directory names.
 
 ---
 
-## PDB Page Layout
+## 2. ANLZ File Format — What the CDJ Actually Requires
 
-Pioneer's DeviceSQL format uses fixed 4096-byte pages with a specific layout:
+The existing Kaitai Struct spec documents the section tags, but not the **validation requirements** that cause the CDJ to accept or reject the file.
 
-```
-Page 0:      File header (512 bytes used)
-Pages 1-2:   Tracks (header + first data page)
-Pages 3-4:   Genres
-Pages 5-6:   Artists
-Pages 7-8:   Albums
-Pages 9-10:  Labels (header only, no data)
-Pages 11-12: Keys
-Pages 13-14: Colors
-Pages 15-16: Playlists
-Pages 17-18: PlaylistEntries
-Pages 19-32: Unknown/Reserved tables
-Pages 33-34: Columns
-Pages 35-36: HistoryPlaylists
-Pages 37-38: HistoryEntries
-Pages 39-40: History
+### Critical Discovery: PPTH Null Terminator
 
-Pages 41-52: RESERVED ZONE - MUST BE ALL ZEROS
-             These pages are pointed to by empty_candidate fields
-             Never write page headers or data here
+The PPTH (path) section stores the audio file path as UTF-16 Big Endian. **The path MUST include a null terminator** (U+0000, 2 bytes).
 
-Pages 53+:   Overflow data for large exports
-             Track overflow chains: 2 -> 53 -> 54 -> ...
-```
-
-### Critical Discovery: Pages 41-52
-
-**Pages 41-52 must be completely zeroed.** Writing any data to these pages causes corruption. These pages serve as "empty candidate" targets for various tables:
-
-| Page | Purpose |
-|------|---------|
-| 41-49 | Reserved for future table growth |
-| 50 | Keys.empty_candidate |
-| 51 | Tracks.empty_candidate (small exports) |
-| 52 | PlaylistEntries.empty_candidate |
-
----
-
-## Page Header Formulas
-
-Each data page has a 40-byte header. Two fields use **undocumented formulas** based on row count:
-
-### Sequence Field (offset 0x10, 4 bytes)
+Without it, the CDJ finds the ANLZ file but rejects it and creates its own `ANLZ0001.DAT` alongside yours. This was the hardest bug to find — the file is in the right place, the sections look correct, but the CDJ silently rejects it.
 
 ```
-sequence = base + (total_rows - 1) * 5
+PPTH content:  /Contents/Artist/Track.flac\x00\x00   <- 2 zero bytes at end
+path_len field: (string_length + 1) * 2              <- includes null terminator
 ```
 
-| Table | Base Value |
-|-------|------------|
-| Tracks | 10 |
-| Genres | 8 |
-| Artists | 7 |
-| Albums | 9 |
-| Playlists | 6 |
-| PlaylistEntries | 11 |
-| History | 10 |
+**How we found this:** The CDJ created `ANLZ0001.DAT` next to our `ANLZ0000.DAT`. Comparing the CDJ-generated file against ours, the only difference in the PPTH section was 2 extra bytes (the null terminator). The CDJ's `path_len` was always 2 bytes larger than ours.
 
-**For multi-page tables**: Sequence is cumulative across pages.
-```
-Page 1: base + (rows_page1 - 1) * 5
-Page 2: page1_seq + rows_page2 * 5
-Page 3: page2_seq + rows_page3 * 5
-```
+### .DAT File — Required Sections
 
-### unk3 Field (offset 0x19, 1 byte)
+Order matters. The CDJ reads sections sequentially.
 
 ```
-unk3 = (rows % 8) * 0x20
+PMAI  (28 bytes)     — File header
+PPTH  (variable)     — File path (UTF-16BE, null-terminated)
+PVBR  (1620 bytes)   — VBR seek table (all zeros for FLAC/WAV/AIFF)
+PQTZ  (variable)     — Beat grid
+PWAV  (420 bytes)    — Monochrome waveform preview (400 entries)
+PCOB  (24 bytes)     — Cue points container (hot cues, count=1, no entries)
+PCOB  (24 bytes)     — Cue points container (memory cues, count=0)
 ```
 
-| Rows mod 8 | unk3 |
-|------------|------|
-| 1 | 0x20 |
-| 2 | 0x40 |
-| 3 | 0x60 |
-| 4 | 0x80 |
-| 5 | 0xA0 |
-| 6 | 0xC0 |
-| 7 | 0xE0 |
-| 0 (8, 16, ...) | 0x00 |
+### .EXT File — Required by CDJ-3000
 
-**Using incorrect values causes silent corruption in Rekordbox 5.**
-
----
-
-## Row Group Structure
-
-PDB stores row offsets in "row groups" at the end of each data page. **This structure was incorrectly documented elsewhere.**
-
-### Layout
-
-Row groups are stored in **reverse order** (last group first), growing downward from the page boundary:
+**The CDJ-3000 requires .EXT files.** Without them, it re-analyzes every track on load. This was not obvious because the .DAT file works fine on older hardware.
 
 ```
-Page data area: [row data...]
-                    |
-                    v
-Footer area:    [Group N-1][Group N-2]...[Group 1][Group 0]
-                                                          ^ Page end (0xFFF)
+PMAI  (28 bytes)     — File header
+PPTH  (variable)     — File path (same as .DAT)
+PWV3  (51224 bytes)  — Color preview waveform (51200 entries, 1 byte each)
+PCOB  (24 bytes)     — Cue points container (hot cues)
+PCOB  (24 bytes)     — Cue points container (memory cues)
+PCO2  (20 bytes)     — Extended cue container (hot cues)
+PCO2  (20 bytes)     — Extended cue container (memory cues)
+PQT2  (variable)     — Extended beat grid (2 bytes per beat)
+PWV5  (variable)     — Detailed color waveform (51200 entries, 2 bytes each)
+PWV4  (7224 bytes)   — Color waveform preview (1200 entries, 6 bytes each)
+PVB2  (8032 bytes)   — Extended VBR info (all zeros for lossless)
 ```
 
-### Group Structure (variable size)
+### .2EX File — Optional (CDJ-3000)
+
+Contains high-resolution waveforms. The CDJ works without it but displays lower-quality waveforms.
 
 ```
-For a full group (16 rows):
-  [offset_15][offset_14]...[offset_0][present_flags:2][unknown:2]
-  = 16 * 2 + 2 + 2 = 36 bytes
-
-For a partial group (N rows, N < 16):
-  [offset_N-1][offset_N-2]...[offset_0][present_flags:2][unknown:2]
-  = N * 2 + 4 bytes
+PMAI  (28 bytes)
+PPTH  (variable)
+PWV7  (variable)     — High-res color waveform (51200 entries, 3 bytes each)
+PWV6  (variable)     — High-res color preview (1200 entries, 3 bytes each)
+PWVC  (20 bytes)     — Waveform color config
 ```
 
-### Fields
-
-| Field | Size | Description |
-|-------|------|-------------|
-| offsets | 2 bytes each | Row start offsets within page, in reverse order |
-| present_flags | 2 bytes | Bitmask of used slots (0xFFFF for full group) |
-| unknown | 2 bytes | 0x0000 for full groups, `1 << (N-1)` for partial groups |
-
-### Example: 20 rows (Group 0 = 16 rows, Group 1 = 4 rows)
+### PMAI Header
 
 ```
-Footer layout (48 bytes total):
-  0x6FD0: [off_3][off_2][off_1][off_0][0x000F][0x0008]  <- Group 1 (partial, 4 rows)
-  0x6FDC: [off_15]...[off_0][0xFFFF][0x0000]            <- Group 0 (full, 16 rows)
+Offset  Size  Value      Description
+0x00    4     "PMAI"     Magic
+0x04    4     0x1C       Header length (always 28)
+0x08    4     (varies)   Total file size (all sections + header)
+0x0C    4     0x01       Unknown (rekordbox uses 1, CDJ uses 0 — both work)
+0x10    4     0x10000    Unknown (rekordbox uses 0x10000, CDJ uses 0)
+0x14    4     0x10000    Unknown (same as above)
+0x18    4     0x00       Padding
+```
+
+### PQTZ Section — Beat Grid
+
+The header is **24 bytes, not 20**. Some documentation omits the `unknown2` field.
+
+```
+Offset  Size  Value       Description
+0x00    4     "PQTZ"      Tag
+0x04    4     0x18        Header length (24, NOT 20)
+0x08    4     (varies)    Section length (header + beat_count * 8)
+0x0C    4     0x00        Unknown1
+0x10    4     0x00080000  Unknown2 (beat entry size marker — MUST be this value)
+0x14    4     (varies)    Beat count
+0x18    ...   beat data   Each beat: bar_position(u16be) + tempo(u16be) + time_ms(u32be) = 8 bytes
+```
+
+### PCOB Section — Cue Points
+
+```
+Offset  Size  Value       Description
+0x00    4     "PCOB"      Tag
+0x04    4     0x18        Header length (24)
+0x08    4     0x18        Section length (24 when no cue entries)
+0x0C    4     (varies)    Cue count (1 for hot cues container, 0 for memory)
+0x10    4     0x00        Unknown
+0x14    4     0xFFFFFFFF  Sentinel (rekordbox uses 0xFFFFFFFF)
+```
+
+### PCO2 Section — Extended Cues
+
+```
+Offset  Size  Value       Description
+0x00    4     "PCO2"      Tag
+0x04    4     0x14        Header length (20)
+0x08    4     0x14        Section length
+0x0C    4     (varies)    Count
+0x10    4     0x00        Unknown
+```
+
+### PWV3 Section — Color Preview Waveform
+
+```
+Offset  Size  Value       Description
+0x00    4     "PWV3"      Tag
+0x04    4     0x18        Header length (24)
+0x08    4     0xC818      Section length (51224)
+0x0C    4     0x01        Unknown (possibly version)
+0x10    4     0xC800      Data length (51200)
+0x14    2     0x0096      Unknown (150 — possibly entries per beat?)
+0x16    2     0x0000      Unknown
+0x18    ...   data        51200 bytes, each byte: color(3 bits) | height(5 bits)
 ```
 
 ---
 
-## Track Row Structure
+## 3. PDB Database — Critical Undocumented Fields
 
-Track rows use a complex variable-length structure with string pointers.
+These are the fields that cause "rekordbox database not found" when wrong. All were found through binary bisection testing on CDJ-3000 hardware.
 
-### Fixed Fields
-
-| Offset | Size | Field | Notes |
-|--------|------|-------|-------|
-| 0x00 | 2 | unknown | Always 0x0024 |
-| 0x02 | 2 | index_shift | Always 0x0003 |
-| 0x04 | 4 | bitmask | 0x1FF803DE for standard track |
-| 0x08 | 4 | sample_rate | e.g., 44100 |
-| 0x0C | 4 | composer_id | Usually 0 |
-| 0x10 | 4 | file_size | Audio file size in bytes |
-| 0x14 | 4 | unknown_2 | Usually track_id + 20 |
-| ... | ... | ... | ... |
-| 0x52 | 2 | sample_depth | e.g., 16 |
-| 0x54 | 2 | duration | Duration in seconds |
-
-### String Offsets
-
-Track rows contain 21 string offset fields (2 bytes each) pointing to DeviceSQL-encoded strings:
-
-1. isrc
-2. texter
-3. unknown_string_2
-4. unknown_string_3
-5. unknown_string_4
-6. message
-7. kuvo_public
-8. autoload_hotcues
-9. unknown_string_5
-10. unknown_string_6
-11. date_added
-12. release_date
-13. mix_name
-14. unknown_string_7
-15. analyze_path
-16. analyze_date
-17. comment
-18. title
-19. unknown_string_8
-20. filename
-21. file_path
-
-### Row Padding
-
-- **Single track exports**: Pad to 332 bytes total
-- **Multi-track exports**: Pad each row to 344 bytes
-
----
-
-## History Tables
-
-**Critical discovery**: History tables are **required** for XDJ hardware to recognize the USB, but their content doesn't need to match the exported tracks.
-
-### Behavior
-
-| History Tables | USB Recognition |
-|---------------|-----------------|
-| Empty (no rows) | **NOT RECOGNIZED** |
-| Any valid data | Works |
-
-### Solution
-
-Copy reference History table pages directly from a working export:
-- Page 36: HistoryPlaylists header
-- Page 38: HistoryEntries data
-- Page 40: History data
-
-### History Header Special Values (Page 39)
-
-| Field | 1 Track | 2+ Tracks |
-|-------|---------|-----------|
-| unk5 (0x20) | 0x0001 | 0x1FFF |
-| num_rows_large | 0x0000 | 0x1FFF |
-| unk6 (0x24) | 0x03EC | 0x03EC |
-| unk7 (0x26) | 0x0001 | 0x0001 |
-
----
-
-## Waveform Encoding
-
-### PWAV - Monochrome Preview (400 bytes)
+### Page 0 Header
 
 ```
-Each byte: [whiteness:3][height:5]
-- height: 0-31 (amplitude)
-- whiteness: 5 for preview (controls brightness)
+Offset  Size  Field              Value/Formula
+0x00    4     magic              0x00000000
+0x04    4     page_size          4096 (0x1000)
+0x08    4     num_tables         20 (0x14) — number of table types
+0x0C    4     next_unused_page   52 — first page not used by any table
+0x10    4     unknown            5
+0x14    4     sequence           MUST be >= max sequence of all data pages + 1
+0x18    4     padding            0
+0x1C    ...   table_pointers     20 entries × 16 bytes each
 ```
 
-### PWV2 - Tiny Preview (100 bytes)
+**The sequence field** was our first "database not found" trap with more tracks. With 6 tracks, all data page sequences were below 53. With 11 tracks, playlist entries reached sequence 61. Hardcoding 53 broke everything.
+
+### Table Pointer Format (16 bytes each)
 
 ```
-Each byte: [unused:4][height:4]
-- height: 0-15 (simple peak amplitude)
+Offset  Size  Field
+0x00    4     table_type         Type ID (0x00=Tracks, 0x01=Genres, ...)
+0x04    4     empty_candidate    Page index for empty/overflow chain
+0x08    4     first_page         First header page for this table
+0x0C    4     last_page          Last page in chain (header_page if no data)
 ```
 
-### PWV3 - Monochrome Detail (variable size)
+### Columns Table (type 0x10) — Special Page Header
+
+The Columns table uses a **completely different page header format** from all other tables. Getting this wrong causes "database not found."
 
 ```
-Each byte: [whiteness:3][height:5]
-- whiteness: 7 for detail waveform
-- Entry count: duration_seconds * 150
+Normal data page:     unknown5=0x0001, num_rows_large=(num_rows-1), unk4=num_groups
+Columns data page:    unknown5=num_rows, num_rows_large=0, unk4=num_groups+1
+Columns sequence:     Always 3 (regardless of row count)
 ```
 
-### PWV4 - Color Preview (7200 bytes = 1200 entries x 6 bytes)
+### Tracks and History Header Pages — Special Values
 
-Three frequency bands per entry:
-
-| Bytes | Band | Height Range | Color Range |
-|-------|------|--------------|-------------|
-| 0-1 | Low | 0-127 | 0xE0-0xFF (bright) |
-| 2-3 | Mid | 0-127 | 0x01-0x30 (dim) |
-| 4-5 | High | 0-127 | 0x01-0x20 (dimmer) |
-
-**Note**: PWV4 uses full 8-bit height (0-127), not 5-bit like PWAV/PWV3.
-
-### PWV5 - Color Detail (variable size)
+Tracks (0x00) and History (0x13) header pages need two non-standard values:
 
 ```
-Each 2-byte entry: [blue:3][green:3][red:3][height:5]
-- Entry count: duration_seconds * 150
+unknown7 (offset 0x26):  1 (instead of 0 for all other tables)
+
+Header page content at 0x28:
+  +0x10: 0x1FFF0001  (instead of 0x1FFF0000 for other tables)
+  +0x14: 0x00000010  (Tracks) or 0x00000140 (History)
+```
+
+### History Tables MUST Be Populated
+
+Empty history data pages cause "database not found." Even though it makes no sense for a fresh export to have history, the CDJ requires it.
+
+**Solution:** Embed binary blobs of known-good history pages from a working rekordbox export. The content doesn't need to match your tracks.
+
+```
+Page 36: HistoryPlaylists data (from reference export)
+Page 38: HistoryEntries data (from reference export)
+Page 40: History data (from reference export)
 ```
 
 ---
 
-## Hardware Behavior
+## 4. PDB Page Header Formulas
 
-### XDJ-XZ Waveform Loading
+Every data page has a 40-byte header (0x28 bytes). Two fields use formulas based on row count that aren't documented anywhere.
 
-1. Hardware receives track selection
-2. Computes ANLZ path using hash algorithm (ignores PDB `analyze_path`)
-3. Loads `/PIONEER/USBANLZ/P{XXX}/{YYYYYYYY}/ANLZ0000.EXT`
-4. Falls back to `.DAT` if `.EXT` missing
+### Page Header Layout
 
-### Which Waveform Sections Control What
+```
+Offset  Size  Field          Formula / Value
+0x00    4     gap            0x00000000
+0x04    4     page_index     This page's index
+0x08    4     table_type     Type ID
+0x0C    4     next_page      Next page in chain (empty_candidate if last)
+0x10    4     sequence       base + (total_rows - 1) * 5
+0x14    4     unknown2       0x00000000
+0x18    1     num_rows_small min(num_rows, 255)
+0x19    1     unk3           (num_rows % 8) * 0x20
+0x1A    1     unk4           ceil(num_rows / 16)  [+1 for Columns table]
+0x1B    1     page_flags     0x64=header page, 0x24=data page
+0x1C    2     free_size      Remaining bytes in page
+0x1E    2     used_size      Bytes used by row data + row groups
+0x20    2     unknown5       0x0001 (normal) / num_rows (Columns) / 0x1FFF (header)
+0x22    2     num_rows_large (num_rows - 1) (normal) / 0 (Columns) / 0x1FFF (header)
+0x24    2     unknown6       0x0000 (data) / 0x03EC (header)
+0x26    2     unknown7       0 (normal) / 1 (Tracks + History header pages)
+```
 
-| Section | Needle Search | Jogwheel | Main Screen |
-|---------|---------------|----------|-------------|
-| PWV3 | **Primary** | **Primary** | No |
-| PWV4 | No | No | Color preview |
-| PWV5 | No | No | Color detail |
-| PWAV | Overview | No | No |
+### Sequence Base Values
 
-**Key finding**: PWV3 (monochrome detail) controls both needle search and jogwheel display on XDJ-XZ, not PWV4/PWV5 as one might expect.
+| Table | Base |
+|---|---|
+| Tracks (0x00) | 10 |
+| Artists (0x02) | 7 |
+| Albums (0x03) | 9 |
+| Colors (0x06) | 8 |
+| PlaylistTree (0x07) | 6 |
+| PlaylistEntries (0x08) | 11 |
+| Columns (0x10) | 3 (fixed, no formula) |
 
-### File Requirements
+Formula: `sequence = base + (num_rows - 1) * 5`
 
-| File | Required? | Purpose |
-|------|-----------|---------|
-| export.pdb | Yes | Track database |
-| exportExt.pdb | No | Extended database (can be deleted) |
-| ANLZ0000.DAT | Optional | Basic waveforms |
-| ANLZ0000.EXT | **Yes** | Detailed waveforms + cues |
+For multi-page tables, sequence is cumulative across pages.
 
 ---
 
-## References
+## 5. PDB Row Group Structure
+
+Row offsets are stored in "row groups" at the end of each data page, growing downward from the page boundary.
+
+```
+Page layout:
+  [0x00-0x27]  Page header (40 bytes)
+  [0x28-...]   Row data (heap, growing upward)
+  [...-0xFFF]  Row groups (growing downward from page end)
+```
+
+### Row Group Format
+
+Groups hold up to 16 rows. Groups are stored in reverse order.
+
+```
+Full group (16 rows):   16 offsets(u16) + present_flags(u16) + padding(u16) = 36 bytes
+Partial group (N rows):  N offsets(u16) + present_flags(u16) + padding(u16) = N*2 + 4 bytes
+```
+
+- `present_flags`: bitmask of used slots (0xFFFF for full group)
+- `padding`: 0x0000 for full groups, implementation-dependent for partial
+
+---
+
+## 6. Track Row Layout
+
+Track rows are variable-length with fixed fields followed by string offset pointers.
+
+### Fixed Fields (first ~86 bytes)
+
+| Offset | Size | Field |
+|---|---|---|
+| 0x00 | 2 | unknown (0x0024) |
+| 0x02 | 2 | index_shift (0x0003) |
+| 0x04 | 4 | bitmask (0x1FF803DE) |
+| 0x08 | 4 | sample_rate |
+| 0x0C | 4 | composer_id |
+| 0x10 | 4 | file_size |
+| 0x14 | 4 | unknown_2 (track_id + 20) |
+| ... | ... | (more fixed fields) |
+| 0x52 | 2 | sample_depth |
+| 0x54 | 2 | duration_seconds |
+
+### String Offset Fields (21 × u16)
+
+These are offsets from the row start pointing to DeviceSQL-encoded strings within the row data:
+
+1. isrc, 2. texter, 3-4. unknown, 5. unknown, 6. message,
+7. kuvo_public, 8. autoload_hotcues, 9-10. unknown,
+11. date_added, 12. release_date, 13. mix_name, 14. unknown,
+15. analyze_path, 16. analyze_date, 17. comment, 18. title,
+19. unknown, 20. filename, 21. file_path
+
+---
+
+## 7. CDJ-3000 Hardware Behavior
+
+### USB Recognition Flow
+
+1. CDJ reads `PIONEER/rekordbox/export.pdb`
+2. Validates page 0 header, then walks table chains
+3. **Any invalid page causes "rekordbox database not found"** — there is no partial failure
+
+### Track Loading Flow
+
+1. User selects track from browser
+2. CDJ computes ANLZ hash from audio file path (ignoring PDB `analyze_path`)
+3. Looks for `ANLZ0000.DAT` and `ANLZ0000.EXT` at computed hash path
+4. **Validates PPTH path matches** (including null terminator)
+5. If valid: uses waveform/beat data from files
+6. If invalid: creates `ANLZ0001.DAT` with its own analysis (increments the number)
+
+### What Triggers Re-Analysis
+
+| Condition | Result |
+|---|---|
+| .EXT file missing | Re-analyzes (CDJ-3000 needs color waveforms) |
+| .DAT file missing | Re-analyzes |
+| PPTH path missing null terminator | Rejects file, creates ANLZ0001.DAT |
+| Wrong hash directory | Files never found |
+| Wrong PQTZ header size (20 instead of 24) | Unknown (may cause re-analysis) |
+
+### What the CDJ Creates on USB
+
+When analyzing, the CDJ writes:
+- `ANLZ0001.DAT` — if `ANLZ0000.DAT` exists but was rejected
+- `export.pdb.bak` — backup of the PDB on first use
+- `RBFLTR.DAT` — filter/settings file (identifies player model and firmware)
+
+### CDJ-Generated ANLZ vs Rekordbox ANLZ
+
+| Field | CDJ-3000 | Rekordbox |
+|---|---|---|
+| PMAI unknown fields | All zeros | Non-zero (0x01, 0x10000, 0x10000) |
+| PCOB sentinel | 0x00000000 | 0xFFFFFFFF |
+| PPTH null terminator | Present | Present |
+| PWV2 section (100-entry waveform) | Present | Not in .DAT |
+
+Both formats are accepted by the CDJ. Rekordbox format is the reference standard.
+
+---
+
+## 8. Debugging Methodology
+
+### Binary Bisection Testing
+
+When the CDJ reports "database not found," the cause could be any single byte in a 168KB file. Binary bisection is the fastest way to isolate it:
+
+1. Start with a known-working PDB (e.g., rekordbox export)
+2. Copy your PDB's pages into the working one, one at a time
+3. Test on CDJ after each page swap
+4. When it breaks: that page is the problem
+5. Within the broken page: swap individual fields to find the exact byte
+
+This is how we found the Columns table, History table, and header page issues — each was a single page causing "database not found."
+
+### ANLZ Validation
+
+1. Check the hash-computed directory matches where your files are
+2. Hex-compare your PPTH section against a CDJ-generated one (look for null terminator)
+3. Compare section order and count against rekordbox-exported files
+4. If the CDJ creates `ANLZ0001.DAT`, it found but rejected your `ANLZ0000.DAT` — diff them
+
+### Tools
+
+- `xxd` — hex dumps for binary comparison
+- `python3 struct` — quick binary parsing scripts
+- `dd` — extract individual pages from PDB files
+- `dot_clean` — remove macOS resource forks from FAT32 USBs (they can confuse Linux-based players)
+
+---
+
+## 9. References
 
 ### Existing Documentation (starting points)
 
-- [Deep Symmetry - PDB Format](https://djl-analysis.deepsymmetry.org/rekordbox-export-analysis/exports.html)
-- [Deep Symmetry - ANLZ Format](https://djl-analysis.deepsymmetry.org/rekordbox-export-analysis/anlz.html)
-- [rekordcrate Library](https://holzhaus.github.io/rekordcrate/)
+- [Deep Symmetry — PDB Format](https://djl-analysis.deepsymmetry.org/rekordbox-export-analysis/exports.html)
+- [Deep Symmetry — ANLZ Format](https://djl-analysis.deepsymmetry.org/rekordbox-export-analysis/anlz.html)
+- [rekordcrate Library (Rust)](https://holzhaus.github.io/rekordcrate/)
 - [Kaitai PDB Spec](https://github.com/Deep-Symmetry/crate-digger/blob/main/src/main/kaitai/rekordbox_pdb.ksy)
 
-### Tools Used for Reverse Engineering
+### What This Document Adds
 
-- radare2 - Binary disassembly
-- xxd - Hex dumps
-- Python struct - Binary parsing
-- XDJ-XZ hardware - Live testing
-- Rekordbox 5 (MacOS) - Live testing
-
----
-
-## License
-
-This documentation is released into the public domain. Use it however you want.
-
-If you find this useful, consider contributing back any additional discoveries.
+Things not covered by any of the above:
+- ANLZ path hash algorithm (constants, modulo, P-value bit extraction)
+- PPTH null terminator requirement
+- Columns table special page header format
+- History table population requirement
+- Tracks/History header page unknown7 and content byte values
+- Page 0 sequence must exceed all data page sequences
+- CDJ-3000 .EXT file requirement
+- PQTZ 24-byte header (unknown2 = 0x00080000)
+- CDJ file rejection behavior (ANLZ0001.DAT creation)
 
 ---
 
-*Last updated: December 29, 2025*
+*Tested on: CDJ-3000 firmware 3.19, April 2026*
+*Source: [pioneer-usb-writer](https://github.com/) — Rust tool that writes CDJ-compatible USBs without rekordbox*
