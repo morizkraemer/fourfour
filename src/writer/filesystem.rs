@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
-use crate::models::{AnalysisResult, Track};
+use crate::models::{AnalysisResult, Playlist, Track};
 use crate::writer::{anlz, pdb};
 
 /// Write the complete Pioneer USB structure to the output directory.
@@ -9,6 +9,7 @@ pub fn write_usb(
     output_dir: &Path,
     tracks: &[Track],
     analyses: &[AnalysisResult],
+    playlists: &[Playlist],
 ) -> Result<()> {
     // Create directory structure
     let pioneer_dir = output_dir.join("PIONEER");
@@ -46,7 +47,7 @@ pub fn write_usb(
     println!("Writing PDB database...");
     // Write PDB database
     let pdb_path = rekordbox_dir.join("export.pdb");
-    pdb::write_pdb(&pdb_path, tracks)?;
+    pdb::write_pdb(&pdb_path, tracks, playlists)?;
 
     println!("USB structure written to {}", output_dir.display());
     Ok(())

@@ -62,3 +62,12 @@ pub struct AnalysisResult {
     pub bpm: f64,
     pub key: String,
 }
+
+/// A playlist containing a subset of tracks.
+#[derive(Debug, Clone)]
+pub struct Playlist {
+    pub id: u32,
+    pub name: String,
+    /// Track IDs belonging to this playlist.
+    pub track_ids: Vec<u32>,
+}

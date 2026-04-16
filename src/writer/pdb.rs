@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
-use crate::models::Track;
+use crate::models::{Playlist, Track};
 use crate::writer::anlz;
 
 const PAGE_SIZE: u32 = 4096;
@@ -656,7 +656,7 @@ fn key_name_to_id(key: &str) -> u32 {
 
 // ── Main PDB Writer ────────────────────────────────────────────────
 
-pub fn write_pdb(output_path: &Path, tracks: &[Track]) -> Result<()> {
+pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -> Result<()> {
     // Collect unique values
     let mut artists: Vec<String> = tracks.iter().map(|t| t.artist.clone()).collect();
     artists.sort();
@@ -691,15 +691,21 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track]) -> Result<()> {
     let (color_heap, color_offsets) = build_color_rows();
     let (columns_heap, columns_offsets) = build_columns_rows();
 
-    // Playlist: just "All Tracks" at root level (no ROOT folder node — CDJ expects
-    // playlists directly at root with parent_id=0, per reference implementation)
-    let playlist_tree_data: Vec<(u32, u32, u32, &str, bool)> = vec![
-        (1, 0, 0, "All Tracks", false),
-    ];
+    // Build playlist tree and entries from the provided playlists
+    let playlist_tree_data: Vec<(u32, u32, u32, &str, bool)> = playlists.iter()
+        .enumerate()
+        .map(|(i, p)| (p.id, 0u32, i as u32, p.name.as_str(), false))
+        .collect();
     let (pt_heap, pt_offsets) = build_playlist_tree_rows(&playlist_tree_data);
 
-    let playlist_entries: Vec<(u32, u32, u32)> = tracks.iter().enumerate()
-        .map(|(i, t)| ((i + 1) as u32, t.id, 1u32)).collect();
+    let mut playlist_entries: Vec<(u32, u32, u32)> = Vec::new();
+    let mut entry_idx = 1u32;
+    for playlist in playlists {
+        for &track_id in &playlist.track_ids {
+            playlist_entries.push((entry_idx, track_id, playlist.id));
+            entry_idx += 1;
+        }
+    }
     let (pe_heap, pe_offsets) = build_playlist_entry_rows(&playlist_entries);
 
     // Check that tables fit in single pages
@@ -733,13 +739,26 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track]) -> Result<()> {
     file.write_all(&vec![0u8; file_size as usize])?;
     file.seek(SeekFrom::Start(0))?;
 
+    // Compute max sequence across all data pages so page 0 sequence exceeds them all.
+    // Each data page sequence = base + (num_rows - 1) * 5.
+    let data_sequences: Vec<u32> = vec![
+        10 + track_offsets.len().saturating_sub(1) as u32 * 5,   // tracks
+        7 + artist_offsets.len().saturating_sub(1) as u32 * 5,   // artists
+        9 + album_offsets.len().saturating_sub(1) as u32 * 5,    // albums
+        8 + 7 * 5,                                                // colors (always 8 rows)
+        6 + pt_offsets.len().saturating_sub(1) as u32 * 5,       // playlist_tree
+        11 + pe_offsets.len().saturating_sub(1) as u32 * 5,      // playlist_entries
+        3,                                                        // columns (always 3)
+    ];
+    let max_seq = data_sequences.iter().copied().max().unwrap_or(0);
+    let header_sequence = max_seq + 2; // page 0 sequence must exceed all data page sequences
+
     // --- Page 0: File header ---
     file.write_all(&[0u8; 4])?; // 0x00: magic
     file.write_all(&PAGE_SIZE.to_le_bytes())?; // 0x04: len_page
     file.write_all(&(LAYOUTS.len() as u32).to_le_bytes())?; // 0x08: num_tables
     file.write_all(&52u32.to_le_bytes())?; // 0x0C: next_unused_page
     file.write_all(&5u32.to_le_bytes())?; // 0x10: unknown
-    let header_sequence = 53u32; // matches BLAU rekordbox reference export
     file.write_all(&header_sequence.to_le_bytes())?; // 0x14: sequence
     file.write_all(&[0u8; 4])?; // 0x18: gap
 
