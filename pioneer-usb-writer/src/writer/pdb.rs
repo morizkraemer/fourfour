@@ -79,7 +79,7 @@ const LAYOUTS: &[TableLayout] = &[
     TableLayout { table_type: 0x01, header_page: 3,  data_page: 4,  empty_candidate: 4,  last_page: 3  }, // genres (ec=data slot, last=header)
     TableLayout { table_type: 0x02, header_page: 5,  data_page: 6,  empty_candidate: 47, last_page: 6  }, // artists
     TableLayout { table_type: 0x03, header_page: 7,  data_page: 8,  empty_candidate: 48, last_page: 8  }, // albums
-    TableLayout { table_type: 0x04, header_page: 9,  data_page: 0,  empty_candidate: 10, last_page: 9  }, // labels
+    TableLayout { table_type: 0x04, header_page: 9,  data_page: 0,  empty_candidate: 10, last_page: 9  }, // labels (no data page yet)
     TableLayout { table_type: 0x05, header_page: 11, data_page: 12, empty_candidate: 12, last_page: 11 }, // keys (ec=data slot, last=header)
     TableLayout { table_type: 0x06, header_page: 13, data_page: 14, empty_candidate: 42, last_page: 14 }, // colors
     TableLayout { table_type: 0x07, header_page: 15, data_page: 16, empty_candidate: 46, last_page: 16 }, // playlist_tree
@@ -353,6 +353,18 @@ fn build_genre_rows(genres: &[String]) -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
+fn build_label_rows(labels: &[String]) -> (Vec<u8>, Vec<u16>) {
+    let mut heap = Vec::new();
+    let mut offsets = Vec::new();
+    for (i, l) in labels.iter().enumerate() {
+        offsets.push(heap.len() as u16);
+        heap.extend_from_slice(&((i + 1) as u32).to_le_bytes());
+        heap.extend_from_slice(&encode_string(l));
+        align_to_4(&mut heap);
+    }
+    (heap, offsets)
+}
+
 fn build_artist_rows(artists: &[String]) -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
@@ -441,6 +453,8 @@ fn build_track_rows(
     artist_map: &HashMap<String, u32>,
     album_map: &HashMap<String, u32>,
     genre_map: &HashMap<String, u32>,
+    label_map: &HashMap<String, u32>,
+    remixer_map: &HashMap<String, u32>,
 ) -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
@@ -452,6 +466,8 @@ fn build_track_rows(
         let artist_id = *artist_map.get(&track.artist).unwrap_or(&0);
         let album_id = *album_map.get(&track.album).unwrap_or(&0);
         let genre_id = *genre_map.get(&track.genre).unwrap_or(&1);
+        let label_id = if track.label.is_empty() { 0 } else { *label_map.get(&track.label).unwrap_or(&0) };
+        let remixer_id = if track.remixer.is_empty() { 0 } else { *remixer_map.get(&track.remixer).unwrap_or(&0) };
         let key_id = key_name_to_id(&track.key);
 
         // --- Fixed header (94 bytes = 0x5E) ---
@@ -469,18 +485,18 @@ fn build_track_rows(
         heap.extend_from_slice(&artwork_id.to_le_bytes()); // 0x1C: artwork_id
         heap.extend_from_slice(&key_id.to_le_bytes()); // 0x20: key_id
         heap.extend_from_slice(&0u32.to_le_bytes()); // 0x24: original_artist_id
-        heap.extend_from_slice(&0u32.to_le_bytes()); // 0x28: label_id
-        heap.extend_from_slice(&0u32.to_le_bytes()); // 0x2C: remixer_id
+        heap.extend_from_slice(&label_id.to_le_bytes()); // 0x28: label_id
+        heap.extend_from_slice(&remixer_id.to_le_bytes()); // 0x2C: remixer_id
         heap.extend_from_slice(&(track.bitrate as u32).to_le_bytes()); // 0x30: bitrate
-        heap.extend_from_slice(&0u32.to_le_bytes()); // 0x34: track_number
+        heap.extend_from_slice(&track.track_number.to_le_bytes()); // 0x34: track_number
         heap.extend_from_slice(&track.tempo.to_le_bytes()); // 0x38: tempo
         heap.extend_from_slice(&genre_id.to_le_bytes()); // 0x3C: genre_id
         heap.extend_from_slice(&album_id.to_le_bytes()); // 0x40: album_id
         heap.extend_from_slice(&artist_id.to_le_bytes()); // 0x44: artist_id
         heap.extend_from_slice(&track.id.to_le_bytes()); // 0x48: id
-        heap.extend_from_slice(&0u16.to_le_bytes()); // 0x4C: disc_number
+        heap.extend_from_slice(&track.disc_number.to_le_bytes()); // 0x4C: disc_number
         heap.extend_from_slice(&0u16.to_le_bytes()); // 0x4E: play_count
-        heap.extend_from_slice(&0u16.to_le_bytes()); // 0x50: year
+        heap.extend_from_slice(&track.year.to_le_bytes()); // 0x50: year
         heap.extend_from_slice(&16u16.to_le_bytes()); // 0x52: sample_depth
         heap.extend_from_slice(&(track.duration_secs as u16).to_le_bytes()); // 0x54: duration
         heap.extend_from_slice(&0x0029u16.to_le_bytes()); // 0x56: u5
@@ -520,13 +536,21 @@ fn build_track_rows(
         add(8, &[0x03]); // unknown8
         add(9, &[0x03]); // unknown9
         add(10, &encode_string("2026-04-15")); // date_added
-        add(11, &[0x03]); // release_date
+        if track.year > 0 {
+            add(11, &encode_string(&format!("{}-01-01", track.year))); // release_date
+        } else {
+            add(11, &[0x03]); // release_date
+        }
         add(12, &[0x03]); // mix_name
         add(13, &[0x03]); // unknown13
         let anlz_path = anlz::anlz_path_for_pdb(track);
         add(14, &encode_string(&anlz_path)); // analyze_path
         add(15, &encode_string("2026-04-15")); // analyze_date
-        add(16, &[0x03]); // comment
+        if track.comment.is_empty() {
+            add(16, &[0x03]); // comment
+        } else {
+            add(16, &encode_string(&track.comment)); // comment
+        }
         add(17, &encode_string(&track.title)); // title
         add(18, &[0x03]); // unknown18
         let filename = track.source_path.file_name()
@@ -699,11 +723,37 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     let genre_map: HashMap<String, u32> = genres.iter().enumerate()
         .map(|(i, g)| (g.clone(), (i + 1) as u32)).collect();
 
+    let mut labels: Vec<String> = tracks.iter()
+        .filter(|t| !t.label.is_empty())
+        .map(|t| t.label.clone()).collect();
+    labels.sort();
+    labels.dedup();
+    let label_map: HashMap<String, u32> = labels.iter().enumerate()
+        .map(|(i, l)| (l.clone(), (i + 1) as u32)).collect();
+
+    let mut remixers: Vec<String> = tracks.iter()
+        .filter(|t| !t.remixer.is_empty())
+        .map(|t| t.remixer.clone()).collect();
+    remixers.sort();
+    remixers.dedup();
+    // Remixers go into the artist table — offset IDs after existing artists
+    let remixer_id_base = artists.len() as u32 + 1;
+    let remixer_map: HashMap<String, u32> = remixers.iter().enumerate()
+        .map(|(i, r)| (r.clone(), remixer_id_base + i as u32)).collect();
+    // Merge remixer names into the artist list for PDB
+    let mut all_artists = artists.clone();
+    for r in &remixers {
+        if !all_artists.contains(r) {
+            all_artists.push(r.clone());
+        }
+    }
+
     // Build row data for each table
-    let (track_heap, track_offsets) = build_track_rows(tracks, &artist_map, &album_map, &genre_map);
+    let (track_heap, track_offsets) = build_track_rows(tracks, &artist_map, &album_map, &genre_map, &label_map, &remixer_map);
     let (genre_heap, genre_offsets) = build_genre_rows(&genres);
-    let (artist_heap, artist_offsets) = build_artist_rows(&artists);
+    let (artist_heap, artist_offsets) = build_artist_rows(&all_artists);
     let (album_heap, album_offsets) = build_album_rows(&albums, &album_artist_map);
+    let (label_heap, label_offsets) = build_label_rows(&labels);
     let (key_heap, key_offsets) = build_key_rows();
     let (color_heap, color_offsets) = build_color_rows();
     let (columns_heap, columns_offsets) = build_columns_rows();
@@ -730,11 +780,13 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     for (name, heap_len, num_rows) in [
         ("tracks", track_heap.len(), track_offsets.len()),
         ("genres", genre_heap.len(), genre_offsets.len()),
+        ("labels", label_heap.len(), label_offsets.len()),
         ("artists", artist_heap.len(), artist_offsets.len()),
         ("albums", album_heap.len(), album_offsets.len()),
         ("keys", key_heap.len(), key_offsets.len()),
         ("colors", color_heap.len(), color_offsets.len()),
         ("columns", columns_heap.len(), columns_offsets.len()),
+        ("artwork", artwork_heap.len(), artwork_offsets.len()),
         ("playlist_tree", pt_heap.len(), pt_offsets.len()),
         ("playlist_entries", pe_heap.len(), pe_offsets.len()),
     ] {
@@ -763,7 +815,9 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
         10 + track_offsets.len().saturating_sub(1) as u32 * 5,   // tracks
         7 + artist_offsets.len().saturating_sub(1) as u32 * 5,   // artists
         9 + album_offsets.len().saturating_sub(1) as u32 * 5,    // albums
+        4 + label_offsets.len().saturating_sub(1) as u32 * 5,      // labels
         8 + 7 * 5,                                                // colors (always 8 rows)
+        5 + artwork_offsets.len().saturating_sub(1) as u32 * 5,  // artwork
         6 + pt_offsets.len().saturating_sub(1) as u32 * 5,       // playlist_tree
         11 + pe_offsets.len().saturating_sub(1) as u32 * 5,      // playlist_entries
         3,                                                        // columns (always 3)
@@ -815,6 +869,7 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
                 0x06 => (&color_heap, &color_offsets, 8 + 7 * 5),
                 0x07 => (&pt_heap, &pt_offsets, 6 + (pt_offsets.len().saturating_sub(1) as u32) * 5),
                 0x08 => { let s = 11 + (pe_offsets.len().saturating_sub(1) as u32) * 5; (&pe_heap, &pe_offsets, s) },
+                0x0D => { let s = 5 + (artwork_offsets.len().saturating_sub(1) as u32) * 5; (&artwork_heap, &artwork_offsets, s) },
                 0x10 => (&columns_heap, &columns_offsets, 3u32), // columns sequence is always 3
                 // History tables: CDJ requires populated history data pages
                 0x11 => {

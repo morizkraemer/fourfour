@@ -1,7 +1,9 @@
 /// Shared types used across the application.
 
+use serde::{Deserialize, Serialize};
+
 /// Metadata and analysis results for a single audio track.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
     /// Original file path on disk
     pub source_path: std::path::PathBuf,
@@ -15,6 +17,18 @@ pub struct Track {
     pub album: String,
     /// Genre from tags
     pub genre: String,
+    /// Record label from tags
+    pub label: String,
+    /// Remixer from tags
+    pub remixer: String,
+    /// Comment from tags
+    pub comment: String,
+    /// Year of release
+    pub year: u16,
+    /// Disc number
+    pub disc_number: u16,
+    /// Track number on disc
+    pub track_number: u32,
     /// BPM (beats per minute × 100, as Pioneer stores it)
     pub tempo: u32,
     /// Musical key (e.g. "1A", "5B")
@@ -34,12 +48,12 @@ pub struct Track {
 }
 
 /// Beat grid: list of beat positions with timing info.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeatGrid {
     pub beats: Vec<Beat>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Beat {
     /// Beat number within the bar (1-4)
     pub bar_position: u8,
@@ -50,14 +64,29 @@ pub struct Beat {
 }
 
 /// 400-byte monochrome waveform preview.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaveformPreview {
     /// 400 bytes, each encoding height (5 low bits) and whiteness (3 high bits)
+    #[serde(with = "waveform_data")]
     pub data: [u8; 400],
 }
 
+mod waveform_data {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(data: &[u8; 400], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_bytes(data)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<[u8; 400], D::Error> {
+        let v: Vec<u8> = Deserialize::deserialize(d)?;
+        v.try_into()
+            .map_err(|v: Vec<u8>| serde::de::Error::custom(format!("expected 400 bytes, got {}", v.len())))
+    }
+}
+
 /// Full analysis result for a track.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     pub beat_grid: BeatGrid,
     pub waveform: WaveformPreview,
@@ -66,7 +95,7 @@ pub struct AnalysisResult {
 }
 
 /// A playlist containing a subset of tracks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Playlist {
     pub id: u32,
     pub name: String,

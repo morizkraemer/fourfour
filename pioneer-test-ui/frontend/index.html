@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pioneer USB Writer - Test</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Drop overlay (shown on drag enter) -->
+    <div id="drop-overlay" class="drop-overlay hidden">
+        <div class="drop-overlay-inner">Drop audio files here</div>
+    </div>
+
+    <div id="app">
+
+        <!-- Toolbar -->
+        <div id="toolbar">
+            <button id="btn-import" onclick="importFolder()">Import Folder</button>
+            <button id="btn-analyze" onclick="analyzeAll()">Analyze All</button>
+            <div class="toolbar-spacer"></div>
+            <label for="usb-select">USB:</label>
+            <select id="usb-select" onchange="selectVolume(this.value)">
+                <option value="">-- select volume --</option>
+            </select>
+            <button id="btn-refresh-volumes" onclick="loadVolumes()" title="Refresh volumes">&#8635;</button>
+            <button id="btn-sync" onclick="syncToUsb()">Sync</button>
+        </div>
+
+        <!-- Main content: track list + playlists -->
+        <div id="main">
+
+            <!-- Track list (left 70%) -->
+            <div id="track-panel">
+                <div id="track-table-wrap">
+                    <table id="track-table">
+                        <thead>
+                            <tr>
+                                <th class="col-num">#</th>
+                                <th class="col-title">Title</th>
+                                <th class="col-artist">Artist</th>
+                                <th class="col-bpm">BPM</th>
+                                <th class="col-key">Key</th>
+                                <th class="col-dur">Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="track-tbody">
+                            <tr class="empty-row">
+                                <td colspan="6">No tracks loaded. Import a folder or drop files here.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Playlist sidebar (right 30%) -->
+            <div id="playlist-panel">
+                <div id="playlist-actions">
+                    <span id="selection-count">0 selected</span>
+                    <button id="btn-new-playlist" onclick="createPlaylist()">+ New Playlist</button>
+                </div>
+                <div id="playlist-list"></div>
+            </div>
+
+        </div>
+
+        <!-- Progress bar (bottom) -->
+        <div id="progress-bar-wrap" class="hidden">
+            <div id="progress-bar-track">
+                <div id="progress-bar-fill"></div>
+            </div>
+            <div id="progress-label">Ready</div>
+        </div>
+
+    </div>
+
+    <!-- Simple modal for text input (prompt() doesn't work in Tauri webview) -->
+    <dialog id="text-input-dialog">
+        <form method="dialog">
+            <p id="text-input-label">Name:</p>
+            <input type="text" id="text-input-field" autofocus>
+            <div style="margin-top:8px;text-align:right;">
+                <button type="button" onclick="document.getElementById('text-input-dialog').close()">Cancel</button>
+                <button type="submit">OK</button>
+            </div>
+        </form>
+    </dialog>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,8 +1,4 @@
-mod analyzer;
-mod models;
-mod scanner;
-mod waveform;
-mod writer;
+use pioneer_usb_writer::{analyzer, models, scanner, writer};
 
 use anyhow::{Context, Result};
 use clap::Parser;

@@ -1,0 +1,20 @@
+[package]
+name = "pioneer-test-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+pioneer_usb_writer = { path = "../pioneer-usb-writer", package = "pioneer-usb-writer" }
+anyhow = "1"
+tokio = { version = "1.52.1", features = ["rt"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }
+objc2 = "0.6"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }

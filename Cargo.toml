@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = ["pioneer-usb-writer", "pioneer-test-ui"]
+
+# Optimize heavy DSP/audio dependencies even in dev builds.
+# This keeps your own crate in debug (fast compiles) but makes
+# analysis 10-50x faster.
+[profile.dev.package.stratum-dsp]
+opt-level = 3
+[profile.dev.package.symphonia]
+opt-level = 3
+[profile.dev.package.symphonia-core]
+opt-level = 3
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+[profile.dev.package.symphonia-format-isomp4]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-flac]
+opt-level = 3
