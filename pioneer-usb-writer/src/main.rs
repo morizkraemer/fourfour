@@ -97,6 +97,7 @@ fn main() -> Result<()> {
                     waveform: models::WaveformPreview { data: [0u8; 400] },
                     bpm: 0.0,
                     key: String::new(),
+                    cue_points: Vec::new(),
                 });
                 failed += 1;
             }

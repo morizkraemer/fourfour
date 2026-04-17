@@ -31,6 +31,12 @@ No test suite exists yet. Validation is done against real CDJ-3000 hardware usin
 
 Dev builds optimize DSP/audio dependencies at `opt-level = 3` while keeping app code in debug. This is critical — stratum-dsp is 10-50x slower unoptimized. When adding new symphonia sub-crates, add a corresponding `[profile.dev.package.*]` entry.
 
+## Versioning
+
+The app version is defined in **`pioneer-usb-writer/src/lib.rs`** as `pub const VERSION`. It is displayed in the Tauri UI toolbar and printed by the CLI on startup.
+
+**On every edit or feature change**, bump the version in `pioneer-usb-writer/src/lib.rs`.
+
 ## Architecture
 
 The library pipeline is: **scan → analyze → write**.

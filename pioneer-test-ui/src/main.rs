@@ -60,14 +60,30 @@ fn scan_directory(
     Ok(infos)
 }
 
-/// Scan specific files and add them to the state.
+/// Scan specific files and/or folders and add them to the state.
+/// Directories are recursed into via scan_directory; files are scanned directly.
 #[tauri::command]
 fn scan_files(
     paths: Vec<String>,
     state: State<'_, SharedState>,
 ) -> Result<Vec<TrackInfo>, String> {
-    let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    let mut scanned = scanner::scan_files(&path_bufs).map_err(|e| e.to_string())?;
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut dir_tracks: Vec<models::Track> = Vec::new();
+
+    for p in &paths {
+        let pb = PathBuf::from(p);
+        if pb.is_dir() {
+            let mut found = scanner::scan_directory(&pb).map_err(|e| e.to_string())?;
+            // IDs will be reassigned below; zero them out to avoid conflicts
+            for t in &mut found { t.id = 0; }
+            dir_tracks.extend(found);
+        } else {
+            files.push(pb);
+        }
+    }
+
+    let mut scanned = scanner::scan_files(&files).map_err(|e| e.to_string())?;
+    scanned.extend(dir_tracks);
 
     let mut st = state.lock().map_err(|e| e.to_string())?;
 
@@ -166,9 +182,11 @@ async fn analyze_tracks(
         }
     }
 
-    // 4. Return the full updated track list.
+    // 4. Return the full updated track list (with cue info).
     let st = shared.lock().map_err(|e| e.to_string())?;
-    let infos: Vec<TrackInfo> = st.tracks.iter().map(TrackInfo::from).collect();
+    let infos: Vec<TrackInfo> = st.tracks.iter().zip(st.analyses.iter())
+        .map(|(t, a)| TrackInfo::from_track_and_analysis(t, a.as_ref()))
+        .collect();
     Ok(infos)
 }
 
@@ -224,6 +242,72 @@ fn write_usb(
     .ok();
 
     Ok(())
+}
+
+/// Remove tracks by ID from the shared state and all playlists.
+#[tauri::command]
+fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedState>) -> Result<(), String> {
+    let id_set: std::collections::HashSet<u32> = ids.into_iter().collect();
+    let mut st = state.lock().map_err(|e| e.to_string())?;
+    let mut i = 0;
+    while i < st.tracks.len() {
+        if id_set.contains(&st.tracks[i].id) {
+            st.tracks.remove(i);
+            st.analyses.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Set 2 test hot cues (A at 1:00, B at 1:30) on the selected tracks.
+/// Replaces any existing cues on those tracks.
+#[tauri::command]
+fn set_test_cues(
+    ids: Vec<u32>,
+    state: State<'_, SharedState>,
+) -> Result<Vec<TrackInfo>, String> {
+    let id_set: std::collections::HashSet<u32> = ids.into_iter().collect();
+    let mut st = state.lock().map_err(|e| e.to_string())?;
+
+    for i in 0..st.tracks.len() {
+        if !id_set.contains(&st.tracks[i].id) {
+            continue;
+        }
+        let Some(ref existing) = st.analyses[i] else {
+            continue;
+        };
+        let new_analysis = models::AnalysisResult {
+            cue_points: vec![
+                models::CuePoint {
+                    hot_cue_number: 0, // Memory cue
+                    time_ms: 60_000,
+                    loop_time_ms: None,
+                },
+                models::CuePoint {
+                    hot_cue_number: 1, // Hot cue A
+                    time_ms: 75_000,
+                    loop_time_ms: None,
+                },
+                models::CuePoint {
+                    hot_cue_number: 2, // Hot cue B
+                    time_ms: 90_000,
+                    loop_time_ms: None,
+                },
+            ],
+            beat_grid: existing.beat_grid.clone(),
+            waveform: existing.waveform.clone(),
+            bpm: existing.bpm,
+            key: existing.key.clone(),
+        };
+        st.analyses[i] = Some(new_analysis);
+    }
+
+    let infos: Vec<TrackInfo> = st.tracks.iter().zip(st.analyses.iter())
+        .map(|(t, a)| TrackInfo::from_track_and_analysis(t, a.as_ref()))
+        .collect();
+    Ok(infos)
 }
 
 /// Open a native folder-picker dialog and return the selected path.
@@ -293,6 +377,65 @@ fn get_mounted_volumes() -> Result<Vec<String>, String> {
         result.sort();
         Ok(result)
     }
+}
+
+/// Eject a mounted volume (macOS: `diskutil eject`, others: `umount`).
+#[tauri::command]
+fn eject_volume(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("diskutil")
+            .args(["eject", &path])
+            .output()
+            .map_err(|e| format!("Failed to run diskutil: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Eject failed: {stderr}"));
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let output = std::process::Command::new("umount")
+            .arg(&path)
+            .output()
+            .map_err(|e| format!("Failed to run umount: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Eject failed: {stderr}"));
+        }
+    }
+
+    Ok(())
+}
+
+/// Wipe all Pioneer data from a USB drive (removes PIONEER/ and Contents/ directories).
+#[tauri::command]
+fn wipe_usb(path: String) -> Result<(), String> {
+    let usb = std::path::Path::new(&path);
+    if !usb.is_dir() {
+        return Err("Not a valid directory".into());
+    }
+
+    let pioneer_dir = usb.join("PIONEER");
+    let contents_dir = usb.join("Contents");
+
+    if pioneer_dir.exists() {
+        std::fs::remove_dir_all(&pioneer_dir)
+            .map_err(|e| format!("Failed to remove PIONEER/: {e}"))?;
+    }
+    if contents_dir.exists() {
+        std::fs::remove_dir_all(&contents_dir)
+            .map_err(|e| format!("Failed to remove Contents/: {e}"))?;
+    }
+
+    Ok(())
+}
+
+/// Return the application version string.
+#[tauri::command]
+fn app_version() -> String {
+    pioneer_usb_writer::VERSION.to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -385,7 +528,7 @@ fn main() {
         ns_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
     }
 
-    tauri::Builder::default()
+    tauri::Builder::default() // v0.1
         .plugin(tauri_plugin_dialog::init())
         .manage(Arc::new(Mutex::new(AppState {
             tracks: Vec::new(),
@@ -397,10 +540,15 @@ fn main() {
             scan_files,
             analyze_tracks,
             write_usb,
+            remove_tracks,
+            set_test_cues,
             pick_directory,
             get_mounted_volumes,
+            eject_volume,
+            wipe_usb,
             save_state,
             load_state,
+            app_version,
         ])
         .setup(|app| {
             // Ensure the window is positioned on the primary monitor and focused.
@@ -411,12 +559,18 @@ fn main() {
                 let _ = window.center();
                 let _ = window.show();
                 let _ = window.set_focus();
-                // Remove always-on-top after a short delay so normal behaviour resumes
-                let win = window.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                    let _ = win.set_always_on_top(false);
-                });
+            }
+
+            // Activate the app so macOS sends keyboard input to our window
+            // (always_on_top alone makes the window float but keystrokes go to
+            // whichever app was frontmost before)
+            #[cfg(target_os = "macos")]
+            {
+                use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
+                let current_app = NSRunningApplication::currentApplication();
+                let _ = current_app.activateWithOptions(
+                    NSApplicationActivationOptions::ActivateIgnoringOtherApps
+                );
             }
             Ok(())
         })

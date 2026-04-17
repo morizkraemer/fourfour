@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
-use crate::models::{AnalysisResult, Track};
+use crate::models::{AnalysisResult, CuePoint, Track};
 
 /// Magic bytes for ANLZ file header
 const ANLZ_MAGIC: &[u8; 4] = b"PMAI";
@@ -32,12 +32,15 @@ pub fn write_anlz_dat(
 ) -> Result<()> {
     // Build all sections first so we know total file size
     // Section order must match rekordbox: PPTH → PVBR → PQTZ → PWAV → PCOB → PCOB
+    let hot_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number > 0).collect();
+    let memory_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number == 0).collect();
+
     let path_section = build_path_section(&track.usb_path);
     let vbr_section = build_vbr_section();
     let beat_section = build_beat_grid_section(analysis);
     let waveform_section = build_waveform_preview_section(analysis);
-    let cue_section_1 = build_cue_section(1); // hot cues container (count=1, no entries)
-    let cue_section_2 = build_cue_section(0); // memory cues container (count=0)
+    let cue_section_1 = build_cue_section(1, &hot_cues);   // hot cues
+    let cue_section_2 = build_cue_section(0, &memory_cues); // memory cues
 
     let total_len = HEADER_LEN as usize
         + path_section.len()
@@ -148,13 +151,16 @@ pub fn write_anlz_ext(
     track: &Track,
     analysis: &AnalysisResult,
 ) -> Result<()> {
+    let hot_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number > 0).collect();
+    let memory_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number == 0).collect();
+
     // Section order must match rekordbox: PPTH → PWV3 → PCOB → PCOB → PCO2 → PCO2 → PQT2 → PWV5 → PWV4 → PVB2
     let path_section = build_path_section(&track.usb_path);
     let pwv3_section = build_color_preview_section(analysis);
-    let cue_section_1 = build_cue_section(1);
-    let cue_section_2 = build_cue_section(0);
-    let cue_ext_1 = build_cue_extended_section(1);
-    let cue_ext_2 = build_cue_extended_section(0);
+    let cue_section_1 = build_cue_section(1, &[]);             // EXT PCOBs are always empty
+    let cue_section_2 = build_cue_section(0, &[]);             // actual cues go in PCO2
+    let cue_ext_1 = build_cue_extended_section(1, &hot_cues);
+    let cue_ext_2 = build_cue_extended_section(0, &memory_cues);
     let pqt2_section = build_beat_grid_ext_section(analysis);
     let pwv5_section = build_color_detail_section(analysis);
     let pwv4_section = build_color_waveform_section(analysis);
@@ -290,17 +296,35 @@ fn build_color_waveform_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf
 }
 
-/// PCO2 section: extended cue/loop point container.
-fn build_cue_extended_section(count: u32) -> Vec<u8> {
+/// PCO2 section: extended cue/loop point container with PCP2 entries.
+fn build_cue_extended_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
     let section_header_len: u32 = 20;
-    let section_total_len: u32 = 20;
+    let pcp2_entry_len: u32 = 88;
+    let section_total_len: u32 = section_header_len + pcp2_entry_len * cues.len() as u32;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_CUE_EXTENDED);
     buf.extend_from_slice(&section_header_len.to_be_bytes());
     buf.extend_from_slice(&section_total_len.to_be_bytes());
-    buf.extend_from_slice(&count.to_be_bytes());
-    buf.extend_from_slice(&[0u8; 4]); // unknown
+    buf.extend_from_slice(&cue_type.to_be_bytes());                 // 0x0C: type (1=hot, 0=memory)
+    buf.extend_from_slice(&(cues.len() as u16).to_be_bytes());     // 0x10: entry count (u16)
+    buf.extend_from_slice(&[0u8; 2]);                               // 0x12: padding
+
+    for cue in cues {
+        let loop_time = cue.loop_time_ms.unwrap_or(0xFFFFFFFF);
+
+        buf.extend_from_slice(b"PCP2");                             // 0x00: tag
+        buf.extend_from_slice(&16u32.to_be_bytes());                // 0x04: header_len
+        buf.extend_from_slice(&pcp2_entry_len.to_be_bytes());       // 0x08: entry_len
+        buf.extend_from_slice(&cue.hot_cue_number.to_be_bytes());   // 0x0C: hot_cue_number
+        buf.push(0x01);                                             // 0x10: type (1 = cue point)
+        buf.push(0x00);                                             // 0x11: unknown
+        buf.extend_from_slice(&0x03E8u16.to_be_bytes());            // 0x12: loop_denominator
+        buf.extend_from_slice(&cue.time_ms.to_be_bytes());          // 0x14: time_ms
+        buf.extend_from_slice(&loop_time.to_be_bytes());            // 0x18: loop_time
+        buf.extend_from_slice(&0x0001u16.to_be_bytes());            // 0x1C: unknown
+        buf.extend_from_slice(&[0u8; 46]);                          // 0x1E: remaining (color/label, zeros for now)
+    }
 
     buf
 }
@@ -375,19 +399,46 @@ fn build_vbr_section() -> Vec<u8> {
     buf
 }
 
-/// PCOB section: cue/loop point container.
-fn build_cue_section(count: u32) -> Vec<u8> {
-    // Section: tag(4) + header_len(4) + section_len(4) + count(4) + unknown(4) + sentinel(4) = 24
+/// PCOB section: cue/loop point container with PCPT entries.
+fn build_cue_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
     let section_header_len: u32 = 24;
-    let section_total_len: u32 = 24; // no cue entries, just the header
+    let pcpt_entry_len: u32 = 56;
+    let section_total_len: u32 = section_header_len + pcpt_entry_len * cues.len() as u32;
+
+    let sentinel: u32 = if cues.is_empty() {
+        0xFFFFFFFF
+    } else if cue_type == 1 {
+        0xFFFFFFFF // hot cues always use 0xFFFFFFFF
+    } else {
+        0x00000000 // memory cues use 0 when entries present
+    };
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_CUE);
     buf.extend_from_slice(&section_header_len.to_be_bytes());
     buf.extend_from_slice(&section_total_len.to_be_bytes());
-    buf.extend_from_slice(&count.to_be_bytes());
-    buf.extend_from_slice(&[0u8; 4]); // unknown
-    buf.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes()); // sentinel
+    buf.extend_from_slice(&cue_type.to_be_bytes());                // type (1=hot, 0=memory)
+    buf.extend_from_slice(&(cues.len() as u32).to_be_bytes());    // entry count
+    buf.extend_from_slice(&sentinel.to_be_bytes());
+
+    for cue in cues {
+        let loop_time = cue.loop_time_ms.unwrap_or(0xFFFFFFFF);
+
+        buf.extend_from_slice(b"PCPT");                             // 0x00: tag
+        buf.extend_from_slice(&28u32.to_be_bytes());                // 0x04: header_len
+        buf.extend_from_slice(&pcpt_entry_len.to_be_bytes());       // 0x08: entry_len
+        buf.extend_from_slice(&cue.hot_cue_number.to_be_bytes());   // 0x0C: hot_cue_number
+        buf.extend_from_slice(&[0u8; 4]);                           // 0x10: status
+        buf.extend_from_slice(&0x0001u16.to_be_bytes());            // 0x14: unknown
+        buf.extend_from_slice(&[0u8; 2]);                           // 0x16: unknown
+        buf.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());       // 0x18: sentinel
+        buf.push(0x01);                                             // 0x1C: type (1 = cue)
+        buf.push(0x00);                                             // 0x1D: unknown
+        buf.extend_from_slice(&0x03E8u16.to_be_bytes());            // 0x1E: loop_denominator
+        buf.extend_from_slice(&cue.time_ms.to_be_bytes());          // 0x20: time_ms
+        buf.extend_from_slice(&loop_time.to_be_bytes());            // 0x24: loop_time
+        buf.extend_from_slice(&[0u8; 16]);                          // 0x28: padding
+    }
 
     buf
 }

@@ -19,13 +19,18 @@
         <div id="toolbar">
             <button id="btn-import" onclick="importFolder()">Import Folder</button>
             <button id="btn-analyze" onclick="analyzeAll()">Analyze All</button>
+            <button id="btn-delete" onclick="deleteSelected()" disabled>Delete Selected</button>
+            <button id="btn-test-cues" onclick="setTestCues()" disabled>Test Cues</button>
             <div class="toolbar-spacer"></div>
             <label for="usb-select">USB:</label>
             <select id="usb-select" onchange="selectVolume(this.value)">
                 <option value="">-- select volume --</option>
             </select>
             <button id="btn-refresh-volumes" onclick="loadVolumes()" title="Refresh volumes">&#8635;</button>
+            <button id="btn-eject" onclick="ejectVolume()" title="Eject selected volume">&#9167;</button>
+            <button id="btn-wipe" onclick="wipeUsb()">Wipe</button>
             <button id="btn-sync" onclick="syncToUsb()">Sync</button>
+            <span id="version-badge"></span>
         </div>
 
         <!-- Main content: track list + playlists -->
@@ -42,12 +47,13 @@
                                 <th class="col-artist">Artist</th>
                                 <th class="col-bpm">BPM</th>
                                 <th class="col-key">Key</th>
+                                <th class="col-cues">Cues</th>
                                 <th class="col-dur">Duration</th>
                             </tr>
                         </thead>
                         <tbody id="track-tbody">
                             <tr class="empty-row">
-                                <td colspan="6">No tracks loaded. Import a folder or drop files here.</td>
+                                <td colspan="7">No tracks loaded. Import a folder or drop files here.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -85,6 +91,15 @@
                 <button type="submit">OK</button>
             </div>
         </form>
+    </dialog>
+
+    <!-- Confirmation dialog for destructive actions -->
+    <dialog id="confirm-dialog">
+        <p id="confirm-label">Are you sure?</p>
+        <div style="margin-top:12px;text-align:right;">
+            <button type="button" onclick="document.getElementById('confirm-dialog').close('cancel')">Cancel</button>
+            <button type="button" id="confirm-ok-btn" style="background:var(--accent);border-color:var(--accent);color:#fff;" onclick="document.getElementById('confirm-dialog').close('ok')">Wipe</button>
+        </div>
     </dialog>
 
     <script src="app.js"></script>

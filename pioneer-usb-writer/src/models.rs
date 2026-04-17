@@ -85,6 +85,17 @@ mod waveform_data {
     }
 }
 
+/// A cue or memory point within a track.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CuePoint {
+    /// 0 = memory cue, 1 = hot cue A, 2 = hot cue B, etc.
+    pub hot_cue_number: u32,
+    /// Position in milliseconds from track start
+    pub time_ms: u32,
+    /// Loop end position in ms, or `None` if not a loop
+    pub loop_time_ms: Option<u32>,
+}
+
 /// Full analysis result for a track.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
@@ -92,6 +103,7 @@ pub struct AnalysisResult {
     pub waveform: WaveformPreview,
     pub bpm: f64,
     pub key: String,
+    pub cue_points: Vec<CuePoint>,
 }
 
 /// A playlist containing a subset of tracks.

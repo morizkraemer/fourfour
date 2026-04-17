@@ -1,8 +1,15 @@
 # Pioneer DeviceSQL & ANLZ Format — Reverse Engineering Notes
 
-This document contains technical discoveries about Pioneer's proprietary DeviceSQL format (`export.pdb`) and ANLZ analysis files that are **not publicly documented**. These findings were obtained through binary analysis, disassembly, and hardware testing on a **CDJ-3000 (firmware 3.19)**.
+This document contains technical discoveries about Pioneer's proprietary DeviceSQL format (`export.pdb`), ANLZ analysis files, and the newer **OneLibrary format** (`exportLibrary.db`) that are **not publicly documented**. These findings were obtained through binary analysis, disassembly, and hardware testing on a **CDJ-3000 (firmware 3.19)**.
 
 Existing open-source documentation (Deep Symmetry, rekordcrate, Kaitai Struct specs) covers the broad structure. This document focuses on the **undocumented details that make or break hardware compatibility** — the things that cause "rekordbox database not found" or silent re-analysis on real players.
+
+### Dual-Format Requirement
+
+As of rekordbox 7.x, USB exports contain **both** the legacy format and the OneLibrary format side by side. Both must be written for full device compatibility:
+
+- **Legacy** (`export.pdb` + `.DAT` + `.EXT`): Required for CDJ-3000, XDJ-XZ, and all older players.
+- **OneLibrary** (`exportLibrary.db` + `.2EX` + `exportExt.pdb`): Required for CDJ-3000X, XDJ-AZ, OPUS-QUAD, OMNIS-DUO. Also read by djay Pro and Traktor.
 
 **Use this freely.** If you're building tools for Pioneer hardware, this will save you weeks of binary diffing.
 
@@ -18,7 +25,8 @@ Existing open-source documentation (Deep Symmetry, rekordcrate, Kaitai Struct sp
 6. [Track Row Layout](#6-track-row-layout)
 7. [CDJ-3000 Hardware Behavior](#7-cdj-3000-hardware-behavior)
 8. [Debugging Methodology](#8-debugging-methodology)
-9. [References](#9-references)
+9. [OneLibrary Format (exportLibrary.db)](#9-onelibrary-format-exportlibrarydb)
+10. [References](#10-references)
 
 ---
 
@@ -133,17 +141,53 @@ PWV4  (7224 bytes)   — Color waveform preview (1200 entries, 6 bytes each)
 PVB2  (8032 bytes)   — Extended VBR info (all zeros for lossless)
 ```
 
-### .2EX File — Optional (CDJ-3000)
+### .2EX File — OneLibrary Waveforms
 
-Contains high-resolution waveforms. The CDJ works without it but displays lower-quality waveforms.
+Contains the 3-band frequency waveforms used by OneLibrary. Required for CDJ-3000X/XDJ-AZ/OPUS-QUAD and readable by djay Pro and Traktor. The CDJ-3000 (non-X) works without it but displays lower-quality waveforms.
 
 ```
 PMAI  (28 bytes)
-PPTH  (variable)
-PWV7  (variable)     — High-res color waveform (51200 entries, 3 bytes each)
-PWV6  (variable)     — High-res color preview (1200 entries, 3 bytes each)
-PWVC  (20 bytes)     — Waveform color config
+PPTH  (variable)     — File path (same as .DAT/.EXT)
+PWV7  (variable)     — 3-band waveform, full resolution (same entry count as PWV5, 3 bytes each)
+PWV6  (variable)     — 3-band waveform, overview (same entry count as PWV4, 3 bytes each)
 ```
+
+### PWV7 Section — Full-Resolution 3-Band Waveform
+
+Entry count matches PWV3/PWV5 (varies by track length, e.g. 53734 for a ~6min track).
+
+```
+Offset  Size  Value       Description
+0x00    4     "PWV7"      Tag
+0x04    4     0x18        Header length (24)
+0x08    4     (varies)    Section length (header + entry_count * 3)
+0x0C    4     0x03        Unknown (version or type — always 3)
+0x10    4     (varies)    Entry count (same as PWV3/PWV5 for this track)
+0x14    2     0x0096      Unknown (150 — matches PWV3)
+0x16    2     0x0000      Unknown
+0x18    ...   data        3 bytes per entry: [low, mid, high] frequency amplitudes
+```
+
+Each entry is 3 bytes representing amplitude levels for frequency bands:
+- Byte 0: **Low** (bass) — values typically 0x00–0x60
+- Byte 1: **Mid** — values typically 0x00–0x40
+- Byte 2: **High** (treble) — values typically 0x00–0x30
+
+### PWV6 Section — Overview 3-Band Waveform
+
+Entry count matches PWV4 (1200 entries for standard overview).
+
+```
+Offset  Size  Value       Description
+0x00    4     "PWV6"      Tag
+0x04    4     0x14        Header length (20)
+0x08    4     (varies)    Section length (header + entry_count * 3)
+0x0C    4     0x03        Unknown (always 3)
+0x10    4     (varies)    Entry count (same as PWV4, typically 1200)
+0x14    ...   data        3 bytes per entry: [low, mid, high] frequency amplitudes
+```
+
+Same 3-byte [low, mid, high] encoding as PWV7. This is the simplified/interoperable counterpart to PWV4 (which uses 6 bytes per entry with Pioneer-specific color encoding).
 
 ### PMAI Header
 
@@ -455,7 +499,187 @@ This is how we found the Columns table, History table, and header page issues �
 
 ---
 
-## 9. References
+## 9. OneLibrary Format (exportLibrary.db)
+
+OneLibrary (formerly "Device Library Plus") is a new export format introduced in rekordbox 6.8+ and expanded in rekordbox 7.x. It replaces the binary DeviceSQL format (`export.pdb`) with an encrypted SQLite database for newer hardware. The format was developed by AlphaTheta and adopted by Algoriddim (djay Pro) and Native Instruments (Traktor) for cross-platform DJ library interoperability.
+
+### Files on USB
+
+OneLibrary adds three files alongside the legacy format:
+
+```
+PIONEER/rekordbox/exportLibrary.db       — SQLCipher-encrypted SQLite database
+PIONEER/rekordbox/exportLibrary.db-wal   — SQLite write-ahead log
+PIONEER/rekordbox/exportLibrary.db-shm   — SQLite shared memory
+PIONEER/rekordbox/exportExt.pdb          — Extended PDB (page-based, menu/sort config)
+PIONEER/USBANLZ/P{XXX}/{HASH}/ANLZ0000.2EX  — 3-band waveforms (see section 2)
+```
+
+### Database Encryption
+
+The database is encrypted with **SQLCipher** (SQLite encryption extension). The key is different from the master.db key.
+
+**Decryption key:** `r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls`
+
+The key is derived from an obfuscated constant in the rekordbox binary:
+
+```python
+import base64, zlib
+
+BLOB_KEY = b"657f48f84c437cc1"
+BLOB = b"PN_1dH8$oLJY)16j_RvM6qphWw`476>;C1cWmI#se(PG`j}~xAjlufj?`#0i{;=glh(SkW)y0>n?YEiD`l%t("
+
+data = base64.b85decode(BLOB)
+xored = bytes(b ^ BLOB_KEY[i % len(BLOB_KEY)] for i, b in enumerate(data))
+key = zlib.decompress(xored).decode("utf-8")
+# key = "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls"
+```
+
+**Opening the database:**
+
+```python
+import sqlcipher3
+
+conn = sqlcipher3.connect("exportLibrary.db")
+conn.execute("PRAGMA key='r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls'")
+conn.execute("SELECT * FROM content")  # works
+```
+
+Default SQLCipher4 parameters (no custom PRAGMAs needed).
+
+### Database Schema — 22 Tables
+
+```sql
+-- Core content
+CREATE TABLE content(
+    content_id integer primary key,
+    title varchar,
+    titleForSearch varchar,
+    subtitle varchar,
+    bpmx100 integer,              -- BPM * 100 (e.g. 12990 = 129.90 BPM)
+    length integer,               -- duration in seconds
+    trackNo integer,
+    discNo integer,
+    artist_id_artist integer,     -- FK -> artist.artist_id
+    artist_id_remixer integer,
+    artist_id_originalArtist integer,
+    artist_id_composer integer,
+    artist_id_lyricist integer,
+    album_id integer,             -- FK -> album.album_id
+    genre_id integer,             -- FK -> genre.genre_id
+    label_id integer,             -- FK -> label.label_id
+    key_id integer,               -- FK -> key.key_id (musical key)
+    color_id integer,             -- FK -> color.color_id
+    image_id integer,             -- FK -> image.image_id
+    djComment varchar,
+    rating integer,
+    releaseYear integer,
+    releaseDate varchar,
+    dateCreated varchar,          -- "YYYY-MM-DD"
+    dateAdded varchar,
+    path varchar,                 -- USB-relative path, e.g. "/Contents/Artist/Album/File.flac"
+    fileName varchar,
+    fileSize integer,
+    fileType integer,             -- 1=MP3, 4=M4A, 5=FLAC, 11=WAV, 12=AIFF
+    bitrate integer,
+    bitDepth integer,
+    samplingRate integer,
+    isrc varchar,
+    djPlayCount integer,
+    isHotCueAutoLoadOn integer,
+    isKuvoDeliverStatusOn integer,
+    kuvoDeliveryComment varchar,
+    masterDbId integer,           -- rekordbox master DB identifier
+    masterContentId integer,
+    analysisDataFilePath varchar, -- USB-relative ANLZ path, e.g. "/PIONEER/USBANLZ/P00C/000289D2/ANLZ0000.DAT"
+    analysedBits integer,
+    contentLink integer,
+    hasModified integer,
+    cueUpdateCount integer,
+    analysisDataUpdateCount integer,
+    informationUpdateCount integer
+);
+
+-- Lookup tables
+CREATE TABLE artist(artist_id integer primary key, name varchar, nameForSearch varchar);
+CREATE TABLE album(album_id integer primary key, name varchar, artist_id integer, image_id integer, isComplation integer, nameForSearch varchar);
+CREATE TABLE genre(genre_id integer primary key, name varchar);
+CREATE TABLE label(label_id integer primary key, name varchar);
+CREATE TABLE key(key_id integer primary key, name varchar);
+CREATE TABLE color(color_id integer primary key, name varchar);
+CREATE TABLE image(image_id integer primary key, path varchar);  -- e.g. "/PIONEER/Artwork/00001/b1.jpg"
+
+-- Cue points
+CREATE TABLE cue(
+    cue_id integer primary key,
+    content_id integer,
+    kind integer,                 -- cue type
+    colorTableIndex integer,
+    cueComment varchar,
+    isActiveLoop integer,
+    beatLoopNumerator integer,
+    beatLoopDenominator integer,
+    inUsec integer,               -- microsecond precision
+    outUsec integer,
+    in150FramePerSec integer,
+    out150FramePerSec integer,
+    inMpegFrameNumber integer,
+    outMpegFrameNumber integer,
+    inMpegAbs integer,
+    outMpegAbs integer,
+    inDecodingStartFramePosition integer,
+    outDecodingStartFramePosition integer,
+    inFileOffsetInBlock integer,
+    OutFileOffsetInBlock integer,
+    inNumberOfSampleInBlock integer,
+    outNumberOfSampleInBlock integer
+);
+
+-- Playlists (self-referential tree: folders + playlists)
+CREATE TABLE playlist(playlist_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, playlist_id_parent integer);
+CREATE TABLE playlist_content(playlist_id integer, content_id integer, sequenceNo integer);
+
+-- History
+CREATE TABLE history(history_id integer primary key, sequenceNo integer, name varchar, attribute integer, history_id_parent integer);
+CREATE TABLE history_content(history_id integer, content_id integer, sequenceNo integer);
+
+-- Hot cue banks
+CREATE TABLE hotCueBankList(hotCueBankList_id integer primary key, sequenceNo integer, name varchar, image_id integer, attribute integer, hotCueBankList_id_parent integer);
+CREATE TABLE hotCueBankList_cue(hotCueBankList_id integer, cue_id integer, sequenceNo integer);
+
+-- My Tags (rekordbox custom tagging system)
+CREATE TABLE myTag(myTag_id integer primary key, sequenceNo integer, name varchar, attribute integer, myTag_id_parent integer);
+CREATE TABLE myTag_content(myTag_id integer, content_id integer);
+
+-- CDJ browse menu configuration
+CREATE TABLE menuItem(menuItem_id integer primary key, kind integer, name varchar);  -- names use \ufffa...\ufffb delimiters
+CREATE TABLE category(category_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer);
+CREATE TABLE sort(sort_id integer primary key, menuItem_id integer, sequenceNo integer, isVisible integer, isSelectedAsSubColumn integer);
+
+-- Metadata
+CREATE TABLE property(deviceName varchar, dbVersion varchar, numberOfContents integer, createdDate varchar, backGroundColorType integer, myTagMasterDBID integer);
+CREATE TABLE recommendedLike(content_id_1 integer, content_id_2 integer, rating integer, createdDate integer);
+```
+
+### Key Observations
+
+- **DB version** is `"1000"` (in `property.dbVersion`).
+- **IDs are plain integers**, unlike the master.db which uses VARCHAR UUIDs. Much simpler.
+- **Paths** use forward slashes and are relative to USB root (e.g. `/Contents/Artist/Album/File.flac`).
+- **BPM** is stored as integer × 100 (e.g. 12990 = 129.90 BPM).
+- **fileType values**: 1=MP3, 4=M4A, 5=FLAC, 11=WAV, 12=AIFF (same as master.db).
+- **menuItem names** use special delimiters: `\ufffa` before and `\ufffb` after (e.g. `\ufffaGENRE\ufffb`).
+- **color table** has 8 fixed entries: Pink, Red, Orange, Yellow, Green, Aqua, Blue, Purple.
+- **`analysisDataFilePath`** points to the ANLZ path on the USB — same hash-computed path used by the legacy format.
+- **`contentLink`** appears to be a hash or identifier — possibly related to how the CDJ cross-references between `export.pdb` and `exportLibrary.db`.
+
+### exportExt.pdb
+
+A page-based file (same 4096-byte page size as `export.pdb`) but with a different structure. Contains 18 pages for a 6-track export. Appears to store extended menu/sort/category configuration data. Page 0 is an index page, data pages use `0x64` page flags. Further reverse engineering needed.
+
+---
+
+## 10. References
 
 ### Existing Documentation (starting points)
 
@@ -463,6 +687,10 @@ This is how we found the Columns table, History table, and header page issues �
 - [Deep Symmetry — ANLZ Format](https://djl-analysis.deepsymmetry.org/rekordbox-export-analysis/anlz.html)
 - [rekordcrate Library (Rust)](https://holzhaus.github.io/rekordcrate/)
 - [Kaitai PDB Spec](https://github.com/Deep-Symmetry/crate-digger/blob/main/src/main/kaitai/rekordbox_pdb.ksy)
+- [pyrekordbox — Device Library Plus support](https://github.com/dylanljones/pyrekordbox)
+- [rbox — Rust/Python library for OneLibrary](https://docs.rs/crate/rbox/latest)
+- [Pioneer database encryption research](https://github.com/liamcottle/pioneer-rekordbox-database-encryption)
+- [Rekordbox OneLibrary announcement](https://rekordbox.com/en/2025/10/dj-brands-unite-to-launch-onelibrary/)
 
 ### What This Document Adds
 
@@ -476,6 +704,9 @@ Things not covered by any of the above:
 - CDJ-3000 .EXT file requirement
 - PQTZ 24-byte header (unknown2 = 0x00080000)
 - CDJ file rejection behavior (ANLZ0001.DAT creation)
+- OneLibrary exportLibrary.db decryption key and full schema (22 tables)
+- ANLZ .2EX file structure: PWV7 (full-res 3-band) and PWV6 (overview 3-band) tags
+- Dual-format requirement for supporting both legacy and new devices
 
 ---
 

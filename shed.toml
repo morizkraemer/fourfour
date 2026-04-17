@@ -1,0 +1,12 @@
+[log]
+file = ".shed.log"
+max_lines = 5000
+
+[services.app]
+name = "Pioneer Test UI"
+start = "./pioneer-test-ui/dev.sh"
+
+[services.app.watch]
+paths = ["pioneer-usb-writer/src", "pioneer-test-ui/src", "pioneer-test-ui/frontend"]
+mode = "notify"
+

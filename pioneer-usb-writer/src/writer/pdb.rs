@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
@@ -110,6 +110,76 @@ fn row_group_bytes(num_rows: usize) -> usize {
     let full = num_rows / 16;
     let partial = num_rows % 16;
     full * 36 + if partial > 0 { partial * 2 + 4 } else { 0 }
+}
+
+/// A chunk of rows that fits within a single 4096-byte page.
+struct PageChunk {
+    heap: Vec<u8>,
+    offsets: Vec<u16>,
+}
+
+/// Split pre-built (heap, offsets) into page-sized chunks.
+/// Each chunk's heap + row_group footer must fit in PAGE_SIZE - HEAP_START bytes.
+fn split_into_pages(heap: &[u8], offsets: &[u16]) -> Vec<PageChunk> {
+    if offsets.is_empty() {
+        return vec![PageChunk { heap: Vec::new(), offsets: Vec::new() }];
+    }
+
+    let mut chunks = Vec::new();
+    let mut chunk_start = 0usize; // index into offsets
+
+    while chunk_start < offsets.len() {
+        let mut chunk_end = chunk_start;
+
+        // Greedily add rows until the next one won't fit
+        loop {
+            let candidate = chunk_end + 1;
+            if candidate > offsets.len() {
+                break;
+            }
+            let rows_in_chunk = candidate - chunk_start;
+            let rg = row_group_bytes(rows_in_chunk);
+            // Heap bytes for this chunk: from offsets[chunk_start] to end of last row
+            let heap_start_offset = offsets[chunk_start] as usize;
+            let heap_end_offset = if candidate < offsets.len() {
+                offsets[candidate] as usize
+            } else {
+                heap.len()
+            };
+            let heap_size = heap_end_offset - heap_start_offset;
+
+            if heap_size + rg > PAGE_SIZE as usize - HEAP_START {
+                break;
+            }
+            chunk_end = candidate;
+        }
+
+        if chunk_end == chunk_start {
+            // Single row that's too large — force it onto its own page anyway
+            chunk_end = chunk_start + 1;
+        }
+
+        // Extract this chunk's heap slice and rebase offsets to 0
+        let heap_base = offsets[chunk_start] as usize;
+        let heap_end = if chunk_end < offsets.len() {
+            offsets[chunk_end] as usize
+        } else {
+            heap.len()
+        };
+        let chunk_heap = heap[heap_base..heap_end].to_vec();
+        let chunk_offsets: Vec<u16> = offsets[chunk_start..chunk_end]
+            .iter()
+            .map(|&o| o - heap_base as u16)
+            .collect();
+
+        chunks.push(PageChunk {
+            heap: chunk_heap,
+            offsets: chunk_offsets,
+        });
+        chunk_start = chunk_end;
+    }
+
+    chunks
 }
 
 fn seek_to_page(file: &mut std::fs::File, page: u32) -> Result<u64> {
@@ -336,6 +406,34 @@ fn write_blank_data_page(
     // Patch free/used: all space is free, nothing used
     let free = (PAGE_SIZE as usize - HEAP_START) as u16;
     patch_page_usage(file, page_start, free, 0)?;
+    Ok(())
+}
+
+/// Write multiple chained data pages for a table.
+/// `page_indices` are the page numbers to write to.
+/// `chunks` are the PageChunks (one per page).
+/// `empty_candidate` terminates the last page's next_page pointer.
+fn write_chained_data_pages(
+    file: &mut std::fs::File,
+    table_type: u32,
+    page_indices: &[u32],
+    empty_candidate: u32,
+    chunks: &[PageChunk],
+    sequence: u32,
+) -> Result<()> {
+    assert_eq!(page_indices.len(), chunks.len());
+    for (i, (page_idx, chunk)) in page_indices.iter().zip(chunks.iter()).enumerate() {
+        let next_page = if i + 1 < page_indices.len() {
+            page_indices[i + 1]
+        } else {
+            empty_candidate
+        };
+        if chunk.offsets.is_empty() {
+            write_blank_data_page(file, *page_idx, table_type, next_page)?;
+        } else {
+            write_data_page(file, *page_idx, table_type, next_page, &chunk.heap, &chunk.offsets, sequence)?;
+        }
+    }
     Ok(())
 }
 
@@ -776,26 +874,80 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     }
     let (pe_heap, pe_offsets) = build_playlist_entry_rows(&playlist_entries);
 
-    // Check that tables fit in single pages
-    for (name, heap_len, num_rows) in [
-        ("tracks", track_heap.len(), track_offsets.len()),
-        ("genres", genre_heap.len(), genre_offsets.len()),
-        ("labels", label_heap.len(), label_offsets.len()),
-        ("artists", artist_heap.len(), artist_offsets.len()),
-        ("albums", album_heap.len(), album_offsets.len()),
-        ("keys", key_heap.len(), key_offsets.len()),
-        ("colors", color_heap.len(), color_offsets.len()),
-        ("columns", columns_heap.len(), columns_offsets.len()),
-        ("artwork", artwork_heap.len(), artwork_offsets.len()),
-        ("playlist_tree", pt_heap.len(), pt_offsets.len()),
-        ("playlist_entries", pe_heap.len(), pe_offsets.len()),
-    ] {
-        let total = heap_len + row_group_bytes(num_rows);
-        let capacity = PAGE_SIZE as usize - HEAP_START;
-        if total > capacity {
-            bail!("{} table overflow: {} bytes needed, {} available. Too many tracks for single-page POC.", name, total, capacity);
+    // Split all table data into page-sized chunks
+    let track_chunks = split_into_pages(&track_heap, &track_offsets);
+    let genre_chunks = split_into_pages(&genre_heap, &genre_offsets);
+    let artist_chunks = split_into_pages(&artist_heap, &artist_offsets);
+    let album_chunks = split_into_pages(&album_heap, &album_offsets);
+    let label_chunks = split_into_pages(&label_heap, &label_offsets);
+    let key_chunks = split_into_pages(&key_heap, &key_offsets);
+    let color_chunks = split_into_pages(&color_heap, &color_offsets);
+    let columns_chunks = split_into_pages(&columns_heap, &columns_offsets);
+    let artwork_chunks = split_into_pages(&artwork_heap, &artwork_offsets);
+    let pt_chunks = split_into_pages(&pt_heap, &pt_offsets);
+    let pe_chunks = split_into_pages(&pe_heap, &pe_offsets);
+
+    // Map table_type -> (chunks, base_sequence)
+    // base_sequence = base + (total_rows - 1) * 5
+    let table_data: Vec<(u32, &[PageChunk], u32)> = vec![
+        (0x00, &track_chunks, 10 + track_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x01, &genre_chunks, 2 + genre_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x02, &artist_chunks, 7 + artist_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x03, &album_chunks, 9 + album_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x04, &label_chunks, 4 + label_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x05, &key_chunks, 1),
+        (0x06, &color_chunks, 8 + 7 * 5),
+        (0x07, &pt_chunks, 6 + pt_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x08, &pe_chunks, 11 + pe_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x0D, &artwork_chunks, 5 + artwork_offsets.len().saturating_sub(1) as u32 * 5),
+        (0x10, &columns_chunks, 3),
+    ];
+
+    // Allocate overflow pages starting at page 52 (past all default empty_candidates 41-51).
+    // For tables needing >1 page, extra pages are dynamically assigned here.
+    let mut next_overflow_page = 52u32;
+    // Maps: table_type -> (vec of all page indices, effective last_page, effective empty_candidate)
+    let mut overflow_map: HashMap<u32, (Vec<u32>, u32, u32)> = HashMap::new();
+
+    for layout in LAYOUTS {
+        // Find if this table has overflow data
+        let entry = table_data.iter().find(|(tt, _, _)| *tt == layout.table_type);
+        if let Some((_tt, chunks, _seq)) = entry {
+            if layout.data_page == 0 {
+                // Table has no default data page slot. If we have data, allocate all pages dynamically.
+                if !chunks.is_empty() && !chunks[0].offsets.is_empty() {
+                    let mut pages = Vec::new();
+                    for _ in 0..chunks.len() {
+                        pages.push(next_overflow_page);
+                        next_overflow_page += 1;
+                    }
+                    let last = *pages.last().unwrap();
+                    let ec = next_overflow_page;
+                    next_overflow_page += 1;
+                    overflow_map.insert(layout.table_type, (pages, last, ec));
+                }
+                continue;
+            }
+
+            let extra_pages_needed = chunks.len().saturating_sub(1);
+            if extra_pages_needed > 0 {
+                // First page is layout.data_page, rest are overflow
+                let mut pages = vec![layout.data_page];
+                for _ in 0..extra_pages_needed {
+                    pages.push(next_overflow_page);
+                    next_overflow_page += 1;
+                }
+                let last = *pages.last().unwrap();
+                // empty_candidate = one past the last overflow page
+                let ec = next_overflow_page;
+                next_overflow_page += 1;
+                overflow_map.insert(layout.table_type, (pages, last, ec));
+            }
         }
     }
+
+    // Compute total file size: max of (41 pages baseline) or (highest allocated page + 1)
+    let total_pages = std::cmp::max(41, next_overflow_page);
 
     // Create file
     if let Some(parent) = output_path.parent() {
@@ -803,117 +955,120 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     }
     let mut file = std::fs::File::create(output_path)?;
 
-    // Pre-allocate 41 pages (0-40) matching rekordbox exports.
-    // Empty_candidate pages beyond 40 don't need to exist in the file.
-    let file_size = 41 * PAGE_SIZE;
+    // Pre-allocate all pages
+    let file_size = total_pages * PAGE_SIZE;
     file.write_all(&vec![0u8; file_size as usize])?;
     file.seek(SeekFrom::Start(0))?;
 
     // Compute max sequence across all data pages so page 0 sequence exceeds them all.
-    // Each data page sequence = base + (num_rows - 1) * 5.
-    let data_sequences: Vec<u32> = vec![
-        10 + track_offsets.len().saturating_sub(1) as u32 * 5,   // tracks
-        7 + artist_offsets.len().saturating_sub(1) as u32 * 5,   // artists
-        9 + album_offsets.len().saturating_sub(1) as u32 * 5,    // albums
-        4 + label_offsets.len().saturating_sub(1) as u32 * 5,      // labels
-        8 + 7 * 5,                                                // colors (always 8 rows)
-        5 + artwork_offsets.len().saturating_sub(1) as u32 * 5,  // artwork
-        6 + pt_offsets.len().saturating_sub(1) as u32 * 5,       // playlist_tree
-        11 + pe_offsets.len().saturating_sub(1) as u32 * 5,      // playlist_entries
-        3,                                                        // columns (always 3)
-    ];
-    let max_seq = data_sequences.iter().copied().max().unwrap_or(0);
-    let header_sequence = max_seq + 2; // page 0 sequence must exceed all data page sequences
+    let max_seq = table_data.iter().map(|(_, _, s)| *s).max().unwrap_or(0);
+    let header_sequence = max_seq + 2;
 
     // --- Page 0: File header ---
-    file.write_all(&[0u8; 4])?; // 0x00: magic
-    file.write_all(&PAGE_SIZE.to_le_bytes())?; // 0x04: len_page
-    file.write_all(&(LAYOUTS.len() as u32).to_le_bytes())?; // 0x08: num_tables
-    file.write_all(&52u32.to_le_bytes())?; // 0x0C: next_unused_page
-    file.write_all(&5u32.to_le_bytes())?; // 0x10: unknown
-    file.write_all(&header_sequence.to_le_bytes())?; // 0x14: sequence
-    file.write_all(&[0u8; 4])?; // 0x18: gap
+    file.write_all(&[0u8; 4])?;                                    // 0x00: magic
+    file.write_all(&PAGE_SIZE.to_le_bytes())?;                      // 0x04: len_page
+    file.write_all(&(LAYOUTS.len() as u32).to_le_bytes())?;         // 0x08: num_tables
+    file.write_all(&next_overflow_page.to_le_bytes())?;             // 0x0C: next_unused_page
+    file.write_all(&5u32.to_le_bytes())?;                           // 0x10: unknown
+    file.write_all(&header_sequence.to_le_bytes())?;                // 0x14: sequence
+    file.write_all(&[0u8; 4])?;                                    // 0x18: gap
 
-    // Table pointers at 0x1C (type, empty_candidate, first_page, last_page)
+    // Table pointers at 0x1C — use overflow-adjusted last_page and empty_candidate
     for layout in LAYOUTS {
         file.write_all(&layout.table_type.to_le_bytes())?;
-        file.write_all(&layout.empty_candidate.to_le_bytes())?;
-        file.write_all(&layout.header_page.to_le_bytes())?;
-        file.write_all(&layout.last_page.to_le_bytes())?;
+        if let Some((_pages, last, ec)) = overflow_map.get(&layout.table_type) {
+            file.write_all(&ec.to_le_bytes())?;
+            file.write_all(&layout.header_page.to_le_bytes())?;
+            file.write_all(&last.to_le_bytes())?;
+        } else {
+            file.write_all(&layout.empty_candidate.to_le_bytes())?;
+            file.write_all(&layout.header_page.to_le_bytes())?;
+            file.write_all(&layout.last_page.to_le_bytes())?;
+        }
     }
 
     // --- Write table pages ---
     for layout in LAYOUTS {
-        let has_data = layout.data_page != 0;
-        // Tables where last_page == header_page are "empty" from CDJ perspective:
-        // the CDJ stops at the header and never reads the data page.
-        // Don't reference the data page from the header to avoid self-loops.
-        let cdj_reads_data = has_data && layout.last_page != layout.header_page;
+        let has_data = layout.data_page != 0 || overflow_map.contains_key(&layout.table_type);
+
+        // Determine the effective first data page and empty_candidate
+        let (first_data_page, effective_ec) = if let Some((pages, _last, ec)) = overflow_map.get(&layout.table_type) {
+            (Some(pages[0]), *ec)
+        } else if layout.data_page != 0 && layout.last_page != layout.header_page {
+            (Some(layout.data_page), layout.empty_candidate)
+        } else {
+            (None, layout.empty_candidate)
+        };
+
+        let cdj_reads_data = first_data_page.is_some();
 
         let next_for_header = if cdj_reads_data {
-            layout.data_page
+            first_data_page.unwrap()
         } else {
-            layout.empty_candidate
+            effective_ec
         };
-        let first_data = if cdj_reads_data { Some(layout.data_page) } else { None };
 
         // Header page
-        write_header_page(&mut file, layout.header_page, layout.table_type, next_for_header, first_data)?;
+        write_header_page(&mut file, layout.header_page, layout.table_type, next_for_header, first_data_page)?;
 
-        // Data page — only write if CDJ will actually read it
-        if has_data && cdj_reads_data {
-            let (heap, offsets, seq) = match layout.table_type {
-                0x00 => { let s = 10 + (track_offsets.len().saturating_sub(1) as u32) * 5; (&track_heap, &track_offsets, s) },
-                0x02 => { let s = 7 + (artist_offsets.len().saturating_sub(1) as u32) * 5; (&artist_heap, &artist_offsets, s) },
-                0x03 => { let s = 9 + (album_offsets.len().saturating_sub(1) as u32) * 5; (&album_heap, &album_offsets, s) },
-                0x06 => (&color_heap, &color_offsets, 8 + 7 * 5),
-                0x07 => (&pt_heap, &pt_offsets, 6 + (pt_offsets.len().saturating_sub(1) as u32) * 5),
-                0x08 => { let s = 11 + (pe_offsets.len().saturating_sub(1) as u32) * 5; (&pe_heap, &pe_offsets, s) },
-                0x0D => { let s = 5 + (artwork_offsets.len().saturating_sub(1) as u32) * 5; (&artwork_heap, &artwork_offsets, s) },
-                0x10 => (&columns_heap, &columns_offsets, 3u32), // columns sequence is always 3
-                // History tables: CDJ requires populated history data pages
-                0x11 => {
-                    seek_to_page(&mut file, layout.data_page)?;
-                    file.write_all(REFERENCE_HISTORY_PLAYLISTS)?;
-                    continue;
-                }
-                0x12 => {
-                    seek_to_page(&mut file, layout.data_page)?;
-                    file.write_all(REFERENCE_HISTORY_ENTRIES)?;
-                    continue;
-                }
-                0x13 => {
-                    seek_to_page(&mut file, layout.data_page)?;
-                    file.write_all(REFERENCE_HISTORY)?;
-                    continue;
-                }
-                _ => {
-                    // artwork and other tables — write blank data page with valid header
-                    write_blank_data_page(
-                        &mut file,
-                        layout.data_page,
-                        layout.table_type,
-                        layout.empty_candidate,
-                    )?;
-                    continue;
-                }
-            };
+        if !has_data || !cdj_reads_data {
+            continue;
+        }
 
-            if offsets.is_empty() {
-                // Leave as zeros (pre-allocated)
+        // History tables: write reference binary blobs
+        match layout.table_type {
+            0x11 => {
+                seek_to_page(&mut file, layout.data_page)?;
+                file.write_all(REFERENCE_HISTORY_PLAYLISTS)?;
                 continue;
             }
-
-            write_data_page(
-                &mut file,
-                layout.data_page,
-                layout.table_type,
-                layout.empty_candidate, // next_page = empty_candidate (terminates chain)
-                heap,
-                offsets,
-                seq,
-            )?;
+            0x12 => {
+                seek_to_page(&mut file, layout.data_page)?;
+                file.write_all(REFERENCE_HISTORY_ENTRIES)?;
+                continue;
+            }
+            0x13 => {
+                seek_to_page(&mut file, layout.data_page)?;
+                file.write_all(REFERENCE_HISTORY)?;
+                continue;
+            }
+            _ => {}
         }
+
+        // Find table data entry
+        let entry = table_data.iter().find(|(tt, _, _)| *tt == layout.table_type);
+        let (chunks, seq) = match entry {
+            Some((_tt, chunks, seq)) => (*chunks, *seq),
+            None => {
+                // No data for this table — write blank page if it has a data slot
+                if layout.data_page != 0 {
+                    write_blank_data_page(&mut file, layout.data_page, layout.table_type, effective_ec)?;
+                }
+                continue;
+            }
+        };
+
+        // Get the page indices for this table
+        let page_indices: Vec<u32> = if let Some((pages, _last, _ec)) = overflow_map.get(&layout.table_type) {
+            pages.clone()
+        } else {
+            vec![layout.data_page]
+        };
+
+        if chunks.iter().all(|c| c.offsets.is_empty()) {
+            // All chunks empty — write blank pages
+            for (i, &page_idx) in page_indices.iter().enumerate() {
+                let next = if i + 1 < page_indices.len() {
+                    page_indices[i + 1]
+                } else {
+                    effective_ec
+                };
+                write_blank_data_page(&mut file, page_idx, layout.table_type, next)?;
+            }
+            continue;
+        }
+
+        write_chained_data_pages(&mut file, layout.table_type, &page_indices, effective_ec, chunks, seq)?;
     }
 
     Ok(())

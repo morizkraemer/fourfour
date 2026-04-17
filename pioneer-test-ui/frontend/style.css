@@ -75,8 +75,19 @@ button:hover { background: var(--bg3); border-color: var(--accent2); }
 button:active { background: var(--accent2); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+#btn-wipe { border-color: var(--accent); color: var(--accent); }
+#btn-wipe:hover { background: var(--accent); color: #fff; }
+
 #btn-sync { background: var(--accent2); border-color: var(--accent); }
 #btn-sync:hover { background: var(--accent); }
+
+#version-badge {
+    color: var(--text-dim);
+    font-size: 10px;
+    font-family: var(--mono);
+    opacity: 0.5;
+    padding-left: 8px;
+}
 
 #btn-refresh-volumes { padding: 5px 8px; }
 
@@ -143,6 +154,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .col-artist { width: 25%; }
 .col-bpm    { width: 60px; font-family: var(--mono); text-align: right; }
 .col-key    { width: 50px; font-family: var(--mono); text-align: center; }
+.col-cues   { width: 50px; text-align: center; }
 .col-dur    { width: 60px; font-family: var(--mono); text-align: right; color: var(--text-dim); }
 
 .empty-row td { color: var(--text-dim); text-align: center; padding: 32px; cursor: default; }
@@ -286,3 +298,17 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent2); }
+
+/* ── Dialogs ── */
+dialog {
+    background: var(--bg2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+dialog::backdrop {
+    background: rgba(0,0,0,0.6);
+}

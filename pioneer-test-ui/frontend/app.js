@@ -15,6 +15,12 @@ let syncing = false;
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
+    // Show version
+    try {
+        const ver = await invoke('app_version');
+        document.getElementById('version-badge').textContent = 'v' + ver;
+    } catch (_) {}
+
     // Restore persisted state before anything else
     try {
         const loaded = await invoke('load_state');
@@ -76,6 +82,34 @@ async function loadVolumes() {
 
 function selectVolume(path) {
     outputDir = path || null;
+}
+
+async function ejectVolume() {
+    if (!outputDir) { alert('Select a USB volume first.'); return; }
+    try {
+        await invoke('eject_volume', { path: outputDir });
+        outputDir = null;
+        document.getElementById('usb-select').value = '';
+        loadVolumes();
+    } catch (err) {
+        alert('Eject failed: ' + err);
+    }
+}
+
+async function wipeUsb() {
+    if (!outputDir) { alert('Select a USB volume first.'); return; }
+
+    const dialog = document.getElementById('confirm-dialog');
+    document.getElementById('confirm-label').textContent =
+        '⚠ This will permanently delete all Pioneer data (PIONEER/ and Contents/) from ' + outputDir + '. This cannot be undone.';
+    dialog.returnValue = '';
+    dialog.showModal();
+    dialog.onclose = () => {
+        if (dialog.returnValue !== 'ok') return;
+        invoke('wipe_usb', { path: outputDir })
+            .then(() => { alert('USB wiped successfully.'); })
+            .catch(err => { alert('Wipe failed: ' + err); });
+    };
 }
 
 // ── Import ─────────────────────────────────────────────────────────────────
@@ -173,8 +207,47 @@ function toggleTrackSelection(trackId) {
 }
 
 function updateSelectionCount() {
+    const n = selectedTrackIds.size;
     document.getElementById('selection-count').textContent =
-        selectedTrackIds.size === 1 ? '1 selected' : `${selectedTrackIds.size} selected`;
+        n === 1 ? '1 selected' : `${n} selected`;
+    document.getElementById('btn-delete').disabled = n === 0 || analyzing || syncing;
+    document.getElementById('btn-test-cues').disabled = n === 0 || analyzing || syncing;
+}
+
+// ── Delete tracks ─────────────────────────────────────────────────────────
+async function deleteSelected() {
+    if (selectedTrackIds.size === 0) return;
+    const ids = [...selectedTrackIds];
+    try {
+        await invoke('remove_tracks', { ids });
+        tracks = tracks.filter(t => !selectedTrackIds.has(t.id));
+        // Remove deleted tracks from all playlists
+        for (const pl of playlists) {
+            pl.trackIds = pl.trackIds.filter(id => !selectedTrackIds.has(id));
+        }
+        selectedTrackIds.clear();
+        updateSelectionCount();
+        renderTracks();
+        renderPlaylists();
+        saveState();
+    } catch (err) {
+        console.error('remove_tracks failed:', err);
+        alert('Delete failed: ' + err);
+    }
+}
+
+async function setTestCues() {
+    if (selectedTrackIds.size === 0) return;
+    const ids = [...selectedTrackIds];
+    try {
+        const updated = await invoke('set_test_cues', { ids });
+        tracks = updated;
+        renderTracks();
+        saveState();
+    } catch (err) {
+        console.error('set_test_cues failed:', err);
+        alert('Set cues failed: ' + err);
+    }
 }
 
 // ── Playlists ──────────────────────────────────────────────────────────────
@@ -224,7 +297,7 @@ function removeFromPlaylist(playlistId, trackId) {
 function renderTracks() {
     const tbody = document.getElementById('track-tbody');
     if (tracks.length === 0) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No tracks loaded. Import a folder or drop files here.</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No tracks loaded. Import a folder or drop files here.</td></tr>';
         return;
     }
     const rows = tracks.map((t, i) => {
@@ -234,12 +307,14 @@ function renderTracks() {
         const bpm = formatBpm(t.tempo);
         const key = t.key ? esc(t.key) : '—';
         const dur = formatDuration(t.duration_secs);
+        const cues = t.has_cues ? '●' : '';
         return `<tr class="track-row${sel}" data-track-id="${t.id}" onclick="toggleTrackSelection(${t.id})">
             <td class="col-num">${i + 1}</td>
             <td class="col-title" title="${esc(t.source_path)}">${title}</td>
             <td class="col-artist">${artist}</td>
             <td class="col-bpm">${bpm}</td>
             <td class="col-key">${key}</td>
+            <td class="col-cues">${cues}</td>
             <td class="col-dur">${dur}</td>
         </tr>`;
     });
@@ -338,6 +413,8 @@ function setButtonStates() {
     document.getElementById('btn-analyze').disabled = analyzing;
     document.getElementById('btn-sync').disabled = syncing;
     document.getElementById('btn-import').disabled = analyzing || syncing;
+    document.getElementById('btn-delete').disabled = selectedTrackIds.size === 0 || analyzing || syncing;
+    document.getElementById('btn-test-cues').disabled = selectedTrackIds.size === 0 || analyzing || syncing;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
