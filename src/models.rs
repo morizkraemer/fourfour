@@ -29,6 +29,8 @@ pub struct Track {
     pub file_size: u64,
     /// Unique track ID (1-based, assigned during processing)
     pub id: u32,
+    /// Raw cover art image bytes (JPEG or PNG), if available
+    pub artwork: Option<Vec<u8>>,
 }
 
 /// Beat grid: list of beat positions with timing info.

@@ -1,4 +1,7 @@
 use anyhow::{Context, Result};
+use image::imageops::FilterType;
+use image::ImageFormat;
+use std::io::Cursor;
 use std::path::Path;
 
 use crate::models::{AnalysisResult, Playlist, Track};
@@ -32,6 +35,17 @@ pub fn write_usb(
             .with_context(|| format!("Failed to copy {}", track.source_path.display()))?;
     }
 
+    println!("Writing artwork...");
+    let artwork_dir = pioneer_dir.join("Artwork/00001");
+    std::fs::create_dir_all(&artwork_dir)?;
+    for track in tracks {
+        if let Some(ref art_data) = track.artwork {
+            if let Err(e) = write_artwork(&artwork_dir, track.id, art_data) {
+                eprintln!("Warning: artwork failed for track {}: {}", track.id, e);
+            }
+        }
+    }
+
     println!("Writing ANLZ files...");
     // Write ANLZ files (.DAT and .EXT)
     for (track, analysis) in tracks.iter().zip(analyses.iter()) {
@@ -50,5 +64,26 @@ pub fn write_usb(
     pdb::write_pdb(&pdb_path, tracks, playlists)?;
 
     println!("USB structure written to {}", output_dir.display());
+    Ok(())
+}
+
+/// Write artwork files for a track: a{id}.jpg (80x80), a{id}_m.jpg (240x240), and b copies.
+fn write_artwork(artwork_dir: &Path, artwork_id: u32, image_data: &[u8]) -> Result<()> {
+    let img = image::load_from_memory(image_data)
+        .context("Failed to decode cover art")?;
+
+    let small = img.resize_to_fill(80, 80, FilterType::Lanczos3);
+    let medium = img.resize_to_fill(240, 240, FilterType::Lanczos3);
+
+    for prefix in ["a", "b"] {
+        let mut small_buf = Cursor::new(Vec::new());
+        small.write_to(&mut small_buf, ImageFormat::Jpeg)?;
+        std::fs::write(artwork_dir.join(format!("{}{}.jpg", prefix, artwork_id)), small_buf.into_inner())?;
+
+        let mut medium_buf = Cursor::new(Vec::new());
+        medium.write_to(&mut medium_buf, ImageFormat::Jpeg)?;
+        std::fs::write(artwork_dir.join(format!("{}{}_m.jpg", prefix, artwork_id)), medium_buf.into_inner())?;
+    }
+
     Ok(())
 }

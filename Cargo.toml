@@ -19,17 +19,9 @@ clap = { version = "4", features = ["derive"] }
 # Error handling
 anyhow = "1"
 
-# Parallelism
-rayon = "1"
-
 # Progress bars
 indicatif = "0.17"
 
-# Binary writing (for ANLZ/PDB format)
-binrw = "0.15"
-
-# File hashing
-crc16 = "0.4"
-
 # Walkdir for scanning
 walkdir = "2"
+image = "0.25.10"

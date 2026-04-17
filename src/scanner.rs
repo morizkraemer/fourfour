@@ -90,6 +90,16 @@ fn read_track_metadata(path: &Path, id: u32) -> Result<Track> {
 
     let file_size = std::fs::metadata(path)?.len();
 
+    // Extract cover art
+    let artwork = tag
+        .and_then(|t| {
+            t.pictures()
+                .iter()
+                .find(|p| p.pic_type() == lofty::picture::PictureType::CoverFront)
+                .or_else(|| t.pictures().first())
+                .map(|p| p.data().to_vec())
+        });
+
     // Build USB path: Contents/<Artist>/<filename>
     let filename = path
         .file_name()
@@ -112,6 +122,7 @@ fn read_track_metadata(path: &Path, id: u32) -> Result<Track> {
         bitrate,
         file_size,
         id,
+        artwork,
     })
 }
 

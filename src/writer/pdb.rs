@@ -465,7 +465,8 @@ fn build_track_rows(
         heap.extend_from_slice(&u2.to_le_bytes()); // 0x14: analysis flags
         heap.extend_from_slice(&0xE5B6u16.to_le_bytes()); // 0x18: u3
         heap.extend_from_slice(&0x6A76u16.to_le_bytes()); // 0x1A: u4
-        heap.extend_from_slice(&0u32.to_le_bytes()); // 0x1C: artwork_id
+        let artwork_id = if track.artwork.is_some() { track.id } else { 0u32 };
+        heap.extend_from_slice(&artwork_id.to_le_bytes()); // 0x1C: artwork_id
         heap.extend_from_slice(&key_id.to_le_bytes()); // 0x20: key_id
         heap.extend_from_slice(&0u32.to_le_bytes()); // 0x24: original_artist_id
         heap.extend_from_slice(&0u32.to_le_bytes()); // 0x28: label_id
@@ -600,6 +601,22 @@ fn build_columns_rows() -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
+fn build_artwork_rows(tracks: &[Track]) -> (Vec<u8>, Vec<u16>) {
+    let mut heap = Vec::new();
+    let mut offsets = Vec::new();
+    for track in tracks {
+        if track.artwork.is_none() {
+            continue;
+        }
+        offsets.push(heap.len() as u16);
+        heap.extend_from_slice(&track.id.to_le_bytes()); // artwork_id = track_id
+        let path = format!("/PIONEER/Artwork/00001/a{}.jpg", track.id);
+        heap.extend_from_slice(&encode_string(&path));
+        align_to_4(&mut heap);
+    }
+    (heap, offsets)
+}
+
 fn build_playlist_tree_rows(playlists: &[(u32, u32, u32, &str, bool)]) -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
@@ -690,6 +707,7 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     let (key_heap, key_offsets) = build_key_rows();
     let (color_heap, color_offsets) = build_color_rows();
     let (columns_heap, columns_offsets) = build_columns_rows();
+    let (artwork_heap, artwork_offsets) = build_artwork_rows(tracks);
 
     // Build playlist tree and entries from the provided playlists
     let playlist_tree_data: Vec<(u32, u32, u32, &str, bool)> = playlists.iter()
