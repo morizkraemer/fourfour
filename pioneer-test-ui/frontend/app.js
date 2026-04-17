@@ -13,6 +13,7 @@ let nextPlaylistId = 1;
 let analyzing = false;
 let syncing = false;
 let usbTracks = [];
+let usbPlaylists = [];
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
@@ -88,7 +89,9 @@ function selectVolume(path) {
         loadUsbContents();
     } else {
         usbTracks = [];
+        usbPlaylists = [];
         renderUsbTracks();
+        renderUsbPlaylists();
     }
 }
 
@@ -98,14 +101,18 @@ async function loadUsbContents() {
         const result = await invoke('read_usb_state', { path: outputDir });
         if (result) {
             usbTracks = result.tracks;
+            usbPlaylists = result.playlists;
         } else {
             usbTracks = [];
+            usbPlaylists = [];
         }
     } catch (err) {
         console.error('read_usb_state failed:', err);
         usbTracks = [];
+        usbPlaylists = [];
     }
     renderUsbTracks();
+    renderUsbPlaylists();
 }
 
 async function ejectVolume() {
@@ -131,7 +138,7 @@ async function wipeUsb() {
     dialog.onclose = () => {
         if (dialog.returnValue !== 'ok') return;
         invoke('wipe_usb', { path: outputDir })
-            .then(() => { usbTracks = []; renderUsbTracks(); alert('USB wiped successfully.'); })
+            .then(() => { usbTracks = []; usbPlaylists = []; renderUsbTracks(); renderUsbPlaylists(); alert('USB wiped successfully.'); })
             .catch(err => { alert('Wipe failed: ' + err); });
     };
 }
@@ -375,6 +382,26 @@ function renderUsbTracks() {
         </tr>`;
     });
     tbody.innerHTML = rows.join('');
+}
+
+// ── Render: USB Playlists ──────────────────────────────────────────────────
+function renderUsbPlaylists() {
+    const container = document.getElementById('usb-playlist-list');
+
+    if (usbPlaylists.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-dim);font-size:11px;padding:12px 10px;font-style:italic;">' +
+            (outputDir ? 'No playlists on USB' : 'Select a USB volume') + '</p>';
+        return;
+    }
+
+    const html = usbPlaylists.map(pl => {
+        const countLabel = pl.track_count === 1 ? '1 track' : `${pl.track_count} tracks`;
+        return `<div class="usb-playlist-item">
+            <span class="usb-playlist-name">${esc(pl.name)}</span>
+            <span class="usb-playlist-count">${countLabel}</span>
+        </div>`;
+    }).join('');
+    container.innerHTML = html;
 }
 
 // ── Render: Playlists ──────────────────────────────────────────────────────

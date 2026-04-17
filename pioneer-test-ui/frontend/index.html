@@ -33,64 +33,72 @@
             <span id="version-badge"></span>
         </div>
 
-        <!-- Main content: track list + playlists -->
+        <!-- Main content: library side | USB side (mirrored) -->
         <div id="main">
 
-            <!-- Track list (left 70%) -->
-            <div id="track-panel">
-                <div id="track-table-wrap">
-                    <table id="track-table">
-                        <thead>
-                            <tr>
-                                <th class="col-num">#</th>
-                                <th class="col-title">Title</th>
-                                <th class="col-artist">Artist</th>
-                                <th class="col-bpm">BPM</th>
-                                <th class="col-key">Key</th>
-                                <th class="col-cues">Cues</th>
-                                <th class="col-dur">Duration</th>
-                            </tr>
-                        </thead>
-                        <tbody id="track-tbody">
-                            <tr class="empty-row">
-                                <td colspan="7">No tracks loaded. Import a folder or drop files here.</td>
-                            </tr>
-                        </tbody>
-                    </table>
+            <!-- Library: tracks + playlists -->
+            <div class="side library-side">
+                <div id="track-panel">
+                    <div id="track-table-wrap">
+                        <table id="track-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-num">#</th>
+                                    <th class="col-title">Title</th>
+                                    <th class="col-artist">Artist</th>
+                                    <th class="col-bpm">BPM</th>
+                                    <th class="col-key">Key</th>
+                                    <th class="col-cues">Cues</th>
+                                    <th class="col-dur">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="track-tbody">
+                                <tr class="empty-row">
+                                    <td colspan="7">No tracks loaded. Import a folder or drop files here.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div id="playlist-panel">
+                    <div id="playlist-actions">
+                        <span id="selection-count">0 selected</span>
+                        <button id="btn-new-playlist" onclick="createPlaylist()">+ New Playlist</button>
+                    </div>
+                    <div id="playlist-list"></div>
                 </div>
             </div>
 
-            <!-- USB contents (middle 35%) -->
-            <div id="usb-panel">
-                <div id="usb-header">
-                    <span>USB Contents</span>
-                    <span id="usb-track-count"></span>
+            <!-- USB: playlists + tracks (mirrored) -->
+            <div class="side usb-side">
+                <div id="usb-playlist-panel">
+                    <div id="usb-playlist-header">
+                        <span>USB Playlists</span>
+                    </div>
+                    <div id="usb-playlist-list"></div>
                 </div>
-                <div id="usb-table-wrap">
-                    <table id="usb-table">
-                        <thead>
-                            <tr>
-                                <th class="col-title">Title</th>
-                                <th class="col-artist">Artist</th>
-                                <th class="col-bpm">BPM</th>
-                                <th class="col-key">Key</th>
-                                <th class="col-dur">Duration</th>
-                            </tr>
-                        </thead>
-                        <tbody id="usb-tbody">
-                            <tr class="empty-row"><td colspan="5">Select a USB volume to view contents</td></tr>
-                        </tbody>
-                    </table>
+                <div id="usb-panel">
+                    <div id="usb-header">
+                        <span>USB Tracks</span>
+                        <span id="usb-track-count"></span>
+                    </div>
+                    <div id="usb-table-wrap">
+                        <table id="usb-table">
+                            <thead>
+                                <tr>
+                                    <th class="col-title">Title</th>
+                                    <th class="col-artist">Artist</th>
+                                    <th class="col-bpm">BPM</th>
+                                    <th class="col-key">Key</th>
+                                    <th class="col-dur">Duration</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usb-tbody">
+                                <tr class="empty-row"><td colspan="5">Select a USB volume to view contents</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </div>
-
-            <!-- Playlist sidebar (right 25%) -->
-            <div id="playlist-panel">
-                <div id="playlist-actions">
-                    <span id="selection-count">0 selected</span>
-                    <button id="btn-new-playlist" onclick="createPlaylist()">+ New Playlist</button>
-                </div>
-                <div id="playlist-list"></div>
             </div>
 
         </div>
