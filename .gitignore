@@ -1,3 +1,2 @@
-/target
--e
--p
+target/
+.DS_Store
