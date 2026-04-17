@@ -34,3 +34,4 @@ indicatif = "0.17"
 walkdir = "2"
 image = "0.25.10"
 serde = { version = "1", features = ["derive"] }
+chrono = "0.4"

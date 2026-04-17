@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Local;
 use std::collections::HashMap;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
@@ -364,7 +365,8 @@ fn write_data_page(
 ) -> Result<()> {
     let num_rows = row_offsets.len();
     let rg_bytes = row_group_bytes(num_rows);
-    let padding = PAGE_SIZE as usize - HEAP_START - heap.len() - rg_bytes;
+    let used_space = HEAP_START + heap.len() + rg_bytes;
+    let padding = (PAGE_SIZE as usize).saturating_sub(used_space);
 
     let page_start = seek_to_page(file, page_index)?;
     write_page_header(file, page_index, table_type, next_page, num_rows, 0x24, sequence, 0)?;
@@ -553,6 +555,7 @@ fn build_track_rows(
     genre_map: &HashMap<String, u32>,
     label_map: &HashMap<String, u32>,
     remixer_map: &HashMap<String, u32>,
+    today: &str,
 ) -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
@@ -561,11 +564,11 @@ fn build_track_rows(
         let row_start = heap.len();
         offsets.push(row_start as u16);
 
-        let artist_id = *artist_map.get(&track.artist).unwrap_or(&0);
-        let album_id = *album_map.get(&track.album).unwrap_or(&0);
-        let genre_id = *genre_map.get(&track.genre).unwrap_or(&1);
-        let label_id = if track.label.is_empty() { 0 } else { *label_map.get(&track.label).unwrap_or(&0) };
-        let remixer_id = if track.remixer.is_empty() { 0 } else { *remixer_map.get(&track.remixer).unwrap_or(&0) };
+        let artist_id = *artist_map.get(&track.artist.to_lowercase()).unwrap_or(&0);
+        let album_id = *album_map.get(&track.album.to_lowercase()).unwrap_or(&0);
+        let genre_id = if track.genre.is_empty() { 0 } else { *genre_map.get(&track.genre.to_lowercase()).unwrap_or(&0) };
+        let label_id = if track.label.is_empty() { 0 } else { *label_map.get(&track.label.to_lowercase()).unwrap_or(&0) };
+        let remixer_id = if track.remixer.is_empty() { 0 } else { *remixer_map.get(&track.remixer.to_lowercase()).unwrap_or(&0) };
         let key_id = key_name_to_id(&track.key);
 
         // --- Fixed header (94 bytes = 0x5E) ---
@@ -633,7 +636,7 @@ fn build_track_rows(
         add(7, &encode_string("ON")); // autoload_hotcues
         add(8, &[0x03]); // unknown8
         add(9, &[0x03]); // unknown9
-        add(10, &encode_string("2026-04-15")); // date_added
+        add(10, &encode_string(today)); // date_added
         if track.year > 0 {
             add(11, &encode_string(&format!("{}-01-01", track.year))); // release_date
         } else {
@@ -643,7 +646,7 @@ fn build_track_rows(
         add(13, &[0x03]); // unknown13
         let anlz_path = anlz::anlz_path_for_pdb(track);
         add(14, &encode_string(&anlz_path)); // analyze_path
-        add(15, &encode_string("2026-04-15")); // analyze_date
+        add(15, &encode_string(today)); // analyze_date
         if track.comment.is_empty() {
             add(16, &[0x03]); // comment
         } else {
@@ -778,76 +781,76 @@ fn key_name_to_id(key: &str) -> u32 {
     let minor_map: &[u32] = &[22, 17, 24, 19, 14, 21, 16, 23, 18, 13, 20, 15]; // 1B..12B
 
     if key.is_empty() {
-        return 1; // default C major
+        return 0; // no key
     }
 
     // Parse "1A" through "12B" format
     if key.ends_with('A') || key.ends_with('B') {
         let is_minor = key.ends_with('B');
         if let Ok(num) = key[..key.len() - 1].parse::<usize>() {
-            if num >= 1 && num <= 12 {
+            if (1..=12).contains(&num) {
                 return if is_minor { minor_map[num - 1] } else { major_map[num - 1] };
             }
         }
     }
-    1 // default
+    0 // unknown key
 }
 
 // ── Main PDB Writer ────────────────────────────────────────────────
 
 pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -> Result<()> {
-    // Collect unique values
-    let mut artists: Vec<String> = tracks.iter().map(|t| t.artist.clone()).collect();
-    artists.sort();
-    artists.dedup();
-    let artist_map: HashMap<String, u32> = artists.iter().enumerate()
-        .map(|(i, a)| (a.clone(), (i + 1) as u32)).collect();
+    // Case-insensitive dedup: keeps first occurrence as display name, maps by lowercase key
+    fn dedup_ci(values: impl Iterator<Item = String>) -> (Vec<String>, HashMap<String, u32>) {
+        let mut seen: HashMap<String, u32> = HashMap::new();
+        let mut unique = Vec::new();
+        for v in values {
+            let key = v.to_lowercase();
+            if !seen.contains_key(&key) {
+                let id = unique.len() as u32 + 1;
+                seen.insert(key, id);
+                unique.push(v);
+            }
+        }
+        (unique, seen)
+    }
 
-    let mut albums: Vec<String> = tracks.iter().map(|t| t.album.clone()).collect();
-    albums.sort();
-    albums.dedup();
-    let album_map: HashMap<String, u32> = albums.iter().enumerate()
-        .map(|(i, a)| (a.clone(), (i + 1) as u32)).collect();
+    // Collect unique values (case-insensitive dedup)
+    let (artists, artist_map) = dedup_ci(tracks.iter().map(|t| t.artist.clone()));
+    let (albums, album_map) = dedup_ci(tracks.iter().map(|t| t.album.clone()));
+    let (genres, genre_map) = dedup_ci(
+        tracks.iter().filter(|t| !t.genre.is_empty()).map(|t| t.genre.clone())
+    );
+    let (labels, label_map) = dedup_ci(
+        tracks.iter().filter(|t| !t.label.is_empty()).map(|t| t.label.clone())
+    );
+    let (remixers, remixer_map_raw) = dedup_ci(
+        tracks.iter().filter(|t| !t.remixer.is_empty()).map(|t| t.remixer.clone())
+    );
+
+    // Album → artist mapping (uses first artist seen for each album)
     let mut album_artist_map: HashMap<String, u32> = HashMap::new();
     for t in tracks {
-        if let Some(&aid) = artist_map.get(&t.artist) {
+        if let Some(&aid) = artist_map.get(&t.artist.to_lowercase()) {
             album_artist_map.entry(t.album.clone()).or_insert(aid);
         }
     }
 
-    let mut genres: Vec<String> = tracks.iter().map(|t| t.genre.clone()).collect();
-    genres.sort();
-    genres.dedup();
-    let genre_map: HashMap<String, u32> = genres.iter().enumerate()
-        .map(|(i, g)| (g.clone(), (i + 1) as u32)).collect();
-
-    let mut labels: Vec<String> = tracks.iter()
-        .filter(|t| !t.label.is_empty())
-        .map(|t| t.label.clone()).collect();
-    labels.sort();
-    labels.dedup();
-    let label_map: HashMap<String, u32> = labels.iter().enumerate()
-        .map(|(i, l)| (l.clone(), (i + 1) as u32)).collect();
-
-    let mut remixers: Vec<String> = tracks.iter()
-        .filter(|t| !t.remixer.is_empty())
-        .map(|t| t.remixer.clone()).collect();
-    remixers.sort();
-    remixers.dedup();
     // Remixers go into the artist table — offset IDs after existing artists
     let remixer_id_base = artists.len() as u32 + 1;
-    let remixer_map: HashMap<String, u32> = remixers.iter().enumerate()
-        .map(|(i, r)| (r.clone(), remixer_id_base + i as u32)).collect();
+    let remixer_map: HashMap<String, u32> = remixer_map_raw.iter()
+        .map(|(k, &i)| (k.clone(), remixer_id_base + i - 1)).collect();
     // Merge remixer names into the artist list for PDB
     let mut all_artists = artists.clone();
     for r in &remixers {
-        if !all_artists.contains(r) {
+        let key = r.to_lowercase();
+        if !artist_map.contains_key(&key) {
             all_artists.push(r.clone());
         }
     }
 
     // Build row data for each table
-    let (track_heap, track_offsets) = build_track_rows(tracks, &artist_map, &album_map, &genre_map, &label_map, &remixer_map);
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let (track_heap, track_offsets) = build_track_rows(tracks, &artist_map, &album_map, &genre_map, &label_map, &remixer_map, &today);
     let (genre_heap, genre_offsets) = build_genre_rows(&genres);
     let (artist_heap, artist_offsets) = build_artist_rows(&all_artists);
     let (album_heap, album_offsets) = build_album_rows(&albums, &album_artist_map);
@@ -955,9 +958,9 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     }
     let mut file = std::fs::File::create(output_path)?;
 
-    // Pre-allocate all pages
-    let file_size = total_pages * PAGE_SIZE;
-    file.write_all(&vec![0u8; file_size as usize])?;
+    // Pre-allocate all pages (zero-filled by the OS)
+    let file_size = (total_pages * PAGE_SIZE) as u64;
+    file.set_len(file_size)?;
     file.seek(SeekFrom::Start(0))?;
 
     // Compute max sequence across all data pages so page 0 sequence exceeds them all.

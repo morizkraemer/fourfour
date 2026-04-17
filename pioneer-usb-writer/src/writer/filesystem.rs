@@ -4,6 +4,7 @@ use image::ImageFormat;
 use std::io::Cursor;
 use std::path::Path;
 
+use anyhow::ensure;
 use crate::models::{AnalysisResult, Playlist, Track};
 use crate::writer::{anlz, pdb};
 
@@ -14,6 +15,13 @@ pub fn write_usb(
     analyses: &[AnalysisResult],
     playlists: &[Playlist],
 ) -> Result<()> {
+    ensure!(
+        tracks.len() == analyses.len(),
+        "tracks ({}) and analyses ({}) must have the same length",
+        tracks.len(),
+        analyses.len()
+    );
+
     // Create directory structure
     let pioneer_dir = output_dir.join("PIONEER");
     let rekordbox_dir = pioneer_dir.join("rekordbox");
@@ -75,14 +83,17 @@ fn write_artwork(artwork_dir: &Path, artwork_id: u32, image_data: &[u8]) -> Resu
     let small = img.resize_to_fill(80, 80, FilterType::Lanczos3);
     let medium = img.resize_to_fill(240, 240, FilterType::Lanczos3);
 
-    for prefix in ["a", "b"] {
-        let mut small_buf = Cursor::new(Vec::new());
-        small.write_to(&mut small_buf, ImageFormat::Jpeg)?;
-        std::fs::write(artwork_dir.join(format!("{}{}.jpg", prefix, artwork_id)), small_buf.into_inner())?;
+    let mut small_buf = Cursor::new(Vec::new());
+    small.write_to(&mut small_buf, ImageFormat::Jpeg)?;
+    let small_bytes = small_buf.into_inner();
 
-        let mut medium_buf = Cursor::new(Vec::new());
-        medium.write_to(&mut medium_buf, ImageFormat::Jpeg)?;
-        std::fs::write(artwork_dir.join(format!("{}{}_m.jpg", prefix, artwork_id)), medium_buf.into_inner())?;
+    let mut medium_buf = Cursor::new(Vec::new());
+    medium.write_to(&mut medium_buf, ImageFormat::Jpeg)?;
+    let medium_bytes = medium_buf.into_inner();
+
+    for prefix in ["a", "b"] {
+        std::fs::write(artwork_dir.join(format!("{}{}.jpg", prefix, artwork_id)), &small_bytes)?;
+        std::fs::write(artwork_dir.join(format!("{}{}_m.jpg", prefix, artwork_id)), &medium_bytes)?;
     }
 
     Ok(())
