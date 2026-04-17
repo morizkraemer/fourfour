@@ -6,7 +6,7 @@ use std::path::Path;
 
 use anyhow::ensure;
 use crate::models::{AnalysisResult, Playlist, Track};
-use crate::writer::{anlz, pdb};
+use crate::writer::{anlz, onelibrary, pdb};
 
 /// Write the complete Pioneer USB structure to the output directory.
 pub fn write_usb(
@@ -70,6 +70,9 @@ pub fn write_usb(
     // Write PDB database
     let pdb_path = rekordbox_dir.join("export.pdb");
     pdb::write_pdb(&pdb_path, tracks, playlists)?;
+
+    println!("Writing OneLibrary database...");
+    onelibrary::write_onelibrary(output_dir, tracks, analyses, playlists)?;
 
     println!("USB structure written to {}", output_dir.display());
     Ok(())

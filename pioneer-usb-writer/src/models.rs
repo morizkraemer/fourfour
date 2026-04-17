@@ -114,3 +114,44 @@ pub struct Playlist {
     /// Track IDs belonging to this playlist.
     pub track_ids: Vec<u32>,
 }
+
+/// A track read back from an existing USB's OneLibrary database.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExistingTrack {
+    pub id: u32,
+    pub usb_path: String,
+    pub title: String,
+    pub artist: String,
+    pub remixer: String,
+    pub album: String,
+    pub genre: String,
+    pub label: String,
+    pub key: String,
+    pub comment: String,
+    pub year: u16,
+    pub track_number: u32,
+    pub disc_number: u16,
+    pub tempo: u32,
+    pub duration_secs: f64,
+    pub sample_rate: u32,
+    pub bitrate: u32,
+    pub file_size: u64,
+    pub has_artwork: bool,
+}
+
+/// A playlist read back from an existing USB.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExistingPlaylist {
+    pub id: u32,
+    pub name: String,
+    pub track_ids: Vec<u32>,
+}
+
+/// Full state read from an existing USB's OneLibrary database.
+#[derive(Debug, Clone)]
+pub struct ExistingUsbState {
+    pub tracks: Vec<ExistingTrack>,
+    pub playlists: Vec<ExistingPlaylist>,
+    pub next_track_id: u32,
+    pub next_playlist_id: u32,
+}

@@ -30,6 +30,9 @@ anyhow = "1"
 # Progress bars
 indicatif = "0.17"
 
+# Database
+rusqlite = { version = "0.33", features = ["bundled-sqlcipher"] }
+
 # Walkdir for scanning
 walkdir = "2"
 image = "0.25.10"
