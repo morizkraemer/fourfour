@@ -1,2 +1,9 @@
 target/
 .DS_Store
+.shed.log
+.shed-pids/
+.shed.sock
+plans/
+pioneer-usb-writer/-e
+pioneer-usb-writer/-p
+shed.toml
