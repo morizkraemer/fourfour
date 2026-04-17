@@ -28,27 +28,12 @@ pub fn analyze_track(path: &Path) -> Result<models::AnalysisResult> {
     // Generate waveform preview
     let waveform_preview = waveform::generate_preview(&samples);
 
-    // Place a test memory cue at the nearest downbeat to ~60 seconds
-    let cue_time_ms = beat_grid
-        .beats
-        .iter()
-        .filter(|b| b.bar_position == 1 && b.time_ms >= 60_000)
-        .map(|b| b.time_ms)
-        .next()
-        .unwrap_or(60_000);
-
-    let cue_points = vec![models::CuePoint {
-        hot_cue_number: 0, // memory cue
-        time_ms: cue_time_ms,
-        loop_time_ms: None,
-    }];
-
     Ok(models::AnalysisResult {
         beat_grid,
         waveform: waveform_preview,
         bpm,
         key,
-        cue_points,
+        cue_points: vec![],
     })
 }
 

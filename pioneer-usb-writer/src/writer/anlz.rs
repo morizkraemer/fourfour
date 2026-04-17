@@ -155,14 +155,15 @@ pub fn write_anlz_ext(
     let memory_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number == 0).collect();
 
     // Section order must match rekordbox: PPTH → PWV3 → PCOB → PCOB → PCO2 → PCO2 → PQT2 → PWV5 → PWV4 → PVB2
+    let duration_secs = track.duration_secs;
     let path_section = build_path_section(&track.usb_path);
-    let pwv3_section = build_color_preview_section(analysis);
+    let pwv3_section = build_color_preview_section(analysis, duration_secs);
     let cue_section_1 = build_cue_section(1, &[]);             // EXT PCOBs are always empty
     let cue_section_2 = build_cue_section(0, &[]);             // actual cues go in PCO2
     let cue_ext_1 = build_cue_extended_section(1, &hot_cues);
     let cue_ext_2 = build_cue_extended_section(0, &memory_cues);
     let pqt2_section = build_beat_grid_ext_section(analysis);
-    let pwv5_section = build_color_detail_section(analysis);
+    let pwv5_section = build_color_detail_section(analysis, duration_secs);
     let pwv4_section = build_color_waveform_section(analysis);
     let pvb2_section = build_vbr_ext_section();
 
@@ -208,11 +209,12 @@ pub fn write_anlz_ext(
     Ok(())
 }
 
-/// PWV3 section: color preview waveform (51200 entries, 1 byte each).
-/// Each byte: bits 5-7 = color (frequency band), bits 0-4 = height.
-fn build_color_preview_section(analysis: &AnalysisResult) -> Vec<u8> {
+/// PWV3 section: color preview waveform (variable entries, 1 byte each).
+/// Entry count = duration_secs * 150 to match rekordbox's resolution.
+/// Each byte: bits 7-5 = color (7=white/full-spectrum), bits 4-0 = height.
+fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let section_header_len: u32 = 24;
-    let entry_count: u32 = 51200; // 0xC800
+    let entry_count: u32 = (duration_secs * 150.0).round() as u32;
     let section_total_len = section_header_len + entry_count;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
@@ -223,22 +225,23 @@ fn build_color_preview_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf.extend_from_slice(&entry_count.to_be_bytes());        // data length
     buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());     // unknown fields
 
-    // Generate color waveform from PWAV data by interpolating 400 → 51200 entries
-    for i in 0..51200u32 {
-        let pwav_idx = (i * 400 / 51200) as usize;
+    // Interpolate 400-entry PWAV data to fill the full track duration
+    for i in 0..entry_count {
+        let pwav_idx = (i * 400 / entry_count) as usize;
         let pwav_byte = analysis.waveform.data[pwav_idx];
         let height = pwav_byte & 0x1F; // 5-bit height from PWAV
-        let color: u8 = 3 << 5;        // green (mid-frequency) as default color
+        let color: u8 = 7 << 5;        // 0xe0 = white/full-spectrum (matches rekordbox)
         buf.push(color | height);
     }
 
     buf
 }
 
-/// PWV5 section: detailed color waveform (51200 entries, 2 bytes each).
-fn build_color_detail_section(analysis: &AnalysisResult) -> Vec<u8> {
+/// PWV5 section: detailed color waveform (variable entries, 2 bytes each).
+/// Entry count matches PWV3 (duration_secs * 150).
+fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let section_header_len: u32 = 24;
-    let num_entries: u32 = 51200;
+    let num_entries: u32 = (duration_secs * 150.0).round() as u32;
     let data_len = num_entries * 2;
     let section_total_len = section_header_len + data_len;
 
@@ -248,16 +251,18 @@ fn build_color_detail_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf.extend_from_slice(&section_total_len.to_be_bytes());
     buf.extend_from_slice(&2u32.to_be_bytes());               // bytes per entry
     buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
-    buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (from BLAU)
+    buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (confirmed from rekordbox)
 
-    // Generate 2-byte entries from PWAV data
-    for i in 0..51200u32 {
-        let pwav_idx = (i * 400 / 51200) as usize;
+    // Generate 2-byte entries from PWAV data.
+    // Byte 0: amplitude scaled to 0-255 range (rekordbox format).
+    // Byte 1: 0x80 (observed constant in rekordbox exports).
+    for i in 0..num_entries {
+        let pwav_idx = (i * 400 / num_entries) as usize;
         let pwav_byte = analysis.waveform.data[pwav_idx];
-        let height = pwav_byte & 0x1F;
-        // Byte 0: height info, Byte 1: color/intensity info
-        buf.push(height);
-        buf.push(0x60 | (height >> 1)); // simple color encoding
+        let height = pwav_byte & 0x1F; // 5-bit height (0-31)
+        let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
+        buf.push(amplitude);
+        buf.push(0x80); // constant second byte observed in rekordbox
     }
 
     buf
@@ -323,7 +328,7 @@ fn build_cue_extended_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
         buf.extend_from_slice(&cue.time_ms.to_be_bytes());          // 0x14: time_ms
         buf.extend_from_slice(&loop_time.to_be_bytes());            // 0x18: loop_time
         buf.extend_from_slice(&0x0001u16.to_be_bytes());            // 0x1C: unknown
-        buf.extend_from_slice(&[0u8; 46]);                          // 0x1E: remaining (color/label, zeros for now)
+        buf.extend_from_slice(&[0u8; 58]);                          // 0x1E: remaining (color/label/padding, zeros)
     }
 
     buf

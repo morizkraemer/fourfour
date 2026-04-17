@@ -21,6 +21,8 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    println!("pioneer-usb-writer v{}", pioneer_usb_writer::VERSION);
+
     // Step 1: Scan all input directories
     let mut all_tracks = Vec::new();
     let mut playlists = Vec::new();
