@@ -100,7 +100,7 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── Track panel ── */
 #track-panel {
-    flex: 0 0 70%;
+    flex: 0 0 40%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -159,9 +159,77 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .empty-row td { color: var(--text-dim); text-align: center; padding: 32px; cursor: default; }
 
+/* ── USB panel ── */
+#usb-panel {
+    flex: 0 0 35%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+}
+
+#usb-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#usb-track-count {
+    font-weight: 400;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+#usb-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+#usb-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#usb-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--bg2);
+    color: var(--text-dim);
+    font-weight: 600;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+#usb-table tbody tr {
+    border-bottom: 1px solid var(--border);
+}
+
+#usb-table td {
+    padding: 5px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 0;
+}
+
 /* ── Playlist panel ── */
 #playlist-panel {
-    flex: 0 0 30%;
+    flex: 0 0 25%;
     display: flex;
     flex-direction: column;
     overflow: hidden;

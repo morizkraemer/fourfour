@@ -12,6 +12,7 @@ let outputDir = null;
 let nextPlaylistId = 1;
 let analyzing = false;
 let syncing = false;
+let usbTracks = [];
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
@@ -53,6 +54,7 @@ async function init() {
         hideProgress();
         syncing = false;
         setButtonStates();
+        loadUsbContents();
         alert('USB write complete!');
     });
 }
@@ -82,6 +84,28 @@ async function loadVolumes() {
 
 function selectVolume(path) {
     outputDir = path || null;
+    if (outputDir) {
+        loadUsbContents();
+    } else {
+        usbTracks = [];
+        renderUsbTracks();
+    }
+}
+
+async function loadUsbContents() {
+    if (!outputDir) return;
+    try {
+        const result = await invoke('read_usb_state', { path: outputDir });
+        if (result) {
+            usbTracks = result.tracks;
+        } else {
+            usbTracks = [];
+        }
+    } catch (err) {
+        console.error('read_usb_state failed:', err);
+        usbTracks = [];
+    }
+    renderUsbTracks();
 }
 
 async function ejectVolume() {
@@ -107,7 +131,7 @@ async function wipeUsb() {
     dialog.onclose = () => {
         if (dialog.returnValue !== 'ok') return;
         invoke('wipe_usb', { path: outputDir })
-            .then(() => { alert('USB wiped successfully.'); })
+            .then(() => { usbTracks = []; renderUsbTracks(); alert('USB wiped successfully.'); })
             .catch(err => { alert('Wipe failed: ' + err); });
     };
 }
@@ -315,6 +339,38 @@ function renderTracks() {
             <td class="col-bpm">${bpm}</td>
             <td class="col-key">${key}</td>
             <td class="col-cues">${cues}</td>
+            <td class="col-dur">${dur}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = rows.join('');
+}
+
+// ── Render: USB tracks ────────────────────────────────────────────────────
+function renderUsbTracks() {
+    const tbody = document.getElementById('usb-tbody');
+    const countEl = document.getElementById('usb-track-count');
+
+    if (usbTracks.length === 0) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="5">' +
+            (outputDir ? 'No OneLibrary database found on this volume' : 'Select a USB volume to view contents') +
+            '</td></tr>';
+        countEl.textContent = '';
+        return;
+    }
+
+    countEl.textContent = usbTracks.length === 1 ? '1 track' : usbTracks.length + ' tracks';
+
+    const rows = usbTracks.map(t => {
+        const title = esc(t.title || '—');
+        const artist = esc(t.artist || '—');
+        const bpm = t.bpm > 0 ? t.bpm.toFixed(1) : '—';
+        const key = t.key ? esc(t.key) : '—';
+        const dur = formatDuration(t.duration);
+        return `<tr>
+            <td class="col-title">${title}</td>
+            <td class="col-artist">${artist}</td>
+            <td class="col-bpm">${bpm}</td>
+            <td class="col-key">${key}</td>
             <td class="col-dur">${dur}</td>
         </tr>`;
     });

@@ -439,6 +439,76 @@ fn app_version() -> String {
 }
 
 // ---------------------------------------------------------------------------
+// USB state reading
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct UsbTrackInfo {
+    id: u32,
+    title: String,
+    artist: String,
+    album: String,
+    genre: String,
+    key: String,
+    bpm: f64,
+    duration: f64,
+    usb_path: String,
+}
+
+#[derive(Serialize)]
+struct UsbPlaylistInfo {
+    id: u32,
+    name: String,
+    track_count: usize,
+}
+
+#[derive(Serialize)]
+struct UsbStateResponse {
+    tracks: Vec<UsbTrackInfo>,
+    playlists: Vec<UsbPlaylistInfo>,
+}
+
+/// Read the existing Pioneer USB library state from the OneLibrary database.
+/// Returns `None` if no `exportLibrary.db` is found at the expected path.
+#[tauri::command]
+fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, String> {
+    let state = pioneer_usb_writer::writer::onelibrary::read_usb_state(Path::new(&path))
+        .map_err(|e| e.to_string())?;
+
+    let Some(existing) = state else {
+        return Ok(None);
+    };
+
+    let tracks = existing
+        .tracks
+        .into_iter()
+        .map(|track| UsbTrackInfo {
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            genre: track.genre,
+            key: track.key,
+            bpm: track.tempo as f64 / 100.0,
+            duration: track.duration_secs,
+            usb_path: track.usb_path,
+        })
+        .collect();
+
+    let playlists = existing
+        .playlists
+        .into_iter()
+        .map(|playlist| UsbPlaylistInfo {
+            id: playlist.id,
+            name: playlist.name,
+            track_count: playlist.track_ids.len(),
+        })
+        .collect();
+
+    Ok(Some(UsbStateResponse { tracks, playlists }))
+}
+
+// ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
 
@@ -549,6 +619,7 @@ fn main() {
             save_state,
             load_state,
             app_version,
+            read_usb_state,
         ])
         .setup(|app| {
             // Ensure the window is positioned on the primary monitor and focused.

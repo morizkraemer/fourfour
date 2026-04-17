@@ -60,7 +60,31 @@
                 </div>
             </div>
 
-            <!-- Playlist sidebar (right 30%) -->
+            <!-- USB contents (middle 35%) -->
+            <div id="usb-panel">
+                <div id="usb-header">
+                    <span>USB Contents</span>
+                    <span id="usb-track-count"></span>
+                </div>
+                <div id="usb-table-wrap">
+                    <table id="usb-table">
+                        <thead>
+                            <tr>
+                                <th class="col-title">Title</th>
+                                <th class="col-artist">Artist</th>
+                                <th class="col-bpm">BPM</th>
+                                <th class="col-key">Key</th>
+                                <th class="col-dur">Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usb-tbody">
+                            <tr class="empty-row"><td colspan="5">Select a USB volume to view contents</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Playlist sidebar (right 25%) -->
             <div id="playlist-panel">
                 <div id="playlist-actions">
                     <span id="selection-count">0 selected</span>
