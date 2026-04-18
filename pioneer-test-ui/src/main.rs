@@ -5,14 +5,14 @@ mod dto;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_dialog::DialogExt;
 
 mod analyzer;
 
+use pioneer_library::LocalLibrary;
 use pioneer_usb_writer::models;
-use pioneer_usb_writer::{scanner, writer};
+use pioneer_usb_writer::scanner;
 
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 
@@ -20,54 +20,83 @@ use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 // Shared application state
 // ---------------------------------------------------------------------------
 
-struct AppState {
-    tracks: Vec<models::Track>,
-    /// Parallel to `tracks` — `None` means "not yet analyzed".
-    analyses: Vec<Option<models::AnalysisResult>>,
-    next_id: u32,
-}
+type SharedLibrary = Arc<Mutex<LocalLibrary>>;
 
-type SharedState = Arc<Mutex<AppState>>;
+/// Build TrackInfo list from the library's tracks + flags.
+fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
+    let rows = lib.get_all_tracks_with_flags().map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|(track, has_artwork, _has_analysis, has_cues)| TrackInfo {
+            id: track.id,
+            source_path: track.source_path.to_string_lossy().to_string(),
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            genre: track.genre,
+            tempo: track.tempo,
+            key: track.key,
+            duration_secs: track.duration_secs,
+            bitrate: track.bitrate,
+            file_size: track.file_size,
+            has_artwork,
+            has_cues,
+        })
+        .collect())
+}
 
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
-/// Scan a directory for audio files and add them to the state.
+/// Scan a directory for audio files and add them to the library.
 #[tauri::command]
 fn scan_directory(
     path: String,
-    state: State<'_, SharedState>,
+    state: State<'_, SharedLibrary>,
 ) -> Result<Vec<TrackInfo>, String> {
     let dir = Path::new(&path);
-    let mut scanned = scanner::scan_directory(dir).map_err(|e| e.to_string())?;
+    let scanned = scanner::scan_directory(dir).map_err(|e| e.to_string())?;
 
-    let mut st = state.lock().map_err(|e| e.to_string())?;
+    let lib = state.lock().map_err(|e| e.to_string())?;
 
-    // Assign IDs from the global counter so they don't collide with
-    // previously loaded tracks.
-    for track in &mut scanned {
-        track.id = st.next_id;
-        st.next_id += 1;
+    let mut added = Vec::new();
+    for track in &scanned {
+        // Skip tracks already in the library
+        if lib
+            .track_exists_by_path(&track.source_path)
+            .map_err(|e| e.to_string())?
+        {
+            continue;
+        }
+        let id = lib.add_track(track).map_err(|e| e.to_string())?;
+        let has_artwork = track.artwork.is_some();
+        added.push(TrackInfo {
+            id: id as u32,
+            source_path: track.source_path.to_string_lossy().to_string(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            genre: track.genre.clone(),
+            tempo: track.tempo,
+            key: track.key.clone(),
+            duration_secs: track.duration_secs,
+            bitrate: track.bitrate,
+            file_size: track.file_size,
+            has_artwork,
+            has_cues: false,
+        });
     }
 
-    let infos: Vec<TrackInfo> = scanned.iter().map(TrackInfo::from).collect();
-
-    // Push into shared state with empty analyses.
-    for track in scanned {
-        st.tracks.push(track);
-        st.analyses.push(None);
-    }
-
-    Ok(infos)
+    Ok(added)
 }
 
-/// Scan specific files and/or folders and add them to the state.
+/// Scan specific files and/or folders and add them to the library.
 /// Directories are recursed into via scan_directory; files are scanned directly.
 #[tauri::command]
 fn scan_files(
     paths: Vec<String>,
-    state: State<'_, SharedState>,
+    state: State<'_, SharedLibrary>,
 ) -> Result<Vec<TrackInfo>, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut dir_tracks: Vec<models::Track> = Vec::new();
@@ -75,9 +104,7 @@ fn scan_files(
     for p in &paths {
         let pb = PathBuf::from(p);
         if pb.is_dir() {
-            let mut found = scanner::scan_directory(&pb).map_err(|e| e.to_string())?;
-            // IDs will be reassigned below; zero them out to avoid conflicts
-            for t in &mut found { t.id = 0; }
+            let found = scanner::scan_directory(&pb).map_err(|e| e.to_string())?;
             dir_tracks.extend(found);
         } else {
             files.push(pb);
@@ -87,52 +114,66 @@ fn scan_files(
     let mut scanned = scanner::scan_files(&files).map_err(|e| e.to_string())?;
     scanned.extend(dir_tracks);
 
-    let mut st = state.lock().map_err(|e| e.to_string())?;
+    let lib = state.lock().map_err(|e| e.to_string())?;
 
-    for track in &mut scanned {
-        track.id = st.next_id;
-        st.next_id += 1;
+    let mut added = Vec::new();
+    for track in &scanned {
+        if lib
+            .track_exists_by_path(&track.source_path)
+            .map_err(|e| e.to_string())?
+        {
+            continue;
+        }
+        let id = lib.add_track(track).map_err(|e| e.to_string())?;
+        let has_artwork = track.artwork.is_some();
+        added.push(TrackInfo {
+            id: id as u32,
+            source_path: track.source_path.to_string_lossy().to_string(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            genre: track.genre.clone(),
+            tempo: track.tempo,
+            key: track.key.clone(),
+            duration_secs: track.duration_secs,
+            bitrate: track.bitrate,
+            file_size: track.file_size,
+            has_artwork,
+            has_cues: false,
+        });
     }
 
-    let infos: Vec<TrackInfo> = scanned.iter().map(TrackInfo::from).collect();
-
-    for track in scanned {
-        st.tracks.push(track);
-        st.analyses.push(None);
-    }
-
-    Ok(infos)
+    Ok(added)
 }
 
 /// Analyze all tracks that have not yet been analyzed.
 ///
 /// Emits `analysis-progress` events so the frontend can show a progress bar.
 /// Returns the full (updated) track list.
-///
-/// Runs each track analysis on a blocking thread so the Tauri async runtime
-/// stays responsive (progress events keep flowing, macOS won't kill the app).
 #[tauri::command]
 async fn analyze_tracks(
     app: AppHandle,
-    state: State<'_, SharedState>,
+    state: State<'_, SharedLibrary>,
 ) -> Result<Vec<TrackInfo>, String> {
-    let shared: SharedState = state.inner().clone();
+    let shared: SharedLibrary = state.inner().clone();
 
     // 1. Collect the work we need to do while holding the lock briefly.
-    let pending: Vec<(usize, PathBuf)> = {
-        let st = shared.lock().map_err(|e| e.to_string())?;
-        st.analyses
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.is_none())
-            .map(|(i, _)| (i, st.tracks[i].source_path.clone()))
-            .collect()
+    let pending: Vec<(i64, PathBuf)> = {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
+        let mut work = Vec::with_capacity(unanalyzed_ids.len());
+        for id in unanalyzed_ids {
+            if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
+                work.push((id, track.source_path));
+            }
+        }
+        work
     };
 
     let total = pending.len() as u32;
 
     // 2. Run analysis on a blocking thread, one track at a time.
-    for (seq, (idx, source_path)) in pending.iter().enumerate() {
+    for (seq, (track_id, source_path)) in pending.iter().enumerate() {
         let current = seq as u32 + 1;
 
         let file_name = source_path
@@ -163,10 +204,16 @@ async fn analyze_tracks(
         match analysis_result {
             Ok(Ok(result)) => {
                 // 3. Lock briefly to store result and update track metadata.
-                let mut st = shared.lock().map_err(|e| e.to_string())?;
-                st.tracks[*idx].tempo = (result.bpm * 100.0) as u32;
-                st.tracks[*idx].key = result.key.clone();
-                st.analyses[*idx] = Some(result);
+                let lib = shared.lock().map_err(|e| e.to_string())?;
+                // Update track's tempo and key from analysis
+                if let Some(mut track) = lib.get_track(*track_id).map_err(|e| e.to_string())? {
+                    track.tempo = (result.bpm * 100.0) as u32;
+                    track.key = result.key.clone();
+                    lib.update_track(*track_id, &track)
+                        .map_err(|e| e.to_string())?;
+                }
+                lib.set_analysis(*track_id, &result)
+                    .map_err(|e| e.to_string())?;
             }
             Ok(Err(e)) => {
                 eprintln!(
@@ -176,91 +223,69 @@ async fn analyze_tracks(
                 );
             }
             Err(_panic) => {
-                eprintln!(
-                    "Warning: analysis panicked for {}",
-                    source_path.display(),
-                );
+                eprintln!("Warning: analysis panicked for {}", source_path.display());
             }
         }
     }
 
-    // 4. Return the full updated track list (with cue info).
-    let st = shared.lock().map_err(|e| e.to_string())?;
-    let infos: Vec<TrackInfo> = st.tracks.iter().zip(st.analyses.iter())
-        .map(|(t, a)| TrackInfo::from_track_and_analysis(t, a.as_ref()))
-        .collect();
-    Ok(infos)
+    // 4. Return the full updated track list.
+    let lib = shared.lock().map_err(|e| e.to_string())?;
+    build_track_infos(&lib)
 }
 
-/// Write the Pioneer USB structure to the given output directory.
+/// Incrementally sync the Pioneer USB structure to the given output directory.
 ///
 /// Only tracks that have been analyzed are included because the writer
-/// requires an `AnalysisResult` for every track.
+/// requires an `AnalysisResult` for every track. Unchanged tracks are
+/// skipped (no audio re-copy), and removed tracks are cleaned up.
 #[tauri::command]
 fn write_usb(
     output_dir: String,
     playlists: Vec<PlaylistInput>,
     app: AppHandle,
-    state: State<'_, SharedState>,
-) -> Result<(), String> {
-    let st = state.lock().map_err(|e| e.to_string())?;
+    state: State<'_, SharedLibrary>,
+) -> Result<models::SyncReport, String> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
 
-    // Collect only analyzed tracks (writer needs parallel slices).
-    let mut analyzed_tracks: Vec<models::Track> = Vec::new();
-    let mut analyzed_results: Vec<models::AnalysisResult> = Vec::new();
-
-    for (track, analysis) in st.tracks.iter().zip(st.analyses.iter()) {
-        if let Some(a) = analysis {
-            analyzed_tracks.push(track.clone());
-            analyzed_results.push(a.clone());
-        }
-    }
-
-    // Convert PlaylistInput -> models::Playlist
-    let model_playlists: Vec<models::Playlist> = playlists
-        .into_iter()
-        .map(|p| models::Playlist {
-            id: p.id,
-            name: p.name,
-            track_ids: p.track_ids,
-        })
-        .collect();
-
-    // Drop the lock before the potentially long write operation.
-    drop(st);
+    // Save playlists to library before writing
+    sync_playlists_to_library(&lib, &playlists)?;
 
     let out = Path::new(&output_dir);
-    writer::filesystem::write_usb(out, &analyzed_tracks, &analyzed_results, &model_playlists)
-        .map_err(|e| e.to_string())?;
+    let report = lib.sync_usb(out).map_err(|e| e.to_string())?;
 
-    app.emit(
-        "write-complete",
-        ProgressPayload {
-            current: 1,
-            total: 1,
-            message: "USB write complete".to_string(),
-        },
-    )
-    .ok();
+    app.emit("write-complete", &report).ok();
 
+    Ok(report)
+}
+
+/// Sync frontend playlists into the library.
+fn sync_playlists_to_library(
+    lib: &LocalLibrary,
+    playlists: &[PlaylistInput],
+) -> Result<(), String> {
+    // Delete all existing playlists and recreate from frontend state.
+    let existing = lib.get_all_playlists().map_err(|e| e.to_string())?;
+    for pl in &existing {
+        lib.delete_playlist(pl.id as i64)
+            .map_err(|e| e.to_string())?;
+    }
+    for pl in playlists {
+        let id = lib
+            .create_playlist(&pl.name)
+            .map_err(|e| e.to_string())?;
+        let track_ids: Vec<i64> = pl.track_ids.iter().map(|&tid| tid as i64).collect();
+        lib.set_playlist_tracks(id, &track_ids)
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
-/// Remove tracks by ID from the shared state and all playlists.
+/// Remove tracks by ID from the library.
 #[tauri::command]
-fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedState>) -> Result<(), String> {
-    let id_set: std::collections::HashSet<u32> = ids.into_iter().collect();
-    let mut st = state.lock().map_err(|e| e.to_string())?;
-    let mut i = 0;
-    while i < st.tracks.len() {
-        if id_set.contains(&st.tracks[i].id) {
-            st.tracks.remove(i);
-            st.analyses.remove(i);
-        } else {
-            i += 1;
-        }
-    }
-    Ok(())
+fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    let ids_i64: Vec<i64> = ids.into_iter().map(|id| id as i64).collect();
+    lib.remove_tracks(&ids_i64).map_err(|e| e.to_string())
 }
 
 /// Set 2 test hot cues (A at 1:00, B at 1:30) on the selected tracks.
@@ -268,18 +293,18 @@ fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedState>) -> Result<(), Str
 #[tauri::command]
 fn set_test_cues(
     ids: Vec<u32>,
-    state: State<'_, SharedState>,
+    state: State<'_, SharedLibrary>,
 ) -> Result<Vec<TrackInfo>, String> {
-    let id_set: std::collections::HashSet<u32> = ids.into_iter().collect();
-    let mut st = state.lock().map_err(|e| e.to_string())?;
+    let lib = state.lock().map_err(|e| e.to_string())?;
 
-    for i in 0..st.tracks.len() {
-        if !id_set.contains(&st.tracks[i].id) {
-            continue;
-        }
-        let Some(ref existing) = st.analyses[i] else {
+    for &track_id in &ids {
+        let Some(existing) = lib
+            .get_analysis(track_id as i64)
+            .map_err(|e| e.to_string())?
+        else {
             continue;
         };
+
         let new_analysis = models::AnalysisResult {
             cue_points: vec![
                 models::CuePoint {
@@ -298,37 +323,16 @@ fn set_test_cues(
                     loop_time_ms: None,
                 },
             ],
-            beat_grid: existing.beat_grid.clone(),
-            waveform: existing.waveform.clone(),
+            beat_grid: existing.beat_grid,
+            waveform: existing.waveform,
             bpm: existing.bpm,
-            key: existing.key.clone(),
+            key: existing.key,
         };
-        st.analyses[i] = Some(new_analysis);
+        lib.set_analysis(track_id as i64, &new_analysis)
+            .map_err(|e| e.to_string())?;
     }
 
-    let infos: Vec<TrackInfo> = st.tracks.iter().zip(st.analyses.iter())
-        .map(|(t, a)| TrackInfo::from_track_and_analysis(t, a.as_ref()))
-        .collect();
-    Ok(infos)
-}
-
-/// Open a native folder-picker dialog and return the selected path.
-///
-/// Uses the blocking variant of the dialog plugin, which is safe to call from
-/// a Tauri command thread (commands do not run on the main thread).
-#[tauri::command]
-fn pick_directory(app: AppHandle) -> Result<Option<String>, String> {
-    let result = app.dialog().file().blocking_pick_folder();
-
-    match result {
-        Some(file_path) => {
-            let path_buf: PathBuf = file_path
-                .into_path()
-                .map_err(|e| format!("Invalid path: {e}"))?;
-            Ok(Some(path_buf.to_string_lossy().to_string()))
-        }
-        None => Ok(None),
-    }
+    build_track_infos(&lib)
 }
 
 /// List mounted volumes so the frontend can offer a target-drive picker.
@@ -362,7 +366,6 @@ fn get_mounted_volumes() -> Result<Vec<String>, String> {
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
-        // Fallback for Linux — list /media and /mnt
         let mut result = Vec::new();
         for dir in &["/media", "/mnt"] {
             let base = Path::new(dir);
@@ -474,7 +477,7 @@ struct UsbStateResponse {
 /// Returns `None` if no `exportLibrary.db` is found at the expected path.
 #[tauri::command]
 fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, String> {
-    let state = pioneer_usb_writer::writer::onelibrary::read_usb_state(Path::new(&path))
+    let state = pioneer_usb_writer::reader::read_usb_state(Path::new(&path))
         .map_err(|e| e.to_string())?;
 
     let Some(existing) = state else {
@@ -511,78 +514,112 @@ fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence
+// Persistence (backed by LocalLibrary — no more JSON)
 // ---------------------------------------------------------------------------
 
-/// Everything we write to disk.
-#[derive(Serialize, Deserialize)]
-struct PersistentState {
-    tracks: Vec<models::Track>,
-    analyses: Vec<Option<models::AnalysisResult>>,
-    playlists: Vec<PlaylistInput>,
-    next_id: u32,
-}
-
-fn state_file_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(dir.join("state.json"))
-}
-
-/// Save the current tracks, analyses, and playlists to disk.
+/// Save playlists to the library. Tracks are already persisted automatically.
 #[tauri::command]
 fn save_state(
     playlists: Vec<PlaylistInput>,
-    app: AppHandle,
-    state: State<'_, SharedState>,
+    _app: AppHandle,
+    state: State<'_, SharedLibrary>,
 ) -> Result<(), String> {
-    let st = state.lock().map_err(|e| e.to_string())?;
-    let persistent = PersistentState {
-        tracks: st.tracks.clone(),
-        analyses: st.analyses.clone(),
-        playlists,
-        next_id: st.next_id,
-    };
-    drop(st);
-
-    let path = state_file_path(&app)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    let json = serde_json::to_string(&persistent).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(())
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    sync_playlists_to_library(&lib, &playlists)
 }
 
-/// Load previously saved state from disk. Returns tracks + playlists for the
-/// frontend and repopulates the backend shared state.
+/// Load the library state. Returns all tracks and playlists.
 #[tauri::command]
 fn load_state(
-    app: AppHandle,
-    state: State<'_, SharedState>,
+    _app: AppHandle,
+    state: State<'_, SharedLibrary>,
 ) -> Result<LoadedState, String> {
-    let path = state_file_path(&app)?;
-    if !path.exists() {
-        return Ok(LoadedState {
-            tracks: Vec::new(),
-            playlists: Vec::new(),
-        });
-    }
+    let lib = state.lock().map_err(|e| e.to_string())?;
 
-    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let persistent: PersistentState =
-        serde_json::from_str(&json).map_err(|e| format!("Failed to parse saved state: {e}"))?;
+    let track_infos = build_track_infos(&lib)?;
 
-    let infos: Vec<TrackInfo> = persistent.tracks.iter().map(TrackInfo::from).collect();
-
-    let mut st = state.lock().map_err(|e| e.to_string())?;
-    st.tracks = persistent.tracks;
-    st.analyses = persistent.analyses;
-    st.next_id = persistent.next_id;
+    let playlists = lib
+        .get_all_playlists()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|pl| PlaylistInput {
+            id: pl.id,
+            name: pl.name,
+            track_ids: pl.track_ids,
+        })
+        .collect();
 
     Ok(LoadedState {
-        tracks: infos,
-        playlists: persistent.playlists,
+        tracks: track_infos,
+        playlists,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Library path management
+// ---------------------------------------------------------------------------
+
+/// Config file that remembers the user's chosen library path.
+fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("config.json"))
+}
+
+fn default_library_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("library.db"))
+}
+
+/// Read the stored library path from config, falling back to the default.
+fn read_library_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let cfg = config_path(app)?;
+    if cfg.exists() {
+        let json = std::fs::read_to_string(&cfg).map_err(|e| e.to_string())?;
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let Some(p) = val.get("library_path").and_then(|v| v.as_str()) {
+                return Ok(PathBuf::from(p));
+            }
+        }
+    }
+    default_library_path(app)
+}
+
+/// Save the library path to config.
+fn write_library_path(app: &AppHandle, path: &Path) -> Result<(), String> {
+    let cfg = config_path(app)?;
+    let json = serde_json::json!({ "library_path": path.to_string_lossy() });
+    std::fs::write(&cfg, json.to_string()).map_err(|e| e.to_string())
+}
+
+/// Return the path of the currently open library database.
+#[tauri::command]
+fn get_library_path(app: AppHandle) -> Result<String, String> {
+    let path = read_library_path(&app)?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// Open or create a library at the given directory path.
+/// Creates `library.db` inside the chosen directory and swaps the active library.
+#[tauri::command]
+fn change_library_path(
+    folder_path: String,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<String, String> {
+    let db_path = PathBuf::from(&folder_path).join("library.db");
+
+    let new_library = LocalLibrary::open(&db_path).map_err(|e| e.to_string())?;
+
+    // Swap the active library
+    let mut lib = state.lock().map_err(|e| e.to_string())?;
+    *lib = new_library;
+
+    // Remember the choice
+    write_library_path(&app, &db_path)?;
+
+    Ok(db_path.to_string_lossy().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -602,11 +639,6 @@ fn main() {
 
     tauri::Builder::default() // v0.1
         .plugin(tauri_plugin_dialog::init())
-        .manage(Arc::new(Mutex::new(AppState {
-            tracks: Vec::new(),
-            analyses: Vec::new(),
-            next_id: 1,
-        })))
         .invoke_handler(tauri::generate_handler![
             scan_directory,
             scan_files,
@@ -614,7 +646,6 @@ fn main() {
             write_usb,
             remove_tracks,
             set_test_cues,
-            pick_directory,
             get_mounted_volumes,
             eject_volume,
             wipe_usb,
@@ -622,11 +653,18 @@ fn main() {
             load_state,
             app_version,
             read_usb_state,
+            get_library_path,
+            change_library_path,
         ])
         .setup(|app| {
+            // Open (or create) the local library database at the stored/default path
+            let db_path = read_library_path(&app.handle())
+                .expect("Failed to determine library database path");
+            let library = LocalLibrary::open(&db_path)
+                .expect("Failed to open library database");
+            app.manage(Arc::new(Mutex::new(library)));
+
             // Ensure the window is positioned on the primary monitor and focused.
-            // This works around tiling window managers (e.g. AeroSpace) that may
-            // not recognise un-bundled binaries and leave the window off-screen.
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_always_on_top(true);
                 let _ = window.center();
@@ -635,14 +673,12 @@ fn main() {
             }
 
             // Activate the app so macOS sends keyboard input to our window
-            // (always_on_top alone makes the window float but keystrokes go to
-            // whichever app was frontmost before)
             #[cfg(target_os = "macos")]
             {
                 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
                 let current_app = NSRunningApplication::currentApplication();
                 let _ = current_app.activateWithOptions(
-                    NSApplicationActivationOptions::ActivateIgnoringOtherApps
+                    NSApplicationActivationOptions::ActivateIgnoringOtherApps,
                 );
             }
             Ok(())

@@ -49,9 +49,9 @@ writer::filesystem::write_usb(
 ### Reading USB contents
 
 ```rust
-use pioneer_usb_writer::writer::onelibrary;
+use pioneer_usb_writer::reader;
 
-if let Some(state) = onelibrary::read_usb_state(Path::new("/Volumes/USB"))? {
+if let Some(state) = reader::read_usb_state(Path::new("/Volumes/USB"))? {
     for track in &state.tracks {
         println!("{} — {}", track.artist, track.title);
     }
@@ -59,6 +59,20 @@ if let Some(state) = onelibrary::read_usb_state(Path::new("/Volumes/USB"))? {
         println!("Playlist '{}': {} tracks", playlist.name, playlist.track_ids.len());
     }
 }
+```
+
+### Importing from Rekordbox
+
+```rust
+use pioneer_usb_writer::reader::masterdb;
+
+let import = masterdb::read_masterdb(Path::new(
+    "~/Library/Pioneer/rekordbox/master.db"
+))?;
+// import.tracks      — Vec<Track> with sequential 1-based IDs
+// import.cue_points  — Vec<Vec<CuePoint>> parallel to tracks
+// import.playlists   — Vec<Playlist> (leaf playlists only)
+// import.artwork_paths — Vec<Option<PathBuf>> parallel to tracks
 ```
 
 ## Analysis Interface
@@ -132,4 +146,3 @@ Both formats are written on every sync to maximize hardware compatibility.
 
 - **Color waveforms** are placeholder (solid green) — no spectral analysis yet
 - **Album-artist mapping** uses the first artist encountered per album; compilations show a single artist
-- **No incremental sync** — the full database is rewritten each time

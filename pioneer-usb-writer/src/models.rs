@@ -178,3 +178,57 @@ pub struct ExistingUsbState {
     /// Next available playlist ID to use when appending new playlists (max existing ID + 1).
     pub next_playlist_id: u32,
 }
+
+/// What [`sync_usb`](crate::writer::filesystem::sync_usb) will do for a given track.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SyncAction {
+    /// Track not on USB — copy audio, write ANLZ, write artwork.
+    Add,
+    /// Track on USB with identical file + metadata — skip all I/O.
+    Skip,
+    /// Track on USB, metadata or analysis changed but audio file unchanged — skip audio, rewrite ANLZ + artwork.
+    Update,
+    /// Track on USB but audio file changed (different file_size) — recopy audio, rewrite ANLZ + artwork.
+    Replace,
+}
+
+/// A single entry in the sync plan linking a caller's track + analysis to a sync action and stable USB ID.
+#[derive(Debug)]
+pub struct SyncEntry<'a> {
+    /// Reference to the caller's Track.
+    pub track: &'a Track,
+    /// Reference to the caller's AnalysisResult.
+    pub analysis: &'a AnalysisResult,
+    /// What file operation to perform.
+    pub action: SyncAction,
+    /// The stable USB ID (preserved from existing or newly allocated).
+    pub usb_id: u32,
+}
+
+/// The full sync plan computed by diffing the caller's tracks against existing USB state.
+#[derive(Debug)]
+pub struct SyncPlan<'a> {
+    /// Entries for tracks that will be on the USB after sync.
+    pub entries: Vec<SyncEntry<'a>>,
+    /// Tracks currently on USB that are NOT in the caller's list — will be deleted.
+    pub removals: Vec<ExistingTrack>,
+    /// Mapping from caller-assigned track.id to the final USB ID.
+    pub id_remap: std::collections::HashMap<u32, u32>,
+    /// Playlists with track_ids remapped to stable USB IDs.
+    pub playlists: Vec<Playlist>,
+}
+
+/// Summary report returned by [`sync_usb`](crate::writer::filesystem::sync_usb).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncReport {
+    /// Number of new tracks added to the USB.
+    pub tracks_added: u32,
+    /// Number of tracks with metadata/analysis changes (audio file unchanged).
+    pub tracks_updated: u32,
+    /// Number of tracks whose audio file was replaced (different file_size).
+    pub tracks_replaced: u32,
+    /// Number of tracks removed from the USB.
+    pub tracks_removed: u32,
+    /// Number of tracks that were already up-to-date.
+    pub tracks_unchanged: u32,
+}

@@ -26,7 +26,8 @@ As of rekordbox 7.x, USB exports contain **both** the legacy format and the OneL
 7. [CDJ-3000 Hardware Behavior](#7-cdj-3000-hardware-behavior)
 8. [Debugging Methodology](#8-debugging-methodology)
 9. [OneLibrary Format (exportLibrary.db)](#9-onelibrary-format-exportlibrarydb)
-10. [References](#10-references)
+10. [Rekordbox Master Database (master.db)](#10-rekordbox-master-database-masterdb)
+11. [References](#11-references)
 
 ---
 
@@ -679,7 +680,259 @@ A page-based file (same 4096-byte page size as `export.pdb`) but with a differen
 
 ---
 
-## 10. References
+## 10. Rekordbox Master Database (master.db)
+
+The Rekordbox master database is the local library store on the user's computer — the source of truth that Rekordbox syncs to USB. Unlike the USB export format (which uses both DeviceSQL and OneLibrary), the master database is a single **SQLCipher-encrypted SQLite** file.
+
+### Location
+
+**macOS:** `~/Library/Pioneer/rekordbox/master.db`
+
+**Windows:** `%APPDATA%\Pioneer\rekordbox\master.db`
+
+Backup copies are rotated automatically:
+- `master.backup.db` (most recent)
+- `master.backup2.db`
+- `master.backup3.db`
+
+### Supporting Files in Same Directory
+
+```
+master.db                  — Main library database (SQLCipher encrypted)
+product.db                 — Product/device info (same encryption)
+datafile.edb               — Genre/tag/color configuration (Pioneer proprietary binary)
+ExtData.edb                — Extended tag data (Pioneer proprietary binary)
+networkAnalyze6.db         — Network analysis cache (unencrypted SQLite)
+networkRecommend.db        — Network recommendation cache (unencrypted SQLite)
+masterPlaylists6.xml       — Playlist tree structure (plain XML)
+automixPlaylist6.xml       — Automix settings (plain XML)
+share/PIONEER/Artwork/     — Cached artwork thumbnails
+Exceptions/ExceptioinInfo  — Exception/crash data
+```
+
+### Encryption
+
+The database uses **SQLCipher** with default v4 parameters (no custom KDF iterations, page size, etc.).
+
+**Decryption key:** `402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497`
+
+This key is **static across all Rekordbox 6.x and 7.x installations** — it is not per-device.
+
+### How the Key Was Found
+
+1. **Find the device password (dp).** Rekordbox stores a base64-encoded "device password" in the agent configuration:
+   ```
+   ~/Library/Application Support/Pioneer/rekordboxAgent/storage/options.json
+   ```
+   The `dp` field contains a base64-encoded 64-byte value. This is used for device pairing, **not** directly as the database key.
+
+2. **Find the obfuscated key.** The open-source project `pyrekordbox` ships a hardcoded blob that contains the actual SQLCipher key, obfuscated with base85 encoding + XOR + zlib compression:
+
+   ```python
+   from pyrekordbox.db6.database import BLOB
+   from pyrekordbox.utils import deobfuscate
+
+   key = deobfuscate(BLOB)
+   # key = "402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497"
+   ```
+
+   The deobfuscation uses:
+   - XOR key: `b"657f48f84c437cc1"` (16 bytes, repeated cyclically)
+   - Base85 decode the blob
+   - XOR with the key
+   - Zlib decompress
+
+3. **Open the database.** With `rusqlite` (Rust, `bundled-sqlcipher` feature):
+   ```rust
+   let conn = Connection::open("master.db")?;
+   conn.execute_batch("PRAGMA key='402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497'")?;
+   conn.execute_batch("SELECT count(*) FROM sqlite_master")?; // verifies decryption
+   ```
+
+   Or with Python (`sqlcipher3`):
+   ```python
+   import sqlcipher3
+   conn = sqlcipher3.connect("master.db")
+   conn.execute("PRAGMA key='402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497'")
+   conn.execute("SELECT * FROM djmdContent")
+   ```
+
+### Database Schema — 47 Tables
+
+The master database uses a significantly different schema from the USB export format. Notable differences:
+- All IDs are **VARCHAR UUIDs** (not sequential integers like the USB export)
+- Tables are prefixed with `djmd` (DJ Music Database)
+- Extensive cloud sync fields (`rb_data_status`, `rb_local_synced`, `usn`, etc.)
+- `contentFile` and `imageFile` tables track file paths and hashes for cloud sync
+
+#### Core Tables
+
+| Table | Purpose | Key Columns |
+|---|---|---|
+| `djmdContent` | All tracks (649 in our library) | Title, ArtistID, AlbumID, GenreID, BPM, Length, TrackNo, BitRate, KeyID, ColorID, Rating, FolderPath, FileNameL, ImagePath, AnalysisDataPath |
+| `djmdArtist` | Artists (590) | Name, SearchStr |
+| `djmdAlbum` | Albums (600) | Name, AlbumArtistID, ImagePath, Compilation |
+| `djmdGenre` | Genres (24) | Name |
+| `djmdLabel` | Labels (382) | Name |
+| `djmdKey` | Musical keys (24) | ScaleName, Seq |
+| `djmdColor` | Cue colors (8) | ColorCode, SortKey, Commnt |
+| `djmdPlaylist` | Playlists/tree (28) | Name, Attribute, ParentID, SmartList |
+| `djmdSongPlaylist` | Playlist entries (642) | PlaylistID, ContentID, TrackNo |
+| `djmdHistory` | Play history | Name, Attribute, ParentID, DateCreated |
+| `djmdCue` | Cue points | ContentID, InMsec, OutMsec, Kind, Color, Comment, ActiveLoop |
+| `djmdMixerParam` | Gain/peak settings | ContentID, GainHigh, GainLow, PeakHigh, PeakLow |
+
+#### File Management Tables
+
+| Table | Purpose |
+|---|---|
+| `contentFile` (2602) | Maps content to file paths, hashes, sizes — tracks cloud sync state |
+| `imageFile` | Artwork file paths and hashes |
+| `settingFile` | Settings file references |
+| `contentCue` | Cue point file data (cloud sync) |
+| `hotCueBanklistCue` | Hot cue bank file data |
+
+#### System Tables
+
+| Table | Purpose |
+|---|---|
+| `djmdProperty` | Database metadata (DBID, DBVersion, BaseDBDrive, DeviceID) |
+| `djmdDevice` | Device registration |
+| `agentRegistry` | Agent configuration key-value store |
+| `uuidIDMap` | UUID to numeric ID mapping |
+| `djmdMenuItems` / `djmdCategory` / `djmdSort` | Browser menu structure |
+
+#### djmdContent — Full Column List
+
+```sql
+CREATE TABLE djmdContent(
+    ID VARCHAR(255) PRIMARY KEY,
+    FolderPath VARCHAR(255),       -- Absolute path on disk
+    FileNameL VARCHAR(255),        -- Long filename
+    FileNameS VARCHAR(255),        -- Short filename
+    Title VARCHAR(255),
+    ArtistID VARCHAR(255),         -- FK -> djmdArtist
+    AlbumID VARCHAR(255),          -- FK -> djmdAlbum
+    GenreID VARCHAR(255),          -- FK -> djmdGenre
+    BPM INTEGER,                   -- BPM × 100 (same as USB export, e.g. 12990 = 129.90 BPM)
+    Length INTEGER,                -- Duration in seconds
+    TrackNo INTEGER,
+    BitRate INTEGER,
+    BitDepth INTEGER,
+    Commnt TEXT,
+    FileType INTEGER,              -- 1=MP3, 4=M4A, 5=FLAC, 11=WAV, 12=AIFF
+    Rating INTEGER,                -- 0-5 stars
+    ReleaseYear INTEGER,
+    RemixerID VARCHAR(255),
+    LabelID VARCHAR(255),
+    OrgArtistID VARCHAR(255),
+    KeyID VARCHAR(255),
+    StockDate VARCHAR(255),
+    ColorID VARCHAR(255),
+    DJPlayCount INTEGER,
+    ImagePath VARCHAR(255),
+    MasterDBID VARCHAR(255),
+    MasterSongID VARCHAR(255),
+    AnalysisDataPath VARCHAR(255), -- Absolute path to ANLZ analysis
+    SearchStr VARCHAR(255),
+    FileSize INTEGER,
+    DiscNo INTEGER,
+    ComposerID VARCHAR(255),
+    Subtitle VARCHAR(255),
+    SampleRate INTEGER,
+    DisableQuantize INTEGER,
+    Analysed INTEGER,
+    ReleaseDate VARCHAR(255),
+    DateCreated VARCHAR(255),
+    ContentLink INTEGER,
+    Tag VARCHAR(255),
+    ModifiedByRBM VARCHAR(255),
+    HotCueAutoLoad VARCHAR(255),
+    CueUpdated VARCHAR(255),
+    AnalysisUpdated VARCHAR(255),
+    TrackInfoUpdated VARCHAR(255),
+    Lyricist VARCHAR(255),
+    ISRC VARCHAR(255),
+    SamplerTrackInfo INTEGER,
+    SamplerPlayOffset INTEGER,
+    SamplerGain FLOAT,
+    VideoAssociate VARCHAR(255),
+    LyricStatus INTEGER,
+    ServiceID INTEGER,
+    OrgFolderPath VARCHAR(255),
+    -- Cloud sync fields
+    UUID VARCHAR(255),
+    rb_data_status INTEGER,
+    rb_local_data_status INTEGER,
+    rb_local_deleted TINYINT(1),
+    rb_local_synced TINYINT(1),
+    usn BIGINT,
+    rb_local_usn BIGINT,
+    created_at DATETIME,
+    updated_at DATETIME
+);
+```
+
+### Key Differences from USB Export Format
+
+| Aspect | master.db | USB export (OneLibrary) |
+|---|---|---|
+| IDs | VARCHAR UUID strings | Sequential integers |
+| BPM | Integer × 100 (e.g. 12990 = 129.90 BPM) — same as USB export | Integer × 100 (e.g. 13000) |
+| Paths | Absolute local paths | USB-relative paths |
+| Encryption | Key `402fd...08497` | Key `r8gdd...yqls` |
+| Schema | 47 tables with cloud sync | 22 tables, export-only |
+| Artwork | Referenced by absolute path | Embedded in `/PIONEER/Artwork/` |
+| Playlists | Self-referential tree with `ParentID` | Flat with `playlist_id_parent` |
+
+### Building a Tool That Reads master.db
+
+The minimal approach to read a Rekordbox library without Rekordbox running:
+
+```rust
+use rusqlite::{Connection, params};
+
+const MASTER_DB_KEY: &str = "402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497";
+
+fn open_master_db(path: &Path) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.execute_batch(&format!("PRAGMA key='{}'", MASTER_DB_KEY))?;
+    conn.execute_batch("SELECT count(*) FROM sqlite_master")?; // verify decryption
+    Ok(conn)
+}
+
+fn get_all_tracks(conn: &Connection) -> Result<Vec<Track>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.ID, c.Title, c.FolderPath, c.FileNameL, c.BPM, c.Length,
+                c.TrackNo, c.BitRate, c.FileSize, c.SampleRate, c.FileType,
+                c.Rating, c.KeyID, c.GenreID, c.ArtistID, c.AlbumID,
+                ar.Name as Artist, al.Name as Album, g.Name as Genre,
+                k.ScaleName as Key
+         FROM djmdContent c
+         LEFT JOIN djmdArtist ar ON c.ArtistID = ar.ID
+         LEFT JOIN djmdAlbum al ON c.AlbumID = al.ID
+         LEFT JOIN djmdGenre g ON c.GenreID = g.ID
+         LEFT JOIN djmdKey k ON c.KeyID = k.ID
+         ORDER BY c.ID"
+    )?;
+    // ... map rows to your track struct
+}
+```
+
+### Will the Key Change?
+
+No. The key has been stable across all Rekordbox 6.x and 7.x releases (2020–2026). Pioneer cannot rotate it without breaking every existing user's library. The only scenario where it would change is a major version migration (like the RB5→RB6 transition from XML to SQLCipher).
+
+### Caveats
+
+- **Do not open master.db while Rekordbox is running.** The database uses WAL mode and concurrent access can corrupt it.
+- **The `dp` value in `options.json` is NOT the database key.** It's a device pairing token for the rekordboxAgent.
+- **`product.db` uses the same encryption key** as `master.db`.
+- **Cloud sync fields** (`rb_data_status`, `rb_local_synced`, `usn`) should not be modified if you want Rekordbox to continue syncing.
+
+---
+
+## 11. References
 
 ### Existing Documentation (starting points)
 
@@ -707,6 +960,9 @@ Things not covered by any of the above:
 - OneLibrary exportLibrary.db decryption key and full schema (22 tables)
 - ANLZ .2EX file structure: PWV7 (full-res 3-band) and PWV6 (overview 3-band) tags
 - Dual-format requirement for supporting both legacy and new devices
+- Rekordbox master.db location, encryption key, and full schema (47 tables)
+- Key derivation from pyrekordbox obfuscated blob
+- master.db vs USB export format differences (UUIDs vs integers, BPM scaling, paths)
 
 ---
 

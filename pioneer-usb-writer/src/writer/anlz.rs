@@ -487,10 +487,17 @@ fn compute_anlz_path_hash(file_path: &str) -> (u16, u32) {
     (p_value, hash_result)
 }
 
+/// Compute the ANLZ base directory path from a USB-relative audio path.
+///
+/// Public version for use by sync cleanup where only the path string is available.
+pub fn anlz_dir_for_path(usb_path: &str) -> String {
+    let (p_value, hash_value) = compute_anlz_path_hash(usb_path);
+    format!("PIONEER/USBANLZ/P{:03X}/{:08X}", p_value, hash_value)
+}
+
 /// Compute the ANLZ base directory path for a track using Pioneer's hash algorithm.
 fn anlz_dir_for_track(track: &Track) -> String {
-    let (p_value, hash_value) = compute_anlz_path_hash(&track.usb_path);
-    format!("PIONEER/USBANLZ/P{:03X}/{:08X}", p_value, hash_value)
+    anlz_dir_for_path(&track.usb_path)
 }
 
 /// Return the USB-relative path to the `ANLZ0000.DAT` file for `track`

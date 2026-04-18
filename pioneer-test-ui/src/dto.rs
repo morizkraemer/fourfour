@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use pioneer_usb_writer::models;
 use pioneer_usb_writer::models::Track;
 
 /// Lightweight track info sent over the IPC boundary.
@@ -40,27 +39,6 @@ impl From<&Track> for TrackInfo {
             file_size: t.file_size,
             has_artwork: t.artwork.is_some(),
             has_cues: false,
-        }
-    }
-}
-
-impl TrackInfo {
-    /// Create from a Track + its analysis (to populate has_cues).
-    pub fn from_track_and_analysis(track: &Track, analysis: Option<&models::AnalysisResult>) -> Self {
-        Self {
-            id: track.id,
-            source_path: track.source_path.to_string_lossy().to_string(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: track.album.clone(),
-            genre: track.genre.clone(),
-            tempo: track.tempo,
-            key: track.key.clone(),
-            duration_secs: track.duration_secs,
-            bitrate: track.bitrate,
-            file_size: track.file_size,
-            has_artwork: track.artwork.is_some(),
-            has_cues: analysis.map(|a| !a.cue_points.is_empty()).unwrap_or(false),
         }
     }
 }

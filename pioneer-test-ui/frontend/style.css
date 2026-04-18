@@ -48,6 +48,34 @@ html, body {
 
 .toolbar-spacer { flex: 1; }
 
+/* ── Library path bar ── */
+#library-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 12px;
+    height: 24px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+#library-bar button {
+    font-size: 10px;
+    padding: 1px 6px;
+    min-height: 0;
+}
+#library-path {
+    font-family: var(--mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 600px;
+    direction: rtl;
+    text-align: left;
+}
+
 #toolbar label { color: var(--text-dim); font-size: 12px; }
 
 #usb-select {

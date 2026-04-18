@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["pioneer-usb-writer", "pioneer-test-ui"]
+members = ["pioneer-usb-writer", "pioneer-test-ui", "pioneer-library"]
 
 # Optimize heavy DSP/audio dependencies even in dev builds.
 # This keeps your own crate in debug (fast compiles) but makes

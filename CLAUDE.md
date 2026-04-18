@@ -66,7 +66,9 @@ writer::filesystem::write_usb()                       (orchestrates all output)
 - **`writer/filesystem.rs`** — Orchestration: copy audio, resize artwork, call anlz + pdb + onelibrary writers.
 - **`writer/pdb.rs`** (~1080 lines) — Generates the legacy DeviceSQL `export.pdb`. 20 table types, multi-page support, binary string encoding (ASCII + UTF-16LE).
 - **`writer/anlz.rs`** (~490 lines) — Generates ANLZ files (.DAT and .EXT). Beat grids, waveform previews, color waveforms, cue points, VBR sections.
-- **`writer/onelibrary.rs`** (~1120 lines) — Generates the OneLibrary `exportLibrary.db` (SQLCipher-encrypted SQLite). 22 tables, static lookups + dynamic data. Also provides `read_usb_state()` to read back existing USB contents.
+- **`writer/onelibrary.rs`** (~1120 lines) — Generates the OneLibrary `exportLibrary.db` (SQLCipher-encrypted SQLite). 22 tables, static lookups + dynamic data.
+- **`reader/usb.rs`** — Reads back existing USB OneLibrary state (`read_usb_state()`). Re-exported as `pioneer_usb_writer::reader::read_usb_state`.
+- **`reader/masterdb.rs`** — Reads Rekordbox's local `master.db` (SQLCipher key `402fd482...`). Returns `MasterDbImport` with tracks, cue points, playlists, and artwork paths.
 
 ### Test UI crate (`pioneer-test-ui`)
 
@@ -82,7 +84,7 @@ writer::filesystem::write_usb()                       (orchestrates all output)
 To use `pioneer-usb-writer` in your own project:
 
 ```rust
-use pioneer_usb_writer::{scanner, writer, models};
+use pioneer_usb_writer::{reader, scanner, writer, models};
 
 // 1. Scan audio files for metadata
 let tracks = scanner::scan_directory(Path::new("/path/to/music"))?;
@@ -108,7 +110,7 @@ writer::filesystem::write_usb(
 )?;
 
 // 5. Read back USB state (optional)
-let state = writer::onelibrary::read_usb_state(Path::new("/Volumes/USB"))?;
+let state = reader::read_usb_state(Path::new("/Volumes/USB"))?;
 ```
 
 The `AnalysisResult` struct you need to populate:

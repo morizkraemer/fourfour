@@ -15,11 +15,14 @@
 //! scanner::scan_directory()  →  Vec<Track>        (tag metadata)
 //! analyzer::analyze_track()  →  AnalysisResult     (BPM/key — external crate)
 //! writer::filesystem::write_usb()                  (writes all output)
+//! reader::read_usb_state()   →  ExistingUsbState   (read back existing USB)
+//! reader::masterdb::read_masterdb()  →  MasterDbImport  (import from Rekordbox)
 //! ```
 
 pub mod models;
+pub mod reader;
 pub mod scanner;
 pub mod writer;
 
 /// Application version — update on every release/edit.
-pub const VERSION: &str = "0.6.0";
+pub const VERSION: &str = "0.9.0";

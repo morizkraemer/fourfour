@@ -21,4 +21,8 @@ rusqlite = { version = "0.33", features = ["bundled-sqlcipher"] }
 walkdir = "2"
 image = "0.25.10"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3.27.0"

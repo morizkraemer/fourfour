@@ -3,6 +3,7 @@
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const { open: dialogOpen } = window.__TAURI__.dialog;
 
 // ── State ──────────────────────────────────────────────────────────────────
 let tracks = [];
@@ -22,6 +23,9 @@ async function init() {
         const ver = await invoke('app_version');
         document.getElementById('version-badge').textContent = 'v' + ver;
     } catch (_) {}
+
+    // Show library path
+    loadLibraryPath();
 
     // Restore persisted state before anything else
     try {
@@ -51,12 +55,19 @@ async function init() {
         showProgress(current, total, message);
     });
 
-    listen('write-complete', () => {
+    listen('write-complete', (event) => {
         hideProgress();
         syncing = false;
         setButtonStates();
         loadUsbContents();
-        alert('USB write complete!');
+        const r = event.payload;
+        const parts = [];
+        if (r.tracks_added > 0) parts.push(r.tracks_added + ' added');
+        if (r.tracks_replaced > 0) parts.push(r.tracks_replaced + ' replaced');
+        if (r.tracks_updated > 0) parts.push(r.tracks_updated + ' updated');
+        if (r.tracks_removed > 0) parts.push(r.tracks_removed + ' removed');
+        if (r.tracks_unchanged > 0) parts.push(r.tracks_unchanged + ' unchanged');
+        alert('Sync complete: ' + (parts.length > 0 ? parts.join(', ') : 'no changes'));
     });
 }
 
@@ -146,7 +157,7 @@ async function wipeUsb() {
 // ── Import ─────────────────────────────────────────────────────────────────
 async function importFolder() {
     try {
-        const dir = await invoke('pick_directory');
+        const dir = await dialogOpen({ directory: true, multiple: false });
         if (!dir) return;
         const newTracks = await invoke('scan_directory', { path: dir });
         // Merge, avoiding duplicate IDs
@@ -526,6 +537,42 @@ function esc(str) {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+}
+
+// ── Library path ──────────────────────────────────────────────────────────
+async function loadLibraryPath() {
+    try {
+        const path = await invoke('get_library_path');
+        document.getElementById('library-path').textContent = path;
+    } catch (err) {
+        document.getElementById('library-path').textContent = '(unknown)';
+    }
+}
+
+async function changeLibraryPath() {
+    try {
+        const folder = await dialogOpen({ directory: true, multiple: false });
+        if (!folder) return; // user cancelled
+
+        const newPath = await invoke('change_library_path', { folderPath: folder });
+        document.getElementById('library-path').textContent = newPath;
+
+        // Reload library contents
+        const loaded = await invoke('load_state');
+        tracks = loaded.tracks;
+        playlists = loaded.playlists.map(p => ({
+            id: p.id,
+            name: p.name,
+            trackIds: p.track_ids,
+        }));
+        nextPlaylistId = playlists.length > 0
+            ? Math.max(...playlists.map(p => p.id)) + 1
+            : 1;
+        renderTracks();
+        renderPlaylists();
+    } catch (err) {
+        alert('Failed to change library: ' + err);
+    }
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────
