@@ -45,7 +45,11 @@ pub fn scan_directory(dir: &Path) -> Result<Vec<Track>> {
         }
     }
 
-    tracks.sort_by(|a, b| a.title.cmp(&b.title));
+    tracks.sort_by(|a, b| {
+        a.title.cmp(&b.title)
+            .then_with(|| a.artist.cmp(&b.artist))
+            .then_with(|| a.source_path.cmp(&b.source_path))
+    });
 
     // Reassign IDs after sorting
     for (i, track) in tracks.iter_mut().enumerate() {
@@ -149,10 +153,11 @@ pub fn read_track_metadata(path: &Path, id: u32) -> Result<Track> {
         });
 
     // Build USB path: Contents/<Artist>/<filename>
-    let filename = path
+    let raw_filename = path
         .file_name()
         .and_then(|f| f.to_str())
         .unwrap_or("unknown.mp3");
+    let filename = sanitize_path_component(raw_filename);
     let safe_artist = sanitize_path_component(&artist);
     let usb_path = format!("/Contents/{}/{}", safe_artist, filename);
 

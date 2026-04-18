@@ -112,7 +112,9 @@ pub fn write_onelibrary(
         tracks.iter().filter(|t| !t.label.is_empty()).map(|t| t.label.clone()),
     );
 
-    // Album → artist mapping (first artist seen per album)
+    // Album → artist mapping (first artist seen per album).
+    // Uses the first artist encountered for each album. Compilations/VA albums
+    // will show a single artist — known limitation.
     let mut album_artist_map: HashMap<String, u32> = HashMap::new();
     for track in tracks {
         let album_key = track.album.to_lowercase();
@@ -569,6 +571,11 @@ fn create_tables(conn: &Connection) -> Result<()> {
             rating INTEGER,
             createdDate INTEGER
         );
+
+        CREATE INDEX IF NOT EXISTS idx_content_id ON content(content_id);
+        CREATE INDEX IF NOT EXISTS idx_content_album ON content(album_id);
+        CREATE INDEX IF NOT EXISTS idx_content_artist ON content(artist_id_artist);
+        CREATE INDEX IF NOT EXISTS idx_playlistContent_playlist ON playlist_content(playlist_id);
         ",
     )?;
 

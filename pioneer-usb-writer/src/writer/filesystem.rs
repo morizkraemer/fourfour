@@ -32,7 +32,6 @@ pub fn write_usb(
     std::fs::create_dir_all(&anlz_dir)?;
     std::fs::create_dir_all(&contents_dir)?;
 
-    println!("Writing audio files...");
     // Copy audio files
     for track in tracks {
         let dest = output_dir.join(track.usb_path.trim_start_matches('/'));
@@ -43,7 +42,6 @@ pub fn write_usb(
             .with_context(|| format!("Failed to copy {}", track.source_path.display()))?;
     }
 
-    println!("Writing artwork...");
     let artwork_dir = pioneer_dir.join("Artwork/00001");
     std::fs::create_dir_all(&artwork_dir)?;
     for track in tracks {
@@ -54,7 +52,6 @@ pub fn write_usb(
         }
     }
 
-    println!("Writing ANLZ files...");
     // Write ANLZ files (.DAT and .EXT)
     for (track, analysis) in tracks.iter().zip(analyses.iter()) {
         let dat_path = output_dir.join(anlz::anlz_path_for_track(track));
@@ -66,15 +63,12 @@ pub fn write_usb(
             .with_context(|| format!("Failed to write ANLZ .EXT for track {}", track.id))?;
     }
 
-    println!("Writing PDB database...");
     // Write PDB database
     let pdb_path = rekordbox_dir.join("export.pdb");
     pdb::write_pdb(&pdb_path, tracks, playlists)?;
 
-    println!("Writing OneLibrary database...");
     onelibrary::write_onelibrary(output_dir, tracks, analyses, playlists)?;
 
-    println!("USB structure written to {}", output_dir.display());
     Ok(())
 }
 

@@ -577,9 +577,11 @@ fn build_track_rows(
         heap.extend_from_slice(&0x0700u32.to_le_bytes()); // 0x04: bitmask
         heap.extend_from_slice(&track.sample_rate.to_le_bytes()); // 0x08: sample_rate
         heap.extend_from_slice(&0u32.to_le_bytes()); // 0x0C: composer_id
-        heap.extend_from_slice(&(track.file_size as u32).to_le_bytes()); // 0x10: file_size
+        heap.extend_from_slice(&(track.file_size.min(u32::MAX as u64) as u32).to_le_bytes()); // 0x10: file_size
+        // (track.id + 5) | 0x100: empirical value observed in rekordbox CDJ-3000 exports; purpose unknown
         let u2 = (track.id + 5) | 0x100;
         heap.extend_from_slice(&u2.to_le_bytes()); // 0x14: analysis flags
+        // 0xE5B6 and 0x6A76: empirical constants observed in rekordbox CDJ-3000 exports; purpose unknown
         heap.extend_from_slice(&0xE5B6u16.to_le_bytes()); // 0x18: u3
         heap.extend_from_slice(&0x6A76u16.to_le_bytes()); // 0x1A: u4
         let artwork_id = if track.artwork.is_some() { track.id } else { 0u32 };
@@ -599,7 +601,7 @@ fn build_track_rows(
         heap.extend_from_slice(&0u16.to_le_bytes()); // 0x4E: play_count
         heap.extend_from_slice(&track.year.to_le_bytes()); // 0x50: year
         heap.extend_from_slice(&16u16.to_le_bytes()); // 0x52: sample_depth
-        heap.extend_from_slice(&(track.duration_secs as u16).to_le_bytes()); // 0x54: duration
+        heap.extend_from_slice(&(track.duration_secs.round() as u16).to_le_bytes()); // 0x54: duration
         heap.extend_from_slice(&0x0029u16.to_le_bytes()); // 0x56: u5
         heap.push(0); // 0x58: color_id
         heap.push(0); // 0x59: rating
@@ -823,11 +825,13 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     let (labels, label_map) = dedup_ci(
         tracks.iter().filter(|t| !t.label.is_empty()).map(|t| t.label.clone())
     );
-    let (remixers, remixer_map_raw) = dedup_ci(
+    let (remixers, _remixer_map_raw) = dedup_ci(
         tracks.iter().filter(|t| !t.remixer.is_empty()).map(|t| t.remixer.clone())
     );
 
-    // Album → artist mapping (uses first artist seen for each album)
+    // Album → artist mapping (uses first artist seen for each album).
+    // Known limitation: compilations and VA albums will show whichever artist
+    // appears first in the track list, not a dedicated "Various Artists" entry.
     let mut album_artist_map: HashMap<String, u32> = HashMap::new();
     for t in tracks {
         if let Some(&aid) = artist_map.get(&t.artist.to_lowercase()) {
@@ -835,16 +839,24 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
         }
     }
 
-    // Remixers go into the artist table — offset IDs after existing artists
+    // Remixers go into the artist table — reuse existing artist IDs where the name
+    // matches, and allocate new IDs (offset after existing artists) only for remixers
+    // that are not already in the artist table.
     let remixer_id_base = artists.len() as u32 + 1;
-    let remixer_map: HashMap<String, u32> = remixer_map_raw.iter()
-        .map(|(k, &i)| (k.clone(), remixer_id_base + i - 1)).collect();
-    // Merge remixer names into the artist list for PDB
     let mut all_artists = artists.clone();
+    let mut remixer_map: HashMap<String, u32> = HashMap::new();
+    let mut new_remixer_idx = 0u32; // counts only truly new remixers
     for r in &remixers {
         let key = r.to_lowercase();
-        if !artist_map.contains_key(&key) {
+        if let Some(&existing_id) = artist_map.get(&key) {
+            // Remixer already exists as an artist — reuse that ID
+            remixer_map.insert(key, existing_id);
+        } else {
+            // New remixer — assign next available ID after all existing artists
+            let new_id = remixer_id_base + new_remixer_idx;
+            remixer_map.insert(key, new_id);
             all_artists.push(r.clone());
+            new_remixer_idx += 1;
         }
     }
 

@@ -162,7 +162,7 @@ pub fn write_anlz_ext(
     let cue_section_2 = build_cue_section(0, &[]);             // actual cues go in PCO2
     let cue_ext_1 = build_cue_extended_section(1, &hot_cues);
     let cue_ext_2 = build_cue_extended_section(0, &memory_cues);
-    let pqt2_section = build_beat_grid_ext_section(analysis);
+    let pqt2_section = build_beat_grid_ext_section(analysis, duration_secs);
     let pwv5_section = build_color_detail_section(analysis, duration_secs);
     let pwv4_section = build_color_waveform_section(analysis);
     let pvb2_section = build_vbr_ext_section();
@@ -335,7 +335,7 @@ fn build_cue_extended_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
 }
 
 /// PQT2 section: extended beat grid.
-fn build_beat_grid_ext_section(analysis: &AnalysisResult) -> Vec<u8> {
+fn build_beat_grid_ext_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let beats = &analysis.beat_grid.beats;
     let beat_count = beats.len() as u32;
 
@@ -344,8 +344,7 @@ fn build_beat_grid_ext_section(analysis: &AnalysisResult) -> Vec<u8> {
     let data_len = beat_count * 2;
     let section_total_len = section_header_len + data_len;
 
-    // Compute track duration from last beat
-    let track_duration_ms = beats.last().map(|b| b.time_ms).unwrap_or(0);
+    let track_duration_ms = (duration_secs * 1000.0).round() as u32;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_BEAT_GRID_EXT);
