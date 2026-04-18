@@ -1,4 +1,4 @@
-use crate::models::WaveformPreview;
+use pioneer_usb_writer::models::WaveformPreview;
 
 /// Generate a 400-byte monochrome waveform preview (PWAV format).
 ///

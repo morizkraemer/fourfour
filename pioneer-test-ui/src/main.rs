@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+mod analyzer;
+
 use pioneer_usb_writer::models;
-use pioneer_usb_writer::{analyzer, scanner, writer};
+use pioneer_usb_writer::{scanner, writer};
 
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 

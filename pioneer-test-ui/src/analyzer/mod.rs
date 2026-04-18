@@ -8,8 +8,9 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-use crate::models;
-use crate::waveform;
+use pioneer_usb_writer::models;
+
+mod waveform;
 
 /// Decode audio file to mono f32 samples, then run BPM/key/waveform analysis.
 pub fn analyze_track(path: &Path) -> Result<models::AnalysisResult> {

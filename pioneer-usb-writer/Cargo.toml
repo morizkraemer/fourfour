@@ -7,34 +7,12 @@ edition = "2024"
 name = "pioneer_usb_writer"
 path = "src/lib.rs"
 
-[[bin]]
-name = "pioneer-usb-writer"
-path = "src/main.rs"
-required-features = ["cli"]
-
-[features]
-default = []
-analyzer = ["dep:stratum-dsp", "dep:symphonia"]
-cli = ["analyzer", "dep:clap", "dep:indicatif"]
-
 [dependencies]
-# Audio analysis (optional — behind "analyzer" feature)
-stratum-dsp = { version = "1.0.0", optional = true }
-
-# Audio decoding (optional — behind "analyzer" feature)
-symphonia = { version = "0.5", features = ["mp3", "flac", "wav", "aac", "pcm", "aiff"], optional = true }
-
 # Metadata reading
 lofty = "0.24"
 
-# CLI (optional — behind "cli" feature)
-clap = { version = "4", features = ["derive"], optional = true }
-
 # Error handling
 anyhow = "1"
-
-# Progress bars (optional — behind "cli" feature)
-indicatif = { version = "0.17", optional = true }
 
 # Database
 rusqlite = { version = "0.33", features = ["bundled-sqlcipher"] }
