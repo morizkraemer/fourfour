@@ -9,7 +9,16 @@ use crate::models::Track;
 
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4a", "aac"];
 
-/// Scan a directory for audio files and read their metadata.
+/// Recursively scan a directory for audio files and return their metadata as a list of [`Track`]s.
+///
+/// Walks `dir` (following symlinks), skips any file whose extension is not in the
+/// supported set (`mp3`, `flac`, `wav`, `aiff`, `aif`, `m4a`, `aac`), and reads
+/// tag metadata from each matching file via [`read_track_metadata`].
+///
+/// Files that cannot be opened or parsed emit a warning to stderr and are skipped.
+///
+/// The returned list is **sorted** by title → artist → source path, and track IDs
+/// are reassigned in that sorted order starting at 1.
 pub fn scan_directory(dir: &Path) -> Result<Vec<Track>> {
     let mut tracks = Vec::new();
     let mut id = 1u32;
@@ -59,7 +68,14 @@ pub fn scan_directory(dir: &Path) -> Result<Vec<Track>> {
     Ok(tracks)
 }
 
-/// Scan specific files (not a directory). Returns tracks for valid audio files.
+/// Read metadata from a specific list of file paths and return them as [`Track`]s.
+///
+/// Unlike [`scan_directory`], this function does not recurse — it processes only
+/// the exact paths provided. Non-audio files (unrecognised extension) are silently
+/// skipped; files that fail to parse emit a warning and are skipped.
+///
+/// Tracks are returned **in the order the paths were supplied** (no sorting).
+/// IDs are assigned sequentially starting at 1.
 pub fn scan_files(paths: &[std::path::PathBuf]) -> Result<Vec<Track>> {
     let audio_extensions = ["mp3", "flac", "wav", "aiff", "aif", "m4a", "aac"];
     let mut tracks = Vec::new();
@@ -82,6 +98,24 @@ pub fn scan_files(paths: &[std::path::PathBuf]) -> Result<Vec<Track>> {
     Ok(tracks)
 }
 
+/// Read tag metadata from a single audio file and return a [`Track`].
+///
+/// Extracts title, artist, album, genre, label, remixer, comment, year, disc number,
+/// track number, sample rate, bitrate, file size, and cover art bytes via `lofty`.
+///
+/// **Defaults for missing tags:**
+/// - `title` — filename stem (without extension)
+/// - `artist` — `"Unknown Artist"`
+/// - `album` — `"Unknown Album"`
+/// - `genre` — `"Unknown"`
+/// - `label`, `remixer`, `comment` — empty string
+/// - `year`, `disc_number`, `track_number` — `0`
+///
+/// The `tempo` and `key` fields are left empty/zero; they must be filled in by
+/// the analyzer before writing to USB.
+///
+/// The USB-relative audio path is derived as `/Contents/<artist>/<filename>`,
+/// with path-unsafe characters in the artist and filename replaced by `_`.
 pub fn read_track_metadata(path: &Path, id: u32) -> Result<Track> {
     let tagged_file = Probe::open(path)
         .with_context(|| format!("Failed to open {}", path.display()))?

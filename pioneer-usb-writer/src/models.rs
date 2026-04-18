@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct Track {
     /// Original file path on disk
     pub source_path: std::path::PathBuf,
-    /// Relative path on USB (e.g. "Contents/Artist/track.mp3")
+    /// USB-relative path used by the CDJ, e.g. `/Contents/Artist/track.mp3`
     pub usb_path: String,
     /// Track title from tags
     pub title: String,
@@ -50,9 +50,11 @@ pub struct Track {
 /// Beat grid: list of beat positions with timing info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BeatGrid {
+    /// Ordered list of every detected beat in the track.
     pub beats: Vec<Beat>,
 }
 
+/// A single beat position within a track's beat grid.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Beat {
     /// Beat number within the bar (1-4)
@@ -99,26 +101,34 @@ pub struct CuePoint {
 /// Full analysis result for a track.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
+    /// Beat grid written to the ANLZ BEAT tag.
     pub beat_grid: BeatGrid,
+    /// Monochrome waveform preview written to the ANLZ PWAV tag.
     pub waveform: WaveformPreview,
+    /// Detected tempo in BPM (floating-point, not scaled).
     pub bpm: f64,
+    /// Detected musical key, e.g. `"1A"` or `"5B"` (Camelot notation).
     pub key: String,
+    /// Memory cues and hot cues written to the ANLZ PCOB tag.
     pub cue_points: Vec<CuePoint>,
 }
 
 /// A playlist containing a subset of tracks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Playlist {
+    /// 1-based playlist ID stored in the PDB playlists table.
     pub id: u32,
     pub name: String,
-    /// Track IDs belonging to this playlist.
+    /// Track IDs belonging to this playlist (references `Track::id`).
     pub track_ids: Vec<u32>,
 }
 
 /// A track read back from an existing USB's OneLibrary database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExistingTrack {
+    /// 1-based track ID from the PDB tracks table.
     pub id: u32,
+    /// USB-relative path, e.g. `/Contents/Artist/track.mp3`.
     pub usb_path: String,
     pub title: String,
     pub artist: String,
@@ -126,32 +136,45 @@ pub struct ExistingTrack {
     pub album: String,
     pub genre: String,
     pub label: String,
+    /// Musical key in Camelot notation, e.g. `"1A"`.
     pub key: String,
     pub comment: String,
     pub year: u16,
     pub track_number: u32,
     pub disc_number: u16,
+    /// Tempo as BPM × 100 (e.g. 12800 = 128.00 BPM).
     pub tempo: u32,
+    /// Track length in seconds.
     pub duration_secs: f64,
+    /// Sample rate in Hz.
     pub sample_rate: u32,
+    /// Bitrate in kbps.
     pub bitrate: u32,
+    /// File size in bytes.
     pub file_size: u64,
+    /// Whether artwork is stored on the USB for this track.
     pub has_artwork: bool,
 }
 
 /// A playlist read back from an existing USB.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExistingPlaylist {
+    /// 1-based playlist ID from the PDB playlists table.
     pub id: u32,
     pub name: String,
+    /// Track IDs belonging to this playlist (references `ExistingTrack::id`).
     pub track_ids: Vec<u32>,
 }
 
 /// Full state read from an existing USB's OneLibrary database.
 #[derive(Debug, Clone)]
 pub struct ExistingUsbState {
+    /// All tracks found in the existing database.
     pub tracks: Vec<ExistingTrack>,
+    /// All playlists found in the existing database.
     pub playlists: Vec<ExistingPlaylist>,
+    /// Next available track ID to use when appending new tracks (max existing ID + 1).
     pub next_track_id: u32,
+    /// Next available playlist ID to use when appending new playlists (max existing ID + 1).
     pub next_playlist_id: u32,
 }

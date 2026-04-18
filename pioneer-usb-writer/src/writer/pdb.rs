@@ -800,6 +800,16 @@ fn key_name_to_id(key: &str) -> u32 {
 
 // ── Main PDB Writer ────────────────────────────────────────────────
 
+/// Write a Pioneer DeviceSQL binary database (`export.pdb`) to `output_path`.
+///
+/// The file consists of 4096-byte pages laid out across 20 table types (tracks,
+/// genres, artists, albums, labels, keys, colors, playlists, artwork, etc.).
+/// Page 0 is a file header containing table pointers; pages 1-40 hold the table
+/// header and data pages; overflow pages start at 52 when a table's data exceeds
+/// one page.
+///
+/// History tables (types 0x11, 0x12, 0x13) are written from embedded reference
+/// binary blobs — the CDJ requires non-empty history data to recognise the database.
 pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -> Result<()> {
     // Case-insensitive dedup: keeps first occurrence as display name, maps by lowercase key
     fn dedup_ci(values: impl Iterator<Item = String>) -> (Vec<String>, HashMap<String, u32>) {

@@ -8,7 +8,26 @@ use anyhow::ensure;
 use crate::models::{AnalysisResult, Playlist, Track};
 use crate::writer::{anlz, onelibrary, pdb};
 
-/// Write the complete Pioneer USB structure to the output directory.
+/// Write the complete Pioneer USB structure to `output_dir`.
+///
+/// `tracks` and `analyses` must have the same length — the function returns an
+/// error immediately if they do not.
+///
+/// # Directory structure created
+/// ```text
+/// <output_dir>/
+///   Contents/<artist>/<filename>      — copies of the source audio files
+///   PIONEER/
+///     rekordbox/
+///       export.pdb                    — legacy DeviceSQL binary database
+///       exportLibrary.db              — SQLCipher-encrypted OneLibrary database
+///     USBANLZ/P{xxx}/{hash}/
+///       ANLZ0000.DAT                  — beat grid, waveform preview, cue points
+///       ANLZ0000.EXT                  — color waveforms, extended beat grid
+///     Artwork/00001/
+///       a{id}.jpg / a{id}_m.jpg       — 80×80 and 240×240 cover art (JPEG)
+///       b{id}.jpg / b{id}_m.jpg       — duplicate set used by CDJ for redundancy
+/// ```
 pub fn write_usb(
     output_dir: &Path,
     tracks: &[Track],

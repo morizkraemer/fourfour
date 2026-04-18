@@ -24,7 +24,14 @@ const TAG_CUE_EXTENDED: &[u8; 4] = b"PCO2";
 const TAG_BEAT_GRID_EXT: &[u8; 4] = b"PQT2";
 const TAG_VBR_EXT: &[u8; 4] = b"PVB2";
 
-/// Write an ANLZ .DAT file containing path, beat grid, and waveform preview.
+/// Write an ANLZ `.DAT` file for a track to `output_path`.
+///
+/// The file contains the following sections in the order required by rekordbox:
+/// `PPTH` (USB path, UTF-16BE) → `PVBR` (VBR seek table) → `PQTZ` (beat grid)
+/// → `PWAV` (400-byte monochrome waveform preview) → `PCOB` (hot cues)
+/// → `PCOB` (memory cues).
+///
+/// Parent directories are created automatically.
 pub fn write_anlz_dat(
     output_path: &Path,
     track: &Track,
@@ -144,8 +151,19 @@ fn build_waveform_preview_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf
 }
 
-/// Write an ANLZ .EXT file containing color waveforms and extended beat grid.
-/// The CDJ-3000 requires this file to consider a track fully analyzed.
+/// Write an ANLZ `.EXT` file for a track to `output_path`.
+///
+/// The CDJ-3000 requires this file to consider a track fully analyzed. It contains
+/// the following sections in the order required by rekordbox:
+/// `PPTH` → `PWV3` (color preview waveform) → `PCOB` × 2 (empty in EXT)
+/// → `PCO2` × 2 (extended hot/memory cues) → `PQT2` (extended beat grid)
+/// → `PWV5` (detailed color waveform) → `PWV4` (color waveform, 1200 entries)
+/// → `PVB2` (extended VBR info).
+///
+/// Color waveform data is currently derived from the monochrome PWAV values
+/// (faked green/white tint); spectral analysis is not yet implemented.
+///
+/// Parent directories are created automatically.
 pub fn write_anlz_ext(
     output_path: &Path,
     track: &Track,
@@ -475,17 +493,27 @@ fn anlz_dir_for_track(track: &Track) -> String {
     format!("PIONEER/USBANLZ/P{:03X}/{:08X}", p_value, hash_value)
 }
 
-/// Compute the ANLZ .DAT path for a track.
+/// Return the USB-relative path to the `ANLZ0000.DAT` file for `track`
+/// (e.g. `PIONEER/USBANLZ/P0A3/001F8B2C/ANLZ0000.DAT`).
+///
+/// The path is computed from the track's USB path using Pioneer's hash algorithm
+/// (see [`compute_anlz_path_hash`]). No leading `/`.
 pub fn anlz_path_for_track(track: &Track) -> String {
     format!("{}/ANLZ0000.DAT", anlz_dir_for_track(track))
 }
 
-/// Compute the ANLZ .EXT path for a track.
+/// Return the USB-relative path to the `ANLZ0000.EXT` file for `track`.
+///
+/// Same directory as [`anlz_path_for_track`], different file extension. No leading `/`.
 pub fn anlz_ext_path_for_track(track: &Track) -> String {
     format!("{}/ANLZ0000.EXT", anlz_dir_for_track(track))
 }
 
-/// The path as stored in the PDB track row (with leading /).
+/// Return the ANLZ `.DAT` path as stored in the PDB `analyze_path` field.
+///
+/// Identical to [`anlz_path_for_track`] but prefixed with `/`. Note: the CDJ
+/// recomputes this path from the hash algorithm and ignores the stored value —
+/// this is kept for PDB completeness only.
 pub fn anlz_path_for_pdb(track: &Track) -> String {
     format!("/{}", anlz_path_for_track(track))
 }

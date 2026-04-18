@@ -63,8 +63,17 @@ const MENU_ITEMS: [(i32, i32, &str); 21] = [
 
 // ── Public API ───────────────────────────────────────────────────
 
-/// Write the OneLibrary SQLCipher database.
-/// Creates `{output_dir}/PIONEER/rekordbox/exportLibrary.db`.
+/// Write the OneLibrary SQLCipher-encrypted SQLite database to
+/// `{output_dir}/PIONEER/rekordbox/exportLibrary.db`.
+///
+/// The database uses the fixed rekordbox encryption key embedded in this crate.
+/// Any pre-existing `exportLibrary.db` (and its WAL/SHM sidecar files) is removed
+/// before writing so the output is always a clean single-file database.
+///
+/// Populates all static lookup tables (keys, colors, menu items, category and sort
+/// orders) and then writes the dynamic data — artists, albums, genres, labels,
+/// images, tracks (`content` rows), cue points, playlists, and a `property` row —
+/// in a single transaction for performance.
 pub fn write_onelibrary(
     output_dir: &Path,
     tracks: &[Track],
@@ -192,8 +201,15 @@ pub fn write_onelibrary(
     Ok(())
 }
 
-/// Read existing USB state from the OneLibrary database.
-/// Returns `Ok(None)` if no `exportLibrary.db` exists at the expected path.
+/// Read the existing track and playlist state from the OneLibrary database at
+/// `{output_dir}/PIONEER/rekordbox/exportLibrary.db`.
+///
+/// Returns `Ok(None)` if the file does not exist (i.e. a fresh USB).
+/// Returns an error if the file exists but cannot be decrypted or queried.
+///
+/// The returned [`ExistingUsbState`] contains all tracks and playlists currently
+/// in the database, along with pre-computed next available IDs for incremental
+/// writes.
 pub fn read_usb_state(output_dir: &Path) -> Result<Option<ExistingUsbState>> {
     let db_path = output_dir
         .join(DB_REL_PATH[0])
