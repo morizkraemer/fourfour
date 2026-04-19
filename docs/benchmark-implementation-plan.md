@@ -1,247 +1,256 @@
 # fourfour Benchmark — Implementation Plan
 
-> Concrete plan to fork the samplebase benchmark harness and build a ground-truth comparison tool for Pioneer USB analysis quality.
+> Concrete plan to build a ground-truth comparison tool for Pioneer USB analysis quality, reusing patterns from the samplebase benchmark harness.
 
 ---
 
-## Architecture: What Gets Forked vs Built New
+## Current Repo Architecture (as of v0.9.0)
 
 ```
 fourfour/
-├── benchmark/                          ← NEW directory (mirrors samplebase/benchmark/)
+├── Cargo.toml                    # workspace: 3 crates
+├── pioneer-usb-writer/           # Pure format library (no CLI, no analyzer)
+│   └── src/
+│       ├── lib.rs                # Re-exports: models, reader, scanner, writer
+│       ├── models.rs             # Track, AnalysisResult, BeatGrid, Beat, CuePoint,
+│       │                         # ExistingTrack, ExistingUsbState, SyncPlan, etc.
+│       ├── scanner.rs            # lofty-based tag reader
+│       ├── reader/
+│       │   ├── mod.rs
+│       │   ├── usb.rs            # Reads OneLibrary exportLibrary.db from USB
+│       │   └── masterdb.rs       # Reads Rekordbox ~/Library/Pioneer/rekordbox/master.db
+│       └── writer/
+│           ├── anlz.rs           # ANLZ0000.DAT/EXT writer (beat grids, waveforms, cues)
+│           ├── pdb.rs            # export.pdb writer (legacy DeviceSQL)
+│           ├── onelibrary.rs     # exportLibrary.db writer (SQLCipher)
+│           ├── filesystem.rs     # Orchestrator: copy audio + write all format files
+│           ├── sync.rs           # Incremental sync: diff tracks vs existing USB state
+│           └── mod.rs
+├── pioneer-test-ui/              # Tauri v2 test harness
+│   └── src/
+│       ├── main.rs               # Tauri app + all commands
+│       ├── analyzer/
+│       │   ├── mod.rs            # stratum-dsp + symphonia: BPM, key, beats, waveform
+│       │   └── waveform.rs       # 400-byte monochrome waveform preview
+│       └── dto.rs                # Frontend DTOs
+└── pioneer-library/              # Persistent local library (SQLite CRUD + export/sync)
+    └── src/
+        ├── lib.rs                # LocalLibrary: add_track, get_analysis, export_to_usb, etc.
+        ├── queries.rs            # SQL queries
+        └── schema.rs             # Schema migrations
+```
+
+**Key insight:** The analyzer lives in `pioneer-test-ui/src/analyzer/`. The format library is pure I/O. The benchmark's Rust side needs a thin CLI binary that wraps `analyzer::analyze_track()` and outputs JSON.
+
+---
+
+## Ground Truth Strategy: master.db, Not PDB
+
+The plan originally assumed we'd need to parse binary PDB/ANLZ from a Rekordbox-exported USB to extract ground truth BPM, key, and beats. The repo now has `reader/masterdb.rs` which changes this entirely.
+
+### Why master.db is better
+
+| | Export USB PDB/ANLZ | Local master.db |
+|---|---|---|
+| **Format** | Binary, custom DeviceSQL + custom ANLZ tags | SQLCipher SQLite, structured queries |
+| **Parser needed** | Yes, ~400 lines new Rust or Python | **Already written** — `read_masterdb()` |
+| **BPM** | Decode PDB track rows | `SELECT BPM FROM djmdContent` |
+| **Key** | Decode PDB track rows + lookup table | `SELECT ScaleName FROM djmdKey JOIN djmdContent` |
+| **Beat grids** | Parse ANLZ PQTZ binary tag | Not in master.db (see below) |
+| **Cue points** | Parse ANLZ PCOB binary tag | `SELECT InMsec, OutMsec, Kind FROM djmdCue` |
+| **Playlists** | Decode PDB playlist tree | `SELECT * FROM djmdSongPlaylist ORDER BY TrackNo` |
+| **Artwork paths** | Not available | `SELECT ImagePath FROM djmdContent` |
+| **File paths** | USB-relative → need reverse mapping | `SELECT FolderPath` (absolute local path) |
+
+**BPM and key come from master.db for free.** No binary parsing needed for the two most important accuracy metrics.
+
+### What master.db does NOT have
+
+- **Beat grid positions** (individual beat timestamps) — Rekordbox stores these only in the ANLZ files on the exported USB, not in master.db
+- **Waveform data** — same, only in ANLZ files
+
+### Revised strategy
+
+```
+Ground truth source:
+  ├── master.db → BPM, key, cue points, playlists, file paths     (already readable)
+  └── ANLZ files → beat grid positions                              (need new reader)
+
+ANLZ reader: mirror the existing anlz.rs writer in reverse.
+Read PQTZ tag → extract beat timestamps.
+This is the only new binary parsing needed.
+```
+
+This eliminates the need for a PDB reader entirely. The Python benchmark calls:
+```bash
+cargo run -p pioneer-usb-writer -- read-groundtruth /Volumes/REKORDBOX_USB --masterdb ~/Library/Pioneer/rekordbox/master.db --json
+```
+
+Or the Rust side produces a ground truth JSON that the Python benchmark consumes.
+
+---
+
+## Revision Notes After samplebase Harness Review
+
+The samplebase harness has been updated on `feat/benchmark-harness-fixes` with three changes that affect our reuse strategy:
+
+1. **Runs are now isolated** — each run gets its own vector store at `run_dir/vectors/`, not the global persistent store. Old runs with contaminated corpus are labeled "exploratory" in the UI. fourfour must use run-scoped semantics from day one.
+
+2. **Source paths are preserved** — entries carry `source_path` + `prepared_path` separately. Results report `source_path` as canonical identity. fourfour must do the same.
+
+3. **All backend pairings are analyzed** — not just the first. Progress is per-pairing.
+
+### Safe to reuse from samplebase
+
+- Benchmark directory layout pattern
+- CLI command shape (`benchmark-init`, `benchmark-run`, `benchmark-analyze`)
+- Backend registry / variant dict pattern
+- Dataclass / typed-result style
+- JSON artifact writing / loading helpers
+- `search_unique_by_source()` vector dedup pattern (for Phase 5 embeddings)
+
+### Do not reuse from samplebase
+
+- Persistent vector store as benchmark corpus
+- Subjective `gemini/local/tie` scoring model
+- Lossy preprocessed audio as the analysis source
+- Path-only cache keys
+- Single-pairing analysis
+- Dashboard orchestrator thread-per-backend pattern (fourfour uses simpler CLI execution)
+
+---
+
+## Architecture: What Gets Built
+
+```
+fourfour/
+├── benchmark/                              ← NEW directory
 │   ├── README.md
-│   ├── manifests/                      ← same pattern as samplebase
+│   ├── schemas/                            ← JSON schemas for every artifact
+│   │   ├── manifest.schema.json
+│   │   ├── groundtruth.schema.json
+│   │   ├── raw-analysis.schema.json
+│   │   ├── comparisons.schema.json
+│   │   └── analysis.schema.json
+│   ├── manifests/                          ← track corpus manifests
 │   │   └── corpus-v1.manifest.json
-│   ├── groundtruth/                    ← NEW: Rekordbox reference data
+│   ├── groundtruth/                        ← Rekordbox reference data (from master.db + ANLZ)
 │   │   └── corpus-v1.groundtruth.json
-│   ├── results/{run_id}/              ← same structure as samplebase
-│   │   ├── config.json
-│   │   ├── comparisons.json            ← NEW (replaces results.json)
-│   │   ├── scores.json
-│   │   └── analysis.json
-│   └── cache/                          ← same SHA1 caching as samplebase
-│       └── embeddings/{backend_id}/
+│   ├── results/{run_id}/                  ← run-scoped, immutable after completion
+│   │   ├── config.json                     # backends, timings, corpus scope
+│   │   ├── raw_analysis/
+│   │   │   └── {backend_id}.json           # raw backend output per track
+│   │   ├── comparisons.json                # objective comparison rows
+│   │   ├── analysis.json                   # aggregate scorecard
+│   │   └── audit_notes.json               # optional manual notes
+│   └── cache/                              ← content/config-addressed analysis cache
+│       └── analysis/{backend_id}/
 │
-└── analysis/                           ← NEW Python package
+└── analysis/                               ← NEW Python package
     ├── pyproject.toml
     ├── src/fourfour_analysis/
     │   ├── __init__.py
-    │   ├── __main__.py                 ← CLI entry point
-    │   ├── cli.py                      ← argparse: init, run, analyze, compare
-    │   │
-    │   ├── config.py                   ← FORKED from samplebase/config.py (simplified)
-    │   ├── types.py                    ← FORKED from samplebase/benchmark_types.py (adapted)
-    │   │
-    │   ├── backends/                   ← FORKED pattern from samplebase/benchmark_backends.py
+    │   ├── __main__.py
+    │   ├── cli.py                          ← argparse: init, run, analyze, compare
+    │   ├── config.py                       ← Settings dataclass, path resolution
+    │   ├── types.py                        ← TrackEntry, AnalysisResult, AnalysisRecord,
+    │   │                                     GroundTruth, TrackComparison, BackendMetadata
+    │   ├── cache.py                        ← Content/config-addressed JSON cache
+    │   ├── backends/
     │   │   ├── __init__.py
-    │   │   ├── base.py                 ← ABC: AnalysisBackend (adapted from BenchmarkBackend)
-    │   │   ├── registry.py             ← FORKED pattern: ANALYSIS_VARIANTS dict
-    │   │   ├── stratum_dsp.py          ← NEW: subprocess wrapper around Rust CLI
+    │   │   ├── base.py                     ← AnalysisBackend ABC
+    │   │   ├── registry.py                 ← ANALYSIS_VARIANTS dict
+    │   │   ├── stratum_dsp.py              ← subprocess → Rust analyzer CLI
     │   │   └── (future: essentia.py, madmom.py, openkeyscan.py)
-    │   │
-    │   ├── cache.py                    ← FORKED: SHA1-keyed JSON cache (verbatim copy)
-    │   │
-    │   ├── groundtruth.py              ← NEW: Rekordbox PDB + ANLZ parser
-    │   ├── manifest.py                 ← FORKED from samplebase/benchmark_manifest.py (simplified)
-    │   ├── runner.py                   ← FORKED from samplebase/benchmark_runner.py (adapted)
-    │   ├── analysis.py                 ← FORKED from samplebase/benchmark_analysis.py (adapted)
-    │   │
-    │   └── compare.py                  ← NEW: diff logic (ours vs Rekordbox ground truth)
-    │
+    │   ├── manifest.py                     ← Build/load track corpus manifest
+    │   ├── groundtruth.py                  ← Load & validate ground truth JSON
+    │   ├── compare.py                      ← Diff analysis vs ground truth
+    │   ├── runner.py                       ← Run orchestration: analyze + compare + write
+    │   └── analysis.py                     ← Aggregate metrics from comparisons
     └── tests/
         └── ...
 ```
 
 ---
 
-## Step-by-Step Build Order
+## Rust-Side Changes
 
-### Step 1: Scaffold the Python package
+### Change 1: ANLZ reader (in `pioneer-usb-writer`)
 
-Create `analysis/` as an installable Python package with a CLI.
+Mirror the existing `writer/anlz.rs` in reverse. Read PQTZ tag to extract beat timestamps.
 
-**Files to create:**
-- `analysis/pyproject.toml` — minimal, depends on: `anyhow` pattern is Python so just `anyhow` equivalent = nothing special. Deps: `numpy` (future), no external deps yet
-- `analysis/src/fourfour_analysis/__init__.py`
-- `analysis/src/fourfour_analysis/__main__.py` — `python -m fourfour_analysis` entry
-- `analysis/src/fourfour_analysis/cli.py` — argparse with subcommands: `init`, `run`, `analyze`, `compare`
-- `analysis/src/fourfour_analysis/config.py` — FORKED from samplebase, stripped to just benchmark paths
+```rust
+// pioneer-usb-writer/src/reader/anlz.rs (NEW)
 
-**Config changes from samplebase:**
-```python
-# samplebase config has: db_path, gemini_api_key, describe_model, embedding_model,
-#   output_dimensionality, upload_sample_rate_hz, upload_bitrate_kbps, etc.
-# fourfour config only needs:
-@dataclass(frozen=True)
-class Settings:
-    benchmark_dir: Path
-    benchmark_cache_dir: Path
-    benchmark_results_dir: Path
-    benchmark_manifests_dir: Path
-    groundtruth_dir: Path
-    # Rust binary path (for stratum-dsp backend)
-    pioneer_usb_writer_bin: str  # defaults to "cargo run -p pioneer-usb-writer --"
+pub struct AnlzBeatGrid {
+    pub beats: Vec<AnlzBeat>,
+}
+
+pub struct AnlzBeat {
+    pub time_ms: u32,
+    pub bar_position: u8,
+    pub tempo: u32,
+}
+
+/// Read beat grid from an ANLZ0000.DAT file.
+pub fn read_beat_grid(path: &Path) -> Result<AnlzBeatGrid> {
+    // Parse PMAI header, find PQTZ section, decode beat entries
+    // Mirrors the write path in writer/anlz.rs
+}
 ```
 
-### Step 2: Fork the caching layer (verbatim)
+**Estimate:** ~150 lines. The format is already fully understood from the writer.
 
-Copy `samplebase/mvp/src/samplebase_mvp/benchmark_backends.py` lines related to caching into `cache.py`.
+### Change 2: Ground truth extraction command
 
-**What to extract:**
-- `_cache_key(self, *, path, segment) -> str` — SHA1 hash
-- `_load_cached_embedding(self, *, path, segment) -> EmbeddingVector | None`
-- `_save_cached_embedding(self, *, path, segment, embedding)`
-
-**Changes:**
-- Rename `EmbeddingVector` → `CachedAnalysis` (or keep as generic `CachedResult`)
-- `segment` parameter becomes unnecessary for fourfour (we always analyze full tracks), replace with just `track_id: str`
-- Cache key: `sha1("{path}|{backend_id}")`
-
-This is ~60 lines of code, nearly verbatim.
-
-### Step 3: Fork the types (adapted)
-
-From `samplebase/mvp/src/samplebase_mvp/benchmark_types.py`:
-
-**Keep (rename):**
-- `EmbeddingVector` → `CachedResult` — `{values: list[float], elapsed_seconds: float, metrics: dict}`
-
-**New types for fourfour:**
-```python
-@dataclass(frozen=True)
-class TrackEntry:
-    id: str
-    path: str
-    label: str           # filename or title
-    genre: str
-    duration_seconds: float
-
-@dataclass(frozen=True)
-class AnalysisResult:
-    bpm: float
-    key: str             # "1A", "5B", etc.
-    beats: list[float]   # timestamps in seconds
-    waveform_preview: list[int]  # 400 bytes as int list (JSON-safe)
-    elapsed_seconds: float
-    metrics: dict
-
-@dataclass(frozen=True)
-class GroundTruth:
-    track_id: str
-    bpm: float
-    key: str
-    beats: list[float]
-    # waveform: list[int]  # future: compare waveforms too
-
-@dataclass(frozen=True)
-class TrackComparison:
-    track_id: str
-    track_label: str
-    bpm_ours: float
-    bpm_groundtruth: float
-    bpm_delta: float
-    key_ours: str
-    key_groundtruth: str
-    key_match: bool
-    beats_count_ours: int
-    beats_count_groundtruth: int
-    beat_offset_mean_ms: float | None
-    beat_offset_max_ms: float | None
-    waveform_mse: float | None
-```
-
-### Step 4: Build the AnalysisBackend ABC
-
-From `samplebase/mvp/src/samplebase_mvp/benchmark_backends.py` — extract `BenchmarkBackend` class.
-
-**samplebase's interface:**
-```python
-class BenchmarkBackend(ABC):
-    def embed_audio_segments(self, item: dict) -> CorpusEmbedding
-    def embed_text_query(self, query: dict) -> QueryEmbedding
-    def score(self, query_vectors, corpus_vectors) -> float
-    # + caching helpers
-```
-
-**fourfour's interface:**
-```python
-class AnalysisBackend(ABC):
-    """Base class for track analysis backends."""
-    
-    def __init__(self, *, settings: Settings, variant: dict):
-        self.settings = settings
-        self.variant = variant
-        self.id = variant["id"]
-        self.label = variant["label"]
-        self.cache_dir = settings.benchmark_cache_dir / "analysis" / self.id
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-    
-    @abstractmethod
-    def metadata(self) -> dict:
-        """Backend info for config.json."""
-        ...
-    
-    @abstractmethod
-    def analyze_track(self, track_path: str) -> AnalysisResult:
-        """Analyze a single track. Must be overridden by each backend."""
-        ...
-    
-    def analyze_track_cached(self, track: TrackEntry) -> AnalysisResult:
-        """Analyze with caching. Subclasses should NOT override this."""
-        cached = self._load_cache(track.id)
-        if cached is not None:
-            return cached
-        
-        started = time.perf_counter()
-        result = self.analyze_track(track.path)
-        result.elapsed_seconds = time.perf_counter() - started
-        self._save_cache(track.id, result)
-        return result
-    
-    # Cache helpers (forked from samplebase)
-    def _cache_key(self, track_id: str) -> str: ...
-    def _load_cache(self, track_id: str) -> AnalysisResult | None: ...
-    def _save_cache(self, track_id: str, result: AnalysisResult) -> None: ...
-```
-
-### Step 5: Implement StratumDspBackend
-
-The first concrete backend. Calls the Rust binary via subprocess.
-
-```python
-class StratumDspBackend(AnalysisBackend):
-    """Calls pioneer-usb-writer Rust binary via subprocess."""
-    
-    def metadata(self) -> dict:
-        return {
-            "backend": "stratum_dsp",
-            "language": "rust",
-            "chunking_policy": "full",
-            "network_required": False,
-        }
-    
-    def analyze_track(self, track_path: str) -> AnalysisResult:
-        # Option A: Add a --analyze --json subcommand to the Rust CLI
-        # Option B: Use the existing library via a thin Rust binary that outputs JSON
-        #
-        # For now, we need to ADD a JSON output mode to the Rust CLI.
-        # The current main.rs only does scan→analyze→write_usb in one shot.
-        # We need a separate mode that outputs analysis for a single track as JSON.
-        ...
-```
-
-**IMPORTANT: This requires a Rust-side change first.** The current `pioneer-usb-writer` CLI doesn't have an "analyze single track and output JSON" mode. We need to add one.
-
-### Step 5a: Add `analyze` subcommand to Rust CLI
-
-Modify `pioneer-usb-writer/src/main.rs` to support:
+Add a thin binary (in `pioneer-test-ui` or a new `fourfour-bench` crate) that:
+1. Reads `master.db` via `reader::masterdb::read_masterdb()` → gets BPM, key, cue points, file paths
+2. Finds the matching ANLZ files on the Rekordbox-exported USB
+3. Reads beat grids via `reader::anlz::read_beat_grid()`
+4. Outputs a single JSON ground truth file
 
 ```bash
-# Current behavior (unchanged):
-pioneer-usb-writer /path/to/music -o /Volumes/USB
+fourfour-bench extract-groundtruth \
+  --masterdb ~/Library/Pioneer/rekordbox/master.db \
+  --usb /Volumes/REKORDBOX_USB \
+  --output benchmark/groundtruth/corpus-v1.groundtruth.json
+```
 
-# New behavior:
-pioneer-usb-writer analyze /path/to/track.mp3 --json
+Output schema:
+```json
+{
+  "schema_version": 1,
+  "source": {
+    "masterdb_path": "~/Library/Pioneer/rekordbox/master.db",
+    "usb_path": "/Volumes/REKORDBOX_USB"
+  },
+  "tracks": [
+    {
+      "track_id": "s_abc123",
+      "file_path": "/Users/.../track.mp3",
+      "title": "Track Name",
+      "artist": "Artist",
+      "genre": "House",
+      "bpm": 128.02,
+      "key": "1A",
+      "beats": [0.461, 0.928, 1.395, "..."],
+      "beat_count": 412,
+      "cue_points": [
+        {"hot_cue_number": 0, "time_ms": 461, "loop_time_ms": null}
+      ],
+      "rekordbox_content_id": "12345",
+      "duration_seconds": 193.5
+    }
+  ]
+}
+```
+
+### Change 3: Analyze single track command
+
+Add a `analyze` subcommand to the `pioneer-test-ui` binary (or extract into a small `fourfour-analyzer` binary):
+
+```bash
+fourfour-analyzer analyze /path/to/track.mp3 --json
 ```
 
 Output:
@@ -250,295 +259,474 @@ Output:
   "path": "/path/to/track.mp3",
   "bpm": 128.0,
   "key": "1A",
-  "beats": [0.461, 0.928, 1.395, ...],
+  "beats": [0.461, 0.928, 1.395],
   "beat_count": 412,
-  "waveform_preview": [34, 67, 23, ...],
+  "waveform_preview": [34, 67, 23],
   "duration_seconds": 193.5,
-  "sample_rate": 44100
+  "sample_rate": 44100,
+  "elapsed_seconds": 1.23,
+  "version": "0.9.0"
 }
 ```
 
-This is a small Rust change (~30 lines in `main.rs`):
+Implementation: thin wrapper around `pioneer_test_ui::analyzer::analyze_track()`:
+
 ```rust
-#[derive(Parser)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-    
-    // Legacy: if no subcommand, run the original scan→write flow
-    input_dirs: Vec<PathBuf>,
-    #[arg(short, long)]
-    output: Option<PathBuf>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Analyze a single track and output results as JSON
-    Analyze {
-        /// Path to audio file
-        path: PathBuf,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
+// Either in pioneer-test-ui/src/main.rs as a subcommand,
+// or a new small binary crate.
+fn cmd_analyze(path: &Path) -> Result<()> {
+    let result = analyzer::analyze_track(path)?;
+    let output = serde_json::json!({
+        "path": path.to_str().unwrap(),
+        "bpm": result.bpm,
+        "key": result.key,
+        "beats": result.beat_grid.beats.iter()
+            .map(|b| b.time_ms as f64 / 1000.0).collect::<Vec<_>>(),
+        "beat_count": result.beat_grid.beats.len(),
+        "waveform_preview": result.waveform.data.to_vec(),
+        "duration_seconds": 0.0, // TODO: from track metadata
+        "elapsed_seconds": 0.0,  // filled by caller
+        "version": pioneer_usb_writer::VERSION,
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
 }
 ```
 
-### Step 6: Fork the manifest builder (simplified)
+**Estimate:** ~40 lines of new code (CLI parsing) + the `analyze_track` function already exists.
 
-From `samplebase/mvp/src/samplebase_mvp/benchmark_manifest.py`.
+### Where to put the CLI
 
-**samplebase's manifest has per-entry:**
-`id, path, label, category, role, one_shot_or_loop, duration_bucket, duration_seconds, tags, known_similar_group, bleed_risk_group, is_long_form`
+**Option A: Subcommand in `pioneer-test-ui`** — smallest change, but couples the benchmark tool to the Tauri binary.
 
-**fourfour's manifest needs per-entry:**
-`id, path, label, genre, duration_seconds`
+**Option B: New `fourfour-cli` crate** — clean separation. Depends on `pioneer-usb-writer` + copies `analyzer/` module from `pioneer-test-ui`. But duplicates the analyzer code.
 
-Way simpler. Strip out all the sample-specific inference (`infer_role`, `infer_loop_state`, `infer_tags`, `infer_group`, `infer_bleed_group`). Keep:
-- `build_manifest()` — scans directory for audio files
-- `load_json()` — reads JSON
-- `write_manifest_bundle()` — writes manifest + ground truth to benchmark dir
+**Option C: Extract `analyzer/` into a shared `fourfour-analyzer` library crate** — both `pioneer-test-ui` and `fourfour-cli` depend on it. Cleanest but needs workspace restructuring.
 
-New additions:
-- Audio file detection can use the same `SUPPORTED_SUFFIXES` pattern from samplebase
-- Duration probing uses `ffprobe` (same as samplebase) or we could use `mutagen`/`tinytag` for a lighter dep
+**Recommendation: Option A for now, Option C later.** The benchmark is experimental. Ship fast with a subcommand in `pioneer-test-ui`. Refactor into a shared crate once the analyzer stabilizes.
 
-### Step 7: Build the ground truth parser (NEW)
+---
 
-This is the main new code. Two parsers needed:
+## Python Package: Build Steps
 
-**`groundtruth.py` — Rekordbox export parser:**
+### Step 0: Lock artifact schemas
+
+Before writing any logic, define JSON schemas:
+
+| Schema | Purpose |
+|---|---|
+| `manifest.schema.json` | Track corpus: id, path, label, genre, duration_seconds, content_fingerprint |
+| `groundtruth.schema.json` | Rekordbox reference: bpm, key, beats, cue_points, rekordbox_content_id |
+| `raw-analysis.schema.json` | Per-backend per-track analysis output |
+| `comparisons.schema.json` | Per-track comparison rows with status + metrics |
+| `analysis.schema.json` | Aggregate scorecard per backend |
+
+Each schema gets a version number. The runner validates inputs and outputs against schemas in tests. Cache keys include the output schema version.
+
+### Step 1: Scaffold the Python package
+
+```
+analysis/
+├── pyproject.toml         # pip install -e .
+└── src/fourfour_analysis/
+    ├── __init__.py
+    ├── __main__.py         # python -m fourfour_analysis
+    ├── cli.py              # argparse: init, run, analyze, compare
+    └── config.py           # Settings dataclass
+```
+
+`config.py` — simplified from samplebase pattern:
+```python
+@dataclass(frozen=True)
+class Settings:
+    benchmark_dir: Path
+    benchmark_cache_dir: Path
+    benchmark_results_dir: Path
+    benchmark_manifests_dir: Path
+    groundtruth_dir: Path
+    schemas_dir: Path
+    # Rust binaries
+    analyzer_bin: str       # e.g. "cargo run -p pioneer-test-ui -- analyze"
+    bench_bin: str          # e.g. "cargo run -p pioneer-test-ui -- extract-groundtruth"
+```
+
+### Step 2: Build types and cache
+
+`types.py` — core data types:
+```python
+@dataclass(frozen=True)
+class TrackEntry:
+    id: str
+    path: str
+    label: str
+    genre: str
+    duration_seconds: float
+    content_fingerprint: str
+    artist: str | None = None
+    title: str | None = None
+
+@dataclass(frozen=True)
+class AnalysisResult:
+    bpm: float | None
+    key: str | None
+    beats: list[float]            # timestamps in seconds
+    waveform_preview: list[int]
+    metrics: dict
+
+@dataclass(frozen=True)
+class AnalysisRecord:
+    track_id: str
+    backend_id: str
+    status: str                   # ok | analysis_failed | unsupported | timeout
+    result: AnalysisResult | None
+    elapsed_seconds: float
+    error: str | None
+    backend_version: str
+    backend_config_hash: str
+
+@dataclass(frozen=True)
+class GroundTruth:
+    track_id: str
+    bpm: float | None
+    key: str | None
+    beats: list[float]
+    cue_points: list[dict]        # [{hot_cue_number, time_ms, loop_time_ms}]
+    rekordbox_content_id: str | None
+    file_path: str | None
+
+@dataclass(frozen=True)
+class TrackComparison:
+    track_id: str
+    track_label: str
+    backend_id: str
+    status: str                   # ok | missing_groundtruth | analysis_failed | ...
+    bpm_ours: float | None
+    bpm_groundtruth: float | None
+    bpm_delta: float | None
+    bpm_relative_delta_pct: float | None
+    bpm_within_1_pct: bool | None
+    bpm_octave_error: bool | None
+    key_ours: str | None
+    key_groundtruth: str | None
+    key_exact_match: bool | None
+    key_weighted_score: float | None
+    key_error_type: str | None    # exact | relative_major_minor | parallel | fifth | other
+    beats_count_ours: int
+    beats_count_groundtruth: int
+    beat_f_measure: float | None
+    beat_offset_median_ms: float | None
+    beat_offset_max_ms: float | None
+    waveform_mse: float | None
+```
+
+`cache.py` — content/config-addressed caching:
+```python
+def cache_key(*, track: TrackEntry, backend: BackendMetadata, schema_version: int) -> str:
+    payload = {
+        "content_fingerprint": track.content_fingerprint,
+        "backend_id": backend.id,
+        "backend_version": backend.version,
+        "backend_config_hash": backend.config_hash,
+        "output_schema_version": schema_version,
+    }
+    return sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24]
+```
+
+### Step 3: Build the AnalysisBackend ABC
 
 ```python
-def parse_rekordbox_usb(usb_path: Path) -> list[GroundTruth]:
-    """Parse a Rekordbox-exported USB to extract ground truth data.
-    
-    Reads:
-      - PIONEER/rekordbox/export.pdb  → BPM, key, track file paths
-      - PIONEER/USBANLZ/P*/ANLZ0000.DAT → beat positions
-    """
-    ...
+class AnalysisBackend(ABC):
+    def __init__(self, *, settings: Settings, variant: dict):
+        self.settings = settings
+        self.variant = variant
+        self.id = variant["id"]
+        self.label = variant["label"]
+        self.cache_dir = settings.benchmark_cache_dir / "analysis" / self.id
+
+    @abstractmethod
+    def metadata(self) -> dict: ...
+
+    @abstractmethod
+    def analyze_track(self, track: TrackEntry) -> AnalysisResult: ...
+
+    def analyze_track_cached(self, track: TrackEntry) -> AnalysisRecord:
+        """Analyze with caching. Returns AnalysisRecord with status."""
+        cached = self._load_cache(track)
+        if cached is not None:
+            return cached
+        started = time.perf_counter()
+        try:
+            result = self.analyze_track(track)
+            record = AnalysisRecord(
+                track_id=track.id, backend_id=self.id, status="ok",
+                result=result, elapsed_seconds=time.perf_counter() - started,
+                error=None, backend_version=self.metadata()["version"],
+                backend_config_hash=self.metadata()["config_hash"],
+            )
+        except Exception as exc:
+            record = AnalysisRecord(
+                track_id=track.id, backend_id=self.id, status="analysis_failed",
+                result=None, elapsed_seconds=time.perf_counter() - started,
+                error=str(exc), backend_version=self.metadata()["version"],
+                backend_config_hash=self.metadata()["config_hash"],
+            )
+        self._save_cache(track, record)
+        return record
 ```
 
-Implementation strategy:
-1. Parse `export.pdb` binary format — we already have a *writer* in Rust (`pdb.rs`). The parser reads the same format. Can port the read path from the Rust reference code in `pioneer-usb-writer/reference-code/`, or write a fresh Python parser that reads just the track rows we need (BPM, key, file path).
-2. Parse ANLZ files for beat grids — same story, we have the writer in `anlz.rs`, need a reader.
+### Step 4: Implement StratumDspBackend
 
-**Alternative shortcut:** Instead of parsing binary PDB/ANLZ from Python, we could:
-- Add a `parse-usb` subcommand to the Rust CLI that reads a Rekordbox USB and outputs JSON
-- Python benchmark calls `cargo run -p pioneer-usb-writer -- parse-usb /Volumes/REKORDBOX_USB --json`
-- This reuses the existing Rust knowledge of the binary format
+```python
+class StratumDspBackend(AnalysisBackend):
+    """Calls the Rust analyzer binary via subprocess."""
 
-**Recommendation: Rust-side parser.** It's much easier to read a binary format you already know how to write. The Rust binary already links `symphonia`, `lofty`, etc. Adding a PDB reader is ~200 lines of Rust that mirrors the writer's structure.
+    def metadata(self) -> dict:
+        return {
+            "backend": "stratum_dsp",
+            "language": "rust",
+            "version": pioneer_usb_writer::VERSION,  # from JSON output
+            "config_hash": "default",
+            "network_required": False,
+        }
 
-### Step 8: Build the comparison logic (NEW)
+    def analyze_track(self, track: TrackEntry) -> AnalysisResult:
+        cmd = self.settings.analyzer_bin.split() + ["analyze", track.path, "--json"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Analyzer failed: {proc.stderr}")
+        data = json.loads(proc.stdout)
+        return AnalysisResult(
+            bpm=data["bpm"],
+            key=data["key"],
+            beats=data["beats"],
+            waveform_preview=data.get("waveform_preview", []),
+            metrics={"sample_rate": data.get("sample_rate")},
+        )
+```
 
-**`compare.py` — diff our output vs ground truth:**
+### Step 5: Build groundtruth.py
+
+Loads the JSON produced by the Rust `extract-groundtruth` command. Validates against schema. Matches tracks to manifest entries by file path.
+
+```python
+def load_groundtruth(path: Path) -> dict[str, GroundTruth]:
+    """Load ground truth JSON, keyed by track_id (matched by file_path)."""
+    data = json.loads(path.read_text())
+    by_path: dict[str, GroundTruth] = {}
+    for t in data["tracks"]:
+        gt = GroundTruth(
+            track_id=t["track_id"],
+            bpm=t["bpm"],
+            key=t["key"],
+            beats=t["beats"],
+            cue_points=t.get("cue_points", []),
+            rekordbox_content_id=t.get("rekordbox_content_id"),
+            file_path=t.get("file_path"),
+        )
+        if gt.file_path:
+            by_path[gt.file_path] = gt
+    return by_path
+```
+
+### Step 6: Build compare.py
+
+Objective diff logic — every manifest track produces a row.
 
 ```python
 def compare_results(
-    ours: dict[str, AnalysisResult],    # keyed by track_id
-    ground_truth: dict[str, GroundTruth], # keyed by track_id
+    ours: dict[str, AnalysisRecord],
+    ground_truth: dict[str, GroundTruth],
+    manifest: list[TrackEntry],
+    path_to_id: dict[str, str],
 ) -> list[TrackComparison]:
-    """Compare analysis results against ground truth."""
     comparisons = []
-    for track_id, gt in ground_truth.items():
-        our = ours.get(track_id)
-        if our is None:
-            continue  # track not in our corpus
-        
-        # Match beats by finding closest pairs
-        beat_offsets = _align_beats(our.beats, gt.beats)
-        
+    for track in manifest:
+        gt = ground_truth.get(path_to_id.get(track.path, ""))
+        record = ours.get(track.id)
+
+        if gt is None:
+            comparisons.append(_missing_groundtruth_row(track, record))
+            continue
+        if record is None:
+            comparisons.append(_missing_analysis_row(track, gt))
+            continue
+        if record.status != "ok" or record.result is None:
+            comparisons.append(_failed_analysis_row(track, gt, record))
+            continue
+
+        result = record.result
+        tempo = compare_tempo(result.bpm, gt.bpm)
+        key = compare_key(result.key, gt.key)
+        beats = compare_beats(result.beats, gt.beats)
+
         comparisons.append(TrackComparison(
-            track_id=track_id,
-            track_label=gt.label,
-            bpm_ours=our.bpm,
-            bpm_groundtruth=gt.bpm,
-            bpm_delta=abs(our.bpm - gt.bpm),
-            key_ours=our.key,
-            key_groundtruth=gt.key,
-            key_match=_keys_equivalent(our.key, gt.key),
-            beats_count_ours=len(our.beats),
+            track_id=track.id, track_label=track.label,
+            backend_id=record.backend_id, status="ok",
+            bpm_ours=result.bpm, bpm_groundtruth=gt.bpm,
+            bpm_delta=tempo.abs_delta, bpm_relative_delta_pct=tempo.relative_pct,
+            bpm_within_1_pct=tempo.within_1_pct, bpm_octave_error=tempo.octave_error,
+            key_ours=result.key, key_groundtruth=gt.key,
+            key_exact_match=key.exact, key_weighted_score=key.weighted_score,
+            key_error_type=key.error_type,
+            beats_count_ours=len(result.beats),
             beats_count_groundtruth=len(gt.beats),
-            beat_offset_mean_ms=_mean(beat_offsets) if beat_offsets else None,
-            beat_offset_max_ms=_max(beat_offsets) if beat_offsets else None,
-            waveform_mse=None,  # future
+            beat_f_measure=beats.f_measure,
+            beat_offset_median_ms=beats.median_offset_ms,
+            beat_offset_max_ms=beats.max_offset_ms,
+            waveform_mse=None,
         ))
     return comparisons
-
-def _align_beats(ours: list[float], theirs: list[float]) -> list[float]:
-    """Find closest beat pairs and return offset in ms."""
-    offsets = []
-    j = 0
-    for our_t in ours:
-        # Find closest beat in theirs
-        while j < len(theirs) - 1 and abs(theirs[j+1] - our_t) < abs(theirs[j] - our_t):
-            j += 1
-        offsets.append(abs(our_t - theirs[j]) * 1000)  # ms
-    return offsets
-
-def _keys_equivalent(a: str, b: str) -> bool:
-    """Check if two key notations are equivalent.
-    
-    Handles: "1A" == "A♭m", "5B" == "E major", etc.
-    Simple version: exact string match on Camelot notation.
-    """
-    return a.strip().upper() == b.strip().upper()
 ```
 
-### Step 9: Fork the runner (adapted)
+**Beat comparison** uses standard MIR metrics (not just nearest-neighbor offset):
+- **F-measure** with tolerance window (e.g. ±50ms): precision × recall
+- **Cemgil score**: Gaussian-weighted match score
+- **Continuity**: longest consecutive correctly-tracked segment
+- Median/max offset as supplementary interpretable metrics
+- Implementation: either `mir_eval.beat` (preferred) or minimal port with golden tests
 
-From `samplebase/mvp/src/samplebase_mvp/benchmark_runner.py`.
+**Key comparison** categorizes errors:
+- Exact match → `1.0`
+- Relative major/minor (1A ↔ 1B) → `0.8`, error_type = `relative_major_minor`
+- Parallel major/minor → `0.6`
+- Fifth apart → `0.4`
+- Other → `0.0`
 
-**What to keep:**
-- `run_benchmark()` orchestration pattern
-- Per-run directory creation
-- `config.json` / `analysis.json` writing
-- Backend instantiation + parallel execution (thread-per-backend)
-- `load_run_detail()` for re-loading results
+**Tempo comparison** detects octave errors:
+- Absolute delta, relative delta percentage
+- `within_1_pct`, `within_4_pct`
+- Octave error: one is ~2× or ~0.5× the other
 
-**What to change:**
-- Replace `_embed_corpus()` → `_analyze_corpus()` — calls `backend.analyze_track_cached()` for each entry
-- Replace `_score_query()` → `_compare_to_groundtruth()` — uses `compare.py`
-- Result structure: `comparisons.json` instead of `results.json`
+### Step 7: Build runner.py
 
-**Runner flow:**
+Run-scoped orchestration. No persistent vector store.
+
 ```
 1. Load manifest (track list)
-2. Load ground truth (Rekordbox reference)
+2. Load ground truth (from master.db + ANLZ extraction)
 3. For each backend variant:
    a. Instantiate backend
-   b. For each track in manifest:
-      - backend.analyze_track_cached(track) → AnalysisResult
-   c. Compare all results to ground truth → list[TrackComparison]
+   b. For each track: backend.analyze_track_cached(track) → AnalysisRecord
+   c. Write raw_analysis/{backend_id}.json
+   d. Compare all records to ground truth → list[TrackComparison]
 4. Write config.json, comparisons.json, analysis.json
-5. Print summary table
+5. Print summary table with coverage counts
 ```
 
-### Step 10: Fork the analysis module (adapted)
+### Step 8: Build analysis.py
 
-From `samplebase/mvp/src/samplebase_mvp/benchmark_analysis.py`.
+Aggregates comparisons into a scorecard:
 
-**What to keep:**
-- `compute_analysis()` pattern
-- `save_analysis()` / `load_scores()`
-- Per-backend quality bucket pattern
-
-**What to change:**
-- Instead of `gemini_wins` / `local_wins` → track per-backend: `bpm_accuracy`, `key_accuracy`, `mean_beat_offset_ms`
-- Aggregation: average across all tracks, grouped by genre
-
-**New analysis output:**
 ```json
 {
   "run_id": "run-20260417T120000Z",
+  "generated_at": "...",
   "backends": {
     "stratum_dsp_default": {
-      "tracks_compared": 30,
+      "manifest_tracks": 30,
+      "tracks_compared": 28,
+      "missing_groundtruth": 1,
+      "analysis_failures": 1,
       "bpm": {
-        "mean_delta": 0.15,
-        "within_0.5_pct": 0.93,
-        "octave_errors": 1,
-        "complete_misses": 0
+        "median_abs_delta": 0.15,
+        "within_1_pct": 0.96,
+        "within_4_pct": 1.0,
+        "octave_error_rate": 0.03,
+        "missing_count": 0
       },
       "key": {
         "exact_match_rate": 0.80,
-        "relative_major_minor_confusions": 3,
-        "complete_misses": 1
+        "weighted_score_mean": 0.86,
+        "error_breakdown": {
+          "relative_major_minor": 3,
+          "parallel": 1,
+          "fifth": 2,
+          "other": 0
+        },
+        "missing_count": 1
       },
       "beats": {
-        "mean_offset_ms": 2.3,
-        "max_offset_ms": 8.1,
-        "count_delta_mean": 1.2
+        "f_measure_mean": 0.94,
+        "f_measure_median": 0.97,
+        "median_offset_ms": 2.3,
+        "count_delta_median": 1.0
       },
       "operational": {
         "avg_analysis_time_seconds": 1.2,
+        "p95_analysis_time_seconds": 2.7,
         "cache_hit_rate": 0.0,
         "failures": 0
       }
     }
   },
-  "recommendation": "stratum_dsp_default meets accuracy targets (BPM ≥95%, Key ≥85%)"
+  "recommendation": "stratum_dsp_default meets compatibility targets for BPM and beat grid; key accuracy needs manual review."
 }
 ```
 
 ---
 
-## Build Order (Dependency Chain)
+## Build Order
 
 ```
-Weekend 1 (Day 1-2):
-  ┌─────────────────────────────────────┐
-  │ 1. Scaffold Python package          │  ← no deps, pure boilerplate
-  │ 2. Fork config.py (simplified)      │
-  │ 3. Fork cache.py (verbatim)         │
-  │ 4. Fork types.py (adapted)          │
-  └──────────────┬──────────────────────┘
-                 │
-  ┌──────────────▼──────────────────────┐
-  │ 5a. Add `analyze --json` to Rust    │  ← ~30 lines in main.rs
-  │     CLI                              │
-  └──────────────┬──────────────────────┘
-                 │
-  ┌──────────────▼──────────────────────┐
-  │ 4. Build AnalysisBackend ABC        │  ← fork pattern from samplebase
-  │ 5. Implement StratumDspBackend      │  ← subprocess wrapper
-  └──────────────┬──────────────────────┘
-                 │
-Weekend 1 (Day 2-3):
-  ┌──────────────▼──────────────────────┐
-  │ 6. Fork manifest.py (simplified)    │  ← strip sample-specific stuff
-  │ 7. Build groundtruth.py             │  ← NEW: PDB/ANLZ parser
-  │    (or Rust parse-usb subcommand)   │
-  └──────────────┬──────────────────────┘
-                 │
-  ┌──────────────▼──────────────────────┐
-  │ 8. Build compare.py                 │  ← NEW: diff logic
-  └──────────────┬──────────────────────┘
-                 │
-Weekend 2:
-  ┌──────────────▼──────────────────────┐
-  │ 9. Fork runner.py (adapted)         │  ← main orchestration
-  │ 10. Fork analysis.py (adapted)      │  ← aggregation/scoring
-  │ 11. Wire up CLI                     │
-  └──────────────┬──────────────────────┘
-                 │
-  ┌──────────────▼──────────────────────┐
-  │ 12. Curate test corpus (30 tracks)  │
-  │ 13. Export from Rekordbox → USB     │
-  │ 14. Run first benchmark!            │
-  └─────────────────────────────────────┘
+Phase R (Rust-side, ~1 day):
+  ┌─────────────────────────────────────────┐
+  │ R1. ANLZ reader in pioneer-usb-writer   │  ~150 lines, mirrors anlz.rs writer
+  │ R2. extract-groundtruth command          │  ~80 lines, uses read_masterdb + ANLZ reader
+  │ R3. analyze --json command               │  ~40 lines, wraps analyzer::analyze_track
+  └─────────────────────────────────────────┘
+
+Phase P (Python-side, ~3-4 days):
+  ┌─────────────────────────────────────────┐
+  │ P0. JSON schemas for all artifacts       │  ~150 lines
+  │ P1. Scaffold package + config            │  ~100 lines
+  │ P2. Types + cache                        │  ~200 lines
+  │ P3. AnalysisBackend ABC + StratumDsp     │  ~150 lines
+  │ P4. groundtruth.py (loader)              │  ~60 lines
+  │ P5. compare.py (diff logic)              │  ~200 lines
+  │ P6. runner.py (orchestration)            │  ~200 lines
+  │ P7. analysis.py (aggregation)            │  ~100 lines
+  │ P8. cli.py (argparse)                    │  ~100 lines
+  └─────────────────────────────────────────┘
+
+Phase T (Testing, ~1-2 days):
+  ┌─────────────────────────────────────────┐
+  │ T1. Curate test corpus (30 tracks)       │
+  │ T2. Export from Rekordbox → USB          │
+  │ T3. Run extract-groundtruth              │
+  │ T4. Run first benchmark                  │
+  │ T5. Review results, iterate              │
+  └─────────────────────────────────────────┘
 ```
 
 ---
 
-## Files: Fork vs New vs Modify
+## Files: New vs Modified
 
-### Forked from samplebase (copy + adapt):
-| Source | Destination | Changes |
-|---|---|---|
-| `benchmark_backends.py` (cache helpers, ~60 lines) | `cache.py` | Rename types, simplify key (no segment) |
-| `benchmark_backends.py` (ABC structure) | `backends/base.py` | New interface: `analyze_track()` instead of `embed_audio_segments()` |
-| `benchmark_runner.py` (DEFAULT_VARIANTS, run orchestration, result writing) | `runner.py` | Swap embed→analyze, score→compare |
-| `benchmark_analysis.py` (compute_analysis, save/load) | `analysis.py` | New metrics (accuracy instead of win-rate) |
-| `benchmark_manifest.py` (build_manifest, load_json, write_bundle) | `manifest.py` | Strip sample-specific inference functions |
-| `benchmark_types.py` (dataclass patterns) | `types.py` | New types for analysis results |
-| `config.py` (Settings dataclass, path resolution) | `config.py` | Strip Gemini/embedding/sample-specific fields |
-
-### New code:
+### Rust-side (new code)
 | File | Purpose | Est. Lines |
 |---|---|---|
-| `groundtruth.py` | Parse Rekordbox USB export (PDB + ANLZ) | ~200 |
-| `compare.py` | Diff analysis results vs ground truth | ~120 |
-| `backends/stratum_dsp.py` | Subprocess wrapper for Rust CLI | ~80 |
-| `cli.py` | argparse: init, run, analyze, compare | ~100 |
+| `pioneer-usb-writer/src/reader/anlz.rs` | ANLZ PQTZ beat grid reader | ~150 |
+| `pioneer-test-ui/src/main.rs` | Add `analyze` and `extract-groundtruth` subcommands | ~120 |
 
-### Rust-side modification:
-| File | Change | Est. Lines |
+### Python-side (all new)
+| File | Purpose | Est. Lines |
 |---|---|---|
-| `pioneer-usb-writer/src/main.rs` | Add `analyze` subcommand with `--json` output | ~40 |
-| (optional) `pioneer-usb-writer/src/main.rs` | Add `parse-usb` subcommand for ground truth extraction | ~200 |
+| `analysis/src/fourfour_analysis/types.py` | Core data types | ~100 |
+| `analysis/src/fourfour_analysis/cache.py` | Content-addressed JSON cache | ~80 |
+| `analysis/src/fourfour_analysis/backends/base.py` | AnalysisBackend ABC | ~60 |
+| `analysis/src/fourfour_analysis/backends/stratum_dsp.py` | Subprocess wrapper | ~80 |
+| `analysis/src/fourfour_analysis/backends/registry.py` | ANALYSIS_VARIANTS dict | ~30 |
+| `analysis/src/fourfour_analysis/manifest.py` | Corpus manifest builder | ~80 |
+| `analysis/src/fourfour_analysis/groundtruth.py` | Ground truth loader | ~60 |
+| `analysis/src/fourfour_analysis/compare.py` | Diff logic + metrics | ~200 |
+| `analysis/src/fourfour_analysis/runner.py` | Run orchestration | ~200 |
+| `analysis/src/fourfour_analysis/analysis.py` | Aggregation | ~100 |
+| `analysis/src/fourfour_analysis/cli.py` | argparse CLI | ~100 |
+| `analysis/src/fourfour_analysis/config.py` | Settings | ~40 |
+| `benchmark/schemas/*.schema.json` | Artifact validation | ~150 |
+| `analysis/pyproject.toml` | Package config | ~15 |
+
+**Total new code: ~1,545 lines** (Rust ~270, Python ~1,130, schemas ~150)
 
 ---
 
@@ -550,14 +738,17 @@ cd fourfour/analysis
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-# Step 1: Create a test corpus manifest from a directory of tracks
+# Step 1: Create test corpus manifest from a directory of tracks
 fourfour-benchmark init ~/Music/benchmark-corpus --name corpus-v1
 
-# Step 2: Extract ground truth from a Rekordbox-exported USB
-fourfour-benchmark extract-groundtruth /Volumes/REKORDBOX_USB --name corpus-v1
-# (or: cargo run -p pioneer-usb-writer -- parse-usb /Volumes/REKORDBOX_USB --json > groundtruth.json)
+# Step 2: Extract ground truth (Rust-side, reads master.db + USB ANLZ)
+cargo run -p pioneer-test-ui -- extract-groundtruth \
+  --masterdb ~/Library/Pioneer/rekordbox/master.db \
+  --usb /Volumes/REKORDBOX_USB \
+  --manifest benchmark/manifests/corpus-v1.manifest.json \
+  --output benchmark/groundtruth/corpus-v1.groundtruth.json
 
-# Step 3: Run all backends against the corpus
+# Step 3: Run benchmark
 fourfour-benchmark run \
   --manifest benchmark/manifests/corpus-v1.manifest.json \
   --groundtruth benchmark/groundtruth/corpus-v1.groundtruth.json \
@@ -575,29 +766,9 @@ fourfour-benchmark run \
 
 ---
 
-## Decision: Rust-side or Python-side ground truth parser?
-
-**Option A: Python PDB/ANLZ parser (~200 lines)**
-- Pros: No Rust changes needed for ground truth extraction, Python is easier to iterate on
-- Cons: Duplicates binary format knowledge that already exists in Rust writer, two sources of truth for format
-
-**Option B: Rust `parse-usb` subcommand (~200 lines in Rust)**
-- Pros: Single source of truth for PDB/ANLZ format, Rust already has the writer = reader is trivial mirror
-- Cons: More Rust code to maintain, Python can't run without compiling Rust first
-
-**Recommendation: Option B (Rust parser).** The PDB writer is ~920 lines. Writing a reader in Python that correctly handles all the binary edge cases would be error-prone. The Rust binary already knows every page offset and string encoding detail. A reader is just the writer in reverse.
-
-The ground truth extraction becomes:
-```bash
-cargo run -p pioneer-usb-writer -- parse-usb /Volumes/REKORDBOX_USB --json
-```
-Output is JSON that Python can consume directly.
-
----
-
 ## Test Corpus Requirements
 
-For Phase 0, we need ~30 tracks with known Rekordbox analysis:
+For Phase 0, ~30 tracks with known Rekordbox analysis:
 
 | Genre | Count | BPM Range | Why |
 |---|---|---|---|
@@ -609,8 +780,9 @@ For Phase 0, we need ~30 tracks with known Rekordbox analysis:
 
 **Process:**
 1. Curate these tracks in a Rekordbox collection
-2. Export to USB with full analysis (right-click → Export)
-3. Also copy the same files to our benchmark corpus directory
-4. Run `fourfour-benchmark extract-groundtruth` to parse the USB
-5. Run `fourfour-benchmark init` on the corpus directory
-6. Run `fourfour-benchmark run` to compare our analysis vs Rekordbox
+2. Let Rekordbox analyze them (full analysis with beat grids)
+3. Export to USB (creates ANLZ files with beat grids)
+4. Copy the same source files to our benchmark corpus directory
+5. Run `extract-groundtruth` to pull BPM/key from master.db + beats from ANLZ
+6. Run `fourfour-benchmark init` on the corpus directory
+7. Run `fourfour-benchmark run` to compare our analysis vs Rekordbox
