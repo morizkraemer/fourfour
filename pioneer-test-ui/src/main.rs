@@ -444,11 +444,23 @@ fn app_version() -> String {
 }
 
 /// Run Python analysis CLI on a single track and return the result as JSON.
+/// Uses the venv Python at `analysis/.venv/bin/python`.
 #[tauri::command]
 async fn analyze_track_python(path: String) -> Result<serde_json::Value, String> {
+    // Resolve the venv Python relative to the workspace root
+    let venv_python = std::env::current_dir()
+        .unwrap_or_default()
+        .join("analysis/.venv/bin/python");
+
+    let python = if venv_python.exists() {
+        venv_python.to_string_lossy().to_string()
+    } else {
+        "python3".to_string()
+    };
+
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("python3")
-            .args(["-m", "fourfour_analysis.cli", "analyze", &path, "--json"])
+        std::process::Command::new(&python)
+            .args(["-m", "fourfour_analysis", "analyze", &path, "--json"])
             .output()
     })
     .await
