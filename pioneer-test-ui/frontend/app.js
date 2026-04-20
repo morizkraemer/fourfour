@@ -578,17 +578,29 @@ async function changeLibraryPath() {
 // ── Waveform Display ──────────────────────────────────────────────────────
 let currentWaveformData = null;
 
-function showWaveform(trackId) {
+async function showWaveform(trackId) {
     const track = tracks.find(t => t.id === trackId);
     if (!track) return;
 
     document.getElementById('waveform-track-name').textContent = track.title || 'Unknown';
     document.getElementById('waveform-panel').classList.remove('hidden');
 
-    // For now, just show the panel. Data will be loaded by Task 8 integration.
-    // This allows testing the canvas rendering with mock data.
-    if (currentWaveformData) {
+    try {
+        // Try Python analyzer first (richer data: color waveform)
+        const data = await invoke('analyze_track_python', { path: track.source_path });
+        currentWaveformData = data;
         renderWaveform();
+    } catch (pyErr) {
+        console.warn('Python analyzer unavailable, falling back to Rust:', pyErr);
+        try {
+            // Fall back to Rust analyzer (mono PWAV only)
+            const data = await invoke('get_analysis_data', { trackId: trackId });
+            currentWaveformData = data;
+            renderWaveform();
+        } catch (rustErr) {
+            console.error('Both analyzers failed:', rustErr);
+            document.getElementById('waveform-track-name').textContent += ' (no analysis data)';
+        }
     }
 }
 
