@@ -60,15 +60,81 @@ def analyze(paths, directory, output_json, output, workers):
             click.echo(f"{name}: BPM={bpm} Key={key} Energy={e_score}/10 Errors={errors}")
 
 
+MASTERDB_KEY = "402fd482c38817c35ffa8ffb8c7d93143b749e7d315df7a81732a1ff43608497"
+
+
+def read_masterdb_tracks(db_path: str, playlist_name: str | None = None) -> list[dict]:
+    """Read tracks from Rekordbox master.db (SQLCipher encrypted).
+
+    Returns list of dicts with: source_path, tempo, key
+    """
+    try:
+        from pysqlcipher3 import dbapi2 as sqlite
+    except ImportError:
+        raise ImportError(
+            "pysqlcipher3 required for reading master.db.\n"
+            "Install: pip install pysqlcipher3\n"
+            "Requires sqlcipher library: brew install sqlcipher"
+        )
+
+    conn = sqlite.connect(db_path)
+    conn.execute(f"PRAGMA key = '{MASTERDB_KEY}'")
+    conn.execute("PRAGMA cipher_compatibility = 4")
+
+    # Read key lookup table
+    keys = {}
+    for row in conn.execute("SELECT ID, ScaleName FROM djmdKey"):
+        keys[row[0]] = row[1]
+
+    # Read tracks
+    query = """
+        SELECT ID, FolderPath, BPM, KeyID
+        FROM djmdContent
+        WHERE (rb_local_deleted = 0 OR rb_local_deleted IS NULL)
+    """
+    tracks = []
+    for row in conn.execute(query):
+        content_id, folder_path, bpm_x100, key_id = row
+        key = keys.get(key_id, "")
+        tracks.append({
+            "id": content_id,
+            "source_path": folder_path,
+            "tempo": bpm_x100 or 0,
+            "key": key,
+        })
+
+    # Filter by playlist if specified
+    if playlist_name:
+        playlist_row = conn.execute(
+            "SELECT ID FROM djmdPlaylist WHERE Name = ?", (playlist_name,)
+        ).fetchone()
+        if playlist_row is None:
+            conn.close()
+            raise click.ClickException(f"Playlist '{playlist_name}' not found")
+
+        playlist_id = playlist_row[0]
+        playlist_track_ids = set()
+        for row in conn.execute(
+            "SELECT TrackID FROM djmdSongPlaylist WHERE PlaylistID = ?", (playlist_id,)
+        ):
+            playlist_track_ids.add(row[0])
+
+        tracks = [t for t in tracks if t["id"] in playlist_track_ids]
+
+    conn.close()
+    return tracks
+
+
 @main.command()
 @click.option("--masterdb", type=click.Path(exists=True), help="Path to Rekordbox master.db")
-@click.option("--playlist", type=str, help="Playlist name to benchmark from master.db")
+@click.option("--playlist", type=str, help="Playlist name to benchmark")
 @click.option("--workers", "-w", type=int, default=4, help="Number of parallel workers")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output JSON report")
 def benchmark(masterdb, playlist, workers, output_json):
     """Benchmark analysis against Rekordbox master.db ground truth."""
     import platform
     from fourfour_analysis.benchmark import run_benchmark
+    from fourfour_analysis.analyze import analyze_batch
 
     # Default master.db path
     if masterdb is None:
@@ -82,39 +148,24 @@ def benchmark(masterdb, playlist, workers, output_json):
         click.echo(f"master.db not found at {masterdb}", err=True)
         sys.exit(1)
 
-    # Read ground truth via the Rust masterdb reader CLI
-    proc = subprocess.run(
-        ["cargo", "run", "-p", "pioneer-test-ui", "--", "read-masterdb", masterdb, "--json"],
-        capture_output=True, text=True,
-        cwd=str(Path(__file__).parents[3]),
-    )
-    if proc.returncode != 0:
-        click.echo(f"Failed to read master.db: {proc.stderr}", err=True)
+    # Read ground truth
+    try:
+        ground_truth = read_masterdb_tracks(masterdb, playlist)
+    except ImportError as e:
+        click.echo(str(e), err=True)
         sys.exit(1)
 
-    ground_truth = json.loads(proc.stdout)
+    click.echo(f"Read {len(ground_truth)} tracks from master.db", err=True)
 
-    # Filter to playlist if specified
-    if playlist:
-        playlist_tracks = None
-        for pl in ground_truth.get("playlists", []):
-            if pl["name"] == playlist:
-                playlist_tracks = set(pl["track_ids"])
-                break
-        if playlist_tracks is None:
-            click.echo(f"Playlist '{playlist}' not found in master.db", err=True)
-            sys.exit(1)
-        gt_tracks = [t for t in ground_truth["tracks"] if t["id"] in playlist_tracks]
-    else:
-        gt_tracks = ground_truth["tracks"]
+    # Filter to tracks that exist on disk
+    paths = [t["source_path"] for t in ground_truth if Path(t["source_path"]).exists()]
+    click.echo(f"Analyzing {len(paths)} tracks (found on disk)...", err=True)
 
-    # Analyze the same tracks
-    paths = [t["source_path"] for t in gt_tracks if Path(t["source_path"]).exists()]
-    click.echo(f"Analyzing {len(paths)} tracks...", err=True)
+    # Analyze
     results = analyze_batch(paths, workers=workers)
 
     # Compare
-    report = run_benchmark(results, gt_tracks)
+    report = run_benchmark(results, ground_truth)
 
     if output_json:
         click.echo(json.dumps({

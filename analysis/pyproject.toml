@@ -12,6 +12,9 @@ dependencies = [
     "click",
 ]
 
+[project.optional-dependencies]
+benchmark = ["pysqlcipher3"]
+
 [project.scripts]
 fourfour-analyze = "fourfour_analysis.cli:main"
 
