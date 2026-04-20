@@ -350,7 +350,7 @@ function renderTracks() {
         const key = t.key ? esc(t.key) : '—';
         const dur = formatDuration(t.duration_secs);
         const cues = t.has_cues ? '●' : '';
-        return `<tr class="track-row${sel}" data-track-id="${t.id}" onclick="toggleTrackSelection(${t.id})">
+        return `<tr class="track-row${sel}" data-track-id="${t.id}" onclick="toggleTrackSelection(${t.id})" ondblclick="showWaveform(${t.id})">
             <td class="col-num">${i + 1}</td>
             <td class="col-title" title="${esc(t.source_path)}">${title}</td>
             <td class="col-artist">${artist}</td>
@@ -572,6 +572,108 @@ async function changeLibraryPath() {
         renderPlaylists();
     } catch (err) {
         alert('Failed to change library: ' + err);
+    }
+}
+
+// ── Waveform Display ──────────────────────────────────────────────────────
+let currentWaveformData = null;
+
+function showWaveform(trackId) {
+    const track = tracks.find(t => t.id === trackId);
+    if (!track) return;
+
+    document.getElementById('waveform-track-name').textContent = track.title || 'Unknown';
+    document.getElementById('waveform-panel').classList.remove('hidden');
+
+    // For now, just show the panel. Data will be loaded by Task 8 integration.
+    // This allows testing the canvas rendering with mock data.
+    if (currentWaveformData) {
+        renderWaveform();
+    }
+}
+
+function closeWaveform() {
+    document.getElementById('waveform-panel').classList.add('hidden');
+    currentWaveformData = null;
+}
+
+function renderWaveform() {
+    if (!currentWaveformData) return;
+
+    const canvas = document.getElementById('waveform-canvas');
+    const ctx = canvas.getContext('2d');
+    const mode = document.getElementById('waveform-mode').value;
+
+    // Set canvas resolution to match display size
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+    const w = rect.width;
+    const h = rect.height;
+
+    // Clear
+    ctx.fillStyle = '#0d0d0d';
+    ctx.fillRect(0, 0, w, h);
+
+    if (mode === 'color') {
+        renderColorWaveform(ctx, w, h, currentWaveformData.waveform_color);
+    } else if (mode === 'mono') {
+        renderMonoWaveform(ctx, w, h, currentWaveformData.waveform_preview);
+    } else if (mode === 'peaks') {
+        renderPeaksWaveform(ctx, w, h, currentWaveformData.waveform_peaks);
+    }
+}
+
+function renderColorWaveform(ctx, w, h, data) {
+    if (!data || data.length === 0) return;
+    const barWidth = w / data.length;
+    const centerY = h / 2;
+
+    for (let i = 0; i < data.length; i++) {
+        const { amp, r, g, b } = data[i];
+        const barH = amp * centerY;
+
+        // Mix RGB channels into a color
+        const red = Math.round(r * 255);
+        const green = Math.round(g * 255);
+        const blue = Math.round(b * 255);
+
+        ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+        ctx.fillRect(i * barWidth, centerY - barH, Math.max(barWidth, 1), barH * 2);
+    }
+}
+
+function renderMonoWaveform(ctx, w, h, data) {
+    if (!data || data.length === 0) return;
+    const barWidth = w / data.length;
+    const centerY = h / 2;
+
+    for (let i = 0; i < data.length; i++) {
+        const byte = data[i];
+        const height = (byte & 0x1F) / 31.0;  // 5 low bits
+        const whiteness = ((byte >> 5) & 0x07) / 7.0;  // 3 high bits
+
+        const barH = height * centerY;
+        const brightness = Math.round(100 + whiteness * 155);
+
+        ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${brightness})`;
+        ctx.fillRect(i * barWidth, centerY - barH, Math.max(barWidth, 1), barH * 2);
+    }
+}
+
+function renderPeaksWaveform(ctx, w, h, data) {
+    if (!data || data.length === 0) return;
+    const barWidth = w / data.length;
+    const centerY = h / 2;
+
+    ctx.fillStyle = '#4a9eff';
+    for (let i = 0; i < data.length; i++) {
+        const [min, max] = data[i];
+        const y1 = centerY - max * centerY;
+        const y2 = centerY - min * centerY;
+        ctx.fillRect(i * barWidth, y1, Math.max(barWidth, 1), y2 - y1);
     }
 }
 

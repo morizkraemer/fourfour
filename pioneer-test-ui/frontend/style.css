@@ -137,13 +137,21 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
     border-right: 2px solid var(--accent2);
 }
 
+/* ── Track + waveform column wrapper ── */
+.track-and-waveform {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-right: 1px solid var(--border);
+}
+
 /* ── Track panel ── */
 #track-panel {
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-right: 1px solid var(--border);
 }
 
 #track-table-wrap {
@@ -458,4 +466,51 @@ dialog {
 }
 dialog::backdrop {
     background: rgba(0,0,0,0.6);
+}
+
+/* ── Waveform panel ── */
+.waveform-panel {
+    border-top: 1px solid #333;
+    background: #1a1a1a;
+    padding: 8px;
+    flex-shrink: 0;
+}
+
+.waveform-panel.hidden {
+    display: none;
+}
+
+.waveform-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #aaa;
+}
+
+.waveform-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.waveform-controls select {
+    font-size: 11px;
+    padding: 2px 4px;
+    background: #2a2a2a;
+    color: #ccc;
+    border: 1px solid #444;
+}
+
+.waveform-controls button {
+    font-size: 11px;
+    padding: 2px 8px;
+}
+
+#waveform-canvas {
+    width: 100%;
+    height: 128px;
+    background: #0d0d0d;
+    border-radius: 4px;
 }

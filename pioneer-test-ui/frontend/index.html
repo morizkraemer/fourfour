@@ -44,28 +44,47 @@
 
             <!-- Library: tracks + playlists -->
             <div class="side library-side">
-                <div id="track-panel">
-                    <div id="track-table-wrap">
-                        <table id="track-table">
-                            <thead>
-                                <tr>
-                                    <th class="col-num">#</th>
-                                    <th class="col-title">Title</th>
-                                    <th class="col-artist">Artist</th>
-                                    <th class="col-bpm">BPM</th>
-                                    <th class="col-key">Key</th>
-                                    <th class="col-cues">Cues</th>
-                                    <th class="col-dur">Duration</th>
-                                </tr>
-                            </thead>
-                            <tbody id="track-tbody">
-                                <tr class="empty-row">
-                                    <td colspan="7">No tracks loaded. Import a folder or drop files here.</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                <div class="track-and-waveform">
+                    <div id="track-panel">
+                        <div id="track-table-wrap">
+                            <table id="track-table">
+                                <thead>
+                                    <tr>
+                                        <th class="col-num">#</th>
+                                        <th class="col-title">Title</th>
+                                        <th class="col-artist">Artist</th>
+                                        <th class="col-bpm">BPM</th>
+                                        <th class="col-key">Key</th>
+                                        <th class="col-cues">Cues</th>
+                                        <th class="col-dur">Duration</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="track-tbody">
+                                    <tr class="empty-row">
+                                        <td colspan="7">No tracks loaded. Import a folder or drop files here.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Waveform display panel (below track table) -->
+                    <div id="waveform-panel" class="waveform-panel hidden">
+                        <div class="waveform-header">
+                            <span id="waveform-track-name">No track selected</span>
+                            <div class="waveform-controls">
+                                <select id="waveform-mode" onchange="renderWaveform()">
+                                    <option value="color">Color (RGB)</option>
+                                    <option value="mono">Mono (PWAV)</option>
+                                    <option value="peaks">Peaks</option>
+                                </select>
+                                <button onclick="closeWaveform()">Close</button>
+                            </div>
+                        </div>
+                        <canvas id="waveform-canvas" width="800" height="128"></canvas>
                     </div>
                 </div>
+
                 <div id="playlist-panel">
                     <div id="playlist-actions">
                         <span id="selection-count">0 selected</span>
