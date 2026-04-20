@@ -9,3 +9,6 @@ pioneer-usb-writer/-e
 pioneer-usb-writer/-p
 shed.toml
 .pi
+analysis/
+benchmark/
+node_modules/
