@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>four four</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg-base:        #1e1e1e;
+    --bg-elevated:    #242424;
+    --bg-surface:     #2a2a2a;
+    --selection:      rgba(0, 99, 225, 0.32);
+    --selection-text: #fff;
+    --text-primary:   #e0e0e0;
+    --text-secondary: #999;
+    --text-tertiary:  #5a5a5a;
+    --text-disabled:  #404040;
+    --border:         #333;
+    --border-subtle:  #2a2a2a;
+    --sidebar-w:      220px;
+    --col-narrow:     26px 2.5fr 1.6fr 1.2fr 42px 38px 50px;
+    --col-wide:       26px 2.5fr 1.6fr 1.2fr 42px 38px 50px 1fr 50px 1.5fr;
+    --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.35;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-rows: 1fr auto auto;
+    height: 100vh;
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr 1fr;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .main.expanded {
+    grid-template-columns: var(--sidebar-w) 1fr 0px;
+  }
+  .main.expanded .panel:last-child { display: none; }
+  .main.expanded .panel:first-of-type { border-right: none; }
+
+  /* ── Sidebar ───────────────────────────────────────────── */
+  .sidebar {
+    background: var(--bg-base);
+    border-right: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .sidebar-drawer {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+  }
+  .sidebar-page {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--bg-surface) transparent;
+    transition: transform 0.22s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.22s ease;
+    will-change: transform;
+  }
+  .sidebar-page { background: var(--bg-base); }
+  .sidebar-page.root-page { transform: translateX(0); z-index: 1; }
+  .sidebar-page.child-page { transform: translateX(100%); z-index: 2; pointer-events: none; }
+  .sidebar-page.child-page.visible { transform: translateX(0); pointer-events: auto; }
+  .sidebar-page.root-page.pushed { transform: translateX(-20%); pointer-events: none; }
+  .sidebar-back {
+    display: flex; align-items: center; height: 30px;
+    padding: 0 6px 0 4px; margin: 6px 6px 0;
+    cursor: default; color: var(--text-tertiary);
+    font-size: 11.5px; border-radius: 4px;
+    transition: background 0.08s, color 0.08s;
+    gap: 2px; flex-shrink: 0;
+  }
+  .sidebar-back:hover { background: rgba(255,255,255,0.05); color: var(--text-secondary); }
+  .sidebar-back svg { width: 12px; height: 12px; fill: currentColor; flex-shrink: 0; }
+  .sidebar-back .back-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sidebar-section { padding: 10px 0 4px; }
+  .sidebar-section + .sidebar-section { border-top: 1px solid var(--border-subtle); }
+  .sidebar-heading {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-tertiary);
+    padding: 2px 12px 6px;
+  }
+  .sidebar-row {
+    display: flex; align-items: center; height: 26px;
+    padding: 0 12px; cursor: default; color: var(--text-secondary);
+    font-size: 12.5px; border-radius: 4px; margin: 1px 6px;
+    transition: background 0.08s, color 0.08s;
+  }
+  .sidebar-row:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+  .sidebar-row.active { background: var(--selection); color: var(--selection-text); }
+  .sidebar-row .chevron {
+    flex-shrink: 0; width: 16px; height: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sidebar-row .chevron svg { width: 8px; height: 8px; fill: currentColor; opacity: 0.35; }
+  .sidebar-row .chevron-right { order: 999; }
+  .sidebar-row .icon {
+    flex-shrink: 0; width: 18px; height: 16px;
+    display: flex; align-items: center; justify-content: center; opacity: 0.45;
+  }
+  .sidebar-row .icon svg { width: 13px; height: 13px; }
+  .sidebar-row.active .icon { opacity: 0.5; }
+  .sidebar-row .label {
+    flex: 1; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .sidebar-row .count {
+    flex-shrink: 0; font-size: 11px; color: var(--text-tertiary);
+    font-variant-numeric: tabular-nums; margin-left: 8px;
+  }
+  .sidebar-row.active .count { color: rgba(255,255,255,0.4); }
+  .sidebar-spacer { flex: 1; }
+  .sidebar-usb { padding: 10px 0 4px; border-top: 1px solid var(--border-subtle); flex-shrink: 0; }
+  .usb-row {
+    display: flex; align-items: center; height: 26px;
+    padding: 0 12px; margin: 1px 6px; border-radius: 4px;
+    font-size: 12.5px; color: var(--text-secondary); cursor: default;
+    transition: background 0.08s;
+  }
+  .usb-row:hover { background: rgba(255,255,255,0.05); }
+  .usb-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; margin-right: 8px; }
+  .usb-dot.mounted { background: #4caf7a; }
+  .usb-dot.unmounted { background: var(--text-tertiary); }
+
+  /* ── Panel ─────────────────────────────────────────────── */
+  .panel {
+    display: flex; flex-direction: column;
+    min-width: 0; min-height: 0; overflow: hidden;
+    background: var(--bg-elevated);
+  }
+  .panel + .panel { border-left: 1px solid var(--border-subtle); }
+  .panel-header {
+    height: 36px; padding: 0 12px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border-subtle); flex-shrink: 0;
+  }
+  .panel-header-left { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .panel-title { font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-subtitle { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+  .panel-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .panel-actions button {
+    background: none; border: none; color: var(--text-tertiary);
+    cursor: default; padding: 2px 8px; border-radius: 3px;
+    font-size: 11px; font-family: var(--font); line-height: 20px;
+    transition: background 0.08s, color 0.08s;
+  }
+  .panel-actions button:hover { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+
+  /* ── Context Menu ─────────────────────────────────────── */
+  .context-menu {
+    position: fixed; z-index: 1000;
+    background: #2a2a2a; border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 0;
+    min-width: 160px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    font-size: 12.5px;
+    display: none;
+  }
+  .context-menu.visible { display: block; }
+  .context-menu-item {
+    padding: 5px 12px; cursor: default;
+    color: var(--text-secondary);
+    transition: background 0.08s, color 0.08s;
+  }
+  .context-menu-item:hover { background: var(--selection); color: #fff; }
+
+  /* ── Track List ────────────────────────────────────────── */
+  .track-list-header, .track-row {
+    display: grid;
+    grid-template-columns: var(--col-narrow);
+    padding: 0 12px;
+  }
+  .main.expanded .track-list-header,
+  .main.expanded .track-row {
+    grid-template-columns: var(--col-wide);
+  }
+  .extra-col { display: none; }
+  .main.expanded .extra-col { display: block; }
+  .track-list-header {
+    height: 24px; align-items: center;
+    border-bottom: 1px solid var(--border-subtle);
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bg-elevated);
+  }
+  .track-list-header span {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.4px; color: var(--text-tertiary);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .track-list {
+    flex: 1; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--bg-surface) transparent;
+  }
+  .track-row {
+    height: 26px; align-items: center; cursor: default;
+    transition: background 0.06s;
+  }
+  .track-row:nth-child(even) { background: rgba(255,255,255,0.025); }
+  .track-row:hover { background: rgba(255,255,255,0.06); }
+  .track-row.selected { background: var(--selection); }
+  .track-row.analyzing { opacity: 0.45; }
+  .track-cell {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12px;
+  }
+  .track-cell.num { color: var(--text-tertiary); font-variant-numeric: tabular-nums; text-align: right; padding-right: 4px; }
+  .track-cell.title { color: var(--text-primary); }
+  .track-cell.artist { color: var(--text-secondary); }
+  .track-cell.label { color: var(--text-tertiary); }
+  .track-cell.bpm, .track-cell.key, .track-cell.time,
+  .track-cell.genre, .track-cell.year {
+    color: var(--text-secondary); font-variant-numeric: tabular-nums;
+  }
+  .track-cell.genre, .track-cell.comment { color: var(--text-tertiary); }
+  .track-cell.year { text-align: center; }
+  .track-row.selected .track-cell { color: rgba(255,255,255,0.65); }
+  .track-row.selected .track-cell.title { color: var(--selection-text); }
+  .track-row .track-cell.muted { color: var(--text-disabled) !important; }
+
+  /* ── Player ────────────────────────────────────────────── */
+  .player {
+    background: var(--bg-elevated); border-top: 1px solid var(--border);
+    display: grid; grid-template-columns: 44px 28px 1fr;
+    gap: 12px; align-items: center; padding: 8px 14px; flex-shrink: 0;
+  }
+  .player-artwork {
+    width: 44px; height: 44px; background: var(--bg-surface); border-radius: 3px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: var(--text-disabled); font-size: 16px; line-height: 1;
+  }
+  .player-play {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--text-primary); border: none;
+    display: flex; align-items: center; justify-content: center;
+    cursor: default; flex-shrink: 0; transition: opacity 0.1s;
+  }
+  .player-play:hover { opacity: 0.82; }
+  .player-play svg { margin-left: 1px; }
+  .player-waveform-area { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .player-track-info { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .player-track-title {
+    font-size: 12px; font-weight: 500; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text-primary); flex-shrink: 0; max-width: 50%;
+  }
+  .player-track-artist { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .waveform-container { position: relative; height: 32px; cursor: default; }
+  .waveform-container canvas { width: 100%; height: 100%; display: block; }
+  .waveform-time { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+
+  /* ── Status ────────────────────────────────────────────── */
+  .status-bar {
+    background: var(--bg-base); border-top: 1px solid var(--border-subtle);
+    padding: 0 14px; display: flex; align-items: center; justify-content: space-between;
+    height: 24px; font-size: 11px; color: var(--text-tertiary); flex-shrink: 0;
+  }
+  .status-left { display: flex; align-items: center; gap: 6px; }
+  .spinner {
+    width: 12px; height: 12px; border: 1.5px solid var(--border);
+    border-top-color: var(--text-tertiary); border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .status-sep { color: var(--border); }
+</style>
+</head>
+<body>
+
+<!-- Context Menu -->
+<div class="context-menu" id="contextMenu">
+  <div class="context-menu-item" data-action="split">Open in Split View</div>
+</div>
+
+<div class="app">
+  <div class="main">
+
+    <!-- ── Sidebar ── -->
+    <div class="sidebar">
+      <div class="sidebar-drawer">
+        <!-- Root page -->
+        <div class="sidebar-page root-page" id="sidebarRoot">
+          <div class="sidebar-section">
+            <div class="sidebar-heading">Library</div>
+            <div class="sidebar-row active" data-id="all">
+              <span class="icon"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6" cy="6" r="4"/><path d="M6 3v3l2 1"/></svg></span>
+              <span class="label">All Tracks</span>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-heading">Playlists</div>
+            <div class="sidebar-row" data-id="gigs" data-folder="true">
+              <span class="icon"><svg viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="3" width="10" height="7" rx="1"/><rect x="1" y="2" width="5" height="2" rx="0.5"/></svg></span>
+              <span class="label">Gigs</span>
+              <span class="chevron chevron-right"><svg viewBox="0 0 8 8"><path d="M2 1 L6 4 L2 7 Z"/></svg></span>
+            </div>
+            <div class="sidebar-row" data-id="panorama" data-folder="true">
+              <span class="icon"><svg viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="3" width="10" height="7" rx="1"/><rect x="1" y="2" width="5" height="2" rx="0.5"/></svg></span>
+              <span class="label">Panorama Bar</span>
+              <span class="chevron chevron-right"><svg viewBox="0 0 8 8"><path d="M2 1 L6 4 L2 7 Z"/></svg></span>
+            </div>
+            <div class="sidebar-row" data-id="house"><span class="label">House</span></div>
+            <div class="sidebar-row" data-id="techno"><span class="label">Techno</span></div>
+            <div class="sidebar-row" data-id="breaks"><span class="label">Breaks</span></div>
+            <div class="sidebar-row" data-id="clubk" data-folder="true">
+              <span class="icon"><svg viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="3" width="10" height="7" rx="1"/><rect x="1" y="2" width="5" height="2" rx="0.5"/></svg></span>
+              <span class="label">Club K</span>
+              <span class="chevron chevron-right"><svg viewBox="0 0 8 8"><path d="M2 1 L6 4 L2 7 Z"/></svg></span>
+            </div>
+            <div class="sidebar-row" data-id="openers"><span class="label">Opener Sets</span></div>
+            <div class="sidebar-row" data-id="warehouse"><span class="label">Warehouse Rave</span></div>
+            <div class="sidebar-row" data-id="afterdark"><span class="label">After Dark</span></div>
+            <div class="sidebar-row" data-id="sunset"><span class="label">Sunset Session</span></div>
+            <div class="sidebar-row" data-id="festival" data-folder="true">
+              <span class="icon"><svg viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="3" width="10" height="7" rx="1"/><rect x="1" y="2" width="5" height="2" rx="0.5"/></svg></span>
+              <span class="label">Festival Prep</span>
+              <span class="chevron chevron-right"><svg viewBox="0 0 8 8"><path d="M2 1 L6 4 L2 7 Z"/></svg></span>
+            </div>
+            <div class="sidebar-row" data-id="deephouse"><span class="label">Deep House</span></div>
+            <div class="sidebar-row" data-id="minimal"><span class="label">Minimal</span></div>
+          </div>
+          <div class="sidebar-spacer"></div>
+        </div>
+
+        <!-- Child pages (one per folder, hidden by default) -->
+        <div class="sidebar-page child-page" id="sidebar-gigs">
+          <div class="sidebar-back" data-back="true">
+            <svg viewBox="0 0 12 12"><path d="M8 2 L4 6 L8 10 Z"/></svg>
+            <span class="back-label">Playlists</span>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-heading">Gigs</div>
+            <div class="sidebar-row" data-id="gigs-balie"><span class="label">Balie</span></div>
+            <div class="sidebar-row" data-id="gigs-ot301"><span class="label">OT301</span></div>
+            <div class="sidebar-row" data-id="gigs-dekmantel"><span class="label">Dekmantel</span></div>
+          </div>
+        </div>
+
+        <div class="sidebar-page child-page" id="sidebar-panorama">
+          <div class="sidebar-back" data-back="true">
+            <svg viewBox="0 0 12 12"><path d="M8 2 L4 6 L8 10 Z"/></svg>
+            <span class="back-label">Playlists</span>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-heading">Panorama Bar</div>
+            <div class="sidebar-row" data-id="saturday"><span class="label">Saturday</span></div>
+            <div class="sidebar-row" data-id="sunday"><span class="label">Sunday Closing</span></div>
+            <div class="sidebar-row" data-id="warmup"><span class="label">Warmup</span></div>
+            <div class="sidebar-row" data-id="peaktime"><span class="label">Peak Time</span></div>
+          </div>
+        </div>
+
+        <div class="sidebar-page child-page" id="sidebar-clubk">
+          <div class="sidebar-back" data-back="true">
+            <svg viewBox="0 0 12 12"><path d="M8 2 L4 6 L8 10 Z"/></svg>
+            <span class="back-label">Playlists</span>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-heading">Club K</div>
+            <div class="sidebar-row" data-id="clubk-main"><span class="label">Main Room</span></div>
+            <div class="sidebar-row" data-id="clubk-floor2"><span class="label">Floor 2</span></div>
+          </div>
+        </div>
+
+        <div class="sidebar-page child-page" id="sidebar-festival">
+          <div class="sidebar-back" data-back="true">
+            <svg viewBox="0 0 12 12"><path d="M8 2 L4 6 L8 10 Z"/></svg>
+            <span class="back-label">Playlists</span>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-heading">Festival Prep</div>
+            <div class="sidebar-row" data-id="festival-opener"><span class="label">Opener</span></div>
+            <div class="sidebar-row" data-id="festival-peak"><span class="label">Peak Time</span></div>
+            <div class="sidebar-row" data-id="festival-closing"><span class="label">Closing</span></div>
+            <div class="sidebar-row" data-id="festival-b2b"><span class="label">B2B</span></div>
+            <div class="sidebar-row" data-id="festival-warmup"><span class="label">Warmup</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-usb">
+        <div class="sidebar-heading">USB Devices</div>
+        <div class="usb-row"><span class="usb-dot mounted"></span>SanDisk 64GB</div>
+        <div class="usb-row"><span class="usb-dot unmounted"></span>Tour Stick</div>
+      </div>
+    </div>
+
+    <!-- ── Library Panel (All Tracks) ── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-header-left">
+          <span class="panel-title">All Tracks</span>
+          <span class="panel-subtitle">52 tracks · 5h 24m</span>
+        </div>
+        <div class="panel-actions"></div>
+      </div>
+      <div class="track-list-header">
+        <span>#</span><span>Title</span><span>Artist</span><span>Label</span><span>BPM</span><span>Key</span><span>Time</span>
+        <span class="extra-col">Genre</span><span class="extra-col">Year</span><span class="extra-col">Comment</span>
+      </div>
+      <div class="track-list">
+<div class="track-row"><span class="track-cell num">1</span><span class="track-cell title">Luvstruck 2024</span><span class="track-cell artist">Southside Spinners</span><span class="track-cell label">selected.</span><span class="track-cell bpm">128</span><span class="track-cell key">8A</span><span class="track-cell time">6:14</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">2024</span><span class="track-cell comment extra-col">Classic vocal sample flip</span></div>
+<div class="track-row selected"><span class="track-cell num">2</span><span class="track-cell title">Midnight City (Dub)</span><span class="track-cell artist">Rhode &amp; Brown</span><span class="track-cell label">selected.</span><span class="track-cell bpm">124</span><span class="track-cell key">9A</span><span class="track-cell time">5:42</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">2024</span><span class="track-cell comment extra-col">Warmup material</span></div>
+<div class="track-row"><span class="track-cell num">3</span><span class="track-cell title">Pulse</span><span class="track-cell artist">Chaos in the CBD</span><span class="track-cell label">In Order to Dance</span><span class="track-cell bpm">126</span><span class="track-cell key">3A</span><span class="track-cell time">7:01</span><span class="track-cell genre extra-col">Deep House</span><span class="track-cell year extra-col">2023</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">4</span><span class="track-cell title">Tangerine</span><span class="track-cell artist">DJ Boring</span><span class="track-cell label">Peach Discs</span><span class="track-cell bpm">122</span><span class="track-cell key">11A</span><span class="track-cell time">5:48</span><span class="track-cell genre extra-col">Lo-fi House</span><span class="track-cell year extra-col">2020</span><span class="track-cell comment extra-col">Dreamy</span></div>
+<div class="track-row"><span class="track-cell num">5</span><span class="track-cell title">Sanctuary</span><span class="track-cell artist">Fred P</span><span class="track-cell label">Soul People Music</span><span class="track-cell bpm">123</span><span class="track-cell key">4A</span><span class="track-cell time">6:33</span><span class="track-cell genre extra-col">Deep House</span><span class="track-cell year extra-col">2019</span><span class="track-cell comment extra-col">Hypnotic</span></div>
+<div class="track-row analyzing"><span class="track-cell num">6</span><span class="track-cell title">Closer to God</span><span class="track-cell artist">Hunee</span><span class="track-cell label">Sound Signature</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span><span class="track-cell genre extra-col"></span><span class="track-cell year extra-col"></span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">7</span><span class="track-cell title">Submerge</span><span class="track-cell artist">Moomin</span><span class="track-cell label">White Noise</span><span class="track-cell bpm">125</span><span class="track-cell key">8A</span><span class="track-cell time">6:22</span><span class="track-cell genre extra-col">Deep House</span><span class="track-cell year extra-col">2018</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">8</span><span class="track-cell title">Juice</span><span class="track-cell artist">Kerri Chandler</span><span class="track-cell label">Kaoz Theory</span><span class="track-cell bpm">127</span><span class="track-cell key">6A</span><span class="track-cell time">7:15</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">2017</span><span class="track-cell comment extra-col">Classic KC</span></div>
+<div class="track-row analyzing"><span class="track-cell num">9</span><span class="track-cell title">Falling (Dub)</span><span class="track-cell artist">Guy J</span><span class="track-cell label">Lost &amp; Found</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span><span class="track-cell genre extra-col"></span><span class="track-cell year extra-col"></span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">10</span><span class="track-cell title">Jupiter</span><span class="track-cell artist">Bicep</span><span class="track-cell label">Ninja Tune</span><span class="track-cell bpm">130</span><span class="track-cell key">1B</span><span class="track-cell time">4:58</span><span class="track-cell genre extra-col">Electronica</span><span class="track-cell year extra-col">2021</span><span class="track-cell comment extra-col">Peak time</span></div>
+<div class="track-row"><span class="track-cell num">11</span><span class="track-cell title">Feelings</span><span class="track-cell artist">Joy Orbison</span><span class="track-cell label">Hinge Finger</span><span class="track-cell bpm">131</span><span class="track-cell key">10A</span><span class="track-cell time">5:31</span><span class="track-cell genre extra-col">Breaks</span><span class="track-cell year extra-col">2022</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">12</span><span class="track-cell title">Système</span><span class="track-cell artist">Djoko</span><span class="track-cell label">Deeppa Records</span><span class="track-cell bpm">124</span><span class="track-cell key">5A</span><span class="track-cell time">6:07</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">2023</span><span class="track-cell comment extra-col">Groovy</span></div>
+<div class="track-row"><span class="track-cell num">13</span><span class="track-cell title">Aquarius</span><span class="track-cell artist">Marshall Jefferson</span><span class="track-cell label">Trax Records</span><span class="track-cell bpm">126</span><span class="track-cell key">7A</span><span class="track-cell time">6:45</span><span class="track-cell genre extra-col">Chicago House</span><span class="track-cell year extra-col">1986</span><span class="track-cell comment extra-col">Legend</span></div>
+<div class="track-row"><span class="track-cell num">14</span><span class="track-cell title">Deep Inside</span><span class="track-cell artist">Hardrive</span><span class="track-cell label">Strictly Rhythm</span><span class="track-cell bpm">124</span><span class="track-cell key">9A</span><span class="track-cell time">5:58</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">1993</span><span class="track-cell comment extra-col">Organ bass</span></div>
+<div class="track-row"><span class="track-cell num">15</span><span class="track-cell title">Follow Me</span><span class="track-cell artist">Ade</span><span class="track-cell label">Honey Dijon</span><span class="track-cell bpm">122</span><span class="track-cell key">4A</span><span class="track-cell time">7:12</span><span class="track-cell genre extra-col">Deep House</span><span class="track-cell year extra-col">2024</span><span class="track-cell comment extra-col">New find</span></div>
+<div class="track-row"><span class="track-cell num">16</span><span class="track-cell title">Gypsy Woman</span><span class="track-cell artist">Crystal Waters</span><span class="track-cell label">Mercury</span><span class="track-cell bpm">118</span><span class="track-cell key">6A</span><span class="track-cell time">5:08</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">1991</span><span class="track-cell comment extra-col">Anthem</span></div>
+<div class="track-row"><span class="track-cell num">17</span><span class="track-cell title">Hold On</span><span class="track-cell artist">Solid Groove</span><span class="track-cell label">Guesthouse</span><span class="track-cell bpm">128</span><span class="track-cell key">11A</span><span class="track-cell time">6:33</span><span class="track-cell genre extra-col">Tech House</span><span class="track-cell year extra-col">2023</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">18</span><span class="track-cell title">Insomnia</span><span class="track-cell artist">Faithless</span><span class="track-cell label">Cheeky</span><span class="track-cell bpm">126</span><span class="track-cell key">1B</span><span class="track-cell time">5:42</span><span class="track-cell genre extra-col">Progressive</span><span class="track-cell year extra-col">1995</span><span class="track-cell comment extra-col">Monster</span></div>
+<div class="track-row"><span class="track-cell num">19</span><span class="track-cell title">Jack Your Body</span><span class="track-cell artist">Steve Silk Hurley</span><span class="track-cell label">DJ International</span><span class="track-cell bpm">123</span><span class="track-cell key">8A</span><span class="track-cell time">5:17</span><span class="track-cell genre extra-col">Chicago House</span><span class="track-cell year extra-col">1987</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">20</span><span class="track-cell title">Knights of the Jaguar</span><span class="track-cell artist">DJ Rolando</span><span class="track-cell label">Underground Resistance</span><span class="track-cell bpm">130</span><span class="track-cell key">3A</span><span class="track-cell time">6:55</span><span class="track-cell genre extra-col">Techno</span><span class="track-cell year extra-col">2000</span><span class="track-cell comment extra-col">Classic</span></div>
+<div class="track-row"><span class="track-cell num">21</span><span class="track-cell title">Love Is Gone</span><span class="track-cell artist">David Guetta</span><span class="track-cell label">GUM Prod</span><span class="track-cell bpm">128</span><span class="track-cell key">10A</span><span class="track-cell time">4:48</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">2007</span><span class="track-cell comment extra-col">Vocal</span></div>
+<div class="track-row"><span class="track-cell num">22</span><span class="track-cell title">Missing</span><span class="track-cell artist">Everything But The Girl</span><span class="track-cell label">Virgin</span><span class="track-cell bpm">120</span><span class="track-cell key">5A</span><span class="track-cell time">6:22</span><span class="track-cell genre extra-col">Electronica</span><span class="track-cell year extra-col">1994</span><span class="track-cell comment extra-col">Todd Terry remix</span></div>
+<div class="track-row"><span class="track-cell num">23</span><span class="track-cell title">Needin U</span><span class="track-cell artist">David Morales</span><span class="track-cell label">Deconstruction</span><span class="track-cell bpm">124</span><span class="track-cell key">2A</span><span class="track-cell time">5:31</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">1998</span><span class="track-cell comment extra-col">Masterpiece</span></div>
+<div class="track-row"><span class="track-cell num">24</span><span class="track-cell title">Phantom</span><span class="track-cell artist">Recondite</span><span class="track-cell label">Giegling</span><span class="track-cell bpm">125</span><span class="track-cell key">9A</span><span class="track-cell time">7:08</span><span class="track-cell genre extra-col">Minimal</span><span class="track-cell year extra-col">2015</span><span class="track-cell comment extra-col">Atmospheric</span></div>
+<div class="track-row"><span class="track-cell num">25</span><span class="track-cell title">Queen of the Rhythm</span><span class="track-cell artist">Floorplan</span><span class="track-cell label">Mote Evolver</span><span class="track-cell bpm">130</span><span class="track-cell key">3B</span><span class="track-cell time">6:19</span><span class="track-cell genre extra-col">Techno</span><span class="track-cell year extra-col">2018</span><span class="track-cell comment extra-col">High energy</span></div>
+<div class="track-row"><span class="track-cell num">26</span><span class="track-cell title">Resist</span><span class="track-cell artist">Heiko Laux</span><span class="track-cell label">Kanzleramt</span><span class="track-cell bpm">132</span><span class="track-cell key">7A</span><span class="track-cell time">5:56</span><span class="track-cell genre extra-col">Techno</span><span class="track-cell year extra-col">2020</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">27</span><span class="track-cell title">Sexual Healing (Remix)</span><span class="track-cell artist">Hot Since 82</span><span class="track-cell label">Knee Deep</span><span class="track-cell bpm">124</span><span class="track-cell key">6A</span><span class="track-cell time">7:34</span><span class="track-cell genre extra-col">Tech House</span><span class="track-cell year extra-col">2022</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">28</span><span class="track-cell title">The Bounce</span><span class="track-cell artist">Green Velvet</span><span class="track-cell label">Music Man</span><span class="track-cell bpm">127</span><span class="track-cell key">8B</span><span class="track-cell time">5:12</span><span class="track-cell genre extra-col">Tech House</span><span class="track-cell year extra-col">2001</span><span class="track-cell comment extra-col">Funky</span></div>
+<div class="track-row"><span class="track-cell num">29</span><span class="track-cell title">Voodoo Ray</span><span class="track-cell artist">A Guy Called Gerald</span><span class="track-cell label">Warner</span><span class="track-cell bpm">120</span><span class="track-cell key">1A</span><span class="track-cell time">5:38</span><span class="track-cell genre extra-col">Acid House</span><span class="track-cell year extra-col">1988</span><span class="track-cell comment extra-col">Acid classic</span></div>
+<div class="track-row"><span class="track-cell num">30</span><span class="track-cell title">Windowlicker</span><span class="track-cell artist">Aphex Twin</span><span class="track-cell label">Warp</span><span class="track-cell bpm">125</span><span class="track-cell key">4B</span><span class="track-cell time">5:52</span><span class="track-cell genre extra-col">IDM</span><span class="track-cell year extra-col">1999</span><span class="track-cell comment extra-col">Weird one</span></div>
+<div class="track-row"><span class="track-cell num">31</span><span class="track-cell title">Your Love</span><span class="track-cell artist">Frankie Knuckles</span><span class="track-cell label">Virgin</span><span class="track-cell bpm">122</span><span class="track-cell key">9A</span><span class="track-cell time">6:15</span><span class="track-cell genre extra-col">House</span><span class="track-cell year extra-col">1991</span><span class="track-cell comment extra-col">Godfather</span></div>
+<div class="track-row"><span class="track-cell num">32</span><span class="track-cell title">Zulu</span><span class="track-cell artist">Adam Beyer</span><span class="track-cell label">Drumcode</span><span class="track-cell bpm">133</span><span class="track-cell key">5B</span><span class="track-cell time">6:01</span><span class="track-cell genre extra-col">Techno</span><span class="track-cell year extra-col">2019</span><span class="track-cell comment extra-col">Peak</span></div>
+<div class="track-row"><span class="track-cell num">33</span><span class="track-cell title">Beyond the Dance</span><span class="track-cell artist">Carl Craig</span><span class="track-cell label">Planet E</span><span class="track-cell bpm">126</span><span class="track-cell key">10A</span><span class="track-cell time">7:22</span><span class="track-cell genre extra-col">Techno</span><span class="track-cell year extra-col">2014</span><span class="track-cell comment extra-col">Detroit</span></div>
+<div class="track-row"><span class="track-cell num">34</span><span class="track-cell title">Circus Bells</span><span class="track-cell artist">Helena Hauff</span><span class="track-cell label">Aus Music</span><span class="track-cell bpm">131</span><span class="track-cell key">3A</span><span class="track-cell time">5:49</span><span class="track-cell genre extra-col">Techno</span><span class="track-cell year extra-col">2021</span><span class="track-cell comment extra-col">Raw</span></div>
+<div class="track-row"><span class="track-cell num">35</span><span class="track-cell title">Dimensions</span><span class="track-cell artist">Ben UFO</span><span class="track-cell label">Hemlock</span><span class="track-cell bpm">125</span><span class="track-cell key">7A</span><span class="track-cell time">6:38</span><span class="track-cell genre extra-col">Eclectic</span><span class="track-cell year extra-col">2017</span><span class="track-cell comment extra-col">Selector</span></div>
+<div class="track-row"><span class="track-cell num">36</span><span class="track-cell title">Electric Sunrise</span><span class="track-cell artist">Bicep</span><span class="track-cell label">Ninja Tune</span><span class="track-cell bpm">128</span><span class="track-cell key">1B</span><span class="track-cell time">5:15</span><span class="track-cell genre extra-col">Electronica</span><span class="track-cell year extra-col">2021</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">37</span><span class="track-cell title">Fade to Grey</span><span class="track-cell artist">Molly</span><span class="track-cell label">Giegling</span><span class="track-cell bpm">124</span><span class="track-cell key">11A</span><span class="track-cell time">7:01</span><span class="track-cell genre extra-col">Minimal</span><span class="track-cell year extra-col">2019</span><span class="track-cell comment extra-col">Hypnotic</span></div>
+<div class="track-row"><span class="track-cell num">38</span><span class="track-cell title">Galaxia</span><span class="track-cell artist">Tale of Us</span><span class="track-cell label">Afterlife</span><span class="track-cell bpm">122</span><span class="track-cell key">4A</span><span class="track-cell time">8:12</span><span class="track-cell genre extra-col">Melodic</span><span class="track-cell year extra-col">2020</span><span class="track-cell comment extra-col">Journey</span></div>
+<div class="track-row"><span class="track-cell num">39</span><span class="track-cell title">Horizons</span><span class="track-cell artist">Four Tet</span><span class="track-cell label">Text Records</span><span class="track-cell bpm">120</span><span class="track-cell key">6A</span><span class="track-cell time">5:44</span><span class="track-cell genre extra-col">Electronica</span><span class="track-cell year extra-col">2020</span><span class="track-cell comment extra-col">Beautiful</span></div>
+<div class="track-row"><span class="track-cell num">40</span><span class="track-cell title">Illumination</span><span class="track-cell artist">Blink</span><span class="track-cell label">Poker Flat</span><span class="track-cell bpm">127</span><span class="track-cell key">2A</span><span class="track-cell time">6:28</span><span class="track-cell genre extra-col">Tech House</span><span class="track-cell year extra-col">2018</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">41</span><span class="track-cell title">Jaded</span><span class="track-cell artist">Roses</span><span class="track-cell label">Live at Robert Johnson</span><span class="track-cell bpm">124</span><span class="track-cell key">9A</span><span class="track-cell time">5:55</span><span class="track-cell genre extra-col">Deep House</span><span class="track-cell year extra-col">2016</span><span class="track-cell comment extra-col">Morning set</span></div>
+<div class="track-row"><span class="track-cell num">42</span><span class="track-cell title">Kinetic</span><span class="track-cell artist">Octave One</span><span class="track-cell label">430 West</span><span class="track-cell bpm">129</span><span class="track-cell key">8B</span><span class="track-cell time">6:10</span><span class="track-cell genre extra-col">Detroit Techno</span><span class="track-cell year extra-col">2002</span><span class="track-cell comment extra-col">Live classic</span></div>
+<div class="track-row"><span class="track-cell num">43</span><span class="track-cell title">Lightyears</span><span class="track-cell artist">Mano Le Tough</span><span class="track-cell label">Mule Musiq</span><span class="track-cell bpm">123</span><span class="track-cell key">5A</span><span class="track-cell time">6:52</span><span class="track-cell genre extra-col">Deep House</span><span class="track-cell year extra-col">2022</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">44</span><span class="track-cell title">Midnight</span><span class="track-cell artist">Mall Grab</span><span class="track-cell label">Shall Not Fade</span><span class="track-cell bpm">125</span><span class="track-cell key">12A</span><span class="track-cell time">5:33</span><span class="track-cell genre extra-col">Lo-fi House</span><span class="track-cell year extra-col">2019</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">45</span><span class="track-cell title">Nebula</span><span class="track-cell artist">Skee Mask</span><span class="track-cell label">Ilian Tape</span><span class="track-cell bpm">134</span><span class="track-cell key">3B</span><span class="track-cell time">6:48</span><span class="track-cell genre extra-col">Breaks</span><span class="track-cell year extra-col">2021</span><span class="track-cell comment extra-col">Complex</span></div>
+<div class="track-row"><span class="track-cell num">46</span><span class="track-cell title">Panorama</span><span class="track-cell artist">Dixon</span><span class="track-cell label">Innervisions</span><span class="track-cell bpm">121</span><span class="track-cell key">10A</span><span class="track-cell time">8:22</span><span class="track-cell genre extra-col">Melodic</span><span class="track-cell year extra-col">2019</span><span class="track-cell comment extra-col">Masterclass</span></div>
+<div class="track-row"><span class="track-cell num">47</span><span class="track-cell title">Quicksand</span><span class="track-cell artist">Margaret Dygas</span><span class="track-cell label">Perlon</span><span class="track-cell bpm">126</span><span class="track-cell key">1A</span><span class="track-cell time">6:05</span><span class="track-cell genre extra-col">Minimal</span><span class="track-cell year extra-col">2017</span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row"><span class="track-cell num">48</span><span class="track-cell title">Reflections</span><span class="track-cell artist">DJ Tennis</span><span class="track-cell label">Life and Death</span><span class="track-cell bpm">119</span><span class="track-cell key">4A</span><span class="track-cell time">7:38</span><span class="track-cell genre extra-col">Melodic</span><span class="track-cell year extra-col">2020</span><span class="track-cell comment extra-col">Sunset</span></div>
+<div class="track-row analyzing"><span class="track-cell num">49</span><span class="track-cell title">Titanium</span><span class="track-cell artist">DFA</span><span class="track-cell label">Long Weekend</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span><span class="track-cell genre extra-col"></span><span class="track-cell year extra-col"></span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row analyzing"><span class="track-cell num">50</span><span class="track-cell title">Echoes</span><span class="track-cell artist">Pan Sonic</span><span class="track-cell label">Mille Plateaux</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span><span class="track-cell genre extra-col"></span><span class="track-cell year extra-col"></span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row analyzing"><span class="track-cell num">51</span><span class="track-cell title">Cascade</span><span class="track-cell artist">Borrowed Time</span><span class="track-cell label">Rhythm Section</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span><span class="track-cell genre extra-col"></span><span class="track-cell year extra-col"></span><span class="track-cell comment extra-col"></span></div>
+<div class="track-row analyzing"><span class="track-cell num">52</span><span class="track-cell title">Mirage</span><span class="track-cell artist">Objekt</span><span class="track-cell label">PAN</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span><span class="track-cell genre extra-col"></span><span class="track-cell year extra-col"></span><span class="track-cell comment extra-col"></span></div>
+      </div>
+    </div>
+
+    <!-- ── Playlist Panel (Saturday) ── -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-header-left">
+          <span class="panel-title">Saturday</span>
+          <span class="panel-subtitle">40 tracks · 4h 18m</span>
+        </div>
+        <div class="panel-actions"><button id="closePanel" style="font-size:13px;padding:0 4px">×</button></div>
+      </div>
+      <div class="track-list-header">
+        <span>#</span><span>Title</span><span>Artist</span><span>Label</span><span>BPM</span><span>Key</span><span>Time</span>
+      </div>
+      <div class="track-list">
+<div class="track-row"><span class="track-cell num">1</span><span class="track-cell title">Sanctuary</span><span class="track-cell artist">Fred P</span><span class="track-cell label">Soul People Music</span><span class="track-cell bpm">123</span><span class="track-cell key">4A</span><span class="track-cell time">6:33</span></div>
+<div class="track-row"><span class="track-cell num">2</span><span class="track-cell title">Luvstruck 2024</span><span class="track-cell artist">Southside Spinners</span><span class="track-cell label">selected.</span><span class="track-cell bpm">128</span><span class="track-cell key">8A</span><span class="track-cell time">6:14</span></div>
+<div class="track-row"><span class="track-cell num">3</span><span class="track-cell title">Pulse</span><span class="track-cell artist">Chaos in the CBD</span><span class="track-cell label">In Order to Dance</span><span class="track-cell bpm">126</span><span class="track-cell key">3A</span><span class="track-cell time">7:01</span></div>
+<div class="track-row selected"><span class="track-cell num">4</span><span class="track-cell title">Midnight City (Dub)</span><span class="track-cell artist">Rhode &amp; Brown</span><span class="track-cell label">selected.</span><span class="track-cell bpm">124</span><span class="track-cell key">9A</span><span class="track-cell time">5:42</span></div>
+<div class="track-row analyzing"><span class="track-cell num">5</span><span class="track-cell title">Closer to God</span><span class="track-cell artist">Hunee</span><span class="track-cell label">Sound Signature</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span></div>
+<div class="track-row"><span class="track-cell num">6</span><span class="track-cell title">Submerge</span><span class="track-cell artist">Moomin</span><span class="track-cell label">White Noise</span><span class="track-cell bpm">125</span><span class="track-cell key">8A</span><span class="track-cell time">6:22</span></div>
+<div class="track-row"><span class="track-cell num">7</span><span class="track-cell title">Juice</span><span class="track-cell artist">Kerri Chandler</span><span class="track-cell label">Kaoz Theory</span><span class="track-cell bpm">127</span><span class="track-cell key">6A</span><span class="track-cell time">7:15</span></div>
+<div class="track-row"><span class="track-cell num">8</span><span class="track-cell title">Feelings</span><span class="track-cell artist">Joy Orbison</span><span class="track-cell label">Hinge Finger</span><span class="track-cell bpm">131</span><span class="track-cell key">10A</span><span class="track-cell time">5:31</span></div>
+<div class="track-row analyzing"><span class="track-cell num">9</span><span class="track-cell title">Falling (Dub)</span><span class="track-cell artist">Guy J</span><span class="track-cell label">Lost &amp; Found</span><span class="track-cell bpm muted">—</span><span class="track-cell key muted">—</span><span class="track-cell time muted">—</span></div>
+<div class="track-row"><span class="track-cell num">10</span><span class="track-cell title">Tangerine</span><span class="track-cell artist">DJ Boring</span><span class="track-cell label">Peach Discs</span><span class="track-cell bpm">122</span><span class="track-cell key">11A</span><span class="track-cell time">5:48</span></div>
+<div class="track-row"><span class="track-cell num">11</span><span class="track-cell title">Système</span><span class="track-cell artist">Djoko</span><span class="track-cell label">Deeppa Records</span><span class="track-cell bpm">124</span><span class="track-cell key">5A</span><span class="track-cell time">6:07</span></div>
+<div class="track-row"><span class="track-cell num">12</span><span class="track-cell title">Deep Inside</span><span class="track-cell artist">Hardrive</span><span class="track-cell label">Strictly Rhythm</span><span class="track-cell bpm">124</span><span class="track-cell key">9A</span><span class="track-cell time">5:58</span></div>
+<div class="track-row"><span class="track-cell num">13</span><span class="track-cell title">Aquarius</span><span class="track-cell artist">Marshall Jefferson</span><span class="track-cell label">Trax Records</span><span class="track-cell bpm">126</span><span class="track-cell key">7A</span><span class="track-cell time">6:45</span></div>
+<div class="track-row"><span class="track-cell num">14</span><span class="track-cell title">Voodoo Ray</span><span class="track-cell artist">A Guy Called Gerald</span><span class="track-cell label">Warner</span><span class="track-cell bpm">120</span><span class="track-cell key">1A</span><span class="track-cell time">5:38</span></div>
+<div class="track-row"><span class="track-cell num">15</span><span class="track-cell title">Hold On</span><span class="track-cell artist">Solid Groove</span><span class="track-cell label">Guesthouse</span><span class="track-cell bpm">128</span><span class="track-cell key">11A</span><span class="track-cell time">6:33</span></div>
+<div class="track-row"><span class="track-cell num">16</span><span class="track-cell title">Phantom</span><span class="track-cell artist">Recondite</span><span class="track-cell label">Giegling</span><span class="track-cell bpm">125</span><span class="track-cell key">9A</span><span class="track-cell time">7:08</span></div>
+<div class="track-row"><span class="track-cell num">17</span><span class="track-cell title">Zulu</span><span class="track-cell artist">Adam Beyer</span><span class="track-cell label">Drumcode</span><span class="track-cell bpm">133</span><span class="track-cell key">5B</span><span class="track-cell time">6:01</span></div>
+<div class="track-row"><span class="track-cell num">18</span><span class="track-cell title">Queen of the Rhythm</span><span class="track-cell artist">Floorplan</span><span class="track-cell label">Mote Evolver</span><span class="track-cell bpm">130</span><span class="track-cell key">3B</span><span class="track-cell time">6:19</span></div>
+<div class="track-row"><span class="track-cell num">19</span><span class="track-cell title">Follow Me</span><span class="track-cell artist">Ade</span><span class="track-cell label">Honey Dijon</span><span class="track-cell bpm">122</span><span class="track-cell key">4A</span><span class="track-cell time">7:12</span></div>
+<div class="track-row"><span class="track-cell num">20</span><span class="track-cell title">Jupiter</span><span class="track-cell artist">Bicep</span><span class="track-cell label">Ninja Tune</span><span class="track-cell bpm">130</span><span class="track-cell key">1B</span><span class="track-cell time">4:58</span></div>
+<div class="track-row"><span class="track-cell num">21</span><span class="track-cell title">Needin U</span><span class="track-cell artist">David Morales</span><span class="track-cell label">Deconstruction</span><span class="track-cell bpm">124</span><span class="track-cell key">2A</span><span class="track-cell time">5:31</span></div>
+<div class="track-row"><span class="track-cell num">22</span><span class="track-cell title">Windowlicker</span><span class="track-cell artist">Aphex Twin</span><span class="track-cell label">Warp</span><span class="track-cell bpm">125</span><span class="track-cell key">4B</span><span class="track-cell time">5:52</span></div>
+<div class="track-row"><span class="track-cell num">23</span><span class="track-cell title">Horizons</span><span class="track-cell artist">Four Tet</span><span class="track-cell label">Text Records</span><span class="track-cell bpm">120</span><span class="track-cell key">6A</span><span class="track-cell time">5:44</span></div>
+<div class="track-row"><span class="track-cell num">24</span><span class="track-cell title">Resist</span><span class="track-cell artist">Heiko Laux</span><span class="track-cell label">Kanzleramt</span><span class="track-cell bpm">132</span><span class="track-cell key">7A</span><span class="track-cell time">5:56</span></div>
+<div class="track-row"><span class="track-cell num">25</span><span class="track-cell title">Lightyears</span><span class="track-cell artist">Mano Le Tough</span><span class="track-cell label">Mule Musiq</span><span class="track-cell bpm">123</span><span class="track-cell key">5A</span><span class="track-cell time">6:52</span></div>
+<div class="track-row"><span class="track-cell num">26</span><span class="track-cell title">Insomnia</span><span class="track-cell artist">Faithless</span><span class="track-cell label">Cheeky</span><span class="track-cell bpm">126</span><span class="track-cell key">1B</span><span class="track-cell time">5:42</span></div>
+<div class="track-row"><span class="track-cell num">27</span><span class="track-cell title">Fade to Grey</span><span class="track-cell artist">Molly</span><span class="track-cell label">Giegling</span><span class="track-cell bpm">124</span><span class="track-cell key">11A</span><span class="track-cell time">7:01</span></div>
+<div class="track-row"><span class="track-cell num">28</span><span class="track-cell title">Knights of the Jaguar</span><span class="track-cell artist">DJ Rolando</span><span class="track-cell label">Underground Resistance</span><span class="track-cell bpm">130</span><span class="track-cell key">3A</span><span class="track-cell time">6:55</span></div>
+<div class="track-row"><span class="track-cell num">29</span><span class="track-cell title">Nebula</span><span class="track-cell artist">Skee Mask</span><span class="track-cell label">Ilian Tape</span><span class="track-cell bpm">134</span><span class="track-cell key">3B</span><span class="track-cell time">6:48</span></div>
+<div class="track-row"><span class="track-cell num">30</span><span class="track-cell title">Gypsy Woman</span><span class="track-cell artist">Crystal Waters</span><span class="track-cell label">Mercury</span><span class="track-cell bpm">118</span><span class="track-cell key">6A</span><span class="track-cell time">5:08</span></div>
+<div class="track-row"><span class="track-cell num">31</span><span class="track-cell title">Your Love</span><span class="track-cell artist">Frankie Knuckles</span><span class="track-cell label">Virgin</span><span class="track-cell bpm">122</span><span class="track-cell key">9A</span><span class="track-cell time">6:15</span></div>
+<div class="track-row"><span class="track-cell num">32</span><span class="track-cell title">Circus Bells</span><span class="track-cell artist">Helena Hauff</span><span class="track-cell label">Aus Music</span><span class="track-cell bpm">131</span><span class="track-cell key">3A</span><span class="track-cell time">5:49</span></div>
+<div class="track-row"><span class="track-cell num">33</span><span class="track-cell title">Beyond the Dance</span><span class="track-cell artist">Carl Craig</span><span class="track-cell label">Planet E</span><span class="track-cell bpm">126</span><span class="track-cell key">10A</span><span class="track-cell time">7:22</span></div>
+<div class="track-row"><span class="track-cell num">34</span><span class="track-cell title">Electric Sunrise</span><span class="track-cell artist">Bicep</span><span class="track-cell label">Ninja Tune</span><span class="track-cell bpm">128</span><span class="track-cell key">1B</span><span class="track-cell time">5:15</span></div>
+<div class="track-row"><span class="track-cell num">35</span><span class="track-cell title">Love Is Gone</span><span class="track-cell artist">David Guetta</span><span class="track-cell label">GUM Prod</span><span class="track-cell bpm">128</span><span class="track-cell key">10A</span><span class="track-cell time">4:48</span></div>
+<div class="track-row"><span class="track-cell num">36</span><span class="track-cell title">Galaxia</span><span class="track-cell artist">Tale of Us</span><span class="track-cell label">Afterlife</span><span class="track-cell bpm">122</span><span class="track-cell key">4A</span><span class="track-cell time">8:12</span></div>
+<div class="track-row"><span class="track-cell num">37</span><span class="track-cell title">Sexual Healing (Remix)</span><span class="track-cell artist">Hot Since 82</span><span class="track-cell label">Knee Deep</span><span class="track-cell bpm">124</span><span class="track-cell key">6A</span><span class="track-cell time">7:34</span></div>
+<div class="track-row"><span class="track-cell num">38</span><span class="track-cell title">Jaded</span><span class="track-cell artist">Roses</span><span class="track-cell label">Live at Robert Johnson</span><span class="track-cell bpm">124</span><span class="track-cell key">9A</span><span class="track-cell time">5:55</span></div>
+<div class="track-row"><span class="track-cell num">39</span><span class="track-cell title">The Bounce</span><span class="track-cell artist">Green Velvet</span><span class="track-cell label">Music Man</span><span class="track-cell bpm">127</span><span class="track-cell key">8B</span><span class="track-cell time">5:12</span></div>
+<div class="track-row"><span class="track-cell num">40</span><span class="track-cell title">Missing</span><span class="track-cell artist">Everything But The Girl</span><span class="track-cell label">Virgin</span><span class="track-cell bpm">120</span><span class="track-cell key">5A</span><span class="track-cell time">6:22</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Player ═══ -->
+  <div class="player">
+    <div class="player-artwork">♫</div>
+    <button class="player-play"><svg width="10" height="10" viewBox="0 0 12 12"><path d="M3 1.5 L3 10.5 L10 6 Z" fill="#1e1e1e"/></svg></button>
+    <div class="player-waveform-area">
+      <div class="player-track-info">
+        <span class="player-track-title">Midnight City (Dub)</span>
+        <span class="player-track-artist">Rhode &amp; Brown · selected.</span>
+      </div>
+      <div class="waveform-container"><canvas id="waveform"></canvas></div>
+      <div class="waveform-time"><span>1:58</span><span>5:42</span></div>
+    </div>
+  </div>
+
+  <!-- ═══ Status ═══ -->
+  <div class="status-bar">
+    <div class="status-left">
+      <div class="spinner"></div>
+      <span>Analyzing 12 of 47 tracks</span>
+      <span class="status-sep">·</span>
+      <span>SanDisk 64GB synced</span>
+    </div>
+    <div>4,218 tracks · 412 GB</div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  document.title = 'four four ✓';
+});
+
+(function() {
+  // ── Waveform ──
+  var canvas = document.getElementById('waveform');
+  function resize() {
+    if (!canvas) return;
+    var r = canvas.parentElement.getBoundingClientRect();
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width = r.width * dpr;
+    canvas.height = r.height * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    drawWave(ctx, r.width, r.height);
+  }
+  function hash(i, s) { var x = Math.sin(i * s) * 10000; return x - Math.floor(x); }
+  function drawWave(ctx, w, h) {
+    ctx.clearRect(0, 0, w, h);
+    var n = 140, bw = w / n, gap = Math.max(0.5, bw * 0.15), pf = 0.347, th = h;
+    var bands = {
+      bass: { p:{r:60,g:120,b:200}, u:{r:30,g:55,b:90} },
+      mid:  { p:{r:200,g:140,b:50}, u:{r:90,g:60,b:25} },
+      high: { p:{r:190,g:70,b:55},  u:{r:85,g:30,b:25} }
+    };
+    for (var i = 0; i < n; i++) {
+      var s = hash(i,91.44) > 0.92 ? 0.15 : 1;
+      var bh = (0.15+hash(i,12.9898)*0.55)*th*s;
+      var mh = (0.05+hash(i,78.233)*0.25)*th*s;
+      var hh = (0.01+hash(i,43.172)*0.10)*th*s;
+      var k = (i/n)<pf ? 'p':'u';
+      var y = th, x = i*bw+gap/2, bww = Math.max(1,bw-gap);
+      y-=bh; ctx.fillStyle='rgb('+bands.bass[k].r+','+bands.bass[k].g+','+bands.bass[k].b+')'; ctx.fillRect(x,y,bww,bh);
+      y-=mh; ctx.fillStyle='rgb('+bands.mid[k].r+','+bands.mid[k].g+','+bands.mid[k].b+')'; ctx.fillRect(x,y,bww,mh);
+      y-=hh; ctx.fillStyle='rgb('+bands.high[k].r+','+bands.high[k].g+','+bands.high[k].b+')'; ctx.fillRect(x,y,bww,hh);
+    }
+    var px=pf*w; ctx.fillStyle='rgba(255,255,255,0.85)'; ctx.fillRect(px-0.5,0,1,h);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ── Sidebar drilldown ──
+  var rootPage = document.getElementById('sidebarRoot');
+  var currentChild = null;
+
+  function openFolder(folderId) {
+    var childPage = document.getElementById('sidebar-' + folderId);
+    if (!childPage) return;
+    currentChild = childPage;
+    rootPage.classList.add('pushed');
+    childPage.classList.add('visible');
+  }
+
+  function closeFolder() {
+    if (!currentChild) return;
+    rootPage.classList.remove('pushed');
+    currentChild.classList.remove('visible');
+    currentChild = null;
+  }
+
+  // Folder rows — open drilldown
+  document.querySelectorAll('.sidebar-row[data-folder]').forEach(function(el) {
+    el.addEventListener('click', function() {
+      // highlight the folder row
+      document.querySelectorAll('.sidebar-row').forEach(function(r) { r.classList.remove('active'); });
+      el.classList.add('active');
+      openFolder(el.getAttribute('data-id'));
+    });
+  });
+
+  // Back buttons
+  document.querySelectorAll('.sidebar-back').forEach(function(el) {
+    el.addEventListener('click', function() {
+      closeFolder();
+      // re-highlight the last-selected root item
+      var allTracks = document.querySelector('.sidebar-row[data-id="all"]');
+      if (allTracks) allTracks.classList.add('active');
+    });
+  });
+
+  // Leaf rows — just select (no drilldown)
+  document.querySelectorAll('.sidebar-row:not([data-folder])').forEach(function(el) {
+    el.addEventListener('click', function() {
+      document.querySelectorAll('.sidebar-row').forEach(function(r) { r.classList.remove('active'); });
+      el.classList.add('active');
+    });
+  });
+
+  // ── Close right panel ──
+  var closeBtn = document.getElementById('closePanel');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', function() {
+      document.querySelector('.main').classList.add('expanded');
+    });
+  }
+
+  // ── Context menu on sidebar playlists ──
+  var menu = document.getElementById('contextMenu');
+  document.querySelectorAll('#sidebarRoot .sidebar-section + .sidebar-section .sidebar-row').forEach(function(row) {
+    row.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      var label = row.querySelector('.label');
+      if (!label) return;
+      menu.style.left = e.clientX + 'px';
+      menu.style.top = e.clientY + 'px';
+      menu.classList.add('visible');
+      menu._sourceRow = row;
+    });
+  });
+  document.addEventListener('click', function() { menu.classList.remove('visible'); });
+  menu.querySelector('[data-action="split"]').addEventListener('click', function() {
+    var row = menu._sourceRow;
+    if (!row) return;
+    var main = document.querySelector('.main');
+    main.classList.remove('expanded');
+    var label = row.querySelector('.label').textContent;
+    var count = row.querySelector('.count');
+    count = count ? count.textContent : '';
+    var panels = main.querySelectorAll('.panel');
+    var rightPanel = panels[1];
+    if (rightPanel) {
+      rightPanel.querySelector('.panel-title').textContent = label;
+      rightPanel.querySelector('.panel-subtitle').textContent = count + ' tracks';
+    }
+  });
+
+  // ── Track row selection ──
+  document.querySelectorAll('.track-row').forEach(function(el) {
+    el.addEventListener('click', function() {
+      el.closest('.track-list').querySelectorAll('.track-row').forEach(function(r) { r.classList.remove('selected'); });
+      el.classList.add('selected');
+    });
+  });
+})();
+</script>
+</body>
+</html>
