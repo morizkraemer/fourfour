@@ -31,7 +31,12 @@
 
 ## Existing Asset: samplebase Benchmark Harness
 
-Before planning from scratch — we already have a production-grade benchmark harness in `~/dev/projects/samplebase`. Here's what exists and what we can reuse:
+Benchmarking of audio analysis libraries was completed externally in the **samplebase** project (`~/dev/projects/samplebase`). The results and concrete recommendations are captured in [`analysis-pipeline-handoff.md`](./analysis-pipeline-handoff.md). Key findings:
+
+- **BPM:** DeepRhythm is best (~97% Acc2 accuracy). stratum-dsp accuracy still untested vs Rekordbox.
+- **Key:** librosa chroma_cqt + Krumhansl-Schmuckler (~70%). OpenKeyScan is the upgrade path if needed (~85-90%).
+- **Energy:** librosa feature fusion, validated on 19 genres.
+- **Embeddings:** MS CLAP best for text+audio, LAION-CLAP best for audio→audio.
 
 ### What samplebase built
 A full-stack benchmark framework for comparing audio embedding backends (Gemini, LAION-CLAP, MS-CLAP, spectral baseline). The relevant architecture:
@@ -94,31 +99,22 @@ Each phase is self-contained and produces a measurable outcome. Phases 0-3 are *
 ### Why First
 Every subsequent phase needs a scoring mechanism. Without ground truth, you can't tell if a change improved or regressed anything.
 
-### Strategy: Fork samplebase → fourfour-benchmark
+### Strategy: Use external benchmark results → validate stratum-dsp
 
-Rather than building from scratch, we fork the samplebase benchmark architecture and swap the domain:
+The external benchmark (samplebase) gave us library recommendations and accuracy data. The remaining work is validating **our** analyzer (stratum-dsp) against Rekordbox ground truth. We don't need to build a full harness from scratch — a minimal comparison script suffices:
 
 ```
-samplebase                          fourfour-benchmark
-─────────────────────────────       ─────────────────────────────
-Backend = embedding model           Backend = analysis engine
-  GeminiEmbeddingBackend              StratumDspBackend (Rust, current)
-  LaionClapBackend                    EssentiaBackend (Python sidecar)
-  SpectralBaselineBackend             MadmomBackend (Python sidecar)
-  MicrosoftClapBackend                OpenKeyScanBackend (Python sidecar)
+What's done (samplebase):
+  ├── BPM library comparison (DeepRhythm wins, ~97% Acc2)
+  ├── Key library comparison (librosa + KS ~70%, OpenKeyScan ~85-90%)
+  ├── Energy validation (librosa feature fusion, 19 genres)
+  ├── Embedding comparison (MS CLAP vs LAION-CLAP vs TTMR++ vs CLaMP 3)
+  └── Python analysis pipeline design with code samples
 
-Entry = audio sample                 Entry = full track
-  id, path, category, tags           id, path, genre, bpm_ground_truth, key_ground_truth
-
-Query = "find similar to X"          Query = ground truth comparison
-  audio query → ranked results       Rekordbox export → parse → compare
-
-Score = retrieval relevance          Score = signal accuracy
-  rank, MRR, P@5                     BPM Δ, key match, beat offset count, waveform MSE
-
-Result dir shape: same               Result dir shape: same
-  config.json, results.json,         config.json, results.json,
-  scores.json, analysis.json         scores.json, analysis.json
+What's still needed (fourfour):
+  ├── Validate stratum-dsp BPM/key/beat accuracy vs Rekordbox export
+  ├── Ground truth extraction from master.db + ANLZ (reader/masterdb.rs exists)
+  └── If stratum-dsp falls short, integrate winning Python backends
 ```
 
 ### Steps
@@ -180,27 +176,21 @@ Result dir shape: same               Result dir shape: same
   ```
 - [ ] **0.9** Run `stratum-dsp` against the full corpus and record baseline scores
 
-### Reused from samplebase
-- `BenchmarkBackend` ABC pattern → `AnalysisBackend` ABC
-- `DEFAULT_VARIANTS` registry pattern → analysis engine registry
-- Per-run result directory structure
-- SHA1-keyed JSON caching layer
-- `benchmark_runner.py` orchestration pattern
-- `VectorStore` (saved for Phase 5)
-- `benchmark_orchestrator.py` dashboard pattern (thread-per-backend, progress)
+### Reused from samplebase (benchmarking phase, completed)
+- Library accuracy data and recommendations → captured in `analysis-pipeline-handoff.md`
+- Python analysis pipeline design (BPM, key, energy, waveform code samples)
+- Embedding backend implementations for Phase 5
 
-### New code needed
-- Rekordbox PDB parser (~200 lines, binary format)
-- Rekordbox ANLZ parser (~150 lines, binary format)
-- `StratumDspBackend` adapter (~100 lines, subprocess + JSON)
-- `GroundTruthComparer` (~150 lines, diff logic)
-- Track corpus manifest builder (~50 lines, simpler than samplebase's)
+### Remaining work
+- Ground truth extraction from Rekordbox master.db (reader exists) + ANLZ (reader needed)
+- Minimal comparison script: stratum-dsp output vs ground truth
+- Test corpus curation (~30 tracks across genres)
 
 ### Deliverable
-A `fourfour/benchmark/` directory with CLI: one command to run all engines against the corpus and output a comparison table. One command to re-score after any analysis change.
+A ground truth JSON file extracted from Rekordbox, plus a comparison table showing stratum-dsp accuracy. If stratum-dsp falls short, we know which Python backends to integrate (from the handoff doc).
 
 ### Time Estimate
-3-5 days (down from 5-7 days building from scratch, thanks to samplebase fork)
+1-2 days (ground truth extraction + comparison, much simpler now that library research is done externally)
 
 ---
 
@@ -224,7 +214,7 @@ A `fourfour/benchmark/` directory with CLI: one command to run all engines again
 
 ### Step 1B — Python Analysis Backends (if needed)
 
-If `stratum-dsp` doesn't cut it, we plug in Python backends using the same `AnalysisBackend` interface from Phase 0. The samplebase harness already proved this pattern works — each backend is an adapter behind a shared ABC, runs are parallel, results are cached.
+If `stratum-dsp` doesn't cut it, we plug in Python backends. The external benchmark (samplebase) already identified the best options — see `analysis-pipeline-handoff.md` for code and accuracy data.
 
 ```
 ┌──────────────┐     JSON/stdio      ┌──────────────────────┐
@@ -239,28 +229,23 @@ If `stratum-dsp` doesn't cut it, we plug in Python backends using the same `Anal
 ```
 
 - [ ] **1B.1** Create a `fourfour/analysis/` Python package (separate from the Rust crate)
-- [ ] **1B.2** Implement backends as `AnalysisBackend` subclasses (same ABC from Phase 0):
-  - **`EssentiaBackend`** — TempoCNN for global BPM, KeyExtractor for key
-  - **`MadmomBackend`** — DBNBeatTracker for beat positions + downbeats, RNNDownBeatProcessor for bar boundaries
-  - **`OpenKeyScanBackend`** — CNN-based key detection (stdin/stdout JSON server)
-- [ ] **1B.3** Register as variants (samplebase pattern):
+- [ ] **1B.2** Implement backends using the code samples from the handoff doc:
+  - **DeepRhythm** — BPM detection (97% Acc2, ~0.2s/track)
+  - **librosa chroma_cqt + KS** — key detection (~70%, upgrade to OpenKeyScan if needed)
+  - **Essentia TempoCNN** — BPM fallback if DeepRhythm fails on specific genres
+  - **OpenKeyScan** — key detection upgrade (~85-90% accuracy)
+- [ ] **1B.3** Register as variants:
   ```python
   ANALYSIS_VARIANTS = {
       "stratum_dsp_default": {"backend": "stratum_dsp", "label": "stratum-dsp (Rust baseline)"},
+      "deeprhythm":          {"backend": "deeprhythm",  "label": "DeepRhythm (97% Acc2)"},
       "essentia_tempocnn":   {"backend": "essentia",     "label": "Essentia TempoCNN"},
-      "madmom_dbn":          {"backend": "madmom",       "label": "Madmom DBN Beat Tracker"},
+      "librosa_ks":          {"backend": "librosa",      "label": "librosa chroma + KS"},
       "openkeyscan_cnn":     {"backend": "openkeyscan",  "label": "OpenKeyScan CNN"},
   }
   ```
-- [ ] **1B.4** Reuse samplebase's caching: SHA1-keyed JSON per backend × track → no re-computation on re-runs
-- [ ] **1B.5** Run all backends against the corpus in one command:
-  ```bash
-  python -m fourfour.analysis.benchmark_run \
-    --manifest benchmark/manifests/corpus-v1.manifest.json \
-    --groundtruth benchmark/manifests/corpus-v1.groundtruth.json \
-    --variants stratum_dsp_default essentia_tempocnn madmom_dbn openkeyscan_cnn
-  ```
-- [ ] **1B.6** Review per-backend accuracy in `analysis.json`
+- [ ] **1B.4** Run all backends against the corpus
+- [ ] **1B.5** Review per-backend accuracy
 
 ### Step 1C — ONNX Runtime (future production path)
 
@@ -285,8 +270,8 @@ Regardless of which engine wins:
 Run benchmark. If we hit ≥ 95% BPM accuracy, ≥ 85% key accuracy → **Phase 1 complete**.
 
 ### Time Estimate
-- Step 1A: 1-2 days (harness already exists from Phase 0)
-- Step 1B: 3-5 days (if needed — samplebase pattern reduces boilerplate)
+- Step 1A: 1-2 days (ground truth extraction + comparison)
+- Step 1B: 2-4 days (if needed — pipeline code samples exist in handoff doc)
 - Step 1D: 1 day
 
 ---
@@ -434,19 +419,19 @@ Phrase markers visible on CDJ waveform display, sections correspond to actual so
 
 ### Big head start from samplebase
 
-This phase is almost entirely reusable from the samplebase benchmark harness. samplebase already has:
-- **`LaionClapBackend`** — fully implemented, thread-safe model loading, audio + text embeddings
-- **`MicrosoftClapBackend`** — fully implemented, same pattern
-- **`VectorStore`** — persistent numpy-backed store with cosine similarity search
-- **`benchmark_orchestrator.py`** — parallel backend execution with progress tracking
-- **Proven results** from 8+ benchmark runs comparing LAION-CLAP vs MS-CLAP across chunking policies
+The external benchmark (samplebase) already implemented and compared CLAP backends. The code and results are documented in `analysis-pipeline-handoff.md`. Key findings:
+
+- **MS CLAP** — best for text+audio (MRR 0.667, Hit@5 0.600, 658 MB)
+- **LAION-CLAP** — best for audio→audio (Hit@5 0.791, 1778 MB)
+- **TTMR++** — runner-up (128-dim, 1854 MB)
+- **CLaMP 3** — collapsed embeddings, do not use
 
 The transfer plan:
 
 ### Steps
 
-- [ ] **5.1** Copy `samplebase/mvp/src/samplebase_mvp/vectorstore.py` → `fourfour/analysis/vectorstore.py` (or import as dependency)
-- [ ] **5.2** Copy the CLAP backend implementations (`LaionClapBackend`, `MicrosoftClapBackend`) from `benchmark_backends.py`
+- [ ] **5.1** Copy `samplebase/mvp/src/samplebase_mvp/vectorstore.py` → fourfour (or import as dependency)
+- [ ] **5.2** Implement CLAP backends based on the patterns from the handoff doc (MS CLAP primary, LAION-CLAP for audio→audio)
 - [ ] **5.3** Adapt the chunking policy for full DJ tracks:
   - samplebase's `top8s` (energy-based 8-second window) maps to "pick the most energetic section"
   - samplebase's `chunked_max` (overlapping 8s chunks) maps to "embed at 10%, 45%, 80% of track" (CLAP standard for full tracks)
@@ -545,14 +530,14 @@ but runs as a separate optional process for similarity search only.
 pioneer-usb-writer (Rust)
 ├── symphonia, lofty, image, custom PDB/ANLZ
 └── spawns → fourfour-analysis (Python)
-              ├── EssentiaBackend or MadmomBackend → BPM, beats, key
-              ├── OpenKeyScanBackend → key (optional, higher accuracy)
-              └── LaionClapBackend → embeddings (from samplebase)
+              ├── DeepRhythm → BPM (97% Acc2)
+              ├── librosa + KS → key (~70%)
+              ├── OpenKeyScan → key upgrade (~85-90%)
+              └── MS CLAP → embeddings (from handoff doc)
 
-Sidecar shares architecture with samplebase's benchmark harness.
-Can reuse samplebase's VectorStore, backend adapters, and caching.
+Analysis pipeline design from external benchmarking.
 ```
-**Pros:** Best analysis quality. Easy to swap models. Proven pattern from samplebase.
+**Pros:** Best analysis quality. Easy to swap models. Pipeline code samples exist in handoff doc.
 **Cons:** Python dependency management. ~500MB+ bundled size. Slower startup.
 
 ### Scenario C: ONNX Runtime (Future Production)
@@ -569,17 +554,15 @@ No Python at runtime. Models downloaded or bundled.
 **Pros:** Best of both worlds — ML quality without Python.
 **Cons:** Model conversion is non-trivial. ONNX Runtime adds ~100MB.
 
-### Cross-project reuse summary
+### Cross-project reference summary
 
-| Component | samplebase → fourfour | Effort |
+| Component | Source | Status |
 |---|---|---|
-| Backend ABC pattern | `BenchmarkBackend` → `AnalysisBackend` | Refactor, ~1 day |
-| CLAP backends | `LaionClapBackend`, `MicrosoftClapBackend` | Copy + adapt chunking |
-| VectorStore | Direct reuse | Copy file |
-| Result directory structure | Same pattern | Trivial |
-| Caching layer | Same SHA1-keyed JSON pattern | Trivial |
-| Dashboard orchestrator | Thread-per-backend, progress, debug log | Copy + adapt |
-| Scoring workflow | Manual judgment → adapt for accuracy scoring | New logic, ~2 days |
+| Library accuracy data | samplebase external benchmark | ✅ In `analysis-pipeline-handoff.md` |
+| Python analysis pipeline design | samplebase external benchmark | ✅ Code samples in handoff doc |
+| CLAP backend implementations | samplebase `benchmark_backends.py` | Available to copy when Phase 5 starts |
+| VectorStore | samplebase `vectorstore.py` | Available to copy when Phase 5 starts |
+| Result directory structure | samplebase pattern | Documented in `benchmark-implementation-plan.md` |
 
 ---
 

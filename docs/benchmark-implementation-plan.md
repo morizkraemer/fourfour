@@ -1,8 +1,31 @@
 # fourfour Benchmark — Implementation Plan
 
-> Concrete plan to build a ground-truth comparison tool for Pioneer USB analysis quality, reusing patterns from the samplebase benchmark harness.
+> **Status: Historical reference.** Benchmarking was completed externally in the samplebase project. The results, library recommendations, and accuracy data are captured in [`analysis-pipeline-handoff.md`](./analysis-pipeline-handoff.md). This document is retained as a design reference for any future benchmark work inside fourfour.
 
 ---
+
+## What Happened
+
+Benchmarking of audio analysis libraries (BPM, key, energy, waveform, embeddings) was done in the **samplebase** project (`~/dev/projects/samplebase`), not in this repo. The research produced:
+
+- Accuracy benchmarks for BPM detection (DeepRhythm ~97% Acc2), key detection (librosa + KS ~70%), and energy scoring (validated across 19 genres)
+- Embedding model comparisons (MS CLAP, LAION-CLAP, TTMR++, CLaMP 3)
+- A full Python analysis pipeline design with concrete code for every component
+
+**The output is in [`analysis-pipeline-handoff.md`](./analysis-pipeline-handoff.md)** — that's the authoritative doc for what to build.
+
+### What was NOT built in this project
+
+- No Python benchmark harness exists in `analysis/`
+- No ground truth extraction from Rekordbox master.db / ANLZ
+- No `fourfour-benchmark` CLI
+- No `StratumDspBackend` adapter or `AnalysisBackend` ABC
+
+These may be built later if needed, but the immediate path is to implement the Python analysis CLI described in the handoff doc.
+
+---
+
+## Original Plan (Retained for Reference)
 
 ## Current Repo Architecture (as of v0.9.0)
 

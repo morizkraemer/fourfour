@@ -2,7 +2,7 @@
 
 ## What This Is
 
-An open-source tool for writing Pioneer CDJ-compatible USB drives. Currently an MVP experimental phase — the format writing works on real CDJ-3000 hardware, but the analysis (BPM, key, beats, waveforms) is still basic and unbenchmarked.
+An open-source tool for writing Pioneer CDJ-compatible USB drives. Currently in MVP experimental phase — the format writing works on real CDJ-3000 hardware, but the analysis (BPM, key, beats, waveforms) is still basic. Benchmarking of candidate analysis libraries was completed externally (see `docs/analysis-pipeline-handoff.md`).
 
 ---
 
@@ -93,17 +93,19 @@ The following have been tested on a **real CDJ-3000** (firmware 3.19):
 | **BPM accuracy** | Unknown | stratum-dsp gives numbers but no benchmark vs Rekordbox exists |
 | **Key accuracy** | Unknown | Same — works, but untested against ground truth |
 | **Beat grid precision** | Unknown | Grids play on CDJ, but no offset measurement vs Rekordbox |
-| **PDB multi-page** | Solved | Multi-page support exists in current pdb.rs |
 
 ---
 
-## Docs (planning, not code)
+## Benchmarking & Analysis Research
+
+Benchmarking of audio analysis libraries was done **externally** in the samplebase project (`~/dev/projects/samplebase`). No benchmark code lives in this repo. The results and recommendations are captured in:
 
 | File | Lines | What |
 |---|---|---|
-| `docs/tech-stack-reference.md` | 391 | Survey of open-source DJ analysis tools (Essentia, madmom, OpenKeyScan, CLAP, Demucs, MSAF). Options + pain points per layer. |
+| `docs/analysis-pipeline-handoff.md` | 590 | Authoritative output from external benchmarking. Library picks, accuracy numbers, code samples for every analysis layer (BPM, key, energy, tags, waveform, color, embeddings). |
 | `docs/experimentation-path.md` | 654 | 6-phase experimentation plan. Phase 0-3 are blocking (benchmark → BPM/key accuracy → waveforms → scale). Phase 4-6 are incremental (phrases → embeddings → stems). |
-| `docs/benchmark-implementation-plan.md` | 788 | Concrete build plan for a Python benchmark harness that compares analysis backends against Rekordbox ground truth (from `master.db`). |
+| `docs/benchmark-implementation-plan.md` | 788 | Historical reference — original plan for an in-repo Python benchmark harness. Benchmarking happened externally instead. |
+| `docs/tech-stack-reference.md` | 391 | Survey of open-source DJ analysis tools (Essentia, madmom, OpenKeyScan, CLAP, Demucs, MSAF). Options + pain points per layer. |
 
 ---
 
@@ -147,14 +149,9 @@ write_usb()                            Add/Update/Replace/Skip/Remove
 
 ## Planned Experiments (separate from the format library)
 
-The benchmark harness is a **separate Python package** (`analysis/`) that:
+Benchmarking of analysis libraries was completed externally (samplebase project). The results are in `docs/analysis-pipeline-handoff.md`. **No benchmark code exists in this repo** — only planning docs and the handoff from the external research.
 
-1. Calls the Rust analyzer as a subprocess (`analyze --json`)
-2. Compares output against ground truth from Rekordbox's `master.db` + ANLZ files
-3. Runs multiple analysis backends (stratum-dsp, essentia, madmom, etc.)
-4. Produces accuracy scorecards per backend
-
-This is documented in `docs/benchmark-implementation-plan.md` and `docs/experimentation-path.md`. **None of this code exists yet** — only the planning docs.
+The next step is to build a Python analysis CLI based on the handoff doc, then validate against Rekordbox ground truth.
 
 ---
 
