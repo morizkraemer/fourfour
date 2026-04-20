@@ -443,6 +443,50 @@ fn app_version() -> String {
     pioneer_usb_writer::VERSION.to_string()
 }
 
+/// Run Python analysis CLI on a single track and return the result as JSON.
+#[tauri::command]
+async fn analyze_track_python(path: String) -> Result<serde_json::Value, String> {
+    let output = tokio::task::spawn_blocking(move || {
+        std::process::Command::new("python3")
+            .args(["-m", "fourfour_analysis.cli", "analyze", &path, "--json"])
+            .output()
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+    .map_err(|e| format!("Failed to run Python analyzer: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Python analyzer failed: {stderr}"));
+    }
+
+    let results: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+
+    results.into_iter().next().ok_or_else(|| "No results".to_string())
+}
+
+/// Get stored analysis data for a track from the local library DB.
+#[tauri::command]
+fn get_analysis_data(
+    track_id: i64,
+    state: State<'_, SharedLibrary>,
+) -> Result<serde_json::Value, String> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    let analysis = lib.get_analysis(track_id).map_err(|e| e.to_string())?;
+
+    match analysis {
+        Some(a) => Ok(serde_json::json!({
+            "waveform_preview": a.waveform.data.to_vec(),
+            "waveform_color": serde_json::Value::Array(vec![]),
+            "waveform_peaks": serde_json::Value::Array(vec![]),
+            "bpm": a.bpm,
+            "key": a.key,
+        })),
+        None => Err("No analysis data for this track".to_string()),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // USB state reading
 // ---------------------------------------------------------------------------
@@ -655,6 +699,8 @@ fn main() {
             read_usb_state,
             get_library_path,
             change_library_path,
+            analyze_track_python,
+            get_analysis_data,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path
