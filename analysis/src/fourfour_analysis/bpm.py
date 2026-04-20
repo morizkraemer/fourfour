@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from deeprhythm import DeepRhythmAnalyzer
+from deeprhythm import DeepRhythmPredictor
 
 # Lazy singleton — DeepRhythm loads a model, expensive to reinit
-_analyzer: DeepRhythmAnalyzer | None = None
+_analyzer: DeepRhythmPredictor | None = None
 
 
-def _get_analyzer() -> DeepRhythmAnalyzer:
+def _get_analyzer() -> DeepRhythmPredictor:
     global _analyzer
     if _analyzer is None:
-        _analyzer = DeepRhythmAnalyzer()
+        _analyzer = DeepRhythmPredictor()
     return _analyzer
 
 
@@ -22,7 +22,7 @@ def detect_bpm(path: str) -> float | None:
     """
     try:
         analyzer = _get_analyzer()
-        bpm = analyzer.analyze(path)
+        bpm = analyzer.predict(path)
 
         # Octave correction
         if bpm < 70:
