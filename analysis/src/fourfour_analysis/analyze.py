@@ -64,6 +64,17 @@ def analyze_track(path: str) -> dict:
         result["waveform_peaks"] = []
         result["errors"].append(f"waveform_peaks: {e}")
 
+    # Pioneer 3-band waveform (native resolution for ANLZ files)
+    try:
+        from fourfour_analysis.waveform import generate_pioneer_3band
+        pioneer_bands = generate_pioneer_3band(path)
+        result["pioneer_3band_detail"] = pioneer_bands["detail"]
+        result["pioneer_3band_overview"] = pioneer_bands["overview"]
+    except Exception as e:
+        result["pioneer_3band_detail"] = []
+        result["pioneer_3band_overview"] = []
+        result["errors"].append(f"pioneer_3band: {e}")
+
     result["elapsed_seconds"] = time.time() - start
     return result
 

@@ -71,6 +71,69 @@ def extract_color_bands(path: str, points: int = 2000) -> list[dict]:
     return results[:points]
 
 
+def generate_pioneer_3band(path: str) -> dict:
+    """Generate Pioneer-native 3-band waveform data.
+
+    Returns dict with:
+        detail: list of [low, mid, high] (0-255 each), entry count = duration * 150
+        overview: list of [low, mid, high] (0-255 each), always 1200 entries
+    """
+    info = sf.info(path)
+    duration = info.duration
+    sr = info.samplerate
+
+    data, _ = sf.read(path, dtype="float32", always_2d=True)
+    mono = data.mean(axis=1)
+
+    n_fft = 2048
+    detail_count = int(duration * 150)
+    overview_count = 1200
+
+    def compute_bands(audio_data, num_entries):
+        hop = max(1, len(audio_data) // num_entries)
+        freqs = np.fft.rfftfreq(n_fft, 1.0 / sr)
+
+        low_mask = (freqs >= 20) & (freqs < 250)
+        mid_mask = (freqs >= 250) & (freqs < 4000)
+        high_mask = freqs >= 4000
+
+        raw = []
+        max_low = max_mid = max_high = 0.0
+
+        for i in range(min(num_entries, len(audio_data) // hop)):
+            chunk = audio_data[i * hop : (i + 1) * hop]
+            if len(chunk) < n_fft:
+                chunk = np.pad(chunk, (0, n_fft - len(chunk)))
+            spec = np.abs(np.fft.rfft(chunk, n=n_fft))
+
+            low = float(spec[low_mask].mean()) if low_mask.any() else 0.0
+            mid = float(spec[mid_mask].mean()) if mid_mask.any() else 0.0
+            high = float(spec[high_mask].mean()) if high_mask.any() else 0.0
+
+            raw.append((low, mid, high))
+            max_low = max(max_low, low)
+            max_mid = max(max_mid, mid)
+            max_high = max(max_high, high)
+
+        # Normalize to Pioneer's typical ranges
+        entries = []
+        for low, mid, high in raw:
+            l = int((low / max_low * 0x60) if max_low > 0 else 0)
+            m = int((mid / max_mid * 0x40) if max_mid > 0 else 0)
+            h = int((high / max_high * 0x30) if max_high > 0 else 0)
+            entries.append([min(255, l), min(255, m), min(255, h)])
+
+        # Pad to exact count
+        while len(entries) < num_entries:
+            entries.append([0, 0, 0])
+        return entries[:num_entries]
+
+    detail = compute_bands(mono, detail_count)
+    overview = compute_bands(mono, overview_count)
+
+    return {"detail": detail, "overview": overview}
+
+
 def generate_pwav_preview(path: str) -> bytes:
     """Generate a 400-byte Pioneer PWAV preview.
 
