@@ -67,6 +67,11 @@ export default class WaveformDisplay {
         this._render();
     }
 
+    /** Re-render at current size — call after container resize. */
+    redraw() {
+        this._render();
+    }
+
     /** Remove canvases and all event listeners. */
     destroy() {
         this._unbindEvents();
@@ -98,7 +103,10 @@ export default class WaveformDisplay {
         ctx.fillRect(0, 0, w, h);
 
         const data = this._data?.waveform_color;
-        if (!data || data.length === 0) return;
+        if (!data || data.length === 0) {
+            this._renderMonoOverview(ctx, w, h);
+            return;
+        }
 
         // One column per CSS pixel — draw upward from center (Lexicon overview style)
         let prevR = 0, prevG = 0, prevB = 0;
@@ -134,6 +142,28 @@ export default class WaveformDisplay {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.lineWidth = 1;
         ctx.strokeRect(x1, 0, x2 - x1, h);
+    }
+
+    _renderMonoOverview(ctx, w, h) {
+        const previewData = this._data?.waveform_preview;
+        if (!previewData || previewData.length === 0) return;
+        const yCenter = h / 2;
+        for (let px = 0; px < w; px++) {
+            const di = Math.min(Math.floor(px * previewData.length / w), previewData.length - 1);
+            const byte = previewData[di];
+            const amplitude = (byte & 0x1F) / 31.0;
+            const whiteness = ((byte >> 5) & 0x07) / 7.0;
+            const brightness = Math.round(100 + whiteness * 155);
+            const barH = amplitude * (h / 2) * 2 * 0.9;
+            ctx.strokeStyle = amplitude < 0.01
+                ? 'rgb(80, 80, 80)'
+                : `rgba(${brightness}, ${brightness}, ${brightness}, 0.7)`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(px, yCenter);
+            ctx.lineTo(px, yCenter - barH);
+            ctx.stroke();
+        }
     }
 
     // ── Zoom ──────────────────────────────────────────────────────────────
@@ -208,9 +238,9 @@ export default class WaveformDisplay {
                 const top = slice.slice(0, 5);
                 let weightedAmp = 0, totalWeight = 0;
                 top.forEach((entry, i) => {
-                    const w = top.length - i;
-                    weightedAmp += entry.amp * w;
-                    totalWeight += w;
+                    const weight = top.length - i;
+                    weightedAmp += entry.amp * weight;
+                    totalWeight += weight;
                 });
                 maxAmp = totalWeight > 0 ? weightedAmp / totalWeight : 0;
             }
@@ -311,7 +341,8 @@ export default class WaveformDisplay {
                 ctx.font = `${isPhrase ? 'bold ' : ''}${fontSize}px system-ui`;
                 ctx.textAlign = 'right';
                 const labelW = ctx.measureText(label).width + 2;
-                ctx.clearRect(x - labelW - 2, 0, labelW + 2, fontSize + 4);
+                ctx.fillStyle = '#0d0d0d';
+                ctx.fillRect(x - labelW - 2, 0, labelW + 2, fontSize + 4);
                 ctx.fillStyle = isPhrase ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.6)';
                 ctx.fillText(label, x - 2, fontSize + 2);
 
