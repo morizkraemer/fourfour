@@ -68,6 +68,7 @@ async function init() {
     });
 
     listen('analysis-progress', (event) => {
+        if (!analyzing) return;
         const { current, total, message } = event.payload;
         showProgress(current, total, message);
     });
