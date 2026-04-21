@@ -22,7 +22,7 @@ A Python CLI that takes audio files → extracts metadata (BPM, key, energy, tag
 Audio files ──▶ Python CLI (analysis) ──▶ JSON ──▶ Rust (USB sync)
                    │
                    ├── BPM: DeepRhythm
-                   ├── Key: librosa chroma + KS  
+                   ├── Key: Essentia KeyExtractor bgate
                    ├── Energy: librosa feature fusion
                    ├── Tags: mutagen
                    ├── Waveform peaks: soundfile + numpy
@@ -70,7 +70,36 @@ The #1 BPM failure mode is detecting 64 instead of 128, or 170 instead of 85. **
 
 ## 2. Key Detection
 
-### Use: librosa chroma_cqt + Krumhansl-Schmuckler
+### Current decision: Essentia KeyExtractor `bgate`
+
+The original handoff recommended `librosa chroma_cqt + Krumhansl-Schmuckler` as a simple starting point. That recommendation has been superseded by an in-repo benchmark against the Beatport EDM Key Dataset.
+
+See [`key-detection-benchmark-findings.md`](./key-detection-benchmark-findings.md) for the full setup and results.
+
+| Backend | Exact key match | Exact + adjacent | Speed |
+|---|---:|---:|---:|
+| Rekordbox baseline | 47% | 55% | Not measured here |
+| Essentia `bgate` | 54.0% | 68.9% | 0.114s / track |
+| Lexicon Python port | 29.9% | 42.5% | 0.186s / track |
+| DeepRhythm + librosa KS | 21.6% | 39.3% | 0.520s / track |
+
+Use `essentia_key_bgate` for current key detection.
+
+```bash
+cd analysis
+uv pip install --python .venv/bin/python essentia
+
+.venv/bin/fourfour-benchmark run \
+  --corpus ../benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json \
+  --variants essentia_key_bgate \
+  --features key \
+  --parallel 1
+```
+
+### Historical fallback: librosa chroma_cqt + Krumhansl-Schmuckler
+
+Retained below for reference only. It is not the current recommendation.
+
 ```bash
 pip install librosa  # already in your stack for energy
 ```
@@ -126,12 +155,13 @@ CAMELOT_MAP = {
 }
 ```
 
-### ⚠️ This is the weakest link
-~70% accuracy means 3 in 10 tracks will be wrong. The most common error is confusing relative major/minor (A minor ↔ C major). For DJ harmonic mixing this matters a lot.
+### ⚠️ This remains the weakest link
+The best current open-source result still has substantial errors. The most common error classes are relative major/minor, parallel major/minor, fifth-adjacent, and same-mode wrong key. For DJ harmonic mixing this matters, so manual spot checks should focus on tracks where Beatport and `essentia_key_bgate` disagree.
 
 **Upgrade path if needed:**
-- **OpenKeyScan** (CNN, ~85-90% accuracy, 780MB, runs as stdin/stdout JSON server) — see `fourfour/docs/tech-stack-reference.md` for details
-- **Essentia KeyExtractor** (~80%, AGPL) — must run as subprocess to contain license
+- Revisit maintained CNN tools only after verifying repository health, installability, licensing, and reproducible benchmarks.
+- Revisit libKeyFinder only if we explicitly install or vendor the native library.
+- Keep `essentia_key_edmm` available as an alternate because it scored the best exact-or-adjacent rate in the Beatport run.
 
 ---
 
@@ -407,7 +437,7 @@ def analyze_track(path: str) -> dict:
         y, sr = librosa.load(path, sr=22050, duration=30)
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
         chroma_avg = chroma.mean(axis=1)
-        # ... KS key detection (see section 2 above) ...
+        # Prefer Essentia bgate for production key detection.
         result["key"] = detect_key_from_chroma(chroma_avg)
     except Exception as e:
         result["errors"].append(f"key: {e}")

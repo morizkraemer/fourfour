@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from fourfour_analysis import __version__
+from fourfour_analysis.backends.registry import ANALYSIS_VARIANTS
 
 _HELP_EPILOG_ANALYZE = """
 examples:
@@ -38,6 +39,7 @@ backends:
   lexicon_port       Lexicon algorithms ported to Python (numpy+scipy, no ML)
   python_deeprhythm  DeepRhythm (torch) for BPM + librosa for key (needs [ml] extras)
   stratum_dsp        Rust subprocess wrapping stratum-dsp (needs stratum-cli binary)
+  essentia_key_bgate Essentia KeyExtractor bgate profile (key only, needs [key] extra)
 """
 
 _HELP_EPILOG_BENCHMARK = """
@@ -65,9 +67,13 @@ ground truth:
 scoring formula:
   decision_score = 0.40 * bpm_acc2 + 0.35 * key_exact + 0.15 * speed + 0.10 * deps
   Where bpm_acc2 = % within 4% of ground truth, key_exact = % exact match.
+
+key benchmark:
+  fourfour-benchmark run --corpus benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json --variants essentia_key_bgate --features key
 """
 
 _BENCHMARK_FEATURES = {"bpm", "key", "energy", "waveform", "cues"}
+_BACKEND_CHOICES = sorted(ANALYSIS_VARIANTS)
 
 
 def _build_analyze_parser() -> argparse.ArgumentParser:
@@ -82,7 +88,7 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         "-b", "--backend",
         action="append",
         dest="backends",
-        choices=["lexicon_port", "python_deeprhythm", "stratum_dsp"],
+        choices=_BACKEND_CHOICES,
         help="Backend(s) to use. May be specified multiple times. Default: lexicon_port.",
     )
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON (machine-readable)")
@@ -120,7 +126,7 @@ def _build_benchmark_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--variants",
         nargs="+",
-        choices=["lexicon_port", "python_deeprhythm", "stratum_dsp"],
+        choices=_BACKEND_CHOICES,
         default=["lexicon_port"],
         help="Backend variant(s) to benchmark (default: lexicon_port)",
     )

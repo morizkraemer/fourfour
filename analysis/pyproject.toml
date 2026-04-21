@@ -20,6 +20,9 @@ ml = [
     "DeepRhythm>=0.3",
     "mutagen>=1.47",
 ]
+key = [
+    "essentia",
+]
 dev = [
     "pytest>=8.0",
     "pytest-timeout>=2.2",

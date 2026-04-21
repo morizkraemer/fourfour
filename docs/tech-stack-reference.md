@@ -122,45 +122,40 @@ For dynamic beatgrids (Rekordbox-style tempo change handling), you'll need to bu
 
 ## 3. Key Detection
 
-### Option A: OpenKeyScan
+### Current Decision: Essentia KeyExtractor `bgate`
 
-| | |
-|---|---|
-| **Repo** | [github.com/rekordcloud/openkeyscan-analyzer](https://github.com/rekordcloud/openkeyscan-analyzer) |
-| **Stars** | New project (2024-2025) |
-| **Language** | Python (PyTorch) |
-| **License** | Open source (check repo) |
-| **Key algorithm** | CNN on Constant-Q Transform spectrograms, trained on GiantSteps + GiantSteps-MTG datasets |
-| **Based on** | Korzeniowski & Widmer (ISMIR 2018) — genre-agnostic key classification |
+An in-repo benchmark against the Beatport EDM Key Dataset found `essentia_key_bgate` is the best current practical backend for this project.
 
-**Strengths:** Community benchmarks show it rivaling Mixed In Key accuracy and outperforming built-in key detection in Rekordbox, Serato, and Traktor. Already integrated into Lexicon DJ library manager. Supports Open Key, Alphanumeric, and traditional notation output. CNN-based approach handles edge cases (key changes, ambiguous tonality) better than profile-matching methods. Runs fully offline. Includes complete training pipeline so you can retrain on your own data.
+| System | Ground truth | Exact | Exact + adjacent |
+|---|---|---:|---:|
+| Rekordbox | Beatport labels | 47% | 55% |
+| Essentia `bgate` | Beatport labels | 54.0% | 68.9% |
 
-**Pain points:**
-- Requires Python 3.12.x specifically (not 3.13+) due to PyTorch compatibility.
-- The standalone executable is ~780MB due to bundled PyTorch/librosa/scipy.
-- Relatively new project — less battle-tested than KeyFinder.
-- Runs as a stdin/stdout JSON server, which is unusual for integration — you'll need to manage the process lifecycle.
-- Linux/Windows require FFmpeg to be installed separately for compressed audio format support.
+The Essentia result used the 598-track clean single-key subset. That is the right target for a one-key Camelot detector. See [`key-detection-benchmark-findings.md`](./key-detection-benchmark-findings.md).
 
-### Option B: Essentia Key Algorithm (HPCP-based)
+Use the `essentia_key_bgate` variant for key-only benchmarking and as the current production candidate. Keep `essentia_key_edmm` available as an alternate because it scored the highest exact-or-adjacent rate.
+
+### Option A: Essentia Key Algorithm (HPCP-based)
 
 | | |
 |---|---|
 | **Repo** | [github.com/MTG/essentia](https://github.com/MTG/essentia) — same repo as BPM |
 | **Key algorithm** | `KeyExtractor` — Harmonic Pitch Class Profile (HPCP) + key profile matching |
-| **Also available** | Pre-trained TensorFlow key classification models |
+| **Chosen profile** | `bgate` |
+| **Also benchmarked** | `edma`, `edmm`, `shaath`, `krumhansl`, `temperley` |
 
-**Strengths:** Part of the Essentia all-in-one pipeline, so no additional dependency if you're already using Essentia. The v2.1 update improved key detection with new pitch class profiles, spectral whitening, and detuning correction. Zero additional setup if Essentia is already in your stack.
+**Strengths:** Best measured result in the current project benchmark. Fast enough for batch import. Actively maintained upstream. Simple Python binding and no TensorFlow dependency for `KeyExtractor`.
 
 **Pain points:**
-- HPCP-based key detection is generally less accurate than CNN approaches (OpenKeyScan). Expect 70-80% accuracy vs 85-90% for the CNN approach.
-- Major/minor misclassification is the most common error — the algorithm sometimes confuses relative major/minor keys.
-- The newer TF-based key models are better but add the TensorFlow dependency.
-- Again, AGPL license.
+- Exact accuracy is still only 54.0% on the clean Beatport subset, so manual spot checks remain necessary.
+- Major/minor and fifth-adjacent errors still happen.
+- License must be reviewed before deciding whether Essentia can be linked directly or should remain isolated as a sidecar process.
 
-### How they work together
+### Option B: OpenKeyScan / CNN key detection
 
-Run **OpenKeyScan** as your primary key detector for highest accuracy. Fall back to **Essentia's KeyExtractor** when you want a quick estimate without spawning a separate process (e.g., for real-time preview during import). If both disagree, flag the track for manual review — this is actually what professional DJs do anyway.
+CNN key detection may still be the future upgrade path, but do not choose it from claims alone. Before adding it, verify repository health, installability on supported Python versions, model licensing, binary size, and score it against the same Beatport corpus.
+
+`key-cnn` was not accepted as a project dependency because it is not on PyPI and appears stale with old Python/TensorFlow assumptions.
 
 ---
 
