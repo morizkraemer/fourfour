@@ -239,14 +239,13 @@ For key detection, the Python sidecar path is already justified by the Beatport 
   - **DeepRhythm** — BPM detection (97% Acc2, ~0.2s/track)
   - **librosa chroma_cqt + KS** — historical key baseline
   - **Essentia KeyExtractor bgate** — current key winner
-  - **Essentia KeyExtractor profile variants** — retained for regression testing
+  - **Essentia KeyExtractor profile variants** — benchmarked historically, not exposed as public variants
 - [x] **1B.3** Register as variants:
   ```python
   ANALYSIS_VARIANTS = {
       "stratum_dsp_default": {"backend": "stratum_dsp", "label": "stratum-dsp (Rust baseline)"},
       "deeprhythm":          {"backend": "deeprhythm",  "label": "DeepRhythm (97% Acc2)"},
       "essentia_key_bgate":  {"backend": "essentia_key", "label": "Essentia KeyExtractor bgate"},
-      "essentia_key_edmm":   {"backend": "essentia_key", "label": "Essentia KeyExtractor edmm"},
   }
   ```
 - [x] **1B.4** Run all key backends against the Beatport corpus

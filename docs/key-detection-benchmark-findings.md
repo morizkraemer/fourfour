@@ -38,7 +38,7 @@ Command shape:
 cd analysis
 .venv/bin/fourfour-benchmark run \
   --corpus ../benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json \
-  --variants essentia_key_bgate essentia_key_edma essentia_key_edmm essentia_key_shaath essentia_key_krumhansl essentia_key_temperley lexicon_port python_deeprhythm \
+  --variants essentia_key_bgate lexicon_port python_deeprhythm \
   --features key \
   --parallel 1
 ```
@@ -54,13 +54,21 @@ Results:
 | Backend | Exact | Exact + adjacent | Mean seconds / track |
 |---|---:|---:|---:|
 | `essentia_key_bgate` | 54.0% | 68.9% | 0.114 |
-| `essentia_key_edmm` | 49.3% | 70.4% | 0.115 |
-| `essentia_key_edma` | 48.0% | 62.7% | 0.114 |
-| `essentia_key_shaath` | 44.3% | 59.4% | 0.116 |
-| `essentia_key_krumhansl` | 40.0% | 54.5% | 0.116 |
-| `essentia_key_temperley` | 39.1% | 62.2% | 0.116 |
 | `lexicon_port` | 29.9% | 42.5% | 0.186 |
 | `python_deeprhythm` | 21.6% | 39.3% | 0.520 |
+
+Historical Essentia profile shootout:
+
+| Profile | Exact | Exact + adjacent | Mean seconds / track |
+|---|---:|---:|---:|
+| `bgate` | 54.0% | 68.9% | 0.114 |
+| `edmm` | 49.3% | 70.4% | 0.115 |
+| `edma` | 48.0% | 62.7% | 0.114 |
+| `shaath` | 44.3% | 59.4% | 0.116 |
+| `krumhansl` | 40.0% | 54.5% | 0.116 |
+| `temperley` | 39.1% | 62.2% | 0.116 |
+
+Only `bgate` is exposed as a registered backend because it won exact-match accuracy, which is the primary metric for writing library key tags.
 
 ## Interpretation
 

@@ -133,7 +133,7 @@ An in-repo benchmark against the Beatport EDM Key Dataset found `essentia_key_bg
 
 The Essentia result used the 598-track clean single-key subset. That is the right target for a one-key Camelot detector. See [`key-detection-benchmark-findings.md`](./key-detection-benchmark-findings.md).
 
-Use the `essentia_key_bgate` variant for key-only benchmarking and as the current production candidate. Keep `essentia_key_edmm` available as an alternate because it scored the highest exact-or-adjacent rate.
+Use the `essentia_key_bgate` variant for key-only benchmarking and as the current production candidate. Other Essentia profiles were tested during the shootout but are not exposed as public backend variants.
 
 ### Option A: Essentia Key Algorithm (HPCP-based)
 
@@ -142,7 +142,7 @@ Use the `essentia_key_bgate` variant for key-only benchmarking and as the curren
 | **Repo** | [github.com/MTG/essentia](https://github.com/MTG/essentia) — same repo as BPM |
 | **Key algorithm** | `KeyExtractor` — Harmonic Pitch Class Profile (HPCP) + key profile matching |
 | **Chosen profile** | `bgate` |
-| **Also benchmarked** | `edma`, `edmm`, `shaath`, `krumhansl`, `temperley` |
+| **Also benchmarked historically** | `edma`, `edmm`, `shaath`, `krumhansl`, `temperley` |
 
 **Strengths:** Best measured result in the current project benchmark. Fast enough for batch import. Actively maintained upstream. Simple Python binding and no TensorFlow dependency for `KeyExtractor`.
 

@@ -32,36 +32,6 @@ ANALYSIS_VARIANTS = {
         "profile_type": "bgate",
         "heavy_deps": ["essentia"],
     },
-    "essentia_key_edma": {
-        "backend": "essentia_key",
-        "label": "Essentia KeyExtractor edma",
-        "profile_type": "edma",
-        "heavy_deps": ["essentia"],
-    },
-    "essentia_key_edmm": {
-        "backend": "essentia_key",
-        "label": "Essentia KeyExtractor edmm",
-        "profile_type": "edmm",
-        "heavy_deps": ["essentia"],
-    },
-    "essentia_key_krumhansl": {
-        "backend": "essentia_key",
-        "label": "Essentia KeyExtractor krumhansl",
-        "profile_type": "krumhansl",
-        "heavy_deps": ["essentia"],
-    },
-    "essentia_key_temperley": {
-        "backend": "essentia_key",
-        "label": "Essentia KeyExtractor temperley",
-        "profile_type": "temperley",
-        "heavy_deps": ["essentia"],
-    },
-    "essentia_key_shaath": {
-        "backend": "essentia_key",
-        "label": "Essentia KeyExtractor shaath",
-        "profile_type": "shaath",
-        "heavy_deps": ["essentia"],
-    },
 }
 
 

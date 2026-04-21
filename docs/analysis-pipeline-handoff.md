@@ -161,7 +161,7 @@ The best current open-source result still has substantial errors. The most commo
 **Upgrade path if needed:**
 - Revisit maintained CNN tools only after verifying repository health, installability, licensing, and reproducible benchmarks.
 - Revisit libKeyFinder only if we explicitly install or vendor the native library.
-- Keep `essentia_key_edmm` available as an alternate because it scored the best exact-or-adjacent rate in the Beatport run.
+- The non-bgate Essentia profiles were useful for the shootout but are not registered as public variants.
 
 ---
 
