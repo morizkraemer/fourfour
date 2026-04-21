@@ -1,6 +1,8 @@
 // Pioneer Test UI — app.js
 // Vanilla JS, no framework. All Tauri calls via window.__TAURI__.core.invoke()
 
+import WaveformDisplay from '../../ui/waveform/WaveformDisplay.js';
+
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open: dialogOpen } = window.__TAURI__.dialog;
@@ -18,6 +20,9 @@ let usbPlaylists = [];
 
 // Right panel mode: null | 'usb' | { playlistId: number }
 let rightPanelMode = null;
+
+// Waveform component instance — initialized in init()
+let waveformDisplay;
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
@@ -52,7 +57,7 @@ async function init() {
 
     loadVolumes();
     setupDragDrop();
-    setupWaveformInteraction();
+    waveformDisplay = new WaveformDisplay(document.querySelector('.waveform-container'));
     updateLibrarySubtitle();
 
     // Click outside context menu to close it
@@ -768,234 +773,20 @@ async function changeLibraryPath() {
 }
 
 // ── Waveform Display ──────────────────────────────────────────────────────
-let currentWaveformData = null;
-let waveformZoom = 1.0;    // horizontal zoom: 1.0 = full track visible
-let waveformOffset = 0.0;  // scroll offset as fraction of total length
-let waveformDragging = false;
-let waveformDragStartY = 0;
-let waveformDragStartX = 0;
-let waveformDragStartZoom = 1.0;
-let waveformDragStartOffset = 0.0;
-
-function setupWaveformInteraction() {
-    const canvas = document.getElementById('waveform-canvas');
-
-    canvas.addEventListener('mousedown', (e) => {
-        waveformDragging = true;
-        waveformDragStartY = e.clientY;
-        waveformDragStartX = e.clientX;
-        waveformDragStartZoom = waveformZoom;
-        waveformDragStartOffset = waveformOffset;
-        canvas.style.cursor = 'grabbing';
-        e.preventDefault();
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        if (!waveformDragging) return;
-        const dy = waveformDragStartY - e.clientY; // drag up = zoom in
-        const dx = e.clientX - waveformDragStartX; // drag right = scroll earlier
-
-        const newZoom = Math.max(1.0, Math.min(64.0, waveformDragStartZoom * Math.pow(1.015, dy)));
-        waveformZoom = newZoom;
-
-        if (waveformZoom > 1.0) {
-            const rect = canvas.getBoundingClientRect();
-            const panAmount = (dx / rect.width) / waveformZoom;
-            waveformOffset = clampOffset(waveformDragStartOffset - panAmount);
-        }
-
-        renderWaveform();
-    });
-
-    window.addEventListener('mouseup', () => {
-        if (waveformDragging) {
-            waveformDragging = false;
-            document.getElementById('waveform-canvas').style.cursor = 'default';
-        }
-    });
-
-    canvas.addEventListener('wheel', (e) => {
-        if (waveformZoom <= 1.0) return;
-        e.preventDefault();
-        waveformOffset = clampOffset(waveformOffset + (e.deltaX + e.deltaY) * 0.005 / waveformZoom);
-        renderWaveform();
-    }, { passive: false });
-}
-
-function clampOffset(offset) {
-    return Math.max(0, Math.min(1.0 - (1.0 / waveformZoom), offset));
-}
 
 async function showWaveform(trackId) {
     const track = tracks.find(t => t.id === trackId);
     if (!track) return;
 
     document.getElementById('waveform-track-name').textContent = track.title || 'Unknown';
-    waveformZoom = 1.0;
-    waveformOffset = 0.0;
 
     try {
         const data = await invoke('get_analysis_data', { trackId: trackId });
-        currentWaveformData = data;
-        renderWaveform();
+        waveformDisplay.setData(data);
     } catch (err) {
         console.warn('No analysis data:', err);
         document.getElementById('waveform-track-name').textContent += ' (not analyzed)';
-        currentWaveformData = null;
-        renderWaveform();
-    }
-}
-
-function renderWaveform() {
-    const canvas = document.getElementById('waveform-canvas');
-    const ctx = canvas.getContext('2d');
-    const mode = document.getElementById('waveform-mode').value;
-
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-
-    const w = rect.width;
-    const h = rect.height;
-
-    ctx.fillStyle = '#0d0d0d';
-    ctx.fillRect(0, 0, w, h);
-
-    if (!currentWaveformData) return;
-
-    const visibleFraction = 1.0 / waveformZoom;
-    const startFrac = waveformOffset;
-    const endFrac = startFrac + visibleFraction;
-
-    if (mode === 'color') {
-        renderColorWaveform(ctx, w, h, currentWaveformData.waveform_color, startFrac, endFrac);
-    } else if (mode === 'mono') {
-        renderMonoWaveform(ctx, w, h, currentWaveformData.waveform_preview, startFrac, endFrac);
-    } else if (mode === 'peaks') {
-        renderPeaksWaveform(ctx, w, h, currentWaveformData.waveform_peaks, startFrac, endFrac);
-    }
-
-    renderBeatGrid(ctx, w, h, startFrac, endFrac);
-    renderTimeGrid(ctx, w, h, startFrac, endFrac);
-}
-
-function renderColorWaveform(ctx, w, h, data, startFrac, endFrac) {
-    if (!data || data.length === 0) return;
-    const startIdx = Math.floor(startFrac * data.length);
-    const endIdx = Math.ceil(endFrac * data.length);
-    const visibleCount = endIdx - startIdx;
-    const barWidth = w / visibleCount;
-    const centerY = h / 2;
-
-    for (let i = 0; i < visibleCount; i++) {
-        const di = startIdx + i;
-        if (di >= data.length) break;
-        const { amp, r, g, b } = data[di];
-        const barH = Math.min(amp * centerY, centerY);
-        ctx.fillStyle = `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
-        ctx.fillRect(i * barWidth, centerY - barH, Math.max(barWidth, 1), barH * 2);
-    }
-}
-
-function renderMonoWaveform(ctx, w, h, data, startFrac, endFrac) {
-    if (!data || data.length === 0) return;
-    const startIdx = Math.floor(startFrac * data.length);
-    const endIdx = Math.ceil(endFrac * data.length);
-    const visibleCount = endIdx - startIdx;
-    const barWidth = w / visibleCount;
-    const centerY = h / 2;
-
-    for (let i = 0; i < visibleCount; i++) {
-        const di = startIdx + i;
-        if (di >= data.length) break;
-        const byte = data[di];
-        const height = (byte & 0x1F) / 31.0;
-        const whiteness = ((byte >> 5) & 0x07) / 7.0;
-        const barH = Math.min(height * centerY, centerY);
-        const brightness = Math.round(100 + whiteness * 155);
-        ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${brightness})`;
-        ctx.fillRect(i * barWidth, centerY - barH, Math.max(barWidth, 1), barH * 2);
-    }
-}
-
-function renderPeaksWaveform(ctx, w, h, data, startFrac, endFrac) {
-    if (!data || data.length === 0) return;
-    const startIdx = Math.floor(startFrac * data.length);
-    const endIdx = Math.ceil(endFrac * data.length);
-    const visibleCount = endIdx - startIdx;
-    const barWidth = w / visibleCount;
-    const centerY = h / 2;
-
-    ctx.fillStyle = '#4a9eff';
-    for (let i = 0; i < visibleCount; i++) {
-        const di = startIdx + i;
-        if (di >= data.length) break;
-        const [min, max] = data[di];
-        const y1 = centerY - max * centerY;
-        const y2 = centerY - min * centerY;
-        ctx.fillRect(i * barWidth, y1, Math.max(barWidth, 1), y2 - y1);
-    }
-}
-
-function renderBeatGrid(ctx, w, h, startFrac, endFrac) {
-    const beats = currentWaveformData?.beats;
-    const durationMs = currentWaveformData?.duration_ms;
-    if (!beats || beats.length === 0 || !durationMs) return;
-
-    let barNumber = 0;
-    for (const beat of beats) {
-        const frac = beat.time_ms / durationMs;
-        if (beat.bar_position === 1) barNumber++;
-        if (frac < startFrac || frac > endFrac) continue;
-
-        const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
-
-        if (beat.bar_position === 1) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-            ctx.font = '9px system-ui';
-            ctx.fillText(String(barNumber), x + 3, 10);
-        } else {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-            ctx.lineWidth = 0.5;
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
-            ctx.stroke();
-        }
-    }
-}
-
-function renderTimeGrid(ctx, w, h, startFrac, endFrac) {
-    const durationMs = currentWaveformData?.duration_ms;
-    if (!durationMs) return;
-
-    const visibleMs = (endFrac - startFrac) * durationMs;
-    let intervalMs;
-    if (visibleMs > 120000) intervalMs = 30000;
-    else if (visibleMs > 60000) intervalMs = 10000;
-    else if (visibleMs > 20000) intervalMs = 5000;
-    else if (visibleMs > 8000) intervalMs = 2000;
-    else intervalMs = 1000;
-
-    const startMs = startFrac * durationMs;
-    const endMs = endFrac * durationMs;
-    const firstTick = Math.ceil(startMs / intervalMs) * intervalMs;
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-    ctx.font = '9px system-ui';
-
-    for (let ms = firstTick; ms <= endMs; ms += intervalMs) {
-        const x = ((ms / durationMs - startFrac) / (endFrac - startFrac)) * w;
-        const secs = Math.floor(ms / 1000);
-        const label = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
-        ctx.fillText(label, x + 2, h - 3);
+        waveformDisplay.clear();
     }
 }
 

@@ -610,19 +610,7 @@ html, body {
 .waveform-container {
     flex: 1;
     min-height: 0;
-    position: relative;
-    cursor: default;
-    background: #0d0d0d;
-    border-radius: 4px;
     overflow: hidden;
-}
-
-.waveform-container canvas {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    display: block;
 }
 
 /* ── Status bar ──────────────────────────────────────────────── */

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pioneer USB Writer</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="../../ui/waveform/waveform.css">
 </head>
 <body>
 
@@ -137,17 +138,8 @@
         <div class="player-waveform-area">
             <div class="player-track-info">
                 <span class="player-track-title" id="waveform-track-name">No track selected — double-click a track to view waveform</span>
-                <div class="waveform-controls">
-                    <select id="waveform-mode" onchange="renderWaveform()">
-                        <option value="color">Color</option>
-                        <option value="mono">Mono</option>
-                        <option value="peaks">Peaks</option>
-                    </select>
-                </div>
             </div>
-            <div class="waveform-container">
-                <canvas id="waveform-canvas"></canvas>
-            </div>
+            <div class="waveform-container"></div>
         </div>
     </div>
 
@@ -194,6 +186,6 @@
     <div id="progress-label"></div>
 </div>
 
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>
