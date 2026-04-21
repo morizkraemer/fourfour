@@ -3,18 +3,24 @@
 //! Backed by a plain SQLite database. Provides CRUD for tracks, analyses,
 //! artwork, and playlists, plus convenience methods to export or sync to a
 //! Pioneer-formatted USB drive via [`pioneer_usb_writer`].
+//!
+//! Analysis data (beat grids, waveforms, cue points) is stored as ANLZ binary
+//! files on disk alongside the database. The SQLite `analyses` table keeps only
+//! a lightweight index (bpm + key) for fast queries.
 
 mod queries;
 mod schema;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
-use pioneer_usb_writer::models::{AnalysisResult, Playlist, SyncReport, Track};
+use pioneer_usb_writer::models::{
+    AnalysisResult, BeatGrid, Playlist, SyncReport, Track, WaveformPreview,
+};
 use pioneer_usb_writer::{reader, writer};
 
 /// Summary report from importing a Pioneer USB into the local library.
@@ -35,6 +41,8 @@ pub struct ImportReport {
 /// or import from an existing USB.
 pub struct LocalLibrary {
     conn: Connection,
+    /// Path to the database file. `None` for in-memory databases (tests).
+    db_path: Option<PathBuf>,
 }
 
 impl LocalLibrary {
@@ -44,15 +52,44 @@ impl LocalLibrary {
     pub fn open(db_path: &Path) -> Result<Self> {
         let conn =
             Connection::open(db_path).with_context(|| format!("Failed to open {}", db_path.display()))?;
-        schema::initialize(&conn)?;
-        Ok(Self { conn })
+        schema::initialize(&conn, Some(db_path))?;
+        Ok(Self {
+            conn,
+            db_path: Some(db_path.to_path_buf()),
+        })
     }
 
     /// Open an in-memory library (for testing).
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
-        schema::initialize(&conn)?;
-        Ok(Self { conn })
+        schema::initialize(&conn, None)?;
+        Ok(Self {
+            conn,
+            db_path: None,
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // ANLZ directory helpers
+    // -----------------------------------------------------------------------
+
+    /// Root directory for ANLZ files: `{db_parent}/anlz/`.
+    fn anlz_dir(&self) -> Option<PathBuf> {
+        self.db_path
+            .as_ref()
+            .map(|p| p.parent().unwrap_or(Path::new(".")).join("anlz"))
+    }
+
+    /// Per-track ANLZ directory: `{db_parent}/anlz/{track_id}/`.
+    fn track_anlz_dir(&self, track_id: i64) -> Option<PathBuf> {
+        self.anlz_dir().map(|d| d.join(track_id.to_string()))
+    }
+
+    /// Remove ANLZ files for a track (best-effort, ignores errors).
+    fn remove_track_anlz(&self, track_id: i64) {
+        if let Some(dir) = self.track_anlz_dir(track_id) {
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -91,14 +128,20 @@ impl LocalLibrary {
         queries::update_track(&self.conn, id, track)
     }
 
-    /// Remove a track (and its analysis + artwork via CASCADE).
+    /// Remove a track (and its analysis + artwork via CASCADE), including ANLZ files.
     pub fn remove_track(&self, id: i64) -> Result<()> {
-        queries::delete_tracks(&self.conn, &[id])
+        queries::delete_tracks(&self.conn, &[id])?;
+        self.remove_track_anlz(id);
+        Ok(())
     }
 
-    /// Remove multiple tracks in a single transaction.
+    /// Remove multiple tracks in a single transaction, including ANLZ files.
     pub fn remove_tracks(&self, ids: &[i64]) -> Result<()> {
-        queries::delete_tracks(&self.conn, ids)
+        queries::delete_tracks(&self.conn, ids)?;
+        for id in ids {
+            self.remove_track_anlz(*id);
+        }
+        Ok(())
     }
 
     /// Retrieve a single track by library ID. Artwork is not loaded (use `get_artwork`).
@@ -145,24 +188,97 @@ impl LocalLibrary {
     // -----------------------------------------------------------------------
 
     /// Store (or replace) analysis results for a track.
+    ///
+    /// Writes ANLZ binary files to disk (if the library is file-backed) and
+    /// updates the lightweight bpm/key index in SQLite.
     pub fn set_analysis(&self, track_id: i64, analysis: &AnalysisResult) -> Result<()> {
-        queries::upsert_analysis(&self.conn, track_id, analysis)
+        // Write ANLZ files if we have a disk path.
+        if let Some(dir) = self.track_anlz_dir(track_id) {
+            std::fs::create_dir_all(&dir)
+                .with_context(|| format!("Failed to create ANLZ dir: {}", dir.display()))?;
+
+            let track = self
+                .get_track(track_id)?
+                .context("Track not found for analysis storage")?;
+
+            // For local library ANLZ files, use source_path in the PPTH section
+            // (CDJs never read these files — they're only for local round-tripping).
+            let mut track_for_anlz = track.clone();
+            track_for_anlz.usb_path = track.source_path.to_string_lossy().to_string();
+
+            let dat_path = dir.join("ANLZ0000.DAT");
+            let ext_path = dir.join("ANLZ0000.EXT");
+
+            writer::anlz::write_anlz_dat(&dat_path, &track_for_anlz, analysis)?;
+            writer::anlz::write_anlz_ext(&ext_path, &track_for_anlz, analysis)?;
+        }
+
+        // Update lightweight DB index.
+        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key)?;
+
+        Ok(())
     }
 
     /// Store analyses for multiple tracks in a single transaction.
     pub fn set_analyses(&self, entries: &[(i64, &AnalysisResult)]) -> Result<()> {
-        queries::upsert_analyses(&self.conn, entries)
+        for (track_id, analysis) in entries {
+            self.set_analysis(*track_id, analysis)?;
+        }
+        Ok(())
     }
 
     /// Retrieve analysis for a track. Returns `None` if not yet analyzed.
+    ///
+    /// Reads bpm/key from the DB index and full beat grid / waveform / cue data
+    /// from the ANLZ files on disk. For in-memory libraries (or if ANLZ files
+    /// are missing), returns a minimal result with just bpm and key.
     pub fn get_analysis(&self, track_id: i64) -> Result<Option<AnalysisResult>> {
-        queries::select_analysis(&self.conn, track_id)
+        // Check the DB index first.
+        let Some((bpm, key)) = queries::select_analysis_index(&self.conn, track_id)? else {
+            return Ok(None);
+        };
+
+        // Try reading full data from ANLZ files.
+        if let Some(dir) = self.track_anlz_dir(track_id) {
+            let dat_path = dir.join("ANLZ0000.DAT");
+            if dat_path.exists() {
+                let mut result = reader::anlz::read_anlz(&dat_path)?;
+                // Override bpm/key from the DB index (authoritative source).
+                result.bpm = bpm;
+                result.key = key;
+                return Ok(Some(result));
+            }
+        }
+
+        // Fallback for in-memory or missing files: return minimal result.
+        Ok(Some(AnalysisResult {
+            beat_grid: BeatGrid { beats: Vec::new() },
+            waveform: WaveformPreview { data: [0u8; 400] },
+            bpm,
+            key,
+            cue_points: Vec::new(),
+            color_waveform: None,
+        }))
     }
 
     /// Retrieve all tracks that have analysis data, with artwork included.
     /// Returns parallel vecs suitable for passing to the writer.
     pub fn get_analyzed_tracks(&self) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
-        queries::select_analyzed_tracks(&self.conn)
+        let track_ids = queries::select_analyzed_track_ids(&self.conn)?;
+
+        let mut tracks = Vec::new();
+        let mut analyses = Vec::new();
+
+        for id in track_ids {
+            if let (Some(mut track), Some(analysis)) = (self.get_track(id)?, self.get_analysis(id)?) {
+                // Load artwork for USB export.
+                track.artwork = queries::select_artwork(&self.conn, id)?;
+                tracks.push(track);
+                analyses.push(analysis);
+            }
+        }
+
+        Ok((tracks, analyses))
     }
 
     /// Return IDs of tracks that have no analysis data yet.
@@ -173,6 +289,9 @@ impl LocalLibrary {
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.
     /// Useful for building UI list views without loading heavy data.
     /// Returns `(Track, has_artwork, has_analysis, has_cues)` tuples.
+    ///
+    /// Note: `has_cues` is always `false` since cue data now lives in ANLZ files.
+    /// Callers that need cue info should read the full analysis via `get_analysis`.
     pub fn get_all_tracks_with_flags(&self) -> Result<Vec<(Track, bool, bool, bool)>> {
         queries::select_all_tracks_with_flags(&self.conn)
     }
@@ -548,8 +667,10 @@ mod tests {
         assert!(lib.get_artwork(id).unwrap().is_none());
     }
 
+    /// In-memory: analysis round-trip stores bpm/key in the DB index.
+    /// Without disk ANLZ files, get_analysis returns a minimal result.
     #[test]
-    fn analysis_round_trip() {
+    fn analysis_round_trip_in_memory() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let id = lib.add_track(&make_track("T", "/music/t.mp3")).unwrap();
         let analysis = make_analysis();
@@ -557,6 +678,34 @@ mod tests {
         lib.set_analysis(id, &analysis).unwrap();
         let fetched = lib.get_analysis(id).unwrap().unwrap();
 
+        // bpm and key round-trip through the DB index.
+        assert_eq!(fetched.bpm, analysis.bpm);
+        assert_eq!(fetched.key, analysis.key);
+        // In-memory: no ANLZ files, so beat grid/waveform/cues are empty defaults.
+        assert!(fetched.beat_grid.beats.is_empty());
+        assert_eq!(fetched.waveform.data, [0u8; 400]);
+        assert!(fetched.cue_points.is_empty());
+    }
+
+    /// On-disk: full ANLZ round-trip through binary files.
+    #[test]
+    fn analysis_round_trip_on_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+
+        let id = lib.add_track(&make_track("T", "/music/t.mp3")).unwrap();
+        let analysis = make_analysis();
+
+        lib.set_analysis(id, &analysis).unwrap();
+
+        // Verify ANLZ files were created.
+        let anlz_dir = dir.path().join("anlz").join(id.to_string());
+        assert!(anlz_dir.join("ANLZ0000.DAT").exists());
+        assert!(anlz_dir.join("ANLZ0000.EXT").exists());
+
+        // Read back and verify full data.
+        let fetched = lib.get_analysis(id).unwrap().unwrap();
         assert_eq!(fetched.bpm, analysis.bpm);
         assert_eq!(fetched.key, analysis.key);
         assert_eq!(fetched.beat_grid.beats.len(), analysis.beat_grid.beats.len());
@@ -564,7 +713,27 @@ mod tests {
         assert_eq!(fetched.beat_grid.beats[0].tempo, 12800);
         assert_eq!(fetched.waveform.data, analysis.waveform.data);
         assert_eq!(fetched.cue_points.len(), 3);
-        assert_eq!(fetched.cue_points[2].loop_time_ms, Some(100_000));
+        // Cue order may differ after ANLZ round-trip (hot cues before memory cues).
+        let loop_cue = fetched.cue_points.iter().find(|c| c.hot_cue_number == 2).unwrap();
+        assert_eq!(loop_cue.loop_time_ms, Some(100_000));
+        assert_eq!(loop_cue.time_ms, 90_000);
+    }
+
+    /// Verify ANLZ files are cleaned up when a track is removed.
+    #[test]
+    fn remove_track_cleans_up_anlz() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+
+        let id = lib.add_track(&make_track("T", "/music/t.mp3")).unwrap();
+        lib.set_analysis(id, &make_analysis()).unwrap();
+
+        let anlz_dir = dir.path().join("anlz").join(id.to_string());
+        assert!(anlz_dir.exists());
+
+        lib.remove_track(id).unwrap();
+        assert!(!anlz_dir.exists());
     }
 
     #[test]
@@ -660,6 +829,10 @@ mod tests {
             assert_eq!(tracks[0].title, "Persisted");
             let analysis = lib.get_analysis(tracks[0].id as i64).unwrap();
             assert!(analysis.is_some());
+            // Verify full ANLZ data persists across reopen.
+            let a = analysis.unwrap();
+            assert_eq!(a.bpm, 128.0);
+            assert_eq!(a.beat_grid.beats.len(), 4);
             let playlists = lib.get_all_playlists().unwrap();
             assert_eq!(playlists.len(), 1);
             assert_eq!(playlists[0].track_ids.len(), 1);
