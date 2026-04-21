@@ -13,3 +13,9 @@
 - `essentia_key_bgate` scored 54.0% exact and 68.9% exact-or-adjacent on the 598-track clean Beatport subset.
 - Rekordbox scored 47% exact and 55% exact-or-adjacent on the user's broader 698-track Beatport run.
 - This satisfies the current requirement: open-source key detection should at least match Rekordbox for this project.
+
+## 2026-04-22 Analysis CLI README
+
+- [x] Add an LLM-oriented entrypoint README for the analysis CLI.
+- [x] Document setup, commands, backend variants, architecture, artifact layout, and verification.
+- [x] Commit and push the README update.
