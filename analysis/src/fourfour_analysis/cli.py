@@ -150,23 +150,86 @@ def benchmark_main() -> None:
         return
 
     if args.command == "init":
-        print(f"Building corpus from: {args.directory}")
-        print(f"  name: {args.name}")
-        print("  (corpus builder not yet implemented — coming in Phase 3)")
+        from fourfour_analysis.config import Settings
+        from fourfour_analysis.manifest import build_corpus
+
+        settings = Settings.from_cwd()
+        corpus_path = build_corpus(
+            args.directory, args.name, settings.manifests_dir
+        )
+        print(f"Corpus written: {corpus_path}")
+
+        # Summary
+        from fourfour_analysis.manifest import load_corpus
+        entries = load_corpus(corpus_path)
+        scorable = sum(1 for e in entries if e.ground_truth is not None)
+        print(f"  {len(entries)} tracks ({scorable} with ground truth)")
         return
 
     if args.command == "run":
-        print(f"Running benchmark: {args.corpus}")
-        print(f"  variants: {args.variants}")
-        print(f"  parallel: {args.parallel}")
-        print("  (benchmark runner not yet implemented — coming in Phase 3)")
+        from fourfour_analysis.config import Settings
+        from fourfour_analysis.runner import run_benchmark
+
+        settings = Settings.from_cwd()
+        run_id = run_benchmark(
+            corpus_path=args.corpus,
+            variant_ids=args.variants,
+            settings=settings,
+            parallel=args.parallel,
+        )
+        print(f"\nRun ID: {run_id}")
+        return
+
+    if args.command == "show":
+        from fourfour_analysis.config import Settings
+        settings = Settings.from_cwd()
+        scoring_path = settings.results_dir / args.run_id / "scoring.json"
+        if not scoring_path.is_file():
+            print(f"No results for run: {args.run_id}", file=sys.stderr)
+            sys.exit(1)
+        import json as _json
+        scores = _json.loads(scoring_path.read_text())
+        from fourfour_analysis.scoring import format_report
+        print(format_report(scores, args.run_id))
         return
 
     if args.command == "list":
-        print("No benchmark runs yet.")
+        from fourfour_analysis.config import Settings
+        settings = Settings.from_cwd()
+        results_dir = settings.results_dir
+        if not results_dir.is_dir():
+            print("No benchmark runs yet.")
+            return
+        runs = sorted([d.name for d in results_dir.iterdir() if d.is_dir()])
+        if not runs:
+            print("No benchmark runs yet.")
+            return
+        for run in runs:
+            print(f"  {run}")
         return
 
-    print(f"Command '{args.command}' not yet implemented.")
+    if args.command == "compare":
+        from fourfour_analysis.config import Settings
+        settings = Settings.from_cwd()
+        import json as _json
+        s1_path = settings.results_dir / args.run1 / "scoring.json"
+        s2_path = settings.results_dir / args.run2 / "scoring.json"
+        if not s1_path.is_file() or not s2_path.is_file():
+            print("One or both runs not found.", file=sys.stderr)
+            sys.exit(1)
+        s1 = _json.loads(s1_path.read_text())
+        s2 = _json.loads(s2_path.read_text())
+        # Simple diff: show backends present in both
+        all_keys = set(s1.keys()) | set(s2.keys())
+        all_keys.discard("_recommendation")
+        for k in sorted(all_keys):
+            d1 = s1.get(k, {}).get("decision_score", "N/A")
+            d2 = s2.get(k, {}).get("decision_score", "N/A")
+            delta = ""
+            if isinstance(d1, (int, float)) and isinstance(d2, (int, float)):
+                delta = f"  ({d2 - d1:+.1f})"
+            print(f"  {k}: {d1} → {d2}{delta}")
+        return
 
 
 def main() -> None:
