@@ -577,29 +577,44 @@ fn get_analysis_data(
 
     match analysis {
         Some(a) => {
+            // Fetch track for duration
+            let duration_ms: u64 = lib
+                .get_track(track_id)
+                .map_err(|e| e.to_string())?
+                .map(|t| (t.duration_secs * 1000.0) as u64)
+                .unwrap_or(0);
+
             // Convert color waveform to frontend format.
-            // Use detail (150 entries/sec) for full resolution; fall back to overview.
             let waveform_color: Vec<serde_json::Value> = a.color_waveform.as_ref()
                 .map(|cw| {
                     let source = if !cw.detail.is_empty() { &cw.detail } else { &cw.overview };
                     source.iter().map(|[low, mid, high]| {
                         let max_val = (*low).max(*mid).max(*high) as f64;
                         let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
-                        let amp = max_val / 96.0; // 0x60 is Pioneer's max low-band value
+                        let amp = (max_val / 96.0).min(1.0);
                         serde_json::json!({
-                            "amp": amp.min(1.0),
-                            "r": *low as f64 * scale,
-                            "g": *mid as f64 * scale,
-                            "b": *high as f64 * scale,
+                            "amp": amp,
+                            "r": (*low as f64 * scale * 255.0) as u8,
+                            "g": (*mid as f64 * scale * 255.0) as u8,
+                            "b": (*high as f64 * scale * 255.0) as u8,
                         })
                     }).collect()
                 })
                 .unwrap_or_default();
 
+            // Serialize beat grid
+            let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
+                serde_json::json!({
+                    "time_ms": b.time_ms,
+                    "bar_position": b.bar_position,
+                })
+            }).collect();
+
             Ok(serde_json::json!({
                 "waveform_preview": a.waveform.data.to_vec(),
                 "waveform_color": waveform_color,
-                "waveform_peaks": serde_json::Value::Array(vec![]),
+                "beats": beats,
+                "duration_ms": duration_ms,
                 "bpm": a.bpm,
                 "key": a.key,
             }))
