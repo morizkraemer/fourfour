@@ -73,6 +73,23 @@ pub struct WaveformPreview {
     pub data: [u8; 400],
 }
 
+/// 3-band color waveform data at Pioneer's native resolution.
+///
+/// Stores frequency band amplitudes (low/mid/high) at two resolutions:
+/// - `detail`: ~150 entries/second (used for PWV3, PWV5, PWV7)
+/// - `overview`: 1200 entries fixed (used for PWV4, PWV6)
+///
+/// Values are 0–255 representing amplitude per band.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ColorWaveform {
+    /// Full-resolution 3-band data. Entry count = track_duration_secs * 150.
+    /// Each entry: [low_freq, mid_freq, high_freq] amplitudes (0–255).
+    pub detail: Vec<[u8; 3]>,
+    /// Overview 3-band data. Always 1200 entries.
+    /// Each entry: [low_freq, mid_freq, high_freq] amplitudes (0–255).
+    pub overview: Vec<[u8; 3]>,
+}
+
 mod waveform_data {
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -111,6 +128,8 @@ pub struct AnalysisResult {
     pub key: String,
     /// Memory cues and hot cues written to the ANLZ PCOB tag.
     pub cue_points: Vec<CuePoint>,
+    /// 3-band color waveform. `None` for legacy results (faked green on USB export).
+    pub color_waveform: Option<ColorWaveform>,
 }
 
 /// A playlist containing a subset of tracks.

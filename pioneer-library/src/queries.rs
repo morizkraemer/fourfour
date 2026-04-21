@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
-use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, Playlist, Track, WaveformPreview};
+use pioneer_usb_writer::models::{Playlist, Track};
 
 // ---------------------------------------------------------------------------
 // Track queries
@@ -175,178 +175,63 @@ pub fn delete_artwork(conn: &Connection, track_id: i64) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Analysis queries
+// Analysis index queries (lightweight bpm/key in DB; full data in ANLZ files)
 // ---------------------------------------------------------------------------
 
-pub fn upsert_analysis(conn: &Connection, track_id: i64, analysis: &AnalysisResult) -> Result<()> {
-    let beat_grid_json = serde_json::to_string(&analysis.beat_grid)
-        .context("Failed to serialize beat grid")?;
-    let cue_points_json = serde_json::to_string(&analysis.cue_points)
-        .context("Failed to serialize cue points")?;
-
+/// Insert or update the lightweight analysis index (bpm + key).
+pub fn upsert_analysis_index(conn: &Connection, track_id: i64, bpm: f64, key: &str) -> Result<()> {
     conn.execute(
-        "INSERT INTO analyses (track_id, beat_grid, waveform, bpm, key, cue_points)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(track_id) DO UPDATE SET
-            beat_grid = excluded.beat_grid,
-            waveform = excluded.waveform,
-            bpm = excluded.bpm,
-            key = excluded.key,
-            cue_points = excluded.cue_points",
-        params![
-            track_id,
-            beat_grid_json,
-            analysis.waveform.data.as_slice(),
-            analysis.bpm,
-            analysis.key,
-            cue_points_json,
-        ],
+        "INSERT INTO analyses (track_id, bpm, key) VALUES (?1, ?2, ?3)
+         ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key",
+        params![track_id, bpm, key],
     )?;
     Ok(())
 }
 
-pub fn upsert_analyses(conn: &Connection, entries: &[(i64, &AnalysisResult)]) -> Result<()> {
-    let tx = conn.unchecked_transaction()?;
-    for (track_id, analysis) in entries {
-        upsert_analysis(&tx, *track_id, analysis)?;
-    }
-    tx.commit()?;
-    Ok(())
-}
-
-pub fn select_analysis(conn: &Connection, track_id: i64) -> Result<Option<AnalysisResult>> {
-    let mut stmt = conn.prepare(
-        "SELECT beat_grid, waveform, bpm, key, cue_points FROM analyses WHERE track_id = ?1",
-    )?;
+/// Check whether an analysis index row exists for the given track.
+pub fn select_analysis_index(
+    conn: &Connection,
+    track_id: i64,
+) -> Result<Option<(f64, String)>> {
+    let mut stmt = conn.prepare("SELECT bpm, key FROM analyses WHERE track_id = ?1")?;
     let mut rows = stmt.query_map([track_id], |row| {
-        let beat_grid_json: String = row.get(0)?;
-        let waveform_blob: Vec<u8> = row.get(1)?;
-        let bpm: f64 = row.get(2)?;
-        let key: String = row.get(3)?;
-        let cue_points_json: String = row.get(4)?;
-        Ok((beat_grid_json, waveform_blob, bpm, key, cue_points_json))
+        Ok((row.get::<_, f64>(0)?, row.get::<_, String>(1)?))
     })?;
-
     match rows.next() {
-        Some(Ok((beat_grid_json, waveform_blob, bpm, key, cue_points_json))) => {
-            let beat_grid: BeatGrid = serde_json::from_str(&beat_grid_json)
-                .context("Failed to deserialize beat grid")?;
-            let cue_points: Vec<CuePoint> = serde_json::from_str(&cue_points_json)
-                .context("Failed to deserialize cue points")?;
-            let mut waveform_data = [0u8; 400];
-            let len = waveform_blob.len().min(400);
-            waveform_data[..len].copy_from_slice(&waveform_blob[..len]);
-
-            Ok(Some(AnalysisResult {
-                beat_grid,
-                waveform: WaveformPreview {
-                    data: waveform_data,
-                },
-                bpm,
-                key,
-                cue_points,
-            }))
-        }
+        Some(Ok(pair)) => Ok(Some(pair)),
         Some(Err(e)) => Err(e.into()),
         None => Ok(None),
     }
 }
 
-/// Select all analyzed tracks with their analysis data and artwork.
-/// Returns parallel vecs suitable for the writer.
-pub fn select_analyzed_tracks(
-    conn: &Connection,
-) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
-    let mut stmt = conn.prepare(
-        "SELECT t.*, a.beat_grid, a.waveform, a.bpm, a.key AS analysis_key, a.cue_points,
-                art.image_data
-         FROM tracks t
-         INNER JOIN analyses a ON a.track_id = t.id
-         LEFT JOIN artwork art ON art.track_id = t.id
-         ORDER BY t.id",
-    )?;
-
-    let mut tracks = Vec::new();
-    let mut analyses = Vec::new();
-
-    let rows = stmt.query_map([], |row| {
-        let source_path: String = row.get("source_path")?;
-        let file_size: i64 = row.get("file_size")?;
-        let id: i64 = row.get("id")?;
-        let artwork: Option<Vec<u8>> = row.get("image_data")?;
-
-        let beat_grid_json: String = row.get("beat_grid")?;
-        let waveform_blob: Vec<u8> = row.get("waveform")?;
-        let bpm: f64 = row.get("bpm")?;
-        let analysis_key: String = row.get("analysis_key")?;
-        let cue_points_json: String = row.get("cue_points")?;
-
-        Ok((
-            Track {
-                id: id as u32,
-                source_path: std::path::PathBuf::from(source_path),
-                usb_path: row.get("usb_path")?,
-                title: row.get("title")?,
-                artist: row.get("artist")?,
-                album: row.get("album")?,
-                genre: row.get("genre")?,
-                label: row.get("label")?,
-                remixer: row.get("remixer")?,
-                comment: row.get("comment")?,
-                year: row.get("year")?,
-                disc_number: row.get("disc_number")?,
-                track_number: row.get("track_number")?,
-                tempo: row.get("tempo")?,
-                key: row.get("key")?,
-                duration_secs: row.get("duration_secs")?,
-                sample_rate: row.get("sample_rate")?,
-                bitrate: row.get("bitrate")?,
-                file_size: file_size as u64,
-                artwork,
-            },
-            beat_grid_json,
-            waveform_blob,
-            bpm,
-            analysis_key,
-            cue_points_json,
-        ))
-    })?;
-
-    for row in rows {
-        let (track, beat_grid_json, waveform_blob, bpm, key, cue_points_json) = row?;
-        let beat_grid: BeatGrid = serde_json::from_str(&beat_grid_json)
-            .context("Failed to deserialize beat grid")?;
-        let cue_points: Vec<CuePoint> = serde_json::from_str(&cue_points_json)
-            .context("Failed to deserialize cue points")?;
-        let mut waveform_data = [0u8; 400];
-        let len = waveform_blob.len().min(400);
-        waveform_data[..len].copy_from_slice(&waveform_blob[..len]);
-
-        tracks.push(track);
-        analyses.push(AnalysisResult {
-            beat_grid,
-            waveform: WaveformPreview {
-                data: waveform_data,
-            },
-            bpm,
-            key,
-            cue_points,
-        });
-    }
-
-    Ok((tracks, analyses))
+/// Return IDs of all tracks that have an analysis row.
+pub fn select_analyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT track_id FROM analyses ORDER BY track_id")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-/// Select all tracks with flags for artwork and analysis existence + cue info.
+pub fn select_unanalyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id WHERE a.track_id IS NULL ORDER BY t.id",
+    )?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Select all tracks with flags for artwork and analysis existence.
 /// Returns (Track, has_artwork, has_analysis, has_cues).
+///
+/// `has_cues` is always `false` since cue data now lives in ANLZ files,
+/// not in the database. Callers that need cue info should read the full
+/// ANLZ file via `get_analysis`.
 pub fn select_all_tracks_with_flags(
     conn: &Connection,
 ) -> Result<Vec<(Track, bool, bool, bool)>> {
     let mut stmt = conn.prepare(
         "SELECT t.*,
                 (art.track_id IS NOT NULL) AS has_artwork,
-                (a.track_id IS NOT NULL)   AS has_analysis,
-                COALESCE(a.cue_points, '[]') AS cue_points_json
+                (a.track_id IS NOT NULL)   AS has_analysis
          FROM tracks t
          LEFT JOIN artwork art ON art.track_id = t.id
          LEFT JOIN analyses a ON a.track_id = t.id
@@ -359,7 +244,6 @@ pub fn select_all_tracks_with_flags(
         let id: i64 = row.get("id")?;
         let has_artwork: bool = row.get("has_artwork")?;
         let has_analysis: bool = row.get("has_analysis")?;
-        let cue_points_json: String = row.get("cue_points_json")?;
 
         Ok((
             Track {
@@ -386,25 +270,16 @@ pub fn select_all_tracks_with_flags(
             },
             has_artwork,
             has_analysis,
-            cue_points_json,
         ))
     })?;
 
     let mut result = Vec::new();
     for row in rows {
-        let (track, has_artwork, has_analysis, cue_points_json) = row?;
-        let has_cues = has_analysis && cue_points_json != "[]";
-        result.push((track, has_artwork, has_analysis, has_cues));
+        let (track, has_artwork, has_analysis) = row?;
+        // has_cues is always false — cue data lives in ANLZ files, not the DB.
+        result.push((track, has_artwork, has_analysis, false));
     }
     Ok(result)
-}
-
-pub fn select_unanalyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
-    let mut stmt = conn.prepare(
-        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id WHERE a.track_id IS NULL ORDER BY t.id",
-    )?;
-    let rows = stmt.query_map([], |row| row.get(0))?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 // ---------------------------------------------------------------------------

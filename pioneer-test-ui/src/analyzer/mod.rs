@@ -35,6 +35,7 @@ pub fn analyze_track(path: &Path) -> Result<models::AnalysisResult> {
         bpm,
         key,
         cue_points: vec![],
+        color_waveform: None,
     })
 }
 

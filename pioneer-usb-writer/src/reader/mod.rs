@@ -1,3 +1,4 @@
+pub mod anlz;
 pub mod masterdb;
 pub mod usb;
 

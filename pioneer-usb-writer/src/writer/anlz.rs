@@ -229,7 +229,7 @@ pub fn write_anlz_ext(
 
 /// PWV3 section: color preview waveform (variable entries, 1 byte each).
 /// Entry count = duration_secs * 150 to match rekordbox's resolution.
-/// Each byte: bits 7-5 = color (7=white/full-spectrum), bits 4-0 = height.
+/// Each byte: bits 7-5 = color (1=red/bass, 2=blue/high, 4=green/mid, 7=white), bits 4-0 = height.
 fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let section_header_len: u32 = 24;
     let entry_count: u32 = (duration_secs * 150.0).round() as u32;
@@ -243,13 +243,41 @@ fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) ->
     buf.extend_from_slice(&entry_count.to_be_bytes());        // data length
     buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());     // unknown fields
 
-    // Interpolate 400-entry PWAV data to fill the full track duration
-    for i in 0..entry_count {
-        let pwav_idx = (i * 400 / entry_count) as usize;
-        let pwav_byte = analysis.waveform.data[pwav_idx];
-        let height = pwav_byte & 0x1F; // 5-bit height from PWAV
-        let color: u8 = 7 << 5;        // 0xe0 = white/full-spectrum (matches rekordbox)
-        buf.push(color | height);
+    if let Some(cw) = &analysis.color_waveform {
+        let src_len = cw.detail.len() as u32;
+        for i in 0..entry_count {
+            let src_idx = if src_len > 0 {
+                (i * src_len / entry_count) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.detail.len() {
+                cw.detail[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            let max_amp = low.max(mid).max(high);
+            // Scale max amplitude (0-255) to 5-bit height (0-31)
+            let height = (max_amp as u32 * 31 / 255) as u8;
+            // Determine dominant band → color code
+            let color_bits: u8 = if low >= mid && low >= high {
+                1 // red — bass dominant
+            } else if high >= low && high >= mid {
+                2 // blue — treble dominant
+            } else {
+                4 // green — mid dominant
+            };
+            buf.push((color_bits << 5) | (height & 0x1F));
+        }
+    } else {
+        // Fallback: interpolate from mono PWAV with white color
+        for i in 0..entry_count {
+            let pwav_idx = (i * 400 / entry_count) as usize;
+            let pwav_byte = analysis.waveform.data[pwav_idx];
+            let height = pwav_byte & 0x1F; // 5-bit height from PWAV
+            let color: u8 = 7 << 5;        // 0xe0 = white/full-spectrum (matches rekordbox)
+            buf.push(color | height);
+        }
     }
 
     buf
@@ -271,16 +299,35 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
     buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
     buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (confirmed from rekordbox)
 
-    // Generate 2-byte entries from PWAV data.
-    // Byte 0: amplitude scaled to 0-255 range (rekordbox format).
-    // Byte 1: 0x80 (observed constant in rekordbox exports).
-    for i in 0..num_entries {
-        let pwav_idx = (i * 400 / num_entries) as usize;
-        let pwav_byte = analysis.waveform.data[pwav_idx];
-        let height = pwav_byte & 0x1F; // 5-bit height (0-31)
-        let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
-        buf.push(amplitude);
-        buf.push(0x80); // constant second byte observed in rekordbox
+    if let Some(cw) = &analysis.color_waveform {
+        let src_len = cw.detail.len() as u32;
+        for i in 0..num_entries {
+            let src_idx = if src_len > 0 {
+                (i * src_len / num_entries) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.detail.len() {
+                cw.detail[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            let amplitude = low.max(mid).max(high);
+            buf.push(amplitude);
+            buf.push(0x80); // constant second byte observed in rekordbox
+        }
+    } else {
+        // Fallback: derive amplitude from mono PWAV data
+        // Byte 0: amplitude scaled to 0-255 range (rekordbox format).
+        // Byte 1: 0x80 (observed constant in rekordbox exports).
+        for i in 0..num_entries {
+            let pwav_idx = (i * 400 / num_entries) as usize;
+            let pwav_byte = analysis.waveform.data[pwav_idx];
+            let height = pwav_byte & 0x1F; // 5-bit height (0-31)
+            let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
+            buf.push(amplitude);
+            buf.push(0x80); // constant second byte observed in rekordbox
+        }
     }
 
     buf
@@ -302,18 +349,44 @@ fn build_color_waveform_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
     buf.extend_from_slice(&[0u8; 4]);                          // unknown
 
-    // Generate 6-byte entries from PWAV data
-    for i in 0..1200u32 {
-        let pwav_idx = (i * 400 / 1200) as usize;
-        let pwav_byte = analysis.waveform.data[pwav_idx];
-        let height = pwav_byte & 0x1F;
-        // 6 bytes per entry: [red, green, blue, height, blue2, white]
-        buf.push(height / 2);    // red component
-        buf.push(height);        // green component
-        buf.push(height / 2);    // blue component
-        buf.push(height);        // height
-        buf.push(height / 3);    // blue2
-        buf.push(0);             // whiteness
+    if let Some(cw) = &analysis.color_waveform {
+        // overview is expected to be exactly 1200 entries; use direct indexing,
+        // falling back to interpolation if lengths differ.
+        let src_len = cw.overview.len() as u32;
+        for i in 0..1200u32 {
+            let src_idx = if src_len > 0 {
+                (i * src_len / 1200) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.overview.len() {
+                cw.overview[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            let max_height = low.max(mid).max(high);
+            // 6 bytes per entry: [red(bass), green(mid), blue(high), max_height, high/2, whiteness]
+            buf.push(low);           // red — bass channel
+            buf.push(mid);           // green — mid channel
+            buf.push(high);          // blue — treble channel
+            buf.push(max_height);    // overall height
+            buf.push(high / 2);      // secondary blue
+            buf.push(0);             // whiteness
+        }
+    } else {
+        // Fallback: derive color from mono PWAV (fake green tint)
+        for i in 0..1200u32 {
+            let pwav_idx = (i * 400 / 1200) as usize;
+            let pwav_byte = analysis.waveform.data[pwav_idx];
+            let height = pwav_byte & 0x1F;
+            // 6 bytes per entry: [red, green, blue, height, blue2, white]
+            buf.push(height / 2);    // red component
+            buf.push(height);        // green component
+            buf.push(height / 2);    // blue component
+            buf.push(height);        // height
+            buf.push(height / 3);    // blue2
+            buf.push(0);             // whiteness
+        }
     }
 
     buf

@@ -146,6 +146,74 @@ fn scan_files(
     Ok(added)
 }
 
+/// Resolve the Python venv binary. Uses CARGO_MANIFEST_DIR (compile-time) so it
+/// works regardless of the process working directory at runtime.
+fn resolve_python() -> String {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let venv_python = Path::new(manifest_dir)
+        .parent() // workspace root (one level up from pioneer-test-ui)
+        .unwrap_or(Path::new("."))
+        .join("analysis/.venv/bin/python");
+    if venv_python.exists() {
+        venv_python.to_string_lossy().to_string()
+    } else {
+        "python3".to_string()
+    }
+}
+
+/// Convert a Python fourfour_analysis JSON result to `models::AnalysisResult`.
+fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult {
+    let bpm = json.get("bpm").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    // Mono waveform preview (400 bytes)
+    let mut waveform_data = [0u8; 400];
+    if let Some(arr) = json.get("waveform_preview").and_then(|v| v.as_array()) {
+        for (i, val) in arr.iter().enumerate().take(400) {
+            waveform_data[i] = val.as_u64().unwrap_or(0) as u8;
+        }
+    }
+
+    // Parse Pioneer 3-band color waveform
+    let color_waveform = {
+        let parse_3band = |key: &str| -> Vec<[u8; 3]> {
+            json.get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter().map(|entry| {
+                        if let Some(a) = entry.as_array() {
+                            let low = a.get(0).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                            let mid = a.get(1).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                            let high = a.get(2).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                            [low, mid, high]
+                        } else {
+                            [0, 0, 0]
+                        }
+                    }).collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let detail = parse_3band("pioneer_3band_detail");
+        let overview = parse_3band("pioneer_3band_overview");
+
+        if !detail.is_empty() {
+            Some(models::ColorWaveform { detail, overview })
+        } else {
+            None
+        }
+    };
+
+    models::AnalysisResult {
+        bpm,
+        key,
+        beat_grid: models::BeatGrid { beats: Vec::new() },
+        waveform: models::WaveformPreview { data: waveform_data },
+        cue_points: Vec::new(),
+        color_waveform,
+    }
+}
+
 /// Analyze all tracks that have not yet been analyzed.
 ///
 /// Emits `analysis-progress` events so the frontend can show a progress bar.
@@ -172,7 +240,10 @@ async fn analyze_tracks(
 
     let total = pending.len() as u32;
 
-    // 2. Run analysis on a blocking thread, one track at a time.
+    // Resolve the venv Python path once.
+    let python = resolve_python();
+
+    // 2. Run analysis one track at a time (Python CLI or Rust fallback).
     for (seq, (track_id, source_path)) in pending.iter().enumerate() {
         let current = seq as u32 + 1;
 
@@ -193,19 +264,39 @@ async fn analyze_tracks(
         .ok();
 
         let path = source_path.clone();
+        let python_cmd = python.clone();
+
+        // Try Python analyzer first, fall back to Rust.
         let analysis_result = tokio::task::spawn_blocking(move || {
+            // Attempt Python CLI
+            let path_str = path.to_string_lossy().to_string();
+            let output = std::process::Command::new(&python_cmd)
+                .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
+                .output();
+
+            if let Ok(output) = output {
+                if output.status.success() {
+                    if let Ok(results) = serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout) {
+                        if let Some(result) = results.into_iter().next() {
+                            return Ok(python_result_to_analysis(&result));
+                        }
+                    }
+                }
+            }
+
+            // Fallback to Rust analyzer
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 analyzer::analyze_track(&path)
             }))
+            .map_err(|_| anyhow::anyhow!("analysis panicked"))?
         })
         .await
         .map_err(|e| format!("Analysis task failed: {e}"))?;
 
         match analysis_result {
-            Ok(Ok(result)) => {
+            Ok(result) => {
                 // 3. Lock briefly to store result and update track metadata.
                 let lib = shared.lock().map_err(|e| e.to_string())?;
-                // Update track's tempo and key from analysis
                 if let Some(mut track) = lib.get_track(*track_id).map_err(|e| e.to_string())? {
                     track.tempo = (result.bpm * 100.0) as u32;
                     track.key = result.key.clone();
@@ -215,15 +306,12 @@ async fn analyze_tracks(
                 lib.set_analysis(*track_id, &result)
                     .map_err(|e| e.to_string())?;
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 eprintln!(
                     "Warning: analysis failed for {}: {}",
                     source_path.display(),
                     e
                 );
-            }
-            Err(_panic) => {
-                eprintln!("Warning: analysis panicked for {}", source_path.display());
             }
         }
     }
@@ -327,6 +415,7 @@ fn set_test_cues(
             waveform: existing.waveform,
             bpm: existing.bpm,
             key: existing.key,
+            color_waveform: None,
         };
         lib.set_analysis(track_id as i64, &new_analysis)
             .map_err(|e| e.to_string())?;
@@ -441,6 +530,70 @@ fn wipe_usb(path: String) -> Result<(), String> {
 #[tauri::command]
 fn app_version() -> String {
     pioneer_usb_writer::VERSION.to_string()
+}
+
+/// Run Python analysis CLI on a single track and return the result as JSON.
+/// Uses the venv Python at `analysis/.venv/bin/python`.
+#[tauri::command]
+async fn analyze_track_python(path: String) -> Result<serde_json::Value, String> {
+    let python = resolve_python();
+
+    let output = tokio::task::spawn_blocking(move || {
+        std::process::Command::new(&python)
+            .args(["-m", "fourfour_analysis", "analyze", &path, "--json"])
+            .output()
+    })
+    .await
+    .map_err(|e| format!("Task join error: {e}"))?
+    .map_err(|e| format!("Failed to run Python analyzer: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Python analyzer failed: {stderr}"));
+    }
+
+    let results: Vec<serde_json::Value> =
+        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+
+    results.into_iter().next().ok_or_else(|| "No results".to_string())
+}
+
+/// Get stored analysis data for a track from the local library DB.
+#[tauri::command]
+fn get_analysis_data(
+    track_id: i64,
+    state: State<'_, SharedLibrary>,
+) -> Result<serde_json::Value, String> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    let analysis = lib.get_analysis(track_id).map_err(|e| e.to_string())?;
+
+    match analysis {
+        Some(a) => {
+            // Convert color waveform to frontend format
+            let waveform_color: Vec<serde_json::Value> = a.color_waveform.as_ref()
+                .map(|cw| {
+                    cw.overview.iter().map(|[low, mid, high]| {
+                        let max_amp = (*low).max(*mid).max(*high) as f64 / 255.0;
+                        serde_json::json!({
+                            "amp": max_amp,
+                            "r": *low as f64 / 255.0,
+                            "g": *mid as f64 / 255.0,
+                            "b": *high as f64 / 255.0,
+                        })
+                    }).collect()
+                })
+                .unwrap_or_default();
+
+            Ok(serde_json::json!({
+                "waveform_preview": a.waveform.data.to_vec(),
+                "waveform_color": waveform_color,
+                "waveform_peaks": serde_json::Value::Array(vec![]),
+                "bpm": a.bpm,
+                "key": a.key,
+            }))
+        }
+        None => Err("No analysis data for this track".to_string()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -655,6 +808,8 @@ fn main() {
             read_usb_state,
             get_library_path,
             change_library_path,
+            analyze_track_python,
+            get_analysis_data,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path

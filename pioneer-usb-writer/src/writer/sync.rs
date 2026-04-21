@@ -195,6 +195,7 @@ mod tests {
             bpm: 128.0,
             key: "1A".to_string(),
             cue_points: vec![],
+            color_waveform: None,
         }
     }
 
