@@ -11,6 +11,11 @@ if TYPE_CHECKING:
 
 # Variant definitions
 ANALYSIS_VARIANTS = {
+    "deeprhythm_essentia": {
+        "backend": "deeprhythm_essentia",
+        "label": "DeepRhythm BPM + Essentia key (bgate) + Lexicon waveform/beats/cues",
+        "heavy_deps": ["torch", "DeepRhythm", "essentia", "numpy", "scipy"],
+    },
     "lexicon_port": {
         "backend": "lexicon_port",
         "label": "Lexicon algorithms (Python port)",
@@ -67,7 +72,11 @@ def load_backend(
     cache_dir = settings.cache_dir
     backend_key = ANALYSIS_VARIANTS[variant_id]["backend"]
 
-    if backend_key == "lexicon_port":
+    if backend_key == "deeprhythm_essentia":
+        from fourfour_analysis.backends.deeprhythm_essentia import DeepRhythmEssentiaBackend
+        return DeepRhythmEssentiaBackend(cache_dir=cache_dir, features=features)
+
+    elif backend_key == "lexicon_port":
         from fourfour_analysis.backends.lexicon_port import LexiconPortBackend
         return LexiconPortBackend(cache_dir=cache_dir, features=features)
 

@@ -56,6 +56,9 @@ class AnalysisResult:
     beats: list[BeatPosition] = field(default_factory=list)
     waveform_peaks: list[WaveformPeak] = field(default_factory=list)
     waveform_colors: list[WaveformColor] = field(default_factory=list)
+    # Raw per-column FFT bands for interactive crossover tuning (64 uint8 values each).
+    # bins 1-64 of a 128-pt FFT at 12 kHz → 93.75 Hz–6 kHz, per-column normalised 0-255.
+    waveform_fft_bands: list[list[int]] = field(default_factory=list)
     cue_points: list[CuePoint] = field(default_factory=list)
     elapsed_seconds: float = 0.0
     backend_metadata: Optional[BackendMetadata] = None

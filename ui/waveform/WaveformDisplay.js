@@ -28,22 +28,42 @@ function bandAmps(amp, bassW, midW, highW) {
     return [bassW * s, midW * s, highW * s];
 }
 
-// Gaussian-weighted smooth over a pixel window — blends bar heights so the
-// waveform flows continuously rather than stepping between columns.
-function smoothAmps(arr, radius = 2) {
-    const out = new Float32Array(arr.length);
-    // Weights: centre=4, ±1=2, ±2=1  (approximates a Gaussian)
-    const kernel = [1, 2, 4, 2, 1];
-    const kSum = 10;
-    for (let i = 0; i < arr.length; i++) {
-        let v = 0;
-        for (let k = -radius; k <= radius; k++) {
-            const j = Math.min(arr.length - 1, Math.max(0, i + k));
-            v += arr[j] * kernel[k + radius];
+// Apply an envelope follower: instant attack, zoom-invariant exponential decay.
+// decayPerColumn controls how fast the tail falls after a transient — the same
+// number of waveform columns regardless of current zoom level.
+function applyEnvelope(amps, samplesPerPixel, decayPerColumn = 0.82) {
+    const out = new Float32Array(amps.length);
+    // Convert column-space decay to pixel-space so it's zoom-invariant.
+    // Zoomed out (spp > 1): many columns per pixel → fast pixel decay.
+    // Zoomed in  (spp < 1): fraction of a column per pixel → slow pixel decay.
+    const decayPerPx = Math.pow(decayPerColumn, Math.max(samplesPerPixel, 0.01));
+    let env = 0;
+    for (let i = 0; i < amps.length; i++) {
+        if (amps[i] > env) {
+            env = amps[i]; // instant attack
+        } else {
+            env *= decayPerPx;
+            if (env < amps[i]) env = amps[i];
         }
-        out[i] = v / kSum;
+        out[i] = env;
     }
     return out;
+}
+
+// Draw one waveform band as a filled symmetric shape (mirrored above/below centre).
+// Filled paths look smooth and continuous; individual strokes look blocky.
+function drawBand(ctx, amps, w, yCenter, scale, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, yCenter);
+    for (let px = 0; px < w; px++) {
+        ctx.lineTo(px, yCenter - amps[px] * scale);
+    }
+    for (let px = w - 1; px >= 0; px--) {
+        ctx.lineTo(px, yCenter + amps[px] * scale);
+    }
+    ctx.closePath();
+    ctx.fill();
 }
 
 
@@ -78,10 +98,13 @@ export default class WaveformDisplay {
         this._dragStartOffset = 0;
         this._dragStartZoom = 1.0;
 
+        // rAF handle — coalesces rapid scroll/drag events into one draw per frame
+        this._zoomRafId = null;
+
         this._bindEvents();
     }
 
-    /** Replace data and re-render. */
+    /** Replace data and re-render. Resets zoom and scroll position. */
     setData(data) {
         this._data = data;
         this._zoom = 1.0;
@@ -89,7 +112,7 @@ export default class WaveformDisplay {
         this._render();
     }
 
-    /** Clear to empty state. */
+/** Clear to empty state. */
     clear() {
         this._data = null;
         this._zoom = 1.0;
@@ -102,8 +125,16 @@ export default class WaveformDisplay {
         this._render();
     }
 
+    /** Programmatically set zoom and scroll position (for syncing displays). */
+    setViewport(zoom, offset) {
+        this._zoom = Math.max(1.0, Math.min(512.0, zoom));
+        this._offset = this._clampOffset(offset);
+        this._render();
+    }
+
     /** Remove canvases and all event listeners. */
     destroy() {
+        if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
         this._unbindEvents();
         this._wrapper.remove();
     }
@@ -112,7 +143,28 @@ export default class WaveformDisplay {
 
     _render() {
         this._renderOverview();
-        this._renderZoom();
+        // Coalesce rapid scroll/drag events — only draw once per animation frame
+        if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
+        this._zoomRafId = requestAnimationFrame(() => {
+            this._zoomRafId = null;
+            this._renderZoom();
+        });
+    }
+
+    // Resize a canvas only when its pixel dimensions actually change.
+    // Setting canvas.width always clears to transparent — that clear-then-draw
+    // gap is what causes visible flicker on every scroll event.
+    _resizeCanvas(canvas, w, h) {
+        const dprW = Math.round(w * devicePixelRatio);
+        const dprH = Math.round(h * devicePixelRatio);
+        if (canvas.width !== dprW || canvas.height !== dprH) {
+            canvas.width = dprW;
+            canvas.height = dprH;
+        }
+        const ctx = canvas.getContext('2d');
+        // Reset transform each frame (setTransform doesn't require a canvas reset)
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        return ctx;
     }
 
     // ── Overview ─────────────────────────────────────────────────────────
@@ -122,12 +174,9 @@ export default class WaveformDisplay {
         const rect = canvas.getBoundingClientRect();
         if (rect.width === 0) return;
 
-        canvas.width = rect.width * devicePixelRatio;
-        canvas.height = rect.height * devicePixelRatio;
-        const ctx = canvas.getContext('2d');
-        ctx.scale(devicePixelRatio, devicePixelRatio);
         const w = rect.width;
         const h = rect.height;
+        const ctx = this._resizeCanvas(canvas, w, h);
 
         ctx.fillStyle = '#0d0d0d';
         ctx.fillRect(0, 0, w, h);
@@ -135,45 +184,31 @@ export default class WaveformDisplay {
         const data = this._data?.waveform_color;
         if (!data || data.length === 0) {
             this._renderMonoOverview(ctx, w, h);
-            return;
-        }
+        } else {
+            // Pre-compute per-pixel absolute band amplitudes (max scan per bucket)
+            const bassA = new Float32Array(w);
+            const midA  = new Float32Array(w);
+            const highA = new Float32Array(w);
 
-        // Pre-compute per-pixel absolute band amplitudes (max scan per bucket)
-        const bassA = new Float32Array(w);
-        const midA  = new Float32Array(w);
-        const highA = new Float32Array(w);
-
-        for (let px = 0; px < w; px++) {
-            const iStart = Math.floor(px * data.length / w);
-            const iEnd = Math.min(data.length - 1, Math.floor((px + 1) * data.length / w));
-            let maxAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
-            for (let i = iStart; i <= iEnd; i++) {
-                const d = data[i];
-                if (d.amp > maxAmp) maxAmp = d.amp;
-                sumR += d.r; sumG += d.g; sumB += d.b; count++;
-            }
-            if (count === 0) continue;
-            [bassA[px], midA[px], highA[px]] = bandAmps(maxAmp, sumR / count, sumG / count, sumB / count);
-        }
-
-        // Draw three layers back-to-front: bass (tallest/widest) → mids → highs (shortest)
-        const yCenter = h / 2;
-        const scale = h / 2 * 0.9;
-        function overviewLayer(amps, color) {
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
             for (let px = 0; px < w; px++) {
-                if (amps[px] < 0.005) continue;
-                const barH = amps[px] * scale;
-                ctx.moveTo(px, yCenter - barH);
-                ctx.lineTo(px, yCenter + barH);
+                const iStart = Math.floor(px * data.length / w);
+                const iEnd = Math.min(data.length - 1, Math.floor((px + 1) * data.length / w));
+                let maxAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
+                for (let i = iStart; i <= iEnd; i++) {
+                    const d = data[i];
+                    if (d.amp > maxAmp) maxAmp = d.amp;
+                    sumR += d.r; sumG += d.g; sumB += d.b; count++;
+                }
+                if (count === 0) continue;
+                [bassA[px], midA[px], highA[px]] = bandAmps(maxAmp, sumR / count, sumG / count, sumB / count);
             }
-            ctx.stroke();
+
+            const yCenter = h / 2;
+            const scale = h / 2 * 0.9;
+            drawBand(ctx, bassA, w, yCenter, scale, COLOR_BASS);
+            drawBand(ctx, midA,  w, yCenter, scale, COLOR_MID);
+            drawBand(ctx, highA, w, yCenter, scale, COLOR_HIGH);
         }
-        overviewLayer(smoothAmps(bassA), COLOR_BASS);
-        overviewLayer(smoothAmps(midA),  COLOR_MID);
-        overviewLayer(smoothAmps(highA), COLOR_HIGH);
 
         // Viewport indicator
         const visibleFrac = 1.0 / this._zoom;
@@ -215,12 +250,9 @@ export default class WaveformDisplay {
         const rect = canvas.getBoundingClientRect();
         if (rect.width === 0) return;
 
-        canvas.width = rect.width * devicePixelRatio;
-        canvas.height = rect.height * devicePixelRatio;
-        const ctx = canvas.getContext('2d');
-        ctx.scale(devicePixelRatio, devicePixelRatio);
         const w = rect.width;
         const h = rect.height;
+        const ctx = this._resizeCanvas(canvas, w, h);
 
         ctx.fillStyle = '#0d0d0d';
         ctx.fillRect(0, 0, w, h);
@@ -260,15 +292,27 @@ export default class WaveformDisplay {
             let amp, bassW, midW, highW;
 
             if (samplesPerPixel < 1) {
-                // Zoomed in — interpolate between adjacent columns
+                // Zoomed in — asymmetric interpolation:
+                // Attack (next column louder): nearest-neighbor → sharp vertical left edge.
+                // Decay  (next column quieter): linear interpolation → smooth taper.
+                // This gives the Rekordbox "pointed" shape: instant hit, gradual fall-off.
                 const i0 = Math.max(0, Math.floor(tStart));
                 const i1 = Math.min(data.length - 1, i0 + 1);
                 const t = tStart - i0;
                 const d0 = data[i0], d1 = data[i1];
-                amp   = d0.amp * (1 - t) + d1.amp * t;
-                bassW = d0.r   * (1 - t) + d1.r   * t;
-                midW  = d0.g   * (1 - t) + d1.g   * t;
-                highW = d0.b   * (1 - t) + d1.b   * t;
+                if (d1.amp >= d0.amp) {
+                    // Attack — stay at current column until the boundary
+                    amp   = d0.amp;
+                    bassW = d0.r;
+                    midW  = d0.g;
+                    highW = d0.b;
+                } else {
+                    // Decay — smooth interpolation toward quieter next column
+                    amp   = d0.amp * (1 - t) + d1.amp * t;
+                    bassW = d0.r   * (1 - t) + d1.r   * t;
+                    midW  = d0.g   * (1 - t) + d1.g   * t;
+                    highW = d0.b   * (1 - t) + d1.b   * t;
+                }
             } else {
                 // Zoomed out — max amplitude in range, average band weights
                 const iStart = Math.max(0, Math.floor(tStart));
@@ -289,26 +333,22 @@ export default class WaveformDisplay {
             [bassA[px], midA[px], highA[px]] = bandAmps(amp, bassW, midW, highW);
         }
 
-        // Draw three layers back-to-front: bass → mids → highs
+        // Envelope follower: sustains amplitude between beats so the waveform
+        // doesn't fade to silence between hits (Rekordbox style).
+        // The asymmetric interpolation above already handles sharp attacks, so
+        // the envelope can be slow without re-introducing the ramp-to-transient.
+        // decayPerColumn=0.92 → ~16% amplitude left after one beat at ~120bpm.
+        const bassE = applyEnvelope(bassA, samplesPerPixel, 0.92);
+        const midE  = applyEnvelope(midA,  samplesPerPixel, 0.92);
+        const highE = applyEnvelope(highA, samplesPerPixel, 0.92);
+
+        // Draw three layers back-to-front as filled symmetric shapes: bass → mids → highs.
+        // The envelope's exponential decay makes the top edge a smooth curve naturally.
         const yCenter = h / 2;
         const scale = h / 2 * 0.95;
-        ctx.lineWidth = 1.5;
-        ctx.lineCap = 'round';
-
-        function zoomLayer(amps, color) {
-            ctx.strokeStyle = color;
-            ctx.beginPath();
-            for (let px = 0; px < w; px++) {
-                if (amps[px] < 0.01) continue;
-                const barH = amps[px] * scale;
-                ctx.moveTo(px, yCenter - barH);
-                ctx.lineTo(px, yCenter + barH);
-            }
-            ctx.stroke();
-        }
-        zoomLayer(smoothAmps(bassA), COLOR_BASS);
-        zoomLayer(smoothAmps(midA),  COLOR_MID);
-        zoomLayer(smoothAmps(highA), COLOR_HIGH);
+        drawBand(ctx, bassE, w, yCenter, scale, COLOR_BASS);
+        drawBand(ctx, midE,  w, yCenter, scale, COLOR_MID);
+        drawBand(ctx, highE, w, yCenter, scale, COLOR_HIGH);
     }
 
     _renderMonoFallback(ctx, w, h, previewData, startFrac, endFrac) {
@@ -450,6 +490,7 @@ export default class WaveformDisplay {
             const frac = (e.clientX - rect.left) / rect.width;
             this._offset = this._clampOffset(frac - 0.5 / this._zoom);
             this._render();
+            if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
         };
 
         this._onMouseDown = (e) => {
@@ -466,12 +507,13 @@ export default class WaveformDisplay {
             if (!this._dragging) return;
             const dy = this._dragStartY - e.clientY;
             const dx = e.clientX - this._dragStartX;
-            this._zoom = Math.max(1.0, Math.min(64.0, this._dragStartZoom * Math.pow(1.015, dy)));
+            this._zoom = Math.max(1.0, Math.min(512.0, this._dragStartZoom * Math.pow(1.015, dy)));
             if (this._zoom > 1.0) {
                 const rect = this._zoomCanvas.getBoundingClientRect();
                 this._offset = this._clampOffset(this._dragStartOffset - dx / rect.width / this._zoom);
             }
             this._render();
+            if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
         };
 
         this._onMouseUp = () => {
@@ -486,6 +528,7 @@ export default class WaveformDisplay {
             e.preventDefault();
             this._offset = this._clampOffset(this._offset + (e.deltaX + e.deltaY) * 0.005 / this._zoom);
             this._render();
+            if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
         };
 
         this._overviewCanvas.addEventListener('click', this._onOverviewClick);

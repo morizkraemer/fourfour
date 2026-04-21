@@ -194,6 +194,55 @@ fn parse_pwv3(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     Ok(entries)
 }
 
+/// Parse a PWV5 (HD color waveform, 2 bytes/entry, little-endian) section into `[low, mid, high]` entries.
+///
+/// Each 2-byte entry is a little-endian 16-bit word:
+/// - bits 14:10 = amplitude (0-31)
+/// - bits  4:0  = color indicator:
+///     0-2  → neutral (all bands equal)
+///     3-7  → bass dominant   (blue in Rekordbox)
+///     8-12 → treble dominant (white)
+///     13+  → mid dominant    (orange)
+///
+/// Outputs `[bass, mid, high]` with the dominant band ×4 so that the same
+/// downstream normalization used for PWV3 (`amp = max/124`) produces the
+/// correct amplitude and color.
+fn parse_pwv5(section: &[u8]) -> Result<Vec<[u8; 3]>> {
+    if section.len() < 24 {
+        bail!("PWV5 section too short ({} bytes)", section.len());
+    }
+    let entry_count = read_u32_be(section, 16)? as usize;
+    let data = &section[24..];
+    let max_entries = data.len() / 2;
+    let count = entry_count.min(max_entries);
+
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        let b0 = data[i * 2];
+        let b1 = data[i * 2 + 1];
+        // Little-endian: word = (b1 << 8) | b0
+        let word = ((b1 as u16) << 8) | (b0 as u16);
+        let height = ((word >> 10) & 0x1f) as u16;
+        let ch3 = (word & 0x1f) as u8;
+
+        let (bass, mid, high): (u16, u16, u16) = if ch3 <= 2 {
+            // Neutral / silence — all bands equal at ×4 scale so downstream
+            // normalization (÷ max) preserves amplitude = height/31.
+            let v = (height * 4).min(255);
+            (v, v, v)
+        } else if ch3 <= 7 {
+            ((height * 4).min(255), height, height) // bass dominant (blue)
+        } else if ch3 <= 12 {
+            (height, height, (height * 4).min(255)) // treble dominant (white)
+        } else {
+            (height, (height * 4).min(255), height) // mid dominant (orange)
+        };
+
+        entries.push([bass as u8, mid as u8, high as u8]);
+    }
+    Ok(entries)
+}
+
 /// Parse a PWV4 (color overview waveform, 6 bytes/entry) section into `[low, mid, high]` entries.
 fn parse_pwv4(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     if section.len() < 24 {
@@ -350,6 +399,7 @@ fn parse_ext_sections(
 
     let mut cue_points: Vec<CuePoint> = Vec::new();
     let mut pwv3_detail: Option<Vec<[u8; 3]>> = None;
+    let mut pwv5_detail: Option<Vec<[u8; 3]>> = None;
     let mut pwv4_overview: Option<Vec<[u8; 3]>> = None;
 
     let file_header_len = read_u32_be(data, 4)? as usize;
@@ -372,6 +422,11 @@ fn parse_ext_sections(
                     pwv3_detail = Some(entries);
                 }
             }
+            b"PWV5" => {
+                if let Ok(entries) = parse_pwv5(section) {
+                    pwv5_detail = Some(entries);
+                }
+            }
             b"PWV4" => {
                 if let Ok(entries) = parse_pwv4(section) {
                     pwv4_overview = Some(entries);
@@ -388,8 +443,9 @@ fn parse_ext_sections(
         offset += section_len;
     }
 
-    // Use PWV3 as detail data (reconstructed to [low,mid,high]).
-    Ok((cue_points, pwv3_detail, pwv4_overview))
+    // Prefer PWV5 (HD color, 2 bytes/entry) over PWV3 (1 byte/entry) for detail.
+    let detail = pwv5_detail.or(pwv3_detail);
+    Ok((cue_points, detail, pwv4_overview))
 }
 
 /// Parse a PCO2 (extended cue points) section into a list of [`CuePoint`]s.

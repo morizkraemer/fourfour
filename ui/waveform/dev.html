@@ -15,7 +15,7 @@
             height: 100vh;
         }
         .toolbar {
-            padding: 8px 14px;
+            padding: 6px 14px;
             background: #1a1a1a;
             border-bottom: 1px solid #333;
             display: flex;
@@ -33,9 +33,78 @@
         .toolbar label:hover { background: #333; }
         #file-input { display: none; }
         #track-name { color: #ccc; flex: 1; }
+        #status { font-size: 10px; color: #555; white-space: nowrap; }
+        #status.active { color: #5ae168; }
+
+        /* ── Track rows ── */
+        .track-row {
+            display: flex;
+            flex-shrink: 0;
+            align-items: stretch;
+        }
+        .track-row + .track-row { border-top: 1px solid #222; }
+
+        /* ── Left sidebar: label + faders ── */
+        .row-sidebar {
+            width: 200px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 6px 10px;
+            gap: 4px;
+            border-right: 1px solid #222;
+        }
+        .row-title {
+            font-size: 10px;
+            color: #555;
+            margin-bottom: 2px;
+        }
+        .fader-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .fader-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .dot-bass { background: #3064ff; }
+        .dot-mid  { background: #ff8c00; }
+        .dot-high { background: #ddd; }
+        input[type=range] {
+            -webkit-appearance: none;
+            flex: 1;
+            height: 3px;
+            background: #2e2e2e;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        .bass-thumb::-webkit-slider-thumb { background: #3064ff; }
+        .mid-thumb::-webkit-slider-thumb  { background: #ff8c00; }
+        .high-thumb::-webkit-slider-thumb { background: #ddd; }
+        .fader-val {
+            min-width: 30px;
+            text-align: right;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+            color: #666;
+        }
+
         .waveform-container {
             height: 18vh;
-            flex-shrink: 0;
+            flex: 1;
+            min-width: 0;
             overflow: hidden;
         }
     </style>
@@ -43,46 +112,203 @@
 <body>
     <div class="toolbar">
         <label>Load JSON <input type="file" id="file-input" accept=".json"></label>
-        <span id="track-name">No file loaded — export from app with Shift+D then load here</span>
+        <span id="track-name">No file loaded</span>
+        <span id="status">watching…</span>
+        <span style="font-size:10px;color:#444">Re-analyze: press Enter in CLI</span>
     </div>
-    <div class="waveform-container"></div>
+
+    <div class="track-row">
+        <div class="row-sidebar">
+            <div class="row-title">Our analysis</div>
+            <div class="fader-row">
+                <span class="fader-dot dot-bass"></span>
+                <input type="range" class="bass-thumb" id="our-bass" min="0" max="200" step="5" value="100">
+                <span class="fader-val" id="our-bass-val">100%</span>
+            </div>
+            <div class="fader-row">
+                <span class="fader-dot dot-mid"></span>
+                <input type="range" class="mid-thumb" id="our-mid" min="0" max="200" step="5" value="100">
+                <span class="fader-val" id="our-mid-val">100%</span>
+            </div>
+            <div class="fader-row">
+                <span class="fader-dot dot-high"></span>
+                <input type="range" class="high-thumb" id="our-high" min="0" max="200" step="5" value="100">
+                <span class="fader-val" id="our-high-val">100%</span>
+            </div>
+        </div>
+        <div class="waveform-container" id="our-container"></div>
+    </div>
+
+    <div class="track-row">
+        <div class="row-sidebar">
+            <div class="row-title">Rekordbox</div>
+            <div class="fader-row">
+                <span class="fader-dot dot-bass"></span>
+                <input type="range" class="bass-thumb" id="rb-bass" min="0" max="200" step="5" value="100">
+                <span class="fader-val" id="rb-bass-val">100%</span>
+            </div>
+            <div class="fader-row">
+                <span class="fader-dot dot-mid"></span>
+                <input type="range" class="mid-thumb" id="rb-mid" min="0" max="200" step="5" value="100">
+                <span class="fader-val" id="rb-mid-val">100%</span>
+            </div>
+            <div class="fader-row">
+                <span class="fader-dot dot-high"></span>
+                <input type="range" class="high-thumb" id="rb-high" min="0" max="200" step="5" value="100">
+                <span class="fader-val" id="rb-high-val">100%</span>
+            </div>
+        </div>
+        <div class="waveform-container" id="rb-container"></div>
+    </div>
 
     <script type="module">
         import WaveformDisplay from './WaveformDisplay.js';
 
-        const display = new WaveformDisplay(document.querySelector('.waveform-container'));
-        const trackName = document.getElementById('track-name');
+        const ourDisplay = new WaveformDisplay(document.getElementById('our-container'));
+        const rbDisplay  = new WaveformDisplay(document.getElementById('rb-container'));
+        const trackName  = document.getElementById('track-name');
+        const statusEl   = document.getElementById('status');
 
-        function load(data, label) {
-            display.setData(data);
-            trackName.textContent = label;
+        // ── Zoom sync ───────────────────────────────────────────────────
+        let _syncing = false;
+        ourDisplay.onViewportChange = (zoom, offset) => {
+            if (_syncing) return;
+            _syncing = true;
+            rbDisplay.setViewport(zoom, offset);
+            _syncing = false;
+        };
+        rbDisplay.onViewportChange = (zoom, offset) => {
+            if (_syncing) return;
+            _syncing = true;
+            ourDisplay.setViewport(zoom, offset);
+            _syncing = false;
+        };
+
+        // ── State ───────────────────────────────────────────────────────
+        let currentData   = null;
+        let rekordboxData = null;
+        let prevDataStamp = null;
+
+        // ── Color recompute ─────────────────────────────────────────────
+        function recomputeColors(data, bassGain, midGain, highGain) {
+            return (data.waveform_color || []).map(c => ({
+                amp: c.amp,
+                r: Math.min(255, Math.round(c.r * bassGain)),
+                g: Math.min(255, Math.round(c.g * midGain)),
+                b: Math.min(255, Math.round(c.b * highGain)),
+            }));
         }
 
-        // Auto-load data.json if served by waveform-dev CLI
-        try {
-            const resp = await fetch(`./data.json?t=${Date.now()}`);
-            if (resp.ok) {
-                load(await resp.json(), 'data.json');
-                trackName.title = 'Re-analyze in CLI then refresh to update';
-            }
-        } catch (_) {}
+        function gainsFor(prefix) {
+            return [
+                document.getElementById(prefix + '-bass').value / 100,
+                document.getElementById(prefix + '-mid').value  / 100,
+                document.getElementById(prefix + '-high').value / 100,
+            ];
+        }
 
-        // Manual file load
+        function applyToDisplay(data, display, prefix, resetZoom) {
+            if (!data) return;
+            const [bg, mg, hg] = gainsFor(prefix);
+            const painted = { ...data, waveform_color: recomputeColors(data, bg, mg, hg) };
+            if (resetZoom) {
+                display.setData(painted);
+            } else {
+                display._data = painted;
+                display.redraw();
+            }
+        }
+
+        function renderOur(resetZoom = false)      { applyToDisplay(currentData,   ourDisplay, 'our', resetZoom); }
+        function renderRekordbox(resetZoom = false) { applyToDisplay(rekordboxData, rbDisplay,  'rb',  resetZoom); }
+
+        // ── Fader binding ───────────────────────────────────────────────
+        function bindFaders(prefix, renderFn) {
+            ['bass', 'mid', 'high'].forEach(band => {
+                const slider = document.getElementById(`${prefix}-${band}`);
+                const label  = document.getElementById(`${prefix}-${band}-val`);
+                slider.addEventListener('input', () => {
+                    label.textContent = slider.value + '%';
+                    renderFn();
+                });
+            });
+        }
+        bindFaders('our', renderOur);
+        bindFaders('rb',  renderRekordbox);
+
+        // ── Data loading ────────────────────────────────────────────────
+        function applyData(data, label, resetZoom = true) {
+            currentData = data;
+            trackName.textContent = label;
+            renderOur(resetZoom);
+        }
+
+        async function loadDataJson() {
+            const resp = await fetch(`./data.json?t=${Date.now()}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            return resp.json();
+        }
+
+        async function loadRekordboxJson(resetZoom = true) {
+            const resp = await fetch(`./rekordbox.json?t=${Date.now()}`);
+            if (!resp.ok) return;
+            rekordboxData = await resp.json();
+            renderRekordbox(resetZoom);
+        }
+
+        function fingerprint(data) {
+            return JSON.stringify(data.bpm) + '_' +
+                   (data.waveform_color ? data.waveform_color.length : 0);
+        }
+
+        // Initial load
+        try {
+            const data = await loadDataJson();
+            prevDataStamp = fingerprint(data);
+            applyData(data, 'data.json');
+            statusEl.textContent = 'watching…';
+            statusEl.className = 'active';
+        } catch (e) {
+            statusEl.textContent = 'no data yet';
+        }
+
+        try { await loadRekordboxJson(); } catch (_) {}
+
+        // ── Auto-reload every 2 s ───────────────────────────────────────
+        async function poll() {
+            try {
+                const data = await loadDataJson();
+                const stamp = fingerprint(data);
+                if (stamp !== prevDataStamp) {
+                    prevDataStamp = stamp;
+                    applyData(data, 'data.json — ' + new Date().toLocaleTimeString(), true);
+                    try { await loadRekordboxJson(true); } catch (_) {}
+                    statusEl.textContent = 'reloaded ' + new Date().toLocaleTimeString();
+                }
+            } catch (_) {}
+            setTimeout(poll, 2000);
+        }
+        setTimeout(poll, 2000);
+
+        // ── Manual file load ────────────────────────────────────────────
         document.getElementById('file-input').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
-            try { load(JSON.parse(await file.text()), file.name); }
-            catch (err) { alert('Failed to parse JSON: ' + err); }
+            try {
+                applyData(JSON.parse(await file.text()), file.name);
+                prevDataStamp = null;
+            } catch (err) { alert('Failed to parse JSON: ' + err); }
         });
 
-        // Drag-and-drop JSON files
         document.addEventListener('dragover', e => e.preventDefault());
         document.addEventListener('drop', async (e) => {
             e.preventDefault();
             const file = [...e.dataTransfer.files].find(f => f.name.endsWith('.json'));
             if (!file) return;
-            try { load(JSON.parse(await file.text()), file.name); }
-            catch (err) { alert('Failed to parse JSON: ' + err); }
+            try {
+                applyData(JSON.parse(await file.text()), file.name);
+                prevDataStamp = null;
+            } catch (err) { alert('Failed to parse JSON: ' + err); }
         });
     </script>
 </body>

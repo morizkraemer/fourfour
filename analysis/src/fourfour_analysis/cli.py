@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from fourfour_analysis import __version__
@@ -19,28 +20,26 @@ from fourfour_analysis.backends.registry import ANALYSIS_VARIANTS
 
 _HELP_EPILOG_ANALYZE = """
 examples:
-  fourfour-analyze track.mp3                              analyze one file
-  fourfour-analyze track.mp3 --json                       output one JSON object
-  fourfour-analyze track1.mp3 track2.mp3 --json           output a JSON list
-  fourfour-analyze --dir ~/Music/test --json              analyze a folder recursively
+  fourfour-analyze track.mp3                              analyze with default backend (deeprhythm_essentia)
+  fourfour-analyze track.mp3 --json                       output as JSON (for piping)
+  fourfour-analyze track.mp3 --backend deeprhythm_essentia  use DeepRhythm BPM + Essentia key
+  fourfour-analyze track.mp3 --backend lexicon_port       use Lexicon algorithms only
 
 output fields (JSON mode):
-  path                     Input audio file path
-  bpm                      Detected tempo in BPM (float, e.g. 128.0)
-  key                      Musical key in Camelot notation (string, e.g. "8A")
-  energy                   Energy dict: {score: 1-10, label: low|medium|high}
-  beats                    Currently empty; beatgrid/first-beat analyzer is separate
-  cue_points               Currently empty until beatgrid/phrase analysis lands
-  waveform_preview         400-byte Pioneer PWAV preview as integers
-  waveform_color           2000 RGB amplitude/color points
-  waveform_peaks           2000 min/max peak pairs
-  pioneer_3band_detail     Native-resolution 3-band detail waveform bytes
-  pioneer_3band_overview   400-point 3-band overview waveform bytes
-  errors                   Non-fatal extractor errors
-  elapsed_seconds          Wall time for analysis
+  bpm           Detected tempo in BPM (float, e.g. 128.0)
+  key           Musical key in Camelot notation (string, e.g. "8A", "3B")
+  energy        Energy rating 1-10 (int)
+  beats         List of beat positions with bar_position (1-4)
+  waveform_peaks  List of {min_val, max_val} per segment
+  waveform_colors  List of {r, g, b} per segment (0-255)
+  cue_points    List of {label, time_seconds, loop_end_seconds?}
+  elapsed_seconds  Wall time for analysis
 
 backends:
-  final_stack        Production stack: DeepRhythm BPM + librosa energy + Essentia bgate key
+  lexicon_port       Lexicon algorithms ported to Python (numpy+scipy, no ML)
+  python_deeprhythm  DeepRhythm (torch) for BPM + librosa for key (needs [ml] extras)
+  stratum_dsp        Rust subprocess wrapping stratum-dsp (needs stratum-cli binary)
+  essentia_key_bgate Essentia KeyExtractor bgate profile (key only, needs [key] extra)
 """
 
 _HELP_EPILOG_BENCHMARK = """
@@ -80,15 +79,19 @@ _BACKEND_CHOICES = sorted(ANALYSIS_VARIANTS)
 def _build_analyze_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fourfour-analyze",
-        description="Analyze one audio file with the complete production stack.",
+        description="Analyze a single audio file for BPM, key, energy, waveforms, and cue points.",
         epilog=_HELP_EPILOG_ANALYZE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("paths", nargs="*", help="Audio file path(s)")
-    parser.add_argument("--dir", dest="directory", help="Analyze all audio files in a directory")
+    parser.add_argument("file", help="Path to audio file (WAV, FLAC, MP3, AAC, etc.)")
+    parser.add_argument(
+        "-b", "--backend",
+        action="append",
+        dest="backends",
+        choices=_BACKEND_CHOICES,
+        help="Backend(s) to use. May be specified multiple times. Default: deeprhythm_essentia.",
+    )
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON (machine-readable)")
-    parser.add_argument("--output", "-o", help="Write JSON output to file")
-    parser.add_argument("--workers", "-w", type=int, default=1, help="Workers for multi-file analysis (default: 1)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -168,6 +171,29 @@ def _build_benchmark_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _analyze_with_backend(backend_id: str, file_path: Path) -> dict:
+    """Run analysis with a single backend, return result dict."""
+    from fourfour_analysis.config import Settings
+    from fourfour_analysis.backends.registry import load_backend
+
+    settings = Settings.from_cwd()
+    backend = load_backend(backend_id, settings)
+
+    start = time.monotonic()
+    try:
+        result = backend.analyze_track(str(file_path))
+        elapsed = time.monotonic() - start
+
+        from dataclasses import asdict
+        result_dict = asdict(result)
+        result_dict["elapsed_seconds"] = elapsed
+        result_dict["status"] = "ok"
+        return result_dict
+    except Exception as e:
+        elapsed = time.monotonic() - start
+        return {"status": "error", "error": str(e), "elapsed_seconds": elapsed, "backend": backend_id}
+
+
 def _parse_benchmark_features(raw: str, no_waveform: bool) -> set[str] | None:
     """Parse benchmark feature flags.
 
@@ -196,54 +222,33 @@ def analyze_main() -> None:
     parser = _build_analyze_parser()
     args = parser.parse_args()
 
-    file_list = list(args.paths)
-    if args.directory:
-        dir_path = Path(args.directory)
-        extensions = {".mp3", ".wav", ".flac", ".aiff", ".aif", ".m4a", ".ogg"}
-        file_list.extend(str(p) for p in dir_path.rglob("*") if p.suffix.lower() in extensions)
-
-    if not file_list:
-        print("Error: no audio files specified", file=sys.stderr)
+    file_path = Path(args.file)
+    if not file_path.is_file():
+        print(f"Error: file not found: {args.file}", file=sys.stderr)
         sys.exit(1)
 
-    missing = [path for path in file_list if not Path(path).is_file()]
-    if missing:
-        print(f"Error: file not found: {missing[0]}", file=sys.stderr)
-        sys.exit(1)
+    backends = args.backends or ["deeprhythm_essentia"]
 
-    from fourfour_analysis.analyze import analyze_batch, analyze_track
-
-    result = (
-        analyze_track(file_list[0])
-        if len(file_list) == 1
-        else analyze_batch(file_list, workers=args.workers)
-    )
-    json_str = json.dumps(result, indent=2)
+    results = {}
+    for backend_id in backends:
+        results[backend_id] = _analyze_with_backend(backend_id, file_path)
 
     if args.json_output:
-        if args.output:
-            Path(args.output).write_text(json_str)
-        else:
-            print(json_str)
+        print(json.dumps(results, indent=2, default=str))
     else:
-        display_results = result if isinstance(result, list) else [result]
-        for item in display_results:
-            name = Path(item["path"]).name
-            print(f"\n{name}")
+        for backend_id, result in results.items():
+            print(f"\n{'='*50}")
+            print(f"Backend: {backend_id}")
             print(f"{'='*50}")
-            print(f"  BPM:    {item.get('bpm', 'N/A')}")
-            print(f"  Key:    {item.get('key', 'N/A')}")
-            print(f"  Energy: {item.get('energy', 'N/A')}")
-            print(f"  Beats:  {len(item.get('beats', []))}")
-            print(f"  Cues:   {len(item.get('cue_points', []))}")
-            print(f"  Preview bytes:   {len(item.get('waveform_preview', []))}")
-            print(f"  Color points:    {len(item.get('waveform_color', []))}")
-            print(f"  Peak points:     {len(item.get('waveform_peaks', []))}")
-            print(f"  3-band detail:   {len(item.get('pioneer_3band_detail', []))}")
-            print(f"  3-band overview: {len(item.get('pioneer_3band_overview', []))}")
-            print(f"  Errors: {len(item.get('errors', []))}")
-            print(f"  Time:   {item.get('elapsed_seconds', 0):.2f}s")
-        return
+            if result.get("status") == "error":
+                print(f"  Error: {result['error']}")
+                continue
+            print(f"  BPM:    {result.get('bpm', 'N/A')}")
+            print(f"  Key:    {result.get('key', 'N/A')}")
+            print(f"  Energy: {result.get('energy', 'N/A')}")
+            print(f"  Beats:  {len(result.get('beats', []))}")
+            print(f"  Cues:   {len(result.get('cue_points', []))}")
+            print(f"  Time:   {result.get('elapsed_seconds', 0):.2f}s")
 
 
 def benchmark_main() -> None:
@@ -353,59 +358,15 @@ def benchmark_main() -> None:
         return
 
 
-def _module_analyze_main(argv: list[str]) -> None:
-    """Compatibility entry point for `python -m fourfour_analysis analyze`.
-
-    The Tauri app calls this command shape and expects a JSON list of per-track
-    dicts containing Pioneer waveform fields.
-    """
-    parser = argparse.ArgumentParser(
-        prog="python -m fourfour_analysis analyze",
-        description="Analyze audio files with the final stack and Pioneer waveform outputs.",
-    )
-    parser.add_argument("paths", nargs="*", help="Audio file path(s)")
-    parser.add_argument("--dir", dest="directory", help="Analyze all audio files in a directory")
-    parser.add_argument("--json", action="store_true", dest="json_output", help="Output JSON to stdout")
-    parser.add_argument("--output", "-o", help="Write JSON output to file")
-    parser.add_argument("--workers", "-w", type=int, default=4, help="Number of parallel workers")
-    args = parser.parse_args(argv)
-
-    file_list = list(args.paths)
-    if args.directory:
-        dir_path = Path(args.directory)
-        extensions = {".mp3", ".wav", ".flac", ".aiff", ".aif", ".m4a", ".ogg"}
-        file_list.extend(str(p) for p in dir_path.rglob("*") if p.suffix.lower() in extensions)
-
-    if not file_list:
-        print("No audio files specified.", file=sys.stderr)
-        sys.exit(1)
-
-    from fourfour_analysis.analyze import analyze_batch, analyze_track
-
-    results = [analyze_track(file_list[0])] if len(file_list) == 1 else analyze_batch(file_list, workers=args.workers)
-    json_str = json.dumps(results, indent=2)
-
-    if args.output:
-        Path(args.output).write_text(json_str)
-        print(f"Results written to {args.output}", file=sys.stderr)
-    elif args.json_output:
-        print(json_str)
-    else:
-        for result in results:
-            name = Path(result["path"]).name
-            bpm = result.get("bpm", "?")
-            key = result.get("key", "?")
-            energy = result.get("energy") or {}
-            e_score = energy.get("score", "?")
-            errors = len(result.get("errors", []))
-            print(f"{name}: BPM={bpm} Key={key} Energy={e_score}/10 Errors={errors}")
-
-
 def main() -> None:
-    """Fallback entry point for python -m fourfour_analysis."""
+    """Entry point for python -m fourfour_analysis [analyze|benchmark] ..."""
+    import sys
     if len(sys.argv) > 1 and sys.argv[1] == "analyze":
-        _module_analyze_main(sys.argv[2:])
-        return
-
-    print(f"fourfour-analysis v{__version__}")
-    print("Use: fourfour-analyze <file>, fourfour-benchmark <command>, or python -m fourfour_analysis analyze <file>")
+        sys.argv = [sys.argv[0]] + sys.argv[2:]  # strip "analyze" subcommand
+        analyze_main()
+    elif len(sys.argv) > 1 and sys.argv[1] == "benchmark":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        benchmark_main()
+    else:
+        print(f"fourfour-analysis v{__version__}")
+        print("Use: fourfour-analyze <file>  or  fourfour-benchmark <command>")

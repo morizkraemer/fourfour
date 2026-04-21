@@ -20,7 +20,9 @@ import numpy as np
 
 TARGET_SR = 12_000
 FFT_SIZE = 128
-SEGMENT_WIDTH = 256  # samples per output column
+# 80 samples at 12 kHz = 6.67 ms/column = 150 col/sec, matching Rekordbox PWV5/PWV3.
+# The FFT window is zero-padded from SEGMENT_WIDTH to FFT_SIZE to preserve band resolution.
+SEGMENT_WIDTH = 80
 
 # Frequency bands (Hz) — Nyquist at 12kHz = 6kHz
 LOW_BAND = (0, 150)
@@ -32,18 +34,22 @@ LOW_WEIGHT = 1.2
 MID_WEIGHT = 1.0
 HIGH_WEIGHT = 1.0
 
-# Smoothing
-MIX_FACTOR = 0.5  # blend with previous segment
+# Smoothing: blend with previous segment (0 = no smoothing, 1 = freeze).
+# Reduced from 0.5 → sharper transients to match Rekordbox appearance.
+MIX_FACTOR = 0.1
 
 
 @dataclass(frozen=True)
 class WaveformColumn:
-    """One column of waveform data: shape + color."""
+    """One column of waveform data: shape + color + raw FFT sub-bands."""
     min_val: float
     max_val: float
     r: int
     g: int
     b: int
+    # Raw FFT magnitudes, bins 1-64 (93.75 Hz–6 kHz at 12 kHz/128-pt FFT).
+    # Per-column normalised: dominant bin = 255.  Used for interactive crossover tuning.
+    fft_bands: tuple[int, ...]
 
 
 def generate_waveform(
@@ -87,9 +93,19 @@ def generate_waveform(
         min_val = float(np.min(segment))
         max_val = float(np.max(segment))
 
-        # 2. FFT for color
-        spectrum = np.fft.rfft(segment[:FFT_SIZE])
+        # 2. FFT for color — zero-pad segment to FFT_SIZE to preserve frequency resolution
+        fft_input = np.zeros(FFT_SIZE, dtype=np.float32)
+        fft_input[:len(segment)] = segment
+        spectrum = np.fft.rfft(fft_input)
         magnitudes = np.abs(spectrum)
+
+        # Raw per-bin magnitudes (bins 1-64, skip DC at bin 0), per-column normalised 0-255.
+        fft_raw = magnitudes[1:65]  # 64 values covering 93.75 Hz–6 kHz
+        fft_max = float(np.max(fft_raw)) if fft_raw.size > 0 else 0.0
+        if fft_max > 1e-10:
+            fft_bands: tuple[int, ...] = tuple(int(round(float(v) / fft_max * 255)) for v in fft_raw)
+        else:
+            fft_bands = (0,) * 64
 
         # RMS per band
         low_rms = _band_rms(magnitudes, low_bin_start, low_bin_end) * LOW_WEIGHT
@@ -116,6 +132,7 @@ def generate_waveform(
             r=max(0, min(255, r)),
             g=max(0, min(255, g)),
             b=max(0, min(255, b)),
+            fft_bands=fft_bands,
         ))
 
     return columns

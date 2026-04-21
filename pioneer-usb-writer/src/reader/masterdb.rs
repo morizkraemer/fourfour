@@ -252,6 +252,52 @@ pub fn read_masterdb(db_path: &Path) -> Result<MasterDbImport> {
     })
 }
 
+/// Look up the ANLZ path for a track in Rekordbox's `master.db` by its file path.
+///
+/// Returns the absolute path to `ANLZ0000.DAT` in the Rekordbox share directory.
+///
+/// `audio_path` must exactly match the `FolderPath` column in `djmdContent`.
+pub fn find_anlz_path(db_path: &Path, audio_path: &Path) -> Result<PathBuf> {
+    use rusqlite::OptionalExtension;
+
+    let conn = open_db(db_path)?;
+    let folder_path = audio_path
+        .to_str()
+        .context("non-UTF8 audio path")?;
+
+    // Try exact path first; fall back to matching by filename so that copies of
+    // a file in a different location (e.g. a repo copy vs ~/Music) still resolve.
+    let filename = audio_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    let like_pattern = format!("%/{}", filename);
+
+    let anlz_rel: Option<String> = conn
+        .query_row(
+            "SELECT AnalysisDataPath FROM djmdContent
+             WHERE (FolderPath = ?1 OR FolderPath LIKE ?2)
+               AND AnalysisDataPath IS NOT NULL
+             LIMIT 1",
+            params![folder_path, like_pattern],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .context("Failed to query djmdContent for AnalysisDataPath")?
+        .flatten();
+
+    let anlz_rel = anlz_rel
+        .context("Track not found in master.db or has no AnalysisDataPath")?;
+
+    // AnalysisDataPath is stored as "/PIONEER/USBANLZ/…/ANLZ0000.DAT", relative
+    // to ~/Library/Pioneer/rekordbox/share/ on macOS.
+    let anlz_rel = anlz_rel.trim_start_matches('/');
+    let home = std::env::var("HOME").context("HOME environment variable not set")?;
+    let base = PathBuf::from(home).join("Library/Pioneer/rekordbox/share");
+
+    Ok(base.join(anlz_rel))
+}
+
 fn open_db(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)
         .with_context(|| format!("Failed to open master.db at {}", path.display()))?;
