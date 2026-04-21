@@ -274,6 +274,7 @@ export default class WaveformDisplay {
         const startIdx = Math.floor(startFrac * previewData.length);
         const endIdx = Math.ceil(endFrac * previewData.length);
         const visibleCount = endIdx - startIdx;
+        if (visibleCount <= 0) return;
         const colW = w / visibleCount;
 
         ctx.lineWidth = 2;
