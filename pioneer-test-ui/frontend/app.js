@@ -585,20 +585,32 @@ async function showWaveform(trackId) {
     document.getElementById('waveform-track-name').textContent = track.title || 'Unknown';
     document.getElementById('waveform-panel').classList.remove('hidden');
 
+    // Try stored analysis first (instant), then enrich with Python (slow, has color/peaks)
     try {
-        // Try Python analyzer first (richer data: color waveform)
+        const data = await invoke('get_analysis_data', { trackId: trackId });
+        currentWaveformData = data;
+        renderWaveform();
+    } catch (_) {
+        // No stored analysis yet — show loading state
+        currentWaveformData = null;
+        const canvas = document.getElementById('waveform-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#0d0d0d';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.font = '14px monospace';
+        ctx.fillText('Analyzing...', 10, canvas.height / 2);
+    }
+
+    // Try Python analyzer in background for richer data (color waveform, peaks)
+    try {
         const data = await invoke('analyze_track_python', { path: track.source_path });
         currentWaveformData = data;
         renderWaveform();
     } catch (pyErr) {
-        console.warn('Python analyzer unavailable, falling back to Rust:', pyErr);
-        try {
-            // Fall back to Rust analyzer (mono PWAV only)
-            const data = await invoke('get_analysis_data', { trackId: trackId });
-            currentWaveformData = data;
-            renderWaveform();
-        } catch (rustErr) {
-            console.error('Both analyzers failed:', rustErr);
+        console.warn('Python analyzer unavailable:', pyErr);
+        // If we already have DB data rendered above, that's fine — keep it
+        if (!currentWaveformData) {
             document.getElementById('waveform-track-name').textContent += ' (no analysis data)';
         }
     }

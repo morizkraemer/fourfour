@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
+import os
+import sys
+
 from deeprhythm import DeepRhythmPredictor
 
 # Lazy singleton — DeepRhythm loads a model, expensive to reinit
@@ -11,7 +16,9 @@ _analyzer: DeepRhythmPredictor | None = None
 def _get_analyzer() -> DeepRhythmPredictor:
     global _analyzer
     if _analyzer is None:
-        _analyzer = DeepRhythmPredictor()
+        # DeepRhythm prints "Model weights already exist." to stdout — suppress it
+        with contextlib.redirect_stdout(io.StringIO()):
+            _analyzer = DeepRhythmPredictor()
     return _analyzer
 
 

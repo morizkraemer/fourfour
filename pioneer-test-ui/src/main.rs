@@ -146,6 +146,47 @@ fn scan_files(
     Ok(added)
 }
 
+/// Resolve the Python venv binary. Uses CARGO_MANIFEST_DIR (compile-time) so it
+/// works regardless of the process working directory at runtime.
+fn resolve_python() -> String {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let venv_python = Path::new(manifest_dir)
+        .parent() // workspace root (one level up from pioneer-test-ui)
+        .unwrap_or(Path::new("."))
+        .join("analysis/.venv/bin/python");
+    if venv_python.exists() {
+        venv_python.to_string_lossy().to_string()
+    } else {
+        "python3".to_string()
+    }
+}
+
+/// Convert a Python fourfour_analysis JSON result to `models::AnalysisResult`.
+fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult {
+    let bpm = json.get("bpm").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let key = json
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Build waveform preview from the 400-int array.
+    let mut waveform_data = [0u8; 400];
+    if let Some(arr) = json.get("waveform_preview").and_then(|v| v.as_array()) {
+        for (i, val) in arr.iter().enumerate().take(400) {
+            waveform_data[i] = val.as_u64().unwrap_or(0) as u8;
+        }
+    }
+
+    models::AnalysisResult {
+        bpm,
+        key,
+        beat_grid: models::BeatGrid { beats: Vec::new() },
+        waveform: models::WaveformPreview { data: waveform_data },
+        cue_points: Vec::new(),
+    }
+}
+
 /// Analyze all tracks that have not yet been analyzed.
 ///
 /// Emits `analysis-progress` events so the frontend can show a progress bar.
@@ -172,7 +213,10 @@ async fn analyze_tracks(
 
     let total = pending.len() as u32;
 
-    // 2. Run analysis on a blocking thread, one track at a time.
+    // Resolve the venv Python path once.
+    let python = resolve_python();
+
+    // 2. Run analysis one track at a time (Python CLI or Rust fallback).
     for (seq, (track_id, source_path)) in pending.iter().enumerate() {
         let current = seq as u32 + 1;
 
@@ -193,19 +237,39 @@ async fn analyze_tracks(
         .ok();
 
         let path = source_path.clone();
+        let python_cmd = python.clone();
+
+        // Try Python analyzer first, fall back to Rust.
         let analysis_result = tokio::task::spawn_blocking(move || {
+            // Attempt Python CLI
+            let path_str = path.to_string_lossy().to_string();
+            let output = std::process::Command::new(&python_cmd)
+                .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
+                .output();
+
+            if let Ok(output) = output {
+                if output.status.success() {
+                    if let Ok(results) = serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout) {
+                        if let Some(result) = results.into_iter().next() {
+                            return Ok(python_result_to_analysis(&result));
+                        }
+                    }
+                }
+            }
+
+            // Fallback to Rust analyzer
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 analyzer::analyze_track(&path)
             }))
+            .map_err(|_| anyhow::anyhow!("analysis panicked"))?
         })
         .await
         .map_err(|e| format!("Analysis task failed: {e}"))?;
 
         match analysis_result {
-            Ok(Ok(result)) => {
+            Ok(result) => {
                 // 3. Lock briefly to store result and update track metadata.
                 let lib = shared.lock().map_err(|e| e.to_string())?;
-                // Update track's tempo and key from analysis
                 if let Some(mut track) = lib.get_track(*track_id).map_err(|e| e.to_string())? {
                     track.tempo = (result.bpm * 100.0) as u32;
                     track.key = result.key.clone();
@@ -215,15 +279,12 @@ async fn analyze_tracks(
                 lib.set_analysis(*track_id, &result)
                     .map_err(|e| e.to_string())?;
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 eprintln!(
                     "Warning: analysis failed for {}: {}",
                     source_path.display(),
                     e
                 );
-            }
-            Err(_panic) => {
-                eprintln!("Warning: analysis panicked for {}", source_path.display());
             }
         }
     }
@@ -447,16 +508,7 @@ fn app_version() -> String {
 /// Uses the venv Python at `analysis/.venv/bin/python`.
 #[tauri::command]
 async fn analyze_track_python(path: String) -> Result<serde_json::Value, String> {
-    // Resolve the venv Python relative to the workspace root
-    let venv_python = std::env::current_dir()
-        .unwrap_or_default()
-        .join("analysis/.venv/bin/python");
-
-    let python = if venv_python.exists() {
-        venv_python.to_string_lossy().to_string()
-    } else {
-        "python3".to_string()
-    };
+    let python = resolve_python();
 
     let output = tokio::task::spawn_blocking(move || {
         std::process::Command::new(&python)
