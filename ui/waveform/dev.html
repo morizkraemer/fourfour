@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WaveformDisplay dev</title>
+    <link rel="stylesheet" href="waveform.css">
+    <style>
+        body {
+            margin: 0;
+            background: #111;
+            color: #aaa;
+            font: 12px/1.5 system-ui;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .toolbar {
+            padding: 8px 14px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .toolbar label {
+            cursor: pointer;
+            padding: 4px 10px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+        .toolbar label:hover { background: #333; }
+        #file-input { display: none; }
+        #track-name { color: #ccc; flex: 1; }
+        .waveform-container {
+            height: 18vh;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <label>Load JSON <input type="file" id="file-input" accept=".json"></label>
+        <span id="track-name">No file loaded — export from app with Shift+D then load here</span>
+    </div>
+    <div class="waveform-container"></div>
+
+    <script type="module">
+        import WaveformDisplay from './WaveformDisplay.js';
+
+        const display = new WaveformDisplay(document.querySelector('.waveform-container'));
+        const trackName = document.getElementById('track-name');
+
+        function load(data, label) {
+            display.setData(data);
+            trackName.textContent = label;
+        }
+
+        // Auto-load data.json if served by waveform-dev CLI
+        try {
+            const resp = await fetch(`./data.json?t=${Date.now()}`);
+            if (resp.ok) {
+                load(await resp.json(), 'data.json');
+                trackName.title = 'Re-analyze in CLI then refresh to update';
+            }
+        } catch (_) {}
+
+        // Manual file load
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try { load(JSON.parse(await file.text()), file.name); }
+            catch (err) { alert('Failed to parse JSON: ' + err); }
+        });
+
+        // Drag-and-drop JSON files
+        document.addEventListener('dragover', e => e.preventDefault());
+        document.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            const file = [...e.dataTransfer.files].find(f => f.name.endsWith('.json'));
+            if (!file) return;
+            try { load(JSON.parse(await file.text()), file.name); }
+            catch (err) { alert('Failed to parse JSON: ' + err); }
+        });
+    </script>
+</body>
+</html>

@@ -537,10 +537,10 @@ html, body {
 .player {
     background: var(--bg-elevated);
     border-top: 1px solid var(--border);
-    display: grid;
-    grid-template-columns: 44px 1fr;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
     gap: 12px;
-    align-items: center;
     padding: 8px 14px;
     flex-shrink: 0;
     min-height: var(--player-h);
@@ -558,16 +558,16 @@ html, body {
     color: var(--text-disabled);
     font-size: 16px;
     line-height: 1;
-    align-self: start;
+    align-self: flex-start;
     margin-top: 4px;
 }
 
 .player-waveform-area {
+    flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 6px;
-    height: 100%;
 }
 
 .player-track-info {

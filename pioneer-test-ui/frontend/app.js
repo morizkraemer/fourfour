@@ -24,6 +24,15 @@ let waveformDisplay;
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
+    // Initialize waveform display FIRST — tracks become clickable during load_state,
+    // so waveformDisplay must exist before that happens.
+    try {
+        const { default: WaveformDisplay } = await import('./waveform/WaveformDisplay.js');
+        waveformDisplay = new WaveformDisplay(document.querySelector('.waveform-container'));
+    } catch (err) {
+        console.error('WaveformDisplay failed to load:', err);
+    }
+
     // Show version
     try {
         const ver = await invoke('app_version');
@@ -55,13 +64,24 @@ async function init() {
 
     loadVolumes();
     setupDragDrop();
-    const { default: WaveformDisplay } = await import('../../ui/waveform/WaveformDisplay.js');
-    waveformDisplay = new WaveformDisplay(document.querySelector('.waveform-container'));
     updateLibrarySubtitle();
 
     // Click outside context menu to close it
     document.addEventListener('click', () => {
         document.getElementById('contextMenu').classList.remove('visible');
+    });
+
+    // Shift+D — download current waveform data as JSON for dev.html
+    document.addEventListener('keydown', (e) => {
+        if (e.shiftKey && e.key === 'D' && window._lastWaveformData) {
+            const blob = new Blob([JSON.stringify(window._lastWaveformData)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'waveform.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
     });
 
     // Sidebar: "All Tracks" row
@@ -781,9 +801,10 @@ async function showWaveform(trackId) {
 
     try {
         const data = await invoke('get_analysis_data', { trackId: trackId });
+        window._lastWaveformData = data;
         waveformDisplay.setData(data);
     } catch (err) {
-        console.warn('No analysis data:', err);
+        console.error('get_analysis_data failed for track', trackId, ':', err);
         document.getElementById('waveform-track-name').textContent += ' (not analyzed)';
         waveformDisplay.clear();
     }

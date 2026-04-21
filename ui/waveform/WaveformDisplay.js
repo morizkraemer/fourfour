@@ -15,7 +15,37 @@
  */
 
 const FALLBACK_COLOR = 'rgb(80, 80, 80)';
-const WAVEFORM_ALPHA = 0.7;
+
+// Rekordbox 3-band colors: bass=blue, mids=orange, highs=white
+const COLOR_BASS = 'rgb(30,  100, 255)';
+const COLOR_MID  = 'rgb(255, 140,   0)';
+const COLOR_HIGH = 'rgb(255, 255, 255)';
+
+// Given per-pixel overall amplitude + band weights (0-255, already relative
+// to the dominant band), return absolute amplitudes for each band.
+function bandAmps(amp, bassW, midW, highW) {
+    const s = amp / 255;
+    return [bassW * s, midW * s, highW * s];
+}
+
+// Gaussian-weighted smooth over a pixel window — blends bar heights so the
+// waveform flows continuously rather than stepping between columns.
+function smoothAmps(arr, radius = 2) {
+    const out = new Float32Array(arr.length);
+    // Weights: centre=4, ±1=2, ±2=1  (approximates a Gaussian)
+    const kernel = [1, 2, 4, 2, 1];
+    const kSum = 10;
+    for (let i = 0; i < arr.length; i++) {
+        let v = 0;
+        for (let k = -radius; k <= radius; k++) {
+            const j = Math.min(arr.length - 1, Math.max(0, i + k));
+            v += arr[j] * kernel[k + radius];
+        }
+        out[i] = v / kSum;
+    }
+    return out;
+}
+
 
 export default class WaveformDisplay {
     /** @param {HTMLElement} container */
@@ -108,30 +138,42 @@ export default class WaveformDisplay {
             return;
         }
 
-        // One column per CSS pixel — draw upward from center (Lexicon overview style)
-        let prevR = 0, prevG = 0, prevB = 0;
+        // Pre-compute per-pixel absolute band amplitudes (max scan per bucket)
+        const bassA = new Float32Array(w);
+        const midA  = new Float32Array(w);
+        const highA = new Float32Array(w);
+
         for (let px = 0; px < w; px++) {
-            const idx = Math.min(Math.floor(px * data.length / w), data.length - 1);
-            const { amp, r, g, b } = data[idx];
+            const iStart = Math.floor(px * data.length / w);
+            const iEnd = Math.min(data.length - 1, Math.floor((px + 1) * data.length / w));
+            let maxAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
+            for (let i = iStart; i <= iEnd; i++) {
+                const d = data[i];
+                if (d.amp > maxAmp) maxAmp = d.amp;
+                sumR += d.r; sumG += d.g; sumB += d.b; count++;
+            }
+            if (count === 0) continue;
+            [bassA[px], midA[px], highA[px]] = bandAmps(maxAmp, sumR / count, sumG / count, sumB / count);
+        }
 
-            const sr = Math.round(prevR * 0.5 + r * 0.5);
-            const sg = Math.round(prevG * 0.5 + g * 0.5);
-            const sb = Math.round(prevB * 0.5 + b * 0.5);
-            prevR = r; prevG = g; prevB = b;
-
-            // Lexicon overview: moveTo center, lineTo center - rmsHeight (upward only)
-            const barH = amp * (h / 2) * 2 * 0.9;
-            const yCenter = h / 2;
-
-            ctx.strokeStyle = amp < 0.005
-                ? FALLBACK_COLOR
-                : `rgba(${sr}, ${sg}, ${sb}, ${WAVEFORM_ALPHA})`;
+        // Draw three layers back-to-front: bass (tallest/widest) → mids → highs (shortest)
+        const yCenter = h / 2;
+        const scale = h / 2 * 0.9;
+        function overviewLayer(amps, color) {
+            ctx.strokeStyle = color;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(px, yCenter);
-            ctx.lineTo(px, yCenter - barH);
+            for (let px = 0; px < w; px++) {
+                if (amps[px] < 0.005) continue;
+                const barH = amps[px] * scale;
+                ctx.moveTo(px, yCenter - barH);
+                ctx.lineTo(px, yCenter + barH);
+            }
             ctx.stroke();
         }
+        overviewLayer(smoothAmps(bassA), COLOR_BASS);
+        overviewLayer(smoothAmps(midA),  COLOR_MID);
+        overviewLayer(smoothAmps(highA), COLOR_HIGH);
 
         // Viewport indicator
         const visibleFrac = 1.0 / this._zoom;
@@ -154,14 +196,14 @@ export default class WaveformDisplay {
             const amplitude = (byte & 0x1F) / 31.0;
             const whiteness = ((byte >> 5) & 0x07) / 7.0;
             const brightness = Math.round(100 + whiteness * 155);
-            const barH = amplitude * (h / 2) * 2 * 0.9;
+            const barH = amplitude * (h / 2) * 0.9;
             ctx.strokeStyle = amplitude < 0.01
                 ? 'rgb(80, 80, 80)'
                 : `rgba(${brightness}, ${brightness}, ${brightness}, 0.7)`;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(px, yCenter);
-            ctx.lineTo(px, yCenter - barH);
+            ctx.moveTo(px, yCenter - barH);
+            ctx.lineTo(px, yCenter + barH);
             ctx.stroke();
         }
     }
@@ -207,66 +249,66 @@ export default class WaveformDisplay {
         if (visibleCount <= 0) return;
 
         const samplesPerPixel = visibleCount / w;
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
 
-        let prevR = 0, prevG = 0, prevB = 0;
+        // Pre-compute per-pixel absolute band amplitudes
+        const bassA = new Float32Array(w);
+        const midA  = new Float32Array(w);
+        const highA = new Float32Array(w);
 
         for (let px = 0; px < w; px++) {
             const tStart = startIdx + px * samplesPerPixel;
-            const iStart = Math.max(0, Math.floor(tStart));
-            const iEnd = Math.min(data.length - 1, Math.ceil(tStart + samplesPerPixel));
-            if (iStart > iEnd) continue;
+            let amp, bassW, midW, highW;
 
-            let maxAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
-
-            if (samplesPerPixel <= 10) {
-                // Zoomed in: max amplitude in range
+            if (samplesPerPixel < 1) {
+                // Zoomed in — interpolate between adjacent columns
+                const i0 = Math.max(0, Math.floor(tStart));
+                const i1 = Math.min(data.length - 1, i0 + 1);
+                const t = tStart - i0;
+                const d0 = data[i0], d1 = data[i1];
+                amp   = d0.amp * (1 - t) + d1.amp * t;
+                bassW = d0.r   * (1 - t) + d1.r   * t;
+                midW  = d0.g   * (1 - t) + d1.g   * t;
+                highW = d0.b   * (1 - t) + d1.b   * t;
+            } else {
+                // Zoomed out — max amplitude in range, average band weights
+                const iStart = Math.max(0, Math.floor(tStart));
+                const iEnd = Math.min(data.length - 1, Math.ceil(tStart + samplesPerPixel));
+                if (iStart > iEnd) continue;
+                let sumR = 0, sumG = 0, sumB = 0, count = 0;
+                amp = 0;
                 for (let i = iStart; i <= iEnd; i++) {
                     const d = data[i];
-                    if (d.amp > maxAmp) maxAmp = d.amp;
+                    if (d.amp > amp) amp = d.amp;
                     sumR += d.r; sumG += d.g; sumB += d.b; count++;
                 }
-            } else {
-                // Zoomed out: top-5 peaks weighted (Lexicon algorithm)
-                const slice = [];
-                for (let i = iStart; i <= iEnd; i++) {
-                    slice.push(data[i]);
-                    sumR += data[i].r; sumG += data[i].g; sumB += data[i].b; count++;
-                }
-                slice.sort((a, b) => b.amp - a.amp);
-                const top = slice.slice(0, 5);
-                let weightedAmp = 0, totalWeight = 0;
-                top.forEach((entry, i) => {
-                    const weight = top.length - i;
-                    weightedAmp += entry.amp * weight;
-                    totalWeight += weight;
-                });
-                maxAmp = totalWeight > 0 ? weightedAmp / totalWeight : 0;
+                if (count === 0) continue;
+                bassW = sumR / count;
+                midW  = sumG / count;
+                highW = sumB / count;
             }
+            [bassA[px], midA[px], highA[px]] = bandAmps(amp, bassW, midW, highW);
+        }
 
-            const r = count > 0 ? Math.round(sumR / count) : 0;
-            const g = count > 0 ? Math.round(sumG / count) : 0;
-            const b = count > 0 ? Math.round(sumB / count) : 0;
+        // Draw three layers back-to-front: bass → mids → highs
+        const yCenter = h / 2;
+        const scale = h / 2 * 0.95;
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
 
-            // 50% smooth with previous pixel
-            const sr = Math.round(prevR * 0.5 + r * 0.5);
-            const sg = Math.round(prevG * 0.5 + g * 0.5);
-            const sb = Math.round(prevB * 0.5 + b * 0.5);
-            prevR = r; prevG = g; prevB = b;
-
-            // y = height - value * height + height/4 (Lexicon bottom-anchor formula)
-            const yTop = h - maxAmp * h + h / 4;
-            const yBottom = h + h / 4;  // off-canvas, clipped at canvas edge
-
-            ctx.strokeStyle = Math.abs(yBottom - yTop) < 0.5
-                ? FALLBACK_COLOR
-                : `rgba(${sr}, ${sg}, ${sb}, ${WAVEFORM_ALPHA})`;
+        function zoomLayer(amps, color) {
+            ctx.strokeStyle = color;
             ctx.beginPath();
-            ctx.moveTo(px, yBottom);
-            ctx.lineTo(px, yTop);
+            for (let px = 0; px < w; px++) {
+                if (amps[px] < 0.01) continue;
+                const barH = amps[px] * scale;
+                ctx.moveTo(px, yCenter - barH);
+                ctx.lineTo(px, yCenter + barH);
+            }
             ctx.stroke();
         }
+        zoomLayer(smoothAmps(bassA), COLOR_BASS);
+        zoomLayer(smoothAmps(midA),  COLOR_MID);
+        zoomLayer(smoothAmps(highA), COLOR_HIGH);
     }
 
     _renderMonoFallback(ctx, w, h, previewData, startFrac, endFrac) {
@@ -288,8 +330,9 @@ export default class WaveformDisplay {
             const whiteness = ((byte >> 5) & 0x07) / 7.0;
             const brightness = Math.round(100 + whiteness * 155);
 
-            const yTop = h - amplitude * h + h / 4;
-            const yBottom = h + h / 4;
+            const halfBar = amplitude * (h / 2) * 0.95;
+            const yTop = h / 2 - halfBar;
+            const yBottom = h / 2 + halfBar;
 
             ctx.strokeStyle = amplitude < 0.01
                 ? FALLBACK_COLOR
