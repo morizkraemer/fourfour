@@ -245,6 +245,7 @@ pub fn select_analysis(conn: &Connection, track_id: i64) -> Result<Option<Analys
                 bpm,
                 key,
                 cue_points,
+                color_waveform: None,
             }))
         }
         Some(Err(e)) => Err(e.into()),
@@ -331,6 +332,7 @@ pub fn select_analyzed_tracks(
             bpm,
             key,
             cue_points,
+            color_waveform: None,
         });
     }
 

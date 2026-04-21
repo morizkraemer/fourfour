@@ -439,6 +439,7 @@ mod tests {
                 CuePoint { hot_cue_number: 1, time_ms: 60_000, loop_time_ms: None },
                 CuePoint { hot_cue_number: 2, time_ms: 90_000, loop_time_ms: Some(100_000) },
             ],
+            color_waveform: None,
         }
     }
 

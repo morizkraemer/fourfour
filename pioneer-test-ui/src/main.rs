@@ -184,6 +184,7 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
         beat_grid: models::BeatGrid { beats: Vec::new() },
         waveform: models::WaveformPreview { data: waveform_data },
         cue_points: Vec::new(),
+        color_waveform: None,
     }
 }
 
@@ -388,6 +389,7 @@ fn set_test_cues(
             waveform: existing.waveform,
             bpm: existing.bpm,
             key: existing.key,
+            color_waveform: None,
         };
         lib.set_analysis(track_id as i64, &new_analysis)
             .map_err(|e| e.to_string())?;
