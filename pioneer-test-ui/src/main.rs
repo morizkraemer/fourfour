@@ -164,13 +164,9 @@ fn resolve_python() -> String {
 /// Convert a Python fourfour_analysis JSON result to `models::AnalysisResult`.
 fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult {
     let bpm = json.get("bpm").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let key = json
-        .get("key")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
-    // Build waveform preview from the 400-int array.
+    // Mono waveform preview (400 bytes)
     let mut waveform_data = [0u8; 400];
     if let Some(arr) = json.get("waveform_preview").and_then(|v| v.as_array()) {
         for (i, val) in arr.iter().enumerate().take(400) {
@@ -178,13 +174,43 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
         }
     }
 
+    // Parse Pioneer 3-band color waveform
+    let color_waveform = {
+        let parse_3band = |key: &str| -> Vec<[u8; 3]> {
+            json.get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter().map(|entry| {
+                        if let Some(a) = entry.as_array() {
+                            let low = a.get(0).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                            let mid = a.get(1).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                            let high = a.get(2).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                            [low, mid, high]
+                        } else {
+                            [0, 0, 0]
+                        }
+                    }).collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let detail = parse_3band("pioneer_3band_detail");
+        let overview = parse_3band("pioneer_3band_overview");
+
+        if !detail.is_empty() {
+            Some(models::ColorWaveform { detail, overview })
+        } else {
+            None
+        }
+    };
+
     models::AnalysisResult {
         bpm,
         key,
         beat_grid: models::BeatGrid { beats: Vec::new() },
         waveform: models::WaveformPreview { data: waveform_data },
         cue_points: Vec::new(),
-        color_waveform: None,
+        color_waveform,
     }
 }
 
@@ -542,13 +568,30 @@ fn get_analysis_data(
     let analysis = lib.get_analysis(track_id).map_err(|e| e.to_string())?;
 
     match analysis {
-        Some(a) => Ok(serde_json::json!({
-            "waveform_preview": a.waveform.data.to_vec(),
-            "waveform_color": serde_json::Value::Array(vec![]),
-            "waveform_peaks": serde_json::Value::Array(vec![]),
-            "bpm": a.bpm,
-            "key": a.key,
-        })),
+        Some(a) => {
+            // Convert color waveform to frontend format
+            let waveform_color: Vec<serde_json::Value> = a.color_waveform.as_ref()
+                .map(|cw| {
+                    cw.overview.iter().map(|[low, mid, high]| {
+                        let max_amp = (*low).max(*mid).max(*high) as f64 / 255.0;
+                        serde_json::json!({
+                            "amp": max_amp,
+                            "r": *low as f64 / 255.0,
+                            "g": *mid as f64 / 255.0,
+                            "b": *high as f64 / 255.0,
+                        })
+                    }).collect()
+                })
+                .unwrap_or_default();
+
+            Ok(serde_json::json!({
+                "waveform_preview": a.waveform.data.to_vec(),
+                "waveform_color": waveform_color,
+                "waveform_peaks": serde_json::Value::Array(vec![]),
+                "bpm": a.bpm,
+                "key": a.key,
+            }))
+        }
         None => Err("No analysis data for this track".to_string()),
     }
 }
