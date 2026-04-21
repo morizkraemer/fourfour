@@ -552,6 +552,16 @@ for each 256-sample window of 12kHz audio:
     segments.push({ min, max, color: { r, g, b, a: 0.7 } })
 ```
 
+#### Rendering Notes (confirmed from Worker 160 source)
+- **lineWidth = 2**, **lineCap = "round"** for all strokes
+- **Zero-amplitude fallback**: `if (y_min === y_max)` → `strokeStyle = "rgb(80, 80, 80)"` (dark gray tick)
+- **Coordinate formula**: `y = height - value * height + height/4`
+  - Silence (0.0) → y = 1.25 × height (off-canvas bottom)
+  - Full peak (1.0) → y = 0.25 × height (top quarter)
+  - The waveform is **bottom-anchored**: peaks grow upward from the canvas floor
+- **Overview is one-sided**: `moveTo(x, h/2); lineTo(x, h/2 - rmsHeight)` — asymmetric, upward only
+- **Overview RMS**: `sqrt(mean(samples²)) × height × 2 × 0.9`
+
 ### Two Outputs
 
 | Output | Format | Purpose |

@@ -555,6 +555,22 @@ CREATE TABLE "Waveform" (
 );
 ```
 
+### 6.1 — Source-Confirmed Rendering Details (Worker 160)
+
+**Confirmed from actual `160.index.worker.js` source code:**
+
+1. **Fallback color for silence**: When a window has zero amplitude (y_min === y_max), Lexicon uses `"rgb(80, 80, 80)"` dark gray instead of transparent. Zero-height lines still render as a gray tick, ensuring visibility even in silence regions.
+
+2. **Coordinate formula (zoom waveform)**: Y-positions use `y = height - value * height + height/4`. The baseline (silence = 0.0) maps to `y = height * 1.25` (off-canvas bottom). The waveform is **bottom-anchored** — peaks grow upward from the canvas floor, not symmetric from center.
+
+3. **Line styling**: `lineWidth = 2` for all waveform strokes; `lineCap = "round"` for smooth endpoints.
+
+4. **Zero-height guard**: `if (y_min === y_max) { use fallback color } else { use rgba(r,g,b,0.7) }`. This prevents invisible lines in silence.
+
+5. **Overview is one-sided RMS**: `drawOverviewSegment` draws `moveTo(x, height/2); lineTo(x, height/2 - rms_height)` — upward from center only, not symmetric. RMS formula: `sqrt(mean(samples²)) * height * 2 * 0.9`.
+
+6. **Color RMS (confirmed true RMS)**: `sqrt(mean(magnitude_bins²))` over each band's FFT bins — this is the true RMS of spectral magnitudes, not a sum or average of magnitudes.
+
 ---
 
 ## 7. Waveform UI Rendering — How It Becomes a Scrolling View
