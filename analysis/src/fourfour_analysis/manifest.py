@@ -225,45 +225,9 @@ def _normalize_key(raw: str) -> Optional[str]:
 
     Handles: "8A", "8B", "Abm", "G# major", "C minor", etc.
     """
-    raw = raw.strip()
+    from fourfour_analysis.groundtruth import normalize_key
 
-    # Already Camelot: number + A/B
-    camelot_alphanumeric = False
-    if len(raw) >= 2:
-        num_part = raw[:-1]
-        letter = raw[-1].upper()
-        if letter in ("A", "B") and num_part.isdigit():
-            n = int(num_part)
-            if 1 <= n <= 12:
-                return f"{n}{letter}"
-
-    # Try note name → Camelot conversion
-    NOTE_TO_CAMELOT_MAJOR = {
-        "C": "8B", "C#": "3B", "DB": "3B", "D": "10B", "D#": "5B", "EB": "5B",
-        "E": "12B", "F": "7B", "F#": "2B", "GB": "2B", "G": "9B", "G#": "4B", "AB": "4B",
-        "A": "11B", "A#": "6B", "BB": "6B", "B": "1B",
-    }
-    NOTE_TO_CAMELOT_MINOR = {
-        "C": "8A", "C#": "3A", "DB": "3A", "D": "10A", "D#": "5A", "EB": "5A",
-        "E": "12A", "F": "7A", "F#": "2A", "GB": "2A", "G": "9A", "G#": "4A", "AB": "4A",
-        "A": "11A", "A#": "6A", "BB": "6A", "B": "1A",
-    }
-
-    raw_lower = raw.lower().replace("♯", "#").replace("♭", "b")
-
-    is_minor = "min" in raw_lower or "m" in raw_lower.split()[0][-1:]
-
-    # Extract note part
-    note = raw_lower.split()[0].rstrip("min").rstrip("m").rstrip("ajor").rstrip("inor")
-    note = note.upper()
-
-    # Handle flats → sharps for lookup
-    FLAT_TO_SHARP = {"DB": "C#", "EB": "D#", "FB": "E", "GB": "F#", "AB": "G#", "BB": "A#", "CB": "B"}
-    if note in FLAT_TO_SHARP:
-        note = FLAT_TO_SHARP[note]
-
-    mapping = NOTE_TO_CAMELOT_MINOR if is_minor else NOTE_TO_CAMELOT_MAJOR
-    return mapping.get(note)
+    return normalize_key(raw)
 
 
 def _estimate_duration(path: Path) -> Optional[float]:

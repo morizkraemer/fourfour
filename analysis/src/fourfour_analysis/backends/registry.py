@@ -29,7 +29,11 @@ ANALYSIS_VARIANTS = {
 }
 
 
-def load_backend(variant_id: str, settings: "Settings") -> "AnalysisBackend":
+def load_backend(
+    variant_id: str,
+    settings: "Settings",
+    features: set[str] | None = None,
+) -> "AnalysisBackend":
     """Instantiate a backend by variant ID.
 
     Args:
@@ -54,11 +58,11 @@ def load_backend(variant_id: str, settings: "Settings") -> "AnalysisBackend":
 
     if backend_key == "lexicon_port":
         from fourfour_analysis.backends.lexicon_port import LexiconPortBackend
-        return LexiconPortBackend(cache_dir=cache_dir)
+        return LexiconPortBackend(cache_dir=cache_dir, features=features)
 
     elif backend_key == "python_stack":
         from fourfour_analysis.backends.python_stack import PythonStackBackend
-        return PythonStackBackend(cache_dir=cache_dir)
+        return PythonStackBackend(cache_dir=cache_dir, features=features)
 
     elif backend_key == "stratum_dsp":
         from fourfour_analysis.backends.stratum_dsp import StratumDspBackend

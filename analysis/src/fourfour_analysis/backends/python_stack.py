@@ -13,16 +13,19 @@ from fourfour_analysis.types import AnalysisResult, BackendMetadata
 
 
 _VERSION = "0.1.0"
+DEFAULT_FEATURES = frozenset({"bpm", "key", "energy"})
 
 
 class PythonStackBackend(AnalysisBackend):
     """DeepRhythm BPM + librosa key + feature-based energy."""
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Optional[Path] = None, features: Optional[set[str]] = None):
         super().__init__(cache_dir=cache_dir)
+        self._features = set(features) if features is not None else set(DEFAULT_FEATURES)
         # Verify optional deps
         try:
-            import deeprhythm  # noqa: F401
+            if "bpm" in self._features:
+                import deeprhythm  # noqa: F401
             import librosa  # noqa: F401
         except ImportError as e:
             raise ImportError(
@@ -31,11 +34,12 @@ class PythonStackBackend(AnalysisBackend):
             )
 
     def metadata(self) -> BackendMetadata:
+        feature_hash = ",".join(sorted(self._features))
         return BackendMetadata(
             id="python_deeprhythm",
             label="DeepRhythm + librosa KS",
             version=_VERSION,
-            config_hash="v1",
+            config_hash=f"v2-features:{feature_hash}",
             heavy_deps=["torch", "librosa", "DeepRhythm"],
             network_required=False,
         )
@@ -47,13 +51,15 @@ class PythonStackBackend(AnalysisBackend):
         audio, sr = load_audio(track_path)
 
         # BPM via DeepRhythm
-        bpm = self._detect_bpm(track_path)
+        bpm = self._detect_bpm(track_path) if "bpm" in self._features else None
 
         # Key via librosa chroma + Krumhansl-Schmuckler
-        key = self._detect_key(audio, sr)
+        key = self._detect_key(audio, sr) if "key" in self._features else None
 
         # Energy via librosa features
-        energy = self._compute_energy(audio, sr, bpm or 120.0)
+        energy = None
+        if "energy" in self._features:
+            energy = self._compute_energy(audio, sr, bpm or 120.0)
 
         return AnalysisResult(
             bpm=bpm,

@@ -23,6 +23,7 @@ def run_benchmark(
     settings: Settings,
     parallel: int = 1,
     speed_only: bool = False,
+    features: set[str] | None = None,
 ) -> str:
     """Run benchmark: analyze all tracks with each backend, compare, score.
 
@@ -58,7 +59,7 @@ def run_benchmark(
 
     for variant_id in variant_ids:
         print(f"\nRunning backend: {variant_id}")
-        backend = load_backend(variant_id, settings)
+        backend = load_backend(variant_id, settings, features=features)
 
         records = _analyze_tracks(backend, entries, parallel)
         all_results[variant_id] = records
@@ -103,6 +104,7 @@ def run_benchmark(
         "num_tracks": len(entries),
         "num_scorable": len(scorable),
         "speed_only": speed_only,
+        "features": sorted(features) if features is not None else None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2))

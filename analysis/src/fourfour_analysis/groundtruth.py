@@ -152,9 +152,9 @@ def normalize_key(raw: str) -> Optional[str]:
         "A": "11B", "A#": "6B", "BB": "6B", "B": "1B",
     }
     NOTE_TO_CAMELOT_MINOR = {
-        "C": "8A", "C#": "3A", "DB": "3A", "D": "10A", "D#": "5A", "EB": "5A",
-        "E": "12A", "F": "7A", "F#": "2A", "GB": "2A", "G": "9A", "G#": "4A", "AB": "4A",
-        "A": "11A", "A#": "6A", "BB": "6A", "B": "1A",
+        "C": "5A", "C#": "12A", "DB": "12A", "D": "7A", "D#": "2A", "EB": "2A",
+        "E": "9A", "F": "4A", "F#": "11A", "GB": "11A", "G": "6A", "G#": "1A", "AB": "1A",
+        "A": "8A", "A#": "3A", "BB": "3A", "B": "10A",
     }
 
     lower = raw.lower().replace("♯", "#").replace("♭", "b")

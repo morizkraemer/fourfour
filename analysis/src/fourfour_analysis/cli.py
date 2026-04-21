@@ -67,6 +67,8 @@ scoring formula:
   Where bpm_acc2 = % within 4% of ground truth, key_exact = % exact match.
 """
 
+_BENCHMARK_FEATURES = {"bpm", "key", "energy", "waveform", "cues"}
+
 
 def _build_analyze_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -123,6 +125,16 @@ def _build_benchmark_parser() -> argparse.ArgumentParser:
         help="Backend variant(s) to benchmark (default: lexicon_port)",
     )
     run_p.add_argument("--parallel", type=int, default=1, help="Number of parallel workers (default: 1)")
+    run_p.add_argument(
+        "--features",
+        default="all",
+        help="Comma-separated analysis features: bpm,key,energy,waveform,cues or 'all' (default).",
+    )
+    run_p.add_argument(
+        "--no-waveform",
+        action="store_true",
+        help="Remove waveform generation from the selected feature set.",
+    )
     run_p.add_argument("--speed-only", action="store_true", dest="speed_only",
                        help="Skip comparison. Only measure timing (operational metrics).")
 
@@ -174,6 +186,29 @@ def _analyze_with_backend(backend_id: str, file_path: Path) -> dict:
     except Exception as e:
         elapsed = time.monotonic() - start
         return {"status": "error", "error": str(e), "elapsed_seconds": elapsed, "backend": backend_id}
+
+
+def _parse_benchmark_features(raw: str, no_waveform: bool) -> set[str] | None:
+    """Parse benchmark feature flags.
+
+    None means each backend should run its default full feature set.
+    """
+    if raw.strip().lower() == "all":
+        features = None
+    else:
+        features = {part.strip().lower() for part in raw.split(",") if part.strip()}
+        unknown = features - _BENCHMARK_FEATURES
+        if unknown:
+            valid = ", ".join(sorted(_BENCHMARK_FEATURES))
+            raise ValueError(f"unknown feature(s): {', '.join(sorted(unknown))}; valid: {valid}")
+        if not features:
+            raise ValueError("--features must not be empty")
+
+    if no_waveform:
+        features = set(_BENCHMARK_FEATURES if features is None else features)
+        features.discard("waveform")
+
+    return features
 
 
 def analyze_main() -> None:
@@ -251,12 +286,19 @@ def benchmark_main() -> None:
         from fourfour_analysis.runner import run_benchmark
 
         settings = Settings.from_cwd()
+        try:
+            features = _parse_benchmark_features(args.features, args.no_waveform)
+        except ValueError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(2)
+
         run_id = run_benchmark(
             corpus_path=args.corpus,
             variant_ids=args.variants,
             settings=settings,
             parallel=args.parallel,
             speed_only=getattr(args, "speed_only", False),
+            features=features,
         )
         print(f"\nRun ID: {run_id}")
         return

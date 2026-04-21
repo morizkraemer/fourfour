@@ -23,20 +23,23 @@ from fourfour_analysis.types import (
 
 
 _VERSION = "0.1.0"
+DEFAULT_FEATURES = frozenset({"bpm", "key", "energy", "waveform", "cues"})
 
 
 class LexiconPortBackend(AnalysisBackend):
     """All Lexicon algorithms ported to Python."""
 
-    def __init__(self, cache_dir: Optional[Path] = None):
+    def __init__(self, cache_dir: Optional[Path] = None, features: Optional[set[str]] = None):
         super().__init__(cache_dir=cache_dir)
+        self._features = set(features) if features is not None else set(DEFAULT_FEATURES)
 
     def metadata(self) -> BackendMetadata:
+        feature_hash = ",".join(sorted(self._features))
         return BackendMetadata(
             id="lexicon_port",
             label="Lexicon algorithms (Python port)",
             version=_VERSION,
-            config_hash="v1",
+            config_hash=f"v2-features:{feature_hash}",
             heavy_deps=["numpy", "scipy"],
             network_required=False,
         )
@@ -46,33 +49,44 @@ class LexiconPortBackend(AnalysisBackend):
         # Load audio
         audio, sr = load_audio(track_path)
 
-        # Preprocess for each analysis type
-        tempo_audio, _ = preprocess_tempo(audio, sr)
-        key_audio, key_sr = preprocess_key(audio, sr)
-        waveform_audio, waveform_sr = preprocess_waveform(audio, sr)
+        needs_tempo = bool(self._features & {"bpm", "energy", "cues"})
+        needs_key = "key" in self._features
+        needs_waveform = "waveform" in self._features
 
         # BPM detection
-        bpm_result = analyze_tempo(tempo_audio, sr)
-        bpm = bpm_result.bpm if bpm_result else None
-        beats = bpm_result.beats if bpm_result else []
+        tempo_audio = None
+        bpm = None
+        beats = []
+        if needs_tempo:
+            tempo_audio, _ = preprocess_tempo(audio, sr)
+            bpm_result = analyze_tempo(tempo_audio, sr)
+            bpm = bpm_result.bpm if bpm_result else None
+            beats = bpm_result.beats if bpm_result else []
 
         # Key detection
-        key_result = detect_key(key_audio, key_sr)
-        key = key_result.camelot if key_result else None
+        key = None
+        if needs_key:
+            key_audio, key_sr = preprocess_key(audio, sr)
+            key_result = detect_key(key_audio, key_sr)
+            key = key_result.camelot if key_result else None
 
         # Energy rating
         energy = None
-        if bpm is not None:
+        if "energy" in self._features and bpm is not None and tempo_audio is not None:
             energy = compute_energy(tempo_audio, sr, bpm)
 
         # Waveform
-        waveform_columns = generate_waveform(waveform_audio, waveform_sr)
-        peaks = [WaveformPeak(min_val=c.min_val, max_val=c.max_val) for c in waveform_columns]
-        colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in waveform_columns]
+        peaks = []
+        colors = []
+        if needs_waveform:
+            waveform_audio, waveform_sr = preprocess_waveform(audio, sr)
+            waveform_columns = generate_waveform(waveform_audio, waveform_sr)
+            peaks = [WaveformPeak(min_val=c.min_val, max_val=c.max_val) for c in waveform_columns]
+            colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in waveform_columns]
 
         # Cue points
         cue_points = []
-        if bpm is not None and len(beats) > 0:
+        if "cues" in self._features and bpm is not None and len(beats) > 0 and tempo_audio is not None:
             cue_points = detect_sections(beats, tempo_audio, sr, bpm)
 
         # Convert beats to BeatPosition

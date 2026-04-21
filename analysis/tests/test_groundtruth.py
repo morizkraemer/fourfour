@@ -19,23 +19,23 @@ class TestNormalizeKey:
         assert normalize_key("A major") == "11B"
 
     def test_note_names_minor(self):
-        assert normalize_key("A minor") == "11A"
-        assert normalize_key("C minor") == "8A"
-        assert normalize_key("E minor") == "12A"
+        assert normalize_key("A minor") == "8A"
+        assert normalize_key("C minor") == "5A"
+        assert normalize_key("E minor") == "9A"
 
     def test_shorthand_minor(self):
-        assert normalize_key("Am") == "11A"
-        assert normalize_key("Cm") == "8A"
-        assert normalize_key("F#m") == "2A"
+        assert normalize_key("Am") == "8A"
+        assert normalize_key("Cm") == "5A"
+        assert normalize_key("F#m") == "11A"
 
     def test_flats(self):
-        assert normalize_key("Abm") == "4A"
-        assert normalize_key("Bbm") == "6A"
+        assert normalize_key("Abm") == "1A"
+        assert normalize_key("Bbm") == "3A"
         assert normalize_key("Eb major") == "5B"
         assert normalize_key("Db major") == "3B"
 
     def test_sharps(self):
-        assert normalize_key("G#m") == "4A"
+        assert normalize_key("G#m") == "1A"
         assert normalize_key("F# major") == "2B"
 
     def test_empty(self):
