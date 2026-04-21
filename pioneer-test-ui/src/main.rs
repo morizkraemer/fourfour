@@ -569,16 +569,20 @@ fn get_analysis_data(
 
     match analysis {
         Some(a) => {
-            // Convert color waveform to frontend format
+            // Convert color waveform to frontend format.
+            // Use detail (150 entries/sec) for full resolution; fall back to overview.
             let waveform_color: Vec<serde_json::Value> = a.color_waveform.as_ref()
                 .map(|cw| {
-                    cw.overview.iter().map(|[low, mid, high]| {
-                        let max_amp = (*low).max(*mid).max(*high) as f64 / 255.0;
+                    let source = if !cw.detail.is_empty() { &cw.detail } else { &cw.overview };
+                    source.iter().map(|[low, mid, high]| {
+                        let max_val = (*low).max(*mid).max(*high) as f64;
+                        let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
+                        let amp = max_val / 96.0; // 0x60 is Pioneer's max low-band value
                         serde_json::json!({
-                            "amp": max_amp,
-                            "r": *low as f64 / 255.0,
-                            "g": *mid as f64 / 255.0,
-                            "b": *high as f64 / 255.0,
+                            "amp": amp.min(1.0),
+                            "r": *low as f64 * scale,
+                            "g": *mid as f64 * scale,
+                            "b": *high as f64 * scale,
                         })
                     }).collect()
                 })

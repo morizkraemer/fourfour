@@ -3,162 +3,197 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pioneer USB Writer - Test</title>
+    <title>Pioneer USB Writer</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <!-- Drop overlay (shown on drag enter) -->
-    <div id="drop-overlay" class="drop-overlay hidden">
-        <div class="drop-overlay-inner">Drop audio files here</div>
-    </div>
+<!-- Drop overlay (shown on drag enter) -->
+<div id="drop-overlay" class="drop-overlay hidden">
+    <div class="drop-overlay-inner">Drop audio files here</div>
+</div>
 
-    <div id="app">
+<!-- Context Menu -->
+<div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" data-action="open-in-right">Open in Right Panel</div>
+    <div class="context-menu-item" data-action="delete-playlist">Delete Playlist</div>
+</div>
 
-        <!-- Toolbar -->
-        <div id="toolbar">
-            <button id="btn-import" onclick="importFolder()">Import Folder</button>
-            <button id="btn-analyze" onclick="analyzeAll()">Analyze All</button>
-            <button id="btn-delete" onclick="deleteSelected()" disabled>Delete Selected</button>
-            <button id="btn-test-cues" onclick="setTestCues()" disabled>Test Cues</button>
-            <div class="toolbar-spacer"></div>
-            <label for="usb-select">USB:</label>
-            <select id="usb-select" onchange="selectVolume(this.value)">
-                <option value="">-- select volume --</option>
-            </select>
-            <button id="btn-refresh-volumes" onclick="loadVolumes()" title="Refresh volumes">&#8635;</button>
-            <button id="btn-eject" onclick="ejectVolume()" title="Eject selected volume">&#9167;</button>
-            <button id="btn-wipe" onclick="wipeUsb()">Wipe</button>
-            <button id="btn-sync" onclick="syncToUsb()">Sync</button>
-            <span id="version-badge"></span>
-        </div>
+<div class="app">
+    <div class="main" id="main">
 
-        <!-- Library path indicator -->
-        <div id="library-bar">
-            <span>Library: <span id="library-path">loading...</span></span>
-            <button id="btn-change-library" onclick="changeLibraryPath()">Change</button>
-        </div>
+        <!-- ── Sidebar ── -->
+        <div class="sidebar">
+            <div class="sidebar-drawer">
+                <div class="sidebar-page root-page" id="sidebarRoot">
 
-        <!-- Main content: library side | USB side (mirrored) -->
-        <div id="main">
-
-            <!-- Library: tracks + playlists -->
-            <div class="side library-side">
-                <div class="track-and-waveform">
-                    <div id="track-panel">
-                        <div id="track-table-wrap">
-                            <table id="track-table">
-                                <thead>
-                                    <tr>
-                                        <th class="col-num">#</th>
-                                        <th class="col-title">Title</th>
-                                        <th class="col-artist">Artist</th>
-                                        <th class="col-bpm">BPM</th>
-                                        <th class="col-key">Key</th>
-                                        <th class="col-cues">Cues</th>
-                                        <th class="col-dur">Duration</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="track-tbody">
-                                    <tr class="empty-row">
-                                        <td colspan="7">No tracks loaded. Import a folder or drop files here.</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                    <!-- Library section -->
+                    <div class="sidebar-section">
+                        <div class="sidebar-heading">Library</div>
+                        <div class="sidebar-row active" id="sidebar-all-tracks" data-view="library">
+                            <span class="icon">
+                                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3">
+                                    <path d="M2 3h8M2 6h8M2 9h5"/>
+                                </svg>
+                            </span>
+                            <span class="label">All Tracks</span>
+                            <span class="count" id="sidebar-track-count"></span>
                         </div>
                     </div>
 
-                    <!-- Waveform display panel (below track table) -->
-                    <div id="waveform-panel" class="waveform-panel hidden">
-                        <div class="waveform-header">
-                            <span id="waveform-track-name">No track selected</span>
-                            <div class="waveform-controls">
-                                <select id="waveform-mode" onchange="renderWaveform()">
-                                    <option value="color">Color (RGB)</option>
-                                    <option value="mono">Mono (PWAV)</option>
-                                    <option value="peaks">Peaks</option>
-                                </select>
-                                <button onclick="closeWaveform()">Close</button>
-                            </div>
+                    <!-- Playlists section -->
+                    <div class="sidebar-section">
+                        <div class="sidebar-heading">
+                            <span>Playlists</span>
+                            <button class="sidebar-heading-btn" id="btn-new-playlist" onclick="createPlaylist()" title="New playlist">+</button>
                         </div>
-                        <canvas id="waveform-canvas" width="800" height="128"></canvas>
+                        <div id="playlist-list"></div>
                     </div>
-                </div>
 
-                <div id="playlist-panel">
-                    <div id="playlist-actions">
-                        <span id="selection-count">0 selected</span>
-                        <button id="btn-new-playlist" onclick="createPlaylist()">+ New Playlist</button>
-                    </div>
-                    <div id="playlist-list"></div>
+                    <div class="sidebar-spacer"></div>
                 </div>
             </div>
 
-            <!-- USB: playlists + tracks (mirrored) -->
-            <div class="side usb-side">
-                <div id="usb-playlist-panel">
-                    <div id="usb-playlist-header">
-                        <span>USB Playlists</span>
-                    </div>
-                    <div id="usb-playlist-list"></div>
+            <!-- USB Devices at bottom -->
+            <div class="sidebar-usb">
+                <div class="sidebar-heading">
+                    <span>USB Devices</span>
+                    <button class="sidebar-heading-btn" id="btn-refresh-volumes" onclick="loadVolumes()" title="Refresh">&#8635;</button>
                 </div>
-                <div id="usb-panel">
-                    <div id="usb-header">
-                        <span>USB Tracks</span>
-                        <span id="usb-track-count"></span>
-                    </div>
-                    <div id="usb-table-wrap">
-                        <table id="usb-table">
-                            <thead>
-                                <tr>
-                                    <th class="col-title">Title</th>
-                                    <th class="col-artist">Artist</th>
-                                    <th class="col-bpm">BPM</th>
-                                    <th class="col-key">Key</th>
-                                    <th class="col-dur">Duration</th>
-                                </tr>
-                            </thead>
-                            <tbody id="usb-tbody">
-                                <tr class="empty-row"><td colspan="5">Select a USB volume to view contents</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
+                <div id="usb-volume-list">
+                    <!-- Populated by loadVolumes() -->
                 </div>
             </div>
 
+            <!-- Library path indicator (compact, at very bottom) -->
+            <div class="sidebar-library-bar">
+                <span id="library-path" class="library-path-text" title="Click to change library folder" onclick="changeLibraryPath()" style="cursor:default;">loading…</span>
+                <span id="version-badge" class="version-badge"></span>
+            </div>
         </div>
 
-        <!-- Progress bar (bottom) -->
-        <div id="progress-bar-wrap" class="hidden">
-            <div id="progress-bar-track">
-                <div id="progress-bar-fill"></div>
+        <!-- ── Library Panel (left) ── -->
+        <div class="panel" id="library-panel">
+            <div class="panel-header">
+                <div class="panel-header-left">
+                    <span class="panel-title">All Tracks</span>
+                    <span class="panel-subtitle" id="lib-track-subtitle"></span>
+                </div>
+                <div class="panel-actions">
+                    <span id="selection-count" class="selection-count"></span>
+                    <button id="btn-import" onclick="importFolder()">Import</button>
+                    <button id="btn-analyze" onclick="analyzeAll()">Analyze</button>
+                    <button id="btn-delete" onclick="deleteSelected()" disabled>Delete</button>
+                    <button id="btn-test-cues" onclick="setTestCues()" disabled>Test Cues</button>
+                </div>
             </div>
-            <div id="progress-label">Ready</div>
+            <div class="track-list-header" id="lib-list-header">
+                <span class="track-cell num">#</span>
+                <span class="track-cell title">Title</span>
+                <span class="track-cell artist">Artist</span>
+                <span class="track-cell label-col">Label</span>
+                <span class="track-cell bpm">BPM</span>
+                <span class="track-cell key">Key</span>
+                <span class="track-cell time">Time</span>
+            </div>
+            <div class="track-list" id="track-list">
+                <div class="empty-row">No tracks loaded. Import a folder or drop files here.</div>
+            </div>
+        </div>
+
+        <!-- ── Right Panel (playlist / USB) ── -->
+        <div class="panel" id="right-panel">
+            <div class="panel-header">
+                <div class="panel-header-left">
+                    <span class="panel-title" id="right-panel-title">Select a playlist or USB</span>
+                    <span class="panel-subtitle" id="right-panel-subtitle"></span>
+                </div>
+                <div class="panel-actions" id="right-panel-actions">
+                    <button id="btn-wipe" onclick="wipeUsb()" class="btn-destructive" style="display:none;">Wipe</button>
+                    <button id="btn-sync" onclick="syncToUsb()" class="btn-primary" style="display:none;">Sync</button>
+                    <button id="btn-eject" onclick="ejectVolume()" style="display:none;" title="Eject">&#9167;</button>
+                    <button id="btn-close-panel" onclick="closeRightPanel()" title="Close panel">&#xd7;</button>
+                </div>
+            </div>
+            <div class="track-list-header" id="right-list-header">
+                <span class="track-cell num">#</span>
+                <span class="track-cell title">Title</span>
+                <span class="track-cell artist">Artist</span>
+                <span class="track-cell label-col">Label</span>
+                <span class="track-cell bpm">BPM</span>
+                <span class="track-cell key">Key</span>
+                <span class="track-cell time">Time</span>
+            </div>
+            <div class="track-list" id="right-track-list">
+                <div class="empty-row">Select a playlist or connect a USB drive.</div>
+            </div>
         </div>
 
     </div>
 
-    <!-- Simple modal for text input (prompt() doesn't work in Tauri webview) -->
-    <dialog id="text-input-dialog">
-        <form method="dialog">
-            <p id="text-input-label">Name:</p>
-            <input type="text" id="text-input-field" autofocus>
-            <div style="margin-top:8px;text-align:right;">
-                <button type="button" onclick="document.getElementById('text-input-dialog').close()">Cancel</button>
-                <button type="submit">OK</button>
+    <!-- ═══ Player / Waveform Bar ═══ -->
+    <div class="player" id="player-bar">
+        <div class="player-artwork" id="player-artwork">&#9835;</div>
+        <div class="player-waveform-area">
+            <div class="player-track-info">
+                <span class="player-track-title" id="waveform-track-name">No track selected — double-click a track to view waveform</span>
+                <div class="waveform-controls">
+                    <select id="waveform-mode" onchange="renderWaveform()">
+                        <option value="color">Color</option>
+                        <option value="mono">Mono</option>
+                        <option value="peaks">Peaks</option>
+                    </select>
+                </div>
             </div>
-        </form>
-    </dialog>
-
-    <!-- Confirmation dialog for destructive actions -->
-    <dialog id="confirm-dialog">
-        <p id="confirm-label">Are you sure?</p>
-        <div style="margin-top:12px;text-align:right;">
-            <button type="button" onclick="document.getElementById('confirm-dialog').close('cancel')">Cancel</button>
-            <button type="button" id="confirm-ok-btn" style="background:var(--accent);border-color:var(--accent);color:#fff;" onclick="document.getElementById('confirm-dialog').close('ok')">Wipe</button>
+            <div class="waveform-container">
+                <canvas id="waveform-canvas"></canvas>
+            </div>
         </div>
-    </dialog>
+    </div>
 
-    <script src="app.js"></script>
+    <!-- ═══ Status Bar ═══ -->
+    <div class="status-bar">
+        <div class="status-left" id="status-left">
+            <div class="spinner hidden" id="status-spinner"></div>
+            <span id="status-message"></span>
+        </div>
+        <div class="status-right" id="status-right"></div>
+    </div>
+
+</div>
+
+<!-- Hidden USB select (driven by sidebar, not shown directly) -->
+<select id="usb-select" style="display:none;" onchange="selectVolume(this.value)">
+    <option value="">-- select volume --</option>
+</select>
+
+<!-- Simple modal for text input (prompt() doesn't work in Tauri webview) -->
+<dialog id="text-input-dialog">
+    <form method="dialog">
+        <p id="text-input-label">Name:</p>
+        <input type="text" id="text-input-field" autofocus>
+        <div style="margin-top:8px;text-align:right;">
+            <button type="button" onclick="document.getElementById('text-input-dialog').close()">Cancel</button>
+            <button type="submit">OK</button>
+        </div>
+    </form>
+</dialog>
+
+<!-- Confirmation dialog for destructive actions -->
+<dialog id="confirm-dialog">
+    <p id="confirm-label">Are you sure?</p>
+    <div style="margin-top:12px;text-align:right;">
+        <button type="button" onclick="document.getElementById('confirm-dialog').close('cancel')">Cancel</button>
+        <button type="button" id="confirm-ok-btn" onclick="document.getElementById('confirm-dialog').close('ok')">Wipe</button>
+    </div>
+</dialog>
+
+<!-- Progress state (hidden, status bar is used for display) -->
+<div id="progress-bar-wrap" class="hidden" aria-hidden="true">
+    <div id="progress-bar-track"><div id="progress-bar-fill"></div></div>
+    <div id="progress-label"></div>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
