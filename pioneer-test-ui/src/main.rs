@@ -591,7 +591,7 @@ fn get_analysis_data(
                     source.iter().map(|[low, mid, high]| {
                         let max_val = (*low).max(*mid).max(*high) as f64;
                         let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
-                        let amp = (max_val / 96.0).min(1.0);
+                        let amp = (max_val / 255.0).min(1.0);
                         serde_json::json!({
                             "amp": amp,
                             "r": (*low as f64 * scale * 255.0) as u8,
