@@ -143,3 +143,58 @@ class TestCompareTrack:
 
         assert comp.tempo is None
         assert comp.key is None
+
+
+# ── compare_beats ────────────────────────────────────────
+
+class TestCompareBeats:
+    def test_perfect_match(self):
+        from fourfour_analysis.compare import compare_beats
+        from fourfour_analysis.types import BeatPosition
+        beats = [BeatPosition(time_seconds=float(i), bar_position=(i % 4) + 1) for i in range(10)]
+        result = compare_beats(beats, beats, tol_ms=50)
+        assert result["f_measure"] == 1.0
+        assert result["matched"] == 10
+
+    def test_offset_within_tolerance(self):
+        from fourfour_analysis.compare import compare_beats
+        from fourfour_analysis.types import BeatPosition
+        ours = [BeatPosition(time_seconds=0.0, bar_position=1),
+                BeatPosition(time_seconds=1.02, bar_position=2)]  # 20ms off
+        gt = [BeatPosition(time_seconds=0.0, bar_position=1),
+              BeatPosition(time_seconds=1.0, bar_position=2)]
+        result = compare_beats(ours, gt, tol_ms=50)
+        assert result["matched"] == 2
+        assert result["f_measure"] == 1.0
+
+    def test_offset_outside_tolerance(self):
+        from fourfour_analysis.compare import compare_beats
+        from fourfour_analysis.types import BeatPosition
+        ours = [BeatPosition(time_seconds=0.0, bar_position=1),
+                BeatPosition(time_seconds=1.1, bar_position=2)]  # 100ms off
+        gt = [BeatPosition(time_seconds=0.0, bar_position=1),
+              BeatPosition(time_seconds=1.0, bar_position=2)]
+        result = compare_beats(ours, gt, tol_ms=50)
+        assert result["matched"] == 1
+
+    def test_empty_beats(self):
+        from fourfour_analysis.compare import compare_beats
+        result = compare_beats([], [], tol_ms=50)
+        assert result["f_measure"] == 0.0
+
+    def test_median_offset(self):
+        from fourfour_analysis.compare import compare_beats
+        from fourfour_analysis.types import BeatPosition
+        ours = [
+            BeatPosition(time_seconds=0.0, bar_position=1),
+            BeatPosition(time_seconds=1.01, bar_position=2),  # +10ms
+            BeatPosition(time_seconds=2.02, bar_position=3),  # +20ms
+        ]
+        gt = [
+            BeatPosition(time_seconds=0.0, bar_position=1),
+            BeatPosition(time_seconds=1.0, bar_position=2),
+            BeatPosition(time_seconds=2.0, bar_position=3),
+        ]
+        result = compare_beats(ours, gt, tol_ms=50)
+        assert result["median_offset_ms"] is not None
+        assert 10 <= result["median_offset_ms"] <= 20

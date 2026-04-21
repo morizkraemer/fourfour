@@ -124,6 +124,58 @@ def compare_energy(energy_ours: int, energy_gt: int) -> int:
     return abs(energy_ours - energy_gt)
 
 
+def compare_beats(
+    beats_ours: list,
+    beats_gt: list,
+    tol_ms: float = 50.0,
+) -> dict:
+    """Compare beat grids using F-measure and median offset.
+
+    Args:
+        beats_ours: Our detected beats (list of BeatPosition or float seconds).
+        beats_gt: Ground truth beats (list of BeatPosition or float seconds).
+
+    Returns:
+        Dict with f_measure (0-1), median_offset_ms, and counts.
+    """
+    # Extract time in seconds
+    ours_sec = [b.time_seconds if hasattr(b, "time_seconds") else float(b) for b in beats_ours]
+    gt_sec = [b.time_seconds if hasattr(b, "time_seconds") else float(b) for b in beats_gt]
+
+    if not ours_sec or not gt_sec:
+        return {"f_measure": 0.0, "median_offset_ms": None, "matched": 0, "total_gt": len(gt_sec), "total_ours": len(ours_sec)}
+
+    tol_s = tol_ms / 1000.0
+    import numpy as np
+    ours = np.array(sorted(ours_sec))
+    gts = np.array(sorted(gt_sec))
+
+    # For each GT beat, find closest ours
+    matched_gt = 0
+    offsets = []
+    for gt_t in gts:
+        diffs = np.abs(ours - gt_t)
+        min_idx = np.argmin(diffs)
+        if diffs[min_idx] <= tol_s:
+            matched_gt += 1
+            offsets.append(float(ours[min_idx] - gt_t) * 1000)  # ms
+
+    # Precision = matched / total_ours, Recall = matched / total_gt
+    precision = matched_gt / len(ours) if len(ours) > 0 else 0.0
+    recall = matched_gt / len(gts) if len(gts) > 0 else 0.0
+    f_measure = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    median_offset = float(np.median(offsets)) if offsets else None
+
+    return {
+        "f_measure": round(f_measure, 4),
+        "median_offset_ms": round(median_offset, 2) if median_offset is not None else None,
+        "matched": matched_gt,
+        "total_gt": len(gts),
+        "total_ours": len(ours),
+    }
+
+
 def compare_track(
     result: AnalysisResult,
     gt: GroundTruth,

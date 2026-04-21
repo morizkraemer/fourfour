@@ -1,4 +1,11 @@
-"""CLI entry points: fourfour-analyze and fourfour-benchmark."""
+"""CLI entry points: fourfour-analyze and fourfour-benchmark.
+
+Provides two commands for LLM and human use:
+  fourfour-analyze <file>         — analyze a single audio file
+  fourfour-benchmark <command>    — build corpora and run benchmarks
+
+Use --help on any command for details.
+"""
 
 from __future__ import annotations
 
@@ -10,21 +17,73 @@ from pathlib import Path
 
 from fourfour_analysis import __version__
 
+_HELP_EPILOG_ANALYZE = """
+examples:
+  fourfour-analyze track.mp3                              analyze with default backend (lexicon_port)
+  fourfour-analyze track.mp3 --json                       output as JSON (for piping)
+  fourfour-analyze track.mp3 --backend lexicon_port       use Lexicon algorithms only
+  fourfour-analyze track.mp3 -b lexicon_port -b stratum_dsp  compare two backends
+
+output fields (JSON mode):
+  bpm           Detected tempo in BPM (float, e.g. 128.0)
+  key           Musical key in Camelot notation (string, e.g. "8A", "3B")
+  energy        Energy rating 1-10 (int)
+  beats         List of beat positions with bar_position (1-4)
+  waveform_peaks  List of {min_val, max_val} per segment
+  waveform_colors  List of {r, g, b} per segment (0-255)
+  cue_points    List of {label, time_seconds, loop_end_seconds?}
+  elapsed_seconds  Wall time for analysis
+
+backends:
+  lexicon_port       Lexicon algorithms ported to Python (numpy+scipy, no ML)
+  python_deeprhythm  DeepRhythm (torch) for BPM + librosa for key (needs [ml] extras)
+  stratum_dsp        Rust subprocess wrapping stratum-dsp (needs stratum-cli binary)
+"""
+
+_HELP_EPILOG_BENCHMARK = """
+workflow:
+  1. fourfour-benchmark init ~/Music/corpus --name my-corpus
+     Scan a directory of tagged audio files. BPM/key tags become ground truth.
+     Writes benchmark/manifests/<name>.corpus.json
+
+  2. fourfour-benchmark run --corpus benchmark/manifests/my-corpus.corpus.json --variants lexicon_port
+     Analyze all tracks with selected backends, compare against ground truth,
+     compute accuracy metrics and a recommendation.
+     Writes benchmark/results/<run_id>/ with raw/, comparisons.json, scoring.json
+
+  3. fourfour-benchmark show <run_id>
+     Print the scoring report for a run.
+
+  4. fourfour-benchmark compare <run1> <run2>
+     Diff decision scores between two runs.
+
+ground truth:
+  BPM and key are extracted from audio file tags (ID3 TBPM/TKEY, Vorbis BPM/INITIALKEY).
+  Tracks without BPM/key tags are analyzed but not scored.
+  Key values are normalized to Camelot notation (1A-12A, 1B-12B).
+
+scoring formula:
+  decision_score = 0.40 * bpm_acc2 + 0.35 * key_exact + 0.15 * speed + 0.10 * deps
+  Where bpm_acc2 = % within 4% of ground truth, key_exact = % exact match.
+"""
+
 
 def _build_analyze_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fourfour-analyze",
-        description="Analyze audio files for BPM, key, energy, waveforms, and cue points.",
+        description="Analyze a single audio file for BPM, key, energy, waveforms, and cue points.",
+        epilog=_HELP_EPILOG_ANALYZE,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("file", help="Path to audio file")
+    parser.add_argument("file", help="Path to audio file (WAV, FLAC, MP3, AAC, etc.)")
     parser.add_argument(
-        "--backend",
+        "-b", "--backend",
         action="append",
         dest="backends",
         choices=["lexicon_port", "python_deeprhythm", "stratum_dsp"],
-        help="Backend(s) to use. Defaults to lexicon_port.",
+        help="Backend(s) to use. May be specified multiple times. Default: lexicon_port.",
     )
-    parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON (machine-readable)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -32,41 +91,63 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
 def _build_benchmark_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fourfour-benchmark",
-        description="Benchmark analysis backends against ground truth.",
+        description="Benchmark analysis backends against ground truth from audio file tags.",
+        epilog=_HELP_EPILOG_BENCHMARK,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="command")
 
     # init
-    init_p = sub.add_parser("init", help="Build corpus from tagged audio files")
-    init_p.add_argument("directory", help="Directory of tagged audio files")
-    init_p.add_argument("--name", required=True, help="Corpus name")
+    init_p = sub.add_parser(
+        "init",
+        help="Build a corpus JSON from tagged audio files",
+        description="Scan a directory recursively for audio files and extract BPM/key tags as ground truth. "
+                    "Produces a .corpus.json file used by 'run'.",
+    )
+    init_p.add_argument("directory", help="Directory of tagged audio files (scanned recursively)")
+    init_p.add_argument("--name", required=True, help="Corpus name (used as filename: <name>.corpus.json)")
 
     # run
-    run_p = sub.add_parser("run", help="Run benchmark")
-    run_p.add_argument("--corpus", required=True, help="Path to corpus JSON")
+    run_p = sub.add_parser(
+        "run",
+        help="Run benchmark: analyze + compare + score",
+        description="Analyze all tracks in a corpus with selected backends, compare against ground truth, "
+                    "and produce scoring.json with accuracy metrics and a recommendation.",
+    )
+    run_p.add_argument("--corpus", required=True, help="Path to .corpus.json file")
     run_p.add_argument(
         "--variants",
         nargs="+",
         choices=["lexicon_port", "python_deeprhythm", "stratum_dsp"],
         default=["lexicon_port"],
-        help="Backends to benchmark",
+        help="Backend variant(s) to benchmark (default: lexicon_port)",
     )
-    run_p.add_argument("--parallel", type=int, default=1, help="Parallel workers")
+    run_p.add_argument("--parallel", type=int, default=1, help="Number of parallel workers (default: 1)")
+    run_p.add_argument("--speed-only", action="store_true", dest="speed_only",
+                       help="Skip comparison. Only measure timing (operational metrics).")
 
     # show
-    show_p = sub.add_parser("show", help="Show benchmark results")
-    show_p.add_argument("run_id", help="Run ID to display")
+    show_p = sub.add_parser(
+        "show",
+        help="Display results from a benchmark run",
+        description="Print the scoring report for a completed benchmark run.",
+    )
+    show_p.add_argument("run_id", help="Run ID to display (e.g. run-20260421T120000Z)")
 
     # compare
-    cmp_p = sub.add_parser("compare", help="Compare two runs")
-    cmp_p.add_argument("run1", help="First run ID")
-    cmp_p.add_argument("run2", help="Second run ID")
+    cmp_p = sub.add_parser(
+        "compare",
+        help="Compare decision scores between two runs",
+        description="Show side-by-side comparison of decision scores for two benchmark runs.",
+    )
+    cmp_p.add_argument("run1", help="First run ID (baseline)")
+    cmp_p.add_argument("run2", help="Second run ID (new)")
 
     # list
-    sub.add_parser("list", help="List all benchmark runs")
+    sub.add_parser("list", help="List all benchmark run IDs")
 
     # config-dirs
-    sub.add_parser("config-dirs", help="Show resolved paths")
+    sub.add_parser("config-dirs", help="Show resolved project paths")
 
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -159,7 +240,6 @@ def benchmark_main() -> None:
         )
         print(f"Corpus written: {corpus_path}")
 
-        # Summary
         from fourfour_analysis.manifest import load_corpus
         entries = load_corpus(corpus_path)
         scorable = sum(1 for e in entries if e.ground_truth is not None)
@@ -176,6 +256,7 @@ def benchmark_main() -> None:
             variant_ids=args.variants,
             settings=settings,
             parallel=args.parallel,
+            speed_only=getattr(args, "speed_only", False),
         )
         print(f"\nRun ID: {run_id}")
         return
@@ -187,8 +268,7 @@ def benchmark_main() -> None:
         if not scoring_path.is_file():
             print(f"No results for run: {args.run_id}", file=sys.stderr)
             sys.exit(1)
-        import json as _json
-        scores = _json.loads(scoring_path.read_text())
+        scores = json.loads(scoring_path.read_text())
         from fourfour_analysis.scoring import format_report
         print(format_report(scores, args.run_id))
         return
@@ -211,15 +291,13 @@ def benchmark_main() -> None:
     if args.command == "compare":
         from fourfour_analysis.config import Settings
         settings = Settings.from_cwd()
-        import json as _json
         s1_path = settings.results_dir / args.run1 / "scoring.json"
         s2_path = settings.results_dir / args.run2 / "scoring.json"
         if not s1_path.is_file() or not s2_path.is_file():
             print("One or both runs not found.", file=sys.stderr)
             sys.exit(1)
-        s1 = _json.loads(s1_path.read_text())
-        s2 = _json.loads(s2_path.read_text())
-        # Simple diff: show backends present in both
+        s1 = json.loads(s1_path.read_text())
+        s2 = json.loads(s2_path.read_text())
         all_keys = set(s1.keys()) | set(s2.keys())
         all_keys.discard("_recommendation")
         for k in sorted(all_keys):
