@@ -13,9 +13,6 @@ pioneer_library = { path = "../pioneer-library", package = "pioneer-library" }
 anyhow = "1"
 tokio = { version = "1.52.1", features = ["rt"] }
 
-# Audio analysis (used by local analyzer module)
-stratum-dsp = "1.0.0"
-symphonia = { version = "0.5", features = ["mp3", "flac", "wav", "aac", "pcm", "aiff"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }

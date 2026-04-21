@@ -87,7 +87,7 @@ def analyze_batch(paths: list[str], workers: int = 4) -> list[dict]:
     """
     if workers <= 1:
         return [analyze_track(p) for p in paths]
-    ctx = multiprocessing.get_context("fork")
+    ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(processes=workers) as pool:
         results = pool.map(analyze_track, paths)
     return results

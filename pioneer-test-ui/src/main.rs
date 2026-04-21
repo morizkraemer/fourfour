@@ -8,8 +8,6 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-mod analyzer;
-
 use pioneer_library::LocalLibrary;
 use pioneer_usb_writer::models;
 use pioneer_usb_writer::scanner;
@@ -216,8 +214,8 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
 
 /// Analyze all tracks that have not yet been analyzed.
 ///
-/// Emits `analysis-progress` events so the frontend can show a progress bar.
-/// Returns the full (updated) track list.
+/// Runs up to 3 Python processes in parallel. Emits `analysis-progress`
+/// events as each track finishes. Returns the full (updated) track list.
 #[tauri::command]
 async fn analyze_tracks(
     app: AppHandle,
@@ -225,7 +223,7 @@ async fn analyze_tracks(
 ) -> Result<Vec<TrackInfo>, String> {
     let shared: SharedLibrary = state.inner().clone();
 
-    // 1. Collect the work we need to do while holding the lock briefly.
+    // 1. Collect pending work while holding the lock briefly.
     let pending: Vec<(i64, PathBuf)> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
         let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
@@ -239,14 +237,61 @@ async fn analyze_tracks(
     };
 
     let total = pending.len() as u32;
+    if total == 0 {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        return build_track_infos(&lib);
+    }
 
-    // Resolve the venv Python path once.
     let python = resolve_python();
+    // Limit concurrency: each Python process loads DeepRhythm (heavy model).
+    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
 
-    // 2. Run analysis one track at a time (Python CLI or Rust fallback).
-    for (seq, (track_id, source_path)) in pending.iter().enumerate() {
-        let current = seq as u32 + 1;
+    // 2. Spawn all tasks; they acquire the semaphore before launching Python.
+    let mut join_set = tokio::task::JoinSet::new();
+    for (track_id, source_path) in pending {
+        let sem = semaphore.clone();
+        let python_cmd = python.clone();
 
+        join_set.spawn(async move {
+            let _permit = sem.acquire_owned().await.unwrap();
+            let path_str = source_path.to_string_lossy().to_string();
+
+            let result: Result<models::AnalysisResult, String> =
+                tokio::task::spawn_blocking(move || {
+                    let out = std::process::Command::new(&python_cmd)
+                        .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
+                        .output()
+                        .map_err(|e| format!("Failed to spawn analyzer: {e}"))?;
+
+                    if !out.status.success() {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        return Err(format!("Analyzer exited non-zero: {stderr}"));
+                    }
+
+                    let results: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)
+                        .map_err(|e| format!("Bad JSON from analyzer: {e}"))?;
+
+                    results
+                        .into_iter()
+                        .next()
+                        .map(|v| python_result_to_analysis(&v))
+                        .ok_or_else(|| "Analyzer returned empty array".to_string())
+                })
+                .await
+                .map_err(|e| format!("Task join error: {e}"))
+                .and_then(|r| r);
+
+            (track_id, source_path, result)
+        });
+    }
+
+    // 3. Process results as they complete (sequential DB writes, parallel Python).
+    let mut completed: u32 = 0;
+    while let Some(task_result) = join_set.join_next().await {
+        let (track_id, source_path, analysis_result) =
+            task_result.map_err(|e| format!("Task panicked: {e}"))?;
+
+        completed += 1;
         let file_name = source_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -256,62 +301,25 @@ async fn analyze_tracks(
         app.emit(
             "analysis-progress",
             ProgressPayload {
-                current,
+                current: completed,
                 total,
-                message: format!("Analyzing {file_name} ({current}/{total})"),
+                message: format!("Analyzed {file_name} ({completed}/{total})"),
             },
         )
         .ok();
 
-        let path = source_path.clone();
-        let python_cmd = python.clone();
-
-        // Try Python analyzer first, fall back to Rust.
-        let analysis_result = tokio::task::spawn_blocking(move || {
-            // Attempt Python CLI
-            let path_str = path.to_string_lossy().to_string();
-            let output = std::process::Command::new(&python_cmd)
-                .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
-                .output();
-
-            if let Ok(output) = output {
-                if output.status.success() {
-                    if let Ok(results) = serde_json::from_slice::<Vec<serde_json::Value>>(&output.stdout) {
-                        if let Some(result) = results.into_iter().next() {
-                            return Ok(python_result_to_analysis(&result));
-                        }
-                    }
-                }
-            }
-
-            // Fallback to Rust analyzer
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                analyzer::analyze_track(&path)
-            }))
-            .map_err(|_| anyhow::anyhow!("analysis panicked"))?
-        })
-        .await
-        .map_err(|e| format!("Analysis task failed: {e}"))?;
-
         match analysis_result {
             Ok(result) => {
-                // 3. Lock briefly to store result and update track metadata.
                 let lib = shared.lock().map_err(|e| e.to_string())?;
-                if let Some(mut track) = lib.get_track(*track_id).map_err(|e| e.to_string())? {
+                if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
                     track.tempo = (result.bpm * 100.0) as u32;
                     track.key = result.key.clone();
-                    lib.update_track(*track_id, &track)
-                        .map_err(|e| e.to_string())?;
+                    lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
                 }
-                lib.set_analysis(*track_id, &result)
-                    .map_err(|e| e.to_string())?;
+                lib.set_analysis(track_id, &result).map_err(|e| e.to_string())?;
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: analysis failed for {}: {}",
-                    source_path.display(),
-                    e
-                );
+                eprintln!("Warning: analysis failed for {}: {}", source_path.display(), e);
             }
         }
     }
