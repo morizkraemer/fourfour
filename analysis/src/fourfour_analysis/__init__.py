@@ -1,11 +1,3 @@
-def analyze_track(*args, **kwargs):
-    from fourfour_analysis.analyze import analyze_track
-    return analyze_track(*args, **kwargs)
+"""fourfour-analysis: Audio analysis CLI for Pioneer DJ USB drives."""
 
-
-def analyze_batch(*args, **kwargs):
-    from fourfour_analysis.analyze import analyze_batch
-    return analyze_batch(*args, **kwargs)
-
-
-__all__ = ["analyze_track", "analyze_batch"]
+__version__ = "0.1.0"
