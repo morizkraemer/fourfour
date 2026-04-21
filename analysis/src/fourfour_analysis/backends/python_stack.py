@@ -63,13 +63,24 @@ class PythonStackBackend(AnalysisBackend):
 
     def _detect_bpm(self, track_path: str) -> Optional[float]:
         """BPM detection via DeepRhythm."""
+        import warnings
+        import io
+        import sys
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            from deeprhythm import DeepRhythmPredictor
+
+        # DeepRhythm prints to stdout/stderr on every call
+        quiet_std = io.StringIO()
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = quiet_std, quiet_std
         try:
-            from deeprhythm import DeepRhythmAnalyzer
-            analyzer = DeepRhythmAnalyzer()
-            bpm = analyzer.analyze(track_path)
-            return float(bpm)
-        except Exception:
-            return None
+            predictor = DeepRhythmPredictor()
+            bpm = predictor.predict(track_path)
+            return float(bpm) if bpm else None
+        finally:
+            sys.stdout, sys.stderr = old_stdout, old_stderr
 
     def _detect_key(self, audio, sr: int) -> Optional[str]:
         """Key detection via librosa chroma_cqt + Krumhansl-Schmuckler."""
