@@ -1,8 +1,6 @@
 // Pioneer Test UI — app.js
 // Vanilla JS, no framework. All Tauri calls via window.__TAURI__.core.invoke()
 
-import WaveformDisplay from '../../ui/waveform/WaveformDisplay.js';
-
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open: dialogOpen } = window.__TAURI__.dialog;
@@ -57,6 +55,7 @@ async function init() {
 
     loadVolumes();
     setupDragDrop();
+    const { default: WaveformDisplay } = await import('../../ui/waveform/WaveformDisplay.js');
     waveformDisplay = new WaveformDisplay(document.querySelector('.waveform-container'));
     updateLibrarySubtitle();
 
