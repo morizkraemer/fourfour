@@ -32,6 +32,11 @@ ANALYSIS_VARIANTS = {
         "profile_type": "bgate",
         "heavy_deps": ["essentia"],
     },
+    "final_stack": {
+        "backend": "final_stack",
+        "label": "Final analysis stack (Lexicon + Essentia bgate key)",
+        "heavy_deps": ["numpy", "scipy", "essentia"],
+    },
 }
 
 
@@ -78,6 +83,10 @@ def load_backend(
         from fourfour_analysis.backends.essentia_key import EssentiaKeyBackend
         profile_type = ANALYSIS_VARIANTS[variant_id]["profile_type"]
         return EssentiaKeyBackend(cache_dir=cache_dir, profile_type=profile_type)
+
+    elif backend_key == "final_stack":
+        from fourfour_analysis.backends.final_stack import FinalStackBackend
+        return FinalStackBackend(cache_dir=cache_dir, features=features)
 
     else:
         raise ValueError(f"Unknown backend key: {backend_key}")

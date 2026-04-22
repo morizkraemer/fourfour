@@ -20,10 +20,8 @@ from fourfour_analysis.backends.registry import ANALYSIS_VARIANTS
 
 _HELP_EPILOG_ANALYZE = """
 examples:
-  fourfour-analyze track.mp3                              analyze with default backend (lexicon_port)
+  fourfour-analyze track.mp3                              analyze with the final production stack
   fourfour-analyze track.mp3 --json                       output as JSON (for piping)
-  fourfour-analyze track.mp3 --backend lexicon_port       use Lexicon algorithms only
-  fourfour-analyze track.mp3 -b lexicon_port -b stratum_dsp  compare two backends
 
 output fields (JSON mode):
   bpm           Detected tempo in BPM (float, e.g. 128.0)
@@ -36,10 +34,7 @@ output fields (JSON mode):
   elapsed_seconds  Wall time for analysis
 
 backends:
-  lexicon_port       Lexicon algorithms ported to Python (numpy+scipy, no ML)
-  python_deeprhythm  DeepRhythm (torch) for BPM + librosa for key (needs [ml] extras)
-  stratum_dsp        Rust subprocess wrapping stratum-dsp (needs stratum-cli binary)
-  essentia_key_bgate Essentia KeyExtractor bgate profile (key only, needs [key] extra)
+  final_stack        Production stack: Lexicon-style analysis + Essentia bgate key
 """
 
 _HELP_EPILOG_BENCHMARK = """
@@ -79,18 +74,11 @@ _BACKEND_CHOICES = sorted(ANALYSIS_VARIANTS)
 def _build_analyze_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fourfour-analyze",
-        description="Analyze a single audio file for BPM, key, energy, waveforms, and cue points.",
+        description="Analyze a single audio file with the final production stack.",
         epilog=_HELP_EPILOG_ANALYZE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("file", help="Path to audio file (WAV, FLAC, MP3, AAC, etc.)")
-    parser.add_argument(
-        "-b", "--backend",
-        action="append",
-        dest="backends",
-        choices=_BACKEND_CHOICES,
-        help="Backend(s) to use. May be specified multiple times. Default: lexicon_port.",
-    )
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON (machine-readable)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -227,28 +215,25 @@ def analyze_main() -> None:
         print(f"Error: file not found: {args.file}", file=sys.stderr)
         sys.exit(1)
 
-    backends = args.backends or ["lexicon_port"]
-
     results = {}
-    for backend_id in backends:
-        results[backend_id] = _analyze_with_backend(backend_id, file_path)
+    results["final_stack"] = _analyze_with_backend("final_stack", file_path)
 
     if args.json_output:
         print(json.dumps(results, indent=2, default=str))
     else:
-        for backend_id, result in results.items():
-            print(f"\n{'='*50}")
-            print(f"Backend: {backend_id}")
-            print(f"{'='*50}")
-            if result.get("status") == "error":
-                print(f"  Error: {result['error']}")
-                continue
-            print(f"  BPM:    {result.get('bpm', 'N/A')}")
-            print(f"  Key:    {result.get('key', 'N/A')}")
-            print(f"  Energy: {result.get('energy', 'N/A')}")
-            print(f"  Beats:  {len(result.get('beats', []))}")
-            print(f"  Cues:   {len(result.get('cue_points', []))}")
-            print(f"  Time:   {result.get('elapsed_seconds', 0):.2f}s")
+        result = results["final_stack"]
+        print(f"\n{'='*50}")
+        print("Backend: final_stack")
+        print(f"{'='*50}")
+        if result.get("status") == "error":
+            print(f"  Error: {result['error']}")
+            return
+        print(f"  BPM:    {result.get('bpm', 'N/A')}")
+        print(f"  Key:    {result.get('key', 'N/A')}")
+        print(f"  Energy: {result.get('energy', 'N/A')}")
+        print(f"  Beats:  {len(result.get('beats', []))}")
+        print(f"  Cues:   {len(result.get('cue_points', []))}")
+        print(f"  Time:   {result.get('elapsed_seconds', 0):.2f}s")
 
 
 def benchmark_main() -> None:

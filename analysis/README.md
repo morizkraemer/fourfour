@@ -11,7 +11,7 @@ Start here when you clone the repo and need to understand or use the CLI without
 - `fourfour-analyze`: analyze one audio file.
 - `fourfour-benchmark`: build corpora, run backend comparisons, and score output against ground truth.
 
-The package is a sidecar for the Rust Pioneer USB tooling. It is used for analysis experiments and for backends that are easier to run in Python than Rust.
+The package is a sidecar for the Rust Pioneer USB tooling. `fourfour-analyze` now uses the final production stack only.
 
 Current validated scope:
 
@@ -55,12 +55,9 @@ Optional backends:
 ```bash
 # Existing ML stack: DeepRhythm + librosa.
 uv pip install --python .venv/bin/python -e ".[ml]"
-
-# Current recommended key backend: Essentia KeyExtractor bgate.
-uv pip install --python .venv/bin/python -e ".[key]"
 ```
 
-If the venv already exists, just install the extras needed for the backend you are using.
+`essentia` is part of the normal install because `fourfour-analyze` uses it in the final stack.
 
 ## Commands
 
@@ -76,13 +73,6 @@ Analyze one track:
 ```bash
 cd analysis
 .venv/bin/fourfour-analyze /path/to/track.mp3 --json
-```
-
-Analyze one track with the current key backend:
-
-```bash
-cd analysis
-.venv/bin/fourfour-analyze /path/to/track.mp3 --backend essentia_key_bgate --json
 ```
 
 Build a manifest from tagged files:
@@ -130,16 +120,17 @@ Backends are registered in `src/fourfour_analysis/backends/registry.py`.
 
 | Variant | Purpose | Dependencies | Status |
 |---|---|---|---|
-| `lexicon_port` | Python port of Lexicon-style BPM/key/energy/cue/waveform logic | base deps | Useful baseline |
-| `python_deeprhythm` | DeepRhythm BPM + librosa key/energy | `[ml]` extra | Heavy baseline |
-| `stratum_dsp` | Rust subprocess wrapper | Rust binary | Integration target, not fully validated here |
-| `essentia_key_bgate` | Essentia KeyExtractor `bgate` profile | `[key]` extra | Current recommended key detector |
+| `final_stack` | Lexicon-style BPM/energy/waveform/cues + Essentia `bgate` key | base deps | Current production path |
+| `lexicon_port` | Python port of Lexicon-style BPM/key/energy/cue/waveform logic | base deps | Benchmark baseline |
+| `python_deeprhythm` | DeepRhythm BPM + librosa key/energy | `[ml]` extra | Benchmark baseline |
+| `stratum_dsp` | Rust subprocess wrapper | Rust binary | Benchmark target |
+| `essentia_key_bgate` | Essentia KeyExtractor `bgate` profile | base deps | Key benchmark winner |
 
-Only `essentia_key_bgate` is exposed for Essentia. Other Essentia profiles were benchmarked historically, but `bgate` won exact-match accuracy and is the only public variant.
+`fourfour-analyze` always uses `final_stack`. The benchmark CLI still exposes the underlying variants for comparison runs.
 
 ## Current Key Decision
 
-Use `essentia_key_bgate` for key detection.
+Use `final_stack` for normal analysis. Use `essentia_key_bgate` inside benchmarks when you want to isolate key detection.
 
 Beatport EDM Key benchmark summary:
 
@@ -184,6 +175,7 @@ Important modules:
 | `src/fourfour_analysis/cache.py` | Content/config-addressed result cache |
 | `src/fourfour_analysis/types.py` | Shared dataclasses |
 | `src/fourfour_analysis/backends/base.py` | Backend interface and caching wrapper |
+| `src/fourfour_analysis/backends/final_stack.py` | Production stack wrapper for `fourfour-analyze` |
 | `src/fourfour_analysis/backends/registry.py` | Public backend variants |
 | `src/fourfour_analysis/backends/essentia_key.py` | Essentia `bgate` key backend |
 | `src/fourfour_analysis/backends/lexicon_port.py` | Lexicon-style full backend |
@@ -239,4 +231,3 @@ cd analysis
   src/fourfour_analysis/backends/registry.py \
   src/fourfour_analysis/backends/essentia_key.py
 ```
-

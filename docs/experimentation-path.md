@@ -593,7 +593,7 @@ python -m fourfour.analysis.benchmark_analyze run-20260417T120000Z
 
 # Phase 1: Compare single track across engines
 cargo run -p pioneer-usb-writer -- analyze /path/to/track.mp3 --json
-python -m fourfour.analysis.analyze_track /path/to/track.mp3 --backend essentia
+python -m fourfour.analysis.analyze_track /path/to/track.mp3
 python -m fourfour.analysis.analyze_track /path/to/track.mp3 --backend madmom
 
 # Phase 2: Generate + compare waveforms

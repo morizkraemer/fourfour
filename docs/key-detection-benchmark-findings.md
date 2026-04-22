@@ -83,11 +83,11 @@ The comparison is not perfectly denominator-matched because Rekordbox was scored
 
 ## Setup
 
-Install the optional key dependency into the analysis venv:
+Install the analysis package into the venv:
 
 ```bash
 cd analysis
-uv pip install --python .venv/bin/python essentia
+uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
 Run a key-only benchmark:

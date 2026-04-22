@@ -87,7 +87,7 @@ Use `essentia_key_bgate` for current key detection.
 
 ```bash
 cd analysis
-uv pip install --python .venv/bin/python essentia
+uv pip install --python .venv/bin/python -e ".[dev]"
 
 .venv/bin/fourfour-benchmark run \
   --corpus ../benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json \
