@@ -57,11 +57,13 @@ class LexiconPortBackend(AnalysisBackend):
         tempo_audio = None
         bpm = None
         beats = []
+        anchor_idx = 0
         if needs_tempo:
             tempo_audio, _ = preprocess_tempo(audio, sr)
             bpm_result = analyze_tempo(tempo_audio, sr)
             bpm = bpm_result.bpm if bpm_result else None
             beats = bpm_result.beats if bpm_result else []
+            anchor_idx = bpm_result.anchor_idx if bpm_result else 0
 
         # Key detection
         key = None
@@ -89,12 +91,13 @@ class LexiconPortBackend(AnalysisBackend):
         if "cues" in self._features and bpm is not None and len(beats) > 0 and tempo_audio is not None:
             cue_points = detect_sections(beats, tempo_audio, sr, bpm)
 
-        # Convert beats to BeatPosition
+        # Convert beats to BeatPosition — bar_position counts from the detected
+        # anchor (first musical beat = bar_position 1), extending backward/forward.
         beat_positions = []
         for i, t in enumerate(beats):
             beat_positions.append(BeatPosition(
                 time_seconds=t,
-                bar_position=(i % 4) + 1,
+                bar_position=((i - anchor_idx) % 4) + 1,
             ))
 
         return AnalysisResult(

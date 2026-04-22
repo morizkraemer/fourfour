@@ -11,6 +11,11 @@ if TYPE_CHECKING:
 
 # Variant definitions
 ANALYSIS_VARIANTS = {
+    "final_stack": {
+        "backend": "final_stack",
+        "label": "Final analysis stack (Lexicon + Essentia bgate key)",
+        "heavy_deps": ["numpy", "scipy", "essentia"],
+    },
     "deeprhythm_essentia": {
         "backend": "deeprhythm_essentia",
         "label": "DeepRhythm BPM + Essentia key (bgate) + Lexicon waveform/beats/cues",
@@ -72,7 +77,11 @@ def load_backend(
     cache_dir = settings.cache_dir
     backend_key = ANALYSIS_VARIANTS[variant_id]["backend"]
 
-    if backend_key == "deeprhythm_essentia":
+    if backend_key == "final_stack":
+        from fourfour_analysis.backends.final_stack import FinalStackBackend
+        return FinalStackBackend(cache_dir=cache_dir, features=features)
+
+    elif backend_key == "deeprhythm_essentia":
         from fourfour_analysis.backends.deeprhythm_essentia import DeepRhythmEssentiaBackend
         return DeepRhythmEssentiaBackend(cache_dir=cache_dir, features=features)
 

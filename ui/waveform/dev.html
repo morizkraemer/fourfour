@@ -36,6 +36,20 @@
         #status { font-size: 10px; color: #555; white-space: nowrap; }
         #status.active { color: #5ae168; }
 
+        /* Player controls */
+        #play-btn {
+            padding: 4px 12px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #ccc;
+            cursor: pointer;
+            font: 13px/1 system-ui;
+        }
+        #play-btn:hover { background: #333; }
+        #play-btn.playing { border-color: #5ae168; color: #5ae168; }
+        #time-display { font-size: 11px; color: #666; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
         /* Source file tabs */
         #source-tabs {
             display: flex;
@@ -143,10 +157,14 @@
     <div class="toolbar">
         <label>+ Load <input type="file" id="file-input" accept=".json"></label>
         <span class="source-tab-sep">|</span>
+        <button id="play-btn">▶</button>
+        <span id="time-display">0:00 / 0:00</span>
+        <span class="source-tab-sep">|</span>
         <span id="source-tabs"></span>
         <span id="track-name" style="flex:1;padding-left:8px;"></span>
         <span id="status">watching…</span>
     </div>
+    <audio id="player" preload="auto"></audio>
 
     <div id="rows"></div>
 
@@ -157,6 +175,88 @@
         const trackName = document.getElementById('track-name');
         const statusEl  = document.getElementById('status');
         const sourceTabsEl = document.getElementById('source-tabs');
+
+        // ── Audio player ────────────────────────────────────────────────
+        const audio   = document.getElementById('player');
+        const playBtn = document.getElementById('play-btn');
+        const timeDsp = document.getElementById('time-display');
+
+        function fmtTime(secs) {
+            const s = Math.floor(secs);
+            return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        }
+
+        playBtn.addEventListener('click', () => {
+            if (audio.paused) audio.play(); else audio.pause();
+        });
+
+        audio.addEventListener('play',  () => { playBtn.textContent = '⏸'; playBtn.classList.add('playing'); });
+        audio.addEventListener('pause', () => { playBtn.textContent = '▶'; playBtn.classList.remove('playing'); });
+        audio.addEventListener('ended', () => { playBtn.textContent = '▶'; playBtn.classList.remove('playing'); });
+        audio.addEventListener('timeupdate', () => {
+            timeDsp.textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(audio.duration || 0)}`;
+        });
+
+        // Seek all rows when clicking a waveform
+        function seekAudio(frac) {
+            if (audio.duration) {
+                audio.currentTime = frac * audio.duration;
+                _autoScroll = true; // re-enable auto-scroll after manual seek
+            }
+        }
+
+        // Playhead rAF loop — updates all rows while playing
+        let _rafId = null;
+        let _autoScroll = true;
+
+        function scrollToPlayhead(frac) {
+            if (!_autoScroll) return;
+            // Use first row as reference for zoom/offset state
+            const ref = rows[0];
+            if (!ref) return;
+            const zoom = ref.display._zoom;
+            if (zoom <= 1.0) return; // nothing to scroll at full zoom-out
+            const visible = 1.0 / zoom;
+            const offset = ref.display._offset;
+            // If playhead is outside the visible window, re-center it
+            if (frac < offset || frac > offset + visible) {
+                const newOffset = Math.max(0, Math.min(1 - visible, frac - visible * 0.25));
+                // Update all rows without triggering sync loop
+                rows.forEach(e => {
+                    e.display._zoom = zoom;
+                    e.display._offset = e.display._clampOffset(newOffset);
+                    e.display._render();
+                });
+            }
+        }
+
+        function startPlayheadLoop() {
+            if (_rafId) return;
+            function tick() {
+                if (!audio.paused && audio.duration) {
+                    const frac = audio.currentTime / audio.duration;
+                    scrollToPlayhead(frac);
+                    rows.forEach(e => e.display.setPlayhead(frac));
+                }
+                _rafId = requestAnimationFrame(tick);
+            }
+            _rafId = requestAnimationFrame(tick);
+        }
+        function stopPlayheadLoop() {
+            if (_rafId) { cancelAnimationFrame(_rafId); _rafId = null; }
+            rows.forEach(e => e.display.setPlayhead(-1));
+        }
+        audio.addEventListener('play',  startPlayheadLoop);
+        audio.addEventListener('pause', stopPlayheadLoop);
+        audio.addEventListener('ended', stopPlayheadLoop);
+
+        // Space bar: toggle play/pause
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && e.target === document.body) {
+                e.preventDefault();
+                if (audio.paused) audio.play(); else audio.pause();
+            }
+        });
 
         // ── Source file registry ─────────────────────────────────────────
         // Each source: { name, data }. Rekordbox-format sources update the
@@ -288,6 +388,7 @@
         let _syncing = false;
         function syncAll(zoom, offset, source) {
             if (_syncing) return;
+            _autoScroll = false; // user is manually navigating
             _syncing = true;
             rows.forEach(e => {
                 if (e !== source) e.display.setViewport(zoom, offset);
@@ -297,6 +398,7 @@
 
         function attachSync(entry) {
             entry.display.onViewportChange = (zoom, offset) => syncAll(zoom, offset, entry);
+            entry.display.onSeek = (frac) => seekAudio(frac);
         }
 
         // ── Shared base (beats/bpm/duration) ───────────────────────────
@@ -402,6 +504,13 @@
         }
 
         function applyAnalysisData(data, resetZoom = true) {
+            // Load audio if track_url changed
+            if (data.track_url && audio.getAttribute('data-src') !== data.track_url) {
+                audio.setAttribute('data-src', data.track_url);
+                audio.src = data.track_url;
+                audio.load();
+            }
+
             const waveforms = data.waveforms || {};
             const names = Object.keys(waveforms);
             ensureAnalysisRows(names);

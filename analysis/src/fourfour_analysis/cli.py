@@ -382,7 +382,7 @@ def waveform_compare_main() -> None:
         sys.exit(1)
 
     # Full analysis for BPM / key / beats + lexicon waveform
-    main_result = _analyze_with_backend("deeprhythm_essentia", file_path)
+    main_result = _analyze_with_backend("final_stack", file_path)
 
     # Load + preprocess audio once for additional backends
     from fourfour_analysis.audio_io import load_audio, preprocess_waveform

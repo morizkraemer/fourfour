@@ -40,7 +40,7 @@ fn main() {
     let data_path = serve_dir.join("data.json");
 
     // Initial analysis
-    if let Err(e) = analyze_and_write(&audio_path, &data_path) {
+    if let Err(e) = analyze_and_write(&audio_path, &data_path, &serve_dir) {
         eprintln!("Analysis failed: {e}");
         std::process::exit(1);
     }
@@ -84,7 +84,7 @@ fn main() {
         print!("Analyzing {}…  ", audio_path.display());
         io::stdout().flush().ok();
 
-        match analyze_and_write(&audio_path, &data_path) {
+        match analyze_and_write(&audio_path, &data_path, &serve_dir) {
             Ok(_) => {
                 if let Err(e) = write_rekordbox_json(&audio_path, &serve_dir) {
                     eprintln!("  (Rekordbox: {e})");
@@ -114,7 +114,7 @@ fn resolve_python() -> String {
     }
 }
 
-fn analyze_and_write(audio_path: &Path, data_path: &Path) -> anyhow::Result<()> {
+fn analyze_and_write(audio_path: &Path, data_path: &Path, serve_dir: &Path) -> anyhow::Result<()> {
     let python = resolve_python();
     let output = Command::new(&python)
         .args([
@@ -131,8 +131,19 @@ fn analyze_and_write(audio_path: &Path, data_path: &Path) -> anyhow::Result<()> 
         anyhow::bail!("Python waveform-compare failed: {stderr}");
     }
 
+    // Symlink the audio file into serve_dir so the browser can fetch it
+    let ext = audio_path.extension().and_then(|e| e.to_str()).unwrap_or("audio");
+    let link_name = format!("current_track.{ext}");
+    let link_path = serve_dir.join(&link_name);
+    let _ = std::fs::remove_file(&link_path);
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(audio_path.canonicalize().unwrap_or(audio_path.to_path_buf()), &link_path)
+        .ok();
+
+    let track_url = format!("./{link_name}");
     let result: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    let value = compare_result_to_display_json(&result);
+    let mut value = compare_result_to_display_json(&result);
+    value["track_url"] = serde_json::Value::String(track_url);
     std::fs::write(data_path, serde_json::to_string(&value)?)?;
     Ok(())
 }

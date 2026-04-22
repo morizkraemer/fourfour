@@ -76,16 +76,30 @@ export default class WaveformDisplay {
         this._wrapper = document.createElement('div');
         this._wrapper.className = 'waveform-display';
 
-        // Overview canvas (full-track mini-view)
+        // Overview canvas (full-track mini-view) — wrapped for playhead overlay
         this._overviewCanvas = document.createElement('canvas');
         this._overviewCanvas.className = 'waveform-display__overview';
+        const overviewWrap = document.createElement('div');
+        overviewWrap.style.cssText = 'position:relative;flex-shrink:0;';
+        overviewWrap.appendChild(this._overviewCanvas);
+        this._overviewPlayhead = document.createElement('div');
+        this._overviewPlayhead.style.cssText =
+            'position:absolute;top:0;bottom:0;width:1px;background:#fff;pointer-events:none;display:none;transform:translateX(-50%)';
+        overviewWrap.appendChild(this._overviewPlayhead);
 
-        // Zoom canvas (scrollable detail view)
+        // Zoom canvas (scrollable detail view) — wrapped for playhead overlay
         this._zoomCanvas = document.createElement('canvas');
         this._zoomCanvas.className = 'waveform-display__zoom';
+        const zoomWrap = document.createElement('div');
+        zoomWrap.style.cssText = 'position:relative;flex:1;min-height:0;';
+        zoomWrap.appendChild(this._zoomCanvas);
+        this._zoomPlayhead = document.createElement('div');
+        this._zoomPlayhead.style.cssText =
+            'position:absolute;top:0;bottom:0;width:1px;background:#fff;pointer-events:none;display:none;transform:translateX(-50%)';
+        zoomWrap.appendChild(this._zoomPlayhead);
 
-        this._wrapper.appendChild(this._overviewCanvas);
-        this._wrapper.appendChild(this._zoomCanvas);
+        this._wrapper.appendChild(overviewWrap);
+        this._wrapper.appendChild(zoomWrap);
         container.appendChild(this._wrapper);
 
         // State
@@ -97,6 +111,8 @@ export default class WaveformDisplay {
         this._dragStartY = 0;
         this._dragStartOffset = 0;
         this._dragStartZoom = 1.0;
+        this._dragMoved = false;
+        this._playheadFrac = -1;
 
         // rAF handle — coalesces rapid scroll/drag events into one draw per frame
         this._zoomRafId = null;
@@ -125,11 +141,38 @@ export default class WaveformDisplay {
         this._render();
     }
 
+    /** Set playhead position (0–1 fraction of duration). Pass -1 to hide. */
+    setPlayhead(frac) {
+        this._playheadFrac = frac;
+        this._updatePlayheadOverlay();
+    }
+
+    _updatePlayheadOverlay() {
+        const frac = this._playheadFrac;
+        if (frac < 0 || frac > 1) {
+            this._overviewPlayhead.style.display = 'none';
+            this._zoomPlayhead.style.display = 'none';
+            return;
+        }
+        this._overviewPlayhead.style.display = 'block';
+        this._overviewPlayhead.style.left = (frac * 100) + '%';
+        const visibleFrac = 1.0 / this._zoom;
+        const start = this._offset;
+        const end = start + visibleFrac;
+        if (frac >= start && frac <= end) {
+            this._zoomPlayhead.style.display = 'block';
+            this._zoomPlayhead.style.left = ((frac - start) / visibleFrac * 100) + '%';
+        } else {
+            this._zoomPlayhead.style.display = 'none';
+        }
+    }
+
     /** Programmatically set zoom and scroll position (for syncing displays). */
     setViewport(zoom, offset) {
         this._zoom = Math.max(1.0, Math.min(512.0, zoom));
         this._offset = this._clampOffset(offset);
         this._render();
+        this._updatePlayheadOverlay();
     }
 
     /** Remove canvases and all event listeners. */
@@ -148,6 +191,7 @@ export default class WaveformDisplay {
         this._zoomRafId = requestAnimationFrame(() => {
             this._zoomRafId = null;
             this._renderZoom();
+            this._updatePlayheadOverlay();
         });
     }
 
@@ -240,6 +284,7 @@ export default class WaveformDisplay {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.lineWidth = 1;
         ctx.strokeRect(x1, 0, x2 - x1, h);
+
     }
 
     _renderMonoOverview(ctx, w, h) {
@@ -507,10 +552,12 @@ export default class WaveformDisplay {
             this._offset = this._clampOffset(frac - 0.5 / this._zoom);
             this._render();
             if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
+            if (this.onSeek) this.onSeek(frac);
         };
 
         this._onMouseDown = (e) => {
             this._dragging = true;
+            this._dragMoved = false;
             this._dragStartX = e.clientX;
             this._dragStartY = e.clientY;
             this._dragStartOffset = this._offset;
@@ -522,6 +569,7 @@ export default class WaveformDisplay {
         this._onMouseMove = (e) => {
             if (!this._dragging) return;
             const dy = this._dragStartY - e.clientY;
+            if (Math.abs(e.clientX - this._dragStartX) > 4 || Math.abs(dy) > 4) this._dragMoved = true;
             const dx = e.clientX - this._dragStartX;
             this._zoom = Math.max(1.0, Math.min(512.0, this._dragStartZoom * Math.pow(1.015, dy)));
             if (this._zoom > 1.0) {
@@ -532,8 +580,15 @@ export default class WaveformDisplay {
             if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
         };
 
-        this._onMouseUp = () => {
+        this._onMouseUp = (e) => {
             if (this._dragging) {
+                if (!this._dragMoved && this.onSeek && this._data?.duration_ms) {
+                    const rect = this._zoomCanvas.getBoundingClientRect();
+                    const clickFrac = (e.clientX - rect.left) / rect.width;
+                    const visibleFrac = 1.0 / this._zoom;
+                    const seekFrac = this._offset + clickFrac * visibleFrac;
+                    this.onSeek(Math.max(0, Math.min(1, seekFrac)));
+                }
                 this._dragging = false;
                 this._zoomCanvas.style.cursor = 'default';
             }

@@ -370,20 +370,20 @@ def quantize(values: list[float]) -> bytes:
 
 ---
 
-## 7. Beat Grid (Already in Rust)
+## 7. Beat Grid (Python — Lexicon port)
 
-### Use: stratum-dsp (already in the repo)
-```rust
-// pioneer-test-ui/src/analyzer/mod.rs — already implemented
-pub fn analyze_track(path: &Path) -> Result<AnalysisResult> { ... }
-```
+### Use: `lexicon_bpm._generate_beats` (already implemented in Python)
 
-The Rust side already handles:
-- Audio decode via symphonia
-- BPM + key + beat grid via stratum-dsp
-- 400-byte monochrome waveform preview
+Beat grid generation lives in `analysis/src/fourfour_analysis/backends/lexicon_bpm.py`.
 
-**Your job:** Benchmark stratum-dsp accuracy against Rekordbox ground truth. The Python benchmark harness in `analysis/` is scaffolded and ready.
+How it works:
+- Onset detection via energy derivative (catches kick transients even when bass is louder)
+- Extends the constant-BPM grid backward from the detected first beat all the way to t=0
+- Bar positions are anchored to the detected first beat — beats before it count down (4, 3, 2, 1, 4, 3…)
+
+This is called by `LexiconPortBackend` and `FinalStackBackend` (the production stack).
+
+**Do not use stratum-dsp for beat grid** — the Python Lexicon port is the current implementation and has been validated against Rekordbox ground truth on hardware.
 
 ---
 
