@@ -185,29 +185,50 @@ export default class WaveformDisplay {
         if (!data || data.length === 0) {
             this._renderMonoOverview(ctx, w, h);
         } else {
-            // Pre-compute per-pixel absolute band amplitudes (max scan per bucket)
-            const bassA = new Float32Array(w);
-            const midA  = new Float32Array(w);
-            const highA = new Float32Array(w);
+            // Rekordbox-style stacked bars: rendered from the bottom, no mirroring.
+            // Bass (blue) fills from the bottom, mid (orange) stacks on top,
+            // high (white) at the tip. Total bar height = overall amplitude.
+            // Color fractions = relative band contributions, normalised to sum to 1.
+            const scale = h * 0.95;
 
             for (let px = 0; px < w; px++) {
                 const iStart = Math.floor(px * data.length / w);
                 const iEnd = Math.min(data.length - 1, Math.floor((px + 1) * data.length / w));
-                let maxAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
+                let sumAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
                 for (let i = iStart; i <= iEnd; i++) {
                     const d = data[i];
-                    if (d.amp > maxAmp) maxAmp = d.amp;
+                    sumAmp += d.amp;
                     sumR += d.r; sumG += d.g; sumB += d.b; count++;
                 }
                 if (count === 0) continue;
-                [bassA[px], midA[px], highA[px]] = bandAmps(maxAmp, sumR / count, sumG / count, sumB / count);
-            }
+                const maxAmp = sumAmp / count;
+                if (maxAmp < 0.005) continue;
 
-            const yCenter = h / 2;
-            const scale = h / 2 * 0.9;
-            drawBand(ctx, bassA, w, yCenter, scale, COLOR_BASS);
-            drawBand(ctx, midA,  w, yCenter, scale, COLOR_MID);
-            drawBand(ctx, highA, w, yCenter, scale, COLOR_HIGH);
+                const [bA, mA, hA] = bandAmps(maxAmp, sumR / count, sumG / count, sumB / count);
+                const total = bA + mA + hA;
+                if (total <= 0) continue;
+
+                // Total column height proportional to amplitude
+                const colH = maxAmp * scale;
+
+                // Each band's share of the column, stacked bottom → top
+                const bassH = (bA / total) * colH;
+                const midH  = (mA / total) * colH;
+                const highH = (hA / total) * colH;
+
+                let y = h;
+
+                ctx.fillStyle = COLOR_BASS;
+                ctx.fillRect(px, y - bassH, 1, bassH);
+                y -= bassH;
+
+                ctx.fillStyle = COLOR_MID;
+                ctx.fillRect(px, y - midH, 1, midH);
+                y -= midH;
+
+                ctx.fillStyle = COLOR_HIGH;
+                ctx.fillRect(px, y - highH, 1, highH);
+            }
         }
 
         // Viewport indicator
@@ -224,22 +245,17 @@ export default class WaveformDisplay {
     _renderMonoOverview(ctx, w, h) {
         const previewData = this._data?.waveform_preview;
         if (!previewData || previewData.length === 0) return;
-        const yCenter = h / 2;
+        // Monochrome fallback: stacked bars from bottom, no mirroring.
         for (let px = 0; px < w; px++) {
             const di = Math.min(Math.floor(px * previewData.length / w), previewData.length - 1);
             const byte = previewData[di];
             const amplitude = (byte & 0x1F) / 31.0;
             const whiteness = ((byte >> 5) & 0x07) / 7.0;
             const brightness = Math.round(100 + whiteness * 155);
-            const barH = amplitude * (h / 2) * 0.9;
-            ctx.strokeStyle = amplitude < 0.01
-                ? 'rgb(80, 80, 80)'
-                : `rgba(${brightness}, ${brightness}, ${brightness}, 0.7)`;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(px, yCenter - barH);
-            ctx.lineTo(px, yCenter + barH);
-            ctx.stroke();
+            const barH = amplitude * h * 0.95;
+            if (barH < 0.5) continue;
+            ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.7)`;
+            ctx.fillRect(px, h - barH, 1, barH);
         }
     }
 
@@ -314,21 +330,21 @@ export default class WaveformDisplay {
                     highW = d0.b   * (1 - t) + d1.b   * t;
                 }
             } else {
-                // Zoomed out — max amplitude in range, average band weights
+                // Zoomed out — average amplitude in range, average band weights
                 const iStart = Math.max(0, Math.floor(tStart));
                 const iEnd = Math.min(data.length - 1, Math.ceil(tStart + samplesPerPixel));
                 if (iStart > iEnd) continue;
-                let sumR = 0, sumG = 0, sumB = 0, count = 0;
-                amp = 0;
+                let sumAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
                 for (let i = iStart; i <= iEnd; i++) {
                     const d = data[i];
-                    if (d.amp > amp) amp = d.amp;
+                    sumAmp += d.amp;
                     sumR += d.r; sumG += d.g; sumB += d.b; count++;
                 }
                 if (count === 0) continue;
-                bassW = sumR / count;
-                midW  = sumG / count;
-                highW = sumB / count;
+                amp    = sumAmp / count;
+                bassW  = sumR / count;
+                midW   = sumG / count;
+                highW  = sumB / count;
             }
             [bassA[px], midA[px], highA[px]] = bandAmps(amp, bassW, midW, highW);
         }

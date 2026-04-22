@@ -36,10 +36,41 @@
         #status { font-size: 10px; color: #555; white-space: nowrap; }
         #status.active { color: #5ae168; }
 
+        /* Source file tabs */
+        #source-tabs {
+            display: flex;
+            gap: 3px;
+            align-items: center;
+        }
+        .source-tab {
+            padding: 3px 9px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 3px;
+            color: #777;
+            font: 11px/1.4 system-ui;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .source-tab:hover { background: #2c2c2c; color: #aaa; }
+        .source-tab.active {
+            background: #1e3a5f;
+            border-color: #2a6496;
+            color: #7ec8e3;
+        }
+        .source-tab-sep { color: #333; font-size: 10px; padding: 0 2px; }
+
         /* ── Track rows ── */
+        #rows {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
         .track-row {
             display: flex;
-            flex-shrink: 0;
+            flex: 1;
+            min-height: 0;
             align-items: stretch;
         }
         .track-row + .track-row { border-top: 1px solid #222; }
@@ -102,7 +133,6 @@
         }
 
         .waveform-container {
-            height: 18vh;
             flex: 1;
             min-width: 0;
             overflow: hidden;
@@ -111,92 +141,115 @@
 </head>
 <body>
     <div class="toolbar">
-        <label>Load JSON <input type="file" id="file-input" accept=".json"></label>
-        <span id="track-name">No file loaded</span>
+        <label>+ Load <input type="file" id="file-input" accept=".json"></label>
+        <span class="source-tab-sep">|</span>
+        <span id="source-tabs"></span>
+        <span id="track-name" style="flex:1;padding-left:8px;"></span>
         <span id="status">watching…</span>
-        <span style="font-size:10px;color:#444">Re-analyze: press Enter in CLI</span>
     </div>
 
-    <div class="track-row">
-        <div class="row-sidebar">
-            <div class="row-title">Our analysis</div>
-            <div class="fader-row">
-                <span class="fader-dot dot-bass"></span>
-                <input type="range" class="bass-thumb" id="our-bass" min="0" max="200" step="5" value="100">
-                <span class="fader-val" id="our-bass-val">100%</span>
-            </div>
-            <div class="fader-row">
-                <span class="fader-dot dot-mid"></span>
-                <input type="range" class="mid-thumb" id="our-mid" min="0" max="200" step="5" value="100">
-                <span class="fader-val" id="our-mid-val">100%</span>
-            </div>
-            <div class="fader-row">
-                <span class="fader-dot dot-high"></span>
-                <input type="range" class="high-thumb" id="our-high" min="0" max="200" step="5" value="100">
-                <span class="fader-val" id="our-high-val">100%</span>
-            </div>
-        </div>
-        <div class="waveform-container" id="our-container"></div>
-    </div>
-
-    <div class="track-row">
-        <div class="row-sidebar">
-            <div class="row-title">Rekordbox</div>
-            <div class="fader-row">
-                <span class="fader-dot dot-bass"></span>
-                <input type="range" class="bass-thumb" id="rb-bass" min="0" max="200" step="5" value="100">
-                <span class="fader-val" id="rb-bass-val">100%</span>
-            </div>
-            <div class="fader-row">
-                <span class="fader-dot dot-mid"></span>
-                <input type="range" class="mid-thumb" id="rb-mid" min="0" max="200" step="5" value="100">
-                <span class="fader-val" id="rb-mid-val">100%</span>
-            </div>
-            <div class="fader-row">
-                <span class="fader-dot dot-high"></span>
-                <input type="range" class="high-thumb" id="rb-high" min="0" max="200" step="5" value="100">
-                <span class="fader-val" id="rb-high-val">100%</span>
-            </div>
-        </div>
-        <div class="waveform-container" id="rb-container"></div>
-    </div>
+    <div id="rows"></div>
 
     <script type="module">
         import WaveformDisplay from './WaveformDisplay.js';
 
-        const ourDisplay = new WaveformDisplay(document.getElementById('our-container'));
-        const rbDisplay  = new WaveformDisplay(document.getElementById('rb-container'));
-        const trackName  = document.getElementById('track-name');
-        const statusEl   = document.getElementById('status');
+        const rowsEl    = document.getElementById('rows');
+        const trackName = document.getElementById('track-name');
+        const statusEl  = document.getElementById('status');
+        const sourceTabsEl = document.getElementById('source-tabs');
 
-        // ── Zoom sync ───────────────────────────────────────────────────
-        let _syncing = false;
-        ourDisplay.onViewportChange = (zoom, offset) => {
-            if (_syncing) return;
-            _syncing = true;
-            rbDisplay.setViewport(zoom, offset);
-            _syncing = false;
-        };
-        rbDisplay.onViewportChange = (zoom, offset) => {
-            if (_syncing) return;
-            _syncing = true;
-            ourDisplay.setViewport(zoom, offset);
-            _syncing = false;
-        };
+        // ── Source file registry ─────────────────────────────────────────
+        // Each source: { name, data }. Rekordbox-format sources update the
+        // fixed reference rows; analysis-format sources replace analysis rows.
+        const sources = [];
+        let activeSourceIdx = -1;
 
-        // ── State ───────────────────────────────────────────────────────
-        let currentData   = null;
-        let rekordboxData = null;
-        let prevDataStamp = null;
+        function renderSourceTabs() {
+            sourceTabsEl.innerHTML = '';
+            sources.forEach((s, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'source-tab' + (i === activeSourceIdx ? ' active' : '');
+                btn.textContent = s.name;
+                btn.title = s.name;
+                btn.onclick = () => switchSource(i);
+                sourceTabsEl.appendChild(btn);
+            });
+        }
 
-        // ── Color recompute ─────────────────────────────────────────────
-        function recomputeColors(data, bassGain, midGain, highGain) {
-            return (data.waveform_color || []).map(c => ({
-                amp: c.amp,
-                r: Math.min(255, Math.round(c.r * bassGain)),
-                g: Math.min(255, Math.round(c.g * midGain)),
-                b: Math.min(255, Math.round(c.b * highGain)),
-            }));
+        function registerSource(name, data) {
+            const idx = sources.findIndex(s => s.name === name);
+            if (idx >= 0) {
+                sources[idx].data = data;
+                if (idx === activeSourceIdx) applySource(idx, false);
+            } else {
+                sources.push({ name, data });
+                renderSourceTabs();
+                if (sources.length === 1 || isAnalysisFormat(data)) switchSource(sources.length - 1);
+            }
+        }
+
+        function switchSource(idx) {
+            activeSourceIdx = idx;
+            renderSourceTabs();
+            applySource(idx, true);
+        }
+
+        function isAnalysisFormat(data) { return !!data.waveforms; }
+
+        function applySource(idx, resetZoom) {
+            const { data } = sources[idx];
+            if (isAnalysisFormat(data)) {
+                clearAnalysisRows();
+                applyAnalysisData(data, resetZoom);
+            } else {
+                applyRekordboxData(data, resetZoom);
+            }
+        }
+
+        // ── Row registry ────────────────────────────────────────────────
+        // Each entry: { display: WaveformDisplay, data: displayData|null, prefix: string }
+        const rows = [];
+
+        function makeRow(label, prefix) {
+            const row = document.createElement('div');
+            row.className = 'track-row';
+            row.innerHTML = `
+                <div class="row-sidebar">
+                    <div class="row-title">${label}</div>
+                    <div class="fader-row">
+                        <span class="fader-dot dot-bass"></span>
+                        <input type="range" class="bass-thumb" id="${prefix}-bass" min="0" max="200" step="5" value="100">
+                        <span class="fader-val" id="${prefix}-bass-val">100%</span>
+                    </div>
+                    <div class="fader-row">
+                        <span class="fader-dot dot-mid"></span>
+                        <input type="range" class="mid-thumb" id="${prefix}-mid" min="0" max="200" step="5" value="100">
+                        <span class="fader-val" id="${prefix}-mid-val">100%</span>
+                    </div>
+                    <div class="fader-row">
+                        <span class="fader-dot dot-high"></span>
+                        <input type="range" class="high-thumb" id="${prefix}-high" min="0" max="200" step="5" value="100">
+                        <span class="fader-val" id="${prefix}-high-val">100%</span>
+                    </div>
+                </div>
+                <div class="waveform-container" id="${prefix}-container"></div>
+            `;
+            rowsEl.appendChild(row);
+            const display = new WaveformDisplay(row.querySelector(`#${prefix}-container`));
+            const entry = { display, data: null, prefix };
+            rows.push(entry);
+
+            // Fader binding
+            ['bass', 'mid', 'high'].forEach(band => {
+                const slider = document.getElementById(`${prefix}-${band}`);
+                const label  = document.getElementById(`${prefix}-${band}-val`);
+                slider.addEventListener('input', () => {
+                    label.textContent = slider.value + '%';
+                    renderRow(entry);
+                });
+            });
+
+            return entry;
         }
 
         function gainsFor(prefix) {
@@ -207,41 +260,134 @@
             ];
         }
 
-        function applyToDisplay(data, display, prefix, resetZoom) {
-            if (!data) return;
-            const [bg, mg, hg] = gainsFor(prefix);
-            const painted = { ...data, waveform_color: recomputeColors(data, bg, mg, hg) };
+        function recomputeColors(waveform_color, bassGain, midGain, highGain) {
+            return (waveform_color || []).map(c => ({
+                amp: c.amp,
+                r: Math.min(255, Math.round(c.r * bassGain)),
+                g: Math.min(255, Math.round(c.g * midGain)),
+                b: Math.min(255, Math.round(c.b * highGain)),
+            }));
+        }
+
+        function renderRow(entry, resetZoom = false) {
+            if (!entry.data) return;
+            const [bg, mg, hg] = gainsFor(entry.prefix);
+            const painted = {
+                ...entry.data,
+                waveform_color: recomputeColors(entry.data.waveform_color, bg, mg, hg),
+            };
             if (resetZoom) {
-                display.setData(painted);
+                entry.display.setData(painted);
             } else {
-                display._data = painted;
-                display.redraw();
+                entry.display._data = painted;
+                entry.display.redraw();
             }
         }
 
-        function renderOur(resetZoom = false)      { applyToDisplay(currentData,   ourDisplay, 'our', resetZoom); }
-        function renderRekordbox(resetZoom = false) { applyToDisplay(rekordboxData, rbDisplay,  'rb',  resetZoom); }
+        // ── Viewport sync ───────────────────────────────────────────────
+        let _syncing = false;
+        function syncAll(zoom, offset, source) {
+            if (_syncing) return;
+            _syncing = true;
+            rows.forEach(e => {
+                if (e !== source) e.display.setViewport(zoom, offset);
+            });
+            _syncing = false;
+        }
 
-        // ── Fader binding ───────────────────────────────────────────────
-        function bindFaders(prefix, renderFn) {
-            ['bass', 'mid', 'high'].forEach(band => {
-                const slider = document.getElementById(`${prefix}-${band}`);
-                const label  = document.getElementById(`${prefix}-${band}-val`);
-                slider.addEventListener('input', () => {
-                    label.textContent = slider.value + '%';
-                    renderFn();
-                });
+        function attachSync(entry) {
+            entry.display.onViewportChange = (zoom, offset) => syncAll(zoom, offset, entry);
+        }
+
+        // ── Shared base (beats/bpm/duration) ───────────────────────────
+        // Waveform_color varies per row; beats/duration shared from data.json.
+        function makeDisplayData(waveformColor, base) {
+            return {
+                waveform_color: waveformColor,
+                waveform_preview: base.waveform_preview || [],
+                beats: base.beats || [],
+                duration_ms: base.duration_ms || 0,
+                bpm: base.bpm || 0,
+                key: base.key || '',
+            };
+        }
+
+        // ── Row setup ───────────────────────────────────────────────────
+        // Rekordbox rows are created first so analysis rows can be inserted before them.
+        // We use placeholder divs so insertBefore works reliably.
+        const rbDetailEntry  = makeRow('Rekordbox (detail)', 'rb-detail');
+        const rbOverviewEntry = makeRow('Rekordbox (overview)', 'rb-overview');
+        attachSync(rbDetailEntry);
+        attachSync(rbOverviewEntry);
+
+        // Analysis rows are inserted before the first Rekordbox row.
+        const rbDetailRowEl = document.getElementById('rb-detail-container').closest('.track-row');
+
+        let analysisRows = {};   // name → entry
+
+        function clearAnalysisRows() {
+            Object.values(analysisRows).forEach(e => {
+                const idx = rows.indexOf(e);
+                if (idx >= 0) rows.splice(idx, 1);
+                e.display.destroy();
+                e.rowEl.remove();
+            });
+            analysisRows = {};
+        }
+
+        function ensureAnalysisRows(names) {
+            names.forEach(name => {
+                if (!analysisRows[name]) {
+                    const prefix = 'a-' + name.toLowerCase().replace(/\s+/g, '-');
+                    // Build the row DOM element
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = `
+                        <div class="track-row">
+                            <div class="row-sidebar">
+                                <div class="row-title">${name}</div>
+                                <div class="fader-row">
+                                    <span class="fader-dot dot-bass"></span>
+                                    <input type="range" class="bass-thumb" id="${prefix}-bass" min="0" max="200" step="5" value="100">
+                                    <span class="fader-val" id="${prefix}-bass-val">100%</span>
+                                </div>
+                                <div class="fader-row">
+                                    <span class="fader-dot dot-mid"></span>
+                                    <input type="range" class="mid-thumb" id="${prefix}-mid" min="0" max="200" step="5" value="100">
+                                    <span class="fader-val" id="${prefix}-mid-val">100%</span>
+                                </div>
+                                <div class="fader-row">
+                                    <span class="fader-dot dot-high"></span>
+                                    <input type="range" class="high-thumb" id="${prefix}-high" min="0" max="200" step="5" value="100">
+                                    <span class="fader-val" id="${prefix}-high-val">100%</span>
+                                </div>
+                            </div>
+                            <div class="waveform-container" id="${prefix}-container"></div>
+                        </div>
+                    `;
+                    const rowEl = tempDiv.firstElementChild;
+                    rowsEl.insertBefore(rowEl, rbDetailRowEl);
+
+                    const display = new WaveformDisplay(rowEl.querySelector(`#${prefix}-container`));
+                    const entry = { display, data: null, prefix, rowEl };
+                    rows.push(entry);
+                    attachSync(entry);
+
+                    ['bass', 'mid', 'high'].forEach(band => {
+                        const slider = document.getElementById(`${prefix}-${band}`);
+                        const lbl    = document.getElementById(`${prefix}-${band}-val`);
+                        slider.addEventListener('input', () => {
+                            lbl.textContent = slider.value + '%';
+                            renderRow(entry);
+                        });
+                    });
+
+                    analysisRows[name] = entry;
+                }
             });
         }
-        bindFaders('our', renderOur);
-        bindFaders('rb',  renderRekordbox);
 
         // ── Data loading ────────────────────────────────────────────────
-        function applyData(data, label, resetZoom = true) {
-            currentData = data;
-            trackName.textContent = label;
-            renderOur(resetZoom);
-        }
+        let prevDataStamp = null;
 
         async function loadDataJson() {
             const resp = await fetch(`./data.json?t=${Date.now()}`);
@@ -249,30 +395,74 @@
             return resp.json();
         }
 
-        async function loadRekordboxJson(resetZoom = true) {
+        async function loadRekordboxJson() {
             const resp = await fetch(`./rekordbox.json?t=${Date.now()}`);
-            if (!resp.ok) return;
-            rekordboxData = await resp.json();
-            renderRekordbox(resetZoom);
+            if (!resp.ok) return null;
+            return resp.json();
+        }
+
+        function applyAnalysisData(data, resetZoom = true) {
+            const waveforms = data.waveforms || {};
+            const names = Object.keys(waveforms);
+            ensureAnalysisRows(names);
+
+            names.forEach(name => {
+                const entry = analysisRows[name];
+                if (!entry) return;
+                const cols = waveforms[name];
+                if (!cols) return;
+                entry.data = makeDisplayData(cols, data);
+                renderRow(entry, resetZoom);
+            });
+
+            const src = sources[activeSourceIdx];
+            const srcLabel = src ? ` — ${src.name}` : '';
+            trackName.textContent = `BPM: ${data.bpm?.toFixed(1) ?? '?'}  Key: ${data.key ?? '?'}${srcLabel}`;
+        }
+
+        function applyRekordboxData(rbData, resetZoom = true) {
+            if (!rbData) return;
+
+            // Detail row — uses waveform_detail (PWV3, ~150 cols/sec)
+            if (rbData.waveform_detail?.length) {
+                rbDetailEntry.data = makeDisplayData(rbData.waveform_detail, rbData);
+            }
+
+            // Overview row — uses waveform_overview (PWV4, 1200 entries)
+            // Same beats/duration but lower column density.
+            if (rbData.waveform_overview?.length) {
+                rbOverviewEntry.data = makeDisplayData(rbData.waveform_overview, rbData);
+            }
+
+            renderRow(rbDetailEntry, resetZoom);
+            renderRow(rbOverviewEntry, resetZoom);
         }
 
         function fingerprint(data) {
-            return JSON.stringify(data.bpm) + '_' +
-                   (data.waveform_color ? data.waveform_color.length : 0);
+            const n = data.waveforms
+                ? Object.values(data.waveforms).reduce((s, c) => s + (c?.length ?? 0), 0)
+                : 0;
+            return `${data.bpm}_${n}`;
         }
 
         // Initial load
         try {
             const data = await loadDataJson();
             prevDataStamp = fingerprint(data);
-            applyData(data, 'data.json');
+            registerSource('data.json', data);
             statusEl.textContent = 'watching…';
             statusEl.className = 'active';
         } catch (e) {
             statusEl.textContent = 'no data yet';
         }
 
-        try { await loadRekordboxJson(); } catch (_) {}
+        try {
+            const rbData = await loadRekordboxJson();
+            if (rbData) {
+                registerSource('rekordbox.json', rbData);
+                applyRekordboxData(rbData, true);
+            }
+        } catch (_) {}
 
         // ── Auto-reload every 2 s ───────────────────────────────────────
         async function poll() {
@@ -281,8 +471,12 @@
                 const stamp = fingerprint(data);
                 if (stamp !== prevDataStamp) {
                     prevDataStamp = stamp;
-                    applyData(data, 'data.json — ' + new Date().toLocaleTimeString(), true);
-                    try { await loadRekordboxJson(true); } catch (_) {}
+                    const idx = sources.findIndex(s => s.name === 'data.json');
+                    if (idx >= 0) {
+                        sources[idx].data = data;
+                        if (idx === activeSourceIdx) applySource(idx, true);
+                    }
+                    try { applyRekordboxData(await loadRekordboxJson(), true); } catch (_) {}
                     statusEl.textContent = 'reloaded ' + new Date().toLocaleTimeString();
                 }
             } catch (_) {}
@@ -291,24 +485,25 @@
         setTimeout(poll, 2000);
 
         // ── Manual file load ────────────────────────────────────────────
+        async function loadFile(file) {
+            try {
+                const data = JSON.parse(await file.text());
+                registerSource(file.name, data);
+                if (!isAnalysisFormat(data)) applyRekordboxData(data, true);
+            } catch (err) { alert('Failed to parse JSON: ' + err); }
+        }
+
         document.getElementById('file-input').addEventListener('change', async (e) => {
             const file = e.target.files[0];
-            if (!file) return;
-            try {
-                applyData(JSON.parse(await file.text()), file.name);
-                prevDataStamp = null;
-            } catch (err) { alert('Failed to parse JSON: ' + err); }
+            if (file) await loadFile(file);
+            e.target.value = '';   // allow re-loading same file
         });
 
         document.addEventListener('dragover', e => e.preventDefault());
         document.addEventListener('drop', async (e) => {
             e.preventDefault();
             const file = [...e.dataTransfer.files].find(f => f.name.endsWith('.json'));
-            if (!file) return;
-            try {
-                applyData(JSON.parse(await file.text()), file.name);
-                prevDataStamp = null;
-            } catch (err) { alert('Failed to parse JSON: ' + err); }
+            if (file) await loadFile(file);
         });
     </script>
 </body>

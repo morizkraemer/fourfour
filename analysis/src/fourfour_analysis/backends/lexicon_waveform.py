@@ -24,15 +24,27 @@ FFT_SIZE = 128
 # The FFT window is zero-padded from SEGMENT_WIDTH to FFT_SIZE to preserve band resolution.
 SEGMENT_WIDTH = 80
 
-# Frequency bands (Hz) — Nyquist at 12kHz = 6kHz
-LOW_BAND = (0, 150)
-MID_BAND = (150, 1500)
-HIGH_BAND = (1500, 6000)
+# Frequency bands (Hz) — Nyquist at 12kHz = 6kHz.
+#
+# At 12kHz / 128-pt FFT, freq_per_bin = 93.75 Hz.  The original (0, 150) low band
+# covered only bin 0 (DC, always ~0 in music), making the low channel dead and the
+# high band win every column → all-white display.
+#
+# New bands capture musically meaningful regions:
+#   LOW:  60–250 Hz  → kick drum fundamental + sub-bass (bins 1–2, ≈ 2 bins)
+#   MID:  250–2500 Hz → bass guitar, synths, snare body  (bins 2–26, ≈ 24 bins)
+#   HIGH: 2500–6000 Hz → cymbals, hi-hats, presence     (bins 26–64, ≈ 38 bins)
+#
+# LOW_WEIGHT is aggressive to match Rekordbox's bass-first visual hierarchy.
+LOW_BAND = (60, 250)
+MID_BAND = (250, 2500)
+HIGH_BAND = (2500, 6000)
 
-# Band weights
-LOW_WEIGHT = 1.2
+# Band weights — low heavily boosted to make kick drum visually dominant,
+# matching Rekordbox's perceptual tuning (bass fills the waveform).
+LOW_WEIGHT = 5.0
 MID_WEIGHT = 1.0
-HIGH_WEIGHT = 1.0
+HIGH_WEIGHT = 0.6
 
 # Smoothing: blend with previous segment (0 = no smoothing, 1 = freeze).
 # Reduced from 0.5 → sharper transients to match Rekordbox appearance.

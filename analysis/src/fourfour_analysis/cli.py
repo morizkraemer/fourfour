@@ -358,8 +358,81 @@ def benchmark_main() -> None:
         return
 
 
+def _waveform_cols_to_list(columns: list) -> list[dict]:
+    """Convert WaveformColumn list to serialisable dicts."""
+    return [
+        {"min_val": c.min_val, "max_val": c.max_val, "r": c.r, "g": c.g, "b": c.b}
+        for c in columns
+    ]
+
+
+def waveform_compare_main() -> None:
+    """Compare waveform generation backends: Lexicon vs Librosa vs Essentia."""
+    parser = argparse.ArgumentParser(
+        prog="fourfour-waveform-compare",
+        description="Generate waveforms from Lexicon, Librosa, and Essentia backends for comparison.",
+    )
+    parser.add_argument("file", help="Path to audio file")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
+    args = parser.parse_args()
+
+    file_path = Path(args.file)
+    if not file_path.is_file():
+        print(f"Error: file not found: {args.file}", file=sys.stderr)
+        sys.exit(1)
+
+    # Full analysis for BPM / key / beats + lexicon waveform
+    main_result = _analyze_with_backend("deeprhythm_essentia", file_path)
+
+    # Load + preprocess audio once for additional backends
+    from fourfour_analysis.audio_io import load_audio, preprocess_waveform
+    audio, sr = load_audio(str(file_path))
+    audio_12k, sr_12k = preprocess_waveform(audio, sr)
+
+    from fourfour_analysis.backends.lexicon_waveform import generate_waveform as _lexicon
+
+    # Lexicon waveform columns (re-use already-preprocessed audio)
+    lexicon_cols = _lexicon(audio_12k, sr_12k)
+    waveforms: dict[str, list[dict] | None] = {
+        "Lexicon": _waveform_cols_to_list(lexicon_cols),
+    }
+
+    try:
+        from fourfour_analysis.backends.librosa_waveform import generate_waveform_librosa
+        waveforms["Librosa"] = _waveform_cols_to_list(
+            generate_waveform_librosa(audio_12k, sr_12k)
+        )
+    except ImportError:
+        waveforms["Librosa"] = None
+
+    try:
+        from fourfour_analysis.backends.essentia_waveform import generate_waveform_essentia
+        waveforms["Essentia"] = _waveform_cols_to_list(
+            generate_waveform_essentia(audio_12k, sr_12k)
+        )
+    except ImportError:
+        waveforms["Essentia"] = None
+
+    output = {
+        "bpm": main_result.get("bpm", 0.0),
+        "key": main_result.get("key", ""),
+        "beats": main_result.get("beats", []),
+        "waveform_peaks": main_result.get("waveform_peaks", []),
+        "waveform_fft_bands": main_result.get("waveform_fft_bands", []),
+        "waveforms": waveforms,
+    }
+
+    if args.json_output:
+        print(json.dumps(output, indent=2, default=str))
+    else:
+        print(f"BPM: {output['bpm']}  Key: {output['key']}")
+        for name, cols in waveforms.items():
+            count = len(cols) if cols else 0
+            print(f"  {name}: {count} columns")
+
+
 def main() -> None:
-    """Entry point for python -m fourfour_analysis [analyze|benchmark] ..."""
+    """Entry point for python -m fourfour_analysis [analyze|benchmark|waveform-compare] ..."""
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "analyze":
         sys.argv = [sys.argv[0]] + sys.argv[2:]  # strip "analyze" subcommand
@@ -367,6 +440,9 @@ def main() -> None:
     elif len(sys.argv) > 1 and sys.argv[1] == "benchmark":
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         benchmark_main()
+    elif len(sys.argv) > 1 and sys.argv[1] == "waveform-compare":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        waveform_compare_main()
     else:
         print(f"fourfour-analysis v{__version__}")
-        print("Use: fourfour-analyze <file>  or  fourfour-benchmark <command>")
+        print("Use: fourfour-analyze <file>  or  fourfour-benchmark <command>  or  fourfour-waveform-compare <file>")

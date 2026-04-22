@@ -7,14 +7,20 @@ from pathlib import Path
 
 
 def _find_project_root(start: Path | None = None) -> Path:
-    """Walk up from start (or cwd) to find the directory containing Cargo.toml."""
+    """Walk up from start (or cwd) to find the directory containing Cargo.toml.
+
+    Falls back to ~/.fourfour when not running from within the project tree
+    (e.g., when invoked as a subprocess from the Tauri app bundle).
+    """
     current = start or Path.cwd()
     for parent in [current] + list(current.parents):
         if (parent / "Cargo.toml").is_file():
             return parent
-    raise FileNotFoundError(
-        f"Could not find project root (Cargo.toml) starting from {current}"
-    )
+    # Not running from within the project tree — use a user-local fallback so
+    # that cache/benchmark dirs still work without crashing.
+    fallback = Path.home() / ".fourfour"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 @dataclass(frozen=True)

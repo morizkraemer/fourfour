@@ -244,10 +244,11 @@ fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) ->
     buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());     // unknown fields
 
     if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
+        let src_len = cw.detail.len() as u64;
         for i in 0..entry_count {
+            // Use u64 to avoid overflow for long tracks (u32*u32 overflows at ~7 min).
             let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
+                (i as u64 * src_len / entry_count as u64) as usize
             } else {
                 0
             };
@@ -300,10 +301,11 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
     buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (confirmed from rekordbox)
 
     if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
+        let src_len = cw.detail.len() as u64;
         for i in 0..num_entries {
+            // Use u64 to avoid overflow for long tracks (u32*u32 overflows at ~7 min).
             let src_idx = if src_len > 0 {
-                (i * src_len / num_entries) as usize
+                (i as u64 * src_len / num_entries as u64) as usize
             } else {
                 0
             };
@@ -312,21 +314,31 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
             } else {
                 [0, 0, 0]
             };
-            let amplitude = low.max(mid).max(high);
-            buf.push(amplitude);
-            buf.push(0x80); // constant second byte observed in rekordbox
+            let max_amp = low.max(mid).max(high);
+            // Scale amplitude (0-255) to 5-bit height (0-31) for bits 14:10.
+            let height = (max_amp as u32 * 31 / 255) as u16;
+            // Color indicator in bits 4:0 — must match parse_pwv5 ranges:
+            // 0-2 neutral, 3-7 bass dominant, 8-12 treble dominant, 13+ mid dominant.
+            let ch3: u16 = if max_amp == 0 {
+                0 // silence
+            } else if low >= mid && low >= high {
+                5  // bass dominant
+            } else if high >= low && high >= mid {
+                10 // treble dominant
+            } else {
+                15 // mid dominant
+            };
+            let word: u16 = (height << 10) | ch3;
+            buf.extend_from_slice(&word.to_le_bytes());
         }
     } else {
-        // Fallback: derive amplitude from mono PWAV data
-        // Byte 0: amplitude scaled to 0-255 range (rekordbox format).
-        // Byte 1: 0x80 (observed constant in rekordbox exports).
+        // Fallback: derive from mono PWAV, neutral color.
         for i in 0..num_entries {
             let pwav_idx = (i * 400 / num_entries) as usize;
             let pwav_byte = analysis.waveform.data[pwav_idx];
-            let height = pwav_byte & 0x1F; // 5-bit height (0-31)
-            let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
-            buf.push(amplitude);
-            buf.push(0x80); // constant second byte observed in rekordbox
+            let height = (pwav_byte & 0x1F) as u16; // 5-bit height (0-31)
+            let word: u16 = height << 10; // neutral color (ch3 = 0), height in bits 14:10
+            buf.extend_from_slice(&word.to_le_bytes());
         }
     }
 

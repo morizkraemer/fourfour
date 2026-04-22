@@ -315,6 +315,13 @@ async function analyzeAll() {
         analyzing = false;
         setButtonStates();
         hideProgress();
+        // Show a brief completion note in the status bar (auto-clears after 3 s)
+        const msg = document.getElementById('status-message');
+        if (msg) {
+            const analyzed = tracks.filter(t => t.tempo > 0).length;
+            msg.textContent = `Analysis complete — ${analyzed} / ${tracks.length} tracks analyzed`;
+            setTimeout(() => { if (msg.textContent.startsWith('Analysis complete')) msg.textContent = ''; }, 3000);
+        }
     }
 }
 

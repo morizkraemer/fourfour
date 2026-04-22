@@ -213,7 +213,9 @@ pub fn select_analyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
 
 pub fn select_unanalyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id WHERE a.track_id IS NULL ORDER BY t.id",
+        // bpm = 0 means a previous attempt stored a failure result — treat as unanalyzed so it retries.
+        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id \
+         WHERE a.track_id IS NULL OR a.bpm = 0.0 ORDER BY t.id",
     )?;
     let rows = stmt.query_map([], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
