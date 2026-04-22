@@ -18,45 +18,16 @@ cargo tauri dev
 
 ## Project Structure
 
-```
-fourfour/
-├── pioneer-usb-writer/     # Rust library — scan metadata, write Pioneer USB formats
-│   ├── src/
-│   │   ├── models.rs       # Track, AnalysisResult, Playlist types
-│   │   ├── scanner.rs      # Reads tags via lofty
-│   │   ├── writer/
-│   │   │   ├── filesystem.rs  # Orchestrator: copy audio, artwork, call sub-writers
-│   │   │   ├── pdb.rs         # export.pdb (legacy DeviceSQL)
-│   │   │   ├── anlz.rs       # ANLZ0000.DAT/.EXT (beat grids, waveforms, cues)
-│   │   │   ├── onelibrary.rs  # exportLibrary.db (SQLCipher OneLibrary)
-│   │   │   └── sync.rs       # Incremental USB sync (read-back + merge)
-│   │   └── reader/
-│   │       ├── usb.rs         # Read existing USB state
-│   │       ├── masterdb.rs    # Read Rekordbox master.db
-│   │       └── anlz.rs        # Parse ANLZ files
-│   └── reference-code/     # Reference binaries + format docs
-│
-├── pioneer-test-ui/        # Tauri v2 test harness (vanilla HTML/JS frontend)
-│   ├── src/
-│   │   ├── main.rs         # Tauri commands (scan, analyze, write, read USB state)
-│   │   └── dto.rs          # Frontend DTOs
-│   ├── frontend/           # index.html + app.js + style.css
-│   └── tauri.conf.json
-│
-├── analysis/               # Python audio analysis (Lexicon DSP stack)
-│   └── src/fourfour_analysis/
-│       ├── cli.py          # fourfour-analyze / fourfour-benchmark entrypoints
-│       ├── analyze.py      # Full analysis pipeline
-│       ├── bpm.py          # BPM detection (Lexicon)
-│       ├── key.py          # Key detection (Lexicon)
-│       ├── waveform.py     # Pioneer-compatible waveform generation
-│       └── energy.py       # Energy/segmentation
-│
-├── pioneer-library/        # Rust crate — read Rekordbox master.db (SQLCipher)
-│
-├── benchmark/              # Benchmark datasets, manifests, results, logs
-│
-├── mockup/                 # Static HTML UI mockup
-│
-└── docs/                   # Architecture notes, plans, findings
-```
+- **`pioneer-usb-writer/`** — Rust library. Scan metadata, write Pioneer USB formats (PDB, ANLZ, OneLibrary)
+  - `models.rs` `scanner.rs` — Track types, tag reading via lofty
+  - `writer/` — `filesystem.rs` (orchestrator), `pdb.rs`, `anlz.rs`, `onelibrary.rs`, `sync.rs`
+  - `reader/` — `usb.rs` (read USB state), `masterdb.rs` (Rekordbox db), `anlz.rs`
+  - `reference-code/` — Reference binaries + format docs
+- **`pioneer-test-ui/`** — Tauri v2 test harness (vanilla HTML/JS frontend)
+  - `src/main.rs` — Tauri commands (scan, analyze, write, read USB state)
+  - `frontend/` — `index.html` + `app.js` + `style.css`
+- **`analysis/`** — Python audio analysis CLI (`fourfour-analyze`, `fourfour-benchmark`)
+  - `src/fourfour_analysis/` — `cli.py`, `analyze.py`, `bpm.py`, `key.py`, `waveform.py`, `energy.py`
+- **`pioneer-library/`** — Rust crate, reads Rekordbox `master.db` (SQLCipher)
+- **`benchmark/`** — Datasets, manifests, results, logs
+- **`docs/`** — Architecture notes, plans, findings

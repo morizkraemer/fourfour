@@ -24,3 +24,4 @@ analysis/.pytest_cache/
 analysis/src/fourfour_analysis/__pycache__/
 analysis/src/fourfour_analysis/backends/__pycache__/
 analysis/tests/__pycache__/
+CLAUDE.md
