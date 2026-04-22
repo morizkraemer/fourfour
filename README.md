@@ -8,7 +8,7 @@ nicht-trash-rekordbox klon
 cargo tauri dev              
 > `cargo tauri dev` runs as a raw binary (no `.app` bundle), so AeroSpace can't match it by bundle-id.
 > target via if.app-name-regex-substring = 'pioneer-test-ui'` instead
-
+```
 ## CLI Tools
 
 | Command | Crate | Use |
@@ -18,7 +18,6 @@ cargo tauri dev
 
 ## Project Structure
 
-<!-- TREEVIEW START -->
 ```bash
 ├── analysis/
 │   └── src/fourfour_analysis/
@@ -44,4 +43,3 @@ cargo tauri dev
 │       └── scanner.rs
 └── mockup/
 ```
-<!-- TREEVIEW END -->
