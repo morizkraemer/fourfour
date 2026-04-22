@@ -22,8 +22,12 @@ def analyze_track(path: str) -> dict:
     """Run all analysis on a single track.
 
     Returns a dict with:
-        path, bpm, key, energy, waveform_preview, waveform_color,
-        waveform_peaks, errors, elapsed_seconds
+        path, bpm, key, energy, beats, cue_points, waveform_preview,
+        waveform_color, waveform_peaks, Pioneer waveform fields, errors,
+        elapsed_seconds.
+
+    Beats and cue points stay empty until the separate beatgrid/first-beat
+    analyzer is integrated. DeepRhythm provides global BPM only.
     """
     result = {"path": path, "errors": []}
     start = time.time()

@@ -50,14 +50,7 @@ uv venv .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 ```
 
-Optional backends:
-
-```bash
-# Existing ML stack: DeepRhythm + librosa.
-uv pip install --python .venv/bin/python -e ".[ml]"
-```
-
-`essentia` is part of the normal install because `fourfour-analyze` uses it in the final stack.
+DeepRhythm, librosa, torch, and Essentia are normal dependencies because `fourfour-analyze` uses them in the final stack.
 
 ## Commands
 
@@ -75,7 +68,7 @@ cd analysis
 .venv/bin/fourfour-analyze /path/to/track.mp3 --json
 ```
 
-`fourfour-analyze --json` returns one JSON object with BPM, key, energy, beats, cue points, classic waveform arrays, and Pioneer waveform arrays:
+`fourfour-analyze --json` returns one JSON object with BPM, key, energy, classic waveform arrays, and Pioneer waveform arrays:
 
 ```text
 path
@@ -92,6 +85,8 @@ pioneer_3band_overview
 errors
 elapsed_seconds
 ```
+
+`beats` and `cue_points` are currently present but empty. DeepRhythm provides the global BPM number, not a beat grid. Beatgrid / first-beat analysis is a separate integration track.
 
 The compatibility command below returns the same per-track objects wrapped in a list because the current Tauri test UI already calls this shape:
 
@@ -145,13 +140,13 @@ Backends are registered in `src/fourfour_analysis/backends/registry.py`.
 
 | Variant | Purpose | Dependencies | Status |
 |---|---|---|---|
-| `final_stack` | Lexicon-style BPM/energy/waveform/cues + Essentia `bgate` key | base deps | Current production path |
+| `final_stack` | DeepRhythm BPM + librosa energy + Essentia `bgate` key | base deps | Current production path |
 | `lexicon_port` | Python port of Lexicon-style BPM/key/energy/cue/waveform logic | base deps | Benchmark baseline |
-| `python_deeprhythm` | DeepRhythm BPM + librosa key/energy | `[ml]` extra | Benchmark baseline |
+| `python_deeprhythm` | DeepRhythm BPM + librosa key/energy | base deps | Benchmark baseline |
 | `stratum_dsp` | Rust subprocess wrapper | Rust binary | Benchmark target |
 | `essentia_key_bgate` | Essentia KeyExtractor `bgate` profile | base deps | Key benchmark winner |
 
-`fourfour-analyze` always uses the full orchestrator: `final_stack` for BPM/key/energy/beats/cues plus the newer Pioneer waveform analyzer from `waveform.py`. The benchmark CLI still exposes the underlying variants for comparison runs.
+`fourfour-analyze` always uses the full orchestrator: `final_stack` for DeepRhythm BPM, librosa energy, and Essentia `bgate` key plus the newer Pioneer waveform analyzer from `waveform.py`. The benchmark CLI still exposes the underlying variants for comparison runs.
 
 ## Current Key Decision
 
@@ -201,7 +196,7 @@ Important modules:
 | `src/fourfour_analysis/types.py` | Shared dataclasses |
 | `src/fourfour_analysis/backends/base.py` | Backend interface and caching wrapper |
 | `src/fourfour_analysis/analyze.py` | Full single-track orchestrator used by `fourfour-analyze` and the module compatibility command |
-| `src/fourfour_analysis/backends/final_stack.py` | Production BPM/key/energy/beats/cues stack |
+| `src/fourfour_analysis/backends/final_stack.py` | Production DeepRhythm BPM, librosa energy, and Essentia `bgate` key stack |
 | `src/fourfour_analysis/backends/registry.py` | Public backend variants |
 | `src/fourfour_analysis/backends/essentia_key.py` | Essentia `bgate` key backend |
 | `src/fourfour_analysis/backends/lexicon_port.py` | Lexicon-style full backend |

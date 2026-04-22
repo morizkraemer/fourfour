@@ -1,7 +1,4 @@
-"""PythonStackBackend — DeepRhythm BPM + librosa key.
-
-Requires optional [ml] dependencies: torch, librosa, DeepRhythm.
-"""
+"""PythonStackBackend — DeepRhythm BPM + librosa key/energy."""
 
 from __future__ import annotations
 
@@ -29,8 +26,8 @@ class PythonStackBackend(AnalysisBackend):
             import librosa  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                f"PythonStackBackend requires [ml] dependencies. "
-                f"Install with: pip install -e '.[ml]'. Error: {e}"
+                f"PythonStackBackend requires torch, librosa, and DeepRhythm. "
+                f"Install the package normally with: pip install -e . Error: {e}"
             )
 
     def metadata(self) -> BackendMetadata:

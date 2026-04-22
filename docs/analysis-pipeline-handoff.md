@@ -520,7 +520,7 @@ cargo build  # symphonia, stratum-dsp, lofty
 | Component | Library | Confidence |
 |---|---|---|
 | BPM | DeepRhythm | High — 97% accuracy |
-| Key | librosa chroma + KS | Medium — ~70%, upgrade path known |
+| Key | Essentia KeyExtractor `bgate` | Medium — best measured current option |
 | Energy | librosa feature fusion | High — validated on 19 genres |
 | Tags | mutagen | High — battle-tested |
 | Waveform peaks | soundfile + numpy | High — standard approach |
@@ -535,7 +535,7 @@ cargo build  # symphonia, stratum-dsp, lofty
 | **stratum-dsp BPM accuracy** | Run benchmark against Rekordbox ground truth | Phase 0 |
 | **stratum-dsp key accuracy** | Run benchmark against Rekordbox ground truth | Phase 0 |
 | **stratum-dsp beat grid quality** | Compare beat positions to Rekordbox ANLZ | Phase 0 |
-| **Key detection accuracy** | Test librosa on your actual library | Phase 0 |
+| **Key detection accuracy** | Continue manual spot checks for Essentia `bgate` mismatches | Phase 0 |
 | **Waveform visual quality** | Generate PWV3/PWV4/PWV5, check on CDJ-3000 | Phase 2 |
 | **Batch performance** | Profile on 5k-10k tracks | Phase 1 |
 
@@ -543,7 +543,7 @@ cargo build  # symphonia, stratum-dsp, lofty
 
 | Component | Upgrade | When |
 |---|---|---|
-| Key detection | OpenKeyScan (85-90% accuracy) | If librosa <70% on real library |
+| Key detection | Maintained CNN/OpenKeyScan-style backend | If Essentia `bgate` is not good enough after manual checks |
 | BPM detection | Essentia TempoCNN | If DeepRhythm fails on specific genres |
 | Phrase analysis | MSAF + custom heuristics | Phase 4 |
 | Embeddings | MS CLAP (from samplebase) | Phase 5 |

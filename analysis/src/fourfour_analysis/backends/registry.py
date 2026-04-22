@@ -34,8 +34,8 @@ ANALYSIS_VARIANTS = {
     },
     "final_stack": {
         "backend": "final_stack",
-        "label": "Final analysis stack (Lexicon + Essentia bgate key)",
-        "heavy_deps": ["numpy", "scipy", "essentia"],
+        "label": "Final analysis stack (DeepRhythm + librosa energy + Essentia bgate key)",
+        "heavy_deps": ["torch", "librosa", "DeepRhythm", "essentia"],
     },
 }
 

@@ -24,7 +24,7 @@
 
 - [x] Merge `origin/feat/analysis-cli` into `master`.
 - [x] Preserve the newer master waveform/Pioneer analysis stack.
-- [x] Route compatibility analysis through the final stack: Lexicon-style BPM/energy plus Essentia bgate key.
+- [x] Route compatibility analysis through the final stack.
 - [x] Keep `python -m fourfour_analysis analyze ... --json` compatible with the Tauri caller.
 - [x] Verify Python tests, CLI smoke checks, and Rust workspace compile.
 
@@ -47,6 +47,14 @@
 - Track: `5152629 Bob Moses - Far From the Tree (Original Mix).mp3`
 - Beatport key label: `E minor` / `9A`
 - Rekordbox result: `Em` / `9A`, BPM `111.0`
-- `fourfour-analyze --json`: key `9A`, BPM `175.0`, energy `8`, no extractor errors.
+- Previous wrong Lexicon-style BPM path: key `9A`, BPM `175.0`, energy `8`, no extractor errors.
+- Corrected DeepRhythm production path: key `9A`, BPM `111.0`, energy `5`, no extractor errors.
 - Output shape is correct: preview `400`, color `2000`, peaks `2000`, Pioneer detail `18000`, Pioneer overview `1200`.
-- Problem: BPM/beat grid quality is not validated by the key benchmark and is wrong on this real track. Treat BPM/beat-grid work as separate from the key decision.
+- Beats/cues are intentionally empty until the separate beatgrid/first-beat analyzer is integrated.
+
+## 2026-04-22 Correct Final Stack
+
+- [x] Replace Lexicon-style production BPM/energy with DeepRhythm BPM + librosa energy.
+- [x] Keep Essentia `bgate` as the production key detector.
+- [x] Keep the current Pioneer waveform analyzer in the CLI orchestrator.
+- [x] Leave `lexicon_port` registered only as a benchmark/reference backend.

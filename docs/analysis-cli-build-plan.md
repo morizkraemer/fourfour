@@ -494,7 +494,7 @@ def analyze_track(self, track_path: str) -> AnalysisResult:
 
 **File:** `backends/python_stack.py`
 
-**Optional deps:** `pip install -e ".[ml]"` (torch, librosa, deeprhythm)
+**Production deps:** normal install includes torch, librosa, DeepRhythm, and Essentia.
 
 **Algorithm sources:** `analysis-pipeline-handoff.md` §§1–6
 

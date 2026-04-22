@@ -27,8 +27,8 @@ output fields (JSON mode):
   bpm                      Detected tempo in BPM (float, e.g. 128.0)
   key                      Musical key in Camelot notation (string, e.g. "8A")
   energy                   Energy dict: {score: 1-10, label: low|medium|high}
-  beats                    Beat positions with bar_position (1-4)
-  cue_points               Detected cue/section points
+  beats                    Currently empty; beatgrid/first-beat analyzer is separate
+  cue_points               Currently empty until beatgrid/phrase analysis lands
   waveform_preview         400-byte Pioneer PWAV preview as integers
   waveform_color           2000 RGB amplitude/color points
   waveform_peaks           2000 min/max peak pairs
@@ -38,7 +38,7 @@ output fields (JSON mode):
   elapsed_seconds          Wall time for analysis
 
 backends:
-  final_stack        Production stack: Lexicon-style analysis + Essentia bgate key
+  final_stack        Production stack: DeepRhythm BPM + librosa energy + Essentia bgate key
 """
 
 _HELP_EPILOG_BENCHMARK = """
