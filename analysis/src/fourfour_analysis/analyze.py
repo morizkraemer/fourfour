@@ -2,12 +2,19 @@
 
 import multiprocessing
 import time
-from pathlib import Path
 
-from fourfour_analysis.bpm import detect_bpm
-from fourfour_analysis.key import detect_key
-from fourfour_analysis.energy import compute_energy
+from fourfour_analysis.backends.final_stack import FinalStackBackend
 from fourfour_analysis.waveform import extract_peaks, extract_color_bands, generate_pwav_preview
+
+
+def _energy_label(score: int | None) -> str | None:
+    if score is None:
+        return None
+    if score <= 3:
+        return "low"
+    if score <= 6:
+        return "medium"
+    return "high"
 
 
 def analyze_track(path: str) -> dict:
@@ -20,27 +27,26 @@ def analyze_track(path: str) -> dict:
     result = {"path": path, "errors": []}
     start = time.time()
 
-    # BPM
-    bpm = detect_bpm(path)
-    if bpm is not None:
-        result["bpm"] = bpm
-    else:
+    try:
+        analysis = FinalStackBackend(features={"bpm", "key", "energy"}).analyze_track(path)
+        result["bpm"] = analysis.bpm
+        result["key"] = analysis.key
+        result["energy"] = (
+            {"score": analysis.energy, "label": _energy_label(analysis.energy)}
+            if analysis.energy is not None
+            else None
+        )
+        if analysis.bpm is None:
+            result["errors"].append("bpm: detection failed")
+        if analysis.key is None:
+            result["errors"].append("key: detection failed")
+        if analysis.energy is None:
+            result["errors"].append("energy: detection failed or track too short")
+    except Exception as e:
         result["bpm"] = None
-        result["errors"].append("bpm: detection failed")
-
-    # Key
-    key = detect_key(path)
-    if key is not None:
-        result["key"] = key
-    else:
         result["key"] = None
-        result["errors"].append("key: detection failed")
-
-    # Energy
-    energy = compute_energy(path)
-    result["energy"] = energy
-    if energy is None:
-        result["errors"].append("energy: detection failed or track too short")
+        result["energy"] = None
+        result["errors"].append(f"analysis: {e}")
 
     # Waveform preview (400 bytes, Pioneer PWAV format)
     try:

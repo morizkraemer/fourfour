@@ -199,7 +199,13 @@ A ground truth JSON file extracted from Rekordbox, plus a comparison table showi
 **Goal:** Match or exceed Rekordbox accuracy on BPM detection and musical key.
 
 ### Current State
-`stratum-dsp` gives us BPM + key in pure Rust. The question is: how good is it?
+Key detection has a current winner: `essentia_key_bgate`.
+
+The Beatport EDM Key benchmark shows `essentia_key_bgate` at 54.0% exact and 68.9% exact-or-adjacent on the 598-track clean single-key subset. The user's Rekordbox baseline on the same Beatport source was 47% exact and 55% exact-or-adjacent on the broader 698-track run.
+
+See [`key-detection-benchmark-findings.md`](./key-detection-benchmark-findings.md).
+
+`stratum-dsp` still needs validation for BPM, beat positions, and possible pure-Rust deployment.
 
 ### Step 1A — Validate stratum-dsp
 
@@ -209,12 +215,12 @@ A ground truth JSON file extracted from Rekordbox, plus a comparison table showi
   - **Small drift** (128.0 vs 128.5 BPM)
   - **Key mismatches** (1A vs 1B, relative major/minor confusion)
   - **Complete misses** (beyond salvageable)
-- [ ] **1A.3** If stratum-dsp scores ≥ 90% BPM accuracy and ≥ 80% key accuracy → **done, ship it**
-- [ ] **1A.4** If not, proceed to Step 1B
+- [ ] **1A.3** If stratum-dsp scores ≥ 90% BPM accuracy and matches `essentia_key_bgate` key quality → pure Rust remains viable
+- [ ] **1A.4** If not, use the Python sidecar for key detection
 
 ### Step 1B — Python Analysis Backends (if needed)
 
-If `stratum-dsp` doesn't cut it, we plug in Python backends. The external benchmark (samplebase) already identified the best options — see `analysis-pipeline-handoff.md` for code and accuracy data.
+For key detection, the Python sidecar path is already justified by the Beatport benchmark.
 
 ```
 ┌──────────────┐     JSON/stdio      ┌──────────────────────┐
@@ -222,30 +228,28 @@ If `stratum-dsp` doesn't cut it, we plug in Python backends. The external benchm
 │  (Tauri)     │                      │  (benchmark sidecar) │
 └──────────────┘                      │                      │
                                       │  StratumDspBackend   │ ← subprocess → cargo run
-                                      │  EssentiaBackend     │ ← TempoCNN + KeyExtractor
+                                      │  EssentiaKeyBackend  │ ← KeyExtractor bgate
                                       │  MadmomBackend       │ ← DBNBeatTracker
                                       │  OpenKeyScanBackend  │ ← CNN key detection
                                       └──────────────────────┘
 ```
 
-- [ ] **1B.1** Create a `fourfour/analysis/` Python package (separate from the Rust crate)
-- [ ] **1B.2** Implement backends using the code samples from the handoff doc:
+- [x] **1B.1** Create a `fourfour/analysis/` Python package (separate from the Rust crate)
+- [x] **1B.2** Implement key-detection backends:
   - **DeepRhythm** — BPM detection (97% Acc2, ~0.2s/track)
-  - **librosa chroma_cqt + KS** — key detection (~70%, upgrade to OpenKeyScan if needed)
-  - **Essentia TempoCNN** — BPM fallback if DeepRhythm fails on specific genres
-  - **OpenKeyScan** — key detection upgrade (~85-90% accuracy)
-- [ ] **1B.3** Register as variants:
+  - **librosa chroma_cqt + KS** — historical key baseline
+  - **Essentia KeyExtractor bgate** — current key winner
+  - **Essentia KeyExtractor profile variants** — benchmarked historically, not exposed as public variants
+- [x] **1B.3** Register as variants:
   ```python
   ANALYSIS_VARIANTS = {
       "stratum_dsp_default": {"backend": "stratum_dsp", "label": "stratum-dsp (Rust baseline)"},
       "deeprhythm":          {"backend": "deeprhythm",  "label": "DeepRhythm (97% Acc2)"},
-      "essentia_tempocnn":   {"backend": "essentia",     "label": "Essentia TempoCNN"},
-      "librosa_ks":          {"backend": "librosa",      "label": "librosa chroma + KS"},
-      "openkeyscan_cnn":     {"backend": "openkeyscan",  "label": "OpenKeyScan CNN"},
+      "essentia_key_bgate":  {"backend": "essentia_key", "label": "Essentia KeyExtractor bgate"},
   }
   ```
-- [ ] **1B.4** Run all backends against the corpus
-- [ ] **1B.5** Review per-backend accuracy
+- [x] **1B.4** Run all key backends against the Beatport corpus
+- [x] **1B.5** Review per-backend key accuracy
 
 ### Step 1C — ONNX Runtime (future production path)
 
@@ -267,7 +271,7 @@ Regardless of which engine wins:
   - Use genre-aware priors (house ≈ 120-135 BPM, DnB ≈ 170-180)
 
 ### Decision Gate
-Run benchmark. If we hit ≥ 95% BPM accuracy, ≥ 85% key accuracy → **Phase 1 complete**.
+Run benchmark. If BPM hits the target and key detection at least matches Rekordbox → **Phase 1 analysis quality is acceptable**.
 
 ### Time Estimate
 - Step 1A: 1-2 days (ground truth extraction + comparison)
@@ -531,8 +535,9 @@ pioneer-usb-writer (Rust)
 ├── symphonia, lofty, image, custom PDB/ANLZ
 └── spawns → fourfour-analysis (Python)
               ├── DeepRhythm → BPM (97% Acc2)
-              ├── librosa + KS → key (~70%)
-              ├── OpenKeyScan → key upgrade (~85-90%)
+              ├── Essentia KeyExtractor bgate → key
+              ├── librosa + KS → historical key baseline
+              ├── OpenKeyScan/CNN → future candidate only after real benchmark
               └── MS CLAP → embeddings (from handoff doc)
 
 Analysis pipeline design from external benchmarking.
@@ -588,7 +593,7 @@ python -m fourfour.analysis.benchmark_analyze run-20260417T120000Z
 
 # Phase 1: Compare single track across engines
 cargo run -p pioneer-usb-writer -- analyze /path/to/track.mp3 --json
-python -m fourfour.analysis.analyze_track /path/to/track.mp3 --backend essentia
+python -m fourfour.analysis.analyze_track /path/to/track.mp3
 python -m fourfour.analysis.analyze_track /path/to/track.mp3 --backend madmom
 
 # Phase 2: Generate + compare waveforms
@@ -611,9 +616,9 @@ python -m fourfour.analysis.similar /path/to/reference-track.mp3
 | Dependency | License | Risk | Mitigation |
 |---|---|---|---|
 | `stratum-dsp` | Check crate | Low quality → need sidecar | Phase 1 validates |
-| `essentia` | AGPL v3 | Viral license | Run as subprocess |
+| `essentia` | Check exact package/license | License and native wheel risk | Keep sidecar boundary available |
 | `madmom` | BSD-like academic | Maintenance risk | Pin versions |
-| `openkeyscan` | Check repo | New, unproven | Benchmark vs alternatives |
+| `openkeyscan` | Check repo | New, unproven | Benchmark before adopting |
 | `MSAF` | MIT | Unmaintained | Fork + fix deps |
 | `LAION CLAP` | Apache 2.0 | Model size | Download on demand |
 | `Demucs` | MIT | Archived upstream | Use maintained fork |
@@ -628,7 +633,7 @@ python -m fourfour.analysis.similar /path/to/reference-track.mp3
 | Metric | Target | How to Measure |
 |---|---|---|
 | BPM accuracy | ≥ 95% within ±0.5 BPM of Rekordbox | Phase 0 benchmark |
-| Key accuracy | ≥ 85% exact match with Rekordbox | Phase 0 benchmark |
+| Key accuracy | At least match Rekordbox on external labels | Beatport benchmark |
 | Octave errors | < 1% of tracks | Phase 1 benchmark |
 | Color waveform | Perceptually matches Rekordbox on CDJ | Visual inspection |
 | PDB capacity | ≥ 1000 tracks on one USB | Phase 3 stress test |

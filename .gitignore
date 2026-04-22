@@ -9,6 +9,11 @@ pioneer-usb-writer/-e
 pioneer-usb-writer/-p
 shed.toml
 .pi
-analysis/
 benchmark/
 node_modules/
+# Python analysis package
+analysis/.venv/
+analysis/.pytest_cache/
+analysis/src/fourfour_analysis/__pycache__/
+analysis/src/fourfour_analysis/backends/__pycache__/
+analysis/tests/__pycache__/

@@ -1,25 +1,8 @@
-"""BPM detection via DeepRhythm with octave correction."""
+"""BPM detection via the final analysis stack."""
 
 from __future__ import annotations
 
-import contextlib
-import io
-import os
-import sys
-
-from deeprhythm import DeepRhythmPredictor
-
-# Lazy singleton — DeepRhythm loads a model, expensive to reinit
-_analyzer: DeepRhythmPredictor | None = None
-
-
-def _get_analyzer() -> DeepRhythmPredictor:
-    global _analyzer
-    if _analyzer is None:
-        # DeepRhythm prints "Model weights already exist." to stdout — suppress it
-        with contextlib.redirect_stdout(io.StringIO()):
-            _analyzer = DeepRhythmPredictor()
-    return _analyzer
+from fourfour_analysis.backends.final_stack import FinalStackBackend
 
 
 def detect_bpm(path: str) -> float | None:
@@ -28,8 +11,9 @@ def detect_bpm(path: str) -> float | None:
     Applies octave correction: doubles BPM < 70, halves BPM > 200.
     """
     try:
-        analyzer = _get_analyzer()
-        bpm = analyzer.predict(path)
+        bpm = FinalStackBackend(features={"bpm"}).analyze_track(path).bpm
+        if bpm is None:
+            return None
 
         # Octave correction
         if bpm < 70:

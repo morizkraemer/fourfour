@@ -2,7 +2,6 @@ import json
 import numpy as np
 import soundfile as sf
 import pytest
-from click.testing import CliRunner
 
 
 @pytest.fixture
@@ -15,21 +14,19 @@ def test_audio(tmp_path):
     return str(path)
 
 
-def test_cli_single_file_json_output(test_audio):
-    from fourfour_analysis.cli import main
+def test_cli_single_file_json_output_payload(test_audio, capsys):
+    from fourfour_analysis.cli import _module_analyze_main
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["analyze", test_audio, "--json"])
+    _module_analyze_main([test_audio, "--json"])
 
-    assert result.exit_code == 0
-    data = json.loads(result.output)
+    data = json.loads(capsys.readouterr().out)
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["path"] == test_audio
 
 
-def test_cli_multiple_files(test_audio, tmp_path):
-    from fourfour_analysis.cli import main
+def test_cli_multiple_files(test_audio, tmp_path, capsys):
+    from fourfour_analysis.cli import _module_analyze_main
 
     # Create a second file
     sr = 44100
@@ -37,9 +34,7 @@ def test_cli_multiple_files(test_audio, tmp_path):
     path2 = tmp_path / "test2.wav"
     sf.write(str(path2), signal, sr)
 
-    runner = CliRunner()
-    result = runner.invoke(main, ["analyze", test_audio, str(path2), "--json"])
+    _module_analyze_main([test_audio, str(path2), "--json", "--workers", "1"])
 
-    assert result.exit_code == 0
-    data = json.loads(result.output)
+    data = json.loads(capsys.readouterr().out)
     assert len(data) == 2
