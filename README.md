@@ -18,16 +18,30 @@ cargo tauri dev
 
 ## Project Structure
 
-- **`pioneer-usb-writer/`** — Rust library. Scan metadata, write Pioneer USB formats (PDB, ANLZ, OneLibrary)
-  - `models.rs` `scanner.rs` — Track types, tag reading via lofty
-  - `writer/` — `filesystem.rs` (orchestrator), `pdb.rs`, `anlz.rs`, `onelibrary.rs`, `sync.rs`
-  - `reader/` — `usb.rs` (read USB state), `masterdb.rs` (Rekordbox db), `anlz.rs`
-  - `reference-code/` — Reference binaries + format docs
-- **`pioneer-test-ui/`** — Tauri v2 test harness (vanilla HTML/JS frontend)
-  - `src/main.rs` — Tauri commands (scan, analyze, write, read USB state)
-  - `frontend/` — `index.html` + `app.js` + `style.css`
-- **`analysis/`** — Python audio analysis CLI (`fourfour-analyze`, `fourfour-benchmark`)
-  - `src/fourfour_analysis/` — `cli.py`, `analyze.py`, `bpm.py`, `key.py`, `waveform.py`, `energy.py`
-- **`pioneer-library/`** — Rust crate, reads Rekordbox `master.db` (SQLCipher)
-- **`benchmark/`** — Datasets, manifests, results, logs
-- **`docs/`** — Architecture notes, plans, findings
+<!-- TREEVIEW START -->
+```bash
+├── analysis/
+│   └── src/fourfour_analysis/
+│       ├── analyze.py
+│       ├── bpm.py
+│       ├── cli.py
+│       ├── energy.py
+│       ├── key.py
+│       └── waveform.py
+├── benchmark/
+├── docs/
+├── pioneer-library/
+│   └── src/
+├── pioneer-test-ui/
+│   ├── frontend/
+│   └── src/
+├── pioneer-usb-writer/
+│   ├── reference-code/
+│   └── src/
+│       ├── reader/
+│       ├── writer/
+│       ├── models.rs
+│       └── scanner.rs
+└── mockup/
+```
+<!-- TREEVIEW END -->
