@@ -4,11 +4,10 @@ nicht-trash-rekordbox klon
 
 ## Run
 
-```bash
 cargo tauri dev              
-> `cargo tauri dev` runs as a raw binary (no `.app` bundle), so AeroSpace can't match it by bundle-id.
-> target via if.app-name-regex-substring = 'pioneer-test-ui'` instead
-```
+> `cargo tauri dev` runs as a raw binary (no `.app` bundle), AeroSpace can't match it by `bundle-id`.
+> Target via `if.app-name-regex-substring = 'pioneer-test-ui'` instead
+
 ## CLI Tools
 
 | Command | Crate | Use |
