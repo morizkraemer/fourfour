@@ -513,6 +513,26 @@ cargo build  # symphonia, stratum-dsp, lofty
 
 ---
 
+## 9.5 Public CLI Batch Validation
+
+Use the tracked batch runner when validating the public `fourfour-analyze <file> --json` contract over real folders. It calls the CLI in chunks, writes run artifacts under `benchmark/results/`, and can launch itself in a tmux pane that closes when finished.
+
+```bash
+analysis/.venv/bin/python benchmark/scripts/cli_batch_analyze.py \
+  benchmark/datasets/beatport-edm-key/audio \
+  --tmux
+```
+
+Outputs:
+
+- `benchmark/results/<run_id>/results.json`
+- `benchmark/results/<run_id>/summary.json`
+- `benchmark/logs/<run_id>.log`
+
+Use this script for end-to-end CLI contract checks. Use `fourfour-benchmark` for backend shootouts and isolated feature comparisons.
+
+---
+
 ## 10. What's Decided vs What Needs Testing
 
 ### ✅ Decided (no more research needed)

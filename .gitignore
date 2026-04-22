@@ -9,8 +9,15 @@ pioneer-usb-writer/-e
 pioneer-usb-writer/-p
 shed.toml
 .pi
-benchmark/
 node_modules/
+__pycache__/
+
+# Benchmark code/config is tracked; local datasets, caches, logs, and run outputs are not.
+benchmark/cache/
+benchmark/datasets/
+benchmark/logs/
+benchmark/results/
+benchmark/**/*.zip
 # Python analysis package
 analysis/.venv/
 analysis/.pytest_cache/

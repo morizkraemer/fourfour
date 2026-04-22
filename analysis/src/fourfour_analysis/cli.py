@@ -19,8 +19,10 @@ from fourfour_analysis.backends.registry import ANALYSIS_VARIANTS
 
 _HELP_EPILOG_ANALYZE = """
 examples:
-  fourfour-analyze track.mp3                              analyze with the final production stack
-  fourfour-analyze track.mp3 --json                       output as JSON (for piping)
+  fourfour-analyze track.mp3                              analyze one file
+  fourfour-analyze track.mp3 --json                       output one JSON object
+  fourfour-analyze track1.mp3 track2.mp3 --json           output a JSON list
+  fourfour-analyze --dir ~/Music/test --json              analyze a folder recursively
 
 output fields (JSON mode):
   path                     Input audio file path
@@ -82,8 +84,11 @@ def _build_analyze_parser() -> argparse.ArgumentParser:
         epilog=_HELP_EPILOG_ANALYZE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("file", help="Path to audio file (WAV, FLAC, MP3, AAC, etc.)")
+    parser.add_argument("paths", nargs="*", help="Audio file path(s)")
+    parser.add_argument("--dir", dest="directory", help="Analyze all audio files in a directory")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON (machine-readable)")
+    parser.add_argument("--output", "-o", help="Write JSON output to file")
+    parser.add_argument("--workers", "-w", type=int, default=1, help="Workers for multi-file analysis (default: 1)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
@@ -191,33 +196,54 @@ def analyze_main() -> None:
     parser = _build_analyze_parser()
     args = parser.parse_args()
 
-    file_path = Path(args.file)
-    if not file_path.is_file():
-        print(f"Error: file not found: {args.file}", file=sys.stderr)
+    file_list = list(args.paths)
+    if args.directory:
+        dir_path = Path(args.directory)
+        extensions = {".mp3", ".wav", ".flac", ".aiff", ".aif", ".m4a", ".ogg"}
+        file_list.extend(str(p) for p in dir_path.rglob("*") if p.suffix.lower() in extensions)
+
+    if not file_list:
+        print("Error: no audio files specified", file=sys.stderr)
         sys.exit(1)
 
-    from fourfour_analysis.analyze import analyze_track
+    missing = [path for path in file_list if not Path(path).is_file()]
+    if missing:
+        print(f"Error: file not found: {missing[0]}", file=sys.stderr)
+        sys.exit(1)
 
-    result = analyze_track(str(file_path))
+    from fourfour_analysis.analyze import analyze_batch, analyze_track
+
+    result = (
+        analyze_track(file_list[0])
+        if len(file_list) == 1
+        else analyze_batch(file_list, workers=args.workers)
+    )
+    json_str = json.dumps(result, indent=2)
 
     if args.json_output:
-        print(json.dumps(result, indent=2))
+        if args.output:
+            Path(args.output).write_text(json_str)
+        else:
+            print(json_str)
     else:
-        print(f"\n{'='*50}")
-        print("fourfour analysis")
-        print(f"{'='*50}")
-        print(f"  BPM:    {result.get('bpm', 'N/A')}")
-        print(f"  Key:    {result.get('key', 'N/A')}")
-        print(f"  Energy: {result.get('energy', 'N/A')}")
-        print(f"  Beats:  {len(result.get('beats', []))}")
-        print(f"  Cues:   {len(result.get('cue_points', []))}")
-        print(f"  Preview bytes:  {len(result.get('waveform_preview', []))}")
-        print(f"  Color points:   {len(result.get('waveform_color', []))}")
-        print(f"  Peak points:    {len(result.get('waveform_peaks', []))}")
-        print(f"  3-band detail:  {len(result.get('pioneer_3band_detail', []))}")
-        print(f"  3-band overview: {len(result.get('pioneer_3band_overview', []))}")
-        print(f"  Errors: {len(result.get('errors', []))}")
-        print(f"  Time:   {result.get('elapsed_seconds', 0):.2f}s")
+        display_results = result if isinstance(result, list) else [result]
+        for item in display_results:
+            name = Path(item["path"]).name
+            print(f"\n{name}")
+            print(f"{'='*50}")
+            print(f"  BPM:    {item.get('bpm', 'N/A')}")
+            print(f"  Key:    {item.get('key', 'N/A')}")
+            print(f"  Energy: {item.get('energy', 'N/A')}")
+            print(f"  Beats:  {len(item.get('beats', []))}")
+            print(f"  Cues:   {len(item.get('cue_points', []))}")
+            print(f"  Preview bytes:   {len(item.get('waveform_preview', []))}")
+            print(f"  Color points:    {len(item.get('waveform_color', []))}")
+            print(f"  Peak points:     {len(item.get('waveform_peaks', []))}")
+            print(f"  3-band detail:   {len(item.get('pioneer_3band_detail', []))}")
+            print(f"  3-band overview: {len(item.get('pioneer_3band_overview', []))}")
+            print(f"  Errors: {len(item.get('errors', []))}")
+            print(f"  Time:   {item.get('elapsed_seconds', 0):.2f}s")
+        return
 
 
 def benchmark_main() -> None:

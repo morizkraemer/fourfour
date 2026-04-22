@@ -222,6 +222,14 @@ See [`key-detection-benchmark-findings.md`](./key-detection-benchmark-findings.m
 
 For key detection, the Python sidecar path is already justified by the Beatport benchmark.
 
+For public CLI contract validation, use the tracked batch runner:
+
+```bash
+analysis/.venv/bin/python benchmark/scripts/cli_batch_analyze.py /path/to/audio --tmux
+```
+
+The script writes generated outputs under `benchmark/results/` and logs under `benchmark/logs/`.
+
 ```
 ┌──────────────┐     JSON/stdio      ┌──────────────────────┐
 │  Rust app    │ ◄──────────────────► │  Python analysis     │

@@ -38,7 +38,7 @@ Use this order:
 4. `../docs/experimentation-path.md` - project roadmap and remaining validation.
 5. `../docs/tech-stack-reference.md` - library tradeoffs and dependency notes.
 
-Generated benchmark artifacts live under `../benchmark/` and are gitignored.
+Reusable benchmark scripts, manifests, and baselines live under `../benchmark/`. Local datasets, logs, caches, and run outputs under that directory are gitignored.
 
 ## Setup
 
@@ -134,6 +134,22 @@ cd analysis
 .venv/bin/fourfour-benchmark list
 ```
 
+Black-box test the public analysis CLI over a folder:
+
+```bash
+cd ..
+analysis/.venv/bin/python benchmark/scripts/cli_batch_analyze.py /path/to/audio --tmux
+```
+
+For the local Beatport dataset:
+
+```bash
+analysis/.venv/bin/python benchmark/scripts/cli_batch_analyze.py \
+  benchmark/datasets/beatport-edm-key/audio \
+  --chunk-size 25 \
+  --tmux
+```
+
 ## Current Backend Variants
 
 Backends are registered in `src/fourfour_analysis/backends/registry.py`.
@@ -205,22 +221,26 @@ Important modules:
 
 ## Artifact Layout
 
-All generated benchmark data is under `../benchmark/`:
+Reusable benchmark config and generated benchmark data are under `../benchmark/`:
 
 ```text
 benchmark/
-  manifests/          input corpora
-  results/<run_id>/   raw backend output, comparisons, scoring, metadata
-  cache/              content/config-addressed backend cache
-  logs/               tmux or shell logs for long runs
-  datasets/           local datasets, not committed
+  README.md           tracked benchmark directory guide
+  scripts/            tracked reusable benchmark/smoke scripts
+  manifests/          tracked small corpus manifests
+  baselines/          tracked small baseline references
+  results/<run_id>/   generated outputs, ignored
+  cache/              generated backend cache, ignored
+  logs/               generated tmux or shell logs, ignored
+  datasets/           local datasets and archives, ignored
 ```
 
-The repo-level `.gitignore` ignores `benchmark/`. Do not commit local datasets, result JSON, cache files, or logs unless there is an explicit reason to publish a small fixture.
+Do not commit local datasets, result JSON, cache files, or logs unless there is an explicit reason to publish a small fixture.
 
 ## Working Rules For Agents
 
-- Prefer `fourfour-benchmark run --features key` when testing key detection. It avoids waveform cost and stale comparisons.
+- Prefer `fourfour-benchmark run --features key` when testing key detection.
+- Prefer `benchmark/scripts/cli_batch_analyze.py` when testing the public `fourfour-analyze` CLI contract over real files.
 - Keep benchmark runs deterministic by using manifest files, not ad hoc directory scans.
 - Cache keys include backend config. If backend behavior changes, update `BackendMetadata.config_hash`.
 - Use `groundtruth.normalize_key()` for all key normalization. Do not add duplicate Camelot mappings.

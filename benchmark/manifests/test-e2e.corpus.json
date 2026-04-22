@@ -1,0 +1,23 @@
+{
+  "name": "test-e2e",
+  "source_directory": "tests/fixtures",
+  "num_entries": 2,
+  "entries": [
+    {
+      "id": "1",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/analysis/tests/fixtures/click_track_128bpm.wav",
+      "content_fingerprint": "3001a0c687d4a3de5c985361804065ecea99eb5101e9de5734a10f1d98eae3e3",
+      "artist": "",
+      "title": "click_track_128bpm",
+      "genre": ""
+    },
+    {
+      "id": "2",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/analysis/tests/fixtures/sine_440_10s.wav",
+      "content_fingerprint": "f4202b8e272210a9b83000a1ace6cc33f28e1b8984614ea88f779d3e38fe1562",
+      "artist": "",
+      "title": "sine_440_10s",
+      "genre": ""
+    }
+  ]
+}

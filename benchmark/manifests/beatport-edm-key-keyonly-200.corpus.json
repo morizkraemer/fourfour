@@ -1,0 +1,2812 @@
+{
+  "name": "beatport-edm-key-keyonly-200",
+  "source": "beatport-edm-key-dataset",
+  "source_directory": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio",
+  "key_directory": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/keys",
+  "selection": "200 evenly spaced MP3s with simple X major/X minor Beatport key labels",
+  "num_clean_candidates": 598,
+  "num_entries": 200,
+  "num_key_ground_truth": 200,
+  "entries": [
+    {
+      "id": "1",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1389968 Cecile - Talk Talk (Jr. Blender Remix).mp3",
+      "content_fingerprint": "80e23cadf6830912441d8eb2b545e965514ed6e7d11d9780dc715a2e40ffd4fc",
+      "artist": "",
+      "title": "Cecile - Talk Talk (Jr. Blender Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "2",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1398692 Phantom Lord - Stay Puft (XUL Mix).mp3",
+      "content_fingerprint": "16ef99f6e55fcc00d76bacdd806d31d660dee772769c5152d95655e800c93d9f",
+      "artist": "",
+      "title": "Phantom Lord - Stay Puft (XUL Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "3",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1410588 R&B Soul Superstars - A Rose Is Still A Rose (Singalong Version).mp3",
+      "content_fingerprint": "373f2298fb5cf1b3f76d920a291514008ed5db3610ecc6ea0be11d4162d0663c",
+      "artist": "",
+      "title": "R&B Soul Superstars - A Rose Is Still A Rose (Singalong Version)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "4",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1426839 Die, Interface, William Cartwright - Bright Lights feat. William Cartwright (Netsky Remix).mp3",
+      "content_fingerprint": "8b44763291d67e85d891e7c9e66ef7f1caba0e12fd2bca144067fc3c2111168e",
+      "artist": "",
+      "title": "Die, Interface, William Cartwright - Bright Lights feat. William Cartwright (Netsky Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "5",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1439221 Jose M., TacoMan - Piruetas De Cama (Original Mix).mp3",
+      "content_fingerprint": "e644a9a4b41aa25e5a82d79d6c94f8d53710cb84b79baf4e296330ef755bd99a",
+      "artist": "",
+      "title": "Jose M., TacoMan - Piruetas De Cama (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "6",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1446566 J.Rabbit - Too Much Sexy (Original Mix).mp3",
+      "content_fingerprint": "5995cbdc646f6bec7e05e36dad3b52af4211ce8b1733fae7d7943a9284215b4d",
+      "artist": "",
+      "title": "J.Rabbit - Too Much Sexy (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F major"
+    },
+    {
+      "id": "7",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1456345 R.E.D. - Discodelic (Original Mix).mp3",
+      "content_fingerprint": "c26772927d22556198b863d293fe1d829ac0e4f381d9a78ba9c9008c679f5cf5",
+      "artist": "",
+      "title": "R.E.D. - Discodelic (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "8",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1474885 Telepatic - Alcion (Original Mix).mp3",
+      "content_fingerprint": "de5bb2a9ece69f2befc7d374f228bd259cbbd63c2c128ecdf2d2bee5363f6bce",
+      "artist": "",
+      "title": "Telepatic - Alcion (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "9",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1493674 Datarock - The Pretender (Holy Ghost Remix).mp3",
+      "content_fingerprint": "11c218b403a423ac8d95b547f4cfb6fcf8750c94fb03dbf290c62d19e1318b1b",
+      "artist": "",
+      "title": "Datarock - The Pretender (Holy Ghost Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "10",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1544667 Smoof - Deja Vu (Nina Divorc\u00e9 Remix).mp3",
+      "content_fingerprint": "4a73881ccfbe028992154d33f7edcf362c16592c996ee5c490c49e2937d4ba82",
+      "artist": "",
+      "title": "Smoof - Deja Vu (Nina Divorc\u00e9 Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "11",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1558123 Joseph Petrin - Skank (Original Mix).mp3",
+      "content_fingerprint": "8cc71a3f41dca69ced7d5ac6c8adbbff192c41f5458cb5f075a98431fe52b93f",
+      "artist": "",
+      "title": "Joseph Petrin - Skank (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A major"
+    },
+    {
+      "id": "12",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1581325 Amanii - Hurry Up (Sun Kidz Extended).mp3",
+      "content_fingerprint": "92feebcfded89223387131e2d54c66e7a86bd01209c656f2154b7d90286c4627",
+      "artist": "",
+      "title": "Amanii - Hurry Up (Sun Kidz Extended)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "13",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1598083 Aimee B - Kadabra (Original Mix).mp3",
+      "content_fingerprint": "9c2e3ffc93be478f1681521f7683bc8fa0179e8c8316f07e9d9541bfe5947137",
+      "artist": "",
+      "title": "Aimee B - Kadabra (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "14",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1609519 Rakoon - Joy Of Creation (Original Mix).mp3",
+      "content_fingerprint": "a98048e8dd5b7630eba8741dc6036b41f5dc2a4bd478dca4ead1812916807f6b",
+      "artist": "",
+      "title": "Rakoon - Joy Of Creation (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "15",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1622038 Kickin Devil - Candyman (Jump Mix Radio Edit).mp3",
+      "content_fingerprint": "186b03c89a6f10f040ccd3316871523268a093148a4344877221651a69a5d9dd",
+      "artist": "",
+      "title": "Kickin Devil - Candyman (Jump Mix Radio Edit)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A minor"
+    },
+    {
+      "id": "16",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1647165 Dream Dance Alliance - Snowflakes (Extended Mix).mp3",
+      "content_fingerprint": "cfcadd5f066a86a28d0f325a8c90aa6b391337642d08d94249e878d6cadb3b77",
+      "artist": "",
+      "title": "Dream Dance Alliance - Snowflakes (Extended Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "17",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1662838 AudioFun - Sensor (Original Mix).mp3",
+      "content_fingerprint": "f0f7d48e47257bc3a9860d7392be523758a5ccce50a4db9ffb93abd09585ba02",
+      "artist": "",
+      "title": "AudioFun - Sensor (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "18",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1681314 Alex Moran, LHK - By Way Of B (Original Mix).mp3",
+      "content_fingerprint": "4d10f19e02d8b429c859badc17773c87881a990d31224c332eda14ac1011930c",
+      "artist": "",
+      "title": "Alex Moran, LHK - By Way Of B (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "19",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1694550 Feedback - Endless Flight (Original Mix).mp3",
+      "content_fingerprint": "0418a469b76120a5bb923e707115cadcb1c3fd0fbc03ec10588f81febd287d3c",
+      "artist": "",
+      "title": "Feedback - Endless Flight (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "20",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1743700 Alex Kidd, Kidd Kaos - Toms Diner (Klonez Remix).mp3",
+      "content_fingerprint": "a4f81e8975c26a621479d3271029d07214060ccf3449424b97bbb03e34644e16",
+      "artist": "",
+      "title": "Alex Kidd, Kidd Kaos - Toms Diner (Klonez Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "21",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1758691 Deeplook - Save The Children (Original Mix).mp3",
+      "content_fingerprint": "767415beb8a3687339bb2964e05344a7ca8da3ad46323c95ae67fa5b1a395b01",
+      "artist": "",
+      "title": "Deeplook - Save The Children (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "22",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1783835 Miss Destiny - Right Here Waiting feat. DJ Fait (Destiny Mix).mp3",
+      "content_fingerprint": "259a5f235fa623fba5bfd876a506fbfcf6a7b4efecf2143993bfd289747999ee",
+      "artist": "",
+      "title": "Miss Destiny - Right Here Waiting feat. DJ Fait (Destiny Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "23",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1797450 Zyce, Flegma - Something Beneath (Original Mix).mp3",
+      "content_fingerprint": "8cfed284108e28307d7bf7af9b06a99bc2fd37d2d4f7c6e7b4224c85ba760449",
+      "artist": "",
+      "title": "Zyce, Flegma - Something Beneath (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "24",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1857841 Luap - Taiko Tympani (Original Mix).mp3",
+      "content_fingerprint": "48b8c72e1776f04ec7e1fac70424c0277d147774849410f5a3887cd732c51b5c",
+      "artist": "",
+      "title": "Luap - Taiko Tympani (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "25",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1879911 Michel Lauriola - Sabretooth (Original Mix).mp3",
+      "content_fingerprint": "22dff1e04cd1674313789fe11e3da2386a7c284bcfe559e41231a22326f33b61",
+      "artist": "",
+      "title": "Michel Lauriola - Sabretooth (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "26",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1895483 Ryuichi Sakamoto, Alva Noto - Pionier IOO (Original Mix).mp3",
+      "content_fingerprint": "6393610dea7cbe9529d01b4ec2a157f8a3faba1cd29aa46aacaa9fb499c3e447",
+      "artist": "",
+      "title": "Ryuichi Sakamoto, Alva Noto - Pionier IOO (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "27",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1918063 Andy Whitby, Technikal - Rumble (Original Mix).mp3",
+      "content_fingerprint": "ccc9cddd6420fad2984a77110d0647b3d7d0d0708d20e527652d0f22a4c732da",
+      "artist": "",
+      "title": "Andy Whitby, Technikal - Rumble (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G major"
+    },
+    {
+      "id": "28",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1926377 Future Hitmakers - Kiss Me Thru The Phone (A Tribute to Soulja Boy Tell 'Em).mp3",
+      "content_fingerprint": "989fd14cfb5cc81e4c7ca74ded36272fcbf955e32135042d690878e5afd4e8c0",
+      "artist": "",
+      "title": "Future Hitmakers - Kiss Me Thru The Phone (A Tribute to Soulja Boy Tell 'Em)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "29",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1958760 Chilled C'Quence - Levels of Rythms (Original Mix).mp3",
+      "content_fingerprint": "c29a16ea24254d4be4a10251610c1fd3e6de285b24c5bb31680f174d06c56319",
+      "artist": "",
+      "title": "Chilled C'Quence - Levels of Rythms (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "30",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1980637 Disorder - Peace N Harmonic (Original Mix).mp3",
+      "content_fingerprint": "33470e6c9e1d229935677707bc12721da3fd3ce639aa88825256d70f3a5ff05a",
+      "artist": "",
+      "title": "Disorder - Peace N Harmonic (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "31",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/1989603 Takeydo - 29state (Original Mix).mp3",
+      "content_fingerprint": "e40a5b390428bad70b42fd7b855e1e5cdf91121cdaf4a416c91f11da736df167",
+      "artist": "",
+      "title": "Takeydo - 29state (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "32",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2017315 The Arms of Someone New - Uptown (Original Mix).mp3",
+      "content_fingerprint": "b656b9b6eb033d77b2981ce1f0aaae5a7b903f9e28fe12f592e2b520c8ceb6d1",
+      "artist": "",
+      "title": "The Arms of Someone New - Uptown (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "33",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2022519 Deliriant - One Sound Fits All (Original Mix).mp3",
+      "content_fingerprint": "acf24a891f7a09773af70038b7e82eed98b527e9c9314c2f8868379c5d3e58ed",
+      "artist": "",
+      "title": "Deliriant - One Sound Fits All (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "34",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2047805 The Noble Six - Forbidden Kingdom (TwoThirds Remix).mp3",
+      "content_fingerprint": "2ac23a3ae3b6ad451289411ef5b63ad71b3221a0d27e5a28cf9f9e7c97fd4cf3",
+      "artist": "",
+      "title": "The Noble Six - Forbidden Kingdom (TwoThirds Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "35",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2090586 Kuana - Steppin' (Kouncilhouse Remix).mp3",
+      "content_fingerprint": "ac54562c2ab7e9a5665b546c0e4d617c5257b341dd25033e8bede5068ad0f97f",
+      "artist": "",
+      "title": "Kuana - Steppin' (Kouncilhouse Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E major"
+    },
+    {
+      "id": "36",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2423336 Syndaesia - Bukkake (Hulk Remix).mp3",
+      "content_fingerprint": "5e769b9cdbd3d102de421f355cd70411c317a24ce833cf47c385cdf8c45eed04",
+      "artist": "",
+      "title": "Syndaesia - Bukkake (Hulk Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "37",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2435069 Tube Tonic, Kimura - Without You (DJ Space Raven Remix Edit).mp3",
+      "content_fingerprint": "70be18ff43ec200962a438e96e122bd5500a09ffaab03c8aafc8113f88897f81",
+      "artist": "",
+      "title": "Tube Tonic, Kimura - Without You (DJ Space Raven Remix Edit)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "38",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2702217 Jaunty Beatz - Invader From Outer Space (Special Long Version).mp3",
+      "content_fingerprint": "b0eb976c2b2151e4b27df2ac5f551e343ed9bc7235bad982be9721f25d0a3ddc",
+      "artist": "",
+      "title": "Jaunty Beatz - Invader From Outer Space (Special Long Version)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "39",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2707024 Ronin - Face Death (Original Mix).mp3",
+      "content_fingerprint": "ab6ff2c0619d3d701ba1dbc291a8176a1ada33ed27fd108e247a9791f110bb55",
+      "artist": "",
+      "title": "Ronin - Face Death (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "40",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/2754261 Love Assassins - Just Fine (Joy n Pain Remix).mp3",
+      "content_fingerprint": "f639cb8886e6a466b4a67c2079ebdd8ab4912dfa560d44e35adb34c47c95034c",
+      "artist": "",
+      "title": "Love Assassins - Just Fine (Joy n Pain Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G major"
+    },
+    {
+      "id": "41",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3010576 Sky'high - Look At Me Now (Clean Edit).mp3",
+      "content_fingerprint": "02d0ab851437f32e2c364fe25f10ac4747da33953e0c9a64a93935f64f268223",
+      "artist": "",
+      "title": "Sky'high - Look At Me Now (Clean Edit)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "42",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3014758 Ramon, Miguel Valbuena, DJ Pinas - B\u00fascame Feat. Layla (Original Extended Version).mp3",
+      "content_fingerprint": "f7570ff3a74bcfdadf49d1a63be0008b658977f1ed18e3d8b020dbd623164b24",
+      "artist": "",
+      "title": "Ramon, Miguel Valbuena, DJ Pinas - B\u00fascame Feat. Layla (Original Extended Version)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "43",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3027735 Hunted - Cycles (Original Mix).mp3",
+      "content_fingerprint": "01e5a8b21f64a30ba2ad6657d796bd22014fd8f516b061c032dd32a2a926e85a",
+      "artist": "",
+      "title": "Hunted - Cycles (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "44",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3034770 Dreads Crontrol - Mr. Black (Sparrow Remix).mp3",
+      "content_fingerprint": "fa99200a3fd1636dc8f1536060930d74372192cb64803d90d8ea339fb8d518ac",
+      "artist": "",
+      "title": "Dreads Crontrol - Mr. Black (Sparrow Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "45",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3062618 Edivads - Jackpot (Original Mix).mp3",
+      "content_fingerprint": "d258b44a335736d663fd4efd18d716e36f25d42eeec3333c72f227816942ed21",
+      "artist": "",
+      "title": "Edivads - Jackpot (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "46",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3086101 Space Tribe, Laughing Buddha - One Drop (Original).mp3",
+      "content_fingerprint": "81d0d4b698aa55fb358936107256a70f1133445ce6ecd39b193f1d9d55b7280e",
+      "artist": "",
+      "title": "Space Tribe, Laughing Buddha - One Drop (Original)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "47",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3098555 ESD - Dynimaze me! (Original Mix).mp3",
+      "content_fingerprint": "dad0e680411bc6646b156029a4f58bd9fd823161a7517d8f47a557790f03f0bc",
+      "artist": "",
+      "title": "ESD - Dynimaze me! (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "48",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3124687 Pierpaolo Effe - Banlieues (Original Mix).mp3",
+      "content_fingerprint": "a43bc8914cd30dd70e6034b37e9a0e02d5402942f25f2f82413bd06a8efeee66",
+      "artist": "",
+      "title": "Pierpaolo Effe - Banlieues (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "49",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3139360 Mindscape - Drive By (Original Mix).mp3",
+      "content_fingerprint": "c0d8c3f1cd31cd0d74f9f71885c13811b6ab18b19d02f005960bec93cecb4f07",
+      "artist": "",
+      "title": "Mindscape - Drive By (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "50",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3161699 Enfusia - Planet Saw Groove (Original Mix).mp3",
+      "content_fingerprint": "034cc6478510547bdabbb4d6fedb6eb07e209a63fcda3d0d01ef4d763e9fa496",
+      "artist": "",
+      "title": "Enfusia - Planet Saw Groove (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "51",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3198358 FrostRAVEN - Muse (Original Mix).mp3",
+      "content_fingerprint": "c2031250769b8ae15524cff88cbd9a5d0bec05da7d448ace0f5de76f0b88de35",
+      "artist": "",
+      "title": "FrostRAVEN - Muse (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "52",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3207588 Mike Kiraly - Flunky Knock (Original Mix).mp3",
+      "content_fingerprint": "be9a3ce51fb132636f0a8f80bc4ce78f013aa7c74f84207e3def09e19fdffb00",
+      "artist": "",
+      "title": "Mike Kiraly - Flunky Knock (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "53",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3221970 Urban Absolutes, Paskal - Homewave (MADF Remix).mp3",
+      "content_fingerprint": "2a8f27c042984ae2c9efaa79e96592deda56c85ed175160c210eef44db316867",
+      "artist": "",
+      "title": "Urban Absolutes, Paskal - Homewave (MADF Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "54",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3240761 Silent Running - Greatful Dawn (Original Mix).mp3",
+      "content_fingerprint": "9b5a2b5921e7fc9d9cfbc8b2ff3cc296b9e061393c885509a6ab710087838e31",
+      "artist": "",
+      "title": "Silent Running - Greatful Dawn (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# major"
+    },
+    {
+      "id": "55",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3252056 Blackburner - Freak You (Original Mix).mp3",
+      "content_fingerprint": "55f9909d7f32149b6fd1fa61da98815b27bfe6f06854ee331ca528ae6d3052c8",
+      "artist": "",
+      "title": "Blackburner - Freak You (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "56",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3272193 Myth Of Unity - Break Your Neck (Original Mix).mp3",
+      "content_fingerprint": "323703269698ab161182164ea97545475bfbdd31ea1bc70d0976ecd11731e0ac",
+      "artist": "",
+      "title": "Myth Of Unity - Break Your Neck (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G major"
+    },
+    {
+      "id": "57",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3292669 The Mekanism - Your Shade (Original Mix).mp3",
+      "content_fingerprint": "c91dad49e6081fa8a140ebdc85575347294dd91b3edc953f5cf8f77957a8929b",
+      "artist": "",
+      "title": "The Mekanism - Your Shade (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "58",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3303218 Nian Project - Joy Thing (Bit Sunday Mix).mp3",
+      "content_fingerprint": "672337ef2aa4e5b95b531b48ab0a3afc00308eb19e5da57fd16222bd7c9cc7ec",
+      "artist": "",
+      "title": "Nian Project - Joy Thing (Bit Sunday Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "59",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3322505 Voko - UK Stand Up! (Thomas Rich Remix).mp3",
+      "content_fingerprint": "bd9f16c84b9e453282918802625ea150097e8a6264fd5a2196301b87f5cba617",
+      "artist": "",
+      "title": "Voko - UK Stand Up! (Thomas Rich Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "60",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3342211 BrightLight - Polaris (Original Mix).mp3",
+      "content_fingerprint": "97a2ee6d82560f191b91b8fd464edc2c1fb14caa560e824941da46d7cf57dc89",
+      "artist": "",
+      "title": "BrightLight - Polaris (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "61",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3360682 Droplex - Speed (Original Mix).mp3",
+      "content_fingerprint": "bd6f8a1996b666ea46eb57c665ac41cd0304b4e79afdfb93085b5888df357514",
+      "artist": "",
+      "title": "Droplex - Speed (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "62",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3378284 Circuit Bent, Paul Kearny - Dubal (Original Mix).mp3",
+      "content_fingerprint": "ae4927f470f62b454706dac7151a1b514c1cdd6ebde7f825719682a4b53b489f",
+      "artist": "",
+      "title": "Circuit Bent, Paul Kearny - Dubal (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "63",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3400910 Fabio Vi - El sueno de Cuba (Original Mix).mp3",
+      "content_fingerprint": "6aef0b97a4de78b589f584313cd721a87a782ad03686788bba6151ca8cf5f7c3",
+      "artist": "",
+      "title": "Fabio Vi - El sueno de Cuba (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "64",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3445831 Evil Needle - Angel (Original Mix).mp3",
+      "content_fingerprint": "6bbb2692b338b5ea1df6e93e7c95cd7fc5fe29a7db8263b52555c97c332e2a7c",
+      "artist": "",
+      "title": "Evil Needle - Angel (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "65",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3486594 bOFUM - Cacophony (Original Mix).mp3",
+      "content_fingerprint": "a6ad2ce576f6d5721d20521b3a2e9a250a3a02f5c95e5e03ad168dffaab470e2",
+      "artist": "",
+      "title": "bOFUM - Cacophony (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "66",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3516171 666 - Paradoxx (Club Mix Reprise).mp3",
+      "content_fingerprint": "17d1625bd6d855c6c8760bca9b1b7310c9b693b7eaa9e20bce691792bcc8a587",
+      "artist": "",
+      "title": "666 - Paradoxx (Club Mix Reprise)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "67",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3527620 Paimon, Place 2B - Quite (Original Mix).mp3",
+      "content_fingerprint": "33972541dd88cd4e3f3fd2c05a223bd356c8a3b6c316440cc90f7fa248242428",
+      "artist": "",
+      "title": "Paimon, Place 2B - Quite (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "68",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3540106 DJ Whitestar - Sunny Boom (Original).mp3",
+      "content_fingerprint": "39ca6be944392d109c167867c8e99bfdda298538e0815142c1973c5bb67260a8",
+      "artist": "",
+      "title": "DJ Whitestar - Sunny Boom (Original)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "69",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3574764 Loran & Tiana Vegas - Work! (Original Mix).mp3",
+      "content_fingerprint": "d5ab9deb2e94567b6b50b4447156474d82ca3787fb92ee5222105eec875c8f65",
+      "artist": "",
+      "title": "Loran & Tiana Vegas - Work! (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "70",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3619815 Aerofeel5 - Feel the Spain (G-Low Remix).mp3",
+      "content_fingerprint": "bdc92b56b25404f0a7474b3368b05b71542bb03a07711910c8b41fe51b7e3363",
+      "artist": "",
+      "title": "Aerofeel5 - Feel the Spain (G-Low Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "71",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3639596 Michael S. - Mark Me Down (Radio Edit).mp3",
+      "content_fingerprint": "6c365d678d511162fd8d4b13edc180093ac2821ecdf6f53333795f3ea6bfe61e",
+      "artist": "",
+      "title": "Michael S. - Mark Me Down (Radio Edit)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "72",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3662506 Hangya Zsolt - Exit (Original Mix).mp3",
+      "content_fingerprint": "1d8dc5628342d8e35c396198016bb74d4430cdb61059dd11050bf0ec2d4d3852",
+      "artist": "",
+      "title": "Hangya Zsolt - Exit (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# major"
+    },
+    {
+      "id": "73",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3687603 Costa Martinez, Jiamee - Sandstorms (Accapella).mp3",
+      "content_fingerprint": "76f046395c92e156e3d226aa24d03e419fff417146515ca85322262d1dfbf50d",
+      "artist": "",
+      "title": "Costa Martinez, Jiamee - Sandstorms (Accapella)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "74",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3728272 Betina Bager, Brian O - Goodbye (Radio Version) (Original Mix).mp3",
+      "content_fingerprint": "8a5f147889dd43e3bed03adc391991f0f3c506b6b73748962b2dbc955f62fe83",
+      "artist": "",
+      "title": "Betina Bager, Brian O - Goodbye (Radio Version) (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "75",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3743797 Limonene - Infinity (Original Mix).mp3",
+      "content_fingerprint": "cb68ea8257eb54ff5f66db5b59d55d021876db891b85c8c878034c46da40bd50",
+      "artist": "",
+      "title": "Limonene - Infinity (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "76",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3771813 Todd Terry, House Of Gypsies - Samba (Stefano Noferini Remix).mp3",
+      "content_fingerprint": "1efc91e711cde1be605a3ede95eb6f101985c127512f676b206fa2a251a32226",
+      "artist": "",
+      "title": "Todd Terry, House Of Gypsies - Samba (Stefano Noferini Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "77",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3798377 Symphonix - Experimental Game (Odiseo, Gandulk Remix).mp3",
+      "content_fingerprint": "8e1a79db94207b97060a065ca8c4424d6fc35e211c9c15e5984ada6ba8f6bc84",
+      "artist": "",
+      "title": "Symphonix - Experimental Game (Odiseo, Gandulk Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "78",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3817388 The Rumblist - Tidy Up (Original Mix).mp3",
+      "content_fingerprint": "30861cb7b61aa4c81212691c486d6aceb249a9684424a3bfccbc2294e3b1b574",
+      "artist": "",
+      "title": "The Rumblist - Tidy Up (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "79",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3831852 Suoy - Final Symphony (Original Mix).mp3",
+      "content_fingerprint": "0eb9a4384d52bd677faab124ab3aea35fc4f954c34d546d65919f3f4616e920d",
+      "artist": "",
+      "title": "Suoy - Final Symphony (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F major"
+    },
+    {
+      "id": "80",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3836467 Jandro Beat - Hipnotik (Original Mix).mp3",
+      "content_fingerprint": "c1d0fb1d38a17230fec27bd60d461c934de7ed801fc873d05e3839ad98cec91d",
+      "artist": "",
+      "title": "Jandro Beat - Hipnotik (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "81",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3865255 G\u00fcnter Schickert - Wanderer (Original Mix).mp3",
+      "content_fingerprint": "93ee475402d07294a879ef118ba67f3c504bc1938dd0417984f72cc26544110d",
+      "artist": "",
+      "title": "G\u00fcnter Schickert - Wanderer (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "82",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3889717 Industrial Bass Machine - World Control (Original Mix).mp3",
+      "content_fingerprint": "67887c4759dc5f0f1aeba97579b0c4715ee199a267857957e681e139222a0091",
+      "artist": "",
+      "title": "Industrial Bass Machine - World Control (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "83",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3906152 Keykutz - Into The Vibe ([Ziggy Gee's Bass Mix]).mp3",
+      "content_fingerprint": "5bd5d758cd58ea6e8e6d12de4d39371978f2c3199f0fb5f707cd22f9bbf05b58",
+      "artist": "",
+      "title": "Keykutz - Into The Vibe ([Ziggy Gee's Bass Mix])",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "84",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3916942 Andre$ - Dannato (Original Mix).mp3",
+      "content_fingerprint": "76a4a7cc9863f1ff8b9a0f7dc35e39d87fad89db7197706d8718181d1081296e",
+      "artist": "",
+      "title": "Andre$ - Dannato (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "85",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3935158 Jaroslav Light, Star Night - New Hero (Original Mix).mp3",
+      "content_fingerprint": "32a160f6c41aa617f2caebdb19c4daeec8090f6262dfd3660ca3773f81d089ef",
+      "artist": "",
+      "title": "Jaroslav Light, Star Night - New Hero (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "86",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3966027 Ditta & Dumont - Drugs On The Shelf (Original Mix).mp3",
+      "content_fingerprint": "ff142e1d00e39b2853e3d72bd2089817289e93558e0659bf685aa7cfb048495f",
+      "artist": "",
+      "title": "Ditta & Dumont - Drugs On The Shelf (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "87",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/3994605 Siggatunez - Plan R (Remix).mp3",
+      "content_fingerprint": "7d927d4ada951870a7dc2293c5c042e4021650832627e3a8ece0b717defff8b9",
+      "artist": "",
+      "title": "Siggatunez - Plan R (Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "88",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4026906 Streamline - Lilt (Original Mix).mp3",
+      "content_fingerprint": "5e76067f13fb974e91f8a588e60ac4bb8eb4da47317aafad7aa3405b92e44428",
+      "artist": "",
+      "title": "Streamline - Lilt (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E major"
+    },
+    {
+      "id": "89",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4061369 John Manning, Andrew Johnston - Deep (Original Mix).mp3",
+      "content_fingerprint": "b414974bd298b0a1cdbacc17fce59ca0f74cb8b4acfd9120fa3fcbc98fa63e2d",
+      "artist": "",
+      "title": "John Manning, Andrew Johnston - Deep (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "90",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4085830 Hedonix - Sakura (Original Mix).mp3",
+      "content_fingerprint": "ddb0991f8e0c60610e87898fe91dcd2ce4481870420f78ddf1af6d1c07e9233b",
+      "artist": "",
+      "title": "Hedonix - Sakura (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "91",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4096403 Psypox - Present (Original Mix).mp3",
+      "content_fingerprint": "c083e4974695a77631421f07ba7fd43e77a3c8fc8385164335957fee5211a423",
+      "artist": "",
+      "title": "Psypox - Present (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E major"
+    },
+    {
+      "id": "92",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4111004 TK Wonder, Ways & Means, Djaikovski - Hell of a Road (Ways & Means Remix).mp3",
+      "content_fingerprint": "15e1c5a13b2442c731d19e76193e5067e83906d9f015c6e24f007d8d3ac0d30c",
+      "artist": "",
+      "title": "TK Wonder, Ways & Means, Djaikovski - Hell of a Road (Ways & Means Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "93",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4132072 Tom Buster - Rouge (Original Mix).mp3",
+      "content_fingerprint": "7d0dce68ad205927911f8185bd874e5730aee671aa483f48ecba9debc7183932",
+      "artist": "",
+      "title": "Tom Buster - Rouge (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "94",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4151001 Fr33m4n - On Fire (feat. Rascal Mc) (Dubstep Mix).mp3",
+      "content_fingerprint": "756efe81d6f63f20734accaa62e903e252a91a9296c256a6ed74ebeecb54571b",
+      "artist": "",
+      "title": "Fr33m4n - On Fire (feat. Rascal Mc) (Dubstep Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "95",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4164425 Aaron Hall - Still Here (Original Mix).mp3",
+      "content_fingerprint": "25ad023a6c019dfd569115166f5658480297efb6578267560a73823fd9554416",
+      "artist": "",
+      "title": "Aaron Hall - Still Here (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "96",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4184925 Shu - The Jillah (Original Mix).mp3",
+      "content_fingerprint": "d28bbe6b3e42bae80015fe09a4caf51fdd088add6b20bbe89779d3b292adbc1a",
+      "artist": "",
+      "title": "Shu - The Jillah (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "97",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4196452 Sebastien Viktoria - Sweetest Moments (Megamix).mp3",
+      "content_fingerprint": "b7a98b06c75e0a210c6d9ff11b5d5d58883db622f89400968f0afb5429b98363",
+      "artist": "",
+      "title": "Sebastien Viktoria - Sweetest Moments (Megamix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "98",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4214391 Cross My Heart Hope To Die - Roller Coasting (Original Mix).mp3",
+      "content_fingerprint": "fa97034d675817eee2c721c4b94631a76ff945b5335a81c28e13a3d470e0986f",
+      "artist": "",
+      "title": "Cross My Heart Hope To Die - Roller Coasting (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "99",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4222236 Burke - Sunny For A Few Hours... (Original Mix).mp3",
+      "content_fingerprint": "4c08e177a60747fe8f8722a2bf0c87ae6420681bbb554bdf6017b3c11633f4db",
+      "artist": "",
+      "title": "Burke - Sunny For A Few Hours... (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C major"
+    },
+    {
+      "id": "100",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4262086 Jon Game - Knobbin' Up (ft. U.M.B.R.O) (Original Mix).mp3",
+      "content_fingerprint": "07e28df6a9bb8106778675d863e83440e7eeb60a41aa923ad40b0cd41187e2d6",
+      "artist": "",
+      "title": "Jon Game - Knobbin' Up (ft. U.M.B.R.O) (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "101",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4272275 Normative - Clone (Original Mix).mp3",
+      "content_fingerprint": "5b0862a4884d52c75e2d4e0277e7605a2fecdf9f224025218cf3a8e7e1ab9aea",
+      "artist": "",
+      "title": "Normative - Clone (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A minor"
+    },
+    {
+      "id": "102",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4297505 Outer Kid, KL2 - Speed Cola (KL2 Remix).mp3",
+      "content_fingerprint": "1cafdc309a30850e290a2a946c7be9ed7062a9a80947024342e469f17796b879",
+      "artist": "",
+      "title": "Outer Kid, KL2 - Speed Cola (KL2 Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "103",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4310604 Criostasis, DJ Yorrin - The Howling (Original Mix).mp3",
+      "content_fingerprint": "fa065c6cdf904e29e5e80d279c97bb97cef5ecc9cc8ff0031b812772879a5bc7",
+      "artist": "",
+      "title": "Criostasis, DJ Yorrin - The Howling (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A minor"
+    },
+    {
+      "id": "104",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4323121 Offer Nissim - Bimbo (Original Mix).mp3",
+      "content_fingerprint": "184a21ea4f35368720d80ff63a45a22ad409c334b4c8af92b348b8df338cea56",
+      "artist": "",
+      "title": "Offer Nissim - Bimbo (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "105",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4340615 En2ak - Gilgamesh And The Invention Of Frisbee (Original Mix).mp3",
+      "content_fingerprint": "30204d44b2d0a350c0f4662885c57faea4145283f9b00fc1d789b3f7d51f4d30",
+      "artist": "",
+      "title": "En2ak - Gilgamesh And The Invention Of Frisbee (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "106",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4351142 Low Fidelity Jet Set Orchestra - Let's Go (Original Mix).mp3",
+      "content_fingerprint": "a333cb356fbe9ae462b0c2c929c462ac16f277d65e6278299b0844327a7b6f6d",
+      "artist": "",
+      "title": "Low Fidelity Jet Set Orchestra - Let's Go (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F major"
+    },
+    {
+      "id": "107",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4364291 MK_ULTRA - Virtual Timebomb (Original Mix).mp3",
+      "content_fingerprint": "6e15495485df8a8256576f255a23379d5a5144fc27e02657bbc3c5172250e3f3",
+      "artist": "",
+      "title": "MK_ULTRA - Virtual Timebomb (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "108",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4381031 Stefan Gubatz - Der achte Tag (Original Mix).mp3",
+      "content_fingerprint": "357cfd5b53905327c6939345147946d91a40c514cbc011e89df0079c7d89ee27",
+      "artist": "",
+      "title": "Stefan Gubatz - Der achte Tag (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "109",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4411864 Zhink - The River (Original Mix).mp3",
+      "content_fingerprint": "c96fc07c63fc1d534342541ee94bd4ab873dad1104e5b2d86671ef1c3af471ef",
+      "artist": "",
+      "title": "Zhink - The River (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# major"
+    },
+    {
+      "id": "110",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4445523 Michael J Collins - Letting Go (Original Mix).mp3",
+      "content_fingerprint": "12217ca1cb1039d2656423d35aa9d8dda5cf57544ebf7a8b646a6d0e6c2417a3",
+      "artist": "",
+      "title": "Michael J Collins - Letting Go (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "111",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4482723 Sharigrama - 260Kin (Original Mix).mp3",
+      "content_fingerprint": "3240bc95609ac50c2b8faf8dbb66ee2f8c16e93ec3d1ba5b5aa4c6d60422495f",
+      "artist": "",
+      "title": "Sharigrama - 260Kin (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "112",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4510650 Delete - Air Raid Waltz (Original Mix).mp3",
+      "content_fingerprint": "dba1481469735cadfa4f39cdfd69d91176973cfe884c68565bfc36fe1636ea90",
+      "artist": "",
+      "title": "Delete - Air Raid Waltz (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "113",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4528744 Damian William, Vanic, Cora, Young A - Really Gonna Do This (Radio Edit).mp3",
+      "content_fingerprint": "1550967e5b9f507754b8fa1c75aa3d33bf79e3deb7dfc337d84e4aa0d53458af",
+      "artist": "",
+      "title": "Damian William, Vanic, Cora, Young A - Really Gonna Do This (Radio Edit)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "114",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4572120 Zoomorfos - Acid Rain (Original Mix).mp3",
+      "content_fingerprint": "85f209643d01462a185f3e1a10760b1ce17f6a464a28387314bbfd14f328395d",
+      "artist": "",
+      "title": "Zoomorfos - Acid Rain (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "115",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4590651 Yellowman - Mister Chin (Re-Recorded) (Original Mix).mp3",
+      "content_fingerprint": "68e163a6078cbd1fe29ff592d52c860bc861f371216e601f05c34aefa1b931d9",
+      "artist": "",
+      "title": "Yellowman - Mister Chin (Re-Recorded) (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "116",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4623197 Lou Bega - Mambo No. 5 (A Little Bit Of...) [Re-Recorded] (Original Mix).mp3",
+      "content_fingerprint": "90cba232c7489171b53459f61f751690ba908c0e852032ab23272c15a35189d6",
+      "artist": "",
+      "title": "Lou Bega - Mambo No. 5 (A Little Bit Of...) [Re-Recorded] (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# major"
+    },
+    {
+      "id": "117",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4660409 Youngblood Brass Band - Cite the Line (Original Mix).mp3",
+      "content_fingerprint": "335ef8fc9c788d94700ef8465c2bf9fad5d00259d8102beea4b0c44ddee64008",
+      "artist": "",
+      "title": "Youngblood Brass Band - Cite the Line (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "118",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4665597 D-Block, S-te-Fan - Twisted Mind Fantasy (Original Mix).mp3",
+      "content_fingerprint": "34b29107e22820e117abaae447ed03e010ad7015a4ac04f5d4d88fa851c1b1b9",
+      "artist": "",
+      "title": "D-Block, S-te-Fan - Twisted Mind Fantasy (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "119",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4704294 Alvaro Wade, Raul Aguilar - Yamba (Original Mix).mp3",
+      "content_fingerprint": "c94ba9b746f902f10c9f7f04a14a8d62571930066b1a4e411ba901e4bdc3cea6",
+      "artist": "",
+      "title": "Alvaro Wade, Raul Aguilar - Yamba (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "120",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4733800 Jonathan Cowan - Mental Health (Original Mix).mp3",
+      "content_fingerprint": "88d15a9e2974b9bab264a9cba50b53a3bcc5f65c922a78dd9db25a258a28f097",
+      "artist": "",
+      "title": "Jonathan Cowan - Mental Health (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "121",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4756702 D. Cannons - Twerk Dat (Original Mix).mp3",
+      "content_fingerprint": "80efe1940cc29d3eaeb303dd674c0b923f6a40684554533855a984abdbbc1ee6",
+      "artist": "",
+      "title": "D. Cannons - Twerk Dat (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "122",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4767556 J.Mancera - My House (Iker Kabe Remix).mp3",
+      "content_fingerprint": "6e5eb0c91061602d5ba747285a8ba2ee6f2c5f829a162f074ade3bd99042c97d",
+      "artist": "",
+      "title": "J.Mancera - My House (Iker Kabe Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A minor"
+    },
+    {
+      "id": "123",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4792796 Jaxxon, John Christian - In The Moment Feat. Jemma Tweedie (John Christian Remix).mp3",
+      "content_fingerprint": "76005988647fcfc0ef04ed5ad3f6ef2080f76130041edc173e8c7b1a868566b6",
+      "artist": "",
+      "title": "Jaxxon, John Christian - In The Moment Feat. Jemma Tweedie (John Christian Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "124",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4811158 Musumeci - Jitoku (Original Mix).mp3",
+      "content_fingerprint": "b5bfa5f19a0ef599befd79db07cc69763838fd4cd767baff3e0bc5b655979f52",
+      "artist": "",
+      "title": "Musumeci - Jitoku (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "125",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4829270 Lukito - We Have Fun (Original Mix).mp3",
+      "content_fingerprint": "a52262e3099e1491fa24659ae16ac8ea17a191db67549112f04ae1d9e77d95e8",
+      "artist": "",
+      "title": "Lukito - We Have Fun (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# major"
+    },
+    {
+      "id": "126",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4848629 Los Amigos Invisibles - Bruja (Original Mix).mp3",
+      "content_fingerprint": "4a32104ecf68b294c3abdb3e165042c983f1c1ee0f7a518b7f9c24191896548d",
+      "artist": "",
+      "title": "Los Amigos Invisibles - Bruja (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "127",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4870279 Chop Black - Aggressive (Original Mix).mp3",
+      "content_fingerprint": "ef917ab6241d968ef691fb052c7af3d1cc7d53bbb6a333b51194e304c342e8a2",
+      "artist": "",
+      "title": "Chop Black - Aggressive (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# major"
+    },
+    {
+      "id": "128",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4885376 Antony Reale - Thunder (Club Mix).mp3",
+      "content_fingerprint": "7f60dc74a6ad7d3c156806e2d914649b32dfa271dcc34fe180659b31c19b73ea",
+      "artist": "",
+      "title": "Antony Reale - Thunder (Club Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "129",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4906900 Curve Pusher - I Know (Original Mix).mp3",
+      "content_fingerprint": "5779f7ddc115ca398118b16f36887b522a63430b5d2b3f114b3166b750f7cfbc",
+      "artist": "",
+      "title": "Curve Pusher - I Know (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "130",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4918269 Kaarth - Apave (Original Mix).mp3",
+      "content_fingerprint": "3a2e4605f05a5fc4b7654376412d12270c47efb12c99f86fc3c22830309d4d49",
+      "artist": "",
+      "title": "Kaarth - Apave (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "131",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4943671 Jason Rivas, Muzzika Global - Elektro Bollywood (Full Vocal Mix).mp3",
+      "content_fingerprint": "a5503e7749a9568942257465546606108ccb6754cfd6dc85a398918baa9efc91",
+      "artist": "",
+      "title": "Jason Rivas, Muzzika Global - Elektro Bollywood (Full Vocal Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "132",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4970565 Paris & Simo, Bright Lights, 3LAU - Escape feat. Bright Lights (Manse Remix).mp3",
+      "content_fingerprint": "bdfb667d8ce689aedb4cfe8b8d5d41bf59a14c5fac054fbde2b5835fc719edd6",
+      "artist": "",
+      "title": "Paris & Simo, Bright Lights, 3LAU - Escape feat. Bright Lights (Manse Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "133",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/4992440 Jof Pryz, Stefano Vitch - Electrolik (Original Mix).mp3",
+      "content_fingerprint": "e5eab3b6d450d37986c6f119379f94aab9eb0e7ea0c5e08613fc7084519294de",
+      "artist": "",
+      "title": "Jof Pryz, Stefano Vitch - Electrolik (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "134",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5038642 Zadar - A Stolen Glance (Original Mix).mp3",
+      "content_fingerprint": "1c573fdcbe668db8a218a047cd5977c638e14388bfeb11e1832cbb6d361d1bb0",
+      "artist": "",
+      "title": "Zadar - A Stolen Glance (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "135",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5057312 Distances - Boring Chuck (Original Mix).mp3",
+      "content_fingerprint": "7212f1b5b71269781ec33abd79c6c16b35cd39a4e6dd2e6d20933ac8925ff75f",
+      "artist": "",
+      "title": "Distances - Boring Chuck (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "136",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5076754 Bigseuf - Inner Vision (Original Mix).mp3",
+      "content_fingerprint": "b0cd6d75642626ff980d1fcc445551a05c9da984942b431eb887b8495094d042",
+      "artist": "",
+      "title": "Bigseuf - Inner Vision (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "137",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5106232 Togz DJ - Lost Contact (Original Mix).mp3",
+      "content_fingerprint": "dc7567ad10517b45216c2e8bfac4c1e078eebd15b3861e144dafecd91a9e3dbd",
+      "artist": "",
+      "title": "Togz DJ - Lost Contact (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "138",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5124850 Distances - Boring Chuck (Original Mix).mp3",
+      "content_fingerprint": "7212f1b5b71269781ec33abd79c6c16b35cd39a4e6dd2e6d20933ac8925ff75f",
+      "artist": "",
+      "title": "Distances - Boring Chuck (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "139",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5138597 Feeboy - Mellow (Original Mix).mp3",
+      "content_fingerprint": "a9bf52118a9a4c7773be195459a1382385ef3950c8255cac1dee33052165d155",
+      "artist": "",
+      "title": "Feeboy - Mellow (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "140",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5152629 Bob Moses - Far From the Tree (Original Mix).mp3",
+      "content_fingerprint": "327c636acc91f1e80a47f9807de0d6d7071bc96bba3421bd9f541faaae043b0e",
+      "artist": "",
+      "title": "Bob Moses - Far From the Tree (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "141",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5186642 Lite Door - Lean Out (Original Mix).mp3",
+      "content_fingerprint": "8673d50576630f99daf63efeca59987738d37116593fdf5da5c052e2bafff6cc",
+      "artist": "",
+      "title": "Lite Door - Lean Out (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "142",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5202489 Jamie Fullick - Show Time (Diction Remix).mp3",
+      "content_fingerprint": "769868968a4370dfc934fbc7d7f4370e11cd40156a08d032a8dd09e07b83134b",
+      "artist": "",
+      "title": "Jamie Fullick - Show Time (Diction Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "143",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5211090 Wild SpeeD - Darktek (Original Mix).mp3",
+      "content_fingerprint": "ced36644400449a843359de41071686883171528c43b99782e154e7be5023eb1",
+      "artist": "",
+      "title": "Wild SpeeD - Darktek (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "144",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5234318 Stan Seba - Hiddensee (Jayson Butera Remix).mp3",
+      "content_fingerprint": "23bb882a39ddea236330f4566318faf9decbc87dd4d92763b18f36a4c60e576d",
+      "artist": "",
+      "title": "Stan Seba - Hiddensee (Jayson Butera Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G major"
+    },
+    {
+      "id": "145",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5254640 Sky Warriors - Echo Sounder (Original Mix).mp3",
+      "content_fingerprint": "2ba2dd2dc5cfe61f7998b81a1a6fbc505227a263957498b2836bb72ecbf9f000",
+      "artist": "",
+      "title": "Sky Warriors - Echo Sounder (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "146",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5279212 Atila Echamende - Fucking Party (Alex The Noise & Lukas Trunk Remix).mp3",
+      "content_fingerprint": "dbd2fa612cdec01acc30f7dcd52fd3ffad3d7f114594aa1a07c983262e7e8cc9",
+      "artist": "",
+      "title": "Atila Echamende - Fucking Party (Alex The Noise & Lukas Trunk Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "147",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5299867 L & L - Limp Dixx Dude (Original Mix).mp3",
+      "content_fingerprint": "b8b827f9b90c503520c776e588a4caa5960825e99c8603bd95b70ceda09b920f",
+      "artist": "",
+      "title": "L & L - Limp Dixx Dude (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B major"
+    },
+    {
+      "id": "148",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5315287 A.F.R - Thunder (Dave Wincent Remix).mp3",
+      "content_fingerprint": "f8c90aaaf681985b74c761c92a684bc861f2f2d398a6f55077e485b26abf2b3e",
+      "artist": "",
+      "title": "A.F.R - Thunder (Dave Wincent Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "149",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5323380 Squarepusher x Z-MACHINES - Sad Robot Goes Funny (Original Mix).mp3",
+      "content_fingerprint": "d573f7a9e4678d4c56230069c2e462e516dc0d49383cc4188d0e5918dda5da4d",
+      "artist": "",
+      "title": "Squarepusher x Z-MACHINES - Sad Robot Goes Funny (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "150",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5338500 Ron Morelli - Shredder (Original Mix).mp3",
+      "content_fingerprint": "73dd2fe0e754c34b73db0fa1ce07c5f656096844acd3c2975179fb5e738600db",
+      "artist": "",
+      "title": "Ron Morelli - Shredder (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "151",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5359592 Jason Caesar, Goose Bumps - This Life (Paul Vinx Remix).mp3",
+      "content_fingerprint": "0840b551c83bbf6e1edff3d62120496a536ec121a1b155e8d1d0f77429134ec0",
+      "artist": "",
+      "title": "Jason Caesar, Goose Bumps - This Life (Paul Vinx Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# major"
+    },
+    {
+      "id": "152",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5382659 Cr3S - B1 - Acqua (Original Mix).mp3",
+      "content_fingerprint": "b63fefbb547c5f398ac73064dcd2e78d89d39307ebde6ccd9af563e12c835a47",
+      "artist": "",
+      "title": "Cr3S - B1 - Acqua (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# major"
+    },
+    {
+      "id": "153",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5404068 Jon Dark - Deep Enough (Chance & Dark Remix).mp3",
+      "content_fingerprint": "7f0451b4b53b29db81fbaeb704a95fe4ce187f0ac9ac411825d2382f882c5a79",
+      "artist": "",
+      "title": "Jon Dark - Deep Enough (Chance & Dark Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "154",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5420676 Collective Sound Members - Forever Waiting (Original Mix).mp3",
+      "content_fingerprint": "684f74a2ae2c6d8279f3e1784b27f362fff6378df8bfcbbcc7613938cddbfcbf",
+      "artist": "",
+      "title": "Collective Sound Members - Forever Waiting (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "155",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5429242 Michael Gidley, Damn Dan - Suspension (Original Mix).mp3",
+      "content_fingerprint": "88eb7a73feb8f79383b8b4d8266a74361d1613163fc9e6f04315c9252c1df489",
+      "artist": "",
+      "title": "Michael Gidley, Damn Dan - Suspension (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "156",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5456553 Strongbass - Prototype (Original Mix).mp3",
+      "content_fingerprint": "fa81434351a8064bcb45c7e8718deb65734b38af97339a8ab6cde04afb48e2bd",
+      "artist": "",
+      "title": "Strongbass - Prototype (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "157",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5467340 Flagman Djs - Lost In Music (Melody Is Good To Me Mix).mp3",
+      "content_fingerprint": "42fe9e61cc2fd4e7cdd519e26d4eaebc168cefc9201c671a1bd61488a1411823",
+      "artist": "",
+      "title": "Flagman Djs - Lost In Music (Melody Is Good To Me Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "158",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5492171 DT - Impulse (Original Mix).mp3",
+      "content_fingerprint": "bca8d4913b4d7c4bcef9c6c45933249edc54f9bcdb86f9bb6c8cfacbd3bae992",
+      "artist": "",
+      "title": "DT - Impulse (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "159",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5495991 Benjamin Takats - Something in My Mind (Album Mix).mp3",
+      "content_fingerprint": "98646d282f3ac74454bf7e7cb0d08297b08898c8cf76c06fd627376a368a9fb2",
+      "artist": "",
+      "title": "Benjamin Takats - Something in My Mind (Album Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "160",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5545112 Candide - Lost in the Sun (Original Mix).mp3",
+      "content_fingerprint": "981578720937e5468ae2cfba71f96d2b5955ecc9da3735693d109e3eaee807a1",
+      "artist": "",
+      "title": "Candide - Lost in the Sun (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C major"
+    },
+    {
+      "id": "161",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5561072 Vynil Band - I Can Tell You Why (Extended Mix).mp3",
+      "content_fingerprint": "5f5e10b0b73f0b522edd2d9789532f13819c3a1f3361ed672469531ed1ebd55c",
+      "artist": "",
+      "title": "Vynil Band - I Can Tell You Why (Extended Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "162",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5580807 Slash - Where Are You Now? (Original Mix).mp3",
+      "content_fingerprint": "9b5736dfb7fd9fa0ebb78fce8d33ad56dfc2b75dd875babcf702c7237f835ae8",
+      "artist": "",
+      "title": "Slash - Where Are You Now? (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "163",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5618695 Devil Dragon Tatoo - Electro Punk (Original Mix).mp3",
+      "content_fingerprint": "b77bd667a684f4307121c4b9d933c1e27b9c896a59818adf3c3338f8ed887a71",
+      "artist": "",
+      "title": "Devil Dragon Tatoo - Electro Punk (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "164",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5653983 einsauszwei - Air Run (Helmut Dubnitzky & Jackspot Remix).mp3",
+      "content_fingerprint": "c9bd32ca1a0522117ea254f462acb790eee04dabc2356d04fb8a45c776f12f14",
+      "artist": "",
+      "title": "einsauszwei - Air Run (Helmut Dubnitzky & Jackspot Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "165",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5687266 Serobliss - Sublimation (Original Mix).mp3",
+      "content_fingerprint": "fd497f14ce2760bf821441e9855fa46e0a10740d9fb26e28871a385415c19502",
+      "artist": "",
+      "title": "Serobliss - Sublimation (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "166",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5701122 Miss Caramelle - Higher (Mykel Mars Festival Remix).mp3",
+      "content_fingerprint": "8170b6a82cfecd3741660b73812e80fa70dd21f6556fa37aae64f810e29a0784",
+      "artist": "",
+      "title": "Miss Caramelle - Higher (Mykel Mars Festival Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "1A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# minor"
+    },
+    {
+      "id": "167",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5733037 Khono - Appologise (Original Mix).mp3",
+      "content_fingerprint": "378287c59a07443292189638f7db2ebbc79f0602879d03358d5b3fb1c54a8151",
+      "artist": "",
+      "title": "Khono - Appologise (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G major"
+    },
+    {
+      "id": "168",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5739130 ReOrder, Ian Standerwick, Skypatrol - Folding Your Universe (Original Mix).mp3",
+      "content_fingerprint": "07964178be2ed6583895d286e1ddef0c483743705ed3c17b25550b88e7b35edb",
+      "artist": "",
+      "title": "ReOrder, Ian Standerwick, Skypatrol - Folding Your Universe (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "B minor"
+    },
+    {
+      "id": "169",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5795173 Nacim Ladj - Minimal Electroid (Original Mix).mp3",
+      "content_fingerprint": "3c7a5f1138b44b24ca51a298f26ad57138f866b7085db353771a6f4952c6cf86",
+      "artist": "",
+      "title": "Nacim Ladj - Minimal Electroid (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "170",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5816285 B S K - Party (Original Mix).mp3",
+      "content_fingerprint": "27cb0325d175a39e78bfe54d8a2f671a9bae145a9e9bb32afd57be90e88a4557",
+      "artist": "",
+      "title": "B S K - Party (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "8A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A minor"
+    },
+    {
+      "id": "171",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5855468 Kosheen DJs - Waiting (Original Mix).mp3",
+      "content_fingerprint": "2811ef3fa2e50469c47313fcbeb4d61ac03c708cd275c8930d682840201dabd4",
+      "artist": "",
+      "title": "Kosheen DJs - Waiting (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "172",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5876668 Alberto Feria, Andres DG - Nothing to Say (Original Mix).mp3",
+      "content_fingerprint": "bc1f27890bc18bdf4b063fccb99629a917b36f70732f4f28fa12524474677866",
+      "artist": "",
+      "title": "Alberto Feria, Andres DG - Nothing to Say (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "173",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5922285 Uruz - Dimension Of The Mind (Original Mix).mp3",
+      "content_fingerprint": "701c69c5aa17bddbcaefea873f140dc50049b2791368134f8067a7e5c4c5a2e2",
+      "artist": "",
+      "title": "Uruz - Dimension Of The Mind (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "174",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5943904 James Blake - Buzzard & Kestrel (Original Mix).mp3",
+      "content_fingerprint": "c8997a079c705095e6beca9c7e60b99541ba74d984fd04b82225cd7b94227c75",
+      "artist": "",
+      "title": "James Blake - Buzzard & Kestrel (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G major"
+    },
+    {
+      "id": "175",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5956160 Wrexial - Downlifts (Original Mix).mp3",
+      "content_fingerprint": "1599369eaabf838874688841a8efeb36d2b709126442b82472e19ca05433c827",
+      "artist": "",
+      "title": "Wrexial - Downlifts (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "5A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C minor"
+    },
+    {
+      "id": "176",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/5986917 Peter Pearson - Soft Blue (Original Mix).mp3",
+      "content_fingerprint": "59248cad4471f42fec29828dd79ea20bbd92935709cef92af7dadd2ee99db784",
+      "artist": "",
+      "title": "Peter Pearson - Soft Blue (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G# major"
+    },
+    {
+      "id": "177",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6002570 Dalem Osuno - Door's Secret (Original Mix).mp3",
+      "content_fingerprint": "c8d673403b97eaf2a93b5bd9555028f69873b633c094d3b25010d00d407a1984",
+      "artist": "",
+      "title": "Dalem Osuno - Door's Secret (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "178",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6027087 Ruben De Ronde - They Are Not You (LTN Remix).mp3",
+      "content_fingerprint": "7e8ad979d7e0e625a7ae6a1d870c7a2b2004f63a296d684a2e3688d00c26723a",
+      "artist": "",
+      "title": "Ruben De Ronde - They Are Not You (LTN Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "179",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6051774 Scar - Call It What You Want (Original Mix).mp3",
+      "content_fingerprint": "b0d6e4ddfdaa936d6cdaa6dd533395a972e8b076df3593a9e6607de3de78c584",
+      "artist": "",
+      "title": "Scar - Call It What You Want (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "180",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6067929 Beat Herren - Control (Remix).mp3",
+      "content_fingerprint": "031080d013af34cac2f0beca473086a7b7a9d60d2ee1af079376d6cfd98a89dc",
+      "artist": "",
+      "title": "Beat Herren - Control (Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "7A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D minor"
+    },
+    {
+      "id": "181",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6103149 Paket - Behind Bars (Original Mix).mp3",
+      "content_fingerprint": "4679e15e208b305286b7a836d09fbfa51e03407168f885cf44d980d8bb2c3e7a",
+      "artist": "",
+      "title": "Paket - Behind Bars (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "182",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6144221 Pano Manara - Speed Up (Original Mix).mp3",
+      "content_fingerprint": "219be2b791af5b842cd11f1b4a9e24f8360533efef87a8fd15ca6c9f4fcac9dc",
+      "artist": "",
+      "title": "Pano Manara - Speed Up (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "183",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6160319 Sun Set - All Night Long (Original Mix).mp3",
+      "content_fingerprint": "98892fd242d6679c45744b950c57b070013e8e6b4197c823d46a9b2a7d0d5543",
+      "artist": "",
+      "title": "Sun Set - All Night Long (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# major"
+    },
+    {
+      "id": "184",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6199830 Mattias Fridell - Bengal (Original Mix).mp3",
+      "content_fingerprint": "776f4cc28a4f8e0976d106d28aaa6a93381817b91126322ce55e3d349fa129d1",
+      "artist": "",
+      "title": "Mattias Fridell - Bengal (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D# minor"
+    },
+    {
+      "id": "185",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6220367 Anton Stellz - Drop It (Original Mix).mp3",
+      "content_fingerprint": "9ff9c6f20275189ba521d53392d6d335d192ea357680c9b491e48c3dac503a25",
+      "artist": "",
+      "title": "Anton Stellz - Drop It (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "10B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "D major"
+    },
+    {
+      "id": "186",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6222804 Sonic Entity, Lyktum - Entitum (Original Mix).mp3",
+      "content_fingerprint": "1cecd3b46b06fd8821f03dd7ca44b1b0d346dfd118c550000dac16f2621be8ae",
+      "artist": "",
+      "title": "Sonic Entity, Lyktum - Entitum (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "187",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6236612 Maky, LHMR - Rock It (Original mix).mp3",
+      "content_fingerprint": "0291a9d423ff4b6d5db8adffa6cf1e71acffba3216f7a6d4df91c85b107e573c",
+      "artist": "",
+      "title": "Maky, LHMR - Rock It (Original mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "188",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6273674 Shadowplay - Necrons (Radio Edit).mp3",
+      "content_fingerprint": "e49b4a3a7c5ca1856201d15185cdb27ab3f58be1d483075b1022c6c6626c616b",
+      "artist": "",
+      "title": "Shadowplay - Necrons (Radio Edit)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# major"
+    },
+    {
+      "id": "189",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6276803 Cactus Arising - Identify Stars (Remix).mp3",
+      "content_fingerprint": "64ec3ee29219a7a64cf0b89a9142a1f8fc5ad96df5e084d8901fe9464c5c1677",
+      "artist": "",
+      "title": "Cactus Arising - Identify Stars (Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "190",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6282761 DJNav, Olga Belikova - Far Away (Original Mix).mp3",
+      "content_fingerprint": "20120ecfe4b9695f2650651da6f13acc3fb4b9864b3a9b074fd42e0e031fdc26",
+      "artist": "",
+      "title": "DJNav, Olga Belikova - Far Away (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "2B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# major"
+    },
+    {
+      "id": "191",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6290068 The Prodigy, Zinc - Nasty (Zinc Remix).mp3",
+      "content_fingerprint": "0b1997b6136ef80755ba86932ec0f110c4241b0d1565f01b230db8af953731e6",
+      "artist": "",
+      "title": "The Prodigy, Zinc - Nasty (Zinc Remix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F# minor"
+    },
+    {
+      "id": "192",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6313807 Hard Head - Here We Go Again (Original Mix).mp3",
+      "content_fingerprint": "4305f821354013bf90efdc1c0f26225967fb9fc889b457a5c880de44949f207d",
+      "artist": "",
+      "title": "Hard Head - Here We Go Again (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "G minor"
+    },
+    {
+      "id": "193",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6320574 Shotu - Looney Loop (Original Mix).mp3",
+      "content_fingerprint": "23635d2fda54933d2ff9df5c511199cbba04535598432916d6938917f5e92e27",
+      "artist": "",
+      "title": "Shotu - Looney Loop (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "194",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6332784 Oberon - Dangerous Journey (Original Mix).mp3",
+      "content_fingerprint": "08b5ce0a8bdefd68466d8b9033481f64deb536203e6e9a2a66ba121a708e35aa",
+      "artist": "",
+      "title": "Oberon - Dangerous Journey (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "3A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# minor"
+    },
+    {
+      "id": "195",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6379893 KO TUNE - Urban Citizen (Original Mix).mp3",
+      "content_fingerprint": "087da5b0d5e086a07d6c288de448f9f8f7fe624417b803a5f5e0b4030f4cb994",
+      "artist": "",
+      "title": "KO TUNE - Urban Citizen (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "6B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A# major"
+    },
+    {
+      "id": "196",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6420899 Chimeraz Finest - Phatt Beat (Radio Version).mp3",
+      "content_fingerprint": "58e9c47a420d806a996dc25e2bced13c540aac4976d8b72ce1637947f7fb1225",
+      "artist": "",
+      "title": "Chimeraz Finest - Phatt Beat (Radio Version)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "197",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6461913 Jeremy Diesel - Watchin (Original Mix).mp3",
+      "content_fingerprint": "e69f1c528874ff8b455e877f2384468a37ac4f5888a6bdcef45d153262746f0f",
+      "artist": "",
+      "title": "Jeremy Diesel - Watchin (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "12A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "C# minor"
+    },
+    {
+      "id": "198",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6476511 Gucci Mane & Rocko - Wrong Man (Original Mix).mp3",
+      "content_fingerprint": "9ebb1deac679c6c988ad85b5da1438a909717b10cd6e22bd14061270ae525943",
+      "artist": "",
+      "title": "Gucci Mane & Rocko - Wrong Man (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "4A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "F minor"
+    },
+    {
+      "id": "199",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6535130 Under Break - Chapter One (Original Mix).mp3",
+      "content_fingerprint": "d75a1e02f8fe41b8fd9f3107b90017749aea85a3c3d5fdf92a7f4b94bcc64acb",
+      "artist": "",
+      "title": "Under Break - Chapter One (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "9A",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "E minor"
+    },
+    {
+      "id": "200",
+      "path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio/6574410 The Casual Brothers, Christian Kjellvander - A Bittersweet (Retrospective) (Original Mix).mp3",
+      "content_fingerprint": "a7da1b1f268911bb56526d71fcfe3b143bae1239df9e821da66795a205777473",
+      "artist": "",
+      "title": "The Casual Brothers, Christian Kjellvander - A Bittersweet (Retrospective) (Original Mix)",
+      "genre": "",
+      "duration_seconds": 120.0,
+      "ground_truth": {
+        "key": "11B",
+        "key_source": "beatport-edm-key"
+      },
+      "beatport_key": "A major"
+    }
+  ]
+}

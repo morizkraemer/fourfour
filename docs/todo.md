@@ -58,3 +58,11 @@
 - [x] Keep Essentia `bgate` as the production key detector.
 - [x] Keep the current Pioneer waveform analyzer in the CLI orchestrator.
 - [x] Leave `lexicon_port` registered only as a benchmark/reference backend.
+
+## 2026-04-22 CLI Batch Benchmark Script
+
+- [x] Promote the ad hoc Beatport 50 runner into a tracked reusable script.
+- [x] Add `--tmux` mode that opens a detached pane and lets it close when the run finishes.
+- [x] Support arbitrary audio folders in the batch runner.
+- [x] Split `benchmark/` gitignore rules: track scripts, manifests, baselines, and docs; ignore datasets, results, logs, cache, and archives.
+- [x] Document script usage for agents and humans.

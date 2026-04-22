@@ -1,0 +1,915 @@
+{
+  "name": "rekordbox-testdata-2025-quick60",
+  "source": "rekordbox-masterdb",
+  "source_playlist": "testdata",
+  "source_directory": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025",
+  "baseline_path": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/baselines/rekordbox-testdata-2025.json",
+  "num_entries": 60,
+  "num_missing_files": 0,
+  "num_bpm_ground_truth": 60,
+  "num_key_ground_truth": 60,
+  "entries": [
+    {
+      "id": "1",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Obstacle.mp3",
+      "content_fingerprint": "4bc7dc5d7c1ca880748cb3a22f74fb2f0116a9b57a6accdebe34b2aa179df77a",
+      "artist": "Riohv",
+      "title": "Obstacle",
+      "genre": "",
+      "duration_seconds": 330.0,
+      "ground_truth": {
+        "bpm": 124.91,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "2",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Never Gonna Give You Up - Jura Soundsystem Special Version.mp3",
+      "content_fingerprint": "3242aa558ecf3e94b84395ff23b8f8949641fb3b4c3fcfb72533bac48f6b2e1d",
+      "artist": "Shiva/Jo Ann Harris/Jura Soundsystem",
+      "title": "Never Gonna Give You Up - Jura Soundsystem Special Version",
+      "genre": "",
+      "duration_seconds": 685.0,
+      "ground_truth": {
+        "bpm": 97.0,
+        "key": "10A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "3",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Fear the Machine - Brickman Remix.mp3",
+      "content_fingerprint": "b3cb2f12d443b576f2a5303ce0ad9b3a80b054ded2280502bd0e216d764046d4",
+      "artist": "Pedro Capelossi/Aeikus/Brickman",
+      "title": "Fear the Machine - Brickman Remix",
+      "genre": "",
+      "duration_seconds": 430.0,
+      "ground_truth": {
+        "bpm": 125.0,
+        "key": "2A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "4",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Deviate.mp3",
+      "content_fingerprint": "390004e9980b074cd711949e46ca281205cc8495d241a94276f600cc1a9c65e4",
+      "artist": "ARKVS/Ronald Nels",
+      "title": "Deviate",
+      "genre": "",
+      "duration_seconds": 378.0,
+      "ground_truth": {
+        "bpm": 130.0,
+        "key": "11A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "5",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/No2.mp3",
+      "content_fingerprint": "924420c772c2048058e94a60e8d5e23a17d417cb1c04aaae7c3b62b6b9ae35d2",
+      "artist": "The Detroit Escalator Co.",
+      "title": "No2",
+      "genre": "",
+      "duration_seconds": 220.0,
+      "ground_truth": {
+        "bpm": 146.0,
+        "key": "5A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "6",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Afterlife - Original Mix.mp3",
+      "content_fingerprint": "936e628f30901c52d31f079aba33fc63874d129429269e63479590bf10da1859",
+      "artist": "Random Sequence",
+      "title": "Afterlife - Original Mix",
+      "genre": "",
+      "duration_seconds": 187.0,
+      "ground_truth": {
+        "bpm": 88.2,
+        "key": "8B",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "7",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Xterm - Original Mix.mp3",
+      "content_fingerprint": "96a1bbe2c554f14e6ea6bd2d241f92e77b4f80e5ce698343bb749b81cfe15bad",
+      "artist": "Max Underson",
+      "title": "Xterm - Original Mix",
+      "genre": "",
+      "duration_seconds": 391.0,
+      "ground_truth": {
+        "bpm": 120.0,
+        "key": "10B",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "8",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Meri.mp3",
+      "content_fingerprint": "cebcfa6b660bf7f9017a2f53029261e5e2ce961c65e1386f54c5cc2e6bbd8b06",
+      "artist": "Sansibar",
+      "title": "Meri",
+      "genre": "",
+      "duration_seconds": 480.0,
+      "ground_truth": {
+        "bpm": 137.0,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "9",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Arctic Horizon.mp3",
+      "content_fingerprint": "b7d5c38d7307d7af207c928a9b7667f34ed3d572980efbb1d714a60ea45bf7a3",
+      "artist": "Polar Inertia",
+      "title": "Arctic Horizon",
+      "genre": "",
+      "duration_seconds": 638.0,
+      "ground_truth": {
+        "bpm": 99.02,
+        "key": "4A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "10",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Fish.mp3",
+      "content_fingerprint": "3189ebd8a1bf0ac3469aea6493137427c38c00cb06ae4c3cf79eb172339708a3",
+      "artist": "Amir Bresler",
+      "title": "Fish",
+      "genre": "",
+      "duration_seconds": 285.0,
+      "ground_truth": {
+        "bpm": 174.98,
+        "key": "8A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "11",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Wo ist meine PlayStation 4?.mp3",
+      "content_fingerprint": "cae67e9163a70b6754a51520e76a8215761f62ba06af9638fee3fcaf356d532a",
+      "artist": "Leif M\u00fcller",
+      "title": "Wo ist meine PlayStation 4?",
+      "genre": "",
+      "duration_seconds": 404.0,
+      "ground_truth": {
+        "bpm": 129.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "12",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Falaise.mp3",
+      "content_fingerprint": "f9729ee50bc572cb164e9330849d2a2496465858ee08f38fa108d74d949054a6",
+      "artist": "Floating Points",
+      "title": "Falaise",
+      "genre": "",
+      "duration_seconds": 234.0,
+      "ground_truth": {
+        "bpm": 82.19,
+        "key": "10A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "13",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Another Human Being.mp3",
+      "content_fingerprint": "6df502516be180515c2892044e5f2b7140ca7e9b925bb4e89b71d643bea2da96",
+      "artist": "Michael Kiwanuka",
+      "title": "Another Human Being",
+      "genre": "",
+      "duration_seconds": 111.0,
+      "ground_truth": {
+        "bpm": 103.45,
+        "key": "10A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "14",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Glint AM - DJ Normal 4 Remix.mp3",
+      "content_fingerprint": "1b10e78d2a8b8bff9857975fbb2c33d7eaabc4195fa2bb47a28af8798aca9d03",
+      "artist": "Alphonse/DJ Normal",
+      "title": "Glint AM - DJ Normal 4 Remix",
+      "genre": "",
+      "duration_seconds": 314.0,
+      "ground_truth": {
+        "bpm": 128.0,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "15",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/New Forms.mp3",
+      "content_fingerprint": "298dac8f7e79ce45fd202976326860f84173dbeefe792c152c343652b57776bd",
+      "artist": "Ryan Crosson",
+      "title": "New Forms",
+      "genre": "",
+      "duration_seconds": 553.0,
+      "ground_truth": {
+        "bpm": 132.0,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "16",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/In langen Z\u00fcgen.mp3",
+      "content_fingerprint": "e6cb6e7c46ca4ab574b60ccae1af62766db842273ea6a951d6da33fda7fca5ec",
+      "artist": "Schatterau",
+      "title": "In langen Z\u00fcgen",
+      "genre": "",
+      "duration_seconds": 151.0,
+      "ground_truth": {
+        "bpm": 84.0,
+        "key": "10A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "17",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/PWR.mp3",
+      "content_fingerprint": "0e05c39cea2a48fb4e84b34a3ac7e5316ca4b63f8b7af132d90f2dd294c3eeab",
+      "artist": "Raygun",
+      "title": "PWR",
+      "genre": "",
+      "duration_seconds": 370.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "5A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "18",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Soucy.mp3",
+      "content_fingerprint": "194863455004bf3661a4795338f0858c5e33e97d6636294ee2ed8a9c2a07e4de",
+      "artist": "Melodule/Van Did",
+      "title": "Soucy",
+      "genre": "",
+      "duration_seconds": 374.0,
+      "ground_truth": {
+        "bpm": 123.0,
+        "key": "2A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "19",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/In A Beautiful Place Out In The Country.mp3",
+      "content_fingerprint": "819d83bcfd78afaa5db767f735b40c6a5a32958b06065553356bbdc7f7e8c0ab",
+      "artist": "Boards of Canada",
+      "title": "In A Beautiful Place Out In The Country",
+      "genre": "",
+      "duration_seconds": 367.0,
+      "ground_truth": {
+        "bpm": 98.51,
+        "key": "5A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "20",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Lu's Dub.mp3",
+      "content_fingerprint": "34acfc7c169db6a034617f1a6d8019bd298fb1078c62d3e5d570b64805f9e49f",
+      "artist": "Cousin",
+      "title": "Lu's Dub",
+      "genre": "",
+      "duration_seconds": 307.0,
+      "ground_truth": {
+        "bpm": 128.0,
+        "key": "8A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "21",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Brooklyn Haunt.mp3",
+      "content_fingerprint": "840925a4a0748c04675754114121370b8cf99dd086bd96d3452d2708bc64cf4a",
+      "artist": "Hauntologists",
+      "title": "Brooklyn Haunt",
+      "genre": "",
+      "duration_seconds": 444.0,
+      "ground_truth": {
+        "bpm": 128.01,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "22",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Diffraction.mp3",
+      "content_fingerprint": "209f5f05892a6e2e13f8159a3261df678abbeb62e8116e15291298f2201c1cf3",
+      "artist": "Deepbass",
+      "title": "Diffraction",
+      "genre": "",
+      "duration_seconds": 329.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "10A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "23",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Suflet.mp3",
+      "content_fingerprint": "ea82f2cc0fec9a772958aa9f7b1b6e22f53f79eac8debb0d06502c9b84862a39",
+      "artist": "BRYZ",
+      "title": "Suflet",
+      "genre": "",
+      "duration_seconds": 718.0,
+      "ground_truth": {
+        "bpm": 123.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "24",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Lanata - Max Tolmachev Remix.mp3",
+      "content_fingerprint": "5d1f7d85f718051b1767611327b165c67e2d0cf1cc4b411ed6999e2624712ae7",
+      "artist": "Raqpar/Max Tolmachev",
+      "title": "Lanata - Max Tolmachev Remix",
+      "genre": "",
+      "duration_seconds": 629.0,
+      "ground_truth": {
+        "bpm": 122.0,
+        "key": "11B",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "25",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/J Strawberry - Cristi Cons Remix.mp3",
+      "content_fingerprint": "de12c1b9292055a26ffcd37a6af8d105ae035ba126f8213a1f2fcca954f87b62",
+      "artist": "Colorhadoo/Rhadoo/Cristi Cons",
+      "title": "J Strawberry - Cristi Cons Remix",
+      "genre": "",
+      "duration_seconds": 544.0,
+      "ground_truth": {
+        "bpm": 127.0,
+        "key": "2A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "26",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Haarp Storm - Spider & Lola's Deep See Mix.mp3",
+      "content_fingerprint": "94156ad7afe04a0b977de3838c7434b57e21bc7aa1c497d4ac06ecbf2c2762e5",
+      "artist": "DJ Spider/Lola",
+      "title": "Haarp Storm - Spider & Lola's Deep See Mix",
+      "genre": "",
+      "duration_seconds": 396.0,
+      "ground_truth": {
+        "bpm": 124.0,
+        "key": "8A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "27",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/And That Was The Way - Echospace's Shinjuku Sedative.mp3",
+      "content_fingerprint": "9901618119d9e50d4e5f962a6e5e806b0d30cf204ad734ba879ad38b126cdad9",
+      "artist": "Kaito",
+      "title": "And That Was The Way - Echospace's Shinjuku Sedative",
+      "genre": "",
+      "duration_seconds": 774.0,
+      "ground_truth": {
+        "bpm": 111.38,
+        "key": "12A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "28",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Between Two Thoughts.mp3",
+      "content_fingerprint": "21aacd7eb26ed4a1a8e308702ec06a26cb382eb832deb892184dad72e1ec2a02",
+      "artist": "Symmetric/Future of Matter",
+      "title": "Between Two Thoughts",
+      "genre": "",
+      "duration_seconds": 406.0,
+      "ground_truth": {
+        "bpm": 130.0,
+        "key": "12A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "29",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Inter.mp3",
+      "content_fingerprint": "9da9949f84116c2a41503be8b7b9005e080ecc6002d49338da93c745f50c6cb5",
+      "artist": "Function",
+      "title": "Inter",
+      "genre": "",
+      "duration_seconds": 410.0,
+      "ground_truth": {
+        "bpm": 117.0,
+        "key": "2A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "30",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/She's A Replicant - Afriqua Remix.mp3",
+      "content_fingerprint": "a90e041800db4253166514803c83e18eb1f60f10555ba51eac777673ea8f06a7",
+      "artist": "Ben Rau/Afriqua",
+      "title": "She's A Replicant - Afriqua Remix",
+      "genre": "",
+      "duration_seconds": 503.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "31",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/schweben/Don't Sleep - Original Mix.mp3",
+      "content_fingerprint": "a144969b94d3a21e4070985f9d5ebf741971243a1c548eba5b6ce6dd51e9f59d",
+      "artist": "Toni Varga",
+      "title": "Don't Sleep - Original Mix",
+      "genre": "",
+      "duration_seconds": 441.0,
+      "ground_truth": {
+        "bpm": 124.0,
+        "key": "7A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "52",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/house/55. Marc Schneider - Sumback.flac",
+      "content_fingerprint": "f473b84638fcb37f34a24d4451888451875c4c26b04bca56de588cba856d48fd",
+      "artist": "Marc Schneider, Aera",
+      "title": "Sumback",
+      "genre": "Electro",
+      "duration_seconds": 366.0,
+      "ground_truth": {
+        "bpm": 123.0,
+        "key": "3A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "73",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/house/81. Odette - VDK001 - B1.flac",
+      "content_fingerprint": "8572bdc740d025a83bfdab0a6cd052fc37c66aebdfc2f9a48f47b1cc5de33703",
+      "artist": "Odette",
+      "title": "VDK001 - B1",
+      "genre": "Electro",
+      "duration_seconds": 391.0,
+      "ground_truth": {
+        "bpm": 128.0,
+        "key": "4A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "94",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/house/32. Callisto - Breezin'.flac",
+      "content_fingerprint": "c97000e1292d2407ceac058a94b553fb7229f9e58dcc620997a5808d678bb4f0",
+      "artist": "Callisto",
+      "title": "Breezin'",
+      "genre": "Electro",
+      "duration_seconds": 519.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "115",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/house/21. Mike Dehnert - Lautschrift.flac",
+      "content_fingerprint": "8818b4bcaedcd87b13a7bfd607ff5abd3924b1ea6b399f6f784c1769db25b6ab",
+      "artist": "Mike Dehnert",
+      "title": "Lautschrift",
+      "genre": "Dance",
+      "duration_seconds": 405.0,
+      "ground_truth": {
+        "bpm": 126.68,
+        "key": "7A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "137",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/2025-12-17_sicnal/wav/01. Dorisburg & Arkajo - Void Pyramid - B.wav",
+      "content_fingerprint": "176e545d86e2a790c921951513cfb7ab237e841827f24b3401b6677f81974c31",
+      "artist": "Dorisburg & Arkajo, Dorisburg, Arkajo",
+      "title": "Void Pyramid - B",
+      "genre": "Dance",
+      "duration_seconds": 457.0,
+      "ground_truth": {
+        "bpm": 128.0,
+        "key": "9A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "158",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/2025-12-17_sicnal/wav/15. DJ Maboku - TRUE LOVE.wav",
+      "content_fingerprint": "0745ba45235e6ff48d1dd49cb938f9ddcd92100782dc4c4d0e2543dc58108993",
+      "artist": "DJ Maboku",
+      "title": "TRUE LOVE",
+      "genre": "African Music",
+      "duration_seconds": 232.0,
+      "ground_truth": {
+        "bpm": 122.0,
+        "key": "4A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "179",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/2025-12-17_sicnal/02. Dauwd - Really Good.flac",
+      "content_fingerprint": "a7ea368224b12d7dacdae663d36da403d7592debf3daa2f342634a6571a27d08",
+      "artist": "Dauwd",
+      "title": "Really Good",
+      "genre": "Electro",
+      "duration_seconds": 322.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "200",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/2025-12-17_sicnal/23. Fantastic Mister Ox - Gravity Knows What's Up.flac",
+      "content_fingerprint": "0014840e8eb3d278bd7e0157ab4a45f557a8d5741eb96f2e480dbff1814aa2fb",
+      "artist": "Fantastic Mister Ox",
+      "title": "Gravity Knows What's Up",
+      "genre": "Electro",
+      "duration_seconds": 221.0,
+      "ground_truth": {
+        "bpm": 123.0,
+        "key": "7A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "222",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Nov-Jan/2025-12-17_sicnal/set/16. Joy Orbison - Burn.wav",
+      "content_fingerprint": "e14f34f5283e0dc7b85c11532b73a6f160f4e350b2c002d98129ded70b71e529",
+      "artist": "Joy Orbison, Infinite Coles, Mansur Brown",
+      "title": "Burn",
+      "genre": "Electro",
+      "duration_seconds": 331.0,
+      "ground_truth": {
+        "bpm": 133.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "243",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/soothing set/Squarepusher - Detroit People Mover.mp3",
+      "content_fingerprint": "6230a04d2651ee9ff2d6ec2833584f0c2b97d5a5cc8d4ac5e1276027337daa3e",
+      "artist": "Squarepusher",
+      "title": "Detroit People Mover",
+      "genre": "Idm",
+      "duration_seconds": 266.0,
+      "ground_truth": {
+        "bpm": 106.51,
+        "key": "9A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "264",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/soothing set/Lightman - Nava.zeta.mp3",
+      "content_fingerprint": "b3975bf2f429c47eed23cbc0e224188f143565be69819d3b4fc678a88b0d1a62",
+      "artist": "Lightman",
+      "title": "Nava.zeta",
+      "genre": "",
+      "duration_seconds": 336.0,
+      "ground_truth": {
+        "bpm": 135.87,
+        "key": "8A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "285",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/soothing set/Sandwell District, Silent Servant, Regis - Sampler 1 B1 - Regis Edit.mp3",
+      "content_fingerprint": "80c6e67af0748cb475bc57a3936d37d3f674703255e78f98071849e5eb59c321",
+      "artist": "Sandwell District/Silent Servant/Regis",
+      "title": "Sampler 1 B1 - Regis Edit",
+      "genre": "Dub Techno",
+      "duration_seconds": 321.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "306",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/1/Sevgilim (Original Mix).wav",
+      "content_fingerprint": "bf47a7d51e63eede53d4bd26826e7be6d5076cb01c4309c5782845c68e8e8759",
+      "artist": "Casual Treatment",
+      "title": "Sevgilim (Original Mix)",
+      "genre": "",
+      "duration_seconds": 370.0,
+      "ground_truth": {
+        "bpm": 137.0,
+        "key": "12A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "327",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/1/Moving North.wav",
+      "content_fingerprint": "0e038ef2f5ab416f79c002a55367971844b8201d1c28ba12895859d295b04d2f",
+      "artist": "Augusto Taito",
+      "title": "Moving North",
+      "genre": "",
+      "duration_seconds": 387.0,
+      "ground_truth": {
+        "bpm": 140.0,
+        "key": "8A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "349",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/1/Neptune.wav",
+      "content_fingerprint": "dabcf400367748e07b89271f7fcdb0129d67a99845140aeb3398e1725484e204",
+      "artist": "Justine Perry",
+      "title": "Neptune",
+      "genre": "",
+      "duration_seconds": 291.0,
+      "ground_truth": {
+        "bpm": 135.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "370",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/tlabel/Unforgotten.wav",
+      "content_fingerprint": "a4ce3fb021fad248462770c5e2d26835ae7c3a236c2d0695a5b574adcece65bf",
+      "artist": "Rove Ranger",
+      "title": "Unforgotten",
+      "genre": "",
+      "duration_seconds": 404.0,
+      "ground_truth": {
+        "bpm": 143.0,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "391",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/dxrvo 1/Distant Voices.wav",
+      "content_fingerprint": "adbfc407df410583c53e82e810f4d4c84550a43497dbbbd0838bb6b5defe5b29",
+      "artist": "LUAR",
+      "title": "Distant Voices",
+      "genre": "",
+      "duration_seconds": 301.0,
+      "ground_truth": {
+        "bpm": 142.0,
+        "key": "1A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "412",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/Moodboard/DJ Koze, Ada - Unbelievable.wav",
+      "content_fingerprint": "48649b66e44f7df2c440c8335fc5a908a31227f91e6719ec5672cb9175f8e7b1",
+      "artist": "",
+      "title": "DJ Koze, Ada - Unbelievable",
+      "genre": "",
+      "duration_seconds": 271.0,
+      "ground_truth": {
+        "bpm": 110.0,
+        "key": "5A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "433",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/3/Visions.wav",
+      "content_fingerprint": "fbd1221f3475db8692153c272ed46e1ae0ff38f81dccd6115b36499b2e3a6b80",
+      "artist": "Justyn Nell",
+      "title": "Visions",
+      "genre": "",
+      "duration_seconds": 286.0,
+      "ground_truth": {
+        "bpm": 144.0,
+        "key": "5A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "454",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Feb-Apr/2/Ra\u00e4r - Blue Mitsubishi [ANTIVERSE01].wav",
+      "content_fingerprint": "b55fba4b14575c43859e6003a24a03cb55c4c4e97d7caa92e882411cb210472f",
+      "artist": "Acidalia",
+      "title": "Ra\u00e4r - Blue Mitsubishi [ANTIVERSE01]",
+      "genre": "",
+      "duration_seconds": 421.0,
+      "ground_truth": {
+        "bpm": 143.0,
+        "key": "4A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "475",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/classic house/Food of Love - Sprinkles Grub Dub.mp3",
+      "content_fingerprint": "931a370ce845b09b74ce83cfd9c86ade85e0610eec1b9c6577df94e1a65c48db",
+      "artist": "Hard Ton/DJ Sprinkles",
+      "title": "Food of Love - Sprinkles Grub Dub",
+      "genre": "",
+      "duration_seconds": 638.0,
+      "ground_truth": {
+        "bpm": 120.0,
+        "key": "7A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "503",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/2562/24.mp3",
+      "content_fingerprint": "6886bddc697e630d6ed25d81358c4895130df0d84dea8332dd6ec8c23f731d62",
+      "artist": "Steve Vai",
+      "title": "Ballerina 12/24",
+      "genre": "",
+      "duration_seconds": 102.0,
+      "ground_truth": {
+        "bpm": 133.33,
+        "key": "8B",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "524",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/soothe4/Mrs. Bojangels.mp3",
+      "content_fingerprint": "d8fb4dffc3fefbf9bcb5c74cf1bf6e7c033ac67cb441b516fe92865fb1876336",
+      "artist": "DJ Koze",
+      "title": "Mrs. Bojangels",
+      "genre": "",
+      "duration_seconds": 589.0,
+      "ground_truth": {
+        "bpm": 121.0,
+        "key": "6B",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "545",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/Andrey House/Breezin'.mp3",
+      "content_fingerprint": "611dd40dd8e4daa1654075bb57ef264322f192763392236d93514c81d9a71fd4",
+      "artist": "Callisto",
+      "title": "Breezin'",
+      "genre": "",
+      "duration_seconds": 519.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "568",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/Andrey House/The Race - JML remix.mp3",
+      "content_fingerprint": "71d645513c0d58719933cb94a137558886b0d853a44b643e7ec740ae5208b7f5",
+      "artist": "The Checkup",
+      "title": "The Race - JML remix",
+      "genre": "",
+      "duration_seconds": 417.0,
+      "ground_truth": {
+        "bpm": 123.0,
+        "key": "8A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "589",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/Andrey House/#3.mp3",
+      "content_fingerprint": "ca6cb031e37cb32f35b95926aba1346dca7ca34ee4dba56a62450e4781f6fb7d",
+      "artist": "Oleg Poliakov",
+      "title": "#3",
+      "genre": "",
+      "duration_seconds": 359.0,
+      "ground_truth": {
+        "bpm": 123.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "610",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/house live/Lost Traxx #3.mp3",
+      "content_fingerprint": "8e6bd36e02df6f8b62c0993d18483663ee32a1581f896704901eeffdb96be703",
+      "artist": "Urban Force",
+      "title": "Lost Traxx #3",
+      "genre": "",
+      "duration_seconds": 575.0,
+      "ground_truth": {
+        "bpm": 126.0,
+        "key": "6A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "631",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/sound design/The Lost Tape I.mp3",
+      "content_fingerprint": "ca07945f6f03aad3446eef0008355ee6571cf5972c56c1ff89df121159c2c63a",
+      "artist": "Simoncino",
+      "title": "The Lost Tape I",
+      "genre": "",
+      "duration_seconds": 415.0,
+      "ground_truth": {
+        "bpm": 125.0,
+        "key": "4B",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    },
+    {
+      "id": "652",
+      "path": "/Users/merlinkraemer/local/2-Areas/1-Mukke/#02_DJ/2025/Aug-Okt/sound design/Bosque Primario.mp3",
+      "content_fingerprint": "21274b72d6a4e6187b526a6aa4ed08f6b5195dd2be3733483546dd17b2f63c80",
+      "artist": "Humnoid",
+      "title": "Bosque Primario",
+      "genre": "",
+      "duration_seconds": 343.0,
+      "ground_truth": {
+        "bpm": 136.0,
+        "key": "11A",
+        "bpm_source": "rekordbox-masterdb",
+        "key_source": "rekordbox-masterdb-standard-camelot"
+      }
+    }
+  ],
+  "parent_manifest": "/Users/merlinkraemer/dev/projects/fourfour/benchmark/manifests/rekordbox-testdata-2025.corpus.json",
+  "selection": "first 30 playlist tracks from interrupted cache + 30 evenly spaced BPM-scorable tracks from remaining playlist"
+}

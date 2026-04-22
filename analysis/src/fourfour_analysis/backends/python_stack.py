@@ -11,6 +11,7 @@ from fourfour_analysis.types import AnalysisResult, BackendMetadata
 
 _VERSION = "0.1.0"
 DEFAULT_FEATURES = frozenset({"bpm", "key", "energy"})
+_DEEPRHYTHM_PREDICTOR = None
 
 
 class PythonStackBackend(AnalysisBackend):
@@ -70,6 +71,7 @@ class PythonStackBackend(AnalysisBackend):
         import io
         import sys
 
+        global _DEEPRHYTHM_PREDICTOR
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             from deeprhythm import DeepRhythmPredictor
@@ -79,8 +81,9 @@ class PythonStackBackend(AnalysisBackend):
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout, sys.stderr = quiet_std, quiet_std
         try:
-            predictor = DeepRhythmPredictor()
-            bpm = predictor.predict(track_path)
+            if _DEEPRHYTHM_PREDICTOR is None:
+                _DEEPRHYTHM_PREDICTOR = DeepRhythmPredictor()
+            bpm = _DEEPRHYTHM_PREDICTOR.predict(track_path)
             return float(bpm) if bpm else None
         finally:
             sys.stdout, sys.stderr = old_stdout, old_stderr
