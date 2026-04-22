@@ -34,3 +34,19 @@
 - `fourfour-benchmark` keeps key-only benchmarking and `--no-waveform` controls.
 - `python -m fourfour_analysis analyze` returns Pioneer waveform fields required by `pioneer-test-ui`.
 - Waveform implementation stays on the newer master stack.
+
+## 2026-04-22 Single Analysis CLI Contract
+
+- [x] Make `fourfour-analyze <file> --json` emit the complete single-track analysis object.
+- [x] Include BPM, key, energy, beats, cue points, waveform preview/color/peaks, and Pioneer 3-band waveform fields.
+- [x] Keep `python -m fourfour_analysis analyze ... --json` as a compatibility wrapper returning a list.
+- [x] Update CLI tests and README docs.
+
+## Single-File Beatport Smoke Test
+
+- Track: `5152629 Bob Moses - Far From the Tree (Original Mix).mp3`
+- Beatport key label: `E minor` / `9A`
+- Rekordbox result: `Em` / `9A`, BPM `111.0`
+- `fourfour-analyze --json`: key `9A`, BPM `175.0`, energy `8`, no extractor errors.
+- Output shape is correct: preview `400`, color `2000`, peaks `2000`, Pioneer detail `18000`, Pioneer overview `1200`.
+- Problem: BPM/beat grid quality is not validated by the key benchmark and is wrong on this real track. Treat BPM/beat-grid work as separate from the key decision.

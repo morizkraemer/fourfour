@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
 from pathlib import Path
 
 from fourfour_analysis import __version__
@@ -24,14 +23,19 @@ examples:
   fourfour-analyze track.mp3 --json                       output as JSON (for piping)
 
 output fields (JSON mode):
-  bpm           Detected tempo in BPM (float, e.g. 128.0)
-  key           Musical key in Camelot notation (string, e.g. "8A", "3B")
-  energy        Energy rating 1-10 (int)
-  beats         List of beat positions with bar_position (1-4)
-  waveform_peaks  List of {min_val, max_val} per segment
-  waveform_colors  List of {r, g, b} per segment (0-255)
-  cue_points    List of {label, time_seconds, loop_end_seconds?}
-  elapsed_seconds  Wall time for analysis
+  path                     Input audio file path
+  bpm                      Detected tempo in BPM (float, e.g. 128.0)
+  key                      Musical key in Camelot notation (string, e.g. "8A")
+  energy                   Energy dict: {score: 1-10, label: low|medium|high}
+  beats                    Beat positions with bar_position (1-4)
+  cue_points               Detected cue/section points
+  waveform_preview         400-byte Pioneer PWAV preview as integers
+  waveform_color           2000 RGB amplitude/color points
+  waveform_peaks           2000 min/max peak pairs
+  pioneer_3band_detail     Native-resolution 3-band detail waveform bytes
+  pioneer_3band_overview   400-point 3-band overview waveform bytes
+  errors                   Non-fatal extractor errors
+  elapsed_seconds          Wall time for analysis
 
 backends:
   final_stack        Production stack: Lexicon-style analysis + Essentia bgate key
@@ -74,7 +78,7 @@ _BACKEND_CHOICES = sorted(ANALYSIS_VARIANTS)
 def _build_analyze_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="fourfour-analyze",
-        description="Analyze a single audio file with the final production stack.",
+        description="Analyze one audio file with the complete production stack.",
         epilog=_HELP_EPILOG_ANALYZE,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -159,29 +163,6 @@ def _build_benchmark_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _analyze_with_backend(backend_id: str, file_path: Path) -> dict:
-    """Run analysis with a single backend, return result dict."""
-    from fourfour_analysis.config import Settings
-    from fourfour_analysis.backends.registry import load_backend
-
-    settings = Settings.from_cwd()
-    backend = load_backend(backend_id, settings)
-
-    start = time.monotonic()
-    try:
-        result = backend.analyze_track(str(file_path))
-        elapsed = time.monotonic() - start
-
-        from dataclasses import asdict
-        result_dict = asdict(result)
-        result_dict["elapsed_seconds"] = elapsed
-        result_dict["status"] = "ok"
-        return result_dict
-    except Exception as e:
-        elapsed = time.monotonic() - start
-        return {"status": "error", "error": str(e), "elapsed_seconds": elapsed, "backend": backend_id}
-
-
 def _parse_benchmark_features(raw: str, no_waveform: bool) -> set[str] | None:
     """Parse benchmark feature flags.
 
@@ -215,24 +196,27 @@ def analyze_main() -> None:
         print(f"Error: file not found: {args.file}", file=sys.stderr)
         sys.exit(1)
 
-    results = {}
-    results["final_stack"] = _analyze_with_backend("final_stack", file_path)
+    from fourfour_analysis.analyze import analyze_track
+
+    result = analyze_track(str(file_path))
 
     if args.json_output:
-        print(json.dumps(results, indent=2, default=str))
+        print(json.dumps(result, indent=2))
     else:
-        result = results["final_stack"]
         print(f"\n{'='*50}")
-        print("Backend: final_stack")
+        print("fourfour analysis")
         print(f"{'='*50}")
-        if result.get("status") == "error":
-            print(f"  Error: {result['error']}")
-            return
         print(f"  BPM:    {result.get('bpm', 'N/A')}")
         print(f"  Key:    {result.get('key', 'N/A')}")
         print(f"  Energy: {result.get('energy', 'N/A')}")
         print(f"  Beats:  {len(result.get('beats', []))}")
         print(f"  Cues:   {len(result.get('cue_points', []))}")
+        print(f"  Preview bytes:  {len(result.get('waveform_preview', []))}")
+        print(f"  Color points:   {len(result.get('waveform_color', []))}")
+        print(f"  Peak points:    {len(result.get('waveform_peaks', []))}")
+        print(f"  3-band detail:  {len(result.get('pioneer_3band_detail', []))}")
+        print(f"  3-band overview: {len(result.get('pioneer_3band_overview', []))}")
+        print(f"  Errors: {len(result.get('errors', []))}")
         print(f"  Time:   {result.get('elapsed_seconds', 0):.2f}s")
 
 

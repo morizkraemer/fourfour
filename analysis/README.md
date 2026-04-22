@@ -11,7 +11,7 @@ Start here when you clone the repo and need to understand or use the CLI without
 - `fourfour-analyze`: analyze one audio file.
 - `fourfour-benchmark`: build corpora, run backend comparisons, and score output against ground truth.
 
-The package is a sidecar for the Rust Pioneer USB tooling. `fourfour-analyze` now uses the final production stack only.
+The package is a sidecar for the Rust Pioneer USB tooling. `fourfour-analyze` now uses the final production stack and emits the complete single-track analysis contract used for testing.
 
 Current validated scope:
 
@@ -75,6 +75,31 @@ cd analysis
 .venv/bin/fourfour-analyze /path/to/track.mp3 --json
 ```
 
+`fourfour-analyze --json` returns one JSON object with BPM, key, energy, beats, cue points, classic waveform arrays, and Pioneer waveform arrays:
+
+```text
+path
+bpm
+key
+energy
+beats
+cue_points
+waveform_preview
+waveform_color
+waveform_peaks
+pioneer_3band_detail
+pioneer_3band_overview
+errors
+elapsed_seconds
+```
+
+The compatibility command below returns the same per-track objects wrapped in a list because the current Tauri test UI already calls this shape:
+
+```bash
+cd analysis
+.venv/bin/python -m fourfour_analysis analyze /path/to/track.mp3 --json
+```
+
 Build a manifest from tagged files:
 
 ```bash
@@ -126,7 +151,7 @@ Backends are registered in `src/fourfour_analysis/backends/registry.py`.
 | `stratum_dsp` | Rust subprocess wrapper | Rust binary | Benchmark target |
 | `essentia_key_bgate` | Essentia KeyExtractor `bgate` profile | base deps | Key benchmark winner |
 
-`fourfour-analyze` always uses `final_stack`. The benchmark CLI still exposes the underlying variants for comparison runs.
+`fourfour-analyze` always uses the full orchestrator: `final_stack` for BPM/key/energy/beats/cues plus the newer Pioneer waveform analyzer from `waveform.py`. The benchmark CLI still exposes the underlying variants for comparison runs.
 
 ## Current Key Decision
 
@@ -175,7 +200,8 @@ Important modules:
 | `src/fourfour_analysis/cache.py` | Content/config-addressed result cache |
 | `src/fourfour_analysis/types.py` | Shared dataclasses |
 | `src/fourfour_analysis/backends/base.py` | Backend interface and caching wrapper |
-| `src/fourfour_analysis/backends/final_stack.py` | Production stack wrapper for `fourfour-analyze` |
+| `src/fourfour_analysis/analyze.py` | Full single-track orchestrator used by `fourfour-analyze` and the module compatibility command |
+| `src/fourfour_analysis/backends/final_stack.py` | Production BPM/key/energy/beats/cues stack |
 | `src/fourfour_analysis/backends/registry.py` | Public backend variants |
 | `src/fourfour_analysis/backends/essentia_key.py` | Essentia `bgate` key backend |
 | `src/fourfour_analysis/backends/lexicon_port.py` | Lexicon-style full backend |

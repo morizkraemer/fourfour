@@ -1,5 +1,6 @@
 """Orchestrator: runs all extractors on a track and returns unified JSON."""
 
+from dataclasses import asdict
 import multiprocessing
 import time
 
@@ -28,7 +29,7 @@ def analyze_track(path: str) -> dict:
     start = time.time()
 
     try:
-        analysis = FinalStackBackend(features={"bpm", "key", "energy"}).analyze_track(path)
+        analysis = FinalStackBackend(features={"bpm", "key", "energy", "cues"}).analyze_track(path)
         result["bpm"] = analysis.bpm
         result["key"] = analysis.key
         result["energy"] = (
@@ -36,6 +37,8 @@ def analyze_track(path: str) -> dict:
             if analysis.energy is not None
             else None
         )
+        result["beats"] = [asdict(beat) for beat in analysis.beats]
+        result["cue_points"] = [asdict(cue) for cue in analysis.cue_points]
         if analysis.bpm is None:
             result["errors"].append("bpm: detection failed")
         if analysis.key is None:
@@ -46,6 +49,8 @@ def analyze_track(path: str) -> dict:
         result["bpm"] = None
         result["key"] = None
         result["energy"] = None
+        result["beats"] = []
+        result["cue_points"] = []
         result["errors"].append(f"analysis: {e}")
 
     # Waveform preview (400 bytes, Pioneer PWAV format)

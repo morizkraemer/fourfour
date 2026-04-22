@@ -24,6 +24,8 @@ def test_analyze_track_returns_all_fields(test_audio):
     assert "bpm" in result
     assert "key" in result
     assert "energy" in result
+    assert "beats" in result
+    assert "cue_points" in result
     assert "waveform_preview" in result
     assert "waveform_color" in result
     assert "waveform_peaks" in result

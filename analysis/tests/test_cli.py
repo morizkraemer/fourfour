@@ -25,6 +25,27 @@ def test_cli_single_file_json_output_payload(test_audio, capsys):
     assert data[0]["path"] == test_audio
 
 
+def test_fourfour_analyze_json_output_payload(test_audio, capsys, monkeypatch):
+    from fourfour_analysis.cli import analyze_main
+
+    monkeypatch.setattr("sys.argv", ["fourfour-analyze", test_audio, "--json"])
+
+    analyze_main()
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["path"] == test_audio
+    assert "bpm" in data
+    assert "key" in data
+    assert "energy" in data
+    assert "beats" in data
+    assert "cue_points" in data
+    assert "waveform_preview" in data
+    assert "waveform_color" in data
+    assert "waveform_peaks" in data
+    assert "pioneer_3band_detail" in data
+    assert "pioneer_3band_overview" in data
+
+
 def test_cli_multiple_files(test_audio, tmp_path, capsys):
     from fourfour_analysis.cli import _module_analyze_main
 
