@@ -81,6 +81,14 @@ pub fn write_usb(
         let ext_path = output_dir.join(anlz::anlz_ext_path_for_track(track));
         anlz::write_anlz_ext(&ext_path, track, analysis)
             .with_context(|| format!("Failed to write ANLZ .EXT for track {}", track.id))?;
+
+        // Write .2EX for full 3-band color on modern players (CDJ-3000X, XDJ-AZ,
+        // OPUS-QUAD) and CDJ-3000 (non-X) when available. The CDJ prefers .2EX
+        // over .EXT PWV4 when both are present, which avoids the proprietary
+        // PWV4 format that we have not yet reverse-engineered.
+        let ex_path = output_dir.join(anlz::anlz_2ex_path_for_track(track));
+        anlz::write_anlz_2ex(&ex_path, track, analysis)
+            .with_context(|| format!("Failed to write ANLZ .2EX for track {}", track.id))?;
     }
 
     // Write PDB database
@@ -88,6 +96,10 @@ pub fn write_usb(
     pdb::write_pdb(&pdb_path, tracks, playlists)?;
 
     onelibrary::write_onelibrary(output_dir, tracks, analyses, playlists)?;
+
+    // macOS creates ._* AppleDouble resource-fork files on FAT/exFAT volumes.
+    // CDJ firmware may try to parse these as ANLZ/PDB files and crash.
+    clean_dot_underscore(output_dir);
 
     Ok(())
 }
@@ -177,6 +189,10 @@ pub fn sync_usb(
                 let ext_path = output_dir.join(anlz::anlz_ext_path_for_track(entry.track));
                 anlz::write_anlz_ext(&ext_path, entry.track, entry.analysis)
                     .with_context(|| format!("Failed to write ANLZ .EXT for track {}", entry.usb_id))?;
+                // TODO: .2EX disabled pending CDJ-3000 crash investigation.
+                // let ex_path = output_dir.join(anlz::anlz_2ex_path_for_track(entry.track));
+                // anlz::write_anlz_2ex(&ex_path, entry.track, entry.analysis)
+                //     .with_context(|| format!("Failed to write ANLZ .2EX for track {}", entry.usb_id))?;
 
                 // Write artwork
                 if let Some(ref art_data) = entry.track.artwork {
@@ -193,6 +209,10 @@ pub fn sync_usb(
                 let ext_path = output_dir.join(anlz::anlz_ext_path_for_track(entry.track));
                 anlz::write_anlz_ext(&ext_path, entry.track, entry.analysis)
                     .with_context(|| format!("Failed to write ANLZ .EXT for track {}", entry.usb_id))?;
+                // TODO: .2EX disabled pending CDJ-3000 crash investigation.
+                // let ex_path = output_dir.join(anlz::anlz_2ex_path_for_track(entry.track));
+                // anlz::write_anlz_2ex(&ex_path, entry.track, entry.analysis)
+                //     .with_context(|| format!("Failed to write ANLZ .2EX for track {}", entry.usb_id))?;
 
                 if let Some(ref art_data) = entry.track.artwork {
                     if let Err(e) = write_artwork(&artwork_dir, entry.usb_id, art_data) {
@@ -228,6 +248,10 @@ pub fn sync_usb(
     let pdb_path = rekordbox_dir.join("export.pdb");
     pdb::write_pdb(&pdb_path, &merged_tracks, &plan.playlists)?;
     onelibrary::write_onelibrary(output_dir, &merged_tracks, &merged_analyses, &plan.playlists)?;
+
+    // macOS creates ._* AppleDouble resource-fork files on FAT/exFAT volumes.
+    // CDJ firmware may try to parse these as ANLZ/PDB files and crash.
+    clean_dot_underscore(output_dir);
 
     Ok(report)
 }
@@ -270,4 +294,31 @@ fn remove_track_files(output_dir: &Path, track: &ExistingTrack) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Remove macOS `._*` AppleDouble resource-fork files from the PIONEER directory tree.
+///
+/// macOS automatically creates these when writing to FAT/exFAT volumes.
+/// CDJ firmware may attempt to parse them alongside legitimate files and crash.
+fn clean_dot_underscore(output_dir: &Path) {
+    fn walk(dir: &Path) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("._") {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+            }
+            if path.is_dir() {
+                walk(&path);
+            }
+        }
+    }
+    walk(&output_dir.join("PIONEER"));
+    walk(&output_dir.join("Contents"));
 }

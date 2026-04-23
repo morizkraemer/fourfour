@@ -336,80 +336,76 @@ export default class WaveformDisplay {
     }
 
     _renderLexiconWaveform(ctx, w, h, data, startFrac, endFrac) {
-        const startIdx = Math.floor(startFrac * data.length);
-        const endIdx = Math.ceil(endFrac * data.length);
-        const visibleCount = endIdx - startIdx;
-        if (visibleCount <= 0) return;
+        const N = data.length;
+        if (N === 0) return;
 
-        const samplesPerPixel = visibleCount / w;
+        const visibleFrac = endFrac - startFrac;
+        if (visibleFrac <= 0) return;
 
-        // Pre-compute per-pixel absolute band amplitudes
-        const bassA = new Float32Array(w);
-        const midA  = new Float32Array(w);
-        const highA = new Float32Array(w);
+        const entriesPerPixel = (visibleFrac * N) / w;
 
-        for (let px = 0; px < w; px++) {
-            const tStart = startIdx + px * samplesPerPixel;
-            let amp, bassW, midW, highW;
+        // ── Envelope lead-in ────────────────────────────────────────
+        // Process extra pixels before the viewport so the envelope
+        // follower is warmed up at the left edge.  Prevents shape
+        // popping when transients cross the viewport boundary.
+        const ENV_LEAD = 64;
+        const leadFrac = ENV_LEAD * visibleFrac / w;
+        const extStartFrac = Math.max(0, startFrac - leadFrac);
+        const leadPx = Math.round((startFrac - extStartFrac) / visibleFrac * w);
+        const totalPx = leadPx + w;
 
-            if (samplesPerPixel < 1) {
-                // Zoomed in — asymmetric interpolation:
-                // Attack (next column louder): nearest-neighbor → sharp vertical left edge.
-                // Decay  (next column quieter): linear interpolation → smooth taper.
-                // This gives the Rekordbox "pointed" shape: instant hit, gradual fall-off.
-                const i0 = Math.max(0, Math.floor(tStart));
-                const i1 = Math.min(data.length - 1, i0 + 1);
-                const t = tStart - i0;
-                const d0 = data[i0], d1 = data[i1];
-                if (d1.amp >= d0.amp) {
-                    // Attack — stay at current column until the boundary
-                    amp   = d0.amp;
-                    bassW = d0.r;
-                    midW  = d0.g;
-                    highW = d0.b;
-                } else {
-                    // Decay — smooth interpolation toward quieter next column
-                    amp   = d0.amp * (1 - t) + d1.amp * t;
-                    bassW = d0.r   * (1 - t) + d1.r   * t;
-                    midW  = d0.g   * (1 - t) + d1.g   * t;
-                    highW = d0.b   * (1 - t) + d1.b   * t;
+        const bassA = new Float32Array(totalPx);
+        const midA  = new Float32Array(totalPx);
+        const highA = new Float32Array(totalPx);
+
+        // ── Data → pixel  (iterate entries, not pixels) ─────────────
+        // Each data entry maps to a deterministic pixel position.
+        // On pan ALL entries shift by the same pixel offset, so the
+        // waveform shape slides without morphing.
+        const pixelScale = w / visibleFrac;          // px per track-fraction
+        const iFirst = Math.max(0, Math.floor(extStartFrac * N));
+        const iLast  = Math.min(N - 1, Math.ceil(endFrac * N));
+
+        if (entriesPerPixel < 1) {
+            // Zoomed in — each entry spans multiple pixels.
+            // Fill each entry's pixel range with its amplitude.
+            for (let i = iFirst; i <= iLast; i++) {
+                const px0 = Math.max(0, Math.floor((i / N - extStartFrac) * pixelScale));
+                const px1 = Math.min(totalPx, Math.ceil(((i + 1) / N - extStartFrac) * pixelScale));
+                const d = data[i];
+                const [b, m, hi] = bandAmps(d.amp, d.r, d.g, d.b);
+                for (let px = px0; px < px1; px++) {
+                    bassA[px] = b;
+                    midA[px]  = m;
+                    highA[px] = hi;
                 }
-            } else {
-                // Zoomed out — average amplitude in range, average band weights
-                const iStart = Math.max(0, Math.floor(tStart));
-                const iEnd = Math.min(data.length - 1, Math.ceil(tStart + samplesPerPixel));
-                if (iStart > iEnd) continue;
-                let sumAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
-                for (let i = iStart; i <= iEnd; i++) {
-                    const d = data[i];
-                    sumAmp += d.amp;
-                    sumR += d.r; sumG += d.g; sumB += d.b; count++;
-                }
-                if (count === 0) continue;
-                amp    = sumAmp / count;
-                bassW  = sumR / count;
-                midW   = sumG / count;
-                highW  = sumB / count;
             }
-            [bassA[px], midA[px], highA[px]] = bandAmps(amp, bassW, midW, highW);
+        } else {
+            // Zoomed out — multiple entries per pixel.
+            // MAX preserves transient peaks and is far more stable than
+            // averaging when entries cross pixel boundaries on pan.
+            for (let i = iFirst; i <= iLast; i++) {
+                const px = Math.floor((i / N - extStartFrac) * pixelScale);
+                if (px < 0 || px >= totalPx) continue;
+                const d = data[i];
+                const [b, m, hi] = bandAmps(d.amp, d.r, d.g, d.b);
+                if (b > bassA[px]) bassA[px] = b;
+                if (m > midA[px]) midA[px] = m;
+                if (hi > highA[px]) highA[px] = hi;
+            }
         }
 
-        // Envelope follower: sustains amplitude between beats so the waveform
-        // doesn't fade to silence between hits (Rekordbox style).
-        // The asymmetric interpolation above already handles sharp attacks, so
-        // the envelope can be slow without re-introducing the ramp-to-transient.
-        // decayPerColumn=0.92 → ~16% amplitude left after one beat at ~120bpm.
-        const bassE = applyEnvelope(bassA, samplesPerPixel, 0.92);
-        const midE  = applyEnvelope(midA,  samplesPerPixel, 0.92);
-        const highE = applyEnvelope(highA, samplesPerPixel, 0.92);
+        // ── Envelope (full range including lead-in) ─────────────────
+        const bassE = applyEnvelope(bassA, entriesPerPixel, 0.92);
+        const midE  = applyEnvelope(midA,  entriesPerPixel, 0.92);
+        const highE = applyEnvelope(highA, entriesPerPixel, 0.92);
 
-        // Draw three layers back-to-front as filled symmetric shapes: bass → mids → highs.
-        // The envelope's exponential decay makes the top edge a smooth curve naturally.
+        // ── Draw visible portion only (skip lead-in buffer) ─────────
         const yCenter = h / 2;
         const scale = h / 2 * 0.95;
-        drawBand(ctx, bassE, w, yCenter, scale, COLOR_BASS);
-        drawBand(ctx, midE,  w, yCenter, scale, COLOR_MID);
-        drawBand(ctx, highE, w, yCenter, scale, COLOR_HIGH);
+        drawBand(ctx, bassE.subarray(leadPx, leadPx + w), w, yCenter, scale, COLOR_BASS);
+        drawBand(ctx, midE.subarray(leadPx, leadPx + w),  w, yCenter, scale, COLOR_MID);
+        drawBand(ctx, highE.subarray(leadPx, leadPx + w), w, yCenter, scale, COLOR_HIGH);
     }
 
     _renderMonoFallback(ctx, w, h, previewData, startFrac, endFrac) {

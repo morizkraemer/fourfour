@@ -24,6 +24,10 @@ const TAG_CUE_EXTENDED: &[u8; 4] = b"PCO2";
 const TAG_BEAT_GRID_EXT: &[u8; 4] = b"PQT2";
 const TAG_VBR_EXT: &[u8; 4] = b"PVB2";
 
+/// Section tag types — .2EX file (OneLibrary / CDJ-3000 3-band waveform)
+const TAG_2EX_OVERVIEW: &[u8; 4] = b"PWV6";
+const TAG_2EX_DETAIL: &[u8; 4] = b"PWV7";
+
 /// Write an ANLZ `.DAT` file for a track to `output_path`.
 ///
 /// The file contains the following sections in the order required by rekordbox:
@@ -227,12 +231,64 @@ pub fn write_anlz_ext(
     Ok(())
 }
 
+/// Write an ANLZ `.2EX` file for a track to `output_path`.
+///
+/// The .2EX file contains OneLibrary 3-band waveforms in the interoperable
+/// PWV6/PWV7 format. It is required for full 3-band color display on modern
+/// players (CDJ-3000X, XDJ-AZ, OPUS-QUAD) and improves waveform quality on
+/// the CDJ-3000 (non-X).
+///
+/// Sections: PPTH → PWV7 (full-res) → PWV6 (overview) → PWVC (color config)
+pub fn write_anlz_2ex(
+    output_path: &Path,
+    track: &Track,
+    analysis: &AnalysisResult,
+) -> Result<()> {
+    let duration_secs = track.duration_secs;
+    let path_section = build_path_section(&track.usb_path);
+    let pwv7_section = build_pwv7_section(analysis, duration_secs);
+    let pwv6_section = build_pwv6_section(analysis);
+    let pwvc_section = build_pwvc_section(analysis);
+
+    let total_len = HEADER_LEN as usize
+        + path_section.len()
+        + pwv7_section.len()
+        + pwv6_section.len()
+        + pwvc_section.len();
+
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = std::fs::File::create(output_path)?;
+
+    // File header (28 bytes) — same as .DAT/.EXT
+    file.write_all(ANLZ_MAGIC)?;
+    file.write_all(&HEADER_LEN.to_be_bytes())?;
+    file.write_all(&(total_len as u32).to_be_bytes())?;
+    file.write_all(&1u32.to_be_bytes())?;
+    file.write_all(&0x0001_0000u32.to_be_bytes())?;
+    file.write_all(&0x0001_0000u32.to_be_bytes())?;
+    file.write_all(&[0u8; 4])?;
+
+    // Sections
+    file.write_all(&path_section)?;
+    file.write_all(&pwv7_section)?;
+    file.write_all(&pwv6_section)?;
+    file.write_all(&pwvc_section)?;
+
+    Ok(())
+}
+
 /// PWV3 section: color preview waveform (variable entries, 1 byte each).
 /// Entry count = duration_secs * 150 to match rekordbox's resolution.
 /// Each byte: bits 7-5 = color (1=red/bass, 2=blue/high, 4=green/mid, 7=white), bits 4-0 = height.
 fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let section_header_len: u32 = 24;
     let entry_count: u32 = (duration_secs * 150.0).round() as u32;
+    // Cap at 51200 entries — the old firmware may allocate fixed-size buffers
+    // based on this maximum. Exceeding it can corrupt memory on load.
+    let entry_count = entry_count.min(51200);
     let section_total_len = section_header_len + entry_count;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
@@ -289,6 +345,9 @@ fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) ->
 fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let section_header_len: u32 = 24;
     let num_entries: u32 = (duration_secs * 150.0).round() as u32;
+    // Cap at 51200 entries — the old firmware may allocate fixed-size buffers
+    // based on this maximum. Exceeding it can corrupt memory on load.
+    let num_entries = num_entries.min(51200);
     let data_len = num_entries * 2;
     let section_total_len = section_header_len + data_len;
 
@@ -300,6 +359,9 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
     buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
     buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (confirmed from rekordbox)
 
+    // PWV5 stores high-resolution amplitude (not color).
+    // Color lives in PWV3 (1-byte color+height) and PWV4 (6-byte RGB).
+    // Byte 0: max amplitude (0-255). Byte 1: 0x80 (observed constant in rekordbox).
     if let Some(cw) = &analysis.color_waveform {
         let src_len = cw.detail.len() as u64;
         for i in 0..num_entries {
@@ -314,31 +376,19 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
             } else {
                 [0, 0, 0]
             };
-            let max_amp = low.max(mid).max(high);
-            // Scale amplitude (0-255) to 5-bit height (0-31) for bits 14:10.
-            let height = (max_amp as u32 * 31 / 255) as u16;
-            // Color indicator in bits 4:0 — must match parse_pwv5 ranges:
-            // 0-2 neutral, 3-7 bass dominant, 8-12 treble dominant, 13+ mid dominant.
-            let ch3: u16 = if max_amp == 0 {
-                0 // silence
-            } else if low >= mid && low >= high {
-                5  // bass dominant
-            } else if high >= low && high >= mid {
-                10 // treble dominant
-            } else {
-                15 // mid dominant
-            };
-            let word: u16 = (height << 10) | ch3;
-            buf.extend_from_slice(&word.to_le_bytes());
+            let amplitude = low.max(mid).max(high);
+            buf.push(amplitude);
+            buf.push(0x80); // constant second byte observed in rekordbox exports
         }
     } else {
-        // Fallback: derive from mono PWAV, neutral color.
+        // Fallback: derive amplitude from mono PWAV data.
         for i in 0..num_entries {
             let pwav_idx = (i * 400 / num_entries) as usize;
             let pwav_byte = analysis.waveform.data[pwav_idx];
-            let height = (pwav_byte & 0x1F) as u16; // 5-bit height (0-31)
-            let word: u16 = height << 10; // neutral color (ch3 = 0), height in bits 14:10
-            buf.extend_from_slice(&word.to_le_bytes());
+            let height = pwav_byte & 0x1F; // 5-bit height (0-31)
+            let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
+            buf.push(amplitude);
+            buf.push(0x80); // constant second byte observed in rekordbox exports
         }
     }
 
@@ -361,30 +411,16 @@ fn build_color_waveform_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
     buf.extend_from_slice(&[0u8; 4]);                          // unknown
 
-    if let Some(cw) = &analysis.color_waveform {
-        // overview is expected to be exactly 1200 entries; use direct indexing,
-        // falling back to interpolation if lengths differ.
-        let src_len = cw.overview.len() as u32;
-        for i in 0..1200u32 {
-            let src_idx = if src_len > 0 {
-                (i * src_len / 1200) as usize
-            } else {
-                0
-            };
-            let [low, mid, high] = if src_idx < cw.overview.len() {
-                cw.overview[src_idx]
-            } else {
-                [0, 0, 0]
-            };
-            let max_height = low.max(mid).max(high);
-            // 6 bytes per entry: [red(bass), green(mid), blue(high), max_height, high/2, whiteness]
-            buf.push(low);           // red — bass channel
-            buf.push(mid);           // green — mid channel
-            buf.push(high);          // blue — treble channel
-            buf.push(max_height);    // overall height
-            buf.push(high / 2);      // secondary blue
-            buf.push(0);             // whiteness
-        }
+    // NOTE: We intentionally ignore real color_waveform data for PWV4.
+    // Rekordbox's PWV4 uses a proprietary 6-byte encoding that we have not
+    // yet reverse-engineered. Writing real RGB data in our assumed format
+    // crashes the CDJ-3000. The fake-green fallback (derived from mono PWAV)
+    // is safe and produces a usable waveform display.
+    //
+    // Real 3-band color data is written to the .2EX file (PWV6/PWV7) which
+    // uses an interoperable format understood by modern players.
+    if false {
+        let _ = &analysis.color_waveform; // keep field alive for .2EX
     } else {
         // Fallback: derive color from mono PWAV (fake green tint)
         for i in 0..1200u32 {
@@ -437,15 +473,20 @@ fn build_cue_extended_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
     buf
 }
 
-/// PQT2 section: extended beat grid.
+/// PQT2 section: extended beat grid (header-only, no data).
+///
+/// The PQT2 2-byte-per-beat data encoding is not yet understood — Rekordbox uses
+/// timing intervals in an unknown unit, not bar_position|tempo as we previously
+/// assumed. Writing incorrect PQT2 data can crash CDJ hardware. The CDJ falls
+/// back to PQTZ (which we write correctly) when PQT2 has no data entries.
+///
+/// Header layout matches rekordbox exactly; do not change field positions.
 fn build_beat_grid_ext_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
     let beats = &analysis.beat_grid.beats;
-    let beat_count = beats.len() as u32;
 
-    // PQT2 header: 56 bytes. Data: 2 bytes per beat.
+    // Write header-only PQT2 with 0 data entries.
     let section_header_len: u32 = 56;
-    let data_len = beat_count * 2;
-    let section_total_len = section_header_len + data_len;
+    let section_total_len = section_header_len; // no data
 
     let track_duration_ms = (duration_secs * 1000.0).round() as u32;
 
@@ -457,20 +498,13 @@ fn build_beat_grid_ext_section(analysis: &AnalysisResult, duration_secs: f64) ->
     buf.extend_from_slice(&0x0100_0002u32.to_be_bytes());      // flags/version
     buf.extend_from_slice(&[0u8; 4]);                          // unknown2
     buf.extend_from_slice(&[0u8; 4]);                          // timing field 1
-    buf.extend_from_slice(&2u32.to_be_bytes());                // unknown3
+    buf.extend_from_slice(&2u32.to_be_bytes());                // unknown3 — observed constant 2 in rekordbox
     buf.extend_from_slice(&[0u8; 4]);                          // timing field 2
     buf.extend_from_slice(&track_duration_ms.to_be_bytes());   // track duration ms
-    buf.extend_from_slice(&beat_count.to_be_bytes());          // beat count
-    buf.extend_from_slice(&[0u8; 4]);                          // unknown4 (checksum?)
+    buf.extend_from_slice(&(beats.len() as u32).to_be_bytes());// PQTZ beat count (rekordbox writes this even when PQT2 has no data)
+    buf.extend_from_slice(&[0u8; 4]);                          // unknown4
     buf.extend_from_slice(&[0u8; 4]);                          // unknown5
     buf.extend_from_slice(&[0u8; 4]);                          // unknown6
-
-    // 2-byte entries per beat — simple encoding based on tempo
-    for beat in beats {
-        let tempo_encoded = (beat.tempo & 0x03FF) as u16;
-        let beat_num = ((beat.bar_position as u16) & 0x0F) << 10;
-        buf.extend_from_slice(&(beat_num | tempo_encoded).to_be_bytes());
-    }
 
     buf
 }
@@ -608,4 +642,128 @@ pub fn anlz_ext_path_for_track(track: &Track) -> String {
 /// this is kept for PDB completeness only.
 pub fn anlz_path_for_pdb(track: &Track) -> String {
     format!("/{}", anlz_path_for_track(track))
+}
+
+/// Return the USB-relative path to the `ANLZ0000.2EX` file for `track`.
+///
+/// Same directory as [`anlz_path_for_track`], different file extension. No leading `/`.
+pub fn anlz_2ex_path_for_track(track: &Track) -> String {
+    format!("{}/ANLZ0000.2EX", anlz_dir_for_track(track))
+}
+
+/// PWV7 section: full-resolution 3-band waveform (same entry count as PWV3/PWV5).
+/// 3 bytes per entry: [low, mid, high] frequency amplitudes.
+fn build_pwv7_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
+    let section_header_len: u32 = 24;
+    let num_entries: u32 = (duration_secs * 150.0).round() as u32;
+    let num_entries = num_entries.min(51200);
+    let data_len = num_entries * 3;
+    let section_total_len = section_header_len + data_len;
+
+    let mut buf = Vec::with_capacity(section_total_len as usize);
+    buf.extend_from_slice(TAG_2EX_DETAIL);
+    buf.extend_from_slice(&section_header_len.to_be_bytes());
+    buf.extend_from_slice(&section_total_len.to_be_bytes());
+    buf.extend_from_slice(&3u32.to_be_bytes());               // unknown (version/type)
+    buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
+    buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());      // unknown fields
+
+    if let Some(cw) = &analysis.color_waveform {
+        let src_len = cw.detail.len() as u64;
+        for i in 0..num_entries {
+            let src_idx = if src_len > 0 {
+                (i as u64 * src_len / num_entries as u64) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.detail.len() {
+                cw.detail[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            buf.push(low);
+            buf.push(mid);
+            buf.push(high);
+        }
+    } else {
+        for i in 0..num_entries {
+            let pwav_idx = (i * 400 / num_entries) as usize;
+            let pwav_byte = analysis.waveform.data[pwav_idx];
+            let height = pwav_byte & 0x1F;
+            let v = (height as u32 * 255 / 31) as u8;
+            buf.push(v); // low
+            buf.push(v); // mid
+            buf.push(v); // high
+        }
+    }
+
+    buf
+}
+
+/// PWV6 section: overview 3-band waveform (1200 entries, 3 bytes each).
+/// 3 bytes per entry: [low, mid, high] frequency amplitudes.
+fn build_pwv6_section(analysis: &AnalysisResult) -> Vec<u8> {
+    let section_header_len: u32 = 20;
+    let num_entries: u32 = 1200;
+    let data_len = num_entries * 3;
+    let section_total_len = section_header_len + data_len;
+
+    let mut buf = Vec::with_capacity(section_total_len as usize);
+    buf.extend_from_slice(TAG_2EX_OVERVIEW);
+    buf.extend_from_slice(&section_header_len.to_be_bytes());
+    buf.extend_from_slice(&section_total_len.to_be_bytes());
+    buf.extend_from_slice(&3u32.to_be_bytes());               // unknown (always 3)
+    buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
+
+    if let Some(cw) = &analysis.color_waveform {
+        let src_len = cw.overview.len() as u32;
+        for i in 0..1200u32 {
+            let src_idx = if src_len > 0 {
+                (i * src_len / 1200) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.overview.len() {
+                cw.overview[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            buf.push(low);
+            buf.push(mid);
+            buf.push(high);
+        }
+    } else {
+        for i in 0..1200u32 {
+            let pwav_idx = (i * 400 / 1200) as usize;
+            let pwav_byte = analysis.waveform.data[pwav_idx];
+            let height = pwav_byte & 0x1F;
+            let v = (height as u32 * 255 / 31) as u8;
+            buf.push(v); // low
+            buf.push(v); // mid
+            buf.push(v); // high
+        }
+    }
+
+    buf
+}
+
+/// PWVC section: color configuration metadata (observed in rekordbox .2EX).
+///
+/// 14-byte header + 6 bytes data = 20 bytes total.
+/// Data: 3 × big-endian u16 values. Meaning unknown — possibly a color
+/// calibration or average tint. We write a safe neutral constant.
+fn build_pwvc_section(_analysis: &AnalysisResult) -> Vec<u8> {
+    let section_header_len: u32 = 14;
+    let section_total_len: u32 = 20;
+    let mut buf = Vec::with_capacity(section_total_len as usize);
+    buf.extend_from_slice(b"PWVC");
+    buf.extend_from_slice(&section_header_len.to_be_bytes());
+    buf.extend_from_slice(&section_total_len.to_be_bytes());
+    // Three u16 values observed in rekordbox: [0x0050, 0x0064, 0x0089] etc.
+    // First value is always 0x50 (80). Second/third vary by track.
+    // We use a safe neutral constant until the meaning is understood.
+    buf.extend_from_slice(&0x0050u16.to_be_bytes());
+    buf.extend_from_slice(&0x0064u16.to_be_bytes());
+    buf.extend_from_slice(&0x0089u16.to_be_bytes());
+    buf
 }

@@ -80,7 +80,7 @@ class DeepRhythmEssentiaBackend(AnalysisBackend):
             tempo_audio, _ = preprocess_tempo(audio, sr)
             duration = len(tempo_audio) / sr
             if bpm is not None and bpm > 0:
-                beats = _generate_beats(tempo_audio, sr, bpm, duration)
+                beats, _anchor_idx = _generate_beats(tempo_audio, sr, bpm, duration)
             # If DeepRhythm failed, beats stays empty
 
         # Key via Essentia bgate

@@ -194,19 +194,15 @@ fn parse_pwv3(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     Ok(entries)
 }
 
-/// Parse a PWV5 (HD color waveform, 2 bytes/entry, little-endian) section into `[low, mid, high]` entries.
+/// Parse a PWV5 (high-resolution amplitude waveform, 2 bytes/entry) section.
 ///
-/// Each 2-byte entry is a little-endian 16-bit word:
-/// - bits 14:10 = amplitude (0-31)
-/// - bits  4:0  = color indicator:
-///     0-2  → neutral (all bands equal)
-///     3-7  → bass dominant   (blue in Rekordbox)
-///     8-12 → treble dominant (white)
-///     13+  → mid dominant    (orange)
+/// Rekordbox writes PWV5 as `[amplitude, 0x80]` where:
+/// - byte 0 = max amplitude (0-255)
+/// - byte 1 = 0x80 (constant flags byte observed in all exports)
 ///
-/// Outputs `[bass, mid, high]` with the dominant band ×4 so that the same
-/// downstream normalization used for PWV3 (`amp = max/124`) produces the
-/// correct amplitude and color.
+/// Color information lives in PWV3/PWV4; PWV5 is amplitude-only detail.
+/// We return greyscale `[amp, amp, amp]` so downstream code gets the shape
+/// even though the per-band color must come from PWV3/PWV4.
 fn parse_pwv5(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     if section.len() < 24 {
         bail!("PWV5 section too short ({} bytes)", section.len());
@@ -218,27 +214,9 @@ fn parse_pwv5(section: &[u8]) -> Result<Vec<[u8; 3]>> {
 
     let mut entries = Vec::with_capacity(count);
     for i in 0..count {
-        let b0 = data[i * 2];
-        let b1 = data[i * 2 + 1];
-        // Little-endian: word = (b1 << 8) | b0
-        let word = ((b1 as u16) << 8) | (b0 as u16);
-        let height = ((word >> 10) & 0x1f) as u16;
-        let ch3 = (word & 0x1f) as u8;
-
-        let (bass, mid, high): (u16, u16, u16) = if ch3 <= 2 {
-            // Neutral / silence — all bands equal at ×4 scale so downstream
-            // normalization (÷ max) preserves amplitude = height/31.
-            let v = (height * 4).min(255);
-            (v, v, v)
-        } else if ch3 <= 7 {
-            ((height * 4).min(255), height, height) // bass dominant (blue)
-        } else if ch3 <= 12 {
-            (height, height, (height * 4).min(255)) // treble dominant (white)
-        } else {
-            (height, (height * 4).min(255), height) // mid dominant (orange)
-        };
-
-        entries.push([bass as u8, mid as u8, high as u8]);
+        let amplitude = data[i * 2];
+        // let flags = data[i * 2 + 1]; // typically 0x80
+        entries.push([amplitude, amplitude, amplitude]);
     }
     Ok(entries)
 }
@@ -269,43 +247,55 @@ fn parse_pwv4(section: &[u8]) -> Result<Vec<[u8; 3]>> {
 
 // ── public API ──────────────────────────────────────────────────────────────
 
-/// Read a `.DAT` file (and its sibling `.EXT` if it exists) into an
+/// Read a `.DAT` file (and its siblings `.EXT` and `.2EX` if they exist) into an
 /// [`AnalysisResult`].
 ///
 /// The `.EXT` file is expected at the same path with the extension changed to
-/// `"EXT"`.  If the `.EXT` file doesn't exist, `color_waveform` will be `None`.
+/// `"EXT"`.  The `.2EX` file is expected with extension `"2EX"`.
+/// If neither exists, `color_waveform` will be `None`.
 ///
 /// The reader is tolerant: unknown tags are skipped and missing sections
 /// produce sensible defaults.
+///
+/// `.2EX` (PWV6/PWV7) is preferred over `.EXT` (PWV3/PWV4/PWV5) when both are
+/// present, because `.2EX` uses the standardised 3-byte `[low, mid, high]` format.
 pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
     let dat_bytes = std::fs::read(dat_path)
         .with_context(|| format!("failed to read DAT file: {}", dat_path.display()))?;
 
     let (beats, waveform_data, mut cue_points) = parse_dat_sections(&dat_bytes)?;
 
-    // Try to read the sibling .EXT file.
-    let ext_path = dat_path.with_extension("EXT");
-    let color_waveform = if ext_path.exists() {
-        let ext_bytes = std::fs::read(&ext_path)
-            .with_context(|| format!("failed to read EXT file: {}", ext_path.display()))?;
-        let (ext_cues, detail, overview) = parse_ext_sections(&ext_bytes)?;
-
-        // PCO2 extended cues are more authoritative than PCOB cues when present.
-        if !ext_cues.is_empty() {
-            cue_points = ext_cues;
-        }
-
-        if detail.is_some() || overview.is_some() {
-            Some(ColorWaveform {
-                detail: detail.unwrap_or_default(),
-                overview: overview.unwrap_or_default(),
-            })
-        } else {
-            None
-        }
+    // Try to read the sibling .2EX file first (preferred format).
+    let ex_path = dat_path.with_extension("2EX");
+    let mut color_waveform = if ex_path.exists() {
+        let ex_bytes = std::fs::read(&ex_path)
+            .with_context(|| format!("failed to read 2EX file: {}", ex_path.display()))?;
+        parse_2ex_sections(&ex_bytes).ok()
     } else {
         None
     };
+
+    // Fall back to .EXT if .2EX is missing or empty.
+    if color_waveform.is_none() {
+        let ext_path = dat_path.with_extension("EXT");
+        if ext_path.exists() {
+            let ext_bytes = std::fs::read(&ext_path)
+                .with_context(|| format!("failed to read EXT file: {}", ext_path.display()))?;
+            let (ext_cues, detail, overview) = parse_ext_sections(&ext_bytes)?;
+
+            // PCO2 extended cues are more authoritative than PCOB cues when present.
+            if !ext_cues.is_empty() {
+                cue_points = ext_cues;
+            }
+
+            if detail.is_some() || overview.is_some() {
+                color_waveform = Some(ColorWaveform {
+                    detail: detail.unwrap_or_default(),
+                    overview: overview.unwrap_or_default(),
+                });
+            }
+        }
+    }
 
     // Infer BPM from the first beat's tempo field (stored as BPM * 100).
     let bpm = beats
@@ -443,8 +433,9 @@ fn parse_ext_sections(
         offset += section_len;
     }
 
-    // Prefer PWV5 (HD color, 2 bytes/entry) over PWV3 (1 byte/entry) for detail.
-    let detail = pwv5_detail.or(pwv3_detail);
+    // Prefer PWV3 (color + height) over PWV5 (amplitude-only) for detail.
+    // PWV5 provides higher amplitude resolution but no color; PWV3 gives both.
+    let detail = pwv3_detail.or(pwv5_detail);
     Ok((cue_points, detail, pwv4_overview))
 }
 
@@ -487,4 +478,95 @@ fn parse_pco2(section: &[u8]) -> Result<Vec<CuePoint>> {
         });
     }
     Ok(cues)
+}
+
+/// Walk the tag-based sections in a `.2EX` file and extract PWV6/PWV7 data.
+///
+/// Returns `Some(ColorWaveform)` if at least one of PWV6 or PWV7 is found.
+fn parse_2ex_sections(data: &[u8]) -> Result<ColorWaveform> {
+    if data.len() < 28 {
+        bail!("2EX file too short for PMAI header ({} bytes)", data.len());
+    }
+    if &data[0..4] != b"PMAI" {
+        bail!("2EX file missing PMAI magic (got {:?})", &data[0..4]);
+    }
+
+    let mut pwv7_detail: Option<Vec<[u8; 3]>> = None;
+    let mut pwv6_overview: Option<Vec<[u8; 3]>> = None;
+
+    let file_header_len = read_u32_be(data, 4)? as usize;
+    let mut offset = file_header_len;
+
+    while offset + 12 <= data.len() {
+        let tag = &data[offset..offset + 4];
+        let _header_len = read_u32_be(data, offset + 4)? as usize;
+        let section_len = read_u32_be(data, offset + 8)? as usize;
+
+        if section_len == 0 || offset + section_len > data.len() {
+            break;
+        }
+
+        let section = &data[offset..offset + section_len];
+
+        match tag {
+            b"PWV7" => {
+                if let Ok(entries) = parse_pwv7(section) {
+                    pwv7_detail = Some(entries);
+                }
+            }
+            b"PWV6" => {
+                if let Ok(entries) = parse_pwv6(section) {
+                    pwv6_overview = Some(entries);
+                }
+            }
+            _ => { /* skip PPTH, etc. */ }
+        }
+
+        offset += section_len;
+    }
+
+    if pwv7_detail.is_some() || pwv6_overview.is_some() {
+        Ok(ColorWaveform {
+            detail: pwv7_detail.unwrap_or_default(),
+            overview: pwv6_overview.unwrap_or_default(),
+        })
+    } else {
+        bail!("no PWV6 or PWV7 sections found in 2EX file")
+    }
+}
+
+/// Parse a PWV7 (full-resolution 3-band, 3 bytes/entry) section.
+fn parse_pwv7(section: &[u8]) -> Result<Vec<[u8; 3]>> {
+    if section.len() < 24 {
+        bail!("PWV7 section too short ({} bytes)", section.len());
+    }
+    let entry_count = read_u32_be(section, 16)? as usize;
+    let data = &section[24..];
+    let max_entries = data.len() / 3;
+    let count = entry_count.min(max_entries);
+
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = i * 3;
+        entries.push([data[base], data[base + 1], data[base + 2]]);
+    }
+    Ok(entries)
+}
+
+/// Parse a PWV6 (overview 3-band, 3 bytes/entry) section.
+fn parse_pwv6(section: &[u8]) -> Result<Vec<[u8; 3]>> {
+    if section.len() < 20 {
+        bail!("PWV6 section too short ({} bytes)", section.len());
+    }
+    let entry_count = read_u32_be(section, 16)? as usize;
+    let data = &section[20..];
+    let max_entries = data.len() / 3;
+    let count = entry_count.min(max_entries);
+
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = i * 3;
+        entries.push([data[base], data[base + 1], data[base + 2]]);
+    }
+    Ok(entries)
 }

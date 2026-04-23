@@ -778,7 +778,7 @@ fn write_content(
             0i32,                              // masterDbId
             0i32,                              // masterContentId
             anlz_path,                         // analysisDataFilePath
-            105i32,                            // analysedBits
+            41i32,                             // analysedBits (1=waveform, 8=beatgrid, 32=color waveform)
             0i32,                              // contentLink
             0i32,                              // hasModified
             0i32,                              // cueUpdateCount

@@ -174,7 +174,10 @@ async function loadVolumes() {
         }
         if (outputDir) {
             select.value = volumes.includes(outputDir) ? outputDir : '';
-            if (select.value === '') outputDir = null;
+            if (select.value === '') {
+                outputDir = null;
+                document.getElementById('btn-wipe-main').disabled = true;
+            }
         }
 
         // Render sidebar USB rows
@@ -206,6 +209,7 @@ async function loadVolumes() {
 
 function selectVolume(path) {
     outputDir = path || null;
+    document.getElementById('btn-wipe-main').disabled = !outputDir;
     if (outputDir) {
         rightPanelMode = 'usb';
         showRightPanel(true);
@@ -247,6 +251,7 @@ async function ejectVolume() {
     try {
         await invoke('eject_volume', { path: outputDir });
         outputDir = null;
+        document.getElementById('btn-wipe-main').disabled = true;
         document.getElementById('usb-select').value = '';
         setUsbButtonsVisible(false);
         closeRightPanel();
@@ -275,6 +280,28 @@ async function wipeUsb() {
                 alert('USB wiped successfully.');
             })
             .catch(err => { alert('Wipe failed: ' + err); });
+    };
+}
+
+async function clearLocalLibrary() {
+    const dialog = document.getElementById('confirm-dialog');
+    document.getElementById('confirm-label').textContent =
+        '⚠ This will permanently delete all tracks, analyses, playlists, and artwork from the local library. This cannot be undone.';
+    dialog.returnValue = '';
+    dialog.showModal();
+    dialog.onclose = () => {
+        if (dialog.returnValue !== 'ok') return;
+        invoke('clear_local_library')
+            .then(() => {
+                tracks = [];
+                playlists = [];
+                selectedTrackIds.clear();
+                renderTracks();
+                renderPlaylistsInSidebar();
+                renderPlaylistTracks();
+                alert('Local library cleared.');
+            })
+            .catch(err => { alert('Clear failed: ' + err); });
     };
 }
 
