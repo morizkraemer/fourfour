@@ -1,5 +1,7 @@
 # Pioneer DeviceSQL & ANLZ Format — Reverse Engineering Notes
 
+> **Last updated:** 2026-04-23 (v0.9.20) — Added `.2EX` PWV6/PWV7/PWVC documentation, PWV4 proprietary-encoding warning, PWV5 `[amplitude, 0x80]` format, and PQT2 header-only safe layout.
+
 This document contains technical discoveries about Pioneer's proprietary DeviceSQL format (`export.pdb`), ANLZ analysis files, and the newer **OneLibrary format** (`exportLibrary.db`) that are **not publicly documented**. These findings were obtained through binary analysis, disassembly, and hardware testing on a **CDJ-3000 (firmware 3.19)**.
 
 Existing open-source documentation (Deep Symmetry, rekordcrate, Kaitai Struct specs) covers the broad structure. This document focuses on the **undocumented details that make or break hardware compatibility** — the things that cause "rekordbox database not found" or silent re-analysis on real players.
@@ -9,7 +11,7 @@ Existing open-source documentation (Deep Symmetry, rekordcrate, Kaitai Struct sp
 As of rekordbox 7.x, USB exports contain **both** the legacy format and the OneLibrary format side by side. Both must be written for full device compatibility:
 
 - **Legacy** (`export.pdb` + `.DAT` + `.EXT`): Required for CDJ-3000, XDJ-XZ, and all older players.
-- **OneLibrary** (`exportLibrary.db` + `.2EX` + `exportExt.pdb`): Required for CDJ-3000X, XDJ-AZ, OPUS-QUAD, OMNIS-DUO. Also read by djay Pro and Traktor.
+- **OneLibrary** (`exportLibrary.db` + `.2EX` + `exportExt.pdb`): Required for CDJ-3000X, XDJ-AZ, OPUS-QUAD, OMNIS-DUO. Also read by djay Pro and Traktor. **The CDJ-3000 (non-X) prefers `.2EX` over `.EXT` when both are present**, using it for full 3-band color waveforms.
 
 **Use this freely.** If you're building tools for Pioneer hardware, this will save you weeks of binary diffing.
 
@@ -142,15 +144,18 @@ PWV4  (7224 bytes)   — Color waveform preview (1200 entries, 6 bytes each)
 PVB2  (8032 bytes)   — Extended VBR info (all zeros for lossless)
 ```
 
+**⚠️ PWV4 Warning:** Rekordbox's PWV4 uses a **proprietary 6-byte encoding** that has not been reverse-engineered. Writing assumed `[R,G,B,max,secondary,white]` layouts with real color data crashes the CDJ-3000 firmware. The safe approach is to write a fake-green fallback in PWV4 and provide real 3-band colors via `.2EX` (PWV6/PWV7), which the CDJ prefers when present.
+
 ### .2EX File — OneLibrary Waveforms
 
-Contains the 3-band frequency waveforms used by OneLibrary. Required for CDJ-3000X/XDJ-AZ/OPUS-QUAD and readable by djay Pro and Traktor. The CDJ-3000 (non-X) works without it but displays lower-quality waveforms.
+Contains the interoperable 3-band frequency waveforms. **The CDJ-3000 (non-X) prefers `.2EX` over `.EXT` when both are present**, using PWV6/PWV7 for color display and falling back to `.EXT` PWV4 only when `.2EX` is absent.
 
 ```
 PMAI  (28 bytes)
 PPTH  (variable)     — File path (same as .DAT/.EXT)
 PWV7  (variable)     — 3-band waveform, full resolution (same entry count as PWV5, 3 bytes each)
 PWV6  (variable)     — 3-band waveform, overview (same entry count as PWV4, 3 bytes each)
+PWVC  (20 bytes)     — Color configuration metadata (3 × u16 BE values)
 ```
 
 ### PWV7 Section — Full-Resolution 3-Band Waveform
@@ -189,6 +194,20 @@ Offset  Size  Value       Description
 ```
 
 Same 3-byte [low, mid, high] encoding as PWV7. This is the simplified/interoperable counterpart to PWV4 (which uses 6 bytes per entry with Pioneer-specific color encoding).
+
+### PWVC Section — Color Configuration
+
+Small metadata block observed in all Rekordbox `.2EX` files. Purpose unknown — possibly a color calibration or average tint value.
+
+```
+Offset  Size  Value       Description
+0x00    4     "PWVC"      Tag
+0x04    4     0x0E        Header length (14)
+0x08    4     0x14        Section length (20)
+0x0C    2     0x0050      Unknown (always 80 / 0x50)
+0x0E    2     (varies)    Unknown (varies by track, e.g. 0x0064, 0x0077)
+0x10    2     (varies)    Unknown (varies by track, e.g. 0x0089, 0x007B)
+```
 
 ### PMAI Header
 
@@ -253,6 +272,47 @@ Offset  Size  Value       Description
 0x14    2     0x0096      Unknown (150 — possibly entries per beat?)
 0x16    2     0x0000      Unknown
 0x18    ...   data        51200 bytes, each byte: color(3 bits) | height(5 bits)
+```
+
+### PWV5 Section — Detailed Color Waveform
+
+High-resolution amplitude-only waveform. **Not a color format** — color lives in PWV3 (1-byte) and PWV4 (6-byte). PWV5 stores amplitude at ~150 entries/sec.
+
+```
+Offset  Size  Value       Description
+0x00    4     "PWV5"      Tag
+0x04    4     0x18        Header length (24)
+0x08    4     (varies)    Section length (header + entry_count * 2)
+0x0C    4     0x02        Unknown (version/type)
+0x10    4     (varies)    Entry count (duration_secs * 150, capped at 51200)
+0x14    4     0x00960305  Unknown (observed constant in rekordbox)
+0x18    ...   data        2 bytes per entry: [amplitude, 0x80]
+```
+
+**Format:** `[amplitude, 0x80]` where amplitude is 0-255. The second byte `0x80` is an observed constant in all Rekordbox exports. Do not write other values here — the CDJ firmware validates it.
+
+### PQT2 Section — Extended Beat Grid
+
+**Critical:** The 2-byte-per-beat data encoding is **not yet understood**. Rekordbox writes 805 data entries for a typical track; writing incorrect data crashes the CDJ-3000 firmware.
+
+**Safe approach:** Write a header-only PQT2 with 0 data entries. The CDJ falls back to PQTZ (which we write correctly) when PQT2 has no data.
+
+```
+Offset  Size  Value       Description
+0x00    4     "PQT2"      Tag
+0x04    4     0x38        Header length (56)
+0x08    4     0x38        Section length (56 when header-only, 56 + beats*2 otherwise)
+0x0C    4     0x00        Unknown1
+0x10    4     0x01000002  Flags/version
+0x14    4     0x00        Unknown2
+0x18    4     0x00        Timing field 1
+0x1C    4     0x02        Unknown3 — observed constant 2 in rekordbox
+0x20    4     0x00        Timing field 2
+0x24    4     (varies)    Track duration (ms)
+0x28    4     (varies)    Beat count (from PQTZ beats.len())
+0x2C    4     0x00        Unknown4
+0x30    4     0x00        Unknown5
+0x34    4     0x00        Unknown6
 ```
 
 ---
