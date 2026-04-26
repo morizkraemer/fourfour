@@ -225,7 +225,7 @@ export default class WaveformDisplay {
         ctx.fillStyle = '#0d0d0d';
         ctx.fillRect(0, 0, w, h);
 
-        const data = this._data?.waveform_color;
+        const data = this._data?.waveform_overview || this._data?.waveform_color;
         if (!data || data.length === 0) {
             this._renderMonoOverview(ctx, w, h);
         } else {
@@ -396,9 +396,10 @@ export default class WaveformDisplay {
         }
 
         // ── Envelope (full range including lead-in) ─────────────────
-        const bassE = applyEnvelope(bassA, entriesPerPixel, 0.92);
-        const midE  = applyEnvelope(midA,  entriesPerPixel, 0.92);
-        const highE = applyEnvelope(highA, entriesPerPixel, 0.92);
+        // Fast decay to match Rekordbox's sharp transient spikes
+        const bassE = applyEnvelope(bassA, entriesPerPixel, 0.65);
+        const midE  = applyEnvelope(midA,  entriesPerPixel, 0.65);
+        const highE = applyEnvelope(highA, entriesPerPixel, 0.65);
 
         // ── Draw visible portion only (skip lead-in buffer) ─────────
         const yCenter = h / 2;

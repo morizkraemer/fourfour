@@ -188,6 +188,9 @@ def _analyze_with_backend(backend_id: str, file_path: Path) -> dict:
         result_dict = asdict(result)
         result_dict["elapsed_seconds"] = elapsed
         result_dict["status"] = "ok"
+        # bytes → list[int] for JSON serialization
+        if isinstance(result_dict.get("waveform_preview"), bytes):
+            result_dict["waveform_preview"] = list(result_dict["waveform_preview"])
         return result_dict
     except Exception as e:
         elapsed = time.monotonic() - start
@@ -366,6 +369,25 @@ def _waveform_cols_to_list(columns: list) -> list[dict]:
     ]
 
 
+def _normalized_cols_to_display(cols: np.ndarray) -> list[dict]:
+    """Convert normalized (N, 3) float64 array to display format.
+
+    Outputs raw {r, g, b} in 0-127 range, matching production's
+    WaveformColumn format. The dev tool's cols_to_display() will
+    compute per-column amplitude from these raw values.
+    """
+    out = []
+    for i in range(len(cols)):
+        low, mid, high = cols[i]
+        # Pioneer PWV7 uses 0-127 range; match production output
+        out.append({
+            "r": min(127, int(round(low * 127))),
+            "g": min(127, int(round(mid * 127))),
+            "b": min(127, int(round(high * 127))),
+        })
+    return out
+
+
 def waveform_compare_main() -> None:
     """Compare waveform generation backends: Lexicon vs Librosa vs Essentia."""
     parser = argparse.ArgumentParser(
@@ -374,6 +396,9 @@ def waveform_compare_main() -> None:
     )
     parser.add_argument("file", help="Path to audio file")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON")
+    parser.add_argument("--sweep", action="store_true", dest="sweep", help="Generate many Lexicon parameter variations")
+    parser.add_argument("--hypotheses", action="store_true", dest="hypotheses", help="Generate PWV7 hypothesis variants for visual comparison")
+    parser.add_argument("--out", type=str, dest="out_path", help="Write JSON output to file (for dev harness)")
     args = parser.parse_args()
 
     file_path = Path(args.file)
@@ -382,47 +407,100 @@ def waveform_compare_main() -> None:
         sys.exit(1)
 
     # Full analysis for BPM / key / beats + lexicon waveform
-    main_result = _analyze_with_backend("final_stack", file_path)
+    main_result = _analyze_with_backend("deeprhythm_essentia", file_path)
 
     # Load + preprocess audio once for additional backends
     from fourfour_analysis.audio_io import load_audio, preprocess_waveform
     audio, sr = load_audio(str(file_path))
     audio_12k, sr_12k = preprocess_waveform(audio, sr)
 
-    from fourfour_analysis.backends.lexicon_waveform import generate_waveform as _lexicon
+    from fourfour_analysis.backends.lexicon_waveform import (
+        generate_waveform as _lexicon,
+        generate_waveform_with_params,
+        generate_waveform_filterbank,
+        SWEEP_VARIANTS,
+        FILTERBANK_VARIANTS,
+    )
 
-    # Lexicon waveform columns (re-use already-preprocessed audio)
-    lexicon_cols = _lexicon(audio_12k, sr_12k)
-    waveforms: dict[str, list[dict] | None] = {
-        "Lexicon": _waveform_cols_to_list(lexicon_cols),
-    }
+    waveforms: dict[str, list[dict] | None] = {}
 
-    try:
-        from fourfour_analysis.backends.librosa_waveform import generate_waveform_librosa
-        waveforms["Librosa"] = _waveform_cols_to_list(
-            generate_waveform_librosa(audio_12k, sr_12k)
-        )
-    except ImportError:
-        waveforms["Librosa"] = None
+    if args.hypotheses:
+        from fourfour_analysis.pwv7_research import HypothesisConfig, generate_pwv7_hypothesis
 
-    try:
-        from fourfour_analysis.backends.essentia_waveform import generate_waveform_essentia
-        waveforms["Essentia"] = _waveform_cols_to_list(
-            generate_waveform_essentia(audio_12k, sr_12k)
-        )
-    except ImportError:
-        waveforms["Essentia"] = None
+        # Focused set of visually distinguishable hypotheses
+        hypothesis_configs = [
+            ("Baseline (sqrt)", HypothesisConfig()),
+            ("Power=1.0 linear", HypothesisConfig(power=1.0)),
+            ("Power=0.7", HypothesisConfig(power=0.7)),
+            ("Envelope + linear", HypothesisConfig(smoothing="envelope", envelope_lookahead=2, power=1.0)),
+            ("Track peak + linear", HypothesisConfig(normalize="track_peak", power=1.0)),
+            ("Sigmoid", HypothesisConfig(normalize="sigmoid")),
+            ("Peak measure", HypothesisConfig(measure="peak")),
+            ("True peak", HypothesisConfig(measure="true_peak")),
+            ("Mean measure", HypothesisConfig(measure="mean")),
+            ("No smoothing", HypothesisConfig(smoothing="none", mix_factor=0.0)),
+            ("Mix 0.3", HypothesisConfig(smoothing="mix", mix_factor=0.3)),
+            ("Block max 3", HypothesisConfig(smoothing="block_max", block_max_width=3)),
+            ("Block max 5", HypothesisConfig(smoothing="block_max", block_max_width=5)),
+            ("Compressor", HypothesisConfig(smoothing="compressor", compressor_attack_ms=1.0, compressor_release_ms=100.0)),
+            ("LR crossover", HypothesisConfig(filter_type="linkwitz_riley")),
+            ("Shelving", HypothesisConfig(filter_type="shelving", filter_order=1)),
+            ("FFT bins", HypothesisConfig(filter_type="fft")),
+            ("Seg=160", HypothesisConfig(segment_width=160)),
+            ("Seg=60", HypothesisConfig(segment_width=60)),
+            ("Overlap 50%", HypothesisConfig(overlap=0.5)),
+            ("22kHz", HypothesisConfig(target_sr=22000, segment_width=147)),
+            ("Low=100/Mid=2k", HypothesisConfig(low_cutoff=100, mid_cutoff=2000)),
+            ("Low=200/Mid=4k", HypothesisConfig(low_cutoff=200, mid_cutoff=4000)),
+            ("Gain 180/100/60", HypothesisConfig(gain_low=180, gain_mid=100, gain_high=60)),
+            ("Gain 200/90/50", HypothesisConfig(gain_low=200, gain_mid=90, gain_high=50)),
+            # Peak-hold variants (the key to matching Rekordbox transients)
+            ("Peak-hold 3", HypothesisConfig(peak_hold=3)),
+            ("Peak-hold 3 + linear", HypothesisConfig(peak_hold=3, power=1.0)),
+            ("Peak-hold 5", HypothesisConfig(peak_hold=5)),
+        ]
+
+        audio_mono = audio_12k.mean(axis=0) if audio_12k.ndim > 1 else audio_12k
+        for label, cfg in hypothesis_configs:
+            cols = generate_pwv7_hypothesis(audio_mono, sr_12k, cfg)
+            waveforms[label] = _normalized_cols_to_display(cols)
+
+        # Also include production code output
+        prod_cols = generate_waveform_filterbank(audio_12k, sr_12k)
+        waveforms["Production"] = _waveform_cols_to_list(prod_cols)
+
+    elif args.sweep:
+        total = len(FILTERBANK_VARIANTS)
+        print(f"Generating {total} filter-bank variants...", file=sys.stderr)
+        for i, (label, params) in enumerate(FILTERBANK_VARIANTS, 1):
+            print(f"  [{i}/{total}] {label}...", file=sys.stderr, flush=True)
+            cols = generate_waveform_filterbank(audio_12k, sr_12k, params)
+            waveforms[f"{label}"] = _waveform_cols_to_list(cols)
+        print("Done.", file=sys.stderr)
+    else:
+        # Lexicon waveform columns (re-use already-preprocessed audio)
+        lexicon_cols = _lexicon(audio_12k, sr_12k)
+        waveforms["Lexicon"] = _waveform_cols_to_list(lexicon_cols)
+
+    # Librosa and Essentia backends disabled — focusing on filter bank tuning.
+    # Re-enable when needed for cross-backend comparison.
 
     output = {
         "bpm": main_result.get("bpm", 0.0),
         "key": main_result.get("key", ""),
         "beats": main_result.get("beats", []),
         "waveform_peaks": main_result.get("waveform_peaks", []),
+        "waveform_preview": main_result.get("waveform_preview", []),
+        "waveform_overview": main_result.get("waveform_overview", []),
         "waveform_fft_bands": main_result.get("waveform_fft_bands", []),
         "waveforms": waveforms,
     }
 
-    if args.json_output:
+    if args.out_path:
+        Path(args.out_path).write_text(json.dumps(output, indent=2, default=str))
+        print(f"Written to {args.out_path}")
+
+    if args.json_output or args.out_path:
         print(json.dumps(output, indent=2, default=str))
     else:
         print(f"BPM: {output['bpm']}  Key: {output['key']}")
@@ -431,8 +509,115 @@ def waveform_compare_main() -> None:
             print(f"  {name}: {count} columns")
 
 
+def pwv7_hypotheses_main() -> None:
+    """Test PWV7 generation hypotheses against Rekordbox reference data."""
+    parser = argparse.ArgumentParser(
+        prog="fourfour-pwv7-hypotheses",
+        description="Systematically test waveform generation hypotheses against Rekordbox PWV7 data.",
+    )
+    parser.add_argument("path", nargs="+", help="Audio file(s) or directory of audio files to test")
+    parser.add_argument("--top-n", type=int, default=20, help="Number of top results to display")
+    parser.add_argument("--json-out", type=str, default=None, help="Export all results to JSON file")
+    parser.add_argument("--quick", action="store_true", help="Quick mode: test only key hypotheses (~50 variants)")
+    args = parser.parse_args()
+
+    from fourfour_analysis.pwv7_research import (
+        HypothesisConfig, run_hypothesis_test, print_results, print_band_breakdown, export_results_json
+    )
+
+    audio_paths: list[Path] = []
+    for p in args.path:
+        target = Path(p)
+        if target.is_dir():
+            audio_paths.extend(sorted([f for f in target.iterdir() if f.suffix.lower() in (".mp3", ".flac", ".wav", ".m4a", ".aac")]))
+        else:
+            audio_paths.append(target)
+
+    if not audio_paths:
+        print(f"No audio files found at {args.path}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Testing {len(audio_paths)} track(s) against Rekordbox references...")
+
+    if args.quick:
+        # Focused subset: ~50 most informative variants
+        configs = [
+            # Exact production baseline (matches FilterbankParams defaults)
+            HypothesisConfig(),
+            # Filter topology
+            HypothesisConfig(filter_type="linkwitz_riley"),
+            HypothesisConfig(filter_type="shelving", filter_order=1),
+            HypothesisConfig(filter_type="fft"),
+            # Measurement
+            HypothesisConfig(measure="peak"),
+            HypothesisConfig(measure="true_peak"),
+            HypothesisConfig(measure="mean"),
+            # Smoothing
+            HypothesisConfig(smoothing="none", mix_factor=0.0),
+            HypothesisConfig(smoothing="mix", mix_factor=0.05),
+            HypothesisConfig(smoothing="mix", mix_factor=0.2),
+            HypothesisConfig(smoothing="mix", mix_factor=0.3),
+            HypothesisConfig(smoothing="block_max", block_max_width=3),
+            HypothesisConfig(smoothing="block_max", block_max_width=5),
+            HypothesisConfig(smoothing="envelope", envelope_lookahead=2),
+            HypothesisConfig(smoothing="compressor", compressor_attack_ms=1.0, compressor_release_ms=100.0),
+            # Normalization
+            HypothesisConfig(normalize="track_peak"),
+            HypothesisConfig(normalize="track_loudness"),
+            HypothesisConfig(normalize="sigmoid"),
+            # Power — key finding: linear (1.0) may be better than sqrt (0.5)
+            HypothesisConfig(power=0.3),
+            HypothesisConfig(power=0.4),
+            HypothesisConfig(power=0.6),
+            HypothesisConfig(power=0.7),
+            HypothesisConfig(power=0.8),
+            HypothesisConfig(power=0.9),
+            HypothesisConfig(power=1.0),
+            # Gains
+            HypothesisConfig(gain_low=180, gain_mid=100, gain_high=60),
+            HypothesisConfig(gain_low=200, gain_mid=90, gain_high=50),
+            HypothesisConfig(gain_low=100, gain_mid=140, gain_high=80),
+            # Crossover
+            HypothesisConfig(low_cutoff=100, mid_cutoff=2000),
+            HypothesisConfig(low_cutoff=160, mid_cutoff=3000),
+            HypothesisConfig(low_cutoff=200, mid_cutoff=4000),
+            # Window
+            HypothesisConfig(segment_width=60),
+            HypothesisConfig(segment_width=100),
+            HypothesisConfig(segment_width=160),
+            HypothesisConfig(overlap=0.5),
+            HypothesisConfig(target_sr=22000, segment_width=147),
+            # Weighting (FFT mode only)
+            HypothesisConfig(filter_type="fft", weighting="a_weight"),
+            HypothesisConfig(filter_type="fft", weighting="c_weight"),
+            # Peak hold variants (this is what production does!)
+            HypothesisConfig(peak_hold=2),
+            HypothesisConfig(peak_hold=3),
+            HypothesisConfig(peak_hold=5),
+            HypothesisConfig(peak_hold=3, power=1.0),
+            HypothesisConfig(peak_hold=3, smoothing="envelope", envelope_lookahead=2),
+            # Combined best guesses
+            HypothesisConfig(power=1.0, normalize="track_peak"),
+            HypothesisConfig(power=1.0, smoothing="envelope", envelope_lookahead=2),
+        ]
+    else:
+        configs = None  # Full grid
+
+    def _progress(msg: str) -> None:
+        print(f"  {msg}", file=sys.stderr)
+
+    results = run_hypothesis_test(audio_paths, configs=configs, progress_fn=_progress)
+
+    print_results(results, top_n=args.top_n)
+    print_band_breakdown(results, top_n=args.top_n)
+
+    if args.json_out:
+        export_results_json(results, Path(args.json_out))
+        print(f"\nResults exported to {args.json_out}")
+
+
 def main() -> None:
-    """Entry point for python -m fourfour_analysis [analyze|benchmark|waveform-compare] ..."""
+    """Entry point for python -m fourfour_analysis [analyze|benchmark|waveform-compare|pwv7-hypotheses] ..."""
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "analyze":
         sys.argv = [sys.argv[0]] + sys.argv[2:]  # strip "analyze" subcommand
@@ -443,6 +628,9 @@ def main() -> None:
     elif len(sys.argv) > 1 and sys.argv[1] == "waveform-compare":
         sys.argv = [sys.argv[0]] + sys.argv[2:]
         waveform_compare_main()
+    elif len(sys.argv) > 1 and sys.argv[1] == "pwv7-hypotheses":
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        pwv7_hypotheses_main()
     else:
         print(f"fourfour-analysis v{__version__}")
-        print("Use: fourfour-analyze <file>  or  fourfour-benchmark <command>  or  fourfour-waveform-compare <file>")
+        print("Use: fourfour-analyze <file>  or  fourfour-benchmark <command>  or  fourfour-waveform-compare <file>  or  fourfour-pwv7-hypotheses <path>")

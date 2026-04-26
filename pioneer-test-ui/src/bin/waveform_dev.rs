@@ -4,11 +4,11 @@
 ///   cargo run --bin waveform-dev -- <audio-file> [port]
 ///
 /// Analyzes the given audio file using the Python fourfour_analysis CLI,
-/// writes waveform data to ui/waveform/data.json, starts a local HTTP server,
+/// writes waveform data to ui/waveform/dev/data.json, starts a local HTTP server,
 /// and opens dev.html in the browser. Press Enter to re-analyze, or type a
 /// new file path + Enter to switch tracks. Ctrl-C to quit.
 use anyhow::Context as _;
-use std::io::{self, BufRead, Write as _};
+use std::io::{self, BufRead, IsTerminal, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
@@ -17,34 +17,48 @@ use pioneer_usb_writer::reader::{anlz as anlz_reader, masterdb};
 use serde_json::json;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: waveform-dev <audio-file> [port]");
-        std::process::exit(1);
+    let mut args_iter = std::env::args().skip(1);
+    let mut audio_path: Option<PathBuf> = None;
+    let mut port: u16 = 8080;
+    let mut sweep = true;
+    let mut hypotheses = false;
+
+    for arg in args_iter {
+        match arg.as_str() {
+            "--no-sweep" => sweep = false,
+            "--hypotheses" => hypotheses = true,
+            _ if audio_path.is_none() => audio_path = Some(PathBuf::from(arg)),
+            _ => port = arg.parse().unwrap_or(8080),
+        }
     }
 
-    let mut audio_path = PathBuf::from(&args[1]);
-    let port: u16 = args.get(2).and_then(|p| p.parse().ok()).unwrap_or(8080);
+    let Some(mut audio_path) = audio_path else {
+        eprintln!("Usage: waveform-dev [--no-sweep] [--hypotheses] <audio-file> [port]");
+        std::process::exit(1);
+    };
 
-    // Locate ui/waveform/ from the current working directory
+    // Locate ui/waveform/ from the current working directory.
+    // Serve from ui/waveform/ (so WaveformDisplay.js is accessible) but write
+    // data files into ui/waveform/dev/ and open dev/dev.html.
     let cwd = std::env::current_dir().expect("Failed to get cwd");
     let serve_dir = cwd.join("ui/waveform");
-    if !serve_dir.exists() {
+    let dev_dir = serve_dir.join("dev");
+    if !dev_dir.exists() {
         eprintln!(
-            "Error: ui/waveform/ not found in {}. Run from the repo root.",
+            "Error: ui/waveform/dev/ not found in {}. Run from the repo root.",
             cwd.display()
         );
         std::process::exit(1);
     }
 
-    let data_path = serve_dir.join("data.json");
+    let data_path = dev_dir.join("data.json");
 
     // Initial analysis
-    if let Err(e) = analyze_and_write(&audio_path, &data_path, &serve_dir) {
+    if let Err(e) = analyze_and_write(&audio_path, &data_path, &dev_dir, sweep, hypotheses) {
         eprintln!("Analysis failed: {e}");
         std::process::exit(1);
     }
-    if let Err(e) = write_rekordbox_json(&audio_path, &serve_dir) {
+    if let Err(e) = write_rekordbox_json(&audio_path, &dev_dir) {
         eprintln!("Rekordbox lookup: {e}");
     }
 
@@ -54,16 +68,24 @@ fn main() {
 
     // Open browser
     let _ = Command::new("open")
-        .arg(format!("http://localhost:{port}/dev.html"))
+        .arg(format!("http://localhost:{port}/dev/dev.html"))
         .spawn();
 
-    println!("Serving http://localhost:{port}/dev.html");
+    println!("Serving http://localhost:{port}/dev/dev.html");
     println!("  Enter         — re-analyze current track");
     println!("  <file path>   — analyze a different track");
     println!("  Ctrl-C        — quit");
     println!();
 
     let stdin = io::stdin();
+    if !stdin.is_terminal() {
+        // Non-interactive (e.g. shed run): keep server alive, don't read stdin
+        println!("Non-interactive mode — server running until Ctrl-C");
+        loop {
+            std::thread::park();
+        }
+    }
+
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
@@ -84,9 +106,9 @@ fn main() {
         print!("Analyzing {}…  ", audio_path.display());
         io::stdout().flush().ok();
 
-        match analyze_and_write(&audio_path, &data_path, &serve_dir) {
+        match analyze_and_write(&audio_path, &data_path, &dev_dir, sweep, hypotheses) {
             Ok(_) => {
-                if let Err(e) = write_rekordbox_json(&audio_path, &serve_dir) {
+                if let Err(e) = write_rekordbox_json(&audio_path, &dev_dir) {
                     eprintln!("  (Rekordbox: {e})");
                 }
                 println!("done — refresh browser tab.");
@@ -114,16 +136,22 @@ fn resolve_python() -> String {
     }
 }
 
-fn analyze_and_write(audio_path: &Path, data_path: &Path, serve_dir: &Path) -> anyhow::Result<()> {
+fn analyze_and_write(audio_path: &Path, data_path: &Path, serve_dir: &Path, sweep: bool, hypotheses: bool) -> anyhow::Result<()> {
     let python = resolve_python();
+    let mut args = vec![
+        "-m".to_string(),
+        "fourfour_analysis".to_string(),
+        "waveform-compare".to_string(),
+        audio_path.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF8 path"))?.to_string(),
+        "--json".to_string(),
+    ];
+    if hypotheses {
+        args.push("--hypotheses".to_string());
+    } else if sweep {
+        args.push("--sweep".to_string());
+    }
     let output = Command::new(&python)
-        .args([
-            "-m",
-            "fourfour_analysis",
-            "waveform-compare",
-            audio_path.to_str().ok_or_else(|| anyhow::anyhow!("non-UTF8 path"))?,
-            "--json",
-        ])
+        .args(&args)
         .output()?;
 
     if !output.status.success() {
@@ -149,15 +177,17 @@ fn analyze_and_write(audio_path: &Path, data_path: &Path, serve_dir: &Path) -> a
 }
 
 /// Convert a {min_val, max_val, r, g, b} column list to [{amp, r, g, b}].
+/// Matches Rekordbox's decode_pwv_rgb: per-column normalize so dominant band = 255,
+/// and derive amplitude from the band values (not the raw audio waveform).
 fn cols_to_display(cols: &[serde_json::Value]) -> Vec<serde_json::Value> {
     cols.iter().map(|c| {
         let r = c.get("r").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let g = c.get("g").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let b = c.get("b").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let min_val = c.get("min_val").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let max_val = c.get("max_val").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let amp = ((max_val - min_val) / 2.0).min(1.0).max(0.0);
-        json!({ "amp": amp, "r": r as u8, "g": g as u8, "b": b as u8 })
+        let max_ch = r.max(g).max(b).max(1.0);
+        let amp = (max_ch / 124.0).min(1.0);
+        let scale = 255.0 / max_ch;
+        json!({ "amp": amp, "r": (r * scale).min(255.0) as u8, "g": (g * scale).min(255.0) as u8, "b": (b * scale).min(255.0) as u8 })
     }).collect()
 }
 

@@ -9,7 +9,7 @@ from fourfour_analysis.backends.base import AnalysisBackend
 from fourfour_analysis.backends.lexicon_bpm import analyze_tempo
 from fourfour_analysis.backends.lexicon_key import detect_key
 from fourfour_analysis.backends.lexicon_energy import compute_energy
-from fourfour_analysis.backends.lexicon_waveform import generate_waveform
+from fourfour_analysis.backends.lexicon_waveform import generate_waveform, generate_waveform_filterbank, generate_overview, generate_preview
 from fourfour_analysis.backends.lexicon_cues import detect_sections
 from fourfour_analysis.audio_io import load_audio, preprocess_tempo, preprocess_key, preprocess_waveform
 from fourfour_analysis.types import (
@@ -80,11 +80,16 @@ class LexiconPortBackend(AnalysisBackend):
         # Waveform
         peaks = []
         colors = []
+        overview_colors = []
+        preview = b""
         if needs_waveform:
             waveform_audio, waveform_sr = preprocess_waveform(audio, sr)
-            waveform_columns = generate_waveform(waveform_audio, waveform_sr)
+            waveform_columns = generate_waveform_filterbank(waveform_audio, waveform_sr)
             peaks = [WaveformPeak(min_val=c.min_val, max_val=c.max_val) for c in waveform_columns]
             colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in waveform_columns]
+            overview_columns = generate_overview(waveform_columns)
+            overview_colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in overview_columns]
+            preview = generate_preview(waveform_columns)
 
         # Cue points
         cue_points = []
@@ -107,5 +112,7 @@ class LexiconPortBackend(AnalysisBackend):
             beats=beat_positions,
             waveform_peaks=peaks,
             waveform_colors=colors,
+            waveform_overview=overview_colors,
+            waveform_preview=preview,
             cue_points=cue_points,
         )

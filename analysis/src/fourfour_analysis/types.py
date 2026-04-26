@@ -56,6 +56,9 @@ class AnalysisResult:
     beats: list[BeatPosition] = field(default_factory=list)
     waveform_peaks: list[WaveformPeak] = field(default_factory=list)
     waveform_colors: list[WaveformColor] = field(default_factory=list)
+    waveform_overview: list[WaveformColor] = field(default_factory=list)
+    # 400-byte Pioneer PWAV preview: each byte = (whiteness << 5) | height
+    waveform_preview: bytes = b""
     # Raw per-column FFT bands for interactive crossover tuning (64 uint8 values each).
     # bins 1-64 of a 128-pt FFT at 12 kHz → 93.75 Hz–6 kHz, per-column normalised 0-255.
     waveform_fft_bands: list[list[int]] = field(default_factory=list)

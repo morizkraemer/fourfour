@@ -52,6 +52,21 @@ MIX_FACTOR = 0.1
 
 
 @dataclass(frozen=True)
+class WaveformParams:
+    """Parameter set for a single waveform generation run."""
+    target_sr: int = TARGET_SR
+    fft_size: int = FFT_SIZE
+    segment_width: int = SEGMENT_WIDTH
+    low_band: tuple[float, float] = LOW_BAND
+    mid_band: tuple[float, float] = MID_BAND
+    high_band: tuple[float, float] = HIGH_BAND
+    low_weight: float = LOW_WEIGHT
+    mid_weight: float = MID_WEIGHT
+    high_weight: float = HIGH_WEIGHT
+    mix_factor: float = MIX_FACTOR
+
+
+@dataclass(frozen=True)
 class WaveformColumn:
     """One column of waveform data: shape + color + raw FFT sub-bands."""
     min_val: float
@@ -64,49 +79,49 @@ class WaveformColumn:
     fft_bands: tuple[int, ...]
 
 
-def generate_waveform(
+def generate_waveform_with_params(
     audio: np.ndarray,
     sr: int,
+    params: WaveformParams,
 ) -> list[WaveformColumn]:
-    """Generate waveform display data from 12kHz mono audio.
-
-    Audio should already be resampled to 12kHz
-    (use audio_io.preprocess_waveform before calling this).
+    """Generate waveform display data from mono audio with explicit parameters.
 
     Args:
-        audio: Mono f32, resampled to 12kHz.
-        sr: Sample rate (should be 12000).
+        audio: Mono f32, already resampled to params.target_sr.
+        sr: Sample rate (should match params.target_sr).
+        params: Waveform generation parameters.
 
     Returns:
-        List of WaveformColumn, one per 256-sample segment.
+        List of WaveformColumn, one per segment.
     """
-    if len(audio) < SEGMENT_WIDTH:
+    seg_w = params.segment_width
+    if len(audio) < seg_w:
         return []
 
-    num_segments = len(audio) // SEGMENT_WIDTH
+    num_segments = len(audio) // seg_w
     columns: list[WaveformColumn] = []
 
     prev_r, prev_g, prev_b = 0, 0, 0
 
     # Precompute FFT frequency bins
-    freq_per_bin = sr / FFT_SIZE
-    low_bin_start = int(LOW_BAND[0] / freq_per_bin)
-    low_bin_end = max(low_bin_start + 1, int(LOW_BAND[1] / freq_per_bin))
-    mid_bin_start = int(MID_BAND[0] / freq_per_bin)
-    mid_bin_end = max(mid_bin_start + 1, int(MID_BAND[1] / freq_per_bin))
-    high_bin_start = int(HIGH_BAND[0] / freq_per_bin)
-    high_bin_end = max(high_bin_start + 1, int(HIGH_BAND[1] / freq_per_bin))
+    freq_per_bin = sr / params.fft_size
+    low_bin_start = int(params.low_band[0] / freq_per_bin)
+    low_bin_end = max(low_bin_start + 1, int(params.low_band[1] / freq_per_bin))
+    mid_bin_start = int(params.mid_band[0] / freq_per_bin)
+    mid_bin_end = max(mid_bin_start + 1, int(params.mid_band[1] / freq_per_bin))
+    high_bin_start = int(params.high_band[0] / freq_per_bin)
+    high_bin_end = max(high_bin_start + 1, int(params.high_band[1] / freq_per_bin))
 
     for i in range(num_segments):
-        start = i * SEGMENT_WIDTH
-        segment = audio[start:start + SEGMENT_WIDTH]
+        start = i * seg_w
+        segment = audio[start:start + seg_w]
 
         # 1. Min/max for waveform shape
         min_val = float(np.min(segment))
         max_val = float(np.max(segment))
 
         # 2. FFT for color — zero-pad segment to FFT_SIZE to preserve frequency resolution
-        fft_input = np.zeros(FFT_SIZE, dtype=np.float32)
+        fft_input = np.zeros(params.fft_size, dtype=np.float32)
         fft_input[:len(segment)] = segment
         spectrum = np.fft.rfft(fft_input)
         magnitudes = np.abs(spectrum)
@@ -120,9 +135,9 @@ def generate_waveform(
             fft_bands = (0,) * 64
 
         # RMS per band
-        low_rms = _band_rms(magnitudes, low_bin_start, low_bin_end) * LOW_WEIGHT
-        mid_rms = _band_rms(magnitudes, mid_bin_start, mid_bin_end) * MID_WEIGHT
-        high_rms = _band_rms(magnitudes, high_bin_start, high_bin_end) * HIGH_WEIGHT
+        low_rms = _band_rms(magnitudes, low_bin_start, low_bin_end) * params.low_weight
+        mid_rms = _band_rms(magnitudes, mid_bin_start, mid_bin_end) * params.mid_weight
+        high_rms = _band_rms(magnitudes, high_bin_start, high_bin_end) * params.high_weight
 
         # Normalize to strongest band
         max_band = max(low_rms, mid_rms, high_rms, 1e-10)
@@ -132,9 +147,9 @@ def generate_waveform(
         b_raw = int(round(high_rms / max_band * 255))
 
         # 3. Smooth with previous segment
-        r = int(round(prev_r * MIX_FACTOR + r_raw * (1 - MIX_FACTOR)))
-        g = int(round(prev_g * MIX_FACTOR + g_raw * (1 - MIX_FACTOR)))
-        b = int(round(prev_b * MIX_FACTOR + b_raw * (1 - MIX_FACTOR)))
+        r = int(round(prev_r * params.mix_factor + r_raw * (1 - params.mix_factor)))
+        g = int(round(prev_g * params.mix_factor + g_raw * (1 - params.mix_factor)))
+        b = int(round(prev_b * params.mix_factor + b_raw * (1 - params.mix_factor)))
 
         prev_r, prev_g, prev_b = r, g, b
 
@@ -150,6 +165,25 @@ def generate_waveform(
     return columns
 
 
+def generate_waveform(
+    audio: np.ndarray,
+    sr: int,
+) -> list[WaveformColumn]:
+    """Generate waveform display data from 12kHz mono audio (default parameters).
+
+    Audio should already be resampled to 12kHz
+    (use audio_io.preprocess_waveform before calling this).
+    """
+    return generate_waveform_with_params(audio, sr, WaveformParams())
+
+
+# ── Parameter sweep variants ──────────────────────────────
+
+SWEEP_VARIANTS: list[tuple[str, WaveformParams]] = [
+    ("baseline", WaveformParams()),
+]
+
+
 def _band_rms(magnitudes: np.ndarray, bin_start: int, bin_end: int) -> float:
     """Compute RMS energy of FFT magnitude bins in a frequency band."""
     if bin_end > len(magnitudes):
@@ -162,3 +196,211 @@ def _band_rms(magnitudes: np.ndarray, bin_start: int, bin_end: int) -> float:
         return 0.0
 
     return float(np.sqrt(np.mean(band ** 2)))
+
+
+# ── Filter bank waveform generation ───────────────────────
+
+@dataclass(frozen=True)
+class FilterbankParams:
+    """Parameters for filter-bank waveform generation (matched to Rekordbox PWV7).
+
+    Calibrated against 5 Rekordbox-analyzed tracks. Key findings:
+    - Crossover at 130/2500 Hz with 4th-order Butterworth matches Rekordbox band split
+    - sqrt compression (power=0.5) matches Rekordbox's dynamic range
+    - Fixed per-band gains (no per-track normalization) — Rekordbox uses absolute scaling
+    - Values clamped to 0-127 (7-bit range used by PWV7 format)
+    """
+    target_sr: int = 12_000
+    segment_width: int = 80
+    low_cutoff: float = 130.0      # low-mid crossover (Hz)
+    mid_cutoff: float = 2500.0     # mid-high crossover (Hz)
+    filter_order: int = 4
+    measure: str = "rms"           # "max" | "rms" | "mean"
+    power: float = 0.5             # compression exponent (sqrt)
+    gain_low: float = 140.0        # fixed gain per band (no per-track normalization)
+    gain_mid: float = 120.0
+    gain_high: float = 70.0
+    mix_factor: float = 0.1
+    peak_hold: int = 3             # hold peak for N segments (fattens transients)
+
+
+def _bandpass_filter(data: np.ndarray, low: float, high: float, sr: int, order: int = 4) -> np.ndarray:
+    """Apply Butterworth bandpass filter."""
+    from scipy.signal import butter, sosfilt
+    nyq = sr / 2.0
+    low_norm = max(low / nyq, 0.001)
+    high_norm = min(high / nyq, 0.999)
+    sos = butter(order, [low_norm, high_norm], btype="band", output="sos")
+    return sosfilt(sos, data)
+
+
+def generate_waveform_filterbank(
+    audio: np.ndarray,
+    sr: int,
+    params: FilterbankParams | None = None,
+) -> list[WaveformColumn]:
+    """Generate 3-band waveform matched to Rekordbox PWV7 format.
+
+    Uses Butterworth crossover filters with sqrt compression and fixed
+    per-band gains.  No per-track normalization — absolute scaling so
+    quiet tracks look quiet and loud tracks look loud, matching Rekordbox.
+    Output values are clamped to 0-127 (PWV7 native range).
+    """
+    if params is None:
+        params = FilterbankParams()
+
+    seg_w = params.segment_width
+    if len(audio) < seg_w:
+        return []
+
+    num_segments = len(audio) // seg_w
+
+    # Apply 3 bandpass filters to full audio
+    low_sig = np.abs(_bandpass_filter(audio, 0.0, params.low_cutoff, sr, params.filter_order))
+    mid_sig = np.abs(_bandpass_filter(audio, params.low_cutoff, params.mid_cutoff, sr, params.filter_order))
+    high_sig = np.abs(_bandpass_filter(audio, params.mid_cutoff, sr / 2.0, sr, params.filter_order))
+
+    # First pass: compute raw per-segment RMS values
+    raw_values: list[tuple[float, float, float]] = []
+    for i in range(num_segments):
+        start = i * seg_w
+        end = start + seg_w
+        if params.measure == "rms":
+            l = float(np.sqrt(np.mean(low_sig[start:end] ** 2)))
+            m = float(np.sqrt(np.mean(mid_sig[start:end] ** 2)))
+            h = float(np.sqrt(np.mean(high_sig[start:end] ** 2)))
+        elif params.measure == "mean":
+            l = float(np.mean(low_sig[start:end]))
+            m = float(np.mean(mid_sig[start:end]))
+            h = float(np.mean(high_sig[start:end]))
+        else:  # max
+            l = float(np.max(low_sig[start:end]))
+            m = float(np.max(mid_sig[start:end]))
+            h = float(np.max(high_sig[start:end]))
+        raw_values.append((l, m, h))
+
+    # Peak-hold: for each segment, use the max of itself and the next N segments.
+    # This fattens transients (kick drums hold their peak for a few columns).
+    hold = params.peak_hold
+    held_values: list[tuple[float, float, float]] = []
+    for i in range(num_segments):
+        window = raw_values[i : min(i + hold + 1, num_segments)]
+        held_values.append((
+            max(v[0] for v in window),
+            max(v[1] for v in window),
+            max(v[2] for v in window),
+        ))
+
+    columns: list[WaveformColumn] = []
+    prev_r, prev_g, prev_b = 0.0, 0.0, 0.0
+
+    for i, (l, m, h) in enumerate(held_values):
+        start = i * seg_w
+        segment = audio[start:start + seg_w]
+        min_val = float(np.min(segment))
+        max_val = float(np.max(segment))
+
+        # Power-law compression + fixed gain (no per-track normalization)
+        r_raw = params.gain_low * (l ** params.power)
+        g_raw = params.gain_mid * (m ** params.power)
+        b_raw = params.gain_high * (h ** params.power)
+
+        # Smooth with previous segment
+        r = prev_r * params.mix_factor + r_raw * (1 - params.mix_factor)
+        g = prev_g * params.mix_factor + g_raw * (1 - params.mix_factor)
+        b = prev_b * params.mix_factor + b_raw * (1 - params.mix_factor)
+        prev_r, prev_g, prev_b = r, g, b
+
+        columns.append(WaveformColumn(
+            min_val=min_val,
+            max_val=max_val,
+            r=max(0, min(127, int(round(r)))),
+            g=max(0, min(127, int(round(g)))),
+            b=max(0, min(127, int(round(b)))),
+            fft_bands=(0,) * 64,
+        ))
+
+    return columns
+
+
+# ── Preview waveform (400-byte Pioneer PWAV) ─────────────
+
+def generate_preview(detail: list[WaveformColumn]) -> bytes:
+    """Downsample detail waveform to 400-byte Pioneer PWAV format.
+
+    Each byte encodes: height (5 low bits, 0-31) | whiteness (3 high bits, 0-7).
+    Height = overall amplitude. Whiteness = how much high-frequency content
+    (bright = hi-hats/cymbals, dark = bass-heavy).
+
+    Uses max-per-bin downsampling to preserve transient peaks.
+    """
+    n = len(detail)
+    if n == 0:
+        return bytes(400)
+
+    out = bytearray(400)
+    for i in range(400):
+        start = i * n // 400
+        end = (i + 1) * n // 400
+        bin_slice = detail[start:end] if end > start else [detail[start]]
+
+        # Height from peak amplitude across the bin
+        max_val = max(abs(c.max_val) for c in bin_slice)
+        height = min(31, int(round(max_val * 31.0)))
+
+        # Whiteness from high-band dominance: high / (low + mid + high)
+        # High whiteness = treble-heavy (hi-hats), low = bass-heavy (kicks)
+        max_r = max(c.r for c in bin_slice)
+        max_g = max(c.g for c in bin_slice)
+        max_b = max(c.b for c in bin_slice)
+        total = max_r + max_g + max_b
+        whiteness = min(7, int(round((max_b / total) * 7.0))) if total > 0 else 0
+
+        out[i] = (whiteness << 5) | height
+
+    return bytes(out)
+
+
+# ── Overview waveform (1200-entry Pioneer PWV6) ──────────
+
+def generate_overview(detail: list[WaveformColumn], num_entries: int = 1200) -> list[WaveformColumn]:
+    """Downsample detail waveform to fixed-size overview using peak-hold.
+
+    Uses max-per-bin (not point-sample) to preserve transient peaks.
+    Matches Pioneer PWV6 format: 1200 entries covering the full track.
+    """
+    n = len(detail)
+    if n == 0:
+        return []
+    if n <= num_entries:
+        return list(detail)
+
+    columns: list[WaveformColumn] = []
+    for i in range(num_entries):
+        start = i * n // num_entries
+        end = (i + 1) * n // num_entries
+        bin_slice = detail[start:end] if end > start else [detail[start]]
+
+        max_r = max(c.r for c in bin_slice)
+        max_g = max(c.g for c in bin_slice)
+        max_b = max(c.b for c in bin_slice)
+        max_max_val = max(c.max_val for c in bin_slice)
+        min_min_val = min(c.min_val for c in bin_slice)
+
+        columns.append(WaveformColumn(
+            min_val=min_min_val,
+            max_val=max_max_val,
+            r=max_r,
+            g=max_g,
+            b=max_b,
+            fft_bands=(0,) * 64,
+        ))
+
+    return columns
+
+
+# ── Filter bank sweep variants ────────────────────────────
+
+FILTERBANK_VARIANTS: list[tuple[str, FilterbankParams]] = [
+    ("FB 130/2.5k sqrt", FilterbankParams()),
+]

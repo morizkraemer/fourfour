@@ -19,6 +19,12 @@ benchmark/logs/
 benchmark/results/
 benchmark/**/*.zip
 # Python analysis package
+# Waveform dev harness generated files
+ui/waveform/dev/data.json
+ui/waveform/dev/rekordbox.json
+ui/waveform/dev/current_track.*
+ui/waveform/dev/scripts/*.json
+
 analysis/.venv/
 analysis/.pytest_cache/
 analysis/src/fourfour_analysis/__pycache__/

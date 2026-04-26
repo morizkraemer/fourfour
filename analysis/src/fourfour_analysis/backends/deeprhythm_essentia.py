@@ -61,7 +61,7 @@ class DeepRhythmEssentiaBackend(AnalysisBackend):
         from fourfour_analysis.audio_io import load_audio, preprocess_tempo, preprocess_waveform
         from fourfour_analysis.backends.lexicon_bpm import _generate_beats
         from fourfour_analysis.backends.lexicon_energy import compute_energy
-        from fourfour_analysis.backends.lexicon_waveform import generate_waveform
+        from fourfour_analysis.backends.lexicon_waveform import generate_waveform_filterbank, generate_overview, generate_preview
         from fourfour_analysis.backends.lexicon_cues import detect_sections
 
         audio, sr = load_audio(track_path)
@@ -93,16 +93,19 @@ class DeepRhythmEssentiaBackend(AnalysisBackend):
         if "energy" in self._features and bpm is not None and tempo_audio is not None:
             energy = compute_energy(tempo_audio, sr, bpm)
 
-        # Waveform via Lexicon
+        # Waveform via Lexicon filterbank (Rekordbox-calibrated 3-band)
         peaks: list[WaveformPeak] = []
         colors: list[WaveformColor] = []
-        fft_bands_list: list[list[int]] = []
+        overview_colors: list[WaveformColor] = []
+        preview: bytes = b""
         if "waveform" in self._features:
             waveform_audio, waveform_sr = preprocess_waveform(audio, sr)
-            waveform_columns = generate_waveform(waveform_audio, waveform_sr)
+            waveform_columns = generate_waveform_filterbank(waveform_audio, waveform_sr)
             peaks = [WaveformPeak(min_val=c.min_val, max_val=c.max_val) for c in waveform_columns]
             colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in waveform_columns]
-            fft_bands_list = [list(c.fft_bands) for c in waveform_columns]
+            overview_columns = generate_overview(waveform_columns)
+            overview_colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in overview_columns]
+            preview = generate_preview(waveform_columns)
 
         # Cue points via Lexicon
         cue_points = []
@@ -122,7 +125,8 @@ class DeepRhythmEssentiaBackend(AnalysisBackend):
             beats=beat_positions,
             waveform_peaks=peaks,
             waveform_colors=colors,
-            waveform_fft_bands=fft_bands_list,
+            waveform_overview=overview_colors,
+            waveform_preview=preview,
             cue_points=cue_points,
         )
 

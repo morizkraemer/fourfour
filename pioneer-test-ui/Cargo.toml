@@ -3,6 +3,30 @@ name = "pioneer-test-ui"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "pioneer-test-ui"
+path = "src/main.rs"
+
+[[bin]]
+name = "waveform_dev"
+path = "src/bin/waveform_dev.rs"
+
+[[bin]]
+name = "waveform_ab"
+path = "src/bin/waveform_ab.rs"
+
+[[bin]]
+name = "waveform_grid"
+path = "src/bin/waveform_grid.rs"
+
+[[bin]]
+name = "pioneer-cli"
+path = "src/bin/pioneer-cli.rs"
+
+[[bin]]
+name = "anlz-diff"
+path = "src/bin/anlz-diff.rs"
+
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"

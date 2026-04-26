@@ -1,0 +1,24 @@
+.waveform-display {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    background: #0d0d0d;
+    overflow: hidden;
+}
+
+.waveform-display__overview {
+    display: block;
+    width: 100%;
+    height: 32px;
+    cursor: pointer;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.waveform-display__zoom {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: default;
+}
