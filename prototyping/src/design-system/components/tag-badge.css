@@ -1,0 +1,29 @@
+.ff-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--ff-radius-sm);
+  font-family: var(--ff-font-mono);
+  font-weight: 500;
+  line-height: 1;
+}
+.ff-badge--md .ff-badge__value {
+  font-size: 10.5px;
+}
+.ff-badge--sm .ff-badge__value {
+  font-size: 9px;
+}
+
+.ff-badge--outline {
+  background: var(--ff-elev);
+  border: 1px solid var(--ff-border);
+  color: var(--ff-text-mid);
+}
+.ff-badge--filled {
+  background: var(--ff-elev-hi);
+  color: var(--ff-text);
+}
+.ff-badge--color {
+  color: var(--ff-bg);
+}

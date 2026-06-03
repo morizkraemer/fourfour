@@ -194,6 +194,7 @@ mod tests {
             waveform: WaveformPreview { data: [0u8; 400] },
             bpm: 128.0,
             key: "1A".to_string(),
+            energy: None,
             cue_points: vec![],
             color_waveform: None,
         }

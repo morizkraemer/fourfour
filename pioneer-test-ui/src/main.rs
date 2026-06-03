@@ -44,6 +44,20 @@ fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
 }
 
 // ---------------------------------------------------------------------------
+// Debug logging — emits events to the frontend debug panel
+// ---------------------------------------------------------------------------
+
+fn debug_log(app: &AppHandle, level: &str, message: &str) {
+    app.emit("debug-log", serde_json::json!({ "level": level, "message": message })).ok();
+}
+
+fn debug_info(app: &AppHandle, msg: &str)  { debug_log(app, "info", msg); }
+fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
+fn debug_warn(app: &AppHandle, msg: &str)  { debug_log(app, "warn", msg); }
+fn debug_err(app: &AppHandle, msg: &str)   { debug_log(app, "err", msg); }
+fn debug_dim(app: &AppHandle, msg: &str)   { debug_log(app, "dim", msg); }
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -163,6 +177,11 @@ fn resolve_python() -> String {
 fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult {
     let bpm = json.get("bpm").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let energy = json
+        .get("energy")
+        .and_then(|v| v.get("score"))
+        .and_then(|v| v.as_u64())
+        .map(|s| s as u8);
 
     // Mono waveform preview (400 bytes)
     let mut waveform_data = [0u8; 400];
@@ -202,12 +221,67 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
         }
     };
 
+    // Parse beat grid from Python BeatPosition entries
+    let mut beats: Vec<models::Beat> = json
+        .get("beats")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| {
+                    let time_s = entry.get("time_seconds")?.as_f64()?;
+                    let bar_pos = entry.get("bar_position")?.as_u64()? as u8;
+                    Some(models::Beat {
+                        bar_position: bar_pos,
+                        time_ms: (time_s * 1000.0).round() as u32,
+                        tempo: 0,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Infer tempo from consecutive beat intervals (stored as BPM * 100)
+    if beats.len() > 1 {
+        for i in 1..beats.len() {
+            let delta_ms = beats[i].time_ms.saturating_sub(beats[i - 1].time_ms);
+            if delta_ms > 0 {
+                beats[i].tempo = (60_000.0 / delta_ms as f64 * 100.0).round() as u32;
+            }
+        }
+        beats[0].tempo = beats[1].tempo;
+    } else if !beats.is_empty() && bpm > 0.0 {
+        beats[0].tempo = (bpm * 100.0).round() as u32;
+    }
+
+    // Parse cue points — auto-detected cues are stored as memory cues (hot_cue_number = 0)
+    let cue_points: Vec<models::CuePoint> = json
+        .get("cue_points")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| {
+                    let time_s = entry.get("time_seconds")?.as_f64()?;
+                    let loop_end = entry
+                        .get("loop_end_seconds")
+                        .and_then(|v| v.as_f64())
+                        .filter(|&t| t > 0.0);
+                    Some(models::CuePoint {
+                        hot_cue_number: 0,
+                        time_ms: (time_s * 1000.0).round() as u32,
+                        loop_time_ms: loop_end.map(|t| (t * 1000.0).round() as u32),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
     models::AnalysisResult {
         bpm,
         key,
-        beat_grid: models::BeatGrid { beats: Vec::new() },
+        energy,
+        beat_grid: models::BeatGrid { beats },
         waveform: models::WaveformPreview { data: waveform_data },
-        cue_points: Vec::new(),
+        cue_points,
         color_waveform,
     }
 }
@@ -238,61 +312,98 @@ async fn analyze_tracks(
 
     let total = pending.len() as u32;
     if total == 0 {
+        debug_info(&app, "No unanalyzed tracks — nothing to do");
         let lib = shared.lock().map_err(|e| e.to_string())?;
         return build_track_infos(&lib);
     }
 
     let python = resolve_python();
+    debug_info(&app, &format!("Starting analysis: {} tracks, python={}", total, python));
+
     // Limit concurrency: each Python process loads DeepRhythm (heavy model).
     let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
 
     // 2. Spawn all tasks; they acquire the semaphore before launching Python.
+    let app_clone = app.clone();
     let mut join_set = tokio::task::JoinSet::new();
-    for (track_id, source_path) in pending {
+    for (idx, (track_id, source_path)) in pending.iter().enumerate() {
         let sem = semaphore.clone();
         let python_cmd = python.clone();
+        let path_str = source_path.to_string_lossy().to_string();
+        let path_str_log = path_str.clone();
+        let track_id = *track_id;
+        let app_log = app_clone.clone();
 
         join_set.spawn(async move {
+            debug_dim(&app_log, &format!("[slot {}] waiting for semaphore…", idx + 1));
             let _permit = sem.acquire_owned().await.unwrap();
-            let path_str = source_path.to_string_lossy().to_string();
+            debug_dim(&app_log, &format!("[slot {}] acquired, spawning Python for {}", idx + 1, Path::new(&path_str).file_name().unwrap_or_default().to_string_lossy()));
+            let t0 = std::time::Instant::now();
 
-            let result: Result<models::AnalysisResult, String> =
-                tokio::task::spawn_blocking(move || {
-                    let out = std::process::Command::new(&python_cmd)
-                        .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
-                        .output()
-                        .map_err(|e| format!("Failed to spawn analyzer: {e}"))?;
+            let result: Result<(models::AnalysisResult, String), String> = async {
+                let mut child = match tokio::process::Command::new(&python_cmd)
+                    .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .kill_on_drop(true)
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) => return Err(format!("Failed to spawn analyzer: {e}")),
+                };
 
-                    if !out.status.success() {
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        return Err(format!("Analyzer exited non-zero: {stderr}"));
+                match tokio::time::timeout(
+                    std::time::Duration::from_secs(120),
+                    child.wait_with_output(),
+                ).await {
+                    Ok(Ok(output)) => {
+                        let elapsed = t0.elapsed();
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let stdout_len = output.stdout.len();
+
+                        if !output.status.success() {
+                            return Err(format!(
+                                "exit={} stderr={}",
+                                output.status.code().unwrap_or(-1),
+                                &stderr[..stderr.len().min(500)]
+                            ));
+                        }
+
+                        if !stderr.trim().is_empty() {
+                            eprintln!("[analyzer stderr] {}", &stderr[..stderr.len().min(300)]);
+                        }
+
+                        let results: Vec<serde_json::Value> = match serde_json::from_slice(&output.stdout) {
+                            Ok(r) => r,
+                            Err(e) => return Err(format!("Bad JSON ({} bytes): {e}", stdout_len)),
+                        };
+
+                        let analysis = match results.into_iter().next().map(|v| python_result_to_analysis(&v)) {
+                            Some(a) => a,
+                            None => return Err("Analyzer returned empty array".to_string()),
+                        };
+
+                        Ok((analysis, format!("{:.1}s {}bytes", elapsed.as_secs_f64(), stdout_len)))
                     }
+                    Ok(Err(e)) => Err(format!("wait_with_output failed: {e}")),
+                    Err(_) => Err(format!("TIMEOUT after 120s")),
+                }
+            }.await;
 
-                    let results: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout)
-                        .map_err(|e| format!("Bad JSON from analyzer: {e}"))?;
-
-                    results
-                        .into_iter()
-                        .next()
-                        .map(|v| python_result_to_analysis(&v))
-                        .ok_or_else(|| "Analyzer returned empty array".to_string())
-                })
-                .await
-                .map_err(|e| format!("Task join error: {e}"))
-                .and_then(|r| r);
-
-            (track_id, source_path, result)
+            let elapsed = t0.elapsed();
+            (track_id, path_str_log, result, elapsed)
         });
     }
 
     // 3. Process results as they complete (sequential DB writes, parallel Python).
     let mut completed: u32 = 0;
+    let mut errors: u32 = 0;
     while let Some(task_result) = join_set.join_next().await {
-        let (track_id, source_path, analysis_result) =
+        let (track_id, path_str, analysis_result, elapsed) =
             task_result.map_err(|e| format!("Task panicked: {e}"))?;
 
         completed += 1;
-        let file_name = source_path
+        let file_name = Path::new(&path_str)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
@@ -309,7 +420,16 @@ async fn analyze_tracks(
         .ok();
 
         match analysis_result {
-            Ok(result) => {
+            Ok((result, detail)) => {
+                debug_ok(&app, &format!(
+                    "[{completed}/{total}] {file_name} — {:.1}s bpm={:.1} key={} beats={} cues={} {detail}",
+                    elapsed.as_secs_f64(),
+                    result.bpm,
+                    result.key,
+                    result.beat_grid.beats.len(),
+                    result.cue_points.len(),
+                ));
+                let t_db = std::time::Instant::now();
                 let lib = shared.lock().map_err(|e| e.to_string())?;
                 if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
                     track.tempo = (result.bpm * 100.0) as u32;
@@ -317,12 +437,24 @@ async fn analyze_tracks(
                     lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
                 }
                 lib.set_analysis(track_id, &result).map_err(|e| e.to_string())?;
+                debug_dim(&app, &format!(
+                    "[{completed}/{total}] {file_name} DB+ANLZ write {:.1}s",
+                    t_db.elapsed().as_secs_f64()
+                ));
             }
             Err(e) => {
-                eprintln!("Warning: analysis failed for {}: {}", source_path.display(), e);
+                errors += 1;
+                debug_err(&app, &format!(
+                    "[{completed}/{total}] {file_name} — {:.1}s FAILED: {e}",
+                    elapsed.as_secs_f64(),
+                ));
             }
         }
     }
+
+    debug_info(&app, &format!(
+        "Analysis complete: {completed} done, {errors} errors out of {total} tracks"
+    ));
 
     // 4. Return the full updated track list.
     let lib = shared.lock().map_err(|e| e.to_string())?;
@@ -341,6 +473,8 @@ fn write_usb(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
 ) -> Result<models::SyncReport, String> {
+    debug_info(&app, &format!("USB sync → {output_dir}"));
+
     let lib = state.lock().map_err(|e| e.to_string())?;
 
     // Save playlists to library before writing
@@ -348,6 +482,13 @@ fn write_usb(
 
     let out = Path::new(&output_dir);
     let report = lib.sync_usb(out).map_err(|e| e.to_string())?;
+
+    debug_ok(&app, &format!(
+        "Sync done: +{} ~{} ↑{} −{} ({} unchanged)",
+        report.tracks_added, report.tracks_updated,
+        report.tracks_replaced, report.tracks_removed,
+        report.tracks_unchanged,
+    ));
 
     app.emit("write-complete", &report).ok();
 
@@ -423,6 +564,7 @@ fn set_test_cues(
             waveform: existing.waveform,
             bpm: existing.bpm,
             key: existing.key,
+            energy: existing.energy,
             color_waveform: None,
         };
         lib.set_analysis(track_id as i64, &new_analysis)
@@ -547,23 +689,46 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
     let python = resolve_python();
 
     let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(&python)
+        let mut child = std::process::Command::new(&python)
             .args(["-m", "fourfour_analysis", "analyze", &path, "--json"])
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to spawn analyzer: {e}"))?;
+
+        let timeout = std::time::Duration::from_secs(120);
+        let wait_result = std::thread::scope(|s| {
+            let handle = s.spawn(move || child.wait_with_output());
+            let start = std::time::Instant::now();
+            loop {
+                if handle.is_finished() {
+                    return Some(handle.join().expect("wait thread panicked"));
+                }
+                if start.elapsed() > timeout {
+                    return None;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        });
+
+        match wait_result {
+            Some(Ok(output)) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(format!("Python analyzer failed: {stderr}"));
+                }
+                let results: Vec<serde_json::Value> =
+                    serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
+                results.into_iter().next().ok_or_else(|| "No results".to_string())
+            }
+            Some(Err(e)) => Err(format!("Analyzer wait failed: {e}")),
+            None => Err(format!("Analyzer timed out after {}s", timeout.as_secs())),
+        }
     })
     .await
-    .map_err(|e| format!("Task join error: {e}"))?
-    .map_err(|e| format!("Failed to run Python analyzer: {e}"))?;
+    .map_err(|e| format!("Task join error: {e}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Python analyzer failed: {stderr}"));
-    }
-
-    let results: Vec<serde_json::Value> =
-        serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-
-    results.into_iter().next().ok_or_else(|| "No results".to_string())
+    output
 }
 
 /// Get stored analysis data for a track from the local library DB.
@@ -577,6 +742,13 @@ fn get_analysis_data(
 
     match analysis {
         Some(a) => {
+            // Get track duration for beat grid display
+            let duration_ms = lib
+                .get_track(track_id)
+                .map_err(|e| e.to_string())?
+                .map(|t| (t.duration_secs * 1000.0).round() as u64)
+                .unwrap_or(0);
+
             // Convert color waveform to frontend format.
             // Use detail (150 entries/sec) for full resolution; fall back to overview.
             let waveform_color: Vec<serde_json::Value> = a.color_waveform.as_ref()
@@ -596,12 +768,33 @@ fn get_analysis_data(
                 })
                 .unwrap_or_default();
 
+            // Serialize beat grid for frontend waveform rendering
+            let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
+                serde_json::json!({
+                    "time_ms": b.time_ms,
+                    "bar_position": b.bar_position,
+                })
+            }).collect();
+
+            // Serialize cue points
+            let cue_points: Vec<serde_json::Value> = a.cue_points.iter().map(|c| {
+                serde_json::json!({
+                    "hot_cue_number": c.hot_cue_number,
+                    "time_ms": c.time_ms,
+                    "loop_time_ms": c.loop_time_ms,
+                })
+            }).collect();
+
             Ok(serde_json::json!({
                 "waveform_preview": a.waveform.data.to_vec(),
                 "waveform_color": waveform_color,
                 "waveform_peaks": serde_json::Value::Array(vec![]),
                 "bpm": a.bpm,
                 "key": a.key,
+                "energy": a.energy,
+                "beats": beats,
+                "cue_points": cue_points,
+                "duration_ms": duration_ms,
             }))
         }
         None => Err("No analysis data for this track".to_string()),

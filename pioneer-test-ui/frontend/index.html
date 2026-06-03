@@ -157,7 +157,19 @@
             <div class="spinner hidden" id="status-spinner"></div>
             <span id="status-message"></span>
         </div>
-        <div class="status-right" id="status-right"></div>
+        <div class="status-right" id="status-right">
+            <span class="status-pct"></span>
+            <button id="debug-toggle" title="Toggle debug panel" onclick="toggleDebugPanel()">&#x1F41B;</button>
+        </div>
+    </div>
+
+    <!-- ═══ Debug Panel ═══ -->
+    <div id="debug-panel" class="debug-panel hidden">
+        <div class="debug-header">
+            <span>Debug Log</span>
+            <button onclick="clearDebugLog()">Clear</button>
+        </div>
+        <div id="debug-log" class="debug-log"></div>
     </div>
 
 </div>

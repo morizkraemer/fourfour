@@ -271,6 +271,7 @@ pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
         },
         bpm,
         key: String::new(), // Key is not stored in ANLZ; caller fills from DB.
+        energy: None,       // Energy is not stored in ANLZ; caller fills from DB.
         cue_points,
         color_waveform,
     })

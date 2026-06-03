@@ -1,0 +1,92 @@
+/*
+ * fourfour design tokens — ported 1:1 from docs/design_system.md.
+ * That doc is normative; keep names in sync. Consumed by every primitive
+ * and intended to lift into the Tauri frontend unchanged.
+ */
+:root {
+  /* 1.1 Color */
+  --ff-bg: #0a0a0a;
+  --ff-surface: #131313;
+  --ff-elev: #1c1c1c;
+  --ff-elev-hi: #242424;
+  --ff-text: #ededed;
+  --ff-text-mid: #aaaaaa;
+  --ff-muted: #6a6a6a;
+  --ff-faint: #4a4a4a;
+  --ff-border: rgba(255, 255, 255, 0.06);
+  --ff-border-hi: rgba(255, 255, 255, 0.12);
+  --ff-hover: rgba(255, 255, 255, 0.04);
+  --ff-select: rgba(255, 255, 255, 0.07);
+  --ff-accent: #fafafa;
+  --ff-danger: #f87171;
+
+  /* Derived interaction tints (from design-system frame §4 Buttons) */
+  --ff-accent-hi: #ffffff;            /* primary button hover */
+  --ff-border-hover: rgba(255, 255, 255, 0.18); /* default button hover border */
+  --ff-danger-border: rgba(248, 113, 113, 0.20);
+  --ff-danger-bg: rgba(248, 113, 113, 0.10);
+  --ff-danger-border-hi: rgba(248, 113, 113, 0.32);
+
+  /* CDJ color tags — only on track rows, color picker, cue pips */
+  --ff-track-color-1: #ec4899;
+  --ff-track-color-2: #f59e0b;
+  --ff-track-color-3: #facc15;
+  --ff-track-color-4: #4ade80;
+  --ff-track-color-5: #38bdf8;
+  --ff-track-color-6: #a78bfa;
+  --ff-track-color-7: #94a3b8;
+
+  --ff-status-online: #4ade80;
+  --ff-status-warn: #fbbf24;
+  --ff-status-offline: #4a4a4a;
+
+  /* 1.2 Typography */
+  --ff-font: 'Geist', system-ui, sans-serif;
+  --ff-font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  --ff-type-display: 30px;
+  --ff-type-h1: 18px;
+  --ff-type-h2: 14px;
+  --ff-type-body: 13px;
+  --ff-type-row: 12.5px;
+  --ff-type-compact: 12px;
+  --ff-type-caption: 11.5px;
+  --ff-type-small: 11px;
+  --ff-type-num: 11px;
+  --ff-type-label: 10px;
+  --ff-type-label-sm: 9.5px;
+
+  /* 1.3 Spacing */
+  --ff-space-0: 0px;
+  --ff-space-1: 2px;
+  --ff-space-2: 4px;
+  --ff-space-3: 6px;
+  --ff-space-4: 8px;
+  --ff-space-5: 12px;
+  --ff-space-6: 14px;
+  --ff-space-7: 16px;
+  --ff-space-8: 24px;
+  --ff-space-9: 32px;
+  --ff-space-10: 48px;
+  --ff-space-11: 56px;
+
+  /* 1.4 Radii */
+  --ff-radius-xs: 2px;
+  --ff-radius-sm: 3px;
+  --ff-radius-md: 4px;
+  --ff-radius-lg: 5px;
+  --ff-radius-xl: 6px;
+
+  /* 1.5 Elevation */
+  --ff-shadow-menu: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --ff-shadow-toast: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --ff-shadow-dialog: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --ff-shadow-palette: 0 16px 60px rgba(0, 0, 0, 0.7);
+
+  /* 1.6 Motion */
+  --ff-motion-instant: 60ms;
+  --ff-motion-fast: 80ms;
+  --ff-motion-default: 120ms;
+  --ff-motion-slow: 200ms;
+  --ff-easing: ease;
+}

@@ -1,0 +1,71 @@
+.ff-btn {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ff-space-3);
+  padding: 0 var(--ff-space-5);
+  border: 1px solid transparent;
+  border-radius: var(--ff-radius-md);
+  background: transparent;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ff-text);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--ff-motion-fast) var(--ff-easing),
+    border-color var(--ff-motion-fast) var(--ff-easing),
+    color var(--ff-motion-fast) var(--ff-easing);
+}
+
+/* primary — solid accent */
+.ff-btn--primary {
+  background: var(--ff-accent);
+  color: var(--ff-bg);
+}
+.ff-btn--primary:hover {
+  background: var(--ff-accent-hi);
+}
+
+/* default — outline */
+.ff-btn--default {
+  border-color: var(--ff-border-hi);
+  color: var(--ff-text);
+}
+.ff-btn--default:hover {
+  background: var(--ff-elev-hi);
+  border-color: var(--ff-border-hover);
+}
+
+/* ghost — text only */
+.ff-btn--ghost {
+  color: var(--ff-muted);
+}
+.ff-btn--ghost:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+/* destructive */
+.ff-btn--destructive {
+  border-color: var(--ff-danger-border);
+  color: var(--ff-danger);
+}
+.ff-btn--destructive:hover {
+  background: var(--ff-danger-bg);
+  border-color: var(--ff-danger-border-hi);
+}
+
+/* icon-only — square 28×28 */
+.ff-btn--icon {
+  width: 28px;
+  padding: 0;
+}
+
+.ff-btn--disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}

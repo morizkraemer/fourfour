@@ -336,16 +336,52 @@ async function saveState() {
 }
 
 // ── Selection ──────────────────────────────────────────────────────────────
-function toggleTrackSelection(trackId) {
-    if (selectedTrackIds.has(trackId)) {
-        selectedTrackIds.delete(trackId);
+let lastClickedIndex = -1; // for shift-click range selection
+
+function handleTrackClick(trackId, event) {
+    const clickedIndex = tracks.findIndex(t => t.id === trackId);
+    if (clickedIndex === -1) return;
+
+    if (event.shiftKey && lastClickedIndex >= 0) {
+        // Shift+click: range select from last clicked to current
+        const start = Math.min(lastClickedIndex, clickedIndex);
+        const end = Math.max(lastClickedIndex, clickedIndex);
+        for (let i = start; i <= end; i++) {
+            selectedTrackIds.add(tracks[i].id);
+        }
+        updateSelectionClasses();
+    } else if (event.metaKey || event.ctrlKey) {
+        // Cmd/Ctrl+click: toggle this track without affecting others
+        if (selectedTrackIds.has(trackId)) {
+            selectedTrackIds.delete(trackId);
+        } else {
+            selectedTrackIds.add(trackId);
+        }
+        lastClickedIndex = clickedIndex;
+        updateSelectionClasses();
     } else {
-        selectedTrackIds.add(trackId);
+        // Plain click: select only this track (deselect others)
+        // If it's the only selected track and already selected, deselect it
+        if (selectedTrackIds.size === 1 && selectedTrackIds.has(trackId)) {
+            selectedTrackIds.clear();
+            lastClickedIndex = -1;
+        } else {
+            selectedTrackIds.clear();
+            selectedTrackIds.add(trackId);
+            lastClickedIndex = clickedIndex;
+        }
+        updateSelectionClasses();
     }
+
     updateSelectionCount();
-    // Toggle the CSS class on the row without a full re-render
-    const row = document.querySelector(`div[data-track-id="${trackId}"]`);
-    if (row) row.classList.toggle('selected', selectedTrackIds.has(trackId));
+}
+
+function updateSelectionClasses() {
+    const container = document.getElementById('track-list');
+    container.querySelectorAll('.track-row[data-track-id]').forEach(row => {
+        const id = parseInt(row.dataset.trackId, 10);
+        row.classList.toggle('selected', selectedTrackIds.has(id));
+    });
 }
 
 function updateSelectionCount() {
@@ -522,7 +558,7 @@ function renderTracks() {
         const bpm = t.tempo ? formatBpm(t.tempo) : '<span class="muted">—</span>';
         const key = t.key ? esc(t.key) : '<span class="muted">—</span>';
         const dur = t.duration_secs ? formatDuration(t.duration_secs) : '<span class="muted">—</span>';
-        return `<div class="track-row${sel}${analyzing_cls}" data-track-id="${t.id}" onclick="toggleTrackSelection(${t.id})" ondblclick="showWaveform(${t.id})">
+        return `<div class="track-row${sel}${analyzing_cls}" data-track-id="${t.id}" onclick="handleTrackClick(${t.id}, event)" ondblclick="showWaveform(${t.id})">
             <span class="track-cell num">${i + 1}</span>
             <span class="track-cell title" title="${esc(t.source_path)}">${title}</span>
             <span class="track-cell artist">${artist}</span>
@@ -645,7 +681,15 @@ function showProgress(current, total, message) {
     spinner.classList.remove('hidden');
     const pct = total > 0 ? Math.round((current / total) * 100) : 0;
     msg.textContent = message || `${current} / ${total}`;
-    right.textContent = total > 0 ? `${pct}%` : '';
+
+    // Update percentage text but keep the debug toggle button
+    let pctSpan = right.querySelector('.status-pct');
+    if (!pctSpan) {
+        pctSpan = document.createElement('span');
+        pctSpan.className = 'status-pct';
+        right.insertBefore(pctSpan, right.firstChild);
+    }
+    pctSpan.textContent = total > 0 ? `${pct}%` : '';
 
     // Also update hidden progress elements for any legacy listeners
     const fill = document.getElementById('progress-bar-fill');
@@ -657,7 +701,8 @@ function showProgress(current, total, message) {
 function hideProgress() {
     document.getElementById('status-spinner').classList.add('hidden');
     document.getElementById('status-message').textContent = '';
-    document.getElementById('status-right').textContent = '';
+    const pctSpan = document.getElementById('status-right').querySelector('.status-pct');
+    if (pctSpan) pctSpan.textContent = '';
 
     const fill = document.getElementById('progress-bar-fill');
     if (fill) fill.style.width = '0%';
@@ -999,5 +1044,48 @@ function renderTimeGrid(ctx, w, h, startFrac, endFrac) {
     }
 }
 
+// ── Debug Panel ───────────────────────────────────────────────────────────
+const MAX_DEBUG_LINES = 2000;
+
+function toggleDebugPanel() {
+    const panel = document.getElementById('debug-panel');
+    const btn = document.getElementById('debug-toggle');
+    panel.classList.toggle('hidden');
+    btn.classList.toggle('active');
+}
+
+function clearDebugLog() {
+    document.getElementById('debug-log').innerHTML = '';
+}
+
+function debugLog(level, msg) {
+    const el = document.getElementById('debug-log');
+    if (!el) return;
+    const now = new Date();
+    const ts = [now.getHours(), now.getMinutes(), now.getSeconds()]
+        .map(n => String(n).padStart(2, '0')).join(':')
+        + '.' + String(now.getMilliseconds()).padStart(3, '0');
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `<span class="log-time">${ts}</span><span class="log-${level}">${esc(msg)}</span>`;
+    el.appendChild(line);
+    // Trim old lines
+    while (el.children.length > MAX_DEBUG_LINES) {
+        el.removeChild(el.firstChild);
+    }
+    el.scrollTop = el.scrollHeight;
+}
+
+// Listen for debug-log events from the Rust backend
+async function initDebugListener() {
+    await listen('debug-log', (event) => {
+        const { level, message } = event.payload;
+        debugLog(level || 'info', message);
+    });
+}
+
 // ── Bootstrap ─────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+    initDebugListener();
+    init();
+});

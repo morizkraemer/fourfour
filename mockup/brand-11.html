@@ -1,0 +1,1854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brand 11 — Element studies</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0a0a;
+    --surface:   #131313;
+    --elev:      #1c1c1c;
+    --elev-hi:   #242424;
+    --text:      #ededed;
+    --text-mid:  #aaaaaa;
+    --muted:     #6a6a6a;
+    --faint:     #4a4a4a;
+    --border:    rgba(255,255,255,0.06);
+    --border-hi: rgba(255,255,255,0.12);
+    --hover:     rgba(255,255,255,0.04);
+    --select:    rgba(255,255,255,0.07);
+    --accent:    #fafafa;
+    --danger:    #f87171;
+
+    --font:      'Geist', system-ui, sans-serif;
+    --font-mono: 'Geist Mono', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  .page { max-width: 1240px; margin: 0 auto; padding: 56px 32px 120px; }
+
+  .page-header { margin-bottom: 48px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+  .page-eyebrow { color: var(--muted); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .page-title { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; margin-top: 6px; }
+  .page-subtitle { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+
+  /* ── Section ───────────────────────────────────────── */
+  section { margin-top: 56px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .sec-num { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); letter-spacing: 0.04em; }
+  .sec-title { font-size: 13px; font-weight: 500; color: var(--text); letter-spacing: -0.005em; }
+  .sec-note { font-size: 11.5px; color: var(--muted); }
+  .sec-body { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 24px; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .col { display: flex; flex-direction: column; gap: 12px; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .label { font-family: var(--font-mono); font-size: 10px; color: var(--faint); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+
+  /* ── 1. Type ───────────────────────────────────────── */
+  .type-grid { display: grid; grid-template-columns: 80px 1fr; gap: 8px 24px; align-items: baseline; }
+  .type-grid .meta { font-family: var(--font-mono); color: var(--faint); font-size: 10.5px; padding-top: 6px; }
+  .t-display { font-size: 30px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.1; }
+  .t-h1 { font-size: 18px; font-weight: 500; letter-spacing: -0.015em; }
+  .t-h2 { font-size: 14px; font-weight: 500; }
+  .t-body { font-size: 13px; color: var(--text); }
+  .t-mid { font-size: 12.5px; color: var(--text-mid); }
+  .t-cap { font-size: 11.5px; color: var(--muted); }
+  .t-num { font-family: var(--font-mono); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-mid); }
+  .t-mono { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); letter-spacing: 0.04em; text-transform: uppercase; }
+
+  /* ── 2. Color ──────────────────────────────────────── */
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .sw { display: flex; flex-direction: column; gap: 6px; }
+  .sw-color { height: 56px; border-radius: 4px; border: 1px solid var(--border); }
+  .sw-name { font-family: var(--font-mono); font-size: 10px; color: var(--text-mid); }
+  .sw-hex { font-family: var(--font-mono); font-size: 10px; color: var(--faint); }
+
+  /* ── 3. Buttons ───────────────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 28px; padding: 0 12px;
+    background: transparent; color: var(--text-mid); border: 1px solid transparent;
+    border-radius: 4px; font: 500 12px var(--font); cursor: default;
+    transition: background 0.08s, color 0.08s, border-color 0.08s;
+  }
+  .btn:hover { background: var(--hover); color: var(--text); }
+  .btn-default { border-color: var(--border-hi); color: var(--text); }
+  .btn-default:hover { background: var(--elev-hi); color: var(--text); border-color: rgba(255,255,255,0.18); }
+  .btn-primary { background: var(--accent); color: #0a0a0a; }
+  .btn-primary:hover { background: #fff; color: #0a0a0a; }
+  .btn-ghost { color: var(--muted); }
+  .btn-ghost:hover { background: var(--hover); color: var(--text); }
+  .btn-destructive { color: var(--danger); border-color: rgba(248,113,113,0.20); }
+  .btn-destructive:hover { background: rgba(248,113,113,0.10); color: var(--danger); border-color: rgba(248,113,113,0.32); }
+  .btn[disabled], .btn[disabled]:hover { opacity: 0.4; pointer-events: none; background: transparent; color: var(--text-mid); border-color: var(--border-hi); }
+  .btn-icon { width: 28px; padding: 0; }
+  .btn-icon svg { width: 13px; height: 13px; fill: currentColor; }
+
+  /* ── 4. Inputs ─────────────────────────────────────── */
+  .input {
+    height: 28px; padding: 0 10px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border-hi); border-radius: 4px;
+    font: 400 12.5px var(--font); outline: none; min-width: 200px;
+    transition: border-color 0.1s;
+  }
+  .input::placeholder { color: var(--faint); }
+  .input:focus { border-color: rgba(255,255,255,0.30); }
+  .input-search { position: relative; }
+  .input-search svg { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); width: 12px; height: 12px; fill: var(--faint); pointer-events: none; }
+  .input-search .input { padding-left: 26px; }
+
+  .kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    background: var(--elev); color: var(--muted);
+    border: 1px solid var(--border-hi); border-radius: 3px;
+    font: 500 10px var(--font-mono); letter-spacing: 0.02em;
+  }
+
+  /* ── 5. Sidebar fragment ───────────────────────────── */
+  .sb { width: 240px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px 0; }
+  .sb-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px 6px; }
+  .sb-head .h { font-family: var(--font-mono); font-size: 9.5px; color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; }
+  .sb-head button { background: none; border: none; color: var(--muted); font-size: 13px; cursor: default; padding: 0 4px; line-height: 1; }
+  .sb-head button:hover { color: var(--text); }
+  .sb-row { display: flex; align-items: center; height: 26px; padding: 0 14px; margin: 1px 6px; border-radius: 3px; color: var(--text-mid); font-size: 12.5px; cursor: default; gap: 8px; }
+  .sb-row:hover { background: var(--hover); color: var(--text); }
+  .sb-row.active { background: var(--select); color: var(--text); }
+  .sb-row .icon { display: inline-flex; width: 13px; height: 13px; opacity: 0.5; }
+  .sb-row .icon svg { width: 13px; height: 13px; fill: currentColor; }
+  .sb-row .lbl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-row .ct { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); }
+  .sb-row.active .ct { color: var(--muted); }
+  .sb-tag-digit {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px;
+    background: var(--elev); color: var(--text-mid);
+    border-radius: 3px;
+    font: 500 10.5px var(--font-mono); font-variant-numeric: tabular-nums;
+    border: 1px solid var(--border);
+  }
+  .sb-row.active .sb-tag-digit { background: var(--elev-hi); color: var(--text); }
+  .sb-section { padding: 6px 0; }
+  .sb-section + .sb-section { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 8px; }
+  .usb-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .usb-dot.on { background: #4ade80; }
+  .usb-dot.off { background: var(--faint); }
+
+  /* ── 6. Panel header ───────────────────────────────── */
+  .ph { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
+  .ph-left { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .ph-title { font-size: 13px; font-weight: 500; }
+  .ph-sub { font-size: 11.5px; color: var(--muted); }
+  .ph-right { display: flex; align-items: center; gap: 4px; }
+
+  /* ── 7. Track list ─────────────────────────────────── */
+  .tl { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .tl-h, .tr {
+    display: grid; grid-template-columns: 26px 2.4fr 1.6fr 1.2fr 60px 44px 38px 50px;
+    padding: 0 12px; gap: 0; align-items: center;
+  }
+  .tl-h { height: 26px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tl-h span { font: 500 9.5px var(--font-mono); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; }
+  .tr { height: 28px; cursor: default; transition: background 0.06s; }
+  .tr:hover { background: var(--hover); }
+  .tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+  .tr:nth-child(even):hover { background: var(--hover); }
+  .tr.sel { background: var(--select); }
+  .tr.sel-multi { background: var(--select); }
+  .tr.an { opacity: 0.45; }
+  .tc { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tc.num { color: var(--faint); font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; padding-right: 6px; font-size: 10.5px; }
+  .tc.title { color: var(--text); }
+  .tc.artist, .tc.label { color: var(--text-mid); }
+  .tc.label { color: var(--muted); }
+  .tc.bpm, .tc.key, .tc.time { color: var(--text-mid); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .tc.muted { color: var(--faint); }
+  .tc.meta { display: flex; align-items: center; gap: 4px; }
+  .color-dot { width: 9px; height: 9px; border-radius: 2px; }
+  .digit-pill {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px;
+    background: var(--elev-hi); color: var(--text-mid);
+    border-radius: 2px;
+    font: 500 9px var(--font-mono); font-variant-numeric: tabular-nums;
+  }
+  .star { color: var(--text-mid); font-size: 9px; }
+  .star.empty { color: var(--faint); }
+
+  /* ── 8. Context menu / dropdown ────────────────────── */
+  .menu {
+    background: var(--elev); border: 1px solid var(--border-hi); border-radius: 5px;
+    padding: 4px; min-width: 180px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  }
+  .menu-item { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px; border-radius: 3px; font-size: 12px; color: var(--text-mid); cursor: default; }
+  .menu-item:hover { background: var(--select); color: var(--text); }
+  .menu-item.danger { color: var(--danger); }
+  .menu-item.danger:hover { background: rgba(248,113,113,0.10); color: var(--danger); }
+  .menu-item.disabled, .menu-item.disabled:hover { color: var(--faint); background: transparent; }
+  .menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+  .menu-shortcut { font-family: var(--font-mono); font-size: 10px; color: var(--faint); letter-spacing: 0.02em; }
+
+  /* ── 9. Dialog ─────────────────────────────────────── */
+  .dlg-wrap { background: rgba(0,0,0,0.4); border-radius: 6px; padding: 32px; display: flex; align-items: center; justify-content: center; min-height: 220px; }
+  .dlg { background: var(--elev); border: 1px solid var(--border-hi); border-radius: 6px; padding: 20px 22px; min-width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,0.6); }
+  .dlg-title { font-size: 13px; font-weight: 500; }
+  .dlg-body { font-size: 12.5px; color: var(--text-mid); margin-top: 6px; line-height: 1.5; }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 18px; }
+
+  /* ── 10. Status bar ────────────────────────────────── */
+  .sb-bar { display: flex; align-items: center; justify-content: space-between; height: 26px; padding: 0 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; }
+  .sb-bar .left, .sb-bar .right { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .spin { width: 11px; height: 11px; border: 1.4px solid var(--border-hi); border-top-color: var(--text-mid); border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pill-progress { height: 4px; width: 80px; background: var(--elev); border-radius: 2px; overflow: hidden; }
+  .pill-progress > i { display: block; height: 100%; width: 38%; background: var(--text-mid); }
+  .sep { color: var(--faint); }
+
+  /* ── 11. Player ────────────────────────────────────── */
+  .player { display: grid; grid-template-columns: 40px 28px 1fr; gap: 12px; align-items: center; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; }
+  .player .art { width: 40px; height: 40px; background: var(--elev); border-radius: 3px; display: flex; align-items: center; justify-content: center; color: var(--faint); }
+  .player .art svg { width: 22px; height: 22px; }
+  .art-ph { background: var(--elev); display: flex; align-items: center; justify-content: center; color: var(--faint); border-radius: 3px; }
+  .art-ph svg { width: 50%; height: 50%; max-width: 64px; max-height: 64px; }
+  .player .play { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--bg); border: none; cursor: default; display: flex; align-items: center; justify-content: center; }
+  .player .play svg { fill: var(--bg); width: 10px; height: 10px; margin-left: 1px; }
+  .player .wf-area { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .player .meta-row { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .player .ttl { font-size: 12px; font-weight: 500; }
+  .player .arti { font-size: 11px; color: var(--muted); }
+  .player .wf { height: 28px; position: relative; }
+  .player canvas { width: 100%; height: 100%; display: block; }
+  .player .times { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 10px; color: var(--faint); }
+
+  /* ── 12. Tag chips inline ──────────────────────────── */
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 7px 2px 4px;
+    background: var(--elev); border: 1px solid var(--border-hi);
+    border-radius: 3px; font-size: 11px; color: var(--text-mid);
+  }
+  .tag-chip .digit {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px;
+    background: var(--bg); color: var(--text);
+    border-radius: 2px;
+    font: 500 9.5px var(--font-mono); font-variant-numeric: tabular-nums;
+  }
+
+  /* ── 13. Empty state ──────────────────────────────── */
+  .empty {
+    background: var(--surface); border: 1px dashed var(--border-hi); border-radius: 4px;
+    padding: 36px 24px; text-align: center;
+  }
+  .empty-title { font-size: 13px; font-weight: 500; color: var(--text-mid); }
+  .empty-sub { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
+  /* ── 14. Tooltip ──────────────────────────────────── */
+  .tip {
+    background: var(--elev-hi); color: var(--text); border: 1px solid var(--border-hi);
+    padding: 4px 8px; border-radius: 3px; font-size: 11px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .tip .key { color: var(--muted); margin-left: 6px; font-family: var(--font-mono); font-size: 10px; }
+
+  /* ── 15. Drop overlay ─────────────────────────────── */
+  .drop {
+    background: var(--surface); border: 1.5px dashed rgba(255,255,255,0.20); border-radius: 6px;
+    padding: 32px; text-align: center; color: var(--text-mid);
+  }
+  .drop-title { font-size: 14px; font-weight: 500; color: var(--text); }
+  .drop-sub { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
+  /* ── 16. Column headers / sort ─────────────────────── */
+  .col-h-row { display: grid; grid-template-columns: 32px 2.4fr 1.6fr 1.2fr 80px 80px; column-gap: 16px; padding: 0 14px; height: 28px; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; }
+  .col-h { font: 500 9.5px var(--font-mono); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 4px; cursor: default; padding: 4px 0; min-width: 0; overflow: hidden; }
+  .col-h:hover { color: var(--text-mid); }
+  .col-h.sorted { color: var(--text); }
+  .col-h .arr { font-size: 8px; opacity: 0.7; flex-shrink: 0; }
+  .col-h.dragging { color: var(--text); background: var(--elev); padding: 4px 8px; border-radius: 3px; margin: 0 -4px; }
+
+  /* ── 17. Form controls ────────────────────────────── */
+  .check { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-mid); cursor: default; }
+  .check .box { width: 14px; height: 14px; border: 1px solid var(--border-hi); border-radius: 3px; background: var(--bg); display: inline-flex; align-items: center; justify-content: center; }
+  .check .box svg { width: 9px; height: 9px; fill: none; stroke: var(--bg); stroke-width: 2; opacity: 0; }
+  .check.on .box { background: var(--accent); border-color: var(--accent); }
+  .check.on .box svg { opacity: 1; }
+  .check.on { color: var(--text); }
+  .check:hover { color: var(--text); }
+  .check:hover .box { border-color: rgba(255,255,255,0.22); }
+  .check.on:hover .box { background: #fff; }
+
+  .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-mid); cursor: default; }
+  .toggle .sw { width: 26px; height: 14px; background: var(--elev-hi); border: 1px solid var(--border-hi); border-radius: 8px; position: relative; transition: background 0.1s; }
+  .toggle .sw::after { content: ''; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); transition: transform 0.12s, background 0.12s; }
+  .toggle.on .sw { background: var(--accent); border-color: var(--accent); }
+  .toggle.on .sw::after { transform: translateX(12px); background: #0a0a0a; }
+  .toggle.on { color: var(--text); }
+  .toggle:hover .sw { border-color: rgba(255,255,255,0.22); }
+
+  .radio { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-mid); cursor: default; }
+  .radio .dot { width: 14px; height: 14px; border: 1px solid var(--border-hi); border-radius: 50%; background: var(--bg); display: inline-flex; align-items: center; justify-content: center; }
+  .radio .dot::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: transparent; }
+  .radio.on .dot { border-color: var(--accent); }
+  .radio.on .dot::after { background: var(--accent); }
+  .radio.on { color: var(--text); }
+  .radio:hover .dot { border-color: rgba(255,255,255,0.22); }
+
+  .seg { display: inline-flex; background: var(--bg); border: 1px solid var(--border-hi); border-radius: 4px; padding: 2px; gap: 2px; }
+  .seg button { background: transparent; border: none; color: var(--muted); font: 500 11.5px var(--font); padding: 4px 10px; border-radius: 3px; cursor: default; }
+  .seg button:hover { color: var(--text); background: var(--hover); }
+  .seg button.on { background: var(--elev-hi); color: var(--text); }
+  .seg button.on:hover { background: var(--elev-hi); }
+
+  .slider { width: 200px; height: 18px; position: relative; display: flex; align-items: center; }
+  .slider .track { width: 100%; height: 2px; background: var(--elev-hi); border-radius: 1px; }
+  .slider .fill { position: absolute; left: 0; top: 50%; transform: translateY(-50%); height: 2px; background: var(--text-mid); border-radius: 1px; }
+  .slider .thumb { position: absolute; top: 50%; transform: translate(-50%,-50%); width: 12px; height: 12px; border-radius: 50%; background: var(--text); border: 1px solid var(--bg); }
+  .slider:hover .thumb { background: #fff; }
+
+  .stars { display: inline-flex; gap: 1px; align-items: center; }
+  .stars span { width: 12px; height: 12px; display: inline-flex; cursor: default; color: var(--text-mid); }
+  .stars span svg { width: 12px; height: 12px; fill: currentColor; }
+  .stars span.empty { color: var(--faint); }
+  .stars:hover span { color: var(--text); }
+
+  .color-pick { display: inline-flex; gap: 5px; }
+  .color-pick .c { width: 14px; height: 14px; border-radius: 3px; border: 1px solid transparent; cursor: default; box-sizing: border-box; }
+  .color-pick .c:hover { transform: scale(1.1); }
+  .color-pick .c.sel { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--bg); }
+  .color-pick .none { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-hi); display: inline-flex; align-items: center; justify-content: center; color: var(--faint); font-size: 9px; }
+  .color-pick .none:hover { color: var(--text); border-color: var(--text-mid); }
+
+  /* ── 18. Command palette ──────────────────────────── */
+  .cp-wrap { background: rgba(0,0,0,0.5); border-radius: 6px; padding: 40px 24px; }
+  .cp { max-width: 560px; margin: 0 auto; background: var(--elev); border: 1px solid var(--border-hi); border-radius: 6px; box-shadow: 0 16px 60px rgba(0,0,0,0.7); overflow: hidden; }
+  .cp-input { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .cp-input svg { width: 14px; height: 14px; color: var(--faint); }
+  .cp-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font: 400 14px var(--font); }
+  .cp-input input::placeholder { color: var(--faint); }
+  .cp-section { padding: 6px 0; }
+  .cp-section + .cp-section { border-top: 1px solid var(--border); }
+  .cp-head { padding: 6px 14px; font: 500 9.5px var(--font-mono); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; }
+  .cp-row { display: flex; align-items: center; gap: 10px; padding: 7px 14px; cursor: default; }
+  .cp-row:hover, .cp-row.act { background: var(--select); }
+  .cp-row .icon { width: 14px; height: 14px; color: var(--muted); flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; }
+  .cp-row .icon svg { width: 14px; height: 14px; }
+  .cp-row .name { flex: 1; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cp-row .name .sub { color: var(--muted); font-size: 11.5px; margin-left: 6px; }
+  .cp-row .right { color: var(--faint); font-size: 11px; font-family: var(--font-mono); }
+  .cp-foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-top: 1px solid var(--border); background: var(--bg); font-size: 10.5px; color: var(--faint); }
+  .cp-foot .keys { display: inline-flex; gap: 12px; }
+  .cp-foot .keys span { display: inline-flex; align-items: center; gap: 4px; }
+
+  /* ── 19. Inline filter in header ──────────────────── */
+  .ph.filtering .ph-left { flex: 1; min-width: 0; }
+  .filter-input { flex: 1; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; background: var(--bg); border: 1px solid var(--border-hi); border-radius: 3px; min-width: 0; }
+  .filter-input svg { width: 12px; height: 12px; color: var(--faint); flex-shrink: 0; }
+  .filter-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--text); font: 400 12px var(--font); min-width: 0; }
+  .filter-input .count { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); flex-shrink: 0; }
+  .filter-input .x { color: var(--muted); font-size: 13px; cursor: default; line-height: 1; padding: 0 2px; }
+  .filter-input .x:hover { color: var(--text); }
+
+  /* ── 20. Drag ghost ───────────────────────────────── */
+  .ghost {
+    background: var(--elev); border: 1px solid var(--border-hi); border-radius: 4px;
+    padding: 6px 10px; box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+    display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text);
+  }
+  .ghost .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; background: var(--accent); color: var(--bg); border-radius: 3px; font: 600 10px var(--font-mono); }
+
+  /* drop indicator (insertion line) */
+  .drop-line { position: relative; height: 0; border-top: 1px solid var(--accent); margin: 4px 0; }
+  .drop-line::before { content: ''; position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; }
+
+  /* ── 21. Detail pane ──────────────────────────────── */
+  .dp { width: 320px; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 14px; }
+  .dp-art { width: 100%; aspect-ratio: 1; background: var(--elev); border-radius: 3px; margin-bottom: 14px; display: flex; align-items: center; justify-content: center; color: var(--faint); }
+  .dp-art svg { width: 50%; height: 50%; }
+  .dp-title { font-size: 14px; font-weight: 500; line-height: 1.3; }
+  .dp-artist { font-size: 12.5px; color: var(--text-mid); margin-top: 2px; }
+  .dp-meta { display: grid; grid-template-columns: 96px 1fr; gap: 6px 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); align-items: baseline; }
+  .dp-meta dt { font: 500 10px var(--font-mono); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+  .dp-meta dd { font-size: 12px; color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dp-meta dd.mono { font-family: var(--font-mono); font-size: 11px; }
+  .dp-meta dd.wrap { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.4; }
+  .dp-section-h { font: 500 10px var(--font-mono); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; margin: 14px 0 6px; }
+  .dp-cue-list { display: flex; flex-direction: column; gap: 2px; }
+  .dp-cue { display: grid; grid-template-columns: 14px 1fr 50px; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 3px; font-size: 11.5px; color: var(--text-mid); cursor: default; }
+  .dp-cue:hover { background: var(--hover); color: var(--text); }
+  .dp-cue .pip { width: 8px; height: 8px; border-radius: 50%; }
+  .dp-cue .pos { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); text-align: right; }
+  .dp-comment { font-size: 12px; color: var(--text-mid); line-height: 1.5; padding: 8px 0; }
+  .dp-path { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint); word-break: break-all; line-height: 1.5; }
+  .dp-multi { display: flex; flex-direction: column; gap: 14px; align-items: center; padding: 24px 0; }
+  .dp-multi-count { font-size: 28px; font-weight: 500; color: var(--text); letter-spacing: -0.02em; }
+  .dp-multi-label { font-size: 12px; color: var(--muted); }
+  .dp-bulk { width: 100%; display: flex; flex-direction: column; gap: 4px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .dp-bulk button { background: transparent; border: none; color: var(--text-mid); font: 400 12px var(--font); padding: 6px 8px; border-radius: 3px; text-align: left; cursor: default; display: flex; justify-content: space-between; align-items: center; }
+  .dp-bulk button:hover { background: var(--hover); color: var(--text); }
+  .dp-bulk button .k { font-family: var(--font-mono); font-size: 10px; color: var(--faint); }
+  .dp-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 60px 16px; text-align: center; }
+  .dp-empty .ic { font-size: 24px; color: var(--faint); }
+  .dp-empty .t { font-size: 12.5px; color: var(--text-mid); }
+  .dp-empty .s { font-size: 11px; color: var(--muted); }
+  .dp-warn { padding: 8px 10px; background: rgba(248,113,113,0.07); border: 1px solid rgba(248,113,113,0.20); border-radius: 3px; color: var(--danger); font-size: 11.5px; margin-top: 14px; }
+
+  /* ── 22. Expanded player ──────────────────────────── */
+  .player-x { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .px-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .px-head .l { display: flex; align-items: center; gap: 10px; }
+  .px-head .ttl { font-size: 13px; font-weight: 500; }
+  .px-head .arti { font-size: 11.5px; color: var(--muted); }
+  .px-head .meta-pills { display: inline-flex; gap: 6px; margin-left: 10px; }
+  .px-pill { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-mid); padding: 2px 6px; background: var(--elev); border-radius: 2px; border: 1px solid var(--border); }
+  .px-cuestrip { display: flex; height: 18px; padding: 0 14px; align-items: center; gap: 0; position: relative; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .px-cue { position: absolute; top: 4px; height: 10px; width: 1px; background: var(--text-mid); }
+  .px-cue::after { content: attr(data-l); position: absolute; top: -1px; left: 3px; font: 500 9px var(--font-mono); color: var(--text-mid); white-space: nowrap; }
+  .px-wf { height: 120px; position: relative; background: linear-gradient(180deg, var(--bg) 0%, #050505 100%); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--faint); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; }
+  .px-wf::before { content: ''; position: absolute; top: 0; bottom: 0; left: 38%; width: 1px; background: var(--text); }
+  .px-wf .placeholder-bars { display: flex; align-items: flex-end; height: 70%; gap: 1px; width: 96%; opacity: 0.7; }
+  .px-wf .placeholder-bars i { flex: 1; background: var(--text-mid); display: block; min-width: 1px; }
+  .px-grid { display: flex; height: 14px; padding: 0 14px; background: var(--bg); border-bottom: 1px solid var(--border); align-items: center; position: relative; }
+  .px-grid .beat { flex: 1; border-left: 1px solid var(--border); height: 6px; position: relative; }
+  .px-grid .beat.bar { border-left-color: var(--text-mid); height: 10px; }
+  .px-grid .beat.bar::after { content: attr(data-n); position: absolute; left: 3px; top: -10px; font: 500 8.5px var(--font-mono); color: var(--faint); }
+  .px-controls { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; gap: 16px; }
+  .px-controls .left, .px-controls .center, .px-controls .right { display: flex; align-items: center; gap: 8px; }
+  .px-time { font-family: var(--font-mono); font-size: 11px; color: var(--text-mid); }
+  .nudge { display: inline-flex; align-items: center; background: var(--bg); border: 1px solid var(--border-hi); border-radius: 3px; }
+  .nudge button { width: 22px; height: 22px; border: none; background: transparent; color: var(--muted); font-size: 12px; cursor: default; }
+  .nudge button:hover { color: var(--text); background: var(--hover); }
+  .nudge .v { padding: 0 8px; font: 500 11px var(--font-mono); color: var(--text); min-width: 50px; text-align: center; border-left: 1px solid var(--border); border-right: 1px solid var(--border); height: 22px; line-height: 22px; }
+
+  /* ── 23. Settings ─────────────────────────────────── */
+  .settings { display: grid; grid-template-columns: 200px 1fr; min-height: 420px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .settings-nav { background: var(--bg); border-right: 1px solid var(--border); padding: 14px 0; }
+  .settings-nav .h { padding: 8px 16px 4px; font: 500 9.5px var(--font-mono); color: var(--faint); letter-spacing: 0.06em; text-transform: uppercase; }
+  .settings-nav .item { padding: 7px 16px; font-size: 12.5px; color: var(--text-mid); cursor: default; }
+  .settings-nav .item:hover { color: var(--text); background: var(--hover); }
+  .settings-nav .item.act { color: var(--text); background: var(--select); }
+  .settings-pane { padding: 22px 28px; }
+  .settings-h { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
+  .settings-sub { font-size: 12px; color: var(--muted); margin-top: 2px; margin-bottom: 18px; }
+  .field { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--border); align-items: center; }
+  .field .lbl { font-size: 12.5px; color: var(--text); }
+  .field .desc { font-size: 11.5px; color: var(--muted); margin-top: 2px; grid-column: 1; }
+  .field .ctrl { grid-row: 1 / 3; grid-column: 2; }
+
+  .shortcut-row { display: grid; grid-template-columns: 1fr auto; padding: 8px 0; align-items: center; gap: 12px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-mid); }
+  .shortcut-row .keys { display: inline-flex; gap: 3px; }
+
+  /* ── 24. Notification / toast / inline alert ─────── */
+  .toast { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--elev); border: 1px solid var(--border-hi); border-radius: 5px; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+  .toast .ic { width: 14px; height: 14px; color: var(--text-mid); }
+  .toast .msg { font-size: 12px; color: var(--text); }
+  .toast .sub { font-size: 11px; color: var(--muted); margin-left: 4px; }
+  .toast.success .ic { color: #4ade80; }
+  .toast.error { border-color: rgba(248,113,113,0.32); }
+  .toast.error .ic { color: var(--danger); }
+  .toast .undo { font-size: 11.5px; color: var(--text-mid); cursor: default; padding: 2px 6px; border-radius: 3px; margin-left: 4px; border: 1px solid var(--border-hi); }
+  .toast .undo:hover { color: var(--text); background: var(--hover); }
+
+  .inline-alert { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 4px; font-size: 12px; }
+  .inline-alert.warn { background: rgba(248,113,113,0.06); border: 1px solid rgba(248,113,113,0.18); color: var(--text-mid); }
+  .inline-alert.warn .ic { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+  .inline-alert.info { background: var(--elev); border: 1px solid var(--border); color: var(--text-mid); }
+  .inline-alert.info .ic { color: var(--text-mid); flex-shrink: 0; margin-top: 1px; }
+  .inline-alert .body { flex: 1; line-height: 1.4; }
+  .inline-alert .body strong { color: var(--text); font-weight: 500; }
+
+  /* ── 25. Onboarding ──────────────────────────────── */
+  .onboard { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 56px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+  .onboard .mark { font-size: 28px; font-weight: 600; letter-spacing: -0.025em; }
+  .onboard .msg { font-size: 13px; color: var(--text-mid); max-width: 380px; line-height: 1.5; }
+  .onboard .actions { display: flex; gap: 8px; margin-top: 6px; }
+
+  /* ── 26. USB drift / conflict ────────────────────── */
+  .conflict { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .conflict-h { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .conflict-h .t { font-size: 13px; font-weight: 500; }
+  .conflict-h .s { font-size: 11.5px; color: var(--muted); }
+  .conflict-row { display: grid; grid-template-columns: 22px 50px 1fr 80px; padding: 6px 14px; align-items: center; gap: 10px; font-size: 12px; cursor: default; border-top: 1px solid var(--border); }
+  .conflict-row:hover { background: var(--hover); }
+  .conflict-row .marker { font: 500 10px var(--font-mono); }
+  .conflict-row.add .marker { color: #4ade80; }
+  .conflict-row.rem .marker { color: var(--danger); }
+  .conflict-row.chg .marker { color: #fbbf24; }
+  .conflict-row .label { font: 500 10px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  .conflict-row .name { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conflict-row .sub { color: var(--muted); font-size: 11px; }
+
+  /* ── 27. Breadcrumb / target chip ────────────────── */
+  .crumb { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-mid); }
+  .crumb a { color: var(--muted); cursor: default; }
+  .crumb a:hover { color: var(--text); }
+  .crumb .sep { color: var(--faint); }
+  .crumb .cur { color: var(--text); }
+
+  .target-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px 3px 6px; background: var(--elev); border: 1px solid var(--border-hi); border-radius: 3px; font-size: 11.5px; color: var(--text); }
+  .target-chip .pin { width: 10px; height: 10px; color: var(--text-mid); }
+  .target-chip .x { color: var(--muted); cursor: default; padding: 0 2px; }
+  .target-chip .x:hover { color: var(--text); }
+
+  /* ── 28. Loading bar / progress ──────────────────── */
+  .pbar { width: 100%; height: 4px; background: var(--elev); border-radius: 2px; overflow: hidden; }
+  .pbar > i { display: block; height: 100%; background: var(--text); border-radius: 2px; }
+  .pbar.indeterm > i { width: 30%; animation: indeterm 1.6s ease-in-out infinite; background: var(--text-mid); }
+  @keyframes indeterm { 0% { transform: translateX(-100%); } 100% { transform: translateX(450%); } }
+
+  /* ── 29. Bulk action bar (selection bar) ─────────── */
+  .bulk-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; background: var(--elev); border: 1px solid var(--border-hi); border-radius: 4px; }
+  .bulk-bar .left { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--text-mid); }
+  .bulk-bar .left .count { color: var(--text); font-weight: 500; }
+  .bulk-bar .right { display: flex; align-items: center; gap: 4px; }
+
+  /* ── 30. Full-window composition ─────────────────── */
+  .app-frame { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .app-titlebar { height: 28px; background: var(--bg); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 12px; gap: 6px; }
+  .app-titlebar .light { width: 10px; height: 10px; border-radius: 50%; background: var(--elev-hi); }
+  .app-titlebar .ttl { margin-left: 12px; font-size: 11px; color: var(--faint); }
+  .app-grid { display: grid; grid-template-rows: 1fr auto auto; height: 600px; }
+  .app-main { display: grid; grid-template-columns: 220px 1fr 280px; min-height: 0; }
+  .app-side { background: var(--bg); border-right: 1px solid var(--border); padding: 10px 0; overflow: hidden; }
+  .app-list { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .app-list .ph { border: none; border-radius: 0; border-bottom: 1px solid var(--border); height: 38px; }
+  .app-list-rows { flex: 1; overflow: hidden; min-height: 0; }
+  .app-detail { background: var(--surface); padding: 14px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+  .app-player { border-top: 1px solid var(--border); }
+  .app-status { height: 24px; background: var(--bg); border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font-size: 10.5px; color: var(--muted); }
+
+  /* compact tighter rows for full mock */
+  .compact .tr, .compact .tl-h { grid-template-columns: 24px 2fr 1.4fr 1fr 50px 38px; padding: 0 10px; height: 26px; }
+  .compact .tr .tc { font-size: 11.5px; }
+  .compact .sb-row { height: 24px; padding: 0 12px; margin: 1px 4px; font-size: 12px; }
+  .compact .sb-section { padding: 4px 0; }
+  .compact .sb-head { padding: 6px 12px 4px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="ic-note" viewBox="0 0 24 24">
+      <path d="M9 18V5l11-2v13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <ellipse cx="6.5" cy="18" rx="2.5" ry="2" fill="currentColor"/>
+      <ellipse cx="17.5" cy="16" rx="2.5" ry="2" fill="currentColor"/>
+    </symbol>
+    <symbol id="ic-star" viewBox="0 0 12 12">
+      <path d="M6 1l1.6 3.2 3.5.5-2.55 2.5.6 3.5L6 9.05 2.85 10.7l.6-3.5L.9 4.7l3.5-.5z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="page">
+
+  <!-- Header -->
+  <header class="page-header">
+    <div class="page-eyebrow">Brand 11 · Geist · Achromatic</div>
+    <h1 class="page-title">Element studies</h1>
+    <p class="page-subtitle">No color accent. Hierarchy comes from neutral tone, weight, and scale only. Destructive uses a single restrained red.</p>
+  </header>
+
+  <!-- 1. Typography -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01</span>
+      <span class="sec-title">Typography</span>
+      <span class="sec-note">Geist · weights 400 / 500 / 600. Geist Mono for tabular numbers and labels.</span>
+    </div>
+    <div class="sec-body">
+      <div class="type-grid">
+        <div class="meta">30 / 600</div><div class="t-display">All Tracks</div>
+        <div class="meta">18 / 500</div><div class="t-h1">Saturday — Panorama Bar</div>
+        <div class="meta">14 / 500</div><div class="t-h2">Recently Added</div>
+        <div class="meta">13 / 400</div><div class="t-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="meta">12.5 / 400</div><div class="t-mid">52 tracks · 5 hours 24 minutes</div>
+        <div class="meta">11.5 / 400</div><div class="t-cap">Last analyzed 2 hours ago</div>
+        <div class="meta">11.5 mono</div><div class="t-num">128 BPM · 8A · 6:14</div>
+        <div class="meta">10.5 mono</div><div class="t-mono">SECTION HEADING</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Color -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02</span>
+      <span class="sec-title">Color</span>
+      <span class="sec-note">Background scale + text scale + single restrained danger.</span>
+    </div>
+    <div class="sec-body">
+      <div class="swatches">
+        <div class="sw"><div class="sw-color" style="background:#0a0a0a"></div><div class="sw-name">bg</div><div class="sw-hex">#0A0A0A</div></div>
+        <div class="sw"><div class="sw-color" style="background:#131313"></div><div class="sw-name">surface</div><div class="sw-hex">#131313</div></div>
+        <div class="sw"><div class="sw-color" style="background:#1c1c1c"></div><div class="sw-name">elevated</div><div class="sw-hex">#1C1C1C</div></div>
+        <div class="sw"><div class="sw-color" style="background:#242424"></div><div class="sw-name">elev hi</div><div class="sw-hex">#242424</div></div>
+        <div class="sw"><div class="sw-color" style="background:#6a6a6a"></div><div class="sw-name">muted</div><div class="sw-hex">#6A6A6A</div></div>
+        <div class="sw"><div class="sw-color" style="background:#ededed"></div><div class="sw-name">text</div><div class="sw-hex">#EDEDED</div></div>
+      </div>
+      <div style="display:flex;gap:24px;margin-top:18px;">
+        <div class="sw" style="width:120px"><div class="sw-color" style="background:#fafafa"></div><div class="sw-name">accent</div><div class="sw-hex">#FAFAFA</div></div>
+        <div class="sw" style="width:120px"><div class="sw-color" style="background:#f87171"></div><div class="sw-name">danger</div><div class="sw-hex">#F87171</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Buttons -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03</span>
+      <span class="sec-title">Buttons</span>
+      <span class="sec-note">Primary uses the white accent. Default has a faint border. Ghost is text-only. Destructive only on irreversible actions.</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Variants</div>
+        <div class="row">
+          <button class="btn btn-primary">Sync to USB</button>
+          <button class="btn btn-default">Import folder</button>
+          <button class="btn btn-ghost">Cancel</button>
+          <button class="btn btn-destructive">Wipe USB</button>
+          <button class="btn btn-icon" title="Eject"><svg viewBox="0 0 12 12"><path d="M6 2 L10 8 L2 8 Z"/><rect x="2" y="9" width="8" height="1.5"/></svg></button>
+          <button class="btn btn-default" disabled>Disabled</button>
+        </div>
+      </div>
+      <div>
+        <div class="label">Sizes & inline</div>
+        <div class="row">
+          <button class="btn btn-primary">Curate <span class="kbd" style="background:rgba(0,0,0,0.15);color:#0a0a0a;border-color:rgba(0,0,0,0.2);">⏎</span></button>
+          <button class="btn btn-default">Filter <span class="kbd">⌘F</span></button>
+          <button class="btn btn-ghost">Search… <span class="kbd">⌘K</span></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Inputs -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <span class="sec-title">Inputs</span>
+    </div>
+    <div class="sec-body row">
+      <input class="input" placeholder="Playlist name" />
+      <div class="input-search">
+        <svg viewBox="0 0 12 12"><path d="M5 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm5 10L8 9" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+        <input class="input" placeholder="Filter tracks" style="min-width:220px" />
+      </div>
+      <input class="input" value="128.0" style="min-width:80px;text-align:right;font-family:var(--font-mono)" />
+      <span class="t-mono" style="color:var(--muted)">BPM</span>
+    </div>
+  </section>
+
+  <!-- 5. Sidebar fragment + Panel header -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">05</span>
+      <span class="sec-title">Sidebar fragment</span>
+      <span class="sec-note">Tags · Library · Playlists · USBs. Active row uses subtle bg lift, not color.</span>
+    </div>
+    <div class="sec-body">
+      <div class="row" style="align-items:flex-start;gap:24px">
+        <div class="sb">
+          <div class="sb-section">
+            <div class="sb-head"><span class="h">Favorites</span><button>+</button></div>
+            <div class="sb-row">
+              <span class="sb-tag-digit">1</span>
+              <span class="lbl">Peak Time</span>
+              <span class="ct">24</span>
+            </div>
+            <div class="sb-row active">
+              <span class="sb-tag-digit">2</span>
+              <span class="lbl">Warmup</span>
+              <span class="ct">18</span>
+            </div>
+            <div class="sb-row">
+              <span class="sb-tag-digit">3</span>
+              <span class="lbl">Weird</span>
+              <span class="ct">7</span>
+            </div>
+          </div>
+          <div class="sb-section">
+            <div class="sb-head"><span class="h">Library</span></div>
+            <div class="sb-row">
+              <span class="icon"><svg viewBox="0 0 12 12"><path d="M2 3h8M2 6h8M2 9h5" stroke="currentColor" stroke-width="1.2" fill="none"/></svg></span>
+              <span class="lbl">All Tracks</span>
+              <span class="ct">4218</span>
+            </div>
+            <div class="sb-row">
+              <span class="icon"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.1" fill="none"/><path d="M6 4v2l1.5 1" stroke="currentColor" stroke-width="1.1" fill="none"/></svg></span>
+              <span class="lbl">Recently Added</span>
+              <span class="ct">52</span>
+            </div>
+            <div class="sb-row">
+              <span class="icon"><svg viewBox="0 0 12 12"><path d="M2 6h8M6 2v8" stroke="currentColor" stroke-width="1.1"/></svg></span>
+              <span class="lbl">Unfiled</span>
+              <span class="ct">311</span>
+            </div>
+          </div>
+          <div class="sb-section">
+            <div class="sb-head"><span class="h">Playlists</span><button>+</button></div>
+            <div class="sb-row"><span class="lbl">Saturday</span><span class="ct">40</span></div>
+            <div class="sb-row"><span class="lbl">Sunday Closing</span><span class="ct">28</span></div>
+            <div class="sb-row"><span class="lbl">Festival Prep</span></div>
+          </div>
+          <div class="sb-section">
+            <div class="sb-head"><span class="h">USB Devices</span></div>
+            <div class="sb-row"><span class="usb-dot on"></span><span class="lbl">SanDisk 64GB</span></div>
+            <div class="sb-row"><span class="usb-dot off"></span><span class="lbl">Tour Stick</span></div>
+          </div>
+        </div>
+
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <div class="label">Panel header — library</div>
+            <div class="ph">
+              <div class="ph-left"><span class="ph-title">All Tracks</span><span class="ph-sub">4,218 tracks · 412 GB</span></div>
+              <div class="ph-right">
+                <button class="btn btn-ghost">Import</button>
+                <button class="btn btn-ghost">Analyze</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="label">Panel header — playlist (curate trigger)</div>
+            <div class="ph">
+              <div class="ph-left"><span class="ph-title">Saturday</span><span class="ph-sub">40 tracks · 4h 18m</span></div>
+              <div class="ph-right">
+                <button class="btn btn-ghost">Filter <span class="kbd">⌘F</span></button>
+                <button class="btn btn-primary">Curate →</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="label">Panel header — USB target (mounted)</div>
+            <div class="ph">
+              <div class="ph-left"><span class="ph-title">SanDisk 64GB</span><span class="ph-sub">in sync · 1,204 tracks · 38 GB</span></div>
+              <div class="ph-right">
+                <button class="btn btn-ghost">Eject</button>
+                <button class="btn btn-destructive">Wipe</button>
+                <button class="btn btn-primary">Sync</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Track list -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">06</span>
+      <span class="sec-title">Track list</span>
+      <span class="sec-note">Default · hover · selected · multi · analyzing. Metadata badges shown on the right.</span>
+    </div>
+    <div class="sec-body">
+      <div class="tl">
+        <div class="tl-h">
+          <span>#</span><span>Title</span><span>Artist</span><span>Label</span><span>BPM · Key</span><span>Time</span><span>Tag</span><span>Color</span>
+        </div>
+        <div class="tr">
+          <span class="tc num">01</span>
+          <span class="tc title">Luvstruck 2024</span>
+          <span class="tc artist">Southside Spinners</span>
+          <span class="tc label">selected.</span>
+          <span class="tc bpm">128 · 8A</span>
+          <span class="tc time">6:14</span>
+          <span class="tc meta"><span class="digit-pill">1</span></span>
+          <span class="tc meta"><span class="color-dot" style="background:#f59e0b"></span></span>
+        </div>
+        <div class="tr sel">
+          <span class="tc num">02</span>
+          <span class="tc title">Midnight City (Dub)</span>
+          <span class="tc artist">Rhode &amp; Brown</span>
+          <span class="tc label">selected.</span>
+          <span class="tc bpm">124 · 9A</span>
+          <span class="tc time">5:42</span>
+          <span class="tc meta"><span class="digit-pill">2</span><span class="digit-pill">5</span></span>
+          <span class="tc meta"><span class="color-dot" style="background:#38bdf8"></span></span>
+        </div>
+        <div class="tr">
+          <span class="tc num">03</span>
+          <span class="tc title">Pulse</span>
+          <span class="tc artist">Chaos in the CBD</span>
+          <span class="tc label">In Order to Dance</span>
+          <span class="tc bpm">126 · 3A</span>
+          <span class="tc time">7:01</span>
+          <span class="tc meta"></span>
+          <span class="tc meta"><span class="color-dot" style="background:#4ade80"></span></span>
+        </div>
+        <div class="tr sel-multi">
+          <span class="tc num">04</span>
+          <span class="tc title">Tangerine</span>
+          <span class="tc artist">DJ Boring</span>
+          <span class="tc label">Peach Discs</span>
+          <span class="tc bpm">122 · 11A</span>
+          <span class="tc time">5:48</span>
+          <span class="tc meta"><span class="digit-pill">2</span></span>
+          <span class="tc meta"></span>
+        </div>
+        <div class="tr sel-multi">
+          <span class="tc num">05</span>
+          <span class="tc title">Sanctuary</span>
+          <span class="tc artist">Fred P</span>
+          <span class="tc label">Soul People Music</span>
+          <span class="tc bpm">123 · 4A</span>
+          <span class="tc time">6:33</span>
+          <span class="tc meta"></span>
+          <span class="tc meta"><span class="color-dot" style="background:#a78bfa"></span></span>
+        </div>
+        <div class="tr an">
+          <span class="tc num">06</span>
+          <span class="tc title">Closer to God</span>
+          <span class="tc artist">Hunee</span>
+          <span class="tc label">Sound Signature</span>
+          <span class="tc bpm muted">— · —</span>
+          <span class="tc time muted">—</span>
+          <span class="tc meta"></span>
+          <span class="tc meta"></span>
+        </div>
+        <div class="tr">
+          <span class="tc num">07</span>
+          <span class="tc title">Submerge</span>
+          <span class="tc artist">Moomin</span>
+          <span class="tc label">White Noise</span>
+          <span class="tc bpm">125 · 8A</span>
+          <span class="tc time">6:22</span>
+          <span class="tc meta"><span class="digit-pill">1</span></span>
+          <span class="tc meta"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Player -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">07</span>
+      <span class="sec-title">Player — compact</span>
+      <span class="sec-note">Spectral waveform (bass / mid / high). Playhead is white.</span>
+    </div>
+    <div class="sec-body">
+      <div class="player">
+        <div class="art"><svg><use href="#ic-note"/></svg></div>
+        <button class="play"><svg viewBox="0 0 12 12"><path d="M3 1.5 L3 10.5 L10 6 Z"/></svg></button>
+        <div class="wf-area">
+          <div class="meta-row"><span class="ttl">Midnight City (Dub)</span><span class="arti">Rhode &amp; Brown · selected.</span></div>
+          <div class="wf"><canvas id="wf"></canvas></div>
+          <div class="times"><span>1:58</span><span>5:42</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. Menus & dialogs -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">08</span>
+      <span class="sec-title">Menus &amp; dialogs</span>
+    </div>
+    <div class="sec-body grid-2">
+      <div>
+        <div class="label">Context menu — track row</div>
+        <div class="menu" style="max-width:240px">
+          <div class="menu-item">Add to playlist… <span class="menu-shortcut">⌘P</span></div>
+          <div class="menu-item">Tag <span class="menu-shortcut">1–9</span></div>
+          <div class="menu-item">Set color tag</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item">Edit metadata</div>
+          <div class="menu-item">Reveal in Finder</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item danger">Delete from library <span class="menu-shortcut">⌫</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Confirm dialog</div>
+        <div class="dlg-wrap">
+          <div class="dlg">
+            <div class="dlg-title">Wipe SanDisk 64GB?</div>
+            <div class="dlg-body">All audio files, the Pioneer database, and ANLZ files on this drive will be removed. This cannot be undone.</div>
+            <div class="dlg-actions">
+              <button class="btn btn-ghost">Cancel</button>
+              <button class="btn btn-destructive">Wipe</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 9. Status, tooltips, drop -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">09</span>
+      <span class="sec-title">Status, tooltips, drop overlay</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Status bar</div>
+        <div class="sb-bar">
+          <div class="left">
+            <div class="spin"></div>
+            <span>Analyzing 12 of 47 tracks</span>
+            <span class="sep">·</span>
+            <span>SanDisk 64GB synced</span>
+          </div>
+          <div class="right">
+            <div class="pill-progress"><i></i></div>
+            <span>4,218 tracks · 412 GB</span>
+          </div>
+        </div>
+      </div>
+      <div class="row" style="gap:24px">
+        <div>
+          <div class="label">Tooltip</div>
+          <div class="tip">Sync to SanDisk 64GB <span class="key">⌘S</span></div>
+        </div>
+        <div>
+          <div class="label">Inline tag chips</div>
+          <div class="row">
+            <span class="tag-chip"><span class="digit">1</span>Peak Time</span>
+            <span class="tag-chip"><span class="digit">2</span>Warmup</span>
+            <span class="tag-chip"><span class="digit">5</span>Maybes</span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Drop overlay</div>
+        <div class="drop">
+          <div class="drop-title">Drop audio files here</div>
+          <div class="drop-sub">12 files · MP3, FLAC, WAV, AIFF</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 10. Empty states -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">10</span>
+      <span class="sec-title">Empty states</span>
+    </div>
+    <div class="sec-body grid-2">
+      <div class="empty">
+        <div class="empty-title">No tracks loaded</div>
+        <div class="empty-sub">Import a folder or drop audio files anywhere in this window.</div>
+      </div>
+      <div class="empty">
+        <div class="empty-title">Tour Stick is unmounted</div>
+        <div class="empty-sub">Connect the drive to sync queued changes.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 11. Column headers / sort -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">11</span>
+      <span class="sec-title">Column headers</span>
+      <span class="sec-note">Default · hover · sorted asc / desc · being dragged.</span>
+    </div>
+    <div class="sec-body col">
+      <div class="col-h-row">
+        <span class="col-h">#</span>
+        <span class="col-h sorted">Title <span class="arr">▲</span></span>
+        <span class="col-h">Artist</span>
+        <span class="col-h">Label</span>
+        <span class="col-h">BPM</span>
+        <span class="col-h">Time</span>
+      </div>
+      <div class="col-h-row">
+        <span class="col-h">#</span>
+        <span class="col-h">Title</span>
+        <span class="col-h sorted">Artist <span class="arr">▼</span></span>
+        <span class="col-h">Label</span>
+        <span class="col-h dragging">BPM</span>
+        <span class="col-h">Time</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12. Form controls -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">12</span>
+      <span class="sec-title">Form controls</span>
+      <span class="sec-note">Used in settings, dialogs, edit panels.</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Checkbox</div>
+        <div class="row">
+          <span class="check on"><span class="box"><svg viewBox="0 0 12 12"><path d="M2 6 L5 9 L10 3"/></svg></span>Show color tag column</span>
+          <span class="check"><span class="box"></span>Show comments column</span>
+          <span class="check"><span class="box"></span>Show date added</span>
+        </div>
+      </div>
+      <div>
+        <div class="label">Toggle</div>
+        <div class="row">
+          <span class="toggle on"><span class="sw"></span>Auto-analyze on import</span>
+          <span class="toggle"><span class="sw"></span>Confirm before delete</span>
+          <span class="toggle on"><span class="sw"></span>Persist USB target across sessions</span>
+        </div>
+      </div>
+      <div>
+        <div class="label">Radio</div>
+        <div class="row">
+          <span class="radio on"><span class="dot"></span>Camelot (1A · 5B)</span>
+          <span class="radio"><span class="dot"></span>Open Key (1d · 5m)</span>
+          <span class="radio"><span class="dot"></span>Sharp / flat (Am · F#m)</span>
+        </div>
+      </div>
+      <div>
+        <div class="label">Segmented control</div>
+        <div class="row">
+          <div class="seg">
+            <button class="on">Color</button>
+            <button>Mono</button>
+            <button>Peaks</button>
+          </div>
+          <div class="seg">
+            <button>Compact</button>
+            <button class="on">Default</button>
+            <button>Comfortable</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Slider · stars · color picker</div>
+        <div class="row" style="gap:32px">
+          <div class="slider">
+            <div class="track"></div>
+            <div class="fill" style="width:42%"></div>
+            <div class="thumb" style="left:42%"></div>
+          </div>
+          <div class="stars">
+            <span><svg><use href="#ic-star"/></svg></span>
+            <span><svg><use href="#ic-star"/></svg></span>
+            <span><svg><use href="#ic-star"/></svg></span>
+            <span class="empty"><svg><use href="#ic-star"/></svg></span>
+            <span class="empty"><svg><use href="#ic-star"/></svg></span>
+          </div>
+          <div class="color-pick">
+            <span class="none">×</span>
+            <span class="c" style="background:#ec4899"></span>
+            <span class="c" style="background:#f59e0b"></span>
+            <span class="c" style="background:#facc15"></span>
+            <span class="c sel" style="background:#4ade80"></span>
+            <span class="c" style="background:#38bdf8"></span>
+            <span class="c" style="background:#a78bfa"></span>
+            <span class="c" style="background:#94a3b8"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 13. Inline filter -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">13</span>
+      <span class="sec-title">Inline filter</span>
+      <span class="sec-note">⌘F replaces the panel header content. Esc or × to dismiss.</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Header — idle</div>
+        <div class="ph">
+          <div class="ph-left"><span class="ph-title">All Tracks</span><span class="ph-sub">4,218 tracks</span></div>
+          <div class="ph-right">
+            <button class="btn btn-ghost">Filter <span class="kbd">⌘F</span></button>
+            <button class="btn btn-ghost">Import</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Header — filtering</div>
+        <div class="ph filtering">
+          <div class="filter-input">
+            <svg viewBox="0 0 12 12"><path d="M5 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm5 10L8 9" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+            <input type="text" value="rhode" autocomplete="off" />
+            <span class="count">12 of 4,218</span>
+            <span class="x">×</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 14. Command palette -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">14</span>
+      <span class="sec-title">Command palette · ⌘K</span>
+      <span class="sec-note">Searches tracks, playlists, USBs, actions.</span>
+    </div>
+    <div class="sec-body">
+      <div class="cp-wrap">
+        <div class="cp">
+          <div class="cp-input">
+            <svg viewBox="0 0 12 12"><path d="M5 1a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm5 10L8 9" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+            <input value="midnight" autocomplete="off" />
+            <span class="kbd">esc</span>
+          </div>
+          <div class="cp-section">
+            <div class="cp-head">Tracks</div>
+            <div class="cp-row act">
+              <span class="icon"><svg><use href="#ic-note"/></svg></span>
+              <span class="name">Midnight City (Dub) <span class="sub">Rhode &amp; Brown · 124 BPM</span></span>
+              <span class="right">⏎</span>
+            </div>
+            <div class="cp-row">
+              <span class="icon"><svg><use href="#ic-note"/></svg></span>
+              <span class="name">Midnight at the Oasis <span class="sub">Maria Muldaur</span></span>
+            </div>
+            <div class="cp-row">
+              <span class="icon"><svg><use href="#ic-note"/></svg></span>
+              <span class="name">After Midnight <span class="sub">JJ Cale · 95 BPM</span></span>
+            </div>
+          </div>
+          <div class="cp-section">
+            <div class="cp-head">Playlists</div>
+            <div class="cp-row">
+              <span class="icon">▤</span>
+              <span class="name">Midnight Set <span class="sub">22 tracks</span></span>
+            </div>
+          </div>
+          <div class="cp-section">
+            <div class="cp-head">Actions</div>
+            <div class="cp-row">
+              <span class="icon">↗</span>
+              <span class="name">Sync to SanDisk 64GB</span>
+              <span class="right">⌘S</span>
+            </div>
+            <div class="cp-row">
+              <span class="icon">+</span>
+              <span class="name">Add selected to playlist…</span>
+            </div>
+          </div>
+          <div class="cp-foot">
+            <div class="keys"><span><span class="kbd">↑</span><span class="kbd">↓</span> navigate</span><span><span class="kbd">⏎</span> select</span></div>
+            <span>5 results</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15. More context menus -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">15</span>
+      <span class="sec-title">Context menus</span>
+      <span class="sec-note">Playlist · column header · tag slot.</span>
+    </div>
+    <div class="sec-body grid-2">
+      <div>
+        <div class="label">Playlist row</div>
+        <div class="menu" style="max-width:220px">
+          <div class="menu-item">Open as target <span class="menu-shortcut">⇧⏎</span></div>
+          <div class="menu-item">Rename <span class="menu-shortcut">F2</span></div>
+          <div class="menu-item">Duplicate</div>
+          <div class="menu-item">Export as M3U…</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item danger">Delete playlist</div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Column header</div>
+        <div class="menu" style="max-width:220px">
+          <div class="menu-item">Sort ascending</div>
+          <div class="menu-item">Sort descending</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item">Hide this column</div>
+          <div class="menu-item">Show all columns</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item">Reset column order</div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Tag slot</div>
+        <div class="menu" style="max-width:220px">
+          <div class="menu-item">Rename slot…</div>
+          <div class="menu-item">Set color hint</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item">Show all tagged tracks</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item danger">Clear all tagged tracks</div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Track row — extended</div>
+        <div class="menu" style="max-width:240px">
+          <div class="menu-item">Play <span class="menu-shortcut">␣</span></div>
+          <div class="menu-item">Add to current playlist <span class="menu-shortcut">⌘⏎</span></div>
+          <div class="menu-item">Add to playlist…</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item">Tag <span class="menu-shortcut">1–9</span></div>
+          <div class="menu-item">Set color tag</div>
+          <div class="menu-item">Set rating</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item">Edit metadata</div>
+          <div class="menu-item">Reanalyze</div>
+          <div class="menu-item">Reveal in Finder</div>
+          <div class="menu-sep"></div>
+          <div class="menu-item disabled">Remove from playlist</div>
+          <div class="menu-item danger">Delete from library <span class="menu-shortcut">⌫</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 16. Drag ghost / drop indicator -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">16</span>
+      <span class="sec-title">Drag affordances</span>
+      <span class="sec-note">Drag ghost · drop insertion line · drop overlay (panel target).</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Ghosts</div>
+        <div class="row" style="gap:24px">
+          <div class="ghost">Midnight City (Dub) — Rhode &amp; Brown</div>
+          <div class="ghost"><span class="badge">12</span>tracks</div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Drop into list — insertion line between rows</div>
+        <div class="tl">
+          <div class="tr">
+            <span class="tc num">01</span><span class="tc title">Pulse</span><span class="tc artist">Chaos in the CBD</span><span class="tc label">In Order to Dance</span><span class="tc bpm">126 · 3A</span><span class="tc time">7:01</span><span class="tc meta"></span><span class="tc meta"></span>
+          </div>
+          <div class="drop-line"></div>
+          <div class="tr">
+            <span class="tc num">02</span><span class="tc title">Tangerine</span><span class="tc artist">DJ Boring</span><span class="tc label">Peach Discs</span><span class="tc bpm">122 · 11A</span><span class="tc time">5:48</span><span class="tc meta"></span><span class="tc meta"></span>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Panel-as-target drop overlay</div>
+        <div class="drop">
+          <div class="drop-title">Drop to add to Saturday</div>
+          <div class="drop-sub">3 tracks · already in playlist will be skipped</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 17. Detail pane -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">17</span>
+      <span class="sec-title">Detail pane</span>
+      <span class="sec-note">Single track · multi-select · empty · file missing.</span>
+    </div>
+    <div class="sec-body">
+      <div class="row" style="align-items:flex-start;gap:18px;flex-wrap:wrap">
+        <div class="dp">
+          <div class="dp-art"><svg><use href="#ic-note"/></svg></div>
+          <div class="dp-title">Midnight City (Dub)</div>
+          <div class="dp-artist">Rhode &amp; Brown</div>
+          <dl class="dp-meta">
+            <dt>Album</dt><dd>selected.</dd>
+            <dt>Label</dt><dd>selected.</dd>
+            <dt>Genre</dt><dd>House</dd>
+            <dt>Year</dt><dd class="mono">2024</dd>
+            <dt>BPM</dt><dd class="mono">124.0</dd>
+            <dt>Key</dt><dd class="mono">9A</dd>
+            <dt>Time</dt><dd class="mono">5:42</dd>
+            <dt>Bitrate</dt><dd class="mono">320 kbps</dd>
+          </dl>
+          <div class="dp-section-h">Cue points</div>
+          <div class="dp-cue-list">
+            <div class="dp-cue"><span class="pip" style="background:#4ade80"></span><span>Intro</span><span class="pos">0:00</span></div>
+            <div class="dp-cue"><span class="pip" style="background:#38bdf8"></span><span>Drop</span><span class="pos">1:20</span></div>
+            <div class="dp-cue"><span class="pip" style="background:#a78bfa"></span><span>Break</span><span class="pos">3:04</span></div>
+            <div class="dp-cue"><span class="pip" style="background:#f59e0b"></span><span>Outro</span><span class="pos">4:48</span></div>
+          </div>
+          <div class="dp-section-h">Comment</div>
+          <div class="dp-comment">Solid peak-time tool. Watch the bass drop at 1:20 — sub-heavy, mix out before 5:00.</div>
+          <div class="dp-section-h">File</div>
+          <div class="dp-path">/Volumes/Music/House/Rhode &amp; Brown — Midnight City Dub.flac</div>
+        </div>
+
+        <div class="dp">
+          <div class="dp-multi">
+            <div class="dp-multi-count">12</div>
+            <div class="dp-multi-label">tracks selected</div>
+          </div>
+          <dl class="dp-meta">
+            <dt>Total time</dt><dd class="mono">1h 14m</dd>
+            <dt>BPM range</dt><dd class="mono">122 – 128</dd>
+            <dt>Keys</dt><dd class="mono">8A · 9A · 11A · 4A</dd>
+            <dt>In playlists</dt><dd>3 shared</dd>
+          </dl>
+          <div class="dp-bulk">
+            <button>Add to playlist… <span class="k">⌘P</span></button>
+            <button>Tag <span class="k">1–9</span></button>
+            <button>Set color tag</button>
+            <button>Reanalyze</button>
+            <button style="color:var(--danger)">Delete <span class="k">⌫</span></button>
+          </div>
+        </div>
+
+        <div class="dp">
+          <div class="dp-empty">
+            <div class="ic">▢</div>
+            <div class="t">No track selected</div>
+            <div class="s">Pick a row to see details, cue points, and the file path.</div>
+          </div>
+        </div>
+
+        <div class="dp">
+          <div class="dp-art" style="opacity:0.5"><svg><use href="#ic-note"/></svg></div>
+          <div class="dp-title" style="color:var(--text-mid)">Closer to God</div>
+          <div class="dp-artist">Hunee</div>
+          <div class="dp-warn">File missing. Last seen at /Volumes/Old Drive/.../closer-to-god.flac</div>
+          <dl class="dp-meta">
+            <dt>BPM</dt><dd class="mono">— · —</dd>
+            <dt>Key</dt><dd class="mono">—</dd>
+            <dt>Time</dt><dd class="mono">—</dd>
+          </dl>
+          <div class="dp-bulk">
+            <button>Locate file…</button>
+            <button>Reanalyze</button>
+            <button style="color:var(--danger)">Remove from library</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 18. Expanded player -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">18</span>
+      <span class="sec-title">Player — expanded</span>
+      <span class="sec-note">Waveform region is a placeholder. Beat grid, cue strip, BPM/key fine-tune around it.</span>
+    </div>
+    <div class="sec-body">
+      <div class="player-x">
+        <div class="px-head">
+          <div class="l">
+            <button class="play" style="background:var(--accent);color:var(--bg);width:30px;height:30px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 12 12" style="width:10px;height:10px;fill:var(--bg);margin-left:1px"><path d="M3 1.5 L3 10.5 L10 6 Z"/></svg></button>
+            <div>
+              <div class="ttl">Midnight City (Dub)</div>
+              <div class="arti">Rhode &amp; Brown · selected.</div>
+            </div>
+            <div class="meta-pills">
+              <span class="px-pill">124.0</span>
+              <span class="px-pill">9A</span>
+              <span class="px-pill">5:42</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="seg" style="margin-right:8px">
+              <button class="on">Color</button>
+              <button>Mono</button>
+            </div>
+            <button class="btn btn-ghost">Save edits</button>
+            <button class="btn btn-ghost">Discard</button>
+            <button class="btn btn-icon" title="Collapse"><svg viewBox="0 0 12 12"><path d="M2 7h8M2 5h8" stroke="currentColor" stroke-width="1.2"/></svg></button>
+          </div>
+        </div>
+        <div class="px-cuestrip">
+          <span class="px-cue" data-l="Intro" style="left:14px"></span>
+          <span class="px-cue" data-l="Drop" style="left:23%"></span>
+          <span class="px-cue" data-l="Break" style="left:54%"></span>
+          <span class="px-cue" data-l="Outro" style="left:84%"></span>
+        </div>
+        <div class="px-wf">
+          <div class="placeholder-bars" id="wfx"></div>
+        </div>
+        <div class="px-grid">
+          <div class="beat bar" data-n="1"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="2"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="3"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="4"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="5"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="6"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="7"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+          <div class="beat bar" data-n="8"></div><div class="beat"></div><div class="beat"></div><div class="beat"></div>
+        </div>
+        <div class="px-controls">
+          <div class="left">
+            <span class="px-time">2:14 / 5:42</span>
+          </div>
+          <div class="center">
+            <span class="t-mono" style="color:var(--muted)">BPM</span>
+            <div class="nudge"><button>−</button><span class="v">124.00</span><button>+</button></div>
+            <span class="t-mono" style="color:var(--muted);margin-left:14px">KEY</span>
+            <div class="nudge"><button>−</button><span class="v">9A</span><button>+</button></div>
+            <button class="btn btn-ghost">½×</button>
+            <button class="btn btn-ghost">2×</button>
+            <button class="btn btn-ghost">Set first beat</button>
+          </div>
+          <div class="right">
+            <button class="btn btn-default">Add cue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19. Progress / sync states -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">19</span>
+      <span class="sec-title">Progress &amp; sync</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Progress bar — determinate</div>
+        <div style="display:flex;align-items:center;gap:10px;max-width:480px">
+          <div class="pbar"><i style="width:62%"></i></div>
+          <span class="t-num">62 %</span>
+        </div>
+      </div>
+      <div>
+        <div class="label">Progress bar — indeterminate</div>
+        <div style="max-width:480px"><div class="pbar indeterm"><i></i></div></div>
+      </div>
+      <div>
+        <div class="label">Sync overlay — USB target</div>
+        <div class="ph">
+          <div class="ph-left">
+            <span class="ph-title">SanDisk 64GB</span>
+            <span class="ph-sub">syncing · 27 of 64 tracks · 4 min remaining</span>
+          </div>
+          <div class="ph-right">
+            <button class="btn btn-ghost">Pause</button>
+            <button class="btn btn-destructive">Cancel</button>
+          </div>
+        </div>
+        <div style="margin-top:8px;max-width:none"><div class="pbar"><i style="width:42%"></i></div></div>
+      </div>
+      <div>
+        <div class="label">Per-row progress (analyzing inline)</div>
+        <div class="tl">
+          <div class="tr an">
+            <span class="tc num">06</span>
+            <span class="tc title">Closer to God</span>
+            <span class="tc artist">Hunee</span>
+            <span class="tc label" style="display:flex;align-items:center;gap:8px"><span class="spin"></span><span>analyzing…</span></span>
+            <span class="tc bpm muted">— · —</span>
+            <span class="tc time muted">—</span>
+            <span class="tc meta"></span>
+            <span class="tc meta"></span>
+          </div>
+          <div class="tr">
+            <span class="tc num">07</span><span class="tc title">Submerge</span><span class="tc artist">Moomin</span><span class="tc label">White Noise</span><span class="tc bpm">125 · 8A</span><span class="tc time">6:22</span><span class="tc meta"></span><span class="tc meta"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 20. Notifications / inline alerts -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">20</span>
+      <span class="sec-title">Notifications</span>
+      <span class="sec-note">Toasts, inline alerts, bulk action bar.</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Toasts</div>
+        <div class="row" style="gap:12px">
+          <div class="toast success"><span class="ic">✓</span><span class="msg">Synced to SanDisk 64GB</span><span class="sub">64 tracks · 38 GB</span></div>
+          <div class="toast"><span class="ic">⏵</span><span class="msg">Saturday saved</span><span class="undo">Undo</span></div>
+          <div class="toast error"><span class="ic">!</span><span class="msg">Analysis failed for 2 tracks</span><span class="undo">Show</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Inline alerts</div>
+        <div class="col" style="gap:8px;max-width:560px">
+          <div class="inline-alert info">
+            <span class="ic">ℹ</span>
+            <div class="body"><strong>Tour Stick is unmounted.</strong> Your queued changes will sync automatically when you reconnect the drive.</div>
+          </div>
+          <div class="inline-alert warn">
+            <span class="ic">!</span>
+            <div class="body"><strong>USB contents have drifted.</strong> The drive's library no longer matches your queued state. Review changes before syncing.</div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Bulk action bar (multi-select)</div>
+        <div class="bulk-bar">
+          <div class="left">
+            <span class="count">12 tracks selected</span>
+            <span class="sep">·</span>
+            <span>1h 14m total</span>
+          </div>
+          <div class="right">
+            <button class="btn btn-ghost">Tag <span class="kbd">1–9</span></button>
+            <button class="btn btn-ghost">Set color</button>
+            <button class="btn btn-default">Add to playlist…</button>
+            <button class="btn btn-ghost">Clear selection <span class="kbd">esc</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 21. Settings -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">21</span>
+      <span class="sec-title">Settings</span>
+      <span class="sec-note">Two-column: nav + pane. Standard form fields, no flourish.</span>
+    </div>
+    <div class="sec-body" style="padding:0;background:transparent;border:none">
+      <div class="settings">
+        <div class="settings-nav">
+          <div class="h">Settings</div>
+          <div class="item act">General</div>
+          <div class="item">View</div>
+          <div class="item">Analyzer</div>
+          <div class="item">Keyboard</div>
+          <div class="item">Storage &amp; library</div>
+          <div class="item">About</div>
+        </div>
+        <div class="settings-pane">
+          <div class="settings-h">General</div>
+          <div class="settings-sub">Library location and default behaviors.</div>
+
+          <div class="field">
+            <div class="lbl">Library path</div>
+            <div class="desc">Where new audio is copied when imported into the library.</div>
+            <div class="ctrl row" style="gap:8px"><input class="input" value="/Volumes/Music/Library" style="min-width:280px" /><button class="btn btn-default">Choose…</button></div>
+          </div>
+          <div class="field">
+            <div class="lbl">Auto-analyze on import</div>
+            <div class="desc">Run BPM, key, and waveform analysis as soon as files are added.</div>
+            <div class="ctrl"><span class="toggle on"><span class="sw"></span></span></div>
+          </div>
+          <div class="field">
+            <div class="lbl">Confirm before delete</div>
+            <div class="desc">Show a confirmation dialog when removing tracks from the library.</div>
+            <div class="ctrl"><span class="toggle on"><span class="sw"></span></span></div>
+          </div>
+          <div class="field">
+            <div class="lbl">Default sort</div>
+            <div class="desc">Used for new playlists and freshly imported folders.</div>
+            <div class="ctrl"><div class="seg"><button>Title</button><button class="on">Date added</button><button>BPM</button></div></div>
+          </div>
+          <div class="field">
+            <div class="lbl">Density</div>
+            <div class="ctrl"><div class="seg"><button>Compact</button><button class="on">Default</button><button>Comfortable</button></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:18px;padding:18px 22px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+        <div class="settings-h" style="font-size:13px">Keyboard shortcuts</div>
+        <div class="settings-sub">Click a row to rebind.</div>
+        <div class="shortcut-row"><span>Play / pause</span><span class="keys"><span class="kbd">␣</span></span></div>
+        <div class="shortcut-row"><span>Filter list</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">F</span></span></div>
+        <div class="shortcut-row"><span>Command palette</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">K</span></span></div>
+        <div class="shortcut-row"><span>Tag selected</span><span class="keys"><span class="kbd">1</span> – <span class="kbd">9</span></span></div>
+        <div class="shortcut-row"><span>Toggle expanded player</span><span class="keys"><span class="kbd">⇧</span><span class="kbd">⇥</span></span></div>
+        <div class="shortcut-row"><span>Sync to current target</span><span class="keys"><span class="kbd">⌘</span><span class="kbd">S</span></span></div>
+        <div class="shortcut-row"><span>Delete from library</span><span class="keys"><span class="kbd">⌫</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 22. Onboarding -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">22</span>
+      <span class="sec-title">First launch</span>
+      <span class="sec-note">No library yet. One CTA, one secondary path, one shortcut hint.</span>
+    </div>
+    <div class="sec-body">
+      <div class="onboard">
+        <div class="mark">fourfour</div>
+        <div class="msg">A library tool that gets out of the way. Import a folder of audio to get started — analysis runs in the background while you browse.</div>
+        <div class="actions">
+          <button class="btn btn-primary">Import folder…</button>
+          <button class="btn btn-default">Import from Rekordbox</button>
+        </div>
+        <div style="font-size:11px;color:var(--faint);margin-top:14px">or drop audio files anywhere in this window</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 23. USB drift / conflict -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">23</span>
+      <span class="sec-title">USB drift — conflict resolution</span>
+      <span class="sec-note">Drive's actual contents diverged from queued state. Three change types: add · remove · changed.</span>
+    </div>
+    <div class="sec-body">
+      <div class="conflict">
+        <div class="conflict-h">
+          <div>
+            <div class="t">SanDisk 64GB has changed</div>
+            <div class="s">3 tracks added · 1 removed · 2 modified externally</div>
+          </div>
+          <div class="row">
+            <button class="btn btn-ghost">Discard local changes</button>
+            <button class="btn btn-default">Keep both</button>
+            <button class="btn btn-primary">Apply local</button>
+          </div>
+        </div>
+        <div class="conflict-row add">
+          <span class="marker">+</span>
+          <span class="label">Add</span>
+          <span class="name">Sanctuary <span class="sub">— Fred P · 123 BPM · 4A</span></span>
+          <span class="sub">queued local</span>
+        </div>
+        <div class="conflict-row add">
+          <span class="marker">+</span>
+          <span class="label">Add</span>
+          <span class="name">Pulse <span class="sub">— Chaos in the CBD · 126 BPM · 3A</span></span>
+          <span class="sub">queued local</span>
+        </div>
+        <div class="conflict-row rem">
+          <span class="marker">−</span>
+          <span class="label">Remove</span>
+          <span class="name">Old Edit (rough) <span class="sub">— present on USB, not in your library</span></span>
+          <span class="sub">on USB</span>
+        </div>
+        <div class="conflict-row chg">
+          <span class="marker">~</span>
+          <span class="label">Changed</span>
+          <span class="name">Midnight City (Dub) <span class="sub">— BPM 124.0 → 124.5, cue points reordered</span></span>
+          <span class="sub">both</span>
+        </div>
+        <div class="conflict-row chg">
+          <span class="marker">~</span>
+          <span class="label">Changed</span>
+          <span class="name">Tangerine <span class="sub">— added to playlist “Saturday”</span></span>
+          <span class="sub">both</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 24. Breadcrumb / target chip -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">24</span>
+      <span class="sec-title">Navigation chrome</span>
+      <span class="sec-note">Breadcrumbs in source panel · target chip in target panel.</span>
+    </div>
+    <div class="sec-body col">
+      <div>
+        <div class="label">Source breadcrumb (left panel header in target mode)</div>
+        <div class="ph">
+          <div class="ph-left">
+            <span class="crumb"><a>Library</a><span class="sep">/</span><a>Recently Added</a><span class="sep">/</span><span class="cur">Last 7 days</span></span>
+          </div>
+          <div class="ph-right">
+            <button class="btn btn-ghost">Filter <span class="kbd">⌘F</span></button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="label">Target chip (right panel header)</div>
+        <div class="ph">
+          <div class="ph-left">
+            <span class="ph-sub" style="font-family:var(--font-mono);font-size:10px;letter-spacing:0.06em;text-transform:uppercase">Target</span>
+            <span class="target-chip">
+              <svg viewBox="0 0 12 12" class="pin"><path d="M6 1v6M3 7h6M5 9v2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+              SanDisk 64GB
+              <span class="x">×</span>
+            </span>
+          </div>
+          <div class="ph-right">
+            <button class="btn btn-primary">Sync <span class="kbd" style="background:rgba(0,0,0,0.15);color:#0a0a0a;border-color:rgba(0,0,0,0.2)">⌘S</span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 25. Full-window composition -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">25</span>
+      <span class="sec-title">Full window — browse mode</span>
+      <span class="sec-note">Everything composed at scale. Sidebar · list · detail · player · status.</span>
+    </div>
+    <div class="sec-body" style="padding:0;background:transparent;border:none">
+      <div class="app-frame">
+        <div class="app-titlebar">
+          <span class="light"></span><span class="light"></span><span class="light"></span>
+          <span class="ttl">fourfour — Library</span>
+        </div>
+        <div class="app-grid">
+          <div class="app-main compact">
+            <div class="app-side">
+              <div class="sb-section">
+                <div class="sb-head"><span class="h">Favorites</span><button>+</button></div>
+                <div class="sb-row"><span class="sb-tag-digit">1</span><span class="lbl">Peak Time</span><span class="ct">24</span></div>
+                <div class="sb-row active"><span class="sb-tag-digit">2</span><span class="lbl">Warmup</span><span class="ct">18</span></div>
+                <div class="sb-row"><span class="sb-tag-digit">3</span><span class="lbl">Weird</span><span class="ct">7</span></div>
+              </div>
+              <div class="sb-section">
+                <div class="sb-head"><span class="h">Library</span></div>
+                <div class="sb-row"><span class="lbl">All Tracks</span><span class="ct">4218</span></div>
+                <div class="sb-row"><span class="lbl">Recently Added</span><span class="ct">52</span></div>
+                <div class="sb-row"><span class="lbl">Unfiled</span><span class="ct">311</span></div>
+              </div>
+              <div class="sb-section">
+                <div class="sb-head"><span class="h">Playlists</span><button>+</button></div>
+                <div class="sb-row"><span class="lbl">Saturday</span><span class="ct">40</span></div>
+                <div class="sb-row"><span class="lbl">Sunday Closing</span><span class="ct">28</span></div>
+                <div class="sb-row"><span class="lbl">Festival Prep</span></div>
+                <div class="sb-row"><span class="lbl">Maybes</span><span class="ct">62</span></div>
+              </div>
+              <div class="sb-section">
+                <div class="sb-head"><span class="h">USB</span></div>
+                <div class="sb-row"><span class="usb-dot on"></span><span class="lbl">SanDisk 64GB</span></div>
+                <div class="sb-row"><span class="usb-dot off"></span><span class="lbl">Tour Stick</span></div>
+              </div>
+            </div>
+
+            <div class="app-list">
+              <div class="ph">
+                <div class="ph-left"><span class="ph-title">Warmup</span><span class="ph-sub">18 tracks · 1h 42m</span></div>
+                <div class="ph-right">
+                  <button class="btn btn-ghost">Filter <span class="kbd">⌘F</span></button>
+                  <button class="btn btn-primary">Curate →</button>
+                </div>
+              </div>
+              <div class="app-list-rows">
+                <div class="tl" style="border:none;border-radius:0">
+                  <div class="tl-h"><span>#</span><span>Title</span><span>Artist</span><span>Label</span><span>BPM</span><span>Time</span></div>
+                  <div class="tr"><span class="tc num">01</span><span class="tc title">Luvstruck 2024</span><span class="tc artist">Southside Spinners</span><span class="tc label">selected.</span><span class="tc bpm">128 · 8A</span><span class="tc time">6:14</span></div>
+                  <div class="tr sel"><span class="tc num">02</span><span class="tc title">Midnight City (Dub)</span><span class="tc artist">Rhode &amp; Brown</span><span class="tc label">selected.</span><span class="tc bpm">124 · 9A</span><span class="tc time">5:42</span></div>
+                  <div class="tr"><span class="tc num">03</span><span class="tc title">Pulse</span><span class="tc artist">Chaos in the CBD</span><span class="tc label">In Order to Dance</span><span class="tc bpm">126 · 3A</span><span class="tc time">7:01</span></div>
+                  <div class="tr"><span class="tc num">04</span><span class="tc title">Tangerine</span><span class="tc artist">DJ Boring</span><span class="tc label">Peach Discs</span><span class="tc bpm">122 · 11A</span><span class="tc time">5:48</span></div>
+                  <div class="tr"><span class="tc num">05</span><span class="tc title">Sanctuary</span><span class="tc artist">Fred P</span><span class="tc label">Soul People Music</span><span class="tc bpm">123 · 4A</span><span class="tc time">6:33</span></div>
+                  <div class="tr"><span class="tc num">06</span><span class="tc title">Submerge</span><span class="tc artist">Moomin</span><span class="tc label">White Noise</span><span class="tc bpm">125 · 8A</span><span class="tc time">6:22</span></div>
+                  <div class="tr an"><span class="tc num">07</span><span class="tc title">Closer to God</span><span class="tc artist">Hunee</span><span class="tc label">Sound Signature</span><span class="tc bpm muted">— · —</span><span class="tc time muted">—</span></div>
+                  <div class="tr"><span class="tc num">08</span><span class="tc title">Falling</span><span class="tc artist">Soichi Terada</span><span class="tc label">Far East Recording</span><span class="tc bpm">120 · 6A</span><span class="tc time">5:12</span></div>
+                  <div class="tr"><span class="tc num">09</span><span class="tc title">Drift</span><span class="tc artist">DJ Sotofett</span><span class="tc label">Wania</span><span class="tc bpm">119 · 2A</span><span class="tc time">8:04</span></div>
+                  <div class="tr"><span class="tc num">10</span><span class="tc title">Ground Loop</span><span class="tc artist">Anthony Naples</span><span class="tc label">ANS</span><span class="tc bpm">121 · 7A</span><span class="tc time">5:34</span></div>
+                  <div class="tr"><span class="tc num">11</span><span class="tc title">Slow Burn</span><span class="tc artist">Theo Parrish</span><span class="tc label">Sound Signature</span><span class="tc bpm">122 · 1A</span><span class="tc time">9:18</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="app-detail">
+              <div class="dp-art" style="margin-bottom:12px;aspect-ratio:1"><svg><use href="#ic-note"/></svg></div>
+              <div class="dp-title">Midnight City (Dub)</div>
+              <div class="dp-artist">Rhode &amp; Brown</div>
+              <dl class="dp-meta" style="margin-top:10px;padding-top:10px">
+                <dt>BPM</dt><dd class="mono">124.0</dd>
+                <dt>Key</dt><dd class="mono">9A</dd>
+                <dt>Time</dt><dd class="mono">5:42</dd>
+                <dt>Label</dt><dd>selected.</dd>
+                <dt>Year</dt><dd class="mono">2024</dd>
+              </dl>
+              <div class="dp-section-h">Cue points</div>
+              <div class="dp-cue-list">
+                <div class="dp-cue"><span class="pip" style="background:#4ade80"></span><span>Intro</span><span class="pos">0:00</span></div>
+                <div class="dp-cue"><span class="pip" style="background:#38bdf8"></span><span>Drop</span><span class="pos">1:20</span></div>
+                <div class="dp-cue"><span class="pip" style="background:#a78bfa"></span><span>Break</span><span class="pos">3:04</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="app-player">
+            <div class="player" style="border:none;border-radius:0">
+              <div class="art"><svg><use href="#ic-note"/></svg></div>
+              <button class="play"><svg viewBox="0 0 12 12"><path d="M3 1.5 L3 10.5 L10 6 Z"/></svg></button>
+              <div class="wf-area">
+                <div class="meta-row"><span class="ttl">Midnight City (Dub)</span><span class="arti">Rhode &amp; Brown · 124 · 9A</span></div>
+                <div class="wf"><canvas id="wf2"></canvas></div>
+                <div class="times"><span>1:58</span><span>5:42</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="app-status">
+            <div class="row" style="gap:8px;font-size:10.5px;color:var(--muted)"><div class="spin" style="width:9px;height:9px;border-width:1.2px"></div><span>Analyzing 12 of 47</span><span class="sep">·</span><span>SanDisk 64GB synced</span></div>
+            <div class="row" style="gap:8px;font-size:10.5px;color:var(--muted)"><span>4,218 tracks · 412 GB</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // ── Waveform (compact player) ──
+  function paintWaveform(canvas, pf) {
+    if (!canvas) return;
+    function resize() {
+      var r = canvas.parentElement.getBoundingClientRect();
+      var dpr = window.devicePixelRatio || 1;
+      canvas.width = r.width * dpr; canvas.height = r.height * dpr;
+      var ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+      draw(ctx, r.width, r.height);
+    }
+    function h(i, s) { var x = Math.sin(i * s) * 10000; return x - Math.floor(x); }
+    function draw(ctx, w, hgt) {
+      ctx.clearRect(0, 0, w, hgt);
+      var n = 160, bw = w / n, gap = Math.max(0.5, bw * 0.18);
+      for (var i = 0; i < n; i++) {
+        var s = h(i, 91.44) > 0.92 ? 0.15 : 1;
+        var bh = (0.18 + h(i,12.9898) * 0.55) * hgt * s;
+        var mh = (0.05 + h(i,78.233) * 0.20) * hgt * s;
+        var hh = (0.01 + h(i,43.172) * 0.10) * hgt * s;
+        var played = (i / n) < pf;
+        var b1 = played ? 'rgba(220,220,220,0.95)' : 'rgba(110,110,110,0.85)';
+        var b2 = played ? 'rgba(170,170,170,0.85)' : 'rgba(80,80,80,0.75)';
+        var b3 = played ? 'rgba(130,130,130,0.75)' : 'rgba(60,60,60,0.65)';
+        var y = hgt, x = i * bw + gap/2, bww = Math.max(1, bw - gap);
+        y -= bh; ctx.fillStyle = b1; ctx.fillRect(x, y, bww, bh);
+        y -= mh; ctx.fillStyle = b2; ctx.fillRect(x, y, bww, mh);
+        y -= hh; ctx.fillStyle = b3; ctx.fillRect(x, y, bww, hh);
+      }
+      var px = pf * w; ctx.fillStyle = '#fafafa'; ctx.fillRect(px - 0.5, 0, 1, hgt);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+  }
+  paintWaveform(document.getElementById('wf'), 0.347);
+  paintWaveform(document.getElementById('wf2'), 0.347);
+
+  // ── Expanded player placeholder bars ──
+  (function() {
+    var el = document.getElementById('wfx'); if (!el) return;
+    function r(i, s) { var x = Math.sin(i * s) * 10000; return x - Math.floor(x); }
+    var n = 220, html = '';
+    for (var i = 0; i < n; i++) {
+      var s = r(i, 91.44) > 0.95 ? 0.1 : 1;
+      var h = (10 + r(i, 12.9898) * 78) * s;
+      html += '<i style="height:' + h + '%"></i>';
+    }
+    el.innerHTML = html;
+  })();
+</script>
+
+</body>
+</html>

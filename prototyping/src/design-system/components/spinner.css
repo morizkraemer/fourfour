@@ -1,0 +1,22 @@
+/* ── Spinner ──────────────────────────────────── */
+
+.ff-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.4px solid var(--ff-border-hi);
+  border-top-color: var(--ff-text-mid);
+  border-radius: 50%;
+  animation: ff-spin 1s linear infinite;
+}
+
+.ff-spinner--small {
+  width: 9px;
+  height: 9px;
+  border-width: 1.2px;
+}
+
+@keyframes ff-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

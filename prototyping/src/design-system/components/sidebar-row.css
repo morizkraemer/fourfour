@@ -1,0 +1,66 @@
+.ff-sbrow {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-4);
+  height: 26px;
+  padding: 0 var(--ff-space-6);
+  border-radius: var(--ff-radius-sm);
+}
+.ff-sbrow .ff-icon {
+  color: var(--ff-muted);
+}
+.ff-sbrow__label {
+  flex: 1 1 0;
+  min-width: 0;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-row);
+  color: var(--ff-text-mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ff-sbrow__count {
+  flex: none;
+  font-family: var(--ff-font-mono);
+  font-size: 10.5px;
+  color: var(--ff-faint);
+}
+
+.ff-sbrow--hover {
+  background: var(--ff-hover);
+}
+.ff-sbrow--active,
+.ff-sbrow--selected {
+  background: var(--ff-select);
+}
+.ff-sbrow--active .ff-sbrow__label,
+.ff-sbrow--selected .ff-sbrow__label {
+  color: var(--ff-text);
+}
+.ff-sbrow--active .ff-sbrow__count,
+.ff-sbrow--selected .ff-sbrow__count {
+  color: var(--ff-text-mid);
+}
+
+/* section header */
+.ff-sbrow__section {
+  display: flex;
+  align-items: center;
+  padding: var(--ff-space-1) var(--ff-space-6) var(--ff-space-3);
+}
+.ff-sbrow__section--with-action {
+  justify-content: space-between;
+}
+.ff-sbrow__section-label {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label-sm);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--ff-faint);
+}
+.ff-sbrow__section-action {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-body);
+  color: var(--ff-muted);
+  cursor: pointer;
+}

@@ -454,6 +454,8 @@ html, body {
     align-items: center;
     cursor: default;
     transition: background 0.06s;
+    user-select: none;
+    -webkit-user-select: none;
 }
 .track-row:nth-child(even) { background: rgba(255,255,255,0.018); }
 .track-row:hover { background: rgba(255,255,255,0.06); }
@@ -750,3 +752,70 @@ dialog button[type="submit"]:hover,
 
 /* Progress bar (invisible in new design — status bar takes over — but keep for compat) */
 #progress-bar-wrap { display: none; }
+
+/* ── Debug Panel ─────────────────────────────────────────────── */
+#debug-toggle {
+    background: none;
+    border: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 4px;
+    opacity: 0.6;
+    transition: opacity 0.15s;
+    line-height: 1;
+}
+#debug-toggle:hover { opacity: 1; }
+#debug-toggle.active { opacity: 1; color: #e06050; }
+
+.debug-panel {
+    background: #111;
+    border-top: 1px solid var(--border);
+    height: 220px;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+.debug-panel.hidden { display: none !important; }
+
+.debug-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    background: #0d0d0d;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+}
+.debug-header button {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-tertiary);
+    font-size: 10px;
+    padding: 1px 6px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+.debug-header button:hover { color: #ccc; }
+
+.debug-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 10px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #999;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.debug-log .log-line { margin: 0; }
+.debug-log .log-time { color: #555; margin-right: 6px; }
+.debug-log .log-info { color: #8cb4ff; }
+.debug-log .log-ok   { color: #73c991; }
+.debug-log .log-warn { color: #e0a547; }
+.debug-log .log-err  { color: #e06050; }
+.debug-log .log-dim  { color: #444; }

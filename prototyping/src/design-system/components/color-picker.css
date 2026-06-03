@@ -1,0 +1,56 @@
+.ff-color-picker {
+  display: flex;
+  gap: var(--ff-space-2);
+  align-items: center;
+}
+
+/* Shared chip base */
+.ff-color-picker__chip {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: var(--ff-radius-sm);
+  border: 1.5px solid transparent;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: transform var(--ff-motion-fast) var(--ff-easing),
+              border-color var(--ff-motion-fast) var(--ff-easing),
+              box-shadow var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-color-picker__chip:hover {
+  transform: scale(1.1);
+}
+
+.ff-color-picker__chip--selected {
+  border-color: var(--ff-text);
+  box-shadow: inset 0 0 0 1px var(--ff-bg);
+}
+
+/* None chip */
+.ff-color-picker__chip--none {
+  border-color: var(--ff-border-hi);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--ff-faint);
+  transition: transform var(--ff-motion-fast) var(--ff-easing),
+              border-color var(--ff-motion-fast) var(--ff-easing),
+              box-shadow var(--ff-motion-fast) var(--ff-easing),
+              color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-color-picker__chip--none:hover {
+  color: var(--ff-text-mid);
+}
+
+/* Color chips 1–7 */
+.ff-color-picker__chip--1 { background: var(--ff-track-color-1); }
+.ff-color-picker__chip--2 { background: var(--ff-track-color-2); }
+.ff-color-picker__chip--3 { background: var(--ff-track-color-3); }
+.ff-color-picker__chip--4 { background: var(--ff-track-color-4); }
+.ff-color-picker__chip--5 { background: var(--ff-track-color-5); }
+.ff-color-picker__chip--6 { background: var(--ff-track-color-6); }
+.ff-color-picker__chip--7 { background: var(--ff-track-color-7); }

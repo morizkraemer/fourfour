@@ -1,0 +1,25 @@
+/* Stars (rating) ─ §2.7 */
+
+.ff-stars {
+  display: inline-flex;
+  gap: 1px;
+  line-height: 0;
+  cursor: default;
+}
+
+.ff-stars--interactive {
+  cursor: pointer;
+}
+
+.ff-stars__star {
+  color: var(--ff-faint);
+  transition: color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-stars__star--filled {
+  color: var(--ff-text-mid);
+}
+
+.ff-stars:hover .ff-stars__star {
+  color: var(--ff-text);
+}

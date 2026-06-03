@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Schema for a fresh v2 database.
 const SCHEMA_DDL: &str = "
@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS artwork (
 CREATE TABLE IF NOT EXISTS analyses (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
     bpm      REAL NOT NULL DEFAULT 0.0,
-    key      TEXT NOT NULL DEFAULT ''
+    key      TEXT NOT NULL DEFAULT '',
+    energy   INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -95,6 +96,9 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
         }
         Some(1) => {
             migrate_v1_to_v2(conn, db_path)?;
+        }
+        Some(2) => {
+            migrate_v2_to_v3(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
         Some(v) => {
@@ -224,6 +228,7 @@ fn read_v1_analyses(conn: &Connection) -> Result<Vec<(i64, String, AnalysisResul
                 waveform: WaveformPreview { data: waveform_data },
                 bpm,
                 key,
+                energy: None,
                 cue_points,
                 color_waveform: None,
             },
@@ -231,4 +236,12 @@ fn read_v1_analyses(conn: &Connection) -> Result<Vec<(i64, String, AnalysisResul
     }
 
     Ok(results)
+}
+
+/// Migrate from v2 (analyses table without energy) to v3 (add energy column).
+fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE analyses ADD COLUMN energy INTEGER;")
+        .context("Failed to add energy column")?;
+    conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
+    Ok(())
 }

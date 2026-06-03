@@ -1,5 +1,16 @@
 # Todo
 
+## 2026-06-03 Prototyping Canvas Blank Fix
+
+- [ ] Confirm `CLAUDE.md` no longer requires version bumps for every edit.
+- [ ] Replace the Konva-backed prototype canvas with a DOM/CSS transform canvas so `#world` stays mounted.
+- [ ] Remove the unused Konva dependency from the prototyping package manifest and lockfile.
+- [ ] Verify with build and non-visual checks only.
+
+## Prototyping Canvas Review
+
+- Pending.
+
 ## 2026-04-22 Key Detection Benchmark
 
 - [x] Document Beatport/Rekordbox baseline and Essentia benchmark results.

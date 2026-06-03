@@ -1,0 +1,21 @@
+/* Minimal reset shared by every primitive. Lifts into Tauri with tokens.css. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-body);
+  color: var(--ff-text);
+  background: var(--ff-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

@@ -178,12 +178,12 @@ pub fn delete_artwork(conn: &Connection, track_id: i64) -> Result<()> {
 // Analysis index queries (lightweight bpm/key in DB; full data in ANLZ files)
 // ---------------------------------------------------------------------------
 
-/// Insert or update the lightweight analysis index (bpm + key).
-pub fn upsert_analysis_index(conn: &Connection, track_id: i64, bpm: f64, key: &str) -> Result<()> {
+/// Insert or update the lightweight analysis index (bpm + key + energy).
+pub fn upsert_analysis_index(conn: &Connection, track_id: i64, bpm: f64, key: &str, energy: Option<u8>) -> Result<()> {
     conn.execute(
-        "INSERT INTO analyses (track_id, bpm, key) VALUES (?1, ?2, ?3)
-         ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key",
-        params![track_id, bpm, key],
+        "INSERT INTO analyses (track_id, bpm, key, energy) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key, energy = excluded.energy",
+        params![track_id, bpm, key, energy],
     )?;
     Ok(())
 }
@@ -192,13 +192,13 @@ pub fn upsert_analysis_index(conn: &Connection, track_id: i64, bpm: f64, key: &s
 pub fn select_analysis_index(
     conn: &Connection,
     track_id: i64,
-) -> Result<Option<(f64, String)>> {
-    let mut stmt = conn.prepare("SELECT bpm, key FROM analyses WHERE track_id = ?1")?;
+) -> Result<Option<(f64, String, Option<u8>)>> {
+    let mut stmt = conn.prepare("SELECT bpm, key, energy FROM analyses WHERE track_id = ?1")?;
     let mut rows = stmt.query_map([track_id], |row| {
-        Ok((row.get::<_, f64>(0)?, row.get::<_, String>(1)?))
+        Ok((row.get::<_, f64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<u8>>(2)?))
     })?;
     match rows.next() {
-        Some(Ok(pair)) => Ok(Some(pair)),
+        Some(Ok(triple)) => Ok(Some(triple)),
         Some(Err(e)) => Err(e.into()),
         None => Ok(None),
     }

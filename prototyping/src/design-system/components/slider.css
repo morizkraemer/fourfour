@@ -1,0 +1,45 @@
+.ff-slider {
+  position: relative;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.ff-slider__track {
+  position: relative;
+  height: 2px;
+  width: 100%;
+  background: var(--ff-elev-hi);
+  border-radius: 1px;
+}
+
+.ff-slider__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--ff-text-mid);
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+.ff-slider__thumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ff-text);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  transition: background var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-slider__thumb:hover,
+.ff-slider--dragging .ff-slider__thumb {
+  background: #ffffff;
+}

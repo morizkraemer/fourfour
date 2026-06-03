@@ -1,0 +1,158 @@
+/* ── Checkbox ────────────────────────────────────────────── */
+
+.ff-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ff-space-3);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ff-checkbox__box {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: var(--ff-radius-sm);
+  border: 1px solid var(--ff-border-hi);
+  background: var(--ff-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--ff-motion-fast) var(--ff-easing),
+    border-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-checkbox__icon {
+  width: 10px;
+  height: 10px;
+  opacity: 0;
+  transition: opacity var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-checkbox:hover .ff-checkbox__box {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.ff-checkbox--on .ff-checkbox__box {
+  background: var(--ff-accent);
+  border-color: var(--ff-accent);
+}
+
+.ff-checkbox--on .ff-checkbox__icon {
+  opacity: 1;
+}
+
+.ff-checkbox--on:hover .ff-checkbox__box {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.ff-checkbox__label {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-text);
+  line-height: 1;
+}
+
+/* ── Toggle ──────────────────────────────────────────────── */
+
+.ff-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ff-space-3);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ff-toggle__track {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  border: 1px solid var(--ff-border-hi);
+  background: var(--ff-elev-hi);
+  transition:
+    background 120ms var(--ff-easing),
+    border-color 120ms var(--ff-easing);
+}
+
+.ff-toggle__knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ff-muted);
+  transition:
+    transform 120ms var(--ff-easing),
+    background 120ms var(--ff-easing);
+}
+
+.ff-toggle--on .ff-toggle__track {
+  background: var(--ff-accent);
+  border-color: var(--ff-accent);
+}
+
+.ff-toggle--on .ff-toggle__knob {
+  background: var(--ff-bg);
+  transform: translateX(12px);
+}
+
+.ff-toggle__label {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-text);
+  line-height: 1;
+}
+
+/* ── Radio ───────────────────────────────────────────────── */
+
+.ff-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ff-space-3);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.ff-radio__circle {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--ff-border-hi);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    border-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-radio__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  transition: background var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-radio--on .ff-radio__circle {
+  border-color: var(--ff-accent);
+}
+
+.ff-radio--on .ff-radio__dot {
+  background: var(--ff-accent);
+}
+
+.ff-radio__label {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-text);
+  line-height: 1;
+}

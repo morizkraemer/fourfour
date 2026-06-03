@@ -1,0 +1,517 @@
+/* ── Infinite canvas — Konva Stage + DOM overlay (fourfour Theme) ── */
+
+/* Viewport: full screen container for Konva canvas + DOM overlay */
+.canvas-viewport {
+  position: absolute;
+  top: 0;
+  left: var(--ff-sidebar-w);
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  background: var(--ff-bg);
+  color: var(--ff-text);
+  touch-action: none;
+}
+
+/* Konva creates its <canvas> inside .canvas-viewport — it sits at z-index 0.
+   The DOM overlay sits on top at z-index 1 with pointer-events: none
+   so drag/wheel events fall through to Konva. */
+
+.canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  z-index: 1;
+  pointer-events: none;
+  padding: var(--ff-space-8);
+}
+
+/* ── CRITICAL DEVTOOLS FIX ──
+   Interactive cards inside the overlay MUST have pointer-events: auto so that
+   DevTools inspection picker, mouse clicks, and hovers work natively on them. */
+.ff-card,
+.module-card,
+.primitive-card,
+.artboard,
+.module-card-header,
+.module-card-title-row,
+.project-frame-header,
+.project-inline-toggle,
+.project-frame-collapse {
+  pointer-events: auto !important;
+}
+
+/* ── Zoom controls (fixed, above everything) ── */
+.zoom-controls {
+  position: fixed;
+  bottom: var(--ff-space-7);
+  right: var(--ff-space-7);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-3);
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  padding: 4px 6px;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-muted);
+  user-select: none;
+  pointer-events: auto;
+  box-shadow: var(--ff-shadow-toast);
+}
+
+.zoom-controls button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ff-muted);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--ff-radius-md);
+  cursor: pointer;
+  font-size: var(--ff-type-h1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background var(--ff-motion-fast), color var(--ff-motion-fast);
+}
+
+.zoom-controls button:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.zoom-controls .zoom-level {
+  min-width: 44px;
+  text-align: center;
+  font-weight: 500;
+  color: var(--ff-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Hint ── */
+.canvas-hint {
+  position: fixed;
+  top: var(--ff-space-7);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  padding: 6px var(--ff-space-6);
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-muted);
+  user-select: none;
+  opacity: 1;
+  transition: opacity var(--ff-motion-slow);
+  pointer-events: none;
+  box-shadow: var(--ff-shadow-toast);
+}
+
+.canvas-hint.hidden {
+  opacity: 0;
+}
+
+/* ── Sidebar edge toggles ── */
+.sidebar-edge-toggle {
+  position: fixed;
+  top: 50%;
+  z-index: 95;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--ff-border);
+  background: var(--ff-surface);
+  color: var(--ff-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: background var(--ff-motion-fast), color var(--ff-motion-fast), border-color var(--ff-motion-fast);
+  font-family: var(--ff-font);
+}
+
+.sidebar-edge-toggle--left {
+  left: 0;
+  border-radius: 0 var(--ff-radius-xl) var(--ff-radius-xl) 0;
+  border-left: none;
+}
+
+.sidebar-edge-toggle--right {
+  right: 0;
+  border-radius: var(--ff-radius-xl) 0 0 var(--ff-radius-xl);
+  border-right: none;
+}
+
+.sidebar-edge-toggle:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text);
+  border-color: var(--ff-border-hi);
+}
+
+.sidebar-edge-toggle[data-open="true"]::before {
+  content: '‹';
+}
+
+.sidebar-edge-toggle[data-open="false"]::before {
+  content: '›';
+}
+
+.sidebar-edge-toggle--right[data-open="true"]::before {
+  content: '›';
+}
+
+.sidebar-edge-toggle--right[data-open="false"]::before {
+  content: '‹';
+}
+
+/* ── Canvas rows ── */
+.canvas-row {
+  margin-bottom: var(--ff-space-9);
+}
+
+.canvas-row-label {
+  font-size: var(--ff-type-small);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ff-muted);
+  padding: var(--ff-space-4) 0;
+  border-bottom: 1px solid var(--ff-border);
+  margin-bottom: var(--ff-space-6);
+  font-family: var(--ff-font-mono);
+}
+
+.canvas-items {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ff-space-8);
+}
+
+/* ── Primitive cards ── */
+.primitive-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ff-space-4);
+  padding: var(--ff-space-6) var(--ff-space-5);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-sm);
+  background: var(--ff-surface);
+  flex-shrink: 0;
+}
+
+.primitive-card--wide {
+  min-width: 240px;
+}
+
+.primitive-size-wrap {
+  overflow: hidden;
+  border-radius: var(--ff-radius-xs);
+}
+
+.primitive-label {
+  font-size: var(--ff-type-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ff-muted);
+  font-family: var(--ff-font-mono);
+}
+
+/* ── Artboard container (styled to match fourfour cards) ── */
+.artboard {
+  flex-shrink: 0;
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-sm);
+  background: var(--ff-surface);
+  padding: var(--ff-space-5);
+  position: relative;
+}
+
+.module-card-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--ff-space-3);
+}
+
+.module-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: grab;
+}
+
+.module-card-pin {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--ff-radius-sm);
+  color: var(--ff-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--ff-motion-fast), color var(--ff-motion-fast), background var(--ff-motion-fast);
+}
+
+.module-card-pin svg {
+  width: 12px;
+  height: 12px;
+}
+
+.module-card:hover .module-card-pin,
+.module-card-pin--active,
+.module-card-pin:focus-visible {
+  opacity: 1;
+}
+
+.module-card-pin:hover {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.module-card-pin--active {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+/* ── Module card: external label above the artboard box ── */
+.module-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ff-space-3);
+  flex-shrink: 0;
+}
+
+.module-card .primitive-label {
+  color: var(--ff-muted);
+}
+
+.artboard-dims-outside {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label);
+  color: var(--ff-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Collapsible Canvas Section ── */
+.canvas-section-group {
+  margin-bottom: var(--ff-space-9);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  background: var(--ff-surface);
+  padding: var(--ff-space-6);
+  width: fit-content;
+  transition: padding var(--ff-motion-default);
+}
+
+.canvas-section-group--collapsed {
+  padding-bottom: 0;
+}
+
+.canvas-section-header {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--ff-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: var(--ff-space-5);
+  padding: 0 0 var(--ff-space-4) 0;
+  cursor: pointer;
+  outline: none;
+  font-family: inherit;
+  color: inherit;
+  transition: border-color var(--ff-motion-default);
+}
+
+.canvas-section-header:hover {
+  border-bottom-color: var(--ff-border-hover);
+}
+
+.canvas-section-group--collapsed .canvas-section-header {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 8px;
+}
+
+.canvas-section-title {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-caption);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--ff-muted);
+  text-transform: uppercase;
+  transition: color var(--ff-motion-fast);
+}
+
+.canvas-section-header:hover .canvas-section-title {
+  color: var(--ff-text);
+}
+
+.canvas-section-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ff-space-6);
+}
+
+.canvas-section-content--collapsed {
+  display: none;
+}
+
+/* --- Integration document canvas layout --- */
+.project-frames-layer {
+  position: relative;
+  min-width: 1600px;
+  min-height: 1200px;
+}
+
+.project-inline-toggle {
+  position: absolute;
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  background: var(--ff-surface);
+  color: var(--ff-muted);
+  font-size: var(--ff-type-caption);
+  font-family: var(--ff-font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  cursor: pointer;
+  z-index: 2;
+  transition: background var(--ff-motion-fast), color var(--ff-motion-fast), border-color var(--ff-motion-fast);
+}
+
+.project-inline-toggle:hover {
+  color: var(--ff-text);
+  border-color: var(--ff-border-hi);
+  background: var(--ff-hover);
+}
+
+.project-frame {
+  position: absolute;
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  background: var(--ff-surface);
+  padding: 10px;
+  min-width: 860px;
+}
+
+.project-frame-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.project-frame-title {
+  font-size: var(--ff-type-compact);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ff-muted);
+  font-family: var(--ff-font-mono);
+}
+
+.project-frame-actions {
+  display: flex;
+  align-items: center;
+}
+
+.project-frame-collapse {
+  border: 1px solid var(--ff-border);
+  background: var(--ff-bg);
+  color: var(--ff-muted);
+  border-radius: var(--ff-radius-md);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: color var(--ff-motion-fast), background var(--ff-motion-fast);
+}
+
+.project-frame-collapse:hover {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.project-frame-body {
+  position: relative;
+  min-height: 360px;
+  min-width: 820px;
+}
+
+.project-frame--collapsed .project-frame-body {
+  display: none;
+}
+
+.module-card--positioned {
+  position: absolute;
+}
+
+.module-card--positioned.module-card--dragging .module-card-title-row {
+  cursor: grabbing;
+}
+
+.module-card--positioned.module-card--dragging {
+  z-index: 3;
+}
+
+.module-card-rename {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: var(--ff-radius-sm);
+  background: transparent;
+  color: var(--ff-muted);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--ff-motion-fast), color var(--ff-motion-fast), background var(--ff-motion-fast);
+}
+
+.module-card:hover .module-card-rename,
+.module-card-rename:focus-visible {
+  opacity: 1;
+}
+
+.module-card-rename:hover {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.canvas-copy-toast {
+  position: fixed;
+  right: var(--ff-space-7);
+  bottom: 56px;
+  z-index: 120;
+  background: var(--ff-surface);
+  color: var(--ff-text);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  padding: 7px 10px;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity var(--ff-motion-fast), transform var(--ff-motion-fast);
+  pointer-events: none;
+  box-shadow: var(--ff-shadow-toast);
+}
+
+.canvas-copy-toast--visible {
+  opacity: 1;
+  transform: translateY(0);
+}

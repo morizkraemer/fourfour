@@ -1,0 +1,42 @@
+/* ── Progress Bar ─────────────────────────────── */
+
+.ff-progress-bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: var(--ff-elev);
+  border-radius: var(--ff-radius-xs);
+  overflow: hidden;
+}
+
+.ff-progress-bar--thin {
+  height: 2px;
+}
+
+.ff-progress-bar__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: var(--ff-radius-xs);
+  background: var(--ff-text);
+}
+
+.ff-progress-bar--determinate .ff-progress-bar__fill {
+  transition: width var(--ff-motion-default) var(--ff-easing);
+}
+
+.ff-progress-bar--indeterminate .ff-progress-bar__fill {
+  width: 30%;
+  background: var(--ff-text-mid);
+  animation: ff-progress-slide 1.6s ease-in-out infinite;
+}
+
+@keyframes ff-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(450%);
+  }
+}

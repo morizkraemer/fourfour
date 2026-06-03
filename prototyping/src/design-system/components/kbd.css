@@ -1,0 +1,19 @@
+.ff-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--ff-radius-sm);
+  background: var(--ff-elev);
+  color: var(--ff-muted);
+  border: 1px solid var(--ff-border-hi);
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}

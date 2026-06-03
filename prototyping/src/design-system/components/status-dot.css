@@ -1,0 +1,16 @@
+.ff-status-dot {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.ff-status-dot--online {
+  background: var(--ff-status-online);
+}
+.ff-status-dot--warn {
+  background: var(--ff-status-warn);
+}
+.ff-status-dot--offline {
+  background: var(--ff-status-offline);
+}

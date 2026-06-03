@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brand Directions — fourfour</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&family=Hanken+Grotesk:wght@400;500;600&family=Sora:wght@400;500;600&family=Onest:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600&family=Public+Sans:wght@400;500;600&family=Albert+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    background: #07070a;
+    color: #888;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+
+  .page-header {
+    margin-bottom: 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid #1a1a1f;
+  }
+  .page-title { color: #ddd; font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+  .page-subtitle { color: #555; font-size: 12px; margin-top: 4px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+
+  /* ── Card ────────────────────────────────────────────── */
+  .card {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    border-radius: 6px;
+    padding: 28px 28px 24px;
+    border: 1px solid var(--border, rgba(255,255,255,0.04));
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    min-height: 460px;
+  }
+
+  .card-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .card-meta .num { opacity: 0.5; }
+
+  .card-mark {
+    font-size: 38px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1;
+  }
+  .card-mark .accent { color: var(--accent); }
+
+  .card-font-name {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+  }
+
+  /* swatches */
+  .swatches { display: flex; gap: 0; border-radius: 4px; overflow: hidden; height: 38px; }
+  .swatch { flex: 1; position: relative; }
+  .swatch-label {
+    position: absolute; bottom: 4px; left: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: rgba(255,255,255,0.65);
+    mix-blend-mode: difference;
+    letter-spacing: 0.02em;
+  }
+
+  /* type specimen */
+  .specimen { display: flex; flex-direction: column; gap: 6px; }
+  .spec-headline { font-size: 18px; font-weight: 500; color: var(--text); letter-spacing: -0.01em; line-height: 1.2; }
+  .spec-body { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .spec-num { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+
+  /* mini mock — track row */
+  .mock {
+    background: var(--surface);
+    border-radius: 4px;
+    padding: 8px 10px;
+    display: grid;
+    grid-template-columns: 18px 1.8fr 1fr 36px 32px 38px;
+    gap: 10px;
+    align-items: center;
+    font-size: 11.5px;
+    border: 1px solid var(--border-mock, transparent);
+  }
+  .mock + .mock { margin-top: 2px; }
+  .mock.selected { background: var(--accent-bg); }
+  .mock-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mock-cell.num { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; font-size: 10px; }
+  .mock-cell.title { color: var(--text); }
+  .mock-cell.artist { color: var(--muted); }
+  .mock-cell.bpm, .mock-cell.key, .mock-cell.time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 10.5px; }
+  .mock.selected .mock-cell { color: var(--text); }
+  .mock.selected .mock-cell.title { color: var(--accent); }
+
+  .footer-note {
+    font-size: 10px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: auto;
+    padding-top: 4px;
+    opacity: 0.7;
+  }
+
+  /* ── Palettes ───────────────────────────────────────── */
+
+  /* 01 — Linear / Inter / Indigo */
+  .b01 {
+    --bg: #0e1015; --surface: #15171c; --elev: #1c1f25;
+    --text: #e6e8eb; --muted: #6c7079; --accent: #818cf8;
+    --accent-bg: rgba(129,140,248,0.10);
+    --font: 'Inter', sans-serif;
+  }
+
+  /* 02 — Geist / Cyan */
+  .b02 {
+    --bg: #0a0a0a; --surface: #111111; --elev: #1a1a1a;
+    --text: #ededed; --muted: #6e6e6e; --accent: #22d3ee;
+    --accent-bg: rgba(34,211,238,0.10);
+    --font: 'Geist', sans-serif;
+  }
+
+  /* 03 — JetBrains Mono / Terminal Lime */
+  .b03 {
+    --bg: #0d1117; --surface: #161b22; --elev: #21262d;
+    --text: #c9d1d9; --muted: #6e7681; --accent: #7ee787;
+    --accent-bg: rgba(126,231,135,0.08);
+    --font: 'JetBrains Mono', monospace;
+  }
+
+  /* 04 — IBM Plex Sans / Slate Sky */
+  .b04 {
+    --bg: #161b22; --surface: #1e242c; --elev: #283038;
+    --text: #dde3ea; --muted: #6f7c8b; --accent: #38bdf8;
+    --accent-bg: rgba(56,189,248,0.10);
+    --font: 'IBM Plex Sans', sans-serif;
+  }
+
+  /* 05 — Space Grotesk / Pure Black + Amber */
+  .b05 {
+    --bg: #000000; --surface: #0c0c0c; --elev: #161616;
+    --text: #fafafa; --muted: #707070; --accent: #f59e0b;
+    --accent-bg: rgba(245,158,11,0.10);
+    --font: 'Space Grotesk', sans-serif;
+  }
+
+  /* 06 — Manrope / Coffee + Coral */
+  .b06 {
+    --bg: #181513; --surface: #211e1a; --elev: #2a2722;
+    --text: #ece4d8; --muted: #837868; --accent: #f87171;
+    --accent-bg: rgba(248,113,113,0.10);
+    --font: 'Manrope', sans-serif;
+  }
+
+  /* 07 — Inter Tight / Neutral + Electric */
+  .b07 {
+    --bg: #131313; --surface: #1c1c1c; --elev: #262626;
+    --text: #f5f5f5; --muted: #707070; --accent: #3b82f6;
+    --accent-bg: rgba(59,130,246,0.12);
+    --font: 'Inter Tight', sans-serif;
+  }
+
+  /* 08 — DM Sans / Warm + Violet */
+  .b08 {
+    --bg: #1a1620; --surface: #221d28; --elev: #2c2632;
+    --text: #ece7f0; --muted: #807889; --accent: #c084fc;
+    --accent-bg: rgba(192,132,252,0.10);
+    --font: 'DM Sans', sans-serif;
+  }
+
+  /* 09 — Hanken Grotesk / Minimal + Mint */
+  .b09 {
+    --bg: #0f1110; --surface: #181a19; --elev: #232624;
+    --text: #e6e8e7; --muted: #6c706e; --accent: #4ade80;
+    --accent-bg: rgba(74,222,128,0.08);
+    --font: 'Hanken Grotesk', sans-serif;
+  }
+
+  /* 10 — IBM Plex Mono / Pure mono, no color */
+  .b10 {
+    --bg: #0d0d0d; --surface: #161616; --elev: #1f1f1f;
+    --text: #e8e8e8; --muted: #6a6a6a; --accent: #fafafa;
+    --accent-bg: rgba(255,255,255,0.06);
+    --font: 'IBM Plex Mono', monospace;
+  }
+
+  /* 11 — Geist / Achromatic */
+  .b11 {
+    --bg: #0a0a0a; --surface: #131313; --elev: #1c1c1c;
+    --text: #ededed; --muted: #6a6a6a; --accent: #fafafa;
+    --accent-bg: rgba(255,255,255,0.06);
+    --font: 'Geist', sans-serif;
+  }
+
+  /* 12 — Sora / Cool achromatic */
+  .b12 {
+    --bg: #0c0d0f; --surface: #15161a; --elev: #1e2025;
+    --text: #e8eaee; --muted: #6a6e76; --accent: #f0f2f5;
+    --accent-bg: rgba(240,242,245,0.06);
+    --font: 'Sora', sans-serif;
+  }
+
+  /* 13 — Onest / Subtle warm achromatic */
+  .b13 {
+    --bg: #0e0d0c; --surface: #161513; --elev: #20201d;
+    --text: #ebe9e6; --muted: #6e6c68; --accent: #f5f3ee;
+    --accent-bg: rgba(245,243,238,0.06);
+    --font: 'Onest', sans-serif;
+  }
+
+  /* 14 — Plus Jakarta Sans / Restrained sky */
+  .b14 {
+    --bg: #0f1115; --surface: #181a1f; --elev: #22252b;
+    --text: #e6e8ec; --muted: #6c707a; --accent: #93c5fd;
+    --accent-bg: rgba(147,197,253,0.10);
+    --font: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  /* 15 — Public Sans / True neutral */
+  .b15 {
+    --bg: #101010; --surface: #181818; --elev: #222222;
+    --text: #ededed; --muted: #6e6e6e; --accent: #ededed;
+    --accent-bg: rgba(255,255,255,0.05);
+    --font: 'Public Sans', sans-serif;
+  }
+
+  /* 16 — Albert Sans / Steel slate */
+  .b16 {
+    --bg: #0d0e10; --surface: #161719; --elev: #1f2123;
+    --text: #e6e7ea; --muted: #6c6f74; --accent: #94a3b8;
+    --accent-bg: rgba(148,163,184,0.10);
+    --font: 'Albert Sans', sans-serif;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <div class="page-header">
+    <div class="page-title">Brand directions — fourfour</div>
+    <div class="page-subtitle">Ten unopinionated dark palettes. Pick one, refine, lock as Figma vars.</div>
+  </div>
+
+  <div class="grid">
+
+    <!-- 01 -->
+    <div class="card b01">
+      <div class="card-meta"><span class="num">01</span><span>Cool · Indigo</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Inter · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0e1015"><span class="swatch-label">0E1015</span></div>
+        <div class="swatch" style="background:#15171c"><span class="swatch-label">15171C</span></div>
+        <div class="swatch" style="background:#1c1f25"><span class="swatch-label">1C1F25</span></div>
+        <div class="swatch" style="background:#6c7079"><span class="swatch-label">6C7079</span></div>
+        <div class="swatch" style="background:#e6e8eb"><span class="swatch-label" style="mix-blend-mode:normal;color:#15171c">E6E8EB</span></div>
+        <div class="swatch" style="background:#818cf8"><span class="swatch-label">818CF8</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// linear · vercel · feels current</div>
+    </div>
+
+    <!-- 02 -->
+    <div class="card b02">
+      <div class="card-meta"><span class="num">02</span><span>Neutral · Cyan</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Geist · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0a0a0a"><span class="swatch-label">0A0A0A</span></div>
+        <div class="swatch" style="background:#111111"><span class="swatch-label">111111</span></div>
+        <div class="swatch" style="background:#1a1a1a"><span class="swatch-label">1A1A1A</span></div>
+        <div class="swatch" style="background:#6e6e6e"><span class="swatch-label">6E6E6E</span></div>
+        <div class="swatch" style="background:#ededed"><span class="swatch-label" style="mix-blend-mode:normal;color:#111">EDEDED</span></div>
+        <div class="swatch" style="background:#22d3ee"><span class="swatch-label">22D3EE</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// vercel-pure · industrial · clean</div>
+    </div>
+
+    <!-- 03 -->
+    <div class="card b03">
+      <div class="card-meta"><span class="num">03</span><span>Terminal · Lime</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">JetBrains Mono · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0d1117"><span class="swatch-label">0D1117</span></div>
+        <div class="swatch" style="background:#161b22"><span class="swatch-label">161B22</span></div>
+        <div class="swatch" style="background:#21262d"><span class="swatch-label">21262D</span></div>
+        <div class="swatch" style="background:#6e7681"><span class="swatch-label">6E7681</span></div>
+        <div class="swatch" style="background:#c9d1d9"><span class="swatch-label" style="mix-blend-mode:normal;color:#161b22">C9D1D9</span></div>
+        <div class="swatch" style="background:#7ee787"><span class="swatch-label" style="mix-blend-mode:normal;color:#161b22">7EE787</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// dev tool · raycast · cli energy</div>
+    </div>
+
+    <!-- 04 -->
+    <div class="card b04">
+      <div class="card-meta"><span class="num">04</span><span>Slate · Sky</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">IBM Plex Sans · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#161b22"><span class="swatch-label">161B22</span></div>
+        <div class="swatch" style="background:#1e242c"><span class="swatch-label">1E242C</span></div>
+        <div class="swatch" style="background:#283038"><span class="swatch-label">283038</span></div>
+        <div class="swatch" style="background:#6f7c8b"><span class="swatch-label">6F7C8B</span></div>
+        <div class="swatch" style="background:#dde3ea"><span class="swatch-label" style="mix-blend-mode:normal;color:#1e242c">DDE3EA</span></div>
+        <div class="swatch" style="background:#38bdf8"><span class="swatch-label" style="mix-blend-mode:normal;color:#1e242c">38BDF8</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// engineering · serious · ibm-y</div>
+    </div>
+
+    <!-- 05 -->
+    <div class="card b05">
+      <div class="card-meta"><span class="num">05</span><span>Pure Black · Amber</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Space Grotesk · 400 / 500 / 700</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#000000"><span class="swatch-label">000000</span></div>
+        <div class="swatch" style="background:#0c0c0c"><span class="swatch-label">0C0C0C</span></div>
+        <div class="swatch" style="background:#161616"><span class="swatch-label">161616</span></div>
+        <div class="swatch" style="background:#707070"><span class="swatch-label">707070</span></div>
+        <div class="swatch" style="background:#fafafa"><span class="swatch-label" style="mix-blend-mode:normal;color:#000">FAFAFA</span></div>
+        <div class="swatch" style="background:#f59e0b"><span class="swatch-label" style="mix-blend-mode:normal;color:#000">F59E0B</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// editorial · brutalist · confident</div>
+    </div>
+
+    <!-- 06 -->
+    <div class="card b06">
+      <div class="card-meta"><span class="num">06</span><span>Coffee · Coral</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Manrope · 400 / 500 / 600 / 700</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#181513"><span class="swatch-label">181513</span></div>
+        <div class="swatch" style="background:#211e1a"><span class="swatch-label">211E1A</span></div>
+        <div class="swatch" style="background:#2a2722"><span class="swatch-label">2A2722</span></div>
+        <div class="swatch" style="background:#837868"><span class="swatch-label">837868</span></div>
+        <div class="swatch" style="background:#ece4d8"><span class="swatch-label" style="mix-blend-mode:normal;color:#211e1a">ECE4D8</span></div>
+        <div class="swatch" style="background:#f87171"><span class="swatch-label" style="mix-blend-mode:normal;color:#211e1a">F87171</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// warm · analog · soft</div>
+    </div>
+
+    <!-- 07 -->
+    <div class="card b07">
+      <div class="card-meta"><span class="num">07</span><span>Neutral · Electric</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Inter Tight · 400 / 500 / 600 / 700</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#131313"><span class="swatch-label">131313</span></div>
+        <div class="swatch" style="background:#1c1c1c"><span class="swatch-label">1C1C1C</span></div>
+        <div class="swatch" style="background:#262626"><span class="swatch-label">262626</span></div>
+        <div class="swatch" style="background:#707070"><span class="swatch-label">707070</span></div>
+        <div class="swatch" style="background:#f5f5f5"><span class="swatch-label" style="mix-blend-mode:normal;color:#1c1c1c">F5F5F5</span></div>
+        <div class="swatch" style="background:#3b82f6"><span class="swatch-label">3B82F6</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// figma-ish · familiar · safe</div>
+    </div>
+
+    <!-- 08 -->
+    <div class="card b08">
+      <div class="card-meta"><span class="num">08</span><span>Warm · Violet</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">DM Sans · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#1a1620"><span class="swatch-label">1A1620</span></div>
+        <div class="swatch" style="background:#221d28"><span class="swatch-label">221D28</span></div>
+        <div class="swatch" style="background:#2c2632"><span class="swatch-label">2C2632</span></div>
+        <div class="swatch" style="background:#807889"><span class="swatch-label">807889</span></div>
+        <div class="swatch" style="background:#ece7f0"><span class="swatch-label" style="mix-blend-mode:normal;color:#221d28">ECE7F0</span></div>
+        <div class="swatch" style="background:#c084fc"><span class="swatch-label" style="mix-blend-mode:normal;color:#221d28">C084FC</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// nighttime · electronic · moody</div>
+    </div>
+
+    <!-- 09 -->
+    <div class="card b09">
+      <div class="card-meta"><span class="num">09</span><span>Minimal · Mint</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Hanken Grotesk · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0f1110"><span class="swatch-label">0F1110</span></div>
+        <div class="swatch" style="background:#181a19"><span class="swatch-label">181A19</span></div>
+        <div class="swatch" style="background:#232624"><span class="swatch-label">232624</span></div>
+        <div class="swatch" style="background:#6c706e"><span class="swatch-label">6C706E</span></div>
+        <div class="swatch" style="background:#e6e8e7"><span class="swatch-label" style="mix-blend-mode:normal;color:#181a19">E6E8E7</span></div>
+        <div class="swatch" style="background:#4ade80"><span class="swatch-label" style="mix-blend-mode:normal;color:#181a19">4ADE80</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// quiet · swiss · functional</div>
+    </div>
+
+    <!-- 10 -->
+    <div class="card b10">
+      <div class="card-meta"><span class="num">10</span><span>Mono · Achromatic</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">IBM Plex Mono · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0d0d0d"><span class="swatch-label">0D0D0D</span></div>
+        <div class="swatch" style="background:#161616"><span class="swatch-label">161616</span></div>
+        <div class="swatch" style="background:#1f1f1f"><span class="swatch-label">1F1F1F</span></div>
+        <div class="swatch" style="background:#6a6a6a"><span class="swatch-label">6A6A6A</span></div>
+        <div class="swatch" style="background:#e8e8e8"><span class="swatch-label" style="mix-blend-mode:normal;color:#161616">E8E8E8</span></div>
+        <div class="swatch" style="background:#fafafa"><span class="swatch-label" style="mix-blend-mode:normal;color:#161616">FAFAFA</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// no color · hardware · purist</div>
+    </div>
+
+    <!-- 11 -->
+    <div class="card b11">
+      <div class="card-meta"><span class="num">11</span><span>Geist · Achromatic</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Geist · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0a0a0a"><span class="swatch-label">0A0A0A</span></div>
+        <div class="swatch" style="background:#131313"><span class="swatch-label">131313</span></div>
+        <div class="swatch" style="background:#1c1c1c"><span class="swatch-label">1C1C1C</span></div>
+        <div class="swatch" style="background:#6a6a6a"><span class="swatch-label">6A6A6A</span></div>
+        <div class="swatch" style="background:#ededed"><span class="swatch-label" style="mix-blend-mode:normal;color:#131313">EDEDED</span></div>
+        <div class="swatch" style="background:#fafafa"><span class="swatch-label" style="mix-blend-mode:normal;color:#131313">FAFAFA</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// 10 fixed · sans not mono · still purist</div>
+    </div>
+
+    <!-- 12 -->
+    <div class="card b12">
+      <div class="card-meta"><span class="num">12</span><span>Sora · Cool Achromatic</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Sora · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0c0d0f"><span class="swatch-label">0C0D0F</span></div>
+        <div class="swatch" style="background:#15161a"><span class="swatch-label">15161A</span></div>
+        <div class="swatch" style="background:#1e2025"><span class="swatch-label">1E2025</span></div>
+        <div class="swatch" style="background:#6a6e76"><span class="swatch-label">6A6E76</span></div>
+        <div class="swatch" style="background:#e8eaee"><span class="swatch-label" style="mix-blend-mode:normal;color:#15161a">E8EAEE</span></div>
+        <div class="swatch" style="background:#f0f2f5"><span class="swatch-label" style="mix-blend-mode:normal;color:#15161a">F0F2F5</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// geometric · slight cool tint · no color</div>
+    </div>
+
+    <!-- 13 -->
+    <div class="card b13">
+      <div class="card-meta"><span class="num">13</span><span>Onest · Warm Achromatic</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Onest · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0e0d0c"><span class="swatch-label">0E0D0C</span></div>
+        <div class="swatch" style="background:#161513"><span class="swatch-label">161513</span></div>
+        <div class="swatch" style="background:#20201d"><span class="swatch-label">20201D</span></div>
+        <div class="swatch" style="background:#6e6c68"><span class="swatch-label">6E6C68</span></div>
+        <div class="swatch" style="background:#ebe9e6"><span class="swatch-label" style="mix-blend-mode:normal;color:#161513">EBE9E6</span></div>
+        <div class="swatch" style="background:#f5f3ee"><span class="swatch-label" style="mix-blend-mode:normal;color:#161513">F5F3EE</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// humanist · subtle warmth · easier on eyes</div>
+    </div>
+
+    <!-- 14 -->
+    <div class="card b14">
+      <div class="card-meta"><span class="num">14</span><span>Plus Jakarta · Restrained Sky</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Plus Jakarta Sans · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0f1115"><span class="swatch-label">0F1115</span></div>
+        <div class="swatch" style="background:#181a1f"><span class="swatch-label">181A1F</span></div>
+        <div class="swatch" style="background:#22252b"><span class="swatch-label">22252B</span></div>
+        <div class="swatch" style="background:#6c707a"><span class="swatch-label">6C707A</span></div>
+        <div class="swatch" style="background:#e6e8ec"><span class="swatch-label" style="mix-blend-mode:normal;color:#181a1f">E6E8EC</span></div>
+        <div class="swatch" style="background:#93c5fd"><span class="swatch-label" style="mix-blend-mode:normal;color:#181a1f">93C5FD</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// 7 muted · softer blue · less electric</div>
+    </div>
+
+    <!-- 15 -->
+    <div class="card b15">
+      <div class="card-meta"><span class="num">15</span><span>Public Sans · True Neutral</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Public Sans · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#101010"><span class="swatch-label">101010</span></div>
+        <div class="swatch" style="background:#181818"><span class="swatch-label">181818</span></div>
+        <div class="swatch" style="background:#222222"><span class="swatch-label">222222</span></div>
+        <div class="swatch" style="background:#6e6e6e"><span class="swatch-label">6E6E6E</span></div>
+        <div class="swatch" style="background:#ededed"><span class="swatch-label" style="mix-blend-mode:normal;color:#181818">EDEDED</span></div>
+        <div class="swatch" style="background:#ededed"><span class="swatch-label" style="mix-blend-mode:normal;color:#181818">EDEDED</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// gov · workhorse · zero personality</div>
+    </div>
+
+    <!-- 16 -->
+    <div class="card b16">
+      <div class="card-meta"><span class="num">16</span><span>Albert Sans · Steel</span></div>
+      <div class="card-mark">four<span class="accent">four</span></div>
+      <div class="card-font-name">Albert Sans · 400 / 500 / 600</div>
+      <div class="swatches">
+        <div class="swatch" style="background:#0d0e10"><span class="swatch-label">0D0E10</span></div>
+        <div class="swatch" style="background:#161719"><span class="swatch-label">161719</span></div>
+        <div class="swatch" style="background:#1f2123"><span class="swatch-label">1F2123</span></div>
+        <div class="swatch" style="background:#6c6f74"><span class="swatch-label">6C6F74</span></div>
+        <div class="swatch" style="background:#e6e7ea"><span class="swatch-label" style="mix-blend-mode:normal;color:#161719">E6E7EA</span></div>
+        <div class="swatch" style="background:#94a3b8"><span class="swatch-label" style="mix-blend-mode:normal;color:#161719">94A3B8</span></div>
+      </div>
+      <div class="specimen">
+        <div class="spec-headline">All Tracks · 4,218</div>
+        <div class="spec-body">A library tool that stays out of your way. Cold start to first track in under two seconds.</div>
+        <div class="spec-num">128 BPM · 8A · 6:14</div>
+      </div>
+      <div>
+        <div class="mock"><span class="mock-cell num">01</span><span class="mock-cell title">Luvstruck 2024</span><span class="mock-cell artist">Southside Spinners</span><span class="mock-cell bpm">128</span><span class="mock-cell key">8A</span><span class="mock-cell time">6:14</span></div>
+        <div class="mock selected"><span class="mock-cell num">02</span><span class="mock-cell title">Midnight City</span><span class="mock-cell artist">Rhode &amp; Brown</span><span class="mock-cell bpm">124</span><span class="mock-cell key">9A</span><span class="mock-cell time">5:42</span></div>
+      </div>
+      <div class="footer-note">// tasteful muted · steel-blue · not branded</div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

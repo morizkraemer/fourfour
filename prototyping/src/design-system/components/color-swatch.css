@@ -1,0 +1,5 @@
+.ff-swatch {
+  display: inline-block;
+  flex: none;
+  border-radius: var(--ff-radius-xs);
+}

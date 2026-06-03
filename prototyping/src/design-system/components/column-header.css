@@ -1,0 +1,34 @@
+.ff-colh {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-4);
+  height: 28px;
+  padding: 0 var(--ff-space-6);
+  border-top: 1px solid var(--ff-border);
+}
+.ff-colh__cell {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-2);
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label-sm);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--ff-faint);
+}
+.ff-colh__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ff-colh__cell--active {
+  color: var(--ff-text);
+}
+.ff-colh__arrow {
+  color: var(--ff-text);
+}
+.ff-colh__arrow--asc {
+  transform: rotate(180deg);
+}

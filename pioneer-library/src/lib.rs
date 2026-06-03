@@ -214,7 +214,7 @@ impl LocalLibrary {
         }
 
         // Update lightweight DB index.
-        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key)?;
+        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy)?;
 
         Ok(())
     }
@@ -234,7 +234,7 @@ impl LocalLibrary {
     /// are missing), returns a minimal result with just bpm and key.
     pub fn get_analysis(&self, track_id: i64) -> Result<Option<AnalysisResult>> {
         // Check the DB index first.
-        let Some((bpm, key)) = queries::select_analysis_index(&self.conn, track_id)? else {
+        let Some((bpm, key, energy)) = queries::select_analysis_index(&self.conn, track_id)? else {
             return Ok(None);
         };
 
@@ -243,9 +243,10 @@ impl LocalLibrary {
             let dat_path = dir.join("ANLZ0000.DAT");
             if dat_path.exists() {
                 let mut result = reader::anlz::read_anlz(&dat_path)?;
-                // Override bpm/key from the DB index (authoritative source).
+                // Override bpm/key/energy from the DB index (authoritative source).
                 result.bpm = bpm;
                 result.key = key;
+                result.energy = energy;
                 return Ok(Some(result));
             }
         }
@@ -256,6 +257,7 @@ impl LocalLibrary {
             waveform: WaveformPreview { data: [0u8; 400] },
             bpm,
             key,
+            energy,
             cue_points: Vec::new(),
             color_waveform: None,
         }))
@@ -553,6 +555,7 @@ mod tests {
             }},
             bpm: 128.0,
             key: "1A".to_string(),
+            energy: Some(7),
             cue_points: vec![
                 CuePoint { hot_cue_number: 0, time_ms: 1000, loop_time_ms: None },
                 CuePoint { hot_cue_number: 1, time_ms: 60_000, loop_time_ms: None },

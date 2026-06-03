@@ -126,6 +126,9 @@ pub struct AnalysisResult {
     pub bpm: f64,
     /// Detected musical key, e.g. `"1A"` or `"5B"` (Camelot notation).
     pub key: String,
+    /// Energy rating 1–10 from analysis. `None` if not computed.
+    #[serde(default)]
+    pub energy: Option<u8>,
     /// Memory cues and hot cues written to the ANLZ PCOB tag.
     pub cue_points: Vec<CuePoint>,
     /// 3-band color waveform. `None` for legacy results (faked green on USB export).
