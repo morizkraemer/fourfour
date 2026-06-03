@@ -3,6 +3,29 @@ import { el } from '../utils/dom.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
+function lookupKey(obj, key) {
+  if (!obj) return undefined;
+  if (obj[key] !== undefined) return obj[key];
+  if (obj[key.toLowerCase()] !== undefined) return obj[key.toLowerCase()];
+  const found = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+  return found ? obj[found] : undefined;
+}
+
+function createMusicIcon() {
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', '146');
+  svg.setAttribute('height', '146');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.5');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  // Lucide music icon
+  svg.innerHTML = '<path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />';
+  return svg;
+}
+
 function createDiscIcon(size) {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -17,14 +40,26 @@ function createDiscIcon(size) {
   return svg;
 }
 
+// Cue color palette matching the track-row and cuestrip CDJ colors
+const CUE_COLORS = [
+  '#ec4899', // pink
+  '#38bdf8', // blue
+  '#4ade80', // green
+  '#f59e0b', // orange
+  '#a78bfa', // purple
+  '#facc15', // yellow
+  '#94a3b8'  // grey
+];
+
 /**
  * @param {object} options
  * @param {'single'|'multi'|'empty'|'missing'} options.mode
  * @param {string} [options.title]
  * @param {string} [options.artist]
  * @param {object} [options.meta]             – key-value pairs for track meta info
- * @param {Array<{ name: string, position: string }>} [options.cues]
+ * @param {Array<{ name: string, position: string, color?: string }>} [options.cues]
  * @param {number} [options.multiCount]       – selected tracks count (for multi mode)
+ * @param {string} [options.filePath]         – file path of the track
  */
 export function createDetailPane({
   mode = 'empty',
@@ -32,7 +67,8 @@ export function createDetailPane({
   artist = '',
   meta = {},
   cues = [],
-  multiCount = 0
+  multiCount = 0,
+  filePath = ''
 } = {}) {
   const containerChildren = [];
 
@@ -50,14 +86,14 @@ export function createDetailPane({
   } else if (mode === 'single' || mode === 'missing') {
     const isMissing = mode === 'missing';
 
-    // Art Placeholder
-    const discIcon = createDiscIcon(80);
-    discIcon.classList.add('ff-detail-pane__art-icon');
-    const art = el('div', {
-      class: `ff-detail-pane__art ${isMissing ? 'ff-detail-pane__art--missing' : ''}`
-    }, [discIcon]);
+    // Cover Art Placeholder (height: 292px)
+    const musicIcon = createMusicIcon();
+    musicIcon.classList.add('ff-detail-pane__art-icon');
+    const cover = el('div', {
+      class: `ff-detail-pane__cover ${isMissing ? 'ff-detail-pane__cover--missing' : ''}`
+    }, [musicIcon]);
 
-    containerChildren.push(art);
+    containerChildren.push(cover);
 
     // Title & Artist
     containerChildren.push(
@@ -76,9 +112,18 @@ export function createDetailPane({
 
     // Meta list
     const dlItems = [];
-    const defaultMetaKeys = ['BPM', 'Key', 'Time', 'Genre', 'Label', 'Added'];
+    const defaultMetaKeys = ['ALBUM', 'LABEL', 'BPM · KEY', 'DURATION', 'ADDED'];
     defaultMetaKeys.forEach(key => {
-      let val = isMissing ? '—' : (meta[key] || '—');
+      let val = '—';
+      if (!isMissing) {
+        if (key === 'BPM · KEY') {
+          const bpmVal = lookupKey(meta, 'BPM') || '—';
+          const keyVal = lookupKey(meta, 'KEY') || '—';
+          val = (bpmVal !== '—' || keyVal !== '—') ? `${bpmVal} · ${keyVal}` : '—';
+        } else {
+          val = lookupKey(meta, key) || '—';
+        }
+      }
       dlItems.push(el('dt', { class: 'ff-detail-pane__dt' }, [key]));
       dlItems.push(el('dd', { class: 'ff-detail-pane__dd' }, [val]));
     });
@@ -86,11 +131,15 @@ export function createDetailPane({
     const metaList = el('dl', { class: 'ff-detail-pane__meta-list' }, dlItems);
     containerChildren.push(metaList);
 
-    // Cues (if single mode and cues provided)
+    // Cues
     if (!isMissing && cues && cues.length > 0) {
-      const cueHeader = el('div', { class: 'ff-detail-pane__section-title' }, ['Cue Points']);
-      const cueRows = cues.map(cue => {
-        const pip = el('div', { class: 'ff-detail-pane__cue-pip' });
+      const cueHeader = el('div', { class: 'ff-detail-pane__section-title' }, ['CUE POINTS']);
+      const cueRows = cues.map((cue, idx) => {
+        const color = cue.color || CUE_COLORS[idx % CUE_COLORS.length];
+        const pip = el('div', {
+          class: 'ff-detail-pane__cue-pip',
+          style: `background-color: ${color}`
+        });
         const nameEl = el('span', { class: 'ff-detail-pane__cue-name' }, [cue.name]);
         const posEl = el('span', { class: 'ff-detail-pane__cue-pos' }, [cue.position]);
 
@@ -104,7 +153,18 @@ export function createDetailPane({
       containerChildren.push(
         el('div', { class: 'ff-detail-pane__cues-section' }, [
           cueHeader,
-          ...cueRows
+          el('div', { class: 'ff-detail-pane__cues-list' }, cueRows)
+        ])
+      );
+    }
+
+    // File Path section
+    const displayPath = filePath || (isMissing ? '/Volumes/Music/Tale Of Us/Endless Run/02 Voidwalker.flac' : '');
+    if (displayPath) {
+      containerChildren.push(
+        el('div', { class: 'ff-detail-pane__file-path-section' }, [
+          el('div', { class: 'ff-detail-pane__section-title' }, ['FILE PATH']),
+          el('div', { class: 'ff-detail-pane__file-path-val' }, [displayPath])
         ])
       );
     }
@@ -130,9 +190,9 @@ export function createDetailPane({
 
     // Meta list with totals
     const dlItems = [];
-    const defaultMetaKeys = ['Total Size', 'Total Duration', 'BPM Range', 'Keys'];
+    const defaultMetaKeys = ['TOTAL SIZE', 'TOTAL DURATION', 'BPM RANGE', 'KEYS'];
     defaultMetaKeys.forEach(key => {
-      let val = meta[key] || '—';
+      let val = lookupKey(meta, key) || '—';
       dlItems.push(el('dt', { class: 'ff-detail-pane__dt' }, [key]));
       dlItems.push(el('dd', { class: 'ff-detail-pane__dd' }, [val]));
     });

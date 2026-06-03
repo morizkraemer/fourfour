@@ -34,11 +34,11 @@ export default function render() {
     title: 'One More Time',
     artist: 'Daft Punk',
     meta: {
+      Album: 'Discovery',
+      Label: 'Virgin',
       BPM: '128.00',
       Key: '8A',
-      Time: '05:20',
-      Genre: 'House',
-      Label: 'Virgin',
+      Duration: '05:20',
       Added: '2026-06-03'
     },
     cues: [

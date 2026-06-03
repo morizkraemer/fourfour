@@ -26,9 +26,12 @@ export default function render() {
     title: 'One More Time',
     artist: 'Daft Punk',
     currentTime: '01:24',
+    currentTimeMs: '.4',
     totalTime: '05:20',
     progress: 0.26,
     playing: false,
+    bpm: '128.00',
+    key: '8A',
     onPlayToggle: () => alert('Play toggle compact')
   }).element;
 
@@ -36,9 +39,12 @@ export default function render() {
     title: 'Strobe',
     artist: 'deadmau5',
     currentTime: '04:12',
+    currentTimeMs: '.8',
     totalTime: '10:37',
     progress: 0.39,
     playing: true,
+    bpm: '128.00',
+    key: '3A',
     onPlayToggle: () => alert('Play toggle compact')
   }).element;
 
@@ -48,7 +54,7 @@ export default function render() {
     artist: 'Daft Punk',
     bpm: '128.00',
     key: '8A',
-    time: '01:24.320',
+    time: '01:24.320 / 05:20',
     cues: [
       { name: 'A', position: 10 },
       { name: 'B', position: 28 },
