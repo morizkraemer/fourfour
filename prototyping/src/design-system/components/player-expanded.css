@@ -1,0 +1,285 @@
+.ff-player-expanded {
+  background-color: var(--ff-bg);
+  border-top: 1px solid var(--ff-border);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* 1. Head */
+.ff-player-expanded__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ff-border);
+  box-sizing: border-box;
+}
+
+.ff-player-expanded__head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ff-player-expanded__play-btn {
+  width: 28px;
+  height: 28px;
+  background-color: var(--ff-accent);
+  color: var(--ff-bg);
+  border: none;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  transition: background-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-player-expanded__play-btn:hover {
+  background-color: var(--ff-accent-hi);
+}
+
+.ff-player-expanded__title {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-h2);
+  font-weight: 500;
+  color: var(--ff-text);
+}
+
+.ff-player-expanded__artist {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-text-mid);
+}
+
+.ff-player-expanded__meta-pills {
+  display: flex;
+  gap: 6px;
+  margin-left: 10px;
+}
+
+.ff-player-expanded__meta-pill {
+  padding: 2px 8px;
+  background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  font-family: var(--ff-font-mono);
+  font-size: 11px;
+  color: var(--ff-text-mid);
+  line-height: 1.2;
+}
+
+.ff-player-expanded__head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ff-player-expanded__action-btn {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0 var(--ff-space-4);
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-small);
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  color: var(--ff-muted);
+  border-radius: var(--ff-radius-sm);
+  transition: background-color var(--ff-motion-fast) var(--ff-easing), color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-player-expanded__action-btn:hover {
+  background-color: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-player-expanded__close-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  outline: none;
+  color: var(--ff-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-player-expanded__close-btn:hover {
+  color: var(--ff-text);
+}
+
+/* 2. Cuestrip */
+.ff-player-expanded__cuestrip {
+  height: 18px;
+  position: relative;
+  background-color: transparent;
+  margin-top: 8px;
+  box-sizing: border-box;
+}
+
+.ff-player-expanded__cue {
+  position: absolute;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.ff-player-expanded__cue-label {
+  font-family: var(--ff-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--ff-text-mid);
+  white-space: nowrap;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+
+.ff-player-expanded__cue-marker {
+  width: 1px;
+  height: 6px;
+  background-color: var(--ff-text-mid);
+}
+
+/* 3. Waveform */
+.ff-player-expanded__waveform {
+  height: 120px;
+  background-color: var(--ff-elev);
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--ff-muted) 0px,
+    var(--ff-muted) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  border-radius: var(--ff-radius-sm);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ff-player-expanded__waveform-playhead {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background-color: var(--ff-text);
+  pointer-events: none;
+}
+
+/* 4. Beat Grid */
+.ff-player-expanded__beat-grid {
+  height: 14px;
+  position: relative;
+  background-color: transparent;
+  border-top: 1px solid var(--ff-border);
+  box-sizing: border-box;
+}
+
+.ff-player-expanded__beat-tick {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 4px;
+  background-color: var(--ff-border);
+}
+
+.ff-player-expanded__beat-tick--bar {
+  height: 10px;
+  background-color: var(--ff-faint);
+}
+
+.ff-player-expanded__bar-num {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  font-family: var(--ff-font-mono);
+  font-size: 8.5px;
+  color: var(--ff-faint);
+  line-height: 1;
+}
+
+/* 5. Controls */
+.ff-player-expanded__controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--ff-border);
+  margin-top: 6px;
+  box-sizing: border-box;
+}
+
+.ff-player-expanded__time-display {
+  font-family: var(--ff-font-mono);
+  font-size: 11px;
+  color: var(--ff-text-mid);
+}
+
+.ff-player-expanded__center-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ff-player-expanded__nudge-placeholder {
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  color: var(--ff-muted);
+  padding: 0 4px;
+}
+
+.ff-player-expanded__control-btn {
+  height: 22px;
+  background: transparent;
+  border: none;
+  padding: 0 var(--ff-space-3);
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-small);
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  color: var(--ff-muted);
+  border-radius: var(--ff-radius-sm);
+  transition: background-color var(--ff-motion-fast) var(--ff-easing), color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-player-expanded__control-btn:hover {
+  background-color: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-player-expanded__add-cue-btn {
+  height: 24px;
+  border: 1px solid var(--ff-border-hi);
+  background: transparent;
+  color: var(--ff-text);
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-caption);
+  font-weight: 500;
+  border-radius: var(--ff-radius-sm);
+  padding: 0 10px;
+  cursor: pointer;
+  outline: none;
+  transition: background-color var(--ff-motion-fast) var(--ff-easing), border-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-player-expanded__add-cue-btn:hover {
+  background-color: var(--ff-elev-hi);
+  border-color: var(--ff-border-hover);
+}

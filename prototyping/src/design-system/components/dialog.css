@@ -1,0 +1,114 @@
+.ff-dialog-wrapper {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.ff-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(1px);
+}
+
+.ff-dialog {
+  position: relative;
+  min-width: 340px;
+  max-width: 440px;
+  padding: 20px 22px;
+  background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-xl);
+  box-shadow: var(--ff-shadow-dialog);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 1001;
+  box-sizing: border-box;
+}
+
+.ff-dialog__title {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-h2);
+  font-weight: 500;
+  color: var(--ff-text);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.ff-dialog__body {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-caption);
+  color: var(--ff-text-mid);
+  line-height: 1.5;
+}
+
+.ff-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+/* Actions base button styling */
+.ff-dialog__action {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--ff-space-5);
+  border: 1px solid transparent;
+  border-radius: var(--ff-radius-md);
+  background: transparent;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  font-weight: 500;
+  color: var(--ff-text);
+  cursor: pointer;
+  outline: none;
+  transition:
+    background var(--ff-motion-fast) var(--ff-easing),
+    border-color var(--ff-motion-fast) var(--ff-easing),
+    color var(--ff-motion-fast) var(--ff-easing);
+}
+
+/* primary — solid accent */
+.ff-dialog__action--primary {
+  background: var(--ff-accent);
+  color: var(--ff-bg);
+}
+.ff-dialog__action--primary:hover {
+  background: var(--ff-accent-hi);
+}
+
+/* default — outline */
+.ff-dialog__action--default {
+  border-color: var(--ff-border-hi);
+  color: var(--ff-text);
+}
+.ff-dialog__action--default:hover {
+  background: var(--ff-elev-hi);
+  border-color: var(--ff-border-hover);
+}
+
+/* ghost — text only */
+.ff-dialog__action--ghost {
+  color: var(--ff-muted);
+}
+.ff-dialog__action--ghost:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+/* destructive */
+.ff-dialog__action--destructive {
+  border-color: var(--ff-danger-border);
+  color: var(--ff-danger);
+}
+.ff-dialog__action--destructive:hover {
+  background: var(--ff-danger-bg);
+  border-color: var(--ff-danger-border-hi);
+}

@@ -1,0 +1,97 @@
+/* 1. tag-chip */
+.ff-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px 2px 4px;
+  background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  color: var(--ff-text-mid);
+  font-family: var(--ff-font);
+  font-size: 11px;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.ff-tag-chip__digit {
+  width: 14px;
+  height: 14px;
+  background-color: var(--ff-bg);
+  color: var(--ff-text);
+  font-family: var(--ff-font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  border-radius: var(--ff-radius-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.ff-tag-chip__name {
+  white-space: nowrap;
+}
+
+/* 2. digit-pill */
+.ff-digit-pill {
+  width: 14px;
+  height: 14px;
+  background-color: var(--ff-elev-hi);
+  color: var(--ff-text-mid);
+  font-family: var(--ff-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  border-radius: var(--ff-radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+/* 3. target-chip */
+.ff-target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 6px;
+  background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  color: var(--ff-text);
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.ff-target-chip__pin {
+  color: var(--ff-text-mid);
+  flex-shrink: 0;
+}
+
+.ff-target-chip__name {
+  font-family: var(--ff-font);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ff-target-chip__close-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ff-muted);
+  cursor: pointer;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-target-chip__close-btn:hover {
+  color: var(--ff-text);
+}

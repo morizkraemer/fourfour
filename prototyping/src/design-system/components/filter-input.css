@@ -1,0 +1,62 @@
+.ff-filter-input {
+  height: 26px;
+  padding: 0 10px;
+  background-color: var(--ff-bg);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ff-filter-input__search-icon {
+  color: var(--ff-faint);
+  flex-shrink: 0;
+}
+
+.ff-filter-input__field {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-row);
+  color: var(--ff-text);
+  padding: 0;
+  margin: 0;
+}
+
+.ff-filter-input__field::placeholder {
+  color: var(--ff-faint);
+}
+
+.ff-filter-input__count {
+  font-family: var(--ff-font-mono);
+  font-size: 10.5px;
+  color: var(--ff-muted);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ff-filter-input__close-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--ff-muted);
+  cursor: pointer;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--ff-motion-fast) var(--ff-easing);
+  user-select: none;
+}
+
+.ff-filter-input__close-btn:hover {
+  color: var(--ff-text);
+}

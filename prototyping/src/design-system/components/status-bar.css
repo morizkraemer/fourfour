@@ -1,0 +1,64 @@
+.ff-status-bar {
+  height: 24px;
+  padding: 0 12px;
+  background-color: var(--ff-bg);
+  border-top: 1px solid var(--ff-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  font-family: var(--ff-font);
+  font-size: 10.5px;
+  color: var(--ff-muted);
+  user-select: none;
+}
+
+.ff-status-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ff-status-bar__spinner {
+  flex-shrink: 0;
+}
+
+.ff-status-bar__message {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-status-bar__separator {
+  color: var(--ff-faint);
+  flex-shrink: 0;
+}
+
+.ff-status-bar__context {
+  color: var(--ff-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-status-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ff-status-bar__progress-wrapper {
+  width: 80px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ff-status-bar__count {
+  font-family: var(--ff-font-mono);
+  color: var(--ff-muted);
+  white-space: nowrap;
+}

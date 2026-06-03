@@ -1,0 +1,99 @@
+.ff-onboarding {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 56px 24px;
+  background-color: var(--ff-bg);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  gap: 14px;
+  max-width: 480px;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  user-select: none;
+}
+
+.ff-onboarding__wordmark {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--ff-text);
+  margin: 0;
+  line-height: 1;
+}
+
+.ff-onboarding__message {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-body);
+  color: var(--ff-text-mid);
+  max-width: 380px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ff-onboarding__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ff-onboarding__btn {
+  height: 28px;
+  padding: 6px 16px;
+  border-radius: var(--ff-radius-md);
+  font-family: var(--ff-font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  outline: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition:
+    background-color var(--ff-motion-fast) var(--ff-easing),
+    border-color var(--ff-motion-fast) var(--ff-easing),
+    color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-onboarding__btn--primary {
+  background-color: var(--ff-accent);
+  color: var(--ff-bg);
+}
+
+.ff-onboarding__btn--primary:hover {
+  background-color: var(--ff-accent-hi);
+}
+
+.ff-onboarding__btn--default {
+  border-color: var(--ff-border-hi);
+  color: var(--ff-text);
+  background: transparent;
+}
+
+.ff-onboarding__btn--default:hover {
+  background-color: var(--ff-elev-hi);
+  border-color: var(--ff-border-hover);
+}
+
+.ff-onboarding__hint {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-small);
+  color: var(--ff-faint);
+  margin-top: 4px;
+}
+
+.ff-onboarding__kbd {
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  background-color: var(--ff-elev-hi);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-xs);
+  color: var(--ff-text-mid);
+  padding: 1px 3px;
+  box-sizing: border-box;
+}

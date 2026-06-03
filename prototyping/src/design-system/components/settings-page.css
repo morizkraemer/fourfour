@@ -1,0 +1,129 @@
+.ff-settings-page {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  min-height: 420px;
+  background-color: var(--ff-bg);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-md);
+  box-sizing: border-box;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Nav */
+.ff-settings-page__nav {
+  padding: 14px 0;
+  border-right: 1px solid var(--ff-border);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.ff-settings-page__nav-head {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label-sm);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ff-faint);
+  padding: 8px 16px 4px;
+}
+
+.ff-settings-page__nav-item {
+  padding: 7px 16px;
+  font-family: var(--ff-font);
+  font-size: 12.5px;
+  color: var(--ff-text-mid);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition:
+    background-color var(--ff-motion-fast) var(--ff-easing),
+    color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-settings-page__nav-item:hover {
+  background-color: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-settings-page__nav-item--active {
+  background-color: var(--ff-select);
+  color: var(--ff-text);
+}
+
+/* Pane */
+.ff-settings-page__pane {
+  padding: 22px 28px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+/* Tab panes toggling */
+.ff-settings-page__pane-tab-content {
+  display: none;
+  flex-direction: column;
+}
+
+.ff-settings-page__pane-tab-content--active {
+  display: flex;
+}
+
+.ff-settings-page__pane-heading {
+  font-family: var(--ff-font);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ff-text);
+  margin: 0;
+}
+
+.ff-settings-page__pane-sub {
+  font-family: var(--ff-font);
+  font-size: 12px;
+  color: var(--ff-muted);
+  margin: 4px 0 18px 0;
+}
+
+.ff-settings-page__fields-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Field Row Layout */
+.ff-settings-page__field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--ff-border);
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.ff-settings-page__field:first-child {
+  border-top: 1px solid var(--ff-border);
+}
+
+.ff-settings-page__field-texts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ff-settings-page__field-label {
+  font-family: var(--ff-font);
+  font-size: 12.5px;
+  color: var(--ff-text);
+}
+
+.ff-settings-page__field-desc {
+  font-family: var(--ff-font);
+  font-size: 11.5px;
+  color: var(--ff-muted);
+}
+
+.ff-settings-page__field-control {
+  align-self: center;
+  justify-self: end;
+}

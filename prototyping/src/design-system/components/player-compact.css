@@ -1,0 +1,126 @@
+.ff-player-compact {
+  padding: 10px 14px;
+  background-color: var(--ff-bg);
+  border-top: 1px solid var(--ff-border);
+  display: grid;
+  grid-template-columns: 40px 28px 1fr;
+  gap: 12px;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.ff-player-compact__art {
+  width: 40px;
+  height: 40px;
+  background-color: var(--ff-elev);
+  border-radius: var(--ff-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.ff-player-compact__art-icon {
+  color: var(--ff-faint);
+}
+
+.ff-player-compact__play-btn {
+  width: 28px;
+  height: 28px;
+  background-color: var(--ff-accent);
+  color: var(--ff-bg);
+  border: none;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: background-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-player-compact__play-btn:hover {
+  background-color: var(--ff-accent-hi);
+}
+
+.ff-player-compact__content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ff-player-compact__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ff-player-compact__title {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  font-weight: 500;
+  color: var(--ff-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.ff-player-compact__artist {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-small);
+  color: var(--ff-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-player-compact__waveform {
+  height: 28px;
+  background-color: var(--ff-elev);
+  /* fake waveform gradient */
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--ff-muted) 0px,
+    var(--ff-muted) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  border-radius: var(--ff-radius-xs);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ff-player-compact__waveform-played {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.ff-player-compact__waveform-playhead {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background-color: var(--ff-accent);
+  pointer-events: none;
+}
+
+.ff-player-compact__times {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label);
+  color: var(--ff-faint);
+  line-height: 1;
+}

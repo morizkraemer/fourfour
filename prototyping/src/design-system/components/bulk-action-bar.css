@@ -1,0 +1,98 @@
+.ff-bulk-bar {
+  padding: 8px 14px;
+  background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.ff-bulk-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ff-bulk-bar__count {
+  font-family: var(--ff-font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ff-text);
+}
+
+.ff-bulk-bar__separator {
+  color: var(--ff-faint);
+}
+
+.ff-bulk-bar__summary {
+  font-family: var(--ff-font);
+  font-size: 12px;
+  color: var(--ff-text-mid);
+}
+
+.ff-bulk-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Bulk Actions */
+.ff-bulk-bar__action {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-caption);
+  font-weight: 500;
+  cursor: pointer;
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    background-color var(--ff-motion-fast) var(--ff-easing),
+    border-color var(--ff-motion-fast) var(--ff-easing),
+    color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-bulk-bar__action--ghost {
+  color: var(--ff-muted);
+  padding: 0 var(--ff-space-3);
+  border-radius: var(--ff-radius-sm);
+}
+
+.ff-bulk-bar__action--ghost:hover {
+  background-color: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-bulk-bar__action--default {
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  padding: 0 10px;
+  color: var(--ff-text);
+}
+
+.ff-bulk-bar__action--default:hover {
+  background-color: var(--ff-elev-hi);
+  border-color: var(--ff-border-hover);
+}
+
+.ff-bulk-bar__esc-kbd {
+  font-family: var(--ff-font-mono);
+  font-size: 9.5px;
+  background-color: var(--ff-elev-hi);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-xs);
+  color: var(--ff-text-mid);
+  padding: 1px 3px;
+  box-sizing: border-box;
+  line-height: 1;
+}

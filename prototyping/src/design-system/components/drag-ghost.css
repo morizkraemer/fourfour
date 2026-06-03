@@ -1,0 +1,94 @@
+/* 1. drag-ghost */
+.ff-drag-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-md);
+  box-shadow: var(--ff-shadow-toast);
+  white-space: nowrap;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  color: var(--ff-text);
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.ff-drag-ghost__badge {
+  min-width: 18px;
+  height: 18px;
+  background-color: var(--ff-accent);
+  color: var(--ff-bg);
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: var(--ff-radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+
+.ff-drag-ghost__label {
+  line-height: 1;
+}
+
+/* 2. drop-line */
+.ff-drop-line {
+  position: relative;
+  height: 1px;
+  width: 100%;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+.ff-drop-line__line {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  right: 0;
+  height: 1px;
+  background-color: var(--ff-accent);
+}
+
+.ff-drop-line__marker {
+  position: absolute;
+  top: -2.5px;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--ff-accent);
+  box-sizing: border-box;
+}
+
+/* 3. drop-overlay */
+.ff-drop-overlay {
+  padding: 32px;
+  border-radius: var(--ff-radius-xl);
+  background-color: var(--ff-surface);
+  border: 1.5px dashed rgba(255, 255, 255, 0.2);
+  text-align: center;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+
+.ff-drop-overlay__title {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-h2);
+  font-weight: 500;
+  color: var(--ff-text);
+}
+
+.ff-drop-overlay__sub {
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-caption);
+  color: var(--ff-text-mid);
+}

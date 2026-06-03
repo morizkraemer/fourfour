@@ -1,0 +1,59 @@
+.ff-nudge {
+  height: 22px;
+  background-color: var(--ff-bg);
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  user-select: none;
+}
+
+.ff-nudge__btn {
+  width: 22px;
+  height: 20px; /* adjusted to account for 1px top/bottom border */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--ff-muted);
+  cursor: pointer;
+  font-family: var(--ff-font);
+  font-size: 13px;
+  line-height: 1;
+  outline: none;
+  box-sizing: border-box;
+  transition:
+    background-color var(--ff-motion-fast) var(--ff-easing),
+    color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-nudge__btn:hover {
+  background-color: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-nudge__btn--dec {
+  border-right: 1px solid var(--ff-border-hi);
+}
+
+.ff-nudge__value {
+  padding: 0 8px;
+  font-family: var(--ff-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ff-text);
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  border-right: 1px solid var(--ff-border-hi);
+  box-sizing: border-box;
+}
