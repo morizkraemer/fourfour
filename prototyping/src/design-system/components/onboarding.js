@@ -1,5 +1,6 @@
 import './onboarding.css';
 import { el } from '../utils/dom.js';
+import { createButton } from './button.js';
 
 /**
  * @param {object} options
@@ -13,15 +14,17 @@ export function createOnboarding({ onImport, onOpenFolder } = {}) {
     'Import your music library, curate playlists, and sync to Pioneer CDJ-compatible USB drives — all without Rekordbox.'
   ]);
 
-  const importBtn = el('button', {
-    class: 'ff-onboarding__btn ff-onboarding__btn--primary',
+  const { element: importBtn } = createButton({
+    label: 'Import Library',
+    variant: 'primary',
     onClick: onImport
-  }, ['Import Library']);
+  });
 
-  const openFolderBtn = el('button', {
-    class: 'ff-onboarding__btn ff-onboarding__btn--default',
+  const { element: openFolderBtn } = createButton({
+    label: 'Open Folder…',
+    variant: 'default',
     onClick: onOpenFolder
-  }, ['Open Folder…']);
+  });
 
   const actions = el('div', { class: 'ff-onboarding__actions' }, [importBtn, openFolderBtn]);
 

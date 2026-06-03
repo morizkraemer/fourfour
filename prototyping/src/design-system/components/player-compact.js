@@ -1,5 +1,6 @@
 import './player-compact.css';
 import { el } from '../utils/dom.js';
+import { createNudge } from './nudge.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -102,24 +103,13 @@ export function createPlayerCompact({
     el('span', { class: 'ff-player-compact__meta-artist' }, [artist])
   ]);
 
-  // BPM nudge (17px height)
-  const bpmN = el('div', { class: 'ff-player-compact__bpm-nudge' }, [
-    el('button', {
-      class: 'ff-player-compact__nudge-btn',
-      onClick: (e) => {
-        e.stopPropagation();
-        if (typeof onBpmChange === 'function') onBpmChange('decrement');
-      }
-    }, ['−']),
-    el('span', { class: 'ff-player-compact__nudge-value' }, [String(bpm)]),
-    el('button', {
-      class: 'ff-player-compact__nudge-btn',
-      onClick: (e) => {
-        e.stopPropagation();
-        if (typeof onBpmChange === 'function') onBpmChange('increment');
-      }
-    }, ['+'])
-  ]);
+  // BPM nudge (17px height compact variant)
+  const { element: bpmN } = createNudge({
+    value: bpm,
+    label: 'BPM',
+    onChange: onBpmChange,
+    variant: 'compact'
+  });
 
   // Key display (17px height)
   const keyN = el('div', { class: 'ff-player-compact__key-display' }, [

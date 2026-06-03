@@ -57,3 +57,45 @@
   border-right: 1px solid var(--ff-border-hi);
   box-sizing: border-box;
 }
+
+/* Compact variant (17px height for player-compact) */
+.ff-nudge--compact {
+  height: 17px;
+  border-color: rgba(255, 255, 255, 0.12); /* stroke: #FFFFFF1F */
+}
+
+.ff-nudge--compact .ff-nudge__btn {
+  height: 15px;
+  font-size: 11px;
+}
+
+.ff-nudge--compact .ff-nudge__btn--dec {
+  border-right: 1px solid rgba(255, 255, 255, 0.06); /* stroke: #FFFFFF0F */
+}
+
+.ff-nudge--compact .ff-nudge__value {
+  padding: 0 8px;
+  font-size: 9px;
+  min-width: unset;
+  border-right: 1px solid rgba(255, 255, 255, 0.06); /* stroke: #FFFFFF0F */
+}
+
+/* Large variant (28px height to match standard buttons) */
+.ff-nudge--large {
+  height: 28px;
+}
+
+.ff-nudge--large .ff-nudge__btn {
+  height: 26px; /* account for 1px top/bottom border */
+  font-size: 14px;
+}
+
+.ff-nudge--large .ff-nudge__btn--dec {
+  border-right: 1px solid var(--ff-border-hi);
+}
+
+.ff-nudge--large .ff-nudge__value {
+  font-size: 12px;
+  min-width: 46px;
+  border-right: 1px solid var(--ff-border-hi);
+}

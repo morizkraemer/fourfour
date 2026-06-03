@@ -133,57 +133,6 @@
   flex-shrink: 0;
 }
 
-/* BPM nudge (height: 17px) */
-.ff-player-compact__bpm-nudge {
-  height: 17px;
-  background-color: var(--ff-bg);
-  border: 1px solid rgba(255, 255, 255, 0.12); /* stroke: #FFFFFF1F */
-  border-radius: var(--ff-radius-sm);
-  display: inline-flex;
-  align-items: center;
-  overflow: hidden;
-  box-sizing: border-box;
-}
-
-.ff-player-compact__nudge-btn {
-  width: 22px;
-  height: 15px; /* height 100% inside border */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  padding: 0;
-  margin: 0;
-  color: var(--ff-muted); /* fill: #6a6a6a */
-  cursor: pointer;
-  font-family: var(--ff-font);
-  font-size: 12px;
-  line-height: 1;
-  outline: none;
-  box-sizing: border-box;
-}
-
-.ff-player-compact__nudge-btn:hover {
-  background-color: var(--ff-hover);
-  color: var(--ff-text);
-}
-
-.ff-player-compact__nudge-value {
-  padding: 0 8px;
-  font-family: var(--ff-font-mono);
-  font-size: 9px; /* size: 9 */
-  font-weight: 500;
-  color: var(--ff-text); /* fill: #ededed */
-  border-left: 1px solid rgba(255, 255, 255, 0.06); /* stroke: #FFFFFF0F */
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  box-sizing: border-box;
-  white-space: nowrap;
-}
 
 /* Key display (height: 17px) */
 .ff-player-compact__key-display {

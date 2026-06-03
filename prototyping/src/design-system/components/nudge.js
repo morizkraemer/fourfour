@@ -7,7 +7,7 @@ import { el } from '../utils/dom.js';
  * @param {string} [options.label]           – aria-label / tooltip label
  * @param {function} [options.onChange]       – returns 'decrement' or 'increment'
  */
-export function createNudge({ value, label = '', onChange } = {}) {
+export function createNudge({ value, label = '', onChange, variant = 'default' } = {}) {
   const decBtn = el('button', {
     class: 'ff-nudge__btn ff-nudge__btn--dec',
     title: label ? `Decrease ${label}` : 'Decrease',
@@ -31,7 +31,7 @@ export function createNudge({ value, label = '', onChange } = {}) {
   }, ['+']);
 
   const element = el('div', {
-    class: 'ff-nudge',
+    class: `ff-nudge ${variant === 'compact' ? 'ff-nudge--compact' : ''} ${variant === 'large' ? 'ff-nudge--large' : ''}`,
     'aria-label': label
   }, [decBtn, valEl, incBtn]);
 

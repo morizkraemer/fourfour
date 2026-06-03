@@ -1,5 +1,7 @@
 import './player-expanded.css';
 import { el } from '../utils/dom.js';
+import { createButton } from './button.js';
+import { createNudge } from './nudge.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -13,31 +15,21 @@ function createPlayIcon() {
   return svg;
 }
 
-function createChevronDownIcon() {
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('width', '14');
-  svg.setAttribute('height', '14');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '2');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  svg.innerHTML = '<polyline points="6 9 12 15 18 9" />';
-  return svg;
-}
-
 /**
  * @param {object} options
  * @param {string} options.title
  * @param {string} options.artist
- * @param {string} options.bpm
+ * @param {string|number} options.bpm
  * @param {string} options.key
- * @param {string} options.time
- * @param {Array<{ name: string, position: number }>} [options.cues]
+ * @param {string} options.time                – time string like "2:14 / 5:42"
+ * @param {Array<{ color: string, position: number }>} [options.cues]
  * @param {function} [options.onSave]
- * @param {function} [options.onDiscard]
- * @param {function} [options.onClose]
+ * @param {function} [options.onBpmChange]
+ * @param {function} [options.onKeyChange]
+ * @param {function} [options.onHalf]
+ * @param {function} [options.onDouble]
+ * @param {function} [options.onSetFirstBeat]
+ * @param {function} [options.onAddCue]
  */
 export function createPlayerExpanded({
   title,
@@ -47,79 +39,81 @@ export function createPlayerExpanded({
   time,
   cues = [],
   onSave,
-  onDiscard,
-  onClose
+  onBpmChange,
+  onKeyChange,
+  onHalf,
+  onDouble,
+  onSetFirstBeat,
+  onAddCue
 } = {}) {
   // 1. Head Row
   const playIcon = createPlayIcon();
   const playBtn = el('button', { class: 'ff-player-expanded__play-btn' }, [playIcon]);
 
-  const titleEl = el('span', { class: 'ff-player-expanded__title' }, [title]);
-  const artistEl = el('span', { class: 'ff-player-expanded__artist' }, [artist]);
+  const titleGroup = el('div', { class: 'ff-player-expanded__title-group' }, [
+    el('span', { class: 'ff-player-expanded__meta-title' }, [title]),
+    el('span', { class: 'ff-player-expanded__meta-artist' }, [artist])
+  ]);
 
-  const bpmPill = el('div', { class: 'ff-player-expanded__meta-pill' }, [bpm]);
-  const keyPill = el('div', { class: 'ff-player-expanded__meta-pill' }, [key]);
-  const timePill = el('div', { class: 'ff-player-expanded__meta-pill' }, [time]);
+  const bpmPill = el('div', { class: 'ff-player-expanded__meta-pill' }, [
+    el('span', { class: 'ff-player-expanded__meta-pill-text' }, [String(bpm)])
+  ]);
+  const keyPill = el('div', { class: 'ff-player-expanded__meta-pill' }, [
+    el('span', { class: 'ff-player-expanded__meta-pill-text' }, [key])
+  ]);
+  const timePill = el('div', { class: 'ff-player-expanded__meta-pill' }, [
+    el('span', { class: 'ff-player-expanded__meta-pill-text' }, [time.split('/')[1]?.trim() || time])
+  ]);
+
   const pills = el('div', { class: 'ff-player-expanded__meta-pills' }, [bpmPill, keyPill, timePill]);
 
-  const leftHead = el('div', { class: 'ff-player-expanded__head-left' }, [
+  const pxhLeft = el('div', { class: 'ff-player-expanded__head-left' }, [
     playBtn,
-    titleEl,
-    artistEl,
+    titleGroup,
     pills
   ]);
 
-  const saveBtn = el('button', {
-    class: 'ff-player-expanded__action-btn ff-player-expanded__action-btn--ghost',
+  // Segmented control color/mono
+  const segColor = el('div', { class: 'ff-player-expanded__seg-item ff-player-expanded__seg-item--active' }, ['Color']);
+  const segMono = el('div', { class: 'ff-player-expanded__seg-item' }, ['Mono']);
+  const seg = el('div', { class: 'ff-player-expanded__seg' }, [segColor, segMono]);
+
+  const { element: saveBtn } = createButton({
+    label: 'Save edits',
+    variant: 'ghost',
     onClick: onSave
-  }, ['Save']);
-
-  const discardBtn = el('button', {
-    class: 'ff-player-expanded__action-btn ff-player-expanded__action-btn--ghost',
-    onClick: onDiscard
-  }, ['Discard']);
-
-  const chevron = createChevronDownIcon();
-  chevron.classList.add('ff-player-expanded__chevron');
-  const closeBtn = el('button', {
-    class: 'ff-player-expanded__close-btn',
-    onClick: onClose
-  }, [chevron]);
-
-  const rightHead = el('div', { class: 'ff-player-expanded__head-right' }, [
-    saveBtn,
-    discardBtn,
-    closeBtn
-  ]);
-
-  const headRow = el('div', { class: 'ff-player-expanded__head' }, [leftHead, rightHead]);
-
-  // 2. Cuestrip
-  const defaultCues = cues.length > 0 ? cues : [
-    { name: 'A', position: 10 },
-    { name: 'B', position: 35 },
-    { name: 'C', position: 60 },
-    { name: 'D', position: 85 },
-  ];
-
-  const cueMarkers = defaultCues.map(cue => {
-    const marker = el('div', { class: 'ff-player-expanded__cue-marker' });
-    const label = el('span', { class: 'ff-player-expanded__cue-label' }, [cue.name]);
-    return el('div', {
-      class: 'ff-player-expanded__cue',
-      style: `left: ${cue.position}%`
-    }, [label, marker]);
   });
 
-  const cuestrip = el('div', { class: 'ff-player-expanded__cuestrip' }, cueMarkers);
+  const pxhRight = el('div', { class: 'ff-player-expanded__head-right' }, [
+    seg,
+    saveBtn
+  ]);
 
-  // 3. Waveform Region
+  const headRow = el('div', { class: 'ff-player-expanded__head' }, [pxhLeft, pxhRight]);
+
+  // 2. Cuestrip (height: 18px)
+  const defaultCues = cues.length > 0 ? cues : [
+    { color: '#4ade80', position: 10 },
+    { color: '#38bdf8', position: 35 },
+    { color: '#a78bfa', position: 60 },
+    { color: '#f59e0b', position: 85 }
+  ];
+
+  const cueElements = defaultCues.map(cue => {
+    return el('div', {
+      class: 'ff-player-expanded__cue-line',
+      style: `left: ${cue.position}%; background-color: ${cue.color}`
+    });
+  });
+
+  const cuestrip = el('div', { class: 'ff-player-expanded__cuestrip' }, cueElements);
+
+  // 3. Waveform (height: 120px)
   const playhead = el('div', { class: 'ff-player-expanded__waveform-playhead', style: 'left: 30%' });
   const waveform = el('div', { class: 'ff-player-expanded__waveform' }, [playhead]);
 
-  // 4. Beat Grid
+  // 4. Beat Grid (height: 14px)
   const beatGridChildren = [];
-  // Fake beats: generate taller and smaller ticks
   for (let i = 0; i <= 64; i++) {
     const leftPct = (i / 64) * 100;
     const isBar = i % 4 === 0;
@@ -145,24 +139,58 @@ export function createPlayerExpanded({
   }
   const beatGrid = el('div', { class: 'ff-player-expanded__beat-grid' }, beatGridChildren);
 
-  // 5. Controls Row
+  // 5. Controls Row (ctrl)
   const timeDisplay = el('span', { class: 'ff-player-expanded__time-display' }, [time]);
 
-  const bpmNudge = el('span', { class: 'ff-player-expanded__nudge-placeholder' }, ['BPM −/+']);
-  const keyNudge = el('span', { class: 'ff-player-expanded__nudge-placeholder' }, ['Key −/+']);
-  const halfBtn = el('button', { class: 'ff-player-expanded__control-btn' }, ['½×']);
-  const doubleBtn = el('button', { class: 'ff-player-expanded__control-btn' }, ['2×']);
-  const setBeatBtn = el('button', { class: 'ff-player-expanded__control-btn' }, ['Set first beat']);
+  // BPM nudge (using design system nudge primitive, large 28px variant)
+  const { element: bpmN } = createNudge({
+    value: bpm,
+    label: 'BPM',
+    onChange: onBpmChange,
+    variant: 'large'
+  });
+
+  // Key nudge (using design system nudge primitive, large 28px variant)
+  const { element: keyN } = createNudge({
+    value: key,
+    label: 'KEY',
+    onChange: onKeyChange,
+    variant: 'large'
+  });
+
+  const { element: halfBtn } = createButton({
+    label: '½×',
+    variant: 'ghost',
+    onClick: onHalf
+  });
+
+  const { element: doubleBtn } = createButton({
+    label: '2×',
+    variant: 'ghost',
+    onClick: onDouble
+  });
+
+  const { element: setBeatBtn } = createButton({
+    label: 'Set first beat',
+    variant: 'ghost',
+    onClick: onSetFirstBeat
+  });
 
   const centerControls = el('div', { class: 'ff-player-expanded__center-controls' }, [
-    bpmNudge,
-    keyNudge,
+    el('span', { class: 'ff-player-expanded__nudge-label' }, ['BPM']),
+    bpmN,
+    el('span', { class: 'ff-player-expanded__nudge-label' }, ['KEY']),
+    keyN,
     halfBtn,
     doubleBtn,
     setBeatBtn
   ]);
 
-  const addCueBtn = el('button', { class: 'ff-player-expanded__add-cue-btn' }, ['Add cue']);
+  const { element: addCueBtn } = createButton({
+    label: 'Add cue',
+    variant: 'default',
+    onClick: onAddCue
+  });
 
   const controlsRow = el('div', { class: 'ff-player-expanded__controls' }, [
     timeDisplay,
