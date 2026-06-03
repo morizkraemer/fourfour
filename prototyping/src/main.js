@@ -33,7 +33,6 @@ document.body.appendChild(pinSidebar.element);
 // Instantiate central canvas
 const canvas = createCanvas({
   viewport: document.getElementById('viewport'),
-  world: document.getElementById('world'),
   documentStore,
   pinSidebar,
   registry,
@@ -206,3 +205,8 @@ documentStore.subscribe((state) => {
 const initialState = documentStore.get();
 canvas.render(initialState);
 sidebar.render(buildSidebarModel(initialState));
+
+// Resolve card overlaps on reload after layout finishes rendering
+setTimeout(() => {
+  documentStore.resolveOverlaps();
+}, 200);

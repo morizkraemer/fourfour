@@ -129,6 +129,9 @@ function normalizeArtboard(id, artboard, projectIds) {
       x: Number.isFinite(artboard?.position?.x) ? artboard.position.x : 24,
       y: Number.isFinite(artboard?.position?.y) ? artboard.position.y : 48,
     },
+    size: artboard?.size && Number.isFinite(artboard.size.width) && Number.isFinite(artboard.size.height)
+      ? { width: artboard.size.width, height: artboard.size.height }
+      : null,
     archived: Boolean(artboard?.archived),
     pinned: Boolean(artboard?.pinned),
     sidebarOrder: Number.isFinite(artboard?.sidebarOrder) ? artboard.sidebarOrder : 0,
@@ -233,6 +236,7 @@ function syncRegistry(doc, registry) {
         displayName: null,
         projectId,
         position: getAutoPosition(doc, projectId),
+        size: null,
         archived: false,
         pinned: false,
         sidebarOrder: getProjectArtboardCount(doc, projectId),
@@ -261,6 +265,7 @@ function syncRegistry(doc, registry) {
   ensureSinglePin(doc);
   ensureVisibleRegistryArtboards(doc, registry);
   reflowLegacyDenseGrid(doc, registry);
+  resolveAllOverlaps(doc);
   return doc;
 }
 
@@ -298,6 +303,79 @@ function reflowLegacyDenseGrid(doc, registry) {
         y: ARTBOARD_BASE_Y + row * ARTBOARD_ROW_SPACING,
       };
       doc.artboards[id].sidebarOrder = index;
+    });
+  });
+}
+
+export function resolveAllOverlaps(doc) {
+  const GAP = 24;
+
+  doc.projects.forEach((project) => {
+    const ids = Object.keys(doc.artboards).filter((id) => {
+      const artboard = doc.artboards[id];
+      return artboard.projectId === project.id && !artboard.archived && !artboard.orphaned;
+    });
+
+    // Sort by coordinate flow (top-to-bottom, left-to-right) so top-left items act as anchors
+    ids.sort((a, b) => {
+      const posA = doc.artboards[a].position;
+      const posB = doc.artboards[b].position;
+      if (posA.y !== posB.y) return posA.y - posB.y;
+      return posA.x - posB.x;
+    });
+
+    const positionedRects = [];
+
+    ids.forEach((id) => {
+      const artboard = doc.artboards[id];
+      const size = artboard.size || { width: 320, height: 260 };
+      
+      let x = artboard.position.x;
+      let y = artboard.position.y;
+      let w = size.width;
+      let h = size.height;
+
+      let hasOverlap = true;
+      let iterations = 0;
+      while (hasOverlap && iterations < 100) {
+        hasOverlap = false;
+        const rectB = { left: x, top: y, right: x + w, bottom: y + h };
+
+        for (const rectA of positionedRects) {
+          const intersects = rectA.left < rectB.right &&
+                             rectA.right > rectB.left &&
+                             rectA.top < rectB.bottom &&
+                             rectA.bottom > rectB.top;
+          
+          if (intersects) {
+            hasOverlap = true;
+            const shiftRight = rectA.right + GAP - rectB.left;
+            const shiftDown = rectA.bottom + GAP - rectB.top;
+
+            if (shiftRight < shiftDown) {
+              x += shiftRight;
+            } else {
+              y += shiftDown;
+            }
+            x = Math.round(x / 8) * 8;
+            y = Math.round(y / 8) * 8;
+            break;
+          }
+        }
+        iterations++;
+      }
+
+      positionedRects.push({
+        id,
+        left: x,
+        top: y,
+        right: x + w,
+        bottom: y + h
+      });
+
+      if (x !== artboard.position.x || y !== artboard.position.y) {
+        artboard.position = { x, y };
+      }
     });
   });
 }
@@ -395,6 +473,11 @@ export function createDocumentStore(initialDoc) {
         });
       });
       return id;
+    },
+    resolveOverlaps() {
+      mutate((draft) => {
+        resolveAllOverlaps(draft);
+      });
     },
   };
 }

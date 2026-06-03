@@ -69,3 +69,40 @@
   opacity: 0.4;
   pointer-events: none;
 }
+
+/* compact size — height: 17px */
+.ff-btn--compact {
+  height: 17px;
+  padding: 0 var(--ff-space-3); /* 6px padding */
+  font-size: 11px;
+  border-radius: var(--ff-radius-sm); /* 3px */
+  gap: var(--ff-space-2);
+}
+
+/* icon-only compact button */
+.ff-btn--compact.ff-btn--icon {
+  width: 17px;
+  padding: 0;
+}
+
+/* small size — height: 24px, matches panel-header and bulk-action-bar height */
+.ff-btn--small {
+  height: 24px;
+  padding: 0 var(--ff-space-4); /* 8px padding */
+  font-size: var(--ff-type-small); /* 11px */
+  border-radius: var(--ff-radius-sm); /* 3px */
+  gap: var(--ff-space-2);
+}
+
+/* icon-only small button */
+.ff-btn--small.ff-btn--icon {
+  width: 24px;
+  padding: 0;
+}
+
+/* Trailing keyboard shortcuts styling when nested inside primary buttons */
+.ff-btn--primary .ff-kbd {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(0, 0, 0, 0.15);
+  color: var(--ff-bg); /* Invert text color to match main button fg */
+}

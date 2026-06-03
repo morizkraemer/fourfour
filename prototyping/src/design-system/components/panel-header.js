@@ -1,6 +1,6 @@
 import './panel-header.css';
 import { el } from '../utils/dom.js';
-import { createIcon } from './icon.js';
+import { createButton } from './button.js';
 
 /**
  * @param {object} options
@@ -39,23 +39,13 @@ export function createPanelHeader({
   if (variant !== 'filtering') {
     actions.forEach(action => {
       const btnVariant = action.variant || 'default';
-      const actionChildren = [];
-
-      if (action.icon) {
-        const { element: iconEl } = createIcon({ name: action.icon, size: 13 });
-        iconEl.classList.add('ff-panel-header__action-icon');
-        actionChildren.push(iconEl);
-      }
-
-      actionChildren.push(el('span', {}, [action.label]));
-
-      const btn = el('button', {
-        class: `ff-panel-header__action ff-panel-header__action--${btnVariant}`,
-        onClick: (e) => {
-          if (typeof action.onClick === 'function') action.onClick(e);
-        }
-      }, actionChildren);
-
+      const { element: btn } = createButton({
+        label: action.label,
+        variant: btnVariant,
+        icon: action.icon,
+        size: 'small',
+        onClick: action.onClick
+      });
       rightChildren.push(btn);
     });
   }

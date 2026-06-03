@@ -5,7 +5,7 @@
   border-left: 1px solid var(--ff-border);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px; /* matched to .pen file gap of 10 */
   box-sizing: border-box;
   overflow-y: auto;
   user-select: none;
@@ -43,10 +43,10 @@
   margin: 4px 0 0;
 }
 
-/* Art Placeholder */
-.ff-detail-pane__art {
-  aspect-ratio: 1 / 1;
+/* Cover (height: 292px) */
+.ff-detail-pane__cover {
   width: 100%;
+  height: 292px;
   background-color: var(--ff-elev);
   border-radius: var(--ff-radius-sm);
   display: flex;
@@ -56,7 +56,7 @@
   box-sizing: border-box;
 }
 
-.ff-detail-pane__art--missing {
+.ff-detail-pane__cover--missing {
   opacity: 0.5;
 }
 
@@ -73,7 +73,7 @@
 
 .ff-detail-pane__title {
   font-family: var(--ff-font);
-  font-size: var(--ff-type-h2);
+  font-size: 14px;
   font-weight: 500;
   color: var(--ff-text);
   margin: 0;
@@ -82,7 +82,7 @@
 
 .ff-detail-pane__artist {
   font-family: var(--ff-font);
-  font-size: var(--ff-type-caption);
+  font-size: 11.5px;
   color: var(--ff-text-mid);
   margin: 0;
 }
@@ -104,9 +104,9 @@
   display: grid;
   grid-template-columns: 96px 1fr;
   gap: 6px 12px;
-  align-items: baseline;
+  align-items: center;
   margin: 0;
-  padding: 0;
+  padding: 6px 0;
 }
 
 .ff-detail-pane__dt {
@@ -121,7 +121,7 @@
 
 .ff-detail-pane__dd {
   font-family: var(--ff-font);
-  font-size: var(--ff-type-compact);
+  font-size: 12px;
   color: var(--ff-text);
   margin: 0;
   white-space: nowrap;
@@ -148,21 +148,27 @@
   margin-bottom: 8px;
 }
 
-/* Cues Section */
-.ff-detail-pane__cues-section {
-  display: flex;
-  flex-direction: column;
-  margin-top: 8px;
-}
-
+/* Section Title */
 .ff-detail-pane__section-title {
   font-family: var(--ff-font-mono);
-  font-size: var(--ff-type-label-sm);
+  font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ff-faint);
   margin-bottom: 4px;
+}
+
+/* Cues Section */
+.ff-detail-pane__cues-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ff-detail-pane__cues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .ff-detail-pane__cue-item {
@@ -181,11 +187,11 @@
   background-color: var(--ff-hover);
 }
 
+/* Cue square of size 8x8 with 2px border-radius */
 .ff-detail-pane__cue-pip {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background-color: var(--ff-text-mid);
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
   justify-self: center;
 }
 
@@ -200,9 +206,23 @@
 
 .ff-detail-pane__cue-pos {
   font-family: var(--ff-font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--ff-text-mid);
   text-align: right;
+}
+
+/* File Path Section */
+.ff-detail-pane__file-path-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ff-detail-pane__file-path-val {
+  font-family: var(--ff-font-mono);
+  font-size: 11px;
+  color: var(--ff-muted);
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 /* Action Links (Missing Mode) */
@@ -211,7 +231,7 @@
   flex-direction: column;
   gap: 4px;
   margin-top: auto;
-  padding-top: 14px;
+  padding-top: 10px;
   border-top: 1px solid var(--ff-border);
 }
 

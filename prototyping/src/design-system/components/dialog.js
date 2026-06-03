@@ -1,5 +1,6 @@
 import './dialog.css';
 import { el } from '../utils/dom.js';
+import { createButton } from './button.js';
 
 /**
  * @param {object} options
@@ -11,12 +12,12 @@ import { el } from '../utils/dom.js';
 export function createDialog({ title, body, actions = [], withBackdrop = true } = {}) {
   const actionElements = actions.map(act => {
     const variant = act.variant || 'default';
-    return el('button', {
-      class: `ff-dialog__action ff-dialog__action--${variant}`,
-      onClick: (e) => {
-        if (typeof act.onClick === 'function') act.onClick(e);
-      }
-    }, [act.label]);
+    const { element: btnEl } = createButton({
+      label: act.label,
+      variant: variant,
+      onClick: act.onClick
+    });
+    return btnEl;
   });
 
   const dialogElement = el('div', { class: 'ff-dialog' }, [

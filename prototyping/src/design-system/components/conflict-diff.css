@@ -43,52 +43,7 @@
   gap: 6px;
 }
 
-/* Actions in conflict diff */
-.ff-conflict-diff__action {
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--ff-space-4);
-  border: 1px solid transparent;
-  border-radius: var(--ff-radius-sm);
-  background: transparent;
-  font-family: var(--ff-font);
-  font-size: var(--ff-type-small);
-  font-weight: 500;
-  color: var(--ff-text);
-  cursor: pointer;
-  outline: none;
-  transition:
-    background var(--ff-motion-fast) var(--ff-easing),
-    border-color var(--ff-motion-fast) var(--ff-easing),
-    color var(--ff-motion-fast) var(--ff-easing);
-}
 
-.ff-conflict-diff__action--primary {
-  background: var(--ff-accent);
-  color: var(--ff-bg);
-}
-.ff-conflict-diff__action--primary:hover {
-  background: var(--ff-accent-hi);
-}
-
-.ff-conflict-diff__action--default {
-  border-color: var(--ff-border-hi);
-  color: var(--ff-text);
-}
-.ff-conflict-diff__action--default:hover {
-  background: var(--ff-elev-hi);
-  border-color: var(--ff-border-hover);
-}
-
-.ff-conflict-diff__action--ghost {
-  color: var(--ff-muted);
-}
-.ff-conflict-diff__action--ghost:hover {
-  background: var(--ff-hover);
-  color: var(--ff-text);
-}
 
 /* Conflict Diff Body & Rows */
 .ff-conflict-diff__body {

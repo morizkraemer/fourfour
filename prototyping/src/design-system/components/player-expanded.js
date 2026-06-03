@@ -2,6 +2,7 @@ import './player-expanded.css';
 import { el } from '../utils/dom.js';
 import { createButton } from './button.js';
 import { createNudge } from './nudge.js';
+import { createSegmentedControl } from './segmented-control.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -73,10 +74,10 @@ export function createPlayerExpanded({
     pills
   ]);
 
-  // Segmented control color/mono
-  const segColor = el('div', { class: 'ff-player-expanded__seg-item ff-player-expanded__seg-item--active' }, ['Color']);
-  const segMono = el('div', { class: 'ff-player-expanded__seg-item' }, ['Mono']);
-  const seg = el('div', { class: 'ff-player-expanded__seg' }, [segColor, segMono]);
+  const { element: seg } = createSegmentedControl({
+    items: ['Color', 'Mono'],
+    activeIndex: 0
+  });
 
   const { element: saveBtn } = createButton({
     label: 'Save edits',
@@ -142,44 +143,49 @@ export function createPlayerExpanded({
   // 5. Controls Row (ctrl)
   const timeDisplay = el('span', { class: 'ff-player-expanded__time-display' }, [time]);
 
-  // BPM nudge (using design system nudge primitive, large 28px variant)
+  // BPM nudge (using design system nudge primitive, compact 17px variant)
   const { element: bpmN } = createNudge({
     value: bpm,
     label: 'BPM',
     onChange: onBpmChange,
-    variant: 'large'
+    variant: 'compact'
   });
 
-  // Key nudge (using design system nudge primitive, large 28px variant)
-  const { element: keyN } = createNudge({
-    value: key,
-    label: 'KEY',
-    onChange: onKeyChange,
-    variant: 'large'
+  // Key toggle button (using design system button primitive, compact 17px variant)
+  const { element: keyN } = createButton({
+    label: key,
+    variant: 'default',
+    size: 'compact',
+    onClick: (e) => {
+      if (e) e.stopPropagation();
+      if (typeof onKeyChange === 'function') onKeyChange();
+    }
   });
+  keyN.classList.add('ff-player-expanded__key-btn');
 
   const { element: halfBtn } = createButton({
     label: '½×',
     variant: 'ghost',
+    size: 'compact',
     onClick: onHalf
   });
 
   const { element: doubleBtn } = createButton({
     label: '2×',
     variant: 'ghost',
+    size: 'compact',
     onClick: onDouble
   });
 
   const { element: setBeatBtn } = createButton({
     label: 'Set first beat',
     variant: 'ghost',
+    size: 'compact',
     onClick: onSetFirstBeat
   });
 
   const centerControls = el('div', { class: 'ff-player-expanded__center-controls' }, [
-    el('span', { class: 'ff-player-expanded__nudge-label' }, ['BPM']),
     bpmN,
-    el('span', { class: 'ff-player-expanded__nudge-label' }, ['KEY']),
     keyN,
     halfBtn,
     doubleBtn,
@@ -189,6 +195,7 @@ export function createPlayerExpanded({
   const { element: addCueBtn } = createButton({
     label: 'Add cue',
     variant: 'default',
+    size: 'compact',
     onClick: onAddCue
   });
 

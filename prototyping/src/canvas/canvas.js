@@ -1,4 +1,6 @@
 import './canvas.css';
+import './sidebar.css';
+import './pin-sidebar.css';
 import Konva from 'konva';
 import { createArtboard } from './artboard.js';
 import { createProjectFrame } from './project-frame.js';
@@ -14,7 +16,7 @@ const ARTBOARD_BASE_Y = 56;
 const ARTBOARD_COL_SPACING = 360;
 const ARTBOARD_ROW_SPACING = 300;
 
-export function createCanvas({ viewport, world, documentStore, pinSidebar, registry, onSelectActiveArtboard }) {
+export function createCanvas({ viewport, documentStore, pinSidebar, registry, onSelectActiveArtboard }) {
   const cards = new Map(); // id -> { id, element, pinBtn, renameBtn, label }
   const projectFrames = new Map(); // projectId -> ProjectFrame components
   let copyToast = null;
@@ -147,7 +149,13 @@ export function createCanvas({ viewport, world, documentStore, pinSidebar, regis
   }
   bgLayer.draw();
 
-  // ── 2. Viewport Transform Syncing ──
+  // ── 2. Create DOM Overlay after Konva wipes the container ──
+  const world = document.createElement('div');
+  world.id = 'world';
+  world.className = 'canvas-world';
+  viewport.appendChild(world);
+
+  // ── 2b. Viewport Transform Syncing ──
   function syncDOM() {
     const s = stage.scaleX();
     const x = stage.x();
@@ -220,9 +228,34 @@ export function createCanvas({ viewport, world, documentStore, pinSidebar, regis
     const reg = registry.find(item => item.id === id);
     if (!reg) return null;
 
-    const el = createArtboard(reg.title, reg.render(), { layer: reg.layer });
+    const title = reg.sourceTitle || reg.id;
+    const el = createArtboard(title, reg.render(), { layer: reg.layer });
     el.classList.add('module-card--positioned');
     el.dataset.artboardId = id;
+
+    let resizeTimeout = null;
+    const ro = new ResizeObserver(() => {
+      const cardW = Math.round(el.offsetWidth);
+      const cardH = Math.round(el.offsetHeight);
+      if (cardW > 0 && cardH > 0) {
+        if (resizeTimeout) clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+          const currentDoc = documentStore.get();
+          const artboard = currentDoc.artboards[id];
+          if (artboard) {
+            const currentSize = artboard.size;
+            if (!currentSize || currentSize.width !== cardW || currentSize.height !== cardH) {
+              documentStore.mutate((draft) => {
+                if (draft.artboards[id]) {
+                  draft.artboards[id].size = { width: cardW, height: cardH };
+                }
+              }, { persist: true });
+            }
+          }
+        }, 100);
+      }
+    });
+    ro.observe(el);
 
     const entry = {
       id,
@@ -231,6 +264,7 @@ export function createCanvas({ viewport, world, documentStore, pinSidebar, regis
       renameBtn: el.renameBtn,
       label: el.titleEl,
       dragBound: false,
+      resizeObserver: ro,
     };
     cards.set(id, entry);
     return entry;
@@ -455,7 +489,9 @@ export function createCanvas({ viewport, world, documentStore, pinSidebar, regis
     // Cleanup unrendered cards
     cards.forEach((entry, id) => {
       if (!renderedIds.has(id)) {
+        entry.resizeObserver?.disconnect();
         entry.element.remove();
+        cards.delete(id);
       }
     });
 

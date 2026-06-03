@@ -1,5 +1,6 @@
 import './conflict-diff.css';
 import { el } from '../utils/dom.js';
+import { createButton } from './button.js';
 
 /**
  * @param {object} options
@@ -14,20 +15,26 @@ export function createConflictDiff({ title, sub = '', rows = [], onAction } = {}
     sub ? el('span', { class: 'ff-conflict-diff__subtitle' }, [sub]) : null
   ]);
 
-  const discardBtn = el('button', {
-    class: 'ff-conflict-diff__action ff-conflict-diff__action--ghost',
+  const { element: discardBtn } = createButton({
+    label: 'Discard',
+    variant: 'ghost',
+    size: 'small',
     onClick: () => { if (typeof onAction === 'function') onAction('discard'); }
-  }, ['Discard']);
+  });
 
-  const keepBothBtn = el('button', {
-    class: 'ff-conflict-diff__action ff-conflict-diff__action--default',
+  const { element: keepBothBtn } = createButton({
+    label: 'Keep both',
+    variant: 'default',
+    size: 'small',
     onClick: () => { if (typeof onAction === 'function') onAction('keep-both'); }
-  }, ['Keep both']);
+  });
 
-  const applyLocalBtn = el('button', {
-    class: 'ff-conflict-diff__action ff-conflict-diff__action--primary',
+  const { element: applyLocalBtn } = createButton({
+    label: 'Apply local',
+    variant: 'primary',
+    size: 'small',
     onClick: () => { if (typeof onAction === 'function') onAction('apply-local'); }
-  }, ['Apply local']);
+  });
 
   const rightHeader = el('div', { class: 'ff-conflict-diff__header-right' }, [
     discardBtn,

@@ -1,5 +1,6 @@
 import './bulk-action-bar.css';
 import { el } from '../utils/dom.js';
+import { createButton } from './button.js';
 
 /**
  * @param {object} options
@@ -16,18 +17,14 @@ export function createBulkActionBar({ count, summary, actions = [] } = {}) {
 
   const actionElements = actions.map(act => {
     const variant = act.variant || 'default';
-    const children = [el('span', {}, [act.label])];
-
-    if (act.withEsc) {
-      children.push(el('kbd', { class: 'ff-bulk-bar__esc-kbd' }, ['esc']));
-    }
-
-    return el('button', {
-      class: `ff-bulk-bar__action ff-bulk-bar__action--${variant}`,
-      onClick: (e) => {
-        if (typeof act.onClick === 'function') act.onClick(e);
-      }
-    }, children);
+    const { element: btn } = createButton({
+      label: act.label,
+      variant: variant,
+      size: 'small',
+      kbd: act.withEsc ? 'esc' : undefined,
+      onClick: act.onClick
+    });
+    return btn;
   });
 
   const right = el('div', { class: 'ff-bulk-bar__right' }, actionElements);

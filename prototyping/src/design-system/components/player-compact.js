@@ -1,5 +1,6 @@
 import './player-compact.css';
 import { el } from '../utils/dom.js';
+import { createButton } from './button.js';
 import { createNudge } from './nudge.js';
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -52,6 +53,7 @@ function createChevronUpIcon() {
  * @param {function} [options.onPlayToggle]
  * @param {function} [options.onCue]
  * @param {function} [options.onBpmChange]
+ * @param {function} [options.onKeyToggle]
  * @param {function} [options.onExpand]
  */
 export function createPlayerCompact({
@@ -67,6 +69,7 @@ export function createPlayerCompact({
   onPlayToggle,
   onCue,
   onBpmChange,
+  onKeyToggle,
   onExpand
 } = {}) {
   // 1. Left Controls: cueBtn & playWrap (30x30 circles)
@@ -111,10 +114,17 @@ export function createPlayerCompact({
     variant: 'compact'
   });
 
-  // Key display (17px height)
-  const keyN = el('div', { class: 'ff-player-compact__key-display' }, [
-    el('span', { class: 'ff-player-compact__key-value' }, [key])
-  ]);
+  // Key toggle button (17px height compact button)
+  const { element: keyN } = createButton({
+    label: key,
+    variant: 'default',
+    size: 'compact',
+    onClick: (e) => {
+      if (e) e.stopPropagation();
+      if (typeof onKeyToggle === 'function') onKeyToggle();
+    }
+  });
+  keyN.classList.add('ff-player-compact__key-btn');
 
   // Times row
   const times = el('div', { class: 'ff-player-compact__times-group' }, [

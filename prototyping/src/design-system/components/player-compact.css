@@ -134,27 +134,9 @@
 }
 
 
-/* Key display (height: 17px) */
-.ff-player-compact__key-display {
-  height: 17px;
-  background-color: var(--ff-bg);
-  border: 1px solid rgba(255, 255, 255, 0.12); /* stroke: #FFFFFF1F */
-  border-radius: var(--ff-radius-sm);
-  display: inline-flex;
-  align-items: center;
-  box-sizing: border-box;
-}
-
-.ff-player-compact__key-value {
-  padding: 0 8px;
+/* Key toggle button override to use mono font */
+.ff-player-compact__key-btn .ff-btn__label {
   font-family: var(--ff-font-mono);
-  font-size: 11px; /* size: 11 */
-  font-weight: 500;
-  color: var(--ff-text);
-  display: flex;
-  align-items: center;
-  height: 100%;
-  box-sizing: border-box;
 }
 
 /* Time display group */

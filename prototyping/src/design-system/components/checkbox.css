@@ -27,6 +27,10 @@
 .ff-checkbox__icon {
   width: 10px;
   height: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ff-bg);
   opacity: 0;
   transition: opacity var(--ff-motion-fast) var(--ff-easing);
 }
