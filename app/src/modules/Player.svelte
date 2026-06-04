@@ -19,7 +19,6 @@
   } from '../stores/player.svelte.ts';
 
   let playerRoot;
-  let waveformStrip = $state(null);
 
   function isEditableTarget(target) {
     if (!(target instanceof Element)) return false;
@@ -36,12 +35,6 @@
     if (e.key === ' ' || e.code === 'Space') {
       e.preventDefault();
       void togglePlay();
-      return;
-    }
-
-    const renderer = waveformStrip?.getRenderer?.();
-    if (renderer?.handleKey(e)) {
-      e.preventDefault();
     }
   }
 
@@ -51,9 +44,11 @@
   });
 </script>
 
-<div class="ff-player-module" bind:this={playerRoot}>
+<div class="ff-player-module" class:ff-player-module--expanded={player.expanded && player.track} bind:this={playerRoot}>
+  {#if player.expanded && player.track}
+    <ExpandedPlayer />
+  {:else}
   <PlayerCompact
-    bind:waveformStrip
     cover={player.track?.cover ?? ''}
     title={player.track?.title || 'No Track Loaded'}
     artist={player.track?.artist || '—'}
@@ -70,23 +65,25 @@
     beats={player.track?.beats ?? []}
     durationMs={player.track?.durationMs ?? 0}
     trackKey={player.track?.id ?? null}
-    followPlayhead={player.playing}
     onScrub={player.track ? seekToProgress : undefined}
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
     onCueUp={player.track ? cuePreviewStop : undefined}
     onExpand={player.track ? toggleExpanded : undefined}
   />
+  {/if}
 </div>
-
-{#if player.expanded && player.track}
-  <ExpandedPlayer />
-{/if}
 
 <style>
   .ff-player-module {
     width: 100%;
     background: var(--ff-bg);
     border-top: 1px solid var(--ff-border);
+  }
+  /* Expanded: a docked panel ~1/3 of the viewport height. */
+  .ff-player-module--expanded {
+    height: 33vh;
+    min-height: 280px;
+    display: flex;
   }
 </style>

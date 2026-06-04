@@ -109,6 +109,22 @@ function defaultCueMs(track: PlayerTrack): number {
   return track.cues[0]?.timeMs ?? 0;
 }
 
+// Fallback beat grid derived from BPM when the analyzer returns no beats.
+// Starts at t=0, downbeat every 4 beats; not phase-aligned, but visible and
+// editable via the expanded player's grid controls (nudge / set-downbeat).
+function synthesizeBeats(bpm: number, durationMs: number): BeatMarker[] {
+  if (!bpm || bpm <= 0 || !durationMs) return [];
+  const beatMs = 60000 / bpm;
+  if (beatMs < 50) return []; // implausible tempo — bail
+  const out: BeatMarker[] = [];
+  let bar = 1;
+  for (let t = 0; t < durationMs; t += beatMs) {
+    out.push({ time_ms: Math.round(t), bar_position: bar });
+    bar = bar === 4 ? 1 : bar + 1;
+  }
+  return out;
+}
+
 /** Drop the playback-tick subscription (e.g. after switching mock ↔ CoreAudio). */
 export function resetPlayerTransport() {
   tickUnlisten?.();
@@ -148,6 +164,10 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
       time_ms: b.time_ms,
       bar_position: b.bar_position,
     }));
+  } else {
+    // No detected beats — synthesize a grid from BPM so one is always shown.
+    const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
+    next.beats = synthesizeBeats(numBpm, durationMs);
   }
   next.cues = mapCues(analysis.cue_points, durationMs);
   return next;
@@ -396,6 +416,46 @@ export async function play() {
 export async function pause() {
   await playbackPause();
   player.playing = false;
+}
+
+// ── Beat-grid editing ──────────────────────────────────────────────────────
+// Local, visual-only edits to the displayed grid. These shift the in-memory
+// beat markers so the waveform re-renders; they are NOT yet persisted back to
+// the analysis cache or the USB writer.
+const BEAT_NUDGE_MS = 10;
+
+/** Shift every beat marker by deltaMs (negative = earlier/left). */
+export function beatGridShift(deltaMs: number) {
+  const t = player.track;
+  if (!t || !t.beats.length) return;
+  t.beats = t.beats.map((b) => ({ ...b, time_ms: b.time_ms + deltaMs }));
+}
+
+export function beatGridNudgeLeft() {
+  beatGridShift(-BEAT_NUDGE_MS);
+}
+
+export function beatGridNudgeRight() {
+  beatGridShift(BEAT_NUDGE_MS);
+}
+
+/** Snap the grid so the nearest downbeat lands on the current playhead. */
+export function beatGridSetCurrent() {
+  const t = player.track;
+  if (!t || !t.beats.length || !t.durationMs) return;
+  const playMs = player.progress * t.durationMs;
+  const downbeats = t.beats.filter((b) => b.bar_position === 1);
+  const pool = downbeats.length ? downbeats : t.beats;
+  let nearest = pool[0];
+  let best = Infinity;
+  for (const b of pool) {
+    const d = Math.abs(b.time_ms - playMs);
+    if (d < best) {
+      best = d;
+      nearest = b;
+    }
+  }
+  beatGridShift(playMs - nearest.time_ms);
 }
 
 export async function seekToProgress(progress: number) {

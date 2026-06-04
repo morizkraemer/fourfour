@@ -1,18 +1,13 @@
 <!--
-  ExpandedPlayer.svelte — full-screen maximized player.
+  ExpandedPlayer.svelte — docked ~1/3-height player panel.
 
-  Hosts the colleague's dual-view WaveformDisplay (overview bar + scrollable zoom
-  view, Rekordbox-calibrated 3-band color, beat grid, click-seek). The compact
-  strip (Player.svelte) stays as-is; this is the opt-in expanded surface.
-
-  Data flows from the player store: `colorDetail` feeds the zoom view, `colorOverview`
-  the overview bar. The store keeps rgb in 0–1; WaveformDisplay expects 0–255, so we
-  scale here. Seeking routes through the same `seekToProgress` path as the compact
-  strip, so playback/scrub behaviour is identical.
+  Hosts the dual-view WaveformView (overview preview + Rekordbox playhead-locked
+  zoom view). Carries the same transport as the compact bar (CUE, play, BPM, key,
+  times) plus zoom controls for the waveform. Seeking routes through the same
+  `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import WaveformDisplay from '../lib/WaveformDisplay.js';
+  import { WaveformView, Button, Nudge } from '$ds';
   import {
     player,
     currentTime,
@@ -20,278 +15,247 @@
     totalTime,
     togglePlay,
     seekToProgress,
+    cuePreviewStart,
+    cuePreviewStop,
     toggleExpanded,
+    beatGridNudgeLeft,
+    beatGridNudgeRight,
+    beatGridSetCurrent,
   } from '../stores/player.svelte.ts';
 
-  let container = $state(null);
-  let display = $state(null);
-  let resizeObs = null;
-  let lastDataKey = null;
+  let wave = $state(null);
 
-  // WaveformDisplay's bandAmps divides weights by 255; the store keeps rgb in 0–1.
-  function toDisplay(samples) {
-    if (!samples) return [];
-    return samples.map((s) => ({ amp: s.amp, r: s.r * 255, g: s.g * 255, b: s.b * 255 }));
-  }
+  const stop = (fn) => (e) => {
+    e.stopPropagation();
+    fn?.(e);
+  };
+</script>
 
-  function buildData(track) {
-    if (!track) return null;
-    const detail = track.colorDetail ?? track.colorData;
-    const overview = track.colorOverview ?? track.colorData;
-    return {
-      waveform_color: toDisplay(detail),
-      waveform_overview: overview ? toDisplay(overview) : undefined,
-      waveform_preview: track.previewBytes ?? undefined,
-      beats: track.beats ?? [],
-      duration_ms: track.durationMs ?? 0,
-      bpm: Number(track.bpm) || 0,
-    };
-  }
-
-  onMount(() => {
-    display = new WaveformDisplay(container);
-    display.onSeek = (frac) => seekToProgress(frac);
-    resizeObs = new ResizeObserver(() => display?.redraw());
-    resizeObs.observe(container);
-  });
-
-  onDestroy(() => {
-    resizeObs?.disconnect();
-    display?.destroy();
-    display = null;
-  });
-
-  // Push data only when the loaded track or its waveform changes — NOT on every
-  // playback tick (setData resets zoom/scroll). `display` is reactive so this
-  // also runs once onMount assigns it.
-  $effect(() => {
-    const t = player.track;
-    const key = t
-      ? `${t.id}:${t.colorDetail?.length ?? 0}:${t.colorOverview?.length ?? 0}:${t.beats?.length ?? 0}:${t.durationMs}`
-      : null;
-    if (!display) return;
-    if (key === lastDataKey) return;
-    lastDataKey = key;
-    if (t) display.setData(buildData(t));
-    else display.clear();
-  });
-
-  // Playhead follows playback progress (cheap overlay update, no re-render).
-  $effect(() => {
-    const frac = player.track ? player.progress : -1;
-    display?.setPlayhead(frac);
-  });
-
-  function onKeydown(e) {
+<svelte:window
+  on:keydown={(e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       toggleExpanded();
     }
-  }
-</script>
+  }} />
 
-<svelte:window on:keydown={onKeydown} />
-
-<div class="ff-expanded-player" role="dialog" aria-label="Expanded player" aria-modal="true">
-  <header class="ff-expanded-player__bar">
-    <div class="ff-expanded-player__meta">
+<div class="ff-xp" role="group" aria-label="Expanded player">
+  <header class="ff-xp__head">
+    <div class="ff-xp__meta">
       {#if player.track?.cover}
-        <img class="ff-expanded-player__cover" src={player.track.cover} alt="" />
+        <img class="ff-xp__cover" src={player.track.cover} alt="" />
       {:else}
-        <div class="ff-expanded-player__cover ff-expanded-player__cover--empty"></div>
+        <div class="ff-xp__cover ff-xp__cover--empty"></div>
       {/if}
-      <div class="ff-expanded-player__titles">
-        <span class="ff-expanded-player__title">{player.track?.title || 'No Track Loaded'}</span>
-        <span class="ff-expanded-player__artist">{player.track?.artist || '—'}</span>
+      <div class="ff-xp__titles">
+        <span class="ff-xp__title">{player.track?.title || 'No Track Loaded'}</span>
+        <span class="ff-xp__artist">{player.track?.artist || '—'}</span>
       </div>
     </div>
-    <div class="ff-expanded-player__stats">
-      <span class="ff-expanded-player__stat"><b>{player.track?.bpm || '—'}</b> BPM</span>
-      <span class="ff-expanded-player__stat"><b>{player.track?.key || '—'}</b> KEY</span>
+
+    <div class="ff-xp__head-right">
+      <Button label={player.track?.key || '—'} variant="default" size="compact" />
+      <Nudge value={player.track?.bpm || '—'} label="BPM" variant="compact" />
+      <div class="ff-xp__times">
+        <span class="ff-xp__time-cur">{currentTime()}<span class="ff-xp__time-ms">{currentTimeMs()}</span></span>
+        <span class="ff-xp__time-tot">{totalTime()}</span>
+      </div>
+      <button
+        class="ff-xp__collapse"
+        title="Collapse player (Esc)"
+        aria-label="Collapse player"
+        onclick={toggleExpanded}>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
     </div>
-    <button
-      class="ff-expanded-player__close"
-      title="Collapse player (Esc)"
-      aria-label="Collapse player"
-      onclick={toggleExpanded}>
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
-        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="6 9 12 15 18 9" />
-      </svg>
-    </button>
   </header>
 
-  <div class="ff-expanded-player__wave" bind:this={container}></div>
+  <div class="ff-xp__wave">
+    <WaveformView
+      bind:this={wave}
+      mode="expanded"
+      colorData={player.track?.colorData ?? null}
+      colorDetail={player.track?.colorDetail ?? null}
+      colorOverview={player.track?.colorOverview ?? null}
+      previewBytes={player.track?.previewBytes ?? null}
+      cues={player.track?.cues ?? []}
+      beats={player.track?.beats ?? []}
+      bpm={player.track?.bpm ?? 0}
+      durationMs={player.track?.durationMs ?? 0}
+      trackKey={player.track?.id ?? null}
+      progress={player.progress}
+      playing={player.playing}
+      onSeek={player.track ? seekToProgress : undefined} />
+  </div>
 
-  <footer class="ff-expanded-player__transport">
-    <button
-      class="ff-expanded-player__play"
-      aria-label={player.playing ? 'Pause' : 'Play'}
-      disabled={!player.track}
-      onclick={() => togglePlay()}>
-      {#if player.playing}
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
-      {:else}
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-      {/if}
-    </button>
-    <span class="ff-expanded-player__time">
-      {currentTime()}<span class="ff-expanded-player__time-ms">{currentTimeMs()}</span>
-      <span class="ff-expanded-player__time-sep">/</span>
-      {totalTime()}
-    </span>
+  <footer class="ff-xp__transport">
+    <div class="ff-xp__transport-left">
+      <button
+        class="ff-xp__cue-btn"
+        title="Cue (hold to preview)"
+        aria-label="Cue"
+        onpointerdown={stop(cuePreviewStart)}
+        onpointerup={stop(cuePreviewStop)}
+        onpointercancel={stop(cuePreviewStop)}
+        onpointerleave={stop(cuePreviewStop)}>
+        <span class="ff-xp__cue-txt">CUE</span>
+      </button>
+      <button
+        class="ff-xp__play"
+        title={player.playing ? 'Pause' : 'Play'}
+        aria-label={player.playing ? 'Pause' : 'Play'}
+        disabled={!player.track}
+        onclick={() => togglePlay()}>
+        {#if player.playing}
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        {:else}
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="6,4 6,20 18,12"/></svg>
+        {/if}
+      </button>
+    </div>
+
+    <div class="ff-xp__grid-edit" role="group" aria-label="Beat grid">
+      <span class="ff-xp__grid-label">GRID</span>
+      <button class="ff-xp__grid-btn" title="Nudge grid left" aria-label="Nudge grid left"
+        disabled={!player.track} onclick={() => beatGridNudgeLeft()}>◀</button>
+      <button class="ff-xp__grid-btn" title="Set downbeat to playhead" aria-label="Set downbeat to playhead"
+        disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
+      <button class="ff-xp__grid-btn" title="Nudge grid right" aria-label="Nudge grid right"
+        disabled={!player.track} onclick={() => beatGridNudgeRight()}>▶</button>
+    </div>
+
+    <div class="ff-xp__zoom">
+      <button class="ff-xp__zoom-btn" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}>−</button>
+      <button class="ff-xp__zoom-btn" title="Fit" aria-label="Reset zoom" onclick={() => wave?.resetZoom()}>Fit</button>
+      <button class="ff-xp__zoom-btn" title="Zoom in" aria-label="Zoom in" onclick={() => wave?.zoomIn()}>+</button>
+    </div>
   </footer>
 </div>
 
 <style>
-  .ff-expanded-player {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
+  .ff-xp {
     display: flex;
     flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
     background: var(--ff-bg, #0d0d0d);
-    padding-top: env(titlebar-area-height, 0);
   }
 
-  .ff-expanded-player__bar {
+  .ff-xp__head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: var(--ff-space-4, 16px);
-    padding: var(--ff-space-3, 12px) var(--ff-space-4, 16px);
-    border-bottom: 1px solid var(--ff-border, rgba(255, 255, 255, 0.08));
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
   }
 
-  .ff-expanded-player__meta {
+  .ff-xp__meta {
     display: flex;
     align-items: center;
     gap: var(--ff-space-3, 12px);
     min-width: 0;
-    flex: 1;
   }
-
-  .ff-expanded-player__cover {
-    width: 44px;
-    height: 44px;
+  .ff-xp__cover {
+    width: 40px;
+    height: 40px;
     border-radius: var(--ff-radius-sm, 4px);
     object-fit: cover;
     flex-shrink: 0;
   }
-  .ff-expanded-player__cover--empty {
-    background: var(--ff-surface, rgba(255, 255, 255, 0.06));
-  }
-
-  .ff-expanded-player__titles {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
-  .ff-expanded-player__title {
-    font-weight: 600;
+  .ff-xp__cover--empty { background: var(--ff-elev, rgba(255, 255, 255, 0.06)); }
+  .ff-xp__titles { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+  .ff-xp__title {
+    font-weight: 500;
+    font-size: 13px;
     color: var(--ff-text, #fff);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .ff-expanded-player__artist {
-    font-size: 0.85em;
-    color: var(--ff-text-dim, rgba(255, 255, 255, 0.6));
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .ff-xp__artist {
+    font-size: 11.5px;
+    color: var(--ff-muted, rgba(255, 255, 255, 0.6));
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
 
-  .ff-expanded-player__stats {
-    display: flex;
+  .ff-xp__head-right { display: flex; align-items: center; gap: 10px; }
+  .ff-xp__times { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+  .ff-xp__time-cur { font-variant-numeric: tabular-nums; color: var(--ff-text, #fff); font-size: 13px; }
+  .ff-xp__time-ms { color: var(--ff-muted, rgba(255, 255, 255, 0.5)); }
+  .ff-xp__time-tot { font-variant-numeric: tabular-nums; color: var(--ff-muted, rgba(255, 255, 255, 0.5)); font-size: 11px; }
+
+  .ff-xp__collapse {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px;
+    border: none; border-radius: var(--ff-radius-sm, 4px);
+    background: transparent; color: var(--ff-muted, rgba(255, 255, 255, 0.6));
+    cursor: pointer;
+  }
+  .ff-xp__collapse:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.06)); color: var(--ff-text, #fff); }
+
+  .ff-xp__wave { flex: 1; min-height: 0; position: relative; }
+
+  .ff-xp__transport {
+    display: flex; align-items: center; justify-content: space-between;
     gap: var(--ff-space-4, 16px);
-    color: var(--ff-text-dim, rgba(255, 255, 255, 0.6));
-    font-size: 0.8em;
-  }
-  .ff-expanded-player__stat b {
-    color: var(--ff-text, #fff);
-    font-size: 1.15em;
-    margin-right: 3px;
-  }
-
-  .ff-expanded-player__close {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border: none;
-    border-radius: var(--ff-radius-sm, 4px);
-    background: transparent;
-    color: var(--ff-text-dim, rgba(255, 255, 255, 0.6));
-    cursor: pointer;
-  }
-  .ff-expanded-player__close:hover {
-    background: var(--ff-surface, rgba(255, 255, 255, 0.06));
-    color: var(--ff-text, #fff);
-  }
-
-  .ff-expanded-player__wave {
-    flex: 1;
-    min-height: 0;
-    position: relative;
-  }
-
-  .ff-expanded-player__transport {
-    display: flex;
-    align-items: center;
-    gap: var(--ff-space-4, 16px);
-    padding: var(--ff-space-3, 12px) var(--ff-space-4, 16px);
-    border-top: 1px solid var(--ff-border, rgba(255, 255, 255, 0.08));
-  }
-  .ff-expanded-player__play {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    border: none;
-    border-radius: 50%;
-    background: var(--ff-accent, #4ade80);
-    color: #000;
-    cursor: pointer;
-  }
-  .ff-expanded-player__play:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .ff-expanded-player__time {
-    font-variant-numeric: tabular-nums;
-    color: var(--ff-text, #fff);
-  }
-  .ff-expanded-player__time-ms {
-    color: var(--ff-text-dim, rgba(255, 255, 255, 0.5));
-  }
-  .ff-expanded-player__time-sep {
-    margin: 0 6px;
-    color: var(--ff-text-dim, rgba(255, 255, 255, 0.4));
-  }
-
-  /* WaveformDisplay builds its own DOM (unscoped) — style globally. */
-  :global(.ff-expanded-player__wave .waveform-display) {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    height: 100%;
-    background: #0d0d0d;
-    overflow: hidden;
-  }
-  :global(.ff-expanded-player__wave .waveform-display__overview) {
-    display: block;
-    width: 100%;
-    height: 48px;
-    cursor: pointer;
+    padding: 10px 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
-  :global(.ff-expanded-player__wave .waveform-display__zoom) {
-    display: block;
-    width: 100%;
-    height: 100%;
-    cursor: default;
+  .ff-xp__transport-left { display: flex; align-items: center; gap: 10px; }
+
+  /* CUE / play match the compact player: circular, orange/green strokes. */
+  .ff-xp__cue-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; padding: 0;
+    border: 1px solid #f59e0b; border-radius: 50%;
+    background: transparent; cursor: pointer;
+    transition: background-color var(--ff-motion-fast, 120ms) ease;
   }
+  .ff-xp__cue-btn:hover { background-color: rgba(245, 158, 11, 0.08); }
+  .ff-xp__cue-txt {
+    font-family: var(--ff-font-mono, monospace);
+    font-size: 8px; font-weight: 500; color: #d4d4d4; line-height: 1;
+  }
+
+  .ff-xp__play {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; padding: 0;
+    border: 1px solid #22c55e; border-radius: 50%;
+    background: transparent; color: #d4d4d4; cursor: pointer;
+    transition: background-color var(--ff-motion-fast, 120ms) ease;
+  }
+  .ff-xp__play:hover { background-color: rgba(34, 197, 94, 0.08); }
+  .ff-xp__play:disabled { opacity: 0.4; cursor: default; }
+
+  /* Beat-grid edit cluster */
+  .ff-xp__grid-edit { display: flex; align-items: center; gap: 4px; }
+  .ff-xp__grid-label {
+    font-family: var(--ff-font-mono, monospace); font-size: 9px;
+    letter-spacing: 0.08em; color: var(--ff-muted, rgba(255, 255, 255, 0.5));
+    margin-right: 2px;
+  }
+  .ff-xp__grid-btn {
+    height: 26px; min-width: 30px; padding: 0 8px;
+    border: 1px solid var(--ff-border, rgba(255, 255, 255, 0.12));
+    border-radius: var(--ff-radius-sm, 4px);
+    background: transparent; color: var(--ff-text, #fff);
+    font-size: 11px; line-height: 1; cursor: pointer;
+  }
+  .ff-xp__grid-btn:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); }
+  .ff-xp__grid-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .ff-xp__zoom { display: flex; align-items: center; gap: 4px; }
+  .ff-xp__zoom-btn {
+    height: 26px; min-width: 30px; padding: 0 8px;
+    border: 1px solid var(--ff-border, rgba(255, 255, 255, 0.12));
+    border-radius: var(--ff-radius-sm, 4px);
+    background: transparent; color: var(--ff-text, #fff);
+    font-size: 13px; line-height: 1; cursor: pointer;
+  }
+  .ff-xp__zoom-btn:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); }
 </style>
