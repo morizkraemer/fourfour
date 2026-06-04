@@ -31,8 +31,8 @@ export { default as ProgressBar } from './components/ProgressBar.svelte';
 export { default as Nudge } from './components/Nudge.svelte';
 export { default as SidebarSection } from './components/SidebarSection.svelte';
 export { default as Waveform } from './components/Waveform.svelte';
-export { default as WaveformStrip } from './components/WaveformStrip.svelte';
-export { WaveformRenderer } from './waveform-renderer.ts';
+export { default as WaveformView } from './components/WaveformView.svelte';
+export { default as WaveformDisplay } from './waveform-display.js';
 
 // Primitives (Svelte) — tier 1 (compose tier 0)
 export { default as ColumnHeader } from './components/ColumnHeader.svelte';

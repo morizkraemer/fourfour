@@ -9,12 +9,22 @@
  *     waveform_color:   Array<{amp: number, r: number, g: number, b: number}>,
  *     waveform_preview: Uint8Array | number[],  // 400-byte Pioneer PWAV fallback
  *     beats:            Array<{time_ms: number, bar_position: number}>,
+ *     cues:             Array<{position: number, color?: string}>,  // position 0–1
  *     duration_ms:      number,
  *     bpm:              number,
  *   }
+ *
+ * Two modes (constructor option `mode`, default 'expanded'):
+ *   'compact'  — single canvas, full-track static view, no zoom/pan, click/drag
+ *                scrubs to seek. Playhead travels across the whole track.
+ *   'expanded' — overview bar + zoom view, Rekordbox-style playhead locked at
+ *                centre while the waveform scrolls. Horizontal drag scrubs,
+ *                vertical drag / wheel zooms (playhead stays centred).
  */
 
 const FALLBACK_COLOR = 'rgb(80, 80, 80)';
+const WAVEFORM_ALPHA = 0.85;
+const DRAG_THRESHOLD_PX = 4;
 
 // Rekordbox 3-band colors: bass=blue, mids=orange, highs=white
 const COLOR_BASS = 'rgb(30,  100, 255)';
@@ -68,9 +78,16 @@ function drawBand(ctx, amps, w, yCenter, scale, color) {
 
 
 export default class WaveformDisplay {
-    /** @param {HTMLElement} container */
-    constructor(container) {
+    /**
+     * @param {HTMLElement} container
+     * @param {{ mode?: 'compact' | 'expanded', onSeek?: (frac: number) => void }} [options]
+     */
+    constructor(container, options = {}) {
         this._container = container;
+        this._mode = options.mode === 'compact' ? 'compact' : 'expanded';
+        // Expanded view locks the playhead at centre and scrolls the waveform.
+        this._lockPlayhead = this._mode === 'expanded';
+        if (options.onSeek) this.onSeek = options.onSeek;
 
         // Create wrapper div
         this._wrapper = document.createElement('div');
@@ -81,6 +98,8 @@ export default class WaveformDisplay {
         this._overviewCanvas.className = 'waveform-display__overview';
         const overviewWrap = document.createElement('div');
         overviewWrap.style.cssText = 'position:relative;flex-shrink:0;';
+        if (this._mode === 'compact') overviewWrap.style.display = 'none';
+        this._overviewWrap = overviewWrap;
         overviewWrap.appendChild(this._overviewCanvas);
         this._overviewPlayhead = document.createElement('div');
         this._overviewPlayhead.style.cssText =
@@ -102,6 +121,14 @@ export default class WaveformDisplay {
         this._wrapper.appendChild(zoomWrap);
         container.appendChild(this._wrapper);
 
+        // Offscreen cache of the overview waveform (bars + cues). The overview
+        // image never changes during playback — only the viewport rectangle
+        // scrolls — so we render the bars once and blit them every frame.
+        this._overviewCache = document.createElement('canvas');
+        this._overviewDirty = true;
+        this._overviewCacheW = 0;
+        this._overviewCacheH = 0;
+
         // State
         this._data = null;
         this._zoom = 1.0;
@@ -111,8 +138,22 @@ export default class WaveformDisplay {
         this._dragStartY = 0;
         this._dragStartOffset = 0;
         this._dragStartZoom = 1.0;
+        this._dragStartPlayhead = 0;
         this._dragMoved = false;
+        // 'none' until the drag passes the threshold, then 'scrub' | 'zoom'.
+        this._gesture = 'none';
+        this._scrubbing = false;
         this._playheadFrac = -1;
+
+        // Playhead interpolation. The transport only reports position at ~20Hz,
+        // which makes the locked-centre scroll visibly step. While playing we
+        // free-run a rAF clock that predicts the position between ticks and
+        // eases toward it, so the waveform scrolls at the display refresh rate.
+        this._playing = false;
+        this._phTarget = -1;     // last authoritative position (0–1)
+        this._phTargetAt = 0;    // timestamp of that report
+        this._phClock = -1;      // smoothed, displayed position
+        this._interpRaf = null;
 
         // rAF handle — coalesces rapid scroll/drag events into one draw per frame
         this._zoomRafId = null;
@@ -120,20 +161,62 @@ export default class WaveformDisplay {
         this._bindEvents();
     }
 
+    /** Switch render mode ('compact' | 'expanded'). */
+    setMode(mode) {
+        const next = mode === 'compact' ? 'compact' : 'expanded';
+        if (next === this._mode) return;
+        this._mode = next;
+        this._lockPlayhead = next === 'expanded';
+        this._overviewWrap.style.display = next === 'compact' ? 'none' : '';
+        if (next === 'compact') {
+            this._zoom = 1.0;
+            this._offset = 0.0;
+        }
+        this._render();
+        this._updatePlayheadOverlay();
+    }
+
     /** Replace data and re-render. Resets zoom and scroll position. */
     setData(data) {
         this._data = data;
-        this._zoom = 1.0;
-        this._offset = 0.0;
+        this._overviewDirty = true;
+        this._phClock = -1; // re-sync interpolation to the next reported tick
+        // Expanded opens pre-zoomed to ~5s on screen; compact shows the whole
+        // track. Fit (resetZoom) returns expanded to the full-track view.
+        this._zoom = this._defaultZoom();
+        this._offset = this._lockPlayhead ? this._centeredOffset() : 0.0;
         this._render();
+        this._updatePlayheadOverlay();
+    }
+
+    // Initial zoom on load. Compact is always full-track. Expanded targets a
+    // ~5s visible window (Rekordbox-style close-up) derived from the duration.
+    _defaultZoom() {
+        if (this._mode === 'compact') return 1.0;
+        const dur = this._data?.duration_ms;
+        if (!dur) return 1.0;
+        const TARGET_VISIBLE_MS = 5000;
+        return Math.max(1.0, Math.min(512.0, dur / TARGET_VISIBLE_MS));
     }
 
 /** Clear to empty state. */
     clear() {
         this._data = null;
+        this._overviewDirty = true;
         this._zoom = 1.0;
         this._offset = 0.0;
         this._render();
+    }
+
+    // Offset that keeps the current playhead centred in the zoom view.
+    // At zoom 1 the whole track is visible, so show [0,1] and let the playhead
+    // travel freely. When zoomed in, allow the offset to run past
+    // [0, 1-visible] so the head stays dead-centre at the track ends (blank
+    // space shows beyond the edges, Rekordbox-style).
+    _centeredOffset() {
+        if (this._zoom <= 1.0) return 0;
+        const frac = this._playheadFrac < 0 ? 0 : this._playheadFrac;
+        return frac - 0.5 / this._zoom;
     }
 
     /** Re-render at current size — call after container resize. */
@@ -141,10 +224,96 @@ export default class WaveformDisplay {
         this._render();
     }
 
-    /** Set playhead position (0–1 fraction of duration). Pass -1 to hide. */
+    /**
+     * Report the authoritative playhead position (0–1 fraction). Pass -1 to
+     * hide. Fed by the (coarse, ~20Hz) transport — while playing the position
+     * is smoothly interpolated up to the display refresh rate.
+     */
     setPlayhead(frac) {
+        // While the user is scrubbing, the drag owns the playhead — ignore
+        // transport ticks so the incoming position can't fight the drag.
+        if (this._scrubbing) return;
+        this._phTarget = frac;
+        this._phTargetAt = this._now();
+        if (frac < 0) {
+            this._phClock = -1;
+            this._applyPlayhead(-1);
+            return;
+        }
+        if (this._phClock < 0) this._phClock = frac;
+        if (!this._playing) {
+            // Paused/seeking: snap straight to the reported position.
+            this._phClock = frac;
+            this._applyPlayhead(frac);
+        } else {
+            this._startInterp();
+        }
+    }
+
+    /** Tell the engine whether the transport is playing (drives interpolation). */
+    setPlaying(playing) {
+        const next = !!playing;
+        if (next === this._playing) return;
+        this._playing = next;
+        if (next) {
+            this._startInterp();
+        } else {
+            this._stopInterp();
+            // Settle on the last reported position so we don't freeze mid-predict.
+            if (this._phTarget >= 0) {
+                this._phClock = this._phTarget;
+                this._applyPlayhead(this._phTarget);
+            }
+        }
+    }
+
+    _now() {
+        return (typeof performance !== 'undefined' && performance.now)
+            ? performance.now() : Date.now();
+    }
+
+    // Push a position to the canvas: in expanded the waveform scrolls under the
+    // fixed centre playhead; in compact only the overlay element moves.
+    _applyPlayhead(frac) {
         this._playheadFrac = frac;
-        this._updatePlayheadOverlay();
+        if (this._lockPlayhead && frac >= 0) {
+            this._offset = this._centeredOffset();
+            this._paint();
+        } else {
+            this._updatePlayheadOverlay();
+        }
+    }
+
+    _startInterp() {
+        if (this._interpRaf || !this._playing) return;
+        const loop = () => {
+            if (!this._playing) { this._interpRaf = null; return; }
+            this._interpRaf = requestAnimationFrame(loop);
+            this._stepInterp();
+        };
+        this._interpRaf = requestAnimationFrame(loop);
+    }
+
+    _stopInterp() {
+        if (this._interpRaf) cancelAnimationFrame(this._interpRaf);
+        this._interpRaf = null;
+    }
+
+    // One interpolation frame: predict where the transport is now from the last
+    // tick, then ease the displayed clock toward it (snap on large jumps/seeks).
+    _stepInterp() {
+        if (this._scrubbing) return;
+        const dur = this._data?.duration_ms;
+        if (!dur || this._phTarget < 0) return;
+        const predicted = Math.max(0, Math.min(1,
+            this._phTarget + (this._now() - this._phTargetAt) / dur));
+        const diff = predicted - this._phClock;
+        if (Math.abs(diff) > 0.05) {
+            this._phClock = predicted;          // seek / large gap → snap
+        } else {
+            this._phClock += diff * 0.25;       // smooth follow
+        }
+        this._applyPlayhead(this._phClock);
     }
 
     _updatePlayheadOverlay() {
@@ -154,8 +323,10 @@ export default class WaveformDisplay {
             this._zoomPlayhead.style.display = 'none';
             return;
         }
-        this._overviewPlayhead.style.display = 'block';
-        this._overviewPlayhead.style.left = (frac * 100) + '%';
+        if (this._mode !== 'compact') {
+            this._overviewPlayhead.style.display = 'block';
+            this._overviewPlayhead.style.left = (frac * 100) + '%';
+        }
         const visibleFrac = 1.0 / this._zoom;
         const start = this._offset;
         const end = start + visibleFrac;
@@ -175,23 +346,47 @@ export default class WaveformDisplay {
         this._updatePlayheadOverlay();
     }
 
+    // ── Zoom controls (expanded toolbar) ───────────────────────────────────
+    // Each keeps the playhead centred in expanded mode. No-ops in compact.
+
+    /** Set zoom, re-centring on the playhead (expanded) or clamping (free). */
+    _applyZoom(next) {
+        if (this._mode === 'compact') return;
+        this._zoom = Math.max(1.0, Math.min(512.0, next));
+        this._offset = this._lockPlayhead ? this._centeredOffset() : this._clampOffset(this._offset);
+        this._render();
+        this._updatePlayheadOverlay();
+        if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
+    }
+
+    zoomIn()    { this._applyZoom(this._zoom * 1.5); }
+    zoomOut()   { this._applyZoom(this._zoom / 1.5); }
+    resetZoom() { this._applyZoom(1.0); }
+
     /** Remove canvases and all event listeners. */
     destroy() {
         if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
+        this._stopInterp();
         this._unbindEvents();
         this._wrapper.remove();
     }
 
     // ── Private ──────────────────────────────────────────────────────────
 
-    _render() {
+    // Synchronous full repaint of both canvases + overlays. Called directly from
+    // the interpolation loop (already inside a frame); use _render() elsewhere.
+    _paint() {
         this._renderOverview();
-        // Coalesce rapid scroll/drag events — only draw once per animation frame
+        this._renderZoom();
+        this._updatePlayheadOverlay();
+    }
+
+    _render() {
+        // Coalesce rapid playhead/scroll/drag updates into one draw per frame.
         if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
         this._zoomRafId = requestAnimationFrame(() => {
             this._zoomRafId = null;
-            this._renderZoom();
-            this._updatePlayheadOverlay();
+            this._paint();
         });
     }
 
@@ -214,6 +409,7 @@ export default class WaveformDisplay {
     // ── Overview ─────────────────────────────────────────────────────────
 
     _renderOverview() {
+        if (this._mode === 'compact') return; // overview hidden in compact
         const canvas = this._overviewCanvas;
         const rect = canvas.getBoundingClientRect();
         if (rect.width === 0) return;
@@ -221,6 +417,44 @@ export default class WaveformDisplay {
         const w = rect.width;
         const h = rect.height;
         const ctx = this._resizeCanvas(canvas, w, h);
+
+        // Re-render the (expensive) bars+cues into the offscreen cache only when
+        // the data or the canvas size changed — not on every playback frame.
+        if (this._overviewDirty || this._overviewCacheW !== w || this._overviewCacheH !== h) {
+            this._renderOverviewCache(w, h);
+            this._overviewCacheW = w;
+            this._overviewCacheH = h;
+            this._overviewDirty = false;
+        }
+
+        // Cheap per-frame path: blit the cached bars, then draw the moving
+        // viewport indicator on top.
+        ctx.drawImage(this._overviewCache, 0, 0, w, h);
+
+        const visibleFrac = 1.0 / this._zoom;
+        const x1 = Math.max(0, this._offset * w);
+        const x2 = Math.min(w, (this._offset + visibleFrac) * w);
+        if (this._zoom > 1.0 && x2 > x1) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.fillRect(x1, 0, x2 - x1, h);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x1, 0, x2 - x1, h);
+        }
+    }
+
+    // Render the static overview (background + 3-band bars + cue ticks) into the
+    // offscreen cache canvas at the given CSS size.
+    _renderOverviewCache(w, h) {
+        const cache = this._overviewCache;
+        const dprW = Math.round(w * devicePixelRatio);
+        const dprH = Math.round(h * devicePixelRatio);
+        if (cache.width !== dprW || cache.height !== dprH) {
+            cache.width = dprW;
+            cache.height = dprH;
+        }
+        const ctx = cache.getContext('2d');
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 
         ctx.fillStyle = '#0d0d0d';
         ctx.fillRect(0, 0, w, h);
@@ -232,8 +466,15 @@ export default class WaveformDisplay {
             // Rekordbox-style stacked bars: rendered from the bottom, no mirroring.
             // Bass (blue) fills from the bottom, mid (orange) stacks on top,
             // high (white) at the tip. Total bar height = overall amplitude.
-            // Color fractions = relative band contributions, normalised to sum to 1.
+            //
+            // First pass: average each pixel's band amplitudes. Second: smooth
+            // them with the envelope follower (a moving floor) so the preview
+            // reads as a continuous silhouette instead of a spiky comb.
             const scale = h * 0.95;
+            const ampA = new Float32Array(w); // overall loudness → bar height
+            const bandB = new Float32Array(w);
+            const bandM = new Float32Array(w);
+            const bandH = new Float32Array(w);
 
             for (let px = 0; px < w; px++) {
                 const iStart = Math.floor(px * data.length / w);
@@ -245,46 +486,49 @@ export default class WaveformDisplay {
                     sumR += d.r; sumG += d.g; sumB += d.b; count++;
                 }
                 if (count === 0) continue;
-                const maxAmp = sumAmp / count;
-                if (maxAmp < 0.005) continue;
+                const avgAmp = sumAmp / count;
+                ampA[px] = avgAmp;
+                const [b, m, hi] = bandAmps(avgAmp, sumR / count, sumG / count, sumB / count);
+                bandB[px] = b; bandM[px] = m; bandH[px] = hi;
+            }
 
-                const [bA, mA, hA] = bandAmps(maxAmp, sumR / count, sumG / count, sumB / count);
-                const total = bA + mA + hA;
+            // Envelope-smooth height + band split so the preview is a continuous
+            // silhouette rather than a spiky comb.
+            const ampE = applyEnvelope(ampA, 1, 0.86);
+            const bE = applyEnvelope(bandB, 1, 0.86);
+            const mE = applyEnvelope(bandM, 1, 0.86);
+            const hE = applyEnvelope(bandH, 1, 0.86);
+
+            for (let px = 0; px < w; px++) {
+                if (ampE[px] < 0.005) continue;
+                const total = bE[px] + mE[px] + hE[px];
                 if (total <= 0) continue;
-
-                // Total column height proportional to amplitude
-                const colH = maxAmp * scale;
-
-                // Each band's share of the column, stacked bottom → top
-                const bassH = (bA / total) * colH;
-                const midH  = (mA / total) * colH;
-                const highH = (hA / total) * colH;
+                const colH = ampE[px] * scale;
+                const bassH = (bE[px] / total) * colH;
+                const midH  = (mE[px] / total) * colH;
+                const highH = (hE[px] / total) * colH;
 
                 let y = h;
-
                 ctx.fillStyle = COLOR_BASS;
                 ctx.fillRect(px, y - bassH, 1, bassH);
                 y -= bassH;
-
                 ctx.fillStyle = COLOR_MID;
                 ctx.fillRect(px, y - midH, 1, midH);
                 y -= midH;
-
                 ctx.fillStyle = COLOR_HIGH;
                 ctx.fillRect(px, y - highH, 1, highH);
             }
         }
 
-        // Viewport indicator
-        const visibleFrac = 1.0 / this._zoom;
-        const x1 = this._offset * w;
-        const x2 = (this._offset + visibleFrac) * w;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.fillRect(x1, 0, x2 - x1, h);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(x1, 0, x2 - x1, h);
-
+        // Cue ticks across the full track
+        const cues = this._data?.cues;
+        if (cues) {
+            for (const cue of cues) {
+                const frac = Math.max(0, Math.min(1, cue.position ?? 0));
+                ctx.fillStyle = cue.color || '#4ade80';
+                ctx.fillRect(frac * w - 0.5, 0, 1, h);
+            }
+        }
     }
 
     _renderMonoOverview(ctx, w, h) {
@@ -333,6 +577,25 @@ export default class WaveformDisplay {
 
         this._renderBeatGrid(ctx, w, h, startFrac, endFrac);
         this._renderTimeGrid(ctx, w, h, startFrac, endFrac);
+        this._renderCues(ctx, w, h, startFrac, endFrac);
+    }
+
+    // Hot-cue markers: a vertical line + a dot at the top, matching the
+    // compact strip so the two views agree. Positions are 0–1 fractions.
+    _renderCues(ctx, w, h, startFrac, endFrac) {
+        const cues = this._data?.cues;
+        if (!cues || cues.length === 0 || endFrac <= startFrac) return;
+        for (const cue of cues) {
+            const frac = Math.max(0, Math.min(1, cue.position ?? 0));
+            if (frac < startFrac || frac > endFrac) continue;
+            const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
+            const color = cue.color || '#4ade80';
+            ctx.fillStyle = color;
+            ctx.fillRect(x - 0.5, 0, 1, h);
+            ctx.beginPath();
+            ctx.arc(x, 2.5, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 
     _renderLexiconWaveform(ctx, w, h, data, startFrac, endFrac) {
@@ -396,10 +659,12 @@ export default class WaveformDisplay {
         }
 
         // ── Envelope (full range including lead-in) ─────────────────
-        // Fast decay to match Rekordbox's sharp transient spikes
-        const bassE = applyEnvelope(bassA, entriesPerPixel, 0.65);
-        const midE  = applyEnvelope(midA,  entriesPerPixel, 0.65);
-        const highE = applyEnvelope(highA, entriesPerPixel, 0.65);
+        // Expanded: fast decay → sharp Rekordbox-style transient spikes.
+        // Compact: slower decay → smoother, simpler full-track silhouette.
+        const decay = this._mode === 'compact' ? 0.88 : 0.65;
+        const bassE = applyEnvelope(bassA, entriesPerPixel, decay);
+        const midE  = applyEnvelope(midA,  entriesPerPixel, decay);
+        const highE = applyEnvelope(highA, entriesPerPixel, decay);
 
         // ── Draw visible portion only (skip lead-in buffer) ─────────
         const yCenter = h / 2;
@@ -447,6 +712,14 @@ export default class WaveformDisplay {
         const durationMs = this._data?.duration_ms;
         const bpm = this._data?.bpm;
         if (!beats || beats.length === 0 || !durationMs) return;
+
+        // Compact shows the whole track, so a full per-beat grid is an
+        // unreadable wash. Draw only phrase boundaries (every 4 bars) as thin
+        // subtle ticks — enough rhythmic reference without the clutter.
+        if (this._mode === 'compact') {
+            this._renderCompactBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs);
+            return;
+        }
 
         let barNumber = 0;
         let firstBeatDrawn = false;
@@ -507,6 +780,27 @@ export default class WaveformDisplay {
         }
     }
 
+    // Phrase-only grid for the compact full-track view.
+    _renderCompactBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs) {
+        const span = endFrac - startFrac;
+        if (span <= 0) return;
+        let barNumber = 0;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.lineWidth = 1;
+        for (const beat of beats) {
+            if (beat.bar_position !== 1) continue;
+            barNumber++;
+            if (barNumber % 4 !== 1) continue; // phrase boundary only
+            const frac = beat.time_ms / durationMs;
+            if (frac < startFrac || frac > endFrac) continue;
+            const x = ((frac - startFrac) / span) * w;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, h);
+            ctx.stroke();
+        }
+    }
+
     _renderTimeGrid(ctx, w, h, startFrac, endFrac) {
         const durationMs = this._data?.duration_ms;
         if (!durationMs) return;
@@ -522,18 +816,24 @@ export default class WaveformDisplay {
         const endMs = endFrac * durationMs;
         const firstTick = Math.ceil(startMs / intervalMs) * intervalMs;
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-        ctx.font = '9px system-ui';
+        // Compact: tuck the labels right against the bottom edge, smaller and
+        // dimmer, so they sit out of the way of the (now taller) waveform.
+        const compact = this._mode === 'compact';
+        ctx.fillStyle = compact ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.35)';
+        ctx.font = compact ? '8px system-ui' : '9px system-ui';
         ctx.textAlign = 'left';
+        ctx.textBaseline = compact ? 'bottom' : 'alphabetic';
+        const yLabel = compact ? h : h - 3;
 
         for (let ms = firstTick; ms <= endMs; ms += intervalMs) {
             const x = ((ms / durationMs - startFrac) / (endFrac - startFrac)) * w;
             const secs = Math.floor(ms / 1000);
             ctx.fillText(
                 `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`,
-                x + 2, h - 3,
+                x + 2, yLabel,
             );
         }
+        ctx.textBaseline = 'alphabetic';
     }
 
     // ── Interaction ───────────────────────────────────────────────────────
@@ -542,63 +842,108 @@ export default class WaveformDisplay {
         return Math.max(0, Math.min(1.0 - 1.0 / this._zoom, offset));
     }
 
+    _defaultCursor() {
+        return this._mode === 'compact' ? 'pointer' : 'default';
+    }
+
+    // Track fraction (0–1) under a clientX on the zoom canvas, honouring the
+    // current viewport. In compact (zoom 1, offset 0) this is just x/width.
+    _zoomFracAtClientX(clientX) {
+        const rect = this._zoomCanvas.getBoundingClientRect();
+        const clickFrac = (clientX - rect.left) / rect.width;
+        const visibleFrac = 1.0 / this._zoom;
+        return Math.max(0, Math.min(1, this._offset + clickFrac * visibleFrac));
+    }
+
     _bindEvents() {
+        // Overview click (expanded only) seeks to the clicked fraction.
         this._onOverviewClick = (e) => {
             const rect = this._overviewCanvas.getBoundingClientRect();
-            const frac = (e.clientX - rect.left) / rect.width;
-            this._offset = this._clampOffset(frac - 0.5 / this._zoom);
+            const frac = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            this._playheadFrac = frac;
+            this._phClock = frac;
+            this._phTarget = frac;
+            this._phTargetAt = this._now();
+            if (this._lockPlayhead) this._offset = this._centeredOffset();
             this._render();
-            if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
+            this._updatePlayheadOverlay();
             if (this.onSeek) this.onSeek(frac);
         };
 
         this._onMouseDown = (e) => {
+            if (e.button !== 0) return;
             this._dragging = true;
             this._dragMoved = false;
+            this._gesture = 'none';
+            this._scrubbing = false;
             this._dragStartX = e.clientX;
             this._dragStartY = e.clientY;
             this._dragStartOffset = this._offset;
             this._dragStartZoom = this._zoom;
-            this._zoomCanvas.style.cursor = 'grabbing';
+            this._dragStartPlayhead = this._playheadFrac < 0 ? 0 : this._playheadFrac;
             e.preventDefault();
         };
 
         this._onMouseMove = (e) => {
             if (!this._dragging) return;
-            const dy = this._dragStartY - e.clientY;
-            if (Math.abs(e.clientX - this._dragStartX) > 4 || Math.abs(dy) > 4) this._dragMoved = true;
             const dx = e.clientX - this._dragStartX;
-            this._zoom = Math.max(1.0, Math.min(512.0, this._dragStartZoom * Math.pow(1.015, dy)));
-            if (this._zoom > 1.0) {
-                const rect = this._zoomCanvas.getBoundingClientRect();
-                this._offset = this._clampOffset(this._dragStartOffset - dx / rect.width / this._zoom);
+            const dy = this._dragStartY - e.clientY;
+
+            // Dragging always scrubs (both modes). Zoom is button/wheel only.
+            if (this._gesture === 'none') {
+                if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+                this._dragMoved = true;
+                this._gesture = 'scrub';
+                this._scrubbing = true;
+                this._zoomCanvas.style.cursor = 'ew-resize';
             }
+
+            // Visual-only: move the playhead now, defer the seek to mouseup so we
+            // don't flood the audio backend. In expanded the waveform scrolls
+            // under the centred playhead.
+            let frac;
+            if (this._lockPlayhead) {
+                const rect = this._zoomCanvas.getBoundingClientRect();
+                const visibleFrac = 1.0 / this._zoom;
+                frac = this._dragStartPlayhead - (dx / rect.width) * visibleFrac;
+            } else {
+                frac = this._zoomFracAtClientX(e.clientX);
+            }
+            this._playheadFrac = Math.max(0, Math.min(1, frac));
+            if (this._lockPlayhead) this._offset = this._centeredOffset();
             this._render();
-            if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
+            this._updatePlayheadOverlay();
         };
 
         this._onMouseUp = (e) => {
-            if (this._dragging) {
-                if (!this._dragMoved && this.onSeek && this._data?.duration_ms) {
-                    const rect = this._zoomCanvas.getBoundingClientRect();
-                    const clickFrac = (e.clientX - rect.left) / rect.width;
-                    const visibleFrac = 1.0 / this._zoom;
-                    const seekFrac = this._offset + clickFrac * visibleFrac;
-                    this.onSeek(Math.max(0, Math.min(1, seekFrac)));
-                }
-                this._dragging = false;
-                this._zoomCanvas.style.cursor = 'default';
+            if (!this._dragging) return;
+            this._dragging = false;
+            this._zoomCanvas.style.cursor = this._defaultCursor();
+
+            // Scrub drag or a plain click — issue the actual seek here.
+            const frac = this._gesture === 'scrub'
+                ? this._playheadFrac
+                : this._zoomFracAtClientX(e.clientX);
+            this._gesture = 'none';
+            this._scrubbing = false;
+            if (this.onSeek && this._data?.duration_ms) {
+                this._playheadFrac = Math.max(0, Math.min(1, frac));
+                this._phClock = this._playheadFrac;
+                this._phTarget = this._playheadFrac;
+                this._phTargetAt = this._now();
+                this.onSeek(this._playheadFrac);
             }
         };
 
+        // Wheel zooms in expanded (centred); compact ignores it.
         this._onWheel = (e) => {
-            if (this._zoom <= 1.0) return;
+            if (this._mode === 'compact') return;
             e.preventDefault();
-            this._offset = this._clampOffset(this._offset + (e.deltaX + e.deltaY) * 0.005 / this._zoom);
-            this._render();
-            if (this.onViewportChange) this.onViewportChange(this._zoom, this._offset);
+            const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+            this._applyZoom(this._zoom * factor);
         };
 
+        this._zoomCanvas.style.cursor = this._defaultCursor();
         this._overviewCanvas.addEventListener('click', this._onOverviewClick);
         this._zoomCanvas.addEventListener('mousedown', this._onMouseDown);
         window.addEventListener('mousemove', this._onMouseMove);
