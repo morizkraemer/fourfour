@@ -1,7 +1,16 @@
+import { mount } from 'svelte';
 import { el } from '../design-system/utils/dom.js';
-import { createButton } from '../design-system/index.js';
+import Button from '../design-system/components/Button.svelte';
 
 export const meta = { title: 'Button', layer: 'primitive' };
+
+// Mount a Svelte Button into a layout-neutral host so the artboard contract
+// (return one DOM node) is satisfied while the component owns its own render.
+function btn(props) {
+  const target = el('span', { style: { display: 'contents' } });
+  mount(Button, { target, props });
+  return target;
+}
 
 const cap = (t) =>
   el('div', {
@@ -35,26 +44,26 @@ export default function render() {
     [
       cap('VARIANTS · (hover is live)'),
       row([
-        createButton({ label: 'Curate', variant: 'primary' }).element,
-        createButton({ label: 'Import', variant: 'default' }).element,
-        createButton({ label: 'Filter', variant: 'ghost' }).element,
-        createButton({ label: 'Delete', variant: 'destructive' }).element,
+        btn({ label: 'Curate', variant: 'primary' }),
+        btn({ label: 'Import', variant: 'default' }),
+        btn({ label: 'Filter', variant: 'ghost' }),
+        btn({ label: 'Delete', variant: 'destructive' }),
       ]),
       cap('WITH ICON'),
       row([
-        createButton({ label: 'Add', icon: 'plus', variant: 'default' }).element,
-        createButton({ label: 'Search', icon: 'search', variant: 'ghost' }).element,
+        btn({ label: 'Add', icon: 'plus', variant: 'default' }),
+        btn({ label: 'Search', icon: 'search', variant: 'ghost' }),
       ]),
       cap('ICON BUTTON'),
       row([
-        createButton({ icon: 'eject', iconOnly: true, variant: 'ghost' }).element,
-        createButton({ icon: 'x', iconOnly: true, variant: 'ghost' }).element,
-        createButton({ icon: 'disc', iconOnly: true, variant: 'default' }).element,
+        btn({ icon: 'eject', iconOnly: true, variant: 'ghost' }),
+        btn({ icon: 'x', iconOnly: true, variant: 'ghost' }),
+        btn({ icon: 'disc', iconOnly: true, variant: 'default' }),
       ]),
       cap('DISABLED'),
       row([
-        createButton({ label: 'Curate', variant: 'primary', disabled: true }).element,
-        createButton({ label: 'Import', variant: 'default', disabled: true }).element,
+        btn({ label: 'Curate', variant: 'primary', disabled: true }),
+        btn({ label: 'Import', variant: 'default', disabled: true }),
       ]),
     ]
   );

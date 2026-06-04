@@ -1,5 +1,33 @@
 # Todo
 
+## 2026-06-04 Translate design-system → Svelte 5 (production Tauri app)
+
+Branch `feat/svelte-ui`. Decisions: **Path A** (single Svelte source; extend the `viewport` engine to
+compile `.svelte`) · **repurpose `pioneer-test-ui`** as the app · CSS lifts byte-identical, globally
+imported · port is mechanical (`createX({props})→{element}` ⟶ `X.svelte` `$props()`, same `ff-*` classes).
+
+Findings: viewport hardcoded its Vite config (no plugin hook) — patched. A **real waveform renderer**
+already exists at `pioneer-test-ui/frontend/app.js:815–1045` (color/mono/peaks, 1–64× zoom, pan,
+beat+time grid, fed by `get_analysis_data`); lacks playhead/cues/beat-snap. Phase 7 extracts it.
+
+- [x] **1. Engine spike (GATE)** — patched `viewport/bin/viewport.js` to merge `viewport.vite.js → plugins`
+      (Node-side, kept off the browser-imported `viewport.config.js`); added `svelte@5.56` +
+      `@sveltejs/vite-plugin-svelte@5.1`; `viewport.vite.js` adds `svelte()`. Ported `Button/Icon/Kbd.svelte`
+      (+ shared `icon-glyphs.js`); `button.artboard.js` mounts the Svelte Button via `mount()`.
+      Verified headless: all `.svelte` + entry transform 200, no compile errors, icon size reactive.
+      ⚠ Engine edit is in the **separate `viewport` repo (on `main`, uncommitted)** — needs review.
+- [ ] **2. Foundations** — global `tokens.css`/`base.css`; barrel re-exports `.svelte`; TS config; retire `dom.js`.
+- [ ] **3. Primitives (tiered, parallel subagents)** — leaves → composed. ~41 total. Verify each tier.
+- [ ] **4. Modules** — sidebar, global-header, table, detail-pane, player, statusbar(+v2); export sub-builders.
+- [ ] **5. Composite** — `screen-browse` recomposed from Svelte modules; verify vs 1440×900.
+- [ ] **6. Tauri shell + state** — repurpose `pioneer-test-ui`: Vite+Svelte+TS, `@tauri-apps/api`, runes stores;
+      wire Browse to `scan_directory`/`analyze_tracks`/`load_state`.
+- [ ] **7. Waveform** — extract `app.js:815–1045` → `WaveformRenderer` class + Svelte wrapper; add
+      playhead + cue interaction. Confirm base (this vs colleague's) first.
+
+Out of scope (later): Curate/Sync + settings + overlay composites; real spectral-data pipeline; missing
+backend commands (playlist CRUD, number-tag persistence).
+
 ## 2026-06-04 Migrate Prototyping To Viewport Package
 
 - [x] Copy project-owned artboards into `prototyping/viewport/artboards`.

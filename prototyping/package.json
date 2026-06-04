@@ -7,7 +7,9 @@
     "dev": "viewport --port 5180"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
     "playwright": "^1.60.0",
+    "svelte": "^5.56.1",
     "viewport": "file:../../viewport"
   }
 }
