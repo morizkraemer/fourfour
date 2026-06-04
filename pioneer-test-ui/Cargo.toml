@@ -12,6 +12,7 @@ pioneer_usb_writer = { path = "../pioneer-usb-writer", package = "pioneer-usb-wr
 pioneer_library = { path = "../pioneer-library", package = "pioneer-library" }
 anyhow = "1"
 tokio = { version = "1.52.1", features = ["rt", "process", "time", "macros"] }
+rodio = { version = "0.20", default-features = true, features = ["symphonia-all"] }
 
 
 [target.'cfg(target_os = "macos")'.dependencies]

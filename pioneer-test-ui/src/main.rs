@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod dto;
+mod playback;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -13,6 +14,9 @@ use pioneer_usb_writer::models;
 use pioneer_usb_writer::scanner;
 
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
+use playback::{
+    playback_pause, playback_play, playback_resume, playback_seek, playback_stop, PlaybackEngine,
+};
 
 // ---------------------------------------------------------------------------
 // Shared application state
@@ -53,7 +57,6 @@ fn debug_log(app: &AppHandle, level: &str, message: &str) {
 
 fn debug_info(app: &AppHandle, msg: &str)  { debug_log(app, "info", msg); }
 fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
-fn debug_warn(app: &AppHandle, msg: &str)  { debug_log(app, "warn", msg); }
 fn debug_err(app: &AppHandle, msg: &str)   { debug_log(app, "err", msg); }
 fn debug_dim(app: &AppHandle, msg: &str)   { debug_log(app, "dim", msg); }
 
@@ -341,7 +344,7 @@ async fn analyze_tracks(
             let t0 = std::time::Instant::now();
 
             let result: Result<(models::AnalysisResult, String), String> = async {
-                let mut child = match tokio::process::Command::new(&python_cmd)
+                let child = match tokio::process::Command::new(&python_cmd)
                     .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
@@ -689,7 +692,7 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
     let python = resolve_python();
 
     let output = tokio::task::spawn_blocking(move || {
-        let mut child = std::process::Command::new(&python)
+        let child = std::process::Command::new(&python)
             .args(["-m", "fourfour_analysis", "analyze", &path, "--json"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -1026,6 +1029,11 @@ fn main() {
             analyze_track_python,
             get_analysis_data,
             get_track_artwork,
+            playback_play,
+            playback_pause,
+            playback_resume,
+            playback_seek,
+            playback_stop,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path
@@ -1034,6 +1042,9 @@ fn main() {
             let library = LocalLibrary::open(&db_path)
                 .expect("Failed to open library database");
             app.manage(Arc::new(Mutex::new(library)));
+
+            let playback = PlaybackEngine::new().expect("Failed to initialize audio playback");
+            app.manage(Arc::new(playback));
 
             // Ensure the window is positioned on the primary monitor and focused.
             if let Some(window) = app.get_webview_window("main") {
