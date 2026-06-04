@@ -219,28 +219,37 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
         }
     }
 
-    // Parse Pioneer 3-band color waveform
+    // Parse 3-band color waveform. The calibrated backend emits objects
+    // `{r,g,b}` (0–127) under `waveform_colors`/`waveform_overview`; older
+    // output used `[low,mid,high]` arrays under `pioneer_3band_*`. Accept both.
     let color_waveform = {
-        let parse_3band = |key: &str| -> Vec<[u8; 3]> {
-            json.get(key)
-                .and_then(|v| v.as_array())
+        let parse_3band = |keys: &[&str]| -> Vec<[u8; 3]> {
+            keys.iter()
+                .find_map(|k| json.get(*k).and_then(|v| v.as_array()))
                 .map(|arr| {
-                    arr.iter().map(|entry| {
-                        if let Some(a) = entry.as_array() {
-                            let low = a.get(0).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
-                            let mid = a.get(1).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
-                            let high = a.get(2).and_then(|v| v.as_u64()).unwrap_or(0) as u8;
-                            [low, mid, high]
-                        } else {
-                            [0, 0, 0]
-                        }
-                    }).collect()
+                    arr.iter()
+                        .map(|entry| {
+                            if let Some(obj) = entry.as_object() {
+                                let ch = |name: &str| {
+                                    obj.get(name).and_then(|v| v.as_u64()).unwrap_or(0) as u8
+                                };
+                                [ch("r"), ch("g"), ch("b")]
+                            } else if let Some(a) = entry.as_array() {
+                                let ch = |i: usize| {
+                                    a.get(i).and_then(|v| v.as_u64()).unwrap_or(0) as u8
+                                };
+                                [ch(0), ch(1), ch(2)]
+                            } else {
+                                [0, 0, 0]
+                            }
+                        })
+                        .collect()
                 })
                 .unwrap_or_default()
         };
 
-        let detail = parse_3band("pioneer_3band_detail");
-        let overview = parse_3band("pioneer_3band_overview");
+        let detail = parse_3band(&["waveform_colors", "pioneer_3band_detail"]);
+        let overview = parse_3band(&["waveform_overview", "pioneer_3band_overview"]);
 
         if !detail.is_empty() {
             Some(models::ColorWaveform { detail, overview })
@@ -352,7 +361,7 @@ async fn run_track_analysis(
 
             let result: Result<(models::AnalysisResult, String), String> = async {
                 let child = match tokio::process::Command::new(&python_cmd)
-                    .args(["-m", "fourfour_analysis", "analyze", &path_str, "--json"])
+                    .args(["-m", "fourfour_analysis", "analyze", &path_str, "--backend", "deeprhythm_essentia", "--json"])
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::piped())
                     .kill_on_drop(true)
@@ -742,7 +751,7 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
 
     let output = tokio::task::spawn_blocking(move || {
         let child = std::process::Command::new(&python)
-            .args(["-m", "fourfour_analysis", "analyze", &path, "--json"])
+            .args(["-m", "fourfour_analysis", "analyze", &path, "--backend", "deeprhythm_essentia", "--json"])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
@@ -783,8 +792,15 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
     output
 }
 
-/// Max RGB waveform samples sent over IPC (player strip / table). Full detail is ~150/sec.
+/// Max RGB waveform samples sent over IPC for the compact strip / table. Full detail is ~150/sec.
 const PLAYER_COLOR_WAVEFORM_MAX: usize = 2048;
+
+/// Max RGB samples for the expanded player's zoom view. Higher cap so zooming in
+/// reveals real per-column detail (≈ a 13-min track at 150 cols/sec downsampled).
+const PLAYER_COLOR_DETAIL_MAX: usize = 12000;
+
+/// Fixed-width overview bar for the expanded player (Pioneer PWV6 length).
+const PLAYER_COLOR_OVERVIEW_LEN: usize = 1200;
 
 fn downsample_3band(source: &[[u8; 3]], max_samples: usize) -> Vec<[u8; 3]> {
     if source.len() <= max_samples {
@@ -862,7 +878,8 @@ fn waveform_color_json(entries: &[[u8; 3]]) -> Vec<serde_json::Value> {
         .map(|[low, mid, high]| {
             let max_val = (*low).max(*mid).max(*high) as f64;
             let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
-            let amp = max_val / 96.0;
+            // Calibrated bands are 0–127; normalize amplitude to that full range.
+            let amp = max_val / 127.0;
             serde_json::json!({
                 "amp": amp.min(1.0),
                 "r": *low as f64 * scale,
@@ -897,6 +914,25 @@ fn get_analysis_data(
                 .map(|cw| waveform_color_json(&color_waveform_for_player(cw)))
                 .unwrap_or_default();
 
+            // Higher-resolution detail + fixed overview for the expanded player's
+            // dual-view renderer. Compact strip keeps using `waveform_color` above.
+            let waveform_color_detail: Vec<serde_json::Value> = a
+                .color_waveform
+                .as_ref()
+                .map(|cw| {
+                    let src = if cw.detail.is_empty() { &cw.overview } else { &cw.detail };
+                    waveform_color_json(&downsample_3band(src, PLAYER_COLOR_DETAIL_MAX))
+                })
+                .unwrap_or_default();
+            let waveform_overview: Vec<serde_json::Value> = a
+                .color_waveform
+                .as_ref()
+                .map(|cw| {
+                    let src = if cw.overview.is_empty() { &cw.detail } else { &cw.overview };
+                    waveform_color_json(&downsample_3band(src, PLAYER_COLOR_OVERVIEW_LEN))
+                })
+                .unwrap_or_default();
+
             // Serialize beat grid for frontend waveform rendering
             let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
                 serde_json::json!({
@@ -917,6 +953,8 @@ fn get_analysis_data(
             Ok(serde_json::json!({
                 "waveform_preview": effective_preview(&a).unwrap_or_default(),
                 "waveform_color": waveform_color,
+                "waveform_color_detail": waveform_color_detail,
+                "waveform_overview": waveform_overview,
                 "waveform_peaks": serde_json::Value::Array(vec![]),
                 "bpm": a.bpm,
                 "key": a.key,

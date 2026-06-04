@@ -5,6 +5,7 @@
 <script>
   import { onMount } from 'svelte';
   import { PlayerCompact } from '$ds';
+  import ExpandedPlayer from './ExpandedPlayer.svelte';
   import {
     player,
     currentTime,
@@ -14,6 +15,7 @@
     seekToProgress,
     cuePreviewStart,
     cuePreviewStop,
+    toggleExpanded,
   } from '../stores/player.svelte.ts';
 
   let playerRoot;
@@ -73,8 +75,13 @@
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
     onCueUp={player.track ? cuePreviewStop : undefined}
+    onExpand={player.track ? toggleExpanded : undefined}
   />
 </div>
+
+{#if player.expanded && player.track}
+  <ExpandedPlayer />
+{/if}
 
 <style>
   .ff-player-module {

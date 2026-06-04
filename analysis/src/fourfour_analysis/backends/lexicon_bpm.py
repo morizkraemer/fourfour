@@ -30,6 +30,7 @@ class BpmResult:
     bpm: float
     confidence: float  # 0-1, ratio of top score to total
     beats: list[float]  # beat positions in seconds
+    anchor_idx: int = 0  # index in beats[] of the detected first musical beat
 
 
 def analyze_tempo(
@@ -90,9 +91,9 @@ def analyze_tempo(
     confidence = max(0.0, min(1.0, confidence))
 
     # Generate beat positions
-    beats = _generate_beats(audio, sr, best_bpm, duration)
+    beats, anchor_idx = _generate_beats(audio, sr, best_bpm, duration)
 
-    return BpmResult(bpm=best_bpm, confidence=confidence, beats=beats)
+    return BpmResult(bpm=best_bpm, confidence=confidence, beats=beats, anchor_idx=anchor_idx)
 
 
 def _energy_envelope(audio: np.ndarray, sr: int) -> np.ndarray:
@@ -314,38 +315,50 @@ def _generate_beats(
     sr: int,
     bpm: float,
     duration: float,
-) -> list[float]:
-    """Generate beat grid aligned to detected onsets."""
+) -> tuple[list[float], int]:
+    """Generate beat grid aligned to detected onset.
+
+    Returns (beats, anchor_idx) where beats[anchor_idx] is the detected
+    first musical beat (bar_position=1). Beats extend backward to t=0 so
+    the grid covers the whole track.
+    """
     beat_interval = 60.0 / bpm
 
-    # Find the first significant onset
+    # Detect first onset via energy derivative — catches kick transients even
+    # when a sustained bass note that follows is louder in absolute terms.
     envelope = _energy_envelope(audio, sr)
     window_ms = 10
     window_size = max(2, int(sr * window_ms / 1000))
     hop = max(1, window_size // 2)
 
-    # Find first frame above threshold
-    threshold = np.max(envelope) * 0.3 if len(envelope) > 0 else 0
     first_onset_frame = 0
-    for i in range(len(envelope)):
-        if envelope[i] > threshold:
-            first_onset_frame = i
-            break
+    if len(envelope) > 1:
+        rising = np.maximum(np.diff(envelope, prepend=envelope[0]), 0)
+        threshold = np.max(rising) * 0.12
+        for i in range(len(rising)):
+            if rising[i] > threshold:
+                first_onset_frame = i
+                break
 
     first_beat_sec = first_onset_frame * hop / sr
 
-    # Snap to nearest beat position
-    if first_beat_sec > beat_interval:
-        # Walk back to find where beat 0 would be
-        n = int(first_beat_sec / beat_interval)
-        candidate = first_beat_sec - n * beat_interval
-        if candidate < 0:
-            candidate += beat_interval
-        first_beat_sec = candidate
+    # Extend forward from first beat
+    num_forward = int((duration - first_beat_sec) / beat_interval) + 1
+    beats_forward = [first_beat_sec + i * beat_interval for i in range(num_forward)]
 
-    # Generate grid
-    num_beats = int((duration - first_beat_sec) / beat_interval) + 1
-    beats = [first_beat_sec + i * beat_interval for i in range(num_beats)]
-    beats = [b for b in beats if 0 <= b <= duration]
+    # Extend backward from first beat to cover the whole track
+    beats_backward = []
+    t = first_beat_sec - beat_interval
+    while t >= 0.0:
+        beats_backward.append(t)
+        t -= beat_interval
+    beats_backward.reverse()
 
-    return beats
+    beats = beats_backward + beats_forward
+    anchor_idx = len(beats_backward)  # index of the detected first beat
+
+    beats = [b for b in beats if 0.0 <= b <= duration]
+    # anchor_idx may shift if first beat was beyond duration (unlikely) — clamp
+    anchor_idx = min(anchor_idx, len(beats) - 1)
+
+    return beats, anchor_idx

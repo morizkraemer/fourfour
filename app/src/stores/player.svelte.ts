@@ -50,6 +50,10 @@ export interface PlayerTrack {
   cues: PlayerCue[];
   beats: BeatMarker[];
   colorData: ColorWaveSample[] | null;
+  // Higher-res detail + fixed overview for the expanded dual-view player.
+  // (compact strip uses colorData; these stay null until analysis loads.)
+  colorDetail: ColorWaveSample[] | null;
+  colorOverview: ColorWaveSample[] | null;
   previewBytes: number[] | null;
 }
 
@@ -60,9 +64,19 @@ export const player = $state({
   progress: 0.0,
   track: null as PlayerTrack | null,
   loading: false,
+  expanded: false,
   levelLeft: 0,
   levelRight: 0,
 });
+
+/** Toggle the full-screen expanded player (dual-view waveform). */
+export function toggleExpanded() {
+  player.expanded = !player.expanded;
+}
+
+export function setExpanded(value: boolean) {
+  player.expanded = value;
+}
 
 let loadGeneration = 0;
 let tickUnlisten: (() => void) | null = null;
@@ -121,6 +135,12 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   } else {
     next.colorData = null;
   }
+  next.colorDetail = isValidColorWaveform(analysis.waveform_color_detail)
+    ? analysis.waveform_color_detail
+    : next.colorData;
+  next.colorOverview = isValidColorWaveform(analysis.waveform_overview)
+    ? analysis.waveform_overview
+    : next.colorData;
   const preview = previewFromAnalysis(analysis);
   if (preview) next.previewBytes = preview;
   if (analysis.beats?.length) {
@@ -232,6 +252,8 @@ function buildBaseTrack(trackInfo: BackendTrackInfo, cover: string): PlayerTrack
     cues: [],
     beats: [],
     colorData: null,
+    colorDetail: null,
+    colorOverview: null,
     previewBytes: null,
   };
 }

@@ -25,3 +25,6 @@ analysis/src/fourfour_analysis/__pycache__/
 analysis/src/fourfour_analysis/backends/__pycache__/
 analysis/tests/__pycache__/
 CLAUDE.md
+# Generated waveform harness fixtures (regenerate via fourfour_analysis)
+app/public/wf-display.json
+app/public/wf.json

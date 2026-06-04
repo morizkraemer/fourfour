@@ -9,7 +9,7 @@ from fourfour_analysis.backends.base import AnalysisBackend
 from fourfour_analysis.backends.lexicon_bpm import analyze_tempo
 from fourfour_analysis.backends.lexicon_key import detect_key
 from fourfour_analysis.backends.lexicon_energy import compute_energy
-from fourfour_analysis.backends.lexicon_waveform import generate_waveform
+from fourfour_analysis.backends.lexicon_waveform import generate_waveform, generate_waveform_filterbank, generate_overview, generate_preview
 from fourfour_analysis.backends.lexicon_cues import detect_sections
 from fourfour_analysis.audio_io import load_audio, preprocess_tempo, preprocess_key, preprocess_waveform
 from fourfour_analysis.types import (
@@ -57,11 +57,13 @@ class LexiconPortBackend(AnalysisBackend):
         tempo_audio = None
         bpm = None
         beats = []
+        anchor_idx = 0
         if needs_tempo:
             tempo_audio, _ = preprocess_tempo(audio, sr)
             bpm_result = analyze_tempo(tempo_audio, sr)
             bpm = bpm_result.bpm if bpm_result else None
             beats = bpm_result.beats if bpm_result else []
+            anchor_idx = bpm_result.anchor_idx if bpm_result else 0
 
         # Key detection
         key = None
@@ -78,23 +80,29 @@ class LexiconPortBackend(AnalysisBackend):
         # Waveform
         peaks = []
         colors = []
+        overview_colors = []
+        preview = b""
         if needs_waveform:
             waveform_audio, waveform_sr = preprocess_waveform(audio, sr)
-            waveform_columns = generate_waveform(waveform_audio, waveform_sr)
+            waveform_columns = generate_waveform_filterbank(waveform_audio, waveform_sr)
             peaks = [WaveformPeak(min_val=c.min_val, max_val=c.max_val) for c in waveform_columns]
             colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in waveform_columns]
+            overview_columns = generate_overview(waveform_columns)
+            overview_colors = [WaveformColor(r=c.r, g=c.g, b=c.b) for c in overview_columns]
+            preview = generate_preview(waveform_columns)
 
         # Cue points
         cue_points = []
         if "cues" in self._features and bpm is not None and len(beats) > 0 and tempo_audio is not None:
             cue_points = detect_sections(beats, tempo_audio, sr, bpm)
 
-        # Convert beats to BeatPosition
+        # Convert beats to BeatPosition — bar_position counts from the detected
+        # anchor (first musical beat = bar_position 1), extending backward/forward.
         beat_positions = []
         for i, t in enumerate(beats):
             beat_positions.append(BeatPosition(
                 time_seconds=t,
-                bar_position=(i % 4) + 1,
+                bar_position=((i - anchor_idx) % 4) + 1,
             ))
 
         return AnalysisResult(
@@ -104,5 +112,7 @@ class LexiconPortBackend(AnalysisBackend):
             beats=beat_positions,
             waveform_peaks=peaks,
             waveform_colors=colors,
+            waveform_overview=overview_colors,
+            waveform_preview=preview,
             cue_points=cue_points,
         )
