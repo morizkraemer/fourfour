@@ -47,10 +47,6 @@
 </div>
 
 <style>
-  .ff-gheader.ff-titlebar-band {
-    padding-top: var(--ff-titlebar-search-padding-y);
-    padding-bottom: var(--ff-titlebar-search-padding-y);
-  }
   .ff-gheader {
     display: flex;
     align-items: center;

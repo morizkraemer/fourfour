@@ -32,10 +32,12 @@
     clearListFilter,
   } from './stores/ui.svelte.ts';
   import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
+  import { importIntoSource } from './menus/context-menus.ts';
   import {
     initLibrary,
     library,
-    analyzeTracks,
+    confirmAnalysisPrompt,
+    dismissAnalysisPrompt,
     importFiles,
     toggleFavoriteSlot,
   } from './stores/library.svelte.ts';
@@ -60,7 +62,7 @@
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
     if (target.closest('[contenteditable="true"]')) return true;
     if (target.closest('.ff-settings-screen')) return true;
-    return !!target.closest('dialog[open]');
+    return !!target.closest('.ff-dialog-wrapper');
   }
 
   function onGlobalKeyDown(e) {
@@ -79,9 +81,21 @@
       return;
     }
 
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      if (isEditableTarget(e.target)) return;
+      if (library.analyzing || library.syncing) return;
+      void importIntoSource(importDropTarget());
+      return;
+    }
+
     if (e.key === 'Escape' && ui.settingsOpen) {
       closeSettings();
       e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'Escape' && library.showAnalysisPrompt) {
       return;
     }
 
@@ -118,7 +132,6 @@
             if (paths?.length) {
               void importFiles(paths, {
                 targetSource: importDropTarget(),
-                analyze: true,
               });
             }
           } else if (p.type === 'cancel' || p.type === 'leave') {
@@ -189,26 +202,15 @@
 
 <Dialog
   open={library.showAnalysisPrompt}
-  title="Analyze Tracks"
-  bodyText="Import complete. Would you like to analyze these tracks now to extract BPM, key, and waveforms?"
-  onClose={() => (library.showAnalysisPrompt = false)}
+  title="Analyze imported tracks?"
+  bodyText={library.pendingAnalyzeTrackIds.length === 1
+    ? '1 track was added. Run BPM, key, and waveform analysis now?'
+    : `${library.pendingAnalyzeTrackIds.length} tracks were added. Run BPM, key, and waveform analysis now?`}
+  onClose={dismissAnalysisPrompt}
 >
   {#snippet actions()}
-    <Button
-      label="Skip"
-      variant="ghost"
-      size="small"
-      onclick={() => (library.showAnalysisPrompt = false)}
-    />
-    <Button
-      label="Analyze All"
-      variant="primary"
-      size="small"
-      onclick={async () => {
-        library.showAnalysisPrompt = false;
-        await analyzeTracks();
-      }}
-    />
+    <Button label="Not now" variant="ghost" onclick={dismissAnalysisPrompt} />
+    <Button label="Analyze" variant="primary" onclick={() => void confirmAnalysisPrompt()} />
   {/snippet}
 </Dialog>
 

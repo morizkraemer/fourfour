@@ -9,6 +9,7 @@ export type TableColumn = {
   key: string;
   label: string;
   width?: number;
+  minWidth?: number;
   flex?: boolean;
   align?: 'right';
   sort?: 'asc' | 'desc';
@@ -17,15 +18,15 @@ export type TableColumn = {
 
 const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'fav', label: 'FAV', width: 20 },
-  { key: 'index', label: '#', width: 24 },
+  { key: 'index', label: '#', width: 28 },
   { key: 'wave', label: 'PREVIEW', width: 120 },
   { key: 'cover', label: '', width: 18 },
-  { key: 'title', label: 'TITLE', flex: true },
+  { key: 'title', label: 'TITLE', flex: true, minWidth: 160 },
   { key: 'artist', label: 'ARTIST', width: 180 },
   { key: 'label', label: 'LABEL', width: 130 },
-  { key: 'bpm', label: 'BPM', width: 50 },
-  { key: 'key', label: 'KEY', width: 36 },
-  { key: 'time', label: 'TIME', width: 48 },
+  { key: 'bpm', label: 'BPM', width: 52, align: 'right' },
+  { key: 'key', label: 'KEY', width: 36, align: 'right' },
+  { key: 'time', label: 'TIME', width: 48, align: 'right' },
 ];
 
 /** Full catalog of columns users can show/hide (includes defaults + extras). */
@@ -63,9 +64,21 @@ export function initTableColumns() {
     if (saved.sortDir === 'asc' || saved.sortDir === 'desc') {
       tableColumns.sortDir = saved.sortDir;
     }
+    syncSortIndicators();
   } catch {
     /* ignore corrupt prefs */
   }
+}
+
+function syncSortIndicators() {
+  for (const col of tableColumns.columns) {
+    if (col.key === tableColumns.sortKey) {
+      col.sort = tableColumns.sortDir;
+    } else {
+      delete col.sort;
+    }
+  }
+  tableColumns.columns = [...tableColumns.columns];
 }
 
 function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
@@ -74,7 +87,13 @@ function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
   for (const s of saved) {
     const def = DEFAULT_COLUMNS.find(d => d.key === s.key)
       ?? extraColumnDef(s.key);
-    if (def) ordered.push({ ...def, ...s, hidden: s.hidden ?? false });
+    if (def) {
+      const merged = { ...def, ...s, hidden: s.hidden ?? false };
+      if (merged.flex && merged.minWidth == null && def.minWidth != null) {
+        merged.minWidth = def.minWidth;
+      }
+      ordered.push(merged);
+    }
   }
   for (const def of DEFAULT_COLUMNS) {
     if (!byKey.has(def.key)) ordered.push({ ...def });
@@ -160,6 +179,39 @@ export function toggleColumnVisibility(key: string) {
   persist();
 }
 
+export function setColumnWidth(key: string, width: number) {
+  const col = tableColumns.columns.find(c => c.key === key);
+  if (!col) return;
+  const min = minWidthForKey(key);
+  const w = Math.round(Math.max(min, width));
+  if (col.flex) {
+    col.minWidth = w;
+  } else {
+    col.width = w;
+  }
+  tableColumns.columns = [...tableColumns.columns];
+  persist();
+}
+
+function minWidthForKey(key: string): number {
+  const mins: Record<string, number> = {
+    fav: 20,
+    index: 28,
+    wave: 72,
+    cover: 18,
+    title: 96,
+    artist: 72,
+    label: 64,
+    album: 72,
+    genre: 64,
+    year: 40,
+    bpm: 44,
+    key: 32,
+    time: 44,
+  };
+  return mins[key] ?? 24;
+}
+
 export function resetColumns() {
   tableColumns.columns = DEFAULT_COLUMNS.map(c => ({ ...c }));
   tableColumns.sortKey = null;
@@ -174,24 +226,14 @@ export function setSort(key: string) {
     tableColumns.sortKey = key;
     tableColumns.sortDir = 'asc';
   }
-  for (const col of tableColumns.columns) {
-    if (col.key === key) {
-      col.sort = tableColumns.sortDir;
-    } else {
-      delete col.sort;
-    }
-  }
-  tableColumns.columns = [...tableColumns.columns];
+  syncSortIndicators();
   persist();
 }
 
 export function clearSort() {
   tableColumns.sortKey = null;
   tableColumns.sortDir = 'asc';
-  for (const col of tableColumns.columns) {
-    delete col.sort;
-  }
-  tableColumns.columns = [...tableColumns.columns];
+  syncSortIndicators();
   persist();
 }
 

@@ -14,12 +14,12 @@ export const TABLE_COLUMNS = [
   { key: 'index', label: '#', width: 24 },
   { key: 'wave', label: 'PREVIEW', width: 120 },
   { key: 'cover', label: '', width: 18 },
-  { key: 'title', label: 'TITLE', flex: true },
+  { key: 'title', label: 'TITLE', flex: true, minWidth: 160 },
   { key: 'artist', label: 'ARTIST', width: 180 },
   { key: 'label', label: 'LABEL', width: 130 },
-  { key: 'bpm', label: 'BPM', width: 50, sort: 'desc' },
-  { key: 'key', label: 'KEY', width: 36 },
-  { key: 'time', label: 'TIME', width: 48 },
+  { key: 'bpm', label: 'BPM', width: 52, align: 'right', sort: 'desc' },
+  { key: 'key', label: 'KEY', width: 36, align: 'right' },
+  { key: 'time', label: 'TIME', width: 48, align: 'right' },
 ];
 
 const TRACKS = [

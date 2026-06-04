@@ -6,6 +6,8 @@ import {
   library,
   playlistByName,
   favoritePlaylistName,
+  favoriteSlotFromName,
+  canRemoveFavoriteSlot,
   isFavoritePlaylistName,
   toggleFavoriteSlot,
   moveTracksToPlaylist,
@@ -55,7 +57,7 @@ function openSplitItem(sourceId, label, onSplit) {
 }
 
 /** @param {string} sourceId */
-async function importIntoSource(sourceId) {
+export async function importIntoSource(sourceId) {
   const dir = await pickDirectory();
   if (dir) await importDirectory(dir, { targetSource: sourceId });
 }
@@ -152,11 +154,13 @@ export function buildSourceContextMenuItems(opts) {
         label: 'Import folder',
         disabled: busy(),
         onClick: () => importIntoSource(sourceId),
-      },
-      { isSeparator: true }
+      }
     );
+
+    /** @type {MenuItem[]} */
+    const destructive = [];
     if (isFavorite && playlist.track_ids.length > 0) {
-      items.push({
+      destructive.push({
         label: 'Clear all tracks',
         variant: 'danger',
         onClick: async () => {
@@ -166,15 +170,18 @@ export function buildSourceContextMenuItems(opts) {
       });
     }
     if (isFavorite) {
-      items.push({
-        label: 'Remove favorite',
-        shortcut: '×',
-        variant: 'danger',
-        onClick: () => onRemoveFavorite?.(playlist),
-      });
+      const slot = favoriteSlotFromName(playlist.name);
+      if (slot != null && canRemoveFavoriteSlot(slot)) {
+        destructive.push({
+          label: 'Remove favorite',
+          shortcut: '×',
+          variant: 'danger',
+          onClick: () => onRemoveFavorite?.(playlist),
+        });
+      }
     }
     if (!isFavorite) {
-      items.push({
+      destructive.push({
         label: 'Delete playlist',
         variant: 'danger',
         onClick: async () => {
@@ -182,6 +189,9 @@ export function buildSourceContextMenuItems(opts) {
           await deletePlaylist(playlist.id);
         },
       });
+    }
+    if (destructive.length > 0) {
+      items.push({ isSeparator: true }, ...destructive);
     }
     return items;
   }

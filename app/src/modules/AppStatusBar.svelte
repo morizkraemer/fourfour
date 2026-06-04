@@ -78,4 +78,14 @@
     color: var(--ff-text);
     background: var(--ff-elev);
   }
+
+  .ff-statusbar__settings:focus-visible {
+    color: var(--ff-text);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  }
+
+  .ff-statusbar__settings:active {
+    background: var(--ff-select);
+    color: var(--ff-text);
+  }
 </style>

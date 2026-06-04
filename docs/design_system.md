@@ -774,7 +774,7 @@ Each spec is the contract. States listed are exhaustive — if a state isn't her
 {
   "id": "empty",
   "size": "padding 36px 24px, text-align center, radius md",
-  "tokens": { "bg": "surface", "border": "1px dashed border-hi" },
+  "tokens": { "bg": "surface", "border": "1px solid border-hi" },
   "anatomy": ["title (13px / 500 text-mid)", "sub (11.5px muted)"]
 }
 ```

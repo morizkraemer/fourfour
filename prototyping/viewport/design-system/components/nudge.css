@@ -37,6 +37,16 @@
   color: var(--ff-text);
 }
 
+.ff-nudge__btn:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  color: var(--ff-text);
+}
+
+.ff-nudge__btn:active {
+  background-color: var(--ff-select);
+  color: var(--ff-text);
+}
+
 .ff-nudge__btn--dec {
   border-right: 1px solid var(--ff-border-hi);
 }

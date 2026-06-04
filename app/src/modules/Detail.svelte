@@ -9,56 +9,36 @@
     selectionCount,
     selectedTrack,
   } from '../stores/selection.svelte.ts';
-  import { getAnalysisData, getTrackArtwork } from '../services/tauri.svelte.ts';
+  import { ensureTrackPeaksLoaded } from '../stores/library.svelte.ts';
+  import { getTrackArtwork } from '../services/tauri.svelte.ts';
 
-  // Derive the detail pane mode from selection state
   let mode = $derived(
     selectionCount() === 0 ? 'empty' :
     selectionCount() === 1 ? 'single' : 'multi'
   );
 
-  // Single-track metadata for the detail pane
   let track = $derived(selectedTrack());
 
-  // Fetch analysis data and artwork dynamically when selected track changes
   $effect(() => {
     const current = track;
-    if (current && !current.peaksLoaded && !current.loadingAnalysis) {
-      current.loadingAnalysis = true;
-      
-      // Load Waveform & Cues
-      getAnalysisData(current.id).then(res => {
-        if (res.waveform_preview) {
-          current.peaks = Array.from(res.waveform_preview).map(byte => (byte & 0x1F) / 31.0);
-        }
-        if (res.cue_points) {
-          current.cues = res.cue_points.map((cue, idx) => {
-            const mins = Math.floor(cue.time_ms / 60000);
-            const secs = Math.floor((cue.time_ms % 60000) / 1000);
-            const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
-            return {
-              name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
-              position: posStr,
-              color: cue.color
-            };
-          });
-        }
-        current.peaksLoaded = true;
-      }).catch(err => {
-        console.warn('Failed to fetch analysis details:', err);
-      }).finally(() => {
-        current.loadingAnalysis = false;
-      });
+    if (!current) return;
+    void ensureTrackPeaksLoaded(current);
 
-      // Load Artwork Image
-      getTrackArtwork(current.id).then(bytes => {
-        if (bytes && bytes.length > 0) {
-          const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
-          current.cover = URL.createObjectURL(blob);
-        }
-      }).catch(err => {
-        console.warn('Failed to fetch track artwork:', err);
-      });
+    if (current.raw?.has_artwork && !current.cover && !current.loadingArtwork) {
+      current.loadingArtwork = true;
+      getTrackArtwork(current.id)
+        .then((bytes) => {
+          if (bytes && bytes.length > 0) {
+            const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
+            current.cover = URL.createObjectURL(blob);
+          }
+        })
+        .catch((err) => {
+          console.warn('Failed to fetch track artwork:', err);
+        })
+        .finally(() => {
+          current.loadingArtwork = false;
+        });
     }
   });
 
@@ -114,6 +94,6 @@
   .ff-detail-module > :global(.ff-detail-pane) {
     width: 100%;
     height: 100%;
-    border-left: none; /* module owns the divider */
+    border-left: none;
   }
 </style>

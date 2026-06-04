@@ -21,6 +21,7 @@
   color: var(--ff-muted);
   border-radius: calc(var(--ff-radius-md) - 2px);
   cursor: pointer;
+  outline: none;
   white-space: nowrap;
   transition:
     background var(--ff-motion-fast) var(--ff-easing),
@@ -37,4 +38,18 @@
 .ff-segmented__item--on {
   background: var(--ff-elev-hi);
   color: var(--ff-text);
+}
+
+.ff-segmented__item:focus-visible {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  color: var(--ff-text);
+}
+
+.ff-segmented__item:active:not(.ff-segmented__item--on) {
+  background: var(--ff-select);
+  color: var(--ff-text);
+}
+
+.ff-segmented__item--on:active {
+  background: var(--ff-select);
 }

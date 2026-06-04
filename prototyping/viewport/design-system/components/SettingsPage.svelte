@@ -33,17 +33,18 @@
 >
   <nav class="ff-settings-page__nav">
     <div class="ff-settings-page__nav-head">
-      <span class="ff-settings-page__nav-title">Preferences</span>
       {#if onClose}
         <button
           type="button"
-          class="ff-settings-page__close"
-          aria-label="Close preferences"
+          class="ff-settings-page__back"
+          aria-label="Back"
           onclick={onClose}
         >
-          <Icon name="x" size={14} />
+          <Icon name="chevron-left" size={14} />
+          <span class="ff-settings-page__back-label">Back</span>
         </button>
       {/if}
+      <span class="ff-settings-page__nav-title">Preferences</span>
     </div>
     {#each sections as sec, idx (sec.key ?? idx)}
       {@const tabKey = sec.key ?? String(idx)}

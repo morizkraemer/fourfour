@@ -22,6 +22,7 @@ export { default as Icon } from './components/Icon.svelte';
 export { default as Kbd } from './components/Kbd.svelte';
 export { default as Button } from './components/Button.svelte';
 export { default as SegmentedControl } from './components/SegmentedControl.svelte';
+export { default as Dropdown } from './components/Dropdown.svelte';
 export { default as TagBadge } from './components/TagBadge.svelte';
 export { default as StatusDot } from './components/StatusDot.svelte';
 export { default as ColorSwatch } from './components/ColorSwatch.svelte';
@@ -42,6 +43,7 @@ export { default as TrackRow, TRACK_COLUMNS } from './components/TrackRow.svelte
 export { default as PlayerCompact } from './components/PlayerCompact.svelte';
 export { default as DetailPane } from './components/DetailPane.svelte';
 export { default as EmptyState } from './components/EmptyState.svelte';
+export { default as Onboarding } from './components/Onboarding.svelte';
 export { default as Dialog } from './components/Dialog.svelte';
 export { default as SettingsPage } from './components/SettingsPage.svelte';
 export { default as ContextMenu } from './components/ContextMenu.svelte';

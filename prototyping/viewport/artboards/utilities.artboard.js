@@ -53,8 +53,8 @@ export default function render() {
 
   // Empty State
   const emptyState = createEmptyState({
-    title: 'No Playlists Found',
-    sub: 'Create a playlist in the sidebar to get started.'
+    title: 'No tracks loaded',
+    sub: 'Import a folder or drop audio files anywhere in this window.',
   }).element;
 
   // Chips & Pills

@@ -60,3 +60,14 @@
 .ff-filter-input__close-btn:hover {
   color: var(--ff-text);
 }
+
+.ff-filter-input__close-btn:focus-visible {
+  color: var(--ff-text);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  border-radius: var(--ff-radius-xs);
+}
+
+.ff-filter-input__close-btn:active {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}

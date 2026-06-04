@@ -58,11 +58,28 @@ export function createWaveform({
   progress = 0,
   cues = [],
   cueStyle = null,
+  animating = false,
 } = {}) {
   const cfg = VARIANTS[variant] ?? VARIANTS.mini;
   const markerStyle = cueStyle ?? (variant === 'strip' ? 'line' : 'dot');
   const canvas = el('canvas', { class: `ff-waveform ff-waveform--${variant}` });
-  const state = { peaks, width, height, progress, cues };
+  const state = { peaks, width, height, progress, cues, animating, phase: 0 };
+  let animRaf = 0;
+
+  function stopAnimLoop() {
+    if (animRaf) cancelAnimationFrame(animRaf);
+    animRaf = 0;
+  }
+
+  function startAnimLoop() {
+    stopAnimLoop();
+    const tick = () => {
+      state.phase += 0.11;
+      draw();
+      animRaf = requestAnimationFrame(tick);
+    };
+    animRaf = requestAnimationFrame(tick);
+  }
 
   function draw() {
     const w = state.width;
@@ -78,14 +95,23 @@ export function createWaveform({
 
     const stride = cfg.step + cfg.gap;
     const bars = Math.max(1, Math.floor(w / stride));
-    const data = state.peaks && state.peaks.length ? state.peaks : fauxPeaks(bars, seed);
+    const hasPeaks = state.peaks && state.peaks.length;
+    const data = hasPeaks ? state.peaks : null;
     const baseColor = rootColor(cfg.base, '#6a6a6a');
     const playedColor = rootColor(cfg.played, '#aaaaaa');
     const playedBars = Math.round(bars * Math.max(0, Math.min(1, state.progress)));
     const mid = h / 2;
 
     for (let i = 0; i < bars; i++) {
-      const p = data[Math.floor((i / bars) * data.length)] ?? cfg.floor;
+      let p;
+      if (data) {
+        p = data[Math.floor((i / bars) * data.length)] ?? cfg.floor;
+      } else if (state.animating) {
+        const x = (i / Math.max(1, bars - 1)) * Math.PI * 2;
+        p = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(x * 1.4 + state.phase));
+      } else {
+        p = 0;
+      }
       const bh = Math.max(1, (cfg.floor + p * (1 - cfg.floor)) * h);
       ctx.fillStyle = i < playedBars ? playedColor : baseColor;
       ctx.fillRect(i * stride, mid - bh / 2, cfg.step, bh);
@@ -111,13 +137,24 @@ export function createWaveform({
     }
   }
 
-  // Draw once attached so token colors resolve; redraw if container resizes.
-  requestAnimationFrame(draw);
-
   function update(next = {}) {
     Object.assign(state, next);
-    draw();
+    const shouldAnimate = state.animating && !(state.peaks && state.peaks.length);
+    if (shouldAnimate) startAnimLoop();
+    else {
+      stopAnimLoop();
+      draw();
+    }
   }
 
-  return { element: canvas, update };
+  if (animating && !(peaks && peaks.length)) startAnimLoop();
+  else requestAnimationFrame(draw);
+
+  return {
+    element: canvas,
+    update,
+    destroy() {
+      stopAnimLoop();
+    },
+  };
 }

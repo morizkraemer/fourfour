@@ -1,5 +1,58 @@
 # Todo
 
+## 2026-06-04 Waveform Preview / Analysis Cache Bug
+
+Goal: make waveform previews deterministic after load/analyze, and prevent bad analysis-cache entries from rendering flat or scrambled data.
+
+- [x] Expose backend `has_analysis` and the 400-byte preview in `TrackInfo` so list rows do not depend on an async N+1 fetch for mini waveforms.
+- [x] Map load-state previews directly into `track.peaks`; keep `ensureTrackPeaksLoaded` as a fallback for cues/refresh.
+- [x] Reject missing-ANLZ placeholder previews before caching them as valid analysis data.
+- [x] Harden player color waveform use so suspicious color data falls back to the known-good mono preview.
+- [x] Run frontend + Rust builds and document verification results here.
+
+### Review (2026-06-04)
+
+Root causes fixed:
+- **`analyzed` flag was `tempo > 0`**, not "has analysis blob". Backend already computed
+  `has_analysis` in `get_all_tracks_with_flags` but discarded it. Now surfaced on `TrackInfo`
+  (`dto.rs`) and used as the authoritative `analyzed` flag in `mapTrackInfoToLocal`.
+- **N+1 reactivity race** (list flat until clicked): `build_track_infos` (`main.rs`) now embeds the
+  400-byte mono preview per analyzed track, so `mapTrackInfoToLocal` sets `track.peaks` atomically
+  with the row object. Removed the per-track `ensureTrackPeaksLoaded` loop from `loadState`. No more
+  dependency on background mutation + `bumpLibraryTracks`.
+- **Missing-ANLZ placeholder masquerade**: `get_analysis` returns `[0u8; 400]` when the DB index
+  exists but ANLZ files are gone. Now dropped at two layers — backend `build_track_infos`
+  (`filter(|d| d.iter().any(|&b| b & 0x1f != 0))`) and frontend `isValidWaveformPreview`
+  (requires a non-zero 5-bit height). Flat placeholders no longer cache as valid.
+- **Cue loading preserved**: `ensureTrackPeaksLoaded` now gates on a new `analysisLoaded` flag
+  (not peak presence), so the Detail pane still fetches cues even though peaks arrive embedded.
+- **Player color**: already falls back to mono when `isValidColorWaveform` fails
+  (`applyAnalysisToTrack`); the all-zero rejection now also keeps flat mono garbage out of the
+  player. Stale-but-valid scrambled color from pre-fix ANLZ files can't be detected
+  programmatically — heals on re-analyze (cache invalidation already wired).
+
+Verification:
+- `cargo build -p pioneer-test-ui` ✓ (1.95s, no errors).
+- `cd app && npm run build` ✓ (220 modules, no errors; only pre-existing a11y warnings).
+- Data-path traced end to end: `build_track_infos` → `TrackInfo.waveform_preview` →
+  `mapTrackInfoToLocal` → `track.peaks` → `TrackRow.svelte:57` → `Waveform.svelte`.
+- NOT yet verified on hardware/real library: the "scrambled player color" symptom — needs an
+  eyeball in `cargo tauri dev` against the user's library + a re-analyze of one bad track to
+  confirm stale-ANLZ is the cause (hypothesis B1/B4).
+
+## 2026-06-04 Core Audio Engine / Player Playback Failure
+
+Goal: identify why the Svelte player does not produce audio and make the smallest backend/player fix that can be proven locally.
+
+- [ ] Trace frontend player store -> Tauri playback commands -> Rust playback engine.
+- [ ] Fix the root cause in the core audio path without adding dependencies.
+- [ ] Add focused verification for decoded sample output.
+- [ ] Run build/tests and document the result.
+
+### Review
+
+- Pending.
+
 ## 2026-06-04 Translate design-system → Svelte 5 (production Tauri app)
 
 Branch `feat/svelte-ui`. Decisions: **Path A** (single Svelte source; extend the `viewport` engine to

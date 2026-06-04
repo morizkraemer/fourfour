@@ -29,15 +29,23 @@ textarea,
   user-select: text;
 }
 
-/* macOS title band — sidebar chrome (traffic lights) + global header (search).
-   Tauri overlay: use data-tauri-drag-region on the element (not -webkit-app-region). */
+/* macOS title band — Tauri overlay: data-tauri-drag-region on the element */
 .ff-titlebar-band {
   flex: none;
   box-sizing: border-box;
+  user-select: none;
+}
+
+.ff-sidebar__chrome.ff-titlebar-band {
   min-height: var(--ff-titlebar-band-height);
   padding-top: var(--ff-titlebar-padding-y);
-  padding-bottom: var(--ff-titlebar-padding-y);
-  user-select: none;
+  padding-bottom: var(--ff-space-2);
+}
+
+.ff-gheader.ff-titlebar-band {
+  min-height: var(--ff-titlebar-search-band-height);
+  padding-top: var(--ff-titlebar-search-padding-y);
+  padding-bottom: var(--ff-titlebar-search-padding-y);
 }
 
 /* Rule only under the search row; sidebar chrome stays flush with nav */

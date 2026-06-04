@@ -46,10 +46,24 @@
   align-items: center;
   justify-content: center;
   outline: none;
-  transition: color var(--ff-motion-fast) var(--ff-easing);
+  border-radius: var(--ff-radius-sm);
+  transition:
+    color var(--ff-motion-fast) var(--ff-easing),
+    background-color var(--ff-motion-fast) var(--ff-easing),
+    box-shadow var(--ff-motion-fast) var(--ff-easing);
 }
 
 .ff-sidebar-section__add-btn:hover {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.ff-sidebar-section__add-btn:focus-visible {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.ff-sidebar-section__add-btn:active {
+  background: var(--ff-select);
   color: var(--ff-text);
 }
 

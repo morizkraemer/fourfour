@@ -40,6 +40,10 @@ cd app && npm run build
 cd pioneer-test-ui && ./dev.sh   # or cargo tauri dev
 ```
 
+## Open bug — waveforms
+
+**Still broken (2026-06-04):** list mini previews sometimes missing until row click; player strip scrambled on some tracks. See **`docs/session/waveform-bug-handoff.md`** for symptoms, data paths, attempted fixes, hypotheses, and debug steps.
+
 ## Immediate next steps (user priority order)
 1. Eyeball empty library → import folder → confirm covers load in table without selection; waveforms flat until Analyze.
 2. Verify **player strip** — select analyzed track, play/scrub; expand player artboard later.

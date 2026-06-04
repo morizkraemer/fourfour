@@ -16,14 +16,16 @@
   import {
     library,
     importDirectory,
+    playlistByName,
     reorderPlaylistTracks,
     moveTracksToPlaylist,
     tracksForSidebarSource,
     filterTracks,
     sidebarSourceLabel,
+    isTrackAnalyzing,
   } from '../stores/library.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
-  import { player, queuePlayAfterLoad, playFromStart } from '../stores/player.svelte.ts';
+  import { player, queuePlayAfterLoad, playFromStart, loadPlayerTrack } from '../stores/player.svelte.ts';
   import { ui, focusListPanel, openSplitPanel } from '../stores/ui.svelte.ts';
   import { pickDirectory } from '../services/tauri.svelte.ts';
   import {
@@ -33,6 +35,7 @@
     moveColumn,
     toggleColumnVisibility,
     resetColumns,
+    setColumnWidth,
     setSort,
     clearSort,
     sortTracks,
@@ -120,6 +123,7 @@
       void playFromStart();
     } else {
       queuePlayAfterLoad();
+      void loadPlayerTrack(track);
     }
   }
 
@@ -187,6 +191,7 @@
 
   function rowState(track) {
     if (dnd.kind === 'tracks' && dnd.trackIds.includes(track.id)) return 'drag';
+    if (isTrackAnalyzing(track.id)) return 'analyzing';
     if (selection.ids.has(track.id)) return 'selected';
     return 'rest';
   }
@@ -355,47 +360,47 @@
   {#if showLibraryEmpty}
     <div class="ff-table__empty-container">
       <EmptyState
-        title="Your library is empty"
-        sub="Import audio files or folders to get started."
+        title="No tracks loaded"
+        sub="Import a folder or drop audio files anywhere in this window."
       >
-        <div style="margin-top: var(--ff-space-4);">
-          <Button
-            label="Import Folder"
-            icon="plus"
-            variant="primary"
-            size="small"
-            disabled={library.analyzing || library.syncing}
-            onclick={handleImport}
-          />
-        </div>
+        <Button
+          label="Import"
+          icon="folder-open"
+          variant="primary"
+          size="small"
+          disabled={library.analyzing || library.syncing}
+          onclick={handleImport}
+        />
       </EmptyState>
     </div>
   {:else}
-    <ColumnHeader
-      {columns}
-      columnDragKey={colDragKey}
-      columnDropKey={colDropKey}
-      onColumnContextMenu={(e) => openColumnMenu(e)}
-      onColumnClick={(col) => {
-        if (col.key && col.key !== 'cover' && col.key !== 'wave' && col.key !== 'fav') {
-          setSort(col.key);
-        }
-      }}
-      onColumnReorder={(from, to) => moveColumn(from, to)}
-      onColumnDragChange={(drag, drop) => {
-        colDragKey = drag;
-        colDropKey = drop;
-      }}
-    />
-    <div
-      class="ff-table__body"
-      class:ff-table__body--marquee={marqueeActive}
-      bind:this={tableBodyEl}
-      role="list"
-      ondragover={(e) => e.preventDefault()}
-      onpointerdown={onBodyPointerDown}
-      onselectstart={(e) => e.preventDefault()}
-    >
+    <div class="ff-table__scroll">
+      <ColumnHeader
+        {columns}
+        columnDragKey={colDragKey}
+        columnDropKey={colDropKey}
+        onColumnContextMenu={(e) => openColumnMenu(e)}
+        onColumnClick={(col) => {
+          if (col.key && col.key !== 'cover' && col.key !== 'wave' && col.key !== 'fav') {
+            setSort(col.key);
+          }
+        }}
+        onColumnReorder={(from, to) => moveColumn(from, to)}
+        onColumnDragChange={(drag, drop) => {
+          colDragKey = drag;
+          colDropKey = drop;
+        }}
+        onColumnResize={(key, width) => setColumnWidth(key, width)}
+      />
+      <div
+        class="ff-table__body"
+        class:ff-table__body--marquee={marqueeActive}
+        bind:this={tableBodyEl}
+        role="list"
+        ondragover={(e) => e.preventDefault()}
+        onpointerdown={onBodyPointerDown}
+        onselectstart={(e) => e.preventDefault()}
+      >
       {#if currentTracks.length === 0}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -434,6 +439,7 @@
           <DropLine />
         {/if}
       {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -478,11 +484,26 @@
     height: 100%;
     background: var(--ff-bg);
   }
-  .ff-table__body {
+  .ff-table__scroll {
     flex: 1 1 0;
-    overflow-y: auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
     display: flex;
     flex-direction: column;
+  }
+  .ff-table__scroll :global(.ff-colh) {
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--ff-bg);
+  }
+  .ff-table__body {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: min-content;
   }
   .ff-table__body--marquee {
     cursor: default;
@@ -502,6 +523,10 @@
     height: 100%;
     padding: var(--ff-space-8);
     box-sizing: border-box;
+  }
+  .ff-table__empty-container :global(.ff-empty-state) {
+    width: 100%;
+    max-width: 480px;
   }
   .ff-table__empty-drop:global(.ff-table__empty-drop) {
     min-height: 120px;

@@ -29,6 +29,8 @@
     key = '8A',
     onPlayToggle,
     onCue,
+    onCueDown,
+    onCueUp,
     onBpmChange,
     onKeyToggle,
     onExpand,
@@ -50,7 +52,13 @@
   </div>
 
   <div class="ff-player-compact__left-controls">
-    <button class="ff-player-compact__cue-btn" onclick={stop(onCue)}>
+    <button
+      class="ff-player-compact__cue-btn"
+      onclick={stop(onCue)}
+      onpointerdown={stop(onCueDown)}
+      onpointerup={stop(onCueUp)}
+      onpointercancel={stop(onCueUp)}
+      onpointerleave={stop(onCueUp)}>
       <span class="ff-player-compact__cue-txt">CUE</span>
     </button>
     <button

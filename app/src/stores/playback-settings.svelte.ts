@@ -8,26 +8,21 @@ import { getIsTauri } from '../services/tauri.svelte.ts';
 const ENGINE_KEY = 'fourfour.playbackEngine.v2';
 const SAMPLE_RATE_KEY = 'fourfour.playbackSampleRate.v1';
 const BUFFER_FRAMES_KEY = 'fourfour.playbackBufferFrames.v1';
+const OUTPUT_DEVICE_KEY = 'fourfour.playbackOutputDevice.v1';
 
 export type PlaybackEngineId = 'coreaudio' | 'mock';
 
 export const DEFAULT_SAMPLE_RATE = 48_000;
 export const DEFAULT_BUFFER_FRAMES = 128;
 
+/** Engines exposed in settings (more backends can be added later). */
 export const PLAYBACK_ENGINE_OPTIONS: ReadonlyArray<{
   id: PlaybackEngineId;
   label: string;
-  description: string;
 }> = [
   {
     id: 'coreaudio',
     label: 'CoreAudio',
-    description: 'Native macOS output via cpal (symphonia decoders).',
-  },
-  {
-    id: 'mock',
-    label: 'Mock',
-    description: 'Simulated transport with no audio output — browser dev and UI testing.',
   },
 ];
 
@@ -45,21 +40,18 @@ export const BUFFER_FRAME_OPTIONS: ReadonlyArray<{ value: number; label: string 
   { value: 1024, label: '1024' },
 ];
 
-function defaultEngine(): PlaybackEngineId {
-  return getIsTauri() ? 'coreaudio' : 'mock';
-}
-
 function loadEngine(): PlaybackEngineId {
+  if (!getIsTauri()) return 'mock';
   try {
     const raw = localStorage.getItem(ENGINE_KEY);
-    if (raw === 'coreaudio' || raw === 'mock') return raw;
+    if (raw === 'coreaudio') return 'coreaudio';
+    if (raw === 'mock') return 'coreaudio';
     const legacy = localStorage.getItem('fourfour.playbackEngine.v1');
-    if (legacy === 'rodio') return 'coreaudio';
-    if (legacy === 'mock') return 'mock';
+    if (legacy === 'rodio' || legacy === 'mock') return 'coreaudio';
   } catch {
     /* private mode / unavailable */
   }
-  return defaultEngine();
+  return 'coreaudio';
 }
 
 function loadSampleRate(): number {
@@ -73,6 +65,16 @@ function loadSampleRate(): number {
     /* ignore */
   }
   return DEFAULT_SAMPLE_RATE;
+}
+
+function loadOutputDevice(): string | null {
+  try {
+    const raw = localStorage.getItem(OUTPUT_DEVICE_KEY);
+    if (raw && raw.length > 0) return raw;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
 function loadBufferFrames(): number {
@@ -112,16 +114,22 @@ function persistBufferFrames(frames: number) {
   }
 }
 
+function persistOutputDevice(name: string | null) {
+  try {
+    if (name) localStorage.setItem(OUTPUT_DEVICE_KEY, name);
+    else localStorage.removeItem(OUTPUT_DEVICE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const playbackSettings = $state({
   engine: loadEngine() as PlaybackEngineId,
   sampleRate: loadSampleRate(),
   bufferFrames: loadBufferFrames(),
+  /** `null` = system default output (cpal default device). */
+  outputDevice: loadOutputDevice(),
 });
-
-/** Engines the user can pick in the current runtime. */
-export function availablePlaybackEngines(): PlaybackEngineId[] {
-  return getIsTauri() ? ['coreaudio', 'mock'] : ['mock'];
-}
 
 export function playbackEngineLabel(id: PlaybackEngineId): string {
   return PLAYBACK_ENGINE_OPTIONS.find((o) => o.id === id)?.label ?? id;
@@ -129,13 +137,12 @@ export function playbackEngineLabel(id: PlaybackEngineId): string {
 
 /** True when transport should use the mock timer instead of Tauri invoke. */
 export function useMockPlayback(): boolean {
-  if (!getIsTauri()) return true;
-  return playbackSettings.engine === 'mock';
+  return !getIsTauri();
 }
 
 export function setPlaybackEngine(id: PlaybackEngineId): void {
-  const allowed = availablePlaybackEngines();
-  if (!allowed.includes(id)) return;
+  if (id !== 'coreaudio') return;
+  if (!getIsTauri()) return;
   if (playbackSettings.engine === id) return;
   playbackSettings.engine = id;
   persistEngine(id);
@@ -153,4 +160,10 @@ export function setPlaybackBufferFrames(frames: number): void {
   if (playbackSettings.bufferFrames === frames) return;
   playbackSettings.bufferFrames = frames;
   persistBufferFrames(frames);
+}
+
+export function setPlaybackOutputDevice(name: string | null): void {
+  if (playbackSettings.outputDevice === name) return;
+  playbackSettings.outputDevice = name;
+  persistOutputDevice(name);
 }

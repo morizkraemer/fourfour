@@ -1,10 +1,12 @@
 .ff-trow {
   display: flex;
   align-items: center;
-  gap: var(--ff-space-4);
+  gap: var(--ff-space-7);
   height: 28px;
   padding: 0 var(--ff-space-6);
   width: 100%;
+  min-width: min-content;
+  box-sizing: border-box;
 }
 .ff-trow__cell {
   display: flex;

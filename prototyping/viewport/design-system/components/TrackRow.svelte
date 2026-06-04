@@ -23,13 +23,9 @@
   import ColorSwatch from './ColorSwatch.svelte';
   import Waveform from './Waveform.svelte';
   import { keyColor } from '../utils/key-color.js';
+  import { columnCellStyle } from '../utils/column-layout.js';
 
   let { track = {}, state = 'rest', columns = TRACK_COLUMNS } = $props();
-
-  function cellStyle(col) {
-    const base = col.flex ? 'flex:1 1 0' : `width:${col.width}px;flex:none`;
-    return col.align === 'right' ? `${base};justify-content:flex-end` : base;
-  }
 
   // track.fav: favorite slot number (1..8) or true (filled, no digit) or falsy.
   function favOn(v) {
@@ -40,7 +36,7 @@
 <div class="ff-trow ff-trow--{state}">
   {#each columns as col}
     {#if col.key === 'tag'}
-      <div class="ff-trow__cell ff-trow__cell--tag" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--tag" style={columnCellStyle(col)}>
         {#if track.tag && track.tag.type === 'digit'}
           <TagBadge value={track.tag.value} variant="color" color={track.tag.color} size="sm" />
         {:else if track.tag}
@@ -48,7 +44,7 @@
         {/if}
       </div>
     {:else if col.key === 'fav'}
-      <div class="ff-trow__cell ff-trow__cell--fav" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--fav" style={columnCellStyle(col)}>
         <div class="ff-trow__fav{favOn(track.fav) ? ' ff-trow__fav--on' : ''}">
           {#if favOn(track.fav) && track.fav !== true}
             <span class="ff-trow__fav-digit">{track.fav}</span>
@@ -56,16 +52,17 @@
         </div>
       </div>
     {:else if col.key === 'wave'}
-      <div class="ff-trow__cell ff-trow__cell--wave" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--wave" style={columnCellStyle(col)}>
         <Waveform
           peaks={track.peaks ?? null}
+          animating={state === 'analyzing' && !track.peaks?.length}
           width={col.width ?? 120}
           height={14}
           variant="mini"
           seed={(track.index ?? 1) * 2654435761} />
       </div>
     {:else if col.key === 'cover'}
-      <div class="ff-trow__cell ff-trow__cell--cover" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--cover" style={columnCellStyle(col)}>
         <div
           class="ff-trow__cover"
           style={track.cover ? `background-image:url(${track.cover})` : undefined}>
@@ -73,15 +70,15 @@
       </div>
     {:else if col.key === 'key'}
       {@const k = String(track.key ?? '—')}
-      <div class="ff-trow__cell ff-trow__cell--key" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--key" style={columnCellStyle(col)}>
         <span class="ff-trow__text" style="color:{k === '—' ? 'var(--ff-muted)' : keyColor(k)}">{k}</span>
       </div>
     {:else if col.key === 'album' || col.key === 'genre' || col.key === 'year'}
-      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={columnCellStyle(col)}>
         <span class="ff-trow__text">{track[col.key] ?? '—'}</span>
       </div>
     {:else}
-      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={cellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={columnCellStyle(col)}>
         <span class="ff-trow__text">{track[col.key] ?? ''}</span>
       </div>
     {/if}

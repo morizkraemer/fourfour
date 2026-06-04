@@ -1,6 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
+import {
+  isValidAnalysisPayload,
+  sanitizeAnalysisPayload,
+} from './analysis-data.ts';
 
 export let lastTauriError = 'None';
 
@@ -37,6 +41,10 @@ export interface TrackInfo {
   file_size: number;
   has_artwork: boolean;
   has_cues: boolean;
+  /** Authoritative analysis flag from the DB index (not `tempo > 0`). */
+  has_analysis?: boolean;
+  /** 400-byte mono preview embedded at load so list rows skip the N+1 fetch. */
+  waveform_preview?: number[] | null;
 }
 
 export interface PlaylistInput {
@@ -133,6 +141,23 @@ export async function changeLibraryPath(folderPath: string): Promise<string> {
   } catch (err) {
     lastTauriError = `change_library_path fail: ${String(err)}`;
     return folderPath + '/library.db';
+  }
+}
+
+/** Wipe the library database at the configured path and reopen an empty library. */
+export async function resetLibrary(): Promise<string> {
+  try {
+    const path = await invoke<string>('reset_library');
+    lastTauriError = 'invoke(reset_library) OK';
+    return path;
+  } catch (err) {
+    lastTauriError = `reset_library fail: ${String(err)}`;
+    if (useBrowserMocks()) {
+      mockTracks = [];
+      mockPlaylists = [];
+      return '/mock/user/library.db';
+    }
+    throw err;
   }
 }
 
@@ -341,7 +366,14 @@ export async function wipeUsb(path: string): Promise<void> {
 const analysisCache = new Map<number, any>();
 
 export function peekAnalysisData(trackId: number): any | undefined {
-  return analysisCache.get(trackId);
+  const cached = analysisCache.get(trackId);
+  if (!cached) return undefined;
+  const clean = sanitizeAnalysisPayload(cached);
+  if (!clean) {
+    analysisCache.delete(trackId);
+    return undefined;
+  }
+  return clean;
 }
 
 export function invalidateAnalysisCache(trackId?: number) {
@@ -351,30 +383,21 @@ export function invalidateAnalysisCache(trackId?: number) {
 
 export async function getAnalysisData(trackId: number, force = false): Promise<any> {
   if (!force) {
-    const cached = analysisCache.get(trackId);
-    if (cached) return cached;
+    const hit = peekAnalysisData(trackId);
+    if (hit) return hit;
   }
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
-    analysisCache.set(trackId, data);
-    return data;
+    const clean = sanitizeAnalysisPayload(data);
+    if (!clean) {
+      throw new Error('Invalid analysis payload from backend');
+    }
+    analysisCache.set(trackId, clean);
+    return clean;
   } catch (err) {
     lastTauriError = `get_analysis_data fail: ${String(err)}`;
-    return {
-      waveform_preview: Array.from({ length: 400 }, () => Math.floor(Math.random() * 255)),
-      waveform_color: Array.from({ length: 400 }, () => ({
-        amp: Math.random(),
-        r: Math.random(),
-        g: Math.random(),
-        b: Math.random(),
-        energy: 0
-      })),
-      bpm: 124.0,
-      key: '9A',
-      beats: [],
-      cue_points: [],
-      duration_ms: 300000
-    };
+    analysisCache.delete(trackId);
+    throw err;
   }
 }
 

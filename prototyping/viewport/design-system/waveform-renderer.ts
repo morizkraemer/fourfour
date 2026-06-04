@@ -52,7 +52,8 @@ export class WaveformRenderer {
   #offset = 0;
 
   #pointerDown = false;
-  #gestureActive = false;
+  #gestureMode: 'none' | 'zoom' | 'scrub' = 'none';
+  #scrubbing = false;
   #dragStartX = 0;
   #dragStartY = 0;
   #dragStartZoom = 1;
@@ -71,8 +72,27 @@ export class WaveformRenderer {
   }
 
   setColorData(data: ColorSample[] | null) {
-    this.#colorData = data?.length ? data : null;
+    const valid =
+      data?.length &&
+      data.length >= 8 &&
+      data.every(
+        (s) =>
+          Number.isFinite(s.amp) &&
+          Number.isFinite(s.r) &&
+          Number.isFinite(s.g) &&
+          Number.isFinite(s.b) &&
+          s.amp >= 0 &&
+          s.amp <= 1.25 &&
+          s.r >= 0 &&
+          s.r <= 1.25 &&
+          s.g >= 0 &&
+          s.g <= 1.25 &&
+          s.b >= 0 &&
+          s.b <= 1.25,
+      );
+    this.#colorData = valid ? data : null;
     if (this.#colorData) this.#mode = 'color';
+    else if (this.#previewBytes?.length) this.#mode = 'mono';
     this.draw();
   }
 
@@ -83,6 +103,9 @@ export class WaveformRenderer {
   }
 
   setProgress(progress: number) {
+    // While the user is dragging the playhead, ignore transport ticks so the
+    // incoming playback position can't fight the drag.
+    if (this.#scrubbing) return;
     this.#progress = Math.max(0, Math.min(1, progress));
     if (this.#followPlayhead) this.#ensurePlayheadVisible();
     this.draw();
@@ -446,13 +469,13 @@ export class WaveformRenderer {
   #onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     this.#pointerDown = true;
-    this.#gestureActive = false;
+    this.#gestureMode = 'none';
+    this.#scrubbing = false;
     this.#dragStartX = e.clientX;
     this.#dragStartY = e.clientY;
     this.#dragStartZoom = this.#zoom;
     this.#dragStartOffset = this.#offset;
     this.#canvas.setPointerCapture(e.pointerId);
-    this.#canvas.style.cursor = 'grabbing';
     e.preventDefault();
   };
 
@@ -462,9 +485,20 @@ export class WaveformRenderer {
     const dx = e.clientX - this.#dragStartX;
     const dy = this.#dragStartY - e.clientY;
 
-    if (!this.#gestureActive) {
+    if (this.#gestureMode === 'none') {
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
-      this.#gestureActive = true;
+      // Horizontal-dominant drag scrubs the playhead; vertical-dominant zooms.
+      this.#gestureMode = Math.abs(dx) >= Math.abs(dy) ? 'scrub' : 'zoom';
+      this.#scrubbing = this.#gestureMode === 'scrub';
+      this.#canvas.style.cursor = this.#gestureMode === 'scrub' ? 'ew-resize' : 'grabbing';
+    }
+
+    if (this.#gestureMode === 'scrub') {
+      // Visual-only while dragging: move the playhead, defer the (expensive)
+      // seek to pointer-up so we don't flood the audio backend.
+      this.#progress = this.#progressAtClientX(e.clientX);
+      this.draw();
+      return;
     }
 
     const newZoom = Math.max(
@@ -492,10 +526,14 @@ export class WaveformRenderer {
       /* already released */
     }
 
-    if (!this.#gestureActive && this.#onScrub) {
-      this.#onScrub(this.#progressAtClientX(e.clientX));
+    // A plain click or the end of a scrub drag both land the playhead exactly.
+    // This is the single point where we issue the actual seek.
+    if (this.#gestureMode !== 'zoom' && this.#onScrub) {
+      this.#progress = this.#progressAtClientX(e.clientX);
+      this.#onScrub(this.#progress);
     }
-    this.#gestureActive = false;
+    this.#gestureMode = 'none';
+    this.#scrubbing = false;
   };
 
   #onWheel = (e: WheelEvent) => {

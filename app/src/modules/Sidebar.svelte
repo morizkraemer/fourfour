@@ -23,6 +23,7 @@
     canAddFavorite,
     removeFavoriteSlot,
     favoriteSlotFromName,
+    canRemoveFavoriteSlot,
   } from '../stores/library.svelte.ts';
   import { ui, openSplitPanel, focusListPanel, closeSplitPanel } from '../stores/ui.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
@@ -105,7 +106,7 @@
 
   function requestRemoveFavorite(playlist) {
     const slot = favoriteSlotFromName(playlist.name);
-    if (slot == null) return;
+    if (slot == null || !canRemoveFavoriteSlot(slot)) return;
     if (playlist.track_ids.length === 0) {
       void commitRemoveFavorite(playlist.id);
       return;
@@ -420,13 +421,11 @@
     <Button
       label="Cancel"
       variant="ghost"
-      size="small"
       onclick={() => (removeFavoriteDialog = null)}
     />
     <Button
       label="Remove"
       variant="destructive"
-      size="small"
       onclick={() => removeFavoriteDialog && commitRemoveFavorite(removeFavoriteDialog.id)}
     />
   {/snippet}

@@ -27,10 +27,23 @@ import {
   invalidateAnalysisCache,
   getTrackArtwork,
   changeLibraryPath,
+  resetLibrary as tauriResetLibrary,
   type TrackInfo,
   type PlaylistInput,
   type SyncReport
 } from '../services/tauri.svelte.ts';
+import {
+  isValidAnalysisPayload,
+  isValidWaveformPreview,
+  previewPeaksNormalized,
+} from '../services/analysis-data.ts';
+
+const peakLoadInflight = new Map<number, Promise<void>>();
+
+/** Shallow-bump so list rows re-render when nested track fields change. */
+export function bumpLibraryTracks() {
+  library.tracks = [...library.tracks];
+}
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
 export const FAVORITE_SLOTS = 9;
@@ -114,6 +127,11 @@ export function canAddFavorite() {
   return nextFavoriteSlot() != null;
 }
 
+/** Slots 1–2 are permanent sidebar favorites; only 3+ can be removed. */
+export function canRemoveFavoriteSlot(slot: number) {
+  return slot > FAVORITE_DEFAULT_VISIBLE;
+}
+
 export function buildFavoriteSidebarRows() {
   const bySlot = favoritePlaylistsBySlot();
   const displaySlots = favoriteSidebarDisplaySlots();
@@ -181,10 +199,14 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   analyzing: false,
+  /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). */
+  analyzingTrackIds: [] as number[],
   syncing: false,
   statusMessage: 'Ready',
   analysisProgress: { current: 0, total: 0, message: '' },
   showAnalysisPrompt: false,
+  /** Track IDs from the last import; used by the post-import analyze dialog. */
+  pendingAnalyzeTrackIds: [] as number[],
 
   // Diagnostics
   tauriError: '',
@@ -299,6 +321,115 @@ export function sidebarSourceLabel(source: string) {
   return source;
 }
 
+export function isTrackAnalyzing(trackId: number): boolean {
+  return library.analyzingTrackIds.includes(trackId);
+}
+
+function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string }, fileName: string) {
+  const base = track.filePath?.split(/[/\\]/).pop();
+  return base === fileName || track.title === fileName;
+}
+
+function applyWaveformAndCuesFromAnalysis(
+  track: Record<string, unknown>,
+  res: {
+    waveform_preview?: number[];
+    cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
+    bpm?: number;
+    key?: string;
+  },
+) {
+  if (res.waveform_preview?.length) {
+    track.peaks = previewPeaksNormalized(res.waveform_preview);
+  }
+  if (res.cue_points) {
+    track.cues = res.cue_points.map((cue) => {
+      const mins = Math.floor(cue.time_ms / 60000);
+      const secs = Math.floor((cue.time_ms % 60000) / 1000);
+      const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
+      return {
+        name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
+        position: posStr,
+        color: cue.color,
+      };
+    });
+  }
+  if (res.bpm) track.bpm = Number(res.bpm).toFixed(1);
+  if (res.key) track.key = res.key;
+  track.analyzed = true;
+  track.analysisLoaded = true;
+}
+
+/**
+ * Fetch the full analysis (cues + peaks) for a track once — used by the Detail
+ * pane. Mini-waveform peaks already arrive embedded in `load_state`, so this
+ * gates on `analysisLoaded` (cues) rather than peak presence; otherwise an
+ * embedded preview would suppress cue loading entirely.
+ */
+export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Promise<void> {
+  if (track.analysisLoaded || !track.analyzed) return;
+  const id = track.id as number;
+  const inflight = peakLoadInflight.get(id);
+  if (inflight) return inflight;
+
+  const job = (async () => {
+    try {
+      const res = await getAnalysisData(id);
+      if (!isValidAnalysisPayload(res)) return;
+      applyWaveformAndCuesFromAnalysis(track, res);
+      bumpLibraryTracks();
+    } catch (err) {
+      console.warn('ensureTrackPeaksLoaded failed:', err);
+    } finally {
+      peakLoadInflight.delete(id);
+    }
+  })();
+  peakLoadInflight.set(id, job);
+  return job;
+}
+
+async function refreshTrackAnalysisDisplay(track: Record<string, unknown>, attempt = 0) {
+  const id = track.id as number;
+  invalidateAnalysisCache(id);
+  try {
+    const res = await getAnalysisData(id, true);
+    applyWaveformAndCuesFromAnalysis(track, res);
+    bumpLibraryTracks();
+  } catch (err) {
+    if (attempt < 4) {
+      await new Promise((r) => setTimeout(r, 120 * (attempt + 1)));
+      return refreshTrackAnalysisDisplay(track, attempt + 1);
+    }
+    console.warn('Failed to refresh analysis display:', err);
+  }
+}
+
+function finishAnalyzingTrack(trackId: number) {
+  library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => id !== trackId);
+  const track = library.tracks.find((t) => t.id === trackId);
+  if (track) void refreshTrackAnalysisDisplay(track);
+}
+
+function markTracksPendingAnalysis(ids: number[]) {
+  for (const id of ids) {
+    const track = library.tracks.find((t) => t.id === id);
+    if (!track) continue;
+    track.peaks = undefined;
+    track.analysisLoaded = false;
+  }
+}
+
+function handleAnalysisProgressEvent(progress: { current: number; total: number; message: string }) {
+  library.analysisProgress = progress;
+  library.statusMessage = progress.message || `Analyzing (${progress.current}/${progress.total})`;
+
+  const match = progress.message.match(/^Analyzed (.+?) \(\d+\/\d+\)$/);
+  if (!match) return;
+  const fileName = match[1];
+  const track = library.tracks.find((t) => trackMatchesAnalyzedFilename(t, fileName));
+  if (track) finishAnalyzingTrack(track.id);
+}
+
 /* ── Mapper ─────────────────────────────────────────────────────────── */
 function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
   const indexStr = String(idx + 1).padStart(2, '0');
@@ -312,7 +443,10 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
   }
 
-  return {
+  // Prefer the authoritative DB flag; fall back to tempo for browser mocks.
+  const analyzed = t.has_analysis ?? t.tempo > 0;
+
+  const local: Record<string, any> = {
     id: t.id,
     index: indexStr,
     title: t.title || t.source_path.split(/[/\\]/).pop() || 'Unknown Title',
@@ -328,24 +462,39 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     filePath: t.source_path,
     cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
-    analyzed: t.tempo > 0,
+    analyzed,
     raw: t
   };
+
+  // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
+  if (t.waveform_preview && isValidWaveformPreview(t.waveform_preview)) {
+    local.peaks = previewPeaksNormalized(t.waveform_preview);
+  }
+
+  return local;
 }
 
 /* ── Actions ────────────────────────────────────────────────────────── */
 
+function revokeTrackCoverUrls(tracks: { cover?: string }[]) {
+  for (const t of tracks) {
+    if (t.cover?.startsWith('blob:')) URL.revokeObjectURL(t.cover);
+  }
+}
+
 /** Loads full state from library backend / mock fallback. */
 export async function loadState() {
   try {
+    revokeTrackCoverUrls(library.tracks);
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     library.tracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
     library.playlists = state.playlists;
 
-    // Load artwork and analysis details for all tracks directly in the background
+    // Load artwork in the background. Mini-waveform peaks now arrive embedded in
+    // load_state (see mapTrackInfoToLocal), so no per-track analysis fetch here —
+    // cues load lazily when a row is selected (Detail pane → ensureTrackPeaksLoaded).
     library.tracks.forEach(track => {
-      // 1. Artwork
       if (track.raw?.has_artwork && !track.cover) {
         getTrackArtwork(track.id).then(bytes => {
           if (bytes && bytes.length > 0) {
@@ -356,38 +505,14 @@ export async function loadState() {
           console.warn('Failed to fetch artwork on load:', err);
         });
       }
-
-      // 2. Waveform peaks and hot cues
-      if (track.analyzed && !track.peaksLoaded) {
-        track.loadingAnalysis = true;
-        getAnalysisData(track.id).then(res => {
-          if (res.waveform_preview) {
-            track.peaks = Array.from(res.waveform_preview).map(byte => (byte & 0x1F) / 31.0);
-          }
-          if (res.cue_points) {
-            track.cues = res.cue_points.map((cue, idx) => {
-              const mins = Math.floor(cue.time_ms / 60000);
-              const secs = Math.floor((cue.time_ms % 60000) / 1000);
-              const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
-              return {
-                name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
-                position: posStr,
-                color: cue.color
-              };
-            });
-          }
-          track.peaksLoaded = true;
-        }).catch(err => {
-          console.warn('Failed to fetch analysis details on load:', err);
-        }).finally(() => {
-          track.loadingAnalysis = false;
-        });
-      }
     });
 
     await ensureFavoriteSlots();
+    library.tauriError = lastTauriError;
   } catch (err) {
     console.error('loadState failed:', err);
+    library.tauriError = lastTauriError;
+    throw err;
   }
 }
 
@@ -400,39 +525,40 @@ export async function saveState() {
   }
 }
 
+let libraryListenersInstalled = false;
+
 /** Initialize library store, triggers on boot */
 export async function initLibrary() {
-  // Set initial diagnostics
   library.ipcDiagnostic = getIpcDiagnostic();
+  library.statusMessage = 'Loading library…';
 
-  // Get Version and Path
-  getVersion().then(v => {
-    library.appVersion = v;
-    library.tauriError = lastTauriError;
-  });
-  getLibraryPath().then(p => {
-    library.libraryPath = p;
-    library.tauriError = lastTauriError;
-  });
+  try {
+    const [version, path] = await Promise.all([getVersion(), getLibraryPath()]);
+    library.appVersion = version;
+    library.libraryPath = path;
 
-  // Load Tracks and Playlists
-  await loadState();
-  library.tauriError = lastTauriError;
+    await loadState();
+    await refreshVolumes();
 
-  // Load Pinned USB Drives
-  await refreshVolumes();
-
-  // Wire event listeners for Tauri (will be no-op outside Tauri)
-  listenToAnalysisProgress((progress) => {
-    library.analysisProgress = progress;
-    library.statusMessage = progress.message || `Analyzing (${progress.current}/${progress.total})`;
-  });
-
-  listenToWriteComplete((report) => {
-    library.syncing = false;
-    library.statusMessage = 'Ready';
-    refreshUsbState();
-  });
+    if (!libraryListenersInstalled) {
+      libraryListenersInstalled = true;
+      listenToAnalysisProgress(handleAnalysisProgressEvent);
+      listenToWriteComplete(() => {
+        library.syncing = false;
+        library.statusMessage = 'Ready';
+        refreshUsbState();
+      });
+    }
+  } catch (err) {
+    library.statusMessage = 'Failed to load library';
+    console.error('initLibrary failed:', err);
+  } finally {
+    if (!library.analyzing && !library.syncing) {
+      library.statusMessage = library.statusMessage.startsWith('Failed')
+        ? library.statusMessage
+        : 'Ready';
+    }
+  }
 }
 
 export type ImportOptions = {
@@ -477,10 +603,25 @@ async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
   await loadState();
 
   if (options?.analyze) {
-    await analyzeTracks();
+    const ids = newTracks.map((t) => t.id);
+    if (ids.length > 0) await analyzeTrackIds(ids);
   } else {
+    library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
     library.showAnalysisPrompt = true;
   }
+}
+
+/** Close the post-import analyze prompt without running analysis. */
+export function dismissAnalysisPrompt() {
+  library.showAnalysisPrompt = false;
+  library.pendingAnalyzeTrackIds = [];
+}
+
+/** Run analysis for tracks pending from the last import, then close the prompt. */
+export async function confirmAnalysisPrompt() {
+  const ids = [...library.pendingAnalyzeTrackIds];
+  dismissAnalysisPrompt();
+  if (ids.length > 0) await analyzeTrackIds(ids);
 }
 
 /** Scan directory for new tracks */
@@ -533,7 +674,10 @@ export async function removeTracks(ids: number[]) {
 /** Trigger analysis on all pending tracks */
 export async function analyzeTracks() {
   if (library.analyzing) return;
+  const pendingIds = library.tracks.filter((t) => !t.analyzed).map((t) => t.id);
+  markTracksPendingAnalysis(pendingIds);
   library.analyzing = true;
+  library.analyzingTrackIds = pendingIds;
   library.statusMessage = 'Starting analysis...';
   try {
     await tauriAnalyzeTracks();
@@ -543,6 +687,7 @@ export async function analyzeTracks() {
     console.error('analyzeTracks failed:', err);
   } finally {
     library.analyzing = false;
+    library.analyzingTrackIds = [];
     library.statusMessage = 'Ready';
     library.analysisProgress = { current: 0, total: 0, message: '' };
   }
@@ -552,7 +697,9 @@ export async function analyzeTracks() {
 export async function analyzeTrackIds(ids: number[]) {
   const unique = [...new Set(ids)].filter((id) => id > 0);
   if (library.analyzing || unique.length === 0) return;
+  markTracksPendingAnalysis(unique);
   library.analyzing = true;
+  library.analyzingTrackIds = unique;
   library.statusMessage =
     unique.length === 1 ? 'Analyzing track…' : `Analyzing ${unique.length} tracks…`;
   try {
@@ -563,6 +710,7 @@ export async function analyzeTrackIds(ids: number[]) {
     console.error('analyzeTrackIds failed:', err);
   } finally {
     library.analyzing = false;
+    library.analyzingTrackIds = [];
     library.statusMessage = 'Ready';
     library.analysisProgress = { current: 0, total: 0, message: '' };
   }
@@ -719,13 +867,22 @@ export async function deletePlaylist(id: number) {
   await saveState();
 }
 
-/** Delete a numbered favorite slot playlist; returns removed playlist name. */
+/** Delete a numbered favorite slot playlist (slots 3+ only); returns removed playlist name. */
 export async function removeFavoriteSlot(playlistId: number): Promise<string | null> {
   const pl = library.playlists.find((p) => p.id === playlistId);
   if (!pl || !isFavoritePlaylistName(pl.name)) return null;
+  const slot = favoriteSlotFromName(pl.name);
+  if (slot == null || !canRemoveFavoriteSlot(slot)) return null;
   const name = pl.name;
   library.playlists = library.playlists.filter((p) => p.id !== playlistId);
-  await saveState();
+  let changed = true;
+  for (let s = 1; s <= FAVORITE_DEFAULT_VISIBLE; s++) {
+    const defaultName = favoritePlaylistName(s);
+    if (library.playlists.some((p) => p.name === defaultName)) continue;
+    pushFavoritePlaylist(s);
+    changed = true;
+  }
+  if (changed) await saveState();
   syncTrackFavoriteFields();
   return name;
 }
@@ -825,11 +982,47 @@ export function playlistByName(name: string): PlaylistInput | undefined {
 
 export async function changeLocalLibraryPath(folderPath: string) {
   try {
+    library.statusMessage = 'Opening library…';
     const dbPath = await changeLibraryPath(folderPath);
     library.libraryPath = dbPath;
+    dismissAnalysisPrompt();
     await loadState();
+    library.statusMessage = 'Ready';
   } catch (err) {
+    library.statusMessage = 'Failed to open library';
     console.error('changeLocalLibraryPath failed:', err);
+    throw err;
+  }
+}
+
+/**
+ * Wipe the configured library database and reload empty state (debug).
+ * Clears UI selection/playback; keeps the library path in config.
+ */
+export async function resetLibraryDatabase() {
+  const { clear: clearSelection } = await import('./selection.svelte.ts');
+  const { clearPlayerTrack } = await import('./player.svelte.ts');
+  const { playbackStop } = await import('../services/playback.svelte.ts');
+
+  try {
+    library.statusMessage = 'Resetting library…';
+    dismissAnalysisPrompt();
+    await playbackStop();
+    clearPlayerTrack();
+    clearSelection();
+
+    const dbPath = await tauriResetLibrary();
+    library.libraryPath = dbPath;
+    library.usbTracks = [];
+    library.usbPlaylists = [];
+    library.activeVolume = null;
+
+    await loadState();
+    library.statusMessage = 'Library reset — empty';
+  } catch (err) {
+    library.statusMessage = 'Library reset failed';
+    console.error('resetLibraryDatabase failed:', err);
+    throw err;
   }
 }
 

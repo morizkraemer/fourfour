@@ -40,18 +40,22 @@
   color: var(--ff-text-mid);
 }
 
-.ff-menu__item--default:hover {
+.ff-menu__item--default:hover,
+.ff-menu__item--default:focus-visible {
   background-color: var(--ff-select);
   color: var(--ff-text);
+  outline: none;
 }
 
 .ff-menu__item--danger {
   color: var(--ff-danger);
 }
 
-.ff-menu__item--danger:hover {
+.ff-menu__item--danger:hover,
+.ff-menu__item--danger:focus-visible {
   background-color: var(--ff-danger-bg);
   color: var(--ff-danger);
+  outline: none;
 }
 
 .ff-menu__item--disabled {

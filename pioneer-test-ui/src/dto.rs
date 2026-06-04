@@ -21,6 +21,12 @@ pub struct TrackInfo {
     pub file_size: u64,
     pub has_artwork: bool,
     pub has_cues: bool,
+    /// True when an analysis row exists in the DB index (authoritative, not `tempo > 0`).
+    pub has_analysis: bool,
+    /// 400-byte mono waveform preview, present only when a real (non-placeholder)
+    /// preview exists. Lets the track list paint mini waveforms without an N+1 fetch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waveform_preview: Option<Vec<u8>>,
 }
 
 impl From<&Track> for TrackInfo {
@@ -39,6 +45,8 @@ impl From<&Track> for TrackInfo {
             file_size: t.file_size,
             has_artwork: t.artwork.is_some(),
             has_cues: false,
+            has_analysis: false,
+            waveform_preview: None,
         }
     }
 }

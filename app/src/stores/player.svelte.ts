@@ -7,10 +7,14 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import {
+  isValidColorWaveform,
+  previewBytesFromPayload,
+} from '../services/analysis-data.ts';
+import {
   playbackPause,
   playbackPlay,
-  playbackResume,
   playbackSeek,
+  playbackSetPosition,
   playbackStop,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
@@ -18,6 +22,7 @@ import {
 export interface PlayerCue {
   position: number;
   color: string;
+  timeMs: number;
 }
 
 export interface ColorWaveSample {
@@ -37,6 +42,7 @@ export interface PlayerTrack {
   sourcePath: string;
   title: string;
   artist: string;
+  cover: string;
   bpm: string;
   key: string;
   totalSeconds: number;
@@ -61,6 +67,15 @@ export const player = $state({
 let loadGeneration = 0;
 let tickUnlisten: (() => void) | null = null;
 let playPending = false;
+let cueHoldMs: number | null = null;
+// After seeking a *playing* track, the native backend keeps emitting ticks at
+// the old position for a few frames while the seek lands. Hold the playhead at
+// the target and ignore those stale ticks until one arrives near it (or we time
+// out), so the playhead doesn't flicker between the old and new positions.
+let seekTargetMs: number | null = null;
+let seekTargetAt = 0;
+const SEEK_SETTLE_MS = 350;
+const SEEK_TIMEOUT_MS = 800;
 
 function formatBpm(tempo: number): string {
   if (!tempo) return '—';
@@ -72,13 +87,24 @@ function mapCues(cuePoints: any[], durationMs: number): PlayerCue[] {
   return cuePoints.map((c, i) => ({
     position: (c.time_ms ?? 0) / durationMs,
     color: CUE_COLORS[i % CUE_COLORS.length],
+    timeMs: c.time_ms ?? 0,
   }));
+}
+
+function defaultCueMs(track: PlayerTrack): number {
+  return track.cues[0]?.timeMs ?? 0;
+}
+
+/** Drop the playback-tick subscription (e.g. after switching mock ↔ CoreAudio). */
+export function resetPlayerTransport() {
+  tickUnlisten?.();
+  tickUnlisten = null;
 }
 
 function previewFromAnalysis(analysis: any): number[] | null {
   const preview = analysis?.waveform_preview;
   if (!preview?.length) return null;
-  return Array.isArray(preview) ? preview : Array.from(preview);
+  return previewBytesFromPayload(analysis);
 }
 
 function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
@@ -90,8 +116,10 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   };
   if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
   if (analysis.key) next.key = analysis.key;
-  if (analysis.waveform_color?.length) {
+  if (isValidColorWaveform(analysis.waveform_color)) {
     next.colorData = analysis.waveform_color;
+  } else {
+    next.colorData = null;
   }
   const preview = previewFromAnalysis(analysis);
   if (preview) next.previewBytes = preview;
@@ -139,13 +167,24 @@ async function ensureTickListener() {
     if (!player.track) return;
     const dur = tick.duration_ms || player.track.durationMs;
     if (dur > 0) {
+      if (seekTargetMs !== null) {
+        const landed = Math.abs(tick.position_ms - seekTargetMs) < SEEK_SETTLE_MS;
+        const expired = performance.now() - seekTargetAt > SEEK_TIMEOUT_MS;
+        if (landed || expired) {
+          seekTargetMs = null;
+        } else {
+          // Stale pre-seek position — keep showing the target.
+          player.playing = tick.playing;
+          return;
+        }
+      }
       player.progress = Math.max(0, Math.min(1, tick.position_ms / dur));
     }
     player.playing = tick.playing;
   });
 }
 
-function buildBaseTrack(trackInfo: {
+interface BackendTrackInfo {
   id: number;
   source_path: string;
   title: string;
@@ -153,12 +192,39 @@ function buildBaseTrack(trackInfo: {
   tempo: number;
   key: string;
   duration_secs: number;
-}): PlayerTrack {
+}
+
+/**
+ * Normalize a selection input into the backend TrackInfo shape.
+ * The library exposes UI rows ({ filePath, bpm: "124.0", raw: TrackInfo }),
+ * but callers may also pass a raw backend track directly. Prefer `.raw`,
+ * fall back to the row's own fields, and fail loud if no playable path exists.
+ */
+function normalizeTrackInput(input: any): BackendTrackInfo | null {
+  const raw = input?.raw ?? input;
+  const sourcePath = raw?.source_path ?? input?.filePath;
+  if (!sourcePath) {
+    console.error('loadPlayerTrack: selected track has no source path', input);
+    return null;
+  }
+  return {
+    id: raw?.id ?? input?.id,
+    source_path: sourcePath,
+    title: raw?.title ?? input?.title ?? '',
+    artist: raw?.artist ?? input?.artist ?? '',
+    tempo: raw?.tempo ?? 0,
+    key: raw?.key ?? input?.key ?? '',
+    duration_secs: raw?.duration_secs ?? 0,
+  };
+}
+
+function buildBaseTrack(trackInfo: BackendTrackInfo, cover: string): PlayerTrack {
   return {
     id: trackInfo.id,
     sourcePath: trackInfo.source_path,
     title: trackInfo.title || 'Unknown',
     artist: trackInfo.artist || '—',
+    cover,
     bpm: formatBpm(trackInfo.tempo),
     key: trackInfo.key || '—',
     totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
@@ -184,22 +250,22 @@ async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack
   }
 }
 
-/** Load track metadata + waveform from library selection. */
-export async function loadPlayerTrack(trackInfo: {
-  id: number;
-  source_path: string;
-  title: string;
-  artist: string;
-  tempo: number;
-  key: string;
-  duration_secs: number;
-}) {
+/** Load track metadata + waveform from a library selection (UI row or backend track). */
+export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
   void playbackStop();
   player.playing = false;
   player.progress = 0;
 
-  const base = buildBaseTrack(trackInfo);
+  const trackInfo = normalizeTrackInput(input);
+  if (!trackInfo) {
+    player.track = null;
+    player.loading = false;
+    return;
+  }
+
+  const cover = input?.cover ?? input?.raw?.cover ?? '';
+  const base = buildBaseTrack(trackInfo, cover);
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
   player.loading = !cached;
@@ -222,6 +288,7 @@ export function queuePlayAfterLoad() {
 /** Play the loaded track from the beginning. */
 export async function playFromStart() {
   if (!player.track) return;
+  seekTargetMs = null;
   player.progress = 0;
   await ensureTickListener();
   await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
@@ -230,6 +297,8 @@ export async function playFromStart() {
 
 export function clearPlayerTrack() {
   loadGeneration++;
+  cueHoldMs = null;
+  seekTargetMs = null;
   void playbackStop();
   player.track = null;
   player.playing = false;
@@ -243,16 +312,55 @@ export function clearPlayerTrack() {
 export async function togglePlay() {
   if (!player.track) return;
   await ensureTickListener();
-  if (player.playing) {
-    await playbackPause();
+  try {
+    if (player.playing) {
+      await playbackPause();
+      player.playing = false;
+    } else {
+      // Always (re)start from the current playhead. playbackPlay sets the
+      // backend path + start offset, so this works even after a scrub on a
+      // track that was never played (where resume would no-op on a null path).
+      const ms = Math.round(player.progress * player.track.durationMs);
+      await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
+      player.playing = true;
+    }
+  } catch (err) {
+    console.error('playback toggle failed:', err);
     player.playing = false;
-  } else if (player.progress > 0 && player.progress < 1) {
-    await playbackResume();
-    player.playing = true;
-  } else {
-    await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
-    player.playing = true;
   }
+}
+
+/** CDJ-style CUE hold: preview from the hot cue (or start) while pressed. */
+export async function cuePreviewStart() {
+  if (!player.track) return;
+  const dur = player.track.durationMs;
+  const ms = dur > 0 ? Math.min(defaultCueMs(player.track), dur) : defaultCueMs(player.track);
+  cueHoldMs = ms;
+  await ensureTickListener();
+  if (dur > 0) player.progress = ms / dur;
+  try {
+    await playbackPlay(player.track.sourcePath, ms, dur || undefined);
+    player.playing = true;
+  } catch (err) {
+    console.error('cue preview failed:', err);
+    cueHoldMs = null;
+    player.playing = false;
+  }
+}
+
+export async function cuePreviewStop() {
+  if (!player.track || cueHoldMs === null) return;
+  const ms = cueHoldMs;
+  const dur = player.track.durationMs;
+  cueHoldMs = null;
+  try {
+    await playbackPause();
+    if (dur > 0) player.progress = ms / dur;
+    await playbackSetPosition(ms);
+  } catch (err) {
+    console.error('cue preview stop failed:', err);
+  }
+  player.playing = false;
 }
 
 export async function play() {
@@ -275,6 +383,11 @@ export async function seekToProgress(progress: number) {
   const ms = Math.round(p * player.track.durationMs);
   await ensureTickListener();
   if (player.playing) {
+    seekTargetMs = ms;
+    seekTargetAt = performance.now();
     await playbackSeek(ms);
+  } else {
+    // Paused/stopped: persist the position so play/resume starts from here.
+    await playbackSetPosition(ms);
   }
 }

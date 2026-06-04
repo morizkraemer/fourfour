@@ -11,7 +11,11 @@
   --ff-titlebar-search-padding-y: var(--ff-space-4);
   --ff-traffic-light-x: 14px;
   --ff-titlebar-control-height: 26px;
-  --ff-titlebar-band-height: calc(var(--ff-titlebar-padding-y) * 2 + var(--ff-titlebar-control-height));
+  --ff-titlebar-search-band-height: calc(
+    var(--ff-titlebar-search-padding-y) * 2 + var(--ff-titlebar-control-height)
+  );
+  /* Sidebar chrome matches search row height; extra top padding is for native traffic lights */
+  --ff-titlebar-band-height: var(--ff-titlebar-search-band-height);
   --ff-traffic-light-inset: 78px;
 
   /* 1.1 Color */

@@ -6,7 +6,10 @@ export const ICONS = {
   list: '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
   'clock-3': '<circle cx="12" cy="12" r="10"/><path d="M12 6v6h4.5"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  'folder-open':
+    '<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
   'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+  'chevron-left': '<path d="m15 18-6-6 6-6"/>',
   'chevron-right': '<path d="m9 18 6-6-6-6"/>',
   search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
   x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',

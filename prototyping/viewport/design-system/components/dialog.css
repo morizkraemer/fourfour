@@ -4,7 +4,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10050;
+  padding: 32px;
+  box-sizing: border-box;
 }
 
 .ff-dialog-backdrop {
@@ -25,9 +27,10 @@
   box-shadow: var(--ff-shadow-dialog);
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  z-index: 1001;
+  gap: 14px;
+  z-index: 1;
   box-sizing: border-box;
+  outline: none;
 }
 
 .ff-dialog__title {
@@ -48,9 +51,16 @@
 
 .ff-dialog__actions {
   display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
   justify-content: flex-end;
-  gap: 6px;
-  margin-top: 6px;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.ff-dialog__actions :global(.ff-btn) {
+  flex: 0 0 auto;
 }
 
 .ff-dialog--wide {

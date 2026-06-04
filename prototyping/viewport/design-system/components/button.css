@@ -15,10 +15,44 @@
   color: var(--ff-text);
   white-space: nowrap;
   cursor: pointer;
+  outline: none;
   transition:
     background var(--ff-motion-fast) var(--ff-easing),
     border-color var(--ff-motion-fast) var(--ff-easing),
-    color var(--ff-motion-fast) var(--ff-easing);
+    color var(--ff-motion-fast) var(--ff-easing),
+    box-shadow var(--ff-motion-fast) var(--ff-easing);
+}
+
+/* focus / pressed — matches input focus ring (rgba 0.30 border) */
+.ff-btn:focus-visible {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.ff-btn--primary:focus-visible {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
+}
+
+.ff-btn--destructive:focus-visible {
+  box-shadow: 0 0 0 1px var(--ff-danger-border-hi);
+}
+
+.ff-btn--primary:active:not(.ff-btn--disabled) {
+  background: #e8e8e8;
+}
+
+.ff-btn--default:active:not(.ff-btn--disabled) {
+  background: var(--ff-select);
+  border-color: var(--ff-border-hover);
+}
+
+.ff-btn--ghost:active:not(.ff-btn--disabled) {
+  background: var(--ff-select);
+  color: var(--ff-text);
+}
+
+.ff-btn--destructive:active:not(.ff-btn--disabled) {
+  background: var(--ff-danger-bg);
+  border-color: var(--ff-danger-border-hi);
 }
 
 /* primary — solid accent */

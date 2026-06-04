@@ -1,0 +1,71 @@
+/* Dropdown trigger — matches input (§2.3). Menu panel uses menu.css (.ff-menu). */
+
+.ff-dropdown {
+  position: relative;
+  display: inline-flex;
+  min-width: 160px;
+  max-width: 100%;
+}
+
+.ff-dropdown__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ff-space-2);
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  padding: 0 8px 0 10px;
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-md);
+  background: var(--ff-bg);
+  font-family: var(--ff-font);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 28px;
+  color: var(--ff-text);
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: border-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-dropdown__trigger:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.ff-dropdown__trigger:focus-visible {
+  border-color: rgba(255, 255, 255, 0.3);
+  outline: none;
+}
+
+.ff-dropdown__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.ff-dropdown__chevron {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--ff-faint);
+}
+
+.ff-dropdown--open .ff-dropdown__chevron {
+  color: var(--ff-text-mid);
+}
+
+.ff-dropdown__menu {
+  position: fixed;
+  z-index: 10001;
+}
+
+.ff-dropdown__check {
+  display: inline-block;
+  width: 14px;
+  margin-right: 4px;
+  font-size: 11px;
+  color: var(--ff-text);
+}

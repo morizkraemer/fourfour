@@ -1,10 +1,12 @@
 .ff-colh {
   display: flex;
   align-items: center;
-  gap: var(--ff-space-4);
+  gap: var(--ff-space-7);
   height: 28px;
   padding: 0 var(--ff-space-6);
   border-top: 1px solid var(--ff-border);
+  min-width: min-content;
+  box-sizing: border-box;
 }
 .ff-colh__cell {
   position: relative;
@@ -27,15 +29,34 @@
 }
 .ff-colh__resize-handle {
   position: absolute;
-  right: 0;
+  right: -4px;
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: 8px;
   cursor: col-resize;
   z-index: 10;
+  touch-action: none;
 }
-.ff-colh__resize-handle:hover {
-  background: rgba(255, 255, 255, 0.08);
+.ff-colh__resize-handle::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.1s ease;
+}
+.ff-colh__resize-handle:hover::after,
+:global(body.ff-colh--resizing) .ff-colh__resize-handle::after {
+  background: var(--ff-border-hi);
+}
+:global(body.ff-colh--resizing) {
+  cursor: col-resize !important;
+  user-select: none;
+}
+:global(body.ff-colh--resizing) * {
+  cursor: col-resize !important;
 }
 .ff-colh__cell--active {
   color: var(--ff-text);

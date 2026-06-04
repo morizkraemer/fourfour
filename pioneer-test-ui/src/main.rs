@@ -16,7 +16,8 @@ use pioneer_usb_writer::scanner;
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
     playback_configure, playback_get_config, playback_pause, playback_play, playback_resume,
-    playback_seek, playback_stop, PlaybackEngine,
+    playback_get_output_device, playback_list_output_devices, playback_seek,
+    playback_set_output_device, playback_set_position, playback_stop, PlaybackEngine,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,20 +31,39 @@ fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
     let rows = lib.get_all_tracks_with_flags().map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
-        .map(|(track, has_artwork, _has_analysis, has_cues)| TrackInfo {
-            id: track.id,
-            source_path: track.source_path.to_string_lossy().to_string(),
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            genre: track.genre,
-            tempo: track.tempo,
-            key: track.key,
-            duration_secs: track.duration_secs,
-            bitrate: track.bitrate,
-            file_size: track.file_size,
-            has_artwork,
-            has_cues,
+        .map(|(track, has_artwork, has_analysis, has_cues)| {
+            // Embed the mono preview so the list paints mini waveforms without an
+            // N+1 fetch. Drop the all-zero placeholder `get_analysis` returns when
+            // the DB index exists but the ANLZ files are gone (otherwise the UI
+            // would cache a flat waveform as if it were real). When the DAT's PWAV
+            // section is degenerate but color data exists, synthesize the preview
+            // from the color overview so the list mini-waveform stays consistent
+            // with the player strip (which can render color) — see #waveform-bug.
+            let waveform_preview = if has_analysis {
+                lib.get_analysis(track.id as i64)
+                    .ok()
+                    .flatten()
+                    .and_then(|a| effective_preview(&a))
+            } else {
+                None
+            };
+            TrackInfo {
+                id: track.id,
+                source_path: track.source_path.to_string_lossy().to_string(),
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                genre: track.genre,
+                tempo: track.tempo,
+                key: track.key,
+                duration_secs: track.duration_secs,
+                bitrate: track.bitrate,
+                file_size: track.file_size,
+                has_artwork,
+                has_cues,
+                has_analysis,
+                waveform_preview,
+            }
         })
         .collect())
 }
@@ -101,6 +121,8 @@ fn scan_directory(
             file_size: track.file_size,
             has_artwork,
             has_cues: false,
+            has_analysis: false,
+            waveform_preview: None,
         });
     }
 
@@ -156,6 +178,8 @@ fn scan_files(
             file_size: track.file_size,
             has_artwork,
             has_cues: false,
+            has_analysis: false,
+            waveform_preview: None,
         });
     }
 
@@ -395,16 +419,6 @@ async fn run_track_analysis(
             .unwrap_or("unknown")
             .to_string();
 
-        app.emit(
-            "analysis-progress",
-            ProgressPayload {
-                current: completed,
-                total,
-                message: format!("Analyzed {file_name} ({completed}/{total})"),
-            },
-        )
-        .ok();
-
         match analysis_result {
             Ok((result, detail)) => {
                 debug_ok(&app, &format!(
@@ -427,6 +441,16 @@ async fn run_track_analysis(
                     "[{completed}/{total}] {file_name} DB+ANLZ write {:.1}s",
                     t_db.elapsed().as_secs_f64()
                 ));
+
+                app.emit(
+                    "analysis-progress",
+                    ProgressPayload {
+                        current: completed,
+                        total,
+                        message: format!("Analyzed {file_name} ({completed}/{total})"),
+                    },
+                )
+                .ok();
             }
             Err(e) => {
                 errors += 1;
@@ -775,18 +799,59 @@ fn downsample_3band(source: &[[u8; 3]], max_samples: usize) -> Vec<[u8; 3]> {
         .collect()
 }
 
-fn color_waveform_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
-    if !cw.detail.is_empty() {
-        if cw.detail.len() <= PLAYER_COLOR_WAVEFORM_MAX {
-            return cw.detail.clone();
-        }
-        if !cw.overview.is_empty() {
-            return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
-        }
-        return downsample_3band(&cw.detail, PLAYER_COLOR_WAVEFORM_MAX);
+/// Build a 400-byte mono PWAV preview from a color waveform's per-sample band
+/// peaks. Used when a track's stored PWAV section is degenerate but its color
+/// data is intact, so the list mini-waveform matches what the player renders.
+/// Byte layout matches PWAV: bits 0-4 height (0-31), bits 5-7 whiteness (0-7).
+fn mono_preview_from_color(cw: &models::ColorWaveform) -> Option<[u8; 400]> {
+    let src = if !cw.overview.is_empty() {
+        &cw.overview
+    } else if !cw.detail.is_empty() {
+        &cw.detail
+    } else {
+        return None;
+    };
+
+    let amps: Vec<u8> = src.iter().map(|[l, m, h]| (*l).max(*m).max(*h)).collect();
+    let max = amps.iter().copied().max().unwrap_or(0);
+    if max == 0 {
+        return None;
     }
+
+    let n = amps.len();
+    let mut out = [0u8; 400];
+    for (i, byte) in out.iter_mut().enumerate() {
+        let start = i * n / 400;
+        let end = ((i + 1) * n / 400).max(start + 1).min(n);
+        let bucket = amps[start..end].iter().copied().max().unwrap_or(0) as u32;
+        let height = (bucket * 31 / max as u32) as u8;
+        let whiteness = (bucket * 7 / max as u32) as u8;
+        *byte = (whiteness << 5) | (height & 0x1F);
+    }
+    Some(out)
+}
+
+/// The mono PWAV preview to show, shared by the list and the player so both
+/// surfaces stay in sync: the real DAT preview when it carries signal, else a
+/// preview synthesized from the color waveform, else `None` (no waveform data).
+fn effective_preview(a: &models::AnalysisResult) -> Option<Vec<u8>> {
+    if a.waveform.data.iter().any(|&b| b & 0x1f != 0) {
+        Some(a.waveform.data.to_vec())
+    } else {
+        a.color_waveform
+            .as_ref()
+            .and_then(mono_preview_from_color)
+            .map(|d| d.to_vec())
+    }
+}
+
+fn color_waveform_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
+    // Overview is fixed ~1200 entries across the full track — best match for the player strip.
     if !cw.overview.is_empty() {
         return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
+    }
+    if !cw.detail.is_empty() {
+        return downsample_3band(&cw.detail, PLAYER_COLOR_WAVEFORM_MAX);
     }
     Vec::new()
 }
@@ -850,7 +915,7 @@ fn get_analysis_data(
             }).collect();
 
             Ok(serde_json::json!({
-                "waveform_preview": a.waveform.data.to_vec(),
+                "waveform_preview": effective_preview(&a).unwrap_or_default(),
                 "waveform_color": waveform_color,
                 "waveform_peaks": serde_json::Value::Array(vec![]),
                 "bpm": a.bpm,
@@ -1054,6 +1119,54 @@ fn change_library_path(
     Ok(db_path.to_string_lossy().to_string())
 }
 
+/// Delete the on-disk library database (and ANLZ cache), then open a fresh empty library
+/// at the configured path. Playlists and tracks are wiped; `config.json` library_path is kept.
+#[tauri::command]
+fn reset_library(
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<String, String> {
+    let db_path = read_library_path(&app)?;
+
+    // Release file handles before deleting SQLite files.
+    {
+        let mut lib = state.lock().map_err(|e| e.to_string())?;
+        *lib = LocalLibrary::open_in_memory().map_err(|e| e.to_string())?;
+    }
+
+    remove_library_files(&db_path)?;
+
+    let fresh = LocalLibrary::open(&db_path).map_err(|e| e.to_string())?;
+    {
+        let mut lib = state.lock().map_err(|e| e.to_string())?;
+        *lib = fresh;
+    }
+
+    Ok(db_path.to_string_lossy().to_string())
+}
+
+/// Remove SQLite library files and the sibling `anlz/` analysis cache directory.
+fn remove_library_files(db_path: &Path) -> Result<(), String> {
+    let base = db_path.to_string_lossy();
+    for suffix in ["", "-wal", "-shm"] {
+        let path = PathBuf::from(format!("{base}{suffix}"));
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("Failed to remove {}: {e}", path.display()))?;
+        }
+    }
+
+    if let Some(parent) = db_path.parent() {
+        let anlz = parent.join("anlz");
+        if anlz.exists() {
+            std::fs::remove_dir_all(&anlz)
+                .map_err(|e| format!("Failed to remove {}: {e}", anlz.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -1066,20 +1179,6 @@ fn focus_main_window(app: &tauri::AppHandle) {
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
-}
-
-fn init_playback_engine(app: &tauri::AppHandle) {
-    let app = app.clone();
-    std::thread::spawn(move || match PlaybackEngine::new() {
-        Ok(playback) => {
-            let engine = Arc::new(playback);
-            let main_app = app.clone();
-            let _ = app.run_on_main_thread(move || {
-                main_app.manage(engine);
-            });
-        }
-        Err(e) => eprintln!("audio playback unavailable: {e}"),
-    });
 }
 
 fn main() {
@@ -1102,6 +1201,7 @@ fn main() {
             read_usb_state,
             get_library_path,
             change_library_path,
+            reset_library,
             analyze_track_python,
             get_analysis_data,
             get_track_artwork,
@@ -1109,9 +1209,13 @@ fn main() {
             playback_pause,
             playback_resume,
             playback_seek,
+            playback_set_position,
             playback_stop,
             playback_configure,
             playback_get_config,
+            playback_list_output_devices,
+            playback_get_output_device,
+            playback_set_output_device,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path
@@ -1120,6 +1224,13 @@ fn main() {
             let library = LocalLibrary::open(&db_path)
                 .expect("Failed to open library database");
             app.manage(Arc::new(Mutex::new(library)));
+
+            match PlaybackEngine::new() {
+                Ok(playback) => {
+                    app.manage(Arc::new(playback));
+                }
+                Err(e) => eprintln!("audio playback unavailable: {e}"),
+            }
 
             focus_main_window(&app.handle());
             Ok(())
@@ -1130,7 +1241,6 @@ fn main() {
             match event {
                 tauri::RunEvent::Ready => {
                     focus_main_window(&app_handle);
-                    init_playback_engine(&app_handle);
                 }
                 #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen { .. } => focus_main_window(&app_handle),

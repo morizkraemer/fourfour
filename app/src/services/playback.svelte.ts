@@ -15,6 +15,11 @@ export interface PlaybackAudioConfig {
   buffer_frames: number;
 }
 
+export interface AudioOutputDevice {
+  name: string;
+  is_default: boolean;
+}
+
 export interface PlaybackTick {
   position_ms: number;
   duration_ms: number;
@@ -80,6 +85,7 @@ function useMock(): boolean {
 /** Apply persisted sample rate / buffer size to the native output device. */
 export async function syncPlaybackAudioConfig(): Promise<PlaybackAudioConfig | null> {
   if (!getIsTauri() || useMock()) return null;
+  await setPlaybackOutputDevice(playbackSettings.outputDevice);
   const config = await invoke<PlaybackAudioConfig>('playback_configure', {
     sampleRate: playbackSettings.sampleRate,
     bufferFrames: playbackSettings.bufferFrames,
@@ -90,6 +96,21 @@ export async function syncPlaybackAudioConfig(): Promise<PlaybackAudioConfig | n
 export async function getPlaybackAudioConfig(): Promise<PlaybackAudioConfig | null> {
   if (!getIsTauri()) return null;
   return invoke<PlaybackAudioConfig>('playback_get_config');
+}
+
+export async function listPlaybackOutputDevices(): Promise<AudioOutputDevice[]> {
+  if (!getIsTauri()) return [];
+  return invoke<AudioOutputDevice[]>('playback_list_output_devices');
+}
+
+export async function getPlaybackOutputDevice(): Promise<string | null> {
+  if (!getIsTauri()) return null;
+  return invoke<string | null>('playback_get_output_device');
+}
+
+export async function setPlaybackOutputDevice(name: string | null): Promise<void> {
+  if (!getIsTauri()) return;
+  await invoke('playback_set_output_device', { name });
 }
 
 export async function playbackPlay(
@@ -138,6 +159,16 @@ export async function playbackSeek(positionMs: number): Promise<void> {
     return;
   }
   await invoke('playback_seek', { positionMs });
+}
+
+/** Update transport position without starting playback (e.g. CUE button release). */
+export async function playbackSetPosition(positionMs: number): Promise<void> {
+  if (useMock()) {
+    mockPositionMs = positionMs;
+    emitMock();
+    return;
+  }
+  await invoke('playback_set_position', { positionMs });
 }
 
 export async function playbackStop(): Promise<void> {

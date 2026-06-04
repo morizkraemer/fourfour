@@ -286,6 +286,17 @@
   color: var(--ff-text);
 }
 
+.ff-detail-pane__action-link:focus-visible {
+  color: var(--ff-text);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  border-radius: var(--ff-radius-xs);
+}
+
+.ff-detail-pane__action-link:active {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
 .ff-detail-pane__action-link--destructive {
   color: var(--ff-danger);
 }

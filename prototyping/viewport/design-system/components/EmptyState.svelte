@@ -11,5 +11,9 @@
   {#if sub}
     <p class="ff-empty-state__sub">{sub}</p>
   {/if}
-  {@render children?.()}
+  {#if children}
+    <div class="ff-empty-state__actions">
+      {@render children()}
+    </div>
+  {/if}
 </div>

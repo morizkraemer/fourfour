@@ -46,11 +46,13 @@
     progress = 0,
     cues = [],
     cueStyle = null,
+    /** Subtle sine wave on placeholder bars while analysis is in progress. */
+    animating = false,
   } = $props();
 
   let canvas;
 
-  function draw() {
+  function draw(phase = 0) {
     if (!canvas) return;
     const cfg = VARIANTS[variant] ?? VARIANTS.mini;
     const markerStyle = cueStyle ?? (variant === 'strip' ? 'line' : 'dot');
@@ -67,14 +69,23 @@
 
     const stride = cfg.step + cfg.gap;
     const bars = Math.max(1, Math.floor(w / stride));
-    const data = peaks && peaks.length ? peaks : new Array(bars).fill(0);
+    const hasPeaks = peaks && peaks.length;
+    const data = hasPeaks ? peaks : null;
     const baseColor = rootColor(cfg.base, '#6a6a6a');
     const playedColor = rootColor(cfg.played, '#aaaaaa');
     const playedBars = Math.round(bars * Math.max(0, Math.min(1, progress)));
     const mid = h / 2;
 
     for (let i = 0; i < bars; i++) {
-      const p = data[Math.floor((i / bars) * data.length)] ?? cfg.floor;
+      let p;
+      if (data) {
+        p = data[Math.floor((i / bars) * data.length)] ?? cfg.floor;
+      } else if (animating) {
+        const x = (i / Math.max(1, bars - 1)) * Math.PI * 2;
+        p = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(x * 1.4 + phase));
+      } else {
+        p = 0;
+      }
       const bh = Math.max(1, (cfg.floor + p * (1 - cfg.floor)) * h);
       ctx.fillStyle = i < playedBars ? playedColor : baseColor;
       ctx.fillRect(i * stride, mid - bh / 2, cfg.step, bh);
@@ -100,8 +111,30 @@
   // Redraw whenever the reactive inputs change; the read of each prop inside
   // draw() registers the dependency. rAF on first paint so token colors resolve.
   $effect(() => {
-    peaks; width; height; variant; seed; progress; cues; cueStyle;
-    requestAnimationFrame(draw);
+    peaks;
+    width;
+    height;
+    variant;
+    seed;
+    progress;
+    cues;
+    cueStyle;
+    animating;
+
+    if (animating && !(peaks && peaks.length)) {
+      let phase = 0;
+      let raf = 0;
+      const tick = () => {
+        phase += 0.11;
+        draw(phase);
+        raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(raf);
+    }
+
+    const raf = requestAnimationFrame(() => draw(0));
+    return () => cancelAnimationFrame(raf);
   });
 </script>
 

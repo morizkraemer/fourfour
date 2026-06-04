@@ -5,7 +5,6 @@
 <script>
   import { onMount } from 'svelte';
   import { PlayerCompact } from '$ds';
-  import { selectedTrack } from '../stores/selection.svelte.ts';
   import {
     player,
     currentTime,
@@ -13,27 +12,18 @@
     totalTime,
     togglePlay,
     seekToProgress,
-    loadPlayerTrack,
-    clearPlayerTrack,
+    cuePreviewStart,
+    cuePreviewStop,
   } from '../stores/player.svelte.ts';
 
   let playerRoot;
   let waveformStrip = $state(null);
 
-  $effect(() => {
-    const track = selectedTrack();
-    if (!track) {
-      clearPlayerTrack();
-      return;
-    }
-    void loadPlayerTrack(track);
-  });
-
   function isEditableTarget(target) {
     if (!(target instanceof Element)) return false;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
     if (target.closest('[contenteditable="true"]')) return true;
-    return !!target.closest('dialog[open]');
+    return !!target.closest('.ff-dialog-wrapper');
   }
 
   function onPlayerKeyDown(e) {
@@ -62,7 +52,7 @@
 <div class="ff-player-module" bind:this={playerRoot}>
   <PlayerCompact
     bind:waveformStrip
-    cover={selectedTrack()?.cover ?? ''}
+    cover={player.track?.cover ?? ''}
     title={player.track?.title || 'No Track Loaded'}
     artist={player.track?.artist || '—'}
     playing={player.playing}
@@ -81,6 +71,8 @@
     followPlayhead={player.playing}
     onScrub={player.track ? seekToProgress : undefined}
     onPlayToggle={player.track ? togglePlay : undefined}
+    onCueDown={player.track ? cuePreviewStart : undefined}
+    onCueUp={player.track ? cuePreviewStop : undefined}
   />
 </div>
 
