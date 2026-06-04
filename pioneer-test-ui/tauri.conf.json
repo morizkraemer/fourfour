@@ -6,7 +6,7 @@
     "frontendDist": "../app/dist",
     "devUrl": "http://localhost:5200",
     "beforeDevCommand": {
-      "script": "sh -c 'lsof -ti :5200 2>/dev/null | xargs kill -9 2>/dev/null || true; exec npm run dev'",
+      "script": "sh -c 'pkill -f \"fourfour/app/node_modules/vite\" 2>/dev/null; sleep 0.3; exec npm run dev'",
       "cwd": "../app"
     },
     "beforeBuildCommand": {
