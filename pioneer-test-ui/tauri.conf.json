@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "identifier": "com.pioneer.test-ui",
   "build": {
-    "frontendDist": "./frontend",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "python3 -m http.server 1420 -d /Users/merlinkraemer/dev/projects/fourfour/pioneer-test-ui/frontend"
+    "frontendDist": "../app/dist",
+    "devUrl": "http://localhost:5200",
+    "beforeDevCommand": "npm run --prefix ../app dev"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "Pioneer USB Writer - Test",

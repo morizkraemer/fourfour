@@ -19,6 +19,7 @@
     state = 'rest',
     splitAction = true,
     onSplit,
+    onclick,
   } = $props();
 
   let selected = $derived(state === 'active' || state === 'selected');
@@ -35,7 +36,9 @@
     {#if action}<span class="ff-sbrow__section-action">{action}</span>{/if}
   </div>
 {:else}
-  <div class="ff-sbrow ff-sbrow--{state}">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="ff-sbrow ff-sbrow--{state}" {onclick}>
     {#if kind === 'favorite'}
       <TagBadge value={digit} variant={selected ? 'filled' : 'outline'} size="md" />
     {:else if kind === 'usb'}

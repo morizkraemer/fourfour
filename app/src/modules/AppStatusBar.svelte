@@ -4,17 +4,26 @@
 -->
 <script>
   import { StatusBar } from '$ds';
-  import { trackCount } from '../stores/library.svelte.ts';
+  import { library } from '../stores/library.svelte.ts';
 
-  // Static for now — Phase 6 wires real analyzer state
-  const message = 'Ready';
+  let showSpinner = $derived(library.analyzing || library.syncing);
+  
+  let progress = $derived(
+    library.analyzing && library.analysisProgress.total > 0
+      ? (library.analysisProgress.current / library.analysisProgress.total) * 100
+      : undefined
+  );
+
+  let versionStr = $derived(library.appVersion ? `v${library.appVersion}` : '');
 </script>
 
 <div class="ff-statusbar-module">
   <StatusBar
-    {message}
-    context="{trackCount} tracks"
-    count="1,284 tracks · 6.4 GB"
+    message={library.statusMessage}
+    context={versionStr}
+    count="{library.trackCount} tracks"
+    {showSpinner}
+    {progress}
   />
 </div>
 

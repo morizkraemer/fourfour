@@ -6,6 +6,7 @@
     / status bar (full width)
 -->
 <script>
+  import { onMount } from 'svelte';
   // Side-effect import: loads tokens.css + base.css globally
   import '$ds';
 
@@ -18,6 +19,11 @@
   import AppStatusBar  from './modules/AppStatusBar.svelte';
 
   import { ui } from './stores/ui.svelte.ts';
+  import { initLibrary } from './stores/library.svelte.ts';
+
+  onMount(() => {
+    initLibrary();
+  });
 </script>
 
 <div class="ff-browse">
