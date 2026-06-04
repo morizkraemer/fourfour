@@ -9,6 +9,8 @@
  */
 import './tokens.css';
 import './base.css';
+import './components/dialog.css';
+import './components/dialog-native.css';
 
 // Helpers
 export { host } from './utils/mount.js';
@@ -27,6 +29,8 @@ export { default as ProgressBar } from './components/ProgressBar.svelte';
 export { default as Nudge } from './components/Nudge.svelte';
 export { default as SidebarSection } from './components/SidebarSection.svelte';
 export { default as Waveform } from './components/Waveform.svelte';
+export { default as WaveformStrip } from './components/WaveformStrip.svelte';
+export { WaveformRenderer } from './waveform-renderer.ts';
 
 // Primitives (Svelte) — tier 1 (compose tier 0)
 export { default as ColumnHeader } from './components/ColumnHeader.svelte';
@@ -35,3 +39,5 @@ export { default as SidebarRow } from './components/SidebarRow.svelte';
 export { default as TrackRow, TRACK_COLUMNS } from './components/TrackRow.svelte';
 export { default as PlayerCompact } from './components/PlayerCompact.svelte';
 export { default as DetailPane } from './components/DetailPane.svelte';
+export { default as EmptyState } from './components/EmptyState.svelte';
+export { default as Dialog } from './components/Dialog.svelte';

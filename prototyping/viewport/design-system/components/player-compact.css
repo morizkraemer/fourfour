@@ -199,7 +199,7 @@
   display: block;
 }
 
-/* 3. Waveform (height: 34px, bg: #141414) */
+/* 3. Waveform (height: 34px, canvas drawn in WaveformStrip) */
 .ff-player-compact__waveform {
   height: 34px;
   background-color: #141414;
@@ -207,49 +207,4 @@
   position: relative;
   overflow: hidden;
   box-sizing: border-box;
-  /* fake waveform gradient */
-  background-image: repeating-linear-gradient(
-    90deg,
-    var(--ff-muted) 0px,
-    var(--ff-muted) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-}
-
-.ff-player-compact__waveform-played {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  background-color: rgba(255, 255, 255, 0.08);
-  pointer-events: none;
-}
-
-.ff-player-compact__waveform-playhead {
-  position: absolute;
-  top: 0;
-  width: 1px;
-  height: 100%;
-  background-color: var(--ff-accent);
-  pointer-events: none;
-}
-
-/* Hot-cue marker: colored vertical line with a dot cap at the top */
-.ff-player-compact__waveform-cue {
-  position: absolute;
-  top: 0;
-  width: 1px;
-  height: 100%;
-  pointer-events: none;
-}
-
-.ff-player-compact__waveform-cue-dot {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
 }

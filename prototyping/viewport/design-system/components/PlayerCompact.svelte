@@ -5,6 +5,7 @@
   import './player-compact.css';
   import Button from './Button.svelte';
   import Nudge from './Nudge.svelte';
+  import WaveformStrip from './WaveformStrip.svelte';
 
   let {
     title,
@@ -14,6 +15,9 @@
     totalTime,
     progress = 0,
     cues = [],
+    colorData = null,
+    previewBytes = null,
+    onScrub = undefined,
     playing = false,
     bpm = '124.00',
     key = '8A',
@@ -28,8 +32,6 @@
     e.stopPropagation();
     fn?.(e);
   };
-
-  let pct = $derived(`${progress * 100}%`);
 </script>
 
 <div class="ff-player-compact">
@@ -98,15 +100,12 @@
     </div>
 
     <div class="ff-player-compact__waveform">
-      <div class="ff-player-compact__waveform-played" style="width:{pct}"></div>
-      {#each cues as cue}
-        {@const left = `${Math.max(0, Math.min(1, cue.position ?? 0)) * 100}%`}
-        {@const color = cue.color || '#4ade80'}
-        <div class="ff-player-compact__waveform-cue" style="left:{left};background-color:{color}">
-          <span class="ff-player-compact__waveform-cue-dot" style="background-color:{color}"></span>
-        </div>
-      {/each}
-      <div class="ff-player-compact__waveform-playhead" style="left:{pct}"></div>
+      <WaveformStrip
+        {colorData}
+        {previewBytes}
+        {progress}
+        {cues}
+        {onScrub} />
     </div>
   </div>
 </div>
