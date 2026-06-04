@@ -94,7 +94,7 @@
     </div>
   {:else if mode === 'single' || mode === 'missing'}
     <div class="ff-detail-pane__cover{isMissing ? ' ff-detail-pane__cover--missing' : ''}">
-      {#if cover}
+      {#if cover && cover !== '' && cover !== 'undefined' && cover !== 'null'}
         <img class="ff-detail-pane__cover-image" src={cover} alt="Cover Art" />
       {:else}
         <svg
