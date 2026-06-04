@@ -1,0 +1,39 @@
+.ff-meter {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-4);
+}
+.ff-meter__label {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label-sm);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--ff-faint);
+}
+.ff-meter__channels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ff-meter__channel {
+  display: flex;
+  gap: 1px;
+}
+.ff-meter__seg {
+  width: 3px;
+  height: 4px;
+  border-radius: 0.5px;
+  background: var(--ff-border);
+}
+.ff-meter__seg--on {
+  background: var(--ff-text-mid);
+}
+.ff-meter__seg--green {
+  background: var(--ff-status-online);
+}
+.ff-meter__seg--warn {
+  background: var(--ff-status-warn);
+}
+.ff-meter__seg--danger {
+  background: var(--ff-danger);
+}

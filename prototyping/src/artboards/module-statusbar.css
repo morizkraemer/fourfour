@@ -1,0 +1,8 @@
+.ff-statusbar-module {
+  width: 100%;
+  background: var(--ff-bg);
+  border-top: 1px solid var(--ff-border);
+}
+.ff-statusbar-demo {
+  width: 1000px;
+}

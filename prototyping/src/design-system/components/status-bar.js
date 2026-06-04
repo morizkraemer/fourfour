@@ -10,8 +10,10 @@ import { createProgressBar } from './progress-bar.js';
  * @param {string|number} [options.count]
  * @param {boolean} [options.showSpinner=false]
  * @param {number} [options.progress]          – 0-100 value. If provided, renders progress bar.
+ * @param {HTMLElement[]} [options.rightExtras] – extra nodes appended to the right region
+ *                                                (e.g. a level meter + settings button for v2)
  */
-export function createStatusBar({ message, context, count, showSpinner = false, progress } = {}) {
+export function createStatusBar({ message, context, count, showSpinner = false, progress, rightExtras = [] } = {}) {
   const leftElements = [];
 
   if (showSpinner) {
@@ -37,6 +39,10 @@ export function createStatusBar({ message, context, count, showSpinner = false, 
 
   if (count !== undefined && count !== null) {
     rightElements.push(el('span', { class: 'ff-status-bar__count' }, [String(count)]));
+  }
+
+  for (const extra of rightExtras) {
+    if (extra) rightElements.push(extra);
   }
 
   const leftRegion = el('div', { class: 'ff-status-bar__left' }, leftElements);

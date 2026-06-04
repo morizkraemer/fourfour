@@ -18,6 +18,8 @@ export { createColorSwatch } from './components/color-swatch.js';
 export { createColumnHeader } from './components/column-header.js';
 export { createSidebarRow } from './components/sidebar-row.js';
 export { createTrackRow, TRACK_COLUMNS } from './components/track-row.js';
+export { createWaveform } from './components/waveform.js';
+export { keyColor } from './utils/key-color.js';
 export { createCheckbox, createToggle, createRadio } from './components/checkbox.js';
 export { createInput } from './components/input.js';
 export { createColorPicker } from './components/color-picker.js';
@@ -49,4 +51,5 @@ export { createPlayerExpanded } from './components/player-expanded.js';
 export { createDetailPane } from './components/detail-pane.js';
 export { createOnboarding } from './components/onboarding.js';
 export { createSettingsPage } from './components/settings-page.js';
+export { createLevelMeter } from './components/level-meter.js';
 

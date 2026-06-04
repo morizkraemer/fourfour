@@ -1,11 +1,17 @@
 /* ── Artboard Sidebar (fourfour Design System Theme) ── */
 
+:root {
+  --ff-sidebar-w: 220px;
+}
+
 .artboard-sidebar {
   position: fixed;
   top: 0;
   left: 0;
   bottom: 0;
   width: var(--ff-sidebar-w);
+  min-width: var(--ff-sidebar-w);
+  max-width: var(--ff-sidebar-w);
   z-index: 90;
   background: var(--ff-surface);
   border-right: 1px solid var(--ff-border);
@@ -15,35 +21,12 @@
   pointer-events: auto;
   font-family: var(--ff-font);
   transition: transform 0.18s cubic-bezier(0.2, 0, 0, 1);
+  overflow: hidden;
 }
 
 .artboard-sidebar--hidden {
   transform: translateX(-100%);
   pointer-events: none;
-}
-
-/* Brand logo section */
-.sidebar-brand {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--ff-space-6) var(--ff-space-5) var(--ff-space-5);
-  border-bottom: 1px solid var(--ff-border);
-}
-
-.sidebar-wordmark {
-  font-size: var(--ff-type-h1);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  color: var(--ff-accent);
-}
-
-.sidebar-sub {
-  font-size: var(--ff-type-label-sm);
-  font-family: var(--ff-font-mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ff-muted);
 }
 
 /* List and Sections */
@@ -107,6 +90,7 @@
   text-align: left;
   cursor: pointer;
   border-radius: var(--ff-radius-xs);
+  overflow: hidden;
 }
 
 .sidebar-item-actions {
@@ -366,6 +350,7 @@ button.sidebar-section-toggle:hover .sidebar-section-toggle-icon {
   display: flex;
   flex-direction: column;
   gap: 1px;
+  overflow: hidden;
 }
 
 .sidebar-item-kind {
@@ -744,4 +729,124 @@ button.sidebar-section-toggle:hover .sidebar-section-toggle-icon {
 .sidebar-dialog-input--multiline {
   min-height: 110px;
   resize: vertical;
+}
+
+/* ── Dashed + New Project button ── */
+.sidebar-new-project-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(100% - 24px);
+  margin: var(--ff-space-4) 12px var(--ff-space-3) 12px;
+  padding: var(--ff-space-3) var(--ff-space-4);
+  background: var(--ff-surface);
+  border: 1px dashed var(--ff-border-hi);
+  border-radius: var(--ff-radius-xl);
+  color: var(--ff-text-mid);
+  font-size: var(--ff-type-compact);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--ff-motion-fast);
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.sidebar-new-project-btn:hover {
+  background: var(--ff-hover);
+  border-color: var(--ff-accent);
+  color: var(--ff-text);
+}
+
+/* ── Subfolder Headers & Lists ── */
+.sidebar-subfolder-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-2);
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--ff-muted);
+  font-size: var(--ff-type-caption);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: var(--ff-space-2) var(--ff-space-4);
+  cursor: pointer;
+  border-radius: var(--ff-radius-sm);
+  font-family: inherit;
+  transition: background var(--ff-motion-fast), color var(--ff-motion-fast);
+  margin-top: var(--ff-space-2);
+}
+
+.sidebar-subfolder-header:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text-mid);
+}
+
+.sidebar-subfolder-chevron {
+  font-size: 9px;
+  width: 12px;
+  text-align: center;
+}
+
+.sidebar-subfolder-title {
+  flex: 1;
+  text-align: left;
+}
+
+.sidebar-subfolder-count {
+  font-size: 9.5px;
+  background: var(--ff-elev-hi);
+  color: var(--ff-muted);
+  padding: 1px 5px;
+  border-radius: var(--ff-radius-xl);
+  min-width: 12px;
+  text-align: center;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.sidebar-subfolder-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ff-space-1);
+  padding-left: var(--ff-space-3);
+  margin-bottom: var(--ff-space-2);
+}
+
+.sidebar-subfolder-list--collapsed {
+  display: none;
+}
+
+/* ── Sidebar Resizing Handle ── */
+.sidebar-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 100;
+  touch-action: none;
+}
+
+.sidebar-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 2px;
+  width: 1px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.sidebar-resize:hover::after,
+body.sidebar-resizing .sidebar-resize::after {
+  background: var(--ff-border-hi);
+}
+
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }

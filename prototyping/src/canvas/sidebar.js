@@ -66,15 +66,6 @@ export function createSidebar(options) {
   const sidebar = document.createElement('aside');
   sidebar.className = 'artboard-sidebar';
 
-  // Brand section matching fourfour's original branding
-  const brand = document.createElement('div');
-  brand.className = 'sidebar-brand';
-  brand.innerHTML = `
-    <span class="sidebar-wordmark">fourfour</span>
-    <span class="sidebar-sub">prototyping canvas</span>
-  `;
-  sidebar.appendChild(brand);
-
   const content = document.createElement('div');
   content.className = 'sidebar-content';
   sidebar.appendChild(content);
@@ -97,9 +88,61 @@ export function createSidebar(options) {
 
   let model = null;
   let activeArtboardId = null;
-  let projectsCollapsed = false;
   let archiveCollapsed = true;
-  let primitivesCollapsed = false;
+  const subfolderCollapsed = {}; // Key format: `${projectId}:${subfolderName}` -> boolean
+
+  // Elegant dashed "+ New Project" button at the top
+  const newProjectBtn = document.createElement('button');
+  newProjectBtn.type = 'button';
+  newProjectBtn.className = 'sidebar-new-project-btn';
+  newProjectBtn.innerHTML = '<span>+ New Project</span>';
+  newProjectBtn.addEventListener('click', () => {
+    const name = window.prompt('Project name');
+    if (name && name.trim()) options.onCreateProject?.(name.trim());
+  });
+
+  // Resizable handle element
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'sidebar-resize';
+  resizeHandle.setAttribute('aria-hidden', 'true');
+  sidebar.appendChild(resizeHandle);
+
+  let sidebarWidth = 220;
+  const MIN_WIDTH = 160;
+  const MAX_WIDTH = 600;
+  let resizing = false;
+
+  function applyWidth() {
+    sidebar.style.width = `${sidebarWidth}px`;
+    document.documentElement.style.setProperty('--ff-sidebar-w', `${sidebarWidth}px`);
+  }
+
+  resizeHandle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    resizing = true;
+    resizeHandle.setPointerCapture(e.pointerId);
+    document.body.classList.add('sidebar-resizing');
+  });
+
+  resizeHandle.addEventListener('pointermove', (e) => {
+    if (!resizing) return;
+    const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, e.clientX));
+    sidebarWidth = next;
+    applyWidth();
+    options.onWidthChange?.(sidebarWidth);
+  });
+
+  function endResize(e) {
+    if (!resizing) return;
+    resizing = false;
+    if (resizeHandle.hasPointerCapture(e.pointerId)) {
+      resizeHandle.releasePointerCapture(e.pointerId);
+    }
+    document.body.classList.remove('sidebar-resizing');
+  }
+
+  resizeHandle.addEventListener('pointerup', endResize);
+  resizeHandle.addEventListener('pointercancel', endResize);
 
   function setActiveStyles() {
     sidebar.querySelectorAll('.sidebar-item--artboard').forEach((item) => {
@@ -120,29 +163,129 @@ export function createSidebar(options) {
     return header;
   }
 
+  function createSubfolderHeader(title, collapsed, count, onToggle) {
+    const header = document.createElement('button');
+    header.type = 'button';
+    header.className = 'sidebar-subfolder-header';
+    header.innerHTML = `
+      <span class="sidebar-subfolder-chevron">${collapsed ? '▸' : '▾'}</span>
+      <span class="sidebar-subfolder-title">${title}</span>
+      <span class="sidebar-subfolder-count">${count}</span>
+    `;
+    header.addEventListener('click', onToggle);
+    return header;
+  }
+
+  function createArtboardRow(artboard, index, project) {
+    const row = document.createElement('div');
+    row.className = 'sidebar-item sidebar-item--artboard';
+    row.dataset.id = artboard.id;
+    row.dataset.projectId = project.id;
+    row.draggable = true;
+
+    const body = document.createElement('button');
+    body.type = 'button';
+    body.className = 'sidebar-item-body';
+
+    const labelWrap = document.createElement('span');
+    labelWrap.className = 'sidebar-item-label-wrap';
+
+    const label = document.createElement('span');
+    label.className = 'sidebar-item-label';
+    label.textContent = getDisplayName(artboard);
+    labelWrap.appendChild(label);
+
+    const meta = document.createElement('span');
+    meta.className = 'sidebar-item-meta';
+    meta.textContent = artboard.id;
+    labelWrap.appendChild(meta);
+    body.appendChild(labelWrap);
+
+    body.addEventListener('click', () => options.onNavigateArtboard?.(artboard.id));
+
+    const actions = document.createElement('div');
+    actions.className = 'sidebar-item-actions';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'sidebar-item-action';
+    copyBtn.innerHTML = copyIconHtml;
+    copyBtn.title = 'Copy reference';
+    copyBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      options.onCopyArtboard?.(artboard.id, { extended: event.shiftKey || event.altKey });
+    });
+    actions.appendChild(copyBtn);
+
+    const noteBtn = document.createElement('button');
+    noteBtn.type = 'button';
+    noteBtn.className = 'sidebar-item-action';
+    noteBtn.innerHTML = noteIconHtml;
+    noteBtn.classList.toggle('sidebar-item-action--active', artboard.noteCount > 0);
+    noteBtn.title = artboard.noteCount > 0 ? 'Edit note' : 'Add note';
+    noteBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      options.onEditArtboardNote?.(artboard.id);
+    });
+    actions.appendChild(noteBtn);
+
+    const pinBtn = document.createElement('button');
+    pinBtn.type = 'button';
+    pinBtn.className = 'sidebar-item-action';
+    pinBtn.innerHTML = pinIconHtml;
+    pinBtn.classList.toggle('sidebar-item-action--active', artboard.pinned);
+    pinBtn.title = artboard.pinned ? 'Unpin' : 'Pin';
+    pinBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      options.onTogglePin?.(artboard.id);
+    });
+    actions.appendChild(pinBtn);
+
+    row.appendChild(body);
+    row.appendChild(actions);
+
+    row.addEventListener('contextmenu', (event) => {
+      showContextMenu(event, [
+        {
+          label: 'Edit name',
+          onSelect: () => showRenameDialog(getDisplayName(artboard), (value) => options.onRenameArtboard?.(artboard.id, value)),
+        },
+        {
+          label: artboard.pinned ? 'Unpin' : 'Pin',
+          onSelect: () => options.onTogglePin?.(artboard.id),
+        },
+        {
+          label: artboard.noteCount > 0 ? 'Edit note...' : 'Add note...',
+          onSelect: () => options.onEditArtboardNote?.(artboard.id),
+        },
+        {
+          label: 'Move to project...',
+          onSelect: () => showProjectPickerDialog({
+            projects: model.projects,
+            currentProjectId: artboard.projectId,
+            onSelect: (nextProjectId) => options.onMoveArtboardProject?.(artboard.id, nextProjectId),
+          }),
+        },
+        { type: 'divider' },
+        {
+          label: 'Archive',
+          muted: true,
+          onSelect: () => showConfirmDialog({
+            title: 'Archive artboard',
+            message: `Archive "${getDisplayName(artboard)}"?`,
+            confirmLabel: 'Archive',
+            onConfirm: () => options.onArchiveArtboard?.(artboard.id),
+          }),
+        },
+      ]);
+    });
+
+    return row;
+  }
+
   function buildProjectsSection() {
     const section = document.createElement('section');
     section.className = 'sidebar-section sidebar-section--projects';
-
-    const header = createSectionHeaderButton('Projects', projectsCollapsed, () => {
-      projectsCollapsed = !projectsCollapsed;
-      render(model);
-    });
-    header.classList.add('sidebar-section-header--split');
-
-    const newBtn = document.createElement('button');
-    newBtn.type = 'button';
-    newBtn.className = 'sidebar-inline-btn';
-    newBtn.textContent = '+ New project';
-    newBtn.addEventListener('click', () => {
-      const name = window.prompt('Project name');
-      if (name && name.trim()) options.onCreateProject?.(name.trim());
-    });
-    newBtn.addEventListener('click', (event) => event.stopPropagation());
-    header.appendChild(newBtn);
-
-    section.appendChild(header);
-    if (projectsCollapsed) return section;
 
     model.projects.forEach((project) => {
       const projectWrap = document.createElement('div');
@@ -175,122 +318,64 @@ export function createSidebar(options) {
       list.classList.toggle('sidebar-project-list--collapsed', project.collapsed);
       projectWrap.appendChild(list);
 
-      const artboards = model.artboardsByProject[project.id] || [];
-      artboards.forEach((artboard, index) => {
-        const row = document.createElement('div');
-        row.className = 'sidebar-item sidebar-item--artboard';
-        row.dataset.id = artboard.id;
-        row.dataset.projectId = project.id;
-        row.draggable = true;
+      const projectArtboards = model.artboardsByProject[project.id] || [];
+      const primitives = projectArtboards.filter((a) => a.layer === 'primitive');
+      const composites = projectArtboards.filter((a) => a.layer !== 'primitive');
 
-        const body = document.createElement('button');
-        body.type = 'button';
-        body.className = 'sidebar-item-body';
+      if (!project.collapsed) {
+        // Primitives subfolder
+        const primKey = `${project.id}:primitives`;
+        const primCollapsed = subfolderCollapsed[primKey] ?? false;
 
-        const indexSpan = document.createElement('span');
-        indexSpan.className = 'sidebar-item-index';
-        indexSpan.textContent = String(index + 1);
-        body.appendChild(indexSpan);
-
-        const labelWrap = document.createElement('span');
-        labelWrap.className = 'sidebar-item-label-wrap';
-
-        const label = document.createElement('span');
-        label.className = 'sidebar-item-label';
-        label.textContent = getDisplayName(artboard);
-        labelWrap.appendChild(label);
-
-        const meta = document.createElement('span');
-        meta.className = 'sidebar-item-meta';
-        meta.textContent = artboard.id;
-        labelWrap.appendChild(meta);
-        body.appendChild(labelWrap);
-
-        body.addEventListener('click', () => options.onNavigateArtboard?.(artboard.id));
-
-        const actions = document.createElement('div');
-        actions.className = 'sidebar-item-actions';
-
-        const copyBtn = document.createElement('button');
-        copyBtn.type = 'button';
-        copyBtn.className = 'sidebar-item-action';
-        copyBtn.innerHTML = copyIconHtml;
-        copyBtn.title = 'Copy reference';
-        copyBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          options.onCopyArtboard?.(artboard.id, { extended: event.shiftKey || event.altKey });
+        const primHeader = createSubfolderHeader('Primitives', primCollapsed, primitives.length, () => {
+          subfolderCollapsed[primKey] = !primCollapsed;
+          render(model);
         });
-        actions.appendChild(copyBtn);
+        list.appendChild(primHeader);
 
-        const noteBtn = document.createElement('button');
-        noteBtn.type = 'button';
-        noteBtn.className = 'sidebar-item-action';
-        noteBtn.innerHTML = noteIconHtml;
-        noteBtn.classList.toggle('sidebar-item-action--active', artboard.noteCount > 0);
-        noteBtn.title = artboard.noteCount > 0 ? 'Edit note' : 'Add note';
-        noteBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          options.onEditArtboardNote?.(artboard.id);
+        const primList = document.createElement('div');
+        primList.className = 'sidebar-subfolder-list';
+        primList.classList.toggle('sidebar-subfolder-list--collapsed', primCollapsed);
+
+        primitives.forEach((artboard, index) => {
+          primList.appendChild(createArtboardRow(artboard, index, project));
         });
-        actions.appendChild(noteBtn);
+        list.appendChild(primList);
 
-        const pinBtn = document.createElement('button');
-        pinBtn.type = 'button';
-        pinBtn.className = 'sidebar-item-action';
-        pinBtn.innerHTML = pinIconHtml;
-        pinBtn.classList.toggle('sidebar-item-action--active', artboard.pinned);
-        pinBtn.title = artboard.pinned ? 'Unpin' : 'Pin';
-        pinBtn.addEventListener('click', (event) => {
-          event.stopPropagation();
-          options.onTogglePin?.(artboard.id);
+        // Artboards subfolder
+        const artKey = `${project.id}:artboards`;
+        const artCollapsed = subfolderCollapsed[artKey] ?? false;
+
+        const artHeader = createSubfolderHeader('Artboards', artCollapsed, composites.length, () => {
+          subfolderCollapsed[artKey] = !artCollapsed;
+          render(model);
         });
-        actions.appendChild(pinBtn);
+        list.appendChild(artHeader);
 
-        row.appendChild(body);
-        row.appendChild(actions);
+        const artList = document.createElement('div');
+        artList.className = 'sidebar-subfolder-list';
+        artList.classList.toggle('sidebar-subfolder-list--collapsed', artCollapsed);
 
-        row.addEventListener('contextmenu', (event) => {
-          showContextMenu(event, [
-            {
-              label: 'Edit name',
-              onSelect: () => showRenameDialog(getDisplayName(artboard), (value) => options.onRenameArtboard?.(artboard.id, value)),
-            },
-            {
-              label: artboard.pinned ? 'Unpin' : 'Pin',
-              onSelect: () => options.onTogglePin?.(artboard.id),
-            },
-            {
-              label: artboard.noteCount > 0 ? 'Edit note...' : 'Add note...',
-              onSelect: () => options.onEditArtboardNote?.(artboard.id),
-            },
-            {
-              label: 'Move to project...',
-              onSelect: () => showProjectPickerDialog({
-                projects: model.projects,
-                currentProjectId: artboard.projectId,
-                onSelect: (nextProjectId) => options.onMoveArtboardProject?.(artboard.id, nextProjectId),
-              }),
-            },
-            { type: 'divider' },
-            {
-              label: 'Archive',
-              muted: true,
-              onSelect: () => showConfirmDialog({
-                title: 'Archive artboard',
-                message: `Archive "${getDisplayName(artboard)}"?`,
-                confirmLabel: 'Archive',
-                onConfirm: () => options.onArchiveArtboard?.(artboard.id),
-              }),
-            },
-          ]);
+        composites.forEach((artboard, index) => {
+          artList.appendChild(createArtboardRow(artboard, index, project));
+        });
+        list.appendChild(artList);
+
+        // Set up separate list drag-reordering
+        const getMergedIds = () => {
+          const primIds = Array.from(primList.querySelectorAll('.sidebar-item--artboard')).map((el) => el.dataset.id);
+          const compIds = Array.from(artList.querySelectorAll('.sidebar-item--artboard')).map((el) => el.dataset.id);
+          return [...primIds, ...compIds];
+        };
+
+        makeListReorderable(primList, () => {
+          options.onReorderProjectArtboards?.(project.id, getMergedIds());
         });
 
-        list.appendChild(row);
-      });
-
-      makeListReorderable(list, (orderedIds) => {
-        options.onReorderProjectArtboards?.(project.id, orderedIds);
-      });
+        makeListReorderable(artList, () => {
+          options.onReorderProjectArtboards?.(project.id, getMergedIds());
+        });
+      }
 
       section.appendChild(projectWrap);
     });
@@ -337,37 +422,17 @@ export function createSidebar(options) {
     return section;
   }
 
-  function buildPrimitivesSection() {
-    const section = document.createElement('section');
-    section.className = 'sidebar-section sidebar-section--primitives';
-    const header = createSectionHeaderButton('Primitives', primitivesCollapsed, () => {
-      primitivesCollapsed = !primitivesCollapsed;
-      render(model);
-    });
-    section.appendChild(header);
-
-    const list = document.createElement('div');
-    list.className = 'sidebar-sublist';
-    list.classList.toggle('sidebar-sublist--collapsed', primitivesCollapsed);
-
-    model.primitives.forEach((primitive) => {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'sidebar-item sidebar-item--primitive';
-      item.textContent = primitive.title;
-      item.addEventListener('click', () => options.onNavigatePrimitive?.(primitive.sourceKey));
-      list.appendChild(item);
-    });
-    section.appendChild(list);
-    return section;
-  }
-
   function render(nextModel) {
     model = nextModel;
+    if (model.ui?.leftSidebarWidth) {
+      sidebarWidth = model.ui.leftSidebarWidth;
+      applyWidth();
+    }
     scroll.innerHTML = '';
     stickyBottom.innerHTML = '';
+
+    scroll.appendChild(newProjectBtn);
     scroll.appendChild(buildProjectsSection());
-    scroll.appendChild(buildPrimitivesSection());
     stickyBottom.appendChild(buildArchiveSection());
     setActiveStyles();
   }

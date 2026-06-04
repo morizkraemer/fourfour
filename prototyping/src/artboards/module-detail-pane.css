@@ -1,0 +1,12 @@
+.ff-detail-module {
+  width: 278px;
+  height: 100%;
+  background: var(--ff-bg);
+  border-left: 1px solid var(--ff-border);
+  overflow: hidden;
+}
+.ff-detail-module > .ff-detail-pane {
+  width: 100%;
+  height: 100%;
+  border-left: none; /* module already owns the divider */
+}

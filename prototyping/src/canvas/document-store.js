@@ -8,6 +8,7 @@ const ARTBOARD_ROW_SPACING = 300;
 
 const DEFAULT_UI = {
   leftSidebarOpen: true,
+  leftSidebarWidth: 220,
   pinPanelOpen: true,
   pinPanelWidth: 280,
   activeProjectId: DEFAULT_PROJECT_ID,
@@ -86,6 +87,7 @@ function normalizeProject(project) {
 function normalizeUi(ui) {
   return {
     leftSidebarOpen: ui?.leftSidebarOpen !== false,
+    leftSidebarWidth: Number.isFinite(ui?.leftSidebarWidth) ? Math.max(160, Math.min(600, ui.leftSidebarWidth)) : DEFAULT_UI.leftSidebarWidth,
     pinPanelOpen: ui?.pinPanelOpen !== false,
     pinPanelWidth: Number.isFinite(ui?.pinPanelWidth) ? Math.max(220, Math.min(800, ui.pinPanelWidth)) : DEFAULT_UI.pinPanelWidth,
     activeProjectId: typeof ui?.activeProjectId === 'string' && ui.activeProjectId ? ui.activeProjectId : DEFAULT_PROJECT_ID,

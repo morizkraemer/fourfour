@@ -28,7 +28,7 @@ function renderSection({ label, action }) {
   return { element: el('div', { class: cls }, children) };
 }
 
-function renderItem({ kind = 'leaf', label, icon, count, digit, status, state = 'rest' }) {
+function renderItem({ kind = 'leaf', label, icon, count, digit, status, state = 'rest', splitAction = true, onSplit }) {
   const selected = state === 'active' || state === 'selected';
   const children = [];
 
@@ -41,7 +41,19 @@ function renderItem({ kind = 'leaf', label, icon, count, digit, status, state = 
   }
 
   children.push(el('span', { class: 'ff-sbrow__label', text: label }));
+
+  // Trailing zone: count (rest) ⇄ open-in-side-panel action (hover).
+  // The action reveals on row hover and opens this collection in a second
+  // list panel (the Pencil "2-column" view).
   if (count != null) children.push(el('span', { class: 'ff-sbrow__count', text: String(count) }));
+  if (splitAction) {
+    const splitBtn = el('button', {
+      class: 'ff-sbrow__action',
+      title: 'Open in side panel',
+      onClick: (e) => { e.stopPropagation(); if (typeof onSplit === 'function') onSplit(); },
+    }, [createIcon({ name: 'columns-2', size: 13 }).element]);
+    children.push(splitBtn);
+  }
 
   return { element: el('div', { class: `ff-sbrow ff-sbrow--${state}` }, children) };
 }

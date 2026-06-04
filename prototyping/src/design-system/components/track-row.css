@@ -41,12 +41,69 @@
 .ff-trow__cell--time .ff-trow__text {
   color: var(--ff-text-mid);
 }
+.ff-trow__cell--key .ff-trow__text {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-num);
+  font-weight: 500;
+}
 .ff-trow__cell--tag {
   justify-content: flex-end;
 }
 
+/* favorite toggle box (14px) */
+.ff-trow__cell--fav {
+  justify-content: center;
+}
+.ff-trow__fav {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--ff-radius-sm);
+  border: 1px solid transparent;
+}
+.ff-trow__fav--on {
+  background: var(--ff-elev);
+  border-color: var(--ff-border-hi);
+}
+.ff-trow__fav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ff-trow__fav-digit {
+  font-family: var(--ff-font-mono);
+  font-size: 8.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--ff-text-mid);
+}
+
+/* cover thumbnail (18px) */
+.ff-trow__cell--cover {
+  justify-content: center;
+}
+.ff-trow__cover {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--ff-radius-xs);
+  background-color: var(--ff-elev);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--ff-border-hi);
+}
+
+/* selected/playing emphasis on the title */
+.ff-trow--selected .ff-trow__cell--title .ff-trow__text {
+  color: var(--ff-accent);
+  font-weight: 500;
+}
+
 /* states */
 .ff-trow--hover {
+  background: var(--ff-hover);
+}
+/* live hover — real pointer hover tints any row that isn't already
+   selected/analyzing/dragging, so the table reacts to the mouse. */
+.ff-trow:hover:not(.ff-trow--selected):not(.ff-trow--analyzing):not(.ff-trow--drag) {
   background: var(--ff-hover);
 }
 .ff-trow--selected {

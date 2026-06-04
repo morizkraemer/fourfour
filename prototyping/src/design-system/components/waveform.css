@@ -1,0 +1,11 @@
+.ff-waveform {
+  display: block;
+  flex: none;
+}
+.ff-waveform--mini {
+  background: var(--ff-surface);
+  border-radius: var(--ff-radius-xs);
+}
+.ff-waveform--strip {
+  background: transparent;
+}

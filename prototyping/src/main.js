@@ -84,6 +84,7 @@ function buildSidebarModel(documentState) {
     artboardsByProject,
     archivedArtboards,
     primitives: primitiveCategories,
+    ui: documentState.ui,
   };
 }
 
@@ -189,6 +190,11 @@ const sidebar = createSidebar({
           draft.artboards[id].sidebarOrder = index;
         }
       });
+    });
+  },
+  onWidthChange(width) {
+    documentStore.mutate((draft) => {
+      draft.ui.leftSidebarWidth = width;
     });
   },
 });

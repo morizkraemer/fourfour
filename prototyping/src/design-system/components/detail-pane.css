@@ -60,6 +60,19 @@
   opacity: 0.5;
 }
 
+/* Mini overview waveform */
+.ff-detail-pane__waveform {
+  width: 100%;
+  height: 38px;
+  background-color: var(--ff-surface);
+  border-radius: var(--ff-radius-sm);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .ff-detail-pane__art-icon {
   color: var(--ff-faint);
 }
@@ -165,37 +178,50 @@
   flex-direction: column;
 }
 
-.ff-detail-pane__cues-list {
+.ff-detail-pane__cues-grid {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-.ff-detail-pane__cue-item {
-  display: grid;
-  grid-template-columns: 14px 1fr 50px;
-  height: 24px;
+.ff-detail-pane__cue-chip {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex: 1 1 calc(33.333% - 4px);
+  min-width: 72px;
+  padding: 5px 8px;
+  border-radius: var(--ff-radius-sm);
+  background-color: var(--ff-hover);
   box-sizing: border-box;
-  transition: background-color var(--ff-motion-fast) var(--ff-easing);
-  border-radius: var(--ff-radius-xs);
-  padding: 0 4px;
 }
 
-.ff-detail-pane__cue-item:hover {
+.ff-detail-pane__cue-chip--active {
+  background-color: var(--ff-select);
+}
+
+.ff-detail-pane__cue-chip--add {
+  flex: 0 0 auto;
+  min-width: 26px;
+  justify-content: center;
+  color: var(--ff-muted);
   background-color: var(--ff-hover);
+  font-family: var(--ff-font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 /* Cue square of size 8x8 with 2px border-radius */
-.ff-detail-pane__cue-pip {
+.ff-detail-pane__cue-dot {
   width: 8px;
   height: 8px;
   border-radius: 2px;
-  justify-self: center;
+  flex: none;
 }
 
 .ff-detail-pane__cue-name {
+  flex: 1 1 0;
   font-family: var(--ff-font);
   font-size: 12px;
   color: var(--ff-text);

@@ -234,3 +234,22 @@
   background-color: var(--ff-accent);
   pointer-events: none;
 }
+
+/* Hot-cue marker: colored vertical line with a dot cap at the top */
+.ff-player-compact__waveform-cue {
+  position: absolute;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  pointer-events: none;
+}
+
+.ff-player-compact__waveform-cue-dot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}

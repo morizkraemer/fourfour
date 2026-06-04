@@ -1,0 +1,15 @@
+.ff-table {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: var(--ff-bg);
+}
+/* standalone catalog card only — gives the fill-width table a frame to size to */
+.ff-table-demo {
+  width: 760px;
+}
+.ff-table__body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}

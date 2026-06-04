@@ -36,6 +36,21 @@
   --ff-track-color-6: #a78bfa;
   --ff-track-color-7: #94a3b8;
 
+  /* Camelot key wheel — only on track-row key cell + detail pane. Hue keyed by
+     the wheel number (1-12); A/B share a hue. Mirrors docs/design_system.md. */
+  --ff-key-1: #f43f5e;
+  --ff-key-2: #fb923c;
+  --ff-key-3: #f59e0b;
+  --ff-key-4: #eab308;
+  --ff-key-5: #84cc16;
+  --ff-key-6: #22c55e;
+  --ff-key-7: #14b8a6;
+  --ff-key-8: #06b6d4;
+  --ff-key-9: #38bdf8;
+  --ff-key-10: #3b82f6;
+  --ff-key-11: #8b5cf6;
+  --ff-key-12: #ec4899;
+
   --ff-status-online: #4ade80;
   --ff-status-warn: #fbbf24;
   --ff-status-offline: #4a4a4a;

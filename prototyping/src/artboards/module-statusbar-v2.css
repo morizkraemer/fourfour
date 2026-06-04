@@ -1,0 +1,32 @@
+.ff-statusbar2-module {
+  width: 100%;
+  background: var(--ff-bg);
+  border-top: 1px solid var(--ff-border);
+}
+.ff-statusbar2-demo {
+  width: 1000px;
+}
+
+/* trailing settings (gear) button, sized to fit the 24px bar */
+.ff-statusbar2__settings {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: var(--ff-radius-xs);
+  background: transparent;
+  color: var(--ff-muted);
+  cursor: pointer;
+  outline: none;
+  transition: color var(--ff-motion-fast) var(--ff-easing),
+    background-color var(--ff-motion-fast) var(--ff-easing);
+}
+.ff-statusbar2__settings:hover {
+  color: var(--ff-text);
+  background: var(--ff-elev);
+}

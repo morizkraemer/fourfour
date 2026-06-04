@@ -54,6 +54,19 @@ Convert tokens to whatever format your stack needs (CSS vars, Tailwind config, J
     "track-color-6": { "value": "#a78bfa", "use": "CDJ color tag — purple" },
     "track-color-7": { "value": "#94a3b8", "use": "CDJ color tag — grey" },
 
+    "key-1":  { "value": "#f43f5e", "use": "Camelot key wheel — 1A/1B" },
+    "key-2":  { "value": "#fb923c", "use": "Camelot key wheel — 2A/2B" },
+    "key-3":  { "value": "#f59e0b", "use": "Camelot key wheel — 3A/3B" },
+    "key-4":  { "value": "#eab308", "use": "Camelot key wheel — 4A/4B" },
+    "key-5":  { "value": "#84cc16", "use": "Camelot key wheel — 5A/5B" },
+    "key-6":  { "value": "#22c55e", "use": "Camelot key wheel — 6A/6B" },
+    "key-7":  { "value": "#14b8a6", "use": "Camelot key wheel — 7A/7B" },
+    "key-8":  { "value": "#06b6d4", "use": "Camelot key wheel — 8A/8B" },
+    "key-9":  { "value": "#38bdf8", "use": "Camelot key wheel — 9A/9B" },
+    "key-10": { "value": "#3b82f6", "use": "Camelot key wheel — 10A/10B" },
+    "key-11": { "value": "#8b5cf6", "use": "Camelot key wheel — 11A/11B" },
+    "key-12": { "value": "#ec4899", "use": "Camelot key wheel — 12A/12B" },
+
     "status-online":  { "value": "#4ade80", "use": "USB mounted dot" },
     "status-warn":    { "value": "#fbbf24", "use": "modified marker in conflict diff" },
     "status-offline": { "value": "#4a4a4a", "use": "USB ejected dot" }

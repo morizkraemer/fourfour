@@ -151,17 +151,13 @@ export function createPlayerExpanded({
     variant: 'compact'
   });
 
-  // Key toggle button (using design system button primitive, compact 17px variant)
-  const { element: keyN } = createButton({
-    label: key,
-    variant: 'default',
-    size: 'compact',
-    onClick: (e) => {
-      if (e) e.stopPropagation();
-      if (typeof onKeyChange === 'function') onKeyChange();
-    }
+  // Key nudge (using design system nudge primitive, compact 17px variant)
+  const { element: keyN } = createNudge({
+    value: key,
+    label: 'KEY',
+    onChange: onKeyChange,
+    variant: 'compact'
   });
-  keyN.classList.add('ff-player-expanded__key-btn');
 
   const { element: halfBtn } = createButton({
     label: '½×',

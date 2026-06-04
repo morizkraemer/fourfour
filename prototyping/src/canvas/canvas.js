@@ -21,7 +21,7 @@ export function createCanvas({ viewport, documentStore, pinSidebar, registry, on
   const projectFrames = new Map(); // projectId -> ProjectFrame components
   let copyToast = null;
 
-  const LEFT_SIDEBAR_WIDTH = 220;
+  let leftSidebarWidth = 220;
   let pinSidebarWidth = pinSidebar.getWidth();
   let pinSidebarPinned = pinSidebar.isActive();
   let leftSidebarOpen = true;
@@ -29,7 +29,7 @@ export function createCanvas({ viewport, documentStore, pinSidebar, registry, on
 
   function getCanvasInsets() {
     return {
-      left: leftSidebarOpen ? LEFT_SIDEBAR_WIDTH : 0,
+      left: leftSidebarOpen ? leftSidebarWidth : 0,
       right: pinSidebarPinned && pinPanelOpen ? pinSidebarWidth : 0,
     };
   }
@@ -55,7 +55,7 @@ export function createCanvas({ viewport, documentStore, pinSidebar, registry, on
     if (!leftSidebarToggle || !pinSidebarToggle) return;
 
     const { left, right } = getCanvasInsets();
-    leftSidebarToggle.style.left = leftSidebarOpen ? `${LEFT_SIDEBAR_WIDTH - 1}px` : '0';
+    leftSidebarToggle.style.left = leftSidebarOpen ? `${leftSidebarWidth - 1}px` : '0';
     leftSidebarToggle.dataset.open = leftSidebarOpen ? 'true' : 'false';
     leftSidebarToggle.title = leftSidebarOpen ? 'Hide sidebar' : 'Show sidebar';
     leftSidebarToggle.setAttribute('aria-label', leftSidebarToggle.title);
@@ -567,7 +567,7 @@ export function createCanvas({ viewport, documentStore, pinSidebar, registry, on
     const worldH = rect.height / scale;
 
     // Viewport dimensions accounting for sidebars
-    const leftWidth = documentStore.get().ui.leftSidebarOpen !== false ? 220 : 0;
+    const leftWidth = documentStore.get().ui.leftSidebarOpen !== false ? leftSidebarWidth : 0;
     const rightWidth = pinSidebar.isActive() && documentStore.get().ui.pinPanelOpen !== false ? pinSidebar.getWidth() : 0;
     const vpW = window.innerWidth - leftWidth - rightWidth;
     const vpH = window.innerHeight;
@@ -662,6 +662,7 @@ export function createCanvas({ viewport, documentStore, pinSidebar, registry, on
   // ── 7. Render triggers ──
   function render(nextDocument) {
     leftSidebarOpen = nextDocument.ui.leftSidebarOpen !== false;
+    leftSidebarWidth = nextDocument.ui.leftSidebarWidth || 220;
     pinPanelOpen = nextDocument.ui.pinPanelOpen !== false;
     pinSidebarWidth = nextDocument.ui.pinPanelWidth || pinSidebar.getWidth();
     pinSidebarPinned = getSinglePinnedId(nextDocument) !== null;

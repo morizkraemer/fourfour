@@ -1,0 +1,32 @@
+.ff-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 240px;
+  height: 100%;
+  background: var(--ff-bg);
+  border-right: 1px solid var(--ff-border);
+}
+.ff-sidebar__top {
+  display: flex;
+  flex-direction: column;
+}
+.ff-sidebar__bottom {
+  margin-top: auto;
+  border-top: 1px solid var(--ff-border);
+}
+
+/* macOS window chrome dots */
+.ff-sidebar__chrome {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-3);
+  padding: var(--ff-space-4) var(--ff-space-6);
+}
+.ff-sidebar__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.ff-sidebar__dot--close { background: #ff5f57; }
+.ff-sidebar__dot--min { background: #febc2e; }
+.ff-sidebar__dot--max { background: #28c840; }

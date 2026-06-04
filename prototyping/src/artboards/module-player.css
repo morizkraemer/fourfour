@@ -1,0 +1,8 @@
+.ff-player-module {
+  width: 100%;
+  background: var(--ff-bg);
+  border-top: 1px solid var(--ff-border);
+}
+.ff-player-demo {
+  width: 1000px;
+}

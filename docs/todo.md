@@ -1,5 +1,42 @@
 # Todo
 
+## 2026-06-04 First-Screen UI — Modules + Browse Composite
+
+Goal: build the six main-window **modules** matching the Pencil reusable components, then compose
+them into a **Browse first-screen composite**. Pencil (`designs/fourfour_design_system.pen`) is truth.
+Canonical layout = "main layout v3" (1440×900): `[sidebar 240 | table fill | detail ~278]` / player 96 / statusbar 24.
+
+Audit findings — primitives to fix/add FIRST (bottom-up):
+- [ ] **track-row**: extend `TRACK_COLUMNS` + `renderCell` for the Pencil cell types it lacks —
+      `fav` (14px toggle box), `wave` (mini-waveform), `cover` (18px thumb), `key` (camelot-colored mono).
+      Keep text/tag cells working so existing artboards don't break.
+- [ ] **waveform** (NEW primitive): Canvas-2D `createWaveform({peaks?,width,height,variant}) → {element,update}`.
+      Used by track-row `wave` cell + player module.
+- [ ] **camelot key colors**: shared token-mapped helper for the 12 hues (track-row key cell + detail pane).
+
+Modules to build (layer 'module', own width/padding/gap; export reusable builders):
+- [ ] `module-sidebar` (240w) · `module-table` (fill) · `module-detail-pane` (278w) ·
+      `module-player` (96h) · `module-statusbar` (24h) · `module-global-header` (search, for completeness).
+
+Composite:
+- [ ] `screen-browse` (layer 'composite'): pin 1440×900, `overflow:hidden`, flattened slots (no composite spacing).
+      Rows: main-area `[sidebar | table | detail]` / player / statusbar. Compose module builders AS-IS.
+
+Verify: `cd prototyping && npm run build` (no errors) + eyeball each card vs Pencil node screenshots.
+
+### Review (2026-06-04)
+- Primitives: added `waveform` (Canvas-2D faux peaks) + `keyColor` util + 12 `--ff-key-*` tokens
+  (mirrored in design_system.md). Extended `track-row` with `fav`/`wave`/`cover`/`key` cell types
+  (non-breaking: default TRACK_COLUMNS untouched; modules pass their own column set).
+- Modules built (all export a builder for the composite): `module-sidebar` (240w, traffic lights +
+  Favorites/Library/Playlists + USB pinned bottom), `module-table` (Pencil column set, 12 rows w/
+  states), `module-detail-pane` (278w), `module-player` (full-width compact), `module-statusbar`,
+  `module-global-header` (search; not wired into v3 composite).
+- Composite: `screen-browse` pins 1440×900, flattened slots, `[sidebar|table|detail]`/player/status.
+- Build: ✓ 180 modules transformed, no errors.
+- VERIFICATION GAP: no visual check run (per instruction "no visual tests / claude-in-chrome").
+  Needs eyeball in `npm run dev` — the "Screen · Browse" + 6 "Module ·" cards — vs Pencil.
+
 ## 2026-06-03 Prototyping Canvas Blank Fix
 
 - [ ] Confirm `CLAUDE.md` no longer requires version bumps for every edit.

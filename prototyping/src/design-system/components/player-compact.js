@@ -47,6 +47,7 @@ function createChevronUpIcon() {
  * @param {string} [options.currentTimeMs=".2"]
  * @param {string} options.totalTime          – total duration string like "8:14"
  * @param {number} options.progress           – 0 to 1 progress value
+ * @param {Array<{position:number,color:string}>} [options.cues] – hot-cue markers (0..1)
  * @param {boolean} [options.playing=false]
  * @param {string|number} [options.bpm="124.00"]
  * @param {string} [options.key="8A"]
@@ -63,6 +64,7 @@ export function createPlayerCompact({
   currentTimeMs = '.2',
   totalTime,
   progress = 0,
+  cues = [],
   playing = false,
   bpm = '124.00',
   key = '8A',
@@ -173,8 +175,23 @@ export function createPlayerCompact({
     style: `left: ${progress * 100}%`
   });
 
+  // Hot-cue markers: thin colored vertical lines with a dot cap (playhead-style)
+  const cueMarkers = (cues || []).map((cue) => {
+    const left = `${Math.max(0, Math.min(1, cue.position ?? 0)) * 100}%`;
+    return el('div', {
+      class: 'ff-player-compact__waveform-cue',
+      style: `left: ${left}; background-color: ${cue.color || '#4ade80'}`
+    }, [
+      el('span', {
+        class: 'ff-player-compact__waveform-cue-dot',
+        style: `background-color: ${cue.color || '#4ade80'}`
+      })
+    ]);
+  });
+
   const waveform = el('div', { class: 'ff-player-compact__waveform' }, [
     playedOverlay,
+    ...cueMarkers,
     playhead
   ]);
 

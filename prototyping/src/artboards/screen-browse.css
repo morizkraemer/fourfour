@@ -1,0 +1,48 @@
+.ff-browse {
+  display: flex;
+  flex-direction: column;
+  width: 1440px;
+  height: 900px;
+  overflow: hidden;
+  background: var(--ff-bg);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-lg);
+}
+
+/* main area: [ sidebar | body ], fills the space above player + status */
+.ff-browse__main {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+/* body column: global header on top, table+detail row below */
+.ff-browse__body {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ff-browse__content {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+/* bare slots — no spacing; modules own their own padding/width (rule 4) */
+.ff-browse__slot {
+  display: flex;
+  min-width: 0;
+}
+.ff-browse__slot--sidebar { flex: none; }
+.ff-browse__slot--header { flex: none; }
+.ff-browse__slot--table { flex: 1 1 0; }
+.ff-browse__slot--detail { flex: none; }
+.ff-browse__slot--player,
+.ff-browse__slot--status { flex: none; }
+
+/* the table column scrolls internally; header stays put */
+.ff-browse__slot--table .ff-table { height: 100%; }
+.ff-browse__slot--table .ff-table__body { flex: 1 1 0; overflow-y: auto; }

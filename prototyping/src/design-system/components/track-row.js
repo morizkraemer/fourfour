@@ -2,15 +2,20 @@ import './track-row.css';
 import { el } from '../utils/dom.js';
 import { createTagBadge } from './tag-badge.js';
 import { createColorSwatch } from './color-swatch.js';
+import { createWaveform } from './waveform.js';
+import { keyColor } from '../utils/key-color.js';
 
 /*
  * Track list row (§7). Cells are driven by a `columns` array so a column header
  * built from the same array stays aligned.
- *   track: { index, title, artist, label, bpm, time, tag }
+ *   track: { index, title, artist, label, bpm, key, time, tag, fav, cover, peaks }
  *     tag: null | { type:'color', color } | { type:'digit', value, color }
  *   state: 'rest' | 'hover' | 'selected' | 'analyzing' | 'drag'
  *
- * TRACK_COLUMNS is the default layout — import it to feed createColumnHeader too.
+ * Special cell types (dispatched by col.key): 'fav' (toggle box), 'wave'
+ * (mini-waveform preview), 'cover' (artwork thumb), 'key' (camelot-colored).
+ * Everything else renders as text. TRACK_COLUMNS is the default text layout;
+ * the table module passes its own Pencil-matching column set.
  */
 export const TRACK_COLUMNS = [
   { key: 'index', label: '#', width: 26 },
@@ -40,6 +45,41 @@ function renderCell(col, track) {
       child = createColorSwatch({ color: tag.color }).element;
     }
     return el('div', { class: 'ff-trow__cell ff-trow__cell--tag', style }, child ? [child] : []);
+  }
+
+  if (col.key === 'fav') {
+    // track.fav is the favorite slot number (1..8). Filled box + centered digit
+    // when assigned (Pencil "rNfav"); empty transparent box otherwise.
+    const digit = track.fav;
+    const on = digit != null && digit !== false && digit !== '';
+    const box = el('div', { class: `ff-trow__fav${on ? ' ff-trow__fav--on' : ''}` },
+      on && digit !== true ? [el('span', { class: 'ff-trow__fav-digit', text: String(digit) })] : []);
+    return el('div', { class: 'ff-trow__cell ff-trow__cell--fav', style }, [box]);
+  }
+
+  if (col.key === 'wave') {
+    const w = col.width ?? 120;
+    const { element } = createWaveform({
+      peaks: track.peaks ?? null,
+      width: w,
+      height: 14,
+      variant: 'mini',
+      seed: (track.index ?? 1) * 2654435761,
+    });
+    return el('div', { class: 'ff-trow__cell ff-trow__cell--wave', style }, [element]);
+  }
+
+  if (col.key === 'cover') {
+    const thumb = el('div', { class: 'ff-trow__cover' });
+    if (track.cover) thumb.style.backgroundImage = `url(${track.cover})`;
+    return el('div', { class: 'ff-trow__cell ff-trow__cell--cover', style }, [thumb]);
+  }
+
+  if (col.key === 'key') {
+    const k = String(track.key ?? '—');
+    const span = el('span', { class: 'ff-trow__text', text: k });
+    span.style.color = k === '—' ? 'var(--ff-muted)' : keyColor(k);
+    return el('div', { class: 'ff-trow__cell ff-trow__cell--key', style }, [span]);
   }
 
   return el('div', { class: `ff-trow__cell ff-trow__cell--${col.key}`, style }, [

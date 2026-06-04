@@ -26,8 +26,43 @@
   color: var(--ff-faint);
 }
 
+/* trailing open-in-side-panel action: hidden until the row is hovered */
+.ff-sbrow__action {
+  flex: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: var(--ff-radius-xs);
+  background: transparent;
+  color: var(--ff-muted);
+  cursor: pointer;
+  outline: none;
+  transition: color var(--ff-motion-fast) var(--ff-easing),
+    background-color var(--ff-motion-fast) var(--ff-easing);
+}
+.ff-sbrow__action:hover {
+  color: var(--ff-text);
+  background: var(--ff-elev);
+}
+
 .ff-sbrow--hover {
   background: var(--ff-hover);
+}
+/* live hover — real pointer hover tints any item row not already active,
+   and swaps the count for the open-in-side-panel action. */
+.ff-sbrow:hover:not(.ff-sbrow--active):not(.ff-sbrow--selected) {
+  background: var(--ff-hover);
+}
+.ff-sbrow:hover .ff-sbrow__count {
+  display: none;
+}
+.ff-sbrow:hover .ff-sbrow__action {
+  display: flex;
 }
 .ff-sbrow--active,
 .ff-sbrow--selected {

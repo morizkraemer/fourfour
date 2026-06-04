@@ -197,8 +197,5 @@
   gap: 8px;
 }
 
-/* Key toggle button override to use mono font */
-.ff-player-expanded__key-btn .ff-btn__label {
-  font-family: var(--ff-font-mono);
-}
+
 

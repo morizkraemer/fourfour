@@ -1,5 +1,6 @@
 import './detail-pane.css';
 import { el } from '../utils/dom.js';
+import { createWaveform } from './waveform.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -38,6 +39,13 @@ function createDiscIcon(size) {
   svg.setAttribute('stroke-linejoin', 'round');
   svg.innerHTML = '<circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="2" />';
   return svg;
+}
+
+// "m:ss" → seconds; returns null if unparseable
+function timeToSeconds(str) {
+  const m = /^(\d+):(\d{1,2})$/.exec(String(str ?? '').trim());
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
 }
 
 // Cue color palette matching the track-row and cuestrip CDJ colors
@@ -95,6 +103,26 @@ export function createDetailPane({
 
     containerChildren.push(cover);
 
+    // Mini overview waveform (Pencil mediaSection "waveform", 38px tall) with
+    // colored hot-cue dots positioned along the track duration.
+    if (!isMissing) {
+      const totalSec = timeToSeconds(lookupKey(meta, 'DURATION'));
+      const cueMarkers = (cues || []).map((cue, idx) => {
+        const sec = timeToSeconds(cue.position);
+        const frac = (totalSec && sec != null) ? sec / totalSec
+          : (cues.length > 1 ? idx / (cues.length - 1) : 0);
+        return { position: frac, color: cue.color || CUE_COLORS[idx % CUE_COLORS.length] };
+      });
+      const wave = createWaveform({
+        width: 300, height: 36, variant: 'strip', seed: 7,
+        cues: cueMarkers, cueStyle: 'dot',
+      });
+      wave.element.style.width = '100%';
+      containerChildren.push(
+        el('div', { class: 'ff-detail-pane__waveform' }, [wave.element])
+      );
+    }
+
     // Title & Artist
     containerChildren.push(
       el('div', { class: 'ff-detail-pane__header' }, [
@@ -131,29 +159,32 @@ export function createDetailPane({
     const metaList = el('dl', { class: 'ff-detail-pane__meta-list' }, dlItems);
     containerChildren.push(metaList);
 
-    // Cues
+    // Hot cues (Pencil "HOT CUE": colored-dot chips wrapping into rows)
     if (!isMissing && cues && cues.length > 0) {
-      const cueHeader = el('div', { class: 'ff-detail-pane__section-title' }, ['CUE POINTS']);
-      const cueRows = cues.map((cue, idx) => {
+      const cueHeader = el('div', { class: 'ff-detail-pane__section-title' }, ['HOT CUE']);
+      const chips = cues.map((cue, idx) => {
         const color = cue.color || CUE_COLORS[idx % CUE_COLORS.length];
-        const pip = el('div', {
-          class: 'ff-detail-pane__cue-pip',
+        const dot = el('div', {
+          class: 'ff-detail-pane__cue-dot',
           style: `background-color: ${color}`
         });
         const nameEl = el('span', { class: 'ff-detail-pane__cue-name' }, [cue.name]);
         const posEl = el('span', { class: 'ff-detail-pane__cue-pos' }, [cue.position]);
 
-        return el('div', { class: 'ff-detail-pane__cue-item' }, [
-          pip,
-          nameEl,
-          posEl
-        ]);
+        return el('div', {
+          class: `ff-detail-pane__cue-chip${idx === 0 ? ' ff-detail-pane__cue-chip--active' : ''}`
+        }, [dot, nameEl, posEl]);
       });
+
+      // Trailing "+" add-cue chip (Pencil c5)
+      chips.push(
+        el('div', { class: 'ff-detail-pane__cue-chip ff-detail-pane__cue-chip--add' }, ['+'])
+      );
 
       containerChildren.push(
         el('div', { class: 'ff-detail-pane__cues-section' }, [
           cueHeader,
-          el('div', { class: 'ff-detail-pane__cues-list' }, cueRows)
+          el('div', { class: 'ff-detail-pane__cues-grid' }, chips)
         ])
       );
     }
