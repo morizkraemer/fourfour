@@ -37,7 +37,11 @@
     <button class="ff-player-compact__cue-btn" onclick={stop(onCue)}>
       <span class="ff-player-compact__cue-txt">CUE</span>
     </button>
-    <button class="ff-player-compact__play-btn" onclick={stop(onPlayToggle)}>
+    <button
+      class="ff-player-compact__play-btn"
+      title={playing ? 'Pause' : 'Play'}
+      aria-label={playing ? 'Pause' : 'Play'}
+      onclick={stop(onPlayToggle)}>
       {#if playing}
         <svg class="ff-player-compact__play-icon" viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
           <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
@@ -72,7 +76,11 @@
           </span>
           <span class="ff-player-compact__time-tot">{totalTime}</span>
         </div>
-        <button class="ff-player-compact__expand-btn" onclick={stop(onExpand)}>
+        <button
+          class="ff-player-compact__expand-btn"
+          title="Expand player"
+          aria-label="Expand player"
+          onclick={stop(onExpand)}>
           <svg
             class="ff-player-compact__expand-chevron"
             viewBox="0 0 24 24"

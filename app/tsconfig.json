@@ -1,0 +1,18 @@
+{
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "checkJs": false,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "paths": {
+      "$ds": ["../prototyping/viewport/design-system/svelte.js"],
+      "$ds/*": ["../prototyping/viewport/design-system/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
+}

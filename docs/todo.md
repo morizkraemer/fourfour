@@ -32,10 +32,22 @@ beat+time grid, fed by `get_analysis_data`); lacks playhead/cues/beat-snap. Phas
       `Waveform` = canvas-2D, redraws via `$effect`. Converted `track-row`/`sidebar-row`/`button` artboards
       to mount the Svelte versions. Verified headless: every `.svelte` + entry transform 200, no errors.
       ⏳ Remaining ~30 primitives ported on demand when their module/screen is built.
-- [ ] **4. Modules** — sidebar, global-header, table, detail-pane, player, statusbar(+v2); export sub-builders.
-- [ ] **5. Composite** — `screen-browse` recomposed from Svelte modules; verify vs 1440×900.
-- [ ] **6. Tauri shell + state** — repurpose `pioneer-test-ui`: Vite+Svelte+TS, `@tauri-apps/api`, runes stores;
-      wire Browse to `scan_directory`/`analyze_tracks`/`load_state`.
+**↪ Redirect (2026-06-04, user):** "canvas is static, real ui isnt — keep them separate." So **primitives
+are shared** (design-system, both canvas + app import them) but **modules/screens are NOT**: the app owns its
+own *interactive* modules (selection, drag-drop, store-bound); the canvas keeps its existing *static* module
+artboards as visual reference. Original phases 4–5 ("shared Svelte modules") are **descoped** — the real path
+is to build Browse inside the app, composing shared primitives. New phase shape below.
+
+- [~] **4. App scaffold (isolated)** — new `app/` (Vite + Svelte 5 + TS), imports shared primitives from
+      `../prototyping/viewport/design-system/svelte.js`. Built as a NEW project alongside the working
+      `pioneer-test-ui/frontend/` harness (which stays until the app replaces it — no destructive in-place
+      convert). Gate: `npm run build` compiles + renders shared primitives → proves the lift works in a real app.
+- [ ] **5. Browse screen (app)** — interactive modules (Sidebar, TrackTable, DetailPane, GlobalHeader, Player,
+      StatusBar) built in `app/`, composing shared primitives, runes stores (library, selection, currentTrack,
+      panelMode, playerState). Static demo data first; wiring next.
+- [ ] **6. Tauri wiring** — point the `pioneer-test-ui` Rust crate's `tauri.conf` at `app/` build (drop
+      `withGlobalTauri`, use `@tauri-apps/api`); wire Browse to `scan_directory`/`analyze_tracks`/`load_state`.
+      Retire `frontend/` harness once parity reached.
 - [ ] **7. Waveform** — extract `app.js:815–1045` → `WaveformRenderer` class + Svelte wrapper; add
       playhead + cue interaction. Confirm base (this vs colleague's) first.
 
