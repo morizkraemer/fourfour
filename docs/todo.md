@@ -1,5 +1,22 @@
 # Todo
 
+## 2026-06-04 Migrate Prototyping To Viewport Package
+
+- [x] Copy project-owned artboards into `prototyping/viewport/artboards`.
+- [x] Copy project-owned design-system into `prototyping/viewport/design-system`.
+- [x] Add `prototyping/viewport.config.js` with fourfour layers and a fresh storage namespace.
+- [x] Install/use the local `viewport` package and switch `npm run dev` to the package CLI.
+- [x] Remove duplicated prototype engine files after the package CLI renders all artboards.
+- [x] Verify headlessly: package CLI render, `screen-browse`, camera persistence, and artboard HMR.
+
+### Review (2026-06-04)
+- Checkpoint commit before migration: `26c9a5b chore: checkpoint fourfour prototype state`.
+- Moved prototype content to `prototyping/viewport/artboards` and `prototyping/viewport/design-system`.
+- Added `prototyping/viewport.config.js` with `storageNamespace: 'fourfour'`.
+- Switched `npm run dev` to `viewport --port 5180` via the local `file:../../viewport` package.
+- Removed the old duplicated `prototyping/src` canvas/content, `index.html`, and `vite.config.js`.
+- Headless smoke after clean restart: 20 cards rendered, `screen-browse` present, camera persisted across reload, artboard HMR updated in place, no console/page errors.
+
 ## 2026-06-04 First-Screen UI — Modules + Browse Composite
 
 Goal: build the six main-window **modules** matching the Pencil reusable components, then compose
