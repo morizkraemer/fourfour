@@ -1,16 +1,9 @@
-import { mount } from 'svelte';
 import { el } from '../design-system/utils/dom.js';
-import Button from '../design-system/components/Button.svelte';
+import { host, Button } from '../design-system/svelte.js';
 
 export const meta = { title: 'Button', layer: 'primitive' };
 
-// Mount a Svelte Button into a layout-neutral host so the artboard contract
-// (return one DOM node) is satisfied while the component owns its own render.
-function btn(props) {
-  const target = el('span', { style: { display: 'contents' } });
-  mount(Button, { target, props });
-  return target;
-}
+const btn = (props) => host(Button, props);
 
 const cap = (t) =>
   el('div', {

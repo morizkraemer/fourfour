@@ -1,13 +1,13 @@
 import { el } from '../design-system/utils/dom.js';
-import { createSidebarRow } from '../design-system/index.js';
+import { host, SidebarRow } from '../design-system/svelte.js';
 
 export const meta = { title: 'Sidebar Row', layer: 'primitive' };
 
 // A section = header + its item rows, stacked with a 1px gap. Non-first groups
 // get a hairline top divider, matching §6.
 function group({ header, items, first = false }) {
-  const rows = [createSidebarRow({ kind: 'section', ...header }).element];
-  for (const it of items) rows.push(createSidebarRow(it).element);
+  const rows = [host(SidebarRow, { kind: 'section', ...header })];
+  for (const it of items) rows.push(host(SidebarRow, it));
   return el(
     'div',
     {

@@ -15,9 +15,23 @@ beat+time grid, fed by `get_analysis_data`); lacks playhead/cues/beat-snap. Phas
       `@sveltejs/vite-plugin-svelte@5.1`; `viewport.vite.js` adds `svelte()`. Ported `Button/Icon/Kbd.svelte`
       (+ shared `icon-glyphs.js`); `button.artboard.js` mounts the Svelte Button via `mount()`.
       Verified headless: all `.svelte` + entry transform 200, no compile errors, icon size reactive.
-      ⚠ Engine edit is in the **separate `viewport` repo (on `main`, uncommitted)** — needs review.
-- [ ] **2. Foundations** — global `tokens.css`/`base.css`; barrel re-exports `.svelte`; TS config; retire `dom.js`.
-- [ ] **3. Primitives (tiered, parallel subagents)** — leaves → composed. ~41 total. Verify each tier.
+      ✅ Engine edit committed to the separate `viewport` repo on `main`: `d5230af`.
+- [x] **2. Foundations** — tokens/base load **globally for free** (engine entry imports the barrel, whose
+      first two lines are `tokens.css`+`base.css`). Added `utils/mount.js` (`host(Component,props)` →
+      `display:contents` node, kills per-artboard boilerplate) and `design-system/svelte.js` — the
+      **production Svelte barrel** (loads tokens+base, re-exports ported components + `host`/`keyColor`/
+      `ICON_NAMES`); this is the entry the Tauri app imports in phase 6. Decision: components stay
+      **plain-JS `<script>`, not `lang="ts"`** — TS belongs to the phase-6 app shell, not the 50 framework-light
+      components. `dom.js` retire deferred (vanilla artboards still use it; cut at phase-6 cutover).
+- [~] **3. Primitives — Browse subset (14 ported, the rest deferred)** — scoped to the Browse dependency
+      closure, not all ~50 (Curate/Sync/Settings/overlay primitives are out-of-scope per this plan;
+      porting them now = speculative, unverifiable churn). Tier 0 (leaves): `Button Icon Kbd TagBadge
+      StatusDot ColorSwatch Spinner ProgressBar Nudge SidebarSection Waveform`. Tier 1 (compose):
+      `ColumnHeader StatusBar SidebarRow TrackRow PlayerCompact DetailPane`. Added `class` passthrough to
+      `Icon/Spinner/Button`. Snippet-based slotting (`{@render children()}`) for `SidebarSection`/`StatusBar`.
+      `Waveform` = canvas-2D, redraws via `$effect`. Converted `track-row`/`sidebar-row`/`button` artboards
+      to mount the Svelte versions. Verified headless: every `.svelte` + entry transform 200, no errors.
+      ⏳ Remaining ~30 primitives ported on demand when their module/screen is built.
 - [ ] **4. Modules** — sidebar, global-header, table, detail-pane, player, statusbar(+v2); export sub-builders.
 - [ ] **5. Composite** — `screen-browse` recomposed from Svelte modules; verify vs 1440×900.
 - [ ] **6. Tauri shell + state** — repurpose `pioneer-test-ui`: Vite+Svelte+TS, `@tauri-apps/api`, runes stores;

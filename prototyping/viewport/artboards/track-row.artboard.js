@@ -1,5 +1,5 @@
 import { el } from '../design-system/utils/dom.js';
-import { createColumnHeader, createTrackRow, TRACK_COLUMNS } from '../design-system/index.js';
+import { host, ColumnHeader, TrackRow, TRACK_COLUMNS } from '../design-system/svelte.js';
 
 export const meta = { title: 'Track Row + Column Header', layer: 'primitive' };
 
@@ -15,8 +15,8 @@ const ROWS = [
 ];
 
 export default function render() {
-  const children = [createColumnHeader({ columns: headerColumns }).element];
-  for (const r of ROWS) children.push(createTrackRow(r).element);
+  const children = [host(ColumnHeader, { columns: headerColumns })];
+  for (const r of ROWS) children.push(host(TrackRow, r));
 
   return el(
     'div',

@@ -16,6 +16,7 @@
     size = 'default',
     kbd,
     onclick,
+    class: className = '',
   } = $props();
 
   let iconSize = $derived(size === 'compact' ? 10 : size === 'small' ? 13 : 14);
@@ -27,6 +28,7 @@
       disabled && 'ff-btn--disabled',
       size === 'compact' && 'ff-btn--compact',
       size === 'small' && 'ff-btn--small',
+      className,
     ]
       .filter(Boolean)
       .join(' ')
