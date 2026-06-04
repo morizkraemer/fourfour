@@ -1,13 +1,35 @@
 .ff-player-compact {
+  --ff-player-compact-inner-h: calc(96px - 14px - 16px);
   height: 96px;
   padding: 14px 16px 16px;
   background-color: var(--ff-bg);
   border-top: 1px solid var(--ff-border);
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 15px;
   box-sizing: border-box;
   width: 100%;
+}
+
+.ff-player-compact__cover {
+  width: var(--ff-player-compact-inner-h);
+  height: var(--ff-player-compact-inner-h);
+  flex-shrink: 0;
+  border-radius: var(--ff-radius-sm);
+  background-color: var(--ff-elev);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ff-player-compact__cover--empty {
+  opacity: 0.85;
+}
+
+.ff-player-compact__cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .ff-player-compact__bpm-key-group {

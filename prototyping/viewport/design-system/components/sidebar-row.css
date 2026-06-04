@@ -19,6 +19,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.ff-sbrow__label-input {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  outline: none;
+  color: var(--ff-text);
+  box-shadow: inset 0 -1px 0 var(--ff-accent);
+}
+.ff-sbrow--active .ff-sbrow__label-input,
+.ff-sbrow--selected .ff-sbrow__label-input {
+  color: var(--ff-text);
+}
 .ff-sbrow__count {
   flex: none;
   font-family: var(--ff-font-mono);
@@ -75,6 +89,14 @@
 .ff-sbrow--active .ff-sbrow__count,
 .ff-sbrow--selected .ff-sbrow__count {
   color: var(--ff-text-mid);
+}
+.ff-sbrow--drag-over {
+  outline: 1px solid var(--ff-accent);
+  outline-offset: -1px;
+  background: var(--ff-hover);
+}
+.ff-sbrow--drag-source {
+  opacity: 0.5;
 }
 
 /* section header */

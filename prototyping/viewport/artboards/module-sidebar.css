@@ -15,12 +15,17 @@
   border-top: 1px solid var(--ff-border);
 }
 
-/* macOS window chrome dots */
+/* macOS window chrome — traffic lights sit in this band */
 .ff-sidebar__chrome {
   display: flex;
   align-items: center;
+  padding-left: var(--ff-space-6);
+  padding-right: var(--ff-space-6);
+}
+.ff-sidebar__traffic {
+  display: flex;
+  align-items: center;
   gap: var(--ff-space-3);
-  padding: var(--ff-space-4) var(--ff-space-6);
 }
 .ff-sidebar__dot {
   width: 10px;

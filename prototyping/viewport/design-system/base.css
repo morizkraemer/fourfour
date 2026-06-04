@@ -18,4 +18,29 @@ body {
   background: var(--ff-bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* macOS title band — sidebar chrome (traffic lights) + global header (search).
+   Tauri overlay: use data-tauri-drag-region on the element (not -webkit-app-region). */
+.ff-titlebar-band {
+  flex: none;
+  box-sizing: border-box;
+  min-height: var(--ff-titlebar-band-height);
+  padding-top: var(--ff-titlebar-padding-y);
+  padding-bottom: var(--ff-titlebar-padding-y);
+  user-select: none;
+}
+
+/* Rule only under the search row; sidebar chrome stays flush with nav */
+.ff-titlebar-band--ruled {
+  border-bottom: 1px solid var(--ff-border);
 }

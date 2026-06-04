@@ -1,13 +1,23 @@
 {
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capabilities for the test UI",
   "windows": ["main"],
+  "remote": {
+    "urls": [
+      "http://localhost:5200",
+      "http://127.0.0.1:5200",
+      "http://localhost:5201",
+      "http://127.0.0.1:5201"
+    ]
+  },
   "permissions": [
     "core:default",
     "dialog:default",
     "dialog:allow-open",
     "core:event:default",
     "core:event:allow-listen",
-    "core:event:allow-emit"
+    "core:event:allow-emit",
+    "core:window:allow-start-dragging"
   ]
 }

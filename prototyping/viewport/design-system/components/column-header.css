@@ -7,6 +7,7 @@
   border-top: 1px solid var(--ff-border);
 }
 .ff-colh__cell {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--ff-space-2);
@@ -22,6 +23,19 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding-right: 6px;
+}
+.ff-colh__resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.ff-colh__resize-handle:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 .ff-colh__cell--active {
   color: var(--ff-text);
@@ -31,4 +45,14 @@
 }
 .ff-colh__arrow--asc {
   transform: rotate(180deg);
+}
+.ff-colh__label--draggable {
+  cursor: grab;
+}
+.ff-colh__cell--dragging {
+  opacity: 0.45;
+}
+.ff-colh__cell--drop-target {
+  outline: 1px dashed var(--ff-accent);
+  outline-offset: -1px;
 }

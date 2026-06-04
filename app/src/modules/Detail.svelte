@@ -53,7 +53,7 @@
       // Load Artwork Image
       getTrackArtwork(current.id).then(bytes => {
         if (bytes && bytes.length > 0) {
-          const blob = new Blob([bytes], { type: 'image/jpeg' });
+          const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
           current.cover = URL.createObjectURL(blob);
         }
       }).catch(err => {
@@ -89,6 +89,7 @@
       cues={track.cues ?? []}
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
+      peaks={track.peaks}
     />
   {:else if mode === 'multi'}
     <DetailPane

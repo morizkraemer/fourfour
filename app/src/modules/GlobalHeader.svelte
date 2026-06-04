@@ -1,165 +1,83 @@
 <!--
   GlobalHeader.svelte — Top header bar with search field and actions.
-  Matches the v3 artboard layout with action controls added for Tauri integrations.
+  Search is the ⌘F inline filter (narrows the active track list in place).
 -->
 <script>
-  import { Icon, Kbd, Button } from '$ds';
-  import {
-    library,
-    importDirectory,
-    analyzeTracks,
-    setTestCuesOnSelected,
-    removeTracks,
-    changeLocalLibraryPath,
-    syncToUsb,
-    wipeVolume
-  } from '../stores/library.svelte.ts';
-  import { pickDirectory } from '../services/tauri.svelte.ts';
-  import { selection, clear as clearSelection } from '../stores/selection.svelte.ts';
+  import { Kbd, FilterInput } from '$ds';
+  import { tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
+  import { ui, clearListFilter } from '../stores/ui.svelte.ts';
 
-  async function handleImport() {
-    const dir = await pickDirectory();
-    if (dir) {
-      await importDirectory(dir);
-    }
-  }
+  let filterInputEl = $state(null);
 
-  async function handleChangeLibrary() {
-    const dir = await pickDirectory();
-    if (dir) {
-      await changeLocalLibraryPath(dir);
-    }
-  }
+  let activeTracks = $derived(tracksForSidebarSource(ui.activeSidebarRow));
+  let filteredCount = $derived(filterTracks(activeTracks, ui.listFilter).length);
+  let filterCountLabel = $derived(
+    ui.listFilter.trim()
+      ? `${filteredCount} / ${activeTracks.length}`
+      : ''
+  );
 
-  async function handleAnalyze() {
-    await analyzeTracks();
-  }
+  $effect(() => {
+    ui.filterFocusNonce;
+    filterInputEl?.focus();
+    filterInputEl?.select();
+  });
 
-  async function handleSetTestCues() {
-    const ids = Array.from(selection.ids);
-    if (ids.length > 0) {
-      await setTestCuesOnSelected(ids);
-    }
-  }
-
-  async function handleDeleteSelected() {
-    const ids = Array.from(selection.ids);
-    if (ids.length > 0) {
-      if (confirm(`Are you sure you want to delete ${ids.length} selected track(s)?`)) {
-        await removeTracks(ids);
-        clearSelection();
-      }
-    }
-  }
-
-  async function handleSyncToUsb() {
-    if (confirm(`Sync all playlists to ${library.activeVolume}?`)) {
-      await syncToUsb();
-    }
-  }
-
-  async function handleWipeUsb() {
-    if (confirm(`⚠ WARNING: Wipe all Pioneer library contents from ${library.activeVolume}? This cannot be undone.`)) {
-      await wipeVolume(library.activeVolume);
+  function onFilterKeydown(e) {
+    if (e.key === 'Escape') {
+      clearListFilter();
+      filterInputEl?.blur();
+      e.preventDefault();
     }
   }
 </script>
 
-<div class="ff-gheader">
+<div class="ff-gheader ff-titlebar-band ff-titlebar-band--ruled" data-tauri-drag-region>
   <div class="ff-gheader__search">
-    <Icon name="search" size={12} />
-    <span class="ff-gheader__placeholder">Search tracks, artists, labels…</span>
-    <Kbd key="⌘F" />
-  </div>
-
-  <div class="ff-gheader__actions">
-    {#if library.activeVolume}
-      <Button
-        label="Sync to USB"
-        variant="primary"
-        size="small"
-        disabled={library.analyzing || library.syncing || library.playlists.length === 0}
-        onclick={handleSyncToUsb}
-      />
-      <Button
-        label="Wipe USB"
-        variant="destructive"
-        size="small"
-        disabled={library.analyzing || library.syncing}
-        onclick={handleWipeUsb}
-      />
-    {:else}
-      <Button
-        label="Library Path"
-        icon="settings"
-        size="small"
-        disabled={library.analyzing || library.syncing}
-        onclick={handleChangeLibrary}
-      />
-      <Button
-        label="Import Folder"
-        icon="plus"
-        variant="primary"
-        size="small"
-        disabled={library.analyzing || library.syncing}
-        onclick={handleImport}
-      />
-      <Button
-        label="Analyze All"
-        size="small"
-        disabled={library.tracks.length === 0 || library.analyzing || library.syncing}
-        onclick={handleAnalyze}
-      />
-    {/if}
-    {#if selection.ids.size > 0}
-      <Button
-        label="Set Cues"
-        size="small"
-        disabled={library.analyzing || library.syncing}
-        onclick={handleSetTestCues}
-      />
-      <Button
-        label="Delete"
-        variant="destructive"
-        size="small"
-        disabled={library.analyzing || library.syncing}
-        onclick={handleDeleteSelected}
-      />
-    {/if}
+    <FilterInput
+      bind:value={ui.listFilter}
+      bind:inputRef={filterInputEl}
+      placeholder="Search tracks, artists, labels…"
+      count={filterCountLabel}
+      onClose={clearListFilter}
+      onkeydown={onFilterKeydown}
+    />
+    <span class="ff-gheader__kbd"><Kbd key="⌘F" /></span>
   </div>
 </div>
 
 <style>
+  .ff-gheader.ff-titlebar-band {
+    padding-top: var(--ff-titlebar-search-padding-y);
+    padding-bottom: var(--ff-titlebar-search-padding-y);
+  }
   .ff-gheader {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     width: 100%;
-    padding: var(--ff-space-4) var(--ff-space-7);
+    padding-left: var(--ff-space-7);
+    padding-right: var(--ff-space-7);
+    overflow: hidden;
     background: var(--ff-bg);
-    border-bottom: 1px solid var(--ff-border);
   }
   .ff-gheader__search {
     display: flex;
     align-items: center;
-    gap: var(--ff-space-4);
-    width: 420px;
-    height: 28px;
-    padding: 0 10px;
-    background: var(--ff-surface);
-    border: 1px solid var(--ff-border);
-    border-radius: var(--ff-radius-md);
-    color: var(--ff-muted);
-  }
-  .ff-gheader__placeholder {
-    flex: 1 1 0;
-    font-family: var(--ff-font);
-    font-size: var(--ff-type-compact);
-    color: var(--ff-faint);
-  }
-  .ff-gheader__actions {
-    display: flex;
-    align-items: center;
     gap: var(--ff-space-3);
+    width: min(420px, 100%);
+    max-width: 100%;
+  }
+  .ff-gheader__search :global(.ff-filter-input) {
+    flex: 1 1 0;
+    min-width: 0;
+    height: var(--ff-titlebar-control-height);
+    border-radius: var(--ff-radius-md);
+    background: var(--ff-surface);
+    border-color: var(--ff-border);
+  }
+  .ff-gheader__kbd {
+    flex-shrink: 0;
+    opacity: 0.85;
   }
 </style>

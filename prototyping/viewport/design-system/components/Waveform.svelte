@@ -67,7 +67,7 @@
 
     const stride = cfg.step + cfg.gap;
     const bars = Math.max(1, Math.floor(w / stride));
-    const data = peaks && peaks.length ? peaks : fauxPeaks(bars, seed);
+    const data = peaks && peaks.length ? peaks : new Array(bars).fill(0);
     const baseColor = rootColor(cfg.base, '#6a6a6a');
     const playedColor = rootColor(cfg.played, '#aaaaaa');
     const playedBars = Math.round(bars * Math.max(0, Math.min(1, progress)));

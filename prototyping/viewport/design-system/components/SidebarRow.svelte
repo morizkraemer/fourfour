@@ -18,15 +18,50 @@
     action,
     state = 'rest',
     splitAction = true,
+    renaming = false,
+    renameValue = $bindable(''),
     onSplit,
     onclick,
+    ondblclick,
+    onRenameCommit,
+    onRenameCancel,
   } = $props();
 
   let selected = $derived(state === 'active' || state === 'selected');
+  /** @type {HTMLInputElement | null} */
+  let renameInputEl = null;
+  let skipRenameBlurCommit = false;
+
+  $effect(() => {
+    if (renaming && renameInputEl) {
+      renameInputEl.focus();
+      renameInputEl.select();
+    }
+  });
 
   function split(e) {
     e.stopPropagation();
     onSplit?.();
+  }
+
+  function handleRenameKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      skipRenameBlurCommit = true;
+      onRenameCommit?.();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      skipRenameBlurCommit = true;
+      onRenameCancel?.();
+    }
+  }
+
+  function handleRenameBlur() {
+    if (skipRenameBlurCommit) {
+      skipRenameBlurCommit = false;
+      return;
+    }
+    onRenameCommit?.();
   }
 </script>
 
@@ -38,7 +73,7 @@
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ff-sbrow ff-sbrow--{state}" {onclick}>
+  <div class="ff-sbrow ff-sbrow--{state}" {onclick} {ondblclick}>
     {#if kind === 'favorite'}
       <TagBadge value={digit} variant={selected ? 'filled' : 'outline'} size="md" />
     {:else if kind === 'usb'}
@@ -47,7 +82,21 @@
       <Icon name={icon} size={13} />
     {/if}
 
-    <span class="ff-sbrow__label">{label}</span>
+    {#if renaming}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        bind:this={renameInputEl}
+        class="ff-sbrow__label ff-sbrow__label-input"
+        type="text"
+        bind:value={renameValue}
+        onkeydown={handleRenameKeydown}
+        onblur={handleRenameBlur}
+        onclick={(e) => e.stopPropagation()}
+        ondblclick={(e) => e.stopPropagation()}
+      />
+    {:else}
+      <span class="ff-sbrow__label">{label}</span>
+    {/if}
 
     {#if count != null}<span class="ff-sbrow__count">{count}</span>{/if}
     {#if splitAction}

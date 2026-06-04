@@ -41,6 +41,7 @@ function createChevronUpIcon() {
 
 /**
  * @param {object} options
+ * @param {string} [options.cover]
  * @param {string} options.title
  * @param {string} options.artist
  * @param {string} options.currentTime        – current time string like "2:54"
@@ -58,6 +59,7 @@ function createChevronUpIcon() {
  * @param {function} [options.onExpand]
  */
 export function createPlayerCompact({
+  cover = '',
   title,
   artist,
   currentTime,
@@ -95,6 +97,15 @@ export function createPlayerCompact({
       if (typeof onPlayToggle === 'function') onPlayToggle();
     }
   }, [playIcon]);
+
+  const coverArt = el('div', {
+    class: `ff-player-compact__cover${cover ? '' : ' ff-player-compact__cover--empty'}`
+  });
+  if (cover) {
+    const img = el('img', { class: 'ff-player-compact__cover-image', alt: '' });
+    img.src = cover;
+    coverArt.appendChild(img);
+  }
 
   const leftControls = el('div', { class: 'ff-player-compact__left-controls' }, [
     cueBtn,
@@ -201,6 +212,7 @@ export function createPlayerCompact({
   ]);
 
   const element = el('div', { class: 'ff-player-compact' }, [
+    coverArt,
     leftControls,
     contentCol
   ]);

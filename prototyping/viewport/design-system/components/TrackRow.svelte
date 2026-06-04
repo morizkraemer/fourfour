@@ -76,6 +76,10 @@
       <div class="ff-trow__cell ff-trow__cell--key" style={cellStyle(col)}>
         <span class="ff-trow__text" style="color:{k === '—' ? 'var(--ff-muted)' : keyColor(k)}">{k}</span>
       </div>
+    {:else if col.key === 'album' || col.key === 'genre' || col.key === 'year'}
+      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={cellStyle(col)}>
+        <span class="ff-trow__text">{track[col.key] ?? '—'}</span>
+      </div>
     {:else}
       <div class="ff-trow__cell ff-trow__cell--{col.key}" style={cellStyle(col)}>
         <span class="ff-trow__text">{track[col.key] ?? ''}</span>

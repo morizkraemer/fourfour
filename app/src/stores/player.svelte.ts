@@ -2,7 +2,10 @@
  * player.svelte.ts — Playback state for the compact player bar.
  */
 
-import { getAnalysisData } from '../services/tauri.svelte.ts';
+import {
+  getAnalysisData,
+  peekAnalysisData,
+} from '../services/tauri.svelte.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -24,6 +27,11 @@ export interface ColorWaveSample {
   b: number;
 }
 
+export interface BeatMarker {
+  time_ms: number;
+  bar_position: number;
+}
+
 export interface PlayerTrack {
   id: number;
   sourcePath: string;
@@ -34,6 +42,7 @@ export interface PlayerTrack {
   totalSeconds: number;
   durationMs: number;
   cues: PlayerCue[];
+  beats: BeatMarker[];
   colorData: ColorWaveSample[] | null;
   previewBytes: number[] | null;
 }
@@ -45,10 +54,13 @@ export const player = $state({
   progress: 0.0,
   track: null as PlayerTrack | null,
   loading: false,
+  levelLeft: 0,
+  levelRight: 0,
 });
 
 let loadGeneration = 0;
 let tickUnlisten: (() => void) | null = null;
+let playPending = false;
 
 function formatBpm(tempo: number): string {
   if (!tempo) return '—';
@@ -61,6 +73,36 @@ function mapCues(cuePoints: any[], durationMs: number): PlayerCue[] {
     position: (c.time_ms ?? 0) / durationMs,
     color: CUE_COLORS[i % CUE_COLORS.length],
   }));
+}
+
+function previewFromAnalysis(analysis: any): number[] | null {
+  const preview = analysis?.waveform_preview;
+  if (!preview?.length) return null;
+  return Array.isArray(preview) ? preview : Array.from(preview);
+}
+
+function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
+  const durationMs = analysis.duration_ms ?? base.durationMs;
+  const next: PlayerTrack = {
+    ...base,
+    durationMs,
+    totalSeconds: Math.max(0, Math.round(durationMs / 1000)),
+  };
+  if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
+  if (analysis.key) next.key = analysis.key;
+  if (analysis.waveform_color?.length) {
+    next.colorData = analysis.waveform_color;
+  }
+  const preview = previewFromAnalysis(analysis);
+  if (preview) next.previewBytes = preview;
+  if (analysis.beats?.length) {
+    next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
+      time_ms: b.time_ms,
+      bar_position: b.bar_position,
+    }));
+  }
+  next.cues = mapCues(analysis.cue_points, durationMs);
+  return next;
 }
 
 export function currentTime() {
@@ -84,9 +126,16 @@ export function totalTime() {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Subscribe to transport ticks (position + master levels). Safe to call repeatedly. */
+export async function initPlayerTransport() {
+  await ensureTickListener();
+}
+
 async function ensureTickListener() {
   if (tickUnlisten) return;
   tickUnlisten = await subscribePlaybackTick((tick) => {
+    player.levelLeft = tick.level_left ?? 0;
+    player.levelRight = tick.level_right ?? 0;
     if (!player.track) return;
     const dur = tick.duration_ms || player.track.durationMs;
     if (dur > 0) {
@@ -94,6 +143,45 @@ async function ensureTickListener() {
     }
     player.playing = tick.playing;
   });
+}
+
+function buildBaseTrack(trackInfo: {
+  id: number;
+  source_path: string;
+  title: string;
+  artist: string;
+  tempo: number;
+  key: string;
+  duration_secs: number;
+}): PlayerTrack {
+  return {
+    id: trackInfo.id,
+    sourcePath: trackInfo.source_path,
+    title: trackInfo.title || 'Unknown',
+    artist: trackInfo.artist || '—',
+    bpm: formatBpm(trackInfo.tempo),
+    key: trackInfo.key || '—',
+    totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
+    durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
+    cues: [],
+    beats: [],
+    colorData: null,
+    previewBytes: null,
+  };
+}
+
+async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack) {
+  try {
+    const analysis = await getAnalysisData(trackId);
+    if (gen !== loadGeneration || player.track?.id !== trackId) return;
+    player.track = applyAnalysisToTrack(base, analysis);
+  } catch {
+    if (gen !== loadGeneration) return;
+  } finally {
+    if (gen === loadGeneration) {
+      player.loading = false;
+    }
+  }
 }
 
 /** Load track metadata + waveform from library selection. */
@@ -107,49 +195,37 @@ export async function loadPlayerTrack(trackInfo: {
   duration_secs: number;
 }) {
   const gen = ++loadGeneration;
-  await playbackStop();
+  void playbackStop();
   player.playing = false;
   player.progress = 0;
-  player.loading = true;
 
-  const base: PlayerTrack = {
-    id: trackInfo.id,
-    sourcePath: trackInfo.source_path,
-    title: trackInfo.title || 'Unknown',
-    artist: trackInfo.artist || '—',
-    bpm: formatBpm(trackInfo.tempo),
-    key: trackInfo.key || '—',
-    totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
-    durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
-    cues: [],
-    colorData: null,
-    previewBytes: null,
-  };
-  player.track = base;
+  const base = buildBaseTrack(trackInfo);
+  const cached = peekAnalysisData(trackInfo.id);
+  player.track = cached ? applyAnalysisToTrack(base, cached) : base;
+  player.loading = !cached;
 
-  try {
-    const analysis = await getAnalysisData(trackInfo.id);
-    if (gen !== loadGeneration) return;
-
-    const durationMs = analysis.duration_ms ?? base.durationMs;
-    base.durationMs = durationMs;
-    base.totalSeconds = Math.max(0, Math.round(durationMs / 1000));
-    if (analysis.bpm) base.bpm = Number(analysis.bpm).toFixed(2);
-    if (analysis.key) base.key = analysis.key;
-    if (analysis.waveform_color?.length) {
-      base.colorData = analysis.waveform_color;
-    }
-    if (analysis.waveform_preview?.length) {
-      base.previewBytes = Array.from(analysis.waveform_preview);
-    }
-    base.cues = mapCues(analysis.cue_points, durationMs);
-    player.track = { ...base };
-  } catch {
-    if (gen !== loadGeneration) return;
-    // Keep metadata; waveform stays empty until analyzed.
-  } finally {
-    if (gen === loadGeneration) player.loading = false;
+  if (playPending && gen === loadGeneration) {
+    playPending = false;
+    void playFromStart();
   }
+
+  if (cached) return;
+
+  void enrichPlayerTrack(gen, trackInfo.id, base);
+}
+
+/** Start playback after the current selection finishes loading in the player. */
+export function queuePlayAfterLoad() {
+  playPending = true;
+}
+
+/** Play the loaded track from the beginning. */
+export async function playFromStart() {
+  if (!player.track) return;
+  player.progress = 0;
+  await ensureTickListener();
+  await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
+  player.playing = true;
 }
 
 export function clearPlayerTrack() {
@@ -159,6 +235,9 @@ export function clearPlayerTrack() {
   player.playing = false;
   player.progress = 0;
   player.loading = false;
+  player.levelLeft = 0;
+  player.levelRight = 0;
+  playPending = false;
 }
 
 export async function togglePlay() {
@@ -171,7 +250,7 @@ export async function togglePlay() {
     await playbackResume();
     player.playing = true;
   } else {
-    await playbackPlay(player.track.sourcePath, 0);
+    await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
     player.playing = true;
   }
 }
@@ -179,7 +258,8 @@ export async function togglePlay() {
 export async function play() {
   if (!player.track) return;
   await ensureTickListener();
-  await playbackPlay(player.track.sourcePath, Math.round(player.progress * player.track.durationMs));
+  const ms = Math.round(player.progress * player.track.durationMs);
+  await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
   player.playing = true;
 }
 

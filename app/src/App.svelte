@@ -1,7 +1,7 @@
 <!--
   App.svelte — fourfour Browse screen.
   Composes the six interactive modules into the "main layout v3" window frame:
-    [ sidebar 240 | body[ header / (table fill | detail 278) ] ]
+    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 278) ] ]
     / player (full width)
     / status bar (full width)
 -->
@@ -9,20 +9,131 @@
   import { onMount } from 'svelte';
   // Side-effect import: loads tokens.css + base.css globally
   import '$ds';
+  import { Dialog, Button, FileDropOverlay } from '$ds';
+  import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
   // Modules
   import Sidebar       from './modules/Sidebar.svelte';
   import GlobalHeader  from './modules/GlobalHeader.svelte';
   import TrackTable    from './modules/TrackTable.svelte';
+  import ListPanel     from './modules/ListPanel.svelte';
   import Detail        from './modules/Detail.svelte';
   import Player        from './modules/Player.svelte';
   import AppStatusBar  from './modules/AppStatusBar.svelte';
+  import Settings      from './modules/Settings.svelte';
 
-  import { ui } from './stores/ui.svelte.ts';
-  import { initLibrary } from './stores/library.svelte.ts';
+  import {
+    ui,
+    closeSplitPanel,
+    importDropTarget,
+    openSettings,
+    closeSettings,
+    focusListFilter,
+    clearListFilter,
+  } from './stores/ui.svelte.ts';
+  import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
+  import {
+    initLibrary,
+    library,
+    analyzeTracks,
+    importFiles,
+    toggleFavoriteSlot,
+  } from './stores/library.svelte.ts';
+  import { selection, selectionCount } from './stores/selection.svelte.ts';
+  import { getIsTauri } from './services/tauri.svelte.ts';
+  import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
+  import { installMacWindowChrome } from './services/window-chrome.ts';
+
+  let fileDropVisible = $state(false);
+
+  let dropTarget = $derived(importDropTarget());
+  let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
+  let dropIntoPlaylist = $derived(playlistForSidebarSource(dropTarget) != null);
+  let fileDropSub = $derived(
+    dropIntoPlaylist
+      ? `Files and folders will be added to “${dropTargetLabel}” and analyzed`
+      : 'Files and folders will be added to your library and analyzed'
+  );
+
+  function isEditableTarget(target) {
+    if (!(target instanceof Element)) return false;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
+    if (target.closest('[contenteditable="true"]')) return true;
+    if (target.closest('.ff-settings-screen')) return true;
+    return !!target.closest('dialog[open]');
+  }
+
+  function onGlobalKeyDown(e) {
+    if (e.defaultPrevented) return;
+
+    if (e.metaKey && e.key === ',') {
+      e.preventDefault();
+      if (ui.settingsOpen) closeSettings();
+      else openSettings();
+      return;
+    }
+
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      focusListFilter();
+      return;
+    }
+
+    if (e.key === 'Escape' && ui.settingsOpen) {
+      closeSettings();
+      e.preventDefault();
+      return;
+    }
+
+    if (e.key === 'Escape' && ui.listFilter.trim()) {
+      clearListFilter();
+      e.preventDefault();
+      return;
+    }
+
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (isEditableTarget(e.target)) return;
+    const slot = /^[1-9]$/.test(e.key) ? parseInt(e.key, 10) : null;
+    if (slot == null || selectionCount() === 0) return;
+    e.preventDefault();
+    toggleFavoriteSlot(slot, [...selection.ids]);
+  }
 
   onMount(() => {
     initLibrary();
+    void syncPlaybackAudioConfig();
+    window.addEventListener('keydown', onGlobalKeyDown);
+    const teardownWindowChrome = installMacWindowChrome();
+
+    if (getIsTauri()) {
+      try {
+        const appWindow = getCurrentWebviewWindow();
+        appWindow.onDragDropEvent((event) => {
+          const p = event.payload;
+          if (p.type === 'hover' || p.type === 'over') {
+            fileDropVisible = true;
+          } else if (p.type === 'drop') {
+            fileDropVisible = false;
+            const paths = p.paths;
+            if (paths?.length) {
+              void importFiles(paths, {
+                targetSource: importDropTarget(),
+                analyze: true,
+              });
+            }
+          } else if (p.type === 'cancel' || p.type === 'leave') {
+            fileDropVisible = false;
+          }
+        });
+      } catch (err) {
+        console.warn('File drag-drop unavailable:', err);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('keydown', onGlobalKeyDown);
+      teardownWindowChrome();
+    };
   });
 </script>
 
@@ -35,14 +146,33 @@
       <div class="ff-browse__slot ff-browse__slot--header">
         <GlobalHeader />
       </div>
-      <div class="ff-browse__content">
-        <div class="ff-browse__slot ff-browse__slot--table">
-          <TrackTable />
-        </div>
-        {#if ui.detailPaneOpen}
-          <div class="ff-browse__slot ff-browse__slot--detail">
-            <Detail />
+      <div class="ff-browse__content" class:ff-browse__content--split={ui.splitPanel != null}>
+        {#if ui.splitPanel}
+          <div class="ff-browse__panels">
+            <div class="ff-browse__slot ff-browse__slot--table">
+              <ListPanel
+                sourceId={ui.activeSidebarRow}
+                title={sidebarSourceLabel(ui.activeSidebarRow)}
+              />
+            </div>
+            <div class="ff-browse__slot ff-browse__slot--table">
+              <ListPanel
+                sourceId={ui.splitPanel.sourceId}
+                title={ui.splitPanel.label}
+                showClose
+                onClose={closeSplitPanel}
+              />
+            </div>
           </div>
+        {:else}
+          <div class="ff-browse__slot ff-browse__slot--table">
+            <TrackTable />
+          </div>
+          {#if ui.detailPaneOpen && selectionCount() > 0}
+            <div class="ff-browse__slot ff-browse__slot--detail">
+              <Detail />
+            </div>
+          {/if}
         {/if}
       </div>
     </div>
@@ -54,6 +184,39 @@
     <AppStatusBar />
   </div>
 </div>
+
+<Settings />
+
+<Dialog
+  open={library.showAnalysisPrompt}
+  title="Analyze Tracks"
+  bodyText="Import complete. Would you like to analyze these tracks now to extract BPM, key, and waveforms?"
+  onClose={() => (library.showAnalysisPrompt = false)}
+>
+  {#snippet actions()}
+    <Button
+      label="Skip"
+      variant="ghost"
+      size="small"
+      onclick={() => (library.showAnalysisPrompt = false)}
+    />
+    <Button
+      label="Analyze All"
+      variant="primary"
+      size="small"
+      onclick={async () => {
+        library.showAnalysisPrompt = false;
+        await analyzeTracks();
+      }}
+    />
+  {/snippet}
+</Dialog>
+
+<FileDropOverlay
+  visible={fileDropVisible}
+  title="Drop audio files here"
+  sub={fileDropSub}
+/>
 
 <style>
   /* ── Browse screen layout ──────────────────────────────── */
@@ -74,7 +237,7 @@
     background: var(--ff-bg);
   }
 
-  /* main area: [ sidebar | body ], fills space above player + status */
+  /* main area: [ sidebar | body[ header / content ] ], fills space above player + status */
   .ff-browse__main {
     flex: 1 1 0;
     min-height: 0;
@@ -95,6 +258,19 @@
     min-height: 0;
     display: flex;
     align-items: stretch;
+  }
+
+  .ff-browse__panels {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: stretch;
+  }
+
+  .ff-browse__content--split .ff-browse__slot--table {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   /* bare slots — no spacing; modules own their own padding/width (rule 4) */

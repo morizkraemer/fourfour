@@ -15,7 +15,8 @@ use pioneer_usb_writer::scanner;
 
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
-    playback_pause, playback_play, playback_resume, playback_seek, playback_stop, PlaybackEngine,
+    playback_configure, playback_get_config, playback_pause, playback_play, playback_resume,
+    playback_seek, playback_stop, PlaybackEngine,
 };
 
 // ---------------------------------------------------------------------------
@@ -289,30 +290,12 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
     }
 }
 
-/// Analyze all tracks that have not yet been analyzed.
-///
-/// Runs up to 3 Python processes in parallel. Emits `analysis-progress`
-/// events as each track finishes. Returns the full (updated) track list.
-#[tauri::command]
-async fn analyze_tracks(
+/// Run Python analysis for the given track ids (paths). Used by bulk and per-selection commands.
+async fn run_track_analysis(
     app: AppHandle,
-    state: State<'_, SharedLibrary>,
+    shared: SharedLibrary,
+    pending: Vec<(i64, PathBuf)>,
 ) -> Result<Vec<TrackInfo>, String> {
-    let shared: SharedLibrary = state.inner().clone();
-
-    // 1. Collect pending work while holding the lock briefly.
-    let pending: Vec<(i64, PathBuf)> = {
-        let lib = shared.lock().map_err(|e| e.to_string())?;
-        let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
-        let mut work = Vec::with_capacity(unanalyzed_ids.len());
-        for id in unanalyzed_ids {
-            if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
-                work.push((id, track.source_path));
-            }
-        }
-        work
-    };
-
     let total = pending.len() as u32;
     if total == 0 {
         debug_info(&app, "No unanalyzed tracks — nothing to do");
@@ -462,6 +445,48 @@ async fn analyze_tracks(
     // 4. Return the full updated track list.
     let lib = shared.lock().map_err(|e| e.to_string())?;
     build_track_infos(&lib)
+}
+
+/// Analyze all tracks that have not yet been analyzed.
+#[tauri::command]
+async fn analyze_tracks(
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<Vec<TrackInfo>, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    let pending: Vec<(i64, PathBuf)> = {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
+        let mut work = Vec::with_capacity(unanalyzed_ids.len());
+        for id in unanalyzed_ids {
+            if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
+                work.push((id, track.source_path));
+            }
+        }
+        work
+    };
+    run_track_analysis(app, shared, pending).await
+}
+
+/// Analyze or re-analyze specific tracks by library id.
+#[tauri::command]
+async fn analyze_track_ids(
+    ids: Vec<i64>,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<Vec<TrackInfo>, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    let pending: Vec<(i64, PathBuf)> = {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let mut work = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
+                work.push((id, track.source_path));
+            }
+        }
+        work
+    };
+    run_track_analysis(app, shared, pending).await
 }
 
 /// Incrementally sync the Pioneer USB structure to the given output directory.
@@ -734,6 +759,55 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
     output
 }
 
+/// Max RGB waveform samples sent over IPC (player strip / table). Full detail is ~150/sec.
+const PLAYER_COLOR_WAVEFORM_MAX: usize = 2048;
+
+fn downsample_3band(source: &[[u8; 3]], max_samples: usize) -> Vec<[u8; 3]> {
+    if source.len() <= max_samples {
+        return source.to_vec();
+    }
+    let step = source.len() as f64 / max_samples as f64;
+    (0..max_samples)
+        .map(|i| {
+            let idx = (i as f64 * step).floor() as usize;
+            source[idx.min(source.len() - 1)]
+        })
+        .collect()
+}
+
+fn color_waveform_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
+    if !cw.detail.is_empty() {
+        if cw.detail.len() <= PLAYER_COLOR_WAVEFORM_MAX {
+            return cw.detail.clone();
+        }
+        if !cw.overview.is_empty() {
+            return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
+        }
+        return downsample_3band(&cw.detail, PLAYER_COLOR_WAVEFORM_MAX);
+    }
+    if !cw.overview.is_empty() {
+        return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
+    }
+    Vec::new()
+}
+
+fn waveform_color_json(entries: &[[u8; 3]]) -> Vec<serde_json::Value> {
+    entries
+        .iter()
+        .map(|[low, mid, high]| {
+            let max_val = (*low).max(*mid).max(*high) as f64;
+            let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
+            let amp = max_val / 96.0;
+            serde_json::json!({
+                "amp": amp.min(1.0),
+                "r": *low as f64 * scale,
+                "g": *mid as f64 * scale,
+                "b": *high as f64 * scale,
+            })
+        })
+        .collect()
+}
+
 /// Get stored analysis data for a track from the local library DB.
 #[tauri::command]
 fn get_analysis_data(
@@ -752,23 +826,10 @@ fn get_analysis_data(
                 .map(|t| (t.duration_secs * 1000.0).round() as u64)
                 .unwrap_or(0);
 
-            // Convert color waveform to frontend format.
-            // Use detail (150 entries/sec) for full resolution; fall back to overview.
-            let waveform_color: Vec<serde_json::Value> = a.color_waveform.as_ref()
-                .map(|cw| {
-                    let source = if !cw.detail.is_empty() { &cw.detail } else { &cw.overview };
-                    source.iter().map(|[low, mid, high]| {
-                        let max_val = (*low).max(*mid).max(*high) as f64;
-                        let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
-                        let amp = max_val / 96.0; // 0x60 is Pioneer's max low-band value
-                        serde_json::json!({
-                            "amp": amp.min(1.0),
-                            "r": *low as f64 * scale,
-                            "g": *mid as f64 * scale,
-                            "b": *high as f64 * scale,
-                        })
-                    }).collect()
-                })
+            let waveform_color: Vec<serde_json::Value> = a
+                .color_waveform
+                .as_ref()
+                .map(|cw| waveform_color_json(&color_waveform_for_player(cw)))
                 .unwrap_or_default();
 
             // Serialize beat grid for frontend waveform rendering
@@ -997,23 +1058,38 @@ fn change_library_path(
 // Entry point
 // ---------------------------------------------------------------------------
 
-fn main() {
-    // Set activation policy before Tauri initializes so macOS registers us
-    // as a proper GUI app with a Dock icon from the start.
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
-        let mtm = objc2::MainThreadMarker::new().expect("must be on main thread");
-        let ns_app = NSApplication::sharedApplication(mtm);
-        ns_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    }
+fn focus_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        eprintln!("focus_main_window: no webview labeled \"main\"");
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
 
+fn init_playback_engine(app: &tauri::AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || match PlaybackEngine::new() {
+        Ok(playback) => {
+            let engine = Arc::new(playback);
+            let main_app = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                main_app.manage(engine);
+            });
+        }
+        Err(e) => eprintln!("audio playback unavailable: {e}"),
+    });
+}
+
+fn main() {
     tauri::Builder::default() // v0.1
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             scan_directory,
             scan_files,
             analyze_tracks,
+            analyze_track_ids,
             write_usb,
             remove_tracks,
             set_test_cues,
@@ -1034,6 +1110,8 @@ fn main() {
             playback_resume,
             playback_seek,
             playback_stop,
+            playback_configure,
+            playback_get_config,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path
@@ -1043,28 +1121,20 @@ fn main() {
                 .expect("Failed to open library database");
             app.manage(Arc::new(Mutex::new(library)));
 
-            let playback = PlaybackEngine::new().expect("Failed to initialize audio playback");
-            app.manage(Arc::new(playback));
-
-            // Ensure the window is positioned on the primary monitor and focused.
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.set_always_on_top(true);
-                let _ = window.center();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-
-            // Activate the app so macOS sends keyboard input to our window
-            #[cfg(target_os = "macos")]
-            {
-                use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
-                let current_app = NSRunningApplication::currentApplication();
-                let _ = current_app.activateWithOptions(
-                    NSApplicationActivationOptions::ActivateIgnoringOtherApps,
-                );
-            }
+            focus_main_window(&app.handle());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error running tauri app");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            match event {
+                tauri::RunEvent::Ready => {
+                    focus_main_window(&app_handle);
+                    init_playback_engine(&app_handle);
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => focus_main_window(&app_handle),
+                _ => {}
+            }
+        });
 }

@@ -14,6 +14,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   padding: 5px 10px;
   border-radius: var(--ff-radius-sm);
   font-family: var(--ff-font);
@@ -24,6 +25,14 @@
   transition:
     background var(--ff-motion-fast) var(--ff-easing),
     color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-menu__item-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* States / Variants */

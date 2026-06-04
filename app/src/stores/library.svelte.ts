@@ -4,7 +4,6 @@
  */
 
 import {
-  isTauri,
   getVersion,
   getLibraryPath,
   loadState as tauriLoadState,
@@ -14,6 +13,7 @@ import {
   removeTracks as tauriRemoveTracks,
   setTestCues as tauriSetTestCues,
   analyzeTracks as tauriAnalyzeTracks,
+  analyzeTrackIds as tauriAnalyzeTrackIds,
   getMountedVolumes as tauriGetMountedVolumes,
   readUsbState as tauriReadUsbState,
   writeUsb as tauriWriteUsb,
@@ -21,24 +21,150 @@ import {
   wipeUsb as tauriWipeUsb,
   listenToAnalysisProgress,
   listenToWriteComplete,
+  lastTauriError,
+  getIpcDiagnostic,
+  getAnalysisData,
+  invalidateAnalysisCache,
+  getTrackArtwork,
+  changeLibraryPath,
   type TrackInfo,
   type PlaylistInput,
   type SyncReport
 } from '../services/tauri.svelte.ts';
 
-/* ── Table column set (matches module-table.artboard.js) ────────────── */
-export const TABLE_COLUMNS = [
-  { key: 'fav', label: 'FAV', width: 20 },
-  { key: 'index', label: '#', width: 24 },
-  { key: 'wave', label: 'PREVIEW', width: 120 },
-  { key: 'cover', label: '', width: 18 },
-  { key: 'title', label: 'TITLE', flex: true },
-  { key: 'artist', label: 'ARTIST', width: 180 },
-  { key: 'label', label: 'LABEL', width: 130 },
-  { key: 'bpm', label: 'BPM', width: 50, sort: 'desc' },
-  { key: 'key', label: 'KEY', width: 36 },
-  { key: 'time', label: 'TIME', width: 48 },
-];
+/** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
+export const FAVORITE_SLOTS = 9;
+
+/** Minimum favorite rows shown in the sidebar (empty placeholders included). */
+export const FAVORITE_DEFAULT_VISIBLE = 2;
+
+export function favoritePlaylistName(slot: number) {
+  return `Favorites ${slot}`;
+}
+
+export function favoriteSlotFromName(name: string): number | null {
+  const m = name.match(/^Favorites (\d+)$/);
+  if (!m) return null;
+  const slot = parseInt(m[1], 10);
+  return slot >= 1 && slot <= FAVORITE_SLOTS ? slot : null;
+}
+
+export function isFavoritePlaylistName(name: string) {
+  return favoriteSlotFromName(name) != null;
+}
+
+/** Lowest favorite slot a track belongs to (for the FAV column). */
+export function syncTrackFavoriteFields() {
+  const slotsByTrack = new Map<number, number[]>();
+  for (const pl of library.playlists) {
+    const slot = favoriteSlotFromName(pl.name);
+    if (slot == null) continue;
+    for (const tid of pl.track_ids) {
+      const list = slotsByTrack.get(tid) ?? [];
+      list.push(slot);
+      slotsByTrack.set(tid, list);
+    }
+  }
+  for (const track of library.tracks) {
+    const slots = slotsByTrack.get(track.id);
+    track.fav = slots?.length ? Math.min(...slots) : undefined;
+  }
+}
+
+function pushFavoritePlaylist(slot: number) {
+  const name = favoritePlaylistName(slot);
+  const newId =
+    library.playlists.length > 0 ? Math.max(...library.playlists.map((pl) => pl.id)) + 1 : 1;
+  library.playlists.push({ id: newId, name, track_ids: [] });
+}
+
+/** Map slot number → favorite playlist (only existing playlists). */
+export function favoritePlaylistsBySlot() {
+  const bySlot = new Map<number, PlaylistInput>();
+  for (const p of library.playlists) {
+    const slot = favoriteSlotFromName(p.name);
+    if (slot != null) bySlot.set(slot, p);
+  }
+  return bySlot;
+}
+
+/** Highest occupied favorite slot, or 0 when none exist. */
+export function highestFavoriteSlot() {
+  const slots = [...favoritePlaylistsBySlot().keys()];
+  return slots.length ? Math.max(...slots) : 0;
+}
+
+/** Sidebar shows at least two rows; grows with favorites up to nine. */
+export function favoriteSidebarDisplaySlots() {
+  return Math.min(
+    FAVORITE_SLOTS,
+    Math.max(FAVORITE_DEFAULT_VISIBLE, highestFavoriteSlot())
+  );
+}
+
+/** First slot without a playlist, or null when all nine exist. */
+export function nextFavoriteSlot(): number | null {
+  for (let slot = 1; slot <= FAVORITE_SLOTS; slot++) {
+    if (!playlistByName(favoritePlaylistName(slot))) return slot;
+  }
+  return null;
+}
+
+export function canAddFavorite() {
+  return nextFavoriteSlot() != null;
+}
+
+export function buildFavoriteSidebarRows() {
+  const bySlot = favoritePlaylistsBySlot();
+  const displaySlots = favoriteSidebarDisplaySlots();
+  const rows = [];
+  for (let slot = 1; slot <= displaySlots; slot++) {
+    const p = bySlot.get(slot);
+    rows.push({
+      kind: 'favorite' as const,
+      digit: slot,
+      label: p?.name ?? favoritePlaylistName(slot),
+      count: p?.track_ids.length ?? 0,
+    });
+  }
+  return rows;
+}
+
+export async function ensureFavoriteSlots() {
+  let changed = false;
+  for (let slot = 3; slot <= FAVORITE_SLOTS; slot++) {
+    const name = favoritePlaylistName(slot);
+    const idx = library.playlists.findIndex((p) => p.name === name);
+    if (idx < 0) continue;
+    if (library.playlists[idx].track_ids.length === 0) {
+      library.playlists.splice(idx, 1);
+      changed = true;
+    }
+  }
+  for (let slot = 1; slot <= FAVORITE_DEFAULT_VISIBLE; slot++) {
+    const name = favoritePlaylistName(slot);
+    if (library.playlists.some((p) => p.name === name)) continue;
+    pushFavoritePlaylist(slot);
+    changed = true;
+  }
+  if (changed) await saveState();
+  syncTrackFavoriteFields();
+}
+
+/** Toggle membership in a favorite slot for each track (add / remove). */
+export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
+  if (slot < 1 || slot > FAVORITE_SLOTS || trackIds.length === 0) return;
+  const pl = playlistByName(favoritePlaylistName(slot));
+  if (!pl) return;
+  const unique = [...new Set(trackIds)];
+  for (const tid of unique) {
+    const idx = pl.track_ids.indexOf(tid);
+    if (idx >= 0) pl.track_ids.splice(idx, 1);
+    else pl.track_ids.push(tid);
+  }
+  await saveState();
+  syncTrackFavoriteFields();
+}
 
 /* ── Main Library Store State ───────────────────────────────────────── */
 export const library = $state({
@@ -58,6 +184,11 @@ export const library = $state({
   syncing: false,
   statusMessage: 'Ready',
   analysisProgress: { current: 0, total: 0, message: '' },
+  showAnalysisPrompt: false,
+
+  // Diagnostics
+  tauriError: '',
+  ipcDiagnostic: '',
 
   // Getters
   get trackCount() {
@@ -68,10 +199,7 @@ export const library = $state({
     return {
       favorites: {
         label: 'FAVORITES',
-        rows: [
-          { kind: 'favorite', digit: 1, label: 'Peak Time',  count: this.playlists.find(p => p.name === 'Peak Time')?.track_ids.length ?? 0 },
-          { kind: 'favorite', digit: 2, label: 'Warmup',     count: this.playlists.find(p => p.name === 'Warmup')?.track_ids.length ?? 0 },
-        ],
+        rows: buildFavoriteSidebarRows(),
       },
       library: {
         label: 'LIBRARY',
@@ -84,12 +212,14 @@ export const library = $state({
       playlists: {
         label: 'PLAYLISTS',
         showAdd: true,
-        rows: this.playlists.map(p => ({
-          kind: 'playlist',
-          label: p.name,
-          count: p.track_ids.length,
-          id: p.id
-        })),
+        rows: this.playlists
+          .filter(p => !p.name.startsWith('Favorites '))
+          .map(p => ({
+            kind: 'playlist',
+            label: p.name,
+            count: p.track_ids.length,
+            id: p.id
+          })),
       },
       usb: {
         label: 'USB DEVICES',
@@ -103,6 +233,71 @@ export const library = $state({
     };
   }
 });
+
+/** Match tracks against a whitespace-separated query (all terms must match). */
+export function filterTracks<T extends Record<string, unknown>>(
+  tracks: T[],
+  query: string
+): T[] {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return tracks;
+  const terms = trimmed.split(/\s+/).filter(Boolean);
+  return tracks.filter((track) => {
+    const haystack = [
+      track.title,
+      track.artist,
+      track.album,
+      track.label,
+      track.genre,
+      track.key,
+      track.bpm,
+      track.time,
+      track.filePath,
+      track.index,
+      track.raw?.title,
+      track.raw?.artist,
+      track.raw?.album,
+      track.raw?.genre,
+      track.raw?.key,
+      track.raw?.source_path,
+    ]
+      .map((v) => String(v ?? '').toLowerCase())
+      .join(' ');
+    return terms.every((term) => haystack.includes(term));
+  });
+}
+
+/** Tracks shown for a sidebar source (label, playlist name, or USB path). */
+export function tracksForSidebarSource(source: string | null | undefined) {
+  const active = source ?? 'All Tracks';
+  if (!active || active === 'All Tracks') {
+    return library.tracks;
+  }
+  if (active === 'Recently Added') {
+    return library.tracks.filter((t) => t.raw?.tempo > 0);
+  }
+  if (active === 'Unfiled') {
+    return library.tracks.filter((t) => t.raw?.tempo === 0);
+  }
+  if (library.volumes.includes(active)) {
+    return library.usbTracks;
+  }
+  const playlist = library.playlists.find((p) => p.name === active);
+  if (playlist) {
+    const byId = new Map(library.tracks.map((t) => [t.id, t]));
+    return playlist.track_ids.map((id) => byId.get(id)).filter(Boolean);
+  }
+  return library.tracks;
+}
+
+/** Human-readable title for a sidebar source id. */
+export function sidebarSourceLabel(source: string) {
+  if (!source || source === 'All Tracks') return 'All Tracks';
+  if (library.volumes.includes(source)) {
+    return source.replace(/\\/g, '/').split('/').pop() || source;
+  }
+  return source;
+}
 
 /* ── Mapper ─────────────────────────────────────────────────────────── */
 function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
@@ -122,16 +317,18 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     index: indexStr,
     title: t.title || t.source_path.split(/[/\\]/).pop() || 'Unknown Title',
     artist: t.artist || '—',
+    album: t.album || '—',
     label: '—',
     bpm: bpmStr,
     key: keyStr,
     time: timeStr,
     fav: undefined,
     genre: t.genre || '—',
-    year: undefined,
+    year: '—',
     filePath: t.source_path,
     cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
+    analyzed: t.tempo > 0,
     raw: t
   };
 }
@@ -141,9 +338,54 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
 /** Loads full state from library backend / mock fallback. */
 export async function loadState() {
   try {
+    invalidateAnalysisCache();
     const state = await tauriLoadState();
     library.tracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
     library.playlists = state.playlists;
+
+    // Load artwork and analysis details for all tracks directly in the background
+    library.tracks.forEach(track => {
+      // 1. Artwork
+      if (track.raw?.has_artwork && !track.cover) {
+        getTrackArtwork(track.id).then(bytes => {
+          if (bytes && bytes.length > 0) {
+            const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
+            track.cover = URL.createObjectURL(blob);
+          }
+        }).catch(err => {
+          console.warn('Failed to fetch artwork on load:', err);
+        });
+      }
+
+      // 2. Waveform peaks and hot cues
+      if (track.analyzed && !track.peaksLoaded) {
+        track.loadingAnalysis = true;
+        getAnalysisData(track.id).then(res => {
+          if (res.waveform_preview) {
+            track.peaks = Array.from(res.waveform_preview).map(byte => (byte & 0x1F) / 31.0);
+          }
+          if (res.cue_points) {
+            track.cues = res.cue_points.map((cue, idx) => {
+              const mins = Math.floor(cue.time_ms / 60000);
+              const secs = Math.floor((cue.time_ms % 60000) / 1000);
+              const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
+              return {
+                name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
+                position: posStr,
+                color: cue.color
+              };
+            });
+          }
+          track.peaksLoaded = true;
+        }).catch(err => {
+          console.warn('Failed to fetch analysis details on load:', err);
+        }).finally(() => {
+          track.loadingAnalysis = false;
+        });
+      }
+    });
+
+    await ensureFavoriteSlots();
   } catch (err) {
     console.error('loadState failed:', err);
   }
@@ -160,12 +402,22 @@ export async function saveState() {
 
 /** Initialize library store, triggers on boot */
 export async function initLibrary() {
+  // Set initial diagnostics
+  library.ipcDiagnostic = getIpcDiagnostic();
+
   // Get Version and Path
-  getVersion().then(v => library.appVersion = v);
-  getLibraryPath().then(p => library.libraryPath = p);
+  getVersion().then(v => {
+    library.appVersion = v;
+    library.tauriError = lastTauriError;
+  });
+  getLibraryPath().then(p => {
+    library.libraryPath = p;
+    library.tauriError = lastTauriError;
+  });
 
   // Load Tracks and Playlists
   await loadState();
+  library.tauriError = lastTauriError;
 
   // Load Pinned USB Drives
   await refreshVolumes();
@@ -183,26 +435,84 @@ export async function initLibrary() {
   });
 }
 
+export type ImportOptions = {
+  /** Sidebar source (playlist name, etc.) to add tracks into after scan. */
+  targetSource?: string;
+  /** Analyze immediately instead of showing the post-import prompt. */
+  analyze?: boolean;
+};
+
+/** Playlist for a sidebar source, or null for library-wide / non-importable views. */
+export function playlistForSidebarSource(source: string | null | undefined) {
+  const active = source ?? 'All Tracks';
+  if (
+    !active ||
+    active === 'All Tracks' ||
+    active === 'Recently Added' ||
+    active === 'Unfiled' ||
+    library.volumes.includes(active)
+  ) {
+    return null;
+  }
+  return library.playlists.find((p) => p.name === active) ?? null;
+}
+
+function importErrorMessage(err: unknown): string {
+  const detail = err instanceof Error ? err.message : String(err);
+  return detail ? `Import failed: ${detail}` : 'Import failed';
+}
+
+async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
+  if (newTracks.length === 0) {
+    library.statusMessage = 'No new audio files found (already in library or unsupported format).';
+    return;
+  }
+
+  const playlist = playlistForSidebarSource(options?.targetSource);
+  if (playlist) {
+    const ids = newTracks.map((t) => t.id);
+    await addTracksToPlaylist(playlist.id, ids);
+  }
+
+  await loadState();
+
+  if (options?.analyze) {
+    await analyzeTracks();
+  } else {
+    library.showAnalysisPrompt = true;
+  }
+}
+
 /** Scan directory for new tracks */
-export async function importDirectory(path: string) {
+export async function importDirectory(path: string, options?: ImportOptions) {
   try {
+    library.statusMessage = 'Importing…';
     const newTracks = await tauriScanDirectory(path);
+    await finishImport(newTracks, options);
+    library.tauriError = lastTauriError;
     if (newTracks.length > 0) {
-      await loadState();
+      library.statusMessage = `Imported ${newTracks.length} track${newTracks.length === 1 ? '' : 's'}`;
     }
   } catch (err) {
+    library.statusMessage = importErrorMessage(err);
+    library.tauriError = lastTauriError;
     console.error('importDirectory failed:', err);
   }
 }
 
 /** Scan dropped files/folders */
-export async function importFiles(paths: string[]) {
+export async function importFiles(paths: string[], options?: ImportOptions) {
   try {
+    library.statusMessage = 'Importing…';
     const newTracks = await tauriScanFiles(paths);
+    await finishImport(newTracks, options);
+    library.tauriError = lastTauriError;
     if (newTracks.length > 0) {
-      await loadState();
+      library.statusMessage = `Imported ${newTracks.length} track${newTracks.length === 1 ? '' : 's'}`;
     }
   } catch (err) {
+    library.statusMessage = importErrorMessage(err);
+    library.tauriError = lastTauriError;
     console.error('importFiles failed:', err);
   }
 }
@@ -227,6 +537,7 @@ export async function analyzeTracks() {
   library.statusMessage = 'Starting analysis...';
   try {
     await tauriAnalyzeTracks();
+    invalidateAnalysisCache();
     await loadState();
   } catch (err) {
     console.error('analyzeTracks failed:', err);
@@ -235,6 +546,45 @@ export async function analyzeTracks() {
     library.statusMessage = 'Ready';
     library.analysisProgress = { current: 0, total: 0, message: '' };
   }
+}
+
+/** Analyze or re-analyze specific tracks by id */
+export async function analyzeTrackIds(ids: number[]) {
+  const unique = [...new Set(ids)].filter((id) => id > 0);
+  if (library.analyzing || unique.length === 0) return;
+  library.analyzing = true;
+  library.statusMessage =
+    unique.length === 1 ? 'Analyzing track…' : `Analyzing ${unique.length} tracks…`;
+  try {
+    await tauriAnalyzeTrackIds(unique);
+    for (const id of unique) invalidateAnalysisCache(id);
+    await loadState();
+  } catch (err) {
+    console.error('analyzeTrackIds failed:', err);
+  } finally {
+    library.analyzing = false;
+    library.statusMessage = 'Ready';
+    library.analysisProgress = { current: 0, total: 0, message: '' };
+  }
+}
+
+/** Remove tracks from a playlist without deleting library entries */
+export async function removeTracksFromPlaylist(playlistId: number, trackIds: number[]) {
+  const pl = library.playlists.find((p) => p.id === playlistId);
+  if (!pl || trackIds.length === 0) return;
+  const drop = new Set(trackIds);
+  pl.track_ids = pl.track_ids.filter((id) => !drop.has(id));
+  await saveState();
+  if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
+}
+
+/** Remove every track from a playlist (favorites / curate lists). */
+export async function clearPlaylistTracks(playlistId: number) {
+  const pl = library.playlists.find((p) => p.id === playlistId);
+  if (!pl || pl.track_ids.length === 0) return;
+  pl.track_ids = [];
+  await saveState();
+  if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
 
 /** Set test hot cues on selected track IDs */
@@ -336,6 +686,24 @@ export async function syncToUsb() {
 
 /* ── Playlist management ────────────────────────────────────────────── */
 
+/** Default name for a new user playlist (excludes favorite slots). */
+export function defaultPlaylistName(): string {
+  const userPlaylists = library.playlists.filter((p) => !p.name.startsWith('Favorites '));
+  const used = new Set(userPlaylists.map((p) => p.name));
+  let n = userPlaylists.length + 1;
+  while (used.has(`Playlist ${n}`)) n += 1;
+  return `Playlist ${n}`;
+}
+
+export async function renamePlaylist(id: number, name: string) {
+  const pl = library.playlists.find((p) => p.id === id);
+  if (!pl) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  pl.name = trimmed;
+  await saveState();
+}
+
 export async function addPlaylist(name: string) {
   const newId = library.playlists.length > 0 ? Math.max(...library.playlists.map(p => p.id)) + 1 : 1;
   library.playlists.push({
@@ -351,6 +719,17 @@ export async function deletePlaylist(id: number) {
   await saveState();
 }
 
+/** Delete a numbered favorite slot playlist; returns removed playlist name. */
+export async function removeFavoriteSlot(playlistId: number): Promise<string | null> {
+  const pl = library.playlists.find((p) => p.id === playlistId);
+  if (!pl || !isFavoritePlaylistName(pl.name)) return null;
+  const name = pl.name;
+  library.playlists = library.playlists.filter((p) => p.id !== playlistId);
+  await saveState();
+  syncTrackFavoriteFields();
+  return name;
+}
+
 export async function addTracksToPlaylist(playlistId: number, trackIds: number[]) {
   const pl = library.playlists.find(p => p.id === playlistId);
   if (!pl) return;
@@ -360,6 +739,7 @@ export async function addTracksToPlaylist(playlistId: number, trackIds: number[]
     }
   });
   await saveState();
+  if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
 
 export async function removeTrackFromPlaylist(playlistId: number, trackId: number) {
@@ -367,6 +747,78 @@ export async function removeTrackFromPlaylist(playlistId: number, trackId: numbe
   if (!pl) return;
   pl.track_ids = pl.track_ids.filter(tid => tid !== trackId);
   await saveState();
+  if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
+}
+
+export async function reorderPlaylistTracks(playlistId: number, orderedIds: number[]) {
+  const pl = library.playlists.find(p => p.id === playlistId);
+  if (!pl) return;
+  pl.track_ids = orderedIds;
+  await saveState();
+}
+
+/**
+ * Move or copy tracks into a playlist. When removeFromSource is true and
+ * sourcePlaylistId is set, tracks are removed from the source playlist.
+ */
+export async function moveTracksToPlaylist(opts: {
+  trackIds: number[];
+  toPlaylistId: number;
+  sourcePlaylistId?: number | null;
+  insertIndex?: number;
+  removeFromSource?: boolean;
+}) {
+  const {
+    trackIds,
+    toPlaylistId,
+    sourcePlaylistId = null,
+    insertIndex,
+    removeFromSource = true,
+  } = opts;
+  const target = library.playlists.find(p => p.id === toPlaylistId);
+  if (!target || trackIds.length === 0) return;
+
+  const unique = [...new Set(trackIds)];
+  if (removeFromSource && sourcePlaylistId != null && sourcePlaylistId !== toPlaylistId) {
+    const source = library.playlists.find(p => p.id === sourcePlaylistId);
+    if (source) {
+      source.track_ids = source.track_ids.filter(id => !unique.includes(id));
+    }
+  }
+
+  const withoutDupes = target.track_ids.filter(id => !unique.includes(id));
+  const idx =
+    insertIndex != null && insertIndex >= 0
+      ? Math.min(insertIndex, withoutDupes.length)
+      : withoutDupes.length;
+  target.track_ids = [
+    ...withoutDupes.slice(0, idx),
+    ...unique,
+    ...withoutDupes.slice(idx),
+  ];
+  await saveState();
+  if (
+    isFavoritePlaylistName(target.name) ||
+    (sourcePlaylistId != null &&
+      isFavoritePlaylistName(library.playlists.find((p) => p.id === sourcePlaylistId)?.name ?? ''))
+  ) {
+    syncTrackFavoriteFields();
+  }
+}
+
+export async function reorderPlaylists(dragId: number, dropId: number) {
+  const from = library.playlists.findIndex(p => p.id === dragId);
+  const to = library.playlists.findIndex(p => p.id === dropId);
+  if (from < 0 || to < 0 || from === to) return;
+  const [item] = library.playlists.splice(from, 1);
+  library.playlists.splice(to, 0, item);
+  library.playlists = [...library.playlists];
+  await saveState();
+}
+
+/** Resolve playlist by sidebar label (name). */
+export function playlistByName(name: string): PlaylistInput | undefined {
+  return library.playlists.find(p => p.name === name);
 }
 
 /* ── Change local library directory ─────────────────────────────────── */

@@ -12,12 +12,8 @@ pioneer_usb_writer = { path = "../pioneer-usb-writer", package = "pioneer-usb-wr
 pioneer_library = { path = "../pioneer-library", package = "pioneer-library" }
 anyhow = "1"
 tokio = { version = "1.52.1", features = ["rt", "process", "time", "macros"] }
-rodio = { version = "0.20", default-features = true, features = ["symphonia-all"] }
-
-
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSRunningApplication"] }
-objc2 = "0.6"
+cpal = "0.15"
+symphonia = { version = "0.5", features = ["all"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

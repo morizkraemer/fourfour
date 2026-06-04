@@ -71,6 +71,11 @@ export function selectAll(currentList: any[]) {
   selection.ids = next;
 }
 
+/** Replace selection with the given track IDs. */
+export function setSelection(ids: Iterable<number>) {
+  selection.ids = new Set(ids);
+}
+
 /** Clear selection. */
 export function clear() {
   selection.ids = new Set();

@@ -1,0 +1,36 @@
+/* Native <dialog> shell — inner panel uses dialog.css (.ff-dialog). */
+
+.ff-dialog-native {
+  border: none;
+  padding: 0;
+  margin: auto;
+  max-width: none;
+  max-height: none;
+  background: transparent;
+  overflow: visible;
+}
+
+.ff-dialog-native::backdrop {
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(1px);
+}
+
+.ff-dialog-native:not([open]) {
+  display: none;
+}
+
+.ff-dialog-form-input {
+  width: 100%;
+  padding: var(--ff-space-3);
+  background: var(--ff-surface);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-md);
+  color: var(--ff-text);
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-compact);
+  box-sizing: border-box;
+}
+
+.ff-dialog-form-input:focus {
+  outline: 1px solid var(--ff-border-hi);
+}

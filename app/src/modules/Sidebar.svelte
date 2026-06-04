@@ -1,29 +1,51 @@
 <!--
-  Sidebar.svelte — Left navigation sidebar module.
-  Traffic lights, nav sections (Favorites/Library/Playlists), USB pinned at bottom.
-  Matches module-sidebar.artboard.js structure.
+  Sidebar.svelte — Left navigation with playlist drop targets and row reorder.
 -->
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { SidebarSection, SidebarRow } from '$ds';
+  import { SidebarSection, SidebarRow, ContextMenu, Dialog, Button } from '$ds';
+  import { getIsTauri } from '../services/tauri.svelte.ts';
+  import {
+    buildSourceContextMenuItems,
+    buildSidebarSectionMenuItems,
+  } from '../menus/context-menus.ts';
   import {
     addPlaylist,
-    deletePlaylist,
+    defaultPlaylistName,
+    renamePlaylist,
     refreshVolumes,
     selectVolume,
     ejectVolume,
-    library
+    library,
+    reorderPlaylists,
+    favoritePlaylistName,
+    nextFavoriteSlot,
+    canAddFavorite,
+    removeFavoriteSlot,
+    favoriteSlotFromName,
   } from '../stores/library.svelte.ts';
-  import { ui } from '../stores/ui.svelte.ts';
+  import { ui, openSplitPanel, focusListPanel, closeSplitPanel } from '../stores/ui.svelte.ts';
+  import { sidebarSourceLabel } from '../stores/library.svelte.ts';
+  import { dnd, endDrag } from '../stores/dnd.svelte.ts';
 
-  let dialogEl;
-  let newPlaylistName = '';
   let intervalId;
+  let renamingPlaylistId = $state(null);
+  let renameDraft = $state('');
+  let playlistDragId = $state(null);
+  let playlistDropId = $state(null);
+  let contextMenu = $state({
+    open: false,
+    x: 0,
+    y: 0,
+    kind: 'source',
+    sourceId: '',
+    label: '',
+    onSplit: null,
+    section: null,
+  });
 
   onMount(() => {
-    // Refresh volumes immediately
     refreshVolumes();
-    // Poll for volume changes every 5 seconds
     intervalId = setInterval(refreshVolumes, 5000);
   });
 
@@ -33,6 +55,7 @@
 
   function handleRowClick(id, isUsb = false, path = null) {
     ui.activeSidebarRow = id;
+    ui.focusedListSource = id;
     if (isUsb) {
       selectVolume(path);
     } else {
@@ -40,111 +63,374 @@
     }
   }
 
-  function handleAddPlaylist() {
-    newPlaylistName = '';
-    dialogEl?.showModal();
+  async function handleAddPlaylist() {
+    const name = defaultPlaylistName();
+    await addPlaylist(name);
+    handleRowClick(name);
   }
 
-  function submitPlaylist() {
-    const name = newPlaylistName.trim();
-    if (name) {
-      addPlaylist(name);
+  function startPlaylistRename(playlistId, currentName) {
+    renamingPlaylistId = playlistId;
+    renameDraft = currentName;
+  }
+
+  async function commitPlaylistRename(playlistId) {
+    if (renamingPlaylistId !== playlistId) return;
+    const pl = library.playlists.find((p) => p.id === playlistId);
+    const draft = renameDraft.trim();
+    renamingPlaylistId = null;
+    if (!pl || !draft || draft === pl.name) return;
+    const oldName = pl.name;
+    await renamePlaylist(playlistId, draft);
+    if (ui.activeSidebarRow === oldName) {
+      ui.activeSidebarRow = draft;
+      if (ui.focusedListSource === oldName) ui.focusedListSource = draft;
     }
-    dialogEl?.close();
+  }
+
+  function cancelPlaylistRename() {
+    renamingPlaylistId = null;
+  }
+
+  function handleAddFavorite() {
+    const slot = nextFavoriteSlot();
+    if (slot == null) return;
+    addPlaylist(favoritePlaylistName(slot));
+  }
+
+  let showAddFavorite = $derived(canAddFavorite());
+
+  /** @type {{ id: number, slot: number, trackCount: number } | null} */
+  let removeFavoriteDialog = $state(null);
+
+  function requestRemoveFavorite(playlist) {
+    const slot = favoriteSlotFromName(playlist.name);
+    if (slot == null) return;
+    if (playlist.track_ids.length === 0) {
+      void commitRemoveFavorite(playlist.id);
+      return;
+    }
+    removeFavoriteDialog = {
+      id: playlist.id,
+      slot,
+      trackCount: playlist.track_ids.length,
+    };
+  }
+
+  async function commitRemoveFavorite(playlistId) {
+    const removedName = await removeFavoriteSlot(playlistId);
+    removeFavoriteDialog = null;
+    if (!removedName) return;
+    if (ui.activeSidebarRow === removedName) {
+      ui.activeSidebarRow = 'All Tracks';
+      ui.focusedListSource = 'All Tracks';
+    }
+    if (ui.splitPanel?.sourceId === removedName) {
+      closeSplitPanel();
+    }
+  }
+
+  let removeFavoriteDialogBody = $derived(
+    removeFavoriteDialog
+      ? `Favorite ${removeFavoriteDialog.slot} has ${removeFavoriteDialog.trackCount} track${
+          removeFavoriteDialog.trackCount === 1 ? '' : 's'
+        }. Removing it clears those assignments from this favorite slot.`
+      : ''
+  );
+
+  function handleSplit(sourceId, label, isUsb = false, usbPath = null) {
+    if (isUsb && usbPath) selectVolume(usbPath);
+    openSplitPanel(sourceId, label ?? sidebarSourceLabel(sourceId));
+    focusListPanel(sourceId);
+  }
+
+  function sidebarRowState(label, playlistId = null) {
+    if (ui.activeSidebarRow === label) return 'active';
+    if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'selected';
+    if (playlistId != null && playlistDragId === playlistId) return 'hover';
+    return 'rest';
+  }
+
+  function rowClassExtra(playlistId) {
+    if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'drag-over';
+    if (playlistId != null && playlistDragId === playlistId) return 'drag-source';
+    return '';
+  }
+
+  function onPlaylistPointerEnter(playlistId) {
+    if (dnd.kind === 'tracks' && dnd.trackIds.length > 0) {
+      dnd.dropPlaylistId = playlistId;
+    }
+    if (dnd.kind === 'playlist' || playlistDragId != null) {
+      playlistDropId = playlistId;
+    }
+  }
+
+  function onPlaylistPointerLeave(playlistId) {
+    if (dnd.dropPlaylistId === playlistId) dnd.dropPlaylistId = null;
+    if (playlistDropId === playlistId) playlistDropId = null;
+  }
+
+  async function onPlaylistPointerUp() {
+    if (playlistDragId != null && playlistDropId != null && playlistDragId !== playlistDropId) {
+      await reorderPlaylists(playlistDragId, playlistDropId);
+    }
+    playlistDragId = null;
+    playlistDropId = null;
+  }
+
+  function closeContextMenu() {
+    contextMenu = { ...contextMenu, open: false, onSplit: null, section: null };
+  }
+
+  function contextMenuItems() {
+    if (contextMenu.kind === 'section' && contextMenu.section) {
+      return buildSidebarSectionMenuItems(contextMenu.section, {
+        onNewPlaylist: handleAddPlaylist,
+        onAddFavorite: handleAddFavorite,
+        canAddFavorite: showAddFavorite,
+      });
+    }
+    return buildSourceContextMenuItems({
+      sourceId: contextMenu.sourceId,
+      label: contextMenu.label,
+      onSplit: contextMenu.onSplit ?? undefined,
+      onNewPlaylist: handleAddPlaylist,
+      onAddFavorite: handleAddFavorite,
+      onRemoveFavorite: requestRemoveFavorite,
+    });
+  }
+
+  function openSectionMenu(e, section) {
+    e.preventDefault();
+    contextMenu = {
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      kind: 'section',
+      sourceId: '',
+      label: '',
+      onSplit: null,
+      section,
+    };
+  }
+
+  function openSourceMenu(e, sourceId, label, onSplit = null, isUsb = false, usbPath = null) {
+    e.preventDefault();
+    if (isUsb && usbPath) handleRowClick(usbPath, true, usbPath);
+    else handleRowClick(sourceId);
+    contextMenu = {
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      kind: 'source',
+      sourceId,
+      label,
+      onSplit,
+      section: null,
+    };
+  }
+
+  function onPlaylistRowPointerDown(e, playlistId) {
+    if (e.button !== 0 || renamingPlaylistId === playlistId) return;
+    let moved = false;
+    function onMove(ev) {
+      if (!moved && Math.abs(ev.clientX - e.clientX) > 6) {
+        moved = true;
+        playlistDragId = playlistId;
+        dnd.kind = 'playlist';
+      }
+    }
+    function onUp() {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (!moved) return;
+      onPlaylistPointerUp(playlistId);
+      playlistDragId = null;
+      playlistDropId = null;
+      endDrag();
+    }
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   }
 </script>
 
 <div class="ff-sidebar">
-  <!-- macOS traffic lights -->
-  <div class="ff-sidebar__chrome">
-    <span class="ff-sidebar__dot ff-sidebar__dot--close"></span>
-    <span class="ff-sidebar__dot ff-sidebar__dot--min"></span>
-    <span class="ff-sidebar__dot ff-sidebar__dot--max"></span>
+  <div
+    class="ff-sidebar__chrome ff-titlebar-band"
+    data-tauri-drag-region
+    aria-hidden={getIsTauri()}
+  >
+    {#if !getIsTauri()}
+      <div class="ff-sidebar__traffic" aria-label="Window">
+        <span class="ff-sidebar__dot ff-sidebar__dot--close"></span>
+        <span class="ff-sidebar__dot ff-sidebar__dot--min"></span>
+        <span class="ff-sidebar__dot ff-sidebar__dot--max"></span>
+      </div>
+    {/if}
   </div>
-
-  <!-- scrollable sections -->
   <div class="ff-sidebar__top">
-    <SidebarSection label={library.sidebarData.favorites.label}>
+    <SidebarSection
+      label={library.sidebarData.favorites.label}
+      onHeaderContextMenu={(e) => openSectionMenu(e, 'favorites')}
+    >
       {#each library.sidebarData.favorites.rows as row}
-        <SidebarRow
-          kind={row.kind}
-          digit={row.digit}
-          label={row.label}
-          count={row.count}
-          state={ui.activeSidebarRow === row.label ? 'active' : 'rest'}
-          splitAction={false}
-          onclick={() => handleRowClick(row.label)}
-        />
+        {@const pl = library.playlists.find(p => p.name === row.label)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="ff-sidebar__drop-wrap {rowClassExtra(pl?.id)}"
+          onpointerenter={() => pl && onPlaylistPointerEnter(pl.id)}
+          onpointerleave={() => pl && onPlaylistPointerLeave(pl.id)}
+          onpointerup={onPlaylistPointerUp}
+          oncontextmenu={(e) =>
+            openSourceMenu(e, row.label, row.label, () => handleSplit(row.label, row.label))}
+        >
+          <SidebarRow
+            kind={row.kind}
+            digit={row.digit}
+            label={row.label}
+            count={row.count}
+            state={sidebarRowState(row.label, pl?.id)}
+            onSplit={() => handleSplit(row.label, row.label)}
+            onclick={() => handleRowClick(row.label)}
+          />
+        </div>
       {/each}
+      {#if showAddFavorite}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div oncontextmenu={(e) => openSectionMenu(e, 'favorites')}>
+          <SidebarRow
+            kind="leaf"
+            icon="plus"
+            label="Add favorite"
+            state="rest"
+            splitAction={false}
+            onclick={handleAddFavorite}
+          />
+        </div>
+      {/if}
     </SidebarSection>
 
-    <SidebarSection label={library.sidebarData.library.label}>
+    <SidebarSection
+      label={library.sidebarData.library.label}
+      onHeaderContextMenu={(e) => openSectionMenu(e, 'library')}
+    >
       {#each library.sidebarData.library.rows as row}
-        <SidebarRow
-          kind={row.kind}
-          icon={row.icon}
-          label={row.label}
-          count={row.count}
-          state={ui.activeSidebarRow === row.label ? 'active' : 'rest'}
-          splitAction={false}
-          onclick={() => handleRowClick(row.label)}
-        />
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          oncontextmenu={(e) =>
+            openSourceMenu(e, row.label, row.label, () => handleSplit(row.label, row.label))}
+        >
+          <SidebarRow
+            kind={row.kind}
+            icon={row.icon}
+            label={row.label}
+            count={row.count}
+            state={sidebarRowState(row.label)}
+            onSplit={() => handleSplit(row.label, row.label)}
+            onclick={() => handleRowClick(row.label)}
+          />
+        </div>
       {/each}
     </SidebarSection>
 
-    <SidebarSection label={library.sidebarData.playlists.label} showAdd onclick={handleAddPlaylist}>
+    <SidebarSection
+      label={library.sidebarData.playlists.label}
+      showAdd
+      onAdd={handleAddPlaylist}
+      onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
+    >
       {#each library.sidebarData.playlists.rows as row}
-        <SidebarRow
-          kind={row.kind}
-          label={row.label}
-          count={row.count}
-          state={ui.activeSidebarRow === row.label ? 'active' : 'rest'}
-          splitAction={true}
-          onSplit={() => deletePlaylist(row.id)}
-          onclick={() => handleRowClick(row.label)}
-        />
+        {@const pl = library.playlists.find(p => p.id === row.id)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="ff-sidebar__drop-wrap {rowClassExtra(row.id)}"
+          onpointerenter={() => onPlaylistPointerEnter(row.id)}
+          onpointerleave={() => onPlaylistPointerLeave(row.id)}
+          onpointerup={onPlaylistPointerUp}
+          onpointerdown={(e) => onPlaylistRowPointerDown(e, row.id)}
+          oncontextmenu={(e) =>
+            openSourceMenu(e, row.label, row.label, () => handleSplit(row.label, row.label))}
+        >
+          <SidebarRow
+            kind={row.kind}
+            label={row.label}
+            count={row.count}
+            state={sidebarRowState(row.label, row.id)}
+            renaming={renamingPlaylistId === row.id}
+            bind:renameValue={renameDraft}
+            onRenameCommit={() => commitPlaylistRename(row.id)}
+            onRenameCancel={cancelPlaylistRename}
+            onSplit={() => handleSplit(row.label, row.label)}
+            onclick={() => handleRowClick(row.label)}
+            ondblclick={() => startPlaylistRename(row.id, row.label)}
+          />
+        </div>
       {/each}
     </SidebarSection>
   </div>
 
-  <!-- USB pinned at bottom -->
   <div class="ff-sidebar__bottom">
-    <SidebarSection label={library.sidebarData.usb.label}>
+    <SidebarSection
+      label={library.sidebarData.usb.label}
+      onHeaderContextMenu={(e) => openSectionMenu(e, 'usb')}
+    >
       {#each library.sidebarData.usb.rows as row}
-        <SidebarRow
-          kind={row.kind}
-          label={row.label}
-          status={row.status}
-          state={ui.activeSidebarRow === row.path ? 'active' : 'rest'}
-          splitAction={true}
-          onSplit={() => ejectVolume(row.path)}
-          onclick={() => handleRowClick(row.path, true, row.path)}
-        />
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          oncontextmenu={(e) =>
+            openSourceMenu(
+              e,
+              row.path,
+              row.label,
+              () => handleSplit(row.path, row.label, true, row.path),
+              true,
+              row.path
+            )}
+        >
+          <SidebarRow
+            kind={row.kind}
+            label={row.label}
+            status={row.status}
+            state={ui.activeSidebarRow === row.path ? 'active' : 'rest'}
+            onSplit={() => handleSplit(row.path, row.label, true, row.path)}
+            onclick={() => handleRowClick(row.path, true, row.path)}
+          />
+        </div>
       {/each}
     </SidebarSection>
   </div>
 </div>
 
-<!-- Playlist creation dialog -->
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<dialog bind:this={dialogEl} class="ff-playlist-dialog" onclick={(e) => e.target === dialogEl && dialogEl.close()}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ff-playlist-dialog__content" onclick={(e) => e.stopPropagation()}>
-    <h3>Create Playlist</h3>
-    <input
-      type="text"
-      placeholder="Playlist Name"
-      bind:value={newPlaylistName}
-      onkeydown={(e) => e.key === 'Enter' && submitPlaylist()}
+<ContextMenu
+  open={contextMenu.open}
+  x={contextMenu.x}
+  y={contextMenu.y}
+  items={contextMenuItems()}
+  onClose={closeContextMenu}
+/>
+
+<Dialog
+  open={removeFavoriteDialog != null}
+  title="Remove favorite?"
+  bodyText={removeFavoriteDialogBody}
+  onClose={() => (removeFavoriteDialog = null)}
+>
+  {#snippet actions()}
+    <Button
+      label="Cancel"
+      variant="ghost"
+      size="small"
+      onclick={() => (removeFavoriteDialog = null)}
     />
-    <div class="ff-playlist-dialog__actions">
-      <button class="ff-dialog-btn ff-dialog-btn--cancel" onclick={() => dialogEl.close()}>Cancel</button>
-      <button class="ff-dialog-btn ff-dialog-btn--create" onclick={submitPlaylist}>Create</button>
-    </div>
-  </div>
-</dialog>
+    <Button
+      label="Remove"
+      variant="destructive"
+      size="small"
+      onclick={() => removeFavoriteDialog && commitRemoveFavorite(removeFavoriteDialog.id)}
+    />
+  {/snippet}
+</Dialog>
 
 <style>
   .ff-sidebar {
@@ -158,19 +444,33 @@
   .ff-sidebar__chrome {
     display: flex;
     align-items: center;
+    /* Room for native traffic lights (trafficLightPosition.x ≈ 14px) */
+    padding-left: var(--ff-traffic-light-x);
+    padding-right: var(--ff-space-6);
+    background: var(--ff-bg);
+  }
+  .ff-sidebar__traffic {
+    display: flex;
+    align-items: center;
     gap: var(--ff-space-3);
-    padding: var(--ff-space-4) var(--ff-space-6);
-    -webkit-app-region: drag;
   }
   .ff-sidebar__dot {
     width: 10px;
     height: 10px;
+    padding: 0;
+    border: none;
     border-radius: 50%;
+    cursor: default;
   }
-  .ff-sidebar__dot--close { background: #ff5f57; }
-  .ff-sidebar__dot--min   { background: #febc2e; }
-  .ff-sidebar__dot--max   { background: #28c840; }
-
+  .ff-sidebar__dot--close {
+    background: #ff5f57;
+  }
+  .ff-sidebar__dot--min {
+    background: #febc2e;
+  }
+  .ff-sidebar__dot--max {
+    background: #28c840;
+  }
   .ff-sidebar__top {
     flex: 1 1 0;
     overflow-y: auto;
@@ -181,70 +481,12 @@
     margin-top: auto;
     border-top: 1px solid var(--ff-border);
   }
-
-  /* Simple styling for the playlist dialog matching system colors */
-  .ff-playlist-dialog {
-    border: 1px solid var(--ff-border);
-    background: var(--ff-bg);
-    border-radius: var(--ff-radius-lg);
-    color: var(--ff-text);
-    padding: 0;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  .ff-sidebar__drop-wrap.drag-over :global(.ff-sbrow) {
+    outline: 1px solid var(--ff-accent);
+    outline-offset: -1px;
+    background: var(--ff-hover);
   }
-  .ff-playlist-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(2px);
-  }
-  .ff-playlist-dialog__content {
-    padding: var(--ff-space-6);
-    width: 280px;
-    display: flex;
-    flex-direction: column;
-    gap: var(--ff-space-4);
-  }
-  .ff-playlist-dialog__content h3 {
-    margin: 0;
-    font-size: var(--ff-type-title);
-    font-weight: 500;
-  }
-  .ff-playlist-dialog__content input {
-    width: 100%;
-    padding: var(--ff-space-3);
-    background: var(--ff-surface);
-    border: 1px solid var(--ff-border);
-    border-radius: var(--ff-radius-md);
-    color: var(--ff-text);
-    font-size: var(--ff-type-compact);
-  }
-  .ff-playlist-dialog__content input:focus {
-    outline: 1px solid var(--ff-border);
-  }
-  .ff-playlist-dialog__actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--ff-space-3);
-    margin-top: var(--ff-space-2);
-  }
-  .ff-dialog-btn {
-    padding: var(--ff-space-2) var(--ff-space-4);
-    border-radius: var(--ff-radius-md);
-    font-size: var(--ff-type-compact);
-    cursor: pointer;
-    border: none;
-  }
-  .ff-dialog-btn--cancel {
-    background: transparent;
-    color: var(--ff-muted);
-  }
-  .ff-dialog-btn--cancel:hover {
-    color: var(--ff-text);
-  }
-  .ff-dialog-btn--create {
-    background: var(--ff-text);
-    color: var(--ff-bg);
-    font-weight: 500;
-  }
-  .ff-dialog-btn--create:hover {
-    opacity: 0.9;
+  .ff-sidebar__drop-wrap.drag-source :global(.ff-sbrow) {
+    opacity: 0.5;
   }
 </style>

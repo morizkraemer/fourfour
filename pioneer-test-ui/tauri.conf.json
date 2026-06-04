@@ -5,18 +5,30 @@
   "build": {
     "frontendDist": "../app/dist",
     "devUrl": "http://localhost:5200",
-    "beforeDevCommand": "npm run --prefix ../app dev"
+    "beforeDevCommand": {
+      "script": "sh -c 'lsof -ti :5200 2>/dev/null | xargs kill -9 2>/dev/null || true; exec npm run dev'",
+      "cwd": "../app"
+    },
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": "../app"
+    }
   },
   "app": {
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "Pioneer USB Writer - Test",
+        "label": "main",
+        "title": "",
         "width": 1400,
         "height": 700,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 14, "y": 20 },
         "visible": true,
         "focus": true,
-        "maximized": true
+        "center": true
       }
     ]
   },

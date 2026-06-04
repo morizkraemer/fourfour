@@ -8,6 +8,7 @@
   import WaveformStrip from './WaveformStrip.svelte';
 
   let {
+    cover = '',
     title,
     artist,
     currentTime,
@@ -17,7 +18,12 @@
     cues = [],
     colorData = null,
     previewBytes = null,
+    beats = [],
+    durationMs = 0,
+    trackKey = null,
     onScrub = undefined,
+    followPlayhead = true,
+    waveformStrip = $bindable(null),
     playing = false,
     bpm = '124.00',
     key = '8A',
@@ -35,6 +41,14 @@
 </script>
 
 <div class="ff-player-compact">
+  <div
+    class="ff-player-compact__cover"
+    class:ff-player-compact__cover--empty={!cover}>
+    {#if cover}
+      <img class="ff-player-compact__cover-image" src={cover} alt="" />
+    {/if}
+  </div>
+
   <div class="ff-player-compact__left-controls">
     <button class="ff-player-compact__cue-btn" onclick={stop(onCue)}>
       <span class="ff-player-compact__cue-txt">CUE</span>
@@ -101,10 +115,15 @@
 
     <div class="ff-player-compact__waveform">
       <WaveformStrip
+        bind:this={waveformStrip}
         {colorData}
         {previewBytes}
         {progress}
         {cues}
+        {beats}
+        {durationMs}
+        {trackKey}
+        {followPlayhead}
         {onScrub} />
     </div>
   </div>

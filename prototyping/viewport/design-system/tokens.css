@@ -4,6 +4,16 @@
  * and intended to lift into the Tauri frontend unchanged.
  */
 :root {
+  /* macOS overlay title bar — keep in sync with pioneer-test-ui tauri.conf trafficLightPosition */
+  --ff-titlebar-row-height: env(titlebar-area-height, 28px);
+  --ff-titlebar-inset: var(--ff-titlebar-row-height);
+  --ff-titlebar-padding-y: 20px;
+  --ff-titlebar-search-padding-y: var(--ff-space-4);
+  --ff-traffic-light-x: 14px;
+  --ff-titlebar-control-height: 26px;
+  --ff-titlebar-band-height: calc(var(--ff-titlebar-padding-y) * 2 + var(--ff-titlebar-control-height));
+  --ff-traffic-light-inset: 78px;
+
   /* 1.1 Color */
   --ff-bg: #0a0a0a;
   --ff-surface: #131313;

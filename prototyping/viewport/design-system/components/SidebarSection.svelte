@@ -5,7 +5,7 @@
   import './sidebar-section.css';
   import Icon from './Icon.svelte';
 
-  let { label, showAdd = false, onAdd, children } = $props();
+  let { label, showAdd = false, onAdd, onHeaderContextMenu, children } = $props();
 
   function add(e) {
     e.stopPropagation();
@@ -14,7 +14,14 @@
 </script>
 
 <div class="ff-sidebar-section">
-  <div class="ff-sidebar-section__head">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="ff-sidebar-section__head"
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      onHeaderContextMenu?.(e);
+    }}
+  >
     <span class="ff-sidebar-section__label">{label}</span>
     {#if showAdd}
       <button class="ff-sidebar-section__add-btn" onclick={add}>

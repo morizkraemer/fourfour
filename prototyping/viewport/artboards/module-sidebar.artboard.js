@@ -10,10 +10,12 @@ export const meta = { title: 'Module · Main Sidebar (240w nav)', layer: 'module
  * Exports buildSidebar() for the Browse composite.
  */
 function trafficLights() {
-  return el('div', { class: 'ff-sidebar__chrome' }, [
-    el('span', { class: 'ff-sidebar__dot ff-sidebar__dot--close' }),
-    el('span', { class: 'ff-sidebar__dot ff-sidebar__dot--min' }),
-    el('span', { class: 'ff-sidebar__dot ff-sidebar__dot--max' }),
+  return el('div', { class: 'ff-sidebar__chrome ff-titlebar-band' }, [
+    el('div', { class: 'ff-sidebar__traffic', 'aria-label': 'Window' }, [
+      el('span', { class: 'ff-sidebar__dot ff-sidebar__dot--close' }),
+      el('span', { class: 'ff-sidebar__dot ff-sidebar__dot--min' }),
+      el('span', { class: 'ff-sidebar__dot ff-sidebar__dot--max' }),
+    ]),
   ]);
 }
 

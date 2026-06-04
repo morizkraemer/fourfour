@@ -64,32 +64,20 @@ selection (1 track) ──► loadPlayerTrack() ──► get_analysis_data
 ### CP1 — Plan (this file)
 - Document findings and phases.
 
-### CP2 — Waveform renderer
-- [ ] `prototyping/viewport/design-system/waveform-renderer.ts` — color, mono, playhead, cues, scrub hit-test.
-- [ ] `WaveformStrip.svelte` — binds canvas, ResizeObserver, props: `colorData | previewBytes`, `progress`, `cues`, `onScrub`.
-- [ ] `PlayerCompact.svelte` — swap CSS fake waveform for `WaveformStrip`.
-- [ ] Export from `svelte.js`.
+### CP2 — Waveform renderer ✅
+- [x] `waveform-renderer.ts`, `WaveformStrip.svelte`, `PlayerCompact` canvas swap, `svelte.js` export.
 
-### CP3 — Selection → player (no audio yet)
-- [ ] `player.svelte.ts` — `loadTrack`, `setProgress`, types, reactive load on selection.
-- [ ] `App.svelte` or `Player.svelte` — `$effect` when `selectedTrack()` changes.
-- [ ] Map `cue_points` + `duration_ms` from analysis.
+### CP3 — Selection → player ✅
+- [x] `player.svelte.ts` + `Player.svelte` `$effect` on `selectedTrack()`.
 
-### CP4 — Rust playback
-- [ ] `playback.rs` — thread-safe state, play/pause/seek/stop.
-- [ ] Commands: `playback_play { path }`, `playback_pause`, `playback_resume`, `playback_seek { position_ms }`, `playback_stop`.
-- [ ] Event: `playback-tick` with `{ position_ms, duration_ms, playing }`.
-- [ ] `Cargo.toml` — `rodio` with symphonia format features + `[profile.dev.package.rodio] opt-level = 3` if needed.
+### CP4 — Rust playback ✅
+- [x] `playback.rs` + rodio/symphonia + `playback-tick` event.
 
-### CP5 — Frontend playback wiring
-- [ ] `tauri.svelte.ts` — playback IPC + listen tick.
-- [ ] `player.svelte.ts` — drive `progress` from ticks; play/pause/seek call backend.
-- [ ] Scrub on waveform → `playback_seek`.
-- [ ] Space / play button toggles transport.
+### CP5 — Frontend playback wiring ✅
+- [x] `playback.svelte.ts` + store transport + waveform scrub.
 
 ## Out of scope (follow-ups)
 
-- Beat grid + zoom/pan on strip (port from `app.js` beat/time grid).
 - Expanded player (`player-expanded.js` artboard).
 - Sample-accurate cue / quantize.
 - LRU cache for full `waveform_color` arrays (lazy load per selected track only in v1).

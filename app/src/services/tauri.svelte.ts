@@ -2,8 +2,26 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
 
-// Detect if running inside Tauri
-export const isTauri = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ !== undefined;
+export let lastTauriError = 'None';
+
+export function getIpcDiagnostic(): string {
+  if (typeof window === 'undefined') return 'window undefined';
+  const hasIpc = (window as any).__TAURI_IPC__ !== undefined;
+  const hasInternals = (window as any).__TAURI_INTERNALS__ !== undefined;
+  const hasTauriGlobal = (window as any).__TAURI__ !== undefined;
+  return `IPC: ${hasIpc}, Internals: ${hasInternals}, Global: ${hasTauriGlobal}`;
+}
+
+// Detect if running inside Tauri (evaluated dynamically to avoid race conditions at module load time)
+export function getIsTauri(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (window as any).__TAURI_IPC__ !== undefined || (window as any).__TAURI_INTERNALS__ !== undefined;
+}
+
+/** Browser-only Vite preview — use mock fallbacks instead of failing invoke. */
+function useBrowserMocks(): boolean {
+  return !getIsTauri();
+}
 
 export interface TrackInfo {
   id: number;
@@ -78,103 +96,142 @@ let mockPlaylists: PlaylistInput[] = [
 let mockVolumes = ['/Volumes/SanDisk 64GB', '/Volumes/VAULT666'];
 
 export async function getVersion(): Promise<string> {
-  if (!isTauri) return '0.1.0-mock';
-  return invoke<string>('app_version');
+  try {
+    return await invoke<string>('app_version');
+  } catch (err) {
+    lastTauriError = `app_version fail: ${String(err)}`;
+    return '0.1.0-mock';
+  }
 }
 
 export async function getLibraryPath(): Promise<string> {
-  if (!isTauri) return '/mock/user/library.db';
-  return invoke<string>('get_library_path');
+  try {
+    return await invoke<string>('get_library_path');
+  } catch (err) {
+    lastTauriError = `get_library_path fail: ${String(err)}`;
+    return '/mock/user/library.db';
+  }
 }
 
 export async function pickDirectory(): Promise<string | null> {
-  if (!isTauri) {
+  if (useBrowserMocks()) {
     const path = prompt('Enter mock directory path:');
     return path || null;
   }
-  const result = await dialogOpen({ directory: true, multiple: false });
-  return typeof result === 'string' ? result : Array.isArray(result) ? result[0] : null;
+  try {
+    const result = await dialogOpen({ directory: true, multiple: false });
+    return typeof result === 'string' ? result : Array.isArray(result) ? result[0] : null;
+  } catch (err) {
+    lastTauriError = `pickDirectory fail: ${String(err)}`;
+    throw err;
+  }
 }
 
 export async function changeLibraryPath(folderPath: string): Promise<string> {
-  if (!isTauri) return folderPath + '/library.db';
-  return invoke<string>('change_library_path', { folderPath });
+  try {
+    return await invoke<string>('change_library_path', { folderPath });
+  } catch (err) {
+    lastTauriError = `change_library_path fail: ${String(err)}`;
+    return folderPath + '/library.db';
+  }
 }
 
 export async function loadState(): Promise<LoadedState> {
-  if (!isTauri) {
-    return { tracks: mockTracks, playlists: mockPlaylists };
+  try {
+    const res = await invoke<LoadedState>('load_state');
+    lastTauriError = 'invoke(load_state) OK';
+    return res;
+  } catch (err) {
+    lastTauriError = `load_state fail: ${String(err)}`;
+    if (useBrowserMocks()) {
+      return { tracks: mockTracks, playlists: mockPlaylists };
+    }
+    throw err;
   }
-  return invoke<LoadedState>('load_state');
 }
 
 export async function saveState(playlists: PlaylistInput[]): Promise<void> {
-  if (!isTauri) {
+  try {
+    return await invoke<void>('save_state', { playlists });
+  } catch (err) {
+    lastTauriError = `save_state fail: ${String(err)}`;
     mockPlaylists = playlists;
-    return;
   }
-  return invoke<void>('save_state', { playlists });
 }
 
 export async function scanDirectory(path: string): Promise<TrackInfo[]> {
-  if (!isTauri) {
-    const newTrack: TrackInfo = {
-      id: Date.now(),
-      source_path: path + '/NewTrack.mp3',
-      title: 'Scanned Track ' + (mockTracks.length + 1),
-      artist: 'Unknown Artist',
-      album: 'Scanned Album',
-      genre: 'Techno',
-      tempo: 12500,
-      key: '1A',
-      duration_secs: 360,
-      bitrate: 320,
-      file_size: 14400000,
-      has_artwork: false,
-      has_cues: false,
-    };
-    mockTracks.push(newTrack);
-    return [newTrack];
+  try {
+    return await invoke<TrackInfo[]>('scan_directory', { path });
+  } catch (err) {
+    lastTauriError = `scan_directory fail: ${String(err)}`;
+    if (useBrowserMocks()) {
+      const newTrack: TrackInfo = {
+        id: Date.now(),
+        source_path: path + '/NewTrack.mp3',
+        title: 'Scanned Track ' + (mockTracks.length + 1),
+        artist: 'Unknown Artist',
+        album: 'Scanned Album',
+        genre: 'Techno',
+        tempo: 12500,
+        key: '1A',
+        duration_secs: 360,
+        bitrate: 320,
+        file_size: 14400000,
+        has_artwork: false,
+        has_cues: false,
+      };
+      mockTracks.push(newTrack);
+      return [newTrack];
+    }
+    throw err;
   }
-  return invoke<TrackInfo[]>('scan_directory', { path });
 }
 
 export async function scanFiles(paths: string[]): Promise<TrackInfo[]> {
-  if (!isTauri) {
-    const newTracks = paths.map((p, i) => ({
-      id: Date.now() + i,
-      source_path: p,
-      title: p.split('/').pop() || 'Dropped Track',
-      artist: 'Dropped Artist',
-      album: 'Dropped Album',
-      genre: 'House',
-      tempo: 12000,
-      key: '8A',
-      duration_secs: 300,
-      bitrate: 320,
-      file_size: 12000000,
-      has_artwork: false,
-      has_cues: false,
-    }));
-    mockTracks.push(...newTracks);
-    return newTracks;
+  try {
+    return await invoke<TrackInfo[]>('scan_files', { paths });
+  } catch (err) {
+    lastTauriError = `scan_files fail: ${String(err)}`;
+    if (useBrowserMocks()) {
+      const newTracks = paths.map((p, i) => ({
+        id: Date.now() + i,
+        source_path: p,
+        title: p.split('/').pop() || 'Dropped Track',
+        artist: 'Dropped Artist',
+        album: 'Dropped Album',
+        genre: 'House',
+        tempo: 12000,
+        key: '8A',
+        duration_secs: 300,
+        bitrate: 320,
+        file_size: 12000000,
+        has_artwork: false,
+        has_cues: false,
+      }));
+      mockTracks.push(...newTracks);
+      return newTracks;
+    }
+    throw err;
   }
-  return invoke<TrackInfo[]>('scan_files', { paths });
 }
 
 export async function removeTracks(ids: number[]): Promise<void> {
-  if (!isTauri) {
+  try {
+    return await invoke<void>('remove_tracks', { ids });
+  } catch (err) {
+    lastTauriError = `remove_tracks fail: ${String(err)}`;
     mockTracks = mockTracks.filter(t => !ids.includes(t.id));
     mockPlaylists.forEach(pl => {
       pl.track_ids = pl.track_ids.filter(tid => !ids.includes(tid));
     });
-    return;
   }
-  return invoke<void>('remove_tracks', { ids });
 }
 
 export async function setTestCues(ids: number[]): Promise<TrackInfo[]> {
-  if (!isTauri) {
+  try {
+    return await invoke<TrackInfo[]>('set_test_cues', { ids });
+  } catch (err) {
+    lastTauriError = `set_test_cues fail: ${String(err)}`;
     mockTracks.forEach(t => {
       if (ids.includes(t.id)) {
         t.has_cues = true;
@@ -182,11 +239,33 @@ export async function setTestCues(ids: number[]): Promise<TrackInfo[]> {
     });
     return mockTracks;
   }
-  return invoke<TrackInfo[]>('set_test_cues', { ids });
+}
+
+export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
+  try {
+    return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
+  } catch (err) {
+    lastTauriError = `analyze_track_ids fail: ${String(err)}`;
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        mockTracks.forEach((t) => {
+          if (ids.includes(t.id)) {
+            t.tempo = 12600 + (t.id % 7) * 100;
+            t.key = '3A';
+            t.duration_secs = 380;
+          }
+        });
+        resolve(mockTracks);
+      }, 800);
+    });
+  }
 }
 
 export async function analyzeTracks(): Promise<TrackInfo[]> {
-  if (!isTauri) {
+  try {
+    return await invoke<TrackInfo[]>('analyze_tracks');
+  } catch (err) {
+    lastTauriError = `analyze_tracks fail: ${String(err)}`;
     return new Promise((resolve) => {
       setTimeout(() => {
         mockTracks.forEach(t => {
@@ -200,16 +279,22 @@ export async function analyzeTracks(): Promise<TrackInfo[]> {
       }, 1500);
     });
   }
-  return invoke<TrackInfo[]>('analyze_tracks');
 }
 
 export async function getMountedVolumes(): Promise<string[]> {
-  if (!isTauri) return mockVolumes;
-  return invoke<string[]>('get_mounted_volumes');
+  try {
+    return await invoke<string[]>('get_mounted_volumes');
+  } catch (err) {
+    lastTauriError = `get_mounted_volumes fail: ${String(err)}`;
+    return mockVolumes;
+  }
 }
 
 export async function readUsbState(path: string): Promise<UsbStateResponse | null> {
-  if (!isTauri) {
+  try {
+    return await invoke<UsbStateResponse | null>('read_usb_state', { path });
+  } catch (err) {
+    lastTauriError = `read_usb_state fail: ${String(err)}`;
     return {
       tracks: [
         { id: 1, title: 'USB Track 1', artist: 'Artist A', album: 'Album A', genre: 'House', key: '5A', bpm: 124.0, duration: 400, usb_path: '/Contents/Artist A/Album A/01 Track 1.mp3' }
@@ -219,11 +304,13 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
       ]
     };
   }
-  return invoke<UsbStateResponse | null>('read_usb_state', { path });
 }
 
 export async function writeUsb(outputDir: string, playlists: PlaylistInput[]): Promise<SyncReport> {
-  if (!isTauri) {
+  try {
+    return await invoke<SyncReport>('write_usb', { outputDir, playlists });
+  } catch (err) {
+    lastTauriError = `write_usb fail: ${String(err)}`;
     return {
       tracks_added: 2,
       tracks_updated: 0,
@@ -232,24 +319,47 @@ export async function writeUsb(outputDir: string, playlists: PlaylistInput[]): P
       tracks_unchanged: 1,
     };
   }
-  return invoke<SyncReport>('write_usb', { outputDir, playlists });
 }
 
 export async function ejectVolume(path: string): Promise<void> {
-  if (!isTauri) {
+  try {
+    return await invoke<void>('eject_volume', { path });
+  } catch (err) {
+    lastTauriError = `eject_volume fail: ${String(err)}`;
     mockVolumes = mockVolumes.filter(v => v !== path);
-    return;
   }
-  return invoke<void>('eject_volume', { path });
 }
 
 export async function wipeUsb(path: string): Promise<void> {
-  if (!isTauri) return;
-  return invoke<void>('wipe_usb', { path });
+  try {
+    return await invoke<void>('wipe_usb', { path });
+  } catch (err) {
+    lastTauriError = `wipe_usb fail: ${String(err)}`;
+  }
 }
 
-export async function getAnalysisData(trackId: number): Promise<any> {
-  if (!isTauri) {
+const analysisCache = new Map<number, any>();
+
+export function peekAnalysisData(trackId: number): any | undefined {
+  return analysisCache.get(trackId);
+}
+
+export function invalidateAnalysisCache(trackId?: number) {
+  if (trackId == null) analysisCache.clear();
+  else analysisCache.delete(trackId);
+}
+
+export async function getAnalysisData(trackId: number, force = false): Promise<any> {
+  if (!force) {
+    const cached = analysisCache.get(trackId);
+    if (cached) return cached;
+  }
+  try {
+    const data = await invoke<any>('get_analysis_data', { trackId });
+    analysisCache.set(trackId, data);
+    return data;
+  } catch (err) {
+    lastTauriError = `get_analysis_data fail: ${String(err)}`;
     return {
       waveform_preview: Array.from({ length: 400 }, () => Math.floor(Math.random() * 255)),
       waveform_color: Array.from({ length: 400 }, () => ({
@@ -257,6 +367,7 @@ export async function getAnalysisData(trackId: number): Promise<any> {
         r: Math.random(),
         g: Math.random(),
         b: Math.random(),
+        energy: 0
       })),
       bpm: 124.0,
       key: '9A',
@@ -265,32 +376,45 @@ export async function getAnalysisData(trackId: number): Promise<any> {
       duration_ms: 300000
     };
   }
-  return invoke<any>('get_analysis_data', { trackId });
 }
 
 export async function getTrackArtwork(trackId: number): Promise<Uint8Array | null> {
-  if (!isTauri) return null;
-  return invoke<Uint8Array | null>('get_track_artwork', { trackId });
+  try {
+    return await invoke<Uint8Array | null>('get_track_artwork', { trackId });
+  } catch (err) {
+    lastTauriError = `get_track_artwork fail: ${String(err)}`;
+    return null;
+  }
 }
 
 export function listenToAnalysisProgress(callback: (payload: { current: number; total: number; message: string }) => void) {
-  if (!isTauri) return () => {};
   let unsubscribe: () => void = () => {};
-  listen<{ current: number; total: number; message: string }>('analysis-progress', (event) => {
-    callback(event.payload);
-  }).then(unsub => {
-    unsubscribe = unsub;
-  });
+  try {
+    listen<{ current: number; total: number; message: string }>('analysis-progress', (event) => {
+      callback(event.payload);
+    }).then(unsub => {
+      unsubscribe = unsub;
+    }).catch(err => {
+      lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
+    });
+  } catch (err) {
+    lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
+  }
   return () => unsubscribe();
 }
 
 export function listenToWriteComplete(callback: (payload: SyncReport) => void) {
-  if (!isTauri) return () => {};
   let unsubscribe: () => void = () => {};
-  listen<SyncReport>('write-complete', (event) => {
-    callback(event.payload);
-  }).then(unsub => {
-    unsubscribe = unsub;
-  });
+  try {
+    listen<SyncReport>('write-complete', (event) => {
+      callback(event.payload);
+    }).then(unsub => {
+      unsubscribe = unsub;
+    }).catch(err => {
+      lastTauriError = `listen(write-complete) fail: ${String(err)}`;
+    });
+  } catch (err) {
+    lastTauriError = `listen(write-complete) fail: ${String(err)}`;
+  }
   return () => unsubscribe();
 }

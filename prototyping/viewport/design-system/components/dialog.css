@@ -53,4 +53,20 @@
   margin-top: 6px;
 }
 
+.ff-dialog--wide {
+  min-width: 640px;
+  max-width: 760px;
+  width: min(760px, calc(100vw - 48px));
+  padding: 16px 18px;
+}
+
+.ff-dialog--wide .ff-dialog__body {
+  padding: 0;
+  color: inherit;
+}
+
+.ff-dialog--wide .ff-dialog__title {
+  margin-bottom: 4px;
+}
+
 
