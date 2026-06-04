@@ -46,7 +46,7 @@
 /* Cover (height: 292px) */
 .ff-detail-pane__cover {
   width: 100%;
-  height: 292px;
+  aspect-ratio: 1 / 1;
   background-color: var(--ff-elev);
   border-radius: var(--ff-radius-sm);
   display: flex;
