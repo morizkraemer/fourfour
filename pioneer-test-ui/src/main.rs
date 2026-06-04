@@ -801,6 +801,16 @@ fn get_analysis_data(
     }
 }
 
+/// Get raw artwork bytes for a track from the local library DB.
+#[tauri::command]
+fn get_track_artwork(
+    track_id: i64,
+    state: State<'_, SharedLibrary>,
+) -> Result<Option<Vec<u8>>, String> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    lib.get_artwork(track_id).map_err(|e| e.to_string())
+}
+
 // ---------------------------------------------------------------------------
 // USB state reading
 // ---------------------------------------------------------------------------
@@ -1015,6 +1025,7 @@ fn main() {
             change_library_path,
             analyze_track_python,
             get_analysis_data,
+            get_track_artwork,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path

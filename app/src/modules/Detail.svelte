@@ -8,8 +8,8 @@
   import {
     selectionCount,
     selectedTrack,
-    selectedTracks,
   } from '../stores/selection.svelte.ts';
+  import { getAnalysisData, getTrackArtwork } from '../services/tauri.svelte.ts';
 
   // Derive the detail pane mode from selection state
   let mode = $derived(
@@ -20,8 +20,50 @@
   // Single-track metadata for the detail pane
   let track = $derived(selectedTrack());
 
+  // Fetch analysis data and artwork dynamically when selected track changes
+  $effect(() => {
+    const current = track;
+    if (current && !current.peaksLoaded && !current.loadingAnalysis) {
+      current.loadingAnalysis = true;
+      
+      // Load Waveform & Cues
+      getAnalysisData(current.id).then(res => {
+        if (res.waveform_preview) {
+          current.peaks = Array.from(res.waveform_preview).map(byte => (byte & 0x1F) / 31.0);
+        }
+        if (res.cue_points) {
+          current.cues = res.cue_points.map((cue, idx) => {
+            const mins = Math.floor(cue.time_ms / 60000);
+            const secs = Math.floor((cue.time_ms % 60000) / 1000);
+            const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
+            return {
+              name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
+              position: posStr,
+              color: cue.color
+            };
+          });
+        }
+        current.peaksLoaded = true;
+      }).catch(err => {
+        console.warn('Failed to fetch analysis details:', err);
+      }).finally(() => {
+        current.loadingAnalysis = false;
+      });
+
+      // Load Artwork Image
+      getTrackArtwork(current.id).then(bytes => {
+        if (bytes && bytes.length > 0) {
+          const blob = new Blob([bytes], { type: 'image/jpeg' });
+          current.cover = URL.createObjectURL(blob);
+        }
+      }).catch(err => {
+        console.warn('Failed to fetch track artwork:', err);
+      });
+    }
+  });
+
   let singleMeta = $derived(track ? {
-    ALBUM: track.label ?? '—',
+    ALBUM: track.album ?? '—',
     LABEL: track.label ?? '—',
     BPM: track.bpm ?? '—',
     KEY: track.key ?? '—',
@@ -46,6 +88,7 @@
       meta={singleMeta}
       cues={track.cues ?? []}
       filePath={track.filePath ?? ''}
+      cover={track.cover ?? ''}
     />
   {:else if mode === 'multi'}
     <DetailPane

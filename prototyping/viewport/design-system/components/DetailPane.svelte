@@ -35,6 +35,7 @@
     cues = [],
     multiCount = 0,
     filePath = '',
+    cover = '',
   } = $props();
 
   let isMissing = $derived(mode === 'missing');
@@ -93,18 +94,22 @@
     </div>
   {:else if mode === 'single' || mode === 'missing'}
     <div class="ff-detail-pane__cover{isMissing ? ' ff-detail-pane__cover--missing' : ''}">
-      <svg
-        class="ff-detail-pane__art-icon"
-        viewBox="0 0 24 24"
-        width="146"
-        height="146"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-        stroke-linejoin="round">
-        <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-      </svg>
+      {#if cover}
+        <img class="ff-detail-pane__cover-image" src={cover} alt="Cover Art" />
+      {:else}
+        <svg
+          class="ff-detail-pane__art-icon"
+          viewBox="0 0 24 24"
+          width="146"
+          height="146"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+        </svg>
+      {/if}
     </div>
 
     {#if !isMissing}

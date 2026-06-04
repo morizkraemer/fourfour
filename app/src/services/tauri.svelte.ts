@@ -268,6 +268,11 @@ export async function getAnalysisData(trackId: number): Promise<any> {
   return invoke<any>('get_analysis_data', { trackId });
 }
 
+export async function getTrackArtwork(trackId: number): Promise<Uint8Array | null> {
+  if (!isTauri) return null;
+  return invoke<Uint8Array | null>('get_track_artwork', { trackId });
+}
+
 export function listenToAnalysisProgress(callback: (payload: { current: number; total: number; message: string }) => void) {
   if (!isTauri) return () => {};
   let unsubscribe: () => void = () => {};

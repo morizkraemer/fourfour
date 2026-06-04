@@ -60,6 +60,13 @@
   opacity: 0.5;
 }
 
+.ff-detail-pane__cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--ff-radius-sm);
+}
+
 /* Mini overview waveform */
 .ff-detail-pane__waveform {
   width: 100%;
