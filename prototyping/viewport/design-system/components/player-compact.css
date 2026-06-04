@@ -1,7 +1,7 @@
 .ff-player-compact {
-  --ff-player-compact-inner-h: calc(96px - 14px - 16px);
+  --ff-player-compact-inner-h: calc(96px - 12px - 10px);
   height: 96px;
-  padding: 14px 16px 16px;
+  padding: 12px 16px 10px;
   background-color: var(--ff-bg);
   border-top: 1px solid var(--ff-border);
   display: flex;
@@ -111,7 +111,7 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 15px; /* metadata row and waveform stacked with gap 15 */
+  gap: 10px; /* tighter so the waveform gets more height */
   min-width: 0;
 }
 
@@ -221,9 +221,9 @@
   display: block;
 }
 
-/* 3. Waveform (height: 34px, canvas drawn in WaveformStrip) */
+/* 3. Waveform (canvas drawn in WaveformView, mode="compact") */
 .ff-player-compact__waveform {
-  height: 34px;
+  height: 46px;
   background-color: #141414;
   border-radius: var(--ff-radius-sm);
   position: relative;

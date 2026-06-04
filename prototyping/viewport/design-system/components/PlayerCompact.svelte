@@ -5,7 +5,7 @@
   import './player-compact.css';
   import Button from './Button.svelte';
   import Nudge from './Nudge.svelte';
-  import WaveformStrip from './WaveformStrip.svelte';
+  import WaveformView from './WaveformView.svelte';
 
   let {
     cover = '',
@@ -22,8 +22,6 @@
     durationMs = 0,
     trackKey = null,
     onScrub = undefined,
-    followPlayhead = true,
-    waveformStrip = $bindable(null),
     playing = false,
     bpm = '124.00',
     key = '8A',
@@ -122,17 +120,17 @@
     </div>
 
     <div class="ff-player-compact__waveform">
-      <WaveformStrip
-        bind:this={waveformStrip}
+      <WaveformView
+        mode="compact"
         {colorData}
         {previewBytes}
         {progress}
+        {playing}
         {cues}
         {beats}
         {durationMs}
         {trackKey}
-        {followPlayhead}
-        {onScrub} />
+        onSeek={onScrub} />
     </div>
   </div>
 </div>
