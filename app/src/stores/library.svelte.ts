@@ -827,6 +827,39 @@ export async function syncToUsb() {
   }
 }
 
+/**
+ * Export tracks to a specific USB volume by triggering a full sync to that
+ * device. Note: the `write_usb` backend command is a holistic sync — it
+ * exports ALL library tracks + playlists to the target volume, not just the
+ * dragged subset. Per-track selective export is not yet supported by the
+ * backend. The `trackIds` parameter is reserved for future per-track export
+ * support and logged here for traceability.
+ */
+export async function exportTracksToVolume(trackIds: number[], volumePath: string) {
+  if (!library.volumes.includes(volumePath)) {
+    console.error(
+      `[organize] exportTracksToVolume: volume "${volumePath}" is not mounted. Aborting.`
+    );
+    return;
+  }
+  if (library.syncing) {
+    console.error('[organize] exportTracksToVolume: a sync is already in progress. Aborting.');
+    return;
+  }
+  // NOTE: write_usb is a full sync — trackIds logged for future selective-export support.
+  console.log(`[organize] Exporting ${trackIds.length} dragged track(s) to ${volumePath} (full sync)`);
+  library.syncing = true;
+  library.statusMessage = 'Exporting to USB…';
+  try {
+    await tauriWriteUsb(volumePath, library.playlists);
+    // write-complete event from backend resets syncing state via listenToWriteComplete
+  } catch (err) {
+    console.error('[organize] exportTracksToVolume failed:', err);
+    library.syncing = false;
+    library.statusMessage = 'Ready';
+  }
+}
+
 /* ── Playlist management ────────────────────────────────────────────── */
 
 /** Default name for a new user playlist (excludes favorite slots). */

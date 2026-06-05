@@ -19,6 +19,7 @@
     playlistByName,
     reorderPlaylistTracks,
     moveTracksToPlaylist,
+    exportTracksToVolume,
     tracksForSidebarSource,
     filterTracks,
     sidebarSourceLabel,
@@ -52,7 +53,8 @@
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
 
   /** When set, show this sidebar source instead of the active row. */
-  let { sourceId = undefined, embedded = false, layoutKindOverride = undefined } = $props();
+  /** organize=true marks this table as the docked organize-panel destination. */
+  let { sourceId = undefined, embedded = false, layoutKindOverride = undefined, organize = false } = $props();
 
   let lastSelectedId = null;
   let tableBodyEl = $state(null);
@@ -91,11 +93,25 @@
 
   let canReorderRows = $derived(!!activePlaylist && !isUsbView);
 
+  // Organize USB target: accept drops when this table is the docked organize
+  // destination and it is a mounted USB volume.
+  let isOrganizeUsbDropTarget = $derived(
+    organize &&
+      dnd.kind === 'tracks' &&
+      dnd.dropPanelSourceId === effectiveSource &&
+      isUsbView &&
+      ui.organize.target?.kind === 'usb' &&
+      ui.organize.target?.id === effectiveSource
+  );
+
   let isDropTarget = $derived(
-    dnd.kind === 'tracks' &&
+    isOrganizeUsbDropTarget ||
+    (
+      dnd.kind === 'tracks' &&
       dnd.dropPanelSourceId === effectiveSource &&
       playlistByName(effectiveSource ?? '') != null &&
       !isUsbView
+    )
   );
 
   let baseTracks = $derived(tracksForSidebarSource(effectiveSource));
@@ -325,6 +341,42 @@
       const dropSource = dnd.dropPanelSourceId;
       const copyOnly = ev.altKey;
 
+      // ── Organize-panel drop routing ──────────────────────────────────────
+      // If the drop landed on the docked organize panel, route to
+      // playlist-add@index (playlist target) or USB export (usb target).
+      // This runs before the generic branch so USB drops aren't silently skipped.
+      const organizeTarget = ui.organize.target;
+      if (
+        dropSource != null &&
+        organizeTarget != null &&
+        dropSource === organizeTarget.id &&
+        dropSource !== effectiveSource // only cross-panel drops (not same-panel reorder)
+      ) {
+        if (organizeTarget.kind === 'playlist' && typeof organizeTarget.playlistId === 'number') {
+          // Add dragged tracks to the docked playlist at the drop index
+          await moveTracksToPlaylist({
+            trackIds: ids,
+            toPlaylistId: organizeTarget.playlistId,
+            sourcePlaylistId: dnd.sourcePlaylistId,
+            insertIndex: dropIdx ?? undefined,
+            removeFromSource: !copyOnly && dnd.sourcePlaylistId != null,
+          });
+        } else if (organizeTarget.kind === 'usb') {
+          // Trigger export to the docked USB volume (full sync — see exportTracksToVolume)
+          await exportTracksToVolume(ids, organizeTarget.id);
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          console.error(
+            '[organize] Drop onto unsupported target kind — no action taken.',
+            organizeTarget
+          );
+        }
+        dragging = false;
+        dropLineTop = null;
+        endDrag();
+        return;
+      }
+
       if (dropPlId != null) {
         await moveTracksToPlaylist({
           trackIds: ids,
@@ -464,6 +516,7 @@
         class:ff-table__body--marquee={marqueeActive}
         data-track-drop-body
         data-source-id={effectiveSource}
+        data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
         role="list"
         ondragover={(e) => e.preventDefault()}
