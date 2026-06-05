@@ -51,6 +51,12 @@
   let fileDropVisible = $state(false);
   let browseContentEl = $state(null);
 
+  // Inspector is the grey z-layer between the black browse window and the drawer.
+  // It shows only when collapsed (rail) with a selection; the drawer floats above it.
+  let inspectorVisible = $derived(
+    ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded
+  );
+
   let dropTarget = $derived(importDropTarget());
   let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
   let dropIntoPlaylist = $derived(playlistForSidebarSource(dropTarget) != null);
@@ -177,12 +183,20 @@
         <div class="ff-browse__slot ff-browse__slot--table">
           <TrackTable />
         </div>
-        {#if ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded}
+        {#if inspectorVisible}
           <div class="ff-browse__slot ff-browse__slot--detail">
             <Detail />
           </div>
         {/if}
-        <OrganizePanel contentEl={browseContentEl} />
+        <!-- Drawer sits on the inspector's grey layer: the dock backing turns grey
+             whenever the inspector is visible so the gap around the floating drawer
+             reads as that layer, not the black browse window. -->
+        <div
+          class="ff-browse__organize-dock"
+          class:ff-browse__organize-dock--inspector={inspectorVisible}
+        >
+          <OrganizePanel contentEl={browseContentEl} />
+        </div>
       </div>
     </div>
   </div>
@@ -267,6 +281,17 @@
   .ff-browse__slot--header  { flex: none; }
   .ff-browse__slot--table   { flex: 1 1 0; }
   .ff-browse__slot--detail  { flex: none; }
+
+  /* Backing dock for the organize drawer — the inspector's grey z-layer shows
+     through the drawer's top/bottom margin when the inspector is open. */
+  .ff-browse__organize-dock {
+    display: flex;
+    flex: none;
+    min-width: 0;
+  }
+  .ff-browse__organize-dock--inspector {
+    background: var(--ff-surface);
+  }
   .ff-browse__slot--player,
   .ff-browse__slot--status  { flex: none; }
 </style>

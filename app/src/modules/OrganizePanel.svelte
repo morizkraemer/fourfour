@@ -244,9 +244,9 @@
     onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && expandOrganize()}
   >
     {#if ui.organize.target}
-      <!-- Filled rail: icon tile on top, then cover tiles (rounded squares). -->
-      <div class="ff-organize__rail-tile ff-organize__rail-tile--icon" aria-hidden="true">
-        <Icon name={ui.organize.target.kind === 'usb' ? 'disc' : 'list'} size={16} />
+      <!-- Filled rail: the same open-chevron as the empty rail, then cover tiles. -->
+      <div class="ff-organize__rail-top" aria-hidden="true">
+        <Icon name="chevron-left" size={18} />
       </div>
       {#each railCovers as coverUrl}
         <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
@@ -270,7 +270,7 @@
     flex-direction: column;
     flex-shrink: 0;
     margin: var(--ff-space-3, 8px) 0;
-    background: var(--ff-bg);
+    background: var(--ff-surface);
     border: 1px solid var(--ff-border);
     border-right: none;
     border-radius: 10px 0 0 10px;
@@ -307,6 +307,16 @@
     padding: 6px;
   }
 
+  /* Open-chevron at the top of the filled rail — no tile chrome, just the glyph. */
+  .ff-organize__rail-top {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 28px;
+    flex-shrink: 0;
+  }
+
   .ff-organize__rail-tile {
     width: 40px;
     height: 40px;
@@ -315,18 +325,6 @@
     background-size: cover;
     background-position: center;
     flex-shrink: 0;
-  }
-
-  .ff-organize__rail-tile--icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--ff-border-hi);
-    color: var(--ff-text-mid);
-  }
-
-  .ff-organize--rail-filled:hover .ff-organize__rail-tile--icon {
-    color: var(--ff-text);
   }
 
   /* ── Expanded panel ────────────────────────────────────────────────────── */
