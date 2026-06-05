@@ -102,42 +102,65 @@
   // ── Rail drag-to-expand ────────────────────────────────────────────────────
 
   /**
-   * Dragging on the rail itself: if the pointer moves far enough left (into the
-   * content area), expand the panel and set its width based on drag position.
-   * A simple click on the rail also expands.
+   * Rail interaction is split into two clean paths:
+   *   - click  → expand to last width (onRailClick)
+   *   - drag   → resize live from the rail (onRailPointerDown)
+   *
+   * We deliberately do NOT use setPointerCapture: expanding mid-drag unmounts
+   * the rail element, and a captured pointer fires `pointercancel` the moment
+   * its target leaves the DOM — which would kill the gesture. Window-level
+   * listeners survive the rail→panel swap, so we rely on those instead.
+   */
+  let suppressNextClick = false;
+
+  function onRailClick() {
+    // A click that immediately follows a drag is swallowed (the drag already
+    // grew the panel — re-expanding would fight it).
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    expandOrganize();
+  }
+
+  /**
+   * Pulling the rail out is a one-way gesture: as soon as it qualifies as a
+   * drag we commit to expanded and let the width follow the cursor. We must NOT
+   * route through applyResizeWidth here — at the rail the candidate width is
+   * tiny (≈10px), which is below the snap-to-rail threshold, so it would
+   * collapse on every move and the panel would never open. Collapsing back to
+   * the rail is the job of the expanded panel's own resize handle.
    */
   function onRailPointerDown(e) {
     if (e.button !== 0) return;
-    e.preventDefault();
-    e.currentTarget.setPointerCapture?.(e.pointerId);
 
     const startX = e.clientX;
     let dragged = false;
 
+    const container = contentEl ?? document.querySelector('.ff-browse__content');
+    const rect = container ? container.getBoundingClientRect() : null;
+    const containerRight = rect ? rect.right : window.innerWidth;
+    const containerLeft = rect ? rect.left : 0;
+    const maxWidth = containerRight - containerLeft;
+
     function onMove(ev) {
-      const delta = startX - ev.clientX; // positive = dragging left (expanding)
-      if (!dragged && delta > 6) {
+      if (!dragged) {
+        if (startX - ev.clientX <= 6) return; // only leftward drags pull it out
         dragged = true;
         expandOrganize();
       }
-      if (dragged) {
-        const container = contentEl ?? document.querySelector('.ff-browse__content');
-        const containerRight = container
-          ? container.getBoundingClientRect().right
-          : window.innerWidth;
-        const newWidth = containerRight - ev.clientX;
-        applyResizeWidth(newWidth, containerRight);
-      }
+      let w = containerRight - ev.clientX;
+      if (w > maxWidth - ORGANIZE_SNAP_TO_FULL_PX) w = maxWidth; // snap to full near the edge
+      setOrganizeWidth(w); // clamps to the configured min width
     }
 
     function onUp() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      commitOrganizeWidth();
-      if (!dragged) {
-        // Simple click: expand to last width
-        expandOrganize();
+      if (dragged) {
+        suppressNextClick = true;
+        commitOrganizeWidth();
       }
     }
 
@@ -279,10 +302,11 @@
   <!-- ── Rail sliver ──────────────────────────────────────────────────────── -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ''}"
+    class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ' ff-organize--rail-empty'}"
     role="button"
     tabindex="0"
     aria-label={ui.organize.target ? `Open ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize panel'}
+    onclick={onRailClick}
     onpointerdown={onRailPointerDown}
     onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && expandOrganize()}
   >
@@ -304,9 +328,9 @@
         <span class="ff-organize__rail-count">{railTrackCount}</span>
       </div>
     {:else}
-      <!-- Empty rail: pull-me-out chevron -->
-      <div class="ff-organize__rail-handle" aria-hidden="true">
-        <Icon name="chevron-left" size={12} />
+      <!-- Empty rail (Spotify-style): a chevron toggle floating on the edge. -->
+      <div class="ff-organize__rail-chevron" aria-hidden="true">
+        <Icon name="chevron-left" size={16} />
       </div>
     {/if}
   </div>
@@ -335,25 +359,48 @@
     transition: background 0.1s ease;
   }
 
-  /* Filled-collapsed rail: slightly wider to fit cover stack */
+  /* Filled-collapsed rail: a Spotify-style column of cover thumbnails */
   .ff-organize--rail-filled {
-    width: 44px;
+    width: 60px;
   }
 
   .ff-organize--rail:hover {
     background: var(--ff-hover);
   }
 
-  .ff-organize__rail-handle {
+  /* ── Empty rail (Spotify-style): thin edge + chevron toggle ─────────────── */
+  .ff-organize--rail-empty {
+    width: 14px;
+    background: transparent;
+    border-left: 1px solid var(--ff-border);
+    overflow: visible;          /* let the chevron button straddle the edge */
+  }
+
+  .ff-organize--rail-empty:hover {
+    background: var(--ff-hover);
+  }
+
+  .ff-organize__rail-chevron {
+    position: absolute;
+    left: -11px;                /* sit astride the panel edge */
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--ff-elev);
+    border: 1px solid var(--ff-border-hi);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--ff-faint);
-    transition: color 0.1s ease;
+    color: var(--ff-text-mid);
+    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   }
 
-  .ff-organize--rail:hover .ff-organize__rail-handle {
-    color: var(--ff-text-dim, var(--ff-faint));
+  .ff-organize--rail-empty:hover .ff-organize__rail-chevron {
+    background: var(--ff-elev-hi);
+    border-color: var(--ff-border-hover);
+    color: var(--ff-text);
   }
 
   /* ── Filled-rail glance (s8) ─────────────────────────────────────────── */
@@ -370,14 +417,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 2px;
-    width: 32px;
+    gap: 6px;
+    width: 44px;
   }
 
   .ff-organize__rail-cover {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--ff-radius-sm, 3px);
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
     background-color: var(--ff-surface-hi, var(--ff-surface));
     background-size: cover;
     background-position: center;

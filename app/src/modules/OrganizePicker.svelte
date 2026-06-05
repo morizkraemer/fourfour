@@ -18,7 +18,7 @@
     defaultPlaylistName,
     isFavoritePlaylistName,
   } from '../stores/library.svelte.ts';
-  import { dockOrganizeTarget } from '../stores/ui.svelte.ts';
+  import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
 
   const MAX_RESULTS = 4;
 
