@@ -86,7 +86,8 @@
   .ff-detail-module {
     width: 278px;
     height: 100%;
-    background: var(--ff-bg);
+    /* Inspector is the grey mid-layer between the black browse window and the drawer. */
+    background: var(--ff-surface);
     border-left: 1px solid var(--ff-border);
     overflow-y: auto;
     overflow-x: hidden;
