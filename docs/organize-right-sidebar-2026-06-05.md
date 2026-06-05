@@ -1,7 +1,25 @@
 # Organize Right-Sidebar
 
 **Date:** 2026-06-05
-**Status:** draft
+**Status:** implemented (all 8 slices on `feat/organize-sidebar`)
+
+## Implementation notes (2026-06-05)
+
+All slices s1–s8 implemented and committed; `npm run build` green throughout.
+
+- **s1** replaced `splitPanel`/dual-`ListPanel` with `ui.organize` + `OrganizePanel.svelte` (rail/expanded, magnetic snap, localStorage geometry). Removed all split machinery from ui/dnd/table-columns/Sidebar/context-menus/ListPanel/TrackTable.
+- **s2** `OrganizePicker.svelte` (New playlist · search ≤4 / 4 recents · USB) + `dockOrganizeTarget` + renders docked target via `TrackTable`.
+- **s3** `'organize'` LayoutKind (index, cover, title, album, bpm, key), independent + persisted; `TrackTable` gained `layoutKindOverride`.
+- **s4** inspector hidden while panel expanded — pure derived condition in `App.svelte` (no new state).
+- **s5** `SidebarRow` hover "open in side panel" (favorites/playlists/USB only) + sidebar ＋ auto-docks new playlist.
+- **s6** drop left→right: playlist adds at drop index (`moveTracksToPlaylist insertIndex`); USB triggers `exportTracksToVolume`.
+- **s7** persist + reconcile docked target across restarts (localStorage; validates against live playlists/volumes after library load).
+- **s8** filled-collapsed rail shows up to 4 covers + track count.
+
+**Known gaps / follow-ups:**
+- USB drop export uses the backend `write_usb`, which is a **holistic full-library sync**, not per-track — dragged ids are logged for future selective export. Progress/error feedback still TODO (already flagged out-of-scope).
+- `ListPanel.svelte` is now unused but retained (retire in a later cleanup, salvaging header bits if any remain useful).
+- An unrelated scrub-pause player/waveform change surfaced during the work is held in `git stash` (not part of this feature).
 
 ## Problem
 
