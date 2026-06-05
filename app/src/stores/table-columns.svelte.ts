@@ -6,7 +6,6 @@
  *   library  — All Tracks, Recently Added
  *   playlist — named playlists
  *   usb      — mounted USB volumes
- *   split    — right-hand side-by-side panel only
  */
 
 import {
@@ -18,9 +17,9 @@ import { library, playlistByName } from './library.svelte.ts';
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
 
-export type LayoutKind = 'library' | 'playlist' | 'usb' | 'split';
+export type LayoutKind = 'library' | 'playlist' | 'usb';
 
-export const LAYOUT_KINDS: LayoutKind[] = ['library', 'playlist', 'usb', 'split'];
+export const LAYOUT_KINDS: LayoutKind[] = ['library', 'playlist', 'usb'];
 
 export type TableColumn = {
   key: string;
@@ -82,7 +81,6 @@ function emptyLayouts(): Record<LayoutKind, TableLayout> {
     library: defaultLayout(),
     playlist: defaultLayout(),
     usb: defaultLayout(),
-    split: defaultLayout(),
   };
 }
 
@@ -91,9 +89,7 @@ export const tableLayouts = $state(emptyLayouts());
 /** Resolve which persisted layout profile applies to a list panel. */
 export function resolveLayoutKind(
   sourceId: string | null | undefined,
-  splitCompanion = false,
 ): LayoutKind {
-  if (splitCompanion) return 'split';
   const source = sourceId ?? 'All Tracks';
   if (library.volumes.includes(source)) return 'usb';
   if (playlistByName(source)) return 'playlist';

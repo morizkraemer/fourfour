@@ -2,8 +2,6 @@
  * dnd.svelte.ts — Shared drag-and-drop session state (tracks, columns, playlists).
  */
 
-import { ui } from './ui.svelte.ts';
-
 export type DragKind = 'tracks' | 'column' | 'playlist' | null;
 
 export const dnd = $state({
@@ -14,8 +12,6 @@ export const dnd = $state({
   sourcePlaylistId: null as number | null,
   /** Sidebar source id of the list panel the drag started in */
   dragOriginSourceId: null as string | null,
-  /** Pointer has hovered a different split panel during this drag */
-  crossPanelDrag: false,
   ghostLabel: '',
   ghostCount: 1,
   pointerX: 0,
@@ -46,7 +42,6 @@ export function startTrackDrag(
   dnd.trackIds = trackIds;
   dnd.sourcePlaylistId = sourcePlaylistId;
   dnd.dragOriginSourceId = originSourceId;
-  dnd.crossPanelDrag = false;
   dnd.ghostLabel = label;
   dnd.ghostCount = trackIds.length;
   dnd.pointerX = x;
@@ -56,7 +51,7 @@ export function startTrackDrag(
   dnd.dropPlaylistId = null;
 }
 
-/** Hit-test track list panels under the pointer (split / curate view). */
+/** Hit-test track list panels under the pointer. */
 export function updateTrackDropTarget(clientX: number, clientY: number) {
   if (dnd.kind !== 'tracks') return;
 
@@ -79,16 +74,6 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
     dnd.dropPanelSourceId = null;
     dnd.dropRowIndex = null;
     return;
-  }
-
-  if (ui.splitPanel && dnd.dragOriginSourceId) {
-    if (sourceId !== dnd.dragOriginSourceId) {
-      dnd.crossPanelDrag = true;
-    } else if (dnd.crossPanelDrag) {
-      dnd.dropPanelSourceId = null;
-      dnd.dropRowIndex = null;
-      return;
-    }
   }
 
   dnd.dropPanelSourceId = sourceId;
@@ -135,7 +120,6 @@ export function endDrag() {
   dnd.trackIds = [];
   dnd.sourcePlaylistId = null;
   dnd.dragOriginSourceId = null;
-  dnd.crossPanelDrag = false;
   dnd.ghostLabel = '';
   dnd.ghostCount = 1;
   dnd.dropRowIndex = null;

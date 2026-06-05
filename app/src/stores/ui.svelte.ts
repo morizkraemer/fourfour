@@ -3,61 +3,109 @@
  * State lives in a single exported object so consumers can read + write fields.
  */
 
-export type SplitPanelTarget = {
-  /** Sidebar source key (label, playlist name, or USB path). */
-  sourceId: string;
-  /** Display title for the right panel header. */
-  label: string;
-};
+// ── Organize panel ──────────────────────────────────────────────────────────
 
-const SPLIT_RATIO_KEY = 'fourfour.splitPaneRatio';
-const SPLIT_RATIO_MIN = 0.22;
-const SPLIT_RATIO_MAX = 0.78;
-const SPLIT_RATIO_DEFAULT = 0.5;
+export type OrganizeTarget = { kind: 'playlist' | 'usb'; id: string; label: string };
+
+const ORGANIZE_WIDTH_KEY = 'fourfour.organize.width';
+const ORGANIZE_EXPANDED_KEY = 'fourfour.organize.expanded';
+
+/**
+ * Default panel width (px) when pulled out. Tune here.
+ * Min panel width before snapping to rail: ORGANIZE_SNAP_TO_RAIL_PX (below).
+ * Snap-to-fullscreen threshold: ORGANIZE_SNAP_TO_FULL_PX (below).
+ */
+const ORGANIZE_WIDTH_DEFAULT = 360;
+const ORGANIZE_WIDTH_MIN = 200; // absolute floor; below SNAP_RAIL threshold snaps to rail
+const ORGANIZE_WIDTH_MAX = 99999; // effectively unlimited (clamped by viewport at render)
+
+/** Magnetic snap thresholds — tunable. */
+export const ORGANIZE_SNAP_TO_RAIL_PX = 120;   // if dragged width < this → snap to rail
+export const ORGANIZE_SNAP_TO_FULL_PX = 120;   // if gap to viewport right < this → snap to full
 
 export const ui = $state({
-  /** Left panel share of side-by-side width (0–1). */
-  splitPaneRatio: SPLIT_RATIO_DEFAULT,
   /** Whether the right detail pane is visible. */
   detailPaneOpen: true,
   /** Whether the left sidebar is collapsed (future). */
   sidebarCollapsed: false,
   /** Which sidebar row is currently active (drives library view). */
   activeSidebarRow: 'All Tracks',
-  /** Last-focused track list (split view); falls back to activeSidebarRow for file drop. */
-  focusedListSource: null as string | null,
-  /** Second list panel on the right (columns-2 sidebar action). */
-  splitPanel: null as SplitPanelTarget | null,
   /** Preferences modal opened from the footer settings button. */
   settingsOpen: false,
   /** ⌘F inline filter — narrows visible track lists in place. */
   listFilter: '',
   /** Incremented to focus the filter field (GlobalHeader). */
   filterFocusNonce: 0,
+  /** Right-sidebar organize panel state. */
+  organize: {
+    /** Docked target — null in s1; s2 fills it. */
+    target: null as OrganizeTarget | null,
+    /** false = rail only; true = pulled-out panel. */
+    expanded: false as boolean,
+    /** Panel width in px when expanded. */
+    width: ORGANIZE_WIDTH_DEFAULT as number,
+  },
 });
 
-function clampSplitPaneRatio(ratio: number) {
-  return Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, ratio));
-}
+// ── Organize init / persist ──────────────────────────────────────────────────
 
-export function initSplitPaneRatio() {
+export function initOrganize() {
   try {
-    const raw = localStorage.getItem(SPLIT_RATIO_KEY);
-    if (!raw) return;
-    const n = parseFloat(raw);
-    if (Number.isFinite(n)) ui.splitPaneRatio = clampSplitPaneRatio(n);
+    const rawW = localStorage.getItem(ORGANIZE_WIDTH_KEY);
+    if (rawW) {
+      const n = parseFloat(rawW);
+      if (Number.isFinite(n)) ui.organize.width = clampOrganizeWidth(n);
+    }
+    const rawE = localStorage.getItem(ORGANIZE_EXPANDED_KEY);
+    if (rawE === 'true') ui.organize.expanded = true;
   } catch {
     /* ignore */
   }
 }
 
-function persistSplitPaneRatio() {
+function persistOrganize() {
   try {
-    localStorage.setItem(SPLIT_RATIO_KEY, String(ui.splitPaneRatio));
+    localStorage.setItem(ORGANIZE_WIDTH_KEY, String(ui.organize.width));
+    localStorage.setItem(ORGANIZE_EXPANDED_KEY, String(ui.organize.expanded));
   } catch {
     /* ignore */
   }
 }
+
+function clampOrganizeWidth(w: number): number {
+  return Math.max(ORGANIZE_WIDTH_MIN, Math.min(ORGANIZE_WIDTH_MAX, w));
+}
+
+/** Pull the organize panel out to its last width. */
+export function expandOrganize() {
+  ui.organize.expanded = true;
+  persistOrganize();
+}
+
+/** Collapse to rail — keeps the target intact. */
+export function collapseOrganize() {
+  ui.organize.expanded = false;
+  persistOrganize();
+}
+
+/** Close the organize panel: clear target and collapse. */
+export function closeOrganize() {
+  ui.organize.target = null;
+  ui.organize.expanded = false;
+  persistOrganize();
+}
+
+/** Set panel width (clamped). Call commitOrganizeWidth() after drag ends to persist. */
+export function setOrganizeWidth(px: number) {
+  ui.organize.width = clampOrganizeWidth(px);
+}
+
+/** Persist the current width — call on pointer-up after a resize drag. */
+export function commitOrganizeWidth() {
+  persistOrganize();
+}
+
+// ── Other UI state ────────────────────────────────────────────────────────────
 
 /** Clear the inline list filter. */
 export function clearListFilter() {
@@ -82,42 +130,7 @@ export function closeSettings() {
   ui.settingsOpen = false;
 }
 
-/** Open a collection in the right-hand split list panel. */
-export function openSplitPanel(sourceId: string, label: string) {
-  ui.splitPanel = { sourceId, label };
-}
-
-/** Close split view and return to single-panel layout. */
-export function closeSplitPanel() {
-  ui.splitPanel = null;
-}
-
-/** Mark which list panel receives the next file drop (split / curate). */
-export function focusListPanel(sourceId: string) {
-  ui.focusedListSource = sourceId;
-}
-
 /** Sidebar source id used when importing via drag-and-drop. */
 export function importDropTarget(): string {
-  return ui.focusedListSource ?? ui.activeSidebarRow;
-}
-
-const SPLIT_DIVIDER_PX = 5;
-const SPLIT_PANE_MIN_PX = 160;
-
-/** Drag the side-by-side divider; call on pointerup from the host. */
-export function resizeSplitPane(clientX: number, containerLeft: number, containerWidth: number) {
-  if (containerWidth <= 0) return;
-  const usable = containerWidth - SPLIT_DIVIDER_PX;
-  const minRatio = SPLIT_PANE_MIN_PX / usable;
-  const maxRatio = 1 - minRatio;
-  const x = clientX - containerLeft;
-  const leftWidth = x - SPLIT_DIVIDER_PX / 2;
-  ui.splitPaneRatio = clampSplitPaneRatio(
-    Math.min(maxRatio, Math.max(minRatio, leftWidth / usable)),
-  );
-}
-
-export function commitSplitPaneRatio() {
-  persistSplitPaneRatio();
+  return ui.activeSidebarRow;
 }

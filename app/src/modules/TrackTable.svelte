@@ -26,7 +26,7 @@
   } from '../stores/library.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, queuePlayAfterLoad, playFromStart, loadPlayerTrack } from '../stores/player.svelte.ts';
-  import { ui, focusListPanel, openSplitPanel } from '../stores/ui.svelte.ts';
+  import { ui } from '../stores/ui.svelte.ts';
   import { pickDirectory } from '../services/tauri.svelte.ts';
   import {
     getLayout,
@@ -51,8 +51,8 @@
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
 
-  /** When set, show this sidebar source instead of the active row (split panels). */
-  let { sourceId = undefined, embedded = false, splitCompanion = false } = $props();
+  /** When set, show this sidebar source instead of the active row. */
+  let { sourceId = undefined, embedded = false } = $props();
 
   let lastSelectedId = null;
   let tableBodyEl = $state(null);
@@ -101,7 +101,7 @@
   let baseTracks = $derived(tracksForSidebarSource(effectiveSource));
   let filteredTracks = $derived(filterTracks(baseTracks, ui.listFilter));
 
-  let layoutKind = $derived(resolveLayoutKind(effectiveSource, splitCompanion));
+  let layoutKind = $derived(resolveLayoutKind(effectiveSource));
   let layout = $derived(getLayout(layoutKind));
 
   let currentTracks = $derived.by(() => {
@@ -393,7 +393,6 @@
     return buildSourceContextMenuItems({
       sourceId: source,
       label: sidebarSourceLabel(source),
-      onSplit: () => openSplitPanel(source, sidebarSourceLabel(source)),
     });
   }
 
@@ -417,9 +416,7 @@
   class:ff-table--embedded={embedded}
   class:ff-table--drop-target={isDropTarget}
   data-source-id={effectiveSource}
-  onmousedown={() => {
-    if (!embedded) focusListPanel(effectiveSource);
-  }}
+  onmousedown={() => {}}
   oncontextmenu={openListMenu}
 >
   {#if showLibraryEmpty}

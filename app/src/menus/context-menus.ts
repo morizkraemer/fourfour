@@ -27,7 +27,6 @@ import {
   FAVORITE_SLOTS,
 } from '../stores/library.svelte.ts';
 import { pickDirectory } from '../services/tauri.svelte.ts';
-import { openSplitPanel } from '../stores/ui.svelte.ts';
 
 /**
  * @typedef {object} MenuItem
@@ -48,15 +47,6 @@ function busy() {
   return library.analyzing || library.syncing;
 }
 
-/** @param {() => void} [onSplit] */
-function openSplitItem(sourceId, label, onSplit) {
-  return {
-    label: 'Open in side panel',
-    shortcut: '⇧⏎',
-    onClick: () => (onSplit ? onSplit() : openSplitPanel(sourceId, label)),
-  };
-}
-
 /** @param {string} sourceId */
 export async function importIntoSource(sourceId) {
   const dir = await pickDirectory();
@@ -69,21 +59,17 @@ export async function importIntoSource(sourceId) {
  * @param {object} opts
  * @param {string} opts.sourceId — sidebar key (label, playlist name, or USB path)
  * @param {string} [opts.label] — display name for confirms
- * @param {() => void} [opts.onSplit]
  * @param {() => void} [opts.onNewPlaylist]
  * @param {() => void} [opts.onAddFavorite]
  * @param {(playlist: import('../stores/library.svelte.ts').PlaylistInput) => void} [opts.onRemoveFavorite]
  */
 export function buildSourceContextMenuItems(opts) {
-  const { sourceId, label = sourceId, onSplit, onNewPlaylist, onAddFavorite, onRemoveFavorite } =
-    opts;
+  const { sourceId, label = sourceId, onNewPlaylist, onAddFavorite, onRemoveFavorite } = opts;
   /** @type {MenuItem[]} */
   const items = [];
 
   if (library.volumes.includes(sourceId)) {
     items.push(
-      openSplitItem(sourceId, label, onSplit),
-      { isSeparator: true },
       {
         label: 'Sync to USB',
         disabled: busy() || library.playlists.length === 0,
@@ -122,7 +108,6 @@ export function buildSourceContextMenuItems(opts) {
   }
 
   if (LIBRARY_VIEWS.has(sourceId)) {
-    items.push(openSplitItem(sourceId, label, onSplit));
     if (sourceId === 'All Tracks') {
       items.push(
         {
@@ -143,14 +128,11 @@ export function buildSourceContextMenuItems(opts) {
   const playlist = library.playlists.find((p) => p.name === sourceId);
   if (playlist) {
     const isFavorite = isFavoritePlaylistName(playlist.name);
-    items.push(
-      openSplitItem(sourceId, label, onSplit),
-      {
-        label: 'Import folder',
-        disabled: busy(),
-        onClick: () => importIntoSource(sourceId),
-      }
-    );
+    items.push({
+      label: 'Import folder',
+      disabled: busy(),
+      onClick: () => importIntoSource(sourceId),
+    });
 
     /** @type {MenuItem[]} */
     const destructive = [];

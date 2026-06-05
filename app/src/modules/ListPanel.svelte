@@ -5,7 +5,7 @@
   import { Button, ContextMenu } from '$ds';
   import TrackTable from './TrackTable.svelte';
   import { tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
-  import { focusListPanel, ui, openSplitPanel } from '../stores/ui.svelte.ts';
+  import { ui } from '../stores/ui.svelte.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import '../../../prototyping/viewport/design-system/components/panel-header.css';
 
@@ -13,7 +13,6 @@
     sourceId,
     title,
     showClose = false,
-    splitCompanion = false,
     onClose,
   } = $props();
 
@@ -31,21 +30,16 @@
 
   function openHeaderMenu(e) {
     e.preventDefault();
-    focusListPanel(sourceId);
     contextMenu = { open: true, x: e.clientX, y: e.clientY };
   }
 
   function headerMenuItems() {
-    return buildSourceContextMenuItems({
-      sourceId,
-      label: title,
-      onSplit: () => openSplitPanel(sourceId, title),
-    });
+    return buildSourceContextMenuItems({ sourceId, label: title });
   }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="ff-list-panel" onmousedown={() => focusListPanel(sourceId)}>
+<div class="ff-list-panel">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <header
     class="ff-panel-header ff-panel-header--library"
@@ -69,7 +63,7 @@
       </div>
     {/if}
   </header>
-  <TrackTable {sourceId} embedded {splitCompanion} />
+  <TrackTable {sourceId} embedded />
 </div>
 
 <ContextMenu

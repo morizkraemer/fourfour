@@ -25,7 +25,7 @@
     favoriteSlotFromName,
     canRemoveFavoriteSlot,
   } from '../stores/library.svelte.ts';
-  import { ui, openSplitPanel, focusListPanel, closeSplitPanel } from '../stores/ui.svelte.ts';
+  import { ui } from '../stores/ui.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag } from '../stores/dnd.svelte.ts';
 
@@ -41,7 +41,6 @@
     kind: 'source',
     sourceId: '',
     label: '',
-    onSplit: null,
     section: null,
   });
 
@@ -56,7 +55,6 @@
 
   function handleRowClick(id, isUsb = false, path = null) {
     ui.activeSidebarRow = id;
-    ui.focusedListSource = id;
     if (isUsb) {
       selectVolume(path);
     } else {
@@ -85,7 +83,6 @@
     await renamePlaylist(playlistId, draft);
     if (ui.activeSidebarRow === oldName) {
       ui.activeSidebarRow = draft;
-      if (ui.focusedListSource === oldName) ui.focusedListSource = draft;
     }
   }
 
@@ -124,10 +121,6 @@
     if (!removedName) return;
     if (ui.activeSidebarRow === removedName) {
       ui.activeSidebarRow = 'All Tracks';
-      ui.focusedListSource = 'All Tracks';
-    }
-    if (ui.splitPanel?.sourceId === removedName) {
-      closeSplitPanel();
     }
   }
 
@@ -138,12 +131,6 @@
         }. Removing it clears those assignments from this favorite slot.`
       : ''
   );
-
-  function handleSplit(sourceId, label, isUsb = false, usbPath = null) {
-    if (isUsb && usbPath) selectVolume(usbPath);
-    openSplitPanel(sourceId, label ?? sidebarSourceLabel(sourceId));
-    focusListPanel(sourceId);
-  }
 
   function sidebarRowState(label, playlistId = null) {
     if (ui.activeSidebarRow === label) return 'active';
@@ -183,7 +170,7 @@
   }
 
   function closeContextMenu() {
-    contextMenu = { ...contextMenu, open: false, onSplit: null, section: null };
+    contextMenu = { ...contextMenu, open: false, section: null };
   }
 
   function contextMenuItems() {
@@ -197,7 +184,6 @@
     return buildSourceContextMenuItems({
       sourceId: contextMenu.sourceId,
       label: contextMenu.label,
-      onSplit: contextMenu.onSplit ?? undefined,
       onNewPlaylist: handleAddPlaylist,
       onAddFavorite: handleAddFavorite,
       onRemoveFavorite: requestRemoveFavorite,
@@ -213,12 +199,11 @@
       kind: 'section',
       sourceId: '',
       label: '',
-      onSplit: null,
       section,
     };
   }
 
-  function openSourceMenu(e, sourceId, label, onSplit = null, isUsb = false, usbPath = null) {
+  function openSourceMenu(e, sourceId, label, isUsb = false, usbPath = null) {
     e.preventDefault();
     if (isUsb && usbPath) handleRowClick(usbPath, true, usbPath);
     else handleRowClick(sourceId);
@@ -229,7 +214,6 @@
       kind: 'source',
       sourceId,
       label,
-      onSplit,
       section: null,
     };
   }
@@ -285,8 +269,7 @@
           onpointerenter={() => pl && onPlaylistPointerEnter(pl.id)}
           onpointerleave={() => pl && onPlaylistPointerLeave(pl.id)}
           onpointerup={onPlaylistPointerUp}
-          oncontextmenu={(e) =>
-            openSourceMenu(e, row.label, row.label, () => handleSplit(row.label, row.label))}
+          oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
         >
           <SidebarRow
             kind={row.kind}
@@ -294,7 +277,6 @@
             label={row.label}
             count={row.count}
             state={sidebarRowState(row.label, pl?.id)}
-            onSplit={() => handleSplit(row.label, row.label)}
             onclick={() => handleRowClick(row.label)}
           />
         </div>
@@ -321,8 +303,7 @@
       {#each library.sidebarData.library.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          oncontextmenu={(e) =>
-            openSourceMenu(e, row.label, row.label, () => handleSplit(row.label, row.label))}
+          oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
         >
           <SidebarRow
             kind={row.kind}
@@ -330,7 +311,6 @@
             label={row.label}
             count={row.count}
             state={sidebarRowState(row.label)}
-            onSplit={() => handleSplit(row.label, row.label)}
             onclick={() => handleRowClick(row.label)}
           />
         </div>
@@ -352,8 +332,7 @@
           onpointerleave={() => onPlaylistPointerLeave(row.id)}
           onpointerup={onPlaylistPointerUp}
           onpointerdown={(e) => onPlaylistRowPointerDown(e, row.id)}
-          oncontextmenu={(e) =>
-            openSourceMenu(e, row.label, row.label, () => handleSplit(row.label, row.label))}
+          oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
         >
           <SidebarRow
             kind={row.kind}
@@ -364,7 +343,6 @@
             bind:renameValue={renameDraft}
             onRenameCommit={() => commitPlaylistRename(row.id)}
             onRenameCancel={cancelPlaylistRename}
-            onSplit={() => handleSplit(row.label, row.label)}
             onclick={() => handleRowClick(row.label)}
             ondblclick={() => startPlaylistRename(row.id, row.label)}
           />
@@ -381,22 +359,13 @@
       {#each library.sidebarData.usb.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
-          oncontextmenu={(e) =>
-            openSourceMenu(
-              e,
-              row.path,
-              row.label,
-              () => handleSplit(row.path, row.label, true, row.path),
-              true,
-              row.path
-            )}
+          oncontextmenu={(e) => openSourceMenu(e, row.path, row.label, true, row.path)}
         >
           <SidebarRow
             kind={row.kind}
             label={row.label}
             status={row.status}
             state={ui.activeSidebarRow === row.path ? 'active' : 'rest'}
-            onSplit={() => handleSplit(row.path, row.label, true, row.path)}
             onclick={() => handleRowClick(row.path, true, row.path)}
           />
         </div>

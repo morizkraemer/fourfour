@@ -90,6 +90,9 @@ let seekTargetMs: number | null = null;
 let seekTargetAt = 0;
 const SEEK_SETTLE_MS = 350;
 const SEEK_TIMEOUT_MS = 800;
+// Optimistic pause: UI stops immediately; ignore stale playing=true ticks until
+// the backend IPC returns (same class of race as seek settle).
+let pausePending = false;
 
 function formatBpm(tempo: number): string {
   if (!tempo) return '—';
@@ -205,6 +208,10 @@ async function ensureTickListener() {
     player.levelLeft = tick.level_left ?? 0;
     player.levelRight = tick.level_right ?? 0;
     if (!player.track) return;
+    if (pausePending) {
+      player.playing = false;
+      return;
+    }
     const dur = tick.duration_ms || player.track.durationMs;
     if (dur > 0) {
       if (seekTargetMs !== null) {
@@ -351,13 +358,25 @@ export function clearPlayerTrack() {
   playPending = false;
 }
 
+async function pausePlayback() {
+  if (!player.playing && !pausePending) return;
+  pausePending = true;
+  player.playing = false;
+  try {
+    await playbackPause();
+  } catch (err) {
+    console.error('playback pause failed:', err);
+  } finally {
+    pausePending = false;
+  }
+}
+
 export async function togglePlay() {
   if (!player.track) return;
   await ensureTickListener();
   try {
-    if (player.playing) {
-      await playbackPause();
-      player.playing = false;
+    if (player.playing || pausePending) {
+      await pausePlayback();
     } else {
       // Always (re)start from the current playhead. playbackPlay sets the
       // backend path + start offset, so this works even after a scrub on a
@@ -369,6 +388,7 @@ export async function togglePlay() {
   } catch (err) {
     console.error('playback toggle failed:', err);
     player.playing = false;
+    pausePending = false;
   }
 }
 
@@ -396,13 +416,12 @@ export async function cuePreviewStop() {
   const dur = player.track.durationMs;
   cueHoldMs = null;
   try {
-    await playbackPause();
+    await pausePlayback();
     if (dur > 0) player.progress = ms / dur;
     await playbackSetPosition(ms);
   } catch (err) {
     console.error('cue preview stop failed:', err);
   }
-  player.playing = false;
 }
 
 export async function play() {
@@ -414,8 +433,7 @@ export async function play() {
 }
 
 export async function pause() {
-  await playbackPause();
-  player.playing = false;
+  await pausePlayback();
 }
 
 // ── Beat-grid editing ──────────────────────────────────────────────────────
