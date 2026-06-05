@@ -6,6 +6,7 @@
  *   library  — All Tracks, Recently Added
  *   playlist — named playlists
  *   usb      — mounted USB volumes
+ *   organize — right-panel organize table (independent persistent layout)
  */
 
 import {
@@ -17,9 +18,9 @@ import { library, playlistByName } from './library.svelte.ts';
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
 
-export type LayoutKind = 'library' | 'playlist' | 'usb';
+export type LayoutKind = 'library' | 'playlist' | 'usb' | 'organize';
 
-export const LAYOUT_KINDS: LayoutKind[] = ['library', 'playlist', 'usb'];
+export const LAYOUT_KINDS: LayoutKind[] = ['library', 'playlist', 'usb', 'organize'];
 
 export type TableColumn = {
   key: string;
@@ -76,11 +77,29 @@ function defaultLayout(): TableLayout {
   };
 }
 
+const ORGANIZE_DEFAULT_COLUMNS: TableColumn[] = [
+  { key: 'index', label: '#', width: 28 },
+  { key: 'cover', label: '', width: 18 },
+  { key: 'title', label: 'TITLE', width: 180 },
+  { key: 'album', label: 'ALBUM', width: 160 },
+  { key: 'bpm', label: 'BPM', width: 52, align: 'right' },
+  { key: 'key', label: 'KEY', width: 36, align: 'right' },
+];
+
+function organizeLayout(): TableLayout {
+  return {
+    columns: ORGANIZE_DEFAULT_COLUMNS.map(c => normalizeColumn({ ...c })),
+    sortKey: null,
+    sortDir: 'asc',
+  };
+}
+
 function emptyLayouts(): Record<LayoutKind, TableLayout> {
   return {
     library: defaultLayout(),
     playlist: defaultLayout(),
     usb: defaultLayout(),
+    organize: organizeLayout(),
   };
 }
 
@@ -120,8 +139,9 @@ export function initTableColumns() {
       for (const kind of LAYOUT_KINDS) {
         const entry = saved.layouts[kind];
         if (entry && Array.isArray(entry.columns)) {
+          const fallback = kind === 'organize' ? ORGANIZE_DEFAULT_COLUMNS : DEFAULT_COLUMNS;
           tableLayouts[kind] = {
-            columns: mergeSavedColumns(entry.columns),
+            columns: mergeSavedColumns(entry.columns, fallback),
             sortKey: entry.sortKey ?? null,
             sortDir: entry.sortDir === 'desc' ? 'desc' : 'asc',
           };
@@ -132,7 +152,8 @@ export function initTableColumns() {
       return;
     }
 
-    // Migrate v1/v2 single global layout → seed all kinds from the same saved prefs.
+    // Migrate v1/v2 single global layout → seed library/playlist/usb from saved prefs.
+    // 'organize' always starts fresh from its own default.
     if (Array.isArray(saved.columns)) {
       const migrated = {
         columns: mergeSavedColumns(saved.columns),
@@ -140,6 +161,7 @@ export function initTableColumns() {
         sortDir: saved.sortDir === 'desc' ? 'desc' : 'asc',
       } as TableLayout;
       for (const kind of LAYOUT_KINDS) {
+        if (kind === 'organize') continue;
         tableLayouts[kind] = {
           columns: migrated.columns.map(c => ({ ...c })),
           sortKey: migrated.sortKey,
@@ -183,11 +205,15 @@ function normalizeColumn(col: TableColumn): TableColumn {
   return { ...rest, width };
 }
 
-function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
+function mergeSavedColumns(
+  saved: TableColumn[],
+  fallbackColumns: TableColumn[] = DEFAULT_COLUMNS,
+): TableColumn[] {
   const byKey = new Map(saved.map(c => [c.key, c]));
   const ordered: TableColumn[] = [];
   for (const s of saved) {
-    const def = DEFAULT_COLUMNS.find(d => d.key === s.key)
+    const def = fallbackColumns.find(d => d.key === s.key)
+      ?? DEFAULT_COLUMNS.find(d => d.key === s.key)
       ?? extraColumnDef(s.key);
     if (def) {
       ordered.push(normalizeColumn({
@@ -197,7 +223,7 @@ function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
       }));
     }
   }
-  for (const def of DEFAULT_COLUMNS) {
+  for (const def of fallbackColumns) {
     if (!byKey.has(def.key)) ordered.push({ ...def });
   }
   for (const extra of ALL_COLUMN_KEYS) {

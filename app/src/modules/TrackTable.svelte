@@ -52,7 +52,7 @@
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
 
   /** When set, show this sidebar source instead of the active row. */
-  let { sourceId = undefined, embedded = false } = $props();
+  let { sourceId = undefined, embedded = false, layoutKindOverride = undefined } = $props();
 
   let lastSelectedId = null;
   let tableBodyEl = $state(null);
@@ -101,7 +101,7 @@
   let baseTracks = $derived(tracksForSidebarSource(effectiveSource));
   let filteredTracks = $derived(filterTracks(baseTracks, ui.listFilter));
 
-  let layoutKind = $derived(resolveLayoutKind(effectiveSource));
+  let layoutKind = $derived(layoutKindOverride ?? resolveLayoutKind(effectiveSource));
   let layout = $derived(getLayout(layoutKind));
 
   let currentTracks = $derived.by(() => {

@@ -241,7 +241,7 @@
         <OrganizePicker onNewPlaylistDocked={startHeaderRename} />
       {:else}
         <!-- Target docked: show its tracks -->
-        <TrackTable sourceId={ui.organize.target.id} embedded />
+        <TrackTable sourceId={ui.organize.target.id} embedded layoutKindOverride="organize" />
       {/if}
     </div>
   </div>
