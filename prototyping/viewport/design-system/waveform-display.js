@@ -342,20 +342,33 @@ export default class WaveformDisplay {
         this._phTargetAt = this._now();
 
         if (!this._playing) {
-            // Pause: snap to the authoritative position. We render a touch in the
-            // past while playing, so this is a tiny forward catch-up, not a snap back.
             this._stopInterp();
             this._resetSamples();
-            this._phClock = frac;
-            this._applyPlayhead(frac);
+            if (wasPlaying && this._phClock >= 0) {
+                // Play→pause: freeze where the waveform is visually resting. While
+                // playing we render ~RENDER_DELAY behind the true position, so
+                // snapping to frac here would jump the waveform that far forward.
+                // (Keep _phClock as-is.)
+            } else {
+                // Already paused — a position change is a deliberate seek; honor it.
+                this._phClock = frac;
+            }
+            this._applyPlayhead(this._phClock);
             return;
         }
 
-        // Resuming from pause / first tick — start the interpolation buffer fresh
-        // from the reported position so we don't blend across the gap.
+        // Resuming from pause / first tick — seed the interpolation buffer so it
+        // continues from the frozen displayed position instead of snapping to the
+        // authoritative frac (which sits ~RENDER_DELAY ahead of the frozen head).
         if (!wasPlaying || this._phClock < 0) {
-            this._phClock = frac;
             this._resetSamples();
+            if (this._phClock >= 0) {
+                // Place the frozen position one render-delay in the past so the
+                // delayed interpolation picks up exactly there — no forward jump.
+                this._samples.push({ f: this._phClock, t: this._now() - PLAYHEAD_RENDER_DELAY_MS });
+            } else {
+                this._phClock = frac;
+            }
         }
         this._pushSample(frac);
         this._startInterp();
@@ -754,6 +767,19 @@ export default class WaveformDisplay {
 
         const entriesPerPixel = (visibleFrac * N) / w;
 
+        // ── Sub-pixel scroll: sample on an integer-pixel grid ───────
+        // The viewport slides by sub-pixel amounts each frame. If we sampled at
+        // the raw fractional offset, the per-pixel peak-hold buckets would
+        // re-bucket every frame and spiky bands (mid/high) would jitter in
+        // height as transients cross bucket boundaries. Instead, quantise the
+        // sample grid to whole pixels (stable bucket contents) and recover the
+        // smooth motion by translating the canvas by the sub-pixel remainder.
+        const fracPerPx = visibleFrac / w;
+        const leftPxReal = startFrac / fracPerPx;
+        const leftPxFloor = Math.floor(leftPxReal);
+        const subPx = leftPxReal - leftPxFloor;     // 0..1, drawn via translate
+        const qStartFrac = leftPxFloor * fracPerPx; // integer-pixel-aligned start
+
         // ── Envelope lead-in ────────────────────────────────────────
         // Process extra pixels before the viewport so the envelope
         // follower is warmed up at the left edge.  Prevents shape
@@ -761,9 +787,12 @@ export default class WaveformDisplay {
         const ENV_LEAD = 64;
         const leadFrac = ENV_LEAD * visibleFrac / w;
         // Allow negative — centred-at-start uses offset < 0 (blank before t=0).
-        const extStartFrac = startFrac - leadFrac;
-        const leadPx = Math.max(0, Math.round((startFrac - extStartFrac) / visibleFrac * w));
-        const totalPx = leadPx + w;
+        const extStartFrac = qStartFrac - leadFrac;
+        const leadPx = Math.max(0, Math.round((qStartFrac - extStartFrac) / visibleFrac * w));
+        // Two extra trailing columns: the sub-pixel left-translate exposes up to
+        // 1px on the right edge that these fill (one isn't quite enough since the
+        // band polygon's last vertex lands at x = w - subPx).
+        const totalPx = leadPx + w + 2;
 
         const bassA = new Float32Array(totalPx);
         const midA  = new Float32Array(totalPx);
@@ -808,11 +837,17 @@ export default class WaveformDisplay {
         const highE = clampEnvelopeFloor(applyEnvelope(highA, 1, decay));
 
         // ── Draw visible portion only (skip lead-in buffer) ─────────
+        // Translate by the sub-pixel remainder so the integer-pixel-aligned
+        // bars scroll smoothly. Draw one extra column to cover the exposed edge.
         const yCenter = h / 2;
         const scale = h / 2;
-        drawBand(ctx, bassE.subarray(leadPx, leadPx + w), w, yCenter, scale, COLOR_BASS);
-        drawBand(ctx, midE.subarray(leadPx, leadPx + w),  w, yCenter, scale, COLOR_MID);
-        drawBand(ctx, highE.subarray(leadPx, leadPx + w), w, yCenter, scale, COLOR_HIGH);
+        const drawW = w + 2;
+        ctx.save();
+        ctx.translate(-subPx, 0);
+        drawBand(ctx, bassE.subarray(leadPx, leadPx + drawW), drawW, yCenter, scale, COLOR_BASS);
+        drawBand(ctx, midE.subarray(leadPx, leadPx + drawW),  drawW, yCenter, scale, COLOR_MID);
+        drawBand(ctx, highE.subarray(leadPx, leadPx + drawW), drawW, yCenter, scale, COLOR_HIGH);
+        ctx.restore();
     }
 
     _renderMonoFallback(ctx, w, h, previewData, startFrac, endFrac) {
