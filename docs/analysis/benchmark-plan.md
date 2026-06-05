@@ -1,6 +1,6 @@
 # fourfour Benchmark — Implementation Plan
 
-> **Status: Historical reference.** Benchmarking was completed externally in the samplebase project. The results, library recommendations, and accuracy data are captured in [`analysis-pipeline-handoff.md`](./analysis-pipeline-handoff.md). This document is retained as a design reference for any future benchmark work inside fourfour.
+> **Status: Historical reference.** Benchmarking was completed externally in the samplebase project. The results, library recommendations, and accuracy data are captured in [`pipeline-handoff.md`](./pipeline-handoff.md). This document is retained as a design reference for any future benchmark work inside fourfour.
 
 ---
 
@@ -12,7 +12,7 @@ Benchmarking of audio analysis libraries (BPM, key, energy, waveform, embeddings
 - Embedding model comparisons (MS CLAP, LAION-CLAP, TTMR++, CLaMP 3)
 - A full Python analysis pipeline design with concrete code for every component
 
-**The output is in [`analysis-pipeline-handoff.md`](./analysis-pipeline-handoff.md)** — that's the authoritative doc for what to build.
+**The output is in [`pipeline-handoff.md`](./pipeline-handoff.md)** — that's the authoritative doc for what to build.
 
 ### What was NOT built in this project
 

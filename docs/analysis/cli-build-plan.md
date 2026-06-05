@@ -81,10 +81,10 @@ fourfour/
 
 | Doc | What it contains | When to read |
 |-----|-----------------|--------------|
-| `lexicon-wiki.md` | Reverse-engineered Lexicon algorithm details (BPM, key, energy, waveform, cues) | Before Steps 6–10 |
+| `lexicon-deep-dive.md` | Reverse-engineered Lexicon algorithm details (BPM, key, energy, waveform, cues) | Before Steps 6–10 |
 | `lexicon-reverse-engineering.md` | Raw decompiled source, constants, profiles | During Steps 6–10 |
-| `analysis-pipeline-handoff.md` | Python stack code samples, library choices, accuracy benchmarks | Before Steps 13–14 |
-| `tech-stack-reference.md` | Library survey (Essentia, madmom, OpenKeyScan, etc.) | If exploring alternatives |
+| `pipeline-handoff.md` | Python stack code samples, library choices, accuracy benchmarks | Before Steps 13–14 |
+| `tech-stack.md` | Library survey (Essentia, madmom, OpenKeyScan, etc.) | If exploring alternatives |
 
 ---
 
@@ -261,7 +261,7 @@ def save_cache(cache_dir, key, record) -> None
 
 *Produces: 5 standalone modules, each independently testable.*
 *Each is a pure function: `numpy array → result`.*
-*Reference: `docs/lexicon-wiki.md` for algorithm details.*
+*Reference: `docs/lexicon-deep-dive.md` for algorithm details.*
 
 **Steps 6–9 are independent — build in any order or in parallel.**
 
@@ -269,7 +269,7 @@ def save_cache(cache_dir, key, record) -> None
 
 ### Step 6: BPM detection — `lexicon_bpm.py`
 
-**Reference:** `lexicon-wiki.md` §4, Worker 182 Module 745
+**Reference:** `lexicon-deep-dive.md` §4, Worker 182 Module 745
 
 **Algorithm pipeline:**
 
@@ -304,7 +304,7 @@ def save_cache(cache_dir, key, record) -> None
 
 ### Step 7: Key detection — `lexicon_key.py`
 
-**Reference:** `lexicon-wiki.md` §5, Worker 182 functions O(), W(), E(), j(), C()
+**Reference:** `lexicon-deep-dive.md` §5, Worker 182 functions O(), W(), E(), j(), C()
 
 **Constants (from reverse engineering):**
 ```python
@@ -339,7 +339,7 @@ OCTAVE_WEIGHTS = [0.400, 0.556, 0.525, 0.608, 0.599, 0.491]
 
 ### Step 8: Energy rating — `lexicon_energy.py`
 
-**Reference:** `lexicon-wiki.md` §8, Worker 182 function A()
+**Reference:** `lexicon-deep-dive.md` §8, Worker 182 function A()
 
 **Algorithm:**
 ```python
@@ -368,7 +368,7 @@ def compute_energy(audio, sr, bpm, drop_regions=None) -> int:  # 1-10
 
 ### Step 9: Waveform — `lexicon_waveform.py`
 
-**Reference:** `lexicon-wiki.md` §9, Worker 160
+**Reference:** `lexicon-deep-dive.md` §9, Worker 160
 
 **Constants:**
 ```python
@@ -402,7 +402,7 @@ MIX_FACTOR = 0.5  # blend with previous segment
 
 ### Step 10: Cue points — `lexicon_cues.py`
 
-**Reference:** `lexicon-wiki.md` §7, Worker 182 function M()
+**Reference:** `lexicon-deep-dive.md` §7, Worker 182 function M()
 
 **Depends on:** Step 6 (needs beat positions from BPM module)
 
@@ -496,7 +496,7 @@ def analyze_track(self, track_path: str) -> AnalysisResult:
 
 **Production deps:** normal install includes torch, librosa, DeepRhythm, and Essentia.
 
-**Algorithm sources:** `analysis-pipeline-handoff.md` §§1–6
+**Algorithm sources:** `pipeline-handoff.md` §§1–6
 
 - **BPM:** `DeepRhythmAnalyzer().analyze(path)` — 97% Acc2, ~0.2s/track
 - **Key:** `librosa.chroma_cqt` + Krumhansl-Schmuckler — ~70%, convert to Camelot

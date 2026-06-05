@@ -3,7 +3,7 @@
 LLM-readable component spec. Reference this when implementing UI in any framework.
 Brand 11 (Geist Sans, achromatic). Visual reference: `mockup/brand-11.html`.
 
-Companion to `ui_vision.md` (the *why*) and `ui_components.md` (the build checklist).
+Companion to `vision.md` (the *why*) and `components.md` (the build checklist).
 
 ---
 

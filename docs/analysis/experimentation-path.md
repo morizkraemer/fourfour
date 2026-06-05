@@ -31,7 +31,7 @@
 
 ## Existing Asset: samplebase Benchmark Harness
 
-Benchmarking of audio analysis libraries was completed externally in the **samplebase** project (`~/dev/projects/samplebase`). The results and concrete recommendations are captured in [`analysis-pipeline-handoff.md`](./analysis-pipeline-handoff.md). Key findings:
+Benchmarking of audio analysis libraries was completed externally in the **samplebase** project (`~/dev/projects/samplebase`). The results and concrete recommendations are captured in [`pipeline-handoff.md`](./pipeline-handoff.md). Key findings:
 
 - **BPM:** DeepRhythm is best (~97% Acc2 accuracy). stratum-dsp accuracy still untested vs Rekordbox.
 - **Key:** librosa chroma_cqt + Krumhansl-Schmuckler (~70%). OpenKeyScan is the upgrade path if needed (~85-90%).
@@ -177,7 +177,7 @@ What's still needed (fourfour):
 - [ ] **0.9** Run `stratum-dsp` against the full corpus and record baseline scores
 
 ### Reused from samplebase (benchmarking phase, completed)
-- Library accuracy data and recommendations → captured in `analysis-pipeline-handoff.md`
+- Library accuracy data and recommendations → captured in `pipeline-handoff.md`
 - Python analysis pipeline design (BPM, key, energy, waveform code samples)
 - Embedding backend implementations for Phase 5
 
@@ -431,7 +431,7 @@ Phrase markers visible on CDJ waveform display, sections correspond to actual so
 
 ### Big head start from samplebase
 
-The external benchmark (samplebase) already implemented and compared CLAP backends. The code and results are documented in `analysis-pipeline-handoff.md`. Key findings:
+The external benchmark (samplebase) already implemented and compared CLAP backends. The code and results are documented in `pipeline-handoff.md`. Key findings:
 
 - **MS CLAP** — best for text+audio (MRR 0.667, Hit@5 0.600, 658 MB)
 - **LAION-CLAP** — best for audio→audio (Hit@5 0.791, 1778 MB)
@@ -571,11 +571,11 @@ No Python at runtime. Models downloaded or bundled.
 
 | Component | Source | Status |
 |---|---|---|
-| Library accuracy data | samplebase external benchmark | ✅ In `analysis-pipeline-handoff.md` |
+| Library accuracy data | samplebase external benchmark | ✅ In `pipeline-handoff.md` |
 | Python analysis pipeline design | samplebase external benchmark | ✅ Code samples in handoff doc |
 | CLAP backend implementations | samplebase `benchmark_backends.py` | Available to copy when Phase 5 starts |
 | VectorStore | samplebase `vectorstore.py` | Available to copy when Phase 5 starts |
-| Result directory structure | samplebase pattern | Documented in `benchmark-implementation-plan.md` |
+| Result directory structure | samplebase pattern | Documented in `benchmark-plan.md` |
 
 ---
 

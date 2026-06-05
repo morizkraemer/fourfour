@@ -355,7 +355,7 @@ def preprocess_for_waveform(audio: np.ndarray, sr: int) -> np.ndarray:
 
 ### Option A: Rekordbox master.db + ANLZ (existing plan)
 
-From `benchmark-implementation-plan.md` — read BPM/key from `master.db`, beats from ANLZ files. Requires a Rekordbox USB export.
+From `benchmark-plan.md` — read BPM/key from `master.db`, beats from ANLZ files. Requires a Rekordbox USB export.
 
 **Pros:** Direct comparison to Rekordbox (what DJs actually use).  
 **Cons:** Need Rekordbox installed, need to curate + export a test collection. ANLZ reader still needs to be built in Rust.
@@ -561,7 +561,7 @@ Day 10: Decision + Report
 ├── Generate final recommendation
 ├── Write decision document
 ├── If hybrid wins: define which components from which backend
-└── Update analysis-pipeline-handoff.md with results
+└── Update pipeline-handoff.md with results
 ```
 
 ---
@@ -579,7 +579,7 @@ Day 10: Decision + Report
 
 ### Scenario C: Python stack wins on everything
 
-→ **Ship Python stack** as designed in `analysis-pipeline-handoff.md`.
+→ **Ship Python stack** as designed in `pipeline-handoff.md`.
 → Lexicon's approach informs optimization (12kHz resampling, 128-pt FFT for waveform).
 
 ### Scenario D: Close call

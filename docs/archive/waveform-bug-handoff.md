@@ -226,8 +226,8 @@ console.debug('[player wf]', trackId, {
 ## Related docs
 
 - `docs/session/handoff.md` — general app/session state
-- `docs/player-strip-plan.md` — player waveform architecture
-- `docs/analysis-pipeline-handoff.md` — Python analysis sidecar
+- `docs/player-strip.md` — player waveform architecture
+- `docs/pipeline-handoff.md` — Python analysis sidecar
 - `pioneer-usb-writer/reference-code/PIONEER.md` — PWAV 400-byte format
 
 ---

@@ -1,6 +1,6 @@
 # UI Components & Mockup Checklist
 
-What needs to be designed in Figma. Companion to `ui_vision.md` (the *why*).
+What needs to be designed in Figma. Companion to `vision.md` (the *why*).
 
 Build order: foundations → components → core screens → overlays → edge states → settings.
 

@@ -1,8 +1,13 @@
 # fourfour — Repo Overview
 
+> **Note:** This predates the Svelte `app/` frontend. The crate map, hardware
+> status, and format pipeline below are still accurate; for the current UI see
+> [`../ui/`](../ui/) and [`ui-architecture.md`](ui-architecture.md). Authoritative
+> entrypoint: [`../../AGENTS.md`](../../AGENTS.md).
+
 ## What This Is
 
-An open-source tool for writing Pioneer CDJ-compatible USB drives. Currently in MVP experimental phase — the format writing works on real CDJ-3000 hardware, but the analysis (BPM, key, beats, waveforms) is still basic. Benchmarking of candidate analysis libraries was completed externally (see `docs/analysis-pipeline-handoff.md`).
+An open-source tool for writing Pioneer CDJ-compatible USB drives. Currently in MVP experimental phase — the format writing works on real CDJ-3000 hardware, but the analysis (BPM, key, beats, waveforms) is still basic. Benchmarking of candidate analysis libraries was completed externally (see `docs/pipeline-handoff.md`).
 
 ---
 
@@ -102,10 +107,10 @@ Benchmarking of audio analysis libraries was done **externally** in the sampleba
 
 | File | Lines | What |
 |---|---|---|
-| `docs/analysis-pipeline-handoff.md` | 590 | Authoritative output from external benchmarking. Library picks, accuracy numbers, code samples for every analysis layer (BPM, key, energy, tags, waveform, color, embeddings). |
+| `docs/pipeline-handoff.md` | 590 | Authoritative output from external benchmarking. Library picks, accuracy numbers, code samples for every analysis layer (BPM, key, energy, tags, waveform, color, embeddings). |
 | `docs/experimentation-path.md` | 654 | 6-phase experimentation plan. Phase 0-3 are blocking (benchmark → BPM/key accuracy → waveforms → scale). Phase 4-6 are incremental (phrases → embeddings → stems). |
-| `docs/benchmark-implementation-plan.md` | 788 | Historical reference — original plan for an in-repo Python benchmark harness. Benchmarking happened externally instead. |
-| `docs/tech-stack-reference.md` | 391 | Survey of open-source DJ analysis tools (Essentia, madmom, OpenKeyScan, CLAP, Demucs, MSAF). Options + pain points per layer. |
+| `docs/benchmark-plan.md` | 788 | Historical reference — original plan for an in-repo Python benchmark harness. Benchmarking happened externally instead. |
+| `docs/tech-stack.md` | 391 | Survey of open-source DJ analysis tools (Essentia, madmom, OpenKeyScan, CLAP, Demucs, MSAF). Options + pain points per layer. |
 
 ---
 
@@ -149,7 +154,7 @@ write_usb()                            Add/Update/Replace/Skip/Remove
 
 ## Planned Experiments (separate from the format library)
 
-Benchmarking of analysis libraries was completed externally (samplebase project). The results are in `docs/analysis-pipeline-handoff.md`. **No benchmark code exists in this repo** — only planning docs and the handoff from the external research.
+Benchmarking of analysis libraries was completed externally (samplebase project). The results are in `docs/pipeline-handoff.md`. **No benchmark code exists in this repo** — only planning docs and the handoff from the external research.
 
 The next step is to build a Python analysis CLI based on the handoff doc, then validate against Rekordbox ground truth.
 

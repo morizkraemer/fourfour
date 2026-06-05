@@ -1,51 +1,77 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+Agent entrypoint for the **fourfour** repository. Start here, then follow the
+[Documentation Map](#documentation-map) into `docs/` for anything deeper.
+
+> `CLAUDE.md` is a thin pointer to this file — this is the single source of
+> truth for agent guidance, regardless of which tool you are.
 
 ## What This Is
 
-A Rust library that reads and writes Pioneer CDJ-compatible USB drives without Rekordbox. Monorepo with two crates:
+An open-source tool for writing Pioneer CDJ-compatible USB drives without
+Rekordbox — scan music, analyze it, and export a drive that plays on real
+CDJ hardware. The format library is proven on a CDJ-3000; the desktop UI and
+the analysis pipeline are the active frontier.
 
-- **`pioneer-usb-writer/`** — Pure format library. Scans audio file metadata, writes the Pioneer USB structure (PDB database, OneLibrary SQLCipher database, ANLZ files, artwork, audio). **No audio analysis** — consumers bring their own BPM/key/waveform analyzer and populate the provided types.
-- **`pioneer-test-ui/`** — Throwaway Tauri v2 test harness (vanilla HTML/JS frontend) with a bundled analyzer (stratum-dsp). The real UI will be built separately by a collaborator.
+## Repository Layout
+
+A Cargo workspace (3 Rust crates) plus a Svelte frontend, a Python analysis
+CLI, and prototyping/design assets.
+
+| Path | Lang | What |
+|---|---|---|
+| `pioneer-usb-writer/` | Rust | **Format library.** Scans tags, writes the Pioneer USB structure (PDB, OneLibrary, ANLZ, artwork, audio). No audio analysis — consumers supply `AnalysisResult`. |
+| `pioneer-library/` | Rust | **Persistent library.** SQLite-backed CRUD for tracks/analyses/playlists + USB export & incremental sync. |
+| `pioneer-test-ui/` | Rust | **Tauri v2 shell.** Hosts the Svelte UI (`frontendDist: ../app/dist`), exposes Tauri commands, bundles the reference analyzer (`src/analyzer/`, stratum-dsp). The old vanilla `frontend/` is legacy. |
+| `app/` | Svelte 5 + TS | **The real UI** (`fourfour-app`). Browse, player strip, organize sidebar. Dev server on `:5200`. |
+| `prototyping/` | Svelte | **Design-system playground** (`viewport`). Primitives → modules → screens. See `prototyping/README.md` and its `SKILL.md`. |
+| `analysis/` | Python | **Analysis CLI** — `fourfour-analyze` (BPM/key/waveform/energy/cues) and `fourfour-benchmark`. Uses the Lexicon DSP stack. |
+| `benchmark/` | — | Benchmark datasets and result reports. |
+| `docs/` | — | All planning, architecture, and reference docs. **See `docs/README.md`.** |
 
 ## Build & Run
 
 ```bash
-# Build everything
+# Rust workspace
 cargo build
 
-# Run Tauri test UI (starts Python dev server on :1420)
-cargo tauri dev
-
-# Build Tauri debug .app bundle and open it
+# Desktop app — fast dev loop (rebuilds bundle, kills old instance, relaunches)
 cd pioneer-test-ui && ./dev.sh
+
+# Frontend alone (Vite dev server on :5200)
+cd app && npm run dev          # npm run check  → svelte-check
+
+# Design-system prototyping (viewport on :5180)
+cd prototyping && npm run dev
+
+# Python analysis CLI
+fourfour-analyze <files...>    # fourfour-benchmark for ground-truth runs
 ```
 
-No test suite exists yet. Validation is done against real CDJ-3000 hardware using binary bisection (see `pioneer-usb-writer/reference-code/PIONEER.md`).
+No Rust test suite yet. Format correctness is validated against real CDJ-3000
+hardware by binary bisection — see `pioneer-usb-writer/reference-code/PIONEER.md`.
 
 ## Workspace Cargo.toml
 
-Dev builds optimize DSP/audio dependencies at `opt-level = 3` while keeping app code in debug. This is critical — stratum-dsp is 10-50x slower unoptimized. When adding new symphonia sub-crates, add a corresponding `[profile.dev.package.*]` entry.
+Dev builds optimize DSP/audio deps at `opt-level = 3` while keeping app code in
+debug — **critical**, stratum-dsp is 10–50x slower unoptimized. When adding a
+new symphonia sub-crate, add a matching `[profile.dev.package.*]` entry.
 
 ## Versioning
 
-The app version is defined in **`pioneer-usb-writer/src/lib.rs`** as `pub const VERSION`. It is displayed in the Tauri UI toolbar.
+`pub const VERSION` in `pioneer-usb-writer/src/lib.rs`, shown in the UI toolbar.
 
-## Architecture
+## Architecture: the format pipeline
 
-### Library crate (`pioneer-usb-writer`)
-
-The library is a **format-only crate** — it handles scanning metadata and writing Pioneer's binary formats. It does not perform audio analysis (BPM detection, key detection, waveform generation). Consumers populate the `AnalysisResult` type with their own analyzer and pass it to the writer.
-
-**Pipeline: scan → (external analysis) → write**
+`pioneer-usb-writer` is **format-only** — no BPM/key/waveform detection.
+Consumers fill `AnalysisResult` and hand it to the writer.
 
 ```
-scanner::scan_directory()  →  Vec<Track>             (metadata via lofty)
+scanner::scan_directory()  →  Vec<Track>            (metadata via lofty)
                            ↓
-              [consumer fills AnalysisResult]          (BPM, key, beat grid, waveform)
+              [consumer fills AnalysisResult]         (BPM, key, beat grid, waveform)
                            ↓
-writer::filesystem::write_usb()                       (orchestrates all output)
+writer::filesystem::write_usb()                      (orchestrates all output)
   ├── copies audio to /Contents/{artist}/{file}
   ├── writer::anlz       → ANLZ0000.{DAT,EXT}        (beat grid, waveforms, cues)
   ├── writer::pdb        → export.pdb                 (legacy DeviceSQL database)
@@ -53,87 +79,75 @@ writer::filesystem::write_usb()                       (orchestrates all output)
   └── artwork JPGs       → /PIONEER/Artwork/          (80x80 + 240x240 thumbnails)
 ```
 
-**Key modules:**
+**Key modules** (`pioneer-usb-writer/src`):
 
-- **`models.rs`** — Core types shared across all modules:
-  - `Track` — metadata from tags (title, artist, album, BPM, key, artwork, etc.)
-  - `AnalysisResult` — analysis output: `BeatGrid`, `WaveformPreview`, BPM, key, `CuePoint`s
-  - `Playlist` — named list of track IDs
-  - `ExistingTrack`, `ExistingPlaylist`, `ExistingUsbState` — types for reading back from USB
-- **`scanner.rs`** — Reads tags with lofty. Extracts: title, artist, album, genre, label, remixer, comment, year, disc/track number, artwork bytes. Builds USB-relative paths with sanitized components.
-- **`writer/filesystem.rs`** — Orchestration: copy audio, resize artwork, call anlz + pdb + onelibrary writers.
-- **`writer/pdb.rs`** (~1080 lines) — Generates the legacy DeviceSQL `export.pdb`. 20 table types, multi-page support, binary string encoding (ASCII + UTF-16LE).
-- **`writer/anlz.rs`** (~490 lines) — Generates ANLZ files (.DAT and .EXT). Beat grids, waveform previews, color waveforms, cue points, VBR sections.
-- **`writer/onelibrary.rs`** (~1120 lines) — Generates the OneLibrary `exportLibrary.db` (SQLCipher-encrypted SQLite). 22 tables, static lookups + dynamic data.
-- **`reader/usb.rs`** — Reads back existing USB OneLibrary state (`read_usb_state()`). Re-exported as `pioneer_usb_writer::reader::read_usb_state`.
-- **`reader/masterdb.rs`** — Reads Rekordbox's local `master.db` (SQLCipher key `402fd482...`). Returns `MasterDbImport` with tracks, cue points, playlists, and artwork paths.
+- `models.rs` — shared types: `Track`, `AnalysisResult` (`BeatGrid`, `WaveformPreview`, BPM, key, `CuePoint`s), `Playlist`, `ExistingTrack`/`ExistingUsbState`.
+- `scanner.rs` — lofty tag reads; builds sanitized USB-relative paths.
+- `writer/filesystem.rs` — orchestration; fresh write + incremental sync.
+- `writer/sync.rs` — diff engine (Add/Update/Replace/Skip/Remove vs existing USB).
+- `writer/pdb.rs` (~1100) — legacy DeviceSQL `export.pdb`. 20 table types, multi-page, binary string encoding.
+- `writer/anlz.rs` (~525) — ANLZ `.DAT`/`.EXT`: beat grids, waveforms, color waveforms, cues, VBR sections.
+- `writer/onelibrary.rs` (~900) — OneLibrary `exportLibrary.db` (SQLCipher). 22 tables.
+- `reader/usb.rs` — reads back existing USB OneLibrary state (`read_usb_state()`).
+- `reader/masterdb.rs` — reads Rekordbox `master.db` (SQLCipher). Tracks, cues, playlists, artwork.
 
-### Test UI crate (`pioneer-test-ui`)
+For the UI side (`app/`), read `docs/architecture/ui-architecture.md` and
+`docs/ui/`.
 
-- **`src/analyzer/`** — Audio analysis module (stratum-dsp + symphonia). Decodes audio to mono f32, detects BPM/key/beats, generates 400-byte waveform preview. This is the reference analyzer implementation — not part of the library.
-- `AppState` holds `Vec<Track>` + parallel `Vec<Option<AnalysisResult>>`, wrapped in `Arc<Mutex<_>>`.
-- `analyze_tracks` is async — each track runs via `tokio::task::spawn_blocking` with `catch_unwind` so a panic in DSP code skips the track instead of crashing.
-- Frontend is plain HTML/JS in `pioneer-test-ui/frontend/`. No framework. `window.prompt()` doesn't work in Tauri's WKWebView — use `<dialog>` elements instead.
-- Tauri commands: `scan_directory`, `scan_files`, `analyze_tracks`, `write_usb`, `pick_directory`, `get_mounted_volumes`, `read_usb_state`, `save_state`, `load_state`.
-- UI layout: mirrored split view — Library (tracks | playlists) || (playlists | tracks) USB.
-
-## Using the Library
-
-To use `pioneer-usb-writer` in your own project:
+## Using the library
 
 ```rust
 use pioneer_usb_writer::{reader, scanner, writer, models};
 
-// 1. Scan audio files for metadata
 let tracks = scanner::scan_directory(Path::new("/path/to/music"))?;
-
-// 2. Analyze tracks with YOUR analyzer (not included in this crate)
 let analyses: Vec<models::AnalysisResult> = tracks.iter()
-    .map(|track| your_analyzer::analyze(&track.source_path))
+    .map(|t| your_analyzer::analyze(&t.source_path))   // YOUR analyzer
     .collect();
-
-// 3. Define playlists
-let playlists = vec![models::Playlist {
-    id: 1,
-    name: "My Playlist".to_string(),
-    track_ids: vec![1, 2, 3],
-}];
-
-// 4. Write to USB
-writer::filesystem::write_usb(
-    Path::new("/Volumes/USB"),
-    &tracks,
-    &analyses,
-    &playlists,
-)?;
-
-// 5. Read back USB state (optional)
-let state = reader::read_usb_state(Path::new("/Volumes/USB"))?;
+let playlists = vec![models::Playlist { id: 1, name: "Set".into(), track_ids: vec![1,2,3] }];
+writer::filesystem::write_usb(Path::new("/Volumes/USB"), &tracks, &analyses, &playlists)?;
+let state = reader::read_usb_state(Path::new("/Volumes/USB"))?;   // optional read-back
 ```
 
-The `AnalysisResult` struct you need to populate:
+`AnalysisResult` to populate:
 
 ```rust
 AnalysisResult {
-    beat_grid: BeatGrid { beats: Vec<Beat> },  // bar_position (1-4), time_ms, tempo (BPM*100)
-    waveform: WaveformPreview { data: [u8; 400] },  // 5-bit height + 3-bit whiteness per byte
+    beat_grid: BeatGrid { beats: Vec<Beat> },          // bar_position 1-4, time_ms, tempo (BPM*100)
+    waveform: WaveformPreview { data: [u8; 400] },      // 5-bit height + 3-bit whiteness per byte
     bpm: f64,
-    key: String,       // DJ notation: "1A", "5B", etc.
+    key: String,                                        // DJ notation: "1A", "5B", …
     cue_points: Vec<CuePoint>,
 }
 ```
 
-## Pioneer Format Gotchas
+## Pioneer format gotchas
 
-These are hard-won from hardware testing. See `reference-code/PIONEER.md` for full details.
+Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/PIONEER.md`.
 
-- **Dual database format**: The writer produces both `export.pdb` (legacy DeviceSQL) and `exportLibrary.db` (OneLibrary SQLCipher). Modern CDJs (CDJ-3000X, XDJ-AZ, OPUS-QUAD) prefer OneLibrary; older hardware uses PDB.
-- **OneLibrary encryption**: SQLCipher with key `r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls`. This is Pioneer's standard key (not a security measure — obfuscation only). WAL must be checkpointed after writing.
-- **ANLZ path hash**: CDJ computes the USBANLZ directory path from the USB-relative audio path using a specific hash algorithm. If you get this wrong, the CDJ silently regenerates ANLZ files (creates ANLZ0001.DAT alongside your ANLZ0000.DAT — diff them to debug).
-- **History tables must be populated**: Even for fresh exports, the CDJ requires non-empty history data pages. Three reference binary blobs are embedded via `include_bytes!()`.
-- **PDB page 0 sequence**: Must exceed all data page sequences or CDJ ignores the database.
-- **Columns table (0x10)**: Uses a different page header format — `unknown5` = num_rows instead of the usual 0x0001.
-- **DeviceSQL string encoding**: Length-prefixed, specific byte markers (0x40 for long strings, 0x90 for UTF-16LE). See `encode_string()` in pdb.rs.
-- **PPTH tag in ANLZ**: Path must be null-terminated UTF-16BE, and the tag's `len_path` includes the null terminator bytes.
-- **Color waveforms (PWV3/PWV4/PWV5)**: Currently faked with hardcoded green — no spectral analysis yet.
-- **Album-artist mapping**: Both PDB and OneLibrary use the first artist encountered for each album. Compilations/VA albums will show a single artist.
+- **Dual format**: writer emits both `export.pdb` (legacy) and `exportLibrary.db` (OneLibrary). Modern CDJs (3000X, XDJ-AZ, OPUS-QUAD) prefer OneLibrary; older hardware uses PDB.
+- **OneLibrary encryption**: SQLCipher key `r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls` (Pioneer's standard key — obfuscation, not security). Checkpoint WAL after writing.
+- **ANLZ path hash**: CDJ derives the USBANLZ dir from the USB-relative audio path via a specific hash. Wrong → CDJ silently regenerates ANLZ files (ANLZ0001.DAT appears next to yours — diff to debug).
+- **History tables must be non-empty** even for fresh exports — three reference blobs via `include_bytes!()`.
+- **PDB page 0 sequence** must exceed all data page sequences or the CDJ ignores the DB.
+- **Columns table (0x10)** uses a different page header — `unknown5` = num_rows, not `0x0001`.
+- **DeviceSQL strings**: length-prefixed, byte markers (`0x40` long, `0x90` UTF-16LE). See `encode_string()` in `pdb.rs`.
+- **PPTH tag (ANLZ)**: null-terminated UTF-16BE; `len_path` includes the null terminator bytes.
+- **Color waveforms (PWV3/4/5)**: faked hardcoded green — no spectral analysis yet.
+- **Album-artist mapping**: PDB and OneLibrary use the first artist seen per album. VA/compilations collapse to one artist.
+
+## Working in this repo
+
+- **Branching**: `master` is the trunk. Both devs work close to it, split by area — Rust lib vs `app/`/`prototyping/` UI. Short throwaway branches only; push daily. Never push `master` without the owner's say-so.
+- **UI work**: follow the specs in `docs/ui/` and `prototyping/` rather than inventing new layouts. Use the `ui-prototyping` skill for prototyping changes.
+- **Conventional commits** (`feat:`, `fix:`, `docs:`, …), atomic, one concern each.
+
+## Documentation Map
+
+`docs/README.md` is the full index. Quick links:
+
+- **Architecture** → `docs/architecture/` — `repo-overview.md`, `ui-architecture.md`, `tech-stack.md`
+- **UI specs (current phase)** → `docs/ui/` — `vision.md`, `components.md`, `design-system.md`, `player-strip.md`, `organize-sidebar.md`, `waveform-dynamics.md`
+- **Analysis pipeline (research/plans)** → `docs/analysis/` — `pipeline-handoff.md` (authoritative), `experimentation-path.md`, plus benchmark + Lexicon reverse-engineering
+- **Pioneer format reference** → `pioneer-usb-writer/reference-code/PIONEER.md`
+- **Process** → `docs/process/` — `todo.md`, `lessons.md`
+- **Archive** → `docs/archive/` — superseded handoffs

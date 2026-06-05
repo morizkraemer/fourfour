@@ -21,7 +21,7 @@ _Last updated: 2026-06-04 (evening)_
 - **Search**: header search is visual only.
 - **Curate / USB write flows**: partial (Sync/Wipe when USB volume selected).
 - **Full settings UI**: prototype has `createSettingsPage` (panels artboard); app uses a small modal.
-- **Waveform player strip**: `WaveformRenderer` + rodio playback wired (see `docs/player-strip-plan.md`).
+- **Waveform player strip**: `WaveformRenderer` + rodio playback wired (see `docs/player-strip.md`).
 
 ## Recent UI alignment (this session)
 - Added shared **`Dialog.svelte`** + `dialog-native.css` in `prototyping/viewport/design-system/`; exported from `$ds`.

@@ -1,6 +1,6 @@
 # UI Vision
 
-Design decisions for the production app UI. This is the *why* and the *how it should feel*. Companion to `ui_components.md` (the mockup checklist) and `ui-architecture.md` (technical/framework decisions).
+Design decisions for the production app UI. This is the *why* and the *how it should feel*. Companion to `components.md` (the mockup checklist) and `ui-architecture.md` (technical/framework decisions).
 
 ---
 

@@ -150,7 +150,7 @@ Verify: `cd prototyping && npm run build` (no errors) + eyeball each card vs Pen
 
 ### Review (2026-06-04)
 - Primitives: added `waveform` (Canvas-2D faux peaks) + `keyColor` util + 12 `--ff-key-*` tokens
-  (mirrored in design_system.md). Extended `track-row` with `fav`/`wave`/`cover`/`key` cell types
+  (mirrored in design-system.md). Extended `track-row` with `fav`/`wave`/`cover`/`key` cell types
   (non-breaking: default TRACK_COLUMNS untouched; modules pass their own column set).
 - Modules built (all export a builder for the composite): `module-sidebar` (240w, traffic lights +
   Favorites/Library/Playlists + USB pinned bottom), `module-table` (Pencil column set, 12 rows w/

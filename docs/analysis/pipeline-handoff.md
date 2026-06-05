@@ -633,8 +633,8 @@ Target: `fourfour-analyze ~/Music/dj-library/ --output results.json --parallel 8
 ## Questions? 
 
 Check these docs for deep dives:
-- `fourfour/docs/tech-stack-reference.md` — detailed library options for every component
+- `fourfour/docs/tech-stack.md` — detailed library options for every component
 - `fourfour/docs/experimentation-path.md` — phased build plan
-- `fourfour/docs/benchmark-implementation-plan.md` — how the benchmark harness works
+- `fourfour/docs/benchmark-plan.md` — how the benchmark harness works
 - `samplebase/docs/library-stack.md` — full stack with sizes and decisions
 - `samplebase/docs/research-results/waveform-analysis.md` — waveform pipeline details
