@@ -20,7 +20,7 @@
     splitAction = true,
     renaming = false,
     renameValue = $bindable(''),
-    onSplit,
+    onOpenInPanel,
     onclick,
     ondblclick,
     onRenameCommit,
@@ -39,9 +39,9 @@
     }
   });
 
-  function split(e) {
+  function openInPanel(e) {
     e.stopPropagation();
-    onSplit?.();
+    onOpenInPanel?.();
   }
 
   function handleRenameKeydown(e) {
@@ -99,8 +99,8 @@
     {/if}
 
     {#if count != null}<span class="ff-sbrow__count">{count}</span>{/if}
-    {#if splitAction}
-      <button class="ff-sbrow__action" title="Open in side panel" onclick={split}>
+    {#if onOpenInPanel}
+      <button class="ff-sbrow__action" title="Open in side panel" onclick={openInPanel}>
         <Icon name="columns-2" size={13} />
       </button>
     {/if}

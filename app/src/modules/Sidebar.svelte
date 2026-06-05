@@ -25,7 +25,7 @@
     favoriteSlotFromName,
     canRemoveFavoriteSlot,
   } from '../stores/library.svelte.ts';
-  import { ui } from '../stores/ui.svelte.ts';
+  import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag } from '../stores/dnd.svelte.ts';
 
@@ -64,8 +64,9 @@
 
   async function handleAddPlaylist() {
     const name = defaultPlaylistName();
-    await addPlaylist(name);
+    const playlistId = await addPlaylist(name);
     handleRowClick(name);
+    dockOrganizeTarget({ kind: 'playlist', id: name, label: name, playlistId });
   }
 
   function startPlaylistRename(playlistId, currentName) {
@@ -278,6 +279,7 @@
             count={row.count}
             state={sidebarRowState(row.label, pl?.id)}
             onclick={() => handleRowClick(row.label)}
+            onOpenInPanel={pl ? () => dockOrganizeTarget({ kind: 'playlist', id: pl.name, label: pl.name, playlistId: pl.id }) : undefined}
           />
         </div>
       {/each}
@@ -345,6 +347,7 @@
             onRenameCancel={cancelPlaylistRename}
             onclick={() => handleRowClick(row.label)}
             ondblclick={() => startPlaylistRename(row.id, row.label)}
+            onOpenInPanel={() => dockOrganizeTarget({ kind: 'playlist', id: row.label, label: row.label, playlistId: row.id })}
           />
         </div>
       {/each}
@@ -367,6 +370,7 @@
             status={row.status}
             state={ui.activeSidebarRow === row.path ? 'active' : 'rest'}
             onclick={() => handleRowClick(row.path, true, row.path)}
+            onOpenInPanel={() => dockOrganizeTarget({ kind: 'usb', id: row.path, label: row.label })}
           />
         </div>
       {/each}
