@@ -17,6 +17,7 @@ export type OrganizeTarget = {
 const ORGANIZE_WIDTH_KEY = 'fourfour.organize.width';
 const ORGANIZE_EXPANDED_KEY = 'fourfour.organize.expanded';
 const ORGANIZE_RECENTS_KEY = 'fourfour.organize.recents';
+const ORGANIZE_TARGET_KEY = 'fourfour.organize.target';
 const ORGANIZE_RECENTS_MAX = 8;
 
 /**
@@ -78,6 +79,23 @@ export function initOrganize() {
           .slice(0, ORGANIZE_RECENTS_MAX);
       }
     }
+    const rawT = localStorage.getItem(ORGANIZE_TARGET_KEY);
+    if (rawT) {
+      try {
+        const parsed = JSON.parse(rawT);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          (parsed.kind === 'playlist' || parsed.kind === 'usb') &&
+          typeof parsed.id === 'string' &&
+          typeof parsed.label === 'string'
+        ) {
+          ui.organize.target = parsed as OrganizeTarget;
+        }
+      } catch {
+        /* malformed — leave target null */
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -88,6 +106,11 @@ function persistOrganize() {
     localStorage.setItem(ORGANIZE_WIDTH_KEY, String(ui.organize.width));
     localStorage.setItem(ORGANIZE_EXPANDED_KEY, String(ui.organize.expanded));
     localStorage.setItem(ORGANIZE_RECENTS_KEY, JSON.stringify(ui.organize.recentPlaylistIds));
+    if (ui.organize.target === null) {
+      localStorage.removeItem(ORGANIZE_TARGET_KEY);
+    } else {
+      localStorage.setItem(ORGANIZE_TARGET_KEY, JSON.stringify(ui.organize.target));
+    }
   } catch {
     /* ignore */
   }
@@ -139,6 +162,47 @@ export function setOrganizeWidth(px: number) {
 /** Persist the current width — call on pointer-up after a resize drag. */
 export function commitOrganizeWidth() {
   persistOrganize();
+}
+
+/**
+ * Validate the restored organize target against live library data.
+ * Call once after the library has finished loading (playlists + volumes populated).
+ * - playlist target: keep only if a matching playlist still exists; refresh label/id.
+ * - usb target: keep only if the volume path is still mounted.
+ * Clears + persists when the target is stale.
+ */
+export function reconcileOrganizeTarget(
+  playlists: Array<{ id: number; name: string }>,
+  volumes: string[],
+) {
+  const target = ui.organize.target;
+  if (!target) return; // nothing to reconcile
+
+  if (target.kind === 'playlist') {
+    // Match by numeric playlistId first, then fall back to name match via id field.
+    const match =
+      (typeof target.playlistId === 'number'
+        ? playlists.find((p) => p.id === target.playlistId)
+        : null) ?? playlists.find((p) => p.name === target.id);
+    if (!match) {
+      ui.organize.target = null;
+      persistOrganize();
+    } else if (match.id !== target.playlistId || match.name !== target.id || match.name !== target.label) {
+      // Refresh stale label/id in case the playlist was renamed.
+      ui.organize.target = {
+        kind: 'playlist',
+        id: match.name,
+        label: match.name,
+        playlistId: match.id,
+      };
+      persistOrganize();
+    }
+  } else if (target.kind === 'usb') {
+    if (!volumes.includes(target.id)) {
+      ui.organize.target = null;
+      persistOrganize();
+    }
+  }
 }
 
 // ── Other UI state ────────────────────────────────────────────────────────────

@@ -30,6 +30,7 @@
     focusListFilter,
     clearListFilter,
     initOrganize,
+    reconcileOrganizeTarget,
   } from './stores/ui.svelte.ts';
   import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
   import { importIntoSource } from './menus/context-menus.ts';
@@ -124,7 +125,9 @@
   }
 
   onMount(() => {
-    initLibrary();
+    initLibrary().then(() => {
+      reconcileOrganizeTarget(library.playlists, library.volumes);
+    });
     initOrganize();
     void syncPlaybackAudioConfig();
     window.addEventListener('keydown', onGlobalKeyDown);
