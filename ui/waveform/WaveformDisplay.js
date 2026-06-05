@@ -21,11 +21,26 @@ const COLOR_BASS = 'rgb(30,  100, 255)';
 const COLOR_MID  = 'rgb(255, 140,   0)';
 const COLOR_HIGH = 'rgb(255, 255, 255)';
 
-// Given per-pixel overall amplitude + band weights (0-255, already relative
-// to the dominant band), return absolute amplitudes for each band.
+// amp: peak loudness 0–1 (1.0 = 0 dBFS). r/g/b: relative band weights 0–1.
 function bandAmps(amp, bassW, midW, highW) {
-    const s = amp / 255;
-    return [bassW * s, midW * s, highW * s];
+    return [bassW * amp, midW * amp, highW * amp];
+}
+
+function lerpColumn(d0, d1, t) {
+    return {
+        amp: d0.amp + (d1.amp - d0.amp) * t,
+        r: d0.r + (d1.r - d0.r) * t,
+        g: d0.g + (d1.g - d0.g) * t,
+        b: d0.b + (d1.b - d0.b) * t,
+    };
+}
+
+function sampleColumnAtFrac(data, N, frac) {
+    const clamped = Math.max(0, Math.min(1, frac));
+    const f = clamped * N;
+    if (f >= N - 1) return data[N - 1];
+    const i0 = Math.floor(f);
+    return lerpColumn(data[i0], data[i0 + 1], f - i0);
 }
 
 // Apply an envelope follower: instant attack, zoom-invariant exponential decay.
@@ -233,7 +248,7 @@ export default class WaveformDisplay {
             // Bass (blue) fills from the bottom, mid (orange) stacks on top,
             // high (white) at the tip. Total bar height = overall amplitude.
             // Color fractions = relative band contributions, normalised to sum to 1.
-            const scale = h * 0.95;
+            const scale = h;
 
             for (let px = 0; px < w; px++) {
                 const iStart = Math.floor(px * data.length / w);
@@ -297,7 +312,7 @@ export default class WaveformDisplay {
             const amplitude = (byte & 0x1F) / 31.0;
             const whiteness = ((byte >> 5) & 0x07) / 7.0;
             const brightness = Math.round(100 + whiteness * 155);
-            const barH = amplitude * h * 0.95;
+            const barH = amplitude * h;
             if (barH < 0.5) continue;
             ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.7)`;
             ctx.fillRect(px, h - barH, 1, barH);
@@ -358,52 +373,38 @@ export default class WaveformDisplay {
         const midA  = new Float32Array(totalPx);
         const highA = new Float32Array(totalPx);
 
-        // ── Data → pixel  (iterate entries, not pixels) ─────────────
-        // Each data entry maps to a deterministic pixel position.
-        // On pan ALL entries shift by the same pixel offset, so the
-        // waveform shape slides without morphing.
-        const pixelScale = w / visibleFrac;          // px per track-fraction
-        const iFirst = Math.max(0, Math.floor(extStartFrac * N));
-        const iLast  = Math.min(N - 1, Math.ceil(endFrac * N));
+        const pixelScale = w / visibleFrac;
 
-        if (entriesPerPixel < 1) {
-            // Zoomed in — each entry spans multiple pixels.
-            // Fill each entry's pixel range with its amplitude.
-            for (let i = iFirst; i <= iLast; i++) {
-                const px0 = Math.max(0, Math.floor((i / N - extStartFrac) * pixelScale));
-                const px1 = Math.min(totalPx, Math.ceil(((i + 1) / N - extStartFrac) * pixelScale));
-                const d = data[i];
+        for (let px = 0; px < totalPx; px++) {
+            const fracLo = extStartFrac + px / pixelScale;
+            const fracHi = extStartFrac + (px + 1) / pixelScale;
+
+            if (entriesPerPixel < 1) {
+                const d = sampleColumnAtFrac(data, N, (fracLo + fracHi) * 0.5);
                 const [b, m, hi] = bandAmps(d.amp, d.r, d.g, d.b);
-                for (let px = px0; px < px1; px++) {
-                    bassA[px] = b;
-                    midA[px]  = m;
-                    highA[px] = hi;
+                bassA[px] = b;
+                midA[px]  = m;
+                highA[px] = hi;
+            } else {
+                const iStart = Math.max(0, Math.floor(fracLo * N));
+                const iEnd = Math.min(N - 1, Math.max(iStart, Math.ceil(fracHi * N) - 1));
+                for (let i = iStart; i <= iEnd; i++) {
+                    const d = data[i];
+                    const [b, m, hi] = bandAmps(d.amp, d.r, d.g, d.b);
+                    if (b > bassA[px]) bassA[px] = b;
+                    if (m > midA[px]) midA[px] = m;
+                    if (hi > highA[px]) highA[px] = hi;
                 }
-            }
-        } else {
-            // Zoomed out — multiple entries per pixel.
-            // MAX preserves transient peaks and is far more stable than
-            // averaging when entries cross pixel boundaries on pan.
-            for (let i = iFirst; i <= iLast; i++) {
-                const px = Math.floor((i / N - extStartFrac) * pixelScale);
-                if (px < 0 || px >= totalPx) continue;
-                const d = data[i];
-                const [b, m, hi] = bandAmps(d.amp, d.r, d.g, d.b);
-                if (b > bassA[px]) bassA[px] = b;
-                if (m > midA[px]) midA[px] = m;
-                if (hi > highA[px]) highA[px] = hi;
             }
         }
 
-        // ── Envelope (full range including lead-in) ─────────────────
-        // Fast decay to match Rekordbox's sharp transient spikes
-        const bassE = applyEnvelope(bassA, entriesPerPixel, 0.65);
-        const midE  = applyEnvelope(midA,  entriesPerPixel, 0.65);
-        const highE = applyEnvelope(highA, entriesPerPixel, 0.65);
+        const bassE = applyEnvelope(bassA, 1, 0.86);
+        const midE  = applyEnvelope(midA,  1, 0.86);
+        const highE = applyEnvelope(highA, 1, 0.86);
 
         // ── Draw visible portion only (skip lead-in buffer) ─────────
         const yCenter = h / 2;
-        const scale = h / 2 * 0.95;
+        const scale = h / 2;
         drawBand(ctx, bassE.subarray(leadPx, leadPx + w), w, yCenter, scale, COLOR_BASS);
         drawBand(ctx, midE.subarray(leadPx, leadPx + w),  w, yCenter, scale, COLOR_MID);
         drawBand(ctx, highE.subarray(leadPx, leadPx + w), w, yCenter, scale, COLOR_HIGH);
@@ -428,7 +429,7 @@ export default class WaveformDisplay {
             const whiteness = ((byte >> 5) & 0x07) / 7.0;
             const brightness = Math.round(100 + whiteness * 155);
 
-            const halfBar = amplitude * (h / 2) * 0.95;
+            const halfBar = amplitude * (h / 2);
             const yTop = h / 2 - halfBar;
             const yBottom = h / 2 + halfBar;
 
@@ -445,11 +446,9 @@ export default class WaveformDisplay {
     _renderBeatGrid(ctx, w, h, startFrac, endFrac) {
         const beats = this._data?.beats;
         const durationMs = this._data?.duration_ms;
-        const bpm = this._data?.bpm;
         if (!beats || beats.length === 0 || !durationMs) return;
 
         let barNumber = 0;
-        let firstBeatDrawn = false;
 
         for (const beat of beats) {
             const frac = beat.time_ms / durationMs;
@@ -459,8 +458,6 @@ export default class WaveformDisplay {
             const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
             const isBar = beat.bar_position === 1;
             const isPhrase = isBar && barNumber % 4 === 1;
-            const isFirst = !firstBeatDrawn && isBar;
-            if (isBar) firstBeatDrawn = true;
 
             if (!isBar) {
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
@@ -487,22 +484,6 @@ export default class WaveformDisplay {
                 ctx.fillRect(x - labelW - 2, 0, labelW + 2, fontSize + 4);
                 ctx.fillStyle = isPhrase ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.6)';
                 ctx.fillText(label, x - 2, fontSize + 2);
-
-                // First beat BPM pill
-                if (isFirst && bpm) {
-                    const bpmLabel = `${bpm.toFixed(2)} BPM`;
-                    ctx.font = '10px system-ui';
-                    const pillW = ctx.measureText(bpmLabel).width + 8;
-                    const pillH = 16;
-                    const pillY = h - pillH - 2;
-                    ctx.fillStyle = '#5ae168';
-                    ctx.beginPath();
-                    ctx.roundRect(x, pillY, pillW, pillH, [0, 3, 3, 0]);
-                    ctx.fill();
-                    ctx.fillStyle = '#000';
-                    ctx.textAlign = 'left';
-                    ctx.fillText(bpmLabel, x + 4, pillY + 11);
-                }
             }
         }
     }

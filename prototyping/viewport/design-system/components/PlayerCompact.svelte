@@ -1,9 +1,8 @@
 <script>
   // Compact player (Svelte port of player-compact.js). The full-width resting
-  // player: cue + play, track meta, BPM nudge + key toggle, times, expand, and a
+  // player: cue + play, track meta, KEY/BPM nudges, times, expand, and a
   // CSS-bar waveform with played overlay / playhead / hot-cue markers.
   import './player-compact.css';
-  import Button from './Button.svelte';
   import Nudge from './Nudge.svelte';
   import WaveformView from './WaveformView.svelte';
 
@@ -30,7 +29,7 @@
     onCueDown,
     onCueUp,
     onBpmChange,
-    onKeyToggle,
+    onKeyChange,
     onExpand,
   } = $props();
 
@@ -84,12 +83,7 @@
       </div>
       <div class="ff-player-compact__right-toggles">
         <div class="ff-player-compact__bpm-key-group">
-          <Button
-            label={key}
-            variant="default"
-            size="compact"
-            class="ff-player-compact__key-btn"
-            onclick={stop(onKeyToggle)} />
+          <Nudge value={key} label="KEY" onChange={onKeyChange} variant="compact" />
           <Nudge value={bpm} label="BPM" onChange={onBpmChange} variant="compact" />
         </div>
         <div class="ff-player-compact__times-group">

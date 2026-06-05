@@ -228,7 +228,6 @@ export const library = $state({
         rows: [
           { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: this.tracks.length },
           { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: this.tracks.filter(t => t.raw?.tempo > 0).length },
-          { kind: 'leaf', icon: 'disc',     label: 'Unfiled',         count: this.tracks.filter(t => t.raw?.tempo === 0).length },
         ],
       },
       playlists: {
@@ -297,9 +296,6 @@ export function tracksForSidebarSource(source: string | null | undefined) {
   }
   if (active === 'Recently Added') {
     return library.tracks.filter((t) => t.raw?.tempo > 0);
-  }
-  if (active === 'Unfiled') {
-    return library.tracks.filter((t) => t.raw?.tempo === 0);
   }
   if (library.volumes.includes(active)) {
     return library.usbTracks;
@@ -575,7 +571,6 @@ export function playlistForSidebarSource(source: string | null | undefined) {
     !active ||
     active === 'All Tracks' ||
     active === 'Recently Added' ||
-    active === 'Unfiled' ||
     library.volumes.includes(active)
   ) {
     return null;

@@ -4,6 +4,9 @@
 
   let { left = 0, right = 0, segments = 16, label = 'MASTER' } = $props();
 
+  /** Ignore sub-threshold bleed so idle meters stay dark. */
+  const LEVEL_FLOOR = 0.06;
+
   function zone(i) {
     const frac = i / segments;
     if (frac >= 0.85) return 'danger';
@@ -11,8 +14,14 @@
     return 'green';
   }
 
-  let litLeft = $derived(Math.round(Math.max(0, Math.min(1, left)) * segments));
-  let litRight = $derived(Math.round(Math.max(0, Math.min(1, right)) * segments));
+  function litCount(level) {
+    const v = Math.max(0, Math.min(1, level));
+    if (v < LEVEL_FLOOR) return 0;
+    return Math.round(v * segments);
+  }
+
+  let litLeft = $derived(litCount(left));
+  let litRight = $derived(litCount(right));
 </script>
 
 <div class="ff-meter">

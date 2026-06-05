@@ -1,9 +1,26 @@
 /**
- * table-columns.svelte.ts — Column order, visibility, width, and sort state.
- * Persisted to localStorage under fourfour.tableColumns.v1
+ * table-columns.svelte.ts — Column layouts per list context.
+ * Persisted to localStorage under fourfour.tableColumns.v3
+ *
+ * Layout kinds:
+ *   library  — All Tracks, Recently Added
+ *   playlist — named playlists
+ *   usb      — mounted USB volumes
+ *   split    — right-hand side-by-side panel only
  */
 
-const STORAGE_KEY = 'fourfour.tableColumns.v1';
+import {
+  minWidthForColumn,
+  measureColumnContentWidth,
+} from '../../../prototyping/viewport/design-system/utils/column-layout.js';
+import { library, playlistByName } from './library.svelte.ts';
+
+const STORAGE_KEY = 'fourfour.tableColumns.v3';
+const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
+
+export type LayoutKind = 'library' | 'playlist' | 'usb' | 'split';
+
+export const LAYOUT_KINDS: LayoutKind[] = ['library', 'playlist', 'usb', 'split'];
 
 export type TableColumn = {
   key: string;
@@ -16,12 +33,18 @@ export type TableColumn = {
   hidden?: boolean;
 };
 
+export type TableLayout = {
+  columns: TableColumn[];
+  sortKey: string | null;
+  sortDir: 'asc' | 'desc';
+};
+
 const DEFAULT_COLUMNS: TableColumn[] = [
   { key: 'fav', label: 'FAV', width: 20 },
   { key: 'index', label: '#', width: 28 },
   { key: 'wave', label: 'PREVIEW', width: 120 },
   { key: 'cover', label: '', width: 18 },
-  { key: 'title', label: 'TITLE', flex: true, minWidth: 160 },
+  { key: 'title', label: 'TITLE', width: 180 },
   { key: 'artist', label: 'ARTIST', width: 180 },
   { key: 'label', label: 'LABEL', width: 130 },
   { key: 'bpm', label: 'BPM', width: 52, align: 'right' },
@@ -46,39 +69,122 @@ export const ALL_COLUMN_KEYS: { key: string; label: string }[] = [
   { key: 'time', label: 'Time' },
 ];
 
-export const tableColumns = $state({
-  columns: DEFAULT_COLUMNS.map(c => ({ ...c })) as TableColumn[],
-  sortKey: null as string | null,
-  sortDir: 'asc' as 'asc' | 'desc',
-});
+function defaultLayout(): TableLayout {
+  return {
+    columns: DEFAULT_COLUMNS.map(c => normalizeColumn({ ...c })),
+    sortKey: null,
+    sortDir: 'asc',
+  };
+}
+
+function emptyLayouts(): Record<LayoutKind, TableLayout> {
+  return {
+    library: defaultLayout(),
+    playlist: defaultLayout(),
+    usb: defaultLayout(),
+    split: defaultLayout(),
+  };
+}
+
+export const tableLayouts = $state(emptyLayouts());
+
+/** Resolve which persisted layout profile applies to a list panel. */
+export function resolveLayoutKind(
+  sourceId: string | null | undefined,
+  splitCompanion = false,
+): LayoutKind {
+  if (splitCompanion) return 'split';
+  const source = sourceId ?? 'All Tracks';
+  if (library.volumes.includes(source)) return 'usb';
+  if (playlistByName(source)) return 'playlist';
+  return 'library';
+}
+
+export function getLayout(kind: LayoutKind): TableLayout {
+  return tableLayouts[kind];
+}
+
+let initialized = false;
 
 export function initTableColumns() {
+  if (initialized) return;
+  initialized = true;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      for (const legacyKey of LEGACY_STORAGE_KEYS) {
+        raw = localStorage.getItem(legacyKey);
+        if (raw) break;
+      }
+    }
     if (!raw) return;
+
     const saved = JSON.parse(raw);
+    if (saved.layouts && typeof saved.layouts === 'object') {
+      for (const kind of LAYOUT_KINDS) {
+        const entry = saved.layouts[kind];
+        if (entry && Array.isArray(entry.columns)) {
+          tableLayouts[kind] = {
+            columns: mergeSavedColumns(entry.columns),
+            sortKey: entry.sortKey ?? null,
+            sortDir: entry.sortDir === 'desc' ? 'desc' : 'asc',
+          };
+          syncSortIndicators(kind);
+        }
+      }
+      persist();
+      return;
+    }
+
+    // Migrate v1/v2 single global layout → seed all kinds from the same saved prefs.
     if (Array.isArray(saved.columns)) {
-      tableColumns.columns = mergeSavedColumns(saved.columns);
+      const migrated = {
+        columns: mergeSavedColumns(saved.columns),
+        sortKey: saved.sortKey ?? null,
+        sortDir: saved.sortDir === 'desc' ? 'desc' : 'asc',
+      } as TableLayout;
+      for (const kind of LAYOUT_KINDS) {
+        tableLayouts[kind] = {
+          columns: migrated.columns.map(c => ({ ...c })),
+          sortKey: migrated.sortKey,
+          sortDir: migrated.sortDir,
+        };
+        syncSortIndicators(kind);
+      }
+      persist();
     }
-    if (saved.sortKey) tableColumns.sortKey = saved.sortKey;
-    if (saved.sortDir === 'asc' || saved.sortDir === 'desc') {
-      tableColumns.sortDir = saved.sortDir;
-    }
-    syncSortIndicators();
   } catch {
     /* ignore corrupt prefs */
   }
 }
 
-function syncSortIndicators() {
-  for (const col of tableColumns.columns) {
-    if (col.key === tableColumns.sortKey) {
-      col.sort = tableColumns.sortDir;
+function syncSortIndicators(kind: LayoutKind) {
+  const layout = tableLayouts[kind];
+  for (const col of layout.columns) {
+    if (col.key === layout.sortKey) {
+      col.sort = layout.sortDir;
     } else {
       delete col.sort;
     }
   }
-  tableColumns.columns = [...tableColumns.columns];
+  layout.columns = [...layout.columns];
+  tableLayouts[kind] = { ...layout };
+}
+
+function defaultWidthForKey(key: string): number {
+  const def = DEFAULT_COLUMNS.find(d => d.key === key) ?? extraColumnDef(key);
+  return def?.width ?? 100;
+}
+
+/** Flex columns only set a resize floor — convert to fixed width so drag actually changes size. */
+function normalizeColumn(col: TableColumn): TableColumn {
+  const floor = minWidthForColumn(col.key);
+  const { flex: _flex, minWidth, ...rest } = col;
+  const width = Math.max(
+    floor,
+    col.width ?? (col.flex ? minWidth : undefined) ?? defaultWidthForKey(col.key),
+  );
+  return { ...rest, width };
 }
 
 function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
@@ -88,11 +194,11 @@ function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
     const def = DEFAULT_COLUMNS.find(d => d.key === s.key)
       ?? extraColumnDef(s.key);
     if (def) {
-      const merged = { ...def, ...s, hidden: s.hidden ?? false };
-      if (merged.flex && merged.minWidth == null && def.minWidth != null) {
-        merged.minWidth = def.minWidth;
-      }
-      ordered.push(merged);
+      ordered.push(normalizeColumn({
+        ...def,
+        ...s,
+        hidden: s.hidden ?? false,
+      }));
     }
   }
   for (const def of DEFAULT_COLUMNS) {
@@ -100,7 +206,7 @@ function mergeSavedColumns(saved: TableColumn[]): TableColumn[] {
   }
   for (const extra of ALL_COLUMN_KEYS) {
     if (!ordered.some(c => c.key === extra.key) && byKey.has(extra.key)) {
-      ordered.push({ ...extraColumnDef(extra.key)!, ...byKey.get(extra.key)! });
+      ordered.push(normalizeColumn({ ...extraColumnDef(extra.key)!, ...byKey.get(extra.key)! }));
     }
   }
   return ordered;
@@ -126,129 +232,153 @@ function persist() {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({
-        columns: tableColumns.columns,
-        sortKey: tableColumns.sortKey,
-        sortDir: tableColumns.sortDir,
-      })
+      JSON.stringify({ layouts: tableLayouts }),
     );
   } catch {
     /* quota / private mode */
   }
 }
 
-export function visibleColumns(): TableColumn[] {
-  return tableColumns.columns.filter(c => !c.hidden);
+export function visibleColumns(kind: LayoutKind): TableColumn[] {
+  return tableLayouts[kind].columns.filter(c => !c.hidden);
 }
 
-export function moveColumn(dragKey: string, targetKey: string) {
-  const cols = tableColumns.columns;
+export function moveColumn(
+  kind: LayoutKind,
+  dragKey: string,
+  targetKey: string,
+  insertBefore = true,
+) {
+  const cols = tableLayouts[kind].columns;
   const from = cols.findIndex(c => c.key === dragKey);
-  const to = cols.findIndex(c => c.key === targetKey);
+  let to = cols.findIndex(c => c.key === targetKey);
   if (from < 0 || to < 0 || from === to) return;
+  if (!insertBefore) to += 1;
   const [item] = cols.splice(from, 1);
+  if (from < to) to -= 1;
   cols.splice(to, 0, item);
-  tableColumns.columns = [...cols];
+  tableLayouts[kind] = { ...tableLayouts[kind], columns: [...cols] };
   persist();
 }
 
-export function setColumnHidden(key: string, hidden: boolean) {
-  const col = tableColumns.columns.find(c => c.key === key);
+export function setColumnHidden(kind: LayoutKind, key: string, hidden: boolean) {
+  const cols = tableLayouts[kind].columns;
+  const col = cols.find(c => c.key === key);
   if (!col) {
     const def = extraColumnDef(key);
     if (!def) return;
-    tableColumns.columns.push({ ...def, hidden });
+    cols.push({ ...def, hidden });
   } else {
     col.hidden = hidden;
   }
-  tableColumns.columns = [...tableColumns.columns];
+  tableLayouts[kind] = { ...tableLayouts[kind], columns: [...cols] };
   persist();
 }
 
-export function toggleColumnVisibility(key: string) {
-  let col = tableColumns.columns.find(c => c.key === key);
+export function toggleColumnVisibility(kind: LayoutKind, key: string) {
+  const cols = tableLayouts[kind].columns;
+  let col = cols.find(c => c.key === key);
   if (!col) {
     const def = extraColumnDef(key);
     if (!def) return;
     col = { ...def, hidden: false };
-    tableColumns.columns.push(col);
+    cols.push(col);
   } else {
     col.hidden = !col.hidden;
   }
-  tableColumns.columns = [...tableColumns.columns];
+  tableLayouts[kind] = { ...tableLayouts[kind], columns: [...cols] };
   persist();
 }
 
-export function setColumnWidth(key: string, width: number) {
-  const col = tableColumns.columns.find(c => c.key === key);
+export function setColumnWidth(
+  kind: LayoutKind,
+  key: string,
+  width: number,
+  save = true,
+) {
+  const cols = tableLayouts[kind].columns;
+  const col = cols.find(c => c.key === key);
   if (!col) return;
-  const min = minWidthForKey(key);
-  const w = Math.round(Math.max(min, width));
-  if (col.flex) {
-    col.minWidth = w;
-  } else {
-    col.width = w;
-  }
-  tableColumns.columns = [...tableColumns.columns];
+  const w = Math.round(Math.max(minWidthForColumn(key), width));
+  delete col.flex;
+  delete col.minWidth;
+  col.width = w;
+  tableLayouts[kind] = { ...tableLayouts[kind], columns: [...cols] };
+  if (save) persist();
+}
+
+export function fitColumnToContent(
+  kind: LayoutKind,
+  key: string,
+  rootEl: HTMLElement | null,
+) {
+  const width = measureColumnContentWidth(key, rootEl, visibleColumns(kind));
+  setColumnWidth(kind, key, width);
+}
+
+export function resetColumns(kind: LayoutKind) {
+  tableLayouts[kind] = defaultLayout();
   persist();
 }
 
-function minWidthForKey(key: string): number {
-  const mins: Record<string, number> = {
-    fav: 20,
-    index: 28,
-    wave: 72,
-    cover: 18,
-    title: 96,
-    artist: 72,
-    label: 64,
-    album: 72,
-    genre: 64,
-    year: 40,
-    bpm: 44,
-    key: 32,
-    time: 44,
+export function setSort(kind: LayoutKind, key: string) {
+  const layout = tableLayouts[kind];
+  if (layout.sortKey === key) {
+    layout.sortDir = layout.sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    layout.sortKey = key;
+    layout.sortDir = 'asc';
+  }
+  syncSortIndicators(kind);
+  persist();
+}
+
+export function clearSort(kind: LayoutKind) {
+  tableLayouts[kind] = {
+    ...tableLayouts[kind],
+    sortKey: null,
+    sortDir: 'asc',
   };
-  return mins[key] ?? 24;
-}
-
-export function resetColumns() {
-  tableColumns.columns = DEFAULT_COLUMNS.map(c => ({ ...c }));
-  tableColumns.sortKey = null;
-  tableColumns.sortDir = 'asc';
-  persist();
-}
-
-export function setSort(key: string) {
-  if (tableColumns.sortKey === key) {
-    tableColumns.sortDir = tableColumns.sortDir === 'asc' ? 'desc' : 'asc';
-  } else {
-    tableColumns.sortKey = key;
-    tableColumns.sortDir = 'asc';
-  }
-  syncSortIndicators();
-  persist();
-}
-
-export function clearSort() {
-  tableColumns.sortKey = null;
-  tableColumns.sortDir = 'asc';
-  syncSortIndicators();
+  syncSortIndicators(kind);
   persist();
 }
 
 /** Sort track rows for display (does not mutate library order). */
-export function sortTracks<T extends Record<string, unknown>>(tracks: T[]): T[] {
-  const key = tableColumns.sortKey;
+export function sortTracks<T extends Record<string, unknown>>(
+  tracks: T[],
+  kind: LayoutKind,
+): T[] {
+  const key = tableLayouts[kind].sortKey;
   if (!key) return tracks;
-  const dir = tableColumns.sortDir === 'asc' ? 1 : -1;
+  const dir = tableLayouts[kind].sortDir === 'asc' ? 1 : -1;
   return [...tracks].sort((a, b) => {
+    if (key === 'fav') return compareFav(a, b, dir);
     const av = sortValue(a, key);
     const bv = sortValue(b, key);
     if (av < bv) return -1 * dir;
     if (av > bv) return 1 * dir;
     return 0;
   });
+}
+
+function favSlot(track: Record<string, unknown>): number | null {
+  const n = track.fav;
+  return typeof n === 'number' && n > 0 ? n : null;
+}
+
+function compareFav(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>,
+  dir: number,
+): number {
+  const af = favSlot(a);
+  const bf = favSlot(b);
+  if (af === null && bf === null) return 0;
+  if (af === null) return 1;
+  if (bf === null) return -1;
+  if (af < bf) return -1 * dir;
+  if (af > bf) return 1 * dir;
+  return 0;
 }
 
 function sortValue(track: Record<string, unknown>, key: string): string | number {

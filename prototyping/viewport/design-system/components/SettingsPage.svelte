@@ -66,8 +66,7 @@
         class="ff-settings-page__pane-tab-content"
         class:ff-settings-page__pane-tab-content--active={activeKey === tabKey}
       >
-        <h3 class="ff-settings-page__pane-heading">{sec.label}</h3>
-        <p class="ff-settings-page__pane-sub">Configure settings for {sec.label}</p>
+        <h2 class="ff-settings-page__pane-heading">{sec.label}</h2>
         <div class="ff-settings-page__fields-container">
           {#each sec.items as field (field.title)}
             <div class="ff-settings-page__field">

@@ -4,23 +4,35 @@
   //   columns: [{ label, width?, flex?, align?, sort?:'asc'|'desc', key? }]
   import './column-header.css';
   import Icon from './Icon.svelte';
-  import { columnCellStyle } from '../utils/column-layout.js';
+  import { columnCellStyle, minWidthForColumn } from '../utils/column-layout.js';
 
   let {
     columns = [],
     columnDragKey = null,
     columnDropKey = null,
+    columnDropBefore = true,
     onColumnContextMenu,
     onColumnClick,
     onColumnReorder,
     onColumnDragChange,
     onColumnResize,
+    onColumnAutoFit,
   } = $props();
 
+  let headerEl = $state(null);
   let resizeCol = null;
   let resizeCell = null;
   let resizeStartX = 0;
   let resizeStartWidth = 0;
+  let resizePreview = $state(null);
+  let dropLineLeft = $state(null);
+
+  function cellStyle(col) {
+    if (resizePreview?.key === col.key) {
+      return columnCellStyle(col, { width: resizePreview.width });
+    }
+    return columnCellStyle(col);
+  }
 
   function startResize(e, col) {
     if (!col.key || e.button !== 0) return;
@@ -33,6 +45,7 @@
     resizeCell = cell;
     resizeStartX = e.clientX;
     resizeStartWidth = cell.getBoundingClientRect().width;
+    resizePreview = { key: col.key, width: resizeStartWidth };
 
     cell.setPointerCapture?.(e.pointerId);
     window.addEventListener('pointermove', handleResize);
@@ -43,19 +56,16 @@
 
   function handleResize(e) {
     if (!resizeCol || !resizeCell) return;
+    const min = minWidthForColumn(resizeCol.key);
     const deltaX = e.clientX - resizeStartX;
-    const next = Math.round(resizeStartWidth + deltaX);
-    if (resizeCol.flex) {
-      resizeCol.minWidth = next;
-    } else {
-      resizeCol.width = next;
-    }
+    const next = Math.max(min, Math.round(resizeStartWidth + deltaX));
+    resizePreview = { key: resizeCol.key, width: next };
+    onColumnResize?.(resizeCol.key, next, false);
   }
 
   function stopResize(e) {
-    if (resizeCol?.key && resizeCell) {
-      const width = resizeCell.getBoundingClientRect().width;
-      onColumnResize?.(resizeCol.key, width);
+    if (resizeCol?.key && resizePreview?.key === resizeCol.key) {
+      onColumnResize?.(resizeCol.key, resizePreview.width, true);
     }
     if (resizeCell && e?.pointerId != null) {
       try {
@@ -66,10 +76,28 @@
     }
     resizeCol = null;
     resizeCell = null;
+    resizePreview = null;
     window.removeEventListener('pointermove', handleResize);
     window.removeEventListener('pointerup', stopResize);
     window.removeEventListener('pointercancel', stopResize);
     document.body.classList.remove('ff-colh--resizing');
+  }
+
+  function autoFitColumn(e, col) {
+    if (!col.key) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onColumnAutoFit?.(col.key);
+  }
+
+  function updateDropLine(cell, before) {
+    if (!headerEl || !cell) {
+      dropLineLeft = null;
+      return;
+    }
+    const cellRect = cell.getBoundingClientRect();
+    const headerRect = headerEl.getBoundingClientRect();
+    dropLineLeft = (before ? cellRect.left : cellRect.right) - headerRect.left;
   }
 
   function onLabelPointerDown(e, col) {
@@ -79,19 +107,28 @@
     const startKey = col.key;
     let dragging = false;
     let dropKey = null;
+    let insertBefore = true;
 
     function onMove(ev) {
       if (!dragging && (Math.abs(ev.clientX - e.clientX) > 4 || Math.abs(ev.clientY - e.clientY) > 4)) {
         dragging = true;
-        onColumnDragChange?.(startKey, null);
+        onColumnDragChange?.(startKey, null, true);
+        dropLineLeft = null;
       }
       if (!dragging) return;
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       const cell = el?.closest?.('[data-col-key]');
       const hoverKey = cell?.getAttribute?.('data-col-key');
       if (hoverKey && hoverKey !== startKey) {
+        const rect = cell.getBoundingClientRect();
+        insertBefore = ev.clientX < rect.left + rect.width / 2;
         dropKey = hoverKey;
-        onColumnDragChange?.(startKey, hoverKey);
+        onColumnDragChange?.(startKey, hoverKey, insertBefore);
+        updateDropLine(cell, insertBefore);
+      } else {
+        dropKey = null;
+        dropLineLeft = null;
+        onColumnDragChange?.(startKey, null, true);
       }
     }
 
@@ -99,9 +136,10 @@
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       if (dragging && dropKey && dropKey !== startKey) {
-        onColumnReorder?.(startKey, dropKey);
+        onColumnReorder?.(startKey, dropKey, insertBefore);
       }
-      onColumnDragChange?.(null, null);
+      onColumnDragChange?.(null, null, true);
+      dropLineLeft = null;
       if (!dragging && onColumnClick) {
         onColumnClick(col, ev);
       }
@@ -112,15 +150,17 @@
   }
 </script>
 
-<div class="ff-colh">
+<div class="ff-colh" bind:this={headerEl}>
+  {#if columnDragKey && dropLineLeft != null}
+    <div class="ff-colh__drop-line" style:left="{dropLineLeft}px"></div>
+  {/if}
   {#each columns as col}
     {@const dragKey = col.key}
     {@const isDragging = columnDragKey === dragKey}
-    {@const isDropTarget = columnDropKey === dragKey && columnDragKey && columnDragKey !== dragKey}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="ff-colh__cell{col.sort ? ' ff-colh__cell--active' : ''}{isDragging ? ' ff-colh__cell--dragging' : ''}{isDropTarget ? ' ff-colh__cell--drop-target' : ''}"
-      style={columnCellStyle(col)}
+      class="ff-colh__cell{col.sort ? ' ff-colh__cell--active' : ''}{isDragging ? ' ff-colh__cell--dragging' : ''}"
+      style={cellStyle(col)}
       data-col-key={dragKey ?? ''}
       oncontextmenu={(e) => {
         e.preventDefault();
@@ -149,6 +189,7 @@
           aria-orientation="vertical"
           aria-label="Resize {col.label || col.key} column"
           onpointerdown={(e) => startResize(e, col)}
+          ondblclick={(e) => autoFitColumn(e, col)}
         ></div>
       {/if}
     </div>

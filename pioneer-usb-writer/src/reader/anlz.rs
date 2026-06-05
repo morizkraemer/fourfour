@@ -194,6 +194,42 @@ fn parse_pwv3(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     Ok(entries)
 }
 
+/// Parse a PWV7 (full-resolution 3-band, 3 bytes/entry) section.
+fn parse_pwv7(section: &[u8]) -> Result<Vec<[u8; 3]>> {
+    if section.len() < 24 {
+        bail!("PWV7 section too short ({} bytes)", section.len());
+    }
+    let entry_count = read_u32_be(section, 16)? as usize;
+    let data = &section[24..];
+    let max_entries = data.len() / 3;
+    let count = entry_count.min(max_entries);
+
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = i * 3;
+        entries.push([data[base], data[base + 1], data[base + 2]]);
+    }
+    Ok(entries)
+}
+
+/// Parse a PWV6 (overview 3-band, 3 bytes/entry) section.
+fn parse_pwv6(section: &[u8]) -> Result<Vec<[u8; 3]>> {
+    if section.len() < 20 {
+        bail!("PWV6 section too short ({} bytes)", section.len());
+    }
+    let entry_count = read_u32_be(section, 16)? as usize;
+    let data = &section[20..];
+    let max_entries = data.len() / 3;
+    let count = entry_count.min(max_entries);
+
+    let mut entries = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = i * 3;
+        entries.push([data[base], data[base + 1], data[base + 2]]);
+    }
+    Ok(entries)
+}
+
 /// Parse a PWV4 (color overview waveform, 6 bytes/entry) section into `[low, mid, high]` entries.
 fn parse_pwv4(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     if section.len() < 24 {
@@ -234,26 +270,40 @@ pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
 
     let (beats, waveform_data, mut cue_points) = parse_dat_sections(&dat_bytes)?;
 
-    // Try to read the sibling .EXT file.
+    // Try sibling .EXT and .2EX files (Rekordbox puts PWV7/PWV6 in .2EX).
     let ext_path = dat_path.with_extension("EXT");
-    let color_waveform = if ext_path.exists() {
+    let ext2_path = dat_path.with_extension("2EX");
+    let mut color_detail: Option<Vec<[u8; 3]>> = None;
+    let mut color_overview: Option<Vec<[u8; 3]>> = None;
+
+    if ext_path.exists() {
         let ext_bytes = std::fs::read(&ext_path)
             .with_context(|| format!("failed to read EXT file: {}", ext_path.display()))?;
         let (ext_cues, detail, overview) = parse_ext_sections(&ext_bytes)?;
-
-        // PCO2 extended cues are more authoritative than PCOB cues when present.
         if !ext_cues.is_empty() {
             cue_points = ext_cues;
         }
+        color_detail = detail;
+        color_overview = overview;
+    }
 
-        if detail.is_some() || overview.is_some() {
-            Some(ColorWaveform {
-                detail: detail.unwrap_or_default(),
-                overview: overview.unwrap_or_default(),
-            })
-        } else {
-            None
+    if ext2_path.exists() {
+        let ext2_bytes = std::fs::read(&ext2_path)
+            .with_context(|| format!("failed to read 2EX file: {}", ext2_path.display()))?;
+        let (_, detail, overview) = parse_ext_sections(&ext2_bytes)?;
+        if detail.is_some() {
+            color_detail = detail;
         }
+        if overview.is_some() {
+            color_overview = overview;
+        }
+    }
+
+    let color_waveform = if color_detail.is_some() || color_overview.is_some() {
+        Some(ColorWaveform {
+            detail: color_detail.unwrap_or_default(),
+            overview: color_overview.unwrap_or_default(),
+        })
     } else {
         None
     };
@@ -350,6 +400,8 @@ fn parse_ext_sections(
     }
 
     let mut cue_points: Vec<CuePoint> = Vec::new();
+    let mut pwv7_detail: Option<Vec<[u8; 3]>> = None;
+    let mut pwv6_overview: Option<Vec<[u8; 3]>> = None;
     let mut pwv3_detail: Option<Vec<[u8; 3]>> = None;
     let mut pwv4_overview: Option<Vec<[u8; 3]>> = None;
 
@@ -368,6 +420,16 @@ fn parse_ext_sections(
         let section = &data[offset..offset + section_len];
 
         match tag {
+            b"PWV7" => {
+                if let Ok(entries) = parse_pwv7(section) {
+                    pwv7_detail = Some(entries);
+                }
+            }
+            b"PWV6" => {
+                if let Ok(entries) = parse_pwv6(section) {
+                    pwv6_overview = Some(entries);
+                }
+            }
             b"PWV3" => {
                 if let Ok(entries) = parse_pwv3(section) {
                     pwv3_detail = Some(entries);
@@ -389,8 +451,12 @@ fn parse_ext_sections(
         offset += section_len;
     }
 
-    // Use PWV3 as detail data (reconstructed to [low,mid,high]).
-    Ok((cue_points, pwv3_detail, pwv4_overview))
+    // Prefer native 3-band PWV7/PWV6; fall back to legacy PWV3/PWV4 reconstruction.
+    Ok((
+        cue_points,
+        pwv7_detail.or(pwv3_detail),
+        pwv6_overview.or(pwv4_overview),
+    ))
 }
 
 /// Parse a PCO2 (extended cue points) section into a list of [`CuePoint`]s.

@@ -58,8 +58,7 @@ export function createSettingsPage({ sections = [] } = {}) {
       class: `ff-settings-page__pane-tab-content ${isFirst ? 'ff-settings-page__pane-tab-content--active' : ''}`,
       dataset: { paneKey: sec.key || String(idx) }
     }, [
-      el('h3', { class: 'ff-settings-page__pane-heading' }, [sec.label]),
-      el('p', { class: 'ff-settings-page__pane-sub' }, [`Configure settings for ${sec.label}`]),
+      el('h2', { class: 'ff-settings-page__pane-heading' }, [sec.label]),
       el('div', { class: 'ff-settings-page__fields-container' }, fields)
     ]);
 

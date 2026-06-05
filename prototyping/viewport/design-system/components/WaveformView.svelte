@@ -6,9 +6,9 @@
       mode="compact"  — static full-track view, no zoom, click/drag scrubs.
       mode="expanded" — overview + Rekordbox playhead-locked zoom view.
 
-    The store keeps rgb in 0–1; WaveformDisplay expects 0–255, so the scale
-    happens here (one place). Data is pushed via setData only when the track or
-    its waveform changes (setData resets zoom); the playhead follows every tick.
+    All waveform samples are 0–1: amp is peak loudness (1.0 = 0 dBFS), rgb are
+    relative band weights. Data is pushed via setData only when the track or its
+    waveform changes (setData resets zoom); the playhead follows every tick.
   */
   import WaveformDisplay from '../waveform-display.js';
 
@@ -35,10 +35,9 @@
   let ro;
   let lastDataKey = null;
 
-  // WaveformDisplay's bandAmps divides weights by 255; the store keeps rgb 0–1.
   function toDisplay(samples) {
     if (!samples) return undefined;
-    return samples.map((s) => ({ amp: s.amp, r: s.r * 255, g: s.g * 255, b: s.b * 255 }));
+    return samples.map((s) => ({ amp: s.amp, r: s.r, g: s.g, b: s.b }));
   }
 
   function buildData() {
@@ -87,18 +86,15 @@
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
-    display.setData(buildData());
+    // Pass playhead with data so zoom offset centres atomically on load (progress
+    // often stays 0 across track changes, so a separate effect would not re-run).
+    display.setData(buildData(), progress);
   });
 
-  // Tell the engine when playback is running so it interpolates the playhead
-  // (the transport only reports position at ~20Hz).
+  // Atomic transport update — avoids play/pause ordering jitter between separate
+  // playing and progress effects (the transport only reports position at ~20Hz).
   $effect(() => {
-    display?.setPlaying(playing);
-  });
-
-  // Playhead follows playback progress (cheap overlay / scroll update).
-  $effect(() => {
-    display?.setPlayhead(progress);
+    display?.setTransport(playing, progress);
   });
 </script>
 

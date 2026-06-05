@@ -5,16 +5,20 @@
   height: 28px;
   padding: 0 var(--ff-space-6);
   width: 100%;
-  min-width: min-content;
+  min-width: 0;
   box-sizing: border-box;
 }
 .ff-trow__cell {
   display: flex;
   align-items: center;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
 }
 .ff-trow__text {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
   font-family: var(--ff-font);
   font-size: var(--ff-type-row);
   color: var(--ff-text);

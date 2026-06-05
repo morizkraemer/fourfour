@@ -1,5 +1,9 @@
 <script>
   import './menu.css';
+  import './checkbox.css';
+
+  const CHECK_SVG =
+    '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="2,5.5 4.2,7.5 8,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   /**
    * @typedef {object} MenuItem
@@ -8,6 +12,7 @@
    * @property {'default'|'danger'|'disabled'} [variant]
    * @property {boolean} [disabled]
    * @property {boolean} [checked]
+   * @property {boolean} [keepOpen]
    * @property {boolean} [isSeparator]
    * @property {MenuItem[]} [items]
    * @property {() => void} [onClick]
@@ -78,7 +83,7 @@
   function runItem(item) {
     if (item.disabled || item.items?.length) return;
     item.onClick?.();
-    onClose?.();
+    if (!item.keepOpen) onClose?.();
   }
 
   /** @param {number} index */
@@ -104,6 +109,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="ff-menu__item ff-menu__item--{variant}"
+        class:ff-menu__item--toggle={item.checked !== undefined}
         class:ff-menu__item--submenu={hasSub}
         class:ff-menu__item--submenu-open={subOpen}
         onmouseenter={() => hasSub && depth === 0 && openSubmenu(i)}
@@ -115,9 +121,19 @@
       >
         <span class="ff-menu__item-label">
           {#if item.checked !== undefined}
-            <span class="ff-context-menu__check">{item.checked ? '✓' : ' '}</span>
+            <span
+              class="ff-checkbox ff-menu__checkbox"
+              class:ff-checkbox--on={item.checked}
+              aria-hidden="true"
+            >
+              <span class="ff-checkbox__box">
+                <span class="ff-checkbox__icon">{@html CHECK_SVG}</span>
+              </span>
+              <span class="ff-checkbox__label">{item.label ?? ''}</span>
+            </span>
+          {:else}
+            {item.label ?? ''}
           {/if}
-          {item.label ?? ''}
         </span>
         <span class="ff-menu__item-trail">
           {#if item.shortcut}
@@ -149,9 +165,19 @@
                 >
                   <span class="ff-menu__item-label">
                     {#if subItem.checked !== undefined}
-                      <span class="ff-context-menu__check">{subItem.checked ? '✓' : ' '}</span>
+                      <span
+                        class="ff-checkbox ff-menu__checkbox"
+                        class:ff-checkbox--on={subItem.checked}
+                        aria-hidden="true"
+                      >
+                        <span class="ff-checkbox__box">
+                          <span class="ff-checkbox__icon">{@html CHECK_SVG}</span>
+                        </span>
+                        <span class="ff-checkbox__label">{subItem.label ?? ''}</span>
+                      </span>
+                    {:else}
+                      {subItem.label ?? ''}
                     {/if}
-                    {subItem.label ?? ''}
                   </span>
                   {#if subItem.shortcut}
                     <span class="ff-menu__item-trail">
@@ -183,12 +209,12 @@
 {/if}
 
 <style>
-  .ff-context-menu__check {
-    display: inline-block;
-    width: 14px;
-    margin-right: 4px;
-    font-family: var(--ff-font-mono);
-    color: var(--ff-accent);
+  .ff-menu__checkbox {
+    pointer-events: none;
+  }
+
+  .ff-menu__item--toggle .ff-checkbox__label {
+    color: inherit;
   }
 
   .ff-menu__item-trail {

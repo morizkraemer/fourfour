@@ -29,19 +29,21 @@
   import { ui, focusListPanel, openSplitPanel } from '../stores/ui.svelte.ts';
   import { pickDirectory } from '../services/tauri.svelte.ts';
   import {
-    tableColumns,
+    getLayout,
+    resolveLayoutKind,
     visibleColumns,
     initTableColumns,
     moveColumn,
     toggleColumnVisibility,
     resetColumns,
     setColumnWidth,
+    fitColumnToContent,
     setSort,
     clearSort,
     sortTracks,
     ALL_COLUMN_KEYS,
   } from '../stores/table-columns.svelte.ts';
-  import { dnd, startTrackDrag, updatePointer, endDrag } from '../stores/dnd.svelte.ts';
+  import { dnd, startTrackDrag, updatePointer, updateTrackDropTarget, endDrag } from '../stores/dnd.svelte.ts';
   import {
     buildTrackContextMenuItems,
     buildColumnContextMenuItems,
@@ -50,7 +52,7 @@
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
 
   /** When set, show this sidebar source instead of the active row (split panels). */
-  let { sourceId = undefined, embedded = false } = $props();
+  let { sourceId = undefined, embedded = false, splitCompanion = false } = $props();
 
   let lastSelectedId = null;
   let tableBodyEl = $state(null);
@@ -59,7 +61,9 @@
   let listMenu = $state({ open: false, x: 0, y: 0 });
   let colDragKey = $state(null);
   let colDropKey = $state(null);
+  let tableScrollEl = $state(null);
   let dragging = $state(false);
+  let dropLineTop = $state(null);
   let marqueeActive = $state(false);
   let suppressRowClick = false;
 
@@ -87,15 +91,25 @@
 
   let canReorderRows = $derived(!!activePlaylist && !isUsbView);
 
+  let isDropTarget = $derived(
+    dnd.kind === 'tracks' &&
+      dnd.dropPanelSourceId === effectiveSource &&
+      playlistByName(effectiveSource ?? '') != null &&
+      !isUsbView
+  );
+
   let baseTracks = $derived(tracksForSidebarSource(effectiveSource));
   let filteredTracks = $derived(filterTracks(baseTracks, ui.listFilter));
 
+  let layoutKind = $derived(resolveLayoutKind(effectiveSource, splitCompanion));
+  let layout = $derived(getLayout(layoutKind));
+
   let currentTracks = $derived.by(() => {
     if (canReorderRows) return filteredTracks;
-    return tableColumns.sortKey ? sortTracks(filteredTracks) : filteredTracks;
+    return layout.sortKey ? sortTracks(filteredTracks, layoutKind) : filteredTracks;
   });
 
-  let columns = $derived(visibleColumns());
+  let columns = $derived(visibleColumns(layoutKind));
 
   function handleRowClick(track, event) {
     if (suppressRowClick) {
@@ -210,79 +224,143 @@
     return `${t.artist} — ${t.title}`;
   }
 
+  function dropLineTopForIndex(index) {
+    if (!tableBodyEl || index == null) return null;
+    const rows = tableBodyEl.querySelectorAll('[data-track-row]');
+    if (rows.length === 0) return 0;
+    if (index >= rows.length) {
+      const last = rows[rows.length - 1];
+      return last.offsetTop + last.offsetHeight;
+    }
+    return rows[index].offsetTop;
+  }
+
+  $effect(() => {
+    if (!isDropTarget || dnd.dropRowIndex == null || !tableBodyEl) {
+      dropLineTop = null;
+      return;
+    }
+    dropLineTop = dropLineTopForIndex(dnd.dropRowIndex);
+  });
+
   function onRowPointerDown(e, track, index) {
     if (isUsbView || e.button !== 0) return;
     const target = e.target;
     if (target.closest?.('.ff-colh__resize-handle')) return;
+    e.preventDefault();
 
+    const rowEl = e.currentTarget;
+    const scrollEl = rowEl?.closest('.ff-table__scroll');
+    const scrollTopAtDrag = scrollEl?.scrollTop ?? 0;
     const ids = dragTrackIds(track);
     let moved = false;
+    let scrollPinRaf = null;
+
+    function pinSourceScroll() {
+      if (!embedded || !scrollEl) return;
+      scrollEl.scrollTop = scrollTopAtDrag;
+    }
+
+    function onWheel(ev) {
+      if (!moved) return;
+      ev.preventDefault();
+    }
+
+    function startScrollPin() {
+      const tick = () => {
+        pinSourceScroll();
+        scrollPinRaf = requestAnimationFrame(tick);
+      };
+      scrollPinRaf = requestAnimationFrame(tick);
+    }
+
+    function stopScrollPin() {
+      if (scrollPinRaf != null) {
+        cancelAnimationFrame(scrollPinRaf);
+        scrollPinRaf = null;
+      }
+    }
 
     function onMove(ev) {
+      if (embedded) {
+        ev.preventDefault();
+        pinSourceScroll();
+      }
       if (!moved && (Math.abs(ev.clientX - e.clientX) > 5 || Math.abs(ev.clientY - e.clientY) > 5)) {
         moved = true;
         dragging = true;
+        rowEl?.setPointerCapture?.(e.pointerId);
         startTrackDrag(
           ids,
           ghostLabelFor(ids),
           activePlaylist?.id ?? null,
+          effectiveSource,
           ev.clientX,
           ev.clientY
         );
+        if (embedded) {
+          startScrollPin();
+          scrollEl?.addEventListener('wheel', onWheel, { passive: false });
+        }
       }
       if (!moved) return;
+      ev.preventDefault();
       updatePointer(ev.clientX, ev.clientY);
-      updateDropRowIndex(ev.clientY);
+      updateTrackDropTarget(ev.clientX, ev.clientY);
+      pinSourceScroll();
     }
 
     async function onUp(ev) {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      stopScrollPin();
+      scrollEl?.removeEventListener('wheel', onWheel);
+      if (rowEl?.hasPointerCapture?.(e.pointerId)) {
+        rowEl.releasePointerCapture(e.pointerId);
+      }
       if (!moved) return;
 
       const dropPlId = dnd.dropPlaylistId;
       const dropIdx = dnd.dropRowIndex;
+      const dropSource = dnd.dropPanelSourceId;
+      const copyOnly = ev.altKey;
 
       if (dropPlId != null) {
-        const copyOnly = ev.altKey;
         await moveTracksToPlaylist({
           trackIds: ids,
           toPlaylistId: dropPlId,
-          sourcePlaylistId: activePlaylist?.id ?? null,
+          sourcePlaylistId: dnd.sourcePlaylistId,
           removeFromSource: !copyOnly,
         });
-      } else if (canReorderRows && activePlaylist && dropIdx != null && dnd.dropPlaylistId == null) {
-        const ordered = currentTracks.map(t => t.id);
-        const without = ordered.filter(id => !ids.includes(id));
-        const insertAt = Math.min(Math.max(0, dropIdx), without.length);
-        const newOrder = [...without.slice(0, insertAt), ...ids, ...without.slice(insertAt)];
-        await reorderPlaylistTracks(activePlaylist.id, newOrder);
+      } else if (dropSource != null && dropIdx != null) {
+        const targetPlaylist = playlistByName(dropSource);
+        if (targetPlaylist && !library.volumes.includes(dropSource)) {
+          const samePanel = dropSource === effectiveSource;
+          if (samePanel && canReorderRows && activePlaylist) {
+            const ordered = currentTracks.map(t => t.id);
+            const without = ordered.filter(id => !ids.includes(id));
+            const insertAt = Math.min(Math.max(0, dropIdx), without.length);
+            const newOrder = [...without.slice(0, insertAt), ...ids, ...without.slice(insertAt)];
+            await reorderPlaylistTracks(activePlaylist.id, newOrder);
+          } else {
+            await moveTracksToPlaylist({
+              trackIds: ids,
+              toPlaylistId: targetPlaylist.id,
+              sourcePlaylistId: dnd.sourcePlaylistId,
+              insertIndex: dropIdx,
+              removeFromSource: !copyOnly && dnd.sourcePlaylistId != null,
+            });
+          }
+        }
       }
 
       dragging = false;
+      dropLineTop = null;
       endDrag();
     }
 
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
-  }
-
-  function updateDropRowIndex(clientY) {
-    if (!tableBodyEl) return;
-    const rows = tableBodyEl.querySelectorAll('[data-track-row]');
-    if (rows.length === 0) {
-      dnd.dropRowIndex = 0;
-      return;
-    }
-    for (let i = 0; i < rows.length; i++) {
-      const rect = rows[i].getBoundingClientRect();
-      const mid = rect.top + rect.height / 2;
-      if (clientY < mid) {
-        dnd.dropRowIndex = i;
-        return;
-      }
-    }
-    dnd.dropRowIndex = rows.length;
   }
 
   function openColumnMenu(e) {
@@ -292,10 +370,10 @@
   function columnMenuItems() {
     return buildColumnContextMenuItems({
       allColumnKeys: ALL_COLUMN_KEYS,
-      tableColumns,
-      toggleColumnVisibility,
-      resetColumns,
-      clearSort,
+      layout,
+      toggleColumnVisibility: (key) => toggleColumnVisibility(layoutKind, key),
+      resetColumns: () => resetColumns(layoutKind),
+      clearSort: () => clearSort(layoutKind),
     });
   }
 
@@ -331,27 +409,14 @@
     });
   }
 
-  async function onTableDropEmpty(e) {
-    if (!activePlaylist || isUsbView) return;
-    e.preventDefault();
-    const ids = dnd.trackIds;
-    if (ids.length === 0) return;
-    await moveTracksToPlaylist({
-      trackIds: ids,
-      toPlaylistId: activePlaylist.id,
-      sourcePlaylistId: dnd.sourcePlaylistId,
-      insertIndex: activePlaylist.track_ids.length,
-      removeFromSource: true,
-    });
-    endDrag();
-    dragging = false;
-  }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="ff-table"
   class:ff-table--embedded={embedded}
+  class:ff-table--drop-target={isDropTarget}
+  data-source-id={effectiveSource}
   onmousedown={() => {
     if (!embedded) focusListPanel(effectiveSource);
   }}
@@ -374,39 +439,47 @@
       </EmptyState>
     </div>
   {:else}
-    <div class="ff-table__scroll">
+    <div
+      class="ff-table__scroll"
+      class:ff-table__scroll--dragging={dragging && embedded}
+      bind:this={tableScrollEl}
+    >
       <ColumnHeader
         {columns}
         columnDragKey={colDragKey}
         columnDropKey={colDropKey}
         onColumnContextMenu={(e) => openColumnMenu(e)}
         onColumnClick={(col) => {
-          if (col.key && col.key !== 'cover' && col.key !== 'wave' && col.key !== 'fav') {
-            setSort(col.key);
+          if (col.key && col.key !== 'cover' && col.key !== 'wave') {
+            setSort(layoutKind, col.key);
           }
         }}
-        onColumnReorder={(from, to) => moveColumn(from, to)}
+        onColumnReorder={(from, to, insertBefore) => moveColumn(layoutKind, from, to, insertBefore)}
         onColumnDragChange={(drag, drop) => {
           colDragKey = drag;
           colDropKey = drop;
         }}
-        onColumnResize={(key, width) => setColumnWidth(key, width)}
+        onColumnResize={(key, width, save = true) => setColumnWidth(layoutKind, key, width, save)}
+        onColumnAutoFit={(key) => fitColumnToContent(layoutKind, key, tableScrollEl)}
       />
       <div
         class="ff-table__body"
         class:ff-table__body--marquee={marqueeActive}
+        data-track-drop-body
+        data-source-id={effectiveSource}
         bind:this={tableBodyEl}
         role="list"
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
         onselectstart={(e) => e.preventDefault()}
       >
+      {#if isDropTarget && dropLineTop != null}
+        <div class="ff-table__drop-line" style:top="{dropLineTop}px">
+          <DropLine />
+        </div>
+      {/if}
       {#if currentTracks.length === 0}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="ff-table__empty-container ff-table__empty-drop"
-          onpointerup={onTableDropEmpty}
-        >
+        <div class="ff-table__empty-container ff-table__empty-drop">
           <EmptyState
             title="No tracks in this view"
             sub={activePlaylist
@@ -416,9 +489,6 @@
         </div>
       {:else}
         {#each currentTracks as track, i (track.id)}
-          {#if dnd.kind === 'tracks' && dnd.dropRowIndex === i}
-            <DropLine />
-          {/if}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
@@ -435,9 +505,6 @@
             />
           </div>
         {/each}
-        {#if dnd.kind === 'tracks' && dnd.dropRowIndex === currentTracks.length}
-          <DropLine />
-        {/if}
       {/if}
       </div>
     </div>
@@ -492,6 +559,10 @@
     display: flex;
     flex-direction: column;
   }
+  .ff-table__scroll--dragging {
+    overflow: hidden;
+    touch-action: none;
+  }
   .ff-table__scroll :global(.ff-colh) {
     flex-shrink: 0;
     position: sticky;
@@ -500,10 +571,20 @@
     background: var(--ff-bg);
   }
   .ff-table__body {
+    position: relative;
     flex: 1 0 auto;
     display: flex;
     flex-direction: column;
-    min-width: min-content;
+    min-width: 0;
+    width: 100%;
+  }
+  .ff-table__drop-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 0;
+    pointer-events: none;
+    z-index: 1;
   }
   .ff-table__body--marquee {
     cursor: default;
@@ -530,5 +611,9 @@
   }
   .ff-table__empty-drop:global(.ff-table__empty-drop) {
     min-height: 120px;
+  }
+  .ff-table--drop-target {
+    outline: 1px solid var(--ff-accent);
+    outline-offset: -1px;
   }
 </style>

@@ -10,7 +10,14 @@ export type SplitPanelTarget = {
   label: string;
 };
 
+const SPLIT_RATIO_KEY = 'fourfour.splitPaneRatio';
+const SPLIT_RATIO_MIN = 0.22;
+const SPLIT_RATIO_MAX = 0.78;
+const SPLIT_RATIO_DEFAULT = 0.5;
+
 export const ui = $state({
+  /** Left panel share of side-by-side width (0–1). */
+  splitPaneRatio: SPLIT_RATIO_DEFAULT,
   /** Whether the right detail pane is visible. */
   detailPaneOpen: true,
   /** Whether the left sidebar is collapsed (future). */
@@ -28,6 +35,29 @@ export const ui = $state({
   /** Incremented to focus the filter field (GlobalHeader). */
   filterFocusNonce: 0,
 });
+
+function clampSplitPaneRatio(ratio: number) {
+  return Math.min(SPLIT_RATIO_MAX, Math.max(SPLIT_RATIO_MIN, ratio));
+}
+
+export function initSplitPaneRatio() {
+  try {
+    const raw = localStorage.getItem(SPLIT_RATIO_KEY);
+    if (!raw) return;
+    const n = parseFloat(raw);
+    if (Number.isFinite(n)) ui.splitPaneRatio = clampSplitPaneRatio(n);
+  } catch {
+    /* ignore */
+  }
+}
+
+function persistSplitPaneRatio() {
+  try {
+    localStorage.setItem(SPLIT_RATIO_KEY, String(ui.splitPaneRatio));
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Clear the inline list filter. */
 export function clearListFilter() {
@@ -70,4 +100,24 @@ export function focusListPanel(sourceId: string) {
 /** Sidebar source id used when importing via drag-and-drop. */
 export function importDropTarget(): string {
   return ui.focusedListSource ?? ui.activeSidebarRow;
+}
+
+const SPLIT_DIVIDER_PX = 5;
+const SPLIT_PANE_MIN_PX = 160;
+
+/** Drag the side-by-side divider; call on pointerup from the host. */
+export function resizeSplitPane(clientX: number, containerLeft: number, containerWidth: number) {
+  if (containerWidth <= 0) return;
+  const usable = containerWidth - SPLIT_DIVIDER_PX;
+  const minRatio = SPLIT_PANE_MIN_PX / usable;
+  const maxRatio = 1 - minRatio;
+  const x = clientX - containerLeft;
+  const leftWidth = x - SPLIT_DIVIDER_PX / 2;
+  ui.splitPaneRatio = clampSplitPaneRatio(
+    Math.min(maxRatio, Math.max(minRatio, leftWidth / usable)),
+  );
+}
+
+export function commitSplitPaneRatio() {
+  persistSplitPaneRatio();
 }

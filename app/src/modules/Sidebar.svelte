@@ -161,6 +161,8 @@
   function onPlaylistPointerEnter(playlistId) {
     if (dnd.kind === 'tracks' && dnd.trackIds.length > 0) {
       dnd.dropPlaylistId = playlistId;
+      dnd.dropPanelSourceId = null;
+      dnd.dropRowIndex = null;
     }
     if (dnd.kind === 'playlist' || playlistDragId != null) {
       playlistDropId = playlistId;

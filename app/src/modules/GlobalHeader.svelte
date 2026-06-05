@@ -17,8 +17,10 @@
       : ''
   );
 
+  // Only steal focus on explicit ⌘F (nonce > 0), not on mount — otherwise
+  // spacebar play/pause never reaches the window handler while search is focused.
   $effect(() => {
-    ui.filterFocusNonce;
+    if (ui.filterFocusNonce === 0) return;
     filterInputEl?.focus();
     filterInputEl?.select();
   });

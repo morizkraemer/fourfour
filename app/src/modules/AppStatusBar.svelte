@@ -33,7 +33,10 @@
     {progress}
   >
     {#snippet rightExtras()}
-      <LevelMeter left={player.levelLeft} right={player.levelRight} />
+      <LevelMeter
+        left={player.playing ? player.levelLeft : 0}
+        right={player.playing ? player.levelRight : 0}
+      />
       <button
         type="button"
         class="ff-statusbar__settings"

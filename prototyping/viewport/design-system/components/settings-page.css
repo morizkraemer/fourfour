@@ -24,8 +24,10 @@
 }
 
 .ff-settings-page--fullscreen .ff-settings-page__pane {
-  padding-top: calc(var(--ff-space-5) + var(--ff-titlebar-row-height));
-  max-width: 720px;
+  padding-top: calc(32px + var(--ff-titlebar-row-height));
+  padding-left: 48px;
+  padding-right: 48px;
+  max-width: 680px;
 }
 
 .ff-settings-page--fullscreen .ff-settings-page__path-value {
@@ -102,14 +104,15 @@
 
 .ff-settings-page__nav-item {
   display: block;
-  width: 100%;
-  padding: 7px 16px;
-  margin: 0;
+  width: calc(100% - 16px);
+  padding: 7px 12px;
+  margin: 1px 8px;
   border: none;
+  border-radius: var(--ff-radius-md);
   background: transparent;
   text-align: left;
   font-family: var(--ff-font);
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--ff-text-mid);
   cursor: pointer;
   box-sizing: border-box;
@@ -141,7 +144,7 @@
 
 /* Pane */
 .ff-settings-page__pane {
-  padding: 22px 28px;
+  padding: 32px 40px;
   box-sizing: border-box;
   overflow-y: auto;
 }
@@ -158,57 +161,57 @@
 
 .ff-settings-page__pane-heading {
   font-family: var(--ff-font);
-  font-size: 16px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--ff-text);
-  margin: 0;
-}
-
-.ff-settings-page__pane-sub {
-  font-family: var(--ff-font);
-  font-size: 12px;
-  color: var(--ff-muted);
-  margin: 4px 0 18px 0;
+  margin: 0 0 32px 0;
 }
 
 .ff-settings-page__fields-container {
   display: flex;
   flex-direction: column;
+  background-color: var(--ff-surface);
+  border: 1px solid var(--ff-border);
+  border-radius: 10px;
+  overflow: hidden;
 }
 
 /* Field Row Layout */
 .ff-settings-page__field {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px 16px;
-  padding: 12px 0;
-  border-top: 1px solid var(--ff-border);
+  gap: 4px 24px;
+  padding: 16px 20px;
   align-items: center;
   box-sizing: border-box;
 }
 
-.ff-settings-page__field:first-child {
+.ff-settings-page__field + .ff-settings-page__field {
   border-top: 1px solid var(--ff-border);
 }
 
 .ff-settings-page__field-texts {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
 }
 
 .ff-settings-page__field-label {
   font-family: var(--ff-font);
-  font-size: 12.5px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--ff-text);
+  line-height: 1.3;
 }
 
 .ff-settings-page__field-desc {
   font-family: var(--ff-font);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--ff-muted);
+  line-height: 1.45;
+  max-width: 420px;
 }
 
 .ff-settings-page__field-control {

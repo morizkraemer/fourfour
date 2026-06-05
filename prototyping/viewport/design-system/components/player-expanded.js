@@ -181,8 +181,8 @@ export function createPlayerExpanded({
   });
 
   const centerControls = el('div', { class: 'ff-player-expanded__center-controls' }, [
-    bpmN,
     keyN,
+    bpmN,
     halfBtn,
     doubleBtn,
     setBeatBtn

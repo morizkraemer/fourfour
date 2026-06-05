@@ -156,11 +156,6 @@
 }
 
 
-/* Key toggle button override to use mono font */
-.ff-player-compact__key-btn .ff-btn__label {
-  font-family: var(--ff-font-mono);
-}
-
 /* Time display group */
 .ff-player-compact__times-group {
   display: flex;

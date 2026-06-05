@@ -20,6 +20,8 @@ const TAG_CUE: &[u8; 4] = b"PCOB";
 const TAG_COLOR_PREVIEW: &[u8; 4] = b"PWV3";
 const TAG_COLOR_DETAIL: &[u8; 4] = b"PWV5";
 const TAG_COLOR_WAVEFORM: &[u8; 4] = b"PWV4";
+const TAG_COLOR_3BAND_DETAIL: &[u8; 4] = b"PWV7";
+const TAG_COLOR_3BAND_OVERVIEW: &[u8; 4] = b"PWV6";
 const TAG_CUE_EXTENDED: &[u8; 4] = b"PCO2";
 const TAG_BEAT_GRID_EXT: &[u8; 4] = b"PQT2";
 const TAG_VBR_EXT: &[u8; 4] = b"PVB2";
@@ -183,6 +185,8 @@ pub fn write_anlz_ext(
     let pqt2_section = build_beat_grid_ext_section(analysis, duration_secs);
     let pwv5_section = build_color_detail_section(analysis, duration_secs);
     let pwv4_section = build_color_waveform_section(analysis);
+    let pwv7_section = build_pwv7_section(analysis, duration_secs);
+    let pwv6_section = build_pwv6_section(analysis);
     let pvb2_section = build_vbr_ext_section();
 
     let total_len = HEADER_LEN as usize
@@ -195,6 +199,8 @@ pub fn write_anlz_ext(
         + pqt2_section.len()
         + pwv5_section.len()
         + pwv4_section.len()
+        + pwv7_section.len()
+        + pwv6_section.len()
         + pvb2_section.len();
 
     if let Some(parent) = output_path.parent() {
@@ -222,6 +228,8 @@ pub fn write_anlz_ext(
     file.write_all(&pqt2_section)?;
     file.write_all(&pwv5_section)?;
     file.write_all(&pwv4_section)?;
+    file.write_all(&pwv7_section)?;
+    file.write_all(&pwv6_section)?;
     file.write_all(&pvb2_section)?;
 
     Ok(())
@@ -327,6 +335,88 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
             let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
             buf.push(amplitude);
             buf.push(0x80); // constant second byte observed in rekordbox
+        }
+    }
+
+    buf
+}
+
+/// PWV7 section: full-resolution 3-band waveform (3 bytes per entry).
+/// Entry count = duration_secs * 150, matching PWV3/PWV5.
+fn build_pwv7_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
+    let section_header_len: u32 = 24;
+    let entry_count: u32 = (duration_secs * 150.0).round() as u32;
+    let data_len = entry_count * 3;
+    let section_total_len = section_header_len + data_len;
+
+    let mut buf = Vec::with_capacity(section_total_len as usize);
+    buf.extend_from_slice(TAG_COLOR_3BAND_DETAIL);
+    buf.extend_from_slice(&section_header_len.to_be_bytes());
+    buf.extend_from_slice(&section_total_len.to_be_bytes());
+    buf.extend_from_slice(&3u32.to_be_bytes());
+    buf.extend_from_slice(&entry_count.to_be_bytes());
+    buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());
+
+    if let Some(cw) = &analysis.color_waveform {
+        let src_len = cw.detail.len() as u32;
+        for i in 0..entry_count {
+            let src_idx = if src_len > 0 {
+                (i * src_len / entry_count) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.detail.len() {
+                cw.detail[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            buf.push(low);
+            buf.push(mid);
+            buf.push(high);
+        }
+    } else {
+        for _ in 0..entry_count {
+            buf.extend_from_slice(&[0, 0, 0]);
+        }
+    }
+
+    buf
+}
+
+/// PWV6 section: overview 3-band waveform (1200 entries, 3 bytes each).
+fn build_pwv6_section(analysis: &AnalysisResult) -> Vec<u8> {
+    let section_header_len: u32 = 20;
+    let entry_count: u32 = 1200;
+    let data_len = entry_count * 3;
+    let section_total_len = section_header_len + data_len;
+
+    let mut buf = Vec::with_capacity(section_total_len as usize);
+    buf.extend_from_slice(TAG_COLOR_3BAND_OVERVIEW);
+    buf.extend_from_slice(&section_header_len.to_be_bytes());
+    buf.extend_from_slice(&section_total_len.to_be_bytes());
+    buf.extend_from_slice(&3u32.to_be_bytes());
+    buf.extend_from_slice(&entry_count.to_be_bytes());
+
+    if let Some(cw) = &analysis.color_waveform {
+        let src_len = cw.overview.len() as u32;
+        for i in 0..entry_count {
+            let src_idx = if src_len > 0 {
+                (i * src_len / entry_count) as usize
+            } else {
+                0
+            };
+            let [low, mid, high] = if src_idx < cw.overview.len() {
+                cw.overview[src_idx]
+            } else {
+                [0, 0, 0]
+            };
+            buf.push(low);
+            buf.push(mid);
+            buf.push(high);
+        }
+    } else {
+        for _ in 0..entry_count {
+            buf.extend_from_slice(&[0, 0, 0]);
         }
     }
 

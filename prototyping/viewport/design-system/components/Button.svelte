@@ -16,6 +16,7 @@
     size = 'default',
     kbd,
     onclick,
+    ariaLabel,
     class: className = '',
   } = $props();
 
@@ -35,7 +36,13 @@
   );
 </script>
 
-<button class={cls} type="button" disabled={disabled || undefined} {onclick}>
+<button
+  class={cls}
+  type="button"
+  disabled={disabled || undefined}
+  aria-label={iconOnly ? (ariaLabel ?? label) : undefined}
+  {onclick}
+>
   {#if icon}<Icon name={icon} size={iconSize} />{/if}
   {#if label && !iconOnly}<span class="ff-btn__label">{label}</span>{/if}
   {#if kbd}<Kbd key={kbd} />{/if}

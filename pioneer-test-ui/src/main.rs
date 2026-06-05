@@ -795,9 +795,9 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
 /// Max RGB waveform samples sent over IPC for the compact strip / table. Full detail is ~150/sec.
 const PLAYER_COLOR_WAVEFORM_MAX: usize = 2048;
 
-/// Max RGB samples for the expanded player's zoom view. Higher cap so zooming in
-/// reveals real per-column detail (≈ a 13-min track at 150 cols/sec downsampled).
-const PLAYER_COLOR_DETAIL_MAX: usize = 12000;
+/// Safety cap for expanded-player IPC (~55 min at 150 cols/sec). Peak-hold
+/// downsampling only applies beyond native length; typical tracks send full detail.
+const PLAYER_COLOR_DETAIL_MAX: usize = 500_000;
 
 /// Fixed-width overview bar for the expanded player (Pioneer PWV6 length).
 const PLAYER_COLOR_OVERVIEW_LEN: usize = 1200;
@@ -806,13 +806,25 @@ fn downsample_3band(source: &[[u8; 3]], max_samples: usize) -> Vec<[u8; 3]> {
     if source.len() <= max_samples {
         return source.to_vec();
     }
-    let step = source.len() as f64 / max_samples as f64;
+    let n = source.len();
     (0..max_samples)
         .map(|i| {
-            let idx = (i as f64 * step).floor() as usize;
-            source[idx.min(source.len() - 1)]
+            let start = i * n / max_samples;
+            let end = ((i + 1) * n / max_samples).max(start + 1).min(n);
+            source[start..end].iter().copied().fold([0u8; 3], |[l, m, h], [l2, m2, h2]| {
+                [l.max(l2), m.max(m2), h.max(h2)]
+            })
         })
         .collect()
+}
+
+fn color_detail_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
+    let src = if !cw.detail.is_empty() {
+        &cw.detail
+    } else {
+        &cw.overview
+    };
+    downsample_3band(src, PLAYER_COLOR_DETAIL_MAX)
 }
 
 /// Build a 400-byte mono PWAV preview from a color waveform's per-sample band
@@ -840,8 +852,9 @@ fn mono_preview_from_color(cw: &models::ColorWaveform) -> Option<[u8; 400]> {
         let start = i * n / 400;
         let end = ((i + 1) * n / 400).max(start + 1).min(n);
         let bucket = amps[start..end].iter().copied().max().unwrap_or(0) as u32;
-        let height = (bucket * 31 / max as u32) as u8;
-        let whiteness = (bucket * 7 / max as u32) as u8;
+        // Absolute scale: 127 = 0 dBFS reference (matches PWV7 band ceiling).
+        let height = ((bucket * 31) / 127).min(31) as u8;
+        let whiteness = ((bucket * 7) / 127).min(7) as u8;
         *byte = (whiteness << 5) | (height & 0x1F);
     }
     Some(out)
@@ -872,16 +885,41 @@ fn color_waveform_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
     Vec::new()
 }
 
-fn waveform_color_json(entries: &[[u8; 3]]) -> Vec<serde_json::Value> {
+/// Scale per-column band amps so the track peak matches PWAV (sample-peak based,
+/// absolute 0 dBFS = 1.0). Band values stay per-column for smooth detail; only
+/// the global calibration comes from the coarse preview.
+fn pwav_band_calibration(entries: &[[u8; 3]], preview: &[u8]) -> f64 {
+    if !preview.iter().any(|b| b & 0x1f != 0) {
+        return 1.0;
+    }
+    let pwav_peak = preview
+        .iter()
+        .map(|b| (b & 0x1f) as f64 / 31.0)
+        .fold(0.0_f64, f64::max);
+    let band_peak = entries
+        .iter()
+        .map(|[l, m, h]| (*l).max(*m).max(*h) as f64 / 127.0)
+        .fold(0.0_f64, f64::max);
+    if band_peak > 1e-6 {
+        pwav_peak / band_peak
+    } else {
+        1.0
+    }
+}
+
+fn waveform_color_json(entries: &[[u8; 3]], preview: Option<&[u8]>) -> Vec<serde_json::Value> {
+    let calibration = preview
+        .map(|p| pwav_band_calibration(entries, p))
+        .unwrap_or(1.0);
+
     entries
         .iter()
         .map(|[low, mid, high]| {
             let max_val = (*low).max(*mid).max(*high) as f64;
             let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
-            // Calibrated bands are 0–127; normalize amplitude to that full range.
-            let amp = max_val / 127.0;
+            let amp = ((max_val / 127.0) * calibration).min(1.0);
             serde_json::json!({
-                "amp": amp.min(1.0),
+                "amp": amp,
                 "r": *low as f64 * scale,
                 "g": *mid as f64 * scale,
                 "b": *high as f64 * scale,
@@ -908,10 +946,13 @@ fn get_analysis_data(
                 .map(|t| (t.duration_secs * 1000.0).round() as u64)
                 .unwrap_or(0);
 
+            let preview = effective_preview(&a);
+            let preview_slice = preview.as_deref();
+
             let waveform_color: Vec<serde_json::Value> = a
                 .color_waveform
                 .as_ref()
-                .map(|cw| waveform_color_json(&color_waveform_for_player(cw)))
+                .map(|cw| waveform_color_json(&color_waveform_for_player(cw), preview_slice))
                 .unwrap_or_default();
 
             // Higher-resolution detail + fixed overview for the expanded player's
@@ -919,17 +960,14 @@ fn get_analysis_data(
             let waveform_color_detail: Vec<serde_json::Value> = a
                 .color_waveform
                 .as_ref()
-                .map(|cw| {
-                    let src = if cw.detail.is_empty() { &cw.overview } else { &cw.detail };
-                    waveform_color_json(&downsample_3band(src, PLAYER_COLOR_DETAIL_MAX))
-                })
+                .map(|cw| waveform_color_json(&color_detail_for_player(cw), preview_slice))
                 .unwrap_or_default();
             let waveform_overview: Vec<serde_json::Value> = a
                 .color_waveform
                 .as_ref()
                 .map(|cw| {
                     let src = if cw.overview.is_empty() { &cw.detail } else { &cw.overview };
-                    waveform_color_json(&downsample_3band(src, PLAYER_COLOR_OVERVIEW_LEN))
+                    waveform_color_json(&downsample_3band(src, PLAYER_COLOR_OVERVIEW_LEN), preview_slice)
                 })
                 .unwrap_or_default();
 
@@ -951,7 +989,7 @@ fn get_analysis_data(
             }).collect();
 
             Ok(serde_json::json!({
-                "waveform_preview": effective_preview(&a).unwrap_or_default(),
+                "waveform_preview": preview.unwrap_or_default(),
                 "waveform_color": waveform_color,
                 "waveform_color_detail": waveform_color_detail,
                 "waveform_overview": waveform_overview,

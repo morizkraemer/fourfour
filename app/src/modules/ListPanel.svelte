@@ -13,6 +13,7 @@
     sourceId,
     title,
     showClose = false,
+    splitCompanion = false,
     onClose,
   } = $props();
 
@@ -56,11 +57,19 @@
     </div>
     {#if showClose}
       <div class="ff-panel-header__right">
-        <Button label="×" variant="ghost" size="small" onclick={onClose} />
+        <Button
+          icon="x"
+          iconOnly
+          variant="ghost"
+          size="small"
+          ariaLabel="Close side panel"
+          class="ff-list-panel__close"
+          onclick={onClose}
+        />
       </div>
     {/if}
   </header>
-  <TrackTable {sourceId} embedded />
+  <TrackTable {sourceId} embedded {splitCompanion} />
 </div>
 
 <ContextMenu
@@ -79,10 +88,15 @@
     height: 100%;
     min-width: 0;
     background: var(--ff-bg);
-    border-right: 1px solid var(--ff-border);
   }
   .ff-list-panel :global(.ff-table) {
     flex: 1 1 0;
     min-height: 0;
+  }
+  .ff-list-panel :global(.ff-list-panel__close) {
+    color: var(--ff-faint);
+  }
+  .ff-list-panel :global(.ff-list-panel__close:hover) {
+    color: var(--ff-text);
   }
 </style>

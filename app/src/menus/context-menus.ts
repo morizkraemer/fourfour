@@ -36,12 +36,13 @@ import { openSplitPanel } from '../stores/ui.svelte.ts';
  * @property {'default'|'danger'|'disabled'} [variant]
  * @property {boolean} [disabled]
  * @property {boolean} [checked]
+ * @property {boolean} [keepOpen]
  * @property {boolean} [isSeparator]
  * @property {MenuItem[]} [items]
  * @property {() => void} [onClick]
  */
 
-const LIBRARY_VIEWS = new Set(['All Tracks', 'Recently Added', 'Unfiled']);
+const LIBRARY_VIEWS = new Set(['All Tracks', 'Recently Added']);
 
 function busy() {
   return library.analyzing || library.syncing;
@@ -135,12 +136,6 @@ export function buildSourceContextMenuItems(opts) {
           onClick: () => analyzeTracks(),
         }
       );
-    } else if (sourceId === 'Unfiled') {
-      items.push({
-        label: 'Analyze all unanalyzed',
-        disabled: busy() || library.tracks.length === 0,
-        onClick: () => analyzeTracks(),
-      });
     }
     return items;
   }
@@ -356,22 +351,23 @@ export function buildTrackContextMenuItems(opts) {
 /**
  * @param {object} opts
  * @param {typeof import('../stores/table-columns.svelte.ts').ALL_COLUMN_KEYS} opts.allColumnKeys
- * @param {typeof import('../stores/table-columns.svelte.ts').tableColumns} opts.tableColumns
- * @param {() => void} opts.toggleColumnVisibility
+ * @param {import('../stores/table-columns.svelte.ts').TableLayout} opts.layout
+ * @param {(key: string) => void} opts.toggleColumnVisibility
  * @param {() => void} opts.resetColumns
  * @param {() => void} opts.clearSort
  */
 export function buildColumnContextMenuItems(opts) {
-  const { allColumnKeys, tableColumns, toggleColumnVisibility, resetColumns, clearSort } =
+  const { allColumnKeys, layout, toggleColumnVisibility, resetColumns, clearSort } =
     opts;
 
   const columnItems = allColumnKeys.map((meta) => {
-    const col = tableColumns.columns.find((c) => c.key === meta.key);
+    const col = layout.columns.find((c) => c.key === meta.key);
     const hidden =
       col?.hidden ?? (meta.key === 'album' || meta.key === 'genre' || meta.key === 'year');
     return {
       label: meta.label,
       checked: !hidden,
+      keepOpen: true,
       onClick: () => toggleColumnVisibility(meta.key),
     };
   });
@@ -382,7 +378,7 @@ export function buildColumnContextMenuItems(opts) {
     { label: 'Reset columns', onClick: () => resetColumns() },
     {
       label: 'Clear sort',
-      disabled: !tableColumns.sortKey,
+      disabled: !layout.sortKey,
       onClick: () => clearSort(),
     },
   ];

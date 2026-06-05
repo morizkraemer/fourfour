@@ -3,7 +3,6 @@
   Wraps the $ds PlayerCompact primitive with player store state.
 -->
 <script>
-  import { onMount } from 'svelte';
   import { PlayerCompact } from '$ds';
   import ExpandedPlayer from './ExpandedPlayer.svelte';
   import {
@@ -19,29 +18,6 @@
   } from '../stores/player.svelte.ts';
 
   let playerRoot;
-
-  function isEditableTarget(target) {
-    if (!(target instanceof Element)) return false;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
-    if (target.closest('[contenteditable="true"]')) return true;
-    return !!target.closest('.ff-dialog-wrapper');
-  }
-
-  function onPlayerKeyDown(e) {
-    if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (isEditableTarget(e.target)) return;
-    if (!player.track) return;
-
-    if (e.key === ' ' || e.code === 'Space') {
-      e.preventDefault();
-      void togglePlay();
-    }
-  }
-
-  onMount(() => {
-    window.addEventListener('keydown', onPlayerKeyDown);
-    return () => window.removeEventListener('keydown', onPlayerKeyDown);
-  });
 </script>
 
 <div class="ff-player-module" class:ff-player-module--expanded={player.expanded && player.track} bind:this={playerRoot}>

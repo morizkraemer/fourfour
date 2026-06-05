@@ -30,6 +30,9 @@
     closeSettings,
     focusListFilter,
     clearListFilter,
+    initSplitPaneRatio,
+    resizeSplitPane,
+    commitSplitPaneRatio,
   } from './stores/ui.svelte.ts';
   import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
   import { importIntoSource } from './menus/context-menus.ts';
@@ -45,8 +48,10 @@
   import { getIsTauri } from './services/tauri.svelte.ts';
   import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
   import { installMacWindowChrome } from './services/window-chrome.ts';
+  import { player, togglePlay } from './stores/player.svelte.ts';
 
   let fileDropVisible = $state(false);
+  let splitPanelsEl = $state(null);
 
   let dropTarget = $derived(importDropTarget());
   let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
@@ -107,14 +112,54 @@
 
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (isEditableTarget(e.target)) return;
+
+    if (e.key === ' ' || e.code === 'Space') {
+      if (!player.track) return;
+      e.preventDefault();
+      void togglePlay();
+      return;
+    }
+
     const slot = /^[1-9]$/.test(e.key) ? parseInt(e.key, 10) : null;
     if (slot == null || selectionCount() === 0) return;
     e.preventDefault();
     toggleFavoriteSlot(slot, [...selection.ids]);
   }
 
+  function startSplitResize(e) {
+    if (e.button !== 0 || !splitPanelsEl) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const divider = e.currentTarget;
+    const rect = splitPanelsEl.getBoundingClientRect();
+    divider.setPointerCapture?.(e.pointerId);
+    document.body.classList.add('ff-split--resizing');
+
+    function onMove(ev) {
+      resizeSplitPane(ev.clientX, rect.left, rect.width);
+    }
+
+    function onUp(ev) {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      try {
+        divider.releasePointerCapture?.(ev.pointerId);
+      } catch {
+        /* already released */
+      }
+      document.body.classList.remove('ff-split--resizing');
+      commitSplitPaneRatio();
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }
+
   onMount(() => {
     initLibrary();
+    initSplitPaneRatio();
     void syncPlaybackAudioConfig();
     window.addEventListener('keydown', onGlobalKeyDown);
     const teardownWindowChrome = installMacWindowChrome();
@@ -161,17 +206,30 @@
       </div>
       <div class="ff-browse__content" class:ff-browse__content--split={ui.splitPanel != null}>
         {#if ui.splitPanel}
-          <div class="ff-browse__panels">
-            <div class="ff-browse__slot ff-browse__slot--table">
+          <div
+            class="ff-browse__panels"
+            bind:this={splitPanelsEl}
+            style:--split-ratio={ui.splitPaneRatio}
+          >
+            <div class="ff-browse__split-pane">
               <ListPanel
                 sourceId={ui.activeSidebarRow}
                 title={sidebarSourceLabel(ui.activeSidebarRow)}
               />
             </div>
-            <div class="ff-browse__slot ff-browse__slot--table">
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div
+              class="ff-browse__split-divider"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize side-by-side panels"
+              onpointerdown={startSplitResize}
+            ></div>
+            <div class="ff-browse__split-pane ff-browse__split-pane--fill">
               <ListPanel
                 sourceId={ui.splitPanel.sourceId}
                 title={ui.splitPanel.label}
+                splitCompanion
                 showClose
                 onClose={closeSplitPanel}
               />
@@ -270,9 +328,63 @@
     align-items: stretch;
   }
 
-  .ff-browse__content--split .ff-browse__slot--table {
-    flex: 1 1 0;
+  .ff-browse__split-pane {
+    flex: 0 0 calc((100% - 5px) * var(--split-ratio, 0.5));
     min-width: 0;
+    min-height: 0;
+    display: flex;
+  }
+
+  .ff-browse__split-pane--fill {
+    flex: 1 1 0;
+  }
+
+  .ff-browse__split-divider {
+    position: relative;
+    flex: 0 0 5px;
+    width: 5px;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 3;
+    /* Match panel header (40px surface) then table body (bg) — avoids a dark strip in the header band */
+    background: linear-gradient(
+      to bottom,
+      var(--ff-surface) 0,
+      var(--ff-surface) 40px,
+      var(--ff-bg) 40px,
+      var(--ff-bg) 100%
+    );
+  }
+
+  .ff-browse__split-divider::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--ff-border-hi);
+    opacity: 0.7;
+    transition: opacity 0.12s ease, background 0.12s ease;
+  }
+
+  .ff-browse__split-divider:hover::after {
+    opacity: 1;
+    background: var(--ff-border-hover);
+  }
+
+  :global(body.ff-split--resizing) .ff-browse__split-divider::after {
+    opacity: 1;
+    background: var(--ff-accent);
+  }
+
+  :global(body.ff-split--resizing) {
+    cursor: col-resize !important;
+    user-select: none;
+  }
+
+  :global(body.ff-split--resizing) * {
+    cursor: col-resize !important;
   }
 
   /* bare slots — no spacing; modules own their own padding/width (rule 4) */

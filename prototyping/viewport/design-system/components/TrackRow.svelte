@@ -36,7 +36,7 @@
 <div class="ff-trow ff-trow--{state}">
   {#each columns as col}
     {#if col.key === 'tag'}
-      <div class="ff-trow__cell ff-trow__cell--tag" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--tag" style={columnCellStyle(col)} data-col-key={col.key}>
         {#if track.tag && track.tag.type === 'digit'}
           <TagBadge value={track.tag.value} variant="color" color={track.tag.color} size="sm" />
         {:else if track.tag}
@@ -44,7 +44,7 @@
         {/if}
       </div>
     {:else if col.key === 'fav'}
-      <div class="ff-trow__cell ff-trow__cell--fav" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--fav" style={columnCellStyle(col)} data-col-key={col.key}>
         <div class="ff-trow__fav{favOn(track.fav) ? ' ff-trow__fav--on' : ''}">
           {#if favOn(track.fav) && track.fav !== true}
             <span class="ff-trow__fav-digit">{track.fav}</span>
@@ -52,7 +52,7 @@
         </div>
       </div>
     {:else if col.key === 'wave'}
-      <div class="ff-trow__cell ff-trow__cell--wave" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--wave" style={columnCellStyle(col)} data-col-key={col.key}>
         <Waveform
           peaks={track.peaks ?? null}
           animating={state === 'analyzing' && !track.peaks?.length}
@@ -62,7 +62,7 @@
           seed={(track.index ?? 1) * 2654435761} />
       </div>
     {:else if col.key === 'cover'}
-      <div class="ff-trow__cell ff-trow__cell--cover" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--cover" style={columnCellStyle(col)} data-col-key={col.key}>
         <div
           class="ff-trow__cover"
           style={track.cover ? `background-image:url(${track.cover})` : undefined}>
@@ -70,15 +70,15 @@
       </div>
     {:else if col.key === 'key'}
       {@const k = String(track.key ?? '—')}
-      <div class="ff-trow__cell ff-trow__cell--key" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--key" style={columnCellStyle(col)} data-col-key={col.key}>
         <span class="ff-trow__text" style="color:{k === '—' ? 'var(--ff-muted)' : keyColor(k)}">{k}</span>
       </div>
     {:else if col.key === 'album' || col.key === 'genre' || col.key === 'year'}
-      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={columnCellStyle(col)} data-col-key={col.key}>
         <span class="ff-trow__text">{track[col.key] ?? '—'}</span>
       </div>
     {:else}
-      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={columnCellStyle(col)}>
+      <div class="ff-trow__cell ff-trow__cell--{col.key}" style={columnCellStyle(col)} data-col-key={col.key}>
         <span class="ff-trow__text">{track[col.key] ?? ''}</span>
       </div>
     {/if}

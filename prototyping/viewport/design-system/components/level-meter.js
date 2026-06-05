@@ -10,8 +10,16 @@ import { el } from '../utils/dom.js';
  *   segments:   number of LEDs per channel
  *   label:      leading caption (set '' to hide)
  */
+const LEVEL_FLOOR = 0.06;
+
+function litCount(level, segments) {
+  const v = Math.max(0, Math.min(1, level));
+  if (v < LEVEL_FLOOR) return 0;
+  return Math.round(v * segments);
+}
+
 function channel(level, segments) {
-  const lit = Math.round(Math.max(0, Math.min(1, level)) * segments);
+  const lit = litCount(level, segments);
   const blocks = [];
   for (let i = 0; i < segments; i++) {
     const frac = i / segments;

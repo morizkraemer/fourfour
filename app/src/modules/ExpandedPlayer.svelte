@@ -7,7 +7,7 @@
   `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { WaveformView, Button, Nudge } from '$ds';
+  import { WaveformView, Nudge } from '$ds';
   import {
     player,
     currentTime,
@@ -54,8 +54,10 @@
     </div>
 
     <div class="ff-xp__head-right">
-      <Button label={player.track?.key || '—'} variant="default" size="compact" />
-      <Nudge value={player.track?.bpm || '—'} label="BPM" variant="compact" />
+      <div class="ff-xp__bpm-key-group">
+        <Nudge value={player.track?.key || '—'} label="KEY" variant="compact" />
+        <Nudge value={player.track?.bpm || '—'} label="BPM" variant="compact" />
+      </div>
       <div class="ff-xp__times">
         <span class="ff-xp__time-cur">{currentTime()}<span class="ff-xp__time-ms">{currentTimeMs()}</span></span>
         <span class="ff-xp__time-tot">{totalTime()}</span>
@@ -183,6 +185,7 @@
   }
 
   .ff-xp__head-right { display: flex; align-items: center; gap: 10px; }
+  .ff-xp__bpm-key-group { display: flex; align-items: center; gap: 8px; }
   .ff-xp__times { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
   .ff-xp__time-cur { font-variant-numeric: tabular-nums; color: var(--ff-text, #fff); font-size: 13px; }
   .ff-xp__time-ms { color: var(--ff-muted, rgba(255, 255, 255, 0.5)); }
