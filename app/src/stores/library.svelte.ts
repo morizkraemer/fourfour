@@ -847,7 +847,7 @@ export async function renamePlaylist(id: number, name: string) {
   await saveState();
 }
 
-export async function addPlaylist(name: string) {
+export async function addPlaylist(name: string): Promise<number> {
   const newId = library.playlists.length > 0 ? Math.max(...library.playlists.map(p => p.id)) + 1 : 1;
   library.playlists.push({
     id: newId,
@@ -855,6 +855,7 @@ export async function addPlaylist(name: string) {
     track_ids: []
   });
   await saveState();
+  return newId;
 }
 
 export async function deletePlaylist(id: number) {

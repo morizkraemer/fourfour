@@ -5,10 +5,19 @@
 
 // ── Organize panel ──────────────────────────────────────────────────────────
 
-export type OrganizeTarget = { kind: 'playlist' | 'usb'; id: string; label: string };
+export type OrganizeTarget = {
+  kind: 'playlist' | 'usb';
+  /** Sidebar-source string: playlist NAME (playlist) or volume PATH (usb). Used by TrackTable. */
+  id: string;
+  label: string;
+  /** Numeric playlist id when kind==='playlist'. */
+  playlistId?: number;
+};
 
 const ORGANIZE_WIDTH_KEY = 'fourfour.organize.width';
 const ORGANIZE_EXPANDED_KEY = 'fourfour.organize.expanded';
+const ORGANIZE_RECENTS_KEY = 'fourfour.organize.recents';
+const ORGANIZE_RECENTS_MAX = 8;
 
 /**
  * Default panel width (px) when pulled out. Tune here.
@@ -38,12 +47,14 @@ export const ui = $state({
   filterFocusNonce: 0,
   /** Right-sidebar organize panel state. */
   organize: {
-    /** Docked target — null in s1; s2 fills it. */
+    /** Docked target — null when picker is shown. */
     target: null as OrganizeTarget | null,
     /** false = rail only; true = pulled-out panel. */
     expanded: false as boolean,
     /** Panel width in px when expanded. */
     width: ORGANIZE_WIDTH_DEFAULT as number,
+    /** Recently docked playlist ids — most recent first, capped at ORGANIZE_RECENTS_MAX. */
+    recentPlaylistIds: [] as number[],
   },
 });
 
@@ -58,6 +69,15 @@ export function initOrganize() {
     }
     const rawE = localStorage.getItem(ORGANIZE_EXPANDED_KEY);
     if (rawE === 'true') ui.organize.expanded = true;
+    const rawR = localStorage.getItem(ORGANIZE_RECENTS_KEY);
+    if (rawR) {
+      const parsed = JSON.parse(rawR);
+      if (Array.isArray(parsed)) {
+        ui.organize.recentPlaylistIds = parsed
+          .filter((x) => typeof x === 'number')
+          .slice(0, ORGANIZE_RECENTS_MAX);
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -67,6 +87,7 @@ function persistOrganize() {
   try {
     localStorage.setItem(ORGANIZE_WIDTH_KEY, String(ui.organize.width));
     localStorage.setItem(ORGANIZE_EXPANDED_KEY, String(ui.organize.expanded));
+    localStorage.setItem(ORGANIZE_RECENTS_KEY, JSON.stringify(ui.organize.recentPlaylistIds));
   } catch {
     /* ignore */
   }
@@ -92,6 +113,21 @@ export function collapseOrganize() {
 export function closeOrganize() {
   ui.organize.target = null;
   ui.organize.expanded = false;
+  persistOrganize();
+}
+
+/**
+ * Dock a target on the right panel: set target, expand, and push playlist id
+ * onto the recents list (for playlist targets).
+ */
+export function dockOrganizeTarget(target: OrganizeTarget) {
+  ui.organize.target = target;
+  ui.organize.expanded = true;
+  if (target.kind === 'playlist' && typeof target.playlistId === 'number') {
+    const id = target.playlistId;
+    const filtered = ui.organize.recentPlaylistIds.filter((x) => x !== id);
+    ui.organize.recentPlaylistIds = [id, ...filtered].slice(0, ORGANIZE_RECENTS_MAX);
+  }
   persistOrganize();
 }
 

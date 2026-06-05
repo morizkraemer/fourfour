@@ -1,5 +1,5 @@
 <!--
-  OrganizePanel.svelte — Persistent right-edge organize panel (s1 shell).
+  OrganizePanel.svelte — Persistent right-edge organize panel.
 
   Visual states:
     rail     (ui.organize.expanded === false): thin sliver at the right edge.
@@ -9,7 +9,10 @@
                 - Below ORGANIZE_SNAP_TO_RAIL_PX → snap to rail
                 - Within ORGANIZE_SNAP_TO_FULL_PX of the viewport edge → snap to full width
 
-  s1 panel body is empty — the picker + table arrive in s2.
+  Panel body (s2):
+    - target === null → <OrganizePicker />
+    - target !== null → <TrackTable sourceId={target.id} embedded />
+      Header shows target.label; inline rename when renaming=true.
 -->
 <script>
   import { Button, Icon } from '$ds';
@@ -23,10 +26,48 @@
     ORGANIZE_SNAP_TO_RAIL_PX,
     ORGANIZE_SNAP_TO_FULL_PX,
   } from '../stores/ui.svelte.ts';
+  import { renamePlaylist } from '../stores/library.svelte.ts';
+  import OrganizePicker from './OrganizePicker.svelte';
+  import TrackTable from './TrackTable.svelte';
 
   // The host (.ff-browse__content) is the resize container.
   // We receive a ref to it via prop so we can read its bounding rect.
   let { contentEl = null } = $props();
+
+  // ── Inline rename for the docked target label ─────────────────────────────
+  // When a new playlist is created and docked, the header enters rename mode
+  // automatically. The OrganizePicker calls dockOrganizeTarget, which sets
+  // target; we detect a freshly-created playlist by listening for the
+  // renamePending flag exposed by OrganizePicker via a callback prop.
+
+  let renamingHeader = $state(false);
+  let renameDraft = $state('');
+  let renameHeaderEl = $state(null);
+
+  /** Called by OrganizePicker after it creates+docks a new playlist. */
+  function startHeaderRename(name) {
+    renamingHeader = true;
+    renameDraft = name;
+    // Focus on next tick after DOM updates
+    setTimeout(() => renameHeaderEl?.select(), 0);
+  }
+
+  async function commitHeaderRename() {
+    if (!renamingHeader) return;
+    renamingHeader = false;
+    const draft = renameDraft.trim();
+    const target = ui.organize.target;
+    if (!target || !draft || draft === target.label) return;
+    if (target.kind === 'playlist' && typeof target.playlistId === 'number') {
+      await renamePlaylist(target.playlistId, draft);
+      // Update the reactive target in ui store
+      ui.organize.target = { ...target, id: draft, label: draft };
+    }
+  }
+
+  function cancelHeaderRename() {
+    renamingHeader = false;
+  }
 
   // ── Rail drag-to-expand ────────────────────────────────────────────────────
 
@@ -152,9 +193,25 @@
 
     <!-- Panel header -->
     <div class="ff-organize__header">
-      <span class="ff-organize__header-title">
-        {ui.organize.target ? ui.organize.target.label : 'Organize'}
-      </span>
+      {#if renamingHeader && ui.organize.target}
+        <!-- Inline rename input for newly-created playlists -->
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          bind:this={renameHeaderEl}
+          class="ff-organize__header-rename"
+          type="text"
+          bind:value={renameDraft}
+          onkeydown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); void commitHeaderRename(); }
+            if (e.key === 'Escape') cancelHeaderRename();
+          }}
+          onblur={commitHeaderRename}
+        />
+      {:else}
+        <span class="ff-organize__header-title">
+          {ui.organize.target ? ui.organize.target.label : 'Organize'}
+        </span>
+      {/if}
       <div class="ff-organize__header-actions">
         <!-- Collapse to rail -->
         <Button
@@ -177,12 +234,15 @@
       </div>
     </div>
 
-    <!-- Panel body — empty in s1; picker + table arrive in s2 -->
-    <div class="ff-organize__body">
-      <div class="ff-organize__empty-hint">
-        <Icon name="list" size={20} />
-        <span>Pick a destination to organize tracks.</span>
-      </div>
+    <!-- Panel body -->
+    <div class="ff-organize__body" class:ff-organize__body--table={ui.organize.target !== null}>
+      {#if ui.organize.target === null}
+        <!-- No target: show destination picker -->
+        <OrganizePicker onNewPlaylistDocked={startHeaderRename} />
+      {:else}
+        <!-- Target docked: show its tracks -->
+        <TrackTable sourceId={ui.organize.target.id} embedded />
+      {/if}
     </div>
   </div>
 {:else}
@@ -312,6 +372,20 @@
     text-overflow: ellipsis;
   }
 
+  /* Inline rename input in header */
+  .ff-organize__header-rename {
+    flex: 1 1 0;
+    background: var(--ff-input-bg, var(--ff-surface-hi));
+    border: 1px solid var(--ff-accent);
+    border-radius: var(--ff-radius-sm, 4px);
+    color: var(--ff-text);
+    font-size: var(--ff-text-sm, 12px);
+    font-weight: 600;
+    padding: 2px var(--ff-space-2);
+    outline: none;
+    min-width: 0;
+  }
+
   .ff-organize__header-actions {
     display: flex;
     align-items: center;
@@ -329,13 +403,16 @@
     padding: var(--ff-space-5);
   }
 
-  .ff-organize__empty-hint {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--ff-space-3);
-    color: var(--ff-faint);
-    font-size: var(--ff-text-sm, 12px);
-    text-align: center;
+  /* When a target is docked the body holds a TrackTable — remove centering padding */
+  .ff-organize__body--table {
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .ff-organize__body--table > :global(*) {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
   }
 </style>
