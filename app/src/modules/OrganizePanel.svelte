@@ -26,7 +26,7 @@
     ORGANIZE_SNAP_TO_RAIL_PX,
     ORGANIZE_SNAP_TO_FULL_PX,
   } from '../stores/ui.svelte.ts';
-  import { renamePlaylist } from '../stores/library.svelte.ts';
+  import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
 
@@ -68,6 +68,36 @@
   function cancelHeaderRename() {
     renamingHeader = false;
   }
+
+  // ── Filled-rail cover glance (s8) ─────────────────────────────────────────
+
+  /**
+   * Up to 4 cover thumbnails from the docked target, shown when the rail is
+   * collapsed and a target is docked. `track.cover` is a blob URL populated by
+   * loadState() → getTrackArtwork(). We take the first MAX_RAIL_COVERS tracks
+   * that have a cover URL; if fewer exist we show the ones we have.
+   */
+  const MAX_RAIL_COVERS = 4;
+
+  const railCovers = $derived.by(() => {
+    const target = ui.organize.target;
+    if (!target) return [];
+    const tracks = tracksForSidebarSource(target.id);
+    const result = [];
+    for (const t of tracks) {
+      if (t.cover) {
+        result.push(t.cover);
+        if (result.length >= MAX_RAIL_COVERS) break;
+      }
+    }
+    return result;
+  });
+
+  const railTrackCount = $derived.by(() => {
+    const target = ui.organize.target;
+    if (!target) return 0;
+    return tracksForSidebarSource(target.id).length;
+  });
 
   // ── Rail drag-to-expand ────────────────────────────────────────────────────
 
@@ -249,16 +279,36 @@
   <!-- ── Rail sliver ──────────────────────────────────────────────────────── -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
-    class="ff-organize ff-organize--rail"
+    class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ''}"
     role="button"
     tabindex="0"
-    aria-label="Open organize panel"
+    aria-label={ui.organize.target ? `Open ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize panel'}
     onpointerdown={onRailPointerDown}
     onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && expandOrganize()}
   >
-    <div class="ff-organize__rail-handle" aria-hidden="true">
-      <Icon name="chevron-left" size={12} />
-    </div>
+    {#if ui.organize.target}
+      <!-- Filled rail: cover thumbnails + track count -->
+      <div class="ff-organize__rail-glance" aria-hidden="true">
+        <div class="ff-organize__rail-covers">
+          {#each railCovers as coverUrl}
+            <div
+              class="ff-organize__rail-cover"
+              style:background-image="url({coverUrl})"
+            ></div>
+          {/each}
+          {#if railCovers.length === 0}
+            <!-- No covers available: show a placeholder block -->
+            <div class="ff-organize__rail-cover ff-organize__rail-cover--placeholder"></div>
+          {/if}
+        </div>
+        <span class="ff-organize__rail-count">{railTrackCount}</span>
+      </div>
+    {:else}
+      <!-- Empty rail: pull-me-out chevron -->
+      <div class="ff-organize__rail-handle" aria-hidden="true">
+        <Icon name="chevron-left" size={12} />
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -285,6 +335,11 @@
     transition: background 0.1s ease;
   }
 
+  /* Filled-collapsed rail: slightly wider to fit cover stack */
+  .ff-organize--rail-filled {
+    width: 44px;
+  }
+
   .ff-organize--rail:hover {
     background: var(--ff-hover);
   }
@@ -299,6 +354,51 @@
 
   .ff-organize--rail:hover .ff-organize__rail-handle {
     color: var(--ff-text-dim, var(--ff-faint));
+  }
+
+  /* ── Filled-rail glance (s8) ─────────────────────────────────────────── */
+  .ff-organize__rail-glance {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--ff-space-2, 4px);
+    padding: var(--ff-space-3, 6px) 0;
+    width: 100%;
+  }
+
+  .ff-organize__rail-covers {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    width: 32px;
+  }
+
+  .ff-organize__rail-cover {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--ff-radius-sm, 3px);
+    background-color: var(--ff-surface-hi, var(--ff-surface));
+    background-size: cover;
+    background-position: center;
+    flex-shrink: 0;
+  }
+
+  .ff-organize__rail-cover--placeholder {
+    background-color: var(--ff-surface-hi, var(--ff-surface));
+    opacity: 0.4;
+  }
+
+  .ff-organize__rail-count {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ff-text-dim, var(--ff-faint));
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+
+  .ff-organize--rail-filled:hover .ff-organize__rail-count {
+    color: var(--ff-text, currentColor);
   }
 
   /* ── Expanded panel ────────────────────────────────────────────────────── */
