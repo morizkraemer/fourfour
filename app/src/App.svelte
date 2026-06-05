@@ -174,7 +174,7 @@
         <div class="ff-browse__slot ff-browse__slot--table">
           <TrackTable />
         </div>
-        {#if ui.detailPaneOpen && selectionCount() > 0}
+        {#if ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded}
           <div class="ff-browse__slot ff-browse__slot--detail">
             <Detail />
           </div>
