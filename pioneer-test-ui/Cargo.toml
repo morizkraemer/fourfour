@@ -16,5 +16,17 @@ cpal = "0.15"
 ringbuf = "0.4"
 symphonia = { version = "0.5", features = ["all"] }
 
+[[bin]]
+name = "waveform_dev"
+path = "src/bin/waveform_dev.rs"
+
+[[bin]]
+name = "waveform_ab"
+path = "src/bin/waveform_ab.rs"
+
+[[bin]]
+name = "waveform_grid"
+path = "src/bin/waveform_grid.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

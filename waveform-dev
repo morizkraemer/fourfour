@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# waveform-dev — analyze a track and open the waveform dev harness.
+#
+# Usage:
+#   ./waveform-dev <audio-file> [port]
+#
+# Starts http://localhost:<port>/dev.html with the analyzed waveform.
+# Press Enter in this terminal to re-analyze; refresh browser to see changes.
+# Edit ui/waveform/WaveformDisplay.js freely — just refresh, no rebuild needed.
+
+set -e
+cd "$(dirname "$0")"
+
+if [ $# -eq 0 ]; then
+    echo "Usage: ./waveform-dev <audio-file> [port]"
+    exit 1
+fi
+
+exec cargo run --bin waveform_dev --release -- "$@"
