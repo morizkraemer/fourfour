@@ -25,7 +25,7 @@
     <ExpandedPlayer />
   {:else}
   <PlayerCompact
-    cover={player.track?.cover ?? ''}
+    cover={player.cover}
     title={player.track?.title || 'No Track Loaded'}
     artist={player.track?.artist || '—'}
     playing={player.playing}
