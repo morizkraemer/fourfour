@@ -332,7 +332,9 @@ def generate_preview(detail: list[WaveformColumn]) -> bytes:
     Height = overall amplitude. Whiteness = how much high-frequency content
     (bright = hi-hats/cymbals, dark = bass-heavy).
 
-    Uses max-per-bin downsampling to preserve transient peaks.
+    Uses mean amplitude per bin. Max-per-bin on mastered material saturates
+    ~95% of PWAV columns (every bin touches 0 dBFS), which renders as a flat
+    blob in the UI — mean preserves relative dynamics while staying peak-safe.
     """
     n = len(detail)
     if n == 0:
@@ -344,9 +346,9 @@ def generate_preview(detail: list[WaveformColumn]) -> bytes:
         end = (i + 1) * n // 400
         bin_slice = detail[start:end] if end > start else [detail[start]]
 
-        # Height from peak amplitude across the bin
-        max_val = max(abs(c.max_val) for c in bin_slice)
-        height = min(31, int(round(max_val * 31.0)))
+        # Height from mean sample peak across the bin (not max — see docstring).
+        avg_val = sum(abs(c.max_val) for c in bin_slice) / len(bin_slice)
+        height = min(31, int(round(avg_val * 31.0)))
 
         # Whiteness from high-band dominance: high / (low + mid + high)
         # High whiteness = treble-heavy (hi-hats), low = bass-heavy (kicks)

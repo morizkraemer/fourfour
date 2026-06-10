@@ -236,6 +236,7 @@ fn run_python_analysis(audio: &Path) -> Result<AnalysisResult> {
         key,
         beat_grid: pioneer_usb_writer::models::BeatGrid { beats },
         waveform: pioneer_usb_writer::models::WaveformPreview { data: waveform_data },
+        energy: None,
         cue_points: Vec::new(),
         color_waveform,
     })

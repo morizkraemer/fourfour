@@ -17,7 +17,7 @@ use pioneer_usb_writer::reader::{anlz as anlz_reader, masterdb};
 use serde_json::json;
 
 fn main() {
-    let mut args_iter = std::env::args().skip(1);
+    let args_iter = std::env::args().skip(1);
     let mut audio_path: Option<PathBuf> = None;
     let mut port: u16 = 8080;
     let mut sweep = true;

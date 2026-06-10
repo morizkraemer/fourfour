@@ -47,6 +47,15 @@ function busy() {
   return library.analyzing || library.syncing;
 }
 
+/** Analysis can be queued while a run is already in progress. */
+function analyzeBusy() {
+  return library.syncing;
+}
+
+function hasUnanalyzedTracks() {
+  return library.tracks.some((t) => !t.analyzed);
+}
+
 /** @param {string} sourceId */
 export async function importIntoSource(sourceId) {
   const dir = await pickDirectory();
@@ -117,7 +126,7 @@ export function buildSourceContextMenuItems(opts) {
         },
         {
           label: 'Analyze all unanalyzed',
-          disabled: busy() || library.tracks.length === 0,
+          disabled: analyzeBusy() || library.tracks.length === 0 || !hasUnanalyzedTracks(),
           onClick: () => analyzeTracks(),
         }
       );
@@ -201,7 +210,7 @@ export function buildSidebarSectionMenuItems(section, opts = {}) {
       },
       {
         label: 'Analyze all unanalyzed',
-        disabled: busy() || library.tracks.length === 0,
+        disabled: analyzeBusy() || library.tracks.length === 0 || !hasUnanalyzedTracks(),
         onClick: () => analyzeTracks(),
       }
     );
@@ -290,7 +299,7 @@ export function buildTrackContextMenuItems(opts) {
       { isSeparator: true },
       {
         label: analyzeLabel,
-        disabled: library.analyzing,
+        disabled: analyzeBusy(),
         onClick: () => analyzeTrackIds(trackIds),
       },
       {

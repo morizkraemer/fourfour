@@ -302,3 +302,44 @@ fn read_key_table(conn: &Connection) -> Result<HashMap<String, String>> {
     }
     Ok(map)
 }
+
+/// Find the ANLZ file path for an audio file from Rekordbox's local `master.db`.
+pub fn find_anlz_path(db_path: &Path, audio_path: &Path) -> Result<PathBuf> {
+    let conn = open_db(db_path)?;
+    
+    // We search the djmdContent table for a FolderPath matching the audio_path.
+    // Try both the exact path string and a canonical path comparison if needed.
+    let audio_str = audio_path.to_string_lossy();
+    let mut stmt = conn.prepare("SELECT AnalysisDataPath FROM djmdContent WHERE FolderPath = ?1")?;
+    let mut rows = stmt.query_map(params![audio_str], |row| row.get::<_, Option<String>>(0))?;
+    
+    if let Some(row) = rows.next() {
+        if let Some(path_str) = row? {
+            if !path_str.is_empty() {
+                return Ok(PathBuf::from(path_str));
+            }
+        }
+    }
+    
+    // Fallback: search and compare canonical paths.
+    let mut stmt = conn.prepare("SELECT FolderPath, AnalysisDataPath FROM djmdContent WHERE AnalysisDataPath IS NOT NULL AND AnalysisDataPath != ''")?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    
+    let target_canonical = audio_path.canonicalize().unwrap_or_else(|_| audio_path.to_path_buf());
+    
+    for row in rows {
+        let (folder_path, analysis_path) = row?;
+        if let Ok(canon_folder) = Path::new(&folder_path).canonicalize() {
+            if canon_folder == target_canonical {
+                return Ok(PathBuf::from(analysis_path));
+            }
+        } else if Path::new(&folder_path) == target_canonical {
+            return Ok(PathBuf::from(analysis_path));
+        }
+    }
+    
+    anyhow::bail!("No ANLZ path found in master.db for {}", audio_path.display())
+}
+

@@ -3,7 +3,9 @@
 mod dto;
 mod playback;
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -25,6 +27,68 @@ use playback::{
 // ---------------------------------------------------------------------------
 
 type SharedLibrary = Arc<Mutex<LocalLibrary>>;
+
+type AnalysisWorkItem = (i64, PathBuf);
+type SharedAnalysisQueue = Arc<Mutex<VecDeque<AnalysisWorkItem>>>;
+
+/// Live analysis run state — exposes the work queue for reorder / enqueue while running.
+#[derive(Clone)]
+struct AnalysisCoordinator {
+    active_queue: Arc<Mutex<Option<SharedAnalysisQueue>>>,
+    total: Arc<AtomicU32>,
+    running: Arc<AtomicBool>,
+}
+
+impl Default for AnalysisCoordinator {
+    fn default() -> Self {
+        Self {
+            active_queue: Arc::new(Mutex::new(None)),
+            total: Arc::new(AtomicU32::new(0)),
+            running: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+impl AnalysisCoordinator {
+    fn is_active(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
+    }
+
+    /// Returns true when this caller owns the run (false = work was merged into an active run).
+    fn try_begin(&self) -> bool {
+        self.running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+    }
+
+    fn register_run(&self, queue: SharedAnalysisQueue, total: u32) {
+        *self.active_queue.lock().expect("analysis coordinator lock") = Some(queue);
+        self.total.store(total, Ordering::Relaxed);
+    }
+
+    fn end_run(&self) {
+        *self.active_queue.lock().expect("analysis coordinator lock") = None;
+        self.total.store(0, Ordering::Relaxed);
+        self.running.store(false, Ordering::Release);
+    }
+
+    fn with_queue<R>(&self, f: impl FnOnce(&mut VecDeque<AnalysisWorkItem>) -> R) -> Option<R> {
+        let guard = self.active_queue.lock().ok()?;
+        let q = guard.as_ref()?;
+        let mut deque = q.lock().ok()?;
+        Some(f(&mut deque))
+    }
+
+    fn bump_total(&self, delta: u32) {
+        if delta > 0 {
+            self.total.fetch_add(delta, Ordering::Relaxed);
+        }
+    }
+
+    fn total(&self) -> u32 {
+        self.total.load(Ordering::Relaxed)
+    }
+}
 
 /// Build TrackInfo list from the library's tracks + flags.
 fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
@@ -201,15 +265,43 @@ fn resolve_python() -> String {
     }
 }
 
+/// Unwrap analyzer stdout JSON into the per-track result object.
+///
+/// Accepts legacy `[{...}]` batches, current `{"deeprhythm_essentia": {...}}`
+/// backend-keyed output from `python -m fourfour_analysis analyze`, and a flat
+/// `{bpm, key, ...}` object.
+fn parse_analyzer_stdout(stdout: &[u8]) -> Result<serde_json::Value, String> {
+    let json: serde_json::Value =
+        serde_json::from_slice(stdout).map_err(|e| format!("Bad JSON ({} bytes): {e}", stdout.len()))?;
+
+    if let Some(arr) = json.as_array() {
+        return arr
+            .first()
+            .cloned()
+            .ok_or_else(|| "Analyzer returned empty array".to_string());
+    }
+
+    if let Some(obj) = json.as_object() {
+        if obj.contains_key("bpm") || obj.contains_key("waveform_preview") {
+            return Ok(json);
+        }
+        if let Some(inner) = obj.values().find(|v| v.is_object()) {
+            return Ok(inner.clone());
+        }
+    }
+
+    Err("Analyzer JSON has no recognizable result object".to_string())
+}
+
 /// Convert a Python fourfour_analysis JSON result to `models::AnalysisResult`.
 fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult {
     let bpm = json.get("bpm").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let key = json.get("key").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let energy = json
-        .get("energy")
-        .and_then(|v| v.get("score"))
-        .and_then(|v| v.as_u64())
-        .map(|s| s as u8);
+    let energy = json.get("energy").and_then(|v| {
+        v.as_u64()
+            .map(|s| s as u8)
+            .or_else(|| v.get("score").and_then(|s| s.as_u64()).map(|s| s as u8))
+    });
 
     // Mono waveform preview (400 bytes)
     let mut waveform_data = [0u8; 400];
@@ -323,106 +415,219 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
     }
 }
 
+/// Run the Python analyzer for one track.
+async fn analyze_one_track(
+    python_cmd: &str,
+    _track_id: i64,
+    source_path: &Path,
+) -> Result<(models::AnalysisResult, String), String> {
+    let path_str = source_path.to_string_lossy().to_string();
+    let t0 = std::time::Instant::now();
+
+    let child = tokio::process::Command::new(python_cmd)
+        .args([
+            "-m",
+            "fourfour_analysis",
+            "analyze",
+            &path_str,
+            "--backend",
+            "deeprhythm_essentia",
+            "--json",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("Failed to spawn analyzer: {e}"))?;
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), child.wait_with_output())
+        .await
+        .map_err(|_| "TIMEOUT after 120s".to_string())?
+        .map_err(|e| format!("wait_with_output failed: {e}"))?;
+
+    let elapsed = t0.elapsed();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout_len = output.stdout.len();
+
+    if !output.status.success() {
+        return Err(format!(
+            "exit={} stderr={}",
+            output.status.code().unwrap_or(-1),
+            &stderr[..stderr.len().min(500)]
+        ));
+    }
+
+    if !stderr.trim().is_empty() {
+        eprintln!("[analyzer stderr] {}", &stderr[..stderr.len().min(300)]);
+    }
+
+    let result_json = parse_analyzer_stdout(&output.stdout)?;
+    let analysis = python_result_to_analysis(&result_json);
+    Ok((
+        analysis,
+        format!("{:.1}s {}bytes", elapsed.as_secs_f64(), stdout_len),
+    ))
+}
+
+fn resolve_analysis_work(
+    lib: &LocalLibrary,
+    ids: &[i64],
+) -> Result<Vec<AnalysisWorkItem>, String> {
+    let mut work = Vec::with_capacity(ids.len());
+    for &id in ids {
+        if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
+            work.push((id, track.source_path));
+        }
+    }
+    Ok(work)
+}
+
+fn merge_into_analysis_queue(
+    coordinator: &AnalysisCoordinator,
+    items: Vec<AnalysisWorkItem>,
+    front: bool,
+) -> u32 {
+    let mut added = 0u32;
+    coordinator.with_queue(|queue| {
+        for item in items {
+            let track_id = item.0;
+            if let Some(pos) = queue.iter().position(|(id, _)| *id == track_id) {
+                if front && pos > 0 {
+                    let existing = queue.remove(pos).unwrap();
+                    queue.push_front(existing);
+                }
+                continue;
+            }
+            if front {
+                queue.push_front(item);
+            } else {
+                queue.push_back(item);
+            }
+            added += 1;
+        }
+    });
+    if added > 0 {
+        coordinator.bump_total(added);
+    }
+    added
+}
+
+/// Move a waiting track to the front of the analysis queue (next slot when a worker frees up).
+#[tauri::command]
+fn prioritize_analysis(
+    track_id: i64,
+    coordinator: State<'_, AnalysisCoordinator>,
+) -> Result<(), String> {
+    coordinator.with_queue(|queue| {
+        if let Some(pos) = queue.iter().position(|(id, _)| *id == track_id) {
+            if pos > 0 {
+                let item = queue.remove(pos).unwrap();
+                queue.push_front(item);
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Append or prepend tracks to the active analysis run (no-op when idle).
+#[tauri::command]
+fn enqueue_analysis(
+    ids: Vec<i64>,
+    front: bool,
+    state: State<'_, SharedLibrary>,
+    coordinator: State<'_, AnalysisCoordinator>,
+) -> Result<u32, String> {
+    if !coordinator.is_active() {
+        return Ok(0);
+    }
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    let items = resolve_analysis_work(&lib, &ids)?;
+    Ok(merge_into_analysis_queue(&coordinator, items, front))
+}
+
 /// Run Python analysis for the given track ids (paths). Used by bulk and per-selection commands.
 async fn run_track_analysis(
     app: AppHandle,
     shared: SharedLibrary,
-    pending: Vec<(i64, PathBuf)>,
+    coordinator: AnalysisCoordinator,
+    pending: Vec<AnalysisWorkItem>,
 ) -> Result<Vec<TrackInfo>, String> {
-    let total = pending.len() as u32;
-    if total == 0 {
+    if pending.is_empty() {
         debug_info(&app, "No unanalyzed tracks — nothing to do");
         let lib = shared.lock().map_err(|e| e.to_string())?;
         return build_track_infos(&lib);
     }
 
-    let python = resolve_python();
-    debug_info(&app, &format!("Starting analysis: {} tracks, python={}", total, python));
-
-    // Limit concurrency: each Python process loads DeepRhythm (heavy model).
-    let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(3));
-
-    // 2. Spawn all tasks; they acquire the semaphore before launching Python.
-    let app_clone = app.clone();
-    let mut join_set = tokio::task::JoinSet::new();
-    for (idx, (track_id, source_path)) in pending.iter().enumerate() {
-        let sem = semaphore.clone();
-        let python_cmd = python.clone();
-        let path_str = source_path.to_string_lossy().to_string();
-        let path_str_log = path_str.clone();
-        let track_id = *track_id;
-        let app_log = app_clone.clone();
-
-        join_set.spawn(async move {
-            debug_dim(&app_log, &format!("[slot {}] waiting for semaphore…", idx + 1));
-            let _permit = sem.acquire_owned().await.unwrap();
-            debug_dim(&app_log, &format!("[slot {}] acquired, spawning Python for {}", idx + 1, Path::new(&path_str).file_name().unwrap_or_default().to_string_lossy()));
-            let t0 = std::time::Instant::now();
-
-            let result: Result<(models::AnalysisResult, String), String> = async {
-                let child = match tokio::process::Command::new(&python_cmd)
-                    .args(["-m", "fourfour_analysis", "analyze", &path_str, "--backend", "deeprhythm_essentia", "--json"])
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .kill_on_drop(true)
-                    .spawn()
-                {
-                    Ok(c) => c,
-                    Err(e) => return Err(format!("Failed to spawn analyzer: {e}")),
-                };
-
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(120),
-                    child.wait_with_output(),
-                ).await {
-                    Ok(Ok(output)) => {
-                        let elapsed = t0.elapsed();
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        let stdout_len = output.stdout.len();
-
-                        if !output.status.success() {
-                            return Err(format!(
-                                "exit={} stderr={}",
-                                output.status.code().unwrap_or(-1),
-                                &stderr[..stderr.len().min(500)]
-                            ));
-                        }
-
-                        if !stderr.trim().is_empty() {
-                            eprintln!("[analyzer stderr] {}", &stderr[..stderr.len().min(300)]);
-                        }
-
-                        let results: Vec<serde_json::Value> = match serde_json::from_slice(&output.stdout) {
-                            Ok(r) => r,
-                            Err(e) => return Err(format!("Bad JSON ({} bytes): {e}", stdout_len)),
-                        };
-
-                        let analysis = match results.into_iter().next().map(|v| python_result_to_analysis(&v)) {
-                            Some(a) => a,
-                            None => return Err("Analyzer returned empty array".to_string()),
-                        };
-
-                        Ok((analysis, format!("{:.1}s {}bytes", elapsed.as_secs_f64(), stdout_len)))
-                    }
-                    Ok(Err(e)) => Err(format!("wait_with_output failed: {e}")),
-                    Err(_) => Err(format!("TIMEOUT after 120s")),
-                }
-            }.await;
-
-            let elapsed = t0.elapsed();
-            (track_id, path_str_log, result, elapsed)
-        });
+    if !coordinator.try_begin() {
+        merge_into_analysis_queue(&coordinator, pending, false);
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        return build_track_infos(&lib);
     }
 
-    // 3. Process results as they complete (sequential DB writes, parallel Python).
+    let python = resolve_python();
+    debug_info(
+        &app,
+        &format!(
+            "Starting analysis: {} tracks, python={}",
+            pending.len(),
+            python
+        ),
+    );
+
+    let queue: SharedAnalysisQueue = Arc::new(Mutex::new(VecDeque::from(pending)));
+    let initial_total = {
+        let q = queue.lock().map_err(|e| e.to_string())?;
+        q.len() as u32
+    };
+    coordinator.register_run(queue.clone(), initial_total);
+    struct RunGuard {
+        coordinator: AnalysisCoordinator,
+    }
+    impl Drop for RunGuard {
+        fn drop(&mut self) {
+            self.coordinator.end_run();
+        }
+    }
+    let _run_guard = RunGuard {
+        coordinator: coordinator.clone(),
+    };
+
+    const MAX_IN_FLIGHT: usize = 3;
+    let mut join_set: tokio::task::JoinSet<(i64, PathBuf, Result<(models::AnalysisResult, String), String>)> =
+        tokio::task::JoinSet::new();
     let mut completed: u32 = 0;
     let mut errors: u32 = 0;
-    while let Some(task_result) = join_set.join_next().await {
-        let (track_id, path_str, analysis_result, elapsed) =
+
+    loop {
+        while join_set.len() < MAX_IN_FLIGHT {
+            let next = {
+                let mut q = queue.lock().map_err(|e| e.to_string())?;
+                q.pop_front()
+            };
+            let Some((track_id, source_path)) = next else {
+                break;
+            };
+            let python_cmd = python.clone();
+            join_set.spawn(async move {
+                let result = analyze_one_track(&python_cmd, track_id, &source_path).await;
+                (track_id, source_path, result)
+            });
+        }
+
+        if join_set.is_empty() {
+            break;
+        }
+
+        let task_result = join_set
+            .join_next()
+            .await
+            .ok_or_else(|| "analysis task ended".to_string())?;
+        let (track_id, source_path, analysis_result) =
             task_result.map_err(|e| format!("Task panicked: {e}"))?;
 
         completed += 1;
-        let file_name = Path::new(&path_str)
+        let total = coordinator.total().max(completed);
+        let file_name = source_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
@@ -431,8 +636,7 @@ async fn run_track_analysis(
         match analysis_result {
             Ok((result, detail)) => {
                 debug_ok(&app, &format!(
-                    "[{completed}/{total}] {file_name} — {:.1}s bpm={:.1} key={} beats={} cues={} {detail}",
-                    elapsed.as_secs_f64(),
+                    "[{completed}/{total}] {file_name} — bpm={:.1} key={} beats={} cues={} {detail}",
                     result.bpm,
                     result.key,
                     result.beat_grid.beats.len(),
@@ -446,10 +650,13 @@ async fn run_track_analysis(
                     lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
                 }
                 lib.set_analysis(track_id, &result).map_err(|e| e.to_string())?;
-                debug_dim(&app, &format!(
-                    "[{completed}/{total}] {file_name} DB+ANLZ write {:.1}s",
-                    t_db.elapsed().as_secs_f64()
-                ));
+                debug_dim(
+                    &app,
+                    &format!(
+                        "[{completed}/{total}] {file_name} DB+ANLZ write {:.1}s",
+                        t_db.elapsed().as_secs_f64()
+                    ),
+                );
 
                 app.emit(
                     "analysis-progress",
@@ -457,6 +664,7 @@ async fn run_track_analysis(
                         current: completed,
                         total,
                         message: format!("Analyzed {file_name} ({completed}/{total})"),
+                        track_id: Some(track_id as u32),
                     },
                 )
                 .ok();
@@ -464,18 +672,36 @@ async fn run_track_analysis(
             Err(e) => {
                 errors += 1;
                 debug_err(&app, &format!(
-                    "[{completed}/{total}] {file_name} — {:.1}s FAILED: {e}",
-                    elapsed.as_secs_f64(),
+                    "[{completed}/{total}] {file_name} — FAILED: {e}",
                 ));
+                app.emit(
+                    "analysis-progress",
+                    ProgressPayload {
+                        current: completed,
+                        total,
+                        message: format!("Failed {file_name} ({completed}/{total})"),
+                        track_id: Some(track_id as u32),
+                    },
+                )
+                .ok();
             }
         }
     }
 
     debug_info(&app, &format!(
-        "Analysis complete: {completed} done, {errors} errors out of {total} tracks"
+        "Analysis complete: {completed} done, {errors} errors out of {}",
+        coordinator.total()
     ));
 
-    // 4. Return the full updated track list.
+    app.emit("analysis-complete", ()).ok();
+
+    if errors > 0 && errors == coordinator.total() {
+        return Err(format!(
+            "Analysis failed for all {} tracks — see debug log",
+            coordinator.total()
+        ));
+    }
+
     let lib = shared.lock().map_err(|e| e.to_string())?;
     build_track_infos(&lib)
 }
@@ -485,20 +711,15 @@ async fn run_track_analysis(
 async fn analyze_tracks(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    coordinator: State<'_, AnalysisCoordinator>,
 ) -> Result<Vec<TrackInfo>, String> {
     let shared: SharedLibrary = state.inner().clone();
-    let pending: Vec<(i64, PathBuf)> = {
+    let pending: Vec<AnalysisWorkItem> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
         let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
-        let mut work = Vec::with_capacity(unanalyzed_ids.len());
-        for id in unanalyzed_ids {
-            if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
-                work.push((id, track.source_path));
-            }
-        }
-        work
+        resolve_analysis_work(&lib, &unanalyzed_ids)?
     };
-    run_track_analysis(app, shared, pending).await
+    run_track_analysis(app, shared, coordinator.inner().clone(), pending).await
 }
 
 /// Analyze or re-analyze specific tracks by library id.
@@ -507,19 +728,14 @@ async fn analyze_track_ids(
     ids: Vec<i64>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    coordinator: State<'_, AnalysisCoordinator>,
 ) -> Result<Vec<TrackInfo>, String> {
     let shared: SharedLibrary = state.inner().clone();
-    let pending: Vec<(i64, PathBuf)> = {
+    let pending: Vec<AnalysisWorkItem> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        let mut work = Vec::with_capacity(ids.len());
-        for id in ids {
-            if let Some(track) = lib.get_track(id).map_err(|e| e.to_string())? {
-                work.push((id, track.source_path));
-            }
-        }
-        work
+        resolve_analysis_work(&lib, &ids)?
     };
-    run_track_analysis(app, shared, pending).await
+    run_track_analysis(app, shared, coordinator.inner().clone(), pending).await
 }
 
 /// Incrementally sync the Pioneer USB structure to the given output directory.
@@ -875,12 +1091,13 @@ fn effective_preview(a: &models::AnalysisResult) -> Option<Vec<u8>> {
 }
 
 fn color_waveform_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
-    // Overview is fixed ~1200 entries across the full track — best match for the player strip.
-    if !cw.overview.is_empty() {
-        return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
-    }
+    // Prefer full detail downsampled to the IPC cap. Overview (~1200 cols) is the
+    // Rekordbox-native width but looks soft on our ~150 col/sec analyzer output.
     if !cw.detail.is_empty() {
         return downsample_3band(&cw.detail, PLAYER_COLOR_WAVEFORM_MAX);
+    }
+    if !cw.overview.is_empty() {
+        return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
     }
     Vec::new()
 }
@@ -1265,6 +1482,8 @@ fn main() {
             scan_files,
             analyze_tracks,
             analyze_track_ids,
+            enqueue_analysis,
+            prioritize_analysis,
             write_usb,
             remove_tracks,
             set_test_cues,
@@ -1300,6 +1519,7 @@ fn main() {
             let library = LocalLibrary::open(&db_path)
                 .expect("Failed to open library database");
             app.manage(Arc::new(Mutex::new(library)));
+            app.manage(AnalysisCoordinator::default());
 
             match PlaybackEngine::new() {
                 Ok(playback) => {
@@ -1323,4 +1543,26 @@ fn main() {
                 _ => {}
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_analyzer_stdout, python_result_to_analysis};
+
+    #[test]
+    fn parse_backend_keyed_analyzer_json() {
+        let stdout = br#"{"deeprhythm_essentia":{"bpm":128.0,"key":"8A","waveform_preview":[63]}}"#;
+        let json = parse_analyzer_stdout(stdout).expect("parse");
+        let analysis = python_result_to_analysis(&json);
+        assert!((analysis.bpm - 128.0).abs() < f64::EPSILON);
+        assert_eq!(analysis.key, "8A");
+    }
+
+    #[test]
+    fn parse_legacy_array_analyzer_json() {
+        let stdout = br#"[{"bpm":120.0,"key":"1A","waveform_preview":[1,2,3]}]"#;
+        let json = parse_analyzer_stdout(stdout).expect("parse");
+        let analysis = python_result_to_analysis(&json);
+        assert!((analysis.bpm - 120.0).abs() < f64::EPSILON);
+    }
 }

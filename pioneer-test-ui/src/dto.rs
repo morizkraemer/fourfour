@@ -65,6 +65,7 @@ pub struct ProgressPayload {
     pub current: u32,
     pub total: u32,
     pub message: String,
+    pub track_id: Option<u32>,
 }
 
 /// State returned by `load_state` so the frontend can restore everything.

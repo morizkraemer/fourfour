@@ -6,11 +6,12 @@
   import { onMount } from 'svelte';
   import { StatusBar, LevelMeter, Icon } from '$ds';
   import { library } from '../stores/library.svelte.ts';
-  import { player, initPlayerTransport } from '../stores/player.svelte.ts';
+  import { player, initPlayerAnalysisRefresh, initPlayerTransport } from '../stores/player.svelte.ts';
   import { openSettings } from '../stores/ui.svelte.ts';
 
   onMount(() => {
     void initPlayerTransport();
+    initPlayerAnalysisRefresh();
   });
 
   let showSpinner = $derived(library.analyzing || library.syncing);

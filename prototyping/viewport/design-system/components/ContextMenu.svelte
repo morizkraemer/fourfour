@@ -35,14 +35,24 @@
     function onKey(e) {
       if (e.key === 'Escape') onClose?.();
     }
+    function onWindowBlur() {
+      onClose?.();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') onClose?.();
+    }
     const t = setTimeout(() => {
-      document.addEventListener('mousedown', onDoc);
+      document.addEventListener('pointerdown', onDoc, true);
       document.addEventListener('keydown', onKey);
+      window.addEventListener('blur', onWindowBlur);
+      document.addEventListener('visibilitychange', onVisibilityChange);
     }, 0);
     return () => {
       clearTimeout(t);
-      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('pointerdown', onDoc, true);
       document.removeEventListener('keydown', onKey);
+      window.removeEventListener('blur', onWindowBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   });
 

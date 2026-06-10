@@ -266,6 +266,24 @@ export async function setTestCues(ids: number[]): Promise<TrackInfo[]> {
   }
 }
 
+export async function enqueueAnalysis(ids: number[], front = false): Promise<number> {
+  try {
+    return await invoke<number>('enqueue_analysis', { ids, front });
+  } catch (err) {
+    lastTauriError = `enqueue_analysis fail: ${String(err)}`;
+    return 0;
+  }
+}
+
+export async function prioritizeAnalysis(trackId: number): Promise<void> {
+  try {
+    await invoke<void>('prioritize_analysis', { trackId });
+    lastTauriError = 'invoke(prioritize_analysis) OK';
+  } catch (err) {
+    lastTauriError = `prioritize_analysis fail: ${String(err)}`;
+  }
+}
+
 export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
   try {
     return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
@@ -410,10 +428,22 @@ export async function getTrackArtwork(trackId: number): Promise<Uint8Array | nul
   }
 }
 
-export function listenToAnalysisProgress(callback: (payload: { current: number; total: number; message: string }) => void) {
+export function listenToAnalysisProgress(
+  callback: (payload: {
+    current: number;
+    total: number;
+    message: string;
+    track_id?: number;
+  }) => void,
+) {
   let unsubscribe: () => void = () => {};
   try {
-    listen<{ current: number; total: number; message: string }>('analysis-progress', (event) => {
+    listen<{
+      current: number;
+      total: number;
+      message: string;
+      track_id?: number;
+    }>('analysis-progress', (event) => {
       callback(event.payload);
     }).then(unsub => {
       unsubscribe = unsub;
@@ -422,6 +452,24 @@ export function listenToAnalysisProgress(callback: (payload: { current: number; 
     });
   } catch (err) {
     lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
+  }
+  return () => unsubscribe();
+}
+
+export function listenToAnalysisComplete(callback: () => void) {
+  let unsubscribe: () => void = () => {};
+  try {
+    listen<void>('analysis-complete', () => {
+      callback();
+    })
+      .then((unsub) => {
+        unsubscribe = unsub;
+      })
+      .catch((err) => {
+        lastTauriError = `listen(analysis-complete) fail: ${String(err)}`;
+      });
+  } catch (err) {
+    lastTauriError = `listen(analysis-complete) fail: ${String(err)}`;
   }
   return () => unsubscribe();
 }

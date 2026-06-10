@@ -14,12 +14,14 @@ import {
   setTestCues as tauriSetTestCues,
   analyzeTracks as tauriAnalyzeTracks,
   analyzeTrackIds as tauriAnalyzeTrackIds,
+  prioritizeAnalysis as tauriPrioritizeAnalysis,
   getMountedVolumes as tauriGetMountedVolumes,
   readUsbState as tauriReadUsbState,
   writeUsb as tauriWriteUsb,
   ejectVolume as tauriEjectVolume,
   wipeUsb as tauriWipeUsb,
   listenToAnalysisProgress,
+  listenToAnalysisComplete,
   listenToWriteComplete,
   lastTauriError,
   getIpcDiagnostic,
@@ -321,6 +323,40 @@ export function isTrackAnalyzing(trackId: number): boolean {
   return library.analyzingTrackIds.includes(trackId);
 }
 
+function unanalyzedIds(ids: number[]): number[] {
+  return [...new Set(ids)].filter((id) => {
+    if (id <= 0) return false;
+    const track = library.tracks.find((t) => t.id === id);
+    return track != null && !track.analyzed;
+  });
+}
+
+/** Move a track to the front of the waiting analysis queue. */
+function bumpAnalysisQueuePriority(trackId: number) {
+  if (!library.analyzingTrackIds.includes(trackId)) return;
+  library.analyzingTrackIds = [
+    trackId,
+    ...library.analyzingTrackIds.filter((id) => id !== trackId),
+  ];
+  void tauriPrioritizeAnalysis(trackId);
+}
+
+/**
+ * Ensure a track is analyzed — used when loading into the player.
+ * Starts a background run when idle; bumps queue priority when already queued.
+ */
+export function requestBackgroundAnalysis(trackId: number) {
+  const track = library.tracks.find((t) => t.id === trackId);
+  if (!track || track.analyzed) return;
+
+  if (isTrackAnalyzing(trackId)) {
+    bumpAnalysisQueuePriority(trackId);
+    return;
+  }
+
+  void analyzeTrackIds([trackId]);
+}
+
 function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string }, fileName: string) {
   const base = track.filePath?.split(/[/\\]/).pop();
   return base === fileName || track.title === fileName;
@@ -371,11 +407,19 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
   const job = (async () => {
     try {
       const res = await getAnalysisData(id);
-      if (!isValidAnalysisPayload(res)) return;
+      if (!isValidAnalysisPayload(res)) {
+        track.analyzed = false;
+        track.analysisLoaded = false;
+        bumpLibraryTracks();
+        return;
+      }
       applyWaveformAndCuesFromAnalysis(track, res);
       bumpLibraryTracks();
     } catch (err) {
       console.warn('ensureTrackPeaksLoaded failed:', err);
+      track.analyzed = false;
+      track.analysisLoaded = false;
+      bumpLibraryTracks();
     } finally {
       peakLoadInflight.delete(id);
     }
@@ -389,6 +433,12 @@ async function refreshTrackAnalysisDisplay(track: Record<string, unknown>, attem
   invalidateAnalysisCache(id);
   try {
     const res = await getAnalysisData(id, true);
+    if (!isValidAnalysisPayload(res)) {
+      track.analyzed = false;
+      track.analysisLoaded = false;
+      bumpLibraryTracks();
+      return;
+    }
     applyWaveformAndCuesFromAnalysis(track, res);
     bumpLibraryTracks();
   } catch (err) {
@@ -397,6 +447,9 @@ async function refreshTrackAnalysisDisplay(track: Record<string, unknown>, attem
       return refreshTrackAnalysisDisplay(track, attempt + 1);
     }
     console.warn('Failed to refresh analysis display:', err);
+    track.analyzed = false;
+    track.analysisLoaded = false;
+    bumpLibraryTracks();
   }
 }
 
@@ -415,15 +468,35 @@ function markTracksPendingAnalysis(ids: number[]) {
   }
 }
 
-function handleAnalysisProgressEvent(progress: { current: number; total: number; message: string }) {
+function handleAnalysisProgressEvent(progress: {
+  current: number;
+  total: number;
+  message: string;
+  track_id?: number;
+}) {
+  library.analyzing = true;
   library.analysisProgress = progress;
   library.statusMessage = progress.message || `Analyzing (${progress.current}/${progress.total})`;
 
-  const match = progress.message.match(/^Analyzed (.+?) \(\d+\/\d+\)$/);
+  if (progress.track_id) {
+    finishAnalyzingTrack(progress.track_id);
+    return;
+  }
+
+  const match = progress.message.match(/^(?:Analyzed|Failed) (.+?) \(\d+\/\d+\)$/);
   if (!match) return;
   const fileName = match[1];
   const track = library.tracks.find((t) => trackMatchesAnalyzedFilename(t, fileName));
   if (track) finishAnalyzingTrack(track.id);
+}
+
+function handleAnalysisCompleteEvent() {
+  library.analyzing = false;
+  library.analyzingTrackIds = [];
+  library.analysisProgress = { current: 0, total: 0, message: '' };
+  if (!library.syncing) {
+    library.statusMessage = 'Ready';
+  }
 }
 
 /* ── Mapper ─────────────────────────────────────────────────────────── */
@@ -539,6 +612,7 @@ export async function initLibrary() {
     if (!libraryListenersInstalled) {
       libraryListenersInstalled = true;
       listenToAnalysisProgress(handleAnalysisProgressEvent);
+      listenToAnalysisComplete(handleAnalysisCompleteEvent);
       listenToWriteComplete(() => {
         library.syncing = false;
         library.statusMessage = 'Ready';
@@ -668,46 +742,36 @@ export async function removeTracks(ids: number[]) {
 
 /** Trigger analysis on all pending tracks */
 export async function analyzeTracks() {
-  if (library.analyzing) return;
   const pendingIds = library.tracks.filter((t) => !t.analyzed).map((t) => t.id);
+  if (pendingIds.length === 0) return;
+
   markTracksPendingAnalysis(pendingIds);
   library.analyzing = true;
-  library.analyzingTrackIds = pendingIds;
+  library.analyzingTrackIds = [...new Set([...library.analyzingTrackIds, ...pendingIds])];
   library.statusMessage = 'Starting analysis...';
   try {
     await tauriAnalyzeTracks();
-    invalidateAnalysisCache();
-    await loadState();
   } catch (err) {
     console.error('analyzeTracks failed:', err);
-  } finally {
-    library.analyzing = false;
-    library.analyzingTrackIds = [];
-    library.statusMessage = 'Ready';
-    library.analysisProgress = { current: 0, total: 0, message: '' };
+    if (!library.syncing) library.statusMessage = 'Analysis failed';
   }
 }
 
 /** Analyze or re-analyze specific tracks by id */
 export async function analyzeTrackIds(ids: number[]) {
-  const unique = [...new Set(ids)].filter((id) => id > 0);
-  if (library.analyzing || unique.length === 0) return;
+  const unique = unanalyzedIds(ids);
+  if (unique.length === 0) return;
+
   markTracksPendingAnalysis(unique);
   library.analyzing = true;
-  library.analyzingTrackIds = unique;
+  library.analyzingTrackIds = [...new Set([...library.analyzingTrackIds, ...unique])];
   library.statusMessage =
     unique.length === 1 ? 'Analyzing track…' : `Analyzing ${unique.length} tracks…`;
   try {
     await tauriAnalyzeTrackIds(unique);
-    for (const id of unique) invalidateAnalysisCache(id);
-    await loadState();
   } catch (err) {
     console.error('analyzeTrackIds failed:', err);
-  } finally {
-    library.analyzing = false;
-    library.analyzingTrackIds = [];
-    library.statusMessage = 'Ready';
-    library.analysisProgress = { current: 0, total: 0, message: '' };
+    if (!library.syncing) library.statusMessage = 'Analysis failed';
   }
 }
 

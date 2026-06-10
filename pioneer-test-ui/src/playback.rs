@@ -112,12 +112,18 @@ struct OutputDeviceInfo {
     sample_rate: u32,
 }
 
+#[allow(dead_code)]
+pub struct AudioStreamHandle(pub cpal::Stream);
+unsafe impl Send for AudioStreamHandle {}
+unsafe impl Sync for AudioStreamHandle {}
+
 pub struct PlaybackEngine {
     audio_config: Mutex<PlaybackAudioConfig>,
     output_device_name: Mutex<Option<String>>,
     output: Mutex<Option<OutputDeviceInfo>>,
     output_epoch: Arc<AtomicU64>,
     state: Mutex<PlaybackState>,
+    active_stream: Mutex<Option<AudioStreamHandle>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -146,6 +152,7 @@ impl PlaybackEngine {
                 level_left: Arc::new(AtomicU32::new(0)),
                 level_right: Arc::new(AtomicU32::new(0)),
             }),
+            active_stream: Mutex::new(None),
         };
         engine.rebuild_output_stream(config)?;
         Ok(engine)
@@ -252,8 +259,7 @@ impl PlaybackEngine {
             .map_err(|e| format!("Failed to open CoreAudio output stream: {e}"))?;
 
         stream.play().map_err(|e| e.to_string())?;
-        // cpal::Stream is !Send; leak it so PlaybackEngine stays Send + Sync for Tauri.
-        let _leaked: &'static cpal::Stream = Box::leak(Box::new(stream));
+        *self.active_stream.lock().map_err(|e| e.to_string())? = Some(AudioStreamHandle(stream));
 
         *self.output.lock().map_err(|e| e.to_string())? = Some(OutputDeviceInfo {
             channels,
@@ -624,7 +630,7 @@ fn resolve_output_device(name: Option<&str>) -> Result<cpal::Device, String> {
                 return Ok(device);
             }
         }
-        return Err(format!("Output device not found: {name}"));
+        eprintln!("Warning: Configured output device '{}' not found. Falling back to system default.", name);
     }
     host.default_output_device()
         .ok_or_else(|| "No default output audio device".to_string())

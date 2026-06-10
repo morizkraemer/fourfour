@@ -221,7 +221,6 @@
 
   function rowState(track) {
     if (dnd.kind === 'tracks' && dnd.trackIds.includes(track.id)) return 'drag';
-    if (isTrackAnalyzing(track.id)) return 'analyzing';
     if (selection.ids.has(track.id)) return 'selected';
     return 'rest';
   }
@@ -415,7 +414,14 @@
     window.addEventListener('pointerup', onUp);
   }
 
+  function closeTableMenus() {
+    columnMenu = { ...columnMenu, open: false };
+    rowMenu = { ...rowMenu, open: false, trackId: null };
+    listMenu = { ...listMenu, open: false };
+  }
+
   function openColumnMenu(e) {
+    closeTableMenus();
     columnMenu = { open: true, x: e.clientX, y: e.clientY };
   }
 
@@ -431,12 +437,14 @@
 
   function openRowMenu(e, track) {
     e.preventDefault();
+    closeTableMenus();
     rowMenu = { open: true, x: e.clientX, y: e.clientY, trackId: track.id };
   }
 
   function openListMenu(e) {
     if (e.target.closest('[data-track-row]') || e.target.closest('.ff-colh')) return;
     e.preventDefault();
+    closeTableMenus();
     listMenu = { open: true, x: e.clientX, y: e.clientY };
   }
 
@@ -551,7 +559,8 @@
             <TrackRow
               {track}
               state={rowState(track)}
-              columns={columns}
+              analyzing={isTrackAnalyzing(track.id)}
+              {columns}
             />
           </div>
         {/each}

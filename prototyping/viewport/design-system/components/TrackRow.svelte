@@ -25,7 +25,7 @@
   import { keyColor } from '../utils/key-color.js';
   import { columnCellStyle } from '../utils/column-layout.js';
 
-  let { track = {}, state = 'rest', columns = TRACK_COLUMNS } = $props();
+  let { track = {}, state = 'rest', columns = TRACK_COLUMNS, analyzing = false } = $props();
 
   // track.fav: favorite slot number (1..8) or true (filled, no digit) or falsy.
   function favOn(v) {
@@ -55,7 +55,7 @@
       <div class="ff-trow__cell ff-trow__cell--wave" style={columnCellStyle(col)} data-col-key={col.key}>
         <Waveform
           peaks={track.peaks ?? null}
-          animating={state === 'analyzing' && !track.peaks?.length}
+          animating={analyzing && !track.peaks?.length}
           width={col.width ?? 120}
           height={14}
           variant="mini"

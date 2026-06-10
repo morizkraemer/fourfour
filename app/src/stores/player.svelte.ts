@@ -4,6 +4,8 @@
 
 import {
   getAnalysisData,
+  invalidateAnalysisCache,
+  listenToAnalysisProgress,
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import {
@@ -18,6 +20,7 @@ import {
   playbackStop,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
+import { library, requestBackgroundAnalysis } from './library.svelte.ts';
 
 export interface PlayerCue {
   position: number;
@@ -299,6 +302,22 @@ async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack
   }
 }
 
+let playerAnalysisListenerInstalled = false;
+
+/** Refresh the player strip when background analysis finishes for the loaded track. */
+export function initPlayerAnalysisRefresh() {
+  if (playerAnalysisListenerInstalled) return;
+  playerAnalysisListenerInstalled = true;
+  listenToAnalysisProgress((progress) => {
+    const trackId = progress.track_id;
+    const loaded = player.track;
+    if (!trackId || !loaded || loaded.id !== trackId) return;
+    invalidateAnalysisCache(trackId);
+    player.loading = true;
+    void enrichPlayerTrack(loadGeneration, trackId, loaded);
+  });
+}
+
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
@@ -322,6 +341,12 @@ export async function loadPlayerTrack(input: any) {
   if (playPending && gen === loadGeneration) {
     playPending = false;
     void playFromStart();
+  }
+
+  const libTrack = library.tracks.find((t) => t.id === trackInfo.id);
+  const analyzed = libTrack?.analyzed ?? trackInfo.has_analysis ?? trackInfo.tempo > 0;
+  if (!analyzed) {
+    requestBackgroundAnalysis(trackInfo.id);
   }
 
   if (cached) return;

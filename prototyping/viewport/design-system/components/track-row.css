@@ -109,13 +109,14 @@
 }
 /* live hover — real pointer hover tints any row that isn't already
    selected/analyzing/dragging, so the table reacts to the mouse. */
-.ff-trow:hover:not(.ff-trow--selected):not(.ff-trow--analyzing):not(.ff-trow--drag) {
+.ff-trow:hover:not(.ff-trow--selected):not(.ff-trow--drag) {
   background: var(--ff-hover);
 }
 .ff-trow--selected {
   background: var(--ff-select);
 }
-.ff-trow--analyzing {
+/* Reserved for missing-file rows only — analyzing uses the waveform placeholder. */
+.ff-trow--missing {
   opacity: 0.45;
 }
 .ff-trow--drag {
