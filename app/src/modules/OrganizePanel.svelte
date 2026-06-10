@@ -73,9 +73,9 @@
 
   /**
    * Up to 4 cover thumbnails from the docked target, shown when the rail is
-   * collapsed and a target is docked. `track.cover` is a blob URL populated by
-   * loadState() → getTrackArtwork(). We take the first MAX_RAIL_COVERS tracks
-   * that have a cover URL; if fewer exist we show the ones we have.
+   * collapsed and a target is docked. `track.cover` reads from the artwork
+   * cache on demand. We take the first MAX_RAIL_COVERS tracks that have a
+   * resolved cover URL; if fewer exist we show the ones we have.
    */
   const MAX_RAIL_COVERS = 4;
 

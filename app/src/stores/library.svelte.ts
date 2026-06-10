@@ -25,7 +25,6 @@ import {
   getIpcDiagnostic,
   getAnalysisData,
   invalidateAnalysisCache,
-  getTrackArtwork,
   changeLibraryPath,
   resetLibrary as tauriResetLibrary,
   type TrackInfo,

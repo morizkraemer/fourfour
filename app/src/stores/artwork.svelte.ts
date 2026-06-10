@@ -2,6 +2,8 @@ import { getTrackArtwork } from '../services/tauri.svelte.ts';
 
 // Reactive state containing the cached blob URLs
 let cache = $state<Record<number, string>>({});
+/** Bumped on clear() so in-flight fetches from a prior library session are ignored. */
+let cacheGeneration = 0;
 const inflight = new Map<number, Promise<string | null>>();
 
 export const artwork = {
@@ -24,18 +26,20 @@ export const artwork = {
   async fetch(trackId: number) {
     if (cache[trackId] !== undefined || inflight.has(trackId)) return;
 
+    const gen = cacheGeneration;
     const promise = (async () => {
       try {
         const bytes = await getTrackArtwork(trackId);
+        if (gen !== cacheGeneration) return null;
         if (bytes && bytes.length > 0) {
           const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
           const url = URL.createObjectURL(blob);
           cache[trackId] = url;
           return url;
-        } else {
-          cache[trackId] = ''; // Store empty string if no valid bytes returned
         }
+        cache[trackId] = ''; // No bytes — negative cache
       } catch (err) {
+        if (gen !== cacheGeneration) return null;
         console.warn(`Failed to fetch artwork for track ${trackId}:`, err);
         cache[trackId] = '';
       } finally {
@@ -52,6 +56,7 @@ export const artwork = {
    * Revoke all object URLs and clear the cache to prevent memory leaks.
    */
   clear() {
+    cacheGeneration++;
     for (const key of Object.keys(cache)) {
       const url = cache[Number(key)];
       if (url && url.startsWith('blob:')) {
