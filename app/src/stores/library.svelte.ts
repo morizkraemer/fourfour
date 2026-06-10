@@ -37,6 +37,7 @@ import {
   isValidWaveformPreview,
   previewPeaksNormalized,
 } from '../services/analysis-data.ts';
+import { artwork } from './artwork.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
@@ -459,7 +460,10 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
     analyzed,
-    raw: t
+    raw: t,
+    get cover() {
+      return artwork.get(this.id, this.raw?.has_artwork);
+    }
   };
 
   // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
@@ -472,36 +476,14 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
 
 /* ── Actions ────────────────────────────────────────────────────────── */
 
-function revokeTrackCoverUrls(tracks: { cover?: string }[]) {
-  for (const t of tracks) {
-    if (t.cover?.startsWith('blob:')) URL.revokeObjectURL(t.cover);
-  }
-}
-
 /** Loads full state from library backend / mock fallback. */
 export async function loadState() {
   try {
-    revokeTrackCoverUrls(library.tracks);
+    artwork.clear();
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     library.tracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
     library.playlists = state.playlists;
-
-    // Load artwork in the background. Mini-waveform peaks now arrive embedded in
-    // load_state (see mapTrackInfoToLocal), so no per-track analysis fetch here —
-    // cues load lazily when a row is selected (Detail pane → ensureTrackPeaksLoaded).
-    library.tracks.forEach(track => {
-      if (track.raw?.has_artwork && !track.cover) {
-        getTrackArtwork(track.id).then(bytes => {
-          if (bytes && bytes.length > 0) {
-            const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
-            track.cover = URL.createObjectURL(blob);
-          }
-        }).catch(err => {
-          console.warn('Failed to fetch artwork on load:', err);
-        });
-      }
-    });
 
     await ensureFavoriteSlots();
     library.tauriError = lastTauriError;

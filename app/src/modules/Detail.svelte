@@ -10,7 +10,6 @@
     selectedTrack,
   } from '../stores/selection.svelte.ts';
   import { ensureTrackPeaksLoaded } from '../stores/library.svelte.ts';
-  import { getTrackArtwork } from '../services/tauri.svelte.ts';
 
   let mode = $derived(
     selectionCount() === 0 ? 'empty' :
@@ -23,23 +22,6 @@
     const current = track;
     if (!current) return;
     void ensureTrackPeaksLoaded(current);
-
-    if (current.raw?.has_artwork && !current.cover && !current.loadingArtwork) {
-      current.loadingArtwork = true;
-      getTrackArtwork(current.id)
-        .then((bytes) => {
-          if (bytes && bytes.length > 0) {
-            const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
-            current.cover = URL.createObjectURL(blob);
-          }
-        })
-        .catch((err) => {
-          console.warn('Failed to fetch track artwork:', err);
-        })
-        .finally(() => {
-          current.loadingArtwork = false;
-        });
-    }
   });
 
   let singleMeta = $derived(track ? {

@@ -18,6 +18,7 @@ import {
   playbackStop,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
+import { artwork } from './artwork.svelte.ts';
 
 export interface PlayerCue {
   position: number;
@@ -42,7 +43,7 @@ export interface PlayerTrack {
   sourcePath: string;
   title: string;
   artist: string;
-  cover: string;
+  hasArtwork: boolean;
   bpm: string;
   key: string;
   totalSeconds: number;
@@ -67,6 +68,10 @@ export const player = $state({
   expanded: false,
   levelLeft: 0,
   levelRight: 0,
+  get cover() {
+    if (!this.track) return '';
+    return artwork.get(this.track.id, this.track.hasArtwork);
+  }
 });
 
 /** Toggle the full-screen expanded player (dual-view waveform). */
@@ -239,6 +244,7 @@ interface BackendTrackInfo {
   tempo: number;
   key: string;
   duration_secs: number;
+  has_artwork?: boolean;
 }
 
 /**
@@ -262,16 +268,17 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
     tempo: raw?.tempo ?? 0,
     key: raw?.key ?? input?.key ?? '',
     duration_secs: raw?.duration_secs ?? 0,
+    has_artwork: raw?.has_artwork ?? input?.hasArtwork ?? false,
   };
 }
 
-function buildBaseTrack(trackInfo: BackendTrackInfo, cover: string): PlayerTrack {
+function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
   return {
     id: trackInfo.id,
     sourcePath: trackInfo.source_path,
     title: trackInfo.title || 'Unknown',
     artist: trackInfo.artist || '—',
-    cover,
+    hasArtwork: trackInfo.has_artwork ?? false,
     bpm: formatBpm(trackInfo.tempo),
     key: trackInfo.key || '—',
     totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
@@ -313,8 +320,7 @@ export async function loadPlayerTrack(input: any) {
     return;
   }
 
-  const cover = input?.cover ?? input?.raw?.cover ?? '';
-  const base = buildBaseTrack(trackInfo, cover);
+  const base = buildBaseTrack(trackInfo);
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
   player.loading = !cached;

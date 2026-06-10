@@ -42,8 +42,8 @@
 <div class="ff-xp" role="group" aria-label="Expanded player">
   <header class="ff-xp__head">
     <div class="ff-xp__meta">
-      {#if player.track?.cover}
-        <img class="ff-xp__cover" src={player.track.cover} alt="" />
+      {#if player.cover}
+        <img class="ff-xp__cover" src={player.cover} alt="" />
       {:else}
         <div class="ff-xp__cover ff-xp__cover--empty"></div>
       {/if}
