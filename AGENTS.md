@@ -25,9 +25,11 @@ CLI, and prototyping/design assets.
 | `pioneer-test-ui/` | Rust | **Tauri v2 shell.** Hosts the Svelte UI (`frontendDist: ../app/dist`), exposes Tauri commands, bundles the reference analyzer (`src/analyzer/`, stratum-dsp). The old vanilla `frontend/` is legacy. |
 | `app/` | Svelte 5 + TS | **The real UI** (`fourfour-app`). Browse, player strip, organize sidebar. Dev server on `:5200`. |
 | `prototyping/` | Svelte | **Design-system playground** (`viewport`). Primitives → modules → screens. See `prototyping/README.md` and its `SKILL.md`. |
-| `analysis/` | Python | **Analysis CLI** — `fourfour-analyze` (BPM/key/waveform/energy/cues) and `fourfour-benchmark`. Uses the Lexicon DSP stack. |
-| `benchmark/` | — | Benchmark datasets and result reports. |
-| `docs/` | — | All planning, architecture, and reference docs. **See `docs/README.md`.** |
+| `analysis/` | Python | **Analysis CLI** — `fourfour-analyze` (BPM/key/waveform/energy/cues) and `fourfour-benchmark`. Package name `fourfour-analysis`. Backends include a Lexicon port (`lexicon_port`); benchmark runs default to that variant. |
+| `benchmark/` | Python | **In-repo benchmark scripts** (`scripts/cli_batch_analyze.py`), manifests, and baselines. Datasets, results, logs, and cache are local and gitignored. |
+| `ui/waveform/` | JS | Waveform dev harness. `./waveform-dev <audio>` analyzes a track and opens it. |
+| `mockup/`, `designs/` | HTML / Pencil | Static mockups and a design file. Not the Svelte app. |
+| `docs/` | — | Planning, architecture, and reference docs. **See `docs/README.md`.** |
 
 ## Build & Run
 

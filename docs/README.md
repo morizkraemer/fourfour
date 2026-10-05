@@ -28,8 +28,10 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 
 ## analysis/ — analysis pipeline (research & plans)
 
-Benchmarking was done externally (samplebase project); no benchmark code lives
-in this repo. These capture the research, plans, and reverse-engineering.
+`benchmark/` in this repo has reusable scripts (`scripts/cli_batch_analyze.py`),
+small manifests, and baselines. Generated results, logs, cache, and local audio
+datasets are gitignored. Samplebase is a separate project. The files below are
+the research, plans, and reverse-engineering notes.
 
 | Doc | | Purpose |
 |---|---|---|
