@@ -47,7 +47,7 @@ may write: pioneer-usb-writer/tests/, pioneer-usb-writer/Cargo.toml (dev-deps on
 do not touch: format-writing code (report bugs found as BLOCKED)
 timebox: 60 min
 
-### Q4 Library export smoke test [running] [box] [drain]
+### Q4 Library export smoke test [landed] [box] [drain]
 goal: pioneer-library test: import a fixture folder into a temp SQLite library, export to a temp "USB" dir, re-sync incrementally.
 acceptance: test covers full export + one incremental sync, green.
 validation: `cargo test --workspace`
@@ -66,4 +66,4 @@ timebox: 30 min
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
 Not heard yet: playback on the Mac.
-Running: Q3 (branch q3-export-tests), Q4 (branch q4-library-tests). Next: Q5 macOS build [mac].
+Landed: Q4 (library export + incremental sync test, passing, no bugs). Running: Q3 (branch q3-export-tests). Next: Q5 macOS build [mac].

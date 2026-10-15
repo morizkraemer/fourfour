@@ -12,3 +12,4 @@
 2026-10-15 06:21 orchestrator - decided: Merlin: pushed master (7a1bfd4) to GitHub, deleted origin/fix/waveforms-and-playback; origin switched to SSH
 2026-10-15 06:23 orchestrator Q3 spawn: background worker, branch q3-export-tests
 2026-10-15 06:23 orchestrator Q4 spawn: background worker (sonnet), branch q4-library-tests
+2026-10-15 06:34 orchestrator Q4 landed: a2eb7d3 re-verified (cargo test -p pioneer-library ok, test-only change), merged to master
