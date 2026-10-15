@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(git push * master*)", "Bash(git push *:master*)",
+      "Bash(git -C * push * master*)", "Bash(git -C * push *:master*)",
+      "Bash(gh release *)",
+      "Bash(cargo publish*)",
+      "Bash(npm publish*)",
+      "Bash(xcrun notarytool *)",
+      "Bash(codesign *)"
+    ]
+  }
+}

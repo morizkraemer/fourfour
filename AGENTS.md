@@ -153,3 +153,21 @@ Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/P
 - **Pioneer format reference** → `pioneer-usb-writer/reference-code/PIONEER.md`
 - **Process** → `docs/process/` — `todo.md`, `lessons.md`
 - **Archive** → `docs/archive/` — superseded handoffs
+
+## Unattended
+
+platform: box (Rust + Svelte build on lab2); audio, Tauri window, USB export and CDJ checks are `mac`
+validation: `cargo build --workspace && (cd app && npm ci && npm run build)`; `npm run check` once Q2 lands
+may land: Rust backend, tests, type fixes, docs, scripts
+must ask: user-visible (UI, copy, UX, visuals), USB format output, library DB schema, roadmap/scope
+never: push master, release, notarise, sign, publish crates/packages, secrets, delete benchmark data
+scope fence: no new deps without a BLOCKED report; no edits to `mockup/`, `designs/`, `prototyping/` unless the entry says so
+lane rules: none; format correctness is proven on CDJ-3000 hardware only (see Pioneer format gotchas)
+
+## Orchestrator
+
+This project runs as one long-lived orchestrator thread (see the `orchestrator` skill), on lab2 as a Claude Desktop SSH session in this folder. Live state: `docs/STATE.md`; history: `docs/journal.md`; rulebook: `## Unattended` above.
+
+- Workers are background subagents in worktrees; capped `claude -p` credit runs only for `[drain]` entries.
+- Hard gates are the `permissions.ask` rules in `.claude/settings.json`; only the orchestrator runs them, in the foreground. Everything else Merlin decides goes to STATE.md "Waiting on Merlin" with a recommendation and a branch.
+- Merlin keeps roadmap, anything user-visible, outward actions and taste.
