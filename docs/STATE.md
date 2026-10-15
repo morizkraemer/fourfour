@@ -39,7 +39,7 @@ may write: app/src/ except the two Q1 player files, app/tsconfig.json
 do not touch: prototyping/ (exclude it from the check if it leaks in), styles
 timebox: 45 min
 
-### Q3 Export round-trip tests [queued] [box] [drain]
+### Q3 Export round-trip tests [running] [box] [drain]
 goal: first Rust tests for pioneer-usb-writer: write a fixture library to a temp dir, parse PDB/ANLZ back, assert tracks, playlists, cues, artwork.
 acceptance: `cargo test -p pioneer-usb-writer` runs ≥5 meaningful tests, green; fixtures are small and committed.
 validation: `cargo test --workspace`
@@ -47,7 +47,7 @@ may write: pioneer-usb-writer/tests/, pioneer-usb-writer/Cargo.toml (dev-deps on
 do not touch: format-writing code (report bugs found as BLOCKED)
 timebox: 60 min
 
-### Q4 Library export smoke test [queued] [box] [drain]
+### Q4 Library export smoke test [running] [box] [drain]
 goal: pioneer-library test: import a fixture folder into a temp SQLite library, export to a temp "USB" dir, re-sync incrementally.
 acceptance: test covers full export + one incremental sync, green.
 validation: `cargo test --workspace`
@@ -66,4 +66,4 @@ timebox: 30 min
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
 Not heard yet: playback on the Mac.
-Next: Q3 export round-trip tests, Q4 library export test [box]; Q5 macOS build [mac].
+Running: Q3 (branch q3-export-tests), Q4 (branch q4-library-tests). Next: Q5 macOS build [mac].

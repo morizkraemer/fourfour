@@ -10,3 +10,5 @@
 2026-10-15 06:12 orchestrator Q1 landed: bedfbb8 merged as ab88a4c; re-verified (cargo build, 6 tests ok, svelte-check 0 errors, app build ok); ear check pending on Mac
 2026-10-15 06:17 orchestrator - decided: Merlin: fourfour lives on dev, not lab2 (it already did; earlier lines saying lab2 mean dev)
 2026-10-15 06:21 orchestrator - decided: Merlin: pushed master (7a1bfd4) to GitHub, deleted origin/fix/waveforms-and-playback; origin switched to SSH
+2026-10-15 06:23 orchestrator Q3 spawn: background worker, branch q3-export-tests
+2026-10-15 06:23 orchestrator Q4 spawn: background worker (sonnet), branch q4-library-tests
