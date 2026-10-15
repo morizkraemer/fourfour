@@ -51,14 +51,16 @@ do not touch: signing, secrets, release jobs
 timebox: 45 min
 note: a branch push starts CI on the shared repo → push only after Merlin's OK
 
-### Q9 Analysis accuracy benchmark [running] [box]
-goal: numbers for the current backend (deeprhythm_essentia): key accuracy on beatport-edm-key (Beatport labels); BPM + key agreement with Rekordbox on rekordbox-testdata-2025 (652 tracks, Merlin's library, ground truth from master.db); state that beat-grid ground truth is missing and propose how to get it.
-acceptance: docs/analysis/benchmark-2026-10.md with per-signal tables (exact, octave-tolerant, Camelot-neighbour), the denominators, failures, runtime per track.
-validation: the benchmark run itself; `cd analysis && pytest -q`
-may write: docs/analysis/, benchmark/manifests/ (paths rewritten for dev), benchmark/results/ (ignored)
-do not touch: analysis backends (measure, don't tune)
-timebox: 90 min
-needs: datasets on dev (beatport copying now); rekordbox-testdata audio is Merlin's music on the Mac → his OK to copy
+### Q9 Analysis accuracy benchmark [landed, partial] [box] — docs/analysis/benchmark-2026-10.md
+Key vs Beatport 54% exact / 69% incl. relative+neighbour (n=598); BPM vs Rekordbox within 1 BPM 94%, ±0.1 52% (n=128, DeepRhythm is integer-only); ~20 s/track full analysis on dev. Grid: no ground truth yet.
+
+### Q9b Re-run Rekordbox agreement on all 630 tracks [queued] [box]
+goal: re-run the Rekordbox step once `.copy-complete-rekordbox-testdata-2025` exists; reuse the Q9 worktree venv (.claude/worktrees/agent-a2044eadd817a7e27/analysis/.venv); update the report's Rekordbox tables + subsets.
+acceptance: report tables on ≥600 tracks; runtime measured uncontended. may write: docs/analysis/benchmark-2026-10.md. timebox: 60 min
+
+### Q11 Fix benchmark cache + failing analysis tests [queued] [box]
+goal: `fourfour-benchmark run` crashes (bytes waveform_preview not JSON-serialisable); 5 pytest failures (2 same bug, 3 CLI import/key errors); README link to a moved findings doc.
+acceptance: `pytest -q` green; `fourfour-benchmark run` completes on 5 tracks. may write: analysis/src/fourfour_analysis/ (cache, cli), analysis/tests/, analysis/README.md. do not touch: backend algorithms. timebox: 45 min
 
 ### Q10 Analysis packaging decision [queued] [box]
 goal: a decision doc for shipping analysis without a dev venv: (a) bundled Python (PyInstaller/uv-built runtime), (b) Rust-native (stratum-dsp, Beat This! ONNX, a key detector), (c) hybrid. Per option: size, cold start, per-track speed, accuracy vs Q9, licence (Essentia/DeepRhythm are AGPL), cross-platform effort. Prototype the cheapest credible option on 3 fixture tracks.
