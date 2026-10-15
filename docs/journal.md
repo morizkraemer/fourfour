@@ -32,3 +32,4 @@
 2026-10-15 10:34 orchestrator Q9b landed: e66280b merged (docs only); 579 verified tracks; agreement lower than the 178-track slice
 2026-10-15 10:35 orchestrator Q12 spawn: background worker, branch q12-key-detector
 2026-10-15 11:47 orchestrator Q12 landed: 6a4222c merged; prototype release build re-run ok; 57.3% held-out, bar 60% not clearly met; CC BY-SA training-data question to Merlin
+2026-10-15 13:19 orchestrator - decided: Merlin: accept key 57% for now, move on to BPM/grid. Copied Rekordbox library (master.db + 1382 ANLZ, 390 MB) to dev as grid reference. Q13 spawn: branch q13-bpm-grid
