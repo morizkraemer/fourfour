@@ -30,7 +30,7 @@ may write: pioneer-test-ui/src/, app/src/stores/player.svelte.ts, app/src/servic
 do not touch: USB format code, UI layout/visuals
 timebox: 60 min
 
-### Q2 svelte-check to zero errors [running] [box] [drain]
+### Q2 svelte-check to zero errors [landed] [box] [drain]
 goal: clear the 61 svelte-check errors without changing behavior or visuals.
 acceptance: `cd app && npm run check` exits 0; no rendered change.
 validation: `cd app && npm run check && npm run build`
@@ -63,4 +63,4 @@ do not touch: signing, notarisation, release
 timebox: 30 min
 
 ## Rundown
-Init done: code moved to lab2, master is home (a476e9b, 7 ahead of origin), builds green here. Running: Q1 (branch q1-playback), Q2 (branch q2-svelte-check). Mac: Q5 build, CDJ check.
+Init done: code moved to lab2, master is home (a476e9b, 7 ahead of origin), builds green here. Landed: Q2 (svelte-check 61 → 1; last error is in Q1's file). Running: Q1 (branch q1-playback). Mac: Q5 build, CDJ check.
