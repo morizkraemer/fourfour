@@ -53,12 +53,8 @@ do not touch: signing, secrets, release jobs
 timebox: 45 min
 note: a branch push starts CI on the shared repo → push only after Merlin's OK
 
-### Q9 Analysis accuracy benchmark [landed, partial] [box] — docs/analysis/benchmark-2026-10.md
-Key vs Beatport 54% exact / 69% incl. relative+neighbour (n=598); BPM vs Rekordbox within 1 BPM 94%, ±0.1 52% (n=128, DeepRhythm is integer-only); ~20 s/track full analysis on dev. Grid: no ground truth yet.
-
-### Q9b Re-run Rekordbox agreement on all 630 tracks [running] [box]
-goal: re-run the Rekordbox step once `.copy-complete-rekordbox-testdata-2025` exists; reuse the Q9 worktree venv (.claude/worktrees/agent-a2044eadd817a7e27/analysis/.venv); update the report's Rekordbox tables + subsets.
-acceptance: report tables on ≥600 tracks; runtime measured uncontended. may write: docs/analysis/benchmark-2026-10.md. timebox: 60 min
+### Q9/Q9b Analysis accuracy benchmark [landed] — docs/analysis/benchmark-2026-10.md
+Beatport key exact 54% (n=598). Vs Rekordbox (n≈472 unique of 579 verified): BPM ±0.1 36%, within 1 BPM 90%, key exact 42% / 61% incl. relative+neighbour; slow/half-time tracks detected 1.5–2× off. DeepRhythm crashes on 4 tracks (AttributeError). ~13 s/track bpm+key.
 
 ### Q11 Fix benchmark cache + failing analysis tests [landed] [box]
 goal: `fourfour-benchmark run` crashes (bytes waveform_preview not JSON-serialisable); 5 pytest failures (2 same bug, 3 CLI import/key errors); README link to a moved findings doc.

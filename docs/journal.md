@@ -29,3 +29,4 @@
 2026-10-15 09:45 orchestrator Q10 spawn: background worker, branch q10-packaging; pushed master d188f28 (Merlin: go); queued Q12 key detection upgrade
 2026-10-15 10:10 orchestrator Q10 landed: 90b3bda merged (doc + standalone prototype workspace; root cargo metadata unchanged); decision to Merlin
 2026-10-15 10:12 orchestrator - decided: Merlin: analysis goes Rust-native (option C, permissive, no Python/AGPL); key bar ≥60% exact; Q12 rewritten as permissive key detector
+2026-10-15 10:34 orchestrator Q9b landed: e66280b merged (docs only); 579 verified tracks; agreement lower than the 178-track slice
