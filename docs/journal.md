@@ -39,3 +39,4 @@
 2026-10-15 14:53 orchestrator - decided: Merlin: sync only chosen playlists, plan first, never delete foreign files, warn unanalyzed. Q14 spawn: branch ui-sync-flow (UI only, engine spec for brother)
 2026-10-15 15:11 orchestrator Q14 done: ui-sync-flow b510e70 unlanded (user-visible); spec copied to master; previews split (4200 master, 4240 branch) after a shared build dir clash
 2026-10-15 15:20 orchestrator - decided: Merlin: Q14 sync UI execution not clean; keep the stick header; explore flow (plug-in autosync, per-playlist autosync/frozen, drag to add, side panel). Spawned concept/mockup worker
+2026-10-15 15:35 orchestrator - decided: Merlin on sync concepts: keep storage design, sidebar stick tree, docked stick in side-panel board, won't-fit stop; reject chips, drag tooltip/popover, big cards, full-width header; 'Frozen' wording; reverse sync open. Logged in docs/ui/usb-sync-decisions.md
