@@ -27,6 +27,5 @@ Running log of Merlin's calls on the USB sync flow. Concepts: round 1 mockups (A
 
 ## Open
 - Header layout: what shows where, when (sidebar row vs panel header vs playlist header), compact.
-- Terminology for "follows the library" vs "stays as it is".
 - Reverse direction: playlists on a stick that aren't in the library (made elsewhere, or by Rekordbox) — show, import, keep.
 - Removal threshold, remembering unplugged sticks (needs a stable stick id), backup stick copy vs mirror.
