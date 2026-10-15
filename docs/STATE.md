@@ -13,8 +13,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ## Waiting on Merlin
 1. Beta v0.1 scope — rec: scan → analyze → export only; player and organize ship later — branch: none
-2. Push master (7 ahead of origin, no CI, nothing deploys) — rec: push — branch: master
-4. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: leave until analysis work resumes — branch: none
+2. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: leave until analysis work resumes — branch: none
 
 3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: queue as its own entry after your ear check — branch: none
 
@@ -65,6 +64,6 @@ do not touch: signing, notarisation, release
 timebox: 30 min
 
 ## Rundown
-Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master ab88a4c+, all checks green, not pushed.
+Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
 Not heard yet: playback on the Mac.
 Next: Q3 export round-trip tests, Q4 library export test [box]; Q5 macOS build [mac].
