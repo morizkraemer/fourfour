@@ -73,8 +73,8 @@ note: the choice is Merlin's; run after Q9
 ### Q12 Permissive key detector ≥60% [landed, 57%] — docs/analysis/key-detector-2026-10.md
 Rust chroma + 50-weight transposition-equivariant classifier: 57.3% exact held-out (n=199, ±7), 60.9% 5-fold OOF; 0.8 s/clip; all MIT/Apache/MPL. Weights fit on Beatport EDM Key (CC BY-SA 4.0) → licence question.
 
-### Q13 BPM + beat grid in Rust vs Rekordbox grids [running] [box]
-goal: Rekordbox PQTZ grids (copied library, master.db + USBANLZ) as reference; Beat This! grid + tempo-octave fix + constant-tempo fit in the prototype; score BPM ±0.1/±1, octave errors, grid within ±20 ms, F-measure on a held-out split. Doc: docs/analysis/bpm-grid-2026-10.md. timebox: 120 min
+### Q13 BPM + beat grid in Rust [landed] — docs/analysis/bpm-grid-2026-10.md
+Beat This! + constant-tempo fit + 75–150 fold, test n=205: BPM ±0.1 86% (DeepRhythm 36%), ±1 93%, F 0.875, whole grid within ±20 ms of Rekordbox 47%; ~10 s/track. Grid phase/drift is the next lever.
 
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
