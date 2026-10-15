@@ -164,6 +164,7 @@ never: push master, release, notarise, sign, publish crates/packages, secrets, d
 scope fence: no new deps without a BLOCKED report; no edits to `mockup/`, `designs/`, `prototyping/` unless the entry says so
 lane rules: none; format correctness is proven on CDJ-3000 hardware only (see Pioneer format gotchas)
 lanes: `pioneer-usb-writer/src/` and USB/hardware behaviour belong to Merlin's brother (morizkraemer); workers add tests and report findings there, never change format code
+ui reviews: judge on intuitive, efficient workflows on their own terms, never on Rekordbox familiarity (beating Rekordbox UX is the point)
 
 ## Orchestrator
 
