@@ -31,3 +31,4 @@
 2026-10-15 10:12 orchestrator - decided: Merlin: analysis goes Rust-native (option C, permissive, no Python/AGPL); key bar ≥60% exact; Q12 rewritten as permissive key detector
 2026-10-15 10:34 orchestrator Q9b landed: e66280b merged (docs only); 579 verified tracks; agreement lower than the 178-track slice
 2026-10-15 10:35 orchestrator Q12 spawn: background worker, branch q12-key-detector
+2026-10-15 11:47 orchestrator Q12 landed: 6a4222c merged; prototype release build re-run ok; 57.3% held-out, bar 60% not clearly met; CC BY-SA training-data question to Merlin
