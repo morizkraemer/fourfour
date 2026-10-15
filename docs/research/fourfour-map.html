@@ -1,0 +1,172 @@
+<title>fourfour Terrain Map</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column of four panels — pipeline strip, difficulty plot, work-type grid, path. Palette borrows the CDJ 3-band waveform: low blue, mid amber, high white. */
+:root{
+  --bg:#f3f4f7; --panel:#ffffff; --fg:#151821; --muted:#5d6475; --line:#d9dce4;
+  --low:#1f6fd1; --mid:#e08a12; --high:#8a93a6; --bad:#c8402f; --good:#1f9d6b;
+  --chip:#eef0f5;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1117; --panel:#171a22; --fg:#e9ebf1; --muted:#9aa1b2; --line:#2a2f3b;
+  --low:#4f9bff; --mid:#f2a33a; --high:#c9cfdb; --bad:#ff6b57; --good:#3ccf91; --chip:#20242e; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f1117; --panel:#171a22; --fg:#e9ebf1; --muted:#9aa1b2; --line:#2a2f3b;
+  --low:#4f9bff; --mid:#f2a33a; --high:#c9cfdb; --bad:#ff6b57; --good:#3ccf91; --chip:#20242e; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:14px;line-height:1.45}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:16px;padding-block:28px 48px;display:grid;gap:22px}
+h1{font-family:var(--display);font-weight:700;font-size:40px;letter-spacing:.01em;margin:0;line-height:1}
+h2{font-family:var(--display);font-weight:600;font-size:22px;letter-spacing:.04em;text-transform:uppercase;margin:0}
+.sub{color:var(--muted);margin:6px 0 0;max-width:62ch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px;display:grid;gap:14px;min-width:0}
+.head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:10px;height:10px;border-radius:2px;display:inline-block}
+.scroll{overflow-x:auto}
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(9,minmax(104px,1fr));gap:6px;min-width:960px}
+.stage{border-radius:6px;padding:10px 9px 9px;background:var(--chip);display:grid;gap:6px;align-content:start;position:relative;border-top:4px solid var(--c)}
+.stage b{font-family:var(--display);font-size:17px;font-weight:600;letter-spacing:.02em}
+.stage small{font-family:var(--mono);font-size:10.5px;color:var(--muted);line-height:1.35}
+.stage .st{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--c)}
+.wave{display:flex;align-items:flex-end;gap:2px;height:22px}
+.wave i{flex:1;background:var(--c);opacity:.85;border-radius:1px}
+.players{display:flex;gap:6px;flex-wrap:wrap;font-family:var(--mono);font-size:11px}
+.pl{padding:4px 8px;border-radius:4px;background:var(--chip);border-left:3px solid var(--c)}
+/* plot */
+.plotgrid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px}
+@media (max-width:820px){.plotgrid{grid-template-columns:1fr}}
+svg text{font-family:var(--mono);fill:var(--muted);font-size:11px}
+svg .lbl{fill:var(--fg);font-family:var(--body);font-size:12px;font-weight:500}
+.bars{display:grid;gap:9px;align-content:start}
+.bar{display:grid;grid-template-columns:150px minmax(0,1fr) 38px;gap:10px;align-items:center;font-size:12.5px}
+.track{height:10px;background:var(--chip);border-radius:5px;overflow:hidden}
+.fill{height:100%;background:var(--low);border-radius:5px}
+.pct{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+/* work matrix */
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:12.5px}
+th,td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:center}
+th{font-family:var(--mono);font-weight:500;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;vertical-align:bottom}
+td:first-child,th:first-child{text-align:left;font-weight:500}
+.cell{display:inline-block;width:18px;height:18px;border-radius:4px}
+.w3{background:var(--mid)} .w2{background:color-mix(in srgb,var(--mid) 45%,transparent)} .w1{background:color-mix(in srgb,var(--mid) 18%,transparent)}
+.who{font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:3px;background:var(--chip);white-space:nowrap}
+.who.m{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+/* path */
+.path{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media (max-width:820px){.path{grid-template-columns:1fr 1fr}}
+@media (max-width:480px){.path{grid-template-columns:1fr}}
+.step{border-radius:8px;padding:12px;background:var(--chip);display:grid;gap:8px;align-content:start}
+.step .k{font-family:var(--mono);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.step b{font-family:var(--display);font-size:20px;font-weight:600}
+.step ul{margin:0;padding-left:16px;display:grid;gap:3px;font-size:12.5px}
+.step.goal{background:color-mix(in srgb,var(--low) 14%,var(--panel));outline:2px solid var(--low)}
+.foot{font-family:var(--mono);font-size:11px;color:var(--muted)}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>fourfour — terrain map</h1>
+    <p class="sub">Music folder in, CDJ-ready USB out, no Rekordbox. What's built, where it's hard, and what kind of work each hard part needs. State of master, 15 Oct 2026.</p>
+  </header>
+
+  <section class="panel">
+    <div class="head"><h2>The pipeline</h2>
+      <div class="legend"><span><i class="dot" style="background:var(--good)"></i>built</span><span><i class="dot" style="background:var(--mid)"></i>works, not shippable</span><span><i class="dot" style="background:var(--bad)"></i>missing</span></div></div>
+    <div class="scroll"><div class="pipe" id="pipe"></div></div>
+    <div class="players">
+      <span class="pl" style="--c:var(--good)">CDJ-3000 fw 3.19 · export.pdb · proven (pre-Svelte)</span>
+      <span class="pl" style="--c:var(--mid)">CDJ-3000X · OneLibrary only · untested</span>
+      <span class="pl" style="--c:var(--mid)">CDJ-2000NXS2 / XDJ-XZ · export.pdb · untested</span>
+      <span class="pl" style="--c:var(--mid)">XDJ-AZ / OPUS-QUAD · OneLibrary · untested</span>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="head"><h2>Where it's hard</h2>
+      <div class="legend"><span>bubble size = work left</span><span><i class="dot" style="background:var(--bad)"></i>blocks the beta</span><span><i class="dot" style="background:var(--low)"></i>matters later</span></div></div>
+    <div class="plotgrid">
+      <div class="scroll"><svg id="plot" viewBox="0 0 560 380" width="100%" style="min-width:460px" role="img" aria-label="Difficulty versus impact on shipping"></svg></div>
+      <div class="bars" id="bars"><div class="foot">HOW FAR ALONG</div></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="head"><h2>What kind of work</h2>
+      <div class="legend"><span><i class="cell w3" style="width:10px;height:10px"></i>core</span><span><i class="cell w2" style="width:10px;height:10px"></i>some</span><span><i class="cell w1" style="width:10px;height:10px"></i>a little</span><span><span class="who m">you</span> needs Merlin</span></div></div>
+    <div class="scroll"><table id="work"></table></div>
+  </section>
+
+  <section class="panel">
+    <div class="head"><h2>Suggested path</h2><span class="foot">aim: the Pioneer USB writer you can trust</span></div>
+    <div class="path">
+      <div class="step"><span class="k">Phase A · box</span><b>Trustworthy USB</b><ul><li>Loss-safe sync (temp + rename)</li><li>.2EX + ANLZ path hash</li><li>Parity check PDB ↔ OneLibrary</li><li>Fixture USB generator</li></ul></div>
+      <div class="step"><span class="k">Phase A · you</span><b>Hardware truth</b><ul><li>CDJ-3000 run on fixture USB</li><li>Find a 3000X / XDJ-AZ to test</li><li>Start compatibility ledger</li></ul></div>
+      <div class="step"><span class="k">Phase B · box + mac</span><b>Ships on a Mac</b><ul><li>Analysis packaging decision</li><li>Licence + new name</li><li>CI, signed .dmg</li></ul></div>
+      <div class="step goal"><span class="k">Target</span><b>Public macOS beta</b><ul><li>5 strangers, 1 round-trip each</li><li>Public ledger: model × firmware</li><li>Gig-readiness check in app</li></ul></div>
+    </div>
+  </section>
+  <p class="foot">Sources: code review of master, docs/research/review-2026-10-15.md, synthesis-2026-10-15.md.</p>
+</div>
+
+<script>
+const S={good:"var(--good)",mid:"var(--mid)",bad:"var(--bad)"};
+const stages=[
+ ["Scan","tags + artwork → SQLite","good","built"],
+ ["Analyze","BPM · key · grid · waveforms via Python","mid","needs torch venv"],
+ ["Library","tracks · playlists (flat)","good","built"],
+ ["Browse + play","table · detail · player","mid","not heard on Mac"],
+ ["Organize","playlists · drag-drop","mid","no folders"],
+ ["export.pdb","DeviceSQL","good","CDJ-3000 ok"],
+ ["OneLibrary","exportLibrary.db · SQLCipher","mid","untested on 3000X"],
+ ["USBANLZ","DAT · EXT · no .2EX · no PSSI","mid","partial"],
+ ["Ship",".dmg · signing · licence","bad","nothing yet"]];
+const pipe=document.getElementById("pipe");
+stages.forEach((s,i)=>{const d=document.createElement("div");d.className="stage";d.style.setProperty("--c",S[s[2]]);
+ let w="";for(let k=0;k<14;k++){const h=18+Math.round(70*Math.abs(Math.sin((i+1)*1.7+k*.9)));w+=`<i style="height:${h}%"></i>`}
+ d.innerHTML=`<span class="st">${s[3]}</span><b>${s[0]}</b><small>${s[1]}</small><div class="wave">${w}</div>`;pipe.appendChild(d)});
+
+const areas=[
+ {n:"Analysis: ship + accuracy",d:5,i:5,p:40,b:1},
+ {n:"Format correctness on players",d:4,i:5,p:70,b:1},
+ {n:"Signing + packaging",d:3,i:5,p:5,b:1},
+ {n:"Loss-safe sync",d:3,i:4,p:50,b:1},
+ {n:"Licence + name",d:2,i:4,p:0,b:1},
+ {n:"Compatibility ledger",d:2,i:3.4,p:10,b:0},
+ {n:"Colour waveforms + .2EX",d:3.2,i:3,p:55,b:0},
+ {n:"Large libraries",d:3,i:2.4,p:20,b:0},
+ {n:"Phrases (PSSI)",d:4.2,i:2,p:0,b:0}];
+const svg=document.getElementById("plot"),ns="http://www.w3.org/2000/svg";
+const L=56,R=540,T=20,B=330,x=v=>L+(v-1)/4*(R-L),y=v=>B-(v-1)/4*(B-T);
+const el=(t,a,txt)=>{const e=document.createElementNS(ns,t);for(const k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;svg.appendChild(e);return e};
+for(let v=1;v<=5;v++){el("line",{x1:x(v),x2:x(v),y1:T,y2:B,stroke:"var(--line)"});el("line",{x1:L,x2:R,y1:y(v),y2:y(v),stroke:"var(--line)"});
+ el("text",{x:x(v),y:B+16,"text-anchor":"middle"},v);el("text",{x:L-10,y:y(v)+4,"text-anchor":"end"},v)}
+el("text",{x:(L+R)/2,y:B+38,"text-anchor":"middle"},"DIFFICULTY →");
+el("text",{x:14,y:(T+B)/2,"text-anchor":"middle",transform:`rotate(-90 14 ${(T+B)/2})`},"IMPACT ON SHIPPING →");
+const offs={"Signing + packaging":[-8,-16,"end"],"Format correctness on players":[0,-20,"middle"],"Analysis: ship + accuracy":[-6,26,"end"],"Loss-safe sync":[14,4,"start"],"Licence + name":[14,4,"start"],"Compatibility ledger":[14,4,"start"],"Colour waveforms + .2EX":[14,-8,"start"],"Large libraries":[14,4,"start"],"Phrases (PSSI)":[-12,22,"end"]};
+areas.forEach(a=>{const r=6+(100-a.p)/100*14,c=a.b?"var(--bad)":"var(--low)";
+ el("circle",{cx:x(a.d),cy:y(a.i),r,fill:c,"fill-opacity":.28,stroke:c,"stroke-width":1.5});
+ const o=offs[a.n]||[12,4,"start"];el("text",{class:"lbl",x:x(a.d)+o[0],y:y(a.i)+o[1],"text-anchor":o[2]},a.n)});
+const bars=document.getElementById("bars");
+[...areas].sort((a,b)=>b.p-a.p).forEach(a=>{const d=document.createElement("div");d.className="bar";
+ d.innerHTML=`<span>${a.n}</span><span class="track"><span class="fill" style="width:${Math.max(a.p,2)}%;background:${a.b?"var(--bad)":"var(--low)"}"></span></span><span class="pct">${a.p}%</span>`;bars.appendChild(d)});
+
+const cols=["Reverse eng.","DSP research","Systems eng.","Tests + fixtures","Hardware testing","Build + release","Decision"];
+const rows=[
+ ["Analysis: ship + accuracy",[0,3,2,2,0,3,2],"you: tradeoff"],
+ ["Format correctness",[3,0,1,3,3,0,0],"you: CDJ access"],
+ ["Signing + packaging",[0,0,1,0,0,3,1],"you: Apple acct"],
+ ["Loss-safe sync",[1,0,3,3,1,0,0],""],
+ ["Licence + name",[0,0,0,0,0,0,3],"you: name + licence"],
+ ["Compatibility ledger",[0,0,1,2,3,0,1],"you: players"],
+ ["Colour waveforms + .2EX",[3,2,0,2,2,0,0],""],
+ ["Large libraries",[0,1,3,2,0,0,0],""],
+ ["Phrases (PSSI)",[2,3,0,1,1,0,0],""]];
+const tb=document.getElementById("work");
+tb.innerHTML=`<tr><th>Area</th>${cols.map(c=>`<th>${c}</th>`).join("")}<th>Needs you</th></tr>`+
+ rows.map(r=>`<tr><td>${r[0]}</td>${r[1].map(v=>`<td>${v?`<span class="cell w${v}"></span>`:""}</td>`).join("")}<td>${r[2]?`<span class="who m">${r[2]}</span>`:""}</td></tr>`).join("");
+</script>
