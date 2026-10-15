@@ -18,3 +18,4 @@
 2026-10-15 06:40 orchestrator - decided: Merlin: push master; Q6 stays queued
 2026-10-15 06:55 orchestrator - research: landscape + project review saved under docs/research/
 2026-10-15 07:05 orchestrator - decided: Merlin: he owns UX/player/library/analysis + cross-platform testing; brother (morizkraemer) owns format + hardware; Merlin travelling, no hardware
+2026-10-15 07:08 orchestrator - decided: Merlin: queue Q7 preview, Q8 CI, Q9 benchmark, Q10 packaging; copy benchmark datasets to dev (running)

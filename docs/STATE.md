@@ -15,7 +15,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ## Waiting on Merlin
 1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
-2. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: copy datasets to dev for the analysis benchmark — branch: none
+2. Copy rekordbox-testdata audio (652 tracks of your music on the Mac) to dev for Q9 — rec: yes — branch: none
 3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -27,54 +27,46 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ## Queue
 
-### Q1 Fix player playback (no audio) [landed] [box] [drain]
-goal: root-cause why the Svelte player produces no audio (docs/process/todo.md 2026-06-04) and fix it in the Rust/Tauri path.
-acceptance: root cause named; a cargo test proves the playback path yields non-silent decoded samples; stash@{0} (scrub-pause changes) reviewed and used or noted.
-validation: AGENTS.md validation + `cargo test -p pioneer-test-ui`
-may write: pioneer-test-ui/src/, app/src/stores/player.svelte.ts, app/src/services/playback.svelte.ts, docs/process/todo.md
-do not touch: USB format code, UI layout/visuals
-timebox: 60 min
+### Q1–Q4 [landed]: playback fix, svelte-check 0, usb-writer round-trip tests, library export test (see journal)
 
-### Q2 svelte-check to zero errors [landed] [box] [drain]
-goal: clear the 61 svelte-check errors without changing behavior or visuals.
-acceptance: `cd app && npm run check` exits 0; no rendered change.
-validation: `cd app && npm run check && npm run build`
-may write: app/src/ except the two Q1 player files, app/tsconfig.json
-do not touch: prototyping/ (exclude it from the check if it leaks in), styles
+### Q5 Unsigned macOS build [queued] [mac]: `cargo tauri build` via mac-queue, report artifact + log; no signing. 30 min
+
+### Q6 One key source for PDB and OneLibrary [queued] [box] — brother's lane: format change, hand to him
+
+### Q7 Browser preview with sample data [queued] [box]
+goal: Merlin can open the app on laptop/phone while travelling: `preview start fourfour app-review` serves the browser build with the existing mock data (services/tauri.svelte.ts); every main screen (browse, detail, player, organize, settings) renders with sample tracks instead of erroring on missing Tauri.
+acceptance: preview URL loads; headless screenshots of each main screen show sample data and no console errors; mock gaps fixed in the mock layer only.
+validation: AGENTS.md validation + headless check of the preview URL
+may write: app/src/services/tauri.svelte.ts, app/src/harness.ts, new app/src/mocks/ if needed
+do not touch: real UI components, styles, Rust
 timebox: 45 min
 
-### Q3 Export round-trip tests [landed] [box] [drain]
-goal: first Rust tests for pioneer-usb-writer: write a fixture library to a temp dir, parse PDB/ANLZ back, assert tracks, playlists, cues, artwork.
-acceptance: `cargo test -p pioneer-usb-writer` runs ≥5 meaningful tests, green; fixtures are small and committed.
-validation: `cargo test --workspace`
-may write: pioneer-usb-writer/tests/, pioneer-usb-writer/Cargo.toml (dev-deps only after BLOCKED)
-do not touch: format-writing code (report bugs found as BLOCKED)
-timebox: 60 min
-
-### Q4 Library export smoke test [landed] [box] [drain]
-goal: pioneer-library test: import a fixture folder into a temp SQLite library, export to a temp "USB" dir, re-sync incrementally.
-acceptance: test covers full export + one incremental sync, green.
-validation: `cargo test --workspace`
-may write: pioneer-library/tests/
-do not touch: schema, format code
+### Q8 Cross-platform CI [queued] [box]
+goal: GitHub Actions on macOS, Windows, Linux: cargo build + test, app check + build, and an unsigned `tauri build` per OS as an artifact.
+acceptance: workflow file on a branch; runs green on a fork-free test (act or a branch push after Merlin's OK); per-OS failures listed.
+validation: workflow lint (actionlint) + local cargo/npm validation
+may write: .github/workflows/
+do not touch: signing, secrets, release jobs
 timebox: 45 min
+note: a branch push starts CI on the shared repo → push only after Merlin's OK
 
-### Q5 Unsigned macOS build [queued] [mac]
-goal: `cargo tauri build` via mac-queue (headless build clone) produces an unsigned .app/.dmg; record size, build time, failures.
-acceptance: artifact path + build log tail in the journal.
-validation: the build itself
-may write: none (report only)
-do not touch: signing, notarisation, release
-timebox: 30 min
+### Q9 Analysis accuracy benchmark [queued] [box]
+goal: numbers for the current backend (deeprhythm_essentia): key accuracy on beatport-edm-key (Beatport labels); BPM + key agreement with Rekordbox on rekordbox-testdata-2025 (652 tracks, Merlin's library, ground truth from master.db); state that beat-grid ground truth is missing and propose how to get it.
+acceptance: docs/analysis/benchmark-2026-10.md with per-signal tables (exact, octave-tolerant, Camelot-neighbour), the denominators, failures, runtime per track.
+validation: the benchmark run itself; `cd analysis && pytest -q`
+may write: docs/analysis/, benchmark/manifests/ (paths rewritten for dev), benchmark/results/ (ignored)
+do not touch: analysis backends (measure, don't tune)
+timebox: 90 min
+needs: datasets on dev (beatport copying now); rekordbox-testdata audio is Merlin's music on the Mac → his OK to copy
 
-### Q6 One key source for PDB and OneLibrary [queued] [box]
-goal: OneLibrary writes the key from analysis.key, the PDB from track.key; an empty analysis.key gives an empty OneLibrary key and makes sync see the track as changed. Use one source for both.
-acceptance: a round-trip test with empty analysis.key shows the same key in PDB and OneLibrary and sync skips the unchanged track.
-validation: AGENTS.md validation
-may write: pioneer-usb-writer/src/ (key path only), pioneer-usb-writer/tests/
-do not touch: other format fields
-timebox: 30 min
-note: changes USB output → lands only after Merlin's OK (CDJ check)
+### Q10 Analysis packaging decision [queued] [box]
+goal: a decision doc for shipping analysis without a dev venv: (a) bundled Python (PyInstaller/uv-built runtime), (b) Rust-native (stratum-dsp, Beat This! ONNX, a key detector), (c) hybrid. Per option: size, cold start, per-track speed, accuracy vs Q9, licence (Essentia/DeepRhythm are AGPL), cross-platform effort. Prototype the cheapest credible option on 3 fixture tracks.
+acceptance: docs/analysis/packaging-decision.md with a recommendation and the prototype's numbers; nothing wired into the app.
+validation: prototype runs on dev without analysis/.venv
+may write: docs/analysis/, prototyping branch only
+do not touch: app, Tauri, usb-writer
+timebox: 90 min
+note: the choice is Merlin's; run after Q9
 
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
