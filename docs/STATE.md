@@ -18,6 +18,7 @@ Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, anal
 AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
+0. Review the sync UI (Q14) in the preview — rec: approve, then merge — branch: ui-sync-flow
 1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
 2. (done: Merlin OK) rekordbox-testdata audio copying to dev for Q9
 4. Key weights trained on CC BY-SA 4.0 data: does share-alike reach the shipped weights? — rec: train only on data with a permissive licence for the shipped model, or relicense-check with a lawyer — branch: none
@@ -78,8 +79,8 @@ Rust chroma + 50-weight transposition-equivariant classifier: 57.3% exact held-o
 ### Q13 BPM + beat grid in Rust [landed] — docs/analysis/bpm-grid-2026-10.md
 Beat This! + constant-tempo fit + 75–150 fold, test n=205: BPM ±0.1 86% (DeepRhythm 36%), ±1 93%, F 0.875, whole grid within ±20 ms of Rekordbox 47%; ~10 s/track. Grid phase/drift is the next lever.
 
-### Q14 USB sync UI flow [running] [box] — branch ui-sync-flow (user-visible: stays unlanded for Merlin)
-header (capacity, Sync, Eject, last result), playlist selection per stick, plan dialog, progress + kept result, unanalyzed warning, in-app wipe dialog; engine contract mocked; spec for the brother. Preview :4240. timebox 120 min
+### Q14 USB sync UI flow [waiting on Merlin] — branch ui-sync-flow b510e70, preview https://dev.tail87069a.ts.net:4240 (?mock=usb-fail for errors)
+Frontend only; engine contract mocked; spec on master docs/ui/usb-sync-spec.md. Worktree .claude/worktrees/agent-a27059b23b2b99929 kept for the preview.
 
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.

@@ -37,3 +37,4 @@
 2026-10-15 14:21 orchestrator - UI review done: keep organize/player/layouts (polish); USB sync = rethink (hidden, whole-library mirror, deletes, no plan/progress/result); saved docs/ui/review-2026-10-15.md
 2026-10-15 14:40 orchestrator Q13 landed: 7238342 merged; prototype release build re-run ok; BPM ±0.1 86% vs 36%; grid ±20 ms 47%
 2026-10-15 14:53 orchestrator - decided: Merlin: sync only chosen playlists, plan first, never delete foreign files, warn unanalyzed. Q14 spawn: branch ui-sync-flow (UI only, engine spec for brother)
+2026-10-15 15:11 orchestrator Q14 done: ui-sync-flow b510e70 unlanded (user-visible); spec copied to master; previews split (4200 master, 4240 branch) after a shared build dir clash
