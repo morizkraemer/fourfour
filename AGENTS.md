@@ -156,7 +156,7 @@ Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/P
 
 ## Unattended
 
-platform: box (Rust + Svelte build on lab2); audio, Tauri window, USB export and CDJ checks are `mac`
+platform: box (Rust + Svelte build on dev); audio, Tauri window, USB export and CDJ checks are `mac`
 validation: `cargo build --workspace && cargo test --workspace && (cd app && npm ci && npm run check && npm run build)`
 may land: Rust backend, tests, type fixes, docs, scripts
 must ask: user-visible (UI, copy, UX, visuals), USB format output, library DB schema, roadmap/scope
@@ -166,7 +166,7 @@ lane rules: none; format correctness is proven on CDJ-3000 hardware only (see Pi
 
 ## Orchestrator
 
-This project runs as one long-lived orchestrator thread (see the `orchestrator` skill), on lab2 as a Claude Desktop SSH session in this folder. Live state: `docs/STATE.md`; history: `docs/journal.md`; rulebook: `## Unattended` above.
+This project runs as one long-lived orchestrator thread (see the `orchestrator` skill), on the `dev` box (Proxmox VM on `lab`) as a Claude Desktop SSH session in this folder. Live state: `docs/STATE.md`; history: `docs/journal.md`; rulebook: `## Unattended` above.
 
 - Workers are background subagents in worktrees; capped `claude -p` credit runs only for `[drain]` entries.
 - Hard gates are the `permissions.ask` rules in `.claude/settings.json`; only the orchestrator runs them, in the foreground. Everything else Merlin decides goes to STATE.md "Waiting on Merlin" with a recommendation and a branch.

@@ -9,7 +9,7 @@ Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bo
 Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, analyzes it and exports a USB that plays on a CDJ-3000. Done for the current queue: a clean master that builds, type-checks, plays audio, and has round-trip tests for the export, so the beta build is the only open step.
 
 ## Rulebook
-AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, audio output or USB writes on lab2; those are `[mac]`.
+AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
 1. Beta v0.1 scope — rec: scan → analyze → export only; player and organize ship later — branch: none
