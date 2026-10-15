@@ -16,6 +16,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 ## Waiting on Merlin
 1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
 2. (done: Merlin OK) rekordbox-testdata audio copying to dev for Q9
+4. Analysis path + licence (Q10): C hybrid permissive vs A bundled Python AGPL — rec: C, plus a new permissive key estimator (Q12) — branch: none
 3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
 
 ### Needs Merlin's ears/eyes (laptop)

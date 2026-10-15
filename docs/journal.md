@@ -27,3 +27,4 @@
 2026-10-15 08:34 orchestrator Q11 landed: c288ab0 merged; pytest re-run 129 passed; CLI failures were stale tests (rewritten to current contract)
 2026-10-15 09:43 orchestrator Q9b spawn: background worker (sonnet), branch q9b-benchmark; 589 rekordbox tracks present (Mac + stu), Merlin said run now
 2026-10-15 09:45 orchestrator Q10 spawn: background worker, branch q10-packaging; pushed master d188f28 (Merlin: go); queued Q12 key detection upgrade
+2026-10-15 10:10 orchestrator Q10 landed: 90b3bda merged (doc + standalone prototype workspace; root cargo metadata unchanged); decision to Merlin
