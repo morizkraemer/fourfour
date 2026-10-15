@@ -54,7 +54,7 @@ note: a branch push starts CI on the shared repo → push only after Merlin's OK
 ### Q9 Analysis accuracy benchmark [landed, partial] [box] — docs/analysis/benchmark-2026-10.md
 Key vs Beatport 54% exact / 69% incl. relative+neighbour (n=598); BPM vs Rekordbox within 1 BPM 94%, ±0.1 52% (n=128, DeepRhythm is integer-only); ~20 s/track full analysis on dev. Grid: no ground truth yet.
 
-### Q9b Re-run Rekordbox agreement on all 630 tracks [queued] [box]
+### Q9b Re-run Rekordbox agreement on all 630 tracks [running] [box]
 goal: re-run the Rekordbox step once `.copy-complete-rekordbox-testdata-2025` exists; reuse the Q9 worktree venv (.claude/worktrees/agent-a2044eadd817a7e27/analysis/.venv); update the report's Rekordbox tables + subsets.
 acceptance: report tables on ≥600 tracks; runtime measured uncontended. may write: docs/analysis/benchmark-2026-10.md. timebox: 60 min
 
