@@ -14,15 +14,17 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 ## Waiting on Merlin
 1. Beta v0.1 scope — rec: scan → analyze → export only; player and organize ship later — branch: none
 2. Push master (7 ahead of origin, no CI, nothing deploys) — rec: push — branch: master
-3. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: leave until analysis work resumes — branch: none
+4. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: leave until analysis work resumes — branch: none
+
+3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: queue as its own entry after your ear check — branch: none
 
 ### Needs you at the Mac
 - CDJ-3000 round-trip of a current master export (last proven before the Svelte app).
-- Ear check of player playback once Q1 lands.
+- Ear check of playback (Q1 landed): play on select, scrub/seek while playing, an MP3 with a damaged frame. If still silent, look for "audio playback unavailable" on stderr.
 
 ## Queue
 
-### Q1 Fix player playback (no audio) [running] [box] [drain]
+### Q1 Fix player playback (no audio) [landed] [box] [drain]
 goal: root-cause why the Svelte player produces no audio (docs/process/todo.md 2026-06-04) and fix it in the Rust/Tauri path.
 acceptance: root cause named; a cargo test proves the playback path yields non-silent decoded samples; stash@{0} (scrub-pause changes) reviewed and used or noted.
 validation: AGENTS.md validation + `cargo test -p pioneer-test-ui`
@@ -63,4 +65,6 @@ do not touch: signing, notarisation, release
 timebox: 30 min
 
 ## Rundown
-Init done: code moved to lab2, master is home (a476e9b, 7 ahead of origin), builds green here. Landed: Q2 (svelte-check 61 → 1; last error is in Q1's file). Running: Q1 (branch q1-playback). Mac: Q5 build, CDJ check.
+Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master ab88a4c+, all checks green, not pushed.
+Not heard yet: playback on the Mac.
+Next: Q3 export round-trip tests, Q4 library export test [box]; Q5 macOS build [mac].

@@ -28,3 +28,5 @@ CLAUDE.md
 # Generated waveform harness fixtures (regenerate via fourfour_analysis)
 app/public/wf-display.json
 app/public/wf.json
+.claude/worktrees/
+pioneer-test-ui/gen/schemas/linux-schema.json

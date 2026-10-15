@@ -157,7 +157,7 @@ Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/P
 ## Unattended
 
 platform: box (Rust + Svelte build on lab2); audio, Tauri window, USB export and CDJ checks are `mac`
-validation: `cargo build --workspace && (cd app && npm ci && npm run build)`; `npm run check` once Q2 lands
+validation: `cargo build --workspace && cargo test --workspace && (cd app && npm ci && npm run check && npm run build)`
 may land: Rust backend, tests, type fixes, docs, scripts
 must ask: user-visible (UI, copy, UX, visuals), USB format output, library DB schema, roadmap/scope
 never: push master, release, notarise, sign, publish crates/packages, secrets, delete benchmark data
