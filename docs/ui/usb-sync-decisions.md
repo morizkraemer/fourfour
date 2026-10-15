@@ -20,6 +20,11 @@ Running log of Merlin's calls on the USB sync flow. Concepts: round 1 mockups (A
 - Large notification cards with dead space.
 - A full-width storage header for a little information.
 
+## Round 2 calls (2026-10-15)
+- Wording: one switch, "Keep updated". Only playlists that follow the library show a "Synced" mark; the others show nothing (no second label).
+- Either side can show anything: library, app playlist, stick, playlist on a stick. Left = browse, right = put. The drop target decides the action.
+- Layouts must cover: stick open on the left with the side panel closed (full width — needs its own header design), stick left + panel open, and the other combinations.
+
 ## Open
 - Header layout: what shows where, when (sidebar row vs panel header vs playlist header), compact.
 - Terminology for "follows the library" vs "stays as it is".
