@@ -33,10 +33,10 @@ Not complete here:
 Use this order:
 
 1. `analysis/README.md` - this file, CLI and architecture entrypoint.
-2. `../docs/key-detection-benchmark-findings.md` - current key detector decision and benchmark evidence.
-3. `../docs/analysis-pipeline-handoff.md` - broader analysis pipeline notes.
-4. `../docs/experimentation-path.md` - project roadmap and remaining validation.
-5. `../docs/tech-stack-reference.md` - library tradeoffs and dependency notes.
+2. `../docs/analysis/key-detection-findings.md` - current key detector decision and benchmark evidence.
+3. `../docs/analysis/pipeline-handoff.md` - broader analysis pipeline notes.
+4. `../docs/analysis/experimentation-path.md` - project roadmap and remaining validation.
+5. `../docs/architecture/tech-stack.md` - library tradeoffs and dependency notes.
 
 Reusable benchmark scripts, manifests, and baselines live under `../benchmark/`. Local datasets, logs, caches, and run outputs under that directory are gitignored.
 
@@ -68,27 +68,9 @@ cd analysis
 .venv/bin/fourfour-analyze /path/to/track.mp3 --json
 ```
 
-`fourfour-analyze --json` returns one JSON object with BPM, key, energy, classic waveform arrays, and Pioneer waveform arrays:
+`fourfour-analyze` takes one file and `-b/--backend` (repeatable, default `deeprhythm_essentia`). `--json` returns one object keyed by backend id; each value is the backend's `AnalysisResult` fields plus `status` (`ok` or `error`) and `elapsed_seconds`, with `waveform_preview` as a list of ints. Failed backends return `status`, `error`, `elapsed_seconds` and `backend`.
 
-```text
-path
-bpm
-key
-energy
-beats
-cue_points
-waveform_preview
-waveform_color
-waveform_peaks
-pioneer_3band_detail
-pioneer_3band_overview
-errors
-elapsed_seconds
-```
-
-`beats` and `cue_points` are currently present but empty. DeepRhythm provides the global BPM number, not a beat grid. Beatgrid / first-beat analysis is a separate integration track.
-
-The compatibility command below returns the same per-track objects wrapped in a list because the current Tauri test UI already calls this shape:
+The module form takes the same arguments and output:
 
 ```bash
 cd analysis
@@ -177,7 +159,7 @@ Beatport EDM Key benchmark summary:
 
 This satisfies the current requirement: key detection should at least match Rekordbox on external labels.
 
-Details and caveats are in `../docs/key-detection-benchmark-findings.md`.
+Details and caveats are in `../docs/analysis/key-detection-findings.md`.
 
 ## Architecture
 
