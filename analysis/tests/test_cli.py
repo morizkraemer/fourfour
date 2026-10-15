@@ -14,15 +14,16 @@ def test_audio(tmp_path):
     return str(path)
 
 
-def test_cli_single_file_json_output_payload(test_audio, capsys):
-    from fourfour_analysis.cli import _module_analyze_main
+def test_module_analyze_json_output_payload(test_audio, capsys, monkeypatch):
+    from fourfour_analysis.cli import main
 
-    _module_analyze_main([test_audio, "--json"])
+    monkeypatch.setattr("sys.argv", ["fourfour_analysis", "analyze", test_audio, "--json"])
+
+    main()
 
     data = json.loads(capsys.readouterr().out)
-    assert isinstance(data, list)
-    assert len(data) == 1
-    assert data[0]["path"] == test_audio
+    assert list(data) == ["deeprhythm_essentia"]
+    assert data["deeprhythm_essentia"]["status"] == "ok"
 
 
 def test_fourfour_analyze_json_output_payload(test_audio, capsys, monkeypatch):
@@ -32,30 +33,23 @@ def test_fourfour_analyze_json_output_payload(test_audio, capsys, monkeypatch):
 
     analyze_main()
 
-    data = json.loads(capsys.readouterr().out)
-    assert data["path"] == test_audio
+    data = json.loads(capsys.readouterr().out)["deeprhythm_essentia"]
+    assert data["status"] == "ok"
     assert "bpm" in data
     assert "key" in data
     assert "energy" in data
     assert "beats" in data
     assert "cue_points" in data
     assert "waveform_preview" in data
-    assert "waveform_color" in data
+    assert "waveform_colors" in data
     assert "waveform_peaks" in data
-    assert "pioneer_3band_detail" in data
-    assert "pioneer_3band_overview" in data
 
 
-def test_cli_multiple_files(test_audio, tmp_path, capsys):
-    from fourfour_analysis.cli import _module_analyze_main
+def test_fourfour_analyze_missing_file_exits(tmp_path, monkeypatch):
+    from fourfour_analysis.cli import analyze_main
 
-    # Create a second file
-    sr = 44100
-    signal = np.zeros(sr * 5, dtype=np.float32)
-    path2 = tmp_path / "test2.wav"
-    sf.write(str(path2), signal, sr)
+    monkeypatch.setattr("sys.argv", ["fourfour-analyze", str(tmp_path / "missing.wav"), "--json"])
 
-    _module_analyze_main([test_audio, str(path2), "--json", "--workers", "1"])
-
-    data = json.loads(capsys.readouterr().out)
-    assert len(data) == 2
+    with pytest.raises(SystemExit) as exc:
+        analyze_main()
+    assert exc.value.code == 1
