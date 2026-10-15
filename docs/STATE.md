@@ -7,6 +7,8 @@ Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bo
 
 Roles: Merlin owns the app UX (interface, player, library, analysis quality: grid/BPM/key) and cross-platform testing; his brother (GitHub morizkraemer) owns the USB format and hardware testing. Merlin is travelling: no hardware.
 
+USB sync model (Merlin 2026-10-15): only chosen playlists go to the stick; plan shown before writing; never delete files fourfour didn't write; warn about unanalyzed tracks. UI = Merlin, engine = brother (docs/ui/usb-sync-spec.md).
+
 Analysis: Rust-native (Rust DSP + Beat This! ONNX), no Python, no AGPL (Merlin 2026-10-15). Key bar for beta: ≥60% exact on Beatport (beat Rekordbox a bit).
 
 ## Ship target
@@ -75,6 +77,9 @@ Rust chroma + 50-weight transposition-equivariant classifier: 57.3% exact held-o
 
 ### Q13 BPM + beat grid in Rust [landed] — docs/analysis/bpm-grid-2026-10.md
 Beat This! + constant-tempo fit + 75–150 fold, test n=205: BPM ±0.1 86% (DeepRhythm 36%), ±1 93%, F 0.875, whole grid within ±20 ms of Rekordbox 47%; ~10 s/track. Grid phase/drift is the next lever.
+
+### Q14 USB sync UI flow [running] [box] — branch ui-sync-flow (user-visible: stays unlanded for Merlin)
+header (capacity, Sync, Eject, last result), playlist selection per stick, plan dialog, progress + kept result, unanalyzed warning, in-app wipe dialog; engine contract mocked; spec for the brother. Preview :4240. timebox 120 min
 
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
