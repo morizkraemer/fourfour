@@ -62,7 +62,7 @@ acceptance: report tables on ≥600 tracks; runtime measured uncontended. may wr
 goal: `fourfour-benchmark run` crashes (bytes waveform_preview not JSON-serialisable); 5 pytest failures (2 same bug, 3 CLI import/key errors); README link to a moved findings doc.
 acceptance: `pytest -q` green; `fourfour-benchmark run` completes on 5 tracks. may write: analysis/src/fourfour_analysis/ (cache, cli), analysis/tests/, analysis/README.md. do not touch: backend algorithms. timebox: 45 min
 
-### Q10 Analysis packaging decision [queued] [box]
+### Q10 Analysis packaging decision [running] [box]
 goal: a decision doc for shipping analysis without a dev venv: (a) bundled Python (PyInstaller/uv-built runtime), (b) Rust-native (stratum-dsp, Beat This! ONNX, a key detector), (c) hybrid. Per option: size, cold start, per-track speed, accuracy vs Q9, licence (Essentia/DeepRhythm are AGPL), cross-platform effort. Prototype the cheapest credible option on 3 fixture tracks.
 acceptance: docs/analysis/packaging-decision.md with a recommendation and the prototype's numbers; nothing wired into the app.
 validation: prototype runs on dev without analysis/.venv
@@ -70,6 +70,10 @@ may write: docs/analysis/, prototyping branch only
 do not touch: app, Tauri, usb-writer
 timebox: 90 min
 note: the choice is Merlin's; run after Q9
+
+### Q12 Key detection upgrade [queued] [box]
+goal: key is 54% exact on Beatport (mode confusion ~33%). Benchmark 2–3 alternative key detectors (licence-checked) on beatport-edm-key with the Q9 scripts; recommend one. Pairs with Q10's packaging choice.
+acceptance: table in docs/analysis/benchmark-2026-10.md or a new doc; no backend switch without Merlin. timebox: 75 min
 
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
