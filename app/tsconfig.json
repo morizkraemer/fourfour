@@ -7,6 +7,8 @@
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "skipLibCheck": true,
     "paths": {
@@ -14,5 +16,5 @@
       "$ds/*": ["../prototyping/viewport/design-system/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte"]
 }

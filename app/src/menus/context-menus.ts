@@ -26,20 +26,21 @@ import {
   setTestCuesOnSelected,
   FAVORITE_SLOTS,
 } from '../stores/library.svelte.ts';
+import type { PlaylistInput } from '../services/tauri.svelte.ts';
+import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
 import { pickDirectory } from '../services/tauri.svelte.ts';
 
-/**
- * @typedef {object} MenuItem
- * @property {string} [label]
- * @property {string} [shortcut]
- * @property {'default'|'danger'|'disabled'} [variant]
- * @property {boolean} [disabled]
- * @property {boolean} [checked]
- * @property {boolean} [keepOpen]
- * @property {boolean} [isSeparator]
- * @property {MenuItem[]} [items]
- * @property {() => void} [onClick]
- */
+interface MenuItem {
+  label?: string;
+  shortcut?: string;
+  variant?: 'default' | 'danger' | 'disabled';
+  disabled?: boolean;
+  checked?: boolean;
+  keepOpen?: boolean;
+  isSeparator?: boolean;
+  items?: MenuItem[];
+  onClick?: () => void;
+}
 
 const LIBRARY_VIEWS = new Set(['All Tracks', 'Recently Added']);
 
@@ -56,26 +57,23 @@ function hasUnanalyzedTracks() {
   return library.tracks.some((t) => !t.analyzed);
 }
 
-/** @param {string} sourceId */
-export async function importIntoSource(sourceId) {
+export async function importIntoSource(sourceId: string) {
   const dir = await pickDirectory();
   if (dir) await importDirectory(dir, { targetSource: sourceId });
 }
 
-/**
- * Context menu for a sidebar source or list panel (library view, playlist, USB).
- *
- * @param {object} opts
- * @param {string} opts.sourceId — sidebar key (label, playlist name, or USB path)
- * @param {string} [opts.label] — display name for confirms
- * @param {() => void} [opts.onNewPlaylist]
- * @param {() => void} [opts.onAddFavorite]
- * @param {(playlist: import('../stores/library.svelte.ts').PlaylistInput) => void} [opts.onRemoveFavorite]
- */
-export function buildSourceContextMenuItems(opts) {
-  const { sourceId, label = sourceId, onNewPlaylist, onAddFavorite, onRemoveFavorite } = opts;
-  /** @type {MenuItem[]} */
-  const items = [];
+interface SourceMenuOptions {
+  sourceId: string;
+  label?: string;
+  onNewPlaylist?: () => void;
+  onAddFavorite?: () => void;
+  onRemoveFavorite?: (playlist: PlaylistInput) => void;
+}
+
+/** Context menu for a sidebar source or list panel (library view, playlist, USB). */
+export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[] {
+  const { sourceId, label = sourceId, onRemoveFavorite } = opts;
+  const items: MenuItem[] = [];
 
   if (library.volumes.includes(sourceId)) {
     items.push(
@@ -143,8 +141,7 @@ export function buildSourceContextMenuItems(opts) {
       onClick: () => importIntoSource(sourceId),
     });
 
-    /** @type {MenuItem[]} */
-    const destructive = [];
+    const destructive: MenuItem[] = [];
     if (isFavorite && playlist.track_ids.length > 0) {
       destructive.push({
         label: 'Clear all tracks',
@@ -185,19 +182,19 @@ export function buildSourceContextMenuItems(opts) {
   return items;
 }
 
-/**
- * Section header menus (sidebar group labels).
- *
- * @param {'favorites'|'library'|'playlists'|'usb'} section
- * @param {object} opts
- * @param {() => void} [opts.onNewPlaylist]
- * @param {() => void} [opts.onAddFavorite]
- * @param {boolean} [opts.canAddFavorite]
- */
-export function buildSidebarSectionMenuItems(section, opts = {}) {
+interface SectionMenuOptions {
+  onNewPlaylist?: () => void;
+  onAddFavorite?: () => void;
+  canAddFavorite?: boolean;
+}
+
+/** Section header menus (sidebar group labels). */
+export function buildSidebarSectionMenuItems(
+  section: 'favorites' | 'library' | 'playlists' | 'usb',
+  opts: SectionMenuOptions = {}
+): MenuItem[] {
   const { onNewPlaylist, onAddFavorite, canAddFavorite = false } = opts;
-  /** @type {MenuItem[]} */
-  const items = [];
+  const items: MenuItem[] = [];
   if (section === 'favorites' && canAddFavorite) {
     items.push({ label: 'Add favorite', onClick: () => onAddFavorite?.() });
   }
@@ -228,18 +225,18 @@ export function buildSidebarSectionMenuItems(section, opts = {}) {
   return items;
 }
 
-/**
- * @param {object} opts
- * @param {number[]} opts.trackIds
- * @param {import('../stores/library.svelte.ts').PlaylistInput | null | undefined} opts.activePlaylist
- * @param {boolean} opts.isUsbView
- * @param {() => void} [opts.onTracksRemoved]
- */
-export function buildTrackContextMenuItems(opts) {
+interface TrackMenuOptions {
+  trackIds: number[];
+  activePlaylist: PlaylistInput | null | undefined;
+  isUsbView: boolean;
+  onTracksRemoved?: () => void;
+}
+
+export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
   const { trackIds, activePlaylist, isUsbView, onTracksRemoved } = opts;
   if (trackIds.length === 0) return [];
 
-  const favoriteChildren = [];
+  const favoriteChildren: MenuItem[] = [];
   for (let slot = 1; slot <= FAVORITE_SLOTS; slot++) {
     const pl = playlistByName(favoritePlaylistName(slot));
     const allIn =
@@ -265,8 +262,7 @@ export function buildTrackContextMenuItems(opts) {
         ? 'Reanalyze track'
         : 'Analyze track';
 
-  /** @type {MenuItem[]} */
-  const items = [
+  const items: MenuItem[] = [
     {
       label: 'Add to Favorites',
       shortcut: '1–9',
@@ -339,19 +335,19 @@ export function buildTrackContextMenuItems(opts) {
   return items;
 }
 
-/**
- * @param {object} opts
- * @param {typeof import('../stores/table-columns.svelte.ts').ALL_COLUMN_KEYS} opts.allColumnKeys
- * @param {import('../stores/table-columns.svelte.ts').TableLayout} opts.layout
- * @param {(key: string) => void} opts.toggleColumnVisibility
- * @param {() => void} opts.resetColumns
- * @param {() => void} opts.clearSort
- */
-export function buildColumnContextMenuItems(opts) {
+interface ColumnMenuOptions {
+  allColumnKeys: typeof ALL_COLUMN_KEYS;
+  layout: TableLayout;
+  toggleColumnVisibility: (key: string) => void;
+  resetColumns: () => void;
+  clearSort: () => void;
+}
+
+export function buildColumnContextMenuItems(opts: ColumnMenuOptions): MenuItem[] {
   const { allColumnKeys, layout, toggleColumnVisibility, resetColumns, clearSort } =
     opts;
 
-  const columnItems = allColumnKeys.map((meta) => {
+  const columnItems: MenuItem[] = allColumnKeys.map((meta) => {
     const col = layout.columns.find((c) => c.key === meta.key);
     const hidden =
       col?.hidden ?? (meta.key === 'album' || meta.key === 'genre' || meta.key === 'year');
