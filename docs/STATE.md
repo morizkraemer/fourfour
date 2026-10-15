@@ -18,7 +18,7 @@ Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, anal
 AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-0. Review the sync UI (Q14) in the preview — rec: approve, then merge — branch: ui-sync-flow
+0. Sync UI (Q14): idea ok, execution rejected (too many controls); 3 flow concepts being mocked up — branch: ui-sync-flow (keep header)
 1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
 2. (done: Merlin OK) rekordbox-testdata audio copying to dev for Q9
 4. Key weights trained on CC BY-SA 4.0 data: does share-alike reach the shipped weights? — rec: train only on data with a permissive licence for the shipped model, or relicense-check with a lawyer — branch: none
