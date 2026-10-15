@@ -5,6 +5,8 @@ _Updated: 2026-10-15 06:05 by orchestrator. Live state only, max ~80 lines. Hist
 ## Direction
 Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bounce). Thread drains quietly on engineering work; it never takes Merlin's focus hours. Holiday 2026-10-30 → 2026-11-16: nothing user-visible lands.
 
+Roles: Merlin owns the app UX (interface, player, library, analysis quality: grid/BPM/key) and cross-platform testing; his brother (GitHub morizkraemer) owns the USB format and hardware testing. Merlin is travelling: no hardware.
+
 ## Ship target
 Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, analyzes it and exports a USB that plays on a CDJ-3000. Done for the current queue: a clean master that builds, type-checks, plays audio, and has round-trip tests for the export, so the beta build is the only open step.
 
@@ -12,14 +14,16 @@ Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, anal
 AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-1. Beta v0.1 scope — rec: scan → analyze → export only; player and organize ship later — branch: none
-2. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: leave until analysis work resumes — branch: none
+1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
+2. Benchmark data (2.9 GB datasets, 1 GB results/cache, analysis .venv) stayed on the Mac — rec: copy datasets to dev for the analysis benchmark — branch: none
+3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
 
-3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: queue as its own entry after your ear check — branch: none
+### Needs Merlin's ears/eyes (laptop)
+- Playback ear check (Q1 landed): play on select, scrub/seek while playing, an MP3 with a damaged frame.
 
-### Needs you at the Mac
+### Brother's lane (hardware)
 - CDJ-3000 round-trip of a current master export (last proven before the Svelte app).
-- Ear check of playback (Q1 landed): play on select, scrub/seek while playing, an MP3 with a damaged frame. If still silent, look for "audio playback unavailable" on stderr.
+- Q6 key-source fix and the .2EX/colour-waveform layout (research synthesis) are format changes for him.
 
 ## Queue
 
