@@ -5,6 +5,7 @@ import {
   isValidAnalysisPayload,
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
+import { mockAnalysisData } from '../mocks/analysis.ts';
 
 export let lastTauriError = 'None';
 
@@ -415,6 +416,14 @@ export async function getAnalysisData(trackId: number, force = false): Promise<a
   } catch (err) {
     lastTauriError = `get_analysis_data fail: ${String(err)}`;
     analysisCache.delete(trackId);
+    const mock = mockTracks.find((t) => t.id === trackId);
+    if (useBrowserMocks() && mock) {
+      const clean = sanitizeAnalysisPayload(
+        mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key),
+      );
+      analysisCache.set(trackId, clean);
+      return clean;
+    }
     throw err;
   }
 }
