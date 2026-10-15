@@ -7,6 +7,8 @@ Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bo
 
 Roles: Merlin owns the app UX (interface, player, library, analysis quality: grid/BPM/key) and cross-platform testing; his brother (GitHub morizkraemer) owns the USB format and hardware testing. Merlin is travelling: no hardware.
 
+Analysis: Rust-native (Rust DSP + Beat This! ONNX), no Python, no AGPL (Merlin 2026-10-15). Key bar for beta: ≥60% exact on Beatport (beat Rekordbox a bit).
+
 ## Ship target
 Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, analyzes it and exports a USB that plays on a CDJ-3000. Done for the current queue: a clean master that builds, type-checks, plays audio, and has round-trip tests for the export, so the beta build is the only open step.
 
@@ -16,7 +18,6 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 ## Waiting on Merlin
 1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
 2. (done: Merlin OK) rekordbox-testdata audio copying to dev for Q9
-4. Analysis path + licence (Q10): C hybrid permissive vs A bundled Python AGPL — rec: C, plus a new permissive key estimator (Q12) — branch: none
 3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -72,9 +73,10 @@ do not touch: app, Tauri, usb-writer
 timebox: 90 min
 note: the choice is Merlin's; run after Q9
 
-### Q12 Key detection upgrade [queued] [box]
-goal: key is 54% exact on Beatport (mode confusion ~33%). Benchmark 2–3 alternative key detectors (licence-checked) on beatport-edm-key with the Q9 scripts; recommend one. Pairs with Q10's packaging choice.
-acceptance: table in docs/analysis/benchmark-2026-10.md or a new doc; no backend switch without Merlin. timebox: 75 min
+### Q12 Permissive key detector ≥60% [queued] [box]
+goal: a key estimator usable in the Rust analyzer (MIT/Apache/MPL code and weights only; no Essentia models, no libKeyFinder) reaching ≥60% exact on beatport-edm-key (n=598, Beatport labels). Start from the Q10 prototype (prototyping/analysis-packaging); attack mode confusion first (~33% of errors).
+acceptance: table vs stratum (25%) and Essentia bgate (54%) on the same 598 tracks; licence of every piece verified; prototype only, not wired into the app.
+validation: the benchmark scripts in benchmark/scripts/. may write: prototyping/analysis-packaging/, docs/analysis/. timebox: 120 min
 
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
