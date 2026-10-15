@@ -22,19 +22,19 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ## Queue
 
-### Q1 Fix player playback (no audio) [queued] [box] [drain]
+### Q1 Fix player playback (no audio) [running] [box] [drain]
 goal: root-cause why the Svelte player produces no audio (docs/process/todo.md 2026-06-04) and fix it in the Rust/Tauri path.
 acceptance: root cause named; a cargo test proves the playback path yields non-silent decoded samples; stash@{0} (scrub-pause changes) reviewed and used or noted.
 validation: AGENTS.md validation + `cargo test -p pioneer-test-ui`
-may write: pioneer-test-ui/src/, app/src/lib/ (player store only), docs/process/todo.md
+may write: pioneer-test-ui/src/, app/src/stores/player.svelte.ts, app/src/services/playback.svelte.ts, docs/process/todo.md
 do not touch: USB format code, UI layout/visuals
 timebox: 60 min
 
-### Q2 svelte-check to zero errors [queued] [box] [drain]
+### Q2 svelte-check to zero errors [running] [box] [drain]
 goal: clear the 61 svelte-check errors without changing behavior or visuals.
 acceptance: `cd app && npm run check` exits 0; no rendered change.
 validation: `cd app && npm run check && npm run build`
-may write: app/src/, app/tsconfig.json
+may write: app/src/ except the two Q1 player files, app/tsconfig.json
 do not touch: prototyping/ (exclude it from the check if it leaks in), styles
 timebox: 45 min
 
@@ -63,4 +63,4 @@ do not touch: signing, notarisation, release
 timebox: 30 min
 
 ## Rundown
-Init done: code moved to lab2, master is home (a476e9b, 7 ahead of origin), builds green here. Nothing running. Next: Q1 playback, Q2 type errors (drain-eligible). Mac: Q5 build, CDJ check.
+Init done: code moved to lab2, master is home (a476e9b, 7 ahead of origin), builds green here. Running: Q1 (branch q1-playback), Q2 (branch q2-svelte-check). Mac: Q5 build, CDJ check.
