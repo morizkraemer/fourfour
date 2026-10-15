@@ -5,3 +5,4 @@
 2026-10-15 06:05 orchestrator - decided: Merlin: move to lab2, ship target public macOS beta, quiet drain, home branch master
 2026-10-15 06:05 orchestrator Q1 spawn: background worker, branch q1-playback
 2026-10-15 06:05 orchestrator Q2 spawn: background worker (sonnet), branch q2-svelte-check; player files split off to Q1
+2026-10-15 06:09 orchestrator Q2 answered: 61→13 errors; 12 are a svelte-check loader mismatch → add svelte.config.js, fall back to bumping vite-plugin-svelte to ^6; the has_analysis error goes to Q1
