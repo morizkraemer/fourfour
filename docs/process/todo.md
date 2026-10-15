@@ -44,14 +44,23 @@ Verification:
 
 Goal: identify why the Svelte player does not produce audio and make the smallest backend/player fix that can be proven locally.
 
-- [ ] Trace frontend player store -> Tauri playback commands -> Rust playback engine.
-- [ ] Fix the root cause in the core audio path without adding dependencies.
-- [ ] Add focused verification for decoded sample output.
-- [ ] Run build/tests and document the result.
+- [x] Trace frontend player store -> Tauri playback commands -> Rust playback engine.
+- [x] Fix the root cause in the core audio path without adding dependencies.
+- [x] Add focused verification for decoded sample output.
+- [x] Run build/tests and document the result.
 
 ### Review
 
-- Pending.
+- Decode path (symphonia -> resample -> channel map -> seek offset) is sound: new tests in
+  `pioneer-test-ui/src/playback.rs` decode generated WAVs (native, 44.1k mono -> 48k stereo, seek) and assert non-silent samples.
+- Defects fixed: (1) one undecodable packet (`DecodeError`) aborted the whole decode thread, so MP3s with a bad
+  frame went silent; now skipped per symphonia guidance. (2) `loadPlayerTrack` fired `playbackStop()`
+  un-awaited and then `playFromStart()`; IPC calls are not ordered, so a late stop wiped the new play (path=None, decode
+  stopped) -> no audio on queue-play-after-load. Play now waits for the stop.
+- `has_analysis` typing fixed (`BackendTrackInfo` + normalizer) for svelte-check.
+- `stash@{0}` (scrub-pause: `onScrubStart` in ExpandedPlayer/WaveformView/waveform-display) is waveform UI
+  outside this scope; not applied. Unrelated to audio output.
+- Not verifiable here: real output device. Needs a Mac ear check of play-on-select, scrub, and an MP3 with a damaged frame.
 
 ## 2026-06-04 Translate design-system → Svelte 5 (production Tauri app)
 

@@ -248,6 +248,7 @@ interface BackendTrackInfo {
   key: string;
   duration_secs: number;
   has_artwork?: boolean;
+  has_analysis?: boolean;
 }
 
 /**
@@ -272,6 +273,7 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
     key: raw?.key ?? input?.key ?? '',
     duration_secs: raw?.duration_secs ?? 0,
     has_artwork: raw?.has_artwork ?? input?.hasArtwork ?? false,
+    has_analysis: raw?.has_analysis,
   };
 }
 
@@ -328,7 +330,7 @@ export function initPlayerAnalysisRefresh() {
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
-  void playbackStop();
+  const stopped = playbackStop().catch((err) => console.error('playback stop failed:', err));
   player.playing = false;
   player.progress = 0;
 
@@ -346,7 +348,7 @@ export async function loadPlayerTrack(input: any) {
 
   if (playPending && gen === loadGeneration) {
     playPending = false;
-    void playFromStart();
+    void stopped.then(() => (gen === loadGeneration ? playFromStart() : undefined));
   }
 
   const libTrack = library.tracks.find((t) => t.id === trackInfo.id);

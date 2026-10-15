@@ -710,20 +710,31 @@ fn spawn_decode_thread(
     generation: u64,
 ) {
     thread::spawn(move || {
-        if let Err(e) = run_decode(
+        let outcome = run_decode(
             &path,
             start_sample,
             sample_rate,
             channels,
-            &pipe,
-            generation,
-        ) {
-            eprintln!("playback decode error ({path}): {e}");
-            if pipe.decode_generation.load(Ordering::Relaxed) == generation {
-                pipe.ended.store(true, Ordering::Relaxed);
-            }
+            &|| pipe.decode_generation.load(Ordering::Relaxed) == generation,
+            &mut |samples| {
+                push_interleaved(&pipe.producer, &pipe.decode_generation, generation, samples)
+            },
+        );
+        match outcome {
+            Ok(DecodeOutcome::Superseded) => return,
+            Ok(DecodeOutcome::Finished) => {}
+            Err(e) => eprintln!("playback decode error ({path}): {e}"),
+        }
+        if pipe.decode_generation.load(Ordering::Relaxed) == generation {
+            pipe.ended.store(true, Ordering::Relaxed);
         }
     });
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum DecodeOutcome {
+    Finished,
+    Superseded,
 }
 
 fn run_decode(
@@ -731,9 +742,9 @@ fn run_decode(
     start_sample: u64,
     out_rate: u32,
     out_channels: u16,
-    pipe: &SamplePipe,
-    generation: u64,
-) -> Result<(), String> {
+    is_current: &dyn Fn() -> bool,
+    sink: &mut dyn FnMut(&[f32]) -> Result<bool, String>,
+) -> Result<DecodeOutcome, String> {
     let file = File::open(path).map_err(|e| format!("Open {path}: {e}"))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let hint = Hint::new();
@@ -794,8 +805,8 @@ fn run_decode(
     }
 
     loop {
-        if pipe.decode_generation.load(Ordering::Relaxed) != generation {
-            return Ok(());
+        if !is_current() {
+            return Ok(DecodeOutcome::Superseded);
         }
 
         let packet = match format.next_packet() {
@@ -809,7 +820,14 @@ fn run_decode(
         if packet.track_id() != track_id {
             continue;
         }
-        let decoded = decoder.decode(&packet).map_err(|e| e.to_string())?;
+        let decoded = match decoder.decode(&packet) {
+            Ok(decoded) => decoded,
+            Err(symphonia::core::errors::Error::DecodeError(e)) => {
+                eprintln!("playback skipped undecodable packet ({path}): {e}");
+                continue;
+            }
+            Err(e) => return Err(e.to_string()),
+        };
         let mut frame_samples = audio_buffer_to_interleaved(&decoded);
         if in_rate != out_rate {
             frame_samples = resample_interleaved(&frame_samples, in_rate, out_rate, in_channels);
@@ -821,21 +839,13 @@ fn run_decode(
                 samples_out += chunk.len() as u64;
                 continue;
             }
-            if !push_interleaved(
-                &pipe.producer,
-                &pipe.decode_generation,
-                generation,
-                chunk,
-            )? {
-                return Ok(());
+            if !sink(chunk)? {
+                return Ok(DecodeOutcome::Superseded);
             }
         }
     }
 
-    if pipe.decode_generation.load(Ordering::Relaxed) == generation {
-        pipe.ended.store(true, Ordering::Relaxed);
-    }
-    Ok(())
+    Ok(DecodeOutcome::Finished)
 }
 
 /// Convert any decoded Symphonia buffer to interleaved f32.
@@ -1032,4 +1042,117 @@ pub fn playback_set_output_device(
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
 ) -> Result<(), String> {
     engine.set_output_device(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sine_wav(path: &std::path::Path, rate: u32, channels: u16, seconds: u32, hz: f32) {
+        let frames = rate * seconds;
+        let data_len = frames * channels as u32 * 2;
+        let mut bytes = Vec::with_capacity(44 + data_len as usize);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+        bytes.extend_from_slice(&(channels * 2).to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for n in 0..frames {
+            let v = (f32::sin(2.0 * std::f32::consts::PI * hz * n as f32 / rate as f32) * 0.5
+                * i16::MAX as f32) as i16;
+            for _ in 0..channels {
+                bytes.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn decode_to_vec(path: &std::path::Path, start_sample: u64, rate: u32, channels: u16) -> Vec<f32> {
+        let mut out = Vec::new();
+        let outcome = run_decode(
+            path.to_str().unwrap(),
+            start_sample,
+            rate,
+            channels,
+            &|| true,
+            &mut |samples| {
+                out.extend_from_slice(samples);
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome, DecodeOutcome::Finished);
+        out
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().fold(0.0, |m, s| m.max(s.abs()))
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join("fourfour-playback-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    #[test]
+    fn decodes_non_silent_stereo_at_native_rate() {
+        let path = scratch("stereo_48k.wav");
+        sine_wav(&path, 48_000, 2, 2, 440.0);
+        let samples = decode_to_vec(&path, 0, 48_000, 2);
+        assert_eq!(samples.len(), 48_000 * 2 * 2);
+        assert!(peak(&samples) > 0.45, "peak {}", peak(&samples));
+    }
+
+    #[test]
+    fn resamples_and_upmixes_to_output_format() {
+        let path = scratch("mono_44k.wav");
+        sine_wav(&path, 44_100, 1, 2, 440.0);
+        let samples = decode_to_vec(&path, 0, 48_000, 2);
+        let expected = 48_000 * 2 * 2;
+        assert!(samples.len().abs_diff(expected) < 4_000, "len {}", samples.len());
+        assert!(peak(&samples) > 0.45, "peak {}", peak(&samples));
+        let left_right_equal = samples.chunks(2).all(|f| f[0] == f[1]);
+        assert!(left_right_equal);
+    }
+
+    #[test]
+    fn seek_offset_skips_leading_audio_and_stays_audible() {
+        let path = scratch("seek_44k.wav");
+        sine_wav(&path, 44_100, 2, 4, 440.0);
+        let start_ms = 1_500u64;
+        let start_sample = start_ms * 44_100 * 2 / 1000;
+        let samples = decode_to_vec(&path, start_sample, 44_100, 2);
+        let expected = (4_000 - start_ms) as usize * 44_100 * 2 / 1000;
+        assert!(samples.len().abs_diff(expected) < 8_192, "len {}", samples.len());
+        assert!(peak(&samples) > 0.45, "peak {}", peak(&samples));
+    }
+
+    #[test]
+    fn superseded_decode_stops_without_output() {
+        let path = scratch("superseded.wav");
+        sine_wav(&path, 48_000, 2, 1, 440.0);
+        let mut pushed = 0usize;
+        let outcome = run_decode(
+            path.to_str().unwrap(),
+            0,
+            48_000,
+            2,
+            &|| false,
+            &mut |samples| {
+                pushed += samples.len();
+                Ok(true)
+            },
+        )
+        .unwrap();
+        assert_eq!(outcome, DecodeOutcome::Superseded);
+        assert_eq!(pushed, 0);
+    }
 }
