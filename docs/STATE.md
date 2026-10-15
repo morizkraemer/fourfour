@@ -39,7 +39,7 @@ may write: app/src/ except the two Q1 player files, app/tsconfig.json
 do not touch: prototyping/ (exclude it from the check if it leaks in), styles
 timebox: 45 min
 
-### Q3 Export round-trip tests [running] [box] [drain]
+### Q3 Export round-trip tests [landed] [box] [drain]
 goal: first Rust tests for pioneer-usb-writer: write a fixture library to a temp dir, parse PDB/ANLZ back, assert tracks, playlists, cues, artwork.
 acceptance: `cargo test -p pioneer-usb-writer` runs ≥5 meaningful tests, green; fixtures are small and committed.
 validation: `cargo test --workspace`
@@ -63,7 +63,16 @@ may write: none (report only)
 do not touch: signing, notarisation, release
 timebox: 30 min
 
+### Q6 One key source for PDB and OneLibrary [queued] [box]
+goal: OneLibrary writes the key from analysis.key, the PDB from track.key; an empty analysis.key gives an empty OneLibrary key and makes sync see the track as changed. Use one source for both.
+acceptance: a round-trip test with empty analysis.key shows the same key in PDB and OneLibrary and sync skips the unchanged track.
+validation: AGENTS.md validation
+may write: pioneer-usb-writer/src/ (key path only), pioneer-usb-writer/tests/
+do not touch: other format fields
+timebox: 30 min
+note: changes USB output → lands only after Merlin's OK (CDJ check)
+
 ## Rundown
 Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
 Not heard yet: playback on the Mac.
-Landed: Q4 (library export + incremental sync test, passing, no bugs). Running: Q3 (branch q3-export-tests). Next: Q5 macOS build [mac].
+Landed: Q3 (15 usb-writer round-trip tests), Q4 (library export + sync test). All 47 tests green, no format bugs. Q6 queued (key mismatch). Next: Q5 macOS build [mac].

@@ -13,3 +13,5 @@
 2026-10-15 06:23 orchestrator Q3 spawn: background worker, branch q3-export-tests
 2026-10-15 06:23 orchestrator Q4 spawn: background worker (sonnet), branch q4-library-tests
 2026-10-15 06:34 orchestrator Q4 landed: a2eb7d3 re-verified (cargo test -p pioneer-library ok, test-only change), merged to master
+2026-10-15 06:38 orchestrator Q3 landed: 0615e92 merged; full workspace tests re-run green (47 tests)
+2026-10-15 06:38 orchestrator Q6 followup: Q3 found PDB/OneLibrary key-source mismatch (inside Q3's export scope); queued, lands only with Merlin's OK
