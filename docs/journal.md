@@ -16,3 +16,4 @@
 2026-10-15 06:38 orchestrator Q3 landed: 0615e92 merged; full workspace tests re-run green (47 tests)
 2026-10-15 06:38 orchestrator Q6 followup: Q3 found PDB/OneLibrary key-source mismatch (inside Q3's export scope); queued, lands only with Merlin's OK
 2026-10-15 06:40 orchestrator - decided: Merlin: push master; Q6 stays queued
+2026-10-15 06:55 orchestrator - research: landscape + project review saved under docs/research/
