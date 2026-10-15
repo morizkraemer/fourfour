@@ -1,0 +1,11 @@
+[package]
+name = "rbref"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+pioneer-usb-writer = { path = "../../../pioneer-usb-writer" }
+serde_json = "1"
+anyhow = "1"
+rusqlite = { version = "0.33", features = ["bundled-sqlcipher"] }

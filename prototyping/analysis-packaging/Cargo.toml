@@ -6,6 +6,7 @@ publish = false
 license = "MIT OR Apache-2.0"
 
 [workspace]
+members = ["rbref"]
 
 [dependencies]
 stratum-dsp = "=1.0.0"
