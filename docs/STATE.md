@@ -19,6 +19,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
+- Preview (sample data, any device on the tailnet): https://dev.tail87069a.ts.net:4200 — `preview start fourfour app-review`
 - Playback ear check (Q1 landed): play on select, scrub/seek while playing, an MP3 with a damaged frame.
 
 ### Brother's lane (hardware)
@@ -33,7 +34,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ### Q6 One key source for PDB and OneLibrary [queued] [box] — brother's lane: format change, hand to him
 
-### Q7 Browser preview with sample data [running] [box]
+### Q7 Browser preview with sample data [landed] [box]
 goal: Merlin can open the app on laptop/phone while travelling: `preview start fourfour app-review` serves the browser build with the existing mock data (services/tauri.svelte.ts); every main screen (browse, detail, player, organize, settings) renders with sample tracks instead of erroring on missing Tauri.
 acceptance: preview URL loads; headless screenshots of each main screen show sample data and no console errors; mock gaps fixed in the mock layer only.
 validation: AGENTS.md validation + headless check of the preview URL

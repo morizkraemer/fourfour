@@ -21,3 +21,4 @@
 2026-10-15 07:08 orchestrator - decided: Merlin: queue Q7 preview, Q8 CI, Q9 benchmark, Q10 packaging; copy benchmark datasets to dev (running)
 2026-10-15 07:11 orchestrator Q7 spawn: background worker (sonnet), branch q7-preview
 2026-10-15 07:11 orchestrator Q9 spawn: background worker, branch q9-benchmark; datasets copying (beatport, 652 rekordbox tracks with Merlin OK)
+2026-10-15 07:16 orchestrator Q7 landed: 6383aba merged; app check 0 errors + build re-run; preview up at https://dev.tail87069a.ts.net:4200
