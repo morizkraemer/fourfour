@@ -69,7 +69,7 @@ do not touch: app, Tauri, usb-writer
 timebox: 90 min
 note: the choice is Merlin's; run after Q9
 
-### Q12 Permissive key detector ≥60% [queued] [box]
+### Q12 Permissive key detector ≥60% [running] [box]
 goal: a key estimator usable in the Rust analyzer (MIT/Apache/MPL code and weights only; no Essentia models, no libKeyFinder) reaching ≥60% exact on beatport-edm-key (n=598, Beatport labels). Start from the Q10 prototype (prototyping/analysis-packaging); attack mode confusion first (~33% of errors).
 acceptance: table vs stratum (25%) and Essentia bgate (54%) on the same 598 tracks; licence of every piece verified; prototype only, not wired into the app.
 validation: the benchmark scripts in benchmark/scripts/. may write: prototyping/analysis-packaging/, docs/analysis/. timebox: 120 min
