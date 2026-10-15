@@ -1,0 +1,20 @@
+[package]
+name = "ffproto"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[workspace]
+
+[dependencies]
+stratum-dsp = "=1.0.0"
+beat-this = { version = "=1.1.0", default-features = false, features = ["decode", "serde"] }
+rustfft = "6.2"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
