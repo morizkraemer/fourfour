@@ -1,4 +1,4 @@
-import { mount } from 'svelte';
+import { mount, type ComponentProps } from 'svelte';
 import { PlayerCompact } from '$ds';
 import '$ds/base.css';
 
@@ -29,8 +29,7 @@ async function main() {
       durationMs: data.durationMs,
       cues: [],
       trackKey: 1,
-      followPlayhead: false,
-    },
+    } as unknown as ComponentProps<typeof PlayerCompact>,
   });
 }
 main();

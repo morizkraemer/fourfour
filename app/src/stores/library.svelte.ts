@@ -266,6 +266,7 @@ export function filterTracks<T extends Record<string, unknown>>(
   if (!trimmed) return tracks;
   const terms = trimmed.split(/\s+/).filter(Boolean);
   return tracks.filter((track) => {
+    const raw = track.raw as Record<string, unknown> | undefined;
     const haystack = [
       track.title,
       track.artist,
@@ -277,12 +278,12 @@ export function filterTracks<T extends Record<string, unknown>>(
       track.time,
       track.filePath,
       track.index,
-      track.raw?.title,
-      track.raw?.artist,
-      track.raw?.album,
-      track.raw?.genre,
-      track.raw?.key,
-      track.raw?.source_path,
+      raw?.title,
+      raw?.artist,
+      raw?.album,
+      raw?.genre,
+      raw?.key,
+      raw?.source_path,
     ]
       .map((v) => String(v ?? '').toLowerCase())
       .join(' ');
