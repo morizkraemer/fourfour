@@ -34,3 +34,4 @@
 2026-10-15 11:47 orchestrator Q12 landed: 6a4222c merged; prototype release build re-run ok; 57.3% held-out, bar 60% not clearly met; CC BY-SA training-data question to Merlin
 2026-10-15 13:19 orchestrator - decided: Merlin: accept key 57% for now, move on to BPM/grid. Copied Rekordbox library (master.db + 1382 ANLZ, 390 MB) to dev as grid reference. Q13 spawn: branch q13-bpm-grid
 2026-10-15 14:14 orchestrator - spawn: UI/UX review worker (read-only; right sidebar, sync flow, split views, end-to-end flow) per Merlin
+2026-10-15 14:21 orchestrator - UI review done: keep organize/player/layouts (polish); USB sync = rethink (hidden, whole-library mirror, deletes, no plan/progress/result); saved docs/ui/review-2026-10-15.md
