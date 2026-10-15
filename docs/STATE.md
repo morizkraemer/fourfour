@@ -15,7 +15,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ## Waiting on Merlin
 1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
-2. Copy rekordbox-testdata audio (652 tracks of your music on the Mac) to dev for Q9 — rec: yes — branch: none
+2. (done: Merlin OK) rekordbox-testdata audio copying to dev for Q9
 3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -33,7 +33,7 @@ AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, a
 
 ### Q6 One key source for PDB and OneLibrary [queued] [box] — brother's lane: format change, hand to him
 
-### Q7 Browser preview with sample data [queued] [box]
+### Q7 Browser preview with sample data [running] [box]
 goal: Merlin can open the app on laptop/phone while travelling: `preview start fourfour app-review` serves the browser build with the existing mock data (services/tauri.svelte.ts); every main screen (browse, detail, player, organize, settings) renders with sample tracks instead of erroring on missing Tauri.
 acceptance: preview URL loads; headless screenshots of each main screen show sample data and no console errors; mock gaps fixed in the mock layer only.
 validation: AGENTS.md validation + headless check of the preview URL
@@ -50,7 +50,7 @@ do not touch: signing, secrets, release jobs
 timebox: 45 min
 note: a branch push starts CI on the shared repo → push only after Merlin's OK
 
-### Q9 Analysis accuracy benchmark [queued] [box]
+### Q9 Analysis accuracy benchmark [running] [box]
 goal: numbers for the current backend (deeprhythm_essentia): key accuracy on beatport-edm-key (Beatport labels); BPM + key agreement with Rekordbox on rekordbox-testdata-2025 (652 tracks, Merlin's library, ground truth from master.db); state that beat-grid ground truth is missing and propose how to get it.
 acceptance: docs/analysis/benchmark-2026-10.md with per-signal tables (exact, octave-tolerant, Camelot-neighbour), the denominators, failures, runtime per track.
 validation: the benchmark run itself; `cd analysis && pytest -q`
