@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -30,6 +31,8 @@ def _record_to_dict(record: AnalysisRecord) -> dict:
     from dataclasses import asdict
 
     d = asdict(record)
+    if d.get("result"):
+        d["result"]["waveform_preview"] = base64.b64encode(record.result.waveform_preview).decode("ascii")
     return d
 
 
@@ -52,6 +55,8 @@ def _dict_to_record(d: dict) -> AnalysisRecord:
         beats = [BeatPosition(**b) for b in r.get("beats", [])]
         peaks = [WaveformPeak(**p) for p in r.get("waveform_peaks", [])]
         colors = [WaveformColor(**c) for c in r.get("waveform_colors", [])]
+        overview = [WaveformColor(**c) for c in r.get("waveform_overview", [])]
+        preview = base64.b64decode(r.get("waveform_preview", ""), validate=True)
         cues = [CuePoint(**c) for c in r.get("cue_points", [])]
         meta = BackendMetadata(**r["backend_metadata"]) if r.get("backend_metadata") else None
         result = AnalysisResult(
@@ -61,6 +66,9 @@ def _dict_to_record(d: dict) -> AnalysisRecord:
             beats=beats,
             waveform_peaks=peaks,
             waveform_colors=colors,
+            waveform_overview=overview,
+            waveform_preview=preview,
+            waveform_fft_bands=r.get("waveform_fft_bands", []),
             cue_points=cues,
             elapsed_seconds=r.get("elapsed_seconds", 0.0),
             backend_metadata=meta,
@@ -92,7 +100,7 @@ def load_cache(cache_dir: Path, key: str) -> Optional[AnalysisRecord]:
     try:
         data = json.loads(cache_file.read_text())
         return _dict_to_record(data)
-    except (json.JSONDecodeError, KeyError, TypeError):
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
 
 

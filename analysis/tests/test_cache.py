@@ -75,3 +75,35 @@ def test_cache_roundtrip_with_beats():
         assert len(loaded.result.beats) == 3
         assert loaded.result.beats[1].time_seconds == 0.5
         assert loaded.result.beats[1].bar_position == 2
+
+
+def test_cache_roundtrip_waveform_fields():
+    from fourfour_analysis.types import WaveformColor
+
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_dir = Path(tmp)
+        result = AnalysisResult(
+            bpm=128.0,
+            waveform_preview=bytes(range(200, 256)),
+            waveform_overview=[WaveformColor(r=1, g=2, b=3)],
+            waveform_fft_bands=[[0, 1, 255]],
+        )
+        record = AnalysisRecord(track_id="t1", backend_id="b", status="ok", result=result)
+        save_cache(cache_dir, "k1", record)
+
+        loaded = load_cache(cache_dir, "k1")
+        assert loaded is not None
+        assert loaded.result == result
+
+
+def test_cache_skips_entry_with_legacy_preview_list():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_dir = Path(tmp)
+        entry = {
+            "track_id": "t1",
+            "backend_id": "b",
+            "status": "ok",
+            "result": {"bpm": 120.0, "waveform_preview": [1, 2, 3]},
+        }
+        (cache_dir / "k1.json").write_text(json.dumps(entry))
+        assert load_cache(cache_dir, "k1") is None
