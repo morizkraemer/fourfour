@@ -58,3 +58,13 @@
 2026-10-23 14:08 orchestrator Q20 spawn: branch q20-speed
 2026-10-23 14:23 orchestrator Q19 done: clone research saved docs/research/clones-2026-10-23.md
 2026-10-23 14:23 orchestrator Q21 spawn: branch q21-analysis
+2026-10-23 14:53 orchestrator Q20 done: branch q20-speed 02933a0 (library tests re-run ok); 30k startup 24.7 s→0.5 s backend, 188 s→3.3 s first paint; perf doc landed
+2026-10-23 14:53 orchestrator Q22 spawn: branch q22-audio
+2026-10-23 15:13 orchestrator Q22 done: branch q22-audio c21df16 (pioneer-test-ui tests re-run); audio doc landed
+2026-10-23 15:13 orchestrator Q23 spawn: branch q23-load from q20-speed
+2026-10-23 15:38 orchestrator Q23 done: branch q23-load 27a4372; 56 Rust tests reported green; perf doc section landed
+2026-10-23 15:38 orchestrator Q24 spawn: branch q24-rb-import from q23-load
+2026-10-23 16:01 orchestrator Q24 done: branch q24-rb-import c31a860 (merged q22 cleanly); import doc landed; brother bug: anlz.rs u32 overflow
+2026-10-23 16:01 orchestrator Q25 spawn: branch q25-multi-usb
+2026-10-23 16:32 orchestrator Q21 done: branch q21-analysis 1fc254c (release build reported ok); review doc landed; licence flag on cyanbox templates
+2026-10-23 16:32 orchestrator Q26 spawn: analysis pass 2, branch q26-analysis
