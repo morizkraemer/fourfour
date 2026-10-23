@@ -66,3 +66,5 @@
 2026-10-23 15:38 orchestrator Q24 spawn: branch q24-rb-import from q23-load
 2026-10-23 16:01 orchestrator Q24 done: branch q24-rb-import c31a860 (merged q22 cleanly); import doc landed; brother bug: anlz.rs u32 overflow
 2026-10-23 16:01 orchestrator Q25 spawn: branch q25-multi-usb
+2026-10-23 16:32 orchestrator Q21 done: branch q21-analysis 1fc254c (release build reported ok); review doc landed; licence flag on cyanbox templates
+2026-10-23 16:32 orchestrator Q26 spawn: analysis pass 2, branch q26-analysis
