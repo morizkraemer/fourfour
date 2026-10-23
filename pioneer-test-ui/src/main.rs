@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use pioneer_library::rekordbox;
 use pioneer_library::LocalLibrary;
 use pioneer_usb_writer::models;
 use pioneer_usb_writer::scanner;
@@ -914,6 +915,72 @@ fn wipe_usb(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+struct RekordboxImportRequest {
+    kind: rekordbox::SourceKind,
+    /// `master.db` (or the folder holding it), a USB root, or a `rekordbox.xml`.
+    path: String,
+    #[serde(flatten)]
+    options: rekordbox::ImportOptions,
+}
+
+fn load_rekordbox_source(request: &RekordboxImportRequest) -> Result<rekordbox::SourceLibrary, String> {
+    let path = Path::new(&request.path);
+    let loaded = match request.kind {
+        rekordbox::SourceKind::MasterDb => {
+            let db = if path.is_dir() { path.join("master.db") } else { path.to_path_buf() };
+            rekordbox::load_masterdb(&db, None)
+        }
+        rekordbox::SourceKind::Usb => rekordbox::load_usb(path),
+        rekordbox::SourceKind::Xml => rekordbox::load_xml(path),
+    };
+    loaded.map_err(|e| format!("{e:#}"))
+}
+
+/// Read a Rekordbox library and compare it with the local library without changing anything.
+#[tauri::command]
+async fn rekordbox_import_preview(
+    request: RekordboxImportRequest,
+    state: State<'_, SharedLibrary>,
+) -> Result<rekordbox::ImportPreview, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = load_rekordbox_source(&request)?;
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.rekordbox_preview(&source, &request.options)
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Import a Rekordbox library. Emits `rekordbox-import-progress` while it runs; the
+/// library lock is held only for the final write, not while ANLZ files are parsed.
+#[tauri::command]
+async fn rekordbox_import_run(
+    request: RekordboxImportRequest,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<rekordbox::RekordboxImportReport, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = |p: rekordbox::ImportProgress| {
+            app.emit("rekordbox-import-progress", p).ok();
+        };
+        progress(rekordbox::ImportProgress { stage: "reading", done: 0, total: 0 });
+        let source = load_rekordbox_source(&request)?;
+        let analyses = rekordbox::load_analyses(&source, &progress);
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let report = lib
+            .import_rekordbox(&source, &analyses, &request.options, &progress)
+            .map_err(|e| format!("{e:#}"))?;
+        debug_ok(&app, &format!("Rekordbox import: {report:?}"));
+        Ok(report)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Return the application version string.
 #[tauri::command]
 fn app_version() -> String {
@@ -1263,6 +1330,8 @@ fn main() {
             save_state,
             load_state,
             app_version,
+            rekordbox_import_preview,
+            rekordbox_import_run,
             read_usb_state,
             get_library_path,
             change_library_path,

@@ -9,6 +9,7 @@
 //! a lightweight index (bpm + key) for fast queries.
 
 mod queries;
+pub mod rekordbox;
 mod schema;
 
 use std::collections::HashMap;
@@ -192,6 +193,7 @@ impl LocalLibrary {
     /// Writes ANLZ binary files to disk (if the library is file-backed) and
     /// updates the lightweight bpm/key index in SQLite.
     pub fn set_analysis(&self, track_id: i64, analysis: &AnalysisResult) -> Result<()> {
+        let analysis = &self.keep_imported_data(track_id, analysis)?;
         // Write ANLZ files if we have a disk path.
         if let Some(dir) = self.track_anlz_dir(track_id) {
             std::fs::create_dir_all(&dir)
@@ -217,6 +219,33 @@ impl LocalLibrary {
         queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy)?;
 
         Ok(())
+    }
+
+    /// Re-analysis must not replace what was imported from Rekordbox: a locked
+    /// beat grid (and its tempo) stays as stored, locked cues come from the
+    /// import metadata.
+    fn keep_imported_data(&self, track_id: i64, analysis: &AnalysisResult) -> Result<AnalysisResult> {
+        let mut kept = analysis.clone();
+        let Some(meta) = self.imported_meta(track_id) else {
+            return Ok(kept);
+        };
+        if meta.grid_locked {
+            match self.get_analysis(track_id)? {
+                Some(current) if !current.beat_grid.beats.is_empty() => {
+                    kept.beat_grid = current.beat_grid;
+                    kept.bpm = current.bpm;
+                }
+                _ if !meta.grid.is_empty() => {
+                    kept.bpm = meta.grid[0].tempo as f64 / 100.0;
+                    kept.beat_grid = BeatGrid { beats: meta.grid.clone() };
+                }
+                _ => {}
+            }
+        }
+        if meta.cues_locked {
+            kept.cue_points = rekordbox::to_cue_points(&meta.cues);
+        }
+        Ok(kept)
     }
 
     /// Store analyses for multiple tracks in a single transaction.

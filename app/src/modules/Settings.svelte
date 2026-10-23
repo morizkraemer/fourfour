@@ -20,6 +20,8 @@
     setPlaybackOutputDevice,
   } from '../stores/playback-settings.svelte.ts';
   import { pickDirectory, getIsTauri } from '../services/tauri.svelte.ts';
+  import { openRekordboxImport } from '../stores/rekordbox-import.svelte.ts';
+  import RekordboxImport from './RekordboxImport.svelte';
   import {
     playbackStop,
     syncPlaybackAudioConfig,
@@ -88,6 +90,12 @@
           title: 'Library database',
           description: 'SQLite library file used for tracks, playlists, and analysis cache.',
           control: libraryPathControl,
+        },
+        {
+          title: 'Import from Rekordbox',
+          description:
+            'Bring tracks, playlists, beat grids and cues in from Rekordbox, a Pioneer USB stick or rekordbox.xml.',
+          control: rekordboxImportControl,
         },
         {
           title: 'App version',
@@ -193,6 +201,15 @@
       onclick={handleChangeLibrary}
     />
   </div>
+{/snippet}
+
+{#snippet rekordboxImportControl()}
+  <Button
+    label="Import…"
+    size="small"
+    disabled={busy || !getIsTauri()}
+    onclick={openRekordboxImport}
+  />
 {/snippet}
 
 {#snippet versionControl()}
@@ -312,6 +329,8 @@
     />
   {/snippet}
 </Dialog>
+
+<RekordboxImport />
 
 <style>
   .ff-settings-screen {

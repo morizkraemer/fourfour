@@ -576,3 +576,105 @@ export function listenToWriteComplete(callback: (payload: SyncReport) => void) {
   }
   return () => unsubscribe();
 }
+
+export async function pickFile(
+  filter?: { name: string; extensions: string[] },
+): Promise<string | null> {
+  if (useBrowserMocks()) {
+    return prompt('Enter mock file path:') || null;
+  }
+  try {
+    const result = await dialogOpen({
+      directory: false,
+      multiple: false,
+      filters: filter ? [filter] : undefined,
+    });
+    return typeof result === 'string' ? result : Array.isArray(result) ? result[0] : null;
+  } catch (err) {
+    lastTauriError = `pickFile fail: ${String(err)}`;
+    throw err;
+  }
+}
+
+export type RekordboxSourceKind = 'master_db' | 'usb' | 'xml';
+
+export type RekordboxImportRequest = {
+  kind: RekordboxSourceKind;
+  path: string;
+  remap_from?: string | null;
+  remap_to?: string | null;
+  include_missing: boolean;
+};
+
+export type RekordboxImportPreview = {
+  source: RekordboxSourceKind;
+  tracks: number;
+  playlists: number;
+  folders: number;
+  skipped_smart_playlists: number;
+  hot_cues: number;
+  memory_cues: number;
+  tracks_with_grid: number;
+  detected_root: string;
+  remap: { from_prefix: string; to_prefix: string } | null;
+  files_found: number;
+  files_missing: number;
+  missing_examples: string[];
+  conflicts: number;
+  new_tracks: number;
+  playlist_conflicts: number;
+};
+
+export type RekordboxImportReport = {
+  tracks_imported: number;
+  tracks_merged: number;
+  tracks_skipped_missing: number;
+  files_found: number;
+  files_missing: number;
+  playlists_imported: number;
+  playlists_merged: number;
+  grids_imported: number;
+  hot_cues_imported: number;
+  memory_cues_imported: number;
+  cues_without_analysis: number;
+};
+
+export type RekordboxImportProgress = { stage: string; done: number; total: number };
+
+export async function rekordboxImportPreview(
+  request: RekordboxImportRequest,
+): Promise<RekordboxImportPreview> {
+  try {
+    return await invoke<RekordboxImportPreview>('rekordbox_import_preview', { request });
+  } catch (err) {
+    lastTauriError = `rekordbox_import_preview fail: ${String(err)}`;
+    throw err;
+  }
+}
+
+export async function rekordboxImportRun(
+  request: RekordboxImportRequest,
+): Promise<RekordboxImportReport> {
+  try {
+    return await invoke<RekordboxImportReport>('rekordbox_import_run', { request });
+  } catch (err) {
+    lastTauriError = `rekordbox_import_run fail: ${String(err)}`;
+    throw err;
+  }
+}
+
+export function listenToRekordboxImportProgress(
+  callback: (payload: RekordboxImportProgress) => void,
+) {
+  let unsubscribe: () => void = () => {};
+  listen<RekordboxImportProgress>('rekordbox-import-progress', (event) => {
+    callback(event.payload);
+  })
+    .then((unsub) => {
+      unsubscribe = unsub;
+    })
+    .catch((err) => {
+      lastTauriError = `listen(rekordbox-import-progress) fail: ${String(err)}`;
+    });
+  return () => unsubscribe();
+}
