@@ -7,11 +7,19 @@ use serde_json::{json, Value};
 
 const FPS: f64 = 50.0;
 
+#[derive(Clone)]
 struct Params {
     lo: f64,
     shift_ms: f64,
     comb_refine: bool,
-    audio_refine: bool,
+    audio_q: f64,
+    audio_range_ms: i64,
+    audio_calib_ms: f64,
+    audio_min_ms: f64,
+    mp3_delay: bool,
+    snap_tol: f64,
+    snap_phase_ms: f64,
+    diag: bool,
 }
 
 struct Reference {
@@ -169,6 +177,25 @@ fn fit_track(
         p = r.1;
     }
 
+    if params.snap_tol > 0.0 {
+        let folded = fold_bpm(60.0 / p, params.lo);
+        let snapped = folded.round();
+        if (folded - snapped).abs() < params.snap_tol {
+            p *= folded / snapped;
+            let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
+            let mut best = (comb_score(&act, w, t0, p), t0);
+            let mut dt = -params.snap_phase_ms / 1000.0;
+            while dt <= params.snap_phase_ms / 1000.0 {
+                let s = comb_score(&act, w, t0 + dt, p);
+                if s > best.0 {
+                    best = (s, t0 + dt);
+                }
+                dt += 0.0005;
+            }
+            t0 = best.1;
+        }
+    }
+
     let model_bpm = 60.0 / p;
     let target = fold_bpm(model_bpm, params.lo);
     let ratio = target / model_bpm;
@@ -195,8 +222,8 @@ fn fit_track(
         first += p_out;
     }
     let mut beats = Vec::new();
-    let mut t = first;
-    while t < duration {
+    let mut t = if first - p_out >= -0.05 { first - p_out } else { first };
+    while t < duration + 0.03 {
         beats.push(t);
         t += p_out;
     }
@@ -327,23 +354,38 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
         let Some(mut fit) = fit_track(&peaks, bl, dl, doc["duration_s"].as_f64().unwrap().max(duration), &w, params) else {
             continue;
         };
-        if params.audio_refine {
+        if params.audio_q > 0.0 {
             if let Some(path) = &r.audio_path {
                 let started = Instant::now();
-                if let Some(d) = onset_phase_correction(path, &fit.beats_s) {
-                    fit.beats_s = fit.beats_s.iter().map(|t| t + d).filter(|t| *t >= 0.0).collect();
-                }
+                let d = audio_phase_correction_ms(path, &dir.join(format!("{}.env", r.id)), &fit.beats_s, params);
+                fit.beats_s = fit.beats_s.iter().map(|t| t + d / 1000.0).collect();
                 fit.fit_us += started.elapsed().as_micros();
             }
         }
+        if params.mp3_delay {
+            if let Some(path) = &r.audio_path {
+                let delay = mp3_reference_delay_s(path);
+                fit.beats_s = fit.beats_s.iter().map(|t| t + delay).collect();
+            }
+        }
+        fit.beats_s = fit.beats_s.iter().filter(|t| **t > -0.04).map(|t| t.max(0.0)).collect();
         let est_ms: Vec<f64> = fit.beats_s.iter().map(|t| t * 1000.0).collect();
         let raw_ms: Vec<f64> = fit.raw_beats_s.iter().map(|t| t * 1000.0).collect();
         let (_, f70) = match_f(&r.beats_ms, &est_ms, 70.0);
         let (_, f70_raw) = match_f(&r.beats_ms, &raw_ms, 70.0);
         let offs = nearest_offsets(&r.beats_ms, &est_ms);
+        if std::env::var("GRID_DEBUG_ID").ok().and_then(|v| v.parse::<u64>().ok()) == Some(r.id) {
+            let worst = offs.iter().enumerate().max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap()).unwrap();
+            eprintln!("debug {} worst beat index {} of {} ref_t {} off {} est_first {:?} est_last {:?}", r.id, worst.0, offs.len(), r.beats_ms[worst.0], worst.1, &est_ms[..3], &est_ms[est_ms.len() - 2..]);
+        }
         let mut abs: Vec<f64> = offs.iter().map(|d| d.abs()).collect();
         let mut signed = offs.clone();
         let med = median(&mut signed);
+        if params.diag && r.constant {
+            if let Some(path) = &r.audio_path {
+                phase_diag(r.id, path, &fit.beats_s, med);
+            }
+        }
         let max_dev = abs.iter().cloned().fold(0.0, f64::max);
         abs.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let p95 = abs[((abs.len() as f64) * 0.95) as usize % abs.len()];
@@ -433,7 +475,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let reference = PathBuf::from(args.next().expect("usage: grid <reference.json> <dump dir> [--split dev|test|all] [--lo N] [--shift-ms N] [--comb] [--out file] [--dedupe]"));
     let dir = PathBuf::from(args.next().expect("dump dir"));
-    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_refine: false };
+    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_delay: false, snap_tol: 0.0, snap_phase_ms: 15.0, diag: false };
     let mut split = "test".to_string();
     let mut out: Option<PathBuf> = None;
     let mut dedupe = false;
@@ -444,7 +486,14 @@ fn main() {
             "--lo" => params.lo = args.next().unwrap().parse().unwrap(),
             "--shift-ms" => params.shift_ms = args.next().unwrap().parse().unwrap(),
             "--comb" => params.comb_refine = true,
-            "--audio-phase" => params.audio_refine = true,
+            "--audio-q" => params.audio_q = args.next().unwrap().parse().unwrap(),
+            "--audio-range-ms" => params.audio_range_ms = args.next().unwrap().parse().unwrap(),
+            "--audio-min-ms" => params.audio_min_ms = args.next().unwrap().parse().unwrap(),
+            "--audio-calib-ms" => params.audio_calib_ms = args.next().unwrap().parse().unwrap(),
+            "--mp3-delay" => params.mp3_delay = true,
+            "--snap-tol" => params.snap_tol = args.next().unwrap().parse().unwrap(),
+            "--snap-phase-ms" => params.snap_phase_ms = args.next().unwrap().parse().unwrap(),
+            "--diag" => params.diag = true,
             "--out" => out = Some(PathBuf::from(args.next().unwrap())),
             "--dedupe" => dedupe = true,
             "--sweep" => sweep = true,
@@ -465,7 +514,7 @@ fn main() {
 
     if sweep {
         for lo in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0] {
-            let p = Params { lo, shift_ms: params.shift_ms, comb_refine: params.comb_refine, audio_refine: params.audio_refine };
+            let p = Params { lo, diag: false, ..params.clone() };
             let rows = evaluate(&selected, &dir, &p);
             let rr: Vec<&Row> = rows.iter().collect();
             let s = summarize("sweep", &rr, false);
@@ -538,14 +587,12 @@ const ONSET_SR: f64 = 22050.0;
 const ONSET_WIN: usize = 512;
 const ONSET_HOP: usize = 64;
 const ONSET_MAX_BIN: usize = 116;
-const PHASE_SEARCH_MS: i64 = 50;
-
-fn onset_envelope(samples: &[f32]) -> Vec<f64> {
+fn band_envelope(samples: &[f32], bin_lo: usize, bin_hi: usize, log_compress: bool) -> Vec<f64> {
     let fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(ONSET_WIN);
     let window: Vec<f32> = (0..ONSET_WIN)
         .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / ONSET_WIN as f32).cos())
         .collect();
-    let mut prev = vec![0f32; ONSET_MAX_BIN];
+    let mut prev = vec![0f32; bin_hi];
     let mut buf = vec![rustfft::num_complex::Complex { re: 0f32, im: 0f32 }; ONSET_WIN];
     let frames = samples.len().saturating_sub(ONSET_WIN) / ONSET_HOP;
     let mut env = Vec::with_capacity(frames);
@@ -556,8 +603,8 @@ fn onset_envelope(samples: &[f32]) -> Vec<f64> {
         }
         fft.process(&mut buf);
         let mut flux = 0f32;
-        for b in 1..ONSET_MAX_BIN {
-            let m = (1.0 + 100.0 * buf[b].norm()).ln();
+        for b in bin_lo..bin_hi {
+            let m = if log_compress { (1.0 + 100.0 * buf[b].norm()).ln() } else { buf[b].norm() };
             flux += (m - prev[b]).max(0.0);
             prev[b] = m;
         }
@@ -566,38 +613,105 @@ fn onset_envelope(samples: &[f32]) -> Vec<f64> {
     env
 }
 
-fn onset_phase_correction(path: &str, beats_s: &[f64]) -> Option<f64> {
-    let audio = beat_this::load_audio(std::path::Path::new(path), ONSET_SR as u32).ok()?;
-    let env = onset_envelope(&audio.samples);
-    let at = |t: f64| -> f64 {
-        let x = (t * ONSET_SR - ONSET_WIN as f64 / 2.0) / ONSET_HOP as f64;
-        if x < 0.0 {
-            return 0.0;
-        }
-        let i = x.floor() as usize;
-        if i + 1 >= env.len() {
-            return 0.0;
-        }
-        let fr = x - i as f64;
-        env[i] * (1.0 - fr) + env[i + 1] * fr
-    };
-    let steps = (2 * PHASE_SEARCH_MS + 1) as usize;
-    let mut profile = vec![0f64; steps];
-    for (j, p) in profile.iter_mut().enumerate() {
-        let d = (j as i64 - PHASE_SEARCH_MS) as f64 / 1000.0;
-        *p = beats_s.iter().map(|&t| at(t + d)).sum();
+fn env_at(env: &[f64], t: f64) -> f64 {
+    let x = (t * ONSET_SR - ONSET_WIN as f64 / 2.0) / ONSET_HOP as f64;
+    if x < 0.0 {
+        return 0.0;
     }
+    let i = x.floor() as usize;
+    if i + 1 >= env.len() {
+        return 0.0;
+    }
+    let fr = x - i as f64;
+    env[i] * (1.0 - fr) + env[i + 1] * fr
+}
+
+fn profile_argmax_ms(env: &[f64], beats_s: &[f64], range_ms: i64) -> (f64, f64) {
+    let steps = (2 * range_ms + 1) as usize;
+    let profile: Vec<f64> = (0..steps)
+        .map(|j| {
+            let d = (j as i64 - range_ms) as f64 / 1000.0;
+            beats_s.iter().map(|&t| env_at(env, t + d)).sum()
+        })
+        .collect();
     let smooth: Vec<f64> = (0..steps)
         .map(|j| {
-            let lo = j.saturating_sub(2);
-            let hi = (j + 3).min(steps);
+            let lo = j.saturating_sub(3);
+            let hi = (j + 4).min(steps);
             profile[lo..hi].iter().sum::<f64>() / (hi - lo) as f64
         })
         .collect();
     let mean = smooth.iter().sum::<f64>() / steps as f64;
-    let (best_j, best) = smooth.iter().enumerate().fold((0, f64::MIN), |a, (j, &v)| if v > a.1 { (j, v) } else { a });
-    if mean <= 0.0 || best / mean < 1.1 {
-        return None;
+    let (bj, best) = smooth.iter().enumerate().fold((0, f64::MIN), |a, (j, &v)| if v > a.1 { (j, v) } else { a });
+    ((bj as i64 - range_ms) as f64, best / mean.max(1e-12))
+}
+
+fn phase_diag(id: u64, path: &str, beats_s: &[f64], med_offset_ms: f64) {
+    let Ok(audio) = beat_this::load_audio(std::path::Path::new(path), ONSET_SR as u32) else { return };
+    let bands: [(usize, usize, bool); 5] = [(1, 116, true), (1, 6, true), (1, 6, false), (6, 40, true), (1, 116, false)];
+    let mut cols = Vec::new();
+    for (lo, hi, lg) in bands {
+        let env = band_envelope(&audio.samples, lo, hi, lg);
+        let (d, q) = profile_argmax_ms(&env, beats_s, 80);
+        cols.push(format!("{d:.0} {q:.2}"));
     }
-    Some((best_j as i64 - PHASE_SEARCH_MS) as f64 / 1000.0)
+    println!("DIAG {id} {med_offset_ms:.1} {}", cols.join(" "));
+}
+
+fn cached_envelope(path: &str, cache: &PathBuf) -> Option<Vec<f64>> {
+    if let Ok(raw) = fs::read(cache) {
+        return Some(raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect());
+    }
+    let audio = beat_this::load_audio(std::path::Path::new(path), ONSET_SR as u32).ok()?;
+    let env = band_envelope(&audio.samples, 1, ONSET_MAX_BIN, true);
+    let bytes: Vec<u8> = env.iter().flat_map(|v| (*v as f32).to_le_bytes()).collect();
+    fs::write(cache, bytes).ok()?;
+    Some(env)
+}
+
+fn audio_phase_correction_ms(path: &str, cache: &PathBuf, beats_s: &[f64], params: &Params) -> f64 {
+    let Some(env) = cached_envelope(path, cache) else { return 0.0 };
+    let base: Vec<f64> = beats_s.iter().map(|t| t - params.shift_ms / 1000.0).collect();
+    let (d, q) = profile_argmax_ms(&env, &base, params.audio_range_ms);
+    if q < params.audio_q {
+        return 0.0;
+    }
+    let total = d + params.audio_calib_ms;
+    if total.abs() < params.audio_min_ms {
+        return 0.0;
+    }
+    total - params.shift_ms
+}
+
+fn mp3_reference_delay_s(path: &str) -> f64 {
+    let Ok(data) = fs::read(path) else { return 0.0 };
+    if !path.to_lowercase().ends_with(".mp3") {
+        return 0.0;
+    }
+    let mut pos = 0;
+    if data.len() > 10 && &data[..3] == b"ID3" {
+        pos = 10 + (((data[6] & 0x7f) as usize) << 21 | ((data[7] & 0x7f) as usize) << 14 | ((data[8] & 0x7f) as usize) << 7 | (data[9] & 0x7f) as usize);
+    }
+    while pos + 4 < data.len().min(pos + 4096) && !(data[pos] == 0xff && data[pos + 1] & 0xe0 == 0xe0 && (data[pos + 2] >> 2) & 3 != 3) {
+        pos += 1;
+    }
+    if pos + 200 > data.len() {
+        return 0.0;
+    }
+    let mpeg1 = (data[pos + 1] >> 3) & 3 == 3;
+    let sr_idx = ((data[pos + 2] >> 2) & 3) as usize;
+    let sr = if mpeg1 { [44100.0, 48000.0, 32000.0][sr_idx] } else { [22050.0, 24000.0, 16000.0][sr_idx] };
+    let Some(rel) = data[pos..pos + 200].windows(4).position(|w| w == b"Xing" || w == b"Info") else { return 0.0 };
+    let tag = pos + rel;
+    let flags = u32::from_be_bytes([data[tag + 4], data[tag + 5], data[tag + 6], data[tag + 7]]);
+    let mut ext = tag + 8;
+    if flags & 1 != 0 { ext += 4; }
+    if flags & 2 != 0 { ext += 4; }
+    if flags & 4 != 0 { ext += 100; }
+    if flags & 8 != 0 { ext += 4; }
+    if ext + 24 > data.len() || &data[ext..ext + 4] != b"LAME" {
+        return 0.0;
+    }
+    let delay = ((data[ext + 21] as usize) << 4) | ((data[ext + 22] >> 4) as usize);
+    (delay + 529) as f64 / sr
 }
