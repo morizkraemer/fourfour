@@ -27,7 +27,7 @@ use pioneer_usb_writer::{reader, writer};
 
 pub use multi_sync::{
     NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
-    SyncPhase, SyncSelection, SyncTarget, statvfs_available_bytes,
+    SyncPhase, SyncSelection, SyncTarget, WriterFn, statvfs_available_bytes,
 };
 
 /// Summary report from importing a Pioneer USB into the local library.
