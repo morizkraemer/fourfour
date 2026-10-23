@@ -46,10 +46,10 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q18 App unit tests [done, branch q18-app-tests 4dba72d, rebased on master] — 41 vitest tests (analysis validators, mock, library helpers, menus), check + build green; npm audit advisories not reviewed; untested: mapTrackInfoToLocal, normalizeTrackInput, sortTracks (need export/extraction)
 
 ## Run
-status: idle · since 2026-10-23 14:02 (ran from 11:54 ) · cap 1 worker · autonomy tight · third priority on the seat (after konsole, emberland)
-targets: none new (rulebook targets: grid ±20 ms 47%→70%, key ≥60%)
-idle because: everything left needs Merlin (sync UI, licence, pushes, vitest, Q8 CI first run) or the brother (engine, hardware)
-plan: Q15 grid phase + drift → Q16 key round 2 (measurement only; shipped weights wait on Merlin #4) → own priorities: app unit tests for pure TS modules (branch) → cleanup (doc drift in AGENTS.md: test-suite and stratum claims). All on branches; only state/docs/analysis reports land.
+status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
+targets (Merlin, direct): 1 fastest startup · 2 bulk import + analysis speed · 3 sync several USBs at once · 4 instant track load incl. waveform · 5 better beat grid · 6 Rekordbox library import works · 7 research other Rekordbox clones (incl. new "lite" one), reuse code if licence allows · 8 review the analysis pipeline twice for speed + quality · 10 audio engine: no crashes, fast, responsive · 11 UI lightning fast
+plan: Q19 clone research (7) ∥ Q20 startup + UI speed (1, 11) → Q21 analysis review + bulk speed + grid (8, 2, 5) → Q22 audio engine (10) → Q23 track/waveform load (4) → Q24 Rekordbox import (6) → Q25 multi-USB sync (3) → second analysis review pass (8) → own priorities
+rules: all code on branches (tight); docs/reports land. Items 3/6 touch the brother's lane (sync engine, master.db reader): branch only, flagged for him. Third-party code: licence-checked, inspected in an isolated dir, never executed blindly.
 
 ## Rundown
 Since 10-15 nothing ran. Master holds the Rust analysis prototype (BPM/grid/key), benchmark docs, UI review and three sync mockup rounds. Open: Merlin's sync round 3 answers, brother's engine work, Q15/Q16 proposed.
