@@ -1,3 +1,5 @@
+> **Historical (April 2026).** The stratum-dsp grid design below is not wired. Current docs: [packaging-decision.md](packaging-decision.md), [benchmark-2026-10.md](benchmark-2026-10.md), [bpm-grid-2026-10.md](bpm-grid-2026-10.md), [key-detector-2026-10.md](key-detector-2026-10.md).
+
 # fourfour — Analysis Pipeline Handoff
 
 **For:** Cofounder (backend/Rust)
