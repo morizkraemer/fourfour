@@ -1,4 +1,7 @@
 #[allow(dead_code)]
+#[path = "../analysis_payload.rs"]
+mod analysis_payload;
+#[allow(dead_code)]
 #[path = "../dto.rs"]
 mod dto;
 #[path = "../track_infos.rs"]
@@ -130,11 +133,65 @@ fn run(dir: &Path) {
     );
 }
 
+fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (v[v.len() / 2], v[(v.len() * 95 / 100).min(v.len() - 1)])
+}
+
+fn load(dir: &Path, samples: usize) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let ids = lib.get_unanalyzed_track_ids().unwrap();
+    let total = lib.track_count().unwrap() as usize;
+    drop(ids);
+    let step = (total / samples).max(1);
+    let picked: Vec<i64> = (0..samples).map(|n| (n * step + 1) as i64).collect();
+
+    let mut parse = Vec::new();
+    let mut build = Vec::new();
+    let mut json = Vec::new();
+    let mut bytes = Vec::new();
+    for pass in 0..2 {
+        for id in &picked {
+            let t = Instant::now();
+            let analysis = lib.get_analysis(*id).unwrap().unwrap();
+            let parse_ms = ms(t);
+            drop(analysis);
+
+            let t = Instant::now();
+            let value = analysis_payload::build_analysis_json(&lib, *id).unwrap();
+            let build_ms = ms(t);
+
+            let t = Instant::now();
+            let text = serde_json::to_string(&value).unwrap();
+            let json_ms = ms(t);
+            if pass == 1 {
+                parse.push(parse_ms);
+                build.push(build_ms);
+                json.push(json_ms);
+                bytes.push(text.len() as f64);
+            }
+        }
+    }
+    let (parse_m, parse_p) = median_and_p95(parse);
+    let (build_m, build_p) = median_and_p95(build);
+    let (json_m, json_p) = median_and_p95(json);
+    let (bytes_m, _) = median_and_p95(bytes);
+    let artwork = vec![0xABu8; 200_000];
+    let t = Instant::now();
+    let artwork_json = serde_json::to_string(&artwork).unwrap();
+    let artwork_json_ms = ms(t);
+    println!(
+        "samples={samples} anlz_parse_ms={parse_m:.2}/{parse_p:.2} build_payload_ms={build_m:.2}/{build_p:.2} json_ms={json_m:.2}/{json_p:.2} payload_bytes={bytes_m:.0} artwork_200kb_json_bytes={} artwork_json_ms={artwork_json_ms:.2} (median/p95)",
+        artwork_json.len()
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
-        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir>"),
+        Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
+        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples]"),
     }
 }
