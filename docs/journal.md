@@ -70,3 +70,4 @@
 2026-10-23 16:32 orchestrator Q26 spawn: analysis pass 2, branch q26-analysis
 2026-10-23 16:33 orchestrator Q25 done: branch q25-multi-usb 04fe899; doc landed; CRITICAL brother bug: pdb.rs split_into_pages panics >~200 tracks
 2026-10-23 16:33 orchestrator - decided: own prio bugs: Q27 failing repro tests for writer bugs (no format change, lane rule)
+2026-10-23 17:42 orchestrator - resumed: usage limit reset (PM); Q26 and Q27 workers resumed
