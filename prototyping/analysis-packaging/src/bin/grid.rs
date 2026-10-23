@@ -19,6 +19,9 @@ struct Params {
     mp3_delay: bool,
     snap_tol: f64,
     snap_phase_ms: f64,
+    snap_wide: f64,
+    scan_pct: f64,
+    snap_ratio: f64,
     diag: bool,
 }
 
@@ -172,6 +175,26 @@ fn fit_track(
     let (mut t0, mut p) = fit_line(&refined, p0);
     if params.comb_refine {
         let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
+        if params.scan_pct > 0.0 {
+            let mid = w.offset + w.len / 2.0;
+            let k = (mid - t0) / p;
+            let steps = (params.scan_pct / 100.0 / 1e-5) as i64;
+            let mut best = (f64::MIN, t0, p);
+            for i in -steps..=steps {
+                let pi = p * (1.0 + i as f64 * 1e-5);
+                let tc = t0 + (p - pi) * k;
+                let mut dt = -pi / 2.0;
+                while dt < pi / 2.0 {
+                    let s = comb_score(&act, w, tc + dt, pi);
+                    if s > best.0 {
+                        best = (s, tc + dt, pi);
+                    }
+                    dt += 0.004;
+                }
+            }
+            t0 = best.1;
+            p = best.2;
+        }
         let r = refine_comb(&act, w, t0, p);
         t0 = r.0;
         p = r.1;
@@ -180,21 +203,29 @@ fn fit_track(
     if params.snap_tol > 0.0 {
         let folded = fold_bpm(60.0 / p, params.lo);
         let snapped = folded.round();
-        if (folded - snapped).abs() < params.snap_tol {
-            p *= folded / snapped;
+        let delta = (folded - snapped).abs();
+        if delta < params.snap_wide.max(params.snap_tol) {
             let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
-            let mut best = (comb_score(&act, w, t0, p), t0);
+            let mid = w.offset + w.len / 2.0;
+            let p_new = p * folded / snapped;
+            let t_new = t0 + (p - p_new) * ((mid - t0) / p);
+            let mut best = (comb_score(&act, w, t_new, p_new), t_new);
             let mut dt = -params.snap_phase_ms / 1000.0;
             while dt <= params.snap_phase_ms / 1000.0 {
-                let s = comb_score(&act, w, t0 + dt, p);
+                let s = comb_score(&act, w, t_new + dt, p_new);
                 if s > best.0 {
-                    best = (s, t0 + dt);
+                    best = (s, t_new + dt);
                 }
                 dt += 0.0005;
             }
-            t0 = best.1;
+            let current = comb_score(&act, w, t0, p);
+            if delta < params.snap_tol || best.0 >= params.snap_ratio * current {
+                p = p_new;
+                t0 = best.1;
+            }
         }
     }
+
 
     let model_bpm = 60.0 / p;
     let target = fold_bpm(model_bpm, params.lo);
@@ -475,7 +506,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let reference = PathBuf::from(args.next().expect("usage: grid <reference.json> <dump dir> [--split dev|test|all] [--lo N] [--shift-ms N] [--comb] [--out file] [--dedupe]"));
     let dir = PathBuf::from(args.next().expect("dump dir"));
-    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_delay: false, snap_tol: 0.0, snap_phase_ms: 15.0, diag: false };
+    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_delay: false, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false };
     let mut split = "test".to_string();
     let mut out: Option<PathBuf> = None;
     let mut dedupe = false;
@@ -492,6 +523,9 @@ fn main() {
             "--audio-calib-ms" => params.audio_calib_ms = args.next().unwrap().parse().unwrap(),
             "--mp3-delay" => params.mp3_delay = true,
             "--snap-tol" => params.snap_tol = args.next().unwrap().parse().unwrap(),
+            "--scan-pct" => params.scan_pct = args.next().unwrap().parse().unwrap(),
+            "--snap-wide" => params.snap_wide = args.next().unwrap().parse().unwrap(),
+            "--snap-ratio" => params.snap_ratio = args.next().unwrap().parse().unwrap(),
             "--snap-phase-ms" => params.snap_phase_ms = args.next().unwrap().parse().unwrap(),
             "--diag" => params.diag = true,
             "--out" => out = Some(PathBuf::from(args.next().unwrap())),

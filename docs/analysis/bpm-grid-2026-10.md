@@ -168,3 +168,83 @@ prototyping/analysis-packaging/target/release/grid benchmark/results/rb-grid-ref
 ```
 
 Add `--dedupe` for the unique-track column. Dev tuning: `--split dev --sweep --comb` (octave prior), `--split dev --shift-ms N` (shift). Baseline row: `--split test --lo 70`. The batch run processes dev tracks with id % 12 == 4 first, then the test split; stop it whenever the budget ends and score what exists. Run time for the 205 test tracks plus 58 dev tracks was about 35 minutes on 4 processes at a busy box.
+
+# Q15, 2026-10-23: grid phase and drift
+
+Status: measured on the same held-out test split (manifest id % 3 == 0). Prototype only. Branch `q15-grid`. Settings were tuned on the dev split only; test numbers are for the final settings.
+
+## Result (test split, 205 tracks)
+
+| Metric | Q13 (window, above) | Q15 (full track, final) |
+|---|---:|---:|
+| BPM within +-0.1 | 177 = 86.3% | 180 = 87.8% |
+| BPM within +-1 | 190 = 92.7% | 190 = 92.7% |
+| Octave errors x2 / x0.5 / x1.5 | 0 / 2 / 1 | 0 / 3 / 0 |
+| Other miss (more than 1 BPM, not an octave ratio) | 12 | 12 |
+| Beat F-measure at 70 ms (mean) | 0.875 | 0.893 |
+| Median per-track offset vs Rekordbox, signed (est minus ref) | 0.0 ms | +6.7 ms |
+| Median per-track offset, absolute | 8.3 ms | 11.3 ms |
+| **Whole grid within +-20 ms of Rekordbox** | **97 = 47.3%** | **148 = 72.2%** |
+| Whole grid within 10 / 30 / 50 ms | 54 / 123 / 141 | 50 / 163 / 168 |
+| Constant-grid references only (189): grid within 20 ms | 97 = 51.3% | 148 = 78.3% |
+| Constant-grid references only: BPM within +-0.1 | 174 = 92.1% | 178 = 94.2% |
+
+The median offset got worse on purpose: the global -7 ms shift is gone (see "Phase"), and the metric that counts is the worst beat, not the median. The x0.5 octave errors are the three tracks above 150 BPM (outside the 75 to 150 prior, same as before); one Q13 x1.5 miss is now counted under "other". By container (test): mp3 52 of 88 within 20 ms, flac 34 of 42, wav 62 of 75.
+
+Of the 179 constant-grid tracks within +-0.5 BPM, 31 still fail 20 ms: 21 have a median offset above 20 ms, 14 drift more than 15 ms, 4 have irregular beats (groups overlap). The remaining misses are mostly tracks where the model's tempo wanders by 0.1 to 0.8 BPM or sits half a beat off.
+
+## What helped (dev split, 104 tracks, full-track logits; grid within 20 ms)
+
+| Step (cumulative) | BPM +-0.1 | F70 | Grid within 20 ms |
+|---|---:|---:|---:|
+| Q13 settings (comb, `lo` 75, shift -7 ms), run on full-track logits | 83.7% | 0.863 | 52.9% (55) |
+| shift 0 + MP3 encoder-delay correction | 83.7% | 0.872 | 64.4% (67) |
+| + snap to integer BPM when within 0.05 | 83.7% | 0.874 | 66.3% (69) |
+| + exhaustive tempo scan of the whole-track comb (+-0.3%) | 90.4% | 0.919 | 70.2% (73) |
+| + wide integer snap (within 0.5 BPM if the comb score keeps 97%) = final | 91.3% | 0.925 | **71.2% (74)** |
+
+1. **MP3 encoder delay (largest effect).** Rekordbox's grid for an mp3 sits later than the decoded audio by the LAME delay: ffprobe reports a 25.057 ms start for these files (1105 samples at 44.1 kHz = delay field 576 + 529 decoder delay). The Q13 offset by container (test, tracks with BPM within 0.5): mp3 median -20.0 ms (est earlier than Rekordbox), flac +3.9 ms, wav +3.5 ms. Mp3 files without a LAME header (start 0.000) show about 0. The fix reads the LAME header from the file (`mp3_reference_delay_s`, 20 lines, no crate) and adds `(delay + 529) / sample_rate` to the grid; the global -7 ms shift, which was a compromise between mp3 and the rest, is not needed (dev: shift 0 beats -3 and +3 and -7). This probably also explains why the Q13 audio-onset alignment looked worse than the model: it moved mp3 grids toward the audio, away from Rekordbox. So the reference is not wrong; it is a timeline that includes the encoder delay. Whether an app writing grids for CDJ playback should apply the same offset for mp3 is not settled here and needs a hardware check.
+2. **Whole-track tempo.** Beat This! on the full track instead of a 120 s window, then an exhaustive scan of the comb score over tempo (+-0.3% in steps of 1e-5, phase in 4 ms steps, pivot at the track middle) before the local search. The old local search got stuck on 5 to 8 dev tracks. On dev: BPM +-0.1 83.7% to 90.4%, grid +4 points. Cost: about 1.1 s per track (median, unoptimised) on top of the model.
+3. **Integer BPM prior.** 496 of the 643 reference BPMs (77%) are exact integers, and for those the Q13 estimate is within 0.03 of the integer in 143 of 153 cases. Snapping removes drift for those tracks. The wide variant (up to 0.5 BPM away, accepted only if the whole-track comb score stays at or above 97% of the unsnapped score) adds one dev track; treat it as marginal.
+4. **Grid edges (2 fixes, test +2.9 points on the Q13 logits).** Estimated beats now run to the audio end plus 30 ms (a Rekordbox beat 0.4 ms past the audio duration counted as a 460 ms miss), and a first beat that wraps from slightly negative to a full period late is kept at 0 instead. With only these two fixes and the old settings, the Q13 window logits score 103 of 205 = 50.2% on test (checked once as a reproduction; the "before" column keeps the published 47.3%).
+
+## What did not help
+
+- **Audio-onset phase alignment** (a spectral-flux envelope, best offset within +-40 ms, gated by peak contrast; `--audio-q/--audio-calib-ms/--audio-min-ms`). Median |offset| drops from 11 to about 5 to 7 ms on dev, but the grid within 20 ms falls: 71.2% to 70.2% (only large corrections, gate 15 ms, contrast 4) and 58.7% (contrast 2.5). The worst beat decides the metric, and Rekordbox's own grid is not on the audio's transients to that precision. Same conclusion as Q13, now with the mp3 delay removed as a confound.
+- **Least-squares line through all beats instead of the comb** (comb off, shift 0, mp3 delay, snap 0.05): 67.3% against 71.4% with the comb, measured on the first 49 dev tracks. The line is only the start point of the comb in the final pipeline.
+- **A global phase shift on dev** (-7, -4, -3, 0, +2, +3, +4, +6 ms, measured on 49 to 92 tracks): 0 is best, +2 to +4 is flat, the others lose 3 to 7 points.
+- **Downbeat (bar position) alignment**: not scored here, and not needed for the +-20 ms test; the Q13 downbeat head is still used only to choose the phase when the tempo is halved.
+- Wider integer snap alone (`--snap-tol 0.1`): 69.2%, lower than 0.05.
+
+## Denominators and caveats
+
+- Test: the same 205 verified-audio tracks as Q13 (212 reference grids; 7 without verified audio). Dev: 104 tracks analysed with the full-track model (Q13 used 58), of the 407 verified; they are the first 104 in the bgdump order (ids with id % 12 equal to 4 or 7, then a few more), not a random sample. The test split was run once with the final settings.
+- The dev set was extended and then frozen at 104 before the last tuning steps; the first rows in the dev table were also measured while the set was at 49 to 92 tracks, but the table above is all 104.
+- Dev gains do not equal test gains: grid 52.9% to 71.2% on dev, 47.3% (50.2% with the edge fixes) to 72.2% on test.
+- Reference remains Rekordbox, so all of this measures compatibility with it. The mp3 delay rule is derived from 2 containers' worth of offsets and the LAME header, not from a Rekordbox spec; other encoders (no LAME tag, VBR headers without it) are treated as zero delay.
+
+## Runtime per track
+
+Beat This! on the full track: 29 to 41 s per 345 to 465 s track with 4 processes at 3 threads each on a box at load average 20 to 25 (about 0.1 x realtime of the track; the idle box measured 0.055 x realtime in Q13, so about 20 s for a 6 minute track). Decode 1.5 to 2.5 s. Tempo scan and fit 0.8 to 2 s (median 1.1 s on test; unoptimised scalar loops). Total about 25 s per track on an idle box, roughly double the 120 s window; a 5,000-track library is about 35 hours sequentially or 9 hours on 4 processes.
+
+## Reproduce
+
+```bash
+cd prototyping/analysis-packaging
+./fetch-models.sh
+cargo build --release
+cd ../..
+
+for i in 0 1 2 3; do
+  RTEN_NUM_THREADS=3 prototyping/analysis-packaging/target/release/bgdump \
+    --reference benchmark/results/rb-grid-reference.json \
+    --out benchmark/results/q15/full --shard $i/4 &
+done; wait
+
+prototyping/analysis-packaging/target/release/grid benchmark/results/rb-grid-reference.json \
+  benchmark/results/q15/full --split test --lo 75 --comb --shift-ms 0 --mp3-delay \
+  --snap-tol 0.05 --snap-wide 0.5 --snap-ratio 0.97 --scan-pct 0.3 \
+  --out benchmark/results/q15/test-final.json
+```
+
+`bgdump` without `--window` runs the whole track; it writes dev tracks with id % 12 == 4 first, then the test split, then id % 12 == 7 and the rest, and skips tracks already dumped, so it can be stopped at any time. Dev rows: replace `--split test` with `--split dev` and the flags as in the table (`--shift-ms -7 --comb --lo 75` for the Q13 row). Negative results: `--audio-q 4 --audio-calib-ms 2 --audio-min-ms 15`. `--diag` prints the per-track audio-flux offsets that led to the mp3 finding; `GRID_DEBUG_ID=<id>` prints the worst beat of one track. The reference JSON used here sat next to the Q13 logits (`benchmark/results/q13/rb-grid-reference.json`).
