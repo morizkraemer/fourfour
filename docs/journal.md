@@ -58,3 +58,5 @@
 2026-10-23 14:08 orchestrator Q20 spawn: branch q20-speed
 2026-10-23 14:23 orchestrator Q19 done: clone research saved docs/research/clones-2026-10-23.md
 2026-10-23 14:23 orchestrator Q21 spawn: branch q21-analysis
+2026-10-23 14:53 orchestrator Q20 done: branch q20-speed 02933a0 (library tests re-run ok); 30k startup 24.7 s→0.5 s backend, 188 s→3.3 s first paint; perf doc landed
+2026-10-23 14:53 orchestrator Q22 spawn: branch q22-audio
