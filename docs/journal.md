@@ -68,3 +68,5 @@
 2026-10-23 16:01 orchestrator Q25 spawn: branch q25-multi-usb
 2026-10-23 16:32 orchestrator Q21 done: branch q21-analysis 1fc254c (release build reported ok); review doc landed; licence flag on cyanbox templates
 2026-10-23 16:32 orchestrator Q26 spawn: analysis pass 2, branch q26-analysis
+2026-10-24 16:33 orchestrator Q25 done: branch q25-multi-usb 04fe899; doc landed; CRITICAL brother bug: pdb.rs split_into_pages panics >~200 tracks
+2026-10-24 16:33 orchestrator - decided: own prio bugs: Q27 failing repro tests for writer bugs (no format change, lane rule)

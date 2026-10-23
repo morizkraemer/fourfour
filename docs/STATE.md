@@ -15,6 +15,7 @@ Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a
 AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
+0. USB export panics above ~200 tracks (brother's writer, pdb.rs) — rec: tell your brother first thing; repro test on branch q27-writer-repro — branch: none
 1. Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
 2. Copy a playlist to another stick: Keep updated on by default? — rec: yes — branch: none
 3. Build round 3 into the app (replaces ui-sync-flow's first attempt, keeps the stick header)? — rec: yes after 1–2 — branch: ui-sync-flow
@@ -29,6 +30,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 
 ### Brother's lane
+- **CRITICAL (Q25): `pdb.rs::split_into_pages` panics at ~200+ tracks (u16 heap offsets wrap past 64 KiB) → write_usb/sync_usb fail on any real library. Fix: usize offsets, rebase per chunk.**
 - Bug from Q24: writer/anlz.rs colour-detail index `i * src_len / entry_count` overflows u32 on tracks > ~7 min (panics in debug). Also: parse_pco2 drops cue names/colours; SQLCipher keys private; no PDB reader (docs/architecture/rekordbox-import.md).
 - From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
 - Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
@@ -52,7 +54,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q22 Audio engine review (item 10) [done, branch q22-audio c21df16; doc landed] — 5 high fixes (seek/stop race, L/R shift on underrun, zero-rate WAV panic, truncated file stuck playing, silent after failed device switch) + 6 medium; 26 new tests incl. 0-alloc callback + thread spam; load→audio 1.6 ms, seek→audio 2.5 ms (fake sink). Needs Mac check (8 steps in doc).
 ### Q23 Fast track + waveform load (item 4) [done, branch q23-load 27a4372 (contains q20-speed); doc landed] — get_analysis_data 137→3.8 ms, select→detail ~300→50 ms at 30k, load→waveform 325→80 ms; async load_state/analysis/artwork; LRU + prefetch. Conflicts with q22-audio in player.svelte.ts + main.rs (merge order: q23 then q22). Not run in a real window.
 ### Q24 Rekordbox library import (item 6) [done, branch q24-rb-import c31a860 = q23 + q22 + import; doc landed] — master.db, OneLibrary stick, rekordbox.xml; your library: 631 tracks found + imported, 607 grids, 3 playlists; merge keeps your edits, never deletes. Import UI (Settings → General) unreviewed.
-### Q25 Multi-USB sync (item 3) [running] — branch q25-multi-usb (from q24-rb-import), backend only
+### Q25 Multi-USB sync (item 3) [done, branch q25-multi-usb 04fe899 (contains q24); doc landed] — `sync_usb_many`: prepare once, one thread per stick, failures isolated, root + free-space checks, per-stick progress; 3 sticks 2.4–3× faster than serial; playlist-scoped selection in the library layer; 8 tests. No UI.
+### Q27 Repro tests for writer bugs (own prio: bugs) [running] — branch q27-writer-repro, tests only
 ### Q21 Analysis review pass 1 (items 8, 2, 5) [done, branch q21-analysis 1fc254c (contains q15-grid); doc landed] — unified analyzer `ffa` (decode once, all stages, memory-capped pool): ~4.8 tracks/min on 8 workers, 0.56 GB/worker; Beat This! = 93% of CPU; grid 72.2% held, BPM ±0.1 88.8%; key stage now the cyanbox port 58.3% (n=199). Licence flag: cyanbox key templates fit on GiantSteps MTG (annotations unlicensed).
 ### Q26 Analysis review pass 2 (item 8) [running] — branch q26-analysis (from q21-analysis)
 
