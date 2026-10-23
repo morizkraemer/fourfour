@@ -28,7 +28,7 @@
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, queuePlayAfterLoad, playFromStart, loadPlayerTrack } from '../stores/player.svelte.ts';
   import { ui } from '../stores/ui.svelte.ts';
-  import { pickDirectory } from '../services/tauri.svelte.ts';
+  import { pickDirectory, prefetchAnalysisData } from '../services/tauri.svelte.ts';
   import {
     getLayout,
     resolveLayoutKind,
@@ -158,7 +158,12 @@
   );
   let windowTracks = $derived(currentTracks.slice(firstRow, endRow));
 
-  function handleRowClick(track, event) {
+  function prefetchNeighbours(rowIndex) {
+    const neighbours = [currentTracks[rowIndex + 1], currentTracks[rowIndex - 1]];
+    prefetchAnalysisData(neighbours.filter((t) => t?.analyzed).map((t) => t.id));
+  }
+
+  function handleRowClick(track, event, rowIndex) {
     if (suppressRowClick) {
       suppressRowClick = false;
       return;
@@ -172,6 +177,7 @@
     } else {
       select(track.id);
       lastSelectedId = track.id;
+      prefetchNeighbours(rowIndex);
     }
   }
 
@@ -583,7 +589,7 @@
           <div
             data-track-row
             data-row-index={firstRow + i}
-            onclick={(e) => handleRowClick(track, e)}
+            onclick={(e) => handleRowClick(track, e, firstRow + i)}
             ondblclick={(e) => handleRowDblClick(track, e)}
             onpointerdown={(e) => onRowPointerDown(e, track, firstRow + i)}
             oncontextmenu={(e) => openRowMenu(e, track)}

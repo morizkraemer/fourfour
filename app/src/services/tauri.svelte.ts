@@ -6,6 +6,7 @@ import {
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
+import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 
 export let lastTauriError = 'None';
 
@@ -127,6 +128,8 @@ function syntheticMockTrack(i: number): TrackInfo {
 }
 
 const syntheticTrackCount = mockTrackCountFromUrl();
+const mockLegacyPayload =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).has('legacy');
 if (syntheticTrackCount > 0) {
   mockTracks = Array.from({ length: syntheticTrackCount }, (_, i) => syntheticMockTrack(i));
 }
@@ -416,7 +419,17 @@ export async function wipeUsb(path: string): Promise<void> {
   }
 }
 
+const ANALYSIS_CACHE_LIMIT = 48;
 const analysisCache = new Map<number, any>();
+const analysisInflight = new Map<number, Promise<any>>();
+
+function cacheAnalysis(trackId: number, data: any) {
+  analysisCache.delete(trackId);
+  analysisCache.set(trackId, data);
+  if (analysisCache.size > ANALYSIS_CACHE_LIMIT) {
+    analysisCache.delete(analysisCache.keys().next().value as number);
+  }
+}
 
 export function peekAnalysisData(trackId: number): any | undefined {
   const cached = analysisCache.get(trackId);
@@ -426,45 +439,76 @@ export function peekAnalysisData(trackId: number): any | undefined {
     analysisCache.delete(trackId);
     return undefined;
   }
+  cacheAnalysis(trackId, clean);
   return clean;
 }
 
 export function invalidateAnalysisCache(trackId?: number) {
-  if (trackId == null) analysisCache.clear();
-  else analysisCache.delete(trackId);
+  if (trackId == null) {
+    analysisCache.clear();
+    analysisInflight.clear();
+  } else {
+    analysisCache.delete(trackId);
+    analysisInflight.delete(trackId);
+  }
 }
 
-export async function getAnalysisData(trackId: number, force = false): Promise<any> {
-  if (!force) {
-    const hit = peekAnalysisData(trackId);
-    if (hit) return hit;
-  }
+async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
     const clean = sanitizeAnalysisPayload(data);
     if (!clean) {
       throw new Error('Invalid analysis payload from backend');
     }
-    analysisCache.set(trackId, clean);
+    cacheAnalysis(trackId, clean);
     return clean;
   } catch (err) {
     lastTauriError = `get_analysis_data fail: ${String(err)}`;
     analysisCache.delete(trackId);
     const mock = mockTracks.find((t) => t.id === trackId);
     if (useBrowserMocks() && mock) {
-      const clean = sanitizeAnalysisPayload(
-        mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key),
-      );
-      analysisCache.set(trackId, clean);
+      const data =
+        syntheticTrackCount > 0
+          ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload)
+          : mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key);
+      const clean = sanitizeAnalysisPayload(data);
+      cacheAnalysis(trackId, clean);
       return clean;
     }
     throw err;
   }
 }
 
-export async function getTrackArtwork(trackId: number): Promise<Uint8Array | null> {
+export async function getAnalysisData(trackId: number, force = false): Promise<any> {
+  if (!force) {
+    const hit = peekAnalysisData(trackId);
+    if (hit) return hit;
+    const pending = analysisInflight.get(trackId);
+    if (pending) return pending;
+  }
+  const request = fetchAnalysisData(trackId).finally(() => {
+    if (analysisInflight.get(trackId) === request) analysisInflight.delete(trackId);
+  });
+  analysisInflight.set(trackId, request);
+  return request;
+}
+
+const PREFETCH_DELAY_MS = 120;
+
+/** Warm the analysis cache for tracks the user is likely to select or load next. */
+export function prefetchAnalysisData(trackIds: number[]) {
+  setTimeout(async () => {
+    for (const trackId of trackIds) {
+      if (analysisCache.has(trackId) || analysisInflight.has(trackId)) continue;
+      await getAnalysisData(trackId).catch(() => undefined);
+    }
+  }, PREFETCH_DELAY_MS);
+}
+
+export async function getTrackArtwork(trackId: number): Promise<ArrayBuffer | null> {
   try {
-    return await invoke<Uint8Array | null>('get_track_artwork', { trackId });
+    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId });
+    return bytes.byteLength > 0 ? bytes : null;
   } catch (err) {
     lastTauriError = `get_track_artwork fail: ${String(err)}`;
     return null;

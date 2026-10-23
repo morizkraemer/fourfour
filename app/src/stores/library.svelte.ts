@@ -391,7 +391,8 @@ function applyWaveformAndCuesFromAnalysis(
     bpm?: number;
     key?: string;
   },
-) {
+): boolean {
+  const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
   if (res.waveform_preview?.length) {
     track.peaks = previewPeaksNormalized(res.waveform_preview);
   }
@@ -411,6 +412,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (res.key) track.key = res.key;
   track.analyzed = true;
   track.analysisLoaded = true;
+  return searchTextBefore !== `${track.bpm}|${track.key}|${track.analyzed}`;
 }
 
 /**
@@ -434,8 +436,8 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
         bumpLibraryTracks();
         return;
       }
-      applyWaveformAndCuesFromAnalysis(track, res);
-      bumpLibraryTracks();
+      if (applyWaveformAndCuesFromAnalysis(track, res)) bumpLibraryTracks();
+      performance.mark('ff:detail-ready');
     } catch (err) {
       console.warn('ensureTrackPeaksLoaded failed:', err);
       track.analyzed = false;

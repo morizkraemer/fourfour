@@ -38,6 +38,40 @@ const actions = {
           requestAnimationFrame(tick);
         }),
     ),
+  player: () =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const row = document.querySelectorAll('[data-track-row]')[13];
+          row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+          const poll = () =>
+            performance.getEntriesByName('ff:player-ready').length
+              ? requestAnimationFrame(() => requestAnimationFrame(resolve))
+              : setTimeout(poll, 0);
+          poll();
+        }),
+    ),
+  expand: async () => {
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          document.querySelectorAll('[data-track-row]')[13].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+          const poll = () =>
+            performance.getEntriesByName('ff:player-ready').length ? resolve() : setTimeout(poll, 0);
+          poll();
+        }),
+    );
+    await page.waitForTimeout(500);
+    await client.send('Profiler.stop');
+    await client.send('Profiler.start');
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          document.querySelector('.ff-player-compact__expand-btn').click();
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }),
+    );
+  },
   search: async () => {
     await page.locator('input').first().click();
     await page.keyboard.type('track 12', { delay: 150 });

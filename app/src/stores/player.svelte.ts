@@ -9,7 +9,7 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import {
-  isValidColorWaveform,
+  decodeColorWaveform,
   previewBytesFromPayload,
 } from '../services/analysis-data.ts';
 import {
@@ -63,10 +63,17 @@ export interface PlayerTrack {
 
 const CUE_COLORS = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#34d399', '#38bdf8'];
 
+let loadedTrack = $state.raw<PlayerTrack | null>(null);
+
 export const player = $state({
   playing: false,
   progress: 0.0,
-  track: null as PlayerTrack | null,
+  get track() {
+    return loadedTrack;
+  },
+  set track(value: PlayerTrack | null) {
+    loadedTrack = value;
+  },
   loading: false,
   expanded: false,
   levelLeft: 0,
@@ -157,17 +164,9 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   };
   if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
   if (analysis.key) next.key = analysis.key;
-  if (isValidColorWaveform(analysis.waveform_color)) {
-    next.colorData = analysis.waveform_color;
-  } else {
-    next.colorData = null;
-  }
-  next.colorDetail = isValidColorWaveform(analysis.waveform_color_detail)
-    ? analysis.waveform_color_detail
-    : next.colorData;
-  next.colorOverview = isValidColorWaveform(analysis.waveform_overview)
-    ? analysis.waveform_overview
-    : next.colorData;
+  next.colorData = decodeColorWaveform(analysis.waveform_color);
+  next.colorDetail = decodeColorWaveform(analysis.waveform_color_detail) ?? next.colorData;
+  next.colorOverview = decodeColorWaveform(analysis.waveform_overview) ?? next.colorData;
   const preview = previewFromAnalysis(analysis);
   if (preview) next.previewBytes = preview;
   if (analysis.beats?.length) {
@@ -302,6 +301,7 @@ async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack
     const analysis = await getAnalysisData(trackId);
     if (gen !== loadGeneration || player.track?.id !== trackId) return;
     player.track = applyAnalysisToTrack(base, analysis);
+    performance.mark('ff:player-ready');
   } catch {
     if (gen !== loadGeneration) return;
   } finally {
@@ -345,6 +345,7 @@ export async function loadPlayerTrack(input: any) {
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
   player.loading = !cached;
+  if (cached) performance.mark('ff:player-ready');
 
   if (playPending && gen === loadGeneration) {
     playPending = false;
