@@ -77,3 +77,5 @@
 2026-10-23 18:48 orchestrator - decided: own prio perf: Q29 track row mount + page paint; spawn branch q29-rows
 2026-10-23 18:52 orchestrator Q26 done: branch q26-analysis cdc4f30; pass-2 doc landed
 2026-10-23 18:52 orchestrator Q30 spawn: grid round 3, branch q30-grid
+2026-10-23 19:36 orchestrator Q29 done: branch q29-rows 35dd87f (validation reported green); doc landed
+2026-10-23 19:36 orchestrator - decided: own prio tests: Q31 vitest on the integration stack; spawn branch q31-tests
