@@ -28,6 +28,11 @@ export interface PlaybackTick {
   level_right?: number;
 }
 
+export interface PlaybackErrorEvent {
+  message: string;
+  path?: string | null;
+}
+
 let mockPlaying = false;
 let mockPositionMs = 0;
 let mockDurationMs = 0;
@@ -196,6 +201,16 @@ export async function subscribePlaybackTick(
     return () => mockListeners.delete(handler);
   }
   const unlisten = await listen<PlaybackTick>('playback-tick', (event) => {
+    handler(event.payload);
+  });
+  return unlisten;
+}
+
+export async function subscribePlaybackError(
+  handler: (error: PlaybackErrorEvent) => void,
+): Promise<() => void> {
+  if (useMock()) return () => {};
+  const unlisten = await listen<PlaybackErrorEvent>('playback-error', (event) => {
     handler(event.payload);
   });
   return unlisten;
