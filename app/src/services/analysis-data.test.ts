@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decodeColorWaveform,
+  decodeTrackPreview,
   isValidAnalysisPayload,
   isValidColorWaveform,
   isValidWaveformPreview,
@@ -75,10 +77,10 @@ describe('analysis payload helpers', () => {
     const data = { waveform_preview: preview(), waveform_color: colors() };
     expect(sanitizeAnalysisPayload(data)).toBe(data);
   });
-  it('sanitize empties corrupt colors but keeps other fields', () => {
+  it('sanitize nulls corrupt colors but keeps other fields', () => {
     const data = { waveform_preview: preview(), waveform_color: colors(3), bpm: 128 };
     const out = sanitizeAnalysisPayload(data);
-    expect(out.waveform_color).toEqual([]);
+    expect(out.waveform_color).toBeNull();
     expect(out.bpm).toBe(128);
     expect(data.waveform_color).toHaveLength(3);
   });
@@ -91,5 +93,102 @@ describe('analysis payload helpers', () => {
     expect(previewBytesFromPayload({ waveform_preview: arr })).toBe(arr);
     const typed = new Uint8Array([3, 4]) as unknown as number[];
     expect(previewBytesFromPayload({ waveform_preview: typed })).toEqual([3, 4]);
+  });
+});
+
+const b64 = (bytes: number[]) => Buffer.from(bytes).toString('base64');
+const encoded = (bytes: number[], calibration = 1) => ({
+  len: bytes.length / 3,
+  calibration,
+  bands: b64(bytes),
+});
+const flatBands = (columns: number, triple = [10, 20, 30]) =>
+  Array.from({ length: columns }, () => triple).flat();
+
+function rustCalibration(entries: number[][], previewBytes: number[]) {
+  if (!previewBytes.some((b) => (b & 0x1f) !== 0)) return 1;
+  const pwavPeak = Math.max(...previewBytes.map((b) => (b & 0x1f) / 31));
+  const bandPeak = Math.max(...entries.map(([l, m, h]) => Math.max(l, m, h) / 127));
+  return bandPeak > 1e-6 ? pwavPeak / bandPeak : 1;
+}
+
+describe('decodeColorWaveform', () => {
+  it('passes valid decoded arrays through unchanged', () => {
+    const arr = colors();
+    expect(decodeColorWaveform(arr)).toBe(arr);
+  });
+  it('returns null for null, short, malformed and non-finite calibration payloads', () => {
+    expect(decodeColorWaveform(null)).toBeNull();
+    expect(decodeColorWaveform(undefined)).toBeNull();
+    expect(decodeColorWaveform(encoded(flatBands(7)))).toBeNull();
+    expect(decodeColorWaveform({ len: 8, calibration: NaN, bands: b64(flatBands(8)) })).toBeNull();
+    expect(decodeColorWaveform({ len: 8, calibration: 1, bands: 5 })).toBeNull();
+  });
+  it('decodes one column per three bytes and drops trailing bytes', () => {
+    const out = decodeColorWaveform(encoded([...flatBands(8), 9, 9]))!;
+    expect(out).toHaveLength(8);
+  });
+  it('normalises colour channels by the column maximum', () => {
+    const [first] = decodeColorWaveform(encoded(flatBands(8, [127, 64, 0])))!;
+    expect(first.r).toBe(1);
+    expect(first.g).toBeCloseTo(64 / 127, 10);
+    expect(first.b).toBe(0);
+  });
+  it('derives amp from the column maximum scaled by calibration', () => {
+    const [first] = decodeColorWaveform(encoded(flatBands(8, [20, 60, 40]), 0.5))!;
+    expect(first.amp).toBeCloseTo((60 / 127) * 0.5, 10);
+  });
+  it('clamps amp at 1 when calibration pushes it above', () => {
+    const [first] = decodeColorWaveform(encoded(flatBands(8, [127, 0, 0]), 3))!;
+    expect(first.amp).toBe(1);
+  });
+  it('turns silent columns into zero amp and zero colour', () => {
+    const [first] = decodeColorWaveform(encoded(flatBands(8, [0, 0, 0]), 2))!;
+    expect(first).toEqual({ amp: 0, r: 0, g: 0, b: 0 });
+  });
+  it('memoises per payload object', () => {
+    const payload = encoded(flatBands(8));
+    expect(decodeColorWaveform(payload)).toBe(decodeColorWaveform(payload));
+  });
+  it('reproduces the Rust calibration: loudest column amp equals the PWAV peak', () => {
+    const entries = [
+      [10, 20, 30],
+      [127, 40, 5],
+      [60, 60, 60],
+      ...Array.from({ length: 5 }, () => [1, 1, 1]),
+    ];
+    const calibration = rustCalibration(entries, preview(0x10 | 20));
+    expect(calibration).toBeCloseTo(20 / 31, 10);
+    const out = decodeColorWaveform(encoded(entries.flat(), calibration))!;
+    expect(Math.max(...out.map((s) => s.amp))).toBeCloseTo(20 / 31, 10);
+  });
+  it('keeps a sanitized encoded payload intact', () => {
+    const data = { waveform_preview: preview(), waveform_color: encoded(flatBands(8)) };
+    expect(sanitizeAnalysisPayload(data)).toBe(data);
+  });
+  it('nulls an encoded payload shorter than 8 columns on sanitize', () => {
+    const data = { waveform_preview: preview(), waveform_color: encoded(flatBands(4)) };
+    expect(sanitizeAnalysisPayload(data).waveform_color).toBeNull();
+  });
+});
+
+describe('decodeTrackPreview', () => {
+  it('decodes base64 to bytes', () => {
+    expect(decodeTrackPreview(b64([0, 1, 127, 255]))).toEqual([0, 1, 127, 255]);
+  });
+  it('round-trips a full 400-byte preview into a valid waveform preview', () => {
+    const bytes = Array.from({ length: 400 }, (_, i) => (i % 31) + 1);
+    const decoded = decodeTrackPreview(b64(bytes))!;
+    expect(decoded).toEqual(bytes);
+    expect(isValidWaveformPreview(decoded)).toBe(true);
+  });
+  it('passes arrays through and maps nullish to null', () => {
+    const arr = [1, 2];
+    expect(decodeTrackPreview(arr)).toBe(arr);
+    expect(decodeTrackPreview(null)).toBeNull();
+    expect(decodeTrackPreview(undefined)).toBeNull();
+  });
+  it('decodes the empty string to an empty array', () => {
+    expect(decodeTrackPreview('')).toEqual([]);
   });
 });
