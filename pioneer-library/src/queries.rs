@@ -229,9 +229,11 @@ pub fn select_all_tracks_with_flags(
     conn: &Connection,
 ) -> Result<Vec<(Track, bool, bool, bool)>> {
     let mut stmt = conn.prepare(
-        "SELECT t.*,
-                (art.track_id IS NOT NULL) AS has_artwork,
-                (a.track_id IS NOT NULL)   AS has_analysis
+        "SELECT t.id, t.source_path, t.usb_path, t.title, t.artist, t.album, t.genre,
+                t.label, t.remixer, t.comment, t.year, t.disc_number, t.track_number,
+                t.tempo, t.key, t.duration_secs, t.sample_rate, t.bitrate, t.file_size,
+                (art.track_id IS NOT NULL),
+                (a.track_id IS NOT NULL)
          FROM tracks t
          LEFT JOIN artwork art ON art.track_id = t.id
          LEFT JOIN analyses a ON a.track_id = t.id
@@ -239,37 +241,35 @@ pub fn select_all_tracks_with_flags(
     )?;
 
     let rows = stmt.query_map([], |row| {
-        let source_path: String = row.get("source_path")?;
-        let file_size: i64 = row.get("file_size")?;
-        let id: i64 = row.get("id")?;
-        let has_artwork: bool = row.get("has_artwork")?;
-        let has_analysis: bool = row.get("has_analysis")?;
+        let id: i64 = row.get(0)?;
+        let source_path: String = row.get(1)?;
+        let file_size: i64 = row.get(18)?;
 
         Ok((
             Track {
                 id: id as u32,
                 source_path: std::path::PathBuf::from(source_path),
-                usb_path: row.get("usb_path")?,
-                title: row.get("title")?,
-                artist: row.get("artist")?,
-                album: row.get("album")?,
-                genre: row.get("genre")?,
-                label: row.get("label")?,
-                remixer: row.get("remixer")?,
-                comment: row.get("comment")?,
-                year: row.get("year")?,
-                disc_number: row.get("disc_number")?,
-                track_number: row.get("track_number")?,
-                tempo: row.get("tempo")?,
-                key: row.get("key")?,
-                duration_secs: row.get("duration_secs")?,
-                sample_rate: row.get("sample_rate")?,
-                bitrate: row.get("bitrate")?,
+                usb_path: row.get(2)?,
+                title: row.get(3)?,
+                artist: row.get(4)?,
+                album: row.get(5)?,
+                genre: row.get(6)?,
+                label: row.get(7)?,
+                remixer: row.get(8)?,
+                comment: row.get(9)?,
+                year: row.get(10)?,
+                disc_number: row.get(11)?,
+                track_number: row.get(12)?,
+                tempo: row.get(13)?,
+                key: row.get(14)?,
+                duration_secs: row.get(15)?,
+                sample_rate: row.get(16)?,
+                bitrate: row.get(17)?,
                 file_size: file_size as u64,
                 artwork: None,
             },
-            has_artwork,
-            has_analysis,
+            row.get::<_, bool>(19)?,
+            row.get::<_, bool>(20)?,
         ))
     })?;
 

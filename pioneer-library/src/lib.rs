@@ -263,6 +263,46 @@ impl LocalLibrary {
         }))
     }
 
+    /// Waveform-only analyses for every analyzed track, for building list views.
+    ///
+    /// One SQL query plus a parallel file read, instead of one `get_analysis`
+    /// call (query + full ANLZ parse) per track. Only `waveform` and
+    /// `color_waveform` are populated; beat grid, cues, bpm and key are left
+    /// empty. The color waveform is read only when the DAT's PWAV preview is
+    /// flat, since callers fall back to it in that case. Tracks whose ANLZ
+    /// files are missing or unreadable are omitted.
+    pub fn get_waveform_analyses(&self) -> Result<HashMap<i64, AnalysisResult>> {
+        let Some(anlz_dir) = self.anlz_dir() else {
+            return Ok(HashMap::new());
+        };
+        let ids = queries::select_analyzed_track_ids(&self.conn)?;
+        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let chunk_len = ids.len().div_ceil(workers).max(1);
+
+        let mut out = HashMap::with_capacity(ids.len());
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = ids
+                .chunks(chunk_len)
+                .map(|chunk| {
+                    let anlz_dir = &anlz_dir;
+                    scope.spawn(move || {
+                        chunk
+                            .iter()
+                            .filter_map(|id| {
+                                let dat = anlz_dir.join(id.to_string()).join("ANLZ0000.DAT");
+                                read_waveform_analysis(&dat).map(|a| (*id, a))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            for handle in handles {
+                out.extend(handle.join().expect("waveform reader thread panicked"));
+            }
+        });
+        Ok(out)
+    }
+
     /// Retrieve all tracks that have analysis data, with artwork included.
     /// Returns parallel vecs suitable for passing to the writer.
     pub fn get_analyzed_tracks(&self) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
@@ -507,6 +547,52 @@ fn prepare_for_usb(
     (tracks, analyses, playlists)
 }
 
+/// PWAV preview of an ANLZ `.DAT` image: all-zero when the section is absent,
+/// `None` when the file is not a PMAI image.
+fn dat_pwav_preview(data: &[u8]) -> Option<[u8; 400]> {
+    const PWAV_HEADER_LEN: usize = 20;
+    let be_u32 = |at: usize| -> Option<usize> {
+        let bytes: [u8; 4] = data.get(at..at + 4)?.try_into().ok()?;
+        Some(u32::from_be_bytes(bytes) as usize)
+    };
+    if data.len() < 28 || &data[0..4] != b"PMAI" {
+        return None;
+    }
+    let mut preview = [0u8; 400];
+    let mut offset = be_u32(4)?;
+    while offset + 12 <= data.len() {
+        let section_len = be_u32(offset + 8)?;
+        if section_len == 0 || offset + section_len > data.len() {
+            break;
+        }
+        if &data[offset..offset + 4] == b"PWAV" && section_len >= PWAV_HEADER_LEN + 400 {
+            let start = offset + PWAV_HEADER_LEN;
+            preview.copy_from_slice(&data[start..start + 400]);
+        }
+        offset += section_len;
+    }
+    Some(preview)
+}
+
+/// Read just the PWAV preview from a DAT file; fall back to the full ANLZ
+/// reader (which also loads the color waveform) when the preview is flat.
+fn read_waveform_analysis(dat_path: &Path) -> Option<AnalysisResult> {
+    let bytes = std::fs::read(dat_path).ok()?;
+    let waveform = dat_pwav_preview(&bytes)?;
+    if waveform.iter().any(|&b| b & 0x1f != 0) {
+        return Some(AnalysisResult {
+            beat_grid: BeatGrid { beats: Vec::new() },
+            waveform: WaveformPreview { data: waveform },
+            bpm: 0.0,
+            key: String::new(),
+            energy: None,
+            cue_points: Vec::new(),
+            color_waveform: None,
+        });
+    }
+    reader::anlz::read_anlz(dat_path).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,6 +806,42 @@ mod tests {
         let loop_cue = fetched.cue_points.iter().find(|c| c.hot_cue_number == 2).unwrap();
         assert_eq!(loop_cue.loop_time_ms, Some(100_000));
         assert_eq!(loop_cue.time_ms, 90_000);
+    }
+
+    #[test]
+    fn waveform_analyses_match_per_track_reads() {
+        use pioneer_usb_writer::models::ColorWaveform;
+
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+
+        let real = lib.add_track(&make_track("Real", "/music/real.mp3")).unwrap();
+        lib.set_analysis(real, &make_analysis()).unwrap();
+
+        let mut flat = make_analysis();
+        flat.waveform = WaveformPreview { data: [0u8; 400] };
+        flat.color_waveform = Some(ColorWaveform {
+            detail: (0..600).map(|n| [(n % 100) as u8, 40, 20]).collect(),
+            overview: (0..1200).map(|n| [(n % 100) as u8, 40, 20]).collect(),
+        });
+        let flat_id = lib.add_track(&make_track("Flat", "/music/flat.mp3")).unwrap();
+        lib.set_analysis(flat_id, &flat).unwrap();
+
+        let unanalyzed = lib.add_track(&make_track("None", "/music/none.mp3")).unwrap();
+
+        let batch = lib.get_waveform_analyses().unwrap();
+        assert!(!batch.contains_key(&unanalyzed));
+        for id in [real, flat_id] {
+            let single = lib.get_analysis(id).unwrap().unwrap();
+            let batched = &batch[&id];
+            assert_eq!(batched.waveform.data, single.waveform.data);
+            if single.waveform.data.iter().all(|&b| b & 0x1f == 0) {
+                let (a, b) = (batched.color_waveform.as_ref(), single.color_waveform.as_ref());
+                assert!(a.is_some());
+                assert_eq!(a.unwrap().overview, b.unwrap().overview);
+                assert_eq!(a.unwrap().detail, b.unwrap().detail);
+            }
+        }
     }
 
     /// Verify ANLZ files are cleaned up when a track is removed.

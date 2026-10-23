@@ -29,5 +29,9 @@ path = "src/bin/waveform_ab.rs"
 name = "waveform_grid"
 path = "src/bin/waveform_grid.rs"
 
+[[bin]]
+name = "bench_startup"
+path = "src/bin/bench_startup.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
