@@ -43,3 +43,5 @@
 2026-10-15 16:04 orchestrator - decided: Merlin: 'Keep updated' switch, only synced playlists show a Synced mark; either side shows anything; round 3 mockups for layout combinations incl. full-width stick header
 2026-10-23 06:57 orchestrator - queue rulebook drafted (autonomy tight) per PM; STATE refreshed on dev; stale allow git push in settings.local.json listed for Merlin
 2026-10-23 11:52 orchestrator - queue prepare (PM): plan Q15 → Q16 → own prios; dropped obsolete q9-benchmark worktree (merged; dev manifests kept, now gitignored)
+2026-10-23 11:54 orchestrator - run-start: PM queue start, cap 1, tight; answers: Beatport CC BY-SA fitting for measurement only, library read-only
+2026-10-23 11:54 orchestrator Q15 spawn: branch q15-grid
