@@ -5,7 +5,8 @@ mod dto;
 mod playback;
 mod track_infos;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1085,21 +1086,90 @@ async fn get_analysis_data(
     .map_err(|e| e.to_string())?
 }
 
-/// Get raw artwork bytes for a track from the local library DB.
-/// Sent as a binary IPC response (an `ArrayBuffer`), not a JSON number array.
+const ARTWORK_THUMB_CACHE_LIMIT: usize = 400;
+const ARTWORK_THUMB_JPEG_QUALITY: u8 = 85;
+
+#[derive(Default)]
+struct ArtworkThumbCache {
+    entries: HashMap<(i64, u32, u64), Arc<Vec<u8>>>,
+    order: VecDeque<(i64, u32, u64)>,
+}
+
+type SharedArtworkThumbs = Arc<Mutex<ArtworkThumbCache>>;
+
+fn bytes_fingerprint(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn artwork_thumbnail(bytes: &[u8], max_px: u32) -> Vec<u8> {
+    let Ok(decoded) = image::load_from_memory(bytes) else {
+        return bytes.to_vec();
+    };
+    if decoded.width() <= max_px && decoded.height() <= max_px {
+        return bytes.to_vec();
+    }
+    let thumb = decoded.thumbnail(max_px, max_px).to_rgb8();
+    let mut out = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, ARTWORK_THUMB_JPEG_QUALITY);
+    match thumb.write_with_encoder(encoder) {
+        Ok(()) => out,
+        Err(_) => bytes.to_vec(),
+    }
+}
+
+fn cached_artwork_thumbnail(
+    cache: &SharedArtworkThumbs,
+    track_id: i64,
+    bytes: &[u8],
+    max_px: u32,
+) -> Arc<Vec<u8>> {
+    let key = (track_id, max_px, bytes_fingerprint(bytes));
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.entries.get(&key).cloned()) {
+        return hit;
+    }
+    let thumb = Arc::new(artwork_thumbnail(bytes, max_px));
+    if let Ok(mut c) = cache.lock() {
+        if c.entries.insert(key, thumb.clone()).is_none() {
+            c.order.push_back(key);
+            if c.order.len() > ARTWORK_THUMB_CACHE_LIMIT {
+                if let Some(oldest) = c.order.pop_front() {
+                    c.entries.remove(&oldest);
+                }
+            }
+        }
+    }
+    thumb
+}
+
+/// Get artwork bytes for a track from the local library DB. With `max_px` the image is
+/// downscaled to fit that box (JPEG, cached in memory); without it the stored bytes are
+/// returned unchanged. Sent as a binary IPC response (an `ArrayBuffer`).
 #[tauri::command]
 async fn get_track_artwork(
     track_id: i64,
+    max_px: Option<u32>,
     state: State<'_, SharedLibrary>,
+    thumbs: State<'_, SharedArtworkThumbs>,
 ) -> Result<tauri::ipc::Response, String> {
     let shared = state.inner().clone();
+    let thumbs = thumbs.inner().clone();
     let bytes = tauri::async_runtime::spawn_blocking(move || {
-        let lib = shared.lock().map_err(|e| e.to_string())?;
-        lib.get_artwork(track_id).map_err(|e| e.to_string())
+        let stored = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.get_artwork(track_id).map_err(|e| e.to_string())?
+        };
+        Ok::<_, String>(match (stored, max_px) {
+            (Some(bytes), Some(px)) if px > 0 => {
+                cached_artwork_thumbnail(&thumbs, track_id, &bytes, px).as_ref().clone()
+            }
+            (stored, _) => stored.unwrap_or_default(),
+        })
     })
     .await
     .map_err(|e| e.to_string())??;
-    Ok(tauri::ipc::Response::new(bytes.unwrap_or_default()))
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 // ---------------------------------------------------------------------------
@@ -1394,6 +1464,7 @@ fn main() {
                 .expect("Failed to open library database");
             app.manage(Arc::new(Mutex::new(library)));
             app.manage(AnalysisCoordinator::default());
+            app.manage(SharedArtworkThumbs::default());
 
             match PlaybackEngine::new() {
                 Ok(playback) => {
@@ -1421,7 +1492,29 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_analyzer_stdout, python_result_to_analysis};
+    use super::{artwork_thumbnail, parse_analyzer_stdout, python_result_to_analysis};
+
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, 90]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).expect("encode");
+        out.into_inner()
+    }
+
+    #[test]
+    fn artwork_thumbnail_fits_the_box_and_stays_a_decodable_jpeg() {
+        let thumb = artwork_thumbnail(&png_bytes(1200, 800), 512);
+        let decoded = image::load_from_memory(&thumb).expect("decode");
+        assert_eq!(image::guess_format(&thumb).expect("format"), image::ImageFormat::Jpeg);
+        assert_eq!((decoded.width(), decoded.height()), (512, 341));
+    }
+
+    #[test]
+    fn artwork_thumbnail_keeps_small_images_and_garbage_untouched() {
+        let small = png_bytes(100, 80);
+        assert_eq!(artwork_thumbnail(&small, 512), small);
+        assert_eq!(artwork_thumbnail(b"not an image", 512), b"not an image".to_vec());
+    }
 
     #[test]
     fn parse_backend_keyed_analyzer_json() {

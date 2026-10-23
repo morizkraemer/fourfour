@@ -505,9 +505,11 @@ export function prefetchAnalysisData(trackIds: number[]) {
   }, PREFETCH_DELAY_MS);
 }
 
+const ARTWORK_THUMB_PX = 512;
+
 export async function getTrackArtwork(trackId: number): Promise<ArrayBuffer | null> {
   try {
-    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId });
+    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId, maxPx: ARTWORK_THUMB_PX });
     return bytes.byteLength > 0 ? bytes : null;
   } catch (err) {
     lastTauriError = `get_track_artwork fail: ${String(err)}`;

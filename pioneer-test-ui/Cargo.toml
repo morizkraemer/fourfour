@@ -16,6 +16,7 @@ tokio = { version = "1.52.1", features = ["rt", "process", "time", "macros"] }
 cpal = "0.15"
 ringbuf = "0.4"
 symphonia = { version = "0.5", features = ["all"] }
+image = "0.25.10"
 
 [[bin]]
 name = "waveform_dev"

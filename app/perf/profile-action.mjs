@@ -38,6 +38,20 @@ const actions = {
           requestAnimationFrame(tick);
         }),
     ),
+  fling: () =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          const el = document.querySelector('.ff-table__scroll');
+          const start = performance.now();
+          const tick = (now) => {
+            el.scrollTop = (el.scrollHeight - el.clientHeight) * Math.min(1, (now - start) / 1500);
+            if (now - start < 1800) requestAnimationFrame(tick);
+            else resolve();
+          };
+          requestAnimationFrame(tick);
+        }),
+    ),
   player: () =>
     page.evaluate(
       () =>
@@ -71,6 +85,29 @@ const actions = {
           requestAnimationFrame(() => requestAnimationFrame(resolve));
         }),
     );
+  },
+  playing: async () => {
+    await page.evaluate(() => document.querySelectorAll('[data-track-row]')[13].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })));
+    await page.waitForTimeout(1500);
+    if ((await page.locator('.ff-player-compact__play-btn').getAttribute('aria-label')) !== 'Pause') {
+      await page.locator('.ff-player-compact__play-btn').click();
+    }
+    await page.waitForTimeout(800);
+    await client.send('Profiler.stop');
+    await client.send('Profiler.start');
+    await page.waitForTimeout(4000);
+  },
+  playingExpanded: async () => {
+    await page.evaluate(() => document.querySelectorAll('[data-track-row]')[13].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })));
+    await page.waitForTimeout(1500);
+    if ((await page.locator('.ff-player-compact__play-btn').getAttribute('aria-label')) !== 'Pause') {
+      await page.locator('.ff-player-compact__play-btn').click();
+    }
+    await page.locator('.ff-player-compact__expand-btn').click();
+    await page.waitForTimeout(800);
+    await client.send('Profiler.stop');
+    await client.send('Profiler.start');
+    await page.waitForTimeout(4000);
   },
   search: async () => {
     await page.locator('input').first().click();

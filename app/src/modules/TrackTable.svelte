@@ -697,6 +697,7 @@
     user-select: none;
   }
   .ff-table__body > :global(div[data-track-row]) {
+    contain: layout paint style;
     cursor: default;
   }
   .ff-table__empty-container {
