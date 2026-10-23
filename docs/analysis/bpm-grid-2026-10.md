@@ -248,3 +248,114 @@ prototyping/analysis-packaging/target/release/grid benchmark/results/rb-grid-ref
 ```
 
 `bgdump` without `--window` runs the whole track; it writes dev tracks with id % 12 == 4 first, then the test split, then id % 12 == 7 and the rest, and skips tracks already dumped, so it can be stopped at any time. Dev rows: replace `--split test` with `--split dev` and the flags as in the table (`--shift-ms -7 --comb --lo 75` for the Q13 row). Negative results: `--audio-q 4 --audio-calib-ms 2 --audio-min-ms 15`. `--diag` prints the per-track audio-flux offsets that led to the mp3 finding; `GRID_DEBUG_ID=<id>` prints the worst beat of one track. The reference JSON used here sat next to the Q13 logits (`benchmark/results/q13/rb-grid-reference.json`).
+
+# Q30, 2026-10-24: grid round 3 (Lame3.100, PCM shift, octave and half-beat)
+
+Status: measured. Prototype only. Branch `q30-grid` (from `q26-analysis`, master merged). Tuned on the dev split (manifest id % 3 != 0) only; the test split (id % 3 == 0, n=205) was scored once with the final settings. Reference remains Rekordbox, so all of this measures compatibility with it.
+
+## Result (test split, n=205, same tracks and logits as Q26)
+
+| Metric | Q26 (pass 2) | Q30 (final) |
+|---|---:|---:|
+| **Whole grid within +-20 ms of Rekordbox** | 148 = 72.2% | **161 = 78.5%** |
+| Constant-grid references only (189): grid within 20 ms | 148 = 78.3% | 161 = 85.2% |
+| BPM within +-0.1 | 180 = 87.8% | **180 = 87.8%** (no change, no regression) |
+| BPM within +-0.5 / +-1 | 184 / 190 | 184 / 190 |
+| Octave errors x0.5 | 3 | 2 |
+| Beat F-measure at 70 ms | 0.894 | 0.895 |
+| Median per-track offset, signed / absolute | +7.9 / 10.2 ms | +0.7 / 3.9 ms |
+| Grid within 20 ms by container: mp3 / flac / wav | 52/88, 34/42, 62/75 | 61/88, 37/42, 63/75 |
+
+The 13 new grid hits are 9 mp3 (Lame3.100 files: 1 of 14 to 10 of 14), 3 flac, 1 wav. BPM did not move because none of the three changes touches the tempo of a track that was already within 0.1; the keep-native rule turned one x0.5 miss (Rio Corrente, 82.5 vs 162.2) into a 1.8% miss (165.0). Test misses left, 205 tracks: 15 beyond +-1 BPM, 25 beyond +-0.1.
+
+## Result (dev split, 412 tracks with audio, cumulative)
+
+Dev = the 412 of 431 dev reference grids whose audio is on the box (the brief says 407 verified; I filtered on the file existing and did not chase the 5 difference). 104 of them are the Q15 full-track logits, 308 were dumped this run with `ffa --dump` (7 workers x 1 thread, 72 minutes, 4.28 tracks per minute at load 20 to 30); one damaged wav (Boswick Gates - You Are The Reason, "unexpected end of file") failed to decode. mp3 first, ordered by encoder tag.
+
+| Step (cumulative) | Grid within 20 ms | BPM +-0.1 | BPM +-1 |
+|---|---:|---:|---:|
+| Q26 settings (`enc+header` mp3 rule, no PCM shift) | 289 = 70.1% | 370 = 89.8% | 383 = 93.0% |
+| + Lame3.100 timeline one frame (26.1 ms) earlier | 306 = 74.3% | 370 | 383 |
+| + PCM (wav, flac) timeline shift of -10 ms | 330 = 80.1% | 370 | 383 |
+| + keep the model's native tempo when it is 150 to 185 BPM | 331 = 80.3% | 372 = 90.3% | 385 = 93.4% |
+| + integer snap reaches 1.5 BPM (was 0.5) = **final** | **331 = 80.3%** | **374 = 90.8%** | **386 = 93.7%** |
+
+By container (dev, grid within 20 ms, before to after): mp3 113/180 to 130/180, flac 55/81 to 71/81, wav 121/151 to 130/151. Test split gains were smaller on wav (62 to 63 of 75) because 11 of its 75 wav tracks have a wrong BPM.
+
+## Tag x offset table
+
+Median of the per-track median offset (estimate minus Rekordbox) for tracks with BPM within 0.5 and a constant reference grid, in ms. "Before" is the Q26 rule (`enc+header`, no PCM shift); "after" is final. Encoder = the 9 bytes of the LAME/Lavc/Lavf string in the Xing/Info frame. Groups under 5 tracks are folded into "other mp3 tags". "n/a" = the Q26 test run printed no per-tag table for that group (only the final numbers are available).
+
+| Container : encoder | Dev n | Dev median offset before | after | Dev within 20 ms before to after | Test n | Test median before | after | Test within 20 ms before to after |
+|---|---:|---:|---:|---|---:|---:|---:|---|
+| mp3 : Lame3.100 | 31 | +23.9 | **-1.0** | 5/31 to **22/31** | 14 | +25.5 | **+1.3** | 1/14 to **10/14** |
+| mp3 : LAME3.99r | 37 | -0.6 | -0.6 | 28/37 | 18 | +0.5 | +0.5 | 13/18 |
+| mp3 : Lavc61.19 | 34 | -1.2 | -1.2 | 18/34 | 16 | n/a | -0.3 | 9/16 |
+| mp3 : Lavc57.24 | 22 | +0.7 | +1.0 | 17/22 | 9 | n/a | -0.9 | 7/9 |
+| mp3 : Lavc57.48 | 9 | +2.3 | +2.3 | 7/9 | 12 | n/a | +3.1 | 9/12 |
+| mp3 : Lavf56.9. | 8 | +1.1 | +1.1 | 8/8 | 2 | n/a | -6.1 | 2/2 |
+| mp3 : Lavc56.19 | 7 | +1.3 | +1.3 | 6/7 | 4 | n/a | +7.0 | 3/4 |
+| mp3 : no Xing/Info header | 4 | +20.2 | +20.2 | 1/4 | 4 | +13.3 | +13.3 | 2/4 |
+| mp3 : other tags (LAME3.98r, Lavf, Lavc, 21 tracks) | 21 | -7.4 to +3.9 | same | 17/21 | 8 | n/a | -2.3 to +15.1 | 6/8 |
+| flac | 81 | +12.3 | **+2.3** | 55/81 to **71/81** | 42 | +10.9 | **+1.3** | 34/42 to 37/42 |
+| wav | 151 | +9.6 | **-0.4** | 121/151 to **130/151** | 75 | +10.3 | **+0.3** | 62/75 to 63/75 |
+
+Only Lame3.100 gets an encoder-specific rule (45 files, 31 dev and 14 test; the tag is the mixed-case string `Lame3.100`, `LAME3.99r` is a separate group). The 4 dev and 4 test mp3 files with no Xing/Info header at all have no encoder string and a delay of 0; their median offsets are +20 ms (dev, 2 of the 4 have the right BPM) and +13 ms (test).
+
+## What helped
+
+1. **Lame3.100 timeline (+17 dev tracks, +9 test).** Pass 2 guessed the sign wrong: the hypothesis said "add one frame", but the Lame3.100 estimates are *late* by 14 to 38 ms (median +23.9, all 31 dev files have delay field 576 and `header_counts` false). Adding a frame doubled the offset (+50, 0 of 31 within 20 ms). Subtracting one MPEG frame (1152 / 44100 = 26.1 ms) from the `enc+header` delay gives median -1.0 ms and 22 of 31 within 20 ms; of the 9 dev misses left, 2 are half-beat phase misses (ids 608, 628), 3 are constant offsets of 25 to 57 ms (635, 646, 650), the rest drift or have a wrong BPM. The rule does not touch any other encoder (LAME3.99r, Lavc, Lavf unchanged to the digit). Mechanism not known; it is empirical (Rekordbox's timeline for these files does not match the cyanbox frame map).
+2. **PCM timeline shift of -10 ms (+24 dev tracks; on test +3 flac and +1 wav together with the other changes).** The wav and flac offsets were +9.6 and +12.3 ms on dev (test +10.3 and +10.9 in the same table, and in pass 2). Constant offsets of 21 to 30 ms on 6 flac and wav tracks were the visible tail. Shifting every non-mp3 grid by -10 ms, dev sweep (grid within 20 ms of 412, Lame3.100 rule on): 0 ms 306, -6 326, -8 329, -10 330, -12 330, -14 329. A plateau from -8 to -14, so -10. (On the first 249 dev tracks: +5 ms 173, 0 ms 179, -5 186, -10 188, -15 187.) This does not contradict the Q15 finding "a global shift of 0 is best": that sweep moved the mp3 grids too, which already get their own delay.
+3. **Keep native tempo of 150 to 185 BPM (+2 BPM, +1 grid on dev).** If the model's own median-IBI tempo is in 150 to 185 it is no longer folded (Amir Bresler - Fish, 175.0, was 87.5). The fold to 75 to 150 stays for everything else. Dev: 0 tracks harmed; test: Rio Corrente now x1.02 instead of x0.5.
+4. **Integer snap reach 1.5 BPM (+2 BPM +-0.1 on dev, grid unchanged).** Candidates are tried nearest first and accepted at 97% of the unsnapped comb score, as before. Marginal: 2 of 412.
+5. Runtime: no change. The shifts are constants; the snap loop adds up to 2 more candidates only on tracks where the nearest integer is rejected (fit stage median 189 ms before, 195 ms after, 205 test tracks); the onset envelopes used for the half-beat study are not part of `ffa`. An `ffa` run on 4 tracks reproduces the grid-refit numbers exactly (BPM 4/4 within 0.1 and the same final beats).
+
+## What did not help (negative results)
+
+- **Half-beat phase (12 dev tracks and 7 test tracks whose median offset is within 70 ms of half a beat).** Nothing separated them from the 362 good dev tracks. Off-beat over on-beat energy (`onset.rs`: spectral flux at 11 kHz, bands 21 to 215 Hz, 215 Hz to 1.4 kHz and 1.4 to 5.5 kHz, peak within +-30 ms): half-off ratios 0.4 to 2.0 against a median of 0.64 for the rest; moving the grid by half a beat whenever the ratio is above 1.0 fixes 4 of 12 and breaks 26 of 362 (low band), 5 of 12 against 19 of 362 (mid band); no threshold has more fixes than breaks. The Beat This! beat and downbeat activations at the half-beat position are near zero for both groups (median 0.00 for the good tracks; 0.0 to 0.8 for the half-off ones). A rule built on the first strong onset of the track (its phase against the model's grid) separates nothing either: 4 of 12 fixed against 15 of 362 broken at the best threshold, and in the first 204 dev tracks the first strong low-band onset sat on the model's own grid in 6 of the 7 half-off tracks found by then, so Rekordbox put its grid on the off-beat of the audible pulse there. No rule found; no change made. Tools: `q30-hb-analyze.py`, `q30-hb-first-onset.py`, `grid --onset-dir`.
+- **Wider fold (`lo` other than 75).** Dev, all fixes applied: `lo` 70 gives 79 x0.5 errors and BPM +-0.1 of 72.3% (tracks at 140 to 150 fold down), `lo` 72 gives 85.4%, `lo` 80 gives 89.8% (equal to 75) with 4 x2 errors and one more grid hit (332 against 331 at that point). No advantage. The learned preference (periodicity strength at T against 2T) was not built: dev has no x2 errors and one x0.5 error, and the 5 dev tracks with a reference above 150 are 1 fixed by keep-native and 4 missed at ratios 0.5 to 0.8 of the reference (159 vs 80, 154 vs 102, 167 vs 125, 169 vs 135: the model's tempo is not an octave of Rekordbox's). The beat activation at the half-beat position was tried as the cue on the first 249 dev tracks (Fish 0.52, tracks at 80 to 81 BPM 0.04 to 0.97): no separation.
+- **Integer snap beyond 1.5 BPM** or a lower ratio (0.9, 0.95, 0.93): identical to 1.5 at 0.97 on dev.
+
+## Categories of the remaining wrong-BPM tracks (test, 25 beyond +-0.1, 15 beyond +-1)
+
+| Category | Test tracks (id: estimate vs reference) |
+|---|---|
+| Above the 150 prior, model reports half (kept at x0.5; keep-native does not apply because the model's native tempo is already 85 or 91) | 240: 85.0 vs 170.1; 423: 91.0 vs 181.8 |
+| Above 150, now octave-correct (not within 1) | 246: 165.0 vs 162.2 |
+| Ratio 1.3 to 1.7 (3:2 and 4:3, broken beat, polyrhythm) | 36: 131.9 vs 78.5 (1.68); 9: 145.0 vs 99.0 (1.46); 168: 136.0 vs 95.2 (1.43); 243: 140.0 vs 106.5 (1.31); 6: 111.3 vs 88.2 (1.26) |
+| Ratio 1.1 to 1.14 (different pulse) | 12: 93.6 vs 82.2; 255: 144.0 vs 130.0 |
+| Within 4% (tempo wobble, or Rekordbox's tempo is itself an average of a varying tempo) | 144, 273, 402, 501, 507 (ratio 0.98 to 1.04) |
+
+Dev (26 beyond +-1: 24 other, 1 x0.5, 1 x2/3): 18 of the 26 are within 4% of the reference (the same tempo-wobble class), 4 are references above 150 that the model reports at 0.5 to 0.8 of the value, 4 sit at ratio 1.2 to 1.8. No x2 error on either split, so a better octave decision has little to find; the remaining misses are broken-beat material and tempo wobble that a prior does not fix (the Q13 list: Falaise, Shopping List, Primes, Detroit People Mover and Arctic Horizon come back unchanged).
+
+## Grid misses left (BPM within 1, grid beyond 20 ms)
+
+Test: 29 tracks, by cause: drift 9, outliers 8, half-beat 7, constant offset 4, offset + wobble 1. Dev: 55 of 386 tracks with BPM within 1: constant offset 18, drift 14, half-beat 12, outliers 7, offset + wobble 4 (the mp3 files without Xing/Info header are among the offsets). Next candidates: the no-header mp3 files (4 dev, 4 test; offsets +30, +10, +3, +11 on dev), drift (the model's tempo is off by 0.1 to 0.8 BPM on 14 dev tracks), and a half-beat rule that needs a signal other than onset energy.
+
+## Caveats
+
+- Rekordbox agreement only. The -10 ms PCM shift and the Lame3.100 frame are empirical fits to Rekordbox's timeline, not derived from a spec; other encoders without an Info frame (4 dev, 4 test tracks) are still treated as zero delay.
+- The dev set is not a random sample: it is the tracks that have audio, 104 of them were also used for the Q15 tuning of the snap and scan settings.
+- The test split was scored once with the final settings. Q26's logits (`benchmark/results/q26/dump205`) were re-fitted, not re-run through the model; with 44.1 kHz sources the logits do not change, and an `ffa` check of 4 tracks gives the same result as the re-fit.
+
+## Reproduce
+
+All paths relative to the repo root (logits cache: `benchmark/results/q30/`, gitignored: `ref.json` = the Q13 reference, `dump/` dev logits and Q15 test logits, `test/` the Q26 test dumps).
+
+```bash
+cd prototyping/analysis-packaging && ./fetch-models.sh && cargo build --release && cd ../..
+S=benchmark/scripts; R=benchmark/results/q30
+python3 -I $S/q30-inventory.py $R/ref.json $R/dev-todo.txt --have $R/dump
+target/release/ffa is at prototyping/analysis-packaging/target/release/ffa:
+prototyping/analysis-packaging/target/release/ffa --workers 7 --threads 1 --no-key --no-waveform --brief \
+  --reference $R/ref.json --dump $R/dump --list $R/dev-todo.txt --out $R/devrun.out
+$S/q30-freeze.sh $R/dump $R/frz2
+$S/q30-sum.sh F2 $R/frz2 dev                       # Q30 final settings (defaults of q30-score.sh)
+$S/q30-sum.sh F0 $R/frz2 dev --mp3-rule enc+header --pcm-shift-ms 0 --keep-native 0 0 --snap-wide 0.5   # Q26 settings
+$S/q30-sum.sh test $R/test test                    # test, final settings
+python3 -I $S/q30-tag-table.py $R/last-F2.json     # tag x offset
+python3 -I $S/q30-bpm-misses.py $R/last-test.json $R/ref.json
+$S/q30-sum.sh hb $R/frz2 dev --onset-dir $R/onsets && python3 -I $S/q30-hb-analyze.py $R/last-hb.json
+```
+
+`q30-sum.sh` writes `last-<label>.json` next to the cache. The extra flags of `grid` added in Q30: `--pcm-shift-ms`, `--keep-native LO HI`, `--onset-dir`, `--mp3-rule enc+header+l3100`.
