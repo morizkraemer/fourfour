@@ -45,3 +45,5 @@
 2026-10-23 11:52 orchestrator - queue prepare (PM): plan Q15 → Q16 → own prios; dropped obsolete q9-benchmark worktree (merged; dev manifests kept, now gitignored)
 2026-10-23 11:54 orchestrator - run-start: PM queue start, cap 1, tight; answers: Beatport CC BY-SA fitting for measurement only, library read-only
 2026-10-23 11:54 orchestrator Q15 spawn: branch q15-grid
+2026-10-23 13:35 orchestrator Q15 done: branch q15-grid 8b9a3d0 (release build re-run ok); grid ±20 ms 47%→72%; doc landed on master, code stays on branch (tight)
+2026-10-23 13:35 orchestrator Q16 spawn: branch q16-key

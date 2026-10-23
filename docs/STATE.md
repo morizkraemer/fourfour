@@ -38,9 +38,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q6 Key source PDB vs OneLibrary [handed to brother]
 ### Q8 Cross-platform CI [queued] [box] — Actions on macOS/Windows/Linux (build, test, check, unsigned tauri build). Branch only; first run on the shared repo needs Merlin's OK. 45 min
 ### Q14 USB sync UI [waiting on Merlin] — first attempt on ui-sync-flow (b510e70, preview :4240 when started); round 3 mockups decide the rebuild.
-### Q15 Grid phase + drift [running] [box]
-goal: lift "whole grid within ±20 ms of Rekordbox" from 47% toward 70% in prototyping/analysis-packaging (phase from downbeat/onset alignment, sub-0.01 BPM tempo refinement over the full track). acceptance: test-split table in docs/analysis/bpm-grid-2026-10.md; no regression on BPM ±0.1. timebox: 120 min
-### Q16 Key detector round 2 [proposed] [box]
+### Q15 Grid phase + drift [done, branch q15-grid 8b9a3d0; doc landed] — grid ±20 ms 47%→72% (148/205), BPM ±0.1 86%→88%; full-track Beat This! + tempo comb + integer snap + mp3 encoder-delay fix; ~25 s/track. Code stays on branch (tight); mp3-delay rule needs a hardware check (brother).
+### Q16 Key detector round 2 [running] [box]
 goal: ≥60% exact on a held-out split using only permissively licensed training data (or Beatport-free fitting); per-segment chroma + bass feature. acceptance: doc table, licences verified. timebox: 120 min
 
 ## Run
