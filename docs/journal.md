@@ -82,3 +82,4 @@
 2026-10-23 19:51 orchestrator Q31 done: branch q31-tests f8488e8 (88 app tests); cleanup: removed 9 worktrees whose branches are contained in q31-tests (branches kept); preview :4250 = q31-tests
 2026-10-23 19:51 orchestrator - previews: tailscale serve HTTPS fails for every port on dev (TLS 'wrong version number', also other projects); plain http:// works; restarted :4200
 2026-10-23 19:52 orchestrator - decided: own prio perf/tests: Q32 first-search spike + row-window helper; spawn branch q32-search
+2026-10-23 20:12 orchestrator Q32 done: branch q32-search ae9571c; perf doc section landed
