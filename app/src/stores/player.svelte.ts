@@ -18,6 +18,7 @@ import {
   playbackSeek,
   playbackSetPosition,
   playbackStop,
+  subscribePlaybackError,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
 import { library, requestBackgroundAnalysis } from './library.svelte.ts';
@@ -75,6 +76,7 @@ export const player = $state({
     loadedTrack = value;
   },
   loading: false,
+  error: null as string | null,
   expanded: false,
   levelLeft: 0,
   levelRight: 0,
@@ -95,6 +97,7 @@ export function setExpanded(value: boolean) {
 
 let loadGeneration = 0;
 let tickUnlisten: (() => void) | null = null;
+let errorUnlisten: (() => void) | null = null;
 let playPending = false;
 let cueHoldMs: number | null = null;
 // After seeking a *playing* track, the native backend keeps emitting ticks at
@@ -147,6 +150,8 @@ function synthesizeBeats(bpm: number, durationMs: number): BeatMarker[] {
 export function resetPlayerTransport() {
   tickUnlisten?.();
   tickUnlisten = null;
+  errorUnlisten?.();
+  errorUnlisten = null;
 }
 
 function previewFromAnalysis(analysis: any): number[] | null {
@@ -209,7 +214,20 @@ export async function initPlayerTransport() {
   await ensureTickListener();
 }
 
+function reportPlaybackFailure(message: string) {
+  console.error('playback error:', message);
+  player.error = message;
+  player.playing = false;
+  pausePending = false;
+  seekTargetMs = null;
+}
+
 async function ensureTickListener() {
+  if (!errorUnlisten) {
+    errorUnlisten = await subscribePlaybackError((event) => {
+      reportPlaybackFailure(event.message);
+    });
+  }
   if (tickUnlisten) return;
   tickUnlisten = await subscribePlaybackTick((tick) => {
     player.levelLeft = tick.level_left ?? 0;
@@ -330,6 +348,7 @@ export function initPlayerAnalysisRefresh() {
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
+  player.error = null;
   const stopped = playbackStop().catch((err) => console.error('playback stop failed:', err));
   player.playing = false;
   player.progress = 0;
@@ -373,9 +392,14 @@ export async function playFromStart() {
   if (!player.track) return;
   seekTargetMs = null;
   player.progress = 0;
+  player.error = null;
   await ensureTickListener();
-  await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
-  player.playing = true;
+  try {
+    await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
+    player.playing = true;
+  } catch (err) {
+    reportPlaybackFailure(String(err));
+  }
 }
 
 export function clearPlayerTrack() {
@@ -387,6 +411,7 @@ export function clearPlayerTrack() {
   player.playing = false;
   player.progress = 0;
   player.loading = false;
+  player.error = null;
   player.levelLeft = 0;
   player.levelRight = 0;
   playPending = false;
@@ -416,13 +441,12 @@ export async function togglePlay() {
       // backend path + start offset, so this works even after a scrub on a
       // track that was never played (where resume would no-op on a null path).
       const ms = Math.round(player.progress * player.track.durationMs);
+      player.error = null;
       await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
       player.playing = true;
     }
   } catch (err) {
-    console.error('playback toggle failed:', err);
-    player.playing = false;
-    pausePending = false;
+    reportPlaybackFailure(String(err));
   }
 }
 
@@ -435,12 +459,12 @@ export async function cuePreviewStart() {
   await ensureTickListener();
   if (dur > 0) player.progress = ms / dur;
   try {
+    player.error = null;
     await playbackPlay(player.track.sourcePath, ms, dur || undefined);
     player.playing = true;
   } catch (err) {
-    console.error('cue preview failed:', err);
     cueHoldMs = null;
-    player.playing = false;
+    reportPlaybackFailure(String(err));
   }
 }
 
@@ -462,8 +486,13 @@ export async function play() {
   if (!player.track) return;
   await ensureTickListener();
   const ms = Math.round(player.progress * player.track.durationMs);
-  await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
-  player.playing = true;
+  player.error = null;
+  try {
+    await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
+    player.playing = true;
+  } catch (err) {
+    reportPlaybackFailure(String(err));
+  }
 }
 
 export async function pause() {
@@ -519,7 +548,11 @@ export async function seekToProgress(progress: number) {
   if (player.playing) {
     seekTargetMs = ms;
     seekTargetAt = performance.now();
-    await playbackSeek(ms);
+    try {
+      await playbackSeek(ms);
+    } catch (err) {
+      reportPlaybackFailure(String(err));
+    }
   } else {
     // Paused/stopped: persist the position so play/resume starts from here.
     await playbackSetPosition(ms);
