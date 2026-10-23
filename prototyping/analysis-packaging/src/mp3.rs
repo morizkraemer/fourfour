@@ -191,6 +191,16 @@ pub fn scan(path: &Path) -> Option<Mp3Timeline> {
     })
 }
 
+pub const PCM_SHIFT_MS: f64 = -10.0;
+
+pub fn timeline_shift_s(path: &Path, rule: DelayRule) -> f64 {
+    if path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("mp3")) {
+        reference_delay_s(path, rule)
+    } else {
+        PCM_SHIFT_MS / 1000.0
+    }
+}
+
 pub fn reference_delay_s(path: &Path, rule: DelayRule) -> f64 {
     if rule == DelayRule::None {
         return 0.0;

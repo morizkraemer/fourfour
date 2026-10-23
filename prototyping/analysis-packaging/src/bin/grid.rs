@@ -27,6 +27,9 @@ struct Params {
     scan_pct: f64,
     snap_ratio: f64,
     diag: bool,
+    onset_dir: Option<PathBuf>,
+    keep_native: (f64, f64),
+    pcm_shift_ms: f64,
 }
 
 struct Reference {
@@ -103,6 +106,10 @@ struct Row {
     p95_dev_ms: f64,
     drift_ms: f64,
     detrended_max_ms: f64,
+    container: String,
+    hb: Vec<f64>,
+    fit_first_s: f64,
+    period_ms: f64,
     fit_ms: f64,
     model_s: f64,
     duration: f64,
@@ -166,9 +173,44 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
                 fit.fit_us += started.elapsed().as_micros();
             }
         }
+        let fit_first_s = fit.beats_s.first().copied().unwrap_or(0.0);
+        let mut hb = vec![0.0; 6];
+        if let (Some(dir), Some(path)) = (&params.onset_dir, &r.audio_path) {
+            if let Some(env) = cached_onsets(path, &dir.join(format!("{}.onsets", r.id))) {
+                let period = 60.0 / fit.bpm;
+                for b in 0..3 {
+                    hb[b] = env.offbeat_ratio(b, &fit.beats_s, period);
+                }
+                let act = |l: &[f32], t: f64| {
+                    let x = t * FPS;
+                    let i = x.floor() as usize;
+                    if x < 0.0 || i + 1 >= l.len() { return None; }
+                    let f = x - i as f64;
+                    Some(ffcore::fit::sigmoid(l[i]) * (1.0 - f) + ffcore::fit::sigmoid(l[i + 1]) * f)
+                };
+                for (slot, l) in [(3, bl), (4, dl)] {
+                    let (mut on, mut off) = (0.0, 0.0);
+                    for &t in &fit.beats_s {
+                        if let (Some(a), Some(b)) = (act(l, t), act(l, t + period / 2.0)) { on += a; off += b; }
+                    }
+                    hb[slot] = off / on.max(1e-9);
+                }
+                let mut narrow = 0.0;
+                let (mut on, mut off) = (0.0, 0.0);
+                for &t in &fit.beats_s {
+                    on += env.bands[0].get(((t - env.centre_s) / env.hop_s).round() as usize).copied().unwrap_or(0.0) as f64;
+                    off += env.bands[0].get(((t + period / 2.0 - env.centre_s) / env.hop_s).round() as usize).copied().unwrap_or(0.0) as f64;
+                }
+                narrow += off / on.max(1e-9);
+                hb[5] = narrow;
+            }
+        }
         let mut delay = 0.0;
         if let Some(path) = &r.audio_path {
             delay = mp3::reference_delay_s(std::path::Path::new(path), params.mp3_rule);
+            if !path.to_lowercase().ends_with(".mp3") {
+                delay = params.pcm_shift_ms / 1000.0;
+            }
         }
         if final_beats.is_none() {
             fit.beats_s = ffcore::fit::finalize_beats(&fit.beats_s, delay);
@@ -211,8 +253,19 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
             .zip(&offs)
             .map(|(x, y)| (y - (my + slope * (x - mx))).abs())
             .fold(0.0, f64::max);
+        let container = r.audio_path.as_deref().map_or("none".to_string(), |p| {
+            let ext = std::path::Path::new(p).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            match mp3::scan(std::path::Path::new(p)).and_then(|t| t.encoder) {
+                Some(e) => format!("{ext}:{}", String::from_utf8_lossy(&e)),
+                None => ext,
+            }
+        });
         rows.push(Row {
             id: r.id,
+            container,
+            hb,
+            fit_first_s,
+            period_ms: 60000.0 / fit.bpm,
             label: format!("{} - {}", r.artist, r.title),
             ref_bpm: r.bpm,
             est_bpm: fit.bpm,
@@ -284,7 +337,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let reference = PathBuf::from(args.next().expect("usage: grid <reference.json> <dump dir> [--split dev|test|all] [--lo N] [--shift-ms N] [--comb] [--out file] [--dedupe]"));
     let dir = PathBuf::from(args.next().expect("dump dir"));
-    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_rule: DelayRule::None, mp3_diag: false, use_final: false, threads: 1, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false };
+    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_rule: DelayRule::None, mp3_diag: false, use_final: false, threads: 1, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false, onset_dir: None, keep_native: (0.0, 0.0), pcm_shift_ms: mp3::PCM_SHIFT_MS };
     let mut split = "test".to_string();
     let mut out: Option<PathBuf> = None;
     let mut dedupe = false;
@@ -310,6 +363,9 @@ fn main() {
             "--snap-ratio" => params.snap_ratio = args.next().unwrap().parse().unwrap(),
             "--snap-phase-ms" => params.snap_phase_ms = args.next().unwrap().parse().unwrap(),
             "--diag" => params.diag = true,
+            "--pcm-shift-ms" => params.pcm_shift_ms = args.next().unwrap().parse().unwrap(),
+            "--keep-native" => params.keep_native = (args.next().unwrap().parse().unwrap(), args.next().unwrap().parse().unwrap()),
+            "--onset-dir" => params.onset_dir = Some(PathBuf::from(args.next().unwrap())),
             "--out" => out = Some(PathBuf::from(args.next().unwrap())),
             "--dedupe" => dedupe = true,
             "--sweep" => sweep = true,
@@ -373,7 +429,7 @@ fn main() {
     if let Some(o) = out {
         let per: Vec<Value> = rows
             .iter()
-            .map(|r| json!({"id": r.id, "ref_bpm": r.ref_bpm, "est_bpm": r.est_bpm, "f70": r.f70, "med_offset_ms": r.med_offset_ms, "max_dev_ms": r.max_dev_ms, "drift_ms": r.drift_ms, "detrended_max_ms": r.detrended_max_ms, "ref_constant": r.ref_constant}))
+            .map(|r| json!({"id": r.id, "ref_bpm": r.ref_bpm, "est_bpm": r.est_bpm, "f70": r.f70, "med_offset_ms": r.med_offset_ms, "max_dev_ms": r.max_dev_ms, "drift_ms": r.drift_ms, "detrended_max_ms": r.detrended_max_ms, "container": r.container, "hb": r.hb, "fit_first_s": r.fit_first_s, "period_ms": r.period_ms, "ref_constant": r.ref_constant}))
             .collect();
         fs::write(o, serde_json::to_string(&json!({"report": report, "tracks": per})).unwrap()).unwrap();
     }
@@ -474,6 +530,22 @@ fn phase_diag(id: u64, path: &str, beats_s: &[f64], med_offset_ms: f64) {
     println!("DIAG {id} {med_offset_ms:.1} {}", cols.join(" "));
 }
 
+fn cached_onsets(path: &str, cache: &PathBuf) -> Option<ffcore::onset::Envelopes> {
+    if let Ok(raw) = fs::read(cache) {
+        let f: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let n = (f.len() - 2) / 3;
+        return Some(ffcore::onset::Envelopes { hop_s: f[0] as f64, centre_s: f[1] as f64, bands: [f[2..2 + n].to_vec(), f[2 + n..2 + 2 * n].to_vec(), f[2 + 2 * n..].to_vec()] });
+    }
+    let native = ffcore::decode::decode_mono(std::path::Path::new(path)).ok()?;
+    let env = ffcore::onset::envelopes(&native.samples, native.rate);
+    let mut all = vec![env.hop_s as f32, env.centre_s as f32];
+    for b in &env.bands {
+        all.extend_from_slice(b);
+    }
+    fs::write(cache, all.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).ok()?;
+    Some(env)
+}
+
 fn cached_envelope(path: &str, cache: &PathBuf) -> Option<Vec<f64>> {
     if let Ok(raw) = fs::read(cache) {
         return Some(raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect());
@@ -511,6 +583,7 @@ impl Params {
             snap_wide: self.snap_wide,
             scan_pct: self.scan_pct,
             snap_ratio: self.snap_ratio,
+            keep_native: self.keep_native,
             threads: self.threads,
         }
     }

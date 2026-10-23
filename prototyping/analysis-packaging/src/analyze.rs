@@ -86,7 +86,7 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
             let bt = engine.analyze(&native.samples, native.rate, cfg.threads)?;
             let t = Instant::now();
-            let delay = mp3::reference_delay_s(path, cfg.mp3_rule);
+            let delay = mp3::timeline_shift_s(path, cfg.mp3_rule);
             let mp3_ms = ms(t);
             let t = Instant::now();
             let w = Window { offset: 0.0, len: bt.beat_logits.len() as f64 / FPS };

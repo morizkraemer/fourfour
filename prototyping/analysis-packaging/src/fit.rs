@@ -12,6 +12,7 @@ pub struct FitParams {
     pub snap_wide: f64,
     pub scan_pct: f64,
     pub snap_ratio: f64,
+    pub keep_native: (f64, f64),
     pub threads: usize,
 }
 
@@ -23,9 +24,10 @@ impl Default for FitParams {
             comb_refine: true,
             snap_tol: 0.05,
             snap_phase_ms: 15.0,
-            snap_wide: 0.5,
+            snap_wide: 1.5,
             scan_pct: 0.3,
             snap_ratio: 0.97,
+            keep_native: (150.0, 185.0),
             threads: 1,
         }
     }
@@ -260,10 +262,13 @@ pub fn fit_track(
 
     if params.snap_tol > 0.0 {
         let folded = fold_bpm(60.0 / p, params.lo);
-        let snapped = folded.round();
-        let delta = (folded - snapped).abs();
-        if delta < params.snap_wide.max(params.snap_tol) {
-            let mid = w.offset + w.len / 2.0;
+        let mid = w.offset + w.len / 2.0;
+        let current = comb_score(&act, w, t0, p);
+        let reach = params.snap_wide.max(params.snap_tol);
+        let mut candidates: Vec<f64> = ((folded - reach).ceil() as i64..=(folded + reach).floor() as i64).map(|n| n as f64).collect();
+        candidates.sort_by(|a, b| (a - folded).abs().total_cmp(&(b - folded).abs()));
+        for snapped in candidates {
+            let delta = (folded - snapped).abs();
             let p_new = p * folded / snapped;
             let t_new = t0 + (p - p_new) * ((mid - t0) / p);
             let mut best = (comb_score(&act, w, t_new, p_new), t_new);
@@ -275,16 +280,17 @@ pub fn fit_track(
                 }
                 dt += 0.0005;
             }
-            let current = comb_score(&act, w, t0, p);
             if delta < params.snap_tol || best.0 >= params.snap_ratio * current {
                 p = p_new;
                 t0 = best.1;
+                break;
             }
         }
     }
 
     let model_bpm = 60.0 / p;
-    let target = fold_bpm(model_bpm, params.lo);
+    let keep = model_bpm >= params.keep_native.0 && model_bpm <= params.keep_native.1;
+    let target = if keep { model_bpm } else { fold_bpm(model_bpm, params.lo) };
     let ratio = target / model_bpm;
     let mut p_out = p / ratio;
     let mut t0_out = t0;
