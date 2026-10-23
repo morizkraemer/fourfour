@@ -734,6 +734,40 @@ fn write_usb(
     Ok(report)
 }
 
+struct TauriSyncSink(AppHandle);
+
+impl pioneer_library::ProgressSink for TauriSyncSink {
+    fn progress(&self, progress: &pioneer_library::StickProgress) {
+        self.0.emit("usb-sync-progress", progress).ok();
+    }
+
+    fn finished(&self, report: &pioneer_library::StickReport) {
+        self.0.emit("usb-sync-stick-report", report).ok();
+    }
+}
+
+/// Sync several sticks concurrently. Emits `usb-sync-progress` per stick and
+/// `usb-sync-stick-report` when a stick finishes. One failing stick does not stop
+/// the others; the result carries one report per target, in order. The library
+/// lock is held only while the selection is read.
+#[tauri::command]
+async fn sync_usb_many(
+    targets: Vec<pioneer_library::SyncTarget>,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<Vec<pioneer_library::StickReport>, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.prepare_multi_sync(&targets).map_err(|e| format!("{e:#}"))?
+        };
+        Ok(prepared.run(&TauriSyncSink(app)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Sync frontend playlists into the library.
 fn sync_playlists_to_library(
     lib: &LocalLibrary,
@@ -1322,6 +1356,7 @@ fn main() {
             enqueue_analysis,
             prioritize_analysis,
             write_usb,
+            sync_usb_many,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,

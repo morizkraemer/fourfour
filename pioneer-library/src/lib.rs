@@ -8,6 +8,7 @@
 //! files on disk alongside the database. The SQLite `analyses` table keeps only
 //! a lightweight index (bpm + key) for fast queries.
 
+mod multi_sync;
 mod queries;
 pub mod rekordbox;
 mod schema;
@@ -23,6 +24,11 @@ use pioneer_usb_writer::models::{
     AnalysisResult, BeatGrid, Playlist, SyncReport, Track, WaveformPreview,
 };
 use pioneer_usb_writer::{reader, writer};
+
+pub use multi_sync::{
+    NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
+    SyncPhase, SyncSelection, SyncTarget, statvfs_available_bytes,
+};
 
 /// Summary report from importing a Pioneer USB into the local library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
