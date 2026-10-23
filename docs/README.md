@@ -13,6 +13,7 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 |---|---|---|
 | [`repo-overview.md`](architecture/repo-overview.md) | reference | Crate-by-crate map, what works on hardware, data flow, line counts. *(Predates the Svelte `app/`; for current UI see `ui/`.)* |
 | [`ui-architecture.md`](architecture/ui-architecture.md) | current | UI architecture for the desktop app — stores, modules, IPC. |
+| [`performance-2026-10.md`](architecture/performance-2026-10.md) | reference | Startup and UI performance: before/after numbers at 1k/10k/30k tracks, method, what is left. |
 | [`tech-stack.md`](architecture/tech-stack.md) | reference | Survey of open-source DJ analysis tools (Essentia, madmom, CLAP, Demucs, …) — options and pain points per layer. |
 
 ## ui/ — UI specs (current phase)
