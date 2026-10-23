@@ -165,3 +165,85 @@ python3 -I ../../benchmark/scripts/q21-logit-diff.py <dirA> <dirB> [n]
 ```
 
 Run sizes and outputs sit in `benchmark/results/q21/` (gitignored): `full205.*`, `after-batch8.*`, `before/`, `small50.*`, `mp3rule2-*.txt`, `cyankey-preds.txt`.
+
+## Pass 2, 2026-10-24 (Q26)
+
+Branch `q26-analysis` (from `q21-analysis`, master merged). Same box (`dev`, load average 14 to 35 during every run, so wall times are noisy; CPU seconds are the steadier figure). Same splits as pass 1.
+
+### Result
+
+| | Pass 1 (Q21) | Pass 2 (Q26) |
+|---|---:|---:|
+| CPU s per track (user + sys, 205-track test run, 8 workers x 1 thread, all stages) | 74 | **70.3** |
+| Sum of stage times per track | 98.0 s | **89.3 s** |
+| Tracks per minute at 8 workers | 4.82 | **5.29** (load differs between runs; treat as +-10%) |
+| Peak RSS (8 workers) | 5.1 GB | 5.0 GB (about 0.63 GB per worker, unchanged: the model dominates) |
+| Grid within +-20 ms, test n=205 | 148 = 72.2% | **148 = 72.2%** |
+| BPM within +-0.1, n=205 | 182 = 88.8% | **180 = 87.8%** (see below; equals Q15) |
+| Key exact, Beatport test n=199 | 116 = 58.3% | **116 = 58.3%** (stage and code path unchanged, re-run) |
+
+Stage means per track (205 tracks, 1 thread each): decode 1.85 to 1.14 s, fit 1.57 to 0.28 s, predict 91.7 to 84.9 s (same code and weights; the difference is load), resample 1.61 to 1.72, mel 1.34 to 1.22, key 1.07 to 1.04, waveforms 1.71 to 1.59. Everything except the model is now 4.4 s of 89.3. The pass-1 target (a 3x to 10x gain) is not on the table: 95% of the CPU is Beat This!, and no backend change reaches 2x (next section).
+
+### 1. Inference backend: ONNX Runtime versus rten (finding: not adopted)
+
+Both are permissive: the `ort` crate is MIT OR Apache-2.0 (checked in its `Cargo.toml`, 2.0.0-rc.14), ONNX Runtime is MIT (the onnxruntime 1.31.0 wheel metadata says "MIT License"). The Rust crate downloads the native library from pyke's CDN in its default `download-binaries` feature; a build with `load-dynamic` instead loads a `libonnxruntime.so` that we ship ourselves (no build-script download; Debian's 1.21 and the wheel's 1.31 both exist on this box). Shipping that library costs about 29 MB (`libonnxruntime.so.1.31.0` in the wheel; rten is compiled into the 7.2 MB `ffa`).
+
+The beat-this-rs release already ships the ONNX files (`beat_this.onnx`, `mel_spectrogram.onnx`, both with a dynamic batch axis), so no export from the PyTorch weights is needed. Measured with ONNX Runtime 1.31 (Python, the same C++ core `ort` calls) on one 1500-frame chunk, same moment on the same loaded box; rten: 72.4 s predict for the 430 s track = 14.5 chunks = 5.0 s per chunk (`ffa --threads 1`):
+
+| Setup | Wall s per chunk | CPU s per chunk | Versus rten fp32 |
+|---|---:|---:|---:|
+| rten fp32, 1 thread | 5.0 | 5.0 | 1.0x |
+| ORT fp32, 1 thread | 3.4 to 3.9 | 3.4 to 3.9 | 1.3 to 1.5x |
+| ORT fp32, graph optimisation "basic" only | 3.8 | 3.8 | 1.3x |
+| ORT fp32, 4 threads | 1.39 | 5.3 | 3.6x wall, 1.05x CPU: no CPU gain |
+| ORT fp32, batch 4 (4 chunks in one run) | 16.3 | 12.5 | worse: attention memory traffic |
+| ORT int8 dynamic, MatMul/Gemm (`beat_this_q8mm.onnx`) | 3.3 | 3.3 | 1.5x; vs ORT fp32 only 5 to 9% |
+| ORT int8 dynamic, MatMul/Gemm + Conv (`q8all`) | 3.8 | 3.8 | no gain |
+
+Verdict: ORT is 1.3 to 1.5x faster in CPU per chunk, under the 2x bar, so no feature flag and no new dependency were added (a Rust `ort` build would add the crate chain, a 29 MB shared library to package and sign per platform, and an unstable 2.0 release-candidate API, for at most one third less CPU). Batching chunks into one run makes it slower. int8 buys another 5 to 9% over fp32 in ORT and 11% in rten, and its grid accuracy could not be scored: the pass-1 variant dumps hold one track each. Thread-pool tuning: nothing to tune; threads inside one track only trade CPU for latency (CPU per chunk goes up 1.5x at 4 threads), and 8 one-thread workers is already the efficient point. A 5,000-track library stays at about 95 CPU-hours (12 hours on 8 cores). Revisit if Beat This! ships a distilled model, or if a hardware backend (CoreML on the Mac) is acceptable for the app; neither was measurable here (CPU-only box).
+
+### 2. Decode at the native rate (done)
+
+`src/decode.rs`: own symphonia loop (MPL-2.0, same 0.6 version the lock file already had, `features = ["all"]`), mono mix per packet, native-rate buffer. The model path resamples native to 22.05 kHz once; key and waveforms resample native to 44.1 kHz once, only when the source is not 44.1 kHz. For 44.1 kHz sources the logits are bit-identical to pass 1 (`q21-logit-diff.py`, 20 of 20 tracks checked, same peaks). The 19 non-44.1 kHz tracks no longer resample twice, and the BPM count went from 182 back to 180, the Q15 value: the two extra pass-1 hits were luck from the double resample, not quality. Grid unchanged at 148. Copies saved: the interleaved f32 buffer, the second mono copy and the `to_vec` before the model resample.
+
+### 3. Coarse-to-fine tempo scan (done)
+
+601 tempi x 125 phases became: every 6th tempo over all phases, then the 5 best coarse tempi refined over their 11 neighbours with 7 phases each. Fit time (median over the test split, same logits): 1,094 ms to 187 ms with grid scores identical (148 within 20 ms, 182 BPM within 0.1, F70 and offsets unchanged on re-fit of the pass-1 logits). In the end-to-end run the mean fit stage is 0.28 s.
+
+### 4. Grid quality: MP3 spread and constant-grid misses (cause found, fix not applied)
+
+Not tuned: the pass-1 logits cover the test split only, and the rule was not to tune on test. What the test split shows (bpm-ok tracks; within 20 ms by container: flac 34 of 42 = 81%, mp3 53 of 74 = 72%, wav 61 of 66 = 92%; median offset wav +10.5, flac +10.9, mp3 +2.5 ms):
+
+- The mp3 spread is one encoder. Grouping the mp3 tracks by the encoder string in the Info frame: **`Lame3.100`: 10 of 12 sit at +17 to +35 ms, median +27 ms, one MPEG frame (26.1 ms)**; the other two are half-beat phase misses. `LAME3.99` (16 tracks, median +2), every ffmpeg tag `Lavc*`/`Lavf*` (about 40 tracks, median +1) and no-tag files are fine. The Lame3.100 files have the same first-four-frames header agreement as the others, so the cyanbox rule says "Info frame does not count", but Rekordbox's timeline behaves as if it does. Seven of the 12 constant-offset misses below (ids 3, 537, 549, 573, 606, 648, 651; offsets +27 to +35 ms, detrended error 0.5 ms or less) are these files; the fit itself is internally perfect there.
+- Hypothesis for pass 3: add one frame (1152 samples) to the delay when the encoder tag starts `Lame3.100`. Expected effect on the test split: up to 7 more tracks within 20 ms (about +3 points). This was found by looking at test-split offsets, so it needs a dev-split check before it is adopted: pick the dev mp3s whose tag starts `Lame3.100`, run `ffa --dump`, score with and without the frame. `q26-mp3-features.py` prints the encoder and header fields for this.
+- The 34 tracks with the right BPM and a missed grid (the pass-1 list said 31; same reading with `--diag`), by class: 6 are half-beat phase errors (median offset 211 to 247 ms; Rekordbox's grid sits on the other half-beat or the model locked on the off-beat); 12 have a clean constant offset of 22 to 100 ms (7 are the Lame3.100 files above; the others are ids 69 and 117 at +23 and +26 ms, 75 at -38 ms, 324 at -97 ms and 180 at +55 ms with 100 ms of drift); 16 have a median within 20 ms but drift (tempo error accumulating to 20 to 60 ms over the track, 13 of them with a constant reference) or a few outlier beats (3 of them with 250 to 450 ms outliers). 23 more tracks have the wrong BPM (10 of them with a constant reference grid): mostly octave errors (x0.5) that need a tempo prior, not a fit change.
+
+### 5. Dead weight removed
+
+`ffproto` (`src/main.rs`, the stratum-dsp path, 75 to 170 s per track), the `stratum-dsp` dependency and its lock entries, the `--stratum` switch of `bgdump`, and the two scripts that only drove it (`run-3-tracks.sh`, `key-subset.py`) are gone; nothing else in the tree called them (checked with grep over `benchmark/scripts`, `docs/`, the prototype and the app). `keydet`, `bgdump`, `grid`, `cyankey` and `rbref` stay. The Cargo package is still named `ffproto`; renaming it is cosmetic and left alone.
+
+### 6. Waveform stage
+
+Untouched (bytes identical by construction: the 44.1 kHz mono input is the same for 44.1 kHz sources). It costs 1.6 s per track.
+
+### What is left
+
+1. Lame3.100 timeline rule (item 4), validated on dev, then the half-beat phase and octave tempo errors (a prior from the downbeat logits).
+2. Beat This! stays 95% of the CPU. Options that need a decision, not more engineering: a distilled model, int8 with a proper accuracy study (5 to 11%), or CoreML on the Mac.
+3. Pass-1 list items 3, 5, 6, 7 (Rekordbox-fitted waveform, confidence scores, priority queue, GiantSteps key set) unchanged.
+
+### Reproduce
+
+```bash
+cd prototyping/analysis-packaging && ./fetch-models.sh && cargo build --release
+S=../../benchmark/scripts; R=../../benchmark/results/q26     # copy Q21's tracks205.txt and the Q13 reference as ref.json
+$S/q21-timed.sh $R/full205 target/release/ffa --workers 8 --threads 1 --brief --reference $R/ref.json --dump $R/dump205 --list $R/tracks205.txt
+$S/q26-score.sh $R/dump205 test --use-final                 # as shipped
+$S/q26-stage-means.py $R/full205.out                        # stage means
+target/release/cyankey ../../benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json <beatport audio dir> 1
+# ORT comparison (pip install onnxruntime in a venv)
+$S/q26-ort-matrix.sh <venv python>
+# mp3 and miss analysis
+TAILN=1000 $S/q26-score.sh $R/dump205 test --mp3-diag --diag --out $R/grid-diag.json > $R/diag.txt
+python3 -I $S/q26-mp3-features.py $R/grid-diag.json $R/ref.json ; python3 -I $S/q26-fail-classes.py $R/grid-diag.json
+```
