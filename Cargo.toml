@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["pioneer-usb-writer", "pioneer-test-ui", "pioneer-library"]
+members = ["pioneer-usb-writer", "pioneer-test-ui", "pioneer-library", "fourfour-analysis-rs"]
 

@@ -401,6 +401,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "beat-this",
+ "fourfour-analysis-rs",
  "rten",
  "rten-tensor",
  "rustfft",
@@ -440,6 +441,20 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "fourfour-analysis-rs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "beat-this",
+ "pioneer-usb-writer",
+ "rten",
+ "rten-tensor",
+ "rustfft",
+ "serde_json",
+ "symphonia",
+]
 
 [[package]]
 name = "futures-core"

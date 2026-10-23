@@ -20,6 +20,7 @@ serde_json = "1"
 rten = "=0.24.0"
 rten-tensor = "=0.24.0"
 anyhow = "1"
+fourfour-analysis-rs = { path = "../../fourfour-analysis-rs" }
 
 [profile.release]
 opt-level = 3

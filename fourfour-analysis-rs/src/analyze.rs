@@ -1,5 +1,7 @@
 use std::borrow::Cow;
+use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
@@ -11,7 +13,7 @@ use crate::decode::{decode_mono, resample_to};
 use crate::fit::{self, FitParams, Window, FPS};
 use crate::keymap::camelot;
 use crate::mp3::{self, DelayRule};
-use crate::waveform;
+use crate::waveform::{self, Waveforms};
 
 #[derive(Clone)]
 pub struct Config {
@@ -20,12 +22,13 @@ pub struct Config {
     pub mp3_rule: DelayRule,
     pub key: bool,
     pub waveform: bool,
+    pub placeholder_waveform: bool,
     pub keep_logits: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, keep_logits: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, placeholder_waveform: false, keep_logits: false }
     }
 }
 
@@ -38,6 +41,7 @@ pub struct Analysis {
     pub downbeats_s: Vec<f32>,
     pub key_class: Option<usize>,
     pub key_confidence: f64,
+    pub waveforms: Option<Waveforms>,
     pub waveform_checksum: Option<u64>,
     pub detail_entries: usize,
     pub mp3_delay_s: f64,
@@ -49,13 +53,31 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+#[derive(Debug)]
+pub struct Cancelled;
+
+impl fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "analysis cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
 pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysis> {
+    analyze_cancellable(engine, path, cfg, &AtomicBool::new(false))
+}
+
+pub fn analyze_cancellable(engine: &BeatEngine, path: &Path, cfg: &Config, cancel: &AtomicBool) -> Result<Analysis> {
     let total = Instant::now();
     let t = Instant::now();
     let native = decode_mono(path)?;
     let decode_ms = ms(t);
     if native.samples.is_empty() {
         return Err(anyhow!("no audio decoded"));
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Cancelled.into());
     }
     let duration_s = native.samples.len() as f64 / native.rate as f64;
     let t = Instant::now();
@@ -79,7 +101,11 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         let wf = cfg.waveform.then(|| {
             s.spawn(|| {
                 let t = Instant::now();
-                let w = waveform::compute(mono, 44100, side_threads);
+                let w = if cfg.placeholder_waveform {
+                    Ok(waveform::compute_placeholder(mono, 44100, side_threads))
+                } else {
+                    resample_to(&native.samples, native.rate, waveform::TARGET_SR).map(|a| waveform::compute(&a))
+                };
                 (w, ms(t))
             })
         });
@@ -99,6 +125,9 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         (beat, key.map(|h| h.join().unwrap()), wf.map(|h| h.join().unwrap()))
     });
     let (bt, fit, delay, fit_ms, mp3_ms) = beat_part?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Cancelled.into());
+    }
 
     let (beats_s, bpm, first_beat_s, raw_beats_s) = match &fit {
         Some(f) => {
@@ -113,10 +142,12 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         Some((None, t)) => (None, 0.0, *t),
         None => (None, 0.0, 0.0),
     };
-    let (waveform_checksum, detail_entries, wf_ms) = match &wf_part {
-        Some((w, t)) => (Some(waveform::checksum(w)), w.detail.len(), *t),
-        None => (None, 0, 0.0),
+    let (waveforms, wf_ms) = match wf_part {
+        Some((w, t)) => (Some(w?), t),
+        None => (None, 0.0),
     };
+    let waveform_checksum = waveforms.as_ref().map(waveform::checksum);
+    let detail_entries = waveforms.as_ref().map_or(0, |w| w.detail.len());
     let ms_doc = json!({
         "decode": decode_ms,
         "resample": bt.resample_ms + resample44_ms,
@@ -138,6 +169,7 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         downbeats_s: bt.downbeats.clone(),
         key_class,
         key_confidence,
+        waveforms,
         waveform_checksum,
         detail_entries,
         mp3_delay_s: delay,
