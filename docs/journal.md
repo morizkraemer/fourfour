@@ -75,3 +75,5 @@
 2026-10-23 17:43 orchestrator - decided: own prio perf: Q28 waveform drawing + scroll (design system allowed, pixel-diff gate); spawn branch q28-waveform-perf
 2026-10-23 18:48 orchestrator Q28 done: branch q28-waveform-perf 2a7a232; perf doc section landed
 2026-10-23 18:48 orchestrator - decided: own prio perf: Q29 track row mount + page paint; spawn branch q29-rows
+2026-10-23 18:52 orchestrator Q26 done: branch q26-analysis cdc4f30; pass-2 doc landed
+2026-10-23 18:52 orchestrator Q30 spawn: grid round 3, branch q30-grid
