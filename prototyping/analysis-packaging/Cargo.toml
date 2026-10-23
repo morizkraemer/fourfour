@@ -13,8 +13,8 @@ name = "ffcore"
 path = "src/lib.rs"
 
 [dependencies]
-stratum-dsp = "=1.0.0"
 beat-this = { version = "=1.1.0", default-features = false, features = ["decode", "serde"] }
+symphonia = { version = "0.6", features = ["all"] }
 rustfft = "6.2"
 serde_json = "1"
 rten = "=0.24.0"

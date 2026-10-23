@@ -120,7 +120,6 @@ fn dump(dir: &Path, id: u64, a: &ffcore::analyze::Analysis) {
         "downbeats": a.downbeats_s,
         "final_beats_s": a.beats_s,
         "bpm": a.bpm,
-        "stratum": null,
     });
     std::fs::write(dir.join(format!("{id}.json")), serde_json::to_string(&doc).unwrap()).unwrap();
 }

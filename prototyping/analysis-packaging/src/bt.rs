@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
-use beat_this::__probe::{resample, MelStream};
+use beat_this::__probe::MelStream;
+
+use crate::decode::resample_to;
 use beat_this::{Model as BtModel, Tensor};
 use rten::{ModelOptions, NodeId, RunOptions, ThreadPool, ValueOrView, ValueView};
 
@@ -80,9 +82,9 @@ impl BeatEngine {
         })
     }
 
-    pub fn analyze(&self, samples_44k: &[f32], threads: usize) -> Result<BeatResult> {
+    pub fn analyze(&self, samples: &[f32], source_rate: u32, threads: usize) -> Result<BeatResult> {
         let t = Instant::now();
-        let samples = resample(samples_44k.to_vec(), 44100)?;
+        let samples = resample_to(samples, source_rate, 22050)?;
         let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();

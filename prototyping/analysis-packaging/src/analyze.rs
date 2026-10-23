@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::Path;
 use std::time::Instant;
 
@@ -6,6 +7,7 @@ use serde_json::{json, Value};
 
 use crate::bt::{BeatEngine, BeatResult};
 use crate::cyankey;
+use crate::decode::{decode_mono, resample_to};
 use crate::fit::{self, FitParams, Window, FPS};
 use crate::keymap::camelot;
 use crate::mp3::{self, DelayRule};
@@ -50,13 +52,20 @@ fn ms(t: Instant) -> f64 {
 pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysis> {
     let total = Instant::now();
     let t = Instant::now();
-    let audio = beat_this::load_audio(path, 44100)?;
+    let native = decode_mono(path)?;
     let decode_ms = ms(t);
-    let mono = &audio.samples;
-    let duration_s = mono.len() as f64 / 44100.0;
-    if mono.is_empty() {
+    if native.samples.is_empty() {
         return Err(anyhow!("no audio decoded"));
     }
+    let duration_s = native.samples.len() as f64 / native.rate as f64;
+    let t = Instant::now();
+    let mono44: Cow<[f32]> = if native.rate == 44100 {
+        Cow::Borrowed(&native.samples)
+    } else {
+        Cow::Owned(resample_to(&native.samples, native.rate, 44100)?)
+    };
+    let resample44_ms = ms(t);
+    let mono = &*mono44;
 
     let side_threads = if cfg.threads > 1 { 2 } else { 1 };
     let (beat_part, key_part, wf_part) = std::thread::scope(|s| {
@@ -75,7 +84,7 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
             })
         });
         let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
-            let bt = engine.analyze(mono, cfg.threads)?;
+            let bt = engine.analyze(&native.samples, native.rate, cfg.threads)?;
             let t = Instant::now();
             let delay = mp3::reference_delay_s(path, cfg.mp3_rule);
             let mp3_ms = ms(t);
@@ -110,7 +119,7 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
     };
     let ms_doc = json!({
         "decode": decode_ms,
-        "resample": bt.resample_ms,
+        "resample": bt.resample_ms + resample44_ms,
         "mel": bt.mel_ms,
         "predict": bt.predict_ms,
         "model": bt.resample_ms + bt.mel_ms + bt.predict_ms,

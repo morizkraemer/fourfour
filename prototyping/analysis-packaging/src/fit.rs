@@ -165,45 +165,68 @@ fn refine_comb(act: &[f64], w: &Window, t0: f64, p: f64) -> (f64, f64) {
     (bt0, bp)
 }
 
+const COARSE_STRIDE: i64 = 6;
+const COARSE_KEEP: usize = 5;
+const FINE_PHASE_STEPS: i64 = 3;
+const PHASE_STEP: f64 = 0.004;
+
 fn scan_tempo(act: &[f64], w: &Window, t0: f64, p: f64, steps: i64, threads: usize) -> (f64, f64) {
     let mid = w.offset + w.len / 2.0;
     let k = (mid - t0) / p;
     let total = 2 * steps + 1;
-    let threads = threads.max(1).min(total as usize);
-    let per = (total as usize).div_ceil(threads) as i64;
-    let scan = |from: i64, to: i64| {
-        let mut best = (f64::MIN, t0, p);
-        for i in from..to {
-            let pi = p * (1.0 + (i - steps) as f64 * 1e-5);
-            let tc = t0 + (p - pi) * k;
-            let mut dt = -pi / 2.0;
-            while dt < pi / 2.0 {
-                let s = comb_score(act, w, tc + dt, pi);
-                if s > best.0 {
-                    best = (s, tc + dt, pi);
-                }
-                dt += 0.004;
+    let period_at = |i: i64| p * (1.0 + (i - steps) as f64 * 1e-5);
+    let centre_at = |i: i64| t0 + (p - period_at(i)) * k;
+    let phases_at = |i: i64| ((period_at(i) / PHASE_STEP).ceil() as i64).max(1);
+    let eval = |i: i64, j: i64| {
+        let pi = period_at(i);
+        let t = centre_at(i) - pi / 2.0 + j as f64 * PHASE_STEP;
+        (comb_score(act, w, t, pi), t, pi)
+    };
+    let best_phase = |i: i64, from: i64, to: i64| {
+        let mut best = (f64::MIN, t0, p, 0i64);
+        for j in from..to {
+            let (s, t, pi) = eval(i, j);
+            if s > best.0 {
+                best = (s, t, pi, j);
             }
         }
         best
     };
-    let parts: Vec<(f64, f64, f64)> = if threads == 1 {
-        vec![scan(0, total)]
-    } else {
+    let coarse_idx: Vec<i64> = (0..total).step_by(COARSE_STRIDE as usize).collect();
+    let run = |idx: &[i64], f: &(dyn Fn(i64) -> (f64, f64, f64, i64) + Sync)| -> Vec<(f64, f64, f64, i64, i64)> {
+        let threads = threads.max(1).min(idx.len().max(1));
+        if threads == 1 {
+            return idx.iter().map(|&i| { let r = f(i); (r.0, r.1, r.2, r.3, i) }).collect();
+        }
+        let per = idx.len().div_ceil(threads);
         std::thread::scope(|s| {
-            let handles: Vec<_> = (0..threads as i64)
-                .map(|j| {
-                    let scan = &scan;
-                    s.spawn(move || scan(j * per, ((j + 1) * per).min(total)))
-                })
+            let handles: Vec<_> = idx
+                .chunks(per)
+                .map(|c| s.spawn(move || c.iter().map(|&i| { let r = f(i); (r.0, r.1, r.2, r.3, i) }).collect::<Vec<_>>()))
                 .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect()
+            handles.into_iter().flat_map(|h| h.join().unwrap()).collect()
         })
     };
-    let mut best = (f64::MIN, t0, p);
-    for part in parts {
-        if part.0 > best.0 {
-            best = part;
+    let mut coarse = run(&coarse_idx, &|i| best_phase(i, 0, phases_at(i)));
+    coarse.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.4.cmp(&b.4)));
+    let mut fine_idx: Vec<i64> = Vec::new();
+    let mut fine_phase: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for c in coarse.iter().take(COARSE_KEEP) {
+        for i in (c.4 - COARSE_STRIDE + 1).max(0)..(c.4 + COARSE_STRIDE).min(total) {
+            if fine_phase.insert(i, c.3).is_none() {
+                fine_idx.push(i);
+            }
+        }
+    }
+    fine_idx.sort();
+    let fine = run(&fine_idx, &|i| {
+        let j = fine_phase[&i];
+        best_phase(i, (j - FINE_PHASE_STEPS).max(0), (j + FINE_PHASE_STEPS + 1).min(phases_at(i)))
+    });
+    let mut best = (f64::MIN, t0, p, 0, i64::MAX);
+    for r in coarse.into_iter().chain(fine) {
+        if r.0 > best.0 || (r.0 == best.0 && r.4 < best.4) {
+            best = r;
         }
     }
     (best.1, best.2)

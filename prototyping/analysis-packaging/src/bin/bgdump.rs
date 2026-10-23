@@ -9,7 +9,6 @@ struct Args {
     reference: PathBuf,
     out: PathBuf,
     shard: (usize, usize),
-    stratum: bool,
     limit: usize,
     models: PathBuf,
     small: bool,
@@ -21,7 +20,6 @@ fn parse_args() -> Args {
         reference: PathBuf::new(),
         out: PathBuf::new(),
         shard: (0, 1),
-        stratum: false,
         limit: usize::MAX,
         models: Path::new(env!("CARGO_MANIFEST_DIR")).join("models"),
         small: false,
@@ -37,7 +35,6 @@ fn parse_args() -> Args {
                 let (i, n) = s.split_once('/').expect("--shard i/n");
                 a.shard = (i.parse().unwrap(), n.parse().unwrap());
             }
-            "--stratum" => a.stratum = true,
             "--small" => a.small = true,
             "--window" => a.window_s = it.next().expect("--window seconds").parse().unwrap(),
             "--limit" => a.limit = it.next().expect("--limit n").parse().unwrap(),
@@ -112,24 +109,6 @@ fn main() {
         }
         fs::write(args.out.join(format!("{id}.logits")), logits).unwrap();
 
-        let stratum = if args.stratum {
-            let audio44 = load_audio(&path, 44100).expect("decode 44.1k");
-            let t = Instant::now();
-            let r = stratum_dsp::analyze_audio(&audio44.samples, 44100, stratum_dsp::AnalysisConfig::default());
-            let ms = t.elapsed().as_secs_f64() * 1000.0;
-            match r {
-                Ok(r) => json!({
-                    "ms": ms,
-                    "bpm": r.bpm,
-                    "bpm_confidence": r.bpm_confidence,
-                    "beats": r.beat_grid.beats,
-                }),
-                Err(e) => json!({ "ms": ms, "error": e.to_string() }),
-            }
-        } else {
-            Value::Null
-        };
-
         let doc = json!({
             "id": id,
             "duration_s": duration_s,
@@ -138,7 +117,6 @@ fn main() {
             "ms": { "decode": decode_ms, "model": model_ms, "total": total.elapsed().as_secs_f64() * 1000.0 },
             "beats": a.beats.iter().map(|b| *b as f64 + offset_s).collect::<Vec<f64>>(),
             "downbeats": a.downbeats.iter().map(|b| *b as f64 + offset_s).collect::<Vec<f64>>(),
-            "stratum": stratum,
         });
         fs::write(&json_path, serde_json::to_string(&doc).unwrap()).unwrap();
         eprintln!("{id}: {:.0} s audio, decode {:.1} s, model {:.1} s", duration_s, decode_ms / 1000.0, model_ms / 1000.0);
