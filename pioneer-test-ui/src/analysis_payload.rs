@@ -163,3 +163,33 @@ pub fn build_analysis_json(
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn color_payload_carries_band_bytes_and_calibration() {
+        let entries = [[10u8, 20, 30], [127, 0, 5]];
+        let preview = [0x1f_u8; 4];
+        let payload = color_payload(&entries, Some(&preview));
+
+        assert_eq!(payload["len"], 2);
+        assert_eq!(payload["bands"], base64_encode(&[10, 20, 30, 127, 0, 5]));
+        let calibration = payload["calibration"].as_f64().unwrap();
+        assert!((calibration - pwav_band_calibration(&entries, &preview)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn color_payload_without_preview_is_uncalibrated() {
+        let payload = color_payload(&[[1, 2, 3]], None);
+        assert_eq!(payload["calibration"], 1.0);
+    }
+
+    #[test]
+    fn downsample_keeps_peak_per_window() {
+        let source: Vec<[u8; 3]> = (0..10u8).map(|n| [n, 0, 0]).collect();
+        let out = downsample_3band(&source, 5);
+        assert_eq!(out, vec![[1, 0, 0], [3, 0, 0], [5, 0, 0], [7, 0, 0], [9, 0, 0]]);
+    }
+}

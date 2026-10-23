@@ -45,6 +45,7 @@ const peakLoadInflight = new Map<number, Promise<void>>();
 
 /** Shallow-bump so list rows re-render when nested track fields change. */
 export function bumpLibraryTracks() {
+  haystackById = null;
   library.tracks = [...library.tracks];
 }
 
@@ -262,6 +263,21 @@ export const library = $state({
 
 const haystackCache = new WeakMap<object, string[]>();
 
+/**
+ * Library tracks as plain objects (`library.tracks` wraps these in reactive
+ * proxies). Reading text through the proxies costs ~1 s at 30k tracks; the
+ * plain objects see the same mutations without that cost.
+ */
+let plainTracks: Record<string, unknown>[] = [];
+let haystackById: Map<number, string> | null = null;
+
+function haystackByIdFor(): Map<number, string> {
+  if (!haystackById) {
+    haystackById = new Map(plainTracks.map((t) => [t.id as number, trackHaystack(t)]));
+  }
+  return haystackById;
+}
+
 function trackHaystack(track: Record<string, unknown>): string {
   const raw = track.raw as Record<string, unknown> | undefined;
   return [
@@ -293,7 +309,8 @@ function trackHaystack(track: Record<string, unknown>): string {
 function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] {
   let haystacks = haystackCache.get(tracks);
   if (!haystacks) {
-    haystacks = tracks.map(trackHaystack);
+    const byId = haystackByIdFor();
+    haystacks = tracks.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
     haystackCache.set(tracks, haystacks);
   }
   return haystacks;
@@ -579,7 +596,9 @@ export async function loadState() {
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
-    library.tracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
+    plainTracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
+    haystackById = null;
+    library.tracks = plainTracks;
     library.playlists = state.playlists;
 
     await ensureFavoriteSlots();
