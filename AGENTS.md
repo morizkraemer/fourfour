@@ -22,10 +22,10 @@ CLI, and prototyping/design assets.
 |---|---|---|
 | `pioneer-usb-writer/` | Rust | **Format library.** Scans tags, writes the Pioneer USB structure (PDB, OneLibrary, ANLZ, artwork, audio). No audio analysis — consumers supply `AnalysisResult`. |
 | `pioneer-library/` | Rust | **Persistent library.** SQLite-backed CRUD for tracks/analyses/playlists + USB export & incremental sync. |
-| `pioneer-test-ui/` | Rust | **Tauri v2 shell.** Hosts the Svelte UI (`frontendDist: ../app/dist`), exposes Tauri commands, bundles the reference analyzer (`src/analyzer/`, stratum-dsp). The old vanilla `frontend/` is legacy. |
+| `pioneer-test-ui/` | Rust | **Tauri v2 shell.** Hosts the Svelte UI (`frontendDist: ../app/dist`), exposes Tauri commands, and shells out to the Python CLI for analysis (`python -m fourfour_analysis analyze --backend deeprhythm_essentia`; `resolve_python()` in `src/main.rs`). Analysis is moving to the Rust prototype in `prototyping/analysis-packaging` (`docs/analysis/packaging-decision.md`). The old vanilla `frontend/` is legacy. |
 | `app/` | Svelte 5 + TS | **The real UI** (`fourfour-app`). Browse, player strip, organize sidebar. Dev server on `:5200`. |
 | `prototyping/` | Svelte | **Design-system playground** (`viewport`). Primitives → modules → screens. See `prototyping/README.md` and its `SKILL.md`. |
-| `analysis/` | Python | **Analysis CLI** — `fourfour-analyze` (BPM/key/waveform/energy/cues) and `fourfour-benchmark`. Package name `fourfour-analysis`. Backends include a Lexicon port (`lexicon_port`); benchmark runs default to that variant. |
+| `analysis/` | Python | **Analysis CLI** — `fourfour-analyze` (BPM/key/waveform/energy/cues) and `fourfour-benchmark`. Package name `fourfour-analysis`. `fourfour-analyze` defaults to `deeprhythm_essentia` (DeepRhythm BPM, Essentia key). The Lexicon port (`lexicon_port`) is benchmark/reference code, though `fourfour-benchmark run` still defaults to `--variants lexicon_port`. |
 | `benchmark/` | Python | **In-repo benchmark scripts** (`scripts/cli_batch_analyze.py`), manifests, and baselines. Datasets, results, logs, and cache are local and gitignored. |
 | `ui/waveform/` | JS | Waveform dev harness. `./waveform-dev <audio>` analyzes a track and opens it. |
 | `mockup/`, `designs/` | HTML / Pencil | Static mockups and a design file. Not the Svelte app. |
@@ -48,16 +48,20 @@ cd prototyping && npm run dev
 
 # Python analysis CLI
 fourfour-analyze <files...>    # fourfour-benchmark for ground-truth runs
+
+# Tests
+cargo test --workspace         # includes usb-writer round-trip tests and the library export test
+cd analysis && pytest          # Python analysis tests
 ```
 
-No Rust test suite yet. Format correctness is validated against real CDJ-3000
-hardware by binary bisection — see `pioneer-usb-writer/reference-code/PIONEER.md`.
+The Rust tests cover the writer and library in software only. Format
+correctness is validated against real CDJ-3000 hardware by binary bisection —
+see `pioneer-usb-writer/reference-code/PIONEER.md`.
 
 ## Workspace Cargo.toml
 
-Dev builds optimize DSP/audio deps at `opt-level = 3` while keeping app code in
-debug — **critical**, stratum-dsp is 10–50x slower unoptimized. When adding a
-new symphonia sub-crate, add a matching `[profile.dev.package.*]` entry.
+The root `Cargo.toml` only lists the three members. It sets no `[profile.*]`
+overrides, and stratum-dsp is not a dependency.
 
 ## Versioning
 
@@ -149,7 +153,7 @@ Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/P
 
 - **Architecture** → `docs/architecture/` — `repo-overview.md`, `ui-architecture.md`, `tech-stack.md`
 - **UI specs (current phase)** → `docs/ui/` — `vision.md`, `components.md`, `design-system.md`, `player-strip.md`, `organize-sidebar.md`, `waveform-dynamics.md`
-- **Analysis pipeline (research/plans)** → `docs/analysis/` — `pipeline-handoff.md` (authoritative), `experimentation-path.md`, plus benchmark + Lexicon reverse-engineering
+- **Analysis pipeline (research/plans)** → `docs/analysis/` — current: `packaging-decision.md`, `benchmark-2026-10.md`, `bpm-grid-2026-10.md`, `key-detector-2026-10.md`; `pipeline-handoff.md` is historical; plus `experimentation-path.md` and Lexicon reverse-engineering
 - **Pioneer format reference** → `pioneer-usb-writer/reference-code/PIONEER.md`
 - **Process** → `docs/process/` — `todo.md`, `lessons.md`
 - **Archive** → `docs/archive/` — superseded handoffs
@@ -164,6 +168,12 @@ never: push master, release, notarise, sign, publish crates/packages, secrets, d
 scope fence: no new deps without a BLOCKED report; no edits to `mockup/`, `designs/`, `prototyping/` unless the entry says so
 lane rules: none; format correctness is proven on CDJ-3000 hardware only (see Pioneer format gotchas)
 lanes: `pioneer-usb-writer/src/` and USB/hardware behaviour belong to Merlin's brother (morizkraemer); workers add tests and report findings there, never change format code
+ui reviews: judge on intuitive, efficient workflows on their own terms, never on Rekordbox familiarity (beating Rekordbox UX is the point)
+autonomy: tight (draft; no queue run yet) — everything stays on branches; only state, docs and benchmark/analysis reports land
+own priorities: finish paused work → bugs → tests → perf → cleanup, inside Merlin's lane (app UX code on branches, analysis prototype, tests); experiments: max 1 per run, analysis prototype only (prototyping/analysis-packaging), never landed
+targets: analysis in Rust: beat-grid phase/drift (grid within ±20 ms of Rekordbox: 47% now) and key ≥60% exact on Beatport (57% now); sync UI per docs/ui/usb-sync-decisions.md, built only after Merlin settles its open questions
+ask before queue: anything in the brother's lane (usb-writer src, sync engine, format, hardware); building or changing sync UI while its open questions stand; copying more of Merlin's music or library data to dev; the 2026-10-30 → 2026-11-16 holiday (nothing user-visible lands); any push
+run limits: ≤2 workers; ≤4 analysis processes; one `cargo build --release` at a time; spawn nothing while `free -m` available < 1500 MB (earlyoom killed previews on 2026-10-15); datasets under benchmark/datasets are read-only; results/scratch in benchmark/results (gitignored)
 
 ## Orchestrator
 

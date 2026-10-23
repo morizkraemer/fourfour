@@ -1,6 +1,6 @@
 # Analysis accuracy benchmark, 2026-10
 
-Status: PARTIAL. Key accuracy on Beatport is complete (598 of 598). Rekordbox agreement covers only 178 of 652 manifest entries, because the Rekordbox audio was still copying onto the dev box when the timebox ended.
+Status: complete for what is on disk. Beatport key accuracy: 598 of 598. Rekordbox agreement: 579 fingerprint-verified tracks of the 652 manifest entries (89%); the other 73 are not on this box (see "Data actually used"). Re-run on 2026-10-15 (Q9b); it replaces the earlier 178-track partial run.
 
 Backend measured: `deeprhythm_essentia` (the backend `pioneer-test-ui` calls: DeepRhythm BPM, Essentia `bgate` key). Measured, not tuned. Box: dev VM, Linux x86_64, 16 CPU cores, CPU-only torch 2.14.1+cpu.
 
@@ -8,7 +8,7 @@ Backend measured: `deeprhythm_essentia` (the backend `pioneer-test-ui` calls: De
 
 - Beatport labels are external ground truth, so Beatport key numbers are accuracy.
 - Rekordbox `master.db` values are Rekordbox's own analysis (or Merlin's edits). Agreement with them is compatibility, not correctness (docs/process/lessons.md).
-- DeepRhythm emits integer BPM only (0 of 175 detected values were fractional). Rekordbox BPM is often fractional (e.g. 124.91). The strict "within +-0.1" row is therefore close to "Rekordbox's value is itself an integer", and is not a quality measure on its own.
+- DeepRhythm emits integer BPM only (0 of 573 detected values were fractional). Rekordbox BPM is often fractional (e.g. 124.91). The strict "within +-0.1" row is therefore close to "Rekordbox's value is itself an integer", and is not a quality measure on its own.
 - There is no beat-grid ground truth in this benchmark. See "Beat grid: missing" below.
 
 ## Data actually used
@@ -17,11 +17,13 @@ Backend measured: `deeprhythm_essentia` (the backend `pioneer-test-ui` calls: De
 |---|---:|---:|---|
 | beatport-edm-key keyonly-clean-full | 598 | 598 | complete; fingerprint mismatch 0 |
 | beatport-edm-key keyonly-200 | 200 | 200 | subset of the above; not scored separately |
-| rekordbox-testdata-2025 | 652 | 178 | copy in progress; 474 not yet present; fingerprint mismatch 0 of the 178 |
+| rekordbox-testdata-2025 | 652 | 579 | 589 present when the run started, 10 fingerprint mismatches excluded, 63 not present |
 
-Each Rekordbox file was checked against the manifest `content_fingerprint` (SHA256 of first 64 KB + last 64 KB + size) by `benchmark/scripts/make_dev_manifest.py`. The coordinator reported 22 of 652 are missing on the Mac side and 50 have duplicate filenames; files were matched by filename and parent folder. No file was excluded for a fingerprint mismatch, so the match is byte-identical to what the manifest recorded.
+Rekordbox denominator: 579 verified entries. Each file was checked against the manifest `content_fingerprint` (SHA256 of first 64 KB + last 64 KB + size) by `benchmark/scripts/make_dev_manifest.py`; the 10 mismatches are different bytes behind a matching filename (filename-only matches: duplicate filenames or another version of the track) and are excluded. Of those 579, 574 analysed without a backend error, and 573 / 574 have a Rekordbox BPM / key. Because the same track appears in several folders, the tables also give a unique-track count (artist + title + reference BPM + reference key counted once): 472 unique for BPM, 473 for key.
 
-The quick60 / key160 / batch100 subsets could not be scored meaningfully: only 8, 37 and 29 of their tracks were present. Their numbers are in line with the pooled set (key exact 62.5%, 62.9%, 63.0%; BPM integer-rounded 87.5%, 57.1%, 48.1%) but are far too small to rank. Re-run them when the copy is complete.
+Why tracks are missing: 63 of the 652 manifest entries had no file on this box at run start. The coordinator reported 22 tracks missing on the Mac side (moved or renamed there, so not found by filename); the rest were still copying. A later copy pass brought the present count to 631, which would leave about 21 not found by filename. That later state is not scored: the run had already started on the 589 present files and was not restarted. A re-run over the 631 would add about 40 entries (about 7%); its effect on the percentages was not measured.
+
+The quick60 / key160 / batch100 subsets are scored below on their present, verified tracks (56 of 60, 145 of 160, 89 of 100 entries).
 
 ## Key accuracy vs Beatport labels (accuracy)
 
@@ -54,60 +56,72 @@ About 33% of all tracks (parallel + other mode swap + relative) have the wrong m
 
 ## Key agreement vs Rekordbox (compatibility)
 
-Denominator: 129 unique tracks (176 entries with a detected key and a Rekordbox key; duplicates collapsed by artist + title + reference BPM + reference key). Reference: `rekordbox-masterdb-standard-camelot`. Entries with no Rekordbox key are excluded.
+Reference: `rekordbox-masterdb-standard-camelot`. Entries with no Rekordbox key are excluded. Denominator: 473 unique tracks (574 entries with a detected key and a Rekordbox key). Every analysed track produced a key.
 
-| Class | Unique tracks (129) | All entries (176) |
+| Class | Unique tracks (473) | All entries (574) |
 |---|---:|---:|
-| Exact | 70 = 54.3% | 97 = 55.1% |
-| Relative major/minor | 3 = 2.3% | 3 = 1.7% |
-| Camelot neighbour | 16 = 12.4% | 25 = 14.2% |
-| Exact + relative + neighbour | 89 = 69.0% | 125 = 71.0% |
-| Other | 40 = 31.0% | 51 = 29.0% |
+| Exact | 199 = 42.1% | 251 = 43.7% |
+| Relative major/minor | 29 = 6.1% | 29 = 5.1% |
+| Camelot neighbour | 60 = 12.7% | 80 = 13.9% |
+| Exact + relative + neighbour | 288 = 60.9% | 360 = 62.7% |
+| Exact + neighbour | 259 = 54.8% | 331 = 57.7% |
+| Other | 185 = 39.1% | 214 = 37.3% |
 
-Relationship breakdown (176 entries): exact 55.1%, fifth neighbour 14.2%, other mode swap 11.4%, other same mode 10.8%, parallel 4.5%, relative 1.7%, whole tone 1.7%, tritone 0.6%. Here the parallel-key confusion that dominates Beatport is rare; this library skews to minor-key house and techno where Rekordbox and Essentia agree more on mode.
+Relationship breakdown (574 entries): exact 43.7%, other mode swap 16.0%, fifth neighbour 13.9%, other same mode 12.0%, parallel 5.7%, relative 5.1%, whole tone 2.8%, tritone 0.7%. Compared with the 178-track run (exact 55%) agreement is about 11 points lower on the full set: the 178 tracks were a partial slice and not representative. Wrong mode (mode swap + parallel + relative) is about 27% of entries.
 
 ## BPM agreement vs Rekordbox (compatibility)
 
-Denominator: 128 unique tracks (175 entries with a Rekordbox BPM and a detected BPM; duplicates collapsed as above). Reference: `rekordbox-masterdb` BPM. Tolerance rows use the reference BPM as given, not rounded.
+Reference: `rekordbox-masterdb` BPM. Denominator: 472 unique tracks (573 entries with a Rekordbox BPM and a detected BPM). Tolerance rows use the reference BPM as given, not rounded.
 
-| Metric | Unique tracks (128) | All entries (175) |
+| Metric | Unique tracks (472) | All entries (573) |
 |---|---:|---:|
-| Exact within +-0.1 BPM | 67 = 52.3% | 89 = 50.9% |
-| Octave-tolerant (x1, x2, x0.5), within +-0.1 | 67 = 52.3% | 89 = 50.9% |
-| Integer-rounded equal (round(ours) = round(ref)) | 75 = 58.6% | 102 = 58.3% |
-| Integer-rounded, octave-tolerant | 75 = 58.6% | 102 = 58.3% |
-| Within 1.0 BPM absolute (extra) | 120 = 93.8% | |
-| Within 1% (extra) | 125 = 97.7% | 170 = 97.1% |
+| Exact within +-0.1 BPM | 168 = 35.6% | 222 = 38.7% |
+| Octave-tolerant (x1, x2, x0.5), within +-0.1 | 169 = 35.8% | 223 = 38.9% |
+| Integer-rounded equal | 185 = 39.2% | 247 = 43.1% |
+| Integer-rounded, octave-tolerant | 188 = 39.8% | 250 = 43.6% |
+| Within 1.0 BPM absolute (extra) | 425 = 90.0% | 520 = 90.8% |
+| Within 1% (extra) | 434 = 91.9% | 533 = 93.0% |
 
-- Octave errors: none. No detection was 2x or 0.5x the reference, so the octave-tolerant rows equal the plain rows.
-- Mean signed error (detected minus reference): -0.24 BPM. The tool tends to land slightly low, consistent with integer truncation.
-- Strict agreement is limited by resolution, not by gross errors: 94% of tracks are within 1 BPM, but only about half agree to +-0.1 or to the integer.
+- Octave errors by the script's definition (integer-rounded, detected = 2x or 0.5x the reference): 0 at 2x, 3 at 0.5x (3 of 472 = 0.6%). The check is strict: tracks with a fractional reference near 2x or 0.5x do not count (Four Tet - Two Thousand and Seventeen 150 vs 75.45; Guilherme Coutinho/Grupo Stalo - Rio Corrente 80 vs 162.17). Counting those, true octave confusion is a handful of tracks, not a trend.
+- Mean signed error (detected minus reference): -0.41 BPM (unique), -0.37 (all). The tool lands slightly low, consistent with integer truncation.
+- Strict agreement is limited by resolution: 90% of tracks are within 1 BPM, but only 36% (unique) agree to +-0.1 and 39% to the integer.
+- Compared with the 178-track run: strict agreement fell (52% to 36% within +-0.1, 59% to 39% integer-equal) and within 1 BPM fell from 94% to 90%. The remaining tracks include more slow or half-time material (see worst failures).
+
+Subsets (unique tracks, present and verified):
+
+| Subset | Tracks present (BPM / key denominators) | BPM within +-0.1 | BPM integer-equal | BPM within 1 BPM | Key exact | Key exact + relative + neighbour |
+|---|---:|---:|---:|---:|---:|---:|
+| quick60 | 56 of 60 (55 / 55) | 29 = 52.7% | 30 = 54.5% | 49 = 89.1% | 26 = 47.3% | 41 = 74.5% |
+| key160 | 145 of 160 (139 / 139) | 61 = 43.9% | 65 = 46.8% | 126 = 90.6% | 63 = 45.3% | 93 = 66.9% |
+| batch100 | 89 of 100 (84 / 84) | 32 = 38.1% | 35 = 41.7% | 77 = 91.7% | 37 = 44.0% | 52 = 61.9% |
+| All verified | 579 (472 / 473) | 168 = 35.6% | 185 = 39.2% | 425 = 90.0% | 199 = 42.1% | 288 = 60.9% |
+
+The subsets are small and overlap the full set; differences between them are within sampling noise (quick60 in particular, n = 55).
 
 ## Worst failures and likely cause
 
 Causes below are inferred from the numbers, not confirmed by listening or by looking at the audio.
 
-BPM (unique tracks, worst by ratio):
+BPM (unique tracks, worst by ratio against the reference):
 
 | Track | Detected | Rekordbox | Likely cause |
 |---|---:|---:|---|
-| Koreless - Primes | 117 | 95.24 | Not an octave error (ratio 1.228, about 5:4). Likely a polyrhythmic or off-grid groove where DeepRhythm locks onto a different subdivision. Only real gross BPM miss in the set. |
-| LP - When The Beat Drops | 118 | 120.00 | Off by 2 BPM; likely DeepRhythm resolution or a tempo-drifting track. |
-| Kai Campos, Mount Kimbie - Zone 3 (City Limits) | 126 | 127.40 | Fractional reference; integer output cannot match. |
-| The Moody Boys - Lion Dance (Funky Zulu Mix) | 118 | 119.07 | Same: integer output vs fractional reference. |
-| Frank & Tony - Back Home | 112 | 113.00 | Off by one with an integer reference; true 1 BPM error. |
-| Russ Gabriel - Drax Copter, Four Tet - Reversing, Frits Wentink - Jellyfish, Linkwood - Love Lost | 123 / 114 / 120 / 120 | 124.06 / 114.98 / 121.00 / 121.00 | Consistent -1 BPM bias: DeepRhythm appears to floor, not round. |
+| Four Tet - Two Thousand and Seventeen | 150 | 75.45 | Octave error (1.99x) with a fractional reference, so it is not counted as octave by the strict check. |
+| Guilherme Coutinho/Grupo Stalo - Rio Corrente | 80 | 162.17 | Octave error the other way (0.49x). |
+| Melanie Poret - Humanity, Floating Points - Falaise, Khotin - Shopping List, Boards of Canada - Olson | 151 / 143 / 136 / 120 | 83.33 / 82.19 / 78.53 / 78.95 | Reference about 75-85 BPM, detected 1.5-1.8x higher: half-time feel or broken-beat tracks where DeepRhythm picks a faster pulse. |
+| Koreless - Primes | 117 | 95.24 | Ratio 1.23 (about 5:4); still the oddest single miss, probably an off-grid groove. |
+| Russ Gabriel - Drax Copter and similar | 123 | 124.06 | Consistent -1 BPM bias: DeepRhythm appears to floor, not round. |
 
-The bulk of non-matching tracks sit in this -1 BPM band, not in octave errors.
+The bulk of non-matching tracks sit in this -1 BPM band (90% are within 1 BPM). The roughly 10% of tracks beyond 1 BPM are the ones that matter for beat-grid use; they are dominated by slow (75-100 BPM) references. Causes are inferred from the numbers, not confirmed by listening.
 
 Key vs Beatport: all 186 "other" misses are listed in the run output, not here. Typical patterns from the sampled misses (artist/title, Beatport key vs detected): Zoom - Five To Eleven (7A vs 11B), Havoc - Balling Out (3A vs 6B), Lil Ric - In My Throwback (11A vs 8A), PNC - Who Betta Than This? (1A vs 12B). Likely causes: short 120 s Beatport preview clips, bass-heavy or modally ambiguous EDM (little harmonic content), tonic ambiguity between a major key and its parallel minor, and genuine disagreement between Beatport's label and the audible key. Beatport labels themselves are noisy, so some "failures" are label errors. Not verified per track.
 
-Key vs Rekordbox examples: Dauwd - La Nota (8A vs 1A), Silat Beksi - Curandero (5A vs 8A), Move D - Silk Dub (5A vs 6B), Moodymann - Black Paint, Larry Heard's After Dark Mix (6A vs 11A). Both are algorithmic outputs with different key profiles, so a disagreement does not say which is right.
+Key vs Rekordbox examples: Dauwd - La Nota (8A vs 1A), Dave Aju - Get It (10A vs 6A), Oleg Poliakov - Caravan (9B vs 5A), Russ Gabriel - Drax Copter (5A vs 8A). Both are algorithmic outputs with different key profiles, so a disagreement does not say which is right.
 
-Backend errors (2 of 178 Rekordbox entries, both failed hard, no result):
+Backend errors (5 of 579 Rekordbox entries, no result; excluded from the denominators):
 
-- One track, "Mike Dehnert - Lautschrift" (405 s, mp3): DeepRhythm raised `AttributeError: 'NoneType' object has no attribute 'to'`. Cause not investigated.
-- One track (no reference BPM/key, not in any denominator): `ffmpeg failed ... Failed to find two consecutive MPEG audio frames`, i.e. a corrupt or unusual mp3 header.
+- 4 tracks: DeepRhythm raised `AttributeError: 'NoneType' object has no attribute 'to'` (the earlier run saw this on "Mike Dehnert - Lautschrift"; cause not investigated, so it recurs and is worth a follow-up).
+- 1 track: `ffmpeg failed ... Failed to find two consecutive MPEG audio frames`, a corrupt or unusual mp3 header.
 
 ## Runtime per track (this box)
 
@@ -116,10 +130,11 @@ Backend errors (2 of 178 Rekordbox entries, both failed hard, no result):
 | Beatport 598, 1 process, otherwise idle | key only | 120 s clips | 1.17 (median 1.15, p95 1.29) |
 | Beatport smoke test, 5 tracks, 1 process | bpm + key | 120 s | about 5.9 (first track 21 s incl. model load) |
 | Beatport smoke test, 5 tracks, 1 process | all (what the app requests) | 120 s | about 7.7 (first track 23 s) |
-| Rekordbox 12 tracks, 1 process | all (what the app requests) | mean 414 s | 22.96 (median 20.1; first track 53 s incl. model load) |
-| Rekordbox 176, 8 parallel processes x 2 threads, rsync running | bpm + key | full-length tracks | 37.6 (median 35.7); contended, not representative |
+| Rekordbox 12 tracks, 1 process (earlier run) | all (what the app requests) | mean 414 s | 22.96 (median 20.1; first track 53 s incl. model load) |
+| Rekordbox 12 tracks, 1 process, box load average 4 to 6 from other work (Q9b) | bpm + key | full-length tracks | 12.99 (median 11.85, p95 24.7; first track includes model load) |
+| Rekordbox 574 ok, 4 processes x 4 threads (Q9b), box load average about 28 | bpm + key | full-length tracks | 18.32 (median 16.47, p95 34.5, max 59.1); wall 44 min for 579 tracks |
 
-Best single-number answer for the app's real workload on this box: about 20 s per 7-minute track with all features, which is roughly 0.05x realtime on CPU. Model load adds roughly 15 to 30 s once per process. DeepRhythm dominates cost: key-only is about 1 s on a 2-minute clip.
+The 4-process run is within the 4-process limit but not uncontended: other agents shared the box (load average rose to about 28 against 16 cores), and 4 x 4 threads alone fill the CPU. Read it as an upper bound. The single-process sample ran at a load average of 4 to 6 and is the better per-track figure; it is bpm + key only, so the app's full feature set costs more (earlier measurement: about 20 s per 7-minute track with all features, roughly 0.05x realtime). Model load adds roughly 15 to 30 s once per process. DeepRhythm dominates cost.
 
 ## Beat grid: missing
 
@@ -136,7 +151,7 @@ Recommendation: do option 1 first (cheap, same tracks), then option 2 on a small
 ## Other findings
 
 - `fourfour-benchmark run` is broken for every backend on this repo state. The result cache cannot serialise `AnalysisResult.waveform_preview` (a `bytes` field with default `b""`), so the first track raises `TypeError: Object of type bytes is not JSON serializable`. The same cause fails 5 of 127 tests (below). The backend files were not touched; a driver, `benchmark/scripts/run_backend_direct.py`, runs the registered backend in-process without the cache and writes the same `raw/<variant>.json` layout. Fix in `cache.py` or `types.py` is a small follow-up.
-- Rekordbox corpus contains duplicate entries (same track in several folders): 178 entries collapse to 128 unique BPM rows. Always quote the unique denominator.
+- Rekordbox corpus contains duplicate entries (same track in several folders): 573 entries with a BPM collapse to 472 unique rows. Always quote the unique denominator.
 - `analysis/README.md` links to `../docs/key-detection-benchmark-findings.md`, which no longer exists at that path (now `docs/analysis/key-detection-findings.md`).
 
 ## Validation
@@ -166,8 +181,7 @@ python3 benchmark/scripts/make_dev_manifest.py \
   benchmark/manifests/rekordbox-testdata-2025.corpus.json \
   benchmark/manifests/rekordbox-testdata-2025.dev.corpus.json \
   --strip-prefix /Users/merlinkraemer/local/2-Areas/1-Mukke/ \
-  --dataset-root <repo>/benchmark/datasets/rekordbox-testdata-2025 \
-  --rename-map <tsv of "<current path under dataset-root>\t<path relative to the strip prefix>">
+  --dataset-root <repo>/benchmark/datasets/rekordbox-testdata-2025
 ```
 
 Key accuracy, Beatport (about 12 minutes):
@@ -183,19 +197,19 @@ python3 ../benchmark/scripts/key_error_breakdown.py \
   ../benchmark/manifests/beatport-edm-key-keyonly-clean-full.dev.corpus.json ../benchmark/results/q9-beatport-clean-full-key
 ```
 
-Rekordbox agreement (8 shards, 2 threads each):
+Rekordbox agreement (4 shards, 4 threads each; Q9b run, about 45 min on a busy box):
 
 ```bash
 cd analysis
-for i in 0 1 2 3 4 5 6 7; do
-  OMP_NUM_THREADS=2 MKL_NUM_THREADS=2 .venv/bin/python ../benchmark/scripts/run_backend_direct.py \
+for i in 0 1 2 3; do
+  OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 .venv/bin/python ../benchmark/scripts/run_backend_direct.py \
     --corpus ../benchmark/manifests/rekordbox-testdata-2025.dev.corpus.json \
-    --features bpm,key --run-id q9-rb-bpmkey --shard $i/8 &
+    --features bpm,key --run-id q9b-rb-bpmkey --shard $i/4 &
 done; wait
-.venv/bin/python ../benchmark/scripts/score_run.py ../benchmark/results/q9-rb-bpmkey \
+.venv/bin/python ../benchmark/scripts/score_run.py ../benchmark/results/q9b-rb-bpmkey \
   --corpus ../benchmark/manifests/rekordbox-testdata-2025.dev.corpus.json --dedupe
 ```
 
-Add `--only-ids-from ../benchmark/manifests/rekordbox-testdata-2025-quick60.corpus.json` (or key160, batch100) to score a subset. Runtime sample with the app's feature set: `--features bpm,key,energy,waveform,cues --limit 12`, one process.
+Add `--only-ids-from ../benchmark/manifests/rekordbox-testdata-2025-quick60.corpus.json` (or key160, batch100) to score a subset. Runtime sample: `--features bpm,key --limit 12`, one process (add `energy,waveform,cues` for the app's feature set). The 2026-10-15 run needs no `--rename-map` because the files now sit at their manifest paths under the dataset root.
 
 The dev manifests hold local absolute paths and are not committed; regenerate them with the commands above.

@@ -1,77 +1,62 @@
 # fourfour — state
 
-_Updated: 2026-10-15 06:05 by orchestrator. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
+_Updated: 2026-10-23 by orchestrator on `dev`. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
 
 ## Direction
-Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bounce). Thread drains quietly on engineering work; it never takes Merlin's focus hours. Holiday 2026-10-30 → 2026-11-16: nothing user-visible lands.
-
-Roles: Merlin owns the app UX (interface, player, library, analysis quality: grid/BPM/key) and cross-platform testing; his brother (GitHub morizkraemer) owns the USB format and hardware testing. Merlin is travelling: no hardware.
+Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bounce). Quiet engineering only; never takes Merlin's focus hours. Holiday 2026-10-30 → 2026-11-16: nothing user-visible lands.
+Roles: Merlin owns app UX (interface, player, library, analysis quality) and cross-platform testing; his brother (GitHub morizkraemer) owns the USB format, sync engine and hardware tests. Merlin travels: no hardware.
+Analysis: Rust-native (Rust DSP + Beat This! ONNX), permissive licences only, no Python/AGPL. Key bar ≥60% exact on Beatport.
+USB sync: only chosen playlists go on a stick; plug in = sync; ask only on removals / won't fit / unanalyzed; never delete files fourfour didn't write. Design log: docs/ui/usb-sync-decisions.md; engine spec for the brother: docs/ui/usb-sync-spec.md.
 
 ## Ship target
-Public macOS beta: a downloadable .dmg on GitHub that scans a music folder, analyzes it and exports a USB that plays on a CDJ-3000. Done for the current queue: a clean master that builds, type-checks, plays audio, and has round-trip tests for the export, so the beta build is the only open step.
+Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a USB that plays on a CDJ-3000. Current queue done when: Rust analysis meets the grid/key bars, the sync UI round 3 is built on a branch and reviewed, and the brother's engine supports playlist-scoped sync.
 
 ## Rulebook
-AGENTS.md ## Unattended. Thread-specific limits: no worker runs Tauri windows, audio output or USB writes on dev; those are `[mac]`.
+AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-1. Does this thread touch the brother's lane (usb-writer, sync, format)? — rec: no, only tests + reports; format changes go to him — branch: none
-2. (done: Merlin OK) rekordbox-testdata audio copying to dev for Q9
-3. Old stash@{0}: scrub-pause waveform changes (UI) — rec: build it on a branch for your review — branch: none
+1. Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
+2. Copy a playlist to another stick: Keep updated on by default? — rec: yes — branch: none
+3. Build round 3 into the app (replaces ui-sync-flow's first attempt, keeps the stick header)? — rec: yes after 1–2 — branch: ui-sync-flow
+4. Key detector weights fit on CC BY-SA 4.0 data — rec: ship only weights trained on permissively licensed data — branch: none
+5. Old stash@{0} (scrub-pause waveform tweaks) — rec: build on a branch for review — branch: none
+6. `.claude/settings.local.json` allows `git push *`, which bypasses the push ask rule — rec: remove that allow line (Merlin edits it) — branch: none
+8. [accepted 2026-10-23 per rec] Add vitest as an app dev dependency for unit tests (Q18, branch only) — rec: keep — branch: q18-app-tests
+7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
 
 ### Needs Merlin's ears/eyes (laptop)
-- Preview (sample data, any device on the tailnet): https://dev.tail87069a.ts.net:4200 — `preview start fourfour app-review`
-- Playback ear check (Q1 landed): play on select, scrub/seek while playing, an MP3 with a damaged frame.
+- Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
+- Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 
-### Brother's lane (hardware)
-- CDJ-3000 round-trip of a current master export (last proven before the Svelte app).
-- Q6 key-source fix and the .2EX/colour-waveform layout (research synthesis) are format changes for him.
+### Brother's lane
+- From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
+- Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
+- `get_mounted_volumes` lists the system disk ("Macintosh HD") and offers Wipe: must fix.
+- Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
 
 ## Queue
+### Q1–Q4, Q7, Q9–Q13 [landed] — playback, svelte-check 0, export tests, browser preview, benchmark, cache fix, packaging decision, key detector (57%), BPM/grid (BPM ±0.1 86%, grid ±20 ms 47%). See journal + docs/analysis/.
+### Q5 Unsigned macOS build [queued] [mac] — `cargo tauri build` via mac-queue; report artifact + log; no signing. 30 min
+### Q6 Key source PDB vs OneLibrary [handed to brother]
+### Q8 Cross-platform CI [queued] [box] — Actions on macOS/Windows/Linux (build, test, check, unsigned tauri build). Branch only; first run on the shared repo needs Merlin's OK. 45 min
+### Q14 USB sync UI [waiting on Merlin] — first attempt on ui-sync-flow (b510e70, preview :4240 when started); round 3 mockups decide the rebuild.
+### Q15 Grid phase + drift [done, branch q15-grid 8b9a3d0; doc landed] — grid ±20 ms 47%→72% (148/205), BPM ±0.1 86%→88%; full-track Beat This! + tempo comb + integer snap + mp3 encoder-delay fix; ~25 s/track. Code stays on branch (tight); mp3-delay rule needs a hardware check (brother).
+### Q16 Key detector round 2 [done, branch q16-key a6b4929; doc landed] — still 57.3% exact (70.9% incl. relative+fifth), n=199; augmentation/MLP/segments within noise. Next: check Beatport label noise, more permissive training data, a parallel-key feature. Weights gitignored (CC BY-SA, measurement only).
+### Q17 Doc drift cleanup [landed ac933c8] — own priority: AGENTS.md test-suite + stratum/src/analyzer claims, pioneer-test-ui README, pipeline-handoff status, docs/README index for the new analysis/ui docs.
 
-### Q1–Q4 [landed]: playback fix, svelte-check 0, usb-writer round-trip tests, library export test (see journal)
+### Q18 App unit tests [done, branch q18-app-tests 4dba72d, rebased on master] — 41 vitest tests (analysis validators, mock, library helpers, menus), check + build green; npm audit advisories not reviewed; untested: mapTrackInfoToLocal, normalizeTrackInput, sortTracks (need export/extraction)
 
-### Q5 Unsigned macOS build [queued] [mac]: `cargo tauri build` via mac-queue, report artifact + log; no signing. 30 min
+### Q19 Clone research (item 7) [done] — docs/research/clones-2026-10-23.md; "lite" = rbxport (GPL, ideas only); copyable: cyanbox (BSD-2) key/beat/export, baken (MIT) waveform/PVB2/PSSI/layout
+### Q20 Startup + UI speed (items 1, 11) [done, branch q20-speed 02933a0; doc landed] — load_state 30k 24.7 s→0.5 s; first paint 30k 188 s→3.3 s; virtualised table (39 DOM rows); 50 Rust tests green. Left: waveform canvas jank (design system), sync load_state blocks ~0.5 s, 25.6 MB payload.
+### Q22 Audio engine review (item 10) [done, branch q22-audio c21df16; doc landed] — 5 high fixes (seek/stop race, L/R shift on underrun, zero-rate WAV panic, truncated file stuck playing, silent after failed device switch) + 6 medium; 26 new tests incl. 0-alloc callback + thread spam; load→audio 1.6 ms, seek→audio 2.5 ms (fake sink). Needs Mac check (8 steps in doc).
+### Q23 Fast track + waveform load (item 4) [running] — branch q23-load (from q20-speed)
+### Q21 Analysis review pass 1 + bulk speed + grid/key (items 8, 2, 5) [running] — branch q21-analysis
 
-### Q6 One key source for PDB and OneLibrary [queued] [box] — brother's lane: format change, hand to him
-
-### Q7 Browser preview with sample data [landed] [box]
-goal: Merlin can open the app on laptop/phone while travelling: `preview start fourfour app-review` serves the browser build with the existing mock data (services/tauri.svelte.ts); every main screen (browse, detail, player, organize, settings) renders with sample tracks instead of erroring on missing Tauri.
-acceptance: preview URL loads; headless screenshots of each main screen show sample data and no console errors; mock gaps fixed in the mock layer only.
-validation: AGENTS.md validation + headless check of the preview URL
-may write: app/src/services/tauri.svelte.ts, app/src/harness.ts, new app/src/mocks/ if needed
-do not touch: real UI components, styles, Rust
-timebox: 45 min
-
-### Q8 Cross-platform CI [queued] [box]
-goal: GitHub Actions on macOS, Windows, Linux: cargo build + test, app check + build, and an unsigned `tauri build` per OS as an artifact.
-acceptance: workflow file on a branch; runs green on a fork-free test (act or a branch push after Merlin's OK); per-OS failures listed.
-validation: workflow lint (actionlint) + local cargo/npm validation
-may write: .github/workflows/
-do not touch: signing, secrets, release jobs
-timebox: 45 min
-note: a branch push starts CI on the shared repo → push only after Merlin's OK
-
-### Q9 Analysis accuracy benchmark [landed, partial] [box] — docs/analysis/benchmark-2026-10.md
-Key vs Beatport 54% exact / 69% incl. relative+neighbour (n=598); BPM vs Rekordbox within 1 BPM 94%, ±0.1 52% (n=128, DeepRhythm is integer-only); ~20 s/track full analysis on dev. Grid: no ground truth yet.
-
-### Q9b Re-run Rekordbox agreement on all 630 tracks [running] [box]
-goal: re-run the Rekordbox step once `.copy-complete-rekordbox-testdata-2025` exists; reuse the Q9 worktree venv (.claude/worktrees/agent-a2044eadd817a7e27/analysis/.venv); update the report's Rekordbox tables + subsets.
-acceptance: report tables on ≥600 tracks; runtime measured uncontended. may write: docs/analysis/benchmark-2026-10.md. timebox: 60 min
-
-### Q11 Fix benchmark cache + failing analysis tests [landed] [box]
-goal: `fourfour-benchmark run` crashes (bytes waveform_preview not JSON-serialisable); 5 pytest failures (2 same bug, 3 CLI import/key errors); README link to a moved findings doc.
-acceptance: `pytest -q` green; `fourfour-benchmark run` completes on 5 tracks. may write: analysis/src/fourfour_analysis/ (cache, cli), analysis/tests/, analysis/README.md. do not touch: backend algorithms. timebox: 45 min
-
-### Q10 Analysis packaging decision [queued] [box]
-goal: a decision doc for shipping analysis without a dev venv: (a) bundled Python (PyInstaller/uv-built runtime), (b) Rust-native (stratum-dsp, Beat This! ONNX, a key detector), (c) hybrid. Per option: size, cold start, per-track speed, accuracy vs Q9, licence (Essentia/DeepRhythm are AGPL), cross-platform effort. Prototype the cheapest credible option on 3 fixture tracks.
-acceptance: docs/analysis/packaging-decision.md with a recommendation and the prototype's numbers; nothing wired into the app.
-validation: prototype runs on dev without analysis/.venv
-may write: docs/analysis/, prototyping branch only
-do not touch: app, Tauri, usb-writer
-timebox: 90 min
-note: the choice is Merlin's; run after Q9
+## Run
+status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
+targets (Merlin, direct): 1 fastest startup · 2 bulk import + analysis speed · 3 sync several USBs at once · 4 instant track load incl. waveform · 5 better beat grid · 6 Rekordbox library import works · 7 research other Rekordbox clones (incl. new "lite" one), reuse code if licence allows · 8 review the analysis pipeline twice for speed + quality · 10 audio engine: no crashes, fast, responsive · 11 UI lightning fast
+plan: Q19 clone research (7) ∥ Q20 startup + UI speed (1, 11) → Q21 analysis review + bulk speed + grid (8, 2, 5) → Q22 audio engine (10) → Q23 track/waveform load (4) → Q24 Rekordbox import (6) → Q25 multi-USB sync (3) → second analysis review pass (8) → own priorities
+rules: all code on branches (tight); docs/reports land. Items 3/6 touch the brother's lane (sync engine, master.db reader): branch only, flagged for him. Third-party code: licence-checked, inspected in an isolated dir, never executed blindly.
 
 ## Rundown
-Landed: Q2 (svelte-check 61 → 0), Q1 (decode skips bad packets, play waits for stop, 4 decode tests). Master pushed to GitHub; only branch left is master.
-Not heard yet: playback on the Mac.
-Landed: Q3 (15 usb-writer round-trip tests), Q4 (library export + sync test). All 47 tests green, no format bugs. Q6 queued (key mismatch). Next: Q5 macOS build [mac].
+Since 10-15 nothing ran. Master holds the Rust analysis prototype (BPM/grid/key), benchmark docs, UI review and three sync mockup rounds. Open: Merlin's sync round 3 answers, brother's engine work, Q15/Q16 proposed.

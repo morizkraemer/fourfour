@@ -30,3 +30,4 @@ app/public/wf-display.json
 app/public/wf.json
 .claude/worktrees/
 pioneer-test-ui/gen/schemas/linux-schema.json
+benchmark/manifests/*.dev.corpus.json
