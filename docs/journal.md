@@ -47,3 +47,6 @@
 2026-10-23 11:54 orchestrator Q15 spawn: branch q15-grid
 2026-10-23 13:35 orchestrator Q15 done: branch q15-grid 8b9a3d0 (release build re-run ok); grid ±20 ms 47%→72%; doc landed on master, code stays on branch (tight)
 2026-10-23 13:35 orchestrator Q16 spawn: branch q16-key
+2026-10-23 13:57 orchestrator Q16 done: branch q16-key a6b4929 (build re-run ok); key 57.3% unchanged; doc landed
+2026-10-23 13:57 orchestrator - decided: own prio cleanup (doc drift) before app tests (tests need a new dev dep → branch + Waiting on Merlin)
+2026-10-23 13:57 orchestrator Q17 spawn: doc drift cleanup
