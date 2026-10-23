@@ -165,6 +165,11 @@ scope fence: no new deps without a BLOCKED report; no edits to `mockup/`, `desig
 lane rules: none; format correctness is proven on CDJ-3000 hardware only (see Pioneer format gotchas)
 lanes: `pioneer-usb-writer/src/` and USB/hardware behaviour belong to Merlin's brother (morizkraemer); workers add tests and report findings there, never change format code
 ui reviews: judge on intuitive, efficient workflows on their own terms, never on Rekordbox familiarity (beating Rekordbox UX is the point)
+autonomy: tight (draft; no queue run yet) — everything stays on branches; only state, docs and benchmark/analysis reports land
+own priorities: finish paused work → bugs → tests → perf → cleanup, inside Merlin's lane (app UX code on branches, analysis prototype, tests); experiments: max 1 per run, analysis prototype only (prototyping/analysis-packaging), never landed
+targets: analysis in Rust: beat-grid phase/drift (grid within ±20 ms of Rekordbox: 47% now) and key ≥60% exact on Beatport (57% now); sync UI per docs/ui/usb-sync-decisions.md, built only after Merlin settles its open questions
+ask before queue: anything in the brother's lane (usb-writer src, sync engine, format, hardware); building or changing sync UI while its open questions stand; copying more of Merlin's music or library data to dev; the 2026-10-30 → 2026-11-16 holiday (nothing user-visible lands); any push
+run limits: ≤2 workers; ≤4 analysis processes; one `cargo build --release` at a time; spawn nothing while `free -m` available < 1500 MB (earlyoom killed previews on 2026-10-15); datasets under benchmark/datasets are read-only; results/scratch in benchmark/results (gitignored)
 
 ## Orchestrator
 
