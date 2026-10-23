@@ -85,3 +85,61 @@ python3 ../../benchmark/scripts/score_key_rows.py results/key-subset.json test
 - More training data is the likely lever (not measured here). Other label sets (GiantSteps key, MTG) have their own licences, check before use.
 - Richer small model: circular-convolution CNN or MLP over per-segment chroma plus a bass-note feature; mode confusion (parallel 12.6%) is still the biggest error.
 - Check label noise: Beatport labels disagree with ear/Rekordbox on many tracks (see `benchmark-2026-10.md`).
+
+## Q16, 2026-10-23
+
+Goal: at least 60% exact on the held-out test split (manifest `id % 3 == 0`). Result: **not reached. Best is 57.3% exact, 70.9% exact+relative+fifth on the same 199 tracks; round 1 was 57.3% and 70.4%.** The split, denominators and labels are unchanged from round 1. Tuning used 5-fold CV inside the 399 dev tracks only; the test split was scored once with the final settings (and a second time by reloading the saved weights, identical).
+
+### Test split (n = 199, held out)
+
+| System | Exact | Relative | Parallel | Fifth | E+R+F |
+|---|---:|---:|---:|---:|---:|
+| Round 1: chroma + learned profile (50 weights) | 57.3% | 3.5% | 12.6% | 9.5% | 70.4% |
+| **Q16 final: same 2 channels, 3-seed ensemble, segment-pool augmentation** | **57.3%** | 3.5% | 12.6% | 10.1% | **70.9%** |
+| stratum-dsp 1.0.0 | 25.6% | 3.5% | 25.6% | 22.6% | 51.8% |
+| Essentia `bgate` (reference, AGPL) | not computed on the test split; all 598: 54.0% exact, 5.5% relative, 16.7% parallel, 9.4% fifth, 68.9% E+R+F | | | | |
+
+One more test track lands on fifth, none on exact: the difference is noise (the 95% interval is about +-7 points at n = 199).
+
+### What was tried (dev 5-fold CV, n = 399, exact; round-1 baseline 63.7%)
+
+| Change | Exact |
+|---|---:|
+| Two extra channels: sharpened bass-note chroma (MIDI 28 to 45, power 4) and sharpened mid chroma (power 2), linear model | 60.2% (worse) |
+| Same, with only the bass-note channel / only the sharpened mid channel added; also one run with L2 0.01 and four channels | 58.4% to 62.2% |
+| Equivariant MLP (shared across the 12 tonics, 8 or 16 ReLU units, plus linear skip), 2 channels | 61.9% to 62.7% (worse) |
+| MLP 16 units, 4 channels, 8 segment-pool augmentations | 63.4% |
+| Linear + augmentation (mean of a random 60% of the 8 s segments, 4 copies per track per epoch) | 64.2% |
+| Same, segment voting at predict time | 63.7% |
+| Linear + augmentation x8 (70% keep) + 3-seed ensemble (chosen) | 63.9% |
+| Front-end sweep, linear: gamma 3 / 30, whitening 12 / 24 / 30, harmonic decay 0.8 / 0.95, 12 harmonics, mid band 40 to 78 / 55 to 96 | 61.4% to 63.4% |
+| Bass band top at MIDI 46 / 58 (vs 52) | 57.9% / 59.4% |
+
+Everything that does not remove information lands within +-1.5 points of 63.7%, which is inside the CV noise (about +-2.4 points). What helped: nothing measurable. What hurt: more channels, more capacity, and moving the bass band edge. Reading: with 399 training tracks and Beatport label noise, the model class is not the limit; the 2-channel, 50-weight model is already near the ceiling of this feature set. Per-segment voting and attention-like pooling were not separately built; only voting and random segment pooling were tested. No nested CV was run.
+
+### Runtime
+
+Unchanged from round 1: decode about 355 ms, spectrum about 450 ms, classify about 6 ms per 120 s clip (about 0.8 s per track, single thread, box load average about 20, measured on two clips with `keydet detect`). The final model is the same linear scorer; the 3-net ensemble averages three copies of 50 weights. The two extra channels cost a little extra feature time that was not measured separately.
+
+### Licences
+
+No new crates. New code is `nn.rs` (own code, MIT OR Apache-2.0). The trained weights are a 3 x 50-number summary fit on Beatport EDM Key (CC BY-SA 4.0) for measurement only. They were not embedded or committed: the file is `benchmark/results/q16/final-net.json` (gitignored) and is loaded at eval time with `load=`. `weights.rs` still holds the round-1 weights. Shipping any trained weights waits on the licence decision from round 1.
+
+### Next steps
+
+- Label noise and test size are the likelier limits, not the model: measure agreement between Beatport labels and a second source on the 199 test tracks before more modelling.
+- More labelled data with a licence that allows training is the lever the data suggests; repeated CV (several fold assignments) would resolve effects of about 1 point.
+- Parallel confusion (12.6%) needs a feature that separates minor from major with the same tonic, for example chord-aware third detection; plain chroma channels did not provide it.
+
+### Reproduce
+
+```bash
+cd prototyping/analysis-packaging
+cargo build --release --bin keydet
+M=../../benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json
+./target/release/keydet extract $M /home/merlin/dev/projects/fourfour/benchmark/datasets/beatport-edm-key/audio ../../benchmark/results/keydet-spec threads=4
+./keydet-eval.sh method=net split=cv chan=1100 hidden=0 aug=8 keep=0.7 lr=0.05 seeds=3
+./keydet-eval.sh method=net split=test chan=1100 hidden=0 aug=8 keep=0.7 lr=0.05 seeds=3 save=../../benchmark/results/q16/final-net.json
+./keydet-eval.sh method=net split=test chan=1100 hidden=0 aug=8 keep=0.7 lr=0.05 seeds=3 load=../../benchmark/results/q16/final-net.json
+./keydet-sweep.sh sweep.txt     # one eval config per line
+```

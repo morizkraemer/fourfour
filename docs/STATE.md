@@ -21,6 +21,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 4. Key detector weights fit on CC BY-SA 4.0 data — rec: ship only weights trained on permissively licensed data — branch: none
 5. Old stash@{0} (scrub-pause waveform tweaks) — rec: build on a branch for review — branch: none
 6. `.claude/settings.local.json` allows `git push *`, which bypasses the push ask rule — rec: remove that allow line (Merlin edits it) — branch: none
+8. [accepted 2026-10-23 per rec] Add vitest as an app dev dependency for unit tests (Q18, branch only) — rec: keep — branch: q18-app-tests
 7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -28,6 +29,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Playback ear check: play on select, scrub/seek while playing, an MP3 with a damaged frame.
 
 ### Brother's lane
+- From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
 - Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
 - `get_mounted_volumes` lists the system disk ("Macintosh HD") and offers Wipe: must fix.
 - Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
@@ -38,15 +40,21 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q6 Key source PDB vs OneLibrary [handed to brother]
 ### Q8 Cross-platform CI [queued] [box] — Actions on macOS/Windows/Linux (build, test, check, unsigned tauri build). Branch only; first run on the shared repo needs Merlin's OK. 45 min
 ### Q14 USB sync UI [waiting on Merlin] — first attempt on ui-sync-flow (b510e70, preview :4240 when started); round 3 mockups decide the rebuild.
-### Q15 Grid phase + drift [running] [box]
-goal: lift "whole grid within ±20 ms of Rekordbox" from 47% toward 70% in prototyping/analysis-packaging (phase from downbeat/onset alignment, sub-0.01 BPM tempo refinement over the full track). acceptance: test-split table in docs/analysis/bpm-grid-2026-10.md; no regression on BPM ±0.1. timebox: 120 min
-### Q16 Key detector round 2 [proposed] [box]
-goal: ≥60% exact on a held-out split using only permissively licensed training data (or Beatport-free fitting); per-segment chroma + bass feature. acceptance: doc table, licences verified. timebox: 120 min
+### Q15 Grid phase + drift [done, branch q15-grid 8b9a3d0; doc landed] — grid ±20 ms 47%→72% (148/205), BPM ±0.1 86%→88%; full-track Beat This! + tempo comb + integer snap + mp3 encoder-delay fix; ~25 s/track. Code stays on branch (tight); mp3-delay rule needs a hardware check (brother).
+### Q16 Key detector round 2 [done, branch q16-key a6b4929; doc landed] — still 57.3% exact (70.9% incl. relative+fifth), n=199; augmentation/MLP/segments within noise. Next: check Beatport label noise, more permissive training data, a parallel-key feature. Weights gitignored (CC BY-SA, measurement only).
+### Q17 Doc drift cleanup [landed ac933c8] — own priority: AGENTS.md test-suite + stratum/src/analyzer claims, pioneer-test-ui README, pipeline-handoff status, docs/README index for the new analysis/ui docs.
+
+### Q18 App unit tests [done, branch q18-app-tests 4dba72d, rebased on master] — 41 vitest tests (analysis validators, mock, library helpers, menus), check + build green; npm audit advisories not reviewed; untested: mapTrackInfoToLocal, normalizeTrackInput, sortTracks (need export/extraction)
+
+### Q19 Clone research (item 7) [done] — docs/research/clones-2026-10-23.md; "lite" = rbxport (GPL, ideas only); copyable: cyanbox (BSD-2) key/beat/export, baken (MIT) waveform/PVB2/PSSI/layout
+### Q20 Startup + UI speed (items 1, 11) [running] — branch q20-speed
+### Q21 Analysis review pass 1 + bulk speed + grid/key (items 8, 2, 5) [running] — branch q21-analysis
 
 ## Run
-status: running · since 2026-10-23 11:54 · cap 1 worker · autonomy tight · third priority on the seat (after konsole, emberland)
-targets: none new (rulebook targets: grid ±20 ms 47%→70%, key ≥60%)
-plan: Q15 grid phase + drift → Q16 key round 2 (measurement only; shipped weights wait on Merlin #4) → own priorities: app unit tests for pure TS modules (branch) → cleanup (doc drift in AGENTS.md: test-suite and stratum claims). All on branches; only state/docs/analysis reports land.
+status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
+targets (Merlin, direct): 1 fastest startup · 2 bulk import + analysis speed · 3 sync several USBs at once · 4 instant track load incl. waveform · 5 better beat grid · 6 Rekordbox library import works · 7 research other Rekordbox clones (incl. new "lite" one), reuse code if licence allows · 8 review the analysis pipeline twice for speed + quality · 10 audio engine: no crashes, fast, responsive · 11 UI lightning fast
+plan: Q19 clone research (7) ∥ Q20 startup + UI speed (1, 11) → Q21 analysis review + bulk speed + grid (8, 2, 5) → Q22 audio engine (10) → Q23 track/waveform load (4) → Q24 Rekordbox import (6) → Q25 multi-USB sync (3) → second analysis review pass (8) → own priorities
+rules: all code on branches (tight); docs/reports land. Items 3/6 touch the brother's lane (sync engine, master.db reader): branch only, flagged for him. Third-party code: licence-checked, inspected in an isolated dir, never executed blindly.
 
 ## Rundown
 Since 10-15 nothing ran. Master holds the Rust analysis prototype (BPM/grid/key), benchmark docs, UI review and three sync mockup rounds. Open: Merlin's sync round 3 answers, brother's engine work, Q15/Q16 proposed.

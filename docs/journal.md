@@ -45,3 +45,16 @@
 2026-10-23 11:52 orchestrator - queue prepare (PM): plan Q15 → Q16 → own prios; dropped obsolete q9-benchmark worktree (merged; dev manifests kept, now gitignored)
 2026-10-23 11:54 orchestrator - run-start: PM queue start, cap 1, tight; answers: Beatport CC BY-SA fitting for measurement only, library read-only
 2026-10-23 11:54 orchestrator Q15 spawn: branch q15-grid
+2026-10-23 13:35 orchestrator Q15 done: branch q15-grid 8b9a3d0 (release build re-run ok); grid ±20 ms 47%→72%; doc landed on master, code stays on branch (tight)
+2026-10-23 13:35 orchestrator Q16 spawn: branch q16-key
+2026-10-23 13:57 orchestrator Q16 done: branch q16-key a6b4929 (build re-run ok); key 57.3% unchanged; doc landed
+2026-10-23 13:57 orchestrator - decided: own prio cleanup (doc drift) before app tests (tests need a new dev dep → branch + Waiting on Merlin)
+2026-10-23 13:57 orchestrator Q17 spawn: doc drift cleanup
+2026-10-23 13:59 orchestrator Q17 landed: ac933c8 (docs only, Unattended untouched); fixed one broken link in pipeline-handoff
+2026-10-23 13:59 orchestrator - decided: own prio tests: Q18 app unit tests on branch (vitest dev dep, accepted per rec, waits on Merlin)
+2026-10-23 14:02 orchestrator Q18 done: branch q18-app-tests 4dba72d (rebased on master; 41 tests, check green). run idle: rest needs Merlin or brother
+2026-10-23 14:07 orchestrator - run-start: Merlin direct overnight queue (items 1-11), cap 2, tight; Q19 research + Q20 startup/UI speed first
+2026-10-23 14:08 orchestrator Q19 spawn: clone research (read-only)
+2026-10-23 14:08 orchestrator Q20 spawn: branch q20-speed
+2026-10-23 14:23 orchestrator Q19 done: clone research saved docs/research/clones-2026-10-23.md
+2026-10-23 14:23 orchestrator Q21 spawn: branch q21-analysis
