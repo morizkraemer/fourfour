@@ -15,7 +15,7 @@ Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a
 AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-0. USB export panics above ~200 tracks (brother's writer, pdb.rs) — rec: tell your brother first thing; repro test on branch q27-writer-repro — branch: none
+0. USB export fails from 192 tracks; colour waveforms wrong on tracks > 7:17 (brother's writer) — rec: send your brother docs/architecture/writer-bugs-2026-10.md first thing — branch: q27-writer-repro
 1. Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
 2. Copy a playlist to another stick: Keep updated on by default? — rec: yes — branch: none
 3. Build round 3 into the app (replaces ui-sync-flow's first attempt, keeps the stick header)? — rec: yes after 1–2 — branch: ui-sync-flow
@@ -55,7 +55,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q23 Fast track + waveform load (item 4) [done, branch q23-load 27a4372 (contains q20-speed); doc landed] — get_analysis_data 137→3.8 ms, select→detail ~300→50 ms at 30k, load→waveform 325→80 ms; async load_state/analysis/artwork; LRU + prefetch. Conflicts with q22-audio in player.svelte.ts + main.rs (merge order: q23 then q22). Not run in a real window.
 ### Q24 Rekordbox library import (item 6) [done, branch q24-rb-import c31a860 = q23 + q22 + import; doc landed] — master.db, OneLibrary stick, rekordbox.xml; your library: 631 tracks found + imported, 607 grids, 3 playlists; merge keeps your edits, never deletes. Import UI (Settings → General) unreviewed.
 ### Q25 Multi-USB sync (item 3) [done, branch q25-multi-usb 04fe899 (contains q24); doc landed] — `sync_usb_many`: prepare once, one thread per stick, failures isolated, root + free-space checks, per-stick progress; 3 sticks 2.4–3× faster than serial; playlist-scoped selection in the library layer; 8 tests. No UI.
-### Q27 Repro tests for writer bugs (own prio: bugs) [running] — branch q27-writer-repro, tests only
+### Q27 Repro tests for writer bugs [done, branch q27-writer-repro 450ea04; doc landed] — PDB export fails from 192 tracks (137 with 200-char titles); ANLZ colour detail wrong from 437 s (4 overflow sites, anlz.rs:258/314/364/404). Ignored repro tests on branch. docs/architecture/writer-bugs-2026-10.md
 ### Q21 Analysis review pass 1 (items 8, 2, 5) [done, branch q21-analysis 1fc254c (contains q15-grid); doc landed] — unified analyzer `ffa` (decode once, all stages, memory-capped pool): ~4.8 tracks/min on 8 workers, 0.56 GB/worker; Beat This! = 93% of CPU; grid 72.2% held, BPM ±0.1 88.8%; key stage now the cyanbox port 58.3% (n=199). Licence flag: cyanbox key templates fit on GiantSteps MTG (annotations unlicensed).
 ### Q26 Analysis review pass 2 (item 8) [running] — branch q26-analysis (from q21-analysis)
 
