@@ -52,3 +52,4 @@
 2026-10-23 13:57 orchestrator Q17 spawn: doc drift cleanup
 2026-10-23 13:59 orchestrator Q17 landed: ac933c8 (docs only, Unattended untouched); fixed one broken link in pipeline-handoff
 2026-10-23 13:59 orchestrator - decided: own prio tests: Q18 app unit tests on branch (vitest dev dep, accepted per rec, waits on Merlin)
+2026-10-23 14:02 orchestrator Q18 done: branch q18-app-tests 4dba72d (rebased on master; 41 tests, check green). run idle: rest needs Merlin or brother

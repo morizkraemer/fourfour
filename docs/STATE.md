@@ -43,11 +43,12 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q16 Key detector round 2 [done, branch q16-key a6b4929; doc landed] — still 57.3% exact (70.9% incl. relative+fifth), n=199; augmentation/MLP/segments within noise. Next: check Beatport label noise, more permissive training data, a parallel-key feature. Weights gitignored (CC BY-SA, measurement only).
 ### Q17 Doc drift cleanup [landed ac933c8] — own priority: AGENTS.md test-suite + stratum/src/analyzer claims, pioneer-test-ui README, pipeline-handoff status, docs/README index for the new analysis/ui docs.
 
-### Q18 App unit tests [running] [box] — own priority, branch only: vitest for pure TS modules in app/src; new dev dep → Waiting on Merlin [accepted 2026-10-23 per rec]
+### Q18 App unit tests [done, branch q18-app-tests 4dba72d, rebased on master] — 41 vitest tests (analysis validators, mock, library helpers, menus), check + build green; npm audit advisories not reviewed; untested: mapTrackInfoToLocal, normalizeTrackInput, sortTracks (need export/extraction)
 
 ## Run
-status: running · since 2026-10-23 11:54 · cap 1 worker · autonomy tight · third priority on the seat (after konsole, emberland)
+status: idle · since 2026-10-23 14:02 (ran from 11:54 ) · cap 1 worker · autonomy tight · third priority on the seat (after konsole, emberland)
 targets: none new (rulebook targets: grid ±20 ms 47%→70%, key ≥60%)
+idle because: everything left needs Merlin (sync UI, licence, pushes, vitest, Q8 CI first run) or the brother (engine, hardware)
 plan: Q15 grid phase + drift → Q16 key round 2 (measurement only; shipped weights wait on Merlin #4) → own priorities: app unit tests for pure TS modules (branch) → cleanup (doc drift in AGENTS.md: test-suite and stratum claims). All on branches; only state/docs/analysis reports land.
 
 ## Rundown
