@@ -96,7 +96,7 @@ describe('analysis payload helpers', () => {
   });
 });
 
-const b64 = (bytes: number[]) => Buffer.from(bytes).toString('base64');
+const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
 const encoded = (bytes: number[], calibration = 1) => ({
   len: bytes.length / 3,
   calibration,
