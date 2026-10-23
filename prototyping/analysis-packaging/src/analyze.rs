@@ -25,7 +25,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderAndHeaderFrame, key: true, waveform: true, keep_logits: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, keep_logits: false }
     }
 }
 

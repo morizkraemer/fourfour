@@ -27,6 +27,7 @@ pub struct Mp3Timeline {
     pub lame_delay: Option<u32>,
     pub header_frame: bool,
     pub header_counts: bool,
+    pub encoder: Option<[u8; 9]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,6 +38,7 @@ pub enum DelayRule {
     HeaderFrame,
     Encoder,
     EncoderAndHeaderFrame,
+    EncoderHeaderLame3100Early,
 }
 
 impl DelayRule {
@@ -48,6 +50,7 @@ impl DelayRule {
             "header" => Some(DelayRule::HeaderFrame),
             "enc" => Some(DelayRule::Encoder),
             "enc+header" => Some(DelayRule::EncoderAndHeaderFrame),
+            "enc+header+l3100" => Some(DelayRule::EncoderHeaderLame3100Early),
             _ => None,
         }
     }
@@ -159,6 +162,7 @@ pub fn scan(path: &Path) -> Option<Mp3Timeline> {
         }
     }
 
+    let mut encoder = None;
     let lame_delay = if header_frame {
         let mut ext = tag_pos + 8;
         if d.len() >= ext {
@@ -169,6 +173,7 @@ pub fn scan(path: &Path) -> Option<Mp3Timeline> {
             if flags & 8 != 0 { ext += 4; }
         }
         if ext + 24 <= d.len() && d[ext..ext + 4].iter().all(|c| c.is_ascii_alphanumeric()) {
+            encoder = Some(d[ext..ext + 9].try_into().unwrap());
             Some(((d[ext + 21] as u32) << 4) | ((d[ext + 22] >> 4) as u32))
         } else {
             None
@@ -182,6 +187,7 @@ pub fn scan(path: &Path) -> Option<Mp3Timeline> {
         lame_delay,
         header_frame,
         header_counts: header_frame && map_start == 0,
+        encoder,
     })
 }
 
@@ -201,5 +207,9 @@ pub fn reference_delay_s(path: &Path, rule: DelayRule) -> f64 {
         DelayRule::HeaderFrame => header,
         DelayRule::Encoder => enc,
         DelayRule::EncoderAndHeaderFrame => enc + header,
+        DelayRule::EncoderHeaderLame3100Early => {
+            let early = t.encoder.is_some_and(|e| e.starts_with(b"Lame3.100"));
+            enc + header - if early { t.frame_samples as f64 / sr } else { 0.0 }
+        }
     }
 }
