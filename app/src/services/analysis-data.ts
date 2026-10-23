@@ -54,3 +54,12 @@ export function previewBytesFromPayload(data: { waveform_preview: number[] }): n
     ? data.waveform_preview
     : Array.from(data.waveform_preview);
 }
+
+/** `load_state` embeds each preview as base64; browser mocks pass plain byte arrays. */
+export function decodeTrackPreview(preview: string | number[] | null | undefined): number[] | null {
+  if (typeof preview !== 'string') return preview ?? null;
+  const binary = atob(preview);
+  const bytes = new Array<number>(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}

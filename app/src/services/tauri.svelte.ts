@@ -44,8 +44,8 @@ export interface TrackInfo {
   has_cues: boolean;
   /** Authoritative analysis flag from the DB index (not `tempo > 0`). */
   has_analysis?: boolean;
-  /** 400-byte mono preview embedded at load so list rows skip the N+1 fetch. */
-  waveform_preview?: number[] | null;
+  /** 400-byte mono preview embedded at load (base64 from Tauri, byte array in mocks). */
+  waveform_preview?: string | number[] | null;
 }
 
 export interface PlaylistInput {
@@ -96,6 +96,40 @@ let mockTracks: TrackInfo[] = [
   { id: 2, source_path: '/Music/Tale Of Us - Voidwalker.flac', title: 'Voidwalker', artist: 'Tale Of Us', album: 'Endless Run', genre: 'Melodic Techno', tempo: 12200, key: '7A', duration_secs: 494, bitrate: 1040, file_size: 64281920, has_artwork: true, has_cues: true },
   { id: 3, source_path: '/Music/Bicep - Drift.mp3', title: 'Drift', artist: 'Bicep', album: 'Drift EP', genre: 'Breakbeat', tempo: 12800, key: '5B', duration_secs: 415, bitrate: 320, file_size: 16601020, has_artwork: true, has_cues: false },
 ];
+
+function mockTrackCountFromUrl(): number {
+  if (typeof location === 'undefined') return 0;
+  const n = Number(new URLSearchParams(location.search).get('mock'));
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+function syntheticMockTrack(i: number): TrackInfo {
+  const analyzed = i % 10 !== 0;
+  return {
+    id: i + 1,
+    source_path: `/Music/Artist ${i % 400}/Track ${i}.mp3`,
+    title: `Track ${i}`,
+    artist: `Artist ${i % 400}`,
+    album: `Album ${i % 1500}`,
+    genre: ['House', 'Techno', 'Drum & Bass', 'Disco', 'Ambient'][i % 5],
+    tempo: analyzed ? 9000 + (i % 80) * 100 : 0,
+    key: analyzed ? `${(i % 12) + 1}${i % 2 === 0 ? 'A' : 'B'}` : '',
+    duration_secs: 180 + (i % 300),
+    bitrate: 320,
+    file_size: 9_600_000,
+    has_artwork: false,
+    has_cues: false,
+    has_analysis: analyzed,
+    waveform_preview: analyzed
+      ? Array.from({ length: 400 }, (_, n) => ((n * 7 + i) % 31) + 1)
+      : null,
+  };
+}
+
+const syntheticTrackCount = mockTrackCountFromUrl();
+if (syntheticTrackCount > 0) {
+  mockTracks = Array.from({ length: syntheticTrackCount }, (_, i) => syntheticMockTrack(i));
+}
 
 let mockPlaylists: PlaylistInput[] = [
   { id: 1, name: 'Peak Time', track_ids: [1, 2] },

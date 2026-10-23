@@ -329,12 +329,38 @@ export function setColumnWidth(
   if (save) persist();
 }
 
+const TEXT_FALLBACK_COLUMNS = new Set(['key', 'album', 'genre', 'year']);
+
+/** Widest cell text over every track, not just the rows the virtualised table has rendered. */
+function measureAllRowsTextWidth(
+  key: string,
+  rootEl: HTMLElement | null,
+  tracks: Record<string, unknown>[],
+): number {
+  const sample = rootEl?.querySelector(`.ff-trow__cell[data-col-key="${key}"] .ff-trow__text`);
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (!sample || !ctx) return 0;
+  const style = getComputedStyle(sample);
+  ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const fallback = TEXT_FALLBACK_COLUMNS.has(key) ? '—' : '';
+  let max = 0;
+  for (const track of tracks) {
+    const text = String(track[key] ?? fallback).trim();
+    if (text) max = Math.max(max, ctx.measureText(text).width);
+  }
+  return Math.ceil(max) + 10;
+}
+
 export function fitColumnToContent(
   kind: LayoutKind,
   key: string,
   rootEl: HTMLElement | null,
+  tracks: Record<string, unknown>[] = [],
 ) {
-  const width = measureColumnContentWidth(key, rootEl, visibleColumns(kind));
+  const width = Math.max(
+    measureColumnContentWidth(key, rootEl, visibleColumns(kind)),
+    measureAllRowsTextWidth(key, rootEl, tracks),
+  );
   setColumnWidth(kind, key, width);
 }
 

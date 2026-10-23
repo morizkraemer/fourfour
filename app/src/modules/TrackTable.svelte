@@ -69,6 +69,26 @@
   let marqueeActive = $state(false);
   let suppressRowClick = false;
 
+  const ROW_HEIGHT = 28;
+  const OVERSCAN_ROWS = 12;
+  let scrollTop = $state(0);
+  let viewportHeight = $state(0);
+  let headerHeight = $state(0);
+  let scrollRaf = null;
+
+  function syncScrollWindow() {
+    scrollRaf = null;
+    if (!tableScrollEl) return;
+    scrollTop = tableScrollEl.scrollTop;
+    if (headerHeight === 0) {
+      headerHeight = tableScrollEl.querySelector('.ff-colh')?.offsetHeight ?? 0;
+    }
+  }
+
+  function onTableScroll() {
+    if (scrollRaf == null) scrollRaf = requestAnimationFrame(syncScrollWindow);
+  }
+
   onMount(() => {
     initTableColumns();
   });
@@ -127,6 +147,17 @@
 
   let columns = $derived(visibleColumns(layoutKind));
 
+  let firstRow = $derived(
+    Math.max(0, Math.floor((scrollTop - headerHeight) / ROW_HEIGHT) - OVERSCAN_ROWS)
+  );
+  let endRow = $derived(
+    Math.min(
+      currentTracks.length,
+      Math.ceil((scrollTop + viewportHeight - headerHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
+    )
+  );
+  let windowTracks = $derived(currentTracks.slice(firstRow, endRow));
+
   function handleRowClick(track, event) {
     if (suppressRowClick) {
       suppressRowClick = false;
@@ -170,10 +201,11 @@
     const band = { left, right, top, bottom };
     const ids = [];
     const rows = tableBodyEl.querySelectorAll('[data-track-row]');
-    rows.forEach((row, i) => {
+    rows.forEach((row) => {
       const rect = row.getBoundingClientRect();
-      if (rectsIntersect(band, rect) && currentTracks[i]) {
-        ids.push(currentTracks[i].id);
+      const track = currentTracks[Number(row.dataset.rowIndex)];
+      if (rectsIntersect(band, rect) && track) {
+        ids.push(track.id);
       }
     });
     return ids;
@@ -241,13 +273,7 @@
 
   function dropLineTopForIndex(index) {
     if (!tableBodyEl || index == null) return null;
-    const rows = tableBodyEl.querySelectorAll('[data-track-row]');
-    if (rows.length === 0) return 0;
-    if (index >= rows.length) {
-      const last = rows[rows.length - 1];
-      return last.offsetTop + last.offsetHeight;
-    }
-    return rows[index].offsetTop;
+    return Math.min(index, currentTracks.length) * ROW_HEIGHT;
   }
 
   $effect(() => {
@@ -500,6 +526,8 @@
       class="ff-table__scroll"
       class:ff-table__scroll--dragging={dragging && embedded}
       bind:this={tableScrollEl}
+      bind:clientHeight={viewportHeight}
+      onscroll={onTableScroll}
     >
       <ColumnHeader
         {columns}
@@ -517,7 +545,7 @@
           colDropKey = drop;
         }}
         onColumnResize={(key, width, save = true) => setColumnWidth(layoutKind, key, width, save)}
-        onColumnAutoFit={(key) => fitColumnToContent(layoutKind, key, tableScrollEl)}
+        onColumnAutoFit={(key) => fitColumnToContent(layoutKind, key, tableScrollEl, currentTracks)}
       />
       <div
         class="ff-table__body"
@@ -546,14 +574,18 @@
           />
         </div>
       {:else}
-        {#each currentTracks as track, i (track.id)}
+        {#if firstRow > 0}
+          <div class="ff-table__spacer" style:height="{firstRow * ROW_HEIGHT}px"></div>
+        {/if}
+        {#each windowTracks as track, i (track.id)}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             data-track-row
+            data-row-index={firstRow + i}
             onclick={(e) => handleRowClick(track, e)}
             ondblclick={(e) => handleRowDblClick(track, e)}
-            onpointerdown={(e) => onRowPointerDown(e, track, i)}
+            onpointerdown={(e) => onRowPointerDown(e, track, firstRow + i)}
             oncontextmenu={(e) => openRowMenu(e, track)}
           >
             <TrackRow
@@ -564,6 +596,9 @@
             />
           </div>
         {/each}
+        {#if endRow < currentTracks.length}
+          <div class="ff-table__spacer" style:height="{(currentTracks.length - endRow) * ROW_HEIGHT}px"></div>
+        {/if}
       {/if}
       </div>
     </div>
@@ -636,6 +671,9 @@
     flex-direction: column;
     min-width: 0;
     width: 100%;
+  }
+  .ff-table__spacer {
+    flex: none;
   }
   .ff-table__drop-line {
     position: absolute;

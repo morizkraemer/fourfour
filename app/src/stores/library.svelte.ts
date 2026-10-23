@@ -37,6 +37,7 @@ import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
   previewPeaksNormalized,
+  decodeTrackPreview,
 } from '../services/analysis-data.ts';
 import { artwork } from './artwork.svelte.ts';
 
@@ -187,6 +188,8 @@ export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
 }
 
 /* ── Main Library Store State ───────────────────────────────────────── */
+let recentlyAddedCount = 0;
+
 export const library = $state({
   tracks: [] as any[],
   playlists: [] as PlaylistInput[],
@@ -229,7 +232,7 @@ export const library = $state({
         label: 'LIBRARY',
         rows: [
           { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: this.tracks.length },
-          { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: this.tracks.filter(t => t.raw?.tempo > 0).length },
+          { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: recentlyAddedCount },
         ],
       },
       playlists: {
@@ -257,6 +260,45 @@ export const library = $state({
   }
 });
 
+const haystackCache = new WeakMap<object, string[]>();
+
+function trackHaystack(track: Record<string, unknown>): string {
+  const raw = track.raw as Record<string, unknown> | undefined;
+  return [
+    track.title,
+    track.artist,
+    track.album,
+    track.label,
+    track.genre,
+    track.key,
+    track.bpm,
+    track.time,
+    track.filePath,
+    track.index,
+    raw?.title,
+    raw?.artist,
+    raw?.album,
+    raw?.genre,
+    raw?.key,
+    raw?.source_path,
+  ]
+    .map((v) => String(v ?? '').toLowerCase())
+    .join(' ');
+}
+
+/**
+ * Search text per track, cached per source array. Track text only changes
+ * together with `bumpLibraryTracks()` / `loadState()`, which swap the array.
+ */
+function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] {
+  let haystacks = haystackCache.get(tracks);
+  if (!haystacks) {
+    haystacks = tracks.map(trackHaystack);
+    haystackCache.set(tracks, haystacks);
+  }
+  return haystacks;
+}
+
 /** Match tracks against a whitespace-separated query (all terms must match). */
 export function filterTracks<T extends Record<string, unknown>>(
   tracks: T[],
@@ -265,30 +307,8 @@ export function filterTracks<T extends Record<string, unknown>>(
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return tracks;
   const terms = trimmed.split(/\s+/).filter(Boolean);
-  return tracks.filter((track) => {
-    const raw = track.raw as Record<string, unknown> | undefined;
-    const haystack = [
-      track.title,
-      track.artist,
-      track.album,
-      track.label,
-      track.genre,
-      track.key,
-      track.bpm,
-      track.time,
-      track.filePath,
-      track.index,
-      raw?.title,
-      raw?.artist,
-      raw?.album,
-      raw?.genre,
-      raw?.key,
-      raw?.source_path,
-    ]
-      .map((v) => String(v ?? '').toLowerCase())
-      .join(' ');
-    return terms.every((term) => haystack.includes(term));
-  });
+  const haystacks = haystacksFor(tracks);
+  return tracks.filter((_, i) => terms.every((term) => haystacks[i].includes(term)));
 }
 
 /** Tracks shown for a sidebar source (label, playlist name, or USB path). */
@@ -540,8 +560,9 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
   };
 
   // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
-  if (t.waveform_preview && isValidWaveformPreview(t.waveform_preview)) {
-    local.peaks = previewPeaksNormalized(t.waveform_preview);
+  const preview = decodeTrackPreview(t.waveform_preview);
+  if (preview && isValidWaveformPreview(preview)) {
+    local.peaks = previewPeaksNormalized(preview);
   }
 
   return local;
@@ -555,6 +576,7 @@ export async function loadState() {
     artwork.clear();
     invalidateAnalysisCache();
     const state = await tauriLoadState();
+    recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
     library.tracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
     library.playlists = state.playlists;
 
