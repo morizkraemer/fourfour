@@ -288,14 +288,13 @@ fn run_stick(
     let finished = AtomicBool::new(false);
     let result = std::thread::scope(|scope| {
         scope.spawn(|| watch_copy_progress(stick, sink, &finished));
-        let result = write(
+        let _stop_watcher = StopOnDrop(&finished);
+        write(
             &stick.root,
             &stick.selection.tracks,
             &stick.selection.analyses,
             &stick.selection.playlists,
-        );
-        finished.store(true, Ordering::Release);
-        result
+        )
     });
 
     let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -319,6 +318,14 @@ fn run_stick(
             emit_failed(sink, stick, &report);
             report
         }
+    }
+}
+
+struct StopOnDrop<'a>(&'a AtomicBool);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
     }
 }
 
