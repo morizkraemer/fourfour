@@ -79,3 +79,4 @@
 2026-10-23 18:52 orchestrator Q30 spawn: grid round 3, branch q30-grid
 2026-10-23 19:36 orchestrator Q29 done: branch q29-rows 35dd87f (validation reported green); doc landed
 2026-10-23 19:36 orchestrator - decided: own prio tests: Q31 vitest on the integration stack; spawn branch q31-tests
+2026-10-23 19:51 orchestrator Q31 done: branch q31-tests f8488e8 (88 app tests); cleanup: removed 9 worktrees whose branches are contained in q31-tests (branches kept); preview :4250 = q31-tests
