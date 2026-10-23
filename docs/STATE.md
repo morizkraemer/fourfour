@@ -29,6 +29,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Playback ear check: play on select, scrub/seek while playing, an MP3 with a damaged frame.
 
 ### Brother's lane
+- From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
 - Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
 - `get_mounted_volumes` lists the system disk ("Macintosh HD") and offers Wipe: must fix.
 - Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
@@ -45,8 +46,9 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 ### Q18 App unit tests [done, branch q18-app-tests 4dba72d, rebased on master] — 41 vitest tests (analysis validators, mock, library helpers, menus), check + build green; npm audit advisories not reviewed; untested: mapTrackInfoToLocal, normalizeTrackInput, sortTracks (need export/extraction)
 
-### Q19 Clone research (item 7) [running] — report in scratchpad/clones/report.md
+### Q19 Clone research (item 7) [done] — docs/research/clones-2026-10-23.md; "lite" = rbxport (GPL, ideas only); copyable: cyanbox (BSD-2) key/beat/export, baken (MIT) waveform/PVB2/PSSI/layout
 ### Q20 Startup + UI speed (items 1, 11) [running] — branch q20-speed
+### Q21 Analysis review pass 1 + bulk speed + grid/key (items 8, 2, 5) [running] — branch q21-analysis
 
 ## Run
 status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
