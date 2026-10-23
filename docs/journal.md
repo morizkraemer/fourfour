@@ -66,3 +66,10 @@
 2026-10-23 15:38 orchestrator Q24 spawn: branch q24-rb-import from q23-load
 2026-10-23 16:01 orchestrator Q24 done: branch q24-rb-import c31a860 (merged q22 cleanly); import doc landed; brother bug: anlz.rs u32 overflow
 2026-10-23 16:01 orchestrator Q25 spawn: branch q25-multi-usb
+2026-10-23 16:32 orchestrator Q21 done: branch q21-analysis 1fc254c (release build reported ok); review doc landed; licence flag on cyanbox templates
+2026-10-23 16:32 orchestrator Q26 spawn: analysis pass 2, branch q26-analysis
+2026-10-23 16:33 orchestrator Q25 done: branch q25-multi-usb 04fe899; doc landed; CRITICAL brother bug: pdb.rs split_into_pages panics >~200 tracks
+2026-10-23 16:33 orchestrator - decided: own prio bugs: Q27 failing repro tests for writer bugs (no format change, lane rule)
+2026-10-23 17:42 orchestrator - resumed: usage limit reset (PM); Q26 and Q27 workers resumed
+2026-10-23 17:42 orchestrator Q27 done: branch q27-writer-repro 450ea04; PDB fails from 192 tracks, ANLZ from 437 s; writer-bugs doc landed
+2026-10-23 17:43 orchestrator - decided: own prio perf: Q28 waveform drawing + scroll (design system allowed, pixel-diff gate); spawn branch q28-waveform-perf
