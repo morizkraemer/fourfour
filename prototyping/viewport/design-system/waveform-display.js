@@ -164,7 +164,7 @@ export default class WaveformDisplay {
         overviewWrap.appendChild(this._overviewCanvas);
         this._overviewPlayhead = document.createElement('div');
         this._overviewPlayhead.style.cssText =
-            'position:absolute;top:0;bottom:0;width:1px;background:#fff;pointer-events:none;display:none;transform:translateX(-50%)';
+            'position:absolute;top:0;bottom:0;left:0;width:1px;background:#fff;pointer-events:none;display:none';
         overviewWrap.appendChild(this._overviewPlayhead);
 
         // Zoom canvas (scrollable detail view) — wrapped for playhead overlay
@@ -175,12 +175,29 @@ export default class WaveformDisplay {
         zoomWrap.appendChild(this._zoomCanvas);
         this._zoomPlayhead = document.createElement('div');
         this._zoomPlayhead.style.cssText =
-            'position:absolute;top:0;bottom:0;width:1px;background:#fff;pointer-events:none;display:none;transform:translateX(-50%);z-index:2';
+            'position:absolute;top:0;bottom:0;left:0;width:1px;background:#fff;pointer-events:none;display:none;z-index:2';
         zoomWrap.appendChild(this._zoomPlayhead);
 
         this._wrapper.appendChild(overviewWrap);
         this._wrapper.appendChild(zoomWrap);
         container.appendChild(this._wrapper);
+
+        this._sizes = new WeakMap();
+        this._sizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const box = entry.borderBoxSize && entry.borderBoxSize[0];
+                this._sizes.set(entry.target, {
+                    w: box ? box.inlineSize : entry.contentRect.width,
+                    h: box ? box.blockSize : entry.contentRect.height,
+                });
+            }
+            this._render();
+        });
+        if (this._sizeObserver) {
+            this._sizeObserver.observe(this._overviewCanvas);
+            this._sizeObserver.observe(this._zoomCanvas);
+        }
+        this._playheadX = new WeakMap();
 
         // Offscreen cache of the overview waveform (bars + cues). The overview
         // image never changes during playback — only the viewport rectangle
@@ -455,30 +472,46 @@ export default class WaveformDisplay {
         this._applyPlayhead(this._phClock);
     }
 
+    _canvasSize(canvas) {
+        const cached = this._sizes.get(canvas);
+        if (cached) return cached;
+        const rect = canvas.getBoundingClientRect();
+        return { w: rect.width, h: rect.height };
+    }
+
+    _showPlayhead(el, frac, canvas) {
+        if (el.style.display !== 'block') el.style.display = 'block';
+        const x = Math.round(frac * this._canvasSize(canvas).w * 64) / 64 - 0.5;
+        if (this._playheadX.get(el) === x) return;
+        this._playheadX.set(el, x);
+        el.style.transform = `translateX(${x}px)`;
+    }
+
+    _hidePlayhead(el) {
+        if (el.style.display !== 'none') el.style.display = 'none';
+    }
+
     _updatePlayheadOverlay() {
         const frac = this._playheadFrac;
         if (frac < 0 || frac > 1) {
-            this._overviewPlayhead.style.display = 'none';
-            this._zoomPlayhead.style.display = 'none';
+            this._hidePlayhead(this._overviewPlayhead);
+            this._hidePlayhead(this._zoomPlayhead);
             return;
         }
         if (this._mode !== 'compact') {
-            this._overviewPlayhead.style.display = 'block';
-            this._overviewPlayhead.style.left = (frac * 100) + '%';
+            this._showPlayhead(this._overviewPlayhead, frac, this._overviewCanvas);
         }
         if (this._lockPlayhead) {
-            // Centre playhead is drawn on the zoom canvas (above the beat grid).
-            this._zoomPlayhead.style.display = 'none';
+            this._hidePlayhead(this._zoomPlayhead);
             return;
         }
         const visibleFrac = 1.0 / this._zoom;
         const start = this._offset;
         const end = start + visibleFrac;
         if (frac >= start && frac <= end) {
-            this._zoomPlayhead.style.display = 'block';
-            this._zoomPlayhead.style.left = ((frac - start) / visibleFrac * 100) + '%';
+            this._showPlayhead(this._zoomPlayhead, (frac - start) / visibleFrac, this._zoomCanvas);
         } else {
-            this._zoomPlayhead.style.display = 'none';
+            this._hidePlayhead(this._zoomPlayhead);
         }
     }
 
@@ -511,6 +544,7 @@ export default class WaveformDisplay {
     destroy() {
         if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
         this._stopInterp();
+        if (this._sizeObserver) this._sizeObserver.disconnect();
         this._unbindEvents();
         this._wrapper.remove();
     }
@@ -555,11 +589,11 @@ export default class WaveformDisplay {
     _renderOverview() {
         if (this._mode === 'compact') return; // overview hidden in compact
         const canvas = this._overviewCanvas;
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width === 0) return;
+        const size = this._canvasSize(canvas);
+        if (size.w === 0) return;
 
-        const w = rect.width;
-        const h = rect.height;
+        const w = size.w;
+        const h = size.h;
         const ctx = this._resizeCanvas(canvas, w, h);
 
         // Re-render the (expensive) bars+cues into the offscreen cache only when
@@ -699,11 +733,11 @@ export default class WaveformDisplay {
 
     _renderZoom() {
         const canvas = this._zoomCanvas;
-        const rect = canvas.getBoundingClientRect();
-        if (rect.width === 0) return;
+        const size = this._canvasSize(canvas);
+        if (size.w === 0) return;
 
-        const w = rect.width;
-        const h = rect.height;
+        const w = size.w;
+        const h = size.h;
         const ctx = this._resizeCanvas(canvas, w, h);
 
         ctx.fillStyle = '#0d0d0d';
@@ -909,11 +943,22 @@ export default class WaveformDisplay {
         return ((frac - startFrac) / (endFrac - startFrac)) * w;
     }
 
+    _labelWidth(ctx, label) {
+        if (!this._labelWidths) this._labelWidths = new Map();
+        const key = ctx.font + '|' + label;
+        let width = this._labelWidths.get(key);
+        if (width === undefined) {
+            width = ctx.measureText(label).width;
+            this._labelWidths.set(key, width);
+        }
+        return width;
+    }
+
     _drawBarLabel(ctx, x, w, h, barNumber, isPhrase) {
         const fontSize = 10;
         const label = String(barNumber);
         ctx.font = `${isPhrase ? 'bold ' : ''}${fontSize}px system-ui`;
-        const labelW = ctx.measureText(label).width + 2;
+        const labelW = this._labelWidth(ctx, label) + 2;
         const nearCentre = Math.abs(x - w / 2) < 28;
         ctx.fillStyle = '#0d0d0d';
         if (nearCentre) {

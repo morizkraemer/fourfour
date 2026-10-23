@@ -1,39 +1,95 @@
 <script module>
-  // Shared draw helpers (Svelte port of waveform.js). Canvas-2D faux/real peak
-  // bars for the track-row preview and player strip. Per ui-architecture.md the
-  // real waveform is Canvas, not DOM — this is that primitive.
-  function mulberry32(seed) {
-    let a = seed >>> 0;
-    return function () {
-      a |= 0;
-      a = (a + 0x6d2b79f5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  function fauxPeaks(count, seed) {
-    const rand = mulberry32(seed);
-    const out = new Array(count);
-    let env = 0.5;
-    for (let i = 0; i < count; i++) {
-      env += (rand() - 0.5) * 0.4;
-      env = Math.max(0.15, Math.min(1, env));
-      out[i] = env * (0.55 + rand() * 0.45);
-    }
-    return out;
-  }
-
-  function rootColor(name, fallback) {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v || fallback;
-  }
-
   const VARIANTS = {
     mini: { step: 2, gap: 1, base: '--ff-muted', played: '--ff-text-mid', floor: 0.12 },
     strip: { step: 3, gap: 1, base: '--ff-text-mid', played: '--ff-accent', floor: 0.06 },
   };
+
+  const BASE_FALLBACK = '#6a6a6a';
+  const PLAYED_FALLBACK = '#aaaaaa';
+  const BITMAP_CACHE_LIMIT = 800;
+  const DRAWN_KEYS_LIMIT = 20000;
+
+  const tokenColors = new Map();
+  let tokenVersion = 0;
+
+  function invalidateTokens() {
+    tokenColors.clear();
+    tokenVersion++;
+  }
+
+  if (typeof document !== 'undefined') {
+    new MutationObserver(invalidateTokens).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme'],
+    });
+    window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', invalidateTokens);
+  }
+
+  function resolvedToken(name) {
+    const hit = tokenColors.get(name);
+    if (hit) return hit;
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    if (v) tokenColors.set(name, v);
+    return v || null;
+  }
+
+  const bitmapCache = new Map();
+  const peaksIds = new WeakMap();
+  let nextPeaksId = 1;
+
+  function peaksKey(peaks) {
+    if (!peaks || !peaks.length) return '0';
+    let id = peaksIds.get(peaks);
+    if (!id) {
+      id = nextPeaksId++;
+      peaksIds.set(peaks, id);
+    }
+    return `${id}:${peaks.length}`;
+  }
+
+  function rememberBitmap(key, bitmap) {
+    bitmapCache.set(key, bitmap);
+    if (bitmapCache.size > BITMAP_CACHE_LIMIT) bitmapCache.delete(bitmapCache.keys().next().value);
+  }
+
+  function recallBitmap(key) {
+    const hit = bitmapCache.get(key);
+    if (!hit) return null;
+    bitmapCache.delete(key);
+    bitmapCache.set(key, hit);
+    return hit;
+  }
+
+  const drawnKeys = new Set();
+
+  function wasDrawnBefore(key) {
+    if (drawnKeys.has(key)) return true;
+    drawnKeys.add(key);
+    if (drawnKeys.size > DRAWN_KEYS_LIMIT) drawnKeys.delete(drawnKeys.values().next().value);
+    return false;
+  }
+
+  function tokensResolved(cfg) {
+    return !!(resolvedToken(cfg.base) && resolvedToken(cfg.played));
+  }
+
+  const pendingDraws = new Set();
+  let flushHandle = 0;
+
+  function scheduleDraw(run) {
+    pendingDraws.add(run);
+    if (flushHandle) return;
+    flushHandle = requestAnimationFrame(() => {
+      flushHandle = 0;
+      const batch = [...pendingDraws];
+      pendingDraws.clear();
+      for (const queued of batch) queued();
+    });
+  }
+
+  function cancelDraw(run) {
+    pendingDraws.delete(run);
+  }
 </script>
 
 <script>
@@ -52,28 +108,25 @@
 
   let canvas;
 
-  function draw(phase = 0) {
-    if (!canvas) return;
+  function layout() {
     const cfg = VARIANTS[variant] ?? VARIANTS.mini;
-    const markerStyle = cueStyle ?? (variant === 'strip' ? 'line' : 'dot');
+    const stride = cfg.step + cfg.gap;
+    const bars = Math.max(1, Math.floor(width / stride));
+    const playedBars = Math.round(bars * Math.max(0, Math.min(1, progress)));
+    const dpr = window.devicePixelRatio || 1;
+    return { cfg, stride, bars, playedBars, dpr };
+  }
+
+  function bitmapKey({ playedBars, dpr }) {
+    return `${variant}|${width}|${height}|${dpr}|${tokenVersion}|${peaksKey(peaks)}|${playedBars}`;
+  }
+
+  function paintBars(ctx, { cfg, stride, bars, playedBars }, phase) {
     const w = width;
     const h = height;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
-    const stride = cfg.step + cfg.gap;
-    const bars = Math.max(1, Math.floor(w / stride));
-    const hasPeaks = peaks && peaks.length;
-    const data = hasPeaks ? peaks : null;
-    const baseColor = rootColor(cfg.base, '#6a6a6a');
-    const playedColor = rootColor(cfg.played, '#aaaaaa');
-    const playedBars = Math.round(bars * Math.max(0, Math.min(1, progress)));
+    const data = peaks && peaks.length ? peaks : null;
+    const baseColor = resolvedToken(cfg.base) ?? BASE_FALLBACK;
+    const playedColor = resolvedToken(cfg.played) ?? PLAYED_FALLBACK;
     const mid = h / 2;
 
     for (let i = 0; i < bars; i++) {
@@ -90,7 +143,55 @@
       ctx.fillStyle = i < playedBars ? playedColor : baseColor;
       ctx.fillRect(i * stride, mid - bh / 2, cfg.step, bh);
     }
+  }
 
+  function bitmapFor(geometry, key, pixelW, pixelH) {
+    const bitmap = document.createElement('canvas');
+    bitmap.width = pixelW;
+    bitmap.height = pixelH;
+    const bitmapCtx = bitmap.getContext('2d');
+    bitmapCtx.setTransform(geometry.dpr, 0, 0, geometry.dpr, 0, 0);
+    paintBars(bitmapCtx, geometry, 0);
+    rememberBitmap(key, bitmap);
+    return bitmap;
+  }
+
+  function draw(phase = 0) {
+    if (!canvas) return;
+    const geometry = layout();
+    const { dpr } = geometry;
+    const w = width;
+    const h = height;
+    const pixelW = Math.round(w * dpr);
+    const pixelH = Math.round(h * dpr);
+    if (canvas.width !== pixelW || canvas.height !== pixelH) {
+      canvas.width = pixelW;
+      canvas.height = pixelH;
+    }
+    const cssW = `${w}px`;
+    const cssH = `${h}px`;
+    if (canvas.style.width !== cssW) canvas.style.width = cssW;
+    if (canvas.style.height !== cssH) canvas.style.height = cssH;
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, pixelW, pixelH);
+
+    const placeholderFrame = animating && !(peaks && peaks.length);
+    const key = bitmapKey(geometry);
+    let bitmap = placeholderFrame ? null : recallBitmap(key);
+    if (!bitmap && !placeholderFrame && tokensResolved(geometry.cfg) && wasDrawnBefore(key)) {
+      bitmap = bitmapFor(geometry, key, pixelW, pixelH);
+    }
+    if (bitmap) {
+      ctx.drawImage(bitmap, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    } else {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      paintBars(ctx, geometry, phase);
+    }
+
+    const markerStyle = cueStyle ?? (variant === 'strip' ? 'line' : 'dot');
     for (const cue of cues || []) {
       const frac = Math.max(0, Math.min(1, cue.position ?? 0));
       const x = Math.round(frac * (w - 1)) + 0.5;
@@ -108,8 +209,6 @@
     }
   }
 
-  // Redraw whenever the reactive inputs change; the read of each prop inside
-  // draw() registers the dependency. rAF on first paint so token colors resolve.
   $effect(() => {
     peaks;
     width;
@@ -123,18 +222,27 @@
 
     if (animating && !(peaks && peaks.length)) {
       let phase = 0;
-      let raf = 0;
+      let live = true;
       const tick = () => {
+        if (!live) return;
         phase += 0.11;
         draw(phase);
-        raf = requestAnimationFrame(tick);
+        scheduleDraw(tick);
       };
-      raf = requestAnimationFrame(tick);
-      return () => cancelAnimationFrame(raf);
+      scheduleDraw(tick);
+      return () => {
+        live = false;
+        cancelDraw(tick);
+      };
     }
 
-    const raf = requestAnimationFrame(() => draw(0));
-    return () => cancelAnimationFrame(raf);
+    const run = () => draw(0);
+    if (recallBitmap(bitmapKey(layout()))) {
+      run();
+      return;
+    }
+    scheduleDraw(run);
+    return () => cancelDraw(run);
   });
 </script>
 
