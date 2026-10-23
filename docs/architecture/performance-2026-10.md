@@ -188,3 +188,77 @@ node perf/profile-action.mjs http://127.0.0.1:4312/ 30000 expand
 ```
 
 The backend "before" numbers came from the original command body (`serde_json::json!` objects per colour column) moved unchanged into `analysis_payload.rs` with the `load` bench added; that state was never committed separately. To see it again, replace `color_payload` with a `Vec<serde_json::Value>` of `{amp, r, g, b}` per column.
+
+
+# Q28, 2026-10-23: fast scrolling and waveform drawing
+
+Branch `q28-waveform-perf` (from `q25-multi-usb`, master merged). Everything below is headless Chromium on the shared `dev` box, `?mock=30000`, software compositing, no display.
+
+## Method
+
+`app/perf/waveform-perf.mjs` (new) drives: fast scroll (+90 px per frame for 3 s), a fixed-length scroll (120 frames of +90 px) and a fixed fling (20 frames jumping to the end), then the compact player playing (mock transport, 20 Hz ticks), the expanded player playing, expanded zoom in/out and wheel scroll. It records rAF frame deltas (p50/p95/p99), long tasks, `Performance.getMetrics` script/layout/style time, and main-thread CPU time of the renderer from `/proc/<pid>/task/<pid>/schedstat`. `trace-scroll.mjs` summarises a Chromium trace (Paint, Layerize, Layout ...); `profile-action.mjs` gained `fling`, `playing` and `playingExpanded`.
+
+**Caveat on the numbers.** The box ran at load average 20 to 33 on 16 cores for the whole session, so wall-clock frame times swing by a factor of two between runs of the same build. The table uses the median of 5 alternating before/after runs (before = the merge commit `3eb99a2` built in a scratch directory, after = this branch). Main-thread CPU time and layout time are the trustworthy columns; p95/p99 frame times are shown but read them as "no worse", not as a measured win. Quieter single runs earlier in the session showed 16.7 / 33.4 / 50 ms (p50/p95/p99) after against 33.3 / 50 / 83 ms before for the same 3 s scroll.
+
+## Results (median of 5)
+
+| scenario | metric | before | after |
+|---|---|---|---|
+| fixed scroll, 120 frames of +90 px | main-thread CPU per frame | 33.1 ms | 26.2 ms (-21%) |
+| same | frame p50 / p95 / p99 (wall, noisy) | 49.9 / 66.7 / 83.4 ms | 33.4 / 66.7 / 83.3 ms |
+| 3 s fast scroll | frame p95 / p99 (wall, noisy) | 66.6 / 83.4 ms | 66.8 / 83.4 ms |
+| 3 s fast scroll | `getComputedStyle` calls | 512 | 0 |
+| fling to the end (20 frames, whole window replaced each frame) | main-thread CPU per frame | 165 ms | 174 ms (same, within noise) |
+| compact player playing | layout time | 16.7 ms/s | 0.7 ms/s |
+| compact player playing | script time / main-thread CPU | 33.7 ms/s / 34% of a core | 32.1 ms/s / 37% (same, within noise) |
+| expanded player playing | layout time | 18.4 ms/s | 0.7 ms/s |
+| expanded player playing | script time | 163 ms/s | 154 ms/s |
+| expanded zoom / wheel scroll | layout time | 13.8 / 10.9 ms/s | 0.6 / 0.5 ms/s |
+| expanded player playing | `getBoundingClientRect` calls per second | ~120 | 0 |
+
+Per playhead tick (20 Hz): layout went from about 0.8 ms to about 0.03 ms in both players. Total main-thread CPU per tick did not measurably change (the compact player spends ~17 ms per second on script and the rest in Paint/Layerize at this page size, see What is left). The compact player's per-tick script cost was already small: the playhead was already a DOM overlay (`WaveformDisplay._updatePlayheadOverlay`) and the full-track waveform is drawn once, so there was no per-tick canvas redraw to remove there.
+
+Trace of the 2 s scroll (main thread): `Paint` averaged 24.3 ms per frame (22 frames) before the row containment change and 3.2 ms per frame (68 frames) after. In the compact-playing trace `Layout` ran 183 times in 3 s before and 3 times after.
+
+## What changed
+
+1. **`Waveform.svelte` (design system):** the two colour tokens are resolved once and cached; the cache is cleared by a `MutationObserver` on the root element (`class`, `style`, `data-theme`) and a `prefers-color-scheme` listener. Colours that do not resolve (stylesheet not loaded yet) are never cached. Row previews are drawn straight onto the row canvas the first time; the second time the same key (peaks identity + length, variant, size, devicePixelRatio, token version, played bars) is drawn, the bars are rendered into a shared bitmap cache (800 entries, LRU) and every later mount just blits it, synchronously, so a revisited row has no blank frame. First draws are not cached on purpose: during a one-way scroll every row is new, and building a cache copy per row measured as pure overhead (an idle-time copy cost 175 ms over a fling). Queued draws from all rows flush in one `requestAnimationFrame`; the canvas backing store is only resized when its size changes; the animated placeholder rows share the same flush. Draw-only-when-visible comes from the table's row windowing (only ~56 rows exist); no `IntersectionObserver` was added.
+2. **`waveform-display.js`:** canvas sizes come from a `ResizeObserver` instead of `getBoundingClientRect` on every frame (that forced a layout each frame because the overview playhead's `left` dirtied layout); both playhead overlays move with `transform: translateX()` (rounded to 1/64 px to match layout units) instead of `left: %`; bar-label text widths are cached instead of `measureText` per label per frame. The zoom canvas draw itself is unchanged: in the expanded view the waveform scrolls under a fixed playhead, so it must be redrawn every frame, and caching a strip and blitting it at a sub-pixel offset would resample (blur) the polygon edges.
+3. **`TrackTable.svelte`:** `contain: layout paint style` on each row wrapper. This is the biggest scroll win: it stops every new row from invalidating paint of its neighbours.
+4. **Artwork thumbnails (Rust):** `get_track_artwork` takes an optional `maxPx`; the app asks for 512 px (the 250 px detail-pane cover at 2x). The backend decodes with the `image` crate, downsizes with `thumbnail()` to a 512 px JPEG (quality 85) and keeps up to 400 thumbnails in memory keyed by track id, size and a hash of the stored bytes (so replaced artwork is not served stale); images already 512 px or smaller and undecodable data pass through unchanged. `image = "0.25.10"` was added to `pioneer-test-ui`: it is the version already locked for `pioneer-usb-writer` (MIT OR Apache-2.0, same default features), so `Cargo.lock` only gained a dependency edge, not a package. Two unit tests cover resize/format and pass-through. Browser effect not measured: the mock library has no artwork, so this is verified by the Rust tests only; thumbnails are not pixel-identical to the browser's own downscale of the full image, by design.
+
+Not done: a pool of recycled row canvases (`getContext` is ~30 ms of a 2 s scroll, not the bottleneck), `ImageBitmap` for the player (the overview already blits an offscreen cache and the compact view is drawn once).
+
+## Pixel identity
+
+`app/perf/shots.mjs` takes 14 screenshots at 1440x900 (dpr 1, and again at dpr 2): track list at top / middle / end / after a fast scroll, compact player paused at four fixed positions, expanded player at fit, zoomed and at three overview seeks. Animations are disabled, the library is the fixed `?mock=30000`, the transport is paused and seeked by click. `app/perf/pixdiff.mjs` compares two folders (max channel difference, differing pixel count, bounding box). Before = the merge commit built separately, after = this branch.
+
+- Before vs before (noise floor): 0 everywhere except the master level meter, bottom right (up to 11/255, 16 pixels), which animates by itself.
+- **Every track list screenshot: 0 differing pixels at dpr 1 and dpr 2** (the row mini waveforms, covers and text are identical, including after the bitmap cache has been filled).
+- Compact player: waveform and playhead identical (0) at all positions; at dpr 1 only the cue ring shows up to 2/255 (45 pixels) in two shots, plus the level meter noise above.
+- Expanded player: waveform, overview, grid and labels identical (0) at the seek, zoom and fit screenshots; the selected row's BPM text in the list above it differs by 1/255 on 54 pixels (compositing of the contained row; dpr 2: 1/255 on 147 pixels).
+- **Maximum difference: 4/255 at dpr 1 and 7/255 at dpr 2**, both in a single screenshot (the first expanded frame after expanding), on the 1 px overview playhead line (antialiasing coverage of a line at a fractional x; the same position after any later seek is 0). Threshold used: 8/255, no visible change. A first attempt that promoted the playheads to their own layer (`will-change: transform`) snapped them half a pixel off (up to 128/255) and was dropped.
+
+Not looked at by a person: someone should glance at the compact and expanded waveform and at a few rows with the artwork column enabled once in the app.
+
+## What is left
+
+- **Fling is unchanged**: replacing the whole 56-row window costs ~165 ms of main-thread CPU, ~3 ms per row of Svelte mount (12 cells each) plus style/layout; only fewer cells per row, a leaner `TrackRow`, or recycled row components would move that. `TrackRow.svelte` and `track-row.css` were outside this entry's write scope.
+- **Page-level paint/layerize cost at 30k rows**: while playing, most of the compact player's main-thread time is `Paint`/`Layerize`/`Commit` with no script involved (Layerize ~2 to 5 ms per frame even with the row canvases removed). Something about the 840,000 px tall scroller and layer tree is re-layerized every frame; not tracked down. A GPU-backed Chromium or WebKit will behave differently.
+- **The expanded view still redraws its zoom canvas every frame** (about 3 to 4 ms of script per frame here, mostly `lineTo` and the envelope arrays); caching it would change pixels. Expanded main-thread CPU per frame was within noise before and after (16 to 18 ms in this environment); do not read the layout-time drop as a CPU win there.
+- **Row bitmap cache benefit is untested for scroll-back**: the one-way scroll benchmarks never hit it. It should help sort/filter/scroll-back (remounts of known rows) but there is no number for it.
+- **Not measured**: artwork thumbnails in a real window, WebKit canvas/transform behaviour, anything on the `mac` box.
+
+## Reproduce
+
+```bash
+cd app && npm ci && npm run build
+npx vite preview --host 127.0.0.1 --port 4313 &
+export PW_DIR=/path/to/playwright-dir
+node perf/waveform-perf.mjs http://127.0.0.1:4313/ 30000 [count]     # `count` adds getComputedStyle/getBoundingClientRect/fillRect counters
+node perf/trace-scroll.mjs http://127.0.0.1:4313/ 30000 scroll|playing|expanded
+node perf/shots.mjs http://127.0.0.1:4313/ /tmp/after 30000 1         # last arg: deviceScaleFactor
+node perf/pixdiff.mjs /tmp/before /tmp/after 8                        # exits 1 above the threshold
+```
+
+For "before", extract `3eb99a2` (`git archive 3eb99a2 app prototyping/viewport | tar -x -C /tmp/base`), link `node_modules`, build and preview on another port.

@@ -73,3 +73,5 @@
 2026-10-23 17:42 orchestrator - resumed: usage limit reset (PM); Q26 and Q27 workers resumed
 2026-10-23 17:42 orchestrator Q27 done: branch q27-writer-repro 450ea04; PDB fails from 192 tracks, ANLZ from 437 s; writer-bugs doc landed
 2026-10-23 17:43 orchestrator - decided: own prio perf: Q28 waveform drawing + scroll (design system allowed, pixel-diff gate); spawn branch q28-waveform-perf
+2026-10-23 18:48 orchestrator Q28 done: branch q28-waveform-perf 2a7a232; perf doc section landed
+2026-10-23 18:48 orchestrator - decided: own prio perf: Q29 track row mount + page paint; spawn branch q29-rows
