@@ -262,3 +262,63 @@ node perf/pixdiff.mjs /tmp/before /tmp/after 8                        # exits 1 
 ```
 
 For "before", extract `3eb99a2` (`git archive 3eb99a2 app prototyping/viewport | tar -x -C /tmp/base`), link `node_modules`, build and preview on another port.
+
+
+# Q29, 2026-10-23: track row mount cost and page paint at 30k rows
+
+Branch `q29-rows` (from `q28-waveform-perf`, master merged). Headless Chromium on the shared `dev` box, `?mock=30000`, software compositing. Headline: a fling to the end costs 166 ms of main-thread CPU per frame before, 74 ms after (frame p50 200 -> 83 ms wall); the per-frame Layerize cost fell from 5.2 to 3.9 ms; the "paint cost at 30k rows" is not caused by the 30k-tall scroller.
+
+## Method
+
+Same tools as Q28: `waveform-perf.mjs` (new `ONLY=list` env stops after the list scenarios), `trace-scroll.mjs` (new `fling` action; `INJECT_CSS` / `INJECT_JS` env to try a style change on a built page), `walkthrough.mjs`. Before = the Q28 head built in a scratch directory and served on its own port; after = this branch. Medians of 5 alternating before/after runs (load average 20 to 33 the whole time, so CPU time is the figure to read; wall times are shown for context).
+
+## Results (median of 5, alternating)
+
+| scenario | metric | before | after |
+|---|---|---|---|
+| fling to the end, 20 frames, whole window replaced each frame | main-thread CPU per frame | 166 ms (164 to 168) | 74 ms (72 to 81) |
+| same | frame p50 / p95 (wall) | 200 / 283 ms | 83 / 133 ms |
+| same | script / layout / style per frame | 99 / 37 / 22 ms | 20 / 28 / 6 ms |
+| 120 frames of +90 px scroll | main-thread CPU per frame | 26.2 ms | 19.9 ms |
+| compact player playing (3 s trace, 30k rows) | Layerize avg per frame (181 frames) | 5.2 ms | 3.9 ms |
+| same | main-thread self time over 3 s | 1756 ms | 1457 ms |
+| same | Paint avg (50 paints) | 2.2 ms | 2.4 ms (same, noise) |
+| same, 1,000 rows instead of 30,000 | Layerize avg | 4.9 ms | 3.9 ms |
+| 2 s scroll trace | Paint avg per frame | 4.2 ms (47 paints) | 3.4 ms (72 paints) |
+
+## What was slow, what changed
+
+1. **Row mount on every scroll step.** Rows were keyed by track id, so each new window mounted ~56 `TrackRow` components (12 cells each) and unmounted the old ones: 99 ms of script per fling frame. `TrackTable.svelte` now keeps a fixed pool of row components (`ceil(viewport / 28) + 26` slots, enough for the visible rows plus 12 rows of overscan each side), keyed by slot. Slot `s` shows row index `first + ((s - first) mod pool)`, so a row keeps its DOM node while it scrolls and only the one slot that moves from the top band to the bottom band changes its props. Rows are `position: absolute` at `top = index * 28` inside a body of fixed height; the two spacer divs are gone. Script per fling frame 99 -> 20 ms; layout/style stay (new text must be shaped); layout is now the largest part (28 ms, all of it text layout of the new cell strings: with `.ff-trow__text` hidden it drops to 1.4 ms).
+2. **DOM order is no longer row order.** Anything that read `[data-track-row]` in DOM order broke by design: `updateTrackDropTarget` in `dnd.svelte.ts` now takes the smallest row index whose midpoint is below the pointer (and the largest index + 1 otherwise) instead of the first row in the NodeList. The marquee already read each row's `data-row-index`. Slots without a track (end of a short list) are `display: none` and have no `data-track-row`, so they are invisible to both. Screen-reader order follows slot order, not track order (the list has no row roles, so nothing announces it today).
+3. **`TrackRow.svelte`:** the per-column style string is computed once per `columns` change (`cellPlan`), not per cell per row; text cells (everything except tag, fav, wave, cover) no longer clip (`overflow: hidden` moved from the cell to nothing; the inner `.ff-trow__text` span still clips and ellipsises, and the cell is exactly as wide as the span, so nothing changes visually). Selectors that use `.ff-trow__cell` / `.ff-trow__text` (column fit) are unchanged.
+4. **Paint / Layerize at 30k rows.** Measured, not what Q28 guessed: the cost does not scale with the row count (Layerize 4.9 ms at 1,000 rows, 5.2 ms at 30,000), so the 840,000 px spacer is not the problem. It is a per-frame cost: while a track plays, the playhead overlay (`.waveform-display` `div`, 60 style mutations per second) changes a paint property every frame and Chromium re-layerizes every paint chunk of the page, about 0.13 ms per visible row. Experiments on the built page (`INJECT_CSS`): hiding all rows 4.6 -> 2.1 ms; removing every `overflow: hidden` inside the rows 4.2 -> 1.75 ms; either the cell clips or the text clips alone 3.5 to 3.7; `contain` on the rows, a sticky header, `will-change` on the body or the scroller, `content-visibility: auto` on the rows, and `will-change: transform` on the playhead: no change. So the lever is the number of clip nodes in visible rows, and the change in (3) removes one of the two per text cell: 5.2 -> 3.9 ms.
+
+## Not done, tested and dropped
+
+- **Deferring cell content of rows in the overscan band** (render the text only for visible rows plus 3, fill the rest 70 ms after the last scroll): measured 61 to 64 ms per fling frame against 67 to 74 ms without it, within noise, for blank overscan rows on a fast scroll in a real (async-scrolling) webview. Dropped; the band is only 12 of 56 rows and the cost is the visible ones.
+- **`content-visibility: auto`** on rows: no Layerize change, and it would remove the overscan's protection against blank rows when the webview scrolls on a compositor thread.
+
+## Pixel identity
+
+`shots.mjs` (14 states) before vs after, `pixdiff.mjs` threshold 8/255. dpr 2: max 0 on all 14. dpr 1: all four track-list shots (top, middle, end, after fast scroll) and the 10 player shots are 0 except the master level meter in the bottom right corner (up to 11/255 on 15 to 16 pixels, bbox x 1279..1423, y 794..893), which animates by itself and showed the same 11/255 between two builds of the same code in Q28. Not in the shots: a selected or dragged row (class and CSS unchanged; the walkthrough checks the selection) and the artwork column.
+
+Walkthrough (headless, 2,000 tracks, no console errors): select, shift-range, scroll to end and select the last row, rows match their index and sit at `header + index * 28 - scrollTop` after six scroll jumps (new step), column resize (new step), sort, column menu, search, marquee, row drag onto a playlist, drop line index in a playlist (new step: line at 56 px), organize panel, settings. Both before and after pass every step.
+
+## What is left
+
+- **Fling is now text layout bound** (28 of 74 ms layout, 14 ms paint). Fewer text cells per row or less text would be the only big lever; a column that is always the same text (e.g. a short key) could be a single text node.
+- **Layerize while playing** (3.9 ms per frame at ~32 visible rows): the remaining cost is one clip node per text cell plus the page. Removing the clips needs another way to ellipsise (measure and clip only cells that overflow, with canvas `measureText`), which risks edge pixels; or a playhead that does not change paint properties per frame (the Q28 attempt to put it on its own layer shifted it by half a pixel).
+- **Not measured:** WebKit/real window, a GPU-backed compositor, scroll-back with a populated bitmap cache, drag with a very long list in a playlist (dnd now scans visible rows only, as before).
+
+## Reproduce
+
+```bash
+cd app && npm ci && npm run build   # after
+# before: git archive q28-waveform-perf app prototyping/viewport | tar -x -C /tmp/base, link node_modules, build
+export PW_DIR=/path/to/playwright-dir
+ONLY=list node perf/waveform-perf.mjs http://127.0.0.1:PORT/ 30000     # flingSteps20.totalMs.mainCpu / 20
+node perf/trace-scroll.mjs http://127.0.0.1:PORT/ 30000 fling|playing|scroll
+INJECT_CSS='.ff-trow__text{overflow:visible!important}' node perf/trace-scroll.mjs http://127.0.0.1:PORT/ 30000 playing
+node perf/walkthrough.mjs http://127.0.0.1:PORT/ 2000
+node perf/shots.mjs http://127.0.0.1:PORT/ /tmp/after 30000 1 && node perf/pixdiff.mjs /tmp/before /tmp/after 8
+```
