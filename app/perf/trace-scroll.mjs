@@ -23,7 +23,21 @@ if (action === 'playing' || action === 'expanded') {
 }
 
 await browser.startTracing(undefined, { categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute'] });
-if (action === 'scroll') {
+if (action === 'fling') {
+  await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const el = document.querySelector('.ff-table__scroll');
+        let i = 0;
+        const tick = () => {
+          el.scrollTop = (el.scrollHeight - el.clientHeight) * ((i + 1) / 20);
+          if (++i < 20) requestAnimationFrame(tick);
+          else requestAnimationFrame(() => requestAnimationFrame(resolve));
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+} else if (action === 'scroll') {
   await page.evaluate(
     () =>
       new Promise((resolve) => {
