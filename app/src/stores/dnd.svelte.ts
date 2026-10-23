@@ -85,15 +85,15 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
     return;
   }
 
+  let before: number | null = null;
+  let last = -1;
   for (const row of rows) {
+    const rowIndex = Number((row as HTMLElement).dataset.rowIndex);
+    last = Math.max(last, rowIndex);
     const rect = row.getBoundingClientRect();
-    const mid = rect.top + rect.height / 2;
-    if (clientY < mid) {
-      dnd.dropRowIndex = Number((row as HTMLElement).dataset.rowIndex);
-      return;
-    }
+    if (clientY < rect.top + rect.height / 2 && (before === null || rowIndex < before)) before = rowIndex;
   }
-  dnd.dropRowIndex = Number((rows[rows.length - 1] as HTMLElement).dataset.rowIndex) + 1;
+  dnd.dropRowIndex = before ?? last + 1;
 }
 
 export function startColumnDrag(key: string, x: number, y: number) {

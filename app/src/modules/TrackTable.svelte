@@ -70,6 +70,7 @@
   let suppressRowClick = false;
 
   const ROW_HEIGHT = 28;
+  const EMPTY_TRACK = {};
   const OVERSCAN_ROWS = 12;
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
@@ -156,7 +157,12 @@
       Math.ceil((scrollTop + viewportHeight - headerHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
     )
   );
-  let windowTracks = $derived(currentTracks.slice(firstRow, endRow));
+  let poolSize = $derived(Math.ceil(viewportHeight / ROW_HEIGHT) + 2 * OVERSCAN_ROWS + 2);
+  let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
+
+  function indexForSlot(slot, first, size) {
+    return first + ((((slot - first) % size) + size) % size);
+  }
 
   function prefetchNeighbours(rowIndex) {
     const neighbours = [currentTracks[rowIndex + 1], currentTracks[rowIndex - 1]];
@@ -560,6 +566,7 @@
         data-source-id={effectiveSource}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
+        style:height={currentTracks.length > 0 ? `${currentTracks.length * ROW_HEIGHT}px` : undefined}
         role="list"
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
@@ -580,31 +587,30 @@
           />
         </div>
       {:else}
-        {#if firstRow > 0}
-          <div class="ff-table__spacer" style:height="{firstRow * ROW_HEIGHT}px"></div>
-        {/if}
-        {#each windowTracks as track, i (track.id)}
+        {#each poolSlots as slot (slot)}
+          {@const index = indexForSlot(slot, firstRow, poolSize)}
+          {@const track = index < endRow ? currentTracks[index] : undefined}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
-            data-track-row
-            data-row-index={firstRow + i}
-            onclick={(e) => handleRowClick(track, e, firstRow + i)}
-            ondblclick={(e) => handleRowDblClick(track, e)}
-            onpointerdown={(e) => onRowPointerDown(e, track, firstRow + i)}
-            oncontextmenu={(e) => openRowMenu(e, track)}
+            class="ff-table__row"
+            data-track-row={track ? '' : undefined}
+            data-row-index={index}
+            style:top="{index * ROW_HEIGHT}px"
+            style:display={track ? undefined : 'none'}
+            onclick={(e) => track && handleRowClick(track, e, index)}
+            ondblclick={(e) => track && handleRowDblClick(track, e)}
+            onpointerdown={(e) => track && onRowPointerDown(e, track, index)}
+            oncontextmenu={(e) => track && openRowMenu(e, track)}
           >
             <TrackRow
-              {track}
-              state={rowState(track)}
-              analyzing={isTrackAnalyzing(track.id)}
+              track={track ?? EMPTY_TRACK}
+              state={track ? rowState(track) : 'rest'}
+              analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
             />
           </div>
         {/each}
-        {#if endRow < currentTracks.length}
-          <div class="ff-table__spacer" style:height="{(currentTracks.length - endRow) * ROW_HEIGHT}px"></div>
-        {/if}
       {/if}
       </div>
     </div>
@@ -678,9 +684,6 @@
     min-width: 0;
     width: 100%;
   }
-  .ff-table__spacer {
-    flex: none;
-  }
   .ff-table__drop-line {
     position: absolute;
     left: 0;
@@ -696,7 +699,11 @@
     -webkit-user-select: none;
     user-select: none;
   }
-  .ff-table__body > :global(div[data-track-row]) {
+  .ff-table__row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 28px;
     contain: layout paint style;
     cursor: default;
   }

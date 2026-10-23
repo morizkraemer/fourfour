@@ -9,6 +9,8 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 await page.goto(`${base}?mock=${count}`, { waitUntil: 'commit', timeout: 0 });
 await page.waitForSelector('[data-track-row]', { timeout: 0 });
 await page.waitForTimeout(3000);
+if (process.env.INJECT_CSS) await page.addStyleTag({ content: process.env.INJECT_CSS });
+if (process.env.INJECT_JS) await page.evaluate(process.env.INJECT_JS);
 
 if (action === 'playing' || action === 'expanded') {
   await page.evaluate(() => document.querySelectorAll('[data-track-row]')[13].dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true })));

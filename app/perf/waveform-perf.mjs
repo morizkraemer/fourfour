@@ -209,6 +209,13 @@ result.scrollFling.reachedEnd = endState.top >= endState.max - 1;
 await page.evaluate(() => (document.querySelector('.ff-table__scroll').scrollTop = 0));
 await page.waitForTimeout(500);
 
+if (process.env.ONLY === 'list') {
+  result.errors = errors;
+  console.log(JSON.stringify(result, null, 1));
+  await browser.close();
+  process.exit(0);
+}
+
 await page.evaluate(
   () =>
     new Promise((resolve) => {
