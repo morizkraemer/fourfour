@@ -45,8 +45,9 @@ const peakLoadInflight = new Map<number, Promise<void>>();
 
 /** Shallow-bump so list rows re-render when nested track fields change. */
 export function bumpLibraryTracks() {
-  haystackById = null;
+  resetSearchIndex();
   library.tracks = [...library.tracks];
+  scheduleSearchIndexWarmup();
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -270,12 +271,54 @@ const haystackCache = new WeakMap<object, string[]>();
  */
 let plainTracks: Record<string, unknown>[] = [];
 let haystackById: Map<number, string> | null = null;
+let haystackCursor = 0;
+let warmupTimer: ReturnType<typeof setTimeout> | undefined;
+let warmupGeneration = 0;
+
+const WARMUP_CHUNK = 2000;
+const WARMUP_DELAY_MS = 250;
+
+function resetSearchIndex() {
+  haystackById = null;
+  haystackCursor = 0;
+  warmupGeneration++;
+}
+
+function fillSearchIndex(limit: number) {
+  if (!haystackById) haystackById = new Map();
+  const end = Math.min(plainTracks.length, haystackCursor + limit);
+  for (; haystackCursor < end; haystackCursor++) {
+    const t = plainTracks[haystackCursor];
+    haystackById.set(t.id as number, trackHaystack(t));
+  }
+}
 
 function haystackByIdFor(): Map<number, string> {
-  if (!haystackById) {
-    haystackById = new Map(plainTracks.map((t) => [t.id as number, trackHaystack(t)]));
-  }
-  return haystackById;
+  fillSearchIndex(plainTracks.length);
+  return haystackById!;
+}
+
+function whenIdle(run: () => void) {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
+  else setTimeout(run, 0);
+}
+
+/** Builds the search text in idle-time chunks so the first keystroke finds it ready. */
+function scheduleSearchIndexWarmup() {
+  clearTimeout(warmupTimer);
+  warmupTimer = setTimeout(() => {
+    const generation = warmupGeneration;
+    const step = () => {
+      if (generation !== warmupGeneration) return;
+      if (haystackCursor < plainTracks.length) {
+        fillSearchIndex(WARMUP_CHUNK);
+        whenIdle(step);
+      } else {
+        haystacksFor(library.tracks);
+      }
+    };
+    whenIdle(step);
+  }, WARMUP_DELAY_MS);
 }
 
 function trackHaystack(track: Record<string, unknown>): string {
@@ -316,6 +359,8 @@ function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] 
   return haystacks;
 }
 
+let lastFilter: { tracks: object; query: string; result: unknown[] } | null = null;
+
 /** Match tracks against a whitespace-separated query (all terms must match). */
 export function filterTracks<T extends Record<string, unknown>>(
   tracks: T[],
@@ -323,9 +368,14 @@ export function filterTracks<T extends Record<string, unknown>>(
 ): T[] {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return tracks;
+  if (lastFilter && lastFilter.tracks === tracks && lastFilter.query === trimmed) {
+    return lastFilter.result as T[];
+  }
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const haystacks = haystacksFor(tracks);
-  return tracks.filter((_, i) => terms.every((term) => haystacks[i].includes(term)));
+  const result = tracks.filter((_, i) => terms.every((term) => haystacks[i].includes(term)));
+  lastFilter = { tracks, query: trimmed, result };
+  return result;
 }
 
 /** Tracks shown for a sidebar source (label, playlist name, or USB path). */
@@ -597,9 +647,10 @@ export async function loadState() {
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
     plainTracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
-    haystackById = null;
+    resetSearchIndex();
     library.tracks = plainTracks;
     library.playlists = state.playlists;
+    scheduleSearchIndexWarmup();
 
     await ensureFavoriteSlots();
     library.tauriError = lastTauriError;
