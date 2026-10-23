@@ -51,6 +51,7 @@
     buildSourceContextMenuItems,
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
+  import { rowWindow, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -69,9 +70,7 @@
   let marqueeActive = $state(false);
   let suppressRowClick = false;
 
-  const ROW_HEIGHT = 28;
   const EMPTY_TRACK = {};
-  const OVERSCAN_ROWS = 12;
   let scrollTop = $state(0);
   let viewportHeight = $state(0);
   let headerHeight = $state(0);
@@ -148,21 +147,13 @@
 
   let columns = $derived(visibleColumns(layoutKind));
 
-  let firstRow = $derived(
-    Math.max(0, Math.floor((scrollTop - headerHeight) / ROW_HEIGHT) - OVERSCAN_ROWS)
+  let rowWin = $derived(
+    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length })
   );
-  let endRow = $derived(
-    Math.min(
-      currentTracks.length,
-      Math.ceil((scrollTop + viewportHeight - headerHeight) / ROW_HEIGHT) + OVERSCAN_ROWS
-    )
-  );
-  let poolSize = $derived(Math.ceil(viewportHeight / ROW_HEIGHT) + 2 * OVERSCAN_ROWS + 2);
+  let firstRow = $derived(rowWin.firstRow);
+  let endRow = $derived(rowWin.endRow);
+  let poolSize = $derived(rowWin.poolSize);
   let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
-
-  function indexForSlot(slot, first, size) {
-    return first + ((((slot - first) % size) + size) % size);
-  }
 
   function prefetchNeighbours(rowIndex) {
     const neighbours = [currentTracks[rowIndex + 1], currentTracks[rowIndex - 1]];
@@ -285,7 +276,7 @@
 
   function dropLineTopForIndex(index) {
     if (!tableBodyEl || index == null) return null;
-    return Math.min(index, currentTracks.length) * ROW_HEIGHT;
+    return dropLineTopFor(index, currentTracks.length);
   }
 
   $effect(() => {
@@ -566,7 +557,7 @@
         data-source-id={effectiveSource}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
-        style:height={currentTracks.length > 0 ? `${currentTracks.length * ROW_HEIGHT}px` : undefined}
+        style:height={spacerHeight(currentTracks.length) !== undefined ? `${spacerHeight(currentTracks.length)}px` : undefined}
         role="list"
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
@@ -596,7 +587,7 @@
             class="ff-table__row"
             data-track-row={track ? '' : undefined}
             data-row-index={index}
-            style:top="{index * ROW_HEIGHT}px"
+            style:top="{rowTop(index)}px"
             style:display={track ? undefined : 'none'}
             onclick={(e) => track && handleRowClick(track, e, index)}
             ondblclick={(e) => track && handleRowDblClick(track, e)}
