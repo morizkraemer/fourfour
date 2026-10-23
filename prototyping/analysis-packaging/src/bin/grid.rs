@@ -3,9 +3,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use ffcore::fit::{fit_track, FitParams, Window, FPS};
+use ffcore::mp3::{self, DelayRule};
 use serde_json::{json, Value};
 
-const FPS: f64 = 50.0;
 
 #[derive(Clone)]
 struct Params {
@@ -16,7 +17,10 @@ struct Params {
     audio_range_ms: i64,
     audio_calib_ms: f64,
     audio_min_ms: f64,
-    mp3_delay: bool,
+    mp3_rule: DelayRule,
+    mp3_diag: bool,
+    use_final: bool,
+    threads: usize,
     snap_tol: f64,
     snap_phase_ms: f64,
     snap_wide: f64,
@@ -35,248 +39,8 @@ struct Reference {
     audio_path: Option<String>,
 }
 
-struct Fit {
-    bpm: f64,
-    beats_s: Vec<f64>,
-    first_s: f64,
-    raw_bpm: f64,
-    raw_beats_s: Vec<f64>,
-    fit_us: u128,
-}
-
-fn sigmoid(x: f32) -> f64 {
-    1.0 / (1.0 + (-(x as f64)).exp())
-}
-
-fn refine_peaks(peaks_s: &[f64], logits: &[f32], offset: f64) -> Vec<f64> {
-    peaks_s
-        .iter()
-        .map(|&t| {
-            let f = ((t - offset) * FPS).round() as i64;
-            let (mut num, mut den) = (0.0, 0.0);
-            for g in f - 2..=f + 2 {
-                if g < 0 || g as usize >= logits.len() {
-                    continue;
-                }
-                let p = sigmoid(logits[g as usize]);
-                num += p * g as f64;
-                den += p;
-            }
-            if den > 0.0 { num / den / FPS + offset } else { t }
-        })
-        .collect()
-}
-
-fn mode_period(peaks: &[f64]) -> Option<f64> {
-    let ibis: Vec<f64> = peaks.windows(2).map(|w| w[1] - w[0]).filter(|d| (0.25..=2.0).contains(d)).collect();
-    if ibis.len() < 4 {
-        return None;
-    }
-    let mut best = (0usize, 0.0);
-    for &c in &ibis {
-        let near: Vec<f64> = ibis.iter().copied().filter(|d| (d - c).abs() < 0.015 * c).collect();
-        if near.len() > best.0 {
-            best = (near.len(), near.iter().sum::<f64>() / near.len() as f64);
-        }
-    }
-    Some(best.1)
-}
-
-fn fit_line(peaks: &[f64], p0: f64) -> (f64, f64) {
-    let mut k = vec![0f64; peaks.len()];
-    for i in 1..peaks.len() {
-        k[i] = k[i - 1] + ((peaks[i] - peaks[i - 1]) / p0).round();
-    }
-    let (mut t0, mut p) = (peaks[0], p0);
-    for tol in [0.05, 0.03, 0.02, 0.015].iter() {
-        let inl: Vec<usize> = (0..peaks.len()).filter(|&i| (peaks[i] - (t0 + k[i] * p)).abs() < *tol).collect();
-        if inl.len() < 4 {
-            break;
-        }
-        let n = inl.len() as f64;
-        let mk = inl.iter().map(|&i| k[i]).sum::<f64>() / n;
-        let mt = inl.iter().map(|&i| peaks[i]).sum::<f64>() / n;
-        let sxx: f64 = inl.iter().map(|&i| (k[i] - mk).powi(2)).sum();
-        let sxy: f64 = inl.iter().map(|&i| (k[i] - mk) * (peaks[i] - mt)).sum();
-        if sxx == 0.0 {
-            break;
-        }
-        p = sxy / sxx;
-        t0 = mt - p * mk;
-    }
-    (t0, p)
-}
-
-struct Window {
-    offset: f64,
-    len: f64,
-}
-
-fn comb_score(act: &[f64], w: &Window, t0: f64, p: f64) -> f64 {
-    let mut s = 0.0;
-    let mut t = t0 + ((w.offset - t0) / p).ceil() * p;
-    while t < w.offset + w.len {
-        let x = (t - w.offset) * FPS;
-        let i = x.floor() as usize;
-        if i + 1 < act.len() {
-            let fr = x - i as f64;
-            s += act[i] * (1.0 - fr) + act[i + 1] * fr;
-        }
-        t += p;
-    }
-    s
-}
-
-fn refine_comb(act: &[f64], w: &Window, t0: f64, p: f64) -> (f64, f64) {
-    let mid = w.offset + w.len / 2.0;
-    let (mut bt0, mut bp, mut best) = (t0, p, comb_score(act, w, t0, p));
-    let mut step_p = p * 2e-4;
-    let mut step_t = 0.004;
-    for _ in 0..4 {
-        let mut improved = true;
-        while improved {
-            improved = false;
-            for dp in [-step_p, 0.0, step_p] {
-                for dt in [-step_t, 0.0, step_t] {
-                    if dp == 0.0 && dt == 0.0 {
-                        continue;
-                    }
-                    let cp = bp + dp;
-                    let ct = bt0 + dt - dp * ((mid - bt0) / bp);
-                    let s = comb_score(act, w, ct, cp);
-                    if s > best {
-                        best = s;
-                        bp = cp;
-                        bt0 = ct;
-                        improved = true;
-                    }
-                }
-            }
-        }
-        step_p /= 3.0;
-        step_t /= 3.0;
-    }
-    (bt0, bp)
-}
 
 
-fn fit_track(
-    peaks_s: &[f64],
-    beat_logits: &[f32],
-    down_logits: &[f32],
-    duration: f64,
-    w: &Window,
-    params: &Params,
-) -> Option<Fit> {
-    let started = Instant::now();
-    let refined = refine_peaks(peaks_s, beat_logits, w.offset);
-    let p0 = mode_period(&refined)?;
-    let raw_bpm = fold_bpm(60.0 / p0, params.lo);
-    let (mut t0, mut p) = fit_line(&refined, p0);
-    if params.comb_refine {
-        let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
-        if params.scan_pct > 0.0 {
-            let mid = w.offset + w.len / 2.0;
-            let k = (mid - t0) / p;
-            let steps = (params.scan_pct / 100.0 / 1e-5) as i64;
-            let mut best = (f64::MIN, t0, p);
-            for i in -steps..=steps {
-                let pi = p * (1.0 + i as f64 * 1e-5);
-                let tc = t0 + (p - pi) * k;
-                let mut dt = -pi / 2.0;
-                while dt < pi / 2.0 {
-                    let s = comb_score(&act, w, tc + dt, pi);
-                    if s > best.0 {
-                        best = (s, tc + dt, pi);
-                    }
-                    dt += 0.004;
-                }
-            }
-            t0 = best.1;
-            p = best.2;
-        }
-        let r = refine_comb(&act, w, t0, p);
-        t0 = r.0;
-        p = r.1;
-    }
-
-    if params.snap_tol > 0.0 {
-        let folded = fold_bpm(60.0 / p, params.lo);
-        let snapped = folded.round();
-        let delta = (folded - snapped).abs();
-        if delta < params.snap_wide.max(params.snap_tol) {
-            let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
-            let mid = w.offset + w.len / 2.0;
-            let p_new = p * folded / snapped;
-            let t_new = t0 + (p - p_new) * ((mid - t0) / p);
-            let mut best = (comb_score(&act, w, t_new, p_new), t_new);
-            let mut dt = -params.snap_phase_ms / 1000.0;
-            while dt <= params.snap_phase_ms / 1000.0 {
-                let s = comb_score(&act, w, t_new + dt, p_new);
-                if s > best.0 {
-                    best = (s, t_new + dt);
-                }
-                dt += 0.0005;
-            }
-            let current = comb_score(&act, w, t0, p);
-            if delta < params.snap_tol || best.0 >= params.snap_ratio * current {
-                p = p_new;
-                t0 = best.1;
-            }
-        }
-    }
-
-
-    let model_bpm = 60.0 / p;
-    let target = fold_bpm(model_bpm, params.lo);
-    let ratio = target / model_bpm;
-    let mut p_out = p / ratio;
-    let mut t0_out = t0;
-    if ratio < 1.0 {
-        let n = (1.0 / ratio).round() as usize;
-        let down: Vec<f64> = down_logits.iter().map(|&x| sigmoid(x)).collect();
-        let mut best = (f64::MIN, t0);
-        for j in 0..n {
-            let tj = t0 + j as f64 * p;
-            let s = comb_score(&down, w, tj, p * n as f64);
-            if s > best.0 {
-                best = (s, tj);
-            }
-        }
-        t0_out = best.1;
-        p_out = p * n as f64;
-    }
-
-    let shift = params.shift_ms / 1000.0;
-    let mut first = (t0_out + shift) % p_out;
-    if first < 0.0 {
-        first += p_out;
-    }
-    let mut beats = Vec::new();
-    let mut t = if first - p_out >= -0.05 { first - p_out } else { first };
-    while t < duration + 0.03 {
-        beats.push(t);
-        t += p_out;
-    }
-    Some(Fit {
-        bpm: 60.0 / p_out,
-        beats_s: beats,
-        first_s: first,
-        raw_bpm,
-        raw_beats_s: peaks_s.to_vec(),
-        fit_us: started.elapsed().as_micros(),
-    })
-}
-
-fn fold_bpm(mut bpm: f64, lo: f64) -> f64 {
-    while bpm < lo {
-        bpm *= 2.0;
-    }
-    while bpm >= 2.0 * lo {
-        bpm /= 2.0;
-    }
-    bpm
-}
 
 fn match_f(reference: &[f64], est: &[f64], tol_ms: f64) -> (usize, f64) {
     let (mut i, mut j, mut tp) = (0, 0, 0);
@@ -382,7 +146,16 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
         let peaks: Vec<f64> = doc["beats"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
         let duration = r.beats_ms.last().copied().unwrap_or(0.0).max(doc["duration_s"].as_f64().unwrap() * 1000.0) / 1000.0;
         let w = Window { offset: doc["offset_s"].as_f64().unwrap_or(0.0), len: frames as f64 / FPS };
-        let Some(mut fit) = fit_track(&peaks, bl, dl, doc["duration_s"].as_f64().unwrap().max(duration), &w, params) else {
+        let final_beats: Option<Vec<f64>> = if params.use_final {
+            doc["final_beats_s"].as_array().map(|v| v.iter().map(|x| x.as_f64().unwrap()).collect())
+        } else {
+            None
+        };
+        let fitted = match &final_beats {
+            Some(fb) => doc["bpm"].as_f64().map(|bpm| ffcore::fit::Fit { bpm, beats_s: fb.clone(), first_s: 0.0, raw_bpm: bpm, raw_beats_s: peaks.clone(), fit_us: 0 }),
+            None => fit_track(&peaks, bl, dl, doc["duration_s"].as_f64().unwrap().max(duration), &w, &params.fit()),
+        };
+        let Some(mut fit) = fitted else {
             continue;
         };
         if params.audio_q > 0.0 {
@@ -393,13 +166,13 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
                 fit.fit_us += started.elapsed().as_micros();
             }
         }
-        if params.mp3_delay {
-            if let Some(path) = &r.audio_path {
-                let delay = mp3_reference_delay_s(path);
-                fit.beats_s = fit.beats_s.iter().map(|t| t + delay).collect();
-            }
+        let mut delay = 0.0;
+        if let Some(path) = &r.audio_path {
+            delay = mp3::reference_delay_s(std::path::Path::new(path), params.mp3_rule);
         }
-        fit.beats_s = fit.beats_s.iter().filter(|t| **t > -0.04).map(|t| t.max(0.0)).collect();
+        if final_beats.is_none() {
+            fit.beats_s = ffcore::fit::finalize_beats(&fit.beats_s, delay);
+        }
         let est_ms: Vec<f64> = fit.beats_s.iter().map(|t| t * 1000.0).collect();
         let raw_ms: Vec<f64> = fit.raw_beats_s.iter().map(|t| t * 1000.0).collect();
         let (_, f70) = match_f(&r.beats_ms, &est_ms, 70.0);
@@ -412,6 +185,11 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
         let mut abs: Vec<f64> = offs.iter().map(|d| d.abs()).collect();
         let mut signed = offs.clone();
         let med = median(&mut signed);
+        if params.mp3_diag {
+            if let Some(t) = r.audio_path.as_deref().and_then(|p| mp3::scan(std::path::Path::new(p))) {
+                println!("MP3 {} header_frame {} header_counts {} lame_delay {:?} bpm_ok {} med_offset_ms {:.1} max_dev_ms {:.1}", r.id, t.header_frame, t.header_counts, t.lame_delay, (fit.bpm - r.bpm).abs() <= 0.5, med, abs.iter().cloned().fold(0.0, f64::max));
+            }
+        }
         if params.diag && r.constant {
             if let Some(path) = &r.audio_path {
                 phase_diag(r.id, path, &fit.beats_s, med);
@@ -506,7 +284,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let reference = PathBuf::from(args.next().expect("usage: grid <reference.json> <dump dir> [--split dev|test|all] [--lo N] [--shift-ms N] [--comb] [--out file] [--dedupe]"));
     let dir = PathBuf::from(args.next().expect("dump dir"));
-    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_delay: false, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false };
+    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_rule: DelayRule::None, mp3_diag: false, use_final: false, threads: 1, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false };
     let mut split = "test".to_string();
     let mut out: Option<PathBuf> = None;
     let mut dedupe = false;
@@ -521,7 +299,11 @@ fn main() {
             "--audio-range-ms" => params.audio_range_ms = args.next().unwrap().parse().unwrap(),
             "--audio-min-ms" => params.audio_min_ms = args.next().unwrap().parse().unwrap(),
             "--audio-calib-ms" => params.audio_calib_ms = args.next().unwrap().parse().unwrap(),
-            "--mp3-delay" => params.mp3_delay = true,
+            "--mp3-delay" => params.mp3_rule = DelayRule::Lame,
+            "--mp3-rule" => params.mp3_rule = DelayRule::parse(&args.next().unwrap()).expect("rule none|lame|lame+header|header"),
+            "--mp3-diag" => params.mp3_diag = true,
+            "--use-final" => params.use_final = true,
+            "--threads" => params.threads = args.next().unwrap().parse().unwrap(),
             "--snap-tol" => params.snap_tol = args.next().unwrap().parse().unwrap(),
             "--scan-pct" => params.scan_pct = args.next().unwrap().parse().unwrap(),
             "--snap-wide" => params.snap_wide = args.next().unwrap().parse().unwrap(),
@@ -717,35 +499,19 @@ fn audio_phase_correction_ms(path: &str, cache: &PathBuf, beats_s: &[f64], param
     total - params.shift_ms
 }
 
-fn mp3_reference_delay_s(path: &str) -> f64 {
-    let Ok(data) = fs::read(path) else { return 0.0 };
-    if !path.to_lowercase().ends_with(".mp3") {
-        return 0.0;
+
+impl Params {
+    fn fit(&self) -> FitParams {
+        FitParams {
+            lo: self.lo,
+            shift_ms: self.shift_ms,
+            comb_refine: self.comb_refine,
+            snap_tol: self.snap_tol,
+            snap_phase_ms: self.snap_phase_ms,
+            snap_wide: self.snap_wide,
+            scan_pct: self.scan_pct,
+            snap_ratio: self.snap_ratio,
+            threads: self.threads,
+        }
     }
-    let mut pos = 0;
-    if data.len() > 10 && &data[..3] == b"ID3" {
-        pos = 10 + (((data[6] & 0x7f) as usize) << 21 | ((data[7] & 0x7f) as usize) << 14 | ((data[8] & 0x7f) as usize) << 7 | (data[9] & 0x7f) as usize);
-    }
-    while pos + 4 < data.len().min(pos + 4096) && !(data[pos] == 0xff && data[pos + 1] & 0xe0 == 0xe0 && (data[pos + 2] >> 2) & 3 != 3) {
-        pos += 1;
-    }
-    if pos + 200 > data.len() {
-        return 0.0;
-    }
-    let mpeg1 = (data[pos + 1] >> 3) & 3 == 3;
-    let sr_idx = ((data[pos + 2] >> 2) & 3) as usize;
-    let sr = if mpeg1 { [44100.0, 48000.0, 32000.0][sr_idx] } else { [22050.0, 24000.0, 16000.0][sr_idx] };
-    let Some(rel) = data[pos..pos + 200].windows(4).position(|w| w == b"Xing" || w == b"Info") else { return 0.0 };
-    let tag = pos + rel;
-    let flags = u32::from_be_bytes([data[tag + 4], data[tag + 5], data[tag + 6], data[tag + 7]]);
-    let mut ext = tag + 8;
-    if flags & 1 != 0 { ext += 4; }
-    if flags & 2 != 0 { ext += 4; }
-    if flags & 4 != 0 { ext += 100; }
-    if flags & 8 != 0 { ext += 4; }
-    if ext + 24 > data.len() || &data[ext..ext + 4] != b"LAME" {
-        return 0.0;
-    }
-    let delay = ((data[ext + 21] as usize) << 4) | ((data[ext + 22] >> 4) as usize);
-    (delay + 529) as f64 / sr
 }

@@ -8,11 +8,18 @@ license = "MIT OR Apache-2.0"
 [workspace]
 members = ["rbref"]
 
+[lib]
+name = "ffcore"
+path = "src/lib.rs"
+
 [dependencies]
 stratum-dsp = "=1.0.0"
 beat-this = { version = "=1.1.0", default-features = false, features = ["decode", "serde"] }
 rustfft = "6.2"
 serde_json = "1"
+rten = "=0.24.0"
+rten-tensor = "=0.24.0"
+anyhow = "1"
 
 [profile.release]
 opt-level = 3

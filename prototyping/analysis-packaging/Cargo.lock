@@ -419,7 +419,10 @@ dependencies = [
 name = "ffproto"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "beat-this",
+ "rten",
+ "rten-tensor",
  "rustfft",
  "serde_json",
  "stratum-dsp",
