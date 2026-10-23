@@ -322,3 +322,35 @@ INJECT_CSS='.ff-trow__text{overflow:visible!important}' node perf/trace-scroll.m
 node perf/walkthrough.mjs http://127.0.0.1:PORT/ 2000
 node perf/shots.mjs http://127.0.0.1:PORT/ /tmp/after 30000 1 && node perf/pixdiff.mjs /tmp/before /tmp/after 8
 ```
+
+# Q32, 2026-10-23: first search keystroke and row-window module
+
+## First search keystroke at 30k
+
+Tool: `app/perf/search-perf.mjs <base> <count> <runs> <idleMs>` (fresh headless Chromium per run, 4 s idle after the first row, types `track 12`, wall time = keydown to two animation frames, CPU = CDP `TaskDuration` per keystroke). Medians of 5, `?mock=30000`, load average 25 to 33 the whole time, so the CPU column is the one to trust.
+
+| | before | after |
+|---|---|---|
+| First keystroke, wall (ms) | 444.9 | 119.7 |
+| First keystroke, CPU (ms) | 446.7 | 114.8 |
+| Later keystrokes, wall (ms) | 128.3 | 94.0 |
+| Later keystrokes, CPU (ms) | 113.9 | 87.3 |
+
+Why the first was slow: the per-track search text (16 fields, lowercased, joined) was built lazily inside the first `filterTracks` call, and then a second 30k pass mapped it onto the `library.tracks` proxy array (also lazy, per source array). Both ran on the first keystroke.
+
+Changes (`library.svelte.ts`, results unchanged; the 20 existing search tests pass):
+- The search text is built in idle time after `loadState()` and after `bumpLibraryTracks()`: `requestIdleCallback` chunks of 2,000 tracks, started 250 ms after the change, cancelled by a generation counter when the library changes again. If a keystroke arrives first, `filterTracks` finishes the remaining tracks synchronously, so results never depend on timing.
+- When the index is complete, the per-array list for `library.tracks` is built once as well.
+- `filterTracks` remembers its last (array, query) result. `GlobalHeader`, `ListPanel` and `TrackTable` each call it with the same input per keystroke, so two of the three calls are now free (later keystrokes 128 -> 94 ms).
+- No input debounce was added: after the change nothing on the keystroke path needs it.
+
+Left: every `bumpLibraryTracks()` (a first-time analysis load that changes bpm/key) still rebuilds the whole index in idle time rather than patching one track, because the function does not know which track changed. At 30k that is ~170 ms of idle work spread over chunks.
+
+## Row-window module
+
+The virtual/pooled row maths from `TrackTable.svelte` now lives in `app/src/lib/rowWindow.ts`: `rowWindow` (first row, end row, pool size from scrollTop, viewport, header, row count), `indexForSlot`, `rowTop`, `spacerHeight`, `dropLineTop`, and `scrollTopToReveal` (scroll-to-index; not used by the table yet, which has no keyboard scroll-to-row, but covered by tests so the next feature can use it). Constants `ROW_HEIGHT = 28` and `OVERSCAN_ROWS = 12` moved with it. 20 vitest cases in `rowWindow.test.ts`: top and bottom clamps, list shorter than the viewport, empty list, zero viewport before first measure, viewport resize, jump to the end and back, slot-to-row mapping stays a permutation and moves exactly one slot per row of scroll, reveal up, down and past the end.
+
+## No behaviour or visual change
+
+- `walkthrough.mjs` at 2,000 tracks: 14 steps ok, console errors none.
+- `shots.mjs` + `pixdiff.mjs` threshold 8/255, before = `q31-tests` head built in a scratch worktree, after = this branch, 14 states: dpr 2 max 0 on all. dpr 1: max 11/255, only in the four compact-player shots (master meter, bbox x 1279..1424, y 884..893, and a 2/255 wobble at x 106..134). Two builds of the unchanged `q31-tests` code differ the same way (11/255 meter, 2/255), so this is the animated meter, not the change. All track-list shots are 0.
