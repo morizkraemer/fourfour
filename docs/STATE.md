@@ -26,7 +26,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
 
 ### Needs Merlin's ears/eyes (laptop)
-- Preview of tonight's combined branch q31-tests: http://dev.tail87069a.ts.net:4250 (?mock=30000 for a big library)
+- Preview of tonight's combined branch (q31-tests; q32-search adds the search fix): http://dev.tail87069a.ts.net:4250 (?mock=30000 for a big library)
 - Preview, master: http://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 
@@ -58,12 +58,13 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q25 Multi-USB sync (item 3) [done, branch q25-multi-usb 04fe899 (contains q24); doc landed] — `sync_usb_many`: prepare once, one thread per stick, failures isolated, root + free-space checks, per-stick progress; 3 sticks 2.4–3× faster than serial; playlist-scoped selection in the library layer; 8 tests. No UI.
 ### Q28 Waveform drawing + scroll perf [done, branch q28-waveform-perf 2a7a232 (contains q25); doc landed] — scroll CPU/frame −21%, paint 24→3 ms, getComputedStyle per scroll 512→0, playhead layout 0.8→0.03 ms/tick; pixel diff ≤7/255; 512 px cached artwork thumbnails. Wall-clock win unproven (box load 20–33).
 ### Q29 Track row mount + 30k paint cost [done, branch q29-rows 35dd87f = integration of q20→q23→q22→q24→q25→q28→q29; doc landed] — fling CPU/frame 166→74 ms (pooled rows), layerize while playing 5.2→3.9 ms; row pixels identical. DOM row order is now slot order (drop index adapted).
-### Q32 First-search spike + row-window helper tests (own prio: perf/tests) [running] — branch q32-search (from q31-tests)
+### Q32 First-search spike + row-window helper [done, branch q32-search ae9571c = top of the app stack; doc landed] — first keystroke at 30k 445→120 ms, later 128→94 ms; search index built in idle time; rowWindow.ts + 20 tests (108 app tests).
 ### Q31 App tests on the integration stack [done, branch q31-tests f8488e8 = ALL app/backend work tonight + vitest] — 88 app tests (47 new) + all Rust tests green. Preview of this branch: http://dev.tail87069a.ts.net:4250 (try ?mock=30000).
 ### Q27 Repro tests for writer bugs [done, branch q27-writer-repro 450ea04; doc landed] — PDB export fails from 192 tracks (137 with 200-char titles); ANLZ colour detail wrong from 437 s (4 overflow sites, anlz.rs:258/314/364/404). Ignored repro tests on branch. docs/architecture/writer-bugs-2026-10.md
 ### Q21 Analysis review pass 1 (items 8, 2, 5) [done, branch q21-analysis 1fc254c (contains q15-grid); doc landed] — unified analyzer `ffa` (decode once, all stages, memory-capped pool): ~4.8 tracks/min on 8 workers, 0.56 GB/worker; Beat This! = 93% of CPU; grid 72.2% held, BPM ±0.1 88.8%; key stage now the cyanbox port 58.3% (n=199). Licence flag: cyanbox key templates fit on GiantSteps MTG (annotations unlicensed).
 ### Q26 Analysis review pass 2 (item 8) [done, branch q26-analysis cdc4f30 (contains q21); doc landed] — CPU 74→70 s/track, 5.3 tracks/min at 8 workers, tempo scan 1.1 s→0.19 s; native-rate decode, stratum removed; grid 72.2% / BPM 87.8% / key 58.3%; ONNX Runtime only 1.3–1.5× → not adopted. Lame3.100 mp3s are one frame late (fix needs dev check).
-### Q30 Grid round 3 (item 5) [running] — branch q30-grid (from q26-analysis): Lame3.100 rule on dev, half-beat phase, octave BPM
+### Q30 Grid round 3 (item 5) [done, branch q30-grid 260a51e = top of the analysis stack; doc landed] — grid ±20 ms 72.2%→78.5% (161/205), BPM ±0.1 87.8% held; Lame3.100 files are a frame EARLY-fix (−26 ms), wav/flac −10 ms shift; half-beat phase: no usable signal.
+### Q33 Wire the Rust analyzer into the app (item 2) [running] — branch q33-rust-analysis (from q32-search + q30-grid), Python kept as fallback
 
 ## Run
 status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
