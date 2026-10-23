@@ -76,7 +76,7 @@ The #1 BPM failure mode is detecting 64 instead of 128, or 170 instead of 85. **
 
 The original handoff recommended `librosa chroma_cqt + Krumhansl-Schmuckler` as a simple starting point. That recommendation has been superseded by an in-repo benchmark against the Beatport EDM Key Dataset.
 
-See [`key-detection-benchmark-findings.md`](./key-detection-benchmark-findings.md) for the full setup and results.
+See [`key-detection-benchmark-findings.md`](./key-detection-findings.md) for the full setup and results.
 
 | Backend | Exact key match | Exact + adjacent | Speed |
 |---|---:|---:|---:|
