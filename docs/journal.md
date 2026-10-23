@@ -60,3 +60,5 @@
 2026-10-23 14:23 orchestrator Q21 spawn: branch q21-analysis
 2026-10-23 14:53 orchestrator Q20 done: branch q20-speed 02933a0 (library tests re-run ok); 30k startup 24.7 s→0.5 s backend, 188 s→3.3 s first paint; perf doc landed
 2026-10-23 14:53 orchestrator Q22 spawn: branch q22-audio
+2026-10-23 15:13 orchestrator Q22 done: branch q22-audio c21df16 (pioneer-test-ui tests re-run); audio doc landed
+2026-10-23 15:13 orchestrator Q23 spawn: branch q23-load from q20-speed
