@@ -1395,3 +1395,7 @@ pub fn playback_set_output_device(
 ) -> Result<(), String> {
     engine.set_output_device(name)
 }
+
+#[cfg(test)]
+#[path = "playback_tests.rs"]
+mod tests;
