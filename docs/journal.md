@@ -42,3 +42,4 @@
 2026-10-15 15:35 orchestrator - decided: Merlin on sync concepts: keep storage design, sidebar stick tree, docked stick in side-panel board, won't-fit stop; reject chips, drag tooltip/popover, big cards, full-width header; 'Frozen' wording; reverse sync open. Logged in docs/ui/usb-sync-decisions.md
 2026-10-15 16:04 orchestrator - decided: Merlin: 'Keep updated' switch, only synced playlists show a Synced mark; either side shows anything; round 3 mockups for layout combinations incl. full-width stick header
 2026-10-23 06:57 orchestrator - queue rulebook drafted (autonomy tight) per PM; STATE refreshed on dev; stale allow git push in settings.local.json listed for Merlin
+2026-10-23 11:52 orchestrator - queue prepare (PM): plan Q15 → Q16 → own prios; dropped obsolete q9-benchmark worktree (merged; dev manifests kept, now gitignored)

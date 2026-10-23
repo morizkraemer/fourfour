@@ -44,7 +44,9 @@ goal: lift "whole grid within ±20 ms of Rekordbox" from 47% toward 70% in proto
 goal: ≥60% exact on a held-out split using only permissively licensed training data (or Beatport-free fitting); per-segment chroma + bass feature. acceptance: doc table, licences verified. timebox: 120 min
 
 ## Run
-status: idle · no queue run yet
+status: proposed · since 2026-10-23 · cap 1 worker · autonomy tight · third priority on the seat (after konsole, emberland)
+targets: none new (rulebook targets: grid ±20 ms 47%→70%, key ≥60%)
+plan: Q15 grid phase + drift → Q16 key round 2 (measurement only; shipped weights wait on Merlin #4) → own priorities: app unit tests for pure TS modules (branch) → cleanup (doc drift in AGENTS.md: test-suite and stratum claims). All on branches; only state/docs/analysis reports land.
 
 ## Rundown
 Since 10-15 nothing ran. Master holds the Rust analysis prototype (BPM/grid/key), benchmark docs, UI review and three sync mockup rounds. Open: Merlin's sync round 3 answers, brother's engine work, Q15/Q16 proposed.
