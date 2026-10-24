@@ -129,7 +129,7 @@ const palette = { low: 'LOW', mid: 'MID', high: 'HIGH', bg: 'BG', dim: 'DIM', in
 
 describe('paintBands', () => {
   it('fills high, then mid, then low (low in front), symmetric about the centre line', () => {
-    const shaped = {
+    const shaped: Record<string, any> = {
       low: Float32Array.from([1, 0.5]),
       mid: Float32Array.from([0.8, 0.4]),
       high: Float32Array.from([0.6, 0.2]),

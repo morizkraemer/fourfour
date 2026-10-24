@@ -11,7 +11,7 @@ import {
 import { bandBytes, encodeWire, previewFromBands, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 function wire(bytes: number[], calibration = 0.9) {
-  return { len: bytes.length / 3, calibration, bands: Buffer.from(bytes).toString('base64') };
+  return { len: bytes.length / 3, calibration, bands: btoa(String.fromCharCode(...bytes)) };
 }
 
 describe('bandsFromInterleavedBytes', () => {
