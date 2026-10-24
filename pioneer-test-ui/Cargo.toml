@@ -34,5 +34,9 @@ path = "src/bin/waveform_grid.rs"
 name = "bench_startup"
 path = "src/bin/bench_startup.rs"
 
+[[bin]]
+name = "waveform_fixtures"
+path = "src/bin/waveform_fixtures.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -188,6 +188,7 @@ fn read_reference(dat: &Path) -> Result<Reference> {
 struct Entry {
     name: String,
     audio: PathBuf,
+    dat: PathBuf,
     reference: Reference,
     tune: bool,
 }
@@ -259,7 +260,7 @@ fn select(o: &Options) -> Result<Selection> {
                 continue;
             }
         };
-        entries.push(Entry { name, audio, reference, tune: pos % 2 == 0 });
+        entries.push(Entry { name, audio, dat, reference, tune: pos % 2 == 0 });
     }
     Ok(Selection { entries })
 }
@@ -1032,6 +1033,36 @@ fn main() -> Result<()> {
                 &format!("{} tracks, set {}: export path (PWV7 bands plus measured PWV3/PWV5/PWVC columns; bands only with WAVEFORM_COMPARE_BANDS_ONLY set)", entries.len(), o.set),
                 &merge_metrics(&export_only(&pairs)),
             );
+        }
+        "fixtures" => {
+            let dir = PathBuf::from(args.get(1).context("fixtures needs an output directory")?);
+            std::fs::create_dir_all(&dir)?;
+            let picks: Vec<String> = std::env::var("WAVEFORM_FIXTURE_PICK")
+                .context("set WAVEFORM_FIXTURE_PICK to comma separated track name parts")?
+                .split(',')
+                .map(str::to_string)
+                .collect();
+            let flat = |bands: &[[u8; 3]]| -> Vec<u8> { bands.iter().flatten().copied().collect() };
+            for (k, pick) in picks.iter().enumerate() {
+                let e = sel.entries.iter().find(|e| e.name.contains(pick.as_str())).with_context(|| format!("no track matches {pick}"))?;
+                let beats = pioneer_usb_writer::reader::anlz::read_anlz(&e.dat)?
+                    .beat_grid
+                    .beats
+                    .iter()
+                    .map(|b| serde_json::json!({ "time_ms": b.time_ms, "bar_position": b.bar_position }))
+                    .collect::<Vec<_>>();
+                let fixture = serde_json::json!({
+                    "name": e.name,
+                    "audio": e.audio,
+                    "pwv7": flat(&e.reference.pwv7),
+                    "pwv6": flat(&e.reference.pwv6),
+                    "pwav": e.reference.pwav,
+                    "beats": beats,
+                });
+                let path = dir.join(format!("{:02}.json", k + 1));
+                std::fs::write(&path, serde_json::to_vec(&fixture)?)?;
+                println!("{} {}", path.display(), e.name);
+            }
         }
         "fit" => fit(&o, &sel)?,
         "fit-derive" => fit_derivation(&o, &sel)?,

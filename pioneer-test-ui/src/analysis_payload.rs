@@ -92,6 +92,30 @@ fn color_payload(entries: &[[u8; 3]], preview: Option<&[u8]>, pwv7: bool) -> ser
     })
 }
 
+/// The colour fields of `get_analysis_data`: the compact strip (peak-held to 2048 columns),
+/// the expanded player's full detail and 1200-column overview, and the 3-band row preview.
+/// `Null` without colour data.
+pub fn waveform_fields(
+    cw: Option<&models::ColorWaveform>,
+    preview: Option<&[u8]>,
+    pwv7: bool,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut fields = serde_json::Map::new();
+    let null = serde_json::Value::Null;
+    let color = cw.map(|cw| color_payload(&color_waveform_for_player(cw), preview, pwv7));
+    let detail = cw.map(|cw| color_payload(&color_detail_for_player(cw), preview, pwv7));
+    let overview = cw.map(|cw| {
+        let src = if cw.overview.is_empty() { &cw.detail } else { &cw.overview };
+        color_payload(&downsample_3band(src, PLAYER_COLOR_OVERVIEW_LEN), preview, pwv7)
+    });
+    let row = cw.and_then(row_bands).map(|bytes| serde_json::Value::String(base64_encode(&bytes)));
+    fields.insert("waveform_color".into(), color.unwrap_or_else(|| null.clone()));
+    fields.insert("waveform_color_detail".into(), detail.unwrap_or_else(|| null.clone()));
+    fields.insert("waveform_overview".into(), overview.unwrap_or_else(|| null.clone()));
+    fields.insert("waveform_row_bands".into(), row.unwrap_or(null));
+    fields
+}
+
 /// Stored analysis data for a track, shaped for the frontend.
 pub fn build_analysis_json(
     lib: &LocalLibrary,
@@ -112,27 +136,7 @@ pub fn build_analysis_json(
             let preview_slice = preview.as_deref();
 
             let pwv7 = a.color_waveform.as_ref().is_some_and(|cw| cw.exact.is_some());
-            let waveform_color = a
-                .color_waveform
-                .as_ref()
-                .map(|cw| color_payload(&color_waveform_for_player(cw), preview_slice, pwv7))
-                .unwrap_or(serde_json::Value::Null);
-
-            // Higher-resolution detail + fixed overview for the expanded player's
-            // dual-view renderer. Compact strip keeps using `waveform_color` above.
-            let waveform_color_detail = a
-                .color_waveform
-                .as_ref()
-                .map(|cw| color_payload(&color_detail_for_player(cw), preview_slice, pwv7))
-                .unwrap_or_default();
-            let waveform_overview = a
-                .color_waveform
-                .as_ref()
-                .map(|cw| {
-                    let src = if cw.overview.is_empty() { &cw.detail } else { &cw.overview };
-                    color_payload(&downsample_3band(src, PLAYER_COLOR_OVERVIEW_LEN), preview_slice, pwv7)
-                })
-                .unwrap_or_default();
+            let mut payload = waveform_fields(a.color_waveform.as_ref(), preview_slice, pwv7);
 
             // Serialize beat grid for frontend waveform rendering
             let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
@@ -151,24 +155,15 @@ pub fn build_analysis_json(
                 })
             }).collect();
 
-            Ok(serde_json::json!({
-                "waveform_preview": preview.unwrap_or_default(),
-                "waveform_color": waveform_color,
-                "waveform_color_detail": waveform_color_detail,
-                "waveform_overview": waveform_overview,
-                "waveform_row_bands": a
-                    .color_waveform
-                    .as_ref()
-                    .and_then(row_bands)
-                    .map(|bytes| base64_encode(&bytes)),
-                "waveform_peaks": serde_json::Value::Array(vec![]),
-                "bpm": a.bpm,
-                "key": a.key,
-                "energy": a.energy,
-                "beats": beats,
-                "cue_points": cue_points,
-                "duration_ms": duration_ms,
-            }))
+            payload.insert("waveform_preview".into(), serde_json::json!(preview.unwrap_or_default()));
+            payload.insert("waveform_peaks".into(), serde_json::Value::Array(vec![]));
+            payload.insert("bpm".into(), serde_json::json!(a.bpm));
+            payload.insert("key".into(), serde_json::json!(a.key));
+            payload.insert("energy".into(), serde_json::json!(a.energy));
+            payload.insert("beats".into(), serde_json::Value::Array(beats));
+            payload.insert("cue_points".into(), serde_json::Value::Array(cue_points));
+            payload.insert("duration_ms".into(), serde_json::json!(duration_ms));
+            Ok(serde_json::Value::Object(payload))
         }
         None => Err("No analysis data for this track".to_string()),
     }
