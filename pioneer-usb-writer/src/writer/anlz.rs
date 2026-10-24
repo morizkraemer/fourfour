@@ -252,10 +252,10 @@ fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) ->
     buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());     // unknown fields
 
     if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
+        let src_len = cw.detail.len();
         for i in 0..entry_count {
             let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
+                resample_index(i, src_len, entry_count)
             } else {
                 0
             };
@@ -280,7 +280,7 @@ fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) ->
     } else {
         // Fallback: interpolate from mono PWAV with white color
         for i in 0..entry_count {
-            let pwav_idx = (i * 400 / entry_count) as usize;
+            let pwav_idx = resample_index(i, 400, entry_count);
             let pwav_byte = analysis.waveform.data[pwav_idx];
             let height = pwav_byte & 0x1F; // 5-bit height from PWAV
             let color: u8 = 7 << 5;        // 0xe0 = white/full-spectrum (matches rekordbox)
@@ -308,10 +308,10 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
     buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (confirmed from rekordbox)
 
     if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
+        let src_len = cw.detail.len();
         for i in 0..num_entries {
             let src_idx = if src_len > 0 {
-                (i * src_len / num_entries) as usize
+                resample_index(i, src_len, num_entries)
             } else {
                 0
             };
@@ -329,7 +329,7 @@ fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> 
         // Byte 0: amplitude scaled to 0-255 range (rekordbox format).
         // Byte 1: 0x80 (observed constant in rekordbox exports).
         for i in 0..num_entries {
-            let pwav_idx = (i * 400 / num_entries) as usize;
+            let pwav_idx = resample_index(i, 400, num_entries);
             let pwav_byte = analysis.waveform.data[pwav_idx];
             let height = pwav_byte & 0x1F; // 5-bit height (0-31)
             let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
@@ -358,10 +358,10 @@ fn build_pwv7_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> 
     buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());
 
     if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
+        let src_len = cw.detail.len();
         for i in 0..entry_count {
             let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
+                resample_index(i, src_len, entry_count)
             } else {
                 0
             };
@@ -398,10 +398,10 @@ fn build_pwv6_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf.extend_from_slice(&entry_count.to_be_bytes());
 
     if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.overview.len() as u32;
+        let src_len = cw.overview.len();
         for i in 0..entry_count {
             let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
+                resample_index(i, src_len, entry_count)
             } else {
                 0
             };
@@ -442,10 +442,10 @@ fn build_color_waveform_section(analysis: &AnalysisResult) -> Vec<u8> {
     if let Some(cw) = &analysis.color_waveform {
         // overview is expected to be exactly 1200 entries; use direct indexing,
         // falling back to interpolation if lengths differ.
-        let src_len = cw.overview.len() as u32;
+        let src_len = cw.overview.len();
         for i in 0..1200u32 {
             let src_idx = if src_len > 0 {
-                (i * src_len / 1200) as usize
+                resample_index(i, src_len, 1200)
             } else {
                 0
             };
@@ -466,7 +466,7 @@ fn build_color_waveform_section(analysis: &AnalysisResult) -> Vec<u8> {
     } else {
         // Fallback: derive color from mono PWAV (fake green tint)
         for i in 0..1200u32 {
-            let pwav_idx = (i * 400 / 1200) as usize;
+            let pwav_idx = resample_index(i, 400, 1200);
             let pwav_byte = analysis.waveform.data[pwav_idx];
             let height = pwav_byte & 0x1F;
             // 6 bytes per entry: [red, green, blue, height, blue2, white]
@@ -686,4 +686,10 @@ pub fn anlz_ext_path_for_track(track: &Track) -> String {
 /// this is kept for PDB completeness only.
 pub fn anlz_path_for_pdb(track: &Track) -> String {
     format!("/{}", anlz_path_for_track(track))
+}
+
+/// Source index for output entry `i` when `src_len` entries are stretched over `entry_count`.
+/// Computed in `u64`: `i * src_len` passes `u32::MAX` once a track is longer than 7:17.
+fn resample_index(i: u32, src_len: usize, entry_count: u32) -> usize {
+    (i as u64 * src_len as u64 / entry_count as u64) as usize
 }

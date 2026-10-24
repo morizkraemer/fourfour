@@ -114,13 +114,11 @@ fn color_detail_is_correct_for_5_minute_track() {
 }
 
 #[test]
-#[ignore = "known bug: anlz.rs computes i * src_len / entry_count in u32 and overflows past ~437 s, see docs/architecture/writer-bugs-2026-10.md"]
 fn color_detail_is_correct_for_10_minute_track() {
     assert_long_detail_is_sane(600.0);
 }
 
 #[test]
-#[ignore = "known bug: anlz.rs computes i * src_len / entry_count in u32 and overflows past ~437 s, see docs/architecture/writer-bugs-2026-10.md"]
 fn color_detail_is_correct_for_20_minute_track() {
     assert_long_detail_is_sane(1200.0);
 }
