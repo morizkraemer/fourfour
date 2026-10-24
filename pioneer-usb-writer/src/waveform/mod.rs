@@ -71,10 +71,17 @@ pub struct Tuning {
     pub gain_cap: [u16; 3],
     /// Byte scale applied on top of the gain.
     pub band_scale: [f64; 3],
+    /// Exponent of the band curve: `127 * (value / 127)^curve`, so transients stand out from the body.
+    #[serde(default = "linear_curve")]
+    pub curve: [f64; 3],
     /// `PWV6` is the column mean of `PWV7` times these.
     pub pwv6_scale: [f64; 3],
     /// `PWV4` bytes 3..=5 are `PWV6` times these.
     pub pwv4_scale: [f64; 3],
+}
+
+fn linear_curve() -> [f64; 3] {
+    [1.0; 3]
 }
 
 impl Default for Tuning {
@@ -84,13 +91,14 @@ impl Default for Tuning {
             low_hz: 300.0,
             mid_low_hz: 250.0,
             mid_high_hz: 1200.0,
-            high_hz: 4746.1,
-            release: [0.97, 0.93, 0.765],
-            gain_target: [72.8, 104.0, 78.2],
+            high_hz: 3000.0,
+            release: [0.97, 0.93, 0.90],
+            gain_target: [72.8, 104.0, 140.0],
             gain_floor: [80, 80, 80],
             gain_cap: [300, 300, 500],
-            band_scale: [1.265, 1.17, 0.853],
-            pwv6_scale: [0.56, 0.71, 2.531],
+            band_scale: [1.265, 1.17, 1.0],
+            curve: [1.0, 1.0, 2.08],
+            pwv6_scale: [0.56, 0.71, 0.9],
             pwv4_scale: [2.4, 1.6, 1.1],
         }
     }
@@ -331,7 +339,8 @@ pub fn analyze(audio: &Measured) -> Waveforms {
         .map(|e| {
             let mut out = [0u8; 3];
             for j in 0..3 {
-                out[j] = (t.band_scale[j] * gains[j] as f64 * e[j]).round().min(PWV7_MAX as f64) as u8;
+                let linear = (t.band_scale[j] * gains[j] as f64 * e[j]).min(PWV7_MAX as f64);
+                out[j] = (PWV7_MAX as f64 * (linear / PWV7_MAX as f64).powf(t.curve[j])).round() as u8;
             }
             out
         })
@@ -406,6 +415,11 @@ fn pwv5_entry(band: [f64; 3], height: u8) -> u16 {
     (level(band[0]) << 13) | (level(band[1]) << 10) | (level(band[2]) << 7) | ((height as u16) << 2)
 }
 
+/// The band value before the curve: the overview is a mean of these, not of the curved bytes.
+fn undo_curve(byte: u8, curve: f64) -> f64 {
+    PWV7_MAX as f64 * (byte as f64 / PWV7_MAX as f64).powf(1.0 / curve)
+}
+
 /// `PWV6` and `PWV4` from the `PWV7` bytes.
 fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
     let n = pwv7.len();
@@ -416,7 +430,7 @@ fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
         .map(|r| {
             let mut out = [0u8; 3];
             for j in 0..3 {
-                let m = pwv7[r.clone()].iter().map(|b| b[j] as f64).sum::<f64>() / r.len() as f64;
+                let m = pwv7[r.clone()].iter().map(|b| undo_curve(b[j], t.curve[j])).sum::<f64>() / r.len() as f64;
                 out[j] = (t.pwv6_scale[j] * m).round().min(PWV6_MAX as f64) as u8;
             }
             out

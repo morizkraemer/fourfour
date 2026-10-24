@@ -9,6 +9,7 @@
 //!   scan                    which filter chain, feature and release best correlate with Rekordbox's PWV7 bands
 //!   fit-derive              fit the PWV7 -> PWV3/PWV5/PWAV/PWV2 derivation constants against Rekordbox's own PWV7
 //!   fit                     coordinate-descent fit of the tuning on the tune half, then evaluate both halves
+//!   hiband                  search the high band (filter, feature, release, gain, curve) for correlation and matching level distribution
 //!   png <dir>               render ours vs Rekordbox for --png-count tracks of the test half
 //!
 //! options
@@ -798,6 +799,153 @@ fn scan_bands(sel: &Selection) {
 }
 
 
+#[derive(Clone, Copy, Debug)]
+struct HiCandidate {
+    stages: usize,
+    hz: f64,
+    feature: usize,
+    release: f64,
+    target: f64,
+    scale: f64,
+    curve: f64,
+}
+
+struct HiScore {
+    corr: f64,
+    mae: f64,
+    mean: (f64, f64),
+    p75: (u32, u32),
+    p90: (u32, u32),
+    p99: (u32, u32),
+    loss: f64,
+}
+
+fn hi_quantile(hist: &[f64; 128], q: f64) -> u32 {
+    let total: f64 = hist.iter().sum();
+    let mut acc = 0.0;
+    for (i, h) in hist.iter().enumerate() {
+        acc += h;
+        if acc >= q * total {
+            return i as u32;
+        }
+    }
+    127
+}
+
+fn hi_eval(c: &HiCandidate, feats: &HashMap<(usize, u64), Vec<[Vec<f64>; 3]>>, entries: &[&Entry]) -> HiScore {
+    let f = &feats[&(c.stages, c.hz as u64)];
+    let mut acc = Acc::default();
+    let (mut ho, mut hr) = ([0.0f64; 128], [0.0f64; 128]);
+    for (k, e) in entries.iter().enumerate() {
+        let env = release_env(&f[k][c.feature], c.release);
+        let max = env.iter().cloned().fold(0.0, f64::max);
+        let gain = if max > 0.0 { (c.target / max).round().clamp(80.0, 500.0) } else { 80.0 };
+        for (i, &v) in env.iter().enumerate().take(e.reference.pwv7.len()) {
+            let lin = (c.scale * gain * v).min(127.0);
+            let out = (127.0 * (lin / 127.0).powf(c.curve)).round().min(127.0);
+            let rb = e.reference.pwv7[i][2] as f64;
+            acc.add(out, rb);
+            ho[out as usize] += 1.0;
+            hr[rb as usize] += 1.0;
+        }
+    }
+    let n = acc.n.max(1.0);
+    let q = |q: f64| (hi_quantile(&ho, q), hi_quantile(&hr, q));
+    let (p75, p90, p99) = (q(0.75), q(0.9), q(0.99));
+    let ratio = |p: (u32, u32)| ((p.0 as f64 + 1.0) / (p.1 as f64 + 1.0)).ln().abs();
+    let mean = (acc.sx / n, acc.sy / n);
+    let loss = (1.0 - acc.corr()) + 0.15 * (ratio(p75) + ratio(p90) + ratio(p99) + (mean.0 / mean.1).ln().abs());
+    HiScore { corr: acc.corr(), mae: acc.mae(), mean, p75, p90, p99, loss }
+}
+
+fn hi_line(c: &HiCandidate, s: &HiScore) -> String {
+    format!(
+        "loss {:.4} corr {:.3} mae {:.2} mean {:.1}/{:.1} p75 {}/{} p90 {}/{} p99 {}/{}  | stages {} hz {} feat {} rel {:.3} target {:.1} scale {:.3} curve {:.2}",
+        s.loss, s.corr, s.mae, s.mean.0, s.mean.1, s.p75.0, s.p75.1, s.p90.0, s.p90.1, s.p99.0, s.p99.1,
+        c.stages, c.hz, ["peak", "rms", "meanabs"][c.feature], c.release, c.target, c.scale, c.curve
+    )
+}
+
+fn hiband(sel: &Selection) {
+    let tune: Vec<&Entry> = sel.entries.iter().filter(|e| e.tune).collect();
+    let monos: Vec<Mono> = parallel(tune.iter().collect::<Vec<_>>(), |e| decode_mono(&e.audio).expect("decode"));
+    let mut feats: HashMap<(usize, u64), Vec<[Vec<f64>; 3]>> = HashMap::new();
+    let hzs = [2500.0, 3000.0, 3500.0, 4000.0, 4746.0, 5500.0, 6500.0, 8000.0];
+    for stages in [1usize, 2] {
+        for &hz in &hzs {
+            let chain: Vec<(bool, f64)> = (0..stages).map(|_| (true, hz)).collect();
+            feats.insert((stages, hz as u64), parallel(monos.iter().collect::<Vec<_>>(), |m| column_features(m, &chain)));
+        }
+    }
+    let base = HiCandidate { stages: 1, hz: 4746.0, feature: 0, release: 0.765, target: 78.2, scale: 0.853, curve: 1.0 };
+    println!("current: {}", hi_line(&base, &hi_eval(&base, &feats, &tune)));
+    let mut results: Vec<(f64, HiCandidate, HiScore)> = Vec::new();
+    for stages in [1usize, 2] {
+        for &hz in &hzs {
+            for feature in 0..3 {
+                for release in [0.0, 0.4, 0.6, 0.7, 0.765, 0.85] {
+                    for target in [78.2, 100.0, 130.0, 170.0] {
+                        for curve in [0.8, 1.0, 1.25] {
+                            let c = HiCandidate { stages, hz, feature, release, target, scale: 1.0, curve };
+                            let s = hi_eval(&c, &feats, &tune);
+                            results.push((s.loss, c, s));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut refined: Vec<(f64, HiCandidate, HiScore)> = Vec::new();
+    for feature in [0usize, 1] {
+        for stages in [1usize, 2] {
+            for &hz in &hzs {
+                for start in [(0.85, 100.0, 1.5), (0.9, 120.0, 1.8), (0.8, 90.0, 1.3)] {
+                    let mut c = HiCandidate { stages, hz, feature, release: start.0, target: start.1, scale: 1.0, curve: start.2 };
+                    let mut best = hi_eval(&c, &feats, &tune);
+                    let mut step = 0.2;
+                    for _ in 0..40 {
+                        let mut improved = false;
+                        for k in 0..3 {
+                            for dir in [1.0 + step, 1.0 / (1.0 + step)] {
+                                let mut t = c;
+                                match k {
+                                    0 => t.release = (t.release * dir).min(0.98),
+                                    1 => t.target *= dir,
+                                    _ => t.curve *= dir,
+                                }
+                                let s = hi_eval(&t, &feats, &tune);
+                                if s.loss < best.loss - 1e-5 {
+                                    c = t;
+                                    best = s;
+                                    improved = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if !improved {
+                            step /= 2.0;
+                            if step < 0.01 {
+                                break;
+                            }
+                        }
+                    }
+                    refined.push((best.loss, c, best));
+                }
+            }
+        }
+    }
+    results.extend(refined);
+    results.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    for (_, c, s) in results.iter().take(25) {
+        println!("{}", hi_line(c, s));
+    }
+    println!("\nbest corr:");
+    results.sort_by(|a, b| b.2.corr.partial_cmp(&a.2.corr).unwrap());
+    for (_, c, s) in results.iter().take(8) {
+        println!("{}", hi_line(c, s));
+    }
+}
+
 /// Mean Rekordbox PWV7 byte against our normalised envelope, per band: shows whether the byte scale is linear.
 fn curve(sel: &Selection) {
     let tune: Vec<&Entry> = sel.entries.iter().filter(|e| e.tune).collect();
@@ -1068,6 +1216,7 @@ fn main() -> Result<()> {
         "fit-derive" => fit_derivation(&o, &sel)?,
         "scan" => scan_bands(&sel),
         "curve" => curve(&sel),
+        "hiband" => hiband(&sel),
         "lag" => lag_scan(&sel),
         "gainstat" => gain_stats(&sel),
         "png" => {
