@@ -224,3 +224,103 @@ Nothing here was tried on a player.
 - `waveform/mod.rs` is derived from baken `crates/baken-export/src/anlz/generate/waveform.rs` (MIT, Copyright (c) 2025 Masanari Higashi). The licence header is in the file; the full text is in `NOTICE` at the repository root.
 - Format facts (section order, `.2EX` contents, value ranges) come from the Rekordbox files in Merlin's library, Booth and cyanbox notes; no Booth, cyanbox or rbxport code was copied.
 - The comparison tool reads Merlin's Rekordbox library read-only (it works on a copy of `master.db`); no library data is committed.
+
+## Integration (Q36)
+
+Branch `q36-waveforms` (q35 + q34 merged, master merged). One waveform truth from analysis to app to stick. Not tried on a player, not looked at by Merlin.
+
+### Data flow
+
+```text
+audio file --symphonia decode--> waveform::Meter/analyze (pioneer-test-ui/src/band_analysis.rs, after the Python analysis)
+   --> AnalysisResult.color_waveform { detail = PWV7, overview = PWV6, exact = PWV3 / PWV5 / PWVC values }
+   --> library.set_analysis --> anlz/{id}/ANLZ0000.DAT / .EXT / .2EX      (the same writer the USB export uses)
+   --> get_analysis_data: PWV7 bytes (base64, flag "pwv7", calibration 1) --> bandsFromStickBytes = byte / 127 --> renderer
+   --> load_state: 128-column row preview from PWV6 (base64 low, mid, high) --> rows and detail pane
+USB export: library read-back (PWV7 + exact PWV3/PWV5/PWVC) --> export_waveforms --> same bytes on the stick
+```
+
+- Python stays the live backend for beats, key, BPM and cues. After it returns, the Rust backend decodes the file again and replaces `color_waveform`, so the colour data no longer depends on Python's filter bank. If the decode fails the analyzer's own colour data is kept and the log says so.
+- `get_analysis_data` colour fields (`waveform_color` peak-held to 2048 columns, `waveform_color_detail` the full PWV7, `waveform_overview` PWV6 as stored, `waveform_row_bands`) are built by one function, `waveform_fields`, shared with the fixture tool. A track whose stored files carry the `.2EX` triple (PWV3 + PWV5 + PWVC alongside PWV7) is flagged `pwv7`; the adapter then draws `byte / 127` per band, no PWAV calibration, no balancing. Tracks stored before the 3-band export (no `.2EX`) keep the old calibrated and balanced path. A Python-measured track stored by the q34 writer also counts as `pwv7`: its bytes are what the stick carries, which is the point.
+- `ColorWaveform.exact` (`ExactColumns`: PWV3 bytes, PWV5 words, PWVC gains) is written by `Waveforms::color_waveform()`, read back from the library's `.EXT` / `.2EX` by the ANLZ reader, and used by `export_waveforms` instead of the bands-only derivation. `PWVC` now carries the measured gains of our bytes instead of the fixed 85 / 134 / 135.
+
+### Exact PWV3 / PWV5 heights
+
+Held-out half of the q34 fit (20 tracks, about 970,000 columns), export path against Rekordbox, before (bands only) and after (exact columns):
+
+| Section | before: exact % / MAE / r | after: exact % / MAE / r |
+|---|---|---|
+| `PWV3` height | 18.6 / 3.35 / 0.804 | 99.7 / 0.00 / 1.000 |
+| `PWV3` whiteness | 25.8 / 1.20 / 0.708 | 99.8 / 0.00 / 0.999 |
+| `PWV5` height | 18.6 / 3.34 / 0.806 | 78.9 / 0.65 / 0.966 |
+| `PWV5` low / mid / high level (exact %) | 67.5 / 15.4 / 25.2 | 67.1 / 3.1 / 30.2 |
+
+The export now equals `analyze` direct for `PWV3` (same bytes). `PWV5` heights and `PWV5` levels were always the direct path's values; the levels against Rekordbox did not improve (they were never exact). Reproduce: `waveform_compare score --set test` (set `WAVEFORM_COMPARE_BANDS_ONLY=1` for the old bands-only export). The edits: `ColorWaveform` got one field, 9 literals in 3 crates updated (library, test-ui bins and `main.rs`, writer tests), no PDB or `playback.rs` change.
+
+### Payload sizes (`bench_startup`, release, 30k fixtures of 240 s tracks)
+
+| | before (q35 payload shape, old fixture) | after (new fixture) |
+|---|---|---|
+| `load_state` JSON, 30k tracks | 25,648,980 bytes | 24,868,980 bytes (-3.0 %) |
+| `load_state` JSON, 1k tracks | 858,254 | 832,254 |
+| per row | 400-byte PWAV, 536 base64 characters | 384-byte band preview, 512 characters |
+| `get_analysis_data` per track | colour fields as before | + 512 characters (`waveform_row_bands`), colour bytes unchanged |
+
+The row preview replaces the PWAV in `load_state` (tracks without band data still send the PWAV). The 400-byte PWAV is still in `get_analysis_data` for the player's fallback.
+
+Backend `load_state` at 30k: `build_track_infos` 330 ms to 760 ms and total 480 ms to 910 ms (median of three warm runs). The extra is one more file per track (the tail of the `.2EX`, 3.6 KB, read in a single call) over 30,000 tracks. Not recovered. A sidecar or DB column for the row preview would remove it but is a library schema change (must ask). `load_state` is an async command on `spawn_blocking`, so the window thread is not blocked.
+
+### Analysis cost
+
+`waveform::Meter` plus decode, release build, `bench_startup bands` on the six side-by-side tracks (278 to 417 s of audio, mp3 / wav / flac): 1.0 to 2.0 s per track, about 4 ms per second of audio, on the shared `dev` box. It runs on `spawn_blocking` beside the Python analyzer in the same task (at most 3 tracks in flight).
+
+### App performance
+
+Headless Chromium on the shared `dev` box, `?mock=30000`, production builds of `q32-search` and this branch, median of 5 alternating runs (`app/perf/waveform-perf.mjs`, main-thread CPU per frame; `frame-perf` and `search-perf` for load):
+
+| Scenario | q32-search | q36 |
+|---|---|---|
+| Fast scroll | 22.7 ms | 22.9 (+1.0 %) |
+| Scroll 120 steps | 22.6 | 23.1 (+2.1 %) |
+| Fling to the end | 49.9 | 48.3 (-3.2 %) |
+| Scroll then fling | 32.9 | 33.0 (+0.6 %) |
+| Compact player playing | 10.7 | 10.7 (+0.5 %) |
+| Expanded player playing | 16.0 | 13.6 (-15.0 %) |
+| Expanded zoom | 15.2 | 13.9 (-8.3 %) |
+| Expanded wheel scroll | 35.9 | 25.3 (-29.5 %) |
+
+Frame p50 is identical everywhere. Q35's +10 % fling cost is gone (-3.2 % against q32): a row now builds three bands from 128 real columns instead of reducing a 400-byte approximation, and the load path no longer builds 400-float preview arrays.
+
+Load (`frontend-perf`, 30k, median of 5): first contentful paint 2,712 ms to 1,100 ms, interactive 2,718 to 1,064 ms, heap 186 MB to 68 MB (the old preview arrays). Search keystrokes unchanged (64 ms to 70 ms median, first keystroke CPU 78 ms to 78 ms). Selecting a row (detail pane) went from 19 ms to 42 ms median, a regression: the first two clicks are cold (82 and 64 ms) and the last two match q32 (20 and 18 ms). Q35's detail strip is already a 3-band canvas; not chased further here.
+
+Pixel checks (`app/perf/waveform-pixels.mjs`): 60 of 60.
+
+### Side by side with Rekordbox
+
+`/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/final/` (one PNG per track, README.txt there). Six held-out tracks of the q34 fit (2 mp3, 2 wav, 2 flac). Top half: our analysis measured by the shared module, stored in a temporary library and read back through the app's payload code. Bottom half: Rekordbox 7.2's own PWV7 and PWV6 for the same track through the same payload code. Both through the same app renderer: expanded view (overview + zoom), list row and detail strip.
+
+| Track | PWV7 correlation low / mid / high | Verdict |
+|---|---|---|
+| Vetiver (mp3) | .988 / .975 / .825 | same structure; Rekordbox has a wider orange fringe and more white in the overview |
+| Darkside, Vocal Remix (mp3) | .970 / .993 / .941 | nearly identical zoom; overview a little flatter on ours |
+| Neptune (wav) | .995 / .982 / .918 | closest match |
+| Revision (wav) | .992 / .987 / .924 | same body; Rekordbox's white hi-hat spikes taller |
+| Shimmer (flac) | .980 / .960 / .843 | same shape; Rekordbox has a clearly stronger white rim in the overview |
+| Be You (flac) | .986 / .986 / .948 | same shape; white transients taller on Rekordbox |
+
+The renderer produces the Rekordbox 3-band look from Rekordbox's own bytes (blue body, orange mid, white high in front). The remaining visible difference is the data: our high band is weaker than Rekordbox's (the weakest correlation everywhere, as the q34 fit found) and the `PWV6` overview differs more than `PWV7` (r .63 to .94). The rows (120 x 14) and strips come from the same bands and read as the same track in both halves.
+
+Tools: `waveform_compare fixtures` (Rekordbox bytes and beat grid for picked tracks), `pioneer-test-ui` bin `waveform_fixtures` (the app payloads for both sides), `app/compare.html` plus `app/src/compare-harness.ts` (dev-only page), `app/perf/waveform-final.mjs` (headless screenshots).
+
+### Tests
+
+- Rust: `get_analysis_data` band bytes equal the PWV7 bytes in the `.2EX` (and PWV6, and the analysis' own bytes), `analysis_payload.rs`; exact columns reach `.EXT` / `.2EX` and survive a read back, bands-only derivation differs, PWV6 tail read and scan fallback, `waveform_export.rs`; the existing round-trip tests; `band_analysis` decode test.
+- App: `bandsFromStickBytes` / `pwv7` payloads map to `byte / 127` with no calibration or balancing, row preview decode, fallback path unchanged (`waveform-bands.test.ts`).
+
+### Still needs hardware or Merlin's eye
+
+- Everything in "Open hardware checks" above, plus: do players use the real `PWVC` gains (they are now our measured gains, not 85 / 134 / 135)?
+- The row preview and the high-band weakness in the screenshots: taste (the band gains in the renderer were tuned on balanced data in Q35 and now run on raw PWV7).
+- Row preview cost at 30k (+0.4 s backend) and the schema-change option.
+- A real WebView (WKWebView) with GPU canvas: all numbers here are headless Chromium with software compositing.
+- Re-analysing an existing library: tracks analysed before Q36 keep their stored colour data until re-analysed (Python filter bank, derived PWV3 / PWV5).
