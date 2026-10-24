@@ -276,7 +276,7 @@ Backend `load_state` at 30k: `build_track_infos` 330 ms to 760 ms and total 480 
 
 ### App performance
 
-Headless Chromium on the shared `dev` box, `?mock=30000`, production builds of `q32-search` and this branch, median of 5 alternating runs (`app/perf/waveform-perf.mjs`, main-thread CPU per frame; `frame-perf` and `search-perf` for load):
+Headless Chromium on the shared `dev` box, `?mock=30000`, production builds of `q32-search` and this branch, median of 5 alternating runs (`app/perf/waveform-perf.mjs`, main-thread CPU per frame; `frontend-perf.mjs` and `search-perf.mjs` for load):
 
 | Scenario | q32-search | q36 |
 |---|---|---|
