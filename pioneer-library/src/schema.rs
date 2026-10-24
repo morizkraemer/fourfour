@@ -160,6 +160,11 @@ fn migrate_v1_to_v2(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
                 &track_for_anlz,
                 analysis,
             )?;
+            pioneer_usb_writer::writer::anlz::write_anlz_2ex(
+                &dir.join("ANLZ0000.2EX"),
+                &track_for_anlz,
+                analysis,
+            )?;
         }
     }
 

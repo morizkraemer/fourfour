@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use pioneer_usb_writer::models::{
     AnalysisResult, Beat, BeatGrid, ColorWaveform, Track, WaveformPreview,
 };
-use pioneer_usb_writer::writer::anlz::write_anlz_ext;
+use pioneer_usb_writer::writer::anlz::{write_anlz_2ex, write_anlz_ext};
 use tempfile::TempDir;
 
 const SECTION_HEADER_LEN: usize = 24;
@@ -36,7 +36,7 @@ fn track(duration_secs: f64) -> Track {
 }
 
 fn detail_value(i: usize) -> [u8; 3] {
-    [(i % 251) as u8 + 1, (i % 241) as u8, (i % 239) as u8]
+    [(i % 127) as u8 + 1, (i % 113) as u8, (i % 101) as u8]
 }
 
 fn analysis(entry_count: usize) -> AnalysisResult {
@@ -87,6 +87,14 @@ fn write_ext(duration_secs: f64) -> Result<Vec<u8>, String> {
     }
 }
 
+fn write_2ex(duration_secs: f64, detail_len: usize) -> Vec<u8> {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("long.2EX");
+    let written = write_anlz_2ex(&path, &track(duration_secs), &analysis(detail_len)).unwrap();
+    assert!(written);
+    std::fs::read(&path).unwrap()
+}
+
 fn assert_long_detail_is_sane(duration_secs: f64) {
     let entries = entry_count(duration_secs);
     let file = write_ext(duration_secs).unwrap_or_else(|e| panic!("{duration_secs}s track: {e}"));
@@ -94,17 +102,28 @@ fn assert_long_detail_is_sane(duration_secs: f64) {
     let pwv5 = section(&file, b"PWV5");
     assert_eq!(pwv5.len(), SECTION_HEADER_LEN + entries * 2);
     assert_eq!(u32::from_be_bytes(pwv5[16..20].try_into().unwrap()) as usize, entries);
-    for i in 0..entries {
-        let [low, mid, high] = detail_value(i);
-        assert_eq!(pwv5[SECTION_HEADER_LEN + i * 2], low.max(mid).max(high), "PWV5 entry {i}");
-    }
+    let pwv3 = section(&file, b"PWV3");
+    assert_eq!(pwv3.len(), SECTION_HEADER_LEN + entries);
 
-    let pwv7 = section(&file, b"PWV7");
+    let two_ex = write_2ex(duration_secs, entries);
+    let pwv7 = section(&two_ex, b"PWV7");
     assert_eq!(pwv7.len(), SECTION_HEADER_LEN + entries * 3);
     assert_eq!(u32::from_be_bytes(pwv7[16..20].try_into().unwrap()) as usize, entries);
     for i in 0..entries {
         let at = SECTION_HEADER_LEN + i * 3;
         assert_eq!(pwv7[at..at + 3], detail_value(i), "PWV7 entry {i}");
+    }
+}
+
+fn assert_stretched_detail_follows_source(duration_secs: f64) {
+    let entries = entry_count(duration_secs);
+    let source_len = entries / 2 + 1;
+    let two_ex = write_2ex(duration_secs, source_len);
+    let pwv7 = section(&two_ex, b"PWV7");
+    for i in 0..entries {
+        let source = (i as u64 * source_len as u64 / entries as u64) as usize;
+        let at = SECTION_HEADER_LEN + i * 3;
+        assert_eq!(pwv7[at..at + 3], detail_value(source), "PWV7 entry {i}");
     }
 }
 
@@ -121,6 +140,16 @@ fn color_detail_is_correct_for_10_minute_track() {
 #[test]
 fn color_detail_is_correct_for_20_minute_track() {
     assert_long_detail_is_sane(1200.0);
+}
+
+#[test]
+fn stretched_detail_follows_source_for_10_minute_track() {
+    assert_stretched_detail_follows_source(600.0);
+}
+
+#[test]
+fn stretched_detail_follows_source_for_60_minute_track() {
+    assert_stretched_detail_follows_source(3600.0);
 }
 
 #[test]
