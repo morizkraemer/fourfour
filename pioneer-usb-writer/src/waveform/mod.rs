@@ -83,14 +83,14 @@ impl Default for Tuning {
             whiteness_lowpass_hz: 150.0,
             low_hz: 300.0,
             mid_low_hz: 250.0,
-            mid_high_hz: 1500.0,
-            high_hz: 3000.0,
-            release: [0.97, 0.93, 0.85],
-            gain_target: [91.0, 104.0, 110.0],
+            mid_high_hz: 1200.0,
+            high_hz: 4746.1,
+            release: [0.97, 0.93, 0.765],
+            gain_target: [72.8, 104.0, 78.2],
             gain_floor: [80, 80, 80],
             gain_cap: [300, 300, 500],
-            band_scale: [1.265, 1.17, 1.2],
-            pwv6_scale: [0.56, 0.71, 2.0],
+            band_scale: [1.265, 1.17, 0.853],
+            pwv6_scale: [0.56, 0.71, 2.531],
             pwv4_scale: [2.4, 1.6, 1.1],
         }
     }
@@ -448,8 +448,9 @@ fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
 /// `docs/architecture/waveforms-3band-2026-10.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Derivation {
-    /// Column loudness is `sqrt(sum(weight * band^2))`; height is `31.5 * (loudness / track max)^2`.
+    /// Column loudness is `(sum(weight * band^power))^(1/power)`; height is `31.5 * (loudness / track max)^2`.
     pub loudness_weight: [f64; 3],
+    pub loudness_power: f64,
     /// Whiteness is `7 - floor(8 * clamp(bass_share_gain * low / (low + mid + high)))`.
     pub bass_share_gain: f64,
     /// Relative weight of each band before the `PWV5` levels are taken.
@@ -461,9 +462,10 @@ pub struct Derivation {
 impl Default for Derivation {
     fn default() -> Self {
         Derivation {
-            loudness_weight: [1.0, 1.0, 1.0],
-            bass_share_gain: 1.0,
-            level_weight: [1.0, 1.0, 1.0],
+            loudness_weight: [3.254, 0.505, 0.964],
+            loudness_power: 1.1009,
+            bass_share_gain: 1.0997,
+            level_weight: [1.69, 0.350, 2.959],
             gains: [85, 134, 135],
         }
     }
@@ -490,7 +492,10 @@ impl Waveforms {
         let loudness: Vec<f64> = pwv7
             .iter()
             .map(|b| {
-                (0..3).map(|j| d.loudness_weight[j] * (b[j] as f64).powi(2)).sum::<f64>().sqrt()
+                (0..3)
+                    .map(|j| d.loudness_weight[j] * (b[j] as f64).powf(d.loudness_power))
+                    .sum::<f64>()
+                    .powf(1.0 / d.loudness_power)
             })
             .collect();
         let loudness_max = loudness.iter().cloned().fold(0.0, f64::max);

@@ -142,10 +142,11 @@ fn build_beat_grid_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf
 }
 
-/// The waveform sections of one track, from the band data in `analysis`.
+/// The waveform sections of one track, from the band data in `analysis`: exactly the values
+/// the `.DAT`, `.EXT` and `.2EX` files carry, so a renderer can draw what the stick gets.
 ///
 /// Without band data the colour sections come out neutral (every band equal), never tinted.
-fn export_waveforms(duration_secs: f64, analysis: &AnalysisResult) -> Waveforms {
+pub fn export_waveforms(duration_secs: f64, analysis: &AnalysisResult) -> Waveforms {
     let columns = (duration_secs * COLUMNS_PER_SECOND).round() as usize;
     match analysis.color_waveform.as_ref().filter(|cw| !cw.detail.is_empty()) {
         Some(cw) => {

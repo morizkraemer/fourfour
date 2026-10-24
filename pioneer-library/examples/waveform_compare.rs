@@ -188,7 +188,6 @@ fn read_reference(dat: &Path) -> Result<Reference> {
 struct Entry {
     name: String,
     audio: PathBuf,
-    dat: PathBuf,
     reference: Reference,
     tune: bool,
 }
@@ -260,7 +259,7 @@ fn select(o: &Options) -> Result<Selection> {
                 continue;
             }
         };
-        entries.push(Entry { name, audio, dat, reference, tune: pos % 2 == 0 });
+        entries.push(Entry { name, audio, reference, tune: pos % 2 == 0 });
     }
     Ok(Selection { entries })
 }
@@ -576,6 +575,7 @@ fn derivation_vec(d: &Derivation) -> Vec<f64> {
         d.loudness_weight[1],
         d.loudness_weight[2],
         d.bass_share_gain,
+        d.loudness_power,
         d.level_weight[0],
         d.level_weight[1],
         d.level_weight[2],
@@ -586,7 +586,8 @@ fn vec_derivation(base: &Derivation, v: &[f64]) -> Derivation {
     let mut d = *base;
     d.loudness_weight = [v[0], v[1], v[2]];
     d.bass_share_gain = v[3];
-    d.level_weight = [v[4], v[5], v[6]];
+    d.loudness_power = v[4].clamp(0.5, 12.0);
+    d.level_weight = [v[5], v[6], v[7]];
     d
 }
 
@@ -917,7 +918,7 @@ fn gain_stats(sel: &Selection) {
     }
 }
 
-fn render_png(path: &Path, ours: &Waveforms, rb: &Reference) -> Result<()> {
+fn render_png(path: &Path, ours: &Waveforms, rb: &Reference, window: Option<usize>) -> Result<()> {
     const W: usize = 1200;
     const HALF: usize = 140;
     let colors: [[f32; 3]; 3] = [[24.0, 96.0, 255.0], [255.0, 160.0, 32.0], [255.0, 255.0, 255.0]];
@@ -943,8 +944,17 @@ fn render_png(path: &Path, ours: &Waveforms, rb: &Reference) -> Result<()> {
             }
         }
     };
-    draw(&mut img, &ours.pwv7, 0);
-    draw(&mut img, &rb.pwv7, HALF + 10);
+    let crop = |data: &[[u8; 3]]| -> Vec<[u8; 3]> {
+        match window {
+            Some(w) if data.len() > w => {
+                let start = data.len() / 2 - w / 2;
+                data[start..start + w].to_vec()
+            }
+            _ => data.to_vec(),
+        }
+    };
+    draw(&mut img, &crop(&ours.pwv7), 0);
+    draw(&mut img, &crop(&rb.pwv7), HALF + 10);
     img.save(path)?;
     Ok(())
 }
@@ -1035,8 +1045,11 @@ fn main() -> Result<()> {
                 let mono = decode_mono(&e.audio)?;
                 let ours = measure(&mono, tuning);
                 let name = format!("{:02}_{}.png", k + 1, e.name.rsplit('/').next().unwrap_or("track").replace(|c: char| !c.is_alphanumeric(), "_"));
-                render_png(&dir.join(&name), &ours, &e.reference)?;
-                println!("{}", dir.join(name).display());
+                render_png(&dir.join(&name), &ours, &e.reference, None)?;
+                println!("{}", dir.join(&name).display());
+                let zoom = name.replace(".png", "_zoom.png");
+                render_png(&dir.join(&zoom), &ours, &e.reference, Some(1200))?;
+                println!("{}", dir.join(zoom).display());
             }
         }
         other => return Err(anyhow!("unknown command {other}")),
