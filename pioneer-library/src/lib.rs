@@ -11,6 +11,7 @@
 mod multi_sync;
 mod queries;
 pub mod rekordbox;
+mod row_preview;
 mod schema;
 
 use std::collections::HashMap;
@@ -29,6 +30,7 @@ pub use multi_sync::{
     NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
     SyncPhase, SyncSelection, SyncTarget, WriterFn, statvfs_available_bytes,
 };
+pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
 /// Summary report from importing a Pioneer USB into the local library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,8 +224,13 @@ impl LocalLibrary {
             writer::anlz::write_anlz_2ex(&dir.join("ANLZ0000.2EX"), &track_for_anlz, analysis)?;
         }
 
+        let row_preview = match self.track_anlz_dir(track_id) {
+            Some(dir) => read_waveform_analysis(&dir.join("ANLZ0000.DAT")).map_or(RowPreview::None, |a| RowPreview::from_analysis(&a)),
+            None => RowPreview::from_analysis(analysis),
+        };
+
         // Update lightweight DB index.
-        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy)?;
+        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob())?;
 
         Ok(())
     }
@@ -308,10 +315,14 @@ impl LocalLibrary {
     /// `detail`) unless the DAT's PWAV preview is flat, where the full reader
     /// fills it. Tracks whose ANLZ files are missing or unreadable are omitted.
     pub fn get_waveform_analyses(&self) -> Result<HashMap<i64, AnalysisResult>> {
-        let Some(anlz_dir) = self.anlz_dir() else {
-            return Ok(HashMap::new());
-        };
         let ids = queries::select_analyzed_track_ids(&self.conn)?;
+        Ok(self.read_waveform_analyses(&ids))
+    }
+
+    fn read_waveform_analyses(&self, ids: &[i64]) -> HashMap<i64, AnalysisResult> {
+        let Some(anlz_dir) = self.anlz_dir() else {
+            return HashMap::new();
+        };
         let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
         let chunk_len = ids.len().div_ceil(workers).max(1);
 
@@ -336,7 +347,35 @@ impl LocalLibrary {
                 out.extend(handle.join().expect("waveform reader thread panicked"));
             }
         });
-        Ok(out)
+        out
+    }
+
+    /// The stored row preview of every analyzed track: one SQL query, no file reads.
+    /// Tracks stored before the column existed are missing until
+    /// [`backfill_row_previews`](Self::backfill_row_previews) has run.
+    pub fn get_row_previews(&self) -> Result<HashMap<i64, RowPreview>> {
+        Ok(queries::select_row_previews(&self.conn)?
+            .into_iter()
+            .map(|(id, blob)| (id, RowPreview::from_blob(blob)))
+            .collect())
+    }
+
+    /// Fill `analyses.row_preview` for tracks stored before the column existed,
+    /// from their ANLZ files (parallel read, one transaction). Returns how many
+    /// tracks were filled; later calls find nothing to do and cost one query.
+    pub fn backfill_row_previews(&self) -> Result<usize> {
+        let missing = queries::select_missing_row_preview_ids(&self.conn)?;
+        if missing.is_empty() {
+            return Ok(0);
+        }
+        let mut analyses = self.read_waveform_analyses(&missing);
+        let tx = self.conn.unchecked_transaction()?;
+        for id in &missing {
+            let preview = analyses.remove(id).map_or(RowPreview::None, |a| RowPreview::from_analysis(&a));
+            queries::update_row_preview(&tx, *id, &preview.to_blob())?;
+        }
+        tx.commit()?;
+        Ok(missing.len())
     }
 
     /// Retrieve all tracks that have analysis data, with artwork included.
@@ -883,6 +922,66 @@ mod tests {
                 assert_eq!(a.unwrap().detail, b.unwrap().detail);
             }
         }
+    }
+
+    fn banded_analysis() -> AnalysisResult {
+        use pioneer_usb_writer::models::ColorWaveform;
+        let mut a = make_analysis();
+        a.color_waveform = Some(ColorWaveform {
+            detail: (0..900).map(|n| [(n % 100) as u8, 40, (n % 60) as u8]).collect(),
+            overview: (0..1200).map(|n| [(n % 100) as u8, 40, (n % 60) as u8]).collect(),
+            exact: None,
+        });
+        a
+    }
+
+    #[test]
+    fn row_preview_is_stored_with_the_analysis_and_matches_the_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let banded = lib.add_track(&make_track("Banded", "/music/b.mp3")).unwrap();
+        lib.set_analysis(banded, &banded_analysis()).unwrap();
+        let plain = lib.add_track(&make_track("Plain", "/music/p.mp3")).unwrap();
+        lib.set_analysis(plain, &make_analysis()).unwrap();
+        lib.add_track(&make_track("None", "/music/n.mp3")).unwrap();
+
+        assert_eq!(lib.backfill_row_previews().unwrap(), 0);
+        let previews = lib.get_row_previews().unwrap();
+        assert_eq!(previews.len(), 2);
+        let from_files = lib.get_waveform_analyses().unwrap();
+        for id in [banded, plain] {
+            assert_eq!(previews[&id], RowPreview::from_analysis(&from_files[&id]));
+        }
+        assert!(matches!(previews[&banded], RowPreview::Bands(_)));
+        assert!(matches!(previews[&plain], RowPreview::Mono(_)));
+    }
+
+    #[test]
+    fn v3_library_migrates_and_backfills_row_previews() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let (banded, plain) = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let banded = lib.add_track(&make_track("Banded", "/music/b.mp3")).unwrap();
+            lib.set_analysis(banded, &banded_analysis()).unwrap();
+            let plain = lib.add_track(&make_track("Plain", "/music/p.mp3")).unwrap();
+            lib.set_analysis(plain, &make_analysis()).unwrap();
+            (banded, plain)
+        };
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("ALTER TABLE analyses DROP COLUMN row_preview; UPDATE schema_version SET version = 3;")
+                .unwrap();
+        }
+
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        assert!(lib.get_row_previews().unwrap().is_empty());
+        assert_eq!(lib.backfill_row_previews().unwrap(), 2);
+        let previews = lib.get_row_previews().unwrap();
+        assert!(matches!(previews[&banded], RowPreview::Bands(_)));
+        assert!(matches!(previews[&plain], RowPreview::Mono(_)));
+        assert_eq!(lib.backfill_row_previews().unwrap(), 0);
+        assert_eq!(lib.get_analysis(banded).unwrap().unwrap().bpm, make_analysis().bpm);
     }
 
     /// Verify ANLZ files are cleaned up when a track is removed.
