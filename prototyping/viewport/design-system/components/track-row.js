@@ -60,6 +60,7 @@ function renderCell(col, track) {
   if (col.key === 'wave') {
     const w = col.width ?? 120;
     const { element } = createWaveform({
+      bands: track.bands ?? null,
       peaks: track.peaks ?? null,
       width: w,
       height: 14,

@@ -1,25 +1,22 @@
 <script>
   /*
-    WaveformView — shared wrapper around the WaveformDisplay engine, used by
-    both players so the 3-band look, cues and beat grid match exactly.
+    WaveformView: shared wrapper around the WaveformDisplay engine, used by both
+    players so the 3-band look, cues and beat grid match exactly.
 
-      mode="compact"  — static full-track view, no zoom, click/drag scrubs.
-      mode="expanded" — overview + Rekordbox playhead-locked zoom view.
+      mode="compact"  full-track view, no zoom, click/drag scrubs.
+      mode="expanded" overview + playhead-locked zoom view.
 
-    All waveform samples are 0–1: amp is peak loudness (1.0 = 0 dBFS), rgb are
-    relative band weights. Data is pushed via setData only when the track or its
+    Waveform data is BandColumns ({low, mid, high}, 0..1 per column, see
+    waveform-bands.js). It is pushed via setData only when the track or its
     waveform changes (setData resets zoom); the playhead follows every tick.
   */
   import WaveformDisplay from '../waveform-display.js';
 
   let {
     mode = 'compact',
-    // Compact uses colorData (full track). Expanded prefers the hi-res detail
-    // for the zoom view + the fixed overview for the preview bar.
-    colorData = null,
-    colorDetail = null,
-    colorOverview = null,
-    previewBytes = null,
+    bands = null,
+    bandsDetail = null,
+    bandsOverview = null,
     beats = [],
     cues = [],
     bpm = 0,
@@ -35,18 +32,10 @@
   let ro;
   let lastDataKey = null;
 
-  function toDisplay(samples) {
-    if (!samples) return undefined;
-    return samples.map((s) => ({ amp: s.amp, r: s.r, g: s.g, b: s.b }));
-  }
-
   function buildData() {
-    const detail = mode === 'expanded' ? (colorDetail ?? colorData) : colorData;
-    const overview = mode === 'expanded' ? (colorOverview ?? colorData) : null;
     return {
-      waveform_color: toDisplay(detail) ?? [],
-      waveform_overview: toDisplay(overview),
-      waveform_preview: previewBytes ?? undefined,
+      bands: (mode === 'expanded' ? (bandsDetail ?? bands) : bands) ?? undefined,
+      bandsOverview: mode === 'expanded' ? (bandsOverview ?? bands) ?? undefined : undefined,
       beats: beats ?? [],
       cues: (cues ?? []).map((c) => ({ position: c.position, color: c.color })),
       duration_ms: durationMs ?? 0,
@@ -79,10 +68,10 @@
 
   // Push data only when the track or its waveform changes — NOT on every tick.
   $effect(() => {
-    const detailLen = (mode === 'expanded' ? (colorDetail ?? colorData) : colorData)?.length ?? 0;
+    const detailLen = (mode === 'expanded' ? (bandsDetail ?? bands) : bands)?.low.length ?? 0;
     // beats?.[0]?.time_ms captures beat-grid edits (shift/set) that move the grid
     // without changing its length, so the engine re-reads the shifted beats.
-    const key = `${trackKey}:${mode}:${detailLen}:${colorOverview?.length ?? 0}:${beats?.length ?? 0}:${beats?.[0]?.time_ms ?? 0}:${cues?.length ?? 0}:${durationMs}`;
+    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ?? 0}:${beats?.[0]?.time_ms ?? 0}:${cues?.length ?? 0}:${durationMs}`;
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
@@ -114,7 +103,7 @@
     flex-direction: column;
     width: 100%;
     height: 100%;
-    background: var(--ff-bg, #0d0d0d);
+    background: var(--ff-wave-bg, #0d0d0d);
     overflow: hidden;
   }
   :global(.ff-waveform-view .waveform-display__overview) {
@@ -123,7 +112,7 @@
     height: 48px;
     cursor: pointer;
     flex-shrink: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(var(--ff-wave-ink, 255, 255, 255), 0.08);
   }
   :global(.ff-waveform-view .waveform-display__zoom) {
     display: block;

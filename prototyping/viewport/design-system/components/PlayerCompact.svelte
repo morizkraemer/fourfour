@@ -15,8 +15,7 @@
     totalTime,
     progress = 0,
     cues = [],
-    colorData = null,
-    previewBytes = null,
+    bands = null,
     beats = [],
     durationMs = 0,
     trackKey = null,
@@ -116,8 +115,7 @@
     <div class="ff-player-compact__waveform">
       <WaveformView
         mode="compact"
-        {colorData}
-        {previewBytes}
+        {bands}
         {progress}
         {playing}
         {cues}

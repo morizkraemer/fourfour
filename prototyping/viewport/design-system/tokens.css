@@ -69,6 +69,16 @@
   --ff-status-warn: #fbbf24;
   --ff-status-offline: #4a4a4a;
 
+  /* Waveform 3-band (low in front, then mid, then high behind). Read by
+     waveform-render.js through getComputedStyle; keep as literal colours. */
+  --ff-wave-bg: #0d0d0d;
+  --ff-wave-low: #2f7bff;
+  --ff-wave-mid: #ffa224;
+  --ff-wave-high: #eef2f8;
+  --ff-wave-dim: rgba(13, 13, 13, 0.58);
+  --ff-wave-ink: 255, 255, 255;
+  --ff-wave-playhead: #ffffff;
+
   /* 1.2 Typography */
   --ff-font: 'Geist', system-ui, sans-serif;
   --ff-font-mono: 'Geist Mono', ui-monospace, monospace;
@@ -118,4 +128,16 @@
   --ff-motion-default: 120ms;
   --ff-motion-slow: 200ms;
   --ff-easing: ease;
+}
+
+/* Waveform tokens for a light surface. Only the waveform ships a light variant
+   today: the rest of the app has no light theme yet (docs/ui/design-system.md). */
+:root[data-theme='light'] {
+  --ff-wave-bg: #f1f2f5;
+  --ff-wave-low: #1f5fe6;
+  --ff-wave-mid: #d96c00;
+  --ff-wave-high: #7d8a9b;
+  --ff-wave-dim: rgba(241, 242, 245, 0.62);
+  --ff-wave-ink: 20, 24, 32;
+  --ff-wave-playhead: #111111;
 }
