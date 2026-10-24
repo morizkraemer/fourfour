@@ -31,6 +31,11 @@ const BALANCE_MAX_GAIN = 2.5;
 const BALANCE_MIN_PEAK = 0.02;
 const ROW_CACHE_LIMIT = 1000;
 
+const PREVIEW_MIX = Array.from({ length: 8 }, (_, level) => {
+  const white = level / 7;
+  return [1 - 0.85 * white, 0.35 + 0.5 * (1 - Math.abs(2 * white - 1)), 0.1 + 0.9 * Math.pow(white, 1.5)];
+});
+
 function emptyBands(columns: number): BandColumns {
   return { low: new Float32Array(columns), mid: new Float32Array(columns), high: new Float32Array(columns) };
 }
@@ -141,11 +146,11 @@ export function colorBandsFromPayload(color: unknown): BandColumns | null {
 export function bandsFromPreviewBytes(bytes: ArrayLike<number>): BandColumns {
   const out = emptyBands(bytes.length);
   for (let i = 0; i < bytes.length; i++) {
+    const mix = PREVIEW_MIX[bytes[i] >> 5 & 0x07];
     const amp = (bytes[i] & 0x1f) / 31;
-    const white = ((bytes[i] >> 5) & 0x07) / 7;
-    out.low[i] = amp * (1 - 0.85 * white);
-    out.mid[i] = amp * (0.35 + 0.5 * (1 - Math.abs(2 * white - 1)));
-    out.high[i] = amp * (0.1 + 0.9 * Math.pow(white, 1.5));
+    out.low[i] = amp * mix[0];
+    out.mid[i] = amp * mix[1];
+    out.high[i] = amp * mix[2];
   }
   return out;
 }

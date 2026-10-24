@@ -3,8 +3,8 @@
   import { drawBandRange, ink, paletteVersion, wavePalette } from '../waveform-render.js';
 
   const VARIANTS = {
-    mini: { step: 2, gap: 1, decay: 0.8 },
-    strip: { step: 3, gap: 1, decay: 0.88 },
+    mini: { step: 2, gap: 1, decay: 0.8, columnPx: 2 },
+    strip: { step: 3, gap: 1, decay: 0.88, columnPx: 1 },
   };
 
   const BITMAP_CACHE_LIMIT = 800;
@@ -126,6 +126,7 @@
       palette: wavePalette(),
       dpr,
       decay: cfg.decay,
+      columnPx: cfg.columnPx,
     });
   }
 

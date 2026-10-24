@@ -99,9 +99,12 @@ describe('bandsFromPeaks', () => {
   });
 });
 
+type Rect = { color: string; x: number; y: number; w: number; h: number };
+
 function recordingContext() {
-  const fills: Array<{ color: string; points: Array<[number, number]> }> = [];
-  let current: Array<[number, number]> = [];
+  const rects: Rect[] = [];
+  const paths: Array<{ color: string; points: Array<[number, number]> }> = [];
+  let points: Array<[number, number]> = [];
   let fillStyle = '';
   const ctx = {
     set fillStyle(v: string) {
@@ -110,18 +113,16 @@ function recordingContext() {
     get fillStyle() {
       return fillStyle;
     },
+    fillRect: (x: number, y: number, w: number, h: number) => rects.push({ color: fillStyle, x, y, w, h }),
     beginPath: () => {
-      current = [];
+      points = [];
     },
-    moveTo: (x: number, y: number) => current.push([x, y]),
-    lineTo: (x: number, y: number) => current.push([x, y]),
+    moveTo: (x: number, y: number) => points.push([x, y]),
+    lineTo: (x: number, y: number) => points.push([x, y]),
     closePath: () => {},
-    fill: () => fills.push({ color: fillStyle, points: current }),
-    save: () => {},
-    restore: () => {},
-    translate: () => {},
+    fill: () => paths.push({ color: fillStyle, points }),
   };
-  return { ctx, fills };
+  return { ctx, rects, paths };
 }
 
 const palette = { low: 'LOW', mid: 'MID', high: 'HIGH', bg: 'BG', dim: 'DIM', ink: '0, 0, 0', playhead: 'P', version: 0 };
@@ -134,42 +135,73 @@ describe('paintBands', () => {
       high: Float32Array.from([0.6, 0.2]),
       length: 2,
     };
-    const { ctx, fills } = recordingContext();
-    paintBands(ctx, shaped, { heightPx: 100, palette });
-    expect(fills.map((f) => f.color)).toEqual(['HIGH', 'MID', 'LOW']);
+    const { ctx, rects } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 200, palette });
+    expect(rects.map((r) => r.color)).toEqual(['HIGH', 'HIGH', 'MID', 'MID', 'LOW', 'LOW']);
     expect(BAND_ORDER).toEqual(['high', 'mid', 'low']);
-    for (const band of ['high', 'mid', 'low'] as const) {
-      const fill = fills[BAND_ORDER.indexOf(band)];
-      const top = fill.points.slice(1, 3);
-      const bottom = fill.points.slice(-2).reverse();
-      top.forEach(([x, y], i) => {
-        const expected = halfHeight(shaped[band][i], band, 50);
-        expect(x).toBeCloseTo(i + 0.5, 6);
-        expect(50 - y).toBeCloseTo(expected, 6);
-        expect(bottom[i][1] - 50).toBeCloseTo(expected, 6);
+    for (const band of BAND_ORDER) {
+      [0, 1].forEach((column) => {
+        const rect = rects.find((r) => r.color === band.toUpperCase() && r.x === column)!;
+        const half = halfHeight(shaped[band][column], band, 100);
+        expect(100 - rect.y).toBeCloseTo(half, 0);
+        expect(rect.y + rect.h - 100).toBeCloseTo(half, 0);
+        expect(rect.w).toBe(1);
       });
+    }
+  });
+  it('skips silent columns and never draws less than one pixel', () => {
+    const shaped = { low: Float32Array.from([0, 0.001]), mid: new Float32Array(2), high: new Float32Array(2), length: 2 };
+    const { ctx, rects } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 200, palette });
+    expect(rects).toHaveLength(1);
+    expect(rects[0].h).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('paintBands on short canvases', () => {
+  it('fills one stepped path per band, high then mid then low, with whole-pixel edges', () => {
+    const shaped = {
+      low: Float32Array.from([1, 0.5]),
+      mid: Float32Array.from([0.8, 0.4]),
+      high: Float32Array.from([0.6, 0.2]),
+      length: 2,
+    };
+    const { ctx, rects, paths } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 28, palette });
+    expect(rects).toHaveLength(0);
+    expect(paths.map((p) => p.color)).toEqual(['HIGH', 'MID', 'LOW']);
+    const low = paths[2].points;
+    expect(low[2]).toEqual([0, 14 - Math.round(halfHeight(1, 'low', 14))]);
+    expect(low[3][0]).toBe(1);
+    for (const [x, y] of low) {
+      expect(Number.isInteger(x)).toBe(true);
+      expect(Number.isInteger(y)).toBe(true);
     }
   });
 });
 
 describe('drawBandRange', () => {
-  it('draws nothing for an empty range and three fills otherwise', () => {
+  it('draws nothing for an empty range', () => {
     const empty = recordingContext();
     drawBandRange(empty.ctx, bands([1, 1]), { startFrac: 0.5, endFrac: 0.5, widthPx: 4, heightPx: 10, palette });
-    expect(empty.fills).toHaveLength(0);
-    const full = recordingContext();
-    drawBandRange(full.ctx, bands([1, 1]), { startFrac: 0, endFrac: 1, widthPx: 4, heightPx: 10, palette });
-    expect(full.fills).toHaveLength(3);
+    expect(empty.rects).toHaveLength(0);
   });
-  it('draws the same shape for the visible pixels whether or not the grid is scroll-aligned', () => {
+  it('draws the same columns whether or not the grid is scroll-aligned', () => {
     const data = bands(Array.from({ length: 400 }, (_, i) => ((i * 7) % 13) / 13));
     const still = recordingContext();
-    drawBandRange(still.ctx, data, { startFrac: 0, endFrac: 1, widthPx: 100, heightPx: 40, palette, decay: 0 });
+    drawBandRange(still.ctx, data, { startFrac: 0, endFrac: 1, widthPx: 100, heightPx: 200, palette, decay: 0 });
     const scrolled = recordingContext();
-    drawBandRange(scrolled.ctx, data, { startFrac: 0, endFrac: 1, widthPx: 100, heightPx: 40, palette, decay: 0, scrolling: true });
-    const lowStill = still.fills[2].points.slice(1, 99).map(([, y]) => y);
-    const lowScrolled = scrolled.fills[2].points.slice(1, 99).map(([, y]) => y);
-    expect(lowScrolled).toEqual(lowStill);
+    drawBandRange(scrolled.ctx, data, { startFrac: 0, endFrac: 1, widthPx: 100, heightPx: 200, palette, decay: 0, scrolling: true });
+    const lows = (r: Rect[]) => r.filter((x) => x.color === 'LOW' && x.x >= 0 && x.x < 100).map((x) => [x.x, x.y, x.h]);
+    expect(lows(scrolled.rects).slice(0, 98)).toEqual(lows(still.rects).slice(0, 98));
+  });
+  it('shifts by the sub-pixel remainder while scrolling', () => {
+    const data = bands(Array.from({ length: 400 }, () => 0.5));
+    const { ctx, rects } = recordingContext();
+    drawBandRange(ctx, data, { startFrac: 0.00375, endFrac: 0.25375, widthPx: 100, heightPx: 200, palette, decay: 0, scrolling: true });
+    const first = rects.find((r) => r.color === 'LOW')!;
+    expect(first.x).toBeLessThanOrEqual(0);
+    expect(Math.abs(first.x % 1)).toBeCloseTo(0.5, 5);
   });
 });
 

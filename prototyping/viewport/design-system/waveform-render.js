@@ -2,9 +2,11 @@
  * The one 3-band renderer. Draws BandColumns (see waveform-bands.js) into a 2D context
  * at device-pixel resolution: every output pixel column is one reduced column, so it is
  * crisp at any devicePixelRatio. Bands are symmetric around the centre line, drawn high
- * (back), mid, low (front).
+ * (back), mid, low (front). Short canvases fill one stepped path per band (cheap to
+ * record, exact pixel edges); tall ones, which the zoom view repaints every frame, use one fillRect
+ * per column and band because a jagged tall polygon is far slower to rasterise.
  */
-import { BAND_ORDER, halfHeight, reduceBands, smoothBands } from './waveform-bands.js';
+import { BAND_GAIN, BAND_ORDER, halfHeight, reduceBands, smoothBands } from './waveform-bands.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
@@ -27,6 +29,7 @@ const TOKEN_NAMES = {
 };
 
 const ENVELOPE_LEAD_CSS_PX = 64;
+const STEPPED_PATH_MAX_HEIGHT = 100;
 
 let cached = null;
 let version = 0;
@@ -71,22 +74,64 @@ export function paletteVersion() {
  */
 export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0 }) {
   const yCentre = heightPx / 2;
-  const halfPx = heightPx / 2;
+  const stepped = heightPx <= STEPPED_PATH_MAX_HEIGHT;
   for (const band of BAND_ORDER) {
     const values = shaped[band];
     ctx.fillStyle = palette[band];
-    ctx.beginPath();
-    ctx.moveTo(offsetPx, yCentre);
+    if (stepped) {
+      paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre);
+      continue;
+    }
     for (let p = 0; p < count; p++) {
-      ctx.lineTo(offsetPx + p + 0.5, yCentre - halfHeight(values[from + p], band, halfPx));
+      const half = halfHeight(values[from + p], band, yCentre);
+      if (half === 0) continue;
+      const top = Math.round(yCentre - half);
+      const bottom = Math.round(yCentre + half);
+      ctx.fillRect(offsetPx + p, top, 1, Math.max(1, bottom - top));
     }
-    ctx.lineTo(offsetPx + count, yCentre);
-    for (let p = count - 1; p >= 0; p--) {
-      ctx.lineTo(offsetPx + p + 0.5, yCentre + halfHeight(values[from + p], band, halfPx));
-    }
-    ctx.closePath();
-    ctx.fill();
   }
+}
+
+function paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre) {
+  const gain = BAND_GAIN[band];
+  const tops = new Int16Array(count);
+  const bottoms = new Int16Array(count);
+  const centre = Math.round(yCentre);
+  for (let p = 0; p < count; p++) {
+    const value = values[from + p];
+    if (!(value > 0)) {
+      tops[p] = centre;
+      bottoms[p] = centre;
+      continue;
+    }
+    const half = Math.max(0.5, Math.min(1, value * gain) * yCentre);
+    const top = Math.round(yCentre - half);
+    tops[p] = top;
+    bottoms[p] = Math.max(top + 1, Math.round(yCentre + half));
+  }
+  ctx.beginPath();
+  ctx.moveTo(offsetPx, centre);
+  let last = centre;
+  for (let p = 0; p < count; p++) {
+    if (tops[p] !== last) {
+      ctx.lineTo(offsetPx + p, last);
+      ctx.lineTo(offsetPx + p, tops[p]);
+      last = tops[p];
+    }
+  }
+  ctx.lineTo(offsetPx + count, last);
+  ctx.lineTo(offsetPx + count, centre);
+  last = centre;
+  for (let p = count - 1; p >= 0; p--) {
+    if (bottoms[p] !== last) {
+      ctx.lineTo(offsetPx + p + 1, last);
+      ctx.lineTo(offsetPx + p + 1, bottoms[p]);
+      last = bottoms[p];
+    }
+  }
+  ctx.lineTo(offsetPx, last);
+  ctx.closePath();
+  ctx.fill();
 }
 
 /**
@@ -94,8 +139,17 @@ export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = s
  * `scrolling` aligns the sample grid to whole pixels (so peak buckets do not re-bucket while the viewport
  * slides), warms the envelope up on a lead-in, and recovers the sub-pixel motion by translating the paint.
  */
-export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false }) {
+export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1 }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
+  if (columnPx > 1) {
+    ctx.save();
+    ctx.scale(columnPx, 1);
+    drawBandRange(ctx, bands, {
+      startFrac, endFrac, widthPx: Math.ceil(widthPx / columnPx), heightPx, palette, dpr: dpr / columnPx, decay, scrolling,
+    });
+    ctx.restore();
+    return;
+  }
   const decayPerPixel = Math.pow(decay, 1 / dpr);
   if (!scrolling) {
     const shaped = smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
