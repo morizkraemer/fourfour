@@ -417,7 +417,7 @@ fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
             let mut out = [0u8; 3];
             for j in 0..3 {
                 let m = pwv7[r.clone()].iter().map(|b| b[j] as f64).sum::<f64>() / r.len() as f64;
-                out[j] = (t.pwv6_scale[j] * m).round().min(127.0) as u8;
+                out[j] = (t.pwv6_scale[j] * m).round().min(PWV6_MAX as f64) as u8;
             }
             out
         })
