@@ -134,6 +134,27 @@ function paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre) {
   ctx.fill();
 }
 
+const SHAPED_PER_BANDS_LIMIT = 6;
+const shapedCache = new WeakMap();
+
+/** The reduced and smoothed columns of a static draw, kept per bands object and width: redraws (theme, dpr, bitmap eviction) skip the reduction. */
+function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel) {
+  if (!bands || typeof bands !== 'object') return smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+  let byKey = shapedCache.get(bands);
+  if (!byKey) {
+    byKey = new Map();
+    shapedCache.set(bands, byKey);
+  }
+  const key = `${startFrac}|${endFrac}|${widthPx}|${decayPerPixel}`;
+  let shaped = byKey.get(key);
+  if (!shaped) {
+    shaped = smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+    byKey.set(key, shaped);
+    if (byKey.size > SHAPED_PER_BANDS_LIMIT) byKey.delete(byKey.keys().next().value);
+  }
+  return shaped;
+}
+
 /**
  * Reduce, smooth and paint the part [startFrac, endFrac] of the track into widthPx x heightPx device pixels.
  * `scrolling` aligns the sample grid to whole pixels (so peak buckets do not re-bucket while the viewport
@@ -152,8 +173,7 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
   }
   const decayPerPixel = Math.pow(decay, 1 / dpr);
   if (!scrolling) {
-    const shaped = smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
-    paintBands(ctx, shaped, { heightPx, palette });
+    paintBands(ctx, shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel), { heightPx, palette });
     return;
   }
   const fracPerPx = (endFrac - startFrac) / widthPx;

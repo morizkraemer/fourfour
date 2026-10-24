@@ -101,11 +101,11 @@ export function bandBytes(bands: BandColumns): Uint8Array {
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += 0x2000) {
+    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 0x2000) as unknown as number[]));
   }
-  return btoa(binary);
+  return btoa(chunks.join(''));
 }
 
 export function encodeWire(bytes: Uint8Array) {

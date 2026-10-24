@@ -451,6 +451,15 @@ function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string
   return base === fileName || track.title === fileName;
 }
 
+/** The row preview a track already carries is the one the analysis sends: keep the object so its bands and bitmaps stay cached. */
+function sameBytes(current: unknown, next: ArrayLike<number>): boolean {
+  if (!current || typeof current !== 'object') return false;
+  const bytes = current as ArrayLike<number>;
+  if (bytes.length !== next.length) return false;
+  for (let i = 0; i < next.length; i++) if (bytes[i] !== next[i]) return false;
+  return true;
+}
+
 function applyWaveformAndCuesFromAnalysis(
   track: Record<string, unknown>,
   res: {
@@ -464,7 +473,7 @@ function applyWaveformAndCuesFromAnalysis(
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
   const bandPreview = decodeBandPreview(res.waveform_row_bands);
   if (bandPreview) {
-    track.bandsPreview = bandPreview;
+    if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
     track.preview = undefined;
   } else if (res.waveform_preview?.length) {
     track.bandsPreview = undefined;
