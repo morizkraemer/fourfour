@@ -87,3 +87,6 @@
 2026-10-23 21:10 orchestrator - decided: item 2 (fast analysing) → Q33 wire Rust ffa into the app behind a setting, Python fallback kept; branch only
 2026-10-24 04:09 orchestrator - run-pause (PM): Q33 WIP committed on q33-rust-analysis; run stalled ~21:30 by usage limit
 2026-10-24 05:48 orchestrator - run-start (PM): target colour waveforms 3-band; usb-writer lane OK per PM relay; Q34 + Q35 spawn
+2026-10-24 06:40 orchestrator Q34 done: branch q34-export-waveforms 7a60879; decided per rec: carry peak/whiteness in AnalysisResult for exact PWV3/5 heights (in Q36)
+2026-10-24 06:50 orchestrator Q35 done: branch q35-app-waveforms df5ba3d
+2026-10-24 06:50 orchestrator Q36 spawn: integration q34+q35
