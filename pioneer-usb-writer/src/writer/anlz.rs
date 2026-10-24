@@ -146,6 +146,8 @@ fn build_beat_grid_section(analysis: &AnalysisResult) -> Vec<u8> {
 /// the `.DAT`, `.EXT` and `.2EX` files carry, so a renderer can draw what the stick gets.
 ///
 /// Without band data the colour sections come out neutral (every band equal), never tinted.
+/// `ColorWaveform::exact` supplies the measured `PWV3`, `PWV5` and `PWVC` values; without
+/// it they are derived from the bands.
 pub fn export_waveforms(duration_secs: f64, analysis: &AnalysisResult) -> Waveforms {
     let columns = (duration_secs * COLUMNS_PER_SECOND).round() as usize;
     match analysis.color_waveform.as_ref().filter(|cw| !cw.detail.is_empty()) {
@@ -154,7 +156,11 @@ pub fn export_waveforms(duration_secs: f64, analysis: &AnalysisResult) -> Wavefo
             for band in detail.iter_mut() {
                 *band = band.map(|v| v.min(PWV7_MAX));
             }
-            Waveforms::from_bands(detail, &Tuning::default(), &Derivation::default())
+            let derived = Waveforms::from_bands(detail, &Tuning::default(), &Derivation::default());
+            match cw.exact.as_ref().filter(|e| !e.pwv3.is_empty() && e.pwv3.len() == e.pwv5.len()) {
+                Some(exact) => derived.with_exact(exact),
+                None => derived,
+            }
         }
         None => Waveforms::from_mono_preview(&analysis.waveform.data, columns, &Tuning::default()),
     }

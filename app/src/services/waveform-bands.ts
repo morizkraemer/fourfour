@@ -78,6 +78,11 @@ export function bandsFromInterleavedBytes(
   return out;
 }
 
+/** The columns a player shows for PWV7 / PWV6 bytes: `byte / 127` per band, nothing else applied. */
+export function bandsFromStickBytes(bytes: ArrayLike<number>): BandColumns {
+  return bandsFromInterleavedBytes(bytes, WIRE_FULL_SCALE, 1);
+}
+
 function percentile(values: Float32Array, p: number): number {
   const bins = new Uint32Array(BALANCE_BINS);
   for (let i = 0; i < values.length; i++) bins[Math.min(BALANCE_BINS - 1, Math.floor(values[i] * BALANCE_BINS))]++;
@@ -127,6 +132,12 @@ export function colorBandsFromPayload(color: unknown): BandColumns | null {
   const memo = payloadBands.get(color);
   if (memo) return memo;
   let bands: BandColumns | null = null;
+  if (isEncoded(color) && color.pwv7) {
+    bands = bandsFromStickBytes(decodeBase64(color.bands));
+    if (bands.low.length === 0) return null;
+    payloadBands.set(color, bands);
+    return bands;
+  }
   if (isEncoded(color)) {
     bands = bandsFromInterleavedBytes(decodeBase64(color.bands), WIRE_FULL_SCALE, color.calibration);
   } else {
@@ -157,17 +168,29 @@ export function bandsFromPreviewBytes(bytes: ArrayLike<number>): BandColumns {
 
 const rowCache = new Map<ArrayLike<number>, BandColumns>();
 
-/** Row and detail previews. Small LRU: rows are drawn from a bitmap cache afterwards, so only visible tracks need bands. */
-export function rowBandsFor(preview: ArrayLike<number> | null | undefined): BandColumns | null {
-  if (!preview || preview.length === 0) return null;
-  const hit = rowCache.get(preview);
+function cachedRowBands(
+  bytes: ArrayLike<number> | null | undefined,
+  convert: (bytes: ArrayLike<number>) => BandColumns,
+): BandColumns | null {
+  if (!bytes || bytes.length === 0) return null;
+  const hit = rowCache.get(bytes);
   if (hit) {
-    rowCache.delete(preview);
-    rowCache.set(preview, hit);
+    rowCache.delete(bytes);
+    rowCache.set(bytes, hit);
     return hit;
   }
-  const bands = bandsFromPreviewBytes(preview);
-  rowCache.set(preview, bands);
+  const bands = convert(bytes);
+  rowCache.set(bytes, bands);
   if (rowCache.size > ROW_CACHE_LIMIT) rowCache.delete(rowCache.keys().next().value!);
   return bands;
+}
+
+/** Row and detail previews from the 400-byte PWAV (tracks without band data). Small LRU: rows are drawn from a bitmap cache afterwards, so only visible tracks need bands. */
+export function rowBandsFor(preview: ArrayLike<number> | null | undefined): BandColumns | null {
+  return cachedRowBands(preview, bandsFromPreviewBytes);
+}
+
+/** Row and detail previews from the 3-band row preview (`waveform_bands`: low, mid, high bytes per column). */
+export function rowBandsFromBandBytes(bandPreview: ArrayLike<number> | null | undefined): BandColumns | null {
+  return cachedRowBands(bandPreview, bandsFromStickBytes);
 }

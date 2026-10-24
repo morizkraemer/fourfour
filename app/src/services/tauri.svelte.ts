@@ -7,7 +7,7 @@ import {
 } from './analysis-data.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
-import { previewFromBands, syntheticBands } from '../mocks/synthetic-bands.ts';
+import { rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 export let lastTauriError = 'None';
 
@@ -48,6 +48,8 @@ export interface TrackInfo {
   has_analysis?: boolean;
   /** 400-byte mono preview embedded at load (base64 from Tauri, byte array in mocks). */
   waveform_preview?: string | number[] | null;
+  /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */
+  waveform_bands?: string | number[] | null;
 }
 
 export interface PlaylistInput {
@@ -106,14 +108,14 @@ function mockTrackCountFromUrl(): number {
 }
 
 const ROW_PREVIEW_VARIANTS = 128;
-const rowPreviews = new Map<number, number[]>();
+const rowBandPreviews = new Map<number, string>();
 
-function syntheticRowPreview(i: number): number[] {
+function syntheticRowBands(i: number): string {
   const variant = (i * 31) % ROW_PREVIEW_VARIANTS;
-  let preview = rowPreviews.get(variant);
+  let preview = rowBandPreviews.get(variant);
   if (!preview) {
-    preview = previewFromBands(syntheticBands(1600, variant + 1, 180 + variant, 118 + (variant % 14)));
-    rowPreviews.set(variant, preview);
+    preview = rowBandsBase64(syntheticBands(1200, variant + 1, 180 + variant, 118 + (variant % 14)));
+    rowBandPreviews.set(variant, preview);
   }
   return preview;
 }
@@ -135,7 +137,7 @@ function syntheticMockTrack(i: number): TrackInfo {
     has_artwork: false,
     has_cues: false,
     has_analysis: analyzed,
-    waveform_preview: analyzed ? syntheticRowPreview(i) : null,
+    waveform_bands: analyzed ? syntheticRowBands(i) : null,
   };
 }
 

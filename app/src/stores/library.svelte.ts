@@ -37,8 +37,9 @@ import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
   decodeTrackPreview,
+  decodeBandPreview,
 } from '../services/analysis-data.ts';
-import { rowBandsFor } from '../services/waveform-bands.ts';
+import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
@@ -454,13 +455,19 @@ function applyWaveformAndCuesFromAnalysis(
   track: Record<string, unknown>,
   res: {
     waveform_preview?: number[];
+    waveform_row_bands?: string | null;
     cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
     bpm?: number;
     key?: string;
   },
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
-  if (res.waveform_preview?.length) {
+  const bandPreview = decodeBandPreview(res.waveform_row_bands);
+  if (bandPreview) {
+    track.bandsPreview = bandPreview;
+    track.preview = undefined;
+  } else if (res.waveform_preview?.length) {
+    track.bandsPreview = undefined;
     track.preview = Uint8Array.from(res.waveform_preview);
   }
   if (res.cue_points) {
@@ -554,6 +561,7 @@ function markTracksPendingAnalysis(ids: number[]) {
     const track = library.tracks.find((t) => t.id === id);
     if (!track) continue;
     track.preview = undefined;
+    track.bandsPreview = undefined;
     track.analysisLoaded = false;
   }
 }
@@ -627,14 +635,20 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
       return artwork.get(this.id, this.raw?.has_artwork);
     },
     get bands() {
-      return rowBandsFor(this.preview);
+      return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
     }
   };
 
-  // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
-  const preview = decodeTrackPreview(t.waveform_preview);
-  if (preview && isValidWaveformPreview(preview)) {
-    local.preview = Uint8Array.from(preview);
+  // Embedded preview → paint the mini waveform immediately, no N+1 fetch: the 3-band row
+  // preview when the track has band data, else the mono PWAV.
+  const bandPreview = decodeBandPreview(t.waveform_bands);
+  if (bandPreview) {
+    local.bandsPreview = bandPreview;
+  } else {
+    const preview = decodeTrackPreview(t.waveform_preview);
+    if (preview && isValidWaveformPreview(preview)) {
+      local.preview = Uint8Array.from(preview);
+    }
   }
 
   return local;

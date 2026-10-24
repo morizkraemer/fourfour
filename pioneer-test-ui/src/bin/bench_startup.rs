@@ -72,7 +72,7 @@ fn fake_analysis(i: usize) -> AnalysisResult {
         key: format!("{}{}", i % 12 + 1, if i % 2 == 0 { "A" } else { "B" }),
         energy: Some((i % 10) as u8),
         cue_points: Vec::new(),
-        color_waveform: Some(ColorWaveform { detail, overview }),
+        color_waveform: Some(ColorWaveform { detail, overview, exact: None }),
     }
 }
 

@@ -112,6 +112,32 @@ export function encodeWire(bytes: Uint8Array) {
   return { len: bytes.length / 3, calibration: WIRE_CALIBRATION, bands: bytesToBase64(bytes) };
 }
 
+/** The wire shape of a track stored with 3-band export data: PWV7-style bytes, unscaled, flagged `pwv7`. */
+export function encodeStickWire(bytes: Uint8Array) {
+  return { len: bytes.length / 3, calibration: 1, pwv7: true, bands: bytesToBase64(bytes) };
+}
+
+export const ROW_BAND_COLUMNS = 128;
+
+/** The backend's row preview: the bands averaged to 128 columns, as base64 low, mid, high bytes. */
+export function rowBandsBase64(bands: BandColumns, columns = ROW_BAND_COLUMNS): string {
+  const source = bands.low.length;
+  const mean = (values: Float32Array, from: number, to: number) => {
+    let sum = 0;
+    for (let i = from; i < to; i++) sum += values[i];
+    return sum / (to - from);
+  };
+  const reduced: BandColumns = { low: new Float32Array(columns), mid: new Float32Array(columns), high: new Float32Array(columns) };
+  for (let c = 0; c < columns; c++) {
+    const from = Math.floor((c * source) / columns);
+    const to = Math.max(from + 1, Math.floor(((c + 1) * source) / columns));
+    reduced.low[c] = mean(bands.low, from, to);
+    reduced.mid[c] = mean(bands.mid, from, to);
+    reduced.high[c] = mean(bands.high, from, to);
+  }
+  return bytesToBase64(bandBytes(reduced));
+}
+
 /** 400-byte PWAV preview: 5-bit height (peak) and 3-bit whiteness (how bright the window is). */
 export function previewFromBands(bands: BandColumns, length = 400): number[] {
   const columns = bands.low.length;

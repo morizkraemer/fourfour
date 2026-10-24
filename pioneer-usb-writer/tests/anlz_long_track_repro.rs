@@ -50,6 +50,7 @@ fn analysis(entry_count: usize) -> AnalysisResult {
         color_waveform: Some(ColorWaveform {
             detail: (0..entry_count).map(detail_value).collect(),
             overview: vec![[10, 20, 30]; 1200],
+            exact: None,
         }),
     }
 }

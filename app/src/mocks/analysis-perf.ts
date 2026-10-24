@@ -1,4 +1,4 @@
-import { WIRE_CALIBRATION, bandBytes, encodeWire, previewFromBands, syntheticBands } from './synthetic-bands.ts';
+import { WIRE_CALIBRATION, bandBytes, encodeStickWire, previewFromBands, rowBandsBase64, syntheticBands } from './synthetic-bands.ts';
 
 const COLUMNS_PER_SECOND = 150;
 const STRIP_COLUMNS = 2048;
@@ -35,10 +35,11 @@ function template(legacy: boolean, seed: number): string {
   const strip = bandBytesFor(STRIP_COLUMNS, variant, PERF_DURATION_SECS);
   const detail = bandBytesFor(PERF_DURATION_SECS * COLUMNS_PER_SECOND, variant, PERF_DURATION_SECS);
   const overview = bandBytesFor(OVERVIEW_COLUMNS, variant, PERF_DURATION_SECS);
-  const encode = legacy ? legacyColorSamples : (bytes: Uint8Array) => encodeWire(bytes);
+  const encode = legacy ? legacyColorSamples : (bytes: Uint8Array) => encodeStickWire(bytes);
   const beats = Array.from({ length: 512 }, (_, i) => ({ time_ms: i * 484, bar_position: (i % 4) + 1 }));
   const text = JSON.stringify({
     waveform_preview: previewFromBands(syntheticBands(STRIP_COLUMNS, variant, PERF_DURATION_SECS, 124)),
+    waveform_row_bands: rowBandsBase64(syntheticBands(STRIP_COLUMNS, variant, PERF_DURATION_SECS, 124)),
     waveform_color: encode(strip),
     waveform_color_detail: encode(detail),
     waveform_overview: encode(overview),

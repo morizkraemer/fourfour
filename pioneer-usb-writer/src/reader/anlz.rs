@@ -14,7 +14,7 @@ use std::path::Path;
 use anyhow::{bail, Context, Result};
 
 use crate::models::{
-    AnalysisResult, Beat, BeatGrid, ColorWaveform, CuePoint, WaveformPreview,
+    AnalysisResult, Beat, BeatGrid, ColorWaveform, CuePoint, ExactColumns, WaveformPreview,
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -230,6 +230,38 @@ fn parse_pwv6(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     Ok(entries)
 }
 
+/// The `PWV6` overview of a `.2EX` file, read by skipping the large `PWV7` section instead of
+/// loading it: a few small reads per file, which is what lets a list of 30,000 tracks carry
+/// a band preview. `None` when the file or section is missing.
+pub fn read_pwv6_overview(ext2_path: &Path) -> Option<Vec<[u8; 3]>> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(ext2_path).ok()?;
+    let mut file_header = [0u8; 12];
+    file.read_exact(&mut file_header).ok()?;
+    if &file_header[0..4] != b"PMAI" {
+        return None;
+    }
+    let mut offset = u32::from_be_bytes(file_header[4..8].try_into().ok()?) as u64;
+    loop {
+        file.seek(SeekFrom::Start(offset)).ok()?;
+        let mut head = [0u8; 12];
+        file.read_exact(&mut head).ok()?;
+        let header_len = u32::from_be_bytes(head[4..8].try_into().ok()?) as u64;
+        let section_len = u32::from_be_bytes(head[8..12].try_into().ok()?) as u64;
+        if section_len < 12 || header_len > section_len {
+            return None;
+        }
+        if &head[0..4] == b"PWV6" {
+            let mut section = vec![0u8; section_len as usize];
+            file.seek(SeekFrom::Start(offset)).ok()?;
+            file.read_exact(&mut section).ok()?;
+            return parse_pwv6(&section).ok().filter(|entries| !entries.is_empty());
+        }
+        offset += section_len;
+    }
+}
+
 /// Parse a PWV4 (color overview waveform, 6 bytes/entry) section into `[low, mid, high]` entries.
 fn parse_pwv4(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     if section.len() < 24 {
@@ -275,9 +307,11 @@ pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
     let ext2_path = dat_path.with_extension("2EX");
     let mut color_detail: Option<Vec<[u8; 3]>> = None;
     let mut color_overview: Option<Vec<[u8; 3]>> = None;
+    let mut ext_bytes = Vec::new();
+    let mut ext2_bytes = Vec::new();
 
     if ext_path.exists() {
-        let ext_bytes = std::fs::read(&ext_path)
+        ext_bytes = std::fs::read(&ext_path)
             .with_context(|| format!("failed to read EXT file: {}", ext_path.display()))?;
         let (ext_cues, detail, overview) = parse_ext_sections(&ext_bytes)?;
         if !ext_cues.is_empty() {
@@ -288,7 +322,7 @@ pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
     }
 
     if ext2_path.exists() {
-        let ext2_bytes = std::fs::read(&ext2_path)
+        ext2_bytes = std::fs::read(&ext2_path)
             .with_context(|| format!("failed to read 2EX file: {}", ext2_path.display()))?;
         let (_, detail, overview) = parse_ext_sections(&ext2_bytes)?;
         if detail.is_some() {
@@ -300,10 +334,9 @@ pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
     }
 
     let color_waveform = if color_detail.is_some() || color_overview.is_some() {
-        Some(ColorWaveform {
-            detail: color_detail.unwrap_or_default(),
-            overview: color_overview.unwrap_or_default(),
-        })
+        let detail = color_detail.unwrap_or_default();
+        let exact = exact_columns(&ext_bytes, &ext2_bytes, detail.len());
+        Some(ColorWaveform { detail, overview: color_overview.unwrap_or_default(), exact })
     } else {
         None
     };
@@ -325,6 +358,39 @@ pub fn read_anlz(dat_path: &Path) -> Result<AnalysisResult> {
         cue_points,
         color_waveform,
     })
+}
+
+/// The body of the first section tagged `tag` in an ANLZ file, from the end of its header.
+fn find_section<'a>(data: &'a [u8], tag: &[u8; 4]) -> Option<&'a [u8]> {
+    let mut offset = read_u32_be(data, 4).ok()? as usize;
+    while offset + 12 <= data.len() {
+        let header_len = read_u32_be(data, offset + 4).ok()? as usize;
+        let section_len = read_u32_be(data, offset + 8).ok()? as usize;
+        if section_len == 0 || offset + section_len > data.len() || header_len > section_len {
+            return None;
+        }
+        if &data[offset..offset + 4] == tag {
+            return Some(&data[offset + header_len..offset + section_len]);
+        }
+        offset += section_len;
+    }
+    None
+}
+
+/// `PWV3` and `PWV5` from the `.EXT` and `PWVC` from the `.2EX`, when all three are there
+/// and the columns line up with the `PWV7` detail.
+fn exact_columns(ext: &[u8], ext2: &[u8], detail_len: usize) -> Option<ExactColumns> {
+    let pwv3 = find_section(ext, b"PWV3")?.to_vec();
+    let pwv5: Vec<u16> = find_section(ext, b"PWV5")?
+        .chunks_exact(2)
+        .map(|c| u16::from_be_bytes([c[0], c[1]]))
+        .collect();
+    let pwvc = find_section(ext2, b"PWVC")?;
+    if detail_len == 0 || pwv3.len() != detail_len || pwv5.len() != detail_len || pwvc.len() < 6 {
+        return None;
+    }
+    let gain = |i: usize| u16::from_be_bytes([pwvc[i * 2], pwvc[i * 2 + 1]]);
+    Some(ExactColumns { pwv3, pwv5, gains: [gain(0), gain(1), gain(2)] })
 }
 
 /// Walk the tag-based sections in a `.DAT` file and extract what we understand.

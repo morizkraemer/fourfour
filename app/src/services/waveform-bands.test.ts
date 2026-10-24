@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { decodeColorWaveform } from './analysis-data.ts';
+import { decodeBandPreview, decodeColorWaveform } from './analysis-data.ts';
 import {
   balanceBands,
   bandsFromColorSamples,
   bandsFromInterleavedBytes,
   bandsFromPreviewBytes,
+  bandsFromStickBytes,
   colorBandsFromPayload,
   rowBandsFor,
+  rowBandsFromBandBytes,
 } from './waveform-bands.ts';
-import { bandBytes, encodeWire, previewFromBands, syntheticBands } from '../mocks/synthetic-bands.ts';
+import { ROW_BAND_COLUMNS, bandBytes, encodeWire, previewFromBands, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 function wire(bytes: number[], calibration = 0.9) {
   return { len: bytes.length / 3, calibration, bands: btoa(String.fromCharCode(...bytes)) };
@@ -140,5 +142,45 @@ describe('synthetic mock bands', () => {
     const preview = previewFromBands(bands);
     expect(preview).toHaveLength(400);
     expect(new Set(preview.map((b) => b >> 5)).size).toBeGreaterThan(2);
+  });
+});
+
+describe('PWV7 payloads (the stick bytes)', () => {
+  const pwv7Bytes = Array.from({ length: 600 }, (_, i) => (i * 37 + (i % 3) * 11) % 128);
+  const stick = (bytes: number[]) => ({ ...wire(bytes, 1), pwv7: true });
+
+  it('maps to byte / 127 per band, the columns the stick draws', () => {
+    const bands = colorBandsFromPayload(stick(pwv7Bytes))!;
+    expect(bands.low).toHaveLength(200);
+    for (let i = 0; i < 200; i++) {
+      expect(bands.low[i]).toBeCloseTo(pwv7Bytes[i * 3] / 127, 6);
+      expect(bands.mid[i]).toBeCloseTo(pwv7Bytes[i * 3 + 1] / 127, 6);
+      expect(bands.high[i]).toBeCloseTo(pwv7Bytes[i * 3 + 2] / 127, 6);
+    }
+  });
+
+  it('is not rescaled or balanced, unlike the fallback path', () => {
+    const quiet = Array.from({ length: 300 }, (_, i) => (i % 3 === 0 ? 20 : 10));
+    const stickBands = colorBandsFromPayload(stick(quiet))!;
+    expect(Math.max(...stickBands.low)).toBeCloseTo(20 / 127, 6);
+    const fallback = colorBandsFromPayload(wire(quiet, 0.9))!;
+    expect(Math.max(...fallback.low)).toBeGreaterThan(Math.max(...stickBands.low) * 1.5);
+  });
+
+  it('is the same function the row preview uses', () => {
+    const bytes = Uint8Array.from(pwv7Bytes);
+    expect(rowBandsFromBandBytes(bytes)).toEqual(bandsFromStickBytes(bytes));
+    expect(rowBandsFromBandBytes(bytes)).toBe(rowBandsFromBandBytes(bytes));
+  });
+
+  it('survives the wire: base64 of 128 columns decodes to the bytes the backend sent', () => {
+    const bands = syntheticBands(600, 2, 200, 124);
+    const text = rowBandsBase64(bands);
+    const decoded = decodeBandPreview(text)!;
+    expect(decoded).toHaveLength(ROW_BAND_COLUMNS * 3);
+    expect(decodeBandPreview('AAA=')).toBeNull();
+    expect(decodeBandPreview('')).toBeNull();
+    expect(decodeBandPreview(null)).toBeNull();
+    expect(decodeBandPreview([1, 2, 3])).toEqual(Uint8Array.from([1, 2, 3]));
   });
 });

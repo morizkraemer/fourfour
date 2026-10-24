@@ -53,6 +53,10 @@ pub struct TrackInfo {
     /// the track list paint mini waveforms without an N+1 fetch.
     #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_preview")]
     pub waveform_preview: Option<Vec<u8>>,
+    /// 3-band row preview (`ROW_BAND_COLUMNS` columns of low, mid, high bytes, 0..127) as base64.
+    /// When present it replaces `waveform_preview`, which then stays unset.
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_preview")]
+    pub waveform_bands: Option<Vec<u8>>,
 }
 
 impl From<&Track> for TrackInfo {
@@ -73,6 +77,7 @@ impl From<&Track> for TrackInfo {
             has_cues: false,
             has_analysis: false,
             waveform_preview: None,
+            waveform_bands: None,
         }
     }
 }

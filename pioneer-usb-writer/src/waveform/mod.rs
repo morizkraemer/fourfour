@@ -16,7 +16,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{ColorWaveform, WaveformPreview};
+use crate::models::{ColorWaveform, ExactColumns, WaveformPreview};
 
 pub const COLUMNS_PER_SECOND: f64 = 150.0;
 pub const PWAV_COLUMNS: usize = 400;
@@ -473,11 +473,15 @@ impl Default for Derivation {
 
 /// Resamples `detail` to `columns` entries (nearest earlier column), all in 64-bit math.
 pub fn resample_columns(detail: &[[u8; 3]], columns: usize) -> Vec<[u8; 3]> {
-    if detail.is_empty() {
-        return vec![[0; 3]; columns];
+    resample(detail, columns, [0; 3])
+}
+
+fn resample<T: Copy>(source: &[T], columns: usize, empty: T) -> Vec<T> {
+    if source.is_empty() {
+        return vec![empty; columns];
     }
     (0..columns)
-        .map(|i| detail[(i as u64 * detail.len() as u64 / columns as u64) as usize])
+        .map(|i| source[(i as u64 * source.len() as u64 / columns as u64) as usize])
         .collect()
 }
 
@@ -536,9 +540,27 @@ impl Waveforms {
 }
 
 impl Waveforms {
-    /// The band data an `AnalysisResult` carries: `PWV7` bytes as `detail`, `PWV6` bytes as `overview`.
+    /// The band data an `AnalysisResult` carries: `PWV7` bytes as `detail`, `PWV6` bytes as
+    /// `overview`, and the `PWV3` / `PWV5` / `PWVC` values as `exact`.
     pub fn color_waveform(&self) -> ColorWaveform {
-        ColorWaveform { detail: self.pwv7.clone(), overview: self.pwv6.clone() }
+        ColorWaveform {
+            detail: self.pwv7.clone(),
+            overview: self.pwv6.clone(),
+            exact: Some(ExactColumns {
+                pwv3: self.pwv3.clone(),
+                pwv5: self.pwv5.clone(),
+                gains: self.gains,
+            }),
+        }
+    }
+
+    /// Replaces the derived `PWV3`, `PWV5` and `PWVC` values with the measured ones.
+    pub fn with_exact(mut self, exact: &ExactColumns) -> Waveforms {
+        let columns = self.pwv7.len();
+        self.pwv3 = resample(&exact.pwv3, columns, 0);
+        self.pwv5 = resample(&exact.pwv5, columns, 0);
+        self.gains = exact.gains;
+        self
     }
 
     /// The mono `PWAV` preview an `AnalysisResult` carries.

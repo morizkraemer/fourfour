@@ -454,7 +454,11 @@ fn eval_set(
             }
         };
         let direct = measure(mono, tuning);
-        let exported = Waveforms::from_bands(direct.pwv7.clone(), &tuning, &derivation);
+        let derived = Waveforms::from_bands(direct.pwv7.clone(), &tuning, &derivation);
+        let exported = match std::env::var_os("WAVEFORM_COMPARE_BANDS_ONLY") {
+            Some(_) => derived,
+            None => derived.with_exact(&direct.color_waveform().exact.expect("measured audio carries exact columns")),
+        };
         (compare(&direct, &e.reference), compare(&exported, &e.reference))
     })
 }
@@ -1025,7 +1029,7 @@ fn main() -> Result<()> {
                 &merge_metrics(&direct_only(&pairs)),
             );
             print_metrics(
-                &format!("{} tracks, set {}: export path (derived from PWV7 bands)", entries.len(), o.set),
+                &format!("{} tracks, set {}: export path (PWV7 bands plus measured PWV3/PWV5/PWVC columns; bands only with WAVEFORM_COMPARE_BANDS_ONLY set)", entries.len(), o.set),
                 &merge_metrics(&export_only(&pairs)),
             );
         }

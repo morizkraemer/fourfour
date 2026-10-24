@@ -103,6 +103,7 @@ fn banded(duration_secs: f64, seed: usize) -> AnalysisResult {
     analysis(Some(ColorWaveform {
         detail: synthetic_detail(columns, seed),
         overview: vec![[1, 2, 3]; OVERVIEW_COLUMNS],
+        exact: None,
     }))
 }
 
@@ -234,7 +235,7 @@ fn export_roundtrips_band_data_for_1_7_10_20_and_60_minute_tracks() {
 fn band_bytes_above_127_are_clamped() {
     let source = TempDir::new().unwrap();
     let t = track(source.path(), 1, 10.0);
-    let a = analysis(Some(ColorWaveform { detail: vec![[255, 200, 128]; 1500], overview: Vec::new() }));
+    let a = analysis(Some(ColorWaveform { detail: vec![[255, 200, 128]; 1500], overview: Vec::new(), exact: None }));
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("ANLZ0000.2EX");
     assert!(write_anlz_2ex(&path, &t, &a).unwrap());
@@ -344,4 +345,54 @@ fn analyzed_audio_exports_and_reads_back_identically() {
     assert!(bass[0] > bass[1] && bass[0] > bass[2], "bass section: {bass:?}");
     assert!(mid[1] > mid[0] && mid[1] > mid[2], "mid section: {mid:?}");
     assert!(treble[2] > treble[0] && treble[2] > treble[1], "treble section: {treble:?}");
+}
+
+fn measured_waves() -> Waveforms {
+    let rate = 22050;
+    let mut samples = tone(rate, 4.0, 60.0, 0.9);
+    samples.extend(tone(rate, 4.0, 1000.0, 0.5));
+    samples.extend(tone(rate, 4.0, 9000.0, 0.3));
+    let mut meter = Meter::new(rate, 1);
+    meter.push(&samples);
+    analyze(&meter.finish())
+}
+
+#[test]
+fn exact_columns_reach_the_stick_and_survive_a_read_back() {
+    let waves = measured_waves();
+    let duration_secs = waves.pwv7.len() as f64 / 150.0;
+    let source = TempDir::new().unwrap();
+    let usb = TempDir::new().unwrap();
+    let t = track(source.path(), 1, duration_secs);
+    let a = analysis(Some(waves.color_waveform()));
+    write_usb(usb.path(), &[t.clone()], &[a.clone()], &[]).unwrap();
+
+    let ext = std::fs::read(usb.path().join(anlz_ext_path_for_track(&t))).unwrap();
+    let two_ex = std::fs::read(usb.path().join(anlz_2ex_path_for_track(&t))).unwrap();
+    assert_eq!(&section(&ext, "PWV3")[24..], waves.pwv3.as_slice(), "PWV3 is the measured peak and whiteness");
+    let pwv5: Vec<u16> =
+        section(&ext, "PWV5")[24..].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+    assert_eq!(pwv5, waves.pwv5, "PWV5 is the measured height and levels");
+    let pwvc = section(&two_ex, "PWVC");
+    let gains: Vec<u16> = pwvc[14..20].chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+    assert_eq!(gains, waves.gains);
+
+    let read_back = read_anlz(&usb.path().join(anlz_path_for_track(&t))).unwrap();
+    assert_eq!(
+        read_back.color_waveform.unwrap().exact,
+        a.color_waveform.unwrap().exact,
+        "the library reads back what the stick carries"
+    );
+}
+
+#[test]
+fn without_exact_columns_the_sections_are_derived_from_the_bands() {
+    let waves = measured_waves();
+    let duration_secs = waves.pwv7.len() as f64 / 150.0;
+    let mut cw = waves.color_waveform();
+    cw.exact = None;
+    let derived = pioneer_usb_writer::writer::anlz::export_waveforms(duration_secs, &analysis(Some(cw)));
+    assert_eq!(derived.pwv7, waves.pwv7);
+    assert_ne!(derived.pwv3, waves.pwv3, "the bands alone cannot recover the measured heights");
+    assert_eq!(derived.gains, [85, 134, 135]);
 }

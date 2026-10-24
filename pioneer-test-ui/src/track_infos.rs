@@ -17,12 +17,13 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
     Ok(rows
         .into_iter()
         .map(|(track, has_artwork, has_analysis, has_cues)| {
-            let waveform_preview = if has_analysis {
-                analyses
-                    .get(&i64::from(track.id))
-                    .and_then(effective_preview)
-            } else {
-                None
+            let analysis = if has_analysis { analyses.get(&i64::from(track.id)) } else { None };
+            let waveform_bands = analysis
+                .and_then(|a| a.color_waveform.as_ref())
+                .and_then(row_bands);
+            let waveform_preview = match waveform_bands {
+                Some(_) => None,
+                None => analysis.and_then(effective_preview),
             };
             TrackInfo {
                 id: track.id,
@@ -40,9 +41,34 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
                 has_cues,
                 has_analysis,
                 waveform_preview,
+                waveform_bands,
             }
         })
         .collect())
+}
+
+/// Columns in the 3-band row preview that `load_state` and `get_analysis_data` send.
+pub const ROW_BAND_COLUMNS: usize = 128;
+
+/// The row preview: the `PWV6` overview (else the detail) averaged down to
+/// `ROW_BAND_COLUMNS` columns of interleaved low, mid, high bytes. `None` without band data.
+pub fn row_bands(cw: &models::ColorWaveform) -> Option<Vec<u8>> {
+    let source = if cw.overview.is_empty() { &cw.detail } else { &cw.overview };
+    if source.is_empty() {
+        return None;
+    }
+    let n = source.len();
+    let mut out = Vec::with_capacity(ROW_BAND_COLUMNS * 3);
+    for i in 0..ROW_BAND_COLUMNS {
+        let start = i * n / ROW_BAND_COLUMNS;
+        let end = ((i + 1) * n / ROW_BAND_COLUMNS).max(start + 1).min(n);
+        let window = &source[start.min(n - 1)..end];
+        for band in 0..3 {
+            let sum: u32 = window.iter().map(|c| u32::from(c[band])).sum();
+            out.push(((sum + window.len() as u32 / 2) / window.len() as u32) as u8);
+        }
+    }
+    Some(out)
 }
 
 /// Build a 400-byte mono PWAV preview from a color waveform's per-sample band

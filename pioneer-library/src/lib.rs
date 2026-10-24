@@ -21,7 +21,7 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::{
-    AnalysisResult, BeatGrid, Playlist, SyncReport, Track, WaveformPreview,
+    AnalysisResult, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
 };
 use pioneer_usb_writer::{reader, writer};
 
@@ -304,9 +304,9 @@ impl LocalLibrary {
     /// One SQL query plus a parallel file read, instead of one `get_analysis`
     /// call (query + full ANLZ parse) per track. Only `waveform` and
     /// `color_waveform` are populated; beat grid, cues, bpm and key are left
-    /// empty. The color waveform is read only when the DAT's PWAV preview is
-    /// flat, since callers fall back to it in that case. Tracks whose ANLZ
-    /// files are missing or unreadable are omitted.
+    /// empty. The color waveform carries just the `PWV6` overview (empty
+    /// `detail`) unless the DAT's PWAV preview is flat, where the full reader
+    /// fills it. Tracks whose ANLZ files are missing or unreadable are omitted.
     pub fn get_waveform_analyses(&self) -> Result<HashMap<i64, AnalysisResult>> {
         let Some(anlz_dir) = self.anlz_dir() else {
             return Ok(HashMap::new());
@@ -610,12 +610,16 @@ fn dat_pwav_preview(data: &[u8]) -> Option<[u8; 400]> {
     Some(preview)
 }
 
-/// Read just the PWAV preview from a DAT file; fall back to the full ANLZ
-/// reader (which also loads the color waveform) when the preview is flat.
+/// Read the PWAV preview from a DAT file and the PWV6 overview from its sibling
+/// `.2EX` (`detail` stays empty); fall back to the full ANLZ reader (which also
+/// loads the color waveform) when the preview is flat.
 fn read_waveform_analysis(dat_path: &Path) -> Option<AnalysisResult> {
     let bytes = std::fs::read(dat_path).ok()?;
     let waveform = dat_pwav_preview(&bytes)?;
     if waveform.iter().any(|&b| b & 0x1f != 0) {
+        let color_waveform = reader::anlz::read_pwv6_overview(&dat_path.with_extension("2EX")).map(|overview| {
+            ColorWaveform { detail: Vec::new(), overview, exact: None }
+        });
         return Some(AnalysisResult {
             beat_grid: BeatGrid { beats: Vec::new() },
             waveform: WaveformPreview { data: waveform },
@@ -623,7 +627,7 @@ fn read_waveform_analysis(dat_path: &Path) -> Option<AnalysisResult> {
             key: String::new(),
             energy: None,
             cue_points: Vec::new(),
-            color_waveform: None,
+            color_waveform,
         });
     }
     reader::anlz::read_anlz(dat_path).ok()
@@ -859,6 +863,7 @@ mod tests {
         flat.color_waveform = Some(ColorWaveform {
             detail: (0..600).map(|n| [(n % 100) as u8, 40, 20]).collect(),
             overview: (0..1200).map(|n| [(n % 100) as u8, 40, 20]).collect(),
+            exact: None,
         });
         let flat_id = lib.add_track(&make_track("Flat", "/music/flat.mp3")).unwrap();
         lib.set_analysis(flat_id, &flat).unwrap();

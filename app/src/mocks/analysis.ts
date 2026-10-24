@@ -1,4 +1,4 @@
-import { bandBytes, encodeWire, previewFromBands, syntheticBands } from './synthetic-bands.ts';
+import { bandBytes, encodeStickWire, previewFromBands, rowBandsBase64, syntheticBands } from './synthetic-bands.ts';
 
 const STRIP_COLUMNS = 2048;
 const OVERVIEW_COLUMNS = 1200;
@@ -23,8 +23,9 @@ export function mockAnalysisData(trackId: number, durationSecs: number, tempo: n
     beats,
     cue_points: [{ time_ms: Math.round(durationMs * 0.08) }, { time_ms: Math.round(durationMs * 0.5) }],
     waveform_preview: previewFromBands(strip),
-    waveform_color: encodeWire(bandBytes(strip)),
-    waveform_color_detail: encodeWire(bandBytes(bandsAt(Math.max(8, Math.round(seconds * DETAIL_COLUMNS_PER_SECOND))))),
-    waveform_overview: encodeWire(bandBytes(bandsAt(OVERVIEW_COLUMNS))),
+    waveform_row_bands: rowBandsBase64(strip),
+    waveform_color: encodeStickWire(bandBytes(strip)),
+    waveform_color_detail: encodeStickWire(bandBytes(bandsAt(Math.max(8, Math.round(seconds * DETAIL_COLUMNS_PER_SECOND))))),
+    waveform_overview: encodeStickWire(bandBytes(bandsAt(OVERVIEW_COLUMNS))),
   };
 }
