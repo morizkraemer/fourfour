@@ -219,6 +219,7 @@ impl LocalLibrary {
 
             writer::anlz::write_anlz_dat(&dat_path, &track_for_anlz, analysis)?;
             writer::anlz::write_anlz_ext(&ext_path, &track_for_anlz, analysis)?;
+            writer::anlz::write_anlz_2ex(&dir.join("ANLZ0000.2EX"), &track_for_anlz, analysis)?;
         }
 
         // Update lightweight DB index.

@@ -451,11 +451,14 @@ fn parse_ext_sections(
         offset += section_len;
     }
 
-    // Prefer native 3-band PWV7/PWV6; fall back to legacy PWV3/PWV4 reconstruction.
+    // Prefer native 3-band PWV7/PWV6; fall back to legacy PWV3/PWV4 reconstruction,
+    // but only when it carries band information (equal bands in every column mean
+    // a neutral waveform written without any).
+    let has_bands = |entries: &Vec<[u8; 3]>| entries.iter().any(|b| b[0] != b[1] || b[1] != b[2]);
     Ok((
         cue_points,
-        pwv7_detail.or(pwv3_detail),
-        pwv6_overview.or(pwv4_overview),
+        pwv7_detail.or(pwv3_detail.filter(has_bands)),
+        pwv6_overview.or(pwv4_overview.filter(has_bands)),
     ))
 }
 

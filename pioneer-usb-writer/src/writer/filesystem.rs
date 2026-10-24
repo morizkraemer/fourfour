@@ -25,6 +25,7 @@ use crate::writer::{anlz, onelibrary, pdb, sync};
 ///     USBANLZ/P{xxx}/{hash}/
 ///       ANLZ0000.DAT                  — beat grid, waveform preview, cue points
 ///       ANLZ0000.EXT                  — color waveforms, extended beat grid
+///       ANLZ0000.2EX                  — 3-band waveforms (only for tracks with band data)
 ///     Artwork/00001/
 ///       a{id}.jpg / a{id}_m.jpg       — 80×80 and 240×240 cover art (JPEG)
 ///       b{id}.jpg / b{id}_m.jpg       — duplicate set used by CDJ for redundancy
@@ -81,6 +82,10 @@ pub fn write_usb(
         let ext_path = output_dir.join(anlz::anlz_ext_path_for_track(track));
         anlz::write_anlz_ext(&ext_path, track, analysis)
             .with_context(|| format!("Failed to write ANLZ .EXT for track {}", track.id))?;
+
+        let two_ex_path = output_dir.join(anlz::anlz_2ex_path_for_track(track));
+        anlz::write_anlz_2ex(&two_ex_path, track, analysis)
+            .with_context(|| format!("Failed to write ANLZ .2EX for track {}", track.id))?;
     }
 
     // Write PDB database
@@ -177,6 +182,9 @@ pub fn sync_usb(
                 let ext_path = output_dir.join(anlz::anlz_ext_path_for_track(entry.track));
                 anlz::write_anlz_ext(&ext_path, entry.track, entry.analysis)
                     .with_context(|| format!("Failed to write ANLZ .EXT for track {}", entry.usb_id))?;
+                let two_ex_path = output_dir.join(anlz::anlz_2ex_path_for_track(entry.track));
+                anlz::write_anlz_2ex(&two_ex_path, entry.track, entry.analysis)
+                    .with_context(|| format!("Failed to write ANLZ .2EX for track {}", entry.usb_id))?;
 
                 // Write artwork
                 if let Some(ref art_data) = entry.track.artwork {
@@ -193,6 +201,9 @@ pub fn sync_usb(
                 let ext_path = output_dir.join(anlz::anlz_ext_path_for_track(entry.track));
                 anlz::write_anlz_ext(&ext_path, entry.track, entry.analysis)
                     .with_context(|| format!("Failed to write ANLZ .EXT for track {}", entry.usb_id))?;
+                let two_ex_path = output_dir.join(anlz::anlz_2ex_path_for_track(entry.track));
+                anlz::write_anlz_2ex(&two_ex_path, entry.track, entry.analysis)
+                    .with_context(|| format!("Failed to write ANLZ .2EX for track {}", entry.usb_id))?;
 
                 if let Some(ref art_data) = entry.track.artwork {
                     if let Err(e) = write_artwork(&artwork_dir, entry.usb_id, art_data) {
@@ -250,7 +261,7 @@ fn remove_track_files(output_dir: &Path, track: &ExistingTrack) -> Result<()> {
         let _ = std::fs::remove_dir(parent);
     }
 
-    // Delete ANLZ directory (contains .DAT, .EXT, and any regenerated files)
+    // Delete ANLZ directory (contains .DAT, .EXT, .2EX, and any regenerated files)
     let anlz_dir = output_dir.join(anlz::anlz_dir_for_path(&track.usb_path));
     match std::fs::remove_dir_all(&anlz_dir) {
         Ok(()) => {}
