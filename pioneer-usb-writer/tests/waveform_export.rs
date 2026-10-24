@@ -396,3 +396,25 @@ fn without_exact_columns_the_sections_are_derived_from_the_bands() {
     assert_ne!(derived.pwv3, waves.pwv3, "the bands alone cannot recover the measured heights");
     assert_eq!(derived.gains, [85, 134, 135]);
 }
+
+#[test]
+fn pwv6_overview_is_read_from_the_end_of_the_2ex_or_by_scanning() {
+    let waves = measured_waves();
+    let duration_secs = waves.pwv7.len() as f64 / 150.0;
+    let source = TempDir::new().unwrap();
+    let usb = TempDir::new().unwrap();
+    let t = track(source.path(), 1, duration_secs);
+    write_usb(usb.path(), &[t.clone()], &[analysis(Some(waves.color_waveform()))], &[]).unwrap();
+    let path = usb.path().join(anlz_2ex_path_for_track(&t));
+
+    let fast = pioneer_usb_writer::reader::anlz::read_pwv6_overview(&path).unwrap();
+    assert_eq!(fast, waves.pwv6);
+
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.extend_from_slice(&[0xAA; 8]);
+    std::fs::write(&path, &bytes).unwrap();
+    let scanned = pioneer_usb_writer::reader::anlz::read_pwv6_overview(&path).unwrap();
+    assert_eq!(scanned, waves.pwv6);
+
+    assert!(pioneer_usb_writer::reader::anlz::read_pwv6_overview(&path.with_extension("nope")).is_none());
+}

@@ -230,14 +230,29 @@ fn parse_pwv6(section: &[u8]) -> Result<Vec<[u8; 3]>> {
     Ok(entries)
 }
 
-/// The `PWV6` overview of a `.2EX` file, read by skipping the large `PWV7` section instead of
-/// loading it: a few small reads per file, which is what lets a list of 30,000 tracks carry
+/// The `PWV6` overview of a `.2EX` file without loading the large `PWV7` section: one read from
+/// the end of the file where the writer and Rekordbox put it (`PWV6` then `PWVC`), else a scan
+/// that skips sections. This is what lets a list of 30,000 tracks carry
 /// a band preview. `None` when the file or section is missing.
 pub fn read_pwv6_overview(ext2_path: &Path) -> Option<Vec<[u8; 3]>> {
     use std::io::{Read, Seek, SeekFrom};
 
+    const PWV6_LEN: u64 = 20 + 1200 * 3;
+    const PWVC_LEN: u64 = 20;
+
     let mut file = std::fs::File::open(ext2_path).ok()?;
+    let file_len = file.metadata().ok()?.len();
+    if file_len >= 28 + PWV6_LEN + PWVC_LEN {
+        file.seek(SeekFrom::Start(file_len - PWVC_LEN - PWV6_LEN)).ok()?;
+        let mut section = vec![0u8; PWV6_LEN as usize];
+        file.read_exact(&mut section).ok()?;
+        let declared_len = u32::from_be_bytes(section[8..12].try_into().ok()?) as u64;
+        if &section[0..4] == b"PWV6" && declared_len == PWV6_LEN {
+            return parse_pwv6(&section).ok().filter(|entries| !entries.is_empty());
+        }
+    }
     let mut file_header = [0u8; 12];
+    file.seek(SeekFrom::Start(0)).ok()?;
     file.read_exact(&mut file_header).ok()?;
     if &file_header[0..4] != b"PMAI" {
         return None;
