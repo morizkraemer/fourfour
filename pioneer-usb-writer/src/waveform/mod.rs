@@ -98,7 +98,7 @@ impl Default for Tuning {
             gain_cap: [300, 300, 500],
             band_scale: [1.265, 1.17, 1.0],
             curve: [1.0, 1.0, 2.08],
-            pwv6_scale: [0.56, 0.71, 0.9],
+            pwv6_scale: [0.56, 0.71, 1.2],
             pwv4_scale: [2.4, 1.6, 1.1],
         }
     }
