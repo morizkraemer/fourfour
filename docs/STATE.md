@@ -64,13 +64,15 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q21 Analysis review pass 1 (items 8, 2, 5) [done, branch q21-analysis 1fc254c (contains q15-grid); doc landed] — unified analyzer `ffa` (decode once, all stages, memory-capped pool): ~4.8 tracks/min on 8 workers, 0.56 GB/worker; Beat This! = 93% of CPU; grid 72.2% held, BPM ±0.1 88.8%; key stage now the cyanbox port 58.3% (n=199). Licence flag: cyanbox key templates fit on GiantSteps MTG (annotations unlicensed).
 ### Q26 Analysis review pass 2 (item 8) [done, branch q26-analysis cdc4f30 (contains q21); doc landed] — CPU 74→70 s/track, 5.3 tracks/min at 8 workers, tempo scan 1.1 s→0.19 s; native-rate decode, stratum removed; grid 72.2% / BPM 87.8% / key 58.3%; ONNX Runtime only 1.3–1.5× → not adopted. Lame3.100 mp3s are one frame late (fix needs dev check).
 ### Q30 Grid round 3 (item 5) [done, branch q30-grid 260a51e = top of the analysis stack; doc landed] — grid ±20 ms 72.2%→78.5% (161/205), BPM ±0.1 87.8% held; Lame3.100 files are a frame EARLY-fix (−26 ms), wav/flac −10 ms shift; half-beat phase: no usable signal.
-### Q33 Wire the Rust analyzer into the app (item 2) [running] — branch q33-rust-analysis (from q32-search + q30-grid), Python kept as fallback
+### Q33 Wire the Rust analyzer into the app (item 2) [paused, WIP] — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
-targets (Merlin, direct): 1 fastest startup · 2 bulk import + analysis speed · 3 sync several USBs at once · 4 instant track load incl. waveform · 5 better beat grid · 6 Rekordbox library import works · 7 research other Rekordbox clones (incl. new "lite" one), reuse code if licence allows · 8 review the analysis pipeline twice for speed + quality · 10 audio engine: no crashes, fast, responsive · 11 UI lightning fast
-plan: Q19 clone research (7) ∥ Q20 startup + UI speed (1, 11) → Q21 analysis review + bulk speed + grid (8, 2, 5) → Q22 audio engine (10) → Q23 track/waveform load (4) → Q24 Rekordbox import (6) → Q25 multi-USB sync (3) → second analysis review pass (8) → own priorities
-rules: all code on branches (tight); docs/reports land. Items 3/6 touch the brother's lane (sync engine, master.db reader): branch only, flagged for him. Third-party code: licence-checked, inspected in an isolated dir, never executed blindly.
+status: paused · since 2026-10-24 04:09 (overnight run 2026-10-23 → 10-24) · cap 2 · autonomy tight
+targets: Merlin's items 1–11 (see journal 2026-10-23 run-start)
+resume from: Q33 only — branch q33-rust-analysis, worktree agent-a45ef63857b3fe37b; left: finish analysis_backend.rs + coordinator wiring, build, parity Rust vs Python (10 tracks), app-level throughput bench, tests, docs/analysis/app-integration-2026-10.md. Everything else is done.
+stacks: app = q32-search (contains q20→q23→q22→q24→q25→q28→q29→q31); analysis = q30-grid (contains q15→q21→q26); q16-key, q27-writer-repro, ui-sync-flow separate.
+note: stalled ~21:30 → pause by the usage limit (Q33 worker stopped mid-task).
 
 ## Rundown
-Since 10-15 nothing ran. Master holds the Rust analysis prototype (BPM/grid/key), benchmark docs, UI review and three sync mockup rounds. Open: Merlin's sync round 3 answers, brother's engine work, Q15/Q16 proposed.
+Overnight: startup 30k 24.7 s→0.5 s backend / 188 s→3.3 s first paint; track load ~300→50 ms; fling CPU −55%; search first key 445→120 ms; audio engine 11 fixes + 26 tests; Rekordbox import (master.db/USB/XML); multi-USB sync 2.4–3×; grid 47→78.5%; analysis CPU 74→70 s/track; 108 app tests. All on branches (tight); docs on master.
+Critical for the brother: USB export fails from 192 tracks; colour waveform wrong > 7:17 (docs/architecture/writer-bugs-2026-10.md).
