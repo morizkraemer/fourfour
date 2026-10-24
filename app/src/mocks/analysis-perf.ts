@@ -1,25 +1,12 @@
+import { WIRE_CALIBRATION, bandBytes, encodeWire, previewFromBands, syntheticBands } from './synthetic-bands.ts';
+
 const COLUMNS_PER_SECOND = 150;
 const STRIP_COLUMNS = 2048;
 const OVERVIEW_COLUMNS = 1200;
-const CALIBRATION = 0.9;
 const PERF_DURATION_SECS = 240;
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
-
-function bandBytes(columns: number, seed: number): Uint8Array {
-  const bytes = new Uint8Array(columns * 3);
-  for (let i = 0; i < columns; i++) {
-    bytes[i * 3] = (i + seed) % 120;
-    bytes[i * 3 + 1] = (i * 3) % 100;
-    bytes[i * 3 + 2] = (i * 5 + seed) % 90;
-  }
-  return bytes;
+function bandBytesFor(columns: number, seed: number, durationSecs: number): Uint8Array {
+  return bandBytes(syntheticBands(columns, seed, durationSecs, 124));
 }
 
 function legacyColorSamples(bytes: Uint8Array) {
@@ -28,7 +15,7 @@ function legacyColorSamples(bytes: Uint8Array) {
     const max = Math.max(bytes[i], bytes[i + 1], bytes[i + 2]);
     const scale = max > 0 ? 1 / max : 0;
     out.push({
-      amp: Math.min((max / 127) * CALIBRATION, 1),
+      amp: Math.min((max / 127) * WIRE_CALIBRATION, 1),
       r: bytes[i] * scale,
       g: bytes[i + 1] * scale,
       b: bytes[i + 2] * scale,
@@ -37,22 +24,21 @@ function legacyColorSamples(bytes: Uint8Array) {
   return out;
 }
 
-function encodedColor(bytes: Uint8Array) {
-  return { len: bytes.length / 3, calibration: CALIBRATION, bands: bytesToBase64(bytes) };
-}
+const templates = new Map<string, string>();
+const TEMPLATE_VARIANTS = 4;
 
-const templates = new Map<boolean, string>();
-
-function template(legacy: boolean): string {
-  const cached = templates.get(legacy);
+function template(legacy: boolean, seed: number): string {
+  const key = `${legacy}:${seed % TEMPLATE_VARIANTS}`;
+  const cached = templates.get(key);
   if (cached) return cached;
-  const strip = bandBytes(STRIP_COLUMNS, 1);
-  const detail = bandBytes(PERF_DURATION_SECS * COLUMNS_PER_SECOND, 2);
-  const overview = bandBytes(OVERVIEW_COLUMNS, 3);
-  const encode = legacy ? legacyColorSamples : encodedColor;
-  const beats = Array.from({ length: 512 }, (_, i) => ({ time_ms: i * 469, bar_position: (i % 4) + 1 }));
+  const variant = (seed % TEMPLATE_VARIANTS) + 1;
+  const strip = bandBytesFor(STRIP_COLUMNS, variant, PERF_DURATION_SECS);
+  const detail = bandBytesFor(PERF_DURATION_SECS * COLUMNS_PER_SECOND, variant, PERF_DURATION_SECS);
+  const overview = bandBytesFor(OVERVIEW_COLUMNS, variant, PERF_DURATION_SECS);
+  const encode = legacy ? legacyColorSamples : (bytes: Uint8Array) => encodeWire(bytes);
+  const beats = Array.from({ length: 512 }, (_, i) => ({ time_ms: i * 484, bar_position: (i % 4) + 1 }));
   const text = JSON.stringify({
-    waveform_preview: Array.from({ length: 400 }, (_, n) => (3 << 5) | (((n * 7) % 31) + 1)),
+    waveform_preview: previewFromBands(syntheticBands(STRIP_COLUMNS, variant, PERF_DURATION_SECS, 124)),
     waveform_color: encode(strip),
     waveform_color_detail: encode(detail),
     waveform_overview: encode(overview),
@@ -62,7 +48,7 @@ function template(legacy: boolean): string {
       { hot_cue_number: 2, time_ms: 120000, loop_time_ms: null },
     ],
   });
-  templates.set(legacy, text);
+  templates.set(key, text);
   return text;
 }
 
@@ -76,7 +62,8 @@ export function perfAnalysisData(
   tempo: number,
   key: string,
   legacy: boolean,
+  seed = 0,
 ) {
-  const data = JSON.parse(template(legacy));
+  const data = JSON.parse(template(legacy, seed));
   return { ...data, duration_ms: Math.round(durationSecs * 1000), bpm: tempo / 100, key };
 }

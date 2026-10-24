@@ -1,13 +1,8 @@
-const PREVIEW_LEN = 400;
-const COLOR_LEN = 600;
+import { bandBytes, encodeWire, previewFromBands, syntheticBands } from './synthetic-bands.ts';
 
-function envelope(i: number, count: number, seed: number): number {
-  const t = i / count;
-  const phrase = 0.55 + 0.45 * Math.sin(t * Math.PI * (6 + seed));
-  const grain = 0.5 + 0.5 * Math.sin(i * 0.9 + seed);
-  const breakdown = t > 0.4 && t < 0.55 ? 0.35 : 1;
-  return Math.min(1, phrase * (0.6 + 0.4 * grain) * breakdown);
-}
+const STRIP_COLUMNS = 2048;
+const OVERVIEW_COLUMNS = 1200;
+const DETAIL_COLUMNS_PER_SECOND = 150;
 
 export function mockAnalysisData(trackId: number, durationSecs: number, tempo: number, key: string) {
   const durationMs = Math.max(1, Math.round(durationSecs * 1000));
@@ -17,15 +12,9 @@ export function mockAnalysisData(trackId: number, durationSecs: number, tempo: n
   for (let t = 0, n = 0; t < durationMs; t += beatMs, n++) {
     beats.push({ time_ms: Math.round(t), bar_position: (n % 4) + 1 });
   }
-  const waveform_preview = Array.from({ length: PREVIEW_LEN }, (_, i) => {
-    const height = 4 + Math.round(envelope(i, PREVIEW_LEN, trackId) * 27);
-    return (3 << 5) | height;
-  });
-  const waveform_color = Array.from({ length: COLOR_LEN }, (_, i) => {
-    const amp = envelope(i, COLOR_LEN, trackId);
-    const warmth = 0.5 + 0.5 * Math.sin(i / 40 + trackId);
-    return { amp, r: 0.3 + 0.7 * warmth, g: 0.4 + 0.3 * (1 - warmth), b: 0.9 - 0.6 * warmth };
-  });
+  const seconds = durationMs / 1000;
+  const bandsAt = (columns: number) => syntheticBands(columns, trackId, seconds, bpm);
+  const strip = bandsAt(STRIP_COLUMNS);
   return {
     track_id: trackId,
     duration_ms: durationMs,
@@ -33,9 +22,9 @@ export function mockAnalysisData(trackId: number, durationSecs: number, tempo: n
     key,
     beats,
     cue_points: [{ time_ms: Math.round(durationMs * 0.08) }, { time_ms: Math.round(durationMs * 0.5) }],
-    waveform_preview,
-    waveform_color,
-    waveform_color_detail: waveform_color,
-    waveform_overview: waveform_color,
+    waveform_preview: previewFromBands(strip),
+    waveform_color: encodeWire(bandBytes(strip)),
+    waveform_color_detail: encodeWire(bandBytes(bandsAt(Math.max(8, Math.round(seconds * DETAIL_COLUMNS_PER_SECOND))))),
+    waveform_overview: encodeWire(bandBytes(bandsAt(OVERVIEW_COLUMNS))),
   };
 }

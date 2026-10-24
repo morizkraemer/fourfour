@@ -36,9 +36,9 @@ import {
 import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
-  previewPeaksNormalized,
   decodeTrackPreview,
 } from '../services/analysis-data.ts';
+import { rowBandsFor } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
@@ -461,7 +461,7 @@ function applyWaveformAndCuesFromAnalysis(
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
   if (res.waveform_preview?.length) {
-    track.peaks = previewPeaksNormalized(res.waveform_preview);
+    track.preview = Uint8Array.from(res.waveform_preview);
   }
   if (res.cue_points) {
     track.cues = res.cue_points.map((cue) => {
@@ -553,7 +553,7 @@ function markTracksPendingAnalysis(ids: number[]) {
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
     if (!track) continue;
-    track.peaks = undefined;
+    track.preview = undefined;
     track.analysisLoaded = false;
   }
 }
@@ -625,13 +625,16 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     raw: t,
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
+    },
+    get bands() {
+      return rowBandsFor(this.preview);
     }
   };
 
   // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
   const preview = decodeTrackPreview(t.waveform_preview);
   if (preview && isValidWaveformPreview(preview)) {
-    local.peaks = previewPeaksNormalized(preview);
+    local.preview = Uint8Array.from(preview);
   }
 
   return local;

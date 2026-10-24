@@ -1,6 +1,7 @@
 import { mount, type ComponentProps } from 'svelte';
 import { PlayerCompact } from '$ds';
 import '$ds/base.css';
+import { bandsFromColorSamples } from './services/waveform-bands.ts';
 
 async function main() {
   const data = await (await fetch('/wf.json')).json();
@@ -23,8 +24,7 @@ async function main() {
       totalTime: '7:04',
       bpm: '126.00',
       key: '8A',
-      colorData: data.colorData,
-      previewBytes: null,
+      bands: bandsFromColorSamples(data.colorData),
       beats,
       durationMs: data.durationMs,
       cues: [],

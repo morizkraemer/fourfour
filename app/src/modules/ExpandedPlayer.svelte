@@ -79,10 +79,9 @@
     <WaveformView
       bind:this={wave}
       mode="expanded"
-      colorData={player.track?.colorData ?? null}
-      colorDetail={player.track?.colorDetail ?? null}
-      colorOverview={player.track?.colorOverview ?? null}
-      previewBytes={player.track?.previewBytes ?? null}
+      bands={player.track?.bands ?? null}
+      bandsDetail={player.track?.bandsDetail ?? null}
+      bandsOverview={player.track?.bandsOverview ?? null}
       cues={player.track?.cues ?? []}
       beats={player.track?.beats ?? []}
       bpm={player.track?.bpm ?? 0}

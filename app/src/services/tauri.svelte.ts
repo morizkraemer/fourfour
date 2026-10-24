@@ -7,6 +7,7 @@ import {
 } from './analysis-data.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
+import { previewFromBands, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 export let lastTauriError = 'None';
 
@@ -104,6 +105,19 @@ function mockTrackCountFromUrl(): number {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+const ROW_PREVIEW_VARIANTS = 128;
+const rowPreviews = new Map<number, number[]>();
+
+function syntheticRowPreview(i: number): number[] {
+  const variant = (i * 31) % ROW_PREVIEW_VARIANTS;
+  let preview = rowPreviews.get(variant);
+  if (!preview) {
+    preview = previewFromBands(syntheticBands(1600, variant + 1, 180 + variant, 118 + (variant % 14)));
+    rowPreviews.set(variant, preview);
+  }
+  return preview;
+}
+
 function syntheticMockTrack(i: number): TrackInfo {
   const analyzed = i % 10 !== 0;
   return {
@@ -121,9 +135,7 @@ function syntheticMockTrack(i: number): TrackInfo {
     has_artwork: false,
     has_cues: false,
     has_analysis: analyzed,
-    waveform_preview: analyzed
-      ? Array.from({ length: 400 }, (_, n) => ((n * 7 + i) % 31) + 1)
-      : null,
+    waveform_preview: analyzed ? syntheticRowPreview(i) : null,
   };
 }
 
@@ -469,7 +481,7 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
     if (useBrowserMocks() && mock) {
       const data =
         syntheticTrackCount > 0
-          ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload)
+          ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload, trackId)
           : mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key);
       const clean = sanitizeAnalysisPayload(data);
       cacheAnalysis(trackId, clean);
