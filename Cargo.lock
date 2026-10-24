@@ -3180,6 +3180,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cpal",
+ "fourfour-analysis-rs",
  "image",
  "pioneer-library",
  "pioneer-usb-writer",

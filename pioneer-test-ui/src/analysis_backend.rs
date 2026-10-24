@@ -1,0 +1,210 @@
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use fourfour_analysis::service::{Analyzer, PoolOptions, MODELS_ENV};
+
+pub const BACKEND_ENV: &str = "FOURFOUR_ANALYSIS_BACKEND";
+pub const THREADS_ENV: &str = "FOURFOUR_ANALYSIS_THREADS";
+const CONFIG_KEY: &str = "analysis_backend";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnalysisBackend {
+    Rust,
+    Python,
+}
+
+impl AnalysisBackend {
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "rust" => Some(Self::Rust),
+            "python" => Some(Self::Python),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
+            Self::Python => "python",
+        }
+    }
+}
+
+pub struct BackendChoice {
+    pub backend: AnalysisBackend,
+    pub note: String,
+}
+
+pub fn choose_backend(requested: Option<AnalysisBackend>, weights: Option<&Path>) -> BackendChoice {
+    match (requested, weights) {
+        (Some(AnalysisBackend::Python), _) => BackendChoice {
+            backend: AnalysisBackend::Python,
+            note: "analysis backend: python (set by setting)".to_string(),
+        },
+        (Some(AnalysisBackend::Rust), None) => BackendChoice {
+            backend: AnalysisBackend::Python,
+            note: format!(
+                "analysis backend: python — rust requested but model weights are missing \
+                 (looked in ${MODELS_ENV}, <app data>/models, dev models dir; run prototyping/analysis-packaging/fetch-models.sh)"
+            ),
+        },
+        (Some(AnalysisBackend::Rust), Some(dir)) => BackendChoice {
+            backend: AnalysisBackend::Rust,
+            note: format!("analysis backend: rust (weights {})", dir.display()),
+        },
+        (None, Some(dir)) => BackendChoice {
+            backend: AnalysisBackend::Rust,
+            note: format!("analysis backend: rust (default, weights {})", dir.display()),
+        },
+        (None, None) => BackendChoice {
+            backend: AnalysisBackend::Python,
+            note: "analysis backend: python (default, rust model weights not installed — see prototyping/analysis-packaging/fetch-models.sh)"
+                .to_string(),
+        },
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct BackendEnv {
+    pub config_path: Option<PathBuf>,
+    pub app_data_dir: Option<PathBuf>,
+    pub override_backend: Option<AnalysisBackend>,
+    pub max_threads: Option<usize>,
+}
+
+impl BackendEnv {
+    pub fn from_process(config_path: Option<PathBuf>, app_data_dir: Option<PathBuf>) -> Self {
+        BackendEnv {
+            config_path,
+            app_data_dir,
+            override_backend: std::env::var(BACKEND_ENV).ok().and_then(|v| AnalysisBackend::parse(&v)),
+            max_threads: std::env::var(THREADS_ENV).ok().and_then(|v| v.parse().ok()),
+        }
+    }
+
+    pub fn requested(&self) -> Option<AnalysisBackend> {
+        self.override_backend.or_else(|| self.config_path.as_deref().and_then(read_setting))
+    }
+
+    pub fn pool_options(&self) -> PoolOptions {
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        PoolOptions { max_threads: self.max_threads.unwrap_or_else(|| cores.saturating_sub(1).max(1)), ..PoolOptions::default() }
+    }
+}
+
+pub fn read_setting(config_path: &Path) -> Option<AnalysisBackend> {
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(config_path).ok()?).ok()?;
+    AnalysisBackend::parse(json.get(CONFIG_KEY)?.as_str()?)
+}
+
+pub fn write_setting(config_path: &Path, backend: Option<AnalysisBackend>) -> Result<(), String> {
+    let mut json = std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let object = json.as_object_mut().expect("object checked above");
+    match backend {
+        Some(b) => object.insert(CONFIG_KEY.to_string(), serde_json::Value::String(b.name().to_string())),
+        None => object.remove(CONFIG_KEY),
+    };
+    std::fs::write(config_path, json.to_string()).map_err(|e| e.to_string())
+}
+
+#[derive(Clone, Default)]
+pub struct AnalyzerCache(Arc<std::sync::Mutex<Option<(PathBuf, Arc<Analyzer>)>>>);
+
+impl AnalyzerCache {
+    fn get_or_load(&self, dir: &Path, pool: PoolOptions) -> Result<Arc<Analyzer>, String> {
+        let mut slot = self.0.lock().map_err(|e| e.to_string())?;
+        if let Some((loaded_dir, analyzer)) = slot.as_ref() {
+            if loaded_dir == dir {
+                return Ok(analyzer.clone());
+            }
+        }
+        let analyzer = Arc::new(Analyzer::load(dir, pool).map_err(|e| format!("loading model weights from {}: {e}", dir.display()))?);
+        *slot = Some((dir.to_path_buf(), analyzer.clone()));
+        Ok(analyzer)
+    }
+}
+
+#[derive(Clone)]
+pub enum Runner {
+    Python { command: String },
+    Rust { analyzer: Arc<Analyzer> },
+}
+
+pub fn resolve_runner(
+    env: &BackendEnv,
+    weights: Option<PathBuf>,
+    cache: &AnalyzerCache,
+    python_command: impl FnOnce() -> String,
+) -> (Runner, Vec<String>) {
+    let choice = choose_backend(env.requested(), weights.as_deref());
+    let mut notes = vec![choice.note];
+    if choice.backend == AnalysisBackend::Rust {
+        let dir = weights.expect("rust backend is only chosen with weights");
+        match cache.get_or_load(&dir, env.pool_options()) {
+            Ok(analyzer) => return (Runner::Rust { analyzer }, notes),
+            Err(e) => notes.push(format!("rust analyzer unavailable, falling back to python: {e}")),
+        }
+    }
+    (Runner::Python { command: python_command() }, notes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ff-backend-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn default_is_rust_only_when_weights_exist() {
+        let dir = PathBuf::from("/models");
+        assert_eq!(choose_backend(None, Some(&dir)).backend, AnalysisBackend::Rust);
+        assert_eq!(choose_backend(None, None).backend, AnalysisBackend::Python);
+    }
+
+    #[test]
+    fn explicit_python_wins_and_explicit_rust_without_weights_falls_back_with_a_message() {
+        let dir = PathBuf::from("/models");
+        assert_eq!(choose_backend(Some(AnalysisBackend::Python), Some(&dir)).backend, AnalysisBackend::Python);
+        let fallback = choose_backend(Some(AnalysisBackend::Rust), None);
+        assert_eq!(fallback.backend, AnalysisBackend::Python);
+        assert!(fallback.note.contains("weights are missing"), "{}", fallback.note);
+    }
+
+    #[test]
+    fn setting_round_trips_and_keeps_other_config_keys() {
+        let cfg = scratch("setting").join("config.json");
+        std::fs::write(&cfg, r#"{"library_path":"/lib"}"#).unwrap();
+        assert_eq!(read_setting(&cfg), None);
+        write_setting(&cfg, Some(AnalysisBackend::Python)).unwrap();
+        assert_eq!(read_setting(&cfg), Some(AnalysisBackend::Python));
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(json["library_path"], "/lib");
+        write_setting(&cfg, None).unwrap();
+        assert_eq!(read_setting(&cfg), None);
+    }
+
+    #[test]
+    fn runner_falls_back_to_python_when_the_weights_dir_is_unloadable() {
+        let env = BackendEnv::default();
+        let empty = scratch("empty");
+        let (runner, notes) = resolve_runner(&env, Some(empty), &AnalyzerCache::default(), || "python3".to_string());
+        assert!(matches!(runner, Runner::Python { .. }));
+        assert!(notes.iter().any(|n| n.contains("falling back to python")), "{notes:?}");
+    }
+
+    #[test]
+    fn runner_falls_back_to_python_without_weights() {
+        let env = BackendEnv { override_backend: Some(AnalysisBackend::Rust), ..BackendEnv::default() };
+        let (runner, notes) = resolve_runner(&env, None, &AnalyzerCache::default(), || "python3".to_string());
+        assert!(matches!(runner, Runner::Python { .. }));
+        assert!(notes.iter().any(|n| n.contains("weights are missing")), "{notes:?}");
+    }
+}

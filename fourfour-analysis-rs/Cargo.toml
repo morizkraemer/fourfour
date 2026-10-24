@@ -18,3 +18,7 @@ rten = "=0.24.0"
 rten-tensor = "=0.24.0"
 anyhow = "1"
 pioneer-usb-writer = { path = "../pioneer-usb-writer" }
+
+[[bin]]
+name = "analyze-json"
+path = "src/bin/analyze_json.rs"
