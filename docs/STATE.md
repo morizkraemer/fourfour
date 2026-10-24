@@ -67,11 +67,10 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Wire the Rust analyzer into the app (item 2) [paused, WIP] — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: paused · since 2026-10-24 04:09 (overnight run 2026-10-23 → 10-24) · cap 2 · autonomy tight
-targets: Merlin's items 1–11 (see journal 2026-10-23 run-start)
-resume from: Q33 only — branch q33-rust-analysis, worktree agent-a45ef63857b3fe37b; left: finish analysis_backend.rs + coordinator wiring, build, parity Rust vs Python (10 tracks), app-level throughput bench, tests, docs/analysis/app-integration-2026-10.md. Everything else is done.
-stacks: app = q32-search (contains q20→q23→q22→q24→q25→q28→q29→q31); analysis = q30-grid (contains q15→q21→q26); q16-key, q27-writer-repro, ui-sync-flow separate.
-note: stalled ~21:30 → pause by the usage limit (Q33 worker stopped mid-task).
+status: running · since 2026-10-24 05:48 · cap 2 · autonomy tight · from PM (Merlin's direct target)
+targets: colour waveforms — consistent 3-band (low/mid/high) like modern Rekordbox, in app views and USB export, incl. the colour-detail bug past 7:17. Merlin's OK to touch the usb-writer lane for this (relayed by PM; branch only, brother reviews).
+plan: Q34 export 3-band ANLZ (overflow fix, PWV6/7/4/5 from real 3 bands, .2EX, fit vs Rekordbox's own .2EX from Merlin's library) ∥ Q35 app 3-band rendering (rows, compact + expanded player) → Q36 integrate (export bytes = app bytes), long-track round trip, before/after screenshots → rundown here
+held for Merlin: visual sign-off; Q33 stays paused (resume from: see journal 2026-10-24 run-pause)
 
 ## Rundown
 Overnight: startup 30k 24.7 s→0.5 s backend / 188 s→3.3 s first paint; track load ~300→50 ms; fling CPU −55%; search first key 445→120 ms; audio engine 11 fixes + 26 tests; Rekordbox import (master.db/USB/XML); multi-USB sync 2.4–3×; grid 47→78.5%; analysis CPU 74→70 s/track; 108 app tests. All on branches (tight); docs on master.
