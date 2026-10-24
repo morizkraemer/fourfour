@@ -90,3 +90,5 @@
 2026-10-24 06:40 orchestrator Q34 done: branch q34-export-waveforms 7a60879; decided per rec: carry peak/whiteness in AnalysisResult for exact PWV3/5 heights (in Q36)
 2026-10-24 06:50 orchestrator Q35 done: branch q35-app-waveforms df5ba3d
 2026-10-24 06:50 orchestrator Q36 spawn: integration q34+q35
+2026-10-24 07:37 orchestrator Q36 done: branch q36-waveforms fdbb651; doc landed (export + app + integration)
+2026-10-24 07:37 orchestrator - decided: Q37 polish (high band, select + load_state regressions; additive schema on branch, flagged)
