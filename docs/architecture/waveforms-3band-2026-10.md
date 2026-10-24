@@ -324,3 +324,101 @@ Tools: `waveform_compare fixtures` (Rekordbox bytes and beat grid for picked tra
 - Row preview cost at 30k (+0.4 s backend) and the schema-change option.
 - A real WebView (WKWebView) with GPU canvas: all numbers here are headless Chromium with software compositing.
 - Re-analysing an existing library: tracks analysed before Q36 keep their stored colour data until re-analysed (Python filter bank, derived PWV3 / PWV5).
+
+## Polish (Q37)
+
+Branch `q37-waveforms` (from `q36-waveforms`, master merged). Three fixes: the high band, the `load_state` cost, the row-select cost. Not tried on a player, not looked at by Merlin.
+
+**Needs Merlin's sign-off:** the library schema change below (v3 to v4, a new nullable column). It lives only on this branch. The high-band retune changes what users see and what the stick carries (`PWV7` high bytes), so it also needs a look.
+
+### High band
+
+Tool: `waveform_compare hiband` (new): a search over the high-pass chain, feature (peak, rms), release, gain target and curve on the tune half. Loss is `1 - correlation` plus the log ratio of mean, p75, p90 and p99 of the byte distribution against Rekordbox, so it rewards matching spike height, not only the mean error. The old tuning had p99 of 47 against Rekordbox's 84, which is the "spikes too short" in the side-by-sides.
+
+Change (`Tuning::default`): high-pass 4746 Hz to 3000 Hz, release 0.765 to 0.90, gain target 78.2 to 140, band scale 0.853 to 1.0, plus one new constant, `curve` (`byte = 127 * (value / 127)^curve`, high band 2.08, others 1.0, serde default so old tuning files still load). The envelope attack was already instant (`max(column peak, decayed previous)`), so "fast attack" was not the lever; the slower release and the expanding curve are. `PWV6` is built from the values before the curve (otherwise the overview collapses), and its high scale went from 2.531 to 1.2.
+
+Held-out half (20 tracks, 969,980 columns), `waveform_compare score --set test`, before to after:
+
+| `PWV7` high | exact % | within 2 % | MAE | correlation |
+|---|---|---|---|---|
+| held-out | 13.8 to 41.7 | 54.3 to 73.2 | 4.51 to 2.78 | 0.888 to 0.931 |
+| tune (for reference) | 14.9 to 42.7 | | 4.80 to 2.68 | 0.862 to 0.911 |
+
+Low (12.0 / 43.8 / 5.08 / 0.960) and mid (26.5 / 69.8 / 2.40 / 0.977) are byte for byte unchanged. Side effects on the held-out half: `PWV6` high MAE 5.86 to 9.56 and correlation 0.788 to 0.767 (a deliberate trade, so the overview keeps a white rim; scale 0.9 would give MAE 6.33), `PWV4` b5 MAE 9.47 to 10.91, `PWV5` high level correlation 0.852 to 0.873.
+
+### Side by side, v2
+
+`/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/final-v2/` (same six tracks and layout as `final/`, README.txt there). `PWV7` high correlation before to after and verdict (only 01, 04 and 05 were looked at; the others are from the numbers):
+
+| Track | high corr | Verdict |
+|---|---|---|
+| Vetiver | .825 to .866 | overview now matches in white and structure; zoom mid fringe still thinner than Rekordbox |
+| Darkside | .941 to .992 | best fit of the set (numbers only) |
+| Neptune | .918 to .928 | was already closest (numbers only) |
+| Revision | .924 to .947 | white hi-hat spikes now as tall as Rekordbox's |
+| Shimmer | .843 to .935 | zoom spikes match, the missing white overview rim is back (a bit thinner) |
+| Be You | .948 to .971 | numbers only |
+
+### `load_state` at 30k: 850 ms to 350 ms
+
+Cause: the row preview was read from the tail of each track's `.2EX` (one file per track).
+
+Schema change (v3 to v4, `pioneer-library/src/schema.rs`): `ALTER TABLE analyses ADD COLUMN row_preview BLOB`, nullable, additive. A v1 or v2 library now walks the migrations in order. An older build ignores the column (it refuses a version above its own, so a library opened by this branch is not opened by an older build).
+
+- Content: 384 bytes (128 columns of low, mid, high) for tracks with band data, 400 bytes (mono PWAV) for tracks without, an empty blob for "checked, nothing to show".
+- Filled by `set_analysis`, from the files just written (so it equals what the old path read).
+- Old rows stay `NULL` and are filled once, lazily, by `build_track_infos` (`LocalLibrary::backfill_row_previews`, parallel read, one transaction); later loads cost one query (`get_row_previews`).
+- The preview code (`row_bands`, `effective_preview`) moved from `pioneer-test-ui` into `pioneer-library/src/row_preview.rs`; the old paths re-export it. JSON payload is unchanged (24,868,980 bytes at 30k).
+- Tests: stored preview equals the file read; a v3 library migrates and backfills (`lib.rs`), blob round trip.
+
+`bench_startup run`, release, 30k fixtures of 240 s tracks (Q20 method, warm runs), `load_state` total = `build_track_infos` + playlists + JSON:
+
+| | before (q36) | after |
+|---|---|---|
+| `build_track_infos` | 685 ms | 200 to 230 ms |
+| `load_state` total | 850 ms | 337 to 367 ms (target 520) |
+| first run after migration (backfill, cold) | 3,949 ms (cold files) | 1,310 ms, once |
+
+Run on a copy of the q36 `library.db` with the `anlz` folder linked (so the migration path was measured); a library generated by the new code (1k tracks, `set_analysis` path) loads with no backfill (5.6 ms).
+
+### Row select: 42 ms to 20 ms
+
+`?mock=30000`, `frontend-perf.mjs` (click then two animation frames; 4 clicks, median). Profile (`profile-action.mjs`, plus a per-click profile): a warm click is 19 to 22 ms, which is the two-frame floor; the cold clicks were 82 and 64 ms because the perf mock built its four analysis variants (3-band synthesis, 36,000 columns each, a slow base64 loop) on first use. That is mock work, not app work (the real backend does it in Rust). Fixes:
+
+- Mock: one synthesis, variants by rotation, fast base64, all four built on the first answer. First click cold 90 ms (q32: 62), the rest warm.
+- App: `applyWaveformAndCuesFromAnalysis` keeps the track's row preview object when the analysis sends the same bytes, so the strip is not repainted from fresh bands and a missing bitmap. (The mock sends different bands for rows and analysis, so the harness still draws twice; the real app no longer does.)
+- Renderer: `drawBandRange` keeps the reduced and smoothed columns per bands object and width (6 entries), so redraws skip the reduction.
+- The strip already used the row preview bands (no full data needed).
+
+### Perf against `q32-search`
+
+Headless Chromium on the shared `dev` box, `?mock=30000`, production builds, median of 5 alternating runs (`waveform-perf.mjs`, `frontend-perf.mjs`, `search-perf.mjs`):
+
+| Scenario | q32-search | q37 |
+|---|---|---|
+| Fast scroll | 22.2 ms | 22.2 (-0.3 %) |
+| Scroll 120 steps | 23.2 | 22.6 (-2.6 %) |
+| Fling to the end | 48.6 | 50.6 (+4.1 %) |
+| Scroll then fling | 32.6 | 31.7 (-2.7 %) |
+| Compact player playing | 10.6 | 10.9 (+3.4 %) |
+| Expanded player playing | 15.9 | 14.7 (-7.8 %) |
+| Expanded zoom | 15.2 | 14.5 (-5.1 %) |
+| Expanded wheel scroll | 33.6 | 24.7 (-26.6 %) |
+| Row select, median of 4 clicks | 20.3 | 20.7 |
+| Shift-range click | 22.9 | 22.9 |
+| Search keystroke, median | 69.5 | 65.2 |
+| First contentful paint | 2,688 | 1,076 |
+| Interactive | 2,645 | 1,037 |
+| Heap | 186 MB | 69 MB |
+
+Noise is a few percent between runs (the fling and compact-player rows are inside it). Pixel checks (`waveform-pixels.mjs`): 60 of 60.
+
+### App screenshots
+
+`/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/after-v2/{dark,light}-dpr{1,2}/` (list, detail, compact and expanded player; the app renders them from the mock's synthetic bands, so they show the renderer, not the new tuning). Not looked at.
+
+### Still open
+
+- Schema v4 sign-off (above), and the high band on real tracks in the app.
+- `PWV6` high is now a worse numeric fit than before (white rim chosen over MAE); `PWV4` b5 likewise slightly.
+- Cold first select click is 90 ms against q32's 62 in the mock (first-use synthesis plus the first 3-band strip paint).

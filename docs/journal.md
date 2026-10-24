@@ -92,3 +92,4 @@
 2026-10-24 06:50 orchestrator Q36 spawn: integration q34+q35
 2026-10-24 07:37 orchestrator Q36 done: branch q36-waveforms fdbb651; doc landed (export + app + integration)
 2026-10-24 07:37 orchestrator - decided: Q37 polish (high band, select + load_state regressions; additive schema on branch, flagged)
+2026-10-24 09:01 orchestrator Q37 done: branch q37-waveforms ae7bb44; waveform run idle; review page published; doc landed
