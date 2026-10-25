@@ -22,7 +22,7 @@ const UNIT_SCALE = { low: 1, mid: 1, high: 1 };
  * per-track normalisation, so a quiet breakdown stays thin). Low is the outer layer and its bytes top
  * out lowest, so it is lifted; mid and high sit inside it.
  */
-export const BAND_GAIN = { low: 0.8, mid: 0.82, high: 0.89 };
+export const BAND_GAIN = { low: 0.8, mid: 0.82, high: 0.83 };
 
 /**
  * Share of the loudest column in a pixel bucket that counts towards its height (the rest is the bucket
