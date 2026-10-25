@@ -70,6 +70,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q37 Waveform polish [done, branch q37-waveforms ae7bb44 = final waveform branch] — high band vs Rekordbox exact 13.8→41.7%, corr 0.89→0.93; load_state 30k 850→350 ms; row select 42→20.7 ms; schema v4 (row_preview BLOB, additive) needs your OK.
 ### Q38 Row preview = simple loudness envelope [done, branch row-wave-variants e2fb03b (on q37-waveforms)] — Merlin picked variant e; 3-band stays in players; 159 app tests. Gain/curve tuned on mock only.
 ### Q39 Waveform fix from Merlin's Mac test [done, branch q39-wave-fix 7401e1d (on row-wave-variants)] — flat block = beat-long peak pooling; layer order low back/mid/high core; whole-pixel scroll fixes the flashing; detail strip 3-band; legacy payload path fixed too. Installed on the Mac as fourfour.app.
+### Q40 Waveforms matched to Rekordbox 1:1 [done, branch q40-rb-match 41b2b97 (on q39-wave-fix)] — on Rekordbox's own bytes our renderer matches its screenshots (zoom edge error 17→2 px; bottom-anchored overview); our data: per-track gain on Gate ~13% low, Dubby mp3 27 ms offset. Being installed on the Mac.
 ### Q33 Wire the Rust analyzer into the app (item 2) [paused, WIP] — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
