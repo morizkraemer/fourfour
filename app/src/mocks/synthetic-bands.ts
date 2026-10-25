@@ -1,6 +1,8 @@
 import type { BandColumns } from '../services/waveform-bands.ts';
 
-const SECTIONS = [
+type Section = { until: number; name: string };
+
+const DANCE_SECTIONS: Section[] = [
   { until: 0.07, name: 'intro' },
   { until: 0.22, name: 'build' },
   { until: 0.32, name: 'breakdown' },
@@ -8,7 +10,30 @@ const SECTIONS = [
   { until: 0.66, name: 'breakdown' },
   { until: 0.9, name: 'drop' },
   { until: 1.01, name: 'outro' },
-] as const;
+];
+
+const DYNAMIC_SECTIONS: Section[] = [
+  { until: 0.05, name: 'intro' },
+  { until: 0.12, name: 'build' },
+  { until: 0.3, name: 'drop' },
+  { until: 0.55, name: 'breakdown' },
+  { until: 0.62, name: 'build' },
+  { until: 0.8, name: 'drop' },
+  { until: 0.93, name: 'breakdown' },
+  { until: 1.01, name: 'outro' },
+];
+
+export type MockProfile = 'dance' | 'ambient' | 'loud' | 'dynamic';
+
+/** Loudness and shape of a mock track: `level` scales the band bytes after per-band normalisation, `drive` saturates before it (a brickwalled master). */
+const PROFILES: Record<MockProfile, { level: number; drive: number; sections: Section[] }> = {
+  dance: { level: 0.8, drive: 1, sections: DANCE_SECTIONS },
+  ambient: { level: 0.3, drive: 1, sections: DANCE_SECTIONS },
+  loud: { level: 1, drive: 2.4, sections: DANCE_SECTIONS },
+  dynamic: { level: 0.62, drive: 1, sections: DYNAMIC_SECTIONS },
+};
+
+export const MOCK_PROFILE_ORDER: MockProfile[] = ['dance', 'ambient', 'loud', 'dynamic'];
 
 export const WIRE_CALIBRATION = 0.9;
 const WIRE_FULL_SCALE = 127;
@@ -23,9 +48,9 @@ function mulberry32(seed: number) {
   };
 }
 
-function sectionAt(fraction: number): { name: string; progress: number } {
+function sectionAt(sections: Section[], fraction: number): { name: string; progress: number } {
   let from = 0;
-  for (const s of SECTIONS) {
+  for (const s of sections) {
     if (fraction < s.until) return { name: s.name, progress: (fraction - from) / (s.until - from) };
     from = s.until;
   }
@@ -37,7 +62,10 @@ function sectionAt(fraction: number): { name: string; progress: number } {
  * vocal phrases in mid, hats and risers in high, with intro, build, breakdown, two drops and an outro.
  * Each band is normalised to its own peak, like the per-band scaling of a real 3-band waveform.
  */
-export function syntheticBands(columns: number, seed: number, durationSecs: number, bpm: number): BandColumns {
+export function syntheticBands(columns: number, seed: number, durationSecs: number, bpm: number, profileName?: MockProfile): BandColumns {
+  if (profileName === 'ambient') return ambientBands(columns, seed, durationSecs);
+  const profile = PROFILES[profileName ?? 'dance'];
+  const levelScale = profileName ? profile.level : 1;
   const rand = mulberry32(seed * 7919 + 13);
   const low = new Float32Array(columns);
   const mid = new Float32Array(columns);
@@ -52,7 +80,7 @@ export function syntheticBands(columns: number, seed: number, durationSecs: numb
     const phase = beat - Math.floor(beat);
     const beatIndex = Math.floor(beat);
     const bar = Math.floor(beat / 4);
-    const { name, progress } = sectionAt(fraction);
+    const { name, progress } = sectionAt(profile.sections, fraction);
     const drop = name === 'drop';
     const breakdown = name === 'breakdown';
     const kickOn = drop || name === 'build' || name === 'outro' || (name === 'intro' && progress > 0.5);
@@ -75,16 +103,39 @@ export function syntheticBands(columns: number, seed: number, durationSecs: numb
     const openHat = drop && beatIndex % 8 === 7 ? Math.exp(-Math.abs(phase - 0.5) * 6) * 0.5 : 0;
     const riser = name === 'build' || (breakdown && progress > 0.5) ? 0.5 * Math.pow(progress, 2) : 0;
 
-    low[i] = Math.min(1, Math.max(kick, bass) * jitter);
-    mid[i] = Math.min(1, (pad + vocal + stab + clap * 0.55) * jitter);
-    high[i] = Math.min(1, (closedHat + sixteenth + openHat + clap * 0.35 + riser) * jitter);
+    low[i] = Math.min(1, Math.max(kick, bass) * jitter * profile.drive);
+    mid[i] = Math.min(1, (pad + vocal + stab + clap * 0.55) * jitter * profile.drive);
+    high[i] = Math.min(1, (closedHat + sixteenth + openHat + clap * 0.35 + riser) * jitter * profile.drive);
   }
 
-  for (const band of [low, mid, high]) {
+  normaliseBands([low, mid, high], levelScale);
+  return { low, mid, high };
+}
+
+function normaliseBands(bands: Float32Array[], levelScale: number): void {
+  for (const band of bands) {
     let peak = 0;
-    for (let i = 0; i < columns; i++) if (band[i] > peak) peak = band[i];
-    if (peak > 0) for (let i = 0; i < columns; i++) band[i] = (band[i] / peak) * WIRE_CALIBRATION;
+    for (let i = 0; i < band.length; i++) if (band[i] > peak) peak = band[i];
+    if (peak > 0) for (let i = 0; i < band.length; i++) band[i] = (band[i] / peak) * WIRE_CALIBRATION * levelScale;
   }
+}
+
+/** Beatless ambient: a low drone, slow mid swells, a faint high shimmer. */
+function ambientBands(columns: number, seed: number, durationSecs: number): BandColumns {
+  const rand = mulberry32(seed * 104729 + 7);
+  const phase = rand() * 10;
+  const low = new Float32Array(columns);
+  const mid = new Float32Array(columns);
+  const high = new Float32Array(columns);
+  for (let i = 0; i < columns; i++) {
+    const t = (i / columns) * durationSecs;
+    const swell = Math.pow(0.5 + 0.5 * Math.sin(t * 0.09 + phase), 2);
+    const fadeIn = Math.min(1, i / (columns * 0.08));
+    low[i] = (0.05 + 0.3 * Math.pow(0.5 + 0.5 * Math.sin(t * 0.04 + phase * 2), 3)) * fadeIn;
+    mid[i] = (0.12 + 0.88 * swell) * (0.9 + 0.1 * rand()) * fadeIn;
+    high[i] = (0.1 + 0.35 * swell) * rand() * fadeIn;
+  }
+  normaliseBands([low, mid, high], PROFILES.ambient.level);
   return { low, mid, high };
 }
 

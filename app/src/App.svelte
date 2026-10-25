@@ -21,6 +21,7 @@
   import AppStatusBar   from './modules/AppStatusBar.svelte';
   import Settings       from './modules/Settings.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
+  import WaveVariantLegend from './modules/WaveVariantLegend.svelte';
 
   import {
     ui,
@@ -209,6 +210,7 @@
 </div>
 
 <Settings />
+<WaveVariantLegend />
 
 <Dialog
   open={library.showAnalysisPrompt}

@@ -1,6 +1,7 @@
 <script module>
   import { bandsFromPeaks } from '../waveform-bands.js';
   import { drawBandRange, ink, paletteVersion, wavePalette } from '../waveform-render.js';
+  import { currentWaveVariant, onWaveVariant, scalingFor } from '../waveform-scaling.js';
 
   const VARIANTS = {
     mini: { step: 2, gap: 1, decay: 0.8, columnPx: 2 },
@@ -85,6 +86,8 @@
   } = $props();
 
   let canvas;
+  let waveVariant = $state(currentWaveVariant());
+  $effect(() => onWaveVariant((key) => (waveVariant = key)));
 
   function source() {
     if (bands && bands.low && bands.low.length) return bands;
@@ -96,7 +99,7 @@
   }
 
   function bitmapKey(dpr, data) {
-    return `${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${dataKey(data)}`;
+    return `${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${waveVariant}|${dataKey(data)}`;
   }
 
   function paintPlaceholder(ctx, dpr, phase) {
@@ -127,6 +130,7 @@
       dpr,
       decay: cfg.decay,
       columnPx: cfg.columnPx,
+      scaling: waveVariant === 'a' ? null : scalingFor(waveVariant),
     });
   }
 
@@ -196,6 +200,7 @@
     cues;
     cueStyle;
     animating;
+    waveVariant;
 
     const data = source();
     if (animating && !data) {

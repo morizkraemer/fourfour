@@ -7,7 +7,7 @@ import {
 } from './analysis-data.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
-import { rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
+import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 export let lastTauriError = 'None';
 
@@ -114,7 +114,7 @@ function syntheticRowBands(i: number): string {
   const variant = (i * 31) % ROW_PREVIEW_VARIANTS;
   let preview = rowBandPreviews.get(variant);
   if (!preview) {
-    preview = rowBandsBase64(syntheticBands(1200, variant + 1, 180 + variant, 118 + (variant % 14)));
+    preview = rowBandsBase64(syntheticBands(1200, variant + 1, 180 + variant, 118 + (variant % 14), MOCK_PROFILE_ORDER[variant % MOCK_PROFILE_ORDER.length]));
     rowBandPreviews.set(variant, preview);
   }
   return preview;

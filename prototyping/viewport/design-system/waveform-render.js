@@ -7,6 +7,7 @@
  * per column and band because a jagged tall polygon is far slower to rasterise.
  */
 import { BAND_GAIN, BAND_ORDER, halfHeight, reduceBands, smoothBands } from './waveform-bands.js';
+import { prepareBands, scaledAmp } from './waveform-scaling.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
@@ -72,18 +73,18 @@ export function paletteVersion() {
  * Fill the three band envelopes. `shaped` comes from reduceBands/smoothBands.
  * The context must have an identity transform (device pixels).
  */
-export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0 }) {
+export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0, gains = BAND_GAIN }) {
   const yCentre = heightPx / 2;
   const stepped = heightPx <= STEPPED_PATH_MAX_HEIGHT;
   for (const band of BAND_ORDER) {
     const values = shaped[band];
     ctx.fillStyle = palette[band];
     if (stepped) {
-      paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre);
+      paintSteppedBand(ctx, values, gains[band], from, count, offsetPx, yCentre);
       continue;
     }
     for (let p = 0; p < count; p++) {
-      const half = halfHeight(values[from + p], band, yCentre);
+      const half = halfHeight(values[from + p], band, yCentre, gains);
       if (half === 0) continue;
       const top = Math.round(yCentre - half);
       const bottom = Math.round(yCentre + half);
@@ -92,8 +93,7 @@ export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = s
   }
 }
 
-function paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre) {
-  const gain = BAND_GAIN[band];
+function paintSteppedBand(ctx, values, gain, from, count, offsetPx, yCentre) {
   const tops = new Int16Array(count);
   const bottoms = new Int16Array(count);
   const centre = Math.round(yCentre);
@@ -138,17 +138,18 @@ const SHAPED_PER_BANDS_LIMIT = 6;
 const shapedCache = new WeakMap();
 
 /** The reduced and smoothed columns of a static draw, kept per bands object and width: redraws (theme, dpr, bitmap eviction) skip the reduction. */
-function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel) {
-  if (!bands || typeof bands !== 'object') return smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, scaling) {
+  const shape = scaling ? (v) => scaledAmp(v, scaling) : undefined;
+  if (!bands || typeof bands !== 'object') return smoothBands(reduceBands(bands, startFrac, endFrac, widthPx, shape), decayPerPixel);
   let byKey = shapedCache.get(bands);
   if (!byKey) {
     byKey = new Map();
     shapedCache.set(bands, byKey);
   }
-  const key = `${startFrac}|${endFrac}|${widthPx}|${decayPerPixel}`;
+  const key = `${startFrac}|${endFrac}|${widthPx}|${decayPerPixel}|${scaling ? scaling.name : ''}`;
   let shaped = byKey.get(key);
   if (!shaped) {
-    shaped = smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+    shaped = smoothBands(reduceBands(bands, startFrac, endFrac, widthPx, shape), decayPerPixel);
     byKey.set(key, shaped);
     if (byKey.size > SHAPED_PER_BANDS_LIMIT) byKey.delete(byKey.keys().next().value);
   }
@@ -160,20 +161,24 @@ function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel) {
  * `scrolling` aligns the sample grid to whole pixels (so peak buckets do not re-bucket while the viewport
  * slides), warms the envelope up on a lead-in, and recovers the sub-pixel motion by translating the paint.
  */
-export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1 }) {
+export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, scaling = null }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
   if (columnPx > 1) {
     ctx.save();
     ctx.scale(columnPx, 1);
     drawBandRange(ctx, bands, {
-      startFrac, endFrac, widthPx: Math.ceil(widthPx / columnPx), heightPx, palette, dpr: dpr / columnPx, decay, scrolling,
+      startFrac, endFrac, widthPx: Math.ceil(widthPx / columnPx), heightPx, palette, dpr: dpr / columnPx, decay, scrolling, scaling,
     });
     ctx.restore();
     return;
   }
   const decayPerPixel = Math.pow(decay, 1 / dpr);
   if (!scrolling) {
-    paintBands(ctx, shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel), { heightPx, palette });
+    paintBands(ctx, shapedStatic(scaling ? prepareBands(bands, scaling) : bands, startFrac, endFrac, widthPx, decayPerPixel, scaling), {
+      heightPx,
+      palette,
+      gains: scaling ? scaling.gains : BAND_GAIN,
+    });
     return;
   }
   const fracPerPx = (endFrac - startFrac) / widthPx;
