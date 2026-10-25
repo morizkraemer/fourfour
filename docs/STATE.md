@@ -69,6 +69,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q36 Waveform integration [done, branch q36-waveforms fdbb651 = q34 + q35] — app draws the stick bytes (PWV7/PWV6), 128-col 3-band row previews; PWV3 heights 18.6→99.7% exact; fling regression gone, expanded views −8..−30% CPU; side-by-side vs Rekordbox: scratchpad/waveforms/final/. Over budget: backend load_state 30k 480→910 ms, row select 19→42 ms; our high band weaker than Rekordbox.
 ### Q37 Waveform polish [done, branch q37-waveforms ae7bb44 = final waveform branch] — high band vs Rekordbox exact 13.8→41.7%, corr 0.89→0.93; load_state 30k 850→350 ms; row select 42→20.7 ms; schema v4 (row_preview BLOB, additive) needs your OK.
 ### Q38 Row preview = simple loudness envelope [done, branch row-wave-variants e2fb03b (on q37-waveforms)] — Merlin picked variant e; 3-band stays in players; 159 app tests. Gain/curve tuned on mock only.
+### Q39 Waveform fix from Merlin's Mac test [done, branch q39-wave-fix 7401e1d (on row-wave-variants)] — flat block = beat-long peak pooling; layer order low back/mid/high core; whole-pixel scroll fixes the flashing; detail strip 3-band; legacy payload path fixed too. Installed on the Mac as fourfour.app.
 ### Q33 Wire the Rust analyzer into the app (item 2) [paused, WIP] — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run

@@ -96,3 +96,4 @@
 2026-10-25 07:42 orchestrator - correction: tailscale HTTPS previews work from other devices; only curl from dev itself fails. Links back to https://; waveform preview :4260 = q37-waveforms
 2026-10-25 08:35 orchestrator - decided: Merlin: row previews = variant e (simple smooth loudness envelope, one colour, absolute scaling); 3-band stays in players. Finalizing on branch row-wave-variants
 2026-10-25 08:39 orchestrator Q38 done: branch row-wave-variants e2fb03b (npm test re-run); doc landed
+2026-10-25 11:40 orchestrator Q39 done: branch q39-wave-fix 7401e1d; built + installed fourfour.app on the Mac
