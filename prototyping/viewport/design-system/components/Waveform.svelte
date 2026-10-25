@@ -1,7 +1,8 @@
 <script module>
   import { bandsFromPeaks } from '../waveform-bands.js';
   import { drawBandRange, ink, paletteVersion, wavePalette } from '../waveform-render.js';
-  import { currentWaveVariant, onWaveVariant, scalingFor } from '../waveform-scaling.js';
+  import { currentWaveVariant, onWaveVariant } from '../waveform-scaling.js';
+  import { drawSimple } from '../waveform-simple.js';
 
   const VARIANTS = {
     mini: { step: 2, gap: 1, decay: 0.8, columnPx: 2 },
@@ -121,6 +122,10 @@
 
   function paintData(ctx, data, dpr, pixelW, pixelH) {
     const cfg = VARIANTS[variant] ?? VARIANTS.mini;
+    if (waveVariant !== 'a') {
+      drawSimple(ctx, bandsOf(data), { mode: waveVariant, variant, widthPx: pixelW, heightPx: pixelH, dpr, palette: wavePalette() });
+      return;
+    }
     drawBandRange(ctx, bandsOf(data), {
       startFrac: 0,
       endFrac: 1,
@@ -130,7 +135,6 @@
       dpr,
       decay: cfg.decay,
       columnPx: cfg.columnPx,
-      scaling: waveVariant === 'a' ? null : scalingFor(waveVariant),
     });
   }
 

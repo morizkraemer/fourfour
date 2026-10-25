@@ -5,7 +5,7 @@ const require = createRequire(`${process.env.PW_DIR}/`);
 const { chromium } = require('playwright');
 
 const [dir] = process.argv.slice(2);
-const variants = ['a', 'b', 'c', 'd'];
+const variants = ['a', 'e', 'f', 'g'];
 const dataUrl = (name) => `data:image/png;base64,${readFileSync(`${dir}/${name}.png`).toString('base64')}`;
 
 const listCell = (v) => `<div class="cell"><div class="tag">${v}</div><div class="crop"><img src="${dataUrl(`${v}-list`)}"></div></div>`;

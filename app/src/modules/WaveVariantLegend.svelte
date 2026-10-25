@@ -1,5 +1,5 @@
 <script>
-  import { WAVE_SCALINGS, WAVE_VARIANT_KEYS, currentWaveVariant, onWaveVariant, setWaveVariant, waveSwitchActive } from '$ds/waveform-scaling.js';
+  import { WAVE_VARIANTS, WAVE_VARIANT_KEYS, currentWaveVariant, onWaveVariant, setWaveVariant, waveSwitchActive } from '$ds/waveform-scaling.js';
 
   const active = waveSwitchActive();
   let selected = $state(currentWaveVariant());
@@ -27,7 +27,7 @@
     <div class="wave-legend__title">wave: {selected}</div>
     {#each WAVE_VARIANT_KEYS as key, i}
       <button class="wave-legend__row" class:wave-legend__row--on={key === selected} onclick={() => setWaveVariant(key)}>
-        <kbd>{i + 1}</kbd><b>{key}</b> {WAVE_SCALINGS[key].label}
+        <kbd>{i + 1}</kbd><b>{key}</b> {WAVE_VARIANTS[key].label}
       </button>
     {/each}
   </div>

@@ -48,7 +48,7 @@ function sampleInterpolated(arr, n, centre) {
  *
  * @returns {{low: Float32Array, mid: Float32Array, high: Float32Array, length: number}}
  */
-export function reduceBands(bands, startFrac, endFrac, pixels, shape = displayAmp) {
+export function reduceBands(bands, startFrac, endFrac, pixels) {
   const out = emptyShaped(pixels);
   const n = bands && bands.low ? bands.low.length : 0;
   if (!n || pixels <= 0 || !(endFrac > startFrac)) return out;
@@ -70,7 +70,7 @@ export function reduceBands(bands, startFrac, endFrac, pixels, shape = displayAm
         v = 0;
         for (let i = i0; i <= i1; i++) if (src[i] > v) v = src[i];
       }
-      dst[p] = shape(v);
+      dst[p] = displayAmp(v);
     }
   }
   return out;
@@ -96,9 +96,9 @@ export function smoothBands(shaped, decayPerPixel) {
 }
 
 /** Half height in pixels of one band at one pixel column (0 stays 0, anything drawn is at least half a pixel). */
-export function halfHeight(value, band, halfPx, gains = BAND_GAIN) {
+export function halfHeight(value, band, halfPx) {
   if (!(value > 0)) return 0;
-  return Math.max(0.5, Math.min(1, value * gains[band]) * halfPx);
+  return Math.max(0.5, Math.min(1, value * BAND_GAIN[band]) * halfPx);
 }
 
 /** Fallback for callers that only have a mono 0..1 peak array: a plausible band mix of the same height. */

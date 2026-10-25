@@ -37,7 +37,7 @@ await page.screenshot({ path: `${outDir}/baseline-no-param-full.png` });
 const legendWithoutParam = await page.locator('[data-wave-legend]').count();
 console.log('legend without param:', legendWithoutParam);
 
-for (const variant of ['a', 'b', 'c', 'd']) {
+for (const variant of ['a', 'e', 'f', 'g']) {
   await open(`${base}?mock=${count}&wave=${variant}`);
   await page.locator('[data-track-row]').nth(2).click();
   await page.waitForTimeout(800);
@@ -48,7 +48,7 @@ for (const variant of ['a', 'b', 'c', 'd']) {
 
 await open(`${base}?mock=${count}&wave=a`);
 await page.locator('[data-track-row]').nth(2).click();
-for (const [key, variant] of [['2', 'b'], ['3', 'c'], ['4', 'd'], ['1', 'a']]) {
+for (const [key, variant] of [['2', 'e'], ['3', 'f'], ['4', 'g'], ['1', 'a']]) {
   await page.keyboard.press(key);
   await page.waitForTimeout(600);
   const title = await page.locator('.wave-legend__title').textContent();
