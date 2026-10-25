@@ -1,12 +1,11 @@
 <script module>
   import { bandsFromPeaks } from '../waveform-bands.js';
-  import { drawBandRange, ink, paletteVersion, wavePalette } from '../waveform-render.js';
-  import { currentWaveVariant, onWaveVariant } from '../waveform-scaling.js';
-  import { drawSimple } from '../waveform-simple.js';
+  import { ink, paletteVersion, wavePalette } from '../waveform-render.js';
+  import { drawLoudness } from '../waveform-simple.js';
 
   const VARIANTS = {
-    mini: { step: 2, gap: 1, decay: 0.8, columnPx: 2 },
-    strip: { step: 3, gap: 1, decay: 0.88, columnPx: 1 },
+    mini: { step: 2, gap: 1 },
+    strip: { step: 3, gap: 1 },
   };
 
   const BITMAP_CACHE_LIMIT = 800;
@@ -70,7 +69,7 @@
 
 <script>
   /*
-    Static 3-band waveform for list rows (variant "mini") and the detail pane
+    Static loudness-envelope preview for list rows (variant "mini") and the detail pane
     (variant "strip"). `bands` is BandColumns ({low, mid, high}, 0..1); `peaks`
     (mono 0..1) is the legacy input and is turned into a band mix.
   */
@@ -87,8 +86,6 @@
   } = $props();
 
   let canvas;
-  let waveVariant = $state(currentWaveVariant());
-  $effect(() => onWaveVariant((key) => (waveVariant = key)));
 
   function source() {
     if (bands && bands.low && bands.low.length) return bands;
@@ -100,7 +97,7 @@
   }
 
   function bitmapKey(dpr, data) {
-    return `${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${waveVariant}|${dataKey(data)}`;
+    return `${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${dataKey(data)}`;
   }
 
   function paintPlaceholder(ctx, dpr, phase) {
@@ -120,29 +117,15 @@
     }
   }
 
-  function paintData(ctx, data, dpr, pixelW, pixelH) {
-    const cfg = VARIANTS[variant] ?? VARIANTS.mini;
-    if (waveVariant !== 'a') {
-      drawSimple(ctx, bandsOf(data), { mode: waveVariant, variant, widthPx: pixelW, heightPx: pixelH, dpr, palette: wavePalette() });
-      return;
-    }
-    drawBandRange(ctx, bandsOf(data), {
-      startFrac: 0,
-      endFrac: 1,
-      widthPx: pixelW,
-      heightPx: pixelH,
-      palette: wavePalette(),
-      dpr,
-      decay: cfg.decay,
-      columnPx: cfg.columnPx,
-    });
+  function paintData(ctx, data, pixelW, pixelH) {
+    drawLoudness(ctx, bandsOf(data), { widthPx: pixelW, heightPx: pixelH, palette: wavePalette() });
   }
 
   function bitmapFor(data, key, dpr, pixelW, pixelH) {
     const bitmap = document.createElement('canvas');
     bitmap.width = pixelW;
     bitmap.height = pixelH;
-    paintData(bitmap.getContext('2d'), data, dpr, pixelW, pixelH);
+    paintData(bitmap.getContext('2d'), data, pixelW, pixelH);
     rememberBitmap(key, bitmap);
     return bitmap;
   }
@@ -173,7 +156,7 @@
       let bitmap = recallBitmap(key);
       if (!bitmap && wasDrawnBefore(key)) bitmap = bitmapFor(data, key, dpr, pixelW, pixelH);
       if (bitmap) ctx.drawImage(bitmap, 0, 0);
-      else paintData(ctx, data, dpr, pixelW, pixelH);
+      else paintData(ctx, data, pixelW, pixelH);
     }
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -204,7 +187,6 @@
     cues;
     cueStyle;
     animating;
-    waveVariant;
 
     const data = source();
     if (animating && !data) {
