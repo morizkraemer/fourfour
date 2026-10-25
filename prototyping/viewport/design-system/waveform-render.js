@@ -99,7 +99,7 @@ export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = s
   }
 }
 
-/** Half height of every layer at every pixel column; 0 where a layer is hidden behind the one before it. */
+/** Half height of every layer at every pixel column; 0 where a layer is not shown or a layer drawn after it covers it completely. */
 function layerHalves(shaped, from, count, yCentre) {
   const halves = STEPPED_LAYERS.map(() => new Float32Array(count));
   for (let p = 0; p < count; p++) {
@@ -108,6 +108,14 @@ function layerHalves(shaped, from, count, yCentre) {
     const hm = halfHeight(shaped.mid[from + p], 'mid', yCentre);
     const hh = halfHeight(shaped.high[from + p], 'high', yCentre);
     for (let k = 0; k < STEPPED_LAYERS.length; k++) halves[k][p] = STEPPED_LAYERS[k][1](hl, hm, hh);
+    for (let k = 0; k < STEPPED_LAYERS.length - 1; k++) {
+      for (let j = k + 1; j < STEPPED_LAYERS.length; j++) {
+        if (halves[j][p] >= halves[k][p]) {
+          halves[k][p] = 0;
+          break;
+        }
+      }
+    }
   }
   return halves;
 }
@@ -298,9 +306,12 @@ function newLayer(widthPx, heightPx) {
 function drawScrolledColumns(ctx, bands, { leftFloor, fracPerPx, widthPx, heightPx, palette }) {
   const canvas = ctx.canvas;
   let entry = scrollCache.get(canvas);
-  if (!entry || entry.bands !== bands || entry.fracPerPx !== fracPerPx || entry.palette !== palette || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
-    entry = { bands, fracPerPx, palette, widthPx, heightPx, left: null, front: newLayer(widthPx, heightPx), back: newLayer(widthPx, heightPx) };
+  if (!entry || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
+    entry = { widthPx, heightPx, front: newLayer(widthPx, heightPx), back: newLayer(widthPx, heightPx), left: null };
     scrollCache.set(canvas, entry);
+  }
+  if (entry.bands !== bands || entry.fracPerPx !== fracPerPx || entry.palette !== palette) {
+    Object.assign(entry, { bands, fracPerPx, palette, left: null });
   }
   const paintColumns = (layer, fromPx, count) => {
     const g = layer.getContext('2d');

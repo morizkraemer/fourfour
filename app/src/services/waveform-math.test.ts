@@ -187,15 +187,20 @@ describe('paintBands', () => {
     }
   });
   it('keeps the bright tone only where a front band sticks out of the band behind it', () => {
-    const shaped = { low: Float32Array.from([0.3]), mid: Float32Array.from([0.9]), high: Float32Array.from([1]), length: 1 };
+    const shaped = { low: Float32Array.from([0.3]), mid: Float32Array.from([0.9]), high: Float32Array.from([0.1]), length: 1 };
     const { ctx, rects } = recordingContext();
     paintBands(ctx, shaped, { heightPx: 200, palette });
-    expect(rects.map((r) => r.color)).toEqual(['LOW', 'MID', 'MIDINLOW', 'HIGH', 'HIGHINMID']);
+    expect(rects.map((r) => r.color)).toEqual(['MID', 'MIDINLOW', 'HIGHINMID']);
     const half = (name: string) => 100 - rects.find((r) => r.color === name)!.y;
     expect(half('MID')).toBeGreaterThan(half('MIDINLOW'));
-    expect(half('MIDINLOW')).toBeCloseTo(half('LOW'), 0);
-    expect(half('HIGH')).toBeGreaterThan(half('MID'));
-    expect(half('HIGHINMID')).toBeCloseTo(half('MID'), 0);
+    expect(half('MIDINLOW')).toBeCloseTo(100 * BAND_GAIN.low * 0.3, 0);
+    expect(half('MIDINLOW')).toBeGreaterThan(half('HIGHINMID'));
+  });
+  it('does not paint a layer that a taller layer drawn after it covers', () => {
+    const shaped = { low: Float32Array.from([0.3]), mid: Float32Array.from([0.5]), high: Float32Array.from([0.9]), length: 1 };
+    const { ctx, rects } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 200, palette });
+    expect(rects.map((r) => r.color)).toEqual(['HIGH', 'HIGHINMID']);
   });
   it('skips silent columns and never draws less than one pixel', () => {
     const shaped = { low: Float32Array.from([0, 0.001]), mid: new Float32Array(2), high: new Float32Array(2), length: 2 };
