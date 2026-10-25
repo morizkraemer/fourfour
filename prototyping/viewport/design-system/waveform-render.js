@@ -6,7 +6,7 @@
  * record, exact pixel edges); tall ones, which the zoom view repaints every frame, use one fillRect
  * per column and band because a jagged tall polygon is far slower to rasterise.
  */
-import { OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, halfHeight, reduceBands, smoothBands, stackHeights } from './waveform-bands.js';
+import { OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, halfHeight, reduceBands, smoothBands, stackHeights } from './waveform-bands.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
@@ -220,8 +220,23 @@ const SHAPED_PER_BANDS_LIMIT = 6;
 const shapedCache = new WeakMap();
 
 /** The reduced and smoothed columns of a static draw, kept per bands object and width: redraws (theme, dpr, bitmap eviction) skip the reduction. */
+/** The overview at Rekordbox's resolution: at most OVERVIEW_COLUMNS mean buckets, each held over its share of the pixels. */
+function reduceOverview(bands, startFrac, endFrac, widthPx) {
+  const buckets = Math.min(widthPx, OVERVIEW_COLUMNS);
+  const reduced = reduceBands(bands, startFrac, endFrac, buckets, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE);
+  if (buckets === widthPx) return reduced;
+  const out = { low: new Float32Array(widthPx), mid: new Float32Array(widthPx), high: new Float32Array(widthPx), length: widthPx };
+  for (let p = 0; p < widthPx; p++) {
+    const k = Math.floor((p * buckets) / widthPx);
+    out.low[p] = reduced.low[k];
+    out.mid[p] = reduced.mid[k];
+    out.high[p] = reduced.high[k];
+  }
+  return out;
+}
+
 function reduceStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked) {
-  if (stacked) return reduceBands(bands, startFrac, endFrac, widthPx, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE);
+  if (stacked) return reduceOverview(bands, startFrac, endFrac, widthPx);
   return smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
 }
 

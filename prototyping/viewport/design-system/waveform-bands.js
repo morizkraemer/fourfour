@@ -37,6 +37,8 @@ export const BUCKET_PEAK_WEIGHT = { low: 0.2, mid: 0.3, high: 0.4 };
  * brings that mean to the level Rekordbox's own overview bytes have (about 0.6 / 0.75 / 2 of the detail mean).
  * `STACK_GAIN` is the share of the strip height one unit of that level adds to the stack.
  */
+/** Rekordbox's PWV6 has 1200 columns whatever the track length. */
+export const OVERVIEW_COLUMNS = 1200;
 export const OVERVIEW_PEAK_WEIGHT = { low: 0, mid: 0, high: 0 };
 export const OVERVIEW_SCALE = { low: 0.6, mid: 0.75, high: 2 };
 export const STACK_GAIN = { low: 1.08, mid: 0.7, high: 1.35 };
