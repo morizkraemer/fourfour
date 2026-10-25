@@ -459,7 +459,9 @@ fn eval_set(
         let derived = Waveforms::from_bands(direct.pwv7.clone(), &tuning, &derivation);
         let exported = match std::env::var_os("WAVEFORM_COMPARE_BANDS_ONLY") {
             Some(_) => derived,
-            None => derived.with_exact(&direct.color_waveform().exact.expect("measured audio carries exact columns")),
+            None => derived
+                .with_exact(&direct.color_waveform().exact.expect("measured audio carries exact columns"))
+                .with_overview(&direct.pwv6, &tuning),
         };
         (compare(&direct, &e.reference), compare(&exported, &e.reference))
     })
@@ -1191,8 +1193,15 @@ fn dump_tracks(o: &Options, args: &[String]) -> Result<()> {
             .map(|b| serde_json::json!({ "time_ms": b.time_ms, "bar_position": b.bar_position }))
             .collect::<Vec<_>>();
         let mono = decode_mono(Path::new(audio))?;
-        let ours = measure(&mono, tuning);
+        let mut meter = Meter::with_tuning(mono.rate, 1, tuning);
+        for chunk in mono.samples.chunks(1 << 16) {
+            meter.push(chunk);
+        }
+        let measured = meter.finish();
+        let raw: Vec<f32> = measured.band_columns().iter().flatten().map(|&v| v as f32).collect();
+        let ours = analyze(&measured);
         let fixture = serde_json::json!({
+            "raw": raw,
             "name": t.track.title,
             "audio": audio,
             "duration_secs": mono.samples.len() as f64 / mono.rate as f64,
@@ -1323,9 +1332,15 @@ fn refdump(o: &Options, sel: &Selection, dir: &str) -> Result<()> {
     let entries: Vec<&Entry> = sel.entries.iter().collect();
     let done = parallel(entries.iter().collect::<Vec<_>>(), |e| {
         let mono = decode_mono(&e.audio).expect("decode");
-        let ours = measure(&mono, tuning);
+        let mut meter = Meter::with_tuning(mono.rate, 1, tuning);
+        for chunk in mono.samples.chunks(1 << 16) {
+            meter.push(chunk);
+        }
+        let measured = meter.finish();
+        let raw: Vec<f32> = measured.band_columns().iter().flatten().map(|&v| v as f32).collect();
+        let ours = analyze(&measured);
         serde_json::json!({
-            "name": e.name, "tune": e.tune,
+            "name": e.name, "tune": e.tune, "raw": raw,
             "rb": { "pwv7": flat3(&e.reference.pwv7), "pwv6": flat3(&e.reference.pwv6), "gains": e.reference.gains },
             "ours": { "pwv7": flat3(&ours.pwv7), "pwv6": flat3(&ours.pwv6), "gains": ours.gains },
         })
