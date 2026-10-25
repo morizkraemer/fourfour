@@ -223,7 +223,8 @@ const shapedCache = new WeakMap();
 /** The overview at Rekordbox's resolution: at most OVERVIEW_COLUMNS mean buckets, each held over its share of the pixels. */
 function reduceOverview(bands, startFrac, endFrac, widthPx) {
   const buckets = Math.min(widthPx, OVERVIEW_COLUMNS);
-  const reduced = reduceBands(bands, startFrac, endFrac, buckets, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE);
+  const fromDetail = !bands.overview;
+  const reduced = reduceBands(bands, startFrac, endFrac, buckets, OVERVIEW_PEAK_WEIGHT, fromDetail ? OVERVIEW_SCALE : null);
   if (buckets === widthPx) return reduced;
   const out = { low: new Float32Array(widthPx), mid: new Float32Array(widthPx), high: new Float32Array(widthPx), length: widthPx };
   for (let p = 0; p < widthPx; p++) {

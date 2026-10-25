@@ -1,5 +1,5 @@
 import type { BandColumns } from '../services/waveform-bands.ts';
-import { WIRE_CALIBRATION, bandBytes, encodeStickWire, previewFromBands, rowBandsBase64, syntheticBands } from './synthetic-bands.ts';
+import { WIRE_CALIBRATION, bandBytes, encodeStickWire, overviewLevel, previewFromBands, rowBandsBase64, syntheticBands } from './synthetic-bands.ts';
 
 const COLUMNS_PER_SECOND = 150;
 const STRIP_COLUMNS = 2048;
@@ -58,7 +58,7 @@ function buildTemplate(legacy: boolean, variant: number): string {
   const strip = rotated(baseBands().strip, variant);
   const stripBytes = bandBytes(strip);
   const detail = bandBytes(rotated(baseBands().detail, variant));
-  const overview = bandBytes(rotated(baseBands().overview, variant));
+  const overview = overviewLevel(bandBytes(rotated(baseBands().overview, variant)));
   const encode = legacy ? legacyColorSamples : (bytes: Uint8Array) => encodeStickWire(bytes);
   const beats = Array.from({ length: 512 }, (_, i) => ({ time_ms: i * 484, bar_position: (i % 4) + 1 }));
   return JSON.stringify({

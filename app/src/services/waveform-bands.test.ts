@@ -7,6 +7,7 @@ import {
   bandsFromPreviewBytes,
   bandsFromStickBytes,
   colorBandsFromPayload,
+  overviewBandsFromPayload,
   rowBandsFor,
   rowBandsFromBandBytes,
 } from './waveform-bands.ts';
@@ -197,5 +198,20 @@ describe('PWV7 payloads (the stick bytes)', () => {
     expect(decodeBandPreview('')).toBeNull();
     expect(decodeBandPreview(null)).toBeNull();
     expect(decodeBandPreview([1, 2, 3])).toEqual(Uint8Array.from([1, 2, 3]));
+  });
+});
+
+describe('overviewBandsFromPayload', () => {
+  it('marks stick values as an overview series and is memoised', () => {
+    const payload = { ...wire([10, 20, 30, 40, 50, 60]), pwv7: true };
+    const bands = overviewBandsFromPayload(payload)!;
+    expect(bands.overview).toBe(true);
+    expect(Array.from(bands.low)).toEqual([10 / 127, 40 / 127].map(Math.fround));
+    expect(overviewBandsFromPayload(payload)).toBe(bands);
+  });
+  it('has no overview series for older stored tracks, other shapes or nothing', () => {
+    expect(overviewBandsFromPayload(wire([10, 20, 30, 40, 50, 60]))).toBeNull();
+    expect(overviewBandsFromPayload(null)).toBeNull();
+    expect(overviewBandsFromPayload([{ amp: 1, r: 1, g: 1, b: 1 }])).toBeNull();
   });
 });

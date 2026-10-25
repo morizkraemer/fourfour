@@ -35,7 +35,7 @@
   function buildData() {
     return {
       bands: (mode === 'expanded' ? (bandsDetail ?? bands) : bands) ?? undefined,
-      bandsOverview: mode === 'expanded' ? (bandsOverview ?? bands) ?? undefined : undefined,
+      bandsOverview: (bandsOverview ?? (mode === 'expanded' ? bands : null)) ?? undefined,
       beats: beats ?? [],
       cues: (cues ?? []).map((c) => ({ position: c.position, color: c.color })),
       duration_ms: durationMs ?? 0,

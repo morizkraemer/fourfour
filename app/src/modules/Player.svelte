@@ -37,6 +37,7 @@
     key={player.track?.key || '—'}
     cues={player.track?.cues || []}
     bands={player.track?.bands ?? null}
+    bandsOverview={player.track?.bandsOverview ?? null}
     beats={player.track?.beats ?? []}
     durationMs={player.track?.durationMs ?? 0}
     trackKey={player.track?.id ?? null}

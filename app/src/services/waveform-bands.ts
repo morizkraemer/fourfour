@@ -21,6 +21,8 @@ export interface BandColumns {
   mid: Float32Array;
   high: Float32Array;
   scale?: { low: number; mid: number; high: number };
+  /** The columns already are an overview series (PWV6 level), not detail data. */
+  overview?: boolean;
 }
 
 const WIRE_FULL_SCALE = 127;
@@ -200,4 +202,20 @@ export function rowBandsFor(preview: ArrayLike<number> | null | undefined): Band
  */
 export function rowBandsFromBandBytes(bandPreview: ArrayLike<number> | null | undefined): BandColumns | null {
   return cachedRowBands(bandPreview, (bytes) => ({ ...bandsFromStickBytes(bytes), scale: ROW_PREVIEW_DISPLAY_SCALE }));
+}
+
+const overviewBands = new WeakMap<object, BandColumns | null>();
+
+/**
+ * The overview series of an analysis payload (`waveform_overview`): Rekordbox's PWV6, or ours, as the stick carries it.
+ * Only for payloads whose bytes are stick values (`pwv7`); older stored tracks have no such series and the
+ * caller falls back to the detail columns.
+ */
+export function overviewBandsFromPayload(color: unknown): BandColumns | null {
+  if (!color || typeof color !== 'object') return null;
+  if (overviewBands.has(color)) return overviewBands.get(color) ?? null;
+  const stick = isEncoded(color) && color.pwv7 ? colorBandsFromPayload(color) : null;
+  const result = stick && stick.low.length >= 2 ? { ...stick, overview: true } : null;
+  overviewBands.set(color, result);
+  return result;
 }

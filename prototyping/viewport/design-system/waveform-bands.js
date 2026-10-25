@@ -6,7 +6,8 @@
  *
  *   { low, mid, high }
  *
- * Columns are evenly spaced over the whole track. Each band is its own envelope;
+ * `overview: true` marks columns that already are an overview series (Rekordbox's PWV6 or ours): they are drawn as they are,
+ * not scaled down from detail data. Columns are evenly spaced over the whole track. Each band is its own envelope;
  * they are not weights of one shared height. An optional `scale` ({low, mid, high}) multiplies
  * the values before display (data whose full scale is below 1, such as the 128-column row preview).
  */
@@ -41,8 +42,8 @@ export const BUCKET_PEAK_WEIGHT = { low: 0.2, mid: 0.3, high: 0.4 };
 export const OVERVIEW_COLUMNS = 1200;
 export const OVERVIEW_PEAK_WEIGHT = { low: 0, mid: 0, high: 0 };
 export const OVERVIEW_SCALE = { low: 0.6, mid: 0.75, high: 2 };
-export const STACK_GAIN = { low: 1.08, mid: 0.7, high: 1.35 };
-export const STACK_GAMMA = { low: 1, mid: 1, high: 1.7 };
+export const STACK_GAIN = { low: 1.08, mid: 0.62, high: 1.69 };
+export const STACK_GAMMA = { low: 1, mid: 1, high: 1.72 };
 
 /** Back to front, as Rekordbox stacks them: low is the outer layer, mid in front of it, high the thin core on top. */
 export const BAND_ORDER = ['low', 'mid', 'high'];

@@ -214,3 +214,10 @@ export function previewFromBands(bands: BandColumns, length = 400): number[] {
   }
   return out;
 }
+
+const OVERVIEW_LEVEL = [0.6, 0.75, 1.2];
+
+/** Detail-level band bytes brought to the level of a PWV6 overview (about 0.6 / 0.75 / 1.2 of the detail). */
+export function overviewLevel(bytes: Uint8Array): Uint8Array {
+  return bytes.map((value, i) => Math.min(127, Math.round(value * OVERVIEW_LEVEL[i % 3])));
+}

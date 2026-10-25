@@ -29,10 +29,7 @@ function show(o: ShowOptions) {
   host.className = 'ff-waveform-view';
   root.append(host);
   const bands = bandsFromStickBytes(Uint8Array.from(o.pwv7));
-  const overview =
-    o.overviewFromPwv6 && o.pwv6
-      ? { ...bandsFromStickBytes(Uint8Array.from(o.pwv6)), scale: { low: 1 / 0.6, mid: 1 / 0.75, high: 0.5 } }
-      : bands;
+  const overview = o.overviewFromPwv6 && o.pwv6 ? { ...bandsFromStickBytes(Uint8Array.from(o.pwv6)), overview: true } : bands;
   const display = new WaveformDisplay(host, { mode: 'expanded' });
   const style = document.createElement('style');
   style.textContent = `.ff-waveform-view .waveform-display{display:flex;flex-direction:column;width:100%;height:100%;overflow:hidden}

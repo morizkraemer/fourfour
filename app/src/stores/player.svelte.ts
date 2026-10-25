@@ -9,7 +9,7 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import { previewBytesFromPayload } from '../services/analysis-data.ts';
-import { colorBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
+import { colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -169,7 +169,7 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   next.bands = colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis));
   next.bandsDetail = colorBandsFromPayload(analysis.waveform_color_detail) ?? next.bands;
   next.bands = next.bandsDetail;
-  next.bandsOverview = next.bandsDetail;
+  next.bandsOverview = overviewBandsFromPayload(analysis.waveform_overview) ?? next.bandsDetail;
   if (analysis.beats?.length) {
     next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
       time_ms: b.time_ms,

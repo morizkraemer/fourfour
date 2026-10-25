@@ -656,7 +656,7 @@ export default class WaveformDisplay {
     }
 
     _renderBands(ctx, w, h, startFrac, endFrac, palette) {
-        const bands = this._data.bands;
+        const bands = this._mode === 'compact' ? (this._data.bandsOverview || this._data.bands) : this._data.bands;
         if (!bands || bands.low.length === 0) return;
         const dpr = devicePixelRatio;
         ctx.save();

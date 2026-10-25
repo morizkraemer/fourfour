@@ -16,6 +16,7 @@
     progress = 0,
     cues = [],
     bands = null,
+    bandsOverview = null,
     beats = [],
     durationMs = 0,
     trackKey = null,
@@ -116,6 +117,7 @@
       <WaveformView
         mode="compact"
         {bands}
+        {bandsOverview}
         {progress}
         {playing}
         {cues}

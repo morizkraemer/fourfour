@@ -7,6 +7,7 @@ import {
   DISPLAY_FLOOR,
   OVERVIEW_PEAK_WEIGHT,
   OVERVIEW_SCALE,
+  STACK_GAIN,
   bandsFromPeaks,
   displayAmp,
   halfHeight,
@@ -256,6 +257,20 @@ describe('paintStacked (overview, compact strip)', () => {
     expect(c2).toBeLessThanOrEqual(c3);
     expect(c3).toBe(40);
     expect(stackHeights({ ...full, low: Float32Array.from([0]) }, 0, 40)).toBeNull();
+  });
+  it('draws an overview series as it is and detail data scaled down to overview level', () => {
+    const topOfLow = (data: object) => {
+      const { ctx, paths } = recordingContext();
+      drawBandRange(ctx, data, { startFrac: 0, endFrac: 1, widthPx: 4, heightPx: 100, palette: { ...palette, low: 'LOW' }, layout: 'stacked' });
+      const low = paths.find((p) => p.color === 'LOW')!;
+      return 100 - Math.min(...low.points.map(([, y]) => y));
+    };
+    const flat = (v: number) => ({ low: new Float32Array(4).fill(v), mid: new Float32Array(4), high: new Float32Array(4) });
+    const asOverview = topOfLow({ ...flat(0.3), overview: true });
+    const asDetail = topOfLow(flat(0.3));
+    expect(asOverview).toBeCloseTo(Math.round(STACK_GAIN.low * displayAmp(0.3) * 100), 0);
+    expect(asDetail).toBeCloseTo(Math.round(STACK_GAIN.low * displayAmp(0.3 * OVERVIEW_SCALE.low) * 100), 0);
+    expect(asOverview).toBeGreaterThan(asDetail);
   });
   it('draws the overview from drawBandRange when asked for the stacked layout', () => {
     const { ctx, paths, rects } = recordingContext();
