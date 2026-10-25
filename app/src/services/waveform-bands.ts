@@ -31,6 +31,7 @@ const BALANCE_MIN_GAIN = 0.6;
 const BALANCE_MAX_GAIN = 2.5;
 const BALANCE_MIN_PEAK = 0.02;
 const ROW_CACHE_LIMIT = 1000;
+const LEGACY_LEVEL = 0.75;
 const ROW_PREVIEW_DISPLAY_SCALE = { low: 2.4, mid: 2.4, high: 1.4 };
 
 const PREVIEW_MIX = Array.from({ length: 8 }, (_, level) => {
@@ -43,13 +44,13 @@ function emptyBands(columns: number): BandColumns {
 }
 
 /** Samples as drawn before the 3-band renderer: `amp` is the loudest band, r/g/b are weights relative to it. */
-export function bandsFromColorSamples(samples: ColorWaveSample[]): BandColumns {
+export function bandsFromColorSamples(samples: ColorWaveSample[], level = 1): BandColumns {
   const out = emptyBands(samples.length);
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i];
-    out.low[i] = s.amp * s.r;
-    out.mid[i] = s.amp * s.g;
-    out.high[i] = s.amp * s.b;
+    out.low[i] = s.amp * s.r * level;
+    out.mid[i] = s.amp * s.g * level;
+    out.high[i] = s.amp * s.b * level;
   }
   return out;
 }
@@ -98,6 +99,7 @@ function percentile(values: Float32Array, p: number): number {
 }
 
 /**
+ * Not used for display any more (it flattened dynamics: every band's loud end sat at the top).
  * Scale each band so its 98th percentile lands near the top. Without it the loudest band of every
  * column (usually the low end) always reaches full height and hides the bands behind it.
  * Bounded gains keep a nearly empty band from being blown up.
@@ -141,15 +143,14 @@ export function colorBandsFromPayload(color: unknown): BandColumns | null {
     return bands;
   }
   if (isEncoded(color)) {
-    bands = bandsFromInterleavedBytes(decodeBase64(color.bands), WIRE_FULL_SCALE, color.calibration);
+    bands = bandsFromInterleavedBytes(decodeBase64(color.bands), WIRE_FULL_SCALE, color.calibration * LEGACY_LEVEL);
   } else {
     const samples = decodeColorWaveform(color);
-    if (samples) bands = bandsFromColorSamples(samples);
+    if (samples) bands = bandsFromColorSamples(samples, LEGACY_LEVEL);
   }
   if (!bands || bands.low.length === 0) return null;
-  const balanced = balanceBands(bands);
-  payloadBands.set(color, balanced);
-  return balanced;
+  payloadBands.set(color, bands);
+  return bands;
 }
 
 /**

@@ -16,7 +16,11 @@ interface Side {
 }
 
 function asLegacy(color: any) {
-  return color && typeof color === 'object' ? { ...color, pwv7: false, calibration: 1 } : color;
+  if (!color || typeof color !== 'object') return color;
+  const bytes = Uint8Array.from(atob(color.bands), (c) => c.charCodeAt(0));
+  let peak = 1;
+  for (const b of bytes) if (b > peak) peak = b;
+  return { ...color, pwv7: false, calibration: 127 / peak };
 }
 
 async function main() {
@@ -26,7 +30,7 @@ async function main() {
   const root = document.getElementById('compare')!;
   root.style.cssText = 'width:1160px;padding:16px;box-sizing:border-box;';
   const title = document.createElement('div');
-  title.textContent = fixture.name + (legacy ? '  [legacy payload path: no pwv7 flag, balanceBands applied]' : '');
+  title.textContent = fixture.name + (legacy ? '  [legacy payload path: no pwv7 flag, track peak calibrated to full scale]' : '');
   title.style.cssText = 'margin-bottom:10px;color:#e8ebf0;font-size:13px;';
   root.append(title);
 

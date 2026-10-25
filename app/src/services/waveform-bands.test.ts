@@ -159,12 +159,25 @@ describe('PWV7 payloads (the stick bytes)', () => {
     }
   });
 
-  it('is not rescaled or balanced, unlike the fallback path', () => {
+  it('is not rescaled, unlike the calibrated legacy path', () => {
     const quiet = Array.from({ length: 300 }, (_, i) => (i % 3 === 0 ? 20 : 10));
     const stickBands = colorBandsFromPayload(stick(quiet))!;
     expect(Math.max(...stickBands.low)).toBeCloseTo(20 / 127, 6);
-    const fallback = colorBandsFromPayload(wire(quiet, 0.9))!;
-    expect(Math.max(...fallback.low)).toBeGreaterThan(Math.max(...stickBands.low) * 1.5);
+    const legacy = colorBandsFromPayload(wire(quiet, 0.9))!;
+    expect(Math.max(...legacy.low)).toBeCloseTo((20 / 127) * 0.9 * 0.75, 5);
+  });
+
+  it('legacy payloads are not balanced: a quiet band stays quiet and loud against quiet columns keep their ratio', () => {
+    const columns = 200;
+    const bytes = Array.from({ length: columns * 3 }, (_, i) => {
+      const column = Math.floor(i / 3);
+      const loud = column % 2 === 0;
+      return [loud ? 100 : 10, loud ? 60 : 6, 2][i % 3];
+    });
+    const legacy = colorBandsFromPayload(wire(bytes, 1))!;
+    expect(legacy.low[0] / legacy.low[1]).toBeCloseTo(10, 5);
+    expect(Math.max(...legacy.high)).toBeLessThan(0.05);
+    expect(Math.max(...legacy.low)).toBeLessThan(0.8);
   });
 
   it('is the same function the row preview uses', () => {
