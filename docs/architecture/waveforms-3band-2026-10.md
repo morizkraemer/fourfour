@@ -10,8 +10,8 @@ Branch `q35-app-waveforms` (from `q32-search`, master merged). Goal: every wavef
 
 | View | Before | After |
 |---|---|---|
-| List row preview (120 x 14) | Mono grey bars (2 px + 1 px gap) from the 400-byte PWAV height; whiteness bits dropped | 3-band, built from PWAV height and whiteness |
-| Detail pane strip (300 x 36) | Mono bars, `--ff-text-mid` | 3-band, same data as rows, cue dots kept |
+| List row preview (120 x 14) | Mono grey bars (2 px + 1 px gap) from the 400-byte PWAV height; whiteness bits dropped | Simple loudness envelope (see Row preview decision) |
+| Detail pane strip (300 x 36) | Mono bars, `--ff-text-mid` | Same loudness envelope as rows, cue dots kept |
 | Compact player strip | 3-band polygons, but drawn bass, mid, high, so high (white) covered everything; hard-coded colours and background; no played dimming | 3-band, low in front; tokens; played part dimmed |
 | Expanded overview (48 px) | Different design: bottom-anchored stacked bars (one height split by band weights) | Same symmetric 3-band as everywhere; played part dimmed |
 | Expanded zoom | Same polygon engine as the strip, same layer order problem, hard-coded `#0d0d0d`, white grid | Same renderer; played part left of the playhead dimmed; grid and playhead colours from tokens |
@@ -61,6 +61,10 @@ The renderer takes `BandColumns`: `{ low, mid, high }`, three equally long array
 Tracks in the list carry `preview` (a `Uint8Array(400)`, replaces the `peaks` number arrays: 400 bytes instead of 3.2 KB per track) and a `bands` getter. `player.track` carries `bands`, `bandsDetail`, `bandsOverview`.
 
 Mocks: `app/src/mocks/synthetic-bands.ts` generates a dance track as three band envelopes (kick and sidechained bass, claps, stabs, pads and vocal phrases, hats and risers; intro, build, breakdown, two drops, outro), encodes it in the real wire format, and derives the PWAV preview from it. `?mock=N` rows use 128 distinct previews; `?mock=N` analysis payloads use 4 variants of the same size as before (so the Q23 to Q29 load and scroll numbers stay comparable).
+
+### Row preview decision
+
+Merlin looked at the 3-band rows and the detail strip in the browser and found them busy; three scaling variants of the 3-band picture did not fix it (per-track gain, log curve, Rekordbox-style). He then chose a simple loudness envelope for rows and the detail strip, because rows are for spotting breakdowns and overall energy, not band detail. `waveform-simple.js` draws one smooth mirrored area (RMS of the three bands times a fixed gain, smoothed over about 3 columns twice, curve `level^0.65`, 4% floor) in one muted ink colour, sampled at one column per device pixel. Scaling is absolute, so loud tracks look loud and quiet ones look quiet. The 3-band renderer stays in the players. The mock has four loudness profiles (dance, dynamic, loud, ambient) so the differences show.
 
 ### Tests
 
