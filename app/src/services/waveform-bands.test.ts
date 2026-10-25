@@ -169,7 +169,9 @@ describe('PWV7 payloads (the stick bytes)', () => {
 
   it('is the same function the row preview uses', () => {
     const bytes = Uint8Array.from(pwv7Bytes);
-    expect(rowBandsFromBandBytes(bytes)).toEqual(bandsFromStickBytes(bytes));
+    const { scale, ...columns } = rowBandsFromBandBytes(bytes)!;
+    expect(columns).toEqual(bandsFromStickBytes(bytes));
+    expect(scale!.low).toBeGreaterThan(1);
     expect(rowBandsFromBandBytes(bytes)).toBe(rowBandsFromBandBytes(bytes));
   });
 

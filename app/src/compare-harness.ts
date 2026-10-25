@@ -1,5 +1,6 @@
 import { mount, type ComponentProps } from 'svelte';
 import { Waveform, WaveformView } from '$ds';
+import WaveformDisplay from '$ds/waveform-display.js';
 import '$ds/base.css';
 import { decodeBandPreview } from './services/analysis-data.ts';
 import { colorBandsFromPayload, rowBandsFromBandBytes } from './services/waveform-bands.ts';
@@ -103,6 +104,27 @@ async function main() {
       props: { bands: row, width: 300, height: 36, variant: 'strip', look: 'bands' } as unknown as ComponentProps<typeof Waveform>,
     });
   });
+  if (params.has('play')) {
+    const host = document.createElement('div');
+    host.className = 'cmp-play ff-waveform-view';
+    host.style.cssText = 'width:1128px;height:220px;';
+    root.append(host);
+    const side = fixture.ours.analysis;
+    const bands = colorBandsFromPayload(side.waveform_color_detail);
+    const display = new WaveformDisplay(host, { mode: 'expanded' });
+    display.setData(
+      { bands, bandsOverview: bands, beats: fixture.beats, cues: [], duration_ms: fixture.duration_ms, bpm: 0 } as any,
+      0.4 as any,
+    );
+    const startedAt = performance.now();
+    const startFrac = 0.4;
+    const tickMs = 50;
+    setInterval(() => {
+      const frac = startFrac + (performance.now() - startedAt) / fixture.duration_ms;
+      display.setTransport(true, frac);
+    }, tickMs);
+    display.setTransport(true, startFrac);
+  }
   document.body.dataset.ready = '1';
 }
 

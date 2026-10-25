@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BAND_GAIN,
   BAND_ORDER,
+  BUCKET_PEAK_WEIGHT,
   DISPLAY_FLOOR,
   bandsFromPeaks,
   displayAmp,
@@ -35,9 +36,32 @@ describe('displayAmp', () => {
 });
 
 describe('reduceBands', () => {
-  it('takes the peak of the covered columns when zoomed out', () => {
+  it('blends the peak and the mean of the covered columns when zoomed out', () => {
     const out = reduceBands(bands([0.1, 0.9, 0.2, 0.3, 0.8, 0.1, 0.0, 0.4]), 0, 1, 4);
-    [0.9, 0.3, 0.8, 0.4].forEach((v, i) => expect(out.low[i]).toBeCloseTo(displayAmp(v), 5));
+    const w = BUCKET_PEAK_WEIGHT.low;
+    [[0.1, 0.9], [0.2, 0.3], [0.8, 0.1], [0.0, 0.4]].forEach(([a, b], i) => {
+      const blended = w * Math.max(a, b) + (1 - w) * ((a + b) / 2);
+      expect(out.low[i]).toBeCloseTo(displayAmp(blended), 5);
+    });
+  });
+  it('keeps a drop and a breakdown apart when both contain the same kick peak (no flat block)', () => {
+    const kickEveryFourth = (level: number) => Array.from({ length: 64 }, (_, i) => (i % 4 === 0 ? 0.8 : level));
+    const drop = reduceBands(bands(kickEveryFourth(0.5)), 0, 1, 1);
+    const breakdown = reduceBands(bands(kickEveryFourth(0.02)), 0, 1, 1);
+    expect(drop.low[0] / breakdown.low[0]).toBeGreaterThan(1.5);
+  });
+  it('uses one global reference: the same level is the same height whatever else the track holds', () => {
+    const quiet = reduceBands(bands([0.3, 0.3, 0.3, 0.3]), 0, 1, 4);
+    const loud = reduceBands(bands([0.3, 0.3, 0.9, 0.9]), 0, 1, 4);
+    expect(quiet.low[0]).toBeCloseTo(loud.low[0], 6);
+  });
+  it('applies the per-band scale of data whose full scale is below 1', () => {
+    const base = bands([0.2, 0.2], [0.2, 0.2], [0.2, 0.2]);
+    const scaled = { ...base, scale: { low: 2, mid: 3, high: 1 } };
+    const out = reduceBands(scaled, 0, 1, 2);
+    expect(out.low[0]).toBeCloseTo(displayAmp(0.4), 6);
+    expect(out.mid[0]).toBeCloseTo(displayAmp(0.6), 6);
+    expect(out.high[0]).toBeCloseTo(displayAmp(0.2), 6);
   });
   it('reduces each band independently', () => {
     const out = reduceBands(bands([1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]), 0, 1, 4);
@@ -84,7 +108,9 @@ describe('halfHeight', () => {
   it('scales by band gain and half height, keeps zero at zero and draws at least half a pixel', () => {
     expect(halfHeight(0, 'low', 50)).toBe(0);
     expect(halfHeight(1, 'high', 50)).toBeCloseTo(50 * BAND_GAIN.high, 6);
-    expect(halfHeight(1, 'low', 50)).toBeCloseTo(50 * BAND_GAIN.low, 6);
+    expect(halfHeight(1, 'mid', 50)).toBeCloseTo(50 * BAND_GAIN.mid, 6);
+    expect(halfHeight(1, 'low', 50)).toBeCloseTo(50, 6);
+    expect(halfHeight(0.5, 'low', 50)).toBeCloseTo(50 * BAND_GAIN.low * 0.5, 6);
     expect(halfHeight(0.001, 'mid', 3)).toBe(0.5);
   });
 });
@@ -128,17 +154,17 @@ function recordingContext() {
 const palette = { low: 'LOW', mid: 'MID', high: 'HIGH', bg: 'BG', dim: 'DIM', ink: '0, 0, 0', playhead: 'P', version: 0 };
 
 describe('paintBands', () => {
-  it('fills high, then mid, then low (low in front), symmetric about the centre line', () => {
+  it('fills low, then mid, then high (low outer layer, high thin core on top), symmetric about the centre line', () => {
     const shaped: Record<string, any> = {
-      low: Float32Array.from([1, 0.5]),
-      mid: Float32Array.from([0.8, 0.4]),
+      low: Float32Array.from([1, 0.52]),
+      mid: Float32Array.from([0.8, 0.41]),
       high: Float32Array.from([0.6, 0.2]),
       length: 2,
     };
     const { ctx, rects } = recordingContext();
     paintBands(ctx, shaped, { heightPx: 200, palette });
-    expect(rects.map((r) => r.color)).toEqual(['HIGH', 'HIGH', 'MID', 'MID', 'LOW', 'LOW']);
-    expect(BAND_ORDER).toEqual(['high', 'mid', 'low']);
+    expect(rects.map((r) => r.color)).toEqual(['LOW', 'LOW', 'MID', 'MID', 'HIGH', 'HIGH']);
+    expect(BAND_ORDER).toEqual(['low', 'mid', 'high']);
     for (const band of BAND_ORDER) {
       [0, 1].forEach((column) => {
         const rect = rects.find((r) => r.color === band.toUpperCase() && r.x === column)!;
@@ -159,7 +185,7 @@ describe('paintBands', () => {
 });
 
 describe('paintBands on short canvases', () => {
-  it('fills one stepped path per band, high then mid then low, with whole-pixel edges', () => {
+  it('fills one stepped path per band, low then mid then high, with whole-pixel edges', () => {
     const shaped = {
       low: Float32Array.from([1, 0.5]),
       mid: Float32Array.from([0.8, 0.4]),
@@ -169,8 +195,8 @@ describe('paintBands on short canvases', () => {
     const { ctx, rects, paths } = recordingContext();
     paintBands(ctx, shaped, { heightPx: 28, palette });
     expect(rects).toHaveLength(0);
-    expect(paths.map((p) => p.color)).toEqual(['HIGH', 'MID', 'LOW']);
-    const low = paths[2].points;
+    expect(paths.map((p) => p.color)).toEqual(['LOW', 'MID', 'HIGH']);
+    const low = paths[0].points;
     expect(low[2]).toEqual([0, 14 - Math.round(halfHeight(1, 'low', 14))]);
     expect(low[3][0]).toBe(1);
     for (const [x, y] of low) {
@@ -195,13 +221,18 @@ describe('drawBandRange', () => {
     const lows = (r: Rect[]) => r.filter((x) => x.color === 'LOW' && x.x >= 0 && x.x < 100).map((x) => [x.x, x.y, x.h]);
     expect(lows(scrolled.rects).slice(0, 98)).toEqual(lows(still.rects).slice(0, 98));
   });
-  it('shifts by the sub-pixel remainder while scrolling', () => {
+  it('draws every scrolled column at a whole device pixel, whatever the sub-pixel phase', () => {
     const data = bands(Array.from({ length: 400 }, () => 0.5));
-    const { ctx, rects } = recordingContext();
-    drawBandRange(ctx, data, { startFrac: 0.00375, endFrac: 0.25375, widthPx: 100, heightPx: 200, palette, decay: 0, scrolling: true });
-    const first = rects.find((r) => r.color === 'LOW')!;
-    expect(first.x).toBeLessThanOrEqual(0);
-    expect(Math.abs(first.x % 1)).toBeCloseTo(0.5, 5);
+    for (const startFrac of [0.00375, 0.0041, 0.00444, 0.0049]) {
+      const { ctx, rects } = recordingContext();
+      drawBandRange(ctx, data, { startFrac, endFrac: startFrac + 0.25, widthPx: 100, heightPx: 200, palette, decay: 0, scrolling: true });
+      expect(rects.length).toBeGreaterThan(0);
+      for (const r of rects) {
+        expect(Number.isInteger(r.x)).toBe(true);
+        expect(Number.isInteger(r.y)).toBe(true);
+        expect(Number.isInteger(r.h)).toBe(true);
+      }
+    }
   });
 });
 

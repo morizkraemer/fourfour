@@ -13,7 +13,7 @@ const PATTERN = [
   { low: 0.9, mid: 0, high: 0 },
   { low: 0, mid: 0.9, high: 0 },
   { low: 0, mid: 0, high: 0.9 },
-  { low: 0.4, mid: 0.65, high: 0.9 },
+  { low: 0.7, mid: 0.6, high: 0.5 },
 ];
 
 const browser = await chromium.launch();
@@ -92,8 +92,8 @@ for (const dpr of [1, 2]) {
               inLow: above(h.low * 0.5),
               inMid: above(h.mid * 0.5),
               inHigh: above(h.high * 0.5),
-              midRing: above((h.low + h.mid) / 2),
-              highRing: above((h.mid + h.high) / 2),
+              lowRing: above((h.low + h.mid) / 2),
+              midRing: above((h.mid + h.high) / 2),
               outside: above(Math.max(h.low, h.mid, h.high) + 4),
             } };
           }),
@@ -120,12 +120,41 @@ for (const dpr of [1, 2]) {
     check('segment 2 body is the high colour', near(segments[2].above.inHigh, colours.high));
 
     const s3 = segments[3];
-    check('segment 3 heights stack low < mid < high', s3.half.low < s3.half.mid && s3.half.mid < s3.half.high);
-    check('segment 3 low is in front', near(s3.above.inLow, colours.low));
+    check('segment 3 heights stack high < mid < low', s3.half.high < s3.half.mid && s3.half.mid < s3.half.low);
+    check('segment 3 high is the core in front', near(s3.above.inHigh, colours.high));
     check('segment 3 mid ring is the mid colour', near(s3.above.midRing, colours.mid));
-    check('segment 3 high ring is the high colour', near(s3.above.highRing, colours.high));
+    check('segment 3 low ring is the low colour (outer, back layer)', near(s3.above.lowRing, colours.low));
     check('segment 3 outside the tallest band is the ground', near(s3.above.outside, colours.bg));
-    check('segment 3 top height', Math.abs(centre - s3.top - s3.half.high) <= 1.5, `${centre - s3.top} vs ${s3.half.high}`);
+    check('segment 3 top height', Math.abs(centre - s3.top - s3.half.low) <= 1.5, `${centre - s3.top} vs ${s3.half.low}`);
+
+    const seam = await page.evaluate(
+      async ({ dpr }) => {
+        const render = await import('/waveform-render.js');
+        const columns = 40000;
+        const bands = { low: new Float32Array(columns).fill(0.5), mid: new Float32Array(columns), high: new Float32Array(columns) };
+        const widthPx = 600 * dpr;
+        const heightPx = 160 * dpr;
+        const canvas = document.createElement('canvas');
+        canvas.width = widthPx;
+        canvas.height = heightPx;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const palette = render.wavePalette();
+        const means = [];
+        for (let step = 0; step < 40; step++) {
+          const startFrac = (10000 + step * 0.137) / columns;
+          ctx.fillStyle = palette.bg;
+          ctx.fillRect(0, 0, widthPx, heightPx);
+          render.drawBandRange(ctx, bands, { startFrac, endFrac: startFrac + 0.0375, widthPx, heightPx, palette, dpr, decay: 0.86, scrolling: true });
+          const d = ctx.getImageData(40 * dpr, Math.floor(heightPx / 2) - 6, widthPx - 80 * dpr, 12).data;
+          let sum = 0;
+          for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+          means.push(sum / (d.length / 4));
+        }
+        return { min: Math.min(...means), max: Math.max(...means) };
+      },
+      { dpr },
+    );
+    check('a constant waveform keeps its brightness at every sub-pixel scroll phase', (seam.max - seam.min) / seam.max < 0.01, `${seam.min} .. ${seam.max}`);
 
     await page.close();
   }
