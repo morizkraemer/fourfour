@@ -14,12 +14,18 @@ interface Side {
   load_state_row?: string | null;
 }
 
+function asLegacy(color: any) {
+  return color && typeof color === 'object' ? { ...color, pwv7: false, calibration: 1 } : color;
+}
+
 async function main() {
+  const params = new URLSearchParams(location.search);
+  const legacy = params.has('legacy');
   const fixture = await (await fetch('/compare-fixture.json')).json();
   const root = document.getElementById('compare')!;
   root.style.cssText = 'width:1160px;padding:16px;box-sizing:border-box;';
   const title = document.createElement('div');
-  title.textContent = fixture.name;
+  title.textContent = fixture.name + (legacy ? '  [legacy payload path: no pwv7 flag, balanceBands applied]' : '');
   title.style.cssText = 'margin-bottom:10px;color:#e8ebf0;font-size:13px;';
   root.append(title);
 
@@ -35,6 +41,9 @@ async function main() {
     const caption = document.createElement('div');
     caption.textContent = label;
     caption.style.cssText = 'margin-bottom:6px;color:#8d939e;';
+    const compactBox = document.createElement('div');
+    compactBox.className = 'cmp-compact';
+    compactBox.style.cssText = 'width:1128px;height:44px;margin-bottom:8px;';
     const expanded = document.createElement('div');
     expanded.className = 'cmp-expanded';
     expanded.style.cssText = 'width:1128px;height:220px;';
@@ -45,16 +54,30 @@ async function main() {
     const stripBox = document.createElement('div');
     stripBox.className = 'cmp-strip';
     small.append(rowBox, stripBox);
-    section.append(caption, expanded, small);
+    section.append(caption, compactBox, expanded, small);
     root.append(section);
 
     const analysis = side.analysis;
-    const compact = colorBandsFromPayload(analysis.waveform_color);
-    const detail = colorBandsFromPayload(analysis.waveform_color_detail) ?? compact;
-    const overview = colorBandsFromPayload(analysis.waveform_overview) ?? compact;
+    const pick = (color: any) => colorBandsFromPayload(legacy ? asLegacy(color) : color);
+    const detail = pick(analysis.waveform_color_detail) ?? pick(analysis.waveform_color);
+    const compact = detail;
+    const overview = detail;
     const rowBytes = decodeBandPreview(side.load_state_row ?? analysis.waveform_row_bands);
     const row = rowBandsFromBandBytes(rowBytes);
 
+    mount(WaveformView, {
+      target: compactBox,
+      props: {
+        mode: 'compact',
+        bands: compact,
+        beats: fixture.beats,
+        cues: [],
+        durationMs: fixture.duration_ms,
+        trackKey: trackKey(n) + ':c',
+        progress: 0.37,
+        playing: false,
+      } as unknown as ComponentProps<typeof WaveformView>,
+    });
     mount(WaveformView, {
       target: expanded,
       props: {
@@ -77,7 +100,7 @@ async function main() {
     });
     mount(Waveform, {
       target: stripBox,
-      props: { bands: row, width: 300, height: 36, variant: 'strip' } as unknown as ComponentProps<typeof Waveform>,
+      props: { bands: row, width: 300, height: 36, variant: 'strip', look: 'bands' } as unknown as ComponentProps<typeof Waveform>,
     });
   });
   document.body.dataset.ready = '1';

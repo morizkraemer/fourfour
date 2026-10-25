@@ -12,14 +12,14 @@ const errors = [];
 const files = readdirSync(fixtureDir).filter((f) => f.endsWith('.json')).sort();
 
 for (const file of files) {
-  const page = await browser.newPage({ viewport: { width: 1160, height: 700 }, deviceScaleFactor: Number(dsf) });
+  const page = await browser.newPage({ viewport: { width: 1160, height: 900 }, deviceScaleFactor: Number(dsf) });
   page.on('console', (m) => {
     if (m.type() === 'error') errors.push(`${file} console: ${m.text()}`);
   });
   page.on('pageerror', (e) => errors.push(`${file} pageerror: ${e.message}`));
   const body = readFileSync(`${fixtureDir}/${file}`);
   await page.route('**/compare-fixture.json', (route) => route.fulfill({ contentType: 'application/json', body }));
-  await page.goto(`${base}/compare.html`, { waitUntil: 'load' });
+  await page.goto(`${base}/compare.html${process.env.COMPARE_QUERY ?? ""}`, { waitUntil: 'load' });
   await page.waitForSelector('body[data-ready="1"]', { timeout: 60000 });
   await page.addStyleTag({ content: '*,*::before,*::after{animation:none!important;transition:none!important}' });
   await page.waitForTimeout(1800);

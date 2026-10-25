@@ -20,6 +20,7 @@ export interface BandColumns {
   low: Float32Array;
   mid: Float32Array;
   high: Float32Array;
+  scale?: { low: number; mid: number; high: number };
 }
 
 const WIRE_FULL_SCALE = 127;
@@ -30,6 +31,7 @@ const BALANCE_MIN_GAIN = 0.6;
 const BALANCE_MAX_GAIN = 2.5;
 const BALANCE_MIN_PEAK = 0.02;
 const ROW_CACHE_LIMIT = 1000;
+const ROW_PREVIEW_DISPLAY_SCALE = { low: 2.4, mid: 2.4, high: 1.4 };
 
 const PREVIEW_MIX = Array.from({ length: 8 }, (_, level) => {
   const white = level / 7;
@@ -190,7 +192,11 @@ export function rowBandsFor(preview: ArrayLike<number> | null | undefined): Band
   return cachedRowBands(preview, bandsFromPreviewBytes);
 }
 
-/** Row and detail previews from the 3-band row preview (`waveform_bands`: low, mid, high bytes per column). */
+/**
+ * Row and detail previews from the 3-band row preview (`waveform_bands`: low, mid, high bytes per column).
+ * The preview is the PWV6-sized mean per column, whose bytes top out near 50 of 127, so `scale` brings it to the
+ * detail view's scale for the 3-band strip. The row envelope ignores `scale`.
+ */
 export function rowBandsFromBandBytes(bandPreview: ArrayLike<number> | null | undefined): BandColumns | null {
-  return cachedRowBands(bandPreview, bandsFromStickBytes);
+  return cachedRowBands(bandPreview, (bytes) => ({ ...bandsFromStickBytes(bytes), scale: ROW_PREVIEW_DISPLAY_SCALE }));
 }

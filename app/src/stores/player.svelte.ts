@@ -168,7 +168,8 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   if (analysis.key) next.key = analysis.key;
   next.bands = colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis));
   next.bandsDetail = colorBandsFromPayload(analysis.waveform_color_detail) ?? next.bands;
-  next.bandsOverview = colorBandsFromPayload(analysis.waveform_overview) ?? next.bands;
+  next.bands = next.bandsDetail;
+  next.bandsOverview = next.bandsDetail;
   if (analysis.beats?.length) {
     next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
       time_ms: b.time_ms,
