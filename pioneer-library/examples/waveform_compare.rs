@@ -817,6 +817,7 @@ struct HiScore {
     p75: (u32, u32),
     p90: (u32, u32),
     p99: (u32, u32),
+    level: f64,
     loss: f64,
 }
 
@@ -836,7 +837,10 @@ fn hi_eval(c: &HiCandidate, feats: &HashMap<(usize, u64), Vec<[Vec<f64>; 3]>>, e
     let f = &feats[&(c.stages, c.hz as u64)];
     let mut acc = Acc::default();
     let (mut ho, mut hr) = ([0.0f64; 128], [0.0f64; 128]);
+    let mut level_err = 0.0;
     for (k, e) in entries.iter().enumerate() {
+        let mut outs: Vec<f64> = Vec::new();
+        let mut rbs: Vec<f64> = Vec::new();
         let env = release_env(&f[k][c.feature], c.release);
         let max = env.iter().cloned().fold(0.0, f64::max);
         let gain = if max > 0.0 { (c.target / max).round().clamp(80.0, 500.0) } else { 80.0 };
@@ -845,23 +849,32 @@ fn hi_eval(c: &HiCandidate, feats: &HashMap<(usize, u64), Vec<[Vec<f64>; 3]>>, e
             let out = (127.0 * (lin / 127.0).powf(c.curve)).round().min(127.0);
             let rb = e.reference.pwv7[i][2] as f64;
             acc.add(out, rb);
+            outs.push(out);
+            rbs.push(rb);
             ho[out as usize] += 1.0;
             hr[rb as usize] += 1.0;
         }
+        let top = |v: &mut Vec<f64>| {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let from = v.len() * 9 / 10;
+            v[from..].iter().sum::<f64>() / (v.len() - from).max(1) as f64
+        };
+        level_err += ((top(&mut outs) + 1.0) / (top(&mut rbs) + 1.0)).ln().abs();
     }
+    let level = level_err / entries.len().max(1) as f64;
     let n = acc.n.max(1.0);
     let q = |q: f64| (hi_quantile(&ho, q), hi_quantile(&hr, q));
     let (p75, p90, p99) = (q(0.75), q(0.9), q(0.99));
     let ratio = |p: (u32, u32)| ((p.0 as f64 + 1.0) / (p.1 as f64 + 1.0)).ln().abs();
     let mean = (acc.sx / n, acc.sy / n);
-    let loss = (1.0 - acc.corr()) + 0.15 * (ratio(p75) + ratio(p90) + ratio(p99) + (mean.0 / mean.1).ln().abs());
-    HiScore { corr: acc.corr(), mae: acc.mae(), mean, p75, p90, p99, loss }
+    let loss = (1.0 - acc.corr()) + 0.15 * (ratio(p75) + ratio(p90) + ratio(p99) + (mean.0 / mean.1).ln().abs()) + 0.5 * level;
+    HiScore { corr: acc.corr(), mae: acc.mae(), mean, p75, p90, p99, level, loss }
 }
 
 fn hi_line(c: &HiCandidate, s: &HiScore) -> String {
     format!(
-        "loss {:.4} corr {:.3} mae {:.2} mean {:.1}/{:.1} p75 {}/{} p90 {}/{} p99 {}/{}  | stages {} hz {} feat {} rel {:.3} target {:.1} scale {:.3} curve {:.2}",
-        s.loss, s.corr, s.mae, s.mean.0, s.mean.1, s.p75.0, s.p75.1, s.p90.0, s.p90.1, s.p99.0, s.p99.1,
+        "loss {:.4} corr {:.3} mae {:.2} level {:.3} mean {:.1}/{:.1} p75 {}/{} p90 {}/{} p99 {}/{}  | stages {} hz {} feat {} rel {:.3} target {:.1} scale {:.3} curve {:.2}",
+        s.loss, s.corr, s.mae, s.level, s.mean.0, s.mean.1, s.p75.0, s.p75.1, s.p90.0, s.p90.1, s.p99.0, s.p99.1,
         c.stages, c.hz, ["peak", "rms", "meanabs"][c.feature], c.release, c.target, c.scale, c.curve
     )
 }
@@ -870,22 +883,27 @@ fn hiband(sel: &Selection) {
     let tune: Vec<&Entry> = sel.entries.iter().filter(|e| e.tune).collect();
     let monos: Vec<Mono> = parallel(tune.iter().collect::<Vec<_>>(), |e| decode_mono(&e.audio).expect("decode"));
     let mut feats: HashMap<(usize, u64), Vec<[Vec<f64>; 3]>> = HashMap::new();
-    let hzs = [2500.0, 3000.0, 3500.0, 4000.0, 4746.0, 5500.0, 6500.0, 8000.0];
-    for stages in [1usize, 2] {
+    let quick = std::env::var_os("HIBAND_QUICK").is_some();
+    let hzs: Vec<f64> = if quick { vec![2500.0, 3000.0, 4000.0, 5500.0] } else { vec![2500.0, 3000.0, 3500.0, 4000.0, 4746.0, 5500.0, 6500.0, 8000.0] };
+    let stage_list: Vec<usize> = if quick { vec![1] } else { vec![1, 2] };
+    for &stages in &stage_list {
         for &hz in &hzs {
             let chain: Vec<(bool, f64)> = (0..stages).map(|_| (true, hz)).collect();
             feats.insert((stages, hz as u64), parallel(monos.iter().collect::<Vec<_>>(), |m| column_features(m, &chain)));
         }
     }
-    let base = HiCandidate { stages: 1, hz: 4746.0, feature: 0, release: 0.765, target: 78.2, scale: 0.853, curve: 1.0 };
+    let base = HiCandidate { stages: 1, hz: 3000.0, feature: 0, release: 0.90, target: 140.0, scale: 1.0, curve: 2.08 };
     println!("current: {}", hi_line(&base, &hi_eval(&base, &feats, &tune)));
     let mut results: Vec<(f64, HiCandidate, HiScore)> = Vec::new();
-    for stages in [1usize, 2] {
+    let releases: Vec<f64> = if quick { vec![0.8, 0.86, 0.9, 0.93] } else { vec![0.0, 0.4, 0.6, 0.7, 0.765, 0.85] };
+    let targets: Vec<f64> = if quick { vec![100.0, 140.0, 200.0] } else { vec![78.2, 100.0, 130.0, 170.0] };
+    let curves: Vec<f64> = if quick { vec![1.4, 1.8, 2.08, 2.4] } else { vec![0.8, 1.0, 1.25] };
+    for &stages in &stage_list {
         for &hz in &hzs {
-            for feature in 0..3 {
-                for release in [0.0, 0.4, 0.6, 0.7, 0.765, 0.85] {
-                    for target in [78.2, 100.0, 130.0, 170.0] {
-                        for curve in [0.8, 1.0, 1.25] {
+            for feature in 0..(if quick { 2 } else { 3 }) {
+                for &release in &releases {
+                    for &target in &targets {
+                        for &curve in &curves {
                             let c = HiCandidate { stages, hz, feature, release, target, scale: 1.0, curve };
                             let s = hi_eval(&c, &feats, &tune);
                             results.push((s.loss, c, s));
@@ -897,9 +915,9 @@ fn hiband(sel: &Selection) {
     }
     let mut refined: Vec<(f64, HiCandidate, HiScore)> = Vec::new();
     for feature in [0usize, 1] {
-        for stages in [1usize, 2] {
+        for &stages in &stage_list {
             for &hz in &hzs {
-                for start in [(0.85, 100.0, 1.5), (0.9, 120.0, 1.8), (0.8, 90.0, 1.3)] {
+                for start in [(0.9, 140.0, 2.08)] {
                     let mut c = HiCandidate { stages, hz, feature, release: start.0, target: start.1, scale: 1.0, curve: start.2 };
                     let mut best = hi_eval(&c, &feats, &tune);
                     let mut step = 0.2;
@@ -1297,6 +1315,115 @@ fn shape(o: &Options, sel: &Selection) -> Result<()> {
     Ok(())
 }
 
+/// `refdump <dir>`: per selected track, Rekordbox's PWV7 / PWV6 / gains and ours, as flat byte arrays in JSON.
+fn refdump(o: &Options, sel: &Selection, dir: &str) -> Result<()> {
+    let tuning = load_tuning(o)?;
+    std::fs::create_dir_all(dir)?;
+    let flat3 = |v: &[[u8; 3]]| -> Vec<u8> { v.iter().flatten().copied().collect() };
+    let entries: Vec<&Entry> = sel.entries.iter().collect();
+    let done = parallel(entries.iter().collect::<Vec<_>>(), |e| {
+        let mono = decode_mono(&e.audio).expect("decode");
+        let ours = measure(&mono, tuning);
+        serde_json::json!({
+            "name": e.name, "tune": e.tune,
+            "rb": { "pwv7": flat3(&e.reference.pwv7), "pwv6": flat3(&e.reference.pwv6), "gains": e.reference.gains },
+            "ours": { "pwv7": flat3(&ours.pwv7), "pwv6": flat3(&ours.pwv6), "gains": ours.gains },
+        })
+    });
+    for (i, v) in done.iter().enumerate() {
+        std::fs::write(format!("{dir}/{i:02}.json"), serde_json::to_vec(v)?)?;
+    }
+    println!("wrote {} tracks to {dir}", done.len());
+    Ok(())
+}
+
+/// Per-column peak of the high band for four ways of treating the two channels: mono sum, louder channel,
+/// rms across channels, mean of the channels' absolute values (150 columns per second).
+fn stereo_features(path: &Path, hz: f64) -> [Vec<f64>; 4] {
+    let mut out: [Vec<f64>; 4] = Default::default();
+    let mut state: Option<(Bq, Bq, f64, usize, usize)> = None;
+    let mut acc = [0.0f64; 4];
+    let _ = decode(path, |chunk, rate, channels| {
+        let st = state.get_or_insert_with(|| {
+            let r = rate as f64;
+            (Bq::make(true, hz, r), Bq::make(true, hz, r), r, 0usize, (r / 150.0).round() as usize)
+        });
+        let mut frame_index = st.3;
+        for frame in chunk.chunks_exact(channels.max(1)) {
+            let l = frame[0] as f64;
+            let r = if channels > 1 { frame[1] as f64 } else { l };
+            while frame_index >= st.4 {
+                for k in 0..4 {
+                    out[k].push(acc[k]);
+                    acc[k] = 0.0;
+                }
+                let col = out[0].len();
+                st.4 = (((col + 1) as f64) * st.2 / 150.0).round() as usize;
+            }
+            let hl = st.0.step(l);
+            let hr = st.1.step(r);
+            acc[0] = acc[0].max(((hl + hr) / 2.0).abs());
+            acc[1] = acc[1].max(hl.abs().max(hr.abs()));
+            acc[2] = acc[2].max(((hl * hl + hr * hr) / 2.0).sqrt());
+            acc[3] = acc[3].max((hl.abs() + hr.abs()) / 2.0);
+            frame_index += 1;
+        }
+        st.3 = frame_index;
+    });
+    for k in 0..4 {
+        out[k].push(acc[k]);
+    }
+    out
+}
+
+fn stereo(o: &Options, sel: &Selection) {
+    let release = 0.90;
+    let target = 140.0;
+    let curve: f64 = 2.08;
+    let entries: Vec<&Entry> = sel.entries.iter().collect();
+    let feats = parallel(entries.iter().collect::<Vec<_>>(), |e| stereo_features(&e.audio, 3000.0));
+    let names = ["mono sum", "louder channel", "rms of channels", "mean of |L|,|R|"];
+    for half in ["tune", "test"] {
+        for (k, name) in names.iter().enumerate() {
+            let mut acc = Acc::default();
+            let mut level = 0.0;
+            let mut tracks = 0.0;
+            let mut level_signed = 0.0;
+            for (i, e) in entries.iter().enumerate() {
+                if (half == "tune") != e.tune {
+                    continue;
+                }
+                let env = release_env(&feats[i][k], release);
+                let max = env.iter().cloned().fold(0.0, f64::max);
+                let gain = if max > 0.0 { (target / max).round().clamp(80.0, 500.0) } else { 80.0 };
+                let (mut outs, mut rbs) = (Vec::new(), Vec::new());
+                for (c, &v) in env.iter().enumerate().take(e.reference.pwv7.len()) {
+                    let lin = (gain * v).min(127.0);
+                    let out = (127.0 * (lin / 127.0).powf(curve)).round().min(127.0);
+                    let rb = e.reference.pwv7[c][2] as f64;
+                    acc.add(out, rb);
+                    outs.push(out);
+                    rbs.push(rb);
+                }
+                let top = |v: &mut Vec<f64>| {
+                    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let from = v.len() * 9 / 10;
+                    v[from..].iter().sum::<f64>() / (v.len() - from).max(1) as f64
+                };
+                let r = ((top(&mut outs) + 1.0) / (top(&mut rbs) + 1.0)).ln();
+                level += r.abs();
+                level_signed += r;
+                tracks += 1.0;
+            }
+            println!(
+                "{half} high {name:18} corr {:.3} mae {:.2} | top-decile level error per track: mean abs {:.3} (log), mean signed {:+.3}",
+                acc.corr(), acc.mae(), level / tracks, level_signed / tracks
+            );
+        }
+    }
+    let _ = o;
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().cloned().unwrap_or_else(|| "score".into());
@@ -1366,6 +1493,8 @@ fn main() -> Result<()> {
             }
         }
         "shape" => shape(&o, &sel)?,
+        "stereo" => stereo(&o, &sel),
+        "refdump" => refdump(&o, &sel, args.get(1).context("refdump needs an output directory")?)?,
         "fit" => fit(&o, &sel)?,
         "fit-derive" => fit_derivation(&o, &sel)?,
         "scan" => scan_bands(&sel),
