@@ -98,3 +98,4 @@
 2026-10-25 08:39 orchestrator Q38 done: branch row-wave-variants e2fb03b (npm test re-run); doc landed
 2026-10-25 11:40 orchestrator Q39 done: branch q39-wave-fix 7401e1d; built + installed fourfour.app on the Mac
 2026-10-25 13:46 orchestrator Q40 done: branch q40-rb-match 41b2b97; building + installing on Mac
+2026-10-25 14:51 orchestrator Q40 round 2: branch q40-rb-match 45d18d2 installed on Mac; white per-track level open (Merlin to choose)
