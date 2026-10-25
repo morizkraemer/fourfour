@@ -61,6 +61,12 @@ function emptyShaped(pixels) {
  * views have no plateaus. Pixels outside the track (fraction < 0 or > 1) stay 0, in-track pixels are at
  * least DISPLAY_FLOOR.
  *
+ * @param {any} bands
+ * @param {number} startFrac
+ * @param {number} endFrac
+ * @param {number} pixels
+ * @param {{low: number, mid: number, high: number}} [peakWeights]
+ * @param {{low: number, mid: number, high: number} | null} [bandScale] extra per-band multiplier (the overview level)
  * @returns {{low: Float32Array, mid: Float32Array, high: Float32Array, length: number}}
  */
 export function reduceBands(bands, startFrac, endFrac, pixels, peakWeights = BUCKET_PEAK_WEIGHT, bandScale = null) {

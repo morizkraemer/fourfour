@@ -88,28 +88,33 @@ export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = s
     paintStepped(ctx, shaped, palette, from, count, offsetPx, yCentre);
     return;
   }
+  const layers = layerHalves(shaped, from, count, yCentre);
+  for (let k = 0; k < STEPPED_LAYERS.length; k++) {
+    const halves = layers[k];
+    ctx.fillStyle = palette[STEPPED_LAYERS[k][0]];
+    for (let p = 0; p < count; p++) {
+      const half = halves[p];
+      if (half > 0) fillColumn(ctx, offsetPx + p, yCentre, half);
+    }
+  }
+}
+
+/** Half height of every layer at every pixel column; 0 where a layer is hidden behind the one before it. */
+function layerHalves(shaped, from, count, yCentre) {
+  const halves = STEPPED_LAYERS.map(() => new Float32Array(count));
   for (let p = 0; p < count; p++) {
     const hl = halfHeight(shaped.low[from + p], 'low', yCentre);
     if (hl === 0) continue;
     const hm = halfHeight(shaped.mid[from + p], 'mid', yCentre);
     const hh = halfHeight(shaped.high[from + p], 'high', yCentre);
-    const x = offsetPx + p;
-    fillColumn(ctx, palette.low, x, yCentre, hl);
-    if (hm > hl) fillColumn(ctx, palette.mid, x, yCentre, hm);
-    fillColumn(ctx, palette.midInLow, x, yCentre, Math.min(hm, hl));
-    const hhLow = Math.min(hh, hl);
-    const hhMid = Math.min(hh, hm);
-    if (hh > hl) fillColumn(ctx, palette.high, x, yCentre, hh);
-    if (hhLow > hhMid) fillColumn(ctx, palette.highInLow, x, yCentre, hhLow);
-    fillColumn(ctx, palette.highInMid, x, yCentre, hhMid);
+    for (let k = 0; k < STEPPED_LAYERS.length; k++) halves[k][p] = STEPPED_LAYERS[k][1](hl, hm, hh);
   }
+  return halves;
 }
 
-function fillColumn(ctx, colour, x, yCentre, half) {
-  if (half <= 0) return;
+function fillColumn(ctx, x, yCentre, half) {
   const top = Math.round(yCentre - half);
   const bottom = Math.round(yCentre + half);
-  ctx.fillStyle = colour;
   ctx.fillRect(x, top, 1, Math.max(1, bottom - top));
 }
 
@@ -123,14 +128,7 @@ const STEPPED_LAYERS = [
 ];
 
 function paintStepped(ctx, shaped, palette, from, count, offsetPx, yCentre) {
-  const halves = STEPPED_LAYERS.map(() => new Float32Array(count));
-  for (let p = 0; p < count; p++) {
-    const hl = halfHeight(shaped.low[from + p], 'low', yCentre);
-    if (hl === 0) continue;
-    const hm = halfHeight(shaped.mid[from + p], 'mid', yCentre);
-    const hh = halfHeight(shaped.high[from + p], 'high', yCentre);
-    for (let k = 0; k < STEPPED_LAYERS.length; k++) halves[k][p] = STEPPED_LAYERS[k][1](hl, hm, hh);
-  }
+  const halves = layerHalves(shaped, from, count, yCentre);
   for (let k = 0; k < STEPPED_LAYERS.length; k++) {
     paintSteppedLayer(ctx, halves[k], palette[STEPPED_LAYERS[k][0]], count, offsetPx, yCentre);
   }
@@ -265,6 +263,10 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
   const fracPerPx = (endFrac - startFrac) / widthPx;
   const leftReal = startFrac / fracPerPx;
   const leftFloor = Math.floor(leftReal);
+  if (columnsPerPx <= 1 && canCacheScroll(ctx)) {
+    drawScrolledColumns(ctx, bands, { leftFloor, fracPerPx, widthPx, heightPx, palette });
+    return;
+  }
   const leadPx = Math.round(ENVELOPE_LEAD_CSS_PX * dpr);
   const total = leadPx + widthPx + 2;
   const shaped = smoothBands(
@@ -272,6 +274,53 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
     decayPerPixel,
   );
   paintBands(ctx, shaped, { heightPx, palette, from: leadPx, count: widthPx });
+}
+
+const scrollCache = new WeakMap();
+
+function canCacheScroll(ctx) {
+  return typeof HTMLCanvasElement !== 'undefined' && ctx.canvas instanceof HTMLCanvasElement;
+}
+
+function newLayer(widthPx, heightPx) {
+  const layer = document.createElement('canvas');
+  layer.width = widthPx;
+  layer.height = heightPx;
+  return layer;
+}
+
+/**
+ * Scrolled view at one pixel per column or finer: every pixel column depends only on its absolute pixel index (no
+ * smoothing across columns), so a scroll by d pixels moves the bitmap of the last frame by d and paints only the d
+ * columns that came into view. The bands of the whole view are painted again whenever the data, zoom, size or
+ * palette change or the view jumped by more than its width.
+ */
+function drawScrolledColumns(ctx, bands, { leftFloor, fracPerPx, widthPx, heightPx, palette }) {
+  const canvas = ctx.canvas;
+  let entry = scrollCache.get(canvas);
+  if (!entry || entry.bands !== bands || entry.fracPerPx !== fracPerPx || entry.palette !== palette || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
+    entry = { bands, fracPerPx, palette, widthPx, heightPx, left: null, front: newLayer(widthPx, heightPx), back: newLayer(widthPx, heightPx) };
+    scrollCache.set(canvas, entry);
+  }
+  const paintColumns = (layer, fromPx, count) => {
+    const g = layer.getContext('2d');
+    g.clearRect(fromPx, 0, count, heightPx);
+    const shaped = reduceBands(bands, (leftFloor + fromPx) * fracPerPx, (leftFloor + fromPx + count) * fracPerPx, count);
+    paintBands(g, shaped, { heightPx, palette, offsetPx: fromPx });
+  };
+  const shift = entry.left === null ? widthPx : leftFloor - entry.left;
+  if (Math.abs(shift) >= widthPx) {
+    paintColumns(entry.front, 0, widthPx);
+  } else if (shift !== 0) {
+    const g = entry.back.getContext('2d');
+    g.clearRect(0, 0, widthPx, heightPx);
+    g.drawImage(entry.front, -shift, 0);
+    [entry.front, entry.back] = [entry.back, entry.front];
+    if (shift > 0) paintColumns(entry.front, widthPx - shift, shift);
+    else paintColumns(entry.front, 0, -shift);
+  }
+  entry.left = leftFloor;
+  ctx.drawImage(entry.front, 0, 0);
 }
 
 /** Dim a played region [0, widthPx) on a canvas that has an opaque ground painted. */
