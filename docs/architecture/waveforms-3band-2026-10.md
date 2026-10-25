@@ -426,3 +426,60 @@ Noise is a few percent between runs (the fling and compact-player rows are insid
 - Schema v4 sign-off (above), and the high band on real tracks in the app.
 - `PWV6` high is now a worse numeric fit than before (white rim chosen over MAE); `PWV4` b5 likewise slightly.
 - Cold first select click is 90 ms against q32's 62 in the mock (first-use synthesis plus the first 3-band strip paint).
+
+## Q39 fix
+
+Branch `q39-wave-fix` (from `row-wave-variants`). Merlin ran the real app on his tracks: the compact strip was a flat saturated blue block, the expanded player flashed while scrolling, the detail strip was grey. Rows keep the grey loudness envelope (Row preview decision); everything else is the 3-band picture. Not tried in the real WKWebView, not looked at by Merlin.
+
+### Cause of the flat block
+
+Not saturated bytes. Real PWV7 low bytes top out at 93 of 127 (Rekordbox's own: 124); the overview PWV6 bytes top out at 36 to 49. Three things made the strip flat, in order of weight:
+
+1. **The compact strip was fed `waveform_color`, the full detail peak-held to 2048 columns** (`downsample_3band`, max per band over about 24 columns, 160 ms, one kick period), and then peak-pooled again to one value per pixel. A max over a kick period is the kick level everywhere there is a kick, so a drop is a plateau. Byte percentiles (p5 / p50 / p95), full detail against the 2048-column strip data, `byte-histograms.txt` in the q39 folder has all of it:
+
+   | Track | Low, ours | Low, Rekordbox | Mid, ours | High, ours |
+   |---|---|---|---|---|
+   | Revision | 36 / 61 / 85 to 64 / 83 / 90 | 29 / 59 / 84 to 62 / 81 / 88 | 13 / 27 / 77 to 25 / 73 / 101 | 0 / 3 / 58 to 1 / 36 / 123 |
+   | Be You | 3 / 36 / 78 to 4 / 72 / 87 | 3 / 40 / 105 to 5 / 96 / 118 | 5 / 25 / 63 to 15 / 52 / 93 | 0 / 3 / 54 to 3 / 45 / 116 |
+   | Oyea | 14 / 41 / 62 to 24 / 53 / 73 | 14 / 51 / 79 to 27 / 68 / 93 | 11 / 27 / 73 to 27 / 51 / 102 | 0 / 2 / 39 to 0 / 20 / 76 |
+
+   The median of every band moves up to near its peak and the spread collapses (Revision low: p5 to p95 spans 49 bytes in the detail, 26 in the strip data; Rekordbox's own bytes do the same). Rekordbox's 2048-column equivalent is just as flat through our renderer, so it is the pooling, not our bytes.
+2. **Display curve and stacking.** `0.045 + 0.955 * v^0.65` lifts every quiet value, and low was drawn in front, so the flat low plateau covered mid and high. The Rekordbox references stack the other way (low outer and back, mid in front, high the thin core on top).
+3. **The legacy payload path** (tracks stored before Q36, no `pwv7` flag) runs `balanceBands`, which puts every band's 98th percentile at 0.95. On pooled data that is every column near full height (the `before-legacy/` PNGs reproduce the screenshot: solid blue, thin amber fringe, white specks). Left in place for those tracks; the strip no longer pools.
+4. The expanded overview showed PWV6 at `byte / 127`, so it was thin on the pwv7 path (bytes of 15 to 49) and full on the legacy path: two different looks.
+
+### Fix
+
+- `waveform-bands.js`: `BAND_ORDER` is low, mid, high (low outer, high on top). Pixel buckets blend peak and mean (`BUCKET_PEAK_WEIGHT` low 0.2, mid 0.3, high 0.4) instead of the pure peak. Curve `0.02 + 0.98 * v^0.85` (a gentle expansion: quiet stays quiet, silence is a thin line). Global per-band gains against one reference for every track and view (`BAND_GAIN` low 1.15, mid 0.75, high 0.5), no per-track normalisation. `BandColumns.scale` (per band) for data whose full scale is below 1.
+- The compact strip, the expanded overview and the zoom view all draw the full-resolution `waveform_color_detail` (`player.track.bands` and `bandsOverview` are the detail bands). One data source, one look. The 2048-column field stays in the payload (tests, fallback) but the strip no longer uses it.
+- Detail strip: `Waveform.svelte` got `look` (`envelope` default for rows, `bands` for the detail pane). The 128-column row preview carries `scale { low 2.4, mid 2.4, high 1.4 }` (PWV6 bytes top out near 50 of 127); the row envelope ignores it.
+
+### Cause of the flashing
+
+Headless frame capture (70 to 90 consecutive frames at dpr 1 and 2, mock and real bytes, `app/perf/waveform-flicker.mjs`) shows no blank, half-drawn or cleared frame, no canvas resize, no DOM rebuild and one canvas element throughout, so none of clear-then-draw, bitmap eviction, per-frame resize or a double-buffer swap exists in this code. What does exist: **the zoom view scrolls by translating the 1 px column rects by the fractional pixel remainder (Q28)**. Every column is then anti-aliased across two device pixels and neighbouring columns composite at coverage a and 1 - a, so the background bleeds through (opacity 1 - a(1 - a), down to 75 %). The bleed changes with the sub-pixel phase, i.e. every frame while scrolling. Measured on a constant waveform scrolled in 40 sub-pixel steps: brightness swings 22 % (blue channel 197 to 254) at dpr 1 and 2. On real content the body brightness of the zoom view swung 10.6 % across 70 consecutive frames. Beat, cue and playhead lines had the same problem (a 1 px line at a fractional x is crisp or smeared depending on phase).
+
+Fix: the zoom view scrolls in whole device pixels (no fractional offset), and lines land on whole device pixels (`_lineAt`). Constant waveform: 0.0 % swing at every phase; real content over 64 to 70 frames: 1.9 % at dpr 1, 2.2 % at dpr 2 (what the content itself changes), frame-to-frame content residual 0.7 % median. Pixel check `waveform-pixels.mjs` has the constant-waveform check (64 checks, all pass).
+
+Not reproduced: a GPU-canvas or compositor-level flash that only exists in WKWebView. If Merlin still sees a flash on the Mac, the next suspects are the per-frame cost of about 6,000 `fillRect`s at dpr 2 and the opaque bar-label boxes that clip the waveform top and jump sides at the playhead; neither is blank-frame behaviour, so they are not changed here.
+
+### Tests and checks
+
+- `waveform-math.test.ts`: curve, bucket blend, a drop and a breakdown with the same kick peak stay apart (the flat-block regression), one global reference (the same level is the same height whatever else is in the track), per-band scale, painter layer order (low, mid, high; rect and path painters), whole-pixel scrolled columns.
+- `waveform-bands.test.ts`: row preview carries the display scale.
+- `app/perf/waveform-pixels.mjs`: heights stack high < mid < low, high is the front core, mid ring, low ring, ground outside; constant waveform keeps its brightness at every sub-pixel phase.
+- `app/perf/waveform-flicker.mjs` (frame capture): per frame, ink coverage of the centre rows of the zoom and overview canvases, left and right halves, transparent pixels, canvas width / height assignments, DOM mutations under the player, canvas identity, frame-to-frame content residual, body brightness swing. `FIXTURE=<fixture.json>` runs it on real bytes through `compare.html?play=1`; without it, on the `?mock=N` app.
+
+### Screenshots and numbers
+
+`/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/q39/` (`before/`, `before-legacy/`, `after/`, `README.txt`, `byte-histograms.txt`, `perf.json`): four tracks (Oyea, Revision, Be You, Darkside), compact strip + expanded overview + zoom + row + detail strip, ours and Rekordbox's bytes through the same renderer.
+
+Perf (`waveform-perf.mjs`, headless Chromium, shared `dev` box under load from other jobs, `?mock=3000`, software compositing, median of 5 alternating runs, main-thread CPU per frame; before is the `row-wave-variants` head build):
+
+| Scenario | before | after |
+|---|---|---|
+| Compact player playing | 6.54 ms | 6.18 ms |
+| Expanded player playing | 17.28 | 17.08 |
+| Expanded zoom in/out | 16.75 | 16.53 |
+| Expanded wheel scroll | 29.36 | 28.49 |
+
+CPU per frame is equal or lower everywhere. Frame p50 is 16.7 ms in all of them. Frames over 33 ms per 4 s window (median of 5): expanded playing 8 to 17, zoom 7 to 9, wheel scroll 20 to 15, compact 0 to 0; the expanded-playing difference sits next to unchanged CPU on a loaded box and was not chased (rerun on an idle machine before reading anything into it).
