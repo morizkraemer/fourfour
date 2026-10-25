@@ -5,13 +5,16 @@ import {
   BAND_ORDER,
   BUCKET_PEAK_WEIGHT,
   DISPLAY_FLOOR,
+  OVERVIEW_PEAK_WEIGHT,
+  OVERVIEW_SCALE,
   bandsFromPeaks,
   displayAmp,
   halfHeight,
   reduceBands,
   smoothEnvelope,
+  stackHeights,
 } from '../../../prototyping/viewport/design-system/waveform-bands.js';
-import { drawBandRange, paintBands } from '../../../prototyping/viewport/design-system/waveform-render.js';
+import { drawBandRange, paintBands, paintStacked } from '../../../prototyping/viewport/design-system/waveform-render.js';
 
 const bands = (low: number[], mid = low.map(() => 0), high = low.map(() => 0)) => ({
   low: Float32Array.from(low),
@@ -71,11 +74,18 @@ describe('reduceBands', () => {
     expect(out.high[2]).toBeCloseTo(1, 5);
     expect(out.high[3]).toBeCloseTo(DISPLAY_FLOOR, 5);
   });
-  it('interpolates when zoomed in, so there are no plateaus', () => {
+  it('holds each source column over its pixels when zoomed in, so an attack stays a hard edge', () => {
     const out = reduceBands(bands([0, 1]), 0, 1, 16);
-    const ramp = Array.from(out.low);
-    for (let i = 1; i < ramp.length; i++) expect(ramp[i]).toBeGreaterThanOrEqual(ramp[i - 1]);
-    expect(new Set(ramp.map((v) => v.toFixed(4))).size).toBeGreaterThan(8);
+    const held = Array.from(out.low).map((v) => v.toFixed(4));
+    expect(new Set(held).size).toBe(2);
+    expect(held.slice(0, 8)).toEqual(Array(8).fill(held[0]));
+    expect(held.slice(8)).toEqual(Array(8).fill(held[8]));
+  });
+  it('reduces the overview with the mean of the covered columns, scaled to the overview level', () => {
+    const out = reduceBands(bands([1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]), 0, 1, 1, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE);
+    expect(out.low[0]).toBeCloseTo(displayAmp(0.25 * OVERVIEW_SCALE.low), 5);
+    expect(out.mid[0]).toBeCloseTo(displayAmp(0.25 * OVERVIEW_SCALE.mid), 5);
+    expect(out.high[0]).toBeCloseTo(displayAmp(0.25 * OVERVIEW_SCALE.high), 5);
   });
   it('leaves pixels outside the track blank and in-track pixels at or above the floor', () => {
     const out = reduceBands(bands([0, 0, 0, 0]), -0.5, 1.5, 8);
@@ -109,7 +119,7 @@ describe('halfHeight', () => {
     expect(halfHeight(0, 'low', 50)).toBe(0);
     expect(halfHeight(1, 'high', 50)).toBeCloseTo(50 * BAND_GAIN.high, 6);
     expect(halfHeight(1, 'mid', 50)).toBeCloseTo(50 * BAND_GAIN.mid, 6);
-    expect(halfHeight(1, 'low', 50)).toBeCloseTo(50, 6);
+    expect(halfHeight(1, 'low', 50)).toBeCloseTo(50 * BAND_GAIN.low, 6);
     expect(halfHeight(0.5, 'low', 50)).toBeCloseTo(50 * BAND_GAIN.low * 0.5, 6);
     expect(halfHeight(0.001, 'mid', 3)).toBe(0.5);
   });
@@ -151,10 +161,10 @@ function recordingContext() {
   return { ctx, rects, paths };
 }
 
-const palette = { low: 'LOW', mid: 'MID', high: 'HIGH', bg: 'BG', dim: 'DIM', ink: '0, 0, 0', playhead: 'P', version: 0 };
+const palette = { low: 'LOW', mid: 'MID', high: 'HIGH', midInLow: 'MIDINLOW', highInLow: 'HIGHINLOW', highInMid: 'HIGHINMID', bg: 'BG', dim: 'DIM', ink: '0, 0, 0', playhead: 'P', version: 0 };
 
 describe('paintBands', () => {
-  it('fills low, then mid, then high (low outer layer, high thin core on top), symmetric about the centre line', () => {
+  it('stacks like Rekordbox: low outer, mid inside it in the darker tone, high core inside that, symmetric about the centre line', () => {
     const shaped: Record<string, any> = {
       low: Float32Array.from([1, 0.52]),
       mid: Float32Array.from([0.8, 0.41]),
@@ -163,11 +173,12 @@ describe('paintBands', () => {
     };
     const { ctx, rects } = recordingContext();
     paintBands(ctx, shaped, { heightPx: 200, palette });
-    expect(rects.map((r) => r.color)).toEqual(['LOW', 'LOW', 'MID', 'MID', 'HIGH', 'HIGH']);
+    expect(rects.map((r) => r.color)).toEqual(['LOW', 'LOW', 'MIDINLOW', 'MIDINLOW', 'HIGHINMID', 'HIGHINMID']);
     expect(BAND_ORDER).toEqual(['low', 'mid', 'high']);
+    const colour: Record<string, string> = { low: 'LOW', mid: 'MIDINLOW', high: 'HIGHINMID' };
     for (const band of BAND_ORDER) {
       [0, 1].forEach((column) => {
-        const rect = rects.find((r) => r.color === band.toUpperCase() && r.x === column)!;
+        const rect = rects.find((r) => r.color === colour[band] && r.x === column)!;
         const half = halfHeight(shaped[band][column], band, 100);
         expect(100 - rect.y).toBeCloseTo(half, 0);
         expect(rect.y + rect.h - 100).toBeCloseTo(half, 0);
@@ -175,17 +186,29 @@ describe('paintBands', () => {
       });
     }
   });
+  it('keeps the bright tone only where a front band sticks out of the band behind it', () => {
+    const shaped = { low: Float32Array.from([0.3]), mid: Float32Array.from([0.9]), high: Float32Array.from([1]), length: 1 };
+    const { ctx, rects } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 200, palette });
+    expect(rects.map((r) => r.color)).toEqual(['LOW', 'MID', 'MIDINLOW', 'HIGH', 'HIGHINMID']);
+    const half = (name: string) => 100 - rects.find((r) => r.color === name)!.y;
+    expect(half('MID')).toBeGreaterThan(half('MIDINLOW'));
+    expect(half('MIDINLOW')).toBeCloseTo(half('LOW'), 0);
+    expect(half('HIGH')).toBeGreaterThan(half('MID'));
+    expect(half('HIGHINMID')).toBeCloseTo(half('MID'), 0);
+  });
   it('skips silent columns and never draws less than one pixel', () => {
     const shaped = { low: Float32Array.from([0, 0.001]), mid: new Float32Array(2), high: new Float32Array(2), length: 2 };
     const { ctx, rects } = recordingContext();
     paintBands(ctx, shaped, { heightPx: 200, palette });
-    expect(rects).toHaveLength(1);
+    expect(rects.length).toBeGreaterThan(0);
+    expect(rects.every((r) => r.x === 1)).toBe(true);
     expect(rects[0].h).toBeGreaterThanOrEqual(1);
   });
 });
 
 describe('paintBands on short canvases', () => {
-  it('fills one stepped path per band, low then mid then high, with whole-pixel edges', () => {
+  it('fills one stepped path per visible layer, back to front, with whole-pixel edges', () => {
     const shaped = {
       low: Float32Array.from([1, 0.5]),
       mid: Float32Array.from([0.8, 0.4]),
@@ -195,7 +218,7 @@ describe('paintBands on short canvases', () => {
     const { ctx, rects, paths } = recordingContext();
     paintBands(ctx, shaped, { heightPx: 28, palette });
     expect(rects).toHaveLength(0);
-    expect(paths.map((p) => p.color)).toEqual(['LOW', 'MID', 'HIGH']);
+    expect(paths.map((p) => p.color)).toEqual(['LOW', 'MIDINLOW', 'HIGHINMID']);
     const low = paths[0].points;
     expect(low[2]).toEqual([0, 14 - Math.round(halfHeight(1, 'low', 14))]);
     expect(low[3][0]).toBe(1);
@@ -203,6 +226,39 @@ describe('paintBands on short canvases', () => {
       expect(Number.isInteger(x)).toBe(true);
       expect(Number.isInteger(y)).toBe(true);
     }
+  });
+});
+
+describe('paintStacked (overview, compact strip)', () => {
+  it('draws high behind, then mid, then low in front, each from the baseline up', () => {
+    const shaped = { low: Float32Array.from([0.5, 0.5]), mid: Float32Array.from([0.4, 0.4]), high: Float32Array.from([0.9, 0.2]), length: 2 };
+    const { ctx, paths } = recordingContext();
+    paintStacked(ctx, shaped, { heightPx: 40, palette });
+    expect(paths.map((p) => p.color)).toEqual(['HIGH', 'MID', 'LOW']);
+    for (const path of paths) for (const [, y] of path.points) expect(y).toBeLessThanOrEqual(40);
+    const topAt = (color: string, column: number) => {
+      const pts = paths.find((p) => p.color === color)!.points;
+      return Math.min(...pts.filter(([x]) => x === column || x === column + 1).map(([, y]) => y));
+    };
+    expect(topAt('LOW', 0)).toBeGreaterThan(topAt('MID', 0));
+    expect(topAt('MID', 0)).toBeGreaterThan(topAt('HIGH', 0));
+    expect(stackHeights(shaped, 0, 40)![2]).toBeGreaterThan(stackHeights(shaped, 1, 40)![2]);
+  });
+  it('stacks cumulatively and never past the strip height', () => {
+    const full = { low: Float32Array.from([1]), mid: Float32Array.from([1]), high: Float32Array.from([1]), length: 1 };
+    const [c1, c2, c3] = stackHeights(full, 0, 40)!;
+    expect(c1).toBeLessThanOrEqual(c2);
+    expect(c2).toBeLessThanOrEqual(c3);
+    expect(c3).toBe(40);
+    expect(stackHeights({ ...full, low: Float32Array.from([0]) }, 0, 40)).toBeNull();
+  });
+  it('draws the overview from drawBandRange when asked for the stacked layout', () => {
+    const { ctx, paths, rects } = recordingContext();
+    drawBandRange(ctx, bands([0.5, 0.5, 0.5, 0.5], [0.3, 0.3, 0.3, 0.3], [0.1, 0.1, 0.1, 0.1]), {
+      startFrac: 0, endFrac: 1, widthPx: 4, heightPx: 40, palette, layout: 'stacked',
+    });
+    expect(rects).toHaveLength(0);
+    expect(paths.map((p) => p.color)).toEqual(['HIGH', 'MID', 'LOW']);
   });
 });
 

@@ -1147,10 +1147,163 @@ fn parse_options(args: &[String]) -> Options {
     o
 }
 
+/// `track <outdir>` with `WAVEFORM_TRACKS="Title=audio path,Title=audio path"`: one JSON per track with
+/// Rekordbox's own sections (from `--library`), the beat grid and our bytes measured from the audio.
+fn dump_tracks(o: &Options, args: &[String]) -> Result<()> {
+    let dir = PathBuf::from(args.get(1).context("track needs an output directory")?);
+    std::fs::create_dir_all(&dir)?;
+    let spec = std::env::var("WAVEFORM_TRACKS").context("set WAVEFORM_TRACKS to Title=audio path,...")?;
+    let source = rekordbox::load_masterdb(&o.library.join("master.db"), Some(&o.library.join("share")))?;
+    let tuning = load_tuning(o)?;
+    let flat3 = |v: &[[u8; 3]]| -> Vec<u8> { v.iter().flatten().copied().collect() };
+    let flat6 = |v: &[[u8; 6]]| -> Vec<u8> { v.iter().flatten().copied().collect() };
+    for item in spec.split(',') {
+        let (title, audio) = item.split_once('=').context("Title=audio path")?;
+        let t = source
+            .tracks
+            .iter()
+            .find(|t| t.track.title.to_lowercase() == title.to_lowercase() && t.anlz_dat.as_ref().is_some_and(|d| d.exists()))
+            .with_context(|| format!("no track with analysis matches {title}"))?;
+        let dat = t.anlz_dat.clone().unwrap();
+        let reference = read_reference(&dat)?;
+        let beats = pioneer_usb_writer::reader::anlz::read_anlz(&dat)?
+            .beat_grid
+            .beats
+            .iter()
+            .map(|b| serde_json::json!({ "time_ms": b.time_ms, "bar_position": b.bar_position }))
+            .collect::<Vec<_>>();
+        let mono = decode_mono(Path::new(audio))?;
+        let ours = measure(&mono, tuning);
+        let fixture = serde_json::json!({
+            "name": t.track.title,
+            "audio": audio,
+            "duration_secs": mono.samples.len() as f64 / mono.rate as f64,
+            "beats": beats,
+            "rekordbox": {
+                "pwv7": flat3(&reference.pwv7), "pwv6": flat3(&reference.pwv6), "pwv4": flat6(&reference.pwv4),
+                "pwv5": reference.pwv5, "pwv3": reference.pwv3, "pwav": reference.pwav, "gains": reference.gains,
+            },
+            "ours": {
+                "pwv7": flat3(&ours.pwv7), "pwv6": flat3(&ours.pwv6), "pwv4": flat6(&ours.pwv4),
+                "pwv5": ours.pwv5, "pwv3": ours.pwv3, "pwav": ours.pwav, "gains": ours.gains,
+            },
+        });
+        let path = dir.join(format!("{}.json", title.to_lowercase().replace(' ', "-")));
+        std::fs::write(&path, serde_json::to_vec(&fixture)?)?;
+        println!("{} {} ({} columns)", path.display(), t.track.title, reference.pwv7.len());
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct Shape {
+    levels: [[u64; 128]; 3],
+    rises: [[u64; 128]; 3],
+    falls: [f64; 3],
+    fall_n: [f64; 3],
+}
+
+impl Shape {
+    fn new() -> Self {
+        Shape { levels: [[0; 128]; 3], rises: [[0; 128]; 3], falls: [0.0; 3], fall_n: [0.0; 3] }
+    }
+
+    fn add(&mut self, pwv7: &[[u8; 3]]) {
+        for (i, c) in pwv7.iter().enumerate() {
+            for j in 0..3 {
+                self.levels[j][c[j].min(127) as usize] += 1;
+                if i > 0 {
+                    let prev = pwv7[i - 1][j];
+                    if c[j] > prev {
+                        self.rises[j][(c[j] - prev).min(127) as usize] += 1;
+                    } else if c[j] < prev && prev > 20 {
+                        self.falls[j] += c[j] as f64 / prev as f64;
+                        self.fall_n[j] += 1.0;
+                    }
+                }
+            }
+        }
+    }
+
+    fn merge(&mut self, o: &Shape) {
+        for j in 0..3 {
+            for k in 0..128 {
+                self.levels[j][k] += o.levels[j][k];
+                self.rises[j][k] += o.rises[j][k];
+            }
+            self.falls[j] += o.falls[j];
+            self.fall_n[j] += o.fall_n[j];
+        }
+    }
+}
+
+fn percentile_of(hist: &[u64; 128], p: f64) -> usize {
+    let total: u64 = hist.iter().sum();
+    let target = (total as f64 * p).ceil() as u64;
+    let mut seen = 0;
+    for (v, n) in hist.iter().enumerate() {
+        seen += n;
+        if seen >= target {
+            return v;
+        }
+    }
+    127
+}
+
+fn mean_of(hist: &[u64; 128]) -> f64 {
+    let total: u64 = hist.iter().sum();
+    hist.iter().enumerate().map(|(v, n)| v as f64 * *n as f64).sum::<f64>() / total.max(1) as f64
+}
+
+/// Pooled byte distribution (p50 p90 p99), mean rise per rising column (attack) with its p90, and the mean
+/// fall ratio per falling column (decay), ours against Rekordbox, over one half of the selection.
+fn shape(o: &Options, sel: &Selection) -> Result<()> {
+    let tuning = load_tuning(o)?;
+    let entries: Vec<&Entry> = sel.entries.iter().filter(|e| match o.set.as_str() {
+        "tune" => e.tune,
+        "test" => !e.tune,
+        _ => true,
+    }).collect();
+    let per = parallel(entries.iter().collect::<Vec<_>>(), |e| {
+        let mono = decode_mono(&e.audio).expect("decode");
+        let ours = measure(&mono, tuning);
+        let n = ours.pwv7.len().min(e.reference.pwv7.len());
+        let (mut a, mut b) = (Shape::new(), Shape::new());
+        a.add(&ours.pwv7[..n]);
+        b.add(&e.reference.pwv7[..n]);
+        (a, b)
+    });
+    let (mut ours, mut rb) = (Shape::new(), Shape::new());
+    for (a, b) in &per {
+        ours.merge(a);
+        rb.merge(b);
+    }
+    for (j, name) in ["low", "mid", "high"].iter().enumerate() {
+        let line = |s: &Shape| {
+            format!(
+                "p50 {:3} p90 {:3} p99 {:3} mean {:5.1} | rise mean {:5.2} p90 {:3} | fall ratio {:.3}",
+                percentile_of(&s.levels[j], 0.5),
+                percentile_of(&s.levels[j], 0.9),
+                percentile_of(&s.levels[j], 0.99),
+                mean_of(&s.levels[j]),
+                mean_of(&s.rises[j]),
+                percentile_of(&s.rises[j], 0.9),
+                s.falls[j] / s.fall_n[j].max(1.0),
+            )
+        };
+        println!("{name:5} rekordbox {}", line(&rb));
+        println!("{name:5} ours      {}", line(&ours));
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().cloned().unwrap_or_else(|| "score".into());
     let o = parse_options(&args);
+    if cmd == "track" {
+        return dump_tracks(&o, &args);
+    }
     let sel = select(&o).context("select tracks")?;
     println!("{} tracks selected ({} tune, {} test)", sel.entries.len(), sel.entries.iter().filter(|e| e.tune).count(), sel.entries.iter().filter(|e| !e.tune).count());
     match cmd.as_str() {
@@ -1212,6 +1365,7 @@ fn main() -> Result<()> {
                 println!("{} {}", path.display(), e.name);
             }
         }
+        "shape" => shape(&o, &sel)?,
         "fit" => fit(&o, &sel)?,
         "fit-derive" => fit_derivation(&o, &sel)?,
         "scan" => scan_bands(&sel),

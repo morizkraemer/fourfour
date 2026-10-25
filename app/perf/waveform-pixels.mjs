@@ -68,7 +68,10 @@ for (const dpr of [1, 2]) {
           probe.fillRect(0, 0, 1, 1);
           return Array.from(probe.getImageData(0, 0, 1, 1).data.slice(0, 3));
         };
-        const colours = { bg: rgbOf(palette.bg), low: rgbOf(palette.low), mid: rgbOf(palette.mid), high: rgbOf(palette.high) };
+        const colours = {
+          bg: rgbOf(palette.bg), low: rgbOf(palette.low), mid: rgbOf(palette.mid), high: rgbOf(palette.high),
+          midInLow: rgbOf(palette.midInLow), highInMid: rgbOf(palette.highInMid),
+        };
         const pixel = (x, y) => {
           const i = (Math.round(y) * widthPx + x) * 4;
           return Array.from(image.data.slice(i, i + 3));
@@ -121,8 +124,8 @@ for (const dpr of [1, 2]) {
 
     const s3 = segments[3];
     check('segment 3 heights stack high < mid < low', s3.half.high < s3.half.mid && s3.half.mid < s3.half.low);
-    check('segment 3 high is the core in front', near(s3.above.inHigh, colours.high));
-    check('segment 3 mid ring is the mid colour', near(s3.above.midRing, colours.mid));
+    check('segment 3 high is the core in front, in the tone for high inside mid', near(s3.above.inHigh, colours.highInMid));
+    check('segment 3 mid ring is the tone for mid inside low', near(s3.above.midRing, colours.midInLow));
     check('segment 3 low ring is the low colour (outer, back layer)', near(s3.above.lowRing, colours.low));
     check('segment 3 outside the tallest band is the ground', near(s3.above.outside, colours.bg));
     check('segment 3 top height', Math.abs(centre - s3.top - s3.half.low) <= 1.5, `${centre - s3.top} vs ${s3.half.low}`);
@@ -155,6 +158,106 @@ for (const dpr of [1, 2]) {
       { dpr },
     );
     check('a constant waveform keeps its brightness at every sub-pixel scroll phase', (seam.max - seam.min) / seam.max < 0.01, `${seam.min} .. ${seam.max}`);
+
+    const rbLook = await page.evaluate(
+      async ({ dpr }) => {
+        const render = await import('/waveform-render.js');
+        const palette = render.wavePalette();
+        const paintInto = (bands, opts) => {
+          const widthPx = 64 * dpr;
+          const heightPx = opts.heightPx * dpr;
+          const ctx = new OffscreenCanvas(widthPx, heightPx).getContext('2d', { willReadFrequently: true });
+          ctx.fillStyle = palette.bg;
+          ctx.fillRect(0, 0, widthPx, heightPx);
+          render.drawBandRange(ctx, bands, { startFrac: 0, endFrac: 1, palette, dpr, decay: 0.9, ...opts, widthPx, heightPx });
+          return { ctx, widthPx, heightPx };
+        };
+        const rgbOf = (css) => {
+          const probe = new OffscreenCanvas(1, 1).getContext('2d');
+          probe.fillStyle = css;
+          probe.fillRect(0, 0, 1, 1);
+          return Array.from(probe.getImageData(0, 0, 1, 1).data.slice(0, 3));
+        };
+        const bgRgb = rgbOf(palette.bg);
+        const heightsOf = ({ ctx, widthPx, heightPx }) => {
+          const image = ctx.getImageData(0, 0, widthPx, heightPx).data;
+          const out = [];
+          for (let x = 0; x < widthPx; x++) {
+            let top = heightPx;
+            for (let y = 0; y < heightPx; y++) {
+              const i = (y * widthPx + x) * 4;
+              if (Math.abs(image[i] - bgRgb[0]) + Math.abs(image[i + 1] - bgRgb[1]) + Math.abs(image[i + 2] - bgRgb[2]) > 30) { top = y; break; }
+            }
+            out.push(heightPx - top);
+          }
+          return out;
+        };
+        const kick = { low: Float32Array.from([0.1, 0.9]), mid: Float32Array.from([0.1, 0.5]), high: Float32Array.from([0.05, 0.3]) };
+        const zoomed = heightsOf(paintInto(kick, { heightPx: 120, scrolling: true }));
+        const stacked = paintInto(
+          { low: new Float32Array(8).fill(0.3), mid: new Float32Array(8).fill(0.2), high: new Float32Array(8).fill(0.05) },
+          { heightPx: 40, layout: 'stacked' },
+        );
+        const column = (x, y) => Array.from(stacked.ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+        return {
+          distinctZoomHeights: new Set(zoomed).size,
+          bottomRow: column(8, stacked.heightPx - 1),
+          topRow: column(8, 0),
+          low: rgbOf(palette.low),
+          bg: rgbOf(palette.bg),
+          stackedTop: heightsOf(stacked)[8],
+          stackedHeight: stacked.heightPx,
+        };
+      },
+      { dpr },
+    );
+    check('a hard step in the data stays a hard step when zoomed in (no interpolated ramp)', rbLook.distinctZoomHeights === 2, `${rbLook.distinctZoomHeights} distinct heights`);
+    check('the stacked overview is anchored at the bottom in the low colour', near(rbLook.bottomRow, rbLook.low), JSON.stringify([rbLook.bottomRow, rbLook.low]));
+    check('the stacked overview leaves the top free for a quiet column', near(rbLook.topRow, rbLook.bg), JSON.stringify(rbLook.topRow));
+    check('the stacked overview rises from the baseline (not centred)', rbLook.stackedTop > 0 && rbLook.stackedTop < rbLook.stackedHeight, `${rbLook.stackedTop} of ${rbLook.stackedHeight}`);
+
+    const incremental = await page.evaluate(
+      async ({ dpr }) => {
+        const render = await import('/waveform-render.js');
+        const palette = render.wavePalette();
+        const columns = 20000;
+        const bands = {
+          low: Float32Array.from({ length: columns }, (_, i) => (Math.sin(i * 0.011) + 1) / 2),
+          mid: Float32Array.from({ length: columns }, (_, i) => (Math.sin(i * 0.037 + 1) + 1) / 2),
+          high: Float32Array.from({ length: columns }, (_, i) => (Math.sin(i * 0.19 + 2) + 1) / 2),
+        };
+        const widthPx = 300 * dpr;
+        const heightPx = 130 * dpr;
+        const fracPerPx = 1 / 3000;
+        const make = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = widthPx;
+          canvas.height = heightPx;
+          return canvas;
+        };
+        const draw = (canvas, leftPx) => {
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.fillStyle = palette.bg;
+          ctx.fillRect(0, 0, widthPx, heightPx);
+          const startFrac = leftPx * fracPerPx;
+          render.drawBandRange(ctx, bands, { startFrac, endFrac: startFrac + widthPx * fracPerPx, widthPx, heightPx, palette, dpr, scrolling: true });
+          return ctx.getImageData(0, 0, widthPx, heightPx).data;
+        };
+        const scrolled = make();
+        let left = 9000;
+        for (const step of [0, 1, 3, 4, 7, 2, -5, -1, 11, 40, 2]) {
+          left += step;
+          draw(scrolled, left);
+        }
+        const a = draw(scrolled, left);
+        const b = draw(make(), left);
+        let differing = 0;
+        for (let i = 0; i < a.length; i += 4) if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) differing++;
+        return differing;
+      },
+      { dpr },
+    );
+    check('scrolling by moving the last frame and painting the new columns equals a fresh paint', incremental === 0, `${incremental} differing pixels`);
 
     await page.close();
   }

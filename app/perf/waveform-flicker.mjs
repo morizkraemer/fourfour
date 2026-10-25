@@ -82,11 +82,11 @@ for (const dpr of dprs.split(',').map(Number)) {
         probe.fillRect(0, 0, 1, 1);
         const BACKGROUND = [...probe.getImageData(0, 0, 1, 1).data];
 
-        const inkColumns = (canvas) => {
+        const inkColumns = (canvas, anchoredBottom = false) => {
           const ctx = canvas.getContext('2d', { willReadFrequently: true });
           const w = canvas.width;
           const h = canvas.height;
-          const rowTop = Math.floor(h / 2) - 2;
+          const rowTop = anchoredBottom ? h - 6 : Math.floor(h / 2) - 2;
           const data = ctx.getImageData(0, rowTop, w, 5).data;
           const bg = BACKGROUND;
           let inked = 0;
@@ -143,7 +143,7 @@ for (const dpr of dprs.split(',').map(Number)) {
         let n = 0;
         const frame = () => {
           setTimeout(() => {
-            sample.push({ zoom: inkColumns(zoom), overview: inkColumns(overview), canvasW: zoom.width, canvasH: zoom.height, profile: profile(zoom), luma: bodyLuma(zoom) });
+            sample.push({ zoom: inkColumns(zoom), overview: inkColumns(overview, true), canvasW: zoom.width, canvasH: zoom.height, profile: profile(zoom), luma: bodyLuma(zoom) });
             if (sample.length >= count) {
               const after = { ...window.__flicker };
               resolve({
