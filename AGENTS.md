@@ -169,6 +169,7 @@ scope fence: no new deps without a BLOCKED report; no edits to `mockup/`, `desig
 lane rules: none; format correctness is proven on CDJ-3000 hardware only (see Pioneer format gotchas)
 lanes: `pioneer-usb-writer/src/` and USB/hardware behaviour belong to Merlin's brother (morizkraemer); workers add tests and report findings there, never change format code
 ui reviews: judge on intuitive, efficient workflows on their own terms, never on Rekordbox familiarity (beating Rekordbox UX is the point)
+polish vs rebuild: when a task improves something that already works, polish the existing code in place; replacing it (new renderer, new pipeline) is a BLOCKED question to the orchestrator
 autonomy: tight (draft; no queue run yet) — everything stays on branches; only state, docs and benchmark/analysis reports land
 own priorities: finish paused work → bugs → tests → perf → cleanup, inside Merlin's lane (app UX code on branches, analysis prototype, tests); experiments: max 1 per run, analysis prototype only (prototyping/analysis-packaging), never landed
 targets: analysis in Rust: beat-grid phase/drift (grid within ±20 ms of Rekordbox: 47% now) and key ≥60% exact on Beatport (57% now); sync UI per docs/ui/usb-sync-decisions.md, built only after Merlin settles its open questions
