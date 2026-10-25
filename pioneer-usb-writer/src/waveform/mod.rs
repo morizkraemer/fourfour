@@ -101,15 +101,15 @@ fn default_overview_window() -> [f64; 3] {
 }
 
 fn default_overview_scale() -> [f64; 3] {
-    [51.7, 36.4, 87.0]
+    [51.7, 36.4, 93.2]
 }
 
 fn default_overview_gamma() -> [f64; 3] {
-    [1.0, 0.91, 1.04]
+    [1.0, 0.91, 1.15]
 }
 
 fn default_overview_delta() -> [f64; 3] {
-    [0.63, 0.92, 0.67]
+    [0.63, 0.92, 0.77]
 }
 
 impl Default for Tuning {
