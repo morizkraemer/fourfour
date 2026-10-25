@@ -6,13 +6,16 @@
  * record, exact pixel edges); tall ones, which the zoom view repaints every frame, use one fillRect
  * per column and band because a jagged tall polygon is far slower to rasterise.
  */
-import { BAND_GAIN, BAND_ORDER, halfHeight, reduceBands, smoothBands } from './waveform-bands.js';
+import { OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, halfHeight, reduceBands, smoothBands, stackHeights } from './waveform-bands.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
   low: '#2f7bff',
   mid: '#ffa224',
   high: '#eef2f8',
+  midInLow: '#b2660a',
+  highInLow: '#ece8e5',
+  highInMid: '#f6e4d2',
   dim: 'rgba(13, 13, 13, 0.58)',
   ink: '255, 255, 255',
   playhead: '#ffffff',
@@ -23,6 +26,9 @@ const TOKEN_NAMES = {
   low: '--ff-wave-low',
   mid: '--ff-wave-mid',
   high: '--ff-wave-high',
+  midInLow: '--ff-wave-mid-in-low',
+  highInLow: '--ff-wave-high-in-low',
+  highInMid: '--ff-wave-high-in-mid',
   dim: '--ff-wave-dim',
   ink: '--ff-wave-ink',
   playhead: '--ff-wave-playhead',
@@ -71,44 +77,84 @@ export function paletteVersion() {
 /**
  * Fill the three band envelopes. `shaped` comes from reduceBands/smoothBands.
  * The context must have an identity transform (device pixels).
+ *
+ * Rekordbox's stacking, back to front: low (blue), mid (amber) in front of it, high (white) in front of that,
+ * every band from the centre line with its own height. Where a front band lies inside a back one it is drawn
+ * in a darker tone (`midInLow`, `highInLow`, `highInMid`); only the part that sticks out keeps the bright tone.
  */
 export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0 }) {
   const yCentre = heightPx / 2;
-  const stepped = heightPx <= STEPPED_PATH_MAX_HEIGHT;
-  for (const band of BAND_ORDER) {
-    const values = shaped[band];
-    ctx.fillStyle = palette[band];
-    if (stepped) {
-      paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre);
-      continue;
-    }
-    for (let p = 0; p < count; p++) {
-      const half = halfHeight(values[from + p], band, yCentre);
-      if (half === 0) continue;
-      const top = Math.round(yCentre - half);
-      const bottom = Math.round(yCentre + half);
-      ctx.fillRect(offsetPx + p, top, 1, Math.max(1, bottom - top));
-    }
+  if (heightPx <= STEPPED_PATH_MAX_HEIGHT) {
+    paintStepped(ctx, shaped, palette, from, count, offsetPx, yCentre);
+    return;
+  }
+  for (let p = 0; p < count; p++) {
+    const hl = halfHeight(shaped.low[from + p], 'low', yCentre);
+    if (hl === 0) continue;
+    const hm = halfHeight(shaped.mid[from + p], 'mid', yCentre);
+    const hh = halfHeight(shaped.high[from + p], 'high', yCentre);
+    const x = offsetPx + p;
+    fillColumn(ctx, palette.low, x, yCentre, hl);
+    if (hm > hl) fillColumn(ctx, palette.mid, x, yCentre, hm);
+    fillColumn(ctx, palette.midInLow, x, yCentre, Math.min(hm, hl));
+    const hhLow = Math.min(hh, hl);
+    const hhMid = Math.min(hh, hm);
+    if (hh > hl) fillColumn(ctx, palette.high, x, yCentre, hh);
+    if (hhLow > hhMid) fillColumn(ctx, palette.highInLow, x, yCentre, hhLow);
+    fillColumn(ctx, palette.highInMid, x, yCentre, hhMid);
   }
 }
 
-function paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre) {
-  const gain = BAND_GAIN[band];
+function fillColumn(ctx, colour, x, yCentre, half) {
+  if (half <= 0) return;
+  const top = Math.round(yCentre - half);
+  const bottom = Math.round(yCentre + half);
+  ctx.fillStyle = colour;
+  ctx.fillRect(x, top, 1, Math.max(1, bottom - top));
+}
+
+const STEPPED_LAYERS = [
+  ['low', (l) => l],
+  ['mid', (l, m) => (m > l ? m : 0)],
+  ['midInLow', (l, m) => Math.min(l, m)],
+  ['high', (l, m, h) => (h > l ? h : 0)],
+  ['highInLow', (l, m, h) => (Math.min(h, l) > Math.min(h, m) ? Math.min(h, l) : 0)],
+  ['highInMid', (l, m, h) => Math.min(h, m)],
+];
+
+function paintStepped(ctx, shaped, palette, from, count, offsetPx, yCentre) {
+  const halves = STEPPED_LAYERS.map(() => new Float32Array(count));
+  for (let p = 0; p < count; p++) {
+    const hl = halfHeight(shaped.low[from + p], 'low', yCentre);
+    if (hl === 0) continue;
+    const hm = halfHeight(shaped.mid[from + p], 'mid', yCentre);
+    const hh = halfHeight(shaped.high[from + p], 'high', yCentre);
+    for (let k = 0; k < STEPPED_LAYERS.length; k++) halves[k][p] = STEPPED_LAYERS[k][1](hl, hm, hh);
+  }
+  for (let k = 0; k < STEPPED_LAYERS.length; k++) {
+    paintSteppedLayer(ctx, halves[k], palette[STEPPED_LAYERS[k][0]], count, offsetPx, yCentre);
+  }
+}
+
+function paintSteppedLayer(ctx, halves, colour, count, offsetPx, yCentre) {
   const tops = new Int16Array(count);
   const bottoms = new Int16Array(count);
   const centre = Math.round(yCentre);
+  let any = false;
   for (let p = 0; p < count; p++) {
-    const value = values[from + p];
-    if (!(value > 0)) {
+    const half = halves[p];
+    if (!(half > 0)) {
       tops[p] = centre;
       bottoms[p] = centre;
       continue;
     }
-    const half = Math.max(0.5, Math.min(1, value * gain) * yCentre);
+    any = true;
     const top = Math.round(yCentre - half);
     tops[p] = top;
     bottoms[p] = Math.max(top + 1, Math.round(yCentre + half));
   }
+  if (!any) return;
+  ctx.fillStyle = colour;
   ctx.beginPath();
   ctx.moveTo(offsetPx, centre);
   let last = centre;
@@ -134,21 +180,56 @@ function paintSteppedBand(ctx, values, band, from, count, offsetPx, yCentre) {
   ctx.fill();
 }
 
+/** Bottom-anchored stack (Rekordbox overview): high behind, then mid, then low in front, each from the baseline up to its cumulative height. */
+export function paintStacked(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0 }) {
+  const layers = [new Int16Array(count), new Int16Array(count), new Int16Array(count)];
+  for (let p = 0; p < count; p++) {
+    const stack = stackHeights(shaped, from + p, heightPx);
+    for (let k = 0; k < 3; k++) layers[k][p] = stack ? Math.round(stack[k]) : 0;
+  }
+  const colours = [palette.low, palette.mid, palette.high];
+  for (let k = 2; k >= 0; k--) paintBottomLayer(ctx, layers[k], colours[k], count, offsetPx, heightPx);
+}
+
+function paintBottomLayer(ctx, heights, colour, count, offsetPx, heightPx) {
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo(offsetPx, heightPx);
+  let last = heightPx;
+  for (let p = 0; p < count; p++) {
+    const y = heightPx - heights[p];
+    if (y !== last) {
+      ctx.lineTo(offsetPx + p, last);
+      ctx.lineTo(offsetPx + p, y);
+      last = y;
+    }
+  }
+  ctx.lineTo(offsetPx + count, last);
+  ctx.lineTo(offsetPx + count, heightPx);
+  ctx.closePath();
+  ctx.fill();
+}
+
 const SHAPED_PER_BANDS_LIMIT = 6;
 const shapedCache = new WeakMap();
 
 /** The reduced and smoothed columns of a static draw, kept per bands object and width: redraws (theme, dpr, bitmap eviction) skip the reduction. */
-function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel) {
-  if (!bands || typeof bands !== 'object') return smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+function reduceStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked) {
+  if (stacked) return reduceBands(bands, startFrac, endFrac, widthPx, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE);
+  return smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+}
+
+function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked) {
+  if (!bands || typeof bands !== 'object') return reduceStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked);
   let byKey = shapedCache.get(bands);
   if (!byKey) {
     byKey = new Map();
     shapedCache.set(bands, byKey);
   }
-  const key = `${startFrac}|${endFrac}|${widthPx}|${decayPerPixel}`;
+  const key = `${startFrac}|${endFrac}|${widthPx}|${decayPerPixel}|${stacked}`;
   let shaped = byKey.get(key);
   if (!shaped) {
-    shaped = smoothBands(reduceBands(bands, startFrac, endFrac, widthPx), decayPerPixel);
+    shaped = reduceStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked);
     byKey.set(key, shaped);
     if (byKey.size > SHAPED_PER_BANDS_LIMIT) byKey.delete(byKey.keys().next().value);
   }
@@ -162,7 +243,7 @@ function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel) {
  * offset anti-aliases every one-pixel column against its neighbour, which lets the background bleed through
  * and makes the whole waveform pulse (up to 22 % brightness) as the sub-pixel phase changes.
  */
-export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1 }) {
+export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred' }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
   if (columnPx > 1) {
     ctx.save();
@@ -173,9 +254,12 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
     ctx.restore();
     return;
   }
-  const decayPerPixel = Math.pow(decay, 1 / dpr);
+  const columnsPerPx = ((endFrac - startFrac) * (bands?.low?.length ?? 0)) / widthPx;
+  const decayPerPixel = columnsPerPx <= 1 ? 0 : Math.pow(decay, 1 / dpr);
   if (!scrolling) {
-    paintBands(ctx, shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel), { heightPx, palette });
+    const stacked = layout === 'stacked';
+    const shaped = shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked);
+    (stacked ? paintStacked : paintBands)(ctx, shaped, { heightPx, palette });
     return;
   }
   const fracPerPx = (endFrac - startFrac) / widthPx;

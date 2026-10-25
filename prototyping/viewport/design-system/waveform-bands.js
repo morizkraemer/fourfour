@@ -12,7 +12,7 @@
  */
 
 export const DISPLAY_FLOOR = 0.02;
-export const DISPLAY_GAMMA = 0.85;
+export const DISPLAY_GAMMA = 1;
 
 const BUCKET_EPSILON = 1e-6;
 const UNIT_SCALE = { low: 1, mid: 1, high: 1 };
@@ -22,7 +22,7 @@ const UNIT_SCALE = { low: 1, mid: 1, high: 1 };
  * per-track normalisation, so a quiet breakdown stays thin). Low is the outer layer and its bytes top
  * out lowest, so it is lifted; mid and high sit inside it.
  */
-export const BAND_GAIN = { low: 1.15, mid: 0.75, high: 0.5 };
+export const BAND_GAIN = { low: 0.8, mid: 0.82, high: 0.89 };
 
 /**
  * Share of the loudest column in a pixel bucket that counts towards its height (the rest is the bucket
@@ -30,6 +30,17 @@ export const BAND_GAIN = { low: 1.15, mid: 0.75, high: 0.5 };
  * the mean keeps drops, breakdowns and fills apart. High keeps more peak so hats stay spikes.
  */
 export const BUCKET_PEAK_WEIGHT = { low: 0.2, mid: 0.3, high: 0.4 };
+
+/**
+ * Overview and compact strip, which Rekordbox draws as a bottom-anchored stack (low, then mid on top of it, then high on
+ * top of that) from its 1200-column mean overview. The detail columns are reduced by their mean here, and `OVERVIEW_SCALE`
+ * brings that mean to the level Rekordbox's own overview bytes have (about 0.6 / 0.75 / 2 of the detail mean).
+ * `STACK_GAIN` is the share of the strip height one unit of that level adds to the stack.
+ */
+export const OVERVIEW_PEAK_WEIGHT = { low: 0, mid: 0, high: 0 };
+export const OVERVIEW_SCALE = { low: 0.6, mid: 0.75, high: 2 };
+export const STACK_GAIN = { low: 1.08, mid: 0.7, high: 1.35 };
+export const STACK_GAMMA = { low: 1, mid: 1, high: 1.7 };
 
 /** Back to front, as Rekordbox stacks them: low is the outer layer, mid in front of it, high the thin core on top. */
 export const BAND_ORDER = ['low', 'mid', 'high'];
@@ -44,14 +55,6 @@ function emptyShaped(pixels) {
   return { low: new Float32Array(pixels), mid: new Float32Array(pixels), high: new Float32Array(pixels), length: pixels };
 }
 
-function sampleInterpolated(arr, n, centre) {
-  const c = Math.max(0, Math.min(n - 1, centre));
-  const i0 = Math.floor(c);
-  const i1 = Math.min(n - 1, i0 + 1);
-  const t = c - i0;
-  return arr[i0] + (arr[i1] - arr[i0]) * t;
-}
-
 /**
  * Reduce columns to one display height per pixel column over [startFrac, endFrac] of the track.
  * More than one source column per pixel: a blend of the peak and the mean of the covered columns (BUCKET_PEAK_WEIGHT). Fewer: linear interpolation at the pixel centre, so zoomed-in
@@ -60,7 +63,7 @@ function sampleInterpolated(arr, n, centre) {
  *
  * @returns {{low: Float32Array, mid: Float32Array, high: Float32Array, length: number}}
  */
-export function reduceBands(bands, startFrac, endFrac, pixels) {
+export function reduceBands(bands, startFrac, endFrac, pixels, peakWeights = BUCKET_PEAK_WEIGHT, bandScale = null) {
   const out = emptyShaped(pixels);
   const n = bands && bands.low ? bands.low.length : 0;
   if (!n || pixels <= 0 || !(endFrac > startFrac)) return out;
@@ -76,7 +79,7 @@ export function reduceBands(bands, startFrac, endFrac, pixels) {
       if (hi <= BUCKET_EPSILON || lo >= n - BUCKET_EPSILON) continue;
       let v;
       if (perPixel <= 1) {
-        v = sampleInterpolated(src, n, (lo + hi) / 2 - 0.5);
+        v = src[Math.max(0, Math.min(n - 1, Math.floor((lo + hi) / 2)))];
       } else {
         const i0 = Math.max(0, Math.floor(lo + BUCKET_EPSILON));
         const i1 = Math.min(n - 1, Math.ceil(hi - BUCKET_EPSILON) - 1);
@@ -87,10 +90,10 @@ export function reduceBands(bands, startFrac, endFrac, pixels) {
           sum += x;
           if (x > peak) peak = x;
         }
-        const weight = BUCKET_PEAK_WEIGHT[name];
+        const weight = peakWeights[name];
         v = weight * peak + (1 - weight) * (sum / (i1 - i0 + 1));
       }
-      dst[p] = displayAmp(v * scale[name]);
+      dst[p] = displayAmp(v * scale[name] * (bandScale ? bandScale[name] : 1));
     }
   }
   return out;
@@ -119,6 +122,17 @@ export function smoothBands(shaped, decayPerPixel) {
 export function halfHeight(value, band, halfPx) {
   if (!(value > 0)) return 0;
   return Math.max(0.5, Math.min(1, value * BAND_GAIN[band]) * halfPx);
+}
+
+/** Heights of the three stacked layers (cumulative, in pixels from the baseline) at one pixel column. */
+export function stackHeights(shaped, p, heightPx) {
+  const low = shaped.low[p];
+  if (!(low > 0)) return null;
+  const layer = (name) => STACK_GAIN[name] * Math.pow(shaped[name][p], STACK_GAMMA[name]) * heightPx;
+  const c1 = Math.min(heightPx, layer('low'));
+  const c2 = Math.min(heightPx, c1 + layer('mid'));
+  const c3 = Math.min(heightPx, c2 + layer('high'));
+  return [Math.max(1, c1), Math.max(1, c2), Math.max(1, c3)];
 }
 
 /** Fallback for callers that only have a mono 0..1 peak array: a plausible band mix of the same height. */

@@ -577,7 +577,7 @@ export default class WaveformDisplay {
         const bands = this._data?.bandsOverview || this._data?.bands;
         if (bands && bands.low.length > 0) {
             drawBandRange(ctx, bands, {
-                startFrac: 0, endFrac: 1, widthPx, heightPx, palette, dpr, decay: OVERVIEW_DECAY,
+                startFrac: 0, endFrac: 1, widthPx, heightPx, palette, dpr, decay: OVERVIEW_DECAY, layout: 'stacked',
             });
         }
 
@@ -669,7 +669,8 @@ export default class WaveformDisplay {
             palette,
             dpr,
             decay: this._mode === 'compact' ? COMPACT_DECAY : ZOOM_DECAY,
-            scrolling: true,
+            scrolling: this._mode !== 'compact',
+            layout: this._mode === 'compact' ? 'stacked' : 'centred',
         });
         ctx.restore();
     }

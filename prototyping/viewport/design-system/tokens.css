@@ -72,9 +72,12 @@
   /* Waveform 3-band (low in front, then mid, then high behind). Read by
      waveform-render.js through getComputedStyle; keep as literal colours. */
   --ff-wave-bg: #0d0d0d;
-  --ff-wave-low: #2f7bff;
-  --ff-wave-mid: #ffa224;
-  --ff-wave-high: #eef2f8;
+  --ff-wave-low: #0053e2;
+  --ff-wave-mid: #fda602;
+  --ff-wave-high: #fdfdfd;
+  --ff-wave-mid-in-low: #b2660a;
+  --ff-wave-high-in-low: #ece8e5;
+  --ff-wave-high-in-mid: #f6e4d2;
   --ff-wave-dim: rgba(13, 13, 13, 0.58);
   --ff-wave-ink: 255, 255, 255;
   --ff-wave-playhead: #ffffff;
@@ -137,6 +140,9 @@
   --ff-wave-low: #1f5fe6;
   --ff-wave-mid: #d96c00;
   --ff-wave-high: #7d8a9b;
+  --ff-wave-mid-in-low: #a35100;
+  --ff-wave-high-in-low: #6d7a8c;
+  --ff-wave-high-in-mid: #8d8276;
   --ff-wave-dim: rgba(241, 242, 245, 0.62);
   --ff-wave-ink: 20, 24, 32;
   --ff-wave-playhead: #111111;
