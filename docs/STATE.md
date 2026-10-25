@@ -74,7 +74,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Wire the Rust analyzer into the app (item 2) [paused, WIP] — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: idle · since 2026-10-24 09:01 (waveform run from PM done) · cap 2 · autonomy tight
+status: idle · waveforms accepted "good enough for now" by Merlin 2026-10-25 · cap 2 · autonomy tight
 targets: 3-band colour waveforms in app + USB export — done on branch q37-waveforms (contains q34 export, q35 app, q36 integration, q37 polish; based on the q32-search app stack)
 rundown: app and stick draw the same 3-band bytes (low blue front, mid amber, high white); 7:17 colour bug fixed (tests to 60 min); vs Rekordbox's own bytes on held-out tracks corr low .96 / mid .98 / high .93, PWV3 heights 99.7% exact; perf within noise of q32-search, startup 30k 0.35 s.
 screenshots: review page https://claude.ai/artifact/7XmvdpXferK7rfBqLrEKxU · before /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/before/ · after /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/after/ and app/after-v2/ · side-by-side /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/compare/ · ours vs Rekordbox /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/final-v2/ (v1: final/) · export PNGs /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/export/
