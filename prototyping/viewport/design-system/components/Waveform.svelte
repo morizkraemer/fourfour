@@ -1,6 +1,7 @@
 <script module>
   import { bandsFromPeaks } from '../waveform-bands.js';
   import { ink, paletteVersion, wavePalette } from '../waveform-render.js';
+  import { drawBandRange } from '../waveform-render.js';
   import { drawLoudness } from '../waveform-simple.js';
 
   const VARIANTS = {
@@ -11,6 +12,7 @@
   const BITMAP_CACHE_LIMIT = 800;
   const DRAWN_KEYS_LIMIT = 20000;
   const PLACEHOLDER_INK_ALPHA = 0.3;
+  const STRIP_DECAY = 0.9;
 
   const bitmapCache = new Map();
   const dataIds = new WeakMap();
@@ -69,9 +71,10 @@
 
 <script>
   /*
-    Static loudness-envelope preview for list rows (variant "mini") and the detail pane
-    (variant "strip"). `bands` is BandColumns ({low, mid, high}, 0..1); `peaks`
-    (mono 0..1) is the legacy input and is turned into a band mix.
+    Static preview for list rows (variant "mini") and the detail pane (variant "strip").
+    `look` "envelope" (default, rows) is one loudness envelope; "bands" is the 3-band picture of the
+    players. `bands` is BandColumns ({low, mid, high}, 0..1); `peaks` (mono 0..1) is the legacy input
+    and is turned into a band mix.
   */
   let {
     bands = null,
@@ -79,6 +82,7 @@
     width = 120,
     height = 14,
     variant = 'mini',
+    look = 'envelope',
     cues = [],
     cueStyle = null,
     /** Subtle sine wave on placeholder bars while analysis is in progress. */
@@ -97,7 +101,7 @@
   }
 
   function bitmapKey(dpr, data) {
-    return `${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${dataKey(data)}`;
+    return `${variant}|${look}|${width}|${height}|${dpr}|${paletteVersion()}|${dataKey(data)}`;
   }
 
   function paintPlaceholder(ctx, dpr, phase) {
@@ -117,15 +121,20 @@
     }
   }
 
-  function paintData(ctx, data, pixelW, pixelH) {
-    drawLoudness(ctx, bandsOf(data), { widthPx: pixelW, heightPx: pixelH, palette: wavePalette() });
+  function paintData(ctx, data, pixelW, pixelH, dpr) {
+    const palette = wavePalette();
+    if (look === 'bands') {
+      drawBandRange(ctx, bandsOf(data), { startFrac: 0, endFrac: 1, widthPx: pixelW, heightPx: pixelH, palette, dpr, decay: STRIP_DECAY });
+      return;
+    }
+    drawLoudness(ctx, bandsOf(data), { widthPx: pixelW, heightPx: pixelH, palette });
   }
 
   function bitmapFor(data, key, dpr, pixelW, pixelH) {
     const bitmap = document.createElement('canvas');
     bitmap.width = pixelW;
     bitmap.height = pixelH;
-    paintData(bitmap.getContext('2d'), data, pixelW, pixelH);
+    paintData(bitmap.getContext('2d'), data, pixelW, pixelH, dpr);
     rememberBitmap(key, bitmap);
     return bitmap;
   }
@@ -156,7 +165,7 @@
       let bitmap = recallBitmap(key);
       if (!bitmap && wasDrawnBefore(key)) bitmap = bitmapFor(data, key, dpr, pixelW, pixelH);
       if (bitmap) ctx.drawImage(bitmap, 0, 0);
-      else paintData(ctx, data, pixelW, pixelH);
+      else paintData(ctx, data, pixelW, pixelH, dpr);
     }
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -184,6 +193,7 @@
     width;
     height;
     variant;
+    look;
     cues;
     cueStyle;
     animating;

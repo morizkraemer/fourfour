@@ -7,19 +7,32 @@
  *   { low, mid, high }
  *
  * Columns are evenly spaced over the whole track. Each band is its own envelope;
- * they are not weights of one shared height.
+ * they are not weights of one shared height. An optional `scale` ({low, mid, high}) multiplies
+ * the values before display (data whose full scale is below 1, such as the 128-column row preview).
  */
 
-export const DISPLAY_FLOOR = 0.045;
-export const DISPLAY_GAMMA = 0.65;
+export const DISPLAY_FLOOR = 0.02;
+export const DISPLAY_GAMMA = 0.85;
 
 const BUCKET_EPSILON = 1e-6;
+const UNIT_SCALE = { low: 1, mid: 1, high: 1 };
 
-/** Per-band display gain. Low sits in front, so it is trimmed a little to keep mid and high visible. */
-export const BAND_GAIN = { low: 0.72, mid: 0.9, high: 1 };
+/**
+ * Per-band display gain against one global reference (the same for every track and view, never a
+ * per-track normalisation, so a quiet breakdown stays thin). Low is the outer layer and its bytes top
+ * out lowest, so it is lifted; mid and high sit inside it.
+ */
+export const BAND_GAIN = { low: 1.15, mid: 0.75, high: 0.5 };
 
-/** Back to front. The last band is drawn on top. */
-export const BAND_ORDER = ['high', 'mid', 'low'];
+/**
+ * Share of the loudest column in a pixel bucket that counts towards its height (the rest is the bucket
+ * mean). Pure peak pooling returns the kick level for every pixel of a drop, which is the flat block;
+ * the mean keeps drops, breakdowns and fills apart. High keeps more peak so hats stay spikes.
+ */
+export const BUCKET_PEAK_WEIGHT = { low: 0.2, mid: 0.3, high: 0.4 };
+
+/** Back to front, as Rekordbox stacks them: low is the outer layer, mid in front of it, high the thin core on top. */
+export const BAND_ORDER = ['low', 'mid', 'high'];
 
 /** Raw 0..1 amplitude to display height (sqrt lift plus a minimum silhouette). */
 export function displayAmp(raw) {
@@ -41,8 +54,7 @@ function sampleInterpolated(arr, n, centre) {
 
 /**
  * Reduce columns to one display height per pixel column over [startFrac, endFrac] of the track.
- * More than one source column per pixel: the peak of the covered columns (min/max downsampling
- * of a magnitude envelope is its max). Fewer: linear interpolation at the pixel centre, so zoomed-in
+ * More than one source column per pixel: a blend of the peak and the mean of the covered columns (BUCKET_PEAK_WEIGHT). Fewer: linear interpolation at the pixel centre, so zoomed-in
  * views have no plateaus. Pixels outside the track (fraction < 0 or > 1) stay 0, in-track pixels are at
  * least DISPLAY_FLOOR.
  *
@@ -54,6 +66,7 @@ export function reduceBands(bands, startFrac, endFrac, pixels) {
   if (!n || pixels <= 0 || !(endFrac > startFrac)) return out;
   const perPixel = ((endFrac - startFrac) * n) / pixels;
   const first = startFrac * n;
+  const scale = bands.scale ?? UNIT_SCALE;
   for (const name of BAND_ORDER) {
     const src = bands[name];
     const dst = out[name];
@@ -67,10 +80,17 @@ export function reduceBands(bands, startFrac, endFrac, pixels) {
       } else {
         const i0 = Math.max(0, Math.floor(lo + BUCKET_EPSILON));
         const i1 = Math.min(n - 1, Math.ceil(hi - BUCKET_EPSILON) - 1);
-        v = 0;
-        for (let i = i0; i <= i1; i++) if (src[i] > v) v = src[i];
+        let peak = 0;
+        let sum = 0;
+        for (let i = i0; i <= i1; i++) {
+          const x = src[i];
+          sum += x;
+          if (x > peak) peak = x;
+        }
+        const weight = BUCKET_PEAK_WEIGHT[name];
+        v = weight * peak + (1 - weight) * (sum / (i1 - i0 + 1));
       }
-      dst[p] = displayAmp(v);
+      dst[p] = displayAmp(v * scale[name]);
     }
   }
   return out;

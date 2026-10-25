@@ -116,7 +116,7 @@
 
     {#if !isMissing}
       <div class="ff-detail-pane__waveform">
-        <Waveform {bands} {peaks} width={300} height={36} variant="strip" cues={waveCues} cueStyle="dot" />
+        <Waveform {bands} {peaks} width={300} height={36} variant="strip" look="bands" cues={waveCues} cueStyle="dot" />
       </div>
     {/if}
 
