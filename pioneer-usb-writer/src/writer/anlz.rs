@@ -158,7 +158,14 @@ pub fn export_waveforms(duration_secs: f64, analysis: &AnalysisResult) -> Wavefo
             }
             let derived = Waveforms::from_bands(detail, &Tuning::default(), &Derivation::default());
             match cw.exact.as_ref().filter(|e| !e.pwv3.is_empty() && e.pwv3.len() == e.pwv5.len()) {
-                Some(exact) => derived.with_exact(exact),
+                Some(exact) => {
+                    let with_exact = derived.with_exact(exact);
+                    if cw.overview.len() == OVERVIEW_COLUMNS {
+                        with_exact.with_overview(&cw.overview, &Tuning::default())
+                    } else {
+                        with_exact
+                    }
+                }
                 None => derived,
             }
         }

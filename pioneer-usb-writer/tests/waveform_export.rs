@@ -398,6 +398,20 @@ fn without_exact_columns_the_sections_are_derived_from_the_bands() {
 }
 
 #[test]
+fn the_stick_carries_the_overview_measured_from_the_audio() {
+    let waves = measured_waves();
+    let duration_secs = waves.pwv7.len() as f64 / 150.0;
+    let exported = pioneer_usb_writer::writer::anlz::export_waveforms(duration_secs, &analysis(Some(waves.color_waveform())));
+    assert_eq!(exported.pwv6, waves.pwv6, "PWV6 is the audio's overview");
+    assert_eq!(exported.pwv4, waves.pwv4, "PWV4 follows it");
+    let mut cw = waves.color_waveform();
+    cw.exact = None;
+    let from_bands = pioneer_usb_writer::writer::anlz::export_waveforms(duration_secs, &analysis(Some(cw)));
+    assert_eq!(from_bands.pwv6.len(), OVERVIEW_COLUMNS);
+    assert_ne!(from_bands.pwv6, waves.pwv6, "without the measured columns PWV6 is the mean of the bands");
+}
+
+#[test]
 fn pwv6_overview_is_read_from_the_end_of_the_2ex_or_by_scanning() {
     let waves = measured_waves();
     let duration_secs = waves.pwv7.len() as f64 / 150.0;

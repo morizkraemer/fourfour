@@ -74,14 +74,42 @@ pub struct Tuning {
     /// Exponent of the band curve: `127 * (value / 127)^curve`, so transients stand out from the body.
     #[serde(default = "linear_curve")]
     pub curve: [f64; 3],
-    /// `PWV6` is the column mean of `PWV7` times these.
+    /// `PWV6` is the column mean of `PWV7` times these (only when the audio's own columns are not at hand,
+    /// see `overview_from_columns`).
     pub pwv6_scale: [f64; 3],
+    /// `PWV6` from the audio: each of the 1200 columns is the mean of the raw band peaks over a trailing window of
+    /// this many columns' width (a column is `1 / 1200` of the track), per band.
+    #[serde(default = "default_overview_window")]
+    pub overview_window: [f64; 3],
+    /// `byte = scale * mean^gamma / p99^delta`, p99 being the 99th percentile of the band's 1200 means.
+    #[serde(default = "default_overview_scale")]
+    pub overview_scale: [f64; 3],
+    #[serde(default = "default_overview_gamma")]
+    pub overview_gamma: [f64; 3],
+    #[serde(default = "default_overview_delta")]
+    pub overview_delta: [f64; 3],
     /// `PWV4` bytes 3..=5 are `PWV6` times these.
     pub pwv4_scale: [f64; 3],
 }
 
 fn linear_curve() -> [f64; 3] {
     [1.0; 3]
+}
+
+fn default_overview_window() -> [f64; 3] {
+    [2.2, 1.8, 1.4]
+}
+
+fn default_overview_scale() -> [f64; 3] {
+    [51.7, 36.4, 87.0]
+}
+
+fn default_overview_gamma() -> [f64; 3] {
+    [1.0, 0.91, 1.04]
+}
+
+fn default_overview_delta() -> [f64; 3] {
+    [0.63, 0.92, 0.67]
 }
 
 impl Default for Tuning {
@@ -99,6 +127,10 @@ impl Default for Tuning {
             band_scale: [1.265, 1.17, 1.0],
             curve: [1.0, 1.0, 2.08],
             pwv6_scale: [0.56, 0.71, 1.2],
+            overview_window: default_overview_window(),
+            overview_scale: default_overview_scale(),
+            overview_gamma: default_overview_gamma(),
+            overview_delta: default_overview_delta(),
             pwv4_scale: [2.4, 1.6, 1.1],
         }
     }
@@ -186,6 +218,11 @@ impl Measured {
 
     pub fn column_count(&self) -> usize {
         self.columns.len()
+    }
+
+    /// Peak of each band's filter output per column, before any release or gain.
+    pub fn band_columns(&self) -> Vec<[f64; 3]> {
+        self.columns.iter().map(|c| c.band).collect()
     }
 }
 
@@ -360,7 +397,9 @@ pub fn analyze(audio: &Measured) -> Waveforms {
     };
     let (pwav, pwv2) = previews(n, &whites, &rms_over);
 
-    let (pwv6, pwv4) = overviews(&pwv7, t);
+    let raw: Vec<[f64; 3]> = columns.iter().map(|c| c.band).collect();
+    let pwv6 = overview_from_columns(&raw, t);
+    let pwv4 = pwv4_from(&pwv6, t);
 
     Waveforms { pwv3, pwv5, pwv7, gains, pwav, pwv2, pwv6, pwv4 }
 }
@@ -420,7 +459,52 @@ fn undo_curve(byte: u8, curve: f64) -> f64 {
     PWV7_MAX as f64 * (byte as f64 / PWV7_MAX as f64).powf(1.0 / curve)
 }
 
-/// `PWV6` and `PWV4` from the `PWV7` bytes.
+/// `PWV6` from the audio's own columns (the raw peak of each band's filter output per 1/150 s), the way Rekordbox's
+/// overview relates to the audio: a trailing mean over about two columns' width per band, then a power of that
+/// scaled by the band's 99th percentile, so the white spikes and the breakdowns keep their proportions.
+/// Fit against 40 Rekordbox 7.2 tracks: per-band correlation with its `PWV6` 0.996 / 0.990 / 0.990 on the held-out half
+/// (the mean of the `PWV7` bytes gave 0.87 / 0.75 / 0.80).
+pub fn overview_from_columns(raw: &[[f64; 3]], t: &Tuning) -> Vec<[u8; 3]> {
+    let n = raw.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let per = n as f64 / OVERVIEW_COLUMNS as f64;
+    let mut out = vec![[0u8; 3]; OVERVIEW_COLUMNS];
+    for j in 0..3 {
+        let mut prefix = Vec::with_capacity(n + 1);
+        prefix.push(0.0);
+        for c in raw {
+            prefix.push(prefix[prefix.len() - 1] + c[j]);
+        }
+        let means: Vec<f64> = (0..OVERVIEW_COLUMNS)
+            .map(|k| {
+                let hi = (k as f64 + 1.0) * per;
+                let lo = hi - t.overview_window[j] * per;
+                let a = (lo.floor().max(0.0) as usize).min(n - 1);
+                let b = (hi.ceil().max(1.0) as usize).min(n).max(a + 1);
+                (prefix[b] - prefix[a]) / (b - a) as f64
+            })
+            .collect();
+        let mut sorted = means.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let at = 0.99 * (sorted.len() - 1) as f64;
+        let lo = at.floor() as usize;
+        let hi = (lo + 1).min(sorted.len() - 1);
+        let p99 = sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo as f64);
+        for (k, m) in means.iter().enumerate() {
+            let v = if p99 > 0.0 && *m > 0.0 {
+                t.overview_scale[j] * m.powf(t.overview_gamma[j]) / p99.powf(t.overview_delta[j])
+            } else {
+                0.0
+            };
+            out[k][j] = v.round().min(PWV6_MAX as f64) as u8;
+        }
+    }
+    out
+}
+
+/// `PWV6` and `PWV4` from the `PWV7` bytes alone (the export path when the audio's columns are not at hand).
 fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
     let n = pwv7.len();
     if n == 0 {
@@ -436,8 +520,13 @@ fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
             out
         })
         .collect();
-    let pwv4: Vec<[u8; 6]> = pwv6
-        .iter()
+    let pwv4 = pwv4_from(&pwv6, t);
+    (pwv6, pwv4)
+}
+
+/// `PWV4` from `PWV6`.
+fn pwv4_from(pwv6: &[[u8; 3]], t: &Tuning) -> Vec<[u8; 6]> {
+    pwv6.iter()
         .map(|b6| {
             let mut b = [0u8; 6];
             for j in 0..3 {
@@ -452,8 +541,7 @@ fn overviews(pwv7: &[[u8; 3]], t: &Tuning) -> (Vec<[u8; 3]>, Vec<[u8; 6]>) {
             }
             b
         })
-        .collect();
-    (pwv6, pwv4)
+        .collect()
 }
 
 /// How the sections other than `PWV7` follow from the band bytes when only those
@@ -568,6 +656,13 @@ impl Waveforms {
         }
     }
 
+    /// Replaces the derived `PWV6` (and `PWV4`, which follows it) with the overview measured from the audio.
+    pub fn with_overview(mut self, pwv6: &[[u8; 3]], tuning: &Tuning) -> Waveforms {
+        self.pwv6 = pwv6.iter().map(|b| b.map(|v| v.min(PWV6_MAX))).collect();
+        self.pwv4 = pwv4_from(&self.pwv6, tuning);
+        self
+    }
+
     /// Replaces the derived `PWV3`, `PWV5` and `PWVC` values with the measured ones.
     pub fn with_exact(mut self, exact: &ExactColumns) -> Waveforms {
         let columns = self.pwv7.len();
@@ -643,6 +738,32 @@ mod tests {
 
     fn tone(rate: u32, seconds: f64, hz: f64, amp: f64) -> Measured {
         metered(rate, 2, &[&tone_samples(rate, seconds, hz, amp)])
+    }
+
+    #[test]
+    fn overview_keeps_spikes_and_breakdowns_of_the_audio() {
+        let t = Tuning::default();
+        let mut raw = vec![[0.2, 0.1, 0.02]; 12_000];
+        for c in raw.iter_mut().skip(6_000).take(600) {
+            *c = [0.0; 3];
+        }
+        for c in raw.iter_mut().skip(3_000).take(3) {
+            c[2] = 0.5;
+        }
+        let o = overview_from_columns(&raw, &t);
+        assert_eq!(o.len(), OVERVIEW_COLUMNS);
+        assert!(o[300][0] > 20 && o[300][1] > 10, "body of the track: {:?}", o[300]);
+        assert_eq!(o[630], [0, 0, 0], "breakdown");
+        let spike = o[301][2].max(o[302][2]).max(o[300][2]);
+        assert!(spike as f64 > 2.0 * o[200][2] as f64, "a hat spike stands out of the body: {spike} against {}", o[200][2]);
+        assert!(o.iter().all(|b| b.iter().all(|&v| v <= PWV6_MAX)));
+    }
+
+    #[test]
+    fn overview_of_nothing_is_empty_and_of_silence_is_silent() {
+        let t = Tuning::default();
+        assert!(overview_from_columns(&[], &t).is_empty());
+        assert!(overview_from_columns(&vec![[0.0; 3]; 500], &t).iter().all(|b| *b == [0, 0, 0]));
     }
 
     #[test]
