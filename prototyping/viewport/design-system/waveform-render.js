@@ -158,7 +158,9 @@ function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel) {
 /**
  * Reduce, smooth and paint the part [startFrac, endFrac] of the track into widthPx x heightPx device pixels.
  * `scrolling` aligns the sample grid to whole pixels (so peak buckets do not re-bucket while the viewport
- * slides), warms the envelope up on a lead-in, and recovers the sub-pixel motion by translating the paint.
+ * slides) and warms the envelope up on a lead-in. The view moves in whole device pixels: a fractional paint
+ * offset anti-aliases every one-pixel column against its neighbour, which lets the background bleed through
+ * and makes the whole waveform pulse (up to 22 % brightness) as the sub-pixel phase changes.
  */
 export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1 }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
@@ -179,14 +181,13 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
   const fracPerPx = (endFrac - startFrac) / widthPx;
   const leftReal = startFrac / fracPerPx;
   const leftFloor = Math.floor(leftReal);
-  const subPx = leftReal - leftFloor;
   const leadPx = Math.round(ENVELOPE_LEAD_CSS_PX * dpr);
   const total = leadPx + widthPx + 2;
   const shaped = smoothBands(
     reduceBands(bands, (leftFloor - leadPx) * fracPerPx, (leftFloor - leadPx + total) * fracPerPx, total),
     decayPerPixel,
   );
-  paintBands(ctx, shaped, { heightPx, palette, from: leadPx, count: widthPx + 2, offsetPx: -subPx });
+  paintBands(ctx, shaped, { heightPx, palette, from: leadPx, count: widthPx });
 }
 
 /** Dim a played region [0, widthPx) on a canvas that has an opaque ground painted. */

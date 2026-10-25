@@ -630,9 +630,10 @@ export default class WaveformDisplay {
         const x = this._zoom <= 1.0 ? this._playheadFrac * w : w / 2;
         ctx.strokeStyle = palette.playhead;
         ctx.lineWidth = 1;
+        const lineX = this._lineAt(x, 1);
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
+        ctx.moveTo(lineX, 0);
+        ctx.lineTo(lineX, h);
         ctx.stroke();
     }
 
@@ -647,7 +648,7 @@ export default class WaveformDisplay {
             const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
             const color = cue.color || '#4ade80';
             ctx.fillStyle = color;
-            ctx.fillRect(x - 0.5, 0, 1, h);
+            ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, 1, h);
             ctx.beginPath();
             ctx.arc(x, 2.5, 2.5, 0, Math.PI * 2);
             ctx.fill();
@@ -692,6 +693,15 @@ export default class WaveformDisplay {
         if (pxPerBeat < 20) return 'bars';      // bar lines, no beat ticks
         if (pxPerBeat < 32) return 'bars+beats'; // bars + faint beat ticks
         return 'full';
+    }
+
+    // x (CSS px) of a vertical line of `lineWidth` CSS px that lands on whole device pixels. A line on a
+    // fractional position is anti-aliased across two pixels, so its brightness pulses while the view scrolls.
+    _lineAt(x, lineWidth) {
+        const dpr = devicePixelRatio;
+        const deviceWidth = Math.max(1, Math.round(lineWidth * dpr));
+        const device = x * dpr;
+        return (deviceWidth % 2 ? Math.floor(device) + 0.5 : Math.round(device)) / dpr;
     }
 
     _beatX(frac, startFrac, endFrac, w) {
@@ -773,16 +783,18 @@ export default class WaveformDisplay {
                 if (!showBeats) continue;
                 ctx.strokeStyle = ink(palette, 0.3);
                 ctx.lineWidth = 0.5;
+                const beatX = this._lineAt(x, 0.5);
                 ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, h);
+                ctx.moveTo(beatX, 0);
+                ctx.lineTo(beatX, h);
                 ctx.stroke();
             } else {
                 ctx.strokeStyle = ink(palette, detail === 'bars+beats' ? 0.55 : 0.7);
                 ctx.lineWidth = 1;
+                const barX = this._lineAt(x, 1);
                 ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, h);
+                ctx.moveTo(barX, 0);
+                ctx.lineTo(barX, h);
                 ctx.stroke();
 
                 if (labelBars && (!labelPhrasesOnly || isPhrase)) {
@@ -806,9 +818,10 @@ export default class WaveformDisplay {
             const frac = beat.time_ms / durationMs;
             if (frac < startFrac || frac > endFrac) continue;
             const x = this._beatX(frac, startFrac, endFrac, w);
+            const lineX = this._lineAt(x, 1);
             ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
+            ctx.moveTo(lineX, 0);
+            ctx.lineTo(lineX, h);
             ctx.stroke();
             if (labelPhrases && barStride === 4) {
                 this._drawBarLabel(ctx, x, w, h, barNumber, true, palette);
