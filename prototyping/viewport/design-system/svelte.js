@@ -52,3 +52,4 @@ export { default as DragGhost } from './components/DragGhost.svelte';
 export { default as DropLine } from './components/DropLine.svelte';
 export { default as FileDropOverlay } from './components/FileDropOverlay.svelte';
 export { default as FilterInput } from './components/FilterInput.svelte';
+export { default as CommandPalette } from './components/CommandPalette.svelte';
