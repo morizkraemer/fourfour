@@ -899,6 +899,20 @@ export async function clearPlaylistTracks(playlistId: number) {
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
 
+/** Empty every favorite slot (the slots themselves stay). */
+export async function clearAllFavorites() {
+  let changed = false;
+  for (const pl of library.playlists) {
+    if (isFavoritePlaylistName(pl.name) && pl.track_ids.length > 0) {
+      pl.track_ids = [];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  await saveState();
+  syncTrackFavoriteFields();
+}
+
 /** Set test hot cues on selected track IDs */
 export async function setTestCuesOnSelected(ids: number[]) {
   try {

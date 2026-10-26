@@ -16,6 +16,7 @@ import {
   removeTracks,
   removeTracksFromPlaylist,
   clearPlaylistTracks,
+  clearAllFavorites,
   deletePlaylist,
   importDirectory,
   syncToUsb,
@@ -29,6 +30,8 @@ import {
 import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
 import { pickDirectory } from '../services/tauri.svelte.ts';
+import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { favouriteTrackIds } from '../lib/newPlaylist.ts';
 
 interface MenuItem {
   label?: string;
@@ -60,6 +63,15 @@ function hasUnanalyzedTracks() {
 export async function importIntoSource(sourceId: string) {
   const dir = await pickDirectory();
   if (dir) await importDirectory(dir, { targetSource: sourceId });
+}
+
+function moveFavouritesToNewPlaylistItem(onlySlot?: number): MenuItem {
+  const ids = favouriteTrackIds(library.playlists, favoriteSlotFromName, onlySlot);
+  return {
+    label: 'Move favourite tracks to new playlist',
+    disabled: ids.length === 0,
+    onClick: () => createPlaylistAndOpen(ids),
+  };
 }
 
 interface SourceMenuOptions {
@@ -141,6 +153,10 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
       onClick: () => importIntoSource(sourceId),
     });
 
+    if (isFavorite) {
+      items.push(moveFavouritesToNewPlaylistItem(favoriteSlotFromName(playlist.name) ?? undefined));
+    }
+
     const destructive: MenuItem[] = [];
     if (isFavorite && playlist.track_ids.length > 0) {
       destructive.push({
@@ -195,8 +211,17 @@ export function buildSidebarSectionMenuItems(
 ): MenuItem[] {
   const { onNewPlaylist, onAddFavorite, canAddFavorite = false } = opts;
   const items: MenuItem[] = [];
-  if (section === 'favorites' && canAddFavorite) {
-    items.push({ label: 'Add favorite', onClick: () => onAddFavorite?.() });
+  if (section === 'favorites') {
+    if (canAddFavorite) items.push({ label: 'Add favorite', onClick: () => onAddFavorite?.() });
+    items.push(moveFavouritesToNewPlaylistItem(), {
+      label: 'Clear favourites',
+      variant: 'danger',
+      disabled: favouriteTrackIds(library.playlists, favoriteSlotFromName).length === 0,
+      onClick: async () => {
+        if (!confirm('Clear all favourite tracks? The tracks stay in your library.')) return;
+        await clearAllFavorites();
+      },
+    });
   }
   if (section === 'library') {
     items.push(
