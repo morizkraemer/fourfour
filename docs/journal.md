@@ -101,3 +101,4 @@
 2026-10-25 14:51 orchestrator Q40 round 2: branch q40-rb-match 45d18d2 installed on Mac; white per-track level open (Merlin to choose)
 2026-10-25 15:34 orchestrator Q40 round 3: eb52c59 installed on Mac; Merlin must re-analyse tracks to see new overview
 2026-10-25 15:55 orchestrator - decided: Merlin: waveforms good enough for now (q40-rb-match = final waveform branch, contains the whole app stack)
+2026-10-26 05:04 orchestrator - landed: merged q40-rb-match + q30-grid into master (Merlin OK'd UI, USB output, schema v4, import button, deps, push); validation green

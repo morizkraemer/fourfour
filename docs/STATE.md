@@ -39,6 +39,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
 
 ## Queue
+### MERGED 2026-10-26 into master: q40-rb-match (whole app stack + waveforms) and q30-grid (analysis prototype). Full checks green (Rust tests, 172 app tests, check, build). CDJ checks for the brother: docs/architecture/cdj-checklist-2026-10.md.
 ### Q1–Q4, Q7, Q9–Q13 [landed] — playback, svelte-check 0, export tests, browser preview, benchmark, cache fix, packaging decision, key detector (57%), BPM/grid (BPM ±0.1 86%, grid ±20 ms 47%). See journal + docs/analysis/.
 ### Q5 Unsigned macOS build [queued] [mac] — `cargo tauri build` via mac-queue; report artifact + log; no signing. 30 min
 ### Q6 Key source PDB vs OneLibrary [handed to brother]
