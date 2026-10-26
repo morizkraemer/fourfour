@@ -83,6 +83,10 @@
     if (ui.activeSidebarRow === oldName) {
       ui.activeSidebarRow = draft;
     }
+    const target = ui.organize.target;
+    if (target?.playlistId === playlistId) {
+      ui.organize.target = { ...target, id: draft, label: draft };
+    }
   }
 
   $effect(() => {

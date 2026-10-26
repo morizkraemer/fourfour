@@ -66,20 +66,15 @@
     let acc = 0;
     let travelled = 0;
     let lastY = event.clientY;
-    let locked = false;
 
     function onMove(ev) {
-      const movement = locked ? ev.movementY : ev.clientY - lastY;
+      const movement = ev.clientY - lastY;
       lastY = ev.clientY;
       travelled += Math.abs(movement);
       if (!dragging) {
         if (travelled < DRAG_THRESHOLD_PX) return;
         dragging = true;
         document.body.classList.add('ff-scrub-dragging');
-        if (el?.requestPointerLock) {
-          Promise.resolve(el.requestPointerLock()).catch(() => {});
-          locked = true;
-        }
       }
       acc -= movement;
       const units = Math.trunc(acc / model.pxPerUnit);
@@ -94,7 +89,6 @@
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
       document.body.classList.remove('ff-scrub-dragging');
-      if (document.pointerLockElement === el) document.exitPointerLock();
       if (dragging) {
         dragging = false;
         commitNow();
