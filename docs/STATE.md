@@ -78,7 +78,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 status: done (queue drained 2026-10-26 evening) · all on q41-feedback 38b771a, not merged to master · Mac install waits for the Mac to wake
 landed: (1) player fixes F3/F4/F5/F14/F20/F24 (2) layout: right sidebar full height, toggle in top bar (3) hot cues A–H + memory cues + CUE button + edit lock F9b/F25 (4) drag/scroll/type BPM + key in inspector + players, ×2/÷2, "Adjust beat grid" separate; playlist Rename F17/F18 (5) auto-resume analysis at launch
 checks: cargo build+test green, 370 app tests, check 0 errors, build ok (headless walkthroughs only; no Tauri window)
-open: F21 settings + F22 inspector overhaul (new mockup round); writer drops cue names/colours (brother, docs/architecture/cues.md); unanalysed tracks can't get BPM/key edits
+open: mockup round 2 ready for review (docs/ui/design-round-wm-2.md, board https://dev.tail87069a.ts.net:5233 #inspector-2 #settings-2); writer drops cue names/colours (brother, docs/architecture/cues.md); unanalysed tracks can't get BPM/key edits
 parked: sync UI round 3 (2 open answers); Rust auto cues/energy (licence)
 
 ## Rundown

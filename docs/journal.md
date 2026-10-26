@@ -123,3 +123,4 @@
 2026-10-26 19:57 orchestrator - merged wh-dragvalue (F17/F18) 38b771a; full checks green; queue drained; Mac offline, install retry loop waiting
 2026-10-26 20:20 orchestrator - PM: usage reset, resume; queue drained → own priorities: W-M2 mockup round 2 (F21 settings, F22 inspector), W-Q hygiene (flaky now-lane test, svelte/cargo warnings)
 2026-10-26 20:33 orchestrator - merged wq-hygiene (flaky now-lane test fixed, 0 warnings) into q41-feedback
+2026-10-26 20:39 orchestrator - merged wm2-mockups (round 2: inspector F22 + settings F21, recs C / A+B) into q41-feedback 0934a98; board https://dev.tail87069a.ts.net:5233 (served from the wm2 worktree)
