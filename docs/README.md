@@ -25,6 +25,7 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`components.md`](ui/components.md) | current | Component & mockup checklist. |
 | [`design-system.md`](ui/design-system.md) | current | The fourfour design system — tokens, primitives, patterns. |
 | [`review-2026-10-15.md`](ui/review-2026-10-15.md) | reference | UX review, 2026-10-15. |
+| [`keyboard-shortcuts.md`](ui/keyboard-shortcuts.md) | current | Shortcut registry, rebinding, Tab/Shift-Tab, command palette. |
 | [`usb-sync-spec.md`](ui/usb-sync-spec.md) | current | USB sync spec. |
 | [`usb-sync-decisions.md`](ui/usb-sync-decisions.md) | current | USB sync design decisions. |
 | [`player-strip.md`](ui/player-strip.md) | current | Player strip implementation plan. |

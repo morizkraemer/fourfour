@@ -6,10 +6,10 @@
   import './settings-page.css';
   import Icon from './Icon.svelte';
 
-  /** @typedef {{ label: string, key: string, items: Array<{ title: string, description: string, control?: import('svelte').Snippet }> }} SettingsSection */
+  /** @typedef {{ label: string, key: string, items?: Array<{ title: string, description: string, control?: import('svelte').Snippet }>, body?: import('svelte').Snippet }} SettingsSection */
 
-  /** @type {{ sections?: SettingsSection[], fullscreen?: boolean, onClose?: () => void }} */
-  let { sections = [], fullscreen = false, onClose } = $props();
+  /** @type {{ sections?: SettingsSection[], fullscreen?: boolean, initialKey?: string, onClose?: () => void }} */
+  let { sections = [], fullscreen = false, initialKey = '', onClose } = $props();
 
   let activeKey = $state('');
 
@@ -17,7 +17,7 @@
     if (sections.length === 0) return;
     const keys = sections.map((s, i) => s.key ?? String(i));
     if (!activeKey || !keys.includes(activeKey)) {
-      activeKey = keys[0];
+      activeKey = keys.includes(initialKey) ? initialKey : keys[0];
     }
   });
 
@@ -67,8 +67,11 @@
         class:ff-settings-page__pane-tab-content--active={activeKey === tabKey}
       >
         <h2 class="ff-settings-page__pane-heading">{sec.label}</h2>
+        {#if sec.body}
+          {@render sec.body()}
+        {:else}
         <div class="ff-settings-page__fields-container">
-          {#each sec.items as field (field.title)}
+          {#each sec.items ?? [] as field (field.title)}
             <div class="ff-settings-page__field">
               <div class="ff-settings-page__field-texts">
                 <span class="ff-settings-page__field-label">{field.title}</span>
@@ -82,6 +85,7 @@
             </div>
           {/each}
         </div>
+        {/if}
       </div>
     {/each}
   </div>

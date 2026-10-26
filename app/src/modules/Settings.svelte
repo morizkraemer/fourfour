@@ -22,6 +22,7 @@
   import { pickDirectory, getIsTauri } from '../services/tauri.svelte.ts';
   import { openRekordboxImport } from '../stores/rekordbox-import.svelte.ts';
   import RekordboxImport from './RekordboxImport.svelte';
+  import ShortcutsSettings from './ShortcutsSettings.svelte';
   import {
     playbackStop,
     syncPlaybackAudioConfig,
@@ -136,6 +137,11 @@
       ],
     },
     {
+      label: 'Keyboard shortcuts',
+      key: 'shortcuts',
+      body: shortcutsBody,
+    },
+    {
       label: 'Debug',
       key: 'debug',
       items: [
@@ -188,6 +194,10 @@
     }
   }
 </script>
+
+{#snippet shortcutsBody()}
+  <ShortcutsSettings />
+{/snippet}
 
 {#snippet libraryPathControl()}
   <div class="ff-settings-path-row">
@@ -302,7 +312,7 @@
     tabindex="-1"
     onkeydown={onSettingsKeydown}
   >
-    <SettingsPage {sections} fullscreen onClose={closeSettings} />
+    <SettingsPage {sections} fullscreen initialKey={ui.settingsTab} onClose={closeSettings} />
   </div>
 {/if}
 
