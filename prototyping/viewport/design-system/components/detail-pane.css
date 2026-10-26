@@ -255,7 +255,25 @@
   font-size: 11px;
   color: var(--ff-muted);
   line-height: 1.5;
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ff-detail-pane__file-path-val:hover {
+  color: var(--ff-text);
+  text-decoration: underline;
+}
+
+.ff-detail-pane__file-path-val:focus-visible {
+  color: var(--ff-text);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  border-radius: var(--ff-radius-xs);
 }
 
 /* Action Links (Missing Mode) */

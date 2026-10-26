@@ -26,6 +26,7 @@
 <script>
   import './detail-pane.css';
   import Waveform from './Waveform.svelte';
+  import { middleTruncate } from '../utils/middle-truncate.js';
 
   let {
     mode = 'empty',
@@ -38,6 +39,8 @@
     cover = '',
     peaks = null,
     bands = null,
+    onRevealPath = undefined,
+    onPathContextMenu = undefined,
   } = $props();
 
   let isMissing = $derived(mode === 'missing');
@@ -74,6 +77,29 @@
   let displayPath = $derived(
     filePath || (isMissing ? '/Volumes/Music/Tale Of Us/Endless Run/02 Voidwalker.flac' : '')
   );
+
+  let pathEl = $state(null);
+  let pathMaxChars = $state(Infinity);
+
+  $effect(() => {
+    const el = pathEl;
+    if (!el) return;
+    const measure = () => {
+      const style = getComputedStyle(el);
+      const ctx = document.createElement('canvas').getContext('2d');
+      if (!ctx) return;
+      ctx.font = `${style.fontSize} ${style.fontFamily}`;
+      const charWidth = ctx.measureText('0').width;
+      const innerWidth = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      pathMaxChars = charWidth > 0 ? Math.max(1, Math.floor(innerWidth / charWidth)) : Infinity;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
+
+  let shownPath = $derived(middleTruncate(displayPath, pathMaxChars));
 </script>
 
 <div class="ff-detail-pane">
@@ -156,7 +182,18 @@
     {#if displayPath}
       <div class="ff-detail-pane__file-path-section">
         <div class="ff-detail-pane__section-title">FILE PATH</div>
-        <div class="ff-detail-pane__file-path-val">{displayPath}</div>
+        <button
+          type="button"
+          bind:this={pathEl}
+          class="ff-detail-pane__file-path-val"
+          title={displayPath}
+          onclick={() => onRevealPath?.()}
+          oncontextmenu={(e) => {
+            if (!onPathContextMenu) return;
+            e.preventDefault();
+            onPathContextMenu(e);
+          }}
+        >{shownPath}</button>
       </div>
     {/if}
 

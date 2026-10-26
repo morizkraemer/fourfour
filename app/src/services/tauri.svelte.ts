@@ -306,6 +306,10 @@ export async function scanFiles(paths: string[]): Promise<TrackInfo[]> {
   }
 }
 
+export async function revealInFileManager(path: string): Promise<void> {
+  await invoke<void>('reveal_in_finder', { path });
+}
+
 export async function removeTracks(ids: number[]): Promise<void> {
   try {
     return await invoke<void>('remove_tracks', { ids });

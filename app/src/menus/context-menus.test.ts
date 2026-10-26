@@ -3,6 +3,8 @@ import {
   buildColumnContextMenuItems,
   buildSidebarSectionMenuItems,
   buildTrackContextMenuItems,
+  buildRevealItem,
+  revealLabel,
 } from './context-menus.ts';
 import { FAVORITE_SLOTS, library } from '../stores/library.svelte.ts';
 
@@ -34,11 +36,21 @@ describe('buildTrackContextMenuItems', () => {
   it('returns nothing for an empty selection', () => {
     expect(buildTrackContextMenuItems({ trackIds: [], activePlaylist: null, isUsbView: false })).toEqual([]);
   });
-  it('only offers favorites on a USB view', () => {
+  it('only offers favorites and reveal on a USB view', () => {
     const items = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: null, isUsbView: true });
-    expect(items.map((i) => i.label)).toEqual(['Add to Favorites']);
+    expect(items.map((i) => i.label)).toEqual(['Add to Favorites', revealLabel()]);
     expect(items[0].items).toHaveLength(FAVORITE_SLOTS);
     expect(items[0].items![0]).toMatchObject({ label: 'Favorite 1', shortcut: '1', checked: false });
+  });
+  it('offers reveal for a single selection only', () => {
+    const one = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: null, isUsbView: false });
+    const many = buildTrackContextMenuItems({ trackIds: [1, 2], activePlaylist: null, isUsbView: false });
+    expect(one.map((i) => i.label)).toContain(revealLabel());
+    expect(many.map((i) => i.label)).not.toContain(revealLabel());
+  });
+  it('disables reveal for a track without a file path', () => {
+    expect(buildRevealItem(undefined).disabled).toBe(true);
+    expect(buildRevealItem('/a/b.mp3').disabled).toBe(false);
   });
   it('uses singular and plural labels and a danger remove entry', () => {
     const one = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: null, isUsbView: false });
@@ -53,6 +65,20 @@ describe('buildTrackContextMenuItems', () => {
     const single = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: pl, isUsbView: false });
     expect(many.map((i) => i.label)).toContain('Remove from Warmup');
     expect(single.map((i) => i.label)).toContain('Remove from playlist');
+  });
+});
+
+describe('revealLabel', () => {
+  it('uses platform wording', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const set = (platform: string) =>
+      Object.defineProperty(globalThis, 'navigator', { value: { platform }, configurable: true });
+    set('MacIntel');
+    expect(revealLabel()).toBe('Show in Finder');
+    set('Linux x86_64');
+    expect(revealLabel()).toBe('Show in folder');
+    if (original) Object.defineProperty(globalThis, 'navigator', original);
+    else delete (globalThis as any).navigator;
   });
 });
 
