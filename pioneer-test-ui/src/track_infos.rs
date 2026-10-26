@@ -1,6 +1,6 @@
 use pioneer_library::{LocalLibrary, RowPreview};
 
-pub use pioneer_library::{ROW_BAND_COLUMNS, effective_preview, row_bands};
+pub use pioneer_library::{effective_preview, row_bands};
 
 use crate::dto::TrackInfo;
 
