@@ -21,6 +21,7 @@
   import AppStatusBar   from './modules/AppStatusBar.svelte';
   import Settings       from './modules/Settings.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
+  import CommandPalette from './modules/CommandPalette.svelte';
 
   import {
     ui,
@@ -167,6 +168,7 @@
 </div>
 
 <Settings />
+<CommandPalette />
 
 <Dialog
   open={library.showAnalysisPrompt}

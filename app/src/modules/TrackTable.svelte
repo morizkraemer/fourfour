@@ -3,7 +3,7 @@
   column visibility menu, and playlist-aware row moves.
 -->
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     ColumnHeader,
     TrackRow,
@@ -52,7 +52,7 @@
     buildSourceContextMenuItems,
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
-  import { rowWindow, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
+  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -92,6 +92,22 @@
 
   onMount(() => {
     initTableColumns();
+  });
+
+  $effect(() => {
+    const request = ui.revealTrack;
+    if (!request || embedded) return;
+    void tick().then(() => {
+      if (!tableScrollEl) return;
+      const index = currentTracks.findIndex((t) => t.id === request.id);
+      if (index < 0) return;
+      tableScrollEl.scrollTop = scrollTopToReveal(index, {
+        scrollTop: tableScrollEl.scrollTop,
+        viewportHeight: tableScrollEl.clientHeight,
+        headerHeight,
+        rowCount: currentTracks.length,
+      });
+    });
   });
 
   async function handleImport() {
