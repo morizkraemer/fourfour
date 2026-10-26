@@ -5,6 +5,8 @@
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
   import ExpandedPlayer from './ExpandedPlayer.svelte';
+  import { cuesOf } from '../stores/cues.svelte.ts';
+  import { cueMarkers } from '../lib/cues.ts';
   import { ui, setPlayerHeight, commitPlayerHeight, resetPlayerHeight } from '../stores/ui.svelte.ts';
   import { PLAYER_HEIGHT, clampPlayerHeight, defaultPlayerHeight, maxPlayerHeight } from '../lib/playerHeight.ts';
   import {
@@ -18,6 +20,8 @@
     cuePreviewStop,
     toggleExpanded,
   } from '../stores/player.svelte.ts';
+
+  let cueMarkerList = $derived(cueMarkers(cuesOf(player.track?.id), player.track?.durationMs ?? 0));
 
   let playerRoot;
   let viewportHeight = $state(window.innerHeight);
@@ -57,7 +61,7 @@
     totalTime={totalTime()}
     bpm={player.track?.bpm || '—'}
     key={player.track?.key || '—'}
-    cues={player.track?.cues || []}
+    cues={cueMarkerList}
     bands={player.track?.bands ?? null}
     bandsOverview={player.track?.bandsOverview ?? null}
     beats={player.track?.beats ?? []}

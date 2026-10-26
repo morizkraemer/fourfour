@@ -19,7 +19,9 @@ import {
 } from '../stores/library.svelte.ts';
 import { importIntoSource } from '../menus/context-menus.ts';
 import { selection, selectionCount } from '../stores/selection.svelte.ts';
-import { player, togglePlay, toggleExpanded } from '../stores/player.svelte.ts';
+import { player, togglePlay, toggleExpanded, cueTapPress } from '../stores/player.svelte.ts';
+import { addMemoryCueAtPlayhead, deleteHotCue, triggerHotCue } from '../stores/cue-actions.ts';
+import { HOT_CUE_SLOTS, slotLetter } from '../lib/cues.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
@@ -29,6 +31,7 @@ const GROUP = {
   playback: 'Playback',
   library: 'Library',
   view: 'View',
+  cues: 'Cues',
   favorites: 'Favorites',
 } as const;
 
@@ -58,6 +61,31 @@ const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS },
     run: () => void toggleFavoriteSlot(slot, [...selection.ids]),
   };
 });
+
+const hotCueActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_, i) => {
+  const slot = i + 1;
+  const letter = slotLetter(slot);
+  return [
+    {
+      id: `cues.hot${slot}`,
+      label: `Hot cue ${letter}: set at playhead or jump`,
+      group: GROUP.cues,
+      defaultBinding: `Shift+${slot}`,
+      palette: false,
+      when: () => player.track != null,
+      run: () => void triggerHotCue(slot),
+    },
+    {
+      id: `cues.hot${slot}.delete`,
+      label: `Delete hot cue ${letter}`,
+      group: GROUP.cues,
+      defaultBinding: `Alt+Shift+${slot}`,
+      palette: false,
+      when: () => player.track != null,
+      run: () => deleteHotCue(slot),
+    },
+  ];
+}).flat();
 
 export function buildAppActions(): ShortcutAction[] {
   return [
@@ -114,6 +142,23 @@ export function buildAppActions(): ShortcutAction[] {
       when: () => player.track != null,
       run: () => void togglePlay(),
     },
+    {
+      id: 'cues.cue',
+      label: 'Cue: return to cue point, or set it at the playhead',
+      group: GROUP.cues,
+      defaultBinding: 'C',
+      when: () => player.track != null,
+      run: () => void cueTapPress(),
+    },
+    {
+      id: 'cues.memory.add',
+      label: 'Add memory cue at playhead',
+      group: GROUP.cues,
+      defaultBinding: 'M',
+      when: () => player.track != null,
+      run: addMemoryCueAtPlayhead,
+    },
+    ...hotCueActions,
     {
       id: 'library.search',
       label: 'Search tracks',

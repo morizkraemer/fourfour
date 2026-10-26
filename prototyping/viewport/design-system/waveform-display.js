@@ -27,6 +27,8 @@ import { drawBandRange, dimPlayed, ink, paletteVersion, wavePalette } from './wa
 import { PlayheadClock } from './playhead-clock.js';
 
 const DRAG_THRESHOLD_PX = 4;
+const CUE_TAB_W = 12;
+const CUE_TAB_H = 12;
 
 const OVERVIEW_DECAY = 0.93;
 const COMPACT_DECAY = 0.88;
@@ -191,6 +193,14 @@ export default class WaveformDisplay {
     setBeats(beats) {
         if (!this._data || this._data.beats === beats) return;
         this._data = { ...this._data, beats };
+        this._paint();
+    }
+
+    /** Replace the cue markers only (an edit): zoom, scroll position and the rest of the data stay. */
+    setCues(cues) {
+        if (!this._data || this._data.cues === cues) return;
+        this._data = { ...this._data, cues };
+        this._overviewDirty = true;
         this._paint();
     }
 
@@ -533,7 +543,7 @@ export default class WaveformDisplay {
             for (const cue of cues) {
                 const frac = Math.max(0, Math.min(1, cue.position ?? 0));
                 ctx.fillStyle = cue.color || '#4ade80';
-                ctx.fillRect(frac * w - 0.5, 0, 1, h);
+                ctx.fillRect(this._lineAt(frac * w, 1) - 0.5, 0, 1, h);
             }
         }
     }
@@ -595,9 +605,19 @@ export default class WaveformDisplay {
             const color = cue.color || '#4ade80';
             ctx.fillStyle = color;
             ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, 1, h);
-            ctx.beginPath();
-            ctx.arc(x, 2.5, 2.5, 0, Math.PI * 2);
-            ctx.fill();
+            if (cue.label && this._mode === 'expanded') {
+                const lineX = this._lineAt(x, 1);
+                ctx.fillRect(lineX - 0.5, 0, CUE_TAB_W, CUE_TAB_H);
+                ctx.fillStyle = '#0a0a0a';
+                ctx.font = '700 9px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(cue.label, lineX - 0.5 + CUE_TAB_W / 2, CUE_TAB_H / 2 + 0.5);
+            } else {
+                ctx.beginPath();
+                ctx.arc(x, 2.5, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
     }
 

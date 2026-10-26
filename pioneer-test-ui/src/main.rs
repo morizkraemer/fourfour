@@ -451,40 +451,18 @@ fn set_test_cues(
 ) -> Result<Vec<TrackInfo>, String> {
     let lib = state.lock().map_err(|e| e.to_string())?;
 
+    let cue = |hot_cue_number: u32, time_ms: u32| pioneer_library::rekordbox::ImportedCue {
+        hot_cue_number,
+        time_ms,
+        loop_time_ms: None,
+        color: None,
+        name: String::new(),
+    };
     for &track_id in &ids {
-        let Some(existing) = lib
-            .get_analysis(track_id as i64)
-            .map_err(|e| e.to_string())?
-        else {
+        if lib.get_analysis(track_id as i64).map_err(|e| e.to_string())?.is_none() {
             continue;
-        };
-
-        let new_analysis = models::AnalysisResult {
-            cue_points: vec![
-                models::CuePoint {
-                    hot_cue_number: 0, // Memory cue
-                    time_ms: 60_000,
-                    loop_time_ms: None,
-                },
-                models::CuePoint {
-                    hot_cue_number: 1, // Hot cue A
-                    time_ms: 75_000,
-                    loop_time_ms: None,
-                },
-                models::CuePoint {
-                    hot_cue_number: 2, // Hot cue B
-                    time_ms: 90_000,
-                    loop_time_ms: None,
-                },
-            ],
-            beat_grid: existing.beat_grid,
-            waveform: existing.waveform,
-            bpm: existing.bpm,
-            key: existing.key,
-            energy: existing.energy,
-            color_waveform: None,
-        };
-        lib.set_analysis(track_id as i64, &new_analysis)
+        }
+        lib.set_cues(track_id as i64, &[cue(0, 60_000), cue(1, 75_000), cue(2, 90_000)])
             .map_err(|e| e.to_string())?;
     }
 
@@ -767,6 +745,22 @@ async fn get_analysis_data(
     tauri::async_runtime::spawn_blocking(move || {
         let lib = shared.lock().map_err(|e| e.to_string())?;
         analysis_payload::build_analysis_json(&lib, track_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Replace the hot and memory cues of a track (slot 0 is a memory cue, 1 to 8 are A to H).
+#[tauri::command]
+async fn set_cues(
+    track_id: i64,
+    cues: Vec<pioneer_library::rekordbox::ImportedCue>,
+    state: State<'_, SharedLibrary>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.set_cues(track_id, &cues).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1158,6 +1152,7 @@ fn main() {
             set_analysis_backend,
             get_analysis_data,
             set_beat_grid,
+            set_cues,
             get_track_artwork,
             playback_play,
             playback_pause,
