@@ -6,3 +6,4 @@ export { default as MainWindow } from './MainWindow.svelte';
 export * from './mock-data.js';
 export { default as Decisions } from './local/Decisions.svelte';
 export { default as MwBoards } from './local/MwBoards.svelte';
+export { default as InspBoards } from './local/InspBoards.svelte';
