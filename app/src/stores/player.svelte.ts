@@ -5,6 +5,7 @@
 import {
   getAnalysisData,
   invalidateAnalysisCache,
+  listenToAnalysisPartial,
   listenToAnalysisProgress,
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
@@ -330,14 +331,20 @@ let playerAnalysisListenerInstalled = false;
 export function initPlayerAnalysisRefresh() {
   if (playerAnalysisListenerInstalled) return;
   playerAnalysisListenerInstalled = true;
-  listenToAnalysisProgress((progress) => {
-    const trackId = progress.track_id;
+  const refreshLoadedTrack = (trackId?: number) => {
     const loaded = player.track;
     if (!trackId || !loaded || loaded.id !== trackId) return;
     invalidateAnalysisCache(trackId);
     player.loading = true;
     void enrichPlayerTrack(loadGeneration, trackId, loaded);
-  });
+  };
+  listenToAnalysisProgress((progress) => refreshLoadedTrack(progress.track_id));
+  listenToAnalysisPartial((partial) => refreshLoadedTrack(partial.track_id));
+}
+
+function prioritizeIfUnanalyzed(trackId: number, analyzedFallback: boolean) {
+  const libTrack = library.tracks.find((t) => t.id === trackId);
+  if (!(libTrack?.analyzed ?? analyzedFallback)) requestBackgroundAnalysis(trackId);
 }
 
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
@@ -366,11 +373,7 @@ export async function loadPlayerTrack(input: any) {
     void stopped.then(() => (gen === loadGeneration ? playFromStart() : undefined));
   }
 
-  const libTrack = library.tracks.find((t) => t.id === trackInfo.id);
-  const analyzed = libTrack?.analyzed ?? trackInfo.has_analysis ?? trackInfo.tempo > 0;
-  if (!analyzed) {
-    requestBackgroundAnalysis(trackInfo.id);
-  }
+  prioritizeIfUnanalyzed(trackInfo.id, trackInfo.has_analysis ?? trackInfo.tempo > 0);
 
   if (cached) return;
 
@@ -388,6 +391,7 @@ export async function playFromStart() {
   seekTargetMs = null;
   player.progress = 0;
   player.error = null;
+  prioritizeIfUnanalyzed(player.track.id, player.track.bpm !== '—');
   await ensureTickListener();
   try {
     await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);

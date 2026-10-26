@@ -63,11 +63,30 @@ impl fmt::Display for Cancelled {
 
 impl std::error::Error for Cancelled {}
 
+static NEVER_PAUSED: AtomicBool = AtomicBool::new(false);
+
+pub struct Control<'a> {
+    pub cancel: &'a AtomicBool,
+    pub pause: &'a AtomicBool,
+    pub on_waveform: Option<&'a (dyn Fn(&Waveforms) + Sync)>,
+}
+
+impl<'a> Control<'a> {
+    pub fn new(cancel: &'a AtomicBool) -> Self {
+        Control { cancel, pause: &NEVER_PAUSED, on_waveform: None }
+    }
+}
+
 pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysis> {
     analyze_cancellable(engine, path, cfg, &AtomicBool::new(false))
 }
 
 pub fn analyze_cancellable(engine: &BeatEngine, path: &Path, cfg: &Config, cancel: &AtomicBool) -> Result<Analysis> {
+    analyze_controlled(engine, path, cfg, &Control::new(cancel))
+}
+
+pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, control: &Control) -> Result<Analysis> {
+    let cancel = control.cancel;
     let total = Instant::now();
     let t = Instant::now();
     let native = decode_mono(path)?;
@@ -101,11 +120,16 @@ pub fn analyze_cancellable(engine: &BeatEngine, path: &Path, cfg: &Config, cance
             s.spawn(|| {
                 let t = Instant::now();
                 let w = waveform::compute(&native.samples, native.rate);
+                if let Some(on_waveform) = control.on_waveform {
+                    if !cancel.load(Ordering::Relaxed) {
+                        on_waveform(&w);
+                    }
+                }
                 (w, ms(t))
             })
         });
         let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
-            let bt = engine.analyze(&native.samples, native.rate, cfg.threads)?;
+            let bt = engine.analyze(&native.samples, native.rate, cfg.threads, control)?;
             let t = Instant::now();
             let delay = mp3::timeline_shift_s(path, cfg.mp3_rule);
             let mp3_ms = ms(t);

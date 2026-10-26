@@ -159,21 +159,26 @@ fn scan_files(
     Ok(added)
 }
 
-/// Move a waiting track to the front of the analysis queue (next slot when a worker frees up).
+/// Analyse a track as fast as possible: it leaves the queue for the now lane (all threads,
+/// background analysis paused) and its waveform arrives first as `analysis-partial`.
 #[tauri::command]
-fn prioritize_analysis(
+async fn prioritize_analysis(
     track_id: i64,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
     coordinator: State<'_, AnalysisCoordinator>,
 ) -> Result<(), String> {
-    coordinator.with_queue(|queue| {
-        if let Some(pos) = queue.iter().position(|(id, _)| *id == track_id) {
-            if pos > 0 {
-                let item = queue.remove(pos).unwrap();
-                queue.push_front(item);
-            }
-        }
-    });
-    Ok(())
+    let shared: SharedLibrary = state.inner().clone();
+    let item = {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        resolve_analysis_work(&lib, &[track_id])?.into_iter().next()
+    };
+    let Some(item) = item else {
+        return Ok(());
+    };
+    let sink = Arc::new(TauriAnalysisSink(app.clone()));
+    let env = analysis_backend_env(&app);
+    analysis_run::prioritize_track(shared, coordinator.inner().clone(), item, sink, env).await
 }
 
 /// Append or prepend tracks to the active analysis run (no-op when idle).
@@ -191,6 +196,12 @@ fn enqueue_analysis(
     let items = resolve_analysis_work(&lib, &ids)?;
     Ok(merge_into_analysis_queue(&coordinator, items, front))
 }
+
+#[derive(serde::Serialize, Clone)]
+struct PartialPayload {
+    track_id: u32,
+}
+
 struct TauriAnalysisSink(AppHandle);
 
 impl AnalysisSink for TauriAnalysisSink {
@@ -205,6 +216,10 @@ impl AnalysisSink for TauriAnalysisSink {
                 ProgressPayload { current, total, message, track_id: Some(track_id as u32) },
             )
             .ok();
+    }
+
+    fn partial(&self, track_id: i64) {
+        self.0.emit("analysis-partial", PartialPayload { track_id: track_id as u32 }).ok();
     }
 
     fn complete(&self) {

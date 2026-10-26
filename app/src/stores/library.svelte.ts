@@ -21,6 +21,7 @@ import {
   ejectVolume as tauriEjectVolume,
   wipeUsb as tauriWipeUsb,
   listenToAnalysisProgress,
+  listenToAnalysisPartial,
   listenToAnalysisComplete,
   listenToWriteComplete,
   lastTauriError,
@@ -420,30 +421,24 @@ function unanalyzedIds(ids: number[]): number[] {
   });
 }
 
-/** Move a track to the front of the waiting analysis queue. */
-function bumpAnalysisQueuePriority(trackId: number) {
-  if (!library.analyzingTrackIds.includes(trackId)) return;
-  library.analyzingTrackIds = [
-    trackId,
-    ...library.analyzingTrackIds.filter((id) => id !== trackId),
-  ];
-  void tauriPrioritizeAnalysis(trackId);
-}
-
 /**
- * Ensure a track is analyzed — used when loading into the player.
- * Starts a background run when idle; bumps queue priority when already queued.
+ * Analyse a track now — used when it is loaded into the player or played.
+ * The backend moves it to its fast lane (queued or not) or starts a run when idle;
+ * the waveform arrives first as `analysis-partial`, the full result as `analysis-progress`.
  */
 export function requestBackgroundAnalysis(trackId: number) {
   const track = library.tracks.find((t) => t.id === trackId);
   if (!track || track.analyzed) return;
 
   if (isTrackAnalyzing(trackId)) {
-    bumpAnalysisQueuePriority(trackId);
-    return;
+    library.analyzingTrackIds = [trackId, ...library.analyzingTrackIds.filter((id) => id !== trackId)];
+  } else {
+    markTracksPendingAnalysis([trackId]);
+    library.analyzing = true;
+    library.analyzingTrackIds = [...library.analyzingTrackIds, trackId];
+    library.statusMessage = 'Analyzing track…';
   }
-
-  void analyzeTrackIds([trackId]);
+  void tauriPrioritizeAnalysis(trackId);
 }
 
 function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string }, fileName: string) {
@@ -597,6 +592,11 @@ function handleAnalysisProgressEvent(progress: {
   if (track) finishAnalyzingTrack(track.id);
 }
 
+function handleAnalysisPartialEvent(payload: { track_id: number }) {
+  const track = library.tracks.find((t) => t.id === payload.track_id);
+  if (track) void refreshTrackAnalysisDisplay(track);
+}
+
 function handleAnalysisCompleteEvent() {
   library.analyzing = false;
   library.analyzingTrackIds = [];
@@ -714,6 +714,7 @@ export async function initLibrary() {
     if (!libraryListenersInstalled) {
       libraryListenersInstalled = true;
       listenToAnalysisProgress(handleAnalysisProgressEvent);
+      listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
       listenToWriteComplete(() => {
         library.syncing = false;

@@ -559,6 +559,25 @@ export function listenToAnalysisProgress(
   return () => unsubscribe();
 }
 
+/** The waveform of a prioritised track is stored; tempo, grid and key follow with the full result. */
+export function listenToAnalysisPartial(callback: (payload: { track_id: number }) => void) {
+  let unsubscribe: () => void = () => {};
+  try {
+    listen<{ track_id: number }>('analysis-partial', (event) => {
+      callback(event.payload);
+    })
+      .then((unsub) => {
+        unsubscribe = unsub;
+      })
+      .catch((err) => {
+        lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
+      });
+  } catch (err) {
+    lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
+  }
+  return () => unsubscribe();
+}
+
 export function listenToAnalysisComplete(callback: () => void) {
   let unsubscribe: () => void = () => {};
   try {
