@@ -1,0 +1,43 @@
+.ff-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ff-space-2);
+  flex: none;
+  padding: 1px 5px 1px 4px;
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  background: transparent;
+  color: var(--ff-text);
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label-sm);
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--ff-motion-fast) var(--ff-easing), border-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-lock--icon {
+  padding: 2px;
+  border-color: transparent;
+}
+
+.ff-lock:hover,
+.ff-lock--hover {
+  background: var(--ff-hover);
+  border-color: var(--ff-border-hover);
+}
+
+.ff-lock--open {
+  color: var(--ff-muted);
+  border-style: dashed;
+}
+
+.ff-lock--open:hover {
+  color: var(--ff-text-mid);
+}
+
+.ff-lock:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--ff-border-hi);
+}

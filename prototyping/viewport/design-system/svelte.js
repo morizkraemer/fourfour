@@ -31,6 +31,8 @@ export { default as Spinner } from './components/Spinner.svelte';
 export { default as ProgressBar } from './components/ProgressBar.svelte';
 export { default as Nudge } from './components/Nudge.svelte';
 export { default as ScrubValue } from './components/ScrubValue.svelte';
+export { default as GhostField } from './components/GhostField.svelte';
+export { default as LockMark } from './components/LockMark.svelte';
 export { default as SidebarSection } from './components/SidebarSection.svelte';
 export { default as ResizeHandle } from './components/ResizeHandle.svelte';
 export { default as Waveform } from './components/Waveform.svelte';
