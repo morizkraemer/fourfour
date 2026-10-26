@@ -15,25 +15,29 @@
   let dragging = $state(false);
 
   const KEY_STEP = 16;
+  const GROWTH_PER_POINTER_PX = { right: 1, left: -1, top: -1 };
+  const vertical = $derived(edge === 'top');
 
   function onPointerDown(e) {
     if (e.button !== 0) return;
     e.preventDefault();
-    const startX = e.clientX;
+    const isVertical = vertical;
+    const start = isVertical ? e.clientY : e.clientX;
     const startValue = value;
-    const sign = edge === 'right' ? 1 : -1;
+    const sign = GROWTH_PER_POINTER_PX[edge];
+    const activeClass = isVertical ? 'ff-resize--active-row' : 'ff-resize--active';
     e.currentTarget.setPointerCapture?.(e.pointerId);
     dragging = true;
-    document.body.classList.add('ff-resize--active');
+    document.body.classList.add(activeClass);
 
     function onMove(ev) {
-      onResize?.(startValue + sign * (ev.clientX - startX));
+      onResize?.(startValue + sign * ((isVertical ? ev.clientY : ev.clientX) - start));
     }
     function onUp() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      document.body.classList.remove('ff-resize--active');
+      document.body.classList.remove(activeClass);
       dragging = false;
       onCommit?.();
     }
@@ -43,11 +47,12 @@
   }
 
   function onKeyDown(e) {
-    const dir = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    const growKey = vertical ? 'ArrowUp' : edge === 'right' ? 'ArrowRight' : 'ArrowLeft';
+    const shrinkKey = vertical ? 'ArrowDown' : edge === 'right' ? 'ArrowLeft' : 'ArrowRight';
+    const dir = e.key === growKey ? 1 : e.key === shrinkKey ? -1 : 0;
     if (!dir) return;
     e.preventDefault();
-    const sign = edge === 'right' ? 1 : -1;
-    onResize?.(value + sign * dir * KEY_STEP);
+    onResize?.(value + dir * KEY_STEP);
     onCommit?.();
   }
 </script>
@@ -57,7 +62,7 @@
   class="ff-resize ff-resize--{edge}"
   class:ff-resize--dragging={dragging}
   role="separator"
-  aria-orientation="vertical"
+  aria-orientation={vertical ? 'horizontal' : 'vertical'}
   aria-label={label}
   aria-valuenow={value}
   aria-valuemin={min}
