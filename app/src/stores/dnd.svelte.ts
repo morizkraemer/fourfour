@@ -2,6 +2,8 @@
  * dnd.svelte.ts — Shared drag-and-drop session state (tracks, columns, playlists).
  */
 
+import { ROW_HEIGHT } from '../lib/rowWindow.ts';
+
 export type DragKind = 'tracks' | 'column' | 'playlist' | null;
 
 export const dnd = $state({
@@ -79,21 +81,10 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   dnd.dropPanelSourceId = sourceId;
   dnd.dropPlaylistId = null;
 
-  const rows = body.querySelectorAll('[data-track-row]');
-  if (rows.length === 0) {
-    dnd.dropRowIndex = 0;
-    return;
-  }
-
-  let before: number | null = null;
-  let last = -1;
-  for (const row of rows) {
-    const rowIndex = Number((row as HTMLElement).dataset.rowIndex);
-    last = Math.max(last, rowIndex);
-    const rect = row.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2 && (before === null || rowIndex < before)) before = rowIndex;
-  }
-  dnd.dropRowIndex = before ?? last + 1;
+  const rowCount = Number(body.getAttribute('data-row-count')) || 0;
+  const bodyTop = body.getBoundingClientRect().top;
+  const before = Math.floor((clientY - bodyTop - ROW_HEIGHT / 2) / ROW_HEIGHT) + 1;
+  dnd.dropRowIndex = Math.min(Math.max(before, 0), rowCount);
 }
 
 export function startColumnDrag(key: string, x: number, y: number) {

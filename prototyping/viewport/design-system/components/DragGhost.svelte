@@ -7,7 +7,7 @@
 {#if visible}
   <div
     class="ff-drag-ghost ff-drag-ghost--floating"
-    style="left: {x + 12}px; top: {y + 12}px;"
+    style="transform: translate({x + 12}px, {y + 12}px);"
   >
     {#if count > 1}
       <span class="ff-drag-ghost__badge">{count}</span>
@@ -21,6 +21,9 @@
 <style>
   .ff-drag-ghost--floating {
     position: fixed;
+    left: 0;
+    top: 0;
+    will-change: transform;
     z-index: 10001;
     pointer-events: none;
   }
