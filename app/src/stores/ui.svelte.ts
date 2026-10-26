@@ -50,6 +50,12 @@ export const ui = $state({
   activeSidebarRow: 'All Tracks',
   /** Preferences modal opened from the footer settings button. */
   settingsOpen: false,
+  /** Section key Preferences opens on. */
+  settingsTab: 'general',
+  /** Command palette overlay (⌘K). */
+  paletteOpen: false,
+  /** Set by the palette: the track table scrolls this track into view. */
+  revealTrack: null as { id: number; nonce: number } | null,
   /** ⌘F inline filter — narrows visible track lists in place. */
   listFilter: '',
   /** Incremented to focus the filter field (GlobalHeader). */
@@ -253,8 +259,32 @@ export function toggleDetailPane() {
   ui.detailPaneOpen = !ui.detailPaneOpen;
 }
 
-export function openSettings() {
+export function openSettings(tab: string = 'general') {
+  ui.settingsTab = tab;
   ui.settingsOpen = true;
+}
+
+export function toggleSettings() {
+  if (ui.settingsOpen) closeSettings();
+  else openSettings();
+}
+
+export function openPalette() {
+  ui.paletteOpen = true;
+}
+
+export function closePalette() {
+  ui.paletteOpen = false;
+}
+
+export function togglePalette() {
+  ui.paletteOpen = !ui.paletteOpen;
+}
+
+/** Toggle the right-hand organize drawer between rail and pulled-out. */
+export function toggleOrganize() {
+  if (ui.organize.expanded) collapseOrganize();
+  else expandOrganize();
 }
 
 export function closeSettings() {

@@ -25,10 +25,6 @@
   import {
     ui,
     importDropTarget,
-    openSettings,
-    closeSettings,
-    focusListFilter,
-    clearListFilter,
     initOrganize,
     reconcileOrganizeTarget,
     setPanelWidth,
@@ -37,21 +33,19 @@
   } from './stores/ui.svelte.ts';
   import { PANEL_WIDTH } from './lib/panelWidth.ts';
   import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
-  import { importIntoSource } from './menus/context-menus.ts';
+  import { shortcuts } from './shortcuts/index.ts';
   import {
     initLibrary,
     library,
     confirmAnalysisPrompt,
     dismissAnalysisPrompt,
     importFiles,
-    toggleFavoriteSlot,
   } from './stores/library.svelte.ts';
-  import { selection, selectionCount } from './stores/selection.svelte.ts';
+  import { selectionCount } from './stores/selection.svelte.ts';
   import { getIsTauri } from './services/tauri.svelte.ts';
   import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
   import { installMacWindowChrome } from './services/window-chrome.ts';
-  import { player, togglePlay } from './stores/player.svelte.ts';
-
+  
   let fileDropVisible = $state(false);
   let browseContentEl = $state(null);
 
@@ -80,58 +74,7 @@
 
   function onGlobalKeyDown(e) {
     if (e.defaultPrevented) return;
-
-    if (e.metaKey && e.key === ',') {
-      e.preventDefault();
-      if (ui.settingsOpen) closeSettings();
-      else openSettings();
-      return;
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-      e.preventDefault();
-      focusListFilter();
-      return;
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
-      e.preventDefault();
-      if (isEditableTarget(e.target)) return;
-      if (library.analyzing || library.syncing) return;
-      void importIntoSource(importDropTarget());
-      return;
-    }
-
-    if (e.key === 'Escape' && ui.settingsOpen) {
-      closeSettings();
-      e.preventDefault();
-      return;
-    }
-
-    if (e.key === 'Escape' && library.showAnalysisPrompt) {
-      return;
-    }
-
-    if (e.key === 'Escape' && ui.listFilter.trim()) {
-      clearListFilter();
-      e.preventDefault();
-      return;
-    }
-
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (isEditableTarget(e.target)) return;
-
-    if (e.key === ' ' || e.code === 'Space') {
-      if (!player.track) return;
-      e.preventDefault();
-      void togglePlay();
-      return;
-    }
-
-    const slot = /^[1-9]$/.test(e.key) ? parseInt(e.key, 10) : null;
-    if (slot == null || selectionCount() === 0) return;
-    e.preventDefault();
-    toggleFavoriteSlot(slot, [...selection.ids]);
+    shortcuts.dispatch(e, { typing: isEditableTarget(e.target) });
   }
 
   onMount(() => {
@@ -176,15 +119,15 @@
 
 <div class="ff-browse">
   <div class="ff-browse__main">
-    <div class="ff-browse__slot ff-browse__slot--sidebar">
+    <div class="ff-browse__slot ff-browse__slot--sidebar" data-focus-region="sidebar">
       <Sidebar />
     </div>
     <div class="ff-browse__body">
-      <div class="ff-browse__slot ff-browse__slot--header">
+      <div class="ff-browse__slot ff-browse__slot--header" data-focus-region="search">
         <GlobalHeader />
       </div>
       <div class="ff-browse__content" bind:this={browseContentEl}>
-        <div class="ff-browse__slot ff-browse__slot--table">
+        <div class="ff-browse__slot ff-browse__slot--table" data-focus-region="tracks">
           <TrackTable />
         </div>
         {#if inspectorVisible}
@@ -208,13 +151,14 @@
         <div
           class="ff-browse__organize-dock"
           class:ff-browse__organize-dock--inspector={inspectorVisible}
+          data-focus-region="organize"
         >
           <OrganizePanel contentEl={browseContentEl} />
         </div>
       </div>
     </div>
   </div>
-  <div class="ff-browse__slot ff-browse__slot--player">
+  <div class="ff-browse__slot ff-browse__slot--player" data-focus-region="player">
     <Player />
   </div>
   <div class="ff-browse__slot ff-browse__slot--status">

@@ -31,14 +31,6 @@
   };
 </script>
 
-<svelte:window
-  on:keydown={(e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      toggleExpanded();
-    }
-  }} />
-
 <div class="ff-xp" role="group" aria-label="Expanded player">
   <header class="ff-xp__head">
     <div class="ff-xp__meta">
