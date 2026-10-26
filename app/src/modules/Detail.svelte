@@ -22,6 +22,7 @@
   } from '../stores/cue-actions.ts';
   import { CUE_PALETTE, cueChip } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
+  import { commitTrackBpm, commitTrackKey, fitGridToBpm, releaseTrackEdits } from '../stores/track-edits.svelte.ts';
 
   let mode = $derived(
     selectionCount() === 0 ? 'empty' :
@@ -49,6 +50,20 @@
     if (!current) return;
     void ensureTrackPeaksLoaded(current);
   });
+
+  let tempoEditable = $derived(!!track && track.analyzed === true && track.analysisPending !== true && !!track.bpmExact);
+  let hasEdits = $derived(!!track && (track.bpmLocked || track.keyLocked));
+
+  let bpmMenuItems = $derived(track ? [
+    {
+      label: `Adjust beat grid to ${Number(track.bpmExact).toFixed(2)} BPM`,
+      onClick: () => fitGridToBpm(track.id, track.bpmExact),
+    },
+    ...(hasEdits ? [{ label: 'Let re-analysis replace BPM and key', onClick: () => releaseTrackEdits(track.id) }] : []),
+  ] : []);
+  let keyMenuItems = $derived(hasEdits && track ? [
+    { label: 'Let re-analysis replace BPM and key', onClick: () => releaseTrackEdits(track.id) },
+  ] : []);
 
   let singleMeta = $derived(track ? {
     ALBUM: track.album ?? '—',
@@ -90,6 +105,12 @@
       onWaveformSeek={trackIsLoaded ? seekToProgress : undefined}
       onRevealPath={() => track.filePath && revealFile(track.filePath)}
       onPathContextMenu={openPathMenu}
+      bpm={track.bpmExact ?? 0}
+      musicalKey={track.key ?? ''}
+      onBpmChange={tempoEditable ? (next) => commitTrackBpm(track.id, next) : undefined}
+      onKeyChange={tempoEditable ? (next) => commitTrackKey(track.id, next) : undefined}
+      {bpmMenuItems}
+      {keyMenuItems}
     />
   {:else if mode === 'multi'}
     <DetailPane

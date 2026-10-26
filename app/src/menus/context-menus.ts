@@ -94,11 +94,12 @@ interface SourceMenuOptions {
   onNewPlaylist?: () => void;
   onAddFavorite?: () => void;
   onRemoveFavorite?: (playlist: PlaylistInput) => void;
+  onRenamePlaylist?: (playlist: PlaylistInput) => void;
 }
 
 /** Context menu for a sidebar source or list panel (library view, playlist, USB). */
 export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[] {
-  const { sourceId, label = sourceId, onRemoveFavorite } = opts;
+  const { sourceId, label = sourceId, onRemoveFavorite, onRenamePlaylist } = opts;
   const items: MenuItem[] = [];
 
   if (library.volumes.includes(sourceId)) {
@@ -161,6 +162,9 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
   const playlist = library.playlists.find((p) => p.name === sourceId);
   if (playlist) {
     const isFavorite = isFavoritePlaylistName(playlist.name);
+    if (!isFavorite && onRenamePlaylist) {
+      items.push({ label: 'Rename', onClick: () => onRenamePlaylist(playlist) });
+    }
     items.push({
       label: 'Import folder',
       disabled: busy(),

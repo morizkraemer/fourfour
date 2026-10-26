@@ -4,6 +4,8 @@
   // CSS-bar waveform with played overlay / playhead / hot-cue markers.
   import './player-compact.css';
   import Nudge from './Nudge.svelte';
+  import { bpmScrub, keyScrub } from '../utils/scrub.js';
+  import { keyColor } from '../utils/key-color.js';
   import WaveformView from './WaveformView.svelte';
 
   let {
@@ -30,6 +32,10 @@
     onCueUp,
     onBpmChange,
     onKeyChange,
+    bpmValue = undefined,
+    keyValue = undefined,
+    onBpmCommit = undefined,
+    onKeyCommit = undefined,
     onExpand,
   } = $props();
 
@@ -83,8 +89,8 @@
       </div>
       <div class="ff-player-compact__right-toggles">
         <div class="ff-player-compact__bpm-key-group">
-          <Nudge value={key} label="KEY" onChange={onKeyChange} variant="compact" />
-          <Nudge value={bpm} label="BPM" onChange={onBpmChange} variant="compact" />
+          <Nudge label="KEY" onChange={onKeyChange} variant="compact" model={onKeyCommit ? keyScrub : undefined} onCommit={onKeyCommit} color={keyColor(keyValue ?? key)} value={onKeyCommit ? keyValue : key} />
+          <Nudge label="BPM" onChange={onBpmChange} variant="compact" model={onBpmCommit ? bpmScrub : undefined} onCommit={onBpmCommit} value={onBpmCommit ? bpmValue : bpm} />
         </div>
         <div class="ff-player-compact__times-group">
           <span class="ff-player-compact__time-cur">

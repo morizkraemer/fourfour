@@ -4,6 +4,7 @@
 -->
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
+  import { commitTrackBpm, commitTrackKey } from '../stores/track-edits.svelte.ts';
   import ExpandedPlayer from './ExpandedPlayer.svelte';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { cueMarkers } from '../lib/cues.ts';
@@ -61,6 +62,10 @@
     totalTime={totalTime()}
     bpm={player.track?.bpm || '—'}
     key={player.track?.key || '—'}
+    bpmValue={Number(player.track?.bpm)}
+    keyValue={player.track?.key ?? ''}
+    onBpmCommit={player.track ? (next) => commitTrackBpm(player.track.id, next) : undefined}
+    onKeyCommit={player.track ? (next) => commitTrackKey(player.track.id, next) : undefined}
     cues={cueMarkerList}
     bands={player.track?.bands ?? null}
     bandsOverview={player.track?.bandsOverview ?? null}

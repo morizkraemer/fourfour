@@ -782,6 +782,54 @@ async fn set_beat_grid(
     .map_err(|e| e.to_string())?
 }
 
+/// Set the BPM of an analyzed track by hand; re-analysis keeps it. The beat grid stays as it is.
+#[tauri::command]
+async fn set_track_bpm(track_id: i64, bpm: f64, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.set_user_bpm(track_id, bpm).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Set the Camelot key of an analyzed track by hand; re-analysis keeps it.
+#[tauri::command]
+async fn set_track_key(track_id: i64, key: String, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.set_user_key(track_id, &key).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Let re-analysis replace the hand-set BPM and key of a track again.
+#[tauri::command]
+async fn release_user_edits(track_id: i64, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.release_user_edits(track_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Fit the beat grid to a new BPM (explicit, never done by `set_track_bpm`).
+#[tauri::command]
+async fn rescale_beat_grid(track_id: i64, bpm: f64, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.rescale_beat_grid(track_id, bpm).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 const ARTWORK_THUMB_CACHE_LIMIT: usize = 400;
 const ARTWORK_THUMB_JPEG_QUALITY: u8 = 85;
 
@@ -1152,6 +1200,10 @@ fn main() {
             set_analysis_backend,
             get_analysis_data,
             set_beat_grid,
+            set_track_bpm,
+            set_track_key,
+            release_user_edits,
+            rescale_beat_grid,
             set_cues,
             get_track_artwork,
             playback_play,

@@ -514,6 +514,38 @@ export async function setBeatGrid(
   invalidateAnalysisCache(trackId);
 }
 
+async function invokeOrMock(command: string, args: Record<string, unknown>): Promise<void> {
+  try {
+    await invoke(command, args);
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+  }
+}
+
+/** Set a track's BPM by hand; re-analysis keeps it and the beat grid is left as it is. */
+export async function setTrackBpm(trackId: number, bpm: number): Promise<void> {
+  await invokeOrMock('set_track_bpm', { trackId, bpm });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Set a track's Camelot key by hand; re-analysis keeps it. */
+export async function setTrackKey(trackId: number, key: string): Promise<void> {
+  await invokeOrMock('set_track_key', { trackId, key });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Let re-analysis replace the hand-set BPM and key of a track again. */
+export async function releaseUserEdits(trackId: number): Promise<void> {
+  await invokeOrMock('release_user_edits', { trackId });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Fit the beat grid to a BPM (explicit; setting the BPM never moves the grid). */
+export async function rescaleBeatGrid(trackId: number, bpm: number): Promise<void> {
+  await invokeOrMock('rescale_beat_grid', { trackId, bpm });
+  invalidateAnalysisCache(trackId);
+}
+
 const MOCK_CUES_KEY = 'fourfour.mock.cues';
 
 function mockCueStore(): Record<string, CuePointPayload[]> {

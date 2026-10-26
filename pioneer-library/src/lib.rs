@@ -14,6 +14,7 @@ mod queries;
 pub mod rekordbox;
 mod row_preview;
 mod schema;
+mod user_edits;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -41,6 +42,7 @@ pub use multi_sync::{
     NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
     SyncPhase, SyncSelection, SyncTarget, WriterFn, statvfs_available_bytes,
 };
+pub use user_edits::{MAX_BPM, MIN_BPM, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
 /// Bits of `analyses.stages`: which parts of a track's analysis are stored.
@@ -226,7 +228,7 @@ impl LocalLibrary {
     /// Store an analysis that has only some stages (`analysis_stage` bits). The track stays pending
     /// for the missing stages: it is listed by `get_unanalyzed_track_ids` and left out of USB export.
     pub fn set_analysis_stages(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
-        let analysis = &self.keep_imported_data(track_id, analysis)?;
+        let analysis = &self.keep_user_edits(track_id, &self.keep_imported_data(track_id, analysis)?)?;
         self.write_analysis(track_id, analysis, stages)
     }
 
@@ -306,12 +308,14 @@ impl LocalLibrary {
         Ok(())
     }
 
-    /// Let re-analysis replace the beat grid and cues the user edited.
+    /// Let re-analysis replace the beat grid, cues, BPM and key the user edited.
     pub fn release_user_edits(&self, track_id: i64) -> Result<()> {
         let Some(dir) = self.track_anlz_dir(track_id) else { return Ok(()) };
         if let Some(mut user_edits) = UserEdits::read(&dir) {
             user_edits.grid_locked = false;
             user_edits.cues_locked = false;
+            user_edits.bpm_locked = false;
+            user_edits.key_locked = false;
             user_edits.write(&dir)?;
         }
         Ok(())
@@ -1154,6 +1158,94 @@ mod tests {
         let id = lib.add_track(&make_track("Cues", "/music/c.mp3")).unwrap();
         lib.set_analysis(id, &make_analysis()).unwrap();
         (lib, id)
+    }
+
+    fn locks(lib: &LocalLibrary, id: i64) -> (bool, bool) {
+        let edits = lib.user_edits(id);
+        (edits.bpm_locked, edits.key_locked)
+    }
+
+    #[test]
+    fn user_bpm_and_key_are_stored_and_survive_reanalysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        assert_eq!(locks(&lib, id), (false, false));
+
+        lib.set_user_bpm(id, 127.5).unwrap();
+        lib.set_user_key(id, "8A").unwrap();
+        let stored = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!((stored.bpm, stored.key.as_str()), (127.5, "8A"));
+        assert_eq!(locks(&lib, id), (true, true));
+        assert_eq!(stored.beat_grid.beats[0].tempo, 12800);
+
+        let mut reanalysis = make_analysis();
+        reanalysis.bpm = 90.0;
+        reanalysis.key = "3B".into();
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let after = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!((after.bpm, after.key.as_str()), (127.5, "8A"));
+
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        assert_eq!(locks(&reopened, id), (true, true));
+    }
+
+    #[test]
+    fn only_the_edited_field_is_locked_and_release_lets_reanalysis_replace_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        lib.set_user_key(id, "5B").unwrap();
+        assert_eq!(locks(&lib, id), (false, true));
+
+        let mut reanalysis = make_analysis();
+        reanalysis.bpm = 90.0;
+        reanalysis.key = "3B".into();
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let kept = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!((kept.bpm, kept.key.as_str()), (90.0, "5B"));
+
+        lib.release_user_edits(id).unwrap();
+        assert_eq!(locks(&lib, id), (false, false));
+        lib.set_analysis(id, &reanalysis).unwrap();
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().key, "3B");
+    }
+
+    #[test]
+    fn user_bpm_and_key_reject_bad_values_and_unanalyzed_tracks() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        assert!(lib.set_user_bpm(id, 39.9).is_err());
+        assert!(lib.set_user_bpm(id, 250.1).is_err());
+        assert!(lib.set_user_bpm(id, f64::NAN).is_err());
+        assert!(lib.set_user_key(id, "13A").is_err());
+        assert!(lib.set_user_key(id, "0B").is_err());
+        assert!(lib.set_user_key(id, "8C").is_err());
+        assert!(lib.set_user_key(id, "Am").is_err());
+        assert_eq!(locks(&lib, id), (false, false));
+
+        let bare = lib.add_track(&make_track("Bare", "/music/bare.mp3")).unwrap();
+        assert!(lib.set_user_bpm(bare, 128.0).is_err());
+        assert!(lib.set_user_key(bare, "8A").is_err());
+    }
+
+    #[test]
+    fn changing_the_bpm_leaves_the_beat_grid_alone_until_it_is_rescaled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let grid_times = |lib: &LocalLibrary| -> Vec<(u32, u32)> {
+            lib.get_analysis(id).unwrap().unwrap().beat_grid.beats.iter().map(|b| (b.time_ms, b.tempo)).collect()
+        };
+        let before = grid_times(&lib);
+        lib.set_user_bpm(id, 64.0).unwrap();
+        assert_eq!(grid_times(&lib), before);
+
+        lib.rescale_beat_grid(id, 64.0).unwrap();
+        let scaled = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(scaled.bpm, 64.0);
+        let times: Vec<u32> = scaled.beat_grid.beats.iter().map(|b| b.time_ms).collect();
+        assert_eq!(times, vec![0, 938, 1876, 2812]);
+        assert!(scaled.beat_grid.beats.iter().all(|b| b.tempo == 6400));
+        assert_eq!(scaled.cue_points.len(), 3);
+        assert!(lib.user_edits(id).bpm_locked);
     }
 
     #[test]

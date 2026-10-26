@@ -197,6 +197,14 @@ pub fn upsert_analysis_index(
     Ok(())
 }
 
+pub fn update_analysis_bpm(conn: &Connection, track_id: i64, bpm: f64) -> Result<bool> {
+    Ok(conn.execute("UPDATE analyses SET bpm = ?2 WHERE track_id = ?1", params![track_id, bpm])? > 0)
+}
+
+pub fn update_analysis_key(conn: &Connection, track_id: i64, key: &str) -> Result<bool> {
+    Ok(conn.execute("UPDATE analyses SET key = ?2 WHERE track_id = ?1", params![track_id, key])? > 0)
+}
+
 pub fn select_analysis_stages(conn: &Connection, track_id: i64) -> Result<Option<u8>> {
     let mut stmt = conn.prepare("SELECT stages FROM analyses WHERE track_id = ?1")?;
     let mut rows = stmt.query_map([track_id], |row| row.get::<_, u8>(0))?;

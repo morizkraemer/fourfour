@@ -9,7 +9,7 @@
       Header shows target.label (inline rename) and a Change button.
 -->
 <script>
-  import { Button } from '$ds';
+  import { Button, ContextMenu } from '$ds';
   import {
     ui,
     expandOrganize,
@@ -21,6 +21,7 @@
     ORGANIZE_SNAP_TO_FULL_PX,
   } from '../stores/ui.svelte.ts';
   import { renamePlaylist } from '../stores/library.svelte.ts';
+  import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
 
@@ -29,6 +30,23 @@
   let renamingHeader = $state(false);
   let renameDraft = $state('');
   let renameHeaderEl = $state(null);
+  let headerMenu = $state({ open: false, x: 0, y: 0 });
+
+  function openHeaderMenu(e) {
+    if (ui.organize.target?.kind !== 'playlist') return;
+    e.preventDefault();
+    headerMenu = { open: true, x: e.clientX, y: e.clientY };
+  }
+
+  function headerMenuItems() {
+    const target = ui.organize.target;
+    if (!target) return [];
+    return buildSourceContextMenuItems({
+      sourceId: target.id,
+      label: target.label,
+      onRenamePlaylist: (playlist) => startHeaderRename(playlist.name),
+    });
+  }
 
   $effect(() => {
     const request = ui.renameRequest;
@@ -137,7 +155,8 @@
     ></div>
 
     <!-- Panel header -->
-    <div class="ff-organize__header">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="ff-organize__header" oncontextmenu={openHeaderMenu}>
       {#if renamingHeader && ui.organize.target}
         <!-- Inline rename input for newly-created playlists -->
         <!-- svelte-ignore a11y_autofocus -->
@@ -176,6 +195,14 @@
     </div>
   </div>
 {/if}
+
+<ContextMenu
+  open={headerMenu.open}
+  x={headerMenu.x}
+  y={headerMenu.y}
+  items={headerMenuItems()}
+  onClose={() => (headerMenu = { ...headerMenu, open: false })}
+/>
 
 <style>
   .ff-organize {

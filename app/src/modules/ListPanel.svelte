@@ -34,7 +34,11 @@
   }
 
   function headerMenuItems() {
-    return buildSourceContextMenuItems({ sourceId, label: title });
+    return buildSourceContextMenuItems({
+      sourceId,
+      label: title,
+      onRenamePlaylist: (playlist) => (ui.sidebarRenameRequest = { playlistId: playlist.id }),
+    });
   }
 </script>
 

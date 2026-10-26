@@ -14,6 +14,10 @@ pub struct UserEdits {
     pub grid_locked: bool,
     pub cues_locked: bool,
     pub cues: Vec<ImportedCue>,
+    #[serde(default)]
+    pub bpm_locked: bool,
+    #[serde(default)]
+    pub key_locked: bool,
 }
 
 impl UserEdits {
