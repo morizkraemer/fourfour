@@ -207,4 +207,17 @@ mod tests {
         assert!(matches!(runner, Runner::Python { .. }));
         assert!(notes.iter().any(|n| n.contains("weights are missing")), "{notes:?}");
     }
+
+    #[test]
+    #[ignore = "needs model weights and FOURFOUR_PARITY_TRACK=<audio file>"]
+    fn rust_bands_equal_the_app_band_pass() {
+        let track = PathBuf::from(std::env::var("FOURFOUR_PARITY_TRACK").expect("FOURFOUR_PARITY_TRACK"));
+        let weights = fourfour_analysis::service::locate_models(None).expect("model weights");
+        let analyzer = Analyzer::load(&weights, PoolOptions::default()).unwrap();
+        let rust = analyzer.analyze(&track).unwrap().color_waveform.unwrap();
+        let app = crate::band_analysis::measure_waveforms(&track).unwrap();
+        assert_eq!(rust.detail.len().abs_diff(app.pwv7.len()), 0);
+        let differing = rust.detail.iter().zip(&app.pwv7).filter(|(a, b)| a != b).count();
+        assert!(differing * 100 < rust.detail.len(), "{differing} of {} columns differ", rust.detail.len());
+    }
 }

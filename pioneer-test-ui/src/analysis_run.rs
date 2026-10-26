@@ -167,7 +167,7 @@ pub(crate) enum RunOutcome {
 }
 
 const PYTHON_MAX_IN_FLIGHT: usize = 3;
-const TRACK_TIMEOUT: Duration = Duration::from_secs(120);
+const RUST_TRACK_TIMEOUT: Duration = Duration::from_secs(900);
 
 type TrackResult = Result<(models::AnalysisResult, String), String>;
 
@@ -181,9 +181,9 @@ async fn analyze_one_track_rust(
     let handle = tokio::task::spawn_blocking(move || {
         analyzer.analyze_with(&source_path, &cancel, threads).map_err(|e| e.to_string())
     });
-    let joined = tokio::time::timeout(TRACK_TIMEOUT, handle)
+    let joined = tokio::time::timeout(RUST_TRACK_TIMEOUT, handle)
         .await
-        .map_err(|_| format!("TIMEOUT after {}s", TRACK_TIMEOUT.as_secs()))?;
+        .map_err(|_| format!("TIMEOUT after {}s", RUST_TRACK_TIMEOUT.as_secs()))?;
     let result = joined.map_err(|e| format!("analysis task failed: {e}"))??;
     Ok((result, format!("{:.1}s rust x{threads}", started.elapsed().as_secs_f64())))
 }
