@@ -10,6 +10,7 @@ import {
   PANEL_WIDTH,
   type ResizablePanel,
 } from '../lib/panelWidth.ts';
+import { clampPlayerHeight, loadPlayerHeight, savePlayerHeight } from '../lib/playerHeight.ts';
 
 // ── Organize panel ──────────────────────────────────────────────────────────
 
@@ -64,6 +65,8 @@ export const ui = $state({
   sidebarWidth: loadPanelWidth('sidebar') as number,
   /** Right inspector width in px (persisted). */
   detailWidth: loadPanelWidth('inspector') as number,
+  /** Expanded player height in px (persisted); null = the default share of the window. */
+  playerHeight: loadPlayerHeight() as number | null,
   /** Set by new-playlist flows: the docked panel starts inline rename. */
   renameRequest: null as { playlistId: number } | null,
   /** Right-sidebar organize panel state. */
@@ -240,6 +243,19 @@ export function commitPanelWidth(panel: ResizablePanel) {
 export function resetPanelWidth(panel: ResizablePanel) {
   setPanelWidth(panel, PANEL_WIDTH[panel].initial);
   commitPanelWidth(panel);
+}
+
+export function setPlayerHeight(px: number, viewportHeight: number) {
+  ui.playerHeight = clampPlayerHeight(px, viewportHeight);
+}
+
+export function commitPlayerHeight() {
+  savePlayerHeight(ui.playerHeight);
+}
+
+export function resetPlayerHeight() {
+  ui.playerHeight = null;
+  savePlayerHeight(null);
 }
 
 // ── Other UI state ────────────────────────────────────────────────────────────

@@ -36,8 +36,31 @@
   background: var(--ff-accent);
 }
 
+.ff-resize--top {
+  top: -4px;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 7px;
+  cursor: row-resize;
+}
+.ff-resize--top::after {
+  top: 3px;
+  bottom: auto;
+  left: 0;
+  right: 0;
+  width: auto;
+  height: 1px;
+}
+
 body.ff-resize--active,
 body.ff-resize--active * {
   cursor: col-resize !important;
+  user-select: none;
+}
+body.ff-resize--active-row,
+body.ff-resize--active-row * {
+  cursor: row-resize !important;
   user-select: none;
 }

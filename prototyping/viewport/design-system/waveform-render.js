@@ -285,12 +285,11 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
     return;
   }
   const fracPerPx = (endFrac - startFrac) / widthPx;
-  const leftReal = startFrac / fracPerPx;
-  const leftFloor = Math.floor(leftReal);
   if (columnsPerPx <= 1 && canCacheScroll(ctx)) {
-    drawScrolledColumns(ctx, bands, { leftFloor, fracPerPx, widthPx, heightPx, palette });
+    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, palette });
     return;
   }
+  const leftFloor = Math.floor(startFrac / fracPerPx);
   const leadPx = Math.round(ENVELOPE_LEAD_CSS_PX * dpr);
   const total = leadPx + widthPx + 2;
   const shaped = smoothBands(
@@ -301,6 +300,11 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
 }
 
 const scrollCache = new WeakMap();
+const SCALE_TOLERANCE = 1e-9;
+
+function sameScale(a, b) {
+  return Math.abs(a - b) <= SCALE_TOLERANCE * Math.abs(b);
+}
 
 function canCacheScroll(ctx) {
   return typeof HTMLCanvasElement !== 'undefined' && ctx.canvas instanceof HTMLCanvasElement;
@@ -318,17 +322,23 @@ function newLayer(widthPx, heightPx) {
  * smoothing across columns), so a scroll by d pixels moves the bitmap of the last frame by d and paints only the d
  * columns that came into view. The bands of the whole view are painted again whenever the data, zoom, size or
  * palette change or the view jumped by more than its width.
+ *
+ * The view's width in track fractions comes from `endFrac - startFrac`, which differs in its last bits from frame to
+ * frame as the view scrolls; the cache keeps the scale it was painted at and treats such a difference as the same
+ * zoom (an exact comparison made about every other scrolled frame a full repaint).
  */
-function drawScrolledColumns(ctx, bands, { leftFloor, fracPerPx, widthPx, heightPx, palette }) {
+function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, palette }) {
   const canvas = ctx.canvas;
   let entry = scrollCache.get(canvas);
   if (!entry || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
     entry = { widthPx, heightPx, front: newLayer(widthPx, heightPx), back: newLayer(widthPx, heightPx), left: null };
     scrollCache.set(canvas, entry);
   }
-  if (entry.bands !== bands || entry.fracPerPx !== fracPerPx || entry.palette !== palette) {
-    Object.assign(entry, { bands, fracPerPx, palette, left: null });
+  if (entry.bands !== bands || !sameScale(entry.fracPerPx, viewFracPerPx) || entry.palette !== palette) {
+    Object.assign(entry, { bands, fracPerPx: viewFracPerPx, palette, left: null });
   }
+  const fracPerPx = entry.fracPerPx;
+  const leftFloor = Math.floor(startFrac / fracPerPx);
   const paintColumns = (layer, fromPx, count) => {
     const g = layer.getContext('2d');
     g.clearRect(fromPx, 0, count, heightPx);

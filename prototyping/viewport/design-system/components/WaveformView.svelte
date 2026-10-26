@@ -69,15 +69,18 @@
   // Push data only when the track or its waveform changes — NOT on every tick.
   $effect(() => {
     const detailLen = (mode === 'expanded' ? (bandsDetail ?? bands) : bands)?.low.length ?? 0;
-    // beats?.[0]?.time_ms captures beat-grid edits (shift/set) that move the grid
-    // without changing its length, so the engine re-reads the shifted beats.
-    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ?? 0}:${beats?.[0]?.time_ms ?? 0}:${cues?.length ?? 0}:${durationMs}`;
+    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ? 1 : 0}:${cues?.length ?? 0}:${durationMs}`;
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
     // Pass playhead with data so zoom offset centres atomically on load (progress
     // often stays 0 across track changes, so a separate effect would not re-run).
     display.setData(buildData(), progress);
+  });
+
+  // A beat-grid edit moves the grid only: no data reset, so zoom and scroll stay.
+  $effect(() => {
+    display?.setBeats(beats ?? []);
   });
 
   // Atomic transport update — avoids play/pause ordering jitter between separate

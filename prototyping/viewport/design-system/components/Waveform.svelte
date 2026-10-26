@@ -3,6 +3,7 @@
   import { ink, paletteVersion, wavePalette } from '../waveform-render.js';
   import { drawBandRange } from '../waveform-render.js';
   import { drawLoudness } from '../waveform-simple.js';
+  import { stripFraction } from '../utils/strip-seek.js';
 
   const VARIANTS = {
     mini: { step: 2, gap: 1 },
@@ -12,7 +13,6 @@
   const BITMAP_CACHE_LIMIT = 800;
   const DRAWN_KEYS_LIMIT = 20000;
   const PLACEHOLDER_INK_ALPHA = 0.3;
-  const STRIP_DECAY = 0.9;
 
   const bitmapCache = new Map();
   const dataIds = new WeakMap();
@@ -73,7 +73,7 @@
   /*
     Static preview for list rows (variant "mini") and the detail pane (variant "strip").
     `look` "envelope" (default, rows) is one loudness envelope; "bands" is the 3-band picture of the
-    players. `bands` is BandColumns ({low, mid, high}, 0..1); `peaks` (mono 0..1) is the legacy input
+    players (the stacked overview of the compact strip). `bands` is BandColumns ({low, mid, high}, 0..1); `peaks` (mono 0..1) is the legacy input
     and is turned into a band mix.
   */
   let {
@@ -87,9 +87,16 @@
     cueStyle = null,
     /** Subtle sine wave on placeholder bars while analysis is in progress. */
     animating = false,
+    /** Given: a click seeks, with the track fraction under the pointer. */
+    onSeek = undefined,
   } = $props();
 
   let canvas;
+
+  function seekAt(event) {
+    const rect = canvas.getBoundingClientRect();
+    onSeek(stripFraction(event.clientX, rect.left, rect.width));
+  }
 
   function source() {
     if (bands && bands.low && bands.low.length) return bands;
@@ -124,7 +131,7 @@
   function paintData(ctx, data, pixelW, pixelH, dpr) {
     const palette = wavePalette();
     if (look === 'bands') {
-      drawBandRange(ctx, bandsOf(data), { startFrac: 0, endFrac: 1, widthPx: pixelW, heightPx: pixelH, palette, dpr, decay: STRIP_DECAY });
+      drawBandRange(ctx, bandsOf(data), { startFrac: 0, endFrac: 1, widthPx: pixelW, heightPx: pixelH, palette, dpr, layout: 'stacked' });
       return;
     }
     drawLoudness(ctx, bandsOf(data), { widthPx: pixelW, heightPx: pixelH, palette });
@@ -225,4 +232,8 @@
   });
 </script>
 
-<canvas bind:this={canvas} class="ff-waveform ff-waveform--{variant}"></canvas>
+<canvas
+  bind:this={canvas}
+  class="ff-waveform ff-waveform--{variant}"
+  style:cursor={onSeek ? 'pointer' : null}
+  onclick={onSeek ? seekAt : undefined}></canvas>

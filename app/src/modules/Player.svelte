@@ -3,8 +3,10 @@
   Wraps the $ds PlayerCompact primitive with player store state.
 -->
 <script>
-  import { PlayerCompact } from '$ds';
+  import { PlayerCompact, ResizeHandle } from '$ds';
   import ExpandedPlayer from './ExpandedPlayer.svelte';
+  import { ui, setPlayerHeight, commitPlayerHeight, resetPlayerHeight } from '../stores/ui.svelte.ts';
+  import { PLAYER_HEIGHT, clampPlayerHeight, defaultPlayerHeight, maxPlayerHeight } from '../lib/playerHeight.ts';
   import {
     player,
     currentTime,
@@ -18,10 +20,30 @@
   } from '../stores/player.svelte.ts';
 
   let playerRoot;
+  let viewportHeight = $state(window.innerHeight);
+  let expandedHeight = $derived(
+    ui.playerHeight == null ? defaultPlayerHeight(viewportHeight) : clampPlayerHeight(ui.playerHeight, viewportHeight),
+  );
 </script>
 
-<div class="ff-player-module" class:ff-player-module--expanded={player.expanded && player.track} bind:this={playerRoot}>
+<svelte:window bind:innerHeight={viewportHeight} />
+
+<div
+  class="ff-player-module"
+  class:ff-player-module--expanded={player.expanded && player.track}
+  style:height={player.expanded && player.track ? `${expandedHeight}px` : undefined}
+  bind:this={playerRoot}>
   {#if player.expanded && player.track}
+    <ResizeHandle
+      edge="top"
+      label="Resize player"
+      value={expandedHeight}
+      min={PLAYER_HEIGHT.min}
+      max={maxPlayerHeight(viewportHeight)}
+      onResize={(px) => setPlayerHeight(px, viewportHeight)}
+      onCommit={commitPlayerHeight}
+      onReset={resetPlayerHeight}
+    />
     <ExpandedPlayer />
   {:else}
   <PlayerCompact
@@ -52,14 +74,12 @@
 
 <style>
   .ff-player-module {
+    position: relative;
     width: 100%;
     background: var(--ff-bg);
     border-top: 1px solid var(--ff-border);
   }
-  /* Expanded: a docked panel ~1/3 of the viewport height. */
   .ff-player-module--expanded {
-    height: 33vh;
-    min-height: 280px;
     display: flex;
   }
 </style>

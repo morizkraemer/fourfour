@@ -39,11 +39,13 @@
     cover = '',
     peaks = null,
     bands = null,
+    onWaveformSeek = undefined,
     onRevealPath = undefined,
     onPathContextMenu = undefined,
   } = $props();
 
   let isMissing = $derived(mode === 'missing');
+  let stripWidth = $state(0);
 
   // Overview-waveform hot-cue dots, positioned along the track duration.
   let waveCues = $derived.by(() => {
@@ -141,8 +143,17 @@
     </div>
 
     {#if !isMissing}
-      <div class="ff-detail-pane__waveform">
-        <Waveform {bands} {peaks} width={300} height={36} variant="strip" look="bands" cues={waveCues} cueStyle="dot" />
+      <div class="ff-detail-pane__waveform" bind:clientWidth={stripWidth}>
+        <Waveform
+          {bands}
+          {peaks}
+          width={stripWidth || 300}
+          height={36}
+          variant="strip"
+          look="bands"
+          cues={waveCues}
+          cueStyle="dot"
+          onSeek={onWaveformSeek} />
       </div>
     {/if}
 

@@ -487,6 +487,22 @@ export function invalidateAnalysisCache(trackId?: number) {
   }
 }
 
+const mockBeatGrids = new Map<number, Array<{ time_ms: number; bar_position: number }>>();
+
+/** Store an edited beat grid; the next analysis read of the track carries it. */
+export async function setBeatGrid(
+  trackId: number,
+  beats: Array<{ time_ms: number; bar_position: number }>,
+): Promise<void> {
+  try {
+    await invoke('set_beat_grid', { trackId, beats });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    mockBeatGrids.set(trackId, beats);
+  }
+  invalidateAnalysisCache(trackId);
+}
+
 async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
@@ -505,7 +521,8 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
         syntheticTrackCount > 0
           ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload, trackId)
           : mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key);
-      const clean = sanitizeAnalysisPayload(data);
+      const edited = mockBeatGrids.get(trackId);
+      const clean = sanitizeAnalysisPayload(edited ? { ...data, beats: edited } : data);
       cacheAnalysis(trackId, clean);
       return clean;
     }

@@ -48,6 +48,26 @@ export const STACK_GAMMA = { low: 1, mid: 1, high: 1.72 };
 /** Back to front, as Rekordbox stacks them: low is the outer layer, mid in front of it, high the thin core on top. */
 export const BAND_ORDER = ['low', 'mid', 'high'];
 
+/**
+ * Zoomed in far enough that one column spans more than 1 / INTERPOLATE_BELOW pixels (here: 2), the heights are
+ * interpolated between column centres instead of held, so the envelope is a smooth line, not stairs. A rise of
+ * more than ATTACK_RISE (raw amplitude, 0..1) from one column to the next is an attack and stays a hard step at the
+ * column edge: the transient is crisp, its decay is smooth.
+ */
+export const INTERPOLATE_BELOW = 0.5;
+export const ATTACK_RISE = 0.12;
+
+/** Column heights at position `x` (column units, a column spans [i, i + 1) and is centred at i + 0.5). */
+export function interpolateColumns(src, x, n) {
+  const u = x - 0.5;
+  const left = Math.floor(u);
+  const a = src[Math.max(0, Math.min(n - 1, left))];
+  const b = src[Math.max(0, Math.min(n - 1, left + 1))];
+  const t = u - left;
+  if (b - a > ATTACK_RISE) return t < 0.5 ? a : b;
+  return a + (b - a) * t;
+}
+
 /** Raw 0..1 amplitude to display height (sqrt lift plus a minimum silhouette). */
 export function displayAmp(raw) {
   const a = Math.max(0, Math.min(1, raw));
@@ -87,7 +107,9 @@ export function reduceBands(bands, startFrac, endFrac, pixels, peakWeights = BUC
       const hi = lo + perPixel;
       if (hi <= BUCKET_EPSILON || lo >= n - BUCKET_EPSILON) continue;
       let v;
-      if (perPixel <= 1) {
+      if (perPixel < INTERPOLATE_BELOW) {
+        v = interpolateColumns(src, (lo + hi) / 2, n);
+      } else if (perPixel <= 1) {
         v = src[Math.max(0, Math.min(n - 1, Math.floor((lo + hi) / 2)))];
       } else {
         const i0 = Math.max(0, Math.floor(lo + BUCKET_EPSILON));

@@ -24,23 +24,9 @@
  *                scrolls; horizontal drag scrubs, wheel zooms.
  */
 import { drawBandRange, dimPlayed, ink, paletteVersion, wavePalette } from './waveform-render.js';
-
+import { PlayheadClock } from './playhead-clock.js';
 
 const DRAG_THRESHOLD_PX = 4;
-
-// Playhead render delay (ms). The transport reports position at ~20Hz (~50ms).
-// We display the playhead this far in the past so the render time always falls
-// *between* two buffered ticks — pure interpolation gives constant-velocity
-// scrolling, and rendering behind (never ahead of) the true position avoids a
-// backward snap on pause. ~1.5 tick intervals: enough headroom to absorb tick
-// jitter while staying imperceptible.
-const PLAYHEAD_RENDER_DELAY_MS = 80;
-// Recent authoritative ticks kept for interpolation. A handful is plenty to
-// bracket the (delayed) render time even with jittery tick spacing.
-const PLAYHEAD_TICK_BUFFER = 8;
-// Bound on extrapolation past the newest tick, in multiples of the last gap —
-// lets the head keep gliding through a dropped tick without running away.
-const PLAYHEAD_MAX_EXTRAP = 2.0;
 
 const OVERVIEW_DECAY = 0.93;
 const COMPACT_DECAY = 0.88;
@@ -147,20 +133,15 @@ export default class WaveformDisplay {
         this._dragSurface = null;
         this._playheadFrac = -1;
 
-        // Playhead interpolation. The transport only reports position at ~20Hz,
-        // which makes the locked-centre scroll visibly step. While playing we
-        // free-run a rAF clock and render the playhead a fixed delay in the past,
-        // linearly interpolating between the two most recent authoritative ticks.
-        // Even tick spacing → constant-velocity scroll at the display refresh
-        // rate (the thing that actually reads as smooth).
+        // Playhead. The transport only reports position at ~20Hz, with jittery
+        // delivery. While playing, a PlayheadClock runs at the true speed and the
+        // reports only correct it, so every display frame gets a position that
+        // advances smoothly (see playhead-clock.js).
         this._playing = false;
         this._phTarget = -1;     // last authoritative position (0–1)
-        this._phTargetAt = 0;    // timestamp of that report
-        this._phClock = -1;      // smoothed, displayed position
+        this._phClock = -1;      // displayed position (0–1)
         this._interpRaf = null;
-        // Ring of recent authoritative ticks ({f: frac, t: timestamp}) the
-        // render-delayed playhead interpolates across.
-        this._samples = [];
+        this._clock = new PlayheadClock();
 
         // rAF handle — coalesces rapid scroll/drag events into one draw per frame
         this._zoomRafId = null;
@@ -187,12 +168,11 @@ export default class WaveformDisplay {
     setData(data, playheadFrac = undefined) {
         this._data = data;
         this._overviewDirty = true;
-        this._resetSamples();
+        this._clock.stop(0);
         if (playheadFrac !== undefined && playheadFrac >= 0) {
             this._playheadFrac = playheadFrac;
             this._phClock = playheadFrac;
             this._phTarget = playheadFrac;
-            this._phTargetAt = this._now();
         } else {
             this._phClock = -1;
         }
@@ -204,6 +184,13 @@ export default class WaveformDisplay {
         } else {
             this._offset = 0.0;
         }
+        this._paint();
+    }
+
+    /** Replace the beat grid only (an edit): zoom, scroll position and the rest of the data stay. */
+    setBeats(beats) {
+        if (!this._data || this._data.beats === beats) return;
+        this._data = { ...this._data, beats };
         this._paint();
     }
 
@@ -271,59 +258,38 @@ export default class WaveformDisplay {
         if (frac < 0) {
             this._phTarget = -1;
             this._stopInterp();
-            this._resetSamples();
+            this._clock.stop(0);
             this._phClock = -1;
             this._applyPlayhead(-1);
             return;
         }
 
         this._phTarget = frac;
-        this._phTargetAt = this._now();
+        const durationMs = this._data?.duration_ms || 0;
 
-        if (!this._playing) {
+        if (!this._playing || !durationMs) {
             this._stopInterp();
-            this._resetSamples();
             if (wasPlaying && this._phClock >= 0) {
-                // Play→pause: freeze where the waveform is visually resting. While
-                // playing we render ~RENDER_DELAY behind the true position, so
-                // snapping to frac here would jump the waveform that far forward.
-                // (Keep _phClock as-is.)
+                // Play→pause: the waveform stays where it is. (The clock is a few
+                // ms off the final report; moving there would be a visible jump.)
+                this._clock.stop(this._phClock * durationMs);
             } else {
                 // Already paused — a position change is a deliberate seek; honor it.
                 this._phClock = frac;
+                this._clock.stop(frac * durationMs);
             }
             this._applyPlayhead(this._phClock);
             return;
         }
 
-        // Resuming from pause / first tick — seed the interpolation buffer so it
-        // continues from the frozen displayed position instead of snapping to the
-        // authoritative frac (which sits ~RENDER_DELAY ahead of the frozen head).
-        if (!wasPlaying || this._phClock < 0) {
-            this._resetSamples();
-            if (this._phClock >= 0) {
-                // Place the frozen position one render-delay in the past so the
-                // delayed interpolation picks up exactly there — no forward jump.
-                this._samples.push({ f: this._phClock, t: this._now() - PLAYHEAD_RENDER_DELAY_MS });
-            } else {
-                this._phClock = frac;
-            }
+        // Resuming from pause / first report: run from where the waveform rests,
+        // the report then corrects (or, after a seek, replaces) that position.
+        if (!this._clock.running) {
+            this._clock.start((this._phClock >= 0 ? this._phClock : frac) * durationMs, this._now());
+            if (this._phClock < 0) this._phClock = frac;
         }
-        this._pushSample(frac);
+        this._clock.report(frac * durationMs, this._now());
         this._startInterp();
-    }
-
-    // Record an authoritative tick. Dedupe identical positions so a repeated
-    // report doesn't flatten the interpolation slope (then jump on the next one).
-    _pushSample(frac) {
-        const s = this._samples;
-        if (s.length && Math.abs(frac - s[s.length - 1].f) < 1e-9) return;
-        s.push({ f: frac, t: this._now() });
-        if (s.length > PLAYHEAD_TICK_BUFFER) s.shift();
-    }
-
-    _resetSamples() {
-        this._samples = [];
     }
 
     _now() {
@@ -358,33 +324,13 @@ export default class WaveformDisplay {
         this._interpRaf = null;
     }
 
-    // Render the playhead a fixed delay in the past, linearly interpolating
-    // between the two buffered ticks that bracket the render time. Because the
-    // render time stays between known ticks, the head moves at constant velocity
-    // (steady tick spacing → zero per-frame velocity variance), which is what
-    // reads as smooth. Past the newest tick we extrapolate along the last
-    // segment's slope (bounded) so a dropped tick doesn't freeze the scroll.
+    // One position per display frame from the clock: constant speed between
+    // reports, so the scroll advances smoothly at the display refresh rate.
     _stepInterp() {
         if (this._scrubbing) return;
-        const s = this._samples;
-        if (s.length === 0) return;
-        if (s.length === 1) {
-            this._setClock(s[0].f);
-            return;
-        }
-
-        const renderT = this._now() - PLAYHEAD_RENDER_DELAY_MS;
-        // Bracketing pair: last segment whose start is at/before renderT.
-        let i = s.length - 2;
-        for (let k = 0; k < s.length - 1; k++) {
-            if (s[k + 1].t > renderT) { i = k; break; }
-        }
-        const a = s[i], b = s[i + 1];
-        const span = b.t - a.t;
-        const u = span > 0
-            ? Math.max(0, Math.min(PLAYHEAD_MAX_EXTRAP, (renderT - a.t) / span))
-            : 1;
-        this._setClock(a.f + (b.f - a.f) * u);
+        const durationMs = this._data?.duration_ms || 0;
+        if (!durationMs || !this._clock.running) return;
+        this._setClock(this._clock.positionAt(this._now()) / durationMs);
     }
 
     _setClock(pos) {
@@ -986,8 +932,7 @@ export default class WaveformDisplay {
                 this._playheadFrac = Math.max(0, Math.min(1, frac));
                 this._phClock = this._playheadFrac;
                 this._phTarget = this._playheadFrac;
-                this._phTargetAt = this._now();
-                this._resetSamples();
+                this._clock.stop(this._phClock * this._data.duration_ms);
                 if (this._lockPlayhead) this._offset = this._centeredOffset();
                 this._render();
                 this._updatePlayheadOverlay();
