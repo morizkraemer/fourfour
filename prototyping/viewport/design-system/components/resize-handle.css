@@ -1,0 +1,43 @@
+.ff-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.ff-resize--right {
+  right: -4px;
+}
+.ff-resize--left {
+  left: -4px;
+}
+.ff-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--ff-border-hi);
+  opacity: 0;
+  transition:
+    opacity var(--ff-motion-fast) var(--ff-easing),
+    background-color var(--ff-motion-fast) var(--ff-easing);
+}
+.ff-resize:hover::after,
+.ff-resize:focus-visible::after {
+  opacity: 1;
+}
+.ff-resize--dragging::after {
+  opacity: 1;
+  background: var(--ff-accent);
+}
+
+body.ff-resize--active,
+body.ff-resize--active * {
+  cursor: col-resize !important;
+  user-select: none;
+}

@@ -9,7 +9,7 @@
   import { onMount } from 'svelte';
   // Side-effect import: loads tokens.css + base.css globally
   import '$ds';
-  import { Dialog, Button, FileDropOverlay } from '$ds';
+  import { Dialog, Button, FileDropOverlay, ResizeHandle } from '$ds';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
   // Modules
@@ -31,7 +31,11 @@
     clearListFilter,
     initOrganize,
     reconcileOrganizeTarget,
+    setPanelWidth,
+    commitPanelWidth,
+    resetPanelWidth,
   } from './stores/ui.svelte.ts';
+  import { PANEL_WIDTH } from './lib/panelWidth.ts';
   import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
   import { importIntoSource } from './menus/context-menus.ts';
   import {
@@ -184,7 +188,17 @@
           <TrackTable />
         </div>
         {#if inspectorVisible}
-          <div class="ff-browse__slot ff-browse__slot--detail">
+          <div class="ff-browse__slot ff-browse__slot--detail" style:width="{ui.detailWidth}px">
+            <ResizeHandle
+              edge="left"
+              label="Resize inspector"
+              value={ui.detailWidth}
+              min={PANEL_WIDTH.inspector.min}
+              max={PANEL_WIDTH.inspector.max}
+              onResize={(px) => setPanelWidth('inspector', px)}
+              onCommit={() => commitPanelWidth('inspector')}
+              onReset={() => resetPanelWidth('inspector')}
+            />
             <Detail />
           </div>
         {/if}
@@ -280,7 +294,7 @@
   .ff-browse__slot--sidebar { flex: none; }
   .ff-browse__slot--header  { flex: none; }
   .ff-browse__slot--table   { flex: 1 1 0; }
-  .ff-browse__slot--detail  { flex: none; }
+  .ff-browse__slot--detail  { flex: none; position: relative; }
 
   /* Backing dock for the organize drawer — the inspector's grey z-layer shows
      through the drawer's top/bottom margin when the inspector is open. */

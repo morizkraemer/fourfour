@@ -30,6 +30,7 @@ export { default as Spinner } from './components/Spinner.svelte';
 export { default as ProgressBar } from './components/ProgressBar.svelte';
 export { default as Nudge } from './components/Nudge.svelte';
 export { default as SidebarSection } from './components/SidebarSection.svelte';
+export { default as ResizeHandle } from './components/ResizeHandle.svelte';
 export { default as Waveform } from './components/Waveform.svelte';
 export { default as WaveformView } from './components/WaveformView.svelte';
 export { default as WaveformDisplay } from './waveform-display.js';
