@@ -57,11 +57,10 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="ff-resize ff-resize--{edge}"
   class:ff-resize--dragging={dragging}
-  role="separator"
+  role="slider"
   aria-orientation={vertical ? 'horizontal' : 'vertical'}
   aria-label={label}
   aria-valuenow={value}
