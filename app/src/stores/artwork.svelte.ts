@@ -1,10 +1,35 @@
-import { getTrackArtwork } from '../services/tauri.svelte.ts';
+import { getTrackArtwork, ARTWORK_ROW_PX } from '../services/tauri.svelte.ts';
 
 // Reactive state containing the cached blob URLs
 let cache = $state<Record<number, string>>({});
 /** Bumped on clear() so in-flight fetches from a prior library session are ignored. */
 let cacheGeneration = 0;
 const inflight = new Map<number, Promise<string | null>>();
+
+let rowCache = $state<Record<number, string>>({});
+const ROW_FETCH_CONCURRENCY = 4;
+const ROW_QUEUE_LIMIT = 64;
+const rowQueue: number[] = [];
+const rowQueued = new Set<number>();
+let rowActive = 0;
+
+function pumpRowQueue() {
+  while (rowActive < ROW_FETCH_CONCURRENCY && rowQueue.length > 0) {
+    const trackId = rowQueue.pop()!;
+    rowQueued.delete(trackId);
+    const gen = cacheGeneration;
+    rowActive++;
+    getTrackArtwork(trackId, ARTWORK_ROW_PX)
+      .then((bytes) => {
+        if (gen !== cacheGeneration) return;
+        rowCache[trackId] = bytes ? URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) : '';
+      })
+      .finally(() => {
+        rowActive--;
+        pumpRowQueue();
+      });
+  }
+}
 
 export const artwork = {
   /**
@@ -18,6 +43,23 @@ export const artwork = {
 
     void this.fetch(trackId);
     return ''; // Return empty string while loading
+  },
+
+  /**
+   * Small thumbnail for list rows. Requests wait in a short newest-first queue, so rows that
+   * scrolled past before their turn are dropped instead of fetched.
+   */
+  getRow(trackId: number, hasArtwork: boolean | undefined): string {
+    if (!trackId || !hasArtwork) return '';
+    const cachedUrl = rowCache[trackId];
+    if (cachedUrl !== undefined) return cachedUrl;
+    if (!rowQueued.has(trackId)) {
+      rowQueued.add(trackId);
+      rowQueue.push(trackId);
+      if (rowQueue.length > ROW_QUEUE_LIMIT) rowQueued.delete(rowQueue.shift()!);
+      queueMicrotask(pumpRowQueue);
+    }
+    return '';
   },
 
   /**
@@ -69,5 +111,11 @@ export const artwork = {
     }
     cache = {}; // Reset the Svelte state reactively
     inflight.clear();
+    for (const url of Object.values(rowCache)) {
+      if (url) URL.revokeObjectURL(url);
+    }
+    rowCache = {};
+    rowQueue.length = 0;
+    rowQueued.clear();
   }
 };

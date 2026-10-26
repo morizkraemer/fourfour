@@ -123,12 +123,13 @@ function syntheticRowBands(i: number): string {
 const mockArtworkDelayMs =
   typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('artwork')) || 0 : 0;
 
-async function mockArtworkBytes(trackId: number): Promise<ArrayBuffer> {
+async function mockArtworkBytes(trackId: number, maxPx: number): Promise<ArrayBuffer> {
   await new Promise((resolve) => setTimeout(resolve, mockArtworkDelayMs));
-  const canvas = new OffscreenCanvas(256, 256);
+  const size = Math.min(maxPx, 512);
+  const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = `hsl(${(trackId * 47) % 360} 60% 45%)`;
-  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillRect(0, 0, size, size);
   const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
   return blob.arrayBuffer();
 }
@@ -532,12 +533,13 @@ export function prefetchAnalysisData(trackIds: number[]) {
   }, PREFETCH_DELAY_MS);
 }
 
-const ARTWORK_THUMB_PX = 512;
+export const ARTWORK_DETAIL_PX = 512;
+export const ARTWORK_ROW_PX = 64;
 
-export async function getTrackArtwork(trackId: number): Promise<ArrayBuffer | null> {
-  if (useBrowserMocks() && mockArtworkDelayMs > 0) return mockArtworkBytes(trackId);
+export async function getTrackArtwork(trackId: number, maxPx = ARTWORK_DETAIL_PX): Promise<ArrayBuffer | null> {
+  if (useBrowserMocks() && mockArtworkDelayMs > 0) return mockArtworkBytes(trackId, maxPx);
   try {
-    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId, maxPx: ARTWORK_THUMB_PX });
+    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId, maxPx });
     return bytes.byteLength > 0 ? bytes : null;
   } catch (err) {
     lastTauriError = `get_track_artwork fail: ${String(err)}`;
