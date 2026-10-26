@@ -41,17 +41,17 @@
         <div class="b__big b__big--btn b__big--sm">Edit <Ico name="chevron-down" size={12} /></div>
         <div class="b__sub">125.00 BPM</div>
       </div>
-      <div class="b__tile b__tile--flat">
+      <div class="b__tile b__tile--flat b__tile--rt">
         <div class="b__cap"><span>RATING</span></div>
         <div class="b__row"><Vanilla make={() => createStars({ rating: T.rating, interactive: true })} /></div>
       </div>
-      <div class="b__tile b__tile--flat">
+      <div class="b__tile b__tile--flat b__tile--cl">
         <div class="b__cap"><span>COLOUR</span></div>
         <div class="b__row"><Vanilla make={() => createColorPicker({ selected: 2 })} /></div>
       </div>
       <div class="b__tile b__tile--flat b__tile--ro">
         <div class="b__cap"><span>TIME</span></div>
-        <div class="b__row b__mono">8:11 · FLAC</div>
+        <div class="b__row b__mono">8:11</div>
       </div>
     </div>
 
@@ -104,7 +104,11 @@
   .b__id { display: flex; gap: 10px; }
   .b__cover { flex: none; width: 76px; height: 76px; border-radius: var(--ff-radius-xl); background-size: cover; border: 1px solid var(--ff-border-hi); }
   .b__idf { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .b__tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .b__tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .b__tiles > .b__tile { grid-column: span 2; }
+  .b__tiles > .b__tile--rt { grid-column: span 2; }
+  .b__tiles > .b__tile--cl { grid-column: span 3; }
+  .b__tiles > .b__tile--ro { grid-column: span 1; }
   .b__tile { position: relative; padding: 7px 8px 8px; border: 1px solid var(--ff-border); border-radius: var(--ff-radius-lg); background: var(--ff-bg); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .b__tile--own { border-color: var(--ff-border-hi); }
   .b__tile--open { border-color: rgba(255, 255, 255, 0.34); background: var(--ff-elev); }
