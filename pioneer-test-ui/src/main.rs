@@ -292,6 +292,42 @@ async fn analyze_tracks(
     run_track_analysis(app, shared, coordinator.inner().clone(), pending).await
 }
 
+/// Queue tracks left with missing stages (and, with the setting on, never-analysed ones) at launch.
+/// Returns how many tracks were queued; the run continues in the background.
+#[tauri::command]
+fn resume_analysis(
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+    coordinator: State<'_, AnalysisCoordinator>,
+) -> Result<usize, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    let include_new = config_path(&app).map_or(true, |path| analysis_backend::read_auto_analyze_new(&path));
+    let pending = {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        analysis_run::resume_work(&lib, include_new)?
+    };
+    let queued = pending.len();
+    if queued > 0 {
+        let coordinator = coordinator.inner().clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(err) = run_track_analysis(app.clone(), shared, coordinator, pending).await {
+                debug_info(&app, &format!("Resumed analysis failed: {err}"));
+            }
+        });
+    }
+    Ok(queued)
+}
+
+#[tauri::command]
+fn get_auto_analyze_new(app: AppHandle) -> bool {
+    config_path(&app).map_or(true, |path| analysis_backend::read_auto_analyze_new(&path))
+}
+
+#[tauri::command]
+fn set_auto_analyze_new(enabled: bool, app: AppHandle) -> Result<(), String> {
+    analysis_backend::write_auto_analyze_new(&config_path(&app)?, enabled)
+}
+
 /// Analyze or re-analyze specific tracks by library id.
 #[tauri::command]
 async fn analyze_track_ids(
@@ -1094,6 +1130,9 @@ fn main() {
             scan_files,
             analyze_tracks,
             analyze_track_ids,
+            resume_analysis,
+            get_auto_analyze_new,
+            set_auto_analyze_new,
             enqueue_analysis,
             prioritize_analysis,
             write_usb,

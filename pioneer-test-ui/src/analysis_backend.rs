@@ -8,6 +8,7 @@ use pioneer_usb_writer::models::AnalysisResult;
 pub const BACKEND_ENV: &str = "FOURFOUR_ANALYSIS_BACKEND";
 pub const THREADS_ENV: &str = "FOURFOUR_ANALYSIS_THREADS";
 const CONFIG_KEY: &str = "analysis_backend";
+const AUTO_ANALYZE_KEY: &str = "auto_analyze_new_tracks";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AnalysisBackend {
@@ -100,15 +101,32 @@ pub fn read_setting(config_path: &Path) -> Option<AnalysisBackend> {
 }
 
 pub fn write_setting(config_path: &Path, backend: Option<AnalysisBackend>) -> Result<(), String> {
+    update_config(config_path, CONFIG_KEY, backend.map(|b| serde_json::Value::String(b.name().to_string())))
+}
+
+/// Whether never-analysed tracks are queued at launch (default on); partial analyses always resume.
+pub fn read_auto_analyze_new(config_path: &Path) -> bool {
+    std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json.get(AUTO_ANALYZE_KEY)?.as_bool())
+        .unwrap_or(true)
+}
+
+pub fn write_auto_analyze_new(config_path: &Path, enabled: bool) -> Result<(), String> {
+    update_config(config_path, AUTO_ANALYZE_KEY, Some(serde_json::Value::Bool(enabled)))
+}
+
+fn update_config(config_path: &Path, key: &str, value: Option<serde_json::Value>) -> Result<(), String> {
     let mut json = std::fs::read_to_string(config_path)
         .ok()
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .filter(|v| v.is_object())
         .unwrap_or_else(|| serde_json::json!({}));
     let object = json.as_object_mut().expect("object checked above");
-    match backend {
-        Some(b) => object.insert(CONFIG_KEY.to_string(), serde_json::Value::String(b.name().to_string())),
-        None => object.remove(CONFIG_KEY),
+    match value {
+        Some(value) => object.insert(key.to_string(), value),
+        None => object.remove(key),
     };
     std::fs::write(config_path, json.to_string()).map_err(|e| e.to_string())
 }
@@ -208,6 +226,20 @@ mod tests {
         assert_eq!(json["library_path"], "/lib");
         write_setting(&cfg, None).unwrap();
         assert_eq!(read_setting(&cfg), None);
+    }
+
+    #[test]
+    fn auto_analyze_new_defaults_on_and_keeps_other_config_keys() {
+        let cfg = scratch("auto-analyze").join("config.json");
+        assert!(read_auto_analyze_new(&cfg));
+        std::fs::write(&cfg, r#"{"library_path":"/lib"}"#).unwrap();
+        assert!(read_auto_analyze_new(&cfg));
+        write_auto_analyze_new(&cfg, false).unwrap();
+        assert!(!read_auto_analyze_new(&cfg));
+        write_auto_analyze_new(&cfg, true).unwrap();
+        assert!(read_auto_analyze_new(&cfg));
+        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(json["library_path"], "/lib");
     }
 
     #[test]

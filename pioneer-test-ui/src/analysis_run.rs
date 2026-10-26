@@ -176,6 +176,13 @@ impl AnalysisCoordinator {
         self.with_queue(|queue| queue.len()).unwrap_or(0) + grid
     }
 
+    fn is_scheduled(&self, track_id: i64) -> bool {
+        let jobs = self.jobs.lock().expect("analysis jobs lock");
+        jobs.background.contains_key(&track_id)
+            || jobs.now.contains_key(&track_id)
+            || jobs.grid_queue.iter().any(|(id, _)| *id == track_id)
+    }
+
     fn push_grid(&self, item: AnalysisWorkItem) {
         self.jobs.lock().expect("analysis jobs lock").grid_queue.push_back(item);
     }
@@ -287,12 +294,25 @@ pub(crate) fn resolve_analysis_work(
     Ok(work)
 }
 
+/// Tracks to analyse at launch: partial analyses first (they resume at the missing stage), then,
+/// when `include_new` is set, tracks that were never analysed.
+pub(crate) fn resume_work(lib: &LocalLibrary, include_new: bool) -> Result<Vec<AnalysisWorkItem>, String> {
+    let partial = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?;
+    let mut ids = partial.clone();
+    if include_new {
+        let unanalyzed = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
+        ids.extend(unanalyzed.into_iter().filter(|id| !partial.contains(id)));
+    }
+    resolve_analysis_work(lib, &ids)
+}
+
 pub(crate) fn merge_into_analysis_queue(
     coordinator: &AnalysisCoordinator,
     items: Vec<AnalysisWorkItem>,
     front: bool,
 ) -> u32 {
     let mut added = 0u32;
+    let items: Vec<AnalysisWorkItem> = items.into_iter().filter(|(id, _)| !coordinator.is_scheduled(*id)).collect();
     coordinator.with_queue(|queue| {
         for item in items {
             let track_id = item.0;

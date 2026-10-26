@@ -409,3 +409,82 @@ fn cancel_reaches_every_job() {
     assert!(background.cancel.load(Ordering::Relaxed) && now.load(Ordering::Relaxed));
     assert_eq!(coordinator.queue_len(), 0);
 }
+
+fn resume_ids(work: &[AnalysisWorkItem]) -> Vec<i64> {
+    work.iter().map(|(id, _)| *id).collect()
+}
+
+#[test]
+fn resume_work_lists_partial_tracks_first_and_new_ones_only_when_the_setting_is_on() {
+    let h = harness(4, 1, 8);
+    let lib = h.shared.lock().unwrap();
+    lib.set_analysis(3, &finished_result()).unwrap();
+    lib.set_analysis_stages(2, &finished_result(), analysis_stage::WAVEFORM).unwrap();
+    lib.set_analysis_stages(4, &finished_result(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
+
+    assert_eq!(resume_ids(&resume_work(&lib, true).unwrap()), vec![2, 4, 1]);
+    assert_eq!(resume_ids(&resume_work(&lib, false).unwrap()), vec![2, 4]);
+}
+
+#[test]
+fn resume_work_is_empty_when_everything_is_analysed() {
+    let h = harness(2, 1, 8);
+    let lib = h.shared.lock().unwrap();
+    lib.set_analysis(1, &finished_result()).unwrap();
+    lib.set_analysis(2, &finished_result()).unwrap();
+    assert!(resume_work(&lib, true).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_resumed_run_finishes_missing_stages_only() {
+    let h = harness(3, 2, 8);
+    h.shared
+        .lock()
+        .unwrap()
+        .set_analysis_stages(1, &finished_result(), analysis_stage::WAVEFORM | analysis_stage::KEY)
+        .unwrap();
+    let work = resume_work(&h.shared.lock().unwrap(), true).unwrap();
+    let outcome = h.run_all(work).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 3 }));
+    assert_eq!(h.count(&ran("t1.wav", Pass::Fast)), 0);
+    assert_eq!(h.count(&ran("t1.wav", Pass::Grid)), 1);
+    assert!(h.unanalyzed().is_empty());
+}
+
+#[tokio::test]
+async fn resuming_while_a_run_is_active_queues_no_track_twice() {
+    let h = harness(4, 2, 8);
+    let run = h.run_all(h.items.clone());
+    let resume = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while h.events().is_empty() {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let work = resume_work(&h.shared.lock().unwrap(), true).unwrap();
+        assert_eq!(work.len(), 4);
+        merge_into_analysis_queue(&h.coordinator, work, false)
+    };
+    let (outcome, added) = tokio::join!(run, resume);
+
+    assert_eq!(added, 0);
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 4 }));
+    for n in 1..=4 {
+        assert_eq!(h.count(&ran(&format!("t{n}.wav"), Pass::Fast)), 1, "{:?}", h.events());
+        assert_eq!(h.count(&ran(&format!("t{n}.wav"), Pass::Grid)), 1);
+    }
+}
+
+#[tokio::test]
+async fn resumed_work_yields_to_a_played_track() {
+    let h = harness(4, 1, 8);
+    let work = resume_work(&h.shared.lock().unwrap(), true).unwrap();
+    let outcome = h.run_and_prioritize_when(work[..3].to_vec(), work[3].clone(), |e| !e.is_empty()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 4 }));
+    assert_eq!(h.count(&ran("t4.wav", Pass::All)), 1, "{:?}", h.events());
+    assert!(h.unanalyzed().is_empty());
+}
