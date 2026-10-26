@@ -3,15 +3,33 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use ffcore::fit::{fit_track, FitParams, Window, FPS};
+use ffcore::mp3::{self, DelayRule};
 use serde_json::{json, Value};
 
-const FPS: f64 = 50.0;
 
+#[derive(Clone)]
 struct Params {
     lo: f64,
     shift_ms: f64,
     comb_refine: bool,
-    audio_refine: bool,
+    audio_q: f64,
+    audio_range_ms: i64,
+    audio_calib_ms: f64,
+    audio_min_ms: f64,
+    mp3_rule: DelayRule,
+    mp3_diag: bool,
+    use_final: bool,
+    threads: usize,
+    snap_tol: f64,
+    snap_phase_ms: f64,
+    snap_wide: f64,
+    scan_pct: f64,
+    snap_ratio: f64,
+    diag: bool,
+    onset_dir: Option<PathBuf>,
+    keep_native: (f64, f64),
+    pcm_shift_ms: f64,
 }
 
 struct Reference {
@@ -24,201 +42,8 @@ struct Reference {
     audio_path: Option<String>,
 }
 
-struct Fit {
-    bpm: f64,
-    beats_s: Vec<f64>,
-    first_s: f64,
-    raw_bpm: f64,
-    raw_beats_s: Vec<f64>,
-    fit_us: u128,
-}
-
-fn sigmoid(x: f32) -> f64 {
-    1.0 / (1.0 + (-(x as f64)).exp())
-}
-
-fn refine_peaks(peaks_s: &[f64], logits: &[f32], offset: f64) -> Vec<f64> {
-    peaks_s
-        .iter()
-        .map(|&t| {
-            let f = ((t - offset) * FPS).round() as i64;
-            let (mut num, mut den) = (0.0, 0.0);
-            for g in f - 2..=f + 2 {
-                if g < 0 || g as usize >= logits.len() {
-                    continue;
-                }
-                let p = sigmoid(logits[g as usize]);
-                num += p * g as f64;
-                den += p;
-            }
-            if den > 0.0 { num / den / FPS + offset } else { t }
-        })
-        .collect()
-}
-
-fn mode_period(peaks: &[f64]) -> Option<f64> {
-    let ibis: Vec<f64> = peaks.windows(2).map(|w| w[1] - w[0]).filter(|d| (0.25..=2.0).contains(d)).collect();
-    if ibis.len() < 4 {
-        return None;
-    }
-    let mut best = (0usize, 0.0);
-    for &c in &ibis {
-        let near: Vec<f64> = ibis.iter().copied().filter(|d| (d - c).abs() < 0.015 * c).collect();
-        if near.len() > best.0 {
-            best = (near.len(), near.iter().sum::<f64>() / near.len() as f64);
-        }
-    }
-    Some(best.1)
-}
-
-fn fit_line(peaks: &[f64], p0: f64) -> (f64, f64) {
-    let mut k = vec![0f64; peaks.len()];
-    for i in 1..peaks.len() {
-        k[i] = k[i - 1] + ((peaks[i] - peaks[i - 1]) / p0).round();
-    }
-    let (mut t0, mut p) = (peaks[0], p0);
-    for tol in [0.05, 0.03, 0.02, 0.015].iter() {
-        let inl: Vec<usize> = (0..peaks.len()).filter(|&i| (peaks[i] - (t0 + k[i] * p)).abs() < *tol).collect();
-        if inl.len() < 4 {
-            break;
-        }
-        let n = inl.len() as f64;
-        let mk = inl.iter().map(|&i| k[i]).sum::<f64>() / n;
-        let mt = inl.iter().map(|&i| peaks[i]).sum::<f64>() / n;
-        let sxx: f64 = inl.iter().map(|&i| (k[i] - mk).powi(2)).sum();
-        let sxy: f64 = inl.iter().map(|&i| (k[i] - mk) * (peaks[i] - mt)).sum();
-        if sxx == 0.0 {
-            break;
-        }
-        p = sxy / sxx;
-        t0 = mt - p * mk;
-    }
-    (t0, p)
-}
-
-struct Window {
-    offset: f64,
-    len: f64,
-}
-
-fn comb_score(act: &[f64], w: &Window, t0: f64, p: f64) -> f64 {
-    let mut s = 0.0;
-    let mut t = t0 + ((w.offset - t0) / p).ceil() * p;
-    while t < w.offset + w.len {
-        let x = (t - w.offset) * FPS;
-        let i = x.floor() as usize;
-        if i + 1 < act.len() {
-            let fr = x - i as f64;
-            s += act[i] * (1.0 - fr) + act[i + 1] * fr;
-        }
-        t += p;
-    }
-    s
-}
-
-fn refine_comb(act: &[f64], w: &Window, t0: f64, p: f64) -> (f64, f64) {
-    let mid = w.offset + w.len / 2.0;
-    let (mut bt0, mut bp, mut best) = (t0, p, comb_score(act, w, t0, p));
-    let mut step_p = p * 2e-4;
-    let mut step_t = 0.004;
-    for _ in 0..4 {
-        let mut improved = true;
-        while improved {
-            improved = false;
-            for dp in [-step_p, 0.0, step_p] {
-                for dt in [-step_t, 0.0, step_t] {
-                    if dp == 0.0 && dt == 0.0 {
-                        continue;
-                    }
-                    let cp = bp + dp;
-                    let ct = bt0 + dt - dp * ((mid - bt0) / bp);
-                    let s = comb_score(act, w, ct, cp);
-                    if s > best {
-                        best = s;
-                        bp = cp;
-                        bt0 = ct;
-                        improved = true;
-                    }
-                }
-            }
-        }
-        step_p /= 3.0;
-        step_t /= 3.0;
-    }
-    (bt0, bp)
-}
 
 
-fn fit_track(
-    peaks_s: &[f64],
-    beat_logits: &[f32],
-    down_logits: &[f32],
-    duration: f64,
-    w: &Window,
-    params: &Params,
-) -> Option<Fit> {
-    let started = Instant::now();
-    let refined = refine_peaks(peaks_s, beat_logits, w.offset);
-    let p0 = mode_period(&refined)?;
-    let raw_bpm = fold_bpm(60.0 / p0, params.lo);
-    let (mut t0, mut p) = fit_line(&refined, p0);
-    if params.comb_refine {
-        let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
-        let r = refine_comb(&act, w, t0, p);
-        t0 = r.0;
-        p = r.1;
-    }
-
-    let model_bpm = 60.0 / p;
-    let target = fold_bpm(model_bpm, params.lo);
-    let ratio = target / model_bpm;
-    let mut p_out = p / ratio;
-    let mut t0_out = t0;
-    if ratio < 1.0 {
-        let n = (1.0 / ratio).round() as usize;
-        let down: Vec<f64> = down_logits.iter().map(|&x| sigmoid(x)).collect();
-        let mut best = (f64::MIN, t0);
-        for j in 0..n {
-            let tj = t0 + j as f64 * p;
-            let s = comb_score(&down, w, tj, p * n as f64);
-            if s > best.0 {
-                best = (s, tj);
-            }
-        }
-        t0_out = best.1;
-        p_out = p * n as f64;
-    }
-
-    let shift = params.shift_ms / 1000.0;
-    let mut first = (t0_out + shift) % p_out;
-    if first < 0.0 {
-        first += p_out;
-    }
-    let mut beats = Vec::new();
-    let mut t = first;
-    while t < duration {
-        beats.push(t);
-        t += p_out;
-    }
-    Some(Fit {
-        bpm: 60.0 / p_out,
-        beats_s: beats,
-        first_s: first,
-        raw_bpm,
-        raw_beats_s: peaks_s.to_vec(),
-        fit_us: started.elapsed().as_micros(),
-    })
-}
-
-fn fold_bpm(mut bpm: f64, lo: f64) -> f64 {
-    while bpm < lo {
-        bpm *= 2.0;
-    }
-    while bpm >= 2.0 * lo {
-        bpm /= 2.0;
-    }
-    bpm
-}
 
 fn match_f(reference: &[f64], est: &[f64], tol_ms: f64) -> (usize, f64) {
     let (mut i, mut j, mut tp) = (0, 0, 0);
@@ -281,6 +106,10 @@ struct Row {
     p95_dev_ms: f64,
     drift_ms: f64,
     detrended_max_ms: f64,
+    container: String,
+    hb: Vec<f64>,
+    fit_first_s: f64,
+    period_ms: f64,
     fit_ms: f64,
     model_s: f64,
     duration: f64,
@@ -324,26 +153,90 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
         let peaks: Vec<f64> = doc["beats"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
         let duration = r.beats_ms.last().copied().unwrap_or(0.0).max(doc["duration_s"].as_f64().unwrap() * 1000.0) / 1000.0;
         let w = Window { offset: doc["offset_s"].as_f64().unwrap_or(0.0), len: frames as f64 / FPS };
-        let Some(mut fit) = fit_track(&peaks, bl, dl, doc["duration_s"].as_f64().unwrap().max(duration), &w, params) else {
+        let final_beats: Option<Vec<f64>> = if params.use_final {
+            doc["final_beats_s"].as_array().map(|v| v.iter().map(|x| x.as_f64().unwrap()).collect())
+        } else {
+            None
+        };
+        let fitted = match &final_beats {
+            Some(fb) => doc["bpm"].as_f64().map(|bpm| ffcore::fit::Fit { bpm, beats_s: fb.clone(), first_s: 0.0, raw_bpm: bpm, raw_beats_s: peaks.clone(), fit_us: 0 }),
+            None => fit_track(&peaks, bl, dl, doc["duration_s"].as_f64().unwrap().max(duration), &w, &params.fit()),
+        };
+        let Some(mut fit) = fitted else {
             continue;
         };
-        if params.audio_refine {
+        if params.audio_q > 0.0 {
             if let Some(path) = &r.audio_path {
                 let started = Instant::now();
-                if let Some(d) = onset_phase_correction(path, &fit.beats_s) {
-                    fit.beats_s = fit.beats_s.iter().map(|t| t + d).filter(|t| *t >= 0.0).collect();
-                }
+                let d = audio_phase_correction_ms(path, &dir.join(format!("{}.env", r.id)), &fit.beats_s, params);
+                fit.beats_s = fit.beats_s.iter().map(|t| t + d / 1000.0).collect();
                 fit.fit_us += started.elapsed().as_micros();
             }
+        }
+        let fit_first_s = fit.beats_s.first().copied().unwrap_or(0.0);
+        let mut hb = vec![0.0; 6];
+        if let (Some(dir), Some(path)) = (&params.onset_dir, &r.audio_path) {
+            if let Some(env) = cached_onsets(path, &dir.join(format!("{}.onsets", r.id))) {
+                let period = 60.0 / fit.bpm;
+                for b in 0..3 {
+                    hb[b] = env.offbeat_ratio(b, &fit.beats_s, period);
+                }
+                let act = |l: &[f32], t: f64| {
+                    let x = t * FPS;
+                    let i = x.floor() as usize;
+                    if x < 0.0 || i + 1 >= l.len() { return None; }
+                    let f = x - i as f64;
+                    Some(ffcore::fit::sigmoid(l[i]) * (1.0 - f) + ffcore::fit::sigmoid(l[i + 1]) * f)
+                };
+                for (slot, l) in [(3, bl), (4, dl)] {
+                    let (mut on, mut off) = (0.0, 0.0);
+                    for &t in &fit.beats_s {
+                        if let (Some(a), Some(b)) = (act(l, t), act(l, t + period / 2.0)) { on += a; off += b; }
+                    }
+                    hb[slot] = off / on.max(1e-9);
+                }
+                let mut narrow = 0.0;
+                let (mut on, mut off) = (0.0, 0.0);
+                for &t in &fit.beats_s {
+                    on += env.bands[0].get(((t - env.centre_s) / env.hop_s).round() as usize).copied().unwrap_or(0.0) as f64;
+                    off += env.bands[0].get(((t + period / 2.0 - env.centre_s) / env.hop_s).round() as usize).copied().unwrap_or(0.0) as f64;
+                }
+                narrow += off / on.max(1e-9);
+                hb[5] = narrow;
+            }
+        }
+        let mut delay = 0.0;
+        if let Some(path) = &r.audio_path {
+            delay = mp3::reference_delay_s(std::path::Path::new(path), params.mp3_rule);
+            if !path.to_lowercase().ends_with(".mp3") {
+                delay = params.pcm_shift_ms / 1000.0;
+            }
+        }
+        if final_beats.is_none() {
+            fit.beats_s = ffcore::fit::finalize_beats(&fit.beats_s, delay);
         }
         let est_ms: Vec<f64> = fit.beats_s.iter().map(|t| t * 1000.0).collect();
         let raw_ms: Vec<f64> = fit.raw_beats_s.iter().map(|t| t * 1000.0).collect();
         let (_, f70) = match_f(&r.beats_ms, &est_ms, 70.0);
         let (_, f70_raw) = match_f(&r.beats_ms, &raw_ms, 70.0);
         let offs = nearest_offsets(&r.beats_ms, &est_ms);
+        if std::env::var("GRID_DEBUG_ID").ok().and_then(|v| v.parse::<u64>().ok()) == Some(r.id) {
+            let worst = offs.iter().enumerate().max_by(|a, b| a.1.abs().partial_cmp(&b.1.abs()).unwrap()).unwrap();
+            eprintln!("debug {} worst beat index {} of {} ref_t {} off {} est_first {:?} est_last {:?}", r.id, worst.0, offs.len(), r.beats_ms[worst.0], worst.1, &est_ms[..3], &est_ms[est_ms.len() - 2..]);
+        }
         let mut abs: Vec<f64> = offs.iter().map(|d| d.abs()).collect();
         let mut signed = offs.clone();
         let med = median(&mut signed);
+        if params.mp3_diag {
+            if let Some(t) = r.audio_path.as_deref().and_then(|p| mp3::scan(std::path::Path::new(p))) {
+                println!("MP3 {} header_frame {} header_counts {} lame_delay {:?} bpm_ok {} med_offset_ms {:.1} max_dev_ms {:.1}", r.id, t.header_frame, t.header_counts, t.lame_delay, (fit.bpm - r.bpm).abs() <= 0.5, med, abs.iter().cloned().fold(0.0, f64::max));
+            }
+        }
+        if params.diag && r.constant {
+            if let Some(path) = &r.audio_path {
+                phase_diag(r.id, path, &fit.beats_s, med);
+            }
+        }
         let max_dev = abs.iter().cloned().fold(0.0, f64::max);
         abs.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let p95 = abs[((abs.len() as f64) * 0.95) as usize % abs.len()];
@@ -360,8 +253,19 @@ fn evaluate(refs: &[&Reference], dir: &PathBuf, params: &Params) -> Vec<Row> {
             .zip(&offs)
             .map(|(x, y)| (y - (my + slope * (x - mx))).abs())
             .fold(0.0, f64::max);
+        let container = r.audio_path.as_deref().map_or("none".to_string(), |p| {
+            let ext = std::path::Path::new(p).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            match mp3::scan(std::path::Path::new(p)).and_then(|t| t.encoder) {
+                Some(e) => format!("{ext}:{}", String::from_utf8_lossy(&e)),
+                None => ext,
+            }
+        });
         rows.push(Row {
             id: r.id,
+            container,
+            hb,
+            fit_first_s,
+            period_ms: 60000.0 / fit.bpm,
             label: format!("{} - {}", r.artist, r.title),
             ref_bpm: r.bpm,
             est_bpm: fit.bpm,
@@ -433,7 +337,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let reference = PathBuf::from(args.next().expect("usage: grid <reference.json> <dump dir> [--split dev|test|all] [--lo N] [--shift-ms N] [--comb] [--out file] [--dedupe]"));
     let dir = PathBuf::from(args.next().expect("dump dir"));
-    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_refine: false };
+    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_rule: DelayRule::None, mp3_diag: false, use_final: false, threads: 1, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false, onset_dir: None, keep_native: (0.0, 0.0), pcm_shift_ms: mp3::PCM_SHIFT_MS };
     let mut split = "test".to_string();
     let mut out: Option<PathBuf> = None;
     let mut dedupe = false;
@@ -444,7 +348,24 @@ fn main() {
             "--lo" => params.lo = args.next().unwrap().parse().unwrap(),
             "--shift-ms" => params.shift_ms = args.next().unwrap().parse().unwrap(),
             "--comb" => params.comb_refine = true,
-            "--audio-phase" => params.audio_refine = true,
+            "--audio-q" => params.audio_q = args.next().unwrap().parse().unwrap(),
+            "--audio-range-ms" => params.audio_range_ms = args.next().unwrap().parse().unwrap(),
+            "--audio-min-ms" => params.audio_min_ms = args.next().unwrap().parse().unwrap(),
+            "--audio-calib-ms" => params.audio_calib_ms = args.next().unwrap().parse().unwrap(),
+            "--mp3-delay" => params.mp3_rule = DelayRule::Lame,
+            "--mp3-rule" => params.mp3_rule = DelayRule::parse(&args.next().unwrap()).expect("rule none|lame|lame+header|header"),
+            "--mp3-diag" => params.mp3_diag = true,
+            "--use-final" => params.use_final = true,
+            "--threads" => params.threads = args.next().unwrap().parse().unwrap(),
+            "--snap-tol" => params.snap_tol = args.next().unwrap().parse().unwrap(),
+            "--scan-pct" => params.scan_pct = args.next().unwrap().parse().unwrap(),
+            "--snap-wide" => params.snap_wide = args.next().unwrap().parse().unwrap(),
+            "--snap-ratio" => params.snap_ratio = args.next().unwrap().parse().unwrap(),
+            "--snap-phase-ms" => params.snap_phase_ms = args.next().unwrap().parse().unwrap(),
+            "--diag" => params.diag = true,
+            "--pcm-shift-ms" => params.pcm_shift_ms = args.next().unwrap().parse().unwrap(),
+            "--keep-native" => params.keep_native = (args.next().unwrap().parse().unwrap(), args.next().unwrap().parse().unwrap()),
+            "--onset-dir" => params.onset_dir = Some(PathBuf::from(args.next().unwrap())),
             "--out" => out = Some(PathBuf::from(args.next().unwrap())),
             "--dedupe" => dedupe = true,
             "--sweep" => sweep = true,
@@ -465,7 +386,7 @@ fn main() {
 
     if sweep {
         for lo in [60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0] {
-            let p = Params { lo, shift_ms: params.shift_ms, comb_refine: params.comb_refine, audio_refine: params.audio_refine };
+            let p = Params { lo, diag: false, ..params.clone() };
             let rows = evaluate(&selected, &dir, &p);
             let rr: Vec<&Row> = rows.iter().collect();
             let s = summarize("sweep", &rr, false);
@@ -508,7 +429,7 @@ fn main() {
     if let Some(o) = out {
         let per: Vec<Value> = rows
             .iter()
-            .map(|r| json!({"id": r.id, "ref_bpm": r.ref_bpm, "est_bpm": r.est_bpm, "f70": r.f70, "med_offset_ms": r.med_offset_ms, "max_dev_ms": r.max_dev_ms, "drift_ms": r.drift_ms, "detrended_max_ms": r.detrended_max_ms, "ref_constant": r.ref_constant}))
+            .map(|r| json!({"id": r.id, "ref_bpm": r.ref_bpm, "est_bpm": r.est_bpm, "f70": r.f70, "med_offset_ms": r.med_offset_ms, "max_dev_ms": r.max_dev_ms, "drift_ms": r.drift_ms, "detrended_max_ms": r.detrended_max_ms, "container": r.container, "hb": r.hb, "fit_first_s": r.fit_first_s, "period_ms": r.period_ms, "ref_constant": r.ref_constant}))
             .collect();
         fs::write(o, serde_json::to_string(&json!({"report": report, "tracks": per})).unwrap()).unwrap();
     }
@@ -538,14 +459,12 @@ const ONSET_SR: f64 = 22050.0;
 const ONSET_WIN: usize = 512;
 const ONSET_HOP: usize = 64;
 const ONSET_MAX_BIN: usize = 116;
-const PHASE_SEARCH_MS: i64 = 50;
-
-fn onset_envelope(samples: &[f32]) -> Vec<f64> {
+fn band_envelope(samples: &[f32], bin_lo: usize, bin_hi: usize, log_compress: bool) -> Vec<f64> {
     let fft = rustfft::FftPlanner::<f32>::new().plan_fft_forward(ONSET_WIN);
     let window: Vec<f32> = (0..ONSET_WIN)
         .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / ONSET_WIN as f32).cos())
         .collect();
-    let mut prev = vec![0f32; ONSET_MAX_BIN];
+    let mut prev = vec![0f32; bin_hi];
     let mut buf = vec![rustfft::num_complex::Complex { re: 0f32, im: 0f32 }; ONSET_WIN];
     let frames = samples.len().saturating_sub(ONSET_WIN) / ONSET_HOP;
     let mut env = Vec::with_capacity(frames);
@@ -556,8 +475,8 @@ fn onset_envelope(samples: &[f32]) -> Vec<f64> {
         }
         fft.process(&mut buf);
         let mut flux = 0f32;
-        for b in 1..ONSET_MAX_BIN {
-            let m = (1.0 + 100.0 * buf[b].norm()).ln();
+        for b in bin_lo..bin_hi {
+            let m = if log_compress { (1.0 + 100.0 * buf[b].norm()).ln() } else { buf[b].norm() };
             flux += (m - prev[b]).max(0.0);
             prev[b] = m;
         }
@@ -566,38 +485,106 @@ fn onset_envelope(samples: &[f32]) -> Vec<f64> {
     env
 }
 
-fn onset_phase_correction(path: &str, beats_s: &[f64]) -> Option<f64> {
-    let audio = beat_this::load_audio(std::path::Path::new(path), ONSET_SR as u32).ok()?;
-    let env = onset_envelope(&audio.samples);
-    let at = |t: f64| -> f64 {
-        let x = (t * ONSET_SR - ONSET_WIN as f64 / 2.0) / ONSET_HOP as f64;
-        if x < 0.0 {
-            return 0.0;
-        }
-        let i = x.floor() as usize;
-        if i + 1 >= env.len() {
-            return 0.0;
-        }
-        let fr = x - i as f64;
-        env[i] * (1.0 - fr) + env[i + 1] * fr
-    };
-    let steps = (2 * PHASE_SEARCH_MS + 1) as usize;
-    let mut profile = vec![0f64; steps];
-    for (j, p) in profile.iter_mut().enumerate() {
-        let d = (j as i64 - PHASE_SEARCH_MS) as f64 / 1000.0;
-        *p = beats_s.iter().map(|&t| at(t + d)).sum();
+fn env_at(env: &[f64], t: f64) -> f64 {
+    let x = (t * ONSET_SR - ONSET_WIN as f64 / 2.0) / ONSET_HOP as f64;
+    if x < 0.0 {
+        return 0.0;
     }
+    let i = x.floor() as usize;
+    if i + 1 >= env.len() {
+        return 0.0;
+    }
+    let fr = x - i as f64;
+    env[i] * (1.0 - fr) + env[i + 1] * fr
+}
+
+fn profile_argmax_ms(env: &[f64], beats_s: &[f64], range_ms: i64) -> (f64, f64) {
+    let steps = (2 * range_ms + 1) as usize;
+    let profile: Vec<f64> = (0..steps)
+        .map(|j| {
+            let d = (j as i64 - range_ms) as f64 / 1000.0;
+            beats_s.iter().map(|&t| env_at(env, t + d)).sum()
+        })
+        .collect();
     let smooth: Vec<f64> = (0..steps)
         .map(|j| {
-            let lo = j.saturating_sub(2);
-            let hi = (j + 3).min(steps);
+            let lo = j.saturating_sub(3);
+            let hi = (j + 4).min(steps);
             profile[lo..hi].iter().sum::<f64>() / (hi - lo) as f64
         })
         .collect();
     let mean = smooth.iter().sum::<f64>() / steps as f64;
-    let (best_j, best) = smooth.iter().enumerate().fold((0, f64::MIN), |a, (j, &v)| if v > a.1 { (j, v) } else { a });
-    if mean <= 0.0 || best / mean < 1.1 {
-        return None;
+    let (bj, best) = smooth.iter().enumerate().fold((0, f64::MIN), |a, (j, &v)| if v > a.1 { (j, v) } else { a });
+    ((bj as i64 - range_ms) as f64, best / mean.max(1e-12))
+}
+
+fn phase_diag(id: u64, path: &str, beats_s: &[f64], med_offset_ms: f64) {
+    let Ok(audio) = beat_this::load_audio(std::path::Path::new(path), ONSET_SR as u32) else { return };
+    let bands: [(usize, usize, bool); 5] = [(1, 116, true), (1, 6, true), (1, 6, false), (6, 40, true), (1, 116, false)];
+    let mut cols = Vec::new();
+    for (lo, hi, lg) in bands {
+        let env = band_envelope(&audio.samples, lo, hi, lg);
+        let (d, q) = profile_argmax_ms(&env, beats_s, 80);
+        cols.push(format!("{d:.0} {q:.2}"));
     }
-    Some((best_j as i64 - PHASE_SEARCH_MS) as f64 / 1000.0)
+    println!("DIAG {id} {med_offset_ms:.1} {}", cols.join(" "));
+}
+
+fn cached_onsets(path: &str, cache: &PathBuf) -> Option<ffcore::onset::Envelopes> {
+    if let Ok(raw) = fs::read(cache) {
+        let f: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let n = (f.len() - 2) / 3;
+        return Some(ffcore::onset::Envelopes { hop_s: f[0] as f64, centre_s: f[1] as f64, bands: [f[2..2 + n].to_vec(), f[2 + n..2 + 2 * n].to_vec(), f[2 + 2 * n..].to_vec()] });
+    }
+    let native = ffcore::decode::decode_mono(std::path::Path::new(path)).ok()?;
+    let env = ffcore::onset::envelopes(&native.samples, native.rate);
+    let mut all = vec![env.hop_s as f32, env.centre_s as f32];
+    for b in &env.bands {
+        all.extend_from_slice(b);
+    }
+    fs::write(cache, all.iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<u8>>()).ok()?;
+    Some(env)
+}
+
+fn cached_envelope(path: &str, cache: &PathBuf) -> Option<Vec<f64>> {
+    if let Ok(raw) = fs::read(cache) {
+        return Some(raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect());
+    }
+    let audio = beat_this::load_audio(std::path::Path::new(path), ONSET_SR as u32).ok()?;
+    let env = band_envelope(&audio.samples, 1, ONSET_MAX_BIN, true);
+    let bytes: Vec<u8> = env.iter().flat_map(|v| (*v as f32).to_le_bytes()).collect();
+    fs::write(cache, bytes).ok()?;
+    Some(env)
+}
+
+fn audio_phase_correction_ms(path: &str, cache: &PathBuf, beats_s: &[f64], params: &Params) -> f64 {
+    let Some(env) = cached_envelope(path, cache) else { return 0.0 };
+    let base: Vec<f64> = beats_s.iter().map(|t| t - params.shift_ms / 1000.0).collect();
+    let (d, q) = profile_argmax_ms(&env, &base, params.audio_range_ms);
+    if q < params.audio_q {
+        return 0.0;
+    }
+    let total = d + params.audio_calib_ms;
+    if total.abs() < params.audio_min_ms {
+        return 0.0;
+    }
+    total - params.shift_ms
+}
+
+
+impl Params {
+    fn fit(&self) -> FitParams {
+        FitParams {
+            lo: self.lo,
+            shift_ms: self.shift_ms,
+            comb_refine: self.comb_refine,
+            snap_tol: self.snap_tol,
+            snap_phase_ms: self.snap_phase_ms,
+            snap_wide: self.snap_wide,
+            scan_pct: self.scan_pct,
+            snap_ratio: self.snap_ratio,
+            keep_native: self.keep_native,
+            threads: self.threads,
+        }
+    }
 }
