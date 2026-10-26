@@ -7,7 +7,7 @@
     <span class="sr__title">{#if dot}<i class="sr__dot" title="Changed from default"></i>{/if}{title}</span>
     {#if desc}<span class="sr__desc">{desc}</span>{/if}
   </div>
-  <div class="sr__ctl" class:sr__ctl--w={wide}>{#if dot}<button class="sr__reset" title="Reset to default (128 frames)">↺</button>{/if}{@render control?.()}</div>
+  <div class="sr__ctl" class:sr__ctl--w={wide}>{#if dot}<button class="sr__reset" title="Reset to default">↺</button>{/if}{@render control?.()}</div>
 </div>
 
 <style>

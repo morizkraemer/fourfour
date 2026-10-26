@@ -126,7 +126,7 @@
 {/snippet}
 
 {#snippet analysisRows(compact)}
-  <SRow title="Analysis engine" desc="Built-in needs no setup. Python uses DeepRhythm and Essentia and needs the analysis environment." {compact} dot>
+  <SRow title="Analysis engine" desc="Built-in needs no setup. Python uses DeepRhythm and Essentia and needs the analysis environment." {compact}>
     {#snippet control()}<SegmentedControl items={['Built-in', 'Python']} activeIndex={0} />{/snippet}
   </SRow>
   <SRow title="Parallel workers" desc="Tracks analyzed at the same time." {compact}>
