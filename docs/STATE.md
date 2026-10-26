@@ -75,11 +75,13 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: idle · waveforms accepted "good enough for now" by Merlin 2026-10-25 · cap 2 · autonomy tight
-targets: 3-band colour waveforms in app + USB export — done on branch q37-waveforms (contains q34 export, q35 app, q36 integration, q37 polish; based on the q32-search app stack)
-rundown: app and stick draw the same 3-band bytes (low blue front, mid amber, high white); 7:17 colour bug fixed (tests to 60 min); vs Rekordbox's own bytes on held-out tracks corr low .96 / mid .98 / high .93, PWV3 heights 99.7% exact; perf within noise of q32-search, startup 30k 0.35 s.
-screenshots: review page https://claude.ai/artifact/7XmvdpXferK7rfBqLrEKxU · before /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/before/ · after /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/after/ and app/after-v2/ · side-by-side /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/compare/ · ours vs Rekordbox /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/final-v2/ (v1: final/) · export PNGs /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/export/
-held for Merlin: visual sign-off; schema v4 (additive row_preview column); USB output changes (new .2EX, PWV5 real colour, measured PWVC gains) need the brother's CDJ checks (CDJ-3000, 3000X, older); Q33 stays paused.
+status: paused · since 2026-10-26 09:02 · Merlin: resume later as an overnight queue on "resume" · cap 2 · autonomy tight
+targets: Merlin's 13 feedback items from the Mac test of the q33 build (checklist .agent/feedback-2026-10-26.md, gitignored)
+resume from: integration branch q41-feedback (= q33-rust-analysis + F1/F6 merged; worktree scratchpad/q41-int).
+  - wb-analysis-priority (F2 + staged analysis: waveforms for all first, then key, then BPM/grid) — WIP, see journal
+  - we-playlists-sidebars (F7, F8, F9a, F11) — WIP, see journal
+  - not started: W-C player (F3 resize height, F4 grid broken, F5 sidebar preview click seeks), W-G file path (F10 reveal in Finder, middle-truncate), W-D hot cues (F9b), W-F Cmd-K palette + shortcut settings + Tab/Shift-Tab (F8b, F12, F13)
+  - after all: install on Mac, then merge q41-feedback → master on Merlin's OK
 
 ## Rundown
 Overnight: startup 30k 24.7 s→0.5 s backend / 188 s→3.3 s first paint; track load ~300→50 ms; fling CPU −55%; search first key 445→120 ms; audio engine 11 fixes + 26 tests; Rekordbox import (master.db/USB/XML); multi-USB sync 2.4–3×; grid 47→78.5%; analysis CPU 74→70 s/track; 108 app tests. All on branches (tight); docs on master.

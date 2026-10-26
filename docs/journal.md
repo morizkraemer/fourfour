@@ -105,3 +105,4 @@
 2026-10-26 05:07 orchestrator - master installed on Mac (building); Q33 resumed per Merlin
 2026-10-26 06:30 orchestrator Q33 done: branch q33-rust-analysis 23332d0; doc landed
 2026-10-26 08:42 orchestrator - Merlin feedback (13 items) on q33 build; integration branch q41-feedback; checklist .agent/feedback-2026-10-26.md
+2026-10-26 09:02 orchestrator - run-pause (Merlin): F1/F6 merged into q41-feedback; W-B + W-E told to commit WIP; resume as overnight queue on Merlin's word
