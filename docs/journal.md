@@ -113,3 +113,4 @@
 2026-10-26 14:41 orchestrator - Merlin round-2 feedback (F14–F26) logged; overnight queue: W-V viewport port → W-M mockups; W-C player; W-D hot cues; W-H drag-value BPM/key + rename
 2026-10-26 14:59 orchestrator - /tmp tmpfs filled (old worker build caches ~13 GB); cleaned; rule added: no cargo targets/caches under /tmp
 2026-10-26 15:07 orchestrator - q41-feedback (+F2 staged analysis, schema v5, viewport mockups workflow) validated + installed on Mac
+2026-10-26 15:14 orchestrator - design round 1 mockups merged into q41-feedback; served https://dev.tail87069a.ts.net:5230 (opened on Mac); decisions waiting on Merlin
