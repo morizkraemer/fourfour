@@ -78,7 +78,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 status: paused · since 2026-10-26 09:02 · Merlin: resume later as an overnight queue on "resume" · cap 2 · autonomy tight
 targets: Merlin's 13 feedback items from the Mac test of the q33 build (checklist .agent/feedback-2026-10-26.md, gitignored)
 resume from: integration branch q41-feedback (= q33-rust-analysis + F1/F6 merged; worktree scratchpad/q41-int).
-  - wb-analysis-priority (F2 + staged analysis: waveforms for all first, then key, then BPM/grid) — WIP, see journal
+  - wb-analysis-priority 5053732 (F2 now-lane + partial waveform done; left: staged queue waveform→key→BPM/grid, timings, full validation, doc; fix: partial write must not mark track fully analysed)
   - we-playlists-sidebars 51fc018 (F7, F8, F9a, F11 coded; left: run walkthrough + screenshots + perf, then merge)
   - not started: W-C player (F3 resize height, F4 grid broken, F5 sidebar preview click seeks), W-G file path (F10 reveal in Finder, middle-truncate), W-D hot cues (F9b), W-F Cmd-K palette + shortcut settings + Tab/Shift-Tab (F8b, F12, F13)
   - after all: install on Mac, then merge q41-feedback → master on Merlin's OK
