@@ -376,6 +376,16 @@ export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
   }
 }
 
+/** Queues stages left missing by an earlier session (and new tracks, per setting); returns how many. */
+export async function resumeAnalysis(): Promise<number> {
+  try {
+    return await invoke<number>('resume_analysis');
+  } catch (err) {
+    lastTauriError = `resume_analysis fail: ${String(err)}`;
+    return 0;
+  }
+}
+
 export async function analyzeTracks(): Promise<TrackInfo[]> {
   try {
     return await invoke<TrackInfo[]>('analyze_tracks');

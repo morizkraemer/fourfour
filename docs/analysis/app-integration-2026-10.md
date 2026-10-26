@@ -141,7 +141,7 @@ Played track (queued mid-list, number 21 of 30), seconds after pressing play:
 - A partial row exists between stages; a crash leaves the track pending (waveform and key stored, BPM missing), which is the intended resume state. The USB export skips such tracks.
 - Pause is between model chunks, so up to about 7 s before background grid passes yield. A cancel or preempt has the same latency.
 - Preempting a narrow in-flight grid job discards its progress (up to a full single-thread pass).
-- Resume after a restart happens on the next "analyse" action; there is no automatic start at launch.
+- Resume after a restart is automatic: 5 s after `load_state` the app calls `resume_analysis`, which queues tracks with missing stages (first) and, while `auto_analyze_new_tracks` in `config.json` is on (default on, no UI yet, commands `get/set_auto_analyze_new`), never-analysed tracks, as an ordinary background run. The now lane still preempts it, and queueing skips tracks already queued or running, so a manual analyse never duplicates work.
 
 ## Tests and validation
 

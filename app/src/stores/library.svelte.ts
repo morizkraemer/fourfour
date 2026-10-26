@@ -7,6 +7,7 @@ import {
   getVersion,
   getLibraryPath,
   loadState as tauriLoadState,
+  resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
   scanDirectory as tauriScanDirectory,
   scanFiles as tauriScanFiles,
@@ -706,6 +707,21 @@ export async function saveState() {
 let libraryListenersInstalled = false;
 
 /** Initialize library store, triggers on boot */
+export const LAUNCH_ANALYSIS_DELAY_MS = 5000;
+
+let launchAnalysisTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Resumes unfinished analysis a few seconds after launch so startup stays fast. Runs once. */
+export function scheduleLaunchAnalysis() {
+  if (launchAnalysisTimer !== undefined) return;
+  launchAnalysisTimer = setTimeout(async () => {
+    const queued = await tauriResumeAnalysis();
+    if (queued === 0) return;
+    library.analyzing = true;
+    if (!library.syncing) library.statusMessage = 'Resuming analysis…';
+  }, LAUNCH_ANALYSIS_DELAY_MS);
+}
+
 export async function initLibrary() {
   library.ipcDiagnostic = getIpcDiagnostic();
   library.statusMessage = 'Loading library…';
@@ -729,6 +745,7 @@ export async function initLibrary() {
         refreshUsbState();
       });
     }
+    scheduleLaunchAnalysis();
   } catch (err) {
     library.statusMessage = 'Failed to load library';
     console.error('initLibrary failed:', err);
