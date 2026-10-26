@@ -98,6 +98,7 @@ impl Default for AnalysisCoordinator {
 
 impl AnalysisCoordinator {
     /// With staging off the Rust backend analyses each track in one piece, as before staging existed.
+    #[allow(dead_code)]
     pub(crate) fn with_staging(mut self, staged: bool) -> Self {
         self.staged = staged;
         self
