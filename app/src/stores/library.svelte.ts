@@ -899,6 +899,20 @@ export async function clearPlaylistTracks(playlistId: number) {
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
 
+/** Empty every favorite slot (the slots themselves stay). */
+export async function clearAllFavorites() {
+  let changed = false;
+  for (const pl of library.playlists) {
+    if (isFavoritePlaylistName(pl.name) && pl.track_ids.length > 0) {
+      pl.track_ids = [];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  await saveState();
+  syncTrackFavoriteFields();
+}
+
 /** Set test hot cues on selected track IDs */
 export async function setTestCuesOnSelected(ids: number[]) {
   try {
@@ -1049,12 +1063,12 @@ export async function renamePlaylist(id: number, name: string) {
   await saveState();
 }
 
-export async function addPlaylist(name: string): Promise<number> {
+export async function addPlaylist(name: string, trackIds: number[] = []): Promise<number> {
   const newId = library.playlists.length > 0 ? Math.max(...library.playlists.map(p => p.id)) + 1 : 1;
   library.playlists.push({
     id: newId,
     name,
-    track_ids: []
+    track_ids: [...new Set(trackIds)]
   });
   await saveState();
   return newId;

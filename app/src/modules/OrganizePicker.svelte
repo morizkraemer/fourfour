@@ -14,27 +14,15 @@
   import { Icon } from '$ds';
   import {
     library,
-    addPlaylist,
-    defaultPlaylistName,
     isFavoritePlaylistName,
   } from '../stores/library.svelte.ts';
   import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
+  import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 
   const MAX_RESULTS = 4;
 
-  /**
-   * Called after a new playlist is created and docked, passing the initial
-   * playlist name. OrganizePanel uses this to trigger inline header rename.
-   */
-  let { onNewPlaylistDocked = null } = $props();
-
   async function handleNewPlaylist() {
-    const name = defaultPlaylistName();
-    const newId = await addPlaylist(name);
-    // Dock immediately — OrganizePanel body will switch to TrackTable
-    dockOrganizeTarget({ kind: 'playlist', id: name, label: name, playlistId: newId });
-    // Signal parent to start inline header rename
-    onNewPlaylistDocked?.(name);
+    await createPlaylistAndOpen();
   }
 
   // ── Playlist search / recents ───────────────────────────────────────────────

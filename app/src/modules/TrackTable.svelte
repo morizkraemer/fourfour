@@ -44,6 +44,7 @@
     sortTracks,
     ALL_COLUMN_KEYS,
   } from '../stores/table-columns.svelte.ts';
+  import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { dnd, startTrackDrag, updatePointer, updateTrackDropTarget, endDrag } from '../stores/dnd.svelte.ts';
   import {
     buildTrackContextMenuItems,
@@ -378,6 +379,7 @@
       }
       if (!moved) return;
 
+      const dropNewPlaylist = dnd.dropNewPlaylist;
       const dropPlId = dnd.dropPlaylistId;
       const dropIdx = dnd.dropRowIndex;
       const dropSource = dnd.dropPanelSourceId;
@@ -419,7 +421,9 @@
         return;
       }
 
-      if (dropPlId != null) {
+      if (dropNewPlaylist) {
+        await createPlaylistAndOpen(ids);
+      } else if (dropPlId != null) {
         await moveTracksToPlaylist({
           trackIds: ids,
           toPlaylistId: dropPlId,

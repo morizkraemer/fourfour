@@ -8,9 +8,9 @@ import { FAVORITE_SLOTS, library } from '../stores/library.svelte.ts';
 
 describe('buildSidebarSectionMenuItems', () => {
   it('offers Add favorite only when allowed', () => {
-    expect(buildSidebarSectionMenuItems('favorites')).toEqual([]);
+    expect(buildSidebarSectionMenuItems('favorites').map((i) => i.label)).not.toContain('Add favorite');
     const items = buildSidebarSectionMenuItems('favorites', { canAddFavorite: true });
-    expect(items.map((i) => i.label)).toEqual(['Add favorite']);
+    expect(items.map((i) => i.label)).toContain('Add favorite');
   });
   it('calls the New playlist callback', () => {
     let called = 0;
@@ -91,5 +91,18 @@ describe('buildColumnContextMenuItems', () => {
     unsorted[0].onClick!();
     expect(toggled).toEqual(['title']);
     expect(unsorted[3].isSeparator).toBe(true);
+  });
+});
+
+describe('favourites to playlist', () => {
+  it('offers a move item and a separate clear item, both disabled when empty', () => {
+    const items = buildSidebarSectionMenuItems('favorites');
+    expect(items.map((i) => i.label)).toEqual(['Move favourite tracks to new playlist', 'Clear favourites']);
+    expect(items.every((i) => i.disabled)).toBe(true);
+  });
+  it('lists the move item first and never clears on its own', () => {
+    const [move, clear] = buildSidebarSectionMenuItems('favorites');
+    expect(move.variant).toBeUndefined();
+    expect(clear.variant).toBe('danger');
   });
 });

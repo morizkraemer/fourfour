@@ -3,6 +3,14 @@
  * State lives in a single exported object so consumers can read + write fields.
  */
 
+import {
+  clampPanelWidth,
+  loadPanelWidth,
+  savePanelWidth,
+  PANEL_WIDTH,
+  type ResizablePanel,
+} from '../lib/panelWidth.ts';
+
 // ── Organize panel ──────────────────────────────────────────────────────────
 
 export type OrganizeTarget = {
@@ -46,6 +54,12 @@ export const ui = $state({
   listFilter: '',
   /** Incremented to focus the filter field (GlobalHeader). */
   filterFocusNonce: 0,
+  /** Left sidebar width in px (persisted). */
+  sidebarWidth: loadPanelWidth('sidebar') as number,
+  /** Right inspector width in px (persisted). */
+  detailWidth: loadPanelWidth('inspector') as number,
+  /** Set by new-playlist flows: the docked panel starts inline rename. */
+  renameRequest: null as { playlistId: number } | null,
   /** Right-sidebar organize panel state. */
   organize: {
     /** Docked target — null when picker is shown. */
@@ -203,6 +217,23 @@ export function reconcileOrganizeTarget(
       persistOrganize();
     }
   }
+}
+
+// ── Resizable side panels ────────────────────────────────────────────────────
+
+const PANEL_FIELD = { sidebar: 'sidebarWidth', inspector: 'detailWidth' } as const;
+
+export function setPanelWidth(panel: ResizablePanel, px: number) {
+  ui[PANEL_FIELD[panel]] = clampPanelWidth(panel, px);
+}
+
+export function commitPanelWidth(panel: ResizablePanel) {
+  savePanelWidth(panel, ui[PANEL_FIELD[panel]]);
+}
+
+export function resetPanelWidth(panel: ResizablePanel) {
+  setPanelWidth(panel, PANEL_WIDTH[panel].initial);
+  commitPanelWidth(panel);
 }
 
 // ── Other UI state ────────────────────────────────────────────────────────────

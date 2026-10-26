@@ -3,7 +3,7 @@
 -->
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { SidebarSection, SidebarRow, ContextMenu, Dialog, Button } from '$ds';
+  import { SidebarSection, SidebarRow, ContextMenu, Dialog, Button, ResizeHandle } from '$ds';
   import { getIsTauri } from '../services/tauri.svelte.ts';
   import {
     buildSourceContextMenuItems,
@@ -11,7 +11,6 @@
   } from '../menus/context-menus.ts';
   import {
     addPlaylist,
-    defaultPlaylistName,
     renamePlaylist,
     refreshVolumes,
     selectVolume,
@@ -25,7 +24,9 @@
     favoriteSlotFromName,
     canRemoveFavoriteSlot,
   } from '../stores/library.svelte.ts';
-  import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
+  import { ui, dockOrganizeTarget, setPanelWidth, commitPanelWidth, resetPanelWidth } from '../stores/ui.svelte.ts';
+  import { PANEL_WIDTH } from '../lib/panelWidth.ts';
+  import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag } from '../stores/dnd.svelte.ts';
 
@@ -63,10 +64,7 @@
   }
 
   async function handleAddPlaylist() {
-    const name = defaultPlaylistName();
-    const playlistId = await addPlaylist(name);
-    handleRowClick(name);
-    dockOrganizeTarget({ kind: 'playlist', id: name, label: name, playlistId });
+    await createPlaylistAndOpen();
   }
 
   function startPlaylistRename(playlistId, currentName) {
@@ -243,7 +241,17 @@
   }
 </script>
 
-<div class="ff-sidebar">
+<div class="ff-sidebar" style:width="{ui.sidebarWidth}px">
+  <ResizeHandle
+    edge="right"
+    label="Resize sidebar"
+    value={ui.sidebarWidth}
+    min={PANEL_WIDTH.sidebar.min}
+    max={PANEL_WIDTH.sidebar.max}
+    onResize={(px) => setPanelWidth('sidebar', px)}
+    onCommit={() => commitPanelWidth('sidebar')}
+    onReset={() => resetPanelWidth('sidebar')}
+  />
   <div
     class="ff-sidebar__chrome ff-titlebar-band"
     data-tauri-drag-region
@@ -322,6 +330,7 @@
     <SidebarSection
       label={library.sidebarData.playlists.label}
       showAdd
+      addDropActive={dnd.dropNewPlaylist}
       onAdd={handleAddPlaylist}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
     >
@@ -408,9 +417,10 @@
 
 <style>
   .ff-sidebar {
+    position: relative;
+    flex: none;
     display: flex;
     flex-direction: column;
-    width: 240px;
     height: 100%;
     background: var(--ff-bg);
     border-right: 1px solid var(--ff-border);

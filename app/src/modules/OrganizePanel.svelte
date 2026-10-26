@@ -34,17 +34,19 @@
   // We receive a ref to it via prop so we can read its bounding rect.
   let { contentEl = null } = $props();
 
-  // ── Inline rename for the docked target label ─────────────────────────────
-  // When a new playlist is created and docked, the header enters rename mode
-  // automatically. The OrganizePicker calls dockOrganizeTarget, which sets
-  // target; we detect a freshly-created playlist by listening for the
-  // renamePending flag exposed by OrganizePicker via a callback prop.
-
   let renamingHeader = $state(false);
   let renameDraft = $state('');
   let renameHeaderEl = $state(null);
 
-  /** Called by OrganizePicker after it creates+docks a new playlist. */
+  $effect(() => {
+    const request = ui.renameRequest;
+    if (!request) return;
+    ui.renameRequest = null;
+    if (ui.organize.target?.playlistId === request.playlistId) {
+      startHeaderRename(ui.organize.target.label);
+    }
+  });
+
   function startHeaderRename(name) {
     renamingHeader = true;
     renameDraft = name;
@@ -225,7 +227,7 @@
     <div class="ff-organize__body" class:ff-organize__body--table={ui.organize.target !== null}>
       {#if ui.organize.target === null}
         <!-- No target: show destination picker -->
-        <OrganizePicker onNewPlaylistDocked={startHeaderRename} />
+        <OrganizePicker />
       {:else}
         <!-- Target docked: show its tracks -->
         <TrackTable sourceId={ui.organize.target.id} embedded layoutKindOverride="organize" organize={true} />

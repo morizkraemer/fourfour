@@ -5,7 +5,7 @@
   import './sidebar-section.css';
   import Icon from './Icon.svelte';
 
-  let { label, showAdd = false, onAdd, onHeaderContextMenu, children } = $props();
+  let { label, showAdd = false, addDropActive = false, onAdd, onHeaderContextMenu, children } = $props();
 
   function add(e) {
     e.stopPropagation();
@@ -24,7 +24,14 @@
   >
     <span class="ff-sidebar-section__label">{label}</span>
     {#if showAdd}
-      <button class="ff-sidebar-section__add-btn" onclick={add}>
+      <button
+        class="ff-sidebar-section__add-btn"
+        class:ff-sidebar-section__add-btn--drop={addDropActive}
+        data-new-playlist-drop
+        aria-label="New playlist"
+        title="New playlist — drop tracks here to create one"
+        onclick={add}
+      >
         <Icon name="plus" size={13} class="ff-sidebar-section__add-icon" />
       </button>
     {/if}
