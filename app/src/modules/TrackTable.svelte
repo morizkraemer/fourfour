@@ -28,7 +28,7 @@
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, queuePlayAfterLoad, playFromStart, loadPlayerTrack } from '../stores/player.svelte.ts';
   import { ui } from '../stores/ui.svelte.ts';
-  import { pickDirectory } from '../services/tauri.svelte.ts';
+  import { pickDirectory, prefetchAnalysisData } from '../services/tauri.svelte.ts';
   import {
     getLayout,
     resolveLayoutKind,
@@ -51,6 +51,7 @@
     buildSourceContextMenuItems,
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
+  import { rowWindow, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -68,6 +69,25 @@
   let dropLineTop = $state(null);
   let marqueeActive = $state(false);
   let suppressRowClick = false;
+
+  const EMPTY_TRACK = {};
+  let scrollTop = $state(0);
+  let viewportHeight = $state(0);
+  let headerHeight = $state(0);
+  let scrollRaf = null;
+
+  function syncScrollWindow() {
+    scrollRaf = null;
+    if (!tableScrollEl) return;
+    scrollTop = tableScrollEl.scrollTop;
+    if (headerHeight === 0) {
+      headerHeight = tableScrollEl.querySelector('.ff-colh')?.offsetHeight ?? 0;
+    }
+  }
+
+  function onTableScroll() {
+    if (scrollRaf == null) scrollRaf = requestAnimationFrame(syncScrollWindow);
+  }
 
   onMount(() => {
     initTableColumns();
@@ -127,7 +147,20 @@
 
   let columns = $derived(visibleColumns(layoutKind));
 
-  function handleRowClick(track, event) {
+  let rowWin = $derived(
+    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length })
+  );
+  let firstRow = $derived(rowWin.firstRow);
+  let endRow = $derived(rowWin.endRow);
+  let poolSize = $derived(rowWin.poolSize);
+  let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
+
+  function prefetchNeighbours(rowIndex) {
+    const neighbours = [currentTracks[rowIndex + 1], currentTracks[rowIndex - 1]];
+    prefetchAnalysisData(neighbours.filter((t) => t?.analyzed).map((t) => t.id));
+  }
+
+  function handleRowClick(track, event, rowIndex) {
     if (suppressRowClick) {
       suppressRowClick = false;
       return;
@@ -141,6 +174,7 @@
     } else {
       select(track.id);
       lastSelectedId = track.id;
+      prefetchNeighbours(rowIndex);
     }
   }
 
@@ -170,10 +204,11 @@
     const band = { left, right, top, bottom };
     const ids = [];
     const rows = tableBodyEl.querySelectorAll('[data-track-row]');
-    rows.forEach((row, i) => {
+    rows.forEach((row) => {
       const rect = row.getBoundingClientRect();
-      if (rectsIntersect(band, rect) && currentTracks[i]) {
-        ids.push(currentTracks[i].id);
+      const track = currentTracks[Number(row.dataset.rowIndex)];
+      if (rectsIntersect(band, rect) && track) {
+        ids.push(track.id);
       }
     });
     return ids;
@@ -241,13 +276,7 @@
 
   function dropLineTopForIndex(index) {
     if (!tableBodyEl || index == null) return null;
-    const rows = tableBodyEl.querySelectorAll('[data-track-row]');
-    if (rows.length === 0) return 0;
-    if (index >= rows.length) {
-      const last = rows[rows.length - 1];
-      return last.offsetTop + last.offsetHeight;
-    }
-    return rows[index].offsetTop;
+    return dropLineTopFor(index, currentTracks.length);
   }
 
   $effect(() => {
@@ -500,6 +529,8 @@
       class="ff-table__scroll"
       class:ff-table__scroll--dragging={dragging && embedded}
       bind:this={tableScrollEl}
+      bind:clientHeight={viewportHeight}
+      onscroll={onTableScroll}
     >
       <ColumnHeader
         {columns}
@@ -517,7 +548,7 @@
           colDropKey = drop;
         }}
         onColumnResize={(key, width, save = true) => setColumnWidth(layoutKind, key, width, save)}
-        onColumnAutoFit={(key) => fitColumnToContent(layoutKind, key, tableScrollEl)}
+        onColumnAutoFit={(key) => fitColumnToContent(layoutKind, key, tableScrollEl, currentTracks)}
       />
       <div
         class="ff-table__body"
@@ -526,6 +557,7 @@
         data-source-id={effectiveSource}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
+        style:height={spacerHeight(currentTracks.length) !== undefined ? `${spacerHeight(currentTracks.length)}px` : undefined}
         role="list"
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
@@ -546,20 +578,26 @@
           />
         </div>
       {:else}
-        {#each currentTracks as track, i (track.id)}
+        {#each poolSlots as slot (slot)}
+          {@const index = indexForSlot(slot, firstRow, poolSize)}
+          {@const track = index < endRow ? currentTracks[index] : undefined}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
-            data-track-row
-            onclick={(e) => handleRowClick(track, e)}
-            ondblclick={(e) => handleRowDblClick(track, e)}
-            onpointerdown={(e) => onRowPointerDown(e, track, i)}
-            oncontextmenu={(e) => openRowMenu(e, track)}
+            class="ff-table__row"
+            data-track-row={track ? '' : undefined}
+            data-row-index={index}
+            style:top="{rowTop(index)}px"
+            style:display={track ? undefined : 'none'}
+            onclick={(e) => track && handleRowClick(track, e, index)}
+            ondblclick={(e) => track && handleRowDblClick(track, e)}
+            onpointerdown={(e) => track && onRowPointerDown(e, track, index)}
+            oncontextmenu={(e) => track && openRowMenu(e, track)}
           >
             <TrackRow
-              {track}
-              state={rowState(track)}
-              analyzing={isTrackAnalyzing(track.id)}
+              track={track ?? EMPTY_TRACK}
+              state={track ? rowState(track) : 'rest'}
+              analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
             />
           </div>
@@ -652,7 +690,12 @@
     -webkit-user-select: none;
     user-select: none;
   }
-  .ff-table__body > :global(div[data-track-row]) {
+  .ff-table__row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 28px;
+    contain: layout paint style;
     cursor: default;
   }
   .ff-table__empty-container {

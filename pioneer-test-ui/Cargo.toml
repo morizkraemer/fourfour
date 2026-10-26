@@ -16,6 +16,7 @@ tokio = { version = "1.52.1", features = ["rt", "process", "time", "macros"] }
 cpal = "0.15"
 ringbuf = "0.4"
 symphonia = { version = "0.5", features = ["all"] }
+image = "0.25.10"
 
 [[bin]]
 name = "waveform_dev"
@@ -28,6 +29,14 @@ path = "src/bin/waveform_ab.rs"
 [[bin]]
 name = "waveform_grid"
 path = "src/bin/waveform_grid.rs"
+
+[[bin]]
+name = "bench_startup"
+path = "src/bin/bench_startup.rs"
+
+[[bin]]
+name = "waveform_fixtures"
+path = "src/bin/waveform_fixtures.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

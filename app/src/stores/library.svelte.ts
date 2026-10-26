@@ -36,15 +36,19 @@ import {
 import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
-  previewPeaksNormalized,
+  decodeTrackPreview,
+  decodeBandPreview,
 } from '../services/analysis-data.ts';
+import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
 /** Shallow-bump so list rows re-render when nested track fields change. */
 export function bumpLibraryTracks() {
+  resetSearchIndex();
   library.tracks = [...library.tracks];
+  scheduleSearchIndexWarmup();
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -187,6 +191,8 @@ export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
 }
 
 /* ── Main Library Store State ───────────────────────────────────────── */
+let recentlyAddedCount = 0;
+
 export const library = $state({
   tracks: [] as any[],
   playlists: [] as PlaylistInput[],
@@ -229,7 +235,7 @@ export const library = $state({
         label: 'LIBRARY',
         rows: [
           { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: this.tracks.length },
-          { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: this.tracks.filter(t => t.raw?.tempo > 0).length },
+          { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: recentlyAddedCount },
         ],
       },
       playlists: {
@@ -257,6 +263,105 @@ export const library = $state({
   }
 });
 
+const haystackCache = new WeakMap<object, string[]>();
+
+/**
+ * Library tracks as plain objects (`library.tracks` wraps these in reactive
+ * proxies). Reading text through the proxies costs ~1 s at 30k tracks; the
+ * plain objects see the same mutations without that cost.
+ */
+let plainTracks: Record<string, unknown>[] = [];
+let haystackById: Map<number, string> | null = null;
+let haystackCursor = 0;
+let warmupTimer: ReturnType<typeof setTimeout> | undefined;
+let warmupGeneration = 0;
+
+const WARMUP_CHUNK = 2000;
+const WARMUP_DELAY_MS = 250;
+
+function resetSearchIndex() {
+  haystackById = null;
+  haystackCursor = 0;
+  warmupGeneration++;
+}
+
+function fillSearchIndex(limit: number) {
+  if (!haystackById) haystackById = new Map();
+  const end = Math.min(plainTracks.length, haystackCursor + limit);
+  for (; haystackCursor < end; haystackCursor++) {
+    const t = plainTracks[haystackCursor];
+    haystackById.set(t.id as number, trackHaystack(t));
+  }
+}
+
+function haystackByIdFor(): Map<number, string> {
+  fillSearchIndex(plainTracks.length);
+  return haystackById!;
+}
+
+function whenIdle(run: () => void) {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
+  else setTimeout(run, 0);
+}
+
+/** Builds the search text in idle-time chunks so the first keystroke finds it ready. */
+function scheduleSearchIndexWarmup() {
+  clearTimeout(warmupTimer);
+  warmupTimer = setTimeout(() => {
+    const generation = warmupGeneration;
+    const step = () => {
+      if (generation !== warmupGeneration) return;
+      if (haystackCursor < plainTracks.length) {
+        fillSearchIndex(WARMUP_CHUNK);
+        whenIdle(step);
+      } else {
+        haystacksFor(library.tracks);
+      }
+    };
+    whenIdle(step);
+  }, WARMUP_DELAY_MS);
+}
+
+function trackHaystack(track: Record<string, unknown>): string {
+  const raw = track.raw as Record<string, unknown> | undefined;
+  return [
+    track.title,
+    track.artist,
+    track.album,
+    track.label,
+    track.genre,
+    track.key,
+    track.bpm,
+    track.time,
+    track.filePath,
+    track.index,
+    raw?.title,
+    raw?.artist,
+    raw?.album,
+    raw?.genre,
+    raw?.key,
+    raw?.source_path,
+  ]
+    .map((v) => String(v ?? '').toLowerCase())
+    .join(' ');
+}
+
+/**
+ * Search text per track, cached per source array. Track text only changes
+ * together with `bumpLibraryTracks()` / `loadState()`, which swap the array.
+ */
+function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] {
+  let haystacks = haystackCache.get(tracks);
+  if (!haystacks) {
+    const byId = haystackByIdFor();
+    haystacks = tracks.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
+    haystackCache.set(tracks, haystacks);
+  }
+  return haystacks;
+}
+
+let lastFilter: { tracks: object; query: string; result: unknown[] } | null = null;
+
 /** Match tracks against a whitespace-separated query (all terms must match). */
 export function filterTracks<T extends Record<string, unknown>>(
   tracks: T[],
@@ -264,31 +369,14 @@ export function filterTracks<T extends Record<string, unknown>>(
 ): T[] {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return tracks;
+  if (lastFilter && lastFilter.tracks === tracks && lastFilter.query === trimmed) {
+    return lastFilter.result as T[];
+  }
   const terms = trimmed.split(/\s+/).filter(Boolean);
-  return tracks.filter((track) => {
-    const raw = track.raw as Record<string, unknown> | undefined;
-    const haystack = [
-      track.title,
-      track.artist,
-      track.album,
-      track.label,
-      track.genre,
-      track.key,
-      track.bpm,
-      track.time,
-      track.filePath,
-      track.index,
-      raw?.title,
-      raw?.artist,
-      raw?.album,
-      raw?.genre,
-      raw?.key,
-      raw?.source_path,
-    ]
-      .map((v) => String(v ?? '').toLowerCase())
-      .join(' ');
-    return terms.every((term) => haystack.includes(term));
-  });
+  const haystacks = haystacksFor(tracks);
+  const result = tracks.filter((_, i) => terms.every((term) => haystacks[i].includes(term)));
+  lastFilter = { tracks, query: trimmed, result };
+  return result;
 }
 
 /** Tracks shown for a sidebar source (label, playlist name, or USB path). */
@@ -363,17 +451,33 @@ function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string
   return base === fileName || track.title === fileName;
 }
 
+/** The row preview a track already carries is the one the analysis sends: keep the object so its bands and bitmaps stay cached. */
+function sameBytes(current: unknown, next: ArrayLike<number>): boolean {
+  if (!current || typeof current !== 'object') return false;
+  const bytes = current as ArrayLike<number>;
+  if (bytes.length !== next.length) return false;
+  for (let i = 0; i < next.length; i++) if (bytes[i] !== next[i]) return false;
+  return true;
+}
+
 function applyWaveformAndCuesFromAnalysis(
   track: Record<string, unknown>,
   res: {
     waveform_preview?: number[];
+    waveform_row_bands?: string | null;
     cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
     bpm?: number;
     key?: string;
   },
-) {
-  if (res.waveform_preview?.length) {
-    track.peaks = previewPeaksNormalized(res.waveform_preview);
+): boolean {
+  const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
+  const bandPreview = decodeBandPreview(res.waveform_row_bands);
+  if (bandPreview) {
+    if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
+    track.preview = undefined;
+  } else if (res.waveform_preview?.length) {
+    track.bandsPreview = undefined;
+    track.preview = Uint8Array.from(res.waveform_preview);
   }
   if (res.cue_points) {
     track.cues = res.cue_points.map((cue) => {
@@ -391,6 +495,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (res.key) track.key = res.key;
   track.analyzed = true;
   track.analysisLoaded = true;
+  return searchTextBefore !== `${track.bpm}|${track.key}|${track.analyzed}`;
 }
 
 /**
@@ -414,8 +519,8 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
         bumpLibraryTracks();
         return;
       }
-      applyWaveformAndCuesFromAnalysis(track, res);
-      bumpLibraryTracks();
+      if (applyWaveformAndCuesFromAnalysis(track, res)) bumpLibraryTracks();
+      performance.mark('ff:detail-ready');
     } catch (err) {
       console.warn('ensureTrackPeaksLoaded failed:', err);
       track.analyzed = false;
@@ -464,7 +569,8 @@ function markTracksPendingAnalysis(ids: number[]) {
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
     if (!track) continue;
-    track.peaks = undefined;
+    track.preview = undefined;
+    track.bandsPreview = undefined;
     track.analysisLoaded = false;
   }
 }
@@ -536,12 +642,22 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     raw: t,
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
+    },
+    get bands() {
+      return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
     }
   };
 
-  // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
-  if (t.waveform_preview && isValidWaveformPreview(t.waveform_preview)) {
-    local.peaks = previewPeaksNormalized(t.waveform_preview);
+  // Embedded preview → paint the mini waveform immediately, no N+1 fetch: the 3-band row
+  // preview when the track has band data, else the mono PWAV.
+  const bandPreview = decodeBandPreview(t.waveform_bands);
+  if (bandPreview) {
+    local.bandsPreview = bandPreview;
+  } else {
+    const preview = decodeTrackPreview(t.waveform_preview);
+    if (preview && isValidWaveformPreview(preview)) {
+      local.preview = Uint8Array.from(preview);
+    }
   }
 
   return local;
@@ -555,8 +671,12 @@ export async function loadState() {
     artwork.clear();
     invalidateAnalysisCache();
     const state = await tauriLoadState();
-    library.tracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
+    recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
+    plainTracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
+    resetSearchIndex();
+    library.tracks = plainTracks;
     library.playlists = state.playlists;
+    scheduleSearchIndexWarmup();
 
     await ensureFavoriteSlots();
     library.tauriError = lastTauriError;

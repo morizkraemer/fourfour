@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::models::{AnalysisResult, CuePoint, Track};
+use crate::waveform::{Derivation, OVERVIEW_COLUMNS, Tuning, Waveforms, resample_columns, COLUMNS_PER_SECOND, PWV7_MAX};
 
 /// Magic bytes for ANLZ file header
 const ANLZ_MAGIC: &[u8; 4] = b"PMAI";
@@ -13,6 +14,7 @@ const HEADER_LEN: u32 = 0x1C;
 const TAG_PATH: &[u8; 4] = b"PPTH";
 const TAG_BEAT_GRID: &[u8; 4] = b"PQTZ";
 const TAG_WAVEFORM_PREVIEW: &[u8; 4] = b"PWAV";
+const TAG_WAVEFORM_TINY: &[u8; 4] = b"PWV2";
 const TAG_VBR: &[u8; 4] = b"PVBR";
 const TAG_CUE: &[u8; 4] = b"PCOB";
 
@@ -22,6 +24,7 @@ const TAG_COLOR_DETAIL: &[u8; 4] = b"PWV5";
 const TAG_COLOR_WAVEFORM: &[u8; 4] = b"PWV4";
 const TAG_COLOR_3BAND_DETAIL: &[u8; 4] = b"PWV7";
 const TAG_COLOR_3BAND_OVERVIEW: &[u8; 4] = b"PWV6";
+const TAG_COLOR_3BAND_GAIN: &[u8; 4] = b"PWVC";
 const TAG_CUE_EXTENDED: &[u8; 4] = b"PCO2";
 const TAG_BEAT_GRID_EXT: &[u8; 4] = b"PQT2";
 const TAG_VBR_EXT: &[u8; 4] = b"PVB2";
@@ -30,8 +33,8 @@ const TAG_VBR_EXT: &[u8; 4] = b"PVB2";
 ///
 /// The file contains the following sections in the order required by rekordbox:
 /// `PPTH` (USB path, UTF-16BE) → `PVBR` (VBR seek table) → `PQTZ` (beat grid)
-/// → `PWAV` (400-byte monochrome waveform preview) → `PCOB` (hot cues)
-/// → `PCOB` (memory cues).
+/// → `PWAV` (400-byte monochrome waveform preview) → `PWV2` (100-byte tiny preview)
+/// → `PCOB` (hot cues) → `PCOB` (memory cues).
 ///
 /// Parent directories are created automatically.
 pub fn write_anlz_dat(
@@ -40,14 +43,16 @@ pub fn write_anlz_dat(
     analysis: &AnalysisResult,
 ) -> Result<()> {
     // Build all sections first so we know total file size
-    // Section order must match rekordbox: PPTH → PVBR → PQTZ → PWAV → PCOB → PCOB
+    // Section order must match rekordbox: PPTH → PVBR → PQTZ → PWAV → PWV2 → PCOB → PCOB
     let hot_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number > 0).collect();
     let memory_cues: Vec<&CuePoint> = analysis.cue_points.iter().filter(|c| c.hot_cue_number == 0).collect();
 
     let path_section = build_path_section(&track.usb_path);
     let vbr_section = build_vbr_section();
     let beat_section = build_beat_grid_section(analysis);
-    let waveform_section = build_waveform_preview_section(analysis);
+    let waves = export_waveforms(track.duration_secs, analysis);
+    let waveform_section = build_waveform_preview_section(&waves);
+    let tiny_section = build_waveform_tiny_section(&waves);
     let cue_section_1 = build_cue_section(1, &hot_cues);   // hot cues
     let cue_section_2 = build_cue_section(0, &memory_cues); // memory cues
 
@@ -56,6 +61,7 @@ pub fn write_anlz_dat(
         + vbr_section.len()
         + beat_section.len()
         + waveform_section.len()
+        + tiny_section.len()
         + cue_section_1.len()
         + cue_section_2.len();
 
@@ -74,11 +80,12 @@ pub fn write_anlz_dat(
     file.write_all(&0x0001_0000u32.to_be_bytes())?;      // 0x14: unknown (0x10000 in rekordbox)
     file.write_all(&[0u8; 4])?;                          // 0x18: padding
 
-    // Sections (order must match rekordbox: PPTH → PVBR → PQTZ → PWAV → PCOB → PCOB)
+    // Sections (order must match rekordbox: PPTH → PVBR → PQTZ → PWAV → PWV2 → PCOB → PCOB)
     file.write_all(&path_section)?;
     file.write_all(&vbr_section)?;
     file.write_all(&beat_section)?;
     file.write_all(&waveform_section)?;
+    file.write_all(&tiny_section)?;
     file.write_all(&cue_section_1)?;
     file.write_all(&cue_section_2)?;
 
@@ -135,22 +142,63 @@ fn build_beat_grid_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf
 }
 
-/// PWAV section: 400-byte monochrome waveform preview.
-fn build_waveform_preview_section(analysis: &AnalysisResult) -> Vec<u8> {
-    // Section header: tag(4) + header_len(4) + file_len(4) + entry_count(4) + pad(4) = 20
-    let section_header_len: u32 = 20;
-    let entry_count: u32 = 400;
-    let section_total_len = section_header_len + entry_count;
+/// The waveform sections of one track, from the band data in `analysis`: exactly the values
+/// the `.DAT`, `.EXT` and `.2EX` files carry, so a renderer can draw what the stick gets.
+///
+/// Without band data the colour sections come out neutral (every band equal), never tinted.
+/// `ColorWaveform::exact` supplies the measured `PWV3`, `PWV5` and `PWVC` values; without
+/// it they are derived from the bands.
+pub fn export_waveforms(duration_secs: f64, analysis: &AnalysisResult) -> Waveforms {
+    let columns = (duration_secs * COLUMNS_PER_SECOND).round() as usize;
+    match analysis.color_waveform.as_ref().filter(|cw| !cw.detail.is_empty()) {
+        Some(cw) => {
+            let mut detail = resample_columns(&cw.detail, columns);
+            for band in detail.iter_mut() {
+                *band = band.map(|v| v.min(PWV7_MAX));
+            }
+            let derived = Waveforms::from_bands(detail, &Tuning::default(), &Derivation::default());
+            match cw.exact.as_ref().filter(|e| !e.pwv3.is_empty() && e.pwv3.len() == e.pwv5.len()) {
+                Some(exact) => {
+                    let with_exact = derived.with_exact(exact);
+                    if cw.overview.len() == OVERVIEW_COLUMNS {
+                        with_exact.with_overview(&cw.overview, &Tuning::default())
+                    } else {
+                        with_exact
+                    }
+                }
+                None => derived,
+            }
+        }
+        None => Waveforms::from_mono_preview(&analysis.waveform.data, columns, &Tuning::default()),
+    }
+}
 
+fn has_band_data(analysis: &AnalysisResult) -> bool {
+    analysis.color_waveform.as_ref().is_some_and(|cw| !cw.detail.is_empty())
+}
+
+/// Section with the preview layout shared by `PWAV` and `PWV2`: `len_data, 0x00010000, data`.
+fn build_preview_section(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
+    let section_header_len: u32 = 20;
+    let section_total_len = section_header_len + data.len() as u32;
     let mut buf = Vec::with_capacity(section_total_len as usize);
-    buf.extend_from_slice(TAG_WAVEFORM_PREVIEW);
+    buf.extend_from_slice(tag);
     buf.extend_from_slice(&section_header_len.to_be_bytes());
     buf.extend_from_slice(&section_total_len.to_be_bytes());
-    buf.extend_from_slice(&entry_count.to_be_bytes());
-    buf.extend_from_slice(&[0u8; 4]); // padding
-    buf.extend_from_slice(&analysis.waveform.data);
-
+    buf.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    buf.extend_from_slice(&0x0001_0000u32.to_be_bytes());
+    buf.extend_from_slice(data);
     buf
+}
+
+/// PWAV section: 400-byte monochrome waveform preview (3-bit whiteness, 5-bit height).
+fn build_waveform_preview_section(waves: &Waveforms) -> Vec<u8> {
+    build_preview_section(TAG_WAVEFORM_PREVIEW, &waves.pwav)
+}
+
+/// PWV2 section: 100-byte tiny waveform preview (4-bit height).
+fn build_waveform_tiny_section(waves: &Waveforms) -> Vec<u8> {
+    build_preview_section(TAG_WAVEFORM_TINY, &waves.pwv2)
 }
 
 /// Write an ANLZ `.EXT` file for a track to `output_path`.
@@ -162,8 +210,8 @@ fn build_waveform_preview_section(analysis: &AnalysisResult) -> Vec<u8> {
 /// → `PWV5` (detailed color waveform) → `PWV4` (color waveform, 1200 entries)
 /// → `PVB2` (extended VBR info).
 ///
-/// Color waveform data is currently derived from the monochrome PWAV values
-/// (faked green/white tint); spectral analysis is not yet implemented.
+/// `PWV3`, `PWV5` and `PWV4` come from the same band data as the `.2EX` file
+/// (see [`write_anlz_2ex`]); without band data they are neutral, not tinted.
 ///
 /// Parent directories are created automatically.
 pub fn write_anlz_ext(
@@ -177,16 +225,15 @@ pub fn write_anlz_ext(
     // Section order must match rekordbox: PPTH → PWV3 → PCOB → PCOB → PCO2 → PCO2 → PQT2 → PWV5 → PWV4 → PVB2
     let duration_secs = track.duration_secs;
     let path_section = build_path_section(&track.usb_path);
-    let pwv3_section = build_color_preview_section(analysis, duration_secs);
+    let waves = export_waveforms(duration_secs, analysis);
+    let pwv3_section = build_color_preview_section(&waves);
     let cue_section_1 = build_cue_section(1, &[]);             // EXT PCOBs are always empty
     let cue_section_2 = build_cue_section(0, &[]);             // actual cues go in PCO2
     let cue_ext_1 = build_cue_extended_section(1, &hot_cues);
     let cue_ext_2 = build_cue_extended_section(0, &memory_cues);
     let pqt2_section = build_beat_grid_ext_section(analysis, duration_secs);
-    let pwv5_section = build_color_detail_section(analysis, duration_secs);
-    let pwv4_section = build_color_waveform_section(analysis);
-    let pwv7_section = build_pwv7_section(analysis, duration_secs);
-    let pwv6_section = build_pwv6_section(analysis);
+    let pwv5_section = build_color_detail_section(&waves);
+    let pwv4_section = build_color_waveform_section(&waves);
     let pvb2_section = build_vbr_ext_section();
 
     let total_len = HEADER_LEN as usize
@@ -199,8 +246,6 @@ pub fn write_anlz_ext(
         + pqt2_section.len()
         + pwv5_section.len()
         + pwv4_section.len()
-        + pwv7_section.len()
-        + pwv6_section.len()
         + pvb2_section.len();
 
     if let Some(parent) = output_path.parent() {
@@ -228,126 +273,74 @@ pub fn write_anlz_ext(
     file.write_all(&pqt2_section)?;
     file.write_all(&pwv5_section)?;
     file.write_all(&pwv4_section)?;
-    file.write_all(&pwv7_section)?;
-    file.write_all(&pwv6_section)?;
     file.write_all(&pvb2_section)?;
 
     Ok(())
 }
 
-/// PWV3 section: color preview waveform (variable entries, 1 byte each).
-/// Entry count = duration_secs * 150 to match rekordbox's resolution.
-/// Each byte: bits 7-5 = color (1=red/bass, 2=blue/high, 4=green/mid, 7=white), bits 4-0 = height.
-fn build_color_preview_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
+/// PWV3 section: color preview waveform (150 entries per second, 1 byte each).
+/// Each byte: bits 7-5 = whiteness, bits 4-0 = height.
+fn build_color_preview_section(waves: &Waveforms) -> Vec<u8> {
     let section_header_len: u32 = 24;
-    let entry_count: u32 = (duration_secs * 150.0).round() as u32;
+    let entry_count = waves.pwv3.len() as u32;
     let section_total_len = section_header_len + entry_count;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_COLOR_PREVIEW);
     buf.extend_from_slice(&section_header_len.to_be_bytes());
     buf.extend_from_slice(&section_total_len.to_be_bytes());
-    buf.extend_from_slice(&1u32.to_be_bytes());              // unknown (1 in rekordbox)
-    buf.extend_from_slice(&entry_count.to_be_bytes());        // data length
-    buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());     // unknown fields
-
-    if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
-        for i in 0..entry_count {
-            let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
-            } else {
-                0
-            };
-            let [low, mid, high] = if src_idx < cw.detail.len() {
-                cw.detail[src_idx]
-            } else {
-                [0, 0, 0]
-            };
-            let max_amp = low.max(mid).max(high);
-            // Scale max amplitude (0-255) to 5-bit height (0-31)
-            let height = (max_amp as u32 * 31 / 255) as u8;
-            // Determine dominant band → color code
-            let color_bits: u8 = if low >= mid && low >= high {
-                1 // red — bass dominant
-            } else if high >= low && high >= mid {
-                2 // blue — treble dominant
-            } else {
-                4 // green — mid dominant
-            };
-            buf.push((color_bits << 5) | (height & 0x1F));
-        }
-    } else {
-        // Fallback: interpolate from mono PWAV with white color
-        for i in 0..entry_count {
-            let pwav_idx = (i * 400 / entry_count) as usize;
-            let pwav_byte = analysis.waveform.data[pwav_idx];
-            let height = pwav_byte & 0x1F; // 5-bit height from PWAV
-            let color: u8 = 7 << 5;        // 0xe0 = white/full-spectrum (matches rekordbox)
-            buf.push(color | height);
-        }
-    }
-
+    buf.extend_from_slice(&1u32.to_be_bytes());
+    buf.extend_from_slice(&entry_count.to_be_bytes());
+    buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());
+    buf.extend_from_slice(&waves.pwv3);
     buf
 }
 
-/// PWV5 section: detailed color waveform (variable entries, 2 bytes each).
-/// Entry count matches PWV3 (duration_secs * 150).
-fn build_color_detail_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
+/// PWV5 section: detailed color waveform (150 entries per second, 2 bytes each).
+/// Each entry is big-endian `rrrgggbbbhhhhh00`: 3-bit low, mid and high level, 5-bit height.
+fn build_color_detail_section(waves: &Waveforms) -> Vec<u8> {
     let section_header_len: u32 = 24;
-    let num_entries: u32 = (duration_secs * 150.0).round() as u32;
-    let data_len = num_entries * 2;
-    let section_total_len = section_header_len + data_len;
+    let num_entries = waves.pwv5.len() as u32;
+    let section_total_len = section_header_len + num_entries * 2;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_COLOR_DETAIL);
     buf.extend_from_slice(&section_header_len.to_be_bytes());
     buf.extend_from_slice(&section_total_len.to_be_bytes());
-    buf.extend_from_slice(&2u32.to_be_bytes());               // bytes per entry
-    buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
-    buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());      // unknown fields (confirmed from rekordbox)
-
-    if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
-        for i in 0..num_entries {
-            let src_idx = if src_len > 0 {
-                (i * src_len / num_entries) as usize
-            } else {
-                0
-            };
-            let [low, mid, high] = if src_idx < cw.detail.len() {
-                cw.detail[src_idx]
-            } else {
-                [0, 0, 0]
-            };
-            let amplitude = low.max(mid).max(high);
-            buf.push(amplitude);
-            buf.push(0x80); // constant second byte observed in rekordbox
-        }
-    } else {
-        // Fallback: derive amplitude from mono PWAV data
-        // Byte 0: amplitude scaled to 0-255 range (rekordbox format).
-        // Byte 1: 0x80 (observed constant in rekordbox exports).
-        for i in 0..num_entries {
-            let pwav_idx = (i * 400 / num_entries) as usize;
-            let pwav_byte = analysis.waveform.data[pwav_idx];
-            let height = pwav_byte & 0x1F; // 5-bit height (0-31)
-            let amplitude = (height as u32 * 255 / 31) as u8; // scale to 0-255
-            buf.push(amplitude);
-            buf.push(0x80); // constant second byte observed in rekordbox
-        }
+    buf.extend_from_slice(&2u32.to_be_bytes());
+    buf.extend_from_slice(&num_entries.to_be_bytes());
+    buf.extend_from_slice(&0x0096_0305u32.to_be_bytes());
+    for entry in &waves.pwv5 {
+        buf.extend_from_slice(&entry.to_be_bytes());
     }
-
     buf
 }
 
-/// PWV7 section: full-resolution 3-band waveform (3 bytes per entry).
-/// Entry count = duration_secs * 150, matching PWV3/PWV5.
-fn build_pwv7_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> {
+/// PWV4 section: color waveform preview (1200 entries, 6 bytes each).
+fn build_color_waveform_section(waves: &Waveforms) -> Vec<u8> {
     let section_header_len: u32 = 24;
-    let entry_count: u32 = (duration_secs * 150.0).round() as u32;
-    let data_len = entry_count * 3;
-    let section_total_len = section_header_len + data_len;
+    let bytes_per_entry: u32 = 6;
+    let num_entries = waves.pwv4.len() as u32;
+    let section_total_len = section_header_len + num_entries * bytes_per_entry;
+
+    let mut buf = Vec::with_capacity(section_total_len as usize);
+    buf.extend_from_slice(TAG_COLOR_WAVEFORM);
+    buf.extend_from_slice(&section_header_len.to_be_bytes());
+    buf.extend_from_slice(&section_total_len.to_be_bytes());
+    buf.extend_from_slice(&bytes_per_entry.to_be_bytes());
+    buf.extend_from_slice(&num_entries.to_be_bytes());
+    buf.extend_from_slice(&[0u8; 4]);
+    for entry in &waves.pwv4 {
+        buf.extend_from_slice(entry);
+    }
+    buf
+}
+
+/// PWV7 section: 3-band waveform (150 entries per second, low/mid/high bytes, at most 127).
+fn build_pwv7_section(waves: &Waveforms) -> Vec<u8> {
+    let section_header_len: u32 = 24;
+    let entry_count = waves.pwv7.len() as u32;
+    let section_total_len = section_header_len + entry_count * 3;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_COLOR_3BAND_DETAIL);
@@ -356,39 +349,17 @@ fn build_pwv7_section(analysis: &AnalysisResult, duration_secs: f64) -> Vec<u8> 
     buf.extend_from_slice(&3u32.to_be_bytes());
     buf.extend_from_slice(&entry_count.to_be_bytes());
     buf.extend_from_slice(&0x0096_0000u32.to_be_bytes());
-
-    if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.detail.len() as u32;
-        for i in 0..entry_count {
-            let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
-            } else {
-                0
-            };
-            let [low, mid, high] = if src_idx < cw.detail.len() {
-                cw.detail[src_idx]
-            } else {
-                [0, 0, 0]
-            };
-            buf.push(low);
-            buf.push(mid);
-            buf.push(high);
-        }
-    } else {
-        for _ in 0..entry_count {
-            buf.extend_from_slice(&[0, 0, 0]);
-        }
+    for entry in &waves.pwv7 {
+        buf.extend_from_slice(entry);
     }
-
     buf
 }
 
-/// PWV6 section: overview 3-band waveform (1200 entries, 3 bytes each).
-fn build_pwv6_section(analysis: &AnalysisResult) -> Vec<u8> {
+/// PWV6 section: 3-band overview (1200 entries, low/mid/high bytes).
+fn build_pwv6_section(waves: &Waveforms) -> Vec<u8> {
     let section_header_len: u32 = 20;
-    let entry_count: u32 = 1200;
-    let data_len = entry_count * 3;
-    let section_total_len = section_header_len + data_len;
+    let entry_count = OVERVIEW_COLUMNS as u32;
+    let section_total_len = section_header_len + entry_count * 3;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_COLOR_3BAND_OVERVIEW);
@@ -396,90 +367,80 @@ fn build_pwv6_section(analysis: &AnalysisResult) -> Vec<u8> {
     buf.extend_from_slice(&section_total_len.to_be_bytes());
     buf.extend_from_slice(&3u32.to_be_bytes());
     buf.extend_from_slice(&entry_count.to_be_bytes());
-
-    if let Some(cw) = &analysis.color_waveform {
-        let src_len = cw.overview.len() as u32;
-        for i in 0..entry_count {
-            let src_idx = if src_len > 0 {
-                (i * src_len / entry_count) as usize
-            } else {
-                0
-            };
-            let [low, mid, high] = if src_idx < cw.overview.len() {
-                cw.overview[src_idx]
-            } else {
-                [0, 0, 0]
-            };
-            buf.push(low);
-            buf.push(mid);
-            buf.push(high);
-        }
-    } else {
-        for _ in 0..entry_count {
-            buf.extend_from_slice(&[0, 0, 0]);
-        }
+    for entry in &waves.pwv6 {
+        buf.extend_from_slice(entry);
     }
-
     buf
 }
 
-/// PWV4 section: color waveform preview (1200 entries, 6 bytes each).
-fn build_color_waveform_section(analysis: &AnalysisResult) -> Vec<u8> {
-    let section_header_len: u32 = 24;
-    let num_entries: u32 = 1200; // 0x04B0
-    let bytes_per_entry: u32 = 6;
-    let data_len = num_entries * bytes_per_entry;
-    let section_total_len = section_header_len + data_len;
+/// PWVC section: the low, mid and high gain behind the 3-band bytes.
+fn build_pwvc_section(waves: &Waveforms) -> Vec<u8> {
+    let section_header_len: u32 = 14;
+    let section_total_len: u32 = 20;
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
-    buf.extend_from_slice(TAG_COLOR_WAVEFORM);
+    buf.extend_from_slice(TAG_COLOR_3BAND_GAIN);
     buf.extend_from_slice(&section_header_len.to_be_bytes());
     buf.extend_from_slice(&section_total_len.to_be_bytes());
-    buf.extend_from_slice(&bytes_per_entry.to_be_bytes());     // bytes per entry
-    buf.extend_from_slice(&num_entries.to_be_bytes());         // entry count
-    buf.extend_from_slice(&[0u8; 4]);                          // unknown
+    buf.extend_from_slice(&0u16.to_be_bytes());
+    for gain in waves.gains {
+        buf.extend_from_slice(&gain.to_be_bytes());
+    }
+    buf
+}
 
-    if let Some(cw) = &analysis.color_waveform {
-        // overview is expected to be exactly 1200 entries; use direct indexing,
-        // falling back to interpolation if lengths differ.
-        let src_len = cw.overview.len() as u32;
-        for i in 0..1200u32 {
-            let src_idx = if src_len > 0 {
-                (i * src_len / 1200) as usize
-            } else {
-                0
-            };
-            let [low, mid, high] = if src_idx < cw.overview.len() {
-                cw.overview[src_idx]
-            } else {
-                [0, 0, 0]
-            };
-            let max_height = low.max(mid).max(high);
-            // 6 bytes per entry: [red(bass), green(mid), blue(high), max_height, high/2, whiteness]
-            buf.push(low);           // red — bass channel
-            buf.push(mid);           // green — mid channel
-            buf.push(high);          // blue — treble channel
-            buf.push(max_height);    // overall height
-            buf.push(high / 2);      // secondary blue
-            buf.push(0);             // whiteness
+/// Write an ANLZ `.2EX` file for a track to `output_path`, if `analysis` carries band data.
+///
+/// Sections: `PPTH` → `PWV7` (3-band detail, 150 entries/s) → `PWV6` (3-band overview,
+/// 1200 entries) → `PWVC` (gains). Rekordbox keeps these three in `.2EX`; players that
+/// find them in `.EXT` ignore them.
+///
+/// Returns `Ok(false)` and writes nothing when there is no band data (a stale file at
+/// `output_path` is removed), `Ok(true)` when the file was written.
+pub fn write_anlz_2ex(
+    output_path: &Path,
+    track: &Track,
+    analysis: &AnalysisResult,
+) -> Result<bool> {
+    if !has_band_data(analysis) {
+        match std::fs::remove_file(output_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
-    } else {
-        // Fallback: derive color from mono PWAV (fake green tint)
-        for i in 0..1200u32 {
-            let pwav_idx = (i * 400 / 1200) as usize;
-            let pwav_byte = analysis.waveform.data[pwav_idx];
-            let height = pwav_byte & 0x1F;
-            // 6 bytes per entry: [red, green, blue, height, blue2, white]
-            buf.push(height / 2);    // red component
-            buf.push(height);        // green component
-            buf.push(height / 2);    // blue component
-            buf.push(height);        // height
-            buf.push(height / 3);    // blue2
-            buf.push(0);             // whiteness
-        }
+        return Ok(false);
     }
 
-    buf
+    let waves = export_waveforms(track.duration_secs, analysis);
+    let path_section = build_path_section(&track.usb_path);
+    let pwv7_section = build_pwv7_section(&waves);
+    let pwv6_section = build_pwv6_section(&waves);
+    let pwvc_section = build_pwvc_section(&waves);
+
+    let total_len = HEADER_LEN as usize
+        + path_section.len()
+        + pwv7_section.len()
+        + pwv6_section.len()
+        + pwvc_section.len();
+
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut file = std::fs::File::create(output_path)?;
+    file.write_all(ANLZ_MAGIC)?;
+    file.write_all(&HEADER_LEN.to_be_bytes())?;
+    file.write_all(&(total_len as u32).to_be_bytes())?;
+    file.write_all(&1u32.to_be_bytes())?;
+    file.write_all(&0x0001_0000u32.to_be_bytes())?;
+    file.write_all(&0x0001_0000u32.to_be_bytes())?;
+    file.write_all(&[0u8; 4])?;
+    file.write_all(&path_section)?;
+    file.write_all(&pwv7_section)?;
+    file.write_all(&pwv6_section)?;
+    file.write_all(&pwvc_section)?;
+
+    Ok(true)
 }
 
 /// PCO2 section: extended cue/loop point container with PCP2 entries.
@@ -677,6 +638,13 @@ pub fn anlz_path_for_track(track: &Track) -> String {
 /// Same directory as [`anlz_path_for_track`], different file extension. No leading `/`.
 pub fn anlz_ext_path_for_track(track: &Track) -> String {
     format!("{}/ANLZ0000.EXT", anlz_dir_for_track(track))
+}
+
+/// Return the USB-relative path to the `ANLZ0000.2EX` file for `track`.
+///
+/// Same directory as [`anlz_path_for_track`]; holds the 3-band waveform sections. No leading `/`.
+pub fn anlz_2ex_path_for_track(track: &Track) -> String {
+    format!("{}/ANLZ0000.2EX", anlz_dir_for_track(track))
 }
 
 /// Return the ANLZ `.DAT` path as stored in the PDB `analyze_path` field.

@@ -426,3 +426,210 @@ Noise is a few percent between runs (the fling and compact-player rows are insid
 - Schema v4 sign-off (above), and the high band on real tracks in the app.
 - `PWV6` high is now a worse numeric fit than before (white rim chosen over MAE); `PWV4` b5 likewise slightly.
 - Cold first select click is 90 ms against q32's 62 in the mock (first-use synthesis plus the first 3-band strip paint).
+
+## Q39 fix
+
+Branch `q39-wave-fix` (from `row-wave-variants`). Merlin ran the real app on his tracks: the compact strip was a flat saturated blue block, the expanded player flashed while scrolling, the detail strip was grey. Rows keep the grey loudness envelope (Row preview decision); everything else is the 3-band picture. Not tried in the real WKWebView, not looked at by Merlin.
+
+### Cause of the flat block
+
+Not saturated bytes. Real PWV7 low bytes top out at 93 of 127 (Rekordbox's own: 124); the overview PWV6 bytes top out at 36 to 49. Three things made the strip flat, in order of weight:
+
+1. **The compact strip was fed `waveform_color`, the full detail peak-held to 2048 columns** (`downsample_3band`, max per band over about 24 columns, 160 ms, one kick period), and then peak-pooled again to one value per pixel. A max over a kick period is the kick level everywhere there is a kick, so a drop is a plateau. Byte percentiles (p5 / p50 / p95), full detail against the 2048-column strip data, `byte-histograms.txt` in the q39 folder has all of it:
+
+   | Track | Low, ours | Low, Rekordbox | Mid, ours | High, ours |
+   |---|---|---|---|---|
+   | Revision | 36 / 61 / 85 to 64 / 83 / 90 | 29 / 59 / 84 to 62 / 81 / 88 | 13 / 27 / 77 to 25 / 73 / 101 | 0 / 3 / 58 to 1 / 36 / 123 |
+   | Be You | 3 / 36 / 78 to 4 / 72 / 87 | 3 / 40 / 105 to 5 / 96 / 118 | 5 / 25 / 63 to 15 / 52 / 93 | 0 / 3 / 54 to 3 / 45 / 116 |
+   | Oyea | 14 / 41 / 62 to 24 / 53 / 73 | 14 / 51 / 79 to 27 / 68 / 93 | 11 / 27 / 73 to 27 / 51 / 102 | 0 / 2 / 39 to 0 / 20 / 76 |
+
+   The median of every band moves up to near its peak and the spread collapses (Revision low: p5 to p95 spans 49 bytes in the detail, 26 in the strip data; Rekordbox's own bytes do the same). Rekordbox's 2048-column equivalent is just as flat through our renderer, so it is the pooling, not our bytes.
+2. **Display curve and stacking.** `0.045 + 0.955 * v^0.65` lifts every quiet value, and low was drawn in front, so the flat low plateau covered mid and high. The Rekordbox references stack the other way (low outer and back, mid in front, high the thin core on top).
+3. **The legacy payload path** (tracks stored before Q36, no `pwv7` flag) runs `balanceBands`, which puts every band's 98th percentile at 0.95. On pooled data that is every column near full height (the `before-legacy/` PNGs reproduce the screenshot: solid blue, thin amber fringe, white specks). Left in place for those tracks; the strip no longer pools.
+4. The expanded overview showed PWV6 at `byte / 127`, so it was thin on the pwv7 path (bytes of 15 to 49) and full on the legacy path: two different looks.
+
+### Fix
+
+- `waveform-bands.js`: `BAND_ORDER` is low, mid, high (low outer, high on top). Pixel buckets blend peak and mean (`BUCKET_PEAK_WEIGHT` low 0.2, mid 0.3, high 0.4) instead of the pure peak. Curve `0.02 + 0.98 * v^0.85` (a gentle expansion: quiet stays quiet, silence is a thin line). Global per-band gains against one reference for every track and view (`BAND_GAIN` low 1.15, mid 0.75, high 0.5), no per-track normalisation. `BandColumns.scale` (per band) for data whose full scale is below 1.
+- The compact strip, the expanded overview and the zoom view all draw the full-resolution `waveform_color_detail` (`player.track.bands` and `bandsOverview` are the detail bands). One data source, one look. The 2048-column field stays in the payload (tests, fallback) but the strip no longer uses it.
+- Detail strip: `Waveform.svelte` got `look` (`envelope` default for rows, `bands` for the detail pane). The 128-column row preview carries `scale { low 2.4, mid 2.4, high 1.4 }` (PWV6 bytes top out near 50 of 127); the row envelope ignores it.
+
+### Cause of the flashing
+
+Headless frame capture (70 to 90 consecutive frames at dpr 1 and 2, mock and real bytes, `app/perf/waveform-flicker.mjs`) shows no blank, half-drawn or cleared frame, no canvas resize, no DOM rebuild and one canvas element throughout, so none of clear-then-draw, bitmap eviction, per-frame resize or a double-buffer swap exists in this code. What does exist: **the zoom view scrolls by translating the 1 px column rects by the fractional pixel remainder (Q28)**. Every column is then anti-aliased across two device pixels and neighbouring columns composite at coverage a and 1 - a, so the background bleeds through (opacity 1 - a(1 - a), down to 75 %). The bleed changes with the sub-pixel phase, i.e. every frame while scrolling. Measured on a constant waveform scrolled in 40 sub-pixel steps: brightness swings 22 % (blue channel 197 to 254) at dpr 1 and 2. On real content the body brightness of the zoom view swung 10.6 % across 70 consecutive frames. Beat, cue and playhead lines had the same problem (a 1 px line at a fractional x is crisp or smeared depending on phase).
+
+Fix: the zoom view scrolls in whole device pixels (no fractional offset), and lines land on whole device pixels (`_lineAt`). Constant waveform: 0.0 % swing at every phase; real content over 64 to 70 frames: 1.9 % at dpr 1, 2.2 % at dpr 2 (what the content itself changes), frame-to-frame content residual 0.7 % median. Pixel check `waveform-pixels.mjs` has the constant-waveform check (64 checks, all pass).
+
+Not reproduced: a GPU-canvas or compositor-level flash that only exists in WKWebView. If Merlin still sees a flash on the Mac, the next suspects are the per-frame cost of about 6,000 `fillRect`s at dpr 2 and the opaque bar-label boxes that clip the waveform top and jump sides at the playhead; neither is blank-frame behaviour, so they are not changed here.
+
+### Tests and checks
+
+- `waveform-math.test.ts`: curve, bucket blend, a drop and a breakdown with the same kick peak stay apart (the flat-block regression), one global reference (the same level is the same height whatever else is in the track), per-band scale, painter layer order (low, mid, high; rect and path painters), whole-pixel scrolled columns.
+- `waveform-bands.test.ts`: row preview carries the display scale.
+- `app/perf/waveform-pixels.mjs`: heights stack high < mid < low, high is the front core, mid ring, low ring, ground outside; constant waveform keeps its brightness at every sub-pixel phase.
+- `app/perf/waveform-flicker.mjs` (frame capture): per frame, ink coverage of the centre rows of the zoom and overview canvases, left and right halves, transparent pixels, canvas width / height assignments, DOM mutations under the player, canvas identity, frame-to-frame content residual, body brightness swing. `FIXTURE=<fixture.json>` runs it on real bytes through `compare.html?play=1`; without it, on the `?mock=N` app.
+
+### Screenshots and numbers
+
+`/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/q39/` (`before/`, `before-legacy/`, `after/`, `README.txt`, `byte-histograms.txt`, `perf.json`): four tracks (Oyea, Revision, Be You, Darkside), compact strip + expanded overview + zoom + row + detail strip, ours and Rekordbox's bytes through the same renderer.
+
+Perf (`waveform-perf.mjs`, headless Chromium, shared `dev` box under load from other jobs, `?mock=3000`, software compositing, median of 5 alternating runs, main-thread CPU per frame; before is the `row-wave-variants` head build):
+
+| Scenario | before | after |
+|---|---|---|
+| Compact player playing | 6.54 ms | 6.18 ms |
+| Expanded player playing | 17.28 | 17.08 |
+| Expanded zoom in/out | 16.75 | 16.53 |
+| Expanded wheel scroll | 29.36 | 28.49 |
+
+CPU per frame is equal or lower everywhere. Frame p50 is 16.7 ms in all of them. Frames over 33 ms per 4 s window (median of 5): expanded playing 8 to 17, zoom 7 to 9, wheel scroll 20 to 15, compact 0 to 0; the expanded-playing difference sits next to unchanged CPU on a loaded box and was not chased (rerun on an idle machine before reading anything into it).
+
+## Q40 Rekordbox match
+
+Branch `q40-rb-match` (from `q39-wave-fix`). Goal: the 3-band waveforms look like Rekordbox's, judged 1:1 on the same tracks (Dubby, Gate). Two separate steps: first the renderer alone (Rekordbox's own bytes through our renderer against its screenshots), then our bytes against Rekordbox's. Not looked at by Merlin, not tried in the real WKWebView.
+
+PNGs, README and the metric files: `/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/q40/` (`dubby-zoom.png`, `gate-zoom.png`, `dubby-overview.png`, `gate-overview.png`; each is a labelled stack: Rekordbox screenshot, our renderer on Rekordbox's bytes, our renderer on our bytes; the overviews also have Rekordbox's PWV6 and the app path). The compact strip draws the overview picture through the same code.
+
+### Method
+
+- Rekordbox's bytes for both tracks come from the fresh `master.db` copy (`rekordbox-library-2026-10-25`) through `waveform_compare track` (new: `WAVEFORM_TRACKS="Dubby=<audio>,..."`, writes PWV7, PWV6, PWV4, PWV5, PWV3, PWAV, gains, beats and our measured bytes as JSON). `waveform_compare shape` (new) prints pooled byte distribution, attack (mean rise per column) and decay (mean fall ratio) for ours against Rekordbox over a half of the selection.
+- `app/rbmatch.html` + `app/perf/rbmatch.mjs` draw the real `WaveformDisplay` from raw PWV7/PWV6 bytes at an exact pixels-per-second and left edge. Screenshot geometry: Rekordbox's crops are at Dubby 1:26.0 (bar 51.1) and Gate 1:55.8 (bar 69.2); the "2:29 to 2:33" in the brief is where our own screenshot was. Pixel scale from the red downbeat markers: 241.65 px/s (Dubby, 140 BPM) and 246.4 px/s (Gate, 142 BPM), 1931 px window, centre line at row 78.
+- Pixel comparison: every column is classified by colour (blue, bright amber, dark amber, white, cream, grey-white) and the extents of the outermost colour, of amber-or-white and of white are compared (MAE in px of the 77 px half height, correlation).
+- Rekordbox's waveform in the screenshots sits 8 ms (Dubby) and 2 ms (Gate) later than its PWV7 bytes at the alignment the grid markers give (minimum extent error); applied to the rows that are compared with the screenshot.
+
+### What made the renderer match (top 3)
+
+1. **Hard attacks, linear heights.** Each source column is held over its pixels (no interpolation) and nothing is smoothed along the pixel axis at one pixel per column or finer (the bytes already carry Rekordbox's release; the old follower added a second tail). Heights are linear in the byte (curve exponent 1.0 instead of 0.85), with band gains fitted against Rekordbox's column extents: low 0.80, mid 0.82, high 0.89 (was 1.15, 0.75, 0.5 with the blended-bucket curve). Dubby column extents, outer MAE 17.3 px to 2.2 px, blue 23.7 to 1.75.
+2. **Rekordbox's layer tones.** Rekordbox draws low (blue, back), mid (amber), high (white), every band from the centre line with its own height, and tones the front bands by what is behind them: amber inside the blue is dark amber `#b2660a`, bright amber `#fda602` only where it sticks out; white is `#fdfdfd` outside, `#ece8e5` inside blue, cream `#f6e4d2` inside amber. Colours now `#0053e2` / `#fda602` / `#fdfdfd` (sampled from the screenshots), three new tokens (`--ff-wave-mid-in-low`, `-high-in-low`, `-high-in-mid`). Layers that a taller later layer covers are not painted.
+3. **Stacked, bottom-anchored overview.** Rekordbox's overview is a stack from a baseline: blue body, amber on top of it, white on top of that, from its 1200-column PWV6. The overview and the compact strip now reduce the detail columns to at most 1200 mean buckets (`OVERVIEW_COLUMNS`), scale them to PWV6 level (`OVERVIEW_SCALE` 0.6 / 0.75 / 2.0, from the PWV6 to mean-of-PWV7 ratios of Rekordbox's own files) and stack with `STACK_GAIN` 1.08 / 0.7 / 1.35 (high exponent 1.7, so hat accents stand out of the body). Stack-top MAE against the screenshots: Dubby 2.6 px, Gate 3.9 px from Rekordbox's PWV7 through the app path (2.5 / 3.5 from its PWV6).
+
+### Renderer results
+
+| View, bytes | Dubby | Gate |
+|---|---|---|
+| Zoom, Rekordbox bytes: outer / blue / amber / white MAE (px) | 2.2 / 1.75 / 2.8 / 2.1 | 2.7 / 0.9 / 3.1 / 2.2 |
+| Zoom, our bytes (same audio) | 4.4 / 8.1 / 6.6 / 6.6 | 5.1 / 2.9 / 4.5 / 3.5 |
+| Overview, Rekordbox PWV6: stack / blue MAE | 2.5 / 0.6 | 3.5 / 1.4 |
+| Overview, Rekordbox PWV7 via the app path | 2.6 / 0.55 | 3.9 / 2.2 |
+| Overview, our bytes | 2.8 / 0.8 | 6.6 / 2.5 |
+
+Dubby, our bytes in the zoom row: the extents are worse only because our columns sit 4 columns (27 ms) earlier than Rekordbox's on this mp3 (lag scan: best lag +4 for all three bands; Gate lag 0). Cause not verified; our timeline is the playback timeline, so it is not "fixed" in the bytes.
+
+Honest verdict: zoom matches closely on both tracks (kick and hat spikes with decay tails, white core flash, amber attacks, blue body). Rekordbox's screenshots are slightly blurred; ours are crisper and our cream core is about 1 px wider. The overview reproduces structure and level (breakdown dips, amber fringe, white rim); Rekordbox's tall white hat spikes show only from its own PWV6 bytes: they are not in the mean of its PWV7 (a higher peak weight on the high band raised the level too much, mean 12 % peak made Dubby's stack 2.5 px too tall).
+
+### Our bytes against Rekordbox's
+
+`Tuning::default` after the pooled shape comparison (`waveform_compare shape`, 20 tune and 20 held-out tracks): the high band already matched (p99 82 / 91 against 84 / 83, attack and decay within 3 %); low and mid released slightly too slowly and low peaked slightly low. Changes: low release 0.97 to 0.965, mid release 0.93 to 0.925, low gain target 72.8 to 77.0. A second candidate (low release 0.96, target 82) matched the level distribution better (low p99 99 against 100) but lost exact matches and MAE, so it was not taken.
+
+Held-out half (20 tracks, 969,980 columns), `waveform_compare score --set test`, before to after (Q37 numbers are the "before"):
+
+| `PWV7` | exact % | MAE | correlation |
+|---|---|---|---|
+| low | 12.0 to 10.8 | 5.08 to 5.10 | 0.960 to 0.963 |
+| mid | 26.5 to 27.0 | 2.40 to 2.12 | 0.977 to 0.981 |
+| high (unchanged) | 41.7 | 2.78 | 0.931 |
+
+Tune half: low r 0.959 to 0.965 (MAE 5.01 to 4.68), mid 0.958 to 0.958 (MAE 3.32 to 3.13), high 0.911 unchanged. Held-out correlations are at least Q37's (low .960, mid .977, high .931). Pooled shape, held-out: low mean 48.5 (Rekordbox) / 47.1 (ours) after, rise mean 9.74 / 8.71, fall ratio 0.965 / 0.965; mid p99 91 / 89; high p99 83 / 91.
+
+Not solved: the per-track level. Rekordbox's byte scale per track (its `PWVC` gain) does not follow `max(80, target / max envelope)`: Gate's low gain is 94 in Rekordbox, ours falls to the floor of 80, so our low bytes are about 13 % lower on that track (p50 54 against 63) and the stack in the overview is 6 px lower. Dubby: gains 80 / 121 / 107 (Rekordbox) against 84 / 127 / 127. Recovering that rule is a separate piece of work (needs the per-track gains of the whole library against some track statistic).
+
+### Performance
+
+`waveform-perf.mjs`, headless Chromium on the loaded `dev` box, `?mock=3000`, median of 5 alternating runs, main-thread CPU per frame (ms), before is the `q39-wave-fix` build:
+
+| Scenario | before | after |
+|---|---|---|
+| Compact player playing | 6.24 | 6.60 (earlier full runs of the same build: +1.0 %, +1.3 %, +2.4 %) |
+| Expanded player playing | 16.49 | 12.80 |
+| Expanded zoom | 16.38 | 12.71 |
+| Expanded wheel (zoom out) | 29.61 | 27.06 |
+
+The extra layers cost more at first (+15 to +30 % in the first run); fixed by painting layer by layer (one fill style per layer), skipping layers a taller later layer covers, and an incremental scroll for views at one pixel per column or finer: the zoom canvas moves the last frame by the scroll distance and paints only the new columns (`drawScrolledColumns`; the pixel check compares a scrolled sequence with a fresh paint, 0 differing pixels). `perf/paint-bench.mjs` compares the full-repaint cost of two design-system folders: 17.5 ms to 13.7 ms at 0.3 columns per pixel, 6.2 to 5.4 ms at 8. The compact figure is within the box's noise (spread between runs about 5 %); the code path for it is the static overview bitmap, which did not change per frame.
+
+### Tests and checks
+
+- `waveform-math.test.ts`: held columns (a hard step stays a hard step), overview mean reduction, layer order and tones, hidden-layer pruning, stacked painter and `stackHeights`.
+- `waveform-pixels.mjs` (84 checks, all pass): tones in the stack, a hard step stays hard when zoomed in, the stacked overview is anchored at the bottom, scrolling by moving the last frame equals a fresh paint.
+- `waveform-flicker.mjs`: 0 bad frames at dpr 1 and 2 (body brightness swing 2.7 % and 2.4 %); the overview is sampled at the baseline now that it is bottom-anchored.
+- The 2.6 to 2.7 % swing is the content, as in Q39.
+
+### Open
+
+- The list-row simple envelope (Merlin's choice) and the detail strip (centred bands, 128-column row preview) are not changed except for the new tokens.
+- Pure black ground: Rekordbox's waveform panel is `#000`; ours is `--ff-wave-bg` `#0d0d0d`, left as is.
+- The stack constants come from two tracks; a third and fourth track of different style would show how far the per-track level (above) matters for the overview.
+
+### Q40 round 2: the white band
+
+Merlin on the Mac: "still off, mostly the high end"; "the high end has different energy levels across the board, in the overview and in the zoom; mid and low seem good". Low and mid were not touched. PNGs, white-only diff images and `white-stats.txt`: `.../waveforms/q40/round2/`. (Some of my first scans of this round ran against a dev server that no longer saw `sed -i` edits and are redone; all numbers below are from the redone runs.)
+
+**Dynamic range of the high band, ours against Rekordbox** (RMS of PWV7 high in 6 s windows over the whole track; `hisec.py`):
+
+| Set | section-level correlation | p90 / p10 of the section levels, Rekordbox / ours | CV, Rekordbox / ours |
+|---|---|---|---|
+| held-out, 20 tracks | 0.957 | 2.32 / 2.20 | 0.352 / 0.361 |
+| tune, 20 tracks | 0.970 | 2.74 / 3.16 | 0.467 / 0.607 |
+| Dubby | 0.99 | 15.6 / 15.3 | |
+| Gate | 0.99 | 1.3 / 1.3 | |
+
+Nothing is flat or compressed: the section-to-section variation is the same as Rekordbox's (the pooled byte distribution too: p50 / p90 / p99 on the held-out half 1 / 25 / 83 against 2 / 26 / 91). What differs is the **level per track**: ours / Rekordbox of the section level is 0.77 (Dubby) and 0.71 (Gate), and over the 40 tracks the top-decile level of the high bytes is off by 20 % on average (mean absolute log ratio 0.203 tune, 0.186 held-out; signed mean about 0). Clipping at the top is not the cause: columns at 120 or more are 0.14 % in ours against 0.03 % in Rekordbox's. The gain rule has the right form: Rekordbox's high gain is `K / max envelope` of our envelope (slope -1.18 free, -1 fixed, residual 14 % in log; low: -1.02, 10.7 %), smoothed maxima and percentiles are worse (residual 19 to 27 %), so the 14 % is our maximum differing from Rekordbox's (a spike of a slightly different filter), which the exponent 2.08 of the high curve turns into about 30 % in the bytes. Things tried that did not reduce it (all on the tune half, `waveform_compare hiband` now has a per-track level term in its loss, `stereo` and `refdump` are new):
+
+- Filter, feature, release, gain target and curve search around the current setting: the current one (3000 Hz, peak, release 0.90, target 140, curve 2.08) stays best (level 0.203); the nearest alternative (target 143.5, curve 2.13) is 0.210.
+- Channel handling instead of the mono sum (louder channel, rms of the channels, mean of |L| and |R|): level error 0.227 / 0.206 / 0.200 against 0.203 (tune), 0.208 / 0.196 / 0.191 against 0.186 (held-out); correlation not better.
+- A regression of the level error on statistics of our own envelope and gain (leave-one-out over the 40 tracks): best two-feature model 0.33 against 0.415 without; fitted on the tune half it gives 0.346 against 0.421 on the held-out half and 0.156 on the tune half itself, i.e. over-fitted, so not adopted. Across tracks our level is a little too spread out (sd of log p99 0.72 against 0.62 for Rekordbox, correlation 0.93), the same thing seen from the other side.
+
+No data change for the high band therefore; the held-out numbers are Q40 round 1's (`PWV7` high correlation 0.931, MAE 2.78, exact 41.7 %). The per-track level of the white band stays about 20 % off on average and about 30 % low on Dubby and Gate; recovering Rekordbox's envelope maximum (and so its gain) needs its actual filter, which the 40 tracks do not give.
+
+**Overview and compact strip.** Pooling the high band with a peak share (0.3 to 1.0 of the bucket maximum, scale refitted) was measured against the screenshots: the median of the stack top rises (22 to 25 against Rekordbox's 20 on Dubby) while the tail stays short (26 to 32 against 33), so spikes are not recovered and the stack is too tall; pure mean stays best (Dubby stack top p50 / p90 / p97 / p99.5: 20 / 24 / 27 / 30 against Rekordbox 20 / 27 / 33 / 37; Gate 27 / 34 / 37 / 38 against 28 / 34 / 36 / 37). Why: Rekordbox's PWV6 high is *less* variable than any power mean of its own PWV7 high (CV ratio 0.45 to 0.71 for exponents 0.35 to 5, best per-track correlation 0.80 at exponent 0.5); the tall white hat spikes of its overview come from the PWV6 pass itself (its PWV6 white is not in its PWV7). Our own PWV6 high correlates 0.77 with Rekordbox's PWV6 high, no better than the mean of its PWV7 (0.77), so shipping it in the payload would not help either. Unchanged: mean pooling, `OVERVIEW_SCALE` high 2.0, `STACK_GAIN` high 1.35, exponent 1.7. White pixel area against the screenshots through the app path: Dubby 1.15 times Rekordbox's, Gate 1.66; from our own bytes 0.81 and 0.88 (the track-level difference above again).
+
+**Zoom.** Per-hat comparison with column profiles (`hats.mjs`; 28 and 34 spikes of at least 22 px in Rekordbox's crops, 28 and 32 found within 4 px in ours, position offset 0 px): Rekordbox's bytes through our renderer had the white spikes 8 % too tall (Dubby median 41 against 45 px, mean +3.4 px; Gate 35 against 36, +3.3 px) and 0.2 to 0.8 px too narrow at half height (9 against 8, 12 against 12). `BAND_GAIN.high` 0.89 to 0.83: mean spike height difference +0.5 px on both (Dubby 41 / 42, Gate 35 / 33), widths unchanged. White extents against the screenshot: Dubby MAE 2.10 to 2.02 (r .958 to .957), Gate 2.15 to 1.76 (r .973); the cream core is 0.6 px wider on average (bias). White-only diff, row 2 of the zoom PNGs: Dubby IoU 0.74, Gate 0.81. With our bytes on Dubby, drawn 27 ms later to take out the mp3 lag, the spikes are 14 % shorter (35 against 41 px) and 1.5 px narrower, white correlation 0.78: the level difference above, nothing in the renderer.
+
+Checks: `waveform-pixels.mjs` 84 / 0 failures, `waveform-flicker.mjs` 0 bad frames at dpr 1 and 2 (swing 2.6 % / 2.5 %), `npm test` 169 passed, `npm run check` 0 errors, `npm run build` ok, `cargo build` and `cargo test --workspace` exit 0, no failures. Perf (median of 5 alternating runs, CPU ms per frame, before is `q39-wave-fix`): compact playing 6.46 to 6.54, expanded playing 18.12 to 13.26, zoom 16.89 to 12.74, wheel 28.46 to 28.13.
+
+Honest verdict on the white band per view: zoom with Rekordbox's bytes: matches (heights within 0.5 px, widths within 0.6 px, IoU 0.74 to 0.81); zoom with our bytes: right shape and variation, level 20 to 30 % low on Dubby and Gate (spikes 14 % short on Dubby), Dubby also 27 ms early; overview and compact from Rekordbox's bytes: right rim and structure, tall spikes only from its PWV6; from our bytes: variation right, level low (stack 6 px low on Gate).
+
+## Q40 round 3: the zoomed-out views from a PWV6 series
+
+Merlin on the Mac: "zoomed in looks better, the zoomed-out view isn't right yet". Round 2 had shown that the look of Rekordbox's overview (blue body, thin amber fringe, tall white hat spikes, breakdowns dropping) is in its separate `PWV6` pass and not in the mean of its `PWV7`. Round 3 builds our `PWV6` like Rekordbox's, draws the expanded overview and the compact strip from it, and writes it to the stick. Zoom view, low and mid detail data and list rows are untouched. PNGs, diff images and `stats.txt`: `/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/q40/round3/`.
+
+### How Rekordbox's PWV6 relates to the audio
+
+Fitted on the raw per-column band peaks of our analysis (`Measured::band_columns`: the peak of each band's filter output per 1/150 s, before release and gain; `waveform_compare refdump` now writes them) against Rekordbox's `PWV6` of the 40-track set, tuned on 20 tracks, checked on the other 20 plus Dubby and Gate:
+
+- **Aggregate.** Each of the 1200 columns is a plain mean of the raw peaks over a trailing window that ends with the column's span and is longer than the span: 2.2 columns' width for low, 1.8 for mid, 1.4 for high (a column is `1 / 1200` of the track, so the window scales with the track, not with seconds: fixed-seconds windows correlate 0.971 to 0.991 against 0.988 to 0.995 and fail on long tracks). A two-tap fit of the bucket means shows the same: weights about 0.5 / 0.5 for low and mid, 0.63 / 0.28 for high. Median per-track correlation of that mean with Rekordbox's column: 0.995 / 0.992 / 0.988 (the plain bucket mean gave 0.90 / 0.88 / 0.90, the mean of the `PWV7` bytes 0.87 / 0.75 / 0.80). Peak, rms, percentiles, power means and a max share were all worse (for the high band a 10 % max share drops the correlation from 0.99 to 0.955 and the spikiness).
+- **Level.** Per band `byte = scale * mean^gamma / p99^delta`, p99 being the 99th percentile of the band's 1200 means: low 51.7 / 1.0 / 0.63, mid 36.4 / 0.91 / 0.92, high 93.2 / 1.15 / 0.77. Rekordbox normalises its overview per track (the byte maxima per band have a spread of 0.16 to 0.31 in log across tracks), but not by the maximum; p90 to p99.9 and max as the normaliser were tried, p99 gives the best level error for mid and high. The high exponent 1.15 (the best fit for the mean error was 1.04) buys the spikiness: held-out p90/p10 of the high series 6.15 against Rekordbox's 5.96 (5.18 with 1.04).
+
+Implementation: `waveform::overview_from_columns` (`Tuning::overview_window`, `overview_scale`, `overview_gamma`, `overview_delta`), used by `analyze`; `PWV4` still follows `PWV6`.
+
+### Held-out numbers (20 tracks, 24,000 overview columns each band)
+
+Per-track medians against Rekordbox's `PWV6`, before (mean of the `PWV7` bytes) to after:
+
+| Band | correlation | level error (mean abs log of the track mean) | variation (CV ours / Rekordbox) | p90 / p10, Rekordbox / ours |
+|---|---|---|---|---|
+| low | 0.873 to 0.996 | 0.098 to 0.076 | 0.99 to 0.96 | 2.25 / 2.21 to 2.16 |
+| mid | 0.752 to 0.990 | 0.150 to 0.164 | 0.98 to 0.90 | 2.36 / 2.48 to 2.09 |
+| high | 0.804 to 0.990 | 0.282 to 0.156 | 0.99 to 1.04 | 5.96 / 4.68 to 6.15 |
+
+Tune half: correlation 0.912 / 0.817 / 0.837 to 0.995 / 0.991 / 0.987, high level 0.330 to 0.120. Dubby and Gate (not in the 40): correlation 0.847 / 0.629 / 0.847 to 0.998 / 0.982 / 0.985, level error 0.076 / 0.055 / 0.079, high p90/p10 11.30 against ours 11.76. Pooled over all held-out columns (`waveform_compare score --set test`, the export path): `PWV6` low / mid / high correlation 0.864 / 0.735 / 0.767 (Q37 table) to 0.972 / 0.858 / 0.938, MAE 4.41 / 5.10 / 9.56 to 2.07 / 3.54 / 3.05 (the pooled mid number is limited by the track level, per-track the shape correlation is 0.99). What is left is the track level (mid 16 %, high 16 % mean abs log), the same unrecovered per-track normalisation as in round 2, now much smaller for the overview because the p99 normalisation carries it.
+
+### Data path
+
+`ColorWaveform::overview` already was the analysis' `PWV6`. The writer now uses it (and the `PWV4` that follows) when the analysis carries the measured columns (`exact` present and 1200 entries); without them (Python analysis, older stored tracks) `PWV6` is still derived from the `PWV7` bytes. **The export improves too**: the `PWV6` section (and `PWV4`) on the stick is the new overview; an analysis read back from a stick carries Rekordbox's own `PWV6` and writes it back unchanged. The payload already sends `waveform_overview` (stick values only for tracks with `pwv7`); the app now draws it (`player.track.bandsOverview`, `overviewBandsFromPayload`) in the expanded overview and, through `PlayerCompact`, the compact strip. Tracks stored before this change keep their old overview bytes (mean of the `PWV7`, about the right level) until they are analysed again; tracks without stick values draw from the detail columns as before. The renderer draws overview-level data as it is (`BandColumns.overview`), detail data is still reduced and scaled down for the fallback.
+
+### Renderer against the screenshots (Rekordbox's own `PWV6` through our renderer, then ours)
+
+The stack gains were refit with Rekordbox's `PWV6` as input on both screenshots at their widths (1814 and 1847 px): `STACK_GAIN` 1.08 / 0.62 / 1.69, high exponent 1.72. Stack-top percentiles p50 / p90 / p97 / p99.5 (px of a 38 px strip):
+
+| | screenshot | our renderer, Rekordbox's PWV6 | our renderer, our PWV6 |
+|---|---|---|---|
+| Dubby | 20 / 27 / 33 / 37 | 21 / 28 / 33 / 36 | 21 / 26 / 31 / 36 |
+| Gate | 28 / 34 / 36 / 37 | 26 / 31 / 32 / 34 | 24 / 30 / 32 / 35 |
+
+Column errors against the screenshot (MAE px, stack top / blue top): Dubby 2.5 / 0.6 from Rekordbox's PWV6, 2.3 / 0.8 from ours; Gate 3.3 / 1.4 and 4.2 / 2.4. Silhouette overlap of the ink (any pixel that is not ground): Dubby 0.89 (Rekordbox's bytes) and 0.90 (ours), Gate 0.88 and 0.84. The white-only overlap is low (0.32 to 0.44) because the white spikes are one to two pixels wide and the screenshot is a blurred downscale: our white covers 1.4 to 1.8 times the pixels above the threshold.
+
+Honest verdict: Dubby: breakdowns, blue body, amber fringe and the white hat spikes appear at the same places and heights from our own `PWV6`; the stack is right to within the percentiles above. Gate: structure and spike positions match; our stack is about 4 px lower at the median and the spikes are 1 to 4 px shorter (Rekordbox's Gate `PWV6` itself gives 26 against its screenshot's 28 through the same renderer, so about half of it is the display of that track, not our bytes).
+
+### Checks
+
+`waveform-pixels.mjs` 84 checks, 0 failures; `waveform-flicker.mjs` 0 bad frames at dpr 1 and 2 (swing 2.6 % / 2.4 %); `npm test` 172 passed, `npm run check` 0 errors, `npm run build` ok; `cargo test --workspace` exit 0 (new tests: `overview_keeps_spikes_and_breakdowns_of_the_audio`, `the_stick_carries_the_overview_measured_from_the_audio`, the overview payload and renderer tests). Perf (median of 5 alternating runs, CPU ms per frame, before is `q39-wave-fix`): compact playing 6.35 to 6.22, expanded playing 16.36 to 13.12, zoom 16.52 to 12.84, wheel scroll 28.97 to 26.52.

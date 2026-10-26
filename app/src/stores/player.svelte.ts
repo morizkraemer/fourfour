@@ -8,16 +8,15 @@ import {
   listenToAnalysisProgress,
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
-import {
-  isValidColorWaveform,
-  previewBytesFromPayload,
-} from '../services/analysis-data.ts';
+import { previewBytesFromPayload } from '../services/analysis-data.ts';
+import { colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
   playbackSeek,
   playbackSetPosition,
   playbackStop,
+  subscribePlaybackError,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
 import { library, requestBackgroundAnalysis } from './library.svelte.ts';
@@ -53,21 +52,28 @@ export interface PlayerTrack {
   durationMs: number;
   cues: PlayerCue[];
   beats: BeatMarker[];
-  colorData: ColorWaveSample[] | null;
+  bands: BandColumns | null;
   // Higher-res detail + fixed overview for the expanded dual-view player.
-  // (compact strip uses colorData; these stay null until analysis loads.)
-  colorDetail: ColorWaveSample[] | null;
-  colorOverview: ColorWaveSample[] | null;
-  previewBytes: number[] | null;
+  // (compact strip uses bands; these stay null until analysis loads.)
+  bandsDetail: BandColumns | null;
+  bandsOverview: BandColumns | null;
 }
 
 const CUE_COLORS = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#34d399', '#38bdf8'];
 
+let loadedTrack = $state.raw<PlayerTrack | null>(null);
+
 export const player = $state({
   playing: false,
   progress: 0.0,
-  track: null as PlayerTrack | null,
+  get track() {
+    return loadedTrack;
+  },
+  set track(value: PlayerTrack | null) {
+    loadedTrack = value;
+  },
   loading: false,
+  error: null as string | null,
   expanded: false,
   levelLeft: 0,
   levelRight: 0,
@@ -88,6 +94,7 @@ export function setExpanded(value: boolean) {
 
 let loadGeneration = 0;
 let tickUnlisten: (() => void) | null = null;
+let errorUnlisten: (() => void) | null = null;
 let playPending = false;
 let cueHoldMs: number | null = null;
 // After seeking a *playing* track, the native backend keeps emitting ticks at
@@ -140,6 +147,8 @@ function synthesizeBeats(bpm: number, durationMs: number): BeatMarker[] {
 export function resetPlayerTransport() {
   tickUnlisten?.();
   tickUnlisten = null;
+  errorUnlisten?.();
+  errorUnlisten = null;
 }
 
 function previewFromAnalysis(analysis: any): number[] | null {
@@ -157,19 +166,10 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   };
   if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
   if (analysis.key) next.key = analysis.key;
-  if (isValidColorWaveform(analysis.waveform_color)) {
-    next.colorData = analysis.waveform_color;
-  } else {
-    next.colorData = null;
-  }
-  next.colorDetail = isValidColorWaveform(analysis.waveform_color_detail)
-    ? analysis.waveform_color_detail
-    : next.colorData;
-  next.colorOverview = isValidColorWaveform(analysis.waveform_overview)
-    ? analysis.waveform_overview
-    : next.colorData;
-  const preview = previewFromAnalysis(analysis);
-  if (preview) next.previewBytes = preview;
+  next.bands = colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis));
+  next.bandsDetail = colorBandsFromPayload(analysis.waveform_color_detail) ?? next.bands;
+  next.bands = next.bandsDetail;
+  next.bandsOverview = overviewBandsFromPayload(analysis.waveform_overview) ?? next.bandsDetail;
   if (analysis.beats?.length) {
     next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
       time_ms: b.time_ms,
@@ -210,7 +210,20 @@ export async function initPlayerTransport() {
   await ensureTickListener();
 }
 
+function reportPlaybackFailure(message: string) {
+  console.error('playback error:', message);
+  player.error = message;
+  player.playing = false;
+  pausePending = false;
+  seekTargetMs = null;
+}
+
 async function ensureTickListener() {
+  if (!errorUnlisten) {
+    errorUnlisten = await subscribePlaybackError((event) => {
+      reportPlaybackFailure(event.message);
+    });
+  }
   if (tickUnlisten) return;
   tickUnlisten = await subscribePlaybackTick((tick) => {
     player.levelLeft = tick.level_left ?? 0;
@@ -290,10 +303,9 @@ function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
     durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
     cues: [],
     beats: [],
-    colorData: null,
-    colorDetail: null,
-    colorOverview: null,
-    previewBytes: null,
+    bands: null,
+    bandsDetail: null,
+    bandsOverview: null,
   };
 }
 
@@ -302,6 +314,7 @@ async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack
     const analysis = await getAnalysisData(trackId);
     if (gen !== loadGeneration || player.track?.id !== trackId) return;
     player.track = applyAnalysisToTrack(base, analysis);
+    performance.mark('ff:player-ready');
   } catch {
     if (gen !== loadGeneration) return;
   } finally {
@@ -330,6 +343,7 @@ export function initPlayerAnalysisRefresh() {
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
+  player.error = null;
   const stopped = playbackStop().catch((err) => console.error('playback stop failed:', err));
   player.playing = false;
   player.progress = 0;
@@ -345,6 +359,7 @@ export async function loadPlayerTrack(input: any) {
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
   player.loading = !cached;
+  if (cached) performance.mark('ff:player-ready');
 
   if (playPending && gen === loadGeneration) {
     playPending = false;
@@ -372,9 +387,14 @@ export async function playFromStart() {
   if (!player.track) return;
   seekTargetMs = null;
   player.progress = 0;
+  player.error = null;
   await ensureTickListener();
-  await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
-  player.playing = true;
+  try {
+    await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
+    player.playing = true;
+  } catch (err) {
+    reportPlaybackFailure(String(err));
+  }
 }
 
 export function clearPlayerTrack() {
@@ -386,6 +406,7 @@ export function clearPlayerTrack() {
   player.playing = false;
   player.progress = 0;
   player.loading = false;
+  player.error = null;
   player.levelLeft = 0;
   player.levelRight = 0;
   playPending = false;
@@ -415,13 +436,12 @@ export async function togglePlay() {
       // backend path + start offset, so this works even after a scrub on a
       // track that was never played (where resume would no-op on a null path).
       const ms = Math.round(player.progress * player.track.durationMs);
+      player.error = null;
       await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
       player.playing = true;
     }
   } catch (err) {
-    console.error('playback toggle failed:', err);
-    player.playing = false;
-    pausePending = false;
+    reportPlaybackFailure(String(err));
   }
 }
 
@@ -434,12 +454,12 @@ export async function cuePreviewStart() {
   await ensureTickListener();
   if (dur > 0) player.progress = ms / dur;
   try {
+    player.error = null;
     await playbackPlay(player.track.sourcePath, ms, dur || undefined);
     player.playing = true;
   } catch (err) {
-    console.error('cue preview failed:', err);
     cueHoldMs = null;
-    player.playing = false;
+    reportPlaybackFailure(String(err));
   }
 }
 
@@ -461,8 +481,13 @@ export async function play() {
   if (!player.track) return;
   await ensureTickListener();
   const ms = Math.round(player.progress * player.track.durationMs);
-  await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
-  player.playing = true;
+  player.error = null;
+  try {
+    await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
+    player.playing = true;
+  } catch (err) {
+    reportPlaybackFailure(String(err));
+  }
 }
 
 export async function pause() {
@@ -518,7 +543,11 @@ export async function seekToProgress(progress: number) {
   if (player.playing) {
     seekTargetMs = ms;
     seekTargetAt = performance.now();
-    await playbackSeek(ms);
+    try {
+      await playbackSeek(ms);
+    } catch (err) {
+      reportPlaybackFailure(String(err));
+    }
   } else {
     // Paused/stopped: persist the position so play/resume starts from here.
     await playbackSetPosition(ms);

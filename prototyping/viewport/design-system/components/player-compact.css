@@ -219,7 +219,7 @@
 /* 3. Waveform (canvas drawn in WaveformView, mode="compact") */
 .ff-player-compact__waveform {
   height: 46px;
-  background-color: #141414;
+  background-color: var(--ff-wave-bg);
   border-radius: var(--ff-radius-sm);
   position: relative;
   overflow: hidden;

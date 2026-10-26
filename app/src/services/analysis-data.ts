@@ -32,6 +32,68 @@ export function isValidColorWaveform(color: unknown): color is Array<{
   });
 }
 
+export interface ColorWaveSample {
+  amp: number;
+  r: number;
+  g: number;
+  b: number;
+}
+
+/** Colour waveform as sent by `get_analysis_data`: base64 band bytes (low, mid, high per column) plus the PWAV calibration. */
+export interface EncodedColorWaveform {
+  len: number;
+  calibration: number;
+  bands: string;
+  /** The bytes are the stick's PWV7 / PWV6 values: drawn as `byte / 127`, no calibration or balancing. */
+  pwv7?: boolean;
+}
+
+const MIN_COLOR_COLUMNS = 8;
+
+function isEncodedColorWaveform(color: unknown): color is EncodedColorWaveform {
+  if (!color || typeof color !== 'object') return false;
+  const { len, calibration, bands } = color as Record<string, unknown>;
+  return (
+    typeof len === 'number' &&
+    len >= MIN_COLOR_COLUMNS &&
+    typeof calibration === 'number' &&
+    Number.isFinite(calibration) &&
+    typeof bands === 'string'
+  );
+}
+
+function isUsableColorWaveform(color: unknown): boolean {
+  return isEncodedColorWaveform(color) || isValidColorWaveform(color);
+}
+
+const decodedColorWaveforms = new WeakMap<object, ColorWaveSample[]>();
+
+/** Rebuild `{amp, r, g, b}` columns from the wire format (arrays from browser mocks pass through). */
+export function decodeColorWaveform(color: unknown): ColorWaveSample[] | null {
+  if (isValidColorWaveform(color)) return color;
+  if (!isEncodedColorWaveform(color)) return null;
+  const memo = decodedColorWaveforms.get(color);
+  if (memo) return memo;
+  const binary = atob(color.bands);
+  const columns = Math.floor(binary.length / 3);
+  const out = new Array<ColorWaveSample>(columns);
+  for (let i = 0; i < columns; i++) {
+    const low = binary.charCodeAt(i * 3);
+    const mid = binary.charCodeAt(i * 3 + 1);
+    const high = binary.charCodeAt(i * 3 + 2);
+    const max = Math.max(low, mid, high);
+    const scale = max > 0 ? 1 / max : 0;
+    out[i] = {
+      amp: Math.min((max / 127) * color.calibration, 1),
+      r: low * scale,
+      g: mid * scale,
+      b: high * scale,
+    };
+  }
+  decodedColorWaveforms.set(color, out);
+  return out;
+}
+
 /** True when the payload is safe to cache and render (mono preview required). */
 export function isValidAnalysisPayload(data: unknown): boolean {
   if (!data || typeof data !== 'object') return false;
@@ -41,8 +103,8 @@ export function isValidAnalysisPayload(data: unknown): boolean {
 /** Drop corrupt color bands; keep mono preview for the player strip. */
 export function sanitizeAnalysisPayload(data: any): any | null {
   if (!isValidAnalysisPayload(data)) return null;
-  if (isValidColorWaveform(data.waveform_color)) return data;
-  return { ...data, waveform_color: [] };
+  if (isUsableColorWaveform(data.waveform_color)) return data;
+  return { ...data, waveform_color: null };
 }
 
 export function previewPeaksNormalized(preview: number[]): number[] {
@@ -53,4 +115,24 @@ export function previewBytesFromPayload(data: { waveform_preview: number[] }): n
   return Array.isArray(data.waveform_preview)
     ? data.waveform_preview
     : Array.from(data.waveform_preview);
+}
+
+/** `load_state` embeds each preview as base64; browser mocks pass plain byte arrays. */
+export function decodeTrackPreview(preview: string | number[] | null | undefined): number[] | null {
+  if (typeof preview !== 'string') return preview ?? null;
+  const binary = atob(preview);
+  const bytes = new Array<number>(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** `load_state` and `get_analysis_data` carry the 3-band row preview as base64 (or a byte array in mocks). */
+export function decodeBandPreview(preview: string | number[] | null | undefined): Uint8Array | null {
+  if (!preview || preview.length === 0) return null;
+  if (typeof preview !== 'string') return preview.length % 3 === 0 ? Uint8Array.from(preview) : null;
+  const binary = atob(preview);
+  if (binary.length === 0 || binary.length % 3 !== 0) return null;
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }

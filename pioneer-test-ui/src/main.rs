@@ -1,9 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod analysis_payload;
+mod band_analysis;
 mod dto;
 mod playback;
+mod track_infos;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,10 +15,12 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use pioneer_library::rekordbox;
 use pioneer_library::LocalLibrary;
 use pioneer_usb_writer::models;
 use pioneer_usb_writer::scanner;
 
+use track_infos::build_track_infos;
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
     playback_configure, playback_get_config, playback_pause, playback_play, playback_resume,
@@ -90,48 +96,6 @@ impl AnalysisCoordinator {
     }
 }
 
-/// Build TrackInfo list from the library's tracks + flags.
-fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
-    let rows = lib.get_all_tracks_with_flags().map_err(|e| e.to_string())?;
-    Ok(rows
-        .into_iter()
-        .map(|(track, has_artwork, has_analysis, has_cues)| {
-            // Embed the mono preview so the list paints mini waveforms without an
-            // N+1 fetch. Drop the all-zero placeholder `get_analysis` returns when
-            // the DB index exists but the ANLZ files are gone (otherwise the UI
-            // would cache a flat waveform as if it were real). When the DAT's PWAV
-            // section is degenerate but color data exists, synthesize the preview
-            // from the color overview so the list mini-waveform stays consistent
-            // with the player strip (which can render color) — see #waveform-bug.
-            let waveform_preview = if has_analysis {
-                lib.get_analysis(track.id as i64)
-                    .ok()
-                    .flatten()
-                    .and_then(|a| effective_preview(&a))
-            } else {
-                None
-            };
-            TrackInfo {
-                id: track.id,
-                source_path: track.source_path.to_string_lossy().to_string(),
-                title: track.title,
-                artist: track.artist,
-                album: track.album,
-                genre: track.genre,
-                tempo: track.tempo,
-                key: track.key,
-                duration_secs: track.duration_secs,
-                bitrate: track.bitrate,
-                file_size: track.file_size,
-                has_artwork,
-                has_cues,
-                has_analysis,
-                waveform_preview,
-            }
-        })
-        .collect())
-}
-
 // ---------------------------------------------------------------------------
 // Debug logging — emits events to the frontend debug panel
 // ---------------------------------------------------------------------------
@@ -187,6 +151,7 @@ fn scan_directory(
             has_cues: false,
             has_analysis: false,
             waveform_preview: None,
+            waveform_bands: None,
         });
     }
 
@@ -244,6 +209,7 @@ fn scan_files(
             has_cues: false,
             has_analysis: false,
             waveform_preview: None,
+            waveform_bands: None,
         });
     }
 
@@ -344,7 +310,7 @@ fn python_result_to_analysis(json: &serde_json::Value) -> models::AnalysisResult
         let overview = parse_3band(&["waveform_overview", "pioneer_3band_overview"]);
 
         if !detail.is_empty() {
-            Some(models::ColorWaveform { detail, overview })
+            Some(models::ColorWaveform { detail, overview, exact: None })
         } else {
             None
         }
@@ -462,10 +428,26 @@ async fn analyze_one_track(
     }
 
     let result_json = parse_analyzer_stdout(&output.stdout)?;
-    let analysis = python_result_to_analysis(&result_json);
+    let mut analysis = python_result_to_analysis(&result_json);
+
+    let t_bands = std::time::Instant::now();
+    let band_path = source_path.to_path_buf();
+    let bands = tokio::task::spawn_blocking(move || {
+        band_analysis::apply_measured_bands(&mut analysis, &band_path).map(|()| analysis)
+    })
+    .await
+    .map_err(|e| format!("band measurement panicked: {e}"))?;
+    let (analysis, band_note) = match bands {
+        Ok(analysis) => (analysis, format!("bands {:.2}s", t_bands.elapsed().as_secs_f64())),
+        Err(e) => {
+            let fallback = python_result_to_analysis(&result_json);
+            eprintln!("[bands] {}: {e}; keeping the analyzer's colour data", source_path.display());
+            (fallback, "bands from analyzer".to_string())
+        }
+    };
     Ok((
         analysis,
-        format!("{:.1}s {}bytes", elapsed.as_secs_f64(), stdout_len),
+        format!("{:.1}s {}bytes {band_note}", elapsed.as_secs_f64(), stdout_len),
     ))
 }
 
@@ -772,6 +754,40 @@ fn write_usb(
     Ok(report)
 }
 
+struct TauriSyncSink(AppHandle);
+
+impl pioneer_library::ProgressSink for TauriSyncSink {
+    fn progress(&self, progress: &pioneer_library::StickProgress) {
+        self.0.emit("usb-sync-progress", progress).ok();
+    }
+
+    fn finished(&self, report: &pioneer_library::StickReport) {
+        self.0.emit("usb-sync-stick-report", report).ok();
+    }
+}
+
+/// Sync several sticks concurrently. Emits `usb-sync-progress` per stick and
+/// `usb-sync-stick-report` when a stick finishes. One failing stick does not stop
+/// the others; the result carries one report per target, in order. The library
+/// lock is held only while the selection is read.
+#[tauri::command]
+async fn sync_usb_many(
+    targets: Vec<pioneer_library::SyncTarget>,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<Vec<pioneer_library::StickReport>, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let prepared = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.prepare_multi_sync(&targets).map_err(|e| format!("{e:#}"))?
+        };
+        Ok(prepared.run(&TauriSyncSink(app)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Sync frontend playlists into the library.
 fn sync_playlists_to_library(
     lib: &LocalLibrary,
@@ -953,6 +969,72 @@ fn wipe_usb(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+struct RekordboxImportRequest {
+    kind: rekordbox::SourceKind,
+    /// `master.db` (or the folder holding it), a USB root, or a `rekordbox.xml`.
+    path: String,
+    #[serde(flatten)]
+    options: rekordbox::ImportOptions,
+}
+
+fn load_rekordbox_source(request: &RekordboxImportRequest) -> Result<rekordbox::SourceLibrary, String> {
+    let path = Path::new(&request.path);
+    let loaded = match request.kind {
+        rekordbox::SourceKind::MasterDb => {
+            let db = if path.is_dir() { path.join("master.db") } else { path.to_path_buf() };
+            rekordbox::load_masterdb(&db, None)
+        }
+        rekordbox::SourceKind::Usb => rekordbox::load_usb(path),
+        rekordbox::SourceKind::Xml => rekordbox::load_xml(path),
+    };
+    loaded.map_err(|e| format!("{e:#}"))
+}
+
+/// Read a Rekordbox library and compare it with the local library without changing anything.
+#[tauri::command]
+async fn rekordbox_import_preview(
+    request: RekordboxImportRequest,
+    state: State<'_, SharedLibrary>,
+) -> Result<rekordbox::ImportPreview, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = load_rekordbox_source(&request)?;
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.rekordbox_preview(&source, &request.options)
+            .map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Import a Rekordbox library. Emits `rekordbox-import-progress` while it runs; the
+/// library lock is held only for the final write, not while ANLZ files are parsed.
+#[tauri::command]
+async fn rekordbox_import_run(
+    request: RekordboxImportRequest,
+    app: AppHandle,
+    state: State<'_, SharedLibrary>,
+) -> Result<rekordbox::RekordboxImportReport, String> {
+    let shared: SharedLibrary = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = |p: rekordbox::ImportProgress| {
+            app.emit("rekordbox-import-progress", p).ok();
+        };
+        progress(rekordbox::ImportProgress { stage: "reading", done: 0, total: 0 });
+        let source = load_rekordbox_source(&request)?;
+        let analyses = rekordbox::load_analyses(&source, &progress);
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let report = lib
+            .import_rekordbox(&source, &analyses, &request.options, &progress)
+            .map_err(|e| format!("{e:#}"))?;
+        debug_ok(&app, &format!("Rekordbox import: {report:?}"));
+        Ok(report)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Return the application version string.
 #[tauri::command]
 fn app_version() -> String {
@@ -1008,229 +1090,105 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
     output
 }
 
-/// Max RGB waveform samples sent over IPC for the compact strip / table. Full detail is ~150/sec.
-const PLAYER_COLOR_WAVEFORM_MAX: usize = 2048;
-
-/// Safety cap for expanded-player IPC (~55 min at 150 cols/sec). Peak-hold
-/// downsampling only applies beyond native length; typical tracks send full detail.
-const PLAYER_COLOR_DETAIL_MAX: usize = 500_000;
-
-/// Fixed-width overview bar for the expanded player (Pioneer PWV6 length).
-const PLAYER_COLOR_OVERVIEW_LEN: usize = 1200;
-
-fn downsample_3band(source: &[[u8; 3]], max_samples: usize) -> Vec<[u8; 3]> {
-    if source.len() <= max_samples {
-        return source.to_vec();
-    }
-    let n = source.len();
-    (0..max_samples)
-        .map(|i| {
-            let start = i * n / max_samples;
-            let end = ((i + 1) * n / max_samples).max(start + 1).min(n);
-            source[start..end].iter().copied().fold([0u8; 3], |[l, m, h], [l2, m2, h2]| {
-                [l.max(l2), m.max(m2), h.max(h2)]
-            })
-        })
-        .collect()
-}
-
-fn color_detail_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
-    let src = if !cw.detail.is_empty() {
-        &cw.detail
-    } else {
-        &cw.overview
-    };
-    downsample_3band(src, PLAYER_COLOR_DETAIL_MAX)
-}
-
-/// Build a 400-byte mono PWAV preview from a color waveform's per-sample band
-/// peaks. Used when a track's stored PWAV section is degenerate but its color
-/// data is intact, so the list mini-waveform matches what the player renders.
-/// Byte layout matches PWAV: bits 0-4 height (0-31), bits 5-7 whiteness (0-7).
-fn mono_preview_from_color(cw: &models::ColorWaveform) -> Option<[u8; 400]> {
-    let src = if !cw.overview.is_empty() {
-        &cw.overview
-    } else if !cw.detail.is_empty() {
-        &cw.detail
-    } else {
-        return None;
-    };
-
-    let amps: Vec<u8> = src.iter().map(|[l, m, h]| (*l).max(*m).max(*h)).collect();
-    let max = amps.iter().copied().max().unwrap_or(0);
-    if max == 0 {
-        return None;
-    }
-
-    let n = amps.len();
-    let mut out = [0u8; 400];
-    for (i, byte) in out.iter_mut().enumerate() {
-        let start = i * n / 400;
-        let end = ((i + 1) * n / 400).max(start + 1).min(n);
-        let bucket = amps[start..end].iter().copied().max().unwrap_or(0) as u32;
-        // Absolute scale: 127 = 0 dBFS reference (matches PWV7 band ceiling).
-        let height = ((bucket * 31) / 127).min(31) as u8;
-        let whiteness = ((bucket * 7) / 127).min(7) as u8;
-        *byte = (whiteness << 5) | (height & 0x1F);
-    }
-    Some(out)
-}
-
-/// The mono PWAV preview to show, shared by the list and the player so both
-/// surfaces stay in sync: the real DAT preview when it carries signal, else a
-/// preview synthesized from the color waveform, else `None` (no waveform data).
-fn effective_preview(a: &models::AnalysisResult) -> Option<Vec<u8>> {
-    if a.waveform.data.iter().any(|&b| b & 0x1f != 0) {
-        Some(a.waveform.data.to_vec())
-    } else {
-        a.color_waveform
-            .as_ref()
-            .and_then(mono_preview_from_color)
-            .map(|d| d.to_vec())
-    }
-}
-
-fn color_waveform_for_player(cw: &models::ColorWaveform) -> Vec<[u8; 3]> {
-    // Prefer full detail downsampled to the IPC cap. Overview (~1200 cols) is the
-    // Rekordbox-native width but looks soft on our ~150 col/sec analyzer output.
-    if !cw.detail.is_empty() {
-        return downsample_3band(&cw.detail, PLAYER_COLOR_WAVEFORM_MAX);
-    }
-    if !cw.overview.is_empty() {
-        return downsample_3band(&cw.overview, PLAYER_COLOR_WAVEFORM_MAX);
-    }
-    Vec::new()
-}
-
-/// Scale per-column band amps so the track peak matches PWAV (sample-peak based,
-/// absolute 0 dBFS = 1.0). Band values stay per-column for smooth detail; only
-/// the global calibration comes from the coarse preview.
-fn pwav_band_calibration(entries: &[[u8; 3]], preview: &[u8]) -> f64 {
-    if !preview.iter().any(|b| b & 0x1f != 0) {
-        return 1.0;
-    }
-    let pwav_peak = preview
-        .iter()
-        .map(|b| (b & 0x1f) as f64 / 31.0)
-        .fold(0.0_f64, f64::max);
-    let band_peak = entries
-        .iter()
-        .map(|[l, m, h]| (*l).max(*m).max(*h) as f64 / 127.0)
-        .fold(0.0_f64, f64::max);
-    if band_peak > 1e-6 {
-        pwav_peak / band_peak
-    } else {
-        1.0
-    }
-}
-
-fn waveform_color_json(entries: &[[u8; 3]], preview: Option<&[u8]>) -> Vec<serde_json::Value> {
-    let calibration = preview
-        .map(|p| pwav_band_calibration(entries, p))
-        .unwrap_or(1.0);
-
-    entries
-        .iter()
-        .map(|[low, mid, high]| {
-            let max_val = (*low).max(*mid).max(*high) as f64;
-            let scale = if max_val > 0.0 { 1.0 / max_val } else { 0.0 };
-            let amp = ((max_val / 127.0) * calibration).min(1.0);
-            serde_json::json!({
-                "amp": amp,
-                "r": *low as f64 * scale,
-                "g": *mid as f64 * scale,
-                "b": *high as f64 * scale,
-            })
-        })
-        .collect()
-}
-
 /// Get stored analysis data for a track from the local library DB.
 #[tauri::command]
-fn get_analysis_data(
+async fn get_analysis_data(
     track_id: i64,
     state: State<'_, SharedLibrary>,
 ) -> Result<serde_json::Value, String> {
-    let lib = state.lock().map_err(|e| e.to_string())?;
-    let analysis = lib.get_analysis(track_id).map_err(|e| e.to_string())?;
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        analysis_payload::build_analysis_json(&lib, track_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-    match analysis {
-        Some(a) => {
-            // Get track duration for beat grid display
-            let duration_ms = lib
-                .get_track(track_id)
-                .map_err(|e| e.to_string())?
-                .map(|t| (t.duration_secs * 1000.0).round() as u64)
-                .unwrap_or(0);
+const ARTWORK_THUMB_CACHE_LIMIT: usize = 400;
+const ARTWORK_THUMB_JPEG_QUALITY: u8 = 85;
 
-            let preview = effective_preview(&a);
-            let preview_slice = preview.as_deref();
+#[derive(Default)]
+struct ArtworkThumbCache {
+    entries: HashMap<(i64, u32, u64), Arc<Vec<u8>>>,
+    order: VecDeque<(i64, u32, u64)>,
+}
 
-            let waveform_color: Vec<serde_json::Value> = a
-                .color_waveform
-                .as_ref()
-                .map(|cw| waveform_color_json(&color_waveform_for_player(cw), preview_slice))
-                .unwrap_or_default();
+type SharedArtworkThumbs = Arc<Mutex<ArtworkThumbCache>>;
 
-            // Higher-resolution detail + fixed overview for the expanded player's
-            // dual-view renderer. Compact strip keeps using `waveform_color` above.
-            let waveform_color_detail: Vec<serde_json::Value> = a
-                .color_waveform
-                .as_ref()
-                .map(|cw| waveform_color_json(&color_detail_for_player(cw), preview_slice))
-                .unwrap_or_default();
-            let waveform_overview: Vec<serde_json::Value> = a
-                .color_waveform
-                .as_ref()
-                .map(|cw| {
-                    let src = if cw.overview.is_empty() { &cw.detail } else { &cw.overview };
-                    waveform_color_json(&downsample_3band(src, PLAYER_COLOR_OVERVIEW_LEN), preview_slice)
-                })
-                .unwrap_or_default();
+fn bytes_fingerprint(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
 
-            // Serialize beat grid for frontend waveform rendering
-            let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
-                serde_json::json!({
-                    "time_ms": b.time_ms,
-                    "bar_position": b.bar_position,
-                })
-            }).collect();
-
-            // Serialize cue points
-            let cue_points: Vec<serde_json::Value> = a.cue_points.iter().map(|c| {
-                serde_json::json!({
-                    "hot_cue_number": c.hot_cue_number,
-                    "time_ms": c.time_ms,
-                    "loop_time_ms": c.loop_time_ms,
-                })
-            }).collect();
-
-            Ok(serde_json::json!({
-                "waveform_preview": preview.unwrap_or_default(),
-                "waveform_color": waveform_color,
-                "waveform_color_detail": waveform_color_detail,
-                "waveform_overview": waveform_overview,
-                "waveform_peaks": serde_json::Value::Array(vec![]),
-                "bpm": a.bpm,
-                "key": a.key,
-                "energy": a.energy,
-                "beats": beats,
-                "cue_points": cue_points,
-                "duration_ms": duration_ms,
-            }))
-        }
-        None => Err("No analysis data for this track".to_string()),
+fn artwork_thumbnail(bytes: &[u8], max_px: u32) -> Vec<u8> {
+    let Ok(decoded) = image::load_from_memory(bytes) else {
+        return bytes.to_vec();
+    };
+    if decoded.width() <= max_px && decoded.height() <= max_px {
+        return bytes.to_vec();
+    }
+    let thumb = decoded.thumbnail(max_px, max_px).to_rgb8();
+    let mut out = Vec::new();
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, ARTWORK_THUMB_JPEG_QUALITY);
+    match thumb.write_with_encoder(encoder) {
+        Ok(()) => out,
+        Err(_) => bytes.to_vec(),
     }
 }
 
-/// Get raw artwork bytes for a track from the local library DB.
-#[tauri::command]
-fn get_track_artwork(
+fn cached_artwork_thumbnail(
+    cache: &SharedArtworkThumbs,
     track_id: i64,
+    bytes: &[u8],
+    max_px: u32,
+) -> Arc<Vec<u8>> {
+    let key = (track_id, max_px, bytes_fingerprint(bytes));
+    if let Some(hit) = cache.lock().ok().and_then(|c| c.entries.get(&key).cloned()) {
+        return hit;
+    }
+    let thumb = Arc::new(artwork_thumbnail(bytes, max_px));
+    if let Ok(mut c) = cache.lock() {
+        if c.entries.insert(key, thumb.clone()).is_none() {
+            c.order.push_back(key);
+            if c.order.len() > ARTWORK_THUMB_CACHE_LIMIT {
+                if let Some(oldest) = c.order.pop_front() {
+                    c.entries.remove(&oldest);
+                }
+            }
+        }
+    }
+    thumb
+}
+
+/// Get artwork bytes for a track from the local library DB. With `max_px` the image is
+/// downscaled to fit that box (JPEG, cached in memory); without it the stored bytes are
+/// returned unchanged. Sent as a binary IPC response (an `ArrayBuffer`).
+#[tauri::command]
+async fn get_track_artwork(
+    track_id: i64,
+    max_px: Option<u32>,
     state: State<'_, SharedLibrary>,
-) -> Result<Option<Vec<u8>>, String> {
-    let lib = state.lock().map_err(|e| e.to_string())?;
-    lib.get_artwork(track_id).map_err(|e| e.to_string())
+    thumbs: State<'_, SharedArtworkThumbs>,
+) -> Result<tauri::ipc::Response, String> {
+    let shared = state.inner().clone();
+    let thumbs = thumbs.inner().clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let stored = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.get_artwork(track_id).map_err(|e| e.to_string())?
+        };
+        Ok::<_, String>(match (stored, max_px) {
+            (Some(bytes), Some(px)) if px > 0 => {
+                cached_artwork_thumbnail(&thumbs, track_id, &bytes, px).as_ref().clone()
+            }
+            (stored, _) => stored.unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 // ---------------------------------------------------------------------------
@@ -1320,29 +1278,31 @@ fn save_state(
 
 /// Load the library state. Returns all tracks and playlists.
 #[tauri::command]
-fn load_state(
-    _app: AppHandle,
-    state: State<'_, SharedLibrary>,
-) -> Result<LoadedState, String> {
-    let lib = state.lock().map_err(|e| e.to_string())?;
+async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
 
-    let track_infos = build_track_infos(&lib)?;
+        let track_infos = build_track_infos(&lib)?;
 
-    let playlists = lib
-        .get_all_playlists()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|pl| PlaylistInput {
-            id: pl.id,
-            name: pl.name,
-            track_ids: pl.track_ids,
+        let playlists = lib
+            .get_all_playlists()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|pl| PlaylistInput {
+                id: pl.id,
+                name: pl.name,
+                track_ids: pl.track_ids,
+            })
+            .collect();
+
+        Ok(LoadedState {
+            tracks: track_infos,
+            playlists,
         })
-        .collect();
-
-    Ok(LoadedState {
-        tracks: track_infos,
-        playlists,
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // ---------------------------------------------------------------------------
@@ -1485,6 +1445,7 @@ fn main() {
             enqueue_analysis,
             prioritize_analysis,
             write_usb,
+            sync_usb_many,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
@@ -1493,6 +1454,8 @@ fn main() {
             save_state,
             load_state,
             app_version,
+            rekordbox_import_preview,
+            rekordbox_import_run,
             read_usb_state,
             get_library_path,
             change_library_path,
@@ -1520,6 +1483,7 @@ fn main() {
                 .expect("Failed to open library database");
             app.manage(Arc::new(Mutex::new(library)));
             app.manage(AnalysisCoordinator::default());
+            app.manage(SharedArtworkThumbs::default());
 
             match PlaybackEngine::new() {
                 Ok(playback) => {
@@ -1547,7 +1511,29 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_analyzer_stdout, python_result_to_analysis};
+    use super::{artwork_thumbnail, parse_analyzer_stdout, python_result_to_analysis};
+
+    fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let img = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, 90]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).expect("encode");
+        out.into_inner()
+    }
+
+    #[test]
+    fn artwork_thumbnail_fits_the_box_and_stays_a_decodable_jpeg() {
+        let thumb = artwork_thumbnail(&png_bytes(1200, 800), 512);
+        let decoded = image::load_from_memory(&thumb).expect("decode");
+        assert_eq!(image::guess_format(&thumb).expect("format"), image::ImageFormat::Jpeg);
+        assert_eq!((decoded.width(), decoded.height()), (512, 341));
+    }
+
+    #[test]
+    fn artwork_thumbnail_keeps_small_images_and_garbage_untouched() {
+        let small = png_bytes(100, 80);
+        assert_eq!(artwork_thumbnail(&small, 512), small);
+        assert_eq!(artwork_thumbnail(b"not an image", 512), b"not an image".to_vec());
+    }
 
     #[test]
     fn parse_backend_keyed_analyzer_json() {

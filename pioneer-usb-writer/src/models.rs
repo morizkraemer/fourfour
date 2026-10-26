@@ -88,6 +88,23 @@ pub struct ColorWaveform {
     /// Overview 3-band data. Always 1200 entries.
     /// Each entry: [low_freq, mid_freq, high_freq] amplitudes (0–255).
     pub overview: Vec<[u8; 3]>,
+    /// Columns that `PWV3`, `PWV5` and `PWVC` cannot recover from the bands alone.
+    /// `None` when only bands are known (the writer then derives these sections).
+    #[serde(default)]
+    pub exact: Option<ExactColumns>,
+}
+
+/// Per-column values of the audio pass that the band bytes do not carry: the `PWV3`
+/// bytes (peak height, whiteness), the `PWV5` words (height, band levels) and the
+/// `PWVC` gains. Same column grid as `ColorWaveform::detail`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExactColumns {
+    /// Bits 7-5 whiteness, bits 4-0 height.
+    pub pwv3: Vec<u8>,
+    /// `rrrgggbbbhhhhh00`.
+    pub pwv5: Vec<u16>,
+    /// Low, mid, high gain behind the `PWV7` bytes.
+    pub gains: [u16; 3],
 }
 
 mod waveform_data {

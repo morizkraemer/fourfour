@@ -3066,10 +3066,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "image",
+ "libc",
  "pioneer-usb-writer",
  "rusqlite",
  "serde",
  "serde_json",
+ "symphonia",
  "tempfile",
 ]
 
@@ -3079,6 +3082,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cpal",
+ "image",
  "pioneer-library",
  "pioneer-usb-writer",
  "ringbuf",

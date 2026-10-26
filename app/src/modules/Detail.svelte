@@ -51,7 +51,7 @@
       cues={track.cues ?? []}
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
-      peaks={track.peaks}
+      bands={track.bands}
     />
   {:else if mode === 'multi'}
     <DetailPane

@@ -195,7 +195,7 @@ fn run(audio_files: &[PathBuf], usb_path: &Path) -> Result<()> {
                 waveform: pioneer_usb_writer::models::WaveformPreview { data: waveform_data },
                 energy: None,
                 cue_points: Vec::new(),
-                color_waveform: Some(ColorWaveform { detail, overview }),
+                color_waveform: Some(ColorWaveform { detail, overview, exact: None }),
             };
 
             let mut track = base_track.clone();

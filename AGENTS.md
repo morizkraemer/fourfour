@@ -138,7 +138,7 @@ Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/P
 - **Columns table (0x10)** uses a different page header — `unknown5` = num_rows, not `0x0001`.
 - **DeviceSQL strings**: length-prefixed, byte markers (`0x40` long, `0x90` UTF-16LE). See `encode_string()` in `pdb.rs`.
 - **PPTH tag (ANLZ)**: null-terminated UTF-16BE; `len_path` includes the null terminator bytes.
-- **Color waveforms (PWV3/4/5)**: faked hardcoded green — no spectral analysis yet.
+- **Color waveforms (PWV3/4/5/6/7)**: real 3-band data (low, mid, high; 150 columns/s) measured from the audio by `pioneer-usb-writer/src/waveform/` after analysis; `.2EX` carries PWV7/PWV6/PWVC, `.EXT` PWV3/PWV4/PWV5. The app draws the same bytes. Not yet tried on a player (see `docs/architecture/waveforms-3band-2026-10.md`).
 - **Album-artist mapping**: PDB and OneLibrary use the first artist seen per album. VA/compilations collapse to one artist.
 
 ## Working in this repo

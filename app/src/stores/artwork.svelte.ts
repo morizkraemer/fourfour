@@ -31,8 +31,8 @@ export const artwork = {
       try {
         const bytes = await getTrackArtwork(trackId);
         if (gen !== cacheGeneration) return null;
-        if (bytes && bytes.length > 0) {
-          const blob = new Blob([new Uint8Array(bytes)], { type: 'image/jpeg' });
+        if (bytes) {
+          const blob = new Blob([bytes], { type: 'image/jpeg' });
           const url = URL.createObjectURL(blob);
           cache[trackId] = url;
           return url;
