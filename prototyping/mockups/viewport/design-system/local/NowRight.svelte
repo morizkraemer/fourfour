@@ -9,7 +9,7 @@
   const rail = [TRACKS[2], TRACKS[6], TRACKS[10], TRACKS[3]];
 </script>
 
-{#if mode === 'inspector'}
+{#if mode === 'inspector' || mode === 'inspector-only'}
   <div class="nr nr--insp">
     <DetailPane
       mode="single"
@@ -22,10 +22,12 @@
       filePath="/Users/merlin/Music/Kiln/Afterimage EP/01 Afterimage (Extended Mix).flac"
     />
   </div>
-  <div class="nr nr--rail">
-    <Icon name="chevron-left" size={16} />
-    {#each rail as r}<span class="nr__tile" style="background-image:url({r.rowCover})"></span>{/each}
-  </div>
+  {#if mode === 'inspector'}
+    <div class="nr nr--rail">
+      <Icon name="chevron-left" size={16} />
+      {#each rail as r}<span class="nr__tile" style="background-image:url({r.rowCover})"></span>{/each}
+    </div>
+  {/if}
 {:else}
   <div class="nr nr--drawer" style="width:{drawerWidth}px">
     <div class="nr__dh">

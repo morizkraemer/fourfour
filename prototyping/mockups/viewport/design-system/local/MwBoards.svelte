@@ -13,7 +13,7 @@
   import Scrub from './Scrub.svelte';
   import { SELECTED, CUES, TRACKS } from './data.js';
 
-  let { variant = 'now' } = $props();
+  let { variant = 'now', boardOpen = true, bottom = 'above-player' } = $props();
   const t = SELECTED;
   const META = {
     now: {
@@ -79,9 +79,34 @@
         'Dense: the editor is a fixed-height form, cues editing is limited to chips (waveform editing stays in the expanded player)',
       ],
     },
+    d: {
+      tag: 'D',
+      title: 'Board is a full-height column outside the main view',
+      model: 'Main view keeps search, list and inspector as today. The board becomes a column at the window edge, from the top bar level down. One toggle in the top bar next to the search (⇧⇥).',
+      good: [
+        'The inspector is never squeezed or covered: it stays beside the list, the board sits outside',
+        'F16 solved by removal: one toggle in the top bar shows its state; the board header has no panel icon and no x, only "Change"',
+        'The cover rail is gone: a closed board costs 0px, not 46px',
+      ],
+      cost: [
+        'Open board takes 360px from the main view; at 1100px it overlays instead of squeezing',
+        'Clearing the target moves from an x to a labelled "Change" button',
+      ],
+    },
   };
   const m = $derived(META[variant]);
 </script>
+
+{#snippet boardCol()}
+  <div class="dock dock--d">
+    <div class="dock__head dock__head--band">
+      <span class="target__n">Peak Time</span>
+      <span class="target__c">148 tracks · 14h 12m</span>
+      <button class="chg">Change</button>
+    </div>
+    <div class="dock__body"><BoardList dropAfter={4} /></div>
+  </div>
+{/snippet}
 
 <Frame tag={m.tag} title={m.title} model={m.model} good={m.good} cost={m.cost}>
   {#if variant === 'now'}
@@ -91,6 +116,22 @@
   {:else if variant === 'now-open'}
     <Win cols="narrow">
       {#snippet right()}<NowRight mode="drawer-filled" drawerWidth={440} />{/snippet}
+    </Win>
+  {:else if variant === 'd'}
+    <Win cols={boardOpen ? 'narrow' : 'mid'}>
+      {#snippet top()}
+        <div class="tb tb--d">
+          <div class="tb__search"><FilterInput placeholder="Search tracks, artists, labels…" /><Kbd key="⌘F" /></div>
+          <button class="tb__dock" class:tb__dock--on={boardOpen} aria-label="Toggle board" aria-pressed={boardOpen}><Ico name="panel" size={15} /></button>
+        </div>
+      {/snippet}
+      {#snippet right()}<NowRight mode="inspector-only" />{/snippet}
+      {#snippet edge()}
+        {#if boardOpen && bottom === 'above-player'}{@render boardCol()}{/if}
+      {/snippet}
+      {#snippet edgeFull()}
+        {#if boardOpen && bottom === 'full'}{@render boardCol()}{/if}
+      {/snippet}
     </Win>
   {:else if variant === 'a'}
     <Win cols="mid">
@@ -202,6 +243,11 @@
 </Frame>
 
 <style>
+  .tb--d { justify-content: center; }
+  .tb--d .tb__dock { position: absolute; right: 14px; }
+  .dock--d { width: 360px; border-left: 1px solid var(--ff-border-hi); }
+  .dock__head--band { height: var(--ff-titlebar-band-height); }
+  .chg { border: 1px solid var(--ff-border-hi); background: none; color: var(--ff-text-mid); font-family: var(--ff-font); font-size: 11.5px; height: 24px; padding: 0 10px; border-radius: var(--ff-radius-md); }
   .tb { flex: none; height: var(--ff-titlebar-band-height); display: flex; align-items: center; gap: 12px; padding: 0 14px 0 16px; border-bottom: 1px solid var(--ff-border); background: var(--ff-bg); }
   .tb__ctx { display: flex; align-items: baseline; gap: 8px; width: 170px; flex: none; }
   .tb__ctx b { font-size: 14px; font-weight: 500; }

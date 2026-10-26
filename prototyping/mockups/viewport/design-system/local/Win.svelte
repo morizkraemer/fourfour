@@ -20,7 +20,7 @@
   const NARROW = MID.filter((c) => c.key !== 'wave').map((c) => (c.key === 'artist' ? { ...c, width: 130 } : c));
 
   let {
-    top, right, below, overlay, rowExtra, sidebarBottom,
+    top, right, edge, edgeFull, below, overlay, rowExtra, sidebarBottom,
     cols = 'wide', selectedId = 1, expandedId = null, activeRow = 'All Tracks',
     rows = TRACKS, count = '30,412 tracks', status = 'Ready', statusExtra,
     sidebarWidth = 240, player = true, tableOverlay, tableHeader = true,
@@ -31,6 +31,7 @@
 </script>
 
 <div class="win">
+  <div class="win__col">
   <div class="win__main">
     <div class="win__sidebar" style="width:{sidebarWidth}px">
       <div class="win__chrome ff-titlebar-band ff-sidebar__chrome">
@@ -97,6 +98,7 @@
         {#if right}{@render right()}{/if}
       </div>
     </div>
+    {#if edge}{@render edge()}{/if}
   </div>
   {#if player}
     <div class="win__player">
@@ -123,13 +125,16 @@
       {/snippet}
     </StatusBar>
   </div>
+  </div>
+  {#if edgeFull}{@render edgeFull()}{/if}
   {#if overlay}
     <div class="win__overlay">{@render overlay()}</div>
   {/if}
 </div>
 
 <style>
-  .win { position: relative; display: flex; flex-direction: column; width: 1440px; height: 900px; overflow: hidden; background: var(--ff-bg); color: var(--ff-text); font-family: var(--ff-font); border: 1px solid var(--ff-border-hi); border-radius: 10px; }
+  .win { position: relative; display: flex; flex-direction: row; width: 1440px; height: 900px; overflow: hidden; background: var(--ff-bg); color: var(--ff-text); font-family: var(--ff-font); border: 1px solid var(--ff-border-hi); border-radius: 10px; }
+  .win__col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
   .win__main { flex: 1 1 0; min-height: 0; display: flex; }
   .win__sidebar { flex: none; display: flex; flex-direction: column; background: var(--ff-bg); border-right: 1px solid var(--ff-border); }
   .win__chrome { padding-left: var(--ff-traffic-light-x); display: flex; align-items: center; gap: 8px; }
