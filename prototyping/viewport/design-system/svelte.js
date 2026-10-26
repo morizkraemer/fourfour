@@ -15,6 +15,7 @@ import './components/dialog-native.css';
 // Helpers
 export { host } from './utils/mount.js';
 export { keyColor } from './utils/key-color.js';
+export { bpmScrub, keyScrub } from './utils/scrub.js';
 export { ICON_NAMES } from './components/icon-glyphs.js';
 
 // Primitives (Svelte) — tier 0 (leaves: tokens/dom only)
@@ -29,6 +30,7 @@ export { default as ColorSwatch } from './components/ColorSwatch.svelte';
 export { default as Spinner } from './components/Spinner.svelte';
 export { default as ProgressBar } from './components/ProgressBar.svelte';
 export { default as Nudge } from './components/Nudge.svelte';
+export { default as ScrubValue } from './components/ScrubValue.svelte';
 export { default as SidebarSection } from './components/SidebarSection.svelte';
 export { default as ResizeHandle } from './components/ResizeHandle.svelte';
 export { default as Waveform } from './components/Waveform.svelte';
