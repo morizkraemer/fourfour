@@ -10,6 +10,7 @@
     selectedTrack,
   } from '../stores/selection.svelte.ts';
   import { ensureTrackPeaksLoaded, revealFile } from '../stores/library.svelte.ts';
+  import { player, seekToProgress } from '../stores/player.svelte.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
 
   let mode = $derived(
@@ -18,6 +19,7 @@
   );
 
   let track = $derived(selectedTrack());
+  let trackIsLoaded = $derived(!!track && player.track?.id === track.id);
 
   let pathMenu = $state({ open: false, x: 0, y: 0 });
 
@@ -59,6 +61,7 @@
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
       bands={track.bands}
+      onWaveformSeek={trackIsLoaded ? seekToProgress : undefined}
       onRevealPath={() => track.filePath && revealFile(track.filePath)}
       onPathContextMenu={openPathMenu}
     />

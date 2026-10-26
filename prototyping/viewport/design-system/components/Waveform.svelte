@@ -3,6 +3,7 @@
   import { ink, paletteVersion, wavePalette } from '../waveform-render.js';
   import { drawBandRange } from '../waveform-render.js';
   import { drawLoudness } from '../waveform-simple.js';
+  import { stripFraction } from '../utils/strip-seek.js';
 
   const VARIANTS = {
     mini: { step: 2, gap: 1 },
@@ -87,9 +88,16 @@
     cueStyle = null,
     /** Subtle sine wave on placeholder bars while analysis is in progress. */
     animating = false,
+    /** Given: a click seeks, with the track fraction under the pointer. */
+    onSeek = undefined,
   } = $props();
 
   let canvas;
+
+  function seekAt(event) {
+    const rect = canvas.getBoundingClientRect();
+    onSeek(stripFraction(event.clientX, rect.left, rect.width));
+  }
 
   function source() {
     if (bands && bands.low && bands.low.length) return bands;
@@ -225,4 +233,8 @@
   });
 </script>
 
-<canvas bind:this={canvas} class="ff-waveform ff-waveform--{variant}"></canvas>
+<canvas
+  bind:this={canvas}
+  class="ff-waveform ff-waveform--{variant}"
+  style:cursor={onSeek ? 'pointer' : null}
+  onclick={onSeek ? seekAt : undefined}></canvas>
