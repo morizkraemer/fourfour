@@ -115,3 +115,4 @@
 2026-10-26 15:07 orchestrator - q41-feedback (+F2 staged analysis, schema v5, viewport mockups workflow) validated + installed on Mac
 2026-10-26 15:14 orchestrator - design round 1 mockups merged into q41-feedback; served https://dev.tail87069a.ts.net:5230 (opened on Mac); decisions waiting on Merlin
 2026-10-26 15:32 orchestrator - run-start overnight (Merlin): W-C running; W-L his layout idea next; then hot cues, drag BPM/key+rename, auto-resume
+2026-10-26 18:31 orchestrator - resumed: usage limit reset (PM); W-C + W-L resumed
