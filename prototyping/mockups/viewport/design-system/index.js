@@ -9,3 +9,4 @@ export { default as MwBoards } from './local/MwBoards.svelte';
 export { default as InspBoards } from './local/InspBoards.svelte';
 export { default as SetBoards } from './local/SetBoards.svelte';
 export { default as OrgBoards } from './local/OrgBoards.svelte';
+export { default as W2InspBoards } from './local/W2InspBoards.svelte';
