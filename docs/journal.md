@@ -117,3 +117,4 @@
 2026-10-26 15:32 orchestrator - run-start overnight (Merlin): W-C running; W-L his layout idea next; then hot cues, drag BPM/key+rename, auto-resume
 2026-10-26 18:31 orchestrator - resumed: usage limit reset (PM); W-C + W-L resumed
 2026-10-26 18:37 orchestrator - W-C merged into q41-feedback (wc-player 96da10a: F3/F4/F5/F14/F20/F24; 56 fps pacing); W-D hot cues spawned (incl. user-edit lock for cues + grid)
+2026-10-26 18:41 orchestrator - W-L merged (wl-layout 551776c: right sidebar full-height outside main view, ends above player; top-bar toggle; inspector hides 1100–1279 when sidebar open); W-R auto-resume spawned
