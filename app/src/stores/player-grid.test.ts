@@ -28,7 +28,7 @@ const invokeMock = vi.mocked(invoke);
 let storedBeats: Array<{ time_ms: number; bar_position: number }>;
 
 function backend() {
-  invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+  invokeMock.mockImplementation(async (command: string, args?: unknown): Promise<any> => {
     if (command === 'get_analysis_data') {
       return {
         waveform_preview: Array.from({ length: 400 }, (_, i) => 1 + (i % 30)),
@@ -39,7 +39,7 @@ function backend() {
       };
     }
     if (command === 'set_beat_grid') {
-      storedBeats = args!.beats as typeof storedBeats;
+      storedBeats = (args as { beats: typeof storedBeats }).beats;
     }
     return undefined;
   });
