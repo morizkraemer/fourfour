@@ -354,3 +354,60 @@ The virtual/pooled row maths from `TrackTable.svelte` now lives in `app/src/lib/
 
 - `walkthrough.mjs` at 2,000 tracks: 14 steps ok, console errors none.
 - `shots.mjs` + `pixdiff.mjs` threshold 8/255, before = `q31-tests` head built in a scratch worktree, after = this branch, 14 states: dpr 2 max 0 on all. dpr 1: max 11/255, only in the four compact-player shots (master meter, bbox x 1279..1424, y 884..893, and a 2/255 wobble at x 106..134). Two builds of the unchanged `q31-tests` code differ the same way (11/255 meter, 2/255), so this is the animated meter, not the change. All track-list shots are 0.
+
+
+# F1/F6 (2026-10-26): scroll reloads the list, laggy drag
+
+Branch `wa-list-scroll` (from `q41-feedback`). Merlin's report on the Mac with a real library: "scrolling isn't smooth, it reloads the list on scroll every time" (F1) and "dragging is laggy" (F6). Headless Chromium on the shared `dev` box (load average ~24), `?mock=30000`, software compositing; real WebKit is not available here.
+
+## Root causes
+
+**F1.** The row `cover` getter called `artwork.get`, which fired one `get_track_artwork` IPC per track the moment its row entered the pool (visible rows plus 12 overscan rows each side), asking for the 512 px detail-pane thumbnail for an 18 px cell. Nothing was cancelled or limited, so a fast scroll queued hundreds of calls for rows that were already gone. Each call takes the library mutex, reads the stored image, hashes and decodes it on the backend, then ships a ~50 KB JPEG over IPC, which the page turns into a Blob and an object URL (kept for the session) and the webview decodes at 512 px to draw 18 px. That is a burst of main-thread and backend work on every scroll step, and covers pop in late ("the list reloads"). Not the cause, checked: no row remounts (0 elements added or removed during the scroll), no `getBoundingClientRect` / `getComputedStyle`, no store write per scroll (text mutations match the ~3 recycled rows per frame), no `loadState`, the row pool keys are stable, the row preview bands come embedded with `load_state` (no IPC), `bumpLibraryTracks` only runs on analysis events.
+
+**F6.** Every `pointermove` of a drag ran, synchronously: write `pointerX/Y` (ghost `left/top` style, so layout), `elementFromPoint`, then `getBoundingClientRect` on every row in the pool (38 at this window height) to find the drop index. About 39 forced geometry reads per event; WebKit delivers `pointermove` uncoalesced, so on a Mac this runs at the pointer rate.
+
+## Fix
+
+1. `artwork.getRow()` (new): row covers ask for a 64 px thumbnail (`ARTWORK_ROW_PX`, the backend already took `maxPx`), through a newest-first queue: 4 in flight, 64 waiting, older waiters are dropped (and re-requested when their row is shown again). The detail pane and players still use `artwork.get` at 512 px. `TrackRow` reads `track.rowCover ?? track.cover` (the library track got a `rowCover` getter). Row covers are about 1 to 3 KB instead of ~50 KB each, and the object URL cache for 30k tracks stays small.
+2. `updateTrackDropTarget` computes the drop index from the body rect and a `data-row-count` attribute (`floor((y - top - 14) / 28) + 1`, clamped to 0..count): one `getBoundingClientRect`, no row scan. Same rule as before (before the first row whose midpoint is below the pointer, else after the last).
+3. `TrackTable` stores the latest pointer position per `pointermove` and applies `updatePointer` + `updateTrackDropTarget` once per animation frame; pointerup flushes a pending update first so the drop uses the last position. The ghost is positioned with `transform: translate()` and `will-change: transform` (same pixels, no layout). The scroll pin during an embedded drag only writes `scrollTop` when it moved.
+
+## Results (median of 5 runs, `app/perf/list-scroll-drag.mjs`, 3 s scroll of +90 px per frame, 3 s drag with the mouse; mock backend answers `get_track_artwork` after 12 ms)
+
+| | before | after |
+|---|---|---|
+| scroll: `get_track_artwork` IPC calls in 3 s | 272 | 12 |
+| scroll: blob URLs created | 198 | 10 |
+| scroll: main-thread CPU per rAF frame | 26.2 ms | 18.5 ms |
+| scroll: elements added or removed (mounts) | 0 | 0 |
+| scroll: text / attribute mutations per frame | 29 / 17 | 30 / 16 |
+| scroll: canvas draws per frame | 61 | 60 |
+| drag: `getBoundingClientRect` calls, 3 s | 4522 (38 per move) | 99 (1 per move) |
+| drag: `elementFromPoint` calls | 119 | 99 (one per frame at most) |
+| drag: main-thread CPU per rAF frame | 6.0 ms | 3.3 ms |
+| drag: layout per frame | 0.12 ms | 0 ms |
+
+Frame counts differ between runs (93 vs 105 scroll frames, 186 vs 190 drag) because the box is loaded; read the call counts and CPU per frame. Store writes are not counted directly (no hook): the DOM mutation counts above show no extra re-render, and the artwork cache writes equal the blob URL count. Covers after a 150-frame scroll: all 26 visible rows have one 1.5 s after the scroll stops in both builds (8 of 26 after 0.5 s now against 15 of 26 before, with the mock's 12 ms latency; a real backend decode is slower, which is the point of not queueing hundreds).
+
+Walkthrough (headless, 2,000 tracks): no errors, including drag onto a playlist and the drop line index. `npm test` (173), `npm run check` (0 errors), `npm run build` green; no Rust change.
+
+## Pixel identity
+
+`shots.mjs` dpr 1, 14 shots: all track list shots 0 differing pixels; the rest 0 except the master level meter (up to 11/255, known). New `drag-shots.mjs` (2,000 rows with artwork, covers and mid-drag with ghost): the ghost and everything else identical; 2 pixels differ by up to 18/255 in one cover (the 18 px cell now shows a 64 px source instead of a 256 px one, so the downscale resamples slightly differently).
+
+## Not measurable here, confirm on the Mac
+
+- Whether scrolling in WKWebView feels smooth with a real artwork library (decode cost of the old 512 px covers, IPC latency). Expected: far fewer and smaller IPC calls, no 512 px decodes per row.
+- Drag lag in WKWebView with the ghost on a compositor layer. Check dragging one track and a large selection over the list and over sidebar playlists.
+- A cover pops in about 1 frame later than before only when its row enters the window faster than the backend answers; at normal scroll speed it is ready before the row is visible (12 rows of overscan).
+
+Not done: backend still decodes the full stored image per track on first request (cached per size, 400 entries) and hashes it every call; a stored 64 px thumbnail per track would remove that, but touches the library schema.
+
+## Reproduce
+
+```bash
+cd app && npm ci && npm run build && npx vite preview --host 127.0.0.1 --port 4412 &
+export PW_DIR=/path/to/playwright-dir
+node perf/list-scroll-drag.mjs http://127.0.0.1:4412/ 30000 12 5   # tracks, mock artwork latency ms, runs
+node perf/drag-shots.mjs http://127.0.0.1:4412/ /tmp/after 1 && node perf/pixdiff.mjs /tmp/before /tmp/after 8
+```
