@@ -7,7 +7,8 @@
   `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { WaveformView, Nudge, CueEditor } from '$ds';
+  import { WaveformView, Nudge, CueEditor, bpmScrub, keyScrub, keyColor } from '$ds';
+  import { commitTrackBpm, commitTrackKey } from '../stores/track-edits.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
     addMemoryCueAtPlayhead,
@@ -71,8 +72,8 @@
 
     <div class="ff-xp__head-right">
       <div class="ff-xp__bpm-key-group">
-        <Nudge value={player.track?.key || '—'} label="KEY" variant="compact" />
-        <Nudge value={player.track?.bpm || '—'} label="BPM" variant="compact" />
+        <Nudge value={player.track?.key ?? ''} label="KEY" variant="compact" model={keyScrub} color={keyColor(player.track?.key)} onCommit={(next) => commitTrackKey(player.track.id, next)} />
+        <Nudge value={Number(player.track?.bpm)} label="BPM" variant="compact" model={bpmScrub} onCommit={(next) => commitTrackBpm(player.track.id, next)} />
       </div>
       <div class="ff-xp__times">
         <span class="ff-xp__time-cur">{currentTime()}<span class="ff-xp__time-ms">{currentTimeMs()}</span></span>
