@@ -194,6 +194,10 @@ for (const dpr of [1, 2]) {
         };
         const kick = { low: Float32Array.from([0.1, 0.9]), mid: Float32Array.from([0.1, 0.5]), high: Float32Array.from([0.05, 0.3]) };
         const zoomed = heightsOf(paintInto(kick, { heightPx: 120, scrolling: true }));
+        const slope = { low: Float32Array.from([0.2, 0.3, 0.4, 0.5]), mid: new Float32Array(4), high: new Float32Array(4) };
+        const sloped = heightsOf(paintInto(slope, { heightPx: 120, scrolling: true }));
+        const attack = { low: Float32Array.from([0.1, 0.1, 0.8, 0.6]), mid: new Float32Array(4), high: new Float32Array(4) };
+        const attacked = heightsOf(paintInto(attack, { heightPx: 120, scrolling: true }));
         const stacked = paintInto(
           { low: new Float32Array(8).fill(0.3), mid: new Float32Array(8).fill(0.2), high: new Float32Array(8).fill(0.05) },
           { heightPx: 40, layout: 'stacked' },
@@ -201,6 +205,10 @@ for (const dpr of [1, 2]) {
         const column = (x, y) => Array.from(stacked.ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
         return {
           distinctZoomHeights: new Set(zoomed).size,
+          distinctSlopeHeights: new Set(sloped).size,
+          slopeSteps: sloped.slice(1).filter((h, i) => Math.abs(h - sloped[i]) > 2).length,
+          attackJump: Math.max(...attacked.slice(1).map((h, i) => h - attacked[i])),
+          attackDecaySteps: attacked.slice(Math.floor(attacked.length * 0.6)).filter((h, i, a) => i > 0 && Math.abs(h - a[i - 1]) > 2).length,
           bottomRow: column(8, stacked.heightPx - 1),
           topRow: column(8, 0),
           low: rgbOf(palette.low),
@@ -212,6 +220,8 @@ for (const dpr of [1, 2]) {
       { dpr },
     );
     check('a hard step in the data stays a hard step when zoomed in (no interpolated ramp)', rbLook.distinctZoomHeights === 2, `${rbLook.distinctZoomHeights} distinct heights`);
+    check('a slope across columns that span more than two pixels is a line, not stairs', rbLook.distinctSlopeHeights > 12 && rbLook.slopeSteps === 0, `${rbLook.distinctSlopeHeights} heights, ${rbLook.slopeSteps} jumps`);
+    check('an attack stays a hard step at the column edge and its decay is smooth', rbLook.attackJump > 25 * dpr && rbLook.attackDecaySteps === 0, `jump ${rbLook.attackJump}, ${rbLook.attackDecaySteps} steps in the decay`);
     check('the stacked overview is anchored at the bottom in the low colour', near(rbLook.bottomRow, rbLook.low), JSON.stringify([rbLook.bottomRow, rbLook.low]));
     check('the stacked overview leaves the top free for a quiet column', near(rbLook.topRow, rbLook.bg), JSON.stringify(rbLook.topRow));
     check('the stacked overview rises from the baseline (not centred)', rbLook.stackedTop > 0 && rbLook.stackedTop < rbLook.stackedHeight, `${rbLook.stackedTop} of ${rbLook.stackedHeight}`);
