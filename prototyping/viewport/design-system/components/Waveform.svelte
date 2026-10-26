@@ -1,50 +1,31 @@
 <script module>
+  import { bandsFromPeaks } from '../waveform-bands.js';
+  import { ink, paletteVersion, wavePalette } from '../waveform-render.js';
+  import { drawBandRange } from '../waveform-render.js';
+  import { drawLoudness } from '../waveform-simple.js';
+
   const VARIANTS = {
-    mini: { step: 2, gap: 1, base: '--ff-muted', played: '--ff-text-mid', floor: 0.12 },
-    strip: { step: 3, gap: 1, base: '--ff-text-mid', played: '--ff-accent', floor: 0.06 },
+    mini: { step: 2, gap: 1 },
+    strip: { step: 3, gap: 1 },
   };
 
-  const BASE_FALLBACK = '#6a6a6a';
-  const PLAYED_FALLBACK = '#aaaaaa';
   const BITMAP_CACHE_LIMIT = 800;
   const DRAWN_KEYS_LIMIT = 20000;
-
-  const tokenColors = new Map();
-  let tokenVersion = 0;
-
-  function invalidateTokens() {
-    tokenColors.clear();
-    tokenVersion++;
-  }
-
-  if (typeof document !== 'undefined') {
-    new MutationObserver(invalidateTokens).observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'style', 'data-theme'],
-    });
-    window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', invalidateTokens);
-  }
-
-  function resolvedToken(name) {
-    const hit = tokenColors.get(name);
-    if (hit) return hit;
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    if (v) tokenColors.set(name, v);
-    return v || null;
-  }
+  const PLACEHOLDER_INK_ALPHA = 0.3;
+  const STRIP_DECAY = 0.9;
 
   const bitmapCache = new Map();
-  const peaksIds = new WeakMap();
-  let nextPeaksId = 1;
+  const dataIds = new WeakMap();
+  let nextDataId = 1;
 
-  function peaksKey(peaks) {
-    if (!peaks || !peaks.length) return '0';
-    let id = peaksIds.get(peaks);
+  function dataKey(data) {
+    if (!data) return '0';
+    let id = dataIds.get(data);
     if (!id) {
-      id = nextPeaksId++;
-      peaksIds.set(peaks, id);
+      id = nextDataId++;
+      dataIds.set(data, id);
     }
-    return `${id}:${peaks.length}`;
+    return String(id);
   }
 
   function rememberBitmap(key, bitmap) {
@@ -69,10 +50,6 @@
     return false;
   }
 
-  function tokensResolved(cfg) {
-    return !!(resolvedToken(cfg.base) && resolvedToken(cfg.played));
-  }
-
   const pendingDraws = new Set();
   let flushHandle = 0;
 
@@ -93,13 +70,19 @@
 </script>
 
 <script>
+  /*
+    Static preview for list rows (variant "mini") and the detail pane (variant "strip").
+    `look` "envelope" (default, rows) is one loudness envelope; "bands" is the 3-band picture of the
+    players. `bands` is BandColumns ({low, mid, high}, 0..1); `peaks` (mono 0..1) is the legacy input
+    and is turned into a band mix.
+  */
   let {
+    bands = null,
     peaks = null,
     width = 120,
     height = 14,
     variant = 'mini',
-    seed = 1,
-    progress = 0,
+    look = 'envelope',
     cues = [],
     cueStyle = null,
     /** Subtle sine wave on placeholder bars while analysis is in progress. */
@@ -108,68 +91,65 @@
 
   let canvas;
 
-  function layout() {
+  function source() {
+    if (bands && bands.low && bands.low.length) return bands;
+    return peaks && peaks.length ? peaks : null;
+  }
+
+  function bandsOf(data) {
+    return data.low ? data : bandsFromPeaks(data);
+  }
+
+  function bitmapKey(dpr, data) {
+    return `${variant}|${look}|${width}|${height}|${dpr}|${paletteVersion()}|${dataKey(data)}`;
+  }
+
+  function paintPlaceholder(ctx, dpr, phase) {
     const cfg = VARIANTS[variant] ?? VARIANTS.mini;
     const stride = cfg.step + cfg.gap;
-    const bars = Math.max(1, Math.floor(width / stride));
-    const playedBars = Math.round(bars * Math.max(0, Math.min(1, progress)));
-    const dpr = window.devicePixelRatio || 1;
-    return { cfg, stride, bars, playedBars, dpr };
-  }
-
-  function bitmapKey({ playedBars, dpr }) {
-    return `${variant}|${width}|${height}|${dpr}|${tokenVersion}|${peaksKey(peaks)}|${playedBars}`;
-  }
-
-  function paintBars(ctx, { cfg, stride, bars, playedBars }, phase) {
-    const w = width;
-    const h = height;
-    const data = peaks && peaks.length ? peaks : null;
-    const baseColor = resolvedToken(cfg.base) ?? BASE_FALLBACK;
-    const playedColor = resolvedToken(cfg.played) ?? PLAYED_FALLBACK;
-    const mid = h / 2;
-
-    for (let i = 0; i < bars; i++) {
-      let p;
-      if (data) {
-        p = data[Math.floor((i / bars) * data.length)] ?? cfg.floor;
-      } else if (animating) {
-        const x = (i / Math.max(1, bars - 1)) * Math.PI * 2;
+    const count = Math.max(1, Math.floor(width / stride));
+    const mid = height / 2;
+    ctx.fillStyle = ink(wavePalette(), PLACEHOLDER_INK_ALPHA);
+    for (let i = 0; i < count; i++) {
+      let p = 0;
+      if (animating) {
+        const x = (i / Math.max(1, count - 1)) * Math.PI * 2;
         p = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(x * 1.4 + phase));
-      } else {
-        p = 0;
       }
-      const bh = Math.max(1, (cfg.floor + p * (1 - cfg.floor)) * h);
-      ctx.fillStyle = i < playedBars ? playedColor : baseColor;
-      ctx.fillRect(i * stride, mid - bh / 2, cfg.step, bh);
+      const barHeight = Math.max(1, (0.12 + p * 0.88) * height);
+      ctx.fillRect(Math.round(i * stride * dpr), Math.round((mid - barHeight / 2) * dpr), Math.round(cfg.step * dpr), Math.max(1, Math.round(barHeight * dpr)));
     }
   }
 
-  function bitmapFor(geometry, key, pixelW, pixelH) {
+  function paintData(ctx, data, pixelW, pixelH, dpr) {
+    const palette = wavePalette();
+    if (look === 'bands') {
+      drawBandRange(ctx, bandsOf(data), { startFrac: 0, endFrac: 1, widthPx: pixelW, heightPx: pixelH, palette, dpr, decay: STRIP_DECAY });
+      return;
+    }
+    drawLoudness(ctx, bandsOf(data), { widthPx: pixelW, heightPx: pixelH, palette });
+  }
+
+  function bitmapFor(data, key, dpr, pixelW, pixelH) {
     const bitmap = document.createElement('canvas');
     bitmap.width = pixelW;
     bitmap.height = pixelH;
-    const bitmapCtx = bitmap.getContext('2d');
-    bitmapCtx.setTransform(geometry.dpr, 0, 0, geometry.dpr, 0, 0);
-    paintBars(bitmapCtx, geometry, 0);
+    paintData(bitmap.getContext('2d'), data, pixelW, pixelH, dpr);
     rememberBitmap(key, bitmap);
     return bitmap;
   }
 
   function draw(phase = 0) {
     if (!canvas) return;
-    const geometry = layout();
-    const { dpr } = geometry;
-    const w = width;
-    const h = height;
-    const pixelW = Math.round(w * dpr);
-    const pixelH = Math.round(h * dpr);
+    const dpr = window.devicePixelRatio || 1;
+    const pixelW = Math.round(width * dpr);
+    const pixelH = Math.round(height * dpr);
     if (canvas.width !== pixelW || canvas.height !== pixelH) {
       canvas.width = pixelW;
       canvas.height = pixelH;
     }
-    const cssW = `${w}px`;
-    const cssH = `${h}px`;
+    const cssW = `${width}px`;
+    const cssH = `${height}px`;
     if (canvas.style.width !== cssW) canvas.style.width = cssW;
     if (canvas.style.height !== cssH) canvas.style.height = cssH;
 
@@ -177,27 +157,25 @@
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, pixelW, pixelH);
 
-    const placeholderFrame = animating && !(peaks && peaks.length);
-    const key = bitmapKey(geometry);
-    let bitmap = placeholderFrame ? null : recallBitmap(key);
-    if (!bitmap && !placeholderFrame && tokensResolved(geometry.cfg) && wasDrawnBefore(key)) {
-      bitmap = bitmapFor(geometry, key, pixelW, pixelH);
-    }
-    if (bitmap) {
-      ctx.drawImage(bitmap, 0, 0);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const data = source();
+    if (!data) {
+      paintPlaceholder(ctx, dpr, phase);
     } else {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      paintBars(ctx, geometry, phase);
+      const key = bitmapKey(dpr, data);
+      let bitmap = recallBitmap(key);
+      if (!bitmap && wasDrawnBefore(key)) bitmap = bitmapFor(data, key, dpr, pixelW, pixelH);
+      if (bitmap) ctx.drawImage(bitmap, 0, 0);
+      else paintData(ctx, data, pixelW, pixelH, dpr);
     }
 
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const markerStyle = cueStyle ?? (variant === 'strip' ? 'line' : 'dot');
     for (const cue of cues || []) {
       const frac = Math.max(0, Math.min(1, cue.position ?? 0));
-      const x = Math.round(frac * (w - 1)) + 0.5;
+      const x = Math.round(frac * (width - 1)) + 0.5;
       ctx.fillStyle = cue.color || '#4ade80';
       if (markerStyle === 'line') {
-        ctx.fillRect(x - 0.5, 0, 1, h);
+        ctx.fillRect(x - 0.5, 0, 1, height);
         ctx.beginPath();
         ctx.arc(x, 2.5, 2.5, 0, Math.PI * 2);
         ctx.fill();
@@ -210,17 +188,18 @@
   }
 
   $effect(() => {
+    bands;
     peaks;
     width;
     height;
     variant;
-    seed;
-    progress;
+    look;
     cues;
     cueStyle;
     animating;
 
-    if (animating && !(peaks && peaks.length)) {
+    const data = source();
+    if (animating && !data) {
       let phase = 0;
       let live = true;
       const tick = () => {
@@ -237,7 +216,7 @@
     }
 
     const run = () => draw(0);
-    if (recallBitmap(bitmapKey(layout()))) {
+    if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
       run();
       return;
     }

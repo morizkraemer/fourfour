@@ -3166,11 +3166,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "image",
  "libc",
  "pioneer-usb-writer",
  "rusqlite",
  "serde",
  "serde_json",
+ "symphonia 0.5.5",
  "tempfile",
 ]
 

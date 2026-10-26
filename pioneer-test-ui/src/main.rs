@@ -4,6 +4,7 @@ mod analysis_backend;
 mod analysis_payload;
 mod analysis_python;
 mod analysis_run;
+mod band_analysis;
 mod dto;
 mod playback;
 mod track_infos;
@@ -93,6 +94,7 @@ fn scan_directory(
             has_cues: false,
             has_analysis: false,
             waveform_preview: None,
+            waveform_bands: None,
         });
     }
 
@@ -150,6 +152,7 @@ fn scan_files(
             has_cues: false,
             has_analysis: false,
             waveform_preview: None,
+            waveform_bands: None,
         });
     }
 

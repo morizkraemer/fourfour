@@ -36,9 +36,10 @@ import {
 import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
-  previewPeaksNormalized,
   decodeTrackPreview,
+  decodeBandPreview,
 } from '../services/analysis-data.ts';
+import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
@@ -450,18 +451,33 @@ function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string
   return base === fileName || track.title === fileName;
 }
 
+/** The row preview a track already carries is the one the analysis sends: keep the object so its bands and bitmaps stay cached. */
+function sameBytes(current: unknown, next: ArrayLike<number>): boolean {
+  if (!current || typeof current !== 'object') return false;
+  const bytes = current as ArrayLike<number>;
+  if (bytes.length !== next.length) return false;
+  for (let i = 0; i < next.length; i++) if (bytes[i] !== next[i]) return false;
+  return true;
+}
+
 function applyWaveformAndCuesFromAnalysis(
   track: Record<string, unknown>,
   res: {
     waveform_preview?: number[];
+    waveform_row_bands?: string | null;
     cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
     bpm?: number;
     key?: string;
   },
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
-  if (res.waveform_preview?.length) {
-    track.peaks = previewPeaksNormalized(res.waveform_preview);
+  const bandPreview = decodeBandPreview(res.waveform_row_bands);
+  if (bandPreview) {
+    if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
+    track.preview = undefined;
+  } else if (res.waveform_preview?.length) {
+    track.bandsPreview = undefined;
+    track.preview = Uint8Array.from(res.waveform_preview);
   }
   if (res.cue_points) {
     track.cues = res.cue_points.map((cue) => {
@@ -553,7 +569,8 @@ function markTracksPendingAnalysis(ids: number[]) {
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
     if (!track) continue;
-    track.peaks = undefined;
+    track.preview = undefined;
+    track.bandsPreview = undefined;
     track.analysisLoaded = false;
   }
 }
@@ -625,13 +642,22 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     raw: t,
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
+    },
+    get bands() {
+      return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
     }
   };
 
-  // Embedded mono preview → paint the mini waveform immediately, no N+1 fetch.
-  const preview = decodeTrackPreview(t.waveform_preview);
-  if (preview && isValidWaveformPreview(preview)) {
-    local.peaks = previewPeaksNormalized(preview);
+  // Embedded preview → paint the mini waveform immediately, no N+1 fetch: the 3-band row
+  // preview when the track has band data, else the mono PWAV.
+  const bandPreview = decodeBandPreview(t.waveform_bands);
+  if (bandPreview) {
+    local.bandsPreview = bandPreview;
+  } else {
+    const preview = decodeTrackPreview(t.waveform_preview);
+    if (preview && isValidWaveformPreview(preview)) {
+      local.preview = Uint8Array.from(preview);
+    }
   }
 
   return local;

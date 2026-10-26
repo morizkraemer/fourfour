@@ -5,6 +5,9 @@ mod analysis_backend;
 #[path = "../analysis_python.rs"]
 mod analysis_python;
 #[allow(dead_code)]
+#[path = "../band_analysis.rs"]
+mod band_analysis;
+#[allow(dead_code)]
 #[path = "../analysis_run.rs"]
 mod analysis_run;
 

@@ -96,7 +96,7 @@ pub(crate) fn python_result_to_analysis(json: &serde_json::Value) -> models::Ana
         let overview = parse_3band(&["waveform_overview", "pioneer_3band_overview"]);
 
         if !detail.is_empty() {
-            Some(models::ColorWaveform { detail, overview })
+            Some(models::ColorWaveform { detail, overview, exact: None })
         } else {
             None
         }
@@ -214,9 +214,25 @@ pub(crate) async fn analyze_one_track(
     }
 
     let result_json = parse_analyzer_stdout(&output.stdout)?;
-    let analysis = python_result_to_analysis(&result_json);
+    let mut analysis = python_result_to_analysis(&result_json);
+
+    let t_bands = std::time::Instant::now();
+    let band_path = source_path.to_path_buf();
+    let bands = tokio::task::spawn_blocking(move || {
+        crate::band_analysis::apply_measured_bands(&mut analysis, &band_path).map(|()| analysis)
+    })
+    .await
+    .map_err(|e| format!("band measurement panicked: {e}"))?;
+    let (analysis, band_note) = match bands {
+        Ok(analysis) => (analysis, format!("bands {:.2}s", t_bands.elapsed().as_secs_f64())),
+        Err(e) => {
+            let fallback = python_result_to_analysis(&result_json);
+            eprintln!("[bands] {}: {e}; keeping the analyzer's colour data", source_path.display());
+            (fallback, "bands from analyzer".to_string())
+        }
+    };
     Ok((
         analysis,
-        format!("{:.1}s {}bytes", elapsed.as_secs_f64(), stdout_len),
+        format!("{:.1}s {}bytes {band_note}", elapsed.as_secs_f64(), stdout_len),
     ))
 }

@@ -1,5 +1,7 @@
 import './waveform.css';
 import { el } from '../utils/dom.js';
+import { bandsFromPeaks } from '../waveform-bands.js';
+import { drawBandRange, wavePalette } from '../waveform-render.js';
 
 /*
  * Waveform (§ track-row preview + player strip). A Canvas-2D renderer that draws
@@ -7,10 +9,10 @@ import { el } from '../utils/dom.js';
  * this is that primitive; for now it draws faux peaks deterministically from a seed
  * when no real `peaks` array is supplied.
  *
- *   createWaveform({ peaks?, width, height, variant, seed, progress, cues, cueStyle }) → { element, update }
- *     variant: 'mini' (track row preview) | 'strip' (player) — drives bar sizing + color token
- *     peaks:   optional number[] in 0..1; omitted → faux peaks from `seed`
- *     progress: 0..1 played portion (drawn brighter)
+ *   createWaveform({ bands?, peaks?, width, height, variant, seed, cues, cueStyle }) → { element, update }
+ *     variant: 'mini' (track row preview) | 'strip' (player) — drives envelope smoothing
+ *     bands:   optional {low, mid, high} 0..1 columns (waveform-bands.js)
+ *     peaks:   optional number[] in 0..1 (mono); omitted → faux peaks from `seed`
  *     cues:    optional [{ position: 0..1, color }] hot-cue markers
  *     cueStyle: 'dot' (colored dot) | 'line' (playhead-style line + dot);
  *               defaults to 'line' for the strip variant, 'dot' otherwise
@@ -39,23 +41,18 @@ function fauxPeaks(count, seed) {
   return out;
 }
 
-function rootColor(name, fallback) {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
-}
-
 const VARIANTS = {
-  mini: { step: 2, gap: 1, base: '--ff-muted', played: '--ff-text-mid', floor: 0.12 },
-  strip: { step: 3, gap: 1, base: '--ff-text-mid', played: '--ff-accent', floor: 0.06 },
+  mini: { decay: 0.8 },
+  strip: { decay: 0.88 },
 };
 
 export function createWaveform({
+  bands = null,
   peaks = null,
   width = 120,
   height = 14,
   variant = 'mini',
   seed = 1,
-  progress = 0,
   cues = [],
   cueStyle = null,
   animating = false,
@@ -63,7 +60,7 @@ export function createWaveform({
   const cfg = VARIANTS[variant] ?? VARIANTS.mini;
   const markerStyle = cueStyle ?? (variant === 'strip' ? 'line' : 'dot');
   const canvas = el('canvas', { class: `ff-waveform ff-waveform--${variant}` });
-  const state = { peaks, width, height, progress, cues, animating, phase: 0 };
+  const state = { bands, peaks, width, height, cues, animating, phase: 0 };
   let animRaf = 0;
 
   function stopAnimLoop() {
@@ -85,37 +82,28 @@ export function createWaveform({
     const w = state.width;
     const h = state.height;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    const widthPx = Math.round(w * dpr);
+    const heightPx = Math.round(h * dpr);
+    canvas.width = widthPx;
+    canvas.height = heightPx;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-    const stride = cfg.step + cfg.gap;
-    const bars = Math.max(1, Math.floor(w / stride));
     const hasPeaks = state.peaks && state.peaks.length;
-    const data = hasPeaks ? state.peaks : null;
-    const baseColor = rootColor(cfg.base, '#6a6a6a');
-    const playedColor = rootColor(cfg.played, '#aaaaaa');
-    const playedBars = Math.round(bars * Math.max(0, Math.min(1, state.progress)));
-    const mid = h / 2;
-
-    for (let i = 0; i < bars; i++) {
-      let p;
-      if (data) {
-        p = data[Math.floor((i / bars) * data.length)] ?? cfg.floor;
-      } else if (state.animating) {
-        const x = (i / Math.max(1, bars - 1)) * Math.PI * 2;
-        p = 0.1 + 0.16 * (0.5 + 0.5 * Math.sin(x * 1.4 + state.phase));
-      } else {
-        p = 0;
-      }
-      const bh = Math.max(1, (cfg.floor + p * (1 - cfg.floor)) * h);
-      ctx.fillStyle = i < playedBars ? playedColor : baseColor;
-      ctx.fillRect(i * stride, mid - bh / 2, cfg.step, bh);
+    let data = state.bands;
+    if (!data && hasPeaks) data = bandsFromPeaks(state.peaks);
+    if (!data && state.animating) {
+      const count = Math.max(8, Math.floor(w / 3));
+      data = bandsFromPeaks(Array.from({ length: count }, (_, i) => 0.1 + 0.16 * (0.5 + 0.5 * Math.sin((i / count) * Math.PI * 2 * 1.4 + state.phase))));
     }
+    if (data) {
+      drawBandRange(ctx, data, {
+        startFrac: 0, endFrac: 1, widthPx, heightPx, palette: wavePalette(), dpr, decay: cfg.decay,
+      });
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     // Hot-cue markers (drawn on top of the bars)
     const cueList = state.cues || [];

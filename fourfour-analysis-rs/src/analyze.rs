@@ -22,13 +22,12 @@ pub struct Config {
     pub mp3_rule: DelayRule,
     pub key: bool,
     pub waveform: bool,
-    pub placeholder_waveform: bool,
     pub keep_logits: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, placeholder_waveform: false, keep_logits: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, keep_logits: false }
     }
 }
 
@@ -101,11 +100,7 @@ pub fn analyze_cancellable(engine: &BeatEngine, path: &Path, cfg: &Config, cance
         let wf = cfg.waveform.then(|| {
             s.spawn(|| {
                 let t = Instant::now();
-                let w = if cfg.placeholder_waveform {
-                    Ok(waveform::compute_placeholder(mono, 44100, side_threads))
-                } else {
-                    resample_to(&native.samples, native.rate, waveform::TARGET_SR).map(|a| waveform::compute(&a))
-                };
+                let w = waveform::compute(&native.samples, native.rate);
                 (w, ms(t))
             })
         });
@@ -143,11 +138,11 @@ pub fn analyze_cancellable(engine: &BeatEngine, path: &Path, cfg: &Config, cance
         None => (None, 0.0, 0.0),
     };
     let (waveforms, wf_ms) = match wf_part {
-        Some((w, t)) => (Some(w?), t),
+        Some((w, t)) => (Some(w), t),
         None => (None, 0.0),
     };
     let waveform_checksum = waveforms.as_ref().map(waveform::checksum);
-    let detail_entries = waveforms.as_ref().map_or(0, |w| w.detail.len());
+    let detail_entries = waveforms.as_ref().map_or(0, |w| w.pwv7.len());
     let ms_doc = json!({
         "decode": decode_ms,
         "resample": bt.resample_ms + resample44_ms,

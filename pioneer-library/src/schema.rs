@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Schema for a fresh v2 database.
 const SCHEMA_DDL: &str = "
@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS analyses (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
     bpm      REAL NOT NULL DEFAULT 0.0,
     key      TEXT NOT NULL DEFAULT '',
-    energy   INTEGER
+    energy   INTEGER,
+    row_preview BLOB
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -94,11 +95,14 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
                 [SCHEMA_VERSION],
             )?;
         }
-        Some(1) => {
-            migrate_v1_to_v2(conn, db_path)?;
-        }
-        Some(2) => {
-            migrate_v2_to_v3(conn)?;
+        Some(v) if (1..SCHEMA_VERSION).contains(&v) => {
+            if v < 2 {
+                migrate_v1_to_v2(conn, db_path)?;
+            }
+            if v < 3 {
+                migrate_v2_to_v3(conn)?;
+            }
+            migrate_v3_to_v4(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
         Some(v) => {
@@ -160,6 +164,11 @@ fn migrate_v1_to_v2(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
                 &track_for_anlz,
                 analysis,
             )?;
+            pioneer_usb_writer::writer::anlz::write_anlz_2ex(
+                &dir.join("ANLZ0000.2EX"),
+                &track_for_anlz,
+                analysis,
+            )?;
         }
     }
 
@@ -184,7 +193,7 @@ fn migrate_v1_to_v2(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     }
 
     // 5. Update version.
-    conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
+    conn.execute("UPDATE schema_version SET version = 2", [])?;
 
     Ok(())
 }
@@ -242,6 +251,17 @@ fn read_v1_analyses(conn: &Connection) -> Result<Vec<(i64, String, AnalysisResul
 fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE analyses ADD COLUMN energy INTEGER;")
         .context("Failed to add energy column")?;
+    conn.execute("UPDATE schema_version SET version = 3", [])?;
+    Ok(())
+}
+
+/// Migrate from v3 to v4: the 3-band row preview next to bpm/key, so the list
+/// does not read ANLZ files per track. Additive and nullable: old rows stay
+/// `NULL` until `LocalLibrary::backfill_row_previews` fills them, and an older
+/// build simply ignores the column.
+fn migrate_v3_to_v4(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE analyses ADD COLUMN row_preview BLOB;")
+        .context("Failed to add row_preview column")?;
     conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
     Ok(())
 }

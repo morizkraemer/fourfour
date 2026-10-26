@@ -36,8 +36,8 @@
     bpm={player.track?.bpm || '—'}
     key={player.track?.key || '—'}
     cues={player.track?.cues || []}
-    colorData={player.track?.colorData ?? null}
-    previewBytes={player.track?.previewBytes ?? null}
+    bands={player.track?.bands ?? null}
+    bandsOverview={player.track?.bandsOverview ?? null}
     beats={player.track?.beats ?? []}
     durationMs={player.track?.durationMs ?? 0}
     trackKey={player.track?.id ?? null}

@@ -178,13 +178,39 @@ pub fn delete_artwork(conn: &Connection, track_id: i64) -> Result<()> {
 // Analysis index queries (lightweight bpm/key in DB; full data in ANLZ files)
 // ---------------------------------------------------------------------------
 
-/// Insert or update the lightweight analysis index (bpm + key + energy).
-pub fn upsert_analysis_index(conn: &Connection, track_id: i64, bpm: f64, key: &str, energy: Option<u8>) -> Result<()> {
+/// Insert or update the lightweight analysis index (bpm + key + energy + row preview).
+pub fn upsert_analysis_index(
+    conn: &Connection,
+    track_id: i64,
+    bpm: f64,
+    key: &str,
+    energy: Option<u8>,
+    row_preview: &[u8],
+) -> Result<()> {
     conn.execute(
-        "INSERT INTO analyses (track_id, bpm, key, energy) VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key, energy = excluded.energy",
-        params![track_id, bpm, key, energy],
+        "INSERT INTO analyses (track_id, bpm, key, energy, row_preview) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key,
+             energy = excluded.energy, row_preview = excluded.row_preview",
+        params![track_id, bpm, key, energy, row_preview],
     )?;
+    Ok(())
+}
+
+/// `(track id, row preview blob)` for every analysis row that has one stored.
+pub fn select_row_previews(conn: &Connection) -> Result<Vec<(i64, Vec<u8>)>> {
+    let mut stmt = conn.prepare("SELECT track_id, row_preview FROM analyses WHERE row_preview IS NOT NULL")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn select_missing_row_preview_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE row_preview IS NULL ORDER BY track_id")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn update_row_preview(conn: &Connection, track_id: i64, row_preview: &[u8]) -> Result<()> {
+    conn.execute("UPDATE analyses SET row_preview = ?2 WHERE track_id = ?1", params![track_id, row_preview])?;
     Ok(())
 }
 

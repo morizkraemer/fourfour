@@ -4,6 +4,9 @@ mod analysis_payload;
 #[allow(dead_code)]
 #[path = "../dto.rs"]
 mod dto;
+#[allow(dead_code)]
+#[path = "../band_analysis.rs"]
+mod band_analysis;
 #[path = "../track_infos.rs"]
 mod track_infos;
 
@@ -72,7 +75,7 @@ fn fake_analysis(i: usize) -> AnalysisResult {
         key: format!("{}{}", i % 12 + 1, if i % 2 == 0 { "A" } else { "B" }),
         energy: Some((i % 10) as u8),
         cue_points: Vec::new(),
-        color_waveform: Some(ColorWaveform { detail, overview }),
+        color_waveform: Some(ColorWaveform { detail, overview, exact: None }),
     }
 }
 
@@ -186,12 +189,30 @@ fn load(dir: &Path, samples: usize) {
     );
 }
 
+fn bands(paths: &[String]) {
+    let mut ratios = Vec::new();
+    for path in paths {
+        let t = Instant::now();
+        let waves = band_analysis::measure_waveforms(Path::new(path)).unwrap();
+        let elapsed_ms = ms(t);
+        let seconds = waves.pwv7.len() as f64 / 150.0;
+        ratios.push(elapsed_ms / 1000.0 / seconds);
+        println!(
+            "{path}: {seconds:.0} s of audio, {elapsed_ms:.0} ms, {:.1}x realtime",
+            seconds * 1000.0 / elapsed_ms
+        );
+    }
+    let (median, _) = median_and_p95(ratios);
+    println!("median {:.1} ms per second of audio", median * 1000.0);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
-        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples]"),
+        Some("bands") => bands(&args[2..]),
+        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | bands <audio files>"),
     }
 }

@@ -8,10 +8,8 @@ import {
   listenToAnalysisProgress,
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
-import {
-  decodeColorWaveform,
-  previewBytesFromPayload,
-} from '../services/analysis-data.ts';
+import { previewBytesFromPayload } from '../services/analysis-data.ts';
+import { colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -54,12 +52,11 @@ export interface PlayerTrack {
   durationMs: number;
   cues: PlayerCue[];
   beats: BeatMarker[];
-  colorData: ColorWaveSample[] | null;
+  bands: BandColumns | null;
   // Higher-res detail + fixed overview for the expanded dual-view player.
-  // (compact strip uses colorData; these stay null until analysis loads.)
-  colorDetail: ColorWaveSample[] | null;
-  colorOverview: ColorWaveSample[] | null;
-  previewBytes: number[] | null;
+  // (compact strip uses bands; these stay null until analysis loads.)
+  bandsDetail: BandColumns | null;
+  bandsOverview: BandColumns | null;
 }
 
 const CUE_COLORS = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#34d399', '#38bdf8'];
@@ -169,11 +166,10 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   };
   if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
   if (analysis.key) next.key = analysis.key;
-  next.colorData = decodeColorWaveform(analysis.waveform_color);
-  next.colorDetail = decodeColorWaveform(analysis.waveform_color_detail) ?? next.colorData;
-  next.colorOverview = decodeColorWaveform(analysis.waveform_overview) ?? next.colorData;
-  const preview = previewFromAnalysis(analysis);
-  if (preview) next.previewBytes = preview;
+  next.bands = colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis));
+  next.bandsDetail = colorBandsFromPayload(analysis.waveform_color_detail) ?? next.bands;
+  next.bands = next.bandsDetail;
+  next.bandsOverview = overviewBandsFromPayload(analysis.waveform_overview) ?? next.bandsDetail;
   if (analysis.beats?.length) {
     next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
       time_ms: b.time_ms,
@@ -307,10 +303,9 @@ function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
     durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
     cues: [],
     beats: [],
-    colorData: null,
-    colorDetail: null,
-    colorOverview: null,
-    previewBytes: null,
+    bands: null,
+    bandsDetail: null,
+    bandsOverview: null,
   };
 }
 

@@ -7,6 +7,7 @@ import {
 } from './analysis-data.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
+import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 export let lastTauriError = 'None';
 
@@ -47,6 +48,8 @@ export interface TrackInfo {
   has_analysis?: boolean;
   /** 400-byte mono preview embedded at load (base64 from Tauri, byte array in mocks). */
   waveform_preview?: string | number[] | null;
+  /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */
+  waveform_bands?: string | number[] | null;
 }
 
 export interface PlaylistInput {
@@ -104,6 +107,19 @@ function mockTrackCountFromUrl(): number {
   return Number.isInteger(n) && n > 0 ? n : 0;
 }
 
+const ROW_PREVIEW_VARIANTS = 128;
+const rowBandPreviews = new Map<number, string>();
+
+function syntheticRowBands(i: number): string {
+  const variant = (i * 31) % ROW_PREVIEW_VARIANTS;
+  let preview = rowBandPreviews.get(variant);
+  if (!preview) {
+    preview = rowBandsBase64(syntheticBands(1200, variant + 1, 180 + variant, 118 + (variant % 14), MOCK_PROFILE_ORDER[variant % MOCK_PROFILE_ORDER.length]));
+    rowBandPreviews.set(variant, preview);
+  }
+  return preview;
+}
+
 function syntheticMockTrack(i: number): TrackInfo {
   const analyzed = i % 10 !== 0;
   return {
@@ -121,9 +137,7 @@ function syntheticMockTrack(i: number): TrackInfo {
     has_artwork: false,
     has_cues: false,
     has_analysis: analyzed,
-    waveform_preview: analyzed
-      ? Array.from({ length: 400 }, (_, n) => ((n * 7 + i) % 31) + 1)
-      : null,
+    waveform_bands: analyzed ? syntheticRowBands(i) : null,
   };
 }
 
@@ -469,7 +483,7 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
     if (useBrowserMocks() && mock) {
       const data =
         syntheticTrackCount > 0
-          ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload)
+          ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload, trackId)
           : mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key);
       const clean = sanitizeAnalysisPayload(data);
       cacheAnalysis(trackId, clean);

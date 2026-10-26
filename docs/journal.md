@@ -85,3 +85,21 @@
 2026-10-23 20:12 orchestrator Q32 done: branch q32-search ae9571c; perf doc section landed
 2026-10-23 21:10 orchestrator Q30 done: branch q30-grid 260a51e; grid 78.5% on test; doc landed
 2026-10-23 21:10 orchestrator - decided: item 2 (fast analysing) → Q33 wire Rust ffa into the app behind a setting, Python fallback kept; branch only
+2026-10-24 04:09 orchestrator - run-pause (PM): Q33 WIP committed on q33-rust-analysis; run stalled ~21:30 by usage limit
+2026-10-24 05:48 orchestrator - run-start (PM): target colour waveforms 3-band; usb-writer lane OK per PM relay; Q34 + Q35 spawn
+2026-10-24 06:40 orchestrator Q34 done: branch q34-export-waveforms 7a60879; decided per rec: carry peak/whiteness in AnalysisResult for exact PWV3/5 heights (in Q36)
+2026-10-24 06:50 orchestrator Q35 done: branch q35-app-waveforms df5ba3d
+2026-10-24 06:50 orchestrator Q36 spawn: integration q34+q35
+2026-10-24 07:37 orchestrator Q36 done: branch q36-waveforms fdbb651; doc landed (export + app + integration)
+2026-10-24 07:37 orchestrator - decided: Q37 polish (high band, select + load_state regressions; additive schema on branch, flagged)
+2026-10-24 09:01 orchestrator Q37 done: branch q37-waveforms ae7bb44; waveform run idle; review page published; doc landed
+2026-10-25 07:42 orchestrator - correction: tailscale HTTPS previews work from other devices; only curl from dev itself fails. Links back to https://; waveform preview :4260 = q37-waveforms
+2026-10-25 08:35 orchestrator - decided: Merlin: row previews = variant e (simple smooth loudness envelope, one colour, absolute scaling); 3-band stays in players. Finalizing on branch row-wave-variants
+2026-10-25 08:39 orchestrator Q38 done: branch row-wave-variants e2fb03b (npm test re-run); doc landed
+2026-10-25 11:40 orchestrator Q39 done: branch q39-wave-fix 7401e1d; built + installed fourfour.app on the Mac
+2026-10-25 13:46 orchestrator Q40 done: branch q40-rb-match 41b2b97; building + installing on Mac
+2026-10-25 14:51 orchestrator Q40 round 2: branch q40-rb-match 45d18d2 installed on Mac; white per-track level open (Merlin to choose)
+2026-10-25 15:34 orchestrator Q40 round 3: eb52c59 installed on Mac; Merlin must re-analyse tracks to see new overview
+2026-10-25 15:55 orchestrator - decided: Merlin: waveforms good enough for now (q40-rb-match = final waveform branch, contains the whole app stack)
+2026-10-26 05:04 orchestrator - landed: merged q40-rb-match + q30-grid into master (Merlin OK'd UI, USB output, schema v4, import button, deps, push); validation green
+2026-10-26 05:07 orchestrator - master installed on Mac (building); Q33 resumed per Merlin

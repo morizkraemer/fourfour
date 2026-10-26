@@ -33,7 +33,7 @@
 <script>
   // Track list row (Svelte port of track-row.js). Cells are driven by a `columns`
   // array so a ColumnHeader built from the same array stays aligned.
-  //   track: { index, title, artist, label, bpm, key, time, tag, fav, cover, peaks }
+  //   track: { index, title, artist, label, bpm, key, time, tag, fav, cover, bands, peaks }
   //     tag: null | { type:'color', color } | { type:'digit', value, color }
   //   state: 'rest' | 'hover' | 'selected' | 'analyzing' | 'drag'
   import './track-row.css';
@@ -69,12 +69,12 @@
     {:else if cell.kind === 'wave'}
       <div class="ff-trow__cell ff-trow__cell--wave" style={cell.style} data-col-key={col.key}>
         <Waveform
+          bands={track.bands ?? null}
           peaks={track.peaks ?? null}
-          animating={analyzing && !track.peaks?.length}
+          animating={analyzing && !track.bands && !track.peaks?.length}
           width={col.width ?? 120}
           height={14}
-          variant="mini"
-          seed={(track.index ?? 1) * 2654435761} />
+          variant="mini" />
       </div>
     {:else if cell.kind === 'cover'}
       <div class="ff-trow__cell ff-trow__cell--cover" style={cell.style} data-col-key={col.key}>

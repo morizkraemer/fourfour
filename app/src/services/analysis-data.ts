@@ -44,6 +44,8 @@ export interface EncodedColorWaveform {
   len: number;
   calibration: number;
   bands: string;
+  /** The bytes are the stick's PWV7 / PWV6 values: drawn as `byte / 127`, no calibration or balancing. */
+  pwv7?: boolean;
 }
 
 const MIN_COLOR_COLUMNS = 8;
@@ -120,6 +122,17 @@ export function decodeTrackPreview(preview: string | number[] | null | undefined
   if (typeof preview !== 'string') return preview ?? null;
   const binary = atob(preview);
   const bytes = new Array<number>(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/** `load_state` and `get_analysis_data` carry the 3-band row preview as base64 (or a byte array in mocks). */
+export function decodeBandPreview(preview: string | number[] | null | undefined): Uint8Array | null {
+  if (!preview || preview.length === 0) return null;
+  if (typeof preview !== 'string') return preview.length % 3 === 0 ? Uint8Array.from(preview) : null;
+  const binary = atob(preview);
+  if (binary.length === 0 || binary.length % 3 !== 0) return null;
+  const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }

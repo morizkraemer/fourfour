@@ -273,6 +273,7 @@ mod tests {
             color_waveform: Some(pioneer_usb_writer::models::ColorWaveform {
                 detail: vec![[1, 2, 3]; 90_000],
                 overview: Vec::new(),
+                exact: None,
             }),
         };
         fit_color_detail_for_writer(&mut analysis, 600.0);

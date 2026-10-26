@@ -228,7 +228,7 @@ fn run_python_analysis(audio: &Path) -> Result<AnalysisResult> {
                 .collect();
             let n = detail.len();
             let overview: Vec<[u8; 3]> = (0..1200).map(|i| detail[i * n / 1200]).collect();
-            ColorWaveform { detail, overview }
+            ColorWaveform { detail, overview, exact: None }
         });
 
     Ok(AnalysisResult {

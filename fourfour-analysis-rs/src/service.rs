@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, Result};
-use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, ColorWaveform, WaveformPreview};
+use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, WaveformPreview};
 
 use crate::analyze::{analyze_cancellable, Analysis, Config};
 use crate::bt::BeatEngine;
@@ -223,10 +223,7 @@ pub fn beats_from_grid(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64, bpm: 
 pub fn to_app_result(a: &Analysis) -> AnalysisResult {
     let bpm = a.bpm.unwrap_or(0.0);
     let (waveform, color_waveform) = match &a.waveforms {
-        Some(w) => (
-            WaveformPreview { data: w.pwav },
-            Some(ColorWaveform { detail: w.detail.clone(), overview: w.overview.clone() }),
-        ),
+        Some(w) => (w.preview().unwrap_or(WaveformPreview { data: [0; 400] }), Some(w.color_waveform())),
         None => (WaveformPreview { data: [0; 400] }, None),
     };
     AnalysisResult {
@@ -259,7 +256,7 @@ mod tests {
             downbeats_s: downbeats,
             key_class: Some(0),
             key_confidence: 0.5,
-            waveforms: Some(Waveforms { pwav: [7; 400], detail: vec![[1, 2, 3]; 10], overview: vec![[4, 5, 6]; 10] }),
+            waveforms: Some(Waveforms { pwav: vec![7; 400], pwv7: vec![[1, 2, 3]; 10], pwv6: vec![[4, 5, 6]; 10], ..Waveforms::default() }),
             waveform_checksum: None,
             detail_entries: 10,
             mp3_delay_s: 0.0,
@@ -300,6 +297,7 @@ mod tests {
         assert_eq!(r.waveform.data, [7; 400]);
         let cw = r.color_waveform.unwrap();
         assert_eq!((cw.detail.len(), cw.overview[0]), (10, [4, 5, 6]));
+        assert!(cw.exact.is_some());
         assert!(r.cue_points.is_empty() && r.energy.is_none());
         assert_eq!(r.beat_grid.beats.len(), 4);
     }

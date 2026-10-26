@@ -37,6 +37,7 @@
     filePath = '',
     cover = '',
     peaks = null,
+    bands = null,
   } = $props();
 
   let isMissing = $derived(mode === 'missing');
@@ -115,7 +116,7 @@
 
     {#if !isMissing}
       <div class="ff-detail-pane__waveform">
-        <Waveform peaks={peaks} width={300} height={36} variant="strip" seed={7} cues={waveCues} cueStyle="dot" />
+        <Waveform {bands} {peaks} width={300} height={36} variant="strip" look="bands" cues={waveCues} cueStyle="dot" />
       </div>
     {/if}
 

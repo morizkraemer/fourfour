@@ -26,8 +26,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
 
 ### Needs Merlin's ears/eyes (laptop)
-- Preview of tonight's combined branch (q31-tests; q32-search adds the search fix): http://dev.tail87069a.ts.net:4250 (?mock=30000 for a big library)
-- Preview, master: http://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
+- Preview of tonight's combined branch (q31-tests; q32-search adds the search fix): https://dev.tail87069a.ts.net:4250 (?mock=30000 for a big library)
+- Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 
 ### Brother's lane
@@ -39,6 +39,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
 
 ## Queue
+### MERGED 2026-10-26 into master: q40-rb-match (whole app stack + waveforms) and q30-grid (analysis prototype). Full checks green (Rust tests, 172 app tests, check, build). CDJ checks for the brother: docs/architecture/cdj-checklist-2026-10.md.
 ### Q1–Q4, Q7, Q9–Q13 [landed] — playback, svelte-check 0, export tests, browser preview, benchmark, cache fix, packaging decision, key detector (57%), BPM/grid (BPM ±0.1 86%, grid ±20 ms 47%). See journal + docs/analysis/.
 ### Q5 Unsigned macOS build [queued] [mac] — `cargo tauri build` via mac-queue; report artifact + log; no signing. 30 min
 ### Q6 Key source PDB vs OneLibrary [handed to brother]
@@ -59,18 +60,27 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q28 Waveform drawing + scroll perf [done, branch q28-waveform-perf 2a7a232 (contains q25); doc landed] — scroll CPU/frame −21%, paint 24→3 ms, getComputedStyle per scroll 512→0, playhead layout 0.8→0.03 ms/tick; pixel diff ≤7/255; 512 px cached artwork thumbnails. Wall-clock win unproven (box load 20–33).
 ### Q29 Track row mount + 30k paint cost [done, branch q29-rows 35dd87f = integration of q20→q23→q22→q24→q25→q28→q29; doc landed] — fling CPU/frame 166→74 ms (pooled rows), layerize while playing 5.2→3.9 ms; row pixels identical. DOM row order is now slot order (drop index adapted).
 ### Q32 First-search spike + row-window helper [done, branch q32-search ae9571c = top of the app stack; doc landed] — first keystroke at 30k 445→120 ms, later 128→94 ms; search index built in idle time; rowWindow.ts + 20 tests (108 app tests).
-### Q31 App tests on the integration stack [done, branch q31-tests f8488e8 = ALL app/backend work tonight + vitest] — 88 app tests (47 new) + all Rust tests green. Preview of this branch: http://dev.tail87069a.ts.net:4250 (try ?mock=30000).
+### Q31 App tests on the integration stack [done, branch q31-tests f8488e8 = ALL app/backend work tonight + vitest] — 88 app tests (47 new) + all Rust tests green. Preview of this branch: https://dev.tail87069a.ts.net:4250 (try ?mock=30000).
 ### Q27 Repro tests for writer bugs [done, branch q27-writer-repro 450ea04; doc landed] — PDB export fails from 192 tracks (137 with 200-char titles); ANLZ colour detail wrong from 437 s (4 overflow sites, anlz.rs:258/314/364/404). Ignored repro tests on branch. docs/architecture/writer-bugs-2026-10.md
 ### Q21 Analysis review pass 1 (items 8, 2, 5) [done, branch q21-analysis 1fc254c (contains q15-grid); doc landed] — unified analyzer `ffa` (decode once, all stages, memory-capped pool): ~4.8 tracks/min on 8 workers, 0.56 GB/worker; Beat This! = 93% of CPU; grid 72.2% held, BPM ±0.1 88.8%; key stage now the cyanbox port 58.3% (n=199). Licence flag: cyanbox key templates fit on GiantSteps MTG (annotations unlicensed).
 ### Q26 Analysis review pass 2 (item 8) [done, branch q26-analysis cdc4f30 (contains q21); doc landed] — CPU 74→70 s/track, 5.3 tracks/min at 8 workers, tempo scan 1.1 s→0.19 s; native-rate decode, stratum removed; grid 72.2% / BPM 87.8% / key 58.3%; ONNX Runtime only 1.3–1.5× → not adopted. Lame3.100 mp3s are one frame late (fix needs dev check).
 ### Q30 Grid round 3 (item 5) [done, branch q30-grid 260a51e = top of the analysis stack; doc landed] — grid ±20 ms 72.2%→78.5% (161/205), BPM ±0.1 87.8% held; Lame3.100 files are a frame EARLY-fix (−26 ms), wav/flac −10 ms shift; half-beat phase: no usable signal.
-### Q33 Wire the Rust analyzer into the app (item 2) [running] — branch q33-rust-analysis (from q32-search + q30-grid), Python kept as fallback
+### Q34 3-band export [done, branch q34-export-waveforms 7a60879] — overflow fixed (u64, long-track tests pass to 60 min); real bands (baken port, MIT, NOTICE) → PWV7/PWV6/PWVC in new .2EX, PWV5 real u16 colour, PWV2 added; vs Rekordbox held-out: PWV7 corr 0.96/0.98/0.89, PWV3/5 heights 99.7% exact when computed from audio. PNGs: scratchpad/waveforms/export/. PWV6 kept ≤127 (Rekordbox does), not 45.
+### Q35 3-band app rendering [done, branch q35-app-waveforms df5ba3d] — one renderer for rows, detail, compact, overview, zoom; low in front; tokens --ff-wave-*; 143 app tests, 60/60 pixel checks; fling +10% CPU; rows still approximated from PWAV. Screenshots: scratchpad/waveforms/app/{before,after,compare}.
+### Q36 Waveform integration [done, branch q36-waveforms fdbb651 = q34 + q35] — app draws the stick bytes (PWV7/PWV6), 128-col 3-band row previews; PWV3 heights 18.6→99.7% exact; fling regression gone, expanded views −8..−30% CPU; side-by-side vs Rekordbox: scratchpad/waveforms/final/. Over budget: backend load_state 30k 480→910 ms, row select 19→42 ms; our high band weaker than Rekordbox.
+### Q37 Waveform polish [done, branch q37-waveforms ae7bb44 = final waveform branch] — high band vs Rekordbox exact 13.8→41.7%, corr 0.89→0.93; load_state 30k 850→350 ms; row select 42→20.7 ms; schema v4 (row_preview BLOB, additive) needs your OK.
+### Q38 Row preview = simple loudness envelope [done, branch row-wave-variants e2fb03b (on q37-waveforms)] — Merlin picked variant e; 3-band stays in players; 159 app tests. Gain/curve tuned on mock only.
+### Q39 Waveform fix from Merlin's Mac test [done, branch q39-wave-fix 7401e1d (on row-wave-variants)] — flat block = beat-long peak pooling; layer order low back/mid/high core; whole-pixel scroll fixes the flashing; detail strip 3-band; legacy payload path fixed too. Installed on the Mac as fourfour.app.
+### Q40 Waveforms matched to Rekordbox 1:1 [done, branch q40-rb-match eb52c59 (round 3: overview from a PWV6-style pass, corr .99 per band; per-track level ~16% off) (on q39-wave-fix)] — on Rekordbox's own bytes our renderer matches its screenshots (zoom edge error 17→2 px; bottom-anchored overview); our data: per-track gain on Gate ~13% low, Dubby mp3 27 ms offset. Being installed on the Mac.
+### Q33 Wire the Rust analyzer into the app (item 2) [running again 2026-10-26, merging new master first] — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: running · since 2026-10-23 14:07 · cap 2 workers · autonomy tight · overnight, until Merlin says stop
-targets (Merlin, direct): 1 fastest startup · 2 bulk import + analysis speed · 3 sync several USBs at once · 4 instant track load incl. waveform · 5 better beat grid · 6 Rekordbox library import works · 7 research other Rekordbox clones (incl. new "lite" one), reuse code if licence allows · 8 review the analysis pipeline twice for speed + quality · 10 audio engine: no crashes, fast, responsive · 11 UI lightning fast
-plan: Q19 clone research (7) ∥ Q20 startup + UI speed (1, 11) → Q21 analysis review + bulk speed + grid (8, 2, 5) → Q22 audio engine (10) → Q23 track/waveform load (4) → Q24 Rekordbox import (6) → Q25 multi-USB sync (3) → second analysis review pass (8) → own priorities
-rules: all code on branches (tight); docs/reports land. Items 3/6 touch the brother's lane (sync engine, master.db reader): branch only, flagged for him. Third-party code: licence-checked, inspected in an isolated dir, never executed blindly.
+status: idle · waveforms accepted "good enough for now" by Merlin 2026-10-25 · cap 2 · autonomy tight
+targets: 3-band colour waveforms in app + USB export — done on branch q37-waveforms (contains q34 export, q35 app, q36 integration, q37 polish; based on the q32-search app stack)
+rundown: app and stick draw the same 3-band bytes (low blue front, mid amber, high white); 7:17 colour bug fixed (tests to 60 min); vs Rekordbox's own bytes on held-out tracks corr low .96 / mid .98 / high .93, PWV3 heights 99.7% exact; perf within noise of q32-search, startup 30k 0.35 s.
+screenshots: review page https://claude.ai/artifact/7XmvdpXferK7rfBqLrEKxU · before /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/before/ · after /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/after/ and app/after-v2/ · side-by-side /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/app/compare/ · ours vs Rekordbox /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/final-v2/ (v1: final/) · export PNGs /tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/waveforms/export/
+held for Merlin: visual sign-off; schema v4 (additive row_preview column); USB output changes (new .2EX, PWV5 real colour, measured PWVC gains) need the brother's CDJ checks (CDJ-3000, 3000X, older); Q33 stays paused.
 
 ## Rundown
-Since 10-15 nothing ran. Master holds the Rust analysis prototype (BPM/grid/key), benchmark docs, UI review and three sync mockup rounds. Open: Merlin's sync round 3 answers, brother's engine work, Q15/Q16 proposed.
+Overnight: startup 30k 24.7 s→0.5 s backend / 188 s→3.3 s first paint; track load ~300→50 ms; fling CPU −55%; search first key 445→120 ms; audio engine 11 fixes + 26 tests; Rekordbox import (master.db/USB/XML); multi-USB sync 2.4–3×; grid 47→78.5%; analysis CPU 74→70 s/track; 108 app tests. All on branches (tight); docs on master.
+Critical for the brother: USB export fails from 192 tracks; colour waveform wrong > 7:17 (docs/architecture/writer-bugs-2026-10.md).

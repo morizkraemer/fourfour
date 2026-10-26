@@ -6,12 +6,13 @@
  *
  * Data shape expected by setData():
  *   {
- *     waveform_color:   Array<{amp: number, r: number, g: number, b: number}>,
- *     waveform_preview: Uint8Array | number[],  // 400-byte Pioneer PWAV fallback
- *     beats:            Array<{time_ms: number, bar_position: number}>,
- *     cues:             Array<{position: number, color?: string}>,  // position 0–1
- *     duration_ms:      number,
- *     bpm:              number,
+ *     bands:         {low, mid, high} per-column 0..1 amplitudes (waveform-bands.js),
+ *                    full track; the zoom view and the compact strip draw this,
+ *     bandsOverview: optional lower-resolution {low, mid, high} for the overview bar,
+ *     beats:         Array<{time_ms: number, bar_position: number}>,
+ *     cues:          Array<{position: number, color?: string}>,  // position 0-1
+ *     duration_ms:   number,
+ *     bpm:           number,
  *   }
  *
  * Two modes (constructor option `mode`, default 'expanded'):
@@ -22,9 +23,9 @@
  *                Rekordbox-style playhead locked at centre while the waveform
  *                scrolls; horizontal drag scrubs, wheel zooms.
  */
+import { drawBandRange, dimPlayed, ink, paletteVersion, wavePalette } from './waveform-render.js';
 
-const FALLBACK_COLOR = 'rgb(80, 80, 80)';
-const WAVEFORM_ALPHA = 0.85;
+
 const DRAG_THRESHOLD_PX = 4;
 
 // Playhead render delay (ms). The transport reports position at ~20Hz (~50ms).
@@ -41,102 +42,9 @@ const PLAYHEAD_TICK_BUFFER = 8;
 // lets the head keep gliding through a dropped tick without running away.
 const PLAYHEAD_MAX_EXTRAP = 2.0;
 
-// Rekordbox 3-band colors: bass=blue, mids=orange, highs=white
-const COLOR_BASS = 'rgb(30,  100, 255)';
-const COLOR_MID  = 'rgb(255, 140,   0)';
-const COLOR_HIGH = 'rgb(255, 255, 255)';
-
-// Overview bar: softer than the zoom view so the full-track preview reads smooth.
 const OVERVIEW_DECAY = 0.93;
-const OVERVIEW_ATTACK = 0.4;
-
-// Display dynamics — compress linear analysis amps for a readable silhouette.
-// Matches the strip waveform floor pattern (waveform.js). See docs/waveform-display-dynamics.md.
-const DISPLAY_AMP_FLOOR = 0.045;
-const DISPLAY_AMP_GAMMA = 0.5;
-
-/** Map raw 0–1 peak amp to display height (sqrt lift + minimum floor). */
-function displayAmp(raw) {
-    const a = Math.max(0, Math.min(1, raw));
-    return DISPLAY_AMP_FLOOR + (1 - DISPLAY_AMP_FLOOR) * Math.pow(a, DISPLAY_AMP_GAMMA);
-}
-
-/** Keep envelope tails continuous — never draw true zero after compression. */
-function clampEnvelopeFloor(amps, floor = DISPLAY_AMP_FLOOR) {
-    for (let i = 0; i < amps.length; i++) {
-        if (amps[i] > 0) amps[i] = Math.max(floor, amps[i]);
-    }
-    return amps;
-}
-
-// amp: peak loudness 0–1 (1.0 = 0 dBFS). r/g/b: relative band weights 0–1.
-function bandAmps(amp, bassW, midW, highW) {
-    return [bassW * amp, midW * amp, highW * amp];
-}
-
-function lerpColumn(d0, d1, t) {
-    return {
-        amp: d0.amp + (d1.amp - d0.amp) * t,
-        r: d0.r + (d1.r - d0.r) * t,
-        g: d0.g + (d1.g - d0.g) * t,
-        b: d0.b + (d1.b - d0.b) * t,
-    };
-}
-
-const EMPTY_COLUMN = { amp: 0, r: 0, g: 0, b: 0 };
-
-// Linear blend between waveform columns at a fractional track position.
-// frac < 0 → blank (Rekordbox-style padding before track start).
-function sampleColumnAtFrac(data, N, frac) {
-    if (frac <= 0) return EMPTY_COLUMN;
-    if (frac >= 1) return data[N - 1];
-    const f = frac * N;
-    if (f >= N - 1) return data[N - 1];
-    const i0 = Math.floor(f);
-    return lerpColumn(data[i0], data[i0 + 1], f - i0);
-}
-
-// Apply an envelope follower: zoom-invariant exponential decay.
-// decayPerColumn controls how fast the tail falls after a transient — the same
-// number of waveform columns regardless of current zoom level.
-// attackCoeff 1 = instant attack; lower values soften rising transients.
-function applyEnvelope(amps, samplesPerPixel, decayPerColumn = 0.82, attackCoeff = 1) {
-    const out = new Float32Array(amps.length);
-    // Convert column-space decay to pixel-space so it's zoom-invariant.
-    // Zoomed out (spp > 1): many columns per pixel → fast pixel decay.
-    // Zoomed in  (spp < 1): fraction of a column per pixel → slow pixel decay.
-    const decayPerPx = Math.pow(decayPerColumn, Math.max(samplesPerPixel, 0.01));
-    let env = 0;
-    for (let i = 0; i < amps.length; i++) {
-        if (amps[i] > env) {
-            env = attackCoeff >= 1
-                ? amps[i]
-                : env + (amps[i] - env) * attackCoeff;
-        } else {
-            env *= decayPerPx;
-            if (env < amps[i]) env = amps[i];
-        }
-        out[i] = env;
-    }
-    return out;
-}
-
-// Draw one waveform band as a filled symmetric shape (mirrored above/below centre).
-// Filled paths look smooth and continuous; individual strokes look blocky.
-function drawBand(ctx, amps, w, yCenter, scale, color) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(0, yCenter);
-    for (let px = 0; px < w; px++) {
-        ctx.lineTo(px, yCenter - amps[px] * scale);
-    }
-    for (let px = w - 1; px >= 0; px--) {
-        ctx.lineTo(px, yCenter + amps[px] * scale);
-    }
-    ctx.closePath();
-    ctx.fill();
-}
-
+const COMPACT_DECAY = 0.88;
+const ZOOM_DECAY = 0.86;
 
 export default class WaveformDisplay {
     /**
@@ -164,7 +72,7 @@ export default class WaveformDisplay {
         overviewWrap.appendChild(this._overviewCanvas);
         this._overviewPlayhead = document.createElement('div');
         this._overviewPlayhead.style.cssText =
-            'position:absolute;top:0;bottom:0;left:0;width:1px;background:#fff;pointer-events:none;display:none';
+            'position:absolute;top:0;bottom:0;left:0;width:1px;background:var(--ff-wave-playhead,#fff);pointer-events:none;display:none';
         overviewWrap.appendChild(this._overviewPlayhead);
 
         // Zoom canvas (scrollable detail view) — wrapped for playhead overlay
@@ -175,12 +83,26 @@ export default class WaveformDisplay {
         zoomWrap.appendChild(this._zoomCanvas);
         this._zoomPlayhead = document.createElement('div');
         this._zoomPlayhead.style.cssText =
-            'position:absolute;top:0;bottom:0;left:0;width:1px;background:#fff;pointer-events:none;display:none;z-index:2';
+            'position:absolute;top:0;bottom:0;left:0;width:1px;background:var(--ff-wave-playhead,#fff);pointer-events:none;display:none;z-index:2';
         zoomWrap.appendChild(this._zoomPlayhead);
+        this._playedMask = document.createElement('div');
+        this._playedMask.style.cssText =
+            'position:absolute;top:0;bottom:0;left:0;width:100%;background:var(--ff-wave-dim);pointer-events:none;display:none';
+        zoomWrap.appendChild(this._playedMask);
 
         this._wrapper.appendChild(overviewWrap);
         this._wrapper.appendChild(zoomWrap);
         container.appendChild(this._wrapper);
+
+        this._paletteVersion = paletteVersion();
+        this._themeObserver = new MutationObserver(() => {
+            this._overviewDirty = true;
+            this._render();
+        });
+        this._themeObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class', 'style', 'data-theme'],
+        });
 
         this._sizes = new WeakMap();
         this._sizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
@@ -487,6 +409,16 @@ export default class WaveformDisplay {
         el.style.transform = `translateX(${x}px)`;
     }
 
+    _showPlayedMask(frac) {
+        const mask = this._playedMask;
+        if (mask.style.display !== 'block') mask.style.display = 'block';
+        const w = this._canvasSize(this._zoomCanvas).w;
+        const x = Math.round(frac * w * 64) / 64 - w;
+        if (this._playheadX.get(mask) === x) return;
+        this._playheadX.set(mask, x);
+        mask.style.transform = `translateX(${x}px)`;
+    }
+
     _hidePlayhead(el) {
         if (el.style.display !== 'none') el.style.display = 'none';
     }
@@ -496,10 +428,14 @@ export default class WaveformDisplay {
         if (frac < 0 || frac > 1) {
             this._hidePlayhead(this._overviewPlayhead);
             this._hidePlayhead(this._zoomPlayhead);
+            this._hidePlayhead(this._playedMask);
             return;
         }
         if (this._mode !== 'compact') {
             this._showPlayhead(this._overviewPlayhead, frac, this._overviewCanvas);
+            this._hidePlayhead(this._playedMask);
+        } else {
+            this._showPlayedMask(frac);
         }
         if (this._lockPlayhead) {
             this._hidePlayhead(this._zoomPlayhead);
@@ -545,6 +481,7 @@ export default class WaveformDisplay {
         if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
         this._stopInterp();
         if (this._sizeObserver) this._sizeObserver.disconnect();
+        this._themeObserver.disconnect();
         this._unbindEvents();
         this._wrapper.remove();
     }
@@ -587,7 +524,7 @@ export default class WaveformDisplay {
     // ── Overview ─────────────────────────────────────────────────────────
 
     _renderOverview() {
-        if (this._mode === 'compact') return; // overview hidden in compact
+        if (this._mode === 'compact') return;
         const canvas = this._overviewCanvas;
         const size = this._canvasSize(canvas);
         if (size.w === 0) return;
@@ -595,109 +532,56 @@ export default class WaveformDisplay {
         const w = size.w;
         const h = size.h;
         const ctx = this._resizeCanvas(canvas, w, h);
+        const palette = wavePalette();
 
-        // Re-render the (expensive) bars+cues into the offscreen cache only when
-        // the data or the canvas size changed — not on every playback frame.
-        if (this._overviewDirty || this._overviewCacheW !== w || this._overviewCacheH !== h) {
-            this._renderOverviewCache(w, h);
+        if (this._overviewDirty || this._overviewCacheW !== w || this._overviewCacheH !== h || this._paletteVersion !== palette.version) {
+            this._paletteVersion = palette.version;
+            this._renderOverviewCache(w, h, palette);
             this._overviewCacheW = w;
             this._overviewCacheH = h;
             this._overviewDirty = false;
         }
 
-        // Cheap per-frame path: blit the cached bars, then draw the moving
-        // viewport indicator on top.
         ctx.drawImage(this._overviewCache, 0, 0, w, h);
+
+        if (this._playheadFrac > 0) {
+            dimPlayed(ctx, Math.min(1, this._playheadFrac) * w, h, palette);
+        }
 
         const visibleFrac = 1.0 / this._zoom;
         const x1 = Math.max(0, this._offset * w);
         const x2 = Math.min(w, (this._offset + visibleFrac) * w);
         if (this._zoom > 1.0 && x2 > x1) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+            ctx.fillStyle = ink(palette, 0.08);
             ctx.fillRect(x1, 0, x2 - x1, h);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.strokeStyle = ink(palette, 0.3);
             ctx.lineWidth = 1;
             ctx.strokeRect(x1, 0, x2 - x1, h);
         }
     }
 
-    // Render the static overview (background + 3-band bars + cue ticks) into the
-    // offscreen cache canvas at the given CSS size.
-    _renderOverviewCache(w, h) {
+    _renderOverviewCache(w, h, palette) {
         const cache = this._overviewCache;
-        const dprW = Math.round(w * devicePixelRatio);
-        const dprH = Math.round(h * devicePixelRatio);
-        if (cache.width !== dprW || cache.height !== dprH) {
-            cache.width = dprW;
-            cache.height = dprH;
+        const dpr = devicePixelRatio;
+        const widthPx = Math.round(w * dpr);
+        const heightPx = Math.round(h * dpr);
+        if (cache.width !== widthPx || cache.height !== heightPx) {
+            cache.width = widthPx;
+            cache.height = heightPx;
         }
         const ctx = cache.getContext('2d');
-        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = palette.bg;
+        ctx.fillRect(0, 0, widthPx, heightPx);
 
-        ctx.fillStyle = '#0d0d0d';
-        ctx.fillRect(0, 0, w, h);
-
-        const data = this._data?.waveform_overview || this._data?.waveform_color;
-        if (!data || data.length === 0) {
-            this._renderMonoOverview(ctx, w, h);
-        } else {
-            // Rekordbox-style stacked bars: rendered from the bottom, no mirroring.
-            // Bass (blue) fills from the bottom, mid (orange) stacks on top,
-            // high (white) at the tip. Total bar height = overall amplitude.
-            //
-            // First pass: average each pixel's band amplitudes. Second: smooth
-            // them with the envelope follower (a moving floor) so the preview
-            // reads as a continuous silhouette instead of a spiky comb.
-            const scale = h;
-            const ampA = new Float32Array(w); // overall loudness → bar height
-            const bandB = new Float32Array(w);
-            const bandM = new Float32Array(w);
-            const bandH = new Float32Array(w);
-
-            for (let px = 0; px < w; px++) {
-                const iStart = Math.floor(px * data.length / w);
-                const iEnd = Math.min(data.length - 1, Math.floor((px + 1) * data.length / w));
-                let sumAmp = 0, sumR = 0, sumG = 0, sumB = 0, count = 0;
-                for (let i = iStart; i <= iEnd; i++) {
-                    const d = data[i];
-                    sumAmp += d.amp;
-                    sumR += d.r; sumG += d.g; sumB += d.b; count++;
-                }
-                if (count === 0) continue;
-                const avgAmp = displayAmp(sumAmp / count);
-                ampA[px] = avgAmp;
-                const [b, m, hi] = bandAmps(avgAmp, sumR / count, sumG / count, sumB / count);
-                bandB[px] = b; bandM[px] = m; bandH[px] = hi;
-            }
-
-            // Envelope-smooth height + band split so the preview is a continuous
-            // silhouette rather than a spiky comb.
-            const ampE = clampEnvelopeFloor(applyEnvelope(ampA, 1, OVERVIEW_DECAY, OVERVIEW_ATTACK));
-            const bE = clampEnvelopeFloor(applyEnvelope(bandB, 1, OVERVIEW_DECAY, OVERVIEW_ATTACK));
-            const mE = clampEnvelopeFloor(applyEnvelope(bandM, 1, OVERVIEW_DECAY, OVERVIEW_ATTACK));
-            const hE = clampEnvelopeFloor(applyEnvelope(bandH, 1, OVERVIEW_DECAY, OVERVIEW_ATTACK));
-
-            for (let px = 0; px < w; px++) {
-                const total = bE[px] + mE[px] + hE[px];
-                if (total <= 0) continue;
-                const colH = ampE[px] * scale;
-                const bassH = (bE[px] / total) * colH;
-                const midH  = (mE[px] / total) * colH;
-                const highH = (hE[px] / total) * colH;
-
-                let y = h;
-                ctx.fillStyle = COLOR_BASS;
-                ctx.fillRect(px, y - bassH, 1, bassH);
-                y -= bassH;
-                ctx.fillStyle = COLOR_MID;
-                ctx.fillRect(px, y - midH, 1, midH);
-                y -= midH;
-                ctx.fillStyle = COLOR_HIGH;
-                ctx.fillRect(px, y - highH, 1, highH);
-            }
+        const bands = this._data?.bandsOverview || this._data?.bands;
+        if (bands && bands.low.length > 0) {
+            drawBandRange(ctx, bands, {
+                startFrac: 0, endFrac: 1, widthPx, heightPx, palette, dpr, decay: OVERVIEW_DECAY, layout: 'stacked',
+            });
         }
 
-        // Cue ticks across the full track
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const cues = this._data?.cues;
         if (cues) {
             for (const cue of cues) {
@@ -705,27 +589,6 @@ export default class WaveformDisplay {
                 ctx.fillStyle = cue.color || '#4ade80';
                 ctx.fillRect(frac * w - 0.5, 0, 1, h);
             }
-        }
-    }
-
-    _renderMonoOverview(ctx, w, h) {
-        const previewData = this._data?.waveform_preview;
-        if (!previewData || previewData.length === 0) return;
-        const ampA = new Float32Array(w);
-        const brightA = new Float32Array(w);
-        for (let px = 0; px < w; px++) {
-            const di = Math.min(Math.floor(px * previewData.length / w), previewData.length - 1);
-            const byte = previewData[di];
-            ampA[px] = displayAmp((byte & 0x1F) / 31.0);
-            brightA[px] = 100 + ((byte >> 5) & 0x07) / 7.0 * 155;
-        }
-        const ampE = clampEnvelopeFloor(applyEnvelope(ampA, 1, OVERVIEW_DECAY, OVERVIEW_ATTACK));
-        for (let px = 0; px < w; px++) {
-            const barH = ampE[px] * h;
-            if (barH < 0.5) continue;
-            const brightness = Math.round(brightA[px]);
-            ctx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.7)`;
-            ctx.fillRect(px, h - barH, 1, barH);
         }
     }
 
@@ -739,8 +602,9 @@ export default class WaveformDisplay {
         const w = size.w;
         const h = size.h;
         const ctx = this._resizeCanvas(canvas, w, h);
+        const palette = wavePalette();
 
-        ctx.fillStyle = '#0d0d0d';
+        ctx.fillStyle = palette.bg;
         ctx.fillRect(0, 0, w, h);
 
         if (!this._data) return;
@@ -749,28 +613,27 @@ export default class WaveformDisplay {
         const startFrac = this._offset;
         const endFrac = startFrac + visibleFrac;
 
-        const colorData = this._data.waveform_color;
-        if (colorData && colorData.length > 0) {
-            this._renderLexiconWaveform(ctx, w, h, colorData, startFrac, endFrac);
-        } else {
-            this._renderMonoFallback(ctx, w, h, this._data.waveform_preview, startFrac, endFrac);
+        this._renderBands(ctx, w, h, startFrac, endFrac, palette);
+        if (this._lockPlayhead && this._playheadFrac > startFrac) {
+            const playedW = Math.min(w, ((this._playheadFrac - startFrac) / visibleFrac) * w);
+            dimPlayed(ctx, playedW, h, palette);
         }
 
-        this._renderBeatGrid(ctx, w, h, startFrac, endFrac);
-        this._renderTimeGrid(ctx, w, h, startFrac, endFrac);
+        this._renderBeatGrid(ctx, w, h, startFrac, endFrac, palette);
+        this._renderTimeGrid(ctx, w, h, startFrac, endFrac, palette);
         this._renderCues(ctx, w, h, startFrac, endFrac);
-        this._renderCentrePlayhead(ctx, w, h);
+        this._renderCentrePlayhead(ctx, w, h, palette);
     }
 
-    // Fixed centre playhead for expanded mode — drawn last so it sits above the grid.
-    _renderCentrePlayhead(ctx, w, h) {
+    _renderCentrePlayhead(ctx, w, h, palette) {
         if (!this._lockPlayhead || this._playheadFrac < 0) return;
-        const x = w / 2;
-        ctx.strokeStyle = '#ffffff';
+        const x = this._zoom <= 1.0 ? this._playheadFrac * w : w / 2;
+        ctx.strokeStyle = palette.playhead;
         ctx.lineWidth = 1;
+        const lineX = this._lineAt(x, 1);
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
+        ctx.moveTo(lineX, 0);
+        ctx.lineTo(lineX, h);
         ctx.stroke();
     }
 
@@ -785,137 +648,31 @@ export default class WaveformDisplay {
             const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
             const color = cue.color || '#4ade80';
             ctx.fillStyle = color;
-            ctx.fillRect(x - 0.5, 0, 1, h);
+            ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, 1, h);
             ctx.beginPath();
             ctx.arc(x, 2.5, 2.5, 0, Math.PI * 2);
             ctx.fill();
         }
     }
 
-    _renderLexiconWaveform(ctx, w, h, data, startFrac, endFrac) {
-        const N = data.length;
-        if (N === 0) return;
-
-        const visibleFrac = endFrac - startFrac;
-        if (visibleFrac <= 0) return;
-
-        const entriesPerPixel = (visibleFrac * N) / w;
-
-        // ── Sub-pixel scroll: sample on an integer-pixel grid ───────
-        // The viewport slides by sub-pixel amounts each frame. If we sampled at
-        // the raw fractional offset, the per-pixel peak-hold buckets would
-        // re-bucket every frame and spiky bands (mid/high) would jitter in
-        // height as transients cross bucket boundaries. Instead, quantise the
-        // sample grid to whole pixels (stable bucket contents) and recover the
-        // smooth motion by translating the canvas by the sub-pixel remainder.
-        const fracPerPx = visibleFrac / w;
-        const leftPxReal = startFrac / fracPerPx;
-        const leftPxFloor = Math.floor(leftPxReal);
-        const subPx = leftPxReal - leftPxFloor;     // 0..1, drawn via translate
-        const qStartFrac = leftPxFloor * fracPerPx; // integer-pixel-aligned start
-
-        // ── Envelope lead-in ────────────────────────────────────────
-        // Process extra pixels before the viewport so the envelope
-        // follower is warmed up at the left edge.  Prevents shape
-        // popping when transients cross the viewport boundary.
-        const ENV_LEAD = 64;
-        const leadFrac = ENV_LEAD * visibleFrac / w;
-        // Allow negative — centred-at-start uses offset < 0 (blank before t=0).
-        const extStartFrac = qStartFrac - leadFrac;
-        const leadPx = Math.max(0, Math.round((qStartFrac - extStartFrac) / visibleFrac * w));
-        // Two extra trailing columns: the sub-pixel left-translate exposes up to
-        // 1px on the right edge that these fill (one isn't quite enough since the
-        // band polygon's last vertex lands at x = w - subPx).
-        const totalPx = leadPx + w + 2;
-
-        const bassA = new Float32Array(totalPx);
-        const midA  = new Float32Array(totalPx);
-        const highA = new Float32Array(totalPx);
-
-        // ── Pixel-first sampling ────────────────────────────────────
-        // Interpolate between columns when zoomed in (avoids entry-aligned
-        // plateaus). Peak-hold per pixel when zoomed out.
-        const pixelScale = w / visibleFrac;
-
-        for (let px = 0; px < totalPx; px++) {
-            const fracLo = extStartFrac + px / pixelScale;
-            const fracHi = extStartFrac + (px + 1) / pixelScale;
-            if (fracHi <= 0) continue;
-
-            if (entriesPerPixel < 1) {
-                const d = sampleColumnAtFrac(data, N, (fracLo + fracHi) * 0.5);
-                const amp = displayAmp(d.amp);
-                const [b, m, hi] = bandAmps(amp, d.r, d.g, d.b);
-                bassA[px] = b;
-                midA[px]  = m;
-                highA[px] = hi;
-            } else {
-                const iStart = Math.max(0, Math.floor(fracLo * N));
-                const iEnd = Math.min(N - 1, Math.max(iStart, Math.ceil(fracHi * N) - 1));
-                for (let i = iStart; i <= iEnd; i++) {
-                    const d = data[i];
-                    const amp = displayAmp(d.amp);
-                    const [b, m, hi] = bandAmps(amp, d.r, d.g, d.b);
-                    if (b > bassA[px]) bassA[px] = b;
-                    if (m > midA[px]) midA[px] = m;
-                    if (hi > highA[px]) highA[px] = hi;
-                }
-            }
-        }
-
-        // ── Envelope (full range including lead-in) ─────────────────
-        // Pixel-space smoothing — same decay as the overview bar.
-        const decay = this._mode === 'compact' ? 0.88 : 0.86;
-        const bassE = clampEnvelopeFloor(applyEnvelope(bassA, 1, decay));
-        const midE  = clampEnvelopeFloor(applyEnvelope(midA,  1, decay));
-        const highE = clampEnvelopeFloor(applyEnvelope(highA, 1, decay));
-
-        // ── Draw visible portion only (skip lead-in buffer) ─────────
-        // Translate by the sub-pixel remainder so the integer-pixel-aligned
-        // bars scroll smoothly. Draw one extra column to cover the exposed edge.
-        const yCenter = h / 2;
-        const scale = h / 2;
-        const drawW = w + 2;
+    _renderBands(ctx, w, h, startFrac, endFrac, palette) {
+        const bands = this._mode === 'compact' ? (this._data.bandsOverview || this._data.bands) : this._data.bands;
+        if (!bands || bands.low.length === 0) return;
+        const dpr = devicePixelRatio;
         ctx.save();
-        ctx.translate(-subPx, 0);
-        drawBand(ctx, bassE.subarray(leadPx, leadPx + drawW), drawW, yCenter, scale, COLOR_BASS);
-        drawBand(ctx, midE.subarray(leadPx, leadPx + drawW),  drawW, yCenter, scale, COLOR_MID);
-        drawBand(ctx, highE.subarray(leadPx, leadPx + drawW), drawW, yCenter, scale, COLOR_HIGH);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        drawBandRange(ctx, bands, {
+            startFrac,
+            endFrac,
+            widthPx: Math.round(w * dpr),
+            heightPx: Math.round(h * dpr),
+            palette,
+            dpr,
+            decay: this._mode === 'compact' ? COMPACT_DECAY : ZOOM_DECAY,
+            scrolling: this._mode !== 'compact',
+            layout: this._mode === 'compact' ? 'stacked' : 'centred',
+        });
         ctx.restore();
-    }
-
-    _renderMonoFallback(ctx, w, h, previewData, startFrac, endFrac) {
-        if (!previewData || previewData.length === 0) return;
-        const visibleFrac = endFrac - startFrac;
-        if (visibleFrac <= 0) return;
-
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-
-        for (let px = 0; px < w; px++) {
-            const fracLo = startFrac + (px / w) * visibleFrac;
-            const fracHi = startFrac + ((px + 1) / w) * visibleFrac;
-            if (fracHi <= 0) continue;
-            const frac = Math.max(0, (fracLo + fracHi) * 0.5);
-            const di = Math.min(Math.floor(frac * previewData.length), previewData.length - 1);
-            const byte = previewData[di];
-            const amplitude = displayAmp((byte & 0x1F) / 31.0);
-            const whiteness = ((byte >> 5) & 0x07) / 7.0;
-            const brightness = Math.round(100 + whiteness * 155);
-
-            const halfBar = amplitude * (h / 2);
-            const yTop = h / 2 - halfBar;
-            const yBottom = h / 2 + halfBar;
-
-            ctx.strokeStyle = amplitude < 0.01
-                ? FALLBACK_COLOR
-                : `rgba(${brightness}, ${brightness}, ${brightness}, ${WAVEFORM_ALPHA})`;
-            const x = px + 0.5;
-            ctx.beginPath();
-            ctx.moveTo(x, yBottom);
-            ctx.lineTo(x, yTop);
-            ctx.stroke();
-        }
     }
 
     // How many CSS pixels each beat gets in the current zoom viewport.
@@ -939,6 +696,15 @@ export default class WaveformDisplay {
         return 'full';
     }
 
+    // x (CSS px) of a vertical line of `lineWidth` CSS px that lands on whole device pixels. A line on a
+    // fractional position is anti-aliased across two pixels, so its brightness pulses while the view scrolls.
+    _lineAt(x, lineWidth) {
+        const dpr = devicePixelRatio;
+        const deviceWidth = Math.max(1, Math.round(lineWidth * dpr));
+        const device = x * dpr;
+        return (deviceWidth % 2 ? Math.floor(device) + 0.5 : Math.round(device)) / dpr;
+    }
+
     _beatX(frac, startFrac, endFrac, w) {
         return ((frac - startFrac) / (endFrac - startFrac)) * w;
     }
@@ -954,27 +720,27 @@ export default class WaveformDisplay {
         return width;
     }
 
-    _drawBarLabel(ctx, x, w, h, barNumber, isPhrase) {
+    _drawBarLabel(ctx, x, w, h, barNumber, isPhrase, palette) {
         const fontSize = 10;
         const label = String(barNumber);
         ctx.font = `${isPhrase ? 'bold ' : ''}${fontSize}px system-ui`;
         const labelW = this._labelWidth(ctx, label) + 2;
         const nearCentre = Math.abs(x - w / 2) < 28;
-        ctx.fillStyle = '#0d0d0d';
+        ctx.fillStyle = palette.bg;
         if (nearCentre) {
             ctx.textAlign = 'left';
             ctx.fillRect(x + 2, 0, labelW + 2, fontSize + 4);
-            ctx.fillStyle = isPhrase ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.6)';
+            ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
             ctx.fillText(label, x + 4, fontSize + 2);
         } else {
             ctx.textAlign = 'right';
             ctx.fillRect(x - labelW - 2, 0, labelW + 2, fontSize + 4);
-            ctx.fillStyle = isPhrase ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.6)';
+            ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
             ctx.fillText(label, x - 2, fontSize + 2);
         }
     }
 
-    _renderBeatGrid(ctx, w, h, startFrac, endFrac) {
+    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette) {
         const beats = this._data?.beats;
         const durationMs = this._data?.duration_ms;
         if (!beats || beats.length === 0 || !durationMs) return;
@@ -984,7 +750,7 @@ export default class WaveformDisplay {
 
         // Compact shows the whole track — phrase ticks only.
         if (this._mode === 'compact') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, false);
+            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, false, palette);
             return;
         }
 
@@ -992,11 +758,11 @@ export default class WaveformDisplay {
             this._pxPerBeat(w, startFrac, endFrac, beats, durationMs));
 
         if (detail === 'sections') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 16, true);
+            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 16, true, palette);
             return;
         }
         if (detail === 'phrases') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, true);
+            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, true, palette);
             return;
         }
 
@@ -1016,37 +782,35 @@ export default class WaveformDisplay {
 
             if (!isBar) {
                 if (!showBeats) continue;
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.strokeStyle = ink(palette, 0.3);
                 ctx.lineWidth = 0.5;
+                const beatX = this._lineAt(x, 0.5);
                 ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, h);
+                ctx.moveTo(beatX, 0);
+                ctx.lineTo(beatX, h);
                 ctx.stroke();
             } else {
-                ctx.strokeStyle = detail === 'bars+beats'
-                    ? 'rgba(255, 255, 255, 0.55)'
-                    : 'rgba(255, 255, 255, 0.7)';
+                ctx.strokeStyle = ink(palette, detail === 'bars+beats' ? 0.55 : 0.7);
                 ctx.lineWidth = 1;
+                const barX = this._lineAt(x, 1);
                 ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, h);
+                ctx.moveTo(barX, 0);
+                ctx.lineTo(barX, h);
                 ctx.stroke();
 
                 if (labelBars && (!labelPhrasesOnly || isPhrase)) {
-                    this._drawBarLabel(ctx, x, w, h, barNumber, isPhrase);
+                    this._drawBarLabel(ctx, x, w, h, barNumber, isPhrase, palette);
                 }
             }
         }
     }
 
     // Sparse bar grid — every `barStride` bars (4 = phrase, 16 = section).
-    _renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, barStride, labelPhrases) {
+    _renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, barStride, labelPhrases, palette) {
         const span = endFrac - startFrac;
         if (span <= 0) return;
         let barNumber = 0;
-        ctx.strokeStyle = barStride >= 16
-            ? 'rgba(255, 255, 255, 0.22)'
-            : 'rgba(255, 255, 255, 0.28)';
+        ctx.strokeStyle = ink(palette, barStride >= 16 ? 0.22 : 0.28);
         ctx.lineWidth = 1;
         for (const beat of beats) {
             if (beat.bar_position !== 1) continue;
@@ -1055,17 +819,18 @@ export default class WaveformDisplay {
             const frac = beat.time_ms / durationMs;
             if (frac < startFrac || frac > endFrac) continue;
             const x = this._beatX(frac, startFrac, endFrac, w);
+            const lineX = this._lineAt(x, 1);
             ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, h);
+            ctx.moveTo(lineX, 0);
+            ctx.lineTo(lineX, h);
             ctx.stroke();
             if (labelPhrases && barStride === 4) {
-                this._drawBarLabel(ctx, x, w, h, barNumber, true);
+                this._drawBarLabel(ctx, x, w, h, barNumber, true, palette);
             }
         }
     }
 
-    _renderTimeGrid(ctx, w, h, startFrac, endFrac) {
+    _renderTimeGrid(ctx, w, h, startFrac, endFrac, palette) {
         const durationMs = this._data?.duration_ms;
         if (!durationMs) return;
 
@@ -1083,7 +848,7 @@ export default class WaveformDisplay {
         // Compact: tuck the labels right against the bottom edge, smaller and
         // dimmer, so they sit out of the way of the (now taller) waveform.
         const compact = this._mode === 'compact';
-        ctx.fillStyle = compact ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.35)';
+        ctx.fillStyle = ink(palette, compact ? 0.22 : 0.35);
         ctx.font = compact ? '8px system-ui' : '9px system-ui';
         ctx.textAlign = 'left';
         ctx.textBaseline = compact ? 'bottom' : 'alphabetic';
