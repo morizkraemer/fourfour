@@ -111,3 +111,4 @@
 2026-10-26 13:38 orchestrator - run-resume (Merlin): W-E verify, W-B staged queue; then C, G, D, F; install on Mac as batches land
 2026-10-26 14:19 orchestrator - merged into q41-feedback: F7/F8/F9a/F11, F10, F8b/F12/F13; installed on Mac
 2026-10-26 14:41 orchestrator - Merlin round-2 feedback (F14–F26) logged; overnight queue: W-V viewport port → W-M mockups; W-C player; W-D hot cues; W-H drag-value BPM/key + rename
+2026-10-26 14:59 orchestrator - /tmp tmpfs filled (old worker build caches ~13 GB); cleaned; rule added: no cargo targets/caches under /tmp

@@ -174,7 +174,7 @@ autonomy: tight (draft; no queue run yet) — everything stays on branches; only
 own priorities: finish paused work → bugs → tests → perf → cleanup, inside Merlin's lane (app UX code on branches, analysis prototype, tests); experiments: max 1 per run, analysis prototype only (prototyping/analysis-packaging), never landed
 targets: analysis in Rust: beat-grid phase/drift (grid within ±20 ms of Rekordbox: 47% now) and key ≥60% exact on Beatport (57% now); sync UI per docs/ui/usb-sync-decisions.md, built only after Merlin settles its open questions
 ask before queue: anything in the brother's lane (usb-writer src, sync engine, format, hardware); building or changing sync UI while its open questions stand; copying more of Merlin's music or library data to dev; the 2026-10-30 → 2026-11-16 holiday (nothing user-visible lands); any push
-run limits: ≤2 workers; ≤4 analysis processes; one `cargo build --release` at a time; spawn nothing while `free -m` available < 1500 MB (earlyoom killed previews on 2026-10-15); datasets under benchmark/datasets are read-only; results/scratch in benchmark/results (gitignored)
+run limits: ≤2 workers; ≤4 analysis processes; one `cargo build --release` at a time; spawn nothing while `free -m` available < 1500 MB (earlyoom killed previews on 2026-10-15); datasets under benchmark/datasets are read-only; results/scratch in benchmark/results (gitignored); never put cargo targets, venvs or big caches under /tmp (RAM-backed tmpfs, filled up 2026-10-26) — use the worktree or ~/.cache
 
 ## Orchestrator
 
