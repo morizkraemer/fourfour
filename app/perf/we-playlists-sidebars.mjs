@@ -126,7 +126,7 @@ await step('resize sidebar and inspector, persist across reload', async () => {
   const grip = await page.locator('[aria-label="Resize sidebar"]').boundingBox();
   await page.mouse.move(grip.x + grip.width / 2, grip.y + 300);
   await page.mouse.down();
-  await page.mouse.move(grip.x + 100, grip.y + 300, { steps: 8 });
+  await page.mouse.move(grip.x + grip.width / 2 + 100, grip.y + 300, { steps: 8 });
   await page.waitForTimeout(100);
   await shot(page, 'f9-dragging');
   await page.mouse.up();
@@ -134,7 +134,7 @@ await step('resize sidebar and inspector, persist across reload', async () => {
   const g2 = await page.locator('[aria-label="Resize inspector"]').boundingBox();
   await page.mouse.move(g2.x + g2.width / 2, g2.y + 300);
   await page.mouse.down();
-  await page.mouse.move(g2.x - 120, g2.y + 300, { steps: 8 });
+  await page.mouse.move(g2.x + g2.width / 2 - 120, g2.y + 300, { steps: 8 });
   await page.mouse.up();
   const sb2 = await page.locator('.ff-sidebar').boundingBox();
   const det2 = await page.locator('.ff-browse__slot--detail').boundingBox();
@@ -194,6 +194,26 @@ await step('favourites menu: move to new playlist copies and keeps favourites', 
   await shot(page, 'f11-after');
   if (rows !== 2) throw new Error(`new playlist rows ${rows}`);
   if (favCount.trim() !== '2') throw new Error(`favourites changed: ${favCount}`);
+});
+await page.close();
+
+page = await newPage(1440);
+await step('favourites menu: Clear favourites asks for confirmation then empties', async () => {
+  await page.locator('[data-track-row]').nth(1).click();
+  await page.keyboard.press('1');
+  await page.waitForTimeout(300);
+  let dialogMessage = '';
+  page.once('dialog', (d) => {
+    dialogMessage = d.message();
+    d.accept();
+  });
+  await page.locator('.ff-sidebar-section__label', { hasText: 'FAVORITES' }).click({ button: 'right' });
+  await page.getByText('Clear favourites').click();
+  await page.waitForTimeout(500);
+  const favCount = await page.locator('.ff-sbrow', { hasText: 'Favorites 1' }).locator('.ff-sbrow__count').textContent();
+  await shot(page, 'f11-cleared');
+  if (!dialogMessage) throw new Error('no confirm shown');
+  if (favCount.trim() !== '0') throw new Error(`favourites not cleared: ${favCount}`);
 });
 await page.close();
 
