@@ -5,6 +5,7 @@
 import {
   getAnalysisData,
   invalidateAnalysisCache,
+  setBeatGrid,
   listenToAnalysisPartial,
   listenToAnalysisProgress,
   peekAnalysisData,
@@ -22,6 +23,15 @@ import {
 } from '../services/playback.svelte.ts';
 import { library, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
+import {
+  BEAT_NUDGE_MS,
+  createGridPersister,
+  shiftBeats,
+  shiftToPlaceDownbeatAt,
+  type BeatMarker,
+} from '../lib/beatGrid.ts';
+
+export type { BeatMarker };
 
 export interface PlayerCue {
   position: number;
@@ -34,11 +44,6 @@ export interface ColorWaveSample {
   r: number;
   g: number;
   b: number;
-}
-
-export interface BeatMarker {
-  time_ms: number;
-  bar_position: number;
 }
 
 export interface PlayerTrack {
@@ -333,12 +338,13 @@ let playerAnalysisListenerInstalled = false;
 export function initPlayerAnalysisRefresh() {
   if (playerAnalysisListenerInstalled) return;
   playerAnalysisListenerInstalled = true;
-  const refreshLoadedTrack = (trackId?: number) => {
+  const refreshLoadedTrack = async (trackId?: number) => {
     const loaded = player.track;
     if (!trackId || !loaded || loaded.id !== trackId) return;
+    await flushBeatGridEdits();
     invalidateAnalysisCache(trackId);
     player.loading = true;
-    void enrichPlayerTrack(loadGeneration, trackId, loaded);
+    void enrichPlayerTrack(loadGeneration, trackId, player.track?.id === trackId ? player.track : loaded);
   };
   listenToAnalysisProgress((progress) => refreshLoadedTrack(progress.track_id));
   listenToAnalysisPartial((partial) => refreshLoadedTrack(partial.track_id));
@@ -353,6 +359,7 @@ function prioritizeIfUnanalyzed(trackId: number, completeFallback: boolean) {
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
+  void flushBeatGridEdits();
   player.error = null;
   const stopped = playbackStop().catch((err) => console.error('playback stop failed:', err));
   player.playing = false;
@@ -502,16 +509,25 @@ export async function pause() {
 }
 
 // ── Beat-grid editing ──────────────────────────────────────────────────────
-// Local, visual-only edits to the displayed grid. These shift the in-memory
-// beat markers so the waveform re-renders; they are NOT yet persisted back to
-// the analysis cache or the USB writer.
-const BEAT_NUDGE_MS = 10;
+// A nudge or Set replaces the track's beats (the loaded track is a raw object, so the
+// change only reaches the waveform as a new object) and schedules saving the grid.
+const gridPersister = createGridPersister(setBeatGrid, (err) => {
+  console.error('saving the beat grid failed:', err);
+  player.error = `Could not save the beat grid: ${err}`;
+});
+
+/** Write a pending grid edit now (before another track loads). */
+export function flushBeatGridEdits(): Promise<void> {
+  return gridPersister.flush();
+}
 
 /** Shift every beat marker by deltaMs (negative = earlier/left). */
 export function beatGridShift(deltaMs: number) {
   const t = player.track;
-  if (!t || !t.beats.length) return;
-  t.beats = t.beats.map((b) => ({ ...b, time_ms: b.time_ms + deltaMs }));
+  if (!t || !t.beats.length || !deltaMs) return;
+  const beats = shiftBeats(t.beats, deltaMs);
+  player.track = { ...t, beats };
+  gridPersister.schedule(t.id, beats);
 }
 
 export function beatGridNudgeLeft() {
@@ -525,20 +541,9 @@ export function beatGridNudgeRight() {
 /** Snap the grid so the nearest downbeat lands on the current playhead. */
 export function beatGridSetCurrent() {
   const t = player.track;
-  if (!t || !t.beats.length || !t.durationMs) return;
-  const playMs = player.progress * t.durationMs;
-  const downbeats = t.beats.filter((b) => b.bar_position === 1);
-  const pool = downbeats.length ? downbeats : t.beats;
-  let nearest = pool[0];
-  let best = Infinity;
-  for (const b of pool) {
-    const d = Math.abs(b.time_ms - playMs);
-    if (d < best) {
-      best = d;
-      nearest = b;
-    }
-  }
-  beatGridShift(playMs - nearest.time_ms);
+  if (!t || !t.durationMs) return;
+  const delta = shiftToPlaceDownbeatAt(t.beats, player.progress * t.durationMs);
+  if (delta !== null) beatGridShift(delta);
 }
 
 export async function seekToProgress(progress: number) {

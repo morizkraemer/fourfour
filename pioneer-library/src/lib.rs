@@ -22,9 +22,16 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::{
-    AnalysisResult, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
+    AnalysisResult, Beat, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
 };
 use pioneer_usb_writer::{reader, writer};
+
+/// One beat of an edited grid: where it is and its place in the bar (1 to 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BeatPosition {
+    pub time_ms: u32,
+    pub bar_position: u8,
+}
 
 pub use multi_sync::{
     NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
@@ -216,6 +223,33 @@ impl LocalLibrary {
     /// for the missing stages: it is listed by `get_unanalyzed_track_ids` and left out of USB export.
     pub fn set_analysis_stages(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
         let analysis = &self.keep_imported_data(track_id, analysis)?;
+        self.write_analysis(track_id, analysis, stages)
+    }
+
+    /// Replace the beat grid of an analyzed track with an edited one (nudged, or set from the playhead).
+    /// The tempo of every beat stays the stored one. An edit is user data, so it is written as it is (not
+    /// replaced by a locked imported grid) and the analysis stages stay as they were.
+    pub fn set_beat_grid(&self, track_id: i64, positions: &[BeatPosition]) -> Result<()> {
+        let mut analysis = self
+            .get_analysis(track_id)?
+            .context("Track has no analysis to edit the beat grid of")?;
+        let tempo = analysis
+            .beat_grid
+            .beats
+            .first()
+            .map(|b| b.tempo)
+            .unwrap_or_else(|| (analysis.bpm * 100.0).round() as u32);
+        analysis.beat_grid = BeatGrid {
+            beats: positions
+                .iter()
+                .map(|p| Beat { bar_position: p.bar_position, time_ms: p.time_ms, tempo })
+                .collect(),
+        };
+        let stages = queries::select_analysis_stages(&self.conn, track_id)?.unwrap_or(analysis_stage::ALL);
+        self.write_analysis(track_id, &analysis, stages)
+    }
+
+    fn write_analysis(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
         // Write ANLZ files if we have a disk path.
         if let Some(dir) = self.track_anlz_dir(track_id) {
             std::fs::create_dir_all(&dir)
@@ -957,6 +991,95 @@ mod tests {
             exact: None,
         });
         a
+    }
+
+    fn shifted(analysis: &AnalysisResult, delta_ms: u32) -> Vec<BeatPosition> {
+        analysis
+            .beat_grid
+            .beats
+            .iter()
+            .map(|b| BeatPosition { time_ms: b.time_ms + delta_ms, bar_position: b.bar_position })
+            .collect()
+    }
+
+    #[test]
+    fn edited_beat_grid_is_stored_and_the_rest_of_the_analysis_is_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let id = lib.add_track(&make_track("Edit", "/music/e.mp3")).unwrap();
+        lib.set_analysis(id, &banded_analysis()).unwrap();
+        let before = lib.get_analysis(id).unwrap().unwrap();
+
+        lib.set_beat_grid(id, &shifted(&before, 37)).unwrap();
+
+        let after = lib.get_analysis(id).unwrap().unwrap();
+        let times: Vec<u32> = after.beat_grid.beats.iter().map(|b| b.time_ms).collect();
+        assert_eq!(times, vec![37, 506, 975, 1443]);
+        assert!(after.beat_grid.beats.iter().all(|b| b.tempo == 12800));
+        let bars: Vec<u8> = after.beat_grid.beats.iter().map(|b| b.bar_position).collect();
+        assert_eq!(bars, vec![1, 2, 3, 4]);
+        assert_eq!(after.bpm, before.bpm);
+        assert_eq!(after.key, before.key);
+        assert_eq!(after.waveform.data, before.waveform.data);
+        assert_eq!(after.cue_points.len(), before.cue_points.len());
+        let (a, b) = (after.color_waveform.unwrap(), before.color_waveform.unwrap());
+        assert_eq!(a.detail, b.detail);
+        assert_eq!(a.overview, b.overview);
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
+    }
+
+    #[test]
+    fn edited_beat_grid_keeps_pending_stages_and_survives_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let id = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let id = lib.add_track(&make_track("Edit", "/music/e.mp3")).unwrap();
+            lib.set_analysis_stages(id, &make_analysis(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
+            lib.set_beat_grid(id, &[BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }]).unwrap();
+            id
+        };
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let stored = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(stored.beat_grid.beats.len(), 2);
+        assert_eq!(stored.beat_grid.beats[0].time_ms, 120);
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::WAVEFORM | analysis_stage::KEY));
+    }
+
+    #[test]
+    fn edited_beat_grid_replaces_a_locked_imported_grid_and_stays_through_reanalysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let id = lib.add_track(&make_track("Locked", "/music/l.mp3")).unwrap();
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        rekordbox::ImportedMeta {
+            source: rekordbox::SourceKind::Xml,
+            source_id: "1".into(),
+            grid_locked: true,
+            cues_locked: false,
+            rating: None,
+            color: None,
+            cues: Vec::new(),
+            grid: Vec::new(),
+        }
+        .write(&lib.track_anlz_dir(id).unwrap())
+        .unwrap();
+
+        let current = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50)).unwrap();
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().beat_grid.beats[0].time_ms, 50);
+
+        let mut reanalysis = make_analysis();
+        reanalysis.beat_grid.beats[0].time_ms = 9;
+        lib.set_analysis(id, &reanalysis).unwrap();
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().beat_grid.beats[0].time_ms, 50);
+    }
+
+    #[test]
+    fn beat_grid_of_an_unanalyzed_track_is_an_error() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("None", "/music/n.mp3")).unwrap();
+        assert!(lib.set_beat_grid(id, &[BeatPosition { time_ms: 0, bar_position: 1 }]).is_err());
     }
 
     #[test]

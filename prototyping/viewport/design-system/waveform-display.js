@@ -207,6 +207,13 @@ export default class WaveformDisplay {
         this._paint();
     }
 
+    /** Replace the beat grid only (an edit): zoom, scroll position and the rest of the data stay. */
+    setBeats(beats) {
+        if (!this._data || this._data.beats === beats) return;
+        this._data = { ...this._data, beats };
+        this._paint();
+    }
+
     // Initial zoom on load. Compact is always full-track. Expanded targets a
     // ~5s visible window (Rekordbox-style close-up) derived from the duration.
     _defaultZoom() {

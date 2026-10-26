@@ -18,7 +18,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use pioneer_library::rekordbox;
-use pioneer_library::LocalLibrary;
+use pioneer_library::{BeatPosition, LocalLibrary};
 use pioneer_usb_writer::models;
 use pioneer_usb_writer::scanner;
 
@@ -736,6 +736,22 @@ async fn get_analysis_data(
     .map_err(|e| e.to_string())?
 }
 
+/// Store an edited beat grid (nudged or set from the playhead) for an analyzed track.
+#[tauri::command]
+async fn set_beat_grid(
+    track_id: i64,
+    beats: Vec<BeatPosition>,
+    state: State<'_, SharedLibrary>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.set_beat_grid(track_id, &beats).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 const ARTWORK_THUMB_CACHE_LIMIT: usize = 400;
 const ARTWORK_THUMB_JPEG_QUALITY: u8 = 85;
 
@@ -1102,6 +1118,7 @@ fn main() {
             get_analysis_backend,
             set_analysis_backend,
             get_analysis_data,
+            set_beat_grid,
             get_track_artwork,
             playback_play,
             playback_pause,
