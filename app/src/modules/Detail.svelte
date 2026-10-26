@@ -4,12 +4,13 @@
   Supports empty / single / multi modes.
 -->
 <script>
-  import { DetailPane } from '$ds';
+  import { DetailPane, ContextMenu } from '$ds';
   import {
     selectionCount,
     selectedTrack,
   } from '../stores/selection.svelte.ts';
-  import { ensureTrackPeaksLoaded } from '../stores/library.svelte.ts';
+  import { ensureTrackPeaksLoaded, revealFile } from '../stores/library.svelte.ts';
+  import { buildRevealItem } from '../menus/context-menus.ts';
 
   let mode = $derived(
     selectionCount() === 0 ? 'empty' :
@@ -17,6 +18,12 @@
   );
 
   let track = $derived(selectedTrack());
+
+  let pathMenu = $state({ open: false, x: 0, y: 0 });
+
+  function openPathMenu(e) {
+    pathMenu = { open: true, x: e.clientX, y: e.clientY };
+  }
 
   $effect(() => {
     const current = track;
@@ -52,6 +59,8 @@
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
       bands={track.bands}
+      onRevealPath={() => track.filePath && revealFile(track.filePath)}
+      onPathContextMenu={openPathMenu}
     />
   {:else if mode === 'multi'}
     <DetailPane
@@ -63,6 +72,14 @@
     <DetailPane mode="empty" />
   {/if}
 </div>
+
+<ContextMenu
+  open={pathMenu.open}
+  x={pathMenu.x}
+  y={pathMenu.y}
+  items={[buildRevealItem(track?.filePath)]}
+  onClose={() => (pathMenu = { ...pathMenu, open: false })}
+/>
 
 <style>
   .ff-detail-module {

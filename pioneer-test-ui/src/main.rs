@@ -487,6 +487,49 @@ fn get_mounted_volumes() -> Result<Vec<String>, String> {
     }
 }
 
+fn validated_reveal_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::PathBuf::from(path);
+    if path.trim().is_empty() {
+        return Err("No file path to reveal".to_string());
+    }
+    if !p.exists() {
+        return Err(format!("File not found: {path}"));
+    }
+    Ok(p)
+}
+
+/// Reveal a file in the OS file manager (selects it where supported).
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    let p = validated_reveal_path(&path)?;
+
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("open");
+        c.arg("-R").arg(&p);
+        c
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(format!("/select,{}", p.display()));
+        c
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut command = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(p.parent().unwrap_or(&p));
+        c
+    };
+
+    command
+        .spawn()
+        .map_err(|e| format!("Could not open file manager: {e}"))?;
+    Ok(())
+}
+
 /// Eject a mounted volume (macOS: `diskutil eject`, others: `umount`).
 #[tauri::command]
 fn eject_volume(path: String) -> Result<(), String> {
@@ -1026,6 +1069,7 @@ fn main() {
             set_test_cues,
             get_mounted_volumes,
             eject_volume,
+            reveal_in_finder,
             wipe_usb,
             save_state,
             load_state,
@@ -1090,7 +1134,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::artwork_thumbnail;
+    use super::{artwork_thumbnail, validated_reveal_path};
     use crate::analysis_python::{parse_analyzer_stdout, python_result_to_analysis};
 
     fn png_bytes(width: u32, height: u32) -> Vec<u8> {
@@ -1098,6 +1142,19 @@ mod tests {
         let mut out = std::io::Cursor::new(Vec::new());
         img.write_to(&mut out, image::ImageFormat::Png).expect("encode");
         out.into_inner()
+    }
+
+    #[test]
+    fn reveal_path_rejects_empty_and_missing_paths() {
+        assert!(validated_reveal_path("  ").is_err());
+        let err = validated_reveal_path("/definitely/not/here.mp3").unwrap_err();
+        assert!(err.contains("File not found"));
+    }
+
+    #[test]
+    fn reveal_path_accepts_existing_paths() {
+        let dir = std::env::temp_dir();
+        assert_eq!(validated_reveal_path(dir.to_str().unwrap()).unwrap(), dir);
     }
 
     #[test]

@@ -19,6 +19,7 @@ import {
   readUsbState as tauriReadUsbState,
   writeUsb as tauriWriteUsb,
   ejectVolume as tauriEjectVolume,
+  revealInFileManager,
   wipeUsb as tauriWipeUsb,
   listenToAnalysisProgress,
   listenToAnalysisComplete,
@@ -984,6 +985,14 @@ export async function wipeVolume(path: string) {
     await refreshUsbState();
   } catch (err) {
     console.error('wipeVolume failed:', err);
+  }
+}
+
+export async function revealFile(path: string) {
+  try {
+    await revealInFileManager(path);
+  } catch (err) {
+    library.statusMessage = String(err);
   }
 }
 

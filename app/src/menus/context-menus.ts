@@ -22,6 +22,7 @@ import {
   syncToUsb,
   wipeVolume,
   ejectVolume,
+  revealFile,
   selectVolume,
   refreshVolumes,
   setTestCuesOnSelected,
@@ -32,6 +33,19 @@ import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelt
 import { pickDirectory } from '../services/tauri.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 import { favouriteTrackIds } from '../lib/newPlaylist.ts';
+
+export function revealLabel(): string {
+  const platform = typeof navigator === 'undefined' ? '' : navigator.platform;
+  return /mac/i.test(platform) ? 'Show in Finder' : 'Show in folder';
+}
+
+export function buildRevealItem(filePath: string | undefined): MenuItem {
+  return {
+    label: revealLabel(),
+    disabled: !filePath,
+    onClick: () => revealFile(filePath!),
+  };
+}
 
 interface MenuItem {
   label?: string;
@@ -295,6 +309,11 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
     },
   ];
 
+  const revealItems: MenuItem[] =
+    trackIds.length === 1
+      ? [buildRevealItem(library.tracks.find((t) => t.id === trackIds[0])?.filePath)]
+      : [];
+
   if (!isUsbView) {
     const playlistItems = library.playlists
       .filter((p) => !isFavoritePlaylistName(p.name))
@@ -317,6 +336,7 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
     }
 
     items.push(
+      ...revealItems,
       { isSeparator: true },
       {
         label: analyzeLabel,
@@ -355,6 +375,8 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
         onTracksRemoved?.();
       },
     });
+  } else {
+    items.push(...revealItems);
   }
 
   return items;
