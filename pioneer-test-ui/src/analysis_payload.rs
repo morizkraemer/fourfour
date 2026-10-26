@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(flat, pwv7, "the stick carries the bytes the analysis measured");
 
         let row = base64_decode(payload["waveform_row_bands"].as_str().unwrap());
-        assert_eq!(row.len(), crate::track_infos::ROW_BAND_COLUMNS * 3);
+        assert_eq!(row.len(), pioneer_library::ROW_BAND_COLUMNS * 3);
         std::fs::remove_dir_all(&dir).ok();
     }
 

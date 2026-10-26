@@ -117,16 +117,24 @@
       style:left="{menuLeft}px"
       style:top="{menuTop}px"
       style:min-width="{menuMinWidth}px"
-      onclick={(e) => e.stopPropagation()}
+      tabindex="-1"
     >
       {#each options as opt (opt.value)}
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           role="option"
           aria-selected={opt.value === value}
           class="ff-menu__item ff-menu__item--default"
-          onclick={() => pick(opt.value)}
+          tabindex="-1"
+          onclick={(e) => {
+            e.stopPropagation();
+            pick(opt.value);
+          }}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              pick(opt.value);
+            }
+          }}
         >
           <span class="ff-menu__item-label">
             <span class="ff-dropdown__check">{opt.value === value ? '✓' : ' '}</span>

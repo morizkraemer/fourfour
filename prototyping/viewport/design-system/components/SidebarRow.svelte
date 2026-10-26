@@ -1,8 +1,4 @@
 <script>
-  // Sidebar row (Svelte port of sidebar-row.js). One component covers every row
-  // kind in the nav.
-  //   kind: 'section' | 'favorite' | 'leaf' | 'playlist' | 'usb'
-  //   state: 'rest' | 'hover' | 'active' | 'selected'  (items only)
   import './sidebar-row.css';
   import Icon from './Icon.svelte';
   import TagBadge from './TagBadge.svelte';
@@ -16,7 +12,7 @@
     digit,
     status,
     action,
-    state = 'rest',
+    state: rowState = 'rest',
     splitAction = true,
     renaming = false,
     renameValue = $bindable(''),
@@ -27,9 +23,9 @@
     onRenameCancel,
   } = $props();
 
-  let selected = $derived(state === 'active' || state === 'selected');
+  let selected = $derived(rowState === 'active' || rowState === 'selected');
   /** @type {HTMLInputElement | null} */
-  let renameInputEl = null;
+  let renameInputEl = $state(null);
   let skipRenameBlurCommit = false;
 
   $effect(() => {
@@ -73,7 +69,7 @@
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ff-sbrow ff-sbrow--{state}" {onclick} {ondblclick}>
+  <div class="ff-sbrow ff-sbrow--{rowState}" {onclick} {ondblclick}>
     {#if kind === 'favorite'}
       <TagBadge value={digit} variant={selected ? 'filled' : 'outline'} size="md" />
     {:else if kind === 'usb'}
