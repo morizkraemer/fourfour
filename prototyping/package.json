@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "viewport --port 5180"
+    "dev": "viewport --port 5180",
+    "mockups": "cd mockups && viewport --host 127.0.0.1 --port 5230 --no-open"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.1.1",
