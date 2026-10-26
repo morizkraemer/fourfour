@@ -32,12 +32,16 @@
   let ro;
   let lastDataKey = null;
 
+  function markerData() {
+    return (cues ?? []).map((c) => ({ position: c.position, color: c.color, label: c.label }));
+  }
+
   function buildData() {
     return {
       bands: (mode === 'expanded' ? (bandsDetail ?? bands) : bands) ?? undefined,
       bandsOverview: (bandsOverview ?? (mode === 'expanded' ? bands : null)) ?? undefined,
       beats: beats ?? [],
-      cues: (cues ?? []).map((c) => ({ position: c.position, color: c.color })),
+      cues: markerData(),
       duration_ms: durationMs ?? 0,
       bpm: Number(bpm) || 0,
     };
@@ -69,13 +73,18 @@
   // Push data only when the track or its waveform changes — NOT on every tick.
   $effect(() => {
     const detailLen = (mode === 'expanded' ? (bandsDetail ?? bands) : bands)?.low.length ?? 0;
-    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ? 1 : 0}:${cues?.length ?? 0}:${durationMs}`;
+    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ? 1 : 0}:${durationMs}`;
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
     // Pass playhead with data so zoom offset centres atomically on load (progress
     // often stays 0 across track changes, so a separate effect would not re-run).
     display.setData(buildData(), progress);
+  });
+
+  // A cue edit redraws the markers only: no data reset, so zoom and scroll stay.
+  $effect(() => {
+    display?.setCues(markerData());
   });
 
   // A beat-grid edit moves the grid only: no data reset, so zoom and scroll stay.

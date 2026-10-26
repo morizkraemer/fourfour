@@ -43,6 +43,8 @@ import {
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
+import { loadCuesFromPayload } from './cues.svelte.ts';
+import type { CuePointPayload } from '../lib/cues.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
@@ -461,7 +463,7 @@ function applyWaveformAndCuesFromAnalysis(
   res: {
     waveform_preview?: number[];
     waveform_row_bands?: string | null;
-    cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
+    cue_points?: CuePointPayload[];
     bpm?: number;
     key?: string;
     analysis_pending?: boolean;
@@ -476,18 +478,7 @@ function applyWaveformAndCuesFromAnalysis(
     track.bandsPreview = undefined;
     track.preview = Uint8Array.from(res.waveform_preview);
   }
-  if (res.cue_points) {
-    track.cues = res.cue_points.map((cue) => {
-      const mins = Math.floor(cue.time_ms / 60000);
-      const secs = Math.floor((cue.time_ms % 60000) / 1000);
-      const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
-      return {
-        name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
-        position: posStr,
-        color: cue.color,
-      };
-    });
-  }
+  if (res.cue_points) loadCuesFromPayload(track.id as number, res.cue_points);
   if (res.bpm) track.bpm = Number(res.bpm).toFixed(1);
   if (res.key) track.key = res.key;
   track.analyzed = true;
@@ -639,7 +630,6 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     genre: t.genre || '—',
     year: '—',
     filePath: t.source_path,
-    cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
     analyzed,
     analysisPending: t.analysis_pending ?? false,

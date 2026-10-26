@@ -5,6 +5,7 @@ import {
   isValidAnalysisPayload,
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
+import type { CuePointPayload } from '../lib/cues.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
@@ -503,6 +504,37 @@ export async function setBeatGrid(
   invalidateAnalysisCache(trackId);
 }
 
+const MOCK_CUES_KEY = 'fourfour.mock.cues';
+
+function mockCueStore(): Record<string, CuePointPayload[]> {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_CUES_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+/** Replace the cues of a track (slot 0 memory, 1 to 8 hot A to H); the next analysis read carries them. */
+export async function setCues(trackId: number, cues: CuePointPayload[]): Promise<void> {
+  try {
+    await invoke('set_cues', { trackId, cues });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    try {
+      localStorage.setItem(MOCK_CUES_KEY, JSON.stringify({ ...mockCueStore(), [trackId]: cues }));
+    } catch {
+      mockCueFallback.set(trackId, cues);
+    }
+  }
+  invalidateAnalysisCache(trackId);
+}
+
+const mockCueFallback = new Map<number, CuePointPayload[]>();
+
+function mockEditedCues(trackId: number): CuePointPayload[] | undefined {
+  return mockCueStore()[trackId] ?? mockCueFallback.get(trackId);
+}
+
 async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
@@ -522,7 +554,12 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
           ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload, trackId)
           : mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key);
       const edited = mockBeatGrids.get(trackId);
-      const clean = sanitizeAnalysisPayload(edited ? { ...data, beats: edited } : data);
+      const editedCues = mockEditedCues(trackId);
+      const clean = sanitizeAnalysisPayload({
+        ...data,
+        ...(edited ? { beats: edited } : {}),
+        ...(editedCues ? { cue_points: editedCues } : {}),
+      });
       cacheAnalysis(trackId, clean);
       return clean;
     }

@@ -21,7 +21,10 @@ export function mockAnalysisData(trackId: number, durationSecs: number, tempo: n
     bpm,
     key,
     beats,
-    cue_points: [{ time_ms: Math.round(durationMs * 0.08) }, { time_ms: Math.round(durationMs * 0.5) }],
+    cue_points: [
+      { hot_cue_number: 0, time_ms: Math.round(durationMs * 0.08), loop_time_ms: null },
+      { hot_cue_number: 1, time_ms: Math.round(durationMs * 0.5), loop_time_ms: null },
+    ],
     waveform_preview: previewFromBands(strip),
     waveform_row_bands: rowBandsBase64(strip),
     waveform_color: encodeStickWire(bandBytes(strip)),

@@ -11,6 +11,16 @@
   } from '../stores/selection.svelte.ts';
   import { ensureTrackPeaksLoaded, revealFile } from '../stores/library.svelte.ts';
   import { player, seekToProgress } from '../stores/player.svelte.ts';
+  import { cuesOf } from '../stores/cues.svelte.ts';
+  import {
+    addHotCueAtPlayhead,
+    addMemoryCueAtPlayhead,
+    deleteCue,
+    jumpToCue,
+    recolorCue,
+    renameCue,
+  } from '../stores/cue-actions.ts';
+  import { CUE_PALETTE, cueChip } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
 
   let mode = $derived(
@@ -20,6 +30,13 @@
 
   let track = $derived(selectedTrack());
   let trackIsLoaded = $derived(!!track && player.track?.id === track.id);
+
+  let cueChips = $derived(cuesOf(track?.id).map(cueChip));
+
+  function addCue(kind) {
+    if (kind === 'memory') addMemoryCueAtPlayhead();
+    else addHotCueAtPlayhead();
+  }
 
   let pathMenu = $state({ open: false, x: 0, y: 0 });
 
@@ -57,7 +74,16 @@
       title={track.title}
       artist={track.artist}
       meta={singleMeta}
-      cues={track.cues ?? []}
+      cues={cueChips}
+      cuePalette={CUE_PALETTE}
+      showCues={track.analyzed}
+      canSetCues={trackIsLoaded}
+      canJumpToCues={trackIsLoaded}
+      onCueAdd={addCue}
+      onCueJump={(chip) => jumpToCue(chip)}
+      onCueRename={(chip, name) => renameCue(track.id, chip.key, name)}
+      onCueRecolor={(chip, color) => recolorCue(track.id, chip.key, color)}
+      onCueDelete={(chip) => deleteCue(track.id, chip.key)}
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
       bands={track.bands}
