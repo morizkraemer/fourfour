@@ -1,46 +1,11 @@
-use std::path::Path;
-
 use anyhow::{Context, Result, bail};
-use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::{Beat, BeatGrid};
 
-use crate::{LocalLibrary, queries};
+use crate::{LocalLibrary, UserEdits, queries};
 
-pub const USER_EDITS_FILE: &str = "user_edits.json";
 pub const MIN_BPM: f64 = 40.0;
 pub const MAX_BPM: f64 = 250.0;
-
-/// Values the user typed or scrubbed in the app. Re-analysis must not replace them.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UserEdits {
-    #[serde(default)]
-    pub bpm_locked: bool,
-    #[serde(default)]
-    pub key_locked: bool,
-}
-
-impl UserEdits {
-    pub fn read(track_anlz_dir: &Path) -> Self {
-        std::fs::read(track_anlz_dir.join(USER_EDITS_FILE))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
-    }
-
-    fn write(&self, track_anlz_dir: &Path) -> Result<()> {
-        let path = track_anlz_dir.join(USER_EDITS_FILE);
-        if *self == Self::default() {
-            return match std::fs::remove_file(&path) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e).context("Failed to remove user_edits.json"),
-                _ => Ok(()),
-            };
-        }
-        std::fs::create_dir_all(track_anlz_dir)
-            .with_context(|| format!("Failed to create {}", track_anlz_dir.display()))?;
-        std::fs::write(path, serde_json::to_vec_pretty(self)?).context("Failed to write user_edits.json")
-    }
-}
 
 pub fn is_camelot(key: &str) -> bool {
     let Some(letter) = key.chars().last() else { return false };
@@ -50,12 +15,12 @@ pub fn is_camelot(key: &str) -> bool {
 
 impl LocalLibrary {
     pub fn user_edits(&self, track_id: i64) -> UserEdits {
-        self.track_anlz_dir(track_id).map(|dir| UserEdits::read(&dir)).unwrap_or_default()
+        self.track_anlz_dir(track_id).and_then(|dir| UserEdits::read(&dir)).unwrap_or_default()
     }
 
     fn update_user_edits(&self, track_id: i64, change: impl FnOnce(&mut UserEdits)) -> Result<()> {
         let Some(dir) = self.track_anlz_dir(track_id) else { return Ok(()) };
-        let mut edits = UserEdits::read(&dir);
+        let mut edits = UserEdits::read(&dir).unwrap_or_default();
         change(&mut edits);
         edits.write(&dir)
     }
@@ -81,11 +46,6 @@ impl LocalLibrary {
             bail!("Track has no analysis to set the key of");
         }
         self.update_user_edits(track_id, |edits| edits.key_locked = true)
-    }
-
-    /// Let re-analysis replace the hand-set BPM and key of a track again.
-    pub fn release_user_edits(&self, track_id: i64) -> Result<()> {
-        self.update_user_edits(track_id, |edits| *edits = UserEdits::default())
     }
 
     /// Fit the beat grid to a new BPM: spacing is scaled around the first beat and every beat
@@ -118,7 +78,10 @@ impl LocalLibrary {
         analysis.bpm = new_tempo as f64 / 100.0;
         let stages = queries::select_analysis_stages(&self.conn, track_id)?.unwrap_or(crate::analysis_stage::ALL);
         self.write_analysis(track_id, &analysis, stages)?;
-        self.update_user_edits(track_id, |edits| edits.bpm_locked = true)
+        self.update_user_edits(track_id, |edits| {
+            edits.bpm_locked = true;
+            edits.grid_locked = true;
+        })
     }
 
     /// Re-analysis keeps a hand-set BPM and key.

@@ -146,14 +146,20 @@ pub fn build_analysis_json(
                 })
             }).collect();
 
-            // Serialize cue points
-            let cue_points: Vec<serde_json::Value> = a.cue_points.iter().map(|c| {
-                serde_json::json!({
-                    "hot_cue_number": c.hot_cue_number,
-                    "time_ms": c.time_ms,
-                    "loop_time_ms": c.loop_time_ms,
+            let cue_points: Vec<serde_json::Value> = lib
+                .get_cues(track_id)
+                .map_err(|e| e.to_string())?
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "hot_cue_number": c.hot_cue_number,
+                        "time_ms": c.time_ms,
+                        "loop_time_ms": c.loop_time_ms,
+                        "color": c.color,
+                        "name": c.name,
+                    })
                 })
-            }).collect();
+                .collect();
 
             payload.insert("waveform_preview".into(), serde_json::json!(preview.unwrap_or_default()));
             payload.insert("waveform_peaks".into(), serde_json::Value::Array(vec![]));
@@ -316,6 +322,33 @@ mod tests {
 
         let row = base64_decode(payload["waveform_row_bands"].as_str().unwrap());
         assert_eq!(row.len(), crate::track_infos::ROW_BAND_COLUMNS * 3);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn analysis_data_carries_edited_cues_with_name_and_colour() {
+        let dir = std::env::temp_dir().join(format!("ff-wd-cues-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+        let id = lib.add_track(&test_track(12.0)).unwrap();
+        lib.set_analysis(id, &measured_analysis(12.0)).unwrap();
+        let cue = |slot, time_ms, name: &str, color: Option<&str>| pioneer_library::rekordbox::ImportedCue {
+            hot_cue_number: slot,
+            time_ms,
+            loop_time_ms: None,
+            color: color.map(String::from),
+            name: name.into(),
+        };
+        lib.set_cues(id, &[cue(2, 4_000, "Drop", Some("#ff2fa3")), cue(0, 1_000, "", None)]).unwrap();
+
+        let payload = build_analysis_json(&lib, id).unwrap();
+        let cues = payload["cue_points"].as_array().unwrap();
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0]["hot_cue_number"], 2);
+        assert_eq!(cues[0]["name"], "Drop");
+        assert_eq!(cues[0]["color"], "#ff2fa3");
+        assert_eq!(cues[1]["hot_cue_number"], 0);
+        assert!(cues[1]["color"].is_null());
         std::fs::remove_dir_all(&dir).ok();
     }
 

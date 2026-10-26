@@ -194,43 +194,30 @@
 .ff-detail-pane__cues-section {
   display: flex;
   flex-direction: column;
+  gap: 6px;
 }
 
 .ff-detail-pane__cues-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
   gap: 6px;
 }
 
 .ff-detail-pane__cue-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 1 1 calc(33.333% - 4px);
-  min-width: 72px;
-  padding: 5px 8px;
+  min-width: 0;
   border-radius: var(--ff-radius-sm);
   background-color: var(--ff-hover);
   box-sizing: border-box;
 }
 
-.ff-detail-pane__cue-chip--active {
-  background-color: var(--ff-select);
+/* Plain chip of the canvas prototype (detail-pane.js): dot, name, time directly inside. */
+.ff-detail-pane__cue-chip:not(:has(.ff-detail-pane__cue-main)) {
+  gap: 8px;
+  padding: 5px 8px;
 }
 
-.ff-detail-pane__cue-chip--add {
-  flex: 0 0 auto;
-  min-width: 26px;
-  justify-content: center;
-  color: var(--ff-muted);
-  background-color: var(--ff-hover);
-  font-family: var(--ff-font);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-/* Cue square of size 8x8 with 2px border-radius */
 .ff-detail-pane__cue-dot {
   width: 8px;
   height: 8px;
@@ -238,8 +225,89 @@
   flex: none;
 }
 
+.ff-detail-pane__cue-chip--active {
+  background-color: var(--ff-select);
+}
+
+.ff-detail-pane__cue-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 4px 5px 6px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ff-detail-pane__cue-main:disabled {
+  cursor: default;
+}
+
+.ff-detail-pane__cue-edit {
+  flex: none;
+  padding: 5px 6px 5px 2px;
+  border: none;
+  background: none;
+  color: var(--ff-faint);
+  font-family: var(--ff-font);
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.ff-detail-pane__cue-edit:hover {
+  color: var(--ff-text);
+}
+
+.ff-detail-pane__cue-chip--add {
+  justify-content: center;
+  min-height: 26px;
+  border: none;
+  color: var(--ff-muted);
+  font-family: var(--ff-font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ff-detail-pane__cue-chip--add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ff-detail-pane__cue-chip--add:not(:disabled):hover {
+  color: var(--ff-text);
+  background-color: var(--ff-select);
+}
+
+.ff-detail-pane__cue-editor {
+  display: flex;
+}
+
+/* Slot letter on the cue colour: 16x16, 3px radius */
+.ff-detail-pane__cue-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  flex: none;
+  font-family: var(--ff-font);
+  font-size: 10px;
+  font-weight: 700;
+  color: #0a0a0a;
+}
+
 .ff-detail-pane__cue-name {
   flex: 1 1 0;
+  min-width: 0;
   font-family: var(--ff-font);
   font-size: 12px;
   color: var(--ff-text);
@@ -249,6 +317,8 @@
 }
 
 .ff-detail-pane__cue-pos {
+  flex: none;
+  margin-left: auto;
   font-family: var(--ff-font-mono);
   font-size: 11px;
   color: var(--ff-text-mid);

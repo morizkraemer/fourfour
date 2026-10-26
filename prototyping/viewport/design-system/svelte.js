@@ -45,6 +45,7 @@ export { default as SidebarRow } from './components/SidebarRow.svelte';
 export { default as TrackRow, TRACK_COLUMNS } from './components/TrackRow.svelte';
 export { default as PlayerCompact } from './components/PlayerCompact.svelte';
 export { default as DetailPane } from './components/DetailPane.svelte';
+export { default as CueEditor } from './components/CueEditor.svelte';
 export { default as EmptyState } from './components/EmptyState.svelte';
 export { default as Onboarding } from './components/Onboarding.svelte';
 export { default as Dialog } from './components/Dialog.svelte';

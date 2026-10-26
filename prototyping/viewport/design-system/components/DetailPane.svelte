@@ -16,9 +16,6 @@
     return Number(m[1]) * 60 + Number(m[2]);
   }
 
-  // Cue color palette matching the track-row / cuestrip CDJ colors.
-  const CUE_COLORS = ['#ec4899', '#38bdf8', '#4ade80', '#f59e0b', '#a78bfa', '#facc15', '#94a3b8'];
-
   const SINGLE_META_KEYS = ['ALBUM', 'LABEL', 'BPM · KEY', 'DURATION', 'ADDED'];
   const MULTI_META_KEYS = ['TOTAL SIZE', 'TOTAL DURATION', 'BPM RANGE', 'KEYS'];
 </script>
@@ -29,6 +26,7 @@
   import ScrubValue from './ScrubValue.svelte';
   import { bpmScrub, keyScrub } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
+  import CueEditor from './CueEditor.svelte';
   import { middleTruncate } from '../utils/middle-truncate.js';
 
   let {
@@ -37,6 +35,15 @@
     artist = '',
     meta = {},
     cues = [],
+    cuePalette = [],
+    showCues = false,
+    canSetCues = false,
+    canJumpToCues = false,
+    onCueAdd = undefined,
+    onCueJump = undefined,
+    onCueRename = undefined,
+    onCueRecolor = undefined,
+    onCueDelete = undefined,
     multiCount = 0,
     filePath = '',
     cover = '',
@@ -58,15 +65,19 @@
   let isMissing = $derived(mode === 'missing');
   let stripWidth = $state(0);
 
-  // Overview-waveform hot-cue dots, positioned along the track duration.
+  // Overview-waveform cue dots, positioned along the track duration.
   let waveCues = $derived.by(() => {
     const totalSec = timeToSeconds(lookupKey(meta, 'DURATION'));
-    return (cues || []).map((cue, idx) => {
-      const sec = timeToSeconds(cue.position);
-      const frac = totalSec && sec != null ? sec / totalSec : cues.length > 1 ? idx / (cues.length - 1) : 0;
-      return { position: frac, color: cue.color || CUE_COLORS[idx % CUE_COLORS.length] };
-    });
+    if (!totalSec) return [];
+    return (cues || []).map((cue) => ({ position: Math.min(1, cue.timeMs / 1000 / totalSec), color: cue.color }));
   });
+
+  let hotChips = $derived((cues || []).filter((c) => c.slot > 0));
+  let memoryChips = $derived((cues || []).filter((c) => c.slot === 0));
+  let editingKey = $state(null);
+  let editingChip = $derived((cues || []).find((c) => c.key === editingKey) ?? null);
+
+  const ADD_BLOCKED = 'Load this track in the player to set a cue at the playhead';
 
   // Single/missing meta rows, with the BPM · KEY composite row.
   let singleMeta = $derived(
@@ -192,21 +203,59 @@
       {/each}
     </dl>
 
-    {#if !isMissing && cues && cues.length > 0}
-      <div class="ff-detail-pane__cues-section">
-        <div class="ff-detail-pane__section-title">HOT CUE</div>
-        <div class="ff-detail-pane__cues-grid">
-          {#each cues as cue, idx}
-            {@const color = cue.color || CUE_COLORS[idx % CUE_COLORS.length]}
-            <div class="ff-detail-pane__cue-chip{idx === 0 ? ' ff-detail-pane__cue-chip--active' : ''}">
-              <div class="ff-detail-pane__cue-dot" style="background-color:{color}"></div>
-              <span class="ff-detail-pane__cue-name">{cue.name}</span>
-              <span class="ff-detail-pane__cue-pos">{cue.position}</span>
+    {#if !isMissing && showCues}
+      {#each [{ title: 'HOT CUE', kind: 'hot', chips: hotChips, addLabel: 'Add hot cue at playhead' }, { title: 'MEMORY CUE', kind: 'memory', chips: memoryChips, addLabel: 'Add memory cue at playhead' }] as group (group.kind)}
+        <div class="ff-detail-pane__cues-section" data-cue-group={group.kind}>
+          <div class="ff-detail-pane__section-title">{group.title}</div>
+          <div class="ff-detail-pane__cues-grid">
+            {#each group.chips as chip (chip.key)}
+              <div
+                class="ff-detail-pane__cue-chip{editingKey === chip.key ? ' ff-detail-pane__cue-chip--active' : ''}"
+                data-cue-key={chip.key}>
+                <button
+                  type="button"
+                  class="ff-detail-pane__cue-main"
+                  title={canJumpToCues ? `${chip.label}: jump here` : chip.label}
+                  aria-label={chip.label}
+                  disabled={!canJumpToCues}
+                  onclick={() => onCueJump?.(chip)}
+                  ondblclick={() => (editingKey = chip.key)}>
+                  <span class="ff-detail-pane__cue-badge" style="background-color:{chip.color}">{chip.letter}</span>
+                  {#if chip.name}<span class="ff-detail-pane__cue-name">{chip.name}</span>{/if}
+                  <span class="ff-detail-pane__cue-pos">{chip.time}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ff-detail-pane__cue-edit"
+                  title="Rename, recolour or delete"
+                  aria-label="Edit {chip.label}"
+                  onclick={() => (editingKey = editingKey === chip.key ? null : chip.key)}>···</button>
+              </div>
+            {/each}
+            <button
+              type="button"
+              class="ff-detail-pane__cue-chip ff-detail-pane__cue-chip--add"
+              title={canSetCues ? group.addLabel : ADD_BLOCKED}
+              aria-label={group.addLabel}
+              disabled={!canSetCues}
+              onclick={() => onCueAdd?.(group.kind)}>+</button>
+          </div>
+          {#if editingChip && (editingChip.slot === 0) === (group.kind === 'memory')}
+            <div class="ff-detail-pane__cue-editor">
+              <CueEditor
+                chip={editingChip}
+                palette={cuePalette}
+                onRename={(name) => editingChip && onCueRename?.(editingChip, name)}
+                onRecolor={(color) => editingChip && onCueRecolor?.(editingChip, color)}
+                onDelete={() => {
+                  if (editingChip) onCueDelete?.(editingChip);
+                  editingKey = null;
+                }}
+                onClose={() => (editingKey = null)} />
             </div>
-          {/each}
-          <div class="ff-detail-pane__cue-chip ff-detail-pane__cue-chip--add">+</div>
+          {/if}
         </div>
-      </div>
+      {/each}
     {/if}
 
     {#if displayPath}
