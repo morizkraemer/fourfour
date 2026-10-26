@@ -48,13 +48,9 @@
   import { installMacWindowChrome } from './services/window-chrome.ts';
   
   let fileDropVisible = $state(false);
-  let browseContentEl = $state(null);
+  let browseMainEl = $state(null);
 
-  // Inspector is the grey z-layer between the black browse window and the drawer.
-  // It shows only when collapsed (rail) with a selection; the drawer floats above it.
-  let inspectorVisible = $derived(
-    ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded
-  );
+  let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0);
 
   let dropTarget = $derived(importDropTarget());
   let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
@@ -119,7 +115,7 @@
 </script>
 
 <div class="ff-browse">
-  <div class="ff-browse__main">
+  <div class="ff-browse__main" bind:this={browseMainEl}>
     <div class="ff-browse__slot ff-browse__slot--sidebar" data-focus-region="sidebar">
       <Sidebar />
     </div>
@@ -127,7 +123,7 @@
       <div class="ff-browse__slot ff-browse__slot--header" data-focus-region="search">
         <GlobalHeader />
       </div>
-      <div class="ff-browse__content" bind:this={browseContentEl}>
+      <div class="ff-browse__content">
         <div class="ff-browse__slot ff-browse__slot--table" data-focus-region="tracks">
           <TrackTable />
         </div>
@@ -146,18 +142,13 @@
             <Detail />
           </div>
         {/if}
-        <!-- Drawer sits on the inspector's grey layer: the dock backing turns grey
-             whenever the inspector is visible so the gap around the floating drawer
-             reads as that layer, not the black browse window. -->
-        <div
-          class="ff-browse__organize-dock"
-          class:ff-browse__organize-dock--inspector={inspectorVisible}
-          data-focus-region="organize"
-        >
-          <OrganizePanel contentEl={browseContentEl} />
-        </div>
       </div>
     </div>
+    {#if ui.organize.expanded}
+      <div class="ff-browse__organize-dock" data-focus-region="organize">
+        <OrganizePanel containerEl={browseMainEl} />
+      </div>
+    {/if}
   </div>
   <div class="ff-browse__slot ff-browse__slot--player" data-focus-region="player">
     <Player />
@@ -209,8 +200,9 @@
     background: var(--ff-bg);
   }
 
-  /* main area: [ sidebar | body[ header / content ] ], fills space above player + status */
+  /* main area: [ sidebar | body[ header / content ] | organize ], fills space above player + status */
   .ff-browse__main {
+    position: relative;
     flex: 1 1 0;
     min-height: 0;
     display: flex;
@@ -242,15 +234,25 @@
   .ff-browse__slot--table   { flex: 1 1 0; }
   .ff-browse__slot--detail  { flex: none; position: relative; }
 
-  /* Backing dock for the organize drawer — the inspector's grey z-layer shows
-     through the drawer's top/bottom margin when the inspector is open. */
   .ff-browse__organize-dock {
     display: flex;
     flex: none;
     min-width: 0;
   }
-  .ff-browse__organize-dock--inspector {
-    background: var(--ff-surface);
+  @media (min-width: 1100px) and (max-width: 1279px) {
+    .ff-browse__main:has(.ff-browse__organize-dock) .ff-browse__slot--detail {
+      display: none;
+    }
+  }
+  @media (max-width: 1099px) {
+    .ff-browse__organize-dock {
+      position: absolute;
+      top: var(--ff-titlebar-band-height);
+      right: 0;
+      bottom: 0;
+      z-index: 5;
+      box-shadow: -12px 0 24px rgba(0, 0, 0, 0.4);
+    }
   }
   .ff-browse__slot--player,
   .ff-browse__slot--status  { flex: none; }
