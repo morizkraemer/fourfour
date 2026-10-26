@@ -75,13 +75,11 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: running · resumed 2026-10-26 13:38 by Merlin · install latest on the Mac as batches land · cap 2 · autonomy tight
-targets: Merlin's 13 feedback items from the Mac test of the q33 build (checklist .agent/feedback-2026-10-26.md, gitignored)
-resume from: integration branch q41-feedback (= q33-rust-analysis + F1/F6 merged; worktree scratchpad/q41-int).
-  - wb-analysis-priority 5053732 (F2 now-lane + partial waveform done; left: staged queue waveform→key→BPM/grid, timings, full validation, doc; fix: partial write must not mark track fully analysed)
-  - we-playlists-sidebars 51fc018 (F7, F8, F9a, F11 coded; left: run walkthrough + screenshots + perf, then merge)
-  - not started: W-C player (F3 resize height, F4 grid broken, F5 sidebar preview click seeks), W-G file path (F10 reveal in Finder, middle-truncate), W-D hot cues (F9b), W-F Cmd-K palette + shortcut settings + Tab/Shift-Tab (F8b, F12, F13)
-  - after all: install on Mac, then merge q41-feedback → master on Merlin's OK
+status: running · overnight since 2026-10-26 15:32 (Merlin) · cap 2 · autonomy tight · all on q41-feedback, installed on the Mac by morning, not merged to master
+targets: Merlin's feedback (.agent/feedback-2026-10-26.md) + his layout idea
+plan: (1) W-C player fixes F3/F4/F5/F14/F20/F24 [running] → (2) W-L layout: right sidebar (organize/board) anchored to the full window height incl. the top bar, its toggle in the top bar next to search; inspector stays inside the main view on the right of the track list; keep today's staggered layout. Mockup board + build. → (3) W-D hot cues F9b/F25 → (4) W-H drag up/down BPM + key (players + inspector) + Rename in playlist menu F17/F18 → (5) auto-resume pending analysis at launch → (6) morning: full checks, install, summary
+decided: inspector edits write to the library only for now (file tags later); mockup round 1 options A–C not taken (Merlin's own layout idea instead); inspector/settings overhaul waits for a new round
+parked: sync UI round 3 (2 open answers); Rust auto cues/energy (licence)
 
 ## Rundown
 Overnight: startup 30k 24.7 s→0.5 s backend / 188 s→3.3 s first paint; track load ~300→50 ms; fling CPU −55%; search first key 445→120 ms; audio engine 11 fixes + 26 tests; Rekordbox import (master.db/USB/XML); multi-USB sync 2.4–3×; grid 47→78.5%; analysis CPU 74→70 s/track; 108 app tests. All on branches (tight); docs on master.
