@@ -108,3 +108,4 @@
 2026-10-26 09:02 orchestrator - run-pause (Merlin): F1/F6 merged into q41-feedback; W-B + W-E told to commit WIP; resume as overnight queue on Merlin's word
 2026-10-26 09:02 orchestrator - paused W-E: we-playlists-sidebars 51fc018 (F7/F8/F9a/F11 coded, tests green before WIP; walkthrough + perf not run)
 2026-10-26 09:07 orchestrator - paused W-B: wb-analysis-priority 5053732 (now lane + partial waveform done; staged queue, timings, full validation, doc left; risk: partial write marks track analysed with bpm 0 if app quits mid-analysis)
+2026-10-26 13:38 orchestrator - run-resume (Merlin): W-E verify, W-B staged queue; then C, G, D, F; install on Mac as batches land

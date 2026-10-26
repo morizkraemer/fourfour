@@ -75,7 +75,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: paused · since 2026-10-26 09:02 · Merlin: resume later as an overnight queue on "resume" · cap 2 · autonomy tight
+status: running · resumed 2026-10-26 13:38 by Merlin · install latest on the Mac as batches land · cap 2 · autonomy tight
 targets: Merlin's 13 feedback items from the Mac test of the q33 build (checklist .agent/feedback-2026-10-26.md, gitignored)
 resume from: integration branch q41-feedback (= q33-rust-analysis + F1/F6 merged; worktree scratchpad/q41-int).
   - wb-analysis-priority 5053732 (F2 now-lane + partial waveform done; left: staged queue waveform→key→BPM/grid, timings, full validation, doc; fix: partial write must not mark track fully analysed)
