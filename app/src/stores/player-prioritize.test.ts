@@ -23,7 +23,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { library } from './library.svelte.ts';
+import { ensureTrackPeaksLoaded, library } from './library.svelte.ts';
 import { initPlayerAnalysisRefresh, loadPlayerTrack, playFromStart } from './player.svelte.ts';
 
 const invokeMock = vi.mocked(invoke);
@@ -74,6 +74,25 @@ describe('priority analysis from the player', () => {
     await loadPlayerTrack(backendTrack(7, false));
     expect(library.analyzingTrackIds).toEqual([7, 3, 4]);
     expect(prioritizeCalls()).toHaveLength(1);
+  });
+
+  it('keeps prioritising a track whose key or grid is still pending', async () => {
+    library.tracks = [{ ...libraryTrack(7, true), analysisPending: true }];
+    await loadPlayerTrack({ ...backendTrack(7, true), analysis_pending: true });
+    expect(prioritizeCalls()).toEqual([['prioritize_analysis', { trackId: 7 }]]);
+  });
+
+  it('shows the waveform of a partial analysis without a BPM and keeps the track pending', async () => {
+    const preview = Array.from({ length: 400 }, (_, i) => 1 + (i % 30));
+    invokeMock.mockImplementation(async (command: string) =>
+      command === 'get_analysis_data' ? { waveform_preview: preview, bpm: 0, key: '', beats: [], analysis_pending: true } : undefined,
+    );
+    const track: Record<string, unknown> = { ...libraryTrack(9, true), bpm: '—', key: '—', analysisPending: true };
+    await ensureTrackPeaksLoaded(track);
+    invokeMock.mockImplementation(async () => undefined);
+    expect(track.bpm).toBe('—');
+    expect(track.analysisPending).toBe(true);
+    expect(track.preview).toBeInstanceOf(Uint8Array);
   });
 
   it('leaves an analysed track alone', async () => {

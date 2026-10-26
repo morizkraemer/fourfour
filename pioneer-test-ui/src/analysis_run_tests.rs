@@ -1,11 +1,12 @@
 use super::*;
 use crate::analysis_backend::PartialResultSink;
-use fourfour_analysis::service::PoolPlan;
+use fourfour_analysis::service::{Pass, PoolPlan};
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, Track, WaveformPreview};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Event {
     Start(String, usize),
+    Ran(String, Pass),
     Paused(String),
     Resumed(String),
     Cancelled(String),
@@ -19,6 +20,7 @@ type EventLog = Arc<Mutex<Vec<Event>>>;
 
 const CHUNKS: usize = 6;
 const CHUNK: Duration = Duration::from_millis(40);
+const FAST: Duration = Duration::from_millis(10);
 
 struct FakeEngine {
     log: EventLog,
@@ -44,11 +46,17 @@ impl TrackEngine for FakeEngine {
         PoolPlan { workers, threads_per_track: self.max_threads / workers }
     }
 
-    fn analyze(&self, path: &Path, control: &Control, threads: usize, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {
+    fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {
         let name = file_name_of(path);
         self.log.lock().unwrap().push(Event::Start(name.clone(), threads));
+        self.log.lock().unwrap().push(Event::Ran(name.clone(), pass));
         if let Some(emit) = on_partial {
             emit(AnalysisResult { bpm: 0.0, key: String::new(), ..finished_result() });
+        }
+        if pass == Pass::Fast {
+            std::thread::sleep(FAST);
+            self.log.lock().unwrap().push(Event::End(name));
+            return Ok(AnalysisResult { bpm: 0.0, ..finished_result() });
         }
         for _ in 0..CHUNKS {
             let mut paused = false;
@@ -69,7 +77,8 @@ impl TrackEngine for FakeEngine {
             std::thread::sleep(CHUNK);
         }
         self.log.lock().unwrap().push(Event::End(name));
-        Ok(finished_result())
+        let key = if pass == Pass::Grid { String::new() } else { "8A".to_string() };
+        Ok(AnalysisResult { key, ..finished_result() })
     }
 }
 
@@ -168,10 +177,21 @@ impl Harness {
         self.shared.lock().unwrap().get_unanalyzed_track_ids().unwrap()
     }
 
-    async fn run_and_prioritize_later(&self, queued: Vec<AnalysisWorkItem>, priority: AnalysisWorkItem) -> RunOutcome {
+    async fn run_and_prioritize_when(
+        &self,
+        queued: Vec<AnalysisWorkItem>,
+        priority: AnalysisWorkItem,
+        trigger: impl Fn(&[Event]) -> bool,
+    ) -> RunOutcome {
         let run = run_with_runner(self.shared.clone(), self.coordinator.clone(), queued, self.sink.clone(), BackendEnv::default(), Some(self.runner()));
         let prioritize = async {
-            tokio::time::sleep(Duration::from_millis(70)).await;
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !trigger(&self.events()) {
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            })
+            .await
+            .expect("trigger never happened");
             prioritize_with_runner(self.shared.clone(), self.coordinator.clone(), priority, self.sink.clone(), BackendEnv::default(), self.runner())
                 .await
                 .unwrap();
@@ -179,6 +199,20 @@ impl Harness {
         let (outcome, ()) = tokio::join!(run, prioritize);
         outcome.unwrap()
     }
+
+    async fn run_all(&self, queued: Vec<AnalysisWorkItem>) -> RunOutcome {
+        run_with_runner(self.shared.clone(), self.coordinator.clone(), queued, self.sink.clone(), BackendEnv::default(), Some(self.runner()))
+            .await
+            .unwrap()
+    }
+}
+
+fn ran(name: &str, pass: Pass) -> Event {
+    Event::Ran(name.to_string(), pass)
+}
+
+fn has(events: &[Event], wanted: &Event) -> bool {
+    events.contains(wanted)
 }
 
 fn start(name: &str, threads: usize) -> Event {
@@ -190,51 +224,122 @@ fn named(kind: fn(String) -> Event, name: &str) -> Event {
 }
 
 #[tokio::test]
-async fn a_queued_track_jumps_to_the_now_lane_and_background_yields() {
-    let h = harness(8, 2, 8);
-    let outcome = h.run_and_prioritize_later(h.items.clone(), h.items[6].clone()).await;
+async fn the_fast_pass_of_every_track_comes_before_any_grid_pass_and_stores_waveform_and_key() {
+    let h = harness(5, 2, 8);
+    let outcome = h.run_all(h.items.clone()).await;
 
-    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 8 }));
-    assert_eq!(h.count(&start("t7.wav", 8)), 1, "{:?}", h.events());
-    assert_eq!(h.count(&start("t7.wav", 4)), 0);
-    assert!(h.position(&start("t7.wav", 8)) < h.position(&start("t3.wav", 4)), "t7 starts before the third queued track");
-    let end_t7 = h.position(&named(Event::End, "t7.wav"));
-    assert!(h.position(&named(Event::Paused, "t1.wav")) < end_t7);
-    assert!(h.position(&named(Event::Paused, "t2.wav")) < end_t7);
-    assert!(h.position(&named(Event::Resumed, "t1.wav")) > end_t7);
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 5 }));
+    let events = h.events();
+    let last_fast = events.iter().rposition(|e| matches!(e, Event::Ran(_, Pass::Fast))).unwrap();
+    let first_grid = events.iter().position(|e| matches!(e, Event::Ran(_, Pass::Grid))).unwrap();
+    assert!(last_fast < first_grid, "{events:?}");
+    for n in 1..=5 {
+        let name = format!("t{n}.wav");
+        assert!(h.count(&Event::PartialStored(n, 0.0)) >= 1);
+        assert_eq!(h.count(&ran(&name, Pass::Fast)), 1, "{events:?}");
+        assert_eq!(h.count(&ran(&name, Pass::Grid)), 1);
+        let stored = h.shared.lock().unwrap().get_analysis(n).unwrap().unwrap();
+        assert_eq!((stored.bpm, stored.key.as_str()), (128.0, "8A"), "grid result keeps the key the fast pass found");
+        assert_eq!(h.shared.lock().unwrap().analysis_stages(n).unwrap(), Some(analysis_stage::ALL));
+    }
+    assert!(h.unanalyzed().is_empty());
+}
+
+#[tokio::test]
+async fn between_the_passes_a_track_is_waveform_and_key_only() {
+    let h = harness(3, 1, 8);
+    let run = h.run_all(h.items.clone());
+    let watch = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !has(&h.events(), &ran("t1.wav", Pass::Grid)) {
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let lib = h.shared.lock().unwrap();
+        assert_eq!(lib.analysis_stages(3).unwrap(), Some(analysis_stage::WAVEFORM | analysis_stage::KEY));
+        assert_eq!(lib.get_unanalyzed_track_ids().unwrap(), vec![1, 2, 3]);
+        assert_eq!(lib.get_track(3).unwrap().unwrap().key, "8A");
+    };
+    tokio::join!(run, watch);
+}
+
+#[tokio::test]
+async fn a_track_with_waveform_and_key_stored_goes_straight_to_the_grid_pass() {
+    let h = harness(2, 1, 8);
+    h.shared.lock().unwrap().set_analysis_stages(1, &finished_result(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
+    h.run_all(h.items.clone()).await;
+
+    assert_eq!(h.count(&ran("t1.wav", Pass::Fast)), 0);
+    assert_eq!(h.count(&ran("t1.wav", Pass::Grid)), 1);
+    assert_eq!(h.count(&ran("t2.wav", Pass::Fast)), 1);
+}
+
+#[tokio::test]
+async fn with_staging_off_every_track_is_analysed_in_one_piece() {
+    let mut h = harness(3, 2, 8);
+    h.coordinator = AnalysisCoordinator::default().with_staging(false);
+    h.run_all(h.items.clone()).await;
+
+    assert!(h.events().iter().all(|e| !matches!(e, Event::Ran(_, Pass::Fast | Pass::Grid))));
+    assert_eq!(h.events().iter().filter(|e| matches!(e, Event::Ran(_, Pass::All))).count(), 3);
+    assert!(h.unanalyzed().is_empty());
+}
+
+#[tokio::test]
+async fn a_queued_track_jumps_to_the_now_lane_and_running_grid_passes_yield() {
+    let h = harness(6, 2, 8);
+    let outcome = h
+        .run_and_prioritize_when(h.items.clone(), h.items[5].clone(), |e| has(e, &ran("t1.wav", Pass::Grid)) && has(e, &ran("t2.wav", Pass::Grid)))
+        .await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 6 }));
+    assert_eq!(h.count(&start("t6.wav", 8)), 1, "{:?}", h.events());
+    assert_eq!(h.count(&ran("t6.wav", Pass::All)), 1);
+    assert_eq!(h.count(&ran("t6.wav", Pass::Grid)), 0, "its queued grid pass was replaced");
+    let end_t6 = h.events().iter().rposition(|e| *e == named(Event::End, "t6.wav")).unwrap();
+    assert!(h.position(&named(Event::Paused, "t1.wav")) < end_t6);
+    assert!(h.position(&named(Event::Paused, "t2.wav")) < end_t6);
+    assert!(h.position(&named(Event::Resumed, "t1.wav")) > end_t6);
+    assert!(h.position(&ran("t3.wav", Pass::Grid)) > end_t6, "queued grid passes wait for the now lane");
     assert!(h.unanalyzed().is_empty());
     assert_eq!(h.count(&Event::Complete), 1);
     assert_eq!(h.events().last(), Some(&Event::Complete));
 }
 
 #[tokio::test]
-async fn the_waveform_is_stored_before_the_full_result() {
+async fn the_now_lane_stores_the_waveform_before_the_full_result() {
     let h = harness(3, 1, 8);
-    h.run_and_prioritize_later(h.items.clone(), h.items[2].clone()).await;
+    h.run_and_prioritize_when(h.items.clone(), h.items[2].clone(), |e| has(e, &ran("t1.wav", Pass::Grid))).await;
 
-    assert_eq!(h.count(&Event::PartialStored(3, 0.0)), 1, "{:?}", h.events());
-    assert!(h.position(&Event::PartialStored(3, 0.0)) < h.position(&named(Event::End, "t3.wav")));
+    let events = h.events();
+    let all_start = events.iter().position(|e| *e == ran("t3.wav", Pass::All)).unwrap();
+    let end = events.iter().rposition(|e| *e == named(Event::End, "t3.wav")).unwrap();
+    assert!(events[all_start..end].contains(&Event::PartialStored(3, 0.0)), "{events:?}");
     assert_eq!(h.shared.lock().unwrap().get_analysis(3).unwrap().unwrap().bpm, 128.0);
 }
 
 #[tokio::test]
-async fn a_narrow_in_flight_job_is_preempted_and_restarted_wide() {
-    let h = harness(4, 2, 8);
-    let outcome = h.run_and_prioritize_later(h.items.clone(), h.items[1].clone()).await;
+async fn a_narrow_grid_job_is_preempted_and_restarted_wide() {
+    let h = harness(6, 2, 8);
+    let outcome = h
+        .run_and_prioritize_when(h.items.clone(), h.items[0].clone(), |e| has(e, &ran("t1.wav", Pass::Grid)))
+        .await;
 
-    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 4 }));
-    assert_eq!(h.count(&start("t2.wav", 4)), 1);
-    assert_eq!(h.count(&named(Event::Cancelled, "t2.wav")), 1);
-    assert_eq!(h.count(&start("t2.wav", 8)), 1);
-    assert_eq!(h.count(&named(Event::End, "t2.wav")), 1);
-    assert_eq!(h.count(&Event::Progress(2)), 1);
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 6 }));
+    assert_eq!(h.count(&named(Event::Cancelled, "t1.wav")), 1, "{:?}", h.events());
+    assert_eq!(h.count(&ran("t1.wav", Pass::All)), 1);
+    assert_eq!(h.count(&Event::Progress(1)), 1);
     assert!(h.unanalyzed().is_empty());
 }
 
 #[tokio::test]
 async fn a_track_missing_from_the_queue_joins_the_run_and_its_total() {
     let h = harness(4, 2, 8);
-    let outcome = h.run_and_prioritize_later(h.items[..3].to_vec(), h.items[3].clone()).await;
+    let outcome = h
+        .run_and_prioritize_when(h.items[..3].to_vec(), h.items[3].clone(), |e| !e.is_empty())
+        .await;
 
     assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 4 }));
     assert_eq!(h.count(&start("t4.wav", 8)), 1);
@@ -245,12 +350,14 @@ async fn a_track_missing_from_the_queue_joins_the_run_and_its_total() {
 #[tokio::test]
 async fn a_job_that_already_has_every_thread_is_left_alone() {
     let h = harness(2, 1, 8);
-    let outcome = h.run_and_prioritize_later(h.items[..1].to_vec(), h.items[0].clone()).await;
+    let outcome = h
+        .run_and_prioritize_when(h.items[..1].to_vec(), h.items[0].clone(), |e| has(e, &ran("t1.wav", Pass::Grid)))
+        .await;
 
     assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 1 }));
-    assert_eq!(h.count(&start("t1.wav", 8)), 1);
+    assert_eq!(h.count(&ran("t1.wav", Pass::Grid)), 1);
     assert_eq!(h.count(&named(Event::Cancelled, "t1.wav")), 0);
-    assert_eq!(h.count(&Event::Paused("t1.wav".to_string())), 0);
+    assert_eq!(h.count(&ran("t1.wav", Pass::All)), 0);
 }
 
 #[tokio::test]
@@ -260,7 +367,8 @@ async fn prioritizing_while_idle_runs_the_track_alone_with_every_thread() {
         .await
         .unwrap();
 
-    assert_eq!(h.count(&start("t2.wav", 8)), 1);
+    assert_eq!(h.count(&start("t2.wav", 1)), 1, "the run starts with the fast pass");
+    assert_eq!(h.count(&start("t2.wav", 8)), 1, "the grid pass has every thread");
     assert_eq!(h.count(&Event::Complete), 1);
     assert_eq!(h.unanalyzed(), vec![1]);
     assert!(!h.coordinator.is_active());
@@ -293,7 +401,7 @@ fn cancel_reaches_every_job() {
     assert!(coordinator.try_begin());
     let queue: SharedAnalysisQueue = Arc::new(Mutex::new(VecDeque::from([(1, PathBuf::from("/a.wav")), (2, PathBuf::from("/b.wav"))])));
     coordinator.register_run(queue, 2);
-    let background = coordinator.take_next(|_| 1).unwrap();
+    let background = coordinator.take_next(true, |_| 0, |_| 1).unwrap();
     let NowClaim::Granted { cancel: now } = coordinator.claim_now(2, 8) else { panic!("claim refused") };
 
     coordinator.cancel();
