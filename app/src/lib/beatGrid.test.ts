@@ -127,6 +127,16 @@ describe('createGridPersister', () => {
     expect(order).toEqual(['start 1', 'end 1', 'start 2', 'end 2']);
   });
 
+  it('writes the waiting edit of one track when another track is edited', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    const clock = fakeTimers();
+    const persister = createGridPersister(save, vi.fn(), 400, clock.timers);
+    persister.schedule(1, grid());
+    persister.schedule(2, grid());
+    await persister.flush();
+    expect(save.mock.calls.map((c) => c[0])).toEqual([1, 2]);
+  });
+
   it('reports a failed write and keeps saving later edits', async () => {
     const failure = new Error('disk full');
     const save = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
