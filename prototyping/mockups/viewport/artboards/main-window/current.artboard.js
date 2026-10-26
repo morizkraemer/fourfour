@@ -1,7 +1,7 @@
-import { host, MainWindow } from '#design-system/index.js';
+import { host, MwBoards } from '#design-system/index.js';
 
-export const meta = { title: 'Main window: current', layer: 'composite', group: 'Main window', order: 0 };
+export const meta = { title: "Now: inspector open", layer: 'composite', group: "Main window (F23, F16)", order: 0 };
 
 export default function render() {
-  return host(MainWindow);
+  return host(MwBoards, { variant: "now" });
 }

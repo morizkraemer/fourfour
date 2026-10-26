@@ -100,7 +100,8 @@
   .mw__header { display: flex; align-items: center; justify-content: center; gap: var(--ff-space-4); }
   .mw__content { flex: 1 1 0; min-height: 0; display: flex; }
   .mw__table { flex: 1 1 0; min-width: 0; overflow: auto; background: var(--ff-bg); }
-  .mw__detail { flex: none; width: 278px; position: relative; }
+  .mw__detail { flex: none; width: 320px; position: relative; overflow: hidden; }
+  .mw__detail :global(.ff-detail-pane) { width: 100%; height: 100%; }
   .mw__player, .mw__status { flex: none; }
   .mw__status { border-top: 1px solid var(--ff-border); }
 </style>
