@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { existsSync, readFileSync } from 'node:fs';
 
 /**
  * Scroll frame pacing of the expanded player's zoom view while playing (mock transport, 50 ms ticks).
@@ -37,6 +38,14 @@ await page.addInitScript((jitter) => {
   window.setInterval = (fn, ms, ...rest) =>
     realSetInterval(ms === 50 && jitter > 0 ? () => setTimeout(fn, Math.random() * jitter) : fn, ms, ...rest);
 }, Number(jitterArg));
+if (process.env.OVERRIDE_DIR) {
+  await page.route(/design-system\/waveform-[a-z]+\.js|design-system\/playhead-clock\.js/, async (route) => {
+    const name = new URL(route.request().url()).pathname.split('/').pop();
+    const file = `${process.env.OVERRIDE_DIR}/${name}`;
+    if (!existsSync(file)) return route.continue();
+    return route.fulfill({ contentType: 'text/javascript', body: readFileSync(file) });
+  });
+}
 await page.goto(`${base}/?mock=2000`, { waitUntil: 'load' });
 await page.waitForSelector('[data-track-row]', { timeout: 120000 });
 await page.waitForTimeout(1000);
@@ -60,7 +69,7 @@ const result = await page.evaluate(async (seconds) => {
   const start = performance.now();
   await new Promise((resolve) => {
     function frame(t) {
-      reads.push({ t, scrolled: window.__scrolled.total, paints: window.__scrolled.paints });
+      reads.push({ t, n: performance.now(), scrolled: window.__scrolled.total, paints: window.__scrolled.paints });
       if (t - start < seconds * 1000) requestAnimationFrame(frame);
       else resolve();
     }
@@ -68,7 +77,7 @@ const result = await page.evaluate(async (seconds) => {
   });
   const out = [];
   for (let i = 1; i < reads.length; i++) {
-    out.push({ dt: reads[i].t - reads[i - 1].t, shift: reads[i].scrolled - reads[i - 1].scrolled, paints: reads[i].paints - reads[i - 1].paints });
+    out.push({ dt: reads[i].t - reads[i - 1].t, wall: reads[i].n - reads[i - 1].n, shift: reads[i].scrolled - reads[i - 1].scrolled, paints: reads[i].paints - reads[i - 1].paints });
   }
   return out;
 }, SECONDS);
@@ -82,7 +91,7 @@ const hist = {};
 for (const s of shifts) hist[s] = (hist[s] ?? 0) + 1;
 const mean = shifts.reduce((a, b) => a + b, 0) / shifts.length;
 const sd = Math.sqrt(shifts.reduce((a, b) => a + (b - mean) ** 2, 0) / shifts.length);
-const velocities = result.map((r) => (r.shift / r.dt) * 1000);
+const velocities = result.map((r) => (r.shift / r.wall) * 1000);
 const vMean = velocities.reduce((a, b) => a + b, 0) / velocities.length;
 const vSd = Math.sqrt(velocities.reduce((a, b) => a + (b - vMean) ** 2, 0) / velocities.length);
 const vSorted = [...velocities].sort((a, b) => a - b);
@@ -106,4 +115,8 @@ const summary = {
   errors,
 };
 console.log(JSON.stringify(summary));
+if (process.env.TRACE) {
+  console.log(result.slice(0, 60).map((r) => `${r.dt.toFixed(1)}:${r.shift}:${r.paints}`).join(' '));
+  console.log(JSON.stringify(await page.evaluate(() => window.__lf?.slice(40, 100))));
+}
 await browser.close();

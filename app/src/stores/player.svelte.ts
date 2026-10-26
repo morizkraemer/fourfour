@@ -23,6 +23,7 @@ import {
 } from '../services/playback.svelte.ts';
 import { library, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
+import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
 import {
   BEAT_NUDGE_MS,
   createGridPersister,
@@ -99,6 +100,7 @@ export function setExpanded(value: boolean) {
 }
 
 let loadGeneration = 0;
+const transportClock = new PlayheadClock();
 let tickUnlisten: (() => void) | null = null;
 let errorUnlisten: (() => void) | null = null;
 let playPending = false;
@@ -253,6 +255,8 @@ async function ensureTickListener() {
         }
       }
       player.progress = Math.max(0, Math.min(1, tick.position_ms / dur));
+      if (tick.playing) transportClock.report(tick.position_ms, performance.now());
+      else transportClock.stop(tick.position_ms);
     }
     player.playing = tick.playing;
   });
@@ -538,11 +542,18 @@ export function beatGridNudgeRight() {
   beatGridShift(BEAT_NUDGE_MS);
 }
 
+/** Where the playhead is right now: while playing, the transport clock (reports only arrive every 50 ms); else the stored position. */
+export function currentPositionMs(): number {
+  const t = player.track;
+  if (!t) return 0;
+  return player.playing ? transportClock.positionAt(performance.now()) : player.progress * t.durationMs;
+}
+
 /** Snap the grid so the nearest downbeat lands on the current playhead. */
 export function beatGridSetCurrent() {
   const t = player.track;
   if (!t || !t.durationMs) return;
-  const delta = shiftToPlaceDownbeatAt(t.beats, player.progress * t.durationMs);
+  const delta = shiftToPlaceDownbeatAt(t.beats, currentPositionMs());
   if (delta !== null) beatGridShift(delta);
 }
 
