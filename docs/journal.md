@@ -119,3 +119,4 @@
 2026-10-26 18:37 orchestrator - W-C merged into q41-feedback (wc-player 96da10a: F3/F4/F5/F14/F20/F24; 56 fps pacing); W-D hot cues spawned (incl. user-edit lock for cues + grid)
 2026-10-26 18:41 orchestrator - W-L merged (wl-layout 551776c: right sidebar full-height outside main view, ends above player; top-bar toggle; inspector hides 1100–1279 when sidebar open); W-R auto-resume spawned
 2026-10-26 18:59 orchestrator - merged wr-resume (auto-resume analysis at launch) into q41-feedback 1117b43; W-H drag-value BPM/key + rename spawned; W-D hot cues still running
+2026-10-26 19:10 orchestrator - merged wd-hotcues (hot cues A–H, memory cues, CUE button, edit lock; F9b/F25) into q41-feedback 606e56c; writer cue name/colour gaps → docs/architecture/cues.md for brother; W-H told to wire player header too
