@@ -149,6 +149,17 @@
   text-overflow: ellipsis;
 }
 
+.ff-detail-pane__dd--tempo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: visible;
+}
+
+.ff-detail-pane__tempo-sep {
+  color: var(--ff-faint);
+}
+
 /* Multi-select Header */
 .ff-detail-pane__count-display {
   font-family: var(--ff-font);

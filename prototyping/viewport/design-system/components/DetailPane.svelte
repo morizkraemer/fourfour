@@ -26,6 +26,9 @@
 <script>
   import './detail-pane.css';
   import Waveform from './Waveform.svelte';
+  import ScrubValue from './ScrubValue.svelte';
+  import { bpmScrub, keyScrub } from '../utils/scrub.js';
+  import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
 
   let {
@@ -42,7 +45,15 @@
     onWaveformSeek = undefined,
     onRevealPath = undefined,
     onPathContextMenu = undefined,
+    bpm = 0,
+    musicalKey = '',
+    onBpmChange = undefined,
+    onKeyChange = undefined,
+    bpmMenuItems = [],
+    keyMenuItems = [],
   } = $props();
+
+  let tempoEditable = $derived(!!onBpmChange && !!onKeyChange);
 
   let isMissing = $derived(mode === 'missing');
   let stripWidth = $state(0);
@@ -169,7 +180,15 @@
     <dl class="ff-detail-pane__meta-list">
       {#each singleMeta as row}
         <dt class="ff-detail-pane__dt">{row.key}</dt>
-        <dd class="ff-detail-pane__dd">{row.val}</dd>
+        {#if row.key === 'BPM · KEY' && tempoEditable && !isMissing}
+          <dd class="ff-detail-pane__dd ff-detail-pane__dd--tempo">
+            <ScrubValue model={bpmScrub} value={bpm} label="BPM" onCommit={onBpmChange} extraItems={bpmMenuItems} />
+            <span class="ff-detail-pane__tempo-sep" aria-hidden="true">·</span>
+            <ScrubValue model={keyScrub} value={musicalKey} label="Key" color={keyColor(musicalKey)} onCommit={onKeyChange} extraItems={keyMenuItems} />
+          </dd>
+        {:else}
+          <dd class="ff-detail-pane__dd">{row.val}</dd>
+        {/if}
       {/each}
     </dl>
 

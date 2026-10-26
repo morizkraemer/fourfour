@@ -465,6 +465,8 @@ function applyWaveformAndCuesFromAnalysis(
     cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
     bpm?: number;
     key?: string;
+    bpm_locked?: boolean;
+    key_locked?: boolean;
     analysis_pending?: boolean;
   },
 ): boolean {
@@ -489,8 +491,13 @@ function applyWaveformAndCuesFromAnalysis(
       };
     });
   }
-  if (res.bpm) track.bpm = Number(res.bpm).toFixed(1);
+  if (res.bpm) {
+    track.bpm = Number(res.bpm).toFixed(1);
+    track.bpmExact = Number(res.bpm);
+  }
   if (res.key) track.key = res.key;
+  track.bpmLocked = res.bpm_locked === true;
+  track.keyLocked = res.key_locked === true;
   track.analyzed = true;
   track.analysisPending = res.analysis_pending === true;
   track.analysisLoaded = true;
@@ -634,6 +641,9 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     album: t.album || '—',
     label: '—',
     bpm: bpmStr,
+    bpmExact: t.tempo / 100,
+    bpmLocked: false,
+    keyLocked: false,
     key: keyStr,
     time: timeStr,
     fav: undefined,

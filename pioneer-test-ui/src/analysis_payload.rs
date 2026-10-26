@@ -159,6 +159,9 @@ pub fn build_analysis_json(
             payload.insert("waveform_peaks".into(), serde_json::Value::Array(vec![]));
             payload.insert("bpm".into(), serde_json::json!(a.bpm));
             payload.insert("key".into(), serde_json::json!(a.key));
+            let edits = lib.user_edits(track_id);
+            payload.insert("bpm_locked".into(), serde_json::json!(edits.bpm_locked));
+            payload.insert("key_locked".into(), serde_json::json!(edits.key_locked));
             payload.insert("energy".into(), serde_json::json!(a.energy));
             payload.insert("beats".into(), serde_json::Value::Array(beats));
             payload.insert("cue_points".into(), serde_json::Value::Array(cue_points));
