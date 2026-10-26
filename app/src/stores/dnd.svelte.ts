@@ -22,6 +22,8 @@ export const dnd = $state({
   dropRowIndex: null as number | null,
   /** Sidebar source id of the list panel receiving a track drop */
   dropPanelSourceId: null as string | null,
+  /** Pointer is over the sidebar "+" (new playlist) button */
+  dropNewPlaylist: false,
   /** Sidebar playlist receiving a drop */
   dropPlaylistId: null as number | null,
   /** Column key being dragged or hovered for reorder */
@@ -51,6 +53,7 @@ export function startTrackDrag(
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropNewPlaylist = false;
 }
 
 /** Hit-test track list panels under the pointer. */
@@ -58,6 +61,13 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   if (dnd.kind !== 'tracks') return;
 
   const hit = document.elementFromPoint(clientX, clientY);
+  dnd.dropNewPlaylist = !!hit?.closest('[data-new-playlist-drop]');
+  if (dnd.dropNewPlaylist) {
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    dnd.dropPlaylistId = null;
+    return;
+  }
   if (!hit) {
     dnd.dropPanelSourceId = null;
     dnd.dropRowIndex = null;
@@ -116,6 +126,7 @@ export function endDrag() {
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropNewPlaylist = false;
   dnd.columnDragKey = null;
   dnd.columnDropKey = null;
   dnd.playlistDragId = null;

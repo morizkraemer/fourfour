@@ -1049,12 +1049,12 @@ export async function renamePlaylist(id: number, name: string) {
   await saveState();
 }
 
-export async function addPlaylist(name: string): Promise<number> {
+export async function addPlaylist(name: string, trackIds: number[] = []): Promise<number> {
   const newId = library.playlists.length > 0 ? Math.max(...library.playlists.map(p => p.id)) + 1 : 1;
   library.playlists.push({
     id: newId,
     name,
-    track_ids: []
+    track_ids: [...new Set(trackIds)]
   });
   await saveState();
   return newId;

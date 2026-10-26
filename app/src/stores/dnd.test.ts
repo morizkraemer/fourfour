@@ -8,7 +8,7 @@ function stubDocument(body: { top: number; rowCount: number } | null, sourceId: 
     getBoundingClientRect: () => ({ top: body?.top ?? 0 }),
   };
   vi.stubGlobal('document', {
-    elementFromPoint: () => (body === null ? null : { closest: () => el }),
+    elementFromPoint: () => (body === null ? null : { closest: (sel: string) => (sel === '[data-track-drop-body]' ? el : null) }),
   });
 }
 
@@ -87,5 +87,31 @@ describe('drag session', () => {
     expect(dnd.kind).toBeNull();
     expect(dnd.trackIds).toEqual([]);
     expect(dnd.dropRowIndex).toBeNull();
+  });
+});
+
+describe('new playlist drop target', () => {
+  it('flags the + button and clears other drop targets', () => {
+    dnd.dropRowIndex = 3;
+    dnd.dropPlaylistId = 7;
+    vi.stubGlobal('document', {
+      elementFromPoint: () => ({ closest: (sel: string) => (sel === '[data-new-playlist-drop]' ? {} : null) }),
+    });
+    updateTrackDropTarget(5, 5);
+    expect(dnd.dropNewPlaylist).toBe(true);
+    expect(dnd.dropRowIndex).toBeNull();
+    expect(dnd.dropPlaylistId).toBeNull();
+    expect(dnd.dropPanelSourceId).toBeNull();
+  });
+  it('clears the flag when the pointer leaves the button', () => {
+    dnd.dropNewPlaylist = true;
+    stubDocument({ top: 0, rowCount: 10 });
+    updateTrackDropTarget(5, 5);
+    expect(dnd.dropNewPlaylist).toBe(false);
+  });
+  it('is cleared when the drag ends', () => {
+    dnd.dropNewPlaylist = true;
+    endDrag();
+    expect(dnd.dropNewPlaylist).toBe(false);
   });
 });

@@ -11,7 +11,6 @@
   } from '../menus/context-menus.ts';
   import {
     addPlaylist,
-    defaultPlaylistName,
     renamePlaylist,
     refreshVolumes,
     selectVolume,
@@ -26,6 +25,7 @@
     canRemoveFavoriteSlot,
   } from '../stores/library.svelte.ts';
   import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
+  import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag } from '../stores/dnd.svelte.ts';
 
@@ -63,10 +63,7 @@
   }
 
   async function handleAddPlaylist() {
-    const name = defaultPlaylistName();
-    const playlistId = await addPlaylist(name);
-    handleRowClick(name);
-    dockOrganizeTarget({ kind: 'playlist', id: name, label: name, playlistId });
+    await createPlaylistAndOpen();
   }
 
   function startPlaylistRename(playlistId, currentName) {
@@ -322,6 +319,7 @@
     <SidebarSection
       label={library.sidebarData.playlists.label}
       showAdd
+      addDropActive={dnd.dropNewPlaylist}
       onAdd={handleAddPlaylist}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
     >
