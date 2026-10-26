@@ -69,6 +69,7 @@ export const ui = $state({
   playerHeight: loadPlayerHeight() as number | null,
   /** Set by new-playlist flows: the docked panel starts inline rename. */
   renameRequest: null as { playlistId: number } | null,
+  sidebarRenameRequest: null as { playlistId: number } | null,
   /** Right-sidebar organize panel state. */
   organize: {
     /** Docked target — null when picker is shown. */

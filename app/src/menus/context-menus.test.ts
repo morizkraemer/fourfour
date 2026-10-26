@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildColumnContextMenuItems,
   buildSidebarSectionMenuItems,
+  buildSourceContextMenuItems,
   buildTrackContextMenuItems,
   buildRevealItem,
   revealLabel,
@@ -130,5 +131,24 @@ describe('favourites to playlist', () => {
     const [move, clear] = buildSidebarSectionMenuItems('favorites');
     expect(move.variant).toBeUndefined();
     expect(clear.variant).toBe('danger');
+  });
+});
+
+describe('buildSourceContextMenuItems rename', () => {
+  it('offers Rename first for a normal playlist and not for a favorite slot', () => {
+    library.playlists = [
+      { id: 1, name: 'Warmup', track_ids: [] },
+      { id: 2, name: 'Favorites 1', track_ids: [] },
+    ];
+    const renamed: string[] = [];
+    const onRenamePlaylist = (p: { name: string }) => renamed.push(p.name);
+    const normal = buildSourceContextMenuItems({ sourceId: 'Warmup', onRenamePlaylist });
+    expect(normal[0].label).toBe('Rename');
+    normal[0].onClick!();
+    expect(renamed).toEqual(['Warmup']);
+    const favorite = buildSourceContextMenuItems({ sourceId: 'Favorites 1', onRenamePlaylist });
+    expect(favorite.map((i) => i.label)).not.toContain('Rename');
+    expect(buildSourceContextMenuItems({ sourceId: 'Warmup' }).map((i) => i.label)).not.toContain('Rename');
+    library.playlists = [];
   });
 });

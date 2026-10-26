@@ -85,6 +85,14 @@
     }
   }
 
+  $effect(() => {
+    const request = ui.sidebarRenameRequest;
+    if (!request) return;
+    ui.sidebarRenameRequest = null;
+    const playlist = library.playlists.find((p) => p.id === request.playlistId);
+    if (playlist) startPlaylistRename(playlist.id, playlist.name);
+  });
+
   function cancelPlaylistRename() {
     renamingPlaylistId = null;
   }
@@ -186,6 +194,7 @@
       onNewPlaylist: handleAddPlaylist,
       onAddFavorite: handleAddFavorite,
       onRemoveFavorite: requestRemoveFavorite,
+      onRenamePlaylist: (playlist) => startPlaylistRename(playlist.id, playlist.name),
     });
   }
 
