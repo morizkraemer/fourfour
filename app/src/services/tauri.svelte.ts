@@ -46,6 +46,8 @@ export interface TrackInfo {
   has_cues: boolean;
   /** Authoritative analysis flag from the DB index (not `tempo > 0`). */
   has_analysis?: boolean;
+  /** Waveform (and maybe key) are stored; key or BPM/grid still to come. */
+  analysis_pending?: boolean;
   /** 400-byte mono preview embedded at load (base64 from Tauri, byte array in mocks). */
   waveform_preview?: string | number[] | null;
   /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */

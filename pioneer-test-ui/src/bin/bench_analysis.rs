@@ -25,7 +25,7 @@ use pioneer_usb_writer::scanner;
 struct BenchSink {
     started: Instant,
     first_result_ms: Mutex<Option<f64>>,
-    partial_ms: Mutex<HashMap<i64, f64>>,
+    partial_ms: Mutex<HashMap<i64, Vec<f64>>>,
     done_ms: Mutex<HashMap<i64, f64>>,
     log: Mutex<Vec<String>>,
     verbose: bool,
@@ -46,7 +46,7 @@ impl AnalysisSink for BenchSink {
     }
 
     fn partial(&self, track_id: i64) {
-        self.partial_ms.lock().unwrap().insert(track_id, self.started.elapsed().as_secs_f64() * 1000.0);
+        self.partial_ms.lock().unwrap().entry(track_id).or_default().push(self.started.elapsed().as_secs_f64() * 1000.0);
     }
 
     fn complete(&self) {}
@@ -103,6 +103,7 @@ fn main() {
     let mut play_after_s: Option<f64> = None;
     let mut play_index = 0usize;
     let mut legacy_priority = false;
+    let mut unstaged = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -114,6 +115,7 @@ fn main() {
             "--play-after" => play_after_s = Some(it.next().unwrap().parse().unwrap()),
             "--play-index" => play_index = it.next().unwrap().parse().unwrap(),
             "--legacy-priority" => legacy_priority = true,
+            "--unstaged" => unstaged = true,
             other => panic!("unknown argument {other}"),
         }
     }
@@ -135,7 +137,7 @@ fn main() {
     let shared = Arc::new(Mutex::new(library));
 
     let env = BackendEnv { override_backend: Some(backend), max_threads: threads, ..BackendEnv::default() };
-    let coordinator = AnalysisCoordinator::default();
+    let coordinator = AnalysisCoordinator::default().with_staging(!unstaged);
     let started = Instant::now();
     let sink = Arc::new(BenchSink { started, first_result_ms: Mutex::new(None), partial_ms: Mutex::new(HashMap::new()), done_ms: Mutex::new(HashMap::new()), log: Mutex::new(Vec::new()), verbose });
 
@@ -191,12 +193,27 @@ fn main() {
         *peak.lock().unwrap()
     );
     if let (Some(delay), Some((id, _))) = (play_after_s, played) {
-        let at = |map: &Mutex<HashMap<i64, f64>>| map.lock().unwrap().get(&id).map(|ms| (ms / 1000.0 - delay).max(0.0));
-        let waveform = at(&sink.partial_ms).or_else(|| at(&sink.done_ms));
+        let rel = |ms: f64| (ms / 1000.0 - delay).max(0.0);
+        let first_partial = sink.partial_ms.lock().unwrap().get(&id).and_then(|v| v.first().copied()).map(rel);
+        let done = sink.done_ms.lock().unwrap().get(&id).copied().map(rel);
         println!(
             "PLAY id={id} legacy={legacy_priority} to_waveform={:.1}s to_full={:.1}s",
-            waveform.unwrap_or(f64::NAN),
-            at(&sink.done_ms).unwrap_or(f64::NAN)
+            first_partial.or(done).unwrap_or(f64::NAN),
+            done.unwrap_or(f64::NAN)
+        );
+    }
+    {
+        let partials = sink.partial_ms.lock().unwrap();
+        let done = sink.done_ms.lock().unwrap();
+        let latest = |pick: &dyn Fn(&[f64]) -> Option<f64>| {
+            ids.iter().filter_map(|id| pick(partials.get(id).map_or(&[][..], |v| &v[..])).or_else(|| done.get(id).copied())).fold(0.0f64, f64::max) / 1000.0
+        };
+        println!(
+            "STAGES staged={} all_waveform={:.1}s all_key={:.1}s all_grid={:.1}s",
+            !unstaged,
+            latest(&|v| v.first().copied()),
+            latest(&|v| v.get(1).copied()),
+            ids.iter().filter_map(|id| done.get(id).copied()).fold(0.0f64, f64::max) / 1000.0
         );
     }
     std::fs::remove_dir_all(&dir).ok();

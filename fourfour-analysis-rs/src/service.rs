@@ -88,6 +88,14 @@ pub fn plan_pool(opts: &PoolOptions, available_mb: f64, jobs: usize) -> PoolPlan
     PoolPlan { workers, threads_per_track: (opts.max_threads / workers).max(1) }
 }
 
+/// Which stages one run computes. The waveform is cheap, so `Grid` recomputes it from the same decode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pass {
+    Fast,
+    Grid,
+    All,
+}
+
 pub struct Analyzer {
     engine: Arc<BeatEngine>,
     cfg: Config,
@@ -114,7 +122,7 @@ impl Analyzer {
     }
 
     pub fn analyze_with(&self, path: &Path, cancel: &AtomicBool, threads: usize) -> Result<AnalysisResult> {
-        self.analyze_controlled(path, &Control::new(cancel), threads, None)
+        self.analyze_controlled(path, &Control::new(cancel), threads, Pass::All, None)
     }
 
     pub fn analyze_controlled(
@@ -122,6 +130,7 @@ impl Analyzer {
         path: &Path,
         control: &Control,
         threads: usize,
+        pass: Pass,
         on_partial: Option<&(dyn Fn(AnalysisResult) + Sync)>,
     ) -> Result<AnalysisResult> {
         let partial = on_partial.map(|emit| move |w: &Waveforms| emit(waveform_only_result(w)));
@@ -132,6 +141,8 @@ impl Analyzer {
         };
         let mut cfg = self.cfg.clone();
         cfg.threads = threads.max(1);
+        cfg.beats = pass != Pass::Fast;
+        cfg.key = cfg.key && pass != Pass::Grid;
         let analysis = analyze_controlled(&self.engine, path, &cfg, &control)?;
         Ok(to_app_result(&analysis))
     }

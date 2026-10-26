@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fourfour_analysis::analyze::Control;
-use pioneer_library::LocalLibrary;
+use fourfour_analysis::service::Pass;
+use pioneer_library::{analysis_stage, LocalLibrary};
 use pioneer_usb_writer::models;
 
 use crate::analysis_backend::{resolve_runner, AnalyzerCache, BackendEnv, Runner, TrackEngine};
@@ -16,6 +17,25 @@ pub(crate) type SharedLibrary = Arc<Mutex<LocalLibrary>>;
 pub(crate) type AnalysisWorkItem = (i64, PathBuf);
 pub(crate) type SharedAnalysisQueue = Arc<Mutex<VecDeque<AnalysisWorkItem>>>;
 
+/// What one background job computes: the fast pass (waveform and key, one decode, no model),
+/// the grid pass (Beat This! and fit), or everything at once (Python, or staging off).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stage {
+    Fast,
+    Grid,
+    Whole,
+}
+
+impl Stage {
+    fn pass(self) -> Pass {
+        match self {
+            Stage::Fast => Pass::Fast,
+            Stage::Grid => Pass::Grid,
+            Stage::Whole => Pass::All,
+        }
+    }
+}
+
 struct BackgroundJob {
     cancel: Arc<AtomicBool>,
     threads: usize,
@@ -23,6 +43,7 @@ struct BackgroundJob {
 
 #[derive(Default)]
 struct Jobs {
+    grid_queue: VecDeque<AnalysisWorkItem>,
     background: HashMap<i64, BackgroundJob>,
     now: HashMap<i64, Arc<AtomicBool>>,
     preempted: HashSet<i64>,
@@ -32,6 +53,7 @@ struct Jobs {
 pub(crate) struct BackgroundTask {
     pub(crate) track_id: i64,
     pub(crate) source_path: PathBuf,
+    pub(crate) stage: Stage,
     pub(crate) threads: usize,
     pub(crate) cancel: Arc<AtomicBool>,
 }
@@ -53,6 +75,7 @@ pub(crate) struct AnalysisCoordinator {
     cancel: Arc<AtomicBool>,
     background_paused: Arc<AtomicBool>,
     jobs: Arc<Mutex<Jobs>>,
+    staged: bool,
     pub(crate) analyzers: AnalyzerCache,
 }
 
@@ -67,12 +90,19 @@ impl Default for AnalysisCoordinator {
             cancel: Arc::new(AtomicBool::new(false)),
             background_paused: Arc::new(AtomicBool::new(false)),
             jobs: Arc::new(Mutex::new(Jobs::default())),
+            staged: true,
             analyzers: AnalyzerCache::default(),
         }
     }
 }
 
 impl AnalysisCoordinator {
+    /// With staging off the Rust backend analyses each track in one piece, as before staging existed.
+    pub(crate) fn with_staging(mut self, staged: bool) -> Self {
+        self.staged = staged;
+        self
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
@@ -95,7 +125,8 @@ impl AnalysisCoordinator {
     pub(crate) fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
         self.with_queue(|queue| queue.clear());
-        let jobs = self.jobs.lock().expect("analysis jobs lock");
+        let mut jobs = self.jobs.lock().expect("analysis jobs lock");
+        jobs.grid_queue.clear();
         jobs.background.values().for_each(|job| job.cancel.store(true, Ordering::Relaxed));
         jobs.now.values().for_each(|cancel| cancel.store(true, Ordering::Relaxed));
     }
@@ -107,7 +138,10 @@ impl AnalysisCoordinator {
     pub(crate) fn end_run(&self) {
         *self.active_queue.lock().expect("analysis coordinator lock") = None;
         self.total.store(0, Ordering::Relaxed);
-        self.jobs.lock().expect("analysis jobs lock").sealed = false;
+        let mut jobs = self.jobs.lock().expect("analysis jobs lock");
+        jobs.sealed = false;
+        jobs.grid_queue.clear();
+        drop(jobs);
         self.running.store(false, Ordering::Release);
     }
 
@@ -137,21 +171,43 @@ impl AnalysisCoordinator {
     }
 
     fn queue_len(&self) -> usize {
-        self.with_queue(|queue| queue.len()).unwrap_or(0)
+        let grid = self.jobs.lock().map_or(0, |jobs| jobs.grid_queue.len());
+        self.with_queue(|queue| queue.len()).unwrap_or(0) + grid
     }
 
-    /// Pops the next queued track and registers it as a background job in one step, so a priority
-    /// request can never miss a track that is between the queue and a worker.
-    pub(crate) fn take_next(&self, threads_for: impl FnOnce(usize) -> usize) -> Option<BackgroundTask> {
-        let mut jobs = self.jobs.lock().ok()?;
-        let (track_id, source_path, queued) = self.with_queue(|queue| {
-            let (id, path) = queue.pop_front()?;
-            Some((id, path, queue.len()))
-        })??;
-        let threads = threads_for(queued + jobs.background.len() + 1);
+    fn push_grid(&self, item: AnalysisWorkItem) {
+        self.jobs.lock().expect("analysis jobs lock").grid_queue.push_back(item);
+    }
+
+    /// Pops the next track and registers it as a background job in one step, so a priority request can
+    /// never miss a track that is between a queue and a worker. Fast passes of the whole library come
+    /// first; grid passes follow. `stages_of` tells which stages a track already has stored.
+    pub(crate) fn take_next(
+        &self,
+        staged: bool,
+        stages_of: impl Fn(i64) -> u8,
+        threads_for: impl FnOnce(usize) -> usize,
+    ) -> Option<BackgroundTask> {
+        let mut guard = self.jobs.lock().ok()?;
+        let jobs = &mut *guard;
+        let fresh = self.with_queue(|queue| queue.pop_front()).flatten();
+        let (track_id, source_path, stage) = match fresh {
+            Some((id, path)) if !staged => (id, path, Stage::Whole),
+            Some((id, path)) if stages_of(id) & FAST_STAGES == FAST_STAGES => (id, path, Stage::Grid),
+            Some((id, path)) => (id, path, Stage::Fast),
+            None => {
+                let (id, path) = jobs.grid_queue.pop_front()?;
+                (id, path, Stage::Grid)
+            }
+        };
+        let waiting = self.with_queue(|queue| queue.len()).unwrap_or(0) + jobs.grid_queue.len();
+        let threads = match stage {
+            Stage::Fast => 1,
+            Stage::Grid | Stage::Whole => threads_for(waiting + jobs.background.len() + 1),
+        };
         let cancel = Arc::new(AtomicBool::new(false));
         jobs.background.insert(track_id, BackgroundJob { cancel: cancel.clone(), threads });
-        Some(BackgroundTask { track_id, source_path, threads, cancel })
+        Some(BackgroundTask { track_id, source_path, stage, threads, cancel })
     }
 
     /// Ends a background job. True when a priority request preempted it (its result is to be dropped).
@@ -179,10 +235,17 @@ impl AnalysisCoordinator {
                 jobs.preempted.insert(track_id);
             }
             None => {
-                let was_queued = self
+                let from_queue = self
                     .with_queue(|queue| queue.iter().position(|(id, _)| *id == track_id).and_then(|pos| queue.remove(pos)))
                     .flatten()
                     .is_some();
+                let from_grid_queue = jobs
+                    .grid_queue
+                    .iter()
+                    .position(|(id, _)| *id == track_id)
+                    .and_then(|pos| jobs.grid_queue.remove(pos))
+                    .is_some();
+                let was_queued = from_queue || from_grid_queue;
                 if !was_queued {
                     self.bump_total(1);
                 }
@@ -286,6 +349,7 @@ pub(crate) enum RunOutcome {
     Finished { errors: u32, total: u32 },
 }
 
+const FAST_STAGES: u8 = analysis_stage::WAVEFORM | analysis_stage::KEY;
 const PYTHON_MAX_IN_FLIGHT: usize = 3;
 const RUST_TRACK_TIMEOUT: Duration = Duration::from_secs(900);
 const SCHEDULER_POLL: Duration = Duration::from_millis(100);
@@ -303,19 +367,20 @@ async fn analyze_one_track_rust(
     engine: Arc<dyn TrackEngine>,
     source_path: PathBuf,
     threads: usize,
+    pass: Pass,
     job: JobControl,
 ) -> TrackResult {
     let started = Instant::now();
     let handle = tokio::task::spawn_blocking(move || {
         let control = Control { cancel: &job.cancel, pause: &job.pause, on_waveform: None };
         let on_partial = job.on_partial.as_deref().map(|f| f as &(dyn Fn(models::AnalysisResult) + Sync));
-        engine.analyze(&source_path, &control, threads, on_partial)
+        engine.analyze(&source_path, &control, threads, pass, on_partial)
     });
     let joined = tokio::time::timeout(RUST_TRACK_TIMEOUT, handle)
         .await
         .map_err(|_| format!("TIMEOUT after {}s", RUST_TRACK_TIMEOUT.as_secs()))?;
     let result = joined.map_err(|e| format!("analysis task failed: {e}"))??;
-    Ok((result, format!("{:.1}s rust x{threads}", started.elapsed().as_secs_f64())))
+    Ok((result, format!("{:.1}s rust {pass:?} x{threads}", started.elapsed().as_secs_f64())))
 }
 
 fn file_name_of(path: &Path) -> String {
@@ -328,13 +393,22 @@ fn record_outcome(
     coordinator: &AnalysisCoordinator,
     track_id: i64,
     source_path: &Path,
+    stage: Stage,
     outcome: TrackResult,
 ) -> Result<(), String> {
     let completed = coordinator.completed.fetch_add(1, Ordering::Relaxed) + 1;
     let total = coordinator.total().max(completed);
     let file_name = file_name_of(source_path);
     match outcome {
-        Ok((result, detail)) => {
+        Ok((mut result, detail)) => {
+            let t_db = Instant::now();
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            let stored_track = lib.get_track(track_id).map_err(|e| e.to_string())?;
+            if stage == Stage::Grid {
+                if let Some(track) = &stored_track {
+                    result.key = track.key.clone();
+                }
+            }
             sink.log(
                 LogLevel::Ok,
                 format!(
@@ -345,9 +419,7 @@ fn record_outcome(
                     result.cue_points.len(),
                 ),
             );
-            let t_db = Instant::now();
-            let lib = shared.lock().map_err(|e| e.to_string())?;
-            if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
+            if let Some(mut track) = stored_track {
                 track.tempo = (result.bpm * 100.0) as u32;
                 track.key = result.key.clone();
                 lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
@@ -369,13 +441,35 @@ fn record_outcome(
     Ok(())
 }
 
+fn store_fast_pass(
+    shared: &SharedLibrary,
+    sink: &Arc<dyn AnalysisSink>,
+    track_id: i64,
+    source_path: &Path,
+    result: &models::AnalysisResult,
+    detail: &str,
+) -> Result<(), String> {
+    let lib = shared.lock().map_err(|e| e.to_string())?;
+    if !result.key.is_empty() {
+        if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
+            track.key = result.key.clone();
+            lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
+        }
+    }
+    lib.set_analysis_stages(track_id, result, FAST_STAGES).map_err(|e| e.to_string())?;
+    drop(lib);
+    sink.log(LogLevel::Dim, format!("{} waveform+key stored key={} {detail}", file_name_of(source_path), result.key));
+    sink.partial(track_id);
+    Ok(())
+}
+
 fn partial_store(shared: &SharedLibrary, sink: &Arc<dyn AnalysisSink>, track_id: i64, source_path: &Path, started: Instant) -> PartialStore {
     let (shared, sink, file_name) = (shared.clone(), sink.clone(), file_name_of(source_path));
     Arc::new(move |partial| {
         let stored = shared
             .lock()
             .map_err(|e| e.to_string())
-            .and_then(|lib| lib.set_analysis(track_id, &partial).map_err(|e| e.to_string()));
+            .and_then(|lib| lib.set_analysis_stages(track_id, &partial, analysis_stage::WAVEFORM).map_err(|e| e.to_string()));
         match stored {
             Ok(()) => {
                 sink.log(LogLevel::Dim, format!("{file_name} waveform ready {:.1}s", started.elapsed().as_secs_f64()));
@@ -415,7 +509,7 @@ async fn run_now_lane(
         Runner::Rust { engine } => {
             sink.log(LogLevel::Info, format!("Priority: {} on the now lane, threads={wide_threads}", file_name_of(&source_path)));
             let job = JobControl { cancel, pause: Arc::new(AtomicBool::new(false)), on_partial: Some(on_partial) };
-            analyze_one_track_rust(engine, source_path.clone(), wide_threads, job).await
+            analyze_one_track_rust(engine, source_path.clone(), wide_threads, Pass::All, job).await
         }
         Runner::Python { command } => {
             sink.log(LogLevel::Info, format!("Priority: {} starts at once, background paused", file_name_of(&source_path)));
@@ -430,7 +524,7 @@ async fn run_now_lane(
             result
         }
     };
-    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, outcome)
+    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, Stage::Whole, outcome)
 }
 
 /// Analyse `item` as fast as possible: now lane inside an active run, a run of its own otherwise.
@@ -536,11 +630,13 @@ async fn run_with_runner(
         }
     };
 
-    let mut join_set: tokio::task::JoinSet<(i64, PathBuf, TrackResult)> = tokio::task::JoinSet::new();
+    let mut join_set: tokio::task::JoinSet<(i64, PathBuf, Stage, TrackResult)> = tokio::task::JoinSet::new();
 
+    let staged = coordinator.staged && matches!(runner, Runner::Rust { .. });
     loop {
         while join_set.len() < max_in_flight && !coordinator.is_cancelled() && !coordinator.background_paused() {
-            let task = coordinator.take_next(|jobs_left| match &runner {
+            let stored_stages = |id: i64| shared.lock().ok().and_then(|lib| lib.analysis_stages(id).ok().flatten()).unwrap_or(0);
+            let task = coordinator.take_next(staged, stored_stages, |jobs_left| match &runner {
                 Runner::Python { .. } => 0,
                 Runner::Rust { engine } => engine.plan(jobs_left).threads_per_track,
             });
@@ -551,14 +647,16 @@ async fn run_with_runner(
                 Runner::Python { command } => {
                     join_set.spawn(async move {
                         let result = analyze_one_track(&command, task.track_id, &task.source_path).await;
-                        (task.track_id, task.source_path, result)
+                        (task.track_id, task.source_path, task.stage, result)
                     });
                 }
                 Runner::Rust { engine } => {
-                    let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial: None };
+                    let on_partial = (task.stage == Stage::Fast)
+                        .then(|| partial_store(&shared, &sink, task.track_id, &task.source_path, Instant::now()));
+                    let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial };
                     join_set.spawn(async move {
-                        let result = analyze_one_track_rust(engine, task.source_path.clone(), task.threads, job).await;
-                        (task.track_id, task.source_path, result)
+                        let result = analyze_one_track_rust(engine, task.source_path.clone(), task.threads, task.stage.pass(), job).await;
+                        (task.track_id, task.source_path, task.stage, result)
                     });
                 }
             }
@@ -575,14 +673,20 @@ async fn run_with_runner(
         let Ok(task_result) = tokio::time::timeout(SCHEDULER_POLL, join_set.join_next()).await else {
             continue;
         };
-        let (track_id, source_path, analysis_result) = task_result
+        let (track_id, source_path, stage, analysis_result) = task_result
             .ok_or_else(|| "analysis task ended".to_string())?
             .map_err(|e| format!("Task panicked: {e}"))?;
 
         if coordinator.finish_background(track_id) {
             continue;
         }
-        record_outcome(&shared, &sink, &coordinator, track_id, &source_path, analysis_result)?;
+        match (stage, analysis_result) {
+            (Stage::Fast, Ok((result, detail))) => {
+                store_fast_pass(&shared, &sink, track_id, &source_path, &result, &detail)?;
+                coordinator.push_grid((track_id, source_path));
+            }
+            (_, outcome) => record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, outcome)?,
+        }
     }
 
     let completed = coordinator.completed.load(Ordering::Relaxed);

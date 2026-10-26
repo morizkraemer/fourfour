@@ -93,6 +93,7 @@ fn scan_directory(
             has_artwork,
             has_cues: false,
             has_analysis: false,
+            analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
         });
@@ -151,6 +152,7 @@ fn scan_files(
             has_artwork,
             has_cues: false,
             has_analysis: false,
+            analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
         });

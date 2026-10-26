@@ -263,6 +263,7 @@ interface BackendTrackInfo {
   duration_secs: number;
   has_artwork?: boolean;
   has_analysis?: boolean;
+  analysis_pending?: boolean;
 }
 
 /**
@@ -288,6 +289,7 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
     duration_secs: raw?.duration_secs ?? 0,
     has_artwork: raw?.has_artwork ?? input?.hasArtwork ?? false,
     has_analysis: raw?.has_analysis,
+    analysis_pending: raw?.analysis_pending,
   };
 }
 
@@ -342,9 +344,10 @@ export function initPlayerAnalysisRefresh() {
   listenToAnalysisPartial((partial) => refreshLoadedTrack(partial.track_id));
 }
 
-function prioritizeIfUnanalyzed(trackId: number, analyzedFallback: boolean) {
+function prioritizeIfUnanalyzed(trackId: number, completeFallback: boolean) {
   const libTrack = library.tracks.find((t) => t.id === trackId);
-  if (!(libTrack?.analyzed ?? analyzedFallback)) requestBackgroundAnalysis(trackId);
+  const complete = libTrack ? libTrack.analyzed && !libTrack.analysisPending : completeFallback;
+  if (!complete) requestBackgroundAnalysis(trackId);
 }
 
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
@@ -373,7 +376,7 @@ export async function loadPlayerTrack(input: any) {
     void stopped.then(() => (gen === loadGeneration ? playFromStart() : undefined));
   }
 
-  prioritizeIfUnanalyzed(trackInfo.id, trackInfo.has_analysis ?? trackInfo.tempo > 0);
+  prioritizeIfUnanalyzed(trackInfo.id, (trackInfo.has_analysis ?? trackInfo.tempo > 0) && !trackInfo.analysis_pending);
 
   if (cached) return;
 

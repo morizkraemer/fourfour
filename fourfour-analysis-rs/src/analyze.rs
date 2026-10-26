@@ -20,6 +20,7 @@ pub struct Config {
     pub threads: usize,
     pub fit: FitParams,
     pub mp3_rule: DelayRule,
+    pub beats: bool,
     pub key: bool,
     pub waveform: bool,
     pub keep_logits: bool,
@@ -27,7 +28,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, keep_logits: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, beats: true, key: true, waveform: true, keep_logits: false }
     }
 }
 
@@ -129,6 +130,18 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
             })
         });
         let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
+            if !cfg.beats {
+                let none = BeatResult {
+                    beat_logits: Vec::new(),
+                    down_logits: Vec::new(),
+                    beats: Vec::new(),
+                    downbeats: Vec::new(),
+                    resample_ms: 0.0,
+                    mel_ms: 0.0,
+                    predict_ms: 0.0,
+                };
+                return Ok((none, None, 0.0, 0.0, 0.0));
+            }
             let bt = engine.analyze(&native.samples, native.rate, cfg.threads, control)?;
             let t = Instant::now();
             let delay = mp3::timeline_shift_s(path, cfg.mp3_rule);

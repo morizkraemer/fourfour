@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fourfour_analysis::analyze::Control;
-use fourfour_analysis::service::{Analyzer, PoolOptions, PoolPlan, MODELS_ENV};
+use fourfour_analysis::service::{Analyzer, Pass, PoolOptions, PoolPlan, MODELS_ENV};
 use pioneer_usb_writer::models::AnalysisResult;
 
 pub const BACKEND_ENV: &str = "FOURFOUR_ANALYSIS_BACKEND";
@@ -134,7 +134,7 @@ pub type PartialResultSink<'a> = Option<&'a (dyn Fn(AnalysisResult) + Sync)>;
 
 pub trait TrackEngine: Send + Sync + 'static {
     fn plan(&self, jobs: usize) -> PoolPlan;
-    fn analyze(&self, path: &Path, control: &Control, threads: usize, on_partial: PartialResultSink) -> Result<AnalysisResult, String>;
+    fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String>;
 }
 
 impl TrackEngine for Analyzer {
@@ -142,8 +142,8 @@ impl TrackEngine for Analyzer {
         Analyzer::plan(self, jobs)
     }
 
-    fn analyze(&self, path: &Path, control: &Control, threads: usize, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {
-        self.analyze_controlled(path, control, threads, on_partial).map_err(|e| e.to_string())
+    fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {
+        self.analyze_controlled(path, control, threads, pass, on_partial).map_err(|e| e.to_string())
     }
 }
 

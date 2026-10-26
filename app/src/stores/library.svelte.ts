@@ -417,7 +417,7 @@ function unanalyzedIds(ids: number[]): number[] {
   return [...new Set(ids)].filter((id) => {
     if (id <= 0) return false;
     const track = library.tracks.find((t) => t.id === id);
-    return track != null && !track.analyzed;
+    return track != null && (!track.analyzed || track.analysisPending);
   });
 }
 
@@ -428,7 +428,7 @@ function unanalyzedIds(ids: number[]): number[] {
  */
 export function requestBackgroundAnalysis(trackId: number) {
   const track = library.tracks.find((t) => t.id === trackId);
-  if (!track || track.analyzed) return;
+  if (!track || (track.analyzed && !track.analysisPending)) return;
 
   if (isTrackAnalyzing(trackId)) {
     library.analyzingTrackIds = [trackId, ...library.analyzingTrackIds.filter((id) => id !== trackId)];
@@ -463,6 +463,7 @@ function applyWaveformAndCuesFromAnalysis(
     cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
     bpm?: number;
     key?: string;
+    analysis_pending?: boolean;
   },
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
@@ -489,6 +490,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (res.bpm) track.bpm = Number(res.bpm).toFixed(1);
   if (res.key) track.key = res.key;
   track.analyzed = true;
+  track.analysisPending = res.analysis_pending === true;
   track.analysisLoaded = true;
   return searchTextBefore !== `${track.bpm}|${track.key}|${track.analyzed}`;
 }
@@ -563,7 +565,7 @@ function finishAnalyzingTrack(trackId: number) {
 function markTracksPendingAnalysis(ids: number[]) {
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
-    if (!track) continue;
+    if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
     track.analysisLoaded = false;
@@ -639,6 +641,7 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
     analyzed,
+    analysisPending: t.analysis_pending ?? false,
     raw: t,
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
@@ -845,7 +848,7 @@ export async function removeTracks(ids: number[]) {
 
 /** Trigger analysis on all pending tracks */
 export async function analyzeTracks() {
-  const pendingIds = library.tracks.filter((t) => !t.analyzed).map((t) => t.id);
+  const pendingIds = library.tracks.filter((t) => !t.analyzed || t.analysisPending).map((t) => t.id);
   if (pendingIds.length === 0) return;
 
   markTracksPendingAnalysis(pendingIds);
