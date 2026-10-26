@@ -26,6 +26,7 @@ struct FakeEngine {
     log: EventLog,
     workers: usize,
     max_threads: usize,
+    hold_grid: AtomicBool,
 }
 
 fn finished_result() -> AnalysisResult {
@@ -73,6 +74,9 @@ impl TrackEngine for FakeEngine {
             if control.cancel.load(Ordering::Relaxed) {
                 self.log.lock().unwrap().push(Event::Cancelled(name));
                 return Err("analysis cancelled".to_string());
+            }
+            while pass == Pass::Grid && self.hold_grid.load(Ordering::Relaxed) && !control.pause.load(Ordering::Relaxed) && !control.cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(1));
             }
             std::thread::sleep(CHUNK);
         }
@@ -150,7 +154,7 @@ fn harness(tracks: usize, workers: usize, max_threads: usize) -> Harness {
     Harness {
         shared: shared.clone(),
         coordinator: AnalysisCoordinator::default(),
-        engine: Arc::new(FakeEngine { log: log.clone(), workers, max_threads }),
+        engine: Arc::new(FakeEngine { log: log.clone(), workers, max_threads, hold_grid: AtomicBool::new(false) }),
         sink: Arc::new(TestSink { log, shared }),
         items,
     }
@@ -195,6 +199,7 @@ impl Harness {
             prioritize_with_runner(self.shared.clone(), self.coordinator.clone(), priority, self.sink.clone(), BackendEnv::default(), self.runner())
                 .await
                 .unwrap();
+            self.engine.hold_grid.store(false, Ordering::Relaxed);
         };
         let (outcome, ()) = tokio::join!(run, prioritize);
         outcome.unwrap()
@@ -290,6 +295,7 @@ async fn with_staging_off_every_track_is_analysed_in_one_piece() {
 #[tokio::test]
 async fn a_queued_track_jumps_to_the_now_lane_and_running_grid_passes_yield() {
     let h = harness(6, 2, 8);
+    h.engine.hold_grid.store(true, Ordering::Relaxed);
     let outcome = h
         .run_and_prioritize_when(h.items.clone(), h.items[5].clone(), |e| has(e, &ran("t1.wav", Pass::Grid)) && has(e, &ran("t2.wav", Pass::Grid)))
         .await;
