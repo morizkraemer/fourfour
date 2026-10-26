@@ -643,6 +643,9 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
     },
+    get rowCover() {
+      return artwork.getRow(this.id, this.raw?.has_artwork);
+    },
     get bands() {
       return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
     }

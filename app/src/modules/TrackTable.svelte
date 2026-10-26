@@ -299,9 +299,18 @@
     const ids = dragTrackIds(track);
     let moved = false;
     let scrollPinRaf = null;
+    let moveRaf = null;
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+
+    function applyPointer() {
+      moveRaf = null;
+      updatePointer(lastX, lastY);
+      updateTrackDropTarget(lastX, lastY);
+    }
 
     function pinSourceScroll() {
-      if (!embedded || !scrollEl) return;
+      if (!embedded || !scrollEl || scrollEl.scrollTop === scrollTopAtDrag) return;
       scrollEl.scrollTop = scrollTopAtDrag;
     }
 
@@ -349,8 +358,9 @@
       }
       if (!moved) return;
       ev.preventDefault();
-      updatePointer(ev.clientX, ev.clientY);
-      updateTrackDropTarget(ev.clientX, ev.clientY);
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      if (moveRaf == null) moveRaf = requestAnimationFrame(applyPointer);
       pinSourceScroll();
     }
 
@@ -358,6 +368,10 @@
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       stopScrollPin();
+      if (moveRaf != null) {
+        cancelAnimationFrame(moveRaf);
+        applyPointer();
+      }
       scrollEl?.removeEventListener('wheel', onWheel);
       if (rowEl?.hasPointerCapture?.(e.pointerId)) {
         rowEl.releasePointerCapture(e.pointerId);
@@ -555,6 +569,7 @@
         class:ff-table__body--marquee={marqueeActive}
         data-track-drop-body
         data-source-id={effectiveSource}
+        data-row-count={currentTracks.length}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
         style:height={spacerHeight(currentTracks.length) !== undefined ? `${spacerHeight(currentTracks.length)}px` : undefined}
