@@ -4,11 +4,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use beat_this::__probe::MelStream;
 
+use crate::analyze::{Cancelled, Control};
 use crate::decode::resample_to;
 use beat_this::{Model as BtModel, Tensor};
 use rten::{ModelOptions, NodeId, RunOptions, ThreadPool, ValueOrView, ValueView};
@@ -19,6 +20,7 @@ const STRIDE: usize = CHUNK_SIZE - 2 * BORDER_SIZE;
 const MEL_STRIDE: usize = 1536;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
+const PAUSE_POLL: Duration = Duration::from_millis(50);
 
 pub struct BeatEngine {
     mel: Arc<rten::Model>,
@@ -82,7 +84,7 @@ impl BeatEngine {
         })
     }
 
-    pub fn analyze(&self, samples: &[f32], source_rate: u32, threads: usize) -> Result<BeatResult> {
+    pub fn analyze(&self, samples: &[f32], source_rate: u32, threads: usize, control: &Control) -> Result<BeatResult> {
         let t = Instant::now();
         let samples = resample_to(samples, source_rate, 22050)?;
         let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -97,7 +99,7 @@ impl BeatEngine {
         let mel_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let (beat_logits, down_logits) = self.predict(&mel, threads)?;
+        let (beat_logits, down_logits) = self.predict(&mel, threads, control)?;
         let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
         let (beats, downbeats) = pick_peaks(&beat_logits, &down_logits);
         Ok(BeatResult { beat_logits, down_logits, beats, downbeats, resample_ms, mel_ms, predict_ms })
@@ -112,13 +114,19 @@ impl BeatEngine {
         Ok((b.into_data(), d.into_data()))
     }
 
-    fn predict(&self, mel: &Tensor, threads: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+    fn predict(&self, mel: &Tensor, threads: usize, control: &Control) -> Result<(Vec<f32>, Vec<f32>)> {
         let full_time = mel.shape[1];
         let starts = generate_starts(full_time);
         let workers = threads.max(1).min(starts.len());
         let next = AtomicUsize::new(0);
         let results: Vec<Mutex<Option<Result<(Vec<f32>, Vec<f32>)>>>> = starts.iter().map(|_| Mutex::new(None)).collect();
         let run_worker = |options: RunOptions| loop {
+            while control.pause.load(Ordering::Relaxed) && !control.cancel.load(Ordering::Relaxed) {
+                std::thread::sleep(PAUSE_POLL);
+            }
+            if control.cancel.load(Ordering::Relaxed) {
+                break;
+            }
             let i = next.fetch_add(1, Ordering::SeqCst);
             if i >= starts.len() {
                 break;
@@ -135,6 +143,9 @@ impl BeatEngine {
                     s.spawn(move || run_worker(RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))))));
                 }
             });
+        }
+        if control.cancel.load(Ordering::Relaxed) {
+            return Err(Cancelled.into());
         }
         let mut beat_logits = vec![-1000.0f32; full_time];
         let mut down_logits = vec![-1000.0f32; full_time];

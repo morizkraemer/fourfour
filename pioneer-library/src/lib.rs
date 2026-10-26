@@ -32,6 +32,14 @@ pub use multi_sync::{
 };
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
+/// Bits of `analyses.stages`: which parts of a track's analysis are stored.
+pub mod analysis_stage {
+    pub const WAVEFORM: u8 = 1;
+    pub const KEY: u8 = 2;
+    pub const GRID: u8 = 4;
+    pub const ALL: u8 = WAVEFORM | KEY | GRID;
+}
+
 /// Summary report from importing a Pioneer USB into the local library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportReport {
@@ -201,6 +209,12 @@ impl LocalLibrary {
     /// Writes ANLZ binary files to disk (if the library is file-backed) and
     /// updates the lightweight bpm/key index in SQLite.
     pub fn set_analysis(&self, track_id: i64, analysis: &AnalysisResult) -> Result<()> {
+        self.set_analysis_stages(track_id, analysis, analysis_stage::ALL)
+    }
+
+    /// Store an analysis that has only some stages (`analysis_stage` bits). The track stays pending
+    /// for the missing stages: it is listed by `get_unanalyzed_track_ids` and left out of USB export.
+    pub fn set_analysis_stages(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
         let analysis = &self.keep_imported_data(track_id, analysis)?;
         // Write ANLZ files if we have a disk path.
         if let Some(dir) = self.track_anlz_dir(track_id) {
@@ -230,7 +244,7 @@ impl LocalLibrary {
         };
 
         // Update lightweight DB index.
-        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob())?;
+        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob(), stages)?;
 
         Ok(())
     }
@@ -381,7 +395,7 @@ impl LocalLibrary {
     /// Retrieve all tracks that have analysis data, with artwork included.
     /// Returns parallel vecs suitable for passing to the writer.
     pub fn get_analyzed_tracks(&self) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
-        let track_ids = queries::select_analyzed_track_ids(&self.conn)?;
+        let track_ids = queries::select_complete_analysis_track_ids(&self.conn, analysis_stage::ALL)?;
 
         let mut tracks = Vec::new();
         let mut analyses = Vec::new();
@@ -398,9 +412,19 @@ impl LocalLibrary {
         Ok((tracks, analyses))
     }
 
-    /// Return IDs of tracks that have no analysis data yet.
+    /// Return IDs of tracks that have no analysis data yet or only some of its stages.
     pub fn get_unanalyzed_track_ids(&self) -> Result<Vec<i64>> {
-        queries::select_unanalyzed_track_ids(&self.conn)
+        queries::select_unanalyzed_track_ids(&self.conn, analysis_stage::ALL)
+    }
+
+    /// Stage bits stored for a track, `None` when it has no analysis row.
+    pub fn analysis_stages(&self, track_id: i64) -> Result<Option<u8>> {
+        queries::select_analysis_stages(&self.conn, track_id)
+    }
+
+    /// Tracks that have an analysis row with stages still missing.
+    pub fn get_incomplete_analysis_ids(&self) -> Result<Vec<i64>> {
+        queries::select_incomplete_analysis_ids(&self.conn, analysis_stage::ALL)
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.
@@ -1013,6 +1037,44 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(analyses.len(), 1);
         assert_eq!(tracks[0].title, "Analyzed");
+    }
+
+    #[test]
+    fn partial_analysis_stays_pending_and_out_of_export() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let done = lib.add_track(&make_track("B", "/music/b.mp3")).unwrap();
+        lib.set_analysis(done, &make_analysis()).unwrap();
+
+        lib.set_analysis_stages(id, &make_analysis(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
+
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(3));
+        assert_eq!(lib.get_unanalyzed_track_ids().unwrap(), vec![id]);
+        assert_eq!(lib.get_incomplete_analysis_ids().unwrap(), vec![id]);
+        assert_eq!(lib.get_analyzed_tracks().unwrap().0.len(), 1);
+
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
+        assert!(lib.get_unanalyzed_track_ids().unwrap().is_empty());
+        assert_eq!(lib.get_analyzed_tracks().unwrap().0.len(), 2);
+    }
+
+    #[test]
+    fn v4_library_migrates_with_every_analysis_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let id = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let id = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+            lib.set_analysis(id, &make_analysis()).unwrap();
+            id
+        };
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("ALTER TABLE analyses DROP COLUMN stages; UPDATE schema_version SET version = 4;").unwrap();
+        }
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
     }
 
     #[test]

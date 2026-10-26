@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Schema for a fresh v2 database.
 const SCHEMA_DDL: &str = "
@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS analyses (
     bpm      REAL NOT NULL DEFAULT 0.0,
     key      TEXT NOT NULL DEFAULT '',
     energy   INTEGER,
-    row_preview BLOB
+    row_preview BLOB,
+    stages   INTEGER NOT NULL DEFAULT 7
 );
 
 CREATE TABLE IF NOT EXISTS playlists (
@@ -102,7 +103,10 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
             if v < 3 {
                 migrate_v2_to_v3(conn)?;
             }
-            migrate_v3_to_v4(conn)?;
+            if v < 4 {
+                migrate_v3_to_v4(conn)?;
+            }
+            migrate_v4_to_v5(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
         Some(v) => {
@@ -262,6 +266,21 @@ fn migrate_v2_to_v3(conn: &Connection) -> Result<()> {
 fn migrate_v3_to_v4(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE analyses ADD COLUMN row_preview BLOB;")
         .context("Failed to add row_preview column")?;
+    conn.execute("UPDATE schema_version SET version = 4", [])?;
+    Ok(())
+}
+
+/// Every existing analysis row is complete: all three stage bits set.
+fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
+    let has_stages: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('analyses') WHERE name = 'stages'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_stages {
+        conn.execute_batch("ALTER TABLE analyses ADD COLUMN stages INTEGER NOT NULL DEFAULT 7;")
+            .context("Failed to add stages column")?;
+    }
     conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
     Ok(())
 }

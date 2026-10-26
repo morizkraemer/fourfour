@@ -22,6 +22,7 @@ import {
   revealInFileManager,
   wipeUsb as tauriWipeUsb,
   listenToAnalysisProgress,
+  listenToAnalysisPartial,
   listenToAnalysisComplete,
   listenToWriteComplete,
   lastTauriError,
@@ -417,34 +418,28 @@ function unanalyzedIds(ids: number[]): number[] {
   return [...new Set(ids)].filter((id) => {
     if (id <= 0) return false;
     const track = library.tracks.find((t) => t.id === id);
-    return track != null && !track.analyzed;
+    return track != null && (!track.analyzed || track.analysisPending);
   });
 }
 
-/** Move a track to the front of the waiting analysis queue. */
-function bumpAnalysisQueuePriority(trackId: number) {
-  if (!library.analyzingTrackIds.includes(trackId)) return;
-  library.analyzingTrackIds = [
-    trackId,
-    ...library.analyzingTrackIds.filter((id) => id !== trackId),
-  ];
-  void tauriPrioritizeAnalysis(trackId);
-}
-
 /**
- * Ensure a track is analyzed — used when loading into the player.
- * Starts a background run when idle; bumps queue priority when already queued.
+ * Analyse a track now — used when it is loaded into the player or played.
+ * The backend moves it to its fast lane (queued or not) or starts a run when idle;
+ * the waveform arrives first as `analysis-partial`, the full result as `analysis-progress`.
  */
 export function requestBackgroundAnalysis(trackId: number) {
   const track = library.tracks.find((t) => t.id === trackId);
-  if (!track || track.analyzed) return;
+  if (!track || (track.analyzed && !track.analysisPending)) return;
 
   if (isTrackAnalyzing(trackId)) {
-    bumpAnalysisQueuePriority(trackId);
-    return;
+    library.analyzingTrackIds = [trackId, ...library.analyzingTrackIds.filter((id) => id !== trackId)];
+  } else {
+    markTracksPendingAnalysis([trackId]);
+    library.analyzing = true;
+    library.analyzingTrackIds = [...library.analyzingTrackIds, trackId];
+    library.statusMessage = 'Analyzing track…';
   }
-
-  void analyzeTrackIds([trackId]);
+  void tauriPrioritizeAnalysis(trackId);
 }
 
 function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string }, fileName: string) {
@@ -469,6 +464,7 @@ function applyWaveformAndCuesFromAnalysis(
     cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
     bpm?: number;
     key?: string;
+    analysis_pending?: boolean;
   },
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
@@ -495,6 +491,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (res.bpm) track.bpm = Number(res.bpm).toFixed(1);
   if (res.key) track.key = res.key;
   track.analyzed = true;
+  track.analysisPending = res.analysis_pending === true;
   track.analysisLoaded = true;
   return searchTextBefore !== `${track.bpm}|${track.key}|${track.analyzed}`;
 }
@@ -569,7 +566,7 @@ function finishAnalyzingTrack(trackId: number) {
 function markTracksPendingAnalysis(ids: number[]) {
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
-    if (!track) continue;
+    if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
     track.analysisLoaded = false;
@@ -596,6 +593,11 @@ function handleAnalysisProgressEvent(progress: {
   const fileName = match[1];
   const track = library.tracks.find((t) => trackMatchesAnalyzedFilename(t, fileName));
   if (track) finishAnalyzingTrack(track.id);
+}
+
+function handleAnalysisPartialEvent(payload: { track_id: number }) {
+  const track = library.tracks.find((t) => t.id === payload.track_id);
+  if (track) void refreshTrackAnalysisDisplay(track);
 }
 
 function handleAnalysisCompleteEvent() {
@@ -640,6 +642,7 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
     analyzed,
+    analysisPending: t.analysis_pending ?? false,
     raw: t,
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
@@ -718,6 +721,7 @@ export async function initLibrary() {
     if (!libraryListenersInstalled) {
       libraryListenersInstalled = true;
       listenToAnalysisProgress(handleAnalysisProgressEvent);
+      listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
       listenToWriteComplete(() => {
         library.syncing = false;
@@ -848,7 +852,7 @@ export async function removeTracks(ids: number[]) {
 
 /** Trigger analysis on all pending tracks */
 export async function analyzeTracks() {
-  const pendingIds = library.tracks.filter((t) => !t.analyzed).map((t) => t.id);
+  const pendingIds = library.tracks.filter((t) => !t.analyzed || t.analysisPending).map((t) => t.id);
   if (pendingIds.length === 0) return;
 
   markTracksPendingAnalysis(pendingIds);

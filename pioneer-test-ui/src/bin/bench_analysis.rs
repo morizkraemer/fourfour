@@ -25,6 +25,8 @@ use pioneer_usb_writer::scanner;
 struct BenchSink {
     started: Instant,
     first_result_ms: Mutex<Option<f64>>,
+    partial_ms: Mutex<HashMap<i64, Vec<f64>>>,
+    done_ms: Mutex<HashMap<i64, f64>>,
     log: Mutex<Vec<String>>,
     verbose: bool,
 }
@@ -37,11 +39,14 @@ impl AnalysisSink for BenchSink {
         self.log.lock().unwrap().push(message);
     }
 
-    fn progress(&self, _current: u32, _total: u32, _message: String, _track_id: i64) {
-        self.first_result_ms
-            .lock()
-            .unwrap()
-            .get_or_insert(self.started.elapsed().as_secs_f64() * 1000.0);
+    fn progress(&self, _current: u32, _total: u32, _message: String, track_id: i64) {
+        let now_ms = self.started.elapsed().as_secs_f64() * 1000.0;
+        self.first_result_ms.lock().unwrap().get_or_insert(now_ms);
+        self.done_ms.lock().unwrap().insert(track_id, now_ms);
+    }
+
+    fn partial(&self, track_id: i64) {
+        self.partial_ms.lock().unwrap().entry(track_id).or_default().push(self.started.elapsed().as_secs_f64() * 1000.0);
     }
 
     fn complete(&self) {}
@@ -95,6 +100,10 @@ fn main() {
     let mut limit = 50usize;
     let mut threads: Option<usize> = None;
     let mut verbose = false;
+    let mut play_after_s: Option<f64> = None;
+    let mut play_index = 0usize;
+    let mut legacy_priority = false;
+    let mut unstaged = false;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -103,6 +112,10 @@ fn main() {
             "--limit" => limit = it.next().unwrap().parse().unwrap(),
             "--threads" => threads = Some(it.next().unwrap().parse().unwrap()),
             "--verbose" => verbose = true,
+            "--play-after" => play_after_s = Some(it.next().unwrap().parse().unwrap()),
+            "--play-index" => play_index = it.next().unwrap().parse().unwrap(),
+            "--legacy-priority" => legacy_priority = true,
+            "--unstaged" => unstaged = true,
             other => panic!("unknown argument {other}"),
         }
     }
@@ -120,12 +133,13 @@ fn main() {
     let tracks = scanner::scan_files(&paths).expect("scan");
     let ids = library.add_tracks(&tracks).expect("add tracks");
     let pending: Vec<(i64, PathBuf)> = ids.iter().zip(&tracks).map(|(id, t)| (*id, t.source_path.clone())).collect();
+    let played = play_after_s.map(|_| pending[play_index].clone());
     let shared = Arc::new(Mutex::new(library));
 
     let env = BackendEnv { override_backend: Some(backend), max_threads: threads, ..BackendEnv::default() };
-    let coordinator = AnalysisCoordinator::default();
+    let coordinator = AnalysisCoordinator::default().with_staging(!unstaged);
     let started = Instant::now();
-    let sink = Arc::new(BenchSink { started, first_result_ms: Mutex::new(None), log: Mutex::new(Vec::new()), verbose });
+    let sink = Arc::new(BenchSink { started, first_result_ms: Mutex::new(None), partial_ms: Mutex::new(HashMap::new()), done_ms: Mutex::new(HashMap::new()), log: Mutex::new(Vec::new()), verbose });
 
     let stop = Arc::new(AtomicBool::new(false));
     let peak = Arc::new(Mutex::new(0.0f64));
@@ -144,7 +158,21 @@ fn main() {
 
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let outcome = runtime
-        .block_on(analysis_run::run_track_analysis(shared.clone(), coordinator, pending, sink.clone(), env))
+        .block_on(async {
+            let run = analysis_run::run_track_analysis(shared.clone(), coordinator.clone(), pending, sink.clone(), env.clone());
+            let play = async {
+                let (Some(delay), Some(item)) = (play_after_s, played.clone()) else { return };
+                tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+                eprintln!("[bench] play track {} at {:.1}s", item.0, started.elapsed().as_secs_f64());
+                if legacy_priority {
+                    analysis_run::merge_into_analysis_queue(&coordinator, vec![item], true);
+                } else {
+                    analysis_run::prioritize_track(shared.clone(), coordinator.clone(), item, sink.clone(), env.clone()).await.expect("prioritize");
+                }
+            };
+            let (outcome, ()) = tokio::join!(run, play);
+            outcome
+        })
         .expect("run");
     let wall_s = started.elapsed().as_secs_f64();
     stop.store(true, Ordering::Relaxed);
@@ -164,5 +192,29 @@ fn main() {
         first / 1000.0,
         *peak.lock().unwrap()
     );
+    if let (Some(delay), Some((id, _))) = (play_after_s, played) {
+        let rel = |ms: f64| (ms / 1000.0 - delay).max(0.0);
+        let first_partial = sink.partial_ms.lock().unwrap().get(&id).and_then(|v| v.first().copied()).map(rel);
+        let done = sink.done_ms.lock().unwrap().get(&id).copied().map(rel);
+        println!(
+            "PLAY id={id} legacy={legacy_priority} to_waveform={:.1}s to_full={:.1}s",
+            first_partial.or(done).unwrap_or(f64::NAN),
+            done.unwrap_or(f64::NAN)
+        );
+    }
+    {
+        let partials = sink.partial_ms.lock().unwrap();
+        let done = sink.done_ms.lock().unwrap();
+        let latest = |pick: &dyn Fn(&[f64]) -> Option<f64>| {
+            ids.iter().filter_map(|id| pick(partials.get(id).map_or(&[][..], |v| &v[..])).or_else(|| done.get(id).copied())).fold(0.0f64, f64::max) / 1000.0
+        };
+        println!(
+            "STAGES staged={} all_waveform={:.1}s all_key={:.1}s all_grid={:.1}s",
+            !unstaged,
+            latest(&|v| v.first().copied()),
+            latest(&|v| v.get(1).copied()),
+            ids.iter().filter_map(|id| done.get(id).copied()).fold(0.0f64, f64::max) / 1000.0
+        );
+    }
     std::fs::remove_dir_all(&dir).ok();
 }

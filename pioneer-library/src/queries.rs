@@ -186,14 +186,34 @@ pub fn upsert_analysis_index(
     key: &str,
     energy: Option<u8>,
     row_preview: &[u8],
+    stages: u8,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO analyses (track_id, bpm, key, energy, row_preview) VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO analyses (track_id, bpm, key, energy, row_preview, stages) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key,
-             energy = excluded.energy, row_preview = excluded.row_preview",
-        params![track_id, bpm, key, energy, row_preview],
+             energy = excluded.energy, row_preview = excluded.row_preview, stages = excluded.stages",
+        params![track_id, bpm, key, energy, row_preview, stages],
     )?;
     Ok(())
+}
+
+pub fn select_analysis_stages(conn: &Connection, track_id: i64) -> Result<Option<u8>> {
+    let mut stmt = conn.prepare("SELECT stages FROM analyses WHERE track_id = ?1")?;
+    let mut rows = stmt.query_map([track_id], |row| row.get::<_, u8>(0))?;
+    rows.next().transpose().map_err(Into::into)
+}
+
+pub fn select_incomplete_analysis_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE stages != ?1 ORDER BY track_id")?;
+    let rows = stmt.query_map([complete], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Return IDs of tracks whose analysis has every stage.
+pub fn select_complete_analysis_track_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE stages = ?1 ORDER BY track_id")?;
+    let rows = stmt.query_map([complete], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// `(track id, row preview blob)` for every analysis row that has one stored.
@@ -237,11 +257,12 @@ pub fn select_analyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-pub fn select_unanalyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
+pub fn select_unanalyzed_track_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id WHERE a.track_id IS NULL ORDER BY t.id",
+        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id
+         WHERE a.track_id IS NULL OR a.stages != ?1 ORDER BY t.id",
     )?;
-    let rows = stmt.query_map([], |row| row.get(0))?;
+    let rows = stmt.query_map([complete], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 

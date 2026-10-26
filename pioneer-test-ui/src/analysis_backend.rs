@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fourfour_analysis::service::{Analyzer, PoolOptions, MODELS_ENV};
+use fourfour_analysis::analyze::Control;
+use fourfour_analysis::service::{Analyzer, Pass, PoolOptions, PoolPlan, MODELS_ENV};
+use pioneer_usb_writer::models::AnalysisResult;
 
 pub const BACKEND_ENV: &str = "FOURFOUR_ANALYSIS_BACKEND";
 pub const THREADS_ENV: &str = "FOURFOUR_ANALYSIS_THREADS";
@@ -128,10 +130,27 @@ impl AnalyzerCache {
     }
 }
 
+pub type PartialResultSink<'a> = Option<&'a (dyn Fn(AnalysisResult) + Sync)>;
+
+pub trait TrackEngine: Send + Sync + 'static {
+    fn plan(&self, jobs: usize) -> PoolPlan;
+    fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String>;
+}
+
+impl TrackEngine for Analyzer {
+    fn plan(&self, jobs: usize) -> PoolPlan {
+        Analyzer::plan(self, jobs)
+    }
+
+    fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {
+        self.analyze_controlled(path, control, threads, pass, on_partial).map_err(|e| e.to_string())
+    }
+}
+
 #[derive(Clone)]
 pub enum Runner {
     Python { command: String },
-    Rust { analyzer: Arc<Analyzer> },
+    Rust { engine: Arc<dyn TrackEngine> },
 }
 
 pub fn resolve_runner(
@@ -145,7 +164,7 @@ pub fn resolve_runner(
     if choice.backend == AnalysisBackend::Rust {
         let dir = weights.expect("rust backend is only chosen with weights");
         match cache.get_or_load(&dir, env.pool_options()) {
-            Ok(analyzer) => return (Runner::Rust { analyzer }, notes),
+            Ok(engine) => return (Runner::Rust { engine }, notes),
             Err(e) => notes.push(format!("rust analyzer unavailable, falling back to python: {e}")),
         }
     }

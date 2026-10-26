@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{anyhow, Result};
 use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, WaveformPreview};
+use pioneer_usb_writer::waveform::Waveforms;
 
-use crate::analyze::{analyze_cancellable, Analysis, Config};
+use crate::analyze::{analyze_controlled, Analysis, Config, Control};
 use crate::bt::BeatEngine;
 use crate::keymap::camelot;
 
@@ -87,6 +88,14 @@ pub fn plan_pool(opts: &PoolOptions, available_mb: f64, jobs: usize) -> PoolPlan
     PoolPlan { workers, threads_per_track: (opts.max_threads / workers).max(1) }
 }
 
+/// Which stages one run computes. The waveform is cheap, so `Grid` recomputes it from the same decode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pass {
+    Fast,
+    Grid,
+    All,
+}
+
 pub struct Analyzer {
     engine: Arc<BeatEngine>,
     cfg: Config,
@@ -113,9 +122,28 @@ impl Analyzer {
     }
 
     pub fn analyze_with(&self, path: &Path, cancel: &AtomicBool, threads: usize) -> Result<AnalysisResult> {
+        self.analyze_controlled(path, &Control::new(cancel), threads, Pass::All, None)
+    }
+
+    pub fn analyze_controlled(
+        &self,
+        path: &Path,
+        control: &Control,
+        threads: usize,
+        pass: Pass,
+        on_partial: Option<&(dyn Fn(AnalysisResult) + Sync)>,
+    ) -> Result<AnalysisResult> {
+        let partial = on_partial.map(|emit| move |w: &Waveforms| emit(waveform_only_result(w)));
+        let control = Control {
+            cancel: control.cancel,
+            pause: control.pause,
+            on_waveform: partial.as_ref().map(|f| f as &(dyn Fn(&Waveforms) + Sync)),
+        };
         let mut cfg = self.cfg.clone();
         cfg.threads = threads.max(1);
-        let analysis = analyze_cancellable(&self.engine, path, &cfg, cancel)?;
+        cfg.beats = pass != Pass::Fast;
+        cfg.key = cfg.key && pass != Pass::Grid;
+        let analysis = analyze_controlled(&self.engine, path, &cfg, &control)?;
         Ok(to_app_result(&analysis))
     }
 }
@@ -218,6 +246,18 @@ pub fn beats_from_grid(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64, bpm: 
             tempo,
         })
         .collect()
+}
+
+pub fn waveform_only_result(w: &Waveforms) -> AnalysisResult {
+    AnalysisResult {
+        beat_grid: BeatGrid { beats: Vec::new() },
+        waveform: w.preview().unwrap_or(WaveformPreview { data: [0; 400] }),
+        bpm: 0.0,
+        key: String::new(),
+        energy: None,
+        cue_points: Vec::new(),
+        color_waveform: Some(w.color_waveform()),
+    }
 }
 
 pub fn to_app_result(a: &Analysis) -> AnalysisResult {
