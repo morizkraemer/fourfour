@@ -157,3 +157,42 @@ Note: `synth-b.json` was rendered before the `borrow` option existed. That optio
 1. A closer domain: render permissively licensed MIDI (Lakh CC BY 4.0, POP909 MIT) through FluidR3_GM (MIT) with production-style processing (sidechain, saturation, reverb, EDM drum loops). Take labels from the notes, not the key-signature events. This is the most likely way to close the 2–5 point gap.
 2. Self-labelling: label CC BY / CC0 FMA audio with the synthetic model, keep only confident labels, and refit. This is label-clean and audio-clean when filtered per track.
 3. Refit or drop the confidence calibration before any swap. Re-check on a second labelled set (GiantSteps is evaluation-only, licence unclear) before calling any difference of 2–3 points real.
+
+## Q49: MIDI rendered through FluidR3_GM (2026-10-27)
+
+Branch `q49-key-midi` (from `q46-key`). Report only. Nothing here ships. Result: **no gain over Q46; the bar is not reached.**
+
+**Data** (downloaded to `benchmark/data/`, gitignored, about 1.4 GB, treated as untrusted and only parsed by our own code):
+- Lakh MIDI `clean_midi` (17,256 files, 234 MB archive), CC BY 4.0, https://colinraffel.com/projects/lmd/ (licence statement re-read on the page). The files are third-party compositions; the CC BY applies to the dataset as Raffel distributes it.
+- POP909 (909 songs), MIT, https://github.com/music-x-lab/POP909-Dataset (GitHub API licence MIT, LICENSE file read).
+- FluidR3_GM soundfont, MIT per the Debian copyright file (`fluid-soundfont-gm` 3.1-6): https://deb.debian.org/debian/pool/main/f/fluid-soundfont/ . Rendered with the system `libfluidsynth.so.3` via ctypes. No package was installed and there is no new dependency.
+
+**Labels.** Duration and velocity weighted pitch-class histogram, correlated with Krumhansl-Kessler profiles over 24 keys. Key-signature events are used only as a tie-break when the top two keys are within 0.04 correlation. Kept only if best correlation >= 0.7, margin to the runner-up >= 0.05, and the first and second halves of the piece agree. Result: Lakh 11,116 of 17,192 usable files kept, POP909 656 of 909. Check against POP909's own audio key labels (single-key songs, n = 757): 84.8% agree before filtering, 91.6% after. Lakh labels have no ground truth, so expect a similar 8% error.
+
+**Render** (`prototyping/analysis-packaging/midi/`, stdlib Python plus ffmpeg): random 30 s window, tempo stretched to 118-142 BPM, uniform random tonic by transposition (mode share 60% / 70% minor), channels re-programmed to synth leads, pads and basses (35% keep the original), an extra synth-bass layer on the lowest note per two beats, an EDM drum loop replacing the original drums (four-on-floor, breakbeat, half-time), detune up to 35 cents, then ffmpeg: kick sidechain compression, high/low-pass, bass shelf, echo, tanh saturation, compressor, limiter. 3,983 tracks rendered (2,488 + 1,495, plus a 400-track pilot that was only used as a sanity check). Cost about 1 s of CPU per track.
+
+Sanity: cyanbox templates score 74.5% exact on the pilot, the same as on the Q46 synthetic set (73.9%), so the labels and audio are consistent.
+
+**Fit.** Same keyfit pipeline, features from `extract-labelled` (new command), trained with `train=`. Configurations were chosen on dev (n = 399). Test was printed for the pilot (400 tracks, early, not used for choices) and for the two final rows below.
+
+| Training data | Options | Dev exact | Test exact | Test E+R+F | Test MIREX |
+|---|---|---:|---:|---:|---:|
+| cyanbox (shipped) | | 62.7% | **58.3%** | 72.9% | 67.0 |
+| Q46 synthetic (b+e), bass dropped, Temperley 1.0 | | 59.9% | 55.8% | 72.9% | 65.6 |
+| MIDI only (3,983) | all bands | 57.1% | not run | | |
+| MIDI only | bass dropped | 57.1% | not run | | |
+| MIDI only | bass dropped, Temperley 1.0 | 58.4% | 52.8% | 70.9% | 62.7 |
+| MIDI + Q46 synthetic | all bands | 59.4% | not run | | |
+| MIDI + Q46 synthetic | bass dropped | 59.9% | not run | | |
+| MIDI + Q46 synthetic | bass dropped, Temperley 1.0 | 59.9% | not run | | |
+| **MIDI + Q46 synthetic (chosen on dev)** | bass dropped, Temperley 0.5 | **60.2%** | **55.8%** | 72.4% | 65.0 |
+
+All-598: 58.7% (cyanbox 61.2%). The chosen row ties Q46 on test (111 of 199 tracks) and is 5 tracks short of cyanbox, within noise. Dev rose by 0.3 points over Q46, which is also noise. The MIDI-only set (52.8% test) is weaker than the pure procedural synthetic set (55.8%) on its own.
+
+Reading: more realistic note content and rendering did not close the domain gap. Errors remain major to parallel minor (16) and minor to a fifth up (about 15), as before. Likely causes: Lakh and POP909 are pop, rock and piano, with real chord and voicing statistics unlike EDM; the mode share of minor songs in the pool is only 28%; and about 8% label noise.
+
+**Shippable licence-wise:** yes for the data (CC BY 4.0 with attribution, MIT, MIT), but not worth shipping: accuracy is 55.8% against a bar of 60% and a current 58.3%. The Q46 caveats on the calibration constants still apply. Attribution for Lakh (Raffel 2016) would be needed.
+
+Reproduce: `midi/scan_keys.py <dir> <index.json> 4`, then `midi/render_midi.py '<json spec>'` (see `main` for fields; seeds 21 and 22, counts 2500 and 1500), then `keyfit extract-labelled <wav dir> <out.json> 4`, then the `keyfit score` and `cyankey` commands from the Q46 section with `train=` pointing at the MIDI and Q46 synthetic feature files. Cargo target `$HOME/.cache/fourfour-q49/target`. Feature files and templates are in `benchmark/results/q49/` (gitignored).
+
+Next steps: a genre-matched MIDI source (EDM MIDI is not permissively licensed anywhere found); self-labelling FMA CC BY audio (Q46 step 2); or accept the ~58% plateau and fold in Q46 step 3 (calibration).

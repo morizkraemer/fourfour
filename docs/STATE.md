@@ -47,8 +47,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-pm: resumed after limit reset; Q42–Q48 done on q42-overnight (installed on Mac dc818de); Q49 experiment resumed
-status: running · since 2026-10-27 23:40 · cap 2 workers · autonomy tight (all on branches; integration branch q42-overnight from master 61b81b3; only state/docs land on master)
+status: idle · since 2026-10-28 · queue + own priorities done; everything on branch q42-overnight (dc818de), installed on the Mac; master untouched except docs
 targets: Merlin approved option 1 (2026-10-27): stick sync real → review → leftovers → .dmg → key refit → housekeeping
 plan: W-Z zoom detail + W-X ⌥-delete/ribbon (round 7, running) → Q42 → Q43 → Q44 → Q45 [mac] → Q46 → Q47, then own priorities
 decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync fixes go ahead here
@@ -60,8 +59,8 @@ decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync f
 ### Q43b Review follow-ups [done, q43b-fixes dab9629 → q42-overnight 0c713b9] [box] — PDB oversized row, fake data on error paths, Linux removable filter + wipe path check, Esc/editable/listener/loadStick/claim_selection. 120 min
 ### Q46 Key refit on permissive labels [done, branch q46-key c6deeff, report only] — best licence-clean 55.8% exact (cyanbox 58.3%), bar 60% not met; doc docs/analysis/key-licence-2026-10-27.md [box] — find permissively licensed key labels, refit templates, measure on Beatport set; report only, never shipped. 150 min
 ### Q48 Tempo engine robustness [done, q48-tempo-robust 8c2dd93 → q42-overnight dc818de] [own prio: bugs] [box] — stretcher built at device sample rate, crossfade on stretch→varispeed dropout, ring size for 8ch/192k, NaN sanitising. 120 min
-### Q49 Key: render permissive MIDI (Lakh CC BY / POP909 MIT) via FluidR3 (MIT) for template fit [own prio: experiment, never landed] [box] 150 min
+### Q49 [done, branch q49-key-midi d0a176b, never landed: 55.8% test, ties Q46] Key: render permissive MIDI (Lakh CC BY / POP909 MIT) via FluidR3 (MIT) for template fit [own prio: experiment, never landed] [box] 150 min
 ### Q47 Housekeeping [done, a72200e: 27 worktrees removed, STATE 96→64 lines, disk 47%] [box] — remove merged worktrees + caches (check uncommitted/ignored first), disk < 70%; trim STATE.md to ≤80 lines (history → journal/docs). 45 min
 
 ## Rundown
-Latest: Q42–Q44 done on q42-overnight; Q43b and Q46 still running. Older rundown → docs/state-archive-2026-10-28.md.
+Overnight (q42-overnight dc818de, installed on the Mac): stick sync for real (All tracks + playlists, stick id, capacity, dry run), zoom waveform 2400 col/s, ⌥ deletes hot cues, ribbon covers + quiet drop slot, row/player waveform scaling, 16 review fixes (incl. stick playlists wiped on save, PDB rows > page, wipe guard home dir, removable-only writes), tempo engine robustness, unsigned .dmg (32 MB). Key: no licence-clean model beats 58.3% (best 55.8%). Next: Merlin tests on the Mac → merge q42-overnight to master.
