@@ -132,3 +132,4 @@
 2026-10-27 07:18 orchestrator - merged wa-reanalyze (G4/G5) 940b344; disk hit 100% (worker targets) → cleared merged worktrees' target dirs + finished caches (65%); full checks green (381 tests, 0 warnings); Mac install started
 2026-10-27 07:20 orchestrator - Mac install done (940b344, round-3 fixes)
 2026-10-27 07:45 orchestrator - Merlin round-4 feedback (H1–H6); W-B2 top bar/sidebar, W-S settings sheet + palette; inspector round 3 queued
+2026-10-27 07:51 orchestrator - merged wb-topbar2 (H1/H2/H4); W-I inspector round 3 spawned
