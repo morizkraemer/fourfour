@@ -57,7 +57,9 @@ decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync f
 ### Q44 Leftovers [done, q44-leftovers a26ab3c → q42-overnight 6f654ab] [box] — row waveforms blue-block (row_bands detail labelled overview), player overview fallback → stripBandsFromAnalysis, flaky vitest (find + fix). 90 min
 ### Q45 Unsigned .dmg [done] — Mac ~/dev/build/fourfour-dmg/target/release/bundle/dmg/fourfour_0.1.0_aarch64.dmg (32 MB, checksum valid, ad-hoc signed, arm64 only, app 79 MB incl. dev bench binaries) [mac] — `cargo tauri build` .dmg on the Mac build clone (separate dir), launch smoke check headless; report artifact + size + log. No signing/notarising. 60 min
 ### Q43b Review follow-ups [done, q43b-fixes dab9629 → q42-overnight 0c713b9] [box] — PDB oversized row, fake data on error paths, Linux removable filter + wipe path check, Esc/editable/listener/loadStick/claim_selection. 120 min
-### Q46 Key refit on permissive labels [running] [box] — find permissively licensed key labels, refit templates, measure on Beatport set; report only, never shipped. 150 min
+### Q46 Key refit on permissive labels [done, branch q46-key c6deeff, report only] — best licence-clean 55.8% exact (cyanbox 58.3%), bar 60% not met; doc docs/analysis/key-licence-2026-10-27.md [box] — find permissively licensed key labels, refit templates, measure on Beatport set; report only, never shipped. 150 min
+### Q48 Tempo engine robustness [own prio: bugs] [box] — stretcher built at device sample rate, crossfade on stretch→varispeed dropout, ring size for 8ch/192k, NaN sanitising. 120 min
+### Q49 Key: render permissive MIDI (Lakh CC BY / POP909 MIT) via FluidR3 (MIT) for template fit [own prio: experiment, never landed] [box] 150 min
 ### Q47 Housekeeping [done, a72200e: 27 worktrees removed, STATE 96→64 lines, disk 47%] [box] — remove merged worktrees + caches (check uncommitted/ignored first), disk < 70%; trim STATE.md to ≤80 lines (history → journal/docs). 45 min
 
 ## Rundown

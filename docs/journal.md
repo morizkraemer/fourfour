@@ -176,3 +176,5 @@
 2026-10-27 18:01 orchestrator Q47 spawn: housekeeping (seat, haiku)
 2026-10-27 18:03 orchestrator - Mac install done (0c713b9, full overnight build; macOS volume guard compiles, 0 warnings)
 2026-10-27 18:03 orchestrator Q47 done: 27 worktrees removed, STATE trimmed (a72200e), disk 47%; Waiting item 0 marked resolved (parse_pco2 reads names/colours, verified)
+2026-10-27 18:27 orchestrator Q46 done: report only, 55.8% exact licence-clean vs cyanbox 58.3%; doc landed on master
+2026-10-27 18:27 orchestrator decided: own prio Q48 tempo engine robustness (bugs from Q43 review) + Q49 key experiment (Q46 next step 1, never landed)
