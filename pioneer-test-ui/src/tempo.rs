@@ -851,4 +851,42 @@ mod tests {
         assert_eq!(Varispeed::table_index(2.0), 8);
         assert_eq!(Varispeed::table_index(3.2), 13);
     }
+
+    #[test]
+    fn limiter_passes_quiet_audio_unchanged_but_late() {
+        let mut limiter = Limiter::new(48_000.0);
+        let delay = limiter.delay_frames();
+        let source: Vec<f32> = (0..2000).flat_map(|n| [0.4 * (n as f32 * 0.05).sin(), 0.3 * (n as f32 * 0.07).cos()]).collect();
+        let mut out = source.clone();
+        limiter.process(&mut out);
+        for n in delay..2000 {
+            assert_eq!(out[n * 2].to_bits(), source[(n - delay) * 2].to_bits());
+            assert_eq!(out[n * 2 + 1].to_bits(), source[(n - delay) * 2 + 1].to_bits());
+        }
+    }
+
+    #[test]
+    fn limiter_holds_overshoots_to_the_ceiling() {
+        let mut limiter = Limiter::new(48_000.0);
+        let mut signal: Vec<f32> = (0..9600).flat_map(|n| {
+            let loud = if (4000..4040).contains(&n) { 1.9 } else { 0.5 };
+            let v = loud * (n as f32 * 0.2).sin();
+            [v, -v]
+        }).collect();
+        limiter.process(&mut signal);
+        let peak = signal.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(peak <= LIMITER_CEILING + 1e-6, "peak {peak}");
+        assert!(peak > 0.9, "limiter removed the signal, peak {peak}");
+    }
+
+    #[test]
+    fn soft_knee_leaves_normal_levels_alone_and_stays_below_full_scale() {
+        for x in [0.0f32, 0.3, -0.5, 0.92, -0.92] {
+            assert_eq!(soft_knee(x), x);
+        }
+        for x in [0.95f32, 1.0, 1.5, 4.0, -1.2] {
+            assert!(soft_knee(x).abs() <= 1.0, "{x}");
+        }
+        assert!(soft_knee(1.5) > soft_knee(1.0));
+    }
 }

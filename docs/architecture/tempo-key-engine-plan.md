@@ -1,6 +1,6 @@
 # Tempo and key engine plan (player BPM / KEY become playback controls)
 
-Status: plan only, no engine code. Branch `wp-tempo-plan` (from `q41-feedback`). Written 2026-10-27.
+Status: built on branch `wk-tempo` (see "Built" at the end). Originally plan only. Branch `wp-tempo-plan` (from `q41-feedback`). Written 2026-10-27.
 
 Goal: the player BPM field works like a CDJ tempo control (with Master Tempo / key lock, pitch stays), the KEY field shifts pitch in semitones independent of tempo. Today `playback.rs` has neither; the fields edit analysed metadata (`commitTrackBpm/Key` in `app/src/stores/track-edits.svelte.ts`).
 
@@ -95,3 +95,44 @@ Total about 6-7 days; slice 0 gates the engine choice.
 5. Key shown as Camelot only, or musical (Am), following the library setting?
 6. OK to add a C++ build dependency (MIT, via `build.rs`) for Signalsmith?
 7. Should row/hover previews follow the player tempo, or always play at 1.0?
+
+
+## Built (wk-tempo, 2026-10-27)
+
+Engine: Signalsmith Stretch 1.3.1 (MIT), vendored unmodified in `fourfour-stretch/vendor/` with our own `build.rs` (cc, always `-O2`, `NDEBUG`, no `-ffast-math`) and a hand-written C FFI (no bindgen/libclang; the `signalsmith-stretch` crate was not used, it needs libclang and its wrapper has a bug in `set_formant_base`). Bungee was not needed. Tempo/key code: `pioneer-test-ui/src/tempo.rs`, wired into `RenderState::render` in `playback.rs`. Commands: `playback_set_tempo(ratio)`, `playback_set_key_shift(semitones)`, `playback_set_key_lock(on)`; the tick carries `tempo_ratio`. `playback_stop` drops tempo and key shift (key lock stays).
+
+### How it differs from the plan
+
+- Key shift is not done with Signalsmith's own transposition: that lands up to 17 cents off at 110 Hz. Stage one only stretches time (exact, 0.002 cents), stage two is the in-tree windowed-sinc resampler (64 taps, 256 phases, 14 cutoff tables so reading faster than 1x lowers the cutoff and nothing aliases). Cost: at large shifts the stretcher works at up to 2x speed (see limits).
+- The stretcher is shadow-fed whenever key lock is on, so engaging tempo or key is an aligned crossfade, never a gap. It reads from a lookahead that tracks its latency (input latency + output latency x ratio + limiter delay), so the playhead is the ring front at every ratio. Chunks are 256 frames; larger device buffers are looped.
+- Paths: identity (ratio exactly 1, shift 0: copied, bit-exact), varispeed (key lock off), stretch. Fades: identity/varispeed one chunk, to or from the stretcher 1024 frames equal-power (stretched and plain signals agree on position, not phase). After a seek the stretcher primes at 4x speed over about 8 callbacks while varispeed plays.
+- Added a 2 ms lookahead peak limiter (ceiling 1.0, 40 ms release) on the stretched path and a soft knee above 0.92 on varispeed and fades. Without it a master peaking at 0 dBFS came out up to +4.7 dBFS and clipped the device (10-20k samples per 40 s). Identity is untouched.
+- Preset `Preset::REALTIME` = Signalsmith default window (0.12 s / 0.03 s hop) with split computation, so no callback pays for a whole spectrum.
+
+### Measured (offline renders through the real callback code, 48 kHz stereo, dev box = shared cloud VM)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Pitch, key lock on, ratios 0.84 0.92 0.98 1.02 1.08 1.16 1.5 x 110 Hz..8 kHz sines | worst 0.002 cents |
+| 1 | Pitch, key shift -12..+12 st at ratio 1.0 and 1.08 | worst 0.023 cents |
+| 1 | 100 Hz..6 kHz log sweep at 0.92 / 1.08 / 1.16 | 0.9 / 1.2 / 2.0 cents (limited by the playhead mapping used to measure, 200 ms windows) |
+| 2 | 5 min click grid at 0.92 / 1.08 / 1.16 | drift 0.010 / 0.010 / 0.008 ms over 5 min, worst beat 0.3 ms |
+| 3 | Kick attack rise time (10-90 %, 1 ms envelope, techno track, time-scale corrected) | 1.2-1.35x of the source (source 7.4 ms), pre-echo at or below source level at +8 %; presets within measurement noise of each other |
+| 4 | Clicks (derivative spike detector, 7 scenarios x 3 tracks, compared to the same timeline at identity) | 0 extra spikes: tempo sweep -8..+8 % over 10 s (lock and varispeed), key changes, 8 seeks, 8 loop jumps, 4 loads, 6 pause/resume |
+| 5 | Playhead vs audio after seek, 11 ratio/shift/lock combos | worst 1.6 ms (limit 5 ms) |
+| 6 | Ratio 1.0 / shift 0, lock on and off, 3 tracks x 60 s | 0 differing samples (bit-identical) |
+| 7 | CPU per callback, Apple M5 Pro, release, realtime preset | mean 0.6 %, p99 1.0-1.3 % of the budget at 128/256/512 (max 4-39 %, OS scheduling outliers), 40 seeks p99 2.5-4.6 % |
+| 7 | CPU per callback, dev VM (shared, noisy) | mean 5.2-5.9 %, p99 8-10 % (128/256/512), seeks p99 22-41 %, max 45 % |
+
+Not met or caveats:
+- The key-lock-on shadow stretcher costs the same CPU at identity as when stretching (0.6 % on the M5 Pro, 5 % on the dev VM). Key lock off and shift 0 costs 0.02 %.
+- Transients: kick rise time is 20-35 % longer than the source. Merlin should judge by ear (renders below).
+- The measured pitch of a moving sweep is limited by how well the playhead maps output time to source time (about 1-2 ms), not by the stretcher.
+- Large key shifts (beyond about 5 st) stretch at up to 2x speed before resampling, so transients soften; typical +-1..3 st is fine.
+- The player shows the key in the notation of the analysed key (Camelot or note names). There is no key notation setting in this tree to read.
+- Latency until a seek lands at the new tempo and key: about 8 callbacks of varispeed first (pitch follows tempo for roughly 45 ms at 256 frames).
+- Not tested on a real audio device (none here); the Mac checklist in `audio-engine-2026-10.md` still applies, plus: drag the tempo with a track playing and listen for zipper noise, toggle MT at +8 %.
+
+Listening renders (30 s excerpts of three tracks, original / +8 % / -8 % / +16 % / +2 st / -2 st / +8 % varispeed / sweep, plus Rubber Band reference renders): `/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/feedback/wk/renders/index.md`.
+
+Reproduce: `cargo test --release -p pioneer-test-ui --bin pioneer-test-ui lab_report_ -- --ignored --nocapture` (env `FOURFOUR_LAB=pitch,tempo,latency,transparency,transients,clicks,cpu`, `FOURFOUR_LAB_TRACKS`, `FOURFOUR_LAB_OUT`); `lab_render_listening_set` writes the renders.
