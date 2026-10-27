@@ -3,7 +3,7 @@
   Search is the ⌘F inline filter (narrows the active track list in place).
 -->
 <script>
-  import { Kbd, FilterInput, Icon } from '$ds';
+  import { FilterInput, Icon } from '$ds';
   import { tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
   import { ui, clearListFilter, toggleOrganize } from '../stores/ui.svelte.ts';
 
@@ -44,7 +44,6 @@
       onClose={clearListFilter}
       onkeydown={onFilterKeydown}
     />
-    <span class="ff-gheader__kbd"><Kbd key="⌘F" /></span>
   </div>
   <button
     class="ff-gheader__toggle"
@@ -61,6 +60,7 @@
 
 <style>
   .ff-gheader {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -86,8 +86,10 @@
     border-color: var(--ff-border);
   }
   .ff-gheader__toggle {
-    flex: none;
-    margin-left: var(--ff-space-3);
+    position: absolute;
+    right: var(--ff-space-4);
+    top: 50%;
+    transform: translateY(-50%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -107,9 +109,5 @@
     color: var(--ff-text);
     background: var(--ff-select);
     border-color: var(--ff-border);
-  }
-  .ff-gheader__kbd {
-    flex-shrink: 0;
-    opacity: 0.85;
   }
 </style>

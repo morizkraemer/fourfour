@@ -144,21 +144,22 @@ function clampOrganizeWidth(w: number): number {
   return Math.max(ORGANIZE_WIDTH_MIN, Math.min(ORGANIZE_WIDTH_MAX, w));
 }
 
-/** Show the right sidebar at its last width. */
+/** Pull the organize panel out to its last width. */
 export function expandOrganize() {
   ui.organize.expanded = true;
   persistOrganize();
 }
 
-/** Hide the right sidebar — keeps the target intact. */
+/** Collapse to rail — keeps the target intact. */
 export function collapseOrganize() {
   ui.organize.expanded = false;
   persistOrganize();
 }
 
-/** Forget the docked target; the sidebar stays open on the destination picker. */
-export function clearOrganizeTarget() {
+/** Close the organize panel: clear target and collapse. */
+export function closeOrganize() {
   ui.organize.target = null;
+  ui.organize.expanded = false;
   persistOrganize();
 }
 
@@ -297,7 +298,7 @@ export function togglePalette() {
   ui.paletteOpen = !ui.paletteOpen;
 }
 
-/** Toggle the right sidebar (top bar button, Shift-Tab). */
+/** Toggle the right sidebar between rail and pulled-out (top bar button, Shift-Tab). */
 export function toggleOrganize() {
   if (ui.organize.expanded) collapseOrganize();
   else expandOrganize();

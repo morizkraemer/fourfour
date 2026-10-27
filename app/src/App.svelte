@@ -50,7 +50,9 @@
   let fileDropVisible = $state(false);
   let browseMainEl = $state(null);
 
-  let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0);
+  let inspectorVisible = $derived(
+    ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded
+  );
 
   let dropTarget = $derived(importDropTarget());
   let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
@@ -144,11 +146,13 @@
         {/if}
       </div>
     </div>
-    {#if ui.organize.expanded}
-      <div class="ff-browse__organize-dock" data-focus-region="organize">
-        <OrganizePanel containerEl={browseMainEl} />
-      </div>
-    {/if}
+    <div
+      class="ff-browse__organize-dock"
+      class:ff-browse__organize-dock--inspector={inspectorVisible}
+      data-focus-region="organize"
+    >
+      <OrganizePanel containerEl={browseMainEl} />
+    </div>
   </div>
   <div class="ff-browse__slot ff-browse__slot--player" data-focus-region="player">
     <Player />
@@ -239,20 +243,8 @@
     flex: none;
     min-width: 0;
   }
-  @media (min-width: 1100px) and (max-width: 1279px) {
-    .ff-browse__main:has(.ff-browse__organize-dock) .ff-browse__slot--detail {
-      display: none;
-    }
-  }
-  @media (max-width: 1099px) {
-    .ff-browse__organize-dock {
-      position: absolute;
-      top: var(--ff-titlebar-band-height);
-      right: 0;
-      bottom: 0;
-      z-index: 5;
-      box-shadow: -12px 0 24px rgba(0, 0, 0, 0.4);
-    }
+  .ff-browse__organize-dock--inspector {
+    background: var(--ff-surface);
   }
   .ff-browse__slot--player,
   .ff-browse__slot--status  { flex: none; }
