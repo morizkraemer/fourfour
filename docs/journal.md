@@ -143,3 +143,4 @@
 2026-10-27 08:48 orchestrator - merged wg-tags bf00bdb; checks green (397 tests); Mac install started (inspector + tags)
 2026-10-27 08:50 orchestrator - Mac install done (bf00bdb, inspector + tags)
 2026-10-27 08:56 orchestrator - merged wu-writer 1312650 (PDB >64KiB pages, removable-only volumes + wipe guard, cue names/colours/loops); checks green; Mac install started
+2026-10-27 10:55 orchestrator - Mac install done (cc0c6aa, writer fixes; macOS volumes.rs compiles, 0 warnings)
