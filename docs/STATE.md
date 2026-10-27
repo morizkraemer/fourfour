@@ -47,6 +47,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
+pm: resumed after limit reset; Q42–Q48 done on q42-overnight (installed on Mac dc818de); Q49 experiment resumed
 status: running · since 2026-10-27 23:40 · cap 2 workers · autonomy tight (all on branches; integration branch q42-overnight from master 61b81b3; only state/docs land on master)
 targets: Merlin approved option 1 (2026-10-27): stick sync real → review → leftovers → .dmg → key refit → housekeeping
 plan: W-Z zoom detail + W-X ⌥-delete/ribbon (round 7, running) → Q42 → Q43 → Q44 → Q45 [mac] → Q46 → Q47, then own priorities
