@@ -78,6 +78,7 @@
 
 <div class="ff-detail-module">
   {#if mode === 'single' && track}
+    {#key track.id}
     <DetailPane
       {mode}
       title={track.title}
@@ -113,6 +114,7 @@
       {bpmMenuItems}
       {keyMenuItems}
     />
+    {/key}
   {:else if mode === 'multi'}
     <DetailPane
       {mode}
