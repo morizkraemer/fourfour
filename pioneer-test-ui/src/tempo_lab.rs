@@ -150,24 +150,28 @@ fn heard_to_output_frame(positions: &[f64], block: usize, start: f64, frame: f64
 }
 
 fn hf_spikes(x: &[f32]) -> usize {
-    let win = 32;
-    let mut w = vec![0.0f64; x.len() / win];
-    for k in 0..w.len() {
-        let slice = &x[k * win..(k + 1) * win];
-        let mut e = 0.0f64;
-        for i in 1..slice.len() - 1 {
-            let d = (slice[i + 1] - 2.0 * slice[i] + slice[i - 1]) as f64;
-            e += d * d;
-        }
-        w[k] = (e / win as f64).sqrt();
+    let n = x.len();
+    let mut d2 = vec![0.0f64; n];
+    for i in 1..n - 1 {
+        d2[i] = (x[i + 1] - 2.0 * x[i] + x[i - 1]) as f64;
     }
+    let mut prefix = vec![0.0f64; n + 1];
+    for i in 0..n {
+        prefix[i + 1] = prefix[i] + d2[i] * d2[i];
+    }
+    let radius = 128usize;
     let mut count = 0;
-    for k in 16..w.len().saturating_sub(16) {
-        let mut around: Vec<f64> = (k - 16..k + 16).filter(|&j| j != k).map(|j| w[j]).collect();
-        around.sort_by(|a, b| a.total_cmp(b));
-        let baseline = around[around.len() / 2].max(1e-6);
-        if w[k] > 12.0 * baseline && w[k] > 2e-4 {
+    let mut last = 0usize;
+    for i in radius..n - radius {
+        let magnitude = d2[i].abs();
+        if magnitude < 2e-3 {
+            continue;
+        }
+        let energy = prefix[i + radius] - prefix[i - radius] - d2[i - 1] * d2[i - 1] - d2[i] * d2[i] - d2[i + 1] * d2[i + 1];
+        let rms = (energy / (2 * radius - 3) as f64).sqrt().max(1e-6);
+        if magnitude > 14.0 * rms && i > last + 64 {
             count += 1;
+            last = i;
         }
     }
     count
@@ -183,11 +187,13 @@ fn cpu_row(label: &str, block: usize, timings: &[u64]) -> String {
     let budget_ns = block as f64 / SR as f64 * 1e9;
     let mean = timings.iter().sum::<u64>() as f64 / timings.len() as f64;
     let p99 = percentile_ns(timings, 0.99) as f64;
+    let p999 = percentile_ns(timings, 0.999) as f64;
     let max = *timings.iter().max().unwrap() as f64;
     format!(
-        "| {label} | {block} | {:.2}% | {:.2}% | {:.2}% |",
+        "| {label} | {block} | {:.2}% | {:.2}% | {:.2}% | {:.2}% |",
         mean / budget_ns * 100.0,
         p99 / budget_ns * 100.0,
+        p999 / budget_ns * 100.0,
         max / budget_ns * 100.0
     )
 }
@@ -218,7 +224,7 @@ fn lab_report_pitch_and_tempo() {
         let mut worst_shift: f64 = 0.0;
         for freq in [110.0f32, 220.0, 440.0, 1000.0, 3000.0, 8000.0] {
             for ratio in [0.84, 0.92, 0.98, 1.02, 1.08, 1.16, 1.5] {
-                let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, Preset::DEFAULT);
+                let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, STRETCH_PRESET);
                 lab.set(ratio, 0.0, true);
                 let out = left(&lab.run_seconds(5.0));
                 let f = zero_cross_freq(&out, 2 * SR as usize, 5 * SR as usize);
@@ -226,7 +232,7 @@ fn lab_report_pitch_and_tempo() {
             }
             for semitones in [-12.0, -7.0, -5.0, -2.0, -1.0, 1.0, 2.0, 5.0, 7.0, 12.0] {
                 for ratio in [1.0, 1.08] {
-                    let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, Preset::DEFAULT);
+                    let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, STRETCH_PRESET);
                     lab.set(ratio, semitones, true);
                     let out = left(&lab.run_seconds(5.0));
                     let f = zero_cross_freq(&out, 2 * SR as usize, 5 * SR as usize);
@@ -250,7 +256,7 @@ fn lab_report_pitch_and_tempo() {
             source.push(v);
         }
         for ratio in [0.92, 1.08, 1.16] {
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.set(ratio, 0.0, true);
             lab.settle();
             lab.locate(0);
@@ -280,7 +286,7 @@ fn lab_report_pitch_and_tempo() {
         let seconds = 300.0f32;
         let click_period = 0.5;
         for ratio in [0.92, 1.08, 1.16] {
-            let mut lab = Lab::new(click_train(click_period, seconds), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(click_train(click_period, seconds), 256, STRETCH_PRESET);
             lab.set(ratio, 0.0, true);
             lab.settle();
             lab.locate(0);
@@ -353,7 +359,7 @@ fn lab_report_tracks() {
     if want("transparency") {
         for (name, source) in &tracks {
             for lock in [true, false] {
-                let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+                let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
                 lab.set(1.0, 0.0, lock);
                 let out = lab.run_seconds(60.0);
                 let mismatches = (256 * 2..out.len()).filter(|&i| out[i].to_bits() != source[i].to_bits()).count();
@@ -365,7 +371,7 @@ fn lab_report_tracks() {
     if want("transients") {
         let presets = [
             ("default 0.12/0.03", Preset::DEFAULT),
-            ("default split", Preset { split_computation: true, ..Preset::DEFAULT }),
+            ("realtime 0.12/0.03 split", Preset::REALTIME),
             ("cheaper 0.10/0.04 split", Preset::CHEAPER),
         ];
         for (name, source) in tracks.iter().take(1) {
@@ -411,13 +417,13 @@ fn lab_report_tracks() {
     if want("clicks") {
         for (name, source) in &tracks {
             let baseline = {
-                let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+                let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
                 lab.set(1.0, 0.0, true);
                 hf_spikes(&left(&lab.run_seconds(40.0)))
             };
             let mut scenarios: Vec<(String, usize)> = Vec::new();
 
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.settle();
             let mut out = Vec::new();
             for b in 0..(10 * SR as usize / 256) {
@@ -427,7 +433,7 @@ fn lab_report_tracks() {
             }
             scenarios.push(("tempo sweep -8..+8 % over 10 s, key lock".into(), hf_spikes(&left(&out))));
 
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.settle();
             let mut out = Vec::new();
             for b in 0..(10 * SR as usize / 256) {
@@ -437,7 +443,7 @@ fn lab_report_tracks() {
             }
             scenarios.push(("tempo sweep -8..+8 % over 10 s, varispeed".into(), hf_spikes(&left(&out))));
 
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.settle();
             let mut out = Vec::new();
             for b in 0..(12 * SR as usize / 256) {
@@ -447,7 +453,7 @@ fn lab_report_tracks() {
             }
             scenarios.push(("key changes every 2 s (0,+2,-3,+5,0,-1)".into(), hf_spikes(&left(&out))));
 
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.set(1.08, 0.0, true);
             lab.settle();
             let mut out = Vec::new();
@@ -458,7 +464,7 @@ fn lab_report_tracks() {
             }
             scenarios.push(("8 seeks/cue jumps at +8 %".into(), hf_spikes(&left(&out))));
 
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.set(1.0, 0.0, true);
             lab.settle();
             let mut out = Vec::new();
@@ -470,14 +476,14 @@ fn lab_report_tracks() {
 
             let mut out = Vec::new();
             for i in 0..4 {
-                let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+                let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
                 lab.set(1.0 + 0.04 * i as f64, 0.0, true);
                 lab.locate(SR as usize * 5);
                 out.extend(lab.run_seconds(2.0));
             }
             scenarios.push(("4 track loads (fresh engine) at +0..12 %".into(), hf_spikes(&left(&out))));
 
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             lab.set(1.08, 0.0, true);
             lab.settle();
             let mut out = Vec::new();
@@ -497,36 +503,41 @@ fn lab_report_tracks() {
     }
 
     if want("cpu") {
-        writeln!(report, "\n| scenario | block | mean | p99 | max |\n|---|---|---|---|---|").unwrap();
+        let presets = [
+            ("default 0.12/0.03", Preset::DEFAULT),
+            ("realtime 0.12/0.03 split", Preset::REALTIME),
+            ("cheaper 0.10/0.04 split", Preset::CHEAPER),
+        ];
+        writeln!(report, "\n| preset / scenario | block | mean | p99 | p99.9 | max |\n|---|---|---|---|---|---|").unwrap();
         let (_, source) = &tracks[0];
-        for block in [128usize, 256, 512] {
-            let scenarios: [(&str, f64, f64, bool); 8] = [
-                ("identity, key lock on (shadow stretcher)", 1.0, 0.0, true),
-                ("identity, key lock off", 1.0, 0.0, false),
-                ("+8 %, key lock", 1.08, 0.0, true),
-                ("-16 %, key lock", 0.84, 0.0, true),
-                ("+50 %, key lock", 1.5, 0.0, true),
-                ("+8 %, +3 st", 1.08, 3.0, true),
-                ("-12 st", 1.0, -12.0, true),
-                ("+8 %, varispeed", 1.08, 0.0, false),
-            ];
-            for (label, ratio, semitones, lock) in scenarios {
-                let mut lab = Lab::new(source.clone(), block, Preset::DEFAULT);
-                lab.set(ratio, semitones, lock);
+        for (preset_name, preset) in presets {
+            for block in [128usize, 256, 512] {
+                let scenarios: [(&str, f64, f64, bool); 6] = [
+                    ("identity, key lock on (shadow stretcher)", 1.0, 0.0, true),
+                    ("identity, key lock off", 1.0, 0.0, false),
+                    ("+8 %, key lock", 1.08, 0.0, true),
+                    ("+50 %, +3 st", 1.5, 3.0, true),
+                    ("-12 st", 1.0, -12.0, true),
+                    ("+8 %, varispeed", 1.08, 0.0, false),
+                ];
+                for (label, ratio, semitones, lock) in scenarios {
+                    let mut lab = Lab::new(source.clone(), block, preset);
+                    lab.set(ratio, semitones, lock);
+                    lab.settle();
+                    lab.timings_ns.clear();
+                    lab.run_seconds(40.0);
+                    writeln!(report, "{}", cpu_row(&format!("{preset_name}: {label}"), block, &lab.timings_ns)).unwrap();
+                }
+                let mut lab = Lab::new(source.clone(), block, preset);
+                lab.set(1.08, 0.0, true);
                 lab.settle();
                 lab.timings_ns.clear();
-                lab.run_seconds(40.0);
-                writeln!(report, "{}", cpu_row(label, block, &lab.timings_ns)).unwrap();
+                for i in 0..40 {
+                    lab.locate(SR as usize * (2 + i));
+                    lab.run_seconds(1.0);
+                }
+                writeln!(report, "{}", cpu_row(&format!("{preset_name}: 40 seeks at +8 %"), block, &lab.timings_ns)).unwrap();
             }
-            let mut lab = Lab::new(source.clone(), block, Preset::DEFAULT);
-            lab.set(1.08, 0.0, true);
-            lab.settle();
-            lab.timings_ns.clear();
-            for i in 0..40 {
-                lab.locate(SR as usize * (2 + i));
-                lab.run_seconds(1.0);
-            }
-            writeln!(report, "{}", cpu_row("40 seeks at +8 % (priming bursts included)", block, &lab.timings_ns)).unwrap();
         }
     }
     println!("{report}");
@@ -553,7 +564,7 @@ fn lab_render_listening_set() {
     for (name, source) in &tracks {
         writeln!(index, "## {name}\n").unwrap();
         for (tag, description, ratio, semitones, lock) in cases {
-            let mut lab = Lab::new(source.clone(), 256, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
             let mut out = Vec::new();
             if tag == "sweep" {
                 lab.set(0.92, 0.0, true);
@@ -599,4 +610,71 @@ fn lab_render_listening_set() {
         writeln!(index).unwrap();
     }
     std::fs::write(dir.join("index.md"), index).unwrap();
+}
+
+fn envelope_ripple_percent(x: &[f32], from: usize, to: usize) -> f64 {
+    let env = mono_smoothed_envelope(&x[from..to], 960);
+    let lo = env[960..].iter().copied().fold(f32::MAX, f32::min) as f64;
+    let hi = env[960..].iter().copied().fold(0.0f32, f32::max) as f64;
+    (hi - lo) / ((hi + lo) / 2.0) * 100.0
+}
+
+#[test]
+#[ignore]
+fn lab_preset_search() {
+    let tracks = lab_tracks();
+    let (_, source) = &tracks[0];
+    let mono = left(source);
+    let onsets = onsets_of(&mono, 40);
+    let reference: Vec<Attack> = onsets.iter().filter_map(|&o| attack_at(&mono, o)).collect();
+    let ref_rise = median(reference.iter().map(|a| a.rise_ms).collect());
+    println!("source rise {ref_rise:.2} ms");
+    let candidates = [
+        ("0.12/0.03 split", 0.12f32, 0.03f32),
+        ("0.10/0.04 split", 0.10, 0.04),
+        ("0.10/0.025 split", 0.10, 0.025),
+        ("0.08/0.02 split", 0.08, 0.02),
+        ("0.08/0.04 split", 0.08, 0.04),
+        ("0.06/0.015 split", 0.06, 0.015),
+        ("0.14/0.035 split", 0.14, 0.035),
+    ];
+    for (label, block, interval) in candidates {
+        let preset = Preset { block_seconds: block, interval_seconds: interval, split_computation: true };
+        let mut row = format!("{label}:");
+        for ratio in [0.92, 1.08, 1.16] {
+            let mut lab = Lab::new(source.clone(), 256, preset);
+            lab.set(ratio, 0.0, true);
+            lab.settle();
+            lab.locate(0);
+            lab.positions.clear();
+            let out = left(&lab.run_seconds(40.0 / ratio as f32));
+            let mut rises = Vec::new();
+            let mut pres = Vec::new();
+            let mut refs = Vec::new();
+            for &onset in &onsets {
+                if let Some(o) = heard_to_output_frame(&lab.positions, 256, 0.0, onset as f64) {
+                    if let (Some(a), Some(r)) = (attack_at(&out, o), attack_at(&mono, onset)) {
+                        rises.push(a.rise_ms * ratio);
+                        pres.push(a.pre_echo);
+                        refs.push(r.rise_ms);
+                    }
+                }
+            }
+            row += &format!(" r{ratio} rise x{:.2} pre {:.3};", median(rises) / median(refs), median(pres));
+        }
+        for freq in [55.0f32, 110.0, 440.0] {
+            let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, preset);
+            lab.set(1.08, 0.0, true);
+            let out = left(&lab.run_seconds(8.0));
+            row += &format!(" {freq}Hz ripple {:.2}%;", envelope_ripple_percent(&out, 2 * SR as usize, 7 * SR as usize));
+        }
+        let mut lab = Lab::new(source.clone(), 256, preset);
+        lab.set(1.08, 0.0, true);
+        lab.settle();
+        lab.timings_ns.clear();
+        lab.run_seconds(30.0);
+        let mean = lab.timings_ns.iter().sum::<u64>() as f64 / lab.timings_ns.len() as f64;
+        row += &format!(" cpu mean {:.2}% p99 {:.2}%", mean / (256.0 / SR as f64 * 1e9) * 100.0, percentile_ns(&lab.timings_ns, 0.99) as f64 / (256.0 / SR as f64 * 1e9) * 100.0);
+        println!("{row}");
+    }
 }

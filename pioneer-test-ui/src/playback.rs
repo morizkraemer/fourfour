@@ -58,7 +58,7 @@ const UNDERRUN_DECAY: f32 = 0.98;
 const MAX_CH: usize = 8;
 const TICK_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_CONSECUTIVE_RESETS: u32 = 8;
-const STRETCH_PRESET: Preset = Preset::DEFAULT;
+const STRETCH_PRESET: Preset = Preset::REALTIME;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct PlaybackAudioConfig {

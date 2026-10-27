@@ -52,6 +52,13 @@ impl Preset {
         interval_seconds: 0.03,
         split_computation: false,
     };
+    /// The default window with the work spread over the hop, so no single callback pays for a
+    /// whole spectrum.
+    pub const REALTIME: Preset = Preset {
+        block_seconds: 0.12,
+        interval_seconds: 0.03,
+        split_computation: true,
+    };
     pub const CHEAPER: Preset = Preset {
         block_seconds: 0.10,
         interval_seconds: 0.04,

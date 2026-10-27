@@ -251,7 +251,7 @@ fn identity_is_bit_exact_with_key_lock_on_and_off() {
     for lock in [true, false] {
         for block in [64usize, 100, 256, 512, 1000] {
             let source = noise(2.0, 0.6);
-            let mut lab = Lab::new(source.clone(), block, Preset::DEFAULT);
+            let mut lab = Lab::new(source.clone(), block, STRETCH_PRESET);
             lab.set(1.0, 0.0, lock);
             let out = lab.run_seconds(1.5);
             let frames = out.len() / 2;
@@ -270,7 +270,7 @@ fn identity_is_bit_exact_with_key_lock_on_and_off() {
 #[test]
 fn key_lock_keeps_pitch_across_ratios() {
     for ratio in [0.84, 0.92, 0.98, 1.02, 1.08, 1.16, 1.5] {
-        let mut lab = Lab::new(sine(1000.0, 8.0, 0.5), 256, Preset::DEFAULT);
+        let mut lab = Lab::new(sine(1000.0, 8.0, 0.5), 256, STRETCH_PRESET);
         lab.set(ratio, 0.0, true);
         let out = left(&lab.run_seconds(5.0));
         let f = zero_cross_freq(&out, 2 * SR as usize, 5 * SR as usize);
@@ -282,7 +282,7 @@ fn key_lock_keeps_pitch_across_ratios() {
 #[test]
 fn key_shift_lands_on_the_semitone() {
     for semitones in [-12.0, -5.0, -2.0, 2.0, 7.0, 12.0] {
-        let mut lab = Lab::new(sine(500.0, 8.0, 0.5), 256, Preset::DEFAULT);
+        let mut lab = Lab::new(sine(500.0, 8.0, 0.5), 256, STRETCH_PRESET);
         lab.set(1.0, semitones, true);
         let out = left(&lab.run_seconds(5.0));
         let expected = 500.0 * 2f64.powf(semitones / 12.0);
@@ -294,7 +294,7 @@ fn key_shift_lands_on_the_semitone() {
 
 #[test]
 fn key_shift_with_tempo_change_stays_independent() {
-    let mut lab = Lab::new(sine(500.0, 8.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(500.0, 8.0, 0.5), 256, STRETCH_PRESET);
     lab.set(1.08, 3.0, true);
     let out = left(&lab.run_seconds(5.0));
     let expected = 500.0 * 2f64.powf(3.0 / 12.0);
@@ -305,7 +305,7 @@ fn key_shift_with_tempo_change_stays_independent() {
 #[test]
 fn varispeed_moves_pitch_with_tempo() {
     for ratio in [0.84, 0.92, 1.08, 1.16, 1.5] {
-        let mut lab = Lab::new(sine(1000.0, 8.0, 0.5), 256, Preset::DEFAULT);
+        let mut lab = Lab::new(sine(1000.0, 8.0, 0.5), 256, STRETCH_PRESET);
         lab.set(ratio, 0.0, false);
         let out = left(&lab.run_seconds(5.0));
         let f = zero_cross_freq(&out, 2 * SR as usize, 5 * SR as usize);
@@ -317,7 +317,7 @@ fn varispeed_moves_pitch_with_tempo() {
 #[test]
 fn playing_ten_seconds_at_ratio_takes_ten_over_ratio() {
     for (ratio, lock) in [(0.92, true), (1.08, true), (1.16, true), (1.08, false), (0.84, false)] {
-        let mut lab = Lab::new(sine(440.0, 10.0, 0.5), 256, Preset::DEFAULT);
+        let mut lab = Lab::new(sine(440.0, 10.0, 0.5), 256, STRETCH_PRESET);
         lab.set(ratio, 0.0, lock);
         lab.settle();
         lab.locate(0);
@@ -333,7 +333,7 @@ fn playing_ten_seconds_at_ratio_takes_ten_over_ratio() {
 
 pub(crate) fn heard_error_ms(period: f32, ratio: f64, semitones: f64, lock: bool, start_frame: usize) -> f64 {
     let seconds = 12.0;
-    let mut lab = Lab::new(click_train(period, seconds), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(click_train(period, seconds), 256, STRETCH_PRESET);
     lab.set(ratio, semitones, lock);
     lab.settle();
     lab.locate(start_frame);
@@ -382,7 +382,7 @@ fn reported_position_matches_the_audio_after_seek_at_every_ratio() {
 #[test]
 fn no_discontinuities_while_tempo_and_key_move() {
     let theory = |f: f32| 0.5 * (2.0 * PI * f / SR as f32).powi(2);
-    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, STRETCH_PRESET);
     lab.settle();
     let mut out = Vec::new();
     for b in 0..(10 * SR as usize / 256) {
@@ -394,7 +394,7 @@ fn no_discontinuities_while_tempo_and_key_move() {
     let (spike, at) = max_second_difference(&x, SR as usize / 2);
     assert!(spike < theory(220.0) * 3.0, "tempo sweep spike {spike} at {at}");
 
-    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, STRETCH_PRESET);
     lab.settle();
     let mut out = Vec::new();
     for b in 0..(6 * SR as usize / 256) {
@@ -410,7 +410,7 @@ fn no_discontinuities_while_tempo_and_key_move() {
 #[test]
 fn switching_between_paths_never_clicks() {
     let theory = |f: f32| 0.5 * (2.0 * PI * f / SR as f32).powi(2);
-    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, STRETCH_PRESET);
     lab.settle();
     let script: [(f64, f64, bool); 8] = [
         (1.0, 0.0, true),
@@ -440,7 +440,7 @@ fn switching_between_paths_never_clicks() {
 
 #[test]
 fn engine_reports_the_path_it_plays() {
-    let mut lab = Lab::new(sine(220.0, 10.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(220.0, 10.0, 0.5), 256, STRETCH_PRESET);
     lab.settle();
     lab.run_seconds(0.2);
     lab.set(1.08, 0.0, true);
@@ -478,7 +478,7 @@ fn lab_pitch_table() {
 fn lab_spike_debug() {
     let theory = 0.5 * (2.0 * PI * 220.0 / SR as f32).powi(2);
     for ratio in [1.3f64, 1.35, 1.4, 1.45, 1.5] {
-        let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
+        let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, STRETCH_PRESET);
         lab.set(ratio, 0.0, true);
         let out = left(&lab.run_seconds(6.0));
         let (spike, at) = max_second_difference(&out, SR as usize);
@@ -487,7 +487,7 @@ fn lab_spike_debug() {
         println!("static {ratio}: spike/theory {:.2} at {:.3}s, peak {peak:.4}", spike / theory, at as f64 / SR as f64);
         let _ = floor;
     }
-    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, STRETCH_PRESET);
     lab.settle();
     let mut out = Vec::new();
     let mut targets = Vec::new();
@@ -515,7 +515,7 @@ fn lab_spike_debug() {
 #[test]
 #[ignore]
 fn lab_switch_debug() {
-    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
+    let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, STRETCH_PRESET);
     lab.settle();
     let script: [(f64, f64, bool); 8] = [
         (1.0, 0.0, true), (1.06, 0.0, true), (1.06, 0.0, false), (1.06, 2.0, true),
@@ -553,7 +553,7 @@ fn lab_switch_debug() {
 #[ignore]
 fn lab_trace() {
     for ratio in [1.4, 1.3] {
-        let mut lab = Lab::new(sine(220.0, 12.0, 0.5), 256, Preset::DEFAULT);
+        let mut lab = Lab::new(sine(220.0, 12.0, 0.5), 256, STRETCH_PRESET);
         lab.set(ratio, 0.0, true);
         let out = left(&lab.run_seconds(8.0));
         let mut row = format!("ratio {ratio}:");
