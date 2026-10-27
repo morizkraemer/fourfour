@@ -580,6 +580,12 @@ impl LocalLibrary {
         queries::set_playlist_tracks(&self.conn, playlist_id, track_ids)
     }
 
+    /// Make the stored playlists exactly `playlists`, in that order, keeping their ids. Playlists
+    /// that stay keep what refers to them (the sticks they are on).
+    pub fn replace_playlists(&self, playlists: &[Playlist]) -> Result<()> {
+        queries::replace_playlists(&self.conn, playlists)
+    }
+
     /// Retrieve all playlists with their track IDs.
     pub fn get_all_playlists(&self) -> Result<Vec<Playlist>> {
         queries::select_all_playlists(&self.conn)

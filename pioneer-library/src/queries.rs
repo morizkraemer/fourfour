@@ -375,15 +375,43 @@ pub fn delete_playlist(conn: &Connection, id: i64) -> Result<()> {
 
 pub fn set_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: &[i64]) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute(
+    write_playlist_tracks(&tx, playlist_id, track_ids.iter().copied())?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn write_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: impl Iterator<Item = i64>) -> Result<()> {
+    conn.execute(
         "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
         [playlist_id],
     )?;
-    for (pos, track_id) in track_ids.iter().enumerate() {
-        tx.execute(
+    for (pos, track_id) in track_ids.enumerate() {
+        conn.execute(
             "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
             params![playlist_id, track_id, pos as i64],
         )?;
+    }
+    Ok(())
+}
+
+pub fn replace_playlists(conn: &Connection, playlists: &[Playlist]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    let existing: Vec<i64> = tx
+        .prepare("SELECT id FROM playlists")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    for id in existing {
+        if !playlists.iter().any(|p| p.id as i64 == id) {
+            tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+        }
+    }
+    for (sort_order, playlist) in playlists.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO playlists (id, name, sort_order) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, sort_order = ?3",
+            params![playlist.id as i64, playlist.name, sort_order as i64],
+        )?;
+        write_playlist_tracks(&tx, playlist.id as i64, playlist.track_ids.iter().map(|&t| t as i64))?;
     }
     tx.commit()?;
     Ok(())

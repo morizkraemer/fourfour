@@ -243,3 +243,37 @@ fn resync_after_removing_a_track_drops_only_that_track() {
         .unwrap();
     assert_eq!(with_cues.cues.iter().filter(|c| c.hot_cue_number > 0).count(), 2);
 }
+
+fn playlist(id: i64, name: &str, tracks: &[i64]) -> pioneer_usb_writer::models::Playlist {
+    pioneer_usb_writer::models::Playlist {
+        id: id as u32,
+        name: name.to_string(),
+        track_ids: tracks.iter().map(|&t| t as u32).collect(),
+    }
+}
+
+#[test]
+fn saving_playlists_keeps_their_ids_and_the_sticks_holding_them() {
+    let fx = fixture(6);
+    let stick = "stick-a";
+    fx.library.add_stick_playlists(stick, &[fx.peak]).unwrap();
+
+    fx.library
+        .replace_playlists(&[playlist(fx.warmup, "Warmup", &fx.ids[..1]), playlist(fx.peak, "Peak", &fx.ids[2..4])])
+        .unwrap();
+    assert_eq!(fx.library.stick_contents(stick).unwrap().playlist_ids, vec![fx.peak]);
+
+    let added = fx.peak + 7;
+    fx.library
+        .replace_playlists(&[playlist(fx.peak, "Peak", &fx.ids[2..5]), playlist(added, "New", &fx.ids[..1])])
+        .unwrap();
+    let summary: Vec<(i64, String, usize)> = fx
+        .library
+        .get_all_playlists()
+        .unwrap()
+        .iter()
+        .map(|p| (p.id as i64, p.name.clone(), p.track_ids.len()))
+        .collect();
+    assert_eq!(summary, vec![(fx.peak, "Peak".into(), 3), (added, "New".into(), 1)]);
+    assert_eq!(fx.library.stick_contents(stick).unwrap().playlist_ids, vec![fx.peak]);
+}
