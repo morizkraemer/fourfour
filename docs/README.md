@@ -16,6 +16,7 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`cues.md`](architecture/cues.md) | current | Hot and memory cues, CUE button, edit lock for cues and beat grid, shortcuts, what export does with cues, writer issues. |
 | [`performance-2026-10.md`](architecture/performance-2026-10.md) | reference | Startup and UI performance: before/after numbers at 1k/10k/30k tracks, method, what is left. |
 | [`rekordbox-import.md`](architecture/rekordbox-import.md) | current | Importing Rekordbox libraries (master.db, USB, XML): sources, field mapping, path remap, merge policy, test results, gaps. |
+| [`tempo-key-engine-plan.md`](architecture/tempo-key-engine-plan.md) | plan | Player BPM/KEY as real tempo and pitch controls: stretch engine choice, engine placement, UI, slices. |
 | [`tech-stack.md`](architecture/tech-stack.md) | reference | Survey of open-source DJ analysis tools (Essentia, madmom, CLAP, Demucs, …) — options and pain points per layer. |
 
 ## ui/ — UI specs (current phase)
