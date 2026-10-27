@@ -2,6 +2,7 @@
  * Shared context-menu item builders — keep all app menus on the $ds ContextMenu shape.
  */
 
+import { isStickSyncBusy } from '../stores/stick-sync.svelte.ts';
 import {
   library,
   playlistByName,
@@ -62,7 +63,7 @@ interface MenuItem {
 const LIBRARY_VIEWS = new Set(['All Tracks', 'Recently Added']);
 
 function busy() {
-  return library.analyzing || library.syncing;
+  return library.analyzing || library.syncing || isStickSyncBusy();
 }
 
 /** Analysis can be queued while a run is already in progress. */
@@ -105,11 +106,10 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
   if (library.volumes.includes(sourceId)) {
     items.push(
       {
-        label: 'Sync to USB',
-        disabled: busy() || library.playlists.length === 0,
+        label: 'Sync stick',
+        disabled: busy(),
         onClick: async () => {
           await selectVolume(sourceId);
-          if (!confirm(`Sync all playlists to ${label}?`)) return;
           await syncToUsb();
         },
       },

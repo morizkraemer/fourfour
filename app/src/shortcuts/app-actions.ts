@@ -19,6 +19,7 @@ import {
 } from '../stores/library.svelte.ts';
 import { importIntoSource } from '../menus/context-menus.ts';
 import { selection, selectionCount } from '../stores/selection.svelte.ts';
+import { isStickSyncBusy } from '../stores/stick-sync.svelte.ts';
 import { player, togglePlay, toggleExpanded, cueTapPress } from '../stores/player.svelte.ts';
 import { addMemoryCueAtPlayhead, deleteHotCue, triggerHotCue } from '../stores/cue-actions.ts';
 import { HOT_CUE_SLOTS, slotLetter } from '../lib/cues.ts';
@@ -195,7 +196,7 @@ export function buildAppActions(): ShortcutAction[] {
       label: 'Sync stick',
       group: GROUP.library,
       defaultBinding: null,
-      when: () => library.activeVolume != null && !library.syncing,
+      when: () => library.activeVolume != null && !library.syncing && !isStickSyncBusy(),
       run: () => void syncToUsb(),
     },
     {

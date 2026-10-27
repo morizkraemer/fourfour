@@ -609,19 +609,290 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
   }
 }
 
-export async function writeUsb(outputDir: string, playlists: PlaylistInput[]): Promise<SyncReport> {
-  try {
-    return await invoke<SyncReport>('write_usb', { outputDir, playlists });
-  } catch (err) {
-    lastTauriError = `write_usb fail: ${String(err)}`;
-    return {
-      tracks_added: 2,
-      tracks_updated: 0,
-      tracks_replaced: 0,
-      tracks_removed: 0,
-      tracks_unchanged: 1,
-    };
+export interface StickContents {
+  stick_id: string | null;
+  track_ids: number[];
+  playlist_ids: number[];
+}
+
+export interface VolumeCapacity {
+  total_bytes: number;
+  free_bytes: number;
+}
+
+export type SyncSelection =
+  | { kind: 'whole_library' }
+  | { kind: 'playlists'; playlist_ids: number[]; track_ids: number[] };
+
+export interface SyncTarget {
+  volume: string;
+  selection: SyncSelection;
+}
+
+export interface PlanTrack {
+  track_id: number | null;
+  title: string;
+  artist: string;
+  size_bytes: number | null;
+}
+
+export interface UsbSyncPlan {
+  volume: string;
+  stick_id: string | null;
+  playlist_count: number;
+  add: PlanTrack[];
+  remove: PlanTrack[];
+  update_count: number;
+  unchanged_count: number;
+  skipped_unanalyzed: PlanTrack[];
+  foreign_kept_count: number;
+  bytes_to_add: number;
+  bytes_to_free: number;
+  bytes_needed: number;
+  free_bytes: number | null;
+  fits: boolean | null;
+}
+
+export type SyncPhase = 'checking-space' | 'copying' | 'writing-database' | 'done' | 'failed';
+
+export interface StickProgress {
+  volume: string;
+  phase: SyncPhase;
+  done: number;
+  total: number;
+  message: string;
+}
+
+export interface StickReport {
+  volume: string;
+  path: string;
+  status: 'done' | 'failed';
+  report: SyncReport | null;
+  error: string | null;
+  skipped_unanalyzed: number;
+  elapsed_ms: number;
+}
+
+const GB = 1_000_000_000;
+const MOCK_TRACK_MARGIN = 128 * 1024;
+const MOCK_BASE_MARGIN = 16 * 1024 * 1024;
+
+const mockCapacities: Record<string, VolumeCapacity> = {
+  '/Volumes/SanDisk 64GB': { total_bytes: 64 * GB, free_bytes: 22.8 * GB },
+  '/Volumes/VAULT666': { total_bytes: 8 * GB, free_bytes: 100_000_000 },
+};
+
+const mockSticks = new Map<string, StickContents>();
+const mockWritten = new Map<string, Set<number>>([['/Volumes/SanDisk 64GB', new Set([1, 2])]]);
+const mockSyncListeners = new Set<(progress: StickProgress) => void>();
+
+function mockStick(path: string): StickContents {
+  return mockSticks.get(path) ?? { stick_id: null, track_ids: [], playlist_ids: [] };
+}
+
+function mockEditStick(path: string, edit: (stick: StickContents) => number): [number, StickContents] {
+  const current = mockStick(path);
+  const stick = {
+    stick_id: current.stick_id ?? `mock-${path.split('/').pop()}`,
+    track_ids: [...current.track_ids],
+    playlist_ids: [...current.playlist_ids],
+  };
+  const changed = edit(stick);
+  mockSticks.set(path, stick);
+  return [changed, stick];
+}
+
+function appendNew(list: number[], ids: number[]): number {
+  const fresh = [...new Set(ids)].filter((id) => !list.includes(id));
+  list.push(...fresh);
+  return fresh.length;
+}
+
+function dropIds(list: number[], ids: number[]): number {
+  const before = list.length;
+  const kept = list.filter((id) => !ids.includes(id));
+  list.splice(0, list.length, ...kept);
+  return before - kept.length;
+}
+
+function mockWantedTrackIds(selection: SyncSelection): number[] {
+  if (selection.kind === 'whole_library') return mockTracks.map((t) => t.id);
+  const wanted = new Set(selection.track_ids);
+  for (const playlist of mockPlaylists) {
+    if (selection.playlist_ids.includes(playlist.id)) playlist.track_ids.forEach((id) => wanted.add(id));
   }
+  return [...wanted];
+}
+
+function mockPlanTrack(id: number): PlanTrack {
+  const track = mockTracks.find((t) => t.id === id);
+  return {
+    track_id: id,
+    title: track?.title ?? `Track ${id}`,
+    artist: track?.artist ?? '',
+    size_bytes: track?.file_size ?? null,
+  };
+}
+
+function mockPlan(target: SyncTarget): UsbSyncPlan {
+  const wanted = mockWantedTrackIds(target.selection);
+  const analyzed = wanted.filter((id) => mockTracks.find((t) => t.id === id)?.has_analysis);
+  const written = mockWritten.get(target.volume) ?? new Set<number>();
+  const add = analyzed.filter((id) => !written.has(id)).map(mockPlanTrack);
+  const remove = [...written].filter((id) => !analyzed.includes(id)).map(mockPlanTrack);
+  const bytesToAdd = add.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
+  const needed = bytesToAdd + MOCK_BASE_MARGIN + MOCK_TRACK_MARGIN * analyzed.length;
+  const free = mockCapacities[target.volume]?.free_bytes ?? null;
+  return {
+    volume: target.volume.split('/').pop() ?? target.volume,
+    stick_id: mockStick(target.volume).stick_id,
+    playlist_count: target.selection.kind === 'playlists' ? target.selection.playlist_ids.length : mockPlaylists.length,
+    add,
+    remove,
+    update_count: 0,
+    unchanged_count: analyzed.length - add.length,
+    skipped_unanalyzed: wanted.filter((id) => !analyzed.includes(id)).map(mockPlanTrack),
+    foreign_kept_count: 0,
+    bytes_to_add: bytesToAdd,
+    bytes_to_free: remove.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0),
+    bytes_needed: needed,
+    free_bytes: free,
+    fits: free === null ? null : needed <= free,
+  };
+}
+
+function mockSyncSteps(target: SyncTarget): Promise<StickReport> {
+  const plan = mockPlan(target);
+  const volume = plan.volume;
+  const total = plan.add.length + plan.unchanged_count;
+  const emit = (phase: SyncPhase, done: number, message: string) =>
+    mockSyncListeners.forEach((listener) => listener({ volume, phase, done, total, message }));
+  return new Promise((resolve) => {
+    emit('checking-space', 0, 'Checking free space');
+    if (plan.fits === false) {
+      const error = `Not enough space on ${volume}. Nothing was written.`;
+      emit('failed', 0, error);
+      resolve({ volume, path: target.volume, status: 'failed', report: null, error, skipped_unanalyzed: plan.skipped_unanalyzed.length, elapsed_ms: 0 });
+      return;
+    }
+    let step = 0;
+    const timer = setInterval(() => {
+      step += 1;
+      if (step <= plan.add.length) {
+        emit('copying', plan.unchanged_count + step, `Copying ${plan.add[step - 1].artist} - ${plan.add[step - 1].title}`);
+        return;
+      }
+      clearInterval(timer);
+      emit('writing-database', total, 'Writing database');
+      const kept = new Set(mockWantedTrackIds(target.selection).filter((id) => mockTracks.find((t) => t.id === id)?.has_analysis));
+      mockWritten.set(target.volume, kept);
+      const capacity = mockCapacities[target.volume];
+      if (capacity) capacity.free_bytes = Math.max(0, capacity.free_bytes - plan.bytes_to_add + plan.bytes_to_free);
+      emit('done', total, 'Safe to eject');
+      resolve({
+        volume,
+        path: target.volume,
+        status: 'done',
+        report: {
+          tracks_added: plan.add.length,
+          tracks_updated: 0,
+          tracks_replaced: 0,
+          tracks_removed: plan.remove.length,
+          tracks_unchanged: plan.unchanged_count,
+        },
+        error: null,
+        skipped_unanalyzed: plan.skipped_unanalyzed.length,
+        elapsed_ms: step * 150,
+      });
+    }, 150);
+  });
+}
+
+export async function getStick(path: string): Promise<StickContents> {
+  try {
+    return await invoke<StickContents>('get_stick', { path });
+  } catch (err) {
+    lastTauriError = `get_stick fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return mockStick(path);
+  }
+}
+
+async function editStick(
+  command: string,
+  args: Record<string, unknown>,
+  path: string,
+  mock: (stick: StickContents) => number
+): Promise<[number, StickContents]> {
+  try {
+    return await invoke<[number, StickContents]>(command, { path, ...args });
+  } catch (err) {
+    lastTauriError = `${command} fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return mockEditStick(path, mock);
+  }
+}
+
+export function stickAddTracks(path: string, trackIds: number[]) {
+  return editStick('stick_add_tracks', { trackIds }, path, (s) => appendNew(s.track_ids, trackIds));
+}
+
+export function stickRemoveTracks(path: string, trackIds: number[]) {
+  return editStick('stick_remove_tracks', { trackIds }, path, (s) => dropIds(s.track_ids, trackIds));
+}
+
+export function stickAddPlaylists(path: string, playlistIds: number[]) {
+  return editStick('stick_add_playlists', { playlistIds }, path, (s) => appendNew(s.playlist_ids, playlistIds));
+}
+
+export function stickRemovePlaylists(path: string, playlistIds: number[]) {
+  return editStick('stick_remove_playlists', { playlistIds }, path, (s) => dropIds(s.playlist_ids, playlistIds));
+}
+
+export async function getVolumeCapacity(path: string): Promise<VolumeCapacity | null> {
+  try {
+    return await invoke<VolumeCapacity>('get_volume_capacity', { path });
+  } catch (err) {
+    lastTauriError = `get_volume_capacity fail: ${String(err)}`;
+    if (!useBrowserMocks()) return null;
+    return mockCapacities[path] ? { ...mockCapacities[path] } : null;
+  }
+}
+
+export async function planUsbSync(target: SyncTarget): Promise<UsbSyncPlan> {
+  try {
+    return await invoke<UsbSyncPlan>('plan_usb_sync', { target });
+  } catch (err) {
+    lastTauriError = `plan_usb_sync fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return mockPlan(target);
+  }
+}
+
+export async function syncUsbMany(targets: SyncTarget[]): Promise<StickReport[]> {
+  try {
+    return await invoke<StickReport[]>('sync_usb_many', { targets });
+  } catch (err) {
+    lastTauriError = `sync_usb_many fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return Promise.all(targets.map(mockSyncSteps));
+  }
+}
+
+export function listenToUsbSyncProgress(callback: (progress: StickProgress) => void) {
+  let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) {
+    mockSyncListeners.add(callback);
+    return () => mockSyncListeners.delete(callback);
+  }
+  listen<StickProgress>('usb-sync-progress', (event) => callback(event.payload))
+    .then((unsub) => {
+      unsubscribe = unsub;
+    })
+    .catch((err) => {
+      lastTauriError = `listen(usb-sync-progress) fail: ${String(err)}`;
+    });
+  return () => unsubscribe();
 }
 
 export async function ejectVolume(path: string): Promise<void> {

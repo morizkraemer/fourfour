@@ -14,6 +14,7 @@ mod queries;
 pub mod rekordbox;
 mod row_preview;
 mod schema;
+pub mod sticks;
 mod user_edits;
 
 use std::collections::HashMap;
@@ -39,9 +40,11 @@ pub struct BeatPosition {
 }
 
 pub use multi_sync::{
-    NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
-    SyncPhase, SyncSelection, SyncTarget, WriterFn, statvfs_available_bytes,
+    NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
+    StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    statvfs_available_bytes, volume_capacity,
 };
+pub use sticks::StickContents;
 pub use user_edits::{MAX_BPM, MIN_BPM, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
@@ -817,7 +820,7 @@ mod tests {
     use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, CuePoint, WaveformPreview};
     use std::path::PathBuf;
 
-    fn make_track(title: &str, source: &str) -> Track {
+    pub(crate) fn make_track(title: &str, source: &str) -> Track {
         Track {
             id: 0,
             source_path: PathBuf::from(source),
@@ -1507,6 +1510,43 @@ mod tests {
         }
         let lib = LocalLibrary::open(&db_path).unwrap();
         assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
+    }
+
+    #[test]
+    fn v5_library_migrates_to_stick_tables_and_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let (track, playlist) = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let track = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+            lib.set_analysis(track, &make_analysis()).unwrap();
+            let playlist = lib.create_playlist("Warmup").unwrap();
+            lib.set_playlist_tracks(playlist, &[track]).unwrap();
+            (track, playlist)
+        };
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "DROP TABLE stick_playlists; DROP TABLE stick_tracks; DROP TABLE sticks;
+                 UPDATE schema_version SET version = 5;",
+            )
+            .unwrap();
+        }
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let version: u32 = lib
+            .conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, schema::SCHEMA_VERSION);
+        assert_eq!(lib.get_playlist(playlist).unwrap().unwrap().track_ids, vec![track as u32]);
+        assert_eq!(lib.analysis_stages(track).unwrap(), Some(analysis_stage::ALL));
+        assert_eq!(lib.add_stick_tracks("stick-1", &[track]).unwrap(), 1);
+        assert_eq!(lib.add_stick_playlists("stick-1", &[playlist]).unwrap(), 1);
+        drop(lib);
+        let reopened = LocalLibrary::open(&db_path).unwrap();
+        let contents = reopened.stick_contents("stick-1").unwrap();
+        assert_eq!(contents.track_ids, vec![track]);
+        assert_eq!(contents.playlist_ids, vec![playlist]);
     }
 
     #[test]

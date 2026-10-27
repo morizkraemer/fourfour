@@ -18,6 +18,7 @@
   import { fitRibbonCovers } from '../lib/ribbonFit.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
+  import StickBoard from './StickBoard.svelte';
 
   let { containerEl = null } = $props();
 
@@ -262,6 +263,10 @@
         />
       </div>
     </div>
+
+    {#if ui.organize.target?.kind === 'usb'}
+      <StickBoard volumePath={ui.organize.target.id} />
+    {/if}
 
     <div class="ff-organize__body" class:ff-organize__body--table={ui.organize.target !== null}>
       {#if ui.organize.target === null}

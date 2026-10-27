@@ -18,7 +18,6 @@ import {
   prioritizeAnalysis as tauriPrioritizeAnalysis,
   getMountedVolumes as tauriGetMountedVolumes,
   readUsbState as tauriReadUsbState,
-  writeUsb as tauriWriteUsb,
   ejectVolume as tauriEjectVolume,
   revealInFileManager,
   wipeUsb as tauriWipeUsb,
@@ -36,6 +35,8 @@ import {
   type PlaylistInput,
   type SyncReport
 } from '../services/tauri.svelte.ts';
+import { loadSticks } from './sticks.svelte.ts';
+import { onStickSyncFinished, syncStick } from './stick-sync.svelte.ts';
 import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
@@ -972,7 +973,10 @@ export async function setTestCuesOnSelected(ids: number[]) {
 
 export async function refreshVolumes() {
   try {
-    library.volumes = await tauriGetMountedVolumes();
+    const mounted = await tauriGetMountedVolumes();
+    const changed = mounted.length !== library.volumes.length || mounted.some((v) => !library.volumes.includes(v));
+    library.volumes = mounted;
+    if (changed) void loadSticks(mounted);
     // Validate activeVolume still exists
     if (library.activeVolume && !library.volumes.includes(library.activeVolume)) {
       library.activeVolume = null;
@@ -983,6 +987,10 @@ export async function refreshVolumes() {
     console.error('refreshVolumes failed:', err);
   }
 }
+
+onStickSyncFinished(async (path) => {
+  if (library.activeVolume === path) await refreshUsbState();
+});
 
 export async function selectVolume(path: string | null) {
   library.activeVolume = path;
@@ -1049,51 +1057,10 @@ export async function ejectVolume(path: string) {
   }
 }
 
+/** Syncs the open stick: exactly its All tracks and the playlists put on it. */
 export async function syncToUsb() {
-  if (!library.activeVolume || library.syncing) return;
-  library.syncing = true;
-  library.statusMessage = 'Syncing tracks to USB...';
-  try {
-    await tauriWriteUsb(library.activeVolume, library.playlists);
-    // Write complete event handles resetting state
-  } catch (err) {
-    console.error('syncToUsb failed:', err);
-    library.syncing = false;
-    library.statusMessage = 'Ready';
-  }
-}
-
-/**
- * Export tracks to a specific USB volume by triggering a full sync to that
- * device. Note: the `write_usb` backend command is a holistic sync — it
- * exports ALL library tracks + playlists to the target volume, not just the
- * dragged subset. Per-track selective export is not yet supported by the
- * backend. The `trackIds` parameter is reserved for future per-track export
- * support and logged here for traceability.
- */
-export async function exportTracksToVolume(trackIds: number[], volumePath: string) {
-  if (!library.volumes.includes(volumePath)) {
-    console.error(
-      `[organize] exportTracksToVolume: volume "${volumePath}" is not mounted. Aborting.`
-    );
-    return;
-  }
-  if (library.syncing) {
-    console.error('[organize] exportTracksToVolume: a sync is already in progress. Aborting.');
-    return;
-  }
-  // NOTE: write_usb is a full sync — trackIds logged for future selective-export support.
-  console.log(`[organize] Exporting ${trackIds.length} dragged track(s) to ${volumePath} (full sync)`);
-  library.syncing = true;
-  library.statusMessage = 'Exporting to USB…';
-  try {
-    await tauriWriteUsb(volumePath, library.playlists);
-    // write-complete event from backend resets syncing state via listenToWriteComplete
-  } catch (err) {
-    console.error('[organize] exportTracksToVolume failed:', err);
-    library.syncing = false;
-    library.statusMessage = 'Ready';
-  }
+  if (!library.activeVolume) return;
+  await syncStick(library.activeVolume);
 }
 
 /* ── Playlist management ────────────────────────────────────────────── */

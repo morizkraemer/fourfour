@@ -19,7 +19,6 @@
     playlistByName,
     reorderPlaylistTracks,
     moveTracksToPlaylist,
-    exportTracksToVolume,
     tracksForSidebarSource,
     filterTracks,
     sidebarSourceLabel,
@@ -425,10 +424,6 @@
         return;
       }
 
-      // ── Organize-panel drop routing ──────────────────────────────────────
-      // If the drop landed on the docked organize panel, route to
-      // playlist-add@index (playlist target) or USB export (usb target).
-      // This runs before the generic branch so USB drops aren't silently skipped.
       const organizeTarget = ui.organize.target;
       if (
         dropSource != null &&
@@ -446,8 +441,7 @@
             removeFromSource: !copyOnly && dnd.sourcePlaylistId != null,
           });
         } else if (organizeTarget.kind === 'usb') {
-          // Trigger export to the docked USB volume (full sync — see exportTracksToVolume)
-          await exportTracksToVolume(ids, organizeTarget.id);
+          await dropTracksOnCard({ kind: 'stick', volumePath: organizeTarget.id }, ids);
         } else {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           console.error(
