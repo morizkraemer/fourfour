@@ -2,7 +2,7 @@ use std::fs::File;
 use std::path::Path;
 
 use pioneer_usb_writer::models::AnalysisResult;
-use pioneer_usb_writer::waveform::{analyze, Meter, Waveforms};
+use pioneer_usb_writer::waveform::{analyze, DetailMeter, DetailSeries, Meter, Waveforms};
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
@@ -11,9 +11,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-/// Decodes `path` and measures the 3-band waveforms with the shared `waveform` module,
-/// the same pass whose bytes the USB export writes.
-pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
+fn decode_blocks(path: &Path, mut on_block: impl FnMut(u32, usize, &[f32])) -> Result<(), String> {
     let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
     let stream = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -30,7 +28,6 @@ pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
         .make(&track.codec_params, &DecoderOptions::default())
         .map_err(|e| format!("decoder: {e}"))?;
 
-    let mut meter: Option<Meter> = None;
     let mut buffer: Option<SampleBuffer<f32>> = None;
     loop {
         let packet = match format.next_packet() {
@@ -55,12 +52,29 @@ pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
         }
         let samples = buffer.as_mut().expect("buffer was just created");
         samples.copy_interleaved_ref(decoded);
-        meter
-            .get_or_insert_with(|| Meter::new(spec.rate, channels))
-            .push(samples.samples());
+        on_block(spec.rate, channels, samples.samples());
     }
+    Ok(())
+}
+
+/// Decodes `path` and measures the 3-band waveforms with the shared `waveform` module,
+/// the same pass whose bytes the USB export writes.
+pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
+    let mut meter: Option<Meter> = None;
+    decode_blocks(path, |rate, channels, samples| {
+        meter.get_or_insert_with(|| Meter::new(rate, channels)).push(samples);
+    })?;
     let meter = meter.ok_or("no audio decoded")?;
     Ok(analyze(&meter.finish()))
+}
+
+/// Decodes `path` and measures the app-only high-resolution series for the zoomed waveform.
+pub fn measure_detail(path: &Path) -> Result<DetailSeries, String> {
+    let mut meter: Option<DetailMeter> = None;
+    decode_blocks(path, |rate, channels, samples| {
+        meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(samples);
+    })?;
+    meter.map(DetailMeter::finish).ok_or_else(|| "no audio decoded".to_string())
 }
 
 /// Replaces the colour data of `analysis` with bands measured from the audio at `path`,
@@ -110,6 +124,18 @@ mod tests {
         assert_eq!(waves.pwv7.len(), 300);
         assert_eq!(waves.pwv6.len(), 1200);
         let steady = waves.pwv7[100];
+        assert!(steady[0] > 40 && steady[0] > steady[2], "an 80 Hz tone is low: {steady:?}");
+    }
+
+    #[test]
+    fn measures_a_wav_into_2400_detail_columns_per_second() {
+        let path = std::env::temp_dir().join(format!("ff-detail-analysis-{}.wav", std::process::id()));
+        write_wav(&path, 44_100, 2.0, 80.0);
+        let detail = measure_detail(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(detail.len(), 4800);
+        let steady = [detail.planes[0][2400], detail.planes[1][2400], detail.planes[2][2400]];
         assert!(steady[0] > 40 && steady[0] > steady[2], "an 80 Hz tone is low: {steady:?}");
     }
 
