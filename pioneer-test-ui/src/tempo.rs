@@ -1,0 +1,582 @@
+//! Real-time tempo and key changes for the playback callback.
+//!
+//! The ring buffer stays in source time. Per callback chunk the engine takes `n_in` source frames
+//! for `n` output frames (`n_in / n` is the tempo ratio, a fraction is carried) and renders them
+//! through one of three paths:
+//!
+//! - `Identity`: ratio 1 and no key shift. The frames are copied untouched, so output is
+//!   bit-identical to a player without this module.
+//! - `Varispeed`: a windowed-sinc resampler. Speed and pitch move together (key lock off).
+//! - `Stretch`: Signalsmith Stretch (key lock on, or any key shift). Tempo and pitch are separate.
+//!
+//! The stretcher is fed from a lookahead (`feed_ahead` frames beyond the ring front) that tracks
+//! its own latency, so what it plays at any moment is the source frame at the ring front. That
+//! keeps the playhead, waveform and cue points exact at every ratio and makes switching between
+//! paths a plain 1-chunk crossfade of aligned signals.
+
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+use fourfour_stretch::{Preset, Stretch};
+
+pub const MIN_RATIO: f64 = 0.5;
+pub const MAX_RATIO: f64 = 1.5;
+pub const MAX_SEMITONES: f64 = 12.0;
+
+pub const CHUNK_FRAMES: usize = 256;
+pub const MAX_DEVICE_CHANNELS: usize = 64;
+
+const PRIME_BURST_FRAMES: usize = CHUNK_FRAMES * 4;
+const MAX_FEED_ADJUST: usize = CHUNK_FRAMES / 4;
+const TAPS: usize = 64;
+const HISTORY_FRAMES: usize = TAPS / 2;
+const LOOKAHEAD_FRAMES: usize = TAPS / 2 + 1;
+const PHASES: usize = 256;
+const RATE_SMOOTHING_SECONDS: f64 = 0.03;
+const SHIFT_SMOOTHING_SECONDS: f64 = 0.05;
+const RATE_SNAP: f64 = 1e-6;
+const SHIFT_SNAP: f64 = 1e-4;
+const KERNEL_CUTOFF: f64 = 0.92;
+const KAISER_BETA: f64 = 9.0;
+
+pub fn clamp_ratio(ratio: f64) -> f64 {
+    if ratio.is_finite() {
+        ratio.clamp(MIN_RATIO, MAX_RATIO)
+    } else {
+        1.0
+    }
+}
+
+pub fn clamp_semitones(semitones: f64) -> f64 {
+    if semitones.is_finite() {
+        semitones.clamp(-MAX_SEMITONES, MAX_SEMITONES)
+    } else {
+        0.0
+    }
+}
+
+pub fn semitone_factor(semitones: f64) -> f64 {
+    (semitones / 12.0).exp2()
+}
+
+/// Frequency multiplier the stretcher applies: with key lock only the key shift, without it the
+/// tempo change also moves the pitch like a turntable.
+pub fn transpose_factor(ratio: f64, semitones: f64, key_lock: bool) -> f64 {
+    let shift = semitone_factor(semitones);
+    if key_lock { shift } else { ratio * shift }
+}
+
+/// Source frames between what the stretcher was last fed and what it plays.
+pub fn stretch_latency_frames(input_latency: usize, output_latency: usize, ratio: f64) -> f64 {
+    input_latency as f64 + output_latency as f64 * ratio
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TempoTarget {
+    pub ratio: f64,
+    pub semitones: f64,
+    pub key_lock: bool,
+}
+
+impl TempoTarget {
+    pub const IDENTITY: TempoTarget = TempoTarget {
+        ratio: 1.0,
+        semitones: 0.0,
+        key_lock: true,
+    };
+}
+
+/// Shared between the commands and the audio callback. Atomics only.
+pub struct TempoParams {
+    ratio: AtomicU32,
+    semitones: AtomicU32,
+    key_lock: AtomicBool,
+    live_ratio: AtomicU32,
+}
+
+impl TempoParams {
+    pub fn new() -> Self {
+        Self {
+            ratio: AtomicU32::new(1.0f32.to_bits()),
+            semitones: AtomicU32::new(0.0f32.to_bits()),
+            key_lock: AtomicBool::new(true),
+            live_ratio: AtomicU32::new(1.0f32.to_bits()),
+        }
+    }
+
+    pub fn set_ratio(&self, ratio: f64) {
+        self.ratio
+            .store((clamp_ratio(ratio) as f32).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn set_semitones(&self, semitones: f64) {
+        self.semitones
+            .store((clamp_semitones(semitones) as f32).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn set_key_lock(&self, on: bool) {
+        self.key_lock.store(on, Ordering::Relaxed);
+    }
+
+    /// Back to the track's own tempo and key. Key lock is a mode, not a value, so it stays.
+    pub fn reset(&self) {
+        self.set_ratio(1.0);
+        self.set_semitones(0.0);
+    }
+
+    pub fn target(&self) -> TempoTarget {
+        TempoTarget {
+            ratio: f32::from_bits(self.ratio.load(Ordering::Relaxed)) as f64,
+            semitones: f32::from_bits(self.semitones.load(Ordering::Relaxed)) as f64,
+            key_lock: self.key_lock.load(Ordering::Relaxed),
+        }
+    }
+
+    /// The smoothed ratio the callback is playing right now.
+    pub fn live_ratio(&self) -> f64 {
+        f32::from_bits(self.live_ratio.load(Ordering::Relaxed)) as f64
+    }
+
+    pub(crate) fn publish_live_ratio(&self, ratio: f64) {
+        self.live_ratio
+            .store((ratio as f32).to_bits(), Ordering::Relaxed);
+    }
+}
+
+impl Default for TempoParams {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Windowed-sinc interpolation over a phase table (64 taps, 256 phases, linear between rows).
+pub struct Varispeed {
+    table: Vec<f32>,
+}
+
+impl Varispeed {
+    pub fn new() -> Self {
+        let mut table = vec![0.0f32; (PHASES + 1) * TAPS];
+        let half = (TAPS / 2) as f64;
+        for q in 0..=PHASES {
+            let frac = q as f64 / PHASES as f64;
+            let mut row = [0.0f64; TAPS];
+            let mut sum = 0.0;
+            for (j, slot) in row.iter_mut().enumerate() {
+                let d = (j as f64 - (half - 1.0)) - frac;
+                let x = std::f64::consts::PI * KERNEL_CUTOFF * d;
+                let sinc = if x.abs() < 1e-12 { 1.0 } else { x.sin() / x };
+                let r = d / half;
+                let window = if r.abs() >= 1.0 {
+                    0.0
+                } else {
+                    bessel_i0(KAISER_BETA * (1.0 - r * r).sqrt()) / bessel_i0(KAISER_BETA)
+                };
+                *slot = sinc * window;
+                sum += *slot;
+            }
+            for (j, v) in row.iter().enumerate() {
+                table[q * TAPS + j] = (*v / sum) as f32;
+            }
+        }
+        Self { table }
+    }
+
+    /// `input` is stereo with `HISTORY_FRAMES` of history in front. Output frame `k` reads the
+    /// signal at `start + k * rate` input frames from the start of `input`.
+    pub fn render(&self, input: &[f32], start: f64, rate: f64, out: &mut [f32]) {
+        let frames = out.len() / 2;
+        let mut kernel = [0.0f32; TAPS];
+        for k in 0..frames {
+            let p = start + k as f64 * rate;
+            let i = p as usize;
+            let q = (p - i as f64) * PHASES as f64;
+            let q0 = q as usize;
+            let w = (q - q0 as f64) as f32;
+            let row0 = &self.table[q0 * TAPS..(q0 + 1) * TAPS];
+            let row1 = &self.table[(q0 + 1) * TAPS..(q0 + 2) * TAPS];
+            for j in 0..TAPS {
+                kernel[j] = row0[j] + w * (row1[j] - row0[j]);
+            }
+            let base = (i + 1 - TAPS / 2) * 2;
+            let taps = &input[base..base + TAPS * 2];
+            let (mut l, mut r) = (0.0f32, 0.0f32);
+            for j in 0..TAPS {
+                l += taps[j * 2] * kernel[j];
+                r += taps[j * 2 + 1] * kernel[j];
+            }
+            out[k * 2] = l;
+            out[k * 2 + 1] = r;
+        }
+    }
+}
+
+impl Default for Varispeed {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn bessel_i0(x: f64) -> f64 {
+    let mut sum = 1.0;
+    let mut term = 1.0;
+    let q = x * x / 4.0;
+    for k in 1..60 {
+        term *= q / (k as f64 * k as f64);
+        sum += term;
+        if term < sum * 1e-17 {
+            break;
+        }
+    }
+    sum
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Path {
+    Identity,
+    Varispeed,
+    Stretch,
+}
+
+pub struct ChunkResult {
+    pub valid_frames: usize,
+    pub popped_frames: usize,
+    pub path: Path,
+}
+
+pub struct TempoEngine {
+    stretch: Stretch,
+    varispeed: Varispeed,
+    sample_rate: f64,
+    input_latency: usize,
+    output_latency: usize,
+    rate: f64,
+    semitones: f64,
+    carry: f64,
+    armed: bool,
+    primed: bool,
+    feed_ahead: usize,
+    previous_path: Option<Path>,
+    history: Vec<f32>,
+    popped_total: u64,
+    window: Vec<f32>,
+    stretch_in: Vec<f32>,
+    stretch_out: Vec<f32>,
+    varispeed_out: Vec<f32>,
+    identity_dev: Vec<f32>,
+    varispeed_dev: Vec<f32>,
+    stretch_dev: Vec<f32>,
+}
+
+impl TempoEngine {
+    pub fn new(sample_rate: u32, preset: Preset) -> Self {
+        let stretch = Stretch::new(2, sample_rate as f32, preset);
+        let input_latency = stretch.input_latency();
+        let output_latency = stretch.output_latency();
+        let dev = CHUNK_FRAMES * MAX_DEVICE_CHANNELS;
+        let feed_max = CHUNK_FRAMES * 2 + PRIME_BURST_FRAMES;
+        Self {
+            stretch,
+            varispeed: Varispeed::new(),
+            sample_rate: sample_rate.max(1) as f64,
+            input_latency,
+            output_latency,
+            rate: 1.0,
+            semitones: 0.0,
+            carry: 0.0,
+            armed: false,
+            primed: false,
+            feed_ahead: 0,
+            previous_path: None,
+            history: vec![0.0; HISTORY_FRAMES * 2],
+            popped_total: 0,
+            window: vec![0.0; (feed_max + HISTORY_FRAMES + LOOKAHEAD_FRAMES) * 2],
+            stretch_in: vec![0.0; feed_max * 2],
+            stretch_out: vec![0.0; (PRIME_BURST_FRAMES * 2 + CHUNK_FRAMES) * 2],
+            varispeed_out: vec![0.0; CHUNK_FRAMES * 2],
+            identity_dev: vec![0.0; dev],
+            varispeed_dev: vec![0.0; dev],
+            stretch_dev: vec![0.0; dev],
+        }
+    }
+
+    pub fn input_latency(&self) -> usize {
+        self.input_latency
+    }
+
+    pub fn output_latency(&self) -> usize {
+        self.output_latency
+    }
+
+    pub fn rate(&self) -> f64 {
+        self.rate
+    }
+
+    pub fn is_primed(&self) -> bool {
+        self.primed
+    }
+
+    /// Source frames played since the last flush, including the fractional carry.
+    pub fn heard_frames(&self) -> u64 {
+        self.popped_total + self.carry as u64
+    }
+
+    /// A new stream starts: forget the old one's audio. Rate and key shift keep their values.
+    pub fn flush(&mut self) {
+        self.stretch.reset();
+        self.armed = false;
+        self.primed = false;
+        self.feed_ahead = 0;
+        self.carry = 0.0;
+        self.previous_path = None;
+        self.history.fill(0.0);
+        self.popped_total = 0;
+    }
+
+    fn advance_parameters(&mut self, target: TempoTarget, frames: usize) {
+        let seconds = frames as f64 / self.sample_rate;
+        let ratio = clamp_ratio(target.ratio);
+        let shift = clamp_semitones(target.semitones);
+        self.rate += (ratio - self.rate) * (1.0 - (-seconds / RATE_SMOOTHING_SECONDS).exp());
+        if (self.rate - ratio).abs() < RATE_SNAP {
+            self.rate = ratio;
+        }
+        self.semitones +=
+            (shift - self.semitones) * (1.0 - (-seconds / SHIFT_SMOOTHING_SECONDS).exp());
+        if (self.semitones - shift).abs() < SHIFT_SNAP {
+            self.semitones = shift;
+        }
+    }
+
+    fn disarm(&mut self) {
+        if self.armed || self.primed || self.feed_ahead > 0 {
+            self.stretch.reset();
+        }
+        self.armed = false;
+        self.primed = false;
+        self.feed_ahead = 0;
+    }
+
+    /// `ring` is the readable region of the sample ring as two slices, interleaved with `ch`
+    /// channels. `out` holds one chunk (at most `CHUNK_FRAMES` frames) in the same layout. The
+    /// caller pops `popped_frames` from the ring afterwards.
+    pub fn process_chunk(
+        &mut self,
+        ring: (&[f32], &[f32]),
+        ch: usize,
+        ended: bool,
+        target: TempoTarget,
+        out: &mut [f32],
+    ) -> ChunkResult {
+        let n = out.len() / ch;
+        debug_assert!(n <= CHUNK_FRAMES && ch <= MAX_DEVICE_CHANNELS);
+        self.advance_parameters(target, n);
+
+        let available = (ring.0.len() + ring.1.len()) / ch;
+        let identity = self.rate == 1.0 && self.semitones == 0.0;
+        let stretch_wanted = !identity && (target.key_lock || self.semitones != 0.0);
+        let should_arm = target.key_lock
+            || self.semitones != 0.0
+            || target.semitones != 0.0
+            || self.previous_path == Some(Path::Stretch);
+
+        let n_in = if identity {
+            n
+        } else {
+            (self.carry + n as f64 * self.rate) as usize
+        };
+        let identity_valid = n.min(available);
+        let usable = if identity {
+            identity_valid > 0
+        } else {
+            ended || available >= n_in + LOOKAHEAD_FRAMES
+        };
+        if !usable {
+            self.disarm();
+            return ChunkResult {
+                valid_frames: 0,
+                popped_frames: 0,
+                path: Path::Identity,
+            };
+        }
+
+        if should_arm {
+            self.armed = true;
+        } else {
+            self.disarm();
+        }
+        let stretch_ran = self.armed && self.run_stretch(ring, ch, ended, target, available, n, n_in);
+
+        let effective = if identity {
+            Path::Identity
+        } else if stretch_wanted && stretch_ran {
+            Path::Stretch
+        } else {
+            Path::Varispeed
+        };
+        let previous = self.previous_path.filter(|old| {
+            *old != effective
+                && !(*old == Path::Varispeed && effective == Path::Identity)
+                && !(*old == Path::Stretch && !stretch_ran)
+        });
+
+        let valid = if identity { identity_valid } else { n };
+        let popped = if identity { valid } else { n_in.min(available) };
+
+        if effective == Path::Identity || previous == Some(Path::Identity) {
+            gather_raw(ring, ch, valid, &mut self.identity_dev[..n * ch]);
+        }
+        let frames = n_in + LOOKAHEAD_FRAMES;
+        self.window[..HISTORY_FRAMES * 2].copy_from_slice(&self.history);
+        gather_stereo(
+            ring,
+            ch,
+            0,
+            frames,
+            &mut self.window[HISTORY_FRAMES * 2..(HISTORY_FRAMES + frames) * 2],
+        );
+        if effective == Path::Varispeed || previous == Some(Path::Varispeed) {
+            self.varispeed.render(
+                &self.window[..(HISTORY_FRAMES + frames) * 2],
+                HISTORY_FRAMES as f64 + self.carry,
+                self.rate,
+                &mut self.varispeed_out[..n * 2],
+            );
+            expand_stereo(&self.varispeed_out[..n * 2], ch, &mut self.varispeed_dev[..n * ch]);
+        }
+
+        let current = self.path_output(effective, n * ch);
+        match previous {
+            Some(old) => {
+                let old = self.path_output(old, n * ch);
+                for f in 0..n {
+                    let t = (f + 1) as f32 / n as f32;
+                    for c in 0..ch {
+                        out[f * ch + c] = old[f * ch + c] * (1.0 - t) + current[f * ch + c] * t;
+                    }
+                }
+            }
+            None => out[..n * ch].copy_from_slice(current),
+        }
+
+        let from = popped * 2;
+        self.history
+            .copy_from_slice(&self.window[from..from + HISTORY_FRAMES * 2]);
+        self.carry = if identity {
+            0.0
+        } else {
+            self.carry + n as f64 * self.rate - n_in as f64
+        };
+        self.popped_total += popped as u64;
+        self.feed_ahead = self.feed_ahead.saturating_sub(popped);
+        self.previous_path = Some(effective);
+
+        ChunkResult {
+            valid_frames: valid,
+            popped_frames: popped,
+            path: effective,
+        }
+    }
+
+    fn path_output(&self, path: Path, len: usize) -> &[f32] {
+        match path {
+            Path::Identity => &self.identity_dev[..len],
+            Path::Varispeed => &self.varispeed_dev[..len],
+            Path::Stretch => &self.stretch_dev[..len],
+        }
+    }
+
+    fn run_stretch(
+        &mut self,
+        ring: (&[f32], &[f32]),
+        ch: usize,
+        ended: bool,
+        target: TempoTarget,
+        available: usize,
+        n: usize,
+        n_in: usize,
+    ) -> bool {
+        let factor = transpose_factor(self.rate, self.semitones, target.key_lock);
+        self.stretch.set_transpose_factor(factor as f32);
+        let latency = stretch_latency_frames(self.input_latency, self.output_latency, self.rate);
+        let wanted_ahead = latency.round() as usize;
+
+        if !self.primed {
+            let room = if ended {
+                usize::MAX
+            } else {
+                available.saturating_sub(self.feed_ahead)
+            };
+            let burst = PRIME_BURST_FRAMES
+                .min(wanted_ahead.saturating_sub(self.feed_ahead))
+                .min(room);
+            if burst > 0 {
+                let produced = ((burst as f64 / self.rate).round() as usize).max(1);
+                gather_stereo(ring, ch, self.feed_ahead, burst, &mut self.stretch_in[..burst * 2]);
+                self.stretch.process(
+                    &mut self.stretch_in[..burst * 2],
+                    &mut self.stretch_out[..produced * 2],
+                );
+                self.feed_ahead += burst;
+            }
+            self.primed = self.feed_ahead >= wanted_ahead + n_in;
+            return false;
+        }
+
+        let adjust = (wanted_ahead as i64 - self.feed_ahead as i64)
+            .clamp(-(MAX_FEED_ADJUST as i64), MAX_FEED_ADJUST as i64);
+        let feed = (n_in as i64 + adjust).max(1) as usize;
+        if !ended && available < self.feed_ahead + feed {
+            self.disarm();
+            return false;
+        }
+        gather_stereo(ring, ch, self.feed_ahead, feed, &mut self.stretch_in[..feed * 2]);
+        self.stretch
+            .process(&mut self.stretch_in[..feed * 2], &mut self.stretch_out[..n * 2]);
+        self.feed_ahead += feed;
+        expand_stereo(&self.stretch_out[..n * 2], ch, &mut self.stretch_dev[..n * ch]);
+        true
+    }
+}
+
+fn sample_at(ring: (&[f32], &[f32]), index: usize) -> Option<f32> {
+    if index < ring.0.len() {
+        Some(ring.0[index])
+    } else {
+        ring.1.get(index - ring.0.len()).copied()
+    }
+}
+
+fn gather_stereo(ring: (&[f32], &[f32]), ch: usize, start_frame: usize, frames: usize, dst: &mut [f32]) {
+    for f in 0..frames {
+        let base = (start_frame + f) * ch;
+        let l = sample_at(ring, base);
+        let (l, r) = match l {
+            None => (0.0, 0.0),
+            Some(l) => {
+                let r = if ch > 1 { sample_at(ring, base + 1).unwrap_or(0.0) } else { l };
+                (l, r)
+            }
+        };
+        dst[f * 2] = l;
+        dst[f * 2 + 1] = r;
+    }
+}
+
+fn gather_raw(ring: (&[f32], &[f32]), ch: usize, frames: usize, dst: &mut [f32]) {
+    let samples = frames * ch;
+    for (i, slot) in dst.iter_mut().enumerate() {
+        *slot = if i < samples { sample_at(ring, i).unwrap_or(0.0) } else { 0.0 };
+    }
+}
+
+fn expand_stereo(stereo: &[f32], ch: usize, dst: &mut [f32]) {
+    let frames = stereo.len() / 2;
+    for f in 0..frames {
+        let frame = &mut dst[f * ch..(f + 1) * ch];
+        frame.fill(0.0);
+        frame[0] = stereo[f * 2];
+        if ch > 1 {
+            frame[1] = stereo[f * 2 + 1];
+        }
+    }
+}
