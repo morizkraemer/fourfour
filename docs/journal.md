@@ -156,3 +156,4 @@
 2026-10-27 15:01 orchestrator - merged wc-inspector-cues, wr-sidebar-ribbon, wt-sort-cuefire (round 6, J1–J9) 16fe50b; cargo green, 469 vitest (1 flaky fail on first run, 3 clean reruns); Mac install started
 2026-10-27 15:03 orchestrator - Mac install done (16fe50b, round 6)
 2026-10-27 15:14 orchestrator - Merlin tested + OK'd: merged q41-feedback into master 3c200d1 (one doc conflict resolved); full checks green (cargo, 469 vitest, 0 warnings, build); not pushed
+2026-10-27 15:24 orchestrator - pushed master to origin (6fb1d1b..6ada046), Merlin's OK
