@@ -29,3 +29,5 @@ Running log of Merlin's calls on the USB sync flow. Concepts: round 1 mockups (A
 - Header layout: what shows where, when (sidebar row vs panel header vs playlist header), compact.
 - Reverse direction: playlists on a stick that aren't in the library (made elsewhere, or by Rekordbox) — show, import, keep.
 - Removal threshold, remembering unplugged sticks (needs a stable stick id), backup stick copy vs mirror.
+
+- 2026-10-27 (Merlin): a track dropped on a stick goes into that stick's "All tracks" collection (no playlist picker). Engine impact for the brother: loose tracks on a stick need to be owned/synced like playlist tracks.
