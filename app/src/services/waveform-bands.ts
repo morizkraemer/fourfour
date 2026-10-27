@@ -218,3 +218,19 @@ export function overviewBandsFromPayload(color: unknown): BandColumns | null {
   overviewBands.set(color, result);
   return result;
 }
+
+/**
+ * The columns the player's overview strip draws for an analysis payload: the PWV6 overview series when the
+ * payload has one, else the detail columns (which the renderer scales down to overview level). Never the
+ * row preview: that one is cut from whichever series the analysis stored and carries no scale of its own.
+ */
+export function stripBandsFromAnalysis(
+  analysis: { waveform_overview?: unknown; waveform_color_detail?: unknown; waveform_color?: unknown } | null | undefined,
+): BandColumns | null {
+  if (!analysis) return null;
+  return (
+    overviewBandsFromPayload(analysis.waveform_overview) ??
+    colorBandsFromPayload(analysis.waveform_color_detail) ??
+    colorBandsFromPayload(analysis.waveform_color)
+  );
+}

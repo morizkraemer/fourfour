@@ -311,6 +311,44 @@
   color: #0a0a0a;
 }
 
+.ff-inspector__cues-key {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 2px;
+}
+
+.ff-inspector__cues-key--hot {
+  background: var(--ff-text-mid);
+}
+
+.ff-inspector__cues-key--memory {
+  border: 1px solid var(--ff-text-mid);
+}
+
+.ff-inspector__cue-badge--memory {
+  box-sizing: border-box;
+  border: 1px solid var(--ff-border-hi);
+  background: none;
+  color: var(--ff-text-mid);
+}
+
+.ff-inspector__marker--memory::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  box-sizing: border-box;
+  transform: translateX(-50%);
+  border: 1px solid var(--cue);
+  border-radius: 2px;
+  background: var(--ff-bg);
+}
+
 .ff-inspector__cue-name {
   flex: 1 1 0;
   min-width: 0;

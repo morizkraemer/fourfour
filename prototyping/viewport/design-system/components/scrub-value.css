@@ -48,22 +48,25 @@
 }
 
 .ff-scrub__input {
-  width: 7em;
-  height: 20px;
-  padding: 0 5px;
-  margin: -2px -5px;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  padding: 1px 5px;
+  margin: -1px -5px;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: none;
   border-radius: var(--ff-radius-sm);
-  background: var(--ff-bg);
+  background: var(--ff-hover);
+  box-shadow: inset 0 0 0 1px var(--ff-border-hi);
   font: inherit;
   font-variant-numeric: tabular-nums;
-  color: var(--ff-text);
+  line-height: inherit;
+  color: inherit;
   outline: none;
 }
 
 .ff-scrub__input--invalid {
-  border-color: var(--ff-danger);
+  box-shadow: inset 0 0 0 1px var(--ff-danger);
 }
 
 :global(body.ff-scrub-dragging),
