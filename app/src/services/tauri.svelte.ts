@@ -230,6 +230,60 @@ export async function resetLibrary(): Promise<string> {
   }
 }
 
+export interface TrackFields {
+  title: string;
+  artist: string;
+  album: string;
+  genre: string;
+}
+
+export type TrackFieldEdits = Partial<TrackFields>;
+
+const MOCK_TAGS_KEY = 'fourfour.mock.tags';
+
+function mockTagStore(): Record<string, TrackFields> {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_TAGS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function applyMockTags(): void {
+  const stored = mockTagStore();
+  mockTracks = mockTracks.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t));
+}
+
+function updateMockTrackFields(trackId: number, edits: TrackFieldEdits): TrackFields {
+  const track = mockTracks.find((t) => t.id === trackId);
+  if (!track) throw new Error(`Track ${trackId} is not in the library`);
+  const title = edits.title?.trim();
+  if (title === '') throw new Error('Title cannot be empty');
+  const next: TrackFields = {
+    title: title ?? track.title,
+    artist: edits.artist?.trim() ?? track.artist,
+    album: edits.album?.trim() ?? track.album,
+    genre: edits.genre?.trim() ?? track.genre,
+  };
+  Object.assign(track, next);
+  try {
+    localStorage.setItem(MOCK_TAGS_KEY, JSON.stringify({ ...mockTagStore(), [trackId]: next }));
+  } catch {
+    return next;
+  }
+  return next;
+}
+
+/** Edit the library tags (title, artist, album, genre) of a track; file tags are never touched. */
+export async function updateTrackFields(trackId: number, edits: TrackFieldEdits): Promise<TrackFields> {
+  try {
+    return await invoke<TrackFields>('update_track_fields', { trackId, edits });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return updateMockTrackFields(trackId, edits);
+  }
+}
+
 export async function loadState(): Promise<LoadedState> {
   try {
     const res = await invoke<LoadedState>('load_state');
@@ -238,6 +292,7 @@ export async function loadState(): Promise<LoadedState> {
   } catch (err) {
     lastTauriError = `load_state fail: ${String(err)}`;
     if (useBrowserMocks()) {
+      applyMockTags();
       return { tracks: mockTracks, playlists: mockPlaylists };
     }
     throw err;
