@@ -12,6 +12,8 @@ import {
   rescaleBeatGrid,
   setTrackBpm,
   setTrackKey,
+  updateTrackFields,
+  type TrackFieldEdits,
 } from '../services/tauri.svelte.ts';
 
 function trackById(trackId: number) {
@@ -95,4 +97,27 @@ export async function releaseTrackEdits(trackId: number): Promise<void> {
     track.keyLocked = false;
     bumpLibraryTracks();
   }
+}
+
+export async function commitTrackFields(trackId: number, edits: TrackFieldEdits): Promise<boolean> {
+  let saved;
+  try {
+    saved = await updateTrackFields(trackId, edits);
+  } catch (err) {
+    reportFailure('Saving the tags', err);
+    return false;
+  }
+  const track = trackById(trackId);
+  if (track) {
+    track.title = saved.title;
+    track.artist = saved.artist || '—';
+    track.album = saved.album || '—';
+    track.genre = saved.genre || '—';
+    if (track.raw) track.raw = { ...track.raw, ...saved };
+    bumpLibraryTracks();
+  }
+  if (player.track?.id === trackId) {
+    player.track = { ...player.track, title: saved.title, artist: saved.artist || '—' };
+  }
+  return true;
 }

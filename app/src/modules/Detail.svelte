@@ -17,7 +17,7 @@
   import { CUE_PALETTE, cueChip, cueMarkers } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
   import { seekTrackToMs, seekTrackToProgress } from '../stores/inspector-seek.ts';
-  import { commitTrackBpm, commitTrackKey, fitGridToBpm, releaseTrackEdits } from '../stores/track-edits.svelte.ts';
+  import { commitTrackBpm, commitTrackFields, commitTrackKey, fitGridToBpm, releaseTrackEdits } from '../stores/track-edits.svelte.ts';
 
   let mode = $derived(
     selectionCount() === 0 ? 'empty' :
@@ -61,8 +61,8 @@
   ] : []);
 
   let fields = $derived(track ? [
-    { key: 'album', label: 'Album', value: track.album === '—' ? '' : track.album, readOnly: true },
-    { key: 'genre', label: 'Genre', value: track.genre === '—' ? '' : track.genre, readOnly: true },
+    { key: 'album', label: 'Album', value: track.album === '—' ? '' : track.album, placeholder: 'None' },
+    { key: 'genre', label: 'Genre', value: track.genre === '—' ? '' : track.genre, placeholder: 'None' },
   ] : []);
 
   let durationMs = $derived((track?.raw?.duration_secs ?? 0) * 1000);
@@ -84,6 +84,7 @@
       title={track.title}
       artist={track.artist}
       {fields}
+      onFieldChange={(key, value) => commitTrackFields(track.id, { [key]: value })}
       duration={track.time ?? ''}
       bpmLocked={track.bpmLocked}
       keyLocked={track.keyLocked}
