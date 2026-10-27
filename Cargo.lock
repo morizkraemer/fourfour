@@ -1253,6 +1253,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "fourfour-stretch"
+version = "0.1.0"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "futf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3183,6 +3190,7 @@ dependencies = [
  "anyhow",
  "cpal",
  "fourfour-analysis-rs",
+ "fourfour-stretch",
  "image",
  "pioneer-library",
  "pioneer-usb-writer",
