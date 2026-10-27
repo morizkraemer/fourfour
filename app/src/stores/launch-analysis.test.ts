@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -9,6 +9,12 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 function resumeCalls() {
   return invokeMock.mock.calls.filter(([command]) => command === 'resume_analysis');
 }
+
+const COLD_IMPORT_TIMEOUT_MS = 60_000;
+
+beforeAll(async () => {
+  await import('./library.svelte.ts');
+}, COLD_IMPORT_TIMEOUT_MS);
 
 async function freshLibrary() {
   vi.resetModules();

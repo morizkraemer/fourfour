@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const storage = vi.hoisted(() => new Map<string, string>());
@@ -31,6 +31,14 @@ function fakeBackend(command: string, args: Record<string, any> = {}) {
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
+
+const COLD_IMPORT_TIMEOUT_MS = 60_000;
+
+beforeAll(async () => {
+  await import('./library.svelte.ts');
+  await import('./organize-drop.svelte.ts');
+  await import('./sticks.svelte.ts');
+}, COLD_IMPORT_TIMEOUT_MS);
 
 async function fresh() {
   vi.resetModules();

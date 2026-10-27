@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UsbSyncPlan } from '../services/tauri.svelte.ts';
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -62,6 +62,13 @@ beforeEach(() => {
     }
   });
 });
+
+const COLD_IMPORT_TIMEOUT_MS = 60_000;
+
+beforeAll(async () => {
+  await import('./sticks.svelte.ts');
+  await import('./stick-sync.svelte.ts');
+}, COLD_IMPORT_TIMEOUT_MS);
 
 async function fresh() {
   vi.resetModules();
