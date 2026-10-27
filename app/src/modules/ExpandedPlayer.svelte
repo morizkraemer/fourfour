@@ -21,6 +21,7 @@
   import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueMarkers, hotCueIn, slotLetter } from '../lib/cues.ts';
   import {
     player,
+    loadZoomDetail,
     currentTime,
     currentTimeMs,
     totalTime,
@@ -35,6 +36,11 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+
+  $effect(() => {
+    const id = player.track?.id;
+    if (id != null) void loadZoomDetail(id);
+  });
   let trackCues = $derived(cuesOf(player.track?.id));
   let markers = $derived(cueMarkers(trackCues, player.track?.durationMs ?? 0));
   let pads = $derived(
@@ -97,6 +103,7 @@
       bands={player.track?.bands ?? null}
       bandsDetail={player.track?.bandsDetail ?? null}
       bandsOverview={player.track?.bandsOverview ?? null}
+      bandsZoom={player.track?.bandsZoom ?? null}
       cues={markers}
       beats={player.track?.beats ?? []}
       bpm={player.track?.bpm ?? 0}

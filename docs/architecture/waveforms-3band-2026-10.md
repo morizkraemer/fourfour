@@ -657,3 +657,20 @@ Branch `wc-player` (from `q41-feedback`). Headless Chromium on the loaded `dev` 
 - **F24 cream strip**: the row preview carried a x2.4 display scale tuned for the Q39 curve; with the Q40 linear gains mid and high saturated and the cream front tone covered the strip (the mock strip shows it too). The strip now draws the row preview as an overview series with the compact strip's stacked layout.
 - Perf (`waveform-perf.mjs`, production builds, `?mock=3000`, median of 5 alternating runs, main-thread CPU per frame): compact playing 5.27 to 5.20 ms, expanded playing 12.10 to 7.90, zoom 11.22 to 10.64, wheel 43.1 to 37.9, list scroll +0.9 to +1.4 % (noise).
 - Checks: `waveform-pixels.mjs` 92 checks (8 new: slope and attack at both dpr and themes), `waveform-flicker.mjs` 0 bad frames, `npm test` 283 passed (was 258 before this branch).
+
+
+## Zoom detail (wz-zoom-detail)
+
+Complaint: zoomed in, the waveform is big smooth polygons, kicks look like triangles.
+
+Root cause, measured: the zoom view drew the 150 columns per second `PWV7` series. The default 5 s window on a 1128 px wide canvas at DPR 2 is 3 device px per column, the closest zoom (track / 512) was 40 to 80 px per column. On top of that `reduceBands` interpolated linearly between column centres once a column spanned more than 2 px, and `PWV7` itself carries a release of about 190 ms (0.965 per column), so every decay is a long straight ramp. Nothing was downsampled on the way to the frontend; the data simply was not finer.
+
+Fix:
+
+- `pioneer-usb-writer/src/waveform/detail.rs` (additive, no export byte changes; the only touch to existing code is the gain rule moved into `band_gain`): `DetailMeter` measures the same three filters at 2400 columns per second (16 columns make exactly one `PWV7` column, tested: the max of 16 raw peaks equals the raw `PWV7` band peak). Same gains and byte scale as `PWV7` (gains rebuilt from the 150/s envelope), but a release of 10 / 5 / 2.5 ms (low / mid / high) instead of about 190 ms, so attacks and decays are sharp. Bytes 0..127, planar, `DetailSeries::to_bytes` = `FFWD` header (16 B) + low, mid, high planes.
+- `pioneer-test-ui/src/waveform_detail.rs` + command `get_waveform_detail(track_id)`: measured on first use from the audio (one decode pass), cached as `app_data/waveform-detail/<hash of path, size, mtime>.ffwd` (256 files max, oldest dropped), returned as a binary IPC response. Nothing in the library DB or the ANLZ files changes.
+- Backfill: none needed. Every existing track gets the series the first time its expanded player opens (`loadZoomDetail`); until it arrives the 150/s series is drawn.
+- Renderer: `reduceBands` no longer interpolates (columns are flat bars with hard edges at any zoom); with the series present the zoom view uses it once the 150/s columns would be narrower than 2 px wide per column, takes mostly the per-pixel peak (`ZOOM_PEAK_WEIGHT` 0.75 / 0.85 / 0.95) and no peak-hold smoothing. The maximum zoom is then limited to one column per device pixel (visible window at least canvas device px / 2400 s: 0.94 s at 1128 px, DPR 2). Colours and stacking are unchanged.
+- Cost: 7200 bytes per second of audio (30 s 216 KB, 6 min about 2.7 MB). Measuring takes 0.15 to 0.19 s for a 30 s FLAC and 2.3 to 3.5 s for a 6 min MP3/FLAC (decode dominated; the `PWV7` pass over the same file takes 2.1 to 2.3 s). It runs lazily, so analysis time is unchanged. If folded into the analysis decode pass it adds only the filter work (a small part of that time).
+- Frame time, expanded view scrolling at 1x, 300 frames, headless Chromium (software raster, shared box, includes the overview repaint and a forced flush): median 11 to 13 ms before and after on 30 s tracks at 8, 3 and 1 s windows; no regression (one outlier track, 30 to 47 ms before, was box noise).
+- Shots and numbers: `app/perf/zoom-detail-shots.mjs` with `waveform_detail_dump` fixtures, in `scratchpad/feedback/wz/`.

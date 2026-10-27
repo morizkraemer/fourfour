@@ -3,6 +3,7 @@ import { decodeBandPreview, decodeColorWaveform } from './analysis-data.ts';
 import {
   balanceBands,
   bandsFromColorSamples,
+  bandsFromDetailBytes,
   bandsFromInterleavedBytes,
   bandsFromPreviewBytes,
   bandsFromStickBytes,
@@ -11,6 +12,7 @@ import {
   rowBandsFor,
   rowBandsFromBandBytes,
 } from './waveform-bands.ts';
+import { displayAmp, reduceBands, ZOOM_PEAK_WEIGHT } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import { ROW_BAND_COLUMNS, bandBytes, encodeWire, previewFromBands, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
 
 function wire(bytes: number[], calibration = 0.9) {
@@ -213,5 +215,41 @@ describe('overviewBandsFromPayload', () => {
     expect(overviewBandsFromPayload(wire([10, 20, 30, 40, 50, 60]))).toBeNull();
     expect(overviewBandsFromPayload(null)).toBeNull();
     expect(overviewBandsFromPayload([{ amp: 1, r: 1, g: 1, b: 1 }])).toBeNull();
+  });
+});
+
+function detailFile(low: number[], mid: number[], high: number[]): ArrayBuffer {
+  const n = low.length;
+  const buffer = new ArrayBuffer(16 + 3 * n);
+  const view = new DataView(buffer);
+  'FFWD'.split('').forEach((c, i) => view.setUint8(i, c.charCodeAt(0)));
+  view.setUint8(4, 1);
+  view.setUint32(8, 2400, true);
+  view.setUint32(12, n, true);
+  new Uint8Array(buffer, 16).set([...low, ...mid, ...high]);
+  return buffer;
+}
+
+describe('bandsFromDetailBytes', () => {
+  it('splits the planes into views of the buffer and scales bytes by 1 / 127', () => {
+    const bands = bandsFromDetailBytes(detailFile([0, 127, 64], [1, 2, 3], [9, 8, 7]))!;
+    expect(Array.from(bands.low)).toEqual([0, 127, 64]);
+    expect(Array.from(bands.mid)).toEqual([1, 2, 3]);
+    expect(Array.from(bands.high)).toEqual([9, 8, 7]);
+    expect(bands.scale.low).toBeCloseTo(1 / 127, 8);
+  });
+  it('rejects a damaged or foreign file', () => {
+    const good = detailFile([1, 2], [1, 2], [1, 2]);
+    expect(bandsFromDetailBytes(good.slice(0, good.byteLength - 1))).toBeNull();
+    expect(bandsFromDetailBytes(new ArrayBuffer(4))).toBeNull();
+    expect(bandsFromDetailBytes(detailFile([], [], []))).toBeNull();
+  });
+  it('maps one column to one pixel at one column per pixel, and peaks over many columns per pixel', () => {
+    const bands = bandsFromDetailBytes(detailFile([10, 100, 20, 120], [0, 0, 0, 0], [0, 0, 0, 0]))!;
+    const one = reduceBands(bands, 0, 1, 4, ZOOM_PEAK_WEIGHT);
+    expect(Array.from(one.low)).toEqual([10, 100, 20, 120].map((v) => Math.fround(displayAmp(v / 127))));
+    const two = reduceBands(bands, 0, 1, 2, ZOOM_PEAK_WEIGHT);
+    const w = ZOOM_PEAK_WEIGHT.low;
+    expect(two.low[1]).toBeCloseTo(displayAmp((w * 120 + (1 - w) * 70) / 127), 5);
   });
 });

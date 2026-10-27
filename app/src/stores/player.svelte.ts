@@ -4,6 +4,7 @@
 
 import {
   getAnalysisData,
+  getWaveformDetail,
   invalidateAnalysisCache,
   setBeatGrid,
   listenToAnalysisPartial,
@@ -11,7 +12,7 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
-import { colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
+import { bandsFromDetailBytes, colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns, type ByteBandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -69,6 +70,8 @@ export interface PlayerTrack {
   // (compact strip uses bands; these stay null until analysis loads.)
   bandsDetail: BandColumns | null;
   bandsOverview: BandColumns | null;
+  /** 2400 columns per second, for the zoom view; arrives after the track, see `loadZoomDetail`. */
+  bandsZoom: ByteBandColumns | null;
 }
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
@@ -306,6 +309,27 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
   };
 }
 
+const ZOOM_DETAIL_CACHE_TRACKS = 3;
+const zoomDetailCache = new Map<number, ByteBandColumns>();
+const zoomDetailLoading = new Set<number>();
+
+/** Fetch the high-resolution series of the loaded track (once, in the background) and hand it to the zoom view. */
+export async function loadZoomDetail(trackId: number) {
+  if (zoomDetailCache.has(trackId) || zoomDetailLoading.has(trackId)) return;
+  zoomDetailLoading.add(trackId);
+  try {
+    const buffer = await getWaveformDetail(trackId);
+    const bands = buffer ? bandsFromDetailBytes(buffer) : null;
+    if (!bands) return;
+    zoomDetailCache.set(trackId, bands);
+    if (zoomDetailCache.size > ZOOM_DETAIL_CACHE_TRACKS) zoomDetailCache.delete(zoomDetailCache.keys().next().value!);
+    const loaded = player.track;
+    if (loaded?.id === trackId) player.track = { ...loaded, bandsZoom: bands };
+  } finally {
+    zoomDetailLoading.delete(trackId);
+  }
+}
+
 function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
   return {
     id: trackInfo.id,
@@ -321,6 +345,7 @@ function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
     bands: null,
     bandsDetail: null,
     bandsOverview: null,
+    bandsZoom: zoomDetailCache.get(trackInfo.id) ?? null,
   };
 }
 

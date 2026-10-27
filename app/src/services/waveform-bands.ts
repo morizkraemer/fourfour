@@ -18,12 +18,20 @@ import {
 } from './analysis-data.ts';
 
 export interface BandColumns {
-  low: Float32Array | Uint8Array;
-  mid: Float32Array | Uint8Array;
-  high: Float32Array | Uint8Array;
+  low: Float32Array;
+  mid: Float32Array;
+  high: Float32Array;
   scale?: { low: number; mid: number; high: number };
   /** The columns already are an overview series (PWV6 level), not detail data. */
   overview?: boolean;
+}
+
+/** The same columns as bytes (`scale` brings them to 0..1): the 2400 columns per second series stays at one byte per column and band. */
+export interface ByteBandColumns {
+  low: Uint8Array;
+  mid: Uint8Array;
+  high: Uint8Array;
+  scale: { low: number; mid: number; high: number };
 }
 
 const WIRE_FULL_SCALE = 127;
@@ -99,7 +107,7 @@ const DETAIL_HEADER_BYTES = 16;
  * The high-resolution series of `get_waveform_detail` (`FFWD` header, then the low, mid and high planes, bytes on the
  * PWV7 scale). The planes are views into `buffer`, drawn as `byte / 127`; nothing is copied or widened.
  */
-export function bandsFromDetailBytes(buffer: ArrayBuffer): BandColumns | null {
+export function bandsFromDetailBytes(buffer: ArrayBuffer): ByteBandColumns | null {
   if (buffer.byteLength < DETAIL_HEADER_BYTES) return null;
   const view = new DataView(buffer);
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
