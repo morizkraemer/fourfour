@@ -313,8 +313,6 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Additive: the per-stick "All tracks" list and the playlists put on each stick,
-/// keyed by the stick id from the stick's fourfour manifest.
 fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
     conn.execute_batch(STICK_DDL)
         .context("Failed to create stick tables")?;

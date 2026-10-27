@@ -440,10 +440,6 @@ fn bytes_needed(stick: &PreparedStick) -> u64 {
         + SPACE_MARGIN_PER_TRACK_BYTES * stick.selection.tracks.len() as u64
 }
 
-/// The plan for one stick and the stick paths of removed tracks whose files stay.
-///
-/// Only tracks the manifest lists are removed; a stick without a manifest loses
-/// no files at all.
 fn stick_plan(stick: &PreparedStick, free_space: &FreeSpaceProbe) -> Result<(UsbSyncPlan, HashSet<String>)> {
     if let Some(message) = &stick.setup_error {
         bail!("{message}");
@@ -530,8 +526,6 @@ fn owned_files(stick: &PreparedStick) -> Vec<OwnedFile> {
         .collect()
 }
 
-/// Before writing: the manifest also lists every file this sync may create, so
-/// an interrupted sync never leaves files fourfour wrote but does not own.
 fn claim_selection(stick: &PreparedStick) -> Result<StickManifest> {
     let mut manifest = sticks::manifest_or_fresh(&stick.root)?;
     for file in owned_files(stick) {
