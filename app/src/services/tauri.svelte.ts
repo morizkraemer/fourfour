@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
+import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
   sanitizeAnalysisPayload,
@@ -883,19 +884,16 @@ export async function syncUsbMany(targets: SyncTarget[]): Promise<StickReport[]>
 }
 
 export function listenToUsbSyncProgress(callback: (progress: StickProgress) => void) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) {
     mockSyncListeners.add(callback);
     return () => mockSyncListeners.delete(callback);
   }
-  listen<StickProgress>('usb-sync-progress', (event) => callback(event.payload))
-    .then((unsub) => {
-      unsubscribe = unsub;
-    })
-    .catch((err) => {
+  return unlistenWhenReady(
+    listen<StickProgress>('usb-sync-progress', (event) => callback(event.payload)),
+    (err) => {
       lastTauriError = `listen(usb-sync-progress) fail: ${String(err)}`;
-    });
-  return () => unsubscribe();
+    },
+  );
 }
 
 export async function ejectVolume(path: string): Promise<void> {
@@ -1119,80 +1117,35 @@ export function listenToAnalysisProgress(
     track_id?: number;
   }) => void,
 ) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) mockAnalysisListeners.progress.add(callback);
-  try {
-    listen<{
-      current: number;
-      total: number;
-      message: string;
-      track_id?: number;
-    }>('analysis-progress', (event) => {
-      callback(event.payload);
-    }).then(unsub => {
-      unsubscribe = unsub;
-    }).catch(err => {
-      lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
-    });
-  } catch (err) {
-    lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
-  }
-  return () => unsubscribe();
+  return subscribe('analysis-progress', callback);
 }
 
 /** The waveform of a prioritised track is stored; tempo, grid and key follow with the full result. */
 export function listenToAnalysisPartial(callback: (payload: { track_id: number }) => void) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) mockAnalysisListeners.partial.add(callback);
-  try {
-    listen<{ track_id: number }>('analysis-partial', (event) => {
-      callback(event.payload);
-    })
-      .then((unsub) => {
-        unsubscribe = unsub;
-      })
-      .catch((err) => {
-        lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
-      });
-  } catch (err) {
-    lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
-  }
-  return () => unsubscribe();
+  return subscribe('analysis-partial', callback);
 }
 
 export function listenToAnalysisComplete(callback: () => void) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) mockAnalysisListeners.complete.add(callback);
-  try {
-    listen<void>('analysis-complete', () => {
-      callback();
-    })
-      .then((unsub) => {
-        unsubscribe = unsub;
-      })
-      .catch((err) => {
-        lastTauriError = `listen(analysis-complete) fail: ${String(err)}`;
-      });
-  } catch (err) {
-    lastTauriError = `listen(analysis-complete) fail: ${String(err)}`;
-  }
-  return () => unsubscribe();
+  return subscribe<void>('analysis-complete', () => callback());
 }
 
 export function listenToWriteComplete(callback: (payload: SyncReport) => void) {
-  let unsubscribe: () => void = () => {};
+  return subscribe('write-complete', callback);
+}
+
+function subscribe<T>(eventName: string, callback: (payload: T) => void): () => void {
+  const onError = (err: unknown) => {
+    lastTauriError = `listen(${eventName}) fail: ${String(err)}`;
+  };
   try {
-    listen<SyncReport>('write-complete', (event) => {
-      callback(event.payload);
-    }).then(unsub => {
-      unsubscribe = unsub;
-    }).catch(err => {
-      lastTauriError = `listen(write-complete) fail: ${String(err)}`;
-    });
+    return unlistenWhenReady(listen<T>(eventName, (event) => callback(event.payload)), onError);
   } catch (err) {
-    lastTauriError = `listen(write-complete) fail: ${String(err)}`;
+    onError(err);
+    return () => {};
   }
-  return () => unsubscribe();
 }
 
 export async function pickFile(
