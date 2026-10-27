@@ -142,3 +142,4 @@
 2026-10-27 08:32 orchestrator - Merlin: ignore brother-related gates for now; W-U writer fixes spawned (192-track PDB split, system disk listed/wipe guard, cue names/colours/loops on export)
 2026-10-27 08:48 orchestrator - merged wg-tags bf00bdb; checks green (397 tests); Mac install started (inspector + tags)
 2026-10-27 08:50 orchestrator - Mac install done (bf00bdb, inspector + tags)
+2026-10-27 08:56 orchestrator - merged wu-writer 1312650 (PDB >64KiB pages, removable-only volumes + wipe guard, cue names/colours/loops); checks green; Mac install started
