@@ -33,9 +33,15 @@ fn is_system_volume(canonical: &Path) -> bool {
         return true;
     }
     match std::env::var_os("HOME") {
-        Some(home) => Path::new(&home).starts_with(canonical),
+        Some(home) => overlaps_home(canonical, Path::new(&home)),
         None => false,
     }
+}
+
+#[cfg(unix)]
+fn overlaps_home(canonical: &Path, home: &Path) -> bool {
+    let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    home.starts_with(canonical) || canonical.starts_with(&home)
 }
 
 #[cfg(windows)]
@@ -198,6 +204,16 @@ mod tests {
     fn home_directory_is_refused() {
         let home = std::env::var("HOME").unwrap();
         assert!(refuse_system_volume(Path::new(&home)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folders_inside_or_above_home_overlap_it() {
+        let home = Path::new("/Users/merlin");
+        assert!(overlaps_home(Path::new("/Users/merlin/Music"), home));
+        assert!(overlaps_home(Path::new("/Users"), home));
+        assert!(!overlaps_home(Path::new("/Volumes/DJ STICK"), home));
+        assert!(!overlaps_home(Path::new("/Users/merlinx"), home));
     }
 
     #[cfg(unix)]
