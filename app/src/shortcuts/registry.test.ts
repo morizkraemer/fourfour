@@ -32,7 +32,7 @@ function fixture() {
   return { calls, actions };
 }
 
-function key(init: { key: string; code?: string; ctrlKey?: boolean; shiftKey?: boolean; metaKey?: boolean }) {
+function key(init: { key: string; code?: string; ctrlKey?: boolean; shiftKey?: boolean; metaKey?: boolean; repeat?: boolean }) {
   return { ...init, preventDefault: vi.fn() };
 }
 
@@ -144,6 +144,17 @@ describe('persistence', () => {
 });
 
 describe('dispatch', () => {
+  it('runs once while a key is held: auto-repeat is swallowed, not re-run', () => {
+    const { actions, calls } = fixture();
+    const reg = createShortcutRegistry(actions, null);
+    const held = key({ key: ' ', code: 'Space', repeat: true });
+    expect(reg.dispatch(key({ key: ' ', code: 'Space' }), { typing: false })).toBe(true);
+    expect(reg.dispatch(held, { typing: false })).toBe(true);
+    expect(reg.dispatch(held, { typing: false })).toBe(true);
+    expect(calls).toEqual(['play']);
+    expect(held.preventDefault).toHaveBeenCalled();
+  });
+
   it('runs a Mod binding from either Ctrl or Meta', () => {
     const { actions, calls } = fixture();
     const reg = createShortcutRegistry(actions, null);
