@@ -139,3 +139,4 @@
 2026-10-27 08:14 orchestrator - Merlin chose inspector-3 option A + waveform preview with cue markers + BPM/key/length dark cards; W-N building it
 2026-10-27 08:29 orchestrator - Merlin: track dropped on stick → stick All tracks; keep Python engine option for now
 2026-10-27 08:31 orchestrator - merged wn-inspector (F22 option A, 340px); W-G tag editing command spawned (no Tauri write for tags existed)
+2026-10-27 08:32 orchestrator - Merlin: ignore brother-related gates for now; W-U writer fixes spawned (192-track PDB split, system disk listed/wipe guard, cue names/colours/loops on export)
