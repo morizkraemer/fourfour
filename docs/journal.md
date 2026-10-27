@@ -140,3 +140,4 @@
 2026-10-27 08:29 orchestrator - Merlin: track dropped on stick → stick All tracks; keep Python engine option for now
 2026-10-27 08:31 orchestrator - merged wn-inspector (F22 option A, 340px); W-G tag editing command spawned (no Tauri write for tags existed)
 2026-10-27 08:32 orchestrator - Merlin: ignore brother-related gates for now; W-U writer fixes spawned (192-track PDB split, system disk listed/wipe guard, cue names/colours/loops on export)
+2026-10-27 08:48 orchestrator - merged wg-tags bf00bdb; checks green (397 tests); Mac install started (inspector + tags)
