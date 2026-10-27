@@ -117,6 +117,8 @@ impl PlaybackEvents for AppHandle {
 }
 
 pub type RenderFn = Box<dyn FnMut(&mut [f32], u16) + Send + 'static>;
+/// Builds the callback once the backend knows the rate and channel count the device opened with.
+pub type MakeRender<'a> = &'a mut dyn FnMut(u32, u16) -> RenderFn;
 pub type OutputErrorFn = Box<dyn Fn(String) + Send + Sync + 'static>;
 
 pub struct OutputRequest {
@@ -134,12 +136,13 @@ pub struct OpenedOutput {
 
 pub trait OutputBackend: Send + Sync + 'static {
     fn list_devices(&self) -> Result<Vec<AudioOutputDevice>, String>;
-    /// `render` is called from the device's real-time thread with an interleaved f32 buffer and
-    /// the channel count. `on_error` reports device failures (unplugged, format change).
+    /// `make_render` is called once with the device's actual sample rate and channel count; the
+    /// callback it returns runs on the device's real-time thread with an interleaved f32 buffer
+    /// and the channel count. `on_error` reports device failures (unplugged, format change).
     fn open(
         &self,
         request: &OutputRequest,
-        render: RenderFn,
+        make_render: MakeRender<'_>,
         on_error: OutputErrorFn,
     ) -> Result<OpenedOutput, String>;
 }
@@ -484,23 +487,31 @@ impl PlaybackEngine {
         inner.output = None;
         let epoch = inner.output_epoch.fetch_add(1, Ordering::SeqCst) + 1;
         let (pipe, cons) = new_sample_pipe();
-        let mut render_state = RenderState::new(
-            cons,
-            pipe.clone(),
-            inner.level_left.clone(),
-            inner.level_right.clone(),
-            inner.tempo.clone(),
-            inner.config.sample_rate,
-            STRETCH_PRESET,
-        );
+        let mut cons = Some(cons);
+        let render_pipe = pipe.clone();
+        let level_left = inner.level_left.clone();
+        let level_right = inner.level_right.clone();
+        let tempo = inner.tempo.clone();
         let active_epoch = inner.output_epoch.clone();
-        let render: RenderFn = Box::new(move |data, channels| {
-            if active_epoch.load(Ordering::SeqCst) != epoch {
-                data.fill(0.0);
-                return;
-            }
-            render_state.render(data, channels);
-        });
+        let mut make_render = move |sample_rate: u32, _channels: u16| -> RenderFn {
+            let mut render_state = RenderState::new(
+                cons.take().expect("backend asked for a second renderer"),
+                render_pipe.clone(),
+                level_left.clone(),
+                level_right.clone(),
+                tempo.clone(),
+                sample_rate,
+                STRETCH_PRESET,
+            );
+            let active_epoch = active_epoch.clone();
+            Box::new(move |data, channels| {
+                if active_epoch.load(Ordering::SeqCst) != epoch {
+                    data.fill(0.0);
+                    return;
+                }
+                render_state.render(data, channels);
+            })
+        };
         let hub = self.hub.clone();
         let device_lost = self.device_lost.clone();
         let on_error: OutputErrorFn = Box::new(move |message| {
@@ -512,7 +523,7 @@ impl PlaybackEngine {
             sample_rate: inner.config.sample_rate,
             buffer_frames: inner.config.buffer_frames,
         };
-        let opened = self.backend.open(&request, render, on_error)?;
+        let opened = self.backend.open(&request, &mut make_render, on_error)?;
         self.device_lost.store(false, Ordering::SeqCst);
         inner.pipe = pipe;
         inner.stream = Some(opened.stream);
@@ -786,13 +797,15 @@ impl OutputBackend for CpalBackend {
     fn open(
         &self,
         request: &OutputRequest,
-        mut render: RenderFn,
+        make_render: MakeRender<'_>,
         on_error: OutputErrorFn,
     ) -> Result<OpenedOutput, String> {
         let device = resolve_output_device(request.device_name.as_deref())?;
-        let (supported, stream_config) =
+        let stream_config =
             resolve_stream_config(&device, request.sample_rate, request.buffer_frames)?;
         let channels = stream_config.channels;
+        let sample_rate = stream_config.sample_rate.0;
+        let mut render = make_render(sample_rate, channels);
         let stream = device
             .build_output_stream(
                 &stream_config,
@@ -804,7 +817,7 @@ impl OutputBackend for CpalBackend {
         stream.play().map_err(|e| e.to_string())?;
         Ok(OpenedOutput {
             channels,
-            sample_rate: supported.sample_rate().0,
+            sample_rate,
             stream: Box::new(AudioStreamHandle(stream)),
         })
     }
@@ -814,7 +827,7 @@ fn resolve_stream_config(
     device: &cpal::Device,
     sample_rate: u32,
     buffer_frames: u32,
-) -> Result<(SupportedStreamConfig, StreamConfig), String> {
+) -> Result<StreamConfig, String> {
     let target = SampleRate(sample_rate);
     let mut ranges: Vec<_> = device
         .supported_output_configs()
@@ -825,8 +838,7 @@ fn resolve_stream_config(
 
     for range in ranges {
         if let Some(supported) = range.clone().try_with_sample_rate(target) {
-            let stream_config = stream_config_with_buffer(&supported, buffer_frames);
-            return Ok((supported, stream_config));
+            return Ok(stream_config_with_buffer(&supported, buffer_frames));
         }
     }
 
@@ -834,8 +846,7 @@ fn resolve_stream_config(
     if default.sample_format() != SampleFormat::F32 {
         return Err("Default output device does not support f32 samples".to_string());
     }
-    let stream_config = stream_config_with_buffer(&default, buffer_frames);
-    Ok((default, stream_config))
+    Ok(stream_config_with_buffer(&default, buffer_frames))
 }
 
 fn stream_config_with_buffer(
