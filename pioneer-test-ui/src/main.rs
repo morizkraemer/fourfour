@@ -8,6 +8,7 @@ mod band_analysis;
 mod dto;
 mod playback;
 mod track_infos;
+mod volumes;
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -469,53 +470,10 @@ fn set_test_cues(
     build_track_infos(&lib)
 }
 
-/// List mounted volumes so the frontend can offer a target-drive picker.
+/// List removable and external volumes so the frontend can offer a target-drive picker.
 #[tauri::command]
 fn get_mounted_volumes() -> Result<Vec<String>, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let volumes = Path::new("/Volumes");
-        let mut result = Vec::new();
-        let entries = std::fs::read_dir(volumes).map_err(|e| e.to_string())?;
-        for entry in entries.flatten() {
-            if let Some(name) = entry.path().to_str() {
-                result.push(name.to_string());
-            }
-        }
-        result.sort();
-        Ok(result)
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let mut result = Vec::new();
-        for letter in b'A'..=b'Z' {
-            let drive = format!("{}:\\", letter as char);
-            if Path::new(&drive).exists() {
-                result.push(drive);
-            }
-        }
-        Ok(result)
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        let mut result = Vec::new();
-        for dir in &["/media", "/mnt"] {
-            let base = Path::new(dir);
-            if base.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(base) {
-                    for entry in entries.flatten() {
-                        if let Some(name) = entry.path().to_str() {
-                            result.push(name.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        result.sort();
-        Ok(result)
-    }
+    volumes::list_removable_volumes()
 }
 
 fn validated_reveal_path(path: &str) -> Result<std::path::PathBuf, String> {
@@ -598,6 +556,7 @@ fn wipe_usb(path: String) -> Result<(), String> {
     if !usb.is_dir() {
         return Err("Not a valid directory".into());
     }
+    volumes::refuse_system_volume(usb)?;
 
     let pioneer_dir = usb.join("PIONEER");
     let contents_dir = usb.join("Contents");
