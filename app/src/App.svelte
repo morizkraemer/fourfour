@@ -23,6 +23,7 @@
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import CommandPalette from './modules/CommandPalette.svelte';
   import StickSyncDialog from './modules/StickSyncDialog.svelte';
+  import { isEditableTarget } from './lib/editableTarget.ts';
 
   import {
     ui,
@@ -61,14 +62,6 @@
       ? `Files and folders will be added to “${dropTargetLabel}” and analyzed`
       : 'Files and folders will be added to your library and analyzed'
   );
-
-  function isEditableTarget(target) {
-    if (!(target instanceof Element)) return false;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
-    if (target.closest('[contenteditable="true"]')) return true;
-    if (target.closest('.ff-settings-screen')) return true;
-    return !!target.closest('.ff-dialog-wrapper');
-  }
 
   function onGlobalKeyDown(e) {
     if (e.defaultPrevented) return;
