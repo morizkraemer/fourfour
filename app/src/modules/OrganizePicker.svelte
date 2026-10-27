@@ -11,9 +11,14 @@
   import { dropFlash, cardKey } from '../stores/organize-drop.svelte.ts';
   import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
 
-  const MAX_RECENT = 4;
+  const MAX_RECENT_NARROW = 4;
+  const MAX_RECENT_WIDE = 8;
+  const WIDE_PICKER_PX = 820;
 
   let query = $state('');
+  let pickerWidth = $state(0);
+
+  let maxRecent = $derived(pickerWidth >= WIDE_PICKER_PX ? MAX_RECENT_WIDE : MAX_RECENT_NARROW);
 
   let eligiblePlaylists = $derived(library.playlists.filter((p) => !isFavoritePlaylistName(p.name)));
 
@@ -21,7 +26,7 @@
     const recent = ui.organize.recentPlaylistIds
       .map((id) => eligiblePlaylists.find((p) => p.id === id))
       .filter(Boolean);
-    return (recent.length > 0 ? recent : eligiblePlaylists).slice(0, MAX_RECENT);
+    return (recent.length > 0 ? recent : eligiblePlaylists).slice(0, maxRecent);
   });
 
   let needle = $derived(query.trim().toLowerCase());
@@ -68,83 +73,106 @@
   }
 </script>
 
-<div class="ff-picker">
-  <label class="ff-picker__search">
-    <Icon name="search" size={13} />
-    <input
-      type="search"
-      placeholder="Find playlist or stick…"
-      bind:value={query}
-      autocomplete="off"
-      spellcheck={false}
-    />
-  </label>
+<div class="ff-picker" bind:clientWidth={pickerWidth}>
+  <div class="ff-picker__content">
+    <label class="ff-picker__search">
+      <Icon name="search" size={13} />
+      <input
+        type="search"
+        placeholder="Find playlist or stick…"
+        bind:value={query}
+        autocomplete="off"
+        spellcheck={false}
+      />
+    </label>
 
-  <div class="ff-picker__label">{needle ? 'PLAYLISTS' : 'RECENT'}</div>
-  <div class="ff-picker__cards">
-    {#if !needle}
-      <DestinationCard
-        variant="new"
-        name="New playlist"
-        meta="⌘⇧N"
-        onclick={() => void createPlaylistAndOpen()}
-      />
-    {/if}
-    {#each visiblePlaylists as pl (pl.id)}
-      {@const target = { kind: 'playlist', playlistId: pl.id }}
-      <DestinationCard
-        name={pl.name}
-        meta={trackCountLabel(pl.track_ids.length)}
-        covers={coversFor(pl)}
-        dropActive={isDropTarget(dnd.dropCardPlaylistId === pl.id)}
-        flash={flashFor(target)}
-        data-drop-playlist-id={pl.id}
-        onclick={() => pickPlaylist(pl)}
-      />
-    {/each}
+    <div class="ff-picker__sections">
+      <section class="ff-picker__section">
+        <div class="ff-picker__label">{needle ? 'PLAYLISTS' : 'RECENT'}</div>
+        <div class="ff-picker__cards">
+          {#if !needle}
+            <DestinationCard
+              variant="new"
+              name="New playlist"
+              meta="⌘⇧N"
+              onclick={() => void createPlaylistAndOpen()}
+            />
+          {/if}
+          {#each visiblePlaylists as pl (pl.id)}
+            {@const target = { kind: 'playlist', playlistId: pl.id }}
+            <DestinationCard
+              name={pl.name}
+              meta={trackCountLabel(pl.track_ids.length)}
+              covers={coversFor(pl)}
+              dropActive={isDropTarget(dnd.dropCardPlaylistId === pl.id)}
+              flash={flashFor(target)}
+              data-drop-playlist-id={pl.id}
+              onclick={() => pickPlaylist(pl)}
+            />
+          {/each}
+        </div>
+        {#if needle && visiblePlaylists.length === 0}
+          <div class="ff-picker__none">No playlists match</div>
+        {/if}
+      </section>
+
+      <section class="ff-picker__section">
+        <div class="ff-picker__label">STICKS</div>
+        <div class="ff-picker__sticks">
+          {#each visibleSticks as vol (vol)}
+            {@const target = { kind: 'stick', volumePath: vol }}
+            <DestinationCard
+              variant="stick"
+              name={volumeLabel(vol)}
+              meta={`All tracks · ${stickAllTrackIds(vol).length}`}
+              dropActive={isDropTarget(dnd.dropStickPath === vol)}
+              flash={flashFor(target)}
+              data-drop-stick-path={vol}
+              onclick={() => pickVolume(vol)}
+            />
+          {/each}
+          {#if visibleSticks.length === 0}
+            {#if needle}
+              <div class="ff-picker__none">No sticks match</div>
+            {:else}
+              <DestinationCard
+                variant="empty"
+                icon="usb"
+                name="Plug in a USB stick"
+                meta="It shows up here. Drag tracks onto it, or onto any card."
+                data-empty-sticks
+              />
+            {/if}
+          {/if}
+        </div>
+      </section>
+    </div>
   </div>
-  {#if needle && visiblePlaylists.length === 0}
-    <div class="ff-picker__none">No playlists match</div>
-  {/if}
-
-  <div class="ff-picker__label">STICKS</div>
-  <div class="ff-picker__sticks">
-    {#each visibleSticks as vol (vol)}
-      {@const target = { kind: 'stick', volumePath: vol }}
-      <DestinationCard
-        variant="stick"
-        name={volumeLabel(vol)}
-        meta={`All tracks · ${stickAllTrackIds(vol).length}`}
-        dropActive={isDropTarget(dnd.dropStickPath === vol)}
-        flash={flashFor(target)}
-        data-drop-stick-path={vol}
-        onclick={() => pickVolume(vol)}
-      />
-    {/each}
-    {#if visibleSticks.length === 0}
-      <div class="ff-picker__none">{needle ? 'No sticks match' : 'No stick plugged in'}</div>
-    {/if}
-  </div>
-
-  <div class="ff-picker__hint">Drag tracks onto a card to put them there. Click a card to open it here.</div>
 </div>
 
 <style>
   .ff-picker {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
     align-self: stretch;
     width: 100%;
-    gap: var(--ff-space-5);
     padding: var(--ff-space-5);
     overflow-y: auto;
+    container-type: inline-size;
+  }
+
+  .ff-picker__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ff-space-6);
+    max-width: 1180px;
+    margin: 0 auto;
   }
 
   .ff-picker__search {
     display: flex;
     align-items: center;
     gap: var(--ff-space-4);
+    width: 100%;
+    max-width: 520px;
     height: 32px;
     padding: 0 10px;
     border: 1px solid var(--ff-border-hi);
@@ -173,8 +201,21 @@
     display: none;
   }
 
+  .ff-picker__sections {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ff-space-8);
+    align-items: start;
+  }
+
+  .ff-picker__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ff-space-5);
+    min-width: 0;
+  }
+
   .ff-picker__label {
-    margin-top: var(--ff-space-3);
     font-family: var(--ff-font-mono);
     font-size: var(--ff-type-label-sm);
     letter-spacing: 0.06em;
@@ -183,8 +224,8 @@
 
   .ff-picker__cards {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-    gap: var(--ff-space-4);
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--ff-space-5);
   }
 
   .ff-picker__sticks {
@@ -198,8 +239,9 @@
     color: var(--ff-faint);
   }
 
-  .ff-picker__hint {
-    font-size: var(--ff-type-caption);
-    color: var(--ff-faint);
+  @container (min-width: 820px) {
+    .ff-picker__sections {
+      grid-template-columns: minmax(0, 1fr) 260px;
+    }
   }
 </style>

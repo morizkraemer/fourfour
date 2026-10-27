@@ -45,6 +45,13 @@
   background-position: center;
 }
 
+.ff-dcard__mosaic--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ff-faint);
+}
+
 .ff-dcard__name {
   display: flex;
   align-items: center;
@@ -78,6 +85,31 @@
   border-color: var(--ff-border-hi);
   background: none;
   color: var(--ff-text-mid);
+}
+
+.ff-dcard--empty {
+  align-items: center;
+  justify-content: center;
+  gap: var(--ff-space-3);
+  min-height: 100px;
+  padding: var(--ff-space-5);
+  border-style: dashed;
+  border-color: var(--ff-border-hi);
+  background: none;
+  color: var(--ff-text-mid);
+  text-align: center;
+  cursor: default;
+}
+
+.ff-dcard--empty:hover {
+  background: none;
+  border-color: var(--ff-border-hi);
+}
+
+.ff-dcard__meta--wrap {
+  max-width: 28ch;
+  white-space: normal;
+  color: var(--ff-faint);
 }
 
 .ff-dcard--stick {
