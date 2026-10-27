@@ -126,3 +126,4 @@
 2026-10-26 20:39 orchestrator - merged wm2-mockups (round 2: inspector F22 + settings F21, recs C / A+B) into q41-feedback 0934a98; board https://dev.tail87069a.ts.net:5233 (served from the wm2 worktree)
 2026-10-27 00:17 orchestrator - Mac install done (38b771a, INSTALLED 05:18 WITA); PM resume: queue + own priorities drained, rest waits on Merlin (round 2 answers)
 2026-10-27 04:39 orchestrator - run-pause (PM, Merlin): nothing running; idle
+2026-10-27 06:53 orchestrator - Merlin round-3 feedback (G1–G5) from Mac test; W-T top bar/sidebar/board, W-A reanalyze + player BPM/key, W-P tempo/key-shift engine plan (plan only)
