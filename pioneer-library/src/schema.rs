@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Schema for a fresh v2 database.
 const SCHEMA_DDL: &str = "
@@ -68,6 +68,29 @@ CREATE INDEX IF NOT EXISTS idx_tracks_usb_path ON tracks(usb_path);
 CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist ON playlist_tracks(playlist_id);
 ";
 
+const STICK_DDL: &str = "
+CREATE TABLE IF NOT EXISTS sticks (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL DEFAULT '',
+    last_path  TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS stick_tracks (
+    stick_id TEXT NOT NULL REFERENCES sticks(id) ON DELETE CASCADE,
+    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (stick_id, track_id)
+);
+
+CREATE TABLE IF NOT EXISTS stick_playlists (
+    stick_id    TEXT NOT NULL REFERENCES sticks(id) ON DELETE CASCADE,
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    PRIMARY KEY (stick_id, playlist_id)
+);
+";
+
 pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .context("Failed to set WAL journal mode")?;
@@ -91,6 +114,8 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
             // Fresh database — create v2 schema.
             conn.execute_batch(SCHEMA_DDL)
                 .context("Failed to create schema")?;
+            conn.execute_batch(STICK_DDL)
+                .context("Failed to create stick tables")?;
             conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [SCHEMA_VERSION],
@@ -106,7 +131,10 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
             if v < 4 {
                 migrate_v3_to_v4(conn)?;
             }
-            migrate_v4_to_v5(conn)?;
+            if v < 5 {
+                migrate_v4_to_v5(conn)?;
+            }
+            migrate_v5_to_v6(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
         Some(v) => {
@@ -281,6 +309,15 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
         conn.execute_batch("ALTER TABLE analyses ADD COLUMN stages INTEGER NOT NULL DEFAULT 7;")
             .context("Failed to add stages column")?;
     }
+    conn.execute("UPDATE schema_version SET version = 5", [])?;
+    Ok(())
+}
+
+/// Additive: the per-stick "All tracks" list and the playlists put on each stick,
+/// keyed by the stick id from the stick's fourfour manifest.
+fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
+    conn.execute_batch(STICK_DDL)
+        .context("Failed to create stick tables")?;
     conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
     Ok(())
 }
