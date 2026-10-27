@@ -174,3 +174,4 @@
 2026-10-27 17:47 orchestrator - disk hit 100% (worker cargo caches ~150 GB); pruned finished workers' caches → 49%; q46/q43b notified. Lesson: prune each worker's cache right after its merge
 2026-10-27 18:01 orchestrator Q43b landed-on-branch: q43b-fixes dab9629 → q42-overnight 0c713b9; full checks green (505 tests, 0 warnings); Mac install of 0c713b9 started
 2026-10-27 18:01 orchestrator Q47 spawn: housekeeping (seat, haiku)
+2026-10-27 18:03 orchestrator - Mac install done (0c713b9, full overnight build; macOS volume guard compiles, 0 warnings)
