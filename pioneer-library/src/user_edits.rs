@@ -10,7 +10,11 @@ pub const MAX_BPM: f64 = 250.0;
 pub fn is_camelot(key: &str) -> bool {
     let Some(letter) = key.chars().last() else { return false };
     let number = &key[..key.len() - letter.len_utf8()];
-    matches!(letter, 'A' | 'B') && number.parse::<u8>().is_ok_and(|n| (1..=12).contains(&n)) && !number.starts_with('0')
+    matches!(letter, 'A' | 'B')
+        && !number.is_empty()
+        && number.bytes().all(|b| b.is_ascii_digit())
+        && !number.starts_with('0')
+        && number.parse::<u8>().is_ok_and(|n| (1..=12).contains(&n))
 }
 
 impl LocalLibrary {
@@ -104,5 +108,20 @@ impl LocalLibrary {
             }
         }
         Ok(kept)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_camelot;
+
+    #[test]
+    fn camelot_keys_are_one_to_twelve_then_a_or_b() {
+        for key in ["1A", "8A", "12B"] {
+            assert!(is_camelot(key), "{key}");
+        }
+        for key in ["", "A", "0A", "08A", "13B", "8C", "+8A", "8a", " 8A"] {
+            assert!(!is_camelot(key), "{key}");
+        }
     }
 }
