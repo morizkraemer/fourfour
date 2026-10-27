@@ -1,5 +1,5 @@
 import { addTracksToPlaylist, library } from './library.svelte.ts';
-import { addTracksToStickAll } from './sticks.svelte.ts';
+import { addPlaylistsToStick, addTracksToStickAll } from './sticks.svelte.ts';
 import { expandOrganize, type OrganizeTarget } from './ui.svelte.ts';
 
 export type CardDropTarget =
@@ -57,8 +57,21 @@ export async function dropTracksOnCard(target: CardDropTarget, trackIds: number[
   const added =
     target.kind === 'playlist'
       ? await addTracksToPlaylist(target.playlistId, trackIds)
-      : addTracksToStickAll(target.volumePath, trackIds);
+      : await addTracksToStickAll(target.volumePath, trackIds);
   showFlash(cardKey(target), dropConfirmation(requested, added), added, added > 0 ? firstCover(trackIds) : null);
+  return added;
+}
+
+export function playlistDropConfirmation(added: number): string {
+  return added > 0 ? 'Playlist on stick' : 'Already on stick';
+}
+
+/** Puts a playlist on a stick; only playlists put on a stick are written to it. */
+export async function dropPlaylistOnStick(volumePath: string, playlistId: number): Promise<number> {
+  const added = await addPlaylistsToStick(volumePath, [playlistId]);
+  const playlist = library.playlists.find((p) => p.id === playlistId);
+  const cover = added > 0 && playlist ? firstCover(playlist.track_ids) : null;
+  showFlash(cardKey({ kind: 'stick', volumePath }), playlistDropConfirmation(added), added, cover);
   return added;
 }
 

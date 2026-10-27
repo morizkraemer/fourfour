@@ -10,6 +10,7 @@ mod playback;
 mod tempo;
 mod track_fields;
 mod track_infos;
+mod stick_commands;
 mod volumes;
 
 use std::collections::{HashMap, VecDeque};
@@ -1164,6 +1165,13 @@ fn main() {
             prioritize_analysis,
             write_usb,
             sync_usb_many,
+            stick_commands::get_stick,
+            stick_commands::stick_add_tracks,
+            stick_commands::stick_remove_tracks,
+            stick_commands::stick_add_playlists,
+            stick_commands::stick_remove_playlists,
+            stick_commands::get_volume_capacity,
+            stick_commands::plan_usb_sync,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,

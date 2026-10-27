@@ -2,6 +2,31 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 const storage = vi.hoisted(() => new Map<string, string>());
+const stickDb = vi.hoisted(() => new Map<string, { track_ids: number[]; playlist_ids: number[] }>());
+
+function fakeBackend(command: string, args: Record<string, any> = {}) {
+  const stick = () => {
+    const found = stickDb.get(args.path) ?? { track_ids: [], playlist_ids: [] };
+    stickDb.set(args.path, found);
+    return found;
+  };
+  const contents = () => ({ stick_id: `id:${args.path}`, ...stick() });
+  const append = (list: number[], ids: number[]) => {
+    const fresh = [...new Set(ids)].filter((id) => !list.includes(id));
+    list.push(...fresh);
+    return fresh.length;
+  };
+  switch (command) {
+    case 'get_stick':
+      return stickDb.has(args.path) ? contents() : { stick_id: null, track_ids: [], playlist_ids: [] };
+    case 'stick_add_tracks':
+      return [append(stick().track_ids, args.trackIds), contents()];
+    case 'stick_add_playlists':
+      return [append(stick().playlist_ids, args.playlistIds), contents()];
+    default:
+      return undefined;
+  }
+}
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
@@ -21,13 +46,14 @@ async function fresh() {
 
 beforeEach(() => {
   storage.clear();
+  stickDb.clear();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
     setItem: (key: string, value: string) => void storage.set(key, value),
     removeItem: (key: string) => void storage.delete(key),
   });
   invokeMock.mockReset();
-  invokeMock.mockResolvedValue(undefined);
+  invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => fakeBackend(command, args));
 });
 
 describe('drop on a playlist card', () => {
@@ -76,11 +102,36 @@ describe('drop on a stick card', () => {
     expect(dropFlash.text).toBe('Added 1 · 1 already there');
   });
 
-  it('keeps the list across restarts', async () => {
+  it('keeps the list in the library across restarts', async () => {
     const first = await fresh();
     await first.dropTracksOnCard({ kind: 'stick', volumePath: '/Volumes/A' }, [5]);
     const second = await fresh();
+    expect(second.stickAllTrackIds('/Volumes/A')).toEqual([]);
+    await second.loadStick('/Volumes/A');
     expect(second.stickAllTrackIds('/Volumes/A')).toEqual([5]);
+    expect(storage.size).toBe(0);
+  });
+
+  it('moves a list an older build left in localStorage into the library', async () => {
+    storage.set('fourfour.sticks.allTracks', JSON.stringify({ '/Volumes/A': [3, 4], '/Volumes/B': [9] }));
+    const { loadStick, stickAllTrackIds } = await fresh();
+    await loadStick('/Volumes/A');
+    expect(stickAllTrackIds('/Volumes/A')).toEqual([3, 4]);
+    expect(stickDb.get('/Volumes/A')?.track_ids).toEqual([3, 4]);
+    expect(JSON.parse(storage.get('fourfour.sticks.allTracks')!)).toEqual({ '/Volumes/B': [9] });
+  });
+});
+
+describe('drop a playlist on a stick', () => {
+  it('puts the playlist on the stick once', async () => {
+    const { dropPlaylistOnStick, dropFlash, stickPlaylistIds } = await fresh();
+    expect(await dropPlaylistOnStick('/Volumes/A', 1)).toBe(1);
+    expect(dropFlash.key).toBe('stick:/Volumes/A');
+    expect(dropFlash.text).toBe('Playlist on stick');
+    expect(await dropPlaylistOnStick('/Volumes/A', 1)).toBe(0);
+    expect(dropFlash.text).toBe('Already on stick');
+    expect(stickPlaylistIds('/Volumes/A')).toEqual([1]);
+    expect(stickPlaylistIds('/Volumes/B')).toEqual([]);
   });
 });
 
