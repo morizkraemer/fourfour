@@ -1,4 +1,4 @@
-import { addTracksToPlaylist } from './library.svelte.ts';
+import { addTracksToPlaylist, library } from './library.svelte.ts';
 import { addTracksToStickAll } from './sticks.svelte.ts';
 import { expandOrganize, type OrganizeTarget } from './ui.svelte.ts';
 
@@ -8,7 +8,12 @@ export type CardDropTarget =
 
 const FLASH_MS = 1800;
 
-export const dropFlash = $state({ key: null as string | null, text: '' });
+export const dropFlash = $state({
+  key: null as string | null,
+  text: '',
+  added: 0,
+  cover: null as string | null,
+});
 
 let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,14 +28,27 @@ export function dropConfirmation(requested: number, added: number): string {
   return skipped > 0 ? `${addedText} · ${skipped} already there` : addedText;
 }
 
-function showFlash(key: string, text: string) {
+function showFlash(key: string, text: string, added: number, cover: string | null) {
   if (flashTimer) clearTimeout(flashTimer);
   dropFlash.key = key;
   dropFlash.text = text;
+  dropFlash.added = added;
+  dropFlash.cover = cover;
   flashTimer = setTimeout(() => {
     dropFlash.key = null;
     dropFlash.text = '';
+    dropFlash.added = 0;
+    dropFlash.cover = null;
   }, FLASH_MS);
+}
+
+function firstCover(trackIds: number[]): string | null {
+  const byId = new Map(library.tracks.map((t) => [t.id, t]));
+  for (const id of trackIds) {
+    const cover = byId.get(id)?.cover;
+    if (cover) return cover;
+  }
+  return null;
 }
 
 /** Puts dragged tracks on a destination card without opening it; duplicates are skipped. */
@@ -40,7 +58,7 @@ export async function dropTracksOnCard(target: CardDropTarget, trackIds: number[
     target.kind === 'playlist'
       ? await addTracksToPlaylist(target.playlistId, trackIds)
       : addTracksToStickAll(target.volumePath, trackIds);
-  showFlash(cardKey(target), dropConfirmation(requested, added));
+  showFlash(cardKey(target), dropConfirmation(requested, added), added, added > 0 ? firstCover(trackIds) : null);
   return added;
 }
 
