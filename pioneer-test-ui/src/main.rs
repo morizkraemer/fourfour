@@ -25,7 +25,7 @@ use pioneer_usb_writer::scanner;
 use analysis_backend::{AnalysisBackend, BackendEnv};
 use analysis_python::resolve_python;
 use analysis_run::{
-    merge_into_analysis_queue, resolve_analysis_work, AnalysisCoordinator, AnalysisSink, AnalysisWorkItem, LogLevel,
+    merge_into_analysis_queue, rerun_work, resolve_analysis_work, AnalysisCoordinator, AnalysisSink, AnalysisWorkItem, LogLevel,
     RunOutcome, SharedLibrary,
 };
 use track_infos::build_track_infos;
@@ -339,7 +339,7 @@ async fn analyze_track_ids(
     let shared: SharedLibrary = state.inner().clone();
     let pending: Vec<AnalysisWorkItem> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        resolve_analysis_work(&lib, &ids)?
+        rerun_work(&lib, &ids)?
     };
     run_track_analysis(app, shared, coordinator.inner().clone(), pending).await
 }
