@@ -130,3 +130,4 @@
 2026-10-27 06:57 orchestrator - W-P plan merged (docs/architecture/tempo-key-engine-plan.md): Signalsmith Stretch (MIT) after the ring, ~6–7 days, 7 open questions; nothing reusable from konsole/audio_tools beyond design
 2026-10-27 06:59 orchestrator - merged wt-topbar (G1–G3) into q41-feedback; board :5233 fixed (vite allowedHosts)
 2026-10-27 07:18 orchestrator - merged wa-reanalyze (G4/G5) 940b344; disk hit 100% (worker targets) → cleared merged worktrees' target dirs + finished caches (65%); full checks green (381 tests, 0 warnings); Mac install started
+2026-10-27 07:20 orchestrator - Mac install done (940b344, round-3 fixes)
