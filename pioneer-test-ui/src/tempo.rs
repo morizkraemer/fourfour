@@ -357,6 +357,21 @@ pub enum Path {
     Stretch,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StretchRun {
+    Idle,
+    Playing,
+    Draining,
+}
+
+fn is_stretch(path: Path) -> bool {
+    path == Path::Stretch
+}
+
+fn outgoing_path(last: Path) -> Path {
+    if last == Path::Identity { Path::Varispeed } else { last }
+}
+
 pub struct ChunkResult {
     pub valid_frames: usize,
     pub popped_frames: usize,
@@ -378,6 +393,8 @@ pub struct TempoEngine {
     fade_from: Option<Path>,
     fade_total: usize,
     fade_done: usize,
+    fade_equal_power: bool,
+    stretch_draining: bool,
     history: Vec<f32>,
     popped_total: u64,
     window: Vec<f32>,
@@ -417,6 +434,8 @@ impl TempoEngine {
             fade_from: None,
             fade_total: 0,
             fade_done: 0,
+            fade_equal_power: false,
+            stretch_draining: false,
             history: vec![0.0; HISTORY_FRAMES * 2],
             popped_total: 0,
             window: vec![0.0; (feed_max + HISTORY_FRAMES + LOOKAHEAD_FRAMES) * 2],
@@ -436,6 +455,17 @@ impl TempoEngine {
 
     pub fn rate(&self) -> f64 {
         self.rate
+    }
+
+    /// The most source frames beyond the ring front the stretcher can need: the slowest
+    /// stretch spacing (fastest tempo, lowest key) plus one chunk and the feed correction.
+    pub fn max_feed_ahead_frames(&self) -> usize {
+        let spacing = MAX_RATIO / semitone_factor(-MAX_SEMITONES);
+        let latency = stretch_latency_frames(self.input_latency, self.output_latency, spacing);
+        let limiter_lead = self.limiter.delay_frames() as f64 * MAX_RATIO;
+        let steady = latency + LOOKAHEAD_FRAMES as f64 * spacing + limiter_lead;
+        let chunk_in = CHUNK_FRAMES as f64 * MAX_RATIO + 1.0;
+        (steady + chunk_in).ceil() as usize + MAX_FEED_ADJUST + LOOKAHEAD_FRAMES
     }
 
     #[cfg(test)]
@@ -479,6 +509,10 @@ impl TempoEngine {
         }
         self.armed = false;
         self.primed = false;
+        self.stretch_draining = false;
+        if self.fade_from == Some(Path::Stretch) {
+            self.fade_from = None;
+        }
         self.feed_ahead = 0;
         self.mid.fill(0.0);
         self.mid_fifo = 0;
@@ -529,24 +563,33 @@ impl TempoEngine {
             };
         }
 
+        if self.stretch_draining
+            && self.fade_from != Some(Path::Stretch)
+            && self.last_path != Some(Path::Stretch)
+        {
+            self.disarm();
+        }
         if should_arm {
             self.armed = true;
         } else {
             self.disarm();
         }
         let pitch = pitch_factor(self.rate, self.semitones, target.key_lock);
-        let stretch_ran =
-            self.armed && self.run_stretch(ring, ch, ended, pitch, available, n, n_in);
+        let stretch_run = if self.armed {
+            self.run_stretch(ring, ch, ended, pitch, available, n, n_in)
+        } else {
+            StretchRun::Idle
+        };
 
         let effective = if identity {
             Path::Identity
-        } else if stretch_wanted && stretch_ran {
+        } else if stretch_wanted && stretch_run == StretchRun::Playing {
             Path::Stretch
         } else {
             Path::Varispeed
         };
         self.start_fade_if_path_changed(effective, n);
-        if self.fade_from == Some(Path::Stretch) && !stretch_ran {
+        if self.fade_from == Some(Path::Stretch) && stretch_run == StretchRun::Idle {
             self.fade_from = None;
         }
         let previous = self.fade_from;
@@ -583,10 +626,9 @@ impl TempoEngine {
         match previous {
             Some(old_path) => {
                 let old = self.path_output(old_path, n * ch);
-                let uncorrelated = old_path != Path::Identity && effective != Path::Identity;
                 for f in 0..n {
                     let t = ((self.fade_done + f + 1) as f32 / self.fade_total as f32).min(1.0);
-                    let (gain_old, gain_new) = if uncorrelated {
+                    let (gain_old, gain_new) = if self.fade_equal_power {
                         let angle = t * std::f32::consts::FRAC_PI_2;
                         (angle.cos(), angle.sin())
                     } else {
@@ -624,22 +666,30 @@ impl TempoEngine {
     }
 
     /// Identity and resampling agree on position and phase, so they fade within the chunk. The
-    /// stretcher agrees on position but not on phase, so fades to or from it are longer and
-    /// equal-power. An outgoing identity path keeps playing as 1x resampling, because the ring
-    /// moves at the new rate and a raw copy would jump forward at every chunk.
+    /// stretcher agrees on position but not on phase, so fades to or from it are longer. An
+    /// outgoing identity path keeps playing as 1x resampling, because the ring moves at the new
+    /// rate and a raw copy would jump forward at every chunk.
     fn start_fade_if_path_changed(&mut self, effective: Path, n: usize) {
         let Some(last) = self.last_path else { return };
         if last == effective {
             return;
         }
-        let outgoing = if last == Path::Identity { Path::Varispeed } else { last };
+        if self.fade_from.is_some() {
+            if is_stretch(effective) != is_stretch(last) {
+                self.fade_from = Some(outgoing_path(last));
+                self.fade_done = self.fade_total.saturating_sub(self.fade_done);
+            }
+            return;
+        }
+        let outgoing = outgoing_path(last);
         if outgoing == effective {
             return;
         }
-        let uncorrelated = last == Path::Stretch || effective == Path::Stretch;
+        let uncorrelated = is_stretch(last) || is_stretch(effective);
         self.fade_from = Some(outgoing);
         self.fade_done = 0;
         self.fade_total = if uncorrelated { LONG_FADE_FRAMES } else { n };
+        self.fade_equal_power = uncorrelated && effective != Path::Identity;
     }
 
     fn path_output(&self, path: Path, len: usize) -> &[f32] {
@@ -663,7 +713,7 @@ impl TempoEngine {
         available: usize,
         n: usize,
         n_in: usize,
-    ) -> bool {
+    ) -> StretchRun {
         let spacing = self.rate / pitch;
         let latency = stretch_latency_frames(self.input_latency, self.output_latency, spacing);
         let limiter_lead = self.limiter.delay_frames() as f64 * self.rate;
@@ -701,7 +751,7 @@ impl TempoEngine {
                     self.primed = true;
                 }
             }
-            return false;
+            return StretchRun::Idle;
         }
 
         let wanted = (self.mid_carry + n as f64 * pitch) as usize;
@@ -710,8 +760,12 @@ impl TempoEngine {
             .clamp(-(MAX_FEED_ADJUST as i64), MAX_FEED_ADJUST as i64);
         let feed = (n_in as i64 + adjust).max(1) as usize;
         if !ended && available < self.feed_ahead + feed {
-            self.disarm();
-            return false;
+            let audible = self.last_path == Some(Path::Stretch) || self.fade_from == Some(Path::Stretch);
+            if !audible {
+                self.disarm();
+                return StretchRun::Idle;
+            }
+            self.stretch_draining = true;
         }
         gather_stereo(ring, ch, self.feed_ahead, feed, &mut self.stretch_in[..feed * 2]);
         let tail = (HISTORY_FRAMES + self.mid_fifo) * 2;
@@ -735,16 +789,23 @@ impl TempoEngine {
         let limiter_was_filled = self.limiter.is_filled();
         self.limiter.process(&mut self.shifted[..n * 2]);
         expand_stereo(&self.shifted[..n * 2], ch, &mut self.stretch_dev[..n * ch]);
-        limiter_was_filled
+        if self.stretch_draining {
+            StretchRun::Draining
+        } else if limiter_was_filled {
+            StretchRun::Playing
+        } else {
+            StretchRun::Idle
+        }
     }
 }
 
 fn sample_at(ring: (&[f32], &[f32]), index: usize) -> Option<f32> {
-    if index < ring.0.len() {
-        Some(ring.0[index])
+    let sample = if index < ring.0.len() {
+        ring.0[index]
     } else {
-        ring.1.get(index - ring.0.len()).copied()
-    }
+        *ring.1.get(index - ring.0.len())?
+    };
+    Some(if sample.is_finite() { sample } else { 0.0 })
 }
 
 fn gather_stereo(ring: (&[f32], &[f32]), ch: usize, start_frame: usize, frames: usize, dst: &mut [f32]) {
