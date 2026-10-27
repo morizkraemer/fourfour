@@ -49,6 +49,7 @@
     cover = '',
     peaks = null,
     bands = null,
+    analyzing = false,
     onWaveformSeek = undefined,
     onRevealPath = undefined,
     onPathContextMenu = undefined,
@@ -175,6 +176,7 @@
           look="bands"
           cues={waveCues}
           cueStyle="dot"
+          animating={analyzing && !bands && !peaks?.length}
           onSeek={onWaveformSeek} />
       </div>
     {/if}

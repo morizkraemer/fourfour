@@ -530,6 +530,13 @@ impl LocalLibrary {
         queries::select_analysis_stages(&self.conn, track_id)
     }
 
+    /// Mark every stage of a track's analysis as missing, so a re-analysis runs the staged passes
+    /// again and the track counts as pending until they are stored. Hand-set values stay locked.
+    pub fn reset_analysis_stages(&self, track_id: i64) -> Result<()> {
+        queries::reset_analysis_stages(&self.conn, track_id)?;
+        Ok(())
+    }
+
     /// Tracks that have an analysis row with stages still missing.
     pub fn get_incomplete_analysis_ids(&self) -> Result<Vec<i64>> {
         queries::select_incomplete_analysis_ids(&self.conn, analysis_stage::ALL)

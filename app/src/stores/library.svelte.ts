@@ -41,6 +41,7 @@ import {
   isValidWaveformPreview,
   decodeTrackPreview,
   decodeBandPreview,
+  readyAnalysisFields,
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
@@ -417,12 +418,16 @@ export function isTrackAnalyzing(trackId: number): boolean {
   return library.analyzingTrackIds.includes(trackId);
 }
 
-function unanalyzedIds(ids: number[]): number[] {
-  return [...new Set(ids)].filter((id) => {
-    if (id <= 0) return false;
-    const track = library.tracks.find((t) => t.id === id);
-    return track != null && (!track.analyzed || track.analysisPending);
-  });
+function knownTrackIds(ids: number[]): number[] {
+  return [...new Set(ids)].filter((id) => id > 0 && library.tracks.some((t) => t.id === id));
+}
+
+const analysisStartListeners = new Set<(trackIds: number[]) => void>();
+
+/** Called with the ids of tracks whose analysis (re)starts, after their rows were cleared. */
+export function onAnalysisStart(listener: (trackIds: number[]) => void): () => void {
+  analysisStartListeners.add(listener);
+  return () => analysisStartListeners.delete(listener);
 }
 
 /**
@@ -470,11 +475,16 @@ function applyWaveformAndCuesFromAnalysis(
     bpm_locked?: boolean;
     key_locked?: boolean;
     analysis_pending?: boolean;
+    analysis_stages?: number;
   },
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
-  const bandPreview = decodeBandPreview(res.waveform_row_bands);
-  if (bandPreview) {
+  const ready = readyAnalysisFields(res);
+  const bandPreview = ready.waveform ? decodeBandPreview(res.waveform_row_bands) : null;
+  if (!ready.waveform) {
+    track.bandsPreview = undefined;
+    track.preview = undefined;
+  } else if (bandPreview) {
     if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
     track.preview = undefined;
   } else if (res.waveform_preview?.length) {
@@ -482,11 +492,11 @@ function applyWaveformAndCuesFromAnalysis(
     track.preview = Uint8Array.from(res.waveform_preview);
   }
   if (res.cue_points) loadCuesFromPayload(track.id as number, res.cue_points);
-  if (res.bpm) {
+  if (ready.bpm && res.bpm) {
     track.bpm = Number(res.bpm).toFixed(1);
     track.bpmExact = Number(res.bpm);
   }
-  if (res.key) track.key = res.key;
+  if (ready.key && res.key) track.key = res.key;
   track.bpmLocked = res.bpm_locked === true;
   track.keyLocked = res.key_locked === true;
   track.analyzed = true;
@@ -504,6 +514,7 @@ function applyWaveformAndCuesFromAnalysis(
 export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Promise<void> {
   if (track.analysisLoaded || !track.analyzed) return;
   const id = track.id as number;
+  if (isTrackAnalyzing(id)) return;
   const inflight = peakLoadInflight.get(id);
   if (inflight) return inflight;
 
@@ -562,14 +573,26 @@ function finishAnalyzingTrack(trackId: number) {
   if (track) void refreshTrackAnalysisDisplay(track);
 }
 
+/** Puts tracks into the state a first analysis starts from: no waveform, and no BPM or key unless hand-set. */
 function markTracksPendingAnalysis(ids: number[]) {
+  const restarted: number[] = [];
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
     if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
     track.analysisLoaded = false;
+    track.analysisPending = true;
+    if (!track.bpmLocked) {
+      track.bpm = '—';
+      track.bpmExact = 0;
+    }
+    if (!track.keyLocked) track.key = '—';
+    restarted.push(id);
   }
+  if (restarted.length === 0) return;
+  bumpLibraryTracks();
+  analysisStartListeners.forEach((listener) => listener(restarted));
 }
 
 function handleAnalysisProgressEvent(progress: {
@@ -886,7 +909,7 @@ export async function analyzeTracks() {
 
 /** Analyze or re-analyze specific tracks by id */
 export async function analyzeTrackIds(ids: number[]) {
-  const unique = unanalyzedIds(ids);
+  const unique = knownTrackIds(ids);
   if (unique.length === 0) return;
 
   markTracksPendingAnalysis(unique);

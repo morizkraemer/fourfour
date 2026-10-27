@@ -10,7 +10,7 @@ import {
   listenToAnalysisProgress,
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
-import { previewBytesFromPayload } from '../services/analysis-data.ts';
+import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
 import { colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
@@ -21,7 +21,7 @@ import {
   subscribePlaybackError,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
-import { library, requestBackgroundAnalysis } from './library.svelte.ts';
+import { library, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
 import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
 import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cues.svelte.ts';
@@ -162,9 +162,12 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
     durationMs,
     totalSeconds: Math.max(0, Math.round(durationMs / 1000)),
   };
-  if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
-  if (analysis.key) next.key = analysis.key;
-  next.bands = colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis));
+  const ready = readyAnalysisFields(analysis);
+  next.bpm = ready.bpm && analysis.bpm ? Number(analysis.bpm).toFixed(2) : ready.bpm ? base.bpm : '—';
+  next.key = ready.key && analysis.key ? analysis.key : ready.key ? base.key : '—';
+  next.bands = ready.waveform
+    ? (colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis)))
+    : null;
   next.bandsDetail = colorBandsFromPayload(analysis.waveform_color_detail) ?? next.bands;
   next.bands = next.bandsDetail;
   next.bandsOverview = overviewBandsFromPayload(analysis.waveform_overview) ?? next.bandsDetail;
@@ -277,6 +280,8 @@ interface BackendTrackInfo {
  */
 function normalizeTrackInput(input: any): BackendTrackInfo | null {
   const raw = input?.raw ?? input;
+  const rowTempo = Math.round((Number(input?.bpmExact) || 0) * 100);
+  const rowKey = input?.raw && input.key !== '—' ? input.key : undefined;
   const sourcePath = raw?.source_path ?? input?.filePath;
   if (!sourcePath) {
     console.error('loadPlayerTrack: selected track has no source path', input);
@@ -287,8 +292,8 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
     source_path: sourcePath,
     title: raw?.title ?? input?.title ?? '',
     artist: raw?.artist ?? input?.artist ?? '',
-    tempo: raw?.tempo ?? 0,
-    key: raw?.key ?? input?.key ?? '',
+    tempo: rowTempo || (raw?.tempo ?? 0),
+    key: rowKey || (raw?.key ?? input?.key ?? ''),
     duration_secs: raw?.duration_secs ?? 0,
     has_artwork: raw?.has_artwork ?? input?.hasArtwork ?? false,
     has_analysis: raw?.has_analysis,
@@ -320,8 +325,9 @@ async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack
     if (gen !== loadGeneration || player.track?.id !== trackId) return;
     player.track = applyAnalysisToTrack(base, analysis);
     performance.mark('ff:player-ready');
-  } catch {
+  } catch (err) {
     if (gen !== loadGeneration) return;
+    console.warn(`player analysis for track ${trackId} unavailable:`, err);
   } finally {
     if (gen === loadGeneration) {
       player.loading = false;
@@ -343,6 +349,19 @@ export function initPlayerAnalysisRefresh() {
     player.loading = true;
     void enrichPlayerTrack(loadGeneration, trackId, player.track?.id === trackId ? player.track : loaded);
   };
+  onAnalysisStart((trackIds) => {
+    const loaded = player.track;
+    if (!loaded || !trackIds.includes(loaded.id)) return;
+    const row = library.tracks.find((t) => t.id === loaded.id);
+    player.track = {
+      ...loaded,
+      bands: null,
+      bandsDetail: null,
+      bandsOverview: null,
+      bpm: row?.bpmLocked ? loaded.bpm : '—',
+      key: row?.keyLocked ? loaded.key : '—',
+    };
+  });
   listenToAnalysisProgress((progress) => refreshLoadedTrack(progress.track_id));
   listenToAnalysisPartial((partial) => refreshLoadedTrack(partial.track_id));
 }

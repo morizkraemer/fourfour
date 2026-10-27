@@ -22,6 +22,7 @@
     beats = [],
     durationMs = 0,
     trackKey = null,
+    analyzing = false,
     onScrub = undefined,
     playing = false,
     bpm = '124.00',
@@ -130,6 +131,7 @@
         {beats}
         {durationMs}
         {trackKey}
+        {analyzing}
         onSeek={onScrub} />
     </div>
   </div>

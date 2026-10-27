@@ -211,6 +211,10 @@ pub fn select_analysis_stages(conn: &Connection, track_id: i64) -> Result<Option
     rows.next().transpose().map_err(Into::into)
 }
 
+pub fn reset_analysis_stages(conn: &Connection, track_id: i64) -> Result<bool> {
+    Ok(conn.execute("UPDATE analyses SET stages = 0 WHERE track_id = ?1", [track_id])? > 0)
+}
+
 pub fn select_incomplete_analysis_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE stages != ?1 ORDER BY track_id")?;
     let rows = stmt.query_map([complete], |row| row.get(0))?;
@@ -286,7 +290,9 @@ pub fn select_all_tracks_with_flags(
     let mut stmt = conn.prepare(
         "SELECT t.id, t.source_path, t.usb_path, t.title, t.artist, t.album, t.genre,
                 t.label, t.remixer, t.comment, t.year, t.disc_number, t.track_number,
-                t.tempo, t.key, t.duration_secs, t.sample_rate, t.bitrate, t.file_size,
+                CASE WHEN a.bpm > 0 THEN CAST(ROUND(a.bpm * 100) AS INTEGER) ELSE t.tempo END,
+                COALESCE(NULLIF(a.key, ''), t.key),
+                t.duration_secs, t.sample_rate, t.bitrate, t.file_size,
                 (art.track_id IS NOT NULL),
                 (a.track_id IS NOT NULL)
          FROM tracks t

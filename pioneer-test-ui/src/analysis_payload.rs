@@ -172,8 +172,10 @@ pub fn build_analysis_json(
             payload.insert("beats".into(), serde_json::Value::Array(beats));
             payload.insert("cue_points".into(), serde_json::Value::Array(cue_points));
             payload.insert("duration_ms".into(), serde_json::json!(duration_ms));
-            let pending = lib.analysis_stages(track_id).map_err(|e| e.to_string())? != Some(pioneer_library::analysis_stage::ALL);
+            let stages = lib.analysis_stages(track_id).map_err(|e| e.to_string())?;
+            let pending = stages != Some(pioneer_library::analysis_stage::ALL);
             payload.insert("analysis_pending".into(), serde_json::json!(pending));
+            payload.insert("analysis_stages".into(), serde_json::json!(stages.unwrap_or(0)));
             Ok(serde_json::Value::Object(payload))
         }
         None => Err("No analysis data for this track".to_string()),

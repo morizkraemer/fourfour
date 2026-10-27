@@ -136,3 +136,32 @@ export function decodeBandPreview(preview: string | number[] | null | undefined)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+const STAGE_WAVEFORM = 1;
+const STAGE_KEY = 2;
+const STAGE_GRID = 4;
+const ALL_STAGES = STAGE_WAVEFORM | STAGE_KEY | STAGE_GRID;
+
+export interface ReadyAnalysisFields {
+  waveform: boolean;
+  key: boolean;
+  bpm: boolean;
+}
+
+/**
+ * Which parts of a `get_analysis_data` payload are finished results. During a (re-)analysis the stored
+ * row still holds the stages in flight, so only stored stages may be shown; a hand-set BPM or key
+ * is always final. Payloads without stage bits are complete.
+ */
+export function readyAnalysisFields(data: {
+  analysis_stages?: number;
+  bpm_locked?: boolean;
+  key_locked?: boolean;
+}): ReadyAnalysisFields {
+  const stages = typeof data.analysis_stages === 'number' ? data.analysis_stages : ALL_STAGES;
+  return {
+    waveform: (stages & STAGE_WAVEFORM) !== 0,
+    key: (stages & STAGE_KEY) !== 0 || data.key_locked === true,
+    bpm: (stages & STAGE_GRID) !== 0 || data.bpm_locked === true,
+  };
+}

@@ -11,6 +11,7 @@
     waveform changes (setData resets zoom); the playhead follows every tick.
   */
   import WaveformDisplay from '../waveform-display.js';
+  import Waveform from './Waveform.svelte';
 
   let {
     mode = 'compact',
@@ -24,8 +25,12 @@
     playing = false,
     durationMs = 0,
     trackKey = null,
+    analyzing = false,
     onSeek = undefined,
   } = $props();
+
+  let placeholderWidth = $state(0);
+  let placeholderHeight = $state(0);
 
   let container;
   let display = null;
@@ -99,7 +104,13 @@
   });
 </script>
 
-<div class="ff-waveform-view" bind:this={container}></div>
+<div class="ff-waveform-view" bind:this={container}>
+  {#if analyzing && !bands}
+    <div class="ff-waveform-view__analyzing" bind:clientWidth={placeholderWidth} bind:clientHeight={placeholderHeight}>
+      <Waveform width={placeholderWidth || 300} height={placeholderHeight || 48} variant="strip" look="bands" animating />
+    </div>
+  {/if}
+</div>
 
 <style>
   .ff-waveform-view {
@@ -107,6 +118,16 @@
     width: 100%;
     height: 100%;
     min-height: 0;
+  }
+
+  .ff-waveform-view__analyzing {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    background: var(--ff-wave-bg, #0d0d0d);
+    pointer-events: none;
   }
 
   /* WaveformDisplay builds its own DOM (unscoped) — style globally. */

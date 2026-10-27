@@ -294,6 +294,15 @@ pub(crate) fn resolve_analysis_work(
     Ok(work)
 }
 
+/// Work for an explicit (re-)analysis: the tracks' stored stages are reset first, so they run
+/// the same staged passes as a first analysis and are pending until each one is stored.
+pub(crate) fn rerun_work(lib: &LocalLibrary, ids: &[i64]) -> Result<Vec<AnalysisWorkItem>, String> {
+    for &id in ids {
+        lib.reset_analysis_stages(id).map_err(|e| e.to_string())?;
+    }
+    resolve_analysis_work(lib, ids)
+}
+
 /// Tracks to analyse at launch: partial analyses first (they resume at the missing stage), then,
 /// when `include_new` is set, tracks that were never analysed.
 pub(crate) fn resume_work(lib: &LocalLibrary, include_new: bool) -> Result<Vec<AnalysisWorkItem>, String> {

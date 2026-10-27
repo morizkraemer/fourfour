@@ -9,7 +9,7 @@
     selectionCount,
     selectedTrack,
   } from '../stores/selection.svelte.ts';
-  import { ensureTrackPeaksLoaded, revealFile } from '../stores/library.svelte.ts';
+  import { ensureTrackPeaksLoaded, isTrackAnalyzing, revealFile } from '../stores/library.svelte.ts';
   import { player, seekToProgress } from '../stores/player.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
@@ -102,6 +102,7 @@
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
       bands={track.bands}
+      analyzing={isTrackAnalyzing(track.id)}
       onWaveformSeek={trackIsLoaded ? seekToProgress : undefined}
       onRevealPath={() => track.filePath && revealFile(track.filePath)}
       onPathContextMenu={openPathMenu}
