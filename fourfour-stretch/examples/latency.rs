@@ -1,58 +1,58 @@
 use fourfour_stretch::{Preset, Stretch};
 
-fn run(preset: Preset, rate: f64, shift: f32) {
-    let sr = 48_000.0f32;
-    let mut s = Stretch::new(2, sr, preset);
-    s.set_transpose_factor(shift);
-    let burst_at = 60_000usize;
-    let total_in = 160_000usize;
-    let mut source = vec![0.0f32; total_in * 2];
-    for i in 0..64 {
-        let w = (std::f32::consts::PI * i as f32 / 63.0).sin();
-        let v = w * (2.0 * std::f32::consts::PI * 1500.0 * i as f32 / sr).sin();
-        source[(burst_at + i) * 2] = v;
-        source[(burst_at + i) * 2 + 1] = v;
+fn freq(x: &[f32]) -> f64 {
+    let mut first = None;
+    let mut last = 0.0;
+    let mut count = 0usize;
+    for i in 1..x.len() {
+        if x[i - 1] < 0.0 && x[i] >= 0.0 {
+            let t = i as f64 - 1.0 + (-x[i - 1] as f64) / (x[i] as f64 - x[i - 1] as f64);
+            if first.is_none() {
+                first = Some(t);
+            }
+            last = t;
+            count += 1;
+        }
     }
-    let block = 256usize;
+    (count - 1) as f64 * 48000.0 / (last - first.unwrap())
+}
+
+fn run(target: f64, hz: f64, block: usize, ramp: bool) {
+    let mut s = Stretch::new(2, 48000.0, Preset::DEFAULT);
+    let total = 48000 * 8;
+    let source: Vec<f32> = (0..total)
+        .flat_map(|n| {
+            let v = (0.5 * (2.0 * std::f64::consts::PI * hz * n as f64 / 48000.0).sin()) as f32;
+            [v, v]
+        })
+        .collect();
     let mut consumed = 0usize;
     let mut carry = 0.0f64;
-    let mut peak = (0.0f32, 0usize);
-    let mut out_index = 0usize;
+    let mut left = Vec::new();
     let mut out = vec![0.0f32; block * 2];
-    while consumed + 400 < total_in {
+    let mut rate = if ramp { 1.0 } else { target };
+    while consumed + 2000 < total {
+        if ramp {
+            rate += (target - rate) * (1.0 - (-(block as f64) / 48000.0 / 0.03).exp());
+        }
         let want = block as f64 * rate + carry;
         let n_in = want.floor() as usize;
         carry = want - n_in as f64;
         let mut input = source[consumed * 2..(consumed + n_in) * 2].to_vec();
         s.process(&mut input, &mut out);
         consumed += n_in;
-        for i in 0..block {
-            let a = out[i * 2].abs();
-            if a > peak.0 {
-                peak = (a, out_index + i);
-            }
-        }
-        out_index += block;
+        left.extend(out.chunks(2).map(|f| f[0]));
     }
-    let lag_src = peak.1 as f64 * rate - (burst_at as f64 + 32.0);
-    println!(
-        "{:?} rate {:.3} shift {:.3}: peak at out {} lag_src {:.0} (in_lat {} out_lat {} predicted {:.0})",
-        (preset.block_seconds, preset.interval_seconds),
-        rate,
-        shift,
-        peak.1,
-        lag_src,
-        s.input_latency(),
-        s.output_latency(),
-        s.input_latency() as f64 + s.output_latency() as f64 * rate
-    );
+    let f = freq(&left[48000..48000 * 4]);
+    println!("ramp {ramp} rate {target} {hz} Hz -> {:+.2} cents", 1200.0 * (f / hz).log2());
 }
 
 fn main() {
-    for preset in [Preset::DEFAULT, Preset::CHEAPER] {
-        for rate in [0.84, 0.92, 1.0, 1.08, 1.16, 1.5] {
-            run(preset, rate, 1.0);
+    for ramp in [false, true] {
+        for rate in [1.3, 1.4, 1.5] {
+            for hz in [110.0, 220.0, 440.0] {
+                run(rate, hz, 256, ramp);
+            }
         }
-        run(preset, 1.0, 1.122);
     }
 }

@@ -39,7 +39,7 @@ unsafe impl GlobalAlloc for CountingAlloc {
 #[global_allocator]
 static GLOBAL: CountingAlloc = CountingAlloc;
 
-fn write_wav(
+pub(crate) fn write_wav(
     path: &Path,
     rate: u32,
     channels: u16,
@@ -81,7 +81,7 @@ fn scratch(name: &str) -> PathBuf {
     dir.join(name)
 }
 
-fn decode_to_vec(path: &Path, start_sample: u64, rate: u32, channels: u16) -> Vec<f32> {
+pub(crate) fn decode_to_vec(path: &Path, start_sample: u64, rate: u32, channels: u16) -> Vec<f32> {
     let mut out = Vec::new();
     let outcome = run_decode(
         path.to_str().unwrap(),

@@ -1481,3 +1481,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tempo_tests.rs"]
 mod tempo_tests;
+
+#[cfg(test)]
+#[path = "tempo_lab.rs"]
+mod tempo_lab;

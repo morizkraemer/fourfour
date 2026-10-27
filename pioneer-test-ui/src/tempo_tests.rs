@@ -331,7 +331,7 @@ fn playing_ten_seconds_at_ratio_takes_ten_over_ratio() {
     }
 }
 
-fn heard_error_ms(period: f32, ratio: f64, semitones: f64, lock: bool, start_frame: usize) -> f64 {
+pub(crate) fn heard_error_ms(period: f32, ratio: f64, semitones: f64, lock: bool, start_frame: usize) -> f64 {
     let seconds = 12.0;
     let mut lab = Lab::new(click_train(period, seconds), 256, Preset::DEFAULT);
     lab.set(ratio, semitones, lock);
@@ -457,16 +457,16 @@ fn engine_reports_the_path_it_plays() {
 #[test]
 #[ignore]
 fn lab_pitch_table() {
-    for preset in [Preset::DEFAULT, Preset::CHEAPER] {
-        for freq in [110.0f32, 220.0, 440.0, 1000.0, 3000.0, 8000.0] {
-            let mut row = format!("{:?} {freq:>6} Hz:", preset.block_seconds);
-            for (ratio, semitones) in [(1.0, -5.0), (1.0, 2.0), (1.0, 7.0), (0.92, 0.0), (1.08, 0.0), (1.16, 0.0), (1.5, 0.0)] {
+    for (block, interval) in [(0.12f32, 0.03f32)] {
+        let preset = Preset { block_seconds: block, interval_seconds: interval, split_computation: false };
+        for freq in [110.0f32, 220.0, 440.0] {
+            let mut row = format!("{block}/{interval} {freq:>6} Hz:");
+            for ratio in [1.35, 1.4, 1.45, 1.48, 1.5] {
                 let mut lab = Lab::new(sine(freq, 8.0, 0.5), 256, preset);
-                lab.set(ratio, semitones, true);
-                let out = left(&lab.run_seconds(5.0));
-                let f = zero_cross_freq(&out, 2 * SR as usize, 5 * SR as usize);
-                let expected = freq as f64 * 2f64.powf(semitones / 12.0);
-                row += &format!(" r{ratio}/{semitones:+}st {:+.2}c", cents(f, expected));
+                lab.set(ratio, 0.0, true);
+                let out = left(&lab.run_seconds(6.0));
+                let f = zero_cross_freq(&out, 2 * SR as usize, 6 * SR as usize);
+                row += &format!(" r{ratio} {:+.2}c", cents(f, freq as f64));
             }
             println!("{row}");
         }
@@ -477,7 +477,7 @@ fn lab_pitch_table() {
 #[ignore]
 fn lab_spike_debug() {
     let theory = 0.5 * (2.0 * PI * 220.0 / SR as f32).powi(2);
-    for ratio in [1.0f64, 1.03, 1.08, 0.92, 1.5] {
+    for ratio in [1.3f64, 1.35, 1.4, 1.45, 1.5] {
         let mut lab = Lab::new(sine(220.0, 30.0, 0.5), 256, Preset::DEFAULT);
         lab.set(ratio, 0.0, true);
         let out = left(&lab.run_seconds(6.0));
@@ -547,4 +547,22 @@ fn lab_switch_debug() {
         }
     }
     for b in 222..236 { println!("  b{b} rate {:.4} {:?}", log[b].0, log[b].1); }
+}
+
+#[test]
+#[ignore]
+fn lab_trace() {
+    for ratio in [1.4, 1.3] {
+        let mut lab = Lab::new(sine(220.0, 12.0, 0.5), 256, Preset::DEFAULT);
+        lab.set(ratio, 0.0, true);
+        let out = left(&lab.run_seconds(8.0));
+        let mut row = format!("ratio {ratio}:");
+        let w = SR as usize / 2;
+        let mut at = SR as usize;
+        while at + w < out.len() {
+            row += &format!(" {:+.1}", cents(zero_cross_freq(&out, at, at + w), 220.0));
+            at += w;
+        }
+        println!("{row}");
+    }
 }
