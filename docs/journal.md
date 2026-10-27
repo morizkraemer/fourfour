@@ -127,3 +127,4 @@
 2026-10-27 00:17 orchestrator - Mac install done (38b771a, INSTALLED 05:18 WITA); PM resume: queue + own priorities drained, rest waits on Merlin (round 2 answers)
 2026-10-27 04:39 orchestrator - run-pause (PM, Merlin): nothing running; idle
 2026-10-27 06:53 orchestrator - Merlin round-3 feedback (G1–G5) from Mac test; W-T top bar/sidebar/board, W-A reanalyze + player BPM/key, W-P tempo/key-shift engine plan (plan only)
+2026-10-27 06:57 orchestrator - W-P plan merged (docs/architecture/tempo-key-engine-plan.md): Signalsmith Stretch (MIT) after the ring, ~6–7 days, 7 open questions; nothing reusable from konsole/audio_tools beyond design
