@@ -10,12 +10,11 @@
   import { stripBandsFromAnalysis } from '../services/waveform-bands.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
-    addHotCueAtPlayhead,
     addMemoryCueAtPlayhead,
-    convertCue,
     deleteCue,
     recolorCue,
     renameCue,
+    setCuePad,
   } from '../stores/cue-actions.ts';
   import { CUE_PALETTE, cueChip, cueMarkers } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
@@ -31,11 +30,6 @@
   let trackIsLoaded = $derived(!!track && player.track?.id === track.id);
 
   let cueChips = $derived(cuesOf(track?.id).map(cueChip));
-
-  function addCue(kind) {
-    if (kind === 'memory') addMemoryCueAtPlayhead();
-    else addHotCueAtPlayhead();
-  }
 
   let pathMenu = $state({ open: false, x: 0, y: 0 });
 
@@ -119,12 +113,12 @@
       showCues={track.analyzed}
       canSetCues={trackIsLoaded}
       canJumpToCues
-      onCueAdd={addCue}
+      onCueAdd={addMemoryCueAtPlayhead}
       onCueJump={(chip) => seekTrackToMs(track, chip.timeMs)}
       onCueRename={(chip, name) => renameCue(track.id, chip.key, name)}
       onCueRecolor={(chip, color) => recolorCue(track.id, chip.key, color)}
       onCueDelete={(chip) => deleteCue(track.id, chip.key)}
-      onCueConvert={(chip) => convertCue(track.id, chip.key)}
+      onCuePad={(chip, slot) => setCuePad(track.id, chip.key, slot)}
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
       bands={stripBands}

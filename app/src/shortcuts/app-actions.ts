@@ -152,7 +152,7 @@ export function buildAppActions(): ShortcutAction[] {
     },
     {
       id: 'cues.memory.add',
-      label: 'Add memory cue at playhead',
+      label: 'Add cue at playhead',
       group: GROUP.cues,
       defaultBinding: 'M',
       when: () => player.track != null,

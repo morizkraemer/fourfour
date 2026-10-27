@@ -13,7 +13,7 @@ import {
   sameCues,
   slotLetter,
   withCueColor,
-  withCueConverted,
+  withCuePad,
   withCueName,
   withHotCue,
   withMemoryCue,
@@ -179,7 +179,9 @@ describe('chip label', () => {
   });
 
   it('labels a memory cue M with its time', () => {
-    expect(cueChip(cue(0, 60_000)).label).toBe('M 1:00');
+    expect(cueChip(cue(0, 60_000)).label).toBe('1:00');
+    expect(cueChip(cue(0, 60_000)).padded).toBe(false);
+    expect(cueChip(cue(2, 60_000)).padded).toBe(true);
   });
 
   it('never cuts the label short', () => {
@@ -202,6 +204,7 @@ describe('markers', () => {
     const markers = cueMarkers([cue(1, 25_000), cue(0, 50_000)], 100_000);
     expect(markers.map((m) => m.position)).toEqual([0.25, 0.5]);
     expect(markers.map((m) => m.label)).toEqual(['A', '']);
+    expect(markers.map((m) => m.padded)).toEqual([true, false]);
     expect(markers.map((m) => m.key)).toEqual(['h1', 'm50000']);
   });
 
@@ -218,27 +221,35 @@ describe('cue point', () => {
   });
 });
 
-describe('converting a cue', () => {
-  it('turns a hot cue into a memory cue at the same time, keeping name and colour', () => {
+describe('assigning a pad', () => {
+  it('gives a cue without a pad the pad and keeps name and colour', () => {
+    const cues = [cue(0, 9000, { name: 'Out', color: '#ff3b30' })];
+    expect(withCuePad(cues, 'm9000', 3)).toEqual([cue(3, 9000, { name: 'Out', color: '#ff3b30' })]);
+  });
+
+  it('moves a padded cue to a free pad', () => {
+    const cues = [cue(1, 1000), cue(2, 2000)];
+    expect(withCuePad(cues, 'h1', 5)!.map((c) => [c.slot, c.timeMs])).toEqual([[2, 2000], [5, 1000]]);
+  });
+
+  it('refuses a taken pad, an out of range pad and an unknown cue', () => {
+    const cues = [cue(1, 1000), cue(0, 2000)];
+    expect(withCuePad(cues, 'm2000', 1)).toBeNull();
+    expect(withCuePad(cues, 'm2000', 9)).toBeNull();
+    expect(withCuePad(cues, 'h7', 2)).toBeNull();
+  });
+
+  it('removing the pad keeps the cue at its position without one, keeping name and colour', () => {
     const cues = [cue(2, 5000, { name: 'Drop', color: '#ff3b30' })];
-    expect(withCueConverted(cues, 'h2')).toEqual([cue(0, 5000, { name: 'Drop', color: '#ff3b30' })]);
+    expect(withCuePad(cues, 'h2', null)).toEqual([cue(0, 5000, { name: 'Drop', color: '#ff3b30' })]);
   });
 
-  it('drops the hot cue when a memory cue already sits there', () => {
-    const cues = [cue(1, 5000), cue(0, 5020)];
-    expect(withCueConverted(cues, 'h1')).toEqual([cue(0, 5020)]);
+  it('removing the pad folds into a cue without a pad already there', () => {
+    expect(withCuePad([cue(1, 5000), cue(0, 5020)], 'h1', null)).toEqual([cue(0, 5020)]);
   });
 
-  it('turns a memory cue into a hot cue on the first free pad', () => {
-    const cues = [cue(1, 1000), cue(3, 2000), cue(0, 9000, { name: 'Out' })];
-    const result = withCueConverted(cues, 'm9000')!;
-    expect(result.map((c) => [c.slot, c.timeMs])).toEqual([[1, 1000], [2, 9000], [3, 2000]]);
-    expect(result[1].name).toBe('Out');
-  });
-
-  it('refuses when all eight pads are taken, or the cue is unknown', () => {
-    const full = Array.from({ length: 8 }, (_, i) => cue(i + 1, i * 1000));
-    expect(withCueConverted([...full, cue(0, 99000)], 'm99000')).toBeNull();
-    expect(withCueConverted(full, 'h9')).toBeNull();
+  it('removing the pad of a cue that has none changes nothing', () => {
+    const cues = [cue(0, 5000)];
+    expect(withCuePad(cues, 'm5000', null)).toBe(cues);
   });
 });

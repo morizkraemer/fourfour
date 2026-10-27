@@ -10,6 +10,7 @@
  *
  * Real 3-band columns (PWV7 or the filter bank) plug in through `bandsFromInterleavedBytes`.
  */
+import { STACK_GAIN, STACK_GAMMA, displayAmp } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import {
   decodeColorWaveform,
   type ColorWaveSample,
@@ -34,6 +35,10 @@ const BALANCE_MAX_GAIN = 2.5;
 const BALANCE_MIN_PEAK = 0.02;
 const ROW_CACHE_LIMIT = 1000;
 const LEGACY_LEVEL = 0.75;
+const STRIP_COLUMNS = 1200;
+const STRIP_HEADROOM_PERCENTILE = 0.95;
+const STRIP_HEADROOM_LEVEL = 0.9;
+const STRIP_GAIN_STEPS = 12;
 
 const PREVIEW_MIX = Array.from({ length: 8 }, (_, level) => {
   const white = level / 7;
@@ -219,18 +224,78 @@ export function overviewBandsFromPayload(color: unknown): BandColumns | null {
   return result;
 }
 
+function meanReduced(bands: BandColumns, columns: number): BandColumns {
+  const n = bands.low.length;
+  if (n <= columns) return bands;
+  const out = emptyBands(columns);
+  for (const name of ['low', 'mid', 'high'] as const) {
+    const src = bands[name];
+    for (let c = 0; c < columns; c++) {
+      const from = Math.floor((c * n) / columns);
+      const to = Math.max(from + 1, Math.floor(((c + 1) * n) / columns));
+      let sum = 0;
+      for (let i = from; i < to; i++) sum += src[i];
+      out[name][c] = sum / (to - from);
+    }
+  }
+  return out;
+}
+
+function stackLevel(bands: BandColumns, i: number, gain: number): number {
+  const layer = (name: 'low' | 'mid' | 'high') =>
+    STACK_GAIN[name] * Math.pow(displayAmp(bands[name][i] * gain), STACK_GAMMA[name]);
+  return layer('low') + layer('mid') + layer('high');
+}
+
+function stackPercentileLevel(bands: BandColumns, gain: number): number {
+  const levels = new Float32Array(bands.low.length);
+  for (let i = 0; i < levels.length; i++) levels[i] = stackLevel(bands, i, gain);
+  levels.sort();
+  return levels[Math.min(levels.length - 1, Math.floor(levels.length * STRIP_HEADROOM_PERCENTILE))];
+}
+
+/**
+ * One gain for the whole track, never above 1: loud tracks are brought down until the 95th percentile of the stacked
+ * height (low + mid + high) sits at STRIP_HEADROOM_LEVEL of the strip, so drops keep their silhouette and the high band
+ * is not a white slab on the top edge. Quiet tracks are left alone (a breakdown stays thin). Band proportions are kept.
+ */
+export function stripGain(bands: BandColumns): number {
+  if (bands.low.length === 0 || stackPercentileLevel(bands, 1) <= STRIP_HEADROOM_LEVEL) return 1;
+  let lo = 0;
+  let hi = 1;
+  for (let step = 0; step < STRIP_GAIN_STEPS; step++) {
+    const mid = (lo + hi) / 2;
+    if (stackPercentileLevel(bands, mid) > STRIP_HEADROOM_LEVEL) hi = mid;
+    else lo = mid;
+  }
+  return lo;
+}
+
+function withGain(bands: BandColumns, gain: number): BandColumns {
+  if (gain === 1) return bands;
+  const out = emptyBands(bands.low.length);
+  for (const name of ['low', 'mid', 'high'] as const) {
+    for (let i = 0; i < out[name].length; i++) out[name][i] = bands[name][i] * gain;
+  }
+  return { ...out, overview: true };
+}
+
 /**
  * The columns the player's overview strip draws for an analysis payload: the PWV6 overview series when the
- * payload has one, else the detail columns (which the renderer scales down to overview level). Never the
- * row preview: that one is cut from whichever series the analysis stored and carries no scale of its own.
+ * payload has one, else the detail columns brought to overview resolution by their mean. Either way the track gets
+ * one headroom gain (`stripGain`), so every track fits the strip without clipping. Never the row preview: that one
+ * is cut from whichever series the analysis stored and carries no scale of its own.
  */
 export function stripBandsFromAnalysis(
   analysis: { waveform_overview?: unknown; waveform_color_detail?: unknown; waveform_color?: unknown } | null | undefined,
 ): BandColumns | null {
   if (!analysis) return null;
-  return (
-    overviewBandsFromPayload(analysis.waveform_overview) ??
+  const overview = overviewBandsFromPayload(analysis.waveform_overview);
+  const source =
+    overview ??
     colorBandsFromPayload(analysis.waveform_color_detail) ??
-    colorBandsFromPayload(analysis.waveform_color)
-  );
+    colorBandsFromPayload(analysis.waveform_color);
+  if (!source) return null;
+  const columns = overview ? source : { ...meanReduced(source, STRIP_COLUMNS), overview: true };
+  return withGain(columns, stripGain(columns));
 }
