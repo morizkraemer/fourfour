@@ -172,6 +172,25 @@ let mockPlaylists: PlaylistInput[] = [
 
 let mockVolumes = ['/Volumes/SanDisk 64GB', '/Volumes/VAULT666'];
 
+function mockCountFromUrl(param: string): number | null {
+  if (typeof location === 'undefined') return null;
+  const raw = new URLSearchParams(location.search).get(param);
+  const n = Number(raw);
+  return raw !== null && Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+const mockPlaylistCount = mockCountFromUrl('playlists');
+if (mockPlaylistCount !== null) {
+  const names = ['Peak Time', 'Warmup', 'Sunrise Closers', 'Deep Cuts', 'Afterhours', 'Road Trip', 'Sunday Slow', 'B2B Prep'];
+  mockPlaylists = Array.from({ length: mockPlaylistCount }, (_, i) => ({
+    id: i + 1,
+    name: names[i] ?? `Playlist ${i + 1}`,
+    track_ids: [i * 2 + 1, i * 2 + 2],
+  }));
+}
+const mockStickCount = mockCountFromUrl('sticks');
+if (mockStickCount !== null) mockVolumes = mockVolumes.slice(0, mockStickCount);
+
 export async function getVersion(): Promise<string> {
   try {
     return await invoke<string>('app_version');

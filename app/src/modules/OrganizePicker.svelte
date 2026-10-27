@@ -156,15 +156,12 @@
     width: 100%;
     padding: var(--ff-space-5);
     overflow-y: auto;
-    container-type: inline-size;
   }
 
   .ff-picker__content {
     display: flex;
     flex-direction: column;
     gap: var(--ff-space-6);
-    max-width: 1180px;
-    margin: 0 auto;
   }
 
   .ff-picker__search {
@@ -202,10 +199,9 @@
   }
 
   .ff-picker__sections {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: var(--ff-space-8);
-    align-items: start;
   }
 
   .ff-picker__section {
@@ -225,23 +221,24 @@
   .ff-picker__cards {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    justify-content: start;
     gap: var(--ff-space-5);
   }
 
   .ff-picker__sticks {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ff-space-4);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    justify-content: start;
+    gap: var(--ff-space-5);
+  }
+
+  .ff-picker__sticks > :global([data-empty-sticks]) {
+    grid-column: 1 / -1;
+    max-width: 400px;
   }
 
   .ff-picker__none {
     font-size: var(--ff-type-caption);
     color: var(--ff-faint);
-  }
-
-  @container (min-width: 820px) {
-    .ff-picker__sections {
-      grid-template-columns: minmax(0, 1fr) 260px;
-    }
   }
 </style>
