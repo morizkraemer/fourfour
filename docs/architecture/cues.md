@@ -110,9 +110,9 @@ Bindings use the key `code`, so any keyboard layout works.
 positions and loops: `PCOB` (DAT) and `PCO2` (EXT), and the OneLibrary `cue` table (`kind` = slot, `inUsec`, `outUsec`).
 Names and colours do not reach the stick (see below). Locked grids export as stored.
 
-## Writer issues for the brother (not changed)
+## Writer issues
 
-Found in `pioneer-usb-writer/src/writer/anlz.rs` and `onelibrary.rs`; nothing here was touched.
+Items 1–3 fixed on branch wu-writer (2026-10-27): names, colours, loop type and PCPT status are written; see cdj-checklist-2026-10.md for the CDJ check. Items 4–6 are open.
 
 1. Cue names and colours are dropped. `PCP2` writes 58 zero bytes after `loop_denominator` where Rekordbox keeps
    colour code, RGB and the comment. The OneLibrary `cue` row is written with `colorTableIndex = 0` and
