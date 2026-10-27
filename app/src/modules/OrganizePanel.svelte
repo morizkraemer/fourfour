@@ -251,28 +251,23 @@
   </div>
 {:else}
   <!-- ── Rail sliver ──────────────────────────────────────────────────────── -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
+  <button
+    type="button"
     class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ' ff-organize--rail-empty'}"
-    role="button"
-    tabindex="0"
-    aria-label={ui.organize.target ? `Open ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize panel'}
+    aria-label={ui.organize.target ? `Open sidebar: ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize sidebar'}
+    aria-expanded="false"
+    title="Open organize sidebar (⇧⇥)"
     onclick={expandOrganize}
-    onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && expandOrganize()}
   >
+    <div class="ff-organize__rail-top" aria-hidden="true">
+      <Icon name="chevron-left" size={18} />
+    </div>
     {#if ui.organize.target}
-      <!-- Filled rail: the same open-chevron as the empty rail, then cover tiles. -->
-      <div class="ff-organize__rail-top" aria-hidden="true">
-        <Icon name="chevron-left" size={18} />
-      </div>
       {#each railCovers as coverUrl}
         <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
       {/each}
-    {:else}
-      <!-- Empty rail: a chevron centered inside the visible rail. -->
-      <Icon name="chevron-left" size={18} />
     {/if}
-  </div>
+  </button>
 {/if}
 
 <ContextMenu
@@ -312,6 +307,21 @@
     transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
 
+  .ff-organize--rail {
+    padding: 0;
+    font: inherit;
+    border-radius: 10px 0 0 10px;
+  }
+
+  .ff-organize--rail:focus-visible {
+    outline: 1px solid var(--ff-accent);
+    outline-offset: -2px;
+  }
+
+  .ff-organize--rail:active {
+    background: var(--ff-select);
+  }
+
   .ff-organize--rail:hover {
     background: var(--ff-elev);
     border-color: var(--ff-border-hi);
@@ -323,6 +333,10 @@
     width: 44px;
     justify-content: center;
   }
+  .ff-organize--rail-empty .ff-organize__rail-top {
+    width: 100%;
+    height: 100%;
+  }
 
   /* Filled rail: a vertical column of rounded square tiles. */
   .ff-organize--rail-filled {
@@ -331,6 +345,7 @@
     gap: 6px;
     padding: 6px;
   }
+  .ff-organize--rail-filled.ff-organize--rail { padding: 6px; }
 
   /* Open-chevron at the top of the filled rail — no tile chrome, just the glyph. */
   .ff-organize__rail-top {
