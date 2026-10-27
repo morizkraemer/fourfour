@@ -4,7 +4,7 @@
  * straight from those reports steps, and interpolating between two of them follows their jitter: the speed changes
  * with every report.
  *
- * The clock runs at the true playback speed (1 ms per ms) on the page's own timer, so any frame can ask for the
+ * The clock runs at the true playback speed (1 ms per ms, or the tempo ratio) on the page's own timer, so any frame can ask for the
  * position and gets one that advances smoothly. Each report only corrects it: a report ahead of the clock means the
  * clock runs late and is corrected quickly, one behind it was probably delivered late and is corrected slowly. A
  * correction is spread over SLEW_TIME_MS, never applied as a jump; a report far from the clock is a seek and jumps.
@@ -23,6 +23,7 @@ export class PlayheadClock {
     this._at = 0;
     this._pendingMs = 0;
     this._lastReportAt = 0;
+    this._rate = 1;
   }
 
   get running() {
@@ -45,13 +46,15 @@ export class PlayheadClock {
     this._pendingMs = 0;
   }
 
-  /** The transport reported `positionMs` at `nowMs` while playing. */
-  report(positionMs, nowMs) {
+  /** The transport reported `positionMs` at `nowMs` while playing, at `rate` track milliseconds per millisecond. */
+  report(positionMs, nowMs, rate = 1) {
     if (!this._running) {
       this.start(positionMs, nowMs);
+      this._rate = rate;
       return;
     }
     this._advance(nowMs);
+    this._rate = rate;
     const error = positionMs - (this._positionMs + this._pendingMs);
     if (Math.abs(error) > SNAP_MS) {
       this._positionMs = positionMs;
@@ -73,7 +76,7 @@ export class PlayheadClock {
     const elapsed = until - this._at;
     if (elapsed > 0) {
       const slewed = this._pendingMs * (1 - Math.exp(-elapsed / SLEW_TIME_MS));
-      this._positionMs += elapsed + slewed;
+      this._positionMs += elapsed * this._rate + slewed;
       this._pendingMs -= slewed;
     }
     this._at = Math.max(this._at, nowMs);

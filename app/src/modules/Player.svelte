@@ -4,9 +4,9 @@
 -->
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
-  import { commitTrackBpm, commitTrackKey } from '../stores/track-edits.svelte.ts';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import ExpandedPlayer from './ExpandedPlayer.svelte';
+  import PlayerTempo from './PlayerTempo.svelte';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { cueMarkers } from '../lib/cues.ts';
   import { ui, setPlayerHeight, commitPlayerHeight, resetPlayerHeight } from '../stores/ui.svelte.ts';
@@ -61,12 +61,6 @@
     currentTime={currentTime()}
     currentTimeMs={currentTimeMs()}
     totalTime={totalTime()}
-    bpm={player.track?.bpm || '—'}
-    key={player.track?.key || '—'}
-    bpmValue={Number(player.track?.bpm)}
-    keyValue={player.track?.key ?? ''}
-    onBpmCommit={player.track ? (next) => commitTrackBpm(player.track.id, next) : undefined}
-    onKeyCommit={player.track ? (next) => commitTrackKey(player.track.id, next) : undefined}
     cues={cueMarkerList}
     bands={player.track?.bands ?? null}
     bandsOverview={player.track?.bandsOverview ?? null}
@@ -78,8 +72,9 @@
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
     onCueUp={player.track ? cuePreviewStop : undefined}
-    onExpand={player.track ? toggleExpanded : undefined}
-  />
+    onExpand={player.track ? toggleExpanded : undefined}>
+    {#snippet controls()}<PlayerTempo />{/snippet}
+  </PlayerCompact>
   {/if}
 </div>
 

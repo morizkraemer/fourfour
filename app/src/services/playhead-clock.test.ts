@@ -188,3 +188,26 @@ describe('PlayheadClock', () => {
     expect(Math.abs(mean(errors))).toBeLessThan(2 * FRAME_MS);
   });
 });
+
+describe('PlayheadClock at a tempo', () => {
+  it('advances by the ratio per millisecond', () => {
+    const clock = new PlayheadClock();
+    clock.report(1000, 0, 1.08);
+    expect(clock.positionAt(500)).toBeCloseTo(1000 + 500 * 1.08, 6);
+  });
+
+  it('takes the new rate from the next report without rewriting the past', () => {
+    const clock = new PlayheadClock();
+    clock.report(0, 0, 1);
+    clock.report(50, 50, 1);
+    const before = clock.positionAt(100);
+    clock.report(before, 100, 1.16);
+    expect(clock.positionAt(200)).toBeCloseTo(before + 100 * 1.16, 6);
+  });
+
+  it('runs at 1x without a rate', () => {
+    const clock = new PlayheadClock();
+    clock.report(0, 0);
+    expect(clock.positionAt(250)).toBeCloseTo(250, 6);
+  });
+});

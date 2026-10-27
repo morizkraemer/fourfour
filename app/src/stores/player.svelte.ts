@@ -23,6 +23,7 @@ import {
 } from '../services/playback.svelte.ts';
 import { library, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
+import { resetTempoForNewTrack, tempo } from './tempo.svelte.ts';
 import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
 import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cues.svelte.ts';
 import { initialCuePointMs } from '../lib/cues.ts';
@@ -86,6 +87,9 @@ export const player = $state({
   expanded: false,
   levelLeft: 0,
   levelRight: 0,
+  get tempo() {
+    return tempo;
+  },
   get cover() {
     if (!this.track) return '';
     return artwork.get(this.track.id, this.track.hasArtwork);
@@ -252,7 +256,8 @@ async function ensureTickListener() {
         }
       }
       player.progress = Math.max(0, Math.min(1, tick.position_ms / dur));
-      if (tick.playing) transportClock.report(tick.position_ms, performance.now());
+      tempo.liveRatio = tick.tempo_ratio ?? 1;
+      if (tick.playing) transportClock.report(tick.position_ms, performance.now(), tempo.liveRatio);
       else transportClock.stop(tick.position_ms);
     }
     player.playing = tick.playing;
@@ -380,6 +385,7 @@ export async function loadPlayerTrack(input: any) {
   cueButtonTrackId = null;
   cueButton = initialCueButton();
   player.error = null;
+  resetTempoForNewTrack();
   const stopped = playbackStop().catch((err) => console.error('playback stop failed:', err));
   player.playing = false;
   player.progress = 0;
@@ -432,6 +438,7 @@ export async function playFromStart() {
 
 export function clearPlayerTrack() {
   loadGeneration++;
+  resetTempoForNewTrack();
   cueButton = initialCueButton();
   cueButtonTrackId = null;
   seekTargetMs = null;

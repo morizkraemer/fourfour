@@ -1,0 +1,12 @@
+[package]
+name = "fourfour-stretch"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Safe wrapper around vendored Signalsmith Stretch (MIT) for real-time pitch and tempo changes"
+
+[features]
+count-allocs = []
+
+[build-dependencies]
+cc = "1"

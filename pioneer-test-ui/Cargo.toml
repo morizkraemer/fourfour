@@ -14,6 +14,7 @@ pioneer_library = { path = "../pioneer-library", package = "pioneer-library" }
 anyhow = "1"
 tokio = { version = "1.52.1", features = ["rt", "process", "time", "macros"] }
 cpal = "0.15"
+fourfour-stretch = { path = "../fourfour-stretch" }
 ringbuf = "0.4"
 symphonia = { version = "0.5", features = ["all"] }
 image = "0.25.10"
@@ -45,3 +46,6 @@ path = "src/bin/waveform_fixtures.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+fourfour-stretch = { path = "../fourfour-stretch", features = ["count-allocs"] }

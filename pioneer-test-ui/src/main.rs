@@ -7,6 +7,7 @@ mod analysis_run;
 mod band_analysis;
 mod dto;
 mod playback;
+mod tempo;
 mod track_fields;
 mod track_infos;
 mod volumes;
@@ -36,7 +37,8 @@ use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
     playback_configure, playback_get_config, playback_pause, playback_play, playback_resume,
     playback_get_output_device, playback_list_output_devices, playback_seek,
-    playback_set_output_device, playback_set_position, playback_stop, PlaybackEngine,
+    playback_set_key_lock, playback_set_key_shift, playback_set_output_device,
+    playback_set_position, playback_set_tempo, playback_stop, PlaybackEngine,
 };
 
 // ---------------------------------------------------------------------------
@@ -1201,6 +1203,9 @@ fn main() {
             playback_list_output_devices,
             playback_get_output_device,
             playback_set_output_device,
+            playback_set_tempo,
+            playback_set_key_shift,
+            playback_set_key_lock,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path
