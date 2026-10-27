@@ -184,7 +184,7 @@ pub fn read_masterdb(db_path: &Path) -> Result<MasterDbImport> {
             cue_map
                 .entry(content_id)
                 .or_default()
-                .push(CuePoint { hot_cue_number, time_ms, loop_time_ms });
+                .push(CuePoint { hot_cue_number, time_ms, loop_time_ms, ..Default::default() });
         }
     }
 

@@ -128,6 +128,7 @@ fn parse_pcob(section: &[u8]) -> Result<Vec<CuePoint>> {
             hot_cue_number,
             time_ms,
             loop_time_ms,
+            ..Default::default()
         });
     }
     Ok(cues)
@@ -545,40 +546,52 @@ fn parse_ext_sections(
 
 /// Parse a PCO2 (extended cue points) section into a list of [`CuePoint`]s.
 ///
-/// Each PCO2 section contains zero or more PCP2 sub-entries (88 bytes each).
+/// PCP2 entries are walked by their own `len_entry` because the comment makes them variable-sized.
+/// The comment is at 0x2C (`len_comment` at 0x28, UTF-16BE, NUL-terminated), followed by the
+/// colour code and RGB.
 fn parse_pco2(section: &[u8]) -> Result<Vec<CuePoint>> {
     if section.len() < 20 {
         bail!("PCO2 section too short ({} bytes)", section.len());
     }
     let entry_count = read_u16_be(section, 16)? as usize;
-    let entries_data = &section[20..];
-    let pcp2_entry_len = 88usize;
-    let max_possible = entries_data.len() / pcp2_entry_len;
-    let count = entry_count.min(max_possible);
+    let mut at = read_u32_be(section, 4)? as usize;
 
-    let mut cues = Vec::with_capacity(count);
-    for i in 0..count {
-        let base = i * pcp2_entry_len;
-        let entry = &entries_data[base..base + pcp2_entry_len];
+    let mut cues = Vec::with_capacity(entry_count);
+    for _ in 0..entry_count {
+        let entry_len = read_u32_be(section, at + 8)? as usize;
+        if entry_len < 0x2C || at + entry_len > section.len() {
+            break;
+        }
+        let entry = &section[at..at + entry_len];
+        at += entry_len;
 
-        // Validate PCP2 tag
         if entry.get(0..4) != Some(b"PCP2") {
             continue;
         }
 
-        let hot_cue_number = read_u32_be(entry, 12)?;
-        let time_ms = read_u32_be(entry, 20)?;
         let loop_time_raw = read_u32_be(entry, 24)?;
-        let loop_time_ms = if loop_time_raw == 0xFFFF_FFFF {
-            None
-        } else {
-            Some(loop_time_raw)
-        };
+        let comment_len = (read_u32_be(entry, 0x28)? as usize).min(entry_len - 0x2C);
+        let comment_end = 0x2C + comment_len;
+        let name: String = char::decode_utf16(
+            entry[0x2C..comment_end]
+                .chunks_exact(2)
+                .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+                .take_while(|&unit| unit != 0),
+        )
+        .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect();
+        let color = entry
+            .get(comment_end)
+            .copied()
+            .filter(|code| (1..=16).contains(code))
+            .map(|code| format!("table:{code}"));
 
         cues.push(CuePoint {
-            hot_cue_number,
-            time_ms,
-            loop_time_ms,
+            hot_cue_number: read_u32_be(entry, 12)?,
+            time_ms: read_u32_be(entry, 20)?,
+            loop_time_ms: (loop_time_raw != 0xFFFF_FFFF).then_some(loop_time_raw),
+            name,
+            color,
         });
     }
     Ok(cues)

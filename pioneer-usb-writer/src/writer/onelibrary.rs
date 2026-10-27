@@ -9,6 +9,7 @@ use rusqlite::{params, Connection};
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::cue_color;
 use crate::models::{AnalysisResult, Playlist, Track};
 
 /// SQLCipher encryption key for exportLibrary.db (from rekordbox binary).
@@ -832,8 +833,8 @@ fn write_cues(conn: &Connection, tracks: &[Track], analyses: &[AnalysisResult]) 
                 cue_id,      // cue_id
                 content_id,  // content_id
                 kind,        // kind
-                0i32,        // colorTableIndex
-                "",          // cueComment
+                cue.color.as_deref().and_then(cue_color::table_index).unwrap_or(0), // colorTableIndex
+                cue.name,    // cueComment
                 is_loop,     // isActiveLoop
                 0i32,        // beatLoopNumerator
                 0i32,        // beatLoopDenominator

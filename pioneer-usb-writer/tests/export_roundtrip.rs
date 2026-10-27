@@ -104,9 +104,9 @@ fn fixture() -> Fixture {
     let t2 = track(source.path(), 2, "two.wav", "Second Wind", "Beta", "5B", 12400);
     let t3 = track(source.path(), 3, "three.wav", "Third Rail", "Alpha", "", 13000);
     let cues = vec![
-        CuePoint { hot_cue_number: 0, time_ms: 500, loop_time_ms: None },
-        CuePoint { hot_cue_number: 1, time_ms: 1000, loop_time_ms: None },
-        CuePoint { hot_cue_number: 2, time_ms: 1500, loop_time_ms: Some(1900) },
+        CuePoint { hot_cue_number: 0, time_ms: 500, loop_time_ms: None, ..Default::default() },
+        CuePoint { hot_cue_number: 1, time_ms: 1000, loop_time_ms: None, ..Default::default() },
+        CuePoint { hot_cue_number: 2, time_ms: 1500, loop_time_ms: Some(1900), ..Default::default() },
     ];
     let analyses = vec![analysis(12800, "8A", cues), analysis(12400, "5B", vec![]), analysis(13000, "", vec![])];
     let playlists = vec![
@@ -414,4 +414,101 @@ fn sync_usb_second_run_skips_unchanged_and_removes_dropped_tracks() {
     assert!(!anlz_dat(f.usb.path(), dropped).exists());
     let state = read_usb_state(f.usb.path()).unwrap().unwrap();
     assert_eq!(state.tracks.len(), 2);
+}
+
+fn named_cues() -> Vec<CuePoint> {
+    vec![
+        CuePoint { hot_cue_number: 0, time_ms: 500, name: "Intro".into(), color: Some("table:6".into()), ..Default::default() },
+        CuePoint { hot_cue_number: 1, time_ms: 1000, name: "Drop é".into(), color: Some("#ff3b30".into()), ..Default::default() },
+        CuePoint { hot_cue_number: 2, time_ms: 1500, loop_time_ms: Some(1900), color: Some("#e6e6e6".into()), ..Default::default() },
+        CuePoint { hot_cue_number: 3, time_ms: 1700, ..Default::default() },
+    ]
+}
+
+fn exported_with_named_cues() -> Fixture {
+    let mut f = fixture();
+    f.analyses[0].cue_points = named_cues();
+    write_usb(f.usb.path(), &f.tracks, &f.analyses, &f.playlists).unwrap();
+    f
+}
+
+fn entries(file: &[u8], tag: &[u8; 4]) -> Vec<usize> {
+    file.windows(4).enumerate().filter(|(_, w)| *w == tag).map(|(at, _)| at).collect()
+}
+
+fn be32(file: &[u8], at: usize) -> u32 {
+    u32::from_be_bytes(file[at..at + 4].try_into().unwrap())
+}
+
+#[test]
+fn anlz_roundtrips_cue_names_colours_and_loops() {
+    let f = exported_with_named_cues();
+    let read = read_anlz(&anlz_dat(f.usb.path(), &f.tracks[0])).unwrap();
+
+    let mut cues: Vec<_> = read
+        .cue_points
+        .iter()
+        .map(|c| (c.hot_cue_number, c.time_ms, c.loop_time_ms, c.name.clone(), c.color.clone()))
+        .collect();
+    cues.sort();
+    assert_eq!(
+        cues,
+        vec![
+            (0, 500, None, "Intro".to_string(), Some("table:6".to_string())),
+            (1, 1000, None, "Drop é".to_string(), Some("table:2".to_string())),
+            (2, 1500, Some(1900), String::new(), Some("table:16".to_string())),
+            (3, 1700, None, String::new(), None),
+        ]
+    );
+}
+
+#[test]
+fn anlz_marks_loops_with_type_2_and_enabled_status() {
+    let f = exported_with_named_cues();
+    let dat = std::fs::read(anlz_dat(f.usb.path(), &f.tracks[0])).unwrap();
+    let pcpt: Vec<(u32, u32, u8)> = entries(&dat, b"PCPT")
+        .into_iter()
+        .map(|at| (be32(&dat, at + 12), be32(&dat, at + 16), dat[at + 28]))
+        .collect();
+    assert_eq!(pcpt, vec![(1, 1, 1), (2, 1, 2), (3, 1, 1), (0, 1, 1)]);
+
+    let ext = std::fs::read(f.usb.path().join(anlz_ext_path_for_track(&f.tracks[0]))).unwrap();
+    let pcp2: Vec<(u32, u8)> = entries(&ext, b"PCP2")
+        .into_iter()
+        .map(|at| (be32(&ext, at + 12), ext[at + 16]))
+        .collect();
+    assert_eq!(pcp2, vec![(1, 1), (2, 2), (3, 1), (0, 1)]);
+}
+
+#[test]
+fn pcp2_without_name_or_colour_keeps_the_old_88_bytes() {
+    let f = exported();
+    let ext = std::fs::read(f.usb.path().join(anlz_ext_path_for_track(&f.tracks[0]))).unwrap();
+    for at in entries(&ext, b"PCP2") {
+        assert_eq!(be32(&ext, at + 8), 88);
+        assert_eq!(&ext[at + 0x28..at + 88], &[0u8; 48][..]);
+    }
+}
+
+#[test]
+fn onelibrary_stores_cue_colours_and_comments() {
+    let f = exported_with_named_cues();
+    let conn = onelibrary(f.usb.path());
+    let mut stmt = conn
+        .prepare("SELECT kind, colorTableIndex, cueComment, isActiveLoop FROM cue WHERE content_id = 1 ORDER BY cue_id")
+        .unwrap();
+    let rows: Vec<(i32, i32, String, i32)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            (0, 6, "Intro".to_string(), 0),
+            (1, 2, "Drop é".to_string(), 0),
+            (2, 16, String::new(), 1),
+            (3, 0, String::new(), 0),
+        ]
+    );
 }

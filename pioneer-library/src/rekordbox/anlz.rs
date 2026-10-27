@@ -90,6 +90,8 @@ pub fn to_cue_points(cues: &[ImportedCue]) -> Vec<CuePoint> {
             hot_cue_number: c.hot_cue_number,
             time_ms: c.time_ms,
             loop_time_ms: c.loop_time_ms,
+            name: c.name.clone(),
+            color: c.color.clone(),
         })
         .collect()
 }
@@ -129,8 +131,8 @@ fn load_one(dat: &Path, source_cues: &[ImportedCue], tempo_x100: u32, key: &str,
                     hot_cue_number: c.hot_cue_number,
                     time_ms: c.time_ms,
                     loop_time_ms: c.loop_time_ms,
-                    color: None,
-                    name: String::new(),
+                    color: c.color.clone(),
+                    name: c.name.clone(),
                 })
                 .collect()
         } else {

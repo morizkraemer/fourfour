@@ -280,8 +280,8 @@ impl LocalLibrary {
                         hot_cue_number: c.hot_cue_number,
                         time_ms: c.time_ms,
                         loop_time_ms: c.loop_time_ms,
-                        color: None,
-                        name: String::new(),
+                        color: c.color.clone(),
+                        name: c.name.clone(),
                     })
                     .collect()
             })
@@ -861,9 +861,9 @@ mod tests {
             key: "1A".to_string(),
             energy: Some(7),
             cue_points: vec![
-                CuePoint { hot_cue_number: 0, time_ms: 1000, loop_time_ms: None },
-                CuePoint { hot_cue_number: 1, time_ms: 60_000, loop_time_ms: None },
-                CuePoint { hot_cue_number: 2, time_ms: 90_000, loop_time_ms: Some(100_000) },
+                CuePoint { hot_cue_number: 0, time_ms: 1000, loop_time_ms: None, ..Default::default() },
+                CuePoint { hot_cue_number: 1, time_ms: 60_000, loop_time_ms: None, ..Default::default() },
+                CuePoint { hot_cue_number: 2, time_ms: 90_000, loop_time_ms: Some(100_000), ..Default::default() },
             ],
             color_waveform: None,
         }
@@ -1274,6 +1274,10 @@ mod tests {
         assert_eq!(stored.len(), 3);
         let stored_loop = stored.iter().find(|c| c.hot_cue_number == 3).unwrap();
         assert_eq!((stored_loop.time_ms, stored_loop.loop_time_ms), (40_000, Some(48_000)));
+        assert_eq!(stored_loop.name, "Drop");
+        assert!(stored_loop.color.as_deref().is_some_and(|c| c.starts_with("table:")));
+        let stored_intro = stored.iter().find(|c| c.hot_cue_number == 1).unwrap();
+        assert_eq!(stored_intro.name, "Intro");
 
         lib.set_cues(id, &[cue(1, 10_000, "Intro", None)]).unwrap();
         assert_eq!(lib.get_cues(id).unwrap().len(), 1);
@@ -1314,7 +1318,7 @@ mod tests {
 
         let mut reanalysis = make_analysis();
         reanalysis.beat_grid.beats[0].time_ms = 9;
-        reanalysis.cue_points = vec![CuePoint { hot_cue_number: 1, time_ms: 5, loop_time_ms: None }];
+        reanalysis.cue_points = vec![CuePoint { hot_cue_number: 1, time_ms: 5, loop_time_ms: None, ..Default::default() }];
         lib.set_analysis(id, &reanalysis).unwrap();
         let kept = lib.get_analysis(id).unwrap().unwrap();
         assert_eq!(kept.beat_grid.beats[0].time_ms, 50);
