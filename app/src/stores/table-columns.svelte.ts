@@ -391,7 +391,7 @@ export function clearSort(kind: LayoutKind) {
   persist();
 }
 
-/** Sort track rows for display (does not mutate library order). */
+/** Sort track rows for display (does not mutate library order). Tracks without a value stay last in both directions. */
 export function sortTracks<T extends Record<string, unknown>>(
   tracks: T[],
   kind: LayoutKind,
@@ -403,6 +403,9 @@ export function sortTracks<T extends Record<string, unknown>>(
     if (key === 'fav') return compareFav(a, b, dir);
     const av = sortValue(a, key);
     const bv = sortValue(b, key);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
     if (av < bv) return -1 * dir;
     if (av > bv) return 1 * dir;
     return 0;
@@ -429,14 +432,36 @@ function compareFav(
   return 0;
 }
 
-function sortValue(track: Record<string, unknown>, key: string): string | number {
-  const v = track[key];
+function isBlank(text: string): boolean {
+  return text === '' || text === '—' || text === 'undefined';
+}
+
+export function camelotRank(key: string): number | null {
+  const match = /^(\d{1,2})([ABab])$/.exec(key.trim());
+  if (!match) return null;
+  return Number(match[1]) * 2 + (match[2].toUpperCase() === 'B' ? 1 : 0);
+}
+
+export function durationSeconds(time: string): number | null {
+  const parts = time.trim().split(':');
+  if (parts.length < 2 || parts.length > 3) return null;
+  const numbers = parts.map(Number);
+  if (numbers.some((n) => !Number.isFinite(n))) return null;
+  return numbers.reduce((total, n) => total * 60 + n, 0);
+}
+
+function sortValue(track: Record<string, unknown>, key: string): string | number | null {
+  const text = String(track[key] ?? '').trim();
+  if (isBlank(text)) return null;
   if (key === 'bpm') {
-    const n = parseFloat(String(v).replace('—', ''));
-    return Number.isFinite(n) ? n : -1;
+    const n = parseFloat(text);
+    return Number.isFinite(n) ? n : null;
   }
-  if (key === 'index') {
-    return parseInt(String(v), 10) || 0;
+  if (key === 'key') return camelotRank(text);
+  if (key === 'time') return durationSeconds(text);
+  if (key === 'index' || key === 'year') {
+    const n = parseInt(text, 10);
+    return Number.isFinite(n) ? n : null;
   }
-  return String(v ?? '').toLowerCase();
+  return text.toLowerCase();
 }
