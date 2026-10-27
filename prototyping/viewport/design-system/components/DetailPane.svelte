@@ -6,6 +6,7 @@
   import GhostField from './GhostField.svelte';
   import LockMark from './LockMark.svelte';
   import CueEditor from './CueEditor.svelte';
+  import ContextMenu from './ContextMenu.svelte';
   import { bpmScrub, keyScrub } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
@@ -43,6 +44,7 @@
     onCueRename = undefined,
     onCueRecolor = undefined,
     onCueDelete = undefined,
+    onCueConvert = undefined,
     multiCount = 0,
     multiMeta = {},
     filePath = '',
@@ -56,6 +58,49 @@
   let editingChip = $derived(cues.find((c) => c.key === editingKey) ?? null);
   let hotCount = $derived(cues.filter((c) => c.slot > 0).length);
   let memoryCount = $derived(cues.length - hotCount);
+  let cueMenu = $state({ open: false, x: 0, y: 0, key: null });
+  let cueMenuChip = $derived(cues.find((c) => c.key === cueMenu.key) ?? null);
+  let hotSlotsFree = $derived(cues.filter((c) => c.slot > 0).length < 8);
+
+  function openCueMenu(event, key) {
+    event.preventDefault();
+    cueMenu = { open: true, x: event.clientX, y: event.clientY, key };
+  }
+
+  let cueMenuItems = $derived.by(() => {
+    const chip = cueMenuChip;
+    if (!chip) return [];
+    const isMemory = chip.slot === 0;
+    return [
+      { label: 'Jump to', disabled: !canJumpToCues, onClick: () => onCueJump?.(chip) },
+      { label: 'Rename', onClick: () => (editingKey = chip.key) },
+      ...(isMemory
+        ? []
+        : [{
+            label: 'Colour',
+            items: cuePalette.map((swatch) => ({
+              label: swatch.name,
+              checked: swatch.color === chip.color,
+              onClick: () => onCueRecolor?.(chip, swatch.color),
+            })),
+          }]),
+      {
+        label: isMemory ? 'Convert to hot cue' : 'Convert to memory cue',
+        disabled: isMemory && !hotSlotsFree,
+        onClick: () => onCueConvert?.(chip),
+      },
+      { isSeparator: true },
+      {
+        label: 'Delete',
+        variant: 'danger',
+        onClick: () => {
+          if (editingKey === chip.key) editingKey = null;
+          onCueDelete?.(chip);
+        },
+      },
+    ];
+  });
+
   let canEditFields = $derived(!!onFieldChange);
 
   let lockText = $derived(
@@ -190,25 +235,26 @@
           type="button"
           class="ff-inspector__marker{marker.label ? '' : ' ff-inspector__marker--memory'}"
           style:left={markerLeft(marker.position)}
-          style:--cue={marker.color}
+          style:--cue={marker.label ? marker.color : 'var(--ff-text-mid)'}
           data-marker-key={marker.key}
           title={marker.label ? `Cue ${marker.label}` : 'Memory cue'}
           aria-label={marker.label ? `Jump to cue ${marker.label}` : 'Jump to memory cue'}
-          onclick={() => onMarkerClick?.(marker)}>{marker.label}</button>
+          onclick={() => onMarkerClick?.(marker)}
+          oncontextmenu={(e) => openCueMenu(e, marker.key)}>{marker.label}</button>
       {/each}
     </div>
 
     {#if showCues}
       <section class="ff-inspector__cues" data-cue-list>
         <div class="ff-inspector__cues-head">
-          <span>Cues <em>{hotCount} hot · {memoryCount} memory</em></span>
+          <span>Cues <em><i class="ff-inspector__cues-key ff-inspector__cues-key--hot"></i>{hotCount} hot · <i class="ff-inspector__cues-key ff-inspector__cues-key--memory"></i>{memoryCount} memory</em></span>
           <span class="ff-inspector__cues-add">
             <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add hot cue at playhead' : ADD_BLOCKED} aria-label="Add hot cue at playhead" onclick={() => onCueAdd?.('hot')}>+ Hot</button>
             <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add memory cue at playhead' : ADD_BLOCKED} aria-label="Add memory cue at playhead" onclick={() => onCueAdd?.('memory')}>+ Memory</button>
           </span>
         </div>
         {#each cues as chip (chip.key)}
-          <div class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}" data-cue-key={chip.key}>
+          <div class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}" data-cue-key={chip.key} oncontextmenu={(e) => openCueMenu(e, chip.key)}>
             <button
               type="button"
               class="ff-inspector__cue-main"
@@ -217,7 +263,7 @@
               disabled={!canJumpToCues}
               onclick={() => onCueJump?.(chip)}
               ondblclick={() => (editingKey = chip.key)}>
-              <span class="ff-inspector__cue-badge" style="background-color:{chip.color}">{chip.letter}</span>
+              <span class="ff-inspector__cue-badge{chip.slot === 0 ? ' ff-inspector__cue-badge--memory' : ''}" style={chip.slot === 0 ? undefined : `background-color:${chip.color}`}>{chip.letter}</span>
               <span class="ff-inspector__cue-name{chip.name ? '' : ' ff-inspector__cue-name--empty'}">{chip.name || (chip.slot === 0 ? 'Memory cue' : 'Unnamed')}</span>
               <span class="ff-inspector__cue-pos">{chip.time}</span>
             </button>
@@ -279,6 +325,7 @@
         }}
       >{shownPath}</button>
     {/if}
+    <ContextMenu open={cueMenu.open} x={cueMenu.x} y={cueMenu.y} items={cueMenuItems} onClose={() => (cueMenu = { ...cueMenu, open: false })} />
   {:else if mode === 'multi'}
     <div class="ff-detail-pane__count-display">{multiCount}</div>
     <div class="ff-detail-pane__count-label">tracks selected</div>

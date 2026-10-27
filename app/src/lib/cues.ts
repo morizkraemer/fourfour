@@ -140,6 +140,19 @@ export function withCueColor(cues: Cue[], key: string, color: string | null): Cu
   return cues.map((c) => (cueKey(c) === key ? { ...c, color } : c));
 }
 
+/** The same cue as the other kind: a hot cue becomes a memory cue at its position (merged into one already there), a memory cue takes the first free pad. Null when no pad is free or the cue is unknown. */
+export function withCueConverted(cues: Cue[], key: string): Cue[] | null {
+  const cue = cues.find((c) => cueKey(c) === key);
+  if (!cue) return null;
+  const rest = withoutCue(cues, key);
+  if (cue.slot === MEMORY_SLOT) {
+    const slot = firstFreeSlot(rest);
+    return slot === null ? null : sortCues([...rest, { ...cue, slot }]);
+  }
+  const near = memoryCues(rest).some((c) => Math.abs(c.timeMs - cue.timeMs) <= MEMORY_MERGE_MS);
+  return near ? rest : sortCues([...rest, { ...cue, slot: MEMORY_SLOT }]);
+}
+
 export interface CueChip {
   key: string;
   slot: number;

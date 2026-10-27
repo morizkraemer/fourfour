@@ -13,6 +13,7 @@ import {
   sameCues,
   slotLetter,
   withCueColor,
+  withCueConverted,
   withCueName,
   withHotCue,
   withMemoryCue,
@@ -214,5 +215,30 @@ describe('cue point', () => {
   it('starts at the first memory cue, else the start', () => {
     expect(initialCuePointMs([cue(1, 5000)])).toBe(0);
     expect(initialCuePointMs([cue(1, 5000), cue(0, 2000), cue(0, 9000)])).toBe(2000);
+  });
+});
+
+describe('converting a cue', () => {
+  it('turns a hot cue into a memory cue at the same time, keeping name and colour', () => {
+    const cues = [cue(2, 5000, { name: 'Drop', color: '#ff3b30' })];
+    expect(withCueConverted(cues, 'h2')).toEqual([cue(0, 5000, { name: 'Drop', color: '#ff3b30' })]);
+  });
+
+  it('drops the hot cue when a memory cue already sits there', () => {
+    const cues = [cue(1, 5000), cue(0, 5020)];
+    expect(withCueConverted(cues, 'h1')).toEqual([cue(0, 5020)]);
+  });
+
+  it('turns a memory cue into a hot cue on the first free pad', () => {
+    const cues = [cue(1, 1000), cue(3, 2000), cue(0, 9000, { name: 'Out' })];
+    const result = withCueConverted(cues, 'm9000')!;
+    expect(result.map((c) => [c.slot, c.timeMs])).toEqual([[1, 1000], [2, 9000], [3, 2000]]);
+    expect(result[1].name).toBe('Out');
+  });
+
+  it('refuses when all eight pads are taken, or the cue is unknown', () => {
+    const full = Array.from({ length: 8 }, (_, i) => cue(i + 1, i * 1000));
+    expect(withCueConverted([...full, cue(0, 99000)], 'm99000')).toBeNull();
+    expect(withCueConverted(full, 'h9')).toBeNull();
   });
 });

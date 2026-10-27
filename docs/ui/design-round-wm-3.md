@@ -44,5 +44,8 @@ Order top to bottom: cover with title and artist, three dark cards (BPM, key, le
 
 - BPM and key are the existing `ScrubValue` (key in its Camelot colour); length is read-only.
 - The waveform is the existing `Waveform` strip (3-band look, analysing animation). Click seeks; a track that is not in the player is loaded first. Hot cues are lettered markers, memory cues thin marks; a marker click jumps there.
+- The strip is fed the same series the player's overview draws (the analysis payload's overview, else its detail columns), not the 128-column row preview: that preview is cut from whichever series the analysis stored and carries no scale, so detail-sourced previews drew as a solid blue block.
+- Right-click on a cue row or marker opens the app menu: Jump to, Rename, Colour (hot only), Convert to memory/hot, Delete. Hot cues show their pad letter in colour; memory cues a hollow neutral mark, in the list, the legend and on the strip.
+- Editing a figure in place keeps the resting font and stays inside its card. The webview's own menu (Reload, Inspect Element) is suppressed in production builds outside text fields.
 - Width is 340 px (was 278, min now 300): three cards with BPM at two decimals do not fit in 278. Still hidden while the right sidebar is open.
 - Title, artist, album and genre show as plain text: `DetailPane` takes `onFieldChange` and turns the rows into `GhostField`s, but no Tauri command writes tags yet (`Library::update_track` exists in `pioneer-library` without a command). Label, year, comment, rating and colour have no data in the app yet, so no rows.

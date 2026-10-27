@@ -12,6 +12,7 @@
   import {
     addHotCueAtPlayhead,
     addMemoryCueAtPlayhead,
+    convertCue,
     deleteCue,
     recolorCue,
     renameCue,
@@ -123,6 +124,7 @@
       onCueRename={(chip, name) => renameCue(track.id, chip.key, name)}
       onCueRecolor={(chip, color) => recolorCue(track.id, chip.key, color)}
       onCueDelete={(chip) => deleteCue(track.id, chip.key)}
+      onCueConvert={(chip) => convertCue(track.id, chip.key)}
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
       bands={stripBands}

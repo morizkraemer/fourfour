@@ -10,6 +10,12 @@
   } = $props();
 
   let draft = $state('');
+  let nameInput = $state(null);
+
+  $effect(() => {
+    nameInput?.focus();
+    nameInput?.select();
+  });
   let editingKey = null;
 
   $effect(() => {
@@ -37,18 +43,20 @@
 
 <div class="ff-cue-editor" role="group" aria-label="Edit cue {chip.label}">
   <div class="ff-cue-editor__row">
-    <span class="ff-cue-editor__badge" style="background-color:{chip.color}">{chip.letter}</span>
+    <span class="ff-cue-editor__badge{chip.slot === 0 ? ' ff-cue-editor__badge--memory' : ''}" style="background-color:{chip.color}">{chip.letter}</span>
     <input
       class="ff-cue-editor__name"
       type="text"
       maxlength="32"
       placeholder="Name"
       aria-label="Cue name"
+      bind:this={nameInput}
       bind:value={draft}
       onkeydown={onKey}
       onblur={commitName} />
     <span class="ff-cue-editor__time">{chip.time}</span>
   </div>
+  {#if chip.slot !== 0}
   <div class="ff-cue-editor__palette" role="radiogroup" aria-label="Cue colour">
     {#each palette as swatch}
       <button
@@ -62,6 +70,7 @@
         onclick={() => onRecolor?.(swatch.color)}></button>
     {/each}
   </div>
+  {/if}
   <div class="ff-cue-editor__actions">
     <button type="button" class="ff-cue-editor__btn ff-cue-editor__btn--danger" onclick={() => onDelete?.()}>Delete</button>
     <button type="button" class="ff-cue-editor__btn" onclick={() => onClose?.()}>Done</button>
@@ -97,6 +106,12 @@
     font-size: 11px;
     font-weight: 700;
     color: #0a0a0a;
+  }
+  .ff-cue-editor__badge--memory {
+    background: none !important;
+    border: 1px solid var(--ff-border-hi);
+    color: var(--ff-text-mid);
+    box-sizing: border-box;
   }
   .ff-cue-editor__name {
     flex: 1 1 0;

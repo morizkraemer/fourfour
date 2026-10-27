@@ -51,6 +51,7 @@
     onCueRename={noop}
     onCueRecolor={noop}
     onCueDelete={noop}
+    onCueConvert={noop}
     filePath={FILE_PATH}
   />
 </div>
