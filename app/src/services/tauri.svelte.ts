@@ -412,6 +412,74 @@ export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
   }
 }
 
+const MOCK_SETTINGS_KEY = 'fourfour.mock.settings';
+
+function mockSettings(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_SETTINGS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeMockSetting(key: string, value: unknown) {
+  try {
+    localStorage.setItem(MOCK_SETTINGS_KEY, JSON.stringify({ ...mockSettings(), [key]: value }));
+  } catch {
+    mockSettingFallback[key] = value;
+  }
+}
+
+const mockSettingFallback: Record<string, unknown> = {};
+
+function readMockSetting<T>(key: string, fallback: T): T {
+  const value = mockSettings()[key] ?? mockSettingFallback[key];
+  return (value ?? fallback) as T;
+}
+
+/** Whether never-analysed tracks are queued at launch (default on). */
+export async function getAutoAnalyzeNew(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('get_auto_analyze_new');
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return readMockSetting('auto_analyze_new_tracks', true);
+  }
+}
+
+export async function setAutoAnalyzeNew(enabled: boolean): Promise<void> {
+  try {
+    await invoke('set_auto_analyze_new', { enabled });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    writeMockSetting('auto_analyze_new_tracks', enabled);
+  }
+}
+
+/** Stored analysis backend: 'rust', 'python', or null for automatic. */
+export async function getAnalysisBackend(): Promise<string | null> {
+  try {
+    return await invoke<string | null>('get_analysis_backend');
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return readMockSetting<string | null>('analysis_backend', null);
+  }
+}
+
+export async function setAnalysisBackend(backend: string | null): Promise<void> {
+  try {
+    await invoke('set_analysis_backend', { backend });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    writeMockSetting('analysis_backend', backend);
+  }
+}
+
+/** Stop the active analysis run: queued tracks are dropped, in-flight ones aborted. */
+export async function cancelAnalysis(): Promise<void> {
+  await invokeOrMock('cancel_analysis', {});
+}
+
 /** Queues stages left missing by an earlier session (and new tracks, per setting); returns how many. */
 export async function resumeAnalysis(): Promise<number> {
   try {

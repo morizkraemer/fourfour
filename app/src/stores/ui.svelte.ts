@@ -52,7 +52,7 @@ export const ui = $state({
   /** Preferences modal opened from the footer settings button. */
   settingsOpen: false,
   /** Section key Preferences opens on. */
-  settingsTab: 'general',
+  settingsTab: 'library',
   /** Command palette overlay (⌘K). */
   paletteOpen: false,
   /** Set by the palette: the track table scrolls this track into view. */
@@ -276,7 +276,7 @@ export function toggleDetailPane() {
   ui.detailPaneOpen = !ui.detailPaneOpen;
 }
 
-export function openSettings(tab: string = 'general') {
+export function openSettings(tab: string = 'library') {
   ui.settingsTab = tab;
   ui.settingsOpen = true;
 }
