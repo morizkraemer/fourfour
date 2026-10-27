@@ -23,6 +23,8 @@
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import CommandPalette from './modules/CommandPalette.svelte';
   import StickSyncDialog from './modules/StickSyncDialog.svelte';
+  import { unlistenWhenReady } from './lib/lateUnlisten.ts';
+  import { isEditableTarget } from './lib/editableTarget.ts';
 
   import {
     ui,
@@ -62,14 +64,6 @@
       : 'Files and folders will be added to your library and analyzed'
   );
 
-  function isEditableTarget(target) {
-    if (!(target instanceof Element)) return false;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return true;
-    if (target.closest('[contenteditable="true"]')) return true;
-    if (target.closest('.ff-settings-screen')) return true;
-    return !!target.closest('.ff-dialog-wrapper');
-  }
-
   function onGlobalKeyDown(e) {
     if (e.defaultPrevented) return;
     shortcuts.dispatch(e, { typing: isEditableTarget(e.target) });
@@ -84,10 +78,11 @@
     window.addEventListener('keydown', onGlobalKeyDown);
     const teardownWindowChrome = installMacWindowChrome();
 
+    let stopDragDrop = () => {};
     if (getIsTauri()) {
       try {
         const appWindow = getCurrentWebviewWindow();
-        appWindow.onDragDropEvent((event) => {
+        stopDragDrop = unlistenWhenReady(appWindow.onDragDropEvent((event) => {
           const p = event.payload;
           if (p.type === 'hover' || p.type === 'over') {
             fileDropVisible = true;
@@ -102,7 +97,7 @@
           } else if (p.type === 'cancel' || p.type === 'leave') {
             fileDropVisible = false;
           }
-        });
+        }), (err) => console.warn('File drag-drop unavailable:', err));
       } catch (err) {
         console.warn('File drag-drop unavailable:', err);
       }
@@ -110,6 +105,7 @@
 
     return () => {
       window.removeEventListener('keydown', onGlobalKeyDown);
+      stopDragDrop();
       teardownWindowChrome();
     };
   });

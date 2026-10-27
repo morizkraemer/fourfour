@@ -371,6 +371,7 @@ fn write_usb(
     sync_playlists_to_library(&lib, &playlists)?;
 
     let out = Path::new(&output_dir);
+    volumes::require_removable_volume(out)?;
     let report = lib.sync_usb(out).map_err(|e| e.to_string())?;
 
     debug_ok(&app, &format!(
@@ -409,6 +410,9 @@ async fn sync_usb_many(
 ) -> Result<Vec<pioneer_library::StickReport>, String> {
     let shared: SharedLibrary = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        for target in &targets {
+            volumes::require_removable_volume(&target.volume)?;
+        }
         let prepared = {
             let lib = shared.lock().map_err(|e| e.to_string())?;
             lib.prepare_multi_sync(&targets).map_err(|e| format!("{e:#}"))?
@@ -552,7 +556,7 @@ fn wipe_usb(path: String) -> Result<(), String> {
     if !usb.is_dir() {
         return Err("Not a valid directory".into());
     }
-    volumes::refuse_system_volume(usb)?;
+    volumes::require_removable_volume(usb)?;
 
     let pioneer_dir = usb.join("PIONEER");
     let contents_dir = usb.join("Contents");

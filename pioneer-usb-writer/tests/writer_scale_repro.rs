@@ -82,6 +82,14 @@ fn string_at(bytes: &[u8], at: usize) -> String {
     if marker == 0x03 {
         return String::new();
     }
+    if marker == 0x90 {
+        let total = u16_at(bytes, at + 1) as usize;
+        let units: Vec<u16> = bytes[at + 4..at + total]
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        return String::from_utf16(&units).unwrap();
+    }
     if marker == 0x40 {
         let total = u16_at(bytes, at + 1) as usize;
         return String::from_utf8(bytes[at + 4..at + total].to_vec()).unwrap();
@@ -147,30 +155,43 @@ fn table_rows(pdb: &[u8], table_type: u32) -> Vec<Vec<u8>> {
     rows
 }
 
+fn assert_prefix_of(full: &str, stored: &str) {
+    assert!(full.starts_with(stored), "stored string is not a prefix of the original");
+    if full.len() < 500 {
+        assert_eq!(full, stored);
+    }
+}
+
 fn assert_roundtrip(count: u32, text_len: usize) {
+    let source = TempDir::new().unwrap();
+    let tracks = synthetic_tracks(source.path(), count, text_len);
+    assert_tracks_roundtrip(&tracks);
+}
+
+fn assert_tracks_roundtrip(tracks: &[Track]) {
+    let count = tracks.len() as u32;
     let playlists = vec![
         Playlist { id: 1, name: "All".into(), track_ids: (1..=count).collect() },
         Playlist { id: 2, name: "Evens".into(), track_ids: (1..=count).filter(|id| id % 2 == 0).collect() },
     ];
-    let source = TempDir::new().unwrap();
     let usb = TempDir::new().unwrap();
-    let tracks = synthetic_tracks(source.path(), count, text_len);
     let analyses = vec![analysis(); tracks.len()];
-    write_usb(usb.path(), &tracks, &analyses, &playlists).unwrap();
+    write_usb(usb.path(), tracks, &analyses, &playlists).unwrap();
     let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
 
     let track_rows = table_rows(&pdb, 0x00);
     assert_eq!(track_rows.len(), count as usize);
-    for (row, track) in track_rows.iter().zip(&tracks) {
+    for (row, track) in track_rows.iter().zip(tracks) {
         assert_eq!(u32_at(row, 0x48), track.id);
-        assert_eq!(string_at(row, u16_at(row, 0x5E + 17 * 2) as usize), track.title);
+        assert_prefix_of(&track.title, &string_at(row, u16_at(row, 0x5E + 17 * 2) as usize));
+        assert_prefix_of(&track.comment, &string_at(row, u16_at(row, 0x5E + 16 * 2) as usize));
         assert_eq!(string_at(row, u16_at(row, 0x5E + 20 * 2) as usize), track.usb_path);
     }
 
     let artist_rows = table_rows(&pdb, 0x02);
     assert_eq!(artist_rows.len(), count as usize);
-    for (row, track) in artist_rows.iter().zip(&tracks) {
-        assert_eq!(string_at(row, 0x0A), track.artist);
+    for (row, track) in artist_rows.iter().zip(tracks) {
+        assert_prefix_of(&track.artist, &string_at(row, 0x0A));
     }
     assert_eq!(table_rows(&pdb, 0x03).len(), count as usize);
 
@@ -217,7 +238,32 @@ fn pdb_roundtrips_300_tracks_with_long_strings() {
 }
 
 #[test]
-#[ignore = "known bug: a track row larger than a page overflows into the next page; reported, not fixed (format lane)"]
 fn pdb_track_row_larger_than_a_page_stays_inside_its_page() {
     assert_roundtrip(3, 4100);
+}
+
+#[test]
+fn pdb_non_ascii_comment_larger_than_a_page_is_cut_on_a_char_boundary() {
+    let source = TempDir::new().unwrap();
+    let mut tracks = synthetic_tracks(source.path(), 3, 10);
+    tracks[1].comment = "é🎵".repeat(1500);
+    assert_tracks_roundtrip(&tracks);
+}
+
+#[test]
+fn pdb_comment_is_cut_before_title() {
+    let source = TempDir::new().unwrap();
+    let mut tracks = synthetic_tracks(source.path(), 2, 1000);
+    tracks[0].comment = "c".repeat(5000);
+    assert_tracks_roundtrip(&tracks);
+}
+
+#[test]
+fn pdb_track_whose_path_cannot_fit_fails_loudly() {
+    let source = TempDir::new().unwrap();
+    let mut tracks = synthetic_tracks(source.path(), 2, 10);
+    tracks[1].usb_path = format!("/Contents/{}.wav", "p".repeat(4100));
+    let out = TempDir::new().unwrap();
+    let err = pioneer_usb_writer::writer::pdb::write_pdb(&out.path().join("export.pdb"), &tracks, &[]).unwrap_err();
+    assert!(format!("{err:#}").contains("/Contents/ppp"), "{err:#}");
 }

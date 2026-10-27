@@ -187,6 +187,36 @@ fn removals_only_touch_files_fourfour_wrote() {
 }
 
 #[test]
+fn a_foreign_file_at_a_selected_path_is_never_adopted() {
+    let fx = fixture(4);
+    let scratch = fake_stick(&fx, "SCRATCH");
+    sync(&fx, target(&scratch, &[], &[fx.ids[0]]));
+    let contested_path = state(&scratch).tracks[0].usb_path.clone();
+
+    let usb = fake_stick(&fx, "SHARED");
+    let (tracks, analyses) = fx.library.get_analyzed_tracks().unwrap();
+    let (mut foreign_track, foreign_analysis) = tracks
+        .iter()
+        .zip(&analyses)
+        .find(|(t, _)| t.id as i64 == fx.ids[0])
+        .map(|(t, a)| (t.clone(), a.clone()))
+        .unwrap();
+    foreign_track.id = 1;
+    foreign_track.usb_path = contested_path.clone();
+    writer::filesystem::sync_usb(&usb, &[foreign_track], &[foreign_analysis], &[]).unwrap();
+
+    sync(&fx, target(&usb, &[], &[fx.ids[0], fx.ids[1]]));
+    let manifest = sticks::read_manifest(&usb).unwrap().unwrap();
+    assert!(!manifest.owns(&contested_path), "a file fourfour did not write is not owned");
+    assert_eq!(manifest.files.len(), 1);
+
+    let dropping = plan(&fx, target(&usb, &[], &[fx.ids[1]]), PLENTY);
+    assert!(dropping.remove.is_empty());
+    sync(&fx, target(&usb, &[], &[fx.ids[1]]));
+    assert!(usb.join(contested_path.trim_start_matches('/')).is_file());
+}
+
+#[test]
 fn resync_after_removing_a_track_drops_only_that_track() {
     let fx = fixture(6);
     let usb = fake_stick(&fx, "STICK");

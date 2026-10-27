@@ -1029,6 +1029,7 @@ export async function refreshUsbState() {
   } catch (err) {
     console.error('refreshUsbState failed:', err);
     if (library.activeVolume !== volume) return;
+    library.statusMessage = 'Failed to read USB';
     library.usbTracks = [];
     library.usbPlaylists = [];
   }
