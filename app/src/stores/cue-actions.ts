@@ -3,7 +3,7 @@
  * Setting needs the playhead, so it only works on the loaded track; the other edits work on any track.
  */
 
-import { player, currentPositionMs, play, seekToMs } from './player.svelte.ts';
+import { player, currentPositionMs, seekToMs, seekToMsAndPlay } from './player.svelte.ts';
 import { cuesOf, editCues } from './cues.svelte.ts';
 import {
   hotCueIn,
@@ -44,8 +44,7 @@ export async function triggerHotCue(slot: number): Promise<void> {
     addHotCueAtPlayhead(slot);
     return;
   }
-  await seekToMs(cue.timeMs);
-  if (!player.playing) await play();
+  await seekToMsAndPlay(cue.timeMs);
 }
 
 export function jumpToCue(cue: Pick<Cue, 'timeMs'>): Promise<void> {

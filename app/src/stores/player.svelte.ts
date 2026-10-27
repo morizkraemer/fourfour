@@ -607,6 +607,17 @@ export function beatGridSetCurrent() {
   if (delta !== null) beatGridShift(delta);
 }
 
+/** Jump to `ms` and play: a seek while playing, one play command from `ms` while paused. */
+export async function seekToMsAndPlay(ms: number): Promise<void> {
+  const t = player.track;
+  if (!t || !t.durationMs) return;
+  if (player.playing) {
+    await seekToMs(ms);
+    return;
+  }
+  await runCueCommand({ kind: 'play-from', ms });
+}
+
 export function seekToMs(ms: number): Promise<void> {
   const t = player.track;
   if (!t || !t.durationMs) return Promise.resolve();
