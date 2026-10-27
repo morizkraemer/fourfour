@@ -6,6 +6,8 @@
   } from '../stores/selection.svelte.ts';
   import { ensureTrackPeaksLoaded, isTrackAnalyzing, revealFile } from '../stores/library.svelte.ts';
   import { player } from '../stores/player.svelte.ts';
+  import { getAnalysisData } from '../services/tauri.svelte.ts';
+  import { stripBandsFromAnalysis } from '../services/waveform-bands.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
     addHotCueAtPlayhead,
@@ -44,6 +46,26 @@
     const current = track;
     if (!current) return;
     void ensureTrackPeaksLoaded(current);
+  });
+
+  let stripBands = $state(null);
+
+  $effect(() => {
+    const current = track;
+    void current?.bandsPreview;
+    void current?.analysisPending;
+    stripBands = null;
+    if (!current || !current.analyzed) return;
+    const id = current.id;
+    let stale = false;
+    getAnalysisData(id)
+      .then((analysis) => {
+        if (!stale) stripBands = stripBandsFromAnalysis(analysis);
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
   });
 
   let tempoEditable = $derived(!!track && track.analyzed === true && track.analysisPending !== true && !!track.bpmExact);
@@ -103,7 +125,7 @@
       onCueDelete={(chip) => deleteCue(track.id, chip.key)}
       filePath={track.filePath ?? ''}
       cover={track.cover ?? ''}
-      bands={track.bands}
+      bands={stripBands}
       analyzing={isTrackAnalyzing(track.id)}
       onWaveformSeek={(progress) => seekTrackToProgress(track, progress)}
       onRevealPath={() => track.filePath && revealFile(track.filePath)}
