@@ -29,8 +29,10 @@ impl UserEdits {
     pub fn write(&self, track_anlz_dir: &Path) -> Result<()> {
         std::fs::create_dir_all(track_anlz_dir)
             .with_context(|| format!("Failed to create {}", track_anlz_dir.display()))?;
-        std::fs::write(track_anlz_dir.join(EDITS_FILE), serde_json::to_vec_pretty(self)?)
-            .context("Failed to write edits.json")
+        let path = track_anlz_dir.join(EDITS_FILE);
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?).context("Failed to write edits.json")?;
+        std::fs::rename(&tmp, &path).context("Failed to write edits.json")
     }
 }
 
@@ -59,4 +61,21 @@ pub fn normalize_cues(cues: &[ImportedCue]) -> Result<Vec<ImportedCue>> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_replaces_the_file_whole_and_leaves_no_temp_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(EDITS_FILE), b"{\"grid_locked\":tru").unwrap();
+        let edits = UserEdits { cues_locked: true, key_locked: true, ..Default::default() };
+        edits.write(dir.path()).unwrap();
+        let back = UserEdits::read(dir.path()).unwrap();
+        assert!(back.cues_locked && back.key_locked && !back.grid_locked);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from(EDITS_FILE)]);
+    }
 }
