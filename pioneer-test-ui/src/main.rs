@@ -424,21 +424,11 @@ fn sync_playlists_to_library(
     lib: &LocalLibrary,
     playlists: &[PlaylistInput],
 ) -> Result<(), String> {
-    // Delete all existing playlists and recreate from frontend state.
-    let existing = lib.get_all_playlists().map_err(|e| e.to_string())?;
-    for pl in &existing {
-        lib.delete_playlist(pl.id as i64)
-            .map_err(|e| e.to_string())?;
-    }
-    for pl in playlists {
-        let id = lib
-            .create_playlist(&pl.name)
-            .map_err(|e| e.to_string())?;
-        let track_ids: Vec<i64> = pl.track_ids.iter().map(|&tid| tid as i64).collect();
-        lib.set_playlist_tracks(id, &track_ids)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let playlists: Vec<models::Playlist> = playlists
+        .iter()
+        .map(|pl| models::Playlist { id: pl.id, name: pl.name.clone(), track_ids: pl.track_ids.clone() })
+        .collect();
+    lib.replace_playlists(&playlists).map_err(|e| e.to_string())
 }
 
 /// Remove tracks by ID from the library.

@@ -128,7 +128,7 @@ export function createShortcutRegistry(actions: ShortcutAction[], storage: Stora
       if (env.typing && !(action.inInput ?? firesWhileTyping(binding))) continue;
       if (action.when && !action.when()) continue;
       e.preventDefault();
-      action.run();
+      if (!e.repeat) action.run();
       return true;
     }
     return false;

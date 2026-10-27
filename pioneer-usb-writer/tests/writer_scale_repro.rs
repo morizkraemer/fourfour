@@ -215,3 +215,9 @@ fn pdb_roundtrips_5000_tracks() {
 fn pdb_roundtrips_300_tracks_with_long_strings() {
     assert_roundtrip(300, 200);
 }
+
+#[test]
+#[ignore = "known bug: a track row larger than a page overflows into the next page; reported, not fixed (format lane)"]
+fn pdb_track_row_larger_than_a_page_stays_inside_its_page() {
+    assert_roundtrip(3, 4100);
+}

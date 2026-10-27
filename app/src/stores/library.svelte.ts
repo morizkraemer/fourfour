@@ -1003,8 +1003,10 @@ export async function refreshUsbState() {
     library.usbPlaylists = [];
     return;
   }
+  const volume = library.activeVolume;
   try {
-    const res = await tauriReadUsbState(library.activeVolume);
+    const res = await tauriReadUsbState(volume);
+    if (library.activeVolume !== volume) return;
     if (res) {
       library.usbTracks = res.tracks.map((t, idx) => ({
         id: t.id,
@@ -1026,6 +1028,7 @@ export async function refreshUsbState() {
     }
   } catch (err) {
     console.error('refreshUsbState failed:', err);
+    if (library.activeVolume !== volume) return;
     library.usbTracks = [];
     library.usbPlaylists = [];
   }
