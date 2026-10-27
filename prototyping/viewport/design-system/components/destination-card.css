@@ -77,10 +77,13 @@
   color: var(--ff-faint);
 }
 
-.ff-dcard--new {
+.ff-dcard--new,
+.ff-dcard--empty {
   align-items: center;
   justify-content: center;
-  min-height: 100px;
+  gap: var(--ff-space-3);
+  min-height: 112px;
+  padding: var(--ff-space-5);
   border-style: dashed;
   border-color: var(--ff-border-hi);
   background: none;
@@ -88,15 +91,6 @@
 }
 
 .ff-dcard--empty {
-  align-items: center;
-  justify-content: center;
-  gap: var(--ff-space-3);
-  min-height: 100px;
-  padding: var(--ff-space-5);
-  border-style: dashed;
-  border-color: var(--ff-border-hi);
-  background: none;
-  color: var(--ff-text-mid);
   text-align: center;
   cursor: default;
 }
