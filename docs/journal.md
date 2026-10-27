@@ -171,3 +171,4 @@
 2026-10-27 17:34 orchestrator Q43 landed-on-branch: q43-review 33b2906 → q42-overnight 8d84da9 (8 fixes incl. stick playlists cascade-deleted on save); full checks green (490 tests)
 2026-10-27 17:34 orchestrator Q45 done: unsigned dmg 32 MB on the Mac, verify ok, adhoc, arm64
 2026-10-27 17:34 orchestrator Q43b followup: review's unfixed bugs inside Q43 scope (seat, sonnet)
+2026-10-27 17:47 orchestrator - disk hit 100% (worker cargo caches ~150 GB); pruned finished workers' caches → 49%; q46/q43b notified. Lesson: prune each worker's cache right after its merge
