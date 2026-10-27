@@ -40,6 +40,10 @@ const MAX_PITCH_FACTOR: f64 = 3.2;
 const MAX_MID_FRAMES: usize = (CHUNK_FRAMES as f64 * MAX_PITCH_FACTOR) as usize + 2 * LOOKAHEAD_FRAMES;
 const MAX_PRIME_OUTPUT_FRAMES: usize = 8192;
 const LONG_FADE_FRAMES: usize = 1024;
+const LIMITER_LOOKAHEAD_SECONDS: f64 = 0.002;
+const LIMITER_RELEASE_SECONDS: f64 = 0.04;
+const LIMITER_CEILING: f32 = 1.0;
+const SOFT_KNEE_START: f32 = 0.92;
 const RATE_SMOOTHING_SECONDS: f64 = 0.03;
 const SHIFT_SMOOTHING_SECONDS: f64 = 0.05;
 const RATE_SNAP: f64 = 1e-6;
@@ -260,6 +264,92 @@ impl Default for Varispeed {
     }
 }
 
+/// Brick-wall peak limiter with lookahead. The stretcher redistributes phases, so a master that
+/// peaks at full scale comes out up to 5 dB over; without this the device clips it. It only acts
+/// on those overshoots and passes everything under the ceiling unchanged.
+struct Limiter {
+    window: usize,
+    delay: Vec<f32>,
+    needed: Vec<f32>,
+    floor: Vec<f32>,
+    position: usize,
+    average_sum: f64,
+    gain: f32,
+    release: f32,
+    frames_seen: usize,
+}
+
+impl Limiter {
+    fn new(sample_rate: f64) -> Self {
+        let window = ((sample_rate * LIMITER_LOOKAHEAD_SECONDS) as usize).max(2);
+        Self {
+            window,
+            delay: vec![0.0; window * 2],
+            needed: vec![1.0; window],
+            floor: vec![1.0; window],
+            position: 0,
+            average_sum: window as f64,
+            gain: 1.0,
+            release: (1.0 / (sample_rate * LIMITER_RELEASE_SECONDS)) as f32,
+            frames_seen: 0,
+        }
+    }
+
+    /// Frames the signal is late by.
+    fn delay_frames(&self) -> usize {
+        self.window - 1
+    }
+
+    fn reset(&mut self) {
+        self.delay.fill(0.0);
+        self.needed.fill(1.0);
+        self.floor.fill(1.0);
+        self.position = 0;
+        self.average_sum = self.window as f64;
+        self.gain = 1.0;
+        self.frames_seen = 0;
+    }
+
+    fn is_filled(&self) -> bool {
+        self.frames_seen >= self.window
+    }
+
+    fn process(&mut self, stereo: &mut [f32]) {
+        let window = self.window;
+        for frame in stereo.chunks_exact_mut(2) {
+            let peak = frame[0].abs().max(frame[1].abs());
+            let needed = if peak > LIMITER_CEILING { LIMITER_CEILING / peak } else { 1.0 };
+            let at = self.position;
+            self.needed[at] = needed;
+            let lowest = self.needed.iter().copied().fold(1.0f32, f32::min);
+            self.average_sum += (lowest - self.floor[at]) as f64;
+            self.floor[at] = lowest;
+            let target = (self.average_sum / window as f64) as f32;
+            let slow = self.gain + (1.0 - self.gain) * self.release;
+            self.gain = target.min(slow);
+
+            let slot = (at + 1) % window;
+            let delayed = [self.delay[slot * 2], self.delay[slot * 2 + 1]];
+            self.delay[at * 2] = frame[0];
+            self.delay[at * 2 + 1] = frame[1];
+            frame[0] = delayed[0] * self.gain;
+            frame[1] = delayed[1] * self.gain;
+            self.position = slot;
+        }
+        self.frames_seen += stereo.len() / 2;
+    }
+}
+
+/// Rounds the last few percent below full scale so resampling overshoot cannot clip the device.
+fn soft_knee(x: f32) -> f32 {
+    let magnitude = x.abs();
+    if magnitude <= SOFT_KNEE_START {
+        return x;
+    }
+    let room = 1.0 - SOFT_KNEE_START;
+    x.signum() * (SOFT_KNEE_START + room * ((magnitude - SOFT_KNEE_START) / room).tanh())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Path {
     Identity,
@@ -298,6 +388,7 @@ pub struct TempoEngine {
     mid_fifo: usize,
     mid_carry: f64,
     shifted: Vec<f32>,
+    limiter: Limiter,
     varispeed_out: Vec<f32>,
     identity_dev: Vec<f32>,
     varispeed_dev: Vec<f32>,
@@ -336,6 +427,7 @@ impl TempoEngine {
             mid_fifo: 0,
             mid_carry: 0.0,
             shifted: vec![0.0; CHUNK_FRAMES * 2],
+            limiter: Limiter::new(sample_rate.max(1) as f64),
             varispeed_out: vec![0.0; CHUNK_FRAMES * 2],
             identity_dev: vec![0.0; dev],
             varispeed_dev: vec![0.0; dev],
@@ -403,6 +495,7 @@ impl TempoEngine {
         self.mid.fill(0.0);
         self.mid_fifo = 0;
         self.mid_carry = 0.0;
+        self.limiter.reset();
     }
 
     /// `ring` is the readable region of the sample ring as two slices, interleaved with `ch`
@@ -493,6 +586,9 @@ impl TempoEngine {
                 self.rate,
                 &mut self.varispeed_out[..n * 2],
             );
+            for sample in &mut self.varispeed_out[..n * 2] {
+                *sample = soft_knee(*sample);
+            }
             expand_stereo(&self.varispeed_out[..n * 2], ch, &mut self.varispeed_dev[..n * ch]);
         }
 
@@ -500,7 +596,7 @@ impl TempoEngine {
         match previous {
             Some(old_path) => {
                 let old = self.path_output(old_path, n * ch);
-                let uncorrelated = old_path == Path::Stretch || effective == Path::Stretch;
+                let uncorrelated = old_path != Path::Identity && effective != Path::Identity;
                 for f in 0..n {
                     let t = ((self.fade_done + f + 1) as f32 / self.fade_total as f32).min(1.0);
                     let (gain_old, gain_new) = if uncorrelated {
@@ -549,8 +645,12 @@ impl TempoEngine {
         if last == effective || (last == Path::Varispeed && effective == Path::Identity) {
             return;
         }
+        let outgoing = if last == Path::Identity { Path::Varispeed } else { last };
+        if outgoing == effective {
+            return;
+        }
         let uncorrelated = last == Path::Stretch || effective == Path::Stretch;
-        self.fade_from = Some(if last == Path::Identity { Path::Varispeed } else { last });
+        self.fade_from = Some(outgoing);
         self.fade_done = 0;
         self.fade_total = if uncorrelated { LONG_FADE_FRAMES } else { n };
     }
@@ -579,10 +679,12 @@ impl TempoEngine {
     ) -> bool {
         let spacing = self.rate / pitch;
         let latency = stretch_latency_frames(self.input_latency, self.output_latency, spacing);
-        let steady_ahead = (latency + LOOKAHEAD_FRAMES as f64 * spacing).round() as usize;
+        let limiter_lead = self.limiter.delay_frames() as f64 * self.rate;
+        let steady_ahead =
+            (latency + LOOKAHEAD_FRAMES as f64 * spacing + limiter_lead).round() as usize;
 
         if !self.primed {
-            let goal = (latency.round() as usize) + n_in;
+            let goal = ((latency + limiter_lead).round() as usize) + n_in;
             let room = if ended {
                 usize::MAX
             } else {
@@ -643,8 +745,10 @@ impl TempoEngine {
             0,
         );
         self.mid_fifo = LOOKAHEAD_FRAMES;
+        let limiter_was_filled = self.limiter.is_filled();
+        self.limiter.process(&mut self.shifted[..n * 2]);
         expand_stereo(&self.shifted[..n * 2], ch, &mut self.stretch_dev[..n * ch]);
-        true
+        limiter_was_filled
     }
 }
 

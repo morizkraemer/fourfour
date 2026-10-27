@@ -715,3 +715,21 @@ fn lab_load_spikes() {
         println!("load {i}: first stretch block {first:?}");
     }
 }
+
+#[test]
+#[ignore]
+fn lab_overshoot() {
+    for (name, source) in lab_tracks() {
+        let src_peak = source.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        for (ratio, semitones, lock) in [(1.08, 0.0, true), (0.92, 0.0, true), (1.0, 2.0, true), (1.0, -2.0, true), (1.16, 0.0, true), (1.08, 0.0, false)] {
+            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
+            lab.set(ratio, semitones, lock);
+            lab.settle();
+            lab.locate(0);
+            let out = lab.run_seconds(40.0);
+            let peak = out.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            let over = out.iter().filter(|v| v.abs() > 1.0).count();
+            println!("OVERSHOOT {name} r{ratio} {semitones:+}st lock {lock}: source peak {src_peak:.3}, output peak {peak:.3} ({:.2} dBFS), {over} samples over full scale of {}", 20.0 * peak.log10(), out.len());
+        }
+    }
+}

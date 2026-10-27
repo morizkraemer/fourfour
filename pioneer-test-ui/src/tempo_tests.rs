@@ -546,7 +546,7 @@ fn lab_switch_debug() {
             last_block = b;
         }
     }
-    for b in 222..236 { println!("  b{b} rate {:.4} {:?}", log[b].0, log[b].1); }
+    for b in 1578..1600 { println!("  b{b} rate {:.4} {:?}", log[b].0, log[b].1); }
 }
 
 #[test]
