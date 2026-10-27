@@ -1,76 +1,66 @@
-<!--
-  OrganizePicker.svelte — Destination picker rendered in the OrganizePanel body
-  when no target is docked (ui.organize.target === null).
-
-  Three groups:
-    1. ＋ New playlist — creates immediately, docks, focuses inline rename.
-    2. Playlist search — text input filtering playlists by name, ≤4 results;
-       empty query shows ≤4 recents (falls back to first few playlists).
-    3. USB devices — lists library.volumes.
-
-  Read-only library views (All Tracks, Recently Added) are intentionally omitted.
--->
 <script>
-  import { Icon } from '$ds';
+  import { DestinationCard, Icon } from '$ds';
   import {
     library,
     isFavoritePlaylistName,
+    tracksForSidebarSource,
   } from '../stores/library.svelte.ts';
+  import { dnd } from '../stores/dnd.svelte.ts';
   import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+  import { dropFlash, cardKey } from '../stores/organize-drop.svelte.ts';
+  import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
 
-  const MAX_RESULTS = 4;
+  const MAX_RECENT = 4;
 
-  async function handleNewPlaylist() {
-    await createPlaylistAndOpen();
-  }
-
-  // ── Playlist search / recents ───────────────────────────────────────────────
   let query = $state('');
 
-  /** Playlists eligible as destinations: exclude Favorites N and read-only views. */
-  let eligiblePlaylists = $derived(
-    library.playlists.filter((p) => !isFavoritePlaylistName(p.name))
-  );
+  let eligiblePlaylists = $derived(library.playlists.filter((p) => !isFavoritePlaylistName(p.name)));
 
-  /** Recents: resolve recent playlist ids to playlist objects in order. */
-  let recentPlaylists = $derived(
-    ui.organize.recentPlaylistIds
+  let recentPlaylists = $derived.by(() => {
+    const recent = ui.organize.recentPlaylistIds
       .map((id) => eligiblePlaylists.find((p) => p.id === id))
-      .filter(Boolean)
-      .slice(0, MAX_RESULTS)
-  );
+      .filter(Boolean);
+    return (recent.length > 0 ? recent : eligiblePlaylists).slice(0, MAX_RECENT);
+  });
 
-  /** Fallback when no recents: first N eligible playlists. */
-  let fallbackPlaylists = $derived(eligiblePlaylists.slice(0, MAX_RESULTS));
+  let needle = $derived(query.trim().toLowerCase());
 
-  /** Search results when query is non-empty. */
-  let searchResults = $derived(
-    query.trim()
-      ? eligiblePlaylists
-          .filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
-          .slice(0, MAX_RESULTS)
-      : []
-  );
-
-  /** The playlist rows currently visible. */
   let visiblePlaylists = $derived(
-    query.trim()
-      ? searchResults
-      : recentPlaylists.length > 0
-        ? recentPlaylists
-        : fallbackPlaylists
+    needle ? eligiblePlaylists.filter((p) => p.name.toLowerCase().includes(needle)) : recentPlaylists
   );
 
-  let emptySearchState = $derived(query.trim() && searchResults.length === 0);
+  let visibleSticks = $derived(
+    needle
+      ? library.volumes.filter((v) => volumeLabel(v).toLowerCase().includes(needle))
+      : library.volumes
+  );
+
+  function volumeLabel(path) {
+    return path.replace(/\\/g, '/').split('/').pop() || path;
+  }
+
+  function coversFor(playlist) {
+    return tracksForSidebarSource(playlist.name)
+      .map((t) => t.cover)
+      .filter(Boolean)
+      .slice(0, 4);
+  }
+
+  function trackCountLabel(count) {
+    return `${count} ${count === 1 ? 'track' : 'tracks'}`;
+  }
+
+  function flashFor(target) {
+    return dropFlash.key === cardKey(target) ? dropFlash.text : '';
+  }
+
+  function isDropTarget(active) {
+    return dnd.kind === 'tracks' && active;
+  }
 
   function pickPlaylist(pl) {
     dockOrganizeTarget({ kind: 'playlist', id: pl.name, label: pl.name, playlistId: pl.id });
-  }
-
-  // ── USB devices ─────────────────────────────────────────────────────────────
-  function volumeLabel(path) {
-    return path.replace(/\\/g, '/').split('/').pop() || path;
   }
 
   function pickVolume(path) {
@@ -79,238 +69,137 @@
 </script>
 
 <div class="ff-picker">
-  <!-- ── New playlist ─────────────────────────────────────────────────── -->
-  <div class="ff-picker__section">
-    <button class="ff-picker__action-row" onclick={() => void handleNewPlaylist()}>
-      <span class="ff-picker__action-icon"><Icon name="plus" size={14} /></span>
-      <span class="ff-picker__action-label">New playlist</span>
-    </button>
-  </div>
+  <label class="ff-picker__search">
+    <Icon name="search" size={13} />
+    <input
+      type="search"
+      placeholder="Find playlist or stick…"
+      bind:value={query}
+      autocomplete="off"
+      spellcheck={false}
+    />
+  </label>
 
-  <!-- ── Playlist search ──────────────────────────────────────────────── -->
-  <div class="ff-picker__section ff-picker__section--playlists">
-    <div class="ff-picker__search-row">
-      <span class="ff-picker__search-icon"><Icon name="search" size={12} /></span>
-      <input
-        class="ff-picker__search-input"
-        type="search"
-        placeholder="Search playlists…"
-        bind:value={query}
-        autocomplete="off"
-        spellcheck={false}
+  <div class="ff-picker__label">{needle ? 'PLAYLISTS' : 'RECENT'}</div>
+  <div class="ff-picker__cards">
+    {#if !needle}
+      <DestinationCard
+        variant="new"
+        name="New playlist"
+        meta="⌘⇧N"
+        onclick={() => void createPlaylistAndOpen()}
       />
-      {#if query}
-        <button
-          class="ff-picker__search-clear"
-          aria-label="Clear search"
-          onclick={() => (query = '')}
-        >×</button>
-      {/if}
-    </div>
+    {/if}
+    {#each visiblePlaylists as pl (pl.id)}
+      {@const target = { kind: 'playlist', playlistId: pl.id }}
+      <DestinationCard
+        name={pl.name}
+        meta={trackCountLabel(pl.track_ids.length)}
+        covers={coversFor(pl)}
+        dropActive={isDropTarget(dnd.dropCardPlaylistId === pl.id)}
+        flash={flashFor(target)}
+        data-drop-playlist-id={pl.id}
+        onclick={() => pickPlaylist(pl)}
+      />
+    {/each}
+  </div>
+  {#if needle && visiblePlaylists.length === 0}
+    <div class="ff-picker__none">No playlists match</div>
+  {/if}
 
-    <div class="ff-picker__list">
-      {#if emptySearchState}
-        <div class="ff-picker__empty">No playlists match "{query}"</div>
-      {:else if visiblePlaylists.length === 0}
-        <div class="ff-picker__empty">No playlists yet</div>
-      {:else}
-        {#each visiblePlaylists as pl (pl.id)}
-          <button class="ff-picker__row" onclick={() => pickPlaylist(pl)}>
-            <span class="ff-picker__row-icon"><Icon name="list" size={13} /></span>
-            <span class="ff-picker__row-label">{pl.name}</span>
-            <span class="ff-picker__row-count">{pl.track_ids.length}</span>
-          </button>
-        {/each}
-      {/if}
-    </div>
+  <div class="ff-picker__label">STICKS</div>
+  <div class="ff-picker__sticks">
+    {#each visibleSticks as vol (vol)}
+      {@const target = { kind: 'stick', volumePath: vol }}
+      <DestinationCard
+        variant="stick"
+        name={volumeLabel(vol)}
+        meta={`All tracks · ${stickAllTrackIds(vol).length}`}
+        dropActive={isDropTarget(dnd.dropStickPath === vol)}
+        flash={flashFor(target)}
+        data-drop-stick-path={vol}
+        onclick={() => pickVolume(vol)}
+      />
+    {/each}
+    {#if visibleSticks.length === 0}
+      <div class="ff-picker__none">{needle ? 'No sticks match' : 'No stick plugged in'}</div>
+    {/if}
   </div>
 
-  <!-- ── USB devices ──────────────────────────────────────────────────── -->
-  {#if library.volumes.length > 0}
-    <div class="ff-picker__section ff-picker__section--usb">
-      <div class="ff-picker__section-label">USB Devices</div>
-      {#each library.volumes as vol (vol)}
-        <button class="ff-picker__row" onclick={() => pickVolume(vol)}>
-          <span class="ff-picker__row-icon"><Icon name="disc" size={13} /></span>
-          <span class="ff-picker__row-label">{volumeLabel(vol)}</span>
-        </button>
-      {/each}
-    </div>
-  {/if}
+  <div class="ff-picker__hint">Drag tracks onto a card to put them there. Click a card to open it here.</div>
 </div>
 
 <style>
   .ff-picker {
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+    align-self: stretch;
     width: 100%;
-    gap: 0;
+    gap: var(--ff-space-5);
+    padding: var(--ff-space-5);
     overflow-y: auto;
-    padding: var(--ff-space-3) 0;
   }
 
-  /* ── Sections ──────────────────────────────────────────────────────── */
-  .ff-picker__section {
+  .ff-picker__search {
     display: flex;
-    flex-direction: column;
-    padding: 0 var(--ff-space-3);
-  }
-
-  .ff-picker__section + .ff-picker__section {
-    margin-top: var(--ff-space-3);
-    padding-top: var(--ff-space-3);
-    border-top: 1px solid var(--ff-border);
-  }
-
-  .ff-picker__section-label {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    align-items: center;
+    gap: var(--ff-space-4);
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--ff-border-hi);
+    border-radius: var(--ff-radius-md);
+    background: var(--ff-bg);
     color: var(--ff-faint);
-    padding: 0 var(--ff-space-2);
-    margin-bottom: var(--ff-space-2);
   }
 
-  /* ── New playlist action row ───────────────────────────────────────── */
-  .ff-picker__action-row {
-    display: flex;
-    align-items: center;
-    gap: var(--ff-space-2);
-    background: none;
-    border: none;
-    cursor: pointer;
-    width: 100%;
-    padding: var(--ff-space-2) var(--ff-space-2);
-    border-radius: var(--ff-radius-sm, 4px);
-    color: var(--ff-accent);
-    font-size: var(--ff-text-sm, 12px);
-    transition: background 0.1s ease;
-    text-align: left;
-  }
-
-  .ff-picker__action-row:hover {
-    background: var(--ff-hover);
-  }
-
-  .ff-picker__action-icon {
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-  }
-
-  .ff-picker__action-label {
-    font-weight: 500;
-  }
-
-  /* ── Search input row ──────────────────────────────────────────────── */
-  .ff-picker__search-row {
-    display: flex;
-    align-items: center;
-    gap: var(--ff-space-1);
-    background: var(--ff-input-bg, var(--ff-surface-hi));
-    border: 1px solid var(--ff-border);
-    border-radius: var(--ff-radius-sm, 4px);
-    padding: 4px var(--ff-space-2);
-    margin-bottom: var(--ff-space-2);
-  }
-
-  .ff-picker__search-icon {
-    display: flex;
-    align-items: center;
-    color: var(--ff-faint);
-    flex-shrink: 0;
-  }
-
-  .ff-picker__search-input {
-    flex: 1 1 0;
-    background: none;
+  .ff-picker__search input {
+    flex: 1;
+    min-width: 0;
     border: none;
     outline: none;
+    background: none;
     color: var(--ff-text);
-    font-size: var(--ff-text-sm, 12px);
-    min-width: 0;
+    font-family: var(--ff-font);
+    font-size: var(--ff-type-row);
     appearance: none;
   }
 
-  .ff-picker__search-input::placeholder {
+  .ff-picker__search input::placeholder {
     color: var(--ff-faint);
   }
 
-  /* Hide the native search clear button (webkit) */
-  .ff-picker__search-input::-webkit-search-cancel-button {
+  .ff-picker__search input::-webkit-search-cancel-button {
     display: none;
   }
 
-  .ff-picker__search-clear {
-    background: none;
-    border: none;
-    cursor: pointer;
+  .ff-picker__label {
+    margin-top: var(--ff-space-3);
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-label-sm);
+    letter-spacing: 0.06em;
     color: var(--ff-faint);
-    font-size: 14px;
-    line-height: 1;
-    padding: 0;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
   }
 
-  .ff-picker__search-clear:hover {
-    color: var(--ff-text);
+  .ff-picker__cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: var(--ff-space-4);
   }
 
-  /* ── List rows ─────────────────────────────────────────────────────── */
-  .ff-picker__list {
+  .ff-picker__sticks {
     display: flex;
     flex-direction: column;
-    gap: 1px;
+    gap: var(--ff-space-4);
   }
 
-  .ff-picker__row {
-    display: flex;
-    align-items: center;
-    gap: var(--ff-space-2);
-    background: none;
-    border: none;
-    cursor: pointer;
-    width: 100%;
-    padding: var(--ff-space-2) var(--ff-space-2);
-    border-radius: var(--ff-radius-sm, 4px);
-    color: var(--ff-text);
-    font-size: var(--ff-text-sm, 12px);
-    transition: background 0.1s ease;
-    text-align: left;
-  }
-
-  .ff-picker__row:hover {
-    background: var(--ff-hover);
-  }
-
-  .ff-picker__row-icon {
-    display: flex;
-    align-items: center;
+  .ff-picker__none {
+    font-size: var(--ff-type-caption);
     color: var(--ff-faint);
-    flex-shrink: 0;
   }
 
-  .ff-picker__row-label {
-    flex: 1 1 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .ff-picker__row-count {
+  .ff-picker__hint {
+    font-size: var(--ff-type-caption);
     color: var(--ff-faint);
-    font-size: 11px;
-    flex-shrink: 0;
-  }
-
-  /* ── Empty state ───────────────────────────────────────────────────── */
-  .ff-picker__empty {
-    font-size: var(--ff-text-sm, 12px);
-    color: var(--ff-faint);
-    padding: var(--ff-space-2) var(--ff-space-2);
-    font-style: italic;
   }
 </style>

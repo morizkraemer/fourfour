@@ -34,7 +34,7 @@ const ORGANIZE_RECENTS_MAX = 8;
  * Min panel width before snapping to rail: ORGANIZE_SNAP_TO_RAIL_PX (below).
  * Snap-to-fullscreen threshold: ORGANIZE_SNAP_TO_FULL_PX (below).
  */
-const ORGANIZE_WIDTH_DEFAULT = 360;
+const ORGANIZE_WIDTH_DEFAULT = 420;
 const ORGANIZE_WIDTH_MIN = 200; // absolute floor; below SNAP_RAIL threshold snaps to rail
 const ORGANIZE_WIDTH_MAX = 99999; // effectively unlimited (clamped by viewport at render)
 
@@ -153,6 +153,12 @@ export function expandOrganize() {
 /** Collapse to rail — keeps the target intact. */
 export function collapseOrganize() {
   ui.organize.expanded = false;
+  persistOrganize();
+}
+
+/** Clear the docked target and keep the panel open on the destination picker. */
+export function clearOrganizeTarget() {
+  ui.organize.target = null;
   persistOrganize();
 }
 

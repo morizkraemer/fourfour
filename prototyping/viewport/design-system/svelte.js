@@ -43,6 +43,7 @@ export { default as WaveformDisplay } from './waveform-display.js';
 export { default as ColumnHeader } from './components/ColumnHeader.svelte';
 export { default as StatusBar } from './components/StatusBar.svelte';
 export { default as LevelMeter } from './components/LevelMeter.svelte';
+export { default as DestinationCard } from './components/DestinationCard.svelte';
 export { default as SidebarRow } from './components/SidebarRow.svelte';
 export { default as TrackRow, TRACK_COLUMNS } from './components/TrackRow.svelte';
 export { default as PlayerCompact } from './components/PlayerCompact.svelte';

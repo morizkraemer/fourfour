@@ -1,26 +1,10 @@
-<!--
-  OrganizePanel.svelte — Persistent right-edge organize panel.
-
-  Visual states:
-    rail     (ui.organize.expanded === false): thin sliver at the right edge.
-              Clicking or dragging right expands to the panel.
-    expanded (ui.organize.expanded === true):  a panel of ui.organize.width px.
-              Left-edge drag handle resizes with magnetic snap:
-                - Below ORGANIZE_SNAP_TO_RAIL_PX → snap to rail
-                - Within ORGANIZE_SNAP_TO_FULL_PX of the viewport edge → snap to full width
-
-  Panel body (s2):
-    - target === null → <OrganizePicker />
-    - target !== null → <TrackTable sourceId={target.id} embedded />
-      Header shows target.label; inline rename when renaming=true.
--->
 <script>
   import { Button, ContextMenu, Icon } from '$ds';
   import {
     ui,
     expandOrganize,
     collapseOrganize,
-    closeOrganize,
+    clearOrganizeTarget,
     setOrganizeWidth,
     commitOrganizeWidth,
     ORGANIZE_SNAP_TO_RAIL_PX,
@@ -28,6 +12,7 @@
   } from '../stores/ui.svelte.ts';
   import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
+  import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
 
@@ -37,21 +22,31 @@
   let renameDraft = $state('');
   let renameHeaderEl = $state(null);
   let headerMenu = $state({ open: false, x: 0, y: 0 });
+  let widthBeforeWiden = $state(null);
 
   function openHeaderMenu(e) {
-    if (ui.organize.target?.kind !== 'playlist') return;
+    if (!ui.organize.target) return;
     e.preventDefault();
     headerMenu = { open: true, x: e.clientX, y: e.clientY };
+  }
+
+  function openTargetMenu(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    headerMenu = { open: true, x: rect.left, y: rect.bottom + 2 };
   }
 
   function headerMenuItems() {
     const target = ui.organize.target;
     if (!target) return [];
-    return buildSourceContextMenuItems({
-      sourceId: target.id,
-      label: target.label,
-      onRenamePlaylist: (playlist) => startHeaderRename(playlist.name),
-    });
+    const sourceItems =
+      target.kind === 'playlist'
+        ? buildSourceContextMenuItems({
+            sourceId: target.id,
+            label: target.label,
+            onRenamePlaylist: (playlist) => startHeaderRename(playlist.name),
+          })
+        : [];
+    return [{ label: 'Clear board', onClick: clearOrganizeTarget }, ...sourceItems];
   }
 
   $effect(() => {
@@ -66,7 +61,6 @@
   function startHeaderRename(name) {
     renamingHeader = true;
     renameDraft = name;
-    // Focus on next tick after DOM updates
     setTimeout(() => renameHeaderEl?.select(), 0);
   }
 
@@ -78,7 +72,6 @@
     if (!target || !draft || draft === target.label) return;
     if (target.kind === 'playlist' && typeof target.playlistId === 'number') {
       await renamePlaylist(target.playlistId, draft);
-      // Update the reactive target in ui store
       ui.organize.target = { ...target, id: draft, label: draft };
     }
   }
@@ -87,22 +80,13 @@
     renamingHeader = false;
   }
 
-  // ── Filled-rail cover glance (s8) ─────────────────────────────────────────
-
-  /**
-   * Up to 4 cover thumbnails from the docked target, shown when the rail is
-   * collapsed and a target is docked. `track.cover` reads from the artwork
-   * cache on demand. We take the first MAX_RAIL_COVERS tracks that have a
-   * resolved cover URL; if fewer exist we show the ones we have.
-   */
   const MAX_RAIL_COVERS = 4;
 
   const railCovers = $derived.by(() => {
     const target = ui.organize.target;
     if (!target) return [];
-    const tracks = tracksForSidebarSource(target.id);
     const result = [];
-    for (const t of tracks) {
+    for (const t of tracksForSidebarSource(target.id)) {
       if (t.cover) {
         result.push(t.cover);
         if (result.length >= MAX_RAIL_COVERS) break;
@@ -111,22 +95,40 @@
     return result;
   });
 
-  const railTrackCount = $derived.by(() => {
-    const target = ui.organize.target;
-    if (!target) return 0;
-    return tracksForSidebarSource(target.id).length;
-  });
+  const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
+  const summary = $derived(summarizeBoard(boardTracks));
+  const railTrackCount = $derived(summary.count);
+  const subtitle = $derived(
+    [
+      `${summary.count} ${summary.count === 1 ? 'track' : 'tracks'}`,
+      summary.durationSecs > 0 ? formatBoardDuration(summary.durationSecs) : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  );
 
-  // ── Rail open (click-only toggle) ──────────────────────────────────────────
-  // The rail is a plain button: a click expands the panel to its last width.
-  // Resizing/collapsing is the job of the expanded panel's own left-edge handle.
+  function fullWidth() {
+    const right = containerEl ? containerEl.getBoundingClientRect().right : window.innerWidth;
+    const left = containerEl ? containerEl.getBoundingClientRect().left : 0;
+    return right - left - ui.sidebarWidth;
+  }
 
-  // ── Panel left-edge resize handle ─────────────────────────────────────────
+  function toggleWiden() {
+    if (widthBeforeWiden !== null) {
+      setOrganizeWidth(widthBeforeWiden);
+      widthBeforeWiden = null;
+    } else {
+      widthBeforeWiden = ui.organize.width;
+      setOrganizeWidth(fullWidth());
+    }
+    commitOrganizeWidth();
+  }
 
   function onResizeHandlePointerDown(e) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
+    widthBeforeWiden = null;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     document.body.classList.add('ff-organize--resizing');
 
@@ -134,8 +136,7 @@
       const containerRight = containerEl
         ? containerEl.getBoundingClientRect().right
         : window.innerWidth;
-      const newWidth = containerRight - ev.clientX;
-      applyResizeWidth(newWidth, containerRight);
+      applyResizeWidth(containerRight - ev.clientX, containerRight);
     }
 
     function onUp() {
@@ -151,19 +152,12 @@
     window.addEventListener('pointercancel', onUp);
   }
 
-  /**
-   * Apply a candidate width with magnetic snap logic.
-   * Snap thresholds are intentionally tunable via the exported constants
-   * in ui.svelte.ts (ORGANIZE_SNAP_TO_RAIL_PX, ORGANIZE_SNAP_TO_FULL_PX).
-   */
   function applyResizeWidth(rawWidth, containerRight) {
-    // Snap to rail (collapse) when width drops below threshold
     if (rawWidth < ORGANIZE_SNAP_TO_RAIL_PX) {
       collapseOrganize();
       return;
     }
 
-    // Snap to full width when close to the container's right edge
     const containerLeft = containerEl ? containerEl.getBoundingClientRect().left : 0;
     const maxWidth = containerRight - containerLeft - ui.sidebarWidth;
     if (rawWidth > maxWidth - ORGANIZE_SNAP_TO_FULL_PX) {
@@ -172,19 +166,12 @@
     }
 
     setOrganizeWidth(rawWidth);
-    // Ensure we stay expanded if we're setting a valid width
     if (!ui.organize.expanded) expandOrganize();
   }
 </script>
 
 {#if ui.organize.expanded}
-  <!-- ── Expanded panel ─────────────────────────────────────────────────── -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="ff-organize ff-organize--expanded"
-    style:width="{ui.organize.width}px"
-  >
-    <!-- Left-edge resize handle -->
+  <div class="ff-organize ff-organize--expanded" style:width="{ui.organize.width}px">
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="ff-organize__resize-handle"
@@ -194,12 +181,9 @@
       onpointerdown={onResizeHandlePointerDown}
     ></div>
 
-    <!-- Panel header -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ff-organize__header" oncontextmenu={openHeaderMenu}>
       {#if renamingHeader && ui.organize.target}
-        <!-- Inline rename input for newly-created playlists -->
-        <!-- svelte-ignore a11y_autofocus -->
         <input
           bind:this={renameHeaderEl}
           class="ff-organize__header-rename"
@@ -211,46 +195,53 @@
           }}
           onblur={commitHeaderRename}
         />
+      {:else if ui.organize.target}
+        <button type="button" class="ff-organize__target" aria-label="Board menu" onclick={openTargetMenu}>
+          <span class="ff-organize__target-name">{ui.organize.target.label}</span>
+          <span class="ff-organize__target-sub">{subtitle}</span>
+          <Icon name="chevron-down" size={12} />
+        </button>
       {:else}
-        <span class="ff-organize__header-title">
-          {ui.organize.target ? ui.organize.target.label : 'Organize'}
-        </span>
+        <span class="ff-organize__header-title">Put tracks into</span>
       {/if}
       <div class="ff-organize__header-actions">
-        <!-- Collapse to rail -->
         <Button
-          icon="panel-right"
+          icon={widthBeforeWiden !== null ? 'minimize' : 'maximize'}
           iconOnly
           variant="ghost"
           size="small"
-          ariaLabel="Collapse to rail"
-          onclick={collapseOrganize}
+          ariaLabel={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
+          title={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
+          onclick={toggleWiden}
         />
-        <!-- Close / clear -->
         <Button
-          icon="x"
+          icon="chevron-right"
           iconOnly
           variant="ghost"
           size="small"
-          ariaLabel="Close organize panel"
-          onclick={closeOrganize}
+          ariaLabel="Hide board"
+          title="Hide board (⇧⇥)"
+          onclick={collapseOrganize}
         />
       </div>
     </div>
 
-    <!-- Panel body -->
     <div class="ff-organize__body" class:ff-organize__body--table={ui.organize.target !== null}>
       {#if ui.organize.target === null}
-        <!-- No target: show destination picker -->
         <OrganizePicker />
       {:else}
-        <!-- Target docked: show its tracks -->
         <TrackTable sourceId={ui.organize.target.id} embedded layoutKindOverride="organize" organize={true} />
       {/if}
     </div>
+
+    {#if ui.organize.target && (summary.avgBpm !== null || summary.keyRange !== null)}
+      <div class="ff-organize__foot">
+        {#if summary.avgBpm !== null}<span>avg {Math.round(summary.avgBpm)} BPM</span>{/if}
+        {#if summary.keyRange !== null}<span>{summary.keyRange}</span>{/if}
+      </div>
+    {/if}
   </div>
 {:else}
-  <!-- ── Rail sliver ──────────────────────────────────────────────────────── -->
   <button
     type="button"
     class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ' ff-organize--rail-empty'}"
@@ -279,11 +270,6 @@
 />
 
 <style>
-  /* ── Shared ────────────────────────────────────────────────────────────── */
-  /* All states are the same drawer: rounded left corners, flush to the window
-     edge on the right (square corners, no right border) so the rest reads as
-     off-screen. Only the width changes between rail and expanded.
-     overflow:hidden keeps the header/table content clipped to the rounded corners. */
   .ff-organize {
     position: relative;
     display: flex;
@@ -297,20 +283,15 @@
     overflow: hidden;
   }
 
-  /* ── Rail — the collapsed drawer (narrow). Shares the drawer shape above. ── */
   .ff-organize--rail {
     cursor: pointer;
     align-items: center;
     touch-action: none;
     user-select: none;
     color: var(--ff-text-mid);
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-  }
-
-  .ff-organize--rail {
     padding: 0;
     font: inherit;
-    border-radius: 10px 0 0 10px;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
   }
 
   .ff-organize--rail:focus-visible {
@@ -328,7 +309,6 @@
     color: var(--ff-text);
   }
 
-  /* Empty rail: chevron centered inside; a touch narrower than the filled rail. */
   .ff-organize--rail-empty {
     width: 44px;
     justify-content: center;
@@ -338,7 +318,6 @@
     height: 100%;
   }
 
-  /* Filled rail: a vertical column of rounded square tiles. */
   .ff-organize--rail-filled {
     width: 52px;
     justify-content: flex-start;
@@ -347,7 +326,6 @@
   }
   .ff-organize--rail-filled.ff-organize--rail { padding: 6px; }
 
-  /* Open-chevron at the top of the filled rail — no tile chrome, just the glyph. */
   .ff-organize__rail-top {
     display: flex;
     align-items: center;
@@ -367,12 +345,10 @@
     flex-shrink: 0;
   }
 
-  /* ── Expanded panel ────────────────────────────────────────────────────── */
   .ff-organize--expanded {
     min-width: 0;
   }
 
-  /* Left-edge drag handle */
   .ff-organize__resize-handle {
     position: absolute;
     left: 0;
@@ -415,38 +391,68 @@
     cursor: col-resize !important;
   }
 
-  /* Header */
   .ff-organize__header {
     display: flex;
     align-items: center;
+    flex-shrink: 0;
     height: 40px;
-    padding: 0 var(--ff-space-3) 0 var(--ff-space-5);
+    padding: 0 var(--ff-space-4) 0 var(--ff-space-5);
     gap: var(--ff-space-2);
     border-bottom: 1px solid var(--ff-border);
-    flex-shrink: 0;
   }
 
   .ff-organize__header-title {
     flex: 1 1 0;
-    font-size: var(--ff-text-sm, 12px);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--ff-text-dim, var(--ff-faint));
+    font-size: var(--ff-type-body);
+    font-weight: 500;
+    color: var(--ff-text);
+  }
+
+  .ff-organize__target {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: var(--ff-space-4);
+    margin-left: calc(-1 * var(--ff-space-3));
+    padding: var(--ff-space-2) var(--ff-space-3);
+    border: none;
+    border-radius: var(--ff-radius-sm);
+    background: none;
+    color: var(--ff-text);
+    font-family: var(--ff-font);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .ff-organize__target:hover {
+    background: var(--ff-hover);
+  }
+
+  .ff-organize__target-name {
+    font-size: var(--ff-type-body);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .ff-organize__target-sub {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--ff-type-small);
+    color: var(--ff-muted);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  /* Inline rename input in header */
   .ff-organize__header-rename {
     flex: 1 1 0;
     background: var(--ff-input-bg, var(--ff-surface-hi));
     border: 1px solid var(--ff-accent);
     border-radius: var(--ff-radius-sm, 4px);
     color: var(--ff-text);
-    font-size: var(--ff-text-sm, 12px);
-    font-weight: 600;
+    font-size: var(--ff-type-body);
+    font-weight: 500;
     padding: 2px var(--ff-space-2);
     outline: none;
     min-width: 0;
@@ -459,26 +465,32 @@
     flex-shrink: 0;
   }
 
-  /* Body */
   .ff-organize__body {
     flex: 1 1 0;
     min-height: 0;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--ff-space-5);
+    overflow: hidden;
   }
 
-  /* When a target is docked the body holds a TrackTable — remove centering padding */
   .ff-organize__body--table {
-    padding: 0;
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .ff-organize__body--table > :global(*) {
+  .ff-organize__body > :global(*) {
     flex: 1 1 0;
     min-width: 0;
     min-height: 0;
+  }
+
+  .ff-organize__foot {
+    flex: none;
+    display: flex;
+    gap: var(--ff-space-6);
+    padding: var(--ff-space-4) var(--ff-space-6);
+    border-top: 1px solid var(--ff-border);
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-small);
+    color: var(--ff-muted);
   }
 </style>

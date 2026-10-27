@@ -26,6 +26,10 @@ export const dnd = $state({
   dropNewPlaylist: false,
   /** Sidebar playlist receiving a drop */
   dropPlaylistId: null as number | null,
+  /** Organize-drawer playlist card receiving a drop */
+  dropCardPlaylistId: null as number | null,
+  /** Organize-drawer stick card (volume path) receiving a drop */
+  dropStickPath: null as string | null,
   /** Column key being dragged or hovered for reorder */
   columnDragKey: null as string | null,
   columnDropKey: null as string | null,
@@ -53,6 +57,8 @@ export function startTrackDrag(
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropCardPlaylistId = null;
+  dnd.dropStickPath = null;
   dnd.dropNewPlaylist = false;
 }
 
@@ -61,6 +67,17 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   if (dnd.kind !== 'tracks') return;
 
   const hit = document.elementFromPoint(clientX, clientY);
+  const playlistCard = hit?.closest('[data-drop-playlist-id]');
+  const stickCard = hit?.closest('[data-drop-stick-path]');
+  dnd.dropCardPlaylistId = playlistCard ? Number(playlistCard.getAttribute('data-drop-playlist-id')) : null;
+  dnd.dropStickPath = stickCard ? stickCard.getAttribute('data-drop-stick-path') : null;
+  if (playlistCard || stickCard) {
+    dnd.dropNewPlaylist = false;
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    dnd.dropPlaylistId = null;
+    return;
+  }
   dnd.dropNewPlaylist = !!hit?.closest('[data-new-playlist-drop]');
   if (dnd.dropNewPlaylist) {
     dnd.dropPanelSourceId = null;
@@ -126,6 +143,8 @@ export function endDrag() {
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropCardPlaylistId = null;
+  dnd.dropStickPath = null;
   dnd.dropNewPlaylist = false;
   dnd.columnDragKey = null;
   dnd.columnDropKey = null;
