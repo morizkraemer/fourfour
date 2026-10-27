@@ -83,3 +83,46 @@ describe('drop on a stick card', () => {
     expect(second.stickAllTrackIds('/Volumes/A')).toEqual([5]);
   });
 });
+
+describe('drop on the closed ribbon', () => {
+  const playlistBoard = { kind: 'playlist' as const, id: 'Warmup', label: 'Warmup', playlistId: 2 };
+
+  async function freshWithUi() {
+    const ctx = await fresh();
+    const ui = (await import('./ui.svelte.ts')).ui;
+    ui.organize.expanded = false;
+    return { ...ctx, ui };
+  }
+
+  it('adds to the open playlist board without opening the drawer', async () => {
+    const { library, dropTracksOnRibbon, ui } = await freshWithUi();
+    const outcome = await dropTracksOnRibbon(playlistBoard, [10, 12]);
+    expect(outcome).toBe('added');
+    expect(library.playlists[1].track_ids).toEqual([10, 12]);
+    expect(ui.organize.expanded).toBe(false);
+  });
+
+  it('skips duplicates and confirms like a card drop', async () => {
+    const { library, dropFlash, dropTracksOnRibbon } = await freshWithUi();
+    await dropTracksOnRibbon({ ...playlistBoard, id: 'Peak Time', label: 'Peak Time', playlistId: 1 }, [10, 11, 12]);
+    expect(library.playlists[0].track_ids).toEqual([10, 11, 12]);
+    expect(dropFlash.key).toBe('playlist:1');
+    expect(dropFlash.text).toBe('Added 1 · 2 already there');
+  });
+
+  it('adds to the open stick board', async () => {
+    const { stickAllTrackIds, dropFlash, dropTracksOnRibbon } = await freshWithUi();
+    const board = { kind: 'usb' as const, id: '/Volumes/A', label: 'A' };
+    await dropTracksOnRibbon(board, [1, 2]);
+    expect(stickAllTrackIds('/Volumes/A')).toEqual(expect.arrayContaining([1, 2]));
+    expect(dropFlash.key).toBe('stick:/Volumes/A');
+  });
+
+  it('opens the drawer to the picker when no board is open', async () => {
+    const { library, dropTracksOnRibbon, ui } = await freshWithUi();
+    const outcome = await dropTracksOnRibbon(null, [10, 12]);
+    expect(outcome).toBe('opened');
+    expect(ui.organize.expanded).toBe(true);
+    expect(library.playlists[1].track_ids).toEqual([]);
+  });
+});

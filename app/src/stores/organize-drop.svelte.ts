@@ -1,5 +1,6 @@
 import { addTracksToPlaylist } from './library.svelte.ts';
 import { addTracksToStickAll } from './sticks.svelte.ts';
+import { expandOrganize, type OrganizeTarget } from './ui.svelte.ts';
 
 export type CardDropTarget =
   | { kind: 'playlist'; playlistId: number }
@@ -41,4 +42,25 @@ export async function dropTracksOnCard(target: CardDropTarget, trackIds: number[
       : addTracksToStickAll(target.volumePath, trackIds);
   showFlash(cardKey(target), dropConfirmation(requested, added));
   return added;
+}
+
+export function boardDropTarget(board: OrganizeTarget): CardDropTarget | null {
+  if (board.kind === 'usb') return { kind: 'stick', volumePath: board.id };
+  return typeof board.playlistId === 'number' ? { kind: 'playlist', playlistId: board.playlistId } : null;
+}
+
+export type RibbonDropOutcome = 'added' | 'opened';
+
+/** Tracks dropped on the collapsed ribbon join the open board; with no board the drawer opens to the picker. */
+export async function dropTracksOnRibbon(
+  board: OrganizeTarget | null,
+  trackIds: number[]
+): Promise<RibbonDropOutcome> {
+  const target = board && boardDropTarget(board);
+  if (!target) {
+    expandOrganize();
+    return 'opened';
+  }
+  await dropTracksOnCard(target, trackIds);
+  return 'added';
 }

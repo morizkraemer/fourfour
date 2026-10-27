@@ -45,7 +45,7 @@
     ALL_COLUMN_KEYS,
   } from '../stores/table-columns.svelte.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
-  import { dropTracksOnCard } from '../stores/organize-drop.svelte.ts';
+  import { dropTracksOnCard, dropTracksOnRibbon } from '../stores/organize-drop.svelte.ts';
   import { dnd, startTrackDrag, updatePointer, updateTrackDropTarget, endDrag } from '../stores/dnd.svelte.ts';
   import {
     buildTrackContextMenuItems,
@@ -403,6 +403,15 @@
       const copyOnly = ev.altKey;
       const cardPlaylistId = dnd.dropCardPlaylistId;
       const cardStickPath = dnd.dropStickPath;
+      const ribbonDrop = dnd.dropRibbon;
+
+      if (ribbonDrop) {
+        await dropTracksOnRibbon(ui.organize.target, ids);
+        dragging = false;
+        dropLineTop = null;
+        endDrag();
+        return;
+      }
 
       if (cardPlaylistId != null || cardStickPath != null) {
         await dropTracksOnCard(

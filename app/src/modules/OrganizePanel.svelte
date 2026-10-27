@@ -10,6 +10,8 @@
     ORGANIZE_SNAP_TO_RAIL_PX,
     ORGANIZE_SNAP_TO_FULL_PX,
   } from '../stores/ui.svelte.ts';
+  import { dnd } from '../stores/dnd.svelte.ts';
+  import { dropFlash, cardKey, boardDropTarget } from '../stores/organize-drop.svelte.ts';
   import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
@@ -46,7 +48,26 @@
             onRenamePlaylist: (playlist) => startHeaderRename(playlist.name),
           })
         : [];
-    return [{ label: 'Clear board', onClick: clearOrganizeTarget }, ...sourceItems];
+    return sourceItems;
+  }
+
+  let drawerEl = $state(null);
+  let pointerInDrawer = false;
+
+  function onWindowPointerDown(e) {
+    pointerInDrawer = !!drawerEl && drawerEl.contains(e.target);
+  }
+
+  function onWindowKeydown(e) {
+    if (e.key !== 'Escape' || !drawerEl || !ui.organize.expanded || !ui.organize.target) return;
+    if (renamingHeader || headerMenu.open) return;
+    const focusInDrawer = drawerEl.contains(document.activeElement) || pointerInDrawer;
+    if (!focusInDrawer) return;
+    const el = e.target;
+    if (el instanceof HTMLElement && (el.isContentEditable || ['INPUT', 'TEXTAREA'].includes(el.tagName))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    clearOrganizeTarget();
   }
 
   $effect(() => {
@@ -93,6 +114,17 @@
       }
     }
     return result;
+  });
+
+  const ribbonHover = $derived(dnd.kind === 'tracks' && dnd.dropRibbon);
+  const boardDropKey = $derived.by(() => {
+    const target = ui.organize.target && boardDropTarget(ui.organize.target);
+    return target ? cardKey(target) : null;
+  });
+  const ribbonLabel = $derived.by(() => {
+    if (boardDropKey && dropFlash.key === boardDropKey && dropFlash.text) return dropFlash.text;
+    if (!ribbonHover) return '';
+    return ui.organize.target ? `Add to ${ui.organize.target.label}` : 'Open to choose a destination';
   });
 
   const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
@@ -170,8 +202,10 @@
   }
 </script>
 
+<svelte:window onpointerdowncapture={onWindowPointerDown} onkeydowncapture={onWindowKeydown} />
+
 {#if ui.organize.expanded}
-  <div class="ff-organize ff-organize--expanded" style:width="{ui.organize.width}px">
+  <div class="ff-organize ff-organize--expanded" style:width="{ui.organize.width}px" bind:this={drawerEl}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
       class="ff-organize__resize-handle"
@@ -196,6 +230,15 @@
           onblur={commitHeaderRename}
         />
       {:else if ui.organize.target}
+        <Button
+          icon="chevron-left"
+          iconOnly
+          variant="ghost"
+          size="small"
+          ariaLabel="Back to destinations"
+          title="Back to destinations (Esc)"
+          onclick={clearOrganizeTarget}
+        />
         <button type="button" class="ff-organize__target" aria-label="Board menu" onclick={openTargetMenu}>
           <span class="ff-organize__target-name">{ui.organize.target.label}</span>
           <span class="ff-organize__target-sub">{subtitle}</span>
@@ -245,6 +288,8 @@
   <button
     type="button"
     class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ' ff-organize--rail-empty'}"
+    class:ff-organize--rail-drop={ribbonHover}
+    data-drop-ribbon
     aria-label={ui.organize.target ? `Open sidebar: ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize sidebar'}
     aria-expanded="false"
     title="Open organize sidebar (⇧⇥)"
@@ -257,6 +302,9 @@
       {#each railCovers as coverUrl}
         <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
       {/each}
+    {/if}
+    {#if ribbonLabel}
+      <span class="ff-organize__rail-label" role="status">{ribbonLabel}</span>
     {/if}
   </button>
 {/if}
@@ -307,6 +355,34 @@
     background: var(--ff-elev);
     border-color: var(--ff-border-hi);
     color: var(--ff-text);
+  }
+
+  .ff-organize--rail {
+    overflow: visible;
+  }
+
+  .ff-organize--rail-drop,
+  .ff-organize--rail-drop:hover {
+    background: var(--ff-select);
+    border-color: var(--ff-accent);
+    color: var(--ff-text);
+  }
+
+  .ff-organize__rail-label {
+    position: absolute;
+    top: 10px;
+    right: calc(100% + 8px);
+    max-width: 260px;
+    padding: 4px 8px;
+    border: 1px solid var(--ff-border-hi);
+    border-radius: var(--ff-radius-md);
+    background: var(--ff-elev);
+    color: var(--ff-text);
+    font-size: var(--ff-type-small);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
   }
 
   .ff-organize--rail-empty {
@@ -414,7 +490,6 @@
     display: flex;
     align-items: baseline;
     gap: var(--ff-space-4);
-    margin-left: calc(-1 * var(--ff-space-3));
     padding: var(--ff-space-2) var(--ff-space-3);
     border: none;
     border-radius: var(--ff-radius-sm);
