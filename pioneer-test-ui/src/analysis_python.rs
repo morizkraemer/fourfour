@@ -150,6 +150,7 @@ pub(crate) fn python_result_to_analysis(json: &serde_json::Value) -> models::Ana
                         hot_cue_number: 0,
                         time_ms: (time_s * 1000.0).round() as u32,
                         loop_time_ms: loop_end.map(|t| (t * 1000.0).round() as u32),
+                        ..Default::default()
                     })
                 })
                 .collect()

@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
+use crate::cue_color;
 use crate::models::{AnalysisResult, CuePoint, Track};
 use crate::waveform::{Derivation, OVERVIEW_COLUMNS, Tuning, Waveforms, resample_columns, COLUMNS_PER_SECOND, PWV7_MAX};
 
@@ -444,10 +445,13 @@ pub fn write_anlz_2ex(
 }
 
 /// PCO2 section: extended cue/loop point container with PCP2 entries.
+///
+/// An entry is `0x2C` fixed bytes, the UTF-16BE comment (`len_comment` bytes, NUL included),
+/// then 44 bytes starting with colour code and RGB. Without a comment that is the former 88 bytes.
 fn build_cue_extended_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
     let section_header_len: u32 = 20;
-    let pcp2_entry_len: u32 = 88;
-    let section_total_len: u32 = section_header_len + pcp2_entry_len * cues.len() as u32;
+    let entries: Vec<Vec<u8>> = cues.iter().map(|cue| build_cue_extended_entry(cue)).collect();
+    let section_total_len: u32 = section_header_len + entries.iter().map(|e| e.len() as u32).sum::<u32>();
 
     let mut buf = Vec::with_capacity(section_total_len as usize);
     buf.extend_from_slice(TAG_CUE_EXTENDED);
@@ -456,24 +460,54 @@ fn build_cue_extended_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
     buf.extend_from_slice(&cue_type.to_be_bytes());                 // 0x0C: type (1=hot, 0=memory)
     buf.extend_from_slice(&(cues.len() as u16).to_be_bytes());     // 0x10: entry count (u16)
     buf.extend_from_slice(&[0u8; 2]);                               // 0x12: padding
-
-    for cue in cues {
-        let loop_time = cue.loop_time_ms.unwrap_or(0xFFFFFFFF);
-
-        buf.extend_from_slice(b"PCP2");                             // 0x00: tag
-        buf.extend_from_slice(&16u32.to_be_bytes());                // 0x04: header_len
-        buf.extend_from_slice(&pcp2_entry_len.to_be_bytes());       // 0x08: entry_len
-        buf.extend_from_slice(&cue.hot_cue_number.to_be_bytes());   // 0x0C: hot_cue_number
-        buf.push(0x01);                                             // 0x10: type (1 = cue point)
-        buf.push(0x00);                                             // 0x11: unknown
-        buf.extend_from_slice(&0x03E8u16.to_be_bytes());            // 0x12: loop_denominator
-        buf.extend_from_slice(&cue.time_ms.to_be_bytes());          // 0x14: time_ms
-        buf.extend_from_slice(&loop_time.to_be_bytes());            // 0x18: loop_time
-        buf.extend_from_slice(&0x0001u16.to_be_bytes());            // 0x1C: unknown
-        buf.extend_from_slice(&[0u8; 58]);                          // 0x1E: remaining (color/label/padding, zeros)
+    for entry in entries {
+        buf.extend_from_slice(&entry);
     }
 
     buf
+}
+
+fn build_cue_extended_entry(cue: &CuePoint) -> Vec<u8> {
+    const FIXED_LEN: usize = 0x2C;
+    const TAIL_LEN: usize = 44;
+    let comment: Vec<u8> = if cue.name.is_empty() {
+        Vec::new()
+    } else {
+        cue.name.encode_utf16().chain(std::iter::once(0)).flat_map(u16::to_be_bytes).collect()
+    };
+    let entry_len = (FIXED_LEN + comment.len() + TAIL_LEN) as u32;
+    let loop_time = cue.loop_time_ms.unwrap_or(0xFFFFFFFF);
+
+    let mut buf = Vec::with_capacity(entry_len as usize);
+    buf.extend_from_slice(b"PCP2");                             // 0x00: tag
+    buf.extend_from_slice(&16u32.to_be_bytes());                // 0x04: header_len
+    buf.extend_from_slice(&entry_len.to_be_bytes());            // 0x08: entry_len
+    buf.extend_from_slice(&cue.hot_cue_number.to_be_bytes());   // 0x0C: hot_cue_number
+    buf.push(cue_type_byte(cue));                               // 0x10: type (1 = cue point, 2 = loop)
+    buf.push(0x00);                                             // 0x11: unknown
+    buf.extend_from_slice(&0x03E8u16.to_be_bytes());            // 0x12: loop_denominator
+    buf.extend_from_slice(&cue.time_ms.to_be_bytes());          // 0x14: time_ms
+    buf.extend_from_slice(&loop_time.to_be_bytes());            // 0x18: loop_time
+    buf.extend_from_slice(&0x0001u16.to_be_bytes());            // 0x1C: unknown
+    buf.extend_from_slice(&[0u8; 10]);                          // 0x1E: unknown
+    buf.extend_from_slice(&(comment.len() as u32).to_be_bytes()); // 0x28: len_comment
+    buf.extend_from_slice(&comment);                            // 0x2C: comment
+    let (code, rgb) = cue_color_bytes(cue);
+    buf.push(code);                                             // colour code
+    buf.extend_from_slice(&rgb);                                // colour RGB
+    buf.resize(entry_len as usize, 0);
+    buf
+}
+
+fn cue_type_byte(cue: &CuePoint) -> u8 {
+    if cue.loop_time_ms.is_some() { 0x02 } else { 0x01 }
+}
+
+fn cue_color_bytes(cue: &CuePoint) -> (u8, [u8; 3]) {
+    match cue.color.as_deref().and_then(cue_color::table_index) {
+        Some(index) => (index, cue_color::rgb(index)),
+        None => (0, [0; 3]),
+    }
 }
 
 /// PQT2 section: extended beat grid.
@@ -574,11 +608,11 @@ fn build_cue_section(cue_type: u32, cues: &[&CuePoint]) -> Vec<u8> {
         buf.extend_from_slice(&28u32.to_be_bytes());                // 0x04: header_len
         buf.extend_from_slice(&pcpt_entry_len.to_be_bytes());       // 0x08: entry_len
         buf.extend_from_slice(&cue.hot_cue_number.to_be_bytes());   // 0x0C: hot_cue_number
-        buf.extend_from_slice(&[0u8; 4]);                           // 0x10: status
+        buf.extend_from_slice(&1u32.to_be_bytes());                 // 0x10: status (1 = enabled)
         buf.extend_from_slice(&0x0001u16.to_be_bytes());            // 0x14: unknown
         buf.extend_from_slice(&[0u8; 2]);                           // 0x16: unknown
         buf.extend_from_slice(&0xFFFF_FFFFu32.to_be_bytes());       // 0x18: sentinel
-        buf.push(0x01);                                             // 0x1C: type (1 = cue)
+        buf.push(cue_type_byte(cue));                               // 0x1C: type (1 = cue, 2 = loop)
         buf.push(0x00);                                             // 0x1D: unknown
         buf.extend_from_slice(&0x03E8u16.to_be_bytes());            // 0x1E: loop_denominator
         buf.extend_from_slice(&cue.time_ms.to_be_bytes());          // 0x20: time_ms

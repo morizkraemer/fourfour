@@ -122,7 +122,7 @@ mod waveform_data {
 }
 
 /// A cue or memory point within a track.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CuePoint {
     /// 0 = memory cue, 1 = hot cue A, 2 = hot cue B, etc.
     pub hot_cue_number: u32,
@@ -130,6 +130,12 @@ pub struct CuePoint {
     pub time_ms: u32,
     /// Loop end position in ms, or `None` if not a loop
     pub loop_time_ms: Option<u32>,
+    /// Free-text cue name, empty = none.
+    #[serde(default)]
+    pub name: String,
+    /// `#rrggbb` or `table:N` (N = 1 to 16, see `cue_color`); `None` = no colour.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 /// Full analysis result for a track.

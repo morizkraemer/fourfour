@@ -31,7 +31,8 @@ Already fixed before `wu-writer` (u64 index math); see `anlz_long_track_repro.rs
 
 Sources are other workers' reports. Those docs and findings were not on this branch's base, so they were not re-verified here.
 
-- `parse_pco2` assumes 88-byte entries and drops names and colours: `docs/architecture/rekordbox-import.md`.
+- `parse_pco2` assumes 88-byte entries and drops names and colours: `docs/architecture/rekordbox-import.md`. Fixed on `wu-writer` (walks `len_entry`, reads name and colour).
+- Cue names, colours, loop type byte and `PCPT` status (`docs/architecture/cues.md`, "Writer issues"): fixed on `wu-writer`, see `cdj-checklist-2026-10.md` (2026-10-27).
 - SQLCipher keys are private/unavailable for the library DB: reported by the rekordbox-import worker.
 - There is no PDB reader (only a writer; tests parse the PDB by hand): reported by the same worker.
 - Writer proposals for multi-USB sync: `docs/architecture/multi-usb-sync.md`.
