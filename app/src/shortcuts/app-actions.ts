@@ -109,7 +109,7 @@ export function buildAppActions(): ShortcutAction[] {
       label: 'Show keyboard shortcuts',
       group: GROUP.general,
       defaultBinding: null,
-      run: () => openSettings('shortcuts'),
+      run: () => openSettings('keyboard'),
     },
     {
       id: 'ui.dismiss',

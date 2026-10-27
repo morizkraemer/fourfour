@@ -7,13 +7,15 @@
   import './command-palette.css';
   import { tick } from 'svelte';
   import Icon from './Icon.svelte';
+  import Switch from './Switch.svelte';
 
   /**
-   * @typedef {{ id: string, name: string, sub?: string, right?: string, icon?: string, ranges?: number[] }} PaletteItem
+   * @typedef {{ kind: 'switch', on: boolean } | { kind: 'choice', value: string, options: { value: string, label: string }[] }} PaletteControl
+   * @typedef {{ id: string, name: string, sub?: string, right?: string, icon?: string, ranges?: number[], control?: PaletteControl }} PaletteItem
    * @typedef {{ key: string, title: string, items: PaletteItem[] }} PaletteGroup
    */
 
-  /** @type {{ open?: boolean, query?: string, groups?: PaletteGroup[], placeholder?: string, emptyLabel?: string, onRun?: (item: PaletteItem, group: PaletteGroup) => void, onClose?: () => void }} */
+  /** @type {{ open?: boolean, query?: string, groups?: PaletteGroup[], placeholder?: string, emptyLabel?: string, onRun?: (item: PaletteItem, group: PaletteGroup) => void, onChoose?: (item: PaletteItem, value: string) => void, onClose?: () => void }} */
   let {
     open = false,
     query = $bindable(''),
@@ -21,6 +23,7 @@
     placeholder = 'Type a command, playlist or track…',
     emptyLabel = 'No matches',
     onRun,
+    onChoose,
     onClose,
   } = $props();
 
@@ -151,7 +154,24 @@
                 <span class="ff-cp__row-name">
                   {#each segments(item.name, item.ranges) as seg}{#if seg.hit}<b class="ff-cp__hit">{seg.text}</b>{:else}{seg.text}{/if}{/each}{#if item.sub}<span class="ff-cp__row-sub"> {item.sub}</span>{/if}
                 </span>
-                {#if item.right}<span class="ff-cp__row-right">{item.right}</span>{/if}
+                {#if item.control?.kind === 'switch'}
+                  <span class="ff-cp__row-control"><Switch on={item.control.on} label={item.name} /></span>
+                {:else if item.control?.kind === 'choice'}
+                  <span class="ff-cp__row-control ff-cp__choices" role="group" aria-label={item.name}>
+                    {#each item.control.options as option (option.value)}
+                      <button
+                        type="button"
+                        class="ff-cp__choice"
+                        class:ff-cp__choice--on={option.value === item.control.value}
+                        tabindex="-1"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          onChoose?.(item, option.value);
+                        }}
+                      >{option.label}</button>
+                    {/each}
+                  </span>
+                {:else if item.right}<span class="ff-cp__row-right">{item.right}</span>{/if}
               </div>
             {/each}
           {/if}

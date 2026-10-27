@@ -1,12 +1,15 @@
 <!--
   CommandPalette.svelte — ⌘K palette: actions, playlists/devices to jump to, and tracks.
   Actions come from the shortcut registry, so labels and shortcuts never drift.
+  Settings rows carry their control inline and keep the palette open while it is changed.
 -->
 <script>
   import { tick } from 'svelte';
   import { CommandPalette } from '$ds';
   import { ui, closePalette } from '../stores/ui.svelte.ts';
   import { library } from '../stores/library.svelte.ts';
+  import { loadAppSettings } from '../stores/app-settings.svelte.ts';
+  import { buildSettingSources } from '../stores/settings-rows.ts';
   import { shortcuts } from '../shortcuts/index.ts';
   import { formatBinding } from '../shortcuts/keybinding.ts';
   import { goToSource, jumpToTrack } from '../shortcuts/navigation.ts';
@@ -15,11 +18,13 @@
   let query = $state('');
 
   $effect(() => {
-    if (ui.paletteOpen) query = '';
+    if (!ui.paletteOpen) return;
+    query = '';
+    void loadAppSettings();
   });
 
   let sources = $derived.by(() => {
-    if (!ui.paletteOpen) return { actions: [], places: [], tracks: [] };
+    if (!ui.paletteOpen) return { actions: [], settings: [], places: [], tracks: [] };
     return {
       actions: shortcuts.actions
         .filter((a) => a.palette !== false && (!a.when || a.when()))
@@ -29,6 +34,7 @@
           shortcut: formatBinding(shortcuts.bindingOf(a.id)),
           run: a.run,
         })),
+      settings: buildSettingSources(),
       places: [
         { id: 'all', label: 'All Tracks', sub: 'library', icon: 'list', run: () => void goToSource('All Tracks') },
         { id: 'recent', label: 'Recently Added', sub: 'library', icon: 'clock-3', run: () => void goToSource('Recently Added') },
@@ -57,6 +63,10 @@
 
   async function onRun(item) {
     const entry = model.flatMap((g) => g.items).find((e) => e.id === item.id);
+    if (entry?.keepOpen) {
+      entry.run();
+      return;
+    }
     closePalette();
     await tick();
     entry?.run();
@@ -68,5 +78,6 @@
   bind:query
   groups={model}
   {onRun}
+  onChoose={(item, value) => model.flatMap((g) => g.items).find((e) => e.id === item.id)?.choose?.(value)}
   onClose={closePalette}
 />

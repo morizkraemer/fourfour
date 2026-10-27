@@ -8,6 +8,15 @@ function sources(run = vi.fn()): PaletteSources {
       { id: 'new', label: 'New playlist', shortcut: '⌘⇧N', run },
       { id: 'settings', label: 'Open settings', shortcut: '⌘,', run },
     ],
+    settings: [
+      {
+        id: 'analysis.autoAnalyzeNew',
+        label: 'Settings: Analyze new tracks',
+        control: { kind: 'switch', on: true },
+        change: run,
+      },
+      { id: 'page.audio', label: 'Open settings › Audio', change: run },
+    ],
     places: [
       { id: 'all', label: 'All Tracks', icon: 'list', run },
       { id: 'p1', label: 'Peak Time', sub: 'playlist', icon: 'list', run },
@@ -54,5 +63,35 @@ describe('buildPaletteGroups', () => {
     const run = vi.fn();
     buildPaletteGroups('new', sources(run))[0].items[0].run();
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides settings rows until the query asks for them', () => {
+    expect(ids(buildPaletteGroups('', sources()), 'settings')).toEqual([]);
+    expect(ids(buildPaletteGroups('analyze new', sources()), 'settings')).toEqual([
+      'setting:analysis.autoAnalyzeNew',
+    ]);
+  });
+
+  it('keeps the palette open on control rows and routes the chosen value', () => {
+    const change = vi.fn();
+    const src = sources();
+    src.settings = [
+      {
+        id: 'e',
+        label: 'Settings: Analysis engine',
+        control: { kind: 'choice', value: 'auto', options: [{ value: 'auto', label: 'Automatic' }] },
+        change,
+      },
+      { id: 'page.audio', label: 'Open settings › Audio', change },
+    ];
+    const rows = buildPaletteGroups('settings', src).find((g) => g.key === 'settings')!.items;
+    const engine = rows.find((r) => r.id === 'setting:e')!;
+    const page = rows.find((r) => r.id === 'setting:page.audio')!;
+    expect(engine.keepOpen).toBe(true);
+    expect(page.keepOpen).toBe(false);
+    engine.choose!('python');
+    expect(change).toHaveBeenCalledWith('python');
+    engine.run();
+    expect(change).toHaveBeenLastCalledWith();
   });
 });
