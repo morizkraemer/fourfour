@@ -147,3 +147,4 @@
 2026-10-27 11:05 orchestrator - Merlin round-5 feedback (I1–I5); W-F inspector fix (waveform, edit, cue menu) + W-O sidebar option A (card drop, stick All tracks) spawned
 2026-10-27 11:27 orchestrator - merged wo-sidebar (I2/H5) + wf-inspector-fix (I1/I3/I4) into q41-feedback cdfa212; checks green (416 tests, 0 warnings); Mac install started
 2026-10-27 11:28 orchestrator - Mac install done (cdfa212, round 5)
+2026-10-27 11:57 orchestrator - Mac install done (cdfa212); Merlin: sidebar wide layout + empty state (W-P spawned); tempo/key engine approved with defaults, built + tested on wk-tempo before integrating (W-K spawned)
