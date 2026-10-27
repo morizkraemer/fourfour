@@ -166,3 +166,5 @@
 2026-10-27 17:02 orchestrator Q43 spawn: review (seat, opus) · Q44 spawn: leftovers (seat, sonnet)
 2026-10-27 17:20 orchestrator Q44 landed-on-branch: q44-leftovers a26ab3c → q42-overnight 6f654ab (488 tests, 0 warnings); flaky = cold-import timeouts
 2026-10-27 17:20 orchestrator Q46 spawn: key refit on permissive labels (seat, opus); Q45 waits for the Mac install to finish
+2026-10-27 17:20 orchestrator - Mac install done (51a9ef0, round 7 + stick sync)
+2026-10-27 17:20 orchestrator Q45 spawn: unsigned dmg build on Mac (~/dev/build/fourfour-dmg, orchestrator background job)
