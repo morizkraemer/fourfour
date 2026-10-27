@@ -227,4 +227,19 @@ fn resync_after_removing_a_track_drops_only_that_track() {
     assert_eq!(after.playlists.iter().map(|p| p.track_ids.len()).sum::<usize>(), 4);
     assert!(reader::anlz::read_anlz(&dat).is_ok());
     assert_eq!(sticks::read_manifest(&usb).unwrap().unwrap().files.len(), 5);
+
+    let pdb = std::fs::read(usb.join("PIONEER/rekordbox/export.pdb")).unwrap();
+    assert!(!pdb.is_empty() && pdb.len() % 4096 == 0);
+    let imported = pioneer_library::rekordbox::load_usb(&usb).unwrap();
+    assert_eq!(imported.tracks.len(), 5);
+    let mut imported_names: Vec<_> =
+        imported.playlists.iter().filter(|p| !p.is_folder).map(|p| p.name.clone()).collect();
+    imported_names.sort();
+    assert_eq!(imported_names, vec!["Peak", "Warmup"]);
+    let with_cues = imported
+        .tracks
+        .iter()
+        .find(|t| t.track.title == library_title(&fx, fx.ids[0]))
+        .unwrap();
+    assert_eq!(with_cues.cues.iter().filter(|c| c.hot_cue_number > 0).count(), 2);
 }
