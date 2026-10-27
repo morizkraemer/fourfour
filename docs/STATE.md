@@ -19,7 +19,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 9. [accepted 2026-10-27 per rec] Q42: library schema v5→v6 additive (sticks, stick_tracks, stick_playlists) — rec: keep — branch: q42-overnight
 10. [accepted 2026-10-27 per rec] Q42: writer `sync_usb_keeping(keep_files)` so removals never delete files fourfour didn't write (brother's lane, no format bytes) — rec: keep, tell brother — branch: q42-overnight
 11. Review the new stick board, sync confirm dialog, ribbon slot hover, ⌥ pads, zoomed waveform on the Mac — rec: test tomorrow — branch: q42-overnight
-0. USB export fails from 192 tracks; colour waveforms wrong on tracks > 7:17 (brother's writer) — rec: send your brother docs/architecture/writer-bugs-2026-10.md first thing — branch: q27-writer-repro
+0. [resolved 2026-10-27] Writer bugs (192-track PDB split, >7:17 colour overflow, cue names/colours) fixed on wu-writer, merged to master; CDJ check still open: docs/architecture/cdj-checklist-2026-10.md — rec: brother runs the checklist — branch: master
 1. Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
 2. Copy a playlist to another stick: Keep updated on by default? — rec: yes — branch: none
 3. Build round 3 into the app (replaces ui-sync-flow's first attempt, keeps the stick header)? — rec: yes after 1–2 — branch: ui-sync-flow
@@ -56,9 +56,9 @@ decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync f
 ### Q43 Review rounds 3–6 [done, q43-review 33b2906 → q42-overnight 8d84da9; 8 fixes; follow-ups in Q43b] [box] — bug hunt over the q41-feedback merges; extra care: wipe guard, volumes.rs, writer pdb/cue changes, tempo engine RT safety. Fix clear bugs on branch, list the rest. 150 min
 ### Q44 Leftovers [done, q44-leftovers a26ab3c → q42-overnight 6f654ab] [box] — row waveforms blue-block (row_bands detail labelled overview), player overview fallback → stripBandsFromAnalysis, flaky vitest (find + fix). 90 min
 ### Q45 Unsigned .dmg [done] — Mac ~/dev/build/fourfour-dmg/target/release/bundle/dmg/fourfour_0.1.0_aarch64.dmg (32 MB, checksum valid, ad-hoc signed, arm64 only, app 79 MB incl. dev bench binaries) [mac] — `cargo tauri build` .dmg on the Mac build clone (separate dir), launch smoke check headless; report artifact + size + log. No signing/notarising. 60 min
-### Q43b Review follow-ups [running] [box] — PDB oversized row, fake data on error paths, Linux removable filter + wipe path check, Esc/editable/listener/loadStick/claim_selection. 120 min
+### Q43b Review follow-ups [done, q43b-fixes dab9629 → q42-overnight 0c713b9] [box] — PDB oversized row, fake data on error paths, Linux removable filter + wipe path check, Esc/editable/listener/loadStick/claim_selection. 120 min
 ### Q46 Key refit on permissive labels [running] [box] — find permissively licensed key labels, refit templates, measure on Beatport set; report only, never shipped. 150 min
-### Q47 Housekeeping [queued] [box] — remove merged worktrees + caches (check uncommitted/ignored first), disk < 70%; trim STATE.md to ≤80 lines (history → journal/docs). 45 min
+### Q47 Housekeeping [done, a72200e: 27 worktrees removed, STATE 96→64 lines, disk 47%] [box] — remove merged worktrees + caches (check uncommitted/ignored first), disk < 70%; trim STATE.md to ≤80 lines (history → journal/docs). 45 min
 
 ## Rundown
 Latest: Q42–Q44 done on q42-overnight; Q43b and Q46 still running. Older rundown → docs/state-archive-2026-10-28.md.

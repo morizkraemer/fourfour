@@ -175,3 +175,4 @@
 2026-10-27 18:01 orchestrator Q43b landed-on-branch: q43b-fixes dab9629 → q42-overnight 0c713b9; full checks green (505 tests, 0 warnings); Mac install of 0c713b9 started
 2026-10-27 18:01 orchestrator Q47 spawn: housekeeping (seat, haiku)
 2026-10-27 18:03 orchestrator - Mac install done (0c713b9, full overnight build; macOS volume guard compiles, 0 warnings)
+2026-10-27 18:03 orchestrator Q47 done: 27 worktrees removed, STATE trimmed (a72200e), disk 47%; Waiting item 0 marked resolved (parse_pco2 reads names/colours, verified)
