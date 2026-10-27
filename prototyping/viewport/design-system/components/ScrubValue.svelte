@@ -206,6 +206,7 @@
     bind:value={text}
     class="ff-scrub__input"
     class:ff-scrub__input--invalid={invalid}
+    style:color={color}
     type="text"
     inputmode="decimal"
     spellcheck="false"
