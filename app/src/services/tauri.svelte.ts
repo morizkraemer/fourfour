@@ -376,6 +376,8 @@ function runMockAnalysis(ids: number[]): Promise<TrackInfo[]> {
     ids.forEach((id, index) => {
       const start = index * MOCK_TRACK_GAP_MS;
       setTimeout(() => {
+        const track = mockTracks.find((t) => t.id === id);
+        if (track) track.key = '3A';
         mockStages.set(id, MOCK_STAGES_WAVEFORM_AND_KEY);
         invalidateAnalysisCache(id);
         mockAnalysisListeners.partial.forEach((cb) => cb({ track_id: id }));
@@ -384,7 +386,6 @@ function runMockAnalysis(ids: number[]): Promise<TrackInfo[]> {
         const track = mockTracks.find((t) => t.id === id);
         if (track) {
           track.tempo = 12600 + (id % 7) * 100;
-          track.key = '3A';
           track.has_analysis = true;
         }
         mockStages.set(id, MOCK_STAGES_ALL);

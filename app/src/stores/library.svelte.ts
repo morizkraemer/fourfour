@@ -514,6 +514,7 @@ function applyWaveformAndCuesFromAnalysis(
 export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Promise<void> {
   if (track.analysisLoaded || !track.analyzed) return;
   const id = track.id as number;
+  if (isTrackAnalyzing(id)) return;
   const inflight = peakLoadInflight.get(id);
   if (inflight) return inflight;
 

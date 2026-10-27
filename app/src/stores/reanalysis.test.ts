@@ -35,7 +35,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { analyzeTrackIds, initLibrary, isTrackAnalyzing, library } from './library.svelte.ts';
+import { analyzeTrackIds, ensureTrackPeaksLoaded, initLibrary, isTrackAnalyzing, library } from './library.svelte.ts';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { initPlayerAnalysisRefresh, loadPlayerTrack, player } from './player.svelte.ts';
 
@@ -117,6 +117,16 @@ describe('re-analysis of analysed tracks', () => {
     expect(row(1).bands).toBeFalsy();
     expect(row(1).analysisPending).toBe(true);
     expect(row(2).bpm).toBe('128.0');
+  });
+
+  it('does not read the stored analysis back while the stages are still running', async () => {
+    await analyzeTrackIds([1]);
+    vi.mocked(invoke).mockClear();
+
+    await ensureTrackPeaksLoaded(row(1));
+
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('get_analysis_data', expect.anything());
+    expect(row(1).bpm).toBe('—');
   });
 
   it('keeps hand-set BPM and key', async () => {
