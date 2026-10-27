@@ -67,6 +67,7 @@ pub(crate) struct Lab {
     pub block: usize,
     pub timings_ns: Vec<u64>,
     pub positions: Vec<f64>,
+    buffered_cap: Option<usize>,
 }
 
 impl Lab {
@@ -90,6 +91,7 @@ impl Lab {
             block,
             timings_ns: Vec::new(),
             positions: Vec::new(),
+            buffered_cap: None,
         };
         lab.locate(0);
         lab
@@ -109,7 +111,10 @@ impl Lab {
 
     fn fill(&mut self) {
         let mut producer = lock_ignoring_poison(&self.pipe.producer);
-        let free_frames = producer.vacant_len() / 2;
+        let mut free_frames = producer.vacant_len() / 2;
+        if let Some(cap) = self.buffered_cap {
+            free_frames = free_frames.min(cap.saturating_sub(producer.occupied_len() / 2));
+        }
         let remaining = self.source_frames().saturating_sub(self.next_frame);
         let n = free_frames.min(remaining);
         if n > 0 {
@@ -170,6 +175,17 @@ impl Lab {
         self.tempo.set_ratio(ratio);
         self.tempo.set_semitones(semitones);
         self.tempo.set_key_lock(key_lock);
+    }
+
+    pub fn starve(&mut self, cap: usize, period: usize) {
+        let held = self.state.cons.occupied_len() / 2;
+        let drop = held.saturating_sub(cap).div_ceil(period) * period;
+        self.state.cons.skip(drop.min(held / period * period) * 2);
+        self.buffered_cap = Some(cap);
+    }
+
+    pub fn feed_freely(&mut self) {
+        self.buffered_cap = None;
     }
 
     pub fn settle(&mut self) {
@@ -640,4 +656,64 @@ fn non_finite_samples_never_reach_the_output() {
         let tail_peak = tail.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(tail_peak > 0.3, "ratio {ratio} st {semitones} lock {lock}: silent after the bursts, peak {tail_peak}");
     }
+}
+
+#[test]
+fn stretcher_dropouts_and_path_flips_mid_fade_crossfade_without_clicks() {
+    let period = 192;
+    let freq = SR as f32 / period as f32;
+    let theory = 0.5 * (2.0 * PI * freq / SR as f32).powi(2);
+    let starved = 1_536;
+    let is_stretch = |lab: &Lab| lab.state.engine.last_path() == Some(crate::tempo::Path::Stretch);
+    let check = |label: &str, out: &[f32]| {
+        let (spike, at) = max_second_difference(&left(out), 1);
+        assert!(spike < theory * 3.0, "{label}: spike {spike} (sine {theory}) at frame {at}");
+    };
+
+    let mut lab = Lab::new(sine(freq, 30.0, 0.5), 256, STRETCH_PRESET);
+    lab.set(1.06, 0.0, true);
+    lab.settle();
+    assert!(is_stretch(&lab));
+    let mut out = Vec::new();
+    lab.step(&mut out);
+    lab.starve(starved, period);
+    for _ in 0..40 {
+        lab.step(&mut out);
+    }
+    assert!(!is_stretch(&lab), "stretcher kept playing with {starved} frames buffered");
+    check("dropout", &out);
+
+    lab.feed_freely();
+    let mut out = Vec::new();
+    lab.step(&mut out);
+    for _ in 0..200 {
+        lab.step(&mut out);
+        if is_stretch(&lab) {
+            break;
+        }
+    }
+    assert!(is_stretch(&lab), "stretcher never came back");
+    lab.step(&mut out);
+    lab.set(1.06, 0.0, false);
+    for _ in 0..40 {
+        lab.step(&mut out);
+    }
+    check("key lock off half way into the fade", &out);
+
+    lab.set(1.06, 0.0, true);
+    let mut out = Vec::new();
+    lab.step(&mut out);
+    for _ in 0..200 {
+        lab.step(&mut out);
+        if is_stretch(&lab) {
+            break;
+        }
+    }
+    assert!(is_stretch(&lab), "stretcher never came back after key lock");
+    lab.step(&mut out);
+    lab.starve(starved, period);
+    for _ in 0..40 {
+        lab.step(&mut out);
+    }
+    check("dropout half way into the fade", &out);
 }
