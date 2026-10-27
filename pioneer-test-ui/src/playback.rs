@@ -249,6 +249,7 @@ impl RenderState {
         level_right: Arc<AtomicU32>,
         tempo: Arc<TempoParams>,
         sample_rate: u32,
+        preset: Preset,
     ) -> Self {
         Self {
             cons,
@@ -256,7 +257,7 @@ impl RenderState {
             level_left,
             level_right,
             tempo,
-            engine: TempoEngine::new(sample_rate, STRETCH_PRESET),
+            engine: TempoEngine::new(sample_rate, preset),
             chunk: vec![0.0; CHUNK_FRAMES * MAX_DEVICE_CHANNELS],
             callback_generation: 0,
             declick_remaining: 0,
@@ -489,6 +490,7 @@ impl PlaybackEngine {
             inner.level_right.clone(),
             inner.tempo.clone(),
             inner.config.sample_rate,
+            STRETCH_PRESET,
         );
         let active_epoch = inner.output_epoch.clone();
         let render: RenderFn = Box::new(move |data, channels| {
@@ -1475,3 +1477,7 @@ pub fn playback_set_output_device(
 #[cfg(test)]
 #[path = "playback_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tempo_tests.rs"]
+mod tempo_tests;

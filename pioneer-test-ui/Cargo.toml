@@ -46,3 +46,6 @@ path = "src/bin/waveform_fixtures.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+fourfour-stretch = { path = "../fourfour-stretch", features = ["count-allocs"] }
