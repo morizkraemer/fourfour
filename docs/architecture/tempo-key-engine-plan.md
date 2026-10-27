@@ -133,6 +133,14 @@ Not met or caveats:
 - Latency until a seek lands at the new tempo and key: about 8 callbacks of varispeed first (pitch follows tempo for roughly 45 ms at 256 frames).
 - Not tested on a real audio device (none here); the Mac checklist in `audio-engine-2026-10.md` still applies, plus: drag the tempo with a track playing and listen for zipper noise, toggle MT at +8 %.
 
+### Robustness follow-ups (q48, 2026-10-27)
+
+- The engine (smoothing, limiter window, stretcher) is built at the rate the device actually opened. `OutputBackend::open` takes a `MakeRender` factory and calls it with the device's rate and channel count.
+- The sample ring is sized per device: `channels x (max stretcher lookahead + 2 s)`, allocated when the output opens. The lookahead covers the worst spacing (+50 % tempo at -12 st). 8 channels at 192 kHz now stretch instead of falling back to varispeed.
+- When the ring runs too low for the stretcher (a lagging decoder), it keeps running on zero-padded input until its 1024-frame fade-out ends, then re-primes. A path change mid-fade continues the fade (same side) or reverses it from where it stands; the fade curve is fixed when the fade starts.
+- NaN and infinite source samples become 0 where the callback reads the ring, before any path, the stretcher or the limiter.
+- Offline harness (pitch, tempo/drift, latency, transparency, clicks) re-run after these changes: every number identical to the table above.
+
 Listening renders (30 s excerpts of three tracks, original / +8 % / -8 % / +16 % / +2 st / -2 st / +8 % varispeed / sweep, plus Rubber Band reference renders): `/tmp/claude-1000/-home-merlin-dev-projects-fourfour/5e0c999f-66b8-4690-ac43-edb78b690bb0/scratchpad/feedback/wk/renders/index.md`.
 
 Reproduce: `cargo test --release -p pioneer-test-ui --bin pioneer-test-ui lab_report_ -- --ignored --nocapture` (env `FOURFOUR_LAB=pitch,tempo,latency,transparency,transients,clicks,cpu`, `FOURFOUR_LAB_TRACKS`, `FOURFOUR_LAB_OUT`); `lab_render_listening_set` writes the renders.
