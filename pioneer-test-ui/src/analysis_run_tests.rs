@@ -229,6 +229,24 @@ fn named(kind: fn(String) -> Event, name: &str) -> Event {
 }
 
 #[tokio::test]
+async fn re_analysis_keeps_hand_edited_tags() {
+    let h = harness(1, 1, 8);
+    {
+        let lib = h.shared.lock().unwrap();
+        let mut edited = lib.get_track(1).unwrap().unwrap();
+        edited.title = "Hand Title".into();
+        edited.genre = "Hand Genre".into();
+        lib.update_track(1, &edited).unwrap();
+    }
+    h.run_all(h.items.clone()).await;
+    h.run_all(h.items.clone()).await;
+
+    let stored = h.shared.lock().unwrap().get_track(1).unwrap().unwrap();
+    assert_eq!((stored.title.as_str(), stored.genre.as_str()), ("Hand Title", "Hand Genre"));
+    assert_eq!((stored.tempo, stored.key.as_str()), (12800, "8A"));
+}
+
+#[tokio::test]
 async fn the_fast_pass_of_every_track_comes_before_any_grid_pass_and_stores_waveform_and_key() {
     let h = harness(5, 2, 8);
     let outcome = h.run_all(h.items.clone()).await;

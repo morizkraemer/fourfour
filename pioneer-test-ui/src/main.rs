@@ -7,6 +7,7 @@ mod analysis_run;
 mod band_analysis;
 mod dto;
 mod playback;
+mod track_fields;
 mod track_infos;
 
 use std::collections::{HashMap, VecDeque};
@@ -28,6 +29,7 @@ use analysis_run::{
     merge_into_analysis_queue, rerun_work, resolve_analysis_work, AnalysisCoordinator, AnalysisSink, AnalysisWorkItem, LogLevel,
     RunOutcome, SharedLibrary,
 };
+use track_fields::{apply_edits, TrackFieldEdits, TrackFields};
 use track_infos::build_track_infos;
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
@@ -806,6 +808,28 @@ async fn set_track_key(track_id: i64, key: String, state: State<'_, SharedLibrar
     .map_err(|e| e.to_string())?
 }
 
+/// Edit the title, artist, album or genre of a track in the library. File tags are never touched.
+#[tauri::command]
+async fn update_track_fields(
+    track_id: i64,
+    edits: TrackFieldEdits,
+    state: State<'_, SharedLibrary>,
+) -> Result<TrackFields, String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let mut track = lib
+            .get_track(track_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("Track {track_id} is not in the library"))?;
+        apply_edits(&mut track, &edits)?;
+        lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
+        Ok(TrackFields::of(&track))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Let re-analysis replace the hand-set BPM and key of a track again.
 #[tauri::command]
 async fn release_user_edits(track_id: i64, state: State<'_, SharedLibrary>) -> Result<(), String> {
@@ -1202,6 +1226,7 @@ fn main() {
             set_beat_grid,
             set_track_bpm,
             set_track_key,
+            update_track_fields,
             release_user_edits,
             rescale_beat_grid,
             set_cues,
