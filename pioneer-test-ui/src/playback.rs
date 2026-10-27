@@ -715,9 +715,6 @@ impl PlaybackEngine {
         self.lock().tempo.set_key_lock(on);
     }
 
-    pub fn tempo_target(&self) -> crate::tempo::TempoTarget {
-        self.lock().tempo.target()
-    }
 
     fn stop_locked(&self, inner: &mut Inner) {
         inner.tick_stop.store(true, Ordering::SeqCst);

@@ -360,7 +360,6 @@ pub enum Path {
 pub struct ChunkResult {
     pub valid_frames: usize,
     pub popped_frames: usize,
-    pub path: Path,
 }
 
 pub struct TempoEngine {
@@ -435,24 +434,13 @@ impl TempoEngine {
         }
     }
 
-    pub fn input_latency(&self) -> usize {
-        self.input_latency
-    }
-
-    pub fn output_latency(&self) -> usize {
-        self.output_latency
-    }
-
     pub fn rate(&self) -> f64 {
         self.rate
     }
 
+    #[cfg(test)]
     pub fn last_path(&self) -> Option<Path> {
         self.last_path
-    }
-
-    pub fn is_primed(&self) -> bool {
-        self.primed
     }
 
     /// Source frames played since the last flush, including the fractional carry.
@@ -538,7 +526,6 @@ impl TempoEngine {
             return ChunkResult {
                 valid_frames: 0,
                 popped_frames: 0,
-                path: Path::Identity,
             };
         }
 
@@ -606,7 +593,8 @@ impl TempoEngine {
                         (1.0 - t, t)
                     };
                     for c in 0..ch {
-                        out[f * ch + c] = old[f * ch + c] * gain_old + current[f * ch + c] * gain_new;
+                        out[f * ch + c] =
+                            soft_knee(old[f * ch + c] * gain_old + current[f * ch + c] * gain_new);
                     }
                 }
                 self.fade_done += n;
@@ -632,7 +620,6 @@ impl TempoEngine {
         ChunkResult {
             valid_frames: valid,
             popped_frames: popped,
-            path: effective,
         }
     }
 

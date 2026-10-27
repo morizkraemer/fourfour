@@ -471,6 +471,99 @@ fn seek_never_outputs_audio_from_before_the_seek() {
 }
 
 #[test]
+fn seek_while_tempo_and_key_are_changed_never_outputs_pre_seek_audio() {
+    let carrier = scratch("carrier_ramp_8k.wav");
+    write_wav(&carrier, 8_000, 2, 160_000, |n, _| {
+        let amplitude = 0.9 * n as f32 / 160_000.0;
+        amplitude * f32::sin(2.0 * std::f32::consts::PI * 1_000.0 * n as f32 / 8_000.0)
+    });
+    for (ratio, shift, lock) in [(1.16, 0.0, true), (0.9, 0.0, true), (1.08, 0.0, false), (1.0, 2.0, true)] {
+        let rig = rig();
+        rig.engine.configure(8_000, 128).unwrap();
+        rig.engine.set_tempo(ratio);
+        rig.engine.set_key_shift(shift);
+        rig.engine.set_key_lock(lock);
+        for target_ms in [3_000u64, 8_000, 1_000] {
+            rig.play(&carrier, 19_000, Some(20_000)).unwrap();
+            let before = rig.backend.pump(300, Duration::from_micros(300));
+            assert!(peak(&before) > 0.5, "pre-seek peak {}", peak(&before));
+            rig.engine.set_tempo(ratio * 1.01);
+            rig.seek(target_ms);
+            let out = collect_until_audible_frames(&rig.backend, 6_000);
+            let wanted = ramp_value(target_ms, true);
+            let settled = &out[300 * 2..];
+            assert!(is_audible(settled), "no audio after seek");
+            for window in settled.chunks(160) {
+                assert!(
+                    peak(window) < wanted + 0.25,
+                    "tempo {ratio} st {shift} lock {lock} -> {target_ms}: wanted {wanted}, saw {}",
+                    peak(window)
+                );
+            }
+            rig.engine.set_tempo(ratio);
+        }
+    }
+}
+
+#[test]
+fn stop_drops_tempo_and_key_shift_but_keeps_key_lock() {
+    let rig = rig();
+    rig.engine.set_tempo(1.12);
+    rig.engine.set_key_shift(3.0);
+    rig.engine.set_key_lock(false);
+    rig.engine.stop().unwrap();
+    let target = rig.engine.lock().tempo.target();
+    assert_eq!((target.ratio, target.semitones, target.key_lock), (1.0, 0.0, false));
+}
+
+#[test]
+fn tempo_commands_clamp_to_the_supported_range() {
+    let rig = rig();
+    rig.engine.set_tempo(9.0);
+    rig.engine.set_key_shift(-99.0);
+    let target = rig.engine.lock().tempo.target();
+    assert_eq!((target.ratio, target.semitones), (crate::tempo::MAX_RATIO, -crate::tempo::MAX_SEMITONES));
+    rig.engine.set_tempo(0.0);
+    assert_eq!(rig.engine.lock().tempo.target().ratio, crate::tempo::MIN_RATIO);
+}
+
+#[test]
+fn tempo_survives_a_device_reopen_and_ticks_report_it() {
+    let rig = rig();
+    let path = scratch("tempo_tick.wav");
+    sine_wav(&path, 48_000, 2, 10, 220.0);
+    rig.engine.set_tempo(1.16);
+    rig.play(&path, 0, Some(10_000)).unwrap();
+    rig.backend.pump(1_500, Duration::from_micros(300));
+    assert!(wait_until(Duration::from_secs(1), || rig.events.tick_count() > 0));
+    let ratio = rig.events.ticks.lock().unwrap().last().unwrap().tempo_ratio;
+    assert!((ratio - 1.16).abs() < 0.01, "tick ratio {ratio}");
+
+    rig.engine.configure(44_100, 256).unwrap();
+    let target = rig.engine.lock().tempo.target();
+    assert!((target.ratio - 1.16).abs() < 1e-6);
+}
+
+#[test]
+fn key_shift_is_audible_within_a_tenth_of_a_second() {
+    let rig = rig();
+    let path = scratch("shift_audible.wav");
+    sine_wav(&path, 48_000, 2, 10, 440.0);
+    rig.play(&path, 0, Some(10_000)).unwrap();
+    rig.backend.pump(400, Duration::from_micros(300));
+    rig.engine.set_key_shift(12.0);
+    let mut out = Vec::new();
+    for _ in 0..(4_800 / 128 + 1) {
+        out.extend(rig.backend.render_frames(128));
+        thread::sleep(Duration::from_micros(300));
+    }
+    let tail: Vec<f32> = out.chunks(2).map(|f| f[0]).skip(2_600).collect();
+    let crossings = tail.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+    let hz = crossings as f64 * 48_000.0 / tail.len() as f64;
+    assert!(hz > 440.0 * 2f64.powf(6.0 / 12.0), "pitch after 100 ms: {hz:.0} Hz");
+}
+
+#[test]
 fn audio_decoded_before_the_callback_runs_is_not_flushed_after_a_seek() {
     let rig = rig();
     rig.engine.configure(8_000, 128).unwrap();
@@ -924,21 +1017,26 @@ fn rapid_seek_spam_lands_on_the_last_target() {
 fn render_callback_never_allocates() {
     let rig = rig();
     let path = scratch("alloc_free.wav");
-    sine_wav(&path, 48_000, 2, 5, 440.0);
-    rig.play(&path, 0, Some(5_000)).unwrap();
+    sine_wav(&path, 48_000, 2, 12, 440.0);
+    rig.play(&path, 0, Some(12_000)).unwrap();
     rig.backend.pump(100, Duration::from_micros(300));
     thread::sleep(Duration::from_millis(100));
 
     let mut buf = vec![0.0f32; 128 * 2];
     let mut audible_buffers = 0;
+    let mut cpp_events = (0usize, 0usize);
     let mut run_armed = |rig: &Rig, buffers: usize| {
         COUNTING.with(|c| c.set(true));
+        fourfour_stretch::alloc_count::arm();
         for _ in 0..buffers {
             rig.backend.render_into(&mut buf);
             if buf.iter().any(|s| s.abs() > 1e-3) {
                 audible_buffers += 1;
             }
         }
+        let (allocs, frees) = fourfour_stretch::alloc_count::disarm();
+        cpp_events.0 += allocs;
+        cpp_events.1 += frees;
         COUNTING.with(|c| c.set(false));
     };
 
@@ -946,14 +1044,39 @@ fn render_callback_never_allocates() {
     run_armed(&rig, 500);
     rig.seek(2_000);
     run_armed(&rig, 300);
+
+    rig.engine.set_tempo(1.16);
+    run_armed(&rig, 600);
+    rig.engine.set_key_shift(5.0);
+    run_armed(&rig, 400);
+    rig.engine.set_key_lock(false);
+    run_armed(&rig, 400);
+    rig.engine.set_key_shift(0.0);
+    rig.engine.set_tempo(0.84);
+    run_armed(&rig, 400);
+    rig.engine.set_key_lock(true);
+    run_armed(&rig, 400);
+    rig.engine.set_tempo(1.5);
+    rig.engine.set_key_shift(-12.0);
+    run_armed(&rig, 400);
+    rig.seek(4_000);
+    run_armed(&rig, 600);
+    rig.engine.set_tempo(1.0);
+    rig.engine.set_key_shift(0.0);
+    run_armed(&rig, 800);
+    rig.seek(1_000);
+    rig.engine.set_tempo(1.08);
+    run_armed(&rig, 600);
+
     rig.engine.pause().unwrap();
     run_armed(&rig, 100);
     rig.engine.stop().unwrap();
     run_armed(&rig, 100);
     let allocations = ALLOCATIONS.load(Ordering::SeqCst) - before;
 
-    assert!(audible_buffers > 100, "callback never produced audio");
+    assert!(audible_buffers > 1_000, "callback never produced audio");
     assert_eq!(allocations, 0, "render callback allocated or freed memory");
+    assert_eq!(cpp_events, (0, 0), "stretcher allocated or freed memory in the callback");
 }
 
 #[test]

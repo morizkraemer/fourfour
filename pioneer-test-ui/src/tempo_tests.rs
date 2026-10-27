@@ -2,7 +2,7 @@ use super::*;
 
 use std::f32::consts::PI;
 
-use crate::tempo::{Path as TempoPath, TempoTarget};
+use crate::tempo::TempoTarget;
 
 pub(crate) const SR: u32 = 48_000;
 
@@ -67,7 +67,6 @@ pub(crate) struct Lab {
     pub block: usize,
     pub timings_ns: Vec<u64>,
     pub positions: Vec<f64>,
-    pub paths: Vec<TempoPath>,
 }
 
 impl Lab {
@@ -93,7 +92,6 @@ impl Lab {
             block,
             timings_ns: Vec::new(),
             positions: Vec::new(),
-            paths: Vec::new(),
         };
         lab.locate(0);
         lab

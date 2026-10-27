@@ -176,6 +176,29 @@ pub mod alloc_count {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "count-allocs")]
+    #[test]
+    fn allocation_counter_sees_cpp_allocations_and_processing_makes_none() {
+        alloc_count::arm();
+        let mut stretch = Stretch::new(2, 48_000.0, Preset::REALTIME);
+        let (allocs, _) = alloc_count::disarm();
+        assert!(allocs > 0, "counter did not see the constructor allocate");
+
+        let mut input = vec![0.1f32; 512 * 2];
+        let mut output = vec![0.0f32; 480 * 2];
+        for _ in 0..50 {
+            stretch.process(&mut input, &mut output);
+        }
+        alloc_count::arm();
+        for _ in 0..200 {
+            stretch.set_transpose_factor(1.0);
+            stretch.process(&mut input, &mut output);
+        }
+        stretch.reset();
+        let (allocs, frees) = alloc_count::disarm();
+        assert_eq!((allocs, frees), (0, 0));
+    }
+
     #[test]
     fn identity_stream_keeps_level() {
         let sr = 48_000.0;
