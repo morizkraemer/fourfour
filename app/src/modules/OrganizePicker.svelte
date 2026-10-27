@@ -9,7 +9,7 @@
   import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { dropFlash, cardKey } from '../stores/organize-drop.svelte.ts';
-  import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
+  import { sticks, stickAllTrackIds, stickPlaylistIds, capacityLabel } from '../stores/sticks.svelte.ts';
 
   const MAX_RECENT_NARROW = 4;
   const MAX_RECENT_WIDE = 8;
@@ -50,6 +50,17 @@
       .map((t) => t.cover)
       .filter(Boolean)
       .slice(0, 4);
+  }
+
+  function stickMeta(path) {
+    const playlistCount = stickPlaylistIds(path).length;
+    return [
+      `All tracks · ${stickAllTrackIds(path).length}`,
+      playlistCount > 0 ? `${playlistCount} ${playlistCount === 1 ? 'playlist' : 'playlists'}` : null,
+      capacityLabel(sticks.capacity[path]),
+    ]
+      .filter(Boolean)
+      .join(' · ');
   }
 
   function trackCountLabel(count) {
@@ -124,8 +135,8 @@
             <DestinationCard
               variant="stick"
               name={volumeLabel(vol)}
-              meta={`All tracks · ${stickAllTrackIds(vol).length}`}
-              dropActive={isDropTarget(dnd.dropStickPath === vol)}
+              meta={stickMeta(vol)}
+              dropActive={(dnd.kind === 'tracks' || dnd.kind === 'playlist') && dnd.dropStickPath === vol}
               flash={flashFor(target)}
               data-drop-stick-path={vol}
               onclick={() => pickVolume(vol)}

@@ -29,6 +29,7 @@
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag } from '../stores/dnd.svelte.ts';
+  import { dropPlaylistOnStick } from '../stores/organize-drop.svelte.ts';
 
   let intervalId;
   let renamingPlaylistId = $state(null);
@@ -239,11 +240,20 @@
         playlistDragId = playlistId;
         dnd.kind = 'playlist';
       }
+      if (moved) {
+        const stick = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-stick-path]');
+        dnd.dropStickPath = stick ? stick.getAttribute('data-drop-stick-path') : null;
+      }
     }
-    function onUp() {
+    async function onUp() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       if (!moved) return;
+      const stickPath = dnd.dropStickPath;
+      if (stickPath) {
+        playlistDropId = null;
+        await dropPlaylistOnStick(stickPath, playlistId);
+      }
       onPlaylistPointerUp(playlistId);
       playlistDragId = null;
       playlistDropId = null;
@@ -384,6 +394,9 @@
       {#each library.sidebarData.usb.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
+          class="ff-sidebar__drop-wrap"
+          class:drag-over={(dnd.kind === 'playlist' || dnd.kind === 'tracks') && dnd.dropStickPath === row.path}
+          data-drop-stick-path={row.path}
           oncontextmenu={(e) => openSourceMenu(e, row.path, row.label, true, row.path)}
         >
           <SidebarRow

@@ -22,6 +22,7 @@
   import Settings       from './modules/Settings.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import CommandPalette from './modules/CommandPalette.svelte';
+  import StickSyncDialog from './modules/StickSyncDialog.svelte';
 
   import {
     ui,
@@ -162,6 +163,7 @@
 
 <Settings />
 <CommandPalette />
+<StickSyncDialog />
 
 <Dialog
   open={library.showAnalysisPrompt}
