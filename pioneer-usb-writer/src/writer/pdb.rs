@@ -121,7 +121,7 @@ struct PageChunk {
 
 /// Split pre-built (heap, offsets) into page-sized chunks.
 /// Each chunk's heap + row_group footer must fit in PAGE_SIZE - HEAP_START bytes.
-fn split_into_pages(heap: &[u8], offsets: &[u16]) -> Vec<PageChunk> {
+fn split_into_pages(heap: &[u8], offsets: &[usize]) -> Vec<PageChunk> {
     if offsets.is_empty() {
         return vec![PageChunk { heap: Vec::new(), offsets: Vec::new() }];
     }
@@ -141,9 +141,9 @@ fn split_into_pages(heap: &[u8], offsets: &[u16]) -> Vec<PageChunk> {
             let rows_in_chunk = candidate - chunk_start;
             let rg = row_group_bytes(rows_in_chunk);
             // Heap bytes for this chunk: from offsets[chunk_start] to end of last row
-            let heap_start_offset = offsets[chunk_start] as usize;
+            let heap_start_offset = offsets[chunk_start];
             let heap_end_offset = if candidate < offsets.len() {
-                offsets[candidate] as usize
+                offsets[candidate]
             } else {
                 heap.len()
             };
@@ -161,16 +161,16 @@ fn split_into_pages(heap: &[u8], offsets: &[u16]) -> Vec<PageChunk> {
         }
 
         // Extract this chunk's heap slice and rebase offsets to 0
-        let heap_base = offsets[chunk_start] as usize;
+        let heap_base = offsets[chunk_start];
         let heap_end = if chunk_end < offsets.len() {
-            offsets[chunk_end] as usize
+            offsets[chunk_end]
         } else {
             heap.len()
         };
         let chunk_heap = heap[heap_base..heap_end].to_vec();
         let chunk_offsets: Vec<u16> = offsets[chunk_start..chunk_end]
             .iter()
-            .map(|&o| o - heap_base as u16)
+            .map(|&o| (o - heap_base) as u16)
             .collect();
 
         chunks.push(PageChunk {
@@ -441,11 +441,11 @@ fn write_chained_data_pages(
 
 // ── Table Building ─────────────────────────────────────────────────
 
-fn build_genre_rows(genres: &[String]) -> (Vec<u8>, Vec<u16>) {
+fn build_genre_rows(genres: &[String]) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for (i, g) in genres.iter().enumerate() {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes());
         heap.extend_from_slice(&encode_string(g));
         align_to_4(&mut heap);
@@ -453,11 +453,11 @@ fn build_genre_rows(genres: &[String]) -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
-fn build_label_rows(labels: &[String]) -> (Vec<u8>, Vec<u16>) {
+fn build_label_rows(labels: &[String]) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for (i, l) in labels.iter().enumerate() {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes());
         heap.extend_from_slice(&encode_string(l));
         align_to_4(&mut heap);
@@ -465,14 +465,14 @@ fn build_label_rows(labels: &[String]) -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
-fn build_artist_rows(artists: &[String]) -> (Vec<u8>, Vec<u16>) {
+fn build_artist_rows(artists: &[String]) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for (i, a) in artists.iter().enumerate() {
         let row_start = heap.len();
-        offsets.push(row_start as u16);
+        offsets.push(row_start);
         heap.extend_from_slice(&0x0060u16.to_le_bytes()); // subtype
-        heap.extend_from_slice(&((i as u16) * 0x20).to_le_bytes()); // index_shift
+        heap.extend_from_slice(&(i as u16).wrapping_mul(0x20).to_le_bytes()); // index_shift
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes()); // id
         heap.push(0x03); // empty string marker
         heap.push(0x0A); // ofs_name_near = 10
@@ -486,15 +486,15 @@ fn build_artist_rows(artists: &[String]) -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
-fn build_album_rows(albums: &[String], album_artist_map: &HashMap<String, u32>) -> (Vec<u8>, Vec<u16>) {
+fn build_album_rows(albums: &[String], album_artist_map: &HashMap<String, u32>) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for (i, a) in albums.iter().enumerate() {
         let row_start = heap.len();
-        offsets.push(row_start as u16);
+        offsets.push(row_start);
         let artist_id = *album_artist_map.get(a).unwrap_or(&0);
         heap.extend_from_slice(&0x0080u16.to_le_bytes()); // subtype
-        heap.extend_from_slice(&((i as u16) * 0x20).to_le_bytes()); // index_shift
+        heap.extend_from_slice(&(i as u16).wrapping_mul(0x20).to_le_bytes()); // index_shift
         heap.extend_from_slice(&0u32.to_le_bytes()); // unknown
         heap.extend_from_slice(&artist_id.to_le_bytes()); // artist_id
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes()); // album id
@@ -510,7 +510,7 @@ fn build_album_rows(albums: &[String], album_artist_map: &HashMap<String, u32>) 
     (heap, offsets)
 }
 
-fn build_key_rows() -> (Vec<u8>, Vec<u16>) {
+fn build_key_rows() -> (Vec<u8>, Vec<usize>) {
     // All 24 musical keys
     let key_names = [
         "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B",
@@ -519,7 +519,7 @@ fn build_key_rows() -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for (i, name) in key_names.iter().enumerate() {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         let id = (i + 1) as u32;
         heap.extend_from_slice(&id.to_le_bytes()); // id
         heap.extend_from_slice(&id.to_le_bytes()); // id2
@@ -529,7 +529,7 @@ fn build_key_rows() -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
-fn build_color_rows() -> (Vec<u8>, Vec<u16>) {
+fn build_color_rows() -> (Vec<u8>, Vec<usize>) {
     let colors = [
         (1, "Pink"), (2, "Red"), (3, "Orange"), (4, "Yellow"),
         (5, "Green"), (6, "Aqua"), (7, "Blue"), (8, "Purple"),
@@ -537,7 +537,7 @@ fn build_color_rows() -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for &(idx, name) in &colors {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&0u32.to_le_bytes()); // unknown1
         heap.push(0x00); // unknown2
         heap.push(idx as u8); // color_index
@@ -556,13 +556,13 @@ fn build_track_rows(
     label_map: &HashMap<String, u32>,
     remixer_map: &HashMap<String, u32>,
     today: &str,
-) -> (Vec<u8>, Vec<u16>) {
+) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
 
     for (idx, track) in tracks.iter().enumerate() {
         let row_start = heap.len();
-        offsets.push(row_start as u16);
+        offsets.push(row_start);
 
         let artist_id = *artist_map.get(&track.artist.to_lowercase()).unwrap_or(&0);
         let album_id = *album_map.get(&track.album.to_lowercase()).unwrap_or(&0);
@@ -573,7 +573,7 @@ fn build_track_rows(
 
         // --- Fixed header (94 bytes = 0x5E) ---
         heap.extend_from_slice(&0x0024u16.to_le_bytes()); // 0x00: subtype
-        heap.extend_from_slice(&((idx as u16) * 0x20).to_le_bytes()); // 0x02: index_shift
+        heap.extend_from_slice(&(idx as u16).wrapping_mul(0x20).to_le_bytes()); // 0x02: index_shift
         heap.extend_from_slice(&0x0700u32.to_le_bytes()); // 0x04: bitmask
         heap.extend_from_slice(&track.sample_rate.to_le_bytes()); // 0x08: sample_rate
         heap.extend_from_slice(&0u32.to_le_bytes()); // 0x0C: composer_id
@@ -685,7 +685,7 @@ fn build_track_rows(
 /// Build the 27 standard browse column definitions for Pioneer CDJ browser.
 /// Column names use UTF-16LE with Unicode annotation delimiters ￺ (U+FFFA) and ￻ (U+FFFB).
 /// Row format: u16 id, u16 column_type, encoded name string.
-fn build_columns_rows() -> (Vec<u8>, Vec<u16>) {
+fn build_columns_rows() -> (Vec<u8>, Vec<usize>) {
     // 27 columns matching rekordbox CDJ-3000 export (verified against BLAU reference)
     let columns: &[(u16, u16, &str)] = &[
         (1,  0x0080, "\u{FFFA}GENRE\u{FFFB}"),
@@ -719,7 +719,7 @@ fn build_columns_rows() -> (Vec<u8>, Vec<u16>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for &(id, col_type, name) in columns {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&id.to_le_bytes());
         heap.extend_from_slice(&col_type.to_le_bytes());
         heap.extend_from_slice(&encode_string(name)); // will use UTF-16LE due to non-ASCII chars
@@ -728,14 +728,14 @@ fn build_columns_rows() -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
-fn build_artwork_rows(tracks: &[Track]) -> (Vec<u8>, Vec<u16>) {
+fn build_artwork_rows(tracks: &[Track]) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for track in tracks {
         if track.artwork.is_none() {
             continue;
         }
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&track.id.to_le_bytes()); // artwork_id = track_id
         let path = format!("/PIONEER/Artwork/00001/a{}.jpg", track.id);
         heap.extend_from_slice(&encode_string(&path));
@@ -744,11 +744,11 @@ fn build_artwork_rows(tracks: &[Track]) -> (Vec<u8>, Vec<u16>) {
     (heap, offsets)
 }
 
-fn build_playlist_tree_rows(playlists: &[(u32, u32, u32, &str, bool)]) -> (Vec<u8>, Vec<u16>) {
+fn build_playlist_tree_rows(playlists: &[(u32, u32, u32, &str, bool)]) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for &(id, parent_id, sort, name, is_folder) in playlists {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&parent_id.to_le_bytes());
         heap.extend_from_slice(&0u32.to_le_bytes());
         heap.extend_from_slice(&sort.to_le_bytes());
@@ -760,11 +760,11 @@ fn build_playlist_tree_rows(playlists: &[(u32, u32, u32, &str, bool)]) -> (Vec<u
     (heap, offsets)
 }
 
-fn build_playlist_entry_rows(entries: &[(u32, u32, u32)]) -> (Vec<u8>, Vec<u16>) {
+fn build_playlist_entry_rows(entries: &[(u32, u32, u32)]) -> (Vec<u8>, Vec<usize>) {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
     for &(entry_idx, track_id, playlist_id) in entries {
-        offsets.push(heap.len() as u16);
+        offsets.push(heap.len());
         heap.extend_from_slice(&entry_idx.to_le_bytes());
         heap.extend_from_slice(&track_id.to_le_bytes());
         heap.extend_from_slice(&playlist_id.to_le_bytes());

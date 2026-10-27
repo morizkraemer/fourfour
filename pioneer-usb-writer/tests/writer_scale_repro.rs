@@ -1,7 +1,6 @@
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 
-use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, Track, WaveformPreview};
+use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, Playlist, Track, WaveformPreview};
 use pioneer_usb_writer::writer::filesystem::write_usb;
 use tempfile::TempDir;
 
@@ -69,61 +68,127 @@ fn synthetic_tracks(source: &Path, count: u32, text_len: usize) -> Vec<Track> {
         .collect()
 }
 
-fn pdb_track_row_count(pdb: &[u8]) -> usize {
-    assert_eq!(pdb.len() % PAGE, 0);
-    let mut count = 0;
-    for page in 1..pdb.len() / PAGE {
-        let p = &pdb[page * PAGE..(page + 1) * PAGE];
-        let table_type = u32::from_le_bytes(p[0x08..0x0C].try_into().unwrap());
-        let is_header_page = p[0x1B] == 0x64;
-        if table_type == 0x00 && !is_header_page {
-            count += p[0x18] as usize;
+
+fn u16_at(bytes: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes(bytes[at..at + 2].try_into().unwrap())
+}
+
+fn u32_at(bytes: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+}
+
+fn string_at(bytes: &[u8], at: usize) -> String {
+    let marker = bytes[at];
+    if marker == 0x03 {
+        return String::new();
+    }
+    if marker == 0x40 {
+        let total = u16_at(bytes, at + 1) as usize;
+        return String::from_utf8(bytes[at + 4..at + total].to_vec()).unwrap();
+    }
+    assert_eq!(marker & 1, 1, "unexpected string marker {marker:#x}");
+    let len = (marker >> 1) as usize - 1;
+    String::from_utf8(bytes[at + 1..at + 1 + len].to_vec()).unwrap()
+}
+
+fn page_rows(page: &[u8], table_type: u32, page_index: u32) -> Vec<Vec<u8>> {
+    let small = page[0x18] as usize;
+    let num_rows = if small < 255 { small } else { u16_at(page, 0x22) as usize + 1 };
+    let free = u16_at(page, 0x1C) as usize;
+    let used = u16_at(page, 0x1E) as usize;
+    let row_group_bytes = (num_rows / 16) * 36 + if num_rows % 16 > 0 { (num_rows % 16) * 2 + 4 } else { 0 };
+    assert_eq!(0x28 + used + free + row_group_bytes, PAGE, "page {page_index} of table {table_type:#x}");
+
+    let mut offsets = Vec::new();
+    for group in 0..num_rows.div_ceil(16) {
+        let rows_in_group = (num_rows - group * 16).min(16);
+        let group_end = PAGE - group * 36;
+        let flags = u16_at(page, group_end - 4);
+        assert_eq!(flags, ((1u32 << rows_in_group) - 1) as u16);
+        for r in 0..rows_in_group {
+            offsets.push(u16_at(page, group_end - 4 - 2 * (r + 1)) as usize);
         }
     }
-    count
+    assert!(offsets.windows(2).all(|w| w[0] < w[1]), "row offsets not increasing on page {page_index}");
+    offsets
+        .iter()
+        .enumerate()
+        .map(|(i, &start)| {
+            let end = offsets.get(i + 1).copied().unwrap_or(used);
+            assert!(end <= used, "row runs past heap on page {page_index}");
+            page[0x28 + start..0x28 + end].to_vec()
+        })
+        .collect()
 }
 
-fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
-    panic
-        .downcast_ref::<String>()
-        .cloned()
-        .or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()))
-        .unwrap_or_else(|| "panic".into())
+fn table_rows(pdb: &[u8], table_type: u32) -> Vec<Vec<u8>> {
+    assert_eq!(pdb.len() % PAGE, 0);
+    let pointer = (0..u32_at(pdb, 0x08) as usize)
+        .map(|i| 0x1C + i * 16)
+        .find(|&at| u32_at(pdb, at) == table_type)
+        .unwrap();
+    let empty_candidate = u32_at(pdb, pointer + 4);
+    let header_page = u32_at(pdb, pointer + 8) as usize;
+    let last_page = u32_at(pdb, pointer + 12);
+
+    let mut rows = Vec::new();
+    let mut page_index = u32_at(pdb, header_page * PAGE + 0x0C);
+    let mut reached_last = false;
+    while page_index != empty_candidate {
+        assert!(!reached_last, "chain continues past last_page for table {table_type:#x}");
+        reached_last = page_index == last_page;
+        let page = &pdb[page_index as usize * PAGE..(page_index as usize + 1) * PAGE];
+        assert_eq!(u32_at(page, 0x04), page_index);
+        assert_eq!(u32_at(page, 0x08), table_type);
+        rows.extend(page_rows(page, table_type, page_index));
+        page_index = u32_at(page, 0x0C);
+    }
+    assert!(reached_last, "chain did not reach last_page for table {table_type:#x}");
+    rows
 }
 
-fn write_and_count(count: u32, text_len: usize) -> Result<usize, String> {
+fn assert_roundtrip(count: u32, text_len: usize) {
+    let playlists = vec![
+        Playlist { id: 1, name: "All".into(), track_ids: (1..=count).collect() },
+        Playlist { id: 2, name: "Evens".into(), track_ids: (1..=count).filter(|id| id % 2 == 0).collect() },
+    ];
     let source = TempDir::new().unwrap();
     let usb = TempDir::new().unwrap();
     let tracks = synthetic_tracks(source.path(), count, text_len);
     let analyses = vec![analysis(); tracks.len()];
-    let usb_path = usb.path().to_path_buf();
-    let outcome = catch_unwind(AssertUnwindSafe(|| write_usb(&usb_path, &tracks, &analyses, &[])));
-    match outcome {
-        Err(panic) => Err(panic_message(panic)),
-        Ok(Err(e)) => Err(format!("write_usb error: {e}")),
-        Ok(Ok(_)) => {
-            let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
-            Ok(pdb_track_row_count(&pdb))
-        }
-    }
-}
+    write_usb(usb.path(), &tracks, &analyses, &playlists).unwrap();
+    let pdb = std::fs::read(usb.path().join("PIONEER/rekordbox/export.pdb")).unwrap();
 
-fn assert_roundtrip(count: u32, text_len: usize) {
-    let rows = write_and_count(count, text_len).unwrap_or_else(|e| panic!("{count} tracks (text_len {text_len}): {e}"));
-    assert_eq!(rows, count as usize);
-}
+    let track_rows = table_rows(&pdb, 0x00);
+    assert_eq!(track_rows.len(), count as usize);
+    for (row, track) in track_rows.iter().zip(&tracks) {
+        assert_eq!(u32_at(row, 0x48), track.id);
+        assert_eq!(string_at(row, u16_at(row, 0x5E + 17 * 2) as usize), track.title);
+        assert_eq!(string_at(row, u16_at(row, 0x5E + 20 * 2) as usize), track.usb_path);
+    }
 
-fn smallest_failing(text_len: usize) -> Option<u32> {
-    let fails = |n: u32| write_and_count(n, text_len).map_or(true, |rows| rows != n as usize);
-    if !fails(2000) {
-        return None;
+    let artist_rows = table_rows(&pdb, 0x02);
+    assert_eq!(artist_rows.len(), count as usize);
+    for (row, track) in artist_rows.iter().zip(&tracks) {
+        assert_eq!(string_at(row, 0x0A), track.artist);
     }
-    let (mut lo, mut hi) = (1u32, 2000u32);
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        if fails(mid) { hi = mid } else { lo = mid + 1 }
-    }
-    Some(lo)
+    assert_eq!(table_rows(&pdb, 0x03).len(), count as usize);
+
+    let tree: Vec<(u32, String)> = table_rows(&pdb, 0x07)
+        .iter()
+        .map(|r| (u32_at(r, 12), string_at(r, 20)))
+        .collect();
+    assert_eq!(tree, vec![(1, "All".to_string()), (2, "Evens".to_string())]);
+
+    let entries: Vec<(u32, u32)> = table_rows(&pdb, 0x08)
+        .iter()
+        .map(|r| (u32_at(r, 8), u32_at(r, 4)))
+        .collect();
+    let expected: Vec<(u32, u32)> = playlists
+        .iter()
+        .flat_map(|p| p.track_ids.iter().map(move |&t| (p.id, t)))
+        .collect();
+    assert_eq!(entries, expected);
 }
 
 #[test]
@@ -132,33 +197,21 @@ fn pdb_roundtrips_100_tracks() {
 }
 
 #[test]
-#[ignore = "known bug: PDB split_into_pages wraps u16 heap offsets past 64 KiB, see docs/architecture/writer-bugs-2026-10.md"]
 fn pdb_roundtrips_200_tracks() {
     assert_roundtrip(200, 0);
 }
 
 #[test]
-#[ignore = "known bug: PDB split_into_pages wraps u16 heap offsets past 64 KiB, see docs/architecture/writer-bugs-2026-10.md"]
-fn pdb_roundtrips_500_tracks() {
-    assert_roundtrip(500, 0);
+fn pdb_roundtrips_1000_tracks() {
+    assert_roundtrip(1000, 0);
 }
 
 #[test]
-#[ignore = "known bug: PDB split_into_pages wraps u16 heap offsets past 64 KiB, see docs/architecture/writer-bugs-2026-10.md"]
-fn pdb_roundtrips_2000_tracks() {
-    assert_roundtrip(2000, 0);
+fn pdb_roundtrips_5000_tracks() {
+    assert_roundtrip(5000, 0);
 }
 
 #[test]
-#[ignore = "known bug: PDB split_into_pages wraps u16 heap offsets past 64 KiB, see docs/architecture/writer-bugs-2026-10.md"]
-fn pdb_roundtrips_100_tracks_with_long_strings() {
-    assert_roundtrip(100, 100);
-}
-
-#[test]
-#[ignore = "measurement: prints the smallest failing track count; run with --nocapture"]
-fn report_smallest_failing_track_count() {
-    for text_len in [0usize, 30, 100, 200] {
-        println!("text_len={text_len}: smallest failing N = {:?}", smallest_failing(text_len));
-    }
+fn pdb_roundtrips_300_tracks_with_long_strings() {
+    assert_roundtrip(300, 200);
 }
