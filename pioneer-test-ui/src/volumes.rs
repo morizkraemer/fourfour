@@ -87,14 +87,14 @@ fn is_removable(_path: &Path) -> bool {
     true
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn plist_says_removable(xml: &str) -> bool {
     ["Ejectable", "RemovableMediaOrExternalDevice", "RemovableMedia"]
         .iter()
         .any(|key| plist_bool(xml, key) == Some(true))
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn plist_bool(xml: &str, key: &str) -> Option<bool> {
     let after_key = xml.split(&format!("<key>{key}</key>")).nth(1)?;
     let value = after_key.trim_start();
