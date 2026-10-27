@@ -161,3 +161,6 @@
 2026-10-27 16:22 orchestrator run-start: overnight option 1 (Q42 sync, Q43 review, Q44 leftovers, Q45 dmg [mac], Q46 key refit, Q47 housekeeping); tight, cap 2, seat subagents; integration branch q42-overnight
 2026-10-27 16:26 orchestrator - merged wx-cues-ribbon (K2–K4) onto q42-overnight 0cc3492 (475 tests, 0 warnings)
 2026-10-27 16:26 orchestrator Q42 spawn: stick sync for real (seat subagent, opus, fake stick folder only)
+2026-10-27 17:02 orchestrator - merged wz-zoom-detail (K1) 55946e1 onto q42-overnight
+2026-10-27 17:02 orchestrator Q42 landed-on-branch: q42-sync d56f471 → q42-overnight 51a9ef0; full checks green (485 tests); schema v6 + writer keep-set accepted per rec
+2026-10-27 17:02 orchestrator Q43 spawn: review (seat, opus) · Q44 spawn: leftovers (seat, sonnet)
