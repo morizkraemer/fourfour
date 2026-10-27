@@ -254,7 +254,7 @@
           </span>
         </div>
         {#each cues as chip (chip.key)}
-          <div class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}" data-cue-key={chip.key} oncontextmenu={(e) => openCueMenu(e, chip.key)}>
+          <div role="group" aria-label={chip.label} class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}" data-cue-key={chip.key} oncontextmenu={(e) => openCueMenu(e, chip.key)}>
             <button
               type="button"
               class="ff-inspector__cue-main"
