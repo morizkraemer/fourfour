@@ -148,8 +148,8 @@
           onclick={() => triggerHotCue(pad.slot)}
           oncontextmenu={(e) => openEditor(e, pad)}>{pad.letter}</button>
       {/each}
-      <button class="ff-xp__pad ff-xp__pad--memory" title="Add memory cue at the playhead (M)" aria-label="Add memory cue"
-        disabled={!player.track} onclick={() => addMemoryCueAtPlayhead()}>M+</button>
+      <button class="ff-xp__pad ff-xp__pad--memory" title="Add cue at the playhead (M)" aria-label="Add cue"
+        disabled={!player.track} onclick={() => addMemoryCueAtPlayhead()}>+</button>
       {#if editingChip && player.track}
         <div class="ff-xp__cue-editor">
           <CueEditor

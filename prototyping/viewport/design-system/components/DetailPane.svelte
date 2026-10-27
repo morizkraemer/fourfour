@@ -44,7 +44,7 @@
     onCueRename = undefined,
     onCueRecolor = undefined,
     onCueDelete = undefined,
-    onCueConvert = undefined,
+    onCuePad = undefined,
     multiCount = 0,
     multiMeta = {},
     filePath = '',
@@ -56,11 +56,11 @@
   let waveWidth = $state(0);
   let editingKey = $state(null);
   let editingChip = $derived(cues.find((c) => c.key === editingKey) ?? null);
-  let hotCount = $derived(cues.filter((c) => c.slot > 0).length);
-  let memoryCount = $derived(cues.length - hotCount);
+  let linkedKey = $state(null);
   let cueMenu = $state({ open: false, x: 0, y: 0, key: null });
   let cueMenuChip = $derived(cues.find((c) => c.key === cueMenu.key) ?? null);
-  let hotSlotsFree = $derived(cues.filter((c) => c.slot > 0).length < 8);
+  const PAD_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
+  const padLetter = (slot) => String.fromCharCode(64 + slot);
 
   function openCueMenu(event, key) {
     event.preventDefault();
@@ -70,25 +70,27 @@
   let cueMenuItems = $derived.by(() => {
     const chip = cueMenuChip;
     if (!chip) return [];
-    const isMemory = chip.slot === 0;
     return [
       { label: 'Jump to', disabled: !canJumpToCues, onClick: () => onCueJump?.(chip) },
       { label: 'Rename', onClick: () => (editingKey = chip.key) },
-      ...(isMemory
-        ? []
-        : [{
-            label: 'Colour',
-            items: cuePalette.map((swatch) => ({
-              label: swatch.name,
-              checked: swatch.color === chip.color,
-              onClick: () => onCueRecolor?.(chip, swatch.color),
-            })),
-          }]),
       {
-        label: isMemory ? 'Convert to hot cue' : 'Convert to memory cue',
-        disabled: isMemory && !hotSlotsFree,
-        onClick: () => onCueConvert?.(chip),
+        label: 'Colour',
+        items: cuePalette.map((swatch) => ({
+          label: swatch.name,
+          checked: swatch.color === chip.color,
+          onClick: () => onCueRecolor?.(chip, swatch.color),
+        })),
       },
+      {
+        label: 'Assign pad',
+        items: PAD_SLOTS.map((slot) => ({
+          label: padLetter(slot),
+          checked: chip.slot === slot,
+          disabled: cues.some((c) => c.slot === slot && c.key !== chip.key),
+          onClick: () => onCuePad?.(chip, slot),
+        })),
+      },
+      ...(chip.padded ? [{ label: 'Remove pad', onClick: () => onCuePad?.(chip, null) }] : []),
       { isSeparator: true },
       {
         label: 'Delete',
@@ -133,8 +135,15 @@
 
   let shownPath = $derived(middleTruncate(filePath, pathMaxChars));
 
+  const FLAG_WIDTH = 12;
+  const MARKER_EDGE = 4;
+
   function markerLeft(position) {
-    return `clamp(7px, ${(position * 100).toFixed(3)}%, calc(100% - 7px))`;
+    return `clamp(${MARKER_EDGE}px, ${(position * 100).toFixed(3)}%, calc(100% - ${MARKER_EDGE}px))`;
+  }
+
+  function flagFlipped(marker) {
+    return marker.padded && marker.position * waveWidth + FLAG_WIDTH + MARKER_EDGE > waveWidth;
   }
 </script>
 
@@ -221,58 +230,67 @@
     {/if}
 
     <div class="ff-inspector__wave" bind:clientWidth={waveWidth}>
-      <Waveform
-        {bands}
-        {peaks}
-        width={waveWidth || 300}
-        height={56}
-        variant="strip"
-        look="bands"
-        animating={analyzing && !bands && !peaks?.length}
-        onSeek={onWaveformSeek} />
-      {#each markers as marker (marker.key)}
-        <button
-          type="button"
-          class="ff-inspector__marker{marker.label ? '' : ' ff-inspector__marker--memory'}"
-          style:left={markerLeft(marker.position)}
-          style:--cue={marker.label ? marker.color : 'var(--ff-text-mid)'}
-          data-marker-key={marker.key}
-          title={marker.label ? `Cue ${marker.label}` : 'Memory cue'}
-          aria-label={marker.label ? `Jump to cue ${marker.label}` : 'Jump to memory cue'}
-          onclick={() => onMarkerClick?.(marker)}
-          oncontextmenu={(e) => openCueMenu(e, marker.key)}>{marker.label}</button>
-      {/each}
+      <div class="ff-inspector__marker-lane">
+        {#each markers as marker (marker.key)}
+          <button
+            type="button"
+            class="ff-inspector__marker{marker.padded ? '' : ' ff-inspector__marker--plain'}{flagFlipped(marker) ? ' ff-inspector__marker--flip' : ''}{linkedKey === marker.key ? ' ff-inspector__marker--linked' : ''}"
+            style:left={markerLeft(marker.position)}
+            style:--cue={marker.color}
+            data-marker-key={marker.key}
+            title={marker.label ? `Cue ${marker.label}` : 'Cue'}
+            aria-label={marker.label ? `Jump to cue ${marker.label}` : 'Jump to cue'}
+            onclick={() => onMarkerClick?.(marker)}
+            onmouseenter={() => (linkedKey = marker.key)}
+            onmouseleave={() => (linkedKey = null)}
+            oncontextmenu={(e) => openCueMenu(e, marker.key)}><span class="ff-inspector__marker-flag">{marker.label}</span></button>
+        {/each}
+      </div>
+      <div class="ff-inspector__wave-body">
+        <Waveform
+          {bands}
+          {peaks}
+          width={waveWidth || 300}
+          height={56}
+          variant="strip"
+          look="bands"
+          animating={analyzing && !bands && !peaks?.length}
+          onSeek={onWaveformSeek} />
+      </div>
     </div>
 
     {#if showCues}
       <section class="ff-inspector__cues" data-cue-list>
         <div class="ff-inspector__cues-head">
-          <span>Cues <em><i class="ff-inspector__cues-key ff-inspector__cues-key--hot"></i>{hotCount} hot · <i class="ff-inspector__cues-key ff-inspector__cues-key--memory"></i>{memoryCount} memory</em></span>
+          <span>Cues{#if cues.length} <em>{cues.length}</em>{/if}</span>
           <span class="ff-inspector__cues-add">
-            <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add hot cue at playhead' : ADD_BLOCKED} aria-label="Add hot cue at playhead" onclick={() => onCueAdd?.('hot')}>+ Hot</button>
-            <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add memory cue at playhead' : ADD_BLOCKED} aria-label="Add memory cue at playhead" onclick={() => onCueAdd?.('memory')}>+ Memory</button>
+            <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add cue at playhead' : ADD_BLOCKED} aria-label="Add cue at playhead" onclick={() => onCueAdd?.()}>+ Cue</button>
           </span>
         </div>
         {#each cues as chip (chip.key)}
-          <div role="group" aria-label={chip.label} class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}" data-cue-key={chip.key} oncontextmenu={(e) => openCueMenu(e, chip.key)}>
+          <div
+            role="group"
+            aria-label={chip.label}
+            class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}{linkedKey === chip.key ? ' ff-inspector__cue--linked' : ''}"
+            data-cue-key={chip.key}
+            onmouseenter={() => (linkedKey = chip.key)}
+            onmouseleave={() => (linkedKey = null)}
+            oncontextmenu={(e) => openCueMenu(e, chip.key)}>
             <button
               type="button"
               class="ff-inspector__cue-main"
               title={canJumpToCues ? `${chip.label}: jump here` : chip.label}
               aria-label={chip.label}
               disabled={!canJumpToCues}
-              onclick={() => onCueJump?.(chip)}
-              ondblclick={() => (editingKey = chip.key)}>
-              <span class="ff-inspector__cue-badge{chip.slot === 0 ? ' ff-inspector__cue-badge--memory' : ''}" style={chip.slot === 0 ? undefined : `background-color:${chip.color}`}>{chip.letter}</span>
-              <span class="ff-inspector__cue-name{chip.name ? '' : ' ff-inspector__cue-name--empty'}">{chip.name || (chip.slot === 0 ? 'Memory cue' : 'Unnamed')}</span>
+              onclick={() => onCueJump?.(chip)}>
+              {#if chip.padded}
+                <span class="ff-inspector__cue-badge" style="background-color:{chip.color}">{chip.letter}</span>
+              {:else}
+                <span class="ff-inspector__cue-badge ff-inspector__cue-badge--plain"><i></i></span>
+              {/if}
+              <span class="ff-inspector__cue-name{chip.name ? '' : ' ff-inspector__cue-name--empty'}">{chip.name || 'Cue'}</span>
               <span class="ff-inspector__cue-pos">{chip.time}</span>
             </button>
-            <button
-              type="button"
-              class="ff-inspector__cue-edit"
-              title="Rename, recolour or delete"
-              aria-label="Edit {chip.label}"
-              onclick={() => (editingKey = editingKey === chip.key ? null : chip.key)}>···</button>
           </div>
           {#if editingChip && editingChip.key === chip.key}
             <div class="ff-inspector__cue-editor">

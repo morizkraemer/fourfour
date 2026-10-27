@@ -8,7 +8,7 @@ import { cuesOf, editCues } from './cues.svelte.ts';
 import {
   hotCueIn,
   withCueColor,
-  withCueConverted,
+  withCuePad,
   withCueName,
   withHotCue,
   withMemoryCue,
@@ -71,6 +71,6 @@ export function recolorCue(trackId: number, key: string, color: string): void {
   editCues(trackId, (cues) => withCueColor(cues, key, color));
 }
 
-export function convertCue(trackId: number, key: string): void {
-  editCues(trackId, (cues) => withCueConverted(cues, key) ?? cues);
+export function setCuePad(trackId: number, key: string, slot: number | null): void {
+  editCues(trackId, (cues) => withCuePad(cues, key, slot) ?? cues);
 }

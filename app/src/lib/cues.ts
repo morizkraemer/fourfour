@@ -140,22 +140,24 @@ export function withCueColor(cues: Cue[], key: string, color: string | null): Cu
   return cues.map((c) => (cueKey(c) === key ? { ...c, color } : c));
 }
 
-/** The same cue as the other kind: a hot cue becomes a memory cue at its position (merged into one already there), a memory cue takes the first free pad. Null when no pad is free or the cue is unknown. */
-export function withCueConverted(cues: Cue[], key: string): Cue[] | null {
+/** Gives the cue `slot` (a pad, A to H) or, with null, takes its pad away. A cue without a pad is a memory cue: removing the pad merges it into a memory cue already within `MEMORY_MERGE_MS`. Null when the pad is taken by another cue, the slot is out of range or the cue is unknown. */
+export function withCuePad(cues: Cue[], key: string, slot: number | null): Cue[] | null {
   const cue = cues.find((c) => cueKey(c) === key);
   if (!cue) return null;
   const rest = withoutCue(cues, key);
-  if (cue.slot === MEMORY_SLOT) {
-    const slot = firstFreeSlot(rest);
-    return slot === null ? null : sortCues([...rest, { ...cue, slot }]);
+  if (slot === null) {
+    if (cue.slot === MEMORY_SLOT) return cues;
+    const near = memoryCues(rest).some((c) => Math.abs(c.timeMs - cue.timeMs) <= MEMORY_MERGE_MS);
+    return near ? rest : sortCues([...rest, { ...cue, slot: MEMORY_SLOT }]);
   }
-  const near = memoryCues(rest).some((c) => Math.abs(c.timeMs - cue.timeMs) <= MEMORY_MERGE_MS);
-  return near ? rest : sortCues([...rest, { ...cue, slot: MEMORY_SLOT }]);
+  if (slot < 1 || slot > HOT_CUE_SLOTS || hotCueIn(rest, slot)) return null;
+  return sortCues([...rest, { ...cue, slot }]);
 }
 
 export interface CueChip {
   key: string;
   slot: number;
+  padded: boolean;
   letter: string;
   color: string;
   time: string;
@@ -165,11 +167,12 @@ export interface CueChip {
 }
 
 export function cueChip(cue: Cue): CueChip {
-  const letter = slotLetter(cue.slot);
+  const letter = cue.slot === MEMORY_SLOT ? '' : slotLetter(cue.slot);
   const time = formatCueTime(cue.timeMs);
   return {
     key: cueKey(cue),
     slot: cue.slot,
+    padded: cue.slot !== MEMORY_SLOT,
     letter,
     color: cueColor(cue),
     time,
@@ -185,6 +188,7 @@ export interface CueMarker {
   color: string;
   timeMs: number;
   label: string;
+  padded: boolean;
 }
 
 export function cueMarkers(cues: Cue[], durationMs: number): CueMarker[] {
@@ -195,6 +199,7 @@ export function cueMarkers(cues: Cue[], durationMs: number): CueMarker[] {
     color: cueColor(c),
     timeMs: c.timeMs,
     label: c.slot === MEMORY_SLOT ? '' : slotLetter(c.slot),
+    padded: c.slot !== MEMORY_SLOT,
   }));
 }
 
