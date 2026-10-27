@@ -151,3 +151,4 @@
 2026-10-27 12:10 orchestrator - merged wp-sidebar-polish (I6) 80e16a7; app checks green; Mac install started
 2026-10-27 12:11 orchestrator - Mac install done (80e16a7, sidebar polish)
 2026-10-27 13:36 orchestrator - W-K tempo/key engine done on wk-tempo 07be76b (Signalsmith vendored, pitch <0.03 cent, 0 clicks, Mac CPU p99 ~1%); renders on Mac Desktop/fourfour-tempo-renders; not merged, waiting on Merlin's ears
+2026-10-27 14:22 orchestrator - merged wk-tempo 6920426 (checks green, 446 tests); Mac install started; round 6 (J1–J9): W-C inspector cues, W-R sidebar ribbon, W-T sort + cue latency spawned
