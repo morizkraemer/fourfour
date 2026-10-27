@@ -15,6 +15,7 @@
   import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
+  import { fitRibbonCovers } from '../lib/ribbonFit.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
 
@@ -101,19 +102,14 @@
     renamingHeader = false;
   }
 
-  const MAX_RAIL_COVERS = 4;
+  let railHeight = $state(0);
 
-  const railCovers = $derived.by(() => {
+  const allRailCovers = $derived.by(() => {
     const target = ui.organize.target;
     if (!target) return [];
-    const result = [];
-    for (const t of tracksForSidebarSource(target.id)) {
-      if (t.cover) {
-        result.push(t.cover);
-        if (result.length >= MAX_RAIL_COVERS) break;
-      }
-    }
-    return result;
+    return tracksForSidebarSource(target.id)
+      .map((t) => t.cover)
+      .filter(Boolean);
   });
 
   const ribbonHover = $derived(dnd.kind === 'tracks' && dnd.dropRibbon);
@@ -121,11 +117,9 @@
     const target = ui.organize.target && boardDropTarget(ui.organize.target);
     return target ? cardKey(target) : null;
   });
-  const ribbonLabel = $derived.by(() => {
-    if (boardDropKey && dropFlash.key === boardDropKey && dropFlash.text) return dropFlash.text;
-    if (!ribbonHover) return '';
-    return ui.organize.target ? `Add to ${ui.organize.target.label}` : 'Open to choose a destination';
-  });
+  const landed = $derived(!!boardDropKey && dropFlash.key === boardDropKey && dropFlash.added > 0);
+  const slotMode = $derived(landed ? 'landed' : ribbonHover && ui.organize.target ? 'hint' : null);
+  const railFit = $derived(fitRibbonCovers(allRailCovers, railHeight, slotMode ? 1 : 0));
 
   const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
   const summary = $derived(summarizeBoard(boardTracks));
@@ -290,6 +284,7 @@
     class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ' ff-organize--rail-empty'}"
     class:ff-organize--rail-drop={ribbonHover}
     data-drop-ribbon
+    bind:clientHeight={railHeight}
     aria-label={ui.organize.target ? `Open sidebar: ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize sidebar'}
     aria-expanded="false"
     title="Open organize sidebar (⇧⇥)"
@@ -299,12 +294,26 @@
       <Icon name="chevron-left" size={18} />
     </div>
     {#if ui.organize.target}
-      {#each railCovers as coverUrl}
+      {#if slotMode}
+        <div
+          class="ff-organize__rail-tile ff-organize__rail-slot{landed ? ' ff-organize__rail-slot--landed' : ''}"
+          data-rail-slot={slotMode}
+          style:background-image={landed && dropFlash.cover ? `url(${dropFlash.cover})` : null}
+          aria-hidden="true"
+        >
+          {#if landed}
+            <span class="ff-organize__rail-count">+{dropFlash.added}</span>
+          {:else}
+            <Icon name="plus" size={16} />
+          {/if}
+        </div>
+      {/if}
+      {#each railFit.covers as coverUrl}
         <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
       {/each}
-    {/if}
-    {#if ribbonLabel}
-      <span class="ff-organize__rail-label" role="status">{ribbonLabel}</span>
+      {#if railFit.more > 0}
+        <div class="ff-organize__rail-tile ff-organize__rail-more" data-rail-more aria-hidden="true">+{railFit.more}</div>
+      {/if}
     {/if}
   </button>
 {/if}
@@ -363,26 +372,50 @@
 
   .ff-organize--rail-drop,
   .ff-organize--rail-drop:hover {
-    background: var(--ff-select);
-    border-color: var(--ff-accent);
-    color: var(--ff-text);
+    box-shadow: inset 2px 0 0 var(--ff-accent);
   }
 
-  .ff-organize__rail-label {
-    position: absolute;
-    top: 10px;
-    right: calc(100% + 8px);
-    max-width: 260px;
-    padding: 4px 8px;
-    border: 1px solid var(--ff-border-hi);
-    border-radius: var(--ff-radius-md);
-    background: var(--ff-elev);
+  .ff-organize__rail-slot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    border: 1px dashed var(--ff-border-hi);
+    background-color: transparent;
+    color: var(--ff-text-mid);
+    animation: ff-rail-slot-in 0.14s ease-out;
+  }
+  .ff-organize__rail-slot--landed {
+    border-style: solid;
+    border-color: transparent;
+    background-color: var(--ff-elev);
+    background-size: cover;
+    background-position: center;
+    animation: ff-rail-land 0.22s ease-out;
+  }
+  .ff-organize__rail-count {
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.55);
     color: var(--ff-text);
     font-size: var(--ff-type-small);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    pointer-events: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .ff-organize__rail-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--ff-text-mid);
+    font-size: var(--ff-type-small);
+    font-variant-numeric: tabular-nums;
+  }
+  @keyframes ff-rail-slot-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ff-rail-land {
+    from { opacity: 0.4; transform: translateY(-14px) scale(0.85); }
+    to { opacity: 1; transform: none; }
   }
 
   .ff-organize--rail-empty {
