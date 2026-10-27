@@ -529,7 +529,8 @@ fn owned_files(stick: &PreparedStick) -> Vec<OwnedFile> {
 fn claim_selection(stick: &PreparedStick) -> Result<StickManifest> {
     let mut manifest = sticks::manifest_or_fresh(&stick.root)?;
     for file in owned_files(stick) {
-        if !manifest.owns(&file.usb_path) {
+        let already_on_stick = stick.root.join(file.usb_path.trim_start_matches('/')).exists();
+        if !manifest.owns(&file.usb_path) && !already_on_stick {
             manifest.files.push(file);
         }
     }
@@ -538,7 +539,8 @@ fn claim_selection(stick: &PreparedStick) -> Result<StickManifest> {
 }
 
 fn record_sync(stick: &PreparedStick, mut manifest: StickManifest, report: &SyncReport) -> Result<()> {
-    manifest.files = owned_files(stick);
+    let claimed: Vec<OwnedFile> = owned_files(stick).into_iter().filter(|f| manifest.owns(&f.usb_path)).collect();
+    manifest.files = claimed;
     manifest.last_sync = Some(LastSync { at: chrono::Utc::now().to_rfc3339(), report: report.clone() });
     sticks::write_manifest(&stick.root, &manifest)
 }
