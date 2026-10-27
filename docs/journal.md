@@ -168,3 +168,6 @@
 2026-10-27 17:20 orchestrator Q46 spawn: key refit on permissive labels (seat, opus); Q45 waits for the Mac install to finish
 2026-10-27 17:20 orchestrator - Mac install done (51a9ef0, round 7 + stick sync)
 2026-10-27 17:20 orchestrator Q45 spawn: unsigned dmg build on Mac (~/dev/build/fourfour-dmg, orchestrator background job)
+2026-10-27 17:34 orchestrator Q43 landed-on-branch: q43-review 33b2906 → q42-overnight 8d84da9 (8 fixes incl. stick playlists cascade-deleted on save); full checks green (490 tests)
+2026-10-27 17:34 orchestrator Q45 done: unsigned dmg 32 MB on the Mac, verify ok, adhoc, arm64
+2026-10-27 17:34 orchestrator Q43b followup: review's unfixed bugs inside Q43 scope (seat, sonnet)
