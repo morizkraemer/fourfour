@@ -11,9 +11,12 @@
   import PlayerTempo from './PlayerTempo.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
+  import { altKey } from '../stores/alt-key.svelte.ts';
+  import { padAction, padFace } from '../lib/padModifier.ts';
   import {
     addMemoryCueAtPlayhead,
     deleteCue,
+    deleteHotCue,
     recolorCue,
     renameCue,
     triggerHotCue,
@@ -45,6 +48,15 @@
   );
   let editingSlot = $state(null);
   let editingChip = $derived(pads.find((p) => p.slot === editingSlot)?.chip ?? null);
+
+  function firePad(pad, altHeld) {
+    if (padAction(altHeld, !!pad.chip) === 'delete') {
+      if (editingSlot === pad.slot) editingSlot = null;
+      deleteHotCue(pad.slot);
+    } else {
+      triggerHotCue(pad.slot);
+    }
+  }
 
   function openEditor(e, pad) {
     e.preventDefault();
@@ -137,7 +149,7 @@
     <div class="ff-xp__pads" role="group" aria-label="Hot cues">
       {#each pads as pad (pad.slot)}
         <button
-          class="ff-xp__pad{pad.chip ? ' ff-xp__pad--set' : ''}"
+          class="ff-xp__pad{pad.chip ? ' ff-xp__pad--set' : ''}{pad.chip && altKey.held ? ' ff-xp__pad--remove' : ''}"
           style:--pad-color={pad.chip?.color}
           title={pad.chip
             ? `${pad.chip.label}: jump and play (right-click to rename, recolour or delete)`
@@ -145,9 +157,9 @@
           aria-label={pad.chip ? `Hot cue ${pad.chip.label}` : `Set hot cue ${pad.letter}`}
           data-pad={pad.letter}
           disabled={!player.track}
-          onpointerdown={(e) => e.button === 0 && triggerHotCue(pad.slot)}
-          onclick={(e) => e.detail === 0 && triggerHotCue(pad.slot)}
-          oncontextmenu={(e) => openEditor(e, pad)}>{pad.letter}</button>
+          onpointerdown={(e) => e.button === 0 && firePad(pad, e.altKey)}
+          onclick={(e) => e.detail === 0 && firePad(pad, e.altKey)}
+          oncontextmenu={(e) => openEditor(e, pad)}>{padFace(pad.letter, !!pad.chip, altKey.held)}</button>
       {/each}
       <button class="ff-xp__pad ff-xp__pad--memory" title="Add cue at the playhead (M)" aria-label="Add cue"
         disabled={!player.track} onclick={() => addMemoryCueAtPlayhead()}>+</button>
@@ -297,6 +309,7 @@
   .ff-xp__pad:hover:not(:disabled) { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); color: var(--ff-text, #fff); }
   .ff-xp__pad--set { background: var(--pad-color); border-color: var(--pad-color); color: #0a0a0a; }
   .ff-xp__pad--set:hover:not(:disabled) { background: var(--pad-color); color: #0a0a0a; filter: brightness(1.12); }
+  .ff-xp__pad--remove { opacity: 0.7; }
   .ff-xp__pad--memory { margin-left: 4px; color: #ff3b30; border-color: rgba(255, 59, 48, 0.4); }
   .ff-xp__pad:disabled { opacity: 0.4; cursor: default; }
   .ff-xp__cue-editor {
