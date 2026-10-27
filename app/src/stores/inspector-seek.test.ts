@@ -15,6 +15,9 @@ vi.mock('./player.svelte.ts', () => ({
   seekToProgress: vi.fn(async (progress: number) => {
     calls.order.push(`seek ${progress}`);
   }),
+  seekToMs: vi.fn(async (ms: number) => {
+    calls.order.push(`seek ${ms} ms`);
+  }),
 }));
 
 import { seekTrackToMs, seekTrackToProgress } from './inspector-seek.ts';
@@ -37,14 +40,14 @@ describe('inspector seeking', () => {
     expect(calls.order).toEqual(['load 7', 'seek 0.25']);
   });
 
-  it('turns a cue time into a track fraction', async () => {
+  it('seeks a cue time in the player\'s own time, not the tag duration', async () => {
     calls.loadedId = 7;
     await seekTrackToMs({ id: 7, raw: { duration_secs: 200 } }, 50_000);
-    expect(calls.order).toEqual(['seek 0.25']);
+    expect(calls.order).toEqual(['seek 50000 ms']);
   });
 
-  it('does nothing for a track without a duration', async () => {
+  it('loads a track that is not in the player, then seeks the cue time', async () => {
     await seekTrackToMs({ id: 7, raw: { duration_secs: 0 } }, 50_000);
-    expect(calls.order).toEqual([]);
+    expect(calls.order).toEqual(['load 7', 'seek 50000 ms']);
   });
 });
