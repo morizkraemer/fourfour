@@ -179,3 +179,5 @@
 2026-10-27 18:27 orchestrator Q46 done: report only, 55.8% exact licence-clean vs cyanbox 58.3%; doc landed on master
 2026-10-27 18:27 orchestrator decided: own prio Q48 tempo engine robustness (bugs from Q43 review) + Q49 key experiment (Q46 next step 1, never landed)
 2026-10-27 19:01 orchestrator Q48 landed-on-branch: q48-tempo-robust 8c2dd93 → q42-overnight dc818de; harness numbers unchanged; checks green; Mac install started
+2026-10-27 23:20 orchestrator - Mac install done (dc818de, Q48)
+2026-10-27 23:20 orchestrator Q49 resumed: usage limit reset (PM)
