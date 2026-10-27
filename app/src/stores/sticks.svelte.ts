@@ -18,6 +18,14 @@ export const sticks = $state({
   error: '' as string,
 });
 
+const requested = new Set<string>();
+const unmounted = new Set<string>();
+
+function startLoading(volumePath: string) {
+  requested.add(volumePath);
+  unmounted.delete(volumePath);
+}
+
 function legacyAllTracks(): Record<string, number[]> {
   try {
     const parsed = JSON.parse(localStorage.getItem(LEGACY_ALL_TRACKS_KEY) ?? '{}');
@@ -48,13 +56,17 @@ export function stickPlaylistIds(volumePath: string): number[] {
 
 /** Reads the stick's lists from the library; moves a list left in localStorage by an older build into it. */
 export async function loadStick(volumePath: string): Promise<void> {
+  startLoading(volumePath);
   try {
-    sticks.byPath[volumePath] = await getStick(volumePath);
+    const contents = await getStick(volumePath);
+    if (unmounted.has(volumePath)) return;
+    sticks.byPath[volumePath] = contents;
     const legacy = legacyAllTracks()[volumePath];
     if (Array.isArray(legacy) && legacy.length > 0) {
-      const [, contents] = await stickAddTracks(volumePath, legacy);
-      sticks.byPath[volumePath] = contents;
+      const [, migrated] = await stickAddTracks(volumePath, legacy);
       forgetLegacy(volumePath);
+      if (unmounted.has(volumePath)) return;
+      sticks.byPath[volumePath] = migrated;
     }
   } catch (err) {
     sticks.error = String(err);
@@ -62,12 +74,18 @@ export async function loadStick(volumePath: string): Promise<void> {
 }
 
 export async function loadCapacity(volumePath: string): Promise<void> {
-  sticks.capacity[volumePath] = await getVolumeCapacity(volumePath);
+  startLoading(volumePath);
+  const capacity = await getVolumeCapacity(volumePath);
+  if (unmounted.has(volumePath)) return;
+  sticks.capacity[volumePath] = capacity;
 }
 
 export async function loadSticks(volumePaths: string[]): Promise<void> {
-  for (const path of Object.keys(sticks.byPath)) {
-    if (!volumePaths.includes(path)) delete sticks.byPath[path];
+  for (const path of requested) {
+    if (volumePaths.includes(path)) continue;
+    unmounted.add(path);
+    delete sticks.byPath[path];
+    delete sticks.capacity[path];
   }
   await Promise.all(volumePaths.flatMap((path) => [loadStick(path), loadCapacity(path)]));
 }
