@@ -1,5 +1,5 @@
 <script>
-  import { SettingRow, Button, Dialog } from '$ds';
+  import { SettingRow, Button } from '$ds';
   import { library, resetLibraryDatabase } from '../../stores/library.svelte.ts';
 
   let busy = $derived(library.analyzing || library.syncing);
@@ -36,34 +36,33 @@
 
 <div class="ff-settings-section">Danger zone</div>
 <div class="ff-settings-card ff-settings-card--danger">
-  <SettingRow
-    title="Reset library"
-    description="Deletes library.db, its WAL files and the analysis cache. Tracks and playlists are wiped; audio files stay."
-  >
-    {#snippet control()}
-      <Button label="Reset library…" variant="destructive" size="small" disabled={busy || resetting} onclick={() => (confirmOpen = true)} />
-    {/snippet}
-  </SettingRow>
+  {#if confirmOpen}
+    <SettingRow
+      title="Delete every track, playlist and analysis?"
+      description="This cannot be undone. Audio files on disk are not removed."
+    >
+      {#snippet control()}
+        <Button label="Cancel" variant="ghost" size="small" disabled={resetting} onclick={() => (confirmOpen = false)} />
+        <Button
+          label={resetting ? 'Resetting…' : 'Reset library'}
+          variant="destructive"
+          size="small"
+          disabled={resetting}
+          onclick={() => void commitReset()}
+        />
+      {/snippet}
+    </SettingRow>
+  {:else}
+    <SettingRow
+      title="Reset library"
+      description="Deletes library.db, its WAL files and the analysis cache. Tracks and playlists are wiped; audio files stay."
+    >
+      {#snippet control()}
+        <Button label="Reset library…" variant="destructive" size="small" disabled={busy} onclick={() => (confirmOpen = true)} />
+      {/snippet}
+    </SettingRow>
+  {/if}
 </div>
-
-<Dialog
-  open={confirmOpen}
-  title="Reset library database?"
-  bodyText="This permanently deletes all tracks, playlists, and analysis cache for the current library file. Audio files on disk are not removed. This cannot be undone."
-  onClose={() => {
-    if (!resetting) confirmOpen = false;
-  }}
->
-  {#snippet actions()}
-    <Button label="Cancel" variant="ghost" disabled={resetting} onclick={() => (confirmOpen = false)} />
-    <Button
-      label={resetting ? 'Resetting…' : 'Reset'}
-      variant="destructive"
-      disabled={resetting}
-      onclick={() => void commitReset()}
-    />
-  {/snippet}
-</Dialog>
 
 <style>
   .plain,
