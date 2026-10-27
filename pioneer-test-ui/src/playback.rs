@@ -45,8 +45,6 @@ use fourfour_stretch::Preset;
 
 pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 pub const DEFAULT_BUFFER_FRAMES: u32 = 128;
-/// Decoded audio the ring holds beyond what the stretcher needs ahead of the playhead; the decode
-/// thread blocks when the ring is full.
 const RING_HEADROOM_SECONDS: usize = 2;
 const UNOPENED_RING_SAMPLES: usize = 1;
 /// Crossfade length applied when new audio follows a stream switch (play/seek/stop) or a
@@ -355,8 +353,6 @@ impl RenderState {
     }
 }
 
-/// Builds the callback state and its ring. The ring is sized for the device's channels and rate,
-/// so the stretcher's lookahead always fits; it is allocated here, off the real-time thread.
 fn render_pipeline(
     level_left: Arc<AtomicU32>,
     level_right: Arc<AtomicU32>,

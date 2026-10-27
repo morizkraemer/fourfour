@@ -751,11 +751,12 @@ impl TempoEngine {
 }
 
 fn sample_at(ring: (&[f32], &[f32]), index: usize) -> Option<f32> {
-    if index < ring.0.len() {
-        Some(ring.0[index])
+    let sample = if index < ring.0.len() {
+        ring.0[index]
     } else {
-        ring.1.get(index - ring.0.len()).copied()
-    }
+        *ring.1.get(index - ring.0.len())?
+    };
+    Some(if sample.is_finite() { sample } else { 0.0 })
 }
 
 fn gather_stereo(ring: (&[f32], &[f32]), ch: usize, start_frame: usize, frames: usize, dst: &mut [f32]) {

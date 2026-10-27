@@ -622,3 +622,22 @@ fn eight_channels_at_192k_stretch_instead_of_falling_back_to_varispeed() {
     }
     assert!(stretched > 100, "stretch path played in only {stretched} of {} callbacks", rate as usize / 512);
 }
+
+#[test]
+fn non_finite_samples_never_reach_the_output() {
+    for (ratio, semitones, lock) in [(1.0, 0.0, false), (1.08, 0.0, false), (1.08, 0.0, true), (1.0, 2.0, true)] {
+        let mut source = sine(440.0, 6.0, 0.5);
+        let bursts = [(SR as usize, f32::NAN), (2 * SR as usize, f32::INFINITY), (3 * SR as usize, f32::NEG_INFINITY)];
+        for (at, value) in bursts {
+            source[at * 2..(at + 100) * 2].fill(value);
+        }
+        let mut lab = Lab::new(source, 256, STRETCH_PRESET);
+        lab.set(ratio, semitones, lock);
+        let out = lab.run_seconds(5.0);
+        let bad = out.iter().filter(|s| !s.is_finite()).count();
+        assert_eq!(bad, 0, "ratio {ratio} st {semitones} lock {lock}: {bad} non-finite samples");
+        let tail = &out[out.len() - SR as usize..];
+        let tail_peak = tail.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(tail_peak > 0.3, "ratio {ratio} st {semitones} lock {lock}: silent after the bursts, peak {tail_peak}");
+    }
+}
