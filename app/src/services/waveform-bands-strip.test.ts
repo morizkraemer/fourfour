@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripBandsFromAnalysis, stripGain } from './waveform-bands.ts';
+import { rowBandsFromBandBytes, stripBandsFromAnalysis, stripGain } from './waveform-bands.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { MOCK_PROFILE_ORDER, bandBytes, encodeStickWire, overviewLevel, syntheticBands } from '../mocks/synthetic-bands.ts';
 import { reduceBands, stackHeights } from '../../../prototyping/viewport/design-system/waveform-bands.js';
@@ -77,5 +77,33 @@ describe('strip headroom', () => {
   it('handles the default mock analysis payload', () => {
     const bands = stripBandsFromAnalysis(mockAnalysisData(7, 200, 12800, 'Am'))!;
     expect(clippedShare(bands)).toBeLessThan(0.1);
+  });
+});
+
+describe('row preview normalisation', () => {
+  const saturated = Uint8Array.from({ length: 128 * 3 }, (_, i) => [127, 40, 20][i % 3]);
+
+  it('brings a saturated detail-sourced row preview down like the strip does', () => {
+    const row = rowBandsFromBandBytes(saturated)!;
+    expect(row.overview).toBe(true);
+    expect(Math.max(...row.low)).toBeLessThan(1);
+    const strip = stripBandsFromAnalysis({ waveform_color_detail: wire(Array.from(saturated)) })!;
+    expect(row.low[0]).toBeCloseTo(strip.low[0], 5);
+    expect(row.mid[0]).toBeCloseTo(strip.mid[0], 5);
+  });
+
+  it('leaves a quiet row preview untouched', () => {
+    const quiet = Uint8Array.from({ length: 128 * 3 }, (_, i) => [20, 10, 5][i % 3]);
+    const row = rowBandsFromBandBytes(quiet)!;
+    expect(row.low[0]).toBeCloseTo(20 / 127, 5);
+  });
+
+  it('row preview, strip and mock row bytes of every profile stay within 15% of each other in peak low', () => {
+    for (const profile of MOCK_PROFILE_ORDER) {
+      const analysis = mockAnalysisData(MOCK_PROFILE_ORDER.indexOf(profile) + 1, 200, 12800, 'Am');
+      const strip = stripBandsFromAnalysis(analysis)!;
+      const row = rowBandsFromBandBytes(Uint8Array.from(atob((analysis as any).waveform_row_bands), (c) => c.charCodeAt(0)))!;
+      expect(Math.abs(Math.max(...row.low) - Math.max(...strip.low))).toBeLessThan(0.15);
+    }
   });
 });

@@ -121,4 +121,25 @@ mod tests {
         assert_eq!(RowPreview::from_blob(mono.to_blob()), mono);
         assert_eq!(RowPreview::from_blob(RowPreview::None.to_blob()), RowPreview::None);
     }
+
+    fn waveform(detail: Vec<[u8; 3]>, overview: Vec<[u8; 3]>) -> ColorWaveform {
+        ColorWaveform { detail, overview, exact: None }
+    }
+
+    #[test]
+    fn row_bands_come_from_the_overview_when_there_is_one() {
+        let cw = waveform(vec![[127, 127, 127]; 600], vec![[10, 20, 30]; 1200]);
+        let bands = row_bands(&cw).unwrap();
+        assert_eq!(bands.len(), ROW_BAND_COLUMNS * 3);
+        assert!(bands.chunks(3).all(|c| c == [10, 20, 30]));
+    }
+
+    #[test]
+    fn row_bands_fall_back_to_the_mean_of_the_detail_without_an_overview() {
+        let detail: Vec<[u8; 3]> = (0..1280).map(|i| if i % 2 == 0 { [100, 0, 50] } else { [60, 20, 50] }).collect();
+        let bands = row_bands(&waveform(detail, Vec::new())).unwrap();
+        assert_eq!(bands.len(), ROW_BAND_COLUMNS * 3);
+        assert!(bands.chunks(3).all(|c| c == [80, 10, 50]));
+        assert_eq!(row_bands(&waveform(Vec::new(), Vec::new())), None);
+    }
 }
