@@ -164,3 +164,5 @@
 2026-10-27 17:02 orchestrator - merged wz-zoom-detail (K1) 55946e1 onto q42-overnight
 2026-10-27 17:02 orchestrator Q42 landed-on-branch: q42-sync d56f471 → q42-overnight 51a9ef0; full checks green (485 tests); schema v6 + writer keep-set accepted per rec
 2026-10-27 17:02 orchestrator Q43 spawn: review (seat, opus) · Q44 spawn: leftovers (seat, sonnet)
+2026-10-27 17:20 orchestrator Q44 landed-on-branch: q44-leftovers a26ab3c → q42-overnight 6f654ab (488 tests, 0 warnings); flaky = cold-import timeouts
+2026-10-27 17:20 orchestrator Q46 spawn: key refit on permissive labels (seat, opus); Q45 waits for the Mac install to finish
