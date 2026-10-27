@@ -136,3 +136,4 @@
 2026-10-27 07:58 orchestrator - merged wi-inspector3 (round 3, rec B hero+folds); board :5233 now served from q41-int
 2026-10-27 08:04 orchestrator - merged ws-settings (H6) 2e9db14; checks green (390 tests); Mac install started
 2026-10-27 08:05 orchestrator - Mac install done (2e9db14, round-4 H1/H2/H4/H6)
+2026-10-27 08:14 orchestrator - Merlin chose inspector-3 option A + waveform preview with cue markers + BPM/key/length dark cards; W-N building it
