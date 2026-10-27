@@ -124,3 +124,4 @@
 2026-10-26 20:20 orchestrator - PM: usage reset, resume; queue drained → own priorities: W-M2 mockup round 2 (F21 settings, F22 inspector), W-Q hygiene (flaky now-lane test, svelte/cargo warnings)
 2026-10-26 20:33 orchestrator - merged wq-hygiene (flaky now-lane test fixed, 0 warnings) into q41-feedback
 2026-10-26 20:39 orchestrator - merged wm2-mockups (round 2: inspector F22 + settings F21, recs C / A+B) into q41-feedback 0934a98; board https://dev.tail87069a.ts.net:5233 (served from the wm2 worktree)
+2026-10-27 00:17 orchestrator - Mac install done (38b771a, INSTALLED 05:18 WITA); PM resume: queue + own priorities drained, rest waits on Merlin (round 2 answers)
