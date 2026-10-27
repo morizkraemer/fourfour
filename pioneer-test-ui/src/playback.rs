@@ -40,13 +40,18 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use tauri::{AppHandle, Emitter};
 
+use crate::tempo::{TempoEngine, TempoParams, CHUNK_FRAMES, MAX_DEVICE_CHANNELS};
+use fourfour_stretch::Preset;
+
 pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 pub const DEFAULT_BUFFER_FRAMES: u32 = 128;
 /// ~2s stereo @ 48 kHz — back-pressure on decode thread if the ring fills.
 const RING_SAMPLES: usize = 48_000 * 2 * 2;
-/// Crossfade length applied at every stream switch (play/seek/stop). Ramps from
-/// the last sample played into the new position so the waveform discontinuity
-/// doesn't produce an audible click/pop. ~5ms at 48 kHz.
+/// Crossfade length applied when new audio follows a stream switch (play/seek/stop) or a
+/// dropout. Ramps from the last sample played into the new position so the waveform
+/// discontinuity doesn't produce an audible click/pop. The ramp starts when the new audio
+/// arrives, not at the switch: a slow decoder must not use it up while the ring is empty.
+/// ~5ms at 48 kHz.
 const DECLICK_FRAMES: usize = 256;
 /// Per-frame decay applied to the last sample while the ring is empty (underrun), so running dry
 /// fades to silence in about 2 ms instead of cutting off.
@@ -55,6 +60,7 @@ const UNDERRUN_DECAY: f32 = 0.98;
 const MAX_CH: usize = 8;
 const TICK_INTERVAL: Duration = Duration::from_millis(50);
 const MAX_CONSECUTIVE_RESETS: u32 = 8;
+const STRETCH_PRESET: Preset = Preset::REALTIME;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct PlaybackAudioConfig {
@@ -79,6 +85,8 @@ pub struct PlaybackTick {
     /// Stereo master peaks 0..1 (VU ballistics applied before emit).
     pub level_left: f32,
     pub level_right: f32,
+    /// Tempo ratio the callback is playing now (1.0 = the track's own tempo).
+    pub tempo_ratio: f32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -225,6 +233,9 @@ struct RenderState {
     pipe: SamplePipe,
     level_left: Arc<AtomicU32>,
     level_right: Arc<AtomicU32>,
+    tempo: Arc<TempoParams>,
+    engine: TempoEngine,
+    chunk: Vec<f32>,
     callback_generation: u64,
     declick_remaining: usize,
     starved: bool,
@@ -238,12 +249,18 @@ impl RenderState {
         pipe: SamplePipe,
         level_left: Arc<AtomicU32>,
         level_right: Arc<AtomicU32>,
+        tempo: Arc<TempoParams>,
+        sample_rate: u32,
+        preset: Preset,
     ) -> Self {
         Self {
             cons,
             pipe,
             level_left,
             level_right,
+            tempo,
+            engine: TempoEngine::new(sample_rate, preset),
+            chunk: vec![0.0; CHUNK_FRAMES * MAX_DEVICE_CHANNELS],
             callback_generation: 0,
             declick_remaining: 0,
             starved: false,
@@ -256,65 +273,74 @@ impl RenderState {
         let stream_gen = self.pipe.stream_generation.load(Ordering::Acquire);
         if stream_gen != self.callback_generation {
             self.cons.clear();
+            self.engine.flush();
             self.pipe.frames_played.store(0, Ordering::Relaxed);
             self.callback_generation = stream_gen;
-            self.seam = self.last_sample;
-            self.declick_remaining = DECLICK_FRAMES;
-            self.starved = false;
+            self.declick_remaining = 0;
+            self.starved = true;
             self.pipe.ack_generation.store(stream_gen, Ordering::Release);
         }
 
-        let ch = channels.max(1) as usize;
+        let ch = (channels.max(1) as usize).min(MAX_DEVICE_CHANNELS);
         let ramp = DECLICK_FRAMES as f32;
-        let mut played_frames = 0u64;
+        let decode_gen = self.pipe.decode_generation.load(Ordering::Acquire);
+        let ended = self.pipe.ended_generation.load(Ordering::Acquire) == decode_gen;
+        let target = self.tempo.target();
+        let chunk_frames = CHUNK_FRAMES.min(CHUNK_FRAMES * MAX_DEVICE_CHANNELS / ch);
 
-        for frame in data.chunks_mut(ch) {
-            let has_data = self.cons.occupied_len() >= frame.len();
-            if has_data && self.starved {
-                self.starved = false;
-                self.seam = self.last_sample;
-                self.declick_remaining = DECLICK_FRAMES;
-            }
-            let (mix_old, mix_new) = if self.declick_remaining > 0 {
-                let t = 1.0 - (self.declick_remaining as f32 / ramp);
-                (1.0 - t, t)
-            } else {
-                (0.0, 1.0)
-            };
-            for (c, slot) in frame.iter_mut().enumerate() {
-                let seam_v = if c < MAX_CH { self.seam[c] } else { 0.0 };
-                let out = if has_data {
-                    let v = self.cons.try_pop().unwrap_or(0.0);
-                    v * mix_new + seam_v * mix_old
-                } else if self.declick_remaining > 0 {
-                    seam_v * mix_old
+        for block in data.chunks_mut(chunk_frames * ch) {
+            let frames = block.len() / ch;
+            let result = self.engine.process_chunk(
+                self.cons.as_slices(),
+                ch,
+                ended,
+                target,
+                &mut self.chunk[..frames * ch],
+            );
+            self.cons.skip(result.popped_frames * ch);
+
+            for (index, frame) in block.chunks_mut(ch).enumerate() {
+                let has_data = index < result.valid_frames;
+                if has_data && self.starved {
+                    self.starved = false;
+                    self.seam = self.last_sample;
+                    self.declick_remaining = DECLICK_FRAMES;
+                }
+                let (mix_old, mix_new) = if self.declick_remaining > 0 {
+                    let t = 1.0 - (self.declick_remaining as f32 / ramp);
+                    (1.0 - t, t)
                 } else {
-                    self.starved = true;
-                    if c < MAX_CH {
-                        self.last_sample[c] * UNDERRUN_DECAY
-                    } else {
-                        0.0
-                    }
+                    (0.0, 1.0)
                 };
-                *slot = out;
-                if c < MAX_CH {
-                    self.last_sample[c] = out;
+                for (c, slot) in frame.iter_mut().enumerate() {
+                    let seam_v = if c < MAX_CH { self.seam[c] } else { 0.0 };
+                    let out = if has_data {
+                        self.chunk[index * ch + c] * mix_new + seam_v * mix_old
+                    } else if self.declick_remaining > 0 {
+                        seam_v * mix_old
+                    } else {
+                        self.starved = true;
+                        if c < MAX_CH {
+                            self.last_sample[c] * UNDERRUN_DECAY
+                        } else {
+                            0.0
+                        }
+                    };
+                    *slot = out;
+                    if c < MAX_CH {
+                        self.last_sample[c] = out;
+                    }
+                }
+                if self.declick_remaining > 0 {
+                    self.declick_remaining -= 1;
                 }
             }
-            if has_data {
-                played_frames += 1;
-            }
-            if self.declick_remaining > 0 {
-                self.declick_remaining -= 1;
-            }
         }
 
-        if played_frames > 0 {
-            self.pipe
-                .frames_played
-                .fetch_add(played_frames, Ordering::Relaxed);
-        }
-        let decode_gen = self.pipe.decode_generation.load(Ordering::Acquire);
+        self.pipe
+            .frames_played
+            .store(self.engine.heard_frames(), Ordering::Relaxed);
+        self.tempo.publish_live_ratio(self.engine.rate());
         if self.pipe.ended_generation.load(Ordering::Acquire) == decode_gen && self.cons.is_empty()
         {
             self.pipe
@@ -351,6 +377,7 @@ struct Inner {
     playhead: Playhead,
     level_left: Arc<AtomicU32>,
     level_right: Arc<AtomicU32>,
+    tempo: Arc<TempoParams>,
 }
 
 pub struct PlaybackEngine {
@@ -390,6 +417,7 @@ impl PlaybackEngine {
                 },
                 level_left: Arc::new(AtomicU32::new(0)),
                 level_right: Arc::new(AtomicU32::new(0)),
+                tempo: Arc::new(TempoParams::new()),
             }),
             hub: Arc::new(EventHub {
                 events: Mutex::new(None),
@@ -461,6 +489,9 @@ impl PlaybackEngine {
             pipe.clone(),
             inner.level_left.clone(),
             inner.level_right.clone(),
+            inner.tempo.clone(),
+            inner.config.sample_rate,
+            STRETCH_PRESET,
         );
         let active_epoch = inner.output_epoch.clone();
         let render: RenderFn = Box::new(move |data, channels| {
@@ -589,6 +620,7 @@ impl PlaybackEngine {
             pipe: inner.pipe.clone(),
             level_left: inner.level_left.clone(),
             level_right: inner.level_right.clone(),
+            tempo: inner.tempo.clone(),
             device_lost: self.device_lost.clone(),
             duration_ms,
             start_ms: start_position_ms,
@@ -664,11 +696,26 @@ impl PlaybackEngine {
         self.start_locked(&mut inner, events, path, position_ms, duration_ms)
     }
 
+    /// Unloading a track also drops its tempo and key shift, like ejecting on a CDJ.
     pub fn stop(&self) -> Result<(), String> {
         let mut inner = self.lock();
         self.stop_locked(&mut inner);
+        inner.tempo.reset();
         Ok(())
     }
+
+    pub fn set_tempo(&self, ratio: f64) {
+        self.lock().tempo.set_ratio(ratio);
+    }
+
+    pub fn set_key_shift(&self, semitones: f64) {
+        self.lock().tempo.set_semitones(semitones);
+    }
+
+    pub fn set_key_lock(&self, on: bool) {
+        self.lock().tempo.set_key_lock(on);
+    }
+
 
     fn stop_locked(&self, inner: &mut Inner) {
         inner.tick_stop.store(true, Ordering::SeqCst);
@@ -1258,6 +1305,7 @@ struct TickContext {
     pipe: SamplePipe,
     level_left: Arc<AtomicU32>,
     level_right: Arc<AtomicU32>,
+    tempo: Arc<TempoParams>,
     device_lost: Arc<AtomicBool>,
     duration_ms: u64,
     start_ms: u64,
@@ -1304,6 +1352,7 @@ fn spawn_tick_thread(ctx: TickContext) {
                 playing,
                 level_left,
                 level_right,
+                tempo_ratio: ctx.tempo.live_ratio() as f32,
             });
             if !playing && level_left == 0.0 && level_right == 0.0 {
                 break;
@@ -1375,6 +1424,33 @@ pub fn playback_stop(engine: tauri::State<'_, Arc<PlaybackEngine>>) -> Result<()
 }
 
 #[tauri::command]
+pub fn playback_set_tempo(
+    ratio: f64,
+    engine: tauri::State<'_, Arc<PlaybackEngine>>,
+) -> Result<(), String> {
+    engine.set_tempo(ratio);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn playback_set_key_shift(
+    semitones: f64,
+    engine: tauri::State<'_, Arc<PlaybackEngine>>,
+) -> Result<(), String> {
+    engine.set_key_shift(semitones);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn playback_set_key_lock(
+    on: bool,
+    engine: tauri::State<'_, Arc<PlaybackEngine>>,
+) -> Result<(), String> {
+    engine.set_key_lock(on);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn playback_list_output_devices(
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
 ) -> Result<Vec<AudioOutputDevice>, String> {
@@ -1399,3 +1475,11 @@ pub fn playback_set_output_device(
 #[cfg(test)]
 #[path = "playback_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tempo_tests.rs"]
+mod tempo_tests;
+
+#[cfg(test)]
+#[path = "tempo_lab.rs"]
+mod tempo_lab;

@@ -45,6 +45,10 @@
   let { track = {}, state = 'rest', columns = TRACK_COLUMNS, analyzing = false } = $props();
 
   let plan = $derived(cellPlan(columns));
+
+  function cover(t) {
+    return t.rowCover ?? t.cover;
+  }
 </script>
 
 <div class="ff-trow ff-trow--{state}">
@@ -80,7 +84,7 @@
       <div class="ff-trow__cell ff-trow__cell--cover" style={cell.style} data-col-key={col.key}>
         <div
           class="ff-trow__cover"
-          style={track.cover ? `background-image:url(${track.cover})` : undefined}>
+          style={cover(track) ? `background-image:url(${cover(track)})` : undefined}>
         </div>
       </div>
     {:else if cell.kind === 'key'}

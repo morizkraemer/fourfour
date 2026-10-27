@@ -1,6 +1,6 @@
 use pioneer_library::{LocalLibrary, RowPreview};
 
-pub use pioneer_library::{ROW_BAND_COLUMNS, effective_preview, row_bands};
+pub use pioneer_library::{effective_preview, row_bands};
 
 use crate::dto::TrackInfo;
 
@@ -18,6 +18,7 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
     let rows = lib.get_all_tracks_with_flags().map_err(|e| e.to_string())?;
     lib.backfill_row_previews().map_err(|e| e.to_string())?;
     let mut previews = lib.get_row_previews().map_err(|e| e.to_string())?;
+    let pending: std::collections::HashSet<i64> = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?.into_iter().collect();
     Ok(rows
         .into_iter()
         .map(|(track, has_artwork, has_analysis, has_cues)| {
@@ -44,6 +45,7 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
                 has_artwork,
                 has_cues,
                 has_analysis,
+                analysis_pending: pending.contains(&i64::from(track.id)),
                 waveform_preview,
                 waveform_bands,
             }

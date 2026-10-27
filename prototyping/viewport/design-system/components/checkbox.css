@@ -160,3 +160,8 @@
   color: var(--ff-text);
   line-height: 1;
 }
+
+.ff-toggle--disabled {
+  opacity: 0.4;
+  cursor: default;
+}

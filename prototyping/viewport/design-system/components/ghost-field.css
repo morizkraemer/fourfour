@@ -1,0 +1,116 @@
+.ff-ghost {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: var(--ff-radius-md);
+  background: transparent;
+  transition: background var(--ff-motion-fast) var(--ff-easing), border-color var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-ghost:hover,
+.ff-ghost--hover {
+  background: var(--ff-hover);
+  border-color: var(--ff-border);
+}
+
+.ff-ghost:focus-within,
+.ff-ghost--edit {
+  background: var(--ff-bg);
+  border-color: var(--ff-border-hover);
+}
+
+.ff-ghost__input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 var(--ff-space-4);
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ff-text);
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-row);
+  text-overflow: ellipsis;
+  resize: none;
+}
+
+.ff-ghost__input::placeholder {
+  color: var(--ff-muted);
+  font-style: italic;
+}
+
+.ff-ghost--mono .ff-ghost__input {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-compact);
+}
+
+.ff-ghost--title {
+  height: 30px;
+}
+
+.ff-ghost--title .ff-ghost__input {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.ff-ghost--right .ff-ghost__input {
+  text-align: right;
+}
+
+.ff-ghost--multi {
+  height: auto;
+  align-items: stretch;
+}
+
+.ff-ghost--multi .ff-ghost__input {
+  padding: var(--ff-space-3) var(--ff-space-4);
+  line-height: 1.45;
+}
+
+.ff-ghost__pen {
+  position: absolute;
+  right: var(--ff-space-3);
+  display: none;
+  color: var(--ff-muted);
+  pointer-events: none;
+}
+
+.ff-ghost:hover .ff-ghost__pen,
+.ff-ghost--hover .ff-ghost__pen {
+  display: flex;
+}
+
+.ff-ghost:focus-within .ff-ghost__pen,
+.ff-ghost--edit .ff-ghost__pen {
+  display: none;
+}
+
+.ff-ghost__suggest {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  padding: 3px;
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-lg);
+  background: var(--ff-elev);
+  box-shadow: var(--ff-shadow-menu);
+}
+
+.ff-ghost__option {
+  padding: 5px var(--ff-space-4);
+  border-radius: var(--ff-radius-sm);
+  color: var(--ff-text-mid);
+  font-size: var(--ff-type-compact);
+}
+
+.ff-ghost__option--on {
+  background: var(--ff-select);
+  color: var(--ff-text);
+}

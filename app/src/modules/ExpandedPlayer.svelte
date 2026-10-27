@@ -7,7 +7,18 @@
   `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { WaveformView, Nudge } from '$ds';
+  import { WaveformView, CueEditor } from '$ds';
+  import PlayerTempo from './PlayerTempo.svelte';
+  import { isTrackAnalyzing } from '../stores/library.svelte.ts';
+  import { cuesOf } from '../stores/cues.svelte.ts';
+  import {
+    addMemoryCueAtPlayhead,
+    deleteCue,
+    recolorCue,
+    renameCue,
+    triggerHotCue,
+  } from '../stores/cue-actions.ts';
+  import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueMarkers, hotCueIn, slotLetter } from '../lib/cues.ts';
   import {
     player,
     currentTime,
@@ -24,20 +35,27 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+  let trackCues = $derived(cuesOf(player.track?.id));
+  let markers = $derived(cueMarkers(trackCues, player.track?.durationMs ?? 0));
+  let pads = $derived(
+    Array.from({ length: HOT_CUE_SLOTS }, (_, i) => {
+      const cue = hotCueIn(trackCues, i + 1);
+      return { slot: i + 1, letter: slotLetter(i + 1), chip: cue ? cueChip(cue) : null };
+    }),
+  );
+  let editingSlot = $state(null);
+  let editingChip = $derived(pads.find((p) => p.slot === editingSlot)?.chip ?? null);
+
+  function openEditor(e, pad) {
+    e.preventDefault();
+    if (pad.chip) editingSlot = editingSlot === pad.slot ? null : pad.slot;
+  }
 
   const stop = (fn) => (e) => {
     e.stopPropagation();
     fn?.(e);
   };
 </script>
-
-<svelte:window
-  on:keydown={(e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      toggleExpanded();
-    }
-  }} />
 
 <div class="ff-xp" role="group" aria-label="Expanded player">
   <header class="ff-xp__head">
@@ -54,10 +72,7 @@
     </div>
 
     <div class="ff-xp__head-right">
-      <div class="ff-xp__bpm-key-group">
-        <Nudge value={player.track?.key || '—'} label="KEY" variant="compact" />
-        <Nudge value={player.track?.bpm || '—'} label="BPM" variant="compact" />
-      </div>
+      <PlayerTempo />
       <div class="ff-xp__times">
         <span class="ff-xp__time-cur">{currentTime()}<span class="ff-xp__time-ms">{currentTimeMs()}</span></span>
         <span class="ff-xp__time-tot">{totalTime()}</span>
@@ -82,11 +97,12 @@
       bands={player.track?.bands ?? null}
       bandsDetail={player.track?.bandsDetail ?? null}
       bandsOverview={player.track?.bandsOverview ?? null}
-      cues={player.track?.cues ?? []}
+      cues={markers}
       beats={player.track?.beats ?? []}
       bpm={player.track?.bpm ?? 0}
       durationMs={player.track?.durationMs ?? 0}
       trackKey={player.track?.id ?? null}
+      analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
       progress={player.progress}
       playing={player.playing}
       onSeek={player.track ? seekToProgress : undefined} />
@@ -116,6 +132,39 @@
           <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="6,4 6,20 18,12"/></svg>
         {/if}
       </button>
+    </div>
+
+    <div class="ff-xp__pads" role="group" aria-label="Hot cues">
+      {#each pads as pad (pad.slot)}
+        <button
+          class="ff-xp__pad{pad.chip ? ' ff-xp__pad--set' : ''}"
+          style:--pad-color={pad.chip?.color}
+          title={pad.chip
+            ? `${pad.chip.label}: jump and play (right-click to rename, recolour or delete)`
+            : `Hot cue ${pad.letter}: set at the playhead`}
+          aria-label={pad.chip ? `Hot cue ${pad.chip.label}` : `Set hot cue ${pad.letter}`}
+          data-pad={pad.letter}
+          disabled={!player.track}
+          onpointerdown={(e) => e.button === 0 && triggerHotCue(pad.slot)}
+          onclick={(e) => e.detail === 0 && triggerHotCue(pad.slot)}
+          oncontextmenu={(e) => openEditor(e, pad)}>{pad.letter}</button>
+      {/each}
+      <button class="ff-xp__pad ff-xp__pad--memory" title="Add cue at the playhead (M)" aria-label="Add cue"
+        disabled={!player.track} onclick={() => addMemoryCueAtPlayhead()}>+</button>
+      {#if editingChip && player.track}
+        <div class="ff-xp__cue-editor">
+          <CueEditor
+            chip={editingChip}
+            palette={CUE_PALETTE}
+            onRename={(name) => editingChip && player.track && renameCue(player.track.id, editingChip.key, name)}
+            onRecolor={(color) => editingChip && player.track && recolorCue(player.track.id, editingChip.key, color)}
+            onDelete={() => {
+              if (editingChip && player.track) deleteCue(player.track.id, editingChip.key);
+              editingSlot = null;
+            }}
+            onClose={() => (editingSlot = null)} />
+        </div>
+      {/if}
     </div>
 
     <div class="ff-xp__grid-edit" role="group" aria-label="Beat grid">
@@ -184,7 +233,6 @@
   }
 
   .ff-xp__head-right { display: flex; align-items: center; gap: 10px; }
-  .ff-xp__bpm-key-group { display: flex; align-items: center; gap: 8px; }
   .ff-xp__times { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
   .ff-xp__time-cur { font-variant-numeric: tabular-nums; color: var(--ff-text, #fff); font-size: 13px; }
   .ff-xp__time-ms { color: var(--ff-muted, rgba(255, 255, 255, 0.5)); }
@@ -207,6 +255,8 @@
     padding: 10px 14px;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
+    flex-wrap: wrap;
+    position: relative;
   }
   .ff-xp__transport-left { display: flex; align-items: center; gap: 10px; }
 
@@ -233,6 +283,25 @@
   }
   .ff-xp__play:hover { background-color: rgba(34, 197, 94, 0.08); }
   .ff-xp__play:disabled { opacity: 0.4; cursor: default; }
+
+  /* Hot cue pads A-H: filled with the cue colour once set. */
+  .ff-xp__pads { display: flex; align-items: center; gap: 4px; position: relative; }
+  .ff-xp__pad {
+    height: 26px; min-width: 26px; padding: 0 6px;
+    border: 1px solid var(--ff-border-hi, rgba(255, 255, 255, 0.18));
+    border-radius: var(--ff-radius-sm, 4px);
+    background: transparent; color: var(--ff-muted, rgba(255, 255, 255, 0.5));
+    font-family: var(--ff-font-mono, monospace); font-size: 11px; font-weight: 700; line-height: 1;
+    cursor: pointer;
+  }
+  .ff-xp__pad:hover:not(:disabled) { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); color: var(--ff-text, #fff); }
+  .ff-xp__pad--set { background: var(--pad-color); border-color: var(--pad-color); color: #0a0a0a; }
+  .ff-xp__pad--set:hover:not(:disabled) { background: var(--pad-color); color: #0a0a0a; filter: brightness(1.12); }
+  .ff-xp__pad--memory { margin-left: 4px; color: #ff3b30; border-color: rgba(255, 59, 48, 0.4); }
+  .ff-xp__pad:disabled { opacity: 0.4; cursor: default; }
+  .ff-xp__cue-editor {
+    position: absolute; bottom: calc(100% + 12px); left: 0; width: 264px; z-index: 5;
+  }
 
   /* Beat-grid edit cluster */
   .ff-xp__grid-edit { display: flex; align-items: center; gap: 4px; }

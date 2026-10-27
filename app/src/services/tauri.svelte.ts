@@ -5,6 +5,7 @@ import {
   isValidAnalysisPayload,
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
+import type { CuePointPayload } from '../lib/cues.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
@@ -46,6 +47,8 @@ export interface TrackInfo {
   has_cues: boolean;
   /** Authoritative analysis flag from the DB index (not `tempo > 0`). */
   has_analysis?: boolean;
+  /** Waveform (and maybe key) are stored; key or BPM/grid still to come. */
+  analysis_pending?: boolean;
   /** 400-byte mono preview embedded at load (base64 from Tauri, byte array in mocks). */
   waveform_preview?: string | number[] | null;
   /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */
@@ -96,9 +99,9 @@ export interface UsbStateResponse {
 
 // Fallback Mock Data for Browser Mode
 let mockTracks: TrackInfo[] = [
-  { id: 1, source_path: '/Music/Solomun - Hyperion.mp3', title: 'Hyperion', artist: 'Solomun', album: 'Diynamic Hits', genre: 'Melodic House', tempo: 12400, key: '9A', duration_secs: 462, bitrate: 320, file_size: 18482010, has_artwork: true, has_cues: false },
-  { id: 2, source_path: '/Music/Tale Of Us - Voidwalker.flac', title: 'Voidwalker', artist: 'Tale Of Us', album: 'Endless Run', genre: 'Melodic Techno', tempo: 12200, key: '7A', duration_secs: 494, bitrate: 1040, file_size: 64281920, has_artwork: true, has_cues: true },
-  { id: 3, source_path: '/Music/Bicep - Drift.mp3', title: 'Drift', artist: 'Bicep', album: 'Drift EP', genre: 'Breakbeat', tempo: 12800, key: '5B', duration_secs: 415, bitrate: 320, file_size: 16601020, has_artwork: true, has_cues: false },
+  { id: 1, source_path: '/Music/Solomun - Hyperion.mp3', title: 'Hyperion', artist: 'Solomun', album: 'Diynamic Hits', genre: 'Melodic House', tempo: 12400, key: '9A', duration_secs: 462, bitrate: 320, file_size: 18482010, has_artwork: true, has_cues: false, has_analysis: true, analysis_pending: false },
+  { id: 2, source_path: '/Music/Tale Of Us - Voidwalker.flac', title: 'Voidwalker', artist: 'Tale Of Us', album: 'Endless Run', genre: 'Melodic Techno', tempo: 12200, key: '7A', duration_secs: 494, bitrate: 1040, file_size: 64281920, has_artwork: true, has_cues: true, has_analysis: true, analysis_pending: false },
+  { id: 3, source_path: '/Music/Bicep - Drift.mp3', title: 'Drift', artist: 'Bicep', album: 'Drift EP', genre: 'Breakbeat', tempo: 12800, key: '5B', duration_secs: 415, bitrate: 320, file_size: 16601020, has_artwork: true, has_cues: false, has_analysis: true, analysis_pending: false },
 ];
 
 function mockTrackCountFromUrl(): number {
@@ -120,6 +123,20 @@ function syntheticRowBands(i: number): string {
   return preview;
 }
 
+const mockArtworkDelayMs =
+  typeof location !== 'undefined' ? Number(new URLSearchParams(location.search).get('artwork')) || 0 : 0;
+
+async function mockArtworkBytes(trackId: number, maxPx: number): Promise<ArrayBuffer> {
+  await new Promise((resolve) => setTimeout(resolve, mockArtworkDelayMs));
+  const size = Math.min(maxPx, 512);
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = `hsl(${(trackId * 47) % 360} 60% 45%)`;
+  ctx.fillRect(0, 0, size, size);
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+  return blob.arrayBuffer();
+}
+
 function syntheticMockTrack(i: number): TrackInfo {
   const analyzed = i % 10 !== 0;
   return {
@@ -134,7 +151,7 @@ function syntheticMockTrack(i: number): TrackInfo {
     duration_secs: 180 + (i % 300),
     bitrate: 320,
     file_size: 9_600_000,
-    has_artwork: false,
+    has_artwork: mockArtworkDelayMs > 0,
     has_cues: false,
     has_analysis: analyzed,
     waveform_bands: analyzed ? syntheticRowBands(i) : null,
@@ -154,6 +171,25 @@ let mockPlaylists: PlaylistInput[] = [
 ];
 
 let mockVolumes = ['/Volumes/SanDisk 64GB', '/Volumes/VAULT666'];
+
+function mockCountFromUrl(param: string): number | null {
+  if (typeof location === 'undefined') return null;
+  const raw = new URLSearchParams(location.search).get(param);
+  const n = Number(raw);
+  return raw !== null && Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+const mockPlaylistCount = mockCountFromUrl('playlists');
+if (mockPlaylistCount !== null) {
+  const names = ['Peak Time', 'Warmup', 'Sunrise Closers', 'Deep Cuts', 'Afterhours', 'Road Trip', 'Sunday Slow', 'B2B Prep'];
+  mockPlaylists = Array.from({ length: mockPlaylistCount }, (_, i) => ({
+    id: i + 1,
+    name: names[i] ?? `Playlist ${i + 1}`,
+    track_ids: [i * 2 + 1, i * 2 + 2],
+  }));
+}
+const mockStickCount = mockCountFromUrl('sticks');
+if (mockStickCount !== null) mockVolumes = mockVolumes.slice(0, mockStickCount);
 
 export async function getVersion(): Promise<string> {
   try {
@@ -213,6 +249,60 @@ export async function resetLibrary(): Promise<string> {
   }
 }
 
+export interface TrackFields {
+  title: string;
+  artist: string;
+  album: string;
+  genre: string;
+}
+
+export type TrackFieldEdits = Partial<TrackFields>;
+
+const MOCK_TAGS_KEY = 'fourfour.mock.tags';
+
+function mockTagStore(): Record<string, TrackFields> {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_TAGS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function applyMockTags(): void {
+  const stored = mockTagStore();
+  mockTracks = mockTracks.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t));
+}
+
+function updateMockTrackFields(trackId: number, edits: TrackFieldEdits): TrackFields {
+  const track = mockTracks.find((t) => t.id === trackId);
+  if (!track) throw new Error(`Track ${trackId} is not in the library`);
+  const title = edits.title?.trim();
+  if (title === '') throw new Error('Title cannot be empty');
+  const next: TrackFields = {
+    title: title ?? track.title,
+    artist: edits.artist?.trim() ?? track.artist,
+    album: edits.album?.trim() ?? track.album,
+    genre: edits.genre?.trim() ?? track.genre,
+  };
+  Object.assign(track, next);
+  try {
+    localStorage.setItem(MOCK_TAGS_KEY, JSON.stringify({ ...mockTagStore(), [trackId]: next }));
+  } catch {
+    return next;
+  }
+  return next;
+}
+
+/** Edit the library tags (title, artist, album, genre) of a track; file tags are never touched. */
+export async function updateTrackFields(trackId: number, edits: TrackFieldEdits): Promise<TrackFields> {
+  try {
+    return await invoke<TrackFields>('update_track_fields', { trackId, edits });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return updateMockTrackFields(trackId, edits);
+  }
+}
+
 export async function loadState(): Promise<LoadedState> {
   try {
     const res = await invoke<LoadedState>('load_state');
@@ -221,6 +311,7 @@ export async function loadState(): Promise<LoadedState> {
   } catch (err) {
     lastTauriError = `load_state fail: ${String(err)}`;
     if (useBrowserMocks()) {
+      applyMockTags();
       return { tracks: mockTracks, playlists: mockPlaylists };
     }
     throw err;
@@ -292,6 +383,10 @@ export async function scanFiles(paths: string[]): Promise<TrackInfo[]> {
   }
 }
 
+export async function revealInFileManager(path: string): Promise<void> {
+  await invoke<void>('reveal_in_finder', { path });
+}
+
 export async function removeTracks(ids: number[]): Promise<void> {
   try {
     return await invoke<void>('remove_tracks', { ids });
@@ -336,23 +431,136 @@ export async function prioritizeAnalysis(trackId: number): Promise<void> {
   }
 }
 
+const MOCK_STAGES_ALL = 7;
+const MOCK_STAGES_WAVEFORM_AND_KEY = 3;
+const MOCK_FAST_PASS_MS = 700;
+const MOCK_GRID_PASS_MS = 1500;
+const MOCK_TRACK_GAP_MS = 1600;
+const mockStages = new Map<number, number>();
+const mockAnalysisListeners = {
+  progress: new Set<(payload: { current: number; total: number; message: string; track_id?: number }) => void>(),
+  partial: new Set<(payload: { track_id: number }) => void>(),
+  complete: new Set<() => void>(),
+};
+
+/** Browser stand-in for the staged run: waveform and key first, then BPM and grid, one `analysis-*` event per stage. */
+function runMockAnalysis(ids: number[]): Promise<TrackInfo[]> {
+  ids.forEach((id) => mockStages.set(id, 0));
+  return new Promise((resolve) => {
+    ids.forEach((id, index) => {
+      const start = index * MOCK_TRACK_GAP_MS;
+      setTimeout(() => {
+        const track = mockTracks.find((t) => t.id === id);
+        if (track) track.key = '3A';
+        mockStages.set(id, MOCK_STAGES_WAVEFORM_AND_KEY);
+        invalidateAnalysisCache(id);
+        mockAnalysisListeners.partial.forEach((cb) => cb({ track_id: id }));
+      }, start + MOCK_FAST_PASS_MS);
+      setTimeout(() => {
+        const track = mockTracks.find((t) => t.id === id);
+        if (track) {
+          track.tempo = 12600 + (id % 7) * 100;
+          track.has_analysis = true;
+        }
+        mockStages.set(id, MOCK_STAGES_ALL);
+        invalidateAnalysisCache(id);
+        const done = index + 1;
+        mockAnalysisListeners.progress.forEach((cb) =>
+          cb({ current: done, total: ids.length, message: `Analyzed ${track?.title ?? id} (${done}/${ids.length})`, track_id: id }),
+        );
+        if (done === ids.length) {
+          mockAnalysisListeners.complete.forEach((cb) => cb());
+          resolve(mockTracks);
+        }
+      }, start + MOCK_GRID_PASS_MS);
+    });
+  });
+}
+
 export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
   try {
     return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
   } catch (err) {
     lastTauriError = `analyze_track_ids fail: ${String(err)}`;
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        mockTracks.forEach((t) => {
-          if (ids.includes(t.id)) {
-            t.tempo = 12600 + (t.id % 7) * 100;
-            t.key = '3A';
-            t.duration_secs = 380;
-          }
-        });
-        resolve(mockTracks);
-      }, 800);
-    });
+    return runMockAnalysis(ids);
+  }
+}
+
+const MOCK_SETTINGS_KEY = 'fourfour.mock.settings';
+
+function mockSettings(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_SETTINGS_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+function writeMockSetting(key: string, value: unknown) {
+  try {
+    localStorage.setItem(MOCK_SETTINGS_KEY, JSON.stringify({ ...mockSettings(), [key]: value }));
+  } catch {
+    mockSettingFallback[key] = value;
+  }
+}
+
+const mockSettingFallback: Record<string, unknown> = {};
+
+function readMockSetting<T>(key: string, fallback: T): T {
+  const value = mockSettings()[key] ?? mockSettingFallback[key];
+  return (value ?? fallback) as T;
+}
+
+/** Whether never-analysed tracks are queued at launch (default on). */
+export async function getAutoAnalyzeNew(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('get_auto_analyze_new');
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return readMockSetting('auto_analyze_new_tracks', true);
+  }
+}
+
+export async function setAutoAnalyzeNew(enabled: boolean): Promise<void> {
+  try {
+    await invoke('set_auto_analyze_new', { enabled });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    writeMockSetting('auto_analyze_new_tracks', enabled);
+  }
+}
+
+/** Stored analysis backend: 'rust', 'python', or null for automatic. */
+export async function getAnalysisBackend(): Promise<string | null> {
+  try {
+    return await invoke<string | null>('get_analysis_backend');
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return readMockSetting<string | null>('analysis_backend', null);
+  }
+}
+
+export async function setAnalysisBackend(backend: string | null): Promise<void> {
+  try {
+    await invoke('set_analysis_backend', { backend });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    writeMockSetting('analysis_backend', backend);
+  }
+}
+
+/** Stop the active analysis run: queued tracks are dropped, in-flight ones aborted. */
+export async function cancelAnalysis(): Promise<void> {
+  await invokeOrMock('cancel_analysis', {});
+}
+
+/** Queues stages left missing by an earlier session (and new tracks, per setting); returns how many. */
+export async function resumeAnalysis(): Promise<number> {
+  try {
+    return await invoke<number>('resume_analysis');
+  } catch (err) {
+    lastTauriError = `resume_analysis fail: ${String(err)}`;
+    return 0;
   }
 }
 
@@ -467,6 +675,85 @@ export function invalidateAnalysisCache(trackId?: number) {
   }
 }
 
+const mockBeatGrids = new Map<number, Array<{ time_ms: number; bar_position: number }>>();
+
+/** Store an edited beat grid; the next analysis read of the track carries it. */
+export async function setBeatGrid(
+  trackId: number,
+  beats: Array<{ time_ms: number; bar_position: number }>,
+): Promise<void> {
+  try {
+    await invoke('set_beat_grid', { trackId, beats });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    mockBeatGrids.set(trackId, beats);
+  }
+  invalidateAnalysisCache(trackId);
+}
+
+async function invokeOrMock(command: string, args: Record<string, unknown>): Promise<void> {
+  try {
+    await invoke(command, args);
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+  }
+}
+
+/** Set a track's BPM by hand; re-analysis keeps it and the beat grid is left as it is. */
+export async function setTrackBpm(trackId: number, bpm: number): Promise<void> {
+  await invokeOrMock('set_track_bpm', { trackId, bpm });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Set a track's Camelot key by hand; re-analysis keeps it. */
+export async function setTrackKey(trackId: number, key: string): Promise<void> {
+  await invokeOrMock('set_track_key', { trackId, key });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Let re-analysis replace the hand-set BPM and key of a track again. */
+export async function releaseUserEdits(trackId: number): Promise<void> {
+  await invokeOrMock('release_user_edits', { trackId });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Fit the beat grid to a BPM (explicit; setting the BPM never moves the grid). */
+export async function rescaleBeatGrid(trackId: number, bpm: number): Promise<void> {
+  await invokeOrMock('rescale_beat_grid', { trackId, bpm });
+  invalidateAnalysisCache(trackId);
+}
+
+const MOCK_CUES_KEY = 'fourfour.mock.cues';
+
+function mockCueStore(): Record<string, CuePointPayload[]> {
+  try {
+    return JSON.parse(localStorage.getItem(MOCK_CUES_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+}
+
+/** Replace the cues of a track (slot 0 memory, 1 to 8 hot A to H); the next analysis read carries them. */
+export async function setCues(trackId: number, cues: CuePointPayload[]): Promise<void> {
+  try {
+    await invoke('set_cues', { trackId, cues });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    try {
+      localStorage.setItem(MOCK_CUES_KEY, JSON.stringify({ ...mockCueStore(), [trackId]: cues }));
+    } catch {
+      mockCueFallback.set(trackId, cues);
+    }
+  }
+  invalidateAnalysisCache(trackId);
+}
+
+const mockCueFallback = new Map<number, CuePointPayload[]>();
+
+function mockEditedCues(trackId: number): CuePointPayload[] | undefined {
+  return mockCueStore()[trackId] ?? mockCueFallback.get(trackId);
+}
+
 async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
@@ -485,7 +772,14 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
         syntheticTrackCount > 0
           ? perfAnalysisData(mock.duration_secs, mock.tempo, mock.key, mockLegacyPayload, trackId)
           : mockAnalysisData(trackId, mock.duration_secs, mock.tempo, mock.key);
-      const clean = sanitizeAnalysisPayload(data);
+      const edited = mockBeatGrids.get(trackId);
+      const editedCues = mockEditedCues(trackId);
+      const clean = sanitizeAnalysisPayload({
+        ...data,
+        analysis_stages: mockStages.get(trackId) ?? MOCK_STAGES_ALL,
+        ...(edited ? { beats: edited } : {}),
+        ...(editedCues ? { cue_points: editedCues } : {}),
+      });
       cacheAnalysis(trackId, clean);
       return clean;
     }
@@ -519,11 +813,13 @@ export function prefetchAnalysisData(trackIds: number[]) {
   }, PREFETCH_DELAY_MS);
 }
 
-const ARTWORK_THUMB_PX = 512;
+export const ARTWORK_DETAIL_PX = 512;
+export const ARTWORK_ROW_PX = 64;
 
-export async function getTrackArtwork(trackId: number): Promise<ArrayBuffer | null> {
+export async function getTrackArtwork(trackId: number, maxPx = ARTWORK_DETAIL_PX): Promise<ArrayBuffer | null> {
+  if (useBrowserMocks() && mockArtworkDelayMs > 0) return mockArtworkBytes(trackId, maxPx);
   try {
-    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId, maxPx: ARTWORK_THUMB_PX });
+    const bytes = await invoke<ArrayBuffer>('get_track_artwork', { trackId, maxPx });
     return bytes.byteLength > 0 ? bytes : null;
   } catch (err) {
     lastTauriError = `get_track_artwork fail: ${String(err)}`;
@@ -540,6 +836,7 @@ export function listenToAnalysisProgress(
   }) => void,
 ) {
   let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) mockAnalysisListeners.progress.add(callback);
   try {
     listen<{
       current: number;
@@ -559,8 +856,29 @@ export function listenToAnalysisProgress(
   return () => unsubscribe();
 }
 
+/** The waveform of a prioritised track is stored; tempo, grid and key follow with the full result. */
+export function listenToAnalysisPartial(callback: (payload: { track_id: number }) => void) {
+  let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) mockAnalysisListeners.partial.add(callback);
+  try {
+    listen<{ track_id: number }>('analysis-partial', (event) => {
+      callback(event.payload);
+    })
+      .then((unsub) => {
+        unsubscribe = unsub;
+      })
+      .catch((err) => {
+        lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
+      });
+  } catch (err) {
+    lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
+  }
+  return () => unsubscribe();
+}
+
 export function listenToAnalysisComplete(callback: () => void) {
   let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) mockAnalysisListeners.complete.add(callback);
   try {
     listen<void>('analysis-complete', () => {
       callback();

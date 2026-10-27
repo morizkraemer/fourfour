@@ -3,6 +3,15 @@
  * State lives in a single exported object so consumers can read + write fields.
  */
 
+import {
+  clampPanelWidth,
+  loadPanelWidth,
+  savePanelWidth,
+  PANEL_WIDTH,
+  type ResizablePanel,
+} from '../lib/panelWidth.ts';
+import { clampPlayerHeight, loadPlayerHeight, savePlayerHeight } from '../lib/playerHeight.ts';
+
 // ── Organize panel ──────────────────────────────────────────────────────────
 
 export type OrganizeTarget = {
@@ -25,7 +34,7 @@ const ORGANIZE_RECENTS_MAX = 8;
  * Min panel width before snapping to rail: ORGANIZE_SNAP_TO_RAIL_PX (below).
  * Snap-to-fullscreen threshold: ORGANIZE_SNAP_TO_FULL_PX (below).
  */
-const ORGANIZE_WIDTH_DEFAULT = 360;
+const ORGANIZE_WIDTH_DEFAULT = 420;
 const ORGANIZE_WIDTH_MIN = 200; // absolute floor; below SNAP_RAIL threshold snaps to rail
 const ORGANIZE_WIDTH_MAX = 99999; // effectively unlimited (clamped by viewport at render)
 
@@ -42,10 +51,25 @@ export const ui = $state({
   activeSidebarRow: 'All Tracks',
   /** Preferences modal opened from the footer settings button. */
   settingsOpen: false,
+  /** Section key Preferences opens on. */
+  settingsTab: 'library',
+  /** Command palette overlay (⌘K). */
+  paletteOpen: false,
+  /** Set by the palette: the track table scrolls this track into view. */
+  revealTrack: null as { id: number; nonce: number } | null,
   /** ⌘F inline filter — narrows visible track lists in place. */
   listFilter: '',
   /** Incremented to focus the filter field (GlobalHeader). */
   filterFocusNonce: 0,
+  /** Left sidebar width in px (persisted). */
+  sidebarWidth: loadPanelWidth('sidebar') as number,
+  /** Right inspector width in px (persisted). */
+  detailWidth: loadPanelWidth('inspector') as number,
+  /** Expanded player height in px (persisted); null = the default share of the window. */
+  playerHeight: loadPlayerHeight() as number | null,
+  /** Set by new-playlist flows: the docked panel starts inline rename. */
+  renameRequest: null as { playlistId: number } | null,
+  sidebarRenameRequest: null as { playlistId: number } | null,
   /** Right-sidebar organize panel state. */
   organize: {
     /** Docked target — null when picker is shown. */
@@ -132,6 +156,12 @@ export function collapseOrganize() {
   persistOrganize();
 }
 
+/** Clear the docked target and keep the panel open on the destination picker. */
+export function clearOrganizeTarget() {
+  ui.organize.target = null;
+  persistOrganize();
+}
+
 /** Close the organize panel: clear target and collapse. */
 export function closeOrganize() {
   ui.organize.target = null;
@@ -205,6 +235,36 @@ export function reconcileOrganizeTarget(
   }
 }
 
+// ── Resizable side panels ────────────────────────────────────────────────────
+
+const PANEL_FIELD = { sidebar: 'sidebarWidth', inspector: 'detailWidth' } as const;
+
+export function setPanelWidth(panel: ResizablePanel, px: number) {
+  ui[PANEL_FIELD[panel]] = clampPanelWidth(panel, px);
+}
+
+export function commitPanelWidth(panel: ResizablePanel) {
+  savePanelWidth(panel, ui[PANEL_FIELD[panel]]);
+}
+
+export function resetPanelWidth(panel: ResizablePanel) {
+  setPanelWidth(panel, PANEL_WIDTH[panel].initial);
+  commitPanelWidth(panel);
+}
+
+export function setPlayerHeight(px: number, viewportHeight: number) {
+  ui.playerHeight = clampPlayerHeight(px, viewportHeight);
+}
+
+export function commitPlayerHeight() {
+  savePlayerHeight(ui.playerHeight);
+}
+
+export function resetPlayerHeight() {
+  ui.playerHeight = null;
+  savePlayerHeight(null);
+}
+
 // ── Other UI state ────────────────────────────────────────────────────────────
 
 /** Clear the inline list filter. */
@@ -222,8 +282,32 @@ export function toggleDetailPane() {
   ui.detailPaneOpen = !ui.detailPaneOpen;
 }
 
-export function openSettings() {
+export function openSettings(tab: string = 'library') {
+  ui.settingsTab = tab;
   ui.settingsOpen = true;
+}
+
+export function toggleSettings() {
+  if (ui.settingsOpen) closeSettings();
+  else openSettings();
+}
+
+export function openPalette() {
+  ui.paletteOpen = true;
+}
+
+export function closePalette() {
+  ui.paletteOpen = false;
+}
+
+export function togglePalette() {
+  ui.paletteOpen = !ui.paletteOpen;
+}
+
+/** Toggle the right sidebar between rail and pulled-out (top bar button, Shift-Tab). */
+export function toggleOrganize() {
+  if (ui.organize.expanded) collapseOrganize();
+  else expandOrganize();
 }
 
 export function closeSettings() {

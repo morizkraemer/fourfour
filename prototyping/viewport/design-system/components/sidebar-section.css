@@ -38,8 +38,8 @@
 .ff-sidebar-section__add-btn {
   background: transparent;
   border: none;
-  padding: 0;
-  margin: 0;
+  padding: 3px;
+  margin: -3px;
   color: var(--ff-muted);
   cursor: pointer;
   display: inline-flex;
@@ -65,6 +65,13 @@
 .ff-sidebar-section__add-btn:active {
   background: var(--ff-select);
   color: var(--ff-text);
+}
+
+.ff-sidebar-section__add-btn--drop {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+  outline: 1px solid var(--ff-accent);
+  outline-offset: -1px;
 }
 
 .ff-sidebar-section__add-icon {

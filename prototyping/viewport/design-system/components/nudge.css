@@ -109,3 +109,34 @@
   min-width: 46px;
   border-right: 1px solid var(--ff-border-hi);
 }
+
+.ff-nudge__value--scrub {
+  padding: 0;
+  min-width: 52px;
+}
+
+.ff-nudge__value--scrub .ff-scrub {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0 8px;
+  justify-content: center;
+  border-radius: 0;
+}
+
+.ff-nudge__value--scrub .ff-scrub__grip {
+  display: none;
+}
+
+.ff-nudge__value--scrub .ff-scrub__input {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  background: var(--ff-elev);
+  font-family: var(--ff-font-mono);
+  font-size: inherit;
+  text-align: center;
+}

@@ -7,6 +7,7 @@ import {
   getVersion,
   getLibraryPath,
   loadState as tauriLoadState,
+  resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
   scanDirectory as tauriScanDirectory,
   scanFiles as tauriScanFiles,
@@ -19,8 +20,10 @@ import {
   readUsbState as tauriReadUsbState,
   writeUsb as tauriWriteUsb,
   ejectVolume as tauriEjectVolume,
+  revealInFileManager,
   wipeUsb as tauriWipeUsb,
   listenToAnalysisProgress,
+  listenToAnalysisPartial,
   listenToAnalysisComplete,
   listenToWriteComplete,
   lastTauriError,
@@ -38,9 +41,12 @@ import {
   isValidWaveformPreview,
   decodeTrackPreview,
   decodeBandPreview,
+  readyAnalysisFields,
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
 import { artwork } from './artwork.svelte.ts';
+import { loadCuesFromPayload } from './cues.svelte.ts';
+import type { CuePointPayload } from '../lib/cues.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
@@ -412,38 +418,36 @@ export function isTrackAnalyzing(trackId: number): boolean {
   return library.analyzingTrackIds.includes(trackId);
 }
 
-function unanalyzedIds(ids: number[]): number[] {
-  return [...new Set(ids)].filter((id) => {
-    if (id <= 0) return false;
-    const track = library.tracks.find((t) => t.id === id);
-    return track != null && !track.analyzed;
-  });
+function knownTrackIds(ids: number[]): number[] {
+  return [...new Set(ids)].filter((id) => id > 0 && library.tracks.some((t) => t.id === id));
 }
 
-/** Move a track to the front of the waiting analysis queue. */
-function bumpAnalysisQueuePriority(trackId: number) {
-  if (!library.analyzingTrackIds.includes(trackId)) return;
-  library.analyzingTrackIds = [
-    trackId,
-    ...library.analyzingTrackIds.filter((id) => id !== trackId),
-  ];
-  void tauriPrioritizeAnalysis(trackId);
+const analysisStartListeners = new Set<(trackIds: number[]) => void>();
+
+/** Called with the ids of tracks whose analysis (re)starts, after their rows were cleared. */
+export function onAnalysisStart(listener: (trackIds: number[]) => void): () => void {
+  analysisStartListeners.add(listener);
+  return () => analysisStartListeners.delete(listener);
 }
 
 /**
- * Ensure a track is analyzed — used when loading into the player.
- * Starts a background run when idle; bumps queue priority when already queued.
+ * Analyse a track now — used when it is loaded into the player or played.
+ * The backend moves it to its fast lane (queued or not) or starts a run when idle;
+ * the waveform arrives first as `analysis-partial`, the full result as `analysis-progress`.
  */
 export function requestBackgroundAnalysis(trackId: number) {
   const track = library.tracks.find((t) => t.id === trackId);
-  if (!track || track.analyzed) return;
+  if (!track || (track.analyzed && !track.analysisPending)) return;
 
   if (isTrackAnalyzing(trackId)) {
-    bumpAnalysisQueuePriority(trackId);
-    return;
+    library.analyzingTrackIds = [trackId, ...library.analyzingTrackIds.filter((id) => id !== trackId)];
+  } else {
+    markTracksPendingAnalysis([trackId]);
+    library.analyzing = true;
+    library.analyzingTrackIds = [...library.analyzingTrackIds, trackId];
+    library.statusMessage = 'Analyzing track…';
   }
-
-  void analyzeTrackIds([trackId]);
+  void tauriPrioritizeAnalysis(trackId);
 }
 
 function trackMatchesAnalyzedFilename(track: { title?: string; filePath?: string }, fileName: string) {
@@ -465,35 +469,38 @@ function applyWaveformAndCuesFromAnalysis(
   res: {
     waveform_preview?: number[];
     waveform_row_bands?: string | null;
-    cue_points?: Array<{ time_ms: number; hot_cue_number: number; color?: string }>;
+    cue_points?: CuePointPayload[];
     bpm?: number;
     key?: string;
+    bpm_locked?: boolean;
+    key_locked?: boolean;
+    analysis_pending?: boolean;
+    analysis_stages?: number;
   },
 ): boolean {
   const searchTextBefore = `${track.bpm}|${track.key}|${track.analyzed}`;
-  const bandPreview = decodeBandPreview(res.waveform_row_bands);
-  if (bandPreview) {
+  const ready = readyAnalysisFields(res);
+  const bandPreview = ready.waveform ? decodeBandPreview(res.waveform_row_bands) : null;
+  if (!ready.waveform) {
+    track.bandsPreview = undefined;
+    track.preview = undefined;
+  } else if (bandPreview) {
     if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
     track.preview = undefined;
   } else if (res.waveform_preview?.length) {
     track.bandsPreview = undefined;
     track.preview = Uint8Array.from(res.waveform_preview);
   }
-  if (res.cue_points) {
-    track.cues = res.cue_points.map((cue) => {
-      const mins = Math.floor(cue.time_ms / 60000);
-      const secs = Math.floor((cue.time_ms % 60000) / 1000);
-      const posStr = `${mins}:${String(secs).padStart(2, '0')}`;
-      return {
-        name: cue.hot_cue_number === 0 ? 'Memory Cue' : `Hot Cue ${String.fromCharCode(64 + cue.hot_cue_number)}`,
-        position: posStr,
-        color: cue.color,
-      };
-    });
+  if (res.cue_points) loadCuesFromPayload(track.id as number, res.cue_points);
+  if (ready.bpm && res.bpm) {
+    track.bpm = Number(res.bpm).toFixed(1);
+    track.bpmExact = Number(res.bpm);
   }
-  if (res.bpm) track.bpm = Number(res.bpm).toFixed(1);
-  if (res.key) track.key = res.key;
+  if (ready.key && res.key) track.key = res.key;
+  track.bpmLocked = res.bpm_locked === true;
+  track.keyLocked = res.key_locked === true;
   track.analyzed = true;
+  track.analysisPending = res.analysis_pending === true;
   track.analysisLoaded = true;
   return searchTextBefore !== `${track.bpm}|${track.key}|${track.analyzed}`;
 }
@@ -507,6 +514,7 @@ function applyWaveformAndCuesFromAnalysis(
 export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Promise<void> {
   if (track.analysisLoaded || !track.analyzed) return;
   const id = track.id as number;
+  if (isTrackAnalyzing(id)) return;
   const inflight = peakLoadInflight.get(id);
   if (inflight) return inflight;
 
@@ -565,14 +573,26 @@ function finishAnalyzingTrack(trackId: number) {
   if (track) void refreshTrackAnalysisDisplay(track);
 }
 
+/** Puts tracks into the state a first analysis starts from: no waveform, and no BPM or key unless hand-set. */
 function markTracksPendingAnalysis(ids: number[]) {
+  const restarted: number[] = [];
   for (const id of ids) {
     const track = library.tracks.find((t) => t.id === id);
-    if (!track) continue;
+    if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
     track.analysisLoaded = false;
+    track.analysisPending = true;
+    if (!track.bpmLocked) {
+      track.bpm = '—';
+      track.bpmExact = 0;
+    }
+    if (!track.keyLocked) track.key = '—';
+    restarted.push(id);
   }
+  if (restarted.length === 0) return;
+  bumpLibraryTracks();
+  analysisStartListeners.forEach((listener) => listener(restarted));
 }
 
 function handleAnalysisProgressEvent(progress: {
@@ -595,6 +615,11 @@ function handleAnalysisProgressEvent(progress: {
   const fileName = match[1];
   const track = library.tracks.find((t) => trackMatchesAnalyzedFilename(t, fileName));
   if (track) finishAnalyzingTrack(track.id);
+}
+
+function handleAnalysisPartialEvent(payload: { track_id: number }) {
+  const track = library.tracks.find((t) => t.id === payload.track_id);
+  if (track) void refreshTrackAnalysisDisplay(track);
 }
 
 function handleAnalysisCompleteEvent() {
@@ -630,18 +655,24 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     album: t.album || '—',
     label: '—',
     bpm: bpmStr,
+    bpmExact: t.tempo / 100,
+    bpmLocked: false,
+    keyLocked: false,
     key: keyStr,
     time: timeStr,
     fav: undefined,
     genre: t.genre || '—',
     year: '—',
     filePath: t.source_path,
-    cues: t.has_cues ? [{ name: 'Cues Injected', position: '0:00' }] : [],
     comment: '',
     analyzed,
+    analysisPending: t.analysis_pending ?? false,
     raw: t,
     get cover() {
       return artwork.get(this.id, this.raw?.has_artwork);
+    },
+    get rowCover() {
+      return artwork.getRow(this.id, this.raw?.has_artwork);
     },
     get bands() {
       return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
@@ -699,6 +730,21 @@ export async function saveState() {
 let libraryListenersInstalled = false;
 
 /** Initialize library store, triggers on boot */
+export const LAUNCH_ANALYSIS_DELAY_MS = 5000;
+
+let launchAnalysisTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Resumes unfinished analysis a few seconds after launch so startup stays fast. Runs once. */
+export function scheduleLaunchAnalysis() {
+  if (launchAnalysisTimer !== undefined) return;
+  launchAnalysisTimer = setTimeout(async () => {
+    const queued = await tauriResumeAnalysis();
+    if (queued === 0) return;
+    library.analyzing = true;
+    if (!library.syncing) library.statusMessage = 'Resuming analysis…';
+  }, LAUNCH_ANALYSIS_DELAY_MS);
+}
+
 export async function initLibrary() {
   library.ipcDiagnostic = getIpcDiagnostic();
   library.statusMessage = 'Loading library…';
@@ -714,6 +760,7 @@ export async function initLibrary() {
     if (!libraryListenersInstalled) {
       libraryListenersInstalled = true;
       listenToAnalysisProgress(handleAnalysisProgressEvent);
+      listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
       listenToWriteComplete(() => {
         library.syncing = false;
@@ -721,6 +768,7 @@ export async function initLibrary() {
         refreshUsbState();
       });
     }
+    scheduleLaunchAnalysis();
   } catch (err) {
     library.statusMessage = 'Failed to load library';
     console.error('initLibrary failed:', err);
@@ -844,7 +892,7 @@ export async function removeTracks(ids: number[]) {
 
 /** Trigger analysis on all pending tracks */
 export async function analyzeTracks() {
-  const pendingIds = library.tracks.filter((t) => !t.analyzed).map((t) => t.id);
+  const pendingIds = library.tracks.filter((t) => !t.analyzed || t.analysisPending).map((t) => t.id);
   if (pendingIds.length === 0) return;
 
   markTracksPendingAnalysis(pendingIds);
@@ -861,7 +909,7 @@ export async function analyzeTracks() {
 
 /** Analyze or re-analyze specific tracks by id */
 export async function analyzeTrackIds(ids: number[]) {
-  const unique = unanalyzedIds(ids);
+  const unique = knownTrackIds(ids);
   if (unique.length === 0) return;
 
   markTracksPendingAnalysis(unique);
@@ -894,6 +942,20 @@ export async function clearPlaylistTracks(playlistId: number) {
   pl.track_ids = [];
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
+}
+
+/** Empty every favorite slot (the slots themselves stay). */
+export async function clearAllFavorites() {
+  let changed = false;
+  for (const pl of library.playlists) {
+    if (isFavoritePlaylistName(pl.name) && pl.track_ids.length > 0) {
+      pl.track_ids = [];
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  await saveState();
+  syncTrackFavoriteFields();
 }
 
 /** Set test hot cues on selected track IDs */
@@ -967,6 +1029,14 @@ export async function wipeVolume(path: string) {
     await refreshUsbState();
   } catch (err) {
     console.error('wipeVolume failed:', err);
+  }
+}
+
+export async function revealFile(path: string) {
+  try {
+    await revealInFileManager(path);
+  } catch (err) {
+    library.statusMessage = String(err);
   }
 }
 
@@ -1046,12 +1116,12 @@ export async function renamePlaylist(id: number, name: string) {
   await saveState();
 }
 
-export async function addPlaylist(name: string): Promise<number> {
+export async function addPlaylist(name: string, trackIds: number[] = []): Promise<number> {
   const newId = library.playlists.length > 0 ? Math.max(...library.playlists.map(p => p.id)) + 1 : 1;
   library.playlists.push({
     id: newId,
     name,
-    track_ids: []
+    track_ids: [...new Set(trackIds)]
   });
   await saveState();
   return newId;
@@ -1082,16 +1152,15 @@ export async function removeFavoriteSlot(playlistId: number): Promise<string | n
   return name;
 }
 
-export async function addTracksToPlaylist(playlistId: number, trackIds: number[]) {
+export async function addTracksToPlaylist(playlistId: number, trackIds: number[]): Promise<number> {
   const pl = library.playlists.find(p => p.id === playlistId);
-  if (!pl) return;
-  trackIds.forEach(tid => {
-    if (!pl.track_ids.includes(tid)) {
-      pl.track_ids.push(tid);
-    }
-  });
+  if (!pl) return 0;
+  const fresh = [...new Set(trackIds)].filter(tid => !pl.track_ids.includes(tid));
+  if (fresh.length === 0) return 0;
+  pl.track_ids.push(...fresh);
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
+  return fresh.length;
 }
 
 export async function removeTrackFromPlaylist(playlistId: number, trackId: number) {

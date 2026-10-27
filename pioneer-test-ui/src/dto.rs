@@ -48,6 +48,8 @@ pub struct TrackInfo {
     pub has_cues: bool,
     /// True when an analysis row exists in the DB index (authoritative, not `tempo > 0`).
     pub has_analysis: bool,
+    /// True when the analysis row lacks stages (key or grid still to come); the track stays queued for them.
+    pub analysis_pending: bool,
     /// 400-byte mono waveform preview as base64 (a JSON number array is ~2.6x
     /// larger), present only when a real (non-placeholder) preview exists. Lets
     /// the track list paint mini waveforms without an N+1 fetch.
@@ -76,6 +78,7 @@ impl From<&Track> for TrackInfo {
             has_artwork: t.artwork.is_some(),
             has_cues: false,
             has_analysis: false,
+            analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
         }

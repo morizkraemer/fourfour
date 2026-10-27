@@ -100,6 +100,49 @@ No gap against what the app writes today. The prototype's placeholder stage (per
 7. **Decoder**: the library decodes with symphonia 0.6, the app's band pass with 0.5. Moving the app to 0.6 would make both paths bit-identical.
 8. **Per-worker models**: one shared model instance serves all workers, not one per worker (immutable weights; see Design).
 
+## Priority and staged analysis (F2)
+
+Branch `wb-analysis-priority`. Two requests: a played or loaded track with no analysis gets its waveform and result as fast as possible, and the whole queue shows waveforms first, then keys, then BPM/grid.
+
+### Design
+
+- **Stages and storage.** `analyses.stages` (schema v5, existing rows migrate to complete) holds bits `WAVEFORM`, `KEY`, `GRID` (`pioneer_library::analysis_stage`). `set_analysis` stores all three; `set_analysis_stages` stores a partial result. A track with stages missing is listed by `get_unanalyzed_track_ids` (so "analyse all" and a restart resume at the missing stage), is left out of `get_analyzed_tracks` (USB export), and reaches the UI as `analysis_pending` (load state and `get_analysis_data`). BPM stays 0 in a partial row and the UI shows a dash until it lands.
+- **Passes** (`Analyzer::analyze_controlled`, `Pass`): `Fast` = one decode, waveform then key, no model; `Grid` = Beat This! plus fit (the waveform is recomputed from the same decode, the key comes from the stored one); `All` = everything. The waveform is stored and emitted the moment it is ready (`analysis-partial`), the key a few seconds later (second `analysis-partial`), the full result as the usual `analysis-progress`.
+- **Staged queue** (`analysis_run.rs`): background workers take the fast pass of every queued track first (1 thread each, 8 at once), then grid passes (threads per track as before, a lone last track gets all threads). A track that already has waveform and key stored goes straight to its grid pass. `AnalysisCoordinator::with_staging(false)` restores the one-piece behaviour (used for the bench baseline). Python runs one piece per track, unchanged.
+- **Now lane** (`prioritize_analysis`, called when a track is loaded into the player or played and is not fully analysed): the track leaves the queue (or its narrow in-flight job is cancelled and restarted) and runs `All` on all threads, with the waveform stored first. Background grid passes pause between model chunks (a chunk is about 7 s single-thread) and resume afterwards; fast passes are short and keep running. A job that already has every thread is left alone; with no run active the track gets a run of its own. Python: queue priority, an immediate extra process, new launches held, and the band pass as its partial waveform (in-flight Python processes cannot be paused or preempted).
+- **UI**: `analysis-partial` refreshes the track row, the detail pane and the player strip without a reload; the player and library mark a track pending until its BPM/grid arrives, and play/load still request priority for pending tracks.
+
+### Measurements (dev box, 16 cores, 8 analysis threads, 30 tracks, release)
+
+The box was shared and its load average swung between 13 and 53 during the runs, so wall times are not comparable between runs (the same unstaged setup took 315 s and 680 s). Read the stage times and the played-track times; treat total wall as noise.
+
+| Run | All have waveform | All have key | All have BPM/grid | Peak RSS |
+|---|---|---|---|---|
+| Staged, play at 120 s | 17.8 s | 18.1 s | 788 s | 5.3 GB |
+| Staged, no play | 33.0 s | 33.3 s | 552 s | 4.3 GB |
+| Staged, play at 5 s | 27.9 s | 28.3 s | 583 s | 4.6 GB |
+| Before (one piece), no play | 315 s | 315 s | 315 s | 4.6 GB |
+| Before (one piece), play at 120 s | 680 s | 680 s | 680 s | 4.4 GB |
+
+Played track (queued mid-list, number 21 of 30), seconds after pressing play:
+
+| | Waveform shown | Full analysis |
+|---|---|---|
+| Before (front of queue, one thread, waits for a free worker) | 195 s | 195 s |
+| After, play at 120 s (waveform already there from the fast pass) | 0 s | 72 s |
+| After, play at 5 s (fast pass not yet reached it) | 4.2 s | 18.1 s |
+
+- The fast pass costs 2.6 to 9.9 s per track single-thread (decode, waveform, key); the grid pass repeats the decode and the waveform (about 2 to 3 s), so staging adds roughly 5 to 10 % CPU per track. Total time for the whole list is therefore about equal to before; the gain is that every row has a waveform and key after 18 to 33 s instead of at the end.
+- First full result (BPM) comes later than before in the staged runs (23 to 269 s against 66 to 74 s) because grid passes start only after all fast passes; this run order was not tuned.
+- **Decoded-audio cache: not worth it.** The repeated decode is 2 to 3 s against a grid pass of 50 to 130 s (under 3 %); a cached decoded track is 60 to 100 MB (mono f32, 6 min), so a 1 GB cap would hold about 10 of 30 tracks for a gain of under 3 % CPU. Not built.
+
+### Risks and limits
+
+- A partial row exists between stages; a crash leaves the track pending (waveform and key stored, BPM missing), which is the intended resume state. The USB export skips such tracks.
+- Pause is between model chunks, so up to about 7 s before background grid passes yield. A cancel or preempt has the same latency.
+- Preempting a narrow in-flight grid job discards its progress (up to a full single-thread pass).
+- Resume after a restart is automatic: 5 s after `load_state` the app calls `resume_analysis`, which queues tracks with missing stages (first) and, while `auto_analyze_new_tracks` in `config.json` is on (default on, no UI yet, commands `get/set_auto_analyze_new`), never-analysed tracks, as an ordinary background run. The now lane still preempts it, and queueing skips tracks already queued or running, so a manual analyse never duplicates work.
+
 ## Tests and validation
 
 - Library: AnalysisResult mapping (bar-position phase, ms/tempo fields, key, waveform and `exact` columns, failed fit), pool plan limits, weights lookup, shared-band waveform tests; integration test on two generated 30 s WAV tracks plus a cancel test (`#[ignore]`, need weights: `cargo test --release -p fourfour-analysis-rs -- --include-ignored`, 3 of 3 pass); a non-ignored test that loading without weights fails with a clear error.

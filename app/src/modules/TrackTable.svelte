@@ -3,7 +3,7 @@
   column visibility menu, and playlist-aware row moves.
 -->
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     ColumnHeader,
     TrackRow,
@@ -44,6 +44,8 @@
     sortTracks,
     ALL_COLUMN_KEYS,
   } from '../stores/table-columns.svelte.ts';
+  import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+  import { dropTracksOnCard, dropTracksOnRibbon } from '../stores/organize-drop.svelte.ts';
   import { dnd, startTrackDrag, updatePointer, updateTrackDropTarget, endDrag } from '../stores/dnd.svelte.ts';
   import {
     buildTrackContextMenuItems,
@@ -51,7 +53,7 @@
     buildSourceContextMenuItems,
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
-  import { rowWindow, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
+  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -93,6 +95,22 @@
     initTableColumns();
   });
 
+  $effect(() => {
+    const request = ui.revealTrack;
+    if (!request || embedded) return;
+    void tick().then(() => {
+      if (!tableScrollEl) return;
+      const index = currentTracks.findIndex((t) => t.id === request.id);
+      if (index < 0) return;
+      tableScrollEl.scrollTop = scrollTopToReveal(index, {
+        scrollTop: tableScrollEl.scrollTop,
+        viewportHeight: tableScrollEl.clientHeight,
+        headerHeight,
+        rowCount: currentTracks.length,
+      });
+    });
+  });
+
   async function handleImport() {
     const dir = await pickDirectory();
     if (dir) {
@@ -111,7 +129,7 @@
 
   let isUsbView = $derived(library.volumes.includes(effectiveSource ?? ''));
 
-  let canReorderRows = $derived(!!activePlaylist && !isUsbView);
+  let canReorderRows = $derived(!!activePlaylist && !isUsbView && !layout.sortKey);
 
   // Organize USB target: accept drops when this table is the docked organize
   // destination and it is a mounted USB volume.
@@ -141,7 +159,6 @@
   let layout = $derived(getLayout(layoutKind));
 
   let currentTracks = $derived.by(() => {
-    if (canReorderRows) return filteredTracks;
     return layout.sortKey ? sortTracks(filteredTracks, layoutKind) : filteredTracks;
   });
 
@@ -299,9 +316,18 @@
     const ids = dragTrackIds(track);
     let moved = false;
     let scrollPinRaf = null;
+    let moveRaf = null;
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+
+    function applyPointer() {
+      moveRaf = null;
+      updatePointer(lastX, lastY);
+      updateTrackDropTarget(lastX, lastY);
+    }
 
     function pinSourceScroll() {
-      if (!embedded || !scrollEl) return;
+      if (!embedded || !scrollEl || scrollEl.scrollTop === scrollTopAtDrag) return;
       scrollEl.scrollTop = scrollTopAtDrag;
     }
 
@@ -349,8 +375,9 @@
       }
       if (!moved) return;
       ev.preventDefault();
-      updatePointer(ev.clientX, ev.clientY);
-      updateTrackDropTarget(ev.clientX, ev.clientY);
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      if (moveRaf == null) moveRaf = requestAnimationFrame(applyPointer);
       pinSourceScroll();
     }
 
@@ -358,16 +385,45 @@
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       stopScrollPin();
+      if (moveRaf != null) {
+        cancelAnimationFrame(moveRaf);
+        applyPointer();
+      }
       scrollEl?.removeEventListener('wheel', onWheel);
       if (rowEl?.hasPointerCapture?.(e.pointerId)) {
         rowEl.releasePointerCapture(e.pointerId);
       }
       if (!moved) return;
 
+      const dropNewPlaylist = dnd.dropNewPlaylist;
       const dropPlId = dnd.dropPlaylistId;
       const dropIdx = dnd.dropRowIndex;
       const dropSource = dnd.dropPanelSourceId;
       const copyOnly = ev.altKey;
+      const cardPlaylistId = dnd.dropCardPlaylistId;
+      const cardStickPath = dnd.dropStickPath;
+      const ribbonDrop = dnd.dropRibbon;
+
+      if (ribbonDrop) {
+        await dropTracksOnRibbon(ui.organize.target, ids);
+        dragging = false;
+        dropLineTop = null;
+        endDrag();
+        return;
+      }
+
+      if (cardPlaylistId != null || cardStickPath != null) {
+        await dropTracksOnCard(
+          cardPlaylistId != null
+            ? { kind: 'playlist', playlistId: cardPlaylistId }
+            : { kind: 'stick', volumePath: cardStickPath },
+          ids
+        );
+        dragging = false;
+        dropLineTop = null;
+        endDrag();
+        return;
+      }
 
       // ── Organize-panel drop routing ──────────────────────────────────────
       // If the drop landed on the docked organize panel, route to
@@ -405,7 +461,9 @@
         return;
       }
 
-      if (dropPlId != null) {
+      if (dropNewPlaylist) {
+        await createPlaylistAndOpen(ids);
+      } else if (dropPlId != null) {
         await moveTracksToPlaylist({
           trackIds: ids,
           toPlaylistId: dropPlId,
@@ -422,7 +480,7 @@
             const insertAt = Math.min(Math.max(0, dropIdx), without.length);
             const newOrder = [...without.slice(0, insertAt), ...ids, ...without.slice(insertAt)];
             await reorderPlaylistTracks(activePlaylist.id, newOrder);
-          } else {
+          } else if (!samePanel) {
             await moveTracksToPlaylist({
               trackIds: ids,
               toPlaylistId: targetPlaylist.id,
@@ -555,6 +613,7 @@
         class:ff-table__body--marquee={marqueeActive}
         data-track-drop-body
         data-source-id={effectiveSource}
+        data-row-count={currentTracks.length}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
         style:height={spacerHeight(currentTracks.length) !== undefined ? `${spacerHeight(currentTracks.length)}px` : undefined}

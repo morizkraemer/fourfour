@@ -14,9 +14,11 @@ pioneer_library = { path = "../pioneer-library", package = "pioneer-library" }
 anyhow = "1"
 tokio = { version = "1.52.1", features = ["rt", "process", "time", "macros"] }
 cpal = "0.15"
+fourfour-stretch = { path = "../fourfour-stretch" }
 ringbuf = "0.4"
 symphonia = { version = "0.5", features = ["all"] }
 image = "0.25.10"
+fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
 
 [[bin]]
 name = "waveform_dev"
@@ -31,6 +33,10 @@ name = "waveform_grid"
 path = "src/bin/waveform_grid.rs"
 
 [[bin]]
+name = "bench_analysis"
+path = "src/bin/bench_analysis.rs"
+
+[[bin]]
 name = "bench_startup"
 path = "src/bin/bench_startup.rs"
 
@@ -40,3 +46,6 @@ path = "src/bin/waveform_fixtures.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+fourfour-stretch = { path = "../fourfour-stretch", features = ["count-allocs"] }

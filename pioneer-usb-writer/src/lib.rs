@@ -19,6 +19,7 @@
 //! reader::masterdb::read_masterdb()  →  MasterDbImport  (import from Rekordbox)
 //! ```
 
+pub mod cue_color;
 pub mod models;
 pub mod reader;
 pub mod scanner;

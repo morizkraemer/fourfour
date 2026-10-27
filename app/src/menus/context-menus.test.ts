@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   buildColumnContextMenuItems,
   buildSidebarSectionMenuItems,
+  buildSourceContextMenuItems,
   buildTrackContextMenuItems,
+  buildRevealItem,
+  revealLabel,
 } from './context-menus.ts';
 import { FAVORITE_SLOTS, library } from '../stores/library.svelte.ts';
 
 describe('buildSidebarSectionMenuItems', () => {
   it('offers Add favorite only when allowed', () => {
-    expect(buildSidebarSectionMenuItems('favorites')).toEqual([]);
+    expect(buildSidebarSectionMenuItems('favorites').map((i) => i.label)).not.toContain('Add favorite');
     const items = buildSidebarSectionMenuItems('favorites', { canAddFavorite: true });
-    expect(items.map((i) => i.label)).toEqual(['Add favorite']);
+    expect(items.map((i) => i.label)).toContain('Add favorite');
   });
   it('calls the New playlist callback', () => {
     let called = 0;
@@ -34,11 +37,21 @@ describe('buildTrackContextMenuItems', () => {
   it('returns nothing for an empty selection', () => {
     expect(buildTrackContextMenuItems({ trackIds: [], activePlaylist: null, isUsbView: false })).toEqual([]);
   });
-  it('only offers favorites on a USB view', () => {
+  it('only offers favorites and reveal on a USB view', () => {
     const items = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: null, isUsbView: true });
-    expect(items.map((i) => i.label)).toEqual(['Add to Favorites']);
+    expect(items.map((i) => i.label)).toEqual(['Add to Favorites', revealLabel()]);
     expect(items[0].items).toHaveLength(FAVORITE_SLOTS);
     expect(items[0].items![0]).toMatchObject({ label: 'Favorite 1', shortcut: '1', checked: false });
+  });
+  it('offers reveal for a single selection only', () => {
+    const one = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: null, isUsbView: false });
+    const many = buildTrackContextMenuItems({ trackIds: [1, 2], activePlaylist: null, isUsbView: false });
+    expect(one.map((i) => i.label)).toContain(revealLabel());
+    expect(many.map((i) => i.label)).not.toContain(revealLabel());
+  });
+  it('disables reveal for a track without a file path', () => {
+    expect(buildRevealItem(undefined).disabled).toBe(true);
+    expect(buildRevealItem('/a/b.mp3').disabled).toBe(false);
   });
   it('uses singular and plural labels and a danger remove entry', () => {
     const one = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: null, isUsbView: false });
@@ -53,6 +66,20 @@ describe('buildTrackContextMenuItems', () => {
     const single = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: pl, isUsbView: false });
     expect(many.map((i) => i.label)).toContain('Remove from Warmup');
     expect(single.map((i) => i.label)).toContain('Remove from playlist');
+  });
+});
+
+describe('revealLabel', () => {
+  it('uses platform wording', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    const set = (platform: string) =>
+      Object.defineProperty(globalThis, 'navigator', { value: { platform }, configurable: true });
+    set('MacIntel');
+    expect(revealLabel()).toBe('Show in Finder');
+    set('Linux x86_64');
+    expect(revealLabel()).toBe('Show in folder');
+    if (original) Object.defineProperty(globalThis, 'navigator', original);
+    else delete (globalThis as any).navigator;
   });
 });
 
@@ -91,5 +118,37 @@ describe('buildColumnContextMenuItems', () => {
     unsorted[0].onClick!();
     expect(toggled).toEqual(['title']);
     expect(unsorted[3].isSeparator).toBe(true);
+  });
+});
+
+describe('favourites to playlist', () => {
+  it('offers a move item and a separate clear item, both disabled when empty', () => {
+    const items = buildSidebarSectionMenuItems('favorites');
+    expect(items.map((i) => i.label)).toEqual(['Move favourite tracks to new playlist', 'Clear favourites']);
+    expect(items.every((i) => i.disabled)).toBe(true);
+  });
+  it('lists the move item first and never clears on its own', () => {
+    const [move, clear] = buildSidebarSectionMenuItems('favorites');
+    expect(move.variant).toBeUndefined();
+    expect(clear.variant).toBe('danger');
+  });
+});
+
+describe('buildSourceContextMenuItems rename', () => {
+  it('offers Rename first for a normal playlist and not for a favorite slot', () => {
+    library.playlists = [
+      { id: 1, name: 'Warmup', track_ids: [] },
+      { id: 2, name: 'Favorites 1', track_ids: [] },
+    ];
+    const renamed: string[] = [];
+    const onRenamePlaylist = (p: { name: string }) => renamed.push(p.name);
+    const normal = buildSourceContextMenuItems({ sourceId: 'Warmup', onRenamePlaylist });
+    expect(normal[0].label).toBe('Rename');
+    normal[0].onClick!();
+    expect(renamed).toEqual(['Warmup']);
+    const favorite = buildSourceContextMenuItems({ sourceId: 'Favorites 1', onRenamePlaylist });
+    expect(favorite.map((i) => i.label)).not.toContain('Rename');
+    expect(buildSourceContextMenuItems({ sourceId: 'Warmup' }).map((i) => i.label)).not.toContain('Rename');
+    library.playlists = [];
   });
 });

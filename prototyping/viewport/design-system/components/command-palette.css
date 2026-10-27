@@ -147,3 +147,63 @@
 .ff-cp__footer-right {
   color: var(--ff-faint);
 }
+
+.ff-cp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10100;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 14vh 32px 32px;
+  box-sizing: border-box;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(1px);
+}
+
+.ff-cp-overlay .ff-cp {
+  outline: none;
+}
+
+.ff-cp__hit {
+  font-weight: 600;
+}
+
+.ff-cp__empty {
+  padding: 18px 14px;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-caption);
+  color: var(--ff-muted);
+  text-align: center;
+}
+
+.ff-cp__row-control {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.ff-cp__choices {
+  gap: 2px;
+}
+
+.ff-cp__choice {
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--ff-radius-md);
+  background: none;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-caption);
+  color: var(--ff-muted);
+  cursor: pointer;
+}
+
+.ff-cp__choice:hover {
+  color: var(--ff-text);
+}
+
+.ff-cp__choice--on {
+  border-color: var(--ff-border-hi);
+  background: var(--ff-elev-hi);
+  color: var(--ff-text);
+}

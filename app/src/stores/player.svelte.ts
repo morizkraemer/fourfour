@@ -5,10 +5,12 @@
 import {
   getAnalysisData,
   invalidateAnalysisCache,
+  setBeatGrid,
+  listenToAnalysisPartial,
   listenToAnalysisProgress,
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
-import { previewBytesFromPayload } from '../services/analysis-data.ts';
+import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
 import { colorBandsFromPayload, overviewBandsFromPayload, rowBandsFor, type BandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
@@ -19,25 +21,36 @@ import {
   subscribePlaybackError,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
-import { library, requestBackgroundAnalysis } from './library.svelte.ts';
+import { library, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
+import { resetTempoForNewTrack, tempo } from './tempo.svelte.ts';
+import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
+import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cues.svelte.ts';
+import { initialCuePointMs } from '../lib/cues.ts';
+import {
+  cuePress,
+  cueRelease,
+  cueTap,
+  initialCueButton,
+  playWhileCueHeld,
+  type CueCommand,
+  type CueTransport,
+} from '../lib/cueButton.ts';
+import {
+  BEAT_NUDGE_MS,
+  createGridPersister,
+  shiftBeats,
+  shiftToPlaceDownbeatAt,
+  type BeatMarker,
+} from '../lib/beatGrid.ts';
 
-export interface PlayerCue {
-  position: number;
-  color: string;
-  timeMs: number;
-}
+export type { BeatMarker };
 
 export interface ColorWaveSample {
   amp: number;
   r: number;
   g: number;
   b: number;
-}
-
-export interface BeatMarker {
-  time_ms: number;
-  bar_position: number;
 }
 
 export interface PlayerTrack {
@@ -50,7 +63,6 @@ export interface PlayerTrack {
   key: string;
   totalSeconds: number;
   durationMs: number;
-  cues: PlayerCue[];
   beats: BeatMarker[];
   bands: BandColumns | null;
   // Higher-res detail + fixed overview for the expanded dual-view player.
@@ -58,8 +70,6 @@ export interface PlayerTrack {
   bandsDetail: BandColumns | null;
   bandsOverview: BandColumns | null;
 }
-
-const CUE_COLORS = ['#4ade80', '#60a5fa', '#f472b6', '#fbbf24', '#a78bfa', '#fb7185', '#34d399', '#38bdf8'];
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
 
@@ -77,6 +87,9 @@ export const player = $state({
   expanded: false,
   levelLeft: 0,
   levelRight: 0,
+  get tempo() {
+    return tempo;
+  },
   get cover() {
     if (!this.track) return '';
     return artwork.get(this.track.id, this.track.hasArtwork);
@@ -93,10 +106,12 @@ export function setExpanded(value: boolean) {
 }
 
 let loadGeneration = 0;
+const transportClock = new PlayheadClock();
 let tickUnlisten: (() => void) | null = null;
 let errorUnlisten: (() => void) | null = null;
 let playPending = false;
-let cueHoldMs: number | null = null;
+let cueButton = initialCueButton();
+let cueButtonTrackId: number | null = null;
 // After seeking a *playing* track, the native backend keeps emitting ticks at
 // the old position for a few frames while the seek lands. Hold the playhead at
 // the target and ignore those stale ticks until one arrives near it (or we time
@@ -112,19 +127,6 @@ let pausePending = false;
 function formatBpm(tempo: number): string {
   if (!tempo) return '—';
   return (tempo / 100).toFixed(2);
-}
-
-function mapCues(cuePoints: any[], durationMs: number): PlayerCue[] {
-  if (!durationMs || !cuePoints?.length) return [];
-  return cuePoints.map((c, i) => ({
-    position: (c.time_ms ?? 0) / durationMs,
-    color: CUE_COLORS[i % CUE_COLORS.length],
-    timeMs: c.time_ms ?? 0,
-  }));
-}
-
-function defaultCueMs(track: PlayerTrack): number {
-  return track.cues[0]?.timeMs ?? 0;
 }
 
 // Fallback beat grid derived from BPM when the analyzer returns no beats.
@@ -164,9 +166,12 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
     durationMs,
     totalSeconds: Math.max(0, Math.round(durationMs / 1000)),
   };
-  if (analysis.bpm) next.bpm = Number(analysis.bpm).toFixed(2);
-  if (analysis.key) next.key = analysis.key;
-  next.bands = colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis));
+  const ready = readyAnalysisFields(analysis);
+  next.bpm = ready.bpm && analysis.bpm ? Number(analysis.bpm).toFixed(2) : ready.bpm ? base.bpm : '—';
+  next.key = ready.key && analysis.key ? analysis.key : ready.key ? base.key : '—';
+  next.bands = ready.waveform
+    ? (colorBandsFromPayload(analysis.waveform_color) ?? rowBandsFor(previewFromAnalysis(analysis)))
+    : null;
   next.bandsDetail = colorBandsFromPayload(analysis.waveform_color_detail) ?? next.bands;
   next.bands = next.bandsDetail;
   next.bandsOverview = overviewBandsFromPayload(analysis.waveform_overview) ?? next.bandsDetail;
@@ -180,7 +185,11 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
     const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
     next.beats = synthesizeBeats(numBpm, durationMs);
   }
-  next.cues = mapCues(analysis.cue_points, durationMs);
+  loadCuesFromPayload(base.id, analysis.cue_points);
+  if (cueButtonTrackId !== base.id) {
+    cueButtonTrackId = base.id;
+    cueButton = initialCueButton(initialCuePointMs(cuesOf(base.id)));
+  }
   return next;
 }
 
@@ -247,6 +256,9 @@ async function ensureTickListener() {
         }
       }
       player.progress = Math.max(0, Math.min(1, tick.position_ms / dur));
+      tempo.liveRatio = tick.tempo_ratio ?? 1;
+      if (tick.playing) transportClock.report(tick.position_ms, performance.now(), tempo.liveRatio);
+      else transportClock.stop(tick.position_ms);
     }
     player.playing = tick.playing;
   });
@@ -262,6 +274,7 @@ interface BackendTrackInfo {
   duration_secs: number;
   has_artwork?: boolean;
   has_analysis?: boolean;
+  analysis_pending?: boolean;
 }
 
 /**
@@ -272,6 +285,8 @@ interface BackendTrackInfo {
  */
 function normalizeTrackInput(input: any): BackendTrackInfo | null {
   const raw = input?.raw ?? input;
+  const rowTempo = Math.round((Number(input?.bpmExact) || 0) * 100);
+  const rowKey = input?.raw && input.key !== '—' ? input.key : undefined;
   const sourcePath = raw?.source_path ?? input?.filePath;
   if (!sourcePath) {
     console.error('loadPlayerTrack: selected track has no source path', input);
@@ -282,11 +297,12 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
     source_path: sourcePath,
     title: raw?.title ?? input?.title ?? '',
     artist: raw?.artist ?? input?.artist ?? '',
-    tempo: raw?.tempo ?? 0,
-    key: raw?.key ?? input?.key ?? '',
+    tempo: rowTempo || (raw?.tempo ?? 0),
+    key: rowKey || (raw?.key ?? input?.key ?? ''),
     duration_secs: raw?.duration_secs ?? 0,
     has_artwork: raw?.has_artwork ?? input?.hasArtwork ?? false,
     has_analysis: raw?.has_analysis,
+    analysis_pending: raw?.analysis_pending,
   };
 }
 
@@ -301,7 +317,6 @@ function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
     key: trackInfo.key || '—',
     totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
     durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
-    cues: [],
     beats: [],
     bands: null,
     bandsDetail: null,
@@ -315,8 +330,9 @@ async function enrichPlayerTrack(gen: number, trackId: number, base: PlayerTrack
     if (gen !== loadGeneration || player.track?.id !== trackId) return;
     player.track = applyAnalysisToTrack(base, analysis);
     performance.mark('ff:player-ready');
-  } catch {
+  } catch (err) {
     if (gen !== loadGeneration) return;
+    console.warn(`player analysis for track ${trackId} unavailable:`, err);
   } finally {
     if (gen === loadGeneration) {
       player.loading = false;
@@ -330,20 +346,46 @@ let playerAnalysisListenerInstalled = false;
 export function initPlayerAnalysisRefresh() {
   if (playerAnalysisListenerInstalled) return;
   playerAnalysisListenerInstalled = true;
-  listenToAnalysisProgress((progress) => {
-    const trackId = progress.track_id;
+  const refreshLoadedTrack = async (trackId?: number) => {
     const loaded = player.track;
     if (!trackId || !loaded || loaded.id !== trackId) return;
+    await Promise.all([flushBeatGridEdits(), flushCueEdits()]);
     invalidateAnalysisCache(trackId);
     player.loading = true;
-    void enrichPlayerTrack(loadGeneration, trackId, loaded);
+    void enrichPlayerTrack(loadGeneration, trackId, player.track?.id === trackId ? player.track : loaded);
+  };
+  onAnalysisStart((trackIds) => {
+    const loaded = player.track;
+    if (!loaded || !trackIds.includes(loaded.id)) return;
+    const row = library.tracks.find((t) => t.id === loaded.id);
+    player.track = {
+      ...loaded,
+      bands: null,
+      bandsDetail: null,
+      bandsOverview: null,
+      bpm: row?.bpmLocked ? loaded.bpm : '—',
+      key: row?.keyLocked ? loaded.key : '—',
+    };
   });
+  listenToAnalysisProgress((progress) => refreshLoadedTrack(progress.track_id));
+  listenToAnalysisPartial((partial) => refreshLoadedTrack(partial.track_id));
+}
+
+function prioritizeIfUnanalyzed(trackId: number, completeFallback: boolean) {
+  const libTrack = library.tracks.find((t) => t.id === trackId);
+  const complete = libTrack ? libTrack.analyzed && !libTrack.analysisPending : completeFallback;
+  if (!complete) requestBackgroundAnalysis(trackId);
 }
 
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
   const gen = ++loadGeneration;
+  void flushBeatGridEdits();
+  void flushCueEdits();
+  cueButtonTrackId = null;
+  cueButton = initialCueButton();
   player.error = null;
+  resetTempoForNewTrack();
   const stopped = playbackStop().catch((err) => console.error('playback stop failed:', err));
   player.playing = false;
   player.progress = 0;
@@ -366,11 +408,7 @@ export async function loadPlayerTrack(input: any) {
     void stopped.then(() => (gen === loadGeneration ? playFromStart() : undefined));
   }
 
-  const libTrack = library.tracks.find((t) => t.id === trackInfo.id);
-  const analyzed = libTrack?.analyzed ?? trackInfo.has_analysis ?? trackInfo.tempo > 0;
-  if (!analyzed) {
-    requestBackgroundAnalysis(trackInfo.id);
-  }
+  prioritizeIfUnanalyzed(trackInfo.id, (trackInfo.has_analysis ?? trackInfo.tempo > 0) && !trackInfo.analysis_pending);
 
   if (cached) return;
 
@@ -388,6 +426,7 @@ export async function playFromStart() {
   seekTargetMs = null;
   player.progress = 0;
   player.error = null;
+  prioritizeIfUnanalyzed(player.track.id, player.track.bpm !== '—');
   await ensureTickListener();
   try {
     await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
@@ -399,7 +438,9 @@ export async function playFromStart() {
 
 export function clearPlayerTrack() {
   loadGeneration++;
-  cueHoldMs = null;
+  resetTempoForNewTrack();
+  cueButton = initialCueButton();
+  cueButtonTrackId = null;
   seekTargetMs = null;
   void playbackStop();
   player.track = null;
@@ -427,6 +468,10 @@ async function pausePlayback() {
 
 export async function togglePlay() {
   if (!player.track) return;
+  if (cueButton.previewing && player.playing) {
+    cueButton = playWhileCueHeld(cueButton);
+    return;
+  }
   await ensureTickListener();
   try {
     if (player.playing || pausePending) {
@@ -445,36 +490,55 @@ export async function togglePlay() {
   }
 }
 
-/** CDJ-style CUE hold: preview from the hot cue (or start) while pressed. */
-export async function cuePreviewStart() {
-  if (!player.track) return;
-  const dur = player.track.durationMs;
-  const ms = dur > 0 ? Math.min(defaultCueMs(player.track), dur) : defaultCueMs(player.track);
-  cueHoldMs = ms;
-  await ensureTickListener();
-  if (dur > 0) player.progress = ms / dur;
+function cueTransport(): CueTransport {
+  return { playing: player.playing, positionMs: currentPositionMs() };
+}
+
+async function runCueCommand(command: CueCommand) {
+  const track = player.track;
+  if (!track || command.kind === 'none') return;
+  const dur = track.durationMs;
   try {
-    player.error = null;
-    await playbackPlay(player.track.sourcePath, ms, dur || undefined);
-    player.playing = true;
+    if (command.kind === 'play-from') {
+      await ensureTickListener();
+      seekTargetMs = null;
+      if (dur > 0) player.progress = Math.min(1, command.ms / dur);
+      player.error = null;
+      await playbackPlay(track.sourcePath, command.ms, dur || undefined);
+      player.playing = true;
+    } else {
+      await pausePlayback();
+      if (dur > 0) player.progress = Math.min(1, command.ms / dur);
+      await playbackSetPosition(command.ms);
+    }
   } catch (err) {
-    cueHoldMs = null;
+    cueButton = { ...cueButton, previewing: false };
     reportPlaybackFailure(String(err));
   }
 }
 
+/** CUE pressed (CDJ): playing returns to the cue point and pauses; paused sets the cue point here and plays while held. */
+export async function cuePreviewStart() {
+  if (!player.track) return;
+  const step = cuePress(cueButton, cueTransport());
+  cueButton = step.state;
+  await runCueCommand(step.command);
+}
+
+/** CUE released: a preview goes back to the cue point and pauses. */
 export async function cuePreviewStop() {
-  if (!player.track || cueHoldMs === null) return;
-  const ms = cueHoldMs;
-  const dur = player.track.durationMs;
-  cueHoldMs = null;
-  try {
-    await pausePlayback();
-    if (dur > 0) player.progress = ms / dur;
-    await playbackSetPosition(ms);
-  } catch (err) {
-    console.error('cue preview stop failed:', err);
-  }
+  if (!player.track) return;
+  const step = cueRelease(cueButton);
+  cueButton = step.state;
+  await runCueCommand(step.command);
+}
+
+/** CUE as a single key press (keyboard has no hold): playing returns to the cue point, paused sets it at the playhead. */
+export async function cueTapPress() {
+  if (!player.track) return;
+  const step = cueTap(cueButton, cueTransport());
+  cueButton = step.state;
+  await runCueCommand(step.command);
 }
 
 export async function play() {
@@ -495,16 +559,29 @@ export async function pause() {
 }
 
 // ── Beat-grid editing ──────────────────────────────────────────────────────
-// Local, visual-only edits to the displayed grid. These shift the in-memory
-// beat markers so the waveform re-renders; they are NOT yet persisted back to
-// the analysis cache or the USB writer.
-const BEAT_NUDGE_MS = 10;
+// A nudge or Set replaces the track's beats (the loaded track is a raw object, so the
+// change only reaches the waveform as a new object) and schedules saving the grid.
+onCueSaveError((message) => {
+  player.error = message;
+});
+
+const gridPersister = createGridPersister(setBeatGrid, (err) => {
+  console.error('saving the beat grid failed:', err);
+  player.error = `Could not save the beat grid: ${err}`;
+});
+
+/** Write a pending grid edit now (before another track loads). */
+export function flushBeatGridEdits(): Promise<void> {
+  return gridPersister.flush();
+}
 
 /** Shift every beat marker by deltaMs (negative = earlier/left). */
 export function beatGridShift(deltaMs: number) {
   const t = player.track;
-  if (!t || !t.beats.length) return;
-  t.beats = t.beats.map((b) => ({ ...b, time_ms: b.time_ms + deltaMs }));
+  if (!t || !t.beats.length || !deltaMs) return;
+  const beats = shiftBeats(t.beats, deltaMs);
+  player.track = { ...t, beats };
+  gridPersister.schedule(t.id, beats);
 }
 
 export function beatGridNudgeLeft() {
@@ -515,23 +592,36 @@ export function beatGridNudgeRight() {
   beatGridShift(BEAT_NUDGE_MS);
 }
 
+/** Where the playhead is right now: while playing, the transport clock (reports only arrive every 50 ms); else the stored position. */
+export function currentPositionMs(): number {
+  const t = player.track;
+  if (!t) return 0;
+  return player.playing ? transportClock.positionAt(performance.now()) : player.progress * t.durationMs;
+}
+
 /** Snap the grid so the nearest downbeat lands on the current playhead. */
 export function beatGridSetCurrent() {
   const t = player.track;
-  if (!t || !t.beats.length || !t.durationMs) return;
-  const playMs = player.progress * t.durationMs;
-  const downbeats = t.beats.filter((b) => b.bar_position === 1);
-  const pool = downbeats.length ? downbeats : t.beats;
-  let nearest = pool[0];
-  let best = Infinity;
-  for (const b of pool) {
-    const d = Math.abs(b.time_ms - playMs);
-    if (d < best) {
-      best = d;
-      nearest = b;
-    }
+  if (!t || !t.durationMs) return;
+  const delta = shiftToPlaceDownbeatAt(t.beats, currentPositionMs());
+  if (delta !== null) beatGridShift(delta);
+}
+
+/** Jump to `ms` and play: a seek while playing, one play command from `ms` while paused. */
+export async function seekToMsAndPlay(ms: number): Promise<void> {
+  const t = player.track;
+  if (!t || !t.durationMs) return;
+  if (player.playing) {
+    await seekToMs(ms);
+    return;
   }
-  beatGridShift(playMs - nearest.time_ms);
+  await runCueCommand({ kind: 'play-from', ms });
+}
+
+export function seekToMs(ms: number): Promise<void> {
+  const t = player.track;
+  if (!t || !t.durationMs) return Promise.resolve();
+  return seekToProgress(ms / t.durationMs);
 }
 
 export async function seekToProgress(progress: number) {

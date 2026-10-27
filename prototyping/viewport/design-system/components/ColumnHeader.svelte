@@ -162,16 +162,13 @@
       class="ff-colh__cell{col.sort ? ' ff-colh__cell--active' : ''}{isDragging ? ' ff-colh__cell--dragging' : ''}"
       style={cellStyle(col)}
       data-col-key={dragKey ?? ''}
+      onpointerdown={(e) => onLabelPointerDown(e, col)}
       oncontextmenu={(e) => {
         e.preventDefault();
         onColumnContextMenu?.(e, col);
       }}
     >
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <span
-        class="ff-colh__label ff-colh__label--draggable"
-        onpointerdown={(e) => onLabelPointerDown(e, col)}
-      >
+      <span class="ff-colh__label ff-colh__label--draggable">
         {col.label ?? ''}
       </span>
       {#if col.sort}

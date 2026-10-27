@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 /**
  * Renders one expanded player (overview + zoom) from raw PWV7 / PWV6 bytes through the real
@@ -19,6 +19,12 @@ const bytes = fixture[side];
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: Math.ceil(+width) + 20, height: 800 }, deviceScaleFactor: Number(process.env.DPR || 1) });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
+if (process.env.OVERRIDE_DIR) {
+  await page.route(/design-system\/waveform-[a-z]+\.js/, (route) => {
+    const file = `${process.env.OVERRIDE_DIR}/${new URL(route.request().url()).pathname.split('/').pop()}`;
+    return existsSync(file) ? route.fulfill({ contentType: 'text/javascript', body: readFileSync(file) }) : route.continue();
+  });
+}
 await page.goto(`${base}/rbmatch.html`, { waitUntil: 'load' });
 await page.waitForFunction(() => window.rbShow);
 await page.evaluate(

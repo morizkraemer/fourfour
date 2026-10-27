@@ -186,14 +186,46 @@ pub fn upsert_analysis_index(
     key: &str,
     energy: Option<u8>,
     row_preview: &[u8],
+    stages: u8,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO analyses (track_id, bpm, key, energy, row_preview) VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO analyses (track_id, bpm, key, energy, row_preview, stages) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(track_id) DO UPDATE SET bpm = excluded.bpm, key = excluded.key,
-             energy = excluded.energy, row_preview = excluded.row_preview",
-        params![track_id, bpm, key, energy, row_preview],
+             energy = excluded.energy, row_preview = excluded.row_preview, stages = excluded.stages",
+        params![track_id, bpm, key, energy, row_preview, stages],
     )?;
     Ok(())
+}
+
+pub fn update_analysis_bpm(conn: &Connection, track_id: i64, bpm: f64) -> Result<bool> {
+    Ok(conn.execute("UPDATE analyses SET bpm = ?2 WHERE track_id = ?1", params![track_id, bpm])? > 0)
+}
+
+pub fn update_analysis_key(conn: &Connection, track_id: i64, key: &str) -> Result<bool> {
+    Ok(conn.execute("UPDATE analyses SET key = ?2 WHERE track_id = ?1", params![track_id, key])? > 0)
+}
+
+pub fn select_analysis_stages(conn: &Connection, track_id: i64) -> Result<Option<u8>> {
+    let mut stmt = conn.prepare("SELECT stages FROM analyses WHERE track_id = ?1")?;
+    let mut rows = stmt.query_map([track_id], |row| row.get::<_, u8>(0))?;
+    rows.next().transpose().map_err(Into::into)
+}
+
+pub fn reset_analysis_stages(conn: &Connection, track_id: i64) -> Result<bool> {
+    Ok(conn.execute("UPDATE analyses SET stages = 0 WHERE track_id = ?1", [track_id])? > 0)
+}
+
+pub fn select_incomplete_analysis_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE stages != ?1 ORDER BY track_id")?;
+    let rows = stmt.query_map([complete], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Return IDs of tracks whose analysis has every stage.
+pub fn select_complete_analysis_track_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE stages = ?1 ORDER BY track_id")?;
+    let rows = stmt.query_map([complete], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
 /// `(track id, row preview blob)` for every analysis row that has one stored.
@@ -237,11 +269,12 @@ pub fn select_analyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-pub fn select_unanalyzed_track_ids(conn: &Connection) -> Result<Vec<i64>> {
+pub fn select_unanalyzed_track_ids(conn: &Connection, complete: u8) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare(
-        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id WHERE a.track_id IS NULL ORDER BY t.id",
+        "SELECT t.id FROM tracks t LEFT JOIN analyses a ON a.track_id = t.id
+         WHERE a.track_id IS NULL OR a.stages != ?1 ORDER BY t.id",
     )?;
-    let rows = stmt.query_map([], |row| row.get(0))?;
+    let rows = stmt.query_map([complete], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
@@ -257,7 +290,9 @@ pub fn select_all_tracks_with_flags(
     let mut stmt = conn.prepare(
         "SELECT t.id, t.source_path, t.usb_path, t.title, t.artist, t.album, t.genre,
                 t.label, t.remixer, t.comment, t.year, t.disc_number, t.track_number,
-                t.tempo, t.key, t.duration_secs, t.sample_rate, t.bitrate, t.file_size,
+                CASE WHEN a.bpm > 0 THEN CAST(ROUND(a.bpm * 100) AS INTEGER) ELSE t.tempo END,
+                COALESCE(NULLIF(a.key, ''), t.key),
+                t.duration_secs, t.sample_rate, t.bitrate, t.file_size,
                 (art.track_id IS NOT NULL),
                 (a.track_id IS NOT NULL)
          FROM tracks t

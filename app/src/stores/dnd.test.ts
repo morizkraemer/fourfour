@@ -1,23 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { dnd, endDrag, startTrackDrag, updateTrackDropTarget } from './dnd.svelte.ts';
 
-interface FakeRow {
-  dataset: { rowIndex: string };
-  getBoundingClientRect: () => { top: number; height: number };
-}
-
-const row = (index: number, top: number, height = 28): FakeRow => ({
-  dataset: { rowIndex: String(index) },
-  getBoundingClientRect: () => ({ top, height }),
-});
-
-function stubDocument(rows: FakeRow[] | null, sourceId: string | null = 'All Tracks') {
-  const body = {
-    getAttribute: (name: string) => (name === 'data-source-id' ? sourceId : null),
-    querySelectorAll: () => rows ?? [],
+function stubDocument(body: { top: number; rowCount: number } | null, sourceId: string | null = 'All Tracks') {
+  const el = {
+    getAttribute: (name: string) =>
+      name === 'data-source-id' ? sourceId : name === 'data-row-count' ? String(body?.rowCount ?? 0) : null,
+    getBoundingClientRect: () => ({ top: body?.top ?? 0 }),
   };
   vi.stubGlobal('document', {
-    elementFromPoint: () => (rows === null ? null : { closest: () => body }),
+    elementFromPoint: () => (body === null ? null : { closest: (sel: string) => (sel === '[data-track-drop-body]' ? el : null) }),
   });
 }
 
@@ -31,36 +22,41 @@ afterEach(() => {
 });
 
 describe('updateTrackDropTarget', () => {
-  it('picks the lowest row whose midpoint is below the pointer, regardless of DOM order', () => {
-    stubDocument([row(7, 196), row(5, 140), row(6, 168), row(4, 112)]);
+  it('picks the lowest row whose midpoint is below the pointer', () => {
+    stubDocument({ top: 0, rowCount: 100 });
     updateTrackDropTarget(10, 150);
     expect(dnd.dropRowIndex).toBe(5);
   });
-  it('lands before the first row when the pointer is above everything', () => {
-    stubDocument([row(10, 280), row(11, 308)]);
+  it('follows the body position when the list is scrolled', () => {
+    stubDocument({ top: -280, rowCount: 100 });
     updateTrackDropTarget(10, 0);
     expect(dnd.dropRowIndex).toBe(10);
   });
-  it('appends after the highest rendered row when the pointer is below all rows', () => {
-    stubDocument([row(3, 84), row(5, 140), row(4, 112)]);
+  it('lands before the first row when the pointer is above everything', () => {
+    stubDocument({ top: 50, rowCount: 100 });
+    updateTrackDropTarget(10, 0);
+    expect(dnd.dropRowIndex).toBe(0);
+  });
+  it('appends after the last row when the pointer is below all rows', () => {
+    stubDocument({ top: 0, rowCount: 6 });
     updateTrackDropTarget(10, 1000);
     expect(dnd.dropRowIndex).toBe(6);
   });
   it('uses the row midpoint as the boundary', () => {
-    stubDocument([row(0, 0, 28), row(1, 28, 28)]);
+    stubDocument({ top: 0, rowCount: 10 });
     updateTrackDropTarget(10, 13);
     expect(dnd.dropRowIndex).toBe(0);
     updateTrackDropTarget(10, 14);
     expect(dnd.dropRowIndex).toBe(1);
   });
   it('drops at index 0 on an empty body and records the panel', () => {
-    stubDocument([], 'Warmup');
+    stubDocument({ top: 0, rowCount: 0 }, 'Warmup');
     updateTrackDropTarget(10, 10);
     expect(dnd.dropRowIndex).toBe(0);
     expect(dnd.dropPanelSourceId).toBe('Warmup');
   });
   it('clears targets when nothing is under the pointer', () => {
-    stubDocument([row(0, 0)]);
+    stubDocument({ top: 0, rowCount: 1 });
     updateTrackDropTarget(10, 5);
     stubDocument(null);
     updateTrackDropTarget(10, 5);
@@ -68,14 +64,14 @@ describe('updateTrackDropTarget', () => {
     expect(dnd.dropPanelSourceId).toBeNull();
   });
   it('clears targets when the body has no source id', () => {
-    stubDocument([row(0, 0)], null);
+    stubDocument({ top: 0, rowCount: 1 }, null);
     updateTrackDropTarget(10, 5);
     expect(dnd.dropPanelSourceId).toBeNull();
     expect(dnd.dropRowIndex).toBeNull();
   });
   it('ignores pointer moves when no track drag is active', () => {
     endDrag();
-    stubDocument([row(0, 0)]);
+    stubDocument({ top: 0, rowCount: 1 });
     updateTrackDropTarget(10, 5);
     expect(dnd.dropRowIndex).toBeNull();
     expect(dnd.dropPanelSourceId).toBeNull();
@@ -91,5 +87,31 @@ describe('drag session', () => {
     expect(dnd.kind).toBeNull();
     expect(dnd.trackIds).toEqual([]);
     expect(dnd.dropRowIndex).toBeNull();
+  });
+});
+
+describe('new playlist drop target', () => {
+  it('flags the + button and clears other drop targets', () => {
+    dnd.dropRowIndex = 3;
+    dnd.dropPlaylistId = 7;
+    vi.stubGlobal('document', {
+      elementFromPoint: () => ({ closest: (sel: string) => (sel === '[data-new-playlist-drop]' ? {} : null) }),
+    });
+    updateTrackDropTarget(5, 5);
+    expect(dnd.dropNewPlaylist).toBe(true);
+    expect(dnd.dropRowIndex).toBeNull();
+    expect(dnd.dropPlaylistId).toBeNull();
+    expect(dnd.dropPanelSourceId).toBeNull();
+  });
+  it('clears the flag when the pointer leaves the button', () => {
+    dnd.dropNewPlaylist = true;
+    stubDocument({ top: 0, rowCount: 10 });
+    updateTrackDropTarget(5, 5);
+    expect(dnd.dropNewPlaylist).toBe(false);
+  });
+  it('is cleared when the drag ends', () => {
+    dnd.dropNewPlaylist = true;
+    endDrag();
+    expect(dnd.dropNewPlaylist).toBe(false);
   });
 });

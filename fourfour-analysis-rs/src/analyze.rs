@@ -1,5 +1,7 @@
 use std::borrow::Cow;
+use std::fmt;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
@@ -11,13 +13,14 @@ use crate::decode::{decode_mono, resample_to};
 use crate::fit::{self, FitParams, Window, FPS};
 use crate::keymap::camelot;
 use crate::mp3::{self, DelayRule};
-use crate::waveform;
+use crate::waveform::{self, Waveforms};
 
 #[derive(Clone)]
 pub struct Config {
     pub threads: usize,
     pub fit: FitParams,
     pub mp3_rule: DelayRule,
+    pub beats: bool,
     pub key: bool,
     pub waveform: bool,
     pub keep_logits: bool,
@@ -25,7 +28,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, key: true, waveform: true, keep_logits: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::EncoderHeaderLame3100Early, beats: true, key: true, waveform: true, keep_logits: false }
     }
 }
 
@@ -38,6 +41,7 @@ pub struct Analysis {
     pub downbeats_s: Vec<f32>,
     pub key_class: Option<usize>,
     pub key_confidence: f64,
+    pub waveforms: Option<Waveforms>,
     pub waveform_checksum: Option<u64>,
     pub detail_entries: usize,
     pub mp3_delay_s: f64,
@@ -49,13 +53,50 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+#[derive(Debug)]
+pub struct Cancelled;
+
+impl fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "analysis cancelled")
+    }
+}
+
+impl std::error::Error for Cancelled {}
+
+static NEVER_PAUSED: AtomicBool = AtomicBool::new(false);
+
+pub struct Control<'a> {
+    pub cancel: &'a AtomicBool,
+    pub pause: &'a AtomicBool,
+    pub on_waveform: Option<&'a (dyn Fn(&Waveforms) + Sync)>,
+}
+
+impl<'a> Control<'a> {
+    pub fn new(cancel: &'a AtomicBool) -> Self {
+        Control { cancel, pause: &NEVER_PAUSED, on_waveform: None }
+    }
+}
+
 pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysis> {
+    analyze_cancellable(engine, path, cfg, &AtomicBool::new(false))
+}
+
+pub fn analyze_cancellable(engine: &BeatEngine, path: &Path, cfg: &Config, cancel: &AtomicBool) -> Result<Analysis> {
+    analyze_controlled(engine, path, cfg, &Control::new(cancel))
+}
+
+pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, control: &Control) -> Result<Analysis> {
+    let cancel = control.cancel;
     let total = Instant::now();
     let t = Instant::now();
     let native = decode_mono(path)?;
     let decode_ms = ms(t);
     if native.samples.is_empty() {
         return Err(anyhow!("no audio decoded"));
+    }
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Cancelled.into());
     }
     let duration_s = native.samples.len() as f64 / native.rate as f64;
     let t = Instant::now();
@@ -79,12 +120,29 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         let wf = cfg.waveform.then(|| {
             s.spawn(|| {
                 let t = Instant::now();
-                let w = waveform::compute(mono, 44100, side_threads);
+                let w = waveform::compute(&native.samples, native.rate);
+                if let Some(on_waveform) = control.on_waveform {
+                    if !cancel.load(Ordering::Relaxed) {
+                        on_waveform(&w);
+                    }
+                }
                 (w, ms(t))
             })
         });
         let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
-            let bt = engine.analyze(&native.samples, native.rate, cfg.threads)?;
+            if !cfg.beats {
+                let none = BeatResult {
+                    beat_logits: Vec::new(),
+                    down_logits: Vec::new(),
+                    beats: Vec::new(),
+                    downbeats: Vec::new(),
+                    resample_ms: 0.0,
+                    mel_ms: 0.0,
+                    predict_ms: 0.0,
+                };
+                return Ok((none, None, 0.0, 0.0, 0.0));
+            }
+            let bt = engine.analyze(&native.samples, native.rate, cfg.threads, control)?;
             let t = Instant::now();
             let delay = mp3::timeline_shift_s(path, cfg.mp3_rule);
             let mp3_ms = ms(t);
@@ -99,6 +157,9 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         (beat, key.map(|h| h.join().unwrap()), wf.map(|h| h.join().unwrap()))
     });
     let (bt, fit, delay, fit_ms, mp3_ms) = beat_part?;
+    if cancel.load(Ordering::Relaxed) {
+        return Err(Cancelled.into());
+    }
 
     let (beats_s, bpm, first_beat_s, raw_beats_s) = match &fit {
         Some(f) => {
@@ -113,10 +174,12 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         Some((None, t)) => (None, 0.0, *t),
         None => (None, 0.0, 0.0),
     };
-    let (waveform_checksum, detail_entries, wf_ms) = match &wf_part {
-        Some((w, t)) => (Some(waveform::checksum(w)), w.detail.len(), *t),
-        None => (None, 0, 0.0),
+    let (waveforms, wf_ms) = match wf_part {
+        Some((w, t)) => (Some(w), t),
+        None => (None, 0.0),
     };
+    let waveform_checksum = waveforms.as_ref().map(waveform::checksum);
+    let detail_entries = waveforms.as_ref().map_or(0, |w| w.pwv7.len());
     let ms_doc = json!({
         "decode": decode_ms,
         "resample": bt.resample_ms + resample44_ms,
@@ -138,6 +201,7 @@ pub fn analyze(engine: &BeatEngine, path: &Path, cfg: &Config) -> Result<Analysi
         downbeats_s: bt.downbeats.clone(),
         key_class,
         key_confidence,
+        waveforms,
         waveform_checksum,
         detail_entries,
         mp3_delay_s: delay,

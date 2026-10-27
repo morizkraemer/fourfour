@@ -8,11 +8,13 @@
 //! files on disk alongside the database. The SQLite `analyses` table keeps only
 //! a lightweight index (bpm + key) for fast queries.
 
+mod edits;
 mod multi_sync;
 mod queries;
 pub mod rekordbox;
 mod row_preview;
 mod schema;
+mod user_edits;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,15 +24,34 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::{
-    AnalysisResult, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
+    AnalysisResult, Beat, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
 };
 use pioneer_usb_writer::{reader, writer};
+
+pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
+use rekordbox::ImportedCue;
+
+/// One beat of an edited grid: where it is and its place in the bar (1 to 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BeatPosition {
+    pub time_ms: u32,
+    pub bar_position: u8,
+}
 
 pub use multi_sync::{
     NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
     SyncPhase, SyncSelection, SyncTarget, WriterFn, statvfs_available_bytes,
 };
+pub use user_edits::{MAX_BPM, MIN_BPM, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
+
+/// Bits of `analyses.stages`: which parts of a track's analysis are stored.
+pub mod analysis_stage {
+    pub const WAVEFORM: u8 = 1;
+    pub const KEY: u8 = 2;
+    pub const GRID: u8 = 4;
+    pub const ALL: u8 = WAVEFORM | KEY | GRID;
+}
 
 /// Summary report from importing a Pioneer USB into the local library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +222,106 @@ impl LocalLibrary {
     /// Writes ANLZ binary files to disk (if the library is file-backed) and
     /// updates the lightweight bpm/key index in SQLite.
     pub fn set_analysis(&self, track_id: i64, analysis: &AnalysisResult) -> Result<()> {
-        let analysis = &self.keep_imported_data(track_id, analysis)?;
+        self.set_analysis_stages(track_id, analysis, analysis_stage::ALL)
+    }
+
+    /// Store an analysis that has only some stages (`analysis_stage` bits). The track stays pending
+    /// for the missing stages: it is listed by `get_unanalyzed_track_ids` and left out of USB export.
+    pub fn set_analysis_stages(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
+        let analysis = &self.keep_user_edits(track_id, &self.keep_imported_data(track_id, analysis)?)?;
+        self.write_analysis(track_id, analysis, stages)
+    }
+
+    /// Replace the beat grid of an analyzed track with an edited one (nudged, or set from the playhead).
+    /// The tempo of every beat stays the stored one. An edit is user data, so it is written as it is (not
+    /// replaced by a locked imported grid) and the analysis stages stay as they were.
+    pub fn set_beat_grid(&self, track_id: i64, positions: &[BeatPosition]) -> Result<()> {
+        let mut analysis = self
+            .get_analysis(track_id)?
+            .context("Track has no analysis to edit the beat grid of")?;
+        let tempo = analysis
+            .beat_grid
+            .beats
+            .first()
+            .map(|b| b.tempo)
+            .unwrap_or_else(|| (analysis.bpm * 100.0).round() as u32);
+        analysis.beat_grid = BeatGrid {
+            beats: positions
+                .iter()
+                .map(|p| Beat { bar_position: p.bar_position, time_ms: p.time_ms, tempo })
+                .collect(),
+        };
+        let stages = queries::select_analysis_stages(&self.conn, track_id)?.unwrap_or(analysis_stage::ALL);
+        self.write_analysis(track_id, &analysis, stages)?;
+        if let Some(dir) = self.track_anlz_dir(track_id) {
+            let mut edits = UserEdits::read(&dir).unwrap_or_default();
+            edits.grid_locked = true;
+            edits.write(&dir)?;
+        }
+        Ok(())
+    }
+
+    /// The cues of a track with their names and colours: the user's list if they edited it, else the
+    /// imported one, else what the analysis stored (no names or colours).
+    pub fn get_cues(&self, track_id: i64) -> Result<Vec<ImportedCue>> {
+        let dir = self.track_anlz_dir(track_id);
+        if let Some(edits) = dir.as_deref().and_then(UserEdits::read).filter(|e| e.cues_locked) {
+            return Ok(edits.cues);
+        }
+        if let Some(meta) = self.imported_meta(track_id).filter(|m| m.cues_locked) {
+            return Ok(meta.cues);
+        }
+        Ok(self
+            .get_analysis(track_id)?
+            .map(|a| {
+                a.cue_points
+                    .iter()
+                    .map(|c| ImportedCue {
+                        hot_cue_number: c.hot_cue_number,
+                        time_ms: c.time_ms,
+                        loop_time_ms: c.loop_time_ms,
+                        color: c.color.clone(),
+                        name: c.name.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Replace all cues of a track with an edited list (hot cue slots 1 to 8 are A to H, 0 is a memory
+    /// cue). The list is user data: re-analysis keeps it. Names and colours live in `edits.json`; the
+    /// ANLZ files get the positions.
+    pub fn set_cues(&self, track_id: i64, cues: &[ImportedCue]) -> Result<()> {
+        let cues = edits::normalize_cues(cues)?;
+        let dir = self
+            .track_anlz_dir(track_id)
+            .context("This library keeps no files, so cues cannot be stored")?;
+        let mut user_edits = UserEdits::read(&dir).unwrap_or_default();
+        user_edits.cues_locked = true;
+        user_edits.cues = cues.clone();
+        user_edits.write(&dir)?;
+        if let Some(mut analysis) = self.get_analysis(track_id)? {
+            analysis.cue_points = rekordbox::to_cue_points(&cues);
+            let stages = queries::select_analysis_stages(&self.conn, track_id)?.unwrap_or(analysis_stage::ALL);
+            self.write_analysis(track_id, &analysis, stages)?;
+        }
+        Ok(())
+    }
+
+    /// Let re-analysis replace the beat grid, cues, BPM and key the user edited.
+    pub fn release_user_edits(&self, track_id: i64) -> Result<()> {
+        let Some(dir) = self.track_anlz_dir(track_id) else { return Ok(()) };
+        if let Some(mut user_edits) = UserEdits::read(&dir) {
+            user_edits.grid_locked = false;
+            user_edits.cues_locked = false;
+            user_edits.bpm_locked = false;
+            user_edits.key_locked = false;
+            user_edits.write(&dir)?;
+        }
+        Ok(())
+    }
+
+    fn write_analysis(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
         // Write ANLZ files if we have a disk path.
         if let Some(dir) = self.track_anlz_dir(track_id) {
             std::fs::create_dir_all(&dir)
@@ -230,33 +350,35 @@ impl LocalLibrary {
         };
 
         // Update lightweight DB index.
-        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob())?;
+        queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob(), stages)?;
 
         Ok(())
     }
 
-    /// Re-analysis must not replace what was imported from Rekordbox: a locked
-    /// beat grid (and its tempo) stays as stored, locked cues come from the
-    /// import metadata.
+    /// Re-analysis must not replace what the user edited or imported from Rekordbox: a locked beat
+    /// grid (and its tempo) stays as stored, locked cues come from the edit or import metadata.
     fn keep_imported_data(&self, track_id: i64, analysis: &AnalysisResult) -> Result<AnalysisResult> {
         let mut kept = analysis.clone();
-        let Some(meta) = self.imported_meta(track_id) else {
-            return Ok(kept);
-        };
-        if meta.grid_locked {
+        let edits = self.track_anlz_dir(track_id).and_then(|dir| UserEdits::read(&dir)).unwrap_or_default();
+        let meta = self.imported_meta(track_id);
+        let imported_grid = meta.as_ref().filter(|m| m.grid_locked);
+        if edits.grid_locked || imported_grid.is_some() {
             match self.get_analysis(track_id)? {
                 Some(current) if !current.beat_grid.beats.is_empty() => {
                     kept.beat_grid = current.beat_grid;
                     kept.bpm = current.bpm;
                 }
-                _ if !meta.grid.is_empty() => {
-                    kept.bpm = meta.grid[0].tempo as f64 / 100.0;
-                    kept.beat_grid = BeatGrid { beats: meta.grid.clone() };
+                _ => {
+                    if let Some(meta) = imported_grid.filter(|m| !m.grid.is_empty()) {
+                        kept.bpm = meta.grid[0].tempo as f64 / 100.0;
+                        kept.beat_grid = BeatGrid { beats: meta.grid.clone() };
+                    }
                 }
-                _ => {}
             }
         }
-        if meta.cues_locked {
+        if edits.cues_locked {
+            kept.cue_points = rekordbox::to_cue_points(&edits.cues);
+        } else if let Some(meta) = meta.filter(|m| m.cues_locked) {
             kept.cue_points = rekordbox::to_cue_points(&meta.cues);
         }
         Ok(kept)
@@ -381,7 +503,7 @@ impl LocalLibrary {
     /// Retrieve all tracks that have analysis data, with artwork included.
     /// Returns parallel vecs suitable for passing to the writer.
     pub fn get_analyzed_tracks(&self) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
-        let track_ids = queries::select_analyzed_track_ids(&self.conn)?;
+        let track_ids = queries::select_complete_analysis_track_ids(&self.conn, analysis_stage::ALL)?;
 
         let mut tracks = Vec::new();
         let mut analyses = Vec::new();
@@ -398,9 +520,26 @@ impl LocalLibrary {
         Ok((tracks, analyses))
     }
 
-    /// Return IDs of tracks that have no analysis data yet.
+    /// Return IDs of tracks that have no analysis data yet or only some of its stages.
     pub fn get_unanalyzed_track_ids(&self) -> Result<Vec<i64>> {
-        queries::select_unanalyzed_track_ids(&self.conn)
+        queries::select_unanalyzed_track_ids(&self.conn, analysis_stage::ALL)
+    }
+
+    /// Stage bits stored for a track, `None` when it has no analysis row.
+    pub fn analysis_stages(&self, track_id: i64) -> Result<Option<u8>> {
+        queries::select_analysis_stages(&self.conn, track_id)
+    }
+
+    /// Mark every stage of a track's analysis as missing, so a re-analysis runs the staged passes
+    /// again and the track counts as pending until they are stored. Hand-set values stay locked.
+    pub fn reset_analysis_stages(&self, track_id: i64) -> Result<()> {
+        queries::reset_analysis_stages(&self.conn, track_id)?;
+        Ok(())
+    }
+
+    /// Tracks that have an analysis row with stages still missing.
+    pub fn get_incomplete_analysis_ids(&self) -> Result<Vec<i64>> {
+        queries::select_incomplete_analysis_ids(&self.conn, analysis_stage::ALL)
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.
@@ -722,9 +861,9 @@ mod tests {
             key: "1A".to_string(),
             energy: Some(7),
             cue_points: vec![
-                CuePoint { hot_cue_number: 0, time_ms: 1000, loop_time_ms: None },
-                CuePoint { hot_cue_number: 1, time_ms: 60_000, loop_time_ms: None },
-                CuePoint { hot_cue_number: 2, time_ms: 90_000, loop_time_ms: Some(100_000) },
+                CuePoint { hot_cue_number: 0, time_ms: 1000, loop_time_ms: None, ..Default::default() },
+                CuePoint { hot_cue_number: 1, time_ms: 60_000, loop_time_ms: None, ..Default::default() },
+                CuePoint { hot_cue_number: 2, time_ms: 90_000, loop_time_ms: Some(100_000), ..Default::default() },
             ],
             color_waveform: None,
         }
@@ -935,6 +1074,323 @@ mod tests {
         a
     }
 
+    fn shifted(analysis: &AnalysisResult, delta_ms: u32) -> Vec<BeatPosition> {
+        analysis
+            .beat_grid
+            .beats
+            .iter()
+            .map(|b| BeatPosition { time_ms: b.time_ms + delta_ms, bar_position: b.bar_position })
+            .collect()
+    }
+
+    #[test]
+    fn edited_beat_grid_is_stored_and_the_rest_of_the_analysis_is_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let id = lib.add_track(&make_track("Edit", "/music/e.mp3")).unwrap();
+        lib.set_analysis(id, &banded_analysis()).unwrap();
+        let before = lib.get_analysis(id).unwrap().unwrap();
+
+        lib.set_beat_grid(id, &shifted(&before, 37)).unwrap();
+
+        let after = lib.get_analysis(id).unwrap().unwrap();
+        let times: Vec<u32> = after.beat_grid.beats.iter().map(|b| b.time_ms).collect();
+        assert_eq!(times, vec![37, 506, 975, 1443]);
+        assert!(after.beat_grid.beats.iter().all(|b| b.tempo == 12800));
+        let bars: Vec<u8> = after.beat_grid.beats.iter().map(|b| b.bar_position).collect();
+        assert_eq!(bars, vec![1, 2, 3, 4]);
+        assert_eq!(after.bpm, before.bpm);
+        assert_eq!(after.key, before.key);
+        assert_eq!(after.waveform.data, before.waveform.data);
+        assert_eq!(after.cue_points.len(), before.cue_points.len());
+        let (a, b) = (after.color_waveform.unwrap(), before.color_waveform.unwrap());
+        assert_eq!(a.detail, b.detail);
+        assert_eq!(a.overview, b.overview);
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
+    }
+
+    #[test]
+    fn edited_beat_grid_keeps_pending_stages_and_survives_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let id = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let id = lib.add_track(&make_track("Edit", "/music/e.mp3")).unwrap();
+            lib.set_analysis_stages(id, &make_analysis(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
+            lib.set_beat_grid(id, &[BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }]).unwrap();
+            id
+        };
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let stored = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(stored.beat_grid.beats.len(), 2);
+        assert_eq!(stored.beat_grid.beats[0].time_ms, 120);
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::WAVEFORM | analysis_stage::KEY));
+    }
+
+    #[test]
+    fn edited_beat_grid_replaces_a_locked_imported_grid_and_stays_through_reanalysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let id = lib.add_track(&make_track("Locked", "/music/l.mp3")).unwrap();
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        rekordbox::ImportedMeta {
+            source: rekordbox::SourceKind::Xml,
+            source_id: "1".into(),
+            grid_locked: true,
+            cues_locked: false,
+            rating: None,
+            color: None,
+            cues: Vec::new(),
+            grid: Vec::new(),
+        }
+        .write(&lib.track_anlz_dir(id).unwrap())
+        .unwrap();
+
+        let current = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50)).unwrap();
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().beat_grid.beats[0].time_ms, 50);
+
+        let mut reanalysis = make_analysis();
+        reanalysis.beat_grid.beats[0].time_ms = 9;
+        lib.set_analysis(id, &reanalysis).unwrap();
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().beat_grid.beats[0].time_ms, 50);
+    }
+
+    fn cue(slot: u32, time_ms: u32, name: &str, color: Option<&str>) -> ImportedCue {
+        ImportedCue { hot_cue_number: slot, time_ms, loop_time_ms: None, color: color.map(String::from), name: name.into() }
+    }
+
+    fn analyzed_file_library(dir: &Path) -> (LocalLibrary, i64) {
+        let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+        let id = lib.add_track(&make_track("Cues", "/music/c.mp3")).unwrap();
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        (lib, id)
+    }
+
+    fn locks(lib: &LocalLibrary, id: i64) -> (bool, bool) {
+        let edits = lib.user_edits(id);
+        (edits.bpm_locked, edits.key_locked)
+    }
+
+    #[test]
+    fn user_bpm_and_key_are_stored_and_survive_reanalysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        assert_eq!(locks(&lib, id), (false, false));
+
+        lib.set_user_bpm(id, 127.5).unwrap();
+        lib.set_user_key(id, "8A").unwrap();
+        let stored = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!((stored.bpm, stored.key.as_str()), (127.5, "8A"));
+        assert_eq!(locks(&lib, id), (true, true));
+        assert_eq!(stored.beat_grid.beats[0].tempo, 12800);
+
+        let mut reanalysis = make_analysis();
+        reanalysis.bpm = 90.0;
+        reanalysis.key = "3B".into();
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let after = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!((after.bpm, after.key.as_str()), (127.5, "8A"));
+
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        assert_eq!(locks(&reopened, id), (true, true));
+    }
+
+    #[test]
+    fn only_the_edited_field_is_locked_and_release_lets_reanalysis_replace_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        lib.set_user_key(id, "5B").unwrap();
+        assert_eq!(locks(&lib, id), (false, true));
+
+        let mut reanalysis = make_analysis();
+        reanalysis.bpm = 90.0;
+        reanalysis.key = "3B".into();
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let kept = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!((kept.bpm, kept.key.as_str()), (90.0, "5B"));
+
+        lib.release_user_edits(id).unwrap();
+        assert_eq!(locks(&lib, id), (false, false));
+        lib.set_analysis(id, &reanalysis).unwrap();
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().key, "3B");
+    }
+
+    #[test]
+    fn user_bpm_and_key_reject_bad_values_and_unanalyzed_tracks() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        assert!(lib.set_user_bpm(id, 39.9).is_err());
+        assert!(lib.set_user_bpm(id, 250.1).is_err());
+        assert!(lib.set_user_bpm(id, f64::NAN).is_err());
+        assert!(lib.set_user_key(id, "13A").is_err());
+        assert!(lib.set_user_key(id, "0B").is_err());
+        assert!(lib.set_user_key(id, "8C").is_err());
+        assert!(lib.set_user_key(id, "Am").is_err());
+        assert_eq!(locks(&lib, id), (false, false));
+
+        let bare = lib.add_track(&make_track("Bare", "/music/bare.mp3")).unwrap();
+        assert!(lib.set_user_bpm(bare, 128.0).is_err());
+        assert!(lib.set_user_key(bare, "8A").is_err());
+    }
+
+    #[test]
+    fn changing_the_bpm_leaves_the_beat_grid_alone_until_it_is_rescaled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let grid_times = |lib: &LocalLibrary| -> Vec<(u32, u32)> {
+            lib.get_analysis(id).unwrap().unwrap().beat_grid.beats.iter().map(|b| (b.time_ms, b.tempo)).collect()
+        };
+        let before = grid_times(&lib);
+        lib.set_user_bpm(id, 64.0).unwrap();
+        assert_eq!(grid_times(&lib), before);
+
+        lib.rescale_beat_grid(id, 64.0).unwrap();
+        let scaled = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(scaled.bpm, 64.0);
+        let times: Vec<u32> = scaled.beat_grid.beats.iter().map(|b| b.time_ms).collect();
+        assert_eq!(times, vec![0, 938, 1876, 2812]);
+        assert!(scaled.beat_grid.beats.iter().all(|b| b.tempo == 6400));
+        assert_eq!(scaled.cue_points.len(), 3);
+        assert!(lib.user_edits(id).bpm_locked);
+    }
+
+    #[test]
+    fn edited_cues_keep_name_colour_and_loop_and_survive_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let mut looped = cue(3, 40_000, "Drop", Some("#ff00aa"));
+        looped.loop_time_ms = Some(48_000);
+        lib.set_cues(id, &[cue(0, 2_000, "", None), looped.clone(), cue(1, 10_000, "Intro", Some("#00ff00"))]).unwrap();
+        drop(lib);
+
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let cues = lib.get_cues(id).unwrap();
+        let slots: Vec<u32> = cues.iter().map(|c| c.hot_cue_number).collect();
+        assert_eq!(slots, vec![1, 3, 0]);
+        assert_eq!(cues[0].name, "Intro");
+        assert_eq!(cues[1], looped);
+        let stored = lib.get_analysis(id).unwrap().unwrap().cue_points;
+        assert_eq!(stored.len(), 3);
+        let stored_loop = stored.iter().find(|c| c.hot_cue_number == 3).unwrap();
+        assert_eq!((stored_loop.time_ms, stored_loop.loop_time_ms), (40_000, Some(48_000)));
+        assert_eq!(stored_loop.name, "Drop");
+        assert!(stored_loop.color.as_deref().is_some_and(|c| c.starts_with("table:")));
+        let stored_intro = stored.iter().find(|c| c.hot_cue_number == 1).unwrap();
+        assert_eq!(stored_intro.name, "Intro");
+
+        lib.set_cues(id, &[cue(1, 10_000, "Intro", None)]).unwrap();
+        assert_eq!(lib.get_cues(id).unwrap().len(), 1);
+        lib.set_cues(id, &[]).unwrap();
+        assert!(lib.get_cues(id).unwrap().is_empty());
+        assert!(lib.get_analysis(id).unwrap().unwrap().cue_points.is_empty());
+    }
+
+    #[test]
+    fn cues_of_a_track_nobody_edited_come_from_the_analysis_without_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let cues = lib.get_cues(id).unwrap();
+        assert_eq!(cues.len(), 3);
+        assert!(cues.iter().all(|c| c.name.is_empty() && c.color.is_none()));
+    }
+
+    #[test]
+    fn invalid_cue_lists_are_rejected_and_change_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        assert!(lib.set_cues(id, &[cue(9, 1, "", None)]).is_err());
+        assert!(lib.set_cues(id, &[cue(2, 1, "", None), cue(2, 5, "", None)]).is_err());
+        assert!(lib.set_cues(id, &[cue(0, 7, "", None), cue(0, 7, "", None)]).is_err());
+        let mut backwards = cue(1, 5_000, "", None);
+        backwards.loop_time_ms = Some(4_000);
+        assert!(lib.set_cues(id, &[backwards]).is_err());
+        assert_eq!(lib.get_cues(id).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn edited_cues_and_grid_survive_reanalysis_until_released() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let current = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50)).unwrap();
+        lib.set_cues(id, &[cue(2, 33_000, "Mine", Some("#123456"))]).unwrap();
+
+        let mut reanalysis = make_analysis();
+        reanalysis.beat_grid.beats[0].time_ms = 9;
+        reanalysis.cue_points = vec![CuePoint { hot_cue_number: 1, time_ms: 5, loop_time_ms: None, ..Default::default() }];
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let kept = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(kept.beat_grid.beats[0].time_ms, 50);
+        assert_eq!(kept.cue_points.len(), 1);
+        assert_eq!(kept.cue_points[0].time_ms, 33_000);
+        assert_eq!(lib.get_cues(id).unwrap()[0].name, "Mine");
+
+        lib.release_user_edits(id).unwrap();
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let replaced = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(replaced.beat_grid.beats[0].time_ms, 9);
+        assert_eq!(replaced.cue_points[0].time_ms, 5);
+    }
+
+    #[test]
+    fn a_track_nobody_edited_is_replaced_by_reanalysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let mut reanalysis = make_analysis();
+        reanalysis.beat_grid.beats[0].time_ms = 9;
+        reanalysis.cue_points.clear();
+        lib.set_analysis(id, &reanalysis).unwrap();
+        let replaced = lib.get_analysis(id).unwrap().unwrap();
+        assert_eq!(replaced.beat_grid.beats[0].time_ms, 9);
+        assert!(replaced.cue_points.is_empty());
+    }
+
+    #[test]
+    fn imported_cues_show_their_names_until_the_user_edits_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        rekordbox::ImportedMeta {
+            source: rekordbox::SourceKind::Xml,
+            source_id: "1".into(),
+            grid_locked: false,
+            cues_locked: true,
+            rating: None,
+            color: None,
+            cues: vec![cue(1, 1_000, "Vocal in", Some("table:3")), cue(0, 2_000, "Break", None)],
+            grid: Vec::new(),
+        }
+        .write(&lib.track_anlz_dir(id).unwrap())
+        .unwrap();
+
+        let imported = lib.get_cues(id).unwrap();
+        assert_eq!((imported[0].name.as_str(), imported[0].color.as_deref()), ("Vocal in", Some("table:3")));
+
+        let mut renamed = imported.clone();
+        renamed[0].name = "Vocal".into();
+        renamed[0].color = Some("#ffffff".into());
+        lib.set_cues(id, &renamed).unwrap();
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        let after = lib.get_cues(id).unwrap();
+        assert_eq!((after[0].name.as_str(), after[0].color.as_deref()), ("Vocal", Some("#ffffff")));
+        assert_eq!(after[1].name, "Break");
+        assert_eq!(lib.get_analysis(id).unwrap().unwrap().cue_points.len(), 2);
+    }
+
+    #[test]
+    fn cues_need_a_library_with_files() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("Mem", "/music/m.mp3")).unwrap();
+        assert!(lib.set_cues(id, &[cue(1, 1, "", None)]).is_err());
+    }
+
+    #[test]
+    fn beat_grid_of_an_unanalyzed_track_is_an_error() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("None", "/music/n.mp3")).unwrap();
+        assert!(lib.set_beat_grid(id, &[BeatPosition { time_ms: 0, bar_position: 1 }]).is_err());
+    }
+
     #[test]
     fn row_preview_is_stored_with_the_analysis_and_matches_the_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -1013,6 +1469,44 @@ mod tests {
         assert_eq!(tracks.len(), 1);
         assert_eq!(analyses.len(), 1);
         assert_eq!(tracks[0].title, "Analyzed");
+    }
+
+    #[test]
+    fn partial_analysis_stays_pending_and_out_of_export() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let done = lib.add_track(&make_track("B", "/music/b.mp3")).unwrap();
+        lib.set_analysis(done, &make_analysis()).unwrap();
+
+        lib.set_analysis_stages(id, &make_analysis(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
+
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(3));
+        assert_eq!(lib.get_unanalyzed_track_ids().unwrap(), vec![id]);
+        assert_eq!(lib.get_incomplete_analysis_ids().unwrap(), vec![id]);
+        assert_eq!(lib.get_analyzed_tracks().unwrap().0.len(), 1);
+
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
+        assert!(lib.get_unanalyzed_track_ids().unwrap().is_empty());
+        assert_eq!(lib.get_analyzed_tracks().unwrap().0.len(), 2);
+    }
+
+    #[test]
+    fn v4_library_migrates_with_every_analysis_complete() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let id = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let id = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+            lib.set_analysis(id, &make_analysis()).unwrap();
+            id
+        };
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("ALTER TABLE analyses DROP COLUMN stages; UPDATE schema_version SET version = 4;").unwrap();
+        }
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        assert_eq!(lib.analysis_stages(id).unwrap(), Some(analysis_stage::ALL));
     }
 
     #[test]

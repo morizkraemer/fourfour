@@ -416,9 +416,9 @@ fn usb_stick_written_by_the_writer_reads_back_through_the_importer() {
     }
     let analyses = vec![
         analysis_with_key(12800, "5A", vec![
-            CuePoint { hot_cue_number: 0, time_ms: 500, loop_time_ms: None },
-            CuePoint { hot_cue_number: 1, time_ms: 1000, loop_time_ms: None },
-            CuePoint { hot_cue_number: 2, time_ms: 1500, loop_time_ms: Some(1900) },
+            CuePoint { hot_cue_number: 0, time_ms: 500, loop_time_ms: None, ..Default::default() },
+            CuePoint { hot_cue_number: 1, time_ms: 1000, loop_time_ms: None, ..Default::default() },
+            CuePoint { hot_cue_number: 2, time_ms: 1500, loop_time_ms: Some(1900), ..Default::default() },
         ]),
         analysis(12400, Vec::new()),
     ];

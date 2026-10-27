@@ -1,0 +1,76 @@
+/* ── ScrubValue: drag / scroll / type a number ─────────────────────────── */
+
+.ff-scrub {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  margin: -1px -5px;
+  border-radius: var(--ff-radius-sm);
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  user-select: none;
+  transition: background var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-scrub--interactive {
+  cursor: ns-resize;
+}
+
+.ff-scrub--interactive:hover {
+  background: var(--ff-hover);
+}
+
+.ff-scrub--interactive:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--ff-border-hi);
+  background: var(--ff-hover);
+}
+
+.ff-scrub--dragging {
+  background: var(--ff-select);
+}
+
+.ff-scrub--pending .ff-scrub__text {
+  opacity: 0.85;
+}
+
+.ff-scrub__grip {
+  flex: none;
+  opacity: 0;
+  color: var(--ff-muted);
+  transition: opacity var(--ff-motion-fast) var(--ff-easing);
+}
+
+.ff-scrub--interactive:hover .ff-scrub__grip,
+.ff-scrub--interactive:focus-visible .ff-scrub__grip,
+.ff-scrub--dragging .ff-scrub__grip {
+  opacity: 1;
+}
+
+.ff-scrub__input {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  padding: 1px 5px;
+  margin: -1px -5px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: var(--ff-radius-sm);
+  background: var(--ff-hover);
+  box-shadow: inset 0 0 0 1px var(--ff-border-hi);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: inherit;
+  color: inherit;
+  outline: none;
+}
+
+.ff-scrub__input--invalid {
+  box-shadow: inset 0 0 0 1px var(--ff-danger);
+}
+
+:global(body.ff-scrub-dragging),
+:global(body.ff-scrub-dragging *) {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}

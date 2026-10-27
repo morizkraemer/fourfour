@@ -35,8 +35,8 @@
     void (async () => {
       await tick();
       const focusTarget =
-        actionsEl?.querySelector<HTMLElement>('.ff-btn--primary') ??
-        actionsEl?.querySelector<HTMLElement>('.ff-btn') ??
+        actionsEl?.querySelector('.ff-btn--primary') ??
+        actionsEl?.querySelector('.ff-btn') ??
         panelEl;
       focusTarget?.focus();
     })();

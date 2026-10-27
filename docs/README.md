@@ -13,8 +13,10 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 |---|---|---|
 | [`repo-overview.md`](architecture/repo-overview.md) | reference | Crate-by-crate map, what works on hardware, data flow, line counts. *(Predates the Svelte `app/`; for current UI see `ui/`.)* |
 | [`ui-architecture.md`](architecture/ui-architecture.md) | current | UI architecture for the desktop app — stores, modules, IPC. |
+| [`cues.md`](architecture/cues.md) | current | Hot and memory cues, CUE button, edit lock for cues and beat grid, shortcuts, what export does with cues, writer issues. |
 | [`performance-2026-10.md`](architecture/performance-2026-10.md) | reference | Startup and UI performance: before/after numbers at 1k/10k/30k tracks, method, what is left. |
 | [`rekordbox-import.md`](architecture/rekordbox-import.md) | current | Importing Rekordbox libraries (master.db, USB, XML): sources, field mapping, path remap, merge policy, test results, gaps. |
+| [`tempo-key-engine-plan.md`](architecture/tempo-key-engine-plan.md) | plan | Player BPM/KEY as real tempo and pitch controls: stretch engine choice, engine placement, UI, slices. |
 | [`tech-stack.md`](architecture/tech-stack.md) | reference | Survey of open-source DJ analysis tools (Essentia, madmom, CLAP, Demucs, …) — options and pain points per layer. |
 
 ## ui/ — UI specs (current phase)
@@ -25,10 +27,13 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`components.md`](ui/components.md) | current | Component & mockup checklist. |
 | [`design-system.md`](ui/design-system.md) | current | The fourfour design system — tokens, primitives, patterns. |
 | [`review-2026-10-15.md`](ui/review-2026-10-15.md) | reference | UX review, 2026-10-15. |
+| [`keyboard-shortcuts.md`](ui/keyboard-shortcuts.md) | current | Shortcut registry, rebinding, Tab/Shift-Tab, command palette. |
 | [`usb-sync-spec.md`](ui/usb-sync-spec.md) | current | USB sync spec. |
 | [`usb-sync-decisions.md`](ui/usb-sync-decisions.md) | current | USB sync design decisions. |
 | [`player-strip.md`](ui/player-strip.md) | current | Player strip implementation plan. |
 | [`organize-sidebar.md`](ui/organize-sidebar.md) | current | Organize right-sidebar spec (rail, picker, dock, drop-to-playlist). |
+| [`design-round-wm-2.md`](ui/design-round-wm-2.md) | current | Mockup round 2: inspector (all fields editable, lock state) and settings overhaul; options and open questions. |
+| [`design-round-wm-3.md`](ui/design-round-wm-3.md) | current | Mockup round 3: calmer inspector (hierarchy first, edit on click, one lock marker); three options and open questions. |
 | [`waveform-dynamics.md`](ui/waveform-dynamics.md) | current | Waveform display dynamics — playhead, scroll, band rendering. |
 
 ## analysis/ — analysis pipeline (research & plans)

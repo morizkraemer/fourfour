@@ -1,7 +1,7 @@
 <!--
   App.svelte — fourfour Browse screen.
   Composes the six interactive modules into the "main layout v3" window frame:
-    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 278) ] ]
+    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 340) ] ]
     / player (full width)
     / status bar (full width)
 -->
@@ -9,7 +9,7 @@
   import { onMount } from 'svelte';
   // Side-effect import: loads tokens.css + base.css globally
   import '$ds';
-  import { Dialog, Button, FileDropOverlay } from '$ds';
+  import { Dialog, Button, FileDropOverlay, ResizeHandle } from '$ds';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
   // Modules
@@ -21,41 +21,36 @@
   import AppStatusBar   from './modules/AppStatusBar.svelte';
   import Settings       from './modules/Settings.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
+  import CommandPalette from './modules/CommandPalette.svelte';
 
   import {
     ui,
     importDropTarget,
-    openSettings,
-    closeSettings,
-    focusListFilter,
-    clearListFilter,
     initOrganize,
     reconcileOrganizeTarget,
+    setPanelWidth,
+    commitPanelWidth,
+    resetPanelWidth,
   } from './stores/ui.svelte.ts';
+  import { PANEL_WIDTH } from './lib/panelWidth.ts';
   import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
-  import { importIntoSource } from './menus/context-menus.ts';
+  import { shortcuts } from './shortcuts/index.ts';
   import {
     initLibrary,
     library,
     confirmAnalysisPrompt,
     dismissAnalysisPrompt,
     importFiles,
-    toggleFavoriteSlot,
   } from './stores/library.svelte.ts';
-  import { selection, selectionCount } from './stores/selection.svelte.ts';
+  import { selectionCount } from './stores/selection.svelte.ts';
   import { getIsTauri } from './services/tauri.svelte.ts';
   import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
   import { installMacWindowChrome } from './services/window-chrome.ts';
-  import { player, togglePlay } from './stores/player.svelte.ts';
-
+  
   let fileDropVisible = $state(false);
-  let browseContentEl = $state(null);
+  let browseMainEl = $state(null);
 
-  // Inspector is the grey z-layer between the black browse window and the drawer.
-  // It shows only when collapsed (rail) with a selection; the drawer floats above it.
-  let inspectorVisible = $derived(
-    ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded
-  );
+  let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded);
 
   let dropTarget = $derived(importDropTarget());
   let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
@@ -76,58 +71,7 @@
 
   function onGlobalKeyDown(e) {
     if (e.defaultPrevented) return;
-
-    if (e.metaKey && e.key === ',') {
-      e.preventDefault();
-      if (ui.settingsOpen) closeSettings();
-      else openSettings();
-      return;
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
-      e.preventDefault();
-      focusListFilter();
-      return;
-    }
-
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
-      e.preventDefault();
-      if (isEditableTarget(e.target)) return;
-      if (library.analyzing || library.syncing) return;
-      void importIntoSource(importDropTarget());
-      return;
-    }
-
-    if (e.key === 'Escape' && ui.settingsOpen) {
-      closeSettings();
-      e.preventDefault();
-      return;
-    }
-
-    if (e.key === 'Escape' && library.showAnalysisPrompt) {
-      return;
-    }
-
-    if (e.key === 'Escape' && ui.listFilter.trim()) {
-      clearListFilter();
-      e.preventDefault();
-      return;
-    }
-
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (isEditableTarget(e.target)) return;
-
-    if (e.key === ' ' || e.code === 'Space') {
-      if (!player.track) return;
-      e.preventDefault();
-      void togglePlay();
-      return;
-    }
-
-    const slot = /^[1-9]$/.test(e.key) ? parseInt(e.key, 10) : null;
-    if (slot == null || selectionCount() === 0) return;
-    e.preventDefault();
-    toggleFavoriteSlot(slot, [...selection.ids]);
+    shortcuts.dispatch(e, { typing: isEditableTarget(e.target) });
   }
 
   onMount(() => {
@@ -171,36 +115,44 @@
 </script>
 
 <div class="ff-browse">
-  <div class="ff-browse__main">
-    <div class="ff-browse__slot ff-browse__slot--sidebar">
+  <div class="ff-browse__main" bind:this={browseMainEl}>
+    <div class="ff-browse__slot ff-browse__slot--sidebar" data-focus-region="sidebar">
       <Sidebar />
     </div>
     <div class="ff-browse__body">
-      <div class="ff-browse__slot ff-browse__slot--header">
+      <div class="ff-browse__slot ff-browse__slot--header" data-focus-region="search">
         <GlobalHeader />
       </div>
-      <div class="ff-browse__content" bind:this={browseContentEl}>
-        <div class="ff-browse__slot ff-browse__slot--table">
+      <div class="ff-browse__content">
+        <div class="ff-browse__slot ff-browse__slot--table" data-focus-region="tracks">
           <TrackTable />
         </div>
         {#if inspectorVisible}
-          <div class="ff-browse__slot ff-browse__slot--detail">
+          <div class="ff-browse__slot ff-browse__slot--detail" style:width="{ui.detailWidth}px">
+            <ResizeHandle
+              edge="left"
+              label="Resize inspector"
+              value={ui.detailWidth}
+              min={PANEL_WIDTH.inspector.min}
+              max={PANEL_WIDTH.inspector.max}
+              onResize={(px) => setPanelWidth('inspector', px)}
+              onCommit={() => commitPanelWidth('inspector')}
+              onReset={() => resetPanelWidth('inspector')}
+            />
             <Detail />
           </div>
         {/if}
-        <!-- Drawer sits on the inspector's grey layer: the dock backing turns grey
-             whenever the inspector is visible so the gap around the floating drawer
-             reads as that layer, not the black browse window. -->
-        <div
-          class="ff-browse__organize-dock"
-          class:ff-browse__organize-dock--inspector={inspectorVisible}
-        >
-          <OrganizePanel contentEl={browseContentEl} />
-        </div>
       </div>
     </div>
+    <div
+      class="ff-browse__organize-dock"
+      class:ff-browse__organize-dock--inspector={inspectorVisible}
+      data-focus-region="organize"
+    >
+      <OrganizePanel containerEl={browseMainEl} />
+    </div>
   </div>
-  <div class="ff-browse__slot ff-browse__slot--player">
+  <div class="ff-browse__slot ff-browse__slot--player" data-focus-region="player">
     <Player />
   </div>
   <div class="ff-browse__slot ff-browse__slot--status">
@@ -209,6 +161,7 @@
 </div>
 
 <Settings />
+<CommandPalette />
 
 <Dialog
   open={library.showAnalysisPrompt}
@@ -249,8 +202,9 @@
     background: var(--ff-bg);
   }
 
-  /* main area: [ sidebar | body[ header / content ] ], fills space above player + status */
+  /* main area: [ sidebar | body[ header / content ] | organize ], fills space above player + status */
   .ff-browse__main {
+    position: relative;
     flex: 1 1 0;
     min-height: 0;
     display: flex;
@@ -280,10 +234,8 @@
   .ff-browse__slot--sidebar { flex: none; }
   .ff-browse__slot--header  { flex: none; }
   .ff-browse__slot--table   { flex: 1 1 0; }
-  .ff-browse__slot--detail  { flex: none; }
+  .ff-browse__slot--detail  { flex: none; position: relative; }
 
-  /* Backing dock for the organize drawer — the inspector's grey z-layer shows
-     through the drawer's top/bottom margin when the inspector is open. */
   .ff-browse__organize-dock {
     display: flex;
     flex: none;

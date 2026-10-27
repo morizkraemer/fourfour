@@ -633,3 +633,27 @@ Honest verdict: Dubby: breakdowns, blue body, amber fringe and the white hat spi
 ### Checks
 
 `waveform-pixels.mjs` 84 checks, 0 failures; `waveform-flicker.mjs` 0 bad frames at dpr 1 and 2 (swing 2.6 % / 2.4 %); `npm test` 172 passed, `npm run check` 0 errors, `npm run build` ok; `cargo test --workspace` exit 0 (new tests: `overview_keeps_spikes_and_breakdowns_of_the_audio`, `the_stick_carries_the_overview_measured_from_the_audio`, the overview payload and renderer tests). Perf (median of 5 alternating runs, CPU ms per frame, before is `q39-wave-fix`): compact playing 6.35 to 6.22, expanded playing 16.36 to 13.12, zoom 16.52 to 12.84, wheel scroll 28.97 to 26.52.
+
+## Player feedback round (wc-player)
+
+Branch `wc-player` (from `q41-feedback`). Headless Chromium on the loaded `dev` box (load average 25 to 40), WebKit not measurable here (the Playwright WebKit build misses `libwoff2dec`); not looked at by Merlin, not tried in WKWebView.
+
+- **F3 player height**: `ResizeHandle` has a `top` edge; the expanded player is 240 px to 70 % of the window high, stored in `fourfour.player.height`, double-click returns to the default (a third of the window, at least 280 px). Clamp and storage: `app/src/lib/playerHeight.ts`.
+- **F4 grid**: the loaded track is a `$state.raw` object, so mutating `beats` never redrew; edits were never stored; the analysis cache kept serving the old grid; every edit went through `setData`, which resets zoom. Now the store replaces the track object, saves the final grid (400 ms debounce, serialised writes, flushed before another track loads) through `set_beat_grid` (`LocalLibrary::set_beat_grid` rewrites the ANLZ files, keeps tempo, stages and waveform bytes, wins over a locked imported grid; a later re-analysis of a locked track keeps the edit, an unlocked one replaces it), the cache entry is dropped, and `WaveformDisplay.setBeats` redraws without touching zoom. Set uses the transport clock, not the 50 ms old report.
+- **F5**: the inspector strip seeks only when the selected track is the loaded one (pointer cursor then); otherwise it does nothing, so a stray click cannot stop the audio that is playing. The strip also takes the inspector width.
+- **F14 scrolling**: two causes. (1) The Q40 scroll cache compared `endFrac - startFrac` exactly; that value differs in its last bits as the view scrolls, so about every other frame was a full 2,880-column repaint (frames alternated between cheap and 25 to 35 ms, scroll stalled in 48 % of frames). The cache now treats a relative difference below 1e-9 as the same zoom. (2) The playhead interpolated between two jittery reports 80 ms behind, so the speed followed the delivery jitter (and ran backwards at times). `playhead-clock.js` is a clock at true speed that the reports only correct (ahead: fast, behind: slow, spread over 150 ms, a seek jumps). Whole-pixel scroll kept (flicker check: 0 bad frames at dpr 1 and 2).
+  `app/perf/frame-pacing.mjs` (device pixels the zoom view moved per animation frame, mock transport, 50 ms ticks delayed by a random 0 to 30 ms, dpr 2, 8 s):
+
+  | | before | cache fix only | clock + cache fix |
+  |---|---|---|---|
+  | frames per second | 36 | 44 | 56 |
+  | frames with a scroll step per second | 16 | 44 | 56 |
+  | frames without a step | 55 % | 0 | 0 |
+  | speed coefficient of variation | 1.4 | 0.5 | 0.08 |
+  | per-frame delta, std (px) | 8.5 | 8.2 | 1.8 |
+
+  Simulation (`playhead-clock.test.ts`, 20 s, delivery delay 1 to 4 frames): per-frame speed 1 +- 0.011 (range 0.98 to 1.04) against 0.66 (range -1.9 to 4.0) for the old interpolation.
+- **F20 blocky zoom**: where a column spans more than two device pixels (`perPixel < 0.5`; Retina at the default 5 s window) the heights are interpolated between column centres; a rise of more than 0.12 stays a hard step at the column edge. At the Q40 geometry (241.65 px/s, dpr 1) the render is byte-identical to before, so the Q40 metrics stand.
+- **F24 cream strip**: the row preview carried a x2.4 display scale tuned for the Q39 curve; with the Q40 linear gains mid and high saturated and the cream front tone covered the strip (the mock strip shows it too). The strip now draws the row preview as an overview series with the compact strip's stacked layout.
+- Perf (`waveform-perf.mjs`, production builds, `?mock=3000`, median of 5 alternating runs, main-thread CPU per frame): compact playing 5.27 to 5.20 ms, expanded playing 12.10 to 7.90, zoom 11.22 to 10.64, wheel 43.1 to 37.9, list scroll +0.9 to +1.4 % (noise).
+- Checks: `waveform-pixels.mjs` 92 checks (8 new: slope and attack at both dpr and themes), `waveform-flicker.mjs` 0 bad frames, `npm test` 283 passed (was 258 before this branch).

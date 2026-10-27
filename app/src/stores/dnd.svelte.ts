@@ -2,6 +2,8 @@
  * dnd.svelte.ts — Shared drag-and-drop session state (tracks, columns, playlists).
  */
 
+import { ROW_HEIGHT } from '../lib/rowWindow.ts';
+
 export type DragKind = 'tracks' | 'column' | 'playlist' | null;
 
 export const dnd = $state({
@@ -20,8 +22,16 @@ export const dnd = $state({
   dropRowIndex: null as number | null,
   /** Sidebar source id of the list panel receiving a track drop */
   dropPanelSourceId: null as string | null,
+  /** Pointer is over the sidebar "+" (new playlist) button */
+  dropNewPlaylist: false,
   /** Sidebar playlist receiving a drop */
   dropPlaylistId: null as number | null,
+  /** Organize-drawer playlist card receiving a drop */
+  dropCardPlaylistId: null as number | null,
+  /** Organize-drawer stick card (volume path) receiving a drop */
+  dropStickPath: null as string | null,
+  /** Pointer is over the collapsed organize ribbon */
+  dropRibbon: false,
   /** Column key being dragged or hovered for reorder */
   columnDragKey: null as string | null,
   columnDropKey: null as string | null,
@@ -49,6 +59,10 @@ export function startTrackDrag(
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropCardPlaylistId = null;
+  dnd.dropStickPath = null;
+  dnd.dropRibbon = false;
+  dnd.dropNewPlaylist = false;
 }
 
 /** Hit-test track list panels under the pointer. */
@@ -56,6 +70,34 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   if (dnd.kind !== 'tracks') return;
 
   const hit = document.elementFromPoint(clientX, clientY);
+  const playlistCard = hit?.closest('[data-drop-playlist-id]');
+  const stickCard = hit?.closest('[data-drop-stick-path]');
+  dnd.dropRibbon = !!hit?.closest('[data-drop-ribbon]');
+  if (dnd.dropRibbon) {
+    dnd.dropCardPlaylistId = null;
+    dnd.dropStickPath = null;
+    dnd.dropNewPlaylist = false;
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    dnd.dropPlaylistId = null;
+    return;
+  }
+  dnd.dropCardPlaylistId = playlistCard ? Number(playlistCard.getAttribute('data-drop-playlist-id')) : null;
+  dnd.dropStickPath = stickCard ? stickCard.getAttribute('data-drop-stick-path') : null;
+  if (playlistCard || stickCard) {
+    dnd.dropNewPlaylist = false;
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    dnd.dropPlaylistId = null;
+    return;
+  }
+  dnd.dropNewPlaylist = !!hit?.closest('[data-new-playlist-drop]');
+  if (dnd.dropNewPlaylist) {
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    dnd.dropPlaylistId = null;
+    return;
+  }
   if (!hit) {
     dnd.dropPanelSourceId = null;
     dnd.dropRowIndex = null;
@@ -79,21 +121,10 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   dnd.dropPanelSourceId = sourceId;
   dnd.dropPlaylistId = null;
 
-  const rows = body.querySelectorAll('[data-track-row]');
-  if (rows.length === 0) {
-    dnd.dropRowIndex = 0;
-    return;
-  }
-
-  let before: number | null = null;
-  let last = -1;
-  for (const row of rows) {
-    const rowIndex = Number((row as HTMLElement).dataset.rowIndex);
-    last = Math.max(last, rowIndex);
-    const rect = row.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2 && (before === null || rowIndex < before)) before = rowIndex;
-  }
-  dnd.dropRowIndex = before ?? last + 1;
+  const rowCount = Number(body.getAttribute('data-row-count')) || 0;
+  const bodyTop = body.getBoundingClientRect().top;
+  const before = Math.floor((clientY - bodyTop - ROW_HEIGHT / 2) / ROW_HEIGHT) + 1;
+  dnd.dropRowIndex = Math.min(Math.max(before, 0), rowCount);
 }
 
 export function startColumnDrag(key: string, x: number, y: number) {
@@ -125,6 +156,10 @@ export function endDrag() {
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropCardPlaylistId = null;
+  dnd.dropStickPath = null;
+  dnd.dropRibbon = false;
+  dnd.dropNewPlaylist = false;
   dnd.columnDragKey = null;
   dnd.columnDropKey = null;
   dnd.playlistDragId = null;

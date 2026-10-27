@@ -11,6 +11,7 @@
     waveform changes (setData resets zoom); the playhead follows every tick.
   */
   import WaveformDisplay from '../waveform-display.js';
+  import Waveform from './Waveform.svelte';
 
   let {
     mode = 'compact',
@@ -24,20 +25,28 @@
     playing = false,
     durationMs = 0,
     trackKey = null,
+    analyzing = false,
     onSeek = undefined,
   } = $props();
+
+  let placeholderWidth = $state(0);
+  let placeholderHeight = $state(0);
 
   let container;
   let display = null;
   let ro;
   let lastDataKey = null;
 
+  function markerData() {
+    return (cues ?? []).map((c) => ({ position: c.position, color: c.color, label: c.label }));
+  }
+
   function buildData() {
     return {
       bands: (mode === 'expanded' ? (bandsDetail ?? bands) : bands) ?? undefined,
       bandsOverview: (bandsOverview ?? (mode === 'expanded' ? bands : null)) ?? undefined,
       beats: beats ?? [],
-      cues: (cues ?? []).map((c) => ({ position: c.position, color: c.color })),
+      cues: markerData(),
       duration_ms: durationMs ?? 0,
       bpm: Number(bpm) || 0,
     };
@@ -69,15 +78,23 @@
   // Push data only when the track or its waveform changes — NOT on every tick.
   $effect(() => {
     const detailLen = (mode === 'expanded' ? (bandsDetail ?? bands) : bands)?.low.length ?? 0;
-    // beats?.[0]?.time_ms captures beat-grid edits (shift/set) that move the grid
-    // without changing its length, so the engine re-reads the shifted beats.
-    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ?? 0}:${beats?.[0]?.time_ms ?? 0}:${cues?.length ?? 0}:${durationMs}`;
+    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ? 1 : 0}:${durationMs}`;
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
     // Pass playhead with data so zoom offset centres atomically on load (progress
     // often stays 0 across track changes, so a separate effect would not re-run).
     display.setData(buildData(), progress);
+  });
+
+  // A cue edit redraws the markers only: no data reset, so zoom and scroll stay.
+  $effect(() => {
+    display?.setCues(markerData());
+  });
+
+  // A beat-grid edit moves the grid only: no data reset, so zoom and scroll stay.
+  $effect(() => {
+    display?.setBeats(beats ?? []);
   });
 
   // Atomic transport update — avoids play/pause ordering jitter between separate
@@ -87,7 +104,13 @@
   });
 </script>
 
-<div class="ff-waveform-view" bind:this={container}></div>
+<div class="ff-waveform-view" bind:this={container}>
+  {#if analyzing && !bands}
+    <div class="ff-waveform-view__analyzing" bind:clientWidth={placeholderWidth} bind:clientHeight={placeholderHeight}>
+      <Waveform width={placeholderWidth || 300} height={placeholderHeight || 48} variant="strip" look="bands" animating />
+    </div>
+  {/if}
+</div>
 
 <style>
   .ff-waveform-view {
@@ -95,6 +118,16 @@
     width: 100%;
     height: 100%;
     min-height: 0;
+  }
+
+  .ff-waveform-view__analyzing {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    background: var(--ff-wave-bg, #0d0d0d);
+    pointer-events: none;
   }
 
   /* WaveformDisplay builds its own DOM (unscoped) — style globally. */

@@ -4,6 +4,8 @@ For the `pioneer-usb-writer` owner. Found by test-only work on branch `q27-write
 
 ## 1. PDB page split breaks past ~192 tracks
 
+Fixed on `wu-writer`: row offsets are `usize` while building and become per-page `u16` only after rebasing in `split_into_pages`. Repro tests are un-ignored and read the PDB back page by page (200, 1000, 5000 tracks plus playlists).
+
 - Where: `pioneer-usb-writer/src/writer/pdb.rs`, `split_into_pages` (line 124); heap offsets are `u16` (`offsets.push(heap.len() as u16)` at lines 448-565); rebase at line 173.
 - Root cause: each table's heap and `offsets: &[u16]` span the whole table. Once the heap passes 64 KiB, `heap.len() as u16` wraps, so offsets stop being monotonic. In debug, `heap_end_offset - heap_start_offset` (line 150) panics with "attempt to subtract with overflow". In release, the slice at line 170 panics with "slice index starts at 65360 but ends at 168" (matches the report).
 - Repro: `cargo test -p pioneer-usb-writer --test writer_scale_repro -- --ignored` (tests 200, 500, 2000 and long strings). Release also fails: add `--release`.
@@ -17,6 +19,8 @@ For the `pioneer-usb-writer` owner. Found by test-only work on branch `q27-write
 
 ## 2. ANLZ colour-detail index overflows u32
 
+Already fixed before `wu-writer` (u64 index math); see `anlz_long_track_repro.rs`.
+
 - Where: `pioneer-usb-writer/src/writer/anlz.rs`, `(i * src_len / entry_count) as usize` at lines 258 (PWV3), 314 (PWV5), 364 (PWV7), 404 (PWV6 path). Lines 283, 332, 469 are `i * 400 / n`, safe unless entry counts exceed ~10 million.
 - Root cause: `i` and `src_len` are `u32`, so `i * src_len` reaches about `entry_count^2`. That exceeds 2^32 once `entry_count > 65536`, i.e. `duration_secs * 150 > 65536`. Debug build: "attempt to multiply with overflow". Release: wraps, so source indices are garbage and PWV5 amplitude values come from the wrong detail entries (first bad entry at 600 s is 47722).
 - Repro: `cargo test -p pioneer-usb-writer --test anlz_long_track_repro -- --ignored` (600 s and 1200 s tracks, plus `--release`). The 300 s control test passes.
@@ -27,7 +31,8 @@ For the `pioneer-usb-writer` owner. Found by test-only work on branch `q27-write
 
 Sources are other workers' reports. Those docs and findings were not on this branch's base, so they were not re-verified here.
 
-- `parse_pco2` assumes 88-byte entries and drops names and colours: `docs/architecture/rekordbox-import.md`.
+- `parse_pco2` assumes 88-byte entries and drops names and colours: `docs/architecture/rekordbox-import.md`. Fixed on `wu-writer` (walks `len_entry`, reads name and colour).
+- Cue names, colours, loop type byte and `PCPT` status (`docs/architecture/cues.md`, "Writer issues"): fixed on `wu-writer`, see `cdj-checklist-2026-10.md` (2026-10-27).
 - SQLCipher keys are private/unavailable for the library DB: reported by the rekordbox-import worker.
 - There is no PDB reader (only a writer; tests parse the PDB by hand): reported by the same worker.
 - Writer proposals for multi-USB sync: `docs/architecture/multi-usb-sync.md`.

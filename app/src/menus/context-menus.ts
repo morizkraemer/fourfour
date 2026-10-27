@@ -16,11 +16,13 @@ import {
   removeTracks,
   removeTracksFromPlaylist,
   clearPlaylistTracks,
+  clearAllFavorites,
   deletePlaylist,
   importDirectory,
   syncToUsb,
   wipeVolume,
   ejectVolume,
+  revealFile,
   selectVolume,
   refreshVolumes,
   setTestCuesOnSelected,
@@ -29,6 +31,21 @@ import {
 import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
 import { pickDirectory } from '../services/tauri.svelte.ts';
+import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { favouriteTrackIds } from '../lib/newPlaylist.ts';
+
+export function revealLabel(): string {
+  const platform = typeof navigator === 'undefined' ? '' : navigator.platform;
+  return /mac/i.test(platform) ? 'Show in Finder' : 'Show in folder';
+}
+
+export function buildRevealItem(filePath: string | undefined): MenuItem {
+  return {
+    label: revealLabel(),
+    disabled: !filePath,
+    onClick: () => revealFile(filePath!),
+  };
+}
 
 interface MenuItem {
   label?: string;
@@ -62,17 +79,27 @@ export async function importIntoSource(sourceId: string) {
   if (dir) await importDirectory(dir, { targetSource: sourceId });
 }
 
+function moveFavouritesToNewPlaylistItem(onlySlot?: number): MenuItem {
+  const ids = favouriteTrackIds(library.playlists, favoriteSlotFromName, onlySlot);
+  return {
+    label: 'Move favourite tracks to new playlist',
+    disabled: ids.length === 0,
+    onClick: () => createPlaylistAndOpen(ids),
+  };
+}
+
 interface SourceMenuOptions {
   sourceId: string;
   label?: string;
   onNewPlaylist?: () => void;
   onAddFavorite?: () => void;
   onRemoveFavorite?: (playlist: PlaylistInput) => void;
+  onRenamePlaylist?: (playlist: PlaylistInput) => void;
 }
 
 /** Context menu for a sidebar source or list panel (library view, playlist, USB). */
 export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[] {
-  const { sourceId, label = sourceId, onRemoveFavorite } = opts;
+  const { sourceId, label = sourceId, onRemoveFavorite, onRenamePlaylist } = opts;
   const items: MenuItem[] = [];
 
   if (library.volumes.includes(sourceId)) {
@@ -135,11 +162,18 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
   const playlist = library.playlists.find((p) => p.name === sourceId);
   if (playlist) {
     const isFavorite = isFavoritePlaylistName(playlist.name);
+    if (!isFavorite && onRenamePlaylist) {
+      items.push({ label: 'Rename', onClick: () => onRenamePlaylist(playlist) });
+    }
     items.push({
       label: 'Import folder',
       disabled: busy(),
       onClick: () => importIntoSource(sourceId),
     });
+
+    if (isFavorite) {
+      items.push(moveFavouritesToNewPlaylistItem(favoriteSlotFromName(playlist.name) ?? undefined));
+    }
 
     const destructive: MenuItem[] = [];
     if (isFavorite && playlist.track_ids.length > 0) {
@@ -195,8 +229,17 @@ export function buildSidebarSectionMenuItems(
 ): MenuItem[] {
   const { onNewPlaylist, onAddFavorite, canAddFavorite = false } = opts;
   const items: MenuItem[] = [];
-  if (section === 'favorites' && canAddFavorite) {
-    items.push({ label: 'Add favorite', onClick: () => onAddFavorite?.() });
+  if (section === 'favorites') {
+    if (canAddFavorite) items.push({ label: 'Add favorite', onClick: () => onAddFavorite?.() });
+    items.push(moveFavouritesToNewPlaylistItem(), {
+      label: 'Clear favourites',
+      variant: 'danger',
+      disabled: favouriteTrackIds(library.playlists, favoriteSlotFromName).length === 0,
+      onClick: async () => {
+        if (!confirm('Clear all favourite tracks? The tracks stay in your library.')) return;
+        await clearAllFavorites();
+      },
+    });
   }
   if (section === 'library') {
     items.push(
@@ -270,6 +313,11 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
     },
   ];
 
+  const revealItems: MenuItem[] =
+    trackIds.length === 1
+      ? [buildRevealItem(library.tracks.find((t) => t.id === trackIds[0])?.filePath)]
+      : [];
+
   if (!isUsbView) {
     const playlistItems = library.playlists
       .filter((p) => !isFavoritePlaylistName(p.name))
@@ -292,6 +340,7 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
     }
 
     items.push(
+      ...revealItems,
       { isSeparator: true },
       {
         label: analyzeLabel,
@@ -330,6 +379,8 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
         onTracksRemoved?.();
       },
     });
+  } else {
+    items.push(...revealItems);
   }
 
   return items;
