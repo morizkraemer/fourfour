@@ -4,6 +4,11 @@
 // server (see viewport/bin/viewport.js → loadProjectVitePlugins).
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 
+const allowAnyHost = {
+  name: 'prototyping-allow-any-host',
+  config: () => ({ server: { allowedHosts: true } }),
+};
+
 export default {
-  plugins: [svelte()],
+  plugins: [svelte(), allowAnyHost],
 };

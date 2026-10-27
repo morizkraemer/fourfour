@@ -5,6 +5,11 @@ const allowParentFolder = {
   config: () => ({ server: { fs: { allow: ['..'] } } }),
 };
 
+const allowAnyHost = {
+  name: 'mockups-allow-any-host',
+  config: () => ({ server: { allowedHosts: true } }),
+};
+
 export default {
-  plugins: [svelte(), allowParentFolder],
+  plugins: [svelte(), allowParentFolder, allowAnyHost],
 };

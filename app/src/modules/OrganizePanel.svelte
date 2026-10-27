@@ -1,26 +1,32 @@
 <!--
-  OrganizePanel.svelte — Right sidebar: a full-height column at the window edge,
-  outside the main view. Shown or hidden by the top bar toggle (Shift-Tab).
-  Left-edge drag handle resizes; dragging below ORGANIZE_SNAP_TO_RAIL_PX hides it.
+  OrganizePanel.svelte — Persistent right-edge organize panel.
 
-  Body:
+  Visual states:
+    rail     (ui.organize.expanded === false): thin sliver at the right edge.
+              Clicking or dragging right expands to the panel.
+    expanded (ui.organize.expanded === true):  a panel of ui.organize.width px.
+              Left-edge drag handle resizes with magnetic snap:
+                - Below ORGANIZE_SNAP_TO_RAIL_PX → snap to rail
+                - Within ORGANIZE_SNAP_TO_FULL_PX of the viewport edge → snap to full width
+
+  Panel body (s2):
     - target === null → <OrganizePicker />
     - target !== null → <TrackTable sourceId={target.id} embedded />
-      Header shows target.label (inline rename) and a Change button.
+      Header shows target.label; inline rename when renaming=true.
 -->
 <script>
-  import { Button, ContextMenu } from '$ds';
+  import { Button, ContextMenu, Icon } from '$ds';
   import {
     ui,
     expandOrganize,
     collapseOrganize,
-    clearOrganizeTarget,
+    closeOrganize,
     setOrganizeWidth,
     commitOrganizeWidth,
     ORGANIZE_SNAP_TO_RAIL_PX,
     ORGANIZE_SNAP_TO_FULL_PX,
   } from '../stores/ui.svelte.ts';
-  import { renamePlaylist } from '../stores/library.svelte.ts';
+  import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
@@ -81,6 +87,40 @@
     renamingHeader = false;
   }
 
+  // ── Filled-rail cover glance (s8) ─────────────────────────────────────────
+
+  /**
+   * Up to 4 cover thumbnails from the docked target, shown when the rail is
+   * collapsed and a target is docked. `track.cover` reads from the artwork
+   * cache on demand. We take the first MAX_RAIL_COVERS tracks that have a
+   * resolved cover URL; if fewer exist we show the ones we have.
+   */
+  const MAX_RAIL_COVERS = 4;
+
+  const railCovers = $derived.by(() => {
+    const target = ui.organize.target;
+    if (!target) return [];
+    const tracks = tracksForSidebarSource(target.id);
+    const result = [];
+    for (const t of tracks) {
+      if (t.cover) {
+        result.push(t.cover);
+        if (result.length >= MAX_RAIL_COVERS) break;
+      }
+    }
+    return result;
+  });
+
+  const railTrackCount = $derived.by(() => {
+    const target = ui.organize.target;
+    if (!target) return 0;
+    return tracksForSidebarSource(target.id).length;
+  });
+
+  // ── Rail open (click-only toggle) ──────────────────────────────────────────
+  // The rail is a plain button: a click expands the panel to its last width.
+  // Resizing/collapsing is the job of the expanded panel's own left-edge handle.
+
   // ── Panel left-edge resize handle ─────────────────────────────────────────
 
   function onResizeHandlePointerDown(e) {
@@ -113,11 +153,11 @@
 
   /**
    * Apply a candidate width with magnetic snap logic.
-   * Snap thresholds are tunable via the exported constants
+   * Snap thresholds are intentionally tunable via the exported constants
    * in ui.svelte.ts (ORGANIZE_SNAP_TO_RAIL_PX, ORGANIZE_SNAP_TO_FULL_PX).
    */
   function applyResizeWidth(rawWidth, containerRight) {
-    // Hide the sidebar when width drops below threshold
+    // Snap to rail (collapse) when width drops below threshold
     if (rawWidth < ORGANIZE_SNAP_TO_RAIL_PX) {
       collapseOrganize();
       return;
@@ -176,11 +216,26 @@
           {ui.organize.target ? ui.organize.target.label : 'Organize'}
         </span>
       {/if}
-      {#if ui.organize.target}
-        <div class="ff-organize__header-actions">
-          <Button label="Change" variant="default" size="small" onclick={clearOrganizeTarget} />
-        </div>
-      {/if}
+      <div class="ff-organize__header-actions">
+        <!-- Collapse to rail -->
+        <Button
+          icon="panel-right"
+          iconOnly
+          variant="ghost"
+          size="small"
+          ariaLabel="Collapse to rail"
+          onclick={collapseOrganize}
+        />
+        <!-- Close / clear -->
+        <Button
+          icon="x"
+          iconOnly
+          variant="ghost"
+          size="small"
+          ariaLabel="Close organize panel"
+          onclick={closeOrganize}
+        />
+      </div>
     </div>
 
     <!-- Panel body -->
@@ -194,6 +249,30 @@
       {/if}
     </div>
   </div>
+{:else}
+  <!-- ── Rail sliver ──────────────────────────────────────────────────────── -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="ff-organize ff-organize--rail{ui.organize.target ? ' ff-organize--rail-filled' : ' ff-organize--rail-empty'}"
+    role="button"
+    tabindex="0"
+    aria-label={ui.organize.target ? `Open ${ui.organize.target.label} (${railTrackCount} tracks)` : 'Open organize panel'}
+    onclick={expandOrganize}
+    onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && expandOrganize()}
+  >
+    {#if ui.organize.target}
+      <!-- Filled rail: the same open-chevron as the empty rail, then cover tiles. -->
+      <div class="ff-organize__rail-top" aria-hidden="true">
+        <Icon name="chevron-left" size={18} />
+      </div>
+      {#each railCovers as coverUrl}
+        <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
+      {/each}
+    {:else}
+      <!-- Empty rail: a chevron centered inside the visible rail. -->
+      <Icon name="chevron-left" size={18} />
+    {/if}
+  </div>
 {/if}
 
 <ContextMenu
@@ -205,15 +284,72 @@
 />
 
 <style>
+  /* ── Shared ────────────────────────────────────────────────────────────── */
+  /* All states are the same drawer: rounded left corners, flush to the window
+     edge on the right (square corners, no right border) so the rest reads as
+     off-screen. Only the width changes between rail and expanded.
+     overflow:hidden keeps the header/table content clipped to the rounded corners. */
   .ff-organize {
     position: relative;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    height: 100%;
+    margin: var(--ff-space-3, 8px) 0;
     background: var(--ff-surface);
-    border-left: 1px solid var(--ff-border-hi);
+    border: 1px solid var(--ff-border);
+    border-right: none;
+    border-radius: 10px 0 0 10px;
     overflow: hidden;
+  }
+
+  /* ── Rail — the collapsed drawer (narrow). Shares the drawer shape above. ── */
+  .ff-organize--rail {
+    cursor: pointer;
+    align-items: center;
+    touch-action: none;
+    user-select: none;
+    color: var(--ff-text-mid);
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+
+  .ff-organize--rail:hover {
+    background: var(--ff-elev);
+    border-color: var(--ff-border-hi);
+    color: var(--ff-text);
+  }
+
+  /* Empty rail: chevron centered inside; a touch narrower than the filled rail. */
+  .ff-organize--rail-empty {
+    width: 44px;
+    justify-content: center;
+  }
+
+  /* Filled rail: a vertical column of rounded square tiles. */
+  .ff-organize--rail-filled {
+    width: 52px;
+    justify-content: flex-start;
+    gap: 6px;
+    padding: 6px;
+  }
+
+  /* Open-chevron at the top of the filled rail — no tile chrome, just the glyph. */
+  .ff-organize__rail-top {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 28px;
+    flex-shrink: 0;
+  }
+
+  .ff-organize__rail-tile {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    background-color: var(--ff-elev);
+    background-size: cover;
+    background-position: center;
+    flex-shrink: 0;
   }
 
   /* ── Expanded panel ────────────────────────────────────────────────────── */
@@ -268,8 +404,8 @@
   .ff-organize__header {
     display: flex;
     align-items: center;
-    height: var(--ff-titlebar-band-height);
-    padding: 0 var(--ff-space-4) 0 var(--ff-space-5);
+    height: 40px;
+    padding: 0 var(--ff-space-3) 0 var(--ff-space-5);
     gap: var(--ff-space-2);
     border-bottom: 1px solid var(--ff-border);
     flex-shrink: 0;
