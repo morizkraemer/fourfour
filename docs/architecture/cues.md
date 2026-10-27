@@ -81,12 +81,15 @@ imported cues show names until edited and the edit then wins over the import; pa
   newest wins, writes are serialised, an edit of another track writes the waiting one first, flushed before a track
   loads). An analysis payload does not overwrite a track with an unsaved edit.
 - `stores/cue-actions.ts`: set at playhead, trigger, jump, rename, recolour, delete.
-- Inspector (`DetailPane`, `CueEditor` in the design system): HOT CUE and MEMORY CUE groups of chips in a wrapping
-  grid (min 104 px per chip). A chip shows the slot letter on the cue colour, the name if set, the time. Click jumps
-  (loaded track only), the `···` button (or double click) opens the editor: name, 16 swatches, delete. `+` adds at the
-  playhead and is disabled unless the selected track is the loaded one (same rule as the strip seek).
+- Inspector (`DetailPane`, `CueEditor` in the design system): one kind, "Cues". The UI never says "memory": a cue with a
+  pad (A to H) is stored as a hot cue, one without as a memory cue; the data model and USB export are unchanged. One
+  `+ Cue` button adds an unpadded cue at the playhead (disabled unless the selected track is the loaded one). Rows show
+  the pad letter on the cue colour, or a neutral dot, the name and the time; click jumps. Rename, colour, assign pad
+  (A to H, taken pads disabled), remove pad and delete are in the right click menu only (double click does nothing).
+  Hovering a row highlights its marker on the waveform and the other way round. Markers live in a 12 px lane above the
+  waveform: a thin line down through it, a small flag (pad letter) for padded cues, a triangle for the others.
 - Big player: pads A to H (filled with the cue colour when set; click sets or jumps and plays; right click edits),
-  `M+` for a memory cue, markers with the slot letter on the zoom view, lines on the overview, dots on the compact strip.
+  `+` for a cue without a pad, markers with the slot letter on the zoom view, lines on the overview, dots on the compact strip.
 - CUE button (`lib/cueButton.ts`, a pure state machine): paused, press sets the cue point at the playhead and plays
   while held, release returns to the cue point and pauses; playing, press returns to the cue point and pauses;
   pressing play while CUE is held keeps playing. The cue point on load is the first memory cue, else the start. It is
