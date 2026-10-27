@@ -1,16 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  ATTACK_RISE,
   BAND_GAIN,
   BAND_ORDER,
   BUCKET_PEAK_WEIGHT,
   DISPLAY_FLOOR,
-  INTERPOLATE_BELOW,
-  interpolateColumns,
   OVERVIEW_PEAK_WEIGHT,
   OVERVIEW_SCALE,
   STACK_GAIN,
+  ZOOM_PEAK_WEIGHT,
   bandsFromPeaks,
   displayAmp,
   halfHeight,
@@ -85,42 +83,17 @@ describe('reduceBands', () => {
     expect(held.slice(0, 8)).toEqual(Array(8).fill(held[0]));
     expect(held.slice(8)).toEqual(Array(8).fill(held[8]));
   });
-  it('interpolates between column centres when a column spans more than two pixels, so a slope is a line, not stairs', () => {
-    const out = reduceBands(bands([0.2, 0.3, 0.4, 0.5]), 0, 1, 32);
-    const values = Array.from(out.low);
-    for (let i = 1; i < values.length; i++) expect(values[i]).toBeGreaterThanOrEqual(values[i - 1] - 1e-6);
-    expect(new Set(values.map((v) => v.toFixed(4))).size).toBeGreaterThan(24);
-    const step = (values[20] - values[4]) / 16;
-    for (let i = 5; i < 20; i++) expect(values[i] - values[i - 1]).toBeCloseTo(step, 4);
+  it('never ramps between columns: every pixel of a column that spans many pixels has the column value', () => {
+    const out = reduceBands(bands([0.2, 0.3, 0.9, 0.5]), 0, 1, 64);
+    const values = Array.from(out.low).map((v) => v.toFixed(4));
+    expect(new Set(values).size).toBe(4);
+    for (let c = 0; c < 4; c++) expect(new Set(values.slice(c * 16, (c + 1) * 16)).size).toBe(1);
   });
-  it('hits the column value at the column centre', () => {
-    const data = bands([0.2, 0.3, 0.25, 0.3]);
-    const out = reduceBands(data, 0, 1, 32);
-    expect(out.low[12]).toBeCloseTo(displayAmp(0.25 * 1) * 1, 1);
-    expect(interpolateColumns(Float32Array.from([0.2, 0.3]), 1.5, 2)).toBeCloseTo(0.3, 6);
-    expect(interpolateColumns(Float32Array.from([0.2, 0.3]), 1, 2)).toBeCloseTo(0.25, 6);
-  });
-  it('keeps an attack as a hard step at the column edge and decays smoothly after it', () => {
-    const data = bands([0.1, 0.1, 0.8, 0.6, 0.4]);
-    const out = reduceBands(data, 0, 1, 40);
-    const values = Array.from(out.low);
-    const edge = 16;
-    expect(values[edge - 1]).toBeCloseTo(displayAmp(0.1), 4);
-    expect(values[edge]).toBeCloseTo(displayAmp(0.8), 4);
-    for (let i = 20; i < 31; i++) expect(values[i]).toBeLessThan(values[i - 1]);
-    expect(ATTACK_RISE).toBeLessThan(0.7);
-  });
-  it('takes a small rise as a slope, not a step', () => {
-    const out = reduceBands(bands([0.2, 0.2 + ATTACK_RISE / 2]), 0, 1, 32);
-    const values = Array.from(out.low);
-    expect(new Set(values.map((v) => v.toFixed(4))).size).toBeGreaterThan(8);
-  });
-  it('keeps holding columns that are two pixels wide or narrower', () => {
-    const out = reduceBands(bands([0.2, 0.4, 0.6, 0.8]), 0, 1, 8);
-    expect(INTERPOLATE_BELOW).toBe(0.5);
-    expect(Array.from(out.low).map((v) => v.toFixed(4))).toEqual(
-      [0.2, 0.2, 0.4, 0.4, 0.6, 0.6, 0.8, 0.8].map((v) => displayAmp(v).toFixed(4)),
-    );
+  it('takes the peak of the covered columns when peak weights are 1', () => {
+    const data = bands([0.1, 0.9, 0.2, 0.3, 0.1, 0.1, 0.8, 0.1]);
+    const out = reduceBands(data, 0, 1, 2, ZOOM_PEAK_WEIGHT);
+    expect(out.low[0]).toBeCloseTo(displayAmp(0.9 * ZOOM_PEAK_WEIGHT.low + (1 - ZOOM_PEAK_WEIGHT.low) * 0.375), 4);
+    expect(ZOOM_PEAK_WEIGHT.low).toBeGreaterThan(BUCKET_PEAK_WEIGHT.low);
   });
   it('reduces the overview with the mean of the covered columns, scaled to the overview level', () => {
     const out = reduceBands(bands([1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]), 0, 1, 1, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE);

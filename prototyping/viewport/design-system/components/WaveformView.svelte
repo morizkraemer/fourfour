@@ -18,6 +18,7 @@
     bands = null,
     bandsDetail = null,
     bandsOverview = null,
+    bandsZoom = null,
     beats = [],
     cues = [],
     bpm = 0,
@@ -44,6 +45,7 @@
   function buildData() {
     return {
       bands: (mode === 'expanded' ? (bandsDetail ?? bands) : bands) ?? undefined,
+      bandsZoom: (mode === 'expanded' ? bandsZoom : null) ?? undefined,
       bandsOverview: (bandsOverview ?? (mode === 'expanded' ? bands : null)) ?? undefined,
       beats: beats ?? [],
       cues: markerData(),
@@ -85,6 +87,11 @@
     // Pass playhead with data so zoom offset centres atomically on load (progress
     // often stays 0 across track changes, so a separate effect would not re-run).
     display.setData(buildData(), progress);
+  });
+
+  // The high-resolution series arrives after the track: no data reset, so zoom and scroll stay.
+  $effect(() => {
+    if (mode === 'expanded') display?.setDetailBands(bandsZoom ?? undefined);
   });
 
   // A cue edit redraws the markers only: no data reset, so zoom and scroll stay.

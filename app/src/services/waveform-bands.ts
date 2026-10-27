@@ -26,6 +26,14 @@ export interface BandColumns {
   overview?: boolean;
 }
 
+/** The same columns as bytes (`scale` brings them to 0..1): the 2400 columns per second series stays at one byte per column and band. */
+export interface ByteBandColumns {
+  low: Uint8Array;
+  mid: Uint8Array;
+  high: Uint8Array;
+  scale: { low: number; mid: number; high: number };
+}
+
 const WIRE_FULL_SCALE = 127;
 const BALANCE_BINS = 1024;
 const BALANCE_PERCENTILE = 0.98;
@@ -92,7 +100,26 @@ export function bandsFromStickBytes(bytes: ArrayLike<number>): BandColumns {
   return bandsFromInterleavedBytes(bytes, WIRE_FULL_SCALE, 1);
 }
 
-function percentile(values: Float32Array, p: number): number {
+const DETAIL_MAGIC = 'FFWD';
+const DETAIL_HEADER_BYTES = 16;
+
+/**
+ * The high-resolution series of `get_waveform_detail` (`FFWD` header, then the low, mid and high planes, bytes on the
+ * PWV7 scale). The planes are views into `buffer`, drawn as `byte / 127`; nothing is copied or widened.
+ */
+export function bandsFromDetailBytes(buffer: ArrayBuffer): ByteBandColumns | null {
+  if (buffer.byteLength < DETAIL_HEADER_BYTES) return null;
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  const columns = view.getUint32(12, true);
+  if (magic !== DETAIL_MAGIC || view.getUint8(4) !== 1 || buffer.byteLength !== DETAIL_HEADER_BYTES + 3 * columns) return null;
+  if (columns === 0) return null;
+  const plane = (k: number) => new Uint8Array(buffer, DETAIL_HEADER_BYTES + k * columns, columns);
+  const unit = 1 / WIRE_FULL_SCALE;
+  return { low: plane(0), mid: plane(1), high: plane(2), scale: { low: unit, mid: unit, high: unit } };
+}
+
+function percentile(values: ArrayLike<number>, p: number): number {
   const bins = new Uint32Array(BALANCE_BINS);
   for (let i = 0; i < values.length; i++) bins[Math.min(BALANCE_BINS - 1, Math.floor(values[i] * BALANCE_BINS))]++;
   const target = values.length * p;

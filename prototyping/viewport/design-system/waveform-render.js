@@ -6,7 +6,7 @@
  * record, exact pixel edges); tall ones, which the zoom view repaints every frame, use one fillRect
  * per column and band because a jagged tall polygon is far slower to rasterise.
  */
-import { OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, halfHeight, reduceBands, smoothBands, stackHeights } from './waveform-bands.js';
+import { BUCKET_PEAK_WEIGHT, OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, halfHeight, reduceBands, smoothBands, stackHeights } from './waveform-bands.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
@@ -265,13 +265,13 @@ function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked
  * offset anti-aliases every one-pixel column against its neighbour, which lets the background bleed through
  * and makes the whole waveform pulse (up to 22 % brightness) as the sub-pixel phase changes.
  */
-export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred' }) {
+export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred', peakWeights = BUCKET_PEAK_WEIGHT }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
   if (columnPx > 1) {
     ctx.save();
     ctx.scale(columnPx, 1);
     drawBandRange(ctx, bands, {
-      startFrac, endFrac, widthPx: Math.ceil(widthPx / columnPx), heightPx, palette, dpr: dpr / columnPx, decay, scrolling,
+      startFrac, endFrac, widthPx: Math.ceil(widthPx / columnPx), heightPx, palette, dpr: dpr / columnPx, decay, scrolling, peakWeights,
     });
     ctx.restore();
     return;
@@ -286,14 +286,14 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
   }
   const fracPerPx = (endFrac - startFrac) / widthPx;
   if (columnsPerPx <= 1 && canCacheScroll(ctx)) {
-    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, palette });
+    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, palette, peakWeights });
     return;
   }
   const leftFloor = Math.floor(startFrac / fracPerPx);
   const leadPx = Math.round(ENVELOPE_LEAD_CSS_PX * dpr);
   const total = leadPx + widthPx + 2;
   const shaped = smoothBands(
-    reduceBands(bands, (leftFloor - leadPx) * fracPerPx, (leftFloor - leadPx + total) * fracPerPx, total),
+    reduceBands(bands, (leftFloor - leadPx) * fracPerPx, (leftFloor - leadPx + total) * fracPerPx, total, peakWeights),
     decayPerPixel,
   );
   paintBands(ctx, shaped, { heightPx, palette, from: leadPx, count: widthPx });
@@ -327,7 +327,7 @@ function newLayer(widthPx, heightPx) {
  * frame as the view scrolls; the cache keeps the scale it was painted at and treats such a difference as the same
  * zoom (an exact comparison made about every other scrolled frame a full repaint).
  */
-function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, palette }) {
+function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, palette, peakWeights }) {
   const canvas = ctx.canvas;
   let entry = scrollCache.get(canvas);
   if (!entry || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
@@ -342,7 +342,7 @@ function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, 
   const paintColumns = (layer, fromPx, count) => {
     const g = layer.getContext('2d');
     g.clearRect(fromPx, 0, count, heightPx);
-    const shaped = reduceBands(bands, (leftFloor + fromPx) * fracPerPx, (leftFloor + fromPx + count) * fracPerPx, count);
+    const shaped = reduceBands(bands, (leftFloor + fromPx) * fracPerPx, (leftFloor + fromPx + count) * fracPerPx, count, peakWeights);
     paintBands(g, shaped, { heightPx, palette, offsetPx: fromPx });
   };
   const shift = entry.left === null ? widthPx : leftFloor - entry.left;

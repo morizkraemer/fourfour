@@ -18,6 +18,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::{ColorWaveform, ExactColumns, WaveformPreview};
 
+mod detail;
+
+pub use detail::{DetailMeter, DetailSeries, DETAIL_COLUMNS_PER_SECOND};
+
 pub const COLUMNS_PER_SECOND: f64 = 150.0;
 pub const PWAV_COLUMNS: usize = 400;
 pub const PWV2_COLUMNS: usize = 100;
@@ -364,12 +368,7 @@ pub fn analyze(audio: &Measured) -> Waveforms {
     let mut gains = [0u16; 3];
     for j in 0..3 {
         let max = env.iter().map(|e| e[j]).fold(0.0, f64::max);
-        gains[j] = if max > 0.0 {
-            ((t.gain_target[j] / max).round().min(u16::MAX as f64) as u16)
-                .clamp(t.gain_floor[j], t.gain_cap[j])
-        } else {
-            t.gain_floor[j]
-        };
+        gains[j] = band_gain(t, j, max);
     }
     let pwv7: Vec<[u8; 3]> = env
         .iter()
@@ -402,6 +401,15 @@ pub fn analyze(audio: &Measured) -> Waveforms {
     let pwv4 = pwv4_from(&pwv6, t);
 
     Waveforms { pwv3, pwv5, pwv7, gains, pwav, pwv2, pwv6, pwv4 }
+}
+
+fn band_gain(t: &Tuning, band: usize, max_envelope: f64) -> u16 {
+    if max_envelope > 0.0 {
+        ((t.gain_target[band] / max_envelope).round().min(u16::MAX as f64) as u16)
+            .clamp(t.gain_floor[band], t.gain_cap[band])
+    } else {
+        t.gain_floor[band]
+    }
 }
 
 /// `PWAV` (400 columns) and `PWV2` (100 columns) from per-range loudness `rms_over`.

@@ -11,6 +11,7 @@ mod tempo;
 mod track_fields;
 mod track_infos;
 mod volumes;
+mod waveform_detail;
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -713,6 +714,30 @@ async fn get_analysis_data(
     .map_err(|e| e.to_string())?
 }
 
+/// The high-resolution 3-band series of a track for the zoomed waveform (`DetailSeries::to_bytes`),
+/// measured from the audio on first use and cached in the app data folder. Sent as a binary IPC response.
+#[tauri::command]
+async fn get_waveform_detail(
+    app: AppHandle,
+    track_id: i64,
+    state: State<'_, SharedLibrary>,
+) -> Result<tauri::ipc::Response, String> {
+    let shared = state.inner().clone();
+    let cache_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("waveform-detail");
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let track = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.get_track(track_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Track {track_id} is not in the library"))?
+        };
+        waveform_detail::detail_series(&cache_dir, &track.source_path).map(|series| series.to_bytes())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Replace the hot and memory cues of a track (slot 0 is a memory cue, 1 to 8 are A to H).
 #[tauri::command]
 async fn set_cues(
@@ -1184,6 +1209,7 @@ fn main() {
             get_analysis_backend,
             set_analysis_backend,
             get_analysis_data,
+            get_waveform_detail,
             set_beat_grid,
             set_track_bpm,
             set_track_key,

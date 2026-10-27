@@ -754,6 +754,16 @@ function mockEditedCues(trackId: number): CuePointPayload[] | undefined {
   return mockCueStore()[trackId] ?? mockCueFallback.get(trackId);
 }
 
+/** The 2400 columns per second 3-band series of a track (`FFWD` bytes), measured from the audio on first use. `null` where there is no backend or no audio. */
+export async function getWaveformDetail(trackId: number): Promise<ArrayBuffer | null> {
+  try {
+    return await invoke<ArrayBuffer>('get_waveform_detail', { trackId });
+  } catch (err) {
+    lastTauriError = `get_waveform_detail fail: ${String(err)}`;
+    return null;
+  }
+}
+
 async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });

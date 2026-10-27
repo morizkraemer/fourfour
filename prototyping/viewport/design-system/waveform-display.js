@@ -25,6 +25,7 @@
  */
 import { drawBandRange, dimPlayed, ink, paletteVersion, wavePalette } from './waveform-render.js';
 import { PlayheadClock } from './playhead-clock.js';
+import { ZOOM_PEAK_WEIGHT } from './waveform-bands.js';
 
 const DRAG_THRESHOLD_PX = 4;
 const CUE_TAB_W = 12;
@@ -33,6 +34,9 @@ const CUE_TAB_H = 12;
 const OVERVIEW_DECAY = 0.93;
 const COMPACT_DECAY = 0.88;
 const ZOOM_DECAY = 0.86;
+const MAX_ZOOM = 512.0;
+const DETAIL_COLUMNS_PER_SECOND = 2400;
+const DETAIL_BELOW_COLUMNS_PER_PIXEL = 2;
 
 export default class WaveformDisplay {
     /**
@@ -189,6 +193,16 @@ export default class WaveformDisplay {
         this._paint();
     }
 
+    /**
+     * Add (or drop) the high-resolution series of the zoom view: zoom, scroll position and the rest of the data stay.
+     * It arrives after the track is loaded, so the first paint uses the 150 columns per second until then.
+     */
+    setDetailBands(bandsZoom) {
+        if (!this._data || this._data.bandsZoom === bandsZoom) return;
+        this._data = { ...this._data, bandsZoom };
+        this._paint();
+    }
+
     /** Replace the beat grid only (an edit): zoom, scroll position and the rest of the data stay. */
     setBeats(beats) {
         if (!this._data || this._data.beats === beats) return;
@@ -211,7 +225,7 @@ export default class WaveformDisplay {
         const dur = this._data?.duration_ms;
         if (!dur) return 1.0;
         const TARGET_VISIBLE_MS = 5000;
-        return Math.max(1.0, Math.min(512.0, dur / TARGET_VISIBLE_MS));
+        return Math.max(1.0, Math.min(this._maxZoom(), dur / TARGET_VISIBLE_MS));
     }
 
 /** Clear to empty state. */
@@ -409,7 +423,7 @@ export default class WaveformDisplay {
 
     /** Programmatically set zoom and scroll position (for syncing displays). */
     setViewport(zoom, offset) {
-        this._zoom = Math.max(1.0, Math.min(512.0, zoom));
+        this._zoom = Math.max(1.0, Math.min(this._maxZoom(), zoom));
         this._offset = this._clampOffset(offset);
         this._render();
         this._updatePlayheadOverlay();
@@ -421,7 +435,7 @@ export default class WaveformDisplay {
     /** Set zoom, re-centring on the playhead (expanded) or clamping (free). */
     _applyZoom(next) {
         if (this._mode === 'compact') return;
-        this._zoom = Math.max(1.0, Math.min(512.0, next));
+        this._zoom = Math.max(1.0, Math.min(this._maxZoom(), next));
         this._offset = this._lockPlayhead ? this._centeredOffset() : this._clampOffset(this._offset);
         this._render();
         this._updatePlayheadOverlay();
@@ -621,8 +635,29 @@ export default class WaveformDisplay {
         }
     }
 
+    // With the high-resolution series, the closest zoom shows one column per device pixel at least.
+    _maxZoom() {
+        const durationMs = this._data?.duration_ms;
+        if (this._mode === 'compact' || !this._data?.bandsZoom || !durationMs) return MAX_ZOOM;
+        const widthPx = this._canvasSize(this._zoomCanvas).w * devicePixelRatio;
+        const minVisibleSeconds = widthPx / DETAIL_COLUMNS_PER_SECOND;
+        return Math.max(1.0, Math.min(MAX_ZOOM, durationMs / 1000 / minVisibleSeconds));
+    }
+
+    // The high-resolution series once the detail columns would be drawn wider than half a pixel.
+    _zoomDetailBands(widthPx, startFrac, endFrac) {
+        const fine = this._data.bandsZoom;
+        const coarse = this._data.bands;
+        if (!fine || !coarse?.low.length) return null;
+        const coarsePerPixel = ((endFrac - startFrac) * coarse.low.length) / widthPx;
+        return coarsePerPixel < DETAIL_BELOW_COLUMNS_PER_PIXEL ? fine : null;
+    }
+
     _renderBands(ctx, w, h, startFrac, endFrac, palette) {
-        const bands = this._mode === 'compact' ? (this._data.bandsOverview || this._data.bands) : this._data.bands;
+        const compact = this._mode === 'compact';
+        const widthPx = Math.round(w * devicePixelRatio);
+        const fine = compact ? null : this._zoomDetailBands(widthPx, startFrac, endFrac);
+        const bands = fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
         if (!bands || bands.low.length === 0) return;
         const dpr = devicePixelRatio;
         ctx.save();
@@ -634,7 +669,8 @@ export default class WaveformDisplay {
             heightPx: Math.round(h * dpr),
             palette,
             dpr,
-            decay: this._mode === 'compact' ? COMPACT_DECAY : ZOOM_DECAY,
+            decay: compact ? COMPACT_DECAY : fine ? 0 : ZOOM_DECAY,
+            peakWeights: fine ? ZOOM_PEAK_WEIGHT : undefined,
             scrolling: this._mode !== 'compact',
             layout: this._mode === 'compact' ? 'stacked' : 'centred',
         });
