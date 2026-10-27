@@ -1,0 +1,128 @@
+.ff-dcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ff-space-3);
+  min-width: 0;
+  padding: var(--ff-space-4);
+  border: 1px solid var(--ff-border);
+  border-radius: var(--ff-radius-xl);
+  background: var(--ff-bg);
+  color: var(--ff-text);
+  font-family: var(--ff-font);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.ff-dcard:hover {
+  background: var(--ff-hover);
+  border-color: var(--ff-border-hi);
+}
+
+.ff-dcard:focus-visible {
+  outline: 1px solid var(--ff-accent);
+  outline-offset: -1px;
+}
+
+.ff-dcard__mosaic {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--ff-radius-md);
+  overflow: hidden;
+  background: var(--ff-elev);
+}
+
+.ff-dcard__mosaic i {
+  display: block;
+  background-color: var(--ff-elev-hi);
+  background-size: cover;
+  background-position: center;
+}
+
+.ff-dcard__name {
+  display: flex;
+  align-items: center;
+  gap: var(--ff-space-3);
+  font-size: var(--ff-type-row);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-dcard__meta {
+  font-size: var(--ff-type-small);
+  color: var(--ff-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-dcard__meta--mono {
+  font-family: var(--ff-font-mono);
+  font-size: var(--ff-type-label);
+  color: var(--ff-faint);
+}
+
+.ff-dcard--new {
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  border-style: dashed;
+  border-color: var(--ff-border-hi);
+  background: none;
+  color: var(--ff-text-mid);
+}
+
+.ff-dcard--stick {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--ff-space-5);
+  padding: var(--ff-space-5);
+  color: var(--ff-text-mid);
+}
+
+.ff-dcard__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--ff-space-2);
+  min-width: 0;
+}
+
+.ff-dcard--stick .ff-dcard__name {
+  color: var(--ff-text);
+}
+
+.ff-dcard--offline {
+  opacity: 0.7;
+}
+
+.ff-dcard--drop {
+  border-color: var(--ff-accent);
+  background: var(--ff-select);
+}
+
+.ff-dcard__drop,
+.ff-dcard__flash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--ff-type-compact);
+  font-weight: 500;
+  color: var(--ff-text);
+  background: rgba(10, 10, 10, 0.78);
+  pointer-events: none;
+}
+
+.ff-dcard__flash {
+  background: rgba(10, 10, 10, 0.88);
+}

@@ -1152,16 +1152,15 @@ export async function removeFavoriteSlot(playlistId: number): Promise<string | n
   return name;
 }
 
-export async function addTracksToPlaylist(playlistId: number, trackIds: number[]) {
+export async function addTracksToPlaylist(playlistId: number, trackIds: number[]): Promise<number> {
   const pl = library.playlists.find(p => p.id === playlistId);
-  if (!pl) return;
-  trackIds.forEach(tid => {
-    if (!pl.track_ids.includes(tid)) {
-      pl.track_ids.push(tid);
-    }
-  });
+  if (!pl) return 0;
+  const fresh = [...new Set(trackIds)].filter(tid => !pl.track_ids.includes(tid));
+  if (fresh.length === 0) return 0;
+  pl.track_ids.push(...fresh);
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
+  return fresh.length;
 }
 
 export async function removeTrackFromPlaylist(playlistId: number, trackId: number) {

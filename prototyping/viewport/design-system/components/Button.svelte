@@ -17,6 +17,7 @@
     kbd,
     onclick,
     ariaLabel,
+    title,
     class: className = '',
   } = $props();
 
@@ -41,6 +42,7 @@
   type="button"
   disabled={disabled || undefined}
   aria-label={iconOnly ? (ariaLabel ?? label) : undefined}
+  {title}
   {onclick}
 >
   {#if icon}<Icon name={icon} size={iconSize} />{/if}

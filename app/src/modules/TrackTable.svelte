@@ -45,6 +45,7 @@
     ALL_COLUMN_KEYS,
   } from '../stores/table-columns.svelte.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+  import { dropTracksOnCard } from '../stores/organize-drop.svelte.ts';
   import { dnd, startTrackDrag, updatePointer, updateTrackDropTarget, endDrag } from '../stores/dnd.svelte.ts';
   import {
     buildTrackContextMenuItems,
@@ -400,6 +401,21 @@
       const dropIdx = dnd.dropRowIndex;
       const dropSource = dnd.dropPanelSourceId;
       const copyOnly = ev.altKey;
+      const cardPlaylistId = dnd.dropCardPlaylistId;
+      const cardStickPath = dnd.dropStickPath;
+
+      if (cardPlaylistId != null || cardStickPath != null) {
+        await dropTracksOnCard(
+          cardPlaylistId != null
+            ? { kind: 'playlist', playlistId: cardPlaylistId }
+            : { kind: 'stick', volumePath: cardStickPath },
+          ids
+        );
+        dragging = false;
+        dropLineTop = null;
+        endDrag();
+        return;
+      }
 
       // ── Organize-panel drop routing ──────────────────────────────────────
       // If the drop landed on the docked organize panel, route to
