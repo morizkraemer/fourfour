@@ -438,6 +438,17 @@ impl TempoEngine {
         self.rate
     }
 
+    /// The most source frames beyond the ring front the stretcher can need: the slowest
+    /// stretch spacing (fastest tempo, lowest key) plus one chunk and the feed correction.
+    pub fn max_feed_ahead_frames(&self) -> usize {
+        let spacing = MAX_RATIO / semitone_factor(-MAX_SEMITONES);
+        let latency = stretch_latency_frames(self.input_latency, self.output_latency, spacing);
+        let limiter_lead = self.limiter.delay_frames() as f64 * MAX_RATIO;
+        let steady = latency + LOOKAHEAD_FRAMES as f64 * spacing + limiter_lead;
+        let chunk_in = CHUNK_FRAMES as f64 * MAX_RATIO + 1.0;
+        (steady + chunk_in).ceil() as usize + MAX_FEED_ADJUST + LOOKAHEAD_FRAMES
+    }
+
     #[cfg(test)]
     pub fn last_path(&self) -> Option<Path> {
         self.last_path

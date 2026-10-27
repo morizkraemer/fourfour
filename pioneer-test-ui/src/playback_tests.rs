@@ -1247,14 +1247,12 @@ fn seek_latency_real_files() {
 
 #[test]
 fn audio_arriving_after_a_slow_decode_fades_in_without_a_click() {
-    let (pipe, cons) = new_sample_pipe();
-    let mut render = RenderState::new(
-        cons,
-        pipe.clone(),
+    let (mut render, pipe) = render_pipeline(
         Arc::new(AtomicU32::new(0)),
         Arc::new(AtomicU32::new(0)),
         Arc::new(TempoParams::new()),
         48_000,
+        2,
         STRETCH_PRESET,
     );
     let steady = |value: f32, frames: usize| vec![value; frames * 2];

@@ -71,15 +71,13 @@ pub(crate) struct Lab {
 
 impl Lab {
     pub fn new(source: Vec<f32>, block: usize, preset: Preset) -> Self {
-        let (pipe, cons) = new_sample_pipe();
         let tempo = Arc::new(TempoParams::new());
-        let state = RenderState::new(
-            cons,
-            pipe.clone(),
+        let (state, pipe) = render_pipeline(
             Arc::new(AtomicU32::new(0)),
             Arc::new(AtomicU32::new(0)),
             tempo.clone(),
             SR,
+            2,
             preset,
         );
         let mut lab = Self {
@@ -585,4 +583,42 @@ fn returning_to_zero_tempo_with_key_lock_off_does_not_click() {
         }
     }
     assert!(worst.0 < theory * 1.05, "spike {} (sine {theory}) at {} from ratio {}", worst.0, worst.1, worst.2);
+}
+
+#[test]
+fn eight_channels_at_192k_stretch_instead_of_falling_back_to_varispeed() {
+    let rate = 192_000u32;
+    let ch = 8usize;
+    let tempo = Arc::new(TempoParams::new());
+    let (mut state, pipe) = render_pipeline(
+        Arc::new(AtomicU32::new(0)),
+        Arc::new(AtomicU32::new(0)),
+        tempo.clone(),
+        rate,
+        ch as u16,
+        STRETCH_PRESET,
+    );
+    tempo.set_ratio(1.08);
+    tempo.set_key_lock(true);
+    pipe.supersede();
+    state.render(&mut [], ch as u16);
+    let mut phase = 0.0f64;
+    let mut frame = vec![0.0f32; ch];
+    let mut out = vec![0.0f32; 512 * ch];
+    let mut stretched = 0;
+    for _ in 0..(rate as usize / 512) {
+        {
+            let mut producer = lock_ignoring_poison(&pipe.producer);
+            while producer.vacant_len() >= ch {
+                frame.fill(0.5 * phase.sin() as f32);
+                producer.push_slice(&frame);
+                phase += 2.0 * std::f64::consts::PI * 440.0 / rate as f64;
+            }
+        }
+        state.render(&mut out, ch as u16);
+        if state.engine.last_path() == Some(crate::tempo::Path::Stretch) {
+            stretched += 1;
+        }
+    }
+    assert!(stretched > 100, "stretch path played in only {stretched} of {} callbacks", rate as usize / 512);
 }
