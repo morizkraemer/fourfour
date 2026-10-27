@@ -75,12 +75,17 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: idle · q41-feedback (round 3–6 UI, tempo/key engine, writer fixes, sort + cue latency) merged into master 3c200d1, checks green, pushed to origin · installed on the Mac (16fe50b = same code)
-landed: (1) player fixes F3/F4/F5/F14/F20/F24 (2) layout: right sidebar full height, toggle in top bar (3) hot cues A–H + memory cues + CUE button + edit lock F9b/F25 (4) drag/scroll/type BPM + key in inspector + players, ×2/÷2, "Adjust beat grid" separate; playlist Rename F17/F18 (5) auto-resume analysis at launch
-checks: cargo build+test green, 370 app tests, check 0 errors, build ok (headless walkthroughs only; no Tauri window)
-open: mockup round 2 ready for review (docs/ui/design-round-wm-2.md, board https://dev.tail87069a.ts.net:5233 #inspector-2 #settings-2); writer drops cue names/colours (brother, docs/architecture/cues.md); unanalysed tracks can't get BPM/key edits
+status: running · since 2026-10-27 23:40 · cap 2 workers · autonomy tight (all on branches; integration branch q42-overnight from master 61b81b3; only state/docs land on master)
+targets: Merlin approved option 1 (2026-10-27): stick sync real → review → leftovers → .dmg → key refit → housekeeping
+plan: W-Z zoom detail + W-X ⌥-delete/ribbon (round 7, running) → Q42 → Q43 → Q44 → Q45 [mac] → Q46 → Q47, then own priorities
 decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync fixes go ahead here
-parked: sync UI round 3 (2 open answers); Rust auto cues/energy (licence)
+
+### Q42 Stick sync for real [queued] [box] — sync button → sync_usb_many: stick All tracks + chosen playlists (SyncSelection::Playlists track_ids), stable stick id (not path), capacity check, dry-run plan shown before write. Fake stick folder only; no real USB writes. Validation + headless. 180 min
+### Q43 Review rounds 3–6 [queued] [box] — bug hunt over the q41-feedback merges; extra care: wipe guard, volumes.rs, writer pdb/cue changes, tempo engine RT safety. Fix clear bugs on branch, list the rest. 150 min
+### Q44 Leftovers [queued] [box] — row waveforms blue-block (row_bands detail labelled overview), player overview fallback → stripBandsFromAnalysis, flaky vitest (find + fix). 90 min
+### Q45 Unsigned .dmg [queued] [mac] — `cargo tauri build` .dmg on the Mac build clone (separate dir), launch smoke check headless; report artifact + size + log. No signing/notarising. 60 min
+### Q46 Key refit on permissive labels [queued] [box] — find permissively licensed key labels, refit templates, measure on Beatport set; report only, never shipped. 150 min
+### Q47 Housekeeping [queued] [box] — remove merged worktrees + caches (check uncommitted/ignored first), disk < 70%; trim STATE.md to ≤80 lines (history → journal/docs). 45 min
 
 ## Rundown
 Overnight: startup 30k 24.7 s→0.5 s backend / 188 s→3.3 s first paint; track load ~300→50 ms; fling CPU −55%; search first key 445→120 ms; audio engine 11 fixes + 26 tests; Rekordbox import (master.db/USB/XML); multi-USB sync 2.4–3×; grid 47→78.5%; analysis CPU 74→70 s/track; 108 app tests. All on branches (tight); docs on master.

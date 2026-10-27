@@ -158,3 +158,4 @@
 2026-10-27 15:14 orchestrator - Merlin tested + OK'd: merged q41-feedback into master 3c200d1 (one doc conflict resolved); full checks green (cargo, 469 vitest, 0 warnings, build); not pushed
 2026-10-27 15:24 orchestrator - pushed master to origin (6fb1d1b..6ada046), Merlin's OK
 2026-10-27 16:03 orchestrator - round 7 (K1–K4): W-Z zoom waveform detail, W-X ⌥-delete cues + ribbon covers/hover spawned from q41-feedback 61b81b3 (= master)
+2026-10-27 16:22 orchestrator run-start: overnight option 1 (Q42 sync, Q43 review, Q44 leftovers, Q45 dmg [mac], Q46 key refit, Q47 housekeeping); tight, cap 2, seat subagents; integration branch q42-overnight
