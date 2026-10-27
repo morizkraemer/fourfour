@@ -9,6 +9,7 @@
 <script>
   import { WaveformView, Nudge, CueEditor, bpmScrub, keyScrub, keyColor } from '$ds';
   import { commitTrackBpm, commitTrackKey } from '../stores/track-edits.svelte.ts';
+  import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
     addMemoryCueAtPlayhead,
@@ -104,6 +105,7 @@
       bpm={player.track?.bpm ?? 0}
       durationMs={player.track?.durationMs ?? 0}
       trackKey={player.track?.id ?? null}
+      analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
       progress={player.progress}
       playing={player.playing}
       onSeek={player.track ? seekToProgress : undefined} />

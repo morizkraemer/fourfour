@@ -99,9 +99,9 @@ export interface UsbStateResponse {
 
 // Fallback Mock Data for Browser Mode
 let mockTracks: TrackInfo[] = [
-  { id: 1, source_path: '/Music/Solomun - Hyperion.mp3', title: 'Hyperion', artist: 'Solomun', album: 'Diynamic Hits', genre: 'Melodic House', tempo: 12400, key: '9A', duration_secs: 462, bitrate: 320, file_size: 18482010, has_artwork: true, has_cues: false },
-  { id: 2, source_path: '/Music/Tale Of Us - Voidwalker.flac', title: 'Voidwalker', artist: 'Tale Of Us', album: 'Endless Run', genre: 'Melodic Techno', tempo: 12200, key: '7A', duration_secs: 494, bitrate: 1040, file_size: 64281920, has_artwork: true, has_cues: true },
-  { id: 3, source_path: '/Music/Bicep - Drift.mp3', title: 'Drift', artist: 'Bicep', album: 'Drift EP', genre: 'Breakbeat', tempo: 12800, key: '5B', duration_secs: 415, bitrate: 320, file_size: 16601020, has_artwork: true, has_cues: false },
+  { id: 1, source_path: '/Music/Solomun - Hyperion.mp3', title: 'Hyperion', artist: 'Solomun', album: 'Diynamic Hits', genre: 'Melodic House', tempo: 12400, key: '9A', duration_secs: 462, bitrate: 320, file_size: 18482010, has_artwork: true, has_cues: false, has_analysis: true, analysis_pending: false },
+  { id: 2, source_path: '/Music/Tale Of Us - Voidwalker.flac', title: 'Voidwalker', artist: 'Tale Of Us', album: 'Endless Run', genre: 'Melodic Techno', tempo: 12200, key: '7A', duration_secs: 494, bitrate: 1040, file_size: 64281920, has_artwork: true, has_cues: true, has_analysis: true, analysis_pending: false },
+  { id: 3, source_path: '/Music/Bicep - Drift.mp3', title: 'Drift', artist: 'Bicep', album: 'Drift EP', genre: 'Breakbeat', tempo: 12800, key: '5B', duration_secs: 415, bitrate: 320, file_size: 16601020, has_artwork: true, has_cues: false, has_analysis: true, analysis_pending: false },
 ];
 
 function mockTrackCountFromUrl(): number {
@@ -357,23 +357,57 @@ export async function prioritizeAnalysis(trackId: number): Promise<void> {
   }
 }
 
+const MOCK_STAGES_ALL = 7;
+const MOCK_STAGES_WAVEFORM_AND_KEY = 3;
+const MOCK_FAST_PASS_MS = 700;
+const MOCK_GRID_PASS_MS = 1500;
+const MOCK_TRACK_GAP_MS = 1600;
+const mockStages = new Map<number, number>();
+const mockAnalysisListeners = {
+  progress: new Set<(payload: { current: number; total: number; message: string; track_id?: number }) => void>(),
+  partial: new Set<(payload: { track_id: number }) => void>(),
+  complete: new Set<() => void>(),
+};
+
+/** Browser stand-in for the staged run: waveform and key first, then BPM and grid, one `analysis-*` event per stage. */
+function runMockAnalysis(ids: number[]): Promise<TrackInfo[]> {
+  ids.forEach((id) => mockStages.set(id, 0));
+  return new Promise((resolve) => {
+    ids.forEach((id, index) => {
+      const start = index * MOCK_TRACK_GAP_MS;
+      setTimeout(() => {
+        mockStages.set(id, MOCK_STAGES_WAVEFORM_AND_KEY);
+        invalidateAnalysisCache(id);
+        mockAnalysisListeners.partial.forEach((cb) => cb({ track_id: id }));
+      }, start + MOCK_FAST_PASS_MS);
+      setTimeout(() => {
+        const track = mockTracks.find((t) => t.id === id);
+        if (track) {
+          track.tempo = 12600 + (id % 7) * 100;
+          track.key = '3A';
+          track.has_analysis = true;
+        }
+        mockStages.set(id, MOCK_STAGES_ALL);
+        invalidateAnalysisCache(id);
+        const done = index + 1;
+        mockAnalysisListeners.progress.forEach((cb) =>
+          cb({ current: done, total: ids.length, message: `Analyzed ${track?.title ?? id} (${done}/${ids.length})`, track_id: id }),
+        );
+        if (done === ids.length) {
+          mockAnalysisListeners.complete.forEach((cb) => cb());
+          resolve(mockTracks);
+        }
+      }, start + MOCK_GRID_PASS_MS);
+    });
+  });
+}
+
 export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
   try {
     return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
   } catch (err) {
     lastTauriError = `analyze_track_ids fail: ${String(err)}`;
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        mockTracks.forEach((t) => {
-          if (ids.includes(t.id)) {
-            t.tempo = 12600 + (t.id % 7) * 100;
-            t.key = '3A';
-            t.duration_secs = 380;
-          }
-        });
-        resolve(mockTracks);
-      }, 800);
-    });
+    return runMockAnalysis(ids);
   }
 }
 
@@ -599,6 +633,7 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
       const editedCues = mockEditedCues(trackId);
       const clean = sanitizeAnalysisPayload({
         ...data,
+        analysis_stages: mockStages.get(trackId) ?? MOCK_STAGES_ALL,
         ...(edited ? { beats: edited } : {}),
         ...(editedCues ? { cue_points: editedCues } : {}),
       });
@@ -658,6 +693,7 @@ export function listenToAnalysisProgress(
   }) => void,
 ) {
   let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) mockAnalysisListeners.progress.add(callback);
   try {
     listen<{
       current: number;
@@ -680,6 +716,7 @@ export function listenToAnalysisProgress(
 /** The waveform of a prioritised track is stored; tempo, grid and key follow with the full result. */
 export function listenToAnalysisPartial(callback: (payload: { track_id: number }) => void) {
   let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) mockAnalysisListeners.partial.add(callback);
   try {
     listen<{ track_id: number }>('analysis-partial', (event) => {
       callback(event.payload);
@@ -698,6 +735,7 @@ export function listenToAnalysisPartial(callback: (payload: { track_id: number }
 
 export function listenToAnalysisComplete(callback: () => void) {
   let unsubscribe: () => void = () => {};
+  if (useBrowserMocks()) mockAnalysisListeners.complete.add(callback);
   try {
     listen<void>('analysis-complete', () => {
       callback();

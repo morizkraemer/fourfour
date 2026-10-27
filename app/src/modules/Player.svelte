@@ -5,6 +5,7 @@
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
   import { commitTrackBpm, commitTrackKey } from '../stores/track-edits.svelte.ts';
+  import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import ExpandedPlayer from './ExpandedPlayer.svelte';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { cueMarkers } from '../lib/cues.ts';
@@ -72,6 +73,7 @@
     beats={player.track?.beats ?? []}
     durationMs={player.track?.durationMs ?? 0}
     trackKey={player.track?.id ?? null}
+    analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
     onScrub={player.track ? seekToProgress : undefined}
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
