@@ -33,6 +33,7 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`player-strip.md`](ui/player-strip.md) | current | Player strip implementation plan. |
 | [`organize-sidebar.md`](ui/organize-sidebar.md) | current | Organize right-sidebar spec (rail, picker, dock, drop-to-playlist). |
 | [`design-round-wm-2.md`](ui/design-round-wm-2.md) | current | Mockup round 2: inspector (all fields editable, lock state) and settings overhaul; options and open questions. |
+| [`design-round-wm-3.md`](ui/design-round-wm-3.md) | current | Mockup round 3: calmer inspector (hierarchy first, edit on click, one lock marker); three options and open questions. |
 | [`waveform-dynamics.md`](ui/waveform-dynamics.md) | current | Waveform display dynamics — playhead, scroll, band rendering. |
 
 ## analysis/ — analysis pipeline (research & plans)
