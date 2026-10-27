@@ -150,6 +150,10 @@ fn heard_to_output_frame(positions: &[f64], block: usize, start: f64, frame: f64
 }
 
 fn hf_spikes(x: &[f32]) -> usize {
+    hf_spike_positions(x).len()
+}
+
+fn hf_spike_positions(x: &[f32]) -> Vec<usize> {
     let n = x.len();
     let mut d2 = vec![0.0f64; n];
     for i in 1..n - 1 {
@@ -160,7 +164,7 @@ fn hf_spikes(x: &[f32]) -> usize {
         prefix[i + 1] = prefix[i] + d2[i] * d2[i];
     }
     let radius = 128usize;
-    let mut count = 0;
+    let mut found = Vec::new();
     let mut last = 0usize;
     for i in radius..n - radius {
         let magnitude = d2[i].abs();
@@ -170,11 +174,11 @@ fn hf_spikes(x: &[f32]) -> usize {
         let energy = prefix[i + radius] - prefix[i - radius] - d2[i - 1] * d2[i - 1] - d2[i] * d2[i] - d2[i + 1] * d2[i + 1];
         let rms = (energy / (2 * radius - 3) as f64).sqrt().max(1e-6);
         if magnitude > 14.0 * rms && i > last + 64 {
-            count += 1;
+            found.push(i);
             last = i;
         }
     }
-    count
+    found
 }
 
 fn percentile_ns(timings: &[u64], p: f64) -> u64 {
@@ -416,88 +420,97 @@ fn lab_report_tracks() {
 
     if want("clicks") {
         for (name, source) in &tracks {
-            let baseline = {
-                let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-                lab.set(1.0, 0.0, true);
-                hf_spikes(&left(&lab.run_seconds(40.0)))
-            };
-            let mut scenarios: Vec<(String, usize)> = Vec::new();
-
-            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-            lab.settle();
-            let mut out = Vec::new();
-            for b in 0..(10 * SR as usize / 256) {
-                let t = b as f64 * 256.0 / SR as f64;
-                lab.set(0.92 + 0.016 * t, 0.0, true);
-                lab.step(&mut out);
-            }
-            scenarios.push(("tempo sweep -8..+8 % over 10 s, key lock".into(), hf_spikes(&left(&out))));
-
-            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-            lab.settle();
-            let mut out = Vec::new();
-            for b in 0..(10 * SR as usize / 256) {
-                let t = b as f64 * 256.0 / SR as f64;
-                lab.set(0.92 + 0.016 * t, 0.0, false);
-                lab.step(&mut out);
-            }
-            scenarios.push(("tempo sweep -8..+8 % over 10 s, varispeed".into(), hf_spikes(&left(&out))));
-
-            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-            lab.settle();
-            let mut out = Vec::new();
-            for b in 0..(12 * SR as usize / 256) {
-                let t = b as f64 * 256.0 / SR as f64;
-                lab.set(1.0, [0.0, 2.0, -3.0, 5.0, 0.0, -1.0][(t / 2.0) as usize % 6], true);
-                lab.step(&mut out);
-            }
-            scenarios.push(("key changes every 2 s (0,+2,-3,+5,0,-1)".into(), hf_spikes(&left(&out))));
-
-            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-            lab.set(1.08, 0.0, true);
-            lab.settle();
-            let mut out = Vec::new();
-            for i in 0..8 {
-                lab.locate(SR as usize * (3 + i * 7));
-                lab.step(&mut out);
-                out.extend(lab.run_seconds(2.0));
-            }
-            scenarios.push(("8 seeks/cue jumps at +8 %".into(), hf_spikes(&left(&out))));
-
-            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-            lab.set(1.0, 0.0, true);
-            lab.settle();
-            let mut out = Vec::new();
-            for _ in 0..8 {
-                lab.locate(SR as usize * 20);
-                out.extend(lab.run_seconds(1.9));
-            }
-            scenarios.push(("8 loop jumps at ratio 1.0".into(), hf_spikes(&left(&out))));
-
-            let mut out = Vec::new();
-            for i in 0..4 {
-                let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-                lab.set(1.0 + 0.04 * i as f64, 0.0, true);
-                lab.locate(SR as usize * 5);
-                out.extend(lab.run_seconds(2.0));
-            }
-            scenarios.push(("4 track loads (fresh engine) at +0..12 %".into(), hf_spikes(&left(&out))));
-
-            let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
-            lab.set(1.08, 0.0, true);
-            lab.settle();
-            let mut out = Vec::new();
-            for _ in 0..6 {
-                out.extend(lab.run_seconds(1.5));
-                let position = lab.position_frames() as usize;
-                lab.locate(position);
-                out.extend(lab.run_seconds(0.5));
-            }
-            scenarios.push(("6 pause/resume cycles at +8 %".into(), hf_spikes(&left(&out))));
-
-            writeln!(report, "CLICKS {name}: identity baseline {baseline} spikes in 40 s").unwrap();
-            for (label, count) in scenarios {
-                writeln!(report, "CLICKS {name} | {label}: {count} spikes").unwrap();
+            let scenarios: [(&str, fn(&[f32], bool) -> usize); 7] = [
+                ("tempo sweep -8..+8 % over 10 s, key lock", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    lab.settle();
+                    let mut out = Vec::new();
+                    for b in 0..(10 * SR as usize / 256) {
+                        let t = b as f64 * 256.0 / SR as f64;
+                        lab.set(if event { 0.92 + 0.016 * t } else { 1.0 }, 0.0, true);
+                        lab.step(&mut out);
+                    }
+                    hf_spikes(&left(&out))
+                }),
+                ("tempo sweep -8..+8 % over 10 s, varispeed", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    lab.settle();
+                    let mut out = Vec::new();
+                    for b in 0..(10 * SR as usize / 256) {
+                        let t = b as f64 * 256.0 / SR as f64;
+                        lab.set(if event { 0.92 + 0.016 * t } else { 1.0 }, 0.0, false);
+                        lab.step(&mut out);
+                    }
+                    hf_spikes(&left(&out))
+                }),
+                ("key changes every 2 s (0,+2,-3,+5,0,-1)", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    lab.settle();
+                    let mut out = Vec::new();
+                    for b in 0..(12 * SR as usize / 256) {
+                        let t = b as f64 * 256.0 / SR as f64;
+                        let shift = if event { [0.0, 2.0, -3.0, 5.0, 0.0, -1.0][(t / 2.0) as usize % 6] } else { 0.0 };
+                        lab.set(1.0, shift, true);
+                        lab.step(&mut out);
+                    }
+                    hf_spikes(&left(&out))
+                }),
+                ("8 seeks/cue jumps at +8 %", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    lab.set(if event { 1.08 } else { 1.0 }, 0.0, true);
+                    lab.settle();
+                    let mut out = Vec::new();
+                    for i in 0..8 {
+                        lab.locate(SR as usize * (3 + i * 7));
+                        out.extend(lab.run_seconds(2.0));
+                    }
+                    hf_spikes(&left(&out))
+                }),
+                ("8 loop jumps at +8 %", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    lab.set(if event { 1.08 } else { 1.0 }, 0.0, true);
+                    lab.settle();
+                    let mut out = Vec::new();
+                    for _ in 0..8 {
+                        lab.locate(SR as usize * 20);
+                        out.extend(lab.run_seconds(1.9));
+                    }
+                    hf_spikes(&left(&out))
+                }),
+                ("4 track loads (stop, tempo reset, play, new tempo) at +4..16 %", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    let mut out = Vec::new();
+                    for i in 0..4 {
+                        lab.tempo.reset();
+                        lab.locate(SR as usize * (5 + 9 * i));
+                        lab.set(if event { 1.04 + 0.04 * i as f64 } else { 1.0 }, 0.0, true);
+                        out.extend(lab.run_seconds(2.0));
+                    }
+                    hf_spikes(&left(&out))
+                }),
+                ("6 pause/resume cycles at +8 %", |source, event| {
+                    let mut lab = Lab::new(source.to_vec(), 256, STRETCH_PRESET);
+                    lab.set(if event { 1.08 } else { 1.0 }, 0.0, true);
+                    lab.settle();
+                    let mut out = Vec::new();
+                    for _ in 0..6 {
+                        out.extend(lab.run_seconds(1.5));
+                        let position = lab.position_frames() as usize;
+                        lab.locate(position);
+                        out.extend(lab.run_seconds(0.5));
+                    }
+                    hf_spikes(&left(&out))
+                }),
+            ];
+            for (label, run) in scenarios {
+                let with_event = run(source, true);
+                let control = run(source, false);
+                writeln!(
+                    report,
+                    "CLICKS {name} | {label}: {with_event} spikes (same timeline at identity: {control}), extra {}",
+                    with_event as i64 - control as i64
+                )
+                .unwrap();
             }
         }
     }
@@ -676,5 +689,29 @@ fn lab_preset_search() {
         let mean = lab.timings_ns.iter().sum::<u64>() as f64 / lab.timings_ns.len() as f64;
         row += &format!(" cpu mean {:.2}% p99 {:.2}%", mean / (256.0 / SR as f64 * 1e9) * 100.0, percentile_ns(&lab.timings_ns, 0.99) as f64 / (256.0 / SR as f64 * 1e9) * 100.0);
         println!("{row}");
+    }
+}
+
+#[test]
+#[ignore]
+fn lab_load_spikes() {
+    let tracks = lab_tracks();
+    let (_, source) = &tracks[1];
+    for i in 0..4 {
+        let mut lab = Lab::new(source.clone(), 256, STRETCH_PRESET);
+        lab.set(1.04 + 0.04 * i as f64, 0.0, true);
+        lab.locate(SR as usize * 5);
+        let mut out = Vec::new();
+        let mut log = Vec::new();
+        for _ in 0..(2 * SR as usize / 256) {
+            lab.step(&mut out);
+            log.push(lab.state.engine.last_path());
+        }
+        let x = left(&out);
+        for at in hf_spike_positions(&x) {
+            println!("load {i}: spike at {:.4}s block {} path {:?} sample {:.4}", at as f64 / SR as f64, at / 256, log[at / 256], x[at]);
+        }
+        let first = log.iter().position(|p| *p == Some(crate::tempo::Path::Stretch));
+        println!("load {i}: first stretch block {first:?}");
     }
 }
