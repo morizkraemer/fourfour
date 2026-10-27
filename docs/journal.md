@@ -150,3 +150,4 @@
 2026-10-27 11:57 orchestrator - Mac install done (cdfa212); Merlin: sidebar wide layout + empty state (W-P spawned); tempo/key engine approved with defaults, built + tested on wk-tempo before integrating (W-K spawned)
 2026-10-27 12:10 orchestrator - merged wp-sidebar-polish (I6) 80e16a7; app checks green; Mac install started
 2026-10-27 12:11 orchestrator - Mac install done (80e16a7, sidebar polish)
+2026-10-27 13:36 orchestrator - W-K tempo/key engine done on wk-tempo 07be76b (Signalsmith vendored, pitch <0.03 cent, 0 clicks, Mac CPU p99 ~1%); renders on Mac Desktop/fourfour-tempo-renders; not merged, waiting on Merlin's ears
