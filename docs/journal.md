@@ -133,3 +133,4 @@
 2026-10-27 07:20 orchestrator - Mac install done (940b344, round-3 fixes)
 2026-10-27 07:45 orchestrator - Merlin round-4 feedback (H1–H6); W-B2 top bar/sidebar, W-S settings sheet + palette; inspector round 3 queued
 2026-10-27 07:51 orchestrator - merged wb-topbar2 (H1/H2/H4); W-I inspector round 3 spawned
+2026-10-27 07:58 orchestrator - merged wi-inspector3 (round 3, rec B hero+folds); board :5233 now served from q41-int
