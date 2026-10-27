@@ -564,3 +564,25 @@ fn lab_trace() {
         println!("{row}");
     }
 }
+
+#[test]
+fn returning_to_zero_tempo_with_key_lock_off_does_not_click() {
+    let freq = 3000.0;
+    let theory = 0.5 * (2.0 * PI * freq * 1.08 / SR as f32).powi(2);
+    let mut worst = (0.0f32, 0usize, 0.0f64);
+    for ratio in [0.93, 0.97, 1.03, 1.071] {
+        let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, STRETCH_PRESET);
+        lab.set(ratio, 0.0, false);
+        lab.settle();
+        let mut out = Vec::new();
+        lab.set(1.0, 0.0, false);
+        for _ in 0..(1.5 * SR as f32 / 256.0) as usize {
+            lab.step(&mut out);
+        }
+        let (spike, at) = max_second_difference(&left(&out), 1);
+        if spike > worst.0 {
+            worst = (spike, at, ratio);
+        }
+    }
+    assert!(worst.0 < theory * 1.05, "spike {} (sine {theory}) at {} from ratio {}", worst.0, worst.1, worst.2);
+}

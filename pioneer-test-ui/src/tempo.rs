@@ -629,7 +629,7 @@ impl TempoEngine {
     /// moves at the new rate and a raw copy would jump forward at every chunk.
     fn start_fade_if_path_changed(&mut self, effective: Path, n: usize) {
         let Some(last) = self.last_path else { return };
-        if last == effective || (last == Path::Varispeed && effective == Path::Identity) {
+        if last == effective {
             return;
         }
         let outgoing = if last == Path::Identity { Path::Varispeed } else { last };
