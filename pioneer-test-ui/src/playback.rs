@@ -47,9 +47,11 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 pub const DEFAULT_BUFFER_FRAMES: u32 = 128;
 /// ~2s stereo @ 48 kHz — back-pressure on decode thread if the ring fills.
 const RING_SAMPLES: usize = 48_000 * 2 * 2;
-/// Crossfade length applied at every stream switch (play/seek/stop). Ramps from
-/// the last sample played into the new position so the waveform discontinuity
-/// doesn't produce an audible click/pop. ~5ms at 48 kHz.
+/// Crossfade length applied when new audio follows a stream switch (play/seek/stop) or a
+/// dropout. Ramps from the last sample played into the new position so the waveform
+/// discontinuity doesn't produce an audible click/pop. The ramp starts when the new audio
+/// arrives, not at the switch: a slow decoder must not use it up while the ring is empty.
+/// ~5ms at 48 kHz.
 const DECLICK_FRAMES: usize = 256;
 /// Per-frame decay applied to the last sample while the ring is empty (underrun), so running dry
 /// fades to silence in about 2 ms instead of cutting off.
@@ -274,9 +276,8 @@ impl RenderState {
             self.engine.flush();
             self.pipe.frames_played.store(0, Ordering::Relaxed);
             self.callback_generation = stream_gen;
-            self.seam = self.last_sample;
-            self.declick_remaining = DECLICK_FRAMES;
-            self.starved = false;
+            self.declick_remaining = 0;
+            self.starved = true;
             self.pipe.ack_generation.store(stream_gen, Ordering::Release);
         }
 

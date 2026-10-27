@@ -129,7 +129,7 @@
 
   let isUsbView = $derived(library.volumes.includes(effectiveSource ?? ''));
 
-  let canReorderRows = $derived(!!activePlaylist && !isUsbView);
+  let canReorderRows = $derived(!!activePlaylist && !isUsbView && !layout.sortKey);
 
   // Organize USB target: accept drops when this table is the docked organize
   // destination and it is a mounted USB volume.
@@ -159,7 +159,6 @@
   let layout = $derived(getLayout(layoutKind));
 
   let currentTracks = $derived.by(() => {
-    if (canReorderRows) return filteredTracks;
     return layout.sortKey ? sortTracks(filteredTracks, layoutKind) : filteredTracks;
   });
 
@@ -481,7 +480,7 @@
             const insertAt = Math.min(Math.max(0, dropIdx), without.length);
             const newOrder = [...without.slice(0, insertAt), ...ids, ...without.slice(insertAt)];
             await reorderPlaylistTracks(activePlaylist.id, newOrder);
-          } else {
+          } else if (!samePanel) {
             await moveTracksToPlaylist({
               trackIds: ids,
               toPlaylistId: targetPlaylist.id,

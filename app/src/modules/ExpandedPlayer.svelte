@@ -145,7 +145,8 @@
           aria-label={pad.chip ? `Hot cue ${pad.chip.label}` : `Set hot cue ${pad.letter}`}
           data-pad={pad.letter}
           disabled={!player.track}
-          onclick={() => triggerHotCue(pad.slot)}
+          onpointerdown={(e) => e.button === 0 && triggerHotCue(pad.slot)}
+          onclick={(e) => e.detail === 0 && triggerHotCue(pad.slot)}
           oncontextmenu={(e) => openEditor(e, pad)}>{pad.letter}</button>
       {/each}
       <button class="ff-xp__pad ff-xp__pad--memory" title="Add cue at the playhead (M)" aria-label="Add cue"
