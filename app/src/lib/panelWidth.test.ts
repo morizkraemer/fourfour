@@ -33,7 +33,7 @@ describe('persistence', () => {
     });
     savePanelWidth('sidebar', 333);
     expect(loadPanelWidth('sidebar')).toBe(333);
-    expect(loadPanelWidth('inspector')).toBe(278);
+    expect(loadPanelWidth('inspector')).toBe(340);
   });
   it('survives unavailable storage', () => {
     const blocked = () => {

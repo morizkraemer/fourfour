@@ -1,7 +1,7 @@
 <!--
   App.svelte — fourfour Browse screen.
   Composes the six interactive modules into the "main layout v3" window frame:
-    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 278) ] ]
+    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 340) ] ]
     / player (full width)
     / status bar (full width)
 -->

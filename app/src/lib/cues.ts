@@ -167,6 +167,7 @@ export function cueChip(cue: Cue): CueChip {
 }
 
 export interface CueMarker {
+  key: string;
   position: number;
   color: string;
   timeMs: number;
@@ -176,6 +177,7 @@ export interface CueMarker {
 export function cueMarkers(cues: Cue[], durationMs: number): CueMarker[] {
   if (!durationMs) return [];
   return cues.map((c) => ({
+    key: cueKey(c),
     position: Math.max(0, Math.min(1, c.timeMs / durationMs)),
     color: cueColor(c),
     timeMs: c.timeMs,

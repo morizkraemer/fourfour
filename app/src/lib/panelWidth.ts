@@ -2,7 +2,7 @@ export type ResizablePanel = 'sidebar' | 'inspector';
 
 export const PANEL_WIDTH: Record<ResizablePanel, { min: number; max: number; initial: number; key: string }> = {
   sidebar: { min: 200, max: 420, initial: 240, key: 'fourfour.sidebar.width' },
-  inspector: { min: 240, max: 520, initial: 278, key: 'fourfour.inspector.width' },
+  inspector: { min: 300, max: 520, initial: 340, key: 'fourfour.inspector.width' },
 };
 
 export function clampPanelWidth(panel: ResizablePanel, px: number): number {
