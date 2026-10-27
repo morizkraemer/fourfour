@@ -50,9 +50,7 @@
   let fileDropVisible = $state(false);
   let browseMainEl = $state(null);
 
-  let inspectorVisible = $derived(
-    ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded
-  );
+  let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0);
 
   let dropTarget = $derived(importDropTarget());
   let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
