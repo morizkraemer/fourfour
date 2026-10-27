@@ -38,6 +38,7 @@
     onBpmCommit = undefined,
     onKeyCommit = undefined,
     onExpand,
+    controls = undefined,
   } = $props();
 
   const stop = (fn) => (e) => {
@@ -89,10 +90,14 @@
         <span class="ff-player-compact__meta-artist">{artist}</span>
       </div>
       <div class="ff-player-compact__right-toggles">
-        <div class="ff-player-compact__bpm-key-group">
-          <Nudge label="KEY" onChange={onKeyChange} variant="compact" model={onKeyCommit ? keyScrub : undefined} onCommit={onKeyCommit} color={keyColor(keyValue ?? key)} value={onKeyCommit ? keyValue : key} />
-          <Nudge label="BPM" onChange={onBpmChange} variant="compact" model={onBpmCommit ? bpmScrub : undefined} onCommit={onBpmCommit} value={onBpmCommit ? bpmValue : bpm} />
-        </div>
+        {#if controls}
+          {@render controls()}
+        {:else}
+          <div class="ff-player-compact__bpm-key-group">
+            <Nudge label="KEY" onChange={onKeyChange} variant="compact" model={onKeyCommit ? keyScrub : undefined} onCommit={onKeyCommit} color={keyColor(keyValue ?? key)} value={onKeyCommit ? keyValue : key} />
+            <Nudge label="BPM" onChange={onBpmChange} variant="compact" model={onBpmCommit ? bpmScrub : undefined} onCommit={onBpmCommit} value={onBpmCommit ? bpmValue : bpm} />
+          </div>
+        {/if}
         <div class="ff-player-compact__times-group">
           <span class="ff-player-compact__time-cur">
             {currentTime}<span class="ff-player-compact__time-cur-ms">{currentTimeMs}</span>

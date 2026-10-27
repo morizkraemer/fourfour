@@ -7,8 +7,8 @@
   `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { WaveformView, Nudge, CueEditor, bpmScrub, keyScrub, keyColor } from '$ds';
-  import { commitTrackBpm, commitTrackKey } from '../stores/track-edits.svelte.ts';
+  import { WaveformView, CueEditor } from '$ds';
+  import PlayerTempo from './PlayerTempo.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
@@ -72,10 +72,7 @@
     </div>
 
     <div class="ff-xp__head-right">
-      <div class="ff-xp__bpm-key-group">
-        <Nudge value={player.track?.key ?? ''} label="KEY" variant="compact" model={keyScrub} color={keyColor(player.track?.key)} onCommit={(next) => commitTrackKey(player.track.id, next)} />
-        <Nudge value={Number(player.track?.bpm)} label="BPM" variant="compact" model={bpmScrub} onCommit={(next) => commitTrackBpm(player.track.id, next)} />
-      </div>
+      <PlayerTempo />
       <div class="ff-xp__times">
         <span class="ff-xp__time-cur">{currentTime()}<span class="ff-xp__time-ms">{currentTimeMs()}</span></span>
         <span class="ff-xp__time-tot">{totalTime()}</span>
@@ -235,7 +232,6 @@
   }
 
   .ff-xp__head-right { display: flex; align-items: center; gap: 10px; }
-  .ff-xp__bpm-key-group { display: flex; align-items: center; gap: 8px; }
   .ff-xp__times { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
   .ff-xp__time-cur { font-variant-numeric: tabular-nums; color: var(--ff-text, #fff); font-size: 13px; }
   .ff-xp__time-ms { color: var(--ff-muted, rgba(255, 255, 255, 0.5)); }

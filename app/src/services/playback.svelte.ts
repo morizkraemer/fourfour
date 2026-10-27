@@ -26,6 +26,7 @@ export interface PlaybackTick {
   playing: boolean;
   level_left?: number;
   level_right?: number;
+  tempo_ratio?: number;
 }
 
 export interface PlaybackErrorEvent {
@@ -39,6 +40,7 @@ let mockDurationMs = 0;
 let mockLevelLeft = 0;
 let mockLevelRight = 0;
 let mockLevelPhase = 0;
+let mockTempoRatio = 1;
 let mockTimer: ReturnType<typeof setInterval> | null = null;
 const mockListeners = new Set<(tick: PlaybackTick) => void>();
 
@@ -69,6 +71,7 @@ function emitMock() {
     playing: mockPlaying,
     level_left: mockLevelLeft,
     level_right: mockLevelRight,
+    tempo_ratio: mockTempoRatio,
   };
   mockListeners.forEach((fn) => fn(tick));
 }
@@ -77,7 +80,7 @@ function startMockTimer() {
   if (mockTimer) return;
   mockTimer = setInterval(() => {
     if (!mockPlaying || mockDurationMs <= 0) return;
-    mockPositionMs = Math.min(mockDurationMs, mockPositionMs + 50);
+    mockPositionMs = Math.min(mockDurationMs, mockPositionMs + 50 * mockTempoRatio);
     if (mockPositionMs >= mockDurationMs) mockPlaying = false;
     emitMock();
   }, 50);
@@ -178,6 +181,7 @@ export async function playbackSetPosition(positionMs: number): Promise<void> {
 
 export async function playbackStop(): Promise<void> {
   if (useMock()) {
+    mockTempoRatio = 1;
     mockPlaying = false;
     mockPositionMs = 0;
     mockLevelLeft = 0;
@@ -191,6 +195,27 @@ export async function playbackStop(): Promise<void> {
     return;
   }
   await invoke('playback_stop');
+}
+
+/** Playback speed as a ratio of the track's own tempo (1.0 = untouched). */
+export async function playbackSetTempo(ratio: number): Promise<void> {
+  if (useMock()) {
+    mockTempoRatio = ratio;
+    return;
+  }
+  await invoke('playback_set_tempo', { ratio });
+}
+
+/** Pitch shift in semitones, independent of tempo while key lock is on. */
+export async function playbackSetKeyShift(semitones: number): Promise<void> {
+  if (useMock()) return;
+  await invoke('playback_set_key_shift', { semitones });
+}
+
+/** Key lock (Master Tempo): on keeps the pitch when the tempo changes. */
+export async function playbackSetKeyLock(on: boolean): Promise<void> {
+  if (useMock()) return;
+  await invoke('playback_set_key_lock', { on });
 }
 
 export async function subscribePlaybackTick(
