@@ -183,10 +183,14 @@ describe('PWV7 payloads (the stick bytes)', () => {
     expect(Math.max(...legacy.low)).toBeLessThan(0.8);
   });
 
-  it('is the same function the row preview uses', () => {
+  it('is the stick columns under the track headroom gain in the row preview', () => {
     const bytes = Uint8Array.from(pwv7Bytes);
     const { overview, ...columns } = rowBandsFromBandBytes(bytes)!;
-    expect(columns).toEqual(bandsFromStickBytes(bytes));
+    const stick = bandsFromStickBytes(bytes);
+    const gain = columns.low[1] / stick.low[1];
+    expect(gain).toBeGreaterThan(0);
+    expect(gain).toBeLessThanOrEqual(1);
+    stick.high.forEach((v, i) => expect(columns.high[i]).toBeCloseTo(v * gain, 5));
     expect(overview).toBe(true);
     expect(rowBandsFromBandBytes(bytes)).toBe(rowBandsFromBandBytes(bytes));
   });
