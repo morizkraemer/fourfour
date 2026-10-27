@@ -23,6 +23,7 @@ fn claimed_stick(path: &Path, lib: &LocalLibrary) -> Result<String, String> {
     if !path.is_dir() {
         return Err(format!("{} is not mounted.", path.display()));
     }
+    crate::volumes::require_removable_volume(path)?;
     let id = sticks::ensure_stick_id(path).map_err(|e| format!("{e:#}"))?;
     lib.remember_stick(&id, &volume_name(path), path).map_err(|e| e.to_string())?;
     Ok(id)
