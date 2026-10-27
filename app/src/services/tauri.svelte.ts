@@ -205,6 +205,7 @@ export async function getLibraryPath(): Promise<string> {
     return await invoke<string>('get_library_path');
   } catch (err) {
     lastTauriError = `get_library_path fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return '/mock/user/library.db';
   }
 }
@@ -228,6 +229,7 @@ export async function changeLibraryPath(folderPath: string): Promise<string> {
     return await invoke<string>('change_library_path', { folderPath });
   } catch (err) {
     lastTauriError = `change_library_path fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return folderPath + '/library.db';
   }
 }
@@ -598,6 +600,7 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
     return await invoke<UsbStateResponse | null>('read_usb_state', { path });
   } catch (err) {
     lastTauriError = `read_usb_state fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return {
       tracks: [
         { id: 1, title: 'USB Track 1', artist: 'Artist A', album: 'Album A', genre: 'House', key: '5A', bpm: 124.0, duration: 400, usb_path: '/Contents/Artist A/Album A/01 Track 1.mp3' }
