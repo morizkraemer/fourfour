@@ -12,29 +12,28 @@
   const META = {
     now: {
       tag: 'NOW',
-      title: 'Inspector today (278 px, right of the list)',
-      model: 'Real DetailPane. Read-only except BPM and key (ScrubValue) and the cue chips.',
+      title: 'Inspector as built (340 px, right of the list)',
+      model: 'The real DetailPane after Merlin picked A: read-only today for title, artist, album and genre until a metadata write command exists; BPM and key scrub, cues edit in place.',
       good: [
-        'BPM and key scrub in place; a BPM change never moves the grid',
-        'Cue chips jump, rename and recolour',
+        'Same component as option A, fed by the app mock instead of the board mock',
+        'Hand-set line appears only when BPM or key were set by hand',
       ],
       cost: [
-        'Most tags cannot be edited and several are not shown; nothing says BPM or key were hand-set',
-        'The 290 px cover pushes the data below the fold',
+        'Label, year, comment, rating and colour have no data in the app yet, so no rows',
       ],
     },
     a: {
       tag: 'A',
-      title: 'Document: one quiet column',
-      model: 'Cover, title and artist first. Then BPM, key and length as three figures with air around them. One line says what is hand-set. Tags are plain label and value rows, cues a short list, the file path last.',
+      title: 'Document: one quiet column (chosen, with changes)',
+      model: 'Cover and title first. BPM, key and length as three dark cards. One line says what is hand-set. Then the waveform with cue markers (letters for hot cues, thin marks for memory cues), a compact cue list, plain label and value rows, the file path last. This board is the real DetailPane; editing is switched on here (title, artist, album, genre). Click the waveform to seek, a marker to jump.',
       good: [
-        'Reads top to bottom in the order of importance; nothing hides, nothing is boxed',
-        'Every field is visible and one click from editable, so no mode or fold to learn',
-        'Smallest build: ghost fields and the real ScrubValue only',
+        'The track itself is in the panel, and cues are seen where they are',
+        'Cards give the three DJ figures weight; everything else stays quiet text',
+        'Every row is plain text until touched, then editable',
       ],
       cost: [
-        'Everything is on screen at once, so it is the longest of the three; comment and file sit at the fold on a short window',
-        'No picture of the track; cue times are typed',
+        'Needs 340 px: three cards with BPM at two decimals do not fit in 278',
+        'Tag editing needs a metadata write command that does not exist yet, so the app shows these rows read-only',
       ],
     },
     b: {
@@ -73,7 +72,7 @@
   <Win cols="mid">
     {#snippet top()}<W2Top />{/snippet}
     {#snippet right()}
-      {#if variant === 'now'}<W2InspNow width={278} />
+      {#if variant === 'now'}<W2InspNow width={340} />
       {:else if variant === 'a'}<W3InspA width={340} />
       {:else if variant === 'b'}<W3InspB width={340} />
       {:else}<W3InspC width={340} />{/if}
