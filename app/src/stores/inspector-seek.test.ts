@@ -40,14 +40,14 @@ describe('inspector seeking', () => {
     expect(calls.order).toEqual(['load 7', 'seek 0.25']);
   });
 
-  it('seeks a cue time in the player\'s own time, not the tag duration', async () => {
+  it('seeks a cue time in the player\'s own time', async () => {
     calls.loadedId = 7;
-    await seekTrackToMs({ id: 7, raw: { duration_secs: 200 } }, 50_000);
+    await seekTrackToMs({ id: 7 }, 50_000);
     expect(calls.order).toEqual(['seek 50000 ms']);
   });
 
   it('loads a track that is not in the player, then seeks the cue time', async () => {
-    await seekTrackToMs({ id: 7, raw: { duration_secs: 0 } }, 50_000);
+    await seekTrackToMs({ id: 7 }, 50_000);
     expect(calls.order).toEqual(['load 7', 'seek 50000 ms']);
   });
 });
