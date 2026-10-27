@@ -1,8 +1,3 @@
-<!--
-  Detail.svelte — Right detail pane module.
-  Reads selection store and forwards to the $ds DetailPane primitive.
-  Supports empty / single / multi modes.
--->
 <script>
   import { DetailPane, ContextMenu } from '$ds';
   import {
@@ -10,18 +5,18 @@
     selectedTrack,
   } from '../stores/selection.svelte.ts';
   import { ensureTrackPeaksLoaded, isTrackAnalyzing, revealFile } from '../stores/library.svelte.ts';
-  import { player, seekToProgress } from '../stores/player.svelte.ts';
+  import { player } from '../stores/player.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import {
     addHotCueAtPlayhead,
     addMemoryCueAtPlayhead,
     deleteCue,
-    jumpToCue,
     recolorCue,
     renameCue,
   } from '../stores/cue-actions.ts';
-  import { CUE_PALETTE, cueChip } from '../lib/cues.ts';
+  import { CUE_PALETTE, cueChip, cueMarkers } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
+  import { seekTrackToMs, seekTrackToProgress } from '../stores/inspector-seek.ts';
   import { commitTrackBpm, commitTrackKey, fitGridToBpm, releaseTrackEdits } from '../stores/track-edits.svelte.ts';
 
   let mode = $derived(
@@ -65,14 +60,13 @@
     { label: 'Let re-analysis replace BPM and key', onClick: () => releaseTrackEdits(track.id) },
   ] : []);
 
-  let singleMeta = $derived(track ? {
-    ALBUM: track.album ?? '—',
-    LABEL: track.label ?? '—',
-    BPM: track.bpm ?? '—',
-    KEY: track.key ?? '—',
-    DURATION: track.time ?? '—',
-    ADDED: '2 days ago',
-  } : {});
+  let fields = $derived(track ? [
+    { key: 'album', label: 'Album', value: track.album === '—' ? '' : track.album, readOnly: true },
+    { key: 'genre', label: 'Genre', value: track.genre === '—' ? '' : track.genre, readOnly: true },
+  ] : []);
+
+  let durationMs = $derived((track?.raw?.duration_secs ?? 0) * 1000);
+  let markers = $derived(cueMarkers(cuesOf(track?.id), durationMs));
 
   let multiMetaObj = $derived({
     'TOTAL SIZE': `${selectionCount()} files`,
@@ -84,18 +78,25 @@
 
 <div class="ff-detail-module">
   {#if mode === 'single' && track}
+    {#key track.id}
     <DetailPane
       {mode}
       title={track.title}
       artist={track.artist}
-      meta={singleMeta}
+      {fields}
+      duration={track.time ?? ''}
+      bpmLocked={track.bpmLocked}
+      keyLocked={track.keyLocked}
+      onReleaseLocks={() => releaseTrackEdits(track.id)}
+      {markers}
+      onMarkerClick={(marker) => seekTrackToMs(track, marker.timeMs)}
       cues={cueChips}
       cuePalette={CUE_PALETTE}
       showCues={track.analyzed}
       canSetCues={trackIsLoaded}
-      canJumpToCues={trackIsLoaded}
+      canJumpToCues
       onCueAdd={addCue}
-      onCueJump={(chip) => jumpToCue(chip)}
+      onCueJump={(chip) => seekTrackToMs(track, chip.timeMs)}
       onCueRename={(chip, name) => renameCue(track.id, chip.key, name)}
       onCueRecolor={(chip, color) => recolorCue(track.id, chip.key, color)}
       onCueDelete={(chip) => deleteCue(track.id, chip.key)}
@@ -103,7 +104,7 @@
       cover={track.cover ?? ''}
       bands={track.bands}
       analyzing={isTrackAnalyzing(track.id)}
-      onWaveformSeek={trackIsLoaded ? seekToProgress : undefined}
+      onWaveformSeek={(progress) => seekTrackToProgress(track, progress)}
       onRevealPath={() => track.filePath && revealFile(track.filePath)}
       onPathContextMenu={openPathMenu}
       bpm={track.bpmExact ?? 0}
@@ -113,11 +114,12 @@
       {bpmMenuItems}
       {keyMenuItems}
     />
+    {/key}
   {:else if mode === 'multi'}
     <DetailPane
       {mode}
       multiCount={selectionCount()}
-      meta={multiMetaObj}
+      multiMeta={multiMetaObj}
     />
   {:else}
     <DetailPane mode="empty" />
@@ -136,7 +138,6 @@
   .ff-detail-module {
     width: 100%;
     height: 100%;
-    /* Inspector is the grey mid-layer between the black browse window and the drawer. */
     background: var(--ff-surface);
     border-left: 1px solid var(--ff-border);
     overflow-y: auto;

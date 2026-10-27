@@ -201,6 +201,7 @@ describe('markers', () => {
     const markers = cueMarkers([cue(1, 25_000), cue(0, 50_000)], 100_000);
     expect(markers.map((m) => m.position)).toEqual([0.25, 0.5]);
     expect(markers.map((m) => m.label)).toEqual(['A', '']);
+    expect(markers.map((m) => m.key)).toEqual(['h1', 'm50000']);
   });
 
   it('draws none without a duration and keeps late cues on the strip', () => {

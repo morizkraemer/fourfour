@@ -103,7 +103,7 @@
   {#if variant === 'now'}
     <Win cols="mid">
       {#snippet top()}<W2Top />{/snippet}
-      {#snippet right()}<W2InspNow width={278} />{/snippet}
+      {#snippet right()}<W2InspNow width={340} />{/snippet}
     </Win>
   {:else if variant === 'a'}
     <Win cols="mid">

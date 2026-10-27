@@ -37,3 +37,12 @@ B. The hierarchy is the layout (image and title, figures, folds), the resting vi
 2. One padlock for BPM and grid: enough, or show which one is hand-set (tooltip only)?
 3. Cue times typed is fine for now, or is a waveform (C) a must?
 4. Hero at 168 px: OK, or smaller?
+
+## Built: option A, with Merlin's changes (branch `wn-inspector`)
+
+Order top to bottom: cover with title and artist, three dark cards (BPM, key, length), one hand-set line, the waveform with cue markers, a compact cue list, plain label and value rows, the file path.
+
+- BPM and key are the existing `ScrubValue` (key in its Camelot colour); length is read-only.
+- The waveform is the existing `Waveform` strip (3-band look, analysing animation). Click seeks; a track that is not in the player is loaded first. Hot cues are lettered markers, memory cues thin marks; a marker click jumps there.
+- Width is 340 px (was 278, min now 300): three cards with BPM at two decimals do not fit in 278. Still hidden while the right sidebar is open.
+- Title, artist, album and genre show as plain text: `DetailPane` takes `onFieldChange` and turns the rows into `GhostField`s, but no Tauri command writes tags yet (`Library::update_track` exists in `pioneer-library` without a command). Label, year, comment, rating and colour have no data in the app yet, so no rows.
