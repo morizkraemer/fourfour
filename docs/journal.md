@@ -223,3 +223,4 @@
 2026-10-28 16:00 orchestrator - Merlin picked edit-mode A with changes (no highlight colour, Edit button in footer, grid << < downbeat > >>, hot cues unchanged, edit = bpm/key/grid only); wr-editmode spawn (seat, sonnet high) on r12-int
 2026-10-28 16:10 orchestrator - wr-editmode 123309f → r12-int 33c85e4 (687 tests; headless: pads/transport boxes identical across modes); worktree removed; checks + Mac install started
 2026-10-28 16:20 orchestrator - r12-int 33c85e4 installed on Mac (28 cargo, 687 vitest, 0 check errors); includes grid-lag fix + edit mode
+2026-10-28 16:40 orchestrator - Merlin: big-player control layout inconsistent; wr-playerlayout spawn (seat, opus medium) for 3 polished viewport options at :5238
