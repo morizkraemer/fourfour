@@ -225,3 +225,6 @@
 2026-10-28 16:20 orchestrator - r12-int 33c85e4 installed on Mac (28 cargo, 687 vitest, 0 check errors); includes grid-lag fix + edit mode
 2026-10-28 16:40 orchestrator - Merlin: big-player control layout inconsistent; wr-playerlayout spawn (seat, opus medium) for 3 polished viewport options at :5238
 2026-10-28 17:10 orchestrator - wr-playerlayout 97a2c61 mockups (A same places / B edit in header, rec / C strip over waveform) at :5238 #player-layout, served from its worktree — keep until Merlin picks
+2026-10-28 17:40 orchestrator - run-start: overnight run (Merlin go), cap 2, tight, base r12-int → ov-1028; plan L2 → O1–O6, O7 layout build gated on Merlin's mockup approval
+2026-10-28 17:41 orchestrator L2 spawn: player-layout round 2 (resumed wr-playerlayout, opus) — mode-less pencil BPM/key, hot cue homes, memory cue row, use empty space
+2026-10-28 17:41 orchestrator O1 spawn: ov-review rounds 12–13 bug review (seat, opus medium)

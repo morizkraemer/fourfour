@@ -48,9 +48,9 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: paused · since 2026-10-28 · round 12 on branch r12-int (fa9d4be), installed on the Mac (9f5ba16 = same app code); master has rounds 10–11, not pushed
-targets: Merlin approved option 1 (2026-10-27): stick sync real → review → leftovers → .dmg → key refit → housekeeping
-plan: W-Z zoom detail + W-X ⌥-delete/ribbon (round 7, running) → Q42 → Q43 → Q44 → Q45 [mac] → Q46 → Q47, then own priorities
+status: running · since 2026-10-28 17:40 · cap 2 workers · autonomy tight · base r12-int → integration ov-1028 (scratchpad q41-int)
+targets: Merlin 2026-10-28: start overnight now; player-layout build only after he approves the next mockup round on viewport
+plan: L2 player-layout mockups (round 2, viewport :5238) → O1 review rounds 12–13 → O2 smoke-test harness → O3 Q33 Rust analyzer finish + measure (report) → O4 perf pass 10k tracks → O5 Q8 CI (branch only) → O6 housekeeping; O7 build approved layout (gated on Merlin), then own priorities
 decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync fixes go ahead here
 
 ### Q42 Stick sync for real [done, branch q42-sync d56f471, merged into q42-overnight 51a9ef0] [box] — sync button → sync_usb_many: stick All tracks + chosen playlists (SyncSelection::Playlists track_ids), stable stick id (not path), capacity check, dry-run plan shown before write. Fake stick folder only; no real USB writes. Validation + headless. 180 min
