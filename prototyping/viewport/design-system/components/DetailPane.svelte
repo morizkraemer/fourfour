@@ -7,7 +7,7 @@
   import LockMark from './LockMark.svelte';
   import CueEditor from './CueEditor.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { bpmScrub, keyScrub } from '../utils/scrub.js';
+  import { bpmScrub, keyScrub, tierOf } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
   import { nearestCue, CUE_HIT_SLACK } from '../utils/nearest-cue.js';
@@ -25,6 +25,7 @@
     bpmLocked = false,
     keyLocked = false,
     onBpmChange = undefined,
+    onBpmStep = undefined,
     onKeyChange = undefined,
     onReleaseLocks = undefined,
     bpmMenuItems = [],
@@ -234,6 +235,12 @@
         <div class="ff-inspector__fig-val">
           {#if tempoEditable}
             <ScrubValue model={bpmScrub} value={bpm} label="BPM" onCommit={onBpmChange} extraItems={bpmMenuItems} />
+            {#if onBpmStep && bpm}
+              <span class="ff-inspector__fig-steps">
+                <button type="button" class="ff-inspector__fig-step" title="Lower BPM (Shift 1, Alt 0.01)" aria-label="Lower BPM" onclick={(e) => onBpmStep(-1, tierOf(e))}>−</button>
+                <button type="button" class="ff-inspector__fig-step" title="Raise BPM (Shift 1, Alt 0.01)" aria-label="Raise BPM" onclick={(e) => onBpmStep(1, tierOf(e))}>+</button>
+              </span>
+            {/if}
           {:else}
             <span class="ff-inspector__fig-static">{bpm ? Number(bpm).toFixed(1) : '—'}</span>
           {/if}

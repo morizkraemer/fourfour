@@ -1363,10 +1363,50 @@ mod tests {
         let scaled = lib.get_analysis(id).unwrap().unwrap();
         assert_eq!(scaled.bpm, 64.0);
         let times: Vec<u32> = scaled.beat_grid.beats.iter().map(|b| b.time_ms).collect();
-        assert_eq!(times, vec![0, 938, 1876, 2812]);
+        assert_eq!(&times[..4], &[0, 938, 1875, 2813]);
+        assert_eq!(times.len(), 321);
         assert!(scaled.beat_grid.beats.iter().all(|b| b.tempo == 6400));
         assert_eq!(scaled.cue_points.len(), 3);
         assert!(lib.user_edits(id).bpm_locked);
+    }
+
+    #[test]
+    fn rescaling_keeps_the_downbeat_and_its_sub_millisecond_place_and_survives_reanalysis_and_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let before = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), Some(-0.37)).unwrap();
+
+        lib.rescale_beat_grid(id, 100.0).unwrap();
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let scaled = reopened.get_analysis(id).unwrap().unwrap();
+        assert_eq!(reopened.user_edits(id).grid_offset_ms, Some(-0.37));
+        let anchor = scaled.beat_grid.beats.iter().find(|b| b.time_ms == 1000).unwrap();
+        assert_eq!(anchor.bar_position, 1);
+        assert_eq!(scaled.beat_grid.beats.first().unwrap().time_ms, 1000 % 600);
+        assert_eq!(scaled.beat_grid.beats.first().unwrap().bar_position, 1 + ((1000 / 600) as u8 * 3) % 4);
+        assert_eq!(scaled.bpm, 100.0);
+
+        reopened.set_analysis(id, &make_analysis()).unwrap();
+        let kept = reopened.get_analysis(id).unwrap().unwrap();
+        assert_eq!(kept.bpm, 100.0);
+        assert_eq!(kept.beat_grid.beats.iter().find(|b| b.time_ms == 1000).unwrap().tempo, 10000);
+    }
+
+    #[test]
+    fn halving_and_doubling_the_bpm_space_the_beats_twice_as_far_or_close() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        lib.rescale_beat_grid(id, 120.0).unwrap();
+        let spacing = |lib: &LocalLibrary| {
+            let beats = lib.get_analysis(id).unwrap().unwrap().beat_grid.beats;
+            beats[1].time_ms - beats[0].time_ms
+        };
+        assert_eq!(spacing(&lib), 500);
+        lib.rescale_beat_grid(id, 60.0).unwrap();
+        assert_eq!(spacing(&lib), 1000);
+        lib.rescale_beat_grid(id, 120.0).unwrap();
+        assert_eq!(spacing(&lib), 500);
     }
 
     #[test]

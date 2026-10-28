@@ -1,6 +1,6 @@
-import { formatBpm, parseKey, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
+import { BPM_MAX, BPM_MIN, doubleBpm, formatBpm, halveBpm, parseKey, stepBpm, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
 
-export { formatBpm, tierOf };
+export { BPM_MAX, BPM_MIN, doubleBpm, formatBpm, halveBpm, stepBpm, tierOf };
 
 export const MIN_RATIO = 0.25;
 export const MAX_RATIO = 4;
