@@ -35,7 +35,9 @@ const OVERVIEW_DECAY = 0.93;
 const COMPACT_DECAY = 0.88;
 const ZOOM_DECAY = 0.86;
 const MAX_ZOOM = 512.0;
-const DETAIL_COLUMNS_PER_SECOND = 2400;
+const MIN_VISIBLE_MS = 4;
+const FINE_TICK_MS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+const TICKS_ACROSS = 8;
 const DETAIL_BELOW_COLUMNS_PER_PIXEL = 2;
 
 export default class WaveformDisplay {
@@ -635,13 +637,11 @@ export default class WaveformDisplay {
         }
     }
 
-    // With the high-resolution series, the closest zoom shows one column per device pixel at least.
+    // With the high-resolution series the view can close in until a few milliseconds fill it, so single columns are drawn as wide flat bars.
     _maxZoom() {
         const durationMs = this._data?.duration_ms;
         if (this._mode === 'compact' || !this._data?.bandsZoom || !durationMs) return MAX_ZOOM;
-        const widthPx = this._canvasSize(this._zoomCanvas).w * devicePixelRatio;
-        const minVisibleSeconds = widthPx / DETAIL_COLUMNS_PER_SECOND;
-        return Math.max(1.0, Math.min(MAX_ZOOM, durationMs / 1000 / minVisibleSeconds));
+        return Math.max(MAX_ZOOM, durationMs / MIN_VISIBLE_MS);
     }
 
     // The high-resolution series once the detail columns would be drawn wider than half a pixel.
@@ -841,7 +841,8 @@ export default class WaveformDisplay {
             visibleMs > 120000 ? 30000 :
             visibleMs > 60000  ? 10000 :
             visibleMs > 20000  ? 5000  :
-            visibleMs > 8000   ? 2000  : 1000;
+            visibleMs > 8000   ? 2000  :
+            FINE_TICK_MS.find((tick) => tick * TICKS_ACROSS >= visibleMs) ?? 1000;
 
         const startMs = startFrac * durationMs;
         const endMs = endFrac * durationMs;
@@ -859,8 +860,9 @@ export default class WaveformDisplay {
         for (let ms = firstTick; ms <= endMs; ms += intervalMs) {
             const x = ((ms / durationMs - startFrac) / (endFrac - startFrac)) * w;
             const secs = Math.floor(ms / 1000);
+            const subSecond = intervalMs < 1000 ? `.${String(Math.round(ms % 1000)).padStart(3, '0')}` : '';
             ctx.fillText(
-                `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`,
+                `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}${subSecond}`,
                 x + 2, yLabel,
             );
         }

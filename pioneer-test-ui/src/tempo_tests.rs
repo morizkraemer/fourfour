@@ -2,7 +2,7 @@ use super::*;
 
 use std::f32::consts::PI;
 
-use crate::tempo::TempoTarget;
+use crate::tempo::{pitch_factor, TempoTarget};
 
 pub(crate) const SR: u32 = 48_000;
 
@@ -716,4 +716,36 @@ fn stretcher_dropouts_and_path_flips_mid_fade_crossfade_without_clicks() {
         lab.step(&mut out);
     }
     check("dropout half way into the fade", &out);
+}
+
+#[test]
+fn extreme_ratios_stay_finite_bounded_and_on_pitch() {
+    for ratio in [0.25, 0.5, 2.0, 3.0, 4.0] {
+        for lock in [true, false] {
+            for semitones in [0.0, -12.0, 12.0] {
+                let mut lab = Lab::new(sine(500.0, 6.0 * ratio as f32 + 3.0, 0.5), 256, STRETCH_PRESET);
+                lab.set(ratio, semitones, lock);
+                let out = left(&lab.run_seconds(6.0));
+                assert!(out.iter().all(|s| s.is_finite() && s.abs() <= 1.0), "ratio {ratio} lock {lock} st {semitones}");
+                let pitch = pitch_factor(ratio, semitones, lock);
+                let f = zero_cross_freq(&out, 3 * SR as usize, 5 * SR as usize);
+                let error = cents(f, 500.0 * pitch);
+                assert!(error.abs() < 5.0, "ratio {ratio} lock {lock} st {semitones}: {error:.2} cents");
+            }
+        }
+    }
+}
+
+#[test]
+fn extreme_ratios_play_ten_seconds_in_ten_over_ratio() {
+    for (ratio, lock) in [(0.25, true), (0.25, false), (2.0, true), (4.0, true), (4.0, false)] {
+        let mut lab = Lab::new(sine(440.0, 10.0, 0.5), 256, STRETCH_PRESET);
+        lab.set(ratio, 0.0, lock);
+        lab.settle();
+        lab.locate(0);
+        let out = lab.run_until_drained(60.0);
+        let seconds = out.len() as f64 / 2.0 / SR as f64;
+        let expected = 10.0 / ratio;
+        assert!((seconds - expected).abs() < 0.05 * expected.max(1.0), "ratio {ratio} lock {lock}: {seconds:.3}s vs {expected:.3}s");
+    }
 }
