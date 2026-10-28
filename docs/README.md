@@ -49,6 +49,7 @@ the research, plans, and reverse-engineering notes.
 | [`packaging-decision.md`](analysis/packaging-decision.md) | current | How to ship analysis without a Python venv; measured Rust prototype (`prototyping/analysis-packaging`). |
 | [`benchmark-2026-10.md`](analysis/benchmark-2026-10.md) | current | October 2026 accuracy benchmark. |
 | [`bpm-grid-2026-10.md`](analysis/bpm-grid-2026-10.md) | current | BPM and beat-grid results. |
+| [`rust-status-2026-10-28.md`](analysis/rust-status-2026-10-28.md) | current | Rust analyzer status, gaps, accuracy vs bars, bar-1 question (O3). |
 | [`key-detector-2026-10.md`](analysis/key-detector-2026-10.md) | current | Key detector results. |
 | [`analyzer-backend-review.md`](analysis/analyzer-backend-review.md) | historical | Analyzer backend review (June 2026). |
 | [`experimentation-path.md`](analysis/experimentation-path.md) | reference | 6-phase experimentation plan (BPM/key accuracy → waveforms → scale → phrases/embeddings/stems). |
