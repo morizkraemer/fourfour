@@ -992,6 +992,11 @@ export async function setTrackKey(trackId: number, key: string): Promise<void> {
   invalidateAnalysisCache(trackId);
 }
 
+/** Set a track's star rating by hand (0 clears it); it shows over the imported rating. */
+export async function setTrackRating(trackId: number, rating: number): Promise<void> {
+  await invokeOrMock('set_track_rating', { trackId, rating });
+}
+
 /** Let re-analysis replace the hand-set BPM and key of a track again. */
 export async function releaseUserEdits(trackId: number): Promise<void> {
   await invokeOrMock('release_user_edits', { trackId });

@@ -18,6 +18,9 @@ pub struct UserEdits {
     pub bpm_locked: bool,
     #[serde(default)]
     pub key_locked: bool,
+    /// Stars 1 to 5 set by hand; 0 means the user cleared the imported rating.
+    #[serde(default)]
+    pub rating: Option<u8>,
 }
 
 impl UserEdits {

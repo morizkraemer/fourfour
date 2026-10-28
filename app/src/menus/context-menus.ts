@@ -2,6 +2,7 @@
  * Shared context-menu item builders — keep all app menus on the $ds ContextMenu shape.
  */
 
+import { confirmAction } from '../lib/confirmAction.ts';
 import { isStickSyncBusy } from '../stores/stick-sync.svelte.ts';
 import {
   library,
@@ -154,9 +155,9 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
         onClick: async () => {
           await selectVolume(sourceId);
           if (
-            !confirm(
+            !(await confirmAction(
               `⚠ Wipe all Pioneer library contents from ${label}? This cannot be undone.`
-            )
+            ))
           ) {
             return;
           }
@@ -167,7 +168,7 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
         label: 'Eject',
         disabled: busy(),
         onClick: async () => {
-          if (!confirm(`Eject ${label}?`)) return;
+          if (!(await confirmAction(`Eject ${label}?`))) return;
           await ejectVolume(sourceId);
         },
       }
@@ -222,7 +223,7 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
         label: 'Clear all tracks',
         variant: 'danger',
         onClick: async () => {
-          if (!confirm(`Clear all tracks from ${playlist.name}?`)) return;
+          if (!(await confirmAction(`Clear all tracks from ${playlist.name}?`))) return;
           await clearPlaylistTracks(playlist.id);
         },
       });
@@ -243,7 +244,7 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
         label: 'Delete playlist',
         variant: 'danger',
         onClick: async () => {
-          if (!confirm(`Delete playlist “${playlist.name}”?`)) return;
+          if (!(await confirmAction(`Delete playlist “${playlist.name}”?`))) return;
           await deletePlaylist(playlist.id);
         },
       });
@@ -278,7 +279,7 @@ export function buildFolderContextMenuItems(opts: FolderMenuOptions): MenuItem[]
       label: 'Delete folder',
       variant: 'danger',
       onClick: async () => {
-        if (!confirm(`Delete folder “${folder.name}”? ${contents}`)) return;
+        if (!(await confirmAction(`Delete folder “${folder.name}”? ${contents}`))) return;
         await deletePlaylist(folder.id);
       },
     },
@@ -307,7 +308,7 @@ export function playlistSelectionDeleteMessage(
 
 /** Asks once, then deletes the playlists and folders; false when the user declined. */
 export async function confirmDeletePlaylists(ids: readonly number[]): Promise<boolean> {
-  if (!confirm(playlistSelectionDeleteMessage(library.playlists, ids))) return false;
+  if (!(await confirmAction(playlistSelectionDeleteMessage(library.playlists, ids)))) return false;
   await deletePlaylists([...ids]);
   return true;
 }
@@ -356,7 +357,7 @@ export function buildSidebarSectionMenuItems(
       variant: 'danger',
       disabled: favouriteTrackIds(library.playlists, favoriteSlotFromName).length === 0,
       onClick: async () => {
-        if (!confirm('Clear all favourite tracks? The tracks stay in your library.')) return;
+        if (!(await confirmAction('Clear all favourite tracks? The tracks stay in your library.'))) return;
         await clearAllFavorites();
       },
     });
@@ -499,7 +500,7 @@ export function buildTrackContextMenuItems(opts: TrackMenuOptions): MenuItem[] {
           n === 1
             ? 'Remove this track from your library?'
             : `Remove ${n} tracks from your library?`;
-        if (!confirm(msg)) return;
+        if (!(await confirmAction(msg))) return;
         await removeTracks(trackIds);
         onTracksRemoved?.();
       },

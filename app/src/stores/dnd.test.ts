@@ -163,3 +163,18 @@ describe('player drop target', () => {
     expect(dnd.dropPlayer).toBe(false);
   });
 });
+
+describe('new playlist drop targets', () => {
+  function stubHit(selector: string) {
+    vi.stubGlobal('document', {
+      elementFromPoint: () => ({ closest: (sel: string) => (sel === selector ? {} : null) }),
+    });
+  }
+
+  it('lights the new-playlist target for any element marked data-new-playlist-drop (sidebar +, empty space, picker card)', () => {
+    stubHit('[data-new-playlist-drop]');
+    updateTrackDropTarget(5, 5);
+    expect(dnd.dropNewPlaylist).toBe(true);
+    expect(dnd.dropPanelSourceId).toBeNull();
+  });
+});

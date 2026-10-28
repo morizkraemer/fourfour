@@ -6,6 +6,7 @@ use crate::{LocalLibrary, UserEdits, queries};
 
 pub const MIN_BPM: f64 = 40.0;
 pub const MAX_BPM: f64 = 250.0;
+pub const MAX_RATING: u8 = 5;
 
 pub fn is_camelot(key: &str) -> bool {
     let Some(letter) = key.chars().last() else { return false };
@@ -50,6 +51,19 @@ impl LocalLibrary {
             bail!("Track has no analysis to set the key of");
         }
         self.update_user_edits(track_id, |edits| edits.key_locked = true)
+    }
+
+    /// Set the star rating (0 clears it). Shown over the imported rating.
+    pub fn set_user_rating(&self, track_id: i64, rating: u8) -> Result<()> {
+        if rating > MAX_RATING {
+            bail!("Rating {rating} is above {MAX_RATING} stars");
+        }
+        self.update_user_edits(track_id, |edits| edits.rating = Some(rating))
+    }
+
+    /// The hand-set rating when there is one, else the imported one; `None` when unrated.
+    pub fn effective_rating(&self, track_id: i64, imported: Option<u8>) -> Option<u8> {
+        self.user_edits(track_id).rating.or(imported).filter(|&r| r > 0)
     }
 
     /// Fit the beat grid to a new BPM: spacing is scaled around the first beat and every beat

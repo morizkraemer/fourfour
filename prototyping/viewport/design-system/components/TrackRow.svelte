@@ -44,7 +44,10 @@
   import { labelColor } from '../utils/label-color.js';
 
   // onWaveSeek(frac): the mini waveform becomes a seek strip (hover shows where, a click passes the track fraction).
-  let { track = {}, state = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined } = $props();
+  // onRate(stars): the rating cell takes clicks (the current rating again clears it) and previews on hover.
+  let { track = {}, state: rowState = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined, onRate = undefined } = $props();
+
+  let previewStars = $state(0);
 
   let plan = $derived(cellPlan(columns));
 
@@ -69,7 +72,7 @@
   }
 </script>
 
-<div class="ff-trow ff-trow--{state}">
+<div class="ff-trow ff-trow--{rowState}">
   {#each plan as cell}
     {@const col = cell.col}
     {#if cell.kind === 'tag'}
@@ -116,9 +119,23 @@
       </div>
     {:else if cell.kind === 'rating'}
       {@const stars = Number(track.rating) || 0}
-      <div class="ff-trow__cell ff-trow__cell--rating" style={cell.style} data-col-key={col.key}>
+      {@const shown = previewStars || stars}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="ff-trow__cell ff-trow__cell--rating{onRate ? ' ff-trow__cell--rateable' : ''}"
+        style={cell.style}
+        data-col-key={col.key}
+        data-rate={onRate ? '' : undefined}
+        onpointerleave={onRate ? () => (previewStars = 0) : undefined}
+        onclick={onRate ? (e) => e.stopPropagation() : undefined}
+        ondblclick={onRate ? (e) => e.stopPropagation() : undefined}>
         {#each [1, 2, 3, 4, 5] as n}
-          <span class="ff-trow__star{n <= stars ? ' ff-trow__star--on' : ''}">★</span>
+          <span
+            class="ff-trow__star{n <= shown ? ' ff-trow__star--on' : ''}{previewStars && n <= previewStars ? ' ff-trow__star--preview' : ''}"
+            data-star={n}
+            onpointerenter={onRate ? () => (previewStars = n) : undefined}
+            onclick={onRate ? () => onRate(n === stars ? 0 : n) : undefined}>★</span>
         {/each}
       </div>
     {:else if cell.kind === 'color'}

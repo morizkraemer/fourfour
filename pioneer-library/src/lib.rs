@@ -1280,6 +1280,26 @@ mod tests {
     }
 
     #[test]
+    fn user_rating_shows_over_the_imported_one_and_survives_reanalysis() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        assert_eq!(lib.effective_rating(id, None), None);
+        assert_eq!(lib.effective_rating(id, Some(2)), Some(2));
+
+        lib.set_user_rating(id, 4).unwrap();
+        assert_eq!(lib.effective_rating(id, Some(2)), Some(4));
+        lib.set_user_rating(id, 0).unwrap();
+        assert_eq!(lib.effective_rating(id, Some(2)), None);
+        lib.set_user_rating(id, 5).unwrap();
+
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        lib.release_user_edits(id).unwrap();
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        assert_eq!(reopened.effective_rating(id, None), Some(5));
+        assert!(lib.set_user_rating(id, 6).is_err());
+    }
+
+    #[test]
     fn user_bpm_and_key_reject_bad_values_and_unanalyzed_tracks() {
         let dir = tempfile::tempdir().unwrap();
         let (lib, id) = analyzed_file_library(dir.path());
