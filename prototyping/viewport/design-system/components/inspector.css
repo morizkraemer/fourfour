@@ -232,23 +232,78 @@
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
+.ff-inspector__marker--remove .ff-inspector__marker-flag {
+  filter: saturate(0.6);
+  font-size: 10px;
+}
+
+.ff-inspector__marker--plain.ff-inspector__marker--remove {
+  width: 12px;
+}
+
+.ff-inspector__marker--plain.ff-inspector__marker--remove::after {
+  left: 5px;
+}
+
+.ff-inspector__marker--plain.ff-inspector__marker--remove .ff-inspector__marker-flag {
+  width: 12px;
+  height: 11px;
+  border-radius: 2px;
+  clip-path: none;
+}
+
 .ff-inspector__marker-tip {
   position: absolute;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% + 3px);
   transform: translateX(-50%);
   z-index: 2;
-  padding: 3px 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 7px 0 3px;
   border: 1px solid var(--ff-border-hi);
-  border-left: 2px solid var(--cue);
   border-radius: var(--ff-radius-md);
   background: var(--ff-elev);
-  box-shadow: var(--ff-shadow-palette);
-  font-family: var(--ff-font-mono);
+  box-shadow: var(--ff-shadow-menu);
+  font-family: var(--ff-font);
   font-size: 10.5px;
-  line-height: 1.2;
+  line-height: 1;
   color: var(--ff-text);
   white-space: nowrap;
   pointer-events: none;
+}
+
+.ff-inspector__marker-tip-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  border-radius: var(--ff-radius-sm);
+  background: var(--cue);
+  color: #0a0a0a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.ff-inspector__marker-tip-chip--memory {
+  min-width: 8px;
+  height: 8px;
+  margin: 0 3px;
+  border-radius: 50%;
+}
+
+.ff-inspector__marker-tip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-inspector__marker-tip-time {
+  font-family: var(--ff-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ff-text-mid);
 }
 
 .ff-inspector__marker--linked::after {

@@ -47,6 +47,17 @@ export async function triggerHotCue(slot: number): Promise<void> {
   await seekToMsAndPlay(cue.timeMs);
 }
 
+export async function jumpToHotCue(slot: number): Promise<void> {
+  const track = player.track;
+  const cue = track && hotCueIn(cuesOf(track.id), slot);
+  if (cue) await seekToMs(cue.timeMs);
+}
+
+export function clearAllCues(): void {
+  const track = player.track;
+  if (track) editCues(track.id, (cues) => (cues.length ? [] : cues));
+}
+
 export function jumpToCue(cue: Pick<Cue, 'timeMs'>): Promise<void> {
   return seekToMs(cue.timeMs);
 }

@@ -14,6 +14,7 @@
   import { tempo } from '../stores/tempo.svelte.ts';
   import { effectiveShift, formatBpm, formatShift } from '../lib/tempo.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
+  import { registerWaveZoom } from '../stores/wave-zoom.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
     addMemoryCueAtPlayhead,
@@ -44,6 +45,9 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+  $effect(() => {
+    if (wave) return registerWaveZoom(wave);
+  });
   let windowTrackId = $derived(player.track?.bandsZoom ? player.track.id : null);
   let windowSource = $derived(
     windowTrackId == null
