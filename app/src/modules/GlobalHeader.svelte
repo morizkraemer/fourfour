@@ -1,6 +1,8 @@
 <!--
   GlobalHeader.svelte — Top header bar with search field and actions.
-  Search is the ⌘F inline filter (narrows the active track list in place).
+  The search field is the command palette's input: focusing it, ⌘F, ⌘K or ⌥↩ opens the dropdown
+  under it (CommandPalette.svelte). Plain text still narrows the active track list live;
+  a leading `>` switches the dropdown to commands only and leaves the list alone.
   Layout follows main-window option A: context title, search, status chips.
   While the organize sidebar is open the chips are dropped (the status bar
   already carries analysis and sync progress) so the narrower bar stays calm.
@@ -8,9 +10,11 @@
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
   import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
-  import { ui, clearListFilter } from '../stores/ui.svelte.ts';
+  import { ui, clearListFilter, setSearchText, openPalette } from '../stores/ui.svelte.ts';
 
   let filterInputEl = $state(null);
+  let searchEl = $state(null);
+  let returnFocusEl = null;
 
   let activeTracks = $derived(tracksForSidebarSource(ui.activeSidebarRow));
   let filteredCount = $derived(filterTracks(activeTracks, ui.listFilter).length);
@@ -24,16 +28,44 @@
       : ''
   );
 
-  // Only steal focus on explicit ⌘F (nonce > 0), not on mount — otherwise
-  // spacebar play/pause never reaches the window handler while search is focused.
   $effect(() => {
-    if (ui.filterFocusNonce === 0) return;
-    filterInputEl?.focus();
-    filterInputEl?.select();
+    ui.searchAnchor = searchEl;
+    return () => {
+      ui.searchAnchor = null;
+    };
   });
 
+  $effect(() => {
+    if (!filterInputEl) return;
+    if (ui.paletteOpen) {
+      if (document.activeElement !== filterInputEl) {
+        returnFocusEl = document.activeElement;
+        filterInputEl.focus();
+        filterInputEl.select();
+      }
+    } else if (document.activeElement === filterInputEl) {
+      if (returnFocusEl?.isConnected && returnFocusEl !== document.body) returnFocusEl.focus();
+      else filterInputEl.blur();
+      returnFocusEl = null;
+    }
+  });
+
+  function onSearchFocusIn(e) {
+    if (e.target !== filterInputEl || ui.paletteOpen) return;
+    returnFocusEl = e.relatedTarget;
+    openPalette();
+  }
+
+  function onSearchClick() {
+    if (!ui.paletteOpen) openPalette();
+  }
+
+  function onSearchInput() {
+    if (!ui.paletteOpen) openPalette();
+  }
+
   function onFilterKeydown(e) {
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !ui.paletteOpen) {
       clearListFilter();
       filterInputEl?.blur();
       e.preventDefault();
@@ -46,11 +78,12 @@
     <b class="ff-gheader__title">{contextLabel}</b>
     <span class="ff-gheader__count">{activeTracks.length.toLocaleString()}</span>
   </div>
-  <div class="ff-gheader__search">
+  <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+  <div class="ff-gheader__search" bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
     <FilterInput
-      bind:value={ui.listFilter}
+      bind:value={() => ui.searchText, setSearchText}
       bind:inputRef={filterInputEl}
-      placeholder="Search tracks, artists, labels…"
+      placeholder="Search tracks, or type > for commands"
       count={filterCountLabel}
       onClose={clearListFilter}
       onkeydown={onFilterKeydown}

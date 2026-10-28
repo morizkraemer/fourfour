@@ -120,7 +120,7 @@ fn run(dir: &Path) {
         .get_all_playlists()
         .unwrap()
         .into_iter()
-        .map(|pl| PlaylistInput { id: pl.id, name: pl.name, track_ids: pl.track_ids })
+        .map(|pl| PlaylistInput { id: pl.id, name: pl.name, track_ids: pl.track_ids, parent_id: pl.parent_id, is_folder: pl.is_folder })
         .collect();
     let playlists_ms = ms(t);
 

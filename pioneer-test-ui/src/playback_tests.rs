@@ -184,16 +184,16 @@ impl OutputBackend for FakeBackend {
     fn open(
         &self,
         request: &OutputRequest,
-        render: RenderFn,
+        make_render: MakeRender<'_>,
         on_error: OutputErrorFn,
     ) -> Result<OpenedOutput, String> {
         if self.fail_open.load(Ordering::SeqCst) {
             return Err("fake device unavailable".into());
         }
         self.opens.fetch_add(1, Ordering::SeqCst);
-        *self.render.lock().unwrap() = Some(render);
-        *self.on_error.lock().unwrap() = Some(on_error);
         let rate = self.forced_rate.lock().unwrap().unwrap_or(request.sample_rate);
+        *self.render.lock().unwrap() = Some(make_render(rate, self.channels));
+        *self.on_error.lock().unwrap() = Some(on_error);
         Ok(OpenedOutput {
             channels: self.channels,
             sample_rate: rate,
@@ -843,6 +843,23 @@ fn device_that_ignores_the_requested_rate_is_resampled_to_its_actual_rate() {
 }
 
 #[test]
+fn tempo_smoothing_runs_at_the_rate_the_device_opened() {
+    let rig = rig();
+    *rig.backend.forced_rate.lock().unwrap() = Some(96_000);
+    rig.engine.configure(48_000, 128).unwrap();
+    rig.engine.set_key_lock(false);
+    rig.engine.set_tempo(1.1);
+    let device_frames: f64 = 0.03 * 96_000.0;
+    rig.backend.pump((device_frames / 128.0) as usize, Duration::ZERO);
+    let progress = (rig.engine.lock().tempo.live_ratio() - 1.0) / 0.1;
+    let expected = 1.0 - (-((device_frames / 128.0).floor() * 128.0 / 96_000.0) / 0.03f64).exp();
+    assert!(
+        (progress - expected).abs() < 0.03,
+        "smoothing reached {progress:.3} of the step after 30 ms of device time, expected {expected:.3}"
+    );
+}
+
+#[test]
 fn stop_and_drop_join_all_threads() {
     let rig = rig();
     let path = scratch("threads.wav");
@@ -1230,14 +1247,12 @@ fn seek_latency_real_files() {
 
 #[test]
 fn audio_arriving_after_a_slow_decode_fades_in_without_a_click() {
-    let (pipe, cons) = new_sample_pipe();
-    let mut render = RenderState::new(
-        cons,
-        pipe.clone(),
+    let (mut render, pipe) = render_pipeline(
         Arc::new(AtomicU32::new(0)),
         Arc::new(AtomicU32::new(0)),
         Arc::new(TempoParams::new()),
         48_000,
+        2,
         STRETCH_PRESET,
     );
     let steady = |value: f32, frames: usize| vec![value; frames * 2];

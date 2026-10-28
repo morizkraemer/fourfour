@@ -10,6 +10,7 @@ import {
   PANEL_WIDTH,
   type ResizablePanel,
 } from '../lib/panelWidth.ts';
+import { isCommandQuery } from '../shortcuts/palette-model.ts';
 import { clampPlayerHeight, loadPlayerHeight, savePlayerHeight } from '../lib/playerHeight.ts';
 
 // ── Organize panel ──────────────────────────────────────────────────────────
@@ -53,14 +54,16 @@ export const ui = $state({
   settingsOpen: false,
   /** Section key Preferences opens on. */
   settingsTab: 'library',
-  /** Command palette overlay (⌘K). */
+  /** Search + command dropdown under the top bar (⌘F, ⌘K, ⌥↩). */
   paletteOpen: false,
+  /** The top bar search field the dropdown hangs from (set by GlobalHeader). */
+  searchAnchor: null as HTMLElement | null,
+  /** Raw text in the top bar search field, including a leading `>` command prefix. */
+  searchText: '',
   /** Set by the palette: the track table scrolls this track into view. */
   revealTrack: null as { id: number; nonce: number } | null,
-  /** ⌘F inline filter — narrows visible track lists in place. */
+  /** Search text narrowing visible track lists in place; empty while the field holds a `>` command query. */
   listFilter: '',
-  /** Incremented to focus the filter field (GlobalHeader). */
-  filterFocusNonce: 0,
   /** Left sidebar width in px (persisted). */
   sidebarWidth: loadPanelWidth('sidebar') as number,
   /** Right inspector width in px (persisted). */
@@ -267,14 +270,14 @@ export function resetPlayerHeight() {
 
 // ── Other UI state ────────────────────────────────────────────────────────────
 
-/** Clear the inline list filter. */
-export function clearListFilter() {
-  ui.listFilter = '';
+export function setSearchText(text: string) {
+  ui.searchText = text;
+  ui.listFilter = isCommandQuery(text) ? '' : text;
 }
 
-/** Focus the global filter input (⌘F). */
-export function focusListFilter() {
-  ui.filterFocusNonce += 1;
+/** Clear the search field and the inline list filter. */
+export function clearListFilter() {
+  setSearchText('');
 }
 
 /** Toggle the detail pane. */

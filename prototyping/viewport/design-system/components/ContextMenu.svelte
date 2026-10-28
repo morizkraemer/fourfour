@@ -1,6 +1,7 @@
 <script>
   import './menu.css';
   import './checkbox.css';
+  import { closeOnEscape } from './menuEscape.js';
 
   const CHECK_SVG =
     '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="2,5.5 4.2,7.5 8,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -33,7 +34,7 @@
       if (menuEl && !menuEl.contains(e.target)) onClose?.();
     }
     function onKey(e) {
-      if (e.key === 'Escape') onClose?.();
+      closeOnEscape(e, onClose);
     }
     function onWindowBlur() {
       onClose?.();

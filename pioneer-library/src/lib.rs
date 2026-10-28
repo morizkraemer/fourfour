@@ -14,9 +14,10 @@ mod queries;
 pub mod rekordbox;
 mod row_preview;
 mod schema;
+pub mod sticks;
 mod user_edits;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -39,9 +40,11 @@ pub struct BeatPosition {
 }
 
 pub use multi_sync::{
-    NoProgress, PreparedMultiSync, ProgressSink, StickProgress, StickReport, StickStatus,
-    SyncPhase, SyncSelection, SyncTarget, WriterFn, statvfs_available_bytes,
+    NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
+    StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    statvfs_available_bytes, volume_capacity,
 };
+pub use sticks::StickContents;
 pub use user_edits::{MAX_BPM, MIN_BPM, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
@@ -561,6 +564,16 @@ impl LocalLibrary {
         queries::insert_playlist(&self.conn, name)
     }
 
+    /// Create a folder under `parent_id` (0 is the root). Returns its ID.
+    pub fn create_folder(&self, name: &str, parent_id: u32) -> Result<i64> {
+        queries::insert_playlist_row(&self.conn, name, parent_id, true)
+    }
+
+    /// Create a playlist inside the folder `parent_id` (0 is the root). Returns its ID.
+    pub fn create_playlist_in(&self, name: &str, parent_id: u32) -> Result<i64> {
+        queries::insert_playlist_row(&self.conn, name, parent_id, false)
+    }
+
     /// Rename a playlist.
     pub fn rename_playlist(&self, id: i64, name: &str) -> Result<()> {
         queries::rename_playlist(&self.conn, id, name)
@@ -575,6 +588,12 @@ impl LocalLibrary {
     /// `track_ids` are library track IDs, in desired order.
     pub fn set_playlist_tracks(&self, playlist_id: i64, track_ids: &[i64]) -> Result<()> {
         queries::set_playlist_tracks(&self.conn, playlist_id, track_ids)
+    }
+
+    /// Make the stored playlists exactly `playlists`, in that order, keeping their ids. Playlists
+    /// that stay keep what refers to them (the sticks they are on).
+    pub fn replace_playlists(&self, playlists: &[Playlist]) -> Result<()> {
+        queries::replace_playlists(&self.conn, playlists)
     }
 
     /// Retrieve all playlists with their track IDs.
@@ -754,11 +773,36 @@ fn prepare_for_usb(
             .collect();
     }
 
-    for (i, playlist) in playlists.iter_mut().enumerate() {
-        playlist.id = (i + 1) as u32;
+    let playlist_id_map: HashMap<u32, u32> = playlists
+        .iter()
+        .enumerate()
+        .map(|(i, playlist)| (playlist.id, (i + 1) as u32))
+        .collect();
+    for playlist in &mut playlists {
+        playlist.parent_id = playlist_id_map.get(&playlist.parent_id).copied().unwrap_or(0);
+        playlist.id = playlist_id_map[&playlist.id];
     }
 
     (tracks, analyses, playlists)
+}
+
+/// The playlists a stick selection puts on the drive: the chosen ones, everything inside
+/// chosen folders, and the folders around them, in library order.
+pub(crate) fn selected_playlist_tree(playlists: &[Playlist], chosen_ids: &[i64]) -> Vec<Playlist> {
+    let by_id: HashMap<u32, &Playlist> = playlists.iter().map(|p| (p.id, p)).collect();
+    let mut included: HashSet<u32> = HashSet::new();
+    for playlist in playlists {
+        let mut chain = vec![playlist.id];
+        let mut ancestor = playlist.parent_id;
+        while ancestor != 0 && chain.len() <= playlists.len() {
+            chain.push(ancestor);
+            ancestor = by_id.get(&ancestor).map_or(0, |p| p.parent_id);
+        }
+        if chain.iter().any(|id| chosen_ids.contains(&(*id as i64))) {
+            included.extend(chain);
+        }
+    }
+    playlists.iter().filter(|p| included.contains(&p.id)).cloned().collect()
 }
 
 /// PWAV preview of an ANLZ `.DAT` image: all-zero when the section is absent,
@@ -817,7 +861,7 @@ mod tests {
     use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, CuePoint, WaveformPreview};
     use std::path::PathBuf;
 
-    fn make_track(title: &str, source: &str) -> Track {
+    pub(crate) fn make_track(title: &str, source: &str) -> Track {
         Track {
             id: 0,
             source_path: PathBuf::from(source),
@@ -1510,6 +1554,43 @@ mod tests {
     }
 
     #[test]
+    fn v5_library_migrates_to_stick_tables_and_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let (track, playlist) = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let track = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+            lib.set_analysis(track, &make_analysis()).unwrap();
+            let playlist = lib.create_playlist("Warmup").unwrap();
+            lib.set_playlist_tracks(playlist, &[track]).unwrap();
+            (track, playlist)
+        };
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "DROP TABLE stick_playlists; DROP TABLE stick_tracks; DROP TABLE sticks;
+                 UPDATE schema_version SET version = 5;",
+            )
+            .unwrap();
+        }
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let version: u32 = lib
+            .conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, schema::SCHEMA_VERSION);
+        assert_eq!(lib.get_playlist(playlist).unwrap().unwrap().track_ids, vec![track as u32]);
+        assert_eq!(lib.analysis_stages(track).unwrap(), Some(analysis_stage::ALL));
+        assert_eq!(lib.add_stick_tracks("stick-1", &[track]).unwrap(), 1);
+        assert_eq!(lib.add_stick_playlists("stick-1", &[playlist]).unwrap(), 1);
+        drop(lib);
+        let reopened = LocalLibrary::open(&db_path).unwrap();
+        let contents = reopened.stick_contents("stick-1").unwrap();
+        assert_eq!(contents.track_ids, vec![track]);
+        assert_eq!(contents.playlist_ids, vec![playlist]);
+    }
+
+    #[test]
     fn get_unanalyzed_track_ids() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let id1 = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
@@ -1519,6 +1600,141 @@ mod tests {
 
         let unanalyzed = lib.get_unanalyzed_track_ids().unwrap();
         assert_eq!(unanalyzed, vec![id2]);
+    }
+
+    #[test]
+    fn v6_library_migrates_to_playlist_folders_and_keeps_its_playlists() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let (track, playlist) = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let track = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+            let playlist = lib.create_playlist("Warmup").unwrap();
+            lib.set_playlist_tracks(playlist, &[track]).unwrap();
+            (track, playlist)
+        };
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE playlists DROP COLUMN parent_id;
+                 ALTER TABLE playlists DROP COLUMN is_folder;
+                 UPDATE schema_version SET version = 6;",
+            )
+            .unwrap();
+        }
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let version: u32 = lib
+            .conn
+            .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, schema::SCHEMA_VERSION);
+        let migrated = lib.get_playlist(playlist).unwrap().unwrap();
+        assert_eq!((migrated.parent_id, migrated.is_folder), (0, false));
+        assert_eq!(migrated.track_ids, vec![track as u32]);
+        let folder = lib.create_folder("Sets", 0).unwrap();
+        lib.create_playlist_in("Friday", folder as u32).unwrap();
+        assert_eq!(lib.get_all_playlists().unwrap().len(), 3);
+    }
+
+    fn tree_playlist(id: u32, name: &str, parent_id: u32, is_folder: bool, track_ids: &[u32]) -> Playlist {
+        Playlist { id, name: name.to_string(), track_ids: track_ids.to_vec(), parent_id, is_folder }
+    }
+
+    #[test]
+    fn playlist_tree_round_trips_in_any_row_order() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let t1 = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap() as u32;
+        let tree = vec![
+            tree_playlist(3, "Friday", 2, false, &[t1]),
+            tree_playlist(2, "Inner", 1, true, &[]),
+            tree_playlist(1, "Sets", 0, true, &[]),
+            tree_playlist(4, "Loose", 0, false, &[]),
+        ];
+        lib.replace_playlists(&tree).unwrap();
+
+        let stored = lib.get_all_playlists().unwrap();
+        let shape: Vec<_> = stored.iter().map(|p| (p.id, p.parent_id, p.is_folder)).collect();
+        assert_eq!(shape, vec![(3, 2, false), (2, 1, true), (1, 0, true), (4, 0, false)]);
+        assert_eq!(stored[0].track_ids, vec![t1]);
+    }
+
+    #[test]
+    fn replace_playlists_rejects_cycles_and_bad_parents() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        lib.replace_playlists(&[tree_playlist(1, "A", 0, true, &[])]).unwrap();
+
+        let cycle = [tree_playlist(1, "A", 2, true, &[]), tree_playlist(2, "B", 1, true, &[])];
+        assert!(lib.replace_playlists(&cycle).is_err());
+        let own_parent = [tree_playlist(1, "A", 1, true, &[])];
+        assert!(lib.replace_playlists(&own_parent).is_err());
+        let missing_parent = [tree_playlist(1, "A", 9, false, &[])];
+        assert!(lib.replace_playlists(&missing_parent).is_err());
+        let playlist_parent = [tree_playlist(1, "A", 0, false, &[]), tree_playlist(2, "B", 1, false, &[])];
+        assert!(lib.replace_playlists(&playlist_parent).is_err());
+        let folder_with_tracks = [tree_playlist(1, "A", 0, true, &[1])];
+        assert!(lib.replace_playlists(&folder_with_tracks).is_err());
+
+        let stored = lib.get_all_playlists().unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!((stored[0].parent_id, stored[0].is_folder), (0, true));
+    }
+
+    #[test]
+    fn deleting_a_folder_deletes_its_contents() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let t1 = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let folder = lib.create_folder("Sets", 0).unwrap();
+        let inner = lib.create_folder("Inner", folder as u32).unwrap();
+        let playlist = lib.create_playlist_in("Friday", inner as u32).unwrap();
+        lib.set_playlist_tracks(playlist, &[t1]).unwrap();
+        let keep = lib.create_playlist("Keep").unwrap();
+
+        lib.delete_playlist(folder).unwrap();
+
+        let ids: Vec<u32> = lib.get_all_playlists().unwrap().iter().map(|p| p.id).collect();
+        assert_eq!(ids, vec![keep as u32]);
+        assert!(lib.get_track(t1).unwrap().is_some());
+    }
+
+    #[test]
+    fn replace_playlists_dropping_a_folder_removes_its_children() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        lib.replace_playlists(&[
+            tree_playlist(1, "Sets", 0, true, &[]),
+            tree_playlist(2, "Friday", 1, false, &[]),
+            tree_playlist(3, "Keep", 0, false, &[]),
+        ])
+        .unwrap();
+        lib.replace_playlists(&[tree_playlist(3, "Keep", 0, false, &[])]).unwrap();
+        let ids: Vec<u32> = lib.get_all_playlists().unwrap().iter().map(|p| p.id).collect();
+        assert_eq!(ids, vec![3]);
+    }
+
+    #[test]
+    fn stick_selection_includes_folder_contents_and_enclosing_folders() {
+        let playlists = vec![
+            tree_playlist(1, "Sets", 0, true, &[]),
+            tree_playlist(2, "Friday", 1, false, &[5]),
+            tree_playlist(3, "Archive", 0, true, &[]),
+            tree_playlist(4, "Old", 3, false, &[6]),
+            tree_playlist(5, "Loose", 0, false, &[7]),
+        ];
+        let ids = |chosen: &[i64]| -> Vec<u32> {
+            selected_playlist_tree(&playlists, chosen).iter().map(|p| p.id).collect()
+        };
+        assert_eq!(ids(&[2]), vec![1, 2]);
+        assert_eq!(ids(&[3]), vec![3, 4]);
+        assert_eq!(ids(&[5]), vec![5]);
+    }
+
+    #[test]
+    fn prepare_for_usb_remaps_playlist_parents() {
+        let playlists = vec![
+            tree_playlist(40, "Sets", 0, true, &[]),
+            tree_playlist(70, "Friday", 40, false, &[]),
+        ];
+        let (_, _, usb) = prepare_for_usb(Vec::new(), Vec::new(), playlists);
+        assert_eq!(usb.iter().map(|p| (p.id, p.parent_id)).collect::<Vec<_>>(), vec![(1, 0), (2, 1)]);
     }
 
     #[test]
@@ -1557,6 +1773,7 @@ mod tests {
             id: 99,
             name: "PL".to_string(),
             track_ids: vec![25, 10],
+            ..Default::default()
         }];
 
         let (usb_tracks, _usb_analyses, usb_playlists) =

@@ -1,6 +1,6 @@
 mod support;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -201,11 +201,12 @@ fn panics_on_boom(
     tracks: &[Track],
     analyses: &[AnalysisResult],
     playlists: &[Playlist],
+    keep: &HashSet<String>,
 ) -> Result<SyncReport> {
     if root.ends_with("boom") {
         panic!("injected");
     }
-    writer::filesystem::sync_usb(root, tracks, analyses, playlists)
+    writer::filesystem::sync_usb_keeping(root, tracks, analyses, playlists, keep)
 }
 
 fn errors_on_bad(
@@ -213,11 +214,12 @@ fn errors_on_bad(
     tracks: &[Track],
     analyses: &[AnalysisResult],
     playlists: &[Playlist],
+    keep: &HashSet<String>,
 ) -> Result<SyncReport> {
     if root.ends_with("bad") {
         anyhow::bail!("injected error");
     }
-    writer::filesystem::sync_usb(root, tracks, analyses, playlists)
+    writer::filesystem::sync_usb_keeping(root, tracks, analyses, playlists, keep)
 }
 
 #[test]
@@ -279,7 +281,7 @@ fn stick_without_room_is_refused_before_anything_is_written() {
         .library
         .prepare_multi_sync(&targets)
         .unwrap()
-        .run_with(&NoProgress, &probe, writer::filesystem::sync_usb);
+        .run_with(&NoProgress, &probe, writer::filesystem::sync_usb_keeping);
 
     assert_eq!(reports[0].status, StickStatus::Done);
     assert_eq!(reports[1].status, StickStatus::Failed);

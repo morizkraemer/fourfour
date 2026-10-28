@@ -10,7 +10,9 @@ mod playback;
 mod tempo;
 mod track_fields;
 mod track_infos;
+mod stick_commands;
 mod volumes;
+mod waveform_detail;
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
@@ -101,6 +103,8 @@ fn scan_directory(
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         });
     }
 
@@ -160,6 +164,8 @@ fn scan_files(
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         });
     }
 
@@ -369,6 +375,7 @@ fn write_usb(
     sync_playlists_to_library(&lib, &playlists)?;
 
     let out = Path::new(&output_dir);
+    volumes::require_removable_volume(out)?;
     let report = lib.sync_usb(out).map_err(|e| e.to_string())?;
 
     debug_ok(&app, &format!(
@@ -407,6 +414,9 @@ async fn sync_usb_many(
 ) -> Result<Vec<pioneer_library::StickReport>, String> {
     let shared: SharedLibrary = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        for target in &targets {
+            volumes::require_removable_volume(&target.volume)?;
+        }
         let prepared = {
             let lib = shared.lock().map_err(|e| e.to_string())?;
             lib.prepare_multi_sync(&targets).map_err(|e| format!("{e:#}"))?
@@ -422,21 +432,17 @@ fn sync_playlists_to_library(
     lib: &LocalLibrary,
     playlists: &[PlaylistInput],
 ) -> Result<(), String> {
-    // Delete all existing playlists and recreate from frontend state.
-    let existing = lib.get_all_playlists().map_err(|e| e.to_string())?;
-    for pl in &existing {
-        lib.delete_playlist(pl.id as i64)
-            .map_err(|e| e.to_string())?;
-    }
-    for pl in playlists {
-        let id = lib
-            .create_playlist(&pl.name)
-            .map_err(|e| e.to_string())?;
-        let track_ids: Vec<i64> = pl.track_ids.iter().map(|&tid| tid as i64).collect();
-        lib.set_playlist_tracks(id, &track_ids)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    let playlists: Vec<models::Playlist> = playlists
+        .iter()
+        .map(|pl| models::Playlist {
+            id: pl.id,
+            name: pl.name.clone(),
+            track_ids: pl.track_ids.clone(),
+            parent_id: pl.parent_id,
+            is_folder: pl.is_folder,
+        })
+        .collect();
+    lib.replace_playlists(&playlists).map_err(|e| e.to_string())
 }
 
 /// Remove tracks by ID from the library.
@@ -560,7 +566,7 @@ fn wipe_usb(path: String) -> Result<(), String> {
     if !usb.is_dir() {
         return Err("Not a valid directory".into());
     }
-    volumes::refuse_system_volume(usb)?;
+    volumes::require_removable_volume(usb)?;
 
     let pioneer_dir = usb.join("PIONEER");
     let contents_dir = usb.join("Contents");
@@ -597,6 +603,21 @@ fn load_rekordbox_source(request: &RekordboxImportRequest) -> Result<rekordbox::
         rekordbox::SourceKind::Xml => rekordbox::load_xml(path),
     };
     loaded.map_err(|e| format!("{e:#}"))
+}
+
+/// Rekordbox's own `master.db` when it sits in the usual place on this machine.
+#[tauri::command]
+fn rekordbox_default_master_db() -> Option<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
+    [
+        home.map(|h| h.join("Library/Pioneer/rekordbox/master.db")),
+        appdata.map(|a| a.join("Pioneer/rekordbox/master.db")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| p.is_file())
+    .map(|p| p.to_string_lossy().to_string())
 }
 
 /// Read a Rekordbox library and compare it with the local library without changing anything.
@@ -711,6 +732,30 @@ async fn get_analysis_data(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The high-resolution 3-band series of a track for the zoomed waveform (`DetailSeries::to_bytes`),
+/// measured from the audio on first use and cached in the app data folder. Sent as a binary IPC response.
+#[tauri::command]
+async fn get_waveform_detail(
+    app: AppHandle,
+    track_id: i64,
+    state: State<'_, SharedLibrary>,
+) -> Result<tauri::ipc::Response, String> {
+    let shared = state.inner().clone();
+    let cache_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("waveform-detail");
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let track = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.get_track(track_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Track {track_id} is not in the library"))?
+        };
+        waveform_detail::detail_series(&cache_dir, &track.source_path).map(|series| series.to_bytes())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// Replace the hot and memory cues of a track (slot 0 is a memory cue, 1 to 8 are A to H).
@@ -1003,6 +1048,8 @@ async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, Stri
                 id: pl.id,
                 name: pl.name,
                 track_ids: pl.track_ids,
+                parent_id: pl.parent_id,
+                is_folder: pl.is_folder,
             })
             .collect();
 
@@ -1164,6 +1211,13 @@ fn main() {
             prioritize_analysis,
             write_usb,
             sync_usb_many,
+            stick_commands::get_stick,
+            stick_commands::stick_add_tracks,
+            stick_commands::stick_remove_tracks,
+            stick_commands::stick_add_playlists,
+            stick_commands::stick_remove_playlists,
+            stick_commands::get_volume_capacity,
+            stick_commands::plan_usb_sync,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
@@ -1173,6 +1227,7 @@ fn main() {
             save_state,
             load_state,
             app_version,
+            rekordbox_default_master_db,
             rekordbox_import_preview,
             rekordbox_import_run,
             read_usb_state,
@@ -1184,6 +1239,7 @@ fn main() {
             get_analysis_backend,
             set_analysis_backend,
             get_analysis_data,
+            get_waveform_detail,
             set_beat_grid,
             set_track_bpm,
             set_track_key,

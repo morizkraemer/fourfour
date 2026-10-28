@@ -24,6 +24,7 @@ fn files_only_writer(
     tracks: &[Track],
     analyses: &[AnalysisResult],
     _playlists: &[Playlist],
+    _keep: &std::collections::HashSet<String>,
 ) -> Result<SyncReport> {
     for (track, analysis) in tracks.iter().zip(analyses) {
         let dest = root.join(track.usb_path.trim_start_matches('/'));
@@ -117,7 +118,7 @@ fn measure(work: impl FnOnce()) -> Measured {
 fn run_all(library: &LocalLibrary, sticks: &[PathBuf]) {
     let write: pioneer_library::WriterFn = match std::env::var("BENCH_WRITER").as_deref() {
         Ok("files") => files_only_writer,
-        _ => writer::filesystem::sync_usb,
+        _ => writer::filesystem::sync_usb_keeping,
     };
     let reports = library
         .prepare_multi_sync(&targets(sticks))

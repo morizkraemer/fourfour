@@ -2,6 +2,7 @@
  * Shared context-menu item builders — keep all app menus on the $ds ContextMenu shape.
  */
 
+import { isStickSyncBusy } from '../stores/stick-sync.svelte.ts';
 import {
   library,
   playlistByName,
@@ -18,6 +19,9 @@ import {
   clearPlaylistTracks,
   clearAllFavorites,
   deletePlaylist,
+  addFolder,
+  duplicatePlaylist,
+  playlistsInFolder,
   importDirectory,
   syncToUsb,
   wipeVolume,
@@ -32,6 +36,8 @@ import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
 import { pickDirectory } from '../services/tauri.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { dropPlaylistOnStick } from '../stores/organize-drop.svelte.ts';
+import { ui } from '../stores/ui.svelte.ts';
 import { favouriteTrackIds } from '../lib/newPlaylist.ts';
 
 export function revealLabel(): string {
@@ -62,7 +68,7 @@ interface MenuItem {
 const LIBRARY_VIEWS = new Set(['All Tracks', 'Recently Added']);
 
 function busy() {
-  return library.analyzing || library.syncing;
+  return library.analyzing || library.syncing || isStickSyncBusy();
 }
 
 /** Analysis can be queued while a run is already in progress. */
@@ -77,6 +83,33 @@ function hasUnanalyzedTracks() {
 export async function importIntoSource(sourceId: string) {
   const dir = await pickDirectory();
   if (dir) await importDirectory(dir, { targetSource: sourceId });
+}
+
+async function createFolderAndRename(parentId: number) {
+  const id = await addFolder(parentId);
+  ui.sidebarRenameRequest = { playlistId: id };
+}
+
+function volumeLabel(volume: string): string {
+  return volume.replace(/\\/g, '/').split('/').pop() || volume;
+}
+
+function putOnStickItem(playlist: PlaylistInput): MenuItem {
+  return {
+    label: 'Put on stick',
+    disabled: library.volumes.length === 0,
+    items: library.volumes.map((volume) => ({
+      label: volumeLabel(volume),
+      onClick: () => void dropPlaylistOnStick(volume, playlist.id),
+    })),
+  };
+}
+
+function newPlaylistAndFolderItems(parentId: number): MenuItem[] {
+  return [
+    { label: 'New playlist', onClick: () => createPlaylistAndOpen([], parentId) },
+    { label: 'New folder', onClick: () => createFolderAndRename(parentId) },
+  ];
 }
 
 function moveFavouritesToNewPlaylistItem(onlySlot?: number): MenuItem {
@@ -105,11 +138,10 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
   if (library.volumes.includes(sourceId)) {
     items.push(
       {
-        label: 'Sync to USB',
-        disabled: busy() || library.playlists.length === 0,
+        label: 'Sync stick',
+        disabled: busy(),
         onClick: async () => {
           await selectVolume(sourceId);
-          if (!confirm(`Sync all playlists to ${label}?`)) return;
           await syncToUsb();
         },
       },
@@ -159,17 +191,24 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
     return items;
   }
 
-  const playlist = library.playlists.find((p) => p.name === sourceId);
+  const playlist = library.playlists.find((p) => p.name === sourceId && !p.is_folder);
   if (playlist) {
     const isFavorite = isFavoritePlaylistName(playlist.name);
-    if (!isFavorite && onRenamePlaylist) {
-      items.push({ label: 'Rename', onClick: () => onRenamePlaylist(playlist) });
+    if (!isFavorite) {
+      if (onRenamePlaylist) items.push({ label: 'Rename', onClick: () => onRenamePlaylist(playlist) });
+      items.push(
+        { label: 'Duplicate', onClick: () => void duplicatePlaylist(playlist.id) },
+        { isSeparator: true },
+        ...newPlaylistAndFolderItems(playlist.parent_id),
+        { isSeparator: true }
+      );
     }
     items.push({
       label: 'Import folder',
       disabled: busy(),
       onClick: () => importIntoSource(sourceId),
     });
+    if (!isFavorite) items.push(putOnStickItem(playlist));
 
     if (isFavorite) {
       items.push(moveFavouritesToNewPlaylistItem(favoriteSlotFromName(playlist.name) ?? undefined));
@@ -216,6 +255,34 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
   return items;
 }
 
+interface FolderMenuOptions {
+  folder: PlaylistInput;
+  onRename?: (folder: PlaylistInput) => void;
+}
+
+export function buildFolderContextMenuItems(opts: FolderMenuOptions): MenuItem[] {
+  const { folder, onRename } = opts;
+  const playlistCount = playlistsInFolder(folder.id).length;
+  const contents =
+    playlistCount === 0
+      ? 'It is empty.'
+      : `Its ${playlistCount} playlist${playlistCount === 1 ? '' : 's'} will be deleted too. The tracks stay in your library.`;
+  return [
+    ...newPlaylistAndFolderItems(folder.id),
+    { isSeparator: true },
+    { label: 'Rename', onClick: () => onRename?.(folder) },
+    { isSeparator: true },
+    {
+      label: 'Delete folder',
+      variant: 'danger',
+      onClick: async () => {
+        if (!confirm(`Delete folder “${folder.name}”? ${contents}`)) return;
+        await deletePlaylist(folder.id);
+      },
+    },
+  ];
+}
+
 interface SectionMenuOptions {
   onNewPlaylist?: () => void;
   onAddFavorite?: () => void;
@@ -256,7 +323,12 @@ export function buildSidebarSectionMenuItems(
     );
   }
   if (section === 'playlists') {
-    items.push({ label: 'New playlist', onClick: () => onNewPlaylist?.() });
+    items.push(
+      { label: 'New playlist', onClick: () => onNewPlaylist?.() },
+      { label: 'New folder', onClick: () => createFolderAndRename(0) },
+      { isSeparator: true },
+      { label: 'Import folder', disabled: busy(), onClick: () => importIntoSource('All Tracks') }
+    );
   }
   if (section === 'usb') {
     items.push({

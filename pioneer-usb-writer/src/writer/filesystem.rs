@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use image::imageops::FilterType;
 use image::ImageFormat;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::Path;
 
@@ -136,6 +137,18 @@ pub fn sync_usb(
     analyses: &[AnalysisResult],
     playlists: &[Playlist],
 ) -> Result<SyncReport> {
+    sync_usb_keeping(output_dir, tracks, analyses, playlists, &HashSet::new())
+}
+
+/// [`sync_usb`], but the files of removed tracks whose `usb_path` is in
+/// `keep_files` stay on the stick. They still drop out of both databases.
+pub fn sync_usb_keeping(
+    output_dir: &Path,
+    tracks: &[Track],
+    analyses: &[AnalysisResult],
+    playlists: &[Playlist],
+    keep_files: &HashSet<String>,
+) -> Result<SyncReport> {
     ensure!(
         tracks.len() == analyses.len(),
         "tracks ({}) and analyses ({}) must have the same length",
@@ -218,7 +231,7 @@ pub fn sync_usb(
     }
 
     // 5. Remove tracks that are no longer in the library
-    for removal in &plan.removals {
+    for removal in plan.removals.iter().filter(|r| !keep_files.contains(&r.usb_path)) {
         if let Err(e) = remove_track_files(output_dir, removal) {
             eprintln!("Warning: cleanup failed for removed track {}: {}", removal.id, e);
         }

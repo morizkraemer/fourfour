@@ -15,6 +15,8 @@ export const COLUMN_MIN_WIDTH = {
   album: 32,
   genre: 32,
   year: 28,
+  rating: 52,
+  color: 24,
   bpm: 36,
   key: 28,
   time: 40,
@@ -22,7 +24,7 @@ export const COLUMN_MIN_WIDTH = {
 
 const DEFAULT_MIN = 20;
 
-const NON_TEXT_COLUMNS = new Set(['fav', 'index', 'wave', 'cover']);
+const NON_TEXT_COLUMNS = new Set(['fav', 'index', 'wave', 'cover', 'rating', 'color']);
 
 export function minWidthForColumn(key, fallback = DEFAULT_MIN) {
   return COLUMN_MIN_WIDTH[key] ?? fallback;

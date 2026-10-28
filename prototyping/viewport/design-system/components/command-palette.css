@@ -207,3 +207,14 @@
   background: var(--ff-elev-hi);
   color: var(--ff-text);
 }
+
+.ff-cp--anchored {
+  position: fixed;
+  z-index: 10100;
+  max-width: none;
+  border-radius: var(--ff-radius-md);
+}
+
+.ff-cp--anchored .ff-cp__content {
+  max-height: min(420px, calc(100vh - 140px));
+}

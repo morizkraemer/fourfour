@@ -160,7 +160,10 @@
 .ff-player-compact__times-group {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 4px;
+  min-width: 14ch;
+  font-variant-numeric: tabular-nums;
 }
 
 .ff-player-compact__time-cur {

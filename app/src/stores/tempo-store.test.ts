@@ -31,7 +31,6 @@ import {
   setKeyLock,
   setKeyShift,
   setTempoPercent,
-  setTempoRange,
   tempo,
   tempoActive,
 } from './tempo.svelte.ts';
@@ -39,7 +38,6 @@ import { initPlayerTransport, loadPlayerTrack, player } from './player.svelte.ts
 
 beforeEach(() => {
   resetTempo();
-  setTempoRange(8);
   setKeyLock(true);
   vi.clearAllMocks();
 });
@@ -49,7 +47,6 @@ describe('tempo store', () => {
     expect(tempo.percent).toBe(0);
     expect(tempo.keyShift).toBe(0);
     expect(tempo.keyLock).toBe(true);
-    expect(tempo.range).toBe(8);
     expect(tempoActive()).toBe(false);
   });
 
@@ -60,20 +57,15 @@ describe('tempo store', () => {
     expect(tempoActive()).toBe(true);
   });
 
-  it('widens the range for a typed tempo and clamps at 50 %', () => {
+  it('clamps the tempo to a quarter and four times the track speed', () => {
     setTempoPercent(12);
-    expect(tempo.range).toBe(16);
+    expect(tempo.percent).toBe(12);
     setTempoPercent(-80);
-    expect(tempo.percent).toBe(-50);
-    expect(tempo.range).toBe(50);
-    expect(engine.tempo).toHaveBeenLastCalledWith(0.5);
-  });
-
-  it('narrowing the range pulls the tempo inside it', () => {
-    setTempoPercent(12);
-    setTempoRange(8);
-    expect(tempo.percent).toBe(8);
-    expect(engine.tempo).toHaveBeenLastCalledWith(1.08);
+    expect(tempo.percent).toBe(-75);
+    expect(engine.tempo).toHaveBeenLastCalledWith(0.25);
+    setTempoPercent(900);
+    expect(tempo.percent).toBe(300);
+    expect(engine.tempo).toHaveBeenLastCalledWith(4);
   });
 
   it('clamps the key shift to an octave', () => {
@@ -101,14 +93,13 @@ describe('tempo store', () => {
     expect(engine.shift).toHaveBeenLastCalledWith(0);
   });
 
-  it('loading a track drops tempo and key shift but keeps range and key lock', async () => {
+  it('loading a track drops tempo and key shift but keeps key lock', async () => {
     setTempoPercent(12);
     setKeyShift(4);
     setKeyLock(false);
     await loadPlayerTrack({ id: 1, filePath: '/music/a.wav', title: 'a', raw: { id: 1, source_path: '/music/a.wav', title: 'a', artist: '', tempo: 12800, key: '8A', duration_secs: 200 } });
     expect(tempo.percent).toBe(0);
     expect(tempo.keyShift).toBe(0);
-    expect(tempo.range).toBe(16);
     expect(tempo.keyLock).toBe(false);
   });
 

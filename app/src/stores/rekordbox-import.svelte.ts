@@ -2,16 +2,20 @@ import {
   listenToRekordboxImportProgress,
   pickDirectory,
   pickFile,
+  rekordboxDefaultMasterDb,
   rekordboxImportPreview,
   rekordboxImportRun,
   type RekordboxImportPreview,
   type RekordboxImportProgress,
   type RekordboxImportReport,
+  type RekordboxRemapStat,
   type RekordboxSourceKind,
 } from '../services/tauri.svelte.ts';
 import { loadState } from './library.svelte.ts';
 
 export type RekordboxImportPhase = 'idle' | 'scanning' | 'ready' | 'importing' | 'done' | 'error';
+
+export type RekordboxRemapRow = { from: string; to: string };
 
 export const REKORDBOX_SOURCES: { kind: RekordboxSourceKind; label: string }[] = [
   { kind: 'master_db', label: 'Rekordbox' },
@@ -23,8 +27,7 @@ export const rekordboxImport = $state({
   open: false,
   kind: 'master_db' as RekordboxSourceKind,
   path: '',
-  prefix: '',
-  musicRoot: '',
+  rows: [] as RekordboxRemapRow[],
   includeMissing: false,
   phase: 'idle' as RekordboxImportPhase,
   preview: null as RekordboxImportPreview | null,
@@ -33,14 +36,24 @@ export const rekordboxImport = $state({
   error: '',
 });
 
+function activeRows() {
+  return rekordboxImport.rows.filter((row) => row.to);
+}
+
 function request() {
   return {
     kind: rekordboxImport.kind,
     path: rekordboxImport.path,
-    remap_from: rekordboxImport.prefix || null,
-    remap_to: rekordboxImport.musicRoot || null,
+    remaps: activeRows().map((row) => ({ from_prefix: row.from, to_prefix: row.to })),
     include_missing: rekordboxImport.includeMissing,
   };
+}
+
+/** Preview result for each row, in row order; rows without a target have none yet. */
+export function rowStats(): (RekordboxRemapStat | null)[] {
+  const stats = rekordboxImport.preview?.remap_stats ?? [];
+  let next = 0;
+  return rekordboxImport.rows.map((row) => (row.to ? (stats[next++] ?? null) : null));
 }
 
 function resetResults() {
@@ -51,9 +64,18 @@ function resetResults() {
   rekordboxImport.error = '';
 }
 
-export function openRekordboxImport() {
+async function useDefaultMasterDb() {
+  if (rekordboxImport.kind !== 'master_db' || rekordboxImport.path) return;
+  const found = await rekordboxDefaultMasterDb();
+  if (!found || rekordboxImport.path || rekordboxImport.kind !== 'master_db') return;
+  rekordboxImport.path = found;
+  await scanRekordboxSource();
+}
+
+export async function openRekordboxImport() {
   resetResults();
   rekordboxImport.open = true;
+  await useDefaultMasterDb();
 }
 
 export function closeRekordboxImport() {
@@ -64,8 +86,9 @@ export function closeRekordboxImport() {
 export function setRekordboxKind(kind: RekordboxSourceKind) {
   rekordboxImport.kind = kind;
   rekordboxImport.path = '';
-  rekordboxImport.prefix = '';
+  rekordboxImport.rows = [];
   resetResults();
+  void useDefaultMasterDb();
 }
 
 export function setRekordboxIncludeMissing(include: boolean) {
@@ -82,15 +105,29 @@ export async function chooseRekordboxSource() {
         : await pickFile({ name: 'Rekordbox master.db', extensions: ['db'] });
   if (!picked) return;
   rekordboxImport.path = picked;
-  rekordboxImport.prefix = '';
+  rekordboxImport.rows = [];
   await scanRekordboxSource();
 }
 
-export async function chooseRekordboxMusicRoot() {
+export function addRekordboxRemapRow() {
+  rekordboxImport.rows.push({ from: '', to: '' });
+}
+
+export async function removeRekordboxRemapRow(index: number) {
+  const hadTarget = !!rekordboxImport.rows[index]?.to;
+  rekordboxImport.rows.splice(index, 1);
+  if (hadTarget) await scanRekordboxSource();
+}
+
+export async function chooseRekordboxRemapTarget(index: number) {
   const picked = await pickDirectory();
-  if (!picked) return;
-  rekordboxImport.musicRoot = picked;
-  if (rekordboxImport.path) await scanRekordboxSource();
+  if (!picked || !rekordboxImport.rows[index]) return;
+  rekordboxImport.rows[index].to = picked;
+  await scanRekordboxSource();
+}
+
+export async function rescanRekordboxRemap() {
+  if (rekordboxImport.rows.some((row) => row.to)) await scanRekordboxSource();
 }
 
 export async function scanRekordboxSource() {
@@ -98,8 +135,11 @@ export async function scanRekordboxSource() {
   rekordboxImport.phase = 'scanning';
   rekordboxImport.error = '';
   try {
-    rekordboxImport.preview = await rekordboxImportPreview(request());
-    if (!rekordboxImport.prefix) rekordboxImport.prefix = rekordboxImport.preview.detected_root;
+    const preview = await rekordboxImportPreview(request());
+    rekordboxImport.preview = preview;
+    if (rekordboxImport.rows.length === 0 && preview.detected_root) {
+      rekordboxImport.rows.push({ from: preview.detected_root, to: '' });
+    }
     rekordboxImport.phase = 'ready';
   } catch (err) {
     rekordboxImport.preview = null;

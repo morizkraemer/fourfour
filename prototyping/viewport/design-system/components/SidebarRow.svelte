@@ -13,6 +13,8 @@
     status,
     action,
     state: rowState = 'rest',
+    depth = 0,
+    expanded,
     splitAction = true,
     renaming = false,
     renameValue = $bindable(''),
@@ -69,7 +71,15 @@
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="ff-sbrow ff-sbrow--{rowState}" {onclick} {ondblclick}>
+  <div
+    class="ff-sbrow ff-sbrow--{rowState}"
+    style:padding-left={depth > 0 ? `calc(var(--ff-space-6) + ${depth * 14}px)` : undefined}
+    {onclick}
+    {ondblclick}
+  >
+    {#if expanded != null}
+      <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={11} class="ff-sbrow__chevron" />
+    {/if}
     {#if kind === 'favorite'}
       <TagBadge value={digit} variant={selected ? 'filled' : 'outline'} size="md" />
     {:else if kind === 'usb'}

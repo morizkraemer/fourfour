@@ -11,9 +11,14 @@
   import PlayerTempo from './PlayerTempo.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
+  import { tempo } from '../stores/tempo.svelte.ts';
+  import { formatBpm, formatShift } from '../lib/tempo.ts';
+  import { altKey } from '../stores/alt-key.svelte.ts';
+  import { padAction, padFace } from '../lib/padModifier.ts';
   import {
     addMemoryCueAtPlayhead,
     deleteCue,
+    deleteHotCue,
     recolorCue,
     renameCue,
     triggerHotCue,
@@ -21,6 +26,7 @@
   import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueMarkers, hotCueIn, slotLetter } from '../lib/cues.ts';
   import {
     player,
+    loadZoomDetail,
     currentTime,
     currentTimeMs,
     totalTime,
@@ -35,6 +41,11 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+
+  $effect(() => {
+    const id = player.track?.id;
+    if (id != null) void loadZoomDetail(id);
+  });
   let trackCues = $derived(cuesOf(player.track?.id));
   let markers = $derived(cueMarkers(trackCues, player.track?.durationMs ?? 0));
   let pads = $derived(
@@ -45,6 +56,15 @@
   );
   let editingSlot = $state(null);
   let editingChip = $derived(pads.find((p) => p.slot === editingSlot)?.chip ?? null);
+
+  function firePad(pad, altHeld) {
+    if (padAction(altHeld, !!pad.chip) === 'delete') {
+      if (editingSlot === pad.slot) editingSlot = null;
+      deleteHotCue(pad.slot);
+    } else {
+      triggerHotCue(pad.slot);
+    }
+  }
 
   function openEditor(e, pad) {
     e.preventDefault();
@@ -97,6 +117,7 @@
       bands={player.track?.bands ?? null}
       bandsDetail={player.track?.bandsDetail ?? null}
       bandsOverview={player.track?.bandsOverview ?? null}
+      bandsZoom={player.track?.bandsZoom ?? null}
       cues={markers}
       beats={player.track?.beats ?? []}
       bpm={player.track?.bpm ?? 0}
@@ -137,7 +158,7 @@
     <div class="ff-xp__pads" role="group" aria-label="Hot cues">
       {#each pads as pad (pad.slot)}
         <button
-          class="ff-xp__pad{pad.chip ? ' ff-xp__pad--set' : ''}"
+          class="ff-xp__pad{pad.chip ? ' ff-xp__pad--set' : ''}{pad.chip && altKey.held ? ' ff-xp__pad--remove' : ''}"
           style:--pad-color={pad.chip?.color}
           title={pad.chip
             ? `${pad.chip.label}: jump and play (right-click to rename, recolour or delete)`
@@ -145,9 +166,9 @@
           aria-label={pad.chip ? `Hot cue ${pad.chip.label}` : `Set hot cue ${pad.letter}`}
           data-pad={pad.letter}
           disabled={!player.track}
-          onpointerdown={(e) => e.button === 0 && triggerHotCue(pad.slot)}
-          onclick={(e) => e.detail === 0 && triggerHotCue(pad.slot)}
-          oncontextmenu={(e) => openEditor(e, pad)}>{pad.letter}</button>
+          onpointerdown={(e) => e.button === 0 && firePad(pad, e.altKey)}
+          onclick={(e) => e.detail === 0 && firePad(pad, e.altKey)}
+          oncontextmenu={(e) => openEditor(e, pad)}>{padFace(pad.letter, !!pad.chip, altKey.held)}</button>
       {/each}
       <button class="ff-xp__pad ff-xp__pad--memory" title="Add cue at the playhead (M)" aria-label="Add cue"
         disabled={!player.track} onclick={() => addMemoryCueAtPlayhead()}>+</button>
@@ -175,6 +196,15 @@
         disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
       <button class="ff-xp__grid-btn" title="Nudge grid right" aria-label="Nudge grid right"
         disabled={!player.track} onclick={() => beatGridNudgeRight()}>▶</button>
+    </div>
+
+    <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">
+      <span class="ff-xp__grid-label">ORIG</span>
+      <span class="ff-xp__orig" title="The track's own BPM and key, and the key shift">
+        <span class="ff-xp__orig-bpm">{formatBpm(Number(player.track?.bpm))}</span>
+        <span class="ff-xp__orig-key">{player.track?.key || '—'}</span>
+        <span class="ff-xp__orig-shift">{formatShift(tempo.keyShift)}</span>
+      </span>
     </div>
 
     <div class="ff-xp__zoom">
@@ -297,6 +327,7 @@
   .ff-xp__pad:hover:not(:disabled) { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); color: var(--ff-text, #fff); }
   .ff-xp__pad--set { background: var(--pad-color); border-color: var(--pad-color); color: #0a0a0a; }
   .ff-xp__pad--set:hover:not(:disabled) { background: var(--pad-color); color: #0a0a0a; filter: brightness(1.12); }
+  .ff-xp__pad--remove { opacity: 0.7; }
   .ff-xp__pad--memory { margin-left: 4px; color: #ff3b30; border-color: rgba(255, 59, 48, 0.4); }
   .ff-xp__pad:disabled { opacity: 0.4; cursor: default; }
   .ff-xp__cue-editor {
@@ -319,6 +350,16 @@
   }
   .ff-xp__grid-btn:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); }
   .ff-xp__grid-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .ff-xp__pitch { display: flex; align-items: center; gap: 8px; }
+  .ff-xp__orig {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--ff-font-mono, monospace); font-size: 10px;
+    font-variant-numeric: tabular-nums; color: var(--ff-muted, rgba(255, 255, 255, 0.5));
+  }
+  .ff-xp__orig-bpm { width: 6ch; text-align: right; }
+  .ff-xp__orig-key { width: 3ch; }
+  .ff-xp__orig-shift { width: 6ch; }
 
   .ff-xp__zoom { display: flex; align-items: center; gap: 4px; }
   .ff-xp__zoom-btn {

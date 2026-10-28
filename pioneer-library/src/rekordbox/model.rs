@@ -60,12 +60,23 @@ pub struct SourceLibrary {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ImportOptions {
-    /// Prefix to replace. `None` uses the detected common root.
-    pub remap_from: Option<String>,
-    /// Replacement root. `None` keeps source paths untouched.
-    pub remap_to: Option<String>,
+    /// "Old location -> new folder" rules; the first matching rule wins. An empty
+    /// `from_prefix` stands for the detected common root. Empty list keeps the
+    /// source's own paths (or its implied remap).
+    #[serde(default)]
+    pub remaps: Vec<PathRemap>,
     /// Import tracks whose audio file cannot be found.
     pub include_missing: bool,
+}
+
+/// How many tracks one remap rule caught and how many of their files exist.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RemapStat {
+    pub from_prefix: String,
+    pub to_prefix: String,
+    pub tracks: u32,
+    pub files_found: u32,
+    pub files_missing: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,7 +90,10 @@ pub struct ImportPreview {
     pub memory_cues: u32,
     pub tracks_with_grid: u32,
     pub detected_root: String,
-    pub remap: Option<PathRemap>,
+    /// One entry per remap rule, in rule order.
+    pub remap_stats: Vec<RemapStat>,
+    /// Tracks no rule matched (they keep their path or the source's implied remap).
+    pub unmapped: RemapStat,
     pub files_found: u32,
     pub files_missing: u32,
     pub missing_examples: Vec<String>,

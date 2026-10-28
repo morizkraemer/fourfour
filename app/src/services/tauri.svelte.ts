@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
+import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
   sanitizeAnalysisPayload,
@@ -53,12 +54,19 @@ export interface TrackInfo {
   waveform_preview?: string | number[] | null;
   /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */
   waveform_bands?: string | number[] | null;
+  /** Rekordbox star rating 1-5, absent when unrated. */
+  rating?: number;
+  /** Rekordbox colour label: a colour name or `#rrggbb`. */
+  color?: string;
 }
 
 export interface PlaylistInput {
   id: number;
   name: string;
   track_ids: number[];
+  /** Containing folder; 0 is the top level. */
+  parent_id: number;
+  is_folder: boolean;
 }
 
 export interface LoadedState {
@@ -166,8 +174,8 @@ if (syntheticTrackCount > 0) {
 }
 
 let mockPlaylists: PlaylistInput[] = [
-  { id: 1, name: 'Peak Time', track_ids: [1, 2] },
-  { id: 2, name: 'Warmup', track_ids: [3] }
+  { id: 1, name: 'Peak Time', track_ids: [1, 2], parent_id: 0, is_folder: false },
+  { id: 2, name: 'Warmup', track_ids: [3], parent_id: 0, is_folder: false }
 ];
 
 let mockVolumes = ['/Volumes/SanDisk 64GB', '/Volumes/VAULT666'];
@@ -186,6 +194,8 @@ if (mockPlaylistCount !== null) {
     id: i + 1,
     name: names[i] ?? `Playlist ${i + 1}`,
     track_ids: [i * 2 + 1, i * 2 + 2],
+    parent_id: 0,
+    is_folder: false,
   }));
 }
 const mockStickCount = mockCountFromUrl('sticks');
@@ -205,6 +215,7 @@ export async function getLibraryPath(): Promise<string> {
     return await invoke<string>('get_library_path');
   } catch (err) {
     lastTauriError = `get_library_path fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return '/mock/user/library.db';
   }
 }
@@ -228,6 +239,7 @@ export async function changeLibraryPath(folderPath: string): Promise<string> {
     return await invoke<string>('change_library_path', { folderPath });
   } catch (err) {
     lastTauriError = `change_library_path fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return folderPath + '/library.db';
   }
 }
@@ -598,6 +610,7 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
     return await invoke<UsbStateResponse | null>('read_usb_state', { path });
   } catch (err) {
     lastTauriError = `read_usb_state fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return {
       tracks: [
         { id: 1, title: 'USB Track 1', artist: 'Artist A', album: 'Album A', genre: 'House', key: '5A', bpm: 124.0, duration: 400, usb_path: '/Contents/Artist A/Album A/01 Track 1.mp3' }
@@ -609,19 +622,287 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
   }
 }
 
-export async function writeUsb(outputDir: string, playlists: PlaylistInput[]): Promise<SyncReport> {
-  try {
-    return await invoke<SyncReport>('write_usb', { outputDir, playlists });
-  } catch (err) {
-    lastTauriError = `write_usb fail: ${String(err)}`;
-    return {
-      tracks_added: 2,
-      tracks_updated: 0,
-      tracks_replaced: 0,
-      tracks_removed: 0,
-      tracks_unchanged: 1,
-    };
+export interface StickContents {
+  stick_id: string | null;
+  track_ids: number[];
+  playlist_ids: number[];
+}
+
+export interface VolumeCapacity {
+  total_bytes: number;
+  free_bytes: number;
+}
+
+export type SyncSelection =
+  | { kind: 'whole_library' }
+  | { kind: 'playlists'; playlist_ids: number[]; track_ids: number[] };
+
+export interface SyncTarget {
+  volume: string;
+  selection: SyncSelection;
+}
+
+export interface PlanTrack {
+  track_id: number | null;
+  title: string;
+  artist: string;
+  size_bytes: number | null;
+}
+
+export interface UsbSyncPlan {
+  volume: string;
+  stick_id: string | null;
+  playlist_count: number;
+  add: PlanTrack[];
+  remove: PlanTrack[];
+  update_count: number;
+  unchanged_count: number;
+  skipped_unanalyzed: PlanTrack[];
+  foreign_kept_count: number;
+  bytes_to_add: number;
+  bytes_to_free: number;
+  bytes_needed: number;
+  free_bytes: number | null;
+  fits: boolean | null;
+}
+
+export type SyncPhase = 'checking-space' | 'copying' | 'writing-database' | 'done' | 'failed';
+
+export interface StickProgress {
+  volume: string;
+  phase: SyncPhase;
+  done: number;
+  total: number;
+  message: string;
+}
+
+export interface StickReport {
+  volume: string;
+  path: string;
+  status: 'done' | 'failed';
+  report: SyncReport | null;
+  error: string | null;
+  skipped_unanalyzed: number;
+  elapsed_ms: number;
+}
+
+const GB = 1_000_000_000;
+const MOCK_TRACK_MARGIN = 128 * 1024;
+const MOCK_BASE_MARGIN = 16 * 1024 * 1024;
+
+const mockCapacities: Record<string, VolumeCapacity> = {
+  '/Volumes/SanDisk 64GB': { total_bytes: 64 * GB, free_bytes: 22.8 * GB },
+  '/Volumes/VAULT666': { total_bytes: 8 * GB, free_bytes: 100_000_000 },
+};
+
+const mockSticks = new Map<string, StickContents>();
+const mockWritten = new Map<string, Set<number>>([['/Volumes/SanDisk 64GB', new Set([1, 2])]]);
+const mockSyncListeners = new Set<(progress: StickProgress) => void>();
+
+function mockStick(path: string): StickContents {
+  return mockSticks.get(path) ?? { stick_id: null, track_ids: [], playlist_ids: [] };
+}
+
+function mockEditStick(path: string, edit: (stick: StickContents) => number): [number, StickContents] {
+  const current = mockStick(path);
+  const stick = {
+    stick_id: current.stick_id ?? `mock-${path.split('/').pop()}`,
+    track_ids: [...current.track_ids],
+    playlist_ids: [...current.playlist_ids],
+  };
+  const changed = edit(stick);
+  mockSticks.set(path, stick);
+  return [changed, stick];
+}
+
+function appendNew(list: number[], ids: number[]): number {
+  const fresh = [...new Set(ids)].filter((id) => !list.includes(id));
+  list.push(...fresh);
+  return fresh.length;
+}
+
+function dropIds(list: number[], ids: number[]): number {
+  const before = list.length;
+  const kept = list.filter((id) => !ids.includes(id));
+  list.splice(0, list.length, ...kept);
+  return before - kept.length;
+}
+
+function mockWantedTrackIds(selection: SyncSelection): number[] {
+  if (selection.kind === 'whole_library') return mockTracks.map((t) => t.id);
+  const wanted = new Set(selection.track_ids);
+  for (const playlist of mockPlaylists) {
+    if (selection.playlist_ids.includes(playlist.id)) playlist.track_ids.forEach((id) => wanted.add(id));
   }
+  return [...wanted];
+}
+
+function mockPlanTrack(id: number): PlanTrack {
+  const track = mockTracks.find((t) => t.id === id);
+  return {
+    track_id: id,
+    title: track?.title ?? `Track ${id}`,
+    artist: track?.artist ?? '',
+    size_bytes: track?.file_size ?? null,
+  };
+}
+
+function mockPlan(target: SyncTarget): UsbSyncPlan {
+  const wanted = mockWantedTrackIds(target.selection);
+  const analyzed = wanted.filter((id) => mockTracks.find((t) => t.id === id)?.has_analysis);
+  const written = mockWritten.get(target.volume) ?? new Set<number>();
+  const add = analyzed.filter((id) => !written.has(id)).map(mockPlanTrack);
+  const remove = [...written].filter((id) => !analyzed.includes(id)).map(mockPlanTrack);
+  const bytesToAdd = add.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
+  const needed = bytesToAdd + MOCK_BASE_MARGIN + MOCK_TRACK_MARGIN * analyzed.length;
+  const free = mockCapacities[target.volume]?.free_bytes ?? null;
+  return {
+    volume: target.volume.split('/').pop() ?? target.volume,
+    stick_id: mockStick(target.volume).stick_id,
+    playlist_count: target.selection.kind === 'playlists' ? target.selection.playlist_ids.length : mockPlaylists.length,
+    add,
+    remove,
+    update_count: 0,
+    unchanged_count: analyzed.length - add.length,
+    skipped_unanalyzed: wanted.filter((id) => !analyzed.includes(id)).map(mockPlanTrack),
+    foreign_kept_count: 0,
+    bytes_to_add: bytesToAdd,
+    bytes_to_free: remove.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0),
+    bytes_needed: needed,
+    free_bytes: free,
+    fits: free === null ? null : needed <= free,
+  };
+}
+
+function mockSyncSteps(target: SyncTarget): Promise<StickReport> {
+  const plan = mockPlan(target);
+  const volume = plan.volume;
+  const total = plan.add.length + plan.unchanged_count;
+  const emit = (phase: SyncPhase, done: number, message: string) =>
+    mockSyncListeners.forEach((listener) => listener({ volume, phase, done, total, message }));
+  return new Promise((resolve) => {
+    emit('checking-space', 0, 'Checking free space');
+    if (plan.fits === false) {
+      const error = `Not enough space on ${volume}. Nothing was written.`;
+      emit('failed', 0, error);
+      resolve({ volume, path: target.volume, status: 'failed', report: null, error, skipped_unanalyzed: plan.skipped_unanalyzed.length, elapsed_ms: 0 });
+      return;
+    }
+    let step = 0;
+    const timer = setInterval(() => {
+      step += 1;
+      if (step <= plan.add.length) {
+        emit('copying', plan.unchanged_count + step, `Copying ${plan.add[step - 1].artist} - ${plan.add[step - 1].title}`);
+        return;
+      }
+      clearInterval(timer);
+      emit('writing-database', total, 'Writing database');
+      const kept = new Set(mockWantedTrackIds(target.selection).filter((id) => mockTracks.find((t) => t.id === id)?.has_analysis));
+      mockWritten.set(target.volume, kept);
+      const capacity = mockCapacities[target.volume];
+      if (capacity) capacity.free_bytes = Math.max(0, capacity.free_bytes - plan.bytes_to_add + plan.bytes_to_free);
+      emit('done', total, 'Safe to eject');
+      resolve({
+        volume,
+        path: target.volume,
+        status: 'done',
+        report: {
+          tracks_added: plan.add.length,
+          tracks_updated: 0,
+          tracks_replaced: 0,
+          tracks_removed: plan.remove.length,
+          tracks_unchanged: plan.unchanged_count,
+        },
+        error: null,
+        skipped_unanalyzed: plan.skipped_unanalyzed.length,
+        elapsed_ms: step * 150,
+      });
+    }, 150);
+  });
+}
+
+export async function getStick(path: string): Promise<StickContents> {
+  try {
+    return await invoke<StickContents>('get_stick', { path });
+  } catch (err) {
+    lastTauriError = `get_stick fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return mockStick(path);
+  }
+}
+
+async function editStick(
+  command: string,
+  args: Record<string, unknown>,
+  path: string,
+  mock: (stick: StickContents) => number
+): Promise<[number, StickContents]> {
+  try {
+    return await invoke<[number, StickContents]>(command, { path, ...args });
+  } catch (err) {
+    lastTauriError = `${command} fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return mockEditStick(path, mock);
+  }
+}
+
+export function stickAddTracks(path: string, trackIds: number[]) {
+  return editStick('stick_add_tracks', { trackIds }, path, (s) => appendNew(s.track_ids, trackIds));
+}
+
+export function stickRemoveTracks(path: string, trackIds: number[]) {
+  return editStick('stick_remove_tracks', { trackIds }, path, (s) => dropIds(s.track_ids, trackIds));
+}
+
+export function stickAddPlaylists(path: string, playlistIds: number[]) {
+  return editStick('stick_add_playlists', { playlistIds }, path, (s) => appendNew(s.playlist_ids, playlistIds));
+}
+
+export function stickRemovePlaylists(path: string, playlistIds: number[]) {
+  return editStick('stick_remove_playlists', { playlistIds }, path, (s) => dropIds(s.playlist_ids, playlistIds));
+}
+
+export async function getVolumeCapacity(path: string): Promise<VolumeCapacity | null> {
+  try {
+    return await invoke<VolumeCapacity>('get_volume_capacity', { path });
+  } catch (err) {
+    lastTauriError = `get_volume_capacity fail: ${String(err)}`;
+    if (!useBrowserMocks()) return null;
+    return mockCapacities[path] ? { ...mockCapacities[path] } : null;
+  }
+}
+
+export async function planUsbSync(target: SyncTarget): Promise<UsbSyncPlan> {
+  try {
+    return await invoke<UsbSyncPlan>('plan_usb_sync', { target });
+  } catch (err) {
+    lastTauriError = `plan_usb_sync fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return mockPlan(target);
+  }
+}
+
+export async function syncUsbMany(targets: SyncTarget[]): Promise<StickReport[]> {
+  try {
+    return await invoke<StickReport[]>('sync_usb_many', { targets });
+  } catch (err) {
+    lastTauriError = `sync_usb_many fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return Promise.all(targets.map(mockSyncSteps));
+  }
+}
+
+export function listenToUsbSyncProgress(callback: (progress: StickProgress) => void) {
+  if (useBrowserMocks()) {
+    mockSyncListeners.add(callback);
+    return () => mockSyncListeners.delete(callback);
+  }
+  return unlistenWhenReady(
+    listen<StickProgress>('usb-sync-progress', (event) => callback(event.payload)),
+    (err) => {
+      lastTauriError = `listen(usb-sync-progress) fail: ${String(err)}`;
+    },
+  );
 }
 
 export async function ejectVolume(path: string): Promise<void> {
@@ -754,6 +1035,16 @@ function mockEditedCues(trackId: number): CuePointPayload[] | undefined {
   return mockCueStore()[trackId] ?? mockCueFallback.get(trackId);
 }
 
+/** The 2400 columns per second 3-band series of a track (`FFWD` bytes), measured from the audio on first use. `null` where there is no backend or no audio. */
+export async function getWaveformDetail(trackId: number): Promise<ArrayBuffer | null> {
+  try {
+    return await invoke<ArrayBuffer>('get_waveform_detail', { trackId });
+  } catch (err) {
+    lastTauriError = `get_waveform_detail fail: ${String(err)}`;
+    return null;
+  }
+}
+
 async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
@@ -835,80 +1126,35 @@ export function listenToAnalysisProgress(
     track_id?: number;
   }) => void,
 ) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) mockAnalysisListeners.progress.add(callback);
-  try {
-    listen<{
-      current: number;
-      total: number;
-      message: string;
-      track_id?: number;
-    }>('analysis-progress', (event) => {
-      callback(event.payload);
-    }).then(unsub => {
-      unsubscribe = unsub;
-    }).catch(err => {
-      lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
-    });
-  } catch (err) {
-    lastTauriError = `listen(analysis-progress) fail: ${String(err)}`;
-  }
-  return () => unsubscribe();
+  return subscribe('analysis-progress', callback);
 }
 
 /** The waveform of a prioritised track is stored; tempo, grid and key follow with the full result. */
 export function listenToAnalysisPartial(callback: (payload: { track_id: number }) => void) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) mockAnalysisListeners.partial.add(callback);
-  try {
-    listen<{ track_id: number }>('analysis-partial', (event) => {
-      callback(event.payload);
-    })
-      .then((unsub) => {
-        unsubscribe = unsub;
-      })
-      .catch((err) => {
-        lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
-      });
-  } catch (err) {
-    lastTauriError = `listen(analysis-partial) fail: ${String(err)}`;
-  }
-  return () => unsubscribe();
+  return subscribe('analysis-partial', callback);
 }
 
 export function listenToAnalysisComplete(callback: () => void) {
-  let unsubscribe: () => void = () => {};
   if (useBrowserMocks()) mockAnalysisListeners.complete.add(callback);
-  try {
-    listen<void>('analysis-complete', () => {
-      callback();
-    })
-      .then((unsub) => {
-        unsubscribe = unsub;
-      })
-      .catch((err) => {
-        lastTauriError = `listen(analysis-complete) fail: ${String(err)}`;
-      });
-  } catch (err) {
-    lastTauriError = `listen(analysis-complete) fail: ${String(err)}`;
-  }
-  return () => unsubscribe();
+  return subscribe<void>('analysis-complete', () => callback());
 }
 
 export function listenToWriteComplete(callback: (payload: SyncReport) => void) {
-  let unsubscribe: () => void = () => {};
+  return subscribe('write-complete', callback);
+}
+
+function subscribe<T>(eventName: string, callback: (payload: T) => void): () => void {
+  const onError = (err: unknown) => {
+    lastTauriError = `listen(${eventName}) fail: ${String(err)}`;
+  };
   try {
-    listen<SyncReport>('write-complete', (event) => {
-      callback(event.payload);
-    }).then(unsub => {
-      unsubscribe = unsub;
-    }).catch(err => {
-      lastTauriError = `listen(write-complete) fail: ${String(err)}`;
-    });
+    return unlistenWhenReady(listen<T>(eventName, (event) => callback(event.payload)), onError);
   } catch (err) {
-    lastTauriError = `listen(write-complete) fail: ${String(err)}`;
+    onError(err);
+    return () => {};
   }
-  return () => unsubscribe();
 }
 
 export async function pickFile(
@@ -935,9 +1181,16 @@ export type RekordboxSourceKind = 'master_db' | 'usb' | 'xml';
 export type RekordboxImportRequest = {
   kind: RekordboxSourceKind;
   path: string;
-  remap_from?: string | null;
-  remap_to?: string | null;
+  remaps: RekordboxRemap[];
   include_missing: boolean;
+};
+
+export type RekordboxRemap = { from_prefix: string; to_prefix: string };
+
+export type RekordboxRemapStat = RekordboxRemap & {
+  tracks: number;
+  files_found: number;
+  files_missing: number;
 };
 
 export type RekordboxImportPreview = {
@@ -950,7 +1203,8 @@ export type RekordboxImportPreview = {
   memory_cues: number;
   tracks_with_grid: number;
   detected_root: string;
-  remap: { from_prefix: string; to_prefix: string } | null;
+  remap_stats: RekordboxRemapStat[];
+  unmapped: RekordboxRemapStat;
   files_found: number;
   files_missing: number;
   missing_examples: string[];
@@ -975,9 +1229,52 @@ export type RekordboxImportReport = {
 
 export type RekordboxImportProgress = { stage: string; done: number; total: number };
 
+export async function rekordboxDefaultMasterDb(): Promise<string | null> {
+  if (useBrowserMocks()) return '/Users/merlin/Library/Pioneer/rekordbox/master.db';
+  try {
+    return await invoke<string | null>('rekordbox_default_master_db');
+  } catch (err) {
+    lastTauriError = `rekordbox_default_master_db fail: ${String(err)}`;
+    return null;
+  }
+}
+
+function mockRekordboxPreview(request: RekordboxImportRequest): RekordboxImportPreview {
+  const stat = (from: string, to: string, tracks: number, missing: number): RekordboxRemapStat => ({
+    from_prefix: from,
+    to_prefix: to,
+    tracks,
+    files_found: tracks - missing,
+    files_missing: missing,
+  });
+  const rules = request.remaps.map((r, i) => stat(r.from_prefix, r.to_prefix, [631, 698, 32][i] ?? 0, [21, 4, 0][i] ?? 0));
+  const caught = rules.reduce((n, r) => n + r.tracks, 0);
+  const missing = rules.reduce((n, r) => n + r.files_missing, 0);
+  return {
+    source: request.kind,
+    tracks: 1382,
+    playlists: 4,
+    folders: 1,
+    skipped_smart_playlists: 0,
+    hot_cues: 212,
+    memory_cues: 340,
+    tracks_with_grid: 1374,
+    detected_root: '/Users/merlinkraemer/local/2-Areas/1-Mukke',
+    remap_stats: rules,
+    unmapped: stat('', '', 1382 - caught, 1382 - caught),
+    files_found: caught - missing,
+    files_missing: 1382 - caught + missing,
+    missing_examples: [],
+    conflicts: 120,
+    new_tracks: 1262,
+    playlist_conflicts: 1,
+  };
+}
+
 export async function rekordboxImportPreview(
   request: RekordboxImportRequest,
 ): Promise<RekordboxImportPreview> {
+  if (useBrowserMocks()) return mockRekordboxPreview(request);
   try {
     return await invoke<RekordboxImportPreview>('rekordbox_import_preview', { request });
   } catch (err) {
@@ -989,6 +1286,21 @@ export async function rekordboxImportPreview(
 export async function rekordboxImportRun(
   request: RekordboxImportRequest,
 ): Promise<RekordboxImportReport> {
+  if (useBrowserMocks()) {
+    return {
+      tracks_imported: 1262,
+      tracks_merged: 120,
+      tracks_skipped_missing: 0,
+      files_found: 1382,
+      files_missing: 0,
+      playlists_imported: 3,
+      playlists_merged: 1,
+      grids_imported: 1374,
+      hot_cues_imported: 212,
+      memory_cues_imported: 340,
+      cues_without_analysis: 0,
+    };
+  }
   try {
     return await invoke<RekordboxImportReport>('rekordbox_import_run', { request });
   } catch (err) {

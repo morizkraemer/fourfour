@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
+use std::collections::HashMap;
 use std::path::Path;
 
 use pioneer_usb_writer::models::{Playlist, Track};
@@ -348,14 +349,18 @@ pub fn select_all_tracks_with_flags(
 // ---------------------------------------------------------------------------
 
 pub fn insert_playlist(conn: &Connection, name: &str) -> Result<i64> {
+    insert_playlist_row(conn, name, 0, false)
+}
+
+pub fn insert_playlist_row(conn: &Connection, name: &str, parent_id: u32, is_folder: bool) -> Result<i64> {
     let sort_order: u32 = conn.query_row(
         "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM playlists",
         [],
         |row| row.get(0),
     )?;
     conn.execute(
-        "INSERT INTO playlists (name, sort_order) VALUES (?1, ?2)",
-        params![name, sort_order],
+        "INSERT INTO playlists (name, sort_order, parent_id, is_folder) VALUES (?1, ?2, ?3, ?4)",
+        params![name, sort_order, (parent_id != 0).then_some(parent_id as i64), is_folder],
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -375,14 +380,75 @@ pub fn delete_playlist(conn: &Connection, id: i64) -> Result<()> {
 
 pub fn set_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: &[i64]) -> Result<()> {
     let tx = conn.unchecked_transaction()?;
-    tx.execute(
+    write_playlist_tracks(&tx, playlist_id, track_ids.iter().copied())?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn write_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: impl Iterator<Item = i64>) -> Result<()> {
+    conn.execute(
         "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
         [playlist_id],
     )?;
-    for (pos, track_id) in track_ids.iter().enumerate() {
-        tx.execute(
+    for (pos, track_id) in track_ids.enumerate() {
+        conn.execute(
             "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
             params![playlist_id, track_id, pos as i64],
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_playlist_tree(playlists: &[Playlist]) -> Result<()> {
+    let by_id: HashMap<u32, &Playlist> = playlists.iter().map(|p| (p.id, p)).collect();
+    for playlist in playlists {
+        if playlist.is_folder && !playlist.track_ids.is_empty() {
+            anyhow::bail!("Folder {} cannot hold tracks", playlist.id);
+        }
+        let mut ancestor = playlist.parent_id;
+        for _ in 0..=playlists.len() {
+            if ancestor == 0 {
+                break;
+            }
+            let Some(parent) = by_id.get(&ancestor) else {
+                anyhow::bail!("Playlist {} has unknown parent {}", playlist.id, ancestor);
+            };
+            if !parent.is_folder {
+                anyhow::bail!("Playlist {} has non-folder parent {}", playlist.id, ancestor);
+            }
+            ancestor = parent.parent_id;
+        }
+        if ancestor != 0 {
+            anyhow::bail!("Playlist {} is inside its own subtree", playlist.id);
+        }
+    }
+    Ok(())
+}
+
+pub fn replace_playlists(conn: &Connection, playlists: &[Playlist]) -> Result<()> {
+    validate_playlist_tree(playlists)?;
+    let tx = conn.unchecked_transaction()?;
+    let existing: Vec<i64> = tx
+        .prepare("SELECT id FROM playlists")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    for id in existing {
+        if !playlists.iter().any(|p| p.id as i64 == id) {
+            tx.execute("DELETE FROM playlists WHERE id = ?1", [id])?;
+        }
+    }
+    for (sort_order, playlist) in playlists.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO playlists (id, name, sort_order, is_folder) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, sort_order = ?3, is_folder = ?4",
+            params![playlist.id as i64, playlist.name, sort_order as i64, playlist.is_folder],
+        )?;
+        write_playlist_tracks(&tx, playlist.id as i64, playlist.track_ids.iter().map(|&t| t as i64))?;
+    }
+    for playlist in playlists {
+        tx.execute(
+            "UPDATE playlists SET parent_id = ?1 WHERE id = ?2",
+            params![(playlist.parent_id != 0).then_some(playlist.parent_id as i64), playlist.id as i64],
         )?;
     }
     tx.commit()?;
@@ -390,34 +456,42 @@ pub fn set_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: &[i64
 }
 
 pub fn select_all_playlists(conn: &Connection) -> Result<Vec<Playlist>> {
-    let mut stmt = conn.prepare("SELECT id, name FROM playlists ORDER BY sort_order")?;
-    let playlist_rows: Vec<(i64, String)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+    let mut stmt = conn.prepare(
+        "SELECT id, name, COALESCE(parent_id, 0), is_folder FROM playlists ORDER BY sort_order",
+    )?;
+    let playlist_rows: Vec<(i64, String, i64, bool)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut playlists = Vec::with_capacity(playlist_rows.len());
-    for (id, name) in playlist_rows {
+    for (id, name, parent_id, is_folder) in playlist_rows {
         let track_ids = select_playlist_track_ids(conn, id)?;
         playlists.push(Playlist {
             id: id as u32,
             name,
             track_ids: track_ids.into_iter().map(|id| id as u32).collect(),
+            parent_id: parent_id as u32,
+            is_folder,
         });
     }
     Ok(playlists)
 }
 
 pub fn select_playlist(conn: &Connection, id: i64) -> Result<Option<Playlist>> {
-    let mut stmt = conn.prepare("SELECT id, name FROM playlists WHERE id = ?1")?;
-    let mut rows = stmt.query_map([id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))?;
+    let mut stmt = conn.prepare("SELECT id, name, COALESCE(parent_id, 0), is_folder FROM playlists WHERE id = ?1")?;
+    let mut rows = stmt.query_map([id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, bool>(3)?))
+    })?;
 
     match rows.next() {
-        Some(Ok((pl_id, name))) => {
+        Some(Ok((pl_id, name, parent_id, is_folder))) => {
             let track_ids = select_playlist_track_ids(conn, pl_id)?;
             Ok(Some(Playlist {
                 id: pl_id as u32,
                 name,
                 track_ids: track_ids.into_iter().map(|id| id as u32).collect(),
+                parent_id: parent_id as u32,
+                is_folder,
             }))
         }
         Some(Err(e)) => Err(e.into()),

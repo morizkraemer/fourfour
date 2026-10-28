@@ -2,9 +2,9 @@ import { addPlaylist, defaultPlaylistName, selectVolume } from './library.svelte
 import { ui, dockOrganizeTarget } from './ui.svelte.ts';
 import { canDockOrganizeAt } from '../lib/newPlaylist.ts';
 
-export async function createPlaylistAndOpen(trackIds: number[] = []): Promise<number> {
+export async function createPlaylistAndOpen(trackIds: number[] = [], parentId = 0): Promise<number> {
   const name = defaultPlaylistName();
-  const playlistId = await addPlaylist(name, trackIds);
+  const playlistId = await addPlaylist(name, trackIds, parentId);
   if (!canDockOrganizeAt(window.innerWidth)) {
     ui.activeSidebarRow = name;
     await selectVolume(null);

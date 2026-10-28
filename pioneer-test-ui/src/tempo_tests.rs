@@ -2,7 +2,7 @@ use super::*;
 
 use std::f32::consts::PI;
 
-use crate::tempo::TempoTarget;
+use crate::tempo::{pitch_factor, TempoTarget};
 
 pub(crate) const SR: u32 = 48_000;
 
@@ -67,19 +67,18 @@ pub(crate) struct Lab {
     pub block: usize,
     pub timings_ns: Vec<u64>,
     pub positions: Vec<f64>,
+    buffered_cap: Option<usize>,
 }
 
 impl Lab {
     pub fn new(source: Vec<f32>, block: usize, preset: Preset) -> Self {
-        let (pipe, cons) = new_sample_pipe();
         let tempo = Arc::new(TempoParams::new());
-        let state = RenderState::new(
-            cons,
-            pipe.clone(),
+        let (state, pipe) = render_pipeline(
             Arc::new(AtomicU32::new(0)),
             Arc::new(AtomicU32::new(0)),
             tempo.clone(),
             SR,
+            2,
             preset,
         );
         let mut lab = Self {
@@ -92,6 +91,7 @@ impl Lab {
             block,
             timings_ns: Vec::new(),
             positions: Vec::new(),
+            buffered_cap: None,
         };
         lab.locate(0);
         lab
@@ -111,7 +111,10 @@ impl Lab {
 
     fn fill(&mut self) {
         let mut producer = lock_ignoring_poison(&self.pipe.producer);
-        let free_frames = producer.vacant_len() / 2;
+        let mut free_frames = producer.vacant_len() / 2;
+        if let Some(cap) = self.buffered_cap {
+            free_frames = free_frames.min(cap.saturating_sub(producer.occupied_len() / 2));
+        }
         let remaining = self.source_frames().saturating_sub(self.next_frame);
         let n = free_frames.min(remaining);
         if n > 0 {
@@ -172,6 +175,17 @@ impl Lab {
         self.tempo.set_ratio(ratio);
         self.tempo.set_semitones(semitones);
         self.tempo.set_key_lock(key_lock);
+    }
+
+    pub fn starve(&mut self, cap: usize, period: usize) {
+        let held = self.state.cons.occupied_len() / 2;
+        let drop = held.saturating_sub(cap).div_ceil(period) * period;
+        self.state.cons.skip(drop.min(held / period * period) * 2);
+        self.buffered_cap = Some(cap);
+    }
+
+    pub fn feed_freely(&mut self) {
+        self.buffered_cap = None;
     }
 
     pub fn settle(&mut self) {
@@ -562,5 +576,176 @@ fn lab_trace() {
             at += w;
         }
         println!("{row}");
+    }
+}
+
+#[test]
+fn returning_to_zero_tempo_with_key_lock_off_does_not_click() {
+    let freq = 3000.0;
+    let theory = 0.5 * (2.0 * PI * freq * 1.08 / SR as f32).powi(2);
+    let mut worst = (0.0f32, 0usize, 0.0f64);
+    for ratio in [0.93, 0.97, 1.03, 1.071] {
+        let mut lab = Lab::new(sine(freq, 12.0, 0.5), 256, STRETCH_PRESET);
+        lab.set(ratio, 0.0, false);
+        lab.settle();
+        let mut out = Vec::new();
+        lab.set(1.0, 0.0, false);
+        for _ in 0..(1.5 * SR as f32 / 256.0) as usize {
+            lab.step(&mut out);
+        }
+        let (spike, at) = max_second_difference(&left(&out), 1);
+        if spike > worst.0 {
+            worst = (spike, at, ratio);
+        }
+    }
+    assert!(worst.0 < theory * 1.05, "spike {} (sine {theory}) at {} from ratio {}", worst.0, worst.1, worst.2);
+}
+
+#[test]
+fn eight_channels_at_192k_stretch_instead_of_falling_back_to_varispeed() {
+    let rate = 192_000u32;
+    let ch = 8usize;
+    let tempo = Arc::new(TempoParams::new());
+    let (mut state, pipe) = render_pipeline(
+        Arc::new(AtomicU32::new(0)),
+        Arc::new(AtomicU32::new(0)),
+        tempo.clone(),
+        rate,
+        ch as u16,
+        STRETCH_PRESET,
+    );
+    tempo.set_ratio(1.08);
+    tempo.set_key_lock(true);
+    pipe.supersede();
+    state.render(&mut [], ch as u16);
+    let mut phase = 0.0f64;
+    let mut frame = vec![0.0f32; ch];
+    let mut out = vec![0.0f32; 512 * ch];
+    let mut stretched = 0;
+    for _ in 0..(rate as usize / 512) {
+        {
+            let mut producer = lock_ignoring_poison(&pipe.producer);
+            while producer.vacant_len() >= ch {
+                frame.fill(0.5 * phase.sin() as f32);
+                producer.push_slice(&frame);
+                phase += 2.0 * std::f64::consts::PI * 440.0 / rate as f64;
+            }
+        }
+        state.render(&mut out, ch as u16);
+        if state.engine.last_path() == Some(crate::tempo::Path::Stretch) {
+            stretched += 1;
+        }
+    }
+    assert!(stretched > 100, "stretch path played in only {stretched} of {} callbacks", rate as usize / 512);
+}
+
+#[test]
+fn non_finite_samples_never_reach_the_output() {
+    for (ratio, semitones, lock) in [(1.0, 0.0, false), (1.08, 0.0, false), (1.08, 0.0, true), (1.0, 2.0, true)] {
+        let mut source = sine(440.0, 6.0, 0.5);
+        let bursts = [(SR as usize, f32::NAN), (2 * SR as usize, f32::INFINITY), (3 * SR as usize, f32::NEG_INFINITY)];
+        for (at, value) in bursts {
+            source[at * 2..(at + 100) * 2].fill(value);
+        }
+        let mut lab = Lab::new(source, 256, STRETCH_PRESET);
+        lab.set(ratio, semitones, lock);
+        let out = lab.run_seconds(5.0);
+        let bad = out.iter().filter(|s| !s.is_finite()).count();
+        assert_eq!(bad, 0, "ratio {ratio} st {semitones} lock {lock}: {bad} non-finite samples");
+        let tail = &out[out.len() - SR as usize..];
+        let tail_peak = tail.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(tail_peak > 0.3, "ratio {ratio} st {semitones} lock {lock}: silent after the bursts, peak {tail_peak}");
+    }
+}
+
+#[test]
+fn stretcher_dropouts_and_path_flips_mid_fade_crossfade_without_clicks() {
+    let period = 192;
+    let freq = SR as f32 / period as f32;
+    let theory = 0.5 * (2.0 * PI * freq / SR as f32).powi(2);
+    let starved = 1_536;
+    let is_stretch = |lab: &Lab| lab.state.engine.last_path() == Some(crate::tempo::Path::Stretch);
+    let check = |label: &str, out: &[f32]| {
+        let (spike, at) = max_second_difference(&left(out), 1);
+        assert!(spike < theory * 3.0, "{label}: spike {spike} (sine {theory}) at frame {at}");
+    };
+
+    let mut lab = Lab::new(sine(freq, 30.0, 0.5), 256, STRETCH_PRESET);
+    lab.set(1.06, 0.0, true);
+    lab.settle();
+    assert!(is_stretch(&lab));
+    let mut out = Vec::new();
+    lab.step(&mut out);
+    lab.starve(starved, period);
+    for _ in 0..40 {
+        lab.step(&mut out);
+    }
+    assert!(!is_stretch(&lab), "stretcher kept playing with {starved} frames buffered");
+    check("dropout", &out);
+
+    lab.feed_freely();
+    let mut out = Vec::new();
+    lab.step(&mut out);
+    for _ in 0..200 {
+        lab.step(&mut out);
+        if is_stretch(&lab) {
+            break;
+        }
+    }
+    assert!(is_stretch(&lab), "stretcher never came back");
+    lab.step(&mut out);
+    lab.set(1.06, 0.0, false);
+    for _ in 0..40 {
+        lab.step(&mut out);
+    }
+    check("key lock off half way into the fade", &out);
+
+    lab.set(1.06, 0.0, true);
+    let mut out = Vec::new();
+    lab.step(&mut out);
+    for _ in 0..200 {
+        lab.step(&mut out);
+        if is_stretch(&lab) {
+            break;
+        }
+    }
+    assert!(is_stretch(&lab), "stretcher never came back after key lock");
+    lab.step(&mut out);
+    lab.starve(starved, period);
+    for _ in 0..40 {
+        lab.step(&mut out);
+    }
+    check("dropout half way into the fade", &out);
+}
+
+#[test]
+fn extreme_ratios_stay_finite_bounded_and_on_pitch() {
+    for ratio in [0.25, 0.5, 2.0, 3.0, 4.0] {
+        for lock in [true, false] {
+            for semitones in [0.0, -12.0, 12.0] {
+                let mut lab = Lab::new(sine(500.0, 6.0 * ratio as f32 + 3.0, 0.5), 256, STRETCH_PRESET);
+                lab.set(ratio, semitones, lock);
+                let out = left(&lab.run_seconds(6.0));
+                assert!(out.iter().all(|s| s.is_finite() && s.abs() <= 1.0), "ratio {ratio} lock {lock} st {semitones}");
+                let pitch = pitch_factor(ratio, semitones, lock);
+                let f = zero_cross_freq(&out, 3 * SR as usize, 5 * SR as usize);
+                let error = cents(f, 500.0 * pitch);
+                assert!(error.abs() < 5.0, "ratio {ratio} lock {lock} st {semitones}: {error:.2} cents");
+            }
+        }
+    }
+}
+
+#[test]
+fn extreme_ratios_play_ten_seconds_in_ten_over_ratio() {
+    for (ratio, lock) in [(0.25, true), (0.25, false), (2.0, true), (4.0, true), (4.0, false)] {
+        let mut lab = Lab::new(sine(440.0, 10.0, 0.5), 256, STRETCH_PRESET);
+        lab.set(ratio, 0.0, lock);
+        lab.settle();
+        lab.locate(0);
+        let out = lab.run_until_drained(60.0);
+        let seconds = out.len() as f64 / 2.0 / SR as f64;
+        let expected = 10.0 / ratio;
+        assert!((seconds - expected).abs() < 0.05 * expected.max(1.0), "ratio {ratio} lock {lock}: {seconds:.3}s vs {expected:.3}s");
     }
 }

@@ -13,7 +13,7 @@
     { key: 'tag', label: '', width: 16, align: 'right' },
   ];
 
-  const SPECIAL_KEYS = new Set(['tag', 'fav', 'wave', 'cover', 'key']);
+  const SPECIAL_KEYS = new Set(['tag', 'fav', 'wave', 'cover', 'key', 'rating', 'color']);
   const DASH_KEYS = new Set(['album', 'genre', 'year']);
 
   function cellPlan(columns) {
@@ -41,6 +41,7 @@
   import ColorSwatch from './ColorSwatch.svelte';
   import Waveform from './Waveform.svelte';
   import { keyColor } from '../utils/key-color.js';
+  import { labelColor } from '../utils/label-color.js';
 
   let { track = {}, state = 'rest', columns = TRACK_COLUMNS, analyzing = false } = $props();
 
@@ -86,6 +87,19 @@
           class="ff-trow__cover"
           style={cover(track) ? `background-image:url(${cover(track)})` : undefined}>
         </div>
+      </div>
+    {:else if cell.kind === 'rating'}
+      {@const stars = Number(track.rating) || 0}
+      <div class="ff-trow__cell ff-trow__cell--rating" style={cell.style} data-col-key={col.key}>
+        {#each [1, 2, 3, 4, 5] as n}
+          <span class="ff-trow__star{n <= stars ? ' ff-trow__star--on' : ''}">★</span>
+        {/each}
+      </div>
+    {:else if cell.kind === 'color'}
+      <div class="ff-trow__cell ff-trow__cell--color" style={cell.style} data-col-key={col.key}>
+        {#if labelColor(track.color)}
+          <ColorSwatch color={labelColor(track.color)} />
+        {/if}
       </div>
     {:else if cell.kind === 'key'}
       {@const k = String(track.key ?? '—')}

@@ -10,6 +10,43 @@ pub fn list_removable_volumes() -> Result<Vec<String>, String> {
     Ok(volumes)
 }
 
+pub fn require_removable_volume(path: &Path) -> Result<(), String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve {}: {e}", path.display()))?;
+    #[cfg(test)]
+    if fake_volumes::contains(&canonical) {
+        return Ok(());
+    }
+    refuse_system_volume(&canonical)?;
+    let is_listed = candidate_volumes()?
+        .iter()
+        .filter(|candidate| is_removable(candidate))
+        .any(|candidate| candidate.canonicalize().is_ok_and(|c| c == canonical));
+    if is_listed {
+        Ok(())
+    } else {
+        Err(format!("{} is not a removable volume.", path.display()))
+    }
+}
+
+#[cfg(test)]
+pub mod fake_volumes {
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    static VOLUMES: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+    pub fn register(path: &Path) {
+        let canonical = path.canonicalize().expect("fake volume must exist");
+        VOLUMES.lock().unwrap().push(canonical);
+    }
+
+    pub(super) fn contains(canonical: &Path) -> bool {
+        VOLUMES.lock().unwrap().iter().any(|v| v == canonical)
+    }
+}
+
 pub fn refuse_system_volume(path: &Path) -> Result<(), String> {
     let canonical = path
         .canonicalize()
@@ -33,9 +70,15 @@ fn is_system_volume(canonical: &Path) -> bool {
         return true;
     }
     match std::env::var_os("HOME") {
-        Some(home) => Path::new(&home).starts_with(canonical),
+        Some(home) => overlaps_home(canonical, Path::new(&home)),
         None => false,
     }
+}
+
+#[cfg(unix)]
+fn overlaps_home(canonical: &Path, home: &Path) -> bool {
+    let home = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    home.starts_with(canonical) || canonical.starts_with(&home)
 }
 
 #[cfg(windows)]
@@ -83,8 +126,28 @@ fn candidate_volumes() -> Result<Vec<PathBuf>, String> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn is_removable(_path: &Path) -> bool {
-    true
+fn is_removable(path: &Path) -> bool {
+    let Ok(mounts) = std::fs::read_to_string("/proc/mounts") else {
+        return false;
+    };
+    let Some(entry) = parse_mounts(&mounts)
+        .into_iter()
+        .find(|entry| Path::new(&entry.mount_point) == path)
+    else {
+        return false;
+    };
+    linux_volume_is_removable(&entry.filesystem, sysfs_removable_flag(&entry.device))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn sysfs_removable_flag(device: &str) -> Option<bool> {
+    let name = Path::new(device).file_name()?;
+    let block = Path::new("/sys/class/block").join(name).canonicalize().ok()?;
+    [Some(block.as_path()), block.parent()]
+        .into_iter()
+        .flatten()
+        .find_map(|dir| std::fs::read_to_string(dir.join("removable")).ok())
+        .map(|flag| flag.trim() == "1")
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -108,11 +171,38 @@ fn plist_bool(xml: &str, key: &str) -> Option<bool> {
 }
 
 #[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
-fn user_mount_points(proc_mounts: &str) -> Vec<PathBuf> {
+struct MountEntry {
+    device: String,
+    mount_point: String,
+    filesystem: String,
+}
+
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+fn parse_mounts(proc_mounts: &str) -> Vec<MountEntry> {
     proc_mounts
         .lines()
-        .filter_map(|line| line.split_whitespace().nth(1))
-        .map(unescape_mount_point)
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some(MountEntry {
+                device: fields.next()?.to_string(),
+                mount_point: unescape_mount_point(fields.next()?),
+                filesystem: fields.next()?.to_string(),
+            })
+        })
+        .collect()
+}
+
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+fn linux_volume_is_removable(filesystem: &str, sysfs_removable: Option<bool>) -> bool {
+    sysfs_removable == Some(true)
+        || ["vfat", "exfat", "hfs", "hfsplus", "ntfs", "ntfs3", "fuseblk"].contains(&filesystem)
+}
+
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+fn user_mount_points(proc_mounts: &str) -> Vec<PathBuf> {
+    parse_mounts(proc_mounts)
+        .into_iter()
+        .map(|entry| entry.mount_point)
         .filter(|mount| ["/media/", "/run/media/", "/mnt/"].iter().any(|prefix| mount.starts_with(prefix)))
         .map(PathBuf::from)
         .collect()
@@ -184,6 +274,44 @@ mod tests {
     }
 
     #[test]
+    fn removable_flag_wins_and_filesystem_is_the_fallback() {
+        assert!(linux_volume_is_removable("ext4", Some(true)));
+        assert!(linux_volume_is_removable("vfat", None));
+        assert!(linux_volume_is_removable("exfat", Some(false)));
+        assert!(!linux_volume_is_removable("ext4", Some(false)));
+        assert!(!linux_volume_is_removable("ext4", None));
+        assert!(!linux_volume_is_removable("nfs4", None));
+        assert!(!linux_volume_is_removable("btrfs", None));
+    }
+
+    #[test]
+    fn parses_device_and_filesystem_from_proc_mounts() {
+        let entries = parse_mounts("/dev/sdb1 /media/merlin/DJ\\040STICK vfat rw 0 0\n");
+        assert_eq!(entries[0].device, "/dev/sdb1");
+        assert_eq!(entries[0].mount_point, "/media/merlin/DJ STICK");
+        assert_eq!(entries[0].filesystem, "vfat");
+    }
+
+    #[test]
+    fn unlisted_folder_is_not_a_removable_volume() {
+        let dir = std::env::temp_dir().join(format!("volumes-test-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let result = require_removable_volume(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registered_fake_volume_is_accepted() {
+        let dir = std::env::temp_dir().join(format!("volumes-test-fake-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        fake_volumes::register(&dir);
+        let result = require_removable_volume(&dir);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn root_is_refused() {
         assert!(refuse_system_volume(Path::new("/")).is_err());
     }
@@ -198,6 +326,16 @@ mod tests {
     fn home_directory_is_refused() {
         let home = std::env::var("HOME").unwrap();
         assert!(refuse_system_volume(Path::new(&home)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn folders_inside_or_above_home_overlap_it() {
+        let home = Path::new("/Users/merlin");
+        assert!(overlaps_home(Path::new("/Users/merlin/Music"), home));
+        assert!(overlaps_home(Path::new("/Users"), home));
+        assert!(!overlaps_home(Path::new("/Volumes/DJ STICK"), home));
+        assert!(!overlaps_home(Path::new("/Users/merlinx"), home));
     }
 
     #[cfg(unix)]

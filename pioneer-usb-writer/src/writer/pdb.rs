@@ -61,6 +61,39 @@ fn encode_string(s: &str) -> Vec<u8> {
     }
 }
 
+fn encoded_len(s: &str) -> usize {
+    if s.is_empty() {
+        1
+    } else if s.is_ascii() {
+        if s.len() <= 126 { 1 + s.len() } else { 4 + s.len() }
+    } else {
+        4 + s.encode_utf16().count() * 2
+    }
+}
+
+fn truncate_to_encoded_len(s: &str, max_encoded: usize) -> &str {
+    if encoded_len(s) <= max_encoded {
+        return s;
+    }
+    let boundaries: Vec<usize> = s.char_indices().map(|(i, _)| i).chain(std::iter::once(s.len())).collect();
+    let (mut lo, mut hi) = (0usize, boundaries.len() - 1);
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if encoded_len(&s[..boundaries[mid]]) <= max_encoded {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    &s[..boundaries[lo]]
+}
+
+const MAX_ROW_HEAP: usize = PAGE_SIZE as usize - HEAP_START - 6 - 2;
+
+fn fit_name(s: &str, fixed_row_bytes: usize) -> &str {
+    truncate_to_encoded_len(s, MAX_ROW_HEAP - fixed_row_bytes)
+}
+
 // ── Page Layout ────────────────────────────────────────────────────
 // Fixed page assignments matching rekordbox CDJ-3000 exports.
 // Verified by binary comparison against a rekordbox-generated export.pdb.
@@ -121,9 +154,9 @@ struct PageChunk {
 
 /// Split pre-built (heap, offsets) into page-sized chunks.
 /// Each chunk's heap + row_group footer must fit in PAGE_SIZE - HEAP_START bytes.
-fn split_into_pages(heap: &[u8], offsets: &[usize]) -> Vec<PageChunk> {
+fn split_into_pages(heap: &[u8], offsets: &[usize]) -> Result<Vec<PageChunk>> {
     if offsets.is_empty() {
-        return vec![PageChunk { heap: Vec::new(), offsets: Vec::new() }];
+        return Ok(vec![PageChunk { heap: Vec::new(), offsets: Vec::new() }]);
     }
 
     let mut chunks = Vec::new();
@@ -156,8 +189,13 @@ fn split_into_pages(heap: &[u8], offsets: &[usize]) -> Vec<PageChunk> {
         }
 
         if chunk_end == chunk_start {
-            // Single row that's too large — force it onto its own page anyway
-            chunk_end = chunk_start + 1;
+            let row_end = offsets.get(chunk_start + 1).copied().unwrap_or(heap.len());
+            anyhow::bail!(
+                "PDB row {} is {} bytes and cannot fit in a {}-byte page",
+                chunk_start,
+                row_end - offsets[chunk_start],
+                PAGE_SIZE
+            );
         }
 
         // Extract this chunk's heap slice and rebase offsets to 0
@@ -180,7 +218,7 @@ fn split_into_pages(heap: &[u8], offsets: &[usize]) -> Vec<PageChunk> {
         chunk_start = chunk_end;
     }
 
-    chunks
+    Ok(chunks)
 }
 
 fn seek_to_page(file: &mut std::fs::File, page: u32) -> Result<u64> {
@@ -447,7 +485,7 @@ fn build_genre_rows(genres: &[String]) -> (Vec<u8>, Vec<usize>) {
     for (i, g) in genres.iter().enumerate() {
         offsets.push(heap.len());
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes());
-        heap.extend_from_slice(&encode_string(g));
+        heap.extend_from_slice(&encode_string(fit_name(g, 4)));
         align_to_4(&mut heap);
     }
     (heap, offsets)
@@ -459,7 +497,7 @@ fn build_label_rows(labels: &[String]) -> (Vec<u8>, Vec<usize>) {
     for (i, l) in labels.iter().enumerate() {
         offsets.push(heap.len());
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes());
-        heap.extend_from_slice(&encode_string(l));
+        heap.extend_from_slice(&encode_string(fit_name(l, 4)));
         align_to_4(&mut heap);
     }
     (heap, offsets)
@@ -476,7 +514,7 @@ fn build_artist_rows(artists: &[String]) -> (Vec<u8>, Vec<usize>) {
         heap.extend_from_slice(&((i + 1) as u32).to_le_bytes()); // id
         heap.push(0x03); // empty string marker
         heap.push(0x0A); // ofs_name_near = 10
-        heap.extend_from_slice(&encode_string(a));
+        heap.extend_from_slice(&encode_string(fit_name(a, 12)));
         // Pad to min 28 bytes
         let row_size = heap.len() - row_start;
         if row_size < 28 {
@@ -501,7 +539,7 @@ fn build_album_rows(albums: &[String], album_artist_map: &HashMap<String, u32>) 
         heap.extend_from_slice(&0u32.to_le_bytes()); // unknown
         heap.push(0x03); // empty string marker
         heap.push(0x16); // ofs_name_near = 22
-        heap.extend_from_slice(&encode_string(a));
+        heap.extend_from_slice(&encode_string(fit_name(a, 24)));
         let row_size = heap.len() - row_start;
         if row_size < 40 {
             heap.extend(std::iter::repeat(0u8).take(40 - row_size));
@@ -523,7 +561,7 @@ fn build_key_rows() -> (Vec<u8>, Vec<usize>) {
         let id = (i + 1) as u32;
         heap.extend_from_slice(&id.to_le_bytes()); // id
         heap.extend_from_slice(&id.to_le_bytes()); // id2
-        heap.extend_from_slice(&encode_string(name));
+        heap.extend_from_slice(&encode_string(fit_name(name, 24)));
         align_to_4(&mut heap);
     }
     (heap, offsets)
@@ -556,7 +594,7 @@ fn build_track_rows(
     label_map: &HashMap<String, u32>,
     remixer_map: &HashMap<String, u32>,
     today: &str,
-) -> (Vec<u8>, Vec<usize>) {
+) -> Result<(Vec<u8>, Vec<usize>)> {
     let mut heap = Vec::new();
     let mut offsets = Vec::new();
 
@@ -647,17 +685,14 @@ fn build_track_rows(
         add(12, &[0x03]); // mix_name
         add(13, &[0x03]); // unknown13
         let anlz_path = anlz::anlz_path_for_pdb(track);
-        add(14, &encode_string(&anlz_path)); // analyze_path
-        add(15, &encode_string(today)); // analyze_date
-        if track.comment.is_empty() {
-            add(16, &[0x03]); // comment
-        } else {
-            add(16, &encode_string(&track.comment)); // comment
-        }
-        add(17, &encode_string(&track.title)); // title
-        add(18, &[0x03]); // unknown18
         let filename = track.source_path.file_name()
             .and_then(|f| f.to_str()).unwrap_or("");
+        let (comment, title, filename) = fit_track_strings(track, &anlz_path, today, filename)?;
+        add(14, &encode_string(&anlz_path)); // analyze_path
+        add(15, &encode_string(today)); // analyze_date
+        add(16, &encode_string(comment)); // comment
+        add(17, &encode_string(title)); // title
+        add(18, &[0x03]); // unknown18
         add(19, &encode_string(filename)); // filename
         add(20, &encode_string(&track.usb_path)); // file_path
 
@@ -679,7 +714,42 @@ fn build_track_rows(
         }
     }
 
-    (heap, offsets)
+    Ok((heap, offsets))
+}
+
+fn fit_track_strings<'a>(
+    track: &'a Track,
+    anlz_path: &str,
+    today: &str,
+    filename: &'a str,
+) -> Result<(&'a str, &'a str, &'a str)> {
+    const FIXED_STRINGS_AND_OFFSETS: usize = 0x88 + 14 + 3;
+    let release_date = if track.year > 0 { encoded_len(&format!("{}-01-01", track.year)) } else { 1 };
+    let fixed = FIXED_STRINGS_AND_OFFSETS
+        + encoded_len(today) * 2
+        + release_date
+        + encoded_len(anlz_path)
+        + encoded_len(&track.usb_path);
+    let mut fields = [track.comment.as_str(), track.title.as_str(), filename];
+    let mut total = fixed + fields.iter().map(|f| encoded_len(f)).sum::<usize>();
+    for field in fields.iter_mut() {
+        if total <= MAX_ROW_HEAP {
+            break;
+        }
+        let old = encoded_len(field);
+        let target = old.saturating_sub(total - MAX_ROW_HEAP);
+        *field = truncate_to_encoded_len(field, target);
+        total -= old - encoded_len(field);
+    }
+    if total > MAX_ROW_HEAP {
+        anyhow::bail!(
+            "track {} ({}): file path and analysis path leave no room in the {}-byte PDB track row",
+            track.id,
+            track.usb_path,
+            MAX_ROW_HEAP
+        );
+    }
+    Ok((fields[0], fields[1], fields[2]))
 }
 
 /// Build the 27 standard browse column definitions for Pioneer CDJ browser.
@@ -872,7 +942,7 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
 
     // Build row data for each table
     let today = Local::now().format("%Y-%m-%d").to_string();
-    let (track_heap, track_offsets) = build_track_rows(tracks, &artist_map, &album_map, &genre_map, &label_map, &remixer_map, &today);
+    let (track_heap, track_offsets) = build_track_rows(tracks, &artist_map, &album_map, &genre_map, &label_map, &remixer_map, &today)?;
     let (genre_heap, genre_offsets) = build_genre_rows(&genres);
     let (artist_heap, artist_offsets) = build_artist_rows(&all_artists);
     let (album_heap, album_offsets) = build_album_rows(&albums, &album_artist_map);
@@ -885,7 +955,7 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     // Build playlist tree and entries from the provided playlists
     let playlist_tree_data: Vec<(u32, u32, u32, &str, bool)> = playlists.iter()
         .enumerate()
-        .map(|(i, p)| (p.id, 0u32, i as u32, p.name.as_str(), false))
+        .map(|(i, p)| (p.id, p.parent_id, i as u32, p.name.as_str(), p.is_folder))
         .collect();
     let (pt_heap, pt_offsets) = build_playlist_tree_rows(&playlist_tree_data);
 
@@ -900,17 +970,17 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     let (pe_heap, pe_offsets) = build_playlist_entry_rows(&playlist_entries);
 
     // Split all table data into page-sized chunks
-    let track_chunks = split_into_pages(&track_heap, &track_offsets);
-    let genre_chunks = split_into_pages(&genre_heap, &genre_offsets);
-    let artist_chunks = split_into_pages(&artist_heap, &artist_offsets);
-    let album_chunks = split_into_pages(&album_heap, &album_offsets);
-    let label_chunks = split_into_pages(&label_heap, &label_offsets);
-    let key_chunks = split_into_pages(&key_heap, &key_offsets);
-    let color_chunks = split_into_pages(&color_heap, &color_offsets);
-    let columns_chunks = split_into_pages(&columns_heap, &columns_offsets);
-    let artwork_chunks = split_into_pages(&artwork_heap, &artwork_offsets);
-    let pt_chunks = split_into_pages(&pt_heap, &pt_offsets);
-    let pe_chunks = split_into_pages(&pe_heap, &pe_offsets);
+    let track_chunks = split_into_pages(&track_heap, &track_offsets)?;
+    let genre_chunks = split_into_pages(&genre_heap, &genre_offsets)?;
+    let artist_chunks = split_into_pages(&artist_heap, &artist_offsets)?;
+    let album_chunks = split_into_pages(&album_heap, &album_offsets)?;
+    let label_chunks = split_into_pages(&label_heap, &label_offsets)?;
+    let key_chunks = split_into_pages(&key_heap, &key_offsets)?;
+    let color_chunks = split_into_pages(&color_heap, &color_offsets)?;
+    let columns_chunks = split_into_pages(&columns_heap, &columns_offsets)?;
+    let artwork_chunks = split_into_pages(&artwork_heap, &artwork_offsets)?;
+    let pt_chunks = split_into_pages(&pt_heap, &pt_offsets)?;
+    let pe_chunks = split_into_pages(&pe_heap, &pe_offsets)?;
 
     // Map table_type -> (chunks, base_sequence)
     // base_sequence = base + (total_rows - 1) * 5
