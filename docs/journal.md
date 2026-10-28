@@ -190,3 +190,4 @@
 2026-10-28 05:23 orchestrator L6/L7 done: wl-sidebar d7a732d (schema v7 folders, nested PDB/OneLibrary export, right-click menus; 334 cargo + 545 vitest); merges after the running check/install; wl-import told to merge it first
 2026-10-28 05:26 orchestrator - Mac install of 2143c4f done (palette + player; 27 cargo, 520 vitest, 0 warnings); wl-sidebar merged → q42-overnight
 2026-10-28 05:37 orchestrator L8/L9 landed-on-branch: wl-import df79dba → q42-overnight f9315b9 (new dep unicode-normalization in pioneer-library; import request shape remaps[]); full checks + Mac install started
+2026-10-28 05:43 orchestrator - Mac install of f9315b9 done (27 cargo, 550 vitest, 0 warnings); round 8 complete
