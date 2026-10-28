@@ -2,13 +2,17 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
-use pioneer_usb_writer::waveform::DetailSeries;
+use pioneer_usb_writer::waveform::{DetailSeries, WindowSeries};
 
-use crate::band_analysis::measure_detail;
+use crate::band_analysis::{measure_detail, measure_detail_window};
 
 const CACHE_LIMIT_FILES: usize = 256;
+const WINDOW_MAX_COLUMNS: usize = 16_384;
+const WINDOW_MAX_SECONDS: f64 = 30.0;
 
 fn cache_file(dir: &Path, audio: &Path) -> Result<PathBuf, String> {
     let meta = fs::metadata(audio).map_err(|e| format!("stat {}: {e}", audio.display()))?;
@@ -56,6 +60,48 @@ pub fn detail_series(dir: &Path, audio: &Path) -> Result<DetailSeries, String> {
     Ok(series)
 }
 
+/// Fine windows of the zoomed waveform. Only the newest request matters: a request supersedes the one before it, whose
+/// decode stops between blocks. The gains of the last track are kept so a window does not re-read its detail series.
+#[derive(Default)]
+pub struct DetailWindows {
+    generation: AtomicU64,
+    gains: Mutex<Option<(PathBuf, [u16; 3])>>,
+}
+
+impl DetailWindows {
+    /// `Ok(None)` when a newer request superseded this one before it finished.
+    pub fn window(
+        &self,
+        cache_dir: &Path,
+        audio: &Path,
+        start_s: f64,
+        end_s: f64,
+        columns: usize,
+    ) -> Result<Option<WindowSeries>, String> {
+        if !(start_s.is_finite() && end_s.is_finite() && end_s > start_s && start_s >= 0.0) {
+            return Err(format!("bad window {start_s}..{end_s} s"));
+        }
+        if end_s - start_s > WINDOW_MAX_SECONDS || columns == 0 || columns > WINDOW_MAX_COLUMNS {
+            return Err(format!("window of {:.3} s in {columns} columns is out of range", end_s - start_s));
+        }
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let gains = self.gains_of(cache_dir, audio)?;
+        let is_current = || self.generation.load(Ordering::SeqCst) == generation;
+        measure_detail_window(audio, gains, start_s, end_s, columns, &is_current)
+    }
+
+    fn gains_of(&self, cache_dir: &Path, audio: &Path) -> Result<[u16; 3], String> {
+        if let Some((path, gains)) = self.gains.lock().map_err(|e| e.to_string())?.as_ref() {
+            if path == audio {
+                return Ok(*gains);
+            }
+        }
+        let gains = detail_series(cache_dir, audio)?.gains;
+        *self.gains.lock().map_err(|e| e.to_string())? = Some((audio.to_path_buf(), gains));
+        Ok(gains)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +147,30 @@ mod tests {
         assert_eq!(cached, 1);
         assert_eq!(first.len(), 2400);
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_window_uses_the_gains_of_the_cached_series_and_rejects_bad_ranges() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-window-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("tone.wav");
+        write_wav(&audio);
+        let cache = dir.join("cache");
+        let windows = DetailWindows::default();
+
+        let window = windows.window(&cache, &audio, 0.5, 0.6, 400).unwrap().unwrap();
+        let series = detail_series(&cache, &audio).unwrap();
+        let bad = [
+            windows.window(&cache, &audio, 0.6, 0.5, 400),
+            windows.window(&cache, &audio, 0.0, 60.0, 400),
+            windows.window(&cache, &audio, 0.0, 0.1, 0),
+        ];
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(window.len(), 400);
+        let low = *window.planes[0].iter().max().unwrap() as i32;
+        let detail_low = *series.planes[0][1200..1440].iter().max().unwrap() as i32;
+        assert!((low - detail_low).abs() <= 4, "window {low} vs detail {detail_low}");
+        assert!(bad.iter().all(|r| r.is_err()));
     }
 }

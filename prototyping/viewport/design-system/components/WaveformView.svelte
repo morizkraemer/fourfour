@@ -19,6 +19,7 @@
     bandsDetail = null,
     bandsOverview = null,
     bandsZoom = null,
+    windowSource = null,
     beats = [],
     cues = [],
     bpm = 0,
@@ -58,6 +59,7 @@
   export function zoomIn() { display?.zoomIn(); }
   export function zoomOut() { display?.zoomOut(); }
   export function resetZoom() { display?.resetZoom(); }
+  export function msPerPixel() { return display?.msPerPixel() ?? 0; }
 
   $effect(() => {
     if (!container) return;
@@ -92,6 +94,11 @@
   // The high-resolution series arrives after the track: no data reset, so zoom and scroll stay.
   $effect(() => {
     if (mode === 'expanded') display?.setDetailBands(bandsZoom ?? undefined);
+  });
+
+  // Fine windows for the deepest zoom levels (see WaveformDisplay.setWindowSource).
+  $effect(() => {
+    if (mode === 'expanded') display?.setWindowSource(windowSource);
   });
 
   // A cue edit redraws the markers only: no data reset, so zoom and scroll stay.

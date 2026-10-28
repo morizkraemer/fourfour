@@ -4,6 +4,9 @@
 //! release of a few milliseconds instead of the `PWV7` release of about 190 ms, so a kick or a hat keeps its
 //! sharp attack and its decay at any zoom. Column `j` covers samples `[round(j * rate / 2400), round((j + 1) * rate / 2400))`;
 //! 16 columns make exactly one `PWV7` column, so the per-band maximum over 16 columns equals the raw `PWV7` band peak.
+//!
+//! [`measure_window`] measures any short stretch of the track at any resolution with the same filters, release and the
+//! gains stored in the series, for zoom levels where even 2400 columns per second are wider than a pixel.
 
 use super::{band_gain, Biquad, Tuning, COLUMNS_PER_SECOND, PWV7_MAX};
 
@@ -11,13 +14,15 @@ pub const DETAIL_COLUMNS_PER_SECOND: f64 = 2400.0;
 const COLUMNS_PER_PWV7_COLUMN: usize = (DETAIL_COLUMNS_PER_SECOND / COLUMNS_PER_SECOND) as usize;
 const RELEASE_MS: [f64; 3] = [10.0, 5.0, 2.5];
 const MAGIC: &[u8; 4] = b"FFWD";
-const FORMAT_VERSION: u8 = 1;
-const HEADER_LEN: usize = 16;
+const FORMAT_VERSION: u8 = 2;
+const HEADER_LEN: usize = 24;
 
 /// Low, mid and high bytes (0..=127, the `PWV7` scale), one plane per band, `columns_per_second` columns per second.
+/// `gains` are the track's `PWV7` band gains the bytes were scaled with; [`measure_window`] needs them to match.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DetailSeries {
     pub columns_per_second: u32,
+    pub gains: [u16; 3],
     pub planes: [Vec<u8>; 3],
 }
 
@@ -30,7 +35,8 @@ impl DetailSeries {
         self.len() == 0
     }
 
-    /// `FFWD`, version, `columns_per_second` (u32 LE), column count (u32 LE), then the low, mid and high planes.
+    /// `FFWD`, version, `columns_per_second` (u32 LE), column count (u32 LE), the three gains (u16 LE), two zero
+    /// bytes, then the low, mid and high planes.
     pub fn to_bytes(&self) -> Vec<u8> {
         let n = self.len();
         let mut out = Vec::with_capacity(HEADER_LEN + 3 * n);
@@ -38,6 +44,10 @@ impl DetailSeries {
         out.extend_from_slice(&[FORMAT_VERSION, 0, 0, 0]);
         out.extend_from_slice(&self.columns_per_second.to_le_bytes());
         out.extend_from_slice(&(n as u32).to_le_bytes());
+        for gain in self.gains {
+            out.extend_from_slice(&gain.to_le_bytes());
+        }
+        out.extend_from_slice(&[0, 0]);
         for plane in &self.planes {
             out.extend_from_slice(plane);
         }
@@ -53,8 +63,9 @@ impl DetailSeries {
         if bytes.len() != HEADER_LEN + 3 * n {
             return Err(format!("detail waveform file is {} bytes, expected {}", bytes.len(), HEADER_LEN + 3 * n));
         }
+        let gain = |k: usize| u16::from_le_bytes(bytes[16 + 2 * k..18 + 2 * k].try_into().expect("2 bytes"));
         let plane = |k: usize| bytes[HEADER_LEN + k * n..HEADER_LEN + (k + 1) * n].to_vec();
-        Ok(DetailSeries { columns_per_second, planes: [plane(0), plane(1), plane(2)] })
+        Ok(DetailSeries { columns_per_second, gains: [gain(0), gain(1), gain(2)], planes: [plane(0), plane(1), plane(2)] })
     }
 }
 
@@ -86,12 +97,7 @@ impl DetailMeter {
             next_edge: (rate / DETAIL_COLUMNS_PER_SECOND).round() as u64,
             peaks: Vec::new(),
             current: [0.0; 3],
-            filters: [
-                Biquad::lowpass(tuning.low_hz, rate),
-                Biquad::highpass(tuning.mid_low_hz, rate),
-                Biquad::lowpass(tuning.mid_high_hz, rate),
-                Biquad::highpass(tuning.high_hz, rate),
-            ],
+            filters: band_filters(&tuning, rate),
         }
     }
 
@@ -132,6 +138,21 @@ impl DetailMeter {
     }
 }
 
+/// Low, mid high-pass, mid low-pass, high.
+fn band_filters(t: &Tuning, rate: f64) -> [Biquad; 4] {
+    [
+        Biquad::lowpass(t.low_hz, rate),
+        Biquad::highpass(t.mid_low_hz, rate),
+        Biquad::lowpass(t.mid_high_hz, rate),
+        Biquad::highpass(t.high_hz, rate),
+    ]
+}
+
+fn to_byte(t: &Tuning, band: usize, gain: u16, env: f64) -> u8 {
+    let linear = (t.band_scale[band] * gain as f64 * env).min(PWV7_MAX as f64);
+    (PWV7_MAX as f64 * (linear / PWV7_MAX as f64).powf(t.curve[band])).round() as u8
+}
+
 /// The `PWV7` gains (from the `PWV7` envelope rebuilt out of the raw peaks), then the fast envelope and the byte scale.
 fn shape(raw: &[[f32; 3]], t: &Tuning) -> DetailSeries {
     let mut gains = [0u16; 3];
@@ -152,11 +173,135 @@ fn shape(raw: &[[f32; 3]], t: &Tuning) -> DetailSeries {
         let mut env = 0.0f64;
         for c in raw {
             env = (c[band] as f64).max(env * release);
-            let linear = (t.band_scale[band] * gains[band] as f64 * env).min(PWV7_MAX as f64);
-            planes[band].push((PWV7_MAX as f64 * (linear / PWV7_MAX as f64).powf(t.curve[band])).round() as u8);
+            planes[band].push(to_byte(t, band, gains[band], env));
         }
     }
-    DetailSeries { columns_per_second: DETAIL_COLUMNS_PER_SECOND as u32, planes }
+    DetailSeries { columns_per_second: DETAIL_COLUMNS_PER_SECOND as u32, gains, planes }
+}
+
+const WINDOW_MAGIC: &[u8; 4] = b"FFWW";
+const WINDOW_FORMAT_VERSION: u8 = 1;
+const WINDOW_HEADER_LEN: usize = 32;
+
+/// One stretch of the track at `len()` evenly spaced columns from `start_s` to `end_s`: the band bytes on the detail
+/// scale, and the lowest and highest mono sample of each column (full scale `i16::MAX`). A column narrower than one
+/// sample holds the signal interpolated at its centre (lowest equals highest), so the samples can be drawn as a line.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WindowSeries {
+    pub sample_rate: u32,
+    pub start_s: f64,
+    pub end_s: f64,
+    pub planes: [Vec<u8>; 3],
+    pub lowest: Vec<i16>,
+    pub highest: Vec<i16>,
+}
+
+impl WindowSeries {
+    pub fn len(&self) -> usize {
+        self.lowest.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// `FFWW`, version, three zero bytes, column count (u32 LE), sample rate (u32 LE), start and end in seconds
+    /// (f64 LE), then the lowest and highest sample planes (i16 LE) and the low, mid and high band planes (u8).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let n = self.len();
+        let mut out = Vec::with_capacity(WINDOW_HEADER_LEN + 7 * n);
+        out.extend_from_slice(WINDOW_MAGIC);
+        out.extend_from_slice(&[WINDOW_FORMAT_VERSION, 0, 0, 0]);
+        out.extend_from_slice(&(n as u32).to_le_bytes());
+        out.extend_from_slice(&self.sample_rate.to_le_bytes());
+        out.extend_from_slice(&self.start_s.to_le_bytes());
+        out.extend_from_slice(&self.end_s.to_le_bytes());
+        for plane in [&self.lowest, &self.highest] {
+            for v in plane {
+                out.extend_from_slice(&v.to_le_bytes());
+            }
+        }
+        for plane in &self.planes {
+            out.extend_from_slice(plane);
+        }
+        out
+    }
+}
+
+/// Measures `[start_s, end_s)` of mono audio into `columns` columns. `mono[0]` is the track's frame `first_frame`;
+/// the audio before `start_s` warms the filters and envelopes up (a quarter second is plenty). `gains` come from the
+/// track's [`DetailSeries`], so the bytes match it where both exist.
+pub fn measure_window(
+    mono: &[f32],
+    first_frame: u64,
+    sample_rate: u32,
+    gains: [u16; 3],
+    start_s: f64,
+    end_s: f64,
+    columns: usize,
+) -> WindowSeries {
+    let t = Tuning::default();
+    let rate = sample_rate.max(1) as f64;
+    let [mut low, mut mid_hp, mut mid_lp, mut high] = band_filters(&t, rate);
+    let release: [f64; 3] = std::array::from_fn(|b| (-1000.0 / (rate * RELEASE_MS[b])).exp());
+    let mut env = [0.0f64; 3];
+    let mut envelopes: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::with_capacity(mono.len()));
+    for &x in mono {
+        let x = x as f64;
+        let band = [low.step(x).abs(), mid_lp.step(mid_hp.step(x)).abs(), high.step(x).abs()];
+        for b in 0..3 {
+            env[b] = band[b].max(env[b] * release[b]);
+            envelopes[b].push(env[b] as f32);
+        }
+    }
+
+    let columns = columns.max(1);
+    let frames_per_column = (end_s - start_s) * rate / columns as f64;
+    let interpolate = |frame: f64, values: &[f32]| -> f64 {
+        let local = frame - first_frame as f64;
+        if local < 0.0 || values.is_empty() || local > (values.len() - 1) as f64 {
+            return 0.0;
+        }
+        let i = local.floor() as usize;
+        let next = values[(i + 1).min(values.len() - 1)] as f64;
+        values[i] as f64 + (next - values[i] as f64) * (local - i as f64)
+    };
+    let to_sample = |v: f64| (v.clamp(-1.0, 1.0) * i16::MAX as f64).round() as i16;
+    let local_index = |frame: f64| ((frame.ceil() as i64 - first_frame as i64).max(0) as usize).min(mono.len());
+
+    let mut out = WindowSeries {
+        sample_rate,
+        start_s,
+        end_s,
+        planes: std::array::from_fn(|_| Vec::with_capacity(columns)),
+        lowest: Vec::with_capacity(columns),
+        highest: Vec::with_capacity(columns),
+    };
+    for c in 0..columns {
+        let from = start_s * rate + c as f64 * frames_per_column;
+        let to = from + frames_per_column;
+        let (i0, i1) = (local_index(from), local_index(to));
+        if i0 < i1 {
+            let span = &mono[i0..i1];
+            let lo = span.iter().copied().fold(f32::INFINITY, f32::min);
+            let hi = span.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            out.lowest.push(to_sample(lo as f64));
+            out.highest.push(to_sample(hi as f64));
+            for b in 0..3 {
+                let peak = envelopes[b][i0..i1].iter().copied().fold(0.0f32, f32::max);
+                out.planes[b].push(to_byte(&t, b, gains[b], peak as f64));
+            }
+        } else {
+            let centre = (from + to) / 2.0;
+            let v = to_sample(interpolate(centre, mono));
+            out.lowest.push(v);
+            out.highest.push(v);
+            for b in 0..3 {
+                out.planes[b].push(to_byte(&t, b, gains[b], interpolate(centre, &envelopes[b])));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -279,5 +424,59 @@ mod tests {
         let series = meter.finish();
         assert_eq!(series.len(), 2400);
         assert!(series.planes.iter().all(|p| p.iter().all(|&v| v == 0)));
+    }
+
+    fn mono(stereo: &[f32]) -> Vec<f32> {
+        stereo.chunks_exact(2).map(|f| (f[0] + f[1]) / 2.0).collect()
+    }
+
+    #[test]
+    fn the_gains_survive_the_bytes() {
+        let (detail, _) = measure(&kick_track(2.0));
+        let series = detail.finish();
+        assert!(series.gains.iter().all(|&g| g > 0));
+        assert_eq!(DetailSeries::from_bytes(&series.to_bytes()).unwrap().gains, series.gains);
+    }
+
+    #[test]
+    fn a_window_at_2400_columns_per_second_matches_the_detail_series() {
+        let samples = kick_track(6.0);
+        let (detail, _) = measure(&samples);
+        let series = detail.finish();
+        let audio = mono(&samples);
+        let first_frame = RATE as u64 * 2;
+        let (start_s, end_s) = (2.5, 3.5);
+        let window = measure_window(&audio[first_frame as usize..], first_frame, RATE, series.gains, start_s, end_s, 2400);
+        assert_eq!(window.len(), 2400);
+        for band in 0..2 {
+            let expected = &series.planes[band][6000..8400];
+            let got = &window.planes[band];
+            let close = got.iter().zip(expected).filter(|(a, b)| (**a as i32 - **b as i32).abs() <= 6).count();
+            assert!(close * 100 >= 95 * got.len(), "band {band}: {close} of {} columns within 6", got.len());
+        }
+    }
+
+    #[test]
+    fn columns_narrower_than_a_sample_follow_the_signal() {
+        let rate = 48_000u32;
+        let audio: Vec<f32> = (0..rate as usize).map(|i| (i as f64 * 2.0 * std::f64::consts::PI * 100.0 / rate as f64).sin() as f32 * 0.5).collect();
+        let (start_s, end_s, columns) = (0.5, 0.501, 480);
+        let window = measure_window(&audio, 0, rate, [1, 1, 1], start_s, end_s, columns);
+        assert!(window.lowest.iter().zip(&window.highest).all(|(a, b)| a == b));
+        for (c, &v) in window.lowest.iter().enumerate() {
+            let t = start_s + (c as f64 + 0.5) * (end_s - start_s) / columns as f64;
+            let expected = (t * 2.0 * std::f64::consts::PI * 100.0).sin() * 0.5 * i16::MAX as f64;
+            assert!((v as f64 - expected).abs() < 40.0, "column {c}: {v} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn a_wide_column_holds_the_lowest_and_highest_sample() {
+        let audio: Vec<f32> = (0..1000).map(|i| if i == 500 { 0.9 } else if i == 510 { -0.4 } else { 0.0 }).collect();
+        let window = measure_window(&audio, 1000, 1000, [1, 1, 1], 1.0, 2.0, 10);
+        assert_eq!(window.highest[5], (0.9 * i16::MAX as f64).round() as i16);
+        assert_eq!(window.lowest[5], (-0.4 * i16::MAX as f64).round() as i16);
+        assert_eq!(window.highest[4], 0);
+        assert_eq!(window.to_bytes().len(), WINDOW_HEADER_LEN + 7 * 10);
     }
 }

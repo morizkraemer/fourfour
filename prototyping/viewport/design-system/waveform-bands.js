@@ -40,6 +40,8 @@ export const BUCKET_PEAK_WEIGHT = { low: 0.2, mid: 0.3, high: 0.4 };
  */
 /** Rekordbox's PWV6 has 1200 columns whatever the track length. */
 export const OVERVIEW_COLUMNS = 1200;
+/** Half width of the overview's smoothing filter, in Rekordbox overview columns. */
+export const OVERVIEW_SMOOTH_COLUMNS = 1.5;
 export const OVERVIEW_PEAK_WEIGHT = { low: 0, mid: 0, high: 0 };
 export const OVERVIEW_SCALE = { low: 0.6, mid: 0.75, high: 2 };
 export const STACK_GAIN = { low: 1.08, mid: 0.62, high: 1.69 };
@@ -126,6 +128,34 @@ export function smoothEnvelope(values, decayPerPixel) {
     values[i] = env;
   }
   return values;
+}
+
+/**
+ * Triangle-weighted moving average with half width `radius` (fractional allowed). Zeros (outside the track) stay
+ * zero and are left out of their neighbours' averages, so the track's edges keep their place.
+ */
+export function smoothTriangle(values, radius) {
+  const n = values.length;
+  const reach = Math.floor(radius);
+  const out = new Float32Array(n);
+  if (reach < 1) {
+    out.set(values);
+    return out;
+  }
+  for (let i = 0; i < n; i++) {
+    if (!(values[i] > 0)) continue;
+    let sum = 0;
+    let weights = 0;
+    for (let k = -reach; k <= reach; k++) {
+      const j = i + k;
+      if (j < 0 || j >= n || !(values[j] > 0)) continue;
+      const w = 1 - Math.abs(k) / (radius + 1);
+      sum += w * values[j];
+      weights += w;
+    }
+    out[i] = sum / weights;
+  }
+  return out;
 }
 
 export function smoothBands(shaped, decayPerPixel) {

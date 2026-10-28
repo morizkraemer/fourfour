@@ -1045,6 +1045,11 @@ export async function getWaveformDetail(trackId: number): Promise<ArrayBuffer | 
   }
 }
 
+/** `columns` columns of the zoom view from `startMs` to `endMs` (`FFWW` bytes), decoded from the audio now. Rejects when a newer request superseded it. */
+export function getWaveformWindow(trackId: number, startMs: number, endMs: number, columns: number): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>('get_waveform_window', { trackId, startS: startMs / 1000, endS: endMs / 1000, columns });
+}
+
 async function fetchAnalysisData(trackId: number): Promise<any> {
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });

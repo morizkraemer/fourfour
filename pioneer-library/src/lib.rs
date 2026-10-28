@@ -1154,6 +1154,25 @@ mod tests {
     }
 
     #[test]
+    fn a_one_millisecond_grid_nudge_is_stored_exactly_through_a_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let (id, before) = {
+            let lib = LocalLibrary::open(&db_path).unwrap();
+            let id = lib.add_track(&make_track("Fine", "/music/f.mp3")).unwrap();
+            lib.set_analysis(id, &banded_analysis()).unwrap();
+            let before = lib.get_analysis(id).unwrap().unwrap();
+            lib.set_beat_grid(id, &shifted(&before, 1)).unwrap();
+            (id, before)
+        };
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let after = lib.get_analysis(id).unwrap().unwrap();
+        let expected: Vec<u32> = before.beat_grid.beats.iter().map(|b| b.time_ms + 1).collect();
+        let times: Vec<u32> = after.beat_grid.beats.iter().map(|b| b.time_ms).collect();
+        assert_eq!(times, expected);
+    }
+
+    #[test]
     fn edited_beat_grid_keeps_pending_stages_and_survives_a_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("library.db");

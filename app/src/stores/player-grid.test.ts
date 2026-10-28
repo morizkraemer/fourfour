@@ -111,6 +111,19 @@ describe('beat grid editing in the player', () => {
     expect(saveCalls()[0][1]).toMatchObject({ trackId: 4 });
   });
 
+  it('nudges by the step it is given, down to one millisecond', () => {
+    beatGridNudgeRight(1);
+    beatGridNudgeRight(1);
+    beatGridNudgeLeft(3);
+    expect(player.track!.beats.map((b) => b.time_ms)).toEqual([499, 999, 1499, 1999, 2499]);
+  });
+
+  it('sets the downbeat to the millisecond the playhead is on', () => {
+    player.progress = 1287.4 / 20_000;
+    beatGridSetCurrent();
+    expect(player.track!.beats.filter((b) => b.bar_position === 1).map((b) => b.time_ms)).toContain(1287);
+  });
+
   it('puts the nearest downbeat on the playhead with Set', async () => {
     player.progress = 1300 / 20_000;
     beatGridSetCurrent();

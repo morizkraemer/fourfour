@@ -101,22 +101,65 @@ export function bandsFromStickBytes(bytes: ArrayLike<number>): BandColumns {
 }
 
 const DETAIL_MAGIC = 'FFWD';
-const DETAIL_HEADER_BYTES = 16;
+const DETAIL_VERSION = 2;
+const DETAIL_HEADER_BYTES = 24;
 
 /**
- * The high-resolution series of `get_waveform_detail` (`FFWD` header, then the low, mid and high planes, bytes on the
- * PWV7 scale). The planes are views into `buffer`, drawn as `byte / 127`; nothing is copied or widened.
+ * The high-resolution series of `get_waveform_detail` (`FFWD` header with the track's band gains, then the low, mid
+ * and high planes, bytes on the PWV7 scale). The planes are views into `buffer`, drawn as `byte / 127`; nothing is
+ * copied or widened.
  */
 export function bandsFromDetailBytes(buffer: ArrayBuffer): ByteBandColumns | null {
   if (buffer.byteLength < DETAIL_HEADER_BYTES) return null;
   const view = new DataView(buffer);
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
   const columns = view.getUint32(12, true);
-  if (magic !== DETAIL_MAGIC || view.getUint8(4) !== 1 || buffer.byteLength !== DETAIL_HEADER_BYTES + 3 * columns) return null;
+  if (magic !== DETAIL_MAGIC || view.getUint8(4) !== DETAIL_VERSION || buffer.byteLength !== DETAIL_HEADER_BYTES + 3 * columns) return null;
   if (columns === 0) return null;
   const plane = (k: number) => new Uint8Array(buffer, DETAIL_HEADER_BYTES + k * columns, columns);
   const unit = 1 / WIRE_FULL_SCALE;
   return { low: plane(0), mid: plane(1), high: plane(2), scale: { low: unit, mid: unit, high: unit } };
+}
+
+/** A fine stretch of the zoom view (`get_waveform_window`): band bytes plus the lowest and highest sample per column. */
+export interface WaveformWindow extends ByteBandColumns {
+  startMs: number;
+  endMs: number;
+  sampleRate: number;
+  /** Lowest and highest mono sample of each column, full scale 32767. */
+  lowest: Int16Array;
+  highest: Int16Array;
+}
+
+const WINDOW_MAGIC = 'FFWW';
+const WINDOW_HEADER_BYTES = 32;
+
+/** `FFWW` bytes of `get_waveform_window` as views into `buffer`, or null for a damaged or foreign buffer. */
+export function windowFromBytes(buffer: ArrayBuffer): WaveformWindow | null {
+  if (buffer.byteLength < WINDOW_HEADER_BYTES) return null;
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  const columns = view.getUint32(8, true);
+  if (magic !== WINDOW_MAGIC || view.getUint8(4) !== 1 || columns === 0) return null;
+  if (buffer.byteLength !== WINDOW_HEADER_BYTES + 7 * columns) return null;
+  const startMs = view.getFloat64(16, true) * 1000;
+  const endMs = view.getFloat64(24, true) * 1000;
+  if (!(endMs > startMs)) return null;
+  const samples = WINDOW_HEADER_BYTES;
+  const bands = samples + 4 * columns;
+  const plane = (k: number) => new Uint8Array(buffer, bands + k * columns, columns);
+  const unit = 1 / WIRE_FULL_SCALE;
+  return {
+    startMs,
+    endMs,
+    sampleRate: view.getUint32(12, true),
+    lowest: new Int16Array(buffer, samples, columns),
+    highest: new Int16Array(buffer, samples + 2 * columns, columns),
+    low: plane(0),
+    mid: plane(1),
+    high: plane(2),
+    scale: { low: unit, mid: unit, high: unit },
+  };
 }
 
 function percentile(values: ArrayLike<number>, p: number): number {
