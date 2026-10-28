@@ -234,3 +234,5 @@
 2026-10-28 18:30 ov-review O1 landed on ov-1028 f61103a: 3 fixes (stale key on fast steps, BPM save overwrote newer grid nudges, edit mode outlived the track); 691 tests; worktree removed
 2026-10-28 18:30 orchestrator O1b followup: grid anchor drift after ×2/÷2 across a save → additive grid_anchor_ms in edits.json, after O7 (same files)
 2026-10-28 18:31 orchestrator O7 spawn: ov-layout build layout-2 A (seat, sonnet high) on ov-1028
+2026-10-28 18:50 ov-smoke O2 landed on ov-1028 1333070: Playwright smoke harness, 12 flows, ~40 s, 3/3 green; dep @playwright/test (app devDep, branch only); O7 told to adapt the edit-mode spec
+2026-10-28 18:51 orchestrator O3 spawn: ov-analysis Rust analyzer status + grid/BPM accuracy (seat, opus medium; Q33 already on master)
