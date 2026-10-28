@@ -204,3 +204,6 @@
 2026-10-28 08:10 orchestrator - wn-inspector e7bd7ee → r10-int (623 tests); waiting on wn-wave
 2026-10-28 08:14 orch-worker ICON2 cost: $0.3908 (opus) — ✅ **Done** - 12-icon board "Play × DJ, dark" committed on the branch. - Blue-accent versions: Playhead, Platter arc, Loop. RESULT: `/home/merlin/dev/projects/fo [branch drain/ICON2-20261028]
 2026-10-28 08:17 orchestrator - interim Mac install of r10-int 9eebded done (28 cargo, 623 vitest, 0 warnings); ICON2 board published (credit opus $0.39); pad jump+play spawn (credit, opus)
+2026-10-28 08:19 orch-worker PADPLAY cost: $0.4904 (opus) — RESULT: ✅ **Done** - Tapping a filled pad on the loaded track now jumps to the cue and plays. It calls the player pads' own function (`triggerHotCue`), so no lo [branch r10-padplay]
+2026-10-28 08:26 orch-worker ICON3 cost: $1.3223 (opus) — ✅ **Done** - Board with 12 icons, no triangles, nothing from the name - Every icon checked headless at 512, 200, 64, 32 and 16 px - All tags close properly; com [branch drain/ICON3-20261028]
+2026-10-28 09:44 orchestrator - wn-wave fa69206 → r10-int 3b9ba19 (P2 cause: envelope release ramps drawn at deep zoom; P3 cause: stale 50 ms tick after pause; FFWD v3); ICON3 board published (credit opus $1.32); Merlin reverted workers to seat subagents; final round-10 checks + Mac install started
