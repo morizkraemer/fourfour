@@ -66,9 +66,9 @@ impl LocalLibrary {
         self.user_edits(track_id).rating.or(imported).filter(|&r| r > 0)
     }
 
-    /// Fit the beat grid to a new BPM: spacing is scaled around the first beat and every beat
-    /// carries the new tempo. Separate from `set_user_bpm` so changing the BPM never moves the grid
-    /// unasked. The BPM is stored as hand-set.
+    /// Re-space the beat grid for a new BPM from its first downbeat, which stays exactly where it is (its
+    /// sub-millisecond place in `grid_offset_ms` is untouched). Beats are laid out over the whole track and carry the
+    /// new tempo; the BPM and the grid are stored as hand-set. A track with no beat grid only gets the BPM.
     pub fn rescale_beat_grid(&self, track_id: i64, new_bpm: f64) -> Result<()> {
         if !new_bpm.is_finite() || !(MIN_BPM..=MAX_BPM).contains(&new_bpm) {
             bail!("BPM {new_bpm} is outside {MIN_BPM} to {MAX_BPM}");
@@ -76,19 +76,21 @@ impl LocalLibrary {
         let mut analysis = self
             .get_analysis(track_id)?
             .context("Track has no analysis to rescale the beat grid of")?;
-        let Some(first) = analysis.beat_grid.beats.first().copied() else {
-            bail!("Track has no beat grid to rescale");
+        let beats = &analysis.beat_grid.beats;
+        let Some(anchor) = beats.iter().find(|b| b.bar_position == 1).or(beats.first()).copied() else {
+            return self.set_user_bpm(track_id, new_bpm);
         };
+        let duration_ms = self.get_track(track_id)?.context("Track not found")?.duration_secs * 1000.0;
         let new_tempo = (new_bpm * 100.0).round() as u32;
-        let factor = first.tempo as f64 / new_tempo as f64;
+        let beat_ms = 6_000_000.0 / new_tempo as f64;
+        let anchor_ms = anchor.time_ms as f64;
+        let first_index = -((anchor_ms / beat_ms).floor() as i64);
+        let last_index = ((duration_ms - anchor_ms) / beat_ms).floor() as i64;
         analysis.beat_grid = BeatGrid {
-            beats: analysis
-                .beat_grid
-                .beats
-                .iter()
-                .map(|b| Beat {
-                    bar_position: b.bar_position,
-                    time_ms: first.time_ms + (b.time_ms.saturating_sub(first.time_ms) as f64 * factor).round() as u32,
+            beats: (first_index..=last_index.max(0))
+                .map(|k| Beat {
+                    bar_position: ((anchor.bar_position as i64 - 1 + k).rem_euclid(4) + 1) as u8,
+                    time_ms: (anchor_ms + k as f64 * beat_ms).round() as u32,
                     tempo: new_tempo,
                 })
                 .collect(),
