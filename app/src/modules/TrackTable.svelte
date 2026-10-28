@@ -25,7 +25,7 @@
     isTrackAnalyzing,
   } from '../stores/library.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
-  import { player, queuePlayAfterLoad, playFromStart, loadPlayerTrack } from '../stores/player.svelte.ts';
+  import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
   import { pickDirectory, prefetchAnalysisData } from '../services/tauri.svelte.ts';
@@ -200,7 +200,9 @@
     if (dragging || isUsbView) return;
     select(track.id);
     lastSelectedId = track.id;
-    if (player.track?.id === track.id && !player.loading) {
+    if (player.track?.id === track.id && !player.loading && event.target.closest?.('[data-wave-seek]')) {
+      if (!player.playing) void play();
+    } else if (player.track?.id === track.id && !player.loading) {
       void playFromStart();
     } else {
       queuePlayAfterLoad();
@@ -307,7 +309,7 @@
   function onRowPointerDown(e, track, index) {
     if (isUsbView || e.button !== 0) return;
     const target = e.target;
-    if (target.closest?.('.ff-colh__resize-handle')) return;
+    if (target.closest?.('.ff-colh__resize-handle') || target.closest?.('[data-wave-seek]')) return;
     e.preventDefault();
 
     const rowEl = e.currentTarget;
@@ -662,6 +664,7 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
+              onWaveSeek={track && !isUsbView ? (progress) => loadTrackAt(track, progress) : undefined}
             />
           </div>
         {/each}

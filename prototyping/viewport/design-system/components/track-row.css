@@ -141,3 +141,21 @@
 .ff-trow--drag {
   opacity: 0.5;
 }
+
+.ff-trow__cell--seekable {
+  position: relative;
+  cursor: pointer;
+}
+.ff-trow__wave-cursor {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: var(--ff-wave-cursor-x, 0);
+  width: 1px;
+  background: var(--ff-wave-playhead, #fff);
+  pointer-events: none;
+  opacity: 0;
+}
+.ff-trow__cell--seekable:hover .ff-trow__wave-cursor {
+  opacity: 1;
+}

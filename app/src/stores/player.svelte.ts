@@ -437,6 +437,14 @@ export async function loadPlayerTrack(input: any) {
   void enrichPlayerTrack(gen, trackInfo.id, base);
 }
 
+/** A click on a row's mini waveform: that track at that point (a seek if it is already loaded, playing or not). */
+export async function loadTrackAt(input: any, progress: number) {
+  const id = normalizeTrackInput(input)?.id;
+  if (id == null) return;
+  if (player.track?.id !== id) await loadPlayerTrack(input);
+  if (player.track?.id === id) await seekToProgress(progress);
+}
+
 /** Start playback after the current selection finishes loading in the player. */
 export function queuePlayAfterLoad() {
   playPending = true;
