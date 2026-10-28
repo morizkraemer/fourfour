@@ -404,37 +404,21 @@ export function sortTracks<T extends Record<string, unknown>>(
   const key = tableLayouts[kind].sortKey;
   if (!key) return tracks;
   const dir = tableLayouts[kind].sortDir === 'asc' ? 1 : -1;
-  return [...tracks].sort((a, b) => {
-    if (key === 'fav') return compareFav(a, b, dir);
-    const av = sortValue(a, key);
-    const bv = sortValue(b, key);
-    if (av === null && bv === null) return 0;
-    if (av === null) return 1;
-    if (bv === null) return -1;
-    if (av < bv) return -1 * dir;
-    if (av > bv) return 1 * dir;
+  const keyed = tracks.map((track) => ({ track, value: key === 'fav' ? favSlot(track) : sortValue(track, key) }));
+  keyed.sort((a, b) => {
+    if (a.value === null && b.value === null) return 0;
+    if (a.value === null) return 1;
+    if (b.value === null) return -1;
+    if (a.value < b.value) return -1 * dir;
+    if (a.value > b.value) return 1 * dir;
     return 0;
   });
+  return keyed.map((entry) => entry.track);
 }
 
 function favSlot(track: Record<string, unknown>): number | null {
   const n = track.fav;
   return typeof n === 'number' && n > 0 ? n : null;
-}
-
-function compareFav(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-  dir: number,
-): number {
-  const af = favSlot(a);
-  const bf = favSlot(b);
-  if (af === null && bf === null) return 0;
-  if (af === null) return 1;
-  if (bf === null) return -1;
-  if (af < bf) return -1 * dir;
-  if (af > bf) return 1 * dir;
-  return 0;
 }
 
 function isBlank(text: string): boolean {
