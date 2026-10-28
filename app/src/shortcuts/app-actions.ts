@@ -32,7 +32,9 @@ import {
   beatGridNudgeLeft,
   beatGridNudgeRight,
   beatGridSetCurrent,
+  beatGridShiftByBeat,
   loadPlayerTrack,
+  setEditing,
 } from '../stores/player.svelte.ts';
 import { tempo, setKeyShift, setKeyLock, resetTempo } from '../stores/tempo.svelte.ts';
 import { zoomWaveIn, zoomWaveOut, zoomWaveToFit } from '../stores/wave-zoom.ts';
@@ -59,6 +61,7 @@ import {
   loadedTrackHasBpm,
   requestBpmEntry,
   stepTrackBpm,
+  stepTrackKey,
 } from '../stores/track-edits.svelte.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
@@ -82,6 +85,7 @@ function noOverlayOpen(): boolean {
 
 function dismissTopLayer() {
   if (ui.settingsOpen) closeSettings();
+  else if (player.editing) setEditing(false);
   else if (ui.searchText.trim()) clearListFilter();
   else toggleExpanded();
 }
@@ -178,6 +182,42 @@ const playerActions: ShortcutAction[] = [
     defaultBinding: null,
     when: () => player.track != null,
     run: () => beatGridSetCurrent(),
+  },
+  {
+    id: 'grid.beatLater',
+    label: 'Shift beat grid one beat later',
+    keywords: ['grid', 'beatgrid', 'beat', 'edit'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.editing,
+    run: () => beatGridShiftByBeat(1),
+  },
+  {
+    id: 'grid.beatEarlier',
+    label: 'Shift beat grid one beat earlier',
+    keywords: ['grid', 'beatgrid', 'beat', 'edit'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.editing,
+    run: () => beatGridShiftByBeat(-1),
+  },
+  {
+    id: 'track.key.up',
+    label: 'Track key +1 on the Camelot wheel',
+    keywords: ['camelot', 'key', 'edit', 'harmonic'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.editing,
+    run: () => void stepTrackKey(player.track!.id, 1),
+  },
+  {
+    id: 'track.key.down',
+    label: 'Track key −1 on the Camelot wheel',
+    keywords: ['camelot', 'key', 'edit', 'harmonic'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.editing,
+    run: () => void stepTrackKey(player.track!.id, -1),
   },
   {
     id: 'tempo.masterTempo',
@@ -548,6 +588,15 @@ export function buildAppActions(): ShortcutAction[] {
       group: GROUP.view,
       defaultBinding: null,
       run: toggleDetailPane,
+    },
+    {
+      id: 'player.edit',
+      label: 'Toggle edit mode (big player)',
+      keywords: ['bpm', 'key', 'grid', 'beatgrid', 'edit', 'track'],
+      group: GROUP.view,
+      defaultBinding: 'E',
+      when: () => noOverlayOpen() && player.expanded && player.track != null,
+      run: () => setEditing(!player.editing),
     },
     ...bpmActions,
     ...favoriteActions,

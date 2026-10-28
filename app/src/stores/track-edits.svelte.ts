@@ -5,12 +5,12 @@
  */
 
 import { library, bumpLibraryTracks } from './library.svelte.ts';
-import { flushBeatGridEdits, player, refreshLoadedBeatGrid, toggleExpanded } from './player.svelte.ts';
+import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setEditing, toggleExpanded } from './player.svelte.ts';
 import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
 import { rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
 import { createPersister } from '../lib/persister.ts';
-import { BPM_MAX, BPM_MIN, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
+import { BPM_MAX, BPM_MIN, camelotStep, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
 import type { Tier } from '../lib/tempo.ts';
 import {
   getAnalysisData,
@@ -115,12 +115,14 @@ export function loadedTrackHasBpm(): boolean {
   return Number(player.track?.bpm) > 0;
 }
 
-/** Open the big player and put its track BPM field into typing mode. */
+/** Open the big player in edit mode and put its track BPM field into typing mode. */
 export async function requestBpmEntry(): Promise<void> {
   if (!player.expanded) {
     toggleExpanded();
     await tick();
   }
+  setEditing(true);
+  await tick();
   bpmEntry.request++;
 }
 
@@ -139,6 +141,12 @@ export async function commitTrackKey(trackId: number, key: string): Promise<bool
   }
   if (player.track?.id === trackId) player.track = { ...player.track, key };
   return true;
+}
+
+export async function stepTrackKey(trackId: number, units: number): Promise<boolean> {
+  const current = trackById(trackId)?.key ?? (player.track?.id === trackId ? player.track.key : '');
+  const next = camelotStep(current ?? '', units);
+  return next !== null && (await commitTrackKey(trackId, next));
 }
 
 export async function commitTrackRating(trackId: number, rating: number): Promise<boolean> {

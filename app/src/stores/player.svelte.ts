@@ -42,6 +42,7 @@ import {
   createGridPersister,
   gridFromStorage,
   shiftBeats,
+  shiftBeatsByBeat,
   shiftToPlaceDownbeatAt,
   type BeatMarker,
 } from '../lib/beatGrid.ts';
@@ -89,6 +90,7 @@ export const player = $state({
   loading: false,
   error: null as string | null,
   expanded: false,
+  editing: false,
   levelLeft: 0,
   levelRight: 0,
   get tempo() {
@@ -103,10 +105,16 @@ export const player = $state({
 /** Toggle the full-screen expanded player (dual-view waveform). */
 export function toggleExpanded() {
   player.expanded = !player.expanded;
+  if (!player.expanded) player.editing = false;
+}
+
+export function setEditing(value: boolean) {
+  player.editing = value && player.expanded && player.track != null;
 }
 
 export function setExpanded(value: boolean) {
   player.expanded = value;
+  if (!value) player.editing = false;
 }
 
 let loadGeneration = 0;
@@ -657,6 +665,14 @@ export function beatGridNudgeLeft(stepMs = BEAT_NUDGE_MS) {
 
 export function beatGridNudgeRight(stepMs = BEAT_NUDGE_MS) {
   beatGridShift(stepMs);
+}
+
+export function beatGridShiftByBeat(direction: 1 | -1) {
+  const t = player.track;
+  if (!t || t.beats.length < 2) return;
+  const beats = shiftBeatsByBeat(t.beats, direction);
+  player.track = { ...t, beats };
+  gridPersister.schedule(t.id, beats);
 }
 
 /** Where the playhead is right now: while playing, the transport clock (reports only arrive every 50 ms); else the stored position. */
