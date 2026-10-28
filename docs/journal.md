@@ -212,3 +212,4 @@
 2026-10-28 10:28 orchestrator - wo-table bb34f5c → r11-int 19f0f0f (639 tests; Q10 cause: window.confirm is a no-op in WKWebView, so every delete was silently cancelled; Q9 cause: picker card had no drop attribute); wo-palette Q6–Q8 spawn (seat, sonnet)
 2026-10-28 10:33 orchestrator - wo-palette da56ce4 → r11-int de2bdb9 (644 tests); interim checks + Mac install started; wo-zoom still running
 2026-10-28 11:07 orchestrator - wo-zoom d4b0778 → r11-int 7f6e2d0 (edits.rs conflict: kept rating + grid_offset_ms); zoom look D live, A/B/C at preview :5235 (#zoom-look, served from wo-zoom worktree — keep it until Merlin picks); full checks + Mac install started
+2026-10-28 11:14 orchestrator - Mac install of r11-int 7f6e2d0 done (28 cargo, 658 vitest, 0 warnings); Merlin picked zoom look D (comment on :5233: maybe ditch the 3-band look later); wo-zoom worktree + :5235 preview removed
