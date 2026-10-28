@@ -60,6 +60,9 @@ export interface PlaylistInput {
   id: number;
   name: string;
   track_ids: number[];
+  /** Containing folder; 0 is the top level. */
+  parent_id: number;
+  is_folder: boolean;
 }
 
 export interface LoadedState {
@@ -167,8 +170,8 @@ if (syntheticTrackCount > 0) {
 }
 
 let mockPlaylists: PlaylistInput[] = [
-  { id: 1, name: 'Peak Time', track_ids: [1, 2] },
-  { id: 2, name: 'Warmup', track_ids: [3] }
+  { id: 1, name: 'Peak Time', track_ids: [1, 2], parent_id: 0, is_folder: false },
+  { id: 2, name: 'Warmup', track_ids: [3], parent_id: 0, is_folder: false }
 ];
 
 let mockVolumes = ['/Volumes/SanDisk 64GB', '/Volumes/VAULT666'];
@@ -187,6 +190,8 @@ if (mockPlaylistCount !== null) {
     id: i + 1,
     name: names[i] ?? `Playlist ${i + 1}`,
     track_ids: [i * 2 + 1, i * 2 + 2],
+    parent_id: 0,
+    is_folder: false,
   }));
 }
 const mockStickCount = mockCountFromUrl('sticks');

@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use pioneer_usb_writer::models::Track;
+use pioneer_usb_writer::models::{Playlist, Track};
 
 use crate::{LocalLibrary, queries};
 
@@ -125,7 +125,42 @@ impl LibraryIndex {
     }
 }
 
-/// Playlist display names with folders flattened into "Folder / Playlist".
+/// "Folder / Playlist" path of every library playlist, in the same order.
+fn playlist_paths(playlists: &[Playlist]) -> Vec<String> {
+    let by_id: HashMap<u32, &Playlist> = playlists.iter().map(|p| (p.id, p)).collect();
+    playlists
+        .iter()
+        .map(|playlist| {
+            let mut names = vec![playlist.name.as_str()];
+            let mut parent = playlist.parent_id;
+            while let Some(folder) = by_id.get(&parent) {
+                names.push(folder.name.as_str());
+                parent = folder.parent_id;
+            }
+            names.reverse();
+            names.join(" / ")
+        })
+        .collect()
+}
+
+/// The folders around a source playlist, outermost first.
+fn folder_chain<'a>(
+    by_id: &HashMap<&str, &'a SourcePlaylist>,
+    playlist: &SourcePlaylist,
+) -> Vec<&'a SourcePlaylist> {
+    let mut chain = Vec::new();
+    let mut parent = playlist.parent_id.as_deref();
+    for _ in 0..16 {
+        let Some(folder) = parent.and_then(|id| by_id.get(id)) else { break };
+        chain.push(*folder);
+        parent = folder.parent_id.as_deref();
+    }
+    chain.reverse();
+    chain
+}
+
+/// Source playlists keyed by their "Folder / Playlist" path, which is also how
+/// they are matched against playlists already in the library.
 fn flattened_playlists(source: &SourceLibrary) -> Vec<(&SourcePlaylist, String)> {
     let by_id: HashMap<&str, &SourcePlaylist> =
         source.playlists.iter().map(|p| (p.source_id.as_str(), p)).collect();
@@ -134,14 +169,8 @@ fn flattened_playlists(source: &SourceLibrary) -> Vec<(&SourcePlaylist, String)>
         .iter()
         .filter(|p| !p.is_folder)
         .map(|p| {
-            let mut names = vec![p.name.as_str()];
-            let mut parent = p.parent_id.as_deref();
-            for _ in 0..16 {
-                let Some(folder) = parent.and_then(|id| by_id.get(id)) else { break };
-                names.push(folder.name.as_str());
-                parent = folder.parent_id.as_deref();
-            }
-            names.reverse();
+            let mut names: Vec<&str> = folder_chain(&by_id, p).iter().map(|f| f.name.as_str()).collect();
+            names.push(p.name.as_str());
             (p, names.join(" / "))
         })
         .collect();
@@ -261,8 +290,7 @@ impl LocalLibrary {
             memory_cues += memory;
         }
 
-        let existing_names: HashSet<String> =
-            self.get_all_playlists()?.into_iter().map(|p| p.name).collect();
+        let existing_names: HashSet<String> = playlist_paths(&self.get_all_playlists()?).into_iter().collect();
         let named = flattened_playlists(source);
         let playlist_conflicts =
             named.iter().filter(|(_, name)| existing_names.contains(name)).count() as u32;
@@ -441,12 +469,23 @@ impl LocalLibrary {
         progress: &(dyn Fn(ImportProgress) + Sync),
         report: &mut RekordboxImportReport,
     ) -> Result<()> {
-        let mut existing: HashMap<String, (i64, Vec<i64>)> = self
-            .get_all_playlists()?
-            .into_iter()
-            .map(|p| (p.name.clone(), (p.id as i64, p.track_ids.iter().map(|&t| t as i64).collect())))
+        let library_playlists = self.get_all_playlists()?;
+        let library_paths = playlist_paths(&library_playlists);
+        let mut folders: HashMap<String, i64> = library_playlists
+            .iter()
+            .zip(&library_paths)
+            .filter(|(p, _)| p.is_folder)
+            .map(|(p, path)| (path.clone(), p.id as i64))
+            .collect();
+        let mut existing: HashMap<String, (i64, Vec<i64>)> = library_playlists
+            .iter()
+            .zip(&library_paths)
+            .filter(|(p, _)| !p.is_folder)
+            .map(|(p, path)| (path.clone(), (p.id as i64, p.track_ids.iter().map(|&t| t as i64).collect())))
             .collect();
 
+        let source_by_id: HashMap<&str, &SourcePlaylist> =
+            source.playlists.iter().map(|p| (p.source_id.as_str(), p)).collect();
         let named = flattened_playlists(source);
         let total = named.len() as u32;
         for (i, (playlist, name)) in named.iter().enumerate() {
@@ -471,7 +510,23 @@ impl LocalLibrary {
                     report.playlists_merged += 1;
                 }
                 None => {
-                    let playlist_id = self.create_playlist(name)?;
+                    let mut parent_id = 0;
+                    let mut folder_path = String::new();
+                    for folder in folder_chain(&source_by_id, playlist) {
+                        if !folder_path.is_empty() {
+                            folder_path.push_str(" / ");
+                        }
+                        folder_path.push_str(&folder.name);
+                        parent_id = match folders.get(&folder_path) {
+                            Some(&id) => id as u32,
+                            None => {
+                                let id = self.create_folder(&folder.name, parent_id)?;
+                                folders.insert(folder_path.clone(), id);
+                                id as u32
+                            }
+                        };
+                    }
+                    let playlist_id = self.create_playlist_in(&playlist.name, parent_id)?;
                     self.set_playlist_tracks(playlist_id, &ids)?;
                     existing.insert(name.clone(), (playlist_id, ids));
                     report.playlists_imported += 1;

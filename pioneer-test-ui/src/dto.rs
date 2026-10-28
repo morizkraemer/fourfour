@@ -91,6 +91,10 @@ pub struct PlaylistInput {
     pub id: u32,
     pub name: String,
     pub track_ids: Vec<u32>,
+    #[serde(default)]
+    pub parent_id: u32,
+    #[serde(default)]
+    pub is_folder: bool,
 }
 
 /// Payload emitted during analysis to report progress.

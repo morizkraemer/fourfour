@@ -279,6 +279,7 @@ fn playlist(id: i64, name: &str, tracks: &[i64]) -> pioneer_usb_writer::models::
         id: id as u32,
         name: name.to_string(),
         track_ids: tracks.iter().map(|&t| t as u32).collect(),
+        ..Default::default()
     }
 }
 

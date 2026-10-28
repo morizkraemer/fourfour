@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildColumnContextMenuItems,
+  buildFolderContextMenuItems,
   buildSidebarSectionMenuItems,
   buildSourceContextMenuItems,
   buildTrackContextMenuItems,
@@ -61,7 +62,7 @@ describe('buildTrackContextMenuItems', () => {
     expect(one.at(-1)).toMatchObject({ label: 'Remove from library', variant: 'danger' });
   });
   it('names the active playlist in the remove entry for multi-selection', () => {
-    const pl = { id: 5, name: 'Warmup', track_ids: [1, 2] } as any;
+    const pl = { id: 5, name: 'Warmup', track_ids: [1, 2], parent_id: 0, is_folder: false } as any;
     const many = buildTrackContextMenuItems({ trackIds: [1, 2], activePlaylist: pl, isUsbView: false });
     const single = buildTrackContextMenuItems({ trackIds: [1], activePlaylist: pl, isUsbView: false });
     expect(many.map((i) => i.label)).toContain('Remove from Warmup');
@@ -137,8 +138,8 @@ describe('favourites to playlist', () => {
 describe('buildSourceContextMenuItems rename', () => {
   it('offers Rename first for a normal playlist and not for a favorite slot', () => {
     library.playlists = [
-      { id: 1, name: 'Warmup', track_ids: [] },
-      { id: 2, name: 'Favorites 1', track_ids: [] },
+      { id: 1, name: 'Warmup', track_ids: [], parent_id: 0, is_folder: false },
+      { id: 2, name: 'Favorites 1', track_ids: [], parent_id: 0, is_folder: false },
     ];
     const renamed: string[] = [];
     const onRenamePlaylist = (p: { name: string }) => renamed.push(p.name);
@@ -149,6 +150,75 @@ describe('buildSourceContextMenuItems rename', () => {
     const favorite = buildSourceContextMenuItems({ sourceId: 'Favorites 1', onRenamePlaylist });
     expect(favorite.map((i) => i.label)).not.toContain('Rename');
     expect(buildSourceContextMenuItems({ sourceId: 'Warmup' }).map((i) => i.label)).not.toContain('Rename');
+    library.playlists = [];
+  });
+});
+
+describe('playlist folder menus', () => {
+  const tree = () => [
+    { id: 1, name: 'Sets', track_ids: [], parent_id: 0, is_folder: true },
+    { id: 2, name: 'Friday', track_ids: [5], parent_id: 1, is_folder: false },
+    { id: 3, name: 'Loose', track_ids: [], parent_id: 0, is_folder: false },
+  ];
+
+  it('offers new playlist, new folder and import folder on the playlists section', () => {
+    expect(buildSidebarSectionMenuItems('playlists').map((i) => i.label)).toEqual([
+      'New playlist',
+      'New folder',
+      undefined,
+      'Import folder',
+    ]);
+  });
+
+  it('gives a playlist rename, duplicate, creation, import, stick and delete entries', () => {
+    library.playlists = tree();
+    const labels = buildSourceContextMenuItems({ sourceId: 'Friday', onRenamePlaylist: () => {} }).map((i) => i.label);
+    expect(labels).toEqual([
+      'Rename',
+      'Duplicate',
+      undefined,
+      'New playlist',
+      'New folder',
+      undefined,
+      'Import folder',
+      'Put on stick',
+      undefined,
+      'Delete playlist',
+    ]);
+    library.playlists = [];
+  });
+
+  it('lists the connected sticks under Put on stick and disables it with none', () => {
+    library.playlists = tree();
+    library.volumes = ['/Volumes/STICK A', '/Volumes/STICK B'];
+    const find = () => buildSourceContextMenuItems({ sourceId: 'Loose' }).find((i) => i.label === 'Put on stick')!;
+    expect(find().items!.map((i) => i.label)).toEqual(['STICK A', 'STICK B']);
+    library.volumes = [];
+    expect(find().disabled).toBe(true);
+    library.playlists = [];
+  });
+
+  it('gives a folder creation, rename and delete entries', () => {
+    library.playlists = tree();
+    const renamed: string[] = [];
+    const items = buildFolderContextMenuItems({ folder: library.playlists[0], onRename: (f) => renamed.push(f.name) });
+    expect(items.map((i) => i.label)).toEqual([
+      'New playlist',
+      'New folder',
+      undefined,
+      'Rename',
+      undefined,
+      'Delete folder',
+    ]);
+    items.find((i) => i.label === 'Rename')!.onClick!();
+    expect(renamed).toEqual(['Sets']);
+    expect(items.at(-1)!.variant).toBe('danger');
+    library.playlists = [];
+  });
+
+  it('does not treat a folder as the playlist of the same name', () => {
+    library.playlists = [{ id: 1, name: 'Sets', track_ids: [], parent_id: 0, is_folder: true }];
+    expect(buildSourceContextMenuItems({ sourceId: 'Sets' })).toEqual([]);
     library.playlists = [];
   });
 });

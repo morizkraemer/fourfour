@@ -159,13 +159,19 @@ pub struct AnalysisResult {
 }
 
 /// A playlist containing a subset of tracks.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Playlist {
     /// 1-based playlist ID stored in the PDB playlists table.
     pub id: u32,
     pub name: String,
     /// Track IDs belonging to this playlist (references `Track::id`).
     pub track_ids: Vec<u32>,
+    /// ID of the containing folder; 0 is the root.
+    #[serde(default)]
+    pub parent_id: u32,
+    /// Folders hold other playlists instead of tracks.
+    #[serde(default)]
+    pub is_folder: bool,
 }
 
 /// A track read back from an existing USB's OneLibrary database.

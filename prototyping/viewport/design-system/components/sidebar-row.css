@@ -9,6 +9,10 @@
 .ff-sbrow .ff-icon {
   color: var(--ff-muted);
 }
+.ff-sbrow .ff-sbrow__chevron {
+  flex: none;
+  margin-right: calc(var(--ff-space-2) * -1);
+}
 .ff-sbrow__label {
   flex: 1 1 0;
   min-width: 0;

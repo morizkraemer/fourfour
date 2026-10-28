@@ -955,7 +955,7 @@ pub fn write_pdb(output_path: &Path, tracks: &[Track], playlists: &[Playlist]) -
     // Build playlist tree and entries from the provided playlists
     let playlist_tree_data: Vec<(u32, u32, u32, &str, bool)> = playlists.iter()
         .enumerate()
-        .map(|(i, p)| (p.id, 0u32, i as u32, p.name.as_str(), false))
+        .map(|(i, p)| (p.id, p.parent_id, i as u32, p.name.as_str(), p.is_folder))
         .collect();
     let (pt_heap, pt_offsets) = build_playlist_tree_rows(&playlist_tree_data);
 
