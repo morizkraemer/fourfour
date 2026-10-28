@@ -63,29 +63,23 @@ fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
 // Commands
 // ---------------------------------------------------------------------------
 
-/// Scan a directory for audio files and add them to the library.
-#[tauri::command]
-fn scan_directory(
-    path: String,
-    state: State<'_, SharedLibrary>,
-) -> Result<Vec<TrackInfo>, String> {
-    let dir = Path::new(&path);
-    let scanned = scanner::scan_directory(dir).map_err(|e| e.to_string())?;
-
-    let lib = state.lock().map_err(|e| e.to_string())?;
-
-    let mut added = Vec::new();
-    for track in &scanned {
-        // Skip tracks already in the library
-        if lib
-            .track_exists_by_path(&track.source_path)
-            .map_err(|e| e.to_string())?
-        {
+fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result<Vec<TrackInfo>, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut fresh = Vec::new();
+    for track in scanned {
+        if !seen.insert(track.source_path.clone()) {
             continue;
         }
-        let id = lib.add_track(track).map_err(|e| e.to_string())?;
-        let has_artwork = track.artwork.is_some();
-        added.push(TrackInfo {
+        if lib.track_exists_by_path(&track.source_path).map_err(|e| e.to_string())? {
+            continue;
+        }
+        fresh.push(track);
+    }
+    let ids = lib.add_tracks(&fresh).map_err(|e| e.to_string())?;
+    Ok(fresh
+        .iter()
+        .zip(ids)
+        .map(|(track, id)| TrackInfo {
             id: id as u32,
             source_path: track.source_path.to_string_lossy().to_string(),
             title: track.title.clone(),
@@ -97,7 +91,7 @@ fn scan_directory(
             duration_secs: track.duration_secs,
             bitrate: track.bitrate,
             file_size: track.file_size,
-            has_artwork,
+            has_artwork: track.artwork.is_some(),
             has_cues: false,
             has_analysis: false,
             analysis_pending: false,
@@ -105,10 +99,21 @@ fn scan_directory(
             waveform_bands: None,
             rating: None,
             color: None,
-        });
-    }
+        })
+        .collect())
+}
 
-    Ok(added)
+/// Scan a directory for audio files and add them to the library.
+#[tauri::command]
+fn scan_directory(
+    path: String,
+    state: State<'_, SharedLibrary>,
+) -> Result<Vec<TrackInfo>, String> {
+    let dir = Path::new(&path);
+    let scanned = scanner::scan_directory(dir).map_err(|e| e.to_string())?;
+
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    add_scanned_tracks(&lib, scanned)
 }
 
 /// Scan specific files and/or folders and add them to the library.
@@ -135,41 +140,7 @@ fn scan_files(
     scanned.extend(dir_tracks);
 
     let lib = state.lock().map_err(|e| e.to_string())?;
-
-    let mut added = Vec::new();
-    for track in &scanned {
-        if lib
-            .track_exists_by_path(&track.source_path)
-            .map_err(|e| e.to_string())?
-        {
-            continue;
-        }
-        let id = lib.add_track(track).map_err(|e| e.to_string())?;
-        let has_artwork = track.artwork.is_some();
-        added.push(TrackInfo {
-            id: id as u32,
-            source_path: track.source_path.to_string_lossy().to_string(),
-            title: track.title.clone(),
-            artist: track.artist.clone(),
-            album: track.album.clone(),
-            genre: track.genre.clone(),
-            tempo: track.tempo,
-            key: track.key.clone(),
-            duration_secs: track.duration_secs,
-            bitrate: track.bitrate,
-            file_size: track.file_size,
-            has_artwork,
-            has_cues: false,
-            has_analysis: false,
-            analysis_pending: false,
-            waveform_preview: None,
-            waveform_bands: None,
-            rating: None,
-            color: None,
-        });
-    }
-
-    Ok(added)
+    add_scanned_tracks(&lib, scanned)
 }
 
 /// Analyse a track as fast as possible: it leaves the queue for the now lane (all threads,

@@ -381,7 +381,11 @@ function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] 
   return haystacks;
 }
 
-let lastFilter: { tracks: object; query: string; result: unknown[] } | null = null;
+let lastFilter: { tracks: object; query: string; terms: string[]; indices: number[]; result: unknown[] } | null = null;
+
+function narrowsLastFilter(terms: string[]): boolean {
+  return !!lastFilter && lastFilter.terms.every((old) => terms.some((term) => term.includes(old)));
+}
 
 /** Match tracks against a whitespace-separated query (all terms must match). */
 export function filterTracks<T extends Record<string, unknown>>(
@@ -395,9 +399,29 @@ export function filterTracks<T extends Record<string, unknown>>(
   }
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const haystacks = haystacksFor(tracks);
-  const result = tracks.filter((_, i) => terms.every((term) => haystacks[i].includes(term)));
-  lastFilter = { tracks, query: trimmed, result };
+  const candidates = lastFilter && lastFilter.tracks === tracks && narrowsLastFilter(terms) ? lastFilter.indices : null;
+  const indices: number[] = [];
+  const matches = (i: number) => terms.every((term) => haystacks[i].includes(term));
+  if (candidates) {
+    for (const i of candidates) if (matches(i)) indices.push(i);
+  } else {
+    for (let i = 0; i < haystacks.length; i++) if (matches(i)) indices.push(i);
+  }
+  const result = indices.length === tracks.length ? tracks : indices.map((i) => tracks[i]);
+  lastFilter = { tracks, query: trimmed, terms, indices, result };
   return result;
+}
+
+let indexCache: { source: object; length: number; byId: Map<number, number> } | null = null;
+
+function libraryTrackById(id: number) {
+  const tracks = library.tracks;
+  const ids = plainTracks.length === tracks.length ? plainTracks : tracks;
+  if (!indexCache || indexCache.source !== ids || indexCache.length !== ids.length) {
+    indexCache = { source: ids, length: ids.length, byId: new Map(ids.map((t, i) => [t.id as number, i])) };
+  }
+  const track = tracks[indexCache.byId.get(id) ?? -1];
+  return track?.id === id ? track : tracks.find((t) => t.id === id);
 }
 
 /** Tracks shown for a sidebar source (label, playlist name, or USB path). */
@@ -414,8 +438,7 @@ export function tracksForSidebarSource(source: string | null | undefined) {
   }
   const playlist = library.playlists.find((p) => p.name === active && !p.is_folder);
   if (playlist) {
-    const byId = new Map(library.tracks.map((t) => [t.id, t]));
-    return playlist.track_ids.map((id) => byId.get(id)).filter(Boolean);
+    return playlist.track_ids.map(libraryTrackById).filter(Boolean);
   }
   return library.tracks;
 }

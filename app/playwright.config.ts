@@ -19,7 +19,7 @@ export default defineConfig({
     launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
   },
   webServer: {
-    command: `npx vite build --outDir ${OUT_DIR} --emptyOutDir --logLevel warn && npx vite preview --outDir ${OUT_DIR} --port ${PORT} --strictPort --host 127.0.0.1`,
+    command: `npx vite build ${process.env.FF_PERF_PROFILE ? '--minify false ' : ''}--outDir ${OUT_DIR} --emptyOutDir --logLevel warn && npx vite preview --outDir ${OUT_DIR} --port ${PORT} --strictPort --host 127.0.0.1`,
     url: `http://127.0.0.1:${PORT}`,
     timeout: 180_000,
     reuseExistingServer: false,
