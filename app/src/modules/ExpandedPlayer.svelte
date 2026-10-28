@@ -7,12 +7,12 @@
   `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { WaveformView, CueEditor, SegmentedControl } from '$ds';
+  import { WaveformView, CueEditor } from '$ds';
   import PlayerTempo from './PlayerTempo.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
-  import { tempo, setTempoRange } from '../stores/tempo.svelte.ts';
-  import { TEMPO_RANGES, formatBpm, formatShift } from '../lib/tempo.ts';
+  import { tempo } from '../stores/tempo.svelte.ts';
+  import { formatBpm, formatShift } from '../lib/tempo.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -39,8 +39,6 @@
     beatGridNudgeRight,
     beatGridSetCurrent,
   } from '../stores/player.svelte.ts';
-
-  const rangeLabels = TEMPO_RANGES.map((range) => `±${range}`);
 
   let wave = $state(null);
 
@@ -200,12 +198,8 @@
         disabled={!player.track} onclick={() => beatGridNudgeRight()}>▶</button>
     </div>
 
-    <div class="ff-xp__pitch" role="group" aria-label="Pitch range">
-      <span class="ff-xp__grid-label">PITCH</span>
-      <SegmentedControl
-        items={rangeLabels}
-        activeIndex={TEMPO_RANGES.indexOf(tempo.range)}
-        onChange={(index) => setTempoRange(TEMPO_RANGES[index])} />
+    <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">
+      <span class="ff-xp__grid-label">ORIG</span>
       <span class="ff-xp__orig" title="The track's own BPM and key, and the key shift">
         <span class="ff-xp__orig-bpm">{formatBpm(Number(player.track?.bpm))}</span>
         <span class="ff-xp__orig-key">{player.track?.key || '—'}</span>
@@ -358,8 +352,6 @@
   .ff-xp__grid-btn:disabled { opacity: 0.4; cursor: default; }
 
   .ff-xp__pitch { display: flex; align-items: center; gap: 8px; }
-  .ff-xp__pitch :global(.ff-segmented) { padding: 1px; }
-  .ff-xp__pitch :global(.ff-segmented__item) { padding: 3px 6px; font-size: 10.5px; font-family: var(--ff-font-mono, monospace); }
   .ff-xp__orig {
     display: inline-flex; align-items: center; gap: 8px;
     font-family: var(--ff-font-mono, monospace); font-size: 10px;

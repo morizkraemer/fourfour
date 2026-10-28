@@ -18,7 +18,7 @@
     clampShift,
     formatBpm,
     formatPercent,
-    parseBpm,
+    parseBpmEntry,
     parseKeyEntry,
     parsePercent,
     percentAfterBpmStep,
@@ -41,18 +41,18 @@
   function stepBpm(units: number, tier: Tier, fromButton: boolean) {
     if (!hasBpm) return;
     const bpmStep = fromButton ? (tier === 'fine' ? BPM_CLICK_STEP_FINE : BPM_CLICK_STEP) : bpmDragStep(tier);
-    setTempoPercent(percentAfterBpmStep(analysedBpm, tempo.percent, units, bpmStep, tempo.range));
+    setTempoPercent(percentAfterBpmStep(analysedBpm, tempo.percent, units, bpmStep));
   }
 
   function setBpm(typed: string): boolean {
-    const bpm = parseBpm(typed);
+    const bpm = parseBpmEntry(typed);
     if (bpm === null || !hasBpm) return false;
     setTempoPercent(percentForBpm(bpm, analysedBpm));
     return true;
   }
 
   function stepTempo(units: number, tier: Tier) {
-    setTempoPercent(stepPercent(tempo.percent, units, tier, tempo.range));
+    setTempoPercent(stepPercent(tempo.percent, units, tier));
   }
 
   function setTempo(typed: string): boolean {
@@ -85,7 +85,7 @@
   <TempoField
     label="Tempo"
     text={formatPercent(tempo.percent)}
-    width="8ch"
+    width="9ch"
     pxPerUnit={DRAG_PX_PER_UNIT.percent}
     color={tempo.percent !== 0 ? MARKED : undefined}
     stepper={false}

@@ -1,19 +1,15 @@
-import { formatBpm, parseBpm, parseKey, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
+import { formatBpm, parseKey, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
 
-export { formatBpm, parseBpm, tierOf };
+export { formatBpm, tierOf };
 
-export const TEMPO_RANGES = [8, 16, 50] as const;
-export type TempoRange = (typeof TEMPO_RANGES)[number];
-export const DEFAULT_TEMPO_RANGE: TempoRange = 8;
+export const MIN_RATIO = 0.25;
+export const MAX_RATIO = 4;
 export const MAX_SEMITONES = 12;
+export const MAX_BPM_ENTRY = 999;
 
 export type Tier = 'fine' | 'normal' | 'coarse';
 
-const PERCENT_STEPS: Record<TempoRange, Record<Tier, number>> = {
-  8: { fine: 0.01, normal: 0.02, coarse: 0.1 },
-  16: { fine: 0.02, normal: 0.05, coarse: 0.25 },
-  50: { fine: 0.05, normal: 0.1, coarse: 0.5 },
-};
+const PERCENT_STEPS: Record<Tier, number> = { fine: 0.01, normal: 0.1, coarse: 1 };
 
 function round(value: number, places: number): number {
   const factor = 10 ** places;
@@ -28,21 +24,16 @@ export function percentFromRatio(ratio: number): number {
   return round((ratio - 1) * 100, 6);
 }
 
-export function clampPercent(percent: number, range: number = 50): number {
+export function clampPercent(percent: number): number {
   if (!Number.isFinite(percent)) return 0;
-  return Math.min(range, Math.max(-range, percent));
+  return Math.min(percentFromRatio(MAX_RATIO), Math.max(percentFromRatio(MIN_RATIO), percent));
 }
 
-export function smallestRangeFor(percent: number): TempoRange {
-  const magnitude = Math.abs(percent);
-  return TEMPO_RANGES.find((range) => magnitude <= range) ?? 50;
-}
-
-export function stepPercent(percent: number, units: number, tier: Tier, range: TempoRange): number {
-  const step = PERCENT_STEPS[range][tier];
+export function stepPercent(percent: number, units: number, tier: Tier): number {
+  const step = PERCENT_STEPS[tier];
   const position = percent / step;
   const snapped = units > 0 ? Math.floor(position + 1e-9) : Math.ceil(position - 1e-9);
-  return clampPercent(round((snapped + units) * step, 4), range);
+  return clampPercent(round((snapped + units) * step, 4));
 }
 
 export function playingBpm(analysedBpm: number, percent: number): number {
@@ -51,6 +42,14 @@ export function playingBpm(analysedBpm: number, percent: number): number {
 
 export function percentForBpm(targetBpm: number, analysedBpm: number): number {
   return clampPercent(round((targetBpm / analysedBpm - 1) * 100, 4));
+}
+
+/** A typed BPM: any number up to 999; the engine limits how far the tempo can actually go. */
+export function parseBpmEntry(text: string): number | null {
+  const cleaned = String(text ?? '').trim().replace(',', '.');
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const value = round(Number(cleaned), 2);
+  return value <= MAX_BPM_ENTRY ? value : null;
 }
 
 export function formatPercent(percent: number): string {
@@ -69,7 +68,7 @@ export function parsePercent(text: string): number | null {
     .trim();
   if (!/^[+-]?\d+(\.\d+)?$/.test(cleaned)) return null;
   const value = round(Number(cleaned), 2);
-  return Math.abs(value) <= 50 ? value : null;
+  return value >= percentFromRatio(MIN_RATIO) && value <= percentFromRatio(MAX_RATIO) ? value : null;
 }
 
 export function clampShift(semitones: number): number {
@@ -151,10 +150,9 @@ export function percentAfterBpmStep(
   percent: number,
   units: number,
   bpmStep: number,
-  range: TempoRange,
 ): number {
   const next = round(playingBpm(analysedBpm, percent) + units * bpmStep, 2);
-  return clampPercent(round((next / analysedBpm - 1) * 100, 4), range);
+  return clampPercent(round((next / analysedBpm - 1) * 100, 4));
 }
 
 /** A typed key: Camelot or note name picks the key, a number (`+2`, `-3`, `2st`) is the shift in semitones. */

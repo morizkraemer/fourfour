@@ -16,7 +16,7 @@ import {
   ratioFromPercent,
   shiftForKey,
   shiftedKey,
-  smallestRangeFor,
+  parseBpmEntry,
   stepPercent,
 } from './tempo.ts';
 
@@ -29,18 +29,11 @@ describe('percent and ratio', () => {
     expect(percentFromRatio(1)).toBe(0);
   });
 
-  it('clamps to a range and rejects garbage', () => {
-    expect(clampPercent(12, 8)).toBe(8);
-    expect(clampPercent(-12, 8)).toBe(-8);
-    expect(clampPercent(77)).toBe(50);
+  it('clamps to what the engine can play and rejects garbage', () => {
+    expect(clampPercent(12)).toBe(12);
+    expect(clampPercent(-80)).toBe(-75);
+    expect(clampPercent(500)).toBe(300);
     expect(clampPercent(Number.NaN)).toBe(0);
-  });
-
-  it('finds the smallest range that holds a typed value', () => {
-    expect(smallestRangeFor(3)).toBe(8);
-    expect(smallestRangeFor(-8)).toBe(8);
-    expect(smallestRangeFor(8.01)).toBe(16);
-    expect(smallestRangeFor(-30)).toBe(50);
   });
 });
 
@@ -55,31 +48,30 @@ describe('playing BPM', () => {
     expect(percentForBpm(138.24, 128)).toBe(8);
     expect(percentForBpm(128, 128)).toBe(0);
     expect(percentForBpm(120, 125)).toBe(-4);
-    expect(percentForBpm(1000, 128)).toBe(50);
+    expect(percentForBpm(1000, 128)).toBe(300);
+    expect(percentForBpm(10, 128)).toBe(-75);
+    expect(percentForBpm(256, 128)).toBe(100);
   });
 });
 
 describe('percent steps', () => {
-  it('uses CDJ-like fine steps per range', () => {
-    expect(stepPercent(0, 1, 'normal', 8)).toBe(0.02);
-    expect(stepPercent(0, -1, 'normal', 8)).toBe(-0.02);
-    expect(stepPercent(0, 1, 'normal', 16)).toBe(0.05);
-    expect(stepPercent(0, 1, 'normal', 50)).toBe(0.1);
-    expect(stepPercent(0, 1, 'fine', 8)).toBe(0.01);
-    expect(stepPercent(0, 1, 'coarse', 8)).toBe(0.1);
+  it('steps a tenth, fine a hundredth, coarse a whole percent', () => {
+    expect(stepPercent(0, 1, 'normal')).toBe(0.1);
+    expect(stepPercent(0, -1, 'normal')).toBe(-0.1);
+    expect(stepPercent(0, 1, 'fine')).toBe(0.01);
+    expect(stepPercent(0, 1, 'coarse')).toBe(1);
   });
 
   it('snaps to the grid and does not accumulate float error', () => {
-    expect(stepPercent(1.234, 1, 'normal', 8)).toBe(1.24);
-    expect(stepPercent(1.234, -1, 'normal', 8)).toBe(1.22);
+    expect(stepPercent(1.234, 1, 'normal')).toBe(1.3);
     let value = 0;
-    for (let i = 0; i < 100; i++) value = stepPercent(value, 1, 'normal', 8);
-    expect(value).toBe(2);
+    for (let i = 0; i < 100; i++) value = stepPercent(value, 1, 'normal');
+    expect(value).toBe(10);
   });
 
-  it('stops at the end of the range', () => {
-    expect(stepPercent(7.99, 5, 'coarse', 8)).toBe(8);
-    expect(stepPercent(-7.99, -5, 'coarse', 8)).toBe(-8);
+  it('stops where the engine stops', () => {
+    expect(stepPercent(299.5, 5, 'coarse')).toBe(300);
+    expect(stepPercent(-74.5, -5, 'coarse')).toBe(-75);
   });
 });
 
@@ -96,7 +88,8 @@ describe('percent text', () => {
     expect(parsePercent('+4,2 %')).toBe(4.2);
     expect(parsePercent('-3.5%')).toBe(-3.5);
     expect(parsePercent('−3.5')).toBe(-3.5);
-    expect(parsePercent('51')).toBeNull();
+    expect(parsePercent('301')).toBeNull();
+    expect(parsePercent('-76')).toBeNull();
     expect(parsePercent('abc')).toBeNull();
   });
 });
@@ -150,20 +143,35 @@ describe('key shift', () => {
 
 describe('BPM steps', () => {
   it('steps a whole BPM per click and a tenth with fine', () => {
-    expect(playingBpm(140, percentAfterBpmStep(140, 0, 1, BPM_CLICK_STEP, 8))).toBeCloseTo(141, 3);
-    expect(playingBpm(140, percentAfterBpmStep(140, 0, -1, BPM_CLICK_STEP_FINE, 8))).toBeCloseTo(139.9, 3);
-    expect(playingBpm(140, percentAfterBpmStep(140, 8, 1, BPM_CLICK_STEP, 8))).toBeCloseTo(151.2, 3);
+    expect(playingBpm(140, percentAfterBpmStep(140, 0, 1, BPM_CLICK_STEP))).toBeCloseTo(141, 3);
+    expect(playingBpm(140, percentAfterBpmStep(140, 0, -1, BPM_CLICK_STEP_FINE))).toBeCloseTo(139.9, 3);
+    expect(playingBpm(140, percentAfterBpmStep(140, 8, 1, BPM_CLICK_STEP))).toBeCloseTo(152.2, 3);
   });
 
   it('keeps stepping from the BPM being played', () => {
-    const percent = percentAfterBpmStep(128, 0, 1, BPM_CLICK_STEP, 16);
-    expect(playingBpm(128, percentAfterBpmStep(128, percent, 1, BPM_CLICK_STEP, 16))).toBeCloseTo(130, 3);
+    const percent = percentAfterBpmStep(128, 0, 1, BPM_CLICK_STEP);
+    expect(playingBpm(128, percentAfterBpmStep(128, percent, 1, BPM_CLICK_STEP))).toBeCloseTo(130, 3);
   });
 
   it('drags in tenths, coarse in whole BPM, fine in hundredths', () => {
     expect(bpmDragStep('normal')).toBe(0.1);
     expect(bpmDragStep('coarse')).toBe(1);
     expect(bpmDragStep('fine')).toBe(0.01);
+  });
+});
+
+describe('BPM entry and limits', () => {
+  it('takes any BPM up to 999', () => {
+    expect(parseBpmEntry('0')).toBe(0);
+    expect(parseBpmEntry('600,5')).toBe(600.5);
+    expect(parseBpmEntry('999')).toBe(999);
+    expect(parseBpmEntry('1000')).toBeNull();
+    expect(parseBpmEntry('x')).toBeNull();
+  });
+
+  it('steps up to four times the track and down to a quarter', () => {
+    expect(playingBpm(120, percentAfterBpmStep(120, 0, 1000, BPM_CLICK_STEP))).toBeCloseTo(480, 2);
+    expect(playingBpm(120, percentAfterBpmStep(120, 0, -1000, BPM_CLICK_STEP))).toBeCloseTo(30, 2);
   });
 });
 
