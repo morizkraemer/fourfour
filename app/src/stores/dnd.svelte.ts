@@ -112,6 +112,13 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
     dnd.dropPlaylistId = null;
     return;
   }
+  const sidebarPlaylist = hit?.closest('[data-drop-track-playlist-id]');
+  dnd.dropPlaylistId = sidebarPlaylist ? Number(sidebarPlaylist.getAttribute('data-drop-track-playlist-id')) : null;
+  if (sidebarPlaylist) {
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    return;
+  }
   if (!hit) {
     dnd.dropPanelSourceId = null;
     dnd.dropRowIndex = null;

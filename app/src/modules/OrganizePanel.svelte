@@ -560,7 +560,7 @@
 
   .ff-organize__header-rename {
     flex: 1 1 0;
-    background: var(--ff-input-bg, var(--ff-surface-hi));
+    background: var(--ff-elev);
     border: 1px solid var(--ff-accent);
     border-radius: var(--ff-radius-sm, 4px);
     color: var(--ff-text);

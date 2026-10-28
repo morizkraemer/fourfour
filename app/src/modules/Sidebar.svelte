@@ -162,18 +162,6 @@
     return '';
   }
 
-  function onPlaylistPointerEnter(playlistId, isFolder = false) {
-    if (dnd.kind === 'tracks' && dnd.trackIds.length > 0 && !isFolder) {
-      dnd.dropPlaylistId = playlistId;
-      dnd.dropPanelSourceId = null;
-      dnd.dropRowIndex = null;
-    }
-  }
-
-  function onPlaylistPointerLeave(playlistId) {
-    if (dnd.dropPlaylistId === playlistId) dnd.dropPlaylistId = null;
-  }
-
   function dropPlacementAt(rowEl, clientY, isFolder) {
     const rect = rowEl.getBoundingClientRect();
     const ratio = (clientY - rect.top) / rect.height;
@@ -337,8 +325,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap {rowClassExtra(pl?.id)}"
-          onpointerenter={() => pl && onPlaylistPointerEnter(pl.id)}
-          onpointerleave={() => pl && onPlaylistPointerLeave(pl.id)}
+          data-drop-track-playlist-id={pl?.id}
           oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
         >
           <SidebarRow
@@ -402,8 +389,7 @@
           class="ff-sidebar__drop-wrap {rowClassExtra(row.id)}"
           data-playlist-id={row.id}
           data-playlist-folder={isFolder ? '' : undefined}
-          onpointerenter={() => onPlaylistPointerEnter(row.id, isFolder)}
-          onpointerleave={() => onPlaylistPointerLeave(row.id)}
+          data-drop-track-playlist-id={isFolder ? undefined : row.id}
           onpointerdown={(e) => onPlaylistRowPointerDown(e, row.id, isFolder)}
           oncontextmenu={(e) => (isFolder ? openFolderMenu(e, row.id) : openSourceMenu(e, row.label, row.label))}
         >
