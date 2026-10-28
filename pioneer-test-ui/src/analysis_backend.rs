@@ -71,18 +71,24 @@ pub fn choose_backend(requested: Option<AnalysisBackend>, weights: Option<&Path>
 pub struct BackendEnv {
     pub config_path: Option<PathBuf>,
     pub app_data_dir: Option<PathBuf>,
+    pub resource_dir: Option<PathBuf>,
     pub override_backend: Option<AnalysisBackend>,
     pub max_threads: Option<usize>,
 }
 
 impl BackendEnv {
-    pub fn from_process(config_path: Option<PathBuf>, app_data_dir: Option<PathBuf>) -> Self {
+    pub fn from_process(config_path: Option<PathBuf>, app_data_dir: Option<PathBuf>, resource_dir: Option<PathBuf>) -> Self {
         BackendEnv {
             config_path,
             app_data_dir,
+            resource_dir,
             override_backend: std::env::var(BACKEND_ENV).ok().and_then(|v| AnalysisBackend::parse(&v)),
             max_threads: std::env::var(THREADS_ENV).ok().and_then(|v| v.parse().ok()),
         }
+    }
+
+    pub fn locate_weights(&self) -> Option<PathBuf> {
+        fourfour_analysis::service::locate_models_in(self.app_data_dir.as_deref(), self.resource_dir.as_deref())
     }
 
     pub fn requested(&self) -> Option<AnalysisBackend> {
@@ -175,19 +181,23 @@ pub fn resolve_runner(
     env: &BackendEnv,
     weights: Option<PathBuf>,
     cache: &AnalyzerCache,
-    python_command: impl FnOnce() -> String,
-) -> (Runner, Vec<String>) {
+    python_command: impl FnOnce() -> Option<String>,
+) -> Result<(Runner, Vec<String>), String> {
     let choice = choose_backend(env.requested(), weights.as_deref());
     let mut notes = vec![choice.note];
     if choice.backend == AnalysisBackend::Rust {
         let dir = weights.expect("rust backend is only chosen with weights");
         match cache.get_or_load(&dir, env.pool_options()) {
-            Ok(engine) => return (Runner::Rust { engine }, notes),
+            Ok(engine) => return Ok((Runner::Rust { engine }, notes)),
             Err(e) => notes.push(format!("rust analyzer unavailable, falling back to python: {e}")),
         }
     }
-    (Runner::Python { command: python_command() }, notes)
+    let command = python_command().ok_or_else(|| NO_BACKEND_ERROR.to_string())?;
+    Ok((Runner::Python { command }, notes))
 }
+
+pub const NO_BACKEND_ERROR: &str = "No analysis backend available: the Rust model weights (beat_this.onnx, mel_spectrogram.onnx) \
+    were not found and no working Python analyzer is installed. Reinstall the app or set FOURFOUR_MODELS_DIR.";
 
 #[cfg(test)]
 mod tests {
@@ -246,15 +256,53 @@ mod tests {
     fn runner_falls_back_to_python_when_the_weights_dir_is_unloadable() {
         let env = BackendEnv::default();
         let empty = scratch("empty");
-        let (runner, notes) = resolve_runner(&env, Some(empty), &AnalyzerCache::default(), || "python3".to_string());
+        let (runner, notes) = resolve_runner(&env, Some(empty), &AnalyzerCache::default(), || Some("python3".to_string())).unwrap();
         assert!(matches!(runner, Runner::Python { .. }));
         assert!(notes.iter().any(|n| n.contains("falling back to python")), "{notes:?}");
     }
 
     #[test]
+    fn no_weights_and_no_python_is_a_clear_error() {
+        let env = BackendEnv::default();
+        let err = resolve_runner(&env, None, &AnalyzerCache::default(), || None).err().expect("error");
+        assert_eq!(err, NO_BACKEND_ERROR);
+        assert!(err.contains("No analysis backend available"));
+    }
+
+    #[test]
+    fn unloadable_weights_and_no_python_is_a_clear_error() {
+        let env = BackendEnv::default();
+        let err = resolve_runner(&env, Some(scratch("unloadable")), &AnalyzerCache::default(), || None).err().expect("error");
+        assert_eq!(err, NO_BACKEND_ERROR);
+    }
+
+    #[test]
+    fn weights_resolve_from_the_resource_dir_after_app_data() {
+        let root = scratch("resources");
+        let resources = root.join("res");
+        let app_data = root.join("data");
+        for dir in [&resources, &app_data] {
+            let models = dir.join("models");
+            std::fs::create_dir_all(&models).unwrap();
+        }
+        let env = BackendEnv { resource_dir: Some(resources.clone()), app_data_dir: Some(app_data.clone()), ..BackendEnv::default() };
+        let touch = |dir: &Path| {
+            for name in [fourfour_analysis::service::MEL_MODEL, fourfour_analysis::service::BEAT_MODEL] {
+                std::fs::write(dir.join("models").join(name), b"x").unwrap();
+            }
+        };
+        if std::env::var_os(MODELS_ENV).is_none() {
+            touch(&resources);
+            assert_eq!(env.locate_weights(), Some(resources.join("models")));
+            touch(&app_data);
+            assert_eq!(env.locate_weights(), Some(app_data.join("models")));
+        }
+    }
+
+    #[test]
     fn runner_falls_back_to_python_without_weights() {
         let env = BackendEnv { override_backend: Some(AnalysisBackend::Rust), ..BackendEnv::default() };
-        let (runner, notes) = resolve_runner(&env, None, &AnalyzerCache::default(), || "python3".to_string());
+        let (runner, notes) = resolve_runner(&env, None, &AnalyzerCache::default(), || Some("python3".to_string())).unwrap();
         assert!(matches!(runner, Runner::Python { .. }));
         assert!(notes.iter().any(|n| n.contains("weights are missing")), "{notes:?}");
     }

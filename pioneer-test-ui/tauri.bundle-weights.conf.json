@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "../prototyping/analysis-packaging/models/beat_this.onnx": "models/beat_this.onnx",
+      "../prototyping/analysis-packaging/models/mel_spectrogram.onnx": "models/mel_spectrogram.onnx",
+      "../prototyping/analysis-packaging/models/LICENSE-beat-this.txt": "models/LICENSE-beat-this.txt"
+    }
+  }
+}

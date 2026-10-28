@@ -17,6 +17,20 @@ pub(crate) fn resolve_python() -> String {
     }
 }
 
+pub(crate) fn resolve_python_checked() -> Option<String> {
+    let python = resolve_python();
+    python_can_import_analyzer(&python).then_some(python)
+}
+
+fn python_can_import_analyzer(python: &str) -> bool {
+    std::process::Command::new(python)
+        .args(["-c", "import fourfour_analysis"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 /// Unwrap analyzer stdout JSON into the per-track result object.
 ///
 /// Accepts legacy `[{...}]` batches, current `{"deeprhythm_essentia": {...}}`

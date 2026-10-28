@@ -10,7 +10,7 @@ use pioneer_library::{analysis_stage, LocalLibrary};
 use pioneer_usb_writer::models;
 
 use crate::analysis_backend::{resolve_runner, AnalyzerCache, BackendEnv, Runner, TrackEngine};
-use crate::analysis_python::{analyze_one_track, resolve_python};
+use crate::analysis_python::{analyze_one_track, resolve_python_checked};
 
 pub(crate) type SharedLibrary = Arc<Mutex<LocalLibrary>>;
 
@@ -565,8 +565,7 @@ pub(crate) async fn prioritize_track(
     sink: Arc<dyn AnalysisSink>,
     env: BackendEnv,
 ) -> Result<(), String> {
-    let weights = fourfour_analysis::service::locate_models(env.app_data_dir.as_deref());
-    let (runner, _) = resolve_runner(&env, weights, &coordinator.analyzers, resolve_python);
+    let (runner, _) = resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked)?;
     prioritize_with_runner(shared, coordinator, item, sink, env, runner).await
 }
 
@@ -634,8 +633,7 @@ async fn run_with_runner(
     let runner = match chosen_runner {
         Some(runner) => runner,
         None => {
-            let weights = fourfour_analysis::service::locate_models(env.app_data_dir.as_deref());
-            let (runner, notes) = resolve_runner(&env, weights, &coordinator.analyzers, resolve_python);
+            let (runner, notes) = resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked)?;
             for note in notes {
                 sink.log(LogLevel::Info, note);
             }
