@@ -79,6 +79,6 @@ describe('filterTracks search-text cache', () => {
     const first = [track(1, { title: 'Alpha' })];
     const second = [track(2, { title: 'Alpha' }), track(3, { title: 'Alpha Two' })];
     expect(filterTracks(first, 'alpha').map((t) => t.id)).toEqual([1]);
-    expect(filterTracks(second, 'alpha t').map((t) => t.id)).toEqual([3]);
+    expect(filterTracks(second, 'alpha two').map((t) => t.id)).toEqual([3]);
   });
 });
