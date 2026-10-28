@@ -149,7 +149,13 @@
 
   let waveHoverKey = $state(null);
   let waveHoverMarker = $derived(markers.find((m) => m.key === waveHoverKey) ?? null);
-  let waveTip = $derived(waveHoverMarker ? cues.find((c) => c.key === waveHoverMarker.key)?.label || 'Cue' : '');
+  let waveTip = $derived(waveHoverMarker ? (cues.find((c) => c.key === waveHoverMarker.key) ?? null) : null);
+
+  function pressMarker(marker) {
+    const chip = cues.find((c) => c.key === marker.key);
+    if (altHeld && chip && onCueDelete) onCueDelete(chip);
+    else onMarkerClick?.(marker);
+  }
 
   function onWavePointerMove(event) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -166,7 +172,7 @@
   function onWaveClickCapture(event) {
     if (!waveHoverMarker || event.target.closest('.ff-inspector__marker')) return;
     event.stopPropagation();
-    onMarkerClick?.(waveHoverMarker);
+    pressMarker(waveHoverMarker);
   }
 
   function flagFlipped(marker) {
@@ -264,22 +270,25 @@
       onpointerleave={onWavePointerLeave}
       onclickcapture={onWaveClickCapture}>
       {#if waveHoverMarker}
-        <span class="ff-inspector__marker-tip" style:left={markerLeft(waveHoverMarker.position)} style:transform={waveHoverMarker.position < 0.2 ? 'translateX(-4px)' : waveHoverMarker.position > 0.8 ? 'translateX(calc(-100% + 4px))' : null} style:--cue={waveHoverMarker.color}>{waveTip}</span>
+        <span class="ff-inspector__marker-tip" style:left={markerLeft(waveHoverMarker.position)} style:transform={waveHoverMarker.position < 0.2 ? 'translateX(-4px)' : waveHoverMarker.position > 0.8 ? 'translateX(calc(-100% + 4px))' : null} style:--cue={waveHoverMarker.color}>
+          <span class="ff-inspector__marker-tip-chip{waveTip?.letter ? '' : ' ff-inspector__marker-tip-chip--memory'}">{waveTip?.letter ?? ''}</span>
+          {#if waveTip?.name}<span class="ff-inspector__marker-tip-name">{waveTip.name}</span>{/if}
+          <span class="ff-inspector__marker-tip-time">{altHeld ? 'Remove' : (waveTip?.time ?? '')}</span>
+        </span>
       {/if}
       <div class="ff-inspector__marker-lane">
         {#each markers as marker (marker.key)}
           <button
             type="button"
-            class="ff-inspector__marker{marker.padded ? '' : ' ff-inspector__marker--plain'}{flagFlipped(marker) ? ' ff-inspector__marker--flip' : ''}{linkedKey === marker.key ? ' ff-inspector__marker--linked' : ''}"
+            class="ff-inspector__marker{marker.padded ? '' : ' ff-inspector__marker--plain'}{flagFlipped(marker) ? ' ff-inspector__marker--flip' : ''}{linkedKey === marker.key ? ' ff-inspector__marker--linked' : ''}{altHeld ? ' ff-inspector__marker--remove' : ''}"
             style:left={markerLeft(marker.position)}
             style:--cue={marker.color}
             data-marker-key={marker.key}
-            title={marker.label ? `Cue ${marker.label}` : 'Cue'}
-            aria-label={marker.label ? `Jump to cue ${marker.label}` : 'Jump to cue'}
-            onclick={() => onMarkerClick?.(marker)}
+            aria-label={altHeld ? (marker.label ? `Delete cue ${marker.label}` : 'Delete cue') : (marker.label ? `Jump to cue ${marker.label}` : 'Jump to cue')}
+            onclick={() => pressMarker(marker)}
             onmouseenter={() => (linkedKey = marker.key)}
             onmouseleave={() => (linkedKey = null)}
-            oncontextmenu={(e) => openCueMenu(e, marker.key)}><span class="ff-inspector__marker-flag">{marker.label}</span></button>
+            oncontextmenu={(e) => openCueMenu(e, marker.key)}><span class="ff-inspector__marker-flag">{altHeld ? '×' : marker.label}</span></button>
         {/each}
       </div>
       <div class="ff-inspector__wave-body">
