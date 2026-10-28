@@ -55,6 +55,7 @@ import {
   sidebarTreeRows,
   uniqueName,
 } from '../lib/playlistTree.ts';
+import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
 import { outermostIds } from '../lib/playlistSelection.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
 
@@ -890,6 +891,29 @@ export async function importFiles(paths: string[], options?: ImportOptions) {
     library.statusMessage = importErrorMessage(err);
     library.tauriError = lastTauriError;
     console.error('importFiles failed:', err);
+  }
+}
+
+/** Scans dropped files/folders and returns the ids of every library track they hold, including ones imported earlier. */
+export async function importFilesForPlaylist(paths: string[]): Promise<number[]> {
+  try {
+    library.statusMessage = 'Importing…';
+    const newTracks = await tauriScanFiles(paths);
+    await loadState();
+    library.tauriError = lastTauriError;
+    if (newTracks.length > 0) {
+      library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
+      library.showAnalysisPrompt = true;
+    }
+    const ids = trackIdsUnderPaths(library.tracks, paths);
+    library.statusMessage =
+      ids.length === 0 ? 'No audio files found in the dropped items.' : `Found ${ids.length} track${ids.length === 1 ? '' : 's'}`;
+    return ids;
+  } catch (err) {
+    library.statusMessage = importErrorMessage(err);
+    library.tauriError = lastTauriError;
+    console.error('importFilesForPlaylist failed:', err);
+    return [];
   }
 }
 
