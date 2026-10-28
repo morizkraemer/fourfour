@@ -231,3 +231,6 @@
 2026-10-28 17:55 wr-playerlayout L2 done: b2ad150 board player-layout-2 (A pencil fields + footer cue row, rec / B cue column / C deck panel) at :5238 comments, :5239 static — waiting on Merlin's approval before O7
 2026-10-28 17:56 orchestrator O2 spawn: ov-smoke headless smoke harness (seat, sonnet high; may add playwright devDep)
 2026-10-28 18:05 orchestrator O7 decided: Merlin approved layout-2 A (MT + pencils outside the box, no border; rest as is); open questions per rec; queued after O1 (shares ExpandedPlayer)
+2026-10-28 18:30 ov-review O1 landed on ov-1028 f61103a: 3 fixes (stale key on fast steps, BPM save overwrote newer grid nudges, edit mode outlived the track); 691 tests; worktree removed
+2026-10-28 18:30 orchestrator O1b followup: grid anchor drift after ×2/÷2 across a save → additive grid_anchor_ms in edits.json, after O7 (same files)
+2026-10-28 18:31 orchestrator O7 spawn: ov-layout build layout-2 A (seat, sonnet high) on ov-1028

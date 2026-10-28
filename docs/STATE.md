@@ -30,6 +30,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 8. [accepted 2026-10-23 per rec] Add vitest as an app dev dependency for unit tests (Q18, branch only) — rec: keep — branch: q18-app-tests
 7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
 
+13. [accepted 2026-10-28 per rec] O1b: ×2 then ÷2 drifts the grid half a bar after a save (rescale anchors on the first downbeat); fix = additive optional `grid_anchor_ms` in edits.json — rec: keep — branch: ov-1028 (O1b)
+
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -50,7 +52,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ## Run
 status: running · since 2026-10-28 17:40 · cap 2 workers · autonomy tight · base r12-int → integration ov-1028 (scratchpad q41-int)
 targets: Merlin 2026-10-28: start overnight now; player-layout build only after he approves the next mockup round on viewport
-plan: L2 player-layout mockups (round 2, viewport :5238) → O1 review rounds 12–13 → O2 smoke-test harness → O7 (after O1) → O3 Q33 Rust analyzer finish + measure (report) → O4 perf pass 10k tracks → O5 Q8 CI (branch only) → O6 housekeeping; O7 build layout-2 option A (approved 2026-10-28, starts after O1 lands: same files), then own priorities
+plan: L2 player-layout mockups (round 2, viewport :5238) → O1 review rounds 12–13 → O2 smoke-test harness → O7 → O1b grid anchor (after O7) → O3 Q33 Rust analyzer finish + measure (report) → O4 perf pass 10k tracks → O5 Q8 CI (branch only) → O6 housekeeping; O7 build layout-2 option A (approved 2026-10-28, starts after O1 lands: same files), then own priorities
 decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync fixes go ahead here
 
 ### Q42 Stick sync for real [done, branch q42-sync d56f471, merged into q42-overnight 51a9ef0] [box] — sync button → sync_usb_many: stick All tracks + chosen playlists (SyncSelection::Playlists track_ids), stable stick id (not path), capacity check, dry-run plan shown before write. Fake stick folder only; no real USB writes. Validation + headless. 180 min
