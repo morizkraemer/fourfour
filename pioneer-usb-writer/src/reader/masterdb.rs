@@ -240,6 +240,7 @@ pub fn read_masterdb(db_path: &Path) -> Result<MasterDbImport> {
                 id: pl_usb_id,
                 name,
                 track_ids,
+                ..Default::default()
             });
         }
     }

@@ -110,8 +110,8 @@ fn fixture() -> Fixture {
     ];
     let analyses = vec![analysis(12800, "8A", cues), analysis(12400, "5B", vec![]), analysis(13000, "", vec![])];
     let playlists = vec![
-        Playlist { id: 1, name: "Warmup".into(), track_ids: vec![2, 1] },
-        Playlist { id: 2, name: "Peak".into(), track_ids: vec![3] },
+        Playlist { id: 1, name: "Warmup".into(), track_ids: vec![2, 1], ..Default::default() },
+        Playlist { id: 2, name: "Peak".into(), track_ids: vec![3], ..Default::default() },
     ];
     Fixture {
         _source: source,
@@ -286,6 +286,42 @@ fn pdb_playlists_roundtrip() {
 }
 
 #[test]
+fn playlist_folders_roundtrip_in_pdb_and_onelibrary() {
+    let f = fixture();
+    let playlists = vec![
+        Playlist { id: 1, name: "Sets".into(), is_folder: true, ..Default::default() },
+        Playlist { id: 2, name: "Warmup".into(), track_ids: vec![2, 1], parent_id: 1, ..Default::default() },
+        Playlist { id: 3, name: "Peak".into(), track_ids: vec![3], ..Default::default() },
+    ];
+    write_usb(f.usb.path(), &f.tracks, &f.analyses, &playlists).unwrap();
+
+    let pdb = Pdb::open(f.usb.path());
+    let tree: Vec<(u32, u32, u32, String)> = pdb
+        .rows(0x07)
+        .iter()
+        .map(|r| (u32le(&r.bytes, 12), u32le(&r.bytes, 0), u32le(&r.bytes, 16), decode_devicesql_string(&r.bytes[20..])))
+        .collect();
+    assert_eq!(
+        tree,
+        vec![
+            (1, 0, 1, "Sets".to_string()),
+            (2, 1, 0, "Warmup".to_string()),
+            (3, 0, 0, "Peak".to_string()),
+        ]
+    );
+
+    let conn = onelibrary(f.usb.path());
+    let rows: Vec<(u32, i64, u32)> = conn
+        .prepare("SELECT playlist_id, attribute, playlist_id_parent FROM playlist ORDER BY playlist_id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(rows, vec![(1, 1, 0), (2, 0, 1), (3, 0, 0)]);
+}
+
+#[test]
 fn pdb_artwork_row_exists_only_for_tracks_with_cover() {
     let f = exported();
     let rows = Pdb::open(f.usb.path()).rows(0x0D);
@@ -405,7 +441,7 @@ fn sync_usb_second_run_skips_unchanged_and_removes_dropped_tracks() {
     let again = sync_usb(f.usb.path(), &f.tracks, &f.analyses, &f.playlists).unwrap();
     assert_eq!((again.tracks_added, again.tracks_unchanged), (0, 3));
 
-    let kept_playlists = vec![Playlist { id: 1, name: "Warmup".into(), track_ids: vec![2, 1] }];
+    let kept_playlists = vec![Playlist { id: 1, name: "Warmup".into(), track_ids: vec![2, 1], ..Default::default() }];
     let trimmed = sync_usb(f.usb.path(), &f.tracks[..2], &f.analyses[..2], &kept_playlists).unwrap();
     assert_eq!(trimmed.tracks_removed, 1);
 

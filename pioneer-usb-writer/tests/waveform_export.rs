@@ -198,7 +198,7 @@ fn assert_bands_in_range(two_ex: &[u8], ext: &[u8], columns: usize) {
 fn export_roundtrips_band_data_for_1_7_10_20_and_60_minute_tracks() {
     let durations = [60.0, 437.0, 600.0, 1200.0, 3600.0];
     let (_source, usb, tracks, analyses) = exported_tracks(&durations);
-    write_usb(usb.path(), &tracks, &analyses, &[Playlist { id: 1, name: "All".into(), track_ids: vec![1, 2, 3, 4, 5] }])
+    write_usb(usb.path(), &tracks, &analyses, &[Playlist { id: 1, name: "All".into(), track_ids: vec![1, 2, 3, 4, 5], ..Default::default() }])
         .unwrap();
 
     for ((t, a), duration) in tracks.iter().zip(&analyses).zip(durations) {

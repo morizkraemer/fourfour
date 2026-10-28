@@ -18,7 +18,7 @@ use pioneer_usb_writer::models::{AnalysisResult, Playlist, SyncAction, SyncRepor
 use pioneer_usb_writer::{reader, writer};
 
 use crate::sticks::{self, LastSync, OwnedFile, StickManifest};
-use crate::{LocalLibrary, prepare_for_usb};
+use crate::{LocalLibrary, prepare_for_usb, selected_playlist_tree};
 
 const SPACE_MARGIN_BASE_BYTES: u64 = 16 * 1024 * 1024;
 const SPACE_MARGIN_PER_TRACK_BYTES: u64 = 128 * 1024;
@@ -293,11 +293,7 @@ fn prepare_selection(
             Ok(PreparedSelection { tracks, analyses, playlists, library_ids, skipped: Vec::new() })
         }
         SyncSelection::Playlists { playlist_ids, track_ids } => {
-            let chosen: Vec<Playlist> = playlists
-                .iter()
-                .filter(|p| playlist_ids.contains(&(p.id as i64)))
-                .cloned()
-                .collect();
+            let chosen = selected_playlist_tree(playlists, playlist_ids);
             let mut wanted: HashSet<u32> = track_ids.iter().map(|&id| id as u32).collect();
             for playlist in &chosen {
                 wanted.extend(playlist.track_ids.iter().copied());

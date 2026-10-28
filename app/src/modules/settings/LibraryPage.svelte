@@ -15,7 +15,7 @@
 <div class="ff-settings-card ff-settings-card--status">
   <div class="stats">
     <b>{library.trackCount} tracks</b>
-    <span>{library.playlists.length} playlists</span>
+    <span>{library.playlists.filter((p) => !p.is_folder).length} playlists</span>
   </div>
   <span class="path" title={library.libraryPath}>{library.libraryPath || 'Not set'}</span>
 </div>

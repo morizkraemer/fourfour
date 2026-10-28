@@ -881,8 +881,8 @@ fn write_playlists(conn: &Connection, playlists: &[Playlist]) -> Result<()> {
             seq,
             playlist.name,
             0i32,  // image_id
-            0i32,  // attribute (0 = playlist, 1 = folder)
-            0i32,  // parent = ROOT
+            playlist.is_folder as i32,
+            playlist.parent_id,
         ])?;
 
         for (j, &track_id) in playlist.track_ids.iter().enumerate() {

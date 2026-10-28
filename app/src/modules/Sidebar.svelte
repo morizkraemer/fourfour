@@ -8,6 +8,7 @@
   import {
     buildSourceContextMenuItems,
     buildSidebarSectionMenuItems,
+    buildFolderContextMenuItems,
   } from '../menus/context-menus.ts';
   import {
     addPlaylist,
@@ -16,7 +17,7 @@
     selectVolume,
     ejectVolume,
     library,
-    reorderPlaylists,
+    movePlaylistInTree,
     favoritePlaylistName,
     nextFavoriteSlot,
     canAddFavorite,
@@ -30,12 +31,14 @@
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag } from '../stores/dnd.svelte.ts';
   import { dropPlaylistOnStick } from '../stores/organize-drop.svelte.ts';
+  import { toggleFolder } from '../stores/sidebar-folders.svelte.ts';
 
   let intervalId;
   let renamingPlaylistId = $state(null);
   let renameDraft = $state('');
   let playlistDragId = $state(null);
-  let playlistDropId = $state(null);
+  /** @type {{ id: number, placement: 'before' | 'after' | 'into' } | null} */
+  let playlistDrop = $state(null);
   let contextMenu = $state({
     open: false,
     x: 0,
@@ -44,6 +47,7 @@
     sourceId: '',
     label: '',
     section: null,
+    folderId: 0,
   });
 
   onMount(() => {
@@ -144,8 +148,8 @@
       : ''
   );
 
-  function sidebarRowState(label, playlistId = null) {
-    if (ui.activeSidebarRow === label) return 'active';
+  function sidebarRowState(label, playlistId = null, isFolder = false) {
+    if (!isFolder && ui.activeSidebarRow === label) return 'active';
     if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'selected';
     if (playlistId != null && playlistDragId === playlistId) return 'hover';
     return 'rest';
@@ -154,31 +158,45 @@
   function rowClassExtra(playlistId) {
     if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'drag-over';
     if (playlistId != null && playlistDragId === playlistId) return 'drag-source';
+    if (playlistId != null && playlistDrop?.id === playlistId) return `drop-${playlistDrop.placement}`;
     return '';
   }
 
-  function onPlaylistPointerEnter(playlistId) {
-    if (dnd.kind === 'tracks' && dnd.trackIds.length > 0) {
+  function onPlaylistPointerEnter(playlistId, isFolder = false) {
+    if (dnd.kind === 'tracks' && dnd.trackIds.length > 0 && !isFolder) {
       dnd.dropPlaylistId = playlistId;
       dnd.dropPanelSourceId = null;
       dnd.dropRowIndex = null;
-    }
-    if (dnd.kind === 'playlist' || playlistDragId != null) {
-      playlistDropId = playlistId;
     }
   }
 
   function onPlaylistPointerLeave(playlistId) {
     if (dnd.dropPlaylistId === playlistId) dnd.dropPlaylistId = null;
-    if (playlistDropId === playlistId) playlistDropId = null;
   }
 
-  async function onPlaylistPointerUp() {
-    if (playlistDragId != null && playlistDropId != null && playlistDragId !== playlistDropId) {
-      await reorderPlaylists(playlistDragId, playlistDropId);
-    }
-    playlistDragId = null;
-    playlistDropId = null;
+  function dropPlacementAt(rowEl, clientY, isFolder) {
+    const rect = rowEl.getBoundingClientRect();
+    const ratio = (clientY - rect.top) / rect.height;
+    if (isFolder) return ratio < 0.25 ? 'before' : 'into';
+    return ratio < 0.5 ? 'before' : 'after';
+  }
+
+  function playlistDropAt(x, y) {
+    const hit = document.elementFromPoint(x, y);
+    if (hit?.closest('[data-playlist-root-drop]')) return { id: 0, placement: 'into' };
+    const rowEl = hit?.closest('[data-playlist-id]');
+    if (!rowEl) return null;
+    const id = Number(rowEl.getAttribute('data-playlist-id'));
+    const isFolder = rowEl.hasAttribute('data-playlist-folder');
+    return { id, placement: dropPlacementAt(rowEl, y, isFolder) };
+  }
+
+  async function applyPlaylistDrop(dragId, drop) {
+    if (drop.id === 0) return movePlaylistInTree(dragId, 0);
+    const target = library.playlists.find((p) => p.id === drop.id);
+    if (!target || target.id === dragId) return false;
+    if (drop.placement === 'into') return movePlaylistInTree(dragId, target.id);
+    return movePlaylistInTree(dragId, target.parent_id, target.id, drop.placement === 'after');
   }
 
   function closeContextMenu() {
@@ -186,6 +204,12 @@
   }
 
   function contextMenuItems() {
+    if (contextMenu.kind === 'folder') {
+      const folder = library.playlists.find((p) => p.id === contextMenu.folderId);
+      return folder
+        ? buildFolderContextMenuItems({ folder, onRename: (f) => startPlaylistRename(f.id, f.name) })
+        : [];
+    }
     if (contextMenu.kind === 'section' && contextMenu.section) {
       return buildSidebarSectionMenuItems(contextMenu.section, {
         onNewPlaylist: handleAddPlaylist,
@@ -216,6 +240,20 @@
     };
   }
 
+  function openFolderMenu(e, folderId) {
+    e.preventDefault();
+    contextMenu = {
+      open: true,
+      x: e.clientX,
+      y: e.clientY,
+      kind: 'folder',
+      sourceId: '',
+      label: '',
+      section: null,
+      folderId,
+    };
+  }
+
   function openSourceMenu(e, sourceId, label, isUsb = false, usbPath = null) {
     e.preventDefault();
     if (isUsb && usbPath) handleRowClick(usbPath, true, usbPath);
@@ -231,18 +269,21 @@
     };
   }
 
-  function onPlaylistRowPointerDown(e, playlistId) {
+  function onPlaylistRowPointerDown(e, playlistId, isFolder = false) {
     if (e.button !== 0 || renamingPlaylistId === playlistId) return;
     let moved = false;
     function onMove(ev) {
-      if (!moved && Math.abs(ev.clientX - e.clientX) > 6) {
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) > 6) {
         moved = true;
         playlistDragId = playlistId;
         dnd.kind = 'playlist';
       }
       if (moved) {
-        const stick = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-stick-path]');
+        const stick = isFolder
+          ? null
+          : document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-stick-path]');
         dnd.dropStickPath = stick ? stick.getAttribute('data-drop-stick-path') : null;
+        playlistDrop = playlistDropAt(ev.clientX, ev.clientY);
       }
     }
     async function onUp() {
@@ -250,14 +291,12 @@
       window.removeEventListener('pointerup', onUp);
       if (!moved) return;
       const stickPath = dnd.dropStickPath;
-      if (stickPath) {
-        playlistDropId = null;
-        await dropPlaylistOnStick(stickPath, playlistId);
-      }
-      onPlaylistPointerUp(playlistId);
+      const drop = playlistDrop;
+      playlistDrop = null;
       playlistDragId = null;
-      playlistDropId = null;
       endDrag();
+      if (stickPath) await dropPlaylistOnStick(stickPath, playlistId);
+      else if (drop) await applyPlaylistDrop(playlistId, drop);
     }
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -294,13 +333,12 @@
       onHeaderContextMenu={(e) => openSectionMenu(e, 'favorites')}
     >
       {#each library.sidebarData.favorites.rows as row}
-        {@const pl = library.playlists.find(p => p.name === row.label)}
+        {@const pl = library.playlists.find(p => p.name === row.label && !p.is_folder)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap {rowClassExtra(pl?.id)}"
           onpointerenter={() => pl && onPlaylistPointerEnter(pl.id)}
           onpointerleave={() => pl && onPlaylistPointerLeave(pl.id)}
-          onpointerup={onPlaylistPointerUp}
           oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
         >
           <SidebarRow
@@ -358,32 +396,44 @@
       onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
     >
       {#each library.sidebarData.playlists.rows as row}
-        {@const pl = library.playlists.find(p => p.id === row.id)}
+        {@const isFolder = row.kind === 'folder'}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap {rowClassExtra(row.id)}"
-          onpointerenter={() => onPlaylistPointerEnter(row.id)}
+          data-playlist-id={row.id}
+          data-playlist-folder={isFolder ? '' : undefined}
+          onpointerenter={() => onPlaylistPointerEnter(row.id, isFolder)}
           onpointerleave={() => onPlaylistPointerLeave(row.id)}
-          onpointerup={onPlaylistPointerUp}
-          onpointerdown={(e) => onPlaylistRowPointerDown(e, row.id)}
-          oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
+          onpointerdown={(e) => onPlaylistRowPointerDown(e, row.id, isFolder)}
+          oncontextmenu={(e) => (isFolder ? openFolderMenu(e, row.id) : openSourceMenu(e, row.label, row.label))}
         >
           <SidebarRow
             kind={row.kind}
+            icon={isFolder ? (row.expanded ? 'folder-open' : 'folder') : undefined}
             label={row.label}
             count={row.count}
-            state={sidebarRowState(row.label, row.id)}
+            depth={row.depth}
+            expanded={row.expanded}
+            state={sidebarRowState(row.label, row.id, isFolder)}
             renaming={renamingPlaylistId === row.id}
             bind:renameValue={renameDraft}
             onRenameCommit={() => commitPlaylistRename(row.id)}
             onRenameCancel={cancelPlaylistRename}
-            onclick={() => handleRowClick(row.label)}
+            onclick={() => (isFolder ? toggleFolder(row.id) : handleRowClick(row.label))}
             ondblclick={() => startPlaylistRename(row.id, row.label)}
-            onOpenInPanel={() => dockOrganizeTarget({ kind: 'playlist', id: row.label, label: row.label, playlistId: row.id })}
+            onOpenInPanel={isFolder
+              ? undefined
+              : () => dockOrganizeTarget({ kind: 'playlist', id: row.label, label: row.label, playlistId: row.id })}
           />
         </div>
       {/each}
     </SidebarSection>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="ff-sidebar__fill {playlistDrop?.id === 0 ? 'drop-into' : ''}"
+      data-playlist-root-drop
+      oncontextmenu={(e) => openSectionMenu(e, 'playlists')}
+    ></div>
   </div>
 
   <div class="ff-sidebar__bottom">
@@ -498,5 +548,22 @@
   }
   .ff-sidebar__drop-wrap.drag-source :global(.ff-sbrow) {
     opacity: 0.5;
+  }
+  .ff-sidebar__drop-wrap.drop-into :global(.ff-sbrow) {
+    outline: 1px solid var(--ff-accent);
+    outline-offset: -1px;
+    background: var(--ff-hover);
+  }
+  .ff-sidebar__drop-wrap.drop-before :global(.ff-sbrow) {
+    box-shadow: inset 0 2px 0 var(--ff-accent);
+  }
+  .ff-sidebar__drop-wrap.drop-after :global(.ff-sbrow) {
+    box-shadow: inset 0 -2px 0 var(--ff-accent);
+  }
+  .ff-sidebar__fill {
+    flex: 1 0 24px;
+  }
+  .ff-sidebar__fill.drop-into {
+    box-shadow: inset 0 2px 0 var(--ff-accent);
   }
 </style>

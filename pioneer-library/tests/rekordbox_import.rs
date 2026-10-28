@@ -273,8 +273,11 @@ fn masterdb_import_brings_tags_grid_cues_playlists_and_marks_them_imported() {
     let playlists = library.get_all_playlists().unwrap();
     let mut names: Vec<_> = playlists.iter().map(|p| p.name.as_str()).collect();
     names.sort();
-    assert_eq!(names, ["Sets / Friday", "Top"]);
-    let friday = playlists.iter().find(|p| p.name == "Sets / Friday").unwrap();
+    assert_eq!(names, ["Friday", "Sets", "Top"]);
+    let sets = playlists.iter().find(|p| p.name == "Sets").unwrap();
+    assert!(sets.is_folder && sets.parent_id == 0);
+    let friday = playlists.iter().find(|p| p.name == "Friday").unwrap();
+    assert_eq!(friday.parent_id, sets.id);
     assert_eq!(friday.track_ids.len(), 2);
     assert_eq!(friday.track_ids[0], alpha.id);
 }
@@ -369,7 +372,7 @@ fn include_missing_keeps_tracks_whose_files_are_gone() {
         .get_all_playlists()
         .unwrap()
         .into_iter()
-        .find(|p| p.name == "Sets / Friday")
+        .find(|p| p.name == "Friday")
         .unwrap();
     assert_eq!(friday.track_ids.len(), 3);
 }
@@ -422,7 +425,7 @@ fn usb_stick_written_by_the_writer_reads_back_through_the_importer() {
         ]),
         analysis(12400, Vec::new()),
     ];
-    let playlists = vec![Playlist { id: 1, name: "Warmup".into(), track_ids: vec![2, 1] }];
+    let playlists = vec![Playlist { id: 1, name: "Warmup".into(), track_ids: vec![2, 1], ..Default::default() }];
     writer::filesystem::write_usb(usb.path(), &tracks, &analyses, &playlists).unwrap();
 
     let source = rekordbox::load_usb(usb.path()).unwrap();

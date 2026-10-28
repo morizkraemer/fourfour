@@ -430,7 +430,13 @@ fn sync_playlists_to_library(
 ) -> Result<(), String> {
     let playlists: Vec<models::Playlist> = playlists
         .iter()
-        .map(|pl| models::Playlist { id: pl.id, name: pl.name.clone(), track_ids: pl.track_ids.clone() })
+        .map(|pl| models::Playlist {
+            id: pl.id,
+            name: pl.name.clone(),
+            track_ids: pl.track_ids.clone(),
+            parent_id: pl.parent_id,
+            is_folder: pl.is_folder,
+        })
         .collect();
     lib.replace_playlists(&playlists).map_err(|e| e.to_string())
 }
@@ -1023,6 +1029,8 @@ async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, Stri
                 id: pl.id,
                 name: pl.name,
                 track_ids: pl.track_ids,
+                parent_id: pl.parent_id,
+                is_folder: pl.is_folder,
             })
             .collect();
 
