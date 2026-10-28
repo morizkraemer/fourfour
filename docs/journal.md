@@ -216,3 +216,4 @@
 2026-10-28 11:18 orchestrator - landed: r11-int → master on Merlin's OK (code identical to tested 7f6e2d0); not pushed
 2026-10-28 11:27 orchestrator - round 12 spawn: wp-bpm R1 (seat, sonnet), wp-cues R2–R6 (seat, sonnet), both off master 854a5a5
 2026-10-28 11:33 orchestrator - wp-cues 1e70f6f → r12-int e046d48 (663 tests; hotkey ⇧C); waiting on wp-bpm
+2026-10-28 11:51 orchestrator - wp-bpm 78a78e0 → r12-int 9f5ba16 (conflicts in ExpandedPlayer + app-actions resolved, both kept; 663 tests); reported track-bpm.test.ts was never committed → wp-bpm-test spawn (seat, sonnet); checks + Mac install started
