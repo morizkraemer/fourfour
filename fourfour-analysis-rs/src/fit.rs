@@ -8,6 +8,7 @@ pub struct FitParams {
     pub shift_ms: f64,
     pub comb_refine: bool,
     pub snap_tol: f64,
+    pub snap_tol_unchecked: bool,
     pub snap_phase_ms: f64,
     pub snap_wide: f64,
     pub scan_pct: f64,
@@ -23,6 +24,7 @@ impl Default for FitParams {
             shift_ms: 0.0,
             comb_refine: true,
             snap_tol: 0.05,
+            snap_tol_unchecked: false,
             snap_phase_ms: 15.0,
             snap_wide: 1.5,
             scan_pct: 0.3,
@@ -280,7 +282,8 @@ pub fn fit_track(
                 }
                 dt += 0.0005;
             }
-            if delta < params.snap_tol || best.0 >= params.snap_ratio * current {
+            let unchecked = params.snap_tol_unchecked && delta < params.snap_tol;
+            if unchecked || best.0 >= params.snap_ratio * current {
                 p = p_new;
                 t0 = best.1;
                 break;
@@ -332,4 +335,52 @@ pub fn fit_track(
 
 pub fn finalize_beats(beats_s: &[f64], delay_s: f64) -> Vec<f64> {
     beats_s.iter().map(|t| t + delay_s).filter(|t| *t > -0.04).map(|t| t.max(0.0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DURATION: f64 = 420.0;
+
+    fn synthetic(bpm: f64) -> (Vec<f64>, Vec<f32>) {
+        let period = 60.0 / bpm;
+        let first = 0.137;
+        let frames = (DURATION * FPS) as usize;
+        let beats: Vec<f64> = (0..).map(|k| first + k as f64 * period).take_while(|&t| t < DURATION).collect();
+        let logits: Vec<f32> = (0..frames)
+            .map(|f| {
+                let t = f as f64 / FPS;
+                let k = ((t - first) / period).round();
+                let dt = t - (first + k * period);
+                let p = 0.001 + 0.998 * (-(dt / 0.012).powi(2) / 2.0).exp();
+                (p / (1.0 - p)).ln() as f32
+            })
+            .collect();
+        let peaks = beats.iter().map(|t| (t * FPS).round() / FPS).collect();
+        (peaks, logits)
+    }
+
+    fn fitted_bpm(bpm: f64, params: &FitParams) -> f64 {
+        let (peaks, logits) = synthetic(bpm);
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        fit_track(&peaks, &logits, &logits, DURATION, &w, params).unwrap().bpm
+    }
+
+    #[test]
+    fn integer_tempo_snaps_to_the_integer() {
+        assert_eq!(fitted_bpm(128.0, &FitParams::default()), 128.0);
+    }
+
+    #[test]
+    fn tempo_just_off_an_integer_is_not_snapped_when_the_comb_disagrees() {
+        let bpm = fitted_bpm(128.02, &FitParams::default());
+        assert!((bpm - 128.02).abs() < 0.003, "fitted {bpm}");
+    }
+
+    #[test]
+    fn unchecked_snap_keeps_the_old_rule() {
+        let params = FitParams { snap_tol_unchecked: true, ..FitParams::default() };
+        assert_eq!(fitted_bpm(128.02, &params), 128.0);
+    }
 }

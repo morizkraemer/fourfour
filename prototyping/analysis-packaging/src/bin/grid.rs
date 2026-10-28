@@ -22,6 +22,7 @@ struct Params {
     use_final: bool,
     threads: usize,
     snap_tol: f64,
+    snap_tol_unchecked: bool,
     snap_phase_ms: f64,
     snap_wide: f64,
     scan_pct: f64,
@@ -337,7 +338,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let reference = PathBuf::from(args.next().expect("usage: grid <reference.json> <dump dir> [--split dev|test|all] [--lo N] [--shift-ms N] [--comb] [--out file] [--dedupe]"));
     let dir = PathBuf::from(args.next().expect("dump dir"));
-    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_rule: DelayRule::None, mp3_diag: false, use_final: false, threads: 1, snap_tol: 0.0, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false, onset_dir: None, keep_native: (0.0, 0.0), pcm_shift_ms: mp3::PCM_SHIFT_MS };
+    let mut params = Params { lo: 70.0, shift_ms: 0.0, comb_refine: false, audio_q: 0.0, audio_range_ms: 40, audio_calib_ms: 0.0, audio_min_ms: 0.0, mp3_rule: DelayRule::None, mp3_diag: false, use_final: false, threads: 1, snap_tol: 0.0, snap_tol_unchecked: false, snap_phase_ms: 15.0, snap_wide: 0.0, scan_pct: 0.0, snap_ratio: 1.0, diag: false, onset_dir: None, keep_native: (0.0, 0.0), pcm_shift_ms: mp3::PCM_SHIFT_MS };
     let mut split = "test".to_string();
     let mut out: Option<PathBuf> = None;
     let mut dedupe = false;
@@ -358,6 +359,7 @@ fn main() {
             "--use-final" => params.use_final = true,
             "--threads" => params.threads = args.next().unwrap().parse().unwrap(),
             "--snap-tol" => params.snap_tol = args.next().unwrap().parse().unwrap(),
+            "--snap-tol-unchecked" => params.snap_tol_unchecked = true,
             "--scan-pct" => params.scan_pct = args.next().unwrap().parse().unwrap(),
             "--snap-wide" => params.snap_wide = args.next().unwrap().parse().unwrap(),
             "--snap-ratio" => params.snap_ratio = args.next().unwrap().parse().unwrap(),
@@ -579,6 +581,7 @@ impl Params {
             shift_ms: self.shift_ms,
             comb_refine: self.comb_refine,
             snap_tol: self.snap_tol,
+            snap_tol_unchecked: self.snap_tol_unchecked,
             snap_phase_ms: self.snap_phase_ms,
             snap_wide: self.snap_wide,
             scan_pct: self.scan_pct,
