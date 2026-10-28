@@ -20,7 +20,7 @@ use crate::models::{ColorWaveform, ExactColumns, WaveformPreview};
 
 mod detail;
 
-pub use detail::{DetailMeter, DetailSeries, DETAIL_COLUMNS_PER_SECOND};
+pub use detail::{measure_window, DetailMeter, DetailSeries, WindowSeries, DETAIL_COLUMNS_PER_SECOND};
 
 pub const COLUMNS_PER_SECOND: f64 = 150.0;
 pub const PWAV_COLUMNS: usize = 400;

@@ -758,6 +758,39 @@ async fn get_waveform_detail(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// A fine stretch of the zoomed waveform (`WindowSeries::to_bytes`): `columns` columns from `start_s` to `end_s`, decoded
+/// from the audio now, for zoom levels where the high-resolution series is wider than a pixel. A newer request
+/// supersedes an older one, which then fails with `superseded`. Sent as a binary IPC response.
+#[tauri::command]
+async fn get_waveform_window(
+    app: AppHandle,
+    track_id: i64,
+    start_s: f64,
+    end_s: f64,
+    columns: u32,
+    state: State<'_, SharedLibrary>,
+    windows: State<'_, Arc<waveform_detail::DetailWindows>>,
+) -> Result<tauri::ipc::Response, String> {
+    let shared = state.inner().clone();
+    let windows = windows.inner().clone();
+    let cache_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("waveform-detail");
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let track = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.get_track(track_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Track {track_id} is not in the library"))?
+        };
+        windows
+            .window(&cache_dir, &track.source_path, start_s, end_s, columns as usize)?
+            .map(|window| window.to_bytes())
+            .ok_or_else(|| "superseded".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// Replace the hot and memory cues of a track (slot 0 is a memory cue, 1 to 8 are A to H).
 #[tauri::command]
 async fn set_cues(
@@ -1240,6 +1273,7 @@ fn main() {
             set_analysis_backend,
             get_analysis_data,
             get_waveform_detail,
+            get_waveform_window,
             set_beat_grid,
             set_track_bpm,
             set_track_key,
@@ -1272,6 +1306,7 @@ fn main() {
             app.manage(Arc::new(Mutex::new(library)));
             app.manage(AnalysisCoordinator::default());
             app.manage(SharedArtworkThumbs::default());
+            app.manage(Arc::new(waveform_detail::DetailWindows::default()));
 
             match PlaybackEngine::new() {
                 Ok(playback) => {

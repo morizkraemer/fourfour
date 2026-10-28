@@ -24,6 +24,8 @@
     triggerHotCue,
   } from '../stores/cue-actions.ts';
   import { gridNudgeMs } from '../lib/beatGrid.ts';
+  import { getWaveformWindow } from '../services/tauri.svelte.ts';
+  import { windowFromBytes } from '../services/waveform-bands.ts';
   import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueMarkers, hotCueIn, slotLetter } from '../lib/cues.ts';
   import {
     player,
@@ -42,6 +44,12 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+  let windowTrackId = $derived(player.track?.bandsZoom ? player.track.id : null);
+  let windowSource = $derived(
+    windowTrackId == null
+      ? null
+      : async (startMs, endMs, columns) => windowFromBytes(await getWaveformWindow(windowTrackId, startMs, endMs, columns)),
+  );
   const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey);
 
   $effect(() => {
@@ -120,6 +128,7 @@
       bandsDetail={player.track?.bandsDetail ?? null}
       bandsOverview={player.track?.bandsOverview ?? null}
       bandsZoom={player.track?.bandsZoom ?? null}
+      {windowSource}
       cues={markers}
       beats={player.track?.beats ?? []}
       bpm={player.track?.bpm ?? 0}

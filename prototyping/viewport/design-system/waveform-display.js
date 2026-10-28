@@ -23,9 +23,9 @@
  *                Rekordbox-style playhead locked at centre while the waveform
  *                scrolls; horizontal drag scrubs, wheel zooms.
  */
-import { drawBandRange, dimPlayed, ink, paletteVersion, wavePalette } from './waveform-render.js';
+import { drawBandRange, dimPlayed, ink, paintBands, paletteVersion, wavePalette } from './waveform-render.js';
 import { PlayheadClock } from './playhead-clock.js';
-import { ZOOM_PEAK_WEIGHT } from './waveform-bands.js';
+import { ZOOM_PEAK_WEIGHT, reduceBands } from './waveform-bands.js';
 
 const DRAG_THRESHOLD_PX = 4;
 const CUE_TAB_W = 12;
@@ -39,6 +39,14 @@ const MIN_VISIBLE_MS = 4;
 const FINE_TICK_MS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 const TICKS_ACROSS = 8;
 const DETAIL_BELOW_COLUMNS_PER_PIXEL = 2;
+const WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL = 1;
+const WINDOW_SCREENS = 3;
+const WINDOW_THROTTLE_MS = 60;
+const WINDOW_MIN_DENSITY = 0.75;
+const WINDOW_MAX_DENSITY = 3;
+const WINDOW_REFRESH_DENSITY = [0.9, 1.25];
+const SAMPLE_LINE_BELOW_SAMPLES_PER_PIXEL = 2;
+const SAMPLE_LINE_SCALE = 0.92;
 
 export default class WaveformDisplay {
     /**
@@ -154,6 +162,13 @@ export default class WaveformDisplay {
         // rAF handle — coalesces rapid scroll/drag events into one draw per frame
         this._zoomRafId = null;
 
+        this._windowSource = null;
+        this._window = null;
+        this._windowToken = 0;
+        this._windowTimer = null;
+        this._windowNext = null;
+        this._windowInFlight = null;
+
         this._bindEvents();
     }
 
@@ -175,6 +190,7 @@ export default class WaveformDisplay {
     /** Replace data and re-render. Resets zoom and scroll position. */
     setData(data, playheadFrac = undefined) {
         this._data = data;
+        this._dropWindow();
         this._overviewDirty = true;
         this._clock.stop(0);
         if (playheadFrac !== undefined && playheadFrac >= 0) {
@@ -203,6 +219,26 @@ export default class WaveformDisplay {
         if (!this._data || this._data.bandsZoom === bandsZoom) return;
         this._data = { ...this._data, bandsZoom };
         this._paint();
+    }
+
+    /**
+     * Where the zoom view gets fine detail once even the high-resolution series is wider than a pixel:
+     * `source(startMs, endMs, columns)` resolves to a window (`windowFromBytes`) or null, or rejects. Requests are
+     * throttled and only the newest is kept; until one arrives the high-resolution series stays on screen.
+     */
+    setWindowSource(source) {
+        if (this._windowSource === source) return;
+        this._windowSource = source || null;
+        this._dropWindow();
+        this._render();
+    }
+
+    _dropWindow() {
+        this._window = null;
+        this._windowToken++;
+        this._windowNext = null;
+        if (this._windowTimer) clearTimeout(this._windowTimer);
+        this._windowTimer = null;
     }
 
     /** Replace the beat grid only (an edit): zoom, scroll position and the rest of the data stay. */
@@ -459,6 +495,7 @@ export default class WaveformDisplay {
     /** Remove canvases and all event listeners. */
     destroy() {
         if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
+        this._dropWindow();
         this._stopInterp();
         if (this._sizeObserver) this._sizeObserver.disconnect();
         this._themeObserver.disconnect();
@@ -661,9 +698,134 @@ export default class WaveformDisplay {
         return coarsePerPixel < DETAIL_BELOW_COLUMNS_PER_PIXEL ? fine : null;
     }
 
+    // A fetched window that covers the view at about one column per pixel, once the high-resolution series is wider
+    // than a pixel; asks for a new one when the view nears its edge or the zoom moved away from its resolution.
+    _zoomWindow(widthPx, startFrac, endFrac) {
+        const fine = this._data.bandsZoom;
+        const durationMs = this._data.duration_ms;
+        if (!this._windowSource || !fine?.low.length || !durationMs) return null;
+        if (((endFrac - startFrac) * fine.low.length) / widthPx >= WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL) return null;
+        const startMs = startFrac * durationMs;
+        const endMs = endFrac * durationMs;
+        const spanMs = endMs - startMs;
+        const win = this._window;
+        let usable = false;
+        let refresh = true;
+        if (win) {
+            const density = (win.low.length * spanMs) / (win.endMs - win.startMs) / widthPx;
+            usable = win.startMs <= Math.max(0, startMs) && win.endMs >= Math.min(durationMs, endMs)
+                && density >= WINDOW_MIN_DENSITY && density <= WINDOW_MAX_DENSITY;
+            const nearStart = win.startMs > 0 && startMs - win.startMs < spanMs / 2;
+            const nearEnd = win.endMs < durationMs && win.endMs - endMs < spanMs / 2;
+            refresh = !usable || nearStart || nearEnd
+                || density < WINDOW_REFRESH_DENSITY[0] || density > WINDOW_REFRESH_DENSITY[1];
+        }
+        if (refresh) {
+            const centre = (startMs + endMs) / 2;
+            const from = Math.max(0, centre - (WINDOW_SCREENS / 2) * spanMs);
+            const to = Math.min(durationMs, centre + (WINDOW_SCREENS / 2) * spanMs);
+            if (to > from) this._requestWindow({ startMs: from, endMs: to, columns: Math.max(1, Math.round((widthPx * (to - from)) / spanMs)) });
+        }
+        return usable ? win : null;
+    }
+
+    _requestWindow(request) {
+        const inFlight = this._windowInFlight;
+        if (inFlight && inFlight.columns === request.columns
+            && Math.abs(inFlight.startMs - request.startMs) < 1e-6 && Math.abs(inFlight.endMs - request.endMs) < 1e-6) return;
+        this._windowNext = request;
+        if (this._windowTimer || this._windowInFlight) return;
+        this._windowTimer = setTimeout(() => this._fetchWindow(), WINDOW_THROTTLE_MS);
+    }
+
+    _fetchWindow() {
+        this._windowTimer = null;
+        const request = this._windowNext;
+        this._windowNext = null;
+        if (!request || !this._windowSource) return;
+        const token = this._windowToken;
+        this._windowInFlight = request;
+        Promise.resolve()
+            .then(() => this._windowSource(request.startMs, request.endMs, request.columns))
+            .then((win) => {
+                if (token !== this._windowToken || !win) return;
+                this._window = win;
+                this._render();
+            }, () => {})
+            .finally(() => {
+                this._windowInFlight = null;
+                if (this._windowNext && token === this._windowToken) {
+                    const next = this._windowNext;
+                    this._windowNext = null;
+                    this._requestWindow(next);
+                }
+            });
+    }
+
+    _paintWindow(ctx, win, widthPx, heightPx, startFrac, endFrac, palette) {
+        const durationMs = this._data.duration_ms;
+        const spanMs = win.endMs - win.startMs;
+        const a = (startFrac * durationMs - win.startMs) / spanMs;
+        const b = (endFrac * durationMs - win.startMs) / spanMs;
+        const shaped = reduceBands(win, a, b, widthPx, ZOOM_PEAK_WEIGHT);
+        const fracPerPx = (endFrac - startFrac) / widthPx;
+        const inTrack = (p) => {
+            const frac = startFrac + (p + 0.5) * fracPerPx;
+            return frac >= 0 && frac <= 1;
+        };
+        for (let p = 0; p < widthPx; p++) {
+            if (inTrack(p)) continue;
+            shaped.low[p] = 0;
+            shaped.mid[p] = 0;
+            shaped.high[p] = 0;
+        }
+        paintBands(ctx, shaped, { heightPx, palette });
+
+        const samplesPerPx = (((endFrac - startFrac) * durationMs) / 1000) * win.sampleRate / widthPx;
+        if (!(samplesPerPx < SAMPLE_LINE_BELOW_SAMPLES_PER_PIXEL)) return;
+        const n = win.lowest.length;
+        const colsPerPx = ((b - a) * n) / widthPx;
+        const yCentre = heightPx / 2;
+        const yOf = (v) => yCentre - (v / 32767) * yCentre * SAMPLE_LINE_SCALE;
+        ctx.strokeStyle = ink(palette, 0.85);
+        ctx.lineWidth = Math.max(1, Math.round(devicePixelRatio));
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        let started = false;
+        for (let p = 0; p < widthPx; p++) {
+            if (!inTrack(p)) continue;
+            const lo = a * n + p * colsPerPx;
+            const c0 = Math.max(0, Math.min(n - 1, Math.floor(colsPerPx < 1 ? lo + colsPerPx / 2 : lo)));
+            const c1 = colsPerPx < 1 ? c0 : Math.max(c0, Math.min(n - 1, Math.ceil(lo + colsPerPx) - 1));
+            let min = win.lowest[c0];
+            let max = win.highest[c0];
+            for (let c = c0 + 1; c <= c1; c++) {
+                if (win.lowest[c] < min) min = win.lowest[c];
+                if (win.highest[c] > max) max = win.highest[c];
+            }
+            const x = p + 0.5;
+            if (!started) {
+                ctx.moveTo(x, yOf(max));
+                started = true;
+            } else {
+                ctx.lineTo(x, yOf(max));
+            }
+            if (min !== max) ctx.lineTo(x, yOf(min));
+        }
+        ctx.stroke();
+    }
+
     _renderBands(ctx, w, h, startFrac, endFrac, palette) {
         const compact = this._mode === 'compact';
         const widthPx = Math.round(w * devicePixelRatio);
+        const win = compact ? null : this._zoomWindow(widthPx, startFrac, endFrac);
+        if (win) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            this._paintWindow(ctx, win, widthPx, Math.round(h * devicePixelRatio), startFrac, endFrac, palette);
+            ctx.restore();
+            return;
+        }
         const fine = compact ? null : this._zoomDetailBands(widthPx, startFrac, endFrac);
         const bands = fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
         if (!bands || bands.low.length === 0) return;

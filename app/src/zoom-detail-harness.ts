@@ -1,11 +1,13 @@
 import WaveformDisplay from '$ds/waveform-display.js';
 import '$ds/base.css';
-import { bandsFromDetailBytes, bandsFromStickBytes } from './services/waveform-bands.ts';
+import { bandsFromDetailBytes, bandsFromStickBytes, windowFromBytes } from './services/waveform-bands.ts';
 
 /**
  * Dev-only page (`npm run dev`, then /zoom-detail.html?track=NAME&win=SECONDS&at=SECONDS): the expanded
  * waveform of one measured track at a fixed zoom, for the before/after shots and the frame-time runs of
  * `app/perf/zoom-detail-shots.mjs`. `/fx/NAME.pwv7` and `/fx/NAME.ffwd` come from `waveform_detail_dump`.
+ * With `&windows=1` the fine windows of the deepest zoom levels come from `/win/window?...`
+ * (`waveform_window_dump serve`); `body[data-windows]` counts the ones that arrived.
  */
 async function bytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await (await fetch(url)).arrayBuffer());
@@ -28,6 +30,15 @@ async function main() {
   const display = new WaveformDisplay(host, { mode: 'expanded' });
   const frac = (at * 1000) / durationMs;
   display.setData({ bands, bandsOverview: bands, bandsZoom, beats: [], cues: [], duration_ms: durationMs, bpm: 0 } as any, frac as any);
+  if (params.get('windows')) {
+    let arrived = 0;
+    display.setWindowSource(async (startMs: number, endMs: number, columns: number) => {
+      const url = `/win/window?start=${startMs / 1000}&end=${endMs / 1000}&columns=${columns}`;
+      const win = windowFromBytes(await (await fetch(url)).arrayBuffer());
+      document.body.dataset.windows = String(++arrived);
+      return win;
+    });
+  }
   display._applyZoom((durationMs / 1000) / win);
   display._setClock(frac);
 
