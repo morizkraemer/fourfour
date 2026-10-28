@@ -48,6 +48,14 @@ import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.t
 import { artwork } from './artwork.svelte.ts';
 import { loadCuesFromPayload } from './cues.svelte.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
+import {
+  descendantIds,
+  movePlaylist,
+  removeWithDescendants,
+  sidebarTreeRows,
+  uniqueName,
+} from '../lib/playlistTree.ts';
+import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
@@ -101,7 +109,7 @@ function pushFavoritePlaylist(slot: number) {
   const name = favoritePlaylistName(slot);
   const newId =
     library.playlists.length > 0 ? Math.max(...library.playlists.map((pl) => pl.id)) + 1 : 1;
-  library.playlists.push({ id: newId, name, track_ids: [] });
+  library.playlists.push({ id: newId, name, track_ids: [], parent_id: 0, is_folder: false });
 }
 
 /** Map slot number → favorite playlist (only existing playlists). */
@@ -248,14 +256,18 @@ export const library = $state({
       playlists: {
         label: 'PLAYLISTS',
         showAdd: true,
-        rows: this.playlists
-          .filter(p => !p.name.startsWith('Favorites '))
-          .map(p => ({
-            kind: 'playlist',
-            label: p.name,
-            count: p.track_ids.length,
-            id: p.id
-          })),
+        rows: sidebarTreeRows(
+          this.playlists,
+          new Set(folderState.collapsed),
+          (p) => p.name.startsWith('Favorites ')
+        ).map((row) => ({
+          kind: row.isFolder ? 'folder' : 'playlist',
+          label: row.name,
+          count: row.isFolder ? undefined : row.trackCount,
+          id: row.id,
+          depth: row.depth,
+          expanded: row.isFolder ? row.expanded : undefined,
+        })),
       },
       usb: {
         label: 'USB DEVICES',
@@ -398,7 +410,7 @@ export function tracksForSidebarSource(source: string | null | undefined) {
   if (library.volumes.includes(active)) {
     return library.usbTracks;
   }
-  const playlist = library.playlists.find((p) => p.name === active);
+  const playlist = library.playlists.find((p) => p.name === active && !p.is_folder);
   if (playlist) {
     const byId = new Map(library.tracks.map((t) => [t.id, t]));
     return playlist.track_ids.map((id) => byId.get(id)).filter(Boolean);
@@ -800,7 +812,7 @@ export function playlistForSidebarSource(source: string | null | undefined) {
   ) {
     return null;
   }
-  return library.playlists.find((p) => p.name === active) ?? null;
+  return library.playlists.find((p) => p.name === active && !p.is_folder) ?? null;
 }
 
 function importErrorMessage(err: unknown): string {
@@ -1087,20 +1099,75 @@ export async function renamePlaylist(id: number, name: string) {
   await saveState();
 }
 
-export async function addPlaylist(name: string, trackIds: number[] = []): Promise<number> {
-  const newId = library.playlists.length > 0 ? Math.max(...library.playlists.map(p => p.id)) + 1 : 1;
+function nextPlaylistId(): number {
+  return library.playlists.length > 0 ? Math.max(...library.playlists.map((p) => p.id)) + 1 : 1;
+}
+
+export async function addPlaylist(name: string, trackIds: number[] = [], parentId = 0): Promise<number> {
+  const newId = nextPlaylistId();
   library.playlists.push({
     id: newId,
     name,
-    track_ids: [...new Set(trackIds)]
+    track_ids: [...new Set(trackIds)],
+    parent_id: parentId,
+    is_folder: false,
   });
+  if (parentId !== 0) expandFolder(parentId);
   await saveState();
   return newId;
 }
 
-export async function deletePlaylist(id: number) {
-  library.playlists = library.playlists.filter(p => p.id !== id);
+export function defaultFolderName(): string {
+  return uniqueName(library.playlists.map((p) => p.name), 'New folder');
+}
+
+export async function addFolder(parentId = 0, name = defaultFolderName()): Promise<number> {
+  const newId = nextPlaylistId();
+  library.playlists.push({ id: newId, name, track_ids: [], parent_id: parentId, is_folder: true });
+  if (parentId !== 0) expandFolder(parentId);
   await saveState();
+  return newId;
+}
+
+export async function duplicatePlaylist(id: number): Promise<number | null> {
+  const source = library.playlists.find((p) => p.id === id && !p.is_folder);
+  if (!source) return null;
+  const copy = {
+    ...source,
+    id: nextPlaylistId(),
+    name: uniqueName(library.playlists.map((p) => p.name), `${source.name} copy`),
+    track_ids: [...source.track_ids],
+  };
+  const at = library.playlists.findIndex((p) => p.id === id) + 1;
+  library.playlists = [...library.playlists.slice(0, at), copy, ...library.playlists.slice(at)];
+  await saveState();
+  return copy.id;
+}
+
+export function playlistsInFolder(folderId: number): PlaylistInput[] {
+  const inside = descendantIds(library.playlists, folderId);
+  return library.playlists.filter((p) => inside.has(p.id) && !p.is_folder);
+}
+
+/** Deletes a playlist, or a folder with everything inside it. */
+export async function deletePlaylist(id: number) {
+  library.playlists = removeWithDescendants(library.playlists, id);
+  await saveState();
+}
+
+/** Moves a playlist or folder into `parentId` (0 is the top level), next to `anchorId` when given. */
+export async function movePlaylistInTree(
+  id: number,
+  parentId: number,
+  anchorId: number | null = null,
+  placeAfter = false
+): Promise<boolean> {
+  const moved = movePlaylist(library.playlists, id, parentId, anchorId, placeAfter);
+  if (!moved) return false;
+  library.playlists = moved;
+  if (parentId !== 0) expandFolder(parentId);
+  await saveState();
+  return true;
 }
 
 /** Delete a numbered favorite slot playlist (slots 3+ only); returns removed playlist name. */
@@ -1198,19 +1265,9 @@ export async function moveTracksToPlaylist(opts: {
   }
 }
 
-export async function reorderPlaylists(dragId: number, dropId: number) {
-  const from = library.playlists.findIndex(p => p.id === dragId);
-  const to = library.playlists.findIndex(p => p.id === dropId);
-  if (from < 0 || to < 0 || from === to) return;
-  const [item] = library.playlists.splice(from, 1);
-  library.playlists.splice(to, 0, item);
-  library.playlists = [...library.playlists];
-  await saveState();
-}
-
 /** Resolve playlist by sidebar label (name). */
 export function playlistByName(name: string): PlaylistInput | undefined {
-  return library.playlists.find(p => p.name === name);
+  return library.playlists.find(p => p.name === name && !p.is_folder);
 }
 
 /* ── Change local library directory ─────────────────────────────────── */

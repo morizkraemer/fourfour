@@ -46,8 +46,8 @@ async function fresh() {
   const drop = await import('./organize-drop.svelte.ts');
   const sticks = await import('./sticks.svelte.ts');
   library.library.playlists = [
-    { id: 1, name: 'Peak Time', track_ids: [10, 11] },
-    { id: 2, name: 'Warmup', track_ids: [] },
+    { id: 1, name: 'Peak Time', track_ids: [10, 11], parent_id: 0, is_folder: false },
+    { id: 2, name: 'Warmup', track_ids: [], parent_id: 0, is_folder: false },
   ];
   return { library: library.library, ...drop, ...sticks };
 }

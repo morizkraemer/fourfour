@@ -20,7 +20,7 @@
 
   let maxRecent = $derived(pickerWidth >= WIDE_PICKER_PX ? MAX_RECENT_WIDE : MAX_RECENT_NARROW);
 
-  let eligiblePlaylists = $derived(library.playlists.filter((p) => !isFavoritePlaylistName(p.name)));
+  let eligiblePlaylists = $derived(library.playlists.filter((p) => !p.is_folder && !isFavoritePlaylistName(p.name)));
 
   let recentPlaylists = $derived.by(() => {
     const recent = ui.organize.recentPlaylistIds

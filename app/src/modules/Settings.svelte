@@ -31,7 +31,7 @@
   function status(key) {
     switch (key) {
       case 'library':
-        return `${library.trackCount} tracks · ${library.playlists.length} playlists`;
+        return `${library.trackCount} tracks · ${library.playlists.filter((p) => !p.is_folder).length} playlists`;
       case 'analysis':
         if (library.analyzing) {
           return `Running · ${library.analysisProgress.current} / ${library.analysisProgress.total}`;

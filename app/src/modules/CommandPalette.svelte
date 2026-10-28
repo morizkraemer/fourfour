@@ -65,7 +65,7 @@
       places: [
         { id: 'all', label: 'All Tracks', sub: 'library', icon: 'list', run: () => void goToSource('All Tracks') },
         { id: 'recent', label: 'Recently Added', sub: 'library', icon: 'clock-3', run: () => void goToSource('Recently Added') },
-        ...library.playlists.map((p) => ({
+        ...library.playlists.filter((p) => !p.is_folder).map((p) => ({
           id: `playlist:${p.id}`,
           label: p.name,
           sub: 'playlist',
