@@ -1,18 +1,13 @@
-import {
-  clampBpm,
-  formatBpm,
-  parseBpm,
-  parseKey,
-  stepBpm,
-  tierOf,
-} from '../../../prototyping/viewport/design-system/utils/scrub.js';
+import { formatBpm, parseBpm, parseKey, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
+
+export { formatBpm, parseBpm, tierOf };
 
 export const TEMPO_RANGES = [8, 16, 50] as const;
 export type TempoRange = (typeof TEMPO_RANGES)[number];
 export const DEFAULT_TEMPO_RANGE: TempoRange = 8;
 export const MAX_SEMITONES = 12;
 
-type Tier = 'fine' | 'normal' | 'coarse';
+export type Tier = 'fine' | 'normal' | 'coarse';
 
 const PERCENT_STEPS: Record<TempoRange, Record<Tier, number>> = {
   8: { fine: 0.01, normal: 0.02, coarse: 0.1 },
@@ -139,73 +134,36 @@ export function shiftForKey(analysedKey: string, targetKey: string, currentShift
   });
 }
 
-/** BPM field of the player: shows the BPM being played, steps and typing set the tempo that reaches it. */
-export function playingBpmScrub(analysedBpm: number, range: TempoRange) {
-  return {
-    kind: 'bpm',
-    min: analysedBpm * ratioFromPercent(-50),
-    max: analysedBpm * ratioFromPercent(50),
-    pxPerUnit: 6,
-    tier: tierOf,
-    step: (value: number, units: number, tier: Tier = 'normal') => {
-      const next = stepBpm(value, units, tier);
-      const lowest = analysedBpm * ratioFromPercent(-range);
-      const highest = analysedBpm * ratioFromPercent(range);
-      return clampBpm(round(Math.min(highest, Math.max(lowest, next)), 2));
-    },
-    parse: (text: string) => {
-      const bpm = parseBpm(text);
-      if (bpm === null) return null;
-      const percent = (bpm / analysedBpm - 1) * 100;
-      return Math.abs(percent) <= 50 + 1e-9 ? bpm : null;
-    },
-    format: formatBpm,
-    valid: (value: number) => Number.isFinite(value) && value > 0,
-    editText: (value: number) => value.toFixed(2),
-    ariaNow: (value: number) => value,
-    ariaText: (value: number) => `${formatBpm(value)} BPM, ${formatPercent(percentForBpm(value, analysedBpm))}`,
-    hint: 'The BPM being played. Drag, scroll or arrow keys change the tempo. Alt fine, Shift coarse. Double-click to type a BPM.',
-    actions: [],
-  };
+export const BPM_CLICK_STEP = 1;
+export const BPM_CLICK_STEP_FINE = 0.1;
+
+export const DRAG_PX_PER_UNIT = { bpm: 1.5, percent: 1.5, key: 8 } as const;
+
+const BPM_DRAG_STEP: Record<Tier, number> = { fine: 0.01, normal: 0.1, coarse: 1 };
+
+export function bpmDragStep(tier: Tier): number {
+  return BPM_DRAG_STEP[tier];
 }
 
-/** Tempo as a percentage of the track's own speed, with CDJ-like fine steps per range. */
-export function tempoPercentScrub(range: TempoRange) {
-  return {
-    kind: 'tempo',
-    min: -range,
-    max: range,
-    pxPerUnit: 4,
-    tier: tierOf,
-    step: (value: number, units: number, tier: Tier = 'normal') => stepPercent(value, units, tier, range),
-    parse: parsePercent,
-    format: formatPercent,
-    valid: (value: number) => Number.isFinite(value),
-    editText: (value: number) => (value > 0 ? '+' : '') + value.toFixed(2),
-    ariaNow: (value: number) => value,
-    ariaText: (value: number) => `Tempo ${formatPercent(value)}`,
-    hint: `Tempo offset, ±${range} %. Drag, scroll or arrow keys. Alt fine, Shift coarse. Double-click to type. ⌘0 resets.`,
-    actions: [{ label: 'Reset tempo to 0 %', shortcut: '⌘0', hotkey: '0', apply: () => 0 }],
-  };
+/** The tempo that makes the track play `units` steps of `bpmStep` away from where it plays now. */
+export function percentAfterBpmStep(
+  analysedBpm: number,
+  percent: number,
+  units: number,
+  bpmStep: number,
+  range: TempoRange,
+): number {
+  const next = round(playingBpm(analysedBpm, percent) + units * bpmStep, 2);
+  return clampPercent(round((next / analysedBpm - 1) * 100, 4), range);
 }
 
-/** KEY field of the player: the value is the shift in semitones, shown as the resulting key. */
-export function keyShiftScrub(analysedKey: string, currentShift: number) {
-  const resulting = (shift: number) => shiftedKey(analysedKey, shift) ?? '—';
-  return {
-    kind: 'key',
-    min: -MAX_SEMITONES,
-    max: MAX_SEMITONES,
-    pxPerUnit: 14,
-    tier: () => 'normal',
-    step: (value: number, units: number) => clampShift(value + units),
-    parse: (text: string) => shiftForKey(analysedKey, text, currentShift),
-    format: resulting,
-    valid: (value: number) => Number.isFinite(value) && shiftedKey(analysedKey, 0) !== null,
-    editText: resulting,
-    ariaNow: (value: number) => value,
-    ariaText: (value: number) => `${resulting(value)}, ${formatShift(value)}`,
-    hint: 'The key being played. Drag, scroll or arrow keys shift it by a semitone. Double-click to type a key.',
-    actions: [{ label: 'Reset key shift', apply: () => 0 }],
-  };
+/** A typed key: Camelot or note name picks the key, a number (`+2`, `-3`, `2st`) is the shift in semitones. */
+export function parseKeyEntry(text: string, analysedKey: string, currentShift = 0): number | null {
+  const cleaned = String(text ?? '').trim().replace('−', '-');
+  const semitones = /^([+-]?\d+)\s*(st)?$/i.exec(cleaned);
+  if (semitones) {
+    const shift = Number(semitones[1]);
+    return Math.abs(shift) <= MAX_SEMITONES ? shift : null;
+  }
+  return shiftForKey(analysedKey, cleaned, currentShift);
 }

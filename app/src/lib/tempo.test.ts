@@ -4,18 +4,20 @@ import {
   clampShift,
   formatPercent,
   formatShift,
-  keyShiftScrub,
+  BPM_CLICK_STEP,
+  BPM_CLICK_STEP_FINE,
+  bpmDragStep,
+  parseKeyEntry,
+  percentAfterBpmStep,
   parsePercent,
   percentForBpm,
   percentFromRatio,
   playingBpm,
-  playingBpmScrub,
   ratioFromPercent,
   shiftForKey,
   shiftedKey,
   smallestRangeFor,
   stepPercent,
-  tempoPercentScrub,
 } from './tempo.ts';
 
 describe('percent and ratio', () => {
@@ -146,34 +148,39 @@ describe('key shift', () => {
   });
 });
 
-describe('scrub models', () => {
-  it('the BPM model steps within the range and types within Wide', () => {
-    const model = playingBpmScrub(128, 8);
-    expect(model.step(128, 1)).toBe(128.1);
-    expect(model.step(138.2, 5, 'coarse')).toBe(138.24);
-    expect(model.step(117.8, -5, 'coarse')).toBe(117.76);
-    expect(model.parse('140')).toBe(140);
-    expect(model.parse('200')).toBeNull();
-    expect(model.parse('x')).toBeNull();
-    expect(model.valid(0)).toBe(false);
+describe('BPM steps', () => {
+  it('steps a whole BPM per click and a tenth with fine', () => {
+    expect(playingBpm(140, percentAfterBpmStep(140, 0, 1, BPM_CLICK_STEP, 8))).toBeCloseTo(141, 3);
+    expect(playingBpm(140, percentAfterBpmStep(140, 0, -1, BPM_CLICK_STEP_FINE, 8))).toBeCloseTo(139.9, 3);
+    expect(playingBpm(140, percentAfterBpmStep(140, 8, 1, BPM_CLICK_STEP, 8))).toBeCloseTo(151.2, 3);
   });
 
-  it('the tempo model steps by range and resets with the action', () => {
-    const model = tempoPercentScrub(16);
-    expect(model.step(0, 1, 'normal')).toBe(0.05);
-    expect(model.format(model.step(0, 1, 'normal'))).toBe('+0.05%');
-    expect(model.actions[0].apply()).toBe(0);
+  it('keeps stepping from the BPM being played', () => {
+    const percent = percentAfterBpmStep(128, 0, 1, BPM_CLICK_STEP, 16);
+    expect(playingBpm(128, percentAfterBpmStep(128, percent, 1, BPM_CLICK_STEP, 16))).toBeCloseTo(130, 3);
   });
 
-  it('the key model shows the resulting key and steps the shift', () => {
-    const model = keyShiftScrub('8A', 0);
-    expect(model.format(0)).toBe('8A');
-    expect(model.format(2)).toBe('10A');
-    expect(model.step(0, 1)).toBe(1);
-    expect(model.step(12, 1)).toBe(12);
-    expect(model.step(-12, -1)).toBe(-12);
-    expect(model.parse('10A')).toBe(2);
-    expect(model.parse('9B')).toBeNull();
-    expect(keyShiftScrub('—', 0).valid(0)).toBe(false);
+  it('drags in tenths, coarse in whole BPM, fine in hundredths', () => {
+    expect(bpmDragStep('normal')).toBe(0.1);
+    expect(bpmDragStep('coarse')).toBe(1);
+    expect(bpmDragStep('fine')).toBe(0.01);
+  });
+});
+
+describe('typed key', () => {
+  it('accepts Camelot and note names', () => {
+    expect(parseKeyEntry('10A', '8A')).toBe(2);
+    expect(parseKeyEntry('Bm', '8A')).toBe(2);
+    expect(parseKeyEntry('9B', '8A')).toBeNull();
+  });
+
+  it('accepts a semitone offset', () => {
+    expect(parseKeyEntry('+2', '8A')).toBe(2);
+    expect(parseKeyEntry('-3', '8A')).toBe(-3);
+    expect(parseKeyEntry('−3 st', '8A')).toBe(-3);
+    expect(parseKeyEntry('0', '8A')).toBe(0);
+    expect(parseKeyEntry('13', '8A')).toBeNull();
+    expect(parseKeyEntry('+2', '')).toBe(2);
+    expect(parseKeyEntry('x', '8A')).toBeNull();
   });
 });
