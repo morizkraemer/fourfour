@@ -11,6 +11,10 @@ body {
   padding: 0;
 }
 
+html {
+  background: var(--ff-bg);
+}
+
 body {
   font-family: var(--ff-font);
   font-size: var(--ff-type-body);

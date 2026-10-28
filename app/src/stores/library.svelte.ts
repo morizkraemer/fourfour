@@ -55,6 +55,8 @@ import {
   sidebarTreeRows,
   uniqueName,
 } from '../lib/playlistTree.ts';
+import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
+import { outermostIds } from '../lib/playlistSelection.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
@@ -892,6 +894,29 @@ export async function importFiles(paths: string[], options?: ImportOptions) {
   }
 }
 
+/** Scans dropped files/folders and returns the ids of every library track they hold, including ones imported earlier. */
+export async function importFilesForPlaylist(paths: string[]): Promise<number[]> {
+  try {
+    library.statusMessage = 'Importing…';
+    const newTracks = await tauriScanFiles(paths);
+    await loadState();
+    library.tauriError = lastTauriError;
+    if (newTracks.length > 0) {
+      library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
+      library.showAnalysisPrompt = true;
+    }
+    const ids = trackIdsUnderPaths(library.tracks, paths);
+    library.statusMessage =
+      ids.length === 0 ? 'No audio files found in the dropped items.' : `Found ${ids.length} track${ids.length === 1 ? '' : 's'}`;
+    return ids;
+  } catch (err) {
+    library.statusMessage = importErrorMessage(err);
+    library.tauriError = lastTauriError;
+    console.error('importFilesForPlaylist failed:', err);
+    return [];
+  }
+}
+
 /** Delete tracks from library */
 export async function removeTracks(ids: number[]) {
   try {
@@ -1157,6 +1182,14 @@ export async function deletePlaylist(id: number) {
   await saveState();
 }
 
+/** Deletes several playlists and folders (with everything inside folders) in one save. */
+export async function deletePlaylists(ids: number[]) {
+  for (const id of outermostIds(library.playlists, ids)) {
+    library.playlists = removeWithDescendants(library.playlists, id);
+  }
+  await saveState();
+}
+
 /** Moves a playlist or folder into `parentId` (0 is the top level), next to `anchorId` when given. */
 export async function movePlaylistInTree(
   id: number,
@@ -1167,6 +1200,35 @@ export async function movePlaylistInTree(
   const moved = movePlaylist(library.playlists, id, parentId, anchorId, placeAfter);
   if (!moved) return false;
   library.playlists = moved;
+  if (parentId !== 0) expandFolder(parentId);
+  await saveState();
+  return true;
+}
+
+/** Moves several playlists and folders together, keeping their relative order. */
+export async function movePlaylistsInTree(
+  ids: number[],
+  parentId: number,
+  anchorId: number | null = null,
+  placeAfter = false
+): Promise<boolean> {
+  let playlists = library.playlists;
+  let anchor = anchorId;
+  let after = placeAfter;
+  let movedAny = false;
+  for (const id of outermostIds(playlists, ids)) {
+    if (id === anchor) continue;
+    const moved = movePlaylist(playlists, id, parentId, anchor, after);
+    if (!moved) continue;
+    playlists = moved;
+    movedAny = true;
+    if (placeAfter) {
+      anchor = id;
+      after = true;
+    }
+  }
+  if (!movedAny) return false;
+  library.playlists = playlists;
   if (parentId !== 0) expandFolder(parentId);
   await saveState();
   return true;

@@ -72,15 +72,6 @@
     clearOrganizeTarget();
   }
 
-  $effect(() => {
-    const request = ui.renameRequest;
-    if (!request) return;
-    ui.renameRequest = null;
-    if (ui.organize.target?.playlistId === request.playlistId) {
-      startHeaderRename(ui.organize.target.label);
-    }
-  });
-
   function startHeaderRename(name) {
     renamingHeader = true;
     renameDraft = name;

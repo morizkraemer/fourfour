@@ -66,13 +66,17 @@ export function playlistDropConfirmation(added: number): string {
   return added > 0 ? 'Playlist on stick' : 'Already on stick';
 }
 
-/** Puts a playlist on a stick; only playlists put on a stick are written to it. */
-export async function dropPlaylistOnStick(volumePath: string, playlistId: number): Promise<number> {
-  const added = await addPlaylistsToStick(volumePath, [playlistId]);
-  const playlist = library.playlists.find((p) => p.id === playlistId);
+/** Puts playlists on a stick; only playlists put on a stick are written to it. */
+export async function dropPlaylistsOnStick(volumePath: string, playlistIds: number[]): Promise<number> {
+  const added = await addPlaylistsToStick(volumePath, playlistIds);
+  const playlist = library.playlists.find((p) => p.id === playlistIds[0]);
   const cover = added > 0 && playlist ? firstCover(playlist.track_ids) : null;
   showFlash(cardKey({ kind: 'stick', volumePath }), playlistDropConfirmation(added), added, cover);
   return added;
+}
+
+export function dropPlaylistOnStick(volumePath: string, playlistId: number): Promise<number> {
+  return dropPlaylistsOnStick(volumePath, [playlistId]);
 }
 
 export function boardDropTarget(board: OrganizeTarget): CardDropTarget | null {

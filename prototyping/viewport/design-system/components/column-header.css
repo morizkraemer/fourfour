@@ -13,6 +13,7 @@
 .ff-colh__cell {
   position: relative;
   display: flex;
+  align-self: stretch;
   align-items: center;
   gap: var(--ff-space-2);
   min-width: 0;

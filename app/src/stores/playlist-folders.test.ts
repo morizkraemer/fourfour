@@ -3,6 +3,8 @@ import {
   addFolder,
   addPlaylist,
   deletePlaylist,
+  deletePlaylists,
+  movePlaylistsInTree,
   duplicatePlaylist,
   library,
   movePlaylistInTree,
@@ -86,5 +88,32 @@ describe('playlist folders in the store', () => {
   it('does not duplicate a folder', async () => {
     const sets = await addFolder(0, 'Sets');
     expect(await duplicatePlaylist(sets)).toBeNull();
+  });
+
+  it('moves several playlists into a folder together, keeping their order', async () => {
+    const a = await addPlaylist('A');
+    const b = await addPlaylist('B');
+    await addPlaylist('C');
+    const sets = await addFolder(0, 'Sets');
+    expect(await movePlaylistsInTree([a, b], sets)).toBe(true);
+    expect(rowLabels()).toEqual(['C', 'Sets/', '-A', '-B']);
+  });
+
+  it('places several playlists after an anchor in order', async () => {
+    const a = await addPlaylist('A');
+    const b = await addPlaylist('B');
+    const c = await addPlaylist('C');
+    await addPlaylist('D');
+    await movePlaylistsInTree([a, b], 0, c, true);
+    expect(rowLabels()).toEqual(['C', 'A', 'B', 'D']);
+  });
+
+  it('deletes several playlists and folders in one go', async () => {
+    const sets = await addFolder(0, 'Sets');
+    const inner = await addPlaylist('Inner', [], sets);
+    const a = await addPlaylist('A');
+    await addPlaylist('Keep');
+    await deletePlaylists([sets, inner, a]);
+    expect(rowLabels()).toEqual(['Keep']);
   });
 });

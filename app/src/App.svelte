@@ -43,8 +43,8 @@
     library,
     confirmAnalysisPrompt,
     dismissAnalysisPrompt,
-    importFiles,
   } from './stores/library.svelte.ts';
+  import { hoverFileDrop, clearFileDropHover, importDroppedPaths } from './stores/file-drop.svelte.ts';
   import { selectionCount } from './stores/selection.svelte.ts';
   import { getIsTauri } from './services/tauri.svelte.ts';
   import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
@@ -84,18 +84,16 @@
         const appWindow = getCurrentWebviewWindow();
         stopDragDrop = unlistenWhenReady(appWindow.onDragDropEvent((event) => {
           const p = event.payload;
-          if (p.type === 'hover' || p.type === 'over') {
-            fileDropVisible = true;
+          if (p.type === 'enter' || p.type === 'over') {
+            fileDropVisible = hoverFileDrop(p.position).kind === 'view';
           } else if (p.type === 'drop') {
+            const target = hoverFileDrop(p.position);
             fileDropVisible = false;
-            const paths = p.paths;
-            if (paths?.length) {
-              void importFiles(paths, {
-                targetSource: importDropTarget(),
-              });
-            }
-          } else if (p.type === 'cancel' || p.type === 'leave') {
+            clearFileDropHover();
+            if (p.paths?.length) void importDroppedPaths(p.paths, target);
+          } else {
             fileDropVisible = false;
+            clearFileDropHover();
           }
         }), (err) => console.warn('File drag-drop unavailable:', err));
       } catch (err) {

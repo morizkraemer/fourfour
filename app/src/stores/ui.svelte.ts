@@ -71,7 +71,6 @@ export const ui = $state({
   /** Expanded player height in px (persisted); null = the default share of the window. */
   playerHeight: loadPlayerHeight() as number | null,
   /** Set by new-playlist flows: the docked panel starts inline rename. */
-  renameRequest: null as { playlistId: number } | null,
   sidebarRenameRequest: null as { playlistId: number } | null,
   /** Right-sidebar organize panel state. */
   organize: {
