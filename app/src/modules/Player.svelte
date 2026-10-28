@@ -9,6 +9,7 @@
   import PlayerTempo from './PlayerTempo.svelte';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { cueMarkers } from '../lib/cues.ts';
+  import { dnd } from '../stores/dnd.svelte.ts';
   import { ui, setPlayerHeight, commitPlayerHeight, resetPlayerHeight } from '../stores/ui.svelte.ts';
   import { PLAYER_HEIGHT, clampPlayerHeight, defaultPlayerHeight, maxPlayerHeight } from '../lib/playerHeight.ts';
   import {
@@ -36,6 +37,8 @@
 
 <div
   class="ff-player-module"
+  class:ff-player-module--drop={dnd.kind === 'tracks' && dnd.dropPlayer}
+  data-drop-player
   class:ff-player-module--expanded={player.expanded && player.track}
   style:height={player.expanded && player.track ? `${expandedHeight}px` : undefined}
   bind:this={playerRoot}>
@@ -84,6 +87,9 @@
     width: 100%;
     background: var(--ff-bg);
     border-top: 1px solid var(--ff-border);
+  }
+  .ff-player-module--drop {
+    box-shadow: inset 0 2px 0 var(--ff-accent);
   }
   .ff-player-module--expanded {
     display: flex;

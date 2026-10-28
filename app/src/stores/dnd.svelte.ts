@@ -32,6 +32,8 @@ export const dnd = $state({
   dropStickPath: null as string | null,
   /** Pointer is over the collapsed organize ribbon */
   dropRibbon: false,
+  /** Pointer is over the player */
+  dropPlayer: false,
   /** Column key being dragged or hovered for reorder */
   columnDragKey: null as string | null,
   columnDropKey: null as string | null,
@@ -62,6 +64,7 @@ export function startTrackDrag(
   dnd.dropCardPlaylistId = null;
   dnd.dropStickPath = null;
   dnd.dropRibbon = false;
+  dnd.dropPlayer = false;
   dnd.dropNewPlaylist = false;
 }
 
@@ -72,6 +75,17 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   const hit = document.elementFromPoint(clientX, clientY);
   const playlistCard = hit?.closest('[data-drop-playlist-id]');
   const stickCard = hit?.closest('[data-drop-stick-path]');
+  dnd.dropPlayer = !!hit?.closest('[data-drop-player]');
+  if (dnd.dropPlayer) {
+    dnd.dropRibbon = false;
+    dnd.dropCardPlaylistId = null;
+    dnd.dropStickPath = null;
+    dnd.dropNewPlaylist = false;
+    dnd.dropPanelSourceId = null;
+    dnd.dropRowIndex = null;
+    dnd.dropPlaylistId = null;
+    return;
+  }
   dnd.dropRibbon = !!hit?.closest('[data-drop-ribbon]');
   if (dnd.dropRibbon) {
     dnd.dropCardPlaylistId = null;
@@ -159,6 +173,7 @@ export function endDrag() {
   dnd.dropCardPlaylistId = null;
   dnd.dropStickPath = null;
   dnd.dropRibbon = false;
+  dnd.dropPlayer = false;
   dnd.dropNewPlaylist = false;
   dnd.columnDragKey = null;
   dnd.columnDropKey = null;

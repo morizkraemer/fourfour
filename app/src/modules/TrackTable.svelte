@@ -26,6 +26,7 @@
   } from '../stores/library.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, queuePlayAfterLoad, playFromStart, loadPlayerTrack } from '../stores/player.svelte.ts';
+  import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
   import { pickDirectory, prefetchAnalysisData } from '../services/tauri.svelte.ts';
   import {
@@ -402,6 +403,15 @@
       const cardPlaylistId = dnd.dropCardPlaylistId;
       const cardStickPath = dnd.dropStickPath;
       const ribbonDrop = dnd.dropRibbon;
+
+      if (dnd.dropPlayer) {
+        const dropped = firstDroppedTrack(ids, library.tracks);
+        if (dropped) void loadPlayerTrack(dropped);
+        dragging = false;
+        dropLineTop = null;
+        endDrag();
+        return;
+      }
 
       if (ribbonDrop) {
         await dropTracksOnRibbon(ui.organize.target, ids);

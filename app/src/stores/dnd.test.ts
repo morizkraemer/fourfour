@@ -115,3 +115,22 @@ describe('new playlist drop target', () => {
     expect(dnd.dropNewPlaylist).toBe(false);
   });
 });
+
+describe('player drop target', () => {
+  it('flags the player and clears other targets', () => {
+    vi.stubGlobal('document', {
+      elementFromPoint: () => ({ closest: (sel: string) => (sel === '[data-drop-player]' ? {} : null) }),
+    });
+    dnd.dropRowIndex = 3;
+    updateTrackDropTarget(10, 10);
+    expect(dnd.dropPlayer).toBe(true);
+    expect(dnd.dropRowIndex).toBeNull();
+    expect(dnd.dropRibbon).toBe(false);
+  });
+  it('clears when the pointer leaves the player', () => {
+    stubDocument(null);
+    dnd.dropPlayer = true;
+    updateTrackDropTarget(10, 10);
+    expect(dnd.dropPlayer).toBe(false);
+  });
+});
