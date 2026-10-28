@@ -44,6 +44,7 @@ const WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL = 1;
 const WINDOW_SCREENS = 3;
 const WINDOW_THROTTLE_MS = 60;
 const WINDOW_COLUMNS_PER_PX = 2;
+const WINDOW_PREFETCH_ZOOM = 3;
 const WINDOW_MAX_COLUMNS = 16384;
 const WINDOW_MAX_MS = 30000;
 const ASSUMED_SAMPLE_RATE = 44100;
@@ -694,7 +695,8 @@ export default class WaveformDisplay {
         return coarsePerPixel < DETAIL_BELOW_COLUMNS_PER_PIXEL ? fine : null;
     }
 
-    // A fetched window once the high-resolution series is wider than a pixel. Any window that covers the view and is finer
+    // A fetched window once the high-resolution series is wider than a pixel (asked for from WINDOW_PREFETCH_ZOOM times
+    // further out, so it is there when the zoom gets that deep). Any window that covers the view and is finer
     // than that series is drawn, whatever its resolution against the pixels, so the view never falls back to wide bars
     // while the next one is on its way. A new one is asked for when the view nears its edge or a pixel holds less than
     // one of its columns while the audio has finer detail (more samples) to give.
@@ -707,7 +709,8 @@ export default class WaveformDisplay {
         const endMs = endFrac * durationMs;
         const spanMs = endMs - startMs;
         const msPerPx = spanMs / widthPx;
-        if (msPerPx >= fineMsPerColumn * WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL) return null;
+        if (msPerPx >= fineMsPerColumn * WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL * WINDOW_PREFETCH_ZOOM) return null;
+        const needed = msPerPx < fineMsPerColumn * WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL;
         const win = this._window;
         const msPerSample = 1000 / (win?.sampleRate || ASSUMED_SAMPLE_RATE);
         let usable = false;
@@ -721,7 +724,7 @@ export default class WaveformDisplay {
             refresh = !usable || nearStart || nearEnd || coarse;
         }
         if (refresh) this._requestWindow(this._windowRequest(startMs, endMs, msPerPx, msPerSample, durationMs));
-        return usable ? win : null;
+        return needed && usable ? win : null;
     }
 
     // WINDOW_SCREENS screens around the view at WINDOW_COLUMNS_PER_PX columns per pixel, or one column per sample when the

@@ -44,13 +44,20 @@ function morphAmount(msPerPx) {
  * covers; `dpr` sizes the thinnest line.
  */
 export function paintZoom(ctx, cols, { look = ZOOM_LOOK, heightPx, palette, msPerPx, dpr = 1, from = 0, count = cols.length - from, offsetPx = 0 }) {
-  const yCentre = heightPx / 2;
   const hasSignal = !!(cols.top && cols.bottom);
   if (look === 'morph' || !hasSignal) {
     const shapeMix = hasSignal && look === 'morph' ? morphAmount(msPerPx) : 0;
     paintBands(ctx, cols, { heightPx, palette, from, count, offsetPx, shapeMix, minSpanPx: Math.max(1, dpr) });
     return;
   }
+  if (count <= 0 || heightPx <= 0) return;
+  const pixels = PixelColumns.for(ctx, offsetPx, count, heightPx, palette);
+  paintLook(pixels, cols, { look, heightPx, palette, msPerPx, dpr, from, count, offsetPx });
+  pixels.flushTo(ctx);
+}
+
+function paintLook(ctx, cols, { look, heightPx, palette, msPerPx, dpr, from, count, offsetPx }) {
+  const yCentre = heightPx / 2;
   const s = shapeAmount(msPerPx);
   const halves = layerHalves(cols, from, count, yCentre);
   const outer = outerHalves(halves, count);
@@ -229,4 +236,109 @@ export function paintSampleDots(ctx, { look = ZOOM_LOOK, startMs, msPerPx, msPer
     ctx.arc(x, y, radius, 0, Math.PI * 2);
   }
   ctx.fill();
+}
+
+/**
+ * A stand-in for the few canvas calls the looks make (fillStyle, globalAlpha, save/restore, one-pixel-wide fillRect)
+ * that writes the pixels of a `count` x `heightPx` strip into one ImageData on the waveform ground, put on the canvas
+ * in one call. Thousands of one-pixel fillRects a frame are what made a zoom step slow to rasterise.
+ */
+class PixelColumns {
+  static for(ctx, offsetPx, count, heightPx, palette) {
+    let pool = pixelPools.get(ctx);
+    if (!pool) {
+      pool = new PixelColumns();
+      pixelPools.set(ctx, pool);
+    }
+    pool.reset(ctx, offsetPx, count, heightPx, palette);
+    return pool;
+  }
+
+  reset(ctx, offsetPx, count, heightPx, palette) {
+    if (!this.image || this.image.width < count || this.image.height !== heightPx) {
+      this.image = ctx.createImageData(Math.max(count, this.image?.height === heightPx ? this.image.width : 0), heightPx);
+      this.words = new Uint32Array(this.image.data.buffer);
+    }
+    this.offsetPx = offsetPx;
+    this.width = count;
+    this.height = heightPx;
+    const ground = packColour(palette.bg);
+    const stride = this.image.width;
+    for (let row = 0; row < heightPx; row++) this.words.fill(ground, row * stride, row * stride + count);
+    this.colour = 0;
+    this.alpha = 1;
+    this.stack = [];
+  }
+
+  set fillStyle(value) {
+    this.colour = packColour(value);
+  }
+
+  set globalAlpha(value) {
+    this.alpha = Math.max(0, Math.min(1, value));
+  }
+
+  get globalAlpha() {
+    return this.alpha;
+  }
+
+  save() {
+    this.stack.push(this.alpha);
+  }
+
+  restore() {
+    if (this.stack.length) this.alpha = this.stack.pop();
+  }
+
+  fillRect(x, y, w, h) {
+    const x0 = Math.max(0, Math.round(x) - this.offsetPx);
+    const x1 = Math.min(this.width, Math.round(x + w) - this.offsetPx);
+    const y0 = Math.max(0, Math.round(y));
+    const y1 = Math.min(this.height, Math.round(y + h));
+    if (x1 <= x0 || y1 <= y0) return;
+    const words = this.words;
+    const stride = this.image.width;
+    const colour = this.colour;
+    if (this.alpha >= 1 && x1 - x0 === 1) {
+      const end = y1 * stride + x0;
+      for (let i = y0 * stride + x0; i < end; i += stride) words[i] = colour;
+      return;
+    }
+    if (this.alpha >= 1) {
+      for (let row = y0; row < y1; row++) {
+        const at = row * stride;
+        for (let col = x0; col < x1; col++) words[at + col] = colour;
+      }
+      return;
+    }
+    if (this.alpha <= 0) return;
+    const a = this.alpha;
+    for (let row = y0; row < y1; row++) {
+      const at = row * stride;
+      for (let col = x0; col < x1; col++) words[at + col] = blend(words[at + col], colour, a);
+    }
+  }
+
+  flushTo(ctx) {
+    ctx.putImageData(this.image, this.offsetPx, 0, 0, 0, this.width, this.height);
+  }
+}
+
+const pixelPools = new WeakMap();
+const packed = new Map();
+
+/** A CSS colour as one opaque RGBA word in the byte order of ImageData on a little-endian machine. */
+function packColour(value) {
+  let word = packed.get(value);
+  if (word === undefined) {
+    const [r, g, b] = parseColour(value);
+    word = ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+    packed.set(value, word);
+  }
+  return word;
+}
+
+function blend(under, over, a) {
+  const mix = (shift) => Math.round(((over >>> shift) & 255) * a + ((under >>> shift) & 255) * (1 - a));
+  return ((255 << 24) | (mix(16) << 16) | (mix(8) << 8) | mix(0)) >>> 0;
 }

@@ -44,6 +44,7 @@ async function main() {
       return win;
     });
   }
+  (window as any).__display = display;
   display._applyZoom((durationMs / 1000) / win);
   display._setClock(frac);
 
