@@ -197,3 +197,4 @@
 2026-10-28 05:56 orchestrator - wm-tempo cc10865 merged → r9-int 3defe88 (N3 root cause: pointer capture blocked sidebar pointerenter; 561 tests); waiting on wm-zoom
 2026-10-28 06:23 orchestrator - wm-zoom 5b27ad2 merged → r9-int c9da7b2 (M2 root cause: fixed 10 ms nudge; 1 ms floor = library/PQTZ ms); checks + Mac install started
 2026-10-28 06:57 orchestrator - Mac install of r9-int c9da7b2 done (28 cargo, 573 vitest, 0 warnings); round 9 complete
+2026-10-28 06:58 orchestrator - landed: r9-int → master on Merlin's OK (code identical to tested c9da7b2); not pushed
