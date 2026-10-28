@@ -243,3 +243,5 @@
 2026-10-28 19:46 orchestrator O4 spawn: ov-perf 10k-track perf pass (seat, sonnet high)
 2026-10-28 20:30 ov-perf O4 landed on ov-1028: 10k import 15.6 s → 0.5 s (one transaction), save_state 200–380 → 15–35 ms (only changed playlists), sort/filter/playlist 2–5× faster; report docs/architecture/perf-10k-2026-10-28.md; 700 tests
 2026-10-28 20:31 orchestrator O5 spawn: ov-ci cross-platform Actions workflow, branch only, no run (seat, sonnet medium)
+2026-10-28 21:00 ov-ci O5 done: ci.yml 3 OS + unsigned bundles, YAML-parsed only, not run; kept separate on ov-ci (push = run, needs Merlin)
+2026-10-28 21:10 orchestrator O6 housekeeping: 11 merged/clean worktrees removed (q46/q49/wq-editmode branches kept), beat_this weights saved to ~/.cache/fourfour-models, :5237 preview stopped; disk 53%
