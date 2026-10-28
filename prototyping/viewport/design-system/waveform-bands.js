@@ -122,30 +122,47 @@ export function reduceBands(bands, startFrac, endFrac, pixels, peakWeights = BUC
 
 /**
  * The lowest and highest sample under each pixel column (`signalLow` / `signalHigh` times `signalScale`, on the low band's
- * 0..1 scale, signed) as `bottom` / `top`: the extremes over the covered columns, or the column under the pixel centre.
+ * 0..1 scale, signed) as `bottom` / `top`. A pixel wider than a column takes the extremes over the covered columns. A pixel
+ * narrower than a column spans the straight line between the column centres across its width, so a curve finer than a
+ * sample per pixel is one connected line of the right slope, never a staircase of held columns.
  */
 function reduceSignal(bands, out, first, perPixel, n, pixels) {
   const top = new Float32Array(pixels);
   const bottom = new Float32Array(pixels);
   const scale = bands.signalScale ?? 1;
+  const highs = bands.signalHigh;
+  const lows = bands.signalLow;
   const clamp = (v) => Math.max(-1, Math.min(1, v * scale));
+  const between = (plane, x) => {
+    const at = Math.max(0, Math.min(n - 1, x - 0.5));
+    const i = Math.floor(at);
+    const j = Math.min(n - 1, i + 1);
+    return plane[i] + (plane[j] - plane[i]) * (at - i);
+  };
   for (let p = 0; p < pixels; p++) {
     const lo = first + p * perPixel;
     const hi = lo + perPixel;
     if (hi <= BUCKET_EPSILON || lo >= n - BUCKET_EPSILON) continue;
-    let i0;
-    let i1;
+    let max;
+    let min;
     if (perPixel <= 1) {
-      i0 = i1 = Math.max(0, Math.min(n - 1, Math.floor((lo + hi) / 2)));
+      max = Math.max(between(highs, lo), between(highs, hi));
+      min = Math.min(between(lows, lo), between(lows, hi));
+      const centre = Math.ceil(lo - 0.5) + 0.5;
+      if (centre < hi && centre >= 0.5 && centre <= n - 0.5) {
+        const i = centre - 0.5;
+        if (highs[i] > max) max = highs[i];
+        if (lows[i] < min) min = lows[i];
+      }
     } else {
-      i0 = Math.max(0, Math.floor(lo + BUCKET_EPSILON));
-      i1 = Math.min(n - 1, Math.ceil(hi - BUCKET_EPSILON) - 1);
-    }
-    let max = bands.signalHigh[i0];
-    let min = bands.signalLow[i0];
-    for (let i = i0 + 1; i <= i1; i++) {
-      if (bands.signalHigh[i] > max) max = bands.signalHigh[i];
-      if (bands.signalLow[i] < min) min = bands.signalLow[i];
+      const i0 = Math.max(0, Math.floor(lo + BUCKET_EPSILON));
+      const i1 = Math.min(n - 1, Math.ceil(hi - BUCKET_EPSILON) - 1);
+      max = highs[i0];
+      min = lows[i0];
+      for (let i = i0 + 1; i <= i1; i++) {
+        if (highs[i] > max) max = highs[i];
+        if (lows[i] < min) min = lows[i];
+      }
     }
     top[p] = clamp(max);
     bottom[p] = clamp(min);
