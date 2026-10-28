@@ -241,10 +241,7 @@ async function ensureTickListener() {
     player.levelLeft = tick.level_left ?? 0;
     player.levelRight = tick.level_right ?? 0;
     if (!player.track) return;
-    if (pausePending) {
-      player.playing = false;
-      return;
-    }
+    if (pausePending) return;
     const dur = tick.duration_ms || player.track.durationMs;
     if (dur > 0) {
       if (seekTargetMs !== null) {
@@ -478,15 +475,23 @@ export function clearPlayerTrack() {
   playPending = false;
 }
 
+/** The paused position the backend reported: the playhead, Set and the next play all use exactly this. */
+function restAt(positionMs: number) {
+  const t = player.track;
+  if (!t || !t.durationMs || !Number.isFinite(positionMs)) return;
+  player.progress = Math.max(0, Math.min(1, positionMs / t.durationMs));
+  transportClock.stop(positionMs);
+}
+
 async function pausePlayback() {
   if (!player.playing && !pausePending) return;
   pausePending = true;
-  player.playing = false;
   try {
-    await playbackPause();
+    restAt(await playbackPause());
   } catch (err) {
     console.error('playback pause failed:', err);
   } finally {
+    player.playing = false;
     pausePending = false;
   }
 }

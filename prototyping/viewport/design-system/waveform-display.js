@@ -314,7 +314,6 @@ export default class WaveformDisplay {
      */
     setTransport(playing, frac) {
         if (this._scrubbing) return;
-        const wasPlaying = this._playing;
         this._playing = !!playing;
 
         if (frac < 0) {
@@ -330,16 +329,11 @@ export default class WaveformDisplay {
         const durationMs = this._data?.duration_ms || 0;
 
         if (!this._playing || !durationMs) {
+            // Paused, the reported position is where playback resumes and what grid Set and cues use, so the
+            // playhead rests exactly there (on pause it moves the few ms the interpolated clock was off).
             this._stopInterp();
-            if (wasPlaying && this._phClock >= 0) {
-                // Play→pause: the waveform stays where it is. (The clock is a few
-                // ms off the final report; moving there would be a visible jump.)
-                this._clock.stop(this._phClock * durationMs);
-            } else {
-                // Already paused — a position change is a deliberate seek; honor it.
-                this._phClock = frac;
-                this._clock.stop(frac * durationMs);
-            }
+            this._phClock = frac;
+            this._clock.stop(frac * durationMs);
             this._applyPlayhead(this._phClock);
             return;
         }
