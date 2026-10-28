@@ -215,3 +215,4 @@
 2026-10-28 11:14 orchestrator - Mac install of r11-int 7f6e2d0 done (28 cargo, 658 vitest, 0 warnings); Merlin picked zoom look D (comment on :5233: maybe ditch the 3-band look later); wo-zoom worktree + :5235 preview removed
 2026-10-28 11:18 orchestrator - landed: r11-int → master on Merlin's OK (code identical to tested 7f6e2d0); not pushed
 2026-10-28 11:27 orchestrator - round 12 spawn: wp-bpm R1 (seat, sonnet), wp-cues R2–R6 (seat, sonnet), both off master 854a5a5
+2026-10-28 11:33 orchestrator - wp-cues 1e70f6f → r12-int e046d48 (663 tests; hotkey ⇧C); waiting on wp-bpm
