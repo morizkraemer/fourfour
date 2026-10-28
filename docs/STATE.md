@@ -59,6 +59,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 status: running · since 2026-10-28 17:40 · cap 2 workers · autonomy tight · base r12-int → integration ov-1028 (scratchpad q41-int)
 targets: Merlin 2026-10-28: start overnight now; player-layout build only after he approves the next mockup round on viewport
 plan: L2 player-layout mockups (round 2, viewport :5238) → O1 review rounds 12–13 → O2 smoke-test harness → O7 → O1b grid anchor (after O7) → O3 Q33 Rust analyzer finish + measure (report) → O4 perf pass 10k tracks → O5 Q8 CI (branch only) → O6 housekeeping → O8 truncated decode → O9 bundle weights; O7 build layout-2 option A (approved 2026-10-28, starts after O1 lands: same files), then own priorities
+pm: 2026-10-28 19:45 UTC resumed after seat limit; O8 + O9 running; O1–O7 on ov-1028; Mac install pending (Mac offline)
 decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync fixes go ahead here
 
 ### Q42 Stick sync for real [done, branch q42-sync d56f471, merged into q42-overnight 51a9ef0] [box] — sync button → sync_usb_many: stick All tracks + chosen playlists (SyncSelection::Playlists track_ids), stable stick id (not path), capacity check, dry-run plan shown before write. Fake stick folder only; no real USB writes. Validation + headless. 180 min
