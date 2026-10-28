@@ -192,3 +192,4 @@
 2026-10-28 05:37 orchestrator L8/L9 landed-on-branch: wl-import df79dba → q42-overnight f9315b9 (new dep unicode-normalization in pioneer-library; import request shape remaps[]); full checks + Mac install started
 2026-10-28 05:43 orchestrator - Mac install of f9315b9 done (27 cargo, 550 vitest, 0 warnings); round 8 complete
 2026-10-28 05:47 orchestrator - landed: q42-overnight → master 9fc5e48 on Merlin's OK (code identical to tested f9315b9); not pushed
+2026-10-28 05:50 orchestrator - round 9 spawn: wm-zoom M1/M2 (seat, opus — failed attempt last round), wm-tempo M3–M6 (seat, sonnet), both off master 5d728df
