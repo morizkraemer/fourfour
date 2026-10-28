@@ -223,16 +223,24 @@ describe('overviewBandsFromPayload', () => {
   });
 });
 
-function detailFile(low: number[], mid: number[], high: number[]): ArrayBuffer {
+function detailFile(
+  low: number[],
+  mid: number[],
+  high: number[],
+  signalLow = low.map((v) => -v),
+  signalHigh = low,
+): ArrayBuffer {
   const n = low.length;
-  const buffer = new ArrayBuffer(24 + 3 * n);
+  const buffer = new ArrayBuffer(28 + 5 * n);
   const view = new DataView(buffer);
   'FFWD'.split('').forEach((c, i) => view.setUint8(i, c.charCodeAt(0)));
-  view.setUint8(4, 2);
+  view.setUint8(4, 3);
   view.setUint32(8, 2400, true);
   view.setUint32(12, n, true);
   view.setUint16(16, 300, true);
-  new Uint8Array(buffer, 24).set([...low, ...mid, ...high]);
+  view.setFloat32(24, 379.5, true);
+  new Uint8Array(buffer, 28).set([...low, ...mid, ...high]);
+  new Int8Array(buffer, 28 + 3 * n).set([...signalLow, ...signalHigh]);
   return buffer;
 }
 
@@ -278,6 +286,24 @@ describe('bandsFromDetailBytes', () => {
     expect(Array.from(bands.mid)).toEqual([1, 2, 3]);
     expect(Array.from(bands.high)).toEqual([9, 8, 7]);
     expect(bands.scale.low).toBeCloseTo(1 / 127, 8);
+  });
+  it('reads the signed lowest and highest sample planes and the signal gain', () => {
+    const bands = bandsFromDetailBytes(detailFile([1, 2, 3], [0, 0, 0], [0, 0, 0], [-127, -5, 0], [3, 90, 127]))!;
+    expect(Array.from(bands.signalLow)).toEqual([-127, -5, 0]);
+    expect(Array.from(bands.signalHigh)).toEqual([3, 90, 127]);
+    expect(bands.signalScale).toBeCloseTo(1 / 127, 8);
+    expect(bands.signalGain).toBeCloseTo(379.5, 3);
+  });
+  it('reduces the signal to the extremes under each pixel, signed, on the band scale', () => {
+    const bands = bandsFromDetailBytes(detailFile([1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0], [-10, 20, -60, 5], [30, 40, -20, 50]))!;
+    const two = reduceBands(bands, 0, 1, 2, ZOOM_PEAK_WEIGHT);
+    expect(two.top![0]).toBeCloseTo(40 / 127, 6);
+    expect(two.bottom![0]).toBeCloseTo(-10 / 127, 6);
+    expect(two.top![1]).toBeCloseTo(50 / 127, 6);
+    expect(two.bottom![1]).toBeCloseTo(-60 / 127, 6);
+    const eight = reduceBands(bands, 0, 1, 8, ZOOM_PEAK_WEIGHT);
+    expect(eight.top![5]).toBeCloseTo(-20 / 127, 6);
+    expect(eight.bottom![5]).toBeCloseTo(-60 / 127, 6);
   });
   it('rejects a damaged or foreign file', () => {
     const good = detailFile([1, 2], [1, 2], [1, 2]);

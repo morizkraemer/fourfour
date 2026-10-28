@@ -101,24 +101,43 @@ export function bandsFromStickBytes(bytes: ArrayLike<number>): BandColumns {
 }
 
 const DETAIL_MAGIC = 'FFWD';
-const DETAIL_VERSION = 2;
-const DETAIL_HEADER_BYTES = 24;
+const DETAIL_VERSION = 3;
+const DETAIL_HEADER_BYTES = 28;
+
+/** The 2400 columns per second series: bands plus the lowest and highest sample of each column. */
+export interface DetailBandColumns extends ByteBandColumns {
+  signalLow: Int8Array;
+  signalHigh: Int8Array;
+  signalScale: number;
+  /** Bytes of the signal planes per full-scale sample (the low band's gain), for windows measured later. */
+  signalGain: number;
+}
 
 /**
- * The high-resolution series of `get_waveform_detail` (`FFWD` header with the track's band gains, then the low, mid
- * and high planes, bytes on the PWV7 scale). The planes are views into `buffer`, drawn as `byte / 127`; nothing is
- * copied or widened.
+ * The high-resolution series of `get_waveform_detail` (`FFWD` header with the track's band gains and signal gain, then
+ * the low, mid and high planes, bytes on the PWV7 scale, and the lowest and highest sample planes on the low band's
+ * scale). The planes are views into `buffer`, drawn as `byte / 127`; nothing is copied or widened.
  */
-export function bandsFromDetailBytes(buffer: ArrayBuffer): ByteBandColumns | null {
+export function bandsFromDetailBytes(buffer: ArrayBuffer): DetailBandColumns | null {
   if (buffer.byteLength < DETAIL_HEADER_BYTES) return null;
   const view = new DataView(buffer);
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
   const columns = view.getUint32(12, true);
-  if (magic !== DETAIL_MAGIC || view.getUint8(4) !== DETAIL_VERSION || buffer.byteLength !== DETAIL_HEADER_BYTES + 3 * columns) return null;
+  if (magic !== DETAIL_MAGIC || view.getUint8(4) !== DETAIL_VERSION || buffer.byteLength !== DETAIL_HEADER_BYTES + 5 * columns) return null;
   if (columns === 0) return null;
-  const plane = (k: number) => new Uint8Array(buffer, DETAIL_HEADER_BYTES + k * columns, columns);
+  const at = (k: number) => DETAIL_HEADER_BYTES + k * columns;
+  const plane = (k: number) => new Uint8Array(buffer, at(k), columns);
   const unit = 1 / WIRE_FULL_SCALE;
-  return { low: plane(0), mid: plane(1), high: plane(2), scale: { low: unit, mid: unit, high: unit } };
+  return {
+    low: plane(0),
+    mid: plane(1),
+    high: plane(2),
+    scale: { low: unit, mid: unit, high: unit },
+    signalLow: new Int8Array(buffer, at(3), columns),
+    signalHigh: new Int8Array(buffer, at(4), columns),
+    signalScale: unit,
+    signalGain: view.getFloat32(24, true),
+  };
 }
 
 /** A fine stretch of the zoom view (`get_waveform_window`): band bytes plus the lowest and highest sample per column. */

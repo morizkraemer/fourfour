@@ -45,8 +45,8 @@ const WINDOW_THROTTLE_MS = 60;
 const WINDOW_MIN_DENSITY = 0.75;
 const WINDOW_MAX_DENSITY = 3;
 const WINDOW_REFRESH_DENSITY = [0.9, 1.25];
-const SAMPLE_LINE_BELOW_SAMPLES_PER_PIXEL = 2;
-const SAMPLE_LINE_SCALE = 0.92;
+const SIGNAL_SHAPE_FROM_MS_PER_PX = 2;
+const SIGNAL_SHAPE_FULL_MS_PER_PX = 0.4;
 
 export default class WaveformDisplay {
     /**
@@ -762,57 +762,34 @@ export default class WaveformDisplay {
             });
     }
 
+    // The same painter as the high-resolution series, so the hand-over to a window is invisible: band colours inside
+    // the window's lowest and highest samples, on the series' scale (`signalGain` bytes per full scale).
     _paintWindow(ctx, win, widthPx, heightPx, startFrac, endFrac, palette) {
         const durationMs = this._data.duration_ms;
         const spanMs = win.endMs - win.startMs;
         const a = (startFrac * durationMs - win.startMs) / spanMs;
         const b = (endFrac * durationMs - win.startMs) / spanMs;
-        const shaped = reduceBands(win, a, b, widthPx, ZOOM_PEAK_WEIGHT);
+        const signalScale = (this._data.bandsZoom?.signalGain ?? 0) / (32767 * 127);
+        const source = signalScale > 0 ? { ...win, signalLow: win.lowest, signalHigh: win.highest, signalScale } : win;
+        const shaped = reduceBands(source, a, b, widthPx, ZOOM_PEAK_WEIGHT);
         const fracPerPx = (endFrac - startFrac) / widthPx;
-        const inTrack = (p) => {
-            const frac = startFrac + (p + 0.5) * fracPerPx;
-            return frac >= 0 && frac <= 1;
-        };
         for (let p = 0; p < widthPx; p++) {
-            if (inTrack(p)) continue;
+            const frac = startFrac + (p + 0.5) * fracPerPx;
+            if (frac >= 0 && frac <= 1) continue;
             shaped.low[p] = 0;
             shaped.mid[p] = 0;
             shaped.high[p] = 0;
         }
-        paintBands(ctx, shaped, { heightPx, palette });
+        paintBands(ctx, shaped, { heightPx, palette, shapeMix: this._shapeMix(startFrac, endFrac, widthPx), minSpanPx: Math.max(1, devicePixelRatio) });
+    }
 
-        const samplesPerPx = (((endFrac - startFrac) * durationMs) / 1000) * win.sampleRate / widthPx;
-        if (!(samplesPerPx < SAMPLE_LINE_BELOW_SAMPLES_PER_PIXEL)) return;
-        const n = win.lowest.length;
-        const colsPerPx = ((b - a) * n) / widthPx;
-        const yCentre = heightPx / 2;
-        const yOf = (v) => yCentre - (v / 32767) * yCentre * SAMPLE_LINE_SCALE;
-        ctx.strokeStyle = ink(palette, 0.85);
-        ctx.lineWidth = Math.max(1, Math.round(devicePixelRatio));
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        let started = false;
-        for (let p = 0; p < widthPx; p++) {
-            if (!inTrack(p)) continue;
-            const lo = a * n + p * colsPerPx;
-            const c0 = Math.max(0, Math.min(n - 1, Math.floor(colsPerPx < 1 ? lo + colsPerPx / 2 : lo)));
-            const c1 = colsPerPx < 1 ? c0 : Math.max(c0, Math.min(n - 1, Math.ceil(lo + colsPerPx) - 1));
-            let min = win.lowest[c0];
-            let max = win.highest[c0];
-            for (let c = c0 + 1; c <= c1; c++) {
-                if (win.lowest[c] < min) min = win.lowest[c];
-                if (win.highest[c] > max) max = win.highest[c];
-            }
-            const x = p + 0.5;
-            if (!started) {
-                ctx.moveTo(x, yOf(max));
-                started = true;
-            } else {
-                ctx.lineTo(x, yOf(max));
-            }
-            if (min !== max) ctx.lineTo(x, yOf(min));
-        }
-        ctx.stroke();
+    // How far the zoom view has morphed from the band envelope (0) to the shape of the audio (1), from the time one
+    // device pixel covers. It is continuous in the zoom, so no zoom level switches the look.
+    _shapeMix(startFrac, endFrac, widthPx) {
+        const msPerPx = ((endFrac - startFrac) * (this._data?.duration_ms ?? 0)) / widthPx;
+        if (!(msPerPx > 0)) return 0;
+        const t = Math.log(SIGNAL_SHAPE_FROM_MS_PER_PX / msPerPx) / Math.log(SIGNAL_SHAPE_FROM_MS_PER_PX / SIGNAL_SHAPE_FULL_MS_PER_PX);
+        return Math.max(0, Math.min(1, t));
     }
 
     _renderBands(ctx, w, h, startFrac, endFrac, palette) {
@@ -841,6 +818,7 @@ export default class WaveformDisplay {
             dpr,
             decay: compact ? COMPACT_DECAY : fine ? 0 : ZOOM_DECAY,
             peakWeights: fine ? ZOOM_PEAK_WEIGHT : undefined,
+            shapeMix: fine ? this._shapeMix(startFrac, endFrac, Math.round(w * dpr)) : 0,
             scrolling: this._mode !== 'compact',
             layout: this._mode === 'compact' ? 'stacked' : 'centred',
         });

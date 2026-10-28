@@ -12,7 +12,7 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
-import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type ByteBandColumns } from '../services/waveform-bands.ts';
+import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type DetailBandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -71,7 +71,7 @@ export interface PlayerTrack {
   bandsDetail: BandColumns | null;
   bandsOverview: BandColumns | null;
   /** 2400 columns per second, for the zoom view; arrives after the track, see `loadZoomDetail`. */
-  bandsZoom: ByteBandColumns | null;
+  bandsZoom: DetailBandColumns | null;
 }
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
@@ -310,7 +310,7 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
 }
 
 const ZOOM_DETAIL_CACHE_TRACKS = 3;
-const zoomDetailCache = new Map<number, ByteBandColumns>();
+const zoomDetailCache = new Map<number, DetailBandColumns>();
 const zoomDetailLoading = new Set<number>();
 
 /** Fetch the high-resolution series of the loaded track (once, in the background) and hand it to the zoom view. */

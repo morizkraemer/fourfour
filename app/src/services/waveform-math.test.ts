@@ -178,6 +178,64 @@ function recordingContext() {
 
 const palette = { low: 'LOW', mid: 'MID', high: 'HIGH', midInLow: 'MIDINLOW', highInLow: 'HIGHINLOW', highInMid: 'HIGHINMID', bg: 'BG', dim: 'DIM', ink: '0, 0, 0', playhead: 'P', version: 0 };
 
+describe('paintBands with the signal shape', () => {
+  const column = (low: number[], top: number[], bottom: number[]) => ({
+    low: Float32Array.from(low),
+    mid: Float32Array.from(low.map((v) => v / 2)),
+    high: Float32Array.from(low.map(() => 0)),
+    top: Float32Array.from(top),
+    bottom: Float32Array.from(bottom),
+    length: low.length,
+  });
+  const outer = (rects: Array<{ color: string; x: number; y: number; h: number }>, x: number) =>
+    rects.find((r) => r.color === 'LOW' && r.x === x)!;
+
+  it('draws exactly the band envelope at shape mix 0 (the zoomed-out look)', () => {
+    const shaped = column([0.8, 0.5], [0.1, -0.2], [-0.3, -0.4]);
+    const plain = recordingContext();
+    paintBands(plain.ctx, shaped, { heightPx: 200, palette });
+    const mixed = recordingContext();
+    paintBands(mixed.ctx, shaped, { heightPx: 200, palette, shapeMix: 0 });
+    expect(mixed.rects).toEqual(plain.rects);
+  });
+  it('spans each column from its lowest to its highest sample at shape mix 1, bands nested inside', () => {
+    const shaped = column([0.9, 0.9], [0.5, 0.25], [0.1, -0.5]);
+    const { ctx, rects } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 200, palette, shapeMix: 1 });
+    const y = (v: number) => 100 - v * BAND_GAIN.low * 100;
+    const first = outer(rects, 0);
+    expect(first.y).toBeCloseTo(y(0.5), 0);
+    expect(first.y + first.h).toBeCloseTo(y(0.1), 0);
+    const second = outer(rects, 1);
+    expect(second.y + second.h).toBeCloseTo(y(-0.5), 0);
+    const inner = rects.find((r) => r.color === 'MIDINLOW' && r.x === 0)!;
+    expect(inner.y).toBeGreaterThan(first.y);
+    expect(inner.y + inner.h).toBeLessThan(first.y + first.h);
+  });
+  it('joins a column to the one before so a curve thinner than a sample per pixel stays one trace', () => {
+    const shaped = column([0.9, 0.9, 0.9], [0.6, 0.2, 0.2], [0.6, 0.2, 0.2]);
+    const { ctx, rects } = recordingContext();
+    paintBands(ctx, shaped, { heightPx: 200, palette, shapeMix: 1, minSpanPx: 2 });
+    const y = (v: number) => 100 - v * BAND_GAIN.low * 100;
+    const second = outer(rects, 1);
+    expect(second.y).toBeLessThanOrEqual(Math.round(y(0.6)));
+    expect(second.y + second.h).toBeGreaterThanOrEqual(Math.round(y(0.2)));
+    expect(outer(rects, 2).h).toBeGreaterThanOrEqual(2);
+  });
+  it('moves the span continuously between the envelope and the signal as the mix grows', () => {
+    const shaped = column([0.8], [0.2], [0.1]);
+    const tops = [0, 0.25, 0.5, 0.75, 1].map((shapeMix) => {
+      const { ctx, rects } = recordingContext();
+      paintBands(ctx, shaped, { heightPx: 400, palette, shapeMix });
+      return outer(rects, 0).y;
+    });
+    for (let i = 1; i < tops.length; i++) {
+      expect(tops[i]).toBeGreaterThan(tops[i - 1]);
+      expect(tops[i] - tops[i - 1]).toBeLessThan(40);
+    }
+  });
+});
+
 describe('paintBands', () => {
   it('stacks like Rekordbox: low outer, mid inside it in the darker tone, high core inside that, symmetric about the centre line', () => {
     const shaped: Record<string, any> = {

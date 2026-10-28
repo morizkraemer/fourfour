@@ -1,6 +1,7 @@
 //! Measures the 150 columns per second `PWV7` series and the 2400 columns per second detail series of audio
 //! files, prints the time each takes and the bytes of each, and writes `<name>.pwv7` (3 interleaved bytes per
-//! column) and `<name>.ffwd` (`DetailSeries::to_bytes`) for the zoom screenshots (`app/perf/zoom-detail-shots.mjs`).
+//! column), `<name>.pwv6` (the 1200 column overview, same layout) and `<name>.ffwd`
+//! (`DetailSeries::to_bytes`) for the zoom screenshots (`app/perf/zoom-detail-shots.mjs`).
 //!
 //! `waveform_detail_dump <out dir> <audio>...`
 #[allow(dead_code)]
@@ -29,6 +30,8 @@ fn main() {
         let bytes = detail.to_bytes();
         std::fs::write(Path::new(&out).join(format!("{name}.pwv7")), &pwv7).expect("write pwv7");
         std::fs::write(Path::new(&out).join(format!("{name}.ffwd")), &bytes).expect("write ffwd");
+        let pwv6: Vec<u8> = waves.pwv6.iter().flatten().copied().collect();
+        std::fs::write(Path::new(&out).join(format!("{name}.pwv6")), &pwv6).expect("write pwv6");
         println!(
             "{name}: {:.1} s, PWV7 {} columns {} bytes {pwv7_ms:.0} ms, detail {} columns {} bytes {detail_ms:.0} ms",
             waves.pwv7.len() as f64 / 150.0,
