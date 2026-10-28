@@ -248,3 +248,4 @@
 2026-10-28 21:40 orchestrator - ov-1028 33988ec checks green on rerun (one cargo test failed once under load, unidentified); Mac offline, install pending (install-only.sh when it's back)
 2026-10-28 22:10 ov-analysis O3 landed on ov-1028 48da557: Rust is default when weights present, complete; grid ±20 ms 78.5 → 80.5% (whole-BPM snap now checks fit), key 58.3% unchanged; gaps: weights not bundled, Python fallback dev-only, truncated wav/flac fail, no cues/energy; bench results copied to benchmark/results/o3
 2026-10-28 22:11 orchestrator O8/O9 followup (own prio: bugs/ship target): ov-decode truncated audio, ov-weights bundle ONNX weights + no-backend error (seat, sonnet medium/high)
+2026-10-28 19:45 orchestrator - resumed: seat limit hit O8/O9 mid-run; PM said limit reset; SendMessage resume to both
