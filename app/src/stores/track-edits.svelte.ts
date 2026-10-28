@@ -8,7 +8,7 @@ import { library, bumpLibraryTracks } from './library.svelte.ts';
 import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setTrackMode, toggleExpanded } from './player.svelte.ts';
 import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
-import { rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
+import { gridAnchorMs, rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
 import { createPersister } from '../lib/persister.ts';
 import { BPM_MAX, BPM_MIN, camelotStep, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
 import type { Tier } from '../lib/tempo.ts';
@@ -42,17 +42,19 @@ function showBpm(trackId: number, bpm: number) {
   if (player.track?.id === trackId) player.track = { ...player.track, bpm: bpm.toFixed(2) };
 }
 
-let respacedGrid: { trackId: number; from: BeatMarker[]; to: BeatMarker[] } | null = null;
+let respacedGrid: { trackId: number; from: BeatMarker[]; fromAnchorMs: number | null; to: BeatMarker[] } | null = null;
 
 function respaceLoadedGrid(trackId: number, bpm: number) {
   const loaded = player.track;
   if (!loaded || loaded.id !== trackId || !loaded.beats.length) return;
-  const from = respacedGrid?.trackId === trackId && respacedGrid.to === loaded.beats ? respacedGrid.from : loaded.beats;
+  const cached = respacedGrid?.trackId === trackId && respacedGrid.to === loaded.beats ? respacedGrid : null;
+  const from = cached ? cached.from : loaded.beats;
+  const fromAnchorMs = cached ? cached.fromAnchorMs : loaded.gridAnchorMs;
   const durationSecs = trackById(trackId)?.raw?.duration_secs;
   const durationMs = durationSecs ? durationSecs * 1000 : loaded.durationMs;
-  const to = rescaleBeats(from, bpm, durationMs);
-  respacedGrid = { trackId, from, to };
-  player.track = { ...loaded, beats: to };
+  const to = rescaleBeats(from, bpm, durationMs, fromAnchorMs);
+  respacedGrid = { trackId, from, fromAnchorMs, to };
+  player.track = { ...loaded, beats: to, gridAnchorMs: gridAnchorMs(from, fromAnchorMs) };
 }
 
 const bpmPersister = createPersister<number>(saveBpmAndGrid, (err) => reportFailure('Setting the BPM', err));

@@ -8,6 +8,25 @@ pub const MIN_BPM: f64 = 40.0;
 pub const MAX_BPM: f64 = 250.0;
 pub const MAX_RATING: u8 = 5;
 
+struct GridAnchor {
+    stored_ms: f64,
+    bar_position: u8,
+    exact_ms: f64,
+}
+
+fn rescaled_beats(anchor: &GridAnchor, tempo: u32, duration_ms: f64) -> Vec<Beat> {
+    let beat_ms = 6_000_000.0 / tempo as f64;
+    let first_index = -((anchor.stored_ms / beat_ms).floor() as i64);
+    let last_index = ((duration_ms - anchor.stored_ms) / beat_ms).floor() as i64;
+    (first_index..=last_index.max(0))
+        .map(|k| Beat {
+            bar_position: ((anchor.bar_position as i64 - 1 + k).rem_euclid(4) + 1) as u8,
+            time_ms: (anchor.stored_ms + k as f64 * beat_ms).round() as u32,
+            tempo,
+        })
+        .collect()
+}
+
 pub fn is_camelot(key: &str) -> bool {
     let Some(letter) = key.chars().last() else { return false };
     let number = &key[..key.len() - letter.len_utf8()];
@@ -66,9 +85,11 @@ impl LocalLibrary {
         self.user_edits(track_id).rating.or(imported).filter(|&r| r > 0)
     }
 
-    /// Re-space the beat grid for a new BPM from its first downbeat, which stays exactly where it is (its
-    /// sub-millisecond place in `grid_offset_ms` is untouched). Beats are laid out over the whole track and carry the
-    /// new tempo; the BPM and the grid are stored as hand-set. A track with no beat grid only gets the BPM.
+    /// Re-space the beat grid for a new BPM from its anchor downbeat ([`UserEdits::grid_anchor_ms`]; without one, the
+    /// first downbeat), which stays exactly where it is (its sub-millisecond place in `grid_offset_ms` is untouched). Beats
+    /// are laid out over the whole track and carry the new tempo; the BPM and the grid are stored as hand-set. The anchor
+    /// is kept, so a downbeat the fill added at the track start is never the anchor of a later rescale. A track with no
+    /// beat grid only gets the BPM.
     pub fn rescale_beat_grid(&self, track_id: i64, new_bpm: f64) -> Result<()> {
         if !new_bpm.is_finite() || !(MIN_BPM..=MAX_BPM).contains(&new_bpm) {
             bail!("BPM {new_bpm} is outside {MIN_BPM} to {MAX_BPM}");
@@ -76,31 +97,32 @@ impl LocalLibrary {
         let mut analysis = self
             .get_analysis(track_id)?
             .context("Track has no analysis to rescale the beat grid of")?;
+        let edits = self.user_edits(track_id);
+        let offset_ms = edits.grid_offset_ms.unwrap_or(0.0);
         let beats = &analysis.beat_grid.beats;
-        let Some(anchor) = beats.iter().find(|b| b.bar_position == 1).or(beats.first()).copied() else {
+        let anchor = match edits.grid_anchor_ms {
+            Some(exact) => Some(GridAnchor { stored_ms: (exact - offset_ms).round(), bar_position: 1, exact_ms: exact }),
+            None => beats.iter().find(|b| b.bar_position == 1).or(beats.first()).map(|b| GridAnchor {
+                stored_ms: b.time_ms as f64,
+                bar_position: b.bar_position,
+                exact_ms: b.time_ms as f64 + offset_ms,
+            }),
+        };
+        let Some(anchor) = anchor else {
             return self.set_user_bpm(track_id, new_bpm);
         };
         let duration_ms = self.get_track(track_id)?.context("Track not found")?.duration_secs * 1000.0;
         let new_tempo = (new_bpm * 100.0).round() as u32;
-        let beat_ms = 6_000_000.0 / new_tempo as f64;
-        let anchor_ms = anchor.time_ms as f64;
-        let first_index = -((anchor_ms / beat_ms).floor() as i64);
-        let last_index = ((duration_ms - anchor_ms) / beat_ms).floor() as i64;
-        analysis.beat_grid = BeatGrid {
-            beats: (first_index..=last_index.max(0))
-                .map(|k| Beat {
-                    bar_position: ((anchor.bar_position as i64 - 1 + k).rem_euclid(4) + 1) as u8,
-                    time_ms: (anchor_ms + k as f64 * beat_ms).round() as u32,
-                    tempo: new_tempo,
-                })
-                .collect(),
-        };
+        analysis.beat_grid = BeatGrid { beats: rescaled_beats(&anchor, new_tempo, duration_ms) };
         analysis.bpm = new_tempo as f64 / 100.0;
         let stages = queries::select_analysis_stages(&self.conn, track_id)?.unwrap_or(crate::analysis_stage::ALL);
         self.write_analysis(track_id, &analysis, stages)?;
         self.update_user_edits(track_id, |edits| {
             edits.bpm_locked = true;
             edits.grid_locked = true;
+            if edits.grid_anchor_ms.is_none() && anchor.bar_position == 1 {
+                edits.grid_anchor_ms = Some(anchor.exact_ms);
+            }
         })
     }
 

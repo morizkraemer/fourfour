@@ -102,6 +102,7 @@ describe('beat grid editing in the player', () => {
       trackId: 4,
       beats: [520, 1020, 1520, 2020, 2520].map((time_ms, i) => ({ time_ms, bar_position: (i % 4) + 1 })),
       offsetMs: 0,
+      anchorMs: 520,
     });
   });
 

@@ -239,8 +239,20 @@ impl LocalLibrary {
     /// The tempo of every beat stays the stored one. An edit is user data, so it is written as it is (not
     /// replaced by a locked imported grid) and the analysis stages stay as they were.
     /// Replace the beat grid by hand (locks it). `offset_ms` is the grid's place between whole milliseconds (see
-    /// [`UserEdits::grid_offset_ms`]); anything outside half a millisecond either way is refused.
-    pub fn set_beat_grid(&self, track_id: i64, positions: &[BeatPosition], offset_ms: Option<f64>) -> Result<()> {
+    /// [`UserEdits::grid_offset_ms`]); anything outside half a millisecond either way is refused. `anchor_ms` is the
+    /// downbeat a later BPM change keeps ([`UserEdits::grid_anchor_ms`]).
+    pub fn set_beat_grid(
+        &self,
+        track_id: i64,
+        positions: &[BeatPosition],
+        offset_ms: Option<f64>,
+        anchor_ms: Option<f64>,
+    ) -> Result<()> {
+        if let Some(anchor) = anchor_ms {
+            if !anchor.is_finite() {
+                anyhow::bail!("Beat grid anchor {anchor} ms is not a number");
+            }
+        }
         if let Some(offset) = offset_ms {
             if !(offset.is_finite() && offset.abs() <= 0.5) {
                 anyhow::bail!("Beat grid offset {offset} ms is not within half a millisecond");
@@ -267,6 +279,7 @@ impl LocalLibrary {
             let mut edits = UserEdits::read(&dir).unwrap_or_default();
             edits.grid_locked = true;
             edits.grid_offset_ms = offset_ms.filter(|o| *o != 0.0);
+            edits.grid_anchor_ms = anchor_ms;
             edits.write(&dir)?;
         }
         Ok(())
@@ -325,6 +338,7 @@ impl LocalLibrary {
         if let Some(mut user_edits) = UserEdits::read(&dir) {
             user_edits.grid_locked = false;
             user_edits.grid_offset_ms = None;
+            user_edits.grid_anchor_ms = None;
             user_edits.cues_locked = false;
             user_edits.bpm_locked = false;
             user_edits.key_locked = false;
@@ -1134,19 +1148,19 @@ mod tests {
         let id = lib.add_track(&make_track("Exact", "/music/x.mp3")).unwrap();
         lib.set_analysis(id, &banded_analysis()).unwrap();
         let before = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&before, 3), Some(-0.37)).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 3), Some(-0.37), None).unwrap();
         let edits = lib.user_edits(id);
         assert!(edits.grid_locked);
         assert_eq!(edits.grid_offset_ms, Some(-0.37));
         let stored = lib.get_analysis(id).unwrap().unwrap();
         assert_eq!(stored.beat_grid.beats[0].time_ms, before.beat_grid.beats[0].time_ms + 3);
-        lib.set_beat_grid(id, &shifted(&before, 3), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 3), None, None).unwrap();
         assert_eq!(lib.user_edits(id).grid_offset_ms, None);
-        lib.set_beat_grid(id, &shifted(&before, 3), Some(0.25)).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 3), Some(0.25), None).unwrap();
         lib.release_user_edits(id).unwrap();
         assert_eq!(lib.user_edits(id).grid_offset_ms, None);
-        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(0.8)).is_err());
-        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(f64::NAN)).is_err());
+        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(0.8), None).is_err());
+        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(f64::NAN), None).is_err());
     }
 
     fn shifted(analysis: &AnalysisResult, delta_ms: u32) -> Vec<BeatPosition> {
@@ -1166,7 +1180,7 @@ mod tests {
         lib.set_analysis(id, &banded_analysis()).unwrap();
         let before = lib.get_analysis(id).unwrap().unwrap();
 
-        lib.set_beat_grid(id, &shifted(&before, 37), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 37), None, None).unwrap();
 
         let after = lib.get_analysis(id).unwrap().unwrap();
         let times: Vec<u32> = after.beat_grid.beats.iter().map(|b| b.time_ms).collect();
@@ -1193,7 +1207,7 @@ mod tests {
             let id = lib.add_track(&make_track("Fine", "/music/f.mp3")).unwrap();
             lib.set_analysis(id, &banded_analysis()).unwrap();
             let before = lib.get_analysis(id).unwrap().unwrap();
-            lib.set_beat_grid(id, &shifted(&before, 1), None).unwrap();
+            lib.set_beat_grid(id, &shifted(&before, 1), None, None).unwrap();
             (id, before)
         };
         let lib = LocalLibrary::open(&db_path).unwrap();
@@ -1211,7 +1225,7 @@ mod tests {
             let lib = LocalLibrary::open(&db_path).unwrap();
             let id = lib.add_track(&make_track("Edit", "/music/e.mp3")).unwrap();
             lib.set_analysis_stages(id, &make_analysis(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
-            lib.set_beat_grid(id, &[BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }], None).unwrap();
+            lib.set_beat_grid(id, &[BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }], None, None).unwrap();
             id
         };
         let lib = LocalLibrary::open(&db_path).unwrap();
@@ -1241,7 +1255,7 @@ mod tests {
         .unwrap();
 
         let current = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&current, 50), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50), None, None).unwrap();
         assert_eq!(lib.get_analysis(id).unwrap().unwrap().beat_grid.beats[0].time_ms, 50);
 
         let mut reanalysis = make_analysis();
@@ -1375,7 +1389,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (lib, id) = analyzed_file_library(dir.path());
         let before = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&before, 1000), Some(-0.37)).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), Some(-0.37), None).unwrap();
 
         lib.rescale_beat_grid(id, 100.0).unwrap();
         let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
@@ -1407,6 +1421,84 @@ mod tests {
         assert_eq!(spacing(&lib), 1000);
         lib.rescale_beat_grid(id, 120.0).unwrap();
         assert_eq!(spacing(&lib), 500);
+    }
+
+    fn stored_grid(lib: &LocalLibrary, id: i64) -> Vec<(u32, u8)> {
+        lib.get_analysis(id).unwrap().unwrap().beat_grid.beats.iter().map(|b| (b.time_ms, b.bar_position)).collect()
+    }
+
+    #[test]
+    fn doubling_then_halving_the_bpm_across_saves_returns_the_exact_grid() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let before = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), None, None).unwrap();
+        lib.rescale_beat_grid(id, 125.0).unwrap();
+        let original = stored_grid(&lib, id);
+        assert!(original.contains(&(1000, 1)));
+
+        lib.rescale_beat_grid(id, 250.0).unwrap();
+        assert!(stored_grid(&lib, id).contains(&(1000, 1)));
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        reopened.rescale_beat_grid(id, 125.0).unwrap();
+
+        assert_eq!(stored_grid(&reopened, id), original);
+        assert_eq!(reopened.user_edits(id).grid_anchor_ms, Some(1000.0));
+    }
+
+    #[test]
+    fn a_downbeat_set_mid_track_stays_fixed_under_rescale_and_release_forgets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let before = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), Some(0.25), Some(60_000.25)).unwrap();
+
+        for bpm in [128.0, 90.0, 174.0, 70.0] {
+            lib.rescale_beat_grid(id, bpm).unwrap();
+            let grid = lib.get_analysis(id).unwrap().unwrap().beat_grid.beats;
+            let at_anchor = grid.iter().find(|b| b.time_ms == 60_000).unwrap();
+            assert_eq!(at_anchor.bar_position, 1, "{bpm}");
+            assert_eq!(lib.user_edits(id).grid_anchor_ms, Some(60_000.25));
+        }
+
+        lib.release_user_edits(id).unwrap();
+        assert_eq!(lib.user_edits(id).grid_anchor_ms, None);
+    }
+
+    #[test]
+    fn rescale_matches_the_app_for_the_shared_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/rescale-parity.json")).unwrap();
+        let duration_ms = fixture["durationSecs"].as_f64().unwrap() * 1000.0;
+        for case in fixture["cases"].as_array().unwrap() {
+            let dir = tempfile::tempdir().unwrap();
+            let (lib, id) = analyzed_file_library(dir.path());
+            assert_eq!(lib.get_track(id).unwrap().unwrap().duration_secs * 1000.0, duration_ms);
+            let beats: Vec<BeatPosition> = case["beats"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| BeatPosition { time_ms: b["time_ms"].as_u64().unwrap() as u32, bar_position: b["bar_position"].as_u64().unwrap() as u8 })
+                .collect();
+            let offset = case["offsetMs"].as_f64().unwrap();
+            lib.set_beat_grid(id, &beats, Some(offset), case["anchorMs"].as_f64()).unwrap();
+            let bpm = case["bpm"].as_f64().unwrap();
+            lib.rescale_beat_grid(id, bpm).unwrap();
+
+            let grid = lib.get_analysis(id).unwrap().unwrap().beat_grid.beats;
+            let label = format!("{bpm} BPM, anchor {:?}", case["anchorMs"]);
+            assert_eq!(grid.len(), case["count"].as_u64().unwrap() as usize, "{label}");
+            let expected = |key: &str| -> Vec<(f64, u8)> {
+                case[key].as_array().unwrap().iter().map(|b| (b[0].as_f64().unwrap(), b[1].as_u64().unwrap() as u8)).collect()
+            };
+            let actual = |range: std::ops::Range<usize>| -> Vec<(f64, u8)> {
+                grid[range].iter().map(|b| (b.time_ms as f64 + offset, b.bar_position)).collect()
+            };
+            for (key, got) in [("head", actual(0..8)), ("tail", actual(grid.len() - 8..grid.len()))] {
+                for (want, have) in expected(key).iter().zip(&got) {
+                    assert!((want.0 - have.0).abs() < 1e-9 && want.1 == have.1, "{label} {key}: {want:?} vs {have:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -1467,7 +1559,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (lib, id) = analyzed_file_library(dir.path());
         let current = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&current, 50), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50), None, None).unwrap();
         lib.set_cues(id, &[cue(2, 33_000, "Mine", Some("#123456"))]).unwrap();
 
         let mut reanalysis = make_analysis();
@@ -1542,7 +1634,7 @@ mod tests {
     fn beat_grid_of_an_unanalyzed_track_is_an_error() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let id = lib.add_track(&make_track("None", "/music/n.mp3")).unwrap();
-        assert!(lib.set_beat_grid(id, &[BeatPosition { time_ms: 0, bar_position: 1 }], None).is_err());
+        assert!(lib.set_beat_grid(id, &[BeatPosition { time_ms: 0, bar_position: 1 }], None, None).is_err());
     }
 
     #[test]

@@ -7,7 +7,7 @@ import {
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
-import { gridForStorage, type BeatMarker } from '../lib/beatGrid.ts';
+import { gridForStorage, type BeatMarker, type EditedGrid } from '../lib/beatGrid.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
@@ -957,19 +957,20 @@ export function invalidateAnalysisCache(trackId?: number) {
   }
 }
 
-const mockBeatGrids = new Map<number, { beats: BeatMarker[]; offsetMs: number }>();
+const mockBeatGrids = new Map<number, { beats: BeatMarker[]; offsetMs: number; anchorMs: number | null }>();
 
 /**
  * Store an edited beat grid (exact beat times); the next analysis read of the track carries it. The library keeps whole
  * ms beats and the grid's sub-millisecond offset (`gridForStorage`), so the grid comes back exactly where it was set.
  */
-export async function setBeatGrid(trackId: number, exactBeats: BeatMarker[]): Promise<void> {
-  const { beats, offsetMs } = gridForStorage(exactBeats);
+export async function setBeatGrid(trackId: number, grid: EditedGrid): Promise<void> {
+  const { beats, offsetMs } = gridForStorage(grid.beats);
+  const anchorMs = grid.anchorMs;
   try {
-    await invoke('set_beat_grid', { trackId, beats, offsetMs });
+    await invoke('set_beat_grid', { trackId, beats, offsetMs, anchorMs });
   } catch (err) {
     if (!useBrowserMocks()) throw err;
-    mockBeatGrids.set(trackId, { beats, offsetMs });
+    mockBeatGrids.set(trackId, { beats, offsetMs, anchorMs });
   }
   invalidateAnalysisCache(trackId);
 }
@@ -1074,7 +1075,7 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
       const clean = sanitizeAnalysisPayload({
         ...data,
         analysis_stages: mockStages.get(trackId) ?? MOCK_STAGES_ALL,
-        ...(edited ? { beats: edited.beats, grid_offset_ms: edited.offsetMs } : {}),
+        ...(edited ? { beats: edited.beats, grid_offset_ms: edited.offsetMs, grid_anchor_ms: edited.anchorMs } : {}),
         ...(editedCues ? { cue_points: editedCues } : {}),
       });
       cacheAnalysis(trackId, clean);
