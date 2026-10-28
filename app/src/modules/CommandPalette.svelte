@@ -14,30 +14,29 @@
   import { shortcuts } from '../shortcuts/index.ts';
   import { formatBinding } from '../shortcuts/keybinding.ts';
   import { goToSource, jumpToTrack } from '../shortcuts/navigation.ts';
+  import { buildDynamicCommands } from '../shortcuts/palette-commands.ts';
   import { buildPaletteGroups, isCommandQuery } from '../shortcuts/palette-model.ts';
 
-  const MIN_DROPDOWN_WIDTH = 520;
-  const WINDOW_MARGIN = 12;
 
   let anchorRect = $state(null);
   let keySource = $derived(ui.searchAnchor?.querySelector('input') ?? null);
 
   function measureAnchor() {
     const rect = ui.searchAnchor?.getBoundingClientRect();
-    if (!rect) {
-      anchorRect = null;
-      return;
-    }
-    const width = Math.min(Math.max(rect.width, MIN_DROPDOWN_WIDTH), window.innerWidth - rect.left - WINDOW_MARGIN);
-    anchorRect = { left: rect.left, top: rect.bottom + 4, width };
+    anchorRect = rect ? { left: rect.left, top: rect.bottom, width: rect.width } : null;
   }
 
   $effect(() => {
     if (!ui.paletteOpen) return;
     measureAnchor();
     void loadAppSettings();
+    const observer = new ResizeObserver(measureAnchor);
+    if (ui.searchAnchor) observer.observe(ui.searchAnchor);
     window.addEventListener('resize', measureAnchor);
-    return () => window.removeEventListener('resize', measureAnchor);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measureAnchor);
+    };
   });
 
   $effect(() => {
@@ -53,14 +52,18 @@
   let sources = $derived.by(() => {
     if (!ui.paletteOpen) return { actions: [], settings: [], places: [], tracks: [] };
     return {
-      actions: shortcuts.actions
-        .filter((a) => a.palette !== false && (!a.when || a.when()))
-        .map((a) => ({
-          id: a.id,
-          label: a.label,
-          shortcut: formatBinding(shortcuts.bindingOf(a.id)),
-          run: a.run,
-        })),
+      actions: [
+        ...shortcuts.actions
+          .filter((a) => a.palette !== false && (!a.when || a.when()))
+          .map((a) => ({
+            id: a.id,
+            label: a.label,
+            shortcut: formatBinding(shortcuts.bindingOf(a.id)),
+            keywords: a.keywords,
+            run: a.run,
+          })),
+        ...buildDynamicCommands(),
+      ],
       settings: buildSettingSources(),
       places: [
         { id: 'all', label: 'All Tracks', sub: 'library', icon: 'list', run: () => void goToSource('All Tracks') },
@@ -81,6 +84,7 @@
         id: t.id,
         title: t.title ?? '',
         artist: t.artist ?? '',
+        cover: () => t.rowCover ?? '',
         run: () => void jumpToTrack(t.id),
       })),
     };

@@ -10,7 +10,11 @@
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
   import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
-  import { ui, clearListFilter, setSearchText, openPalette } from '../stores/ui.svelte.ts';
+  import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
+  import { stickSync } from '../stores/stick-sync.svelte.ts';
+  import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
+  import { goToSource } from '../shortcuts/navigation.ts';
+  import { stickLabel, topbarIdleStatus } from '../lib/topbarStatus.ts';
 
   let filterInputEl = $state(null);
   let searchEl = $state(null);
@@ -21,7 +25,16 @@
   let contextLabel = $derived(sidebarSourceLabel(ui.activeSidebarRow));
   let showChips = $derived(!ui.organize.expanded);
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
-  let volumeName = $derived(library.activeVolume ? sidebarSourceLabel(library.activeVolume) : '');
+  let idleStatus = $derived(
+    topbarIdleStatus({
+      volumes: library.volumes,
+      activeVolume: library.activeVolume,
+      stickTrackCount: (volume) => stickAllTrackIds(volume).length,
+      trackCount: library.tracks.length,
+      unanalyzedCount: library.tracks.filter((t) => !t.analyzed).length,
+      sync: stickSync,
+    }),
+  );
   let filterCountLabel = $derived(
     ui.listFilter.trim()
       ? `${filteredCount} / ${activeTracks.length}`
@@ -49,6 +62,14 @@
       returnFocusEl = null;
     }
   });
+
+  function openIdleStatus() {
+    if (idleStatus.kind === 'stick') {
+      dockOrganizeTarget({ kind: 'usb', id: idleStatus.volume, label: stickLabel(idleStatus.volume) });
+    } else {
+      void goToSource('All Tracks');
+    }
+  }
 
   function onSearchFocusIn(e) {
     if (e.target !== filterInputEl || ui.paletteOpen) return;
@@ -79,11 +100,11 @@
     <span class="ff-gheader__count">{activeTracks.length.toLocaleString()}</span>
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="ff-gheader__search" bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
+  <div class="ff-gheader__search" class:ff-gheader__search--open={ui.paletteOpen} bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
     <FilterInput
       bind:value={() => ui.searchText, setSearchText}
       bind:inputRef={filterInputEl}
-      placeholder="Search tracks, or type > for commands"
+      placeholder="Search tracks and commands"
       count={filterCountLabel}
       onClose={clearListFilter}
       onkeydown={onFilterKeydown}
@@ -97,11 +118,16 @@
           <b>{library.analysisProgress.current} / {library.analysisProgress.total}</b>
         </span>
       {/if}
-      {#if volumeName}
-        <span class="ff-gheader__chip">
-          <StatusDot status="online" /> {volumeName}
-          {#if library.syncing}<b>Syncing</b>{/if}
-        </span>
+      {#if library.syncing}
+        <span class="ff-gheader__chip"><Spinner size="small" /> Syncing</span>
+      {:else if !analyzing}
+        <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" onclick={openIdleStatus}>
+          {#if idleStatus.kind === 'stick'}
+            <StatusDot status="online" /> {idleStatus.name} <b>{idleStatus.detail}</b>
+          {:else}
+            {idleStatus.text}
+          {/if}
+        </button>
       {/if}
     {/if}
   </div>
@@ -142,7 +168,7 @@
     display: flex;
     align-items: center;
     flex: 1 1 0;
-    max-width: 420px;
+    max-width: 560px;
     min-width: 0;
   }
   .ff-gheader__search :global(.ff-filter-input) {
@@ -152,6 +178,12 @@
     border-radius: var(--ff-radius-md);
     background: var(--ff-surface);
     border-color: var(--ff-border);
+  }
+  .ff-gheader__search--open :global(.ff-filter-input) {
+    background: var(--ff-elev);
+    border-color: var(--ff-border-hi);
+    border-bottom-color: var(--ff-border);
+    border-radius: var(--ff-radius-md) var(--ff-radius-md) 0 0;
   }
   .ff-gheader__right {
     display: flex;
@@ -174,6 +206,19 @@
     color: var(--ff-text-mid);
     white-space: nowrap;
     flex: none;
+  }
+  .ff-gheader__chip--idle {
+    background: none;
+    font-family: inherit;
+    color: var(--ff-text-mid);
+    cursor: pointer;
+    transition:
+      color var(--ff-motion-fast) var(--ff-easing),
+      background-color var(--ff-motion-fast) var(--ff-easing);
+  }
+  .ff-gheader__chip--idle:hover {
+    background: var(--ff-hover);
+    color: var(--ff-text);
   }
   .ff-gheader__chip b {
     font-weight: 500;

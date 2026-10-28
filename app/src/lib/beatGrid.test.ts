@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BEAT_NUDGE_MS, createGridPersister, gridNudgeMs, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
+import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridNudgeMs, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
+
+const SAMPLE_MS = 1000 / 44100;
 
 const grid = (): BeatMarker[] => [
   { time_ms: 100, bar_position: 1 },
@@ -25,26 +27,47 @@ describe('shiftBeats', () => {
     expect(out[0]).toEqual({ time_ms: 450, bar_position: 2 });
     expect(out).toHaveLength(4);
   });
-  it('rounds to whole milliseconds', () => {
-    expect(shiftBeats(grid(), 2.6)[0].time_ms).toBe(103);
+  it('moves by fractions of a millisecond exactly', () => {
+    expect(shiftBeats(grid(), 2.6)[0].time_ms).toBeCloseTo(102.6, 9);
   });
 });
 
 describe('gridNudgeMs', () => {
-  it('moves the grid by one pixel of the zoom view', () => {
-    expect(gridNudgeMs(4.4, false)).toBe(4);
-    expect(gridNudgeMs(2.6, false)).toBe(3);
+  it('moves the grid by one pixel of the zoom view, exactly', () => {
+    expect(gridNudgeMs(4.4, false)).toBe(4.4);
+    expect(gridNudgeMs(0.37, false)).toBe(0.37);
   });
-  it('never goes below one millisecond at deep zoom', () => {
-    expect(gridNudgeMs(0.004, false)).toBe(1);
+  it('never goes below one sample at deep zoom', () => {
+    expect(gridNudgeMs(0.004, false)).toBeCloseTo(SAMPLE_MS, 9);
+    expect(gridNudgeMs(0.004, false, 1000 / 48000)).toBeCloseTo(1000 / 48000, 9);
   });
   it('keeps the old step when zoomed far out or before layout', () => {
     expect(gridNudgeMs(250, false)).toBe(BEAT_NUDGE_MS);
     expect(gridNudgeMs(0, false)).toBe(BEAT_NUDGE_MS);
   });
-  it('is one millisecond with the fine modifier at any zoom', () => {
-    expect(gridNudgeMs(250, true)).toBe(1);
-    expect(gridNudgeMs(4.4, true)).toBe(1);
+  it('is one sample with the fine modifier at any zoom', () => {
+    expect(gridNudgeMs(250, true)).toBeCloseTo(SAMPLE_MS, 9);
+    expect(gridNudgeMs(4.4, true, 1000 / 48000)).toBeCloseTo(1000 / 48000, 9);
+  });
+});
+
+describe('gridForStorage / gridFromStorage', () => {
+  it('stores whole ms beats and the shared fraction, and gets the exact grid back', () => {
+    const exact = shiftBeats(grid(), 12.37);
+    const stored = gridForStorage(exact);
+    expect(stored.beats.map((b) => b.time_ms)).toEqual([112, 612, 1112, 1612, 2112]);
+    expect(stored.offsetMs).toBeCloseTo(0.37, 9);
+    const back = gridFromStorage(stored.beats, stored.offsetMs);
+    back.forEach((b, i) => expect(b.time_ms).toBeCloseTo(exact[i].time_ms, 9));
+  });
+  it('rounds each stored beat to its nearest millisecond, whichever way the fraction goes', () => {
+    const stored = gridForStorage(shiftBeats(grid(), -0.8));
+    expect(stored.beats[0].time_ms).toBe(99);
+    expect(stored.offsetMs).toBeCloseTo(0.2, 9);
+  });
+  it('reads a grid without an offset as it is', () => {
+    expect(gridFromStorage(grid(), undefined)).toEqual(grid());
+    expect(gridFromStorage(grid(), null)).toEqual(grid());
   });
 });
 
@@ -58,9 +81,9 @@ describe('shiftToPlaceDownbeatAt', () => {
     const moved = shiftBeats(grid(), delta);
     expect(moved.find((b) => b.time_ms === 1999)?.bar_position).toBe(1);
   });
-  it('places a downbeat to the millisecond from a sub-millisecond playhead', () => {
-    const delta = shiftToPlaceDownbeatAt(grid(), 2100.6)!;
-    expect(shiftBeats(grid(), delta)[4].time_ms).toBe(2101);
+  it('places a downbeat exactly at a playhead between two milliseconds', () => {
+    const delta = shiftToPlaceDownbeatAt(grid(), 2100.6137)!;
+    expect(shiftBeats(grid(), delta)[4].time_ms).toBeCloseTo(2100.6137, 9);
   });
   it('uses plain beats when the grid has no downbeat', () => {
     expect(shiftToPlaceDownbeatAt([{ time_ms: 500, bar_position: 2 }], 530)).toBe(30);

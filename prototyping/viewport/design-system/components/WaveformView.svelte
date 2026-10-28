@@ -60,6 +60,7 @@
   export function zoomOut() { display?.zoomOut(); }
   export function resetZoom() { display?.resetZoom(); }
   export function msPerPixel() { return display?.msPerPixel() ?? 0; }
+  export function msPerSample() { return display?.msPerSample(); }
 
   $effect(() => {
     if (!container) return;

@@ -50,7 +50,7 @@
       ? null
       : async (startMs, endMs, columns) => windowFromBytes(await getWaveformWindow(windowTrackId, startMs, endMs, columns)),
   );
-  const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey);
+  const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey, wave?.msPerSample());
 
   $effect(() => {
     const id = player.track?.id;
@@ -274,10 +274,28 @@
   }
 
   .ff-xp__head-right { display: flex; align-items: center; gap: 10px; }
-  .ff-xp__times { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
-  .ff-xp__time-cur { font-variant-numeric: tabular-nums; color: var(--ff-text, #fff); font-size: 13px; }
-  .ff-xp__time-ms { color: var(--ff-muted, rgba(255, 255, 255, 0.5)); }
-  .ff-xp__time-tot { font-variant-numeric: tabular-nums; color: var(--ff-muted, rgba(255, 255, 255, 0.5)); font-size: 11px; }
+  .ff-xp__times {
+    display: grid;
+    justify-items: end;
+    row-gap: 3px;
+    min-width: 9ch;
+    font-family: var(--ff-font-mono);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .ff-xp__time-cur {
+    color: var(--ff-text);
+    font-size: 13px;
+  }
+  .ff-xp__time-ms {
+    color: var(--ff-muted);
+    font-size: 11px;
+  }
+  .ff-xp__time-tot {
+    color: var(--ff-muted);
+    font-size: 11px;
+  }
 
   .ff-xp__collapse {
     display: inline-flex; align-items: center; justify-content: center;

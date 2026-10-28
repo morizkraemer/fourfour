@@ -23,7 +23,8 @@
  *                Rekordbox-style playhead locked at centre while the waveform
  *                scrolls; horizontal drag scrubs, wheel zooms.
  */
-import { drawBandRange, dimPlayed, ink, paintBands, paletteVersion, wavePalette } from './waveform-render.js';
+import { drawBandRange, dimPlayed, ink, paletteVersion, wavePalette } from './waveform-render.js';
+import { ZOOM_LOOK, paintSampleDots, paintZoom } from './waveform-zoom.js';
 import { PlayheadClock } from './playhead-clock.js';
 import { ZOOM_PEAK_WEIGHT, reduceBands } from './waveform-bands.js';
 
@@ -42,11 +43,13 @@ const DETAIL_BELOW_COLUMNS_PER_PIXEL = 2;
 const WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL = 1;
 const WINDOW_SCREENS = 3;
 const WINDOW_THROTTLE_MS = 60;
-const WINDOW_MIN_DENSITY = 0.75;
-const WINDOW_MAX_DENSITY = 3;
-const WINDOW_REFRESH_DENSITY = [0.9, 1.25];
-const SAMPLE_LINE_BELOW_SAMPLES_PER_PIXEL = 2;
-const SAMPLE_LINE_SCALE = 0.92;
+const WINDOW_COLUMNS_PER_PX = 2;
+const WINDOW_PREFETCH_ZOOM = 3;
+const WINDOW_MAX_COLUMNS = 16384;
+const WINDOW_MAX_MS = 30000;
+const ASSUMED_SAMPLE_RATE = 44100;
+const WHEEL_ZOOM_PER_PIXEL = 0.0025;
+const WHEEL_LINE_PX = 16;
 
 export default class WaveformDisplay {
     /**
@@ -314,7 +317,6 @@ export default class WaveformDisplay {
      */
     setTransport(playing, frac) {
         if (this._scrubbing) return;
-        const wasPlaying = this._playing;
         this._playing = !!playing;
 
         if (frac < 0) {
@@ -330,16 +332,11 @@ export default class WaveformDisplay {
         const durationMs = this._data?.duration_ms || 0;
 
         if (!this._playing || !durationMs) {
+            // Paused, the reported position is where playback resumes and what grid Set and cues use, so the
+            // playhead rests exactly there (on pause it moves the few ms the interpolated clock was off).
             this._stopInterp();
-            if (wasPlaying && this._phClock >= 0) {
-                // Play→pause: the waveform stays where it is. (The clock is a few
-                // ms off the final report; moving there would be a visible jump.)
-                this._clock.stop(this._phClock * durationMs);
-            } else {
-                // Already paused — a position change is a deliberate seek; honor it.
-                this._phClock = frac;
-                this._clock.stop(frac * durationMs);
-            }
+            this._phClock = frac;
+            this._clock.stop(frac * durationMs);
             this._applyPlayhead(this._phClock);
             return;
         }
@@ -490,6 +487,11 @@ export default class WaveformDisplay {
         const w = this._canvasSize(this._zoomCanvas).w;
         if (!durationMs || !w) return 0;
         return durationMs / this._zoom / w;
+    }
+
+    /** Milliseconds per audio sample: the fine windows' sample rate, or ASSUMED_SAMPLE_RATE before the first one. */
+    msPerSample() {
+        return 1000 / (this._window?.sampleRate || ASSUMED_SAMPLE_RATE);
     }
 
     /** Remove canvases and all event listeners. */
@@ -698,35 +700,54 @@ export default class WaveformDisplay {
         return coarsePerPixel < DETAIL_BELOW_COLUMNS_PER_PIXEL ? fine : null;
     }
 
-    // A fetched window that covers the view at about one column per pixel, once the high-resolution series is wider
-    // than a pixel; asks for a new one when the view nears its edge or the zoom moved away from its resolution.
+    // A fetched window once the high-resolution series is wider than a pixel (asked for from WINDOW_PREFETCH_ZOOM times
+    // further out, so it is there when the zoom gets that deep). Any window that covers the view and is finer
+    // than that series is drawn, whatever its resolution against the pixels, so the view never falls back to wide bars
+    // while the next one is on its way. A new one is asked for when the view nears its edge or a pixel holds less than
+    // one of its columns while the audio has finer detail (more samples) to give.
     _zoomWindow(widthPx, startFrac, endFrac) {
         const fine = this._data.bandsZoom;
         const durationMs = this._data.duration_ms;
         if (!this._windowSource || !fine?.low.length || !durationMs) return null;
-        if (((endFrac - startFrac) * fine.low.length) / widthPx >= WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL) return null;
+        const fineMsPerColumn = durationMs / fine.low.length;
         const startMs = startFrac * durationMs;
         const endMs = endFrac * durationMs;
         const spanMs = endMs - startMs;
+        const msPerPx = spanMs / widthPx;
+        if (msPerPx >= fineMsPerColumn * WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL * WINDOW_PREFETCH_ZOOM) return null;
+        const needed = msPerPx < fineMsPerColumn * WINDOW_BELOW_DETAIL_COLUMNS_PER_PIXEL;
         const win = this._window;
+        const msPerSample = 1000 / (win?.sampleRate || ASSUMED_SAMPLE_RATE);
         let usable = false;
         let refresh = true;
         if (win) {
-            const density = (win.low.length * spanMs) / (win.endMs - win.startMs) / widthPx;
-            usable = win.startMs <= Math.max(0, startMs) && win.endMs >= Math.min(durationMs, endMs)
-                && density >= WINDOW_MIN_DENSITY && density <= WINDOW_MAX_DENSITY;
+            const msPerColumn = (win.endMs - win.startMs) / win.low.length;
+            usable = win.startMs <= Math.max(0, startMs) && win.endMs >= Math.min(durationMs, endMs) && msPerColumn < fineMsPerColumn;
             const nearStart = win.startMs > 0 && startMs - win.startMs < spanMs / 2;
             const nearEnd = win.endMs < durationMs && win.endMs - endMs < spanMs / 2;
-            refresh = !usable || nearStart || nearEnd
-                || density < WINDOW_REFRESH_DENSITY[0] || density > WINDOW_REFRESH_DENSITY[1];
+            const coarse = msPerColumn > msPerPx && msPerColumn > msPerSample * 1.01;
+            refresh = !usable || nearStart || nearEnd || coarse;
         }
-        if (refresh) {
-            const centre = (startMs + endMs) / 2;
-            const from = Math.max(0, centre - (WINDOW_SCREENS / 2) * spanMs);
-            const to = Math.min(durationMs, centre + (WINDOW_SCREENS / 2) * spanMs);
-            if (to > from) this._requestWindow({ startMs: from, endMs: to, columns: Math.max(1, Math.round((widthPx * (to - from)) / spanMs)) });
+        if (refresh) this._requestWindow(this._windowRequest(startMs, endMs, msPerPx, msPerSample, durationMs));
+        return needed && usable ? win : null;
+    }
+
+    // WINDOW_SCREENS screens around the view at WINDOW_COLUMNS_PER_PX columns per pixel, or one column per sample when the
+    // audio has no more than that (centred on the samples, so every sample sits at its column's centre); fewer screens
+    // when the columns would not fit in one window.
+    _windowRequest(startMs, endMs, msPerPx, msPerSample, durationMs) {
+        const spanMs = endMs - startMs;
+        const perSample = msPerPx / WINDOW_COLUMNS_PER_PX <= msPerSample;
+        const msPerColumn = perSample ? msPerSample : msPerPx / WINDOW_COLUMNS_PER_PX;
+        const reachMs = Math.min(WINDOW_MAX_MS, WINDOW_SCREENS * spanMs, WINDOW_MAX_COLUMNS * msPerColumn);
+        const centre = (startMs + endMs) / 2;
+        let from = Math.max(0, centre - reachMs / 2);
+        let to = Math.min(durationMs, centre + reachMs / 2);
+        if (perSample) {
+            from = Math.max(0, (Math.round(from / msPerSample) - 0.5) * msPerSample);
+            to = from + Math.max(1, Math.round((to - from) / msPerSample)) * msPerSample;
         }
-        return usable ? win : null;
+        return { startMs: from, endMs: to, columns: Math.max(1, Math.round((to - from) / msPerColumn)) };
     }
 
     _requestWindow(request) {
@@ -762,57 +783,39 @@ export default class WaveformDisplay {
             });
     }
 
+    // The same painter as the high-resolution series, so the hand-over to a window is invisible: band colours inside
+    // the window's lowest and highest samples, on the series' scale (`signalGain` bytes per full scale). A window of one
+    // column per sample also puts a dot on each sample once they are far enough apart.
     _paintWindow(ctx, win, widthPx, heightPx, startFrac, endFrac, palette) {
         const durationMs = this._data.duration_ms;
         const spanMs = win.endMs - win.startMs;
         const a = (startFrac * durationMs - win.startMs) / spanMs;
         const b = (endFrac * durationMs - win.startMs) / spanMs;
-        const shaped = reduceBands(win, a, b, widthPx, ZOOM_PEAK_WEIGHT);
+        const signalScale = (this._data.bandsZoom?.signalGain ?? 0) / (32767 * 127);
+        const source = signalScale > 0 ? { ...win, signalLow: win.lowest, signalHigh: win.highest, signalScale } : win;
+        const shaped = reduceBands(source, a, b, widthPx, ZOOM_PEAK_WEIGHT);
         const fracPerPx = (endFrac - startFrac) / widthPx;
-        const inTrack = (p) => {
-            const frac = startFrac + (p + 0.5) * fracPerPx;
-            return frac >= 0 && frac <= 1;
-        };
         for (let p = 0; p < widthPx; p++) {
-            if (inTrack(p)) continue;
+            const frac = startFrac + (p + 0.5) * fracPerPx;
+            if (frac >= 0 && frac <= 1) continue;
             shaped.low[p] = 0;
             shaped.mid[p] = 0;
             shaped.high[p] = 0;
         }
-        paintBands(ctx, shaped, { heightPx, palette });
-
-        const samplesPerPx = (((endFrac - startFrac) * durationMs) / 1000) * win.sampleRate / widthPx;
-        if (!(samplesPerPx < SAMPLE_LINE_BELOW_SAMPLES_PER_PIXEL)) return;
-        const n = win.lowest.length;
-        const colsPerPx = ((b - a) * n) / widthPx;
-        const yCentre = heightPx / 2;
-        const yOf = (v) => yCentre - (v / 32767) * yCentre * SAMPLE_LINE_SCALE;
-        ctx.strokeStyle = ink(palette, 0.85);
-        ctx.lineWidth = Math.max(1, Math.round(devicePixelRatio));
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        let started = false;
-        for (let p = 0; p < widthPx; p++) {
-            if (!inTrack(p)) continue;
-            const lo = a * n + p * colsPerPx;
-            const c0 = Math.max(0, Math.min(n - 1, Math.floor(colsPerPx < 1 ? lo + colsPerPx / 2 : lo)));
-            const c1 = colsPerPx < 1 ? c0 : Math.max(c0, Math.min(n - 1, Math.ceil(lo + colsPerPx) - 1));
-            let min = win.lowest[c0];
-            let max = win.highest[c0];
-            for (let c = c0 + 1; c <= c1; c++) {
-                if (win.lowest[c] < min) min = win.lowest[c];
-                if (win.highest[c] > max) max = win.highest[c];
-            }
-            const x = p + 0.5;
-            if (!started) {
-                ctx.moveTo(x, yOf(max));
-                started = true;
-            } else {
-                ctx.lineTo(x, yOf(max));
-            }
-            if (min !== max) ctx.lineTo(x, yOf(min));
-        }
-        ctx.stroke();
+        const dpr = devicePixelRatio;
+        const msPerPx = ((endFrac - startFrac) * durationMs) / widthPx;
+        paintZoom(ctx, shaped, { look: ZOOM_LOOK, heightPx, palette, msPerPx, dpr });
+        const msPerColumn = spanMs / win.low.length;
+        const msPerSample = 1000 / win.sampleRate;
+        if (!(signalScale > 0) || Math.abs(msPerColumn - msPerSample) > msPerSample * 1e-3) return;
+        const viewStartMs = startFrac * durationMs;
+        const first = Math.max(0, Math.floor((viewStartMs - win.startMs) / msPerColumn) - 1);
+        const last = Math.min(win.low.length - 1, Math.ceil((viewStartMs + widthPx * msPerPx - win.startMs) / msPerColumn) + 1);
+        paintSampleDots(ctx, {
+            startMs: viewStartMs, msPerPx, msPerSample, sampleCount: last - first + 1,
+            firstSample: Math.round((win.startMs + (first + 0.5) * msPerColumn) / msPerSample),
+            sampleAt: (k) => win.highest[first + k] * signalScale, heightPx, palette, dpr, widthPx,
+        });
     }
 
     _renderBands(ctx, w, h, startFrac, endFrac, palette) {
@@ -830,6 +833,7 @@ export default class WaveformDisplay {
         const bands = fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
         if (!bands || bands.low.length === 0) return;
         const dpr = devicePixelRatio;
+        const widthDevicePx = Math.round(w * dpr);
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         drawBandRange(ctx, bands, {
@@ -841,6 +845,8 @@ export default class WaveformDisplay {
             dpr,
             decay: compact ? COMPACT_DECAY : fine ? 0 : ZOOM_DECAY,
             peakWeights: fine ? ZOOM_PEAK_WEIGHT : undefined,
+            zoomLook: fine ? ZOOM_LOOK : null,
+            msPerPx: ((endFrac - startFrac) * this._data.duration_ms) / widthDevicePx,
             scrolling: this._mode !== 'compact',
             layout: this._mode === 'compact' ? 'stacked' : 'centred',
         });
@@ -1168,12 +1174,13 @@ export default class WaveformDisplay {
             }
         };
 
-        // Wheel zooms in expanded (centred); compact ignores it.
+        // Wheel zooms in expanded (centred) by an amount that follows the scroll distance, so a trackpad's many small
+        // events zoom as smoothly as a mouse notch; compact ignores it.
         this._onWheel = (e) => {
             if (this._mode === 'compact') return;
             e.preventDefault();
-            const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-            this._applyZoom(this._zoom * factor);
+            const pixels = e.deltaMode === 1 ? e.deltaY * WHEEL_LINE_PX : e.deltaMode === 2 ? e.deltaY * this._canvasSize(this._zoomCanvas).h : e.deltaY;
+            this._applyZoom(this._zoom * Math.exp(-pixels * WHEEL_ZOOM_PER_PIXEL));
         };
 
         this._zoomCanvas.style.cursor = this._defaultCursor();

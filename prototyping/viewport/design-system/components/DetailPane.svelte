@@ -10,6 +10,7 @@
   import { bpmScrub, keyScrub } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
+  import { nearestCue, CUE_HIT_SLACK } from '../utils/nearest-cue.js';
 
   let {
     mode = 'empty',
@@ -40,6 +41,8 @@
     canSetCues = false,
     canJumpToCues = false,
     onCueAdd = undefined,
+    onPadPress = undefined,
+    altHeld = false,
     onCueJump = undefined,
     onCueRename = undefined,
     onCueRecolor = undefined,
@@ -61,6 +64,8 @@
   let cueMenuChip = $derived(cues.find((c) => c.key === cueMenu.key) ?? null);
   const PAD_SLOTS = [1, 2, 3, 4, 5, 6, 7, 8];
   const padLetter = (slot) => String.fromCharCode(64 + slot);
+  let pads = $derived(PAD_SLOTS.map((slot) => ({ slot, letter: padLetter(slot), chip: cues.find((c) => c.slot === slot) ?? null })));
+  let memoryChips = $derived(cues.filter((c) => !c.padded));
 
   function openCueMenu(event, key) {
     event.preventDefault();
@@ -140,6 +145,28 @@
 
   function markerLeft(position) {
     return `clamp(${MARKER_EDGE}px, ${(position * 100).toFixed(3)}%, calc(100% - ${MARKER_EDGE}px))`;
+  }
+
+  let waveHoverKey = $state(null);
+  let waveHoverMarker = $derived(markers.find((m) => m.key === waveHoverKey) ?? null);
+  let waveTip = $derived(waveHoverMarker ? cues.find((c) => c.key === waveHoverMarker.key)?.label || 'Cue' : '');
+
+  function onWavePointerMove(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const hit = nearestCue(markers, event.clientX, rect.left, rect.width, CUE_HIT_SLACK, MARKER_EDGE);
+    waveHoverKey = hit?.key ?? null;
+    linkedKey = waveHoverKey;
+  }
+
+  function onWavePointerLeave() {
+    waveHoverKey = null;
+    linkedKey = null;
+  }
+
+  function onWaveClickCapture(event) {
+    if (!waveHoverMarker || event.target.closest('.ff-inspector__marker')) return;
+    event.stopPropagation();
+    onMarkerClick?.(waveHoverMarker);
   }
 
   function flagFlipped(marker) {
@@ -229,7 +256,16 @@
       </div>
     {/if}
 
-    <div class="ff-inspector__wave" bind:clientWidth={waveWidth}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="ff-inspector__wave"
+      bind:clientWidth={waveWidth}
+      onpointermove={onWavePointerMove}
+      onpointerleave={onWavePointerLeave}
+      onclickcapture={onWaveClickCapture}>
+      {#if waveHoverMarker}
+        <span class="ff-inspector__marker-tip" style:left={markerLeft(waveHoverMarker.position)} style:transform={waveHoverMarker.position < 0.2 ? 'translateX(-4px)' : waveHoverMarker.position > 0.8 ? 'translateX(calc(-100% + 4px))' : null} style:--cue={waveHoverMarker.color}>{waveTip}</span>
+      {/if}
       <div class="ff-inspector__marker-lane">
         {#each markers as marker (marker.key)}
           <button
@@ -263,15 +299,42 @@
       <section class="ff-inspector__cues" data-cue-list>
         <div class="ff-inspector__cues-head">
           <span>Cues{#if cues.length} <em>{cues.length}</em>{/if}</span>
-          <span class="ff-inspector__cues-add">
-            <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add cue at playhead' : ADD_BLOCKED} aria-label="Add cue at playhead" onclick={() => onCueAdd?.()}>+ Cue</button>
-          </span>
         </div>
-        {#each cues as chip (chip.key)}
+        <div class="ff-inspector__pads" role="group" aria-label="Cue pads">
+          {#each pads as pad (pad.slot)}
+            {@const chip = pad.chip}
+            <button
+              type="button"
+              class="ff-inspector__pad{chip ? ' ff-inspector__pad--set' : ''}{chip && altHeld ? ' ff-inspector__pad--remove' : ''}{chip && editingKey === chip.key ? ' ff-inspector__pad--editing' : ''}{chip && linkedKey === chip.key ? ' ff-inspector__pad--linked' : ''}"
+              style:--cue={chip?.color}
+              data-pad={pad.letter}
+              data-cue-key={chip?.key}
+              title={chip
+                ? `${chip.label}: jump here (right-click for more, hold Alt to delete)`
+                : canSetCues ? `Pad ${pad.letter}: save a cue at the playhead` : ADD_BLOCKED}
+              aria-label={chip ? `Cue ${chip.label}` : `Save cue to pad ${pad.letter}`}
+              disabled={chip ? !canJumpToCues && !altHeld : !canSetCues}
+              onclick={(e) => onPadPress?.(pad.slot, chip, e.altKey)}
+              onmouseenter={() => chip && (linkedKey = chip.key)}
+              onmouseleave={() => (linkedKey = null)}
+              oncontextmenu={(e) => chip && openCueMenu(e, chip.key)}>
+              <span class="ff-inspector__pad-letter">{chip && altHeld ? '×' : pad.letter}</span>
+              {#if chip}
+                <span class="ff-inspector__pad-time">{chip.time}</span>
+                {#if chip.name}<span class="ff-inspector__pad-name">{chip.name}</span>{/if}
+              {/if}
+            </button>
+          {/each}
+        </div>
+        <div class="ff-inspector__cues-sub">
+          <span>Memory</span>
+          <button type="button" disabled={!canSetCues} title={canSetCues ? 'Add a memory cue at the playhead' : ADD_BLOCKED} aria-label="Add memory cue at playhead" onclick={() => onCueAdd?.()}>+ Add</button>
+        </div>
+        {#each memoryChips as chip (chip.key)}
           <div
             role="group"
             aria-label={chip.label}
-            class="ff-inspector__cue{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}{linkedKey === chip.key ? ' ff-inspector__cue--linked' : ''}"
+            class="ff-inspector__cue ff-inspector__cue--compact{editingKey === chip.key ? ' ff-inspector__cue--active' : ''}{linkedKey === chip.key ? ' ff-inspector__cue--linked' : ''}"
             data-cue-key={chip.key}
             onmouseenter={() => (linkedKey = chip.key)}
             onmouseleave={() => (linkedKey = null)}
@@ -283,30 +346,26 @@
               aria-label={chip.label}
               disabled={!canJumpToCues}
               onclick={() => onCueJump?.(chip)}>
-              {#if chip.padded}
-                <span class="ff-inspector__cue-badge" style="background-color:{chip.color}">{chip.letter}</span>
-              {:else}
-                <span class="ff-inspector__cue-badge ff-inspector__cue-badge--plain"><i></i></span>
-              {/if}
-              <span class="ff-inspector__cue-name{chip.name ? '' : ' ff-inspector__cue-name--empty'}">{chip.name || 'Cue'}</span>
+              <span class="ff-inspector__cue-badge ff-inspector__cue-badge--plain"><i style:background={chip.color}></i></span>
+              <span class="ff-inspector__cue-name{chip.name ? '' : ' ff-inspector__cue-name--empty'}">{chip.name || 'Memory cue'}</span>
               <span class="ff-inspector__cue-pos">{chip.time}</span>
             </button>
           </div>
-          {#if editingChip && editingChip.key === chip.key}
-            <div class="ff-inspector__cue-editor">
-              <CueEditor
-                chip={editingChip}
-                palette={cuePalette}
-                onRename={(name) => editingChip && onCueRename?.(editingChip, name)}
-                onRecolor={(color) => editingChip && onCueRecolor?.(editingChip, color)}
-                onDelete={() => {
-                  if (editingChip) onCueDelete?.(editingChip);
-                  editingKey = null;
-                }}
-                onClose={() => (editingKey = null)} />
-            </div>
-          {/if}
         {/each}
+        {#if editingChip}
+          <div class="ff-inspector__cue-editor">
+            <CueEditor
+              chip={editingChip}
+              palette={cuePalette}
+              onRename={(name) => editingChip && onCueRename?.(editingChip, name)}
+              onRecolor={(color) => editingChip && onCueRecolor?.(editingChip, color)}
+              onDelete={() => {
+                if (editingChip) onCueDelete?.(editingChip);
+                editingKey = null;
+              }}
+              onClose={() => (editingKey = null)} />
+          </div>
+        {/if}
       </section>
     {/if}
 

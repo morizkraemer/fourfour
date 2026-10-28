@@ -30,7 +30,7 @@ Rebinding: click the binding, press the keys. Esc cancels, Backspace clears. If 
 | Play / pause | Space |
 | Search tracks | Mod+F |
 | New playlist | Mod+Shift+N |
-| Import files | Mod+O |
+| Import folder | Mod+O |
 | Toggle big / small player | Tab |
 | Toggle organize drawer (right sidebar) | Shift+Tab |
 | Focus next / previous region | F6 / Shift+F6 |

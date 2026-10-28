@@ -18,6 +18,13 @@ pub struct UserEdits {
     pub bpm_locked: bool,
     #[serde(default)]
     pub key_locked: bool,
+    /// Stars 1 to 5 set by hand; 0 means the user cleared the imported rating.
+    #[serde(default)]
+    pub rating: Option<u8>,
+    /// Where a hand-set grid really lies against its whole-millisecond beats: every beat sits this many ms (under half a
+    /// millisecond either way) after its stored time. The stored beats and the export stay whole ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_offset_ms: Option<f64>,
 }
 
 impl UserEdits {

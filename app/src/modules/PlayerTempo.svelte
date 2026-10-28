@@ -14,6 +14,7 @@
     BPM_CLICK_STEP,
     BPM_CLICK_STEP_FINE,
     DRAG_PX_PER_UNIT,
+    bpmDiffers,
     bpmDragStep,
     clampShift,
     effectiveShift,
@@ -86,7 +87,7 @@
     text={formatBpm(bpmNow)}
     width="8ch"
     pxPerUnit={DRAG_PX_PER_UNIT.bpm}
-    color={tempo.percent !== 0 ? MARKED : undefined}
+    color={bpmDiffers(analysedBpm, bpmNow) ? MARKED : undefined}
     disabled={!hasBpm}
     editText={hasBpm ? bpmNow.toFixed(2) : ''}
     onStep={stepBpm}
@@ -106,24 +107,25 @@
   }
   .ff-ptempo__mt {
     flex: none;
-    box-sizing: border-box;
-    width: 30px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid var(--ff-border-hi);
-    border-radius: var(--ff-radius-sm);
-    background: var(--ff-bg);
-    color: var(--ff-muted);
+    padding: 3px 4px;
+    border: none;
+    border-radius: var(--ff-radius-xs);
+    background: none;
+    color: var(--ff-text);
     font-family: var(--ff-font-mono);
     font-size: 10.5px;
     font-weight: 600;
+    letter-spacing: 0.04em;
     cursor: pointer;
+    transition: color var(--ff-motion-fast) var(--ff-easing), background-color var(--ff-motion-fast) var(--ff-easing);
   }
   .ff-ptempo__mt:hover {
-    color: var(--ff-text);
+    background: var(--ff-hover);
+  }
+  .ff-ptempo__mt:focus-visible {
+    outline: 1px solid var(--ff-border-hi);
   }
   .ff-ptempo__mt--on {
-    background: var(--ff-elev-hi);
-    color: var(--ff-text);
+    color: var(--ff-danger);
   }
 </style>

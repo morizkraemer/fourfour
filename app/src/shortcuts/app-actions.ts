@@ -14,16 +14,21 @@ import {
   library,
   toggleFavoriteSlot,
   analyzeTrackIds,
+  syncAllSticks,
   syncToUsb,
+  analyzeTracks,
+  refreshVolumes,
   FAVORITE_SLOTS,
 } from '../stores/library.svelte.ts';
-import { importIntoSource } from '../menus/context-menus.ts';
+import { createFolderAndRename, importIntoSource } from '../menus/context-menus.ts';
 import { selection, selectionCount } from '../stores/selection.svelte.ts';
 import { isStickSyncBusy } from '../stores/stick-sync.svelte.ts';
 import { player, togglePlay, toggleExpanded, cueTapPress } from '../stores/player.svelte.ts';
 import { addMemoryCueAtPlayhead, deleteHotCue, triggerHotCue } from '../stores/cue-actions.ts';
 import { HOT_CUE_SLOTS, slotLetter } from '../lib/cues.ts';
+import { openRekordboxImport } from '../stores/rekordbox-import.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { deleteSidebarSelection, sidebarDeleteReady } from '../stores/sidebar-delete.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
 
@@ -110,6 +115,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'settings.toggle',
       label: 'Open settings',
+      keywords: ['preferences', 'options', 'config', 'prefs'],
       group: GROUP.general,
       defaultBinding: 'Mod+,',
       run: toggleSettings,
@@ -117,6 +123,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'settings.shortcuts',
       label: 'Show keyboard shortcuts',
+      keywords: ['keyboard', 'keys', 'bindings', 'hotkeys'],
       group: GROUP.general,
       defaultBinding: null,
       run: () => openSettings('keyboard'),
@@ -147,6 +154,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'playback.toggle',
       label: 'Play / pause',
+      keywords: ['play', 'pause', 'stop', 'start', 'transport'],
       group: GROUP.playback,
       defaultBinding: 'Space',
       when: () => player.track != null,
@@ -163,6 +171,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'cues.memory.add',
       label: 'Add cue at playhead',
+      keywords: ['memory', 'marker', 'cue', 'locator'],
       group: GROUP.cues,
       defaultBinding: 'M',
       when: () => player.track != null,
@@ -180,13 +189,15 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'library.newPlaylist',
       label: 'New playlist',
+      keywords: ['playlist', 'create', 'crate', 'add'],
       group: GROUP.library,
       defaultBinding: 'Mod+Shift+N',
       run: () => void createPlaylistAndOpen(),
     },
     {
       id: 'library.import',
-      label: 'Import files…',
+      label: 'Import folder…',
+      keywords: ['add', 'music', 'files', 'tracks', 'scan'],
       group: GROUP.library,
       defaultBinding: 'Mod+O',
       inInput: false,
@@ -196,6 +207,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'library.analyze',
       label: 'Analyze selection',
+      keywords: ['bpm', 'key', 'waveform', 'detect', 'selected'],
       group: GROUP.library,
       defaultBinding: null,
       when: () => selectionCount() > 0 && !library.analyzing,
@@ -206,12 +218,75 @@ export function buildAppActions(): ShortcutAction[] {
       label: 'Sync stick',
       group: GROUP.library,
       defaultBinding: null,
+      palette: false,
       when: () => library.activeVolume != null && !library.syncing && !isStickSyncBusy(),
       run: () => void syncToUsb(),
     },
     {
+      id: 'library.syncAll',
+      label: 'Sync all sticks',
+      group: GROUP.library,
+      defaultBinding: null,
+      keywords: ['usb', 'stick', 'export', 'write', 'every', 'drives'],
+      when: () => library.volumes.length > 0 && !library.syncing && !isStickSyncBusy(),
+      run: () => void syncAllSticks(),
+    },
+    {
+      id: 'library.analyzeAll',
+      label: 'Analyze all unanalyzed tracks',
+      group: GROUP.library,
+      defaultBinding: null,
+      keywords: ['bpm', 'key', 'waveform', 'detect', 'everything'],
+      when: () => !library.syncing && library.tracks.some((t) => !t.analyzed),
+      run: () => void analyzeTracks(),
+    },
+    {
+      id: 'library.importRekordbox',
+      label: 'Import from Rekordbox…',
+      group: GROUP.library,
+      defaultBinding: null,
+      keywords: ['pioneer', 'xml', 'database', 'migrate', 'playlists', 'cues'],
+      when: () => !library.analyzing && !library.syncing,
+      run: () => void openRekordboxImport(),
+    },
+    {
+      id: 'library.newFolder',
+      label: 'New folder',
+      group: GROUP.library,
+      defaultBinding: null,
+      keywords: ['playlist', 'create', 'group', 'directory'],
+      run: () => void createFolderAndRename(0),
+    },
+    {
+      id: 'library.playlists.delete',
+      label: 'Delete selected playlists',
+      group: GROUP.library,
+      defaultBinding: 'Backspace',
+      palette: false,
+      when: sidebarDeleteReady,
+      run: () => void deleteSidebarSelection(),
+    },
+    {
+      id: 'library.playlists.deleteForward',
+      label: 'Delete selected playlists (forward delete)',
+      group: GROUP.library,
+      defaultBinding: 'Delete',
+      palette: false,
+      when: sidebarDeleteReady,
+      run: () => void deleteSidebarSelection(),
+    },
+    {
+      id: 'library.refreshDevices',
+      label: 'Refresh devices',
+      group: GROUP.library,
+      defaultBinding: null,
+      keywords: ['usb', 'stick', 'drive', 'rescan', 'mount', 'detect'],
+      run: () => void refreshVolumes(),
+    },
+    {
       id: 'view.player',
       label: 'Toggle big / small player',
+      keywords: ['expand', 'collapse', 'waveform', 'big', 'small'],
       group: GROUP.view,
       defaultBinding: 'Tab',
       when: () => noOverlayOpen() && player.track != null,
@@ -220,6 +295,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'view.organize',
       label: 'Toggle organize drawer',
+      keywords: ['sidebar', 'drawer', 'panel', 'stick board'],
       group: GROUP.view,
       defaultBinding: 'Shift+Tab',
       when: noOverlayOpen,
@@ -228,6 +304,7 @@ export function buildAppActions(): ShortcutAction[] {
     {
       id: 'view.inspector',
       label: 'Toggle inspector',
+      keywords: ['detail', 'info', 'panel', 'sidebar'],
       group: GROUP.view,
       defaultBinding: null,
       run: toggleDetailPane,

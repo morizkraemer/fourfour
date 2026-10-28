@@ -10,6 +10,9 @@
  * not scaled down from detail data. Columns are evenly spaced over the whole track. Each band is its own envelope;
  * they are not weights of one shared height. An optional `scale` ({low, mid, high}) multiplies
  * the values before display (data whose full scale is below 1, such as the 128-column row preview).
+ *
+ * Optional `signalLow` / `signalHigh` (signed, times `signalScale` on the low band's 0..1 scale) are the lowest and highest
+ * sample of each column: the zoom view draws the shape of the audio from them once a pixel is short enough.
  */
 
 export const DISPLAY_FLOOR = 0.02;
@@ -78,7 +81,7 @@ function emptyShaped(pixels) {
  * @param {number} pixels
  * @param {{low: number, mid: number, high: number}} [peakWeights]
  * @param {{low: number, mid: number, high: number} | null} [bandScale] extra per-band multiplier (the overview level)
- * @returns {{low: Float32Array, mid: Float32Array, high: Float32Array, length: number}}
+ * @returns {{low: Float32Array, mid: Float32Array, high: Float32Array, length: number, top?: Float32Array, bottom?: Float32Array}}
  */
 export function reduceBands(bands, startFrac, endFrac, pixels, peakWeights = BUCKET_PEAK_WEIGHT, bandScale = null) {
   const out = emptyShaped(pixels);
@@ -113,7 +116,59 @@ export function reduceBands(bands, startFrac, endFrac, pixels, peakWeights = BUC
       dst[p] = displayAmp(v * scale[name] * (bandScale ? bandScale[name] : 1));
     }
   }
+  if (bands.signalHigh && bands.signalLow) reduceSignal(bands, out, first, perPixel, n, pixels);
   return out;
+}
+
+/**
+ * The lowest and highest sample under each pixel column (`signalLow` / `signalHigh` times `signalScale`, on the low band's
+ * 0..1 scale, signed) as `bottom` / `top`. A pixel wider than a column takes the extremes over the covered columns. A pixel
+ * narrower than a column spans the straight line between the column centres across its width, so a curve finer than a
+ * sample per pixel is one connected line of the right slope, never a staircase of held columns.
+ */
+function reduceSignal(bands, out, first, perPixel, n, pixels) {
+  const top = new Float32Array(pixels);
+  const bottom = new Float32Array(pixels);
+  const scale = bands.signalScale ?? 1;
+  const highs = bands.signalHigh;
+  const lows = bands.signalLow;
+  const clamp = (v) => Math.max(-1, Math.min(1, v * scale));
+  const between = (plane, x) => {
+    const at = Math.max(0, Math.min(n - 1, x - 0.5));
+    const i = Math.floor(at);
+    const j = Math.min(n - 1, i + 1);
+    return plane[i] + (plane[j] - plane[i]) * (at - i);
+  };
+  for (let p = 0; p < pixels; p++) {
+    const lo = first + p * perPixel;
+    const hi = lo + perPixel;
+    if (hi <= BUCKET_EPSILON || lo >= n - BUCKET_EPSILON) continue;
+    let max;
+    let min;
+    if (perPixel <= 1) {
+      max = Math.max(between(highs, lo), between(highs, hi));
+      min = Math.min(between(lows, lo), between(lows, hi));
+      const centre = Math.ceil(lo - 0.5) + 0.5;
+      if (centre < hi && centre >= 0.5 && centre <= n - 0.5) {
+        const i = centre - 0.5;
+        if (highs[i] > max) max = highs[i];
+        if (lows[i] < min) min = lows[i];
+      }
+    } else {
+      const i0 = Math.max(0, Math.floor(lo + BUCKET_EPSILON));
+      const i1 = Math.min(n - 1, Math.ceil(hi - BUCKET_EPSILON) - 1);
+      max = highs[i0];
+      min = lows[i0];
+      for (let i = i0 + 1; i <= i1; i++) {
+        if (highs[i] > max) max = highs[i];
+        if (lows[i] < min) min = lows[i];
+      }
+    }
+    top[p] = clamp(max);
+    bottom[p] = clamp(min);
+  }
+  out.top = top;
+  out.bottom = bottom;
 }
 
 /**

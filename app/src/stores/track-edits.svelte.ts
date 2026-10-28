@@ -12,6 +12,7 @@ import {
   rescaleBeatGrid,
   setTrackBpm,
   setTrackKey,
+  setTrackRating,
   updateTrackFields,
   type TrackFieldEdits,
 } from '../services/tauri.svelte.ts';
@@ -61,6 +62,21 @@ export async function commitTrackKey(trackId: number, key: string): Promise<bool
     bumpLibraryTracks();
   }
   if (player.track?.id === trackId) player.track = { ...player.track, key };
+  return true;
+}
+
+export async function commitTrackRating(trackId: number, rating: number): Promise<boolean> {
+  try {
+    await setTrackRating(trackId, rating);
+  } catch (err) {
+    reportFailure('Setting the rating', err);
+    return false;
+  }
+  const track = trackById(trackId);
+  if (track) {
+    track.rating = rating;
+    bumpLibraryTracks();
+  }
   return true;
 }
 

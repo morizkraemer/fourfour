@@ -667,7 +667,9 @@ impl PlaybackEngine {
         )
     }
 
-    pub fn pause(&self) -> Result<(), String> {
+    /// Stops at the position heard now and returns it (ms), so the UI rests exactly where playback will resume
+    /// instead of on the last tick.
+    pub fn pause(&self) -> Result<u64, String> {
         let inner = self.lock();
         if inner.playing.load(Ordering::SeqCst) {
             inner
@@ -676,7 +678,7 @@ impl PlaybackEngine {
         }
         inner.playing.store(false, Ordering::SeqCst);
         inner.pipe.supersede();
-        Ok(())
+        Ok(inner.position_ms.load(Ordering::SeqCst))
     }
 
     pub fn resume(&self, events: Arc<dyn PlaybackEvents>) -> Result<(), String> {
@@ -1413,7 +1415,7 @@ pub fn playback_play(
 }
 
 #[tauri::command]
-pub fn playback_pause(engine: tauri::State<'_, Arc<PlaybackEngine>>) -> Result<(), String> {
+pub fn playback_pause(engine: tauri::State<'_, Arc<PlaybackEngine>>) -> Result<u64, String> {
     engine.pause()
 }
 

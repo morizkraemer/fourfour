@@ -3,7 +3,9 @@
    * Command palette overlay (Svelte port of command-palette.js).
    * Presentational: the host supplies grouped, already-ranked items and runs the chosen one.
    * Keyboard: ↑/↓ and Tab/Shift+Tab move, Enter runs, Esc closes.
-   * Anchored mode renders only the result list under a host-owned input (`keySource`) at `anchorRect`.
+   * Anchored mode renders only the result list, flush under a host-owned input (`keySource`) at `anchorRect`
+   * (left, bottom edge and width of that input): the host styles the open input as the dropdown's header, so the two read as one element.
+   * An item with a `cover` function shows that image URL as a thumbnail instead of its icon.
    */
   import './command-palette.css';
   import { tick } from 'svelte';
@@ -12,7 +14,7 @@
 
   /**
    * @typedef {{ kind: 'switch', on: boolean } | { kind: 'choice', value: string, options: { value: string, label: string }[] }} PaletteControl
-   * @typedef {{ id: string, name: string, sub?: string, right?: string, icon?: string, ranges?: number[], control?: PaletteControl }} PaletteItem
+   * @typedef {{ id: string, name: string, sub?: string, right?: string, icon?: string, ranges?: number[], cover?: () => string, control?: PaletteControl }} PaletteItem
    * @typedef {{ key: string, title: string, items: PaletteItem[] }} PaletteGroup
    */
 
@@ -108,6 +110,19 @@
     return out;
   }
 
+  const MODIFIER_GLYPHS = '⌘⌥⇧⌃';
+
+  function keycaps(right) {
+    if (right.includes('+')) return right.split('+');
+    const glyphs = [];
+    let rest = right;
+    while (rest && MODIFIER_GLYPHS.includes(rest[0])) {
+      glyphs.push(rest[0]);
+      rest = rest.slice(1);
+    }
+    return rest ? [...glyphs, rest] : glyphs;
+  }
+
   function flatIndex(group, itemIndex) {
     let n = 0;
     for (const g of groups) {
@@ -125,11 +140,13 @@
         <div class="ff-cp__section-head">{group.title}</div>
         {#each group.items as item, i (item.id)}
           {@const index = flatIndex(group, i)}
+          {@const art = item.cover?.()}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <div
             id="ff-cp-item-{index}"
             class="ff-cp__row"
             class:ff-cp__row--active={index === activeIndex}
+            class:ff-cp__row--stacked={item.cover && item.sub}
             role="option"
             aria-selected={index === activeIndex}
             data-active={index === activeIndex}
@@ -137,9 +154,14 @@
             onmousemove={() => (activeIndex = index)}
             onclick={() => run({ item, group })}
           >
-            <Icon name={item.icon ?? 'chevron-right'} size={14} class="ff-cp__row-icon" />
-            <span class="ff-cp__row-name">
-              {#each segments(item.name, item.ranges) as seg}{#if seg.hit}<b class="ff-cp__hit">{seg.text}</b>{:else}{seg.text}{/if}{/each}{#if item.sub}<span class="ff-cp__row-sub"> {item.sub}</span>{/if}
+            {#if item.cover}
+              <span class="ff-cp__thumb">{#if art}<img class="ff-cp__thumb-image" src={art} alt="" />{/if}</span>
+            {:else}
+              <Icon name={item.icon ?? 'chevron-right'} size={14} class="ff-cp__row-icon" />
+            {/if}
+            <span class="ff-cp__row-text">
+              <span class="ff-cp__row-name">{#each segments(item.name, item.ranges) as seg}{#if seg.hit}<b class="ff-cp__hit">{seg.text}</b>{:else}{seg.text}{/if}{/each}</span>
+              {#if item.sub}<span class="ff-cp__row-sub">{item.sub}</span>{/if}
             </span>
             {#if item.control?.kind === 'switch'}
               <span class="ff-cp__row-control"><Switch on={item.control.on} label={item.name} /></span>
@@ -158,18 +180,21 @@
                   >{option.label}</button>
                 {/each}
               </span>
-            {:else if item.right}<span class="ff-cp__row-right">{item.right}</span>{/if}
+            {:else if item.right}<span class="ff-cp__row-right">{#each keycaps(item.right) as cap}<kbd class="ff-cp__keycap">{cap}</kbd>{/each}</span>{/if}
           </div>
         {/each}
       {/if}
     {/each}
     {#if flat.length === 0}
-      <div class="ff-cp__empty">{emptyLabel}</div>
+      <div class="ff-cp__empty">
+        <Icon name="search" size={16} class="ff-cp__empty-icon" />
+        <span>{emptyLabel}{query.trim() ? ` for “${query.trim()}”` : ''}</span>
+      </div>
     {/if}
   </div>
 
   <div class="ff-cp__footer">
-    <span class="ff-cp__footer-left">{anchored ? '↑↓ navigate  ⏎ run  esc close  > commands' : '↑↓ navigate  ⏎ run  esc close'}</span>
+    <span class="ff-cp__footer-left">↑↓ navigate  ⏎ run  esc close</span>
     <span class="ff-cp__footer-right">{flat.length} {flat.length === 1 ? 'result' : 'results'}</span>
   </div>
 {/snippet}

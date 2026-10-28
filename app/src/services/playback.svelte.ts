@@ -141,13 +141,14 @@ export async function playbackPlay(
   });
 }
 
-export async function playbackPause(): Promise<void> {
+/** Pause; resolves to the position (ms) playback stopped at and will resume from. */
+export async function playbackPause(): Promise<number> {
   if (useMock()) {
     mockPlaying = false;
     emitMock();
-    return;
+    return mockPositionMs;
   }
-  await invoke('playback_pause');
+  return await invoke<number>('playback_pause');
 }
 
 export async function playbackResume(): Promise<void> {

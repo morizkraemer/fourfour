@@ -12,7 +12,7 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
-import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type ByteBandColumns } from '../services/waveform-bands.ts';
+import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type DetailBandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -40,6 +40,7 @@ import {
 import {
   BEAT_NUDGE_MS,
   createGridPersister,
+  gridFromStorage,
   shiftBeats,
   shiftToPlaceDownbeatAt,
   type BeatMarker,
@@ -71,7 +72,7 @@ export interface PlayerTrack {
   bandsDetail: BandColumns | null;
   bandsOverview: BandColumns | null;
   /** 2400 columns per second, for the zoom view; arrives after the track, see `loadZoomDetail`. */
-  bandsZoom: ByteBandColumns | null;
+  bandsZoom: DetailBandColumns | null;
 }
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
@@ -179,10 +180,10 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   next.bands = next.bandsDetail;
   next.bandsOverview = stripBandsFromAnalysis(analysis) ?? next.bandsDetail;
   if (analysis.beats?.length) {
-    next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
-      time_ms: b.time_ms,
-      bar_position: b.bar_position,
-    }));
+    next.beats = gridFromStorage(
+      analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({ time_ms: b.time_ms, bar_position: b.bar_position })),
+      analysis.grid_offset_ms,
+    );
   } else {
     // No detected beats — synthesize a grid from BPM so one is always shown.
     const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
@@ -206,7 +207,8 @@ export function currentTime() {
 
 export function currentTimeMs() {
   if (!player.track) return '.0';
-  return `.${Math.floor(player.progress * 10) % 10}`;
+  const seconds = player.progress * player.track.totalSeconds;
+  return `.${Math.floor(seconds * 10) % 10}`;
 }
 
 export function totalTime() {
@@ -241,10 +243,7 @@ async function ensureTickListener() {
     player.levelLeft = tick.level_left ?? 0;
     player.levelRight = tick.level_right ?? 0;
     if (!player.track) return;
-    if (pausePending) {
-      player.playing = false;
-      return;
-    }
+    if (pausePending) return;
     const dur = tick.duration_ms || player.track.durationMs;
     if (dur > 0) {
       if (seekTargetMs !== null) {
@@ -258,10 +257,11 @@ async function ensureTickListener() {
           return;
         }
       }
-      player.progress = Math.max(0, Math.min(1, tick.position_ms / dur));
+      const positionMs = restingAt(tick.playing, tick.position_ms);
+      player.progress = Math.max(0, Math.min(1, positionMs / dur));
       tempo.liveRatio = tick.tempo_ratio ?? 1;
-      if (tick.playing) transportClock.report(tick.position_ms, performance.now(), tempo.liveRatio);
-      else transportClock.stop(tick.position_ms);
+      if (tick.playing) transportClock.report(positionMs, performance.now(), tempo.liveRatio);
+      else transportClock.stop(positionMs);
     }
     player.playing = tick.playing;
   });
@@ -310,7 +310,7 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
 }
 
 const ZOOM_DETAIL_CACHE_TRACKS = 3;
-const zoomDetailCache = new Map<number, ByteBandColumns>();
+const zoomDetailCache = new Map<number, DetailBandColumns>();
 const zoomDetailLoading = new Set<number>();
 
 /** Fetch the high-resolution series of the loaded track (once, in the background) and hand it to the zoom view. */
@@ -440,6 +440,14 @@ export async function loadPlayerTrack(input: any) {
   void enrichPlayerTrack(gen, trackInfo.id, base);
 }
 
+/** A click on a row's mini waveform: that track at that point (a seek if it is already loaded, playing or not). */
+export async function loadTrackAt(input: any, progress: number) {
+  const id = normalizeTrackInput(input)?.id;
+  if (id == null) return;
+  if (player.track?.id !== id) await loadPlayerTrack(input);
+  if (player.track?.id === id) await seekToProgress(progress);
+}
+
 /** Start playback after the current selection finishes loading in the player. */
 export function queuePlayAfterLoad() {
   playPending = true;
@@ -478,15 +486,37 @@ export function clearPlayerTrack() {
   playPending = false;
 }
 
+/**
+ * Where a paused playhead rests. The backend keeps whole milliseconds, so a seek to a point between two of them is
+ * reported back rounded; while paused at the point the user picked, that point stays the playhead (and what grid Set
+ * uses) instead of jumping to the reported millisecond. Playing, or any other position, ends it.
+ */
+let exactRestMs: number | null = null;
+
+function restingAt(playing: boolean, reportedMs: number): number {
+  if (!playing && exactRestMs !== null && Math.abs(reportedMs - exactRestMs) <= 0.5) return exactRestMs;
+  exactRestMs = null;
+  return reportedMs;
+}
+
+/** The paused position the backend reported: the playhead, Set and the next play all use exactly this. */
+function restAt(positionMs: number) {
+  exactRestMs = null;
+  const t = player.track;
+  if (!t || !t.durationMs || !Number.isFinite(positionMs)) return;
+  player.progress = Math.max(0, Math.min(1, positionMs / t.durationMs));
+  transportClock.stop(positionMs);
+}
+
 async function pausePlayback() {
   if (!player.playing && !pausePending) return;
   pausePending = true;
-  player.playing = false;
   try {
-    await playbackPause();
+    restAt(await playbackPause());
   } catch (err) {
     console.error('playback pause failed:', err);
   } finally {
+    player.playing = false;
     pausePending = false;
   }
 }
@@ -656,6 +686,7 @@ export async function seekToProgress(progress: number) {
   const ms = Math.round(p * player.track.durationMs);
   await ensureTickListener();
   if (player.playing) {
+    exactRestMs = null;
     seekTargetMs = ms;
     seekTargetAt = performance.now();
     try {
@@ -665,6 +696,7 @@ export async function seekToProgress(progress: number) {
     }
   } else {
     // Paused/stopped: persist the position so play/resume starts from here.
+    exactRestMs = p * player.track.durationMs;
     await playbackSetPosition(ms);
   }
 }

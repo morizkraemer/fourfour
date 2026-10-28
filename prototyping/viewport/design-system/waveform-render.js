@@ -6,7 +6,8 @@
  * record, exact pixel edges); tall ones, which the zoom view repaints every frame, use one fillRect
  * per column and band because a jagged tall polygon is far slower to rasterise.
  */
-import { BAND_ORDER, BUCKET_PEAK_WEIGHT, OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, OVERVIEW_SMOOTH_COLUMNS, halfHeight, reduceBands, smoothBands, smoothTriangle, stackHeights } from './waveform-bands.js';
+import { paintZoom } from './waveform-zoom.js';
+import { BAND_GAIN, BAND_ORDER, BUCKET_PEAK_WEIGHT, OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, OVERVIEW_SMOOTH_COLUMNS, halfHeight, reduceBands, smoothBands, smoothTriangle, stackHeights } from './waveform-bands.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
@@ -82,8 +83,12 @@ export function paletteVersion() {
  * every band from the centre line with its own height. Where a front band lies inside a back one it is drawn
  * in a darker tone (`midInLow`, `highInLow`, `highInMid`); only the part that sticks out keeps the bright tone.
  */
-export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0 }) {
+export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = shaped.length - from, offsetPx = 0, shapeMix = 0, minSpanPx = 1 }) {
   const yCentre = heightPx / 2;
+  if (shapeMix > 0 && shaped.top) {
+    paintSignalShaped(ctx, shaped, { palette, from, count, offsetPx, yCentre, shapeMix, minSpanPx });
+    return;
+  }
   if (heightPx <= STEPPED_PATH_MAX_HEIGHT) {
     paintStepped(ctx, shaped, palette, from, count, offsetPx, yCentre);
     return;
@@ -100,7 +105,7 @@ export function paintBands(ctx, shaped, { heightPx, palette, from = 0, count = s
 }
 
 /** Half height of every layer at every pixel column; 0 where a layer is not shown or a layer drawn after it covers it completely. */
-function layerHalves(shaped, from, count, yCentre) {
+export function layerHalves(shaped, from, count, yCentre) {
   const halves = STEPPED_LAYERS.map(() => new Float32Array(count));
   for (let p = 0; p < count; p++) {
     const hl = halfHeight(shaped.low[from + p], 'low', yCentre);
@@ -120,13 +125,78 @@ function layerHalves(shaped, from, count, yCentre) {
   return halves;
 }
 
+/**
+ * Deep zoom: the silhouette is the audio itself. Each pixel column spans from its lowest to its highest sample (`bottom`,
+ * `top`), moved `shapeMix` of the way there from the symmetric band envelope, so zooming in morphs the band look into the
+ * signal without a jump. A column reaches over to the previous one's extremes, so a curve finer than a sample per pixel stays
+ * one connected trace at least `minSpanPx` thick. The bands keep their colours and nesting inside that span: each layer gets
+ * the share of the span its envelope has of the outermost one.
+ */
+function paintSignalShaped(ctx, shaped, { palette, from, count, offsetPx, yCentre, shapeMix, minSpanPx }) {
+  const halves = layerHalves(shaped, from, count, yCentre);
+  const outerAt = (i) => Math.max(
+    halfHeight(shaped.low[i], 'low', yCentre),
+    halfHeight(shaped.mid[i], 'mid', yCentre),
+    halfHeight(shaped.high[i], 'high', yCentre),
+  );
+  const signalAt = (v) => Math.max(-1, Math.min(1, v * BAND_GAIN.low)) * yCentre;
+  const spanAt = (i) => {
+    const outer = outerAt(i);
+    return [
+      outer + (signalAt(shaped.top[i]) - outer) * shapeMix,
+      -outer + (signalAt(shaped.bottom[i]) + outer) * shapeMix,
+      outer,
+    ];
+  };
+  let prev = from > 0 && shaped.low[from - 1] > 0 ? spanAt(from - 1) : null;
+  const tops = new Float32Array(count);
+  const bottoms = new Float32Array(count);
+  const outers = new Float32Array(count);
+  for (let p = 0; p < count; p++) {
+    const i = from + p;
+    if (!(shaped.low[i] > 0)) {
+      prev = null;
+      continue;
+    }
+    const span = spanAt(i);
+    let [top, bottom] = span;
+    if (prev) {
+      top = Math.max(top, prev[1]);
+      bottom = Math.min(bottom, prev[0]);
+    }
+    if (top - bottom < minSpanPx) {
+      const centre = (top + bottom) / 2;
+      top = centre + minSpanPx / 2;
+      bottom = centre - minSpanPx / 2;
+    }
+    prev = span;
+    tops[p] = top;
+    bottoms[p] = bottom;
+    outers[p] = span[2];
+  }
+  for (let k = 0; k < STEPPED_LAYERS.length; k++) {
+    const layer = halves[k];
+    ctx.fillStyle = palette[STEPPED_LAYERS[k][0]];
+    for (let p = 0; p < count; p++) {
+      const half = layer[p];
+      if (!(half > 0) || !(outers[p] > 0)) continue;
+      const centre = (tops[p] + bottoms[p]) / 2;
+      const reach = (half / outers[p]) * (tops[p] - bottoms[p]) / 2;
+      if (reach * 2 < 0.5) continue;
+      const y0 = Math.round(yCentre - centre - reach);
+      const y1 = Math.round(yCentre - centre + reach);
+      ctx.fillRect(offsetPx + p, y0, 1, Math.max(1, y1 - y0));
+    }
+  }
+}
+
 function fillColumn(ctx, x, yCentre, half) {
   const top = Math.round(yCentre - half);
   const bottom = Math.round(yCentre + half);
   ctx.fillRect(x, top, 1, Math.max(1, bottom - top));
 }
 
-const STEPPED_LAYERS = [
+export const STEPPED_LAYERS = [
   ['low', (l) => l],
   ['mid', (l, m) => (m > l ? m : 0)],
   ['midInLow', (l, m) => Math.min(l, m)],
@@ -262,7 +332,7 @@ function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked
  * offset anti-aliases every one-pixel column against its neighbour, which lets the background bleed through
  * and makes the whole waveform pulse (up to 22 % brightness) as the sub-pixel phase changes.
  */
-export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred', peakWeights = BUCKET_PEAK_WEIGHT }) {
+export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred', peakWeights = BUCKET_PEAK_WEIGHT, zoomLook = null, msPerPx = 0 }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
   if (columnPx > 1) {
     ctx.save();
@@ -282,8 +352,11 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
     return;
   }
   const fracPerPx = (endFrac - startFrac) / widthPx;
+  const paint = (g, shaped, at) => (zoomLook
+    ? paintZoom(g, shaped, { look: zoomLook, heightPx, palette, msPerPx, dpr, ...at })
+    : paintBands(g, shaped, { heightPx, palette, ...at }));
   if (columnsPerPx <= 1 && canCacheScroll(ctx)) {
-    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, palette, peakWeights });
+    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, peakWeights, paint, key: `${zoomLook}|${palette.version}|${palette.bg}` });
     return;
   }
   const leftFloor = Math.floor(startFrac / fracPerPx);
@@ -293,7 +366,7 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
     reduceBands(bands, (leftFloor - leadPx) * fracPerPx, (leftFloor - leadPx + total) * fracPerPx, total, peakWeights),
     decayPerPixel,
   );
-  paintBands(ctx, shaped, { heightPx, palette, from: leadPx, count: widthPx });
+  paint(ctx, shaped, { from: leadPx, count: widthPx });
 }
 
 const scrollCache = new WeakMap();
@@ -324,23 +397,24 @@ function newLayer(widthPx, heightPx) {
  * frame as the view scrolls; the cache keeps the scale it was painted at and treats such a difference as the same
  * zoom (an exact comparison made about every other scrolled frame a full repaint).
  */
-function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, palette, peakWeights }) {
+function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, peakWeights, paint, key }) {
   const canvas = ctx.canvas;
   let entry = scrollCache.get(canvas);
   if (!entry || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
     entry = { widthPx, heightPx, front: newLayer(widthPx, heightPx), back: newLayer(widthPx, heightPx), left: null };
     scrollCache.set(canvas, entry);
   }
-  if (entry.bands !== bands || !sameScale(entry.fracPerPx, viewFracPerPx) || entry.palette !== palette) {
-    Object.assign(entry, { bands, fracPerPx: viewFracPerPx, palette, left: null });
+  if (entry.bands !== bands || !sameScale(entry.fracPerPx, viewFracPerPx) || entry.key !== key) {
+    Object.assign(entry, { bands, fracPerPx: viewFracPerPx, key, left: null });
   }
   const fracPerPx = entry.fracPerPx;
   const leftFloor = Math.floor(startFrac / fracPerPx);
   const paintColumns = (layer, fromPx, count) => {
     const g = layer.getContext('2d');
     g.clearRect(fromPx, 0, count, heightPx);
-    const shaped = reduceBands(bands, (leftFloor + fromPx) * fracPerPx, (leftFloor + fromPx + count) * fracPerPx, count, peakWeights);
-    paintBands(g, shaped, { heightPx, palette, offsetPx: fromPx });
+    const first = leftFloor + fromPx - 1;
+    const shaped = reduceBands(bands, first * fracPerPx, (first + count + 1) * fracPerPx, count + 1, peakWeights);
+    paint(g, shaped, { from: 1, count, offsetPx: fromPx });
   };
   const shift = entry.left === null ? widthPx : leftFloor - entry.left;
   if (Math.abs(shift) >= widthPx) {

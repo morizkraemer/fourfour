@@ -12,6 +12,7 @@ import {
   overviewBandsFromPayload,
   rowBandsFor,
   rowBandsFromBandBytes,
+  stripGains,
 } from './waveform-bands.ts';
 import { displayAmp, reduceBands, ZOOM_PEAK_WEIGHT } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import { ROW_BAND_COLUMNS, bandBytes, encodeWire, previewFromBands, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
@@ -184,14 +185,15 @@ describe('PWV7 payloads (the stick bytes)', () => {
     expect(Math.max(...legacy.low)).toBeLessThan(0.8);
   });
 
-  it('is the stick columns under the track headroom gain in the row preview', () => {
+  it('is the stick columns under the track band gains in the row preview', () => {
     const bytes = Uint8Array.from(pwv7Bytes);
     const { overview, ...columns } = rowBandsFromBandBytes(bytes)!;
     const stick = bandsFromStickBytes(bytes);
-    const gain = columns.low[1] / stick.low[1];
-    expect(gain).toBeGreaterThan(0);
-    expect(gain).toBeLessThanOrEqual(1);
-    stick.high.forEach((v, i) => expect(columns.high[i]).toBeCloseTo(v * gain, 5));
+    const gains = stripGains(stick);
+    for (const band of ['low', 'mid', 'high'] as const) {
+      expect(gains[band]).toBeGreaterThan(0);
+      stick[band].forEach((v, i) => expect(columns[band][i]).toBeCloseTo(v * gains[band], 5));
+    }
     expect(overview).toBe(true);
     expect(rowBandsFromBandBytes(bytes)).toBe(rowBandsFromBandBytes(bytes));
   });
@@ -223,16 +225,24 @@ describe('overviewBandsFromPayload', () => {
   });
 });
 
-function detailFile(low: number[], mid: number[], high: number[]): ArrayBuffer {
+function detailFile(
+  low: number[],
+  mid: number[],
+  high: number[],
+  signalLow = low.map((v) => -v),
+  signalHigh = low,
+): ArrayBuffer {
   const n = low.length;
-  const buffer = new ArrayBuffer(24 + 3 * n);
+  const buffer = new ArrayBuffer(28 + 5 * n);
   const view = new DataView(buffer);
   'FFWD'.split('').forEach((c, i) => view.setUint8(i, c.charCodeAt(0)));
-  view.setUint8(4, 2);
+  view.setUint8(4, 3);
   view.setUint32(8, 2400, true);
   view.setUint32(12, n, true);
   view.setUint16(16, 300, true);
-  new Uint8Array(buffer, 24).set([...low, ...mid, ...high]);
+  view.setFloat32(24, 379.5, true);
+  new Uint8Array(buffer, 28).set([...low, ...mid, ...high]);
+  new Int8Array(buffer, 28 + 3 * n).set([...signalLow, ...signalHigh]);
   return buffer;
 }
 
@@ -278,6 +288,32 @@ describe('bandsFromDetailBytes', () => {
     expect(Array.from(bands.mid)).toEqual([1, 2, 3]);
     expect(Array.from(bands.high)).toEqual([9, 8, 7]);
     expect(bands.scale.low).toBeCloseTo(1 / 127, 8);
+  });
+  it('reads the signed lowest and highest sample planes and the signal gain', () => {
+    const bands = bandsFromDetailBytes(detailFile([1, 2, 3], [0, 0, 0], [0, 0, 0], [-127, -5, 0], [3, 90, 127]))!;
+    expect(Array.from(bands.signalLow)).toEqual([-127, -5, 0]);
+    expect(Array.from(bands.signalHigh)).toEqual([3, 90, 127]);
+    expect(bands.signalScale).toBeCloseTo(1 / 127, 8);
+    expect(bands.signalGain).toBeCloseTo(379.5, 3);
+  });
+  it('reduces the signal to the extremes under each pixel, signed, on the band scale', () => {
+    const bands = bandsFromDetailBytes(detailFile([1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0], [-10, 20, -60, 5], [30, 40, -20, 50]))!;
+    const two = reduceBands(bands, 0, 1, 2, ZOOM_PEAK_WEIGHT);
+    expect(two.top![0]).toBeCloseTo(40 / 127, 6);
+    expect(two.bottom![0]).toBeCloseTo(-10 / 127, 6);
+    expect(two.top![1]).toBeCloseTo(50 / 127, 6);
+    expect(two.bottom![1]).toBeCloseTo(-60 / 127, 6);
+  });
+  it('draws a pixel narrower than a column as the straight line between the column centres across it', () => {
+    const bands = bandsFromDetailBytes(detailFile([1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0], [-10, 20, -60, 5], [30, 40, -20, 50]))!;
+    const eight = reduceBands(bands, 0, 1, 8, ZOOM_PEAK_WEIGHT);
+    expect(eight.top![5]).toBeCloseTo(15 / 127, 6);
+    expect(eight.bottom![5]).toBeCloseTo(-60 / 127, 6);
+    expect(eight.top![4]).toBeCloseTo(10 / 127, 6);
+    for (let p = 1; p < 7; p++) {
+      expect(eight.bottom![p]).toBeLessThanOrEqual(eight.top![p - 1] + 1e-6);
+      expect(eight.top![p]).toBeGreaterThanOrEqual(eight.bottom![p - 1] - 1e-6);
+    }
   });
   it('rejects a damaged or foreign file', () => {
     const good = detailFile([1, 2], [1, 2], [1, 2]);
