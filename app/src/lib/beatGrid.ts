@@ -58,5 +58,27 @@ export function gridFromStorage(beats: BeatMarker[], offsetMs: number | null | u
   return beats.map((b) => ({ time_ms: b.time_ms + offset, bar_position: b.bar_position }));
 }
 
+/**
+ * The grid re-spaced to `bpm` from its first downbeat, exactly as the library's `rescale_beat_grid` does it on the stored
+ * grid (whole-ms anchor, beats from the track start to its end), plus the grid's sub-millisecond offset.
+ */
+export function rescaleBeats(beats: BeatMarker[], bpm: number, durationMs: number): BeatMarker[] {
+  const { beats: stored, offsetMs } = gridForStorage(beats);
+  const anchor = stored.find((b) => b.bar_position === 1) ?? stored[0];
+  if (!anchor) return [];
+  const tempo = Math.round(bpm * 100);
+  const beatMs = 6_000_000 / tempo;
+  const firstIndex = -Math.floor(anchor.time_ms / beatMs);
+  const lastIndex = Math.max(0, Math.floor((durationMs - anchor.time_ms) / beatMs));
+  const out: BeatMarker[] = [];
+  for (let k = firstIndex; k <= lastIndex; k++) {
+    out.push({
+      time_ms: Math.round(anchor.time_ms + k * beatMs) + offsetMs,
+      bar_position: ((((anchor.bar_position - 1 + k) % 4) + 4) % 4) + 1,
+    });
+  }
+  return out;
+}
+
 export { SAVE_DELAY_MS as GRID_SAVE_DELAY_MS, createPersister as createGridPersister } from './persister.ts';
 export type { Persister as GridPersister } from './persister.ts';

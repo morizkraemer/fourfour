@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridNudgeMs, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
+import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridNudgeMs, rescaleBeats, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
 
 const SAMPLE_MS = 1000 / 44100;
 
@@ -193,5 +193,46 @@ describe('createGridPersister', () => {
     persister.schedule(1, grid());
     await persister.flush();
     expect(save).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('rescaleBeats (mirrors the library rescale_beat_grid)', () => {
+  const TRACK_MS = 300_000;
+  const bars = [
+    { time_ms: 0, bar_position: 1 },
+    { time_ms: 469, bar_position: 2 },
+    { time_ms: 938, bar_position: 3 },
+    { time_ms: 1406, bar_position: 4 },
+  ];
+
+  it('64 BPM from a downbeat at 0 gives the library result', () => {
+    const out = rescaleBeats(bars, 64, TRACK_MS);
+    expect(out.slice(0, 4).map((b) => b.time_ms)).toEqual([0, 938, 1875, 2813]);
+    expect(out).toHaveLength(321);
+  });
+
+  it('128 BPM spaces beats 468.75 ms with the bar positions cycling', () => {
+    const out = rescaleBeats(bars, 128, TRACK_MS);
+    expect(out.slice(0, 5).map((b) => b.time_ms)).toEqual([0, 469, 938, 1406, 1875]);
+    expect(out.slice(0, 5).map((b) => b.bar_position)).toEqual([1, 2, 3, 4, 1]);
+  });
+
+  it('keeps the downbeat and its sub-millisecond place, filling back to the track start', () => {
+    const moved = bars.map((b) => ({ time_ms: b.time_ms + 1000 - 0.37, bar_position: b.bar_position }));
+    const out = rescaleBeats(moved, 100, TRACK_MS);
+    expect(out[0].time_ms).toBeCloseTo(400 - 0.37, 9);
+    expect(out[0].bar_position).toBe(4);
+    const anchor = out.find((b) => Math.abs(b.time_ms - (1000 - 0.37)) < 1e-9);
+    expect(anchor?.bar_position).toBe(1);
+    expect(out[1].time_ms - out[0].time_ms).toBeCloseTo(600, 9);
+  });
+
+  it('is what the library stores: saving then loading the grid changes nothing', () => {
+    const moved = bars.map((b) => ({ time_ms: b.time_ms + 1000 - 0.37, bar_position: b.bar_position }));
+    const local = rescaleBeats(moved, 127.35, TRACK_MS);
+    const { beats, offsetMs } = gridForStorage(local);
+    const reloaded = gridFromStorage(beats, offsetMs);
+    expect(reloaded.map((b) => b.bar_position)).toEqual(local.map((b) => b.bar_position));
+    reloaded.forEach((b, i) => expect(b.time_ms).toBeCloseTo(local[i].time_ms, 9));
   });
 });
