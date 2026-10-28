@@ -28,6 +28,7 @@ import { addMemoryCueAtPlayhead, deleteHotCue, triggerHotCue } from '../stores/c
 import { HOT_CUE_SLOTS, slotLetter } from '../lib/cues.ts';
 import { openRekordboxImport } from '../stores/rekordbox-import.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { deleteSidebarSelection, sidebarDeleteReady } from '../stores/sidebar-delete.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
 
@@ -255,6 +256,24 @@ export function buildAppActions(): ShortcutAction[] {
       defaultBinding: null,
       keywords: ['playlist', 'create', 'group', 'directory'],
       run: () => void createFolderAndRename(0),
+    },
+    {
+      id: 'library.playlists.delete',
+      label: 'Delete selected playlists',
+      group: GROUP.library,
+      defaultBinding: 'Backspace',
+      palette: false,
+      when: sidebarDeleteReady,
+      run: () => void deleteSidebarSelection(),
+    },
+    {
+      id: 'library.playlists.deleteForward',
+      label: 'Delete selected playlists (forward delete)',
+      group: GROUP.library,
+      defaultBinding: 'Delete',
+      palette: false,
+      when: sidebarDeleteReady,
+      run: () => void deleteSidebarSelection(),
     },
     {
       id: 'library.refreshDevices',

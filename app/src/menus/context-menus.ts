@@ -305,6 +305,13 @@ export function playlistSelectionDeleteMessage(
   return `Delete ${parts.join(' and ')}?${inside} The tracks stay in your library.`;
 }
 
+/** Asks once, then deletes the playlists and folders; false when the user declined. */
+export async function confirmDeletePlaylists(ids: readonly number[]): Promise<boolean> {
+  if (!confirm(playlistSelectionDeleteMessage(library.playlists, ids))) return false;
+  await deletePlaylists([...ids]);
+  return true;
+}
+
 /** Context menu for several selected playlists and folders. */
 export function buildPlaylistSelectionMenuItems(opts: SelectionMenuOptions): MenuItem[] {
   const { ids, onDeleted } = opts;
@@ -323,9 +330,7 @@ export function buildPlaylistSelectionMenuItems(opts: SelectionMenuOptions): Men
       label: `Delete ${outermostIds(library.playlists, ids).length} items`,
       variant: 'danger',
       onClick: async () => {
-        if (!confirm(playlistSelectionDeleteMessage(library.playlists, ids))) return;
-        await deletePlaylists(ids);
-        onDeleted?.(ids);
+        if (await confirmDeletePlaylists(ids)) onDeleted?.(ids);
       },
     },
   ];

@@ -16,14 +16,17 @@
   gap: 12px;
   align-items: center;
   flex-shrink: 0;
+  margin-bottom: 4px;
 }
 
 .ff-inspector__cover {
   flex: none;
-  width: 72px;
-  height: 72px;
+  width: 84px;
+  height: 84px;
   background-color: var(--ff-elev);
+  border: 1px solid var(--ff-border);
   border-radius: var(--ff-radius-xl);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -40,18 +43,25 @@
 .ff-inspector__idf {
   flex: 1 1 0;
   min-width: 0;
+  margin-left: -6px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .ff-inspector__idf .ff-ghost__input {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--ff-text-mid);
 }
 
+.ff-inspector__idf .ff-ghost--title {
+  height: 32px;
+}
+
 .ff-inspector__idf .ff-ghost--title .ff-ghost__input {
-  font-size: 15px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ff-text);
 }
 
@@ -66,14 +76,15 @@
 }
 
 .ff-inspector__title {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ff-text);
   line-height: 1.3;
 }
 
 .ff-inspector__artist {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--ff-text-mid);
 }
 
@@ -237,14 +248,14 @@
 .ff-inspector__cues {
   display: flex;
   flex-direction: column;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .ff-inspector__cues-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin: 0 0 4px 2px;
+  margin: 0 0 6px 2px;
   font-family: var(--ff-font);
   font-size: var(--ff-type-small);
   color: var(--ff-faint);
@@ -256,12 +267,105 @@
   opacity: 0.6;
 }
 
-.ff-inspector__cues-add {
-  display: flex;
-  gap: 10px;
+.ff-inspector__pads {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
 }
 
-.ff-inspector__cues-add button {
+.ff-inspector__pad {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2px;
+  min-width: 0;
+  height: 50px;
+  padding: 6px 7px;
+  border: 1px dashed var(--ff-border-hi);
+  border-radius: var(--ff-radius-xl);
+  background: transparent;
+  color: var(--ff-faint);
+  font-family: var(--ff-font);
+  text-align: left;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.ff-inspector__pad-letter {
+  font-family: var(--ff-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ff-inspector__pad:not(.ff-inspector__pad--set):not(:disabled):hover {
+  border-color: var(--ff-border-hover);
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.ff-inspector__pad:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ff-inspector__pad--set {
+  border-style: solid;
+  border-color: transparent;
+  background: var(--cue);
+  color: #0a0a0a;
+}
+
+.ff-inspector__pad--set:disabled {
+  opacity: 1;
+}
+
+.ff-inspector__pad--set:hover,
+.ff-inspector__pad--linked {
+  filter: brightness(1.12);
+}
+
+.ff-inspector__pad--editing {
+  box-shadow: 0 0 0 2px var(--ff-surface), 0 0 0 3px var(--cue);
+}
+
+.ff-inspector__pad--remove {
+  opacity: 0.7;
+}
+
+.ff-inspector__pad-time {
+  font-family: var(--ff-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.ff-inspector__pad-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.ff-inspector__pad--set:has(.ff-inspector__pad-name) {
+  gap: 0;
+}
+
+.ff-inspector__cues-sub {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 12px 0 2px 2px;
+  font-family: var(--ff-font);
+  font-size: var(--ff-type-small);
+  color: var(--ff-faint);
+}
+
+.ff-inspector__cues-sub button {
   padding: 0;
   border: none;
   background: none;
@@ -270,13 +374,17 @@
   cursor: pointer;
 }
 
-.ff-inspector__cues-add button:not(:disabled):hover {
+.ff-inspector__cues-sub button:not(:disabled):hover {
   color: var(--ff-text);
 }
 
-.ff-inspector__cues-add button:disabled {
+.ff-inspector__cues-sub button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.ff-inspector__cue--compact .ff-inspector__cue-main {
+  padding: 2px 6px 2px 2px;
 }
 
 .ff-inspector__cue {
