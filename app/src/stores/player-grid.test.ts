@@ -14,6 +14,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
+import { playbackPause, subscribePlaybackTick } from '../services/playback.svelte.ts';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import {
   beatGridNudgeLeft,
@@ -21,6 +22,8 @@ import {
   beatGridSetCurrent,
   loadPlayerTrack,
   player,
+  resetPlayerTransport,
+  togglePlay,
 } from './player.svelte.ts';
 
 const invokeMock = vi.mocked(invoke);
@@ -130,5 +133,37 @@ describe('beat grid editing in the player', () => {
     expect(player.track!.beats.find((b) => b.bar_position === 1 && b.time_ms === 1300)).toBeTruthy();
     await vi.advanceTimersByTimeAsync(500);
     expect(saveCalls()[0][1]).toMatchObject({ trackId: 4 });
+  });
+
+  it('sets the grid at the exact paused position, not the last 50 ms tick, and it survives a save and reload', async () => {
+    let tick: ((t: any) => void) | null = null;
+    resetPlayerTransport();
+    vi.mocked(subscribePlaybackTick).mockImplementation(async (cb: any) => {
+      tick = cb;
+      return () => {};
+    });
+    await togglePlay();
+    expect(player.playing).toBe(true);
+    for (const position_ms of [1200, 1250, 1300]) tick!({ position_ms, duration_ms: 20_000, playing: true });
+    vi.mocked(playbackPause).mockImplementationOnce(async () => {
+      tick!({ position_ms: 1300, duration_ms: 20_000, playing: false });
+      return 1337;
+    });
+    await togglePlay();
+    expect(player.playing).toBe(false);
+    expect(player.progress * 20_000).toBeCloseTo(1337, 6);
+
+    beatGridSetCurrent();
+    beatGridNudgeRight(1);
+    beatGridNudgeRight(1);
+    const downbeat = 1339;
+    expect(player.track!.beats.find((b) => b.bar_position === 1 && b.time_ms === downbeat)).toBeTruthy();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(storedBeats.some((b) => b.bar_position === 1 && b.time_ms === downbeat)).toBe(true);
+
+    await loadPlayerTrack({ ...trackInfo, id: 5 });
+    await loadPlayerTrack(trackInfo);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.track!.beats.find((b) => b.bar_position === 1 && b.time_ms === downbeat)).toBeTruthy();
   });
 });

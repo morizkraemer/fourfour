@@ -1,13 +1,14 @@
 import WaveformDisplay from '$ds/waveform-display.js';
 import '$ds/base.css';
-import { bandsFromDetailBytes, bandsFromStickBytes, windowFromBytes } from './services/waveform-bands.ts';
+import { bandsFromDetailBytes, bandsFromStickBytes, stripBandsFromAnalysis, windowFromBytes } from './services/waveform-bands.ts';
 
 /**
  * Dev-only page (`npm run dev`, then /zoom-detail.html?track=NAME&win=SECONDS&at=SECONDS): the expanded
  * waveform of one measured track at a fixed zoom, for the before/after shots and the frame-time runs of
  * `app/perf/zoom-detail-shots.mjs`. `/fx/NAME.pwv7` and `/fx/NAME.ffwd` come from `waveform_detail_dump`.
  * With `&windows=1` the fine windows of the deepest zoom levels come from `/win/window?...`
- * (`waveform_window_dump serve`); `body[data-windows]` counts the ones that arrived.
+ * (`waveform_window_dump serve`); `body[data-windows]` counts the ones that arrived. The overview strip draws `/fx/NAME.pwv6`
+ * the way the player does (`stripBandsFromAnalysis`) when the dump wrote one.
  */
 async function bytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await (await fetch(url)).arrayBuffer());
@@ -23,13 +24,17 @@ async function main() {
   const durationMs = (pwv7.length / 3 / 150) * 1000;
   const bands = bandsFromStickBytes(pwv7);
   const bandsZoom = bandsFromDetailBytes(detail.buffer as ArrayBuffer);
+  const pwv6 = await fetch(`/fx/${name}.pwv6`).then((r) => (r.ok ? r.arrayBuffer() : null), () => null);
+  const overview = pwv6?.byteLength
+    ? stripBandsFromAnalysis({ waveform_overview: { bands: btoa(String.fromCharCode(...new Uint8Array(pwv6))), pwv7: true, calibration: 1 } })
+    : null;
 
   const host = document.getElementById('host')!;
   host.className = 'ff-waveform-view';
   host.style.cssText = 'width:1128px;height:220px;';
   const display = new WaveformDisplay(host, { mode: 'expanded' });
   const frac = (at * 1000) / durationMs;
-  display.setData({ bands, bandsOverview: bands, bandsZoom, beats: [], cues: [], duration_ms: durationMs, bpm: 0 } as any, frac as any);
+  display.setData({ bands, bandsOverview: overview ?? bands, bandsZoom, beats: [], cues: [], duration_ms: durationMs, bpm: 0 } as any, frac as any);
   if (params.get('windows')) {
     let arrived = 0;
     display.setWindowSource(async (startMs: number, endMs: number, columns: number) => {

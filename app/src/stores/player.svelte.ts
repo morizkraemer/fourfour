@@ -12,7 +12,7 @@ import {
   peekAnalysisData,
 } from '../services/tauri.svelte.ts';
 import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
-import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type ByteBandColumns } from '../services/waveform-bands.ts';
+import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type DetailBandColumns } from '../services/waveform-bands.ts';
 import {
   playbackPause,
   playbackPlay,
@@ -71,7 +71,7 @@ export interface PlayerTrack {
   bandsDetail: BandColumns | null;
   bandsOverview: BandColumns | null;
   /** 2400 columns per second, for the zoom view; arrives after the track, see `loadZoomDetail`. */
-  bandsZoom: ByteBandColumns | null;
+  bandsZoom: DetailBandColumns | null;
 }
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
@@ -242,10 +242,7 @@ async function ensureTickListener() {
     player.levelLeft = tick.level_left ?? 0;
     player.levelRight = tick.level_right ?? 0;
     if (!player.track) return;
-    if (pausePending) {
-      player.playing = false;
-      return;
-    }
+    if (pausePending) return;
     const dur = tick.duration_ms || player.track.durationMs;
     if (dur > 0) {
       if (seekTargetMs !== null) {
@@ -311,7 +308,7 @@ function normalizeTrackInput(input: any): BackendTrackInfo | null {
 }
 
 const ZOOM_DETAIL_CACHE_TRACKS = 3;
-const zoomDetailCache = new Map<number, ByteBandColumns>();
+const zoomDetailCache = new Map<number, DetailBandColumns>();
 const zoomDetailLoading = new Set<number>();
 
 /** Fetch the high-resolution series of the loaded track (once, in the background) and hand it to the zoom view. */
@@ -441,6 +438,14 @@ export async function loadPlayerTrack(input: any) {
   void enrichPlayerTrack(gen, trackInfo.id, base);
 }
 
+/** A click on a row's mini waveform: that track at that point (a seek if it is already loaded, playing or not). */
+export async function loadTrackAt(input: any, progress: number) {
+  const id = normalizeTrackInput(input)?.id;
+  if (id == null) return;
+  if (player.track?.id !== id) await loadPlayerTrack(input);
+  if (player.track?.id === id) await seekToProgress(progress);
+}
+
 /** Start playback after the current selection finishes loading in the player. */
 export function queuePlayAfterLoad() {
   playPending = true;
@@ -479,15 +484,23 @@ export function clearPlayerTrack() {
   playPending = false;
 }
 
+/** The paused position the backend reported: the playhead, Set and the next play all use exactly this. */
+function restAt(positionMs: number) {
+  const t = player.track;
+  if (!t || !t.durationMs || !Number.isFinite(positionMs)) return;
+  player.progress = Math.max(0, Math.min(1, positionMs / t.durationMs));
+  transportClock.stop(positionMs);
+}
+
 async function pausePlayback() {
   if (!player.playing && !pausePending) return;
   pausePending = true;
-  player.playing = false;
   try {
-    await playbackPause();
+    restAt(await playbackPause());
   } catch (err) {
     console.error('playback pause failed:', err);
   } finally {
+    player.playing = false;
     pausePending = false;
   }
 }

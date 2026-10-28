@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rowBandsFromBandBytes, stripBandsFromAnalysis, stripGain } from './waveform-bands.ts';
+import { rowBandsFromBandBytes, stripBandsFromAnalysis, stripGains } from './waveform-bands.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { MOCK_PROFILE_ORDER, bandBytes, encodeStickWire, overviewLevel, syntheticBands } from '../mocks/synthetic-bands.ts';
 import { reduceBands, stackHeights } from '../../../prototyping/viewport/design-system/waveform-bands.js';
@@ -29,7 +29,9 @@ describe('stripBandsFromAnalysis', () => {
     });
     expect(bands?.overview).toBe(true);
     expect(bands?.low.length).toBe(2);
-    expect(bands?.low[0]).toBeCloseTo(40 / 127);
+    const gains = stripGains({ low: Float32Array.of(40 / 127, 40 / 127), mid: Float32Array.of(20 / 127, 20 / 127), high: Float32Array.of(0, 0) });
+    expect(bands!.low[0]).toBeCloseTo((40 / 127) * gains.low);
+    expect(bands!.mid[1]).toBeCloseTo((20 / 127) * gains.mid);
   });
 
   it('falls back to the detail columns, reduced to overview columns and marked as overview', () => {
@@ -37,7 +39,7 @@ describe('stripBandsFromAnalysis', () => {
     const bands = stripBandsFromAnalysis({ waveform_color_detail: wire(bytes) });
     expect(bands?.overview).toBe(true);
     expect(bands?.low.length).toBe(1200);
-    expect(bands?.low[0]).toBeCloseTo(20 / 127);
+    expect(bands!.low[0]).toBeCloseTo(bands!.low[600]);
   });
 
   it('is null without any waveform', () => {
@@ -46,21 +48,40 @@ describe('stripBandsFromAnalysis', () => {
   });
 });
 
-describe('strip headroom', () => {
-  it('leaves quiet tracks at their own level', () => {
-    const quiet = syntheticBands(1200, 3, 240, 124, 'ambient');
-    expect(stripGain(quiet)).toBe(1);
+describe('strip band gains', () => {
+  const layerP95 = (bands: { low: Float32Array; mid: Float32Array; high: Float32Array }, band: 'low' | 'mid' | 'high') => {
+    const shaped = reduceBands(bands, 0, 1, bands.low.length, { low: 0, mid: 0, high: 0 }, null);
+    const heights: number[] = [];
+    for (let p = 0; p < bands.low.length; p++) {
+      const stack = stackHeights(shaped, p, 1000);
+      if (!stack) continue;
+      heights.push(band === 'low' ? stack[0] : band === 'mid' ? stack[1] - stack[0] : stack[2] - stack[1]);
+    }
+    heights.sort((x, y) => x - y);
+    return heights[Math.floor(heights.length * 0.95)] / 1000;
+  };
+
+  it('gives each band its own gain, so a thin high band is lifted and a loud low end brought down', () => {
+    const loud = syntheticBands(1200, 3, 240, 124, 'loud');
+    const gains = stripGains(loud);
+    expect(gains.low).toBeLessThan(1);
+    const bands = stripBandsFromAnalysis({ waveform_overview: encodeStickWire(overviewLevel(bandBytes(loud))) })!;
+    expect(layerP95(bands, 'low')).toBeGreaterThan(0.3);
+    expect(layerP95(bands, 'high')).toBeGreaterThan(0.2);
   });
 
-  it('brings a brickwalled track down and keeps the band proportions', () => {
-    const loud = syntheticBands(1200, 3, 240, 124, 'loud');
-    const gain = stripGain(loud);
-    expect(gain).toBeLessThan(1);
-    expect(gain).toBeGreaterThan(0.3);
-    const bytes = overviewLevel(bandBytes(loud));
-    const bands = stripBandsFromAnalysis({ waveform_overview: encodeStickWire(bytes) })!;
-    expect(bands.low[100] / bands.high[100]).toBeCloseTo(bytes[300] / bytes[302]);
-    expect(bands.low[100]).toBeCloseTo((bytes[300] / 127) * gain);
+  it('shows a hi-hat section as a clearly taller high layer than the same groove without hats', () => {
+    const n = 1200;
+    const bytes: number[] = [];
+    for (let i = 0; i < n; i++) bytes.push(70, 30, i >= 400 && i < 800 ? 34 : 7);
+    const bands = stripBandsFromAnalysis({ waveform_overview: wire(bytes) })!;
+    const shaped = reduceBands(bands, 0, 1, n, { low: 0, mid: 0, high: 0 }, null);
+    const highAt = (p: number) => {
+      const stack = stackHeights(shaped, p, 100)!;
+      return stack[2] - stack[1];
+    };
+    expect(highAt(600)).toBeGreaterThan(20);
+    expect(highAt(600)).toBeGreaterThan(8 * Math.max(1, highAt(200)));
   });
 
   it('keeps every mock profile and both payload shapes under a tenth of columns clipped at the top', () => {
@@ -92,18 +113,20 @@ describe('row preview normalisation', () => {
     expect(row.mid[0]).toBeCloseTo(strip.mid[0], 5);
   });
 
-  it('leaves a quiet row preview untouched', () => {
+  it('brings a quiet and a saturated row preview to the same level, like the strip', () => {
     const quiet = Uint8Array.from({ length: 128 * 3 }, (_, i) => [20, 10, 5][i % 3]);
     const row = rowBandsFromBandBytes(quiet)!;
-    expect(row.low[0]).toBeCloseTo(20 / 127, 5);
+    expect(row.low[0]).toBeCloseTo(rowBandsFromBandBytes(saturated)!.low[0], 2);
   });
 
-  it('row preview, strip and mock row bytes of every profile stay within 15% of each other in peak low', () => {
+  const p95 = (values: ArrayLike<number>) => Array.from(values).sort((x, y) => x - y)[Math.floor(values.length * 0.95)];
+
+  it('row preview and strip of every profile stay within 10% of each other in the loud end of the low band', () => {
     for (const profile of MOCK_PROFILE_ORDER) {
       const analysis = mockAnalysisData(MOCK_PROFILE_ORDER.indexOf(profile) + 1, 200, 12800, 'Am');
       const strip = stripBandsFromAnalysis(analysis)!;
       const row = rowBandsFromBandBytes(Uint8Array.from(atob((analysis as any).waveform_row_bands), (c) => c.charCodeAt(0)))!;
-      expect(Math.abs(Math.max(...row.low) - Math.max(...strip.low))).toBeLessThan(0.15);
+      expect(Math.abs(p95(row.low) - p95(strip.low))).toBeLessThan(0.1);
     }
   });
 });

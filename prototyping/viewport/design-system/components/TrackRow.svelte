@@ -43,9 +43,26 @@
   import { keyColor } from '../utils/key-color.js';
   import { labelColor } from '../utils/label-color.js';
 
-  let { track = {}, state = 'rest', columns = TRACK_COLUMNS, analyzing = false } = $props();
+  // onWaveSeek(frac): the mini waveform becomes a seek strip (hover shows where, a click passes the track fraction).
+  let { track = {}, state = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined } = $props();
 
   let plan = $derived(cellPlan(columns));
+
+  function waveRect(e) {
+    return (e.currentTarget.querySelector('canvas') ?? e.currentTarget).getBoundingClientRect();
+  }
+
+  function waveFrac(e) {
+    const rect = waveRect(e);
+    return rect.width > 0 ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) : 0;
+  }
+
+  function showWaveCursor(e) {
+    const rect = waveRect(e);
+    const cell = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(rect.left, Math.min(rect.right, e.clientX)) - cell.left;
+    e.currentTarget.style.setProperty('--ff-wave-cursor-x', `${Math.round(x)}px`);
+  }
 
   function cover(t) {
     return t.rowCover ?? t.cover;
@@ -72,7 +89,15 @@
         </div>
       </div>
     {:else if cell.kind === 'wave'}
-      <div class="ff-trow__cell ff-trow__cell--wave" style={cell.style} data-col-key={col.key}>
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="ff-trow__cell ff-trow__cell--wave{onWaveSeek ? ' ff-trow__cell--seekable' : ''}"
+        style={cell.style}
+        data-col-key={col.key}
+        data-wave-seek={onWaveSeek ? '' : undefined}
+        onpointermove={onWaveSeek ? showWaveCursor : undefined}
+        onclick={onWaveSeek ? (e) => onWaveSeek(waveFrac(e)) : undefined}>
         <Waveform
           bands={track.bands ?? null}
           peaks={track.peaks ?? null}
@@ -80,6 +105,7 @@
           width={col.width ?? 120}
           height={14}
           variant="mini" />
+        {#if onWaveSeek}<div class="ff-trow__wave-cursor"></div>{/if}
       </div>
     {:else if cell.kind === 'cover'}
       <div class="ff-trow__cell ff-trow__cell--cover" style={cell.style} data-col-key={col.key}>
