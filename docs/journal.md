@@ -198,3 +198,4 @@
 2026-10-28 06:23 orchestrator - wm-zoom 5b27ad2 merged → r9-int c9da7b2 (M2 root cause: fixed 10 ms nudge; 1 ms floor = library/PQTZ ms); checks + Mac install started
 2026-10-28 06:57 orchestrator - Mac install of r9-int c9da7b2 done (28 cargo, 573 vitest, 0 warnings); round 9 complete
 2026-10-28 06:58 orchestrator - landed: r9-int → master on Merlin's OK (code identical to tested c9da7b2); not pushed
+2026-10-28 07:37 orchestrator - round 10 spawn: wn-wave P1/P2/P3/P13 (seat, opus), wn-sidebar P10/P11/P14–P17 (seat, sonnet); B (bar/topbar/palette) and C (inspector) queued
