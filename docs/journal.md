@@ -236,3 +236,5 @@
 2026-10-28 18:31 orchestrator O7 spawn: ov-layout build layout-2 A (seat, sonnet high) on ov-1028
 2026-10-28 18:50 ov-smoke O2 landed on ov-1028 1333070: Playwright smoke harness, 12 flows, ~40 s, 3/3 green; dep @playwright/test (app devDep, branch only); O7 told to adapt the edit-mode spec
 2026-10-28 18:51 orchestrator O3 spawn: ov-analysis Rust analyzer status + grid/BPM accuracy (seat, opus medium; Q33 already on master)
+2026-10-28 19:10 ov-layout O7 landed on ov-1028 5edd7bc: mode-less pencil BPM/key fields, MT outside box, memory chips (slot-0 cues), grid always visible; 692 tests, smoke 13/13; Mac install started
+2026-10-28 19:11 orchestrator O1b spawn: ov-anchor grid_anchor_ms in edits.json (seat, sonnet high)
