@@ -230,3 +230,4 @@
 2026-10-28 17:41 orchestrator O1 spawn: ov-review rounds 12–13 bug review (seat, opus medium)
 2026-10-28 17:55 wr-playerlayout L2 done: b2ad150 board player-layout-2 (A pencil fields + footer cue row, rec / B cue column / C deck panel) at :5238 comments, :5239 static — waiting on Merlin's approval before O7
 2026-10-28 17:56 orchestrator O2 spawn: ov-smoke headless smoke harness (seat, sonnet high; may add playwright devDep)
+2026-10-28 18:05 orchestrator O7 decided: Merlin approved layout-2 A (MT + pencils outside the box, no border; rest as is); open questions per rec; queued after O1 (shares ExpandedPlayer)
