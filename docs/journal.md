@@ -185,3 +185,4 @@
 2026-10-27 23:33 orchestrator run idle: queue + own priorities done; q42-overnight dc818de waits for Merlin's Mac test
 2026-10-28 03:04 orchestrator - run-pause: PM pause; nothing in flight, all work on q42-overnight dc818de; waits for Merlin
 2026-10-28 04:49 orchestrator - spawn: round 8 (Merlin back in thread) — wl-player L1 zoom + L2 control bar, wl-palette L3 column reorder + L4 palette (seat, sonnet high), both off q42-overnight
+2026-10-28 05:00 orchestrator L3/L4 landed-on-branch: wl-palette de6fc3b → q42-overnight bcd6a16 (518 tests); L6/L7 spawn wl-sidebar (seat, sonnet)
