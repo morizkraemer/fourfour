@@ -194,3 +194,4 @@
 2026-10-28 05:47 orchestrator - landed: q42-overnight → master 9fc5e48 on Merlin's OK (code identical to tested f9315b9); not pushed
 2026-10-28 05:50 orchestrator - round 9 spawn: wm-zoom M1/M2 (seat, opus — failed attempt last round), wm-tempo M3–M6 (seat, sonnet), both off master 5d728df
 2026-10-28 05:52 orchestrator - wm-tempo M3–M7 done (9ea3561, 559 tests); resumed for N3/N4; wm-zoom given N1/N2
+2026-10-28 05:56 orchestrator - wm-tempo cc10865 merged → r9-int 3defe88 (N3 root cause: pointer capture blocked sidebar pointerenter; 561 tests); waiting on wm-zoom
