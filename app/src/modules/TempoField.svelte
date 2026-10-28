@@ -20,6 +20,7 @@
     color = undefined,
     disabled = false,
     stepper = true,
+    tall = false,
     editText = text,
     editSignal = 0,
     onStep,
@@ -33,6 +34,7 @@
     color?: string;
     disabled?: boolean;
     stepper?: boolean;
+    tall?: boolean;
     editText?: string;
     editSignal?: number;
     onStep: (units: number, tier: Tier, fromButton: boolean) => void;
@@ -161,7 +163,7 @@
   }
 </script>
 
-<div class="ff-tfield" class:ff-tfield--bare={!stepper} class:ff-tfield--disabled={disabled} class:ff-tfield--editing={editing} role="group" aria-label={label}>
+<div class="ff-tfield" class:ff-tfield--bare={!stepper} class:ff-tfield--tall={tall} class:ff-tfield--disabled={disabled} class:ff-tfield--editing={editing} role="group" aria-label={label}>
   {#if stepper}
     <button
       type="button"
@@ -225,6 +227,15 @@
     background: var(--ff-bg);
     overflow: hidden;
     user-select: none;
+  }
+  .ff-tfield--tall {
+    height: 28px;
+  }
+  .ff-tfield--tall .ff-tfield__btn {
+    width: 26px;
+  }
+  .ff-tfield--tall .ff-tfield__value {
+    font-size: var(--ff-type-compact);
   }
   .ff-tfield--editing {
     border-color: var(--ff-accent);

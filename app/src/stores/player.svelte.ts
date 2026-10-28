@@ -90,7 +90,8 @@ export const player = $state({
   loading: false,
   error: null as string | null,
   expanded: false,
-  editing: false,
+  trackBpmMode: false,
+  trackKeyMode: false,
   levelLeft: 0,
   levelRight: 0,
   get tempo() {
@@ -105,16 +106,23 @@ export const player = $state({
 /** Toggle the full-screen expanded player (dual-view waveform). */
 export function toggleExpanded() {
   player.expanded = !player.expanded;
-  if (!player.expanded) player.editing = false;
+  if (!player.expanded) endTrackModes();
 }
 
-export function setEditing(value: boolean) {
-  player.editing = value && player.expanded && player.track != null;
+export function endTrackModes() {
+  player.trackBpmMode = false;
+  player.trackKeyMode = false;
+}
+
+export function setTrackMode(field: 'bpm' | 'key', on: boolean) {
+  const allowed = on && player.expanded && player.track != null;
+  if (field === 'bpm') player.trackBpmMode = allowed;
+  else player.trackKeyMode = allowed;
 }
 
 export function setExpanded(value: boolean) {
   player.expanded = value;
-  if (!value) player.editing = false;
+  if (!value) endTrackModes();
 }
 
 let loadGeneration = 0;
@@ -430,7 +438,7 @@ export async function loadPlayerTrack(input: any) {
   const trackInfo = normalizeTrackInput(input);
   if (!trackInfo) {
     player.track = null;
-    player.editing = false;
+    endTrackModes();
     player.loading = false;
     return;
   }
@@ -490,7 +498,7 @@ export function clearPlayerTrack() {
   seekTargetMs = null;
   void playbackStop();
   player.track = null;
-  player.editing = false;
+  endTrackModes();
   player.playing = false;
   player.progress = 0;
   player.loading = false;

@@ -71,28 +71,50 @@ test('expands the big player and collapses it with Escape', async ({ smoke: { pa
   await expect(page.locator('.ff-player-compact')).toBeVisible();
 });
 
-test('edit mode toggles with E and Escape, and the BPM step re-spaces the grid', async ({ smoke }) => {
+test('the BPM pencil switches to track mode without shifting the header, and a step re-spaces the grid', async ({ smoke }) => {
   const { page } = smoke;
   await loadByDoubleClick(page, TRACK);
   await page.locator('.ff-player-compact__expand-btn').click();
   await expect(page.locator('.ff-xp')).toBeVisible();
 
-  await page.keyboard.press('e');
-  const edit = page.locator('.ff-xp [role="group"][aria-label="Edit track"]');
-  await expect(edit).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(edit).toHaveCount(0);
-  await expect(page.locator('.ff-xp')).toBeVisible();
+  const group = page.locator('.ff-xp .ff-ptempo--xp');
+  const fieldBox = async (name: string) => (await group.locator(`[role="group"][aria-label="${name}"]`).boundingBox())!;
+  const pads = page.locator('.ff-xp__pads');
+  const padsBefore = await pads.boundingBox();
+  const bpmBefore = await fieldBox('BPM');
+  const keyBefore = await fieldBox('Key');
 
-  await page.keyboard.press('e');
-  const bpm = edit.locator('[aria-label="Track BPM"][role="spinbutton"] .ff-tfield__text');
+  await group.getByRole('button', { name: 'Edit track BPM' }).click();
+  const bpm = group.locator('[aria-label="Track BPM"][role="spinbutton"] .ff-tfield__text');
   await expect(bpm).toHaveText('126.00');
-  await edit.locator('[aria-label="Raise Track BPM"]').click();
+  expect(await fieldBox('Track BPM')).toEqual(bpmBefore);
+  expect(await fieldBox('Key')).toEqual(keyBefore);
+  expect(await pads.boundingBox()).toEqual(padsBefore);
+
+  await group.locator('[aria-label="Raise Track BPM"]').click();
   await expect(bpm).toHaveText('126.10');
-  await edit.locator('[aria-label="Halve track BPM"]').click();
+  await group.getByRole('button', { name: 'Halve track BPM' }).click();
   await expect(bpm).toHaveText('63.05');
   await expect(rowByTitle(page, TRACK).locator('[data-col-key="bpm"]')).toContainText('63.0');
   await expect.poll(async () => (await smoke.invokes('rescale_beat_grid')).length + (await smoke.invokes('set_beat_grid')).length).toBeGreaterThan(0);
+
+  await page.keyboard.press('Escape');
+  await expect(group.locator('[aria-label="BPM"][role="spinbutton"]')).toBeVisible();
+  await expect(page.locator('.ff-xp')).toBeVisible();
+  expect(await fieldBox('BPM')).toEqual(bpmBefore);
+});
+
+test('memory cue chips add at the playhead, jump and remove with Alt', async ({ smoke }) => {
+  const { page } = smoke;
+  await loadByDoubleClick(page, TRACK);
+  await page.locator('.ff-player-compact__expand-btn').click();
+  const chips = page.locator('.ff-xp [data-memory-chip]');
+  const before = await chips.count();
+  await page.locator('.ff-xp').getByRole('button', { name: 'Add memory cue', exact: true }).click();
+  await expect(chips).toHaveCount(before + 1);
+  await expect.poll(async () => (await smoke.invokes('set_cues')).length).toBeGreaterThan(0);
+  await chips.last().click({ modifiers: ['Alt'] });
+  await expect(chips).toHaveCount(before);
 });
 
 test('adds the next free hot cue with Shift+C and removes one with Alt', async ({ smoke }) => {

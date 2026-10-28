@@ -5,7 +5,7 @@
  */
 
 import { library, bumpLibraryTracks } from './library.svelte.ts';
-import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setEditing, toggleExpanded } from './player.svelte.ts';
+import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setTrackMode, toggleExpanded } from './player.svelte.ts';
 import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
 import { rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
@@ -116,13 +116,13 @@ export function loadedTrackHasBpm(): boolean {
   return Number(player.track?.bpm) > 0;
 }
 
-/** Open the big player in edit mode and put its track BPM field into typing mode. */
+/** Open the big player, switch its BPM field to track mode and put it into typing mode. */
 export async function requestBpmEntry(): Promise<void> {
   if (!player.expanded) {
     toggleExpanded();
     await tick();
   }
-  setEditing(true);
+  setTrackMode('bpm', true);
   await tick();
   bpmEntry.request++;
 }

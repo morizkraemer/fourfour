@@ -34,7 +34,7 @@ import {
   beatGridSetCurrent,
   beatGridShiftByBeat,
   loadPlayerTrack,
-  setEditing,
+  endTrackModes,
 } from '../stores/player.svelte.ts';
 import { tempo, setKeyShift, setKeyLock, resetTempo } from '../stores/tempo.svelte.ts';
 import { zoomWaveIn, zoomWaveOut, zoomWaveToFit } from '../stores/wave-zoom.ts';
@@ -85,7 +85,7 @@ function noOverlayOpen(): boolean {
 
 function dismissTopLayer() {
   if (ui.settingsOpen) closeSettings();
-  else if (player.editing) setEditing(false);
+  else if (player.trackBpmMode || player.trackKeyMode) endTrackModes();
   else if (ui.searchText.trim()) clearListFilter();
   else toggleExpanded();
 }
@@ -189,7 +189,7 @@ const playerActions: ShortcutAction[] = [
     keywords: ['grid', 'beatgrid', 'beat', 'edit'],
     group: GROUP.playback,
     defaultBinding: null,
-    when: () => player.expanded && player.editing,
+    when: () => player.expanded && player.track != null,
     run: () => beatGridShiftByBeat(1),
   },
   {
@@ -198,7 +198,7 @@ const playerActions: ShortcutAction[] = [
     keywords: ['grid', 'beatgrid', 'beat', 'edit'],
     group: GROUP.playback,
     defaultBinding: null,
-    when: () => player.expanded && player.editing,
+    when: () => player.expanded && player.track != null,
     run: () => beatGridShiftByBeat(-1),
   },
   {
@@ -207,7 +207,7 @@ const playerActions: ShortcutAction[] = [
     keywords: ['camelot', 'key', 'edit', 'harmonic'],
     group: GROUP.playback,
     defaultBinding: null,
-    when: () => player.expanded && player.editing,
+    when: () => player.expanded && player.track != null,
     run: () => void stepTrackKey(player.track!.id, 1),
   },
   {
@@ -216,7 +216,7 @@ const playerActions: ShortcutAction[] = [
     keywords: ['camelot', 'key', 'edit', 'harmonic'],
     group: GROUP.playback,
     defaultBinding: null,
-    when: () => player.expanded && player.editing,
+    when: () => player.expanded && player.track != null,
     run: () => void stepTrackKey(player.track!.id, -1),
   },
   {
@@ -588,15 +588,6 @@ export function buildAppActions(): ShortcutAction[] {
       group: GROUP.view,
       defaultBinding: null,
       run: toggleDetailPane,
-    },
-    {
-      id: 'player.edit',
-      label: 'Toggle edit mode (big player)',
-      keywords: ['bpm', 'key', 'grid', 'beatgrid', 'edit', 'track'],
-      group: GROUP.view,
-      defaultBinding: 'E',
-      when: () => noOverlayOpen() && player.expanded && player.track != null,
-      run: () => setEditing(!player.editing),
     },
     ...bpmActions,
     ...favoriteActions,
