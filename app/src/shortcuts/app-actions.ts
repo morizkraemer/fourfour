@@ -29,6 +29,14 @@ import { HOT_CUE_SLOTS, slotLetter } from '../lib/cues.ts';
 import { openRekordboxImport } from '../stores/rekordbox-import.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 import { deleteSidebarSelection, sidebarDeleteReady } from '../stores/sidebar-delete.ts';
+import {
+  bpmTargetId,
+  doubleTrackBpm,
+  halveTrackBpm,
+  loadedTrackHasBpm,
+  requestBpmEntry,
+  stepTrackBpm,
+} from '../stores/track-edits.svelte.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
 
@@ -92,6 +100,56 @@ const hotCueActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_
     },
   ];
 }).flat();
+
+const BPM_KEYWORDS = ['tempo', 'beat grid', 'grid', 'bpm'];
+
+const bpmActions: ShortcutAction[] = [
+  {
+    id: 'track.bpm.set',
+    label: 'Set track BPM…',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: BPM_KEYWORDS,
+    when: loadedTrackHasBpm,
+    run: () => void requestBpmEntry(),
+  },
+  {
+    id: 'track.bpm.up',
+    label: 'Track BPM +0.1',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: BPM_KEYWORDS,
+    when: () => bpmTargetId() != null,
+    run: () => stepTrackBpm(bpmTargetId()!, 1, 'normal'),
+  },
+  {
+    id: 'track.bpm.down',
+    label: 'Track BPM −0.1',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: BPM_KEYWORDS,
+    when: () => bpmTargetId() != null,
+    run: () => stepTrackBpm(bpmTargetId()!, -1, 'normal'),
+  },
+  {
+    id: 'track.bpm.double',
+    label: 'Double track BPM',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: [...BPM_KEYWORDS, '×2', 'x2'],
+    when: () => bpmTargetId() != null,
+    run: () => doubleTrackBpm(bpmTargetId()!),
+  },
+  {
+    id: 'track.bpm.halve',
+    label: 'Halve track BPM',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: [...BPM_KEYWORDS, '÷2', 'half'],
+    when: () => bpmTargetId() != null,
+    run: () => halveTrackBpm(bpmTargetId()!),
+  },
+];
 
 export function buildAppActions(): ShortcutAction[] {
   return [
@@ -309,6 +367,7 @@ export function buildAppActions(): ShortcutAction[] {
       defaultBinding: null,
       run: toggleDetailPane,
     },
+    ...bpmActions,
     ...favoriteActions,
   ];
 }

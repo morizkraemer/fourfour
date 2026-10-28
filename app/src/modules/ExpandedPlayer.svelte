@@ -9,10 +9,12 @@
 <script>
   import { WaveformView, CueEditor } from '$ds';
   import PlayerTempo from './PlayerTempo.svelte';
+  import TempoField from './TempoField.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { tempo } from '../stores/tempo.svelte.ts';
-  import { effectiveShift, formatBpm, formatShift } from '../lib/tempo.ts';
+  import { DRAG_PX_PER_UNIT, effectiveShift, formatBpm, formatShift, parseBpmEntry } from '../lib/tempo.ts';
+  import { bpmEntry, commitTrackBpm, doubleTrackBpm, halveTrackBpm, stepTrackBpm } from '../stores/track-edits.svelte.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -44,6 +46,8 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+  let trackBpm = $derived(Number(player.track?.bpm));
+  let hasTrackBpm = $derived(Number.isFinite(trackBpm) && trackBpm > 0);
   let windowTrackId = $derived(player.track?.bandsZoom ? player.track.id : null);
   let windowSource = $derived(
     windowTrackId == null
@@ -207,6 +211,27 @@
         disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
       <button class="ff-xp__grid-btn" title="Nudge grid right one pixel (⌥: 1 ms)" aria-label="Nudge grid right"
         disabled={!player.track} onclick={(e) => beatGridNudgeRight(nudgeMs(e))}>▶</button>
+    </div>
+
+    <div class="ff-xp__grid-edit" role="group" aria-label="Track BPM">
+      <span class="ff-xp__grid-label">BPM</span>
+      <TempoField
+        label="Track BPM"
+        text={hasTrackBpm ? trackBpm.toFixed(2) : '—'}
+        width="8ch"
+        pxPerUnit={DRAG_PX_PER_UNIT.bpm}
+        disabled={!hasTrackBpm}
+        editText={hasTrackBpm ? trackBpm.toFixed(2) : ''}
+        editSignal={bpmEntry.request}
+        onStep={(units, tier) => stepTrackBpm(player.track.id, units, tier)}
+        onSet={(typed) => {
+          const bpm = parseBpmEntry(typed);
+          return bpm !== null && commitTrackBpm(player.track.id, bpm);
+        }} />
+      <button class="ff-xp__grid-btn" title="Double the track BPM and re-space the grid" aria-label="Double track BPM"
+        disabled={!hasTrackBpm} onclick={() => doubleTrackBpm(player.track.id)}>×2</button>
+      <button class="ff-xp__grid-btn" title="Halve the track BPM and re-space the grid" aria-label="Halve track BPM"
+        disabled={!hasTrackBpm} onclick={() => halveTrackBpm(player.track.id)}>÷2</button>
     </div>
 
     <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">

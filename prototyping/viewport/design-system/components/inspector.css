@@ -131,6 +131,41 @@
   min-width: 0;
 }
 
+.ff-inspector__fig-steps {
+  display: inline-flex;
+  margin-left: auto;
+  flex: none;
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  overflow: hidden;
+}
+
+.ff-inspector__fig-step {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ff-muted);
+  font-family: var(--ff-font);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ff-inspector__fig-step + .ff-inspector__fig-step {
+  border-left: 1px solid var(--ff-border);
+}
+
+.ff-inspector__fig-step:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-inspector__fig-step:active {
+  background: var(--ff-select);
+}
+
 .ff-inspector__fig-static {
   white-space: nowrap;
 }

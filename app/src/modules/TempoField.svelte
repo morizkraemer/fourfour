@@ -6,6 +6,7 @@
   double-click resets it. Alt makes − / + and drags fine, Shift makes drags coarse.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { Icon } from '$ds';
   import { tierOf, type Tier } from '../lib/tempo.ts';
 
@@ -20,6 +21,7 @@
     disabled = false,
     stepper = true,
     editText = text,
+    editSignal = 0,
     onStep,
     onSet,
     onReset,
@@ -32,9 +34,10 @@
     disabled?: boolean;
     stepper?: boolean;
     editText?: string;
+    editSignal?: number;
     onStep: (units: number, tier: Tier, fromButton: boolean) => void;
     onSet: (typed: string) => boolean;
-    onReset: () => void;
+    onReset?: () => void;
   } = $props();
 
   let editing = $state(false);
@@ -49,6 +52,13 @@
       inputEl.focus();
       inputEl.select();
     }
+  });
+
+  let seenEditSignal = untrack(() => editSignal);
+  $effect(() => {
+    if (editSignal === seenEditSignal) return;
+    seenEditSignal = editSignal;
+    if (!disabled) startEditing();
   });
 
   function startEditing() {
@@ -87,7 +97,7 @@
     if (event.button !== 0 || disabled || editing) return;
     event.preventDefault();
     if (event.altKey) {
-      onReset();
+      onReset?.();
       return;
     }
     let lastY = event.clientY;
@@ -147,7 +157,7 @@
   function onDoubleClick() {
     if (disabled) return;
     editing = false;
-    onReset();
+    onReset?.();
   }
 </script>
 
@@ -159,7 +169,7 @@
       title={`Lower ${label}`}
       aria-label={`Lower ${label}`}
       {disabled}
-      onclick={(event) => onStep(-1, event.altKey ? 'fine' : 'normal', true)}><Icon name="minus" size={11} /></button>
+      onclick={(event) => onStep(-1, tierOf(event), true)}><Icon name="minus" size={11} /></button>
   {/if}
   <div
     class="ff-tfield__value"
@@ -170,7 +180,7 @@
     tabindex={disabled ? -1 : 0}
     aria-label={label}
     aria-valuetext={text}
-    title={disabled ? undefined : 'Click to type, drag to change, double-click or Alt-click to reset'}
+    title={disabled ? undefined : onReset ? 'Click to type, drag to change, double-click or Alt-click to reset' : 'Click to type, drag to change'}
     onpointerdown={onPointerDown}
     onkeydown={onKeyDown}
     ondblclick={onDoubleClick}>
@@ -199,7 +209,7 @@
       title={`Raise ${label}`}
       aria-label={`Raise ${label}`}
       {disabled}
-      onclick={(event) => onStep(1, event.altKey ? 'fine' : 'normal', true)}><Icon name="plus" size={11} /></button>
+      onclick={(event) => onStep(1, tierOf(event), true)}><Icon name="plus" size={11} /></button>
   {/if}
 </div>
 

@@ -982,12 +982,6 @@ async function invokeOrMock(command: string, args: Record<string, unknown>): Pro
   }
 }
 
-/** Set a track's BPM by hand; re-analysis keeps it and the beat grid is left as it is. */
-export async function setTrackBpm(trackId: number, bpm: number): Promise<void> {
-  await invokeOrMock('set_track_bpm', { trackId, bpm });
-  invalidateAnalysisCache(trackId);
-}
-
 /** Set a track's Camelot key by hand; re-analysis keeps it. */
 export async function setTrackKey(trackId: number, key: string): Promise<void> {
   await invokeOrMock('set_track_key', { trackId, key });
@@ -1005,7 +999,7 @@ export async function releaseUserEdits(trackId: number): Promise<void> {
   invalidateAnalysisCache(trackId);
 }
 
-/** Fit the beat grid to a BPM (explicit; setting the BPM never moves the grid). */
+/** Set a track's own BPM by hand: the beat grid is re-spaced from its first downbeat, re-analysis keeps both. */
 export async function rescaleBeatGrid(trackId: number, bpm: number): Promise<void> {
   await invokeOrMock('rescale_beat_grid', { trackId, bpm });
   invalidateAnalysisCache(trackId);

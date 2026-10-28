@@ -163,6 +163,13 @@ function previewFromAnalysis(analysis: any): number[] | null {
   return previewBytesFromPayload(analysis);
 }
 
+function beatsFromAnalysis(analysis: any): BeatMarker[] {
+  return gridFromStorage(
+    analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({ time_ms: b.time_ms, bar_position: b.bar_position })),
+    analysis.grid_offset_ms,
+  );
+}
+
 function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   const durationMs = analysis.duration_ms ?? base.durationMs;
   const next: PlayerTrack = {
@@ -180,10 +187,7 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   next.bands = next.bandsDetail;
   next.bandsOverview = stripBandsFromAnalysis(analysis) ?? next.bandsDetail;
   if (analysis.beats?.length) {
-    next.beats = gridFromStorage(
-      analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({ time_ms: b.time_ms, bar_position: b.bar_position })),
-      analysis.grid_offset_ms,
-    );
+    next.beats = beatsFromAnalysis(analysis);
   } else {
     // No detected beats — synthesize a grid from BPM so one is always shown.
     const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
@@ -624,6 +628,14 @@ const gridPersister = createGridPersister(setBeatGrid, (err) => {
   console.error('saving the beat grid failed:', err);
   player.error = `Could not save the beat grid: ${err}`;
 });
+
+/** Show the stored grid of the loaded track (after its grid was re-spaced in the library). */
+export async function refreshLoadedBeatGrid(trackId: number): Promise<void> {
+  const fresh = await getAnalysisData(trackId, true);
+  const loaded = player.track;
+  if (!fresh?.beats?.length || !loaded || loaded.id !== trackId) return;
+  player.track = { ...loaded, beats: beatsFromAnalysis(fresh) };
+}
 
 /** Write a pending grid edit now (before another track loads). */
 export function flushBeatGridEdits(): Promise<void> {

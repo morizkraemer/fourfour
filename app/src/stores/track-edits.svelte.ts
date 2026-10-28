@@ -1,16 +1,20 @@
 /**
- * track-edits.svelte.ts — hand-set BPM / key of a track.
+ * track-edits.svelte.ts — hand-set BPM / key of a track. A BPM change re-spaces the beat grid.
  * Persists through the library (re-analysis keeps these) and updates the table
  * row, the inspector and the loaded player track.
  */
 
 import { library, bumpLibraryTracks } from './library.svelte.ts';
-import { player } from './player.svelte.ts';
+import { flushBeatGridEdits, player, refreshLoadedBeatGrid, toggleExpanded } from './player.svelte.ts';
+import { selectedTrack } from './selection.svelte.ts';
+import { tick } from 'svelte';
+import { createPersister } from '../lib/persister.ts';
+import { BPM_MAX, BPM_MIN, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
+import type { Tier } from '../lib/tempo.ts';
 import {
   getAnalysisData,
   releaseUserEdits,
   rescaleBeatGrid,
-  setTrackBpm,
   setTrackKey,
   setTrackRating,
   updateTrackFields,
@@ -37,15 +41,71 @@ function showBpm(trackId: number, bpm: number) {
   if (player.track?.id === trackId) player.track = { ...player.track, bpm: bpm.toFixed(2) };
 }
 
-export async function commitTrackBpm(trackId: number, bpm: number): Promise<boolean> {
+const bpmPersister = createPersister<number>(saveBpmAndGrid, (err) => reportFailure('Setting the BPM', err));
+
+function currentBpm(trackId: number): number {
+  const row = trackById(trackId);
+  if (row?.bpmExact) return row.bpmExact;
+  return player.track?.id === trackId ? Number(player.track.bpm) : NaN;
+}
+
+async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
+  await flushBeatGridEdits();
   try {
-    await setTrackBpm(trackId, bpm);
+    await rescaleBeatGrid(trackId, bpm);
   } catch (err) {
     reportFailure('Setting the BPM', err);
-    return false;
+    const stored = await getAnalysisData(trackId, true);
+    if (stored?.bpm) showBpm(trackId, Number(stored.bpm));
+    return;
   }
+  await refreshLoadedBeatGrid(trackId);
+}
+
+/** Set the track's own BPM: shown at once, the beat grid is re-spaced from its first downbeat and saved once the edits pause. */
+export function commitTrackBpm(trackId: number, bpm: number): boolean {
+  if (!Number.isFinite(bpm) || bpm < BPM_MIN || bpm > BPM_MAX) return false;
   showBpm(trackId, bpm);
+  bpmPersister.schedule(trackId, bpm);
   return true;
+}
+
+export function stepTrackBpm(trackId: number, units: number, tier: Tier): boolean {
+  const current = currentBpm(trackId);
+  return Number.isFinite(current) && commitTrackBpm(trackId, stepBpm(current, units, tier));
+}
+
+export function doubleTrackBpm(trackId: number): boolean {
+  const next = doubleBpm(currentBpm(trackId));
+  return next !== null && commitTrackBpm(trackId, next);
+}
+
+export function halveTrackBpm(trackId: number): boolean {
+  const next = halveBpm(currentBpm(trackId));
+  return next !== null && commitTrackBpm(trackId, next);
+}
+
+export const bpmEntry = $state({ request: 0 });
+
+/** The track the BPM commands act on: the loaded one, else the selected analysed one. */
+export function bpmTargetId(): number | null {
+  const loaded = player.track;
+  if (loaded && Number(loaded.bpm) > 0) return loaded.id;
+  const selected = selectedTrack();
+  return selected?.analyzed && selected.bpmExact ? selected.id : null;
+}
+
+export function loadedTrackHasBpm(): boolean {
+  return Number(player.track?.bpm) > 0;
+}
+
+/** Open the big player and put its track BPM field into typing mode. */
+export async function requestBpmEntry(): Promise<void> {
+  if (!player.expanded) {
+    toggleExpanded();
+    await tick();
+  }
+  bpmEntry.request++;
 }
 
 export async function commitTrackKey(trackId: number, key: string): Promise<boolean> {
@@ -76,26 +136,6 @@ export async function commitTrackRating(trackId: number, rating: number): Promis
   if (track) {
     track.rating = rating;
     bumpLibraryTracks();
-  }
-  return true;
-}
-
-/** Explicit second step: fit the beat grid to the track's BPM. Never done by a BPM change. */
-export async function fitGridToBpm(trackId: number, bpm: number): Promise<boolean> {
-  try {
-    await rescaleBeatGrid(trackId, bpm);
-  } catch (err) {
-    reportFailure('Adjusting the beat grid', err);
-    return false;
-  }
-  showBpm(trackId, bpm);
-  if (player.track?.id === trackId) {
-    const fresh = await getAnalysisData(trackId, true);
-    const beats = fresh?.beats?.map((b: { time_ms: number; bar_position: number }) => ({
-      time_ms: b.time_ms,
-      bar_position: b.bar_position,
-    }));
-    if (beats?.length && player.track?.id === trackId) player.track = { ...player.track, beats };
   }
   return true;
 }
