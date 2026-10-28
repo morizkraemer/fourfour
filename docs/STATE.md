@@ -38,6 +38,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 16. Bar 1: Rekordbox bar 1 matches the model downbeats only 61.7%; "first grid beat = bar 1" matches 78.9%; hybrid 80.0% — rec: listen to ~5 disagreeing tracks on the Mac, then pick (docs/analysis/rust-status-2026-10-28.md) — branch: none
 
+17. [accepted 2026-10-28 per rec] O9: bundle Beat This! weights (+83 MB, MIT, licence file shipped) via tauri.bundle-weights.conf.json + bundle-app.sh; no-backend now errors visibly — rec: keep, check on the next Mac .dmg build — branch: ov-1028
+
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -56,7 +58,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: running · since 2026-10-28 17:40 · cap 2 workers · autonomy tight · base r12-int → integration ov-1028 (scratchpad q41-int)
+status: idle · since 2026-10-28 20:30 UTC · all items done on ov-1028 (232ca15), checks green; nothing left without Merlin or the Mac · cap 2 · tight
 targets: Merlin 2026-10-28: start overnight now; player-layout build only after he approves the next mockup round on viewport
 plan: L2 player-layout mockups (round 2, viewport :5238) → O1 review rounds 12–13 → O2 smoke-test harness → O7 → O1b grid anchor (after O7) → O3 Q33 Rust analyzer finish + measure (report) → O4 perf pass 10k tracks → O5 Q8 CI (branch only) → O6 housekeeping → O8 truncated decode → O9 bundle weights; O7 build layout-2 option A (approved 2026-10-28, starts after O1 lands: same files), then own priorities
 pm: 2026-10-28 19:45 UTC resumed after seat limit; O8 + O9 running; O1–O7 on ov-1028; Mac install pending (Mac offline)
@@ -73,4 +75,6 @@ decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync f
 ### Q47 Housekeeping [done, a72200e: 27 worktrees removed, STATE 96→64 lines, disk 47%] [box] — remove merged worktrees + caches (check uncommitted/ignored first), disk < 70%; trim STATE.md to ≤80 lines (history → journal/docs). 45 min
 
 ## Rundown
-Overnight (q42-overnight dc818de, installed on the Mac): stick sync for real (All tracks + playlists, stick id, capacity, dry run), zoom waveform 2400 col/s, ⌥ deletes hot cues, ribbon covers + quiet drop slot, row/player waveform scaling, 16 review fixes (incl. stick playlists wiped on save, PDB rows > page, wipe guard home dir, removable-only writes), tempo engine robustness, unsigned .dmg (32 MB). Key: no licence-clean model beats 58.3% (best 55.8%). Next: Merlin tests on the Mac → merge q42-overnight to master.
+Overnight 2026-10-28 (ov-1028 232ca15, branch only, not on master): round 12–13 bug review (3 fixes), grid anchor persisted (×2/÷2 exact), new big-player layout A (pencil BPM/key, memory cue chips, no edit mode), Playwright smoke harness (13 flows), 10k perf pass (import 15.6 s → 0.5 s, save ~300 → 20 ms), Rust analyzer status (grid ±20 ms 80.5%, key 58.3%), truncated audio survives, weights bundled. CI on separate branch ov-ci (needs push OK).
+Checks: 700 vitest, smoke 13/13, cargo all ok, cut-wav BPM/grid with real weights ok. One cargo test failed once under load (unidentified).
+Next: install ov-1028 on the Mac (offline overnight) → Merlin tests → merge to master; decisions 15–17 + bar 1 (16).
