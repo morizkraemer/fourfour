@@ -303,9 +303,17 @@ describe('bandsFromDetailBytes', () => {
     expect(two.bottom![0]).toBeCloseTo(-10 / 127, 6);
     expect(two.top![1]).toBeCloseTo(50 / 127, 6);
     expect(two.bottom![1]).toBeCloseTo(-60 / 127, 6);
+  });
+  it('draws a pixel narrower than a column as the straight line between the column centres across it', () => {
+    const bands = bandsFromDetailBytes(detailFile([1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0], [-10, 20, -60, 5], [30, 40, -20, 50]))!;
     const eight = reduceBands(bands, 0, 1, 8, ZOOM_PEAK_WEIGHT);
-    expect(eight.top![5]).toBeCloseTo(-20 / 127, 6);
+    expect(eight.top![5]).toBeCloseTo(15 / 127, 6);
     expect(eight.bottom![5]).toBeCloseTo(-60 / 127, 6);
+    expect(eight.top![4]).toBeCloseTo(10 / 127, 6);
+    for (let p = 1; p < 7; p++) {
+      expect(eight.bottom![p]).toBeLessThanOrEqual(eight.top![p - 1] + 1e-6);
+      expect(eight.top![p]).toBeGreaterThanOrEqual(eight.bottom![p - 1] - 1e-6);
+    }
   });
   it('rejects a damaged or foreign file', () => {
     const good = detailFile([1, 2], [1, 2], [1, 2]);
