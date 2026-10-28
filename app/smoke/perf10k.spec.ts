@@ -1,6 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import type { Page } from '@playwright/test';
 import { expect, rows, sidebarPlaylist, test } from './app.ts';
+import { fixtureAnalysis, fixtureState } from './fixture.ts';
+import { installTauriMock } from './tauri-mock.ts';
 
 const TRACKS = Number(process.env.FF_PERF_TRACKS ?? 0);
 const REPORT = process.env.FF_PERF_OUT;
@@ -46,15 +48,20 @@ const blockingSince = (page: Page, since: number) =>
 
 const now = (page: Page) => page.evaluate(() => performance.now());
 
+type Profile = { nodes: { id: number; children?: number[]; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples: number[]; timeDeltas: number[] };
+
 async function profiled(page: Page, name: string, run: () => Promise<void>) {
   if (process.env.FF_PERF_PROFILE !== name) return run();
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.start');
   await run();
-  const { profile } = (await cdp.send('Profiler.stop')) as {
-    profile: { nodes: { id: number; children?: number[]; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples: number[]; timeDeltas: number[] };
-  };
+  const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  printProfile(name, profile);
+  await cdp.detach();
+}
+
+function printProfile(name: string, profile: Profile) {
   const selfMs = new Map<number, number>();
   profile.samples.forEach((id, i) => selfMs.set(id, (selfMs.get(id) ?? 0) + profile.timeDeltas[i] / 1000));
   const byId = new Map(profile.nodes.map((n) => [n.id, n]));
@@ -76,7 +83,6 @@ async function profiled(page: Page, name: string, run: () => Promise<void>) {
       .slice(0, 14);
   const fmt = (rows: { ms: number; text: string }[]) => rows.map((r) => `${r.ms.toFixed(1).padStart(8)} ms  ${r.text}`).join('\n');
   console.log(`profile ${name} self\n${fmt(rank((id) => selfMs.get(id) ?? 0))}\nprofile ${name} inclusive\n${fmt(rank(total))}`);
-  await cdp.detach();
 }
 
 async function cdpMetrics(page: Page) {
@@ -234,5 +240,19 @@ test.describe('perf at scale', () => {
 
     console.log(JSON.stringify(results, null, 2));
     if (REPORT) writeFileSync(REPORT, JSON.stringify(results, null, 2));
+  });
+
+  test('boot profile', async ({ page }) => {
+    test.skip(process.env.FF_PERF_PROFILE !== 'boot', 'set FF_PERF_PROFILE=boot');
+    await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
+    await page.addInitScript(installTauriMock, fixtureState());
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.start');
+    await page.goto('/');
+    await page.locator('[data-track-row]').first().waitFor();
+    await page.waitForTimeout(500);
+    const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+    printProfile('boot', profile);
   });
 });
