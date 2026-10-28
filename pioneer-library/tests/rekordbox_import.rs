@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use pioneer_library::LocalLibrary;
-use pioneer_library::rekordbox::{self, ImportOptions, SourceKind};
+use pioneer_library::rekordbox::{self, ImportOptions, PathRemap, SourceKind};
 use pioneer_usb_writer::models::{
     AnalysisResult, Beat, BeatGrid, CuePoint, Playlist, Track, WaveformPreview,
 };
@@ -185,10 +185,13 @@ fn master_db_fixture() -> MasterDbFixture {
     MasterDbFixture { _root: root, db, share, audio }
 }
 
+fn remap(from: &str, to: &Path) -> PathRemap {
+    PathRemap { from_prefix: from.into(), to_prefix: to.to_string_lossy().to_string() }
+}
+
 fn options(fixture: &MasterDbFixture) -> ImportOptions {
     ImportOptions {
-        remap_from: None,
-        remap_to: Some(fixture.audio.to_string_lossy().to_string()),
+        remaps: vec![remap("", &fixture.audio)],
         include_missing: false,
     }
 }
@@ -215,7 +218,13 @@ fn masterdb_preview_reports_counts_remap_and_missing_files() {
     assert_eq!(preview.files_missing, 1);
     assert_eq!(preview.missing_examples.len(), 1);
     assert_eq!(preview.detected_root, "/Users/dj/Music");
-    assert_eq!(preview.remap.as_ref().unwrap().from_prefix, "/Users/dj/Music");
+    assert_eq!(preview.remap_stats.len(), 1);
+    assert_eq!(preview.remap_stats[0].from_prefix, "/Users/dj/Music");
+    assert_eq!(
+        (preview.remap_stats[0].tracks, preview.remap_stats[0].files_found, preview.remap_stats[0].files_missing),
+        (3, 2, 1)
+    );
+    assert_eq!(preview.unmapped.tracks, 0);
     assert_eq!((preview.playlists, preview.folders, preview.skipped_smart_playlists), (2, 1, 1));
     assert_eq!((preview.hot_cues, preview.memory_cues), (2, 1));
     assert_eq!(preview.tracks_with_grid, 1);
@@ -383,13 +392,74 @@ fn caller_can_name_the_prefix_to_replace() {
     let source = rekordbox::load_masterdb(&fx.db, Some(&fx.share)).unwrap();
     let (_dir, library) = file_library();
     let mut opts = options(&fx);
-    opts.remap_from = Some("/users/DJ/music/house".into());
-    opts.remap_to = Some(fx.audio.join("House").to_string_lossy().to_string());
+    opts.remaps = vec![remap("/users/DJ/music/house", &fx.audio.join("House"))];
 
     let preview = library.rekordbox_preview(&source, &opts).unwrap();
 
     assert_eq!(preview.files_found, 1);
-    assert_eq!(preview.remap.unwrap().from_prefix, "/users/DJ/music/house");
+    assert_eq!(preview.remap_stats[0].from_prefix, "/users/DJ/music/house");
+    assert_eq!(preview.unmapped.tracks, 2);
+}
+
+#[test]
+fn several_roots_map_to_their_own_folders_and_report_per_row() {
+    let fx = master_db_fixture();
+    let techno = fx._root.path().join("elsewhere");
+    std::fs::create_dir_all(&techno).unwrap();
+    std::fs::rename(fx.audio.join("Techno/Beta.wav"), techno.join("Beta.wav")).unwrap();
+    let source = rekordbox::load_masterdb(&fx.db, Some(&fx.share)).unwrap();
+    let (_dir, library) = file_library();
+    let mut opts = options(&fx);
+    opts.remaps = vec![
+        remap("/Users/dj/Music/House", &fx.audio.join("House")),
+        remap("/Users/dj/Music/Techno", &techno),
+        remap("/Users/dj/Music/Nowhere", &fx.audio),
+    ];
+
+    let preview = library.rekordbox_preview(&source, &opts).unwrap();
+
+    let stats: Vec<_> = preview
+        .remap_stats
+        .iter()
+        .map(|r| (r.tracks, r.files_found, r.files_missing))
+        .collect();
+    assert_eq!(stats, vec![(1, 1, 0), (1, 1, 0), (0, 0, 0)]);
+    assert_eq!((preview.unmapped.tracks, preview.unmapped.files_missing), (1, 1));
+    assert_eq!((preview.files_found, preview.files_missing), (2, 1));
+
+    let report = library.import_rekordbox_from(&source, &opts, &no_progress).unwrap();
+    assert_eq!(report.tracks_imported, 2);
+    let paths: Vec<_> = library
+        .get_all_tracks()
+        .unwrap()
+        .into_iter()
+        .map(|t| t.source_path)
+        .collect();
+    assert!(paths.contains(&techno.join("Beta.wav")));
+    assert!(paths.contains(&fx.audio.join("House/ALPHA.wav")));
+}
+
+#[test]
+fn nfd_and_nfc_file_names_match_in_library_and_on_disk() {
+    let fx = master_db_fixture();
+    let nfc = fx.audio.join("Techno/B\u{e9}ta.wav");
+    std::fs::rename(fx.audio.join("Techno/Beta.wav"), fx.audio.join("Techno/Be\u{301}ta.wav")).unwrap();
+    let conn = Connection::open(&fx.db).unwrap();
+    conn.execute_batch(&format!("PRAGMA key = '{MASTER_DB_KEY}';")).unwrap();
+    conn.execute("UPDATE djmdContent SET FolderPath = ?1 WHERE ID = '101'", params!["/Users/dj/Music/Techno/B\u{e9}ta.wav"])
+        .unwrap();
+    drop(conn);
+    let source = rekordbox::load_masterdb(&fx.db, Some(&fx.share)).unwrap();
+    let (_dir, library) = file_library();
+
+    let preview = library.rekordbox_preview(&source, &options(&fx)).unwrap();
+    assert_eq!(preview.files_found, 2);
+    library.import_rekordbox_from(&source, &options(&fx), &no_progress).unwrap();
+
+    let existing = library.get_all_tracks().unwrap();
+    assert!(existing.iter().any(|t| t.source_path.to_string_lossy().contains("Be\u{301}ta") || t.source_path == nfc));
+    let second = library.rekordbox_preview(&source, &options(&fx)).unwrap();
+    assert_eq!(second.conflicts, 2);
 }
 
 #[test]

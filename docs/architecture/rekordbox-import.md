@@ -71,8 +71,7 @@ Rekordbox stores absolute paths from the machine it ran on.
 - `detect_common_root(paths)` returns the longest shared directory, compared
   per path component, case-insensitively, `/` and `\` treated alike.
 - `PathRemap { from_prefix, to_prefix }.apply(path)` swaps the prefix,
-  case-insensitively. `ImportOptions.remap_from` defaults to the detected
-  root; `remap_to` is the caller's replacement root. Without `remap_to`, paths
+  case-insensitively. The caller's rules replace the prefix. Without a rule, paths
   are used as they are, or the source's implied remap: for `master.db` the
   `djmdProperty` `BaseDBDrive` → `CurrentDBDrive` swap when both are set (idea
   from rbxport's design; no code taken), for a USB stick the stick root.
@@ -82,8 +81,16 @@ Rekordbox stores absolute paths from the machine it ran on.
   examples. Tracks whose file is missing are skipped unless
   `include_missing` is set.
 
-When a library spans several roots (see the test below) the detected root is
-only their common parent. Pass `remap_from` explicitly.
+When a library spans several roots the detected root is only their common
+parent. `ImportOptions.remaps` takes a list of "old location -> new folder"
+rules; the first rule whose prefix matches a path wins, paths no rule matches
+keep the source's implied remap or their own path. An empty `from_prefix` means
+the detected root. The preview returns `remap_stats` (tracks, files found and
+missing per rule) and `unmapped`. The import dialog shows one row per rule and
+pre-fills `master.db` from `~/Library/Pioneer/rekordbox/` when it exists.
+
+File names and prefixes are compared as NFC and lowercase (`remap::fold`), so
+macOS NFD names match NFC ones on either side, in the library index and on disk.
 
 ## Merge policy
 
@@ -161,11 +168,9 @@ Run time about 40 s in a debug build for the import itself.
 - `export.pdb`-only sticks (no reader in the writer crate).
 - RGB for database cue colours (only the palette index is kept) and for hot
   cues in the library's own ANLZ output.
-- Ratings and colour labels are stored but not shown in the UI yet.
-- Only one remap prefix per run; libraries spread over several roots need one
-  run per root (Merlin's needs two more for the 698 + 32 tracks).
-- File names with different Unicode normalisation (macOS NFD vs NFC) are not
-  matched.
+- Ratings and colour labels are shown read-only (Rating and Colour columns,
+  hidden by default) but cannot be edited: they live in `imported.json`, and
+  the library schema has no field for them.
 - Imported tracks count as analysed, so the app will not queue them for
   analysis by itself.
 - Cues without an ANLZ analysis stay in `imported.json` until the track is

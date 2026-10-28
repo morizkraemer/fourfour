@@ -676,6 +676,8 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     fav: undefined,
     genre: t.genre || '—',
     year: '—',
+    rating: t.rating ?? 0,
+    color: t.color ?? null,
     filePath: t.source_path,
     comment: '',
     analyzed,

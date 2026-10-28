@@ -54,6 +54,10 @@ export interface TrackInfo {
   waveform_preview?: string | number[] | null;
   /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */
   waveform_bands?: string | number[] | null;
+  /** Rekordbox star rating 1-5, absent when unrated. */
+  rating?: number;
+  /** Rekordbox colour label: a colour name or `#rrggbb`. */
+  color?: string;
 }
 
 export interface PlaylistInput {
@@ -1177,9 +1181,16 @@ export type RekordboxSourceKind = 'master_db' | 'usb' | 'xml';
 export type RekordboxImportRequest = {
   kind: RekordboxSourceKind;
   path: string;
-  remap_from?: string | null;
-  remap_to?: string | null;
+  remaps: RekordboxRemap[];
   include_missing: boolean;
+};
+
+export type RekordboxRemap = { from_prefix: string; to_prefix: string };
+
+export type RekordboxRemapStat = RekordboxRemap & {
+  tracks: number;
+  files_found: number;
+  files_missing: number;
 };
 
 export type RekordboxImportPreview = {
@@ -1192,7 +1203,8 @@ export type RekordboxImportPreview = {
   memory_cues: number;
   tracks_with_grid: number;
   detected_root: string;
-  remap: { from_prefix: string; to_prefix: string } | null;
+  remap_stats: RekordboxRemapStat[];
+  unmapped: RekordboxRemapStat;
   files_found: number;
   files_missing: number;
   missing_examples: string[];
@@ -1217,9 +1229,52 @@ export type RekordboxImportReport = {
 
 export type RekordboxImportProgress = { stage: string; done: number; total: number };
 
+export async function rekordboxDefaultMasterDb(): Promise<string | null> {
+  if (useBrowserMocks()) return '/Users/merlin/Library/Pioneer/rekordbox/master.db';
+  try {
+    return await invoke<string | null>('rekordbox_default_master_db');
+  } catch (err) {
+    lastTauriError = `rekordbox_default_master_db fail: ${String(err)}`;
+    return null;
+  }
+}
+
+function mockRekordboxPreview(request: RekordboxImportRequest): RekordboxImportPreview {
+  const stat = (from: string, to: string, tracks: number, missing: number): RekordboxRemapStat => ({
+    from_prefix: from,
+    to_prefix: to,
+    tracks,
+    files_found: tracks - missing,
+    files_missing: missing,
+  });
+  const rules = request.remaps.map((r, i) => stat(r.from_prefix, r.to_prefix, [631, 698, 32][i] ?? 0, [21, 4, 0][i] ?? 0));
+  const caught = rules.reduce((n, r) => n + r.tracks, 0);
+  const missing = rules.reduce((n, r) => n + r.files_missing, 0);
+  return {
+    source: request.kind,
+    tracks: 1382,
+    playlists: 4,
+    folders: 1,
+    skipped_smart_playlists: 0,
+    hot_cues: 212,
+    memory_cues: 340,
+    tracks_with_grid: 1374,
+    detected_root: '/Users/merlinkraemer/local/2-Areas/1-Mukke',
+    remap_stats: rules,
+    unmapped: stat('', '', 1382 - caught, 1382 - caught),
+    files_found: caught - missing,
+    files_missing: 1382 - caught + missing,
+    missing_examples: [],
+    conflicts: 120,
+    new_tracks: 1262,
+    playlist_conflicts: 1,
+  };
+}
+
 export async function rekordboxImportPreview(
   request: RekordboxImportRequest,
 ): Promise<RekordboxImportPreview> {
+  if (useBrowserMocks()) return mockRekordboxPreview(request);
   try {
     return await invoke<RekordboxImportPreview>('rekordbox_import_preview', { request });
   } catch (err) {
@@ -1231,6 +1286,21 @@ export async function rekordboxImportPreview(
 export async function rekordboxImportRun(
   request: RekordboxImportRequest,
 ): Promise<RekordboxImportReport> {
+  if (useBrowserMocks()) {
+    return {
+      tracks_imported: 1262,
+      tracks_merged: 120,
+      tracks_skipped_missing: 0,
+      files_found: 1382,
+      files_missing: 0,
+      playlists_imported: 3,
+      playlists_merged: 1,
+      grids_imported: 1374,
+      hot_cues_imported: 212,
+      memory_cues_imported: 340,
+      cues_without_analysis: 0,
+    };
+  }
   try {
     return await invoke<RekordboxImportReport>('rekordbox_import_run', { request });
   } catch (err) {

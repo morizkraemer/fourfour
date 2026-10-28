@@ -30,6 +30,7 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
                 Some(RowPreview::Mono(mono)) => (None, Some(mono)),
                 Some(RowPreview::None) | None => (None, None),
             };
+            let imported = lib.imported_meta(i64::from(track.id));
             TrackInfo {
                 id: track.id,
                 source_path: track.source_path.to_string_lossy().to_string(),
@@ -48,6 +49,8 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
                 analysis_pending: pending.contains(&i64::from(track.id)),
                 waveform_preview,
                 waveform_bands,
+                rating: imported.as_ref().and_then(|m| m.rating).filter(|&r| r > 0),
+                color: imported.and_then(|m| m.color),
             }
         })
         .collect())

@@ -103,6 +103,8 @@ fn scan_directory(
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         });
     }
 
@@ -162,6 +164,8 @@ fn scan_files(
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         });
     }
 
@@ -599,6 +603,21 @@ fn load_rekordbox_source(request: &RekordboxImportRequest) -> Result<rekordbox::
         rekordbox::SourceKind::Xml => rekordbox::load_xml(path),
     };
     loaded.map_err(|e| format!("{e:#}"))
+}
+
+/// Rekordbox's own `master.db` when it sits in the usual place on this machine.
+#[tauri::command]
+fn rekordbox_default_master_db() -> Option<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let appdata = std::env::var_os("APPDATA").map(PathBuf::from);
+    [
+        home.map(|h| h.join("Library/Pioneer/rekordbox/master.db")),
+        appdata.map(|a| a.join("Pioneer/rekordbox/master.db")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|p| p.is_file())
+    .map(|p| p.to_string_lossy().to_string())
 }
 
 /// Read a Rekordbox library and compare it with the local library without changing anything.
@@ -1208,6 +1227,7 @@ fn main() {
             save_state,
             load_state,
             app_version,
+            rekordbox_default_master_db,
             rekordbox_import_preview,
             rekordbox_import_run,
             read_usb_state,

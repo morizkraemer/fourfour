@@ -13,6 +13,7 @@ import {
   minWidthForColumn,
   measureColumnContentWidth,
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
+import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { library, playlistByName } from './library.svelte.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
@@ -64,6 +65,8 @@ export const ALL_COLUMN_KEYS: { key: string; label: string }[] = [
   { key: 'label', label: 'Label' },
   { key: 'genre', label: 'Genre' },
   { key: 'year', label: 'Year' },
+  { key: 'rating', label: 'Rating' },
+  { key: 'color', label: 'Colour' },
   { key: 'bpm', label: 'BPM' },
   { key: 'key', label: 'Key' },
   { key: 'time', label: 'Time' },
@@ -241,6 +244,8 @@ function extraColumnDef(key: string): TableColumn | null {
     album: 160,
     genre: 100,
     year: 48,
+    rating: 60,
+    color: 36,
   };
   return {
     key: meta.key,
@@ -459,6 +464,11 @@ function sortValue(track: Record<string, unknown>, key: string): string | number
   }
   if (key === 'key') return camelotRank(text);
   if (key === 'time') return durationSeconds(text);
+  if (key === 'rating') {
+    const n = parseInt(text, 10);
+    return n > 0 ? n : null;
+  }
+  if (key === 'color') return labelColorRank(text);
   if (key === 'index' || key === 'year') {
     const n = parseInt(text, 10);
     return Number.isFinite(n) ? n : null;

@@ -4,42 +4,52 @@
   Opened from Settings → Library.
 -->
 <script>
-  import { Dialog, Button, SegmentedControl, ProgressBar } from '$ds';
+  import { Dialog, Button, Icon, SegmentedControl, ProgressBar } from '$ds';
   import {
     rekordboxImport,
     REKORDBOX_SOURCES,
+    rowStats,
     closeRekordboxImport,
     setRekordboxKind,
     setRekordboxIncludeMissing,
     chooseRekordboxSource,
-    chooseRekordboxMusicRoot,
-    scanRekordboxSource,
+    addRekordboxRemapRow,
+    removeRekordboxRemapRow,
+    chooseRekordboxRemapTarget,
+    rescanRekordboxRemap,
     runRekordboxImport,
   } from '../stores/rekordbox-import.svelte.ts';
 
   const MISSING_CHOICES = ['Skip missing files', 'Keep missing files'];
+  const STAGE_LABELS = {
+    reading: 'Reading library',
+    analysis: 'Reading beat grids',
+    tracks: 'Importing tracks',
+    playlists: 'Importing playlists',
+  };
 
   let kindIndex = $derived(REKORDBOX_SOURCES.findIndex((s) => s.kind === rekordboxImport.kind));
   let busy = $derived(rekordboxImport.phase === 'scanning' || rekordboxImport.phase === 'importing');
-  let needsMusicRoot = $derived(rekordboxImport.kind !== 'usb');
+  let needsLocations = $derived(rekordboxImport.kind !== 'usb');
   let preview = $derived(rekordboxImport.preview);
   let report = $derived(rekordboxImport.report);
+  let stats = $derived(rowStats());
   let canImport = $derived(rekordboxImport.phase === 'ready' && !!preview && preview.tracks > 0);
-  let percent = $derived(
-    rekordboxImport.progress && rekordboxImport.progress.total > 0
-      ? (rekordboxImport.progress.done / rekordboxImport.progress.total) * 100
-      : 0,
+  let importCount = $derived(
+    preview ? (rekordboxImport.includeMissing ? preview.tracks : preview.files_found) : 0,
   );
+  let progress = $derived(rekordboxImport.progress);
+  let percent = $derived(progress && progress.total > 0 ? (progress.done / progress.total) * 100 : 0);
   let sourceHint = $derived(
     rekordboxImport.kind === 'master_db'
-      ? 'Choose master.db from your Rekordbox folder.'
+      ? 'Choose master.db from your Rekordbox folder'
       : rekordboxImport.kind === 'usb'
-        ? 'Choose the root folder of the stick.'
-        : 'Choose a rekordbox.xml export.',
+        ? 'Choose the root folder of the stick'
+        : 'Choose a rekordbox.xml export',
   );
 
-  function onPrefixKeydown(e) {
-    if (e.key === 'Enter') void scanRekordboxSource();
+  function onFromKeydown(e) {
+    if (e.key === 'Enter') void rescanRekordboxRemap();
   }
 </script>
 
@@ -52,68 +62,109 @@
   {#snippet body()}
     <div class="ff-rbimport">
       {#if rekordboxImport.phase === 'done' && report}
-        <p class="ff-rbimport__lead">Import finished.</p>
-        <dl class="ff-rbimport__stats">
-          <dt>Tracks added</dt><dd>{report.tracks_imported}</dd>
-          <dt>Tracks merged</dt><dd>{report.tracks_merged}</dd>
-          <dt>Skipped (file missing)</dt><dd>{report.tracks_skipped_missing}</dd>
-          <dt>Playlists added / merged</dt><dd>{report.playlists_imported} / {report.playlists_merged}</dd>
-          <dt>Beat grids</dt><dd>{report.grids_imported}</dd>
-          <dt>Hot / memory cues</dt><dd>{report.hot_cues_imported} / {report.memory_cues_imported}</dd>
-        </dl>
+        <div class="ff-rbimport__section">Import finished</div>
+        <div class="ff-rbimport__tiles">
+          <div class="ff-rbimport__tile"><b>{report.tracks_imported}</b><span>Tracks added</span></div>
+          <div class="ff-rbimport__tile"><b>{report.tracks_merged}</b><span>Tracks merged</span></div>
+          <div class="ff-rbimport__tile"><b>{report.playlists_imported + report.playlists_merged}</b><span>Playlists</span></div>
+          <div class="ff-rbimport__tile"><b>{report.grids_imported}</b><span>Beat grids</span></div>
+          <div class="ff-rbimport__tile"><b>{report.hot_cues_imported}</b><span>Hot cues</span></div>
+          <div class="ff-rbimport__tile"><b>{report.memory_cues_imported}</b><span>Memory cues</span></div>
+          <div class="ff-rbimport__tile" class:ff-rbimport__tile--warn={report.tracks_skipped_missing > 0}>
+            <b>{report.tracks_skipped_missing}</b><span>Skipped, file missing</span>
+          </div>
+          <div class="ff-rbimport__tile"><b>{report.files_found}</b><span>Files found</span></div>
+        </div>
       {:else}
-        <SegmentedControl
-          items={REKORDBOX_SOURCES.map((s) => s.label)}
-          activeIndex={kindIndex}
-          disabled={busy}
-          onChange={(i) => setRekordboxKind(REKORDBOX_SOURCES[i].kind)}
-        />
-
-        <div class="ff-rbimport__row">
-          <span class="ff-rbimport__path" title={rekordboxImport.path}>
-            {rekordboxImport.path || sourceHint}
-          </span>
-          <Button label="Choose…" size="small" disabled={busy} onclick={() => void chooseRekordboxSource()} />
+        <div class="ff-rbimport__sources">
+          <SegmentedControl
+            items={REKORDBOX_SOURCES.map((s) => s.label)}
+            activeIndex={kindIndex}
+            disabled={busy}
+            onChange={(i) => setRekordboxKind(REKORDBOX_SOURCES[i].kind)}
+          />
         </div>
 
-        {#if needsMusicRoot}
-          <div class="ff-rbimport__row">
-            <span class="ff-rbimport__path" title={rekordboxImport.musicRoot}>
-              {rekordboxImport.musicRoot || 'Folder where your music is now'}
-            </span>
-            <Button label="Choose…" size="small" disabled={busy} onclick={() => void chooseRekordboxMusicRoot()} />
+        <div class="ff-rbimport__section">Library</div>
+        <div class="ff-rbimport__field">
+          <span class="ff-rbimport__path" class:ff-rbimport__path--empty={!rekordboxImport.path} title={rekordboxImport.path}>
+            {rekordboxImport.path || sourceHint}
+          </span>
+          <Button label={rekordboxImport.path ? 'Change…' : 'Choose…'} size="small" disabled={busy} onclick={() => void chooseRekordboxSource()} />
+        </div>
+
+        {#if needsLocations && preview}
+          <div class="ff-rbimport__section">Where your music is now</div>
+          <div class="ff-rbimport__rows">
+            {#each rekordboxImport.rows as row, i}
+              {@const stat = stats[i]}
+              <div class="ff-rbimport__row">
+                <input
+                  class="ff-rbimport__from"
+                  type="text"
+                  spellcheck="false"
+                  autocomplete="off"
+                  placeholder="Old location in Rekordbox"
+                  title={row.from}
+                  bind:value={row.from}
+                  disabled={busy}
+                  onkeydown={onFromKeydown}
+                  onchange={() => void rescanRekordboxRemap()}
+                />
+                <Icon name="chevron-right" size={12} />
+                <div class="ff-rbimport__field ff-rbimport__field--row">
+                  <span class="ff-rbimport__path" class:ff-rbimport__path--empty={!row.to} title={row.to}>
+                    {row.to || 'New folder'}
+                  </span>
+                  <Button label={row.to ? 'Change…' : 'Choose…'} size="small" disabled={busy} onclick={() => void chooseRekordboxRemapTarget(i)} />
+                </div>
+                <Button
+                  icon="x"
+                  variant="ghost"
+                  size="small"
+                  ariaLabel="Remove location"
+                  disabled={busy || rekordboxImport.rows.length === 1}
+                  onclick={() => void removeRekordboxRemapRow(i)}
+                />
+                {#if stat}
+                  <span class="ff-rbimport__rowstat">
+                    {stat.files_found} found
+                    <span class:ff-rbimport__missing={stat.files_missing > 0}>· {stat.files_missing} missing</span>
+                  </span>
+                {/if}
+              </div>
+            {/each}
           </div>
-          {#if preview}
-            <label class="ff-rbimport__field">
-              <span>Rekordbox path to replace</span>
-              <input
-                type="text"
-                spellcheck="false"
-                autocomplete="off"
-                bind:value={rekordboxImport.prefix}
-                disabled={busy}
-                onkeydown={onPrefixKeydown}
-                onchange={() => void scanRekordboxSource()}
-              />
-            </label>
-          {/if}
+          <div class="ff-rbimport__add">
+            <Button icon="plus" label="Add location" variant="ghost" size="small" disabled={busy} onclick={addRekordboxRemapRow} />
+          </div>
         {/if}
 
         {#if preview}
-          <dl class="ff-rbimport__stats">
-            <dt>Tracks</dt><dd>{preview.tracks} ({preview.new_tracks} new, {preview.conflicts} already in library)</dd>
-            <dt>Files found / missing</dt><dd>{preview.files_found} / {preview.files_missing}</dd>
-            <dt>Playlists</dt><dd>{preview.playlists}{preview.folders > 0 ? `, ${preview.folders} folders flattened` : ''}</dd>
-            <dt>Beat grids</dt><dd>{preview.tracks_with_grid}</dd>
-            <dt>Hot / memory cues</dt><dd>{preview.hot_cues} / {preview.memory_cues}</dd>
-          </dl>
+          <div class="ff-rbimport__section">Preview</div>
+          <div class="ff-rbimport__tiles">
+            <div class="ff-rbimport__tile"><b>{preview.tracks}</b><span>Tracks</span></div>
+            <div class="ff-rbimport__tile"><b>{preview.new_tracks}</b><span>New</span></div>
+            <div class="ff-rbimport__tile"><b>{preview.conflicts}</b><span>Already in library</span></div>
+            <div class="ff-rbimport__tile">
+              <b>{preview.playlists}</b><span>Playlists{preview.folders > 0 ? ` in ${preview.folders} ${preview.folders === 1 ? 'folder' : 'folders'}` : ''}</span>
+            </div>
+            <div class="ff-rbimport__tile"><b>{preview.files_found}</b><span>Files found</span></div>
+            <div class="ff-rbimport__tile" class:ff-rbimport__tile--warn={preview.files_missing > 0}>
+              <b>{preview.files_missing}</b><span>Files missing</span>
+            </div>
+            <div class="ff-rbimport__tile"><b>{preview.tracks_with_grid}</b><span>Beat grids</span></div>
+            <div class="ff-rbimport__tile"><b>{preview.hot_cues} / {preview.memory_cues}</b><span>Hot / memory cues</span></div>
+          </div>
           {#if preview.files_missing > 0}
-            <SegmentedControl
-              items={MISSING_CHOICES}
-              activeIndex={rekordboxImport.includeMissing ? 1 : 0}
-              disabled={busy}
-              onChange={(i) => setRekordboxIncludeMissing(i === 1)}
-            />
+            <div class="ff-rbimport__missing-choice">
+              <SegmentedControl
+                items={MISSING_CHOICES}
+                activeIndex={rekordboxImport.includeMissing ? 1 : 0}
+                disabled={busy}
+                onChange={(i) => setRekordboxIncludeMissing(i === 1)}
+              />
+            </div>
           {/if}
           <p class="ff-rbimport__note">
             Tracks already in your library keep your edits; only empty fields are filled. Nothing is deleted.
@@ -122,12 +173,13 @@
 
         {#if rekordboxImport.phase === 'scanning'}
           <ProgressBar variant="indeterminate" />
+          <p class="ff-rbimport__note">Reading library…</p>
         {:else if rekordboxImport.phase === 'importing'}
           <ProgressBar value={percent} />
           <p class="ff-rbimport__note">
-            {rekordboxImport.progress
-              ? `${rekordboxImport.progress.stage}: ${rekordboxImport.progress.done}/${rekordboxImport.progress.total}`
-              : 'Reading…'}
+            {progress
+              ? `${STAGE_LABELS[progress.stage] ?? progress.stage}${progress.total > 0 ? `: ${progress.done} of ${progress.total}` : ''}`
+              : 'Reading library…'}
           </p>
         {/if}
 
@@ -143,7 +195,7 @@
     {:else}
       <Button label="Cancel" variant="ghost" disabled={busy} onclick={closeRekordboxImport} />
       <Button
-        label={rekordboxImport.phase === 'importing' ? 'Importing…' : 'Import'}
+        label={rekordboxImport.phase === 'importing' ? 'Importing…' : canImport ? `Import ${importCount} tracks` : 'Import'}
         variant="primary"
         disabled={!canImport || busy}
         onclick={() => void runRekordboxImport()}
@@ -156,63 +208,147 @@
   .ff-rbimport {
     display: flex;
     flex-direction: column;
-    gap: var(--ff-space-3);
+    gap: var(--ff-space-4);
+    padding-top: var(--ff-space-3);
+    font-family: var(--ff-font);
+    font-size: var(--ff-type-row);
   }
 
-  .ff-rbimport__row {
+  .ff-rbimport__sources {
     display: flex;
-    align-items: center;
-    gap: var(--ff-space-3);
+    justify-content: flex-start;
+    margin-bottom: var(--ff-space-2);
   }
 
-  .ff-rbimport__path {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ff-text-mid);
+  .ff-rbimport__section {
+    margin-top: var(--ff-space-4);
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-label);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ff-muted);
   }
 
   .ff-rbimport__field {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    align-items: center;
+    gap: var(--ff-space-4);
+    min-width: 0;
+    padding: 3px 3px 3px 10px;
+    background: var(--ff-bg);
+    border: 1px solid var(--ff-border-hi);
+    border-radius: var(--ff-radius-md);
   }
 
-  .ff-rbimport__field input {
-    font: inherit;
+  .ff-rbimport__field--row {
+    flex: 1 1 0;
+  }
+
+  .ff-rbimport__path {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-caption);
+    color: var(--ff-text);
+  }
+
+  .ff-rbimport__path--empty {
+    font-family: var(--ff-font);
+    color: var(--ff-faint);
+  }
+
+  .ff-rbimport__rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ff-space-5);
+  }
+
+  .ff-rbimport__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ff-space-4);
+    color: var(--ff-muted);
+  }
+
+  .ff-rbimport__from {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 10px;
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-caption);
     color: var(--ff-text);
     background: var(--ff-bg);
     border: 1px solid var(--ff-border-hi);
     border-radius: var(--ff-radius-md);
-    padding: 6px 8px;
+    outline: none;
   }
 
-  .ff-rbimport__lead {
-    margin: 0;
-    color: var(--ff-text);
+  .ff-rbimport__from:focus {
+    border-color: rgba(255, 255, 255, 0.3);
   }
 
-  .ff-rbimport__stats {
-    display: grid;
-    grid-template-columns: max-content 1fr;
-    gap: 4px var(--ff-space-4);
-    margin: 0;
-  }
-
-  .ff-rbimport__stats dt {
+  .ff-rbimport__rowstat {
+    flex: 0 0 100%;
+    padding-left: 2px;
+    font-size: var(--ff-type-caption);
     color: var(--ff-text-mid);
   }
 
-  .ff-rbimport__stats dd {
-    margin: 0;
+  .ff-rbimport__missing {
+    color: var(--ff-danger);
+  }
+
+  .ff-rbimport__add {
+    display: flex;
+  }
+
+  .ff-rbimport__tiles {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--ff-space-4);
+  }
+
+  .ff-rbimport__tile {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 9px 12px;
+    background: var(--ff-elev);
+    border: 1px solid var(--ff-border);
+    border-radius: var(--ff-radius-lg);
+    min-width: 0;
+  }
+
+  .ff-rbimport__tile b {
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-h2);
+    font-weight: 500;
     color: var(--ff-text);
+  }
+
+  .ff-rbimport__tile span {
+    font-size: var(--ff-type-caption);
+    color: var(--ff-muted);
+  }
+
+  .ff-rbimport__tile--warn b {
+    color: var(--ff-danger);
+  }
+
+  .ff-rbimport__missing-choice {
+    display: flex;
   }
 
   .ff-rbimport__note {
     margin: 0;
-    color: var(--ff-text-mid);
+    font-size: var(--ff-type-caption);
+    color: var(--ff-muted);
   }
 
   .ff-rbimport__error {
