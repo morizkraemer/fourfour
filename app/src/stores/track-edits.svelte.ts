@@ -8,6 +8,7 @@ import { library, bumpLibraryTracks } from './library.svelte.ts';
 import { flushBeatGridEdits, player, refreshLoadedBeatGrid, toggleExpanded } from './player.svelte.ts';
 import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
+import { rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
 import { createPersister } from '../lib/persister.ts';
 import { BPM_MAX, BPM_MIN, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
 import type { Tier } from '../lib/tempo.ts';
@@ -41,6 +42,19 @@ function showBpm(trackId: number, bpm: number) {
   if (player.track?.id === trackId) player.track = { ...player.track, bpm: bpm.toFixed(2) };
 }
 
+let respacedGrid: { trackId: number; from: BeatMarker[]; to: BeatMarker[] } | null = null;
+
+function respaceLoadedGrid(trackId: number, bpm: number) {
+  const loaded = player.track;
+  if (!loaded || loaded.id !== trackId || !loaded.beats.length) return;
+  const from = respacedGrid?.trackId === trackId && respacedGrid.to === loaded.beats ? respacedGrid.from : loaded.beats;
+  const durationSecs = trackById(trackId)?.raw?.duration_secs;
+  const durationMs = durationSecs ? durationSecs * 1000 : loaded.durationMs;
+  const to = rescaleBeats(from, bpm, durationMs);
+  respacedGrid = { trackId, from, to };
+  player.track = { ...loaded, beats: to };
+}
+
 const bpmPersister = createPersister<number>(saveBpmAndGrid, (err) => reportFailure('Setting the BPM', err));
 
 function currentBpm(trackId: number): number {
@@ -57,6 +71,7 @@ async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
     reportFailure('Setting the BPM', err);
     const stored = await getAnalysisData(trackId, true);
     if (stored?.bpm) showBpm(trackId, Number(stored.bpm));
+    await refreshLoadedBeatGrid(trackId);
     return;
   }
   await refreshLoadedBeatGrid(trackId);
@@ -66,6 +81,7 @@ async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
 export function commitTrackBpm(trackId: number, bpm: number): boolean {
   if (!Number.isFinite(bpm) || bpm < BPM_MIN || bpm > BPM_MAX) return false;
   showBpm(trackId, bpm);
+  respaceLoadedGrid(trackId, bpm);
   bpmPersister.schedule(trackId, bpm);
   return true;
 }
