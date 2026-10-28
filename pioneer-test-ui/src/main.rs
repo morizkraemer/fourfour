@@ -812,12 +812,13 @@ async fn set_cues(
 async fn set_beat_grid(
     track_id: i64,
     beats: Vec<BeatPosition>,
+    offset_ms: Option<f64>,
     state: State<'_, SharedLibrary>,
 ) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        lib.set_beat_grid(track_id, &beats).map_err(|e| e.to_string())
+        lib.set_beat_grid(track_id, &beats, offset_ms).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?

@@ -168,6 +168,7 @@ pub fn build_analysis_json(
             let edits = lib.user_edits(track_id);
             payload.insert("bpm_locked".into(), serde_json::json!(edits.bpm_locked));
             payload.insert("key_locked".into(), serde_json::json!(edits.key_locked));
+            payload.insert("grid_offset_ms".into(), serde_json::json!(edits.grid_offset_ms.unwrap_or(0.0)));
             payload.insert("energy".into(), serde_json::json!(a.energy));
             payload.insert("beats".into(), serde_json::Value::Array(beats));
             payload.insert("cue_points".into(), serde_json::Value::Array(cue_points));

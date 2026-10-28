@@ -40,6 +40,7 @@ import {
 import {
   BEAT_NUDGE_MS,
   createGridPersister,
+  gridFromStorage,
   shiftBeats,
   shiftToPlaceDownbeatAt,
   type BeatMarker,
@@ -179,10 +180,10 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   next.bands = next.bandsDetail;
   next.bandsOverview = stripBandsFromAnalysis(analysis) ?? next.bandsDetail;
   if (analysis.beats?.length) {
-    next.beats = analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({
-      time_ms: b.time_ms,
-      bar_position: b.bar_position,
-    }));
+    next.beats = gridFromStorage(
+      analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({ time_ms: b.time_ms, bar_position: b.bar_position })),
+      analysis.grid_offset_ms,
+    );
   } else {
     // No detected beats — synthesize a grid from BPM so one is always shown.
     const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
@@ -256,10 +257,11 @@ async function ensureTickListener() {
           return;
         }
       }
-      player.progress = Math.max(0, Math.min(1, tick.position_ms / dur));
+      const positionMs = restingAt(tick.playing, tick.position_ms);
+      player.progress = Math.max(0, Math.min(1, positionMs / dur));
       tempo.liveRatio = tick.tempo_ratio ?? 1;
-      if (tick.playing) transportClock.report(tick.position_ms, performance.now(), tempo.liveRatio);
-      else transportClock.stop(tick.position_ms);
+      if (tick.playing) transportClock.report(positionMs, performance.now(), tempo.liveRatio);
+      else transportClock.stop(positionMs);
     }
     player.playing = tick.playing;
   });
@@ -484,8 +486,22 @@ export function clearPlayerTrack() {
   playPending = false;
 }
 
+/**
+ * Where a paused playhead rests. The backend keeps whole milliseconds, so a seek to a point between two of them is
+ * reported back rounded; while paused at the point the user picked, that point stays the playhead (and what grid Set
+ * uses) instead of jumping to the reported millisecond. Playing, or any other position, ends it.
+ */
+let exactRestMs: number | null = null;
+
+function restingAt(playing: boolean, reportedMs: number): number {
+  if (!playing && exactRestMs !== null && Math.abs(reportedMs - exactRestMs) <= 0.5) return exactRestMs;
+  exactRestMs = null;
+  return reportedMs;
+}
+
 /** The paused position the backend reported: the playhead, Set and the next play all use exactly this. */
 function restAt(positionMs: number) {
+  exactRestMs = null;
   const t = player.track;
   if (!t || !t.durationMs || !Number.isFinite(positionMs)) return;
   player.progress = Math.max(0, Math.min(1, positionMs / t.durationMs));
@@ -670,6 +686,7 @@ export async function seekToProgress(progress: number) {
   const ms = Math.round(p * player.track.durationMs);
   await ensureTickListener();
   if (player.playing) {
+    exactRestMs = null;
     seekTargetMs = ms;
     seekTargetAt = performance.now();
     try {
@@ -679,6 +696,7 @@ export async function seekToProgress(progress: number) {
     }
   } else {
     // Paused/stopped: persist the position so play/resume starts from here.
+    exactRestMs = p * player.track.durationMs;
     await playbackSetPosition(ms);
   }
 }

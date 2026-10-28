@@ -50,7 +50,7 @@
       ? null
       : async (startMs, endMs, columns) => windowFromBytes(await getWaveformWindow(windowTrackId, startMs, endMs, columns)),
   );
-  const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey);
+  const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey, wave?.msPerSample());
 
   $effect(() => {
     const id = player.track?.id;

@@ -489,6 +489,11 @@ export default class WaveformDisplay {
         return durationMs / this._zoom / w;
     }
 
+    /** Milliseconds per audio sample: the fine windows' sample rate, or ASSUMED_SAMPLE_RATE before the first one. */
+    msPerSample() {
+        return 1000 / (this._window?.sampleRate || ASSUMED_SAMPLE_RATE);
+    }
+
     /** Remove canvases and all event listeners. */
     destroy() {
         if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);

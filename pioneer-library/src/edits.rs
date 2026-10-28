@@ -18,6 +18,10 @@ pub struct UserEdits {
     pub bpm_locked: bool,
     #[serde(default)]
     pub key_locked: bool,
+    /// Where a hand-set grid really lies against its whole-millisecond beats: every beat sits this many ms (under half a
+    /// millisecond either way) after its stored time. The stored beats and the export stay whole ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_offset_ms: Option<f64>,
 }
 
 impl UserEdits {
