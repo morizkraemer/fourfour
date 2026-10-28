@@ -19,6 +19,8 @@
   import { CUE_PALETTE, cueChip, cueMarkers } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
   import { seekTrackToMs, seekTrackToProgress } from '../stores/inspector-seek.ts';
+  import { pressInspectorPad } from '../stores/inspector-pads.ts';
+  import { altKey } from '../stores/alt-key.svelte.ts';
   import { commitTrackBpm, commitTrackFields, commitTrackKey, fitGridToBpm, releaseTrackEdits } from '../stores/track-edits.svelte.ts';
 
   let mode = $derived(
@@ -114,6 +116,8 @@
       canSetCues={trackIsLoaded}
       canJumpToCues
       onCueAdd={addMemoryCueAtPlayhead}
+      onPadPress={(slot, _chip, altHeld) => pressInspectorPad(track, slot, altHeld)}
+      altHeld={altKey.held}
       onCueJump={(chip) => seekTrackToMs(track, chip.timeMs)}
       onCueRename={(chip, name) => renameCue(track.id, chip.key, name)}
       onCueRecolor={(chip, color) => recolorCue(track.id, chip.key, color)}
