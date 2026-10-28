@@ -201,3 +201,4 @@
 2026-10-28 07:37 orchestrator - round 10 spawn: wn-wave P1/P2/P3/P13 (seat, opus), wn-sidebar P10/P11/P14–P17 (seat, sonnet); B (bar/topbar/palette) and C (inspector) queued
 2026-10-28 07:52 orchestrator - wn-sidebar 6451e30 → r10-int a78d785 (595 tests; P15 cause: empty-label header cell 0px tall; P14 cause: missing columns shown checked); wn-palette P4–P7/P12 spawn (seat, sonnet); icon-design worker running (Claude Design)
 2026-10-28 08:01 orchestrator - wn-palette eb8516b → r10-int a0eb602 (611 tests); wn-inspector P8/P9/P18/P19 spawn (seat, sonnet)
+2026-10-28 08:10 orchestrator - wn-inspector e7bd7ee → r10-int (623 tests); waiting on wn-wave
