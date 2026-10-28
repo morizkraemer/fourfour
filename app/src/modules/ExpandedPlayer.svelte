@@ -23,6 +23,7 @@
     renameCue,
     triggerHotCue,
   } from '../stores/cue-actions.ts';
+  import { gridNudgeMs } from '../lib/beatGrid.ts';
   import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueMarkers, hotCueIn, slotLetter } from '../lib/cues.ts';
   import {
     player,
@@ -41,6 +42,7 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+  const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey);
 
   $effect(() => {
     const id = player.track?.id;
@@ -190,12 +192,12 @@
 
     <div class="ff-xp__grid-edit" role="group" aria-label="Beat grid">
       <span class="ff-xp__grid-label">GRID</span>
-      <button class="ff-xp__grid-btn" title="Nudge grid left" aria-label="Nudge grid left"
-        disabled={!player.track} onclick={() => beatGridNudgeLeft()}>◀</button>
+      <button class="ff-xp__grid-btn" title="Nudge grid left one pixel (⌥: 1 ms)" aria-label="Nudge grid left"
+        disabled={!player.track} onclick={(e) => beatGridNudgeLeft(nudgeMs(e))}>◀</button>
       <button class="ff-xp__grid-btn" title="Set downbeat to playhead" aria-label="Set downbeat to playhead"
         disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
-      <button class="ff-xp__grid-btn" title="Nudge grid right" aria-label="Nudge grid right"
-        disabled={!player.track} onclick={() => beatGridNudgeRight()}>▶</button>
+      <button class="ff-xp__grid-btn" title="Nudge grid right one pixel (⌥: 1 ms)" aria-label="Nudge grid right"
+        disabled={!player.track} onclick={(e) => beatGridNudgeRight(nudgeMs(e))}>▶</button>
     </div>
 
     <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">
@@ -209,7 +211,7 @@
 
     <div class="ff-xp__zoom">
       <button class="ff-xp__zoom-btn" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}>−</button>
-      <button class="ff-xp__zoom-btn" title="Fit" aria-label="Reset zoom" onclick={() => wave?.resetZoom()}>Fit</button>
+      <button class="ff-xp__zoom-btn" title="Default zoom" aria-label="Default zoom" onclick={() => wave?.resetZoom()}>Fit</button>
       <button class="ff-xp__zoom-btn" title="Zoom in" aria-label="Zoom in" onclick={() => wave?.zoomIn()}>+</button>
     </div>
   </footer>

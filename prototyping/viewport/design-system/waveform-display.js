@@ -446,7 +446,15 @@ export default class WaveformDisplay {
 
     zoomIn()    { this._applyZoom(this._zoom * 1.5); }
     zoomOut()   { this._applyZoom(this._zoom / 1.5); }
-    resetZoom() { this._applyZoom(1.0); }
+    resetZoom() { this._applyZoom(this._defaultZoom()); }
+
+    /** Milliseconds of track under one CSS pixel of the zoom view (0 before data or layout). */
+    msPerPixel() {
+        const durationMs = this._data?.duration_ms;
+        const w = this._canvasSize(this._zoomCanvas).w;
+        if (!durationMs || !w) return 0;
+        return durationMs / this._zoom / w;
+    }
 
     /** Remove canvases and all event listeners. */
     destroy() {

@@ -4,6 +4,17 @@ export interface BeatMarker {
 }
 
 export const BEAT_NUDGE_MS = 10;
+export const BEAT_NUDGE_FINE_MS = 1;
+
+/**
+ * One nudge: one CSS pixel of the zoom view, between 1 ms and BEAT_NUDGE_MS; `fine` (⌥) is always 1 ms.
+ * Beat times are whole milliseconds (the library and the PQTZ beat grid of the export store ms), so 1 ms is the floor.
+ */
+export function gridNudgeMs(msPerPixel: number, fine: boolean): number {
+  if (fine) return BEAT_NUDGE_FINE_MS;
+  if (!(msPerPixel > 0)) return BEAT_NUDGE_MS;
+  return Math.min(BEAT_NUDGE_MS, Math.max(BEAT_NUDGE_FINE_MS, Math.round(msPerPixel)));
+}
 
 /** The grid moved by `deltaMs`; beats that would start before the track are dropped (a stored beat time is never negative). */
 export function shiftBeats(beats: BeatMarker[], deltaMs: number): BeatMarker[] {

@@ -609,12 +609,12 @@ export function beatGridShift(deltaMs: number) {
   gridPersister.schedule(t.id, beats);
 }
 
-export function beatGridNudgeLeft() {
-  beatGridShift(-BEAT_NUDGE_MS);
+export function beatGridNudgeLeft(stepMs = BEAT_NUDGE_MS) {
+  beatGridShift(-stepMs);
 }
 
-export function beatGridNudgeRight() {
-  beatGridShift(BEAT_NUDGE_MS);
+export function beatGridNudgeRight(stepMs = BEAT_NUDGE_MS) {
+  beatGridShift(stepMs);
 }
 
 /** Where the playhead is right now: while playing, the transport clock (reports only arrive every 50 ms); else the stored position. */

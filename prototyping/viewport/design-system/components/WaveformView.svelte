@@ -58,6 +58,7 @@
   export function zoomIn() { display?.zoomIn(); }
   export function zoomOut() { display?.zoomOut(); }
   export function resetZoom() { display?.resetZoom(); }
+  export function msPerPixel() { return display?.msPerPixel() ?? 0; }
 
   $effect(() => {
     if (!container) return;
