@@ -224,3 +224,4 @@
 2026-10-28 16:10 orchestrator - wr-editmode 123309f → r12-int 33c85e4 (687 tests; headless: pads/transport boxes identical across modes); worktree removed; checks + Mac install started
 2026-10-28 16:20 orchestrator - r12-int 33c85e4 installed on Mac (28 cargo, 687 vitest, 0 check errors); includes grid-lag fix + edit mode
 2026-10-28 16:40 orchestrator - Merlin: big-player control layout inconsistent; wr-playerlayout spawn (seat, opus medium) for 3 polished viewport options at :5238
+2026-10-28 17:10 orchestrator - wr-playerlayout 97a2c61 mockups (A same places / B edit in header, rec / C strip over waveform) at :5238 #player-layout, served from its worktree — keep until Merlin picks
