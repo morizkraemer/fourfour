@@ -22,16 +22,27 @@ pub fn dev_models_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../prototyping/analysis-packaging/models")
 }
 
-pub fn locate_models(app_data_dir: Option<&Path>) -> Option<PathBuf> {
+pub fn model_search_dirs(env_dir: Option<PathBuf>, app_data_dir: Option<&Path>, resource_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::var_os(MODELS_ENV) {
-        candidates.push(PathBuf::from(dir));
-    }
+    candidates.extend(env_dir);
     if let Some(dir) = app_data_dir {
         candidates.push(dir.join("models"));
     }
+    if let Some(dir) = resource_dir {
+        candidates.push(dir.join("models"));
+    }
     candidates.push(dev_models_dir());
-    candidates.into_iter().find(|d| models_present(d))
+    candidates
+}
+
+pub fn locate_models_in(app_data_dir: Option<&Path>, resource_dir: Option<&Path>) -> Option<PathBuf> {
+    model_search_dirs(std::env::var_os(MODELS_ENV).map(PathBuf::from), app_data_dir, resource_dir)
+        .into_iter()
+        .find(|d| models_present(d))
+}
+
+pub fn locate_models(app_data_dir: Option<&Path>) -> Option<PathBuf> {
+    locate_models_in(app_data_dir, None)
 }
 
 pub fn available_memory_mb() -> f64 {
@@ -359,6 +370,15 @@ mod tests {
         assert_eq!(plan_pool(&opts, 3_700.0, 100), PoolPlan { workers: 2, threads_per_track: 4 });
         assert_eq!(plan_pool(&opts, 500.0, 100), PoolPlan { workers: 1, threads_per_track: 8 });
         assert_eq!(plan_pool(&opts, 64_000.0, 3), PoolPlan { workers: 3, threads_per_track: 2 });
+    }
+
+    #[test]
+    fn model_search_order_is_env_then_app_data_then_resources_then_dev() {
+        let dirs = model_search_dirs(Some(PathBuf::from("/env")), Some(Path::new("/data")), Some(Path::new("/res")));
+        assert_eq!(dirs[..3], [PathBuf::from("/env"), PathBuf::from("/data/models"), PathBuf::from("/res/models")]);
+        assert_eq!(dirs[3], dev_models_dir());
+        assert_eq!(dirs.len(), 4);
+        assert_eq!(model_search_dirs(None, None, None), vec![dev_models_dir()]);
     }
 
     #[test]

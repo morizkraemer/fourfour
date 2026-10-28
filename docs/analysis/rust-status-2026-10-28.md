@@ -98,3 +98,13 @@ prototyping/analysis-packaging/target/release/cyankey benchmark/manifests/beatpo
 ```
 
 `ref.json` is the Q13 reference (`benchmark/results/q13/rb-grid-reference.json`); `test.txt` is the 205 fingerprint-verified test paths, `dev.txt` the 50 dev paths with id % 12 == 4. Weights: `fourfour-analysis-rs/scripts/fetch-models.sh`.
+
+## O9: weights in the bundle, no silent empty analysis (branch `ov-weights`)
+
+**Runtime.** Weight lookup order (`service::model_search_dirs`): `$FOURFOUR_MODELS_DIR`, `<app data>/models`, `<resource dir>/models` (the bundled copy), the dev `prototyping/analysis-packaging/models`. `BackendEnv::locate_weights` feeds it the Tauri resource dir. When no weights load and Python cannot `import fourfour_analysis`, `resolve_runner` returns `NO_BACKEND_ERROR`; the run command returns it as its `Err`, which the existing analysis status UI already shows.
+
+**Bundling.** `pioneer-test-ui/tauri.bundle-weights.conf.json` adds `bundle.resources` (beat_this.onnx, mel_spectrogram.onnx, LICENSE-beat-this.txt into `models/`). It is a separate config on purpose: Tauri checks resource paths at compile time, so putting them in `tauri.conf.json` would break `cargo build` for everyone without the weights. Explicit paths (no globs) make a missing file fail the bundle. `fourfour-analysis-rs/scripts/bundle-app.sh [tauri build args]` fetches the weights if absent (sha256 checked for beat_this), refuses to continue if any file is missing or empty, then runs `cargo tauri build --config tauri.bundle-weights.conf.json`. The .onnx files stay gitignored (`prototyping/analysis-packaging/.gitignore`).
+
+**Mac .dmg build.** `fourfour-analysis-rs/scripts/bundle-app.sh --bundles dmg` on the Mac (needs curl, cargo-tauri 2, node; if the CI flow adds `.github/tauri-ci-bundle.json`, merge the `bundle.resources` object into it or pass both configs). Installed app then finds the weights in `fourfour.app/Contents/Resources/models/`. Size impact: about +83.4 MB (83.16 MB beat_this + 0.27 MB mel), before dmg compression (ONNX float weights compress little).
+
+**Licence.** Beat This! (CPJKU/beat_this README, "License"): "The code and the published model weights are released under the MIT license. Note that some of the training files are fully copyrighted or under limited Creative Commons licenses, and it is up to the user to assess whether this may impact their use case." The ONNX conversion (danigb/beat-this-rs) is MIT and retains both copyright notices; MIT requires shipping the notice, so `LICENSE-beat-this.txt` is bundled next to the weights. Open risk: the training-data note (weights trained on partly restricted data) is the authors' disclaimer, not a restriction on the weights.

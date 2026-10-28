@@ -212,7 +212,7 @@ impl AnalysisSink for TauriAnalysisSink {
 }
 
 fn analysis_backend_env(app: &AppHandle) -> BackendEnv {
-    BackendEnv::from_process(config_path(app).ok(), app.path().app_data_dir().ok())
+    BackendEnv::from_process(config_path(app).ok(), app.path().app_data_dir().ok(), app.path().resource_dir().ok())
 }
 
 /// Run analysis for the given tracks with the configured backend (rust when model

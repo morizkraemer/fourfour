@@ -7,5 +7,6 @@ mkdir -p "$DEST"
 curl -fsSL -o "$DEST/mel_spectrogram.onnx" "$RAW/mel_spectrogram.onnx"
 curl -fsSL -o "$DEST/beat_this.onnx" "$REL/beat_this.onnx"
 curl -fsSL -o "$DEST/beat_this.onnx.sha256" "$REL/beat_this.onnx.sha256"
+curl -fsSL -o "$DEST/LICENSE-beat-this.txt" https://raw.githubusercontent.com/danigb/beat-this-rs/main/LICENSE
 (cd "$DEST" && sha256sum -c beat_this.onnx.sha256 2>/dev/null || shasum -a 256 -c beat_this.onnx.sha256)
 echo "model weights installed in $DEST"
