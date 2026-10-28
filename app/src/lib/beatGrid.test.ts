@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createGridPersister, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
+import { BEAT_NUDGE_MS, createGridPersister, gridNudgeMs, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
 
 const grid = (): BeatMarker[] => [
   { time_ms: 100, bar_position: 1 },
@@ -30,6 +30,24 @@ describe('shiftBeats', () => {
   });
 });
 
+describe('gridNudgeMs', () => {
+  it('moves the grid by one pixel of the zoom view', () => {
+    expect(gridNudgeMs(4.4, false)).toBe(4);
+    expect(gridNudgeMs(2.6, false)).toBe(3);
+  });
+  it('never goes below one millisecond at deep zoom', () => {
+    expect(gridNudgeMs(0.004, false)).toBe(1);
+  });
+  it('keeps the old step when zoomed far out or before layout', () => {
+    expect(gridNudgeMs(250, false)).toBe(BEAT_NUDGE_MS);
+    expect(gridNudgeMs(0, false)).toBe(BEAT_NUDGE_MS);
+  });
+  it('is one millisecond with the fine modifier at any zoom', () => {
+    expect(gridNudgeMs(250, true)).toBe(1);
+    expect(gridNudgeMs(4.4, true)).toBe(1);
+  });
+});
+
 describe('shiftToPlaceDownbeatAt', () => {
   it('puts the nearest downbeat on the playhead', () => {
     expect(shiftToPlaceDownbeatAt(grid(), 2180)).toBe(80);
@@ -39,6 +57,10 @@ describe('shiftToPlaceDownbeatAt', () => {
     const delta = shiftToPlaceDownbeatAt(grid(), 1999)!;
     const moved = shiftBeats(grid(), delta);
     expect(moved.find((b) => b.time_ms === 1999)?.bar_position).toBe(1);
+  });
+  it('places a downbeat to the millisecond from a sub-millisecond playhead', () => {
+    const delta = shiftToPlaceDownbeatAt(grid(), 2100.6)!;
+    expect(shiftBeats(grid(), delta)[4].time_ms).toBe(2101);
   });
   it('uses plain beats when the grid has no downbeat', () => {
     expect(shiftToPlaceDownbeatAt([{ time_ms: 500, bar_position: 2 }], 530)).toBe(30);

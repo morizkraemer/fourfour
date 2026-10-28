@@ -14,6 +14,7 @@ import {
   halfHeight,
   reduceBands,
   smoothEnvelope,
+  smoothTriangle,
   stackHeights,
 } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import { drawBandRange, paintBands, paintStacked } from '../../../prototyping/viewport/design-system/waveform-render.js';
@@ -292,6 +293,33 @@ describe('paintStacked (overview, compact strip)', () => {
     });
     expect(rects).toHaveLength(0);
     expect(paths.map((p) => p.color)).toEqual(['HIGH', 'MID', 'LOW']);
+  });
+});
+
+describe('smoothTriangle (overview)', () => {
+  it('spreads a one-pixel spike over its neighbours and keeps a flat run flat', () => {
+    const out = smoothTriangle(Float32Array.from([0.2, 0.2, 1, 0.2, 0.2]), 1);
+    expect(out[2]).toBeLessThan(1);
+    expect(out[1]).toBeGreaterThan(0.2);
+    expect(Array.from(smoothTriangle(Float32Array.from([0.4, 0.4, 0.4]), 2))).toEqual([0.4, 0.4, 0.4].map(Math.fround));
+  });
+  it('keeps pixels outside the track empty and out of the average', () => {
+    const out = smoothTriangle(Float32Array.from([0, 0.5, 0.5, 0]), 2);
+    expect(out[0]).toBe(0);
+    expect(out[3]).toBe(0);
+    expect(out[1]).toBeCloseTo(0.5, 6);
+  });
+});
+
+describe('overview wider than 1200 pixels', () => {
+  it('damps a column-to-column alternation to under half its height instead of a comb of 1 and 2 px columns', () => {
+    const n = 1200;
+    const data = { ...bands(Array.from({ length: n }, (_, i) => (i % 2 ? 0.6 : 0.4))), overview: true };
+    const { ctx, paths } = recordingContext();
+    drawBandRange(ctx, data, { startFrac: 0, endFrac: 1, widthPx: 2256, heightPx: 100, palette: { ...palette, low: 'LOW' }, layout: 'stacked' });
+    const low = paths.find((p) => p.color === 'LOW')!;
+    const tops = low.points.filter(([x, y]) => x > 20 && x < 2230 && y < 100).map(([, y]) => y);
+    expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan((STACK_GAIN.low * (displayAmp(0.6) - displayAmp(0.4)) * 100) / 2);
   });
 });
 

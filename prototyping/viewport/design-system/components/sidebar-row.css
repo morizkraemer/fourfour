@@ -27,11 +27,11 @@
   margin: 0;
   padding: 0;
   border: none;
-  border-radius: 0;
-  background: transparent;
+  border-radius: var(--ff-radius-sm);
+  background: var(--ff-elev);
   outline: none;
   color: var(--ff-text);
-  box-shadow: inset 0 -1px 0 var(--ff-accent);
+  box-shadow: 0 0 0 1px var(--ff-accent);
 }
 .ff-sbrow--active .ff-sbrow__label-input,
 .ff-sbrow--selected .ff-sbrow__label-input {

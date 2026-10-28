@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { decodeBandPreview, decodeColorWaveform } from './analysis-data.ts';
 import {
+  windowFromBytes,
   balanceBands,
   bandsFromColorSamples,
   bandsFromDetailBytes,
@@ -224,15 +225,51 @@ describe('overviewBandsFromPayload', () => {
 
 function detailFile(low: number[], mid: number[], high: number[]): ArrayBuffer {
   const n = low.length;
-  const buffer = new ArrayBuffer(16 + 3 * n);
+  const buffer = new ArrayBuffer(24 + 3 * n);
   const view = new DataView(buffer);
   'FFWD'.split('').forEach((c, i) => view.setUint8(i, c.charCodeAt(0)));
-  view.setUint8(4, 1);
+  view.setUint8(4, 2);
   view.setUint32(8, 2400, true);
   view.setUint32(12, n, true);
-  new Uint8Array(buffer, 16).set([...low, ...mid, ...high]);
+  view.setUint16(16, 300, true);
+  new Uint8Array(buffer, 24).set([...low, ...mid, ...high]);
   return buffer;
 }
+
+function windowFile(startS: number, endS: number, lowest: number[], highest: number[], low: number[]): ArrayBuffer {
+  const n = lowest.length;
+  const buffer = new ArrayBuffer(32 + 7 * n);
+  const view = new DataView(buffer);
+  'FFWW'.split('').forEach((c, i) => view.setUint8(i, c.charCodeAt(0)));
+  view.setUint8(4, 1);
+  view.setUint32(8, n, true);
+  view.setUint32(12, 44100, true);
+  view.setFloat64(16, startS, true);
+  view.setFloat64(24, endS, true);
+  new Int16Array(buffer, 32, 2 * n).set([...lowest, ...highest]);
+  new Uint8Array(buffer, 32 + 4 * n).set([...low, ...low.map(() => 0), ...low.map(() => 0)]);
+  return buffer;
+}
+
+describe('windowFromBytes', () => {
+  it('reads the range, the sample planes and the band planes', () => {
+    const win = windowFromBytes(windowFile(1.5, 1.504, [-100, 0, 5], [200, 0, 5], [10, 20, 30]))!;
+    expect(win.startMs).toBeCloseTo(1500, 9);
+    expect(win.endMs).toBeCloseTo(1504, 9);
+    expect(win.sampleRate).toBe(44100);
+    expect(Array.from(win.lowest)).toEqual([-100, 0, 5]);
+    expect(Array.from(win.highest)).toEqual([200, 0, 5]);
+    expect(Array.from(win.low)).toEqual([10, 20, 30]);
+    expect(Array.from(win.mid)).toEqual([0, 0, 0]);
+    expect(win.scale.low).toBeCloseTo(1 / 127, 8);
+  });
+  it('rejects a damaged, empty or foreign buffer', () => {
+    const good = windowFile(0, 1, [1], [2], [3]);
+    expect(windowFromBytes(good.slice(0, good.byteLength - 1))).toBeNull();
+    expect(windowFromBytes(windowFile(1, 1, [1], [2], [3]))).toBeNull();
+    expect(windowFromBytes(detailFile([1], [1], [1]))).toBeNull();
+  });
+});
 
 describe('bandsFromDetailBytes', () => {
   it('splits the planes into views of the buffer and scales bytes by 1 / 127', () => {

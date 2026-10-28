@@ -6,7 +6,7 @@
  * record, exact pixel edges); tall ones, which the zoom view repaints every frame, use one fillRect
  * per column and band because a jagged tall polygon is far slower to rasterise.
  */
-import { BUCKET_PEAK_WEIGHT, OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, halfHeight, reduceBands, smoothBands, stackHeights } from './waveform-bands.js';
+import { BAND_ORDER, BUCKET_PEAK_WEIGHT, OVERVIEW_COLUMNS, OVERVIEW_PEAK_WEIGHT, OVERVIEW_SCALE, OVERVIEW_SMOOTH_COLUMNS, halfHeight, reduceBands, smoothBands, smoothTriangle, stackHeights } from './waveform-bands.js';
 
 const FALLBACK = {
   bg: '#0d0d0d',
@@ -220,20 +220,17 @@ const SHAPED_PER_BANDS_LIMIT = 6;
 const shapedCache = new WeakMap();
 
 /** The reduced and smoothed columns of a static draw, kept per bands object and width: redraws (theme, dpr, bitmap eviction) skip the reduction. */
-/** The overview at Rekordbox's resolution: at most OVERVIEW_COLUMNS mean buckets, each held over its share of the pixels. */
+/**
+ * The overview at about Rekordbox's resolution: one mean per pixel, then a triangle filter as wide as
+ * OVERVIEW_SMOOTH_COLUMNS of Rekordbox's OVERVIEW_COLUMNS. Holding 1200 buckets over a wider canvas instead
+ * gave columns of one and two pixels in turn, a comb of spikes along the top edge.
+ */
 function reduceOverview(bands, startFrac, endFrac, widthPx) {
-  const buckets = Math.min(widthPx, OVERVIEW_COLUMNS);
   const fromDetail = !bands.overview;
-  const reduced = reduceBands(bands, startFrac, endFrac, buckets, OVERVIEW_PEAK_WEIGHT, fromDetail ? OVERVIEW_SCALE : null);
-  if (buckets === widthPx) return reduced;
-  const out = { low: new Float32Array(widthPx), mid: new Float32Array(widthPx), high: new Float32Array(widthPx), length: widthPx };
-  for (let p = 0; p < widthPx; p++) {
-    const k = Math.floor((p * buckets) / widthPx);
-    out.low[p] = reduced.low[k];
-    out.mid[p] = reduced.mid[k];
-    out.high[p] = reduced.high[k];
-  }
-  return out;
+  const reduced = reduceBands(bands, startFrac, endFrac, widthPx, OVERVIEW_PEAK_WEIGHT, fromDetail ? OVERVIEW_SCALE : null);
+  const radiusPx = Math.max(1, (OVERVIEW_SMOOTH_COLUMNS * widthPx) / OVERVIEW_COLUMNS);
+  for (const name of BAND_ORDER) reduced[name] = smoothTriangle(reduced[name], radiusPx);
+  return reduced;
 }
 
 function reduceStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked) {

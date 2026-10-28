@@ -12,7 +12,7 @@
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { tempo } from '../stores/tempo.svelte.ts';
-  import { formatBpm, formatShift } from '../lib/tempo.ts';
+  import { effectiveShift, formatBpm, formatShift } from '../lib/tempo.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -23,6 +23,9 @@
     renameCue,
     triggerHotCue,
   } from '../stores/cue-actions.ts';
+  import { gridNudgeMs } from '../lib/beatGrid.ts';
+  import { getWaveformWindow } from '../services/tauri.svelte.ts';
+  import { windowFromBytes } from '../services/waveform-bands.ts';
   import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueMarkers, hotCueIn, slotLetter } from '../lib/cues.ts';
   import {
     player,
@@ -41,6 +44,13 @@
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
+  let windowTrackId = $derived(player.track?.bandsZoom ? player.track.id : null);
+  let windowSource = $derived(
+    windowTrackId == null
+      ? null
+      : async (startMs, endMs, columns) => windowFromBytes(await getWaveformWindow(windowTrackId, startMs, endMs, columns)),
+  );
+  const nudgeMs = (e) => gridNudgeMs(wave?.msPerPixel() ?? 0, e.altKey);
 
   $effect(() => {
     const id = player.track?.id;
@@ -118,6 +128,7 @@
       bandsDetail={player.track?.bandsDetail ?? null}
       bandsOverview={player.track?.bandsOverview ?? null}
       bandsZoom={player.track?.bandsZoom ?? null}
+      {windowSource}
       cues={markers}
       beats={player.track?.beats ?? []}
       bpm={player.track?.bpm ?? 0}
@@ -190,12 +201,12 @@
 
     <div class="ff-xp__grid-edit" role="group" aria-label="Beat grid">
       <span class="ff-xp__grid-label">GRID</span>
-      <button class="ff-xp__grid-btn" title="Nudge grid left" aria-label="Nudge grid left"
-        disabled={!player.track} onclick={() => beatGridNudgeLeft()}>◀</button>
+      <button class="ff-xp__grid-btn" title="Nudge grid left one pixel (⌥: 1 ms)" aria-label="Nudge grid left"
+        disabled={!player.track} onclick={(e) => beatGridNudgeLeft(nudgeMs(e))}>◀</button>
       <button class="ff-xp__grid-btn" title="Set downbeat to playhead" aria-label="Set downbeat to playhead"
         disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
-      <button class="ff-xp__grid-btn" title="Nudge grid right" aria-label="Nudge grid right"
-        disabled={!player.track} onclick={() => beatGridNudgeRight()}>▶</button>
+      <button class="ff-xp__grid-btn" title="Nudge grid right one pixel (⌥: 1 ms)" aria-label="Nudge grid right"
+        disabled={!player.track} onclick={(e) => beatGridNudgeRight(nudgeMs(e))}>▶</button>
     </div>
 
     <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">
@@ -203,13 +214,13 @@
       <span class="ff-xp__orig" title="The track's own BPM and key, and the key shift">
         <span class="ff-xp__orig-bpm">{formatBpm(Number(player.track?.bpm))}</span>
         <span class="ff-xp__orig-key">{player.track?.key || '—'}</span>
-        <span class="ff-xp__orig-shift">{formatShift(tempo.keyShift)}</span>
+        <span class="ff-xp__orig-shift">{formatShift(effectiveShift(tempo.keyShift, tempo.percent, tempo.keyLock))}</span>
       </span>
     </div>
 
     <div class="ff-xp__zoom">
       <button class="ff-xp__zoom-btn" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}>−</button>
-      <button class="ff-xp__zoom-btn" title="Fit" aria-label="Reset zoom" onclick={() => wave?.resetZoom()}>Fit</button>
+      <button class="ff-xp__zoom-btn" title="Default zoom" aria-label="Default zoom" onclick={() => wave?.resetZoom()}>Fit</button>
       <button class="ff-xp__zoom-btn" title="Zoom in" aria-label="Zoom in" onclick={() => wave?.zoomIn()}>+</button>
     </div>
   </footer>

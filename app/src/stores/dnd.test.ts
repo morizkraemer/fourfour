@@ -115,3 +115,51 @@ describe('new playlist drop target', () => {
     expect(dnd.dropNewPlaylist).toBe(false);
   });
 });
+
+describe('sidebar playlist drop target', () => {
+  function stubSidebarRow(id: number | null) {
+    vi.stubGlobal('document', {
+      elementFromPoint: () => ({
+        closest: (sel: string) =>
+          sel === '[data-drop-track-playlist-id]' && id !== null
+            ? { getAttribute: () => String(id) }
+            : null,
+      }),
+    });
+  }
+  it('targets a playlist row by hit-test, top level or inside a folder', () => {
+    stubSidebarRow(7);
+    updateTrackDropTarget(5, 5);
+    expect(dnd.dropPlaylistId).toBe(7);
+    stubSidebarRow(12);
+    updateTrackDropTarget(5, 30);
+    expect(dnd.dropPlaylistId).toBe(12);
+    expect(dnd.dropRowIndex).toBeNull();
+  });
+  it('clears when the pointer leaves the row', () => {
+    stubSidebarRow(7);
+    updateTrackDropTarget(5, 5);
+    stubSidebarRow(null);
+    updateTrackDropTarget(500, 5);
+    expect(dnd.dropPlaylistId).toBeNull();
+  });
+});
+
+describe('player drop target', () => {
+  it('flags the player and clears other targets', () => {
+    vi.stubGlobal('document', {
+      elementFromPoint: () => ({ closest: (sel: string) => (sel === '[data-drop-player]' ? {} : null) }),
+    });
+    dnd.dropRowIndex = 3;
+    updateTrackDropTarget(10, 10);
+    expect(dnd.dropPlayer).toBe(true);
+    expect(dnd.dropRowIndex).toBeNull();
+    expect(dnd.dropRibbon).toBe(false);
+  });
+  it('clears when the pointer leaves the player', () => {
+    stubDocument(null);
+    dnd.dropPlayer = true;
+    updateTrackDropTarget(10, 10);
+    expect(dnd.dropPlayer).toBe(false);
+  });
+});
