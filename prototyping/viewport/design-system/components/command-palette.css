@@ -193,6 +193,7 @@
 
 .ff-cp__footer-left {
   color: var(--ff-muted);
+  white-space: pre;
 }
 
 .ff-cp__footer-right {
