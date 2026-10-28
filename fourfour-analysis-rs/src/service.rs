@@ -288,6 +288,7 @@ mod tests {
 
     fn analysis(beats: Vec<f64>, downbeats: Vec<f32>) -> Analysis {
         Analysis {
+            truncated: false,
             duration_s: 10.0,
             bpm: Some(128.0),
             first_beat_s: beats.first().copied(),

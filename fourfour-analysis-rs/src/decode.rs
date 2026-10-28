@@ -13,7 +13,10 @@ use symphonia::core::meta::MetadataOptions;
 pub struct Mono {
     pub samples: Vec<f32>,
     pub rate: u32,
+    pub truncated: bool,
 }
+
+const MIN_DECODED_SECONDS: usize = 1;
 
 pub fn decode_mono(path: &Path) -> Result<Mono> {
     let mss = MediaSourceStream::new(Box::new(File::open(path)?), Default::default());
@@ -30,7 +33,21 @@ pub fn decode_mono(path: &Path) -> Result<Mono> {
     let mut samples: Vec<f32> = Vec::new();
     let mut scratch: Vec<f32> = Vec::new();
     let mut rate = 0u32;
-    while let Some(packet) = format.next_packet()? {
+    let mut truncated = false;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(Some(packet)) => packet,
+            Ok(None) => break,
+            Err(Error::IoError(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                truncated = true;
+                break;
+            }
+            Err(Error::DecodeError(_)) => {
+                truncated = true;
+                break;
+            }
+            Err(err) => return Err(anyhow!(err)),
+        };
         if packet.track_id != track_id {
             continue;
         }
@@ -46,14 +63,24 @@ pub fn decode_mono(path: &Path) -> Result<Mono> {
                     samples.extend(scratch.chunks(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32));
                 }
             }
-            Err(Error::DecodeError(_)) => (),
+            Err(Error::DecodeError(_)) => truncated = true,
+            Err(Error::IoError(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof => {
+                truncated = true;
+                break;
+            }
             Err(err) => return Err(anyhow!(err)),
         }
     }
     if rate == 0 {
         return Err(anyhow!("failed to decode any audio packets"));
     }
-    Ok(Mono { samples, rate })
+    if truncated {
+        if samples.len() < rate as usize * MIN_DECODED_SECONDS {
+            return Err(anyhow!("damaged audio: only {} samples decoded", samples.len()));
+        }
+        eprintln!("warning: {} is truncated or damaged; analysing the {:.1} s that decoded", path.display(), samples.len() as f64 / rate as f64);
+    }
+    Ok(Mono { samples, rate, truncated })
 }
 
 pub fn resample_to(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>> {

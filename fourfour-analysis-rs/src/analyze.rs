@@ -34,6 +34,7 @@ impl Default for Config {
 
 pub struct Analysis {
     pub duration_s: f64,
+    pub truncated: bool,
     pub bpm: Option<f64>,
     pub first_beat_s: Option<f64>,
     pub beats_s: Vec<f64>,
@@ -194,6 +195,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     });
     Ok(Analysis {
         duration_s,
+        truncated: native.truncated,
         bpm,
         first_beat_s,
         beats_s,
@@ -216,6 +218,7 @@ impl Analysis {
             "id": id,
             "path": path,
             "duration_s": self.duration_s,
+            "truncated": self.truncated,
             "bpm": self.bpm,
             "first_beat_s": self.first_beat_s,
             "n_beats": self.beats_s.len(),
