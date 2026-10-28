@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { library } from './library.svelte.ts';
-import { beatGridNudgeRight, clearPlayerTrack, loadPlayerTrack, player, setEditing, setExpanded } from './player.svelte.ts';
+import { beatGridNudgeRight, clearPlayerTrack, loadPlayerTrack, player, setExpanded, setTrackMode } from './player.svelte.ts';
 import { commitTrackBpm, doubleTrackBpm, halveTrackBpm, stepTrackBpm, stepTrackKey } from './track-edits.svelte.ts';
 
 Object.assign(globalThis, { window: { __TAURI_INTERNALS__: {} } });
@@ -265,13 +265,23 @@ describe('stepTrackKey', () => {
   });
 });
 
-describe('edit mode', () => {
+describe('track mode', () => {
   it('ends when the player track is cleared', () => {
     setExpanded(true);
-    setEditing(true);
-    expect(player.editing).toBe(true);
+    setTrackMode('bpm', true);
+    setTrackMode('key', true);
+    expect(player.trackBpmMode).toBe(true);
+    expect(player.trackKeyMode).toBe(true);
     clearPlayerTrack();
-    expect(player.editing).toBe(false);
+    expect(player.trackBpmMode).toBe(false);
+    expect(player.trackKeyMode).toBe(false);
     setExpanded(false);
+  });
+
+  it('ends when the big player collapses', () => {
+    setExpanded(true);
+    setTrackMode('bpm', true);
+    setExpanded(false);
+    expect(player.trackBpmMode).toBe(false);
   });
 });
