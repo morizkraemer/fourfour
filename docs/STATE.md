@@ -47,7 +47,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q33 Rust analyzer in the app [done, branch q33-rust-analysis 23332d0, master merged] — fourfour-analysis-rs crate; backend setting rust|python (rust when weights present); 2.36 vs 1.78 tracks/min on a loaded box; Rust emits no cues/energy (licence call). Weights: fourfour-analysis-rs/scripts/fetch-models.sh. Not merged. — branch q33-rust-analysis: lib crate fourfour-analysis-rs extracted (c3cb7a2); backend/coordinator files WIP-committed unbuilt; worktree .claude/worktrees/agent-a45ef63857b3fe37b
 
 ## Run
-status: idle · since 2026-10-28 · queue + own priorities done; everything on branch q42-overnight (dc818de), installed on the Mac; master untouched except docs
+status: paused · since 2026-10-28 (PM pause; was idle, nothing in flight) · queue + own priorities done; everything on branch q42-overnight (dc818de), installed on the Mac; master untouched except docs
 targets: Merlin approved option 1 (2026-10-27): stick sync real → review → leftovers → .dmg → key refit → housekeeping
 plan: W-Z zoom detail + W-X ⌥-delete/ribbon (round 7, running) → Q42 → Q43 → Q44 → Q45 [mac] → Q46 → Q47, then own priorities
 decided 2026-10-27 (Merlin): ignore brother-lane gates for now — writer/sync fixes go ahead here
