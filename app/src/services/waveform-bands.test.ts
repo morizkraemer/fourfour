@@ -12,6 +12,7 @@ import {
   overviewBandsFromPayload,
   rowBandsFor,
   rowBandsFromBandBytes,
+  stripGains,
 } from './waveform-bands.ts';
 import { displayAmp, reduceBands, ZOOM_PEAK_WEIGHT } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import { ROW_BAND_COLUMNS, bandBytes, encodeWire, previewFromBands, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
@@ -184,14 +185,15 @@ describe('PWV7 payloads (the stick bytes)', () => {
     expect(Math.max(...legacy.low)).toBeLessThan(0.8);
   });
 
-  it('is the stick columns under the track headroom gain in the row preview', () => {
+  it('is the stick columns under the track band gains in the row preview', () => {
     const bytes = Uint8Array.from(pwv7Bytes);
     const { overview, ...columns } = rowBandsFromBandBytes(bytes)!;
     const stick = bandsFromStickBytes(bytes);
-    const gain = columns.low[1] / stick.low[1];
-    expect(gain).toBeGreaterThan(0);
-    expect(gain).toBeLessThanOrEqual(1);
-    stick.high.forEach((v, i) => expect(columns.high[i]).toBeCloseTo(v * gain, 5));
+    const gains = stripGains(stick);
+    for (const band of ['low', 'mid', 'high'] as const) {
+      expect(gains[band]).toBeGreaterThan(0);
+      stick[band].forEach((v, i) => expect(columns[band][i]).toBeCloseTo(v * gains[band], 5));
+    }
     expect(overview).toBe(true);
     expect(rowBandsFromBandBytes(bytes)).toBe(rowBandsFromBandBytes(bytes));
   });

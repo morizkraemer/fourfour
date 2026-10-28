@@ -44,9 +44,11 @@ const BALANCE_MIN_PEAK = 0.02;
 const ROW_CACHE_LIMIT = 1000;
 const LEGACY_LEVEL = 0.75;
 const STRIP_COLUMNS = 1200;
-const STRIP_HEADROOM_PERCENTILE = 0.95;
-const STRIP_HEADROOM_LEVEL = 0.9;
-const STRIP_GAIN_STEPS = 12;
+const STRIP_LEVEL_PERCENTILE = 0.95;
+const STRIP_LAYER_SHARE: Record<'low' | 'mid' | 'high', number> = { low: 0.4, mid: 0.2, high: 0.3 };
+const STRIP_MIN_GAIN = 0.2;
+const STRIP_MAX_GAIN = 4;
+const STRIP_GAIN_STEPS = 14;
 
 const PREVIEW_MIX = Array.from({ length: 8 }, (_, level) => {
   const white = level / 7;
@@ -291,13 +293,13 @@ export function rowBandsFor(preview: ArrayLike<number> | null | undefined): Band
 /**
  * Row and detail previews from the 3-band row preview (`waveform_bands`: low, mid, high bytes per column).
  * The preview is a mean per column of whichever series the analysis stored (PWV6, or the detail when there is none),
- * and a stored row preview does not say which. So it gets the same per-track headroom gain as the strip
- * (`stripGain`): detail-sourced previews no longer saturate into a solid low band, overview ones are barely touched.
+ * and a stored row preview does not say which. So it gets the same per-band gains as the strip (`stripGains`): either
+ * source ends up at the same level, and the row shows its high band the way the strip does.
  */
 export function rowBandsFromBandBytes(bandPreview: ArrayLike<number> | null | undefined): BandColumns | null {
   return cachedRowBands(bandPreview, (bytes) => {
     const columns = bandsFromStickBytes(bytes);
-    return withGain({ ...columns, overview: true }, stripGain(columns));
+    return withGains(columns, stripGains(columns));
   });
 }
 
@@ -334,49 +336,52 @@ function meanReduced(bands: BandColumns, columns: number): BandColumns {
   return out;
 }
 
-function stackLevel(bands: BandColumns, i: number, gain: number): number {
-  const layer = (name: 'low' | 'mid' | 'high') =>
-    STACK_GAIN[name] * Math.pow(displayAmp(bands[name][i] * gain), STACK_GAMMA[name]);
-  return layer('low') + layer('mid') + layer('high');
+type BandName = 'low' | 'mid' | 'high';
+export type BandGains = Record<BandName, number>;
+
+function layerPercentile(values: ArrayLike<number>, name: BandName, gain: number): number {
+  const layers = new Float32Array(values.length);
+  for (let i = 0; i < layers.length; i++) layers[i] = STACK_GAIN[name] * Math.pow(displayAmp(values[i] * gain), STACK_GAMMA[name]);
+  layers.sort();
+  return layers[Math.min(layers.length - 1, Math.floor(layers.length * STRIP_LEVEL_PERCENTILE))];
 }
 
-function stackPercentileLevel(bands: BandColumns, gain: number): number {
-  const levels = new Float32Array(bands.low.length);
-  for (let i = 0; i < levels.length; i++) levels[i] = stackLevel(bands, i, gain);
-  levels.sort();
-  return levels[Math.min(levels.length - 1, Math.floor(levels.length * STRIP_HEADROOM_PERCENTILE))];
-}
-
-/**
- * One gain for the whole track, never above 1: loud tracks are brought down until the 95th percentile of the stacked
- * height (low + mid + high) sits at STRIP_HEADROOM_LEVEL of the strip, so drops keep their silhouette and the high band
- * is not a white slab on the top edge. Quiet tracks are left alone (a breakdown stays thin). Band proportions are kept.
- */
-export function stripGain(bands: BandColumns): number {
-  if (bands.low.length === 0 || stackPercentileLevel(bands, 1) <= STRIP_HEADROOM_LEVEL) return 1;
-  let lo = 0;
-  let hi = 1;
+function bandGain(values: ArrayLike<number>, name: BandName): number {
+  const target = STRIP_LAYER_SHARE[name];
+  if (layerPercentile(values, name, STRIP_MAX_GAIN) <= target) return STRIP_MAX_GAIN;
+  let lo = STRIP_MIN_GAIN;
+  let hi = STRIP_MAX_GAIN;
   for (let step = 0; step < STRIP_GAIN_STEPS; step++) {
     const mid = (lo + hi) / 2;
-    if (stackPercentileLevel(bands, mid) > STRIP_HEADROOM_LEVEL) hi = mid;
+    if (layerPercentile(values, name, mid) > target) hi = mid;
     else lo = mid;
   }
   return lo;
 }
 
-function withGain(bands: BandColumns, gain: number): BandColumns {
-  if (gain === 1) return bands;
+/**
+ * One gain per band for the whole track: each band's loud end (its 95th percentile) gets its own share of the strip
+ * (`STRIP_LAYER_SHARE`), so the thin high band is not swamped by the low end and a hi-hat section stands out as a
+ * clearly taller white layer. Per track, like Rekordbox's own gains: a breakdown still stays thin against its drop,
+ * and the shares add up to less than the strip, so the stack does not clip.
+ */
+export function stripGains(bands: BandColumns): BandGains {
+  if (bands.low.length === 0) return { low: 1, mid: 1, high: 1 };
+  return { low: bandGain(bands.low, 'low'), mid: bandGain(bands.mid, 'mid'), high: bandGain(bands.high, 'high') };
+}
+
+function withGains(bands: BandColumns, gains: BandGains): BandColumns {
   const out = emptyBands(bands.low.length);
   for (const name of ['low', 'mid', 'high'] as const) {
-    for (let i = 0; i < out[name].length; i++) out[name][i] = bands[name][i] * gain;
+    for (let i = 0; i < out[name].length; i++) out[name][i] = bands[name][i] * gains[name];
   }
   return { ...out, overview: true };
 }
 
 /**
  * The columns the player's overview strip draws for an analysis payload: the PWV6 overview series when the
- * payload has one, else the detail columns brought to overview resolution by their mean. Either way the track gets
- * one headroom gain (`stripGain`), so every track fits the strip without clipping. Never the row preview: that one
+ * payload has one, else the detail columns brought to overview resolution by their mean. Either way each band gets its
+ * own gain (`stripGains`), so every track fits the strip and its highs read. Never the row preview: that one
  * is cut from whichever series the analysis stored and carries no scale of its own.
  */
 export function stripBandsFromAnalysis(
@@ -390,5 +395,5 @@ export function stripBandsFromAnalysis(
     colorBandsFromPayload(analysis.waveform_color);
   if (!source) return null;
   const columns = overview ? source : { ...meanReduced(source, STRIP_COLUMNS), overview: true };
-  return withGain(columns, stripGain(columns));
+  return withGains(columns, stripGains(columns));
 }
