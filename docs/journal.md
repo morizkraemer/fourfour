@@ -187,3 +187,4 @@
 2026-10-28 04:49 orchestrator - spawn: round 8 (Merlin back in thread) — wl-player L1 zoom + L2 control bar, wl-palette L3 column reorder + L4 palette (seat, sonnet high), both off q42-overnight
 2026-10-28 05:00 orchestrator L3/L4 landed-on-branch: wl-palette de6fc3b → q42-overnight bcd6a16 (518 tests); L6/L7 spawn wl-sidebar (seat, sonnet)
 2026-10-28 05:21 orchestrator L1/L2 landed-on-branch: wl-player 2bfbcea → q42-overnight 2143c4f (tempo ratio 0.25–4x); L8/L9 spawn wl-import (seat, sonnet); full checks + Mac install started
+2026-10-28 05:23 orchestrator L6/L7 done: wl-sidebar d7a732d (schema v7 folders, nested PDB/OneLibrary export, right-click menus; 334 cargo + 545 vitest); merges after the running check/install; wl-import told to merge it first
