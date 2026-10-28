@@ -35,6 +35,16 @@ describe('moveColumn', () => {
     expect(keys('library').indexOf('album')).toBe(keys('library').indexOf('title') - 1);
   });
 
+  it('moves the cover column and persists the order', () => {
+    resetColumns('library');
+    moveColumn('library', 'cover', 'artist', false);
+    const order = keys('library');
+    expect(order.indexOf('cover')).toBe(order.indexOf('artist') + 1);
+    expect(JSON.parse(storage['fourfour.tableColumns.v3']).layouts.library.columns.map((c: { key: string }) => c.key)).toContain('cover');
+    moveColumn('library', 'artist', 'cover', true);
+    expect(keys('library').indexOf('artist')).toBe(keys('library').indexOf('cover') - 1);
+  });
+
   it('moves a column after the last one', () => {
     moveColumn('organize', 'album', 'key', false);
     expect(keys('organize').at(-1)).toBe('album');

@@ -10,6 +10,6 @@ export async function createPlaylistAndOpen(trackIds: number[] = [], parentId = 
     await selectVolume(null);
   }
   dockOrganizeTarget({ kind: 'playlist', id: name, label: name, playlistId });
-  ui.renameRequest = { playlistId };
+  ui.sidebarRenameRequest = { playlistId };
   return playlistId;
 }

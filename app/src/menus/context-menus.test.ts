@@ -8,6 +8,7 @@ import {
   buildRevealItem,
   revealLabel,
 } from './context-menus.ts';
+import { ALL_COLUMN_KEYS, getLayout } from '../stores/table-columns.svelte.ts';
 import { FAVORITE_SLOTS, library } from '../stores/library.svelte.ts';
 
 describe('buildSidebarSectionMenuItems', () => {
@@ -92,9 +93,14 @@ describe('buildColumnContextMenuItems', () => {
   ];
   const noop = () => {};
   const layout = (over: Record<string, unknown> = {}) =>
-    ({ columns: [{ key: 'bpm', hidden: true }], sortKey: null, sortDir: 'asc', ...over }) as any;
+    ({
+      columns: [{ key: 'title' }, { key: 'bpm', hidden: true }],
+      sortKey: null,
+      sortDir: 'asc',
+      ...over,
+    }) as any;
 
-  it('derives checked state from layout, defaulting album/genre/year hidden', () => {
+  it('derives checked state from layout, treating columns missing from it as hidden', () => {
     const items = buildColumnContextMenuItems({
       allColumnKeys: keys,
       layout: layout(),
@@ -103,6 +109,22 @@ describe('buildColumnContextMenuItems', () => {
       clearSort: noop,
     });
     expect(items.slice(0, 3).map((i) => i.checked)).toEqual([true, false, false]);
+  });
+  it('lists every catalog column including Rating and Colour, unchecked on a fresh layout', () => {
+    const items = buildColumnContextMenuItems({
+      allColumnKeys: ALL_COLUMN_KEYS,
+      layout: getLayout('library'),
+      toggleColumnVisibility: noop,
+      resetColumns: noop,
+      clearSort: noop,
+    });
+    const byLabel = new Map(items.map((i) => [i.label, i.checked]));
+    expect(byLabel.get('Rating')).toBe(false);
+    expect(byLabel.get('Colour')).toBe(false);
+    expect(byLabel.get('Title')).toBe(true);
+    expect(items.slice(0, ALL_COLUMN_KEYS.length).map((i) => i.label)).toEqual(
+      ALL_COLUMN_KEYS.map((c) => c.label)
+    );
   });
   it('disables Clear sort without a sort key and wires toggle callbacks', () => {
     const toggled: string[] = [];
