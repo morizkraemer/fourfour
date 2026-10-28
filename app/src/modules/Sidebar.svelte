@@ -41,6 +41,7 @@
   } from '../stores/sidebar-selection.svelte.ts';
   import { outermostIds, playlistIdsInSelection } from '../lib/playlistSelection.ts';
   import { toggleFolder } from '../stores/sidebar-folders.svelte.ts';
+  import { resetActiveRowIfDeleted } from '../stores/sidebar-delete.ts';
 
   let intervalId;
   let renamingPlaylistId = $state(null);
@@ -261,21 +262,6 @@
       label: '',
       section,
     };
-  }
-
-  function resetActiveRowIfDeleted() {
-    const stillThere = library.playlists.some((p) => p.name === ui.activeSidebarRow && !p.is_folder);
-    const wasPlaylist = !stillThere && !isNonPlaylistRow(ui.activeSidebarRow);
-    if (wasPlaylist) ui.activeSidebarRow = 'All Tracks';
-  }
-
-  function isNonPlaylistRow(id) {
-    return (
-      id === 'All Tracks' ||
-      id === 'Recently Added' ||
-      library.volumes.includes(id) ||
-      library.sidebarData.favorites.rows.some((row) => row.label === id)
-    );
   }
 
   function openSelectionMenu(e) {

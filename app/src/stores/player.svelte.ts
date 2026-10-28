@@ -206,7 +206,8 @@ export function currentTime() {
 
 export function currentTimeMs() {
   if (!player.track) return '.0';
-  return `.${Math.floor(player.progress * 10) % 10}`;
+  const seconds = player.progress * player.track.totalSeconds;
+  return `.${Math.floor(seconds * 10) % 10}`;
 }
 
 export function totalTime() {
