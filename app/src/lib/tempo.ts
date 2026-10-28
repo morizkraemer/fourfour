@@ -124,6 +124,19 @@ export function shiftedKey(analysedKey: string, semitones: number): string | nul
   return `${names[pitchClass]}${parts.minor ? 'm' : ''}`;
 }
 
+/** The key `units` steps around the Camelot wheel, written in the notation `key` is written in. */
+export function camelotStep(key: string, units: number): string | null {
+  const camelot = parseKey(key);
+  if (!camelot) return null;
+  const number = ((((Number(camelot.slice(0, -1)) - 1 + Math.round(units)) % 12) + 12) % 12) + 1;
+  const stepped = `${number}${camelot.slice(-1)}`;
+  if (isCamelotNotation(key)) return stepped;
+  const parts = keyParts(stepped);
+  if (!parts) return null;
+  const names = /[b♭]/.test(key.trim().slice(1, 2)) ? FLAT_NAMES : SHARP_NAMES;
+  return `${names[parts.pitchClass]}${parts.minor ? 'm' : ''}`;
+}
+
 /** The semitones the pitch has moved: the key shift, plus the tempo change when key lock is off and the tempo changes the pitch. */
 export function effectiveShift(keyShift: number, percent: number, keyLock: boolean): number {
   if (keyLock) return keyShift;

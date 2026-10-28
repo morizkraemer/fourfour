@@ -26,6 +26,23 @@ export function shiftBeats(beats: BeatMarker[], deltaMs: number): BeatMarker[] {
   return out;
 }
 
+export function beatIntervalMs(beats: BeatMarker[]): number | null {
+  if (beats.length < 2) return null;
+  return (beats[beats.length - 1].time_ms - beats[0].time_ms) / (beats.length - 1);
+}
+
+/** The grid moved one beat later (`direction` 1) or earlier (-1); a beat that opens up at the track start is filled in. */
+export function shiftBeatsByBeat(beats: BeatMarker[], direction: 1 | -1): BeatMarker[] {
+  const interval = beatIntervalMs(beats);
+  if (interval === null || !(interval > 0)) return beats;
+  const shifted = shiftBeats(beats, direction * interval);
+  if (direction === 1 && shifted[0] && shifted[0].time_ms - interval >= 0) {
+    const first = shifted[0];
+    shifted.unshift({ time_ms: first.time_ms - interval, bar_position: first.bar_position === 1 ? 4 : first.bar_position - 1 });
+  }
+  return shifted;
+}
+
 /** How far to move the grid so the downbeat nearest to `positionMs` lands exactly on it. */
 export function shiftToPlaceDownbeatAt(beats: BeatMarker[], positionMs: number): number | null {
   if (!beats.length || !Number.isFinite(positionMs)) return null;

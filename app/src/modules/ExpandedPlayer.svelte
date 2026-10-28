@@ -7,14 +7,13 @@
   `seekToProgress` path as the compact strip, so playback/scrub behaviour matches.
 -->
 <script>
-  import { WaveformView, CueEditor } from '$ds';
+  import { WaveformView, CueEditor, keyColor } from '$ds';
   import PlayerTempo from './PlayerTempo.svelte';
   import TempoField from './TempoField.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
-  import { tempo } from '../stores/tempo.svelte.ts';
-  import { DRAG_PX_PER_UNIT, effectiveShift, formatBpm, formatShift, parseBpmEntry } from '../lib/tempo.ts';
-  import { bpmEntry, commitTrackBpm, doubleTrackBpm, halveTrackBpm, stepTrackBpm } from '../stores/track-edits.svelte.ts';
+  import { DRAG_PX_PER_UNIT, camelotStep, parseBpmEntry } from '../lib/tempo.ts';
+  import { bpmEntry, commitTrackBpm, doubleTrackBpm, halveTrackBpm, stepTrackBpm, stepTrackKey } from '../stores/track-edits.svelte.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { registerWaveZoom } from '../stores/wave-zoom.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
@@ -44,6 +43,8 @@
     beatGridNudgeLeft,
     beatGridNudgeRight,
     beatGridSetCurrent,
+    beatGridShiftByBeat,
+    setEditing,
   } from '../stores/player.svelte.ts';
 
   let wave = $state(null);
@@ -51,6 +52,9 @@
     if (wave) return registerWaveZoom(wave);
   });
   let trackBpm = $derived(Number(player.track?.bpm));
+  let trackKey = $derived(player.track?.key ?? '');
+  let hasKey = $derived(camelotStep(trackKey, 0) !== null);
+  let hasBeats = $derived((player.track?.beats.length ?? 0) > 1);
   let hasTrackBpm = $derived(Number.isFinite(trackBpm) && trackBpm > 0);
   let windowTrackId = $derived(player.track?.bandsZoom ? player.track.id : null);
   let windowSource = $derived(
@@ -207,50 +211,64 @@
       {/if}
     </div>
 
-    <div class="ff-xp__grid-edit" role="group" aria-label="Beat grid">
-      <span class="ff-xp__grid-label">GRID</span>
-      <button class="ff-xp__grid-btn" title="Nudge grid left one pixel (⌥: 1 ms)" aria-label="Nudge grid left"
-        disabled={!player.track} onclick={(e) => beatGridNudgeLeft(nudgeMs(e))}>◀</button>
-      <button class="ff-xp__grid-btn" title="Set downbeat to playhead" aria-label="Set downbeat to playhead"
-        disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
-      <button class="ff-xp__grid-btn" title="Nudge grid right one pixel (⌥: 1 ms)" aria-label="Nudge grid right"
-        disabled={!player.track} onclick={(e) => beatGridNudgeRight(nudgeMs(e))}>▶</button>
-    </div>
-
-    <div class="ff-xp__grid-edit" role="group" aria-label="Track BPM">
-      <span class="ff-xp__grid-label">BPM</span>
-      <TempoField
-        label="Track BPM"
-        text={hasTrackBpm ? trackBpm.toFixed(2) : '—'}
-        width="8ch"
-        pxPerUnit={DRAG_PX_PER_UNIT.bpm}
-        disabled={!hasTrackBpm}
-        editText={hasTrackBpm ? trackBpm.toFixed(2) : ''}
-        editSignal={bpmEntry.request}
-        onStep={(units, tier) => stepTrackBpm(player.track.id, units, tier)}
-        onSet={(typed) => {
-          const bpm = parseBpmEntry(typed);
-          return bpm !== null && commitTrackBpm(player.track.id, bpm);
-        }} />
-      <button class="ff-xp__grid-btn" title="Double the track BPM and re-space the grid" aria-label="Double track BPM"
-        disabled={!hasTrackBpm} onclick={() => doubleTrackBpm(player.track.id)}>×2</button>
-      <button class="ff-xp__grid-btn" title="Halve the track BPM and re-space the grid" aria-label="Halve track BPM"
-        disabled={!hasTrackBpm} onclick={() => halveTrackBpm(player.track.id)}>÷2</button>
-    </div>
-
-    <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">
-      <span class="ff-xp__grid-label">ORIG</span>
-      <span class="ff-xp__orig" title="The track's own BPM and key, and the key shift">
-        <span class="ff-xp__orig-bpm">{formatBpm(Number(player.track?.bpm))}</span>
-        <span class="ff-xp__orig-key">{player.track?.key || '—'}</span>
-        <span class="ff-xp__orig-shift">{formatShift(effectiveShift(tempo.keyShift, tempo.percent, tempo.keyLock))}</span>
-      </span>
-    </div>
-
-    <div class="ff-xp__zoom">
-      <button class="ff-xp__zoom-btn" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}>−</button>
-      <button class="ff-xp__zoom-btn" title="Default zoom" aria-label="Default zoom" onclick={() => wave?.resetZoom()}>Fit</button>
-      <button class="ff-xp__zoom-btn" title="Zoom in" aria-label="Zoom in" onclick={() => wave?.zoomIn()}>+</button>
+    <div class="ff-xp__tools">
+      {#if player.editing}
+        <div class="ff-xp__edit" role="group" aria-label="Edit track">
+          <TempoField
+            label="Track BPM"
+            text={hasTrackBpm ? trackBpm.toFixed(2) : '—'}
+            width="8ch"
+            pxPerUnit={DRAG_PX_PER_UNIT.bpm}
+            disabled={!hasTrackBpm}
+            editText={hasTrackBpm ? trackBpm.toFixed(2) : ''}
+            editSignal={bpmEntry.request}
+            onStep={(units, tier) => stepTrackBpm(player.track.id, units, tier)}
+            onSet={(typed) => {
+              const bpm = parseBpmEntry(typed);
+              return bpm !== null && commitTrackBpm(player.track.id, bpm);
+            }} />
+          <button class="ff-xp__grid-btn" title="Double the track BPM" aria-label="Double track BPM"
+            disabled={!hasTrackBpm} onclick={() => doubleTrackBpm(player.track.id)}>×2</button>
+          <button class="ff-xp__grid-btn" title="Halve the track BPM" aria-label="Halve track BPM"
+            disabled={!hasTrackBpm} onclick={() => halveTrackBpm(player.track.id)}>÷2</button>
+          <span class="ff-xp__sep"></span>
+          <button class="ff-xp__grid-btn" title="Previous key on the Camelot wheel" aria-label="Key down"
+            disabled={!hasKey} onclick={() => stepTrackKey(player.track.id, -1)}>−</button>
+          <span class="ff-xp__key" style:color={keyColor(trackKey)} title="Track key">{hasKey ? trackKey : '—'}</span>
+          <button class="ff-xp__grid-btn" title="Next key on the Camelot wheel" aria-label="Key up"
+            disabled={!hasKey} onclick={() => stepTrackKey(player.track.id, 1)}>+</button>
+          <span class="ff-xp__sep"></span>
+          <button class="ff-xp__grid-btn" title="Shift grid one beat earlier" aria-label="Shift grid one beat earlier"
+            disabled={!hasBeats} onclick={() => beatGridShiftByBeat(-1)}>«</button>
+          <button class="ff-xp__grid-btn" title="Nudge grid left one pixel (⌥: 1 sample)" aria-label="Nudge grid left"
+            disabled={!hasBeats} onclick={(e) => beatGridNudgeLeft(nudgeMs(e))}>‹</button>
+          <button class="ff-xp__grid-btn" title="Set downbeat to playhead" aria-label="Set downbeat to playhead"
+            disabled={!hasBeats} onclick={() => beatGridSetCurrent()}>1</button>
+          <button class="ff-xp__grid-btn" title="Nudge grid right one pixel (⌥: 1 sample)" aria-label="Nudge grid right"
+            disabled={!hasBeats} onclick={(e) => beatGridNudgeRight(nudgeMs(e))}>›</button>
+          <button class="ff-xp__grid-btn" title="Shift grid one beat later" aria-label="Shift grid one beat later"
+            disabled={!hasBeats} onclick={() => beatGridShiftByBeat(1)}>»</button>
+        </div>
+        <button class="ff-xp__grid-btn ff-xp__done" title="Done (E, Esc)" aria-label="Done editing"
+          onclick={() => setEditing(false)}>Done</button>
+      {:else}
+        <div class="ff-xp__grid-edit" role="group" aria-label="Beat grid">
+          <span class="ff-xp__grid-label">GRID</span>
+          <button class="ff-xp__grid-btn" title="Nudge grid left one pixel (⌥: 1 ms)" aria-label="Nudge grid left"
+            disabled={!player.track} onclick={(e) => beatGridNudgeLeft(nudgeMs(e))}>◀</button>
+          <button class="ff-xp__grid-btn" title="Set downbeat to playhead" aria-label="Set downbeat to playhead"
+            disabled={!player.track} onclick={() => beatGridSetCurrent()}>Set</button>
+          <button class="ff-xp__grid-btn" title="Nudge grid right one pixel (⌥: 1 ms)" aria-label="Nudge grid right"
+            disabled={!player.track} onclick={(e) => beatGridNudgeRight(nudgeMs(e))}>▶</button>
+        </div>
+        <div class="ff-xp__zoom">
+          <button class="ff-xp__zoom-btn" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}>−</button>
+          <button class="ff-xp__zoom-btn" title="Default zoom" aria-label="Default zoom" onclick={() => wave?.resetZoom()}>Fit</button>
+          <button class="ff-xp__zoom-btn" title="Zoom in" aria-label="Zoom in" onclick={() => wave?.zoomIn()}>+</button>
+        </div>
+        <button class="ff-xp__grid-btn" title="Edit BPM, key and grid (E)" aria-label="Edit track"
+          disabled={!player.track} onclick={() => setEditing(true)}>Edit</button>
+      {/if}
     </div>
   </footer>
 </div>
@@ -338,12 +356,11 @@
   .ff-xp__wave { flex: 1; min-height: 0; position: relative; }
 
   .ff-xp__transport {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; align-items: center; justify-content: flex-start;
     gap: var(--ff-space-4, 16px);
     padding: 10px 14px;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     flex-shrink: 0;
-    flex-wrap: wrap;
     position: relative;
   }
   .ff-xp__transport-left { display: flex; align-items: center; gap: 10px; }
@@ -409,15 +426,13 @@
   .ff-xp__grid-btn:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); }
   .ff-xp__grid-btn:disabled { opacity: 0.4; cursor: default; }
 
-  .ff-xp__pitch { display: flex; align-items: center; gap: 8px; }
-  .ff-xp__orig {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: var(--ff-font-mono, monospace); font-size: 10px;
-    font-variant-numeric: tabular-nums; color: var(--ff-muted, rgba(255, 255, 255, 0.5));
+  .ff-xp__tools { display: flex; align-items: center; gap: var(--ff-space-4, 16px); margin-left: auto; }
+  .ff-xp__edit { display: flex; align-items: center; gap: 4px; }
+  .ff-xp__sep { width: 1px; height: 16px; margin: 0 6px; background: var(--ff-border, rgba(255, 255, 255, 0.12)); }
+  .ff-xp__key {
+    min-width: 3.5ch; text-align: center;
+    font-family: var(--ff-font-mono, monospace); font-size: 12px; font-variant-numeric: tabular-nums;
   }
-  .ff-xp__orig-bpm { width: 6ch; text-align: right; }
-  .ff-xp__orig-key { width: 3ch; }
-  .ff-xp__orig-shift { width: 6ch; }
 
   .ff-xp__zoom { display: flex; align-items: center; gap: 4px; }
   .ff-xp__zoom-btn {

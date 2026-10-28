@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridNudgeMs, rescaleBeats, shiftBeats, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
+import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridNudgeMs, rescaleBeats, shiftBeats, shiftBeatsByBeat, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
 
 const SAMPLE_MS = 1000 / 44100;
 
@@ -234,5 +234,23 @@ describe('rescaleBeats (mirrors the library rescale_beat_grid)', () => {
     const reloaded = gridFromStorage(beats, offsetMs);
     expect(reloaded.map((b) => b.bar_position)).toEqual(local.map((b) => b.bar_position));
     reloaded.forEach((b, i) => expect(b.time_ms).toBeCloseTo(local[i].time_ms, 9));
+  });
+});
+
+describe('shiftBeatsByBeat', () => {
+  it('moves the grid one beat later and fills the opened beat at the start', () => {
+    const out = shiftBeatsByBeat(grid(), 1);
+    expect(out[0]).toEqual({ time_ms: 100, bar_position: 4 });
+    expect(out[1]).toEqual({ time_ms: 600, bar_position: 1 });
+    expect(out).toHaveLength(6);
+  });
+  it('moves the grid one beat earlier and drops a beat that would start before the track', () => {
+    const out = shiftBeatsByBeat(grid(), -1);
+    expect(out).toHaveLength(4);
+    expect(out[0]).toEqual({ time_ms: 100, bar_position: 2 });
+  });
+  it('leaves a grid with fewer than two beats alone', () => {
+    const one = [{ time_ms: 100, bar_position: 1 }];
+    expect(shiftBeatsByBeat(one, 1)).toBe(one);
   });
 });
