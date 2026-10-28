@@ -245,3 +245,4 @@
 2026-10-28 20:31 orchestrator O5 spawn: ov-ci cross-platform Actions workflow, branch only, no run (seat, sonnet medium)
 2026-10-28 21:00 ov-ci O5 done: ci.yml 3 OS + unsigned bundles, YAML-parsed only, not run; kept separate on ov-ci (push = run, needs Merlin)
 2026-10-28 21:10 orchestrator O6 housekeeping: 11 merged/clean worktrees removed (q46/q49/wq-editmode branches kept), beat_this weights saved to ~/.cache/fourfour-models, :5237 preview stopped; disk 53%
+2026-10-28 21:40 orchestrator - ov-1028 33988ec checks green on rerun (one cargo test failed once under load, unidentified); Mac offline, install pending (install-only.sh when it's back)
