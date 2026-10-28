@@ -13,11 +13,11 @@ import { openSettings } from './ui.svelte.ts';
 import type { PaletteSettingSource } from '../shortcuts/palette-model.ts';
 
 export const SETTINGS_PAGES = [
-  { key: 'library', label: 'Library' },
-  { key: 'analysis', label: 'Analysis' },
-  { key: 'audio', label: 'Audio' },
-  { key: 'keyboard', label: 'Keyboard' },
-  { key: 'advanced', label: 'Advanced' },
+  { key: 'library', label: 'Library', keywords: ['rekordbox', 'import', 'folder', 'path', 'database'] },
+  { key: 'analysis', label: 'Analysis', keywords: ['bpm', 'key', 'engine', 'auto', 'detect'] },
+  { key: 'audio', label: 'Audio', keywords: ['output', 'device', 'sample', 'buffer', 'latency', 'sound'] },
+  { key: 'keyboard', label: 'Keyboard', keywords: ['shortcuts', 'keys', 'bindings', 'hotkeys'] },
+  { key: 'advanced', label: 'Advanced', keywords: ['reset', 'debug', 'developer'] },
 ] as const;
 
 export type SettingsPageKey = (typeof SETTINGS_PAGES)[number]['key'];
@@ -40,6 +40,7 @@ export function buildSettingSources(audioAvailable: boolean = getIsTauri()): Pal
     {
       id: 'analysis.autoAnalyzeNew',
       label: 'Settings: Analyze new tracks',
+      keywords: ['auto', 'import', 'automatic'],
       control: { kind: 'switch', on: appSettings.autoAnalyzeNew },
       change: () => void setAutoAnalyzeNew(!appSettings.autoAnalyzeNew),
     },
@@ -74,6 +75,7 @@ export function buildSettingSources(audioAvailable: boolean = getIsTauri()): Pal
   const pages: PaletteSettingSource[] = SETTINGS_PAGES.map((page) => ({
     id: `page.${page.key}`,
     label: `Open settings › ${page.label}`,
+    keywords: [...page.keywords],
     change: () => openSettings(page.key),
   }));
 

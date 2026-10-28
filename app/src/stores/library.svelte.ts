@@ -36,7 +36,7 @@ import {
   type SyncReport
 } from '../services/tauri.svelte.ts';
 import { loadSticks } from './sticks.svelte.ts';
-import { onStickSyncFinished, syncStick } from './stick-sync.svelte.ts';
+import { onStickSyncFinished, stickSync, syncStick } from './stick-sync.svelte.ts';
 import {
   isValidAnalysisPayload,
   isValidWaveformPreview,
@@ -1104,6 +1104,14 @@ export async function ejectVolume(path: string) {
 export async function syncToUsb() {
   if (!library.activeVolume) return;
   await syncStick(library.activeVolume);
+}
+
+/** Syncs every mounted stick in turn; stops at the first one that needs an answer or fails. */
+export async function syncAllSticks() {
+  for (const volume of library.volumes) {
+    await syncStick(volume);
+    if (stickSync.stage === 'confirm' || stickSync.stage === 'failed') return;
+  }
 }
 
 /* ── Playlist management ────────────────────────────────────────────── */

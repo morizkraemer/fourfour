@@ -132,4 +132,44 @@ describe('buildPaletteGroups', () => {
     engine.run();
     expect(change).toHaveBeenLastCalledWith();
   });
+
+  it('finds commands by synonym when the label misses', () => {
+    const src = sources();
+    src.actions = [
+      { id: 'sync', label: 'Sync all sticks', shortcut: '', keywords: ['usb', 'drive'], run: vi.fn() },
+      { id: 'rb', label: 'Import from Rekordbox…', shortcut: '', keywords: ['pioneer', 'migrate'], run: vi.fn() },
+    ];
+    expect(ids(buildPaletteGroups('usb', src), 'actions')).toEqual(['action:sync']);
+    expect(ids(buildPaletteGroups('>pion', src), 'actions')).toEqual(['action:rb']);
+    expect(ids(buildPaletteGroups('xyz', src), 'actions')).toEqual([]);
+  });
+
+  it('ranks a label match above a synonym match', () => {
+    const src = sources();
+    src.actions = [
+      { id: 'a', label: 'Eject drive', shortcut: '', keywords: ['sync'], run: vi.fn() },
+      { id: 'b', label: 'Sync stick', shortcut: '', run: vi.fn() },
+    ];
+    expect(ids(buildPaletteGroups('sync', src), 'actions')).toEqual(['action:b', 'action:a']);
+  });
+
+  it('does not highlight characters for a synonym match', () => {
+    const src = sources();
+    src.actions = [{ id: 'sync', label: 'Sync all sticks', shortcut: '', keywords: ['usb'], run: vi.fn() }];
+    const item = buildPaletteGroups('usb', src).find((g) => g.key === 'actions')!.items[0];
+    expect(item.ranges).toEqual([]);
+  });
+
+  it('matches settings pages by synonym', () => {
+    const src = sources();
+    src.settings = [{ id: 'page.audio', label: 'Open settings › Audio', keywords: ['latency'], change: vi.fn() }];
+    expect(ids(buildPaletteGroups('latency', src), 'settings')).toEqual(['setting:page.audio']);
+  });
+
+  it('passes the track cover through', () => {
+    const src = sources();
+    src.tracks = [{ id: 1, title: 'Hyperion', artist: 'Solomun', cover: () => 'blob:art', run: vi.fn() }];
+    const item = buildPaletteGroups('hyp', src).find((g) => g.key === 'tracks')!.items[0];
+    expect(item.cover?.()).toBe('blob:art');
+  });
 });

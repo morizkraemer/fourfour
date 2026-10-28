@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bpmDiffers,
   clampPercent,
   clampShift,
   formatPercent,
@@ -225,5 +226,21 @@ describe('shift to Camelot to colour', () => {
   it('follows the pitch of a varispeed tempo change', () => {
     expect(colourOf('8A', effectiveShift(0, 6, false))).toBe(colourOf('8A', 1));
     expect(colourOf('8A', effectiveShift(0, 6, true))).toBe('var(--ff-key-8)');
+  });
+});
+
+describe('BPM accent', () => {
+  it('is off while the played BPM equals the analysed one', () => {
+    expect(bpmDiffers(128, playingBpm(128, 0))).toBe(false);
+    expect(bpmDiffers(128, playingBpm(128, 0.001))).toBe(false);
+  });
+
+  it('is on once the displayed BPM differs', () => {
+    expect(bpmDiffers(128, playingBpm(128, 3))).toBe(true);
+    expect(bpmDiffers(128, playingBpm(128, -0.1))).toBe(true);
+  });
+
+  it('is off without a BPM', () => {
+    expect(bpmDiffers(NaN, NaN)).toBe(false);
   });
 });
