@@ -10,6 +10,7 @@
   import { bpmScrub, keyScrub } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
+  import { nearestCue, CUE_HIT_SLACK } from '../utils/nearest-cue.js';
 
   let {
     mode = 'empty',
@@ -146,6 +147,28 @@
     return `clamp(${MARKER_EDGE}px, ${(position * 100).toFixed(3)}%, calc(100% - ${MARKER_EDGE}px))`;
   }
 
+  let waveHoverKey = $state(null);
+  let waveHoverMarker = $derived(markers.find((m) => m.key === waveHoverKey) ?? null);
+  let waveTip = $derived(waveHoverMarker ? cues.find((c) => c.key === waveHoverMarker.key)?.label || 'Cue' : '');
+
+  function onWavePointerMove(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const hit = nearestCue(markers, event.clientX, rect.left, rect.width, CUE_HIT_SLACK, MARKER_EDGE);
+    waveHoverKey = hit?.key ?? null;
+    linkedKey = waveHoverKey;
+  }
+
+  function onWavePointerLeave() {
+    waveHoverKey = null;
+    linkedKey = null;
+  }
+
+  function onWaveClickCapture(event) {
+    if (!waveHoverMarker || event.target.closest('.ff-inspector__marker')) return;
+    event.stopPropagation();
+    onMarkerClick?.(waveHoverMarker);
+  }
+
   function flagFlipped(marker) {
     return marker.padded && marker.position * waveWidth + FLAG_WIDTH + MARKER_EDGE > waveWidth;
   }
@@ -233,7 +256,16 @@
       </div>
     {/if}
 
-    <div class="ff-inspector__wave" bind:clientWidth={waveWidth}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="ff-inspector__wave"
+      bind:clientWidth={waveWidth}
+      onpointermove={onWavePointerMove}
+      onpointerleave={onWavePointerLeave}
+      onclickcapture={onWaveClickCapture}>
+      {#if waveHoverMarker}
+        <span class="ff-inspector__marker-tip" style:left={markerLeft(waveHoverMarker.position)} style:transform={waveHoverMarker.position < 0.2 ? 'translateX(-4px)' : waveHoverMarker.position > 0.8 ? 'translateX(calc(-100% + 4px))' : null} style:--cue={waveHoverMarker.color}>{waveTip}</span>
+      {/if}
       <div class="ff-inspector__marker-lane">
         {#each markers as marker (marker.key)}
           <button

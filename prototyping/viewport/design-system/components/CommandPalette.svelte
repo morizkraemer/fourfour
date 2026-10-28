@@ -110,6 +110,19 @@
     return out;
   }
 
+  const MODIFIER_GLYPHS = '⌘⌥⇧⌃';
+
+  function keycaps(right) {
+    if (right.includes('+')) return right.split('+');
+    const glyphs = [];
+    let rest = right;
+    while (rest && MODIFIER_GLYPHS.includes(rest[0])) {
+      glyphs.push(rest[0]);
+      rest = rest.slice(1);
+    }
+    return rest ? [...glyphs, rest] : glyphs;
+  }
+
   function flatIndex(group, itemIndex) {
     let n = 0;
     for (const g of groups) {
@@ -167,13 +180,16 @@
                   >{option.label}</button>
                 {/each}
               </span>
-            {:else if item.right}<span class="ff-cp__row-right">{item.right}</span>{/if}
+            {:else if item.right}<span class="ff-cp__row-right">{#each keycaps(item.right) as cap}<kbd class="ff-cp__keycap">{cap}</kbd>{/each}</span>{/if}
           </div>
         {/each}
       {/if}
     {/each}
     {#if flat.length === 0}
-      <div class="ff-cp__empty">{emptyLabel}</div>
+      <div class="ff-cp__empty">
+        <Icon name="search" size={16} class="ff-cp__empty-icon" />
+        <span>{emptyLabel}{query.trim() ? ` for “${query.trim()}”` : ''}</span>
+      </div>
     {/if}
   </div>
 

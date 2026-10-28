@@ -168,17 +168,8 @@
     display: flex;
     align-items: center;
     flex: 1 1 0;
-    max-width: 420px;
-    min-width: 0;
-  }
-  .ff-gheader__search {
-    transition:
-      max-width var(--ff-motion-fast) var(--ff-easing),
-      flex-grow var(--ff-motion-fast) var(--ff-easing);
-  }
-  .ff-gheader__search--open {
-    flex-grow: 3;
     max-width: 560px;
+    min-width: 0;
   }
   .ff-gheader__search :global(.ff-filter-input) {
     flex: 1 1 0;
