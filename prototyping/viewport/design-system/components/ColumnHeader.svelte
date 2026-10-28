@@ -100,6 +100,22 @@
     dropLineLeft = (before ? cellRect.left : cellRect.right) - headerRect.left;
   }
 
+  const EDGE_SCROLL_ZONE = 48;
+  const EDGE_SCROLL_STEP = 14;
+
+  function horizontalScroller() {
+    let el = headerEl?.parentElement;
+    while (el && el.scrollWidth <= el.clientWidth) el = el.parentElement;
+    return el;
+  }
+
+  function edgeScrollDelta(scroller, clientX) {
+    const rect = scroller.getBoundingClientRect();
+    if (clientX < rect.left + EDGE_SCROLL_ZONE) return -EDGE_SCROLL_STEP;
+    if (clientX > rect.right - EDGE_SCROLL_ZONE) return EDGE_SCROLL_STEP;
+    return 0;
+  }
+
   function onLabelPointerDown(e, col) {
     if (!col.key || e.button !== 0) return;
     if (e.target.closest?.('.ff-colh__resize-handle')) return;
@@ -108,14 +124,33 @@
     let dragging = false;
     let dropKey = null;
     let insertBefore = true;
+    let lastMove = null;
+    let scrollRaf = null;
+
+    function edgeScrollTick() {
+      scrollRaf = null;
+      const scroller = horizontalScroller();
+      if (!scroller || !lastMove) return;
+      const delta = edgeScrollDelta(scroller, lastMove.clientX);
+      if (delta === 0) return;
+      scroller.scrollLeft += delta;
+      updateHover(lastMove);
+      scrollRaf = requestAnimationFrame(edgeScrollTick);
+    }
 
     function onMove(ev) {
+      lastMove = ev;
       if (!dragging && (Math.abs(ev.clientX - e.clientX) > 4 || Math.abs(ev.clientY - e.clientY) > 4)) {
         dragging = true;
         onColumnDragChange?.(startKey, null, true);
         dropLineLeft = null;
       }
       if (!dragging) return;
+      updateHover(ev);
+      if (scrollRaf === null) scrollRaf = requestAnimationFrame(edgeScrollTick);
+    }
+
+    function updateHover(ev) {
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       const cell = el?.closest?.('[data-col-key]');
       const hoverKey = cell?.getAttribute?.('data-col-key');
@@ -133,6 +168,7 @@
     }
 
     function onUp(ev) {
+      if (scrollRaf !== null) cancelAnimationFrame(scrollRaf);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       if (dragging && dropKey && dropKey !== startKey) {

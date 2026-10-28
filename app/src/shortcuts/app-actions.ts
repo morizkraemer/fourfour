@@ -4,7 +4,7 @@ import {
   openSettings,
   toggleSettings,
   closeSettings,
-  focusListFilter,
+  openPalette,
   clearListFilter,
   toggleDetailPane,
   toggleOrganize,
@@ -37,7 +37,7 @@ const GROUP = {
 } as const;
 
 function dismissibleLayerOpen(): boolean {
-  return !library.showAnalysisPrompt && (ui.settingsOpen || ui.listFilter.trim() !== '' || player.expanded);
+  return !library.showAnalysisPrompt && (ui.settingsOpen || ui.searchText.trim() !== '' || player.expanded);
 }
 
 function noOverlayOpen(): boolean {
@@ -46,7 +46,7 @@ function noOverlayOpen(): boolean {
 
 function dismissTopLayer() {
   if (ui.settingsOpen) closeSettings();
-  else if (ui.listFilter.trim()) clearListFilter();
+  else if (ui.searchText.trim()) clearListFilter();
   else toggleExpanded();
 }
 
@@ -92,11 +92,20 @@ export function buildAppActions(): ShortcutAction[] {
   return [
     {
       id: 'palette.toggle',
-      label: 'Command palette',
+      label: 'Search and commands',
       group: GROUP.general,
       defaultBinding: 'Mod+K',
       palette: false,
       run: togglePalette,
+    },
+    {
+      id: 'palette.open',
+      label: 'Search and commands (alternate)',
+      group: GROUP.general,
+      defaultBinding: 'Alt+Enter',
+      palette: false,
+      inInput: true,
+      run: openPalette,
     },
     {
       id: 'settings.toggle',
@@ -165,7 +174,8 @@ export function buildAppActions(): ShortcutAction[] {
       label: 'Search tracks',
       group: GROUP.library,
       defaultBinding: 'Mod+F',
-      run: focusListFilter,
+      palette: false,
+      run: openPalette,
     },
     {
       id: 'library.newPlaylist',
