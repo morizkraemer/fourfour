@@ -211,3 +211,4 @@
 2026-10-28 10:10 orchestrator - round 11 spawn: wo-zoom Q1–Q4 (seat, opus; viewport mockups + sample-accurate grid), wo-table Q5/Q9–Q12 (seat, sonnet); B2 Q6–Q8 queued; icon round 5 board published
 2026-10-28 10:28 orchestrator - wo-table bb34f5c → r11-int 19f0f0f (639 tests; Q10 cause: window.confirm is a no-op in WKWebView, so every delete was silently cancelled; Q9 cause: picker card had no drop attribute); wo-palette Q6–Q8 spawn (seat, sonnet)
 2026-10-28 10:33 orchestrator - wo-palette da56ce4 → r11-int de2bdb9 (644 tests); interim checks + Mac install started; wo-zoom still running
+2026-10-28 11:07 orchestrator - wo-zoom d4b0778 → r11-int 7f6e2d0 (edits.rs conflict: kept rating + grid_offset_ms); zoom look D live, A/B/C at preview :5235 (#zoom-look, served from wo-zoom worktree — keep it until Merlin picks); full checks + Mac install started
