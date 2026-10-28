@@ -16,8 +16,8 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { library } from './library.svelte.ts';
-import { loadPlayerTrack, player } from './player.svelte.ts';
-import { commitTrackBpm, doubleTrackBpm, halveTrackBpm, stepTrackBpm } from './track-edits.svelte.ts';
+import { beatGridNudgeRight, clearPlayerTrack, loadPlayerTrack, player, setEditing, setExpanded } from './player.svelte.ts';
+import { commitTrackBpm, doubleTrackBpm, halveTrackBpm, stepTrackBpm, stepTrackKey } from './track-edits.svelte.ts';
 
 Object.assign(globalThis, { window: { __TAURI_INTERNALS__: {} } });
 
@@ -210,5 +210,68 @@ describe('grid reload after the save', () => {
     stepTrackBpm(9, 1, 'normal');
     await vi.advanceTimersByTimeAsync(500);
     expect(player.track).toBe(before);
+  });
+});
+
+describe('grid reload racing newer edits', () => {
+  it('keeps a grid nudge made while the BPM save was on its way', async () => {
+    let finishRescale!: () => void;
+    invokeMock.mockImplementation(async (command: string, args?: unknown): Promise<any> => {
+      if (command === 'rescale_beat_grid') {
+        storedBpm = (args as { bpm: number }).bpm;
+        await new Promise<void>((resolve) => (finishRescale = resolve));
+        return undefined;
+      }
+      if (command === 'get_analysis_data') {
+        return { waveform_preview: Array.from({ length: 400 }, () => 1), bpm: storedBpm, beats: storedBeats, grid_offset_ms: 0, duration_ms: 20_000 };
+      }
+      return undefined;
+    });
+    stepTrackBpm(4, 1, 'coarse');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(rescaleCalls()).toHaveLength(1);
+    beatGridNudgeRight(5);
+    const nudged = player.track!.beats;
+    finishRescale();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.track!.beats).toBe(nudged);
+  });
+});
+
+describe('stepTrackKey', () => {
+  it('steps on from the key the previous step asked for while its save is still on its way', async () => {
+    library.tracks = [{ id: 4, title: 'Four', bpm: '120.0', bpmExact: 120, key: '8A' }] as never;
+    await Promise.all([stepTrackKey(4, 1), stepTrackKey(4, 1)]);
+    const keys = invokeMock.mock.calls.filter(([command]) => command === 'set_track_key').map(([, args]) => (args as { key: string }).key);
+    expect(keys).toEqual(['9A', '10A']);
+    expect(row().key).toBe('10A');
+  });
+
+  it('writes the keys one after another so the last step is what stays stored', async () => {
+    library.tracks = [{ id: 4, title: 'Four', bpm: '120.0', bpmExact: 120, key: '8A' }] as never;
+    const order: string[] = [];
+    invokeMock.mockImplementation(async (command: string, args?: unknown): Promise<any> => {
+      if (command !== 'set_track_key') return undefined;
+      const { key } = args as { key: string };
+      await new Promise((resolve) => setTimeout(resolve, key === '9A' ? 50 : 0));
+      order.push(key);
+      return undefined;
+    });
+    const steps = Promise.all([stepTrackKey(4, 1), stepTrackKey(4, 1)]);
+    await vi.advanceTimersByTimeAsync(100);
+    await steps;
+    expect(order).toEqual(['9A', '10A']);
+    expect(row().key).toBe('10A');
+  });
+});
+
+describe('edit mode', () => {
+  it('ends when the player track is cleared', () => {
+    setExpanded(true);
+    setEditing(true);
+    expect(player.editing).toBe(true);
+    clearPlayerTrack();
+    expect(player.editing).toBe(false);
+    setExpanded(false);
   });
 });

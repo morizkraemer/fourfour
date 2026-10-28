@@ -430,6 +430,7 @@ export async function loadPlayerTrack(input: any) {
   const trackInfo = normalizeTrackInput(input);
   if (!trackInfo) {
     player.track = null;
+    player.editing = false;
     player.loading = false;
     return;
   }
@@ -489,6 +490,7 @@ export function clearPlayerTrack() {
   seekTargetMs = null;
   void playbackStop();
   player.track = null;
+  player.editing = false;
   player.playing = false;
   player.progress = 0;
   player.loading = false;
@@ -637,11 +639,15 @@ const gridPersister = createGridPersister(setBeatGrid, (err) => {
   player.error = `Could not save the beat grid: ${err}`;
 });
 
-/** Show the stored grid of the loaded track (after its grid was re-spaced in the library). */
-export async function refreshLoadedBeatGrid(trackId: number): Promise<void> {
+/**
+ * Show the stored grid of the loaded track (after its grid was re-spaced in the library). With `unlessChangedFrom`, a
+ * grid edited since that one was shown is kept: it is newer than what was stored.
+ */
+export async function refreshLoadedBeatGrid(trackId: number, unlessChangedFrom?: BeatMarker[]): Promise<void> {
   const fresh = await getAnalysisData(trackId, true);
   const loaded = player.track;
   if (!fresh?.beats?.length || !loaded || loaded.id !== trackId) return;
+  if (unlessChangedFrom && loaded.beats !== unlessChangedFrom) return;
   player.track = { ...loaded, beats: beatsFromAnalysis(fresh) };
 }
 
