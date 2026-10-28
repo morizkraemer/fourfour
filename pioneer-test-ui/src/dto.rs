@@ -59,6 +59,12 @@ pub struct TrackInfo {
     /// When present it replaces `waveform_preview`, which then stays unset.
     #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_preview")]
     pub waveform_bands: Option<Vec<u8>>,
+    /// Star rating 0-5 imported from Rekordbox.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rating: Option<u8>,
+    /// Colour label imported from Rekordbox: a colour name or `#rrggbb`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 impl From<&Track> for TrackInfo {
@@ -81,6 +87,8 @@ impl From<&Track> for TrackInfo {
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         }
     }
 }

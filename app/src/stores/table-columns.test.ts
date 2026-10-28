@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   initTableColumns,
   moveColumn,
+  resetColumns,
+  ALL_COLUMN_KEYS,
   tableLayouts,
   toggleColumnVisibility,
   visibleColumns,
@@ -53,5 +55,21 @@ describe('moveColumn', () => {
     tableLayouts.organize = { ...tableLayouts.organize, columns: [] };
     initTableColumns();
     expect(keys('organize')).toEqual(expected);
+  });
+});
+
+describe('imported rating and colour columns', () => {
+  it('are offered in the column menu but hidden by default', () => {
+    expect(ALL_COLUMN_KEYS.map((c) => c.key)).toEqual(expect.arrayContaining(['rating', 'color']));
+    resetColumns('library');
+    expect(keys('library')).not.toContain('rating');
+    expect(keys('library')).not.toContain('color');
+  });
+
+  it('show up once toggled on', () => {
+    resetColumns('library');
+    toggleColumnVisibility('library', 'rating');
+    toggleColumnVisibility('library', 'color');
+    expect(keys('library').slice(-2)).toEqual(['rating', 'color']);
   });
 });

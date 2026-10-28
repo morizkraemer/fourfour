@@ -103,6 +103,8 @@ fn scan_directory(
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         });
     }
 
@@ -162,6 +164,8 @@ fn scan_files(
             analysis_pending: false,
             waveform_preview: None,
             waveform_bands: None,
+            rating: None,
+            color: None,
         });
     }
 

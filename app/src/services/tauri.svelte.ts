@@ -54,6 +54,10 @@ export interface TrackInfo {
   waveform_preview?: string | number[] | null;
   /** 3-band row preview (128 columns of low, mid, high bytes): replaces `waveform_preview` when the track has band data. */
   waveform_bands?: string | number[] | null;
+  /** Rekordbox star rating 1-5, absent when unrated. */
+  rating?: number;
+  /** Rekordbox colour label: a colour name or `#rrggbb`. */
+  color?: string;
 }
 
 export interface PlaylistInput {

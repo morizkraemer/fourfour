@@ -4,11 +4,11 @@ import { camelotRank, clearSort, durationSeconds, setSort, sortTracks, tableLayo
 type Row = Record<string, unknown>;
 
 const rows: Row[] = [
-  { id: 1, title: 'Bravo', artist: 'zed', bpm: '128.0', key: '10A', time: '10:05', index: '01', year: '2019', fav: 2 },
-  { id: 2, title: 'alpha', artist: 'Amy', bpm: '95.5', key: '2B', time: '3:30', index: '02', year: '2001' },
+  { id: 1, title: 'Bravo', artist: 'zed', bpm: '128.0', key: '10A', time: '10:05', index: '01', year: '2019', fav: 2, rating: 3, color: 'Blue' },
+  { id: 2, title: 'alpha', artist: 'Amy', bpm: '95.5', key: '2B', time: '3:30', index: '02', year: '2001', rating: 5, color: 'Pink' },
   { id: 3, title: 'Charlie', artist: '—', bpm: '—', key: '—', time: '—', index: '03', year: '—', fav: 1 },
-  { id: 4, title: 'delta', artist: 'Bob', bpm: '174.0', key: '2A', time: '62:00', index: '04', year: '2020' },
-  { id: 5, title: 'echo', artist: 'Cy', bpm: '100.0', key: '9B', time: '0:59', index: '05', year: '1999' },
+  { id: 4, title: 'delta', artist: 'Bob', bpm: '174.0', key: '2A', time: '62:00', index: '04', year: '2020', rating: 0, color: null },
+  { id: 5, title: 'echo', artist: 'Cy', bpm: '100.0', key: '9B', time: '0:59', index: '05', year: '1999', rating: 1, color: '#112233' },
 ];
 
 const idsSortedBy = (key: string, dir: 'asc' | 'desc') => {
@@ -71,6 +71,12 @@ describe('sortTracks', () => {
   it('sorts the number column and year numerically', () => {
     expect(idsSortedBy('index', 'desc')).toEqual([5, 4, 3, 2, 1]);
     expect(idsSortedBy('year', 'asc')).toEqual([5, 2, 1, 4, 3]);
+  });
+
+  it('sorts rating and colour with unrated and uncoloured tracks last', () => {
+    expect(idsSortedBy('rating', 'asc')).toEqual([5, 1, 2, 3, 4]);
+    expect(idsSortedBy('rating', 'desc')).toEqual([2, 1, 5, 3, 4]);
+    expect(idsSortedBy('color', 'asc')).toEqual([2, 1, 5, 3, 4]);
   });
 
   it('puts the lowest favorite slot first and unmarked tracks last', () => {
