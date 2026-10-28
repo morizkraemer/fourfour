@@ -195,3 +195,4 @@
 2026-10-28 05:50 orchestrator - round 9 spawn: wm-zoom M1/M2 (seat, opus — failed attempt last round), wm-tempo M3–M6 (seat, sonnet), both off master 5d728df
 2026-10-28 05:52 orchestrator - wm-tempo M3–M7 done (9ea3561, 559 tests); resumed for N3/N4; wm-zoom given N1/N2
 2026-10-28 05:56 orchestrator - wm-tempo cc10865 merged → r9-int 3defe88 (N3 root cause: pointer capture blocked sidebar pointerenter; 561 tests); waiting on wm-zoom
+2026-10-28 06:23 orchestrator - wm-zoom 5b27ad2 merged → r9-int c9da7b2 (M2 root cause: fixed 10 ms nudge; 1 ms floor = library/PQTZ ms); checks + Mac install started
