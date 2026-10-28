@@ -23,9 +23,11 @@ use pioneer_usb_writer::models::{Playlist, Track};
 
 use crate::{LocalLibrary, queries};
 
+use remap::fold;
+
 pub use anlz::{LoadedAnalysis, load_all as load_analyses};
 pub use model::*;
-pub use remap::{CaseInsensitiveResolver, PathRemap, detect_common_root};
+pub use remap::{CaseInsensitiveResolver, PathRemap, RemapPlan, detect_common_root};
 pub use sidecar::ImportedMeta;
 
 pub(crate) use anlz::to_cue_points;
@@ -42,51 +44,52 @@ pub fn load_xml(xml_path: &Path) -> Result<SourceLibrary> {
     xml::load(xml_path)
 }
 
-/// Replacement prefix from the options, or the one the source implies, plus the
-/// common root detected across all of the source's track paths.
-pub fn resolve_remap(source: &SourceLibrary, options: &ImportOptions) -> (String, Option<PathRemap>) {
+/// Remap rules from the options (empty `from_prefix` = the detected common root,
+/// rules without a target are dropped), the source's implied remap as fallback,
+/// and the common root detected across all of the source's track paths.
+pub fn resolve_remap(source: &SourceLibrary, options: &ImportOptions) -> (String, RemapPlan) {
     let paths: Vec<&str> = source.tracks.iter().map(|t| t.path.as_str()).collect();
     let detected_root = detect_common_root(&paths);
-    let remap = match options.remap_to.as_deref().filter(|to| !to.is_empty()) {
-        Some(to) => Some(PathRemap {
-            from_prefix: options
-                .remap_from
-                .clone()
-                .filter(|from| !from.is_empty())
-                .unwrap_or_else(|| detected_root.clone()),
-            to_prefix: to.to_string(),
-        }),
-        None => source.implied_remap.clone(),
-    };
-    (detected_root, remap)
+    let rules = options
+        .remaps
+        .iter()
+        .filter(|r| !r.to_prefix.is_empty())
+        .map(|r| PathRemap {
+            from_prefix: if r.from_prefix.is_empty() { detected_root.clone() } else { r.from_prefix.clone() },
+            to_prefix: r.to_prefix.clone(),
+        })
+        .collect();
+    (detected_root, RemapPlan { rules, fallback: source.implied_remap.clone() })
 }
 
 struct Located {
     path: PathBuf,
     found: bool,
+    rule: Option<usize>,
 }
 
-fn locate(source: &SourceLibrary, remap: Option<&PathRemap>) -> Vec<Located> {
+fn locate(source: &SourceLibrary, plan: &RemapPlan) -> Vec<Located> {
     let mut resolver = CaseInsensitiveResolver::default();
     source
         .tracks
         .iter()
         .map(|t| {
-            let candidate = remap.map_or_else(|| PathBuf::from(&t.path), |r| r.apply(&t.path));
+            let candidate = plan.apply(&t.path);
+            let rule = plan.rule_index(&t.path);
             match resolver.resolve(&candidate) {
-                Some(path) => Located { path, found: true },
-                None => Located { path: candidate, found: false },
+                Some(path) => Located { path, found: true, rule },
+                None => Located { path: candidate, found: false, rule },
             }
         })
         .collect()
 }
 
 fn path_key(path: &Path) -> String {
-    path.to_string_lossy().to_lowercase()
+    fold(&path.to_string_lossy())
 }
 
 fn fingerprint(path: &Path, file_size: u64) -> Option<(String, u64)> {
-    let name = path.file_name()?.to_string_lossy().to_lowercase();
+    let name = fold(&path.file_name()?.to_string_lossy());
     (file_size > 0).then_some((name, file_size))
 }
 
@@ -255,8 +258,18 @@ impl LocalLibrary {
         source: &SourceLibrary,
         options: &ImportOptions,
     ) -> Result<ImportPreview> {
-        let (detected_root, remap) = resolve_remap(source, options);
-        let located = locate(source, remap.as_ref());
+        let (detected_root, plan) = resolve_remap(source, options);
+        let located = locate(source, &plan);
+        let mut remap_stats: Vec<RemapStat> = plan
+            .rules
+            .iter()
+            .map(|r| RemapStat {
+                from_prefix: r.from_prefix.clone(),
+                to_prefix: r.to_prefix.clone(),
+                ..RemapStat::default()
+            })
+            .collect();
+        let mut unmapped = RemapStat::default();
         let index = LibraryIndex::build(self)?;
 
         let mut files_found = 0;
@@ -265,10 +278,16 @@ impl LocalLibrary {
         let mut tracks_with_grid = 0;
         let (mut hot_cues, mut memory_cues) = (0, 0);
         for (track, loc) in source.tracks.iter().zip(&located) {
+            let stat = loc.rule.map_or(&mut unmapped, |i| &mut remap_stats[i]);
+            stat.tracks += 1;
             if loc.found {
                 files_found += 1;
-            } else if missing_examples.len() < 10 {
-                missing_examples.push(loc.path.to_string_lossy().to_string());
+                stat.files_found += 1;
+            } else {
+                stat.files_missing += 1;
+                if missing_examples.len() < 10 {
+                    missing_examples.push(loc.path.to_string_lossy().to_string());
+                }
             }
             if index.find(&loc.path, track.track.file_size).is_some() {
                 conflicts += 1;
@@ -306,7 +325,8 @@ impl LocalLibrary {
             memory_cues,
             tracks_with_grid,
             detected_root,
-            remap,
+            remap_stats,
+            unmapped,
             files_found,
             files_missing: tracks - files_found,
             missing_examples,
@@ -339,8 +359,8 @@ impl LocalLibrary {
         options: &ImportOptions,
         progress: &(dyn Fn(ImportProgress) + Sync),
     ) -> Result<RekordboxImportReport> {
-        let (_, remap) = resolve_remap(source, options);
-        let located = locate(source, remap.as_ref());
+        let (_, plan) = resolve_remap(source, options);
+        let located = locate(source, &plan);
         let mut index = LibraryIndex::build(self)?;
         let mut report = RekordboxImportReport::default();
         let mut library_ids: HashMap<&str, i64> = HashMap::new();

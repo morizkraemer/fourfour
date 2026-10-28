@@ -25,8 +25,10 @@ fn env_path(name: &str) -> PathBuf {
 fn import_real_library_prints_counts() {
     let library_dir = env_path("FOURFOUR_RB_LIBRARY");
     let options = ImportOptions {
-        remap_from: std::env::var("FOURFOUR_RB_STRIP").ok(),
-        remap_to: Some(env_path("FOURFOUR_RB_AUDIO").to_string_lossy().to_string()),
+        remaps: vec![rekordbox::PathRemap {
+            from_prefix: std::env::var("FOURFOUR_RB_STRIP").unwrap_or_default(),
+            to_prefix: env_path("FOURFOUR_RB_AUDIO").to_string_lossy().to_string(),
+        }],
         include_missing: false,
     };
 
