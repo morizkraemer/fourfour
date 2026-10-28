@@ -241,3 +241,5 @@
 2026-10-28 19:25 orchestrator - ov-1028 5edd7bc installed on Mac (692 vitest, 0 check errors)
 2026-10-28 19:45 ov-anchor O1b landed on ov-1028: persisted grid_anchor_ms (edits.json, optional), ×2/÷2 across saves exact; TS/Rust parity fixture; 697 tests, smoke 13/13
 2026-10-28 19:46 orchestrator O4 spawn: ov-perf 10k-track perf pass (seat, sonnet high)
+2026-10-28 20:30 ov-perf O4 landed on ov-1028: 10k import 15.6 s → 0.5 s (one transaction), save_state 200–380 → 15–35 ms (only changed playlists), sort/filter/playlist 2–5× faster; report docs/architecture/perf-10k-2026-10-28.md; 700 tests
+2026-10-28 20:31 orchestrator O5 spawn: ov-ci cross-platform Actions workflow, branch only, no run (seat, sonnet medium)
