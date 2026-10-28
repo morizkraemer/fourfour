@@ -228,3 +228,5 @@
 2026-10-28 17:40 orchestrator - run-start: overnight run (Merlin go), cap 2, tight, base r12-int → ov-1028; plan L2 → O1–O6, O7 layout build gated on Merlin's mockup approval
 2026-10-28 17:41 orchestrator L2 spawn: player-layout round 2 (resumed wr-playerlayout, opus) — mode-less pencil BPM/key, hot cue homes, memory cue row, use empty space
 2026-10-28 17:41 orchestrator O1 spawn: ov-review rounds 12–13 bug review (seat, opus medium)
+2026-10-28 17:55 wr-playerlayout L2 done: b2ad150 board player-layout-2 (A pencil fields + footer cue row, rec / B cue column / C deck panel) at :5238 comments, :5239 static — waiting on Merlin's approval before O7
+2026-10-28 17:56 orchestrator O2 spawn: ov-smoke headless smoke harness (seat, sonnet high; may add playwright devDep)
