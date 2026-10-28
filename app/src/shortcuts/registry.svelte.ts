@@ -9,6 +9,7 @@ export interface ShortcutAction {
   when?: () => boolean;
   inInput?: boolean;
   palette?: boolean;
+  keywords?: string[];
 }
 
 export interface StorageLike {

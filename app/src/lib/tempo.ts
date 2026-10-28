@@ -40,6 +40,10 @@ export function playingBpm(analysedBpm: number, percent: number): number {
   return analysedBpm * ratioFromPercent(percent);
 }
 
+export function bpmDiffers(analysedBpm: number, playedBpm: number): boolean {
+  return Number.isFinite(analysedBpm) && Number.isFinite(playedBpm) && formatBpm(analysedBpm) !== formatBpm(playedBpm);
+}
+
 export function percentForBpm(targetBpm: number, analysedBpm: number): number {
   return clampPercent(round((targetBpm / analysedBpm - 1) * 100, 4));
 }

@@ -1,4 +1,4 @@
-import { fuzzyMatch, fuzzyRank } from './fuzzy.ts';
+import { fuzzyMatch, fuzzyRank, type Ranked } from './fuzzy.ts';
 
 export interface PaletteEntry {
   id: string;
@@ -9,6 +9,7 @@ export interface PaletteEntry {
   ranges?: number[];
   control?: PaletteControl;
   keepOpen?: boolean;
+  cover?: () => string;
   choose?: (value: string) => void;
   run: () => void;
 }
@@ -20,6 +21,7 @@ export type PaletteControl =
 export interface PaletteSettingSource {
   id: string;
   label: string;
+  keywords?: string[];
   control?: PaletteControl;
   change: (value?: string) => void;
 }
@@ -30,12 +32,20 @@ export interface PaletteGroupModel {
   items: PaletteEntry[];
 }
 
+export interface PaletteActionSource {
+  id: string;
+  label: string;
+  shortcut: string;
+  keywords?: string[];
+  run: () => void;
+}
+
 export interface PaletteSources {
-  actions: { id: string; label: string; shortcut: string; run: () => void }[];
+  actions: PaletteActionSource[];
   settings?: PaletteSettingSource[];
   places: { id: string; label: string; sub?: string; icon: string; run: () => void }[];
   /** Already matched by the host with the library search; the model only caps and highlights them. */
-  tracks: { id: number; title: string; artist: string; run: () => void }[];
+  tracks: { id: number; title: string; artist: string; cover?: () => string; run: () => void }[];
 }
 
 export const EMPTY_QUERY_LIMITS = { actions: 12, settings: 0, places: 6, tracks: 0 };
@@ -48,12 +58,32 @@ export function isCommandQuery(query: string): boolean {
   return query.trimStart().startsWith(COMMAND_PREFIX);
 }
 
+const KEYWORD_SCORE = 2;
+
+/** Ranks by label; items whose label misses are still found when every query word starts a synonym. */
+function rankWithKeywords<T extends { label: string; keywords?: string[] }>(query: string, items: readonly T[]): Ranked<T>[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const ranked: Ranked<T>[] = [];
+  for (const item of items) {
+    const byLabel = fuzzyMatch(query, item.label);
+    if (byLabel) {
+      ranked.push({ item, match: byLabel });
+      continue;
+    }
+    const synonyms = (item.keywords ?? []).flatMap((k) => k.toLowerCase().split(/\s+/));
+    if (words.every((w) => synonyms.some((k) => k.startsWith(w)))) {
+      ranked.push({ item, match: { score: KEYWORD_SCORE, indices: [] } });
+    }
+  }
+  return ranked.sort((a, b) => b.match.score - a.match.score);
+}
+
 export function buildPaletteGroups(query: string, sources: PaletteSources): PaletteGroupModel[] {
   const commandsOnly = isCommandQuery(query);
   const q = (commandsOnly ? query.trimStart().slice(COMMAND_PREFIX.length) : query).trim();
   const limits = commandsOnly ? { ...COMMAND_QUERY_LIMITS, settings: q ? COMMAND_QUERY_LIMITS.settings : 0 } : q ? QUERY_LIMITS : EMPTY_QUERY_LIMITS;
 
-  const actions = fuzzyRank(q, sources.actions, (a) => a.label)
+  const actions = rankWithKeywords(q, sources.actions)
     .slice(0, limits.actions)
     .map(({ item, match }): PaletteEntry => ({
       id: `action:${item.id}`,
@@ -64,7 +94,7 @@ export function buildPaletteGroups(query: string, sources: PaletteSources): Pale
       run: item.run,
     }));
 
-  const settings = fuzzyRank(q, sources.settings ?? [], (r) => r.label)
+  const settings = rankWithKeywords(q, sources.settings ?? [])
     .slice(0, limits.settings)
     .map(({ item, match }): PaletteEntry => ({
       id: `setting:${item.id}`,
@@ -94,6 +124,7 @@ export function buildPaletteGroups(query: string, sources: PaletteSources): Pale
         name: item.title,
         sub: item.artist,
         icon: 'list',
+        cover: item.cover,
         ranges: fuzzyMatch(q, item.title)?.indices,
         run: item.run,
       }))

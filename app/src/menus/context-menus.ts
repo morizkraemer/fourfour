@@ -87,7 +87,7 @@ export async function importIntoSource(sourceId: string) {
   if (dir) await importDirectory(dir, { targetSource: sourceId });
 }
 
-async function createFolderAndRename(parentId: number) {
+export async function createFolderAndRename(parentId: number) {
   const id = await addFolder(parentId);
   ui.sidebarRenameRequest = { playlistId: id };
 }
