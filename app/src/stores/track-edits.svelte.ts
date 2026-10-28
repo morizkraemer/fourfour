@@ -65,6 +65,7 @@ function currentBpm(trackId: number): number {
 
 async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
   await flushBeatGridEdits();
+  const shown = player.track?.id === trackId ? player.track.beats : undefined;
   try {
     await rescaleBeatGrid(trackId, bpm);
   } catch (err) {
@@ -74,7 +75,7 @@ async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
     await refreshLoadedBeatGrid(trackId);
     return;
   }
-  await refreshLoadedBeatGrid(trackId);
+  await refreshLoadedBeatGrid(trackId, shown);
 }
 
 /** Set the track's own BPM: shown at once, the beat grid is re-spaced from its first downbeat and saved once the edits pause. */
@@ -126,7 +127,20 @@ export async function requestBpmEntry(): Promise<void> {
   bpmEntry.request++;
 }
 
-export async function commitTrackKey(trackId: number, key: string): Promise<boolean> {
+const requestedKeys = new Map<number, string>();
+let keyWrites: Promise<unknown> = Promise.resolve();
+
+/** Set the track's key; writes run one after another, so the latest request is what stays stored. */
+export function commitTrackKey(trackId: number, key: string): Promise<boolean> {
+  requestedKeys.set(trackId, key);
+  const write = keyWrites.then(() => saveTrackKey(trackId, key));
+  keyWrites = write;
+  return write.finally(() => {
+    if (requestedKeys.get(trackId) === key) requestedKeys.delete(trackId);
+  });
+}
+
+async function saveTrackKey(trackId: number, key: string): Promise<boolean> {
   try {
     await setTrackKey(trackId, key);
   } catch (err) {
@@ -144,7 +158,7 @@ export async function commitTrackKey(trackId: number, key: string): Promise<bool
 }
 
 export async function stepTrackKey(trackId: number, units: number): Promise<boolean> {
-  const current = trackById(trackId)?.key ?? (player.track?.id === trackId ? player.track.key : '');
+  const current = requestedKeys.get(trackId) ?? trackById(trackId)?.key ?? (player.track?.id === trackId ? player.track.key : '');
   const next = camelotStep(current ?? '', units);
   return next !== null && (await commitTrackKey(trackId, next));
 }
