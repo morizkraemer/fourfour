@@ -390,11 +390,11 @@ fn write_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: impl It
         "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
         [playlist_id],
     )?;
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
+    )?;
     for (pos, track_id) in track_ids.enumerate() {
-        conn.execute(
-            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
-            params![playlist_id, track_id, pos as i64],
-        )?;
+        insert.execute(params![playlist_id, track_id, pos as i64])?;
     }
     Ok(())
 }
@@ -443,7 +443,12 @@ pub fn replace_playlists(conn: &Connection, playlists: &[Playlist]) -> Result<()
              ON CONFLICT(id) DO UPDATE SET name = ?2, sort_order = ?3, is_folder = ?4",
             params![playlist.id as i64, playlist.name, sort_order as i64, playlist.is_folder],
         )?;
-        write_playlist_tracks(&tx, playlist.id as i64, playlist.track_ids.iter().map(|&t| t as i64))?;
+        let stored = select_playlist_track_ids(&tx, playlist.id as i64)?;
+        let unchanged = stored.len() == playlist.track_ids.len()
+            && stored.iter().zip(&playlist.track_ids).all(|(&a, &b)| a == b as i64);
+        if !unchanged {
+            write_playlist_tracks(&tx, playlist.id as i64, playlist.track_ids.iter().map(|&t| t as i64))?;
+        }
     }
     for playlist in playlists {
         tx.execute(

@@ -1861,6 +1861,36 @@ mod tests {
     }
 
     #[test]
+    fn replace_playlists_applies_reorders_removals_and_repeat_saves() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let ids: Vec<u32> = (0..4)
+            .map(|n| lib.add_track(&make_track(&format!("T{n}"), &format!("/music/{n}.mp3"))).unwrap() as u32)
+            .collect();
+        let tracks_of = |lib: &LocalLibrary| lib.get_playlist(1).unwrap().unwrap().track_ids;
+
+        let initial = [tree_playlist(1, "Set", 0, false, &ids[..3])];
+        lib.replace_playlists(&initial).unwrap();
+        lib.replace_playlists(&initial).unwrap();
+        assert_eq!(tracks_of(&lib), ids[..3].to_vec());
+
+        let reordered = [tree_playlist(1, "Set", 0, false, &[ids[2], ids[0], ids[1]])];
+        lib.replace_playlists(&reordered).unwrap();
+        assert_eq!(tracks_of(&lib), vec![ids[2], ids[0], ids[1]]);
+
+        let appended = [tree_playlist(1, "Set", 0, false, &[ids[2], ids[0], ids[1], ids[3]])];
+        lib.replace_playlists(&appended).unwrap();
+        assert_eq!(tracks_of(&lib), vec![ids[2], ids[0], ids[1], ids[3]]);
+
+        let shrunk = [tree_playlist(1, "Set", 0, false, &[ids[2], ids[0]])];
+        lib.replace_playlists(&shrunk).unwrap();
+        assert_eq!(tracks_of(&lib), vec![ids[2], ids[0]]);
+
+        let emptied = [tree_playlist(1, "Set", 0, false, &[])];
+        lib.replace_playlists(&emptied).unwrap();
+        assert!(tracks_of(&lib).is_empty());
+    }
+
+    #[test]
     fn replace_playlists_rejects_cycles_and_bad_parents() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         lib.replace_playlists(&[tree_playlist(1, "A", 0, true, &[])]).unwrap();

@@ -206,13 +206,141 @@ fn bands(paths: &[String]) {
     println!("median {:.1} ms per second of audio", median * 1000.0);
 }
 
+fn save(dir: &Path, count: usize) {
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let tracks: Vec<Track> = (0..count).map(fake_track).collect();
+    let ids: Vec<u32> = lib.add_tracks(&tracks).unwrap().into_iter().map(|id| id as u32).collect();
+    let step = (count / 500).max(1);
+    let mut playlists: Vec<pioneer_usb_writer::models::Playlist> = (0..20)
+        .map(|p| pioneer_usb_writer::models::Playlist {
+            id: p as u32 + 1,
+            name: format!("Playlist {p}"),
+            track_ids: ids.iter().skip(p).step_by(step).copied().collect(),
+            parent_id: 0,
+            is_folder: false,
+        })
+        .collect();
+    playlists.push(pioneer_usb_writer::models::Playlist {
+        id: 21,
+        name: "Big".into(),
+        track_ids: ids.iter().step_by((count / 2000).max(1)).copied().collect(),
+        parent_id: 0,
+        is_folder: false,
+    });
+    let rows: usize = playlists.iter().map(|p| p.track_ids.len()).sum();
+
+    let t = Instant::now();
+    lib.replace_playlists(&playlists).unwrap();
+    let first_ms = ms(t);
+
+    let mut unchanged = Vec::new();
+    for _ in 0..5 {
+        let t = Instant::now();
+        lib.replace_playlists(&playlists).unwrap();
+        unchanged.push(ms(t));
+    }
+
+    let mut rename = Vec::new();
+    for n in 0..5 {
+        playlists[0].name = format!("Renamed {n}");
+        let t = Instant::now();
+        lib.replace_playlists(&playlists).unwrap();
+        rename.push(ms(t));
+    }
+
+    let mut append = Vec::new();
+    for n in 0..5 {
+        playlists[20].track_ids.push(ids[n * 5 + 1]);
+        let t = Instant::now();
+        lib.replace_playlists(&playlists).unwrap();
+        append.push(ms(t));
+    }
+
+    let t = Instant::now();
+    let loaded = lib.get_all_playlists().unwrap();
+    let read_ms = ms(t);
+    println!(
+        "tracks={count} playlist_rows={rows} first_save_ms={first_ms:.1} unchanged_save_ms={:.1} rename_one_save_ms={:.1} append_one_save_ms={:.1} read_playlists_ms={read_ms:.1} playlists={}",
+        median_and_p95(unchanged).0,
+        median_and_p95(rename).0,
+        median_and_p95(append).0,
+        loaded.len(),
+    );
+}
+
+fn tiny_mp3(n: usize) -> Vec<u8> {
+    let text_frame = |id: &str, text: &str| {
+        let mut body = vec![0u8];
+        body.extend_from_slice(text.as_bytes());
+        let mut frame = id.as_bytes().to_vec();
+        frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&body);
+        frame
+    };
+    let mut frames = text_frame("TIT2", &format!("Scan Track {n}"));
+    frames.extend(text_frame("TPE1", &format!("Scan Artist {}", n % 200)));
+    frames.extend(text_frame("TALB", &format!("Scan Album {}", n % 500)));
+    let size = frames.len() as u32;
+    let synchsafe = [(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f];
+    let mut bytes = b"ID3\x03\x00\x00".to_vec();
+    bytes.extend_from_slice(&synchsafe);
+    bytes.extend(frames);
+    for _ in 0..4 {
+        bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+        bytes.extend(std::iter::repeat(0u8).take(413));
+    }
+    bytes
+}
+
+fn scan(dir: &Path, count: usize) {
+    let music = dir.join("music");
+    std::fs::create_dir_all(&music).unwrap();
+    for n in 0..count {
+        let sub = music.join(format!("dir{}", n % 50));
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join(format!("track{n:06}.mp3")), tiny_mp3(n)).unwrap();
+    }
+
+    let t = Instant::now();
+    let scanned = pioneer_usb_writer::scanner::scan_directory(&music).unwrap();
+    let scan_ms = ms(t);
+
+    let per_track = { let _ = std::fs::remove_file(dir.join("per_track.db")); LocalLibrary::open(&dir.join("per_track.db")).unwrap() };
+    let t = Instant::now();
+    for track in &scanned {
+        if !per_track.track_exists_by_path(&track.source_path).unwrap() {
+            per_track.add_track(track).unwrap();
+        }
+    }
+    let per_track_ms = ms(t);
+
+    let batched = { let _ = std::fs::remove_file(dir.join("batched.db")); LocalLibrary::open(&dir.join("batched.db")).unwrap() };
+    let t = Instant::now();
+    let fresh: Vec<Track> = scanned
+        .iter()
+        .filter(|track| !batched.track_exists_by_path(&track.source_path).unwrap())
+        .cloned()
+        .collect();
+    batched.add_tracks(&fresh).unwrap();
+    let batched_ms = ms(t);
+
+    println!(
+        "files={count} scanned={} scan_directory_ms={scan_ms:.1} insert_per_track_ms={per_track_ms:.1} insert_batched_ms={batched_ms:.1}",
+        scanned.len()
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
+        Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
+        Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("bands") => bands(&args[2..]),
-        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | bands <audio files>"),
+        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files>"),
     }
 }
