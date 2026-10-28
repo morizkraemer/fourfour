@@ -171,8 +171,8 @@ fn assert_roundtrip(count: u32, text_len: usize) {
 fn assert_tracks_roundtrip(tracks: &[Track]) {
     let count = tracks.len() as u32;
     let playlists = vec![
-        Playlist { id: 1, name: "All".into(), track_ids: (1..=count).collect() },
-        Playlist { id: 2, name: "Evens".into(), track_ids: (1..=count).filter(|id| id % 2 == 0).collect() },
+        Playlist { id: 1, name: "All".into(), track_ids: (1..=count).collect(), ..Default::default() },
+        Playlist { id: 2, name: "Evens".into(), track_ids: (1..=count).filter(|id| id % 2 == 0).collect(), ..Default::default() },
     ];
     let usb = TempDir::new().unwrap();
     let analyses = vec![analysis(); tracks.len()];

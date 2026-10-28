@@ -71,6 +71,8 @@ pub fn compute_sync_plan<'a>(
         .map(|pl| Playlist {
             id: pl.id,
             name: pl.name.clone(),
+            parent_id: pl.parent_id,
+            is_folder: pl.is_folder,
             track_ids: pl
                 .track_ids
                 .iter()
@@ -303,6 +305,7 @@ mod tests {
             id: 1,
             name: "My Playlist".to_string(),
             track_ids: vec![100, 200, 999], // 999 does not exist — should be filtered
+            ..Default::default()
         }];
         let existing = ExistingUsbState {
             tracks: vec![make_existing(5, "/Contents/A/t1.mp3", "Track 1", 1000)],

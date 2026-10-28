@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Schema for a fresh v2 database.
 const SCHEMA_DDL: &str = "
@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS analyses (
 CREATE TABLE IF NOT EXISTS playlists (
     id         INTEGER PRIMARY KEY,
     name       TEXT NOT NULL,
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    parent_id  INTEGER REFERENCES playlists(id) ON DELETE CASCADE,
+    is_folder  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS playlist_tracks (
@@ -134,7 +136,10 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
             if v < 5 {
                 migrate_v4_to_v5(conn)?;
             }
-            migrate_v5_to_v6(conn)?;
+            if v < 6 {
+                migrate_v5_to_v6(conn)?;
+            }
+            migrate_v6_to_v7(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
         Some(v) => {
@@ -316,6 +321,30 @@ fn migrate_v4_to_v5(conn: &Connection) -> Result<()> {
 fn migrate_v5_to_v6(conn: &Connection) -> Result<()> {
     conn.execute_batch(STICK_DDL)
         .context("Failed to create stick tables")?;
+    conn.execute("UPDATE schema_version SET version = 6", [])?;
+    Ok(())
+}
+
+/// Playlist folders: folders are playlist rows, like Pioneer's own model. Additive:
+/// `parent_id` is `NULL` for the root level and deleting a folder cascades to its contents.
+fn migrate_v6_to_v7(conn: &Connection) -> Result<()> {
+    let has_column = |name: &str| -> Result<bool> {
+        Ok(conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('playlists') WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )?)
+    };
+    if !has_column("parent_id")? {
+        conn.execute_batch(
+            "ALTER TABLE playlists ADD COLUMN parent_id INTEGER REFERENCES playlists(id) ON DELETE CASCADE;",
+        )
+        .context("Failed to add playlists.parent_id")?;
+    }
+    if !has_column("is_folder")? {
+        conn.execute_batch("ALTER TABLE playlists ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0;")
+            .context("Failed to add playlists.is_folder")?;
+    }
     conn.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])?;
     Ok(())
 }
