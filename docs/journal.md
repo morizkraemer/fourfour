@@ -202,3 +202,5 @@
 2026-10-28 07:52 orchestrator - wn-sidebar 6451e30 → r10-int a78d785 (595 tests; P15 cause: empty-label header cell 0px tall; P14 cause: missing columns shown checked); wn-palette P4–P7/P12 spawn (seat, sonnet); icon-design worker running (Claude Design)
 2026-10-28 08:01 orchestrator - wn-palette eb8516b → r10-int a0eb602 (611 tests); wn-inspector P8/P9/P18/P19 spawn (seat, sonnet)
 2026-10-28 08:10 orchestrator - wn-inspector e7bd7ee → r10-int (623 tests); waiting on wn-wave
+2026-10-28 08:14 orch-worker ICON2 cost: $0.3908 (opus) — ✅ **Done** - 12-icon board "Play × DJ, dark" committed on the branch. - Blue-accent versions: Playhead, Platter arc, Loop. RESULT: `/home/merlin/dev/projects/fo [branch drain/ICON2-20261028]
+2026-10-28 08:17 orchestrator - interim Mac install of r10-int 9eebded done (28 cargo, 623 vitest, 0 warnings); ICON2 board published (credit opus $0.39); pad jump+play spawn (credit, opus)
