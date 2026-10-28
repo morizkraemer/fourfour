@@ -208,3 +208,4 @@
 2026-10-28 08:26 orch-worker ICON3 cost: $1.3223 (opus) — ✅ **Done** - Board with 12 icons, no triangles, nothing from the name - Every icon checked headless at 512, 200, 64, 32 and 16 px - All tags close properly; com [branch drain/ICON3-20261028]
 2026-10-28 09:44 orchestrator - wn-wave fa69206 → r10-int 3b9ba19 (P2 cause: envelope release ramps drawn at deep zoom; P3 cause: stale 50 ms tick after pause; FFWD v3); ICON3 board published (credit opus $1.32); Merlin reverted workers to seat subagents; final round-10 checks + Mac install started
 2026-10-28 09:54 orchestrator - Mac install of r10-int 3b9ba19 done (28 cargo, 631 vitest, 0 warnings); round 10 complete; icon round 4 board published
+2026-10-28 10:10 orchestrator - round 11 spawn: wo-zoom Q1–Q4 (seat, opus; viewport mockups + sample-accurate grid), wo-table Q5/Q9–Q12 (seat, sonnet); B2 Q6–Q8 queued; icon round 5 board published
