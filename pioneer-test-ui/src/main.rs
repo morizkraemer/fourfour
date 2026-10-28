@@ -847,6 +847,18 @@ async fn set_track_key(track_id: i64, key: String, state: State<'_, SharedLibrar
     .map_err(|e| e.to_string())?
 }
 
+/// Set the star rating of a track (0 clears it); it shows over the imported rating.
+#[tauri::command]
+async fn set_track_rating(track_id: i64, rating: u8, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        lib.set_user_rating(track_id, rating).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Edit the title, artist, album or genre of a track in the library. File tags are never touched.
 #[tauri::command]
 async fn update_track_fields(
@@ -1277,6 +1289,7 @@ fn main() {
             set_beat_grid,
             set_track_bpm,
             set_track_key,
+            set_track_rating,
             update_track_fields,
             release_user_edits,
             rescale_beat_grid,

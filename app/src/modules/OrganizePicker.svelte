@@ -106,6 +106,8 @@
               variant="new"
               name="New playlist"
               meta="⌘⇧N"
+              dropActive={isDropTarget(dnd.dropNewPlaylist)}
+              data-new-playlist-drop
               onclick={() => void createPlaylistAndOpen()}
             />
           {/if}

@@ -47,8 +47,9 @@
   content: '';
   position: absolute;
   left: 3px;
-  top: 3px;
-  bottom: 3px;
+  top: 50%;
+  height: 10px;
+  margin-top: -5px;
   width: 1px;
   border-radius: 1px;
   background: var(--ff-border-hi);
@@ -82,7 +83,7 @@
 .ff-colh__arrow--asc {
   transform: rotate(180deg);
 }
-.ff-colh__label--draggable {
+.ff-colh__cell[data-col-key]:not([data-col-key='']) {
   cursor: grab;
 }
 .ff-colh__cell--dragging {
