@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildPaletteGroups, type PaletteSources } from './palette-model.ts';
+import { buildPaletteGroups, isCommandQuery, type PaletteSources } from './palette-model.ts';
 
 function sources(run = vi.fn()): PaletteSources {
   return {
@@ -41,27 +41,65 @@ describe('buildPaletteGroups', () => {
 
   it('carries the shortcut text on action rows', () => {
     const g = buildPaletteGroups('play', sources());
-    expect(g[0].items.find((i) => i.id === 'action:play')?.right).toBe('Space');
+    expect(g.find((x) => x.key === 'actions')!.items.find((i) => i.id === 'action:play')?.right).toBe('Space');
   });
 
-  it('finds playlists and tracks by fuzzy query', () => {
-    const peak = buildPaletteGroups('peak', sources());
-    expect(ids(peak, 'places')).toEqual(['place:p1']);
-    const track = buildPaletteGroups('solo', sources());
-    expect(ids(track, 'tracks')).toEqual(['track:1']);
-    expect(track.find((g) => g.key === 'tracks')!.items[0].sub).toBe('Solomun');
+  it('finds playlists by fuzzy query', () => {
+    expect(ids(buildPaletteGroups('peak', sources()), 'places')).toEqual(['place:p1']);
   });
 
-  it('matches tracks on artist too and highlights only the title', () => {
-    const g = buildPaletteGroups('tale', sources());
-    const item = g.find((x) => x.key === 'tracks')!.items[0];
-    expect(item.id).toBe('track:2');
+  it('lists the tracks the host matched, with the artist as sub text', () => {
+    const g = buildPaletteGroups('solo', sources());
+    const tracks = g.find((x) => x.key === 'tracks')!.items;
+    expect(tracks.map((t) => t.id)).toEqual(['track:1', 'track:2']);
+    expect(tracks[0].sub).toBe('Solomun');
+  });
+
+  it('highlights only the title', () => {
+    const item = buildPaletteGroups('tale', sources()).find((x) => x.key === 'tracks')!.items[1];
     expect(item.ranges ?? []).toEqual([]);
+  });
+
+  it('caps tracks at the query limit', () => {
+    const src = sources();
+    src.tracks = Array.from({ length: 20 }, (_, i) => ({ id: i, title: `Song ${i}`, artist: 'A', run: vi.fn() }));
+    expect(ids(buildPaletteGroups('song', src), 'tracks')).toHaveLength(8);
+  });
+
+  it('orders groups tracks, go to, commands, settings', () => {
+    const g = buildPaletteGroups('s', sources());
+    expect(g.map((x) => x.key)).toEqual(['tracks', 'places', 'actions', 'settings']);
+  });
+
+  it('a > prefix keeps only commands and settings', () => {
+    const g = buildPaletteGroups('>play', sources());
+    expect(ids(g, 'actions')[0]).toBe('action:play');
+    expect(ids(g, 'tracks')).toEqual([]);
+    expect(ids(g, 'places')).toEqual([]);
+  });
+
+  it('a bare > lists every command and no settings or tracks', () => {
+    const g = buildPaletteGroups('>', sources());
+    expect(ids(g, 'actions')).toHaveLength(3);
+    expect(ids(g, 'settings')).toEqual([]);
+    expect(ids(g, 'tracks')).toEqual([]);
+  });
+
+  it('a > query still reaches settings rows', () => {
+    expect(ids(buildPaletteGroups('> analyze new', sources()), 'settings')).toEqual([
+      'setting:analysis.autoAnalyzeNew',
+    ]);
+  });
+
+  it('detects the command prefix', () => {
+    expect(isCommandQuery('>x')).toBe(true);
+    expect(isCommandQuery('  > x')).toBe(true);
+    expect(isCommandQuery('x>')).toBe(false);
   });
 
   it('runs the matching entry', () => {
     const run = vi.fn();
-    buildPaletteGroups('new', sources(run))[0].items[0].run();
+    buildPaletteGroups('new', sources(run)).find((g) => g.key === 'actions')!.items[0].run();
     expect(run).toHaveBeenCalledTimes(1);
   });
 

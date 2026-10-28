@@ -3,6 +3,7 @@
    * Command palette overlay (Svelte port of command-palette.js).
    * Presentational: the host supplies grouped, already-ranked items and runs the chosen one.
    * Keyboard: ↑/↓ and Tab/Shift+Tab move, Enter runs, Esc closes.
+   * Anchored mode renders only the result list under a host-owned input (`keySource`) at `anchorRect`.
    */
   import './command-palette.css';
   import { tick } from 'svelte';
@@ -15,7 +16,7 @@
    * @typedef {{ key: string, title: string, items: PaletteItem[] }} PaletteGroup
    */
 
-  /** @type {{ open?: boolean, query?: string, groups?: PaletteGroup[], placeholder?: string, emptyLabel?: string, onRun?: (item: PaletteItem, group: PaletteGroup) => void, onChoose?: (item: PaletteItem, value: string) => void, onClose?: () => void }} */
+  /** @type {{ open?: boolean, query?: string, groups?: PaletteGroup[], placeholder?: string, emptyLabel?: string, onRun?: (item: PaletteItem, group: PaletteGroup) => void, onChoose?: (item: PaletteItem, value: string) => void, onClose?: () => void, anchored?: boolean, anchorRect?: { left: number, top: number, width: number } | null, keySource?: HTMLElement | null }} */
   let {
     open = false,
     query = $bindable(''),
@@ -25,6 +26,9 @@
     onRun,
     onChoose,
     onClose,
+    anchored = false,
+    anchorRect = null,
+    keySource = null,
   } = $props();
 
   let inputEl = $state(null);
@@ -44,7 +48,13 @@
   });
 
   $effect(() => {
-    if (!open) return;
+    if (!open || !anchored || !keySource) return;
+    keySource.addEventListener('keydown', onKeydown);
+    return () => keySource.removeEventListener('keydown', onKeydown);
+  });
+
+  $effect(() => {
+    if (!open || anchored) return;
     returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     void tick().then(() => inputEl?.focus());
     return () => {
@@ -79,7 +89,7 @@
     } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
       e.preventDefault();
       move(-1);
-    } else if (e.key === 'Enter' && !e.isComposing) {
+    } else if (e.key === 'Enter' && !e.altKey && !e.isComposing) {
       e.preventDefault();
       run(flat[activeIndex]);
     }
@@ -108,7 +118,76 @@
   }
 </script>
 
-{#if open}
+{#snippet results()}
+  <div class="ff-cp__content" id="ff-cp-list" role="listbox" bind:this={listEl}>
+    {#each groups as group (group.key)}
+      {#if group.items.length}
+        <div class="ff-cp__section-head">{group.title}</div>
+        {#each group.items as item, i (item.id)}
+          {@const index = flatIndex(group, i)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <div
+            id="ff-cp-item-{index}"
+            class="ff-cp__row"
+            class:ff-cp__row--active={index === activeIndex}
+            role="option"
+            aria-selected={index === activeIndex}
+            data-active={index === activeIndex}
+            tabindex="-1"
+            onmousemove={() => (activeIndex = index)}
+            onclick={() => run({ item, group })}
+          >
+            <Icon name={item.icon ?? 'chevron-right'} size={14} class="ff-cp__row-icon" />
+            <span class="ff-cp__row-name">
+              {#each segments(item.name, item.ranges) as seg}{#if seg.hit}<b class="ff-cp__hit">{seg.text}</b>{:else}{seg.text}{/if}{/each}{#if item.sub}<span class="ff-cp__row-sub"> {item.sub}</span>{/if}
+            </span>
+            {#if item.control?.kind === 'switch'}
+              <span class="ff-cp__row-control"><Switch on={item.control.on} label={item.name} /></span>
+            {:else if item.control?.kind === 'choice'}
+              <span class="ff-cp__row-control ff-cp__choices" role="group" aria-label={item.name}>
+                {#each item.control.options as option (option.value)}
+                  <button
+                    type="button"
+                    class="ff-cp__choice"
+                    class:ff-cp__choice--on={option.value === item.control.value}
+                    tabindex="-1"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      onChoose?.(item, option.value);
+                    }}
+                  >{option.label}</button>
+                {/each}
+              </span>
+            {:else if item.right}<span class="ff-cp__row-right">{item.right}</span>{/if}
+          </div>
+        {/each}
+      {/if}
+    {/each}
+    {#if flat.length === 0}
+      <div class="ff-cp__empty">{emptyLabel}</div>
+    {/if}
+  </div>
+
+  <div class="ff-cp__footer">
+    <span class="ff-cp__footer-left">{anchored ? '↑↓ navigate  ⏎ run  esc close  > commands' : '↑↓ navigate  ⏎ run  esc close'}</span>
+    <span class="ff-cp__footer-right">{flat.length} {flat.length === 1 ? 'result' : 'results'}</span>
+  </div>
+{/snippet}
+
+{#if open && anchored}
+  {#if anchorRect}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="ff-cp ff-cp--anchored"
+      style:left="{anchorRect.left}px"
+      style:top="{anchorRect.top}px"
+      style:width="{anchorRect.width}px"
+      onmousedown={(e) => e.preventDefault()}
+    >
+      {@render results()}
+    </div>
+  {/if}
+{:else if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="ff-cp-overlay" onclick={(e) => e.target === e.currentTarget && onClose?.()}>
@@ -131,60 +210,7 @@
         />
         <kbd class="ff-cp__esc-kbd">esc</kbd>
       </div>
-
-      <div class="ff-cp__content" id="ff-cp-list" role="listbox" bind:this={listEl}>
-        {#each groups as group (group.key)}
-          {#if group.items.length}
-            <div class="ff-cp__section-head">{group.title}</div>
-            {#each group.items as item, i (item.id)}
-              {@const index = flatIndex(group, i)}
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <div
-                id="ff-cp-item-{index}"
-                class="ff-cp__row"
-                class:ff-cp__row--active={index === activeIndex}
-                role="option"
-                aria-selected={index === activeIndex}
-                data-active={index === activeIndex}
-                tabindex="-1"
-                onmousemove={() => (activeIndex = index)}
-                onclick={() => run({ item, group })}
-              >
-                <Icon name={item.icon ?? 'chevron-right'} size={14} class="ff-cp__row-icon" />
-                <span class="ff-cp__row-name">
-                  {#each segments(item.name, item.ranges) as seg}{#if seg.hit}<b class="ff-cp__hit">{seg.text}</b>{:else}{seg.text}{/if}{/each}{#if item.sub}<span class="ff-cp__row-sub"> {item.sub}</span>{/if}
-                </span>
-                {#if item.control?.kind === 'switch'}
-                  <span class="ff-cp__row-control"><Switch on={item.control.on} label={item.name} /></span>
-                {:else if item.control?.kind === 'choice'}
-                  <span class="ff-cp__row-control ff-cp__choices" role="group" aria-label={item.name}>
-                    {#each item.control.options as option (option.value)}
-                      <button
-                        type="button"
-                        class="ff-cp__choice"
-                        class:ff-cp__choice--on={option.value === item.control.value}
-                        tabindex="-1"
-                        onclick={(e) => {
-                          e.stopPropagation();
-                          onChoose?.(item, option.value);
-                        }}
-                      >{option.label}</button>
-                    {/each}
-                  </span>
-                {:else if item.right}<span class="ff-cp__row-right">{item.right}</span>{/if}
-              </div>
-            {/each}
-          {/if}
-        {/each}
-        {#if flat.length === 0}
-          <div class="ff-cp__empty">{emptyLabel}</div>
-        {/if}
-      </div>
-
-      <div class="ff-cp__footer">
-        <span class="ff-cp__footer-left">↑↓ navigate  ⏎ run  esc close</span>
-        <span class="ff-cp__footer-right">{flat.length} {flat.length === 1 ? 'result' : 'results'}</span>
-      </div>
+      {@render results()}
     </div>
   </div>
 {/if}

@@ -34,15 +34,24 @@ export interface PaletteSources {
   actions: { id: string; label: string; shortcut: string; run: () => void }[];
   settings?: PaletteSettingSource[];
   places: { id: string; label: string; sub?: string; icon: string; run: () => void }[];
+  /** Already matched by the host with the library search; the model only caps and highlights them. */
   tracks: { id: number; title: string; artist: string; run: () => void }[];
 }
 
 export const EMPTY_QUERY_LIMITS = { actions: 12, settings: 0, places: 6, tracks: 0 };
 export const QUERY_LIMITS = { actions: 8, settings: 8, places: 8, tracks: 8 };
+export const COMMAND_QUERY_LIMITS = { actions: 60, settings: 12, places: 0, tracks: 0 };
+
+export const COMMAND_PREFIX = '>';
+
+export function isCommandQuery(query: string): boolean {
+  return query.trimStart().startsWith(COMMAND_PREFIX);
+}
 
 export function buildPaletteGroups(query: string, sources: PaletteSources): PaletteGroupModel[] {
-  const q = query.trim();
-  const limits = q ? QUERY_LIMITS : EMPTY_QUERY_LIMITS;
+  const commandsOnly = isCommandQuery(query);
+  const q = (commandsOnly ? query.trimStart().slice(COMMAND_PREFIX.length) : query).trim();
+  const limits = commandsOnly ? { ...COMMAND_QUERY_LIMITS, settings: q ? COMMAND_QUERY_LIMITS.settings : 0 } : q ? QUERY_LIMITS : EMPTY_QUERY_LIMITS;
 
   const actions = fuzzyRank(q, sources.actions, (a) => a.label)
     .slice(0, limits.actions)
@@ -79,23 +88,21 @@ export function buildPaletteGroups(query: string, sources: PaletteSources): Pale
       run: item.run,
     }));
 
-  const tracks = q
-    ? fuzzyRank(q, sources.tracks, (t) => `${t.title} ${t.artist}`)
-        .slice(0, limits.tracks)
-        .map(({ item }): PaletteEntry => ({
-          id: `track:${item.id}`,
-          name: item.title,
-          sub: item.artist,
-          icon: 'list',
-          ranges: fuzzyMatch(q, item.title)?.indices,
-          run: item.run,
-        }))
+  const tracks = q && !commandsOnly
+    ? sources.tracks.slice(0, limits.tracks).map((item): PaletteEntry => ({
+        id: `track:${item.id}`,
+        name: item.title,
+        sub: item.artist,
+        icon: 'list',
+        ranges: fuzzyMatch(q, item.title)?.indices,
+        run: item.run,
+      }))
     : [];
 
   return [
-    { key: 'actions', title: 'Actions', items: actions },
-    { key: 'settings', title: 'Settings', items: settings },
-    { key: 'places', title: 'Go to', items: places },
     { key: 'tracks', title: 'Tracks', items: tracks },
+    { key: 'places', title: 'Go to', items: places },
+    { key: 'actions', title: 'Commands', items: actions },
+    { key: 'settings', title: 'Settings', items: settings },
   ];
 }
