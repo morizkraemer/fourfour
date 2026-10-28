@@ -239,3 +239,5 @@
 2026-10-28 19:10 ov-layout O7 landed on ov-1028 5edd7bc: mode-less pencil BPM/key fields, MT outside box, memory chips (slot-0 cues), grid always visible; 692 tests, smoke 13/13; Mac install started
 2026-10-28 19:11 orchestrator O1b spawn: ov-anchor grid_anchor_ms in edits.json (seat, sonnet high)
 2026-10-28 19:25 orchestrator - ov-1028 5edd7bc installed on Mac (692 vitest, 0 check errors)
+2026-10-28 19:45 ov-anchor O1b landed on ov-1028: persisted grid_anchor_ms (edits.json, optional), ×2/÷2 across saves exact; TS/Rust parity fixture; 697 tests, smoke 13/13
+2026-10-28 19:46 orchestrator O4 spawn: ov-perf 10k-track perf pass (seat, sonnet high)
