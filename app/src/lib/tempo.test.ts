@@ -18,7 +18,9 @@ import {
   shiftedKey,
   parseBpmEntry,
   stepPercent,
+  effectiveShift,
 } from './tempo.ts';
+import { keyColor } from '../../../prototyping/viewport/design-system/utils/key-color.js';
 
 describe('percent and ratio', () => {
   it('maps percent to the playback ratio and back', () => {
@@ -190,5 +192,38 @@ describe('typed key', () => {
     expect(parseKeyEntry('13', '8A')).toBeNull();
     expect(parseKeyEntry('+2', '')).toBe(2);
     expect(parseKeyEntry('x', '8A')).toBeNull();
+  });
+});
+
+describe('effective shift', () => {
+  it('follows the tempo as varispeed when key lock is off', () => {
+    expect(effectiveShift(0, 6, false)).toBe(1);
+    expect(effectiveShift(0, -6, false)).toBe(-1);
+    expect(effectiveShift(2, 6, false)).toBe(3);
+    expect(effectiveShift(0, 2, false)).toBe(0);
+  });
+  it('is the manual shift when key lock is on', () => {
+    expect(effectiveShift(0, 6, true)).toBe(0);
+    expect(effectiveShift(-2, 50, true)).toBe(-2);
+  });
+});
+
+describe('shift to Camelot to colour', () => {
+  const colourOf = (key: string, shift: number) => keyColor(shiftedKey(key, shift) ?? '');
+  it('moves the colour with the shifted key', () => {
+    expect(colourOf('8A', 0)).toBe('var(--ff-key-8)');
+    expect(colourOf('8A', 1)).toBe(keyColor(shiftedKey('8A', 1)));
+    expect(colourOf('8A', 1)).not.toBe(colourOf('8A', 0));
+  });
+  it('wraps around the wheel and keeps the letter', () => {
+    expect(shiftedKey('8A', 1)).toBe('3A');
+    expect(shiftedKey('12A', 1)).toBe('7A');
+    expect(shiftedKey('12B', 1)).toBe('7B');
+    expect(shiftedKey('1A', -1)).toBe('6A');
+    expect(colourOf('12A', 1)).toBe('var(--ff-key-7)');
+  });
+  it('follows the pitch of a varispeed tempo change', () => {
+    expect(colourOf('8A', effectiveShift(0, 6, false))).toBe(colourOf('8A', 1));
+    expect(colourOf('8A', effectiveShift(0, 6, true))).toBe('var(--ff-key-8)');
   });
 });

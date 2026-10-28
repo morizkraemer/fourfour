@@ -16,16 +16,14 @@
     DRAG_PX_PER_UNIT,
     bpmDragStep,
     clampShift,
+    effectiveShift,
     formatBpm,
-    formatPercent,
     parseBpmEntry,
     parseKeyEntry,
-    parsePercent,
     percentAfterBpmStep,
     percentForBpm,
     playingBpm,
     shiftedKey,
-    stepPercent,
     type Tier,
   } from '../lib/tempo.ts';
 
@@ -36,7 +34,8 @@
   let hasBpm = $derived(Number.isFinite(analysedBpm) && analysedBpm > 0);
   let hasKey = $derived(shiftedKey(analysedKey, 0) !== null);
   let bpmNow = $derived(hasBpm ? playingBpm(analysedBpm, tempo.percent) : NaN);
-  let keyNow = $derived(shiftedKey(analysedKey, tempo.keyShift) ?? '');
+  let pitchShift = $derived(effectiveShift(tempo.keyShift, tempo.percent, tempo.keyLock));
+  let keyNow = $derived(shiftedKey(analysedKey, pitchShift) ?? '');
 
   function stepBpm(units: number, tier: Tier, fromButton: boolean) {
     if (!hasBpm) return;
@@ -51,25 +50,14 @@
     return true;
   }
 
-  function stepTempo(units: number, tier: Tier) {
-    setTempoPercent(stepPercent(tempo.percent, units, tier));
-  }
-
-  function setTempo(typed: string): boolean {
-    const percent = parsePercent(typed);
-    if (percent === null) return false;
-    setTempoPercent(percent);
-    return true;
-  }
-
   function stepKey(units: number) {
     if (hasKey) setKeyShift(clampShift(tempo.keyShift + units));
   }
 
   function setKey(typed: string): boolean {
-    const shift = parseKeyEntry(typed, analysedKey, tempo.keyShift);
+    const shift = parseKeyEntry(typed, analysedKey, pitchShift);
     if (shift === null) return false;
-    setKeyShift(shift);
+    setKeyShift(shift - (pitchShift - tempo.keyShift));
     return true;
   }
 </script>
@@ -83,22 +71,11 @@
     title="Master Tempo: keep the key when the tempo changes"
     onclick={() => setKeyLock(!tempo.keyLock)}>MT</button>
   <TempoField
-    label="Tempo"
-    text={formatPercent(tempo.percent)}
-    width="9ch"
-    pxPerUnit={DRAG_PX_PER_UNIT.percent}
-    color={tempo.percent !== 0 ? MARKED : undefined}
-    stepper={false}
-    editText={tempo.percent.toFixed(2)}
-    onStep={stepTempo}
-    onSet={setTempo}
-    onReset={() => setTempoPercent(0)} />
-  <TempoField
     label="Key"
     text={hasKey ? keyNow : '—'}
     width="5ch"
     pxPerUnit={DRAG_PX_PER_UNIT.key}
-    color={tempo.keyShift !== 0 ? MARKED : keyColor(keyNow)}
+    color={keyColor(keyNow)}
     disabled={!hasKey}
     editText={hasKey ? keyNow : ''}
     onStep={stepKey}

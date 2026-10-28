@@ -12,7 +12,7 @@
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { tempo } from '../stores/tempo.svelte.ts';
-  import { formatBpm, formatShift } from '../lib/tempo.ts';
+  import { effectiveShift, formatBpm, formatShift } from '../lib/tempo.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -203,7 +203,7 @@
       <span class="ff-xp__orig" title="The track's own BPM and key, and the key shift">
         <span class="ff-xp__orig-bpm">{formatBpm(Number(player.track?.bpm))}</span>
         <span class="ff-xp__orig-key">{player.track?.key || '—'}</span>
-        <span class="ff-xp__orig-shift">{formatShift(tempo.keyShift)}</span>
+        <span class="ff-xp__orig-shift">{formatShift(effectiveShift(tempo.keyShift, tempo.percent, tempo.keyLock))}</span>
       </span>
     </div>
 

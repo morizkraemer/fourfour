@@ -29,6 +29,16 @@ textarea,
   user-select: text;
 }
 
+input::selection,
+textarea::selection {
+  background: color-mix(in srgb, var(--ff-accent) 22%, transparent);
+  color: inherit;
+}
+input,
+textarea {
+  caret-color: var(--ff-accent);
+}
+
 /* macOS title band — Tauri overlay: data-tauri-drag-region on the element */
 .ff-titlebar-band {
   flex: none;

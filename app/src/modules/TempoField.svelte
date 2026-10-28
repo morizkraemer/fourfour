@@ -151,7 +151,7 @@
   }
 </script>
 
-<div class="ff-tfield" class:ff-tfield--bare={!stepper} class:ff-tfield--disabled={disabled} role="group" aria-label={label}>
+<div class="ff-tfield" class:ff-tfield--bare={!stepper} class:ff-tfield--disabled={disabled} class:ff-tfield--editing={editing} role="group" aria-label={label}>
   {#if stepper}
     <button
       type="button"
@@ -216,6 +216,9 @@
     overflow: hidden;
     user-select: none;
   }
+  .ff-tfield--editing {
+    border-color: var(--ff-accent);
+  }
   .ff-tfield--disabled {
     opacity: 0.45;
   }
@@ -272,14 +275,18 @@
     box-sizing: border-box;
     border: none;
     background: var(--ff-elev);
-    box-shadow: inset 0 0 0 1px var(--ff-border-hi);
+    caret-color: var(--ff-accent);
     font: inherit;
     text-align: center;
     color: var(--ff-text);
     outline: none;
   }
-  .ff-tfield__input--invalid {
-    box-shadow: inset 0 0 0 1px var(--ff-danger);
+  .ff-tfield__input::selection {
+    background: color-mix(in srgb, var(--ff-accent) 22%, transparent);
+    color: inherit;
+  }
+  .ff-tfield--editing:has(.ff-tfield__input--invalid) {
+    border-color: var(--ff-danger);
   }
   :global(body.ff-tempo-dragging),
   :global(body.ff-tempo-dragging *) {

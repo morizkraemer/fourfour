@@ -120,6 +120,12 @@ export function shiftedKey(analysedKey: string, semitones: number): string | nul
   return `${names[pitchClass]}${parts.minor ? 'm' : ''}`;
 }
 
+/** The semitones the pitch has moved: the key shift, plus the tempo change when key lock is off and the tempo changes the pitch. */
+export function effectiveShift(keyShift: number, percent: number, keyLock: boolean): number {
+  if (keyLock) return keyShift;
+  return keyShift + Math.round(12 * Math.log2(ratioFromPercent(percent)));
+}
+
 /** The shift that turns `analysedKey` into `targetKey`, the one closest to `currentShift`. A different mode cannot be reached by shifting. */
 export function shiftForKey(analysedKey: string, targetKey: string, currentShift = 0): number | null {
   const from = keyParts(analysedKey);
