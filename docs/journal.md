@@ -218,3 +218,4 @@
 2026-10-28 11:33 orchestrator - wp-cues 1e70f6f → r12-int e046d48 (663 tests; hotkey ⇧C); waiting on wp-bpm
 2026-10-28 11:51 orchestrator - wp-bpm 78a78e0 → r12-int 9f5ba16 (conflicts in ExpandedPlayer + app-actions resolved, both kept; 663 tests); reported track-bpm.test.ts was never committed → wp-bpm-test spawn (seat, sonnet); checks + Mac install started
 2026-10-28 11:58 orchestrator - Mac install of r12-int 9f5ba16 done (28 cargo, 663 vitest, 0 warnings); BPM tests fa9d4be added (677 tests); round 12 complete
+2026-10-28 12:55 orchestrator - round 13 spawn: wq-gridlag S2 (seat, sonnet), wq-editmode S1 mockups in viewport (seat, opus), both off r12-int
