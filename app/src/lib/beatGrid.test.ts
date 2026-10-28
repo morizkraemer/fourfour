@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridNudgeMs, rescaleBeats, shiftBeats, shiftBeatsByBeat, shiftToPlaceDownbeatAt, type BeatMarker } from './beatGrid.ts';
+import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridAnchorMs, gridNudgeMs, rescaleBeats, shiftBeats, shiftBeatsByBeat, shiftToPlaceDownbeatAt, shiftedAnchorMs, type BeatMarker } from './beatGrid.ts';
 
 const SAMPLE_MS = 1000 / 44100;
 
@@ -234,6 +235,70 @@ describe('rescaleBeats (mirrors the library rescale_beat_grid)', () => {
     const reloaded = gridFromStorage(beats, offsetMs);
     expect(reloaded.map((b) => b.bar_position)).toEqual(local.map((b) => b.bar_position));
     reloaded.forEach((b, i) => expect(b.time_ms).toBeCloseTo(local[i].time_ms, 9));
+  });
+});
+
+describe('rescaleBeats anchor', () => {
+  const TRACK_MS = 300_000;
+  const bars = [0, 469, 938, 1406].map((t, i) => ({ time_ms: t + 1000, bar_position: i + 1 }));
+  const saved = (beats: BeatMarker[]) => {
+    const { beats: stored, offsetMs } = gridForStorage(beats);
+    return gridFromStorage(stored, offsetMs);
+  };
+
+  it('doubling then halving across saves returns the exact grid, bar positions included', () => {
+    const at128 = saved(rescaleBeats(bars, 128, TRACK_MS));
+    const anchor = gridAnchorMs(bars, null);
+    const at256 = saved(rescaleBeats(at128, 256, TRACK_MS, anchor));
+    const back = saved(rescaleBeats(at256, 128, TRACK_MS, anchor));
+    expect(back).toEqual(at128);
+    expect(at128.find((b) => b.time_ms === 1000)?.bar_position).toBe(1);
+  });
+
+  it('without the anchor the fill drifts, which is why it is kept', () => {
+    const at128 = saved(rescaleBeats(bars, 128, TRACK_MS));
+    const at256 = saved(rescaleBeats(at128, 256, TRACK_MS));
+    expect(saved(rescaleBeats(at256, 128, TRACK_MS))).not.toEqual(at128);
+  });
+
+  it('keeps a downbeat set mid-track fixed under every rescale', () => {
+    const anchor = 60_000.25;
+    let grid = saved(bars.map((b) => ({ ...b, time_ms: b.time_ms + 0.25 })));
+    for (const bpm of [128, 90, 174, 70]) {
+      grid = saved(rescaleBeats(grid, bpm, TRACK_MS, anchor));
+      const beat = grid.find((b) => Math.abs(b.time_ms - anchor) < 1e-9);
+      expect(beat?.bar_position, `${bpm}`).toBe(1);
+    }
+  });
+
+  it('moves the anchor with a nudge and falls back to the first downbeat', () => {
+    expect(gridAnchorMs(bars, null)).toBe(1000);
+    expect(gridAnchorMs(bars, 7000)).toBe(7000);
+    expect(shiftedAnchorMs(bars, null, 10)).toBe(1010);
+    expect(shiftedAnchorMs(bars, 7000, -10)).toBe(6990);
+    expect(gridAnchorMs([], null)).toBeNull();
+    expect(gridAnchorMs([{ time_ms: 5, bar_position: 2 }], null)).toBeNull();
+  });
+});
+
+describe('rescaleBeats parity with the library', () => {
+  type Row = [number, number];
+  interface Case { beats: BeatMarker[]; offsetMs: number; anchorMs: number | null; bpm: number; count: number; head: Row[]; tail: Row[] }
+  const fixture = JSON.parse(
+    readFileSync(new URL('../../../pioneer-library/tests/fixtures/rescale-parity.json', import.meta.url), 'utf8'),
+  ) as { durationSecs: number; cases: Case[] };
+
+  it('gives the beats the library test expects for each shared case', () => {
+    expect(fixture.cases.length).toBeGreaterThan(20);
+    for (const c of fixture.cases) {
+      const out = rescaleBeats(gridFromStorage(c.beats, c.offsetMs), c.bpm, fixture.durationSecs * 1000, c.anchorMs);
+      const rows = out.map((b): Row => [b.time_ms, b.bar_position]);
+      expect(rows.length).toBe(c.count);
+      for (const [want, got] of [...c.head.map((w, i) => [w, rows[i]] as const), ...c.tail.map((w, i) => [w, rows[rows.length - 8 + i]] as const)]) {
+        expect(got[0]).toBeCloseTo(want[0], 9);
+        expect(got[1]).toBe(want[1]);
+      }
+    }
   });
 });
 

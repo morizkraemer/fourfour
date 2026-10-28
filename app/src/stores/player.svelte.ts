@@ -39,12 +39,15 @@ import {
 } from '../lib/cueButton.ts';
 import {
   BEAT_NUDGE_MS,
+  beatIntervalMs,
   createGridPersister,
   gridFromStorage,
   shiftBeats,
   shiftBeatsByBeat,
   shiftToPlaceDownbeatAt,
+  shiftedAnchorMs,
   type BeatMarker,
+  type EditedGrid,
 } from '../lib/beatGrid.ts';
 
 export type { BeatMarker };
@@ -67,6 +70,8 @@ export interface PlayerTrack {
   totalSeconds: number;
   durationMs: number;
   beats: BeatMarker[];
+  /** The downbeat a BPM change keeps in place (`grid_anchor_ms`); null until the grid was set by hand or re-spaced. */
+  gridAnchorMs: number | null;
   bands: BandColumns | null;
   // Higher-res detail + fixed overview for the expanded dual-view player.
   // (compact strip uses bands; these stay null until analysis loads.)
@@ -204,6 +209,7 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   next.bandsOverview = stripBandsFromAnalysis(analysis) ?? next.bandsDetail;
   if (analysis.beats?.length) {
     next.beats = beatsFromAnalysis(analysis);
+    next.gridAnchorMs = analysis.grid_anchor_ms ?? null;
   } else {
     // No detected beats — synthesize a grid from BPM so one is always shown.
     const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
@@ -362,6 +368,7 @@ function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
     totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
     durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
     beats: [],
+    gridAnchorMs: null,
     bands: null,
     bandsDetail: null,
     bandsOverview: null,
@@ -642,7 +649,7 @@ onCueSaveError((message) => {
   player.error = message;
 });
 
-const gridPersister = createGridPersister(setBeatGrid, (err) => {
+const gridPersister = createGridPersister<EditedGrid>(setBeatGrid, (err) => {
   console.error('saving the beat grid failed:', err);
   player.error = `Could not save the beat grid: ${err}`;
 });
@@ -656,7 +663,7 @@ export async function refreshLoadedBeatGrid(trackId: number, unlessChangedFrom?:
   const loaded = player.track;
   if (!fresh?.beats?.length || !loaded || loaded.id !== trackId) return;
   if (unlessChangedFrom && loaded.beats !== unlessChangedFrom) return;
-  player.track = { ...loaded, beats: beatsFromAnalysis(fresh) };
+  player.track = { ...loaded, beats: beatsFromAnalysis(fresh), gridAnchorMs: fresh.grid_anchor_ms ?? null };
 }
 
 /** Write a pending grid edit now (before another track loads). */
@@ -668,9 +675,12 @@ export function flushBeatGridEdits(): Promise<void> {
 export function beatGridShift(deltaMs: number) {
   const t = player.track;
   if (!t || !t.beats.length || !deltaMs) return;
-  const beats = shiftBeats(t.beats, deltaMs);
-  player.track = { ...t, beats };
-  gridPersister.schedule(t.id, beats);
+  applyGridEdit(t, shiftBeats(t.beats, deltaMs), shiftedAnchorMs(t.beats, t.gridAnchorMs, deltaMs));
+}
+
+function applyGridEdit(t: PlayerTrack, beats: BeatMarker[], anchorMs: number | null) {
+  player.track = { ...t, beats, gridAnchorMs: anchorMs };
+  gridPersister.schedule(t.id, { beats, anchorMs });
 }
 
 export function beatGridNudgeLeft(stepMs = BEAT_NUDGE_MS) {
@@ -684,9 +694,8 @@ export function beatGridNudgeRight(stepMs = BEAT_NUDGE_MS) {
 export function beatGridShiftByBeat(direction: 1 | -1) {
   const t = player.track;
   if (!t || t.beats.length < 2) return;
-  const beats = shiftBeatsByBeat(t.beats, direction);
-  player.track = { ...t, beats };
-  gridPersister.schedule(t.id, beats);
+  const interval = beatIntervalMs(t.beats) ?? 0;
+  applyGridEdit(t, shiftBeatsByBeat(t.beats, direction), shiftedAnchorMs(t.beats, t.gridAnchorMs, direction * interval));
 }
 
 /** Where the playhead is right now: while playing, the transport clock (reports only arrive every 50 ms); else the stored position. */
@@ -700,8 +709,11 @@ export function currentPositionMs(): number {
 export function beatGridSetCurrent() {
   const t = player.track;
   if (!t || !t.durationMs) return;
-  const delta = shiftToPlaceDownbeatAt(t.beats, currentPositionMs());
-  if (delta !== null) beatGridShift(delta);
+  const position = currentPositionMs();
+  const delta = shiftToPlaceDownbeatAt(t.beats, position);
+  if (delta === null || !delta) return;
+  const placedDownbeat = t.beats.some((b) => b.bar_position === 1);
+  applyGridEdit(t, shiftBeats(t.beats, delta), placedDownbeat ? position : shiftedAnchorMs(t.beats, t.gridAnchorMs, delta));
 }
 
 /** Jump to `ms` and play: a seek while playing, one play command from `ms` while paused. */

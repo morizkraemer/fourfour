@@ -22,7 +22,7 @@ export function installTauriMock(initial: LoadedState) {
 
   const edits = {
     cues: new Map<number, CuePointPayload[]>(),
-    grids: new Map<number, { beats: unknown[]; grid_offset_ms: number }>(),
+    grids: new Map<number, { beats: unknown[]; grid_offset_ms: number; grid_anchor_ms: number | null }>(),
     tempo: new Map<number, number>(),
   };
   let playlists = initial.playlists;
@@ -76,7 +76,7 @@ export function installTauriMock(initial: LoadedState) {
         edits.cues.set(args.trackId, args.cues);
         return null;
       case 'set_beat_grid':
-        edits.grids.set(args.trackId, { beats: args.beats, grid_offset_ms: args.offsetMs });
+        edits.grids.set(args.trackId, { beats: args.beats, grid_offset_ms: args.offsetMs, grid_anchor_ms: args.anchorMs });
         return null;
       case 'rescale_beat_grid':
         edits.tempo.set(args.trackId, args.bpm);
