@@ -246,3 +246,5 @@
 2026-10-28 21:00 ov-ci O5 done: ci.yml 3 OS + unsigned bundles, YAML-parsed only, not run; kept separate on ov-ci (push = run, needs Merlin)
 2026-10-28 21:10 orchestrator O6 housekeeping: 11 merged/clean worktrees removed (q46/q49/wq-editmode branches kept), beat_this weights saved to ~/.cache/fourfour-models, :5237 preview stopped; disk 53%
 2026-10-28 21:40 orchestrator - ov-1028 33988ec checks green on rerun (one cargo test failed once under load, unidentified); Mac offline, install pending (install-only.sh when it's back)
+2026-10-28 22:10 ov-analysis O3 landed on ov-1028 48da557: Rust is default when weights present, complete; grid ±20 ms 78.5 → 80.5% (whole-BPM snap now checks fit), key 58.3% unchanged; gaps: weights not bundled, Python fallback dev-only, truncated wav/flac fail, no cues/energy; bench results copied to benchmark/results/o3
+2026-10-28 22:11 orchestrator O8/O9 followup (own prio: bugs/ship target): ov-decode truncated audio, ov-weights bundle ONNX weights + no-backend error (seat, sonnet medium/high)
