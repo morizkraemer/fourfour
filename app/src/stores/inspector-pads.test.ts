@@ -17,7 +17,9 @@ vi.mock('./player.svelte.ts', () => ({
     hooks.order.push(`seek ${ms}`);
   }),
   seekToProgress: vi.fn(),
-  seekToMsAndPlay: vi.fn(),
+  seekToMsAndPlay: vi.fn(async (ms: number) => {
+    hooks.order.push(`seek+play ${ms}`);
+  }),
 }));
 
 import { cuesOf, loadCuesFromPayload } from './cues.svelte.ts';
@@ -45,12 +47,20 @@ describe('inspector cue pads', () => {
     expect(cuesOf(track)).toEqual([]);
   });
 
-  it('jumps to a set pad and keeps the cue', async () => {
+  it('jumps to a set pad of the loaded track and plays, keeping the cue', async () => {
     hooks.loadedId = track;
     loadCuesFromPayload(track, [{ hot_cue_number: 2, time_ms: 9000 }]);
     await pressInspectorPad({ id: track }, 2, false);
-    expect(hooks.order).toEqual(['seek 9000']);
+    expect(hooks.order).toEqual(['seek+play 9000']);
     expect(cuesOf(track)).toHaveLength(1);
+  });
+
+  it('loads and only jumps on a set pad of a track that is not loaded', async () => {
+    hooks.loadedId = track + 1000;
+    loadCuesFromPayload(track, [{ hot_cue_number: 2, time_ms: 9000 }]);
+    await pressInspectorPad({ id: track }, 2, false);
+    expect(hooks.loadedId).toBe(track);
+    expect(hooks.order).toEqual(['seek 9000']);
   });
 
   it('deletes a set pad with Alt held, on any track', async () => {
