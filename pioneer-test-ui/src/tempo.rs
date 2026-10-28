@@ -21,22 +21,23 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use fourfour_stretch::{Preset, Stretch};
 
-pub const MIN_RATIO: f64 = 0.5;
-pub const MAX_RATIO: f64 = 1.5;
+pub const MIN_RATIO: f64 = 0.25;
+pub const MAX_RATIO: f64 = 4.0;
 pub const MAX_SEMITONES: f64 = 12.0;
 
 pub const CHUNK_FRAMES: usize = 256;
 pub const MAX_DEVICE_CHANNELS: usize = 64;
 
 const PRIME_BURST_FRAMES: usize = CHUNK_FRAMES * 4;
+const MAX_PRIME_BURST_FRAMES: usize = CHUNK_FRAMES * 8;
 const MAX_FEED_ADJUST: usize = CHUNK_FRAMES / 4;
 const TAPS: usize = 64;
 const HISTORY_FRAMES: usize = TAPS / 2;
 const LOOKAHEAD_FRAMES: usize = TAPS / 2 + 1;
 const PHASES: usize = 256;
 const BANK_STEPS_PER_OCTAVE: f64 = 8.0;
-const BANK_TABLES: usize = 14;
-const MAX_PITCH_FACTOR: f64 = 3.2;
+const BANK_TABLES: usize = 26;
+const MAX_PITCH_FACTOR: f64 = 8.5;
 const MAX_MID_FRAMES: usize = (CHUNK_FRAMES as f64 * MAX_PITCH_FACTOR) as usize + 2 * LOOKAHEAD_FRAMES;
 const MAX_PRIME_OUTPUT_FRAMES: usize = 8192;
 const LONG_FADE_FRAMES: usize = 1024;
@@ -417,7 +418,7 @@ impl TempoEngine {
         let input_latency = stretch.input_latency();
         let output_latency = stretch.output_latency();
         let dev = CHUNK_FRAMES * MAX_DEVICE_CHANNELS;
-        let feed_max = CHUNK_FRAMES * 2 + PRIME_BURST_FRAMES;
+        let feed_max = CHUNK_FRAMES * 2 + MAX_PRIME_BURST_FRAMES;
         Self {
             stretch,
             varispeed: Varispeed::new(),
@@ -728,6 +729,8 @@ impl TempoEngine {
                 available.saturating_sub(self.feed_ahead)
             };
             let burst = PRIME_BURST_FRAMES
+                .max(n_in * 2)
+                .min(MAX_PRIME_BURST_FRAMES)
                 .min(goal.saturating_sub(self.feed_ahead))
                 .min(room);
             if burst > 0 {
@@ -910,7 +913,8 @@ mod tests {
         assert_eq!(Varispeed::table_index(0.7), 0);
         assert_eq!(Varispeed::table_index(1.0), 0);
         assert_eq!(Varispeed::table_index(2.0), 8);
-        assert_eq!(Varispeed::table_index(3.2), 13);
+        assert_eq!(Varispeed::table_index(3.2), 14);
+        assert_eq!(Varispeed::table_index(MAX_PITCH_FACTOR), BANK_TABLES - 1);
     }
 
     #[test]

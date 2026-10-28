@@ -2,7 +2,7 @@
  * tempo.svelte.ts — the tempo and key the player is playing at, as opposed to the analysed BPM and
  * key stored with the track. The engine does the work; this holds what the controls show and
  * pushes changes to it. Tempo and key shift go back to the track's own values on every load,
- * range and key lock stay as set.
+ * key lock stays as set.
  */
 
 import {
@@ -10,20 +10,12 @@ import {
   playbackSetKeyShift,
   playbackSetTempo,
 } from '../services/playback.svelte.ts';
-import {
-  DEFAULT_TEMPO_RANGE,
-  clampPercent,
-  clampShift,
-  ratioFromPercent,
-  smallestRangeFor,
-  type TempoRange,
-} from '../lib/tempo.ts';
+import { clampPercent, clampShift, ratioFromPercent } from '../lib/tempo.ts';
 
 export const tempo = $state({
   percent: 0,
   keyShift: 0,
   keyLock: true,
-  range: DEFAULT_TEMPO_RANGE as TempoRange,
   liveRatio: 1,
 });
 
@@ -35,17 +27,11 @@ export function tempoActive(): boolean {
   return tempo.percent !== 0 || tempo.keyShift !== 0;
 }
 
-/** Typed values may go past the selected range; the range widens to hold them. */
+/** The tempo is limited to what the engine can play, a quarter to four times the track's own speed. */
 export function setTempoPercent(percent: number) {
   const next = clampPercent(percent);
   tempo.percent = next;
-  if (Math.abs(next) > tempo.range) tempo.range = smallestRangeFor(next);
   pushed('Setting the tempo', playbackSetTempo(ratioFromPercent(next)));
-}
-
-export function setTempoRange(range: TempoRange) {
-  tempo.range = range;
-  if (Math.abs(tempo.percent) > range) setTempoPercent(clampPercent(tempo.percent, range));
 }
 
 export function setKeyShift(semitones: number) {

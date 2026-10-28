@@ -11,6 +11,8 @@
   import PlayerTempo from './PlayerTempo.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
+  import { tempo } from '../stores/tempo.svelte.ts';
+  import { formatBpm, formatShift } from '../lib/tempo.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -196,6 +198,15 @@
         disabled={!player.track} onclick={() => beatGridNudgeRight()}>▶</button>
     </div>
 
+    <div class="ff-xp__pitch" role="group" aria-label="Original tempo and key">
+      <span class="ff-xp__grid-label">ORIG</span>
+      <span class="ff-xp__orig" title="The track's own BPM and key, and the key shift">
+        <span class="ff-xp__orig-bpm">{formatBpm(Number(player.track?.bpm))}</span>
+        <span class="ff-xp__orig-key">{player.track?.key || '—'}</span>
+        <span class="ff-xp__orig-shift">{formatShift(tempo.keyShift)}</span>
+      </span>
+    </div>
+
     <div class="ff-xp__zoom">
       <button class="ff-xp__zoom-btn" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}>−</button>
       <button class="ff-xp__zoom-btn" title="Fit" aria-label="Reset zoom" onclick={() => wave?.resetZoom()}>Fit</button>
@@ -339,6 +350,16 @@
   }
   .ff-xp__grid-btn:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.08)); }
   .ff-xp__grid-btn:disabled { opacity: 0.4; cursor: default; }
+
+  .ff-xp__pitch { display: flex; align-items: center; gap: 8px; }
+  .ff-xp__orig {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--ff-font-mono, monospace); font-size: 10px;
+    font-variant-numeric: tabular-nums; color: var(--ff-muted, rgba(255, 255, 255, 0.5));
+  }
+  .ff-xp__orig-bpm { width: 6ch; text-align: right; }
+  .ff-xp__orig-key { width: 3ch; }
+  .ff-xp__orig-shift { width: 6ch; }
 
   .ff-xp__zoom { display: flex; align-items: center; gap: 4px; }
   .ff-xp__zoom-btn {
