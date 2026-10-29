@@ -251,3 +251,4 @@
 2026-10-28 19:45 orchestrator - resumed: seat limit hit O8/O9 mid-run; PM said limit reset; SendMessage resume to both
 2026-10-28 20:30 orchestrator - O8 72215b1 + O9 59f9487 landed on ov-1028 232ca15; full checks green (700 vitest, smoke 13/13, cargo ok, cut-wav grid with weights ok)
 2026-10-28 20:31 orchestrator - run idle: queue done; remaining items need Merlin (layout test, CI push, bar 1) or the Mac (install, offline)
+2026-10-29 03:22 orchestrator - ov-1028 232ca15 installed on Mac with bundled weights (162 MB app; Mac build script now uses tauri.bundle-weights.conf.json; first install without weights replaced)
