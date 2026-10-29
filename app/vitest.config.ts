@@ -10,7 +10,7 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
+    environment: 'client-runtime',
     include: ['src/**/*.test.ts'],
   },
 });
