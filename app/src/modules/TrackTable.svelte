@@ -320,6 +320,7 @@
 
   function onRowPointerDown(e, track, index) {
     if (isUsbView || e.button !== 0) return;
+    detailPrefetcher.now(track.id);
     const target = e.target;
     if (target.closest?.('.ff-colh__resize-handle') || target.closest?.('[data-wave-seek]') || target.closest?.('[data-rate]')) return;
     e.preventDefault();

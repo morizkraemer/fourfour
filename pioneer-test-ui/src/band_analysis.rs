@@ -4,9 +4,12 @@ use std::path::Path;
 use pioneer_usb_writer::models::AnalysisResult;
 use pioneer_usb_writer::waveform::{analyze, measure_window, DetailMeter, DetailSeries, Meter, Waveforms, WindowSeries};
 use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Condvar, Mutex};
+
+use symphonia::core::codecs::{CodecParameters, Decoder, DecoderOptions};
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, Packet, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
@@ -21,11 +24,14 @@ pub(crate) fn decode_blocks(path: &Path, mut on_block: impl FnMut(u32, usize, &[
 
 /// Decodes `path` from `from_s` on (an accurate seek, as the player does) and hands every block over with the track
 /// frame its first sample is; stops when `on_block` returns false.
-fn decode_blocks_from(
-    path: &Path,
-    from_s: f64,
-    mut on_block: impl FnMut(u32, usize, u64, &[f32]) -> bool,
-) -> Result<(), String> {
+struct OpenedAudio {
+    format: Box<dyn FormatReader>,
+    track_id: u32,
+    params: CodecParameters,
+    lead: u64,
+}
+
+fn open_audio(path: &Path) -> Result<OpenedAudio, String> {
     let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
     let stream = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
@@ -35,21 +41,34 @@ fn decode_blocks_from(
     let probed = symphonia::default::get_probe()
         .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
         .map_err(|e| format!("probe {}: {e}", path.display()))?;
-    let mut format = probed.format;
+    let format = probed.format;
     let track = format.default_track().ok_or("no audio track")?;
-    let track_id = track.id;
-    let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| format!("decoder: {e}"))?;
-
-    let rate = track.codec_params.sample_rate;
-    let time_base = track.codec_params.time_base;
+    let (track_id, params) = (track.id, track.codec_params.clone());
     let lead = fourfour_analysis::mp3::leading_silence_frames(path) as u64;
+    Ok(OpenedAudio { format, track_id, params, lead })
+}
+
+fn make_decoder(params: &CodecParameters) -> Result<Box<dyn Decoder>, String> {
+    symphonia::default::get_codecs()
+        .make(params, &DecoderOptions::default())
+        .map_err(|e| format!("decoder: {e}"))
+}
+
+fn decode_blocks_from(
+    path: &Path,
+    from_s: f64,
+    mut on_block: impl FnMut(u32, usize, u64, &[f32]) -> bool,
+) -> Result<(), String> {
+    let OpenedAudio { mut format, track_id, params, lead } = open_audio(path)?;
+    let mut decoder = make_decoder(&params)?;
+
+    let rate = params.sample_rate;
+    let time_base = params.time_base;
     let lead_s = rate.map_or(0.0, |r| lead as f64 / r as f64);
     let mut frame: u64 = 0;
     let decode_from_s = from_s - lead_s;
     if decode_from_s <= 0.0 {
-        if let (Some(rate), Some(channels), true) = (rate, track.codec_params.channels.map(|c| c.count()), lead > 0) {
+        if let (Some(rate), Some(channels), true) = (rate, params.channels.map(|c| c.count()), lead > 0) {
             if !on_block(rate, channels, 0, &vec![0.0; lead as usize * channels]) {
                 return Ok(());
             }
@@ -102,6 +121,185 @@ fn decode_blocks_from(
     Ok(())
 }
 
+/// Packets per segment of `decode_blocks_parallel`: enough audio (about 7 s of MP3) that a decoder per segment costs
+/// little, few enough that the first segment is ready early.
+const SEGMENT_PACKETS: usize = 256;
+/// Packets decoded before a segment and thrown away, so its decoder reaches the state a decode from the start has
+/// there: the MP3 bit reservoir reaches at most 511 bytes back, overlap-add and synthesis filters one frame.
+const PREROLL_PACKETS: usize = 16;
+const MAX_DECODE_THREADS: usize = 6;
+
+struct Block {
+    rate: u32,
+    channels: usize,
+    samples: Vec<f32>,
+}
+
+type SegmentResult = Result<Vec<Block>, String>;
+
+/// Decodes `packets` with a fresh decoder and returns the audio of all but the first `skip` of them, consecutive
+/// packets of one format joined into one block.
+fn decode_segment(params: &CodecParameters, packets: &[Packet], skip: usize) -> SegmentResult {
+    let mut decoder = make_decoder(params)?;
+    let mut blocks: Vec<Block> = Vec::new();
+    let mut buffer: Option<SampleBuffer<f32>> = None;
+    for (i, packet) in packets.iter().enumerate() {
+        let decoded = match decoder.decode(packet) {
+            Ok(decoded) => decoded,
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(_) if i < skip => continue,
+            Err(e) => return Err(format!("decode: {e}")),
+        };
+        if i < skip {
+            continue;
+        }
+        let spec = *decoded.spec();
+        let channels = spec.channels.count();
+        let needed = decoded.capacity() * channels;
+        if buffer.as_ref().is_none_or(|b| b.capacity() < needed) {
+            buffer = Some(SampleBuffer::new(decoded.capacity() as u64, spec));
+        }
+        let samples = buffer.as_mut().expect("buffer was just created");
+        samples.copy_interleaved_ref(decoded);
+        match blocks.last_mut() {
+            Some(block) if block.rate == spec.rate && block.channels == channels => {
+                block.samples.extend_from_slice(samples.samples())
+            }
+            _ => blocks.push(Block { rate: spec.rate, channels, samples: samples.samples().to_vec() }),
+        }
+    }
+    Ok(blocks)
+}
+
+/// How many segments the reader may be ahead of the one handed to `on_block`, so memory stays bounded when
+/// `on_block` is slower than the decode.
+struct Lookahead {
+    consumed: Mutex<usize>,
+    advanced: Condvar,
+    limit: usize,
+}
+
+impl Lookahead {
+    fn wait_for_room(&self, index: usize) {
+        let mut consumed = self.consumed.lock().unwrap_or_else(|e| e.into_inner());
+        while index >= consumed.saturating_add(self.limit) {
+            consumed = self.advanced.wait(consumed).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    fn advance(&self) {
+        *self.consumed.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+        self.advanced.notify_all();
+    }
+
+    fn release(&self) {
+        *self.consumed.lock().unwrap_or_else(|e| e.into_inner()) = usize::MAX;
+        self.advanced.notify_all();
+    }
+}
+
+type Job = (Vec<Packet>, usize, SyncSender<SegmentResult>);
+
+/// The audio `decode_blocks` hands over, bit for bit and in order (cut into blocks differently), decoded on `threads`
+/// threads: a reader thread splits the packets into segments of `SEGMENT_PACKETS`, each segment is decoded by a fresh
+/// decoder that first decodes the `PREROLL_PACKETS` before it, and `on_block` gets the segments in order on the
+/// calling thread while later ones are still decoding.
+pub(crate) fn decode_blocks_parallel(
+    path: &Path,
+    threads: usize,
+    mut on_block: impl FnMut(u32, usize, &[f32]),
+) -> Result<(), String> {
+    let OpenedAudio { mut format, track_id, params, lead } = open_audio(path)?;
+    if let (Some(rate), Some(channels), true) = (params.sample_rate, params.channels.map(|c| c.count()), lead > 0) {
+        on_block(rate, channels, &vec![0.0; lead as usize * channels]);
+    }
+    let threads = threads.max(1);
+    let lookahead = Lookahead { consumed: Mutex::new(0), advanced: Condvar::new(), limit: 2 * threads + 2 };
+    let (job_tx, job_rx) = mpsc::sync_channel::<Job>(threads);
+    let job_rx = Mutex::new(job_rx);
+    let (order_tx, order_rx) = mpsc::sync_channel::<Receiver<SegmentResult>>(lookahead.limit);
+    let mut read_error: Option<String> = None;
+
+    let outcome = std::thread::scope(|scope| {
+        let (params, lookahead, job_rx, read_error) = (&params, &lookahead, &job_rx, &mut read_error);
+        scope.spawn(move || {
+            let mut index = 0usize;
+            let mut tail: Vec<Packet> = Vec::new();
+            let mut send = |segment: Vec<Packet>, tail: &mut Vec<Packet>| -> bool {
+                lookahead.wait_for_room(index);
+                let next_tail = segment[segment.len().saturating_sub(PREROLL_PACKETS)..].to_vec();
+                let mut packets = std::mem::replace(tail, next_tail);
+                let skip = packets.len();
+                packets.extend(segment);
+                let (result_tx, result_rx) = mpsc::sync_channel(1);
+                index += 1;
+                order_tx.send(result_rx).is_ok() && job_tx.send((packets, skip, result_tx)).is_ok()
+            };
+            let mut segment: Vec<Packet> = Vec::with_capacity(SEGMENT_PACKETS);
+            loop {
+                match format.next_packet() {
+                    Ok(packet) if packet.track_id() == track_id => {
+                        segment.push(packet);
+                        if segment.len() == SEGMENT_PACKETS
+                            && !send(std::mem::replace(&mut segment, Vec::with_capacity(SEGMENT_PACKETS)), &mut tail)
+                        {
+                            return;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                    Err(SymphoniaError::ResetRequired) => break,
+                    Err(e) => {
+                        *read_error = Some(format!("read packet: {e}"));
+                        break;
+                    }
+                }
+            }
+            if !segment.is_empty() {
+                send(segment, &mut tail);
+            }
+        });
+        for _ in 0..threads {
+            scope.spawn(move || {
+                loop {
+                    let job = job_rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
+                    let Ok((packets, skip, result_tx)) = job else { return };
+                    let _ = result_tx.send(decode_segment(params, &packets, skip));
+                }
+            });
+        }
+
+        let mut outcome = Ok(());
+        for result_rx in order_rx {
+            match result_rx.recv() {
+                Ok(Ok(blocks)) => {
+                    for block in &blocks {
+                        on_block(block.rate, block.channels, &block.samples);
+                    }
+                    lookahead.advance();
+                }
+                Ok(Err(e)) => {
+                    outcome = Err(e);
+                    break;
+                }
+                Err(_) => {
+                    outcome = Err("a decode thread stopped".to_string());
+                    break;
+                }
+            }
+        }
+        lookahead.release();
+        outcome
+    });
+    outcome?;
+    read_error.map_or(Ok(()), Err)
+}
+
+/// Threads for one `decode_blocks_parallel`: the cores but one (the caller measures what they decode), at most six.
+pub(crate) fn decode_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get().saturating_sub(1)).clamp(1, MAX_DECODE_THREADS)
+}
+
 /// Decodes `path` and measures the 3-band waveforms with the shared `waveform` module,
 /// the same pass whose bytes the USB export writes.
 pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
@@ -113,13 +311,27 @@ pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
     Ok(analyze(&meter.finish()))
 }
 
-/// Decodes `path` and measures the app-only high-resolution series for the zoomed waveform.
+/// Decodes `path` (on several threads) and measures the app-only high-resolution series for the zoomed waveform.
 pub fn measure_detail(path: &Path) -> Result<DetailSeries, String> {
     let mut meter: Option<DetailMeter> = None;
-    decode_blocks(path, |rate, channels, samples| {
+    decode_blocks_parallel(path, decode_threads(), |rate, channels, samples| {
         meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(samples);
     })?;
     meter.map(DetailMeter::finish).ok_or_else(|| "no audio decoded".to_string())
+}
+
+/// The 3-band waveforms and the detail series from one decode, for a caller that decodes the track anyway (the
+/// analysis measures the waveforms; with this it can fill the detail cache with `waveform_detail::store_detail`).
+pub fn measure_waveforms_and_detail(path: &Path) -> Result<(Waveforms, DetailSeries), String> {
+    let mut meters: Option<(Meter, DetailMeter)> = None;
+    decode_blocks_parallel(path, decode_threads(), |rate, channels, samples| {
+        let (meter, detail) =
+            meters.get_or_insert_with(|| (Meter::new(rate, channels), DetailMeter::new(rate, channels)));
+        meter.push(samples);
+        detail.push(samples);
+    })?;
+    let (meter, detail) = meters.ok_or("no audio decoded")?;
+    Ok((analyze(&meter.finish()), detail.finish()))
 }
 
 /// Audio before a window that warms the band filters and envelopes up, and covers a decoder that restarts after a seek.
@@ -257,6 +469,43 @@ mod tests {
         let result = measure_detail_window(&path, [1, 1, 1], 0.5, 0.6, 100, &|| false).unwrap();
         std::fs::remove_file(&path).ok();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn the_parallel_decode_hands_over_the_same_audio_and_detail_as_one_thread() {
+        let path = std::env::temp_dir().join(format!("ff-parallel-decode-{}.wav", std::process::id()));
+        write_wav(&path, 44_100, 40.0, 97.0);
+        let mut serial = Vec::new();
+        let mut meter: Option<DetailMeter> = None;
+        decode_blocks(&path, |rate, channels, samples| {
+            serial.extend_from_slice(samples);
+            meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(samples);
+        })
+        .unwrap();
+        let mut blocks = 0;
+        let mut parallel = Vec::new();
+        decode_blocks_parallel(&path, 3, |_, _, samples| {
+            blocks += 1;
+            parallel.extend_from_slice(samples);
+        })
+        .unwrap();
+        let detail = measure_detail(&path).unwrap();
+        let (waves, both_detail) = measure_waveforms_and_detail(&path).unwrap();
+        let waves_alone = measure_waveforms(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert!(blocks > 2, "40 s of audio is several segments, got {blocks}");
+        assert_eq!(parallel.len(), serial.len());
+        assert!(parallel.iter().zip(&serial).all(|(a, b)| a.to_bits() == b.to_bits()));
+        assert_eq!(detail, meter.unwrap().finish());
+        assert_eq!(both_detail, detail);
+        assert_eq!(waves.pwv7, waves_alone.pwv7);
+        assert_eq!(waves.pwv6, waves_alone.pwv6);
+    }
+
+    #[test]
+    fn a_parallel_decode_of_a_missing_file_is_an_error() {
+        assert!(decode_blocks_parallel(Path::new("/nonexistent/track.mp3"), 2, |_, _, _| {}).is_err());
     }
 
     #[test]

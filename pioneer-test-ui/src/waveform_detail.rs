@@ -76,12 +76,26 @@ pub fn detail_bytes(dir: &Path, audio: &Path) -> Result<Vec<u8>, String> {
         return Ok(bytes);
     }
     let bytes = measure_detail(audio)?.to_bytes();
+    write_cache_file(dir, &file, &bytes)?;
+    Ok(bytes)
+}
+
+fn write_cache_file(dir: &Path, file: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let partial = file.with_extension("part");
-    fs::write(&partial, &bytes).map_err(|e| format!("write {}: {e}", partial.display()))?;
-    fs::rename(&partial, &file).map_err(|e| format!("rename {}: {e}", partial.display()))?;
+    fs::write(&partial, bytes).map_err(|e| format!("write {}: {e}", partial.display()))?;
+    fs::rename(&partial, file).map_err(|e| format!("rename {}: {e}", partial.display()))?;
     trim_cache(dir, CACHE_LIMIT_BYTES);
-    Ok(bytes)
+    Ok(())
+}
+
+/// Puts a series measured elsewhere into the cache as the one of `audio`, for a caller that decodes the track anyway
+/// (`band_analysis::measure_waveforms_and_detail`), so its zoomed waveform opens without a decode of its own.
+pub fn store_detail(dir: &Path, audio: &Path, series: &DetailSeries) -> Result<(), String> {
+    let file = cache_file(dir, audio)?;
+    let lock = path_lock(&file);
+    let _writing = lock.lock().unwrap_or_else(|e| e.into_inner());
+    write_cache_file(dir, &file, &series.to_bytes())
 }
 
 pub fn detail_series(dir: &Path, audio: &Path) -> Result<DetailSeries, String> {
@@ -204,6 +218,24 @@ mod tests {
         assert!(results.iter().all(Result::is_ok));
         assert_eq!(files, 1);
         assert_eq!(DetailSeries::from_bytes(&bytes).unwrap().len(), 2400);
+    }
+
+    #[test]
+    fn a_stored_series_is_what_the_cache_hands_out_without_measuring() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-store-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("tone.wav");
+        write_wav(&audio);
+        let cache = dir.join("cache");
+        let (_, measured) = crate::band_analysis::measure_waveforms_and_detail(&audio).unwrap();
+        let marked = DetailSeries { gains: [1, 2, 3], ..measured.clone() };
+
+        store_detail(&cache, &audio, &marked).unwrap();
+        let read = detail_series(&cache, &audio).unwrap();
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(measured.len(), 2400);
+        assert_eq!(read, marked);
     }
 
     #[test]
