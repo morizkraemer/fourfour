@@ -1279,3 +1279,52 @@ fn audio_arriving_after_a_slow_decode_fades_in_without_a_click() {
     let step = max_step(&heard, 2);
     assert!(step < 0.02, "click at the seek: largest sample step {step}");
 }
+
+fn lag_frames(reference: &[f32], other: &[f32], max_lag: i64) -> i64 {
+    let from = (reference.len() as i64 / 3).max(max_lag);
+    let to = (from + 44_100 * 4).min(reference.len().min(other.len()) as i64 - max_lag);
+    let score = |lag: i64| -> f64 {
+        (from..to)
+            .map(|i| reference[i as usize] as f64 * other[(i + lag) as usize] as f64)
+            .sum()
+    };
+    (-max_lag..=max_lag)
+        .max_by(|&a, &b| score(a).total_cmp(&score(b)))
+        .unwrap()
+}
+
+fn mono(interleaved: &[f32], channels: usize) -> Vec<f32> {
+    interleaved
+        .chunks_exact(channels.max(1))
+        .map(|f| f.iter().sum::<f32>() / f.len() as f32)
+        .collect()
+}
+
+/// `FOURFOUR_TIMEBASE_LIST=files.txt cargo test --release playback_and_analysis_share_the_time_base -- --nocapture`
+/// (one audio path per line):
+/// the player, the zoomed-waveform decode and the analyzer must put every sample at the same time, or a grid
+/// measured by one is drawn off the audio of another.
+#[test]
+fn playback_and_analysis_share_the_time_base() {
+    let Ok(list) = std::env::var("FOURFOUR_TIMEBASE_LIST") else {
+        return;
+    };
+    let files = std::fs::read_to_string(list).unwrap();
+    for file in files.lines().filter(|l| !l.trim().is_empty()) {
+        let path = Path::new(file);
+        let analysis = fourfour_analysis::decode::decode_mono(path).unwrap();
+        let played = mono(&decode_to_vec(path, 0, analysis.rate, 2), 2);
+        let mut detail = Vec::new();
+        crate::band_analysis::decode_blocks(path, |_, channels, samples| {
+            detail.extend(mono(samples, channels))
+        })
+        .unwrap();
+        let seek_frames = 30 * analysis.rate as u64;
+        let seeked = mono(&decode_to_vec(path, seek_frames * 2, analysis.rate, 2), 2);
+        let player_lag = lag_frames(&analysis.samples, &played, 3000);
+        let detail_lag = lag_frames(&analysis.samples, &detail, 3000);
+        let seek_lag = lag_frames(&analysis.samples[seek_frames as usize..], &seeked, 3000);
+        println!("{file}: player {player_lag}, detail {detail_lag}, after seek {seek_lag} frames");
+        assert_eq!((player_lag, detail_lag, seek_lag), (0, 0, 0), "{file}");
+    }
+}
