@@ -623,7 +623,7 @@ let analysisApplyTimer: ReturnType<typeof setTimeout> | undefined;
 let analysisApplying = false;
 let lastAnalysisApplyAt = -Infinity;
 
-async function fetchAnalysisForDisplay(id: number, attempt = 0): Promise<unknown> {
+async function fetchAnalysisForDisplay(id: number, attempt = 0): Promise<any> {
   try {
     return await getAnalysisData(id, attempt > 0);
   } catch (err) {
