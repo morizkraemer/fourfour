@@ -19,6 +19,7 @@
     bandsDetail = null,
     bandsOverview = null,
     bandsZoom = null,
+    detailPending = false,
     windowSource = null,
     beats = [],
     cues = [],
@@ -57,7 +58,6 @@
     };
   }
 
-  // Public zoom controls for the expanded toolbar.
   export function zoomIn() { display?.zoomIn(); }
   export function zoomOut() { display?.zoomOut(); }
   export function resetZoom() { display?.resetZoom(); }
@@ -77,7 +77,6 @@
     };
   });
 
-  // Keep the seek callback live without recreating the engine.
   $effect(() => {
     if (display) display.onSeek = onSeek;
   });
@@ -90,40 +89,35 @@
     display?.setCueSnap(cueSnap);
   });
 
-  // Push data only when the track or its waveform changes — NOT on every tick.
   $effect(() => {
     const detailLen = (mode === 'expanded' ? (bandsDetail ?? bands) : bands)?.low.length ?? 0;
     const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${durationMs}`;
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
-    // Pass playhead with data so zoom offset centres atomically on load (progress
-    // often stays 0 across track changes, so a separate effect would not re-run).
     display.setData(buildData(), progress);
   });
 
-  // The high-resolution series arrives after the track: no data reset, so zoom and scroll stay.
   $effect(() => {
     if (mode === 'expanded') display?.setDetailBands(bandsZoom ?? undefined);
   });
 
-  // Fine windows for the deepest zoom levels (see WaveformDisplay.setWindowSource).
+  $effect(() => {
+    if (mode === 'expanded') display?.setDetailPending(detailPending);
+  });
+
   $effect(() => {
     if (mode === 'expanded') display?.setWindowSource(windowSource);
   });
 
-  // A cue edit redraws the markers only: no data reset, so zoom and scroll stay.
   $effect(() => {
     display?.setCues(markerData());
   });
 
-  // A beat-grid edit moves the grid only: no data reset, so zoom and scroll stay.
   $effect(() => {
     display?.setBeats(beats ?? []);
   });
 
-  // Atomic transport update — avoids play/pause ordering jitter between separate
-  // playing and progress effects (the transport only reports position at ~20Hz).
   $effect(() => {
     display?.setTransport(playing, progress);
   });
@@ -155,7 +149,6 @@
     pointer-events: none;
   }
 
-  /* WaveformDisplay builds its own DOM (unscoped) — style globally. */
   :global(.ff-waveform-view .waveform-display) {
     display: flex;
     flex-direction: column;

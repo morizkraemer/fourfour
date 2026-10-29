@@ -67,6 +67,7 @@ export default class WaveformDisplay {
         this._cueSnap = null;
         this._selectedCue = null;
         this._cueDrag = null;
+        this._detailPending = false;
 
         // Create wrapper div
         this._wrapper = document.createElement('div');
@@ -241,6 +242,16 @@ export default class WaveformDisplay {
         this._windowSource = source || null;
         this._dropWindow();
         this._render();
+    }
+
+    /**
+     * While the high-resolution series is on its way, zoom levels that would draw it show the bare ground instead of
+     * the 150 columns per second, so the zoom view never switches looks under the user.
+     */
+    setDetailPending(pending) {
+        if (this._detailPending === !!pending) return;
+        this._detailPending = !!pending;
+        if (this._data) this._paint();
     }
 
     _dropWindow() {
@@ -726,10 +737,18 @@ export default class WaveformDisplay {
     // The high-resolution series once the detail columns would be drawn wider than half a pixel.
     _zoomDetailBands(widthPx, startFrac, endFrac) {
         const fine = this._data.bandsZoom;
+        return fine && this._wantsDetail(widthPx, startFrac, endFrac) ? fine : null;
+    }
+
+    _wantsDetail(widthPx, startFrac, endFrac) {
         const coarse = this._data.bands;
-        if (!fine || !coarse?.low.length) return null;
-        const coarsePerPixel = ((endFrac - startFrac) * coarse.low.length) / widthPx;
-        return coarsePerPixel < DETAIL_BELOW_COLUMNS_PER_PIXEL ? fine : null;
+        if (!coarse?.low.length) return false;
+        return ((endFrac - startFrac) * coarse.low.length) / widthPx < DETAIL_BELOW_COLUMNS_PER_PIXEL;
+    }
+
+    /** Which series the zoom view drew last (`data-bands` on its canvas): window, detail, columns, pending or none. */
+    _markBandSource(source) {
+        if (this._zoomCanvas.dataset.bands !== source) this._zoomCanvas.dataset.bands = source;
     }
 
     // A fetched window once the high-resolution series is wider than a pixel (asked for from WINDOW_PREFETCH_ZOOM times
@@ -855,6 +874,7 @@ export default class WaveformDisplay {
         const widthPx = Math.round(w * devicePixelRatio);
         const win = compact ? null : this._zoomWindow(widthPx, startFrac, endFrac);
         if (win) {
+            this._markBandSource('window');
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = palette.bg;
@@ -864,7 +884,9 @@ export default class WaveformDisplay {
             return;
         }
         const fine = compact ? null : this._zoomDetailBands(widthPx, startFrac, endFrac);
-        const bands = fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
+        const awaitingFine = !compact && !fine && this._detailPending && this._wantsDetail(widthPx, startFrac, endFrac);
+        const bands = awaitingFine ? null : fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
+        this._markBandSource(awaitingFine ? 'pending' : fine ? 'detail' : bands?.low.length ? 'columns' : 'none');
         if (!bands || bands.low.length === 0) {
             ctx.fillStyle = palette.bg;
             ctx.fillRect(0, 0, w, h);

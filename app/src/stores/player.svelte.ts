@@ -97,6 +97,7 @@ export const player = $state({
     loadedTrack = value;
   },
   loading: false,
+  zoomDetailLoadingId: null as number | null,
   error: null as string | null,
   expanded: false,
   trackBpmMode: false,
@@ -199,6 +200,7 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   const durationMs = analysis.duration_ms ?? base.durationMs;
   const next: PlayerTrack = {
     ...base,
+    bandsZoom: zoomDetailCache.get(base.id) ?? base.bandsZoom,
     durationMs,
     totalSeconds: Math.max(0, Math.round(durationMs / 1000)),
   };
@@ -345,19 +347,30 @@ const zoomDetailLoading = new Set<number>();
 
 /** Fetch the high-resolution series of the loaded track (once, in the background) and hand it to the zoom view. */
 export async function loadZoomDetail(trackId: number) {
-  if (zoomDetailCache.has(trackId) || zoomDetailLoading.has(trackId)) return;
+  const cached = zoomDetailCache.get(trackId);
+  if (cached) {
+    giveLoadedTrackZoomDetail(trackId, cached);
+    return;
+  }
+  if (zoomDetailLoading.has(trackId)) return;
   zoomDetailLoading.add(trackId);
+  player.zoomDetailLoadingId = trackId;
   try {
     const buffer = await getWaveformDetail(trackId);
     const bands = buffer ? bandsFromDetailBytes(buffer) : null;
     if (!bands) return;
     zoomDetailCache.set(trackId, bands);
     if (zoomDetailCache.size > ZOOM_DETAIL_CACHE_TRACKS) zoomDetailCache.delete(zoomDetailCache.keys().next().value!);
-    const loaded = player.track;
-    if (loaded?.id === trackId) player.track = { ...loaded, bandsZoom: bands };
+    giveLoadedTrackZoomDetail(trackId, bands);
   } finally {
     zoomDetailLoading.delete(trackId);
+    if (player.zoomDetailLoadingId === trackId) player.zoomDetailLoadingId = null;
   }
+}
+
+function giveLoadedTrackZoomDetail(trackId: number, bands: DetailBandColumns) {
+  const loaded = player.track;
+  if (loaded?.id === trackId && loaded.bandsZoom !== bands) player.track = { ...loaded, bandsZoom: bands };
 }
 
 function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {

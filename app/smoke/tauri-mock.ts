@@ -19,6 +19,8 @@ export interface SmokeWindow {
   __smokeAnalyzeAfterImport: boolean;
   __smokeReleaseImport: (() => void) | null;
   __smokeEmit: (event: string, payload: unknown) => void;
+  __smokeDetail: 'none' | 'serve' | 'hold';
+  __smokeReleaseDetail: (() => void) | null;
 }
 
 export interface SmokeImport {
@@ -44,6 +46,8 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeHoldImport = false;
   w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;
+  w.__smokeDetail = 'none';
+  w.__smokeReleaseDetail = null;
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
 
@@ -95,6 +99,30 @@ export function installTauriMock(initial: LoadedState) {
     const grid = edits.grids.get(trackId);
     const cues = edits.cues.get(trackId);
     return { ...data, ...(grid ?? {}), ...(cues ? { cue_points: cues } : {}) };
+  }
+
+  async function detailFor(trackId: number) {
+    const { duration_ms } = (await w.__smokeAnalysis(trackId)) as { duration_ms: number };
+    const columns = Math.ceil((duration_ms / 1000) * 2400);
+    const buffer = new ArrayBuffer(28 + 5 * columns);
+    const view = new DataView(buffer);
+    'FFWD'.split('').forEach((c, i) => view.setUint8(i, c.charCodeAt(0)));
+    view.setUint8(4, 3);
+    view.setUint32(8, 2400, true);
+    view.setUint32(12, columns, true);
+    view.setUint16(16, 300, true);
+    view.setFloat32(24, 379.5, true);
+    const bands = new Uint8Array(buffer, 28, 3 * columns);
+    const signal = new Int8Array(buffer, 28 + 3 * columns, 2 * columns);
+    for (let i = 0; i < columns; i++) {
+      const beat = Math.abs(Math.sin((i / 2400) * Math.PI * 2.1));
+      bands[i] = Math.round(30 + 80 * beat);
+      bands[columns + i] = Math.round(20 + 40 * Math.abs(Math.sin(i / 700)));
+      bands[2 * columns + i] = Math.round(10 + 30 * Math.abs(Math.sin(i / 230)));
+      signal[i] = -Math.round(20 + 70 * beat);
+      signal[columns + i] = Math.round(20 + 70 * beat);
+    }
+    return buffer;
   }
 
   function health() {
@@ -228,6 +256,9 @@ export function installTauriMock(initial: LoadedState) {
       case 'playback_set_key_lock':
         return null;
       case 'get_waveform_detail':
+        if (w.__smokeDetail === 'none') throw new Error('smoke: no audio');
+        if (w.__smokeDetail === 'hold') await new Promise<void>((done) => (w.__smokeReleaseDetail = done));
+        return detailFor(args.trackId);
       case 'get_waveform_window':
         throw new Error('smoke: no audio');
       case 'get_track_artwork':

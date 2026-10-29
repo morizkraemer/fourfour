@@ -145,6 +145,7 @@
       bandsDetail={player.track?.bandsDetail ?? null}
       bandsOverview={player.track?.bandsOverview ?? null}
       bandsZoom={player.track?.bandsZoom ?? null}
+      detailPending={player.track != null && player.zoomDetailLoadingId === player.track.id}
       {windowSource}
       cues={markers}
       beats={player.track?.beats ?? []}
