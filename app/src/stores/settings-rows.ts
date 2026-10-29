@@ -14,6 +14,7 @@ import type { PaletteSettingSource } from '../shortcuts/palette-model.ts';
 
 export const SETTINGS_PAGES = [
   { key: 'library', label: 'Library', keywords: ['rekordbox', 'import', 'folder', 'path', 'database'] },
+  { key: 'backup', label: 'Backup', keywords: ['export', 'restore', 'save', 'archive'] },
   { key: 'analysis', label: 'Analysis', keywords: ['bpm', 'key', 'engine', 'auto', 'detect'] },
   { key: 'audio', label: 'Audio', keywords: ['output', 'device', 'sample', 'buffer', 'latency', 'sound'] },
   { key: 'keyboard', label: 'Keyboard', keywords: ['shortcuts', 'keys', 'bindings', 'hotkeys'] },

@@ -8,6 +8,7 @@
 //! files on disk alongside the database. The SQLite `analyses` table keeps only
 //! a lightweight index (bpm + key) for fast queries.
 
+pub mod backup;
 mod duplicates;
 mod edits;
 mod file_health;
@@ -963,7 +964,7 @@ mod tests {
         }
     }
 
-    fn make_analysis() -> AnalysisResult {
+    pub(crate) fn make_analysis() -> AnalysisResult {
         AnalysisResult {
             beat_grid: BeatGrid {
                 beats: vec![

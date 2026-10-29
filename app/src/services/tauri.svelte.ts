@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
+import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
@@ -233,6 +233,75 @@ export async function pickDirectory(): Promise<string | null> {
     lastTauriError = `pickDirectory fail: ${String(err)}`;
     throw err;
   }
+}
+
+export async function pickBackupFile(): Promise<string | null> {
+  const result = await dialogOpen({ multiple: false, filters: [{ name: 'Library backup', extensions: ['gz'] }] });
+  return typeof result === 'string' ? result : Array.isArray(result) ? (result[0] ?? null) : null;
+}
+
+export async function pickBackupDestination(defaultPath: string): Promise<string | null> {
+  return (await dialogSave({ defaultPath, filters: [{ name: 'Library backup', extensions: ['gz'] }] })) ?? null;
+}
+
+export interface BackupSizes {
+  library_bytes: number;
+  audio_bytes: number;
+  audio_files: number;
+}
+
+export interface LastBackup {
+  path: string;
+  at_ms: number;
+  bytes: number;
+  includes_audio: boolean;
+}
+
+export interface BackupStatus {
+  sizes: BackupSizes;
+  last: LastBackup | null;
+}
+
+export interface BackupPreview {
+  path: string;
+  created_at: string;
+  track_count: number;
+  playlist_count: number;
+  includes_audio: boolean;
+  audio_files: number;
+  current_tracks: number;
+}
+
+export interface RestoreOutcome {
+  ui_settings: string | null;
+  safety_path: string;
+  relinked: number;
+}
+
+export interface BackupProgress {
+  phase: 'export' | 'restore';
+  done: number;
+  total: number;
+}
+
+export function getBackupStatus(): Promise<BackupStatus> {
+  return invoke<BackupStatus>('get_backup_status');
+}
+
+export function exportBackup(path: string, includeAudio: boolean, uiSettings: string): Promise<LastBackup> {
+  return invoke<LastBackup>('export_backup', { path, includeAudio, uiSettings });
+}
+
+export function readBackup(path: string): Promise<BackupPreview> {
+  return invoke<BackupPreview>('read_backup', { path });
+}
+
+export function restoreBackup(path: string, audioFolder: string | null): Promise<RestoreOutcome> {
+  return invoke<RestoreOutcome>('restore_backup', { path, audioFolder });
+}
+
+export function listenToBackupProgress(callback: (progress: BackupProgress) => void) {
+  return subscribe('backup-progress', callback);
 }
 
 export async function changeLibraryPath(folderPath: string): Promise<string> {

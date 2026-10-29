@@ -4,6 +4,7 @@ mod analysis_backend;
 mod analysis_payload;
 mod analysis_python;
 mod analysis_run;
+mod backup_commands;
 mod band_analysis;
 mod dto;
 mod file_health;
@@ -1257,6 +1258,10 @@ fn main() {
             file_health::get_library_health,
             file_health::relocate_missing_in_folder,
             file_health::locate_track_file,
+            backup_commands::get_backup_status,
+            backup_commands::export_backup,
+            backup_commands::read_backup,
+            backup_commands::restore_backup,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
