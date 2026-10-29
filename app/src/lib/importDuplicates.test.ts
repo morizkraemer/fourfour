@@ -107,30 +107,33 @@ describe('import status copy', () => {
 describe('import activity summary', () => {
   it('leads with what was added and what was skipped', () => {
     expect(importSummary(outcome(12, 0, {}, [1, 2, 3])).headline).toBe('Added 12 · 3 duplicates skipped');
+    expect(importSummary(outcome(12, 0)).headline).toBe('Added 12 tracks');
+    expect(importSummary(outcome(1, 0)).headline).toBe('Added 1 track');
+    expect(importSummary(outcome(12, 40)).headline).toBe('Added 12 · 40 already in library');
   });
 
   it('says plainly when everything is already in the library', () => {
-    expect(importSummary(outcome(0, 12)).headline).toBe('All 12 files already in your library');
-    expect(importSummary(outcome(0, 1)).headline).toBe('File already in your library');
+    expect(importSummary(outcome(0, 12)).headline).toBe('Nothing new — all 12 files are already in your library');
+    expect(importSummary(outcome(0, 55, { unsupported: 0 })).chip).toBe('Nothing new');
+    expect(importSummary(outcome(0, 1)).headline).toBe('Nothing new — that file is already in your library');
+    expect(importSummary(outcome(0, 5, {}, [1, 2])).headline).toBe('Nothing new — 5 already in library · 2 duplicates skipped');
     expect(importSummary(outcome(0, 0)).headline).toBe('No audio files found');
   });
 
-  it('counts files that were not imported in the headline', () => {
-    expect(importSummary(outcome(2, 0, { unsupported: 3, unsupported_exts: ['.m4p'], unreadable: 1 })).headline).toBe(
-      'Added 2 · 4 files not imported',
-    );
+  it('keeps unsupported and unreadable files out of the headline', () => {
+    const summary = importSummary(outcome(0, 55, { unsupported: 1, unsupported_exts: ['.m4p'] }));
+    expect(summary.headline).toBe('Nothing new — all 55 files are already in your library');
+    expect(summary.lines).toEqual(['1 file skipped: unsupported format (.m4p)']);
+    expect(importSummary(outcome(0, 0, { unreadable: 2 })).headline).toBe('Nothing imported');
   });
 
-  it('lists every outcome on its own line with extensions', () => {
+  it('lists placement and skipped files on their own lines with extensions', () => {
     const summary = importSummary(
       outcome(5, 7, { unsupported: 3, unsupported_exts: ['.m4p', '.txt'], unreadable: 1 }, [9]),
       'Added 5 tracks to ‘Warmup’.',
     );
     expect(summary.lines).toEqual([
       'Added 5 tracks to ‘Warmup’.',
-      'Added 5 tracks',
-      '7 already in your library',
-      '1 duplicate skipped',
       '3 files skipped: unsupported format (.m4p, .txt)',
       '1 audio file couldn’t be read',
     ]);

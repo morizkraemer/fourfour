@@ -3,9 +3,21 @@
   import { duplicatesPrompt, answerDuplicates } from '../stores/import-duplicates.svelte.ts';
   import { duplicatesTitle, trackTime } from '../lib/importDuplicates.ts';
 
-  const FADE_AFTER_ROWS = 8;
-
   let rows = $derived(duplicatesPrompt.rows);
+  let scrollEl = $state(null);
+  let overflowing = $state(false);
+
+  function measure() {
+    overflowing = !!scrollEl && scrollEl.scrollHeight > scrollEl.clientHeight + 1;
+  }
+
+  $effect(() => {
+    rows;
+    scrollEl;
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  });
 </script>
 
 <Dialog
@@ -19,7 +31,7 @@
       <div class="ff-dupes__row ff-dupes__row--head">
         <span>New file</span><span>Your track</span><span>Artist</span><span class="ff-dupes__num">Time</span>
       </div>
-      <div class="ff-dupes__scroll" class:ff-dupes__scroll--more={rows.length > FADE_AFTER_ROWS}>
+      <div class="ff-dupes__scroll" class:ff-dupes__scroll--more={overflowing} bind:this={scrollEl}>
         {#each rows as row (row.new_path)}
           <div class="ff-dupes__row" data-duplicate-row title={row.new_path}>
             <span class="ff-dupes__file">{row.file_name}</span>
@@ -45,7 +57,7 @@
     overflow: hidden;
   }
   .ff-dupes__scroll {
-    max-height: 224px;
+    max-height: 60vh;
     overflow-y: auto;
     scrollbar-width: none;
   }

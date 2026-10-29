@@ -51,40 +51,42 @@ function sentence(parts: string[]): string {
 
 export interface ImportSummary {
   headline: string;
+  chip: string;
   lines: string[];
-}
-
-function headlineParts(outcome: ImportOutcome): string[] {
-  const added = outcome.added.length;
-  const duplicates = outcome.skipped_ids.length;
-  const { unsupported, unreadable } = outcome.plan.skipped;
-  const parts: string[] = [];
-  if (added > 0) parts.push(`Added ${added}`);
-  if (duplicates > 0) parts.push(`${count(duplicates, 'duplicate')} skipped`);
-  if (unsupported + unreadable > 0) parts.push(`${count(unsupported + unreadable, 'file')} not imported`);
-  return parts;
 }
 
 function capitalized(text: string): string {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
-export function importSummary(outcome: ImportOutcome, placement?: string): ImportSummary {
+function summaryHeadline(outcome: ImportOutcome): { headline: string; chip: string } {
   const added = outcome.added.length;
   const duplicates = outcome.skipped_ids.length;
   const known = outcome.plan.already_in_library;
-  const parts = headlineParts(outcome);
-  let headline = parts.join(' · ');
-  if (parts.length === 0) {
-    headline = known === 0 ? 'No audio files found' : known === 1 ? 'File already in your library' : `All ${known} files already in your library`;
+  const { unreadable } = outcome.plan.skipped;
+  const leftOut: string[] = [];
+  if (known > 0) leftOut.push(`${known} already in library`);
+  if (duplicates > 0) leftOut.push(`${count(duplicates, 'duplicate')} skipped`);
+  if (added > 0) {
+    const text = leftOut.length === 0 ? `Added ${count(added, 'track')}` : [`Added ${added}`, ...leftOut].join(' · ');
+    return { headline: text, chip: leftOut.length === 0 ? `Added ${added}` : text };
   }
+  if (leftOut.length === 0) {
+    const text = unreadable > 0 ? 'Nothing imported' : 'No audio files found';
+    return { headline: text, chip: text };
+  }
+  if (duplicates === 0) {
+    const all = known === 1 ? 'that file is already' : `all ${known} files are already`;
+    return { headline: `Nothing new — ${all} in your library`, chip: 'Nothing new' };
+  }
+  return { headline: `Nothing new — ${leftOut.join(' · ')}`, chip: 'Nothing new' };
+}
+
+export function importSummary(outcome: ImportOutcome, placement?: string): ImportSummary {
   const lines: string[] = [];
   if (placement) lines.push(placement);
-  if (added > 0) lines.push(`Added ${count(added, 'track')}`);
-  if (known > 0) lines.push(`${known} already in your library`);
-  if (duplicates > 0) lines.push(`${count(duplicates, 'duplicate')} skipped`);
   lines.push(...skippedFileParts(outcome.plan.skipped).map(capitalized));
-  return { headline, lines };
+  return { ...summaryHeadline(outcome), lines };
 }
 
 export type PlaylistDropResult =

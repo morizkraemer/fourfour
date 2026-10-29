@@ -16,6 +16,7 @@ export interface SmokeWindow {
   __smokeReleaseExport: (() => void) | null;
   __smokeImport: SmokeImport | null;
   __smokeHoldImport: boolean;
+  __smokeAnalyzeAfterImport: boolean;
   __smokeReleaseImport: (() => void) | null;
   __smokeEmit: (event: string, payload: unknown) => void;
 }
@@ -41,6 +42,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeReleaseExport = null;
   w.__smokeImport = null;
   w.__smokeHoldImport = false;
+  w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
@@ -238,6 +240,11 @@ export function installTauriMock(initial: LoadedState) {
         return '/smoke/library';
       case 'get_auto_analyze_new':
         return false;
+      case 'get_analyze_after_import':
+        return w.__smokeAnalyzeAfterImport;
+      case 'set_analyze_after_import':
+        w.__smokeAnalyzeAfterImport = args.enabled;
+        return null;
       case 'get_analysis_backend':
         return null;
       case 'resume_analysis':

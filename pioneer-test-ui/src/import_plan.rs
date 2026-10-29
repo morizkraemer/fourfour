@@ -34,6 +34,8 @@ pub struct SkippedFiles {
     pub unreadable: usize,
 }
 
+const SIDECAR_EXTENSIONS: &[&str] = &["asd", "reapeaks", "pkf", "sfk"];
+
 #[derive(Debug, Default)]
 pub struct FileSurvey {
     audio: HashSet<PathBuf>,
@@ -74,7 +76,7 @@ impl FileSurvey {
         let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
             self.audio.insert(path.to_path_buf());
-        } else {
+        } else if !SIDECAR_EXTENSIONS.contains(&ext.as_str()) {
             self.unsupported += 1;
             if !ext.is_empty() {
                 self.unsupported_exts.insert(format!(".{ext}"));
@@ -282,7 +284,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ff-survey-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
-        for name in ["a.mp3", "b.MP3", "notes.txt", "sub/c.m4p", "sub/d.txt", ".DS_Store", "README"] {
+        for name in ["a.mp3", "b.MP3", "notes.txt", "sub/c.m4p", "sub/d.txt", ".DS_Store", "README", "a.mp3.asd", "x.reapeaks", "y.pkf", "._a.mp3"] {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
         let survey = survey_files(&[dir.to_string_lossy().into_owned()]);

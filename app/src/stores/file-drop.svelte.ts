@@ -3,11 +3,12 @@ import {
   importDroppedTracks,
   importFiles,
   library,
+  selectVolume,
   playlistForSidebarSource,
 } from './library.svelte.ts';
 import { createPlaylistAndOpen } from './new-playlist.svelte.ts';
 import { dnd } from './dnd.svelte.ts';
-import { importDropTarget } from './ui.svelte.ts';
+import { importDropTarget, ui } from './ui.svelte.ts';
 import { uniqueName } from '../lib/playlistTree.ts';
 import { playlistImportMessage, type ImportOutcome } from '../lib/importDuplicates.ts';
 import { completeImportActivity } from './import-activity.svelte.ts';
@@ -65,6 +66,10 @@ async function createPlaylistsFromDrop(paths: string[], outcome: ImportOutcome, 
     taken.push(name);
     names.push(name);
     await createPlaylistAndOpen(group.ids, parentId, name);
+  }
+  if (names.length > 0) {
+    ui.activeSidebarRow = names[names.length - 1];
+    await selectVolume(null);
   }
   const tracks = new Set(groups.flatMap((g) => g.ids)).size;
   return playlistImportMessage(outcome, { kind: 'created', names, tracks });

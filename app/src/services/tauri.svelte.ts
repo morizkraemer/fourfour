@@ -662,6 +662,25 @@ export async function setAutoAnalyzeNew(enabled: boolean): Promise<void> {
   }
 }
 
+/** Whether an import starts analysis without asking (default off). */
+export async function getAnalyzeAfterImport(): Promise<boolean> {
+  try {
+    return await invoke<boolean>('get_analyze_after_import');
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    return readMockSetting('auto_analyze_after_import', false);
+  }
+}
+
+export async function setAnalyzeAfterImport(enabled: boolean): Promise<void> {
+  try {
+    await invoke('set_analyze_after_import', { enabled });
+  } catch (err) {
+    if (!useBrowserMocks()) throw err;
+    writeMockSetting('auto_analyze_after_import', enabled);
+  }
+}
+
 /** Stored analysis backend: 'rust', 'python', or null for automatic. */
 export async function getAnalysisBackend(): Promise<string | null> {
   try {

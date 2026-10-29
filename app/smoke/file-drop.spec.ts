@@ -144,12 +144,13 @@ test('re-importing files already in the library says so plainly', async ({ smoke
   const { page } = smoke;
   await nextImport(page, { tracks: [], already: 12 });
   await dropOn(page, table(page));
-  await expect(activity(page)).toHaveText('All 12 files already in your library');
+  await expect(activity(page)).toHaveText('Nothing new');
+  await expect(await openLastImport(page)).toContainText('Nothing new — all 12 files are already in your library');
 
   await nextImport(page, { tracks: [], already: 0, skipped: { unsupported: 3, unsupported_exts: ['.m4p', '.txt'] } });
   await dropOn(page, table(page));
-  await expect(activity(page)).toHaveText('3 files not imported');
-  await expect(await openLastImport(page)).toContainText('3 files skipped: unsupported format (.m4p, .txt)');
+  await expect(activity(page)).toHaveText('No audio files found');
+  await expect(lastImport(page)).toContainText('3 files skipped: unsupported format (.m4p, .txt)');
   await page.screenshot({ path: `${SHOTS}/status-unsupported.png` });
 });
 
@@ -158,7 +159,7 @@ test('a playlist drop of tracks already in the library adds them to the playlist
   await nextImport(page, { tracks: [], already: 20 });
   await dropOn(page, sidebarPlaylist(page, 'Warmup'), ['/Music/smoke']);
 
-  await expect(activity(page)).toHaveText('All 20 files already in your library');
+  await expect(activity(page)).toHaveText('Nothing new');
   await expect(await openLastImport(page)).toContainText('Added 19 tracks to ‘Warmup’ (already in library).');
   const warmup = (await savedPlaylists(smoke)).find((p) => p.name === 'Warmup')!;
   expect(warmup.track_ids).toHaveLength(20);
@@ -188,4 +189,47 @@ test('the duplicates question comes first and Skip duplicates adds the library t
   await page.keyboard.press('Escape');
   const peak = (await savedPlaylists(smoke)).find((p) => p.name === 'Peak Time')!;
   expect(peak.track_ids).toEqual([1, 2, 3, 101, 102, 7, 8]);
+});
+
+test('dropping a folder that is already imported says so and never offers analysis', async ({ smoke }) => {
+  const { page } = smoke;
+  const prompt = page.locator('.ff-dialog').filter({ hasText: 'Analyze imported tracks?' });
+  await nextImport(page, TWO_NEW);
+  await dropOn(page, table(page));
+  await expect(prompt).toContainText('2 tracks were added');
+  await prompt.getByRole('button', { name: 'Not now' }).click();
+  await expect(prompt).toHaveCount(0);
+
+  await nextImport(page, { tracks: [], already: 55 });
+  await dropOn(page, table(page));
+  await expect(activity(page)).toHaveText('Nothing new');
+  await expect(prompt).toHaveCount(0);
+  const last = await openLastImport(page);
+  await expect(last.locator('.ff-activity__headline')).toHaveText('Nothing new — all 55 files are already in your library');
+  await expect(last).not.toContainText('not imported');
+  await expect(last).not.toContainText('unsupported');
+  await page.screenshot({ path: `${SHOTS}/already-imported-summary.png`, clip: { x: 900, y: 0, width: 700, height: 260 } });
+});
+
+test('a drop on empty sidebar space opens the new playlist in the main view', async ({ smoke }) => {
+  const { page } = smoke;
+  await nextImport(page, TWO_NEW);
+  await dropOn(page, fill(page));
+  await expect(page.locator('.ff-gheader__title')).toHaveText('Fresh Finds');
+  await expect(table(page).locator('[data-track-row]')).toHaveCount(2);
+  await page.screenshot({ path: `${SHOTS}/new-playlist-opened.png` });
+});
+
+test('with several folders dropped the last new playlist opens', async ({ smoke }) => {
+  const { page } = smoke;
+  const inFolder = (folder: string, id: number, file: string) => ({ ...newTrack(id, file), source_path: `${folder}/${file}` });
+  await nextImport(page, {
+    tracks: [inFolder('/Downloads/Alpha', 201, 'A One.mp3'), inFolder('/Downloads/Alpha', 202, 'A Two.mp3'), inFolder('/Downloads/Beta', 203, 'B One.mp3')],
+    already: 0,
+  });
+  await dropOn(page, fill(page), ['/Downloads/Alpha', '/Downloads/Beta']);
+  await expect(page.locator('.ff-gheader__title')).toHaveText('Beta');
+  await expect(table(page).locator('[data-track-row]')).toHaveCount(1);
+  await expect(page.locator('.ff-sbrow__label', { hasText: /^Alpha$/ })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/new-playlists-last-opened.png` });
 });

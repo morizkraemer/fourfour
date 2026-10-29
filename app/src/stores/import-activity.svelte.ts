@@ -49,5 +49,5 @@ export function completeImportActivity(outcome: ImportOutcome, placement?: strin
 }
 
 export function failImportActivity(detail: string) {
-  showResult({ headline: 'Import failed', lines: detail ? [detail] : [] }, true);
+  showResult({ headline: 'Import failed', chip: 'Import failed', lines: detail ? [detail] : [] }, true);
 }

@@ -1,5 +1,6 @@
 <script>
-  import { SettingRow, Button } from '$ds';
+  import { SettingRow, Button, Switch } from '$ds';
+  import { appSettings, setAnalyzeAfterImport } from '../../stores/app-settings.svelte.ts';
   import { library, changeLocalLibraryPath } from '../../stores/library.svelte.ts';
   import { pickDirectory, getIsTauri } from '../../services/tauri.svelte.ts';
   import { openRekordboxImport } from '../../stores/rekordbox-import.svelte.ts';
@@ -58,6 +59,18 @@
   >
     {#snippet control()}
       <Button label="Import…" size="small" disabled={busy || !getIsTauri()} onclick={openRekordboxImport} />
+    {/snippet}
+  </SettingRow>
+  <SettingRow
+    title="Always analyze new tracks automatically"
+    description="Analysis starts right after an import, without asking. Off: you are asked each time."
+  >
+    {#snippet control()}
+      <Switch
+        label="Always analyze new tracks automatically"
+        on={appSettings.analyzeAfterImport}
+        onChange={(on) => void setAnalyzeAfterImport(on)}
+      />
     {/snippet}
   </SettingRow>
 </div>

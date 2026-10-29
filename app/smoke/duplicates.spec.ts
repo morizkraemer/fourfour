@@ -77,3 +77,30 @@ test('no dialog when nothing looks like a duplicate', async ({ smoke }) => {
   await expect.poll(() => smoke.invokes('commit_import')).toEqual([{ token: 1, skipDuplicates: true }]);
   await expect(page.locator('[data-duplicates-dialog]')).toHaveCount(0);
 });
+
+test('the list grows to 60% of the window before it scrolls, keeping the fade', async ({ smoke }) => {
+  const { page } = smoke;
+  const many = Array.from({ length: 40 }, (_, i) => ({ ...duplicates(1)[0], new_path: `/Downloads/copy-${i}.mp3`, file_name: `copy-${i}.mp3`, existing_id: i + 1 }));
+  await page.evaluate((rows) => ((window as unknown as { __smokeDuplicates: unknown[] }).__smokeDuplicates = rows), many);
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('>import folder');
+  await page.keyboard.press('Enter');
+  const scroll = page.locator('.ff-dupes__scroll');
+  await expect(scroll).toBeVisible();
+  const { client, scrollHeight, inner, mask } = await scroll.evaluate((el) => ({
+    client: el.clientHeight,
+    scrollHeight: el.scrollHeight,
+    inner: window.innerHeight,
+    mask: getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage,
+  }));
+  expect(client).toBeGreaterThan(inner * 0.55);
+  expect(client).toBeLessThanOrEqual(inner * 0.6 + 1);
+  expect(scrollHeight).toBeGreaterThan(client);
+  expect(mask).not.toBe('none');
+  await page.screenshot({ path: `${SHOTS}/duplicates-dialog-tall.png` });
+  await page.keyboard.press('Enter');
+
+  await importFolderWithDuplicates(page, 3);
+  const short = await page.locator('.ff-dupes__scroll').evaluate((el) => getComputedStyle(el).maskImage);
+  expect(short).toBe('none');
+});
