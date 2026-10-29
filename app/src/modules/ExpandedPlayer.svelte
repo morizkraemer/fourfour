@@ -158,6 +158,7 @@
         class="ff-xp__cue-btn"
         title="Cue (hold to preview)"
         aria-label="Cue"
+        disabled={!player.track}
         onpointerdown={stop(cuePreviewStart)}
         onpointerup={stop(cuePreviewStop)}
         onpointercancel={stop(cuePreviewStop)}
@@ -246,9 +247,9 @@
         </div>
       </div>
       <div class="ff-xp__box" role="group" aria-label="Zoom">
-        <button class="ff-xp__c" title="Zoom out" aria-label="Zoom out" onclick={() => wave?.zoomOut()}><Icon name="minus" size={11} /></button>
-        <button class="ff-xp__c ff-xp__c--wide" title="Default zoom" aria-label="Default zoom" onclick={() => wave?.resetZoom()}>Fit</button>
-        <button class="ff-xp__c" title="Zoom in" aria-label="Zoom in" onclick={() => wave?.zoomIn()}><Icon name="plus" size={11} /></button>
+        <button class="ff-xp__c" title="Zoom out" aria-label="Zoom out" disabled={!player.track} onclick={() => wave?.zoomOut()}><Icon name="minus" size={11} /></button>
+        <button class="ff-xp__c ff-xp__c--wide" title="Default zoom" aria-label="Default zoom" disabled={!player.track} onclick={() => wave?.resetZoom()}>Fit</button>
+        <button class="ff-xp__c" title="Zoom in" aria-label="Zoom in" disabled={!player.track} onclick={() => wave?.zoomIn()}><Icon name="plus" size={11} /></button>
       </div>
     </div>
   </footer>
@@ -354,7 +355,8 @@
     background: transparent; cursor: pointer;
     transition: background-color var(--ff-motion-fast, 120ms) ease;
   }
-  .ff-xp__cue-btn:hover { background-color: rgba(245, 158, 11, 0.08); }
+  .ff-xp__cue-btn:hover:not(:disabled) { background-color: rgba(245, 158, 11, 0.08); }
+  .ff-xp__cue-btn:disabled { opacity: 0.4; cursor: default; }
   .ff-xp__cue-txt {
     font-family: var(--ff-font-mono, monospace);
     font-size: 8px; font-weight: 500; color: #d4d4d4; line-height: 1;
@@ -367,7 +369,7 @@
     background: transparent; color: #d4d4d4; cursor: pointer;
     transition: background-color var(--ff-motion-fast, 120ms) ease;
   }
-  .ff-xp__play:hover { background-color: rgba(34, 197, 94, 0.08); }
+  .ff-xp__play:hover:not(:disabled) { background-color: rgba(34, 197, 94, 0.08); }
   .ff-xp__play:disabled { opacity: 0.4; cursor: default; }
 
   /* Hot cue pads A-H: filled with the cue colour once set. */

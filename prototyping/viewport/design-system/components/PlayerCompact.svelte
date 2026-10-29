@@ -39,6 +39,7 @@
     onKeyCommit = undefined,
     onExpand,
     controls = undefined,
+    disabled = false,
   } = $props();
 
   const stop = (fn) => (e) => {
@@ -59,6 +60,7 @@
   <div class="ff-player-compact__left-controls">
     <button
       class="ff-player-compact__cue-btn"
+      {disabled}
       onclick={stop(onCue)}
       onpointerdown={stop(onCueDown)}
       onpointerup={stop(onCueUp)}
@@ -70,6 +72,7 @@
       class="ff-player-compact__play-btn"
       title={playing ? 'Pause' : 'Play'}
       aria-label={playing ? 'Pause' : 'Play'}
+      {disabled}
       onclick={stop(onPlayToggle)}>
       {#if playing}
         <svg class="ff-player-compact__play-icon" viewBox="0 0 24 24" width="11" height="11" fill="currentColor">

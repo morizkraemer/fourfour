@@ -39,10 +39,10 @@
   class="ff-player-module"
   class:ff-player-module--drop={dnd.kind === 'tracks' && dnd.dropPlayer}
   data-drop-player
-  class:ff-player-module--expanded={player.expanded && player.track}
-  style:height={player.expanded && player.track ? `${expandedHeight}px` : undefined}
+  class:ff-player-module--expanded={player.expanded}
+  style:height={player.expanded ? `${expandedHeight}px` : undefined}
   bind:this={playerRoot}>
-  {#if player.expanded && player.track}
+  {#if player.expanded}
     <ResizeHandle
       edge="top"
       label="Resize player"
@@ -71,11 +71,12 @@
     durationMs={player.track?.durationMs ?? 0}
     trackKey={player.track?.id ?? null}
     analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
+    disabled={!player.track}
     onScrub={player.track ? seekToProgress : undefined}
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
     onCueUp={player.track ? cuePreviewStop : undefined}
-    onExpand={player.track ? toggleExpanded : undefined}>
+    onExpand={toggleExpanded}>
     {#snippet controls()}<PlayerTempo />{/snippet}
   </PlayerCompact>
   {/if}
