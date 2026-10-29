@@ -31,7 +31,7 @@ pub struct BeatEngine {
     beat: Arc<BeatModel>,
     chunks: Arc<ChunkExecutor>,
     chunk_threads: Mutex<Vec<JoinHandle<()>>>,
-    min_chunk_threads: AtomicUsize,
+    shared_chunk_threads: AtomicUsize,
 }
 
 struct BeatModel {
@@ -175,14 +175,15 @@ impl BeatEngine {
             mel: Arc::new(mel),
             chunks: Arc::new(ChunkExecutor::default()),
             chunk_threads: Mutex::new(Vec::new()),
-            min_chunk_threads: AtomicUsize::new(1),
+            shared_chunk_threads: AtomicUsize::new(0),
         })
     }
 
-    /// The number of beat-model threads all tracks share, at least; a track that asks for more threads adds them.
+    /// The number of beat-model threads all tracks share, and so the number of chunks (each with its own activations)
+    /// in memory at once; a track's own thread count no longer adds any. Without it every track brings its thread count.
     /// They start with the first track, so they inherit its priority (see `analysis_priority`).
     pub fn share_chunk_threads(&self, threads: usize) {
-        self.min_chunk_threads.store(threads.max(1), Ordering::Relaxed);
+        self.shared_chunk_threads.store(threads.max(1), Ordering::Relaxed);
     }
 
     fn ensure_chunk_threads(&self, wanted: usize) -> Result<()> {
@@ -218,7 +219,8 @@ impl BeatEngine {
     fn predict(&self, mel: Tensor, threads: usize, control: &Control) -> Result<ChunkLogits> {
         let full_time = mel.shape[1];
         let starts = generate_starts(full_time);
-        self.ensure_chunk_threads(threads.max(self.min_chunk_threads.load(Ordering::Relaxed)))?;
+        let shared = self.shared_chunk_threads.load(Ordering::Relaxed);
+        self.ensure_chunk_threads(if shared > 0 { shared } else { threads.max(1) })?;
         let track = Arc::new(TrackChunks {
             results: Mutex::new(starts.iter().map(|_| None).collect()),
             mel,

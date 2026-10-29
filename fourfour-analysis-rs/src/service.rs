@@ -45,24 +45,50 @@ pub fn locate_models(app_data_dir: Option<&Path>) -> Option<PathBuf> {
     locate_models_in(app_data_dir, None)
 }
 
+/// Overrides the machine's memory (MB) the analysis plans with, to simulate a smaller machine; available memory is
+/// then half of it at most, as on macOS.
+pub const MEMORY_ENV: &str = "FOURFOUR_ANALYSIS_MEMORY_MB";
+
+fn simulated_memory_mb() -> Option<f64> {
+    std::env::var(MEMORY_ENV).ok().and_then(|v| v.parse::<f64>().ok()).filter(|mb| *mb > 0.0)
+}
+
+fn meminfo_mb(field: &str) -> Option<f64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kb = text.lines().find(|l| l.starts_with(field))?.split_whitespace().nth(1)?.parse::<f64>().ok()?;
+    Some(kb / 1024.0)
+}
+
+fn sysctl_memory_mb() -> Option<f64> {
+    let out = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+    let bytes = String::from_utf8(out.stdout).ok()?.trim().parse::<f64>().ok()?;
+    Some(bytes / 1024.0 / 1024.0)
+}
+
+pub fn total_memory_mb() -> f64 {
+    simulated_memory_mb().or_else(|| meminfo_mb("MemTotal:")).or_else(sysctl_memory_mb).unwrap_or(8192.0)
+}
+
 pub fn available_memory_mb() -> f64 {
-    if let Ok(text) = std::fs::read_to_string("/proc/meminfo") {
-        if let Some(kb) = text
-            .lines()
-            .find(|l| l.starts_with("MemAvailable:"))
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|v| v.parse::<f64>().ok())
-        {
-            return kb / 1024.0;
-        }
+    if let Some(mb) = simulated_memory_mb() {
+        return (mb * 0.5).min(meminfo_mb("MemAvailable:").unwrap_or(f64::INFINITY));
     }
-    let total_bytes = std::process::Command::new("sysctl")
-        .args(["-n", "hw.memsize"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse::<f64>().ok());
-    total_bytes.map_or(4096.0, |b| b / 1024.0 / 1024.0 * 0.5)
+    meminfo_mb("MemAvailable:").or_else(|| sysctl_memory_mb().map(|mb| mb * 0.5)).unwrap_or(4096.0)
+}
+
+/// Share of the machine's memory the analysis plans to hold: 2 GB on an 8 GB Mac.
+const ANALYSIS_MEMORY_FRACTION: f64 = 0.25;
+/// Model weights and the decoded audio of the tracks in flight, before any beat-model chunk runs.
+const ANALYSIS_BASE_MB: f64 = 600.0;
+/// Activations of one beat-model chunk while it runs (rten builds a fresh buffer pool for every run).
+const CHUNK_ACTIVATION_MB: f64 = 400.0;
+
+/// Beat-model chunks that may run at once: what fits into a quarter of the machine's memory, and into `mem_fraction`
+/// of what is available now. At least one, at most `max_threads`.
+pub fn chunk_slots(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64) -> usize {
+    let budget = (total_mb * ANALYSIS_MEMORY_FRACTION).min(available_mb * mem_fraction);
+    let slots = ((budget - ANALYSIS_BASE_MB) / CHUNK_ACTIVATION_MB).floor().max(1.0) as usize;
+    slots.min(max_threads.max(1))
 }
 
 #[derive(Clone, Debug)]
@@ -116,7 +142,7 @@ pub struct Analyzer {
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
         let engine = BeatEngine::load(models_dir, BEAT_MODEL, false)?;
-        engine.share_chunk_threads(pool.max_threads);
+        engine.share_chunk_threads(chunk_slots(pool.max_threads, pool.mem_fraction, total_memory_mb(), available_memory_mb()));
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }
 
@@ -371,6 +397,15 @@ mod tests {
         assert_eq!(plan_pool(&opts, 3_700.0, 100), PoolPlan { workers: 2, threads_per_track: 4 });
         assert_eq!(plan_pool(&opts, 500.0, 100), PoolPlan { workers: 1, threads_per_track: 8 });
         assert_eq!(plan_pool(&opts, 64_000.0, 3), PoolPlan { workers: 3, threads_per_track: 2 });
+    }
+
+    #[test]
+    fn chunk_slots_fit_the_memory_budget_and_the_threads() {
+        assert_eq!(chunk_slots(7, 0.5, 8192.0, 4096.0), 3);
+        assert_eq!(chunk_slots(9, 0.5, 16384.0, 8192.0), 8);
+        assert_eq!(chunk_slots(15, 0.5, 65536.0, 32000.0), 15);
+        assert_eq!(chunk_slots(15, 0.5, 65536.0, 1500.0), 1);
+        assert_eq!(chunk_slots(1, 0.5, 65536.0, 32000.0), 1);
     }
 
     #[test]
