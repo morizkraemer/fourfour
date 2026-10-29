@@ -1064,6 +1064,9 @@ export async function wipeUsb(path: string): Promise<void> {
 const ANALYSIS_CACHE_LIMIT = 48;
 const analysisCache = new Map<number, any>();
 const analysisInflight = new Map<number, Promise<any>>();
+let analysisCacheEpoch = 0;
+const trackAnalysisEpochs = new Map<number, number>();
+const analysisEpochOf = (trackId: number) => analysisCacheEpoch + (trackAnalysisEpochs.get(trackId) ?? 0);
 
 function cacheAnalysis(trackId: number, data: any) {
   analysisCache.delete(trackId);
@@ -1085,11 +1088,14 @@ export function peekAnalysisData(trackId: number): any | undefined {
   return clean;
 }
 
+/** Drops cached and in-flight reads; a read already under way when this is called is not cached when it lands. */
 export function invalidateAnalysisCache(trackId?: number) {
   if (trackId == null) {
+    analysisCacheEpoch++;
     analysisCache.clear();
     analysisInflight.clear();
   } else {
+    trackAnalysisEpochs.set(trackId, (trackAnalysisEpochs.get(trackId) ?? 0) + 1);
     analysisCache.delete(trackId);
     analysisInflight.delete(trackId);
   }
@@ -1202,13 +1208,17 @@ export function getWaveformWindow(trackId: number, startMs: number, endMs: numbe
 }
 
 async function fetchAnalysisData(trackId: number): Promise<any> {
+  const epoch = analysisEpochOf(trackId);
+  const keep = (clean: any) => {
+    if (analysisEpochOf(trackId) === epoch) cacheAnalysis(trackId, clean);
+  };
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
     const clean = sanitizeAnalysisPayload(data);
     if (!clean) {
       throw new Error('Invalid analysis payload from backend');
     }
-    cacheAnalysis(trackId, clean);
+    keep(clean);
     return clean;
   } catch (err) {
     lastTauriError = `get_analysis_data fail: ${String(err)}`;
@@ -1227,7 +1237,7 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
         ...(edited ? { beats: edited.beats, grid_offset_ms: edited.offsetMs, grid_anchor_ms: edited.anchorMs } : {}),
         ...(editedCues ? { cue_points: editedCues } : {}),
       });
-      cacheAnalysis(trackId, clean);
+      keep(clean);
       return clean;
     }
     throw err;

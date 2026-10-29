@@ -411,3 +411,67 @@ export PW_DIR=/path/to/playwright-dir
 node perf/list-scroll-drag.mjs http://127.0.0.1:4412/ 30000 12 5   # tracks, mock artwork latency ms, runs
 node perf/drag-shots.mjs http://127.0.0.1:4412/ /tmp/after 1 && node perf/pixdiff.mjs /tmp/before /tmp/after 8
 ```
+
+# Bulk analysis (2026-10-29, fb-bulk): UI lag while a fresh library is analysed
+
+Report: "the UI lags a lot when analyzing a lot of stuff". Branch `fb-bulk` (from `ov-1028`).
+
+## What the backend sends
+
+`bench_analysis` (59 mp3s, Rust backend, dev box at load ~25): staged run with 15 workers. The fast pass (waveform + key, 1 thread per track) finished all 59 tracks in 27 s, about 2.2 tracks/s, and sends two `analysis-partial` events per track (waveform stored, then waveform + key): about 4–5 events/s here, more on an idle Mac. The grid pass runs at about 4 tracks/min and sends one `analysis-progress` per track. A 10k import spends over an hour in the fast pass, so the event storm is the fast pass.
+
+## Causes (measured)
+
+- Every event fetched the track's analysis with a forced read and swapped the whole track array (`bumpLibraryTracks`). At 10k each event was one long task of 90–140 ms. With a list filter active (the palette leaves its text as the filter) each swap also rebuilt the search text of all 10k tracks (~450 ms of `trackHaystack` per profile).
+- The player and the library each read the analysis of the loaded track per event.
+- `analyzingTrackIds` was a deep `$state` array of up to 10k ids: each visible row's `includes` read every element through the proxy, and every progress event filtered and re-proxied the array.
+- The rows' analysing placeholder redrew its canvas every animation frame (about 100 ms/s of script with no input at all).
+- Backend priority: every Rust lane (decode, waveform, key, both rten/ONNX pools, now lane, detail warm-up) already runs inside `run_below_ui`; rten pools are created per call inside those threads, and workers × threads per track ≤ cores − 1, so no oversubscription. The Python fallback did not: its analyzer process and the band pass after it ran at normal priority.
+
+## Fixes
+
+- Events invalidate the cache at once and queue the track; the library applies at most every 250 ms (at once when idle): one read per track, one array swap per batch, the analysing ids filtered once. The read is not forced, so the player's read of the same track is shared; reads invalidated while in flight are no longer cached.
+- A batch rebuilds only its tracks' search text.
+- `analyzingTrackIds` is raw state behind an accessor (replaced, never mutated).
+- The placeholder is drawn once and pulses with a CSS opacity animation (none with `prefers-reduced-motion`). `will-change: opacity` was tried and made headless software compositing much worse, so it is not set.
+- The Python analyzer starts at nice 10 (`lower_child`) and its band pass runs in `run_below_ui`.
+
+## Numbers
+
+`app/smoke/perf-bulk-analysis.spec.ts` (production build, smoke Tauri mock): a fresh import (no analysis), one track loaded in the player, "Analyze all unanalyzed" from the palette, then events replayed at 6/s (fast pass) and 0.2/s (grid pass) while the table scrolls 45 px per frame for 6 s, then typing in search and opening the palette during events. Two interleaved before/after runs per size, medians. The dev box was at load 20–46 on 16 cores during these runs: headless software rendering alone took ~900 ms/s of main thread while scrolling, so frame counts and long-task counts are dominated by the box; script time, reads per event and input latency are the readable signals.
+
+| 10k tracks | before | after |
+|---|---|---|
+| no input, rows analysing: script ms/s | 119 | 13 |
+| scroll during fast pass: script ms/s | 220 | 139 |
+| fast pass: analysis reads per 35 events | 38 | 22 |
+| typing during fast pass: palette open median / worst ms | 422 / 607 | 237 / 440 |
+| typing during fast pass: keystroke worst ms | 654 | 603 |
+| typing during fast pass: long-task ms in window | 6162 | 4370 |
+
+| 2k tracks | before | after |
+|---|---|---|
+| no input, rows analysing: script ms/s | 110 | 15 |
+| scroll during fast pass: script ms/s | 229 | 142 |
+| typing during fast pass: keystroke median / worst ms | 532 / 2176 | 314 / 813 |
+| typing during fast pass: palette open median / worst ms | 706 / 1511 | 290 / 691 |
+| typing during fast pass: long-task ms in window | 17355 | 8713 |
+
+An earlier pair at 10k with the palette text left as the list filter (load ~25): before, each of 37 fast-pass events was a long task (3275 ms in 6 s, 177 frames lost); after, 14 long tasks (1206 ms), 79 frames lost.
+
+Throughput: no Rust scheduling or thread change (only the Python fallback's priority), so Rust throughput is unchanged by construction. Before: 4.20 tracks/min (59 tracks, load ~25). The after run was stopped at 30 min because the box went to load 35–45; it says nothing either way.
+
+## Not done
+
+- A batch still swaps the whole array (~10 ms at 10k per batch in the profile, plus Svelte's re-derivation of the sorted/filtered list). Per-row versioning would remove that; not needed for the event rate measured here.
+- Analysis writes (three ANLZ files and the DB index) happen under the library mutex that `get_analysis_data` also takes, so a UI read can wait for one write. Not measured.
+- Check on the Mac: scrolling and typing while a few thousand tracks analyse; the pulsing placeholder look.
+
+## Reproduce
+
+```bash
+cd app && npm ci
+FF_SMOKE_PORT=5361 FF_PERF_BULK=1 FF_PERF_TRACKS=10000 npx playwright test perf-bulk-analysis
+# rates: FF_PERF_FAST_RATE / FF_PERF_GRID_RATE (events/s); profile a window: FF_PERF_PROFILE="scroll during fast pass"
+FOURFOUR_MODELS_DIR=~/.cache/fourfour-models ./target/release/bench_analysis --backend rust --list <paths.txt> --limit 60
+```
