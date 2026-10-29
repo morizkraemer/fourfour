@@ -135,8 +135,9 @@ async fn plan_import(
     let plans = plans.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let scanned = scan_paths(&paths)?;
+        let survey = import_plan::survey_files(&paths);
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        import_plan::plan_for_library(&plans, &lib, scanned)
+        import_plan::plan_for_library(&plans, &lib, scanned, &survey)
     })
     .await
     .map_err(|e| e.to_string())?
