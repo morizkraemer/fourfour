@@ -261,6 +261,8 @@ export function installTauriMock(initial: LoadedState) {
         return detailFor(args.trackId);
       case 'get_waveform_window':
         throw new Error('smoke: no audio');
+      case 'prefetch_waveform_detail':
+        return null;
       case 'get_track_artwork':
         return new ArrayBuffer(0);
       case 'get_mounted_volumes':

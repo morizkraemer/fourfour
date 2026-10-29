@@ -1191,6 +1191,11 @@ export async function getWaveformDetail(trackId: number): Promise<ArrayBuffer | 
   }
 }
 
+/** Measure a track's high-resolution series into the backend cache, below the UI's priority; rejects where there is no backend or audio. */
+export function prefetchWaveformDetail(trackId: number): Promise<void> {
+  return invoke<void>('prefetch_waveform_detail', { trackId });
+}
+
 /** `columns` columns of the zoom view from `startMs` to `endMs` (`FFWW` bytes), decoded from the audio now. Rejects when a newer request superseded it. */
 export function getWaveformWindow(trackId: number, startMs: number, endMs: number, columns: number): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>('get_waveform_window', { trackId, startS: startMs / 1000, endS: endMs / 1000, columns });
