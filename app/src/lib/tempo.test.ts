@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   bpmDiffers,
   camelotStep,
-  harmonicNeighbours,
   keyCells,
   keyWrittenLike,
   clampPercent,
@@ -270,12 +269,6 @@ describe('key popup helpers', () => {
     expect(minor).toHaveLength(12);
     expect(minor[7]).toEqual({ camelot: '8A', name: 'Am' });
     expect(keyCells(false)[7]).toEqual({ camelot: '8B', name: 'C' });
-  });
-
-  it('finds the harmonic neighbours, wrapping round the wheel', () => {
-    expect(harmonicNeighbours('8A').sort()).toEqual(['7A', '8B', '9A']);
-    expect(harmonicNeighbours('12B').sort()).toEqual(['11B', '12A', '1B']);
-    expect(harmonicNeighbours('nope')).toEqual([]);
   });
 
   it('writes a picked key the way the track writes its key', () => {

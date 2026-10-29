@@ -85,52 +85,60 @@ test('the BPM popup halves, doubles and taps', async ({ smoke }) => {
   await expect.poll(async () => (await smoke.invokes('rescale_beat_grid')).length).toBe(1);
 });
 
-test('the key popup opens on the tab of the current key and marks it and its neighbours', async ({ smoke }) => {
+test('the key popup is two columns with the current key highlighted and no tabs', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
   await keyPen(page).click();
   const popup = keyPopup(page);
   await expect(popup).toBeVisible();
-  await expect(popup.getByRole('button', { name: 'Minor' })).toHaveClass(/--on/);
-  await expect(popup.locator('[data-key]')).toHaveCount(12);
-  await expect(popup.locator('.ff-keypop__key--on')).toHaveText('5A· Cm');
-  await expect(popup.locator('.ff-keypop__key--fit')).toHaveText(['4A· Fm', '6A· Gm']);
+  await expect(popup.getByRole('button', { name: 'Minor' })).toHaveCount(0);
+  await expect(popup.getByRole('button', { name: 'Major' })).toHaveCount(0);
+  await expect(popup.locator('[data-key]')).toHaveCount(24);
+  await expect(popup.locator('.ff-keypop__key--on')).toHaveCount(1);
+  await expect(popup.locator('.ff-keypop__key--on')).toHaveText('5ACm');
   await expect(popup.locator('[data-key="5A"]')).toBeFocused();
+  const fill = await popup.locator('.ff-keypop__key--on').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(fill).not.toBe('rgba(0, 0, 0, 0)');
+  const plain = await popup.locator('[data-key="6A"]').evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(plain).toBe('rgba(0, 0, 0, 0)');
   const box = (await popup.boundingBox())!;
-  expect(box.width).toBeLessThanOrEqual(290);
-  expect(box.height).toBeLessThanOrEqual(270);
+  expect(box.width).toBeCloseTo(228, 0);
+  expect(box.height).toBeLessThanOrEqual(300);
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/key-popup-open.png` });
-
-  await popup.getByRole('button', { name: 'Major' }).click();
-  await expect(popup.locator('.ff-keypop__key--fit')).toHaveCount(1);
-  await expect(popup.locator('[data-key="5B"]')).toHaveClass(/--fit/);
   await popup.locator('[data-key="6B"]').hover();
-  if (SHOTS) await page.screenshot({ path: `${SHOTS}/key-popup-major-hover.png` });
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/key-popup-hover.png` });
 });
 
-test('arrow keys move over the key grid, Enter saves and closes; clicking a key does too', async ({ smoke }) => {
+test('arrow keys move within and across the columns, Enter saves and closes; clicking either column saves', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
   await keyPen(page).click();
   const popup = keyPopup(page);
   await expect(popup.locator('[data-key="5A"]')).toBeFocused();
-  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
   await expect(popup.locator('[data-key="6A"]')).toBeFocused();
-  await page.keyboard.press('ArrowDown');
-  await expect(popup.locator('[data-key="9A"]')).toBeFocused();
-  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowRight');
+  await expect(popup.locator('[data-key="6B"]')).toBeFocused();
   await page.keyboard.press('ArrowUp');
-  await expect(popup.locator('[data-key="5A"]')).toBeFocused();
+  await expect(popup.locator('[data-key="5B"]')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
   await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(popup.locator('[data-key="8A"]')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(popup).toHaveCount(0);
   await expect.poll(async () => (await smoke.invokes('set_track_key')).map((c) => c.key)).toEqual(['8A']);
 
   await keyPen(page).click();
-  await keyPopup(page).getByRole('button', { name: 'Major' }).click();
   await keyPopup(page).locator('[data-key="3B"]').click();
   await expect(keyPopup(page)).toHaveCount(0);
   await expect.poll(async () => (await smoke.invokes('set_track_key')).map((c) => c.key)).toEqual(['8A', '3B']);
+
+  await keyPen(page).click();
+  await keyPopup(page).locator('[data-key="2A"]').click();
+  await expect(keyPopup(page)).toHaveCount(0);
+  await expect.poll(async () => (await smoke.invokes('set_track_key')).map((c) => c.key)).toEqual(['8A', '3B', '2A']);
 });
 
 test('Reset to analyzed releases the hand-set values and analyses the track again', async ({ smoke }) => {
