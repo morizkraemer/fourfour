@@ -85,6 +85,16 @@ describe('analysis cache', () => {
     invalidateAnalysisCache();
     expect(peekAnalysisData(8)).toBeUndefined();
   });
+  it('does not cache a read that was under way when its track was invalidated', async () => {
+    const stale = getAnalysisData(9);
+    invalidateAnalysisCache(9);
+    await stale;
+    expect(peekAnalysisData(9)).toBeUndefined();
+    const all = getAnalysisData(10);
+    invalidateAnalysisCache();
+    await all;
+    expect(peekAnalysisData(10)).toBeUndefined();
+  });
 });
 
 describe('prefetchAnalysisData', () => {
