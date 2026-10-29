@@ -271,3 +271,4 @@
 2026-10-29 08:55 orchestrator decided: Merlin review — topbar B (must stay consistent with all popups/modals incl. new file UI), BPM/key edit strip (B) liked but field layout not right → mockup round; duplicates-simple no objection. Spec docs/ui/file-management-2026-10-29.md. Spawn fb-files (topbar B + health + missing + relocate, seat opus) and fb-strip (edit strip layouts, seat opus)
 2026-10-29 09:20 fb-strip player-edit-4 (3 edit-strip field layouts, rec A 'under its value') on viewport :5240; player-edit-3 archived; fb-mockups 386516c
 2026-10-29 09:45 orchestrator decided: duplicates-simple approved, without the visible scrollbar; edit strip rejected ('needs to be simpler and in the existing strip') → round player-edit-5: inline edit within the existing header strip
+2026-10-29 10:10 fb-strip player-edit-5 (3 in-header BPM/key edit options, rec B pencil menu) + duplicates-simple without scrollbar on :5240; player-edit-4 archived; fb-mockups 3819f32
