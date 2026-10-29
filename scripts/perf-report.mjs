@@ -36,6 +36,15 @@ if (fe) {
 }
 const steady = read('frontend-perf10k.json') ? JSON.parse(read('frontend-perf10k.json')) : null;
 if (steady) put('ui', 'frontend_perf10k', steady);
+const bulk = read('frontend-bulk.json') ? JSON.parse(read('frontend-bulk.json')) : null;
+if (bulk) {
+  const keep = ['frameP95', 'frameMax', 'framesLost', 'taskMsPerSec', 'longTaskMsTotal', 'longTaskMsMax', 'keyMedian', 'keyWorst', 'paletteMedian', 'paletteWorst'];
+  const flat = {};
+  for (const [scenario, values] of Object.entries(bulk.results)) {
+    for (const k of keep) if (k in values) flat[`${scenario} ${k}`] = values[k];
+  }
+  put('ui', 'during_bulk_analysis', flat);
+}
 
 writeFileSync(out, JSON.stringify(report, null, 2));
 

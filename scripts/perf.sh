@@ -105,6 +105,10 @@ if ! skip frontend; then
     FF_PERF_Q50_OUT="$RAW/frontend-q50.json" FF_PERF_OUT="$RAW/frontend-perf10k.json" \
     npx playwright test perf-q50 perf10k --grep 'startup, track load|measure' --reporter=line > "$RAW/frontend.log" 2>&1) ||
     { tail -n 40 "$RAW/frontend.log" >&2; exit 1; }
+  say "frontend: UI responsiveness during bulk analysis (perf-bulk-analysis.spec.ts)"
+  (cd "$ROOT/app" && FF_PERF_BULK=1 FF_PERF_TRACKS="$TRACKS" FF_SMOKE_PORT="$PORT" FF_PERF_OUT="$RAW/frontend-bulk.json" \
+    npx playwright test perf-bulk-analysis --reporter=line > "$RAW/frontend-bulk.log" 2>&1) ||
+    { tail -n 40 "$RAW/frontend-bulk.log" >&2; exit 1; }
 fi
 
 uptime | sed 's/.*load average: /load_after=/' >> "$RAW/load.txt"
