@@ -54,9 +54,11 @@ async function profiled(page: Page, name: string, run: () => Promise<void>) {
   if (process.env.FF_PERF_PROFILE !== name) return run();
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
   await cdp.send('Profiler.start');
   await run();
   const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(process.env.FF_PERF_PROFILE_OUT, JSON.stringify(profile));
   printProfile(name, profile);
   await cdp.detach();
 }

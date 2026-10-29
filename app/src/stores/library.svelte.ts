@@ -579,6 +579,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (!ready.waveform) {
     track.bandsPreview = undefined;
     track.preview = undefined;
+    track.bandsWire = undefined;
   } else if (bandPreview) {
     if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
     track.preview = undefined;
@@ -718,6 +719,7 @@ function markTracksPendingAnalysis(ids: number[]) {
     if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
+    track.bandsWire = undefined;
     track.analysisLoaded = false;
     track.analysisPending = true;
     if (!track.bpmLocked) {
@@ -767,6 +769,20 @@ function handleAnalysisCompleteEvent() {
   }
 }
 
+const WIRE_BANDS_CACHE_LIMIT = 512;
+const wireBandsCache = new Map<string | number[], ReturnType<typeof rowBandsFromBandBytes>>();
+
+function rowBandsFromWire(wire: string | number[] | undefined) {
+  if (!wire) return null;
+  const hit = wireBandsCache.get(wire);
+  if (hit !== undefined) return hit;
+  const bytes = decodeBandPreview(wire);
+  const bands = bytes ? rowBandsFromBandBytes(bytes) : null;
+  wireBandsCache.set(wire, bands);
+  if (wireBandsCache.size > WIRE_BANDS_CACHE_LIMIT) wireBandsCache.delete(wireBandsCache.keys().next().value!);
+  return bands;
+}
+
 /* ── Mapper ─────────────────────────────────────────────────────────── */
 function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined) {
   const indexStr = String(idx + 1).padStart(2, '0');
@@ -782,20 +798,6 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined)
 
   // Prefer the authoritative DB flag; fall back to tempo for browser mocks.
   const analyzed = t.has_analysis ?? t.tempo > 0;
-
-  let embeddedPreview: TrackInfo | null = t.waveform_bands || t.waveform_preview ? t : null;
-  let decodedBands: Uint8Array | undefined;
-  let decodedMono: Uint8Array | undefined;
-  const decodeEmbeddedPreview = () => {
-    if (!embeddedPreview) return;
-    const bandPreview = decodeBandPreview(embeddedPreview.waveform_bands);
-    if (bandPreview) decodedBands = bandPreview;
-    else {
-      const preview = decodeTrackPreview(embeddedPreview.waveform_preview);
-      if (preview && isValidWaveformPreview(preview)) decodedMono = Uint8Array.from(preview);
-    }
-    embeddedPreview = null;
-  };
 
   const local: Record<string, any> = {
     id: t.id,
@@ -830,31 +832,19 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined)
       return fileStateGlyph(fileStateOf(this.id));
     },
     get bands() {
-      return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
-    },
-    bandsPreviewSet: undefined as Uint8Array | null | undefined,
-    monoPreviewSet: undefined as Uint8Array | null | undefined,
-    get bandsPreview() {
-      const set = this.bandsPreviewSet;
-      if (set !== undefined) return set ?? undefined;
-      decodeEmbeddedPreview();
-      return decodedBands;
-    },
-    set bandsPreview(bytes: Uint8Array | undefined) {
-      decodeEmbeddedPreview();
-      this.bandsPreviewSet = bytes ?? null;
-    },
-    get preview() {
-      const set = this.monoPreviewSet;
-      if (set !== undefined) return set ?? undefined;
-      decodeEmbeddedPreview();
-      return decodedMono;
-    },
-    set preview(bytes: Uint8Array | undefined) {
-      decodeEmbeddedPreview();
-      this.monoPreviewSet = bytes ?? null;
+      if (this.bandsPreview) return rowBandsFromBandBytes(this.bandsPreview);
+      return this.preview ? rowBandsFor(this.preview) : rowBandsFromWire(this.bandsWire);
     },
   };
+
+  if (t.waveform_bands) {
+    local.bandsWire = t.waveform_bands;
+  } else {
+    const preview = decodeTrackPreview(t.waveform_preview);
+    if (preview && isValidWaveformPreview(preview)) {
+      local.preview = Uint8Array.from(preview);
+    }
+  }
 
   return local;
 }
