@@ -100,11 +100,13 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
         return Err(Cancelled.into());
     }
     let duration_s = native.samples.len() as f64 / native.rate as f64;
+    let gapless = native.gapless_samples();
+    let gapless_start_s = native.gapless.start as f64 / native.rate as f64;
     let t = Instant::now();
     let mono44: Cow<[f32]> = if native.rate == 44100 {
-        Cow::Borrowed(&native.samples)
+        Cow::Borrowed(gapless)
     } else {
-        Cow::Owned(resample_to(&native.samples, native.rate, 44100)?)
+        Cow::Owned(resample_to(gapless, native.rate, 44100)?)
     };
     let resample44_ms = ms(t);
     let mono = &*mono44;
@@ -143,16 +145,16 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
                 };
                 return Ok((none, None, 0.0, 0.0, 0.0));
             }
-            let bt = engine.analyze(&native.samples, native.rate, cfg.threads, control)?;
+            let bt = engine.analyze(gapless, native.rate, cfg.threads, control)?;
             let t = Instant::now();
-            let delay = mp3::timeline_shift_s(path, cfg.mp3_rule);
+            let delay = mp3::timeline_shift_s(path, cfg.mp3_rule) + if cfg.mp3_rule == DelayRule::ModelLead { gapless_start_s } else { 0.0 };
             let mp3_ms = ms(t);
             let t = Instant::now();
             let w = Window { offset: 0.0, len: bt.beat_logits.len() as f64 / FPS };
             let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
             let mut fp = cfg.fit.clone();
             fp.threads = cfg.threads;
-            let fit = fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, duration_s, &w, &fp);
+            let fit = fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless.len() as f64 / native.rate as f64, &w, &fp);
             Ok((bt, fit, delay, ms(t), mp3_ms))
         })();
         (beat, key.map(|h| h.join().unwrap()), wf.map(|h| h.join().unwrap()))
