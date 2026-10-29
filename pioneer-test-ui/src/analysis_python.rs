@@ -191,7 +191,9 @@ pub(crate) async fn analyze_one_track(
     let path_str = source_path.to_string_lossy().to_string();
     let t0 = std::time::Instant::now();
 
-    let child = tokio::process::Command::new(python_cmd)
+    let mut command = std::process::Command::new(python_cmd);
+    crate::analysis_priority::lower_child(&mut command);
+    let child = tokio::process::Command::from(command)
         .args([
             "-m",
             "fourfour_analysis",
@@ -234,10 +236,10 @@ pub(crate) async fn analyze_one_track(
     let t_bands = std::time::Instant::now();
     let band_path = source_path.to_path_buf();
     let bands = tokio::task::spawn_blocking(move || {
-        crate::band_analysis::apply_measured_bands(&mut analysis, &band_path).map(|()| analysis)
+        crate::analysis_priority::run_below_ui(|| crate::band_analysis::apply_measured_bands(&mut analysis, &band_path).map(|()| analysis))
     })
     .await
-    .map_err(|e| format!("band measurement panicked: {e}"))?;
+    .map_err(|e| format!("band measurement panicked: {e}"))??;
     let (analysis, band_note) = match bands {
         Ok(analysis) => (analysis, format!("bands {:.2}s", t_bands.elapsed().as_secs_f64())),
         Err(e) => {
