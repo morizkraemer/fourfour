@@ -301,3 +301,4 @@
 2026-10-29 21:30 orchestrator - grid fix (ov-1028) installed on Mac after the data reset; checks green
 2026-10-29 21:40 orchestrator decided (Merlin): overnight conditions for Q50 — no API runs (seat only), visible Mac app runs OK only after 00:00 WITA, Mac plugged in at bedtime
 2026-10-29 21:45 orchestrator - Merlin: Grokbot watcher will ping this thread at seat-limit reset; resume stopped workers on ping
+2026-10-29 21:06 fb-bulk landed on ov-1028 (2b7abf4): analysis events batched (≤250 ms), search text rebuilt only for changed tracks, analysing ids raw state, row placeholder pulses via CSS instead of per-frame redraw, Python fallback at nice 10; idle script 119→13 ms/s at 10k; perf harness app/smoke/perf-bulk-analysis.spec.ts; full smoke + Mac install started
