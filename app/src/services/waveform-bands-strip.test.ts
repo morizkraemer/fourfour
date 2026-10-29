@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { rowBandsFromBandBytes, stripBandsFromAnalysis, stripGains } from './waveform-bands.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { MOCK_PROFILE_ORDER, bandBytes, encodeStickWire, overviewLevel, syntheticBands } from '../mocks/synthetic-bands.ts';
-import { reduceBands, stackHeights } from '../../../prototyping/viewport/design-system/waveform-bands.js';
+import { STACK_GAIN, STACK_GAMMA, displayAmp, reduceBands, stackHeights } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 
 function wire(bytes: number[]) {
   return { len: bytes.length / 3, calibration: 1, pwv7: true, bands: btoa(String.fromCharCode(...bytes)) };
@@ -128,5 +128,43 @@ describe('row preview normalisation', () => {
       const row = rowBandsFromBandBytes(Uint8Array.from(atob((analysis as any).waveform_row_bands), (c) => c.charCodeAt(0)))!;
       expect(Math.abs(p95(row.low) - p95(strip.low))).toBeLessThan(0.1);
     }
+  });
+});
+
+describe('stripGains', () => {
+  function sortedLayerGains(bands: { low: ArrayLike<number>; mid: ArrayLike<number>; high: ArrayLike<number> }) {
+    const share = { low: 0.4, mid: 0.2, high: 0.3 } as const;
+    const layerPercentile = (values: ArrayLike<number>, name: 'low' | 'mid' | 'high', gain: number) => {
+      const layers = new Float32Array(values.length);
+      for (let i = 0; i < layers.length; i++) layers[i] = STACK_GAIN[name] * Math.pow(displayAmp(values[i] * gain), STACK_GAMMA[name]);
+      layers.sort();
+      return layers[Math.min(layers.length - 1, Math.floor(layers.length * 0.95))];
+    };
+    const gain = (values: ArrayLike<number>, name: 'low' | 'mid' | 'high') => {
+      if (layerPercentile(values, name, 4) <= share[name]) return 4;
+      let lo = 0.2;
+      let hi = 4;
+      for (let step = 0; step < 14; step++) {
+        const mid = (lo + hi) / 2;
+        if (layerPercentile(values, name, mid) > share[name]) hi = mid;
+        else lo = mid;
+      }
+      return lo;
+    };
+    return { low: gain(bands.low, 'low'), mid: gain(bands.mid, 'mid'), high: gain(bands.high, 'high') };
+  }
+
+  it('gives the gains of sorting every gained layer, from one sort per band', () => {
+    for (const [seed, profile] of MOCK_PROFILE_ORDER.entries()) {
+      const bands = syntheticBands(1200, seed + 3, 240, 126, profile);
+      expect(stripGains(bands)).toEqual(sortedLayerGains(bands));
+    }
+    const bytes = { low: Float32Array.from({ length: 999 }, (_, i) => (i * 37) % 128), mid: Float32Array.from({ length: 999 }, (_, i) => (i * 11) % 90), high: new Float32Array(999) };
+    expect(stripGains(bytes)).toEqual(sortedLayerGains(bytes));
+  });
+
+  it('returns the same strip for the same analysis payload without measuring it again', () => {
+    const analysis = mockAnalysisData(14, 240, 12600, '3A');
+    expect(stripBandsFromAnalysis(analysis)).toBe(stripBandsFromAnalysis(analysis));
   });
 });

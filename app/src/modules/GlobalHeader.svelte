@@ -11,7 +11,7 @@
 -->
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
-  import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
+  import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks, unanalyzedTrackCount } from '../stores/library.svelte.ts';
   import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { stickSync } from '../stores/stick-sync.svelte.ts';
   import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
@@ -48,13 +48,14 @@
   let searchCollapsed = $derived(ui.searchMode !== 'field');
   let showChips = $derived(!ui.organize.expanded);
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
+  let unanalyzedCount = $derived(unanalyzedTrackCount());
   let idleStatus = $derived(
     topbarIdleStatus({
       volumes: library.volumes,
       activeVolume: library.activeVolume,
       stickTrackCount: (volume) => stickAllTrackIds(volume).length,
       trackCount: library.tracks.length,
-      unanalyzedCount: library.tracks.filter((t) => !t.analyzed).length,
+      unanalyzedCount,
       sync: stickSync,
     }),
   );

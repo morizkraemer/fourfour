@@ -339,21 +339,20 @@ function meanReduced(bands: BandColumns, columns: number): BandColumns {
 type BandName = 'low' | 'mid' | 'high';
 export type BandGains = Record<BandName, number>;
 
-function layerPercentile(values: ArrayLike<number>, name: BandName, gain: number): number {
-  const layers = new Float32Array(values.length);
-  for (let i = 0; i < layers.length; i++) layers[i] = STACK_GAIN[name] * Math.pow(displayAmp(values[i] * gain), STACK_GAMMA[name]);
-  layers.sort();
-  return layers[Math.min(layers.length - 1, Math.floor(layers.length * STRIP_LEVEL_PERCENTILE))];
+function layerAt(value: number, name: BandName, gain: number): number {
+  return Math.fround(STACK_GAIN[name] * Math.pow(displayAmp(value * gain), STACK_GAMMA[name]));
 }
 
 function bandGain(values: ArrayLike<number>, name: BandName): number {
+  const sorted = Float64Array.from(values).sort();
+  const loudEnd = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * STRIP_LEVEL_PERCENTILE))];
   const target = STRIP_LAYER_SHARE[name];
-  if (layerPercentile(values, name, STRIP_MAX_GAIN) <= target) return STRIP_MAX_GAIN;
+  if (layerAt(loudEnd, name, STRIP_MAX_GAIN) <= target) return STRIP_MAX_GAIN;
   let lo = STRIP_MIN_GAIN;
   let hi = STRIP_MAX_GAIN;
   for (let step = 0; step < STRIP_GAIN_STEPS; step++) {
     const mid = (lo + hi) / 2;
-    if (layerPercentile(values, name, mid) > target) hi = mid;
+    if (layerAt(loudEnd, name, mid) > target) hi = mid;
     else lo = mid;
   }
   return lo;
@@ -378,6 +377,8 @@ function withGains(bands: BandColumns, gains: BandGains): BandColumns {
   return { ...out, overview: true };
 }
 
+const stripBands = new WeakMap<BandColumns, BandColumns>();
+
 /**
  * The columns the player's overview strip draws for an analysis payload: the PWV6 overview series when the
  * payload has one, else the detail columns brought to overview resolution by their mean. Either way each band gets its
@@ -394,6 +395,10 @@ export function stripBandsFromAnalysis(
     colorBandsFromPayload(analysis.waveform_color_detail) ??
     colorBandsFromPayload(analysis.waveform_color);
   if (!source) return null;
+  const memo = stripBands.get(source);
+  if (memo) return memo;
   const columns = overview ? source : { ...meanReduced(source, STRIP_COLUMNS), overview: true };
-  return withGains(columns, stripGains(columns));
+  const strip = withGains(columns, stripGains(columns));
+  stripBands.set(source, strip);
+  return strip;
 }

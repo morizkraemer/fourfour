@@ -2,6 +2,7 @@
 
 mod analysis_backend;
 mod analysis_payload;
+mod analysis_priority;
 mod analysis_python;
 mod analysis_run;
 mod backup_commands;

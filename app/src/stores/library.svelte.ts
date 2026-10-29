@@ -303,7 +303,8 @@ let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
 
-const WARMUP_CHUNK = 2000;
+const WARMUP_CHUNK = 250;
+const WARMUP_IDLE_RESERVE_MS = 2;
 const WARMUP_DELAY_MS = 250;
 
 function resetSearchIndex() {
@@ -326,7 +327,7 @@ function haystackByIdFor(): Map<number, string> {
   return haystackById!;
 }
 
-function whenIdle(run: () => void) {
+function whenIdle(run: (deadline?: IdleDeadline) => void) {
   if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
   else setTimeout(run, 0);
 }
@@ -336,10 +337,11 @@ function scheduleSearchIndexWarmup() {
   clearTimeout(warmupTimer);
   warmupTimer = setTimeout(() => {
     const generation = warmupGeneration;
-    const step = () => {
+    const step = (deadline?: IdleDeadline) => {
       if (generation !== warmupGeneration) return;
       if (haystackCursor < plainTracks.length) {
-        fillSearchIndex(WARMUP_CHUNK);
+        do fillSearchIndex(WARMUP_CHUNK);
+        while (haystackCursor < plainTracks.length && deadline && !deadline.didTimeout && deadline.timeRemaining() > WARMUP_IDLE_RESERVE_MS);
         whenIdle(step);
       } else {
         haystacksFor(library.tracks);
@@ -381,7 +383,8 @@ function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] 
   let haystacks = haystackCache.get(tracks);
   if (!haystacks) {
     const byId = haystackByIdFor();
-    haystacks = tracks.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
+    const source = tracks === library.tracks && plainTracks.length === tracks.length ? plainTracks : tracks;
+    haystacks = source.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
     haystackCache.set(tracks, haystacks);
   }
   return haystacks;
@@ -419,6 +422,15 @@ export function filterTracks<T extends Record<string, unknown>>(
 }
 
 let indexCache: { source: object; length: number; byId: Map<number, number> } | null = null;
+
+/** Tracks never analysed. Changes with the track list (every field change bumps it); counted on the plain objects. */
+export function unanalyzedTrackCount(): number {
+  const tracks = library.tracks;
+  const source = plainTracks.length === tracks.length ? plainTracks : tracks;
+  let count = 0;
+  for (const track of source) if (!track.analyzed) count++;
+  return count;
+}
 
 function libraryTrackById(id: number) {
   const tracks = library.tracks;
