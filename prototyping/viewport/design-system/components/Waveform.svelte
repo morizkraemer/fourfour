@@ -85,7 +85,7 @@
     look = 'envelope',
     cues = [],
     cueStyle = null,
-    /** Subtle sine wave on placeholder bars while analysis is in progress. */
+    /** Placeholder bars pulse (CSS only) while analysis is in progress. */
     animating = false,
     /** Given: a click seeks, with the track fraction under the pointer. */
     onSeek = undefined,
@@ -146,7 +146,7 @@
     return bitmap;
   }
 
-  function draw(phase = 0) {
+  function draw(phase) {
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
     const pixelW = Math.round(width * dpr);
@@ -206,22 +206,6 @@
     animating;
 
     const data = source();
-    if (animating && !data) {
-      let phase = 0;
-      let live = true;
-      const tick = () => {
-        if (!live) return;
-        phase += 0.11;
-        draw(phase);
-        scheduleDraw(tick);
-      };
-      scheduleDraw(tick);
-      return () => {
-        live = false;
-        cancelDraw(tick);
-      };
-    }
-
     const run = () => draw(0);
     if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
       run();
@@ -235,5 +219,27 @@
 <canvas
   bind:this={canvas}
   class="ff-waveform ff-waveform--{variant}"
+  class:ff-waveform--analysing={animating && !source()}
   style:cursor={onSeek ? 'pointer' : null}
   onclick={onSeek ? seekAt : undefined}></canvas>
+
+<style>
+  .ff-waveform--analysing {
+    animation: ff-waveform-analysing 1.1s ease-in-out infinite alternate;
+  }
+
+  @keyframes ff-waveform-analysing {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.35;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ff-waveform--analysing {
+      animation: none;
+    }
+  }
+</style>
