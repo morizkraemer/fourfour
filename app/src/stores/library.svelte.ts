@@ -780,6 +780,20 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
   // Prefer the authoritative DB flag; fall back to tempo for browser mocks.
   const analyzed = t.has_analysis ?? t.tempo > 0;
 
+  let embeddedPreview: TrackInfo | null = t.waveform_bands || t.waveform_preview ? t : null;
+  let decodedBands: Uint8Array | undefined;
+  let decodedMono: Uint8Array | undefined;
+  const decodeEmbeddedPreview = () => {
+    if (!embeddedPreview) return;
+    const bandPreview = decodeBandPreview(embeddedPreview.waveform_bands);
+    if (bandPreview) decodedBands = bandPreview;
+    else {
+      const preview = decodeTrackPreview(embeddedPreview.waveform_preview);
+      if (preview && isValidWaveformPreview(preview)) decodedMono = Uint8Array.from(preview);
+    }
+    embeddedPreview = null;
+  };
+
   const local: Record<string, any> = {
     id: t.id,
     index: indexStr,
@@ -814,20 +828,32 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     },
     get bands() {
       return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
-    }
+    },
+    // The embedded preview (3-band row preview, else the mono PWAV) is decoded on first read: only
+    // rows that are drawn pay for it. A write replaces it; `null` in the backing field means cleared.
+    bandsPreviewSet: undefined as Uint8Array | null | undefined,
+    monoPreviewSet: undefined as Uint8Array | null | undefined,
+    get bandsPreview() {
+      const set = this.bandsPreviewSet;
+      if (set !== undefined) return set ?? undefined;
+      decodeEmbeddedPreview();
+      return decodedBands;
+    },
+    set bandsPreview(bytes: Uint8Array | undefined) {
+      decodeEmbeddedPreview();
+      this.bandsPreviewSet = bytes ?? null;
+    },
+    get preview() {
+      const set = this.monoPreviewSet;
+      if (set !== undefined) return set ?? undefined;
+      decodeEmbeddedPreview();
+      return decodedMono;
+    },
+    set preview(bytes: Uint8Array | undefined) {
+      decodeEmbeddedPreview();
+      this.monoPreviewSet = bytes ?? null;
+    },
   };
-
-  // Embedded preview → paint the mini waveform immediately, no N+1 fetch: the 3-band row
-  // preview when the track has band data, else the mono PWAV.
-  const bandPreview = decodeBandPreview(t.waveform_bands);
-  if (bandPreview) {
-    local.bandsPreview = bandPreview;
-  } else {
-    const preview = decodeTrackPreview(t.waveform_preview);
-    if (preview && isValidWaveformPreview(preview)) {
-      local.preview = Uint8Array.from(preview);
-    }
-  }
 
   return local;
 }

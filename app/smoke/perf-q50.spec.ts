@@ -9,6 +9,9 @@ const TRACKS = Number(process.env.FF_PERF_TRACKS ?? 0);
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 3);
 const IMPORT_FILES = Number(process.env.FF_PERF_IMPORT ?? 1000);
 const REPORT = process.env.FF_PERF_Q50_OUT;
+const STARTUP_ONLY = process.env.FF_PERF_Q50_ONLY === 'startup';
+/** The real IPC answers `invoke` in a task of its own; the in-page mock would answer in a microtask of the caller's task. */
+const IPC_TASK = process.env.FF_PERF_IPC_TASK !== '0';
 
 const results: Record<string, number> = {};
 const record = (name: string, value: number) => (results[name] = Math.round(value * 10) / 10);
@@ -57,7 +60,7 @@ interface Q50 {
   answeredAt: Record<string, number>;
 }
 
-function installProbes() {
+function installProbes(ipcTask: boolean) {
   const w = window as unknown as { __q50: Q50; __TAURI_INTERNALS__: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } };
   w.__q50 = { firstRow: 0, longTasks: [], detailResolved: {}, mockMs: {}, answeredAt: {} };
   new PerformanceObserver((list) => {
@@ -72,6 +75,7 @@ function installProbes() {
   w.__TAURI_INTERNALS__.invoke = async (cmd, args = {}) => {
     const started = performance.now();
     const answer = await invoke(cmd, args);
+    if (ipcTask) await new Promise((resolve) => setTimeout(resolve, 0));
     (w.__q50.mockMs[cmd] ??= []).push(performance.now() - started);
     w.__q50.answeredAt[cmd] = performance.now();
     if (cmd === 'get_waveform_detail') w.__q50.detailResolved[args.trackId as number] = performance.now();
@@ -84,7 +88,7 @@ async function openApp(browser: Browser, payload: LoadedState) {
   const page = await context.newPage();
   await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
   await page.addInitScript(installTauriMock, payload);
-  await page.addInitScript(installProbes);
+  await page.addInitScript(installProbes, IPC_TASK);
   return { context, page };
 }
 
@@ -213,6 +217,11 @@ test.describe('q50 perf paths', () => {
     }
     recordBoot('startup cold', cold);
     recordBoot('startup warm', warm);
+    if (STARTUP_ONLY) {
+      console.log(JSON.stringify(results, null, 2));
+      if (REPORT) writeFileSync(REPORT, JSON.stringify(results, null, 2));
+      return;
+    }
 
     const { context, page } = await openApp(browser, payload);
     await page.goto('/');
@@ -330,5 +339,26 @@ test('q50 expand-to-detail profile', async ({ browser }) => {
     await page.waitForTimeout(300);
   }
   console.log(`expand to detail drawn ms: ${expands.map((e) => e.toFixed(0)).join(', ')}`);
+  await context.close();
+});
+
+test('q50 boot trace', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'boot-trace', 'set FF_PERF_PROFILE=boot-trace FF_PERF_PROFILE_OUT=trace.json');
+  test.setTimeout(300_000);
+  const { context, page } = await openApp(browser, state());
+  await browser.startTracing(page, {
+    path: process.env.FF_PERF_PROFILE_OUT ?? 'smoke/.results/boot-trace.json',
+    categories: ['devtools.timeline', 'v8.execute', 'disabled-by-default-devtools.timeline', 'blink.user_timing'],
+  });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
+  await cdp.send('Profiler.start');
+  await page.goto('/');
+  console.log(JSON.stringify(await bootMetrics(page)));
+  const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(`${process.env.FF_PERF_PROFILE_OUT}.cpuprofile`, JSON.stringify(profile));
+  printProfile('boot', profile);
+  await browser.stopTracing();
   await context.close();
 });

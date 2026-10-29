@@ -253,6 +253,7 @@ test.describe('perf at scale', () => {
     await page.locator('[data-track-row]').first().waitFor();
     await page.waitForTimeout(500);
     const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+    if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(process.env.FF_PERF_PROFILE_OUT, JSON.stringify(profile));
     printProfile('boot', profile);
   });
 });
