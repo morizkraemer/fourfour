@@ -14,6 +14,7 @@ use fourfour_analysis::mp3::{self, DelayRule};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use serde_json::{json, Value};
+use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
@@ -96,6 +97,32 @@ fn leading_trim_samples(path: &Path) -> Result<(u32, u32)> {
     Ok((track.delay.unwrap_or(0), rate))
 }
 
+fn decode_trimmed(path: &Path) -> Result<Vec<f32>> {
+    let mss = MediaSourceStream::new(Box::new(File::open(path)?), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut format = symphonia::default::get_probe().probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())?;
+    let track = format.first_track_known_codec(TrackType::Audio).ok_or_else(|| anyhow!("no audio track"))?;
+    let id = track.id;
+    let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(|| anyhow!("no params"))?;
+    let mut decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default())?;
+    let mut out = Vec::new();
+    let mut scratch: Vec<f32> = Vec::new();
+    while let Ok(Some(packet)) = format.next_packet() {
+        if packet.track_id != id {
+            continue;
+        }
+        if let Ok(decoded) = decoder.decode(&packet) {
+            let ch = decoded.spec().channels().count();
+            decoded.copy_to_vec_interleaved(&mut scratch);
+            out.extend(scratch.chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32));
+        }
+    }
+    Ok(out)
+}
+
 fn median(v: &mut [f64]) -> Option<f64> {
     if v.is_empty() {
         return None;
@@ -117,7 +144,8 @@ fn offsets_ms(grid_s: &[f64], onsets: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
-fn track(id: u64, reference: &Value, dump: &Path, contrast: f64, rule: DelayRule, heard_is_untrimmed: bool) -> Result<Value> {
+fn track(id: u64, reference: &Value, dump: &Path, contrast: f64, rule: DelayRule, heard: &str) -> Result<Value> {
+    let heard_is_untrimmed = heard == "untrimmed";
     let path = PathBuf::from(reference["path"].as_str().ok_or_else(|| anyhow!("no path"))?);
     let doc: Value = serde_json::from_str(&fs::read_to_string(dump.join(format!("{id}.json")))?)?;
     let raw = fs::read(dump.join(format!("{id}.logits")))?;
@@ -127,7 +155,12 @@ fn track(id: u64, reference: &Value, dump: &Path, contrast: f64, rule: DelayRule
     let peaks: Vec<f64> = doc["beats"].as_array().ok_or_else(|| anyhow!("beats"))?.iter().filter_map(|x| x.as_f64()).collect();
     let duration = doc["duration_s"].as_f64().unwrap_or(0.0);
     let w = Window { offset: 0.0, len: frames as f64 / FPS };
-    let fit = fit_track(&peaks, bl, dl, duration, &w, &FitParams::default()).ok_or_else(|| anyhow!("no fit"))?;
+    let mut fit = fit_track(&peaks, bl, dl, duration, &w, &FitParams::default()).ok_or_else(|| anyhow!("no fit"))?;
+    if heard == "rebased" {
+        let (trim, rate) = leading_trim_samples(&path)?;
+        let to_decoded = (trim + mp3::leading_silence_frames(&path)) as f64 / rate as f64;
+        fit.beats_s.iter_mut().for_each(|b| *b += to_decoded);
+    }
     let shift = mp3::timeline_shift_s(&path, rule);
     let app = finalize_beats(&fit.beats_s, shift);
 
@@ -258,7 +291,10 @@ fn main() -> Result<()> {
             let tag = pioneer_usb_writer::scanner::read_track_metadata(path, 0)?.duration_secs;
             let mono = decode_mono(path)?;
             let decoded = mono.samples.len() as f64 / mono.rate as f64;
-            println!("{:+8.1} ms  tag {tag:.3} s  decoded {decoded:.3} s  {}", (decoded - tag) * 1000.0, path.file_name().unwrap().to_string_lossy());
+            let trimmed = decode_trimmed(path)?;
+            let g = mono.gapless_samples();
+            let diff = g.iter().zip(&trimmed).map(|(a, b)| (a - b).abs()).fold(0f32, f32::max);
+            println!("{:+8.1} ms  tag {tag:.3} s  decoded {decoded:.3} s  gapless slice {} vs trimmed decode {} samples, max diff {diff}  {}", (decoded - tag) * 1000.0, g.len(), trimmed.len(), path.file_name().unwrap().to_string_lossy());
         }
         return Ok(());
     }
@@ -266,7 +302,7 @@ fn main() -> Result<()> {
         return run(&args[2..]);
     }
     if args.len() < 5 {
-        return Err(anyhow!("usage: grid_offset <ref.json> <dump dir> <ids file> <out.jsonl> [workers] [contrast] [mp3 rule] [heard: untrimmed|decoded]\n       grid_offset run <ref.json> <ids file> <out dump dir> [workers]\n       grid_offset selftest"));
+        return Err(anyhow!("usage: grid_offset <ref.json> <dump dir> <ids file> <out.jsonl> [workers] [contrast] [mp3 rule] [heard: untrimmed|decoded|rebased]\n       grid_offset run <ref.json> <ids file> <out dump dir> [workers]\n       grid_offset selftest"));
     }
     let reference: Value = serde_json::from_str(&fs::read_to_string(&args[1])?)?;
     let dump = PathBuf::from(&args[2]);
@@ -274,7 +310,7 @@ fn main() -> Result<()> {
     let workers: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(4);
     let contrast: f64 = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(4.0);
     let rule = args.get(7).and_then(|s| DelayRule::parse(s)).unwrap_or(DelayRule::ModelLead);
-    let heard_is_untrimmed = args.get(8).map(String::as_str) == Some("untrimmed");
+    let heard = args.get(8).cloned().unwrap_or_else(|| "decoded".to_string());
     let out = Mutex::new(File::create(&args[4])?);
     let next = AtomicUsize::new(0);
     std::thread::scope(|s| {
@@ -282,7 +318,7 @@ fn main() -> Result<()> {
             s.spawn(|| loop {
                 let i = next.fetch_add(1, Ordering::SeqCst);
                 let Some(&id) = ids.get(i) else { break };
-                let row = match track(id, &reference[id.to_string()], &dump, contrast, rule, heard_is_untrimmed) {
+                let row = match track(id, &reference[id.to_string()], &dump, contrast, rule, &heard) {
                     Ok(v) => v,
                     Err(e) => json!({"id": id, "error": e.to_string()}),
                 };
