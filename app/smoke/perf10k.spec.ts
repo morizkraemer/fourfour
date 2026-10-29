@@ -154,7 +154,10 @@ test.describe('perf at scale', () => {
     record('scroll frame p50 ms', median(steady));
     record('scroll frame p95 ms', percentile(steady, 95));
     record('scroll frame max ms', Math.max(...steady));
-    const fling = await scrollFrames(page, 30, 9000);
+    let fling: number[] = [];
+    await profiled(page, 'fling', async () => {
+      fling = await scrollFrames(page, 30, 9000);
+    });
     record('fling frame p95 ms', percentile(fling, 95));
     record('fling frame max ms', Math.max(...fling));
     await page.evaluate(() => ((document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop = 0));

@@ -39,7 +39,6 @@
 
   let container;
   let display = null;
-  let ro;
   let lastDataKey = null;
 
   function markerData() {
@@ -66,12 +65,9 @@
 
   $effect(() => {
     if (!container) return;
-    display = new WaveformDisplay(container, { mode, onSeek, onCueMove });
-    ro = new ResizeObserver(() => display?.redraw());
-    ro.observe(container);
+    display = new WaveformDisplay(container, { mode, onSeek, onCueMove, paint: 'frame' });
     lastDataKey = null;
     return () => {
-      ro?.disconnect();
       display?.destroy();
       display = null;
     };
