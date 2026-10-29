@@ -28,9 +28,9 @@ pub fn decode_mono(path: &Path) -> Result<Mono> {
     let track = format.first_track_known_codec(TrackType::Audio).ok_or_else(|| anyhow!("no supported audio tracks"))?;
     let track_id = track.id;
     let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(|| anyhow!("audio track missing codec parameters"))?;
-    let mut decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default())?;
+    let mut decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default().gapless(false))?;
 
-    let mut samples: Vec<f32> = Vec::new();
+    let mut samples: Vec<f32> = vec![0.0; crate::mp3::leading_silence_frames(path) as usize];
     let mut scratch: Vec<f32> = Vec::new();
     let mut rate = 0u32;
     let mut truncated = false;

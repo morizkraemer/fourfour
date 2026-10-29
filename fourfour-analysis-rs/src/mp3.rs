@@ -39,6 +39,7 @@ pub enum DelayRule {
     Encoder,
     EncoderAndHeaderFrame,
     EncoderHeaderLame3100Early,
+    ModelLead,
 }
 
 impl DelayRule {
@@ -51,6 +52,7 @@ impl DelayRule {
             "enc" => Some(DelayRule::Encoder),
             "enc+header" => Some(DelayRule::EncoderAndHeaderFrame),
             "enc+header+l3100" => Some(DelayRule::EncoderHeaderLame3100Early),
+            "model" => Some(DelayRule::ModelLead),
             _ => None,
         }
     }
@@ -191,9 +193,17 @@ pub fn scan(path: &Path) -> Option<Mp3Timeline> {
     })
 }
 
-pub const PCM_SHIFT_MS: f64 = -10.0;
+pub const MODEL_LEAD_MS: f64 = -10.0;
+pub const PCM_SHIFT_MS: f64 = MODEL_LEAD_MS;
+
+pub fn leading_silence_frames(path: &Path) -> u32 {
+    scan(path).filter(|t| t.header_counts).map_or(0, |t| t.frame_samples)
+}
 
 pub fn timeline_shift_s(path: &Path, rule: DelayRule) -> f64 {
+    if rule == DelayRule::ModelLead {
+        return MODEL_LEAD_MS / 1000.0;
+    }
     if path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("mp3")) {
         reference_delay_s(path, rule)
     } else {
@@ -202,7 +212,7 @@ pub fn timeline_shift_s(path: &Path, rule: DelayRule) -> f64 {
 }
 
 pub fn reference_delay_s(path: &Path, rule: DelayRule) -> f64 {
-    if rule == DelayRule::None {
+    if matches!(rule, DelayRule::None | DelayRule::ModelLead) {
         return 0.0;
     }
     let Some(t) = scan(path) else { return 0.0 };
@@ -211,7 +221,7 @@ pub fn reference_delay_s(path: &Path, rule: DelayRule) -> f64 {
     let enc = t.lame_delay.map_or(0.0, |d| d as f64 / sr);
     let header = if t.header_counts { t.frame_samples as f64 / sr } else { 0.0 };
     match rule {
-        DelayRule::None => 0.0,
+        DelayRule::None | DelayRule::ModelLead => 0.0,
         DelayRule::Lame => lame,
         DelayRule::LameAndHeaderFrame => lame + header,
         DelayRule::HeaderFrame => header,
@@ -221,5 +231,66 @@ pub fn reference_delay_s(path: &Path, rule: DelayRule) -> f64 {
             let early = t.encoder.is_some_and(|e| e.starts_with(b"Lame3.100"));
             enc + header - if early { t.frame_samples as f64 / sr } else { 0.0 }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const JOINT_STEREO: u8 = 0x64;
+    const MONO: u8 = 0xc4;
+
+    fn frame(mode: u8) -> Vec<u8> {
+        let mut f = vec![0u8; 417];
+        f[..4].copy_from_slice(&[0xff, 0xfb, 0x90, mode]);
+        f
+    }
+
+    fn info_frame(mode: u8) -> Vec<u8> {
+        let mut f = frame(mode);
+        let tag = 4 + if mode == MONO { 17 } else { 32 };
+        f[tag..tag + 4].copy_from_slice(b"Info");
+        let ext = tag + 8;
+        f[ext..ext + 9].copy_from_slice(b"LAME3.99r");
+        f[ext + 21] = 0x24;
+        f[ext + 22] = 0x00;
+        f
+    }
+
+    fn write(name: &str, first_mode: u8) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("ff-mp3-{}-{name}.mp3", std::process::id()));
+        let mut bytes = info_frame(first_mode);
+        for _ in 0..8 {
+            bytes.extend(frame(JOINT_STEREO));
+        }
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn info_frame_shaped_like_the_audio_is_played_as_a_silent_frame() {
+        let path = write("counts", JOINT_STEREO);
+        let t = scan(&path).unwrap();
+        assert_eq!(t.lame_delay, Some(576));
+        assert!(t.header_counts);
+        assert_eq!(leading_silence_frames(&path), 1152);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn info_frame_of_another_shape_adds_no_silence() {
+        let path = write("skipped", MONO);
+        assert!(!scan(&path).unwrap().header_counts);
+        assert_eq!(leading_silence_frames(&path), 0);
+        std::fs::remove_file(path).ok();
+    }
+
+    #[test]
+    fn model_lead_shifts_every_container_alike() {
+        let path = write("lead", JOINT_STEREO);
+        assert_eq!(timeline_shift_s(&path, DelayRule::ModelLead), MODEL_LEAD_MS / 1000.0);
+        assert_eq!(timeline_shift_s(Path::new("x.flac"), DelayRule::ModelLead), MODEL_LEAD_MS / 1000.0);
+        std::fs::remove_file(path).ok();
     }
 }
