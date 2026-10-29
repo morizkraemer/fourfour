@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::ops::Range;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -14,6 +15,13 @@ pub struct Mono {
     pub samples: Vec<f32>,
     pub rate: u32,
     pub truncated: bool,
+    pub gapless: Range<usize>,
+}
+
+impl Mono {
+    pub fn gapless_samples(&self) -> &[f32] {
+        &self.samples[self.gapless.clone()]
+    }
 }
 
 const MIN_DECODED_SECONDS: usize = 1;
@@ -28,9 +36,11 @@ pub fn decode_mono(path: &Path) -> Result<Mono> {
     let track = format.first_track_known_codec(TrackType::Audio).ok_or_else(|| anyhow!("no supported audio tracks"))?;
     let track_id = track.id;
     let params = track.codec_params.as_ref().and_then(|p| p.audio()).ok_or_else(|| anyhow!("audio track missing codec parameters"))?;
-    let mut decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default())?;
+    let mut decoder = symphonia::default::get_codecs().make_audio_decoder(params, &AudioDecoderOptions::default().gapless(false))?;
 
-    let mut samples: Vec<f32> = Vec::new();
+    let lead = crate::mp3::leading_silence_frames(path) as usize;
+    let (delay, padding) = (track.delay.unwrap_or(0) as usize, track.padding.unwrap_or(0) as usize);
+    let mut samples: Vec<f32> = vec![0.0; lead];
     let mut scratch: Vec<f32> = Vec::new();
     let mut rate = 0u32;
     let mut truncated = false;
@@ -80,7 +90,9 @@ pub fn decode_mono(path: &Path) -> Result<Mono> {
         }
         eprintln!("warning: {} is truncated or damaged; analysing the {:.1} s that decoded", path.display(), samples.len() as f64 / rate as f64);
     }
-    Ok(Mono { samples, rate, truncated })
+    let start = (lead + delay).min(samples.len());
+    let end = if truncated { samples.len() } else { samples.len().saturating_sub(padding).max(start) };
+    Ok(Mono { samples, rate, truncated, gapless: start..end })
 }
 
 pub fn resample_to(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>> {

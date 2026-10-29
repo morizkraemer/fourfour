@@ -12,7 +12,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::units::Time;
 
-fn decode_blocks(path: &Path, mut on_block: impl FnMut(u32, usize, &[f32])) -> Result<(), String> {
+pub(crate) fn decode_blocks(path: &Path, mut on_block: impl FnMut(u32, usize, &[f32])) -> Result<(), String> {
     decode_blocks_from(path, 0.0, |rate, channels, _, samples| {
         on_block(rate, channels, samples);
         true
@@ -44,10 +44,20 @@ fn decode_blocks_from(
 
     let rate = track.codec_params.sample_rate;
     let time_base = track.codec_params.time_base;
+    let lead = fourfour_analysis::mp3::leading_silence_frames(path) as u64;
+    let lead_s = rate.map_or(0.0, |r| lead as f64 / r as f64);
     let mut frame: u64 = 0;
-    if from_s > 0.0 {
+    let decode_from_s = from_s - lead_s;
+    if decode_from_s <= 0.0 {
+        if let (Some(rate), Some(channels), true) = (rate, track.codec_params.channels.map(|c| c.count()), lead > 0) {
+            if !on_block(rate, channels, 0, &vec![0.0; lead as usize * channels]) {
+                return Ok(());
+            }
+            frame = lead;
+        }
+    } else {
         let seeked = format
-            .seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(from_s), track_id: Some(track_id) })
+            .seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(decode_from_s), track_id: Some(track_id) })
             .map_err(|e| format!("seek {}: {e}", path.display()))?;
         decoder.reset();
         frame = match (time_base, rate) {
@@ -56,7 +66,7 @@ fn decode_blocks_from(
                 ((t.seconds as f64 + t.frac) * rate as f64).round() as u64
             }
             _ => seeked.actual_ts,
-        };
+        } + lead;
     }
 
     let mut buffer: Option<SampleBuffer<f32>> = None;

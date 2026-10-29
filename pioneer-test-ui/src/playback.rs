@@ -1123,12 +1123,16 @@ fn run_decode(
     let params_rate = track.codec_params.sample_rate.unwrap_or(out_rate);
     let time_base = track.codec_params.time_base;
 
-    let target_start = start_sample;
+    let lead_samples = reference_lead_samples(path, params_rate, out_rate, out_ch);
+    let target_start = start_sample.saturating_sub(lead_samples);
     let mut samples_out: u64 = 0;
+    if start_sample < lead_samples && !sink(&vec![0.0; (lead_samples - start_sample) as usize])? {
+        return Ok(DecodeOutcome::Superseded);
+    }
 
     // Seek the demuxer near the target instead of decoding-and-discarding every sample before it.
     if target_start > 0 {
-        let target_seconds = start_sample as f64 / (out_rate as f64 * out_ch as f64);
+        let target_seconds = target_start as f64 / (out_rate as f64 * out_ch as f64);
         match format.seek(
             symphonia::core::formats::SeekMode::Accurate,
             symphonia::core::formats::SeekTo::Time {
@@ -1240,6 +1244,15 @@ fn run_decode(
     }
 
     Ok(DecodeOutcome::Finished)
+}
+
+/// Silence the Rekordbox/CDJ decoder plays before the audio of `path` (an mp3 whose Info frame it decodes as a
+/// frame), in interleaved output samples. Analysis decodes the same lead, so grids, waveforms and playback share one
+/// time base.
+fn reference_lead_samples(path: &str, source_rate: u32, out_rate: u32, out_ch: usize) -> u64 {
+    let frames = fourfour_analysis::mp3::leading_silence_frames(std::path::Path::new(path)) as u64;
+    let source_rate = source_rate.max(1) as u64;
+    (frames * out_rate as u64 + source_rate / 2) / source_rate * out_ch as u64
 }
 
 /// Streaming linear resampler. Keeps its read phase and the last frame across packets so packet
