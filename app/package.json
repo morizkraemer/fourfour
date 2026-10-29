@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "smoke": "playwright test"
+    "smoke": "playwright test",
+    "perf": "../scripts/perf.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.10.0",

@@ -97,6 +97,72 @@ fn process_tree_rss_mb(root: u32) -> f64 {
     total / 1024.0
 }
 
+fn median(mut v: Vec<f64>) -> f64 {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v.get(v.len() / 2).copied().unwrap_or(f64::NAN)
+}
+
+/// One track at a time through the analysis crate directly, to read its per-stage timings
+/// (`Analysis::ms`), then the library write the app does with the result. Key and waveform run
+/// in parallel with the beat model, so the stages add up to more than `total`.
+fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Option<usize>) {
+    use fourfour_analysis::analyze::{analyze_controlled, Config, Control};
+    use fourfour_analysis::bt::BeatEngine;
+    use fourfour_analysis::service::{locate_models, plan_pool, available_memory_mb, to_app_result, BEAT_MODEL};
+
+    let models = locate_models(None).expect("model weights (FOURFOUR_MODELS_DIR)");
+    let t = Instant::now();
+    let engine = BeatEngine::load(&models, BEAT_MODEL, false).expect("load models");
+    let model_load_ms = t.elapsed().as_secs_f64() * 1000.0;
+    let env = BackendEnv { max_threads: threads, ..BackendEnv::default() };
+    let threads = plan_pool(&env.pool_options(), available_memory_mb(), 1).threads_per_track;
+    let cfg = Config { threads, ..Config::default() };
+    let stages = ["decode", "resample", "mel", "predict", "fit", "mp3", "key", "waveform", "total"];
+    let mut per_stage: HashMap<&str, Vec<f64>> = HashMap::new();
+    let mut per_audio_s: HashMap<&str, Vec<f64>> = HashMap::new();
+    let mut writes = Vec::new();
+    let mut to_result = Vec::new();
+    let mut audio_s = 0.0;
+    let cancel = AtomicBool::new(false);
+    for (id, path) in items {
+        let analysis = analyze_controlled(&engine, path, &cfg, &Control::new(&cancel)).expect("analyze");
+        let t = Instant::now();
+        let result = to_app_result(&analysis);
+        to_result.push(t.elapsed().as_secs_f64() * 1000.0);
+        let t = Instant::now();
+        library.set_analysis(*id, &result).expect("set_analysis");
+        writes.push(t.elapsed().as_secs_f64() * 1000.0);
+        audio_s += analysis.duration_s;
+        for stage in stages {
+            let v = analysis.ms[stage].as_f64().unwrap_or(0.0);
+            per_stage.entry(stage).or_default().push(v);
+            per_audio_s.entry(stage).or_default().push(v / analysis.duration_s);
+        }
+        eprintln!("[profile] {} {:.0}s audio {}", path.display(), analysis.duration_s, analysis.ms);
+    }
+    let mut values = serde_json::Map::new();
+    values.insert("tracks".into(), items.len().into());
+    values.insert("threads_per_track".into(), threads.into());
+    values.insert("audio_s_total".into(), audio_s.into());
+    values.insert("model_load_ms".into(), model_load_ms.into());
+    let mut line = format!("PROFILE tracks={} threads={threads} model_load={model_load_ms:.0}ms", items.len());
+    for stage in stages.iter().copied().chain(["to_app_result", "write"]) {
+        let ms = match stage {
+            "to_app_result" => to_result.clone(),
+            "write" => writes.clone(),
+            s => per_stage[s].clone(),
+        };
+        let sum: f64 = ms.iter().sum();
+        let med = median(ms);
+        let per_min = if stage == "write" || stage == "to_app_result" { sum / audio_s * 60.0 } else { median(per_audio_s[stage].clone()) * 60.0 };
+        values.insert(format!("{stage}_ms_median"), med.into());
+        values.insert(format!("{stage}_ms_per_audio_min"), per_min.into());
+        line.push_str(&format!(" {stage}={med:.0}ms({per_min:.0}ms/min)"));
+    }
+    println!("{line}");
+    println!("PERF {}", serde_json::json!({ "bench": "analysis_profile", "values": values }));
+}
+
 fn main() {
     let mut backend = AnalysisBackend::Rust;
     let mut list: Option<PathBuf> = None;
@@ -107,6 +173,7 @@ fn main() {
     let mut play_index = 0usize;
     let mut legacy_priority = false;
     let mut unstaged = false;
+    let mut profile = 0usize;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -119,6 +186,7 @@ fn main() {
             "--play-index" => play_index = it.next().unwrap().parse().unwrap(),
             "--legacy-priority" => legacy_priority = true,
             "--unstaged" => unstaged = true,
+            "--profile" => profile = it.next().unwrap().parse().unwrap(),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -137,6 +205,11 @@ fn main() {
     let ids = library.add_tracks(&tracks).expect("add tracks");
     let pending: Vec<(i64, PathBuf)> = ids.iter().zip(&tracks).map(|(id, t)| (*id, t.source_path.clone())).collect();
     let played = play_after_s.map(|_| pending[play_index].clone());
+    if profile > 0 {
+        profile_stages(&library, &pending[..profile.min(pending.len())], threads);
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    }
     let shared = Arc::new(Mutex::new(library));
 
     let env = BackendEnv { override_backend: Some(backend), max_threads: threads, ..BackendEnv::default() };
@@ -194,6 +267,14 @@ fn main() {
         done as f64 / wall_s * 60.0,
         first / 1000.0,
         *peak.lock().unwrap()
+    );
+    println!(
+        "PERF {}",
+        serde_json::json!({ "bench": "analysis_throughput", "values": {
+            "backend": backend.name(), "staged": !unstaged, "tracks": done, "errors": errors,
+            "wall_s": wall_s, "tracks_per_min": done as f64 / wall_s * 60.0,
+            "first_result_s": first / 1000.0, "peak_rss_tree_mb": *peak.lock().unwrap(),
+        }})
     );
     if let (Some(delay), Some((id, _))) = (play_after_s, played) {
         let rel = |ms: f64| (ms / 1000.0 - delay).max(0.0);

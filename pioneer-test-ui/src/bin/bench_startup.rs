@@ -9,6 +9,12 @@ mod dto;
 mod band_analysis;
 #[path = "../track_infos.rs"]
 mod track_infos;
+#[allow(dead_code)]
+#[path = "../import_plan.rs"]
+mod import_plan;
+#[allow(dead_code)]
+#[path = "../waveform_detail.rs"]
+mod waveform_detail;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -101,6 +107,10 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+fn perf(name: &str, value: serde_json::Value) {
+    println!("PERF {}", serde_json::json!({ "bench": name, "values": value }));
+}
+
 fn run(dir: &Path) {
     let t = Instant::now();
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
@@ -133,6 +143,19 @@ fn run(dir: &Path) {
         "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
         json.len(),
         build_ms + playlists_ms + json_ms,
+    );
+    perf(
+        "startup_backend",
+        serde_json::json!({
+            "tracks": count,
+            "open_ms": open_ms,
+            "track_rows_ms": rows_ms,
+            "build_track_infos_ms": build_ms,
+            "playlists_ms": playlists_ms,
+            "json_ms": json_ms,
+            "json_bytes": json.len(),
+            "load_state_ms": build_ms + playlists_ms + json_ms,
+        }),
     );
 }
 
@@ -186,6 +209,16 @@ fn load(dir: &Path, samples: usize) {
     println!(
         "samples={samples} anlz_parse_ms={parse_m:.2}/{parse_p:.2} build_payload_ms={build_m:.2}/{build_p:.2} json_ms={json_m:.2}/{json_p:.2} payload_bytes={bytes_m:.0} artwork_200kb_json_bytes={} artwork_json_ms={artwork_json_ms:.2} (median/p95)",
         artwork_json.len()
+    );
+    perf(
+        "track_load_backend",
+        serde_json::json!({
+            "samples": samples,
+            "anlz_parse_ms_median": parse_m, "anlz_parse_ms_p95": parse_p,
+            "get_analysis_data_ms_median": build_m, "get_analysis_data_ms_p95": build_p,
+            "json_ms_median": json_m, "json_ms_p95": json_p,
+            "payload_bytes_median": bytes_m,
+        }),
     );
 }
 
@@ -332,6 +365,180 @@ fn scan(dir: &Path, count: usize) {
     );
 }
 
+fn read_list(file: &Path) -> Vec<PathBuf> {
+    std::fs::read_to_string(file).unwrap().lines().filter(|l| !l.trim().is_empty()).map(PathBuf::from).collect()
+}
+
+fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<Track>) -> (usize, f64, f64) {
+    let t = Instant::now();
+    let mut seen = std::collections::HashSet::new();
+    let mut fresh = Vec::new();
+    for track in scanned {
+        if seen.insert(track.source_path.clone()) && !lib.track_exists_by_path(&track.source_path).unwrap() {
+            fresh.push(track);
+        }
+    }
+    let exists_ms = ms(t);
+    let t = Instant::now();
+    let added = lib.add_tracks(&fresh).unwrap().len();
+    (added, exists_ms, ms(t))
+}
+
+fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
+    std::fs::create_dir_all(work).unwrap();
+    let db = work.join("import.db");
+    let sidecars = |db: &Path| ["", "-wal", "-shm"].map(|ext| PathBuf::from(format!("{}{ext}", db.display())));
+    let clear = || sidecars(&db).iter().for_each(|f| drop(std::fs::remove_file(f)));
+    clear();
+    if let Some(base) = base_db {
+        for (from, to) in sidecars(base).iter().zip(sidecars(&db).iter()) {
+            if from.exists() {
+                std::fs::copy(from, to).unwrap();
+            }
+        }
+    }
+    let lib = LocalLibrary::open(&db).unwrap();
+    let library_tracks = lib.track_count().unwrap();
+    let paths = vec![folder.to_string_lossy().into_owned()];
+
+    let total = Instant::now();
+    let t = Instant::now();
+    let survey = import_plan::survey_files(&paths);
+    let survey_ms = ms(t);
+    let t = Instant::now();
+    let scanned = pioneer_usb_writer::scanner::scan_directory_with_progress(folder, &mut || {}).unwrap();
+    let scan_ms = ms(t);
+    let files = scanned.len();
+    let plans = import_plan::ImportPlans::default();
+    let t = Instant::now();
+    let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+    let plan_ms = ms(t);
+    let plan_import_ms = ms(total);
+    let t = Instant::now();
+    let (tracks, _) = plans.take(plan.token).unwrap().resolve(false);
+    let (added, exists_ms, insert_ms) = add_scanned_tracks(&lib, tracks);
+    let commit_ms = ms(t);
+    println!(
+        "files={files} library_tracks={library_tracks} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} plan_import_ms={plan_import_ms:.1} commit_import_ms={commit_ms:.1} (exists_check_ms={exists_ms:.1} add_tracks_ms={insert_ms:.1}) added={added} duplicates={}",
+        plan.duplicates.len()
+    );
+    perf(
+        "import_backend",
+        serde_json::json!({
+            "files": files,
+            "library_tracks": library_tracks,
+            "survey_ms": survey_ms,
+            "scan_ms": scan_ms,
+            "plan_ms": plan_ms,
+            "plan_import_ms": plan_import_ms,
+            "commit_import_ms": commit_ms,
+            "commit_exists_check_ms": exists_ms,
+            "commit_add_tracks_ms": insert_ms,
+            "added": added,
+            "duplicates": plan.duplicates.len(),
+        }),
+    );
+    drop(lib);
+    clear();
+}
+
+fn decode_start(path: &Path) -> (f64, f64, f64) {
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    use symphonia::core::units::Time;
+
+    let t = Instant::now();
+    let file = std::fs::File::open(path).unwrap();
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut format = symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()).unwrap().format;
+    let track = format.default_track().unwrap().clone();
+    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).unwrap();
+    let probe_ms = ms(t);
+    let mut first_packet = || loop {
+        let packet = format.next_packet().unwrap();
+        if packet.track_id() == track.id && decoder.decode(&packet).is_ok() {
+            return;
+        }
+    };
+    first_packet();
+    let first_ms = ms(t);
+    let secs = track.codec_params.n_frames.zip(track.codec_params.sample_rate).map_or(60.0, |(n, r)| n as f64 / r as f64);
+    let t = Instant::now();
+    let mut decode_after_seek = || {
+        format.seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(secs * 0.5), track_id: Some(track.id) }).unwrap();
+        decoder.reset();
+        loop {
+            let packet = format.next_packet().unwrap();
+            if packet.track_id() == track.id && decoder.decode(&packet).is_ok() {
+                return;
+            }
+        }
+    };
+    decode_after_seek();
+    (probe_ms, first_ms, ms(t))
+}
+
+fn track_audio(list: &Path, work: &Path) {
+    let files = read_list(list);
+    let mut probe = Vec::new();
+    let mut first = Vec::new();
+    let mut seek = Vec::new();
+    for _ in 0..2 {
+        for f in &files {
+            let (p, a, s) = decode_start(f);
+            probe.push(p);
+            first.push(a);
+            seek.push(s);
+        }
+    }
+    let half = files.len();
+    let (probe_m, probe_p) = median_and_p95(probe[half..].to_vec());
+    let (first_m, first_p) = median_and_p95(first[half..].to_vec());
+    let (seek_m, seek_p) = median_and_p95(seek[half..].to_vec());
+
+    let cache = work.join("waveform-detail");
+    let _ = std::fs::remove_dir_all(&cache);
+    let mut cold = Vec::new();
+    let mut warm = Vec::new();
+    let mut bytes = Vec::new();
+    for f in &files {
+        let t = Instant::now();
+        let b = waveform_detail::detail_bytes(&cache, f).unwrap();
+        cold.push(ms(t));
+        bytes.push(b.len() as f64);
+        let t = Instant::now();
+        waveform_detail::detail_bytes(&cache, f).unwrap();
+        warm.push(ms(t));
+    }
+    let _ = std::fs::remove_dir_all(&cache);
+    let (cold_m, cold_p) = median_and_p95(cold);
+    let (warm_m, warm_p) = median_and_p95(warm);
+    let (bytes_m, _) = median_and_p95(bytes);
+    println!(
+        "files={} decode_probe_ms={probe_m:.1}/{probe_p:.1} decode_first_packet_ms={first_m:.1}/{first_p:.1} seek_mid_decode_ms={seek_m:.1}/{seek_p:.1} detail_cold_ms={cold_m:.0}/{cold_p:.0} detail_cached_ms={warm_m:.1}/{warm_p:.1} detail_bytes={bytes_m:.0} (median/p95)",
+        files.len()
+    );
+    perf(
+        "track_audio_backend",
+        serde_json::json!({
+            "files": files.len(),
+            "decode_probe_ms_median": probe_m, "decode_probe_ms_p95": probe_p,
+            "decode_first_packet_ms_median": first_m, "decode_first_packet_ms_p95": first_p,
+            "seek_mid_decode_ms_median": seek_m, "seek_mid_decode_ms_p95": seek_p,
+            "waveform_detail_cold_ms_median": cold_m, "waveform_detail_cold_ms_p95": cold_p,
+            "waveform_detail_cached_ms_median": warm_m, "waveform_detail_cached_ms_p95": warm_p,
+            "waveform_detail_bytes_median": bytes_m,
+        }),
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -341,6 +548,10 @@ fn main() {
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("bands") => bands(&args[2..]),
-        _ => eprintln!("usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files>"),
+        Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
+        Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
+        _ => eprintln!(
+            "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"
+        ),
     }
 }
