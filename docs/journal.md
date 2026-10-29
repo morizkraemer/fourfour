@@ -279,3 +279,4 @@
 2026-10-29 12:45 orchestrator - ov-1028 a1c03f1 (file health + duplicates + backup) installed on Mac; 737 vitest, 0 check errors, cargo ok
 2026-10-29 13:10 orchestrator decided: BPM and key popups stay separate; their format/layout still bad → round popups-2 (3 layouts each); no comment on popups-1
 2026-10-29 13:20 orchestrator - Merlin bug: drag-import overlay takes the whole window, can't drop folders on sidebar/playlists; unclear 'No new audio files found' message → spawn fb-drop (seat, opus)
+2026-10-29 13:50 fb-strip popups-2 (3 BPM + 3 key popup layouts, rec BPM A one row + key B wheel) on :5240, everything else archived; fb-mockups 7d7f26f
