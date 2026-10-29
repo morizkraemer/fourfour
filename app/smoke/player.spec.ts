@@ -248,3 +248,24 @@ test('CUE starts from the nearest grid beat with Q on, from the playhead with Q 
   expect(quantized.length).toBeGreaterThan(plays.length);
   expect(quantized.at(-1)!.positionMs).toBe(nearestBeat(position));
 });
+
+test('holding Alt shows a big x centred on a set inspector pad and keeps its letter', async ({ smoke: { page } }) => {
+  await page.locator('[data-track-row]').filter({ hasText: TRACK }).first().click();
+  const pad = page.locator('.ff-inspector__pad[data-pad="A"]');
+  await expect(pad).toHaveClass(/ff-inspector__pad--set/);
+  const after = (el: Element) => getComputedStyle(el, '::after').content;
+  expect(await pad.evaluate(after)).toBe('none');
+  await page.keyboard.down('Alt');
+  await expect(pad).toHaveClass(/ff-inspector__pad--remove/);
+  expect(await pad.evaluate(after)).toBe('"×"');
+  await expect(pad.locator('.ff-inspector__pad-letter')).toHaveText('A');
+  const mark = await pad.evaluate((el) => {
+    const style = getComputedStyle(el, '::after');
+    return { display: style.display, align: style.alignItems, justify: style.justifyContent, position: style.position, size: style.fontSize };
+  });
+  expect(mark).toEqual({ display: 'flex', align: 'center', justify: 'center', position: 'absolute', size: '32px' });
+  if (SHOTS) await pad.locator('xpath=..').screenshot({ path: `${SHOTS}/inspector-pads-alt.png` });
+  await page.keyboard.up('Alt');
+  await expect(pad).not.toHaveClass(/ff-inspector__pad--remove/);
+  if (SHOTS) await pad.locator('xpath=..').screenshot({ path: `${SHOTS}/inspector-pads.png` });
+});

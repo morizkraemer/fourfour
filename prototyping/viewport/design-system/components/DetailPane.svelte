@@ -334,7 +334,7 @@
               onmouseenter={() => chip && (linkedKey = chip.key)}
               onmouseleave={() => (linkedKey = null)}
               oncontextmenu={(e) => chip && openCueMenu(e, chip.key)}>
-              <span class="ff-inspector__pad-letter">{chip && altHeld ? '×' : pad.letter}</span>
+              <span class="ff-inspector__pad-letter">{pad.letter}</span>
               {#if chip}
                 <span class="ff-inspector__pad-time">{chip.time}</span>
                 {#if chip.name}<span class="ff-inspector__pad-name">{chip.name}</span>{/if}

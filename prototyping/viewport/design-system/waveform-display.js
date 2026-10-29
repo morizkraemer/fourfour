@@ -446,7 +446,7 @@ export default class WaveformDisplay {
 
     _updatePlayheadOverlay() {
         const frac = this._playheadFrac;
-        if (frac < 0 || frac > 1) {
+        if (frac < 0 || frac > 1 || !this._data) {
             this._hidePlayhead(this._overviewPlayhead);
             this._hidePlayhead(this._zoomPlayhead);
             this._hidePlayhead(this._playedMask);
