@@ -5,10 +5,13 @@
 
 import { player, currentPositionMs, seekToMs, seekToMsAndPlay } from './player.svelte.ts';
 import { cuesOf, editCues } from './cues.svelte.ts';
+import { quantize } from './quantize.svelte.ts';
+import { quantizedMs } from '../lib/quantize.ts';
 import {
   hotCueIn,
   withCueColor,
   withCuePad,
+  withCueMoved,
   withCueName,
   withHotCue,
   withMemoryCue,
@@ -22,11 +25,16 @@ export function addHotCueAtPlayhead(slot: number | null = null): boolean {
   if (!track) return false;
   let added = false;
   editCues(track.id, (cues) => {
-    const result = withHotCue(cues, currentPositionMs(), slot);
+    const result = withHotCue(cues, quantizedMs(track.beats ?? [], currentPositionMs(), quantize.on), slot);
     added = result !== null;
     return result ? result.cues : cues;
   });
   return added;
+}
+
+/** Moves a hot cue to `timeMs` (the caller snaps it to the grid when it should). */
+export function moveHotCue(trackId: number, key: string, timeMs: number): void {
+  editCues(trackId, (cues) => withCueMoved(cues, key, timeMs));
 }
 
 export function addMemoryCueAtPlayhead(): void {

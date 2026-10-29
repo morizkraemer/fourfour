@@ -13,6 +13,7 @@ import {
   sameCues,
   slotLetter,
   withCueColor,
+  withCueMoved,
   withCuePad,
   withCueName,
   withHotCue,
@@ -251,5 +252,23 @@ describe('assigning a pad', () => {
   it('removing the pad of a cue that has none changes nothing', () => {
     const cues = [cue(0, 5000)];
     expect(withCuePad(cues, 'm5000', null)).toBe(cues);
+  });
+});
+
+describe('withCueMoved', () => {
+  const base = [cue(1, 1000), cue(0, 4000)];
+
+  it('moves a hot cue and rounds to whole ms', () => {
+    expect(withCueMoved(base, 'h1', 2500.4).find((c) => c.slot === 1)!.timeMs).toBe(2500);
+  });
+
+  it('never moves before the start', () => {
+    expect(withCueMoved(base, 'h1', -50).find((c) => c.slot === 1)!.timeMs).toBe(0);
+  });
+
+  it('returns the same list for a memory cue, an unknown key or no change', () => {
+    expect(withCueMoved(base, 'm4000', 100)).toBe(base);
+    expect(withCueMoved(base, 'h5', 100)).toBe(base);
+    expect(withCueMoved(base, 'h1', 1000)).toBe(base);
   });
 });
