@@ -25,6 +25,7 @@ import {
   duplicatePlaylist,
   playlistsInFolder,
   importDirectory,
+  importFiles,
   syncToUsb,
   wipeVolume,
   ejectVolume,
@@ -36,7 +37,7 @@ import {
 } from '../stores/library.svelte.ts';
 import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
-import { pickDirectory } from '../services/tauri.svelte.ts';
+import { pickAudioFiles, pickDirectory } from '../services/tauri.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 import { dropPlaylistOnStick, dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
 import { ui } from '../stores/ui.svelte.ts';
@@ -86,6 +87,11 @@ function hasUnanalyzedTracks() {
 export async function importIntoSource(sourceId: string) {
   const dir = await pickDirectory();
   if (dir) await importDirectory(dir, { targetSource: sourceId });
+}
+
+export async function importFilesIntoSource(sourceId: string) {
+  const paths = await pickAudioFiles();
+  if (paths.length > 0) await importFiles(paths, { targetSource: sourceId });
 }
 
 export async function createFolderAndRename(parentId: number) {

@@ -27,6 +27,7 @@
   import ImportDuplicatesDialog from './modules/ImportDuplicatesDialog.svelte';
   import FileBlockedTip from './modules/FileBlockedTip.svelte';
   import { initFileHealth } from './stores/file-health.svelte.ts';
+  import { initImportActivity } from './stores/import-activity.svelte.ts';
   import { unlistenWhenReady } from './lib/lateUnlisten.ts';
   import { isEditableTarget } from './lib/editableTarget.ts';
 
@@ -68,6 +69,7 @@
       void initFileHealth();
     });
     initOrganize();
+    initImportActivity();
     void syncPlaybackAudioConfig();
     window.addEventListener('keydown', onGlobalKeyDown);
     const teardownWindowChrome = installMacWindowChrome();

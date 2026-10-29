@@ -9,7 +9,8 @@ import { createPlaylistAndOpen } from './new-playlist.svelte.ts';
 import { dnd } from './dnd.svelte.ts';
 import { importDropTarget } from './ui.svelte.ts';
 import { uniqueName } from '../lib/playlistTree.ts';
-import { libraryImportMessage, playlistImportMessage, type ImportOutcome } from '../lib/importDuplicates.ts';
+import { playlistImportMessage, type ImportOutcome } from '../lib/importDuplicates.ts';
+import { completeImportActivity } from './import-activity.svelte.ts';
 import {
   dropGroups,
   dropPointToCss,
@@ -55,7 +56,7 @@ function duplicateMatches(outcome: ImportOutcome) {
     .map((d) => ({ path: d.new_path, id: d.existing_id }));
 }
 
-async function createPlaylistsFromDrop(paths: string[], outcome: ImportOutcome, parentId: number) {
+async function createPlaylistsFromDrop(paths: string[], outcome: ImportOutcome, parentId: number): Promise<string> {
   const groups = dropGroups(library.tracks, paths, duplicateMatches(outcome));
   const taken = library.playlists.map((p) => p.name);
   const names: string[] = [];
@@ -66,33 +67,32 @@ async function createPlaylistsFromDrop(paths: string[], outcome: ImportOutcome, 
     await createPlaylistAndOpen(group.ids, parentId, name);
   }
   const tracks = new Set(groups.flatMap((g) => g.ids)).size;
-  library.statusMessage = playlistImportMessage(outcome, { kind: 'created', names, tracks });
+  return playlistImportMessage(outcome, { kind: 'created', names, tracks });
+}
+
+async function placeDroppedTracks(paths: string[], target: FileDropTarget, outcome: ImportOutcome, ids: number[]) {
+  if (ids.length === 0) return undefined;
+  if (target.kind === 'new-playlist' || target.kind === 'folder') {
+    return createPlaylistsFromDrop(paths, outcome, target.kind === 'folder' ? target.folderId : 0);
+  }
+  const playlist = library.playlists.find((p) => p.id === playlistIdFor(target));
+  if (!playlist) return undefined;
+  const added = await addTracksToPlaylist(playlist.id, ids);
+  return playlistImportMessage(outcome, {
+    kind: 'added',
+    name: playlist.name,
+    tracks: ids.length,
+    addedToPlaylist: added,
+  });
 }
 
 export async function importDroppedPaths(paths: string[], target: FileDropTarget) {
-  const playlistId = playlistIdFor(target);
-  if (target.kind === 'view' && playlistId == null) {
+  if (target.kind === 'view' && playlistIdFor(target) == null) {
     await importFiles(paths);
     return;
   }
   const result = await importDroppedTracks(paths);
   if (!result) return;
   const { outcome, ids } = result;
-  if (ids.length === 0) {
-    library.statusMessage = libraryImportMessage(outcome);
-    return;
-  }
-  if (target.kind === 'new-playlist' || target.kind === 'folder') {
-    await createPlaylistsFromDrop(paths, outcome, target.kind === 'folder' ? target.folderId : 0);
-    return;
-  }
-  const playlist = library.playlists.find((p) => p.id === playlistId);
-  if (!playlist) return;
-  const added = await addTracksToPlaylist(playlist.id, ids);
-  library.statusMessage = playlistImportMessage(outcome, {
-    kind: 'added',
-    name: playlist.name,
-    tracks: ids.length,
-    addedToPlaylist: added,
-  });
+  completeImportActivity(outcome, await placeDroppedTracks(paths, target, outcome, ids));
 }

@@ -49,20 +49,42 @@ function sentence(parts: string[]): string {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}${text.endsWith('.') ? '' : '.'}`;
 }
 
-export function libraryImportMessage(outcome: ImportOutcome): string {
+export interface ImportSummary {
+  headline: string;
+  lines: string[];
+}
+
+function headlineParts(outcome: ImportOutcome): string[] {
+  const added = outcome.added.length;
+  const duplicates = outcome.skipped_ids.length;
+  const { unsupported, unreadable } = outcome.plan.skipped;
+  const parts: string[] = [];
+  if (added > 0) parts.push(`Added ${added}`);
+  if (duplicates > 0) parts.push(`${count(duplicates, 'duplicate')} skipped`);
+  if (unsupported + unreadable > 0) parts.push(`${count(unsupported + unreadable, 'file')} not imported`);
+  return parts;
+}
+
+function capitalized(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+export function importSummary(outcome: ImportOutcome, placement?: string): ImportSummary {
   const added = outcome.added.length;
   const duplicates = outcome.skipped_ids.length;
   const known = outcome.plan.already_in_library;
-  const extra = skippedFileParts(outcome.plan.skipped);
-  if (added === 0 && duplicates === 0 && extra.length === 0 && known > 0) {
-    return known === 1 ? 'This file is already in your library.' : `All ${known} files are already in your library.`;
+  const parts = headlineParts(outcome);
+  let headline = parts.join(' · ');
+  if (parts.length === 0) {
+    headline = known === 0 ? 'No audio files found' : known === 1 ? 'File already in your library' : `All ${known} files already in your library`;
   }
-  const parts: string[] = [];
-  if (added > 0) parts.push(`Added ${count(added, 'track')}`);
-  if (duplicates > 0) parts.push(`${count(duplicates, 'duplicate')} skipped`);
-  if (known > 0) parts.push(`${known} already in your library`);
-  parts.push(...extra);
-  return parts.length === 0 ? 'No audio files found.' : sentence(parts);
+  const lines: string[] = [];
+  if (placement) lines.push(placement);
+  if (added > 0) lines.push(`Added ${count(added, 'track')}`);
+  if (known > 0) lines.push(`${known} already in your library`);
+  if (duplicates > 0) lines.push(`${count(duplicates, 'duplicate')} skipped`);
+  lines.push(...skippedFileParts(outcome.plan.skipped).map(capitalized));
+  return { headline, lines };
 }
 
 export type PlaylistDropResult =

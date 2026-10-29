@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   duplicatesTitle,
+  importSummary,
   importWithDuplicateCheck,
-  libraryImportMessage,
   playlistImportMessage,
   trackTime,
   type ImportOutcome,
@@ -75,27 +75,6 @@ function outcome(added: number, known: number, extra: Partial<SkippedFiles> = {}
 }
 
 describe('import status copy', () => {
-  it('says plainly when everything is already in the library', () => {
-    expect(libraryImportMessage(outcome(0, 12))).toBe('All 12 files are already in your library.');
-    expect(libraryImportMessage(outcome(0, 1))).toBe('This file is already in your library.');
-  });
-
-  it('names unsupported formats', () => {
-    expect(libraryImportMessage(outcome(0, 0, { unsupported: 3, unsupported_exts: ['.m4p', '.txt'] }))).toBe(
-      '3 files skipped: unsupported format (.m4p, .txt).'
-    );
-    expect(libraryImportMessage(outcome(0, 0, { unsupported: 6, unsupported_exts: ['.a', '.b', '.c', '.d', '.e'] }))).toBe(
-      '6 files skipped: unsupported format (.a, .b, .c, .d, …).'
-    );
-  });
-
-  it('joins what was added with what was left out', () => {
-    expect(libraryImportMessage(outcome(5, 12))).toBe('Added 5 tracks · 12 already in your library.');
-    expect(libraryImportMessage(outcome(1, 0, {}, [7, 8]))).toBe('Added 1 track · 2 duplicates skipped.');
-    expect(libraryImportMessage(outcome(2, 0, { unreadable: 1 }))).toBe('Added 2 tracks · 1 audio file couldn’t be read.');
-    expect(libraryImportMessage(outcome(0, 0))).toBe('No audio files found.');
-  });
-
   it('says when a playlist drop used tracks already in the library', () => {
     expect(playlistImportMessage(outcome(0, 12), { kind: 'added', name: 'Warmup', tracks: 12, addedToPlaylist: 12 })).toBe(
       'Added 12 tracks to ‘Warmup’ (already in library).'
@@ -122,5 +101,38 @@ describe('import status copy', () => {
         tracks: 5,
       })
     ).toBe('Created 2 playlists (‘A’, ‘B’) with 5 tracks (2 new, 3 already in library) · 1 file skipped: unsupported format (.txt).');
+  });
+});
+
+describe('import activity summary', () => {
+  it('leads with what was added and what was skipped', () => {
+    expect(importSummary(outcome(12, 0, {}, [1, 2, 3])).headline).toBe('Added 12 · 3 duplicates skipped');
+  });
+
+  it('says plainly when everything is already in the library', () => {
+    expect(importSummary(outcome(0, 12)).headline).toBe('All 12 files already in your library');
+    expect(importSummary(outcome(0, 1)).headline).toBe('File already in your library');
+    expect(importSummary(outcome(0, 0)).headline).toBe('No audio files found');
+  });
+
+  it('counts files that were not imported in the headline', () => {
+    expect(importSummary(outcome(2, 0, { unsupported: 3, unsupported_exts: ['.m4p'], unreadable: 1 })).headline).toBe(
+      'Added 2 · 4 files not imported',
+    );
+  });
+
+  it('lists every outcome on its own line with extensions', () => {
+    const summary = importSummary(
+      outcome(5, 7, { unsupported: 3, unsupported_exts: ['.m4p', '.txt'], unreadable: 1 }, [9]),
+      'Added 5 tracks to ‘Warmup’.',
+    );
+    expect(summary.lines).toEqual([
+      'Added 5 tracks to ‘Warmup’.',
+      'Added 5 tracks',
+      '7 already in your library',
+      '1 duplicate skipped',
+      '3 files skipped: unsupported format (.m4p, .txt)',
+      '1 audio file couldn’t be read',
+    ]);
   });
 });

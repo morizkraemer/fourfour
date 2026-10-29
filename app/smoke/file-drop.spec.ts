@@ -58,7 +58,16 @@ async function dropOn(page: Page, target: Locator, paths = [FOLDER]) {
 const fill = (page: Page) => page.locator('.ff-sidebar__fill');
 const table = (page: Page) => page.locator('[data-focus-region="tracks"]');
 const content = (page: Page) => page.locator('[data-file-drop-content]');
-const status = (page: Page) => page.locator('.ff-status-bar__message');
+const activity = (page: Page) => page.locator('[data-library-status]');
+const lastImport = (page: Page) => page.locator('[data-last-import]');
+
+async function openLastImport(page: Page) {
+  const notNow = page.getByRole('button', { name: 'Not now' });
+  if (await notNow.isVisible()) await notNow.click();
+  await activity(page).click();
+  await expect(lastImport(page)).toBeVisible();
+  return lastImport(page);
+}
 
 async function savedPlaylists(smoke: { invokes(cmd: string): Promise<Record<string, any>[]> }) {
   const saves = await smoke.invokes('save_state');
@@ -99,7 +108,8 @@ test('a drop on a playlist imports the files and adds them to it', async ({ smok
   await nextImport(page, TWO_NEW);
   await dropOn(page, sidebarPlaylist(page, 'Warmup'));
 
-  await expect(status(page)).toHaveText('Added 2 tracks to ‘Warmup’.');
+  await expect(activity(page)).toHaveText('Added 2');
+  await expect(await openLastImport(page)).toContainText('Added 2 tracks to ‘Warmup’.');
   expect(await smoke.invokes('plan_import')).toEqual([{ paths: [FOLDER] }]);
   const warmup = (await savedPlaylists(smoke)).find((p) => p.name === 'Warmup')!;
   expect(warmup.track_ids).toEqual([4, 101, 102]);
@@ -111,7 +121,8 @@ test('a drop on empty sidebar space creates a playlist named after the folder', 
   await nextImport(page, TWO_NEW);
   await dropOn(page, fill(page));
 
-  await expect(status(page)).toHaveText('Created ‘Fresh Finds’ with 2 tracks.');
+  await expect(activity(page)).toHaveText('Added 2');
+  await expect(await openLastImport(page)).toContainText('Created ‘Fresh Finds’ with 2 tracks.');
   const created = (await savedPlaylists(smoke)).find((p) => p.name === 'Fresh Finds')!;
   expect(created.track_ids).toEqual([101, 102]);
   expect(created.parent_id).toBe(0);
@@ -123,7 +134,7 @@ test('a drop on the track table imports into the library only', async ({ smoke }
   const before = (await smoke.invokes('save_state')).length;
   await dropOn(page, table(page));
 
-  await expect(status(page)).toHaveText('Added 2 tracks.');
+  await expect(activity(page)).toHaveText('Added 2');
   expect(await smoke.invokes('commit_import')).toEqual([{ token: 1, skipDuplicates: true }]);
   expect(await smoke.invokes('save_state')).toHaveLength(before);
   await expect(content(page)).not.toHaveClass(/file-drop/);
@@ -133,11 +144,12 @@ test('re-importing files already in the library says so plainly', async ({ smoke
   const { page } = smoke;
   await nextImport(page, { tracks: [], already: 12 });
   await dropOn(page, table(page));
-  await expect(status(page)).toHaveText('All 12 files are already in your library.');
+  await expect(activity(page)).toHaveText('All 12 files already in your library');
 
   await nextImport(page, { tracks: [], already: 0, skipped: { unsupported: 3, unsupported_exts: ['.m4p', '.txt'] } });
   await dropOn(page, table(page));
-  await expect(status(page)).toHaveText('3 files skipped: unsupported format (.m4p, .txt).');
+  await expect(activity(page)).toHaveText('3 files not imported');
+  await expect(await openLastImport(page)).toContainText('3 files skipped: unsupported format (.m4p, .txt)');
   await page.screenshot({ path: `${SHOTS}/status-unsupported.png` });
 });
 
@@ -146,7 +158,8 @@ test('a playlist drop of tracks already in the library adds them to the playlist
   await nextImport(page, { tracks: [], already: 20 });
   await dropOn(page, sidebarPlaylist(page, 'Warmup'), ['/Music/smoke']);
 
-  await expect(status(page)).toHaveText('Added 19 tracks to ‘Warmup’ (already in library).');
+  await expect(activity(page)).toHaveText('All 20 files already in your library');
+  await expect(await openLastImport(page)).toContainText('Added 19 tracks to ‘Warmup’ (already in library).');
   const warmup = (await savedPlaylists(smoke)).find((p) => p.name === 'Warmup')!;
   expect(warmup.track_ids).toHaveLength(20);
   await page.screenshot({ path: `${SHOTS}/status-already-in-library.png` });
@@ -170,7 +183,9 @@ test('the duplicates question comes first and Skip duplicates adds the library t
   expect(await smoke.invokes('save_state')).toHaveLength(before);
   await dialog.getByRole('button', { name: 'Skip duplicates' }).click();
 
-  await expect(status(page)).toHaveText('Added 4 tracks to ‘Peak Time’ (2 new, 2 already in library).');
+  await expect(activity(page)).toHaveText('Added 2 · 2 duplicates skipped');
+  await expect(await openLastImport(page)).toContainText('Added 4 tracks to ‘Peak Time’ (2 new, 2 already in library).');
+  await page.keyboard.press('Escape');
   const peak = (await savedPlaylists(smoke)).find((p) => p.name === 'Peak Time')!;
   expect(peak.track_ids).toEqual([1, 2, 3, 101, 102, 7, 8]);
 });
