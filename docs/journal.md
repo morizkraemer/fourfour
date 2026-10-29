@@ -285,3 +285,4 @@
 2026-10-29 14:50 orchestrator decided (Merlin): import moves from status bar to the top bar as one library activity button (progress, result, missing, rest=import icon). spawn fb-activity (seat, sonnet high)
 2026-10-29 15:30 orchestrator - fb-drop installed on Mac (ov-1028 before popups). fb-popups merged into ov-1028 (not installed): full smoke 73/74, tap test flaky under load → follow-up: deterministic tap test + field-scoped Reset (BPM vs key)
 2026-10-29 16:00 fb-popups follow-up landed on ov-1028: deterministic tap test, field-scoped reset (release_user_field, additive Rust); full smoke 75/75; Mac check+install started
+2026-10-29 16:30 fb-activity landed on ov-1028: library activity button (import progress/result/missing/rest), import out of status bar, import-progress event; full smoke 81/81; Mac install started. Merlin: key popup 'very bad, too complicated and messy' → Claude Design canvas with several versions
