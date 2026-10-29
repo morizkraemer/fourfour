@@ -298,3 +298,4 @@
 2026-10-29 21:10 orchestrator - Merlin asked for fresh start: all fourfour app data on the Mac (library.db, anlz, waveform cache, old models copy, WebKit localStorage, caches, prefs) moved to ~/.Trash/fourfour-reset-20261029-1910 (298 MB); Rekordbox's Application Support/Pioneer and audio untouched. Fresh analysis also picks up the grid time-base fix
 2026-10-29 21:20 orchestrator - Merlin: UI lags a lot during bulk analysis → spawn fb-bulk (seat, opus): measure, batch events/per-row reactivity/thread priority+count, keep throughput
 2026-10-29 21:25 orchestrator - Q50 queued (Merlin): speed fleet for next overnight run — startup, track load, import, analysis, UI responsiveness; perf suite + before/after
+2026-10-29 21:30 orchestrator - grid fix (ov-1028) installed on Mac after the data reset; checks green
