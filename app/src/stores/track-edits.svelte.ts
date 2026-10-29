@@ -38,7 +38,7 @@ function showBpm(trackId: number, bpm: number) {
     track.bpm = bpm.toFixed(1);
     track.bpmExact = bpm;
     track.bpmLocked = true;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   if (player.track?.id === trackId) player.track = { ...player.track, bpm: bpm.toFixed(2) };
 }
@@ -150,7 +150,7 @@ async function saveTrackKey(trackId: number, key: string): Promise<boolean> {
   if (track) {
     track.key = key;
     track.keyLocked = true;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   if (player.track?.id === trackId) player.track = { ...player.track, key };
   return true;
@@ -172,7 +172,7 @@ export async function commitTrackRating(trackId: number, rating: number): Promis
   const track = trackById(trackId);
   if (track) {
     track.rating = rating;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   return true;
 }
@@ -188,7 +188,7 @@ export async function releaseTrackEdits(trackId: number): Promise<void> {
   if (track) {
     track.bpmLocked = false;
     track.keyLocked = false;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
 }
 
@@ -204,7 +204,7 @@ export async function resetTrackFieldToAnalyzed(trackId: number, field: 'bpm' | 
   if (track) {
     if (field === 'bpm') track.bpmLocked = false;
     else track.keyLocked = false;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   await analyzeTrackIds([trackId]);
 }
@@ -224,7 +224,7 @@ export async function commitTrackFields(trackId: number, edits: TrackFieldEdits)
     track.album = saved.album || '—';
     track.genre = saved.genre || '—';
     if (track.raw) track.raw = { ...track.raw, ...saved };
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   if (player.track?.id === trackId) {
     player.track = { ...player.track, title: saved.title, artist: saved.artist || '—' };

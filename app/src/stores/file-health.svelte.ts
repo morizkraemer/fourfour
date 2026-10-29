@@ -93,7 +93,7 @@ function patchTrackPaths(relinked: Relinked[]) {
     track.filePath = path;
     if (track.raw) track.raw.source_path = path;
   }
-  bumpLibraryTracks();
+  bumpLibraryTracks(byId.keys());
 }
 
 export async function relocateMissing() {
