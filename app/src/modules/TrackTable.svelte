@@ -58,7 +58,7 @@
   import { fileStatus, fileStateOf } from '../stores/file-status.svelte.ts';
   import { locateTrack } from '../stores/file-health.svelte.ts';
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
-  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
+  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS } from '../lib/rowWindow.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -173,8 +173,16 @@
 
   let columns = $derived(visibleColumns(layoutKind));
 
+  let overscan = $state(0);
+  let offscreenRowsScheduled = false;
+  $effect(() => {
+    if (offscreenRowsScheduled || currentTracks.length === 0 || viewportHeight === 0) return;
+    offscreenRowsScheduled = true;
+    requestAnimationFrame(() => setTimeout(() => (overscan = OVERSCAN_ROWS)));
+  });
+
   let rowWin = $derived(
-    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length })
+    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length, overscan })
   );
   let firstRow = $derived(rowWin.firstRow);
   let endRow = $derived(rowWin.endRow);

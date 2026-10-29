@@ -50,8 +50,57 @@ pub use multi_sync::{
     statvfs_available_bytes, volume_capacity,
 };
 pub use sticks::StickContents;
-pub use user_edits::{MAX_BPM, MIN_BPM, is_camelot};
+pub use user_edits::{MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
+
+/// Runs `read` on the ANLZ directory of every track in `ids`, on as many threads as there are cores, and keeps the
+/// tracks it returns something for.
+fn read_track_dirs<T: Send>(anlz_dir: &Path, ids: &[i64], read: impl Fn(&Path) -> Option<T> + Sync) -> HashMap<i64, T> {
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let chunk_len = ids.len().div_ceil(workers).max(1);
+
+    let mut out = HashMap::with_capacity(ids.len());
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = ids
+            .chunks(chunk_len)
+            .map(|chunk| {
+                let read = &read;
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .filter_map(|id| read(&anlz_dir.join(id.to_string())).map(|a| (*id, a)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for handle in handles {
+            out.extend(handle.join().expect("track directory reader thread panicked"));
+        }
+    });
+    out
+}
+
+/// A track as the track list shows it: the tags it lists, its flags, and the stored row preview.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackListRow {
+    pub id: u32,
+    pub source_path: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    /// BPM * 100: the analysed BPM when there is one, else the tag's.
+    pub tempo: u32,
+    /// The analysed key when there is one, else the tag's.
+    pub key: String,
+    pub duration_secs: f64,
+    pub bitrate: u32,
+    pub file_size: u64,
+    pub has_artwork: bool,
+    /// Stage bits of the analysis row ([`analysis_stage`]); `None` when the track has none.
+    pub analysis_stages: Option<u8>,
+    pub row_preview: Option<RowPreview>,
+}
 
 /// Bits of `analyses.stages`: which parts of a track's analysis are stored.
 pub mod analysis_stage {
@@ -526,31 +575,7 @@ impl LocalLibrary {
         let Some(anlz_dir) = self.anlz_dir() else {
             return HashMap::new();
         };
-        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
-        let chunk_len = ids.len().div_ceil(workers).max(1);
-
-        let mut out = HashMap::with_capacity(ids.len());
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = ids
-                .chunks(chunk_len)
-                .map(|chunk| {
-                    let anlz_dir = &anlz_dir;
-                    scope.spawn(move || {
-                        chunk
-                            .iter()
-                            .filter_map(|id| {
-                                let dat = anlz_dir.join(id.to_string()).join("ANLZ0000.DAT");
-                                read_waveform_analysis(&dat).map(|a| (*id, a))
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            for handle in handles {
-                out.extend(handle.join().expect("waveform reader thread panicked"));
-            }
-        });
-        out
+        read_track_dirs(&anlz_dir, ids, |dir| read_waveform_analysis(&dir.join("ANLZ0000.DAT")))
     }
 
     /// The stored row preview of every analyzed track: one SQL query, no file reads.
@@ -621,6 +646,13 @@ impl LocalLibrary {
     /// Tracks that have an analysis row with stages still missing.
     pub fn get_incomplete_analysis_ids(&self) -> Result<Vec<i64>> {
         queries::select_incomplete_analysis_ids(&self.conn, analysis_stage::ALL)
+    }
+
+    /// Every track with what the track list needs of it (see [`TrackListRow`]), in one query. Row previews of tracks
+    /// stored before that column existed are missing until [`backfill_row_previews`](Self::backfill_row_previews)
+    /// has run.
+    pub fn get_track_list_rows(&self) -> Result<Vec<TrackListRow>> {
+        queries::select_track_list_rows(&self.conn)
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.
@@ -1395,6 +1427,57 @@ mod tests {
         lib.rescale_beat_grid(id, 64.0).unwrap();
         lib.release_user_key(id).unwrap();
         assert_eq!(locks(&lib, id), (true, false));
+    }
+
+    #[test]
+    fn track_list_rows_and_labels_match_the_per_track_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let plain = lib.add_track(&make_track("Plain", "/music/p.mp3")).unwrap();
+        let rated = lib.add_track(&make_track("Rated", "/music/r.mp3")).unwrap();
+        let imported = lib.add_track(&make_track("Imported", "/music/i.mp3")).unwrap();
+        for id in [rated, imported] {
+            lib.set_analysis(id, &make_analysis()).unwrap();
+        }
+        lib.write_analysis(imported, &make_analysis(), analysis_stage::WAVEFORM).unwrap();
+        let meta = |rating, color: Option<&str>| rekordbox::ImportedMeta {
+            source: rekordbox::SourceKind::Xml,
+            source_id: "1".into(),
+            grid_locked: false,
+            cues_locked: false,
+            rating,
+            color: color.map(String::from),
+            cues: Vec::new(),
+            grid: Vec::new(),
+        };
+        meta(Some(2), None).write(&lib.track_anlz_dir(rated).unwrap()).unwrap();
+        lib.set_user_rating(rated, 4).unwrap();
+        meta(Some(3), Some("#ff0000")).write(&lib.track_anlz_dir(imported).unwrap()).unwrap();
+        lib.set_user_rating(imported, 0).unwrap();
+
+        let labels = lib.track_labels_reader().read_all();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[&rated], TrackLabels { rating: Some(4), color: None });
+        assert_eq!(labels[&imported], TrackLabels { rating: None, color: Some("#ff0000".into()) });
+
+        let rows = lib.get_track_list_rows().unwrap();
+        let flags = lib.get_all_tracks_with_flags().unwrap();
+        let previews = lib.get_row_previews().unwrap();
+        assert_eq!(rows.len(), flags.len());
+        for (row, (track, has_artwork, has_analysis, _)) in rows.iter().zip(&flags) {
+            let id = i64::from(row.id);
+            assert_eq!(row.id, track.id);
+            assert_eq!(row.source_path, track.source_path.to_string_lossy());
+            assert_eq!((&row.title, &row.artist, &row.album, &row.genre), (&track.title, &track.artist, &track.album, &track.genre));
+            assert_eq!((row.tempo, &row.key, row.bitrate, row.file_size), (track.tempo, &track.key, track.bitrate, track.file_size));
+            assert_eq!(row.duration_secs, track.duration_secs);
+            assert_eq!(row.has_artwork, *has_artwork);
+            assert_eq!(row.analysis_stages.is_some(), *has_analysis);
+            assert_eq!(row.analysis_stages, lib.analysis_stages(id).unwrap());
+            assert_eq!(row.row_preview.as_ref(), previews.get(&id));
+        }
+        assert_eq!(rows.iter().find(|r| i64::from(r.id) == plain).unwrap().analysis_stages, None);
+        assert_eq!(lib.get_incomplete_analysis_ids().unwrap(), vec![imported]);
     }
 
     #[test]

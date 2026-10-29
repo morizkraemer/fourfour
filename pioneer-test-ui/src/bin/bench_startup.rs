@@ -117,9 +117,14 @@ fn run(dir: &Path) {
     let open_ms = ms(t);
 
     let t = Instant::now();
-    let rows = lib.get_all_tracks_with_flags().unwrap();
+    let rows = lib.get_track_list_rows().unwrap();
     let rows_ms = ms(t);
     drop(rows);
+
+    let t = Instant::now();
+    let labels = lib.track_labels_reader().read_all();
+    let labels_ms = ms(t);
+    drop(labels);
 
     let t = Instant::now();
     let infos = track_infos::build_track_infos(&lib).unwrap();
@@ -140,7 +145,7 @@ fn run(dir: &Path) {
     let json_ms = ms(t);
 
     println!(
-        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
+        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
         json.len(),
         build_ms + playlists_ms + json_ms,
     );
@@ -150,6 +155,7 @@ fn run(dir: &Path) {
             "tracks": count,
             "open_ms": open_ms,
             "track_rows_ms": rows_ms,
+            "track_labels_ms": labels_ms,
             "build_track_infos_ms": build_ms,
             "playlists_ms": playlists_ms,
             "json_ms": json_ms,

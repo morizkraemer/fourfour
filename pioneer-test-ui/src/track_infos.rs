@@ -1,4 +1,4 @@
-use pioneer_library::{LocalLibrary, RowPreview};
+use pioneer_library::{LocalLibrary, RowPreview, analysis_stage};
 
 pub use pioneer_library::{effective_preview, row_bands};
 
@@ -15,44 +15,44 @@ use crate::dto::TrackInfo;
 /// preview is synthesized from the color overview so the list mini-waveform
 /// stays consistent with the player strip — see #waveform-bug.
 pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
-    let rows = lib.get_all_tracks_with_flags().map_err(|e| e.to_string())?;
     lib.backfill_row_previews().map_err(|e| e.to_string())?;
-    let mut previews = lib.get_row_previews().map_err(|e| e.to_string())?;
-    let pending: std::collections::HashSet<i64> = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?.into_iter().collect();
+    let labels_reader = lib.track_labels_reader();
+    let (rows, mut labels) = std::thread::scope(|scope| {
+        let labels = scope.spawn(|| labels_reader.read_all());
+        let rows = lib.get_track_list_rows();
+        (rows, labels.join().expect("track label reader panicked"))
+    });
+    let rows = rows.map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
-        .map(|(track, has_artwork, has_analysis, has_cues)| {
-            let (waveform_bands, waveform_preview) = match has_analysis
-                .then(|| previews.remove(&i64::from(track.id)))
-                .flatten()
-            {
+        .map(|row| {
+            let (waveform_bands, waveform_preview) = match row.row_preview {
                 Some(RowPreview::Bands(bands)) => (Some(bands), None),
                 Some(RowPreview::Mono(mono)) => (None, Some(mono)),
                 Some(RowPreview::None) | None => (None, None),
             };
-            let imported = lib.imported_meta(i64::from(track.id));
+            let labels = labels.remove(&i64::from(row.id));
             TrackInfo {
-                id: track.id,
-                source_path: track.source_path.to_string_lossy().to_string(),
-                title: track.title,
-                artist: track.artist,
-                album: track.album,
-                genre: track.genre,
-                tempo: track.tempo,
-                key: track.key,
-                duration_secs: track.duration_secs,
-                bitrate: track.bitrate,
-                file_size: track.file_size,
-                has_artwork,
-                has_cues,
-                has_analysis,
-                analysis_pending: pending.contains(&i64::from(track.id)),
+                id: row.id,
+                source_path: row.source_path,
+                title: row.title,
+                artist: row.artist,
+                album: row.album,
+                genre: row.genre,
+                tempo: row.tempo,
+                key: row.key,
+                duration_secs: row.duration_secs,
+                bitrate: row.bitrate,
+                file_size: row.file_size,
+                has_artwork: row.has_artwork,
+                has_cues: false,
+                has_analysis: row.analysis_stages.is_some(),
+                analysis_pending: row.analysis_stages.is_some_and(|stages| stages != analysis_stage::ALL),
                 waveform_preview,
                 waveform_bands,
-                rating: lib.effective_rating(i64::from(track.id), imported.as_ref().and_then(|m| m.rating)),
-                color: imported.and_then(|m| m.color),
+                rating: labels.as_ref().and_then(|l| l.rating),
+                color: labels.and_then(|l| l.color),
             }
         })
         .collect())
 }
-

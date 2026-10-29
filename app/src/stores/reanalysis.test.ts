@@ -119,6 +119,12 @@ describe('re-analysis of analysed tracks', () => {
     expect(row(2).bpm).toBe('128.0');
   });
 
+  it('clears an embedded row preview that was never drawn', async () => {
+    await analyzeTrackIds([2]);
+    expect(row(2).bands).toBeFalsy();
+    expect(row(1).bands).toBeTruthy();
+  });
+
   it('does not read the stored analysis back while the stages are still running', async () => {
     await analyzeTrackIds([1]);
     vi.mocked(invoke).mockClear();

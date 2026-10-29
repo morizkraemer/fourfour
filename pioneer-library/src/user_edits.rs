@@ -1,7 +1,11 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+
 use anyhow::{Context, Result, bail};
 
 use pioneer_usb_writer::models::{Beat, BeatGrid};
 
+use crate::rekordbox::ImportedMeta;
 use crate::{LocalLibrary, UserEdits, queries};
 
 pub const MIN_BPM: f64 = 40.0;
@@ -37,7 +41,43 @@ pub fn is_camelot(key: &str) -> bool {
         && number.parse::<u8>().is_ok_and(|n| (1..=12).contains(&n))
 }
 
+/// What the track list shows from a track's sidecar files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrackLabels {
+    /// The hand-set rating over the imported one, as [`LocalLibrary::effective_rating`] gives it.
+    pub rating: Option<u8>,
+    /// The colour label imported from Rekordbox.
+    pub color: Option<String>,
+}
+
+/// Reads [`TrackLabels`] from the sidecar files alone, so it can run on another thread while the library is queried.
+pub struct TrackLabelsReader {
+    anlz_dir: Option<PathBuf>,
+}
+
+impl TrackLabelsReader {
+    /// [`TrackLabels`] of every track that has a rating or a colour, read on several threads.
+    pub fn read_all(&self) -> HashMap<i64, TrackLabels> {
+        let Some(anlz_dir) = &self.anlz_dir else { return HashMap::new() };
+        let Ok(entries) = std::fs::read_dir(anlz_dir) else { return HashMap::new() };
+        let ids: Vec<i64> = entries.filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok()).collect();
+        crate::read_track_dirs(anlz_dir, &ids, |dir| {
+            let imported = ImportedMeta::read(dir);
+            let rating = UserEdits::read(dir)
+                .and_then(|edits| edits.rating)
+                .or(imported.as_ref().and_then(|meta| meta.rating))
+                .filter(|&r| r > 0);
+            let color = imported.and_then(|meta| meta.color);
+            (rating.is_some() || color.is_some()).then_some(TrackLabels { rating, color })
+        })
+    }
+}
+
 impl LocalLibrary {
+    pub fn track_labels_reader(&self) -> TrackLabelsReader {
+        TrackLabelsReader { anlz_dir: self.anlz_dir() }
+    }
+
     pub fn user_edits(&self, track_id: i64) -> UserEdits {
         self.track_anlz_dir(track_id).and_then(|dir| UserEdits::read(&dir)).unwrap_or_default()
     }

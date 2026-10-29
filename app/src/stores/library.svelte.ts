@@ -99,21 +99,25 @@ export function isFavoritePlaylistName(name: string) {
   return favoriteSlotFromName(name) != null;
 }
 
-/** Lowest favorite slot a track belongs to (for the FAV column). */
-export function syncTrackFavoriteFields() {
-  const slotsByTrack = new Map<number, number[]>();
-  for (const pl of library.playlists) {
+function lowestFavoriteSlots(playlists: PlaylistInput[]): Map<number, number> {
+  const lowest = new Map<number, number>();
+  for (const pl of playlists) {
     const slot = favoriteSlotFromName(pl.name);
     if (slot == null) continue;
     for (const tid of pl.track_ids) {
-      const list = slotsByTrack.get(tid) ?? [];
-      list.push(slot);
-      slotsByTrack.set(tid, list);
+      const current = lowest.get(tid);
+      if (current === undefined || slot < current) lowest.set(tid, slot);
     }
   }
+  return lowest;
+}
+
+/** Lowest favorite slot a track belongs to (for the FAV column). */
+export function syncTrackFavoriteFields() {
+  const lowest = lowestFavoriteSlots(library.playlists);
   for (const track of library.tracks) {
-    const slots = slotsByTrack.get(track.id);
-    track.fav = slots?.length ? Math.min(...slots) : undefined;
+    const fav = lowest.get(track.id);
+    if (track.fav !== fav) track.fav = fav;
   }
 }
 
@@ -199,7 +203,6 @@ export async function ensureFavoriteSlots() {
     changed = true;
   }
   if (changed) await saveState();
-  syncTrackFavoriteFields();
 }
 
 /** Toggle membership in a favorite slot for each track (add / remove). */
@@ -576,6 +579,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (!ready.waveform) {
     track.bandsPreview = undefined;
     track.preview = undefined;
+    track.bandsWire = undefined;
   } else if (bandPreview) {
     if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
     track.preview = undefined;
@@ -715,6 +719,7 @@ function markTracksPendingAnalysis(ids: number[]) {
     if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
+    track.bandsWire = undefined;
     track.analysisLoaded = false;
     track.analysisPending = true;
     if (!track.bpmLocked) {
@@ -764,8 +769,22 @@ function handleAnalysisCompleteEvent() {
   }
 }
 
+const WIRE_BANDS_CACHE_LIMIT = 512;
+const wireBandsCache = new Map<string | number[], ReturnType<typeof rowBandsFromBandBytes>>();
+
+function rowBandsFromWire(wire: string | number[] | undefined) {
+  if (!wire) return null;
+  const hit = wireBandsCache.get(wire);
+  if (hit !== undefined) return hit;
+  const bytes = decodeBandPreview(wire);
+  const bands = bytes ? rowBandsFromBandBytes(bytes) : null;
+  wireBandsCache.set(wire, bands);
+  if (wireBandsCache.size > WIRE_BANDS_CACHE_LIMIT) wireBandsCache.delete(wireBandsCache.keys().next().value!);
+  return bands;
+}
+
 /* ── Mapper ─────────────────────────────────────────────────────────── */
-function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
+function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined) {
   const indexStr = String(idx + 1).padStart(2, '0');
   const bpmStr = t.tempo > 0 ? (t.tempo / 100).toFixed(1) : '—';
   const keyStr = t.key || '—';
@@ -793,7 +812,7 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     keyLocked: false,
     key: keyStr,
     time: timeStr,
-    fav: undefined,
+    fav,
     genre: t.genre || '—',
     year: '—',
     rating: t.rating ?? 0,
@@ -813,15 +832,13 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
       return fileStateGlyph(fileStateOf(this.id));
     },
     get bands() {
-      return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
-    }
+      if (this.bandsPreview) return rowBandsFromBandBytes(this.bandsPreview);
+      return this.preview ? rowBandsFor(this.preview) : rowBandsFromWire(this.bandsWire);
+    },
   };
 
-  // Embedded preview → paint the mini waveform immediately, no N+1 fetch: the 3-band row
-  // preview when the track has band data, else the mono PWAV.
-  const bandPreview = decodeBandPreview(t.waveform_bands);
-  if (bandPreview) {
-    local.bandsPreview = bandPreview;
+  if (t.waveform_bands) {
+    local.bandsWire = t.waveform_bands;
   } else {
     const preview = decodeTrackPreview(t.waveform_preview);
     if (preview && isValidWaveformPreview(preview)) {
@@ -830,6 +847,18 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
   }
 
   return local;
+}
+
+const TRACK_MAP_CHUNK = 2500;
+
+async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>) {
+  const mapped: Record<string, any>[] = new Array(tracks.length);
+  for (let start = 0; start < tracks.length; start += TRACK_MAP_CHUNK) {
+    if (start > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    const end = Math.min(tracks.length, start + TRACK_MAP_CHUNK);
+    for (let i = start; i < end; i++) mapped[i] = mapTrackInfoToLocal(tracks[i], i, favorites.get(tracks[i].id));
+  }
+  return mapped;
 }
 
 /* ── Actions ────────────────────────────────────────────────────────── */
@@ -841,7 +870,7 @@ export async function loadState() {
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
-    plainTracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
+    plainTracks = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
     resetSearchIndex();
     library.tracks = plainTracks;
     library.playlists = state.playlists;
