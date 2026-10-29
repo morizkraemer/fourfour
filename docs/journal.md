@@ -257,3 +257,4 @@
 2026-10-29 04:10 fb-mockups landed on branch fb-mockups e748a7b: player-edit-3 (3 options + DJ app research), player-empty, topbar (3 + collapse), files (health, missing, duplicates, backup); static preview https://dev.tail87069a.ts.net:5240. orchestrator spawn fb-icons icon round 6 (seat, opus)
 2026-10-29 04:20 fb-icons icon round 6 published on the icons canvas (12 icons, groove-as-trace, Konsole Groove as inspiration only)
 2026-10-29 05:10 fb-player landed on ov-1028 5cb96c3: empty player greyed, Q quantize (cue set/drag/CUE snap, Alt free), cue drag on big waveform, bar flags fixed side, waveform per-frame work 5.4→1.9 MP (p95 3.4→1.3 ms), MT/Q states, inspector Alt ×; 716 vitest, smoke 20/20; Mac check+install started. spawn fb-chrome search collapse + track count (seat, sonnet)
+2026-10-29 05:30 orchestrator - ov-1028 5cb96c3 (with fb-player) installed on Mac with bundled weights; 716 vitest, 0 check errors
