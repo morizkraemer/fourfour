@@ -54,6 +54,9 @@
     buildSourceContextMenuItems,
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
+  import { fileStatus, fileStateOf } from '../stores/file-status.svelte.ts';
+  import { locateTrack } from '../stores/file-health.svelte.ts';
+  import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
   import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
 
   /** When set, show this sidebar source instead of the active row. */
@@ -153,7 +156,11 @@
     )
   );
 
-  let baseTracks = $derived(tracksForSidebarSource(effectiveSource));
+  let showOnlyProblems = $derived(fileStatus.onlyProblems && !embedded && (effectiveSource ?? 'All Tracks') === 'All Tracks');
+  let baseTracks = $derived.by(() => {
+    const tracks = tracksForSidebarSource(effectiveSource);
+    return showOnlyProblems ? tracks.filter((t) => isUnplayable(fileStateOf(t.id))) : tracks;
+  });
   let filteredTracks = $derived(filterTracks(baseTracks, ui.listFilter));
 
   let layoutKind = $derived(layoutKindOverride ?? resolveLayoutKind(effectiveSource));
@@ -201,6 +208,7 @@
     if (dragging || isUsbView) return;
     select(track.id);
     lastSelectedId = track.id;
+    if (isUnplayable(fileStateOf(track.id))) return;
     if (player.track?.id === track.id && !player.loading && event.target.closest?.('[data-wave-seek]')) {
       if (!player.playing) void play();
     } else if (player.track?.id === track.id && !player.loading) {
@@ -554,12 +562,14 @@
     const trackId = rowMenu.trackId;
     if (trackId == null) return [];
     const ids = selection.ids.has(trackId) ? [...selection.ids] : [trackId];
-    return buildTrackContextMenuItems({
+    const items = buildTrackContextMenuItems({
       trackIds: ids,
       activePlaylist,
       isUsbView,
       onTracksRemoved: () => clearSelection(),
     });
+    if (ids.length !== 1 || isUsbView || !isUnplayable(fileStateOf(trackId))) return items;
+    return [{ label: 'Locate file…', onClick: () => void locateTrack(trackId) }, { isSeparator: true }, ...items];
   }
 
 </script>
@@ -647,12 +657,15 @@
         {#each poolSlots as slot (slot)}
           {@const index = indexForSlot(slot, firstRow, poolSize)}
           {@const track = index < endRow ? currentTracks[index] : undefined}
+          {@const fileState = track && !isUsbView ? fileStateOf(track.id) : undefined}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="ff-table__row"
             data-track-row={track ? '' : undefined}
             data-row-index={index}
+            data-file-status={fileState}
+            title={fileState ? fileStateTooltip(fileState, track.filePath) : undefined}
             style:top="{rowTop(index)}px"
             style:display={track ? undefined : 'none'}
             onclick={(e) => track && handleRowClick(track, e, index)}
@@ -665,7 +678,7 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
-              onWaveSeek={track && !isUsbView ? (progress) => loadTrackAt(track, progress) : undefined}
+              onWaveSeek={track && !isUsbView && !isUnplayable(fileState) ? (progress) => loadTrackAt(track, progress) : undefined}
               onRate={track && !isUsbView ? (stars) => void commitTrackRating(track.id, stars) : undefined}
             />
           </div>
@@ -765,6 +778,36 @@
     height: 28px;
     contain: layout paint style;
     cursor: default;
+  }
+  .ff-table__row :global(.ff-trow__cell--status) {
+    justify-content: center;
+    padding: 0;
+  }
+  .ff-table__row[data-file-status] :global(.ff-trow__cell--status .ff-trow__text) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font: 700 10px / 1 var(--ff-font-mono);
+  }
+  .ff-table__row[data-file-status='missing'] :global(.ff-trow__cell--status .ff-trow__text) {
+    background: color-mix(in srgb, var(--ff-status-warn) 16%, transparent);
+    color: var(--ff-status-warn);
+  }
+  .ff-table__row[data-file-status='error'] :global(.ff-trow__cell--status .ff-trow__text) {
+    background: var(--ff-danger-bg);
+    color: var(--ff-danger);
+  }
+  .ff-table__row[data-file-status='relocated'] :global(.ff-trow__cell--status .ff-trow__text) {
+    background: color-mix(in srgb, var(--ff-status-online) 14%, transparent);
+    color: var(--ff-status-online);
+  }
+  .ff-table__row[data-file-status='missing'] :global(.ff-trow__cell:not(.ff-trow__cell--status)),
+  .ff-table__row[data-file-status='error'] :global(.ff-trow__cell:not(.ff-trow__cell--status)) {
+    opacity: 0.45;
   }
   .ff-table__empty-container {
     display: flex;

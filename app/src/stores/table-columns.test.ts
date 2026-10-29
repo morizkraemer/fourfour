@@ -83,3 +83,18 @@ describe('imported rating and colour columns', () => {
     expect(keys('library').slice(-2)).toEqual(['rating', 'color']);
   });
 });
+
+describe('file status column', () => {
+  it('is shown first by default and slots into an older saved layout before fav', async () => {
+    resetColumns('library');
+    expect(keys('library')[0]).toBe('status');
+
+    vi.resetModules();
+    storage['fourfour.tableColumns.v3'] = JSON.stringify({
+      layouts: { library: { columns: [{ key: 'fav' }, { key: 'title' }, { key: 'time' }], sortKey: null, sortDir: 'asc' } },
+    });
+    const fresh = await import('./table-columns.svelte.ts');
+    fresh.initTableColumns();
+    expect(fresh.visibleColumns('library').map((c) => c.key).slice(0, 2)).toEqual(['status', 'fav']);
+  });
+});

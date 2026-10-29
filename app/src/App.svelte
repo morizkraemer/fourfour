@@ -23,6 +23,8 @@
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import CommandPalette from './modules/CommandPalette.svelte';
   import StickSyncDialog from './modules/StickSyncDialog.svelte';
+  import LibraryHealthDialog from './modules/LibraryHealthDialog.svelte';
+  import { initFileHealth } from './stores/file-health.svelte.ts';
   import { unlistenWhenReady } from './lib/lateUnlisten.ts';
   import { isEditableTarget } from './lib/editableTarget.ts';
 
@@ -72,6 +74,7 @@
   onMount(() => {
     initLibrary().then(() => {
       reconcileOrganizeTarget(library.playlists, library.volumes);
+      void initFileHealth();
     });
     initOrganize();
     void syncPlaybackAudioConfig();
@@ -158,6 +161,7 @@
 <Settings />
 <CommandPalette />
 <StickSyncDialog />
+<LibraryHealthDialog />
 
 <Dialog
   open={library.showAnalysisPrompt}
