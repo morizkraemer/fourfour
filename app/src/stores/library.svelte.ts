@@ -3,6 +3,7 @@
  * Interfaces with tauri.svelte.ts service layer and provides fallback mock data.
  */
 
+import { untrack } from 'svelte';
 import { appSettings, loadAppSettings, setAnalyzeAfterImport } from './app-settings.svelte.ts';
 import {
   getVersion,
@@ -68,12 +69,13 @@ import { fileStateGlyph } from '../lib/fileHealth.ts';
 const peakLoadInflight = new Map<number, Promise<void>>();
 
 /**
- * Shallow-bump so list rows re-render when nested track fields change. With `changedIds`, only those tracks' search
- * text is rebuilt instead of the whole index.
+ * Call after changing fields of the tracks `changedIds` through their rows: copies them to the plain objects the search
+ * text, counts and lookups read, rebuilds their search text and swaps the list so sorts and filters run again.
  */
-export function bumpLibraryTracks(changedIds?: Iterable<number>) {
-  if (changedIds && haystackById) refreshHaystacks(changedIds);
-  else resetSearchIndex();
+export function bumpLibraryTracks(changedIds: Iterable<number>) {
+  const ids = [...changedIds];
+  copyRowFieldsToPlainTracks(ids);
+  if (haystackById) refreshHaystacks(ids);
   trackList = trackList.slice();
   scheduleSearchIndexWarmup();
 }
@@ -115,10 +117,13 @@ function lowestFavoriteSlots(playlists: PlaylistInput[]): Map<number, number> {
 /** Lowest favorite slot a track belongs to (for the FAV column). */
 export function syncTrackFavoriteFields() {
   const lowest = lowestFavoriteSlots(library.playlists);
-  for (const track of library.tracks) {
+  library.tracks.forEach((track, i) => {
     const fav = lowest.get(track.id);
-    if (track.fav !== fav) track.fav = fav;
-  }
+    if (track.fav === fav) return;
+    track.fav = fav;
+    const plain = plainTracks[i];
+    if (plain?.id === track.id) plain.fav = fav;
+  });
 }
 
 function pushFavoritePlaylist(slot: number) {
@@ -236,13 +241,58 @@ function reactiveTrack<T extends object>(track: T): T {
  */
 let trackList = $state.raw<any[]>([]);
 
+/**
+ * The plain objects behind `library.tracks`, same order. Reading text through the row proxies costs ~1 s at 30k
+ * tracks; these are read instead. A write through a row does not reach its plain object (a `$state` proxy keeps its
+ * own copy), so `bumpLibraryTracks(ids)` copies the changed rows over.
+ */
+let plainTracks: Record<string, any>[] = [];
+
+function setLibraryTracks(tracks: Record<string, any>[]) {
+  plainTracks = tracks;
+  trackList = tracks.map(reactiveTrack);
+}
+
+function appendLibraryTracks(tracks: Record<string, any>[]) {
+  plainTracks = plainTracks.concat(tracks);
+  trackList = trackList.concat(tracks.map(reactiveTrack));
+}
+
+function isPlainContainer(value: object): boolean {
+  return Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function plainValue(value: unknown): unknown {
+  return value !== null && typeof value === 'object' && isPlainContainer(value) ? $state.snapshot(value) : value;
+}
+
+function isAccessor(object: object, key: string): boolean {
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  return descriptor !== undefined && !('value' in descriptor);
+}
+
+function copyRowFieldsToPlainTracks(ids: number[]) {
+  untrack(() => {
+    for (const id of ids) {
+      const i = trackIndexById(id);
+      const row = trackList[i];
+      const plain = plainTracks[i];
+      if (!row || plain?.id !== id || row === plain) continue;
+      for (const key of Object.keys(row)) {
+        if (isAccessor(plain, key)) continue;
+        plain[key] = plainValue(row[key]);
+      }
+    }
+  });
+}
+
 export const library = $state({
-  /** Replaced, never mutated in place; `bumpLibraryTracks()` after changing a track's fields. */
+  /** Replaced, never mutated in place; `bumpLibraryTracks(ids)` after changing a track's fields. */
   get tracks(): any[] {
     return trackList;
   },
   set tracks(tracks: any[]) {
-    trackList = tracks.map(reactiveTrack);
+    setLibraryTracks(tracks);
   },
   playlists: [] as PlaylistInput[],
   volumes: [] as string[],
@@ -323,12 +373,6 @@ export const library = $state({
 
 const haystackCache = new WeakMap<object, string[]>();
 
-/**
- * Library tracks as plain objects (`library.tracks` wraps these in reactive
- * proxies). Reading text through the proxies costs ~1 s at 30k tracks; the
- * plain objects see the same mutations without that cost.
- */
-let plainTracks: Record<string, unknown>[] = [];
 let haystackById: Map<number, string> | null = null;
 let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -353,11 +397,11 @@ function fillSearchIndex(limit: number) {
   }
 }
 
-function refreshHaystacks(ids: Iterable<number>) {
+function refreshHaystacks(ids: number[]) {
   for (const id of ids) {
     if (!haystackById!.has(id)) continue;
-    const track = libraryTrackById(id);
-    if (track) haystackById!.set(id, trackHaystack(track));
+    const plain = plainTracks[trackIndexById(id)];
+    if (plain?.id === id) haystackById!.set(id, trackHaystack(plain));
   }
 }
 
@@ -422,7 +466,7 @@ function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] 
   let haystacks = haystackCache.get(tracks);
   if (!haystacks) {
     const byId = haystackByIdFor();
-    const source = tracks === library.tracks && plainTracks.length === tracks.length ? plainTracks : tracks;
+    const source = tracks === library.tracks ? plainTracks : tracks;
     haystacks = source.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
     haystackCache.set(tracks, haystacks);
   }
@@ -465,19 +509,25 @@ let indexCache: { source: object; length: number; byId: Map<number, number> } | 
 /** Tracks never analysed. Changes with the track list (every field change bumps it); counted on the plain objects. */
 export function unanalyzedTrackCount(): number {
   const tracks = library.tracks;
-  const source = plainTracks.length === tracks.length ? plainTracks : tracks;
   let count = 0;
-  for (const track of source) if (!track.analyzed) count++;
+  for (let i = 0; i < tracks.length; i++) if (!plainTracks[i].analyzed) count++;
   return count;
+}
+
+function trackIndexById(id: number): number {
+  if (!indexCache || indexCache.source !== plainTracks || indexCache.length !== plainTracks.length) {
+    indexCache = {
+      source: plainTracks,
+      length: plainTracks.length,
+      byId: new Map(plainTracks.map((t, i) => [t.id as number, i])),
+    };
+  }
+  return indexCache.byId.get(id) ?? -1;
 }
 
 function libraryTrackById(id: number) {
   const tracks = library.tracks;
-  const ids = plainTracks.length === tracks.length ? plainTracks : tracks;
-  if (!indexCache || indexCache.source !== ids || indexCache.length !== ids.length) {
-    indexCache = { source: ids, length: ids.length, byId: new Map(ids.map((t, i) => [t.id as number, i])) };
-  }
-  const track = tracks[indexCache.byId.get(id) ?? -1];
+  const track = tracks[trackIndexById(id)];
   return track?.id === id ? track : tracks.find((t) => t.id === id);
 }
 
@@ -620,16 +670,16 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
       if (!isValidAnalysisPayload(res)) {
         track.analyzed = false;
         track.analysisLoaded = false;
-        bumpLibraryTracks();
+        bumpLibraryTracks([id]);
         return;
       }
-      if (applyWaveformAndCuesFromAnalysis(track, res)) bumpLibraryTracks();
+      if (applyWaveformAndCuesFromAnalysis(track, res)) bumpLibraryTracks([id]);
       performance.mark('ff:detail-ready');
     } catch (err) {
       console.warn('ensureTrackPeaksLoaded failed:', err);
       track.analyzed = false;
       track.analysisLoaded = false;
-      bumpLibraryTracks();
+      bumpLibraryTracks([id]);
     } finally {
       peakLoadInflight.delete(id);
     }
@@ -730,7 +780,7 @@ function markTracksPendingAnalysis(ids: number[]) {
     restarted.push(id);
   }
   if (restarted.length === 0) return;
-  bumpLibraryTracks();
+  bumpLibraryTracks(restarted);
   analysisStartListeners.forEach((listener) => listener(restarted));
 }
 
@@ -870,9 +920,9 @@ export async function loadState() {
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
-    plainTracks = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
+    const tracks = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
     resetSearchIndex();
-    library.tracks = plainTracks;
+    setLibraryTracks(tracks);
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
 
@@ -895,9 +945,8 @@ async function landImportedTracks(added: TrackInfo[]) {
   const favorites = lowestFavoriteSlots(library.playlists);
   const mapped = await mapTracksInTaskSizedChunks(added, favorites, offset);
   recentlyAddedCount += added.filter((t) => t.tempo > 0).length;
-  plainTracks = plainTracks.concat(mapped);
+  appendLibraryTracks(mapped);
   resetSearchIndex();
-  library.tracks = plainTracks;
   scheduleSearchIndexWarmup();
 }
 
