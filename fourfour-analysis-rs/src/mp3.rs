@@ -200,6 +200,10 @@ pub fn leading_silence_frames(path: &Path) -> u32 {
     scan(path).filter(|t| t.header_counts).map_or(0, |t| t.frame_samples)
 }
 
+pub fn leading_silence_s(path: &Path) -> f64 {
+    scan(path).filter(|t| t.header_counts).map_or(0.0, |t| t.frame_samples as f64 / t.sample_rate as f64)
+}
+
 pub fn timeline_shift_s(path: &Path, rule: DelayRule) -> f64 {
     if rule == DelayRule::ModelLead {
         return MODEL_LEAD_MS / 1000.0;
@@ -275,6 +279,7 @@ mod tests {
         assert_eq!(t.lame_delay, Some(576));
         assert!(t.header_counts);
         assert_eq!(leading_silence_frames(&path), 1152);
+        assert_eq!(leading_silence_s(&path), 1152.0 / 44100.0);
         std::fs::remove_file(path).ok();
     }
 

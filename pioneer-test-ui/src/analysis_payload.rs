@@ -125,11 +125,13 @@ pub fn build_analysis_json(
 
     match analysis {
         Some(a) => {
-            // Get track duration for beat grid display
             let duration_ms = lib
                 .get_track(track_id)
                 .map_err(|e| e.to_string())?
-                .map(|t| (t.duration_secs * 1000.0).round() as u64)
+                .map(|t| {
+                    let lead_s = fourfour_analysis::mp3::leading_silence_s(&t.source_path);
+                    ((t.duration_secs + lead_s) * 1000.0).round() as u64
+                })
                 .unwrap_or(0);
 
             let preview = effective_preview(&a);
