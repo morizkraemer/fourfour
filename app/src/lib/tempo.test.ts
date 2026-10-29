@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   bpmDiffers,
   camelotStep,
+  harmonicNeighbours,
+  keyCells,
+  keyWrittenLike,
   clampPercent,
   clampShift,
   formatPercent,
@@ -258,5 +261,26 @@ describe('camelotStep', () => {
   });
   it('rejects text that is not a key', () => {
     expect(camelotStep('—', 1)).toBeNull();
+  });
+});
+
+describe('key popup helpers', () => {
+  it('lists the 12 keys of a mode with their names', () => {
+    const minor = keyCells(true);
+    expect(minor).toHaveLength(12);
+    expect(minor[7]).toEqual({ camelot: '8A', name: 'Am' });
+    expect(keyCells(false)[7]).toEqual({ camelot: '8B', name: 'C' });
+  });
+
+  it('finds the harmonic neighbours, wrapping round the wheel', () => {
+    expect(harmonicNeighbours('8A').sort()).toEqual(['7A', '8B', '9A']);
+    expect(harmonicNeighbours('12B').sort()).toEqual(['11B', '12A', '1B']);
+    expect(harmonicNeighbours('nope')).toEqual([]);
+  });
+
+  it('writes a picked key the way the track writes its key', () => {
+    expect(keyWrittenLike('8A', '3B')).toBe('8A');
+    expect(keyWrittenLike('8A', 'Cm')).toBe('Am');
+    expect(keyWrittenLike('1A', 'Ebm')).toBe('Abm');
   });
 });

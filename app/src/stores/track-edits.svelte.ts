@@ -4,7 +4,7 @@
  * row, the inspector and the loaded player track.
  */
 
-import { library, bumpLibraryTracks } from './library.svelte.ts';
+import { analyzeTrackIds, library, bumpLibraryTracks } from './library.svelte.ts';
 import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setTrackMode, toggleExpanded } from './player.svelte.ts';
 import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
@@ -104,8 +104,6 @@ export function halveTrackBpm(trackId: number): boolean {
   return next !== null && commitTrackBpm(trackId, next);
 }
 
-export const bpmEntry = $state({ request: 0 });
-
 /** The track the BPM commands act on: the loaded one, else the selected analysed one. */
 export function bpmTargetId(): number | null {
   const loaded = player.track;
@@ -118,15 +116,13 @@ export function loadedTrackHasBpm(): boolean {
   return Number(player.track?.bpm) > 0;
 }
 
-/** Open the big player, switch its BPM field to track mode and put it into typing mode. */
+/** Open the big player and its track BPM popup. */
 export async function requestBpmEntry(): Promise<void> {
   if (!player.expanded) {
     toggleExpanded();
     await tick();
   }
   setTrackMode('bpm', true);
-  await tick();
-  bpmEntry.request++;
 }
 
 const requestedKeys = new Map<number, string>();
@@ -193,6 +189,12 @@ export async function releaseTrackEdits(trackId: number): Promise<void> {
     track.keyLocked = false;
     bumpLibraryTracks();
   }
+}
+
+/** Give the hand-set BPM and key back to the analysis: release them and analyse the track again. */
+export async function resetTrackToAnalyzed(trackId: number): Promise<void> {
+  await releaseTrackEdits(trackId);
+  await analyzeTrackIds([trackId]);
 }
 
 export async function commitTrackFields(trackId: number, edits: TrackFieldEdits): Promise<boolean> {

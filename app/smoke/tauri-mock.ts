@@ -244,6 +244,7 @@ export function installTauriMock(initial: LoadedState) {
       case 'set_track_key':
       case 'set_track_rating':
       case 'release_user_edits':
+      case 'analyze_track_ids':
         return null;
       case 'plugin:event|listen': {
         const id = nextListenerId++;

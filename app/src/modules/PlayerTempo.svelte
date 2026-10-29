@@ -8,9 +8,10 @@
 <script lang="ts">
   import { Icon, keyColor } from '$ds';
   import TempoField from './TempoField.svelte';
-  import { player, setTrackMode } from '../stores/player.svelte.ts';
-  import { bpmEntry, commitTrackBpm, commitTrackKey, doubleTrackBpm, halveTrackBpm, stepTrackBpm, stepTrackKey } from '../stores/track-edits.svelte.ts';
-  import { tempo, setKeyLock, setKeyShift, setTempoPercent } from '../stores/tempo.svelte.ts';
+  import TrackBpmPopup from './TrackBpmPopup.svelte';
+  import TrackKeyPopup from './TrackKeyPopup.svelte';
+  import { endTrackModes, player, setTrackMode } from '../stores/player.svelte.ts';
+    import { tempo, setKeyLock, setKeyShift, setTempoPercent } from '../stores/tempo.svelte.ts';
   import { quantize, setQuantize } from '../stores/quantize.svelte.ts';
   import {
     BPM_CLICK_STEP,
@@ -22,7 +23,6 @@
     effectiveShift,
     formatBpm,
     parseBpmEntry,
-    camelotStep,
     parseKeyEntry,
     percentAfterBpmStep,
     percentForBpm,
@@ -67,27 +67,16 @@
     return true;
   }
 
-  let trackBpm = $derived(analysedBpm);
   let bpmTrackMode = $derived(expanded && player.trackBpmMode);
   let keyTrackMode = $derived(expanded && player.trackKeyMode);
 
-  function trackKeyEntry(typed: string): boolean {
-    const key = camelotStep(typed.trim().toUpperCase(), 0);
-    if (key === null || !player.track) return false;
-    void commitTrackKey(player.track.id, key);
-    keyDone();
-    return true;
-  }
+  let keyPen: HTMLElement | undefined = $state();
+  let bpmPen: HTMLElement | undefined = $state();
 
-  function trackBpmEntry(typed: string): boolean {
-    const bpm = parseBpmEntry(typed);
-    if (bpm === null || !player.track || !commitTrackBpm(player.track.id, bpm)) return false;
-    setTrackMode('bpm', false);
-    return true;
-  }
-
-  function keyDone() {
-    setTrackMode('key', false);
+  function openTrackEdit(field: 'bpm' | 'key') {
+    const open = field === 'bpm' ? bpmTrackMode : keyTrackMode;
+    endTrackModes();
+    setTrackMode(field, !open);
   }
 </script>
 
@@ -96,78 +85,76 @@
     <div class="ff-ptempo__group">
       <TempoField
         tall
-        label={keyTrackMode ? 'Track key' : 'Key'}
-        text={hasKey ? (keyTrackMode ? analysedKey : keyNow) : '—'}
+        label="Key"
+        text={hasKey ? keyNow : '—'}
         width="5ch"
         pxPerUnit={DRAG_PX_PER_UNIT.key}
-        color={keyColor(keyTrackMode ? analysedKey : keyNow)}
+        color={keyColor(keyNow)}
         disabled={!hasKey}
-        editText={hasKey ? (keyTrackMode ? analysedKey : keyNow) : ''}
-        onStep={(units) => (keyTrackMode ? void stepTrackKey(player.track!.id, units) : stepKey(units))}
-        onSet={keyTrackMode ? trackKeyEntry : setKey}
-        onReset={() => !keyTrackMode && setKeyShift(0)} />
+        editText={hasKey ? keyNow : ''}
+        onStep={stepKey}
+        onSet={setKey}
+        onReset={() => setKeyShift(0)} />
       <button
         type="button"
         class="ff-ptempo__pen"
         class:ff-ptempo__pen--on={keyTrackMode}
+        bind:this={keyPen}
         aria-pressed={keyTrackMode}
-        aria-label={keyTrackMode ? 'Finish editing track key' : 'Edit track key'}
-        title={keyTrackMode ? 'Back to pitch (Esc)' : 'Edit the track key'}
+        aria-haspopup="dialog"
+        aria-label="Edit track key"
+        title="Edit the track key"
         disabled={!hasKey}
-        onclick={() => setTrackMode('key', !keyTrackMode)}>
-        {#if keyTrackMode}<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6" /></svg>{:else}<Icon name="pencil" size={13} />{/if}
+        onclick={() => openTrackEdit('key')}>
+        <Icon name="pencil" size={13} />
       </button>
     </div>
     <div class="ff-ptempo__group">
       <span class="ff-ptempo__slot">
-        {#if bpmTrackMode}
-          <button type="button" class="ff-ptempo__slot-btn" aria-label="Halve track BPM" title="Halve the track BPM"
-            disabled={!hasBpm} onclick={() => halveTrackBpm(player.track!.id)}>÷2</button>
-          <button type="button" class="ff-ptempo__slot-btn" aria-label="Double track BPM" title="Double the track BPM"
-            disabled={!hasBpm} onclick={() => doubleTrackBpm(player.track!.id)}>×2</button>
-        {:else}
-          <button
-            type="button"
-            class="ff-ptempo__toggle ff-ptempo__toggle--fill"
-            aria-pressed={tempo.keyLock}
-            disabled={!player.track}
-            title="Master Tempo: keep the key when the tempo changes"
-            onclick={() => setKeyLock(!tempo.keyLock)}>MT</button>
-          <button
-            type="button"
-            class="ff-ptempo__toggle ff-ptempo__toggle--fill"
-            aria-pressed={quantize.on}
-            disabled={!player.track}
-            title="Quantize: hot cues and CUE snap to the beat grid (hold Alt while dragging a cue to place it freely)"
-            onclick={() => setQuantize(!quantize.on)}>Q</button>
-        {/if}
+        <button
+          type="button"
+          class="ff-ptempo__toggle ff-ptempo__toggle--fill"
+          aria-pressed={tempo.keyLock}
+          disabled={!player.track}
+          title="Master Tempo: keep the key when the tempo changes"
+          onclick={() => setKeyLock(!tempo.keyLock)}>MT</button>
+        <button
+          type="button"
+          class="ff-ptempo__toggle ff-ptempo__toggle--fill"
+          aria-pressed={quantize.on}
+          disabled={!player.track}
+          title="Quantize: hot cues and CUE snap to the beat grid (hold Alt while dragging a cue to place it freely)"
+          onclick={() => setQuantize(!quantize.on)}>Q</button>
       </span>
       <TempoField
         tall
-        label={bpmTrackMode ? 'Track BPM' : 'BPM'}
-        text={bpmTrackMode ? (hasBpm ? trackBpm.toFixed(2) : '—') : formatBpm(bpmNow)}
+        label="BPM"
+        text={formatBpm(bpmNow)}
         width="8ch"
         pxPerUnit={DRAG_PX_PER_UNIT.bpm}
-        color={!bpmTrackMode && bpmDiffers(analysedBpm, bpmNow) ? MARKED : undefined}
+        color={bpmDiffers(analysedBpm, bpmNow) ? MARKED : undefined}
         disabled={!hasBpm}
-        editText={hasBpm ? (bpmTrackMode ? trackBpm : bpmNow).toFixed(2) : ''}
-        editSignal={bpmEntry.request}
-        onStep={(units, tier, fromButton) => (bpmTrackMode ? void stepTrackBpm(player.track!.id, units, tier) : stepBpm(units, tier, fromButton))}
-        onSet={bpmTrackMode ? trackBpmEntry : setBpm}
-        onReset={() => !bpmTrackMode && setTempoPercent(0)} />
+        editText={hasBpm ? bpmNow.toFixed(2) : ''}
+        onStep={stepBpm}
+        onSet={setBpm}
+        onReset={() => setTempoPercent(0)} />
       <button
         type="button"
         class="ff-ptempo__pen"
         class:ff-ptempo__pen--on={bpmTrackMode}
+        bind:this={bpmPen}
         aria-pressed={bpmTrackMode}
-        aria-label={bpmTrackMode ? 'Finish editing track BPM' : 'Edit track BPM'}
-        title={bpmTrackMode ? 'Back to pitch (Esc)' : 'Edit the track BPM (moves the grid, no pitch)'}
+        aria-haspopup="dialog"
+        aria-label="Edit track BPM"
+        title="Edit the track BPM (moves the grid, no pitch)"
         disabled={!hasBpm}
-        onclick={() => setTrackMode('bpm', !bpmTrackMode)}>
-        {#if bpmTrackMode}<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 12 10 18 20 6" /></svg>{:else}<Icon name="pencil" size={13} />{/if}
+        onclick={() => openTrackEdit('bpm')}>
+        <Icon name="pencil" size={13} />
       </button>
     </div>
   </div>
+  {#if keyTrackMode}<TrackKeyPopup anchor={keyPen} />{/if}
+  {#if bpmTrackMode}<TrackBpmPopup anchor={bpmPen} />{/if}
 {:else}
 <div class="ff-ptempo" class:ff-ptempo--idle={!player.track} role="group" aria-label="Tempo and key">
     <button
@@ -268,27 +255,6 @@
     width: 58px;
     height: 28px;
     flex: none;
-  }
-  .ff-ptempo__slot-btn {
-    flex: 1;
-    min-width: 0;
-    padding: 0;
-    border: none;
-    border-radius: var(--ff-radius-md);
-    background: none;
-    color: var(--ff-text-mid);
-    font-family: var(--ff-font-mono);
-    font-size: var(--ff-type-num);
-    font-weight: 600;
-    cursor: pointer;
-  }
-  .ff-ptempo__slot-btn:hover:not(:disabled) {
-    background: var(--ff-hover);
-    color: var(--ff-text);
-  }
-  .ff-ptempo__slot-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
   }
   .ff-ptempo__pen {
     display: inline-flex;
