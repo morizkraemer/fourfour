@@ -75,34 +75,62 @@ test('very narrow centre column moves the search icon into the left sidebar', as
   await page.screenshot({ path: `${SHOTS}/moved-to-sidebar-state.png` });
 });
 
-for (const [label, width] of [['top-bar-icon', 1100], ['sidebar-icon', 900]] as const) {
-  test(`clicking the ${label} opens the search over the top bar and typing filters`, async ({ smoke: { page } }) => {
+const COLLAPSED = [['top-bar-icon', 1100], ['sidebar-icon', 900]] as const;
+const modalInput = (page: Page) => page.locator('.ff-cp-overlay input');
+const modalBox = (page: Page) => box(page, '.ff-cp-overlay .ff-cp');
+
+async function expectCentredModal(page: Page, width: number) {
+  const dialog = await modalBox(page);
+  expect(Math.abs(dialog.x + dialog.width / 2 - width / 2)).toBeLessThanOrEqual(2);
+  expect(dialog.width).toBeGreaterThanOrEqual(Math.min(600, width - 32));
+  await expect(page.locator('.ff-gheader__search input')).toBeHidden();
+  const truncated = await page.locator('.ff-cp-overlay .ff-cp__row-name').evaluateAll((els) =>
+    els.filter((el) => el.scrollWidth > el.clientWidth).map((el) => el.textContent),
+  );
+  expect(truncated).toEqual([]);
+  await expect(page.locator('.ff-cp-overlay .ff-cp__section-head', { hasText: 'Go to' })).toBeVisible();
+}
+
+for (const [label, width] of COLLAPSED) {
+  for (const trigger of ['icon', 'shortcut'] as const) {
+    test(`${trigger} opens a centred search modal from the ${label} state`, async ({ smoke: { page } }) => {
+      await setup(page, width, true);
+      if (trigger === 'icon') await page.locator('[data-search-icon]').click();
+      else await page.keyboard.press('ControlOrMeta+f');
+      await expect(modalInput(page)).toBeFocused();
+      await expectCentredModal(page, width);
+      await page.screenshot({ path: `${SHOTS}/modal-${label}-${trigger}.png` });
+    });
+  }
+
+  test(`the ${label} search modal filters the table, Esc and backdrop close it`, async ({ smoke: { page } }) => {
     await setup(page, width, true);
     await page.locator('[data-search-icon]').click();
-    const input = page.locator('.ff-gheader__search input');
-    await expect(input).toBeVisible();
-    await expect(input).toBeFocused();
-    await input.fill('Track 07');
+    await modalInput(page).fill('Track 07');
     await expect(rows(page)).not.toHaveCount(TRACK_COUNT);
-    await page.screenshot({ path: `${SHOTS}/open-from-${label}.png` });
-    await input.fill('');
+    await page.screenshot({ path: `${SHOTS}/modal-${label}-filtered.png` });
     await page.keyboard.press('Escape');
-    await expect(input).toBeHidden();
+    await expect(modalInput(page)).toBeHidden();
+    await page.locator('[data-search-icon]').click();
+    await expect(modalInput(page)).toBeVisible();
+    await page.mouse.click(4, 4);
+    await expect(modalInput(page)).toBeHidden();
   });
 }
+
+test('the full field state keeps the dropdown under the top bar field', async ({ smoke: { page } }) => {
+  await setup(page, 1600, false);
+  await page.locator('.ff-gheader__search input').click();
+  await expect(page.locator('.ff-cp--anchored')).toBeVisible();
+  await expect(page.locator('.ff-cp-overlay')).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/field-dropdown.png` });
+});
 
 test('the track count is plain text, not a button', async ({ smoke: { page } }) => {
   const text = page.locator('.ff-gheader__plain');
   await expect(text).toContainText('tracks');
   await expect(page.locator('.ff-gheader__chip--idle')).toHaveCount(0);
   expect(await text.evaluate((el) => getComputedStyle(el).cursor)).not.toBe('pointer');
-});
-
-test('Cmd/Ctrl+F opens the search while collapsed', async ({ smoke: { page } }) => {
-  await setup(page, 1100, true);
-  await page.keyboard.press('ControlOrMeta+f');
-  await expect(page.locator('.ff-gheader__search input')).toBeVisible();
-  await expect(page.locator('.ff-gheader__search input')).toBeFocused();
 });
 
 const centreY = (b: { y: number; height: number }) => b.y + b.height / 2;
