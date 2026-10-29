@@ -42,8 +42,8 @@ fi
 AUDIO_LIST="$DIR/audio-all.txt"
 find -L "$AUDIO" -type f \( -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aiff' \) | LC_ALL=C sort > "$AUDIO_LIST"
 [ -s "$AUDIO_LIST" ] || { echo "no audio under $AUDIO (set FF_PERF_AUDIO)" >&2; exit 1; }
-awk 'NR % 41 == 1' "$AUDIO_LIST" | head -n 12 > "$DIR/audio-load.txt"
-awk -v step="$(( $(wc -l < "$AUDIO_LIST") / ANALYSIS ))" 'NR % step == 7' "$AUDIO_LIST" | head -n "$ANALYSIS" > "$DIR/audio-analysis.txt"
+awk 'NR % 41 == 1 && ++n <= 12' "$AUDIO_LIST" > "$DIR/audio-load.txt"
+awk -v step="$(( $(wc -l < "$AUDIO_LIST") / ANALYSIS ))" -v max="$ANALYSIS" 'NR % step == 7 && ++n <= max' "$AUDIO_LIST" > "$DIR/audio-analysis.txt"
 
 evict() {
   python3 -I - "$@" <<'PY'
