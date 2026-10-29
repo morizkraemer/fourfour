@@ -1,4 +1,3 @@
-// @vitest-environment client-runtime
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hooks = vi.hoisted(() => ({

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { BEAT_NUDGE_MS, createGridPersister, gridForStorage, gridFromStorage, gridAnchorMs, gridNudgeMs, rescaleBeats, shiftBeats, shiftBeatsByBeat, shiftToPlaceDownbeatAt, shiftedAnchorMs, type BeatMarker } from './beatGrid.ts';
