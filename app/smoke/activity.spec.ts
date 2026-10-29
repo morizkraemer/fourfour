@@ -65,6 +65,7 @@ test('the activity button rests as a quiet import icon with a tooltip', async ({
   await expect(button(page)).toHaveAttribute('data-activity', 'rest');
   await expect(button(page)).toHaveAttribute('title', 'Import…');
   await expect(button(page)).toHaveText('');
+  await expect(button(page).locator('[data-import-icon]')).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/rest.png`, clip: TOP_BAR_CLIP });
 });
 
@@ -113,16 +114,14 @@ test('the popover keeps the full last-import summary after the button rests', as
   });
   await importFolder(page);
   await page.locator('.ff-dialog').getByRole('button', { name: 'Skip duplicates' }).click();
-  await expect(button(page)).toHaveText('Added 2 · 1 duplicate skipped · 4 files not imported');
+  await expect(button(page)).toHaveText('Added 2 · 5 already in library · 1 duplicate skipped');
   await dismissAnalysisPrompt(page);
   await expect(button(page)).toHaveAttribute('data-activity', 'rest', { timeout: 9000 });
 
   await button(page).click();
   const last = menu(page).locator('[data-last-import]');
   await expect(last).toContainText('Last import');
-  await expect(last).toContainText('Added 2 tracks');
-  await expect(last).toContainText('5 already in your library');
-  await expect(last).toContainText('1 duplicate skipped');
+  await expect(last.locator('.ff-activity__headline')).toHaveText('Added 2 · 5 already in library · 1 duplicate skipped');
   await expect(last).toContainText('3 files skipped: unsupported format (.m4p, .txt)');
   await expect(last).toContainText('1 audio file couldn’t be read');
   await page.screenshot({ path: `${SHOTS}/popover-last-import.png`, clip: { x: 900, y: 0, width: 700, height: 360 } });
@@ -140,7 +139,7 @@ test('Import folder and Import files open the existing import paths', async ({ s
   await setWindow(page, { __smokePickPath: `${FOLDER}/Low Sun.mp3`, __smokeImport: { tracks: [], already: 1 } });
   await button(page).click();
   await entries(page).filter({ hasText: 'Import files…' }).click();
-  await expect(button(page)).toHaveText('File already in your library');
+  await expect(button(page)).toHaveText('Nothing new');
   expect(await smoke.invokes('plan_import')).toEqual([{ paths: [FOLDER] }, { paths: [`${FOLDER}/Low Sun.mp3`] }]);
 });
 
@@ -169,4 +168,43 @@ test('the missing state still works and comes back after an import result', asyn
   await expect(button(page)).toHaveText('Added 2');
   await dismissAnalysisPrompt(page);
   await expect(button(page)).toHaveText('2 missing', { timeout: 9000 });
+});
+
+const prompt = (page: Page) => page.locator('.ff-dialog').filter({ hasText: 'Analyze imported tracks?' });
+
+test('the analyze prompt offers an always-analyze checkbox that is saved and skips the prompt next time', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokePickPath: FOLDER, __smokeImport: TWO_NEW });
+  await importFolder(page);
+  await expect(prompt(page)).toContainText('2 tracks were added');
+  const always = prompt(page).locator('[data-analyze-always]');
+  await expect(always).toContainText('Always analyze new tracks automatically');
+  await expect(always).toHaveAttribute('aria-checked', 'false');
+  await always.click();
+  await expect(always).toHaveAttribute('aria-checked', 'true');
+  await page.screenshot({ path: `${SHOTS}/analyze-prompt-always.png` });
+  await prompt(page).getByRole('button', { name: 'Analyze' }).click();
+  await expect(prompt(page)).toHaveCount(0);
+  expect(await smoke.invokes('set_analyze_after_import')).toEqual([{ enabled: true }]);
+  expect((await smoke.invokes('analyze_track_ids')).length).toBe(1);
+
+  await setWindow(page, { __smokeImport: { tracks: [newTrack(103, 'Late Bus.mp3')], already: 0 } });
+  await button(page).click();
+  await entries(page).filter({ hasText: 'Import folder…' }).click();
+  await expect(button(page)).toHaveText('Added 1');
+  await expect(prompt(page)).toHaveCount(0);
+  await expect.poll(async () => (await smoke.invokes('analyze_track_ids')).length).toBe(2);
+});
+
+test('Settings → Library can turn automatic analysis after import off again', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokeAnalyzeAfterImport: true });
+  await page.keyboard.press('Control+,');
+  await page.locator('.ff-settings-sheet__nav-item').filter({ hasText: 'Library' }).click();
+  const toggle = page.getByRole('switch', { name: 'Always analyze new tracks automatically' });
+  await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await page.screenshot({ path: `${SHOTS}/settings-library-analyze.png` });
+  await toggle.click();
+  await expect.poll(async () => (await smoke.invokes('set_analyze_after_import')).at(-1)).toEqual({ enabled: false });
 });
