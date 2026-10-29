@@ -28,6 +28,8 @@ import { resetTempoForNewTrack, tempo } from './tempo.svelte.ts';
 import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
 import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cues.svelte.ts';
 import { initialCuePointMs } from '../lib/cues.ts';
+import { fileStateOf, noteBlockedLoad } from './file-status.svelte.ts';
+import { isUnplayable } from '../lib/fileHealth.ts';
 import { quantize } from './quantize.svelte.ts';
 import { quantizedMs } from '../lib/quantize.ts';
 import {
@@ -433,6 +435,12 @@ function prioritizeIfUnanalyzed(trackId: number, completeFallback: boolean) {
 
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
+  const requestedId = input?.raw?.id ?? input?.id;
+  if (requestedId != null && isUnplayable(fileStateOf(requestedId))) {
+    playPending = false;
+    noteBlockedLoad(requestedId);
+    return;
+  }
   const gen = ++loadGeneration;
   void flushBeatGridEdits();
   void flushCueEdits();

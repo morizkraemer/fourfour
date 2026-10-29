@@ -208,7 +208,6 @@
     if (dragging || isUsbView) return;
     select(track.id);
     lastSelectedId = track.id;
-    if (isUnplayable(fileStateOf(track.id))) return;
     if (player.track?.id === track.id && !player.loading && event.target.closest?.('[data-wave-seek]')) {
       if (!player.playing) void play();
     } else if (player.track?.id === track.id && !player.loading) {
@@ -678,7 +677,7 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
-              onWaveSeek={track && !isUsbView && !isUnplayable(fileState) ? (progress) => loadTrackAt(track, progress) : undefined}
+              onWaveSeek={track && !isUsbView ? (progress) => loadTrackAt(track, progress) : undefined}
               onRate={track && !isUsbView ? (stars) => void commitTrackRating(track.id, stars) : undefined}
             />
           </div>

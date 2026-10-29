@@ -12,7 +12,22 @@ export const fileStatus = $state({
   onlyProblems: false,
   dialogOpen: false,
   relocating: false,
+  blockedTrackId: null as number | null,
 });
+
+const BLOCKED_TIP_MS = 5000;
+let blockedTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function noteBlockedLoad(trackId: number) {
+  fileStatus.blockedTrackId = trackId;
+  clearTimeout(blockedTimer);
+  blockedTimer = setTimeout(() => (fileStatus.blockedTrackId = null), BLOCKED_TIP_MS);
+}
+
+export function dismissBlockedLoad() {
+  clearTimeout(blockedTimer);
+  fileStatus.blockedTrackId = null;
+}
 
 export function fileStateOf(trackId: number): FileState | undefined {
   return fileStatus.byId[trackId];

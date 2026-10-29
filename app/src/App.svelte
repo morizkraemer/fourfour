@@ -24,6 +24,7 @@
   import CommandPalette from './modules/CommandPalette.svelte';
   import StickSyncDialog from './modules/StickSyncDialog.svelte';
   import LibraryHealthDialog from './modules/LibraryHealthDialog.svelte';
+  import FileBlockedTip from './modules/FileBlockedTip.svelte';
   import { initFileHealth } from './stores/file-health.svelte.ts';
   import { unlistenWhenReady } from './lib/lateUnlisten.ts';
   import { isEditableTarget } from './lib/editableTarget.ts';
@@ -162,6 +163,7 @@
 <CommandPalette />
 <StickSyncDialog />
 <LibraryHealthDialog />
+<FileBlockedTip />
 
 <Dialog
   open={library.showAnalysisPrompt}

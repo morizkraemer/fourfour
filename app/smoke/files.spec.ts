@@ -45,7 +45,7 @@ test('missing and unreadable rows get a status mark, a tooltip and do not play',
   await expect(row(page, 1)).not.toHaveAttribute('data-file-status');
 
   await row(page, 3).dblclick();
-  await page.waitForTimeout(300);
+  await expect(page.locator('[data-file-blocked-tip]')).toContainText('“Smoke Track 03” is missing');
   expect(await smoke.invokes('playback_play')).toEqual([]);
   await page.screenshot({ path: `${SHOTS}/status-column.png`, clip: { x: 0, y: 0, width: 1600, height: 420 } });
 });
@@ -126,4 +126,34 @@ test('Settings → Library shows the last check and checks again', async ({ smok
   await card.getByRole('button', { name: 'Check now' }).click();
   await expect.poll(async () => (await smoke.invokes('check_library_files')).length).toBe(before + 1);
   await page.screenshot({ path: `${SHOTS}/settings-library.png` });
+});
+
+test('a missing track picked from the palette and loaded by keyboard stays out of the player', async ({ smoke }) => {
+  const { page } = smoke;
+  await withProblems(page, [3]);
+  const palette = page.locator('.ff-cp');
+  const playerTitle = page.locator('.ff-player-compact__meta-title');
+  const titleBefore = await playerTitle.textContent();
+
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('Smoke Track 03');
+  await expect(palette.locator('.ff-cp__row-name').filter({ hasText: 'Smoke Track 03' })).toHaveCount(1);
+  await palette.locator('.ff-cp__row').filter({ hasText: 'Smoke Track 03' }).click();
+  await expect(row(page, 3)).toHaveAttribute('data-file-status', 'missing');
+
+  await page.keyboard.press('Control+k');
+  await page.keyboard.type('>load selected track');
+  await expect(palette.locator('.ff-cp__row')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+
+  const tip = page.locator('[data-file-blocked-tip]');
+  await expect(tip).toContainText('“Smoke Track 03” is missing');
+  await expect(playerTitle).toHaveText(titleBefore ?? '');
+  expect(await smoke.invokes('playback_play')).toEqual([]);
+  await page.screenshot({ path: `${SHOTS}/blocked-load-tip.png` });
+
+  await tip.getByRole('button', { name: 'Locate…' }).click();
+  await expect.poll(() => smoke.invokes('locate_track_file')).toEqual([{ trackId: 3, path: '/Music/moved' }]);
+  await expect(tip).toHaveCount(0);
+  await expect(row(page, 3)).toHaveAttribute('data-file-status', 'relocated');
 });
