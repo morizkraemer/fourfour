@@ -32,7 +32,7 @@ use pioneer_usb_writer::models::{
 };
 use pioneer_usb_writer::{reader, writer};
 
-pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
+pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 use rekordbox::ImportedCue;
@@ -196,7 +196,27 @@ impl LocalLibrary {
     }
 
     /// Add multiple tracks in a single transaction. Returns assigned IDs.
+    ///
+    /// Embedded covers make the write-ahead log large (~25 MB per 1,000 imported files), and
+    /// the commit would copy all of it into the database file and sync both. The commit only
+    /// writes the log (`synchronous=NORMAL`); the checkpoint, which syncs the log first and
+    /// then the database, runs right after on a thread of its own.
     pub fn add_tracks(&self, tracks: &[Track]) -> Result<Vec<i64>> {
+        let Some(db_path) = &self.db_path else {
+            return self.insert_tracks(tracks);
+        };
+        let pragma = |name: &str| self.conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get::<_, i64>(0));
+        let (autocheckpoint, synchronous) = (pragma("wal_autocheckpoint")?, pragma("synchronous")?);
+        self.conn.execute_batch("PRAGMA wal_autocheckpoint=0; PRAGMA synchronous=NORMAL")?;
+        let inserted = self.insert_tracks(tracks);
+        self.conn
+            .execute_batch(&format!("PRAGMA wal_autocheckpoint={autocheckpoint}; PRAGMA synchronous={synchronous}"))?;
+        let ids = inserted?;
+        checkpoint_in_background(db_path.clone());
+        Ok(ids)
+    }
+
+    fn insert_tracks(&self, tracks: &[Track]) -> Result<Vec<i64>> {
         let tx = self.conn.unchecked_transaction()?;
         let mut ids = Vec::with_capacity(tracks.len());
         for track in tracks {
@@ -246,8 +266,13 @@ impl LocalLibrary {
         queries::track_exists_by_path(&self.conn, source_path)
     }
 
+    /// Every track's duplicate-detection fields, in id order: the slim form of `get_all_tracks`.
+    pub fn duplicate_candidates(&self) -> Result<Vec<DuplicateCandidate>> {
+        queries::select_duplicate_candidates(&self.conn)
+    }
+
     pub fn duplicate_index(&self) -> Result<DuplicateIndex> {
-        Ok(DuplicateIndex::new(&self.get_all_tracks()?))
+        Ok(DuplicateIndex::new(&self.duplicate_candidates()?))
     }
 
     /// Every track's audio path and stored size, for the file health check.
@@ -862,6 +887,19 @@ impl LocalLibrary {
 }
 
 /// Remap sparse library IDs to dense 1-based USB IDs.
+/// Copies the write-ahead log into the database file from a second connection. Passive: it
+/// never waits for, or blocks, the library's own reads and writes.
+fn checkpoint_in_background(db_path: PathBuf) {
+    std::thread::spawn(move || {
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let checkpointed = Connection::open_with_flags(&db_path, flags)
+            .and_then(|conn| conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(())));
+        if let Err(e) = checkpointed {
+            eprintln!("Warning: checkpoint of {} after adding tracks failed: {e}", db_path.display());
+        }
+    });
+}
+
 fn prepare_for_usb(
     mut tracks: Vec<Track>,
     analyses: Vec<AnalysisResult>,
@@ -1040,6 +1078,29 @@ mod tests {
     }
 
     #[test]
+    fn the_artwork_flag_reads_the_artwork_index_which_an_older_library_gets_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let id = lib.add_track(&make_track("T", "/music/t.mp3")).unwrap();
+        lib.set_artwork(id, &[1, 2, 3]).unwrap();
+        lib.conn.execute_batch("DROP INDEX idx_artwork_track").unwrap();
+        drop(lib);
+
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let plan: Vec<String> = lib
+            .conn
+            .prepare("EXPLAIN QUERY PLAN SELECT (art.track_id IS NOT NULL) FROM tracks t LEFT JOIN artwork art ON art.track_id = t.id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(plan.iter().any(|step| step.contains("COVERING INDEX idx_artwork_track")), "{plan:?}");
+        assert!(lib.get_track_list_rows().unwrap()[0].has_artwork);
+    }
+
+    #[test]
     fn add_and_get_track() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let track = make_track("Track 1", "/music/track1.mp3");
@@ -1063,6 +1124,49 @@ mod tests {
         let ids = lib.add_tracks(&tracks).unwrap();
         assert_eq!(ids.len(), 3);
         assert_eq!(lib.track_count().unwrap(), 3);
+    }
+
+    #[test]
+    fn add_tracks_on_disk_stores_covers_and_restores_the_sync_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let pragmas = |lib: &LocalLibrary| -> (i64, i64) {
+            let get = |name: &str| lib.conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get(0)).unwrap();
+            (get("wal_autocheckpoint"), get("synchronous"))
+        };
+        let before = pragmas(&lib);
+        let cover: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let tracks: Vec<Track> = (0..40)
+            .map(|i| Track {
+                artwork: (i % 2 == 0).then(|| cover.clone()),
+                ..make_track(&format!("T{i}"), &format!("/music/{i}.mp3"))
+            })
+            .collect();
+        let ids = lib.add_tracks(&tracks).unwrap();
+        assert_eq!(pragmas(&lib), before);
+        assert!(lib.add_tracks(&tracks[..1]).is_err());
+        assert_eq!(pragmas(&lib), before);
+        drop(lib);
+
+        let reopened = LocalLibrary::open(&db_path).unwrap();
+        assert_eq!(reopened.track_count().unwrap(), 40);
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(reopened.get_artwork(*id).unwrap(), tracks[i].artwork);
+        }
+    }
+
+    #[test]
+    fn duplicate_candidates_are_the_library_tracks_in_id_order() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let tracks = vec![
+            Track { artist: "Hale".into(), duration_secs: 380.5, file_size: 42, ..make_track("B", "/music/b.mp3") },
+            make_track("A", "/music/a.mp3"),
+        ];
+        lib.add_tracks(&tracks).unwrap();
+        let expected: Vec<DuplicateCandidate> = lib.get_all_tracks().unwrap().iter().map(DuplicateCandidate::from).collect();
+        assert_eq!(lib.duplicate_candidates().unwrap(), expected);
+        assert_eq!(expected.len(), 2);
     }
 
     #[test]

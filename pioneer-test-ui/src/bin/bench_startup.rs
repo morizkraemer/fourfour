@@ -412,12 +412,15 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let survey = import_plan::survey_files(&paths);
     let survey_ms = ms(t);
     let t = Instant::now();
-    let scanned = pioneer_usb_writer::scanner::scan_directory_with_progress(folder, &mut || {}).unwrap();
+    let scanned = import_plan::scan_paths(&paths, &mut || {});
     let scan_ms = ms(t);
     let files = scanned.len();
     let plans = import_plan::ImportPlans::default();
     let t = Instant::now();
     let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+    if let Ok(out) = std::env::var("FF_IMPORT_PLAN_OUT") {
+        std::fs::write(out, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
+    }
     let plan_ms = ms(t);
     let plan_import_ms = ms(total);
     let t = Instant::now();
@@ -445,6 +448,12 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
         }),
     );
     drop(lib);
+    if let Ok(keep) = std::env::var("FF_IMPORT_KEEP_DB") {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let checkpointed = LocalLibrary::open(&db).unwrap();
+        drop(checkpointed);
+        std::fs::copy(&db, keep).unwrap();
+    }
     clear();
 }
 

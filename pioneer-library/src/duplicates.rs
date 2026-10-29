@@ -3,7 +3,7 @@
 //! artist and title with a duration within [`DURATION_TOLERANCE_SECS`].
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pioneer_usb_writer::models::Track;
 use serde::{Deserialize, Serialize};
@@ -54,14 +54,78 @@ fn file_key(path: &Path, file_size: u64) -> Option<(String, u64)> {
     (file_size > 0).then_some((name, file_size))
 }
 
-fn tags_key(track: &Track) -> Option<(String, String)> {
-    let artist = normalise_tag(&track.artist);
-    let title = normalise_tag(&track.title);
+fn tags_key(artist: &str, title: &str) -> Option<(String, String)> {
+    let artist = normalise_tag(artist);
+    let title = normalise_tag(title);
     (!artist.is_empty() && artist != PLACEHOLDER_ARTIST && !title.is_empty()).then_some((artist, title))
 }
 
 pub fn durations_match(a: f64, b: f64) -> bool {
     a > 0.0 && b > 0.0 && (a - b).abs() <= DURATION_TOLERANCE_SECS
+}
+
+/// The fields of a library track that duplicate detection compares and the import dialog shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DuplicateCandidate {
+    pub id: u32,
+    pub source_path: PathBuf,
+    pub file_size: u64,
+    pub artist: String,
+    pub title: String,
+    pub duration_secs: f64,
+}
+
+impl From<&Track> for DuplicateCandidate {
+    fn from(track: &Track) -> Self {
+        Self {
+            id: track.id,
+            source_path: track.source_path.clone(),
+            file_size: track.file_size,
+            artist: track.artist.clone(),
+            title: track.title.clone(),
+            duration_secs: track.duration_secs,
+        }
+    }
+}
+
+struct CandidateKeys {
+    id: i64,
+    path: String,
+    file: Option<(String, u64)>,
+    tags: Option<(String, String)>,
+    duration_secs: f64,
+}
+
+impl CandidateKeys {
+    fn of(candidate: &DuplicateCandidate) -> Self {
+        Self {
+            id: candidate.id as i64,
+            path: path_key(&candidate.source_path),
+            file: file_key(&candidate.source_path, candidate.file_size),
+            tags: tags_key(&candidate.artist, &candidate.title),
+            duration_secs: candidate.duration_secs,
+        }
+    }
+}
+
+const KEYS_PER_THREAD_MIN: usize = 1024;
+const KEY_THREADS_MAX: usize = 8;
+
+/// The keys of every candidate, in library order. The Unicode folding is the cost, so large
+/// libraries are split over a few threads.
+fn candidate_keys(library: &[DuplicateCandidate]) -> Vec<CandidateKeys> {
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(KEY_THREADS_MAX);
+    let chunk = library.len().div_ceil(threads).max(KEYS_PER_THREAD_MIN);
+    if library.len() <= chunk {
+        return library.iter().map(CandidateKeys::of).collect();
+    }
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = library
+            .chunks(chunk)
+            .map(|part| scope.spawn(move || part.iter().map(CandidateKeys::of).collect::<Vec<_>>()))
+            .collect();
+        parts.into_iter().flat_map(|part| part.join().expect("duplicate key thread panicked")).collect()
+    })
 }
 
 /// The library's tracks, indexed for duplicate lookups. Ids are the library ids (`Track::id`).
@@ -73,16 +137,15 @@ pub struct DuplicateIndex {
 }
 
 impl DuplicateIndex {
-    pub fn new(library: &[Track]) -> Self {
+    pub fn new(library: &[DuplicateCandidate]) -> Self {
         let mut index = Self::default();
-        for track in library {
-            let id = track.id as i64;
-            index.by_path.entry(path_key(&track.source_path)).or_insert(id);
-            if let Some(key) = file_key(&track.source_path, track.file_size) {
-                index.by_file.entry(key).or_insert(id);
+        for keys in candidate_keys(library) {
+            index.by_path.entry(keys.path).or_insert(keys.id);
+            if let Some(key) = keys.file {
+                index.by_file.entry(key).or_insert(keys.id);
             }
-            if let Some(key) = tags_key(track) {
-                index.by_tags.entry(key).or_default().push((id, track.duration_secs));
+            if let Some(key) = keys.tags {
+                index.by_tags.entry(key).or_default().push((keys.id, keys.duration_secs));
             }
         }
         index
@@ -96,7 +159,7 @@ impl DuplicateIndex {
         if let Some(&id) = file_key(&track.source_path, track.file_size).and_then(|k| self.by_file.get(&k)) {
             return hit(id, DuplicateReason::SameFile);
         }
-        let candidates = tags_key(track).and_then(|k| self.by_tags.get(&k))?;
+        let candidates = tags_key(&track.artist, &track.title).and_then(|k| self.by_tags.get(&k))?;
         candidates
             .iter()
             .find(|(_, duration)| durations_match(*duration, track.duration_secs))
@@ -119,8 +182,12 @@ mod tests {
         }
     }
 
+    fn index(tracks: &[Track]) -> DuplicateIndex {
+        DuplicateIndex::new(&tracks.iter().map(DuplicateCandidate::from).collect::<Vec<_>>())
+    }
+
     fn library() -> DuplicateIndex {
-        DuplicateIndex::new(&[
+        index(&[
             track(1, "/Music/Ode & Ash - Glass Harbor.aiff", "Ode & Ash", "Glass Harbor", 425.0, 70_000_000),
             track(2, "/Music/Copper Lines.flac", "Hale", "Copper Lines", 380.0, 40_000_000),
             track(3, "/Music/Intro.mp3", "Unknown Artist", "Intro", 60.0, 1_000_000),
@@ -172,5 +239,23 @@ mod tests {
         assert_eq!(index.find(&other_size), None);
         let unknown_size = Track { file_size: 0, ..copy };
         assert_eq!(index.find(&unknown_size), None);
+    }
+
+    #[test]
+    fn a_library_split_over_threads_keeps_the_first_track_of_each_key() {
+        let mut tracks: Vec<Track> = (1..=5000)
+            .map(|i| track(i, &format!("/Music/{i}.mp3"), "Artist", &format!("Title {i}"), 300.0, 10_000 + i as u64))
+            .collect();
+        tracks.push(track(5001, "/MUSIC/1.mp3", "Other", "Other", 10.0, 1));
+        tracks.push(track(5002, "/Copies/2.mp3", "", "", 0.0, 10_002));
+        tracks.push(track(5003, "/Copies/t3.mp3", "Artist", "Title 3", 300.5, 2));
+        let index = index(&tracks);
+        let probe = |path: &str, artist: &str, title: &str, secs: f64, size: u64| index.find(&track(0, path, artist, title, secs, size));
+        let found = |existing_id, reason| Some(DuplicateOf { existing_id, reason });
+        assert_eq!(probe("/music/1.mp3", "", "", 0.0, 3), found(1, DuplicateReason::SamePath));
+        assert_eq!(probe("/New/2.mp3", "", "", 0.0, 10_002), found(2, DuplicateReason::SameFile));
+        assert_eq!(probe("/New/t3.wav", "artist", "title 3", 300.2, 7), found(3, DuplicateReason::SameTags));
+        assert_eq!(probe("/New/t5000.wav", "Artist", "Title 5000", 301.0, 7), found(5000, DuplicateReason::SameTags));
+        assert_eq!(probe("/New/none.wav", "Artist", "Title 5001", 300.0, 7), None);
     }
 }
