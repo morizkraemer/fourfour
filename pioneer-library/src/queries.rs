@@ -360,6 +360,43 @@ pub fn select_all_tracks_with_flags(
     Ok(result)
 }
 
+/// Every track as the track list shows it, with its artwork and analysis flags, stored analysis stages and row
+/// preview: one query.
+pub fn select_track_list_rows(conn: &Connection) -> Result<Vec<crate::TrackListRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, t.source_path, t.title, t.artist, t.album, t.genre,
+                CASE WHEN a.bpm > 0 THEN CAST(ROUND(a.bpm * 100) AS INTEGER) ELSE t.tempo END,
+                COALESCE(NULLIF(a.key, ''), t.key),
+                t.duration_secs, t.bitrate, t.file_size,
+                (art.track_id IS NOT NULL),
+                a.stages,
+                a.row_preview
+         FROM tracks t
+         LEFT JOIN artwork art ON art.track_id = t.id
+         LEFT JOIN analyses a ON a.track_id = t.id
+         ORDER BY t.id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(crate::TrackListRow {
+            id: row.get::<_, i64>(0)? as u32,
+            source_path: row.get(1)?,
+            title: row.get(2)?,
+            artist: row.get(3)?,
+            album: row.get(4)?,
+            genre: row.get(5)?,
+            tempo: row.get(6)?,
+            key: row.get(7)?,
+            duration_secs: row.get(8)?,
+            bitrate: row.get(9)?,
+            file_size: row.get::<_, i64>(10)? as u64,
+            has_artwork: row.get(11)?,
+            analysis_stages: row.get(12)?,
+            row_preview: row.get::<_, Option<Vec<u8>>>(13)?.map(crate::RowPreview::from_blob),
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 // ---------------------------------------------------------------------------
 // Playlist queries
 // ---------------------------------------------------------------------------
