@@ -6,6 +6,7 @@ mod analysis_python;
 mod analysis_run;
 mod band_analysis;
 mod dto;
+mod file_health;
 mod playback;
 mod tempo;
 mod track_fields;
@@ -1236,6 +1237,10 @@ fn main() {
             stick_commands::stick_remove_playlists,
             stick_commands::get_volume_capacity,
             stick_commands::plan_usb_sync,
+            file_health::check_library_files,
+            file_health::get_library_health,
+            file_health::relocate_missing_in_folder,
+            file_health::locate_track_file,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
@@ -1289,7 +1294,11 @@ fn main() {
                 .expect("Failed to determine library database path");
             let library = LocalLibrary::open(&db_path)
                 .expect("Failed to open library database");
-            app.manage(Arc::new(Mutex::new(library)));
+            let library: SharedLibrary = Arc::new(Mutex::new(library));
+            let health = file_health::SharedHealth::default();
+            app.manage(library.clone());
+            app.manage(health.clone());
+            file_health::spawn_check(app.handle().clone(), library, health);
             app.manage(AnalysisCoordinator::default());
             app.manage(SharedArtworkThumbs::default());
             app.manage(Arc::new(waveform_detail::DetailWindows::default()));

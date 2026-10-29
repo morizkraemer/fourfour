@@ -9,6 +9,7 @@
 //! a lightweight index (bpm + key) for fast queries.
 
 mod edits;
+mod file_health;
 mod multi_sync;
 mod queries;
 pub mod rekordbox;
@@ -30,6 +31,7 @@ use pioneer_usb_writer::models::{
 use pioneer_usb_writer::{reader, writer};
 
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
+pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 use rekordbox::ImportedCue;
 
 /// One beat of an edited grid: where it is and its place in the bar (1 to 4).
@@ -190,6 +192,52 @@ impl LocalLibrary {
     /// Check whether a source path is already in the library.
     pub fn track_exists_by_path(&self, source_path: &Path) -> Result<bool> {
         queries::track_exists_by_path(&self.conn, source_path)
+    }
+
+    /// Every track's audio path and stored size, for the file health check.
+    pub fn track_files(&self) -> Result<Vec<TrackFile>> {
+        Ok(queries::select_track_files(&self.conn)?
+            .into_iter()
+            .map(|(track_id, path, size)| TrackFile { track_id, path: PathBuf::from(path), file_size: size.max(0) as u64 })
+            .collect())
+    }
+
+    /// Point a track at its audio file's new location. Only the path changes: the track id,
+    /// and with it analysis, cues, grid, edits and playlist membership, stay as they are.
+    pub fn relink_track(&self, track_id: i64, new_path: &Path) -> Result<()> {
+        if file_status(new_path) != FileStatus::Ok {
+            anyhow::bail!("{} is not a readable file", new_path.display());
+        }
+        if !queries::update_source_path(&self.conn, track_id, new_path)? {
+            anyhow::bail!("Track {track_id} is not in the library");
+        }
+        Ok(())
+    }
+
+    /// Searches `folder` for the files of `track_ids` that are missing and relinks every
+    /// unambiguous match in one transaction.
+    pub fn relocate_in_folder(&self, track_ids: &[i64], folder: &Path) -> Result<RelocateReport> {
+        let wanted: HashSet<i64> = track_ids.iter().copied().collect();
+        let files = self.track_files()?;
+        let taken: HashSet<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+        let missing: Vec<TrackFile> = files
+            .into_iter()
+            .filter(|f| wanted.contains(&f.track_id) && file_status(&f.path) != FileStatus::Ok)
+            .collect();
+        let (matched, ambiguous, not_found) = file_health::plan_relocation(&missing, folder, &taken);
+        let tx = self.conn.unchecked_transaction()?;
+        for (track_id, path) in &matched {
+            queries::update_source_path(&tx, *track_id, path)?;
+        }
+        tx.commit()?;
+        Ok(RelocateReport {
+            matched: matched
+                .into_iter()
+                .map(|(track_id, path)| Relinked { track_id, source_path: path.to_string_lossy().into_owned() })
+                .collect(),
+            ambiguous,
+            not_found,
+        })
     }
 
     /// Return the number of tracks in the library.
