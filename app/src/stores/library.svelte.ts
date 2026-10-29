@@ -67,9 +67,13 @@ import { fileStateGlyph } from '../lib/fileHealth.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
-/** Shallow-bump so list rows re-render when nested track fields change. */
-export function bumpLibraryTracks() {
-  resetSearchIndex();
+/**
+ * Shallow-bump so list rows re-render when nested track fields change. With `changedIds`, only those tracks' search
+ * text is rebuilt instead of the whole index.
+ */
+export function bumpLibraryTracks(changedIds?: Iterable<number>) {
+  if (changedIds && haystackById) refreshHaystacks(changedIds);
+  else resetSearchIndex();
   library.tracks = [...library.tracks];
   scheduleSearchIndexWarmup();
 }
@@ -325,6 +329,14 @@ function fillSearchIndex(limit: number) {
   for (; haystackCursor < end; haystackCursor++) {
     const t = plainTracks[haystackCursor];
     haystackById.set(t.id as number, trackHaystack(t));
+  }
+}
+
+function refreshHaystacks(ids: Iterable<number>) {
+  for (const id of ids) {
+    if (!haystackById!.has(id)) continue;
+    const track = libraryTrackById(id);
+    if (track) haystackById!.set(id, trackHaystack(track));
   }
 }
 
@@ -665,7 +677,7 @@ async function applyQueuedAnalysis() {
       library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => !finished.has(id));
     }
     await Promise.all(ids.map(refreshTrackAnalysis));
-    if (ids.length > 0) bumpLibraryTracks();
+    if (ids.length > 0) bumpLibraryTracks(ids);
   } finally {
     lastAnalysisApplyAt = performance.now();
     analysisApplying = false;

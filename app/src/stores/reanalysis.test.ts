@@ -35,7 +35,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { analyzeTrackIds, ensureTrackPeaksLoaded, initLibrary, isTrackAnalyzing, library } from './library.svelte.ts';
+import { analyzeTrackIds, ensureTrackPeaksLoaded, filterTracks, initLibrary, isTrackAnalyzing, library } from './library.svelte.ts';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { initPlayerAnalysisRefresh, loadPlayerTrack, player } from './player.svelte.ts';
 
@@ -214,5 +214,15 @@ describe('re-analysis of analysed tracks', () => {
     expect([isTrackAnalyzing(1), isTrackAnalyzing(2)]).toEqual([false, false]);
     expect(reads(1)).toBe(1);
     expect(reads(2)).toBe(1);
+  });
+
+  it('finds a track by the values its analysis brought once the batch is in', async () => {
+    expect(filterTracks(library.tracks, '8a').map((t) => t.id)).toEqual([1, 2]);
+    hooks.analysis[1] = payload(126, '9A', ALL_STAGES);
+
+    emit('analysis-progress', { current: 1, total: 1, message: 'Analyzed t1.wav (1/1)', track_id: 1 });
+
+    await vi.waitFor(() => expect(row(1).key).toBe('9A'));
+    expect(filterTracks(library.tracks, '9a').map((t) => t.id)).toEqual([1]);
   });
 });
