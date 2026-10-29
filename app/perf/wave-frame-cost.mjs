@@ -76,6 +76,7 @@ for (let i = 0; i < Number(zoomInArg); i++) {
   await page.waitForTimeout(100);
 }
 if (Number(throttleArg) > 1) await client.send('Emulation.setCPUThrottlingRate', { rate: Number(throttleArg) });
+if (process.env.EXTRA_CSS) await page.addStyleTag({ content: process.env.EXTRA_CSS });
 await page.waitForTimeout(500);
 
 if (process.env.BREAKDOWN) {
