@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { camelotRank, clearSort, durationSeconds, setSort, sortTracks, tableLayouts } from './table-columns.svelte.ts';
 
 type Row = Record<string, unknown>;
@@ -103,4 +104,61 @@ describe('parsers', () => {
     expect(durationSeconds('1:02:03')).toBe(3723);
     expect(durationSeconds('—')).toBeNull();
   });
+});
+
+describe('sortTracks at 10k against the reference sort', () => {
+  const blank = (text: string) => text === '' || text === '—' || text === 'undefined';
+  function referenceValue(track: Row, key: string): string | number | null {
+    if (key === 'fav') return typeof track.fav === 'number' && track.fav > 0 ? track.fav : null;
+    const text = String(track[key] ?? '').trim();
+    if (blank(text)) return null;
+    if (key === 'bpm') return Number.isFinite(parseFloat(text)) ? parseFloat(text) : null;
+    if (key === 'key') return camelotRank(text);
+    if (key === 'time') return durationSeconds(text);
+    if (key === 'rating') return parseInt(text, 10) > 0 ? parseInt(text, 10) : null;
+    if (key === 'color') return labelColorRank(text);
+    if (key === 'index' || key === 'year') return Number.isFinite(parseInt(text, 10)) ? parseInt(text, 10) : null;
+    return text.toLowerCase();
+  }
+  function referenceSort(tracks: Row[], key: string, dir: 1 | -1) {
+    const keyed = tracks.map((track) => ({ track, value: referenceValue(track, key) }));
+    keyed.sort((a, b) => {
+      if (a.value === null && b.value === null) return 0;
+      if (a.value === null) return 1;
+      if (b.value === null) return -1;
+      if (a.value < b.value) return -dir;
+      if (a.value > b.value) return dir;
+      return 0;
+    });
+    return keyed.map((e) => e.track.id);
+  }
+
+  const WORDS = ['Ölbaum', 'ölbaum', 'Zebra', 'zebra', 'Æon', 'éclair', 'Eclair', 'Straße', 'STRASSE', '東京', '🎧 Mix', '  padded ', '—', '', '1999', 'a', 'A'];
+  let seed = 7;
+  const rand = (n: number) => (seed = (seed * 1103515245 + 12345) % 2 ** 31) % n;
+  const big: Row[] = Array.from({ length: 10_000 }, (_, i) => ({
+    id: i + 1,
+    title: WORDS[rand(WORDS.length)] + (rand(3) === 0 ? '' : ` ${rand(40)}`),
+    artist: rand(5) === 0 ? undefined : WORDS[rand(WORDS.length)],
+    bpm: rand(6) === 0 ? '—' : (90 + rand(80) + rand(10) / 10).toFixed(1),
+    key: rand(7) === 0 ? '—' : `${1 + rand(12)}${rand(2) ? 'A' : 'B'}`,
+    time: rand(8) === 0 ? '—' : `${rand(12)}:${String(rand(60)).padStart(2, '0')}`,
+    index: String(i + 1).padStart(2, '0'),
+    year: rand(4) === 0 ? '—' : String(1980 + rand(45)),
+    rating: rand(6),
+    color: rand(3) === 0 ? null : ['Blue', 'Pink', 'Red', '#112233'][rand(4)],
+    fav: rand(4) === 0 ? 1 + rand(9) : undefined,
+  }));
+
+  for (const key of ['title', 'artist', 'bpm', 'key', 'time', 'index', 'year', 'rating', 'color', 'fav']) {
+    it(`orders ${key} exactly like the reference, both directions and again from the cache`, () => {
+      clearSort('library');
+      setSort('library', key);
+      const asc = referenceSort(big, key, 1);
+      expect(sortTracks(big, 'library').map((r) => r.id)).toEqual(asc);
+      expect(sortTracks(big, 'library').map((r) => r.id)).toEqual(asc);
+      setSort('library', key);
+      expect(sortTracks(big, 'library').map((r) => r.id)).toEqual(referenceSort(big, key, -1));
+    });
+  }
 });

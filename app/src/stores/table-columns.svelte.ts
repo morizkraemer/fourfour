@@ -14,6 +14,7 @@ import {
   measureColumnContentWidth,
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
+import { untrack } from 'svelte';
 import { library, playlistByName } from './library.svelte.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
@@ -429,7 +430,10 @@ export function sortTracks<T extends Record<string, unknown>>(
   const key = tableLayouts[kind].sortKey;
   if (!key) return tracks;
   const dir = tableLayouts[kind].sortDir === 'asc' ? 1 : -1;
-  const keyed = tracks.map((track) => ({ track, value: key === 'fav' ? favSlot(track) : sortValue(track, key) }));
+  const keyed =
+    key === 'fav'
+      ? tracks.map((track) => ({ track, value: favSlot(track) }))
+      : sortKeyed(tracks, sortValueReader(key));
   keyed.sort((a, b) => {
     if (a.value === null && b.value === null) return 0;
     if (a.value === null) return 1;
@@ -439,6 +443,44 @@ export function sortTracks<T extends Record<string, unknown>>(
     return 0;
   });
   return keyed.map((entry) => entry.track);
+}
+
+type SortValue = string | number | null;
+
+let sortValuesVersion: { tracks: unknown; usbTracks: unknown } | null = null;
+const sortValuesByKey = new Map<string, WeakMap<object, SortValue>>();
+
+/**
+ * Sort keys per track, read without tracking and kept until the track list is replaced: library tracks change their
+ * fields only together with `bumpLibraryTracks()` (and USB tracks are replaced whole), which swaps the list this
+ * cache is checked against. A tracked read of the key of every track made each sort depend on 10k track signals.
+ * `fav` stays a tracked read: favorite slots change in place (`syncTrackFavoriteFields`).
+ */
+function sortValueReader(key: string): (track: Record<string, unknown>) => SortValue {
+  const tracks = library.tracks;
+  const usbTracks = library.usbTracks;
+  if (!sortValuesVersion || sortValuesVersion.tracks !== tracks || sortValuesVersion.usbTracks !== usbTracks) {
+    sortValuesVersion = { tracks, usbTracks };
+    sortValuesByKey.clear();
+  }
+  let values = sortValuesByKey.get(key);
+  if (!values) {
+    values = new WeakMap();
+    sortValuesByKey.set(key, values);
+  }
+  const cache = values;
+  return (track) => {
+    let value = cache.get(track);
+    if (value === undefined) {
+      value = sortValue(track, key);
+      cache.set(track, value);
+    }
+    return value;
+  };
+}
+
+function sortKeyed<T extends Record<string, unknown>>(tracks: T[], valueOf: (track: T) => SortValue) {
+  return untrack(() => tracks.map((track) => ({ track, value: valueOf(track) })));
 }
 
 function favSlot(track: Record<string, unknown>): number | null {

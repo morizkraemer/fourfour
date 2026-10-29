@@ -63,4 +63,13 @@ describe('commitTrackRating', () => {
     const ids = sortTracks([...library.tracks] as never, 'library').map((t: any) => t.id);
     expect(ids).toEqual([1, 2]);
   });
+
+  it('re-reads the sort key after a rating change', async () => {
+    hooks.invoke.mockResolvedValue(undefined);
+    clearSort('library');
+    setSort('library', 'rating');
+    expect(sortTracks(library.tracks, 'library').map((t: any) => t.id)).toEqual([2, 1]);
+    await commitTrackRating(1, 1);
+    expect(sortTracks(library.tracks, 'library').map((t: any) => t.id)).toEqual([1, 2]);
+  });
 });
