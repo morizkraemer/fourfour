@@ -107,20 +107,26 @@ fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result
         .collect())
 }
 
-fn scan_paths(paths: &[String]) -> Result<Vec<models::Track>, String> {
+fn scan_paths(paths: &[String], on_file: &mut dyn FnMut()) -> Result<Vec<models::Track>, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut dir_tracks: Vec<models::Track> = Vec::new();
     for p in paths {
         let pb = PathBuf::from(p);
         if pb.is_dir() {
-            dir_tracks.extend(scanner::scan_directory(&pb).map_err(|e| e.to_string())?);
+            dir_tracks.extend(scanner::scan_directory_with_progress(&pb, on_file).map_err(|e| e.to_string())?);
         } else {
             files.push(pb);
         }
     }
-    let mut scanned = scanner::scan_files(&files).map_err(|e| e.to_string())?;
+    let mut scanned = scanner::scan_files_with_progress(&files, on_file).map_err(|e| e.to_string())?;
     scanned.extend(dir_tracks);
     Ok(scanned)
+}
+
+#[derive(Serialize, Clone)]
+struct ImportProgress {
+    done: usize,
+    total: usize,
 }
 
 /// Scan files and folders and hold the result until `commit_import`, listing likely
@@ -128,14 +134,25 @@ fn scan_paths(paths: &[String]) -> Result<Vec<models::Track>, String> {
 #[tauri::command]
 async fn plan_import(
     paths: Vec<String>,
+    app: AppHandle,
     state: State<'_, SharedLibrary>,
     plans: State<'_, Arc<ImportPlans>>,
 ) -> Result<ImportPlan, String> {
     let shared = state.inner().clone();
     let plans = plans.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let scanned = scan_paths(&paths)?;
         let survey = import_plan::survey_files(&paths);
+        let total = survey.audio_count();
+        let mut done = 0;
+        let mut last_emit = std::time::Instant::now();
+        app.emit("import-progress", ImportProgress { done, total }).ok();
+        let scanned = scan_paths(&paths, &mut || {
+            done += 1;
+            if done == total || last_emit.elapsed() >= std::time::Duration::from_millis(80) {
+                last_emit = std::time::Instant::now();
+                app.emit("import-progress", ImportProgress { done, total }).ok();
+            }
+        })?;
         let lib = shared.lock().map_err(|e| e.to_string())?;
         import_plan::plan_for_library(&plans, &lib, scanned, &survey)
     })

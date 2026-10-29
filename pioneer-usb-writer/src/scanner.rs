@@ -20,6 +20,11 @@ pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4
 /// The returned list is **sorted** by title → artist → source path, and track IDs
 /// are reassigned in that sorted order starting at 1.
 pub fn scan_directory(dir: &Path) -> Result<Vec<Track>> {
+    scan_directory_with_progress(dir, &mut || {})
+}
+
+/// Like [`scan_directory`], calling `on_file` after each audio file has been read or skipped.
+pub fn scan_directory_with_progress(dir: &Path, on_file: &mut dyn FnMut()) -> Result<Vec<Track>> {
     let mut tracks = Vec::new();
     let mut id = 1u32;
 
@@ -52,6 +57,7 @@ pub fn scan_directory(dir: &Path) -> Result<Vec<Track>> {
                 eprintln!("Warning: skipping {}: {}", path.display(), e);
             }
         }
+        on_file();
     }
 
     tracks.sort_by(|a, b| {
@@ -77,6 +83,11 @@ pub fn scan_directory(dir: &Path) -> Result<Vec<Track>> {
 /// Tracks are returned **in the order the paths were supplied** (no sorting).
 /// IDs are assigned sequentially starting at 1.
 pub fn scan_files(paths: &[std::path::PathBuf]) -> Result<Vec<Track>> {
+    scan_files_with_progress(paths, &mut || {})
+}
+
+/// Like [`scan_files`], calling `on_file` after each audio file has been read or skipped.
+pub fn scan_files_with_progress(paths: &[std::path::PathBuf], on_file: &mut dyn FnMut()) -> Result<Vec<Track>> {
     let audio_extensions = ["mp3", "flac", "wav", "aiff", "aif", "m4a", "aac"];
     let mut tracks = Vec::new();
     let mut id = 1u32;
@@ -91,6 +102,7 @@ pub fn scan_files(paths: &[std::path::PathBuf]) -> Result<Vec<Track>> {
                     }
                     Err(e) => eprintln!("Warning: failed to read {}: {}", path.display(), e),
                 }
+                on_file();
             }
         }
     }
