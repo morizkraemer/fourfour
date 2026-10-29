@@ -64,15 +64,10 @@ function isSame(a: string, b: string): boolean {
 }
 
 export interface DropGroup {
-  /** Name of the dropped folder, or null for loose files. */
   folder: string | null;
   ids: number[];
 }
 
-/**
- * Library tracks per dropped folder (one group each) plus one group for loose files.
- * `matches` maps dropped file paths to library tracks they were found to duplicate.
- */
 export function dropGroups(
   tracks: ReadonlyArray<{ id: number; filePath?: string }>,
   droppedPaths: readonly string[],

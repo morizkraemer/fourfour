@@ -49,7 +49,6 @@ function sentence(parts: string[]): string {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}${text.endsWith('.') ? '' : '.'}`;
 }
 
-/** Status line after importing into the library, from the real counts of the scan and commit. */
 export function libraryImportMessage(outcome: ImportOutcome): string {
   const added = outcome.added.length;
   const duplicates = outcome.skipped_ids.length;
@@ -70,7 +69,6 @@ export type PlaylistDropResult =
   | { kind: 'added'; name: string; tracks: number; addedToPlaylist: number }
   | { kind: 'created'; names: string[]; tracks: number };
 
-/** Status line after a drop that filled a playlist: says which tracks were new to the library. */
 export function playlistImportMessage(outcome: ImportOutcome, result: PlaylistDropResult): string {
   const added = outcome.added.length;
   const extra = skippedFileParts(outcome.plan.skipped);

@@ -18,7 +18,6 @@ export interface SmokeWindow {
   __smokeEmit: (event: string, payload: unknown) => void;
 }
 
-/** What the next `plan_import` finds: tracks to add, same-path files already in the library, skipped files. */
 export interface SmokeImport {
   tracks: TrackInfo[];
   already: number;

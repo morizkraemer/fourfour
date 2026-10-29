@@ -27,7 +27,6 @@ pub struct ImportPlan {
     pub skipped: SkippedFiles,
 }
 
-/// Dropped files that never became tracks: wrong format, or audio the scanner could not read.
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct SkippedFiles {
     pub unsupported: usize,
@@ -35,7 +34,6 @@ pub struct SkippedFiles {
     pub unreadable: usize,
 }
 
-/// What the dropped files and folders hold, counted the way the scanner picks files.
 #[derive(Debug, Default)]
 pub struct FileSurvey {
     audio: HashSet<PathBuf>,

@@ -26,7 +26,6 @@ export const dnd = $state({
   dropNewPlaylist: false,
   /** Sidebar playlist receiving a drop */
   dropPlaylistId: null as number | null,
-  /** Sidebar playlist folder receiving a file drop from Finder */
   dropFolderId: null as number | null,
   /** Organize-drawer playlist card receiving a drop */
   dropCardPlaylistId: null as number | null,

@@ -911,7 +911,6 @@ export async function importFiles(paths: string[], options?: ImportOptions) {
   }
 }
 
-/** Scans dropped files/folders for a playlist; `ids` holds every library track they cover, including ones imported earlier and skipped duplicates. */
 export async function importDroppedTracks(paths: string[]): Promise<{ outcome: ImportOutcome; ids: number[] } | null> {
   try {
     library.statusMessage = 'Importing…';

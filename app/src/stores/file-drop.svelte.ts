@@ -22,7 +22,6 @@ import {
 export const LOOSE_FILES_PLAYLIST_NAME = 'New playlist';
 
 export const fileDrop = $state({
-  /** Files hover the content area: they will go into the open view. */
   overView: false,
 });
 
