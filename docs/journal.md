@@ -266,3 +266,4 @@
 2026-10-29 07:05 fb-chrome3 landed on ov-1028: collapsed search opens centred palette modal; smoke 45/45; Mac check+install started
 2026-10-29 07:40 orchestrator - fix on ov-1028 968164b: mounted disk images (BusProtocol Disk Image / Virtual) no longer offered as USB sticks on macOS (Merlin report: 'Patches' installer showed as stick); 2 tests; Mac install started. Icon round 15 (single straight slice) to fb-icons
 2026-10-29 08:00 orchestrator - app icon set to plain amber trace (Merlin: placeholder 'for now'), Tauri icon set + bundle.icon on ov-1028; installed on Mac with weights; Dock restarted
+2026-10-29 08:15 orchestrator decided: Merlin viewport review of files boards — missing rows A (status column), relocate A (search folder, relink all), health 'yes good', backup 'good', duplicates 'overcomplicated' → simplify, open questions 'your call'. No comments on player-edit-3 / topbar boards.
