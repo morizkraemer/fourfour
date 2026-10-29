@@ -54,11 +54,12 @@ interface Q50 {
   longTasks: { start: number; duration: number }[];
   detailResolved: Record<number, number>;
   mockMs: Record<string, number[]>;
+  answeredAt: Record<string, number>;
 }
 
 function installProbes() {
   const w = window as unknown as { __q50: Q50; __TAURI_INTERNALS__: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } };
-  w.__q50 = { firstRow: 0, longTasks: [], detailResolved: {}, mockMs: {} };
+  w.__q50 = { firstRow: 0, longTasks: [], detailResolved: {}, mockMs: {}, answeredAt: {} };
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) w.__q50.longTasks.push({ start: e.startTime, duration: e.duration });
   }).observe({ type: 'longtask', buffered: true });
@@ -72,6 +73,7 @@ function installProbes() {
     const started = performance.now();
     const answer = await invoke(cmd, args);
     (w.__q50.mockMs[cmd] ??= []).push(performance.now() - started);
+    w.__q50.answeredAt[cmd] = performance.now();
     if (cmd === 'get_waveform_detail') w.__q50.detailResolved[args.trackId as number] = performance.now();
     return answer;
   };
@@ -119,7 +121,7 @@ function recordBoot(prefix: string, runs: Boot[]) {
 function loadTrack(page: Page, rowIndex: number) {
   return page.evaluate(
     (rowIndex) =>
-      new Promise<{ ready: number; painted: number; detail: number; longTask: number }>((resolve, reject) => {
+      new Promise<{ ready: number; painted: number; detail: number; longTask: number; afterAnswer: number }>((resolve, reject) => {
         const q = (window as unknown as { __q50: Q50 }).__q50;
         const row = document.querySelectorAll('[data-track-row]')[rowIndex] as HTMLElement;
         const id = Number(row.dataset.trackId ?? NaN);
@@ -140,7 +142,8 @@ function loadTrack(page: Page, rowIndex: number) {
           const detailAt = Number.isNaN(id) ? Math.max(0, ...Object.values(q.detailResolved).filter((v) => v > t0)) : q.detailResolved[id] ?? 0;
           if (painted && detailAt > t0) {
             const longTask = q.longTasks.slice(tasksBefore).reduce((s, t) => s + t.duration, 0);
-            return resolve({ ready, painted, detail: detailAt - t0, longTask });
+            const answered = q.answeredAt.get_analysis_data ?? 0;
+            return resolve({ ready, painted, detail: detailAt - t0, longTask, afterAnswer: answered > t0 ? painted - (answered - t0) : painted });
           }
           setTimeout(poll, 0);
         };
@@ -229,6 +232,7 @@ test.describe('q50 perf paths', () => {
     record('track load to overview painted ms', median(loads.map((l) => l.painted)));
     record('track load to detail series ms', median(loads.map((l) => l.detail)));
     record('track load long-task ms', median(loads.map((l) => l.longTask)));
+    record('track load overview painted after backend answer ms', median(loads.map((l) => l.afterAnswer)));
     record('expand to detail drawn ms', median(expands));
     const mockMs = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.mockMs);
     record('mock get_analysis_data ms (not app time)', median(mockMs.get_analysis_data ?? [0]));
@@ -242,15 +246,28 @@ test.describe('q50 perf paths', () => {
     await page.locator('[data-library-status]').click();
     const tasksBefore = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.longTasks.length);
     await frameRecorder(page);
-    const t0 = await page.evaluate(() => performance.now());
-    await page.locator('[data-library-activity-menu] .ff-menu__item').filter({ hasText: 'Import folder…' }).click();
     const total = (TRACKS + IMPORT_FILES).toLocaleString('en-US');
-    await expect(page.locator('.ff-gheader__count')).toHaveText(total, { timeout: 60_000 });
-    const t1 = await page.evaluate(() => performance.now());
+    const { t0, t1 } = await page.evaluate(
+      (total) =>
+        new Promise<{ t0: number; t1: number }>((resolve, reject) => {
+          const item = [...document.querySelectorAll('[data-library-activity-menu] .ff-menu__item')].find((e) => e.textContent?.includes('Import folder…')) as HTMLElement;
+          const t0 = performance.now();
+          item.click();
+          const poll = () => {
+            if (performance.now() - t0 > 60_000) return reject(new Error('import never showed the rows'));
+            if (document.querySelector('.ff-gheader__count')?.textContent?.trim() === total) return resolve({ t0, t1: performance.now() });
+            requestAnimationFrame(poll);
+          };
+          requestAnimationFrame(poll);
+        }),
+      total,
+    );
     await page.waitForTimeout(500);
     const frames = await stopFrames(page);
     const tasks = await page.evaluate((n) => (window as unknown as { __q50: Q50 }).__q50.longTasks.slice(n), tasksBefore);
+    const commitAnswered = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.answeredAt.commit_import ?? 0);
     record('import ui click to rows ms', t1 - t0);
+    record('import ui rows after commit answer ms', t1 - commitAnswered);
     record('import ui long-task ms', tasks.reduce((s, t) => s + t.duration, 0));
     record('import ui longest task ms', tasks.reduce((m, t) => Math.max(m, t.duration), 0));
     record('import ui worst frame ms', Math.max(...frames));
