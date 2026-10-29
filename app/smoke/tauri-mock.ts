@@ -1,4 +1,4 @@
-import type { LoadedState } from '../src/services/tauri.svelte.ts';
+import type { LoadedState, SkippedFiles, TrackInfo } from '../src/services/tauri.svelte.ts';
 import type { CuePointPayload } from '../src/lib/cues.ts';
 
 export interface SmokeWindow {
@@ -14,6 +14,14 @@ export interface SmokeWindow {
   __smokeDuplicates: unknown[];
   __smokeHoldExport: boolean;
   __smokeReleaseExport: (() => void) | null;
+  __smokeImport: SmokeImport | null;
+  __smokeEmit: (event: string, payload: unknown) => void;
+}
+
+export interface SmokeImport {
+  tracks: TrackInfo[];
+  already: number;
+  skipped?: Partial<SkippedFiles>;
 }
 
 export function installTauriMock(initial: LoadedState) {
@@ -29,6 +37,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeDuplicates = [];
   w.__smokeHoldExport = false;
   w.__smokeReleaseExport = null;
+  w.__smokeImport = null;
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
 
@@ -42,6 +51,8 @@ export function installTauriMock(initial: LoadedState) {
     tempo: new Map<number, number>(),
   };
   let playlists = initial.playlists;
+  const tracks = [...initial.tracks];
+  let pendingImport: TrackInfo[] = [];
   const playback = { path: '', position: 0, duration: 0, playing: false, timer: 0 };
 
   function emit(event: string, payload: unknown) {
@@ -51,6 +62,7 @@ export function installTauriMock(initial: LoadedState) {
       callback?.({ event, id: 0, payload });
     }
   }
+  w.__smokeEmit = emit;
 
   function tick() {
     emit('playback-tick', {
@@ -110,10 +122,23 @@ export function installTauriMock(initial: LoadedState) {
       }
       case 'locate_track_file':
         return { relinked: { track_id: args.trackId, source_path: args.path }, health: (relink([args.trackId], ''), health()) };
-      case 'plan_import':
-        return { token: 1, new_count: 2, already_in_library: 0, duplicates: w.__smokeDuplicates };
+      case 'plan_import': {
+        const next = w.__smokeImport;
+        pendingImport = next?.tracks ?? [];
+        return {
+          token: 1,
+          new_count: next ? next.tracks.length : 2,
+          already_in_library: next?.already ?? 0,
+          duplicates: w.__smokeDuplicates,
+          skipped: { unsupported: 0, unsupported_exts: [], unreadable: 0, ...next?.skipped },
+        };
+      }
       case 'commit_import':
-        return { added: [], skipped_ids: args.skipDuplicates ? (w.__smokeDuplicates as { existing_id: number }[]).map((d) => d.existing_id) : [] };
+        tracks.push(...pendingImport);
+        return {
+          added: pendingImport.splice(0),
+          skipped_ids: args.skipDuplicates ? (w.__smokeDuplicates as { existing_id: number }[]).map((d) => d.existing_id) : [],
+        };
       case 'get_backup_status':
         return { sizes: { library_bytes: 38_000_000, audio_bytes: 61_000_000_000, audio_files: initial.tracks.length }, last: lastBackup };
       case 'export_backup': {
@@ -141,7 +166,7 @@ export function installTauriMock(initial: LoadedState) {
       case 'plugin:dialog|open':
         return w.__smokePickPath;
       case 'load_state':
-        return { tracks: initial.tracks, playlists };
+        return { tracks, playlists };
       case 'save_state':
         playlists = args.playlists;
         return null;

@@ -1,8 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use pioneer_library::{DuplicateIndex, DuplicateReason, LocalLibrary};
 use pioneer_usb_writer::models::Track;
+use pioneer_usb_writer::scanner::AUDIO_EXTENSIONS;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -22,6 +24,59 @@ pub struct ImportPlan {
     pub new_count: usize,
     pub already_in_library: usize,
     pub duplicates: Vec<DuplicateRow>,
+    pub skipped: SkippedFiles,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct SkippedFiles {
+    pub unsupported: usize,
+    pub unsupported_exts: Vec<String>,
+    pub unreadable: usize,
+}
+
+#[derive(Debug, Default)]
+pub struct FileSurvey {
+    audio: HashSet<PathBuf>,
+    unsupported: usize,
+    unsupported_exts: BTreeSet<String>,
+}
+
+pub fn survey_files(paths: &[String]) -> FileSurvey {
+    let mut survey = FileSurvey::default();
+    for p in paths {
+        survey.visit(Path::new(p));
+    }
+    survey
+}
+
+impl FileSurvey {
+    fn visit(&mut self, path: &Path) {
+        if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+            return;
+        }
+        if path.is_dir() {
+            let Ok(entries) = std::fs::read_dir(path) else { return };
+            for entry in entries.flatten() {
+                let is_symlinked_dir = entry.file_type().is_ok_and(|t| t.is_symlink()) && entry.path().is_dir();
+                if !is_symlinked_dir {
+                    self.visit(&entry.path());
+                }
+            }
+            return;
+        }
+        if !path.is_file() {
+            return;
+        }
+        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
+            self.audio.insert(path.to_path_buf());
+        } else {
+            self.unsupported += 1;
+            if !ext.is_empty() {
+                self.unsupported_exts.insert(format!(".{ext}"));
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -76,7 +131,7 @@ impl ImportPlans {
 
 /// Splits scanned tracks into ones already in the library (same path, dropped silently),
 /// likely duplicates (asked about) and new tracks.
-pub fn plan_import(token: u64, library: &[Track], scanned: Vec<Track>) -> (PendingImport, ImportPlan) {
+pub fn plan_import(token: u64, library: &[Track], scanned: Vec<Track>, survey: &FileSurvey) -> (PendingImport, ImportPlan) {
     let index = DuplicateIndex::new(library);
     let by_id: HashMap<u32, &Track> = library.iter().map(|t| (t.id, t)).collect();
     let mut seen = HashSet::new();
@@ -112,13 +167,23 @@ pub fn plan_import(token: u64, library: &[Track], scanned: Vec<Track>) -> (Pendi
         }
         fresh.push(track);
     }
-    let plan = ImportPlan { token, new_count: fresh.len() - duplicates.len(), already_in_library, duplicates };
+    let skipped = SkippedFiles {
+        unsupported: survey.unsupported,
+        unsupported_exts: survey.unsupported_exts.iter().cloned().collect(),
+        unreadable: survey.audio.len().saturating_sub(seen.len()),
+    };
+    let plan = ImportPlan { token, new_count: fresh.len() - duplicates.len(), already_in_library, duplicates, skipped };
     (PendingImport { token, fresh, duplicate_of }, plan)
 }
 
-pub fn plan_for_library(plans: &ImportPlans, lib: &LocalLibrary, scanned: Vec<Track>) -> Result<ImportPlan, String> {
+pub fn plan_for_library(
+    plans: &ImportPlans,
+    lib: &LocalLibrary,
+    scanned: Vec<Track>,
+    survey: &FileSurvey,
+) -> Result<ImportPlan, String> {
     let library = lib.get_all_tracks().map_err(|e| e.to_string())?;
-    plans.store(|token| plan_import(token, &library, scanned))
+    plans.store(|token| plan_import(token, &library, scanned, survey))
 }
 
 #[cfg(test)]
@@ -159,7 +224,7 @@ mod tests {
             track(0, "/New/fresh.mp3", "Hale", "Copper Lines", 380.0),
             track(0, "/New/fresh.mp3", "Hale", "Copper Lines", 380.0),
         ];
-        plan_import(3, &library, scanned)
+        plan_import(3, &library, scanned, &FileSurvey::default())
     }
 
     #[test]
@@ -201,10 +266,28 @@ mod tests {
     #[test]
     fn only_the_latest_plan_can_be_committed() {
         let plans = ImportPlans::default();
-        let first = plans.store(|token| plan_import(token, &[], vec![])).unwrap();
-        let second = plans.store(|token| plan_import(token, &[], vec![])).unwrap();
+        let first = plans.store(|token| plan_import(token, &[], vec![], &FileSurvey::default())).unwrap();
+        let second = plans.store(|token| plan_import(token, &[], vec![], &FileSurvey::default())).unwrap();
         assert!(plans.take(first.token).is_err());
         assert!(plans.take(second.token).is_ok());
         assert!(plans.take(second.token).is_err());
+    }
+
+    #[test]
+    fn survey_counts_unsupported_and_unreadable_files_and_ignores_hidden_ones() {
+        let dir = std::env::temp_dir().join(format!("ff-survey-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        for name in ["a.mp3", "b.MP3", "notes.txt", "sub/c.m4p", "sub/d.txt", ".DS_Store", "README"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let survey = survey_files(&[dir.to_string_lossy().into_owned()]);
+        let scanned = vec![track(0, &dir.join("a.mp3").to_string_lossy(), "", "a", 1.0)];
+        let (_, plan) = plan_import(1, &[], scanned, &survey);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(
+            plan.skipped,
+            SkippedFiles { unsupported: 4, unsupported_exts: vec![".m4p".into(), ".txt".into()], unreadable: 1 }
+        );
     }
 }

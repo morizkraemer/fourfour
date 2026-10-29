@@ -9,7 +9,7 @@
   import { onMount } from 'svelte';
   // Side-effect import: loads tokens.css + base.css globally
   import '$ds';
-  import { Dialog, Button, FileDropOverlay, ResizeHandle } from '$ds';
+  import { Dialog, Button, ResizeHandle } from '$ds';
   import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
   // Modules
@@ -32,7 +32,6 @@
 
   import {
     ui,
-    importDropTarget,
     initOrganize,
     reconcileOrganizeTarget,
     setPanelWidth,
@@ -40,7 +39,6 @@
     resetPanelWidth,
   } from './stores/ui.svelte.ts';
   import { PANEL_WIDTH } from './lib/panelWidth.ts';
-  import { sidebarSourceLabel, playlistForSidebarSource } from './stores/library.svelte.ts';
   import { shortcuts } from './shortcuts/index.ts';
   import {
     initLibrary,
@@ -48,27 +46,18 @@
     confirmAnalysisPrompt,
     dismissAnalysisPrompt,
   } from './stores/library.svelte.ts';
-  import { hoverFileDrop, clearFileDropHover, importDroppedPaths } from './stores/file-drop.svelte.ts';
+  import { fileDrop, hoverFileDrop, clearFileDropHover, importDroppedPaths } from './stores/file-drop.svelte.ts';
   import { selectionCount } from './stores/selection.svelte.ts';
   import { getIsTauri } from './services/tauri.svelte.ts';
   import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
   import { installMacWindowChrome } from './services/window-chrome.ts';
   
-  let fileDropVisible = $state(false);
   let browseMainEl = $state(null);
 
   let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded);
 
-  let dropTarget = $derived(importDropTarget());
-  let dropTargetLabel = $derived(sidebarSourceLabel(dropTarget));
-  let dropIntoPlaylist = $derived(playlistForSidebarSource(dropTarget) != null);
-  let fileDropSub = $derived(
-    dropIntoPlaylist
-      ? `Files and folders will be added to “${dropTargetLabel}” and analyzed`
-      : 'Files and folders will be added to your library and analyzed'
-  );
-
   function onGlobalKeyDown(e) {
+    if (e.key === 'Escape') clearFileDropHover();
     if (e.defaultPrevented) return;
     shortcuts.dispatch(e, { typing: isEditableTarget(e.target) });
   }
@@ -90,14 +79,12 @@
         stopDragDrop = unlistenWhenReady(appWindow.onDragDropEvent((event) => {
           const p = event.payload;
           if (p.type === 'enter' || p.type === 'over') {
-            fileDropVisible = hoverFileDrop(p.position).kind === 'view';
+            hoverFileDrop(p.position);
           } else if (p.type === 'drop') {
             const target = hoverFileDrop(p.position);
-            fileDropVisible = false;
             clearFileDropHover();
             if (p.paths?.length) void importDroppedPaths(p.paths, target);
           } else {
-            fileDropVisible = false;
             clearFileDropHover();
           }
         }), (err) => console.warn('File drag-drop unavailable:', err));
@@ -123,7 +110,7 @@
       <div class="ff-browse__slot ff-browse__slot--header" data-focus-region="search">
         <GlobalHeader />
       </div>
-      <div class="ff-browse__content">
+      <div class="ff-browse__content" class:ff-browse__content--file-drop={fileDrop.overView} data-file-drop-content>
         <div class="ff-browse__slot ff-browse__slot--table" data-focus-region="tracks">
           <TrackTable />
         </div>
@@ -181,11 +168,6 @@
   {/snippet}
 </Dialog>
 
-<FileDropOverlay
-  visible={fileDropVisible}
-  title="Drop audio files here"
-  sub={fileDropSub}
-/>
 
 <style>
   /* ── Browse screen layout ──────────────────────────────── */
@@ -224,10 +206,19 @@
   }
 
   .ff-browse__content {
+    position: relative;
     flex: 1 1 0;
     min-height: 0;
     display: flex;
     align-items: stretch;
+  }
+  .ff-browse__content--file-drop::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--ff-accent);
+    pointer-events: none;
+    z-index: 5;
   }
 
   /* bare slots — no spacing; modules own their own padding/width (rule 4) */

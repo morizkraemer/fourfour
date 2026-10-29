@@ -56,7 +56,7 @@ import {
   uniqueName,
 } from '../lib/playlistTree.ts';
 import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
-import { importSummary, importWithDuplicateCheck } from '../lib/importDuplicates.ts';
+import { importWithDuplicateCheck, libraryImportMessage, type ImportOutcome } from '../lib/importDuplicates.ts';
 import { askAboutDuplicates } from './import-duplicates.svelte.ts';
 import { outermostIds } from '../lib/playlistSelection.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
@@ -855,10 +855,7 @@ function importErrorMessage(err: unknown): string {
 }
 
 async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
-  if (newTracks.length === 0) {
-    library.statusMessage = 'No new audio files found (already in library or unsupported format).';
-    return;
-  }
+  if (newTracks.length === 0) return;
 
   const playlist = playlistForSidebarSource(options?.targetSource);
   if (playlist) {
@@ -903,11 +900,10 @@ export function importDirectory(path: string, options?: ImportOptions) {
 export async function importFiles(paths: string[], options?: ImportOptions) {
   try {
     library.statusMessage = 'Importing…';
-    const { added, skipped_ids } = await scanAndAdd(paths);
-    await finishImport(added, options);
+    const outcome = await scanAndAdd(paths);
+    await finishImport(outcome.added, options);
     library.tauriError = lastTauriError;
-    const summary = importSummary(added.length, skipped_ids.length);
-    if (summary) library.statusMessage = summary;
+    library.statusMessage = libraryImportMessage(outcome);
   } catch (err) {
     library.statusMessage = importErrorMessage(err);
     library.tauriError = lastTauriError;
@@ -915,26 +911,23 @@ export async function importFiles(paths: string[], options?: ImportOptions) {
   }
 }
 
-/** Scans dropped files/folders and returns the ids of every library track they hold, including ones imported earlier and skipped duplicates. */
-export async function importFilesForPlaylist(paths: string[]): Promise<number[]> {
+export async function importDroppedTracks(paths: string[]): Promise<{ outcome: ImportOutcome; ids: number[] } | null> {
   try {
     library.statusMessage = 'Importing…';
-    const { added, skipped_ids } = await scanAndAdd(paths);
+    const outcome = await scanAndAdd(paths);
     await loadState();
     library.tauriError = lastTauriError;
-    if (added.length > 0) {
-      library.pendingAnalyzeTrackIds = added.map((t) => t.id);
+    if (outcome.added.length > 0) {
+      library.pendingAnalyzeTrackIds = outcome.added.map((t) => t.id);
       library.showAnalysisPrompt = true;
     }
-    const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...skipped_ids])];
-    library.statusMessage =
-      ids.length === 0 ? 'No audio files found in the dropped items.' : `Found ${ids.length} track${ids.length === 1 ? '' : 's'}`;
-    return ids;
+    const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
+    return { outcome, ids };
   } catch (err) {
     library.statusMessage = importErrorMessage(err);
     library.tauriError = lastTauriError;
-    console.error('importFilesForPlaylist failed:', err);
-    return [];
+    console.error('importDroppedTracks failed:', err);
+    return null;
   }
 }
 

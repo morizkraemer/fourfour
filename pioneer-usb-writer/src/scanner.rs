@@ -7,7 +7,7 @@ use walkdir::WalkDir;
 
 use crate::models::Track;
 
-const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4a", "aac"];
+pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4a", "aac"];
 
 /// Recursively scan a directory for audio files and return their metadata as a list of [`Track`]s.
 ///
