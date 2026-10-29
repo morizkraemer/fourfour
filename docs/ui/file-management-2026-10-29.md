@@ -20,4 +20,4 @@ All new UI fits the existing app and is consistent across every popup, modal, di
 
 ## Open
 
-- Big player BPM/key edit: decided option B (pencil opens a menu: typed BPM, ÷2 ×2 Tap, Reset; key pencil opens key picker). Popup layout/design not liked yet → round popups-1 sets one popup design for the whole app.
+- Big player BPM/key edit: SETTLED 2026-10-29 — BPM pencil popup = layout bpm-a (one row: field | ÷2 ×2 | Tap, Reset link, Save), key pencil popup = key-c list made compact with Minor/Major tabs; surface = popups-1 B card (fb-mockups 7d7f26f).
