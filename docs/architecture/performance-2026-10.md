@@ -492,7 +492,7 @@ New scenario in `app/smoke/perf-bulk-analysis.spec.ts` (`FF_PERF_SCENARIO=player
 
 ## Fix
 
-- `drawBandRange` (`waveform-render.js`) takes the column-ring path whenever no envelope decay applies (`decayPerPixel === 0`), not only at 1 column per pixel or finer. The high-resolution series is drawn without decay, so each device-pixel column depends only on its absolute pixel index at any zoom; a scroll by d pixels now reduces and paints only d columns and blits the ring in two slices. The coarse analysis columns (zoom decay 0.86) still repaint in full. No visual change: `waveform-scroll-identity.test.ts` draws 90 scrolled frames (uneven steps, two zooms at 4-17 columns per pixel) through the ring and through a full repaint into a pixel-exact software canvas and requires 0 differing pixels per frame; it fails if the ring is not used.
+- `drawBandRange` (`waveform-render.js`) takes the column-ring path whenever no envelope decay applies (`decayPerPixel === 0`), not only at 1 column per pixel or finer. The high-resolution series is drawn without decay, so each device-pixel column depends only on its absolute pixel index at any zoom; a scroll by d pixels now reduces and paints only d columns and blits the ring in two slices. The coarse analysis columns (zoom decay 0.86) still repaint in full. No visual change: `waveform-scroll-identity.test.ts` draws 90 scrolled frames (uneven steps, two zooms at 13 and 33 columns per pixel) through the ring and through a full repaint into a pixel-exact software canvas and requires 0 differing pixels per frame; it fails if the ring is not used.
 
 ## Numbers (10k tracks, production build, headless software rendering)
 
