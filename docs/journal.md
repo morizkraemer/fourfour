@@ -273,3 +273,4 @@
 2026-10-29 09:45 orchestrator decided: duplicates-simple approved, without the visible scrollbar; edit strip rejected ('needs to be simpler and in the existing strip') → round player-edit-5: inline edit within the existing header strip
 2026-10-29 10:10 fb-strip player-edit-5 (3 in-header BPM/key edit options, rec B pencil menu) + duplicates-simple without scrollbar on :5240; player-edit-4 archived; fb-mockups 3819f32
 2026-10-29 10:30 orchestrator decided: BPM/key edit = player-edit-5 option B (pencil menu); popup layout/design disliked → round popups-1: one popup design for BPM menu, key picker, top-bar status popover
+2026-10-29 11:00 fb-strip popups-1 (3 app-wide popup directions on BPM menu, key picker, status popover, track menu; rec B card popover + Camelot wheel) on :5240; fb-mockups 3dff11e. fb-files done f9cca53 (status, relocate, column, topbar B, dialog, settings card); follow-up: central load guard
