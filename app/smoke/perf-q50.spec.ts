@@ -10,8 +10,7 @@ const RUNS = Number(process.env.FF_PERF_RUNS ?? 3);
 const IMPORT_FILES = Number(process.env.FF_PERF_IMPORT ?? 1000);
 const REPORT = process.env.FF_PERF_Q50_OUT;
 const STARTUP_ONLY = process.env.FF_PERF_Q50_ONLY === 'startup';
-/** The real IPC answers `invoke` in a task of its own; the in-page mock would answer in a microtask of the caller's task. */
-const IPC_TASK = process.env.FF_PERF_IPC_TASK !== '0';
+const MOCK_IPC_ANSWERS_IN_OWN_TASK = process.env.FF_PERF_IPC_TASK !== '0';
 
 const results: Record<string, number> = {};
 const record = (name: string, value: number) => (results[name] = Math.round(value * 10) / 10);
@@ -88,7 +87,7 @@ async function openApp(browser: Browser, payload: LoadedState) {
   const page = await context.newPage();
   await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
   await page.addInitScript(installTauriMock, payload);
-  await page.addInitScript(installProbes, IPC_TASK);
+  await page.addInitScript(installProbes, MOCK_IPC_ANSWERS_IN_OWN_TASK);
   return { context, page };
 }
 
