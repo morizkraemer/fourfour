@@ -289,3 +289,4 @@
 2026-10-29 17:10 orchestrator - key popup canvas published (https://claude.ai/artifact/EuFKQRMeeHEobgTcvsLBYW): Today + 6 simpler options, rec 6 'codes, both modes'; activity button installed on Mac
 2026-10-29 17:20 orchestrator - Merlin Mac feedback: import summary/icon/list/analyze opt-out/open playlist → fb-import2 (seat, sonnet); grid always slightly off → fb-grid (seat, opus); waveform stutter during analysis + first-load look queued (fb-wave)
 2026-10-29 18:00 fb-import2 landed on ov-1028: import headline facts, sidecars (.asd etc) ignored, analyze prompt only when added + 'always analyze' (new config auto_analyze_after_import), folder-plus icon, dupes list 60% height, dropped folder playlist opens in main view; smoke 87/87. spawn fb-keypop (key popup v7 build)
+2026-10-29 18:40 orchestrator - fb-import2 installed on Mac; fb-keypop merged into ov-1028 (key popup v7, smoke 87/87); spawn fb-wave (waveform stutter during analysis + first-load look, seat opus)
