@@ -558,6 +558,7 @@
     border-right: 1px solid var(--ff-border);
   }
   .ff-sidebar__chrome {
+    position: relative;
     display: flex;
     align-items: center;
     /* Room for native traffic lights (trafficLightPosition.x ≈ 14px) */
@@ -566,8 +567,12 @@
     background: var(--ff-bg);
   }
   .ff-sidebar__search {
-    margin-left: auto;
+    position: absolute;
+    top: 0;
+    right: var(--ff-space-4);
     display: flex;
+    align-items: center;
+    height: calc(var(--ff-titlebar-search-band-height) - 1px);
   }
   .ff-sidebar__traffic {
     display: flex;

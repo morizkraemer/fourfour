@@ -108,14 +108,11 @@
   }
 </script>
 
-<div class="ff-gheader ff-titlebar-band ff-titlebar-band--ruled" data-tauri-drag-region bind:this={headerEl}>
+<div class="ff-gheader ff-titlebar-band ff-titlebar-band--ruled" class:ff-gheader--icon={ui.searchMode === 'icon'} data-tauri-drag-region bind:this={headerEl}>
   <div class="ff-gheader__ctx" data-tauri-drag-region>
     <b class="ff-gheader__title">{contextLabel}</b>
     <span class="ff-gheader__count">{activeTracks.length.toLocaleString()}</span>
   </div>
-  {#if ui.searchMode === 'icon'}
-    <SearchIconButton />
-  {/if}
   <div class="ff-gheader__searchslot" class:ff-gheader__searchslot--cover={searchCollapsed} class:ff-gheader__searchslot--raised={searchCollapsed && searchRaised}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div class="ff-gheader__search" class:ff-gheader__search--open={ui.paletteOpen} bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
@@ -150,6 +147,9 @@
       {/if}
     {/if}
   </div>
+  {#if ui.searchMode === 'icon'}
+    <SearchIconButton />
+  {/if}
 </div>
 
 <style>
@@ -163,6 +163,9 @@
     padding-right: var(--ff-space-7);
     overflow: hidden;
     background: var(--ff-bg);
+  }
+  .ff-gheader--icon {
+    padding-right: var(--ff-space-4);
   }
   .ff-gheader__ctx {
     display: flex;
