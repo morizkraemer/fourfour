@@ -281,3 +281,4 @@
 2026-10-29 13:20 orchestrator - Merlin bug: drag-import overlay takes the whole window, can't drop folders on sidebar/playlists; unclear 'No new audio files found' message → spawn fb-drop (seat, opus)
 2026-10-29 13:50 fb-strip popups-2 (3 BPM + 3 key popup layouts, rec BPM A one row + key B wheel) on :5240, everything else archived; fb-mockups 7d7f26f
 2026-10-29 14:00 orchestrator decided: BPM popup = popups-2 bpm-a (one row); key popup = key-c list but compact, tabbed minor/major. Settled → build. spawn fb-popups (seat, sonnet high)
+2026-10-29 14:40 fb-drop landed on ov-1028: root cause macOS drop positions are CSS points (old code halved them on Retina); targets under cursor (playlist, new-playlist space, folder, table), no overlay; import copy from real counts; AUDIO_EXTENSIONS made pub in usb-writer (one word, brother's lane); smoke 66/66; Mac install started
