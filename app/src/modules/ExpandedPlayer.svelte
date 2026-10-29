@@ -12,6 +12,8 @@
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
+  import { quantize } from '../stores/quantize.svelte.ts';
+  import { nearestBeatMs } from '../lib/quantize.ts';
   import { registerWaveZoom } from '../stores/wave-zoom.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -19,6 +21,7 @@
     deleteCue,
     jumpToCue,
     deleteHotCue,
+    moveHotCue,
     recolorCue,
     renameCue,
     triggerHotCue,
@@ -70,6 +73,8 @@
     }),
   );
   let memory = $derived(memoryCues(trackCues));
+  let cueSnap = $derived(quantize.on ? (ms) => nearestBeatMs(player.track?.beats ?? [], ms) : null);
+  const moveCue = (key, ms) => player.track && moveHotCue(player.track.id, key, ms);
   let editingSlot = $state(null);
   let editingChip = $derived(pads.find((p) => p.slot === editingSlot)?.chip ?? null);
 
@@ -149,7 +154,9 @@
       analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
       progress={player.progress}
       playing={player.playing}
-      onSeek={player.track ? seekToProgress : undefined} />
+      onSeek={player.track ? seekToProgress : undefined}
+      onCueMove={moveCue}
+      {cueSnap} />
   </div>
 
   <footer class="ff-xp__transport">

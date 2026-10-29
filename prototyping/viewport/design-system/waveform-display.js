@@ -10,7 +10,7 @@
  *                    full track; the zoom view and the compact strip draw this,
  *     bandsOverview: optional lower-resolution {low, mid, high} for the overview bar,
  *     beats:         Array<{time_ms: number, bar_position: number}>,
- *     cues:          Array<{position: number, color?: string}>,  // position 0-1
+ *     cues:          Array<{position: number, color?: string, key?: string, padded?: boolean, label?: string}>,  // position 0-1
  *     duration_ms:   number,
  *     bpm:           number,
  *   }
@@ -31,6 +31,7 @@ import { ZOOM_PEAK_WEIGHT, reduceBands } from './waveform-bands.js';
 const DRAG_THRESHOLD_PX = 4;
 const CUE_TAB_W = 12;
 const CUE_TAB_H = 12;
+const CUE_GRAB_PX = 4;
 
 const OVERVIEW_DECAY = 0.93;
 const COMPACT_DECAY = 0.88;
@@ -54,7 +55,7 @@ const WHEEL_LINE_PX = 16;
 export default class WaveformDisplay {
     /**
      * @param {HTMLElement} container
-     * @param {{ mode?: 'compact' | 'expanded', onSeek?: (frac: number) => void }} [options]
+     * @param {{ mode?: 'compact' | 'expanded', onSeek?: (frac: number) => void, onCueMove?: (key: string, timeMs: number) => void }} [options]
      */
     constructor(container, options = {}) {
         this._container = container;
@@ -62,6 +63,10 @@ export default class WaveformDisplay {
         // Expanded view locks the playhead at centre and scrolls the waveform.
         this._lockPlayhead = this._mode === 'expanded';
         if (options.onSeek) this.onSeek = options.onSeek;
+        if (options.onCueMove) this.onCueMove = options.onCueMove;
+        this._cueSnap = null;
+        this._selectedCue = null;
+        this._cueDrag = null;
 
         // Create wrapper div
         this._wrapper = document.createElement('div');
@@ -193,6 +198,8 @@ export default class WaveformDisplay {
     /** Replace data and re-render. Resets zoom and scroll position. */
     setData(data, playheadFrac = undefined) {
         this._data = data;
+        this._selectedCue = null;
+        this._cueDrag = null;
         this._dropWindow();
         this._overviewDirty = true;
         this._clock.stop(0);
@@ -251,9 +258,18 @@ export default class WaveformDisplay {
         this._paint();
     }
 
+    /**
+     * Where a dragged hot cue lands: `snap(timeMs)` returns the position to use (the nearest beat), or null for
+     * no snapping. Holding Alt while dragging bypasses it.
+     */
+    setCueSnap(snap) {
+        this._cueSnap = snap || null;
+    }
+
     /** Replace the cue markers only (an edit): zoom, scroll position and the rest of the data stay. */
     setCues(cues) {
         if (!this._data || this._data.cues === cues) return;
+        if (this._selectedCue && !cues.some((c) => c.key === this._selectedCue)) this._selectedCue = null;
         this._data = { ...this._data, cues };
         this._overviewDirty = true;
         this._paint();
@@ -665,19 +681,28 @@ export default class WaveformDisplay {
 
     // Hot-cue markers: a vertical line + a dot at the top, matching the
     // compact strip so the two views agree. Positions are 0–1 fractions.
+    // A cue being dragged follows the pointer; the selected one is outlined.
     _renderCues(ctx, w, h, startFrac, endFrac) {
         const cues = this._data?.cues;
         if (!cues || cues.length === 0 || endFrac <= startFrac) return;
         for (const cue of cues) {
-            const frac = Math.max(0, Math.min(1, cue.position ?? 0));
+            const dragged = this._cueDrag && this._cueDrag.moved && this._cueDrag.key === cue.key;
+            const position = dragged ? this._cueDragFrac() : (cue.position ?? 0);
+            const frac = Math.max(0, Math.min(1, position));
             if (frac < startFrac || frac > endFrac) continue;
             const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
             const color = cue.color || '#4ade80';
+            const selected = this._mode === 'expanded' && cue.key !== undefined && cue.key === this._selectedCue;
             ctx.fillStyle = color;
-            ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, 1, h);
+            ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, selected ? 2 : 1, h);
             if (cue.label && this._mode === 'expanded') {
                 const lineX = this._lineAt(x, 1);
                 ctx.fillRect(lineX - 0.5, 0, CUE_TAB_W, CUE_TAB_H);
+                if (selected) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(lineX, 0.5, CUE_TAB_W - 1, CUE_TAB_H - 1);
+                }
                 ctx.fillStyle = '#0a0a0a';
                 ctx.font = '700 9px system-ui, sans-serif';
                 ctx.textAlign = 'center';
@@ -1085,7 +1110,83 @@ export default class WaveformDisplay {
         this._updatePlayheadOverlay();
     }
 
+    // The hot cue whose flag is under a pointer position on the zoom view (expanded only), or null.
+    _cueAt(clientX, clientY) {
+        if (this._mode !== 'expanded' || !this._data?.cues) return null;
+        const rect = this._zoomCanvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        if (y < 0 || y > CUE_TAB_H + CUE_GRAB_PX || rect.width <= 0) return null;
+        const visibleFrac = 1.0 / this._zoom;
+        const cues = this._data.cues;
+        for (let i = cues.length - 1; i >= 0; i--) {
+            const cue = cues[i];
+            if (!cue.padded || cue.key === undefined) continue;
+            const cueX = (((cue.position ?? 0) - this._offset) / visibleFrac) * rect.width;
+            if (x >= cueX - CUE_GRAB_PX && x <= cueX + CUE_TAB_W + CUE_GRAB_PX) return cue;
+        }
+        return null;
+    }
+
+    // Track fraction a dragged cue sits at: under the pointer, on the nearest beat when snapping is on and Alt is not held.
+    _cueDragFrac() {
+        const drag = this._cueDrag;
+        const durationMs = this._data?.duration_ms || 0;
+        if (!drag || !durationMs) return 0;
+        let ms = this._zoomFracAtClientX(drag.clientX) * durationMs;
+        if (this._cueSnap && !drag.alt) ms = this._cueSnap(ms) ?? ms;
+        return Math.max(0, Math.min(1, ms / durationMs));
+    }
+
     _bindEvents() {
+        this._onCueMouseDown = (e) => {
+            if (e.button !== 0) return false;
+            const cue = this._cueAt(e.clientX, e.clientY);
+            if (!cue) {
+                if (this._selectedCue !== null) {
+                    this._selectedCue = null;
+                    this._render();
+                }
+                return false;
+            }
+            this._selectedCue = cue.key;
+            this._cueDrag = { key: cue.key, startX: e.clientX, clientX: e.clientX, alt: e.altKey, moved: false };
+            this._zoomCanvas.style.cursor = 'grabbing';
+            this._render();
+            return true;
+        };
+
+        this._onCueMouseMove = (e) => {
+            const drag = this._cueDrag;
+            drag.clientX = e.clientX;
+            drag.alt = e.altKey;
+            if (!drag.moved && Math.abs(e.clientX - drag.startX) < DRAG_THRESHOLD_PX) return;
+            drag.moved = true;
+            this._render();
+        };
+
+        this._onCueMouseUp = () => {
+            const drag = this._cueDrag;
+            const frac = drag.moved ? this._cueDragFrac() : null;
+            this._cueDrag = null;
+            this._zoomCanvas.style.cursor = this._defaultCursor();
+            const durationMs = this._data?.duration_ms || 0;
+            if (frac !== null && this.onCueMove && durationMs) this.onCueMove(drag.key, frac * durationMs);
+            this._render();
+        };
+
+        this._onCueAlt = (e) => {
+            if (!this._cueDrag || e.key !== 'Alt') return;
+            this._cueDrag.alt = e.type === 'keydown';
+            if (this._cueDrag.moved) this._render();
+        };
+
+        this._onZoomHover = (e) => {
+            if (this._dragging || this._cueDrag) return;
+            const cursor = this._cueAt(e.clientX, e.clientY) ? 'grab' : this._defaultCursor();
+            if (this._zoomCanvas.style.cursor !== cursor) this._zoomCanvas.style.cursor = cursor;
+        };
+
         this._onOverviewMouseDown = (e) => {
             if (e.button !== 0 || this._mode === 'compact') return;
             this._dragging = true;
@@ -1100,6 +1201,10 @@ export default class WaveformDisplay {
 
         this._onMouseDown = (e) => {
             if (e.button !== 0) return;
+            if (this._onCueMouseDown(e)) {
+                e.preventDefault();
+                return;
+            }
             this._dragging = true;
             this._dragSurface = 'zoom';
             this._dragMoved = false;
@@ -1114,6 +1219,10 @@ export default class WaveformDisplay {
         };
 
         this._onMouseMove = (e) => {
+            if (this._cueDrag) {
+                this._onCueMouseMove(e);
+                return;
+            }
             if (!this._dragging) return;
             const dx = e.clientX - this._dragStartX;
             const dy = this._dragStartY - e.clientY;
@@ -1146,6 +1255,10 @@ export default class WaveformDisplay {
         };
 
         this._onMouseUp = (e) => {
+            if (this._cueDrag) {
+                this._onCueMouseUp(e);
+                return;
+            }
             if (!this._dragging) return;
             const surface = this._dragSurface;
             this._dragging = false;
@@ -1192,6 +1305,9 @@ export default class WaveformDisplay {
         this._zoomCanvas.style.cursor = this._defaultCursor();
         this._overviewCanvas.addEventListener('mousedown', this._onOverviewMouseDown);
         this._zoomCanvas.addEventListener('mousedown', this._onMouseDown);
+        this._zoomCanvas.addEventListener('mousemove', this._onZoomHover);
+        window.addEventListener('keydown', this._onCueAlt);
+        window.addEventListener('keyup', this._onCueAlt);
         window.addEventListener('mousemove', this._onMouseMove);
         window.addEventListener('mouseup', this._onMouseUp);
         this._zoomCanvas.addEventListener('wheel', this._onWheel, { passive: false });
@@ -1200,6 +1316,9 @@ export default class WaveformDisplay {
     _unbindEvents() {
         this._overviewCanvas.removeEventListener('mousedown', this._onOverviewMouseDown);
         this._zoomCanvas.removeEventListener('mousedown', this._onMouseDown);
+        this._zoomCanvas.removeEventListener('mousemove', this._onZoomHover);
+        window.removeEventListener('keydown', this._onCueAlt);
+        window.removeEventListener('keyup', this._onCueAlt);
         window.removeEventListener('mousemove', this._onMouseMove);
         window.removeEventListener('mouseup', this._onMouseUp);
         this._zoomCanvas.removeEventListener('wheel', this._onWheel);

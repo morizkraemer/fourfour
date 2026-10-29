@@ -29,6 +29,8 @@
     trackKey = null,
     analyzing = false,
     onSeek = undefined,
+    onCueMove = undefined,
+    cueSnap = null,
   } = $props();
 
   let placeholderWidth = $state(0);
@@ -40,7 +42,7 @@
   let lastDataKey = null;
 
   function markerData() {
-    return (cues ?? []).map((c) => ({ position: c.position, color: c.color, label: c.label }));
+    return (cues ?? []).map((c) => ({ position: c.position, color: c.color, label: c.label, key: c.key, padded: c.padded }));
   }
 
   function buildData() {
@@ -64,7 +66,7 @@
 
   $effect(() => {
     if (!container) return;
-    display = new WaveformDisplay(container, { mode, onSeek });
+    display = new WaveformDisplay(container, { mode, onSeek, onCueMove });
     ro = new ResizeObserver(() => display?.redraw());
     ro.observe(container);
     lastDataKey = null;
@@ -78,6 +80,14 @@
   // Keep the seek callback live without recreating the engine.
   $effect(() => {
     if (display) display.onSeek = onSeek;
+  });
+
+  $effect(() => {
+    if (display) display.onCueMove = onCueMove;
+  });
+
+  $effect(() => {
+    display?.setCueSnap(cueSnap);
   });
 
   // Push data only when the track or its waveform changes — NOT on every tick.
