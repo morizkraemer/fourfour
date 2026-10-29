@@ -311,3 +311,4 @@
 2026-10-30 03:37 q50-startup landed on ov-1028: build_track_infos 201-227 → 61-81 ms (one rows query + parallel sidecar labels), load_state 259-277 → 105-131 ms; frontend warm interactive 984 → 569 ms, warm longest task 295 → 87 ms, cold 1100 → 975 ms; lazy row-preview decode, chunked mapping. spawn q50-import (opus)
 2026-10-30 03:55 orchestrator - q50-startup merged (f5f072d, doc conflict resolved, both sections kept); /tmp tmpfs hit 100% (q41-int target 14 GB) → target moved to ~/.cache/ff-q41-target (symlink); smoke 92/92, Mac install 03:55 ok
 2026-10-30 05:24 orchestrator - resumed: seat limit hit ~04:00 (q50-import, q50-analysis2 stopped); PM reset ping → both resumed via SendMessage
+2026-10-30 05:34 q50-analysis2: item 1 landed on ov-1028 (memory-aware chunk slots: simulated 8 GB peak 6.4 → 1.9 GB, dev unchanged, outputs identical); item 3 (detail from analysis decode) held, MP3 not bit-identical; rten 0.27 not identical + slower → Waiting 20-22
