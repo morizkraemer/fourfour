@@ -3,12 +3,18 @@
   import { library, changeLocalLibraryPath } from '../../stores/library.svelte.ts';
   import { pickDirectory, getIsTauri } from '../../services/tauri.svelte.ts';
   import { openRekordboxImport } from '../../stores/rekordbox-import.svelte.ts';
+  import { fileStatus } from '../../stores/file-status.svelte.ts';
+  import { checkLibraryAgain, openHealthDialog } from '../../stores/file-health.svelte.ts';
+  import { lastCheckText } from '../../lib/fileHealth.ts';
 
   let busy = $derived(library.analyzing || library.syncing);
 
   async function changeLibrary() {
     const dir = await pickDirectory();
-    if (dir) await changeLocalLibraryPath(dir);
+    if (dir) {
+      await changeLocalLibraryPath(dir);
+      void checkLibraryAgain();
+    }
   }
 </script>
 
@@ -25,6 +31,21 @@
   <SettingRow title="Library database" description="Tracks, playlists and the analysis cache live next to this file.">
     {#snippet control()}
       <Button label="Change…" size="small" disabled={busy} onclick={changeLibrary} />
+    {/snippet}
+  </SettingRow>
+</div>
+
+<div class="ff-settings-section">Files</div>
+<div class="ff-settings-card" data-settings-file-check>
+  <SettingRow
+    title="Check files"
+    description={fileStatus.running ? 'Checking every track’s file…' : lastCheckText(fileStatus.checkedAt, fileStatus)}
+  >
+    {#snippet control()}
+      {#if fileStatus.missing + fileStatus.error > 0}
+        <Button label="Show results" size="small" variant="ghost" onclick={openHealthDialog} />
+      {/if}
+      <Button label="Check now" size="small" disabled={fileStatus.running} onclick={() => void checkLibraryAgain()} />
     {/snippet}
   </SettingRow>
 </div>
