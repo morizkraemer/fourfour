@@ -402,9 +402,11 @@ async fn analyze_one_track_rust(
 ) -> TrackResult {
     let started = Instant::now();
     let handle = tokio::task::spawn_blocking(move || {
-        let control = Control { cancel: &job.cancel, pause: &job.pause, on_waveform: None };
-        let on_partial = job.on_partial.as_deref().map(|f| f as &(dyn Fn(models::AnalysisResult) + Sync));
-        engine.analyze(&source_path, &control, threads, pass, on_partial)
+        crate::analysis_priority::run_below_ui(|| {
+            let control = Control { cancel: &job.cancel, pause: &job.pause, on_waveform: None };
+            let on_partial = job.on_partial.as_deref().map(|f| f as &(dyn Fn(models::AnalysisResult) + Sync));
+            engine.analyze(&source_path, &control, threads, pass, on_partial)
+        })?
     });
     let joined = tokio::time::timeout(RUST_TRACK_TIMEOUT, handle)
         .await
@@ -545,9 +547,11 @@ async fn run_now_lane(
             sink.log(LogLevel::Info, format!("Priority: {} starts at once, background paused", file_name_of(&source_path)));
             let bands_path = source_path.clone();
             let bands = tokio::task::spawn_blocking(move || {
-                if let Ok(waves) = crate::band_analysis::measure_waveforms(&bands_path) {
-                    on_partial(fourfour_analysis::service::waveform_only_result(&waves));
-                }
+                crate::analysis_priority::run_below_ui(|| {
+                    if let Ok(waves) = crate::band_analysis::measure_waveforms(&bands_path) {
+                        on_partial(fourfour_analysis::service::waveform_only_result(&waves));
+                    }
+                })
             });
             let result = analyze_one_track(&command, track_id, &source_path).await;
             bands.await.ok();
