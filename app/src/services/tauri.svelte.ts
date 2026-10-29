@@ -421,11 +421,18 @@ export interface DuplicateRow {
   reason: DuplicateReason;
 }
 
+export interface SkippedFiles {
+  unsupported: number;
+  unsupported_exts: string[];
+  unreadable: number;
+}
+
 export interface ImportPlan {
   token: number;
   new_count: number;
   already_in_library: number;
   duplicates: DuplicateRow[];
+  skipped: SkippedFiles;
 }
 
 export interface ImportCommit {
@@ -460,7 +467,13 @@ export async function planImport(paths: string[]): Promise<ImportPlan> {
     lastTauriError = `plan_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
       mockPendingImport = paths.map(mockScannedTrack);
-      return { token: 0, new_count: mockPendingImport.length, already_in_library: 0, duplicates: [] };
+      return {
+        token: 0,
+        new_count: mockPendingImport.length,
+        already_in_library: 0,
+        duplicates: [],
+        skipped: { unsupported: 0, unsupported_exts: [], unreadable: 0 },
+      };
     }
     throw err;
   }

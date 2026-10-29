@@ -26,6 +26,8 @@ export const dnd = $state({
   dropNewPlaylist: false,
   /** Sidebar playlist receiving a drop */
   dropPlaylistId: null as number | null,
+  /** Sidebar playlist folder receiving a file drop from Finder */
+  dropFolderId: null as number | null,
   /** Organize-drawer playlist card receiving a drop */
   dropCardPlaylistId: null as number | null,
   /** Organize-drawer stick card (volume path) receiving a drop */
@@ -177,6 +179,7 @@ export function endDrag() {
   dnd.dropRowIndex = null;
   dnd.dropPanelSourceId = null;
   dnd.dropPlaylistId = null;
+  dnd.dropFolderId = null;
   dnd.dropCardPlaylistId = null;
   dnd.dropStickPath = null;
   dnd.dropRibbon = false;

@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { duplicatesTitle, importSummary, importWithDuplicateCheck, trackTime } from './importDuplicates.ts';
-import type { DuplicateRow, ImportPlan } from '../services/tauri.svelte.ts';
+import {
+  duplicatesTitle,
+  importWithDuplicateCheck,
+  libraryImportMessage,
+  playlistImportMessage,
+  trackTime,
+  type ImportOutcome,
+} from './importDuplicates.ts';
+import type { DuplicateRow, ImportPlan, SkippedFiles, TrackInfo } from '../services/tauri.svelte.ts';
 
 const row: DuplicateRow = {
   new_path: '/New/glass_harbor.mp3',
@@ -12,6 +19,8 @@ const row: DuplicateRow = {
   reason: 'same_tags',
 };
 
+const NONE_SKIPPED: SkippedFiles = { unsupported: 0, unsupported_exts: [], unreadable: 0 };
+
 function steps(plan: ImportPlan, skip: boolean) {
   return {
     plan: vi.fn(async () => plan),
@@ -22,14 +31,14 @@ function steps(plan: ImportPlan, skip: boolean) {
 
 describe('importWithDuplicateCheck', () => {
   it('adds right away without asking when nothing looks like a duplicate', async () => {
-    const s = steps({ token: 4, new_count: 2, already_in_library: 1, duplicates: [] }, false);
+    const s = steps({ token: 4, new_count: 2, already_in_library: 1, duplicates: [], skipped: NONE_SKIPPED }, false);
     await importWithDuplicateCheck(['/New'], s);
     expect(s.ask).not.toHaveBeenCalled();
     expect(s.commit).toHaveBeenCalledWith(4, true);
   });
 
   it.each([true, false])('passes the answer (skip = %s) to the commit', async (skip) => {
-    const s = steps({ token: 9, new_count: 1, already_in_library: 0, duplicates: [row] }, skip);
+    const s = steps({ token: 9, new_count: 1, already_in_library: 0, duplicates: [row], skipped: NONE_SKIPPED }, skip);
     const result = await importWithDuplicateCheck(['/New'], s);
     expect(s.ask).toHaveBeenCalledWith([row]);
     expect(s.commit).toHaveBeenCalledWith(9, skip);
@@ -49,9 +58,69 @@ describe('duplicate dialog copy', () => {
     expect(trackTime(0)).toBe('—');
   });
 
-  it('summarises added and skipped tracks', () => {
-    expect(importSummary(3, 0)).toBe('Imported 3 tracks');
-    expect(importSummary(1, 2)).toBe('Imported 1 track, skipped 2 duplicates');
-    expect(importSummary(0, 1)).toBe('Skipped 1 duplicate');
+});
+
+function outcome(added: number, known: number, extra: Partial<SkippedFiles> = {}, skippedIds: number[] = []): ImportOutcome {
+  return {
+    added: Array.from({ length: added }, (_, i) => ({ id: 100 + i }) as TrackInfo),
+    skipped_ids: skippedIds,
+    plan: {
+      token: 1,
+      new_count: added,
+      already_in_library: known,
+      duplicates: [],
+      skipped: { ...NONE_SKIPPED, ...extra },
+    },
+  };
+}
+
+describe('import status copy', () => {
+  it('says plainly when everything is already in the library', () => {
+    expect(libraryImportMessage(outcome(0, 12))).toBe('All 12 files are already in your library.');
+    expect(libraryImportMessage(outcome(0, 1))).toBe('This file is already in your library.');
+  });
+
+  it('names unsupported formats', () => {
+    expect(libraryImportMessage(outcome(0, 0, { unsupported: 3, unsupported_exts: ['.m4p', '.txt'] }))).toBe(
+      '3 files skipped: unsupported format (.m4p, .txt).'
+    );
+    expect(libraryImportMessage(outcome(0, 0, { unsupported: 6, unsupported_exts: ['.a', '.b', '.c', '.d', '.e'] }))).toBe(
+      '6 files skipped: unsupported format (.a, .b, .c, .d, …).'
+    );
+  });
+
+  it('joins what was added with what was left out', () => {
+    expect(libraryImportMessage(outcome(5, 12))).toBe('Added 5 tracks · 12 already in your library.');
+    expect(libraryImportMessage(outcome(1, 0, {}, [7, 8]))).toBe('Added 1 track · 2 duplicates skipped.');
+    expect(libraryImportMessage(outcome(2, 0, { unreadable: 1 }))).toBe('Added 2 tracks · 1 audio file couldn’t be read.');
+    expect(libraryImportMessage(outcome(0, 0))).toBe('No audio files found.');
+  });
+
+  it('says when a playlist drop used tracks already in the library', () => {
+    expect(playlistImportMessage(outcome(0, 12), { kind: 'added', name: 'Warmup', tracks: 12, addedToPlaylist: 12 })).toBe(
+      'Added 12 tracks to ‘Warmup’ (already in library).'
+    );
+    expect(playlistImportMessage(outcome(5, 7), { kind: 'added', name: 'Warmup', tracks: 12, addedToPlaylist: 12 })).toBe(
+      'Added 12 tracks to ‘Warmup’ (5 new, 7 already in library).'
+    );
+    expect(playlistImportMessage(outcome(3, 0), { kind: 'added', name: 'Warmup', tracks: 3, addedToPlaylist: 3 })).toBe(
+      'Added 3 tracks to ‘Warmup’.'
+    );
+    expect(playlistImportMessage(outcome(0, 4), { kind: 'added', name: 'Warmup', tracks: 4, addedToPlaylist: 0 })).toBe(
+      'All 4 tracks are already in ‘Warmup’.'
+    );
+  });
+
+  it('names created playlists', () => {
+    expect(playlistImportMessage(outcome(8, 0), { kind: 'created', names: ['Set One'], tracks: 8 })).toBe(
+      'Created ‘Set One’ with 8 tracks.'
+    );
+    expect(
+      playlistImportMessage(outcome(2, 3, { unsupported: 1, unsupported_exts: ['.txt'] }), {
+        kind: 'created',
+        names: ['A', 'B'],
+        tracks: 5,
+      })
+    ).toBe('Created 2 playlists (‘A’, ‘B’) with 5 tracks (2 new, 3 already in library) · 1 file skipped: unsupported format (.txt).');
   });
 });

@@ -179,15 +179,19 @@
   );
 
   function sidebarRowState(label, playlistId = null, isFolder = false) {
-    if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'selected';
+    if (playlistId != null && isDropTarget(playlistId)) return 'selected';
     if (playlistId != null && isMultiSelected(playlistId)) return 'selected';
     if (!isFolder && ui.activeSidebarRow === label) return 'active';
     if (playlistId != null && playlistDragIds.includes(playlistId)) return 'hover';
     return 'rest';
   }
 
+  function isDropTarget(playlistId) {
+    return dnd.dropPlaylistId === playlistId || dnd.dropFolderId === playlistId;
+  }
+
   function rowClassExtra(playlistId) {
-    if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'drag-over';
+    if (playlistId != null && isDropTarget(playlistId)) return 'drag-over';
     if (playlistId != null && playlistDragIds.includes(playlistId)) return 'drag-source';
     if (playlistId != null && playlistDrop?.id === playlistId) return `drop-${playlistDrop.placement}`;
     return '';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dropPointToCss, droppedFolderName, fileDropTargetFor, trackIdsUnderPaths } from './fileDrop.ts';
+import { dropGroups, dropPointToCss, dropPositionScale, fileDropTargetFor, trackIdsUnderPaths } from './fileDrop.ts';
 
 function hitOn(attrs: Record<string, string>) {
   return {
@@ -21,6 +21,13 @@ describe('fileDropTargetFor', () => {
     expect(fileDropTargetFor(null)).toEqual({ kind: 'view' });
   });
 
+  it('targets a playlist folder by its id', () => {
+    expect(fileDropTargetFor(hitOn({ 'data-playlist-folder': '', 'data-playlist-id': '5' }))).toEqual({
+      kind: 'folder',
+      folderId: 5,
+    });
+  });
+
   it('prefers the new playlist zone when both attributes are present', () => {
     expect(
       fileDropTargetFor(hitOn({ 'data-new-playlist-drop': '', 'data-drop-track-playlist-id': '3' }))
@@ -29,9 +36,12 @@ describe('fileDropTargetFor', () => {
 });
 
 describe('dropPointToCss', () => {
-  it('divides physical pixels by the device pixel ratio', () => {
-    expect(dropPointToCss({ x: 400, y: 200 }, 2)).toEqual({ x: 200, y: 100 });
-    expect(dropPointToCss({ x: 400, y: 200 }, 0)).toEqual({ x: 400, y: 200 });
+  it('scales Windows physical pixels to CSS pixels and leaves macOS and Linux points alone', () => {
+    const mac = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15';
+    const win = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/120.0';
+    expect(dropPointToCss({ x: 400, y: 200 }, dropPositionScale(mac, 2))).toEqual({ x: 400, y: 200 });
+    expect(dropPointToCss({ x: 400, y: 200 }, dropPositionScale(win, 2))).toEqual({ x: 200, y: 100 });
+    expect(dropPositionScale(win, 0)).toBe(1);
   });
 });
 
@@ -54,12 +64,21 @@ describe('trackIdsUnderPaths', () => {
   });
 });
 
-describe('droppedFolderName', () => {
-  it('names the playlist after the dropped folder', () => {
-    expect(droppedFolderName(tracks, ['/Music/Set One'])).toBe('Set One');
-    expect(droppedFolderName(tracks, ['/Music/Set One/'])).toBe('Set One');
+describe('dropGroups', () => {
+  it('makes one group per dropped folder, named after it', () => {
+    expect(dropGroups(tracks, ['/Music/Set One/', '/Music/Set One Extra'])).toEqual([
+      { folder: 'Set One', ids: [1, 2] },
+      { folder: 'Set One Extra', ids: [3] },
+    ]);
   });
-  it('is null when only files were dropped', () => {
-    expect(droppedFolderName(tracks, ['/Music/single.mp3'])).toBeNull();
+  it('puts loose files in one unnamed group and adds skipped duplicates where they were dropped', () => {
+    const matches = [{ path: '/Downloads/dupe.mp3', id: 3 }, { path: '/Music/Set One/copy.mp3', id: 4 }];
+    expect(dropGroups(tracks, ['/Music/single.mp3', '/Downloads/dupe.mp3', '/Music/Set One'], matches)).toEqual([
+      { folder: 'Set One', ids: [1, 2, 4] },
+      { folder: null, ids: [4, 3] },
+    ]);
+  });
+  it('is empty when nothing was found', () => {
+    expect(dropGroups(tracks, ['/Elsewhere'])).toEqual([]);
   });
 });
