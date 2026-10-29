@@ -91,6 +91,7 @@ fn write_cache_file(dir: &Path, file: &Path, bytes: &[u8]) -> Result<(), String>
 
 /// Puts a series measured elsewhere into the cache as the one of `audio`, for a caller that decodes the track anyway
 /// (`band_analysis::measure_waveforms_and_detail`), so its zoomed waveform opens without a decode of its own.
+#[allow(dead_code, reason = "the analysis stores the detail it measures (Q50 follow-up, analysis_run.rs)")]
 pub fn store_detail(dir: &Path, audio: &Path, series: &DetailSeries) -> Result<(), String> {
     let file = cache_file(dir, audio)?;
     let lock = path_lock(&file);

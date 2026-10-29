@@ -322,6 +322,7 @@ pub fn measure_detail(path: &Path) -> Result<DetailSeries, String> {
 
 /// The 3-band waveforms and the detail series from one decode, for a caller that decodes the track anyway (the
 /// analysis measures the waveforms; with this it can fill the detail cache with `waveform_detail::store_detail`).
+#[allow(dead_code, reason = "the analysis switches to it to fill the detail cache (Q50 follow-up, analysis_run.rs)")]
 pub fn measure_waveforms_and_detail(path: &Path) -> Result<(Waveforms, DetailSeries), String> {
     let mut meters: Option<(Meter, DetailMeter)> = None;
     decode_blocks_parallel(path, decode_threads(), |rate, channels, samples| {
