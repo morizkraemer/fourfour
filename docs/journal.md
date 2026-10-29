@@ -291,3 +291,4 @@
 2026-10-29 18:00 fb-import2 landed on ov-1028: import headline facts, sidecars (.asd etc) ignored, analyze prompt only when added + 'always analyze' (new config auto_analyze_after_import), folder-plus icon, dupes list 60% height, dropped folder playlist opens in main view; smoke 87/87. spawn fb-keypop (key popup v7 build)
 2026-10-29 18:40 orchestrator - fb-import2 installed on Mac; fb-keypop merged into ov-1028 (key popup v7, smoke 87/87); spawn fb-wave (waveform stutter during analysis + first-load look, seat opus)
 2026-10-29 19:00 orchestrator - Settings → About (icon, version, Beat This! credits) on ov-1028; smoke ok; Mac install started
+2026-10-29 19:40 fb-wave landed on ov-1028: analysis runs below UI priority (QoS utility / nice 10), strip bands sorted once + cached, top-bar count on plain objects, grid via setBeats, zoom never shows coarse fallback (pending blank instead); full smoke 90/90; follow-up prefetch detail; Mac install started
