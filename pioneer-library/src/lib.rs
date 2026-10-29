@@ -1078,6 +1078,29 @@ mod tests {
     }
 
     #[test]
+    fn the_artwork_flag_reads_the_artwork_index_which_an_older_library_gets_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let id = lib.add_track(&make_track("T", "/music/t.mp3")).unwrap();
+        lib.set_artwork(id, &[1, 2, 3]).unwrap();
+        lib.conn.execute_batch("DROP INDEX idx_artwork_track").unwrap();
+        drop(lib);
+
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let plan: Vec<String> = lib
+            .conn
+            .prepare("EXPLAIN QUERY PLAN SELECT (art.track_id IS NOT NULL) FROM tracks t LEFT JOIN artwork art ON art.track_id = t.id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(plan.iter().any(|step| step.contains("COVERING INDEX idx_artwork_track")), "{plan:?}");
+        assert!(lib.get_track_list_rows().unwrap()[0].has_artwork);
+    }
+
+    #[test]
     fn add_and_get_track() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let track = make_track("Track 1", "/music/track1.mp3");
