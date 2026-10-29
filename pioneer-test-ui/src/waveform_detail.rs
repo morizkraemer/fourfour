@@ -1,16 +1,17 @@
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use pioneer_usb_writer::waveform::{DetailSeries, WindowSeries};
 
 use crate::band_analysis::{measure_detail, measure_detail_window};
 
-const CACHE_LIMIT_FILES: usize = 256;
+const CACHE_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
 const WINDOW_MAX_COLUMNS: usize = 16_384;
 const WINDOW_MAX_SECONDS: f64 = 30.0;
 
@@ -26,38 +27,73 @@ fn cache_file(dir: &Path, audio: &Path) -> Result<PathBuf, String> {
     Ok(dir.join(format!("{:016x}.ffwd", hasher.finish())))
 }
 
-fn trim_cache(dir: &Path) {
+fn trim_cache(dir: &Path, limit_bytes: u64) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut files: Vec<_> = entries
         .flatten()
-        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            Some((meta.modified().ok()?, meta.len(), e.path()))
+        })
         .collect();
-    if files.len() <= CACHE_LIMIT_FILES {
-        return;
-    }
+    let mut total: u64 = files.iter().map(|(_, len, _)| len).sum();
     files.sort();
-    for (_, path) in &files[..files.len() - CACHE_LIMIT_FILES] {
-        fs::remove_file(path).ok();
+    for (_, len, path) in &files {
+        if total <= limit_bytes {
+            break;
+        }
+        if fs::remove_file(path).is_ok() {
+            total -= len;
+        }
     }
 }
 
-/// The high-resolution series of `audio`: read from the cache in `dir`, or measured now (one decode pass)
-/// and written there. Nothing about the track is stored in the library, so every existing track gets it
-/// the first time its zoomed waveform opens.
-pub fn detail_series(dir: &Path, audio: &Path) -> Result<DetailSeries, String> {
-    let file = cache_file(dir, audio)?;
-    if let Ok(bytes) = fs::read(&file) {
-        if let Ok(series) = DetailSeries::from_bytes(&bytes) {
-            return Ok(series);
-        }
+fn path_lock(file: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+    locks.entry(file.to_path_buf()).or_default().clone()
+}
+
+fn cached_bytes(file: &Path) -> Option<Vec<u8>> {
+    let bytes = fs::read(file).ok()?;
+    DetailSeries::from_bytes(&bytes).ok()?;
+    if let Ok(handle) = fs::File::options().write(true).open(file) {
+        handle.set_modified(SystemTime::now()).ok();
     }
-    let series = measure_detail(audio)?;
+    Some(bytes)
+}
+
+/// The high-resolution series of `audio` as `DetailSeries::to_bytes`: read from the cache in `dir`, or measured now
+/// (one decode pass) and written there. One file is measured once at a time: a second caller waits for the first and
+/// reads its result. Nothing about the track is stored in the library, so every existing track gets it the first time
+/// its zoomed waveform opens or it is prefetched; the cache keeps the most recently used files up to 512 MiB.
+pub fn detail_bytes(dir: &Path, audio: &Path) -> Result<Vec<u8>, String> {
+    let file = cache_file(dir, audio)?;
+    let lock = path_lock(&file);
+    let _measuring = lock.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(bytes) = cached_bytes(&file) {
+        return Ok(bytes);
+    }
+    let bytes = measure_detail(audio)?.to_bytes();
     fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let partial = file.with_extension("part");
-    fs::write(&partial, series.to_bytes()).map_err(|e| format!("write {}: {e}", partial.display()))?;
+    fs::write(&partial, &bytes).map_err(|e| format!("write {}: {e}", partial.display()))?;
     fs::rename(&partial, &file).map_err(|e| format!("rename {}: {e}", partial.display()))?;
-    trim_cache(dir);
-    Ok(series)
+    trim_cache(dir, CACHE_LIMIT_BYTES);
+    Ok(bytes)
+}
+
+pub fn detail_series(dir: &Path, audio: &Path) -> Result<DetailSeries, String> {
+    DetailSeries::from_bytes(&detail_bytes(dir, audio)?)
+}
+
+/// Measure the series of `audio` into the cache unless it is there already.
+pub fn warm_detail(dir: &Path, audio: &Path) -> Result<(), String> {
+    if cache_file(dir, audio)?.exists() {
+        return Ok(());
+    }
+    detail_bytes(dir, audio).map(drop)
 }
 
 /// Fine windows of the zoomed waveform. Only the newest request matters: a request supersedes the one before it, whose
@@ -147,6 +183,47 @@ mod tests {
         assert_eq!(cached, 1);
         assert_eq!(first.len(), 2400);
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn callers_of_one_file_share_a_single_measurement_and_a_warmed_file_is_read_back() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-shared-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("tone.wav");
+        write_wav(&audio);
+        let cache = dir.join("cache");
+
+        let results: Vec<_> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..3).map(|_| s.spawn(|| warm_detail(&cache, &audio))).collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let bytes = detail_bytes(&cache, &audio).unwrap();
+        let files = fs::read_dir(&cache).unwrap().count();
+        fs::remove_dir_all(&dir).ok();
+
+        assert!(results.iter().all(Result::is_ok));
+        assert_eq!(files, 1);
+        assert_eq!(DetailSeries::from_bytes(&bytes).unwrap().len(), 2400);
+    }
+
+    #[test]
+    fn the_cache_drops_the_least_recently_used_files_over_its_size() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-trim-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let base = SystemTime::now();
+        for (i, name) in ["old", "mid", "new"].iter().enumerate() {
+            let path = dir.join(format!("{name}.ffwd"));
+            fs::write(&path, vec![0u8; 100]).unwrap();
+            let file = fs::File::options().write(true).open(&path).unwrap();
+            file.set_modified(base - std::time::Duration::from_secs(100 - i as u64 * 10)).unwrap();
+        }
+
+        trim_cache(&dir, 200);
+        let mut left: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+        left.sort();
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(left, ["mid.ffwd", "new.ffwd"]);
     }
 
     #[test]
