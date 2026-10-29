@@ -7,6 +7,7 @@ mod analysis_run;
 mod band_analysis;
 mod dto;
 mod file_health;
+mod import_plan;
 mod playback;
 mod tempo;
 mod track_fields;
@@ -36,6 +37,7 @@ use analysis_run::{
 };
 use track_fields::{apply_edits, TrackFieldEdits, TrackFields};
 use track_infos::build_track_infos;
+use import_plan::{ImportPlan, ImportPlans};
 use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
     playback_configure, playback_get_config, playback_pause, playback_play, playback_resume,
@@ -104,44 +106,58 @@ fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result
         .collect())
 }
 
-/// Scan a directory for audio files and add them to the library.
-#[tauri::command]
-fn scan_directory(
-    path: String,
-    state: State<'_, SharedLibrary>,
-) -> Result<Vec<TrackInfo>, String> {
-    let dir = Path::new(&path);
-    let scanned = scanner::scan_directory(dir).map_err(|e| e.to_string())?;
-
-    let lib = state.lock().map_err(|e| e.to_string())?;
-    add_scanned_tracks(&lib, scanned)
-}
-
-/// Scan specific files and/or folders and add them to the library.
-/// Directories are recursed into via scan_directory; files are scanned directly.
-#[tauri::command]
-fn scan_files(
-    paths: Vec<String>,
-    state: State<'_, SharedLibrary>,
-) -> Result<Vec<TrackInfo>, String> {
+fn scan_paths(paths: &[String]) -> Result<Vec<models::Track>, String> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut dir_tracks: Vec<models::Track> = Vec::new();
-
-    for p in &paths {
+    for p in paths {
         let pb = PathBuf::from(p);
         if pb.is_dir() {
-            let found = scanner::scan_directory(&pb).map_err(|e| e.to_string())?;
-            dir_tracks.extend(found);
+            dir_tracks.extend(scanner::scan_directory(&pb).map_err(|e| e.to_string())?);
         } else {
             files.push(pb);
         }
     }
-
     let mut scanned = scanner::scan_files(&files).map_err(|e| e.to_string())?;
     scanned.extend(dir_tracks);
+    Ok(scanned)
+}
 
+/// Scan files and folders and hold the result until `commit_import`, listing likely
+/// duplicates of library tracks so the user can skip them.
+#[tauri::command]
+async fn plan_import(
+    paths: Vec<String>,
+    state: State<'_, SharedLibrary>,
+    plans: State<'_, Arc<ImportPlans>>,
+) -> Result<ImportPlan, String> {
+    let shared = state.inner().clone();
+    let plans = plans.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let scanned = scan_paths(&paths)?;
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        import_plan::plan_for_library(&plans, &lib, scanned)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[derive(Serialize)]
+struct ImportCommit {
+    added: Vec<TrackInfo>,
+    skipped_ids: Vec<u32>,
+}
+
+/// Add the planned tracks; with `skip_duplicates` the likely duplicates stay out.
+#[tauri::command]
+fn commit_import(
+    token: u64,
+    skip_duplicates: bool,
+    state: State<'_, SharedLibrary>,
+    plans: State<'_, Arc<ImportPlans>>,
+) -> Result<ImportCommit, String> {
+    let (tracks, skipped_ids) = plans.take(token)?.resolve(skip_duplicates);
     let lib = state.lock().map_err(|e| e.to_string())?;
-    add_scanned_tracks(&lib, scanned)
+    Ok(ImportCommit { added: add_scanned_tracks(&lib, tracks)?, skipped_ids })
 }
 
 /// Analyse a track as fast as possible: it leaves the queue for the now lane (all threads,
@@ -1219,8 +1235,8 @@ fn main() {
     tauri::Builder::default() // v0.1
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            scan_directory,
-            scan_files,
+            plan_import,
+            commit_import,
             analyze_tracks,
             analyze_track_ids,
             resume_analysis,
@@ -1299,6 +1315,7 @@ fn main() {
             app.manage(library.clone());
             app.manage(health.clone());
             file_health::spawn_check(app.handle().clone(), library, health);
+            app.manage(Arc::new(ImportPlans::default()));
             app.manage(AnalysisCoordinator::default());
             app.manage(SharedArtworkThumbs::default());
             app.manage(Arc::new(waveform_detail::DetailWindows::default()));

@@ -11,6 +11,7 @@ export interface SmokeWindow {
   __smokeUnreadable: number[];
   __smokeNotFound: number[];
   __smokePickPath: string | null;
+  __smokeDuplicates: unknown[];
 }
 
 export function installTauriMock(initial: LoadedState) {
@@ -23,6 +24,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeUnreadable = [];
   w.__smokeNotFound = [];
   w.__smokePickPath = '/Music/moved';
+  w.__smokeDuplicates = [];
   const relocated = new Set<number>();
 
   let nextCallbackId = 1;
@@ -103,6 +105,10 @@ export function installTauriMock(initial: LoadedState) {
       }
       case 'locate_track_file':
         return { relinked: { track_id: args.trackId, source_path: args.path }, health: (relink([args.trackId], ''), health()) };
+      case 'plan_import':
+        return { token: 1, new_count: 2, already_in_library: 0, duplicates: w.__smokeDuplicates };
+      case 'commit_import':
+        return { added: [], skipped_ids: args.skipDuplicates ? (w.__smokeDuplicates as { existing_id: number }[]).map((d) => d.existing_id) : [] };
       case 'plugin:dialog|open':
         return w.__smokePickPath;
       case 'load_state':

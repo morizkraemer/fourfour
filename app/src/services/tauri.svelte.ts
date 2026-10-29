@@ -340,57 +340,73 @@ export async function saveState(playlists: PlaylistInput[]): Promise<void> {
   }
 }
 
-export async function scanDirectory(path: string): Promise<TrackInfo[]> {
+export type DuplicateReason = 'same_file' | 'same_tags' | 'same_path';
+
+export interface DuplicateRow {
+  new_path: string;
+  file_name: string;
+  existing_id: number;
+  title: string;
+  artist: string;
+  duration_secs: number;
+  reason: DuplicateReason;
+}
+
+export interface ImportPlan {
+  token: number;
+  new_count: number;
+  already_in_library: number;
+  duplicates: DuplicateRow[];
+}
+
+export interface ImportCommit {
+  added: TrackInfo[];
+  skipped_ids: number[];
+}
+
+let mockPendingImport: TrackInfo[] = [];
+
+function mockScannedTrack(path: string, i: number): TrackInfo {
+  return {
+    id: Date.now() + i,
+    source_path: path,
+    title: path.split('/').pop() || 'Dropped Track',
+    artist: 'Dropped Artist',
+    album: 'Dropped Album',
+    genre: 'House',
+    tempo: 12000,
+    key: '8A',
+    duration_secs: 300,
+    bitrate: 320,
+    file_size: 12000000,
+    has_artwork: false,
+    has_cues: false,
+  };
+}
+
+export async function planImport(paths: string[]): Promise<ImportPlan> {
   try {
-    return await invoke<TrackInfo[]>('scan_directory', { path });
+    return await invoke<ImportPlan>('plan_import', { paths });
   } catch (err) {
-    lastTauriError = `scan_directory fail: ${String(err)}`;
+    lastTauriError = `plan_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
-      const newTrack: TrackInfo = {
-        id: Date.now(),
-        source_path: path + '/NewTrack.mp3',
-        title: 'Scanned Track ' + (mockTracks.length + 1),
-        artist: 'Unknown Artist',
-        album: 'Scanned Album',
-        genre: 'Techno',
-        tempo: 12500,
-        key: '1A',
-        duration_secs: 360,
-        bitrate: 320,
-        file_size: 14400000,
-        has_artwork: false,
-        has_cues: false,
-      };
-      mockTracks.push(newTrack);
-      return [newTrack];
+      mockPendingImport = paths.map(mockScannedTrack);
+      return { token: 0, new_count: mockPendingImport.length, already_in_library: 0, duplicates: [] };
     }
     throw err;
   }
 }
 
-export async function scanFiles(paths: string[]): Promise<TrackInfo[]> {
+export async function commitImport(token: number, skipDuplicates: boolean): Promise<ImportCommit> {
   try {
-    return await invoke<TrackInfo[]>('scan_files', { paths });
+    return await invoke<ImportCommit>('commit_import', { token, skipDuplicates });
   } catch (err) {
-    lastTauriError = `scan_files fail: ${String(err)}`;
+    lastTauriError = `commit_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
-      const newTracks = paths.map((p, i) => ({
-        id: Date.now() + i,
-        source_path: p,
-        title: p.split('/').pop() || 'Dropped Track',
-        artist: 'Dropped Artist',
-        album: 'Dropped Album',
-        genre: 'House',
-        tempo: 12000,
-        key: '8A',
-        duration_secs: 300,
-        bitrate: 320,
-        file_size: 12000000,
-        has_artwork: false,
-        has_cues: false,
-      }));
-      mockTracks.push(...newTracks);
-      return newTracks;
+      const added = mockPendingImport;
+      mockPendingImport = [];
+      mockTracks.push(...added);
+      return { added, skipped_ids: [] };
     }
     throw err;
   }
