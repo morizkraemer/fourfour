@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
 
 /**
  * Frame cost of the expanded player's scrolling waveform while playing (mock transport).
@@ -8,6 +9,11 @@ import { createRequire } from 'node:module';
  * Every animation frame is timed from its rAF timestamp to the end of the task (next frame's start is not used):
  * `work` is the main-thread time spent in the frame callbacks, `gap` the time between two frames. Frames whose gap is
  * more than 1.5 display intervals (a dropped frame) are counted, and the CPU profile's top self-time entries printed.
+ *
+ * ANALYZE=1 re-analyses the playing track (and the next rows) through the mock staged run during the measurement, so
+ * the store sees the same start / partial / progress sequence as a real prioritised analysis.
+ * ANALYZING_STATE=1 holds the store in its analysing state (spinners, analysing rows) without any events.
+ * BUSY=<n> runs n spinning processes (the analysis threads) at nice BUSY_NICE (default 0) during the measurement.
  */
 const require = createRequire(`${process.env.PW_DIR}/`);
 const { chromium } = require('playwright');
@@ -22,6 +28,8 @@ page.on('pageerror', (e) => errors.push(e.message));
 const client = await page.context().newCDPSession(page);
 await page.addInitScript(() => {
   window.__work = { raf: [], timer: [] };
+  window.__longTasks = [];
+  new PerformanceObserver((list) => list.getEntries().forEach((e) => window.__longTasks.push(e.duration))).observe({ entryTypes: ['longtask'] });
   const raf = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (cb) =>
     raf((t) => {
@@ -103,7 +111,36 @@ await page.evaluate(() => {
   window.__ops.pixels = 0;
   window.__work.raf.length = 0;
   window.__work.timer.length = 0;
+  window.__longTasks.length = 0;
 });
+const analyzeTimer = process.env.ANALYZE
+  ? await page.evaluate(async () => {
+      const loaded = (name) => performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes(name)) ?? name;
+      const lib = await import(/* @vite-ignore */ loaded('/src/stores/library.svelte.ts'));
+      const { player } = await import(/* @vite-ignore */ loaded('/src/stores/player.svelte.ts'));
+      const id = player.track.id;
+      const others = lib.library.tracks.map((t) => t.id).filter((t) => t !== id).slice(0, 3);
+      window.__analysisEvents = 0;
+      const run = () => void lib.analyzeTrackIds([id, ...others]);
+      run();
+      return window.setTimeout(function again() {
+        run();
+        window.__analyzeHandle = window.setTimeout(again, 6500);
+      }, 6500);
+    })
+  : null;
+if (process.env.ANALYZING_STATE)
+  await page.evaluate(async () => {
+    const loaded = (name) => performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes(name)) ?? name;
+    const lib = await import(/* @vite-ignore */ loaded('/src/stores/library.svelte.ts'));
+    const { player } = await import(/* @vite-ignore */ loaded('/src/stores/player.svelte.ts'));
+    lib.library.analyzing = true;
+    lib.library.analysisProgress = { current: 1, total: 40, message: 'Analyzing' };
+    lib.library.analyzingTrackIds = [player.track.id, ...lib.library.tracks.slice(0, 40).map((t) => t.id)];
+  });
+const busy = Array.from({ length: Number(process.env.BUSY ?? 0) }, () =>
+  spawn('nice', ['-n', String(process.env.BUSY_NICE ?? 0), process.execPath, '-e', 'for(;;){}'], { stdio: 'ignore' }),
+);
 const traced = [];
 if (process.env.TRACE) {
   client.on('Tracing.dataCollected', (e) => traced.push(...e.value));
@@ -129,6 +166,8 @@ const frames = await page.evaluate(async (seconds) => {
   return out.map((f, i) => ({ gap: f.last === null ? 0 : f.t - f.last, begin: f.begin, t: f.t, i }));
 }, SECONDS);
 const { profile } = await client.send('Profiler.stop');
+busy.forEach((child) => child.kill('SIGKILL'));
+if (analyzeTimer !== null) await page.evaluate(() => window.clearTimeout(window.__analyzeHandle));
 const work = await page.evaluate(() => window.__work);
 const ops = await page.evaluate(() => window.__ops);
 const parts = process.env.BREAKDOWN ? await page.evaluate(() => window.__parts) : {};
@@ -203,4 +242,24 @@ profile.samples.forEach((id, i) => {
 const total = [...self.values()].reduce((a, b) => a + b, 0);
 console.log(`profile total ${round(total)} ms over ${SECONDS}s`);
 for (const [k, v] of [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 16)) console.log(v.toFixed(1).padStart(9), 'ms', k);
+if (process.env.INCLUSIVE) {
+  const parent = new Map();
+  for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+  const inclusive = new Map();
+  profile.samples.forEach((id, i) => {
+    const seen = new Set();
+    for (let at = id; at !== undefined; at = parent.get(at)) {
+      const f = byId.get(at).callFrame;
+      if (!f.url.includes('/src/') && !f.url.includes('design-system')) continue;
+      const key = `${f.functionName || '(anon)'} ${f.url.split('/').pop().split('?')[0]}:${f.lineNumber}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      inclusive.set(key, (inclusive.get(key) ?? 0) + profile.timeDeltas[i] / 1000);
+    }
+  });
+  console.log('inclusive (app code)');
+  for (const [k, v] of [...inclusive.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(process.env.INCLUSIVE))) console.log(v.toFixed(1).padStart(9), 'ms', k);
+}
+const longTasks = await page.evaluate(() => window.__longTasks ?? []);
+if (longTasks.length) console.log(JSON.stringify({ longTasksOver50ms: longTasks.length, longTaskMsMax: round(Math.max(...longTasks)), longTaskMsTotal: Math.round(longTasks.reduce((a, b) => a + b, 0)) }));
 await browser.close();
