@@ -8,7 +8,7 @@
   import '$ds/components/button.css';
   import Popover from './Popover.svelte';
   import { player, setTrackMode } from '../stores/player.svelte.ts';
-  import { commitTrackBpm, resetTrackToAnalyzed } from '../stores/track-edits.svelte.ts';
+  import { commitTrackBpm, resetTrackFieldToAnalyzed } from '../stores/track-edits.svelte.ts';
   import { library } from '../stores/library.svelte.ts';
   import { doubleBpm, halveBpm, parseBpmEntry } from '../lib/tempo.ts';
   import { createTapTempo } from '../lib/tapTempo.ts';
@@ -55,7 +55,7 @@
   }
 
   function reset() {
-    if (trackId !== null) void resetTrackToAnalyzed(trackId);
+    if (trackId !== null) void resetTrackFieldToAnalyzed(trackId, 'bpm');
     close();
   }
 

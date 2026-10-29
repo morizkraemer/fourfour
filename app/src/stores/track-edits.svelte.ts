@@ -15,6 +15,7 @@ import type { Tier } from '../lib/tempo.ts';
 import {
   getAnalysisData,
   releaseUserEdits,
+  releaseUserField,
   rescaleBeatGrid,
   setTrackKey,
   setTrackRating,
@@ -191,9 +192,20 @@ export async function releaseTrackEdits(trackId: number): Promise<void> {
   }
 }
 
-/** Give the hand-set BPM and key back to the analysis: release them and analyse the track again. */
-export async function resetTrackToAnalyzed(trackId: number): Promise<void> {
-  await releaseTrackEdits(trackId);
+/** Give one hand-set value back to the analysis: release only it (the BPM with its grid, or the key) and analyse the track again. */
+export async function resetTrackFieldToAnalyzed(trackId: number, field: 'bpm' | 'key'): Promise<void> {
+  try {
+    await releaseUserField(trackId, field);
+  } catch (err) {
+    reportFailure('Releasing the hand-set value', err);
+    return;
+  }
+  const track = trackById(trackId);
+  if (track) {
+    if (field === 'bpm') track.bpmLocked = false;
+    else track.keyLocked = false;
+    bumpLibraryTracks();
+  }
   await analyzeTrackIds([trackId]);
 }
 

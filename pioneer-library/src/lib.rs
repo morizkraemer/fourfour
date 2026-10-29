@@ -1380,6 +1380,24 @@ mod tests {
     }
 
     #[test]
+    fn releasing_the_bpm_leaves_the_key_locked_and_the_other_way_round() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        lib.set_user_key(id, "5B").unwrap();
+        lib.rescale_beat_grid(id, 64.0).unwrap();
+        assert_eq!(locks(&lib, id), (true, true));
+
+        lib.release_user_bpm(id).unwrap();
+        assert_eq!(locks(&lib, id), (false, true));
+        let edits = lib.user_edits(id);
+        assert!(!edits.grid_locked && edits.grid_anchor_ms.is_none());
+
+        lib.rescale_beat_grid(id, 64.0).unwrap();
+        lib.release_user_key(id).unwrap();
+        assert_eq!(locks(&lib, id), (true, false));
+    }
+
+    #[test]
     fn user_rating_shows_over_the_imported_one_and_survives_reanalysis() {
         let dir = tempfile::tempdir().unwrap();
         let (lib, id) = analyzed_file_library(dir.path());
