@@ -116,6 +116,7 @@ pub struct Analyzer {
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
         let engine = BeatEngine::load(models_dir, BEAT_MODEL, false)?;
+        engine.share_chunk_threads(pool.max_threads);
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }
 

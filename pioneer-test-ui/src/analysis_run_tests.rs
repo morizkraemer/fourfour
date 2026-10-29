@@ -425,7 +425,7 @@ fn cancel_reaches_every_job() {
     assert!(coordinator.try_begin());
     let queue: SharedAnalysisQueue = Arc::new(Mutex::new(VecDeque::from([(1, PathBuf::from("/a.wav")), (2, PathBuf::from("/b.wav"))])));
     coordinator.register_run(queue, 2);
-    let background = coordinator.take_next(true, |_| 0, |_| 1).unwrap();
+    let background = coordinator.take_next(true, |_| 0, usize::MAX, |_| 1).unwrap();
     let NowClaim::Granted { cancel: now } = coordinator.claim_now(2, 8) else { panic!("claim refused") };
 
     coordinator.cancel();
