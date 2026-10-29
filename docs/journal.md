@@ -275,3 +275,4 @@
 2026-10-29 10:30 orchestrator decided: BPM/key edit = player-edit-5 option B (pencil menu); popup layout/design disliked → round popups-1: one popup design for BPM menu, key picker, top-bar status popover
 2026-10-29 11:00 fb-strip popups-1 (3 app-wide popup directions on BPM menu, key picker, status popover, track menu; rec B card popover + Camelot wheel) on :5240; fb-mockups 3dff11e. fb-files done f9cca53 (status, relocate, column, topbar B, dialog, settings card); follow-up: central load guard
 2026-10-29 11:20 fb-files landed on ov-1028 (449923e): file health + central missing-track load guard with Locate tip; 725 vitest, smoke 53/53; Mac check+install started
+2026-10-29 12:10 fb-dupes landed on ov-1028: duplicates dialog before every scan import (metadata match, no fingerprint), Settings → Backup export/restore .tar.gz with safety copy + audio relink; new deps tar+filetime (Waiting 18); 737 vitest, smoke 59/59; Mac check+install started
