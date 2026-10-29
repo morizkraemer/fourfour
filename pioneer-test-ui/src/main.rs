@@ -884,6 +884,23 @@ async fn release_user_edits(track_id: i64, state: State<'_, SharedLibrary>) -> R
     .map_err(|e| e.to_string())?
 }
 
+/// Let re-analysis replace only the hand-set BPM and grid (`field` "bpm") or only the hand-set key (`field` "key").
+#[tauri::command]
+async fn release_user_field(track_id: i64, field: String, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        match field.as_str() {
+            "bpm" => lib.release_user_bpm(track_id),
+            "key" => lib.release_user_key(track_id),
+            other => Err(anyhow::anyhow!("Unknown field {other:?}")),
+        }
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Fit the beat grid to a new BPM (explicit, never done by `set_track_bpm`).
 #[tauri::command]
 async fn rescale_beat_grid(track_id: i64, bpm: f64, state: State<'_, SharedLibrary>) -> Result<(), String> {
@@ -1291,6 +1308,7 @@ fn main() {
             set_track_rating,
             update_track_fields,
             release_user_edits,
+            release_user_field,
             rescale_beat_grid,
             set_cues,
             get_track_artwork,

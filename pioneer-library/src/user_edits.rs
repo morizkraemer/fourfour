@@ -72,6 +72,21 @@ impl LocalLibrary {
         self.update_user_edits(track_id, |edits| edits.key_locked = true)
     }
 
+    /// Let re-analysis replace the hand-set BPM and the beat grid again; the key and the cues stay as they are.
+    pub fn release_user_bpm(&self, track_id: i64) -> Result<()> {
+        self.update_user_edits(track_id, |edits| {
+            edits.bpm_locked = false;
+            edits.grid_locked = false;
+            edits.grid_offset_ms = None;
+            edits.grid_anchor_ms = None;
+        })
+    }
+
+    /// Let re-analysis replace the hand-set key again; the BPM, the grid and the cues stay as they are.
+    pub fn release_user_key(&self, track_id: i64) -> Result<()> {
+        self.update_user_edits(track_id, |edits| edits.key_locked = false)
+    }
+
     /// Set the star rating (0 clears it). Shown over the imported rating.
     pub fn set_user_rating(&self, track_id: i64, rating: u8) -> Result<()> {
         if rating > MAX_RATING {
