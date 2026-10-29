@@ -261,3 +261,4 @@
 2026-10-29 05:55 fb-chrome landed on ov-1028: search never shrinks at wide windows, collapses to icon <720 px, moves to left sidebar <440 px; track count plain text; 719 vitest, smoke 35/35; Mac check+install started
 2026-10-29 05:35 orchestrator - ov-1028 e6ad7b3 (with fb-chrome) installed on Mac; 719 vitest, 0 check errors
 2026-10-29 05:50 fb-icons finals: three-band stairs polished (full macOS set + .icns), trace-only (amber) and pair blue tile polished; trio + stairs mockups (dark/light); Round 10/11 boards published
+2026-10-29 06:20 fb-chrome2 landed on ov-1028: search icon hugs organize panel edge, sidebar icon on top-bar centre line; smoke 41/41; Mac check+install started
