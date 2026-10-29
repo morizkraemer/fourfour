@@ -252,3 +252,4 @@
 2026-10-28 20:30 orchestrator - O8 72215b1 + O9 59f9487 landed on ov-1028 232ca15; full checks green (700 vitest, smoke 13/13, cargo ok, cut-wav grid with weights ok)
 2026-10-28 20:31 orchestrator - run idle: queue done; remaining items need Merlin (layout test, CI push, bar 1) or the Mac (install, offline)
 2026-10-29 03:22 orchestrator - ov-1028 232ca15 installed on Mac with bundled weights (162 MB app; Mac build script now uses tauri.bundle-weights.conf.json; first install without weights replaced)
+2026-10-29 03:45 orchestrator - Merlin feedback on ov-1028 (11 items, scratchpad fb-1029.md); spawn fb-player player/waveform fixes (seat, sonnet high), fb-mockups research + viewport round (seat, opus); top bar/search fixes queued after fb-player; file-management features (backup, health check, dedup, missing files) need a plan
