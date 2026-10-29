@@ -16,13 +16,37 @@
   const SPECIAL_KEYS = new Set(['tag', 'fav', 'wave', 'cover', 'key', 'rating', 'color']);
   const DASH_KEYS = new Set(['album', 'genre', 'year']);
 
-  function cellPlan(columns) {
+  function buildPlan(columns) {
     return columns.map((col) => ({
       col,
       kind: SPECIAL_KEYS.has(col.key) ? col.key : DASH_KEYS.has(col.key) ? 'dash' : 'text',
       cls: `ff-trow__cell ff-trow__cell--${col.key} ff-trow__cell--text`,
       style: columnCellStyle(col),
     }));
+  }
+
+  // Every row of a table gets the same columns, and a sort hands them over as a new array with the same layout: one
+  // plan per layout keeps each row's cells untouched unless the layout itself changed.
+  const PLANS_KEPT = 8;
+  const plansByColumns = new WeakMap();
+  const plansByLayout = new Map();
+
+  function layoutSignature(columns) {
+    return columns.map((c) => `${c.key}|${c.flex ? 1 : 0}|${c.width}|${c.minWidth}|${c.align}`).join(';');
+  }
+
+  function cellPlan(columns) {
+    let plan = plansByColumns.get(columns);
+    if (plan) return plan;
+    const signature = layoutSignature(columns);
+    plan = plansByLayout.get(signature);
+    if (!plan) {
+      plan = buildPlan(columns);
+      plansByLayout.set(signature, plan);
+      if (plansByLayout.size > PLANS_KEPT) plansByLayout.delete(plansByLayout.keys().next().value);
+    }
+    plansByColumns.set(columns, plan);
+    return plan;
   }
 
   function favOn(v) {

@@ -260,7 +260,27 @@ function extraColumnDef(key: string): TableColumn | null {
   };
 }
 
+let persistPending = false;
+let persistOnPageHide = false;
+
+function persistIfPending() {
+  if (persistPending) persist();
+}
+
+/** A sort click writes the layout once the browser is idle, so the click's frame does not wait for the JSON and storage write. */
+function persistSoon() {
+  if (persistPending) return;
+  persistPending = true;
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(persistIfPending, { timeout: 1000 });
+  else setTimeout(persistIfPending, 200);
+  if (!persistOnPageHide && typeof addEventListener === 'function') {
+    persistOnPageHide = true;
+    addEventListener('pagehide', persistIfPending);
+  }
+}
+
 function persist() {
+  persistPending = false;
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -388,7 +408,7 @@ export function setSort(kind: LayoutKind, key: string) {
     layout.sortDir = 'asc';
   }
   syncSortIndicators(kind);
-  persist();
+  persistSoon();
 }
 
 export function clearSort(kind: LayoutKind) {
@@ -398,7 +418,7 @@ export function clearSort(kind: LayoutKind) {
     sortDir: 'asc',
   };
   syncSortIndicators(kind);
-  persist();
+  persistSoon();
 }
 
 /** Sort track rows for display (does not mutate library order). Tracks without a value stay last in both directions. */
