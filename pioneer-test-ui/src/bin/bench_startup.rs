@@ -412,7 +412,7 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let survey = import_plan::survey_files(&paths);
     let survey_ms = ms(t);
     let t = Instant::now();
-    let scanned = pioneer_usb_writer::scanner::scan_directory_with_progress(folder, &mut || {}).unwrap();
+    let scanned = import_plan::scan_paths(&paths, &mut || {});
     let scan_ms = ms(t);
     let files = scanned.len();
     let plans = import_plan::ImportPlans::default();

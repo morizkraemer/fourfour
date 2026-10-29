@@ -5,12 +5,14 @@ use std::path::Path;
 
 use pioneer_usb_writer::models::{Playlist, Track};
 
+use crate::DuplicateCandidate;
+
 // ---------------------------------------------------------------------------
 // Track queries
 // ---------------------------------------------------------------------------
 
 pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO tracks (
             source_path, usb_path, title, artist, album, genre, label, remixer,
             comment, year, disc_number, track_number, tempo, key, duration_secs,
@@ -20,7 +22,8 @@ pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
             ?9, ?10, ?11, ?12, ?13, ?14, ?15,
             ?16, ?17, ?18, ?19
         )",
-        params![
+    )?
+    .execute(params![
             track.source_path.to_string_lossy().as_ref(),
             track.usb_path,
             track.title,
@@ -40,8 +43,7 @@ pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
             track.bitrate,
             track.file_size as i64,
             chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        ],
-    )
+        ])
     .context("Failed to insert track")?;
 
     Ok(conn.last_insert_rowid())
@@ -142,6 +144,25 @@ pub fn track_exists_by_path(conn: &Connection, source_path: &Path) -> Result<boo
     Ok(count > 0)
 }
 
+pub fn select_duplicate_candidates(conn: &Connection) -> Result<Vec<DuplicateCandidate>> {
+    let mut stmt =
+        conn.prepare("SELECT id, source_path, file_size, artist, title, duration_secs FROM tracks ORDER BY id")?;
+    let rows = stmt.query_map([], |row| {
+        let id: i64 = row.get(0)?;
+        let source_path: String = row.get(1)?;
+        let file_size: i64 = row.get(2)?;
+        Ok(DuplicateCandidate {
+            id: id as u32,
+            source_path: std::path::PathBuf::from(source_path),
+            file_size: file_size as u64,
+            artist: row.get(3)?,
+            title: row.get(4)?,
+            duration_secs: row.get(5)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
 pub fn select_track_files(conn: &Connection) -> Result<Vec<(i64, String, i64)>> {
     let mut stmt = conn.prepare("SELECT id, source_path, file_size FROM tracks ORDER BY id")?;
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
@@ -168,11 +189,11 @@ pub fn track_count(conn: &Connection) -> Result<u32> {
 // ---------------------------------------------------------------------------
 
 pub fn upsert_artwork(conn: &Connection, track_id: i64, image_data: &[u8]) -> Result<()> {
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO artwork (track_id, image_data) VALUES (?1, ?2)
          ON CONFLICT(track_id) DO UPDATE SET image_data = excluded.image_data",
-        params![track_id, image_data],
-    )?;
+    )?
+    .execute(params![track_id, image_data])?;
     Ok(())
 }
 
