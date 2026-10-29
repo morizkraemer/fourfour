@@ -42,6 +42,7 @@
   import { outermostIds, playlistIdsInSelection } from '../lib/playlistSelection.ts';
   import { toggleFolder } from '../stores/sidebar-folders.svelte.ts';
   import { resetActiveRowIfDeleted } from '../stores/sidebar-delete.ts';
+  import SearchIconButton from './SearchIconButton.svelte';
 
   let intervalId;
   let renamingPlaylistId = $state(null);
@@ -379,6 +380,9 @@
         <span class="ff-sidebar__dot ff-sidebar__dot--max"></span>
       </div>
     {/if}
+    {#if ui.searchMode === 'sidebar'}
+      <span class="ff-sidebar__search"><SearchIconButton /></span>
+    {/if}
   </div>
   <div class="ff-sidebar__top">
     <SidebarSection
@@ -560,6 +564,10 @@
     padding-left: var(--ff-traffic-light-x);
     padding-right: var(--ff-space-6);
     background: var(--ff-bg);
+  }
+  .ff-sidebar__search {
+    margin-left: auto;
+    display: flex;
   }
   .ff-sidebar__traffic {
     display: flex;

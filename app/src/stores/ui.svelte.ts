@@ -3,6 +3,7 @@
  * State lives in a single exported object so consumers can read + write fields.
  */
 
+import type { SearchMode } from '../lib/searchLayout.ts';
 import {
   clampPanelWidth,
   loadPanelWidth,
@@ -58,6 +59,8 @@ export const ui = $state({
   paletteOpen: false,
   /** The top bar search field the dropdown hangs from (set by GlobalHeader). */
   searchAnchor: null as HTMLElement | null,
+  /** How the top bar search shows at the current centre column width (set by GlobalHeader). */
+  searchMode: 'field' as SearchMode,
   /** Raw text in the top bar search field, including a leading `>` command prefix. */
   searchText: '',
   /** Set by the palette: the track table scrolls this track into view. */
