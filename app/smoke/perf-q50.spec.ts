@@ -277,3 +277,58 @@ test.describe('q50 perf paths', () => {
     if (REPORT) writeFileSync(REPORT, JSON.stringify(results, null, 2));
   });
 });
+
+type Profile = { nodes: { id: number; children?: number[]; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples: number[]; timeDeltas: number[] };
+
+function printProfile(name: string, profile: Profile) {
+  const selfMs = new Map<number, number>();
+  profile.samples.forEach((id, i) => selfMs.set(id, (selfMs.get(id) ?? 0) + profile.timeDeltas[i] / 1000));
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const totalMs = new Map<number, number>();
+  const total = (id: number): number => {
+    const cached = totalMs.get(id);
+    if (cached !== undefined) return cached;
+    const sum = (selfMs.get(id) ?? 0) + (byId.get(id)!.children ?? []).reduce((a, child) => a + total(child), 0);
+    totalMs.set(id, sum);
+    return sum;
+  };
+  const label = (n: Profile['nodes'][number]) => `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').pop()}:${n.callFrame.lineNumber}`;
+  const rank = (ms: (id: number) => number) =>
+    profile.nodes
+      .map((n) => ({ ms: ms(n.id), text: label(n) }))
+      .sort((x, y) => y.ms - x.ms)
+      .slice(0, 18)
+      .map((r) => `${r.ms.toFixed(1).padStart(8)} ms  ${r.text}`)
+      .join('\n');
+  console.log(`profile ${name} self\n${rank((id) => selfMs.get(id) ?? 0)}\nprofile ${name} inclusive\n${rank(total)}`);
+}
+
+test('q50 expand-to-detail profile', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'expand', 'set FF_PERF_PROFILE=expand');
+  test.setTimeout(300_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  const expands = [];
+  for (const index of [3, 5, 7, 9]) {
+    await loadTrack(page, index);
+    const cdp = index === 9 ? await page.context().newCDPSession(page) : null;
+    if (cdp) {
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+      await cdp.send('Profiler.start');
+    }
+    expands.push(await expandToDetail(page));
+    if (cdp) {
+      const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+      printProfile('expand', profile);
+      await cdp.detach();
+    }
+    await page.locator('.ff-xp__collapse').click();
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+    await page.waitForTimeout(300);
+  }
+  console.log(`expand to detail drawn ms: ${expands.map((e) => e.toFixed(0)).join(', ')}`);
+  await context.close();
+});
