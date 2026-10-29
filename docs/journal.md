@@ -287,3 +287,4 @@
 2026-10-29 16:00 fb-popups follow-up landed on ov-1028: deterministic tap test, field-scoped reset (release_user_field, additive Rust); full smoke 75/75; Mac check+install started
 2026-10-29 16:30 fb-activity landed on ov-1028: library activity button (import progress/result/missing/rest), import out of status bar, import-progress event; full smoke 81/81; Mac install started. Merlin: key popup 'very bad, too complicated and messy' → Claude Design canvas with several versions
 2026-10-29 17:10 orchestrator - key popup canvas published (https://claude.ai/artifact/EuFKQRMeeHEobgTcvsLBYW): Today + 6 simpler options, rec 6 'codes, both modes'; activity button installed on Mac
+2026-10-29 17:20 orchestrator - Merlin Mac feedback: import summary/icon/list/analyze opt-out/open playlist → fb-import2 (seat, sonnet); grid always slightly off → fb-grid (seat, opus); waveform stutter during analysis + first-load look queued (fb-wave)
