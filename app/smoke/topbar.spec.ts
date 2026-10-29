@@ -7,12 +7,15 @@ import { expect, rows, test } from './app.ts';
 const SHOTS = resolve(import.meta.dirname, '../../.agent/topbar');
 mkdirSync(SHOTS, { recursive: true });
 
-async function setup(page: Page, width: number, organizeOpen: boolean) {
+async function setup(page: Page, width: number, organizeOpen: boolean, panelWidth = 420) {
   await page.setViewportSize({ width, height: 900 });
-  await page.evaluate((open) => {
-    localStorage.setItem('fourfour.organize.expanded', String(open));
-    localStorage.setItem('fourfour.organize.width', '420');
-  }, organizeOpen);
+  await page.evaluate(
+    ([open, panel]) => {
+      localStorage.setItem('fourfour.organize.expanded', String(open));
+      localStorage.setItem('fourfour.organize.width', String(panel));
+    },
+    [organizeOpen, panelWidth] as const,
+  );
   await page.reload();
   await rows(page).first().waitFor();
 }
@@ -69,7 +72,6 @@ test('very narrow centre column moves the search icon into the left sidebar', as
   const sidebar = await box(page, '.ff-sidebar');
   const iconBox = (await icon.boundingBox())!;
   expect(iconBox.x + iconBox.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
-  expect(iconBox.y).toBeLessThan(60);
   await page.screenshot({ path: `${SHOTS}/moved-to-sidebar-state.png` });
 });
 
@@ -102,3 +104,33 @@ test('Cmd/Ctrl+F opens the search while collapsed', async ({ smoke: { page } }) 
   await expect(page.locator('.ff-gheader__search input')).toBeVisible();
   await expect(page.locator('.ff-gheader__search input')).toBeFocused();
 });
+
+const centreY = (b: { y: number; height: number }) => b.y + b.height / 2;
+
+for (const panelWidth of [320, 420, 520]) {
+  test(`top-bar icon hugs the organize panel's left edge at panel width ${panelWidth}`, async ({ smoke: { page } }) => {
+    await setup(page, 760 + panelWidth, true, panelWidth);
+    const icon = page.locator('.ff-gheader [data-search-icon]');
+    await expect(icon).toBeVisible();
+    const iconBox = (await icon.boundingBox())!;
+    const panel = await box(page, '.ff-organize--expanded');
+    const gap = panel.x - (iconBox.x + iconBox.width);
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(16);
+    const title = await box(page, '.ff-gheader__title');
+    expect(Math.abs(centreY(iconBox) - centreY(title))).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: `${SHOTS}/icon-top-bar-panel-${panelWidth}.png` });
+  });
+
+  test(`sidebar icon shares the title's vertical centre at panel width ${panelWidth}`, async ({ smoke: { page } }) => {
+    await setup(page, 560 + panelWidth, true, panelWidth);
+    const icon = page.locator('.ff-sidebar [data-search-icon]');
+    await expect(icon).toBeVisible();
+    const iconBox = (await icon.boundingBox())!;
+    const title = await box(page, '.ff-gheader__title');
+    expect(Math.abs(centreY(iconBox) - centreY(title))).toBeLessThanOrEqual(1);
+    const sidebar = await box(page, '.ff-sidebar');
+    expect(iconBox.x + iconBox.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
+    await page.screenshot({ path: `${SHOTS}/icon-sidebar-panel-${panelWidth}.png` });
+  });
+}
