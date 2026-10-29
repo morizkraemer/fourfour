@@ -138,8 +138,10 @@ function fineSeries(columns: number) {
   return { low, mid, high, signalHigh, signalLow, signalScale: 1 };
 }
 
-function frameOptions(startFrac: number, visible: number, durationMs: number) {
-  return {
+type DrawOptions = Parameters<typeof drawBandRange>[2];
+
+function frameOptions(startFrac: number, visible: number, durationMs: number): DrawOptions {
+  const options = {
     startFrac,
     endFrac: startFrac + visible,
     widthPx: WIDTH,
@@ -154,6 +156,7 @@ function frameOptions(startFrac: number, visible: number, durationMs: number) {
     scrolling: true,
     layout: 'centred',
   };
+  return options as unknown as DrawOptions;
 }
 
 describe('scrolled high-resolution view', () => {

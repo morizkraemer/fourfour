@@ -178,7 +178,7 @@ async function profiled<T>(page: Page, name: string, run: () => Promise<T>): Pro
     }
   });
   console.log(`profile ${name} inclusive`);
-  for (const [k, v] of [...inclusive.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40)) console.log(`${v.toFixed(0).padStart(7)} ms  ${k}`);
+  for (const [k, v] of [...inclusive.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(process.env.FF_PERF_TOP ?? 40))) console.log(`${v.toFixed(0).padStart(7)} ms  ${k}`);
   await cdp.detach();
   return value;
 }

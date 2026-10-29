@@ -475,3 +475,52 @@ FF_SMOKE_PORT=5361 FF_PERF_BULK=1 FF_PERF_TRACKS=10000 npx playwright test perf-
 # rates: FF_PERF_FAST_RATE / FF_PERF_GRID_RATE (events/s); profile a window: FF_PERF_PROFILE="scroll during fast pass"
 FOURFOUR_MODELS_DIR=~/.cache/fourfour-models ./target/release/bench_analysis --backend rust --list <paths.txt> --limit 60
 ```
+
+# Player waveform scroll during bulk analysis (2026-10-29, fb-scroll)
+
+Report: "still very laggy (the big player waveform scroll)" while many tracks analyse. Branch `fb-scroll` (from `ov-1028`).
+
+## Method
+
+New scenario in `app/smoke/perf-bulk-analysis.spec.ts` (`FF_PERF_SCENARIO=player`): 10k fresh tracks, one analysed track loaded, the expanded player open with the high-resolution series, the mock transport playing (50 ms ticks, the zoom view scrolls every frame). Windows of 6 s: no analysis; analysing with no events; fast-pass events at 6/s (twice, interleaved with quiet windows); grid-pass events at 0.2/s. Per window: rAF frame deltas (p50/p95/p99, frames lost), the summed cost of all rAF callbacks per frame (the render path, measured by wrapping `requestAnimationFrame` before the app loads), long tasks, main-thread task and script ms/s. `FF_PERF_PROFILE=<window name>` adds a CPU profile (`FF_PERF_TOP` rows).
+
+## Causes (measured)
+
+- **The zoom canvas was repainted in full every frame.** At the default zoom (~5 s visible) the high-resolution series (2400 columns/s) gives ~7.5 columns per device pixel here (~3.75 on a 2x screen), so the column ring that Q28/Q36 added for 1 column per pixel or finer was never used: every frame reduced ~12000 columns and wrote and uploaded a full-canvas `ImageData`. That was 4.5-9 ms of script per frame in the rAF callback (p50; 260-316 ms/s of script with no analysis at all), the steady cost that leaves no room for anything else in the frame. On a Retina Mac the canvas has 4x the pixels.
+- **Each library batch is one 10-25 ms task** (here; every 250 ms while events arrive): `bumpLibraryTracks` copies the 10k-element deep `$state` array through the proxy (`get`/`proxy` ~10 ms) and Svelte re-runs the deriveds that read `library.tracks`. This is the hitch every quarter second. The player itself does nothing per event unless the event is for the loaded track (it then reads that track once); it does not refetch, redraw or re-derive beats or bands for other tracks.
+- **CPU contention dominates the headless numbers.** With the box at load 15-25 the idle player lost 2-10 frames in 6 s; at load 47-80 (other workers' nice-0 compiles) it lost 30-90 with identical code. Sixteen extra busy processes at nice 10 on top of that load changed nothing measurable (89 vs 95 frames lost, no analysis). A nice-0 run timed out on the box and is not reported. Analysis threads already run below UI priority (fb-wave: QoS utility / nice 10), so no worker throttling was added: there is no evidence here that lower-priority backend load starves the WebView, and it would cost throughput.
+
+## Fix
+
+- `drawBandRange` (`waveform-render.js`) takes the column-ring path whenever no envelope decay applies (`decayPerPixel === 0`), not only at 1 column per pixel or finer. The high-resolution series is drawn without decay, so each device-pixel column depends only on its absolute pixel index at any zoom; a scroll by d pixels now reduces and paints only d columns and blits the ring in two slices. The coarse analysis columns (zoom decay 0.86) still repaint in full. No visual change: `waveform-scroll-identity.test.ts` draws 90 scrolled frames (uneven steps, two zooms at 4-17 columns per pixel) through the ring and through a full repaint into a pixel-exact software canvas and requires 0 differing pixels per frame; it fails if the ring is not used.
+
+## Numbers (10k tracks, production build, headless software rendering)
+
+Interleaved before/after pairs. Render path = summed rAF callback time per frame (p50 / p95 ms).
+
+| window | before (load ~18) | after (load ~25) | before (load ~50-70) | after (load ~50) |
+|---|---|---|---|---|
+| no analysis: render path | 4.6 / 7.4 | 0.7 / 1.4 | 4.5 / 7.3 | 0.7 / 5.0 |
+| no analysis: script ms/s | 316 | 64 | 305 | 81 |
+| analysing, no events: script ms/s | 288 / 291 | 51 / 64 | 273 / 284 | 59 / 69 |
+| fast pass: render path | 5.1 / 8.6, 4.8 / 7.3 | 1.4 / 3.7, 1.0 / 3.2 | 7.7 / 13.5, 6.0 / 11.6 | 1.6 / 9.2, 1.1 / 6.2 |
+| fast pass: script ms/s | 266 / 259 | 74 / 64 | 250 / 247 | 75 / 74 |
+| grid pass: script ms/s | 296 | 57 | 283 | 59 |
+
+Frames lost and frame p95/p99 are not readable on this box: main-thread task time was 800-980 ms/s in every window (software paint and compositing of the whole page), and the same build lost 2 to 90 frames in the quiet window depending only on box load. Read the table as: the render path is 4-6x cheaper, script time per second down ~75%, batches unchanged.
+
+## Not done
+
+- **Batch cost** (10-25 ms per 250 ms here): removing it needs the library's track list out of the deep `$state` proxy (raw array plus per-row versions) so a batch does not copy 10k elements and re-run every derived; that is a store refactor, not done in this entry. A Mac measurement with the ring fix should show whether it is still felt.
+- **Mac check**: play a track in the expanded player while a few thousand tracks analyse; the waveform should scroll without hitches between batches. Retina should gain more than the 1x numbers above.
+- Contention with nice-0 backend load was not isolated cleanly (box too loaded).
+
+## Reproduce
+
+```bash
+cd app && npm ci
+FF_SMOKE_PORT=5371 FF_PERF_BULK=1 FF_PERF_SCENARIO=player FF_PERF_TRACKS=10000 FF_PERF_OUT=/path/out.json npx playwright test perf-bulk-analysis
+# profile a window: FF_PERF_PROFILE="player during fast pass (2)" FF_PERF_TOP=90
+# before: set the condition in drawBandRange back to `columnsPerPx <= 1`
+npx vitest run src/services/waveform-scroll-identity.test.ts
+```
