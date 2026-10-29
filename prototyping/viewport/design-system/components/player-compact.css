@@ -101,6 +101,13 @@
   background-color: rgba(34, 197, 94, 0.08);
 }
 
+.ff-player-compact__cue-btn:disabled,
+.ff-player-compact__play-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background-color: transparent;
+}
+
 .ff-player-compact__play-icon {
   color: #d4d4d4;
   display: block;

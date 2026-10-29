@@ -11,6 +11,7 @@
   import { player, setTrackMode } from '../stores/player.svelte.ts';
   import { bpmEntry, commitTrackBpm, commitTrackKey, doubleTrackBpm, halveTrackBpm, stepTrackBpm, stepTrackKey } from '../stores/track-edits.svelte.ts';
   import { tempo, setKeyLock, setKeyShift, setTempoPercent } from '../stores/tempo.svelte.ts';
+  import { quantize, setQuantize } from '../stores/quantize.svelte.ts';
   import {
     BPM_CLICK_STEP,
     BPM_CLICK_STEP_FINE,
@@ -127,11 +128,18 @@
         {:else}
           <button
             type="button"
-            class="ff-ptempo__slot-btn ff-ptempo__mt"
-            class:ff-ptempo__mt--on={tempo.keyLock}
+            class="ff-ptempo__toggle ff-ptempo__toggle--fill"
             aria-pressed={tempo.keyLock}
+            disabled={!player.track}
             title="Master Tempo: keep the key when the tempo changes"
             onclick={() => setKeyLock(!tempo.keyLock)}>MT</button>
+          <button
+            type="button"
+            class="ff-ptempo__toggle ff-ptempo__toggle--fill"
+            aria-pressed={quantize.on}
+            disabled={!player.track}
+            title="Quantize: hot cues and CUE snap to the beat grid (hold Alt while dragging a cue to place it freely)"
+            onclick={() => setQuantize(!quantize.on)}>Q</button>
         {/if}
       </span>
       <TempoField
@@ -164,11 +172,18 @@
 <div class="ff-ptempo" class:ff-ptempo--idle={!player.track} role="group" aria-label="Tempo and key">
     <button
       type="button"
-      class="ff-ptempo__mt"
-      class:ff-ptempo__mt--on={tempo.keyLock}
+      class="ff-ptempo__toggle"
       aria-pressed={tempo.keyLock}
+      disabled={!player.track}
       title="Master Tempo: keep the key when the tempo changes"
       onclick={() => setKeyLock(!tempo.keyLock)}>MT</button>
+    <button
+      type="button"
+      class="ff-ptempo__toggle"
+      aria-pressed={quantize.on}
+      disabled={!player.track}
+      title="Quantize: hot cues and CUE snap to the beat grid"
+      onclick={() => setQuantize(!quantize.on)}>Q</button>
     <TempoField
       label="Key"
       text={hasKey ? keyNow : '—'}
@@ -204,13 +219,13 @@
     opacity: 0.45;
     pointer-events: none;
   }
-  .ff-ptempo__mt {
+  .ff-ptempo__toggle {
     flex: none;
     padding: 3px 4px;
     border: none;
     border-radius: var(--ff-radius-xs);
     background: none;
-    color: var(--ff-text);
+    color: var(--ff-text-mid);
     font-family: var(--ff-font-mono);
     font-size: 10.5px;
     font-weight: 600;
@@ -218,14 +233,27 @@
     cursor: pointer;
     transition: color var(--ff-motion-fast) var(--ff-easing), background-color var(--ff-motion-fast) var(--ff-easing);
   }
-  .ff-ptempo__mt:hover {
+  .ff-ptempo__toggle:hover:not(:disabled) {
     background: var(--ff-hover);
   }
-  .ff-ptempo__mt:focus-visible {
+  .ff-ptempo__toggle:active:not(:disabled) {
+    background: var(--ff-select);
+  }
+  .ff-ptempo__toggle:focus-visible {
     outline: 1px solid var(--ff-border-hi);
   }
-  .ff-ptempo__mt--on {
-    color: var(--ff-danger);
+  .ff-ptempo__toggle[aria-pressed='true'] {
+    color: var(--ff-toggle-on, #3b82f6);
+  }
+  .ff-ptempo__toggle:disabled {
+    cursor: default;
+  }
+  .ff-ptempo__toggle--fill {
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border-radius: var(--ff-radius-md);
+    font-size: var(--ff-type-num);
   }
   .ff-ptempo--xp {
     gap: var(--ff-space-8);
@@ -261,9 +289,6 @@
   .ff-ptempo__slot-btn:disabled {
     opacity: 0.4;
     cursor: default;
-  }
-  .ff-ptempo__slot .ff-ptempo__mt--on {
-    color: var(--ff-danger);
   }
   .ff-ptempo__pen {
     display: inline-flex;

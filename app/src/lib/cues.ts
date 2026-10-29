@@ -154,6 +154,14 @@ export function withCuePad(cues: Cue[], key: string, slot: number | null): Cue[]
   return sortCues([...rest, { ...cue, slot }]);
 }
 
+/** Moves hot cue `key` to `timeMs` (whole ms, never before the start); the same list when it is not a hot cue or already there. */
+export function withCueMoved(cues: Cue[], key: string, timeMs: number): Cue[] {
+  const target = Math.max(0, Math.round(timeMs));
+  const cue = cues.find((c) => cueKey(c) === key);
+  if (!cue || cue.slot === MEMORY_SLOT || cue.timeMs === target) return cues;
+  return sortCues(cues.map((c) => (c === cue ? { ...c, timeMs: target } : c)));
+}
+
 export interface CueChip {
   key: string;
   slot: number;

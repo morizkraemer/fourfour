@@ -331,8 +331,10 @@ function shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked
  * slides) and warms the envelope up on a lead-in. The view moves in whole device pixels: a fractional paint
  * offset anti-aliases every one-pixel column against its neighbour, which lets the background bleed through
  * and makes the whole waveform pulse (up to 22 % brightness) as the sub-pixel phase changes.
+ * `ground` (a colour) makes the call cover the whole width opaquely: the scrolled view's cached layers hold it, every
+ * other path fills it first, so the caller needs no separate fill of the same area.
  */
-export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred', peakWeights = BUCKET_PEAK_WEIGHT, zoomLook = null, msPerPx = 0 }) {
+export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightPx, palette, dpr = 1, decay = 0.88, scrolling = false, columnPx = 1, layout = 'centred', peakWeights = BUCKET_PEAK_WEIGHT, zoomLook = null, msPerPx = 0, ground = null }) {
   if (widthPx <= 0 || !(endFrac > startFrac)) return;
   if (columnPx > 1) {
     ctx.save();
@@ -345,7 +347,13 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
   }
   const columnsPerPx = ((endFrac - startFrac) * (bands?.low?.length ?? 0)) / widthPx;
   const decayPerPixel = columnsPerPx <= 1 ? 0 : Math.pow(decay, 1 / dpr);
+  const fillGround = () => {
+    if (!ground) return;
+    ctx.fillStyle = ground;
+    ctx.fillRect(0, 0, widthPx, heightPx);
+  };
   if (!scrolling) {
+    fillGround();
     const stacked = layout === 'stacked';
     const shaped = shapedStatic(bands, startFrac, endFrac, widthPx, decayPerPixel, stacked);
     (stacked ? paintStacked : paintBands)(ctx, shaped, { heightPx, palette });
@@ -356,9 +364,10 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
     ? paintZoom(g, shaped, { look: zoomLook, heightPx, palette, msPerPx, dpr, ...at })
     : paintBands(g, shaped, { heightPx, palette, ...at }));
   if (columnsPerPx <= 1 && canCacheScroll(ctx)) {
-    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, peakWeights, paint, key: `${zoomLook}|${palette.version}|${palette.bg}` });
+    drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, peakWeights, paint, ground, key: `${zoomLook}|${palette.version}|${palette.bg}|${ground}` });
     return;
   }
+  fillGround();
   const leftFloor = Math.floor(startFrac / fracPerPx);
   const leadPx = Math.round(ENVELOPE_LEAD_CSS_PX * dpr);
   const total = leadPx + widthPx + 2;
@@ -389,19 +398,20 @@ function newLayer(widthPx, heightPx) {
 
 /**
  * Scrolled view at one pixel per column or finer: every pixel column depends only on its absolute pixel index (no
- * smoothing across columns), so a scroll by d pixels moves the bitmap of the last frame by d and paints only the d
- * columns that came into view. The bands of the whole view are painted again whenever the data, zoom, size or
- * palette change or the view jumped by more than its width.
+ * smoothing across columns), so a scroll by d pixels paints only the d columns that came into view. The columns live
+ * in a ring: absolute pixel column c sits at layer x = c mod width, so a scroll overwrites the columns that left the view
+ * and nothing is copied; the layer is blitted to the view in two slices at the wrap point. The bands of the whole view are
+ * painted again whenever the data, zoom, size or palette change or the view jumped by more than its width.
  *
  * The view's width in track fractions comes from `endFrac - startFrac`, which differs in its last bits from frame to
  * frame as the view scrolls; the cache keeps the scale it was painted at and treats such a difference as the same
  * zoom (an exact comparison made about every other scrolled frame a full repaint).
  */
-function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, peakWeights, paint, key }) {
+function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, widthPx, heightPx, peakWeights, paint, ground, key }) {
   const canvas = ctx.canvas;
   let entry = scrollCache.get(canvas);
   if (!entry || entry.widthPx !== widthPx || entry.heightPx !== heightPx) {
-    entry = { widthPx, heightPx, front: newLayer(widthPx, heightPx), back: newLayer(widthPx, heightPx), left: null };
+    entry = { widthPx, heightPx, layer: newLayer(widthPx, heightPx), left: null };
     scrollCache.set(canvas, entry);
   }
   if (entry.bands !== bands || !sameScale(entry.fracPerPx, viewFracPerPx) || entry.key !== key) {
@@ -409,26 +419,36 @@ function drawScrolledColumns(ctx, bands, { startFrac, fracPerPx: viewFracPerPx, 
   }
   const fracPerPx = entry.fracPerPx;
   const leftFloor = Math.floor(startFrac / fracPerPx);
-  const paintColumns = (layer, fromPx, count) => {
-    const g = layer.getContext('2d');
-    g.clearRect(fromPx, 0, count, heightPx);
-    const first = leftFloor + fromPx - 1;
-    const shaped = reduceBands(bands, first * fracPerPx, (first + count + 1) * fracPerPx, count + 1, peakWeights);
-    paint(g, shaped, { from: 1, count, offsetPx: fromPx });
+  const ringX = (absolute) => ((absolute % widthPx) + widthPx) % widthPx;
+  const paintColumns = (absoluteFrom, count) => {
+    const g = entry.layer.getContext('2d');
+    for (let done = 0; done < count;) {
+      const first = absoluteFrom + done;
+      const x = ringX(first);
+      const run = Math.min(count - done, widthPx - x);
+      if (ground) {
+        g.fillStyle = ground;
+        g.fillRect(x, 0, run, heightPx);
+      } else {
+        g.clearRect(x, 0, run, heightPx);
+      }
+      const shaped = reduceBands(bands, (first - 1) * fracPerPx, (first + run) * fracPerPx, run + 1, peakWeights);
+      paint(g, shaped, { from: 1, count: run, offsetPx: x });
+      done += run;
+    }
   };
   const shift = entry.left === null ? widthPx : leftFloor - entry.left;
-  if (Math.abs(shift) >= widthPx) {
-    paintColumns(entry.front, 0, widthPx);
-  } else if (shift !== 0) {
-    const g = entry.back.getContext('2d');
-    g.clearRect(0, 0, widthPx, heightPx);
-    g.drawImage(entry.front, -shift, 0);
-    [entry.front, entry.back] = [entry.back, entry.front];
-    if (shift > 0) paintColumns(entry.front, widthPx - shift, shift);
-    else paintColumns(entry.front, 0, -shift);
-  }
+  if (Math.abs(shift) >= widthPx) paintColumns(leftFloor, widthPx);
+  else if (shift > 0) paintColumns(entry.left + widthPx, shift);
+  else if (shift < 0) paintColumns(leftFloor, -shift);
   entry.left = leftFloor;
-  ctx.drawImage(entry.front, 0, 0);
+  const split = ringX(leftFloor);
+  if (split === 0) {
+    ctx.drawImage(entry.layer, 0, 0);
+    return;
+  }
+  ctx.drawImage(entry.layer, split, 0, widthPx - split, heightPx, 0, 0, widthPx - split, heightPx);
+  ctx.drawImage(entry.layer, 0, 0, split, heightPx, widthPx - split, 0, split, heightPx);
 }
 
 /** Dim a played region [0, widthPx) on a canvas that has an opaque ground painted. */

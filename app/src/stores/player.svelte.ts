@@ -28,6 +28,8 @@ import { resetTempoForNewTrack, tempo } from './tempo.svelte.ts';
 import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
 import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cues.svelte.ts';
 import { initialCuePointMs } from '../lib/cues.ts';
+import { quantize } from './quantize.svelte.ts';
+import { quantizedMs } from '../lib/quantize.ts';
 import {
   cuePress,
   cueRelease,
@@ -575,7 +577,11 @@ export async function togglePlay() {
 }
 
 function cueTransport(): CueTransport {
-  return { playing: player.playing, positionMs: currentPositionMs() };
+  const positionMs = currentPositionMs();
+  return {
+    playing: player.playing,
+    positionMs: player.playing ? positionMs : quantizedMs(player.track?.beats ?? [], positionMs, quantize.on),
+  };
 }
 
 async function runCueCommand(command: CueCommand) {
