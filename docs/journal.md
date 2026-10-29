@@ -253,3 +253,4 @@
 2026-10-28 20:31 orchestrator - run idle: queue done; remaining items need Merlin (layout test, CI push, bar 1) or the Mac (install, offline)
 2026-10-29 03:22 orchestrator - ov-1028 232ca15 installed on Mac with bundled weights (162 MB app; Mac build script now uses tauri.bundle-weights.conf.json; first install without weights replaced)
 2026-10-29 03:45 orchestrator - Merlin feedback on ov-1028 (11 items, scratchpad fb-1029.md); spawn fb-player player/waveform fixes (seat, sonnet high), fb-mockups research + viewport round (seat, opus); top bar/search fixes queued after fb-player; file-management features (backup, health check, dedup, missing files) need a plan
+2026-10-29 03:55 orchestrator - icon round 6 queued: Merlin wants Konsole 'Groove' concept as inspiration (via audio_tools session); starts when a worker slot frees
