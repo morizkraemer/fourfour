@@ -1,0 +1,172 @@
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { Page } from '@playwright/test';
+import { expect, rows, test } from './app.ts';
+import type { SmokeImport, SmokeWindow } from './tauri-mock.ts';
+
+const SHOTS = resolve(import.meta.dirname, '../../.agent/activity');
+mkdirSync(SHOTS, { recursive: true });
+
+const FOLDER = '/Downloads/Fresh Finds';
+const TOP_BAR_CLIP = { x: 0, y: 0, width: 1600, height: 120 };
+
+const button = (page: Page) => page.locator('[data-library-status]');
+const menu = (page: Page) => page.locator('[data-library-activity-menu]');
+const entries = (page: Page) => menu(page).locator('.ff-menu__item');
+
+function newTrack(id: number, file: string) {
+  return {
+    id,
+    source_path: `${FOLDER}/${file}`,
+    title: file.replace(/\.\w+$/, ''),
+    artist: 'Drop Artist',
+    album: 'Drop Album',
+    genre: 'House',
+    tempo: 12400,
+    key: '8A',
+    duration_secs: 300,
+    bitrate: 320,
+    file_size: 10_000_000,
+    has_artwork: false,
+    has_cues: false,
+    has_analysis: false,
+    analysis_pending: false,
+  };
+}
+
+const TWO_NEW: SmokeImport = { tracks: [newTrack(101, 'Low Sun.mp3'), newTrack(102, 'Side Street.flac')], already: 0 };
+
+async function setWindow(page: Page, patch: Record<string, unknown>) {
+  await page.evaluate((p) => Object.assign(window, p), patch);
+}
+
+async function emit(page: Page, event: string, payload: unknown) {
+  await page.evaluate(([e, p]) => (window as unknown as SmokeWindow).__smokeEmit(e as string, p), [event, payload] as const);
+}
+
+async function dismissAnalysisPrompt(page: Page) {
+  const notNow = page.getByRole('button', { name: 'Not now' });
+  await notNow.click({ timeout: 2000 }).catch(() => undefined);
+}
+
+async function importFolder(page: Page) {
+  await page.waitForTimeout(450);
+  await button(page).click();
+  await entries(page).filter({ hasText: 'Import folder…' }).click();
+}
+
+async function withProblems(page: Page, missing: number[]) {
+  await page.addInitScript((m) => ((window as unknown as Record<string, unknown>).__smokeMissing = m), missing);
+  await page.reload();
+  await rows(page).first().waitFor();
+}
+
+test('the activity button rests as a quiet import icon with a tooltip', async ({ smoke: { page } }) => {
+  await expect(button(page)).toHaveAttribute('data-activity', 'rest');
+  await expect(button(page)).toHaveAttribute('title', 'Import…');
+  await expect(button(page)).toHaveText('');
+  await page.screenshot({ path: `${SHOTS}/rest.png`, clip: TOP_BAR_CLIP });
+});
+
+test('an import in progress shows counted progress on the button and in the popover', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokeHoldImport: true, __smokeImport: TWO_NEW });
+  await importFolder(page);
+
+  await expect(button(page)).toHaveAttribute('data-activity', 'importing');
+  await expect(button(page)).toHaveText('Importing…');
+  await emit(page, 'import-progress', { done: 12, total: 40 });
+  await expect(button(page)).toHaveText('Importing 12/40…');
+  await expect(button(page).locator('.ff-gheader__progress')).toHaveCSS('width', /^\d/);
+  const restBox = (await button(page).boundingBox())!;
+  expect(restBox.height).toBe(24);
+  await page.screenshot({ path: `${SHOTS}/importing.png`, clip: TOP_BAR_CLIP });
+
+  await button(page).click();
+  await expect(menu(page).locator('[data-import-progress]')).toContainText('12 of 40 files');
+  await expect(entries(page).filter({ hasText: 'Import folder…' })).toBeDisabled();
+  await page.screenshot({ path: `${SHOTS}/importing-popover.png`, clip: { x: 900, y: 0, width: 700, height: 300 } });
+  await page.keyboard.press('Escape');
+
+  await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseImport?.());
+  await expect(button(page)).toHaveText('Added 2');
+  await dismissAnalysisPrompt(page);
+});
+
+test('the result shows for a few seconds, then the button returns to rest', async ({ smoke: { page } }) => {
+  await setWindow(page, { __smokeImport: TWO_NEW });
+  await importFolder(page);
+
+  await expect(button(page)).toHaveAttribute('data-activity', 'result');
+  await expect(button(page)).toHaveText('Added 2');
+  await page.screenshot({ path: `${SHOTS}/result.png`, clip: TOP_BAR_CLIP });
+  await expect(button(page)).toHaveAttribute('data-activity', 'rest', { timeout: 9000 });
+  await expect(button(page)).toHaveText('');
+});
+
+test('the popover keeps the full last-import summary after the button rests', async ({ smoke: { page } }) => {
+  await setWindow(page, {
+    __smokeDuplicates: [
+      { new_path: `${FOLDER}/copy-a.mp3`, file_name: 'copy-a.mp3', existing_id: 7, title: 'Smoke Track 07', artist: 'Four Tet', duration_secs: 222, reason: 'same_tags' },
+    ],
+    __smokeImport: { ...TWO_NEW, already: 5, skipped: { unsupported: 3, unsupported_exts: ['.m4p', '.txt'], unreadable: 1 } },
+  });
+  await importFolder(page);
+  await page.locator('.ff-dialog').getByRole('button', { name: 'Skip duplicates' }).click();
+  await expect(button(page)).toHaveText('Added 2 · 1 duplicate skipped · 4 files not imported');
+  await dismissAnalysisPrompt(page);
+  await expect(button(page)).toHaveAttribute('data-activity', 'rest', { timeout: 9000 });
+
+  await button(page).click();
+  const last = menu(page).locator('[data-last-import]');
+  await expect(last).toContainText('Last import');
+  await expect(last).toContainText('Added 2 tracks');
+  await expect(last).toContainText('5 already in your library');
+  await expect(last).toContainText('1 duplicate skipped');
+  await expect(last).toContainText('3 files skipped: unsupported format (.m4p, .txt)');
+  await expect(last).toContainText('1 audio file couldn’t be read');
+  await page.screenshot({ path: `${SHOTS}/popover-last-import.png`, clip: { x: 900, y: 0, width: 700, height: 360 } });
+});
+
+test('Import folder and Import files open the existing import paths', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokePickPath: FOLDER, __smokeImport: TWO_NEW });
+  await importFolder(page);
+  await expect(button(page)).toHaveText('Added 2');
+  await dismissAnalysisPrompt(page);
+  expect(await smoke.invokes('plan_import')).toEqual([{ paths: [FOLDER] }]);
+  expect(await smoke.invokes('commit_import')).toHaveLength(1);
+
+  await setWindow(page, { __smokePickPath: `${FOLDER}/Low Sun.mp3`, __smokeImport: { tracks: [], already: 1 } });
+  await button(page).click();
+  await entries(page).filter({ hasText: 'Import files…' }).click();
+  await expect(button(page)).toHaveText('File already in your library');
+  expect(await smoke.invokes('plan_import')).toEqual([{ paths: [FOLDER] }, { paths: [`${FOLDER}/Low Sun.mp3`] }]);
+});
+
+test('the missing state still works and comes back after an import result', async ({ smoke }) => {
+  const { page } = smoke;
+  await withProblems(page, [3, 5]);
+  await expect(button(page)).toHaveAttribute('data-activity', 'problems');
+  await expect(button(page)).toHaveText('2 missing');
+  await page.screenshot({ path: `${SHOTS}/missing.png`, clip: TOP_BAR_CLIP });
+
+  await button(page).click();
+  await expect(entries(page)).toHaveText([
+    'Relocate missing…',
+    'Show missing tracks',
+    'Check again',
+    'Library check results…',
+    'Import folder…',
+    'Import files…',
+  ]);
+  await expect(menu(page).locator('[data-last-import]')).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/missing-popover.png`, clip: { x: 900, y: 0, width: 700, height: 360 } });
+  await page.keyboard.press('Escape');
+
+  await setWindow(page, { __smokePickPath: FOLDER, __smokeImport: TWO_NEW });
+  await importFolder(page);
+  await expect(button(page)).toHaveText('Added 2');
+  await dismissAnalysisPrompt(page);
+  await expect(button(page)).toHaveText('2 missing', { timeout: 9000 });
+});

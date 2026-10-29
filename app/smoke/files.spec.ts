@@ -26,10 +26,10 @@ async function withProblems(page: Page, missing: number[], unreadable: number[] 
   await rows(page).first().waitFor();
 }
 
-test('no status button and a calm empty status column while every file is found', async ({ smoke: { page } }) => {
+test('the activity button rests as a quiet import button and the status column stays empty while every file is found', async ({ smoke: { page } }) => {
   await expect(page.locator('.ff-colh [data-col-key="status"]')).toHaveCount(1);
   await expect(page.locator('[data-track-row][data-file-status]')).toHaveCount(0);
-  await expect(statusButton(page)).toHaveCount(0);
+  await expect(statusButton(page)).toHaveAttribute('data-activity', 'rest');
 });
 
 test('missing and unreadable rows get a status mark, a tooltip and do not play', async ({ smoke }) => {
@@ -63,7 +63,7 @@ test('the status button popover lists one action per line and filters to missing
   await withProblems(page, [3, 5]);
 
   await statusButton(page).click();
-  await expect(menuItems(page)).toHaveText(['Relocate missing…', 'Show missing tracks', 'Check again', 'Library check results…']);
+  await expect(menuItems(page)).toHaveText(['Relocate missing…', 'Show missing tracks', 'Check again', 'Library check results…', 'Import folder…', 'Import files…']);
   await page.screenshot({ path: `${SHOTS}/topbar-popover.png`, clip: { x: 800, y: 0, width: 800, height: 260 } });
 
   await menuItems(page).filter({ hasText: 'Show missing tracks' }).click();
@@ -97,7 +97,7 @@ test('relocate relinks matches, reports the rest and offers Locate…', async ({
 
   await page.locator('[data-relocate-unresolved="5"]').getByRole('button', { name: 'Locate…' }).click();
   await expect.poll(() => smoke.invokes('locate_track_file')).toEqual([{ trackId: 5, path: '/Music/moved' }]);
-  await expect(statusButton(page)).toHaveCount(0);
+  await expect(statusButton(page)).toHaveAttribute('data-activity', 'rest');
   await expect(page.locator('[data-relocate-unresolved]')).toHaveCount(0);
 
   await page.locator('.ff-dialog').getByRole('button', { name: 'Done' }).click();

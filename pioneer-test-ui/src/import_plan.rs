@@ -50,6 +50,10 @@ pub fn survey_files(paths: &[String]) -> FileSurvey {
 }
 
 impl FileSurvey {
+    pub fn audio_count(&self) -> usize {
+        self.audio.len()
+    }
+
     fn visit(&mut self, path: &Path) {
         if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
             return;

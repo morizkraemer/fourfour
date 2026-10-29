@@ -10,7 +10,7 @@
   already carries analysis and sync progress) so the narrower bar stays calm.
 -->
 <script>
-  import { ContextMenu, FilterInput, Spinner, StatusDot } from '$ds';
+  import { FilterInput, Spinner, StatusDot } from '$ds';
   import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
   import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { stickSync } from '../stores/stick-sync.svelte.ts';
@@ -19,21 +19,24 @@
   import SearchIconButton from './SearchIconButton.svelte';
   import { stickLabel, topbarIdleStatus } from '../lib/topbarStatus.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
-  import { checkLibraryAgain, openHealthDialog, relocateMissing, showProblemTracks } from '../stores/file-health.svelte.ts';
   import { problemLabel } from '../lib/fileHealth.ts';
+  import { libraryActivity } from '../lib/libraryActivity.ts';
+  import { importActivity } from '../stores/import-activity.svelte.ts';
+  import LibraryActivityMenu from './LibraryActivityMenu.svelte';
 
   let filterInputEl = $state(null);
   let statusMenu = $state({ open: false, x: 0, y: 0 });
   let problems = $derived(problemLabel(fileStatus));
-  let statusMenuItems = $derived([
-    { label: 'Relocate missing…', disabled: fileStatus.missing === 0 || fileStatus.relocating, onClick: () => void relocateMissing() },
-    fileStatus.onlyProblems
-      ? { label: 'Show all tracks', onClick: () => showProblemTracks(false) }
-      : { label: 'Show missing tracks', onClick: () => showProblemTracks(true) },
-    { label: 'Check again', disabled: fileStatus.running, onClick: () => void checkLibraryAgain() },
-    { isSeparator: true },
-    { label: 'Library check results…', onClick: openHealthDialog },
-  ]);
+  let activity = $derived(
+    libraryActivity({
+      importing: importActivity.running,
+      importDone: importActivity.done,
+      importTotal: importActivity.total,
+      resultHeadline: importActivity.resultVisible ? (importActivity.summary?.headline ?? null) : null,
+      resultFailed: importActivity.failed,
+      problems,
+    }),
+  );
   let searchEl = $state(null);
   let headerEl = $state(null);
   let returnFocusEl = null;
@@ -159,19 +162,32 @@
     </div>
   </div>
   <div class="ff-gheader__right" data-tauri-drag-region>
-    {#if problems}
-      <button
-        type="button"
-        class="ff-gheader__chip ff-gheader__chip--idle ff-gheader__chip--warn"
-        data-library-status
-        bind:this={statusButtonEl}
-        aria-haspopup="menu"
-        aria-expanded={statusMenu.open}
-        onclick={toggleStatusMenu}
-      >
-        <StatusDot status="warn" /> {problems}
-      </button>
-    {/if}
+    <button
+      type="button"
+      class="ff-gheader__chip ff-gheader__chip--idle ff-gheader__activity"
+      class:ff-gheader__chip--warn={activity.kind === 'problems' || (activity.kind === 'result' && activity.failed)}
+      class:ff-gheader__activity--rest={activity.kind === 'rest'}
+      data-library-status
+      data-activity={activity.kind}
+      title={activity.kind === 'rest' ? 'Import…' : undefined}
+      aria-label={activity.kind === 'rest' ? 'Import…' : undefined}
+      bind:this={statusButtonEl}
+      aria-haspopup="menu"
+      aria-expanded={statusMenu.open}
+      onclick={toggleStatusMenu}
+    >
+      {#if activity.kind === 'rest'}
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 2v6.5M4.5 6l2.5 2.5L9.5 6M2.5 10.5v1h9v-1" />
+        </svg>
+      {:else if activity.kind === 'importing'}
+        <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
+        <span class="ff-gheader__progress" class:ff-gheader__progress--indeterminate={activity.fraction === null} style:width={activity.fraction === null ? undefined : `${activity.fraction * 100}%`}></span>
+      {:else}
+        <StatusDot status={activity.kind === 'result' && !activity.failed ? 'online' : 'warn'} />
+        <span class="ff-gheader__activity-label">{activity.label}</span>
+      {/if}
+    </button>
     {#if showChips}
       {#if analyzing}
         <span class="ff-gheader__chip">
@@ -197,11 +213,11 @@
   {/if}
 </div>
 
-<ContextMenu
-  open={statusMenu.open && !!problems}
+<LibraryActivityMenu
+  open={statusMenu.open}
   x={statusMenu.x}
   y={statusMenu.y}
-  items={statusMenuItems}
+  hasProblems={!!problems}
   onClose={closeStatusMenu}
 />
 
@@ -319,6 +335,40 @@
   .ff-gheader__chip--idle:hover {
     background: var(--ff-hover);
     color: var(--ff-text);
+  }
+  .ff-gheader__activity {
+    position: relative;
+    overflow: hidden;
+    max-width: 280px;
+  }
+  .ff-gheader__activity--rest {
+    justify-content: center;
+    width: 24px;
+    padding: 0;
+  }
+  .ff-gheader__activity-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ff-gheader__progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--ff-text-mid);
+    transition: width var(--ff-motion-fast) var(--ff-easing);
+  }
+  .ff-gheader__progress--indeterminate {
+    width: 30%;
+    animation: ff-gheader-indeterminate 1.1s linear infinite;
+  }
+  @keyframes ff-gheader-indeterminate {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(340%);
+    }
   }
   .ff-gheader__chip--warn {
     color: var(--ff-status-warn);

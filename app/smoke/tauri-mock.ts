@@ -15,6 +15,8 @@ export interface SmokeWindow {
   __smokeHoldExport: boolean;
   __smokeReleaseExport: (() => void) | null;
   __smokeImport: SmokeImport | null;
+  __smokeHoldImport: boolean;
+  __smokeReleaseImport: (() => void) | null;
   __smokeEmit: (event: string, payload: unknown) => void;
 }
 
@@ -38,6 +40,8 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeHoldExport = false;
   w.__smokeReleaseExport = null;
   w.__smokeImport = null;
+  w.__smokeHoldImport = false;
+  w.__smokeReleaseImport = null;
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
 
@@ -125,6 +129,7 @@ export function installTauriMock(initial: LoadedState) {
       case 'plan_import': {
         const next = w.__smokeImport;
         pendingImport = next?.tracks ?? [];
+        if (w.__smokeHoldImport) await new Promise<void>((done) => (w.__smokeReleaseImport = done));
         return {
           token: 1,
           new_count: next ? next.tracks.length : 2,

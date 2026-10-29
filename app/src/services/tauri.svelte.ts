@@ -235,6 +235,18 @@ export async function pickDirectory(): Promise<string | null> {
   }
 }
 
+export async function pickAudioFiles(): Promise<string[]> {
+  if (useBrowserMocks()) {
+    const path = prompt('Enter mock file path:');
+    return path ? [path] : [];
+  }
+  const result = await dialogOpen({
+    multiple: true,
+    filters: [{ name: 'Audio', extensions: ['mp3', 'flac', 'wav', 'aiff', 'aif', 'm4a', 'aac'] }],
+  });
+  return Array.isArray(result) ? result : typeof result === 'string' ? [result] : [];
+}
+
 export async function pickBackupFile(): Promise<string | null> {
   const result = await dialogOpen({ multiple: false, filters: [{ name: 'Library backup', extensions: ['gz'] }] });
   return typeof result === 'string' ? result : Array.isArray(result) ? (result[0] ?? null) : null;
@@ -433,6 +445,15 @@ export interface ImportPlan {
   already_in_library: number;
   duplicates: DuplicateRow[];
   skipped: SkippedFiles;
+}
+
+export interface ImportProgress {
+  done: number;
+  total: number;
+}
+
+export function listenToImportProgress(callback: (progress: ImportProgress) => void) {
+  return subscribe('import-progress', callback);
 }
 
 export interface ImportCommit {
