@@ -152,15 +152,20 @@ struct ImportCommit {
 
 /// Add the planned tracks; with `skip_duplicates` the likely duplicates stay out.
 #[tauri::command]
-fn commit_import(
+async fn commit_import(
     token: u64,
     skip_duplicates: bool,
     state: State<'_, SharedLibrary>,
     plans: State<'_, Arc<ImportPlans>>,
 ) -> Result<ImportCommit, String> {
     let (tracks, skipped_ids) = plans.take(token)?.resolve(skip_duplicates);
-    let lib = state.lock().map_err(|e| e.to_string())?;
-    Ok(ImportCommit { added: add_scanned_tracks(&lib, tracks)?, skipped_ids })
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        Ok(ImportCommit { added: add_scanned_tracks(&lib, tracks)?, skipped_ids })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Analyse a track as fast as possible: it leaves the queue for the now lane (all threads,
