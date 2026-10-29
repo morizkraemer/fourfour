@@ -252,6 +252,16 @@ fn main() -> Result<()> {
     if args.get(1).map(String::as_str) == Some("selftest") {
         return selftest();
     }
+    if args.get(1).map(String::as_str) == Some("durations") {
+        for line in fs::read_to_string(&args[2])?.lines().filter(|l| !l.trim().is_empty()) {
+            let path = Path::new(line);
+            let tag = pioneer_usb_writer::scanner::read_track_metadata(path, 0)?.duration_secs;
+            let mono = decode_mono(path)?;
+            let decoded = mono.samples.len() as f64 / mono.rate as f64;
+            println!("{:+8.1} ms  tag {tag:.3} s  decoded {decoded:.3} s  {}", (decoded - tag) * 1000.0, path.file_name().unwrap().to_string_lossy());
+        }
+        return Ok(());
+    }
     if args.get(1).map(String::as_str) == Some("run") {
         return run(&args[2..]);
     }
