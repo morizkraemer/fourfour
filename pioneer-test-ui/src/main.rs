@@ -769,11 +769,30 @@ async fn get_waveform_detail(
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("Track {track_id} is not in the library"))?
         };
-        waveform_detail::detail_series(&cache_dir, &track.source_path).map(|series| series.to_bytes())
+        waveform_detail::detail_bytes(&cache_dir, &track.source_path)
     })
     .await
     .map_err(|e| e.to_string())??;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Measure a track's high-resolution series into the cache ahead of its zoomed waveform (selection, the next rows),
+/// below the UI's priority like the analysis. Returns nothing: the series is read with `get_waveform_detail`.
+#[tauri::command]
+async fn prefetch_waveform_detail(app: AppHandle, track_id: i64, state: State<'_, SharedLibrary>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    let cache_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("waveform-detail");
+    tauri::async_runtime::spawn_blocking(move || {
+        let track = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            lib.get_track(track_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Track {track_id} is not in the library"))?
+        };
+        analysis_priority::run_below_ui(|| waveform_detail::warm_detail(&cache_dir, &track.source_path))?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// A fine stretch of the zoomed waveform (`WindowSeries::to_bytes`): `columns` columns from `start_s` to `end_s`, decoded
@@ -1332,6 +1351,7 @@ fn main() {
             set_analysis_backend,
             get_analysis_data,
             get_waveform_detail,
+            prefetch_waveform_detail,
             get_waveform_window,
             set_beat_grid,
             set_track_bpm,

@@ -29,7 +29,8 @@
   import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
-  import { pickDirectory, prefetchAnalysisData } from '../services/tauri.svelte.ts';
+  import { pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
+  import { createDetailPrefetcher } from '../services/detail-prefetch.ts';
   import {
     getLayout,
     resolveLayoutKind,
@@ -180,9 +181,12 @@
   let poolSize = $derived(rowWin.poolSize);
   let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
 
+  const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
+
   function prefetchNeighbours(rowIndex) {
     const neighbours = [currentTracks[rowIndex + 1], currentTracks[rowIndex - 1]];
     prefetchAnalysisData(neighbours.filter((t) => t?.analyzed).map((t) => t.id));
+    detailPrefetcher.request([currentTracks[rowIndex], currentTracks[rowIndex + 1], currentTracks[rowIndex + 2]].filter(Boolean).map((t) => t.id));
   }
 
   function handleRowClick(track, event, rowIndex) {

@@ -52,6 +52,18 @@ test('the zoom view waits for the high-resolution series and first draws it exac
   expect(recorded.first === settled, 'the first drawn zoom view is pixel for pixel the settled one').toBe(true);
 });
 
+test('selecting a row warms its high-resolution series and the next two; loading fetches the series at once', async ({ smoke }) => {
+  const { page } = smoke;
+  await page.locator('[data-track-row]').filter({ hasText: TRACK }).first().click();
+  await expect.poll(async () => (await smoke.invokes('prefetch_waveform_detail')).length).toBe(3);
+  const warmed = (await smoke.invokes('prefetch_waveform_detail')).map((args) => args.trackId);
+  expect(new Set(warmed).size).toBe(3);
+
+  await loadByDoubleClick(page, TRACK);
+  await expect.poll(async () => (await smoke.invokes('get_waveform_detail')).length).toBeGreaterThan(0);
+  expect((await smoke.invokes('get_waveform_detail'))[0].trackId).toBe(warmed[0]);
+});
+
 test('without a high-resolution series the zoom view draws the analysis columns', async ({ smoke: { page } }) => {
   await expandPaused(page);
   await expect(page.locator('.ff-xp .waveform-display__zoom')).toHaveAttribute('data-bands', 'columns');

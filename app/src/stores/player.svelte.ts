@@ -476,6 +476,7 @@ export async function loadPlayerTrack(input: any) {
   const base = buildBaseTrack(trackInfo);
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
+  void loadZoomDetail(trackInfo.id);
   player.loading = !cached;
   if (cached) performance.mark('ff:player-ready');
 
