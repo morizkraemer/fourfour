@@ -278,3 +278,4 @@
 2026-10-29 12:10 fb-dupes landed on ov-1028: duplicates dialog before every scan import (metadata match, no fingerprint), Settings → Backup export/restore .tar.gz with safety copy + audio relink; new deps tar+filetime (Waiting 18); 737 vitest, smoke 59/59; Mac check+install started
 2026-10-29 12:45 orchestrator - ov-1028 a1c03f1 (file health + duplicates + backup) installed on Mac; 737 vitest, 0 check errors, cargo ok
 2026-10-29 13:10 orchestrator decided: BPM and key popups stay separate; their format/layout still bad → round popups-2 (3 layouts each); no comment on popups-1
+2026-10-29 13:20 orchestrator - Merlin bug: drag-import overlay takes the whole window, can't drop folders on sidebar/playlists; unclear 'No new audio files found' message → spawn fb-drop (seat, opus)
