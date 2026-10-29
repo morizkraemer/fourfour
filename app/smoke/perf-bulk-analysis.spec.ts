@@ -10,13 +10,19 @@ const FAST_RATE = Number(process.env.FF_PERF_FAST_RATE ?? 6);
 const GRID_RATE = Number(process.env.FF_PERF_GRID_RATE ?? 0.2);
 const WINDOW_MS = Number(process.env.FF_PERF_WINDOW_MS ?? 6000);
 const REPORT = process.env.FF_PERF_OUT;
+const SCENARIO = process.env.FF_PERF_SCENARIO ?? 'list';
+const PLAYER_TRACK = 3;
 
 const test = base.extend<{ page: Page }>({});
 
 const durationOf = (trackId: number) => 180 + ((trackId * 7) % 300);
 
-function freshImportState(): LoadedState {
-  const tracks: TrackInfo[] = fixtureTracks().map((t) => ({ ...t, duration_secs: durationOf(t.id), tempo: 0, key: '', has_analysis: false, has_cues: false }));
+function freshImportState(analysed: number[] = []): LoadedState {
+  const tracks: TrackInfo[] = fixtureTracks().map((t) =>
+    analysed.includes(t.id)
+      ? { ...t, duration_secs: durationOf(t.id), tempo: 12400, key: '8A' }
+      : { ...t, duration_secs: durationOf(t.id), tempo: 0, key: '', has_analysis: false, has_cues: false },
+  );
   return { tracks, playlists: fixturePlaylists() };
 }
 
@@ -172,7 +178,7 @@ async function profiled<T>(page: Page, name: string, run: () => Promise<T>): Pro
     }
   });
   console.log(`profile ${name} inclusive`);
-  for (const [k, v] of [...inclusive.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40)) console.log(`${v.toFixed(0).padStart(7)} ms  ${k}`);
+  for (const [k, v] of [...inclusive.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(process.env.FF_PERF_TOP ?? 40))) console.log(`${v.toFixed(0).padStart(7)} ms  ${k}`);
   await cdp.detach();
   return value;
 }
@@ -230,7 +236,7 @@ async function typingWindow(page: Page, name: string, kind: 'fast' | 'none', rat
 }
 
 test.describe('bulk analysis responsiveness', () => {
-  test.skip(!process.env.FF_PERF_BULK || TRACKS === 0, 'set FF_PERF_BULK=1 FF_PERF_TRACKS=2000 to run');
+  test.skip(!process.env.FF_PERF_BULK || TRACKS === 0 || SCENARIO !== 'list', 'set FF_PERF_BULK=1 FF_PERF_TRACKS=2000 to run');
   test.setTimeout(300_000);
 
   test('measure', async ({ page }) => {
@@ -263,6 +269,114 @@ test.describe('bulk analysis responsiveness', () => {
     await typingWindow(page, 'typing + palette during fast pass', 'fast', FAST_RATE);
 
     console.log(JSON.stringify({ tracks: TRACKS, fastRate: FAST_RATE, gridRate: GRID_RATE, results }, null, 2));
+    if (REPORT) writeFileSync(REPORT, JSON.stringify({ tracks: TRACKS, fastRate: FAST_RATE, gridRate: GRID_RATE, results }, null, 2));
+  });
+});
+
+function installFrameCost() {
+  const w = window as unknown as { __frameCost: Map<number, number> };
+  w.__frameCost = new Map();
+  const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (cb: FrameRequestCallback) =>
+    raf((ts) => {
+      const t0 = performance.now();
+      try {
+        cb(ts);
+      } finally {
+        w.__frameCost.set(ts, (w.__frameCost.get(ts) ?? 0) + performance.now() - t0);
+      }
+    });
+}
+
+function watchWaveform(page: Page, ms: number) {
+  return page.evaluate(
+    (ms) =>
+      new Promise<{ deltas: number[]; costs: number[] }>((resolve) => {
+        const w = window as unknown as { __frameCost: Map<number, number> };
+        const deltas: number[] = [];
+        const stamps: number[] = [];
+        const start = performance.now();
+        let last = start;
+        const tick = (ts: number) => {
+          const t = performance.now();
+          deltas.push(t - last);
+          stamps.push(ts);
+          last = t;
+          if (t - start < ms) requestAnimationFrame(tick);
+          else resolve({ deltas: deltas.slice(1), costs: stamps.slice(1).map((s) => w.__frameCost.get(s) ?? 0) });
+        };
+        requestAnimationFrame(tick);
+      }),
+    ms,
+  );
+}
+
+async function playerWindow(page: Page, name: string, kind: 'fast' | 'grid' | 'none', rate: number) {
+  const before = await counters(page);
+  await page.evaluate(() => (window as unknown as { __frameCost: Map<number, number> }).__frameCost.clear());
+  await startEvents(page, kind, rate, TRACKS);
+  const [{ deltas, costs }, busy] = await busyDuring(page, () => profiled(page, name, () => watchWaveform(page, WINDOW_MS)));
+  await startEvents(page, 'none', 0, TRACKS);
+  results[name] = {
+    ...frameStats(deltas),
+    frameP99: round(pct(deltas, 99)),
+    rafCostP50: round(pct(costs, 50)),
+    rafCostP95: round(pct(costs, 95)),
+    rafCostMax: round(Math.max(...costs)),
+    ...busy,
+    ...(await windowStats(page, before.now, before.emitted, before.fetches)),
+  };
+}
+
+test.describe('player waveform during bulk analysis', () => {
+  test.skip(!process.env.FF_PERF_BULK || TRACKS === 0 || SCENARIO !== 'player', 'set FF_PERF_BULK=1 FF_PERF_SCENARIO=player FF_PERF_TRACKS=10000 to run');
+  test.setTimeout(300_000);
+
+  test('measure', async ({ page }) => {
+    await page.exposeFunction('__smokeAnalysis', (trackId: number) => mockAnalysisData(trackId, durationOf(trackId), 12400, '8A'));
+    await page.addInitScript(installTauriMock, freshImportState([PLAYER_TRACK]));
+    await page.addInitScript(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+    await page.addInitScript(installFrameCost);
+    await page.goto('/');
+    await page.locator('[data-track-row]').first().waitFor();
+    await page.waitForTimeout(1500);
+    await installBench(page);
+
+    const title = `Smoke Track ${String(PLAYER_TRACK).padStart(2, '0')}`;
+    await page.locator('.ff-gheader__search input').fill(title);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ff-cp')).toHaveCount(0);
+    await page.locator('[data-track-row]').filter({ hasText: title }).first().dblclick();
+    await expect(page.locator('.ff-player-compact__meta-title')).toHaveText(title);
+    await page.locator('.ff-gheader__search input').fill('');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ff-cp')).toHaveCount(0);
+    await expect(page.locator('.ff-gheader__count')).toHaveText(TRACKS.toLocaleString('en-US'));
+    await page.locator('.ff-player-compact__expand-btn').click();
+    await expect(page.locator('.ff-xp .waveform-display__zoom')).toHaveAttribute('data-bands', /detail|columns/);
+    if ((await page.locator('.ff-xp__play').getAttribute('aria-label')) === 'Play') await page.locator('.ff-xp__play').click();
+    await expect(page.locator('.ff-xp__play')).toHaveAttribute('aria-label', 'Pause');
+    await page.waitForTimeout(1000);
+    results.zoomSource = { detail: (await page.locator('.ff-xp .waveform-display__zoom').getAttribute('data-bands')) === 'detail' ? 1 : 0 };
+
+    await watchWaveform(page, 2000);
+    await playerWindow(page, 'player, no analysis', 'none', 0);
+
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type('Analyze all unanalyzed');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.ff-cp')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(1000);
+    await expect(page.locator('.ff-xp__play')).toHaveAttribute('aria-label', 'Pause');
+
+    await playerWindow(page, 'player, analysing, no events', 'none', 0);
+    await playerWindow(page, 'player during fast pass', 'fast', FAST_RATE);
+    await playerWindow(page, 'player, analysing, no events (2)', 'none', 0);
+    await playerWindow(page, 'player during fast pass (2)', 'fast', FAST_RATE);
+    await playerWindow(page, 'player during grid pass', 'grid', GRID_RATE);
+
+    console.log(JSON.stringify({ tracks: TRACKS, fastRate: FAST_RATE, results }, null, 2));
     if (REPORT) writeFileSync(REPORT, JSON.stringify({ tracks: TRACKS, fastRate: FAST_RATE, gridRate: GRID_RATE, results }, null, 2));
   });
 });

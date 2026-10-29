@@ -363,7 +363,7 @@ export function drawBandRange(ctx, bands, { startFrac, endFrac, widthPx, heightP
   const paint = (g, shaped, at) => (zoomLook
     ? paintZoom(g, shaped, { look: zoomLook, heightPx, palette, msPerPx, dpr, ...at })
     : paintBands(g, shaped, { heightPx, palette, ...at }));
-  if (columnsPerPx <= 1 && canCacheScroll(ctx)) {
+  if (decayPerPixel === 0 && canCacheScroll(ctx)) {
     drawScrolledColumns(ctx, bands, { startFrac, fracPerPx, widthPx, heightPx, peakWeights, paint, ground, key: `${zoomLook}|${palette.version}|${palette.bg}|${ground}` });
     return;
   }
@@ -397,8 +397,9 @@ function newLayer(widthPx, heightPx) {
 }
 
 /**
- * Scrolled view at one pixel per column or finer: every pixel column depends only on its absolute pixel index (no
- * smoothing across columns), so a scroll by d pixels paints only the d columns that came into view. The columns live
+ * Scrolled view without an envelope decay (one pixel per column or finer, or the high-resolution series at any zoom):
+ * every pixel column depends only on its absolute pixel index (no smoothing across columns), so a scroll by d pixels
+ * paints only the d columns that came into view. The columns live
  * in a ring: absolute pixel column c sits at layer x = c mod width, so a scroll overwrites the columns that left the view
  * and nothing is copied; the layer is blitted to the view in two slices at the wrap point. The bands of the whole view are
  * painted again whenever the data, zoom, size or palette change or the view jumped by more than its width.
