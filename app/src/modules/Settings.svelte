@@ -1,6 +1,6 @@
 <!--
   Settings.svelte — Preferences sheet over the library: a page list by object
-  (Library, Analysis, Audio, Keyboard, Advanced) and one short page at a time.
+  (Library, Backup, Analysis, Audio, Keyboard, Advanced) and one short page at a time.
   Opened from the footer status bar gear, ⌘, or the command palette.
 -->
 <script>
@@ -15,6 +15,10 @@
   import { getIsTauri } from '../services/tauri.svelte.ts';
   import RekordboxImport from './RekordboxImport.svelte';
   import LibraryPage from './settings/LibraryPage.svelte';
+  import BackupPage from './settings/BackupPage.svelte';
+  import RestoreBackupDialog from './RestoreBackupDialog.svelte';
+  import { backup } from '../stores/backup.svelte.ts';
+  import { lastBackupShort } from '../lib/backup.ts';
   import AnalysisPage from './settings/AnalysisPage.svelte';
   import AudioPage from './settings/AudioPage.svelte';
   import ShortcutsSettings from './ShortcutsSettings.svelte';
@@ -32,6 +36,8 @@
     switch (key) {
       case 'library':
         return `${library.trackCount} tracks · ${library.playlists.filter((p) => !p.is_folder).length} playlists`;
+      case 'backup':
+        return backup.status ? lastBackupShort(backup.status.last) : '';
       case 'analysis':
         if (library.analyzing) {
           return `Running · ${library.analysisProgress.current} / ${library.analysisProgress.total}`;
@@ -61,6 +67,8 @@
 >
   {#if activeKey === 'library'}
     <LibraryPage />
+  {:else if activeKey === 'backup'}
+    <BackupPage />
   {:else if activeKey === 'analysis'}
     <AnalysisPage />
   {:else if activeKey === 'audio'}
@@ -73,3 +81,4 @@
 </SettingsSheet>
 
 <RekordboxImport />
+<RestoreBackupDialog />

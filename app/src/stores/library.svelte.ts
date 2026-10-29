@@ -9,8 +9,8 @@ import {
   loadState as tauriLoadState,
   resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
-  scanDirectory as tauriScanDirectory,
-  scanFiles as tauriScanFiles,
+  planImport,
+  commitImport,
   removeTracks as tauriRemoveTracks,
   setTestCues as tauriSetTestCues,
   analyzeTracks as tauriAnalyzeTracks,
@@ -56,6 +56,8 @@ import {
   uniqueName,
 } from '../lib/playlistTree.ts';
 import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
+import { importSummary, importWithDuplicateCheck } from '../lib/importDuplicates.ts';
+import { askAboutDuplicates } from './import-duplicates.svelte.ts';
 import { outermostIds } from '../lib/playlistSelection.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
 import { fileStateOf } from './file-status.svelte.ts';
@@ -888,33 +890,24 @@ export async function confirmAnalysisPrompt() {
   if (ids.length > 0) await analyzeTrackIds(ids);
 }
 
+function scanAndAdd(paths: string[]) {
+  return importWithDuplicateCheck(paths, { plan: planImport, ask: askAboutDuplicates, commit: commitImport });
+}
+
 /** Scan directory for new tracks */
-export async function importDirectory(path: string, options?: ImportOptions) {
-  try {
-    library.statusMessage = 'Importing…';
-    const newTracks = await tauriScanDirectory(path);
-    await finishImport(newTracks, options);
-    library.tauriError = lastTauriError;
-    if (newTracks.length > 0) {
-      library.statusMessage = `Imported ${newTracks.length} track${newTracks.length === 1 ? '' : 's'}`;
-    }
-  } catch (err) {
-    library.statusMessage = importErrorMessage(err);
-    library.tauriError = lastTauriError;
-    console.error('importDirectory failed:', err);
-  }
+export function importDirectory(path: string, options?: ImportOptions) {
+  return importFiles([path], options);
 }
 
 /** Scan dropped files/folders */
 export async function importFiles(paths: string[], options?: ImportOptions) {
   try {
     library.statusMessage = 'Importing…';
-    const newTracks = await tauriScanFiles(paths);
-    await finishImport(newTracks, options);
+    const { added, skipped_ids } = await scanAndAdd(paths);
+    await finishImport(added, options);
     library.tauriError = lastTauriError;
-    if (newTracks.length > 0) {
-      library.statusMessage = `Imported ${newTracks.length} track${newTracks.length === 1 ? '' : 's'}`;
-    }
+    const summary = importSummary(added.length, skipped_ids.length);
+    if (summary) library.statusMessage = summary;
   } catch (err) {
     library.statusMessage = importErrorMessage(err);
     library.tauriError = lastTauriError;
@@ -922,18 +915,18 @@ export async function importFiles(paths: string[], options?: ImportOptions) {
   }
 }
 
-/** Scans dropped files/folders and returns the ids of every library track they hold, including ones imported earlier. */
+/** Scans dropped files/folders and returns the ids of every library track they hold, including ones imported earlier and skipped duplicates. */
 export async function importFilesForPlaylist(paths: string[]): Promise<number[]> {
   try {
     library.statusMessage = 'Importing…';
-    const newTracks = await tauriScanFiles(paths);
+    const { added, skipped_ids } = await scanAndAdd(paths);
     await loadState();
     library.tauriError = lastTauriError;
-    if (newTracks.length > 0) {
-      library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
+    if (added.length > 0) {
+      library.pendingAnalyzeTrackIds = added.map((t) => t.id);
       library.showAnalysisPrompt = true;
     }
-    const ids = trackIdsUnderPaths(library.tracks, paths);
+    const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...skipped_ids])];
     library.statusMessage =
       ids.length === 0 ? 'No audio files found in the dropped items.' : `Found ${ids.length} track${ids.length === 1 ? '' : 's'}`;
     return ids;

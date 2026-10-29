@@ -527,3 +527,8 @@ fn select_playlist_track_ids(conn: &Connection, playlist_id: i64) -> Result<Vec<
     let rows = stmt.query_map([playlist_id], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
+
+pub fn count_tracks(conn: &Connection) -> Result<usize> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
+    Ok(count as usize)
+}

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
+import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
@@ -235,6 +235,75 @@ export async function pickDirectory(): Promise<string | null> {
   }
 }
 
+export async function pickBackupFile(): Promise<string | null> {
+  const result = await dialogOpen({ multiple: false, filters: [{ name: 'Library backup', extensions: ['gz'] }] });
+  return typeof result === 'string' ? result : Array.isArray(result) ? (result[0] ?? null) : null;
+}
+
+export async function pickBackupDestination(defaultPath: string): Promise<string | null> {
+  return (await dialogSave({ defaultPath, filters: [{ name: 'Library backup', extensions: ['gz'] }] })) ?? null;
+}
+
+export interface BackupSizes {
+  library_bytes: number;
+  audio_bytes: number;
+  audio_files: number;
+}
+
+export interface LastBackup {
+  path: string;
+  at_ms: number;
+  bytes: number;
+  includes_audio: boolean;
+}
+
+export interface BackupStatus {
+  sizes: BackupSizes;
+  last: LastBackup | null;
+}
+
+export interface BackupPreview {
+  path: string;
+  created_at: string;
+  track_count: number;
+  playlist_count: number;
+  includes_audio: boolean;
+  audio_files: number;
+  current_tracks: number;
+}
+
+export interface RestoreOutcome {
+  ui_settings: string | null;
+  safety_path: string;
+  relinked: number;
+}
+
+export interface BackupProgress {
+  phase: 'export' | 'restore';
+  done: number;
+  total: number;
+}
+
+export function getBackupStatus(): Promise<BackupStatus> {
+  return invoke<BackupStatus>('get_backup_status');
+}
+
+export function exportBackup(path: string, includeAudio: boolean, uiSettings: string): Promise<LastBackup> {
+  return invoke<LastBackup>('export_backup', { path, includeAudio, uiSettings });
+}
+
+export function readBackup(path: string): Promise<BackupPreview> {
+  return invoke<BackupPreview>('read_backup', { path });
+}
+
+export function restoreBackup(path: string, audioFolder: string | null): Promise<RestoreOutcome> {
+  return invoke<RestoreOutcome>('restore_backup', { path, audioFolder });
+}
+
+export function listenToBackupProgress(callback: (progress: BackupProgress) => void) {
+  return subscribe('backup-progress', callback);
+}
+
 export async function changeLibraryPath(folderPath: string): Promise<string> {
   try {
     return await invoke<string>('change_library_path', { folderPath });
@@ -340,57 +409,73 @@ export async function saveState(playlists: PlaylistInput[]): Promise<void> {
   }
 }
 
-export async function scanDirectory(path: string): Promise<TrackInfo[]> {
+export type DuplicateReason = 'same_file' | 'same_tags' | 'same_path';
+
+export interface DuplicateRow {
+  new_path: string;
+  file_name: string;
+  existing_id: number;
+  title: string;
+  artist: string;
+  duration_secs: number;
+  reason: DuplicateReason;
+}
+
+export interface ImportPlan {
+  token: number;
+  new_count: number;
+  already_in_library: number;
+  duplicates: DuplicateRow[];
+}
+
+export interface ImportCommit {
+  added: TrackInfo[];
+  skipped_ids: number[];
+}
+
+let mockPendingImport: TrackInfo[] = [];
+
+function mockScannedTrack(path: string, i: number): TrackInfo {
+  return {
+    id: Date.now() + i,
+    source_path: path,
+    title: path.split('/').pop() || 'Dropped Track',
+    artist: 'Dropped Artist',
+    album: 'Dropped Album',
+    genre: 'House',
+    tempo: 12000,
+    key: '8A',
+    duration_secs: 300,
+    bitrate: 320,
+    file_size: 12000000,
+    has_artwork: false,
+    has_cues: false,
+  };
+}
+
+export async function planImport(paths: string[]): Promise<ImportPlan> {
   try {
-    return await invoke<TrackInfo[]>('scan_directory', { path });
+    return await invoke<ImportPlan>('plan_import', { paths });
   } catch (err) {
-    lastTauriError = `scan_directory fail: ${String(err)}`;
+    lastTauriError = `plan_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
-      const newTrack: TrackInfo = {
-        id: Date.now(),
-        source_path: path + '/NewTrack.mp3',
-        title: 'Scanned Track ' + (mockTracks.length + 1),
-        artist: 'Unknown Artist',
-        album: 'Scanned Album',
-        genre: 'Techno',
-        tempo: 12500,
-        key: '1A',
-        duration_secs: 360,
-        bitrate: 320,
-        file_size: 14400000,
-        has_artwork: false,
-        has_cues: false,
-      };
-      mockTracks.push(newTrack);
-      return [newTrack];
+      mockPendingImport = paths.map(mockScannedTrack);
+      return { token: 0, new_count: mockPendingImport.length, already_in_library: 0, duplicates: [] };
     }
     throw err;
   }
 }
 
-export async function scanFiles(paths: string[]): Promise<TrackInfo[]> {
+export async function commitImport(token: number, skipDuplicates: boolean): Promise<ImportCommit> {
   try {
-    return await invoke<TrackInfo[]>('scan_files', { paths });
+    return await invoke<ImportCommit>('commit_import', { token, skipDuplicates });
   } catch (err) {
-    lastTauriError = `scan_files fail: ${String(err)}`;
+    lastTauriError = `commit_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
-      const newTracks = paths.map((p, i) => ({
-        id: Date.now() + i,
-        source_path: p,
-        title: p.split('/').pop() || 'Dropped Track',
-        artist: 'Dropped Artist',
-        album: 'Dropped Album',
-        genre: 'House',
-        tempo: 12000,
-        key: '8A',
-        duration_secs: 300,
-        bitrate: 320,
-        file_size: 12000000,
-        has_artwork: false,
-        has_cues: false,
-      }));
-      mockTracks.push(...newTracks);
-      return newTracks;
+      const added = mockPendingImport;
+      mockPendingImport = [];
+      mockTracks.push(...added);
+      return { added, skipped_ids: [] };
     }
     throw err;
   }

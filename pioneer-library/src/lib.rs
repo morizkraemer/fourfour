@@ -8,6 +8,8 @@
 //! files on disk alongside the database. The SQLite `analyses` table keeps only
 //! a lightweight index (bpm + key) for fast queries.
 
+pub mod backup;
+mod duplicates;
 mod edits;
 mod file_health;
 mod multi_sync;
@@ -30,6 +32,7 @@ use pioneer_usb_writer::models::{
 };
 use pioneer_usb_writer::{reader, writer};
 
+pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 use rekordbox::ImportedCue;
@@ -192,6 +195,10 @@ impl LocalLibrary {
     /// Check whether a source path is already in the library.
     pub fn track_exists_by_path(&self, source_path: &Path) -> Result<bool> {
         queries::track_exists_by_path(&self.conn, source_path)
+    }
+
+    pub fn duplicate_index(&self) -> Result<DuplicateIndex> {
+        Ok(DuplicateIndex::new(&self.get_all_tracks()?))
     }
 
     /// Every track's audio path and stored size, for the file health check.
@@ -957,7 +964,7 @@ mod tests {
         }
     }
 
-    fn make_analysis() -> AnalysisResult {
+    pub(crate) fn make_analysis() -> AnalysisResult {
         AnalysisResult {
             beat_grid: BeatGrid {
                 beats: vec![

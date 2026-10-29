@@ -11,6 +11,9 @@ export interface SmokeWindow {
   __smokeUnreadable: number[];
   __smokeNotFound: number[];
   __smokePickPath: string | null;
+  __smokeDuplicates: unknown[];
+  __smokeHoldExport: boolean;
+  __smokeReleaseExport: (() => void) | null;
 }
 
 export function installTauriMock(initial: LoadedState) {
@@ -23,6 +26,10 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeUnreadable = [];
   w.__smokeNotFound = [];
   w.__smokePickPath = '/Music/moved';
+  w.__smokeDuplicates = [];
+  w.__smokeHoldExport = false;
+  w.__smokeReleaseExport = null;
+  let lastBackup: unknown = null;
   const relocated = new Set<number>();
 
   let nextCallbackId = 1;
@@ -103,6 +110,34 @@ export function installTauriMock(initial: LoadedState) {
       }
       case 'locate_track_file':
         return { relinked: { track_id: args.trackId, source_path: args.path }, health: (relink([args.trackId], ''), health()) };
+      case 'plan_import':
+        return { token: 1, new_count: 2, already_in_library: 0, duplicates: w.__smokeDuplicates };
+      case 'commit_import':
+        return { added: [], skipped_ids: args.skipDuplicates ? (w.__smokeDuplicates as { existing_id: number }[]).map((d) => d.existing_id) : [] };
+      case 'get_backup_status':
+        return { sizes: { library_bytes: 38_000_000, audio_bytes: 61_000_000_000, audio_files: initial.tracks.length }, last: lastBackup };
+      case 'export_backup': {
+        emit('backup-progress', { phase: 'export', done: 27_450_000_000, total: 61_038_000_000 });
+        if (w.__smokeHoldExport) await new Promise<void>((done) => (w.__smokeReleaseExport = done));
+        lastBackup = { path: args.path, at_ms: Date.now(), bytes: 38_000_000, includes_audio: args.includeAudio };
+        return lastBackup;
+      }
+      case 'read_backup':
+        if (!String(args.path).endsWith('.tar.gz')) throw 'This file is not a library backup';
+        return {
+          path: args.path,
+          created_at: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+          track_count: 176,
+          playlist_count: 4,
+          includes_audio: false,
+          audio_files: 0,
+          current_tracks: initial.tracks.length,
+        };
+      case 'restore_backup':
+        sessionStorage.setItem('smoke.restore', JSON.stringify(args));
+        return { ui_settings: JSON.stringify({ 'fourfour.quantize.v1': '1' }), safety_path: '/smoke/Backups/before-restore.tar.gz', relinked: 0 };
+      case 'plugin:dialog|save':
+        return `/Backups/${args.options?.defaultPath ?? 'backup.tar.gz'}`;
       case 'plugin:dialog|open':
         return w.__smokePickPath;
       case 'load_state':
@@ -207,6 +242,7 @@ export function installTauriMock(initial: LoadedState) {
     }
   }
 
+  w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
   w.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
     transformCallback(callback: (message: unknown) => void, once = false) {
