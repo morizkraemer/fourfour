@@ -258,3 +258,4 @@
 2026-10-29 04:20 fb-icons icon round 6 published on the icons canvas (12 icons, groove-as-trace, Konsole Groove as inspiration only)
 2026-10-29 05:10 fb-player landed on ov-1028 5cb96c3: empty player greyed, Q quantize (cue set/drag/CUE snap, Alt free), cue drag on big waveform, bar flags fixed side, waveform per-frame work 5.4→1.9 MP (p95 3.4→1.3 ms), MT/Q states, inspector Alt ×; 716 vitest, smoke 20/20; Mac check+install started. spawn fb-chrome search collapse + track count (seat, sonnet)
 2026-10-29 05:30 orchestrator - ov-1028 5cb96c3 (with fb-player) installed on Mac with bundled weights; 716 vitest, 0 check errors
+2026-10-29 05:55 fb-chrome landed on ov-1028: search never shrinks at wide windows, collapses to icon <720 px, moves to left sidebar <440 px; track count plain text; 719 vitest, smoke 35/35; Mac check+install started
