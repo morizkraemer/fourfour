@@ -52,6 +52,7 @@ mod linux {
     pub const PRIO_PROCESS: i32 = 0;
     unsafe extern "C" {
         pub fn setpriority(which: i32, who: u32, prio: i32) -> i32;
+        #[cfg(test)]
         pub fn getpriority(which: i32, who: u32) -> i32;
         pub fn gettid() -> i32;
     }
