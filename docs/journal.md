@@ -272,3 +272,4 @@
 2026-10-29 09:20 fb-strip player-edit-4 (3 edit-strip field layouts, rec A 'under its value') on viewport :5240; player-edit-3 archived; fb-mockups 386516c
 2026-10-29 09:45 orchestrator decided: duplicates-simple approved, without the visible scrollbar; edit strip rejected ('needs to be simpler and in the existing strip') → round player-edit-5: inline edit within the existing header strip
 2026-10-29 10:10 fb-strip player-edit-5 (3 in-header BPM/key edit options, rec B pencil menu) + duplicates-simple without scrollbar on :5240; player-edit-4 archived; fb-mockups 3819f32
+2026-10-29 10:30 orchestrator decided: BPM/key edit = player-edit-5 option B (pencil menu); popup layout/design disliked → round popups-1: one popup design for BPM menu, key picker, top-bar status popover

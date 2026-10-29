@@ -20,4 +20,4 @@ All new UI fits the existing app and is consistent across every popup, modal, di
 
 ## Open
 
-- Big player BPM/key edit: no separate strip. Must be simpler and live inside the existing header strip → round player-edit-5.
+- Big player BPM/key edit: decided option B (pencil opens a menu: typed BPM, ÷2 ×2 Tap, Reset; key pencil opens key picker). Popup layout/design not liked yet → round popups-1 sets one popup design for the whole app.
