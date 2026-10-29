@@ -299,3 +299,4 @@
 2026-10-29 21:20 orchestrator - Merlin: UI lags a lot during bulk analysis → spawn fb-bulk (seat, opus): measure, batch events/per-row reactivity/thread priority+count, keep throughput
 2026-10-29 21:25 orchestrator - Q50 queued (Merlin): speed fleet for next overnight run — startup, track load, import, analysis, UI responsiveness; perf suite + before/after
 2026-10-29 21:30 orchestrator - grid fix (ov-1028) installed on Mac after the data reset; checks green
+2026-10-29 21:40 orchestrator decided (Merlin): overnight conditions for Q50 — no API runs (seat only), visible Mac app runs OK only after 00:00 WITA, Mac plugged in at bedtime
