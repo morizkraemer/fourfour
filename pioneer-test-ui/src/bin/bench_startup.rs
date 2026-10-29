@@ -539,6 +539,84 @@ fn track_audio(list: &Path, work: &Path) {
     );
 }
 
+/// Per file, back to back: the single-threaded decode and the meter on their own, the one-thread detail measurement
+/// (decode then meter, as before Q50) against `measure_detail`, and whether the parallel decode and the detail bytes are
+/// bit-identical to the single-threaded ones.
+fn detail_profile(list: &Path) {
+    use pioneer_usb_writer::waveform::DetailMeter;
+    let serial_detail = |f: &Path| {
+        let mut meter: Option<DetailMeter> = None;
+        band_analysis::decode_blocks(f, |rate, channels, samples| {
+            meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(samples);
+        })
+        .unwrap();
+        meter.unwrap().finish().to_bytes()
+    };
+    let files = read_list(list);
+    let (mut decode, mut meter, mut serial, mut parallel) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut mismatches = Vec::new();
+    for f in &files {
+        let t = Instant::now();
+        let mut audio: Vec<f32> = Vec::new();
+        let mut spec = (0u32, 0usize);
+        if let Err(e) = band_analysis::decode_blocks(f, |rate, channels, samples| {
+            spec = (rate, channels);
+            audio.extend_from_slice(samples);
+        }) {
+            eprintln!("skip {}: {e}", f.display());
+            continue;
+        }
+        decode.push(ms(t));
+        let t = Instant::now();
+        let mut m = DetailMeter::new(spec.0, spec.1);
+        m.push(&audio);
+        std::hint::black_box(m.finish());
+        meter.push(ms(t));
+
+        let mut threaded: Vec<f32> = Vec::with_capacity(audio.len());
+        band_analysis::decode_blocks_parallel(f, band_analysis::decode_threads(), |_, _, samples| {
+            threaded.extend_from_slice(samples)
+        })
+        .unwrap();
+        let same_audio = threaded.len() == audio.len() && threaded.iter().zip(&audio).all(|(a, b)| a.to_bits() == b.to_bits());
+
+        let t = Instant::now();
+        let old = serial_detail(f);
+        serial.push(ms(t));
+        let t = Instant::now();
+        let new = band_analysis::measure_detail(f).unwrap().to_bytes();
+        parallel.push(ms(t));
+        if !same_audio || old != new {
+            mismatches.push(format!("{} (audio {} vs {} samples, same {same_audio})", f.display(), threaded.len(), audio.len()));
+        }
+    }
+    let measured = decode.len();
+    let (d, _) = median_and_p95(decode);
+    let (m, _) = median_and_p95(meter);
+    let (s, sp) = median_and_p95(serial);
+    let (p, pp) = median_and_p95(parallel);
+    for m in &mismatches {
+        println!("MISMATCH {m}");
+    }
+    println!(
+        "files={} threads={} decode_ms={d:.0} meter_ms={m:.0} detail_one_thread_ms={s:.0}/{sp:.0} measure_detail_ms={p:.0}/{pp:.0} identical={}/{} (median/p95)",
+        measured,
+        band_analysis::decode_threads(),
+        measured - mismatches.len(),
+        measured
+    );
+    perf(
+        "waveform_detail_profile",
+        serde_json::json!({
+            "files": measured, "threads": band_analysis::decode_threads(),
+            "decode_ms_median": d, "meter_ms_median": m,
+            "detail_one_thread_ms_median": s, "detail_one_thread_ms_p95": sp,
+            "measure_detail_ms_median": p, "measure_detail_ms_p95": pp,
+            "identical": measured - mismatches.len(),
+        }),
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -549,6 +627,7 @@ fn main() {
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("bands") => bands(&args[2..]),
         Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
+        Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
         _ => eprintln!(
             "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"

@@ -45,6 +45,28 @@ describe('createDetailPrefetcher', () => {
     expect(calls).toEqual([1, 5]);
   });
 
+  it('warms a pressed row at once, ahead of the waiting ones, and only once', async () => {
+    const { calls, finish, warm } = deferredWarm();
+    const prefetcher = createDetailPrefetcher(warm, 150);
+    prefetcher.now(7);
+    expect(calls).toEqual([7]);
+    prefetcher.now(7);
+    prefetcher.request([7, 8]);
+    await vi.advanceTimersByTimeAsync(150);
+    prefetcher.now(9);
+    expect(calls).toEqual([7]);
+    finish[0]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual([7, 9]);
+    finish[1]();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toEqual([7, 9, 8]);
+    finish[2]();
+    await vi.advanceTimersByTimeAsync(0);
+    prefetcher.now(7);
+    expect(calls).toEqual([7, 9, 8]);
+  });
+
   it('goes on with the next track when one fails', async () => {
     const calls: number[] = [];
     const prefetcher = createDetailPrefetcher(async (id) => {
