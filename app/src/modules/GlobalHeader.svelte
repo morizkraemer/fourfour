@@ -5,7 +5,7 @@
   a leading `>` switches the dropdown to commands only and leaves the list alone.
   Layout follows main-window option A: context title, search, status chips.
   The centre column width picks the search form: field (>= 720 px), an icon in this bar (>= 440 px),
-  or an icon in the left sidebar's top-right corner. Either icon opens the full field over the bar.
+  or an icon in the left sidebar's top-right corner. Either icon opens the palette as a centred modal over the window.
   While the organize sidebar is open the chips are dropped (the status bar
   already carries analysis and sync progress) so the narrower bar stays calm.
 -->
@@ -28,7 +28,6 @@
   let filteredCount = $derived(filterTracks(activeTracks, ui.listFilter).length);
   let contextLabel = $derived(sidebarSourceLabel(ui.activeSidebarRow));
   let searchCollapsed = $derived(ui.searchMode !== 'field');
-  let searchRaised = $derived(ui.paletteOpen || ui.searchText.trim() !== '');
   let showChips = $derived(!ui.organize.expanded);
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
   let idleStatus = $derived(
@@ -68,7 +67,7 @@
 
   $effect(() => {
     if (!filterInputEl) return;
-    if (ui.paletteOpen) {
+    if (ui.paletteOpen && !searchCollapsed) {
       if (document.activeElement !== filterInputEl) {
         returnFocusEl = document.activeElement;
         filterInputEl.focus();
@@ -113,7 +112,7 @@
     <b class="ff-gheader__title">{contextLabel}</b>
     <span class="ff-gheader__count">{activeTracks.length.toLocaleString()}</span>
   </div>
-  <div class="ff-gheader__searchslot" class:ff-gheader__searchslot--cover={searchCollapsed} class:ff-gheader__searchslot--raised={searchCollapsed && searchRaised}>
+  <div class="ff-gheader__searchslot" class:ff-gheader__searchslot--cover={searchCollapsed}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
     <div class="ff-gheader__search" class:ff-gheader__search--open={ui.paletteOpen} bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
       <FilterInput
@@ -204,10 +203,6 @@
     background: var(--ff-bg);
     visibility: hidden;
     pointer-events: none;
-  }
-  .ff-gheader__searchslot--raised {
-    visibility: visible;
-    pointer-events: auto;
   }
   .ff-gheader__search {
     display: flex;

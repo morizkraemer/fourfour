@@ -7,7 +7,7 @@
 <script>
   import { tick } from 'svelte';
   import { CommandPalette } from '$ds';
-  import { ui, closePalette } from '../stores/ui.svelte.ts';
+  import { ui, closePalette, setSearchText } from '../stores/ui.svelte.ts';
   import { library, filterTracks } from '../stores/library.svelte.ts';
   import { loadAppSettings } from '../stores/app-settings.svelte.ts';
   import { buildSettingSources } from '../stores/settings-rows.ts';
@@ -18,6 +18,7 @@
   import { buildPaletteGroups, isCommandQuery } from '../shortcuts/palette-model.ts';
 
 
+  let modal = $derived(ui.searchMode !== 'field');
   let anchorRect = $state(null);
   let keySource = $derived(ui.searchAnchor?.querySelector('input') ?? null);
 
@@ -40,7 +41,7 @@
   });
 
   $effect(() => {
-    if (!ui.paletteOpen) return;
+    if (!ui.paletteOpen || modal) return;
     function onOutsidePointerDown(e) {
       if (ui.searchAnchor?.contains(e.target) || e.target.closest?.('.ff-cp--anchored')) return;
       closePalette();
@@ -105,9 +106,10 @@
 </script>
 
 <CommandPalette
-  anchored
+  anchored={!modal}
   open={ui.paletteOpen}
-  query={ui.searchText}
+  bind:query={() => ui.searchText, setSearchText}
+  placeholder="Search tracks and commands"
   {anchorRect}
   {keySource}
   groups={model}
@@ -115,3 +117,9 @@
   onChoose={(item, value) => model.flatMap((g) => g.items).find((e) => e.id === item.id)?.choose?.(value)}
   onClose={closePalette}
 />
+
+<style>
+  :global(.ff-cp-overlay .ff-cp) {
+    max-width: min(640px, 100%);
+  }
+</style>
