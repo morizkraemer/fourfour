@@ -74,7 +74,7 @@ const peakLoadInflight = new Map<number, Promise<void>>();
 export function bumpLibraryTracks(changedIds?: Iterable<number>) {
   if (changedIds && haystackById) refreshHaystacks(changedIds);
   else resetSearchIndex();
-  library.tracks = [...library.tracks];
+  trackList = trackList.slice();
   scheduleSearchIndexWarmup();
 }
 
@@ -221,8 +221,26 @@ export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
 let recentlyAddedCount = 0;
 let analyzingIds = $state.raw<number[]>([]);
 
+function reactiveTrack<T extends object>(track: T): T {
+  const row = $state(track);
+  return row;
+}
+
+/**
+ * The track list itself is raw state: replacing it is one signal, and swapping it after a change copies an array of
+ * pointers instead of reading 10k elements through a reactive array proxy. Each track is its own reactive proxy, so a
+ * row still follows its fields.
+ */
+let trackList = $state.raw<any[]>([]);
+
 export const library = $state({
-  tracks: [] as any[],
+  /** Replaced, never mutated in place; `bumpLibraryTracks()` after changing a track's fields. */
+  get tracks(): any[] {
+    return trackList;
+  },
+  set tracks(tracks: any[]) {
+    trackList = tracks.map(reactiveTrack);
+  },
   playlists: [] as PlaylistInput[],
   volumes: [] as string[],
   

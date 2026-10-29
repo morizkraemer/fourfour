@@ -524,3 +524,38 @@ FF_SMOKE_PORT=5371 FF_PERF_BULK=1 FF_PERF_SCENARIO=player FF_PERF_TRACKS=10000 F
 # before: set the condition in drawBandRange back to `columnsPerPx <= 1`
 npx vitest run src/services/waveform-scroll-identity.test.ts
 ```
+
+# Library batch cost during bulk analysis (2026-10-29, fb-scroll2)
+
+Follow-up to fb-scroll: each analysis batch (every 250 ms while events arrive) was one 10-25 ms task at 10k tracks, the hitch left in the player and list. Branch `fb-scroll2` (from `ov-1028`).
+
+## Cause
+
+`library.tracks` was a deep `$state` array. `bumpLibraryTracks` swapped it with `[...library.tracks]`, which reads all 10k elements through the array proxy's `get` trap, and the assignment wrapped the new array in a new proxy, so every derived that read the list (filter, sort, sidebar counts, the table rows' `currentTracks[index]`) re-read its elements through fresh index signals. Profile of a 6 s fast-pass window (player scenario, 10k): `bumpLibraryTracks` 212-232 ms, `applyQueuedAnalysis` 220-261 ms inclusive.
+
+## Fix
+
+`library.tracks` is now raw state (`$state.raw` behind a getter/setter on the store, like `analyzingTrackIds`) holding one reactive proxy per track (`$state(track)`; the proxies wrap the same plain objects as before, so `plainTracks` and the search index see the same objects). Assigning a list proxies its tracks; `bumpLibraryTracks` replaces the array with `trackList.slice()`, a copy of 10k pointers. A row still follows its track's fields through the track's own proxy, and every identity-keyed cache (filter, haystacks, index) still sees a new array per bump. Nothing writes into the array in place (checked: no `push`/`splice`/index writes on `library.tracks` in the app).
+
+## Numbers (10k tracks, production build, headless; box load 41-76, interleaved)
+
+Profile, 6 s fast-pass window, player scenario: `bumpLibraryTracks` 212 ms -> 14-16 ms; `applyQueuedAnalysis` 220 ms -> 23-31 ms; Svelte `flush` 74-110 ms both. About 12-15 ms per batch before, about 5 ms after (most of it the flush, which also carries the playhead ticks).
+
+List scenario, second pair (both at load ~43-46; the idle scroll control is equal):
+
+| window | before | after |
+|---|---|---|
+| idle scroll: frames lost / long-task ms | 187 / 111 | 178 / 113 |
+| scroll during fast pass: long tasks (ms) | 60 (5017) | 15 (992) |
+| scroll during fast pass: frame p50 ms | 80.5 | 43.7 |
+| scroll during grid pass: long tasks (ms) | 49 (3489) | 20 (1117) |
+| typing during fast pass: key median / worst ms | 221 / 802 | 174 / 567 |
+| typing during fast pass: palette median / worst ms | 420 / 1009 | 307 / 541 |
+
+The first pair (before at load 53-76, after at 48-76) pointed the same way (fast-pass scroll long tasks 62 -> 40, typing key worst 1404 -> 375 ms) but its idle control also differed 2x, so it is not used. Player scenario frame numbers stay box-bound (frames lost 100-160 in the fast-pass windows either way); its long-task total in the fast-pass windows went 924/938 ms -> 281/759 ms.
+
+## Not done
+
+- A batch still re-runs the list's sort when a sort column is active (`sortTracks`, ~4-12 ms at 10k by column) because the array identity changes. Re-sorting only when a sorted field of a changed track moved would remove it; not needed at the measured cost.
+- The Svelte flush after a batch (~3-4 ms here) is left as is.
+- Mac check together with fb-scroll: play in the expanded player while a few thousand tracks analyse; scroll and type in the list.
