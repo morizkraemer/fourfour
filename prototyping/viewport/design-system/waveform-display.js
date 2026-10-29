@@ -55,11 +55,15 @@ const WHEEL_LINE_PX = 16;
 export default class WaveformDisplay {
     /**
      * @param {HTMLElement} container
-     * @param {{ mode?: 'compact' | 'expanded', onSeek?: (frac: number) => void, onCueMove?: (key: string, timeMs: number) => void }} [options]
+     * `paint: 'frame'` draws data changes (setData, setDetailBands, setCues, setBeats, a paused playhead) once in the
+     * next animation frame instead of on every call, so a mount that sets everything at once paints once, outside the
+     * caller's task. The default paints synchronously.
+     * @param {{ mode?: 'compact' | 'expanded', paint?: 'sync' | 'frame', onSeek?: (frac: number) => void, onCueMove?: (key: string, timeMs: number) => void }} [options]
      */
     constructor(container, options = {}) {
         this._container = container;
         this._mode = options.mode === 'compact' ? 'compact' : 'expanded';
+        this._paintOnFrame = options.paint === 'frame';
         // Expanded view locks the playhead at centre and scrolls the waveform.
         this._lockPlayhead = this._mode === 'expanded';
         if (options.onSeek) this.onSeek = options.onSeek;
@@ -117,14 +121,18 @@ export default class WaveformDisplay {
 
         this._sizes = new WeakMap();
         this._sizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
+            let changed = false;
             for (const entry of entries) {
                 const box = entry.borderBoxSize && entry.borderBoxSize[0];
-                this._sizes.set(entry.target, {
+                const size = {
                     w: box ? box.inlineSize : entry.contentRect.width,
                     h: box ? box.blockSize : entry.contentRect.height,
-                });
+                };
+                const known = this._sizes.get(entry.target);
+                if (!known || known.w !== size.w || known.h !== size.h) changed = true;
+                this._sizes.set(entry.target, size);
             }
-            this._render();
+            if (changed) this._render();
         });
         if (this._sizeObserver) {
             this._sizeObserver.observe(this._overviewCanvas);
@@ -219,7 +227,7 @@ export default class WaveformDisplay {
         } else {
             this._offset = 0.0;
         }
-        this._paint();
+        this._invalidate();
     }
 
     /**
@@ -229,7 +237,7 @@ export default class WaveformDisplay {
     setDetailBands(bandsZoom) {
         if (!this._data || this._data.bandsZoom === bandsZoom) return;
         this._data = { ...this._data, bandsZoom };
-        this._paint();
+        this._invalidate();
     }
 
     /**
@@ -251,7 +259,7 @@ export default class WaveformDisplay {
     setDetailPending(pending) {
         if (this._detailPending === !!pending) return;
         this._detailPending = !!pending;
-        if (this._data) this._paint();
+        if (this._data) this._invalidate();
     }
 
     _dropWindow() {
@@ -266,7 +274,7 @@ export default class WaveformDisplay {
     setBeats(beats) {
         if (!this._data || this._data.beats === beats) return;
         this._data = { ...this._data, beats };
-        this._paint();
+        this._invalidate();
     }
 
     /**
@@ -283,7 +291,7 @@ export default class WaveformDisplay {
         if (this._selectedCue && !cues.some((c) => c.key === this._selectedCue)) this._selectedCue = null;
         this._data = { ...this._data, cues };
         this._overviewDirty = true;
-        this._paint();
+        this._invalidate();
     }
 
     // Initial zoom on load. Compact is always full-track. Expanded targets a
@@ -351,7 +359,7 @@ export default class WaveformDisplay {
             this._stopInterp();
             this._clock.stop(0);
             this._phClock = -1;
-            this._applyPlayhead(-1);
+            this._applyPlayhead(-1, false);
             return;
         }
 
@@ -364,7 +372,7 @@ export default class WaveformDisplay {
             this._stopInterp();
             this._phClock = frac;
             this._clock.stop(frac * durationMs);
-            this._applyPlayhead(this._phClock);
+            this._applyPlayhead(this._phClock, false);
             return;
         }
 
@@ -385,11 +393,13 @@ export default class WaveformDisplay {
 
     // Push a position to the canvas: in expanded the waveform scrolls under the
     // fixed centre playhead; in compact only the overlay element moves.
-    _applyPlayhead(frac) {
+    // `inFrame` (the interpolation loop) paints now; a transport report may wait for the next frame (paint: 'frame').
+    _applyPlayhead(frac, inFrame = true) {
         this._playheadFrac = frac;
         if (this._lockPlayhead && frac >= 0) {
             this._offset = this._centeredOffset();
-            this._paint();
+            if (inFrame) this._paint();
+            else this._invalidate();
         } else {
             this._updatePlayheadOverlay();
         }
@@ -397,9 +407,11 @@ export default class WaveformDisplay {
 
     _startInterp() {
         if (this._interpRaf || !this._playing) return;
-        const loop = () => {
+        const loop = (frameTs) => {
             if (!this._playing) { this._interpRaf = null; return; }
             this._interpRaf = requestAnimationFrame(loop);
+            if (frameTs === this._paintedFrame) return;
+            this._paintedFrame = frameTs;
             this._stepInterp();
         };
         this._interpRaf = requestAnimationFrame(loop);
@@ -430,7 +442,9 @@ export default class WaveformDisplay {
         const cached = this._sizes.get(canvas);
         if (cached) return cached;
         const rect = canvas.getBoundingClientRect();
-        return { w: rect.width, h: rect.height };
+        const size = { w: rect.width, h: rect.height };
+        if (this._sizeObserver) this._sizes.set(canvas, size);
+        return size;
     }
 
     _showPlayhead(el, frac, canvas) {
@@ -537,6 +551,10 @@ export default class WaveformDisplay {
     // Synchronous full repaint of both canvases + overlays. Called directly from
     // the interpolation loop (already inside a frame); use _render() elsewhere.
     _paint() {
+        if (this._zoomRafId) {
+            cancelAnimationFrame(this._zoomRafId);
+            this._zoomRafId = null;
+        }
         this._renderOverview();
         this._renderZoom();
         this._updatePlayheadOverlay();
@@ -544,11 +562,32 @@ export default class WaveformDisplay {
 
     _render() {
         // Coalesce rapid playhead/scroll/drag updates into one draw per frame.
-        if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
-        this._zoomRafId = requestAnimationFrame(() => {
+        if (this._zoomRafId) return;
+        this._zoomRafId = requestAnimationFrame((frameTs) => {
             this._zoomRafId = null;
+            if (frameTs === this._paintedFrame) {
+                this._paint();
+                return;
+            }
+            this._paintedFrame = frameTs;
+            this._advanceClock();
             this._paint();
         });
+    }
+
+    // While playing, a frame's paint shows the interpolated position, so the interpolation loop can skip that frame.
+    _advanceClock() {
+        const durationMs = this._data?.duration_ms || 0;
+        if (!this._interpRaf || this._scrubbing || !durationMs || !this._clock.running) return;
+        const pos = Math.max(0, Math.min(1, this._clock.positionAt(this._now()) / durationMs));
+        this._phClock = pos;
+        this._playheadFrac = pos;
+        if (this._lockPlayhead) this._offset = this._centeredOffset();
+    }
+
+    _invalidate() {
+        if (this._paintOnFrame) this._render();
+        else this._paint();
     }
 
     // Resize a canvas only when its pixel dimensions actually change.
