@@ -39,6 +39,7 @@ impl Stage {
 struct BackgroundJob {
     cancel: Arc<AtomicBool>,
     threads: usize,
+    stage: Stage,
 }
 
 #[derive(Default)]
@@ -189,24 +190,38 @@ impl AnalysisCoordinator {
 
     /// Pops the next track and registers it as a background job in one step, so a priority request can
     /// never miss a track that is between a queue and a worker. Fast passes of the whole library come
-    /// first; grid passes follow. `stages_of` tells which stages a track already has stored.
+    /// first; grid passes follow. `stages_of` tells which stages a track already has stored. At most
+    /// `model_jobs` jobs that run the beat model are in flight: the model's threads are shared by all of them,
+    /// so more would only hold more decoded audio in memory.
     pub(crate) fn take_next(
         &self,
         staged: bool,
         stages_of: impl Fn(i64) -> u8,
+        model_jobs: usize,
         threads_for: impl FnOnce(usize) -> usize,
     ) -> Option<BackgroundTask> {
         let mut guard = self.jobs.lock().ok()?;
         let jobs = &mut *guard;
+        let model_room = jobs.background.values().filter(|job| job.stage != Stage::Fast).count() < model_jobs;
         let fresh = self.with_queue(|queue| queue.pop_front()).flatten();
         let (track_id, source_path, stage) = match fresh {
-            Some((id, path)) if !staged => (id, path, Stage::Whole),
-            Some((id, path)) if stages_of(id) & FAST_STAGES == FAST_STAGES => (id, path, Stage::Grid),
-            Some((id, path)) => (id, path, Stage::Fast),
-            None => {
+            Some((id, path)) => {
+                let stage = match () {
+                    () if !staged => Stage::Whole,
+                    () if stages_of(id) & FAST_STAGES == FAST_STAGES => Stage::Grid,
+                    () => Stage::Fast,
+                };
+                if stage != Stage::Fast && !model_room {
+                    self.with_queue(|queue| queue.push_front((id, path)));
+                    return None;
+                }
+                (id, path, stage)
+            }
+            None if model_room => {
                 let (id, path) = jobs.grid_queue.pop_front()?;
                 (id, path, Stage::Grid)
             }
+            None => return None,
         };
         let waiting = self.with_queue(|queue| queue.len()).unwrap_or(0) + jobs.grid_queue.len();
         let threads = match stage {
@@ -214,7 +229,7 @@ impl AnalysisCoordinator {
             Stage::Grid | Stage::Whole => threads_for(waiting + jobs.background.len() + 1),
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        jobs.background.insert(track_id, BackgroundJob { cancel: cancel.clone(), threads });
+        jobs.background.insert(track_id, BackgroundJob { cancel: cancel.clone(), threads, stage });
         Some(BackgroundTask { track_id, source_path, stage, threads, cancel })
     }
 
@@ -381,6 +396,11 @@ pub(crate) enum RunOutcome {
 
 const FAST_STAGES: u8 = analysis_stage::WAVEFORM | analysis_stage::KEY;
 const PYTHON_MAX_IN_FLIGHT: usize = 3;
+/// The waveform detail cache under the app data dir (`get_waveform_detail` in main.rs reads it).
+const DETAIL_CACHE_DIR: &str = "waveform-detail";
+/// Model jobs in flight: one per this many model threads, so the next tracks decode while the model runs.
+const MODEL_THREADS_PER_JOB: usize = 3;
+const MIN_MODEL_JOBS: usize = 3;
 const RUST_TRACK_TIMEOUT: Duration = Duration::from_secs(900);
 const SCHEDULER_POLL: Duration = Duration::from_millis(100);
 
@@ -524,6 +544,7 @@ impl Drop for NowGuard {
 }
 
 /// The now lane: one track, every thread, background analysis paused, waveform stored first.
+#[allow(clippy::too_many_arguments)]
 async fn run_now_lane(
     shared: SharedLibrary,
     coordinator: AnalysisCoordinator,
@@ -532,6 +553,7 @@ async fn run_now_lane(
     runner: Runner,
     wide_threads: usize,
     sink: Arc<dyn AnalysisSink>,
+    detail_dir: Option<PathBuf>,
 ) -> Result<(), String> {
     let (track_id, source_path) = item;
     let _guard = NowGuard { coordinator: coordinator.clone(), track_id };
@@ -548,8 +570,13 @@ async fn run_now_lane(
             let bands_path = source_path.clone();
             let bands = tokio::task::spawn_blocking(move || {
                 crate::analysis_priority::run_below_ui(|| {
-                    if let Ok(waves) = crate::band_analysis::measure_waveforms(&bands_path) {
+                    if let Ok((waves, detail)) = crate::band_analysis::measure_waveforms_and_detail(&bands_path) {
                         on_partial(fourfour_analysis::service::waveform_only_result(&waves));
+                        if let Some(dir) = &detail_dir {
+                            if let Err(e) = crate::waveform_detail::store_detail(dir, &bands_path, &detail) {
+                                eprintln!("waveform detail of {} not cached: {e}", bands_path.display());
+                            }
+                        }
                     }
                 })
             });
@@ -588,7 +615,10 @@ async fn prioritize_with_runner(
     match coordinator.claim_now(item.0, wide_threads) {
         NowClaim::AlreadyRunning => Ok(()),
         NowClaim::NoRun => run_with_runner(shared, coordinator, vec![item], sink, env, Some(runner)).await.map(|_| ()),
-        NowClaim::Granted { cancel } => run_now_lane(shared, coordinator, item, cancel, runner, wide_threads, sink).await,
+        NowClaim::Granted { cancel } => {
+            let detail_dir = env.app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
+            run_now_lane(shared, coordinator, item, cancel, runner, wide_threads, sink, detail_dir).await
+        }
     }
 }
 
@@ -644,21 +674,22 @@ async fn run_with_runner(
             runner
         }
     };
-    let max_in_flight = match &runner {
+    let (max_in_flight, model_jobs) = match &runner {
         Runner::Python { command } => {
             sink.log(LogLevel::Info, format!("Starting analysis: {initial_total} tracks, python={command}"));
-            PYTHON_MAX_IN_FLIGHT
+            (PYTHON_MAX_IN_FLIGHT, PYTHON_MAX_IN_FLIGHT)
         }
         Runner::Rust { engine } => {
             let plan = engine.plan(usize::MAX);
+            let model_jobs = (engine.plan(1).threads_per_track / MODEL_THREADS_PER_JOB).max(MIN_MODEL_JOBS);
             sink.log(
                 LogLevel::Info,
                 format!(
-                    "Starting analysis: {initial_total} tracks, rust workers={} threads/track={}",
+                    "Starting analysis: {initial_total} tracks, rust workers={} threads/track={} model jobs={model_jobs}",
                     plan.workers, plan.threads_per_track
                 ),
             );
-            plan.workers
+            (plan.workers, model_jobs)
         }
     };
 
@@ -668,7 +699,7 @@ async fn run_with_runner(
     loop {
         while join_set.len() < max_in_flight && !coordinator.is_cancelled() && !coordinator.background_paused() {
             let stored_stages = |id: i64| shared.lock().ok().and_then(|lib| lib.analysis_stages(id).ok().flatten()).unwrap_or(0);
-            let task = coordinator.take_next(staged, stored_stages, |jobs_left| match &runner {
+            let task = coordinator.take_next(staged, stored_stages, model_jobs, |jobs_left| match &runner {
                 Runner::Python { .. } => 0,
                 Runner::Rust { engine } => engine.plan(jobs_left).threads_per_track,
             });

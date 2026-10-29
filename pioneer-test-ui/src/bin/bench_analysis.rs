@@ -10,6 +10,9 @@ mod band_analysis;
 #[allow(dead_code)]
 #[path = "../analysis_priority.rs"]
 mod analysis_priority;
+#[allow(dead_code)]
+#[path = "../waveform_detail.rs"]
+mod waveform_detail;
 
 #[path = "../analysis_run.rs"]
 mod analysis_run;
@@ -105,7 +108,7 @@ fn median(mut v: Vec<f64>) -> f64 {
 /// One track at a time through the analysis crate directly, to read its per-stage timings
 /// (`Analysis::ms`), then the library write the app does with the result. Key and waveform run
 /// in parallel with the beat model, so the stages add up to more than `total`.
-fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Option<usize>) {
+fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Option<usize>, dump: Option<&PathBuf>) {
     use fourfour_analysis::analyze::{analyze_controlled, Config, Control};
     use fourfour_analysis::bt::BeatEngine;
     use fourfour_analysis::service::{locate_models, plan_pool, available_memory_mb, to_app_result, BEAT_MODEL};
@@ -116,7 +119,8 @@ fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Opt
     let model_load_ms = t.elapsed().as_secs_f64() * 1000.0;
     let env = BackendEnv { max_threads: threads, ..BackendEnv::default() };
     let threads = plan_pool(&env.pool_options(), available_memory_mb(), 1).threads_per_track;
-    let cfg = Config { threads, ..Config::default() };
+    let cfg = Config { threads, keep_logits: dump.is_some(), ..Config::default() };
+    let mut dumped = Vec::new();
     let stages = ["decode", "resample", "mel", "predict", "fit", "mp3", "key", "waveform", "total"];
     let mut per_stage: HashMap<&str, Vec<f64>> = HashMap::new();
     let mut per_audio_s: HashMap<&str, Vec<f64>> = HashMap::new();
@@ -139,6 +143,15 @@ fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Opt
             per_audio_s.entry(stage).or_default().push(v / analysis.duration_s);
         }
         eprintln!("[profile] {} {:.0}s audio {}", path.display(), analysis.duration_s, analysis.ms);
+        if dump.is_some() {
+            let mut doc = analysis.to_json(path, Some(*id as u64));
+            doc["logits"] = serde_json::json!(analysis.logits);
+            doc["result"] = serde_json::json!(result);
+            dumped.push(doc);
+        }
+    }
+    if let Some(file) = dump {
+        std::fs::write(file, serde_json::to_string(&dumped).unwrap()).expect("write dump");
     }
     let mut values = serde_json::Map::new();
     values.insert("tracks".into(), items.len().into());
@@ -174,6 +187,7 @@ fn main() {
     let mut legacy_priority = false;
     let mut unstaged = false;
     let mut profile = 0usize;
+    let mut dump: Option<PathBuf> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -187,6 +201,7 @@ fn main() {
             "--legacy-priority" => legacy_priority = true,
             "--unstaged" => unstaged = true,
             "--profile" => profile = it.next().unwrap().parse().unwrap(),
+            "--dump" => dump = Some(PathBuf::from(it.next().unwrap())),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -206,7 +221,7 @@ fn main() {
     let pending: Vec<(i64, PathBuf)> = ids.iter().zip(&tracks).map(|(id, t)| (*id, t.source_path.clone())).collect();
     let played = play_after_s.map(|_| pending[play_index].clone());
     if profile > 0 {
-        profile_stages(&library, &pending[..profile.min(pending.len())], threads);
+        profile_stages(&library, &pending[..profile.min(pending.len())], threads, dump.as_ref());
         std::fs::remove_dir_all(&dir).ok();
         return;
     }
@@ -299,6 +314,15 @@ fn main() {
             latest(&|v| v.get(1).copied()),
             ids.iter().filter_map(|id| done.get(id).copied()).fold(0.0f64, f64::max) / 1000.0
         );
+    }
+    if let Some(file) = dump {
+        let lib = shared.lock().unwrap();
+        let stored: Vec<serde_json::Value> = ids
+            .iter()
+            .zip(&paths)
+            .map(|(id, path)| serde_json::json!({ "id": id, "path": path, "result": lib.get_analysis(*id).ok().flatten() }))
+            .collect();
+        std::fs::write(file, serde_json::to_string(&stored).unwrap()).expect("write dump");
     }
     std::fs::remove_dir_all(&dir).ok();
 }

@@ -1,9 +1,11 @@
 // Chunk scheduling and peak picking follow beat-this-rs (MIT, see NOTICE).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
@@ -26,10 +28,98 @@ pub struct BeatEngine {
     mel: Arc<rten::Model>,
     mel_in: NodeId,
     mel_out: NodeId,
-    beat: Arc<rten::Model>,
-    beat_in: NodeId,
+    beat: Arc<BeatModel>,
+    chunks: Arc<ChunkExecutor>,
+    chunk_threads: Mutex<Vec<JoinHandle<()>>>,
+    min_chunk_threads: AtomicUsize,
+}
+
+struct BeatModel {
+    model: rten::Model,
+    input: NodeId,
     beat_out: NodeId,
     down_out: NodeId,
+}
+
+type ChunkLogits = (Vec<f32>, Vec<f32>);
+
+/// Runs the beat model one chunk at a time on each of a set of threads that every track of the engine shares. A
+/// track whose chunks are all taken leaves its threads to the others, so a batch never ends with one long track on
+/// one thread while the other cores wait. Every chunk runs on a single-thread rten pool, the setup whose logits
+/// match the reference bit for bit; tracks are served in the order they arrived.
+#[derive(Default)]
+struct ChunkExecutor {
+    queue: Mutex<ChunkQueue>,
+    ready: Condvar,
+}
+
+#[derive(Default)]
+struct ChunkQueue {
+    tracks: VecDeque<Arc<TrackChunks>>,
+    shutdown: bool,
+}
+
+struct TrackChunks {
+    mel: Tensor,
+    starts: Vec<i32>,
+    next: AtomicUsize,
+    paused: AtomicBool,
+    cancelled: AtomicBool,
+    results: Mutex<Vec<Option<Result<ChunkLogits>>>>,
+    finished: Condvar,
+}
+
+impl ChunkExecutor {
+    fn take(&self) -> Option<(Arc<TrackChunks>, usize)> {
+        let mut queue = self.queue.lock().unwrap();
+        loop {
+            if queue.shutdown {
+                return None;
+            }
+            queue.tracks.retain(|t| !t.cancelled.load(Ordering::Relaxed));
+            if let Some(pos) = queue.tracks.iter().position(|t| !t.paused.load(Ordering::Relaxed)) {
+                let track = queue.tracks[pos].clone();
+                let i = track.next.fetch_add(1, Ordering::Relaxed);
+                if i + 1 >= track.starts.len() {
+                    queue.tracks.remove(pos);
+                }
+                return Some((track, i));
+            }
+            queue = self.ready.wait_timeout(queue, PAUSE_POLL).unwrap().0;
+        }
+    }
+
+    fn work(&self, model: &BeatModel) {
+        let options = RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))));
+        while let Some((track, i)) = self.take() {
+            let chunk = extract_chunk(&track.mel, track.starts[i]);
+            let logits = catch_unwind(AssertUnwindSafe(|| model.run_chunk(&chunk, &options)))
+                .unwrap_or_else(|_| Err(anyhow!("beat model panicked on chunk {i}")));
+            track.results.lock().unwrap()[i] = Some(logits);
+            track.finished.notify_all();
+        }
+    }
+}
+
+impl BeatModel {
+    fn run_chunk(&self, chunk: &Tensor, options: &RunOptions) -> Result<ChunkLogits> {
+        let view = ValueView::from_shape(chunk.shape.as_slice(), chunk.data.as_slice()).map_err(|e| anyhow!("beat input: {e}"))?;
+        let outs = self.model.run(vec![(self.input, ValueOrView::from(view))], &[self.beat_out, self.down_out], Some(options.clone()))?;
+        let mut it = outs.into_iter();
+        let b = it.next().unwrap().into_tensor::<f32>().ok_or_else(|| anyhow!("beat output is not f32"))?;
+        let d = it.next().unwrap().into_tensor::<f32>().ok_or_else(|| anyhow!("downbeat output is not f32"))?;
+        Ok((b.into_data(), d.into_data()))
+    }
+}
+
+impl Drop for BeatEngine {
+    fn drop(&mut self) {
+        self.chunks.queue.lock().unwrap().shutdown = true;
+        self.chunks.ready.notify_all();
+        for handle in self.chunk_threads.get_mut().unwrap().drain(..) {
+            handle.join().ok();
+        }
+    }
 }
 
 pub struct BeatResult {
@@ -76,12 +166,32 @@ impl BeatEngine {
         Ok(BeatEngine {
             mel_in: find(&mel, &["audio_pcm"])?,
             mel_out: find(&mel, &["mel_spectrogram"])?,
-            beat_in: find(&beat, &["spectrogram"])?,
-            beat_out: find(&beat, &["beat", "beat_logits"])?,
-            down_out: find(&beat, &["downbeat", "downbeat_logits"])?,
+            beat: Arc::new(BeatModel {
+                input: find(&beat, &["spectrogram"])?,
+                beat_out: find(&beat, &["beat", "beat_logits"])?,
+                down_out: find(&beat, &["downbeat", "downbeat_logits"])?,
+                model: beat,
+            }),
             mel: Arc::new(mel),
-            beat: Arc::new(beat),
+            chunks: Arc::new(ChunkExecutor::default()),
+            chunk_threads: Mutex::new(Vec::new()),
+            min_chunk_threads: AtomicUsize::new(1),
         })
+    }
+
+    /// The number of beat-model threads all tracks share, at least; a track that asks for more threads adds them.
+    /// They start with the first track, so they inherit its priority (see `analysis_priority`).
+    pub fn share_chunk_threads(&self, threads: usize) {
+        self.min_chunk_threads.store(threads.max(1), Ordering::Relaxed);
+    }
+
+    fn ensure_chunk_threads(&self, wanted: usize) -> Result<()> {
+        let mut threads = self.chunk_threads.lock().unwrap();
+        while threads.len() < wanted {
+            let (chunks, model) = (self.chunks.clone(), self.beat.clone());
+            threads.push(std::thread::Builder::new().name("beat-chunks".into()).spawn(move || chunks.work(&model))?);
+        }
+        Ok(())
     }
 
     pub fn analyze(&self, samples: &[f32], source_rate: u32, threads: usize, control: &Control) -> Result<BeatResult> {
@@ -99,58 +209,48 @@ impl BeatEngine {
         let mel_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let (beat_logits, down_logits) = self.predict(&mel, threads, control)?;
+        let (beat_logits, down_logits) = self.predict(mel, threads, control)?;
         let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
         let (beats, downbeats) = pick_peaks(&beat_logits, &down_logits);
         Ok(BeatResult { beat_logits, down_logits, beats, downbeats, resample_ms, mel_ms, predict_ms })
     }
 
-    fn run_chunk(&self, chunk: &Tensor, options: &RunOptions) -> Result<(Vec<f32>, Vec<f32>)> {
-        let view = ValueView::from_shape(chunk.shape.as_slice(), chunk.data.as_slice()).map_err(|e| anyhow!("beat input: {e}"))?;
-        let outs = self.beat.run(vec![(self.beat_in, ValueOrView::from(view))], &[self.beat_out, self.down_out], Some(options.clone()))?;
-        let mut it = outs.into_iter();
-        let b = it.next().unwrap().into_tensor::<f32>().ok_or_else(|| anyhow!("beat output is not f32"))?;
-        let d = it.next().unwrap().into_tensor::<f32>().ok_or_else(|| anyhow!("downbeat output is not f32"))?;
-        Ok((b.into_data(), d.into_data()))
-    }
-
-    fn predict(&self, mel: &Tensor, threads: usize, control: &Control) -> Result<(Vec<f32>, Vec<f32>)> {
+    fn predict(&self, mel: Tensor, threads: usize, control: &Control) -> Result<ChunkLogits> {
         let full_time = mel.shape[1];
         let starts = generate_starts(full_time);
-        let workers = threads.max(1).min(starts.len());
-        let next = AtomicUsize::new(0);
-        let results: Vec<Mutex<Option<Result<(Vec<f32>, Vec<f32>)>>>> = starts.iter().map(|_| Mutex::new(None)).collect();
-        let run_worker = |options: RunOptions| loop {
-            while control.pause.load(Ordering::Relaxed) && !control.cancel.load(Ordering::Relaxed) {
-                std::thread::sleep(PAUSE_POLL);
-            }
+        self.ensure_chunk_threads(threads.max(self.min_chunk_threads.load(Ordering::Relaxed)))?;
+        let track = Arc::new(TrackChunks {
+            results: Mutex::new(starts.iter().map(|_| None).collect()),
+            mel,
+            starts,
+            next: AtomicUsize::new(0),
+            paused: AtomicBool::new(control.pause.load(Ordering::Relaxed)),
+            cancelled: AtomicBool::new(false),
+            finished: Condvar::new(),
+        });
+        if !track.starts.is_empty() {
+            self.chunks.queue.lock().unwrap().tracks.push_back(track.clone());
+            self.chunks.ready.notify_all();
+        }
+        let mut results = track.results.lock().unwrap();
+        while !results.iter().all(Option::is_some) {
             if control.cancel.load(Ordering::Relaxed) {
-                break;
+                track.cancelled.store(true, Ordering::Relaxed);
+                return Err(Cancelled.into());
             }
-            let i = next.fetch_add(1, Ordering::SeqCst);
-            if i >= starts.len() {
-                break;
+            let paused = control.pause.load(Ordering::Relaxed);
+            if track.paused.swap(paused, Ordering::Relaxed) && !paused {
+                self.chunks.ready.notify_all();
             }
-            let chunk = extract_chunk(mel, starts[i]);
-            *results[i].lock().unwrap() = Some(self.run_chunk(&chunk, &options));
-        };
-        if workers == 1 {
-            run_worker(RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1)))));
-        } else {
-            std::thread::scope(|s| {
-                for _ in 0..workers {
-                    let run_worker = &run_worker;
-                    s.spawn(move || run_worker(RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))))));
-                }
-            });
+            results = track.finished.wait_timeout(results, PAUSE_POLL).unwrap().0;
         }
         if control.cancel.load(Ordering::Relaxed) {
             return Err(Cancelled.into());
         }
         let mut beat_logits = vec![-1000.0f32; full_time];
         let mut down_logits = vec![-1000.0f32; full_time];
-        for (i, &start) in starts.iter().enumerate().rev() {
-            let (beat, down) = results[i].lock().unwrap().take().unwrap()?;
+        for (i, &start) in track.starts.iter().enumerate().rev() {
+            let (beat, down) = results[i].take().unwrap()?;
             let chunk_time = beat.len();
             let valid = BORDER_SIZE..chunk_time - BORDER_SIZE;
             let write_start = (start + BORDER_SIZE as i32) as usize;
