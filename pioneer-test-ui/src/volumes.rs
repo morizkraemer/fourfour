@@ -152,9 +152,23 @@ fn sysfs_removable_flag(device: &str) -> Option<bool> {
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn plist_says_removable(xml: &str) -> bool {
-    ["Ejectable", "RemovableMediaOrExternalDevice", "RemovableMedia"]
-        .iter()
-        .any(|key| plist_bool(xml, key) == Some(true))
+    !plist_is_disk_image(xml)
+        && ["Ejectable", "RemovableMediaOrExternalDevice", "RemovableMedia"]
+            .iter()
+            .any(|key| plist_bool(xml, key) == Some(true))
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn plist_is_disk_image(xml: &str) -> bool {
+    plist_string(xml, "BusProtocol").as_deref() == Some("Disk Image")
+        || plist_string(xml, "VirtualOrPhysical").as_deref() == Some("Virtual")
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn plist_string(xml: &str, key: &str) -> Option<String> {
+    let after_key = xml.split(&format!("<key>{key}</key>")).nth(1)?;
+    let value = after_key.trim_start().strip_prefix("<string>")?;
+    Some(value.split("</string>").next()?.to_string())
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -248,6 +262,20 @@ mod tests {
     #[test]
     fn ejectable_stick_plist_is_removable() {
         assert!(plist_says_removable(STICK_PLIST));
+    }
+
+    #[test]
+    fn mounted_disk_image_is_not_removable() {
+        let installer = "<dict><key>BusProtocol</key>\n<string>Disk Image</string>\n<key>Ejectable</key>\n<true/>\n\
+            <key>RemovableMedia</key>\n<true/>\n<key>RemovableMediaOrExternalDevice</key>\n<true/></dict>";
+        assert!(!plist_says_removable(installer));
+    }
+
+    #[test]
+    fn usb_stick_with_bus_protocol_is_removable() {
+        let stick = "<dict><key>BusProtocol</key>\n<string>USB</string>\n<key>Ejectable</key>\n<true/>\n\
+            <key>VirtualOrPhysical</key>\n<string>Physical</string></dict>";
+        assert!(plist_says_removable(stick));
     }
 
     #[test]
