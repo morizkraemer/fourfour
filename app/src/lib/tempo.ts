@@ -161,16 +161,6 @@ export function keyCells(minor: boolean): KeyCell[] {
   });
 }
 
-/** The keys that mix harmonically with `camelot`: one step either way round the wheel, and the relative major or minor. */
-export function harmonicNeighbours(camelot: string): string[] {
-  const parsed = parseKey(camelot);
-  if (!parsed) return [];
-  const letter = parsed.slice(-1);
-  const number = Number(parsed.slice(0, -1));
-  const wrap = (n: number) => ((n - 1 + 12) % 12) + 1;
-  return [`${wrap(number - 1)}${letter}`, `${wrap(number + 1)}${letter}`, `${number}${letter === 'A' ? 'B' : 'A'}`];
-}
-
 /** `camelot` written the way `like` is written: as a Camelot code, or as a note name. */
 export function keyWrittenLike(camelot: string, like: string): string {
   if (isCamelotNotation(like)) return camelot;

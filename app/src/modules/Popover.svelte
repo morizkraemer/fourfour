@@ -22,6 +22,8 @@
     onClose,
     children,
     foot,
+    heading,
+    dense = false,
   }: {
     anchor: HTMLElement | undefined;
     width: number;
@@ -31,6 +33,8 @@
     onClose: () => void;
     children: Snippet;
     foot?: Snippet;
+    heading?: Snippet;
+    dense?: boolean;
   } = $props();
 
   let card: HTMLElement | undefined = $state();
@@ -88,6 +92,7 @@
   use:toBody
   bind:this={card}
   class="ff-menu ff-popover"
+  class:ff-popover--dense={dense}
   role="dialog"
   aria-label={label}
   style:width="{width}px"
@@ -95,8 +100,12 @@
   style:top="{top}px">
   <i class="ff-popover__arrow" style:left="{arrowLeft}px"></i>
   <div class="ff-popover__title">
-    <span class="ff-popover__name">{title}</span>
-    {#if meta}<span class="ff-popover__meta">{meta}</span>{/if}
+    {#if heading}
+      {@render heading()}
+    {:else}
+      <span class="ff-popover__name">{title}</span>
+      {#if meta}<span class="ff-popover__meta">{meta}</span>{/if}
+    {/if}
   </div>
   {@render children()}
   {#if foot}<div class="ff-popover__foot">{@render foot()}</div>{/if}
@@ -110,6 +119,10 @@
     padding: var(--ff-space-7);
     min-width: 0;
     border-radius: var(--ff-radius-xl);
+  }
+  .ff-popover--dense {
+    gap: var(--ff-space-4);
+    padding: var(--ff-space-5);
   }
   .ff-popover__arrow {
     position: absolute;
