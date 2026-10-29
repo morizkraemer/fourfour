@@ -293,3 +293,4 @@
 2026-10-29 19:00 orchestrator - Settings → About (icon, version, Beat This! credits) on ov-1028; smoke ok; Mac install started
 2026-10-29 19:40 fb-wave landed on ov-1028: analysis runs below UI priority (QoS utility / nice 10), strip bands sorted once + cached, top-bar count on plain objects, grid via setBeats, zoom never shows coarse fallback (pending blank instead); full smoke 90/90; follow-up prefetch detail; Mac install started
 2026-10-29 19:55 orchestrator - bench_analysis build break after fb-wave merge fixed (module include); ov-1028 installed on Mac with waveform fixes; cargo/vitest/check green
+2026-10-29 20:20 fb-wave follow-up landed on ov-1028: prefetch_waveform_detail on select/load, cache 512 MiB LRU, cached read 11-15 ms; uncached decode ~3-5 s release on loaded box. Flaky test identified: the_fast_pass_of_every_track_comes_before_any_grid_pass... (timing-sensitive under load). smoke 91/91; Mac install started
