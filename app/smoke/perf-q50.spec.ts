@@ -196,6 +196,39 @@ const stopFrames = (page: Page) =>
     return w.__frames;
   });
 
+/** Imports IMPORT_FILES tracks through the activity menu; times from the click until the header counts them. */
+async function importRows(page: Page) {
+  await page.evaluate(
+    (patch) => Object.assign(window, patch),
+    { __smokePickPath: '/Downloads/Perf Import', __smokeImport: { tracks: Array.from({ length: IMPORT_FILES }, (_, n) => importedTrack(n)), already: 0 } },
+  );
+  await page.waitForTimeout(450);
+  await page.locator('[data-library-status]').click();
+  const tasksBefore = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.longTasks.length);
+  await frameRecorder(page);
+  const total = (TRACKS + IMPORT_FILES).toLocaleString('en-US');
+  const { t0, t1 } = await page.evaluate(
+    (total) =>
+      new Promise<{ t0: number; t1: number }>((resolve, reject) => {
+        const item = [...document.querySelectorAll('[data-library-activity-menu] .ff-menu__item')].find((e) => e.textContent?.includes('Import folder…')) as HTMLElement;
+        const t0 = performance.now();
+        item.click();
+        const poll = () => {
+          if (performance.now() - t0 > 60_000) return reject(new Error('import never showed the rows'));
+          if (document.querySelector('.ff-gheader__count')?.textContent?.trim() === total) return resolve({ t0, t1: performance.now() });
+          requestAnimationFrame(poll);
+        };
+        requestAnimationFrame(poll);
+      }),
+    total,
+  );
+  await page.waitForTimeout(500);
+  const frames = await stopFrames(page);
+  const tasks = await page.evaluate((n) => (window as unknown as { __q50: Q50 }).__q50.longTasks.slice(n), tasksBefore);
+  const commitAnswered = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.answeredAt.commit_import ?? 0);
+  return { t0, t1, frames, tasks, commitAnswered };
+}
+
 test.describe('q50 perf paths', () => {
   test.skip(!ENABLED || TRACKS === 0, 'set FF_PERF_Q50=1 FF_PERF_TRACKS=10000 (scripts/perf.sh does)');
   test.setTimeout(600_000);
@@ -246,34 +279,7 @@ test.describe('q50 perf paths', () => {
     record('mock get_analysis_data ms (not app time)', median(mockMs.get_analysis_data ?? [0]));
     record('mock get_waveform_detail ms (not app time)', median(mockMs.get_waveform_detail ?? [0]));
 
-    await page.evaluate(
-      (patch) => Object.assign(window, patch),
-      { __smokePickPath: '/Downloads/Perf Import', __smokeImport: { tracks: Array.from({ length: IMPORT_FILES }, (_, n) => importedTrack(n)), already: 0 } },
-    );
-    await page.waitForTimeout(450);
-    await page.locator('[data-library-status]').click();
-    const tasksBefore = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.longTasks.length);
-    await frameRecorder(page);
-    const total = (TRACKS + IMPORT_FILES).toLocaleString('en-US');
-    const { t0, t1 } = await page.evaluate(
-      (total) =>
-        new Promise<{ t0: number; t1: number }>((resolve, reject) => {
-          const item = [...document.querySelectorAll('[data-library-activity-menu] .ff-menu__item')].find((e) => e.textContent?.includes('Import folder…')) as HTMLElement;
-          const t0 = performance.now();
-          item.click();
-          const poll = () => {
-            if (performance.now() - t0 > 60_000) return reject(new Error('import never showed the rows'));
-            if (document.querySelector('.ff-gheader__count')?.textContent?.trim() === total) return resolve({ t0, t1: performance.now() });
-            requestAnimationFrame(poll);
-          };
-          requestAnimationFrame(poll);
-        }),
-      total,
-    );
-    await page.waitForTimeout(500);
-    const frames = await stopFrames(page);
-    const tasks = await page.evaluate((n) => (window as unknown as { __q50: Q50 }).__q50.longTasks.slice(n), tasksBefore);
-    const commitAnswered = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.answeredAt.commit_import ?? 0);
+    const { t0, t1, frames, tasks, commitAnswered } = await importRows(page);
     record('import ui click to rows ms', t1 - t0);
     record('import ui rows after commit answer ms', t1 - commitAnswered);
     record('import ui long-task ms', tasks.reduce((s, t) => s + t.duration, 0));
@@ -359,5 +365,23 @@ test('q50 boot trace', async ({ browser }) => {
   if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(`${process.env.FF_PERF_PROFILE_OUT}.cpuprofile`, JSON.stringify(profile));
   printProfile('boot', profile);
   await browser.stopTracing();
+  await context.close();
+});
+
+test('q50 import profile', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'import', 'set FF_PERF_PROFILE=import');
+  test.setTimeout(300_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+  await cdp.send('Profiler.start');
+  const { t0, t1, frames, tasks } = await importRows(page);
+  const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  printProfile('import', profile);
+  console.log(`import click to rows ${(t1 - t0).toFixed(0)} ms; frames over 50 ms: ${frames.filter((f) => f > 50).map((f) => f.toFixed(0)).join(', ')}; long tasks: ${tasks.map((t) => `${(t.start - t0).toFixed(0)}+${t.duration.toFixed(0)}`).join(', ')}`);
+  await cdp.detach();
   await context.close();
 });

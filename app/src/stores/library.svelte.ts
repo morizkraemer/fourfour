@@ -851,12 +851,12 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined)
 
 const TRACK_MAP_CHUNK = 2500;
 
-async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>) {
+async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>, firstIndex = 0) {
   const mapped: Record<string, any>[] = new Array(tracks.length);
   for (let start = 0; start < tracks.length; start += TRACK_MAP_CHUNK) {
     if (start > 0) await new Promise((resolve) => setTimeout(resolve, 0));
     const end = Math.min(tracks.length, start + TRACK_MAP_CHUNK);
-    for (let i = start; i < end; i++) mapped[i] = mapTrackInfoToLocal(tracks[i], i, favorites.get(tracks[i].id));
+    for (let i = start; i < end; i++) mapped[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
   }
   return mapped;
 }
@@ -883,6 +883,22 @@ export async function loadState() {
     library.tauriError = lastTauriError;
     throw err;
   }
+}
+
+/**
+ * Appends freshly imported tracks: the backend gives them the next ids, so `load_state` would
+ * list them last with the same fields, and nothing else in the state changes on import.
+ */
+async function landImportedTracks(added: TrackInfo[]) {
+  if (added.length === 0) return;
+  const offset = plainTracks.length;
+  const favorites = lowestFavoriteSlots(library.playlists);
+  const mapped = await mapTracksInTaskSizedChunks(added, favorites, offset);
+  recentlyAddedCount += added.filter((t) => t.tempo > 0).length;
+  plainTracks = plainTracks.concat(mapped);
+  resetSearchIndex();
+  library.tracks = plainTracks;
+  scheduleSearchIndexWarmup();
 }
 
 /** Saves playlists to backend. Tracks are already auto-persisted. */
@@ -982,7 +998,7 @@ async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
     await addTracksToPlaylist(playlist.id, ids);
   }
 
-  await loadState();
+  await landImportedTracks(newTracks);
 
   await offerAnalysis(newTracks.map((t) => t.id), options?.analyze);
 }
@@ -1040,7 +1056,7 @@ export async function importDroppedTracks(paths: string[]): Promise<{ outcome: I
   try {
     startImportActivity();
     const outcome = await scanAndAdd(paths);
-    await loadState();
+    await landImportedTracks(outcome.added);
     library.tauriError = lastTauriError;
     await offerAnalysis(outcome.added.map((t) => t.id));
     const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
