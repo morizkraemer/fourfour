@@ -6,8 +6,8 @@ import { fixturePlaylists, fixtureTracks } from './fixture.ts';
 import { installTauriMock, type SmokeWindow } from './tauri-mock.ts';
 
 const TRACKS = Number(process.env.FF_PERF_TRACKS ?? 0);
-const FAST_RATE = Number(process.env.FF_PERF_FAST_RATE ?? 12);
-const GRID_RATE = Number(process.env.FF_PERF_GRID_RATE ?? 2);
+const FAST_RATE = Number(process.env.FF_PERF_FAST_RATE ?? 6);
+const GRID_RATE = Number(process.env.FF_PERF_GRID_RATE ?? 0.2);
 const WINDOW_MS = Number(process.env.FF_PERF_WINDOW_MS ?? 6000);
 const REPORT = process.env.FF_PERF_OUT;
 
@@ -28,6 +28,27 @@ interface Bench {
 }
 
 const results: Record<string, Record<string, number>> = {};
+let readMetrics: (() => Promise<Record<string, number>>) | null = null;
+
+async function mainThreadMs(page: Page) {
+  if (!readMetrics) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    readMetrics = async () =>
+      Object.fromEntries(((await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] }).metrics.map((m) => [m.name, m.value * 1000]));
+  }
+  const m = await readMetrics();
+  return { task: m.TaskDuration, script: m.ScriptDuration };
+}
+
+async function busyDuring<T>(page: Page, run: () => Promise<T>): Promise<[T, { taskMsPerSec: number; scriptMsPerSec: number }]> {
+  const before = await mainThreadMs(page);
+  const t0 = Date.now();
+  const value = await run();
+  const after = await mainThreadMs(page);
+  const seconds = (Date.now() - t0) / 1000;
+  return [value, { taskMsPerSec: Math.round((after.task - before.task) / seconds), scriptMsPerSec: Math.round((after.script - before.script) / seconds) }];
+}
 
 async function installBench(page: Page) {
   await page.evaluate(() => {
@@ -127,12 +148,41 @@ function frameStats(deltas: number[]) {
   };
 }
 
+type Profile = { nodes: { id: number; children?: number[]; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples: number[]; timeDeltas: number[] };
+
+async function profiled<T>(page: Page, name: string, run: () => Promise<T>): Promise<T> {
+  if (process.env.FF_PERF_PROFILE !== name) return run();
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.start');
+  const value = await run();
+  const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  const parent = new Map<number, number>();
+  for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const inclusive = new Map<string, number>();
+  profile.samples.forEach((id, i) => {
+    const seen = new Set<string>();
+    for (let at: number | undefined = id; at !== undefined; at = parent.get(at)) {
+      const f = byId.get(at)!.callFrame;
+      const key = `${f.functionName || '(anon)'} ${f.url.split('/').pop()}:${f.lineNumber}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      inclusive.set(key, (inclusive.get(key) ?? 0) + profile.timeDeltas[i] / 1000);
+    }
+  });
+  console.log(`profile ${name} inclusive`);
+  for (const [k, v] of [...inclusive.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40)) console.log(`${v.toFixed(0).padStart(7)} ms  ${k}`);
+  await cdp.detach();
+  return value;
+}
+
 async function scrollWindow(page: Page, name: string, kind: 'fast' | 'grid' | 'none', rate: number) {
   const before = await counters(page);
   await startEvents(page, kind, rate, TRACKS);
-  const deltas = await scrollFor(page, WINDOW_MS);
+  const [deltas, busy] = await busyDuring(page, () => profiled(page, name, () => scrollFor(page, WINDOW_MS)));
   await startEvents(page, 'none', 0, TRACKS);
-  results[name] = { ...frameStats(deltas), ...(await windowStats(page, before.now, before.emitted, before.fetches)) };
+  results[name] = { ...frameStats(deltas), ...busy, ...(await windowStats(page, before.now, before.emitted, before.fetches)) };
 }
 
 const settle = (page: Page) =>
@@ -194,14 +244,20 @@ test.describe('bulk analysis responsiveness', () => {
     await page.locator('[data-track-row]').nth(2).dblclick();
     await page.waitForTimeout(500);
 
+    await scrollFor(page, 3000);
     await scrollWindow(page, 'idle scroll', 'none', 0);
 
     await page.keyboard.press('Control+k');
     await page.keyboard.type('Analyze all unanalyzed');
     await page.keyboard.press('Enter');
     await expect(page.locator('.ff-cp')).toHaveCount(0);
+    await page.locator('.ff-gheader__search input').fill('');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ff-gheader__count')).toHaveText(TRACKS.toLocaleString('en-US'));
     await page.waitForTimeout(1000);
 
+    const [, still] = await busyDuring(page, () => page.waitForTimeout(3000));
+    results['analysing, no events, no input'] = still;
     await scrollWindow(page, 'scroll during fast pass', 'fast', FAST_RATE);
     await scrollWindow(page, 'scroll during grid pass', 'grid', GRID_RATE);
     await typingWindow(page, 'typing + palette during fast pass', 'fast', FAST_RATE);
