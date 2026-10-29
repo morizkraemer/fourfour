@@ -215,6 +215,7 @@ export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
 
 /* ── Main Library Store State ───────────────────────────────────────── */
 let recentlyAddedCount = 0;
+let analyzingIds = $state.raw<number[]>([]);
 
 export const library = $state({
   tracks: [] as any[],
@@ -230,8 +231,13 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   analyzing: false,
-  /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). */
-  analyzingTrackIds: [] as number[],
+  /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
+  get analyzingTrackIds(): number[] {
+    return analyzingIds;
+  },
+  set analyzingTrackIds(ids: number[]) {
+    analyzingIds = ids;
+  },
   syncing: false,
   statusMessage: 'Ready',
   analysisProgress: { current: 0, total: 0, message: '' },
@@ -598,35 +604,77 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
   return job;
 }
 
-async function refreshTrackAnalysisDisplay(track: Record<string, unknown>, attempt = 0) {
-  const id = track.id as number;
-  invalidateAnalysisCache(id);
+const ANALYSIS_APPLY_INTERVAL_MS = 250;
+const queuedAnalysisRefresh = new Set<number>();
+const queuedAnalysisFinish = new Set<number>();
+let analysisApplyTimer: ReturnType<typeof setTimeout> | undefined;
+let analysisApplying = false;
+let lastAnalysisApplyAt = -Infinity;
+
+async function fetchAnalysisForDisplay(id: number, attempt = 0): Promise<unknown> {
   try {
-    const res = await getAnalysisData(id, true);
-    if (!isValidAnalysisPayload(res)) {
-      track.analyzed = false;
-      track.analysisLoaded = false;
-      bumpLibraryTracks();
+    return await getAnalysisData(id, attempt > 0);
+  } catch (err) {
+    if (attempt >= 4) throw err;
+    await new Promise((r) => setTimeout(r, 120 * (attempt + 1)));
+    return fetchAnalysisForDisplay(id, attempt + 1);
+  }
+}
+
+async function refreshTrackAnalysis(id: number) {
+  const track = libraryTrackById(id);
+  if (!track) return;
+  try {
+    const res = await fetchAnalysisForDisplay(id);
+    if (isValidAnalysisPayload(res)) {
+      applyWaveformAndCuesFromAnalysis(track, res);
       return;
     }
-    applyWaveformAndCuesFromAnalysis(track, res);
-    bumpLibraryTracks();
   } catch (err) {
-    if (attempt < 4) {
-      await new Promise((r) => setTimeout(r, 120 * (attempt + 1)));
-      return refreshTrackAnalysisDisplay(track, attempt + 1);
-    }
     console.warn('Failed to refresh analysis display:', err);
-    track.analyzed = false;
-    track.analysisLoaded = false;
-    bumpLibraryTracks();
+  }
+  track.analyzed = false;
+  track.analysisLoaded = false;
+}
+
+/** Analysis events arrive per track; the rows take them in batches, at most one library update per interval. */
+function queueAnalysisRefresh(trackId: number, finished: boolean) {
+  invalidateAnalysisCache(trackId);
+  queuedAnalysisRefresh.add(trackId);
+  if (finished) queuedAnalysisFinish.add(trackId);
+  scheduleAnalysisApply();
+}
+
+function scheduleAnalysisApply() {
+  if (analysisApplyTimer !== undefined || analysisApplying) return;
+  const wait = Math.max(0, lastAnalysisApplyAt + ANALYSIS_APPLY_INTERVAL_MS - performance.now());
+  analysisApplyTimer = setTimeout(() => {
+    analysisApplyTimer = undefined;
+    void applyQueuedAnalysis();
+  }, wait);
+}
+
+async function applyQueuedAnalysis() {
+  analysisApplying = true;
+  const ids = [...queuedAnalysisRefresh];
+  const finished = new Set(queuedAnalysisFinish);
+  queuedAnalysisRefresh.clear();
+  queuedAnalysisFinish.clear();
+  try {
+    if (finished.size > 0) {
+      library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => !finished.has(id));
+    }
+    await Promise.all(ids.map(refreshTrackAnalysis));
+    if (ids.length > 0) bumpLibraryTracks();
+  } finally {
+    lastAnalysisApplyAt = performance.now();
+    analysisApplying = false;
+    if (queuedAnalysisRefresh.size > 0 || queuedAnalysisFinish.size > 0) scheduleAnalysisApply();
   }
 }
 
 function finishAnalyzingTrack(trackId: number) {
-  library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => id !== trackId);
-  const track = library.tracks.find((t) => t.id === trackId);
-  if (track) void refreshTrackAnalysisDisplay(track);
+  queueAnalysisRefresh(trackId, true);
 }
 
 /** Puts tracks into the state a first analysis starts from: no waveform, and no BPM or key unless hand-set. */
@@ -674,8 +722,7 @@ function handleAnalysisProgressEvent(progress: {
 }
 
 function handleAnalysisPartialEvent(payload: { track_id: number }) {
-  const track = library.tracks.find((t) => t.id === payload.track_id);
-  if (track) void refreshTrackAnalysisDisplay(track);
+  queueAnalysisRefresh(payload.track_id, false);
 }
 
 function handleAnalysisCompleteEvent() {
