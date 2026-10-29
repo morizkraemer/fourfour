@@ -71,7 +71,7 @@ test('expands the big player and collapses it with Escape', async ({ smoke: { pa
   await expect(page.locator('.ff-player-compact')).toBeVisible();
 });
 
-test('the BPM pencil switches to track mode without shifting the header, and a step re-spaces the grid', async ({ smoke }) => {
+test('the BPM pencil opens its popup without shifting the header, and saving re-spaces the grid', async ({ smoke }) => {
   const { page } = smoke;
   await loadByDoubleClick(page, TRACK);
   await page.locator('.ff-player-compact__expand-btn').click();
@@ -85,21 +85,17 @@ test('the BPM pencil switches to track mode without shifting the header, and a s
   const keyBefore = await fieldBox('Key');
 
   await group.getByRole('button', { name: 'Edit track BPM' }).click();
-  const bpm = group.locator('[aria-label="Track BPM"][role="spinbutton"] .ff-tfield__text');
-  await expect(bpm).toHaveText('126.00');
-  expect(await fieldBox('Track BPM')).toEqual(bpmBefore);
+  const popup = page.getByRole('dialog', { name: 'Track BPM' });
+  await expect(popup.getByRole('textbox', { name: 'Track BPM' })).toHaveValue('126.00');
+  expect(await fieldBox('BPM')).toEqual(bpmBefore);
   expect(await fieldBox('Key')).toEqual(keyBefore);
   expect(await pads.boundingBox()).toEqual(padsBefore);
 
-  await group.locator('[aria-label="Raise Track BPM"]').click();
-  await expect(bpm).toHaveText('126.10');
-  await group.getByRole('button', { name: 'Halve track BPM' }).click();
-  await expect(bpm).toHaveText('63.05');
+  await popup.getByRole('button', { name: 'Halve track BPM' }).click();
+  await popup.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(popup).toHaveCount(0);
   await expect(rowByTitle(page, TRACK).locator('[data-col-key="bpm"]')).toContainText('63.0');
   await expect.poll(async () => (await smoke.invokes('rescale_beat_grid')).length + (await smoke.invokes('set_beat_grid')).length).toBeGreaterThan(0);
-
-  await page.keyboard.press('Escape');
-  await expect(group.locator('[aria-label="BPM"][role="spinbutton"]')).toBeVisible();
   await expect(page.locator('.ff-xp')).toBeVisible();
   expect(await fieldBox('BPM')).toEqual(bpmBefore);
 });

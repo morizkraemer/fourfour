@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 5299;
+const PORT = Number(process.env.FF_SMOKE_PORT ?? 5299);
 const OUT_DIR = 'smoke/.dist';
 
 export default defineConfig({
