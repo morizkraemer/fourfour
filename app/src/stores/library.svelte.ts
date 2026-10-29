@@ -3,6 +3,7 @@
  * Interfaces with tauri.svelte.ts service layer and provides fallback mock data.
  */
 
+import { appSettings, loadAppSettings, setAnalyzeAfterImport } from './app-settings.svelte.ts';
 import {
   getVersion,
   getLibraryPath,
@@ -865,13 +866,18 @@ async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
 
   await loadState();
 
-  if (options?.analyze) {
-    const ids = newTracks.map((t) => t.id);
-    if (ids.length > 0) await analyzeTrackIds(ids);
-  } else {
-    library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
-    library.showAnalysisPrompt = true;
+  await offerAnalysis(newTracks.map((t) => t.id), options?.analyze);
+}
+
+async function offerAnalysis(ids: number[], analyzeNow = false) {
+  if (ids.length === 0) return;
+  await loadAppSettings();
+  if (analyzeNow || appSettings.analyzeAfterImport) {
+    await analyzeTrackIds(ids);
+    return;
   }
+  library.pendingAnalyzeTrackIds = ids;
+  library.showAnalysisPrompt = true;
 }
 
 /** Close the post-import analyze prompt without running analysis. */
@@ -881,9 +887,10 @@ export function dismissAnalysisPrompt() {
 }
 
 /** Run analysis for tracks pending from the last import, then close the prompt. */
-export async function confirmAnalysisPrompt() {
+export async function confirmAnalysisPrompt(always = false) {
   const ids = [...library.pendingAnalyzeTrackIds];
   dismissAnalysisPrompt();
+  if (always) await setAnalyzeAfterImport(true).catch((err) => console.error('setAnalyzeAfterImport failed:', err));
   if (ids.length > 0) await analyzeTrackIds(ids);
 }
 
@@ -917,10 +924,7 @@ export async function importDroppedTracks(paths: string[]): Promise<{ outcome: I
     const outcome = await scanAndAdd(paths);
     await loadState();
     library.tauriError = lastTauriError;
-    if (outcome.added.length > 0) {
-      library.pendingAnalyzeTrackIds = outcome.added.map((t) => t.id);
-      library.showAnalysisPrompt = true;
-    }
+    await offerAnalysis(outcome.added.map((t) => t.id));
     const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
     return { outcome, ids };
   } catch (err) {

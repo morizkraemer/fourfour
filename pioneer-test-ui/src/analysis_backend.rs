@@ -8,6 +8,7 @@ use pioneer_usb_writer::models::AnalysisResult;
 pub const BACKEND_ENV: &str = "FOURFOUR_ANALYSIS_BACKEND";
 pub const THREADS_ENV: &str = "FOURFOUR_ANALYSIS_THREADS";
 const CONFIG_KEY: &str = "analysis_backend";
+const ANALYZE_AFTER_IMPORT_KEY: &str = "auto_analyze_after_import";
 const AUTO_ANALYZE_KEY: &str = "auto_analyze_new_tracks";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,6 +124,19 @@ pub fn write_auto_analyze_new(config_path: &Path, enabled: bool) -> Result<(), S
     update_config(config_path, AUTO_ANALYZE_KEY, Some(serde_json::Value::Bool(enabled)))
 }
 
+/// Whether an import starts analysis without asking (default off).
+pub fn read_analyze_after_import(config_path: &Path) -> bool {
+    std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json.get(ANALYZE_AFTER_IMPORT_KEY)?.as_bool())
+        .unwrap_or(false)
+}
+
+pub fn write_analyze_after_import(config_path: &Path, enabled: bool) -> Result<(), String> {
+    update_config(config_path, ANALYZE_AFTER_IMPORT_KEY, Some(serde_json::Value::Bool(enabled)))
+}
+
 fn update_config(config_path: &Path, key: &str, value: Option<serde_json::Value>) -> Result<(), String> {
     let mut json = std::fs::read_to_string(config_path)
         .ok()
@@ -236,6 +250,16 @@ mod tests {
         assert_eq!(json["library_path"], "/lib");
         write_setting(&cfg, None).unwrap();
         assert_eq!(read_setting(&cfg), None);
+    }
+
+    #[test]
+    fn analyze_after_import_defaults_off_and_persists() {
+        let cfg = std::env::temp_dir().join(format!("ff-aai-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&cfg);
+        assert!(!read_analyze_after_import(&cfg));
+        write_analyze_after_import(&cfg, true).unwrap();
+        assert!(read_analyze_after_import(&cfg));
+        std::fs::remove_file(&cfg).unwrap();
     }
 
     #[test]

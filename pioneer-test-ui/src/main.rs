@@ -346,6 +346,16 @@ fn set_auto_analyze_new(enabled: bool, app: AppHandle) -> Result<(), String> {
     analysis_backend::write_auto_analyze_new(&config_path(&app)?, enabled)
 }
 
+#[tauri::command]
+fn get_analyze_after_import(app: AppHandle) -> bool {
+    config_path(&app).map_or(false, |path| analysis_backend::read_analyze_after_import(&path))
+}
+
+#[tauri::command]
+fn set_analyze_after_import(enabled: bool, app: AppHandle) -> Result<(), String> {
+    analysis_backend::write_analyze_after_import(&config_path(&app)?, enabled)
+}
+
 /// Analyze or re-analyze specific tracks by library id.
 #[tauri::command]
 async fn analyze_track_ids(
@@ -1278,6 +1288,8 @@ fn main() {
             resume_analysis,
             get_auto_analyze_new,
             set_auto_analyze_new,
+            get_analyze_after_import,
+            set_analyze_after_import,
             enqueue_analysis,
             prioritize_analysis,
             write_usb,

@@ -2,6 +2,8 @@ import {
   getAutoAnalyzeNew,
   setAutoAnalyzeNew as saveAutoAnalyzeNew,
   getAnalysisBackend,
+  getAnalyzeAfterImport,
+  setAnalyzeAfterImport as saveAnalyzeAfterImport,
   setAnalysisBackend as saveAnalysisBackend,
   getIsTauri,
 } from '../services/tauri.svelte.ts';
@@ -23,6 +25,7 @@ export const ANALYSIS_ENGINE_CHOICES: ReadonlyArray<{ value: AnalysisEngineChoic
 
 export const appSettings = $state({
   autoAnalyzeNew: true,
+  analyzeAfterImport: false,
   analysisEngine: 'auto' as AnalysisEngineChoice,
   loaded: false,
 });
@@ -35,11 +38,13 @@ function engineChoice(stored: string | null): AnalysisEngineChoice {
 
 export function loadAppSettings(): Promise<void> {
   loading ??= (async () => {
-    const [autoAnalyzeNew, backend] = await Promise.all([
+    const [autoAnalyzeNew, analyzeAfterImport, backend] = await Promise.all([
       getAutoAnalyzeNew().catch(() => true),
+      getAnalyzeAfterImport().catch(() => false),
       getAnalysisBackend().catch(() => null),
     ]);
     appSettings.autoAnalyzeNew = autoAnalyzeNew;
+    appSettings.analyzeAfterImport = analyzeAfterImport;
     appSettings.analysisEngine = engineChoice(backend);
     appSettings.loaded = true;
   })();
@@ -53,6 +58,17 @@ export async function setAutoAnalyzeNew(enabled: boolean): Promise<void> {
     await saveAutoAnalyzeNew(enabled);
   } catch (err) {
     appSettings.autoAnalyzeNew = previous;
+    throw err;
+  }
+}
+
+export async function setAnalyzeAfterImport(enabled: boolean): Promise<void> {
+  const previous = appSettings.analyzeAfterImport;
+  appSettings.analyzeAfterImport = enabled;
+  try {
+    await saveAnalyzeAfterImport(enabled);
+  } catch (err) {
+    appSettings.analyzeAfterImport = previous;
     throw err;
   }
 }
