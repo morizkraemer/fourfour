@@ -159,7 +159,7 @@ describe('stripGains', () => {
       const bands = syntheticBands(1200, seed + 3, 240, 126, profile);
       expect(stripGains(bands)).toEqual(sortedLayerGains(bands));
     }
-    const bytes = { low: Uint8Array.from({ length: 999 }, (_, i) => (i * 37) % 128), mid: Uint8Array.from({ length: 999 }, (_, i) => (i * 11) % 90), high: new Uint8Array(999) };
+    const bytes = { low: Float32Array.from({ length: 999 }, (_, i) => (i * 37) % 128), mid: Float32Array.from({ length: 999 }, (_, i) => (i * 11) % 90), high: new Float32Array(999) };
     expect(stripGains(bytes)).toEqual(sortedLayerGains(bytes));
   });
 
