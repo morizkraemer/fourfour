@@ -10,6 +10,9 @@ mod band_analysis;
 #[allow(dead_code)]
 #[path = "../analysis_priority.rs"]
 mod analysis_priority;
+#[allow(dead_code)]
+#[path = "../waveform_detail.rs"]
+mod waveform_detail;
 
 #[path = "../analysis_run.rs"]
 mod analysis_run;

@@ -396,6 +396,8 @@ pub(crate) enum RunOutcome {
 
 const FAST_STAGES: u8 = analysis_stage::WAVEFORM | analysis_stage::KEY;
 const PYTHON_MAX_IN_FLIGHT: usize = 3;
+/// The waveform detail cache under the app data dir (`get_waveform_detail` in main.rs reads it).
+const DETAIL_CACHE_DIR: &str = "waveform-detail";
 /// Model jobs in flight: one per this many model threads, so the next tracks decode while the model runs.
 const MODEL_THREADS_PER_JOB: usize = 3;
 const MIN_MODEL_JOBS: usize = 3;
@@ -542,6 +544,7 @@ impl Drop for NowGuard {
 }
 
 /// The now lane: one track, every thread, background analysis paused, waveform stored first.
+#[allow(clippy::too_many_arguments)]
 async fn run_now_lane(
     shared: SharedLibrary,
     coordinator: AnalysisCoordinator,
@@ -550,6 +553,7 @@ async fn run_now_lane(
     runner: Runner,
     wide_threads: usize,
     sink: Arc<dyn AnalysisSink>,
+    detail_dir: Option<PathBuf>,
 ) -> Result<(), String> {
     let (track_id, source_path) = item;
     let _guard = NowGuard { coordinator: coordinator.clone(), track_id };
@@ -566,8 +570,13 @@ async fn run_now_lane(
             let bands_path = source_path.clone();
             let bands = tokio::task::spawn_blocking(move || {
                 crate::analysis_priority::run_below_ui(|| {
-                    if let Ok(waves) = crate::band_analysis::measure_waveforms(&bands_path) {
+                    if let Ok((waves, detail)) = crate::band_analysis::measure_waveforms_and_detail(&bands_path) {
                         on_partial(fourfour_analysis::service::waveform_only_result(&waves));
+                        if let Some(dir) = &detail_dir {
+                            if let Err(e) = crate::waveform_detail::store_detail(dir, &bands_path, &detail) {
+                                eprintln!("waveform detail of {} not cached: {e}", bands_path.display());
+                            }
+                        }
                     }
                 })
             });
@@ -606,7 +615,10 @@ async fn prioritize_with_runner(
     match coordinator.claim_now(item.0, wide_threads) {
         NowClaim::AlreadyRunning => Ok(()),
         NowClaim::NoRun => run_with_runner(shared, coordinator, vec![item], sink, env, Some(runner)).await.map(|_| ()),
-        NowClaim::Granted { cancel } => run_now_lane(shared, coordinator, item, cancel, runner, wide_threads, sink).await,
+        NowClaim::Granted { cancel } => {
+            let detail_dir = env.app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
+            run_now_lane(shared, coordinator, item, cancel, runner, wide_threads, sink, detail_dir).await
+        }
     }
 }
 
