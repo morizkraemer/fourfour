@@ -1,6 +1,6 @@
 <!--
   Settings.svelte — Preferences sheet over the library: a page list by object
-  (Library, Backup, Analysis, Audio, Keyboard, Advanced) and one short page at a time.
+  (Library, Backup, Analysis, Audio, Keyboard, Advanced, About) and one short page at a time.
   Opened from the footer status bar gear, ⌘, or the command palette.
 -->
 <script>
@@ -23,6 +23,7 @@
   import AudioPage from './settings/AudioPage.svelte';
   import ShortcutsSettings from './ShortcutsSettings.svelte';
   import AdvancedPage from './settings/AdvancedPage.svelte';
+  import AboutPage from './settings/AboutPage.svelte';
 
   $effect(() => {
     if (ui.settingsOpen) void loadAppSettings();
@@ -46,6 +47,8 @@
       case 'audio':
         if (!getIsTauri()) return 'Desktop app only';
         return `${playbackSettings.outputDevice ?? 'System default'} · ${playbackSettings.sampleRate / 1000} kHz`;
+      case 'about':
+        return library.appVersion ? `v${library.appVersion}` : '';
       case 'keyboard':
         return shortcuts.hasCustom() ? 'Customized' : `${shortcuts.actions.length} shortcuts`;
       default:
@@ -75,6 +78,8 @@
     <AudioPage />
   {:else if activeKey === 'keyboard'}
     <ShortcutsSettings />
+  {:else if activeKey === 'about'}
+    <AboutPage />
   {:else}
     <AdvancedPage />
   {/if}

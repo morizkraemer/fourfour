@@ -19,6 +19,7 @@ export const SETTINGS_PAGES = [
   { key: 'audio', label: 'Audio', keywords: ['output', 'device', 'sample', 'buffer', 'latency', 'sound'] },
   { key: 'keyboard', label: 'Keyboard', keywords: ['shortcuts', 'keys', 'bindings', 'hotkeys'] },
   { key: 'advanced', label: 'Advanced', keywords: ['reset', 'debug', 'developer'] },
+  { key: 'about', label: 'About', keywords: ['version', 'icon', 'credits', 'licence', 'license'] },
 ] as const;
 
 export type SettingsPageKey = (typeof SETTINGS_PAGES)[number]['key'];
