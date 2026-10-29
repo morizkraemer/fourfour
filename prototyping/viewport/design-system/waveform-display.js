@@ -550,8 +550,17 @@ export default class WaveformDisplay {
 
         const w = size.w;
         const h = size.h;
-        const ctx = this._resizeCanvas(canvas, w, h);
         const palette = wavePalette();
+        const dpr = devicePixelRatio;
+        const playedPx = this._playheadFrac > 0 ? Math.round(Math.min(1, this._playheadFrac) * w * dpr) : 0;
+        const visibleFrac = 1.0 / this._zoom;
+        const viewFromPx = this._zoom > 1.0 ? Math.round(Math.max(0, this._offset * w) * dpr) : 0;
+        const viewToPx = this._zoom > 1.0 ? Math.round(Math.min(w, (this._offset + visibleFrac) * w) * dpr) : 0;
+        const shown = `${w}|${h}|${dpr}|${playedPx}|${viewFromPx}|${viewToPx}|${palette.version}`;
+        if (!this._overviewDirty && shown === this._overviewShown) return;
+        this._overviewShown = shown;
+
+        const ctx = this._resizeCanvas(canvas, w, h);
 
         if (this._overviewDirty || this._overviewCacheW !== w || this._overviewCacheH !== h || this._paletteVersion !== palette.version) {
             this._paletteVersion = palette.version;
@@ -563,14 +572,11 @@ export default class WaveformDisplay {
 
         ctx.drawImage(this._overviewCache, 0, 0, w, h);
 
-        if (this._playheadFrac > 0) {
-            dimPlayed(ctx, Math.min(1, this._playheadFrac) * w, h, palette);
-        }
+        if (playedPx > 0) dimPlayed(ctx, playedPx / dpr, h, palette);
 
-        const visibleFrac = 1.0 / this._zoom;
-        const x1 = Math.max(0, this._offset * w);
-        const x2 = Math.min(w, (this._offset + visibleFrac) * w);
-        if (this._zoom > 1.0 && x2 > x1) {
+        if (viewToPx > viewFromPx) {
+            const x1 = viewFromPx / dpr;
+            const x2 = viewToPx / dpr;
             ctx.fillStyle = ink(palette, 0.08);
             ctx.fillRect(x1, 0, x2 - x1, h);
             ctx.strokeStyle = ink(palette, 0.3);
@@ -623,10 +629,11 @@ export default class WaveformDisplay {
         const ctx = this._resizeCanvas(canvas, w, h);
         const palette = wavePalette();
 
-        ctx.fillStyle = palette.bg;
-        ctx.fillRect(0, 0, w, h);
-
-        if (!this._data) return;
+        if (!this._data) {
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, w, h);
+            return;
+        }
 
         const visibleFrac = 1.0 / this._zoom;
         const startFrac = this._offset;
@@ -825,13 +832,19 @@ export default class WaveformDisplay {
         if (win) {
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, widthPx, Math.round(h * devicePixelRatio));
             this._paintWindow(ctx, win, widthPx, Math.round(h * devicePixelRatio), startFrac, endFrac, palette);
             ctx.restore();
             return;
         }
         const fine = compact ? null : this._zoomDetailBands(widthPx, startFrac, endFrac);
         const bands = fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
-        if (!bands || bands.low.length === 0) return;
+        if (!bands || bands.low.length === 0) {
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, w, h);
+            return;
+        }
         const dpr = devicePixelRatio;
         const widthDevicePx = Math.round(w * dpr);
         ctx.save();
@@ -842,6 +855,7 @@ export default class WaveformDisplay {
             widthPx: Math.round(w * dpr),
             heightPx: Math.round(h * dpr),
             palette,
+            ground: palette.bg,
             dpr,
             decay: compact ? COMPACT_DECAY : fine ? 0 : ZOOM_DECAY,
             peakWeights: fine ? ZOOM_PEAK_WEIGHT : undefined,
@@ -898,24 +912,16 @@ export default class WaveformDisplay {
         return width;
     }
 
-    _drawBarLabel(ctx, x, w, h, barNumber, isPhrase, palette) {
+    _drawBarLabel(ctx, x, barNumber, isPhrase, palette) {
         const fontSize = 10;
         const label = String(barNumber);
         ctx.font = `${isPhrase ? 'bold ' : ''}${fontSize}px system-ui`;
         const labelW = this._labelWidth(ctx, label) + 2;
-        const nearCentre = Math.abs(x - w / 2) < 28;
         ctx.fillStyle = palette.bg;
-        if (nearCentre) {
-            ctx.textAlign = 'left';
-            ctx.fillRect(x + 2, 0, labelW + 2, fontSize + 4);
-            ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
-            ctx.fillText(label, x + 4, fontSize + 2);
-        } else {
-            ctx.textAlign = 'right';
-            ctx.fillRect(x - labelW - 2, 0, labelW + 2, fontSize + 4);
-            ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
-            ctx.fillText(label, x - 2, fontSize + 2);
-        }
+        ctx.textAlign = 'left';
+        ctx.fillRect(x + 2, 0, labelW + 2, fontSize + 4);
+        ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
+        ctx.fillText(label, x + 4, fontSize + 2);
     }
 
     _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette) {
@@ -977,7 +983,7 @@ export default class WaveformDisplay {
                 ctx.stroke();
 
                 if (labelBars && (!labelPhrasesOnly || isPhrase)) {
-                    this._drawBarLabel(ctx, x, w, h, barNumber, isPhrase, palette);
+                    this._drawBarLabel(ctx, this._lineAt(x, 1), barNumber, isPhrase, palette);
                 }
             }
         }
@@ -1003,7 +1009,7 @@ export default class WaveformDisplay {
             ctx.lineTo(lineX, h);
             ctx.stroke();
             if (labelPhrases && barStride === 4) {
-                this._drawBarLabel(ctx, x, w, h, barNumber, true, palette);
+                this._drawBarLabel(ctx, this._lineAt(x, 1), barNumber, true, palette);
             }
         }
     }
