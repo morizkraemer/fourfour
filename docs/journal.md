@@ -264,3 +264,4 @@
 2026-10-29 06:20 fb-chrome2 landed on ov-1028: search icon hugs organize panel edge, sidebar icon on top-bar centre line; smoke 41/41; Mac check+install started
 2026-10-29 06:35 orchestrator - ov-1028 9766fb7 (search icon fix) check+install on Mac
 2026-10-29 07:05 fb-chrome3 landed on ov-1028: collapsed search opens centred palette modal; smoke 45/45; Mac check+install started
+2026-10-29 07:40 orchestrator - fix on ov-1028 968164b: mounted disk images (BusProtocol Disk Image / Virtual) no longer offered as USB sticks on macOS (Merlin report: 'Patches' installer showed as stick); 2 tests; Mac install started. Icon round 15 (single straight slice) to fb-icons
