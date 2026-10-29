@@ -58,6 +58,8 @@ import {
 import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
 import { outermostIds } from '../lib/playlistSelection.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
+import { fileStateOf } from './file-status.svelte.ts';
+import { fileStateGlyph } from '../lib/fileHealth.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
@@ -713,6 +715,9 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     },
     get rowCover() {
       return artwork.getRow(this.id, this.raw?.has_artwork);
+    },
+    get status() {
+      return fileStateGlyph(fileStateOf(this.id));
     },
     get bands() {
       return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);

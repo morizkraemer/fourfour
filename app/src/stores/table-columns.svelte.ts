@@ -41,6 +41,7 @@ export type TableLayout = {
 };
 
 const DEFAULT_COLUMNS: TableColumn[] = [
+  { key: 'status', label: '', width: 20 },
   { key: 'fav', label: 'FAV', width: 20 },
   { key: 'index', label: '#', width: 28 },
   { key: 'wave', label: 'PREVIEW', width: 120 },
@@ -55,6 +56,7 @@ const DEFAULT_COLUMNS: TableColumn[] = [
 
 /** Full catalog of columns users can show/hide (includes defaults + extras). */
 export const ALL_COLUMN_KEYS: { key: string; label: string }[] = [
+  { key: 'status', label: 'File status' },
   { key: 'fav', label: 'Favorites' },
   { key: 'index', label: '#' },
   { key: 'wave', label: 'Preview' },
@@ -226,9 +228,12 @@ function mergeSavedColumns(
       }));
     }
   }
-  for (const def of fallbackColumns) {
-    if (!byKey.has(def.key)) ordered.push({ ...def });
-  }
+  fallbackColumns.forEach((def, i) => {
+    if (byKey.has(def.key)) return;
+    const nextKey = fallbackColumns.slice(i + 1).find(d => ordered.some(c => c.key === d.key))?.key;
+    const at = nextKey ? ordered.findIndex(c => c.key === nextKey) : ordered.length;
+    ordered.splice(at, 0, { ...def });
+  });
   for (const extra of ALL_COLUMN_KEYS) {
     if (!ordered.some(c => c.key === extra.key) && byKey.has(extra.key)) {
       ordered.push(normalizeColumn({ ...extraColumnDef(extra.key)!, ...byKey.get(extra.key)! }));

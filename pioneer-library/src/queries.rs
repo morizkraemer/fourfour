@@ -142,6 +142,22 @@ pub fn track_exists_by_path(conn: &Connection, source_path: &Path) -> Result<boo
     Ok(count > 0)
 }
 
+pub fn select_track_files(conn: &Connection) -> Result<Vec<(i64, String, i64)>> {
+    let mut stmt = conn.prepare("SELECT id, source_path, file_size FROM tracks ORDER BY id")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn update_source_path(conn: &Connection, id: i64, source_path: &Path) -> Result<bool> {
+    let changed = conn
+        .execute(
+            "UPDATE tracks SET source_path = ?2 WHERE id = ?1",
+            params![id, source_path.to_string_lossy().as_ref()],
+        )
+        .with_context(|| format!("Failed to relink track {id} to {}", source_path.display()))?;
+    Ok(changed > 0)
+}
+
 pub fn track_count(conn: &Connection) -> Result<u32> {
     let count: u32 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
     Ok(count)

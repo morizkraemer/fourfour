@@ -7,6 +7,10 @@ export interface SmokeWindow {
   __smokeDialogs: string[];
   __smokeAnswerDialog: boolean;
   __smokeAnalysis: (trackId: number) => Promise<Record<string, unknown>>;
+  __smokeMissing: number[];
+  __smokeUnreadable: number[];
+  __smokeNotFound: number[];
+  __smokePickPath: string | null;
 }
 
 export function installTauriMock(initial: LoadedState) {
@@ -15,6 +19,11 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeUnhandled = [];
   w.__smokeDialogs = [];
   w.__smokeAnswerDialog = true;
+  w.__smokeMissing = [];
+  w.__smokeUnreadable = [];
+  w.__smokeNotFound = [];
+  w.__smokePickPath = '/Music/moved';
+  const relocated = new Set<number>();
 
   let nextCallbackId = 1;
   const listeners = new Map<number, { event: string; handler: number }>();
@@ -63,8 +72,39 @@ export function installTauriMock(initial: LoadedState) {
     return { ...data, ...(grid ?? {}), ...(cues ? { cue_points: cues } : {}) };
   }
 
+  function health() {
+    return {
+      running: false,
+      checked_at_ms: Date.now(),
+      duration_ms: 40,
+      total: initial.tracks.length,
+      missing: [...w.__smokeMissing],
+      error: [...w.__smokeUnreadable],
+      relocated: [...relocated],
+    };
+  }
+
+  function relink(ids: number[], folder: string) {
+    w.__smokeMissing = w.__smokeMissing.filter((id) => !ids.includes(id));
+    w.__smokeUnreadable = w.__smokeUnreadable.filter((id) => !ids.includes(id));
+    ids.forEach((id) => relocated.add(id));
+    return ids.map((id) => ({ track_id: id, source_path: `${folder}/Smoke Track ${String(id).padStart(2, '0')}.mp3` }));
+  }
+
   async function handle(cmd: string, args: Record<string, any>): Promise<unknown> {
     switch (cmd) {
+      case 'get_library_health':
+      case 'check_library_files':
+        return health();
+      case 'relocate_missing_in_folder': {
+        const notFound = w.__smokeMissing.filter((id) => w.__smokeNotFound.includes(id));
+        const matched = relink(w.__smokeMissing.filter((id) => !notFound.includes(id)), args.folder);
+        return { report: { matched, ambiguous: [], not_found: notFound }, health: health() };
+      }
+      case 'locate_track_file':
+        return { relinked: { track_id: args.trackId, source_path: args.path }, health: (relink([args.trackId], ''), health()) };
+      case 'plugin:dialog|open':
+        return w.__smokePickPath;
       case 'load_state':
         return { tracks: initial.tracks, playlists };
       case 'save_state':

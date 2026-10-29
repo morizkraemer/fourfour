@@ -1331,3 +1331,80 @@ export function listenToRekordboxImportProgress(
     });
   return () => unsubscribe();
 }
+
+export interface LibraryHealth {
+  running: boolean;
+  checked_at_ms: number | null;
+  duration_ms: number;
+  total: number;
+  missing: number[];
+  error: number[];
+  relocated: number[];
+}
+
+export interface Relinked {
+  track_id: number;
+  source_path: string;
+}
+
+export interface RelocateReport {
+  matched: Relinked[];
+  ambiguous: number[];
+  not_found: number[];
+}
+
+function mockMissingIds(): number[] {
+  if (typeof location === 'undefined') return [];
+  const raw = new URLSearchParams(location.search).get('missing') ?? '';
+  return raw.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+}
+
+let mockHealth: LibraryHealth = {
+  running: false,
+  checked_at_ms: null,
+  duration_ms: 0,
+  total: 0,
+  missing: mockMissingIds(),
+  error: [],
+  relocated: [],
+};
+
+function mockChecked(): LibraryHealth {
+  mockHealth = { ...mockHealth, checked_at_ms: Date.now(), duration_ms: 12, total: mockTracks.length };
+  return mockHealth;
+}
+
+export async function checkLibraryFiles(): Promise<LibraryHealth> {
+  if (useBrowserMocks()) return mockChecked();
+  return invoke<LibraryHealth>('check_library_files');
+}
+
+export async function getLibraryHealth(): Promise<LibraryHealth> {
+  if (useBrowserMocks()) return mockHealth.checked_at_ms ? mockHealth : mockChecked();
+  return invoke<LibraryHealth>('get_library_health');
+}
+
+export async function relocateMissingInFolder(folder: string): Promise<{ report: RelocateReport; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    const matched = mockHealth.missing.map((id) => ({ track_id: id, source_path: `${folder}/track-${id}.mp3` }));
+    mockHealth = { ...mockHealth, missing: [], relocated: [...mockHealth.relocated, ...matched.map((m) => m.track_id)] };
+    return { report: { matched, ambiguous: [], not_found: [] }, health: mockHealth };
+  }
+  return invoke('relocate_missing_in_folder', { folder });
+}
+
+export async function locateTrackFile(trackId: number, path: string): Promise<{ relinked: Relinked; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    mockHealth = {
+      ...mockHealth,
+      missing: mockHealth.missing.filter((id) => id !== trackId),
+      relocated: [...mockHealth.relocated, trackId],
+    };
+    return { relinked: { track_id: trackId, source_path: path }, health: mockHealth };
+  }
+  return invoke('locate_track_file', { trackId, path });
+}
+
+export function listenToLibraryHealth(callback: (health: LibraryHealth) => void) {
+  return subscribe('library-health', callback);
+}

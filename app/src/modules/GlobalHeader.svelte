@@ -10,7 +10,7 @@
   already carries analysis and sync progress) so the narrower bar stays calm.
 -->
 <script>
-  import { FilterInput, Spinner, StatusDot } from '$ds';
+  import { ContextMenu, FilterInput, Spinner, StatusDot } from '$ds';
   import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
   import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { stickSync } from '../stores/stick-sync.svelte.ts';
@@ -18,15 +18,30 @@
   import { searchModeForColumn } from '../lib/searchLayout.ts';
   import SearchIconButton from './SearchIconButton.svelte';
   import { stickLabel, topbarIdleStatus } from '../lib/topbarStatus.ts';
+  import { fileStatus } from '../stores/file-status.svelte.ts';
+  import { checkLibraryAgain, openHealthDialog, relocateMissing, showProblemTracks } from '../stores/file-health.svelte.ts';
+  import { problemLabel } from '../lib/fileHealth.ts';
 
   let filterInputEl = $state(null);
+  let statusMenu = $state({ open: false, x: 0, y: 0 });
+  let problems = $derived(problemLabel(fileStatus));
+  let statusMenuItems = $derived([
+    { label: 'Relocate missing…', disabled: fileStatus.missing === 0 || fileStatus.relocating, onClick: () => void relocateMissing() },
+    fileStatus.onlyProblems
+      ? { label: 'Show all tracks', onClick: () => showProblemTracks(false) }
+      : { label: 'Show missing tracks', onClick: () => showProblemTracks(true) },
+    { label: 'Check again', disabled: fileStatus.running, onClick: () => void checkLibraryAgain() },
+    { isSeparator: true },
+    { label: 'Library check results…', onClick: openHealthDialog },
+  ]);
   let searchEl = $state(null);
   let headerEl = $state(null);
   let returnFocusEl = null;
 
   let activeTracks = $derived(tracksForSidebarSource(ui.activeSidebarRow));
   let filteredCount = $derived(filterTracks(activeTracks, ui.listFilter).length);
-  let contextLabel = $derived(sidebarSourceLabel(ui.activeSidebarRow));
+  let showingProblems = $derived(fileStatus.onlyProblems && ui.activeSidebarRow === 'All Tracks');
+  let contextLabel = $derived(showingProblems ? 'Missing tracks' : sidebarSourceLabel(ui.activeSidebarRow));
   let searchCollapsed = $derived(ui.searchMode !== 'field');
   let showChips = $derived(!ui.organize.expanded);
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
@@ -80,6 +95,24 @@
     }
   });
 
+  let statusButtonEl = $state(null);
+  let closedUnderPointerAt = -Infinity;
+
+  function closeStatusMenu() {
+    statusMenu = { ...statusMenu, open: false };
+    if (statusButtonEl?.matches(':hover')) closedUnderPointerAt = performance.now();
+  }
+
+  function toggleStatusMenu(e) {
+    if (statusMenu.open || performance.now() - closedUnderPointerAt < 400) {
+      closedUnderPointerAt = -Infinity;
+      statusMenu = { ...statusMenu, open: false };
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    statusMenu = { open: true, x: rect.left, y: rect.bottom + 4 };
+  }
+
   function openIdleStick(volume) {
     dockOrganizeTarget({ kind: 'usb', id: volume, label: stickLabel(volume) });
   }
@@ -110,7 +143,7 @@
 <div class="ff-gheader ff-titlebar-band ff-titlebar-band--ruled" class:ff-gheader--icon={ui.searchMode === 'icon'} data-tauri-drag-region bind:this={headerEl}>
   <div class="ff-gheader__ctx" data-tauri-drag-region>
     <b class="ff-gheader__title">{contextLabel}</b>
-    <span class="ff-gheader__count">{activeTracks.length.toLocaleString()}</span>
+    <span class="ff-gheader__count">{(showingProblems ? fileStatus.missing + fileStatus.error : activeTracks.length).toLocaleString()}</span>
   </div>
   <div class="ff-gheader__searchslot" class:ff-gheader__searchslot--cover={searchCollapsed}>
     <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
@@ -126,6 +159,19 @@
     </div>
   </div>
   <div class="ff-gheader__right" data-tauri-drag-region>
+    {#if problems}
+      <button
+        type="button"
+        class="ff-gheader__chip ff-gheader__chip--idle ff-gheader__chip--warn"
+        data-library-status
+        bind:this={statusButtonEl}
+        aria-haspopup="menu"
+        aria-expanded={statusMenu.open}
+        onclick={toggleStatusMenu}
+      >
+        <StatusDot status="warn" /> {problems}
+      </button>
+    {/if}
     {#if showChips}
       {#if analyzing}
         <span class="ff-gheader__chip">
@@ -150,6 +196,14 @@
     <SearchIconButton />
   {/if}
 </div>
+
+<ContextMenu
+  open={statusMenu.open && !!problems}
+  x={statusMenu.x}
+  y={statusMenu.y}
+  items={statusMenuItems}
+  onClose={closeStatusMenu}
+/>
 
 <style>
   .ff-gheader {
@@ -265,6 +319,9 @@
   .ff-gheader__chip--idle:hover {
     background: var(--ff-hover);
     color: var(--ff-text);
+  }
+  .ff-gheader__chip--warn {
+    color: var(--ff-status-warn);
   }
   .ff-gheader__chip b {
     font-weight: 500;
