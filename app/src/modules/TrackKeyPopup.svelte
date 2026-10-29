@@ -8,7 +8,7 @@
   import { SegmentedControl, keyColor } from '$ds';
   import Popover from './Popover.svelte';
   import { player, setTrackMode } from '../stores/player.svelte.ts';
-  import { commitTrackKey, resetTrackToAnalyzed } from '../stores/track-edits.svelte.ts';
+  import { commitTrackKey, resetTrackFieldToAnalyzed } from '../stores/track-edits.svelte.ts';
   import { library } from '../stores/library.svelte.ts';
   import { camelotOfKey, harmonicNeighbours, keyCells, keyWrittenLike } from '../lib/tempo.ts';
 
@@ -49,7 +49,7 @@
   }
 
   function reset() {
-    if (trackId !== null) void resetTrackToAnalyzed(trackId);
+    if (trackId !== null) void resetTrackFieldToAnalyzed(trackId, 'key');
     close();
   }
 

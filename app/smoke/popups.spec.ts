@@ -62,14 +62,25 @@ test('the BPM popup halves, doubles and taps', async ({ smoke }) => {
   await expect(save(page)).toBeDisabled();
 
   const tap = bpmPopup(page).getByRole('button', { name: 'Tap', exact: true });
-  for (let i = 0; i < 5; i++) {
+  const setClock = (ms: number) => page.evaluate((now) => ((performance as { now: () => number }).now = () => now), ms);
+  for (let i = 0; i < 3; i++) {
+    await setClock(i * 500);
     await tap.click();
-    await page.waitForTimeout(400);
+    await expect(bpmInput(page)).toHaveValue('126.00');
   }
-  const tapped = Number(await bpmInput(page).inputValue());
-  expect(tapped).toBeGreaterThan(100);
-  expect(tapped).toBeLessThan(170);
-  expect(tapped).not.toBe(126);
+  await setClock(1500);
+  await tap.click();
+  await expect(bpmInput(page)).toHaveValue('120.00');
+  await setClock(1500 + 2500);
+  await tap.click();
+  await expect(bpmInput(page)).toHaveValue('120.00');
+  await setClock(4000 + 400);
+  await tap.click();
+  await setClock(4000 + 800);
+  await tap.click();
+  await setClock(4000 + 1200);
+  await tap.click();
+  await expect(bpmInput(page)).toHaveValue('150.00');
   await save(page).click();
   await expect.poll(async () => (await smoke.invokes('rescale_beat_grid')).length).toBe(1);
 });
@@ -132,8 +143,21 @@ test('Reset to analyzed releases the hand-set values and analyses the track agai
   await keyPen(page).click();
   await keyPopup(page).getByRole('button', { name: 'Reset to analyzed' }).click();
   await expect(keyPopup(page)).toHaveCount(0);
-  await expect.poll(async () => (await smoke.invokes('release_user_edits')).length).toBe(1);
+  await expect.poll(async () => await smoke.invokes('release_user_field')).toEqual([{ trackId: 3, field: 'key' }]);
   await expect.poll(async () => (await smoke.invokes('analyze_track_ids')).length).toBe(1);
+  expect(await smoke.invokes('release_user_edits')).toEqual([]);
+});
+
+test('the BPM popup resets only the BPM', async ({ smoke }) => {
+  const { page } = smoke;
+  await expandWithTrack(page);
+  await bpmPen(page).click();
+  await expect(bpmPopup(page).getByRole('button', { name: 'Reset to analyzed' })).toBeDisabled();
+  await page.keyboard.type('130');
+  await page.keyboard.press('Enter');
+  await bpmPen(page).click();
+  await bpmPopup(page).getByRole('button', { name: 'Reset to analyzed' }).click();
+  await expect.poll(async () => await smoke.invokes('release_user_field')).toEqual([{ trackId: 3, field: 'bpm' }]);
 });
 
 test('click outside closes a popup and opening the other pencil swaps them', async ({ smoke: { page } }) => {

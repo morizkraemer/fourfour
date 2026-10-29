@@ -1085,6 +1085,12 @@ export async function releaseUserEdits(trackId: number): Promise<void> {
   invalidateAnalysisCache(trackId);
 }
 
+/** Let re-analysis replace only the hand-set BPM and beat grid, or only the hand-set key. */
+export async function releaseUserField(trackId: number, field: 'bpm' | 'key'): Promise<void> {
+  await invokeOrMock('release_user_field', { trackId, field });
+  invalidateAnalysisCache(trackId);
+}
+
 /** Set a track's own BPM by hand: the beat grid is re-spaced from its first downbeat, re-analysis keeps both. */
 export async function rescaleBeatGrid(trackId: number, bpm: number): Promise<void> {
   await invokeOrMock('rescale_beat_grid', { trackId, bpm });
