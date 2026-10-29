@@ -159,13 +159,18 @@ function loadTrack(page: Page, rowIndex: number) {
 function expandToDetail(page: Page) {
   return page.evaluate(
     () =>
-      new Promise<number>((resolve, reject) => {
+      new Promise<{ drawn: number; longest: number }>((resolve, reject) => {
+        const q = (window as unknown as { __q50: Q50 }).__q50;
         const t0 = performance.now();
         (document.querySelector('.ff-player-compact__expand-btn') as HTMLElement).click();
+        const done = () => {
+          const drawn = performance.now() - t0;
+          setTimeout(() => resolve({ drawn, longest: q.longTasks.filter((t) => t.start >= t0 - 1).reduce((m, t) => Math.max(m, t.duration), 0) }), 100);
+        };
         const poll = () => {
           if (performance.now() - t0 > 15_000) return reject(new Error('expanded detail timed out'));
           const zoom = document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement | null;
-          if (zoom?.dataset.bands === 'detail') return requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - t0)));
+          if (zoom?.dataset.bands === 'detail') return requestAnimationFrame(() => requestAnimationFrame(done));
           requestAnimationFrame(poll);
         };
         poll();
@@ -241,7 +246,8 @@ test.describe('q50 perf paths', () => {
     record('track load to detail series ms', median(loads.map((l) => l.detail)));
     record('track load long-task ms', median(loads.map((l) => l.longTask)));
     record('track load overview painted after backend answer ms', median(loads.map((l) => l.afterAnswer)));
-    record('expand to detail drawn ms', median(expands));
+    record('expand to detail drawn ms', median(expands.map((e) => e.drawn)));
+    record('expand longest task ms', median(expands.map((e) => e.longest)));
     const mockMs = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.mockMs);
     record('mock get_analysis_data ms (not app time)', median(mockMs.get_analysis_data ?? [0]));
     record('mock get_waveform_detail ms (not app time)', median(mockMs.get_waveform_detail ?? [0]));
@@ -319,25 +325,30 @@ test('q50 expand-to-detail profile', async ({ browser }) => {
   await bootMetrics(page);
   await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
   const expands = [];
+  const traceOut = process.env.FF_PERF_TRACE_OUT;
   for (const index of [3, 5, 7, 9]) {
     await loadTrack(page, index);
-    const cdp = index === 9 ? await page.context().newCDPSession(page) : null;
+    if (traceOut && index === 3) await browser.startTracing(page, { path: traceOut, categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'blink.user_timing'] });
+    const cdp = !traceOut && index === Number(process.env.FF_PERF_PROFILE_INDEX ?? 9) ? await page.context().newCDPSession(page) : null;
     if (cdp) {
       await cdp.send('Profiler.enable');
       await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
       await cdp.send('Profiler.start');
     }
     expands.push(await expandToDetail(page));
+    if (traceOut && index === 3) await browser.stopTracing();
     if (cdp) {
       const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
       printProfile('expand', profile);
+      if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(process.env.FF_PERF_PROFILE_OUT, JSON.stringify(profile));
       await cdp.detach();
     }
     await page.locator('.ff-xp__collapse').click();
     await expect(page.locator('.ff-xp')).toHaveCount(0);
     await page.waitForTimeout(300);
   }
-  console.log(`expand to detail drawn ms: ${expands.map((e) => e.toFixed(0)).join(', ')}`);
+  console.log(`expand to detail drawn ms: ${expands.map((e) => e.drawn.toFixed(0)).join(', ')}`);
+  console.log(`expand longest task ms: ${expands.map((e) => e.longest.toFixed(0)).join(', ')}`);
   await context.close();
 });
 

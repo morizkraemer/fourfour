@@ -31,8 +31,20 @@ function fixtureTrack(i: number): TrackInfo {
   };
 }
 
+const PERF_ROW_BANDS = !!process.env.FF_PERF_ROW_BANDS;
+
+function rowBands(i: number) {
+  const bytes = new Uint8Array(128 * 3);
+  for (let c = 0; c < 128; c++) {
+    bytes[c] = 40 + ((c * 7 + i) % 80);
+    bytes[128 + c] = 20 + ((c * 3 + i) % 60);
+    bytes[256 + c] = 10 + ((c * 5 + i) % 40);
+  }
+  return Buffer.from(bytes).toString('base64');
+}
+
 export function fixtureTracks(): TrackInfo[] {
-  return Array.from({ length: TRACK_COUNT }, (_, i) => fixtureTrack(i));
+  return Array.from({ length: TRACK_COUNT }, (_, i) => (PERF_ROW_BANDS ? { ...fixtureTrack(i), waveform_bands: rowBands(i) } : fixtureTrack(i)));
 }
 
 export function fixturePlaylists(): PlaylistInput[] {
