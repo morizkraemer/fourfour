@@ -56,6 +56,15 @@ async function busyDuring<T>(page: Page, run: () => Promise<T>): Promise<[T, { t
   return [value, { taskMsPerSec: Math.round((after.task - before.task) / seconds), scriptMsPerSec: Math.round((after.script - before.script) / seconds) }];
 }
 
+async function answerAnalysisInPage(page: Page) {
+  if (process.env.FF_PERF_BINDING) return;
+  await page.evaluate(async (template) => {
+    const w = window as unknown as SmokeWindow;
+    const json = JSON.stringify(await w.__smokeAnalysis(template));
+    w.__smokeAnalysis = async (trackId: number) => ({ ...JSON.parse(json), track_id: trackId });
+  }, PLAYER_TRACK);
+}
+
 async function installBench(page: Page) {
   await page.evaluate(() => {
     const w = window as unknown as { __bulk: Bench };
@@ -66,9 +75,12 @@ async function installBench(page: Page) {
   });
 }
 
-async function startEvents(page: Page, kind: 'fast' | 'grid' | 'none', rate: number, total: number) {
+type Order = 'sequential' | 'scattered';
+
+async function startEvents(page: Page, kind: 'fast' | 'grid' | 'none', rate: number, total: number, order: Order = 'sequential') {
   await page.evaluate(
-    ({ kind, rate, total }) => {
+    ({ kind, rate, total, order }) => {
+      const pick = (n: number) => (order === 'scattered' ? ((n * 7919) % total) + 1 : (n % total) + 1);
       const w = window as unknown as { __bulk: Bench } & SmokeWindow;
       if (w.__bulk.emitter !== null) clearInterval(w.__bulk.emitter);
       w.__bulk.emitter = null;
@@ -76,15 +88,15 @@ async function startEvents(page: Page, kind: 'fast' | 'grid' | 'none', rate: num
       w.__bulk.emitter = window.setInterval(() => {
         const n = w.__bulk.cursor++;
         if (kind === 'fast') {
-          w.__smokeEmit('analysis-partial', { track_id: (Math.floor(n / 2) % total) + 1 });
+          w.__smokeEmit('analysis-partial', { track_id: pick(Math.floor(n / 2)) });
         } else {
-          const id = (n % total) + 1;
+          const id = pick(n);
           w.__smokeEmit('analysis-progress', { current: id, total, message: `Analyzed Smoke Track ${id}.mp3 (${id}/${total})`, track_id: id });
         }
         w.__bulk.emitted++;
       }, 1000 / rate);
     },
-    { kind, rate, total },
+    { kind, rate, total, order },
   );
 }
 
@@ -118,22 +130,79 @@ const counters = (page: Page) =>
 function scrollFor(page: Page, ms: number) {
   return page.evaluate(
     (ms) =>
-      new Promise<number[]>((resolve) => {
+      new Promise<{ deltas: number[]; rowsMoved: number; scrollTopOff: number }>((resolve) => {
         const el = document.querySelector('.ff-table__scroll') as HTMLElement;
         const deltas: number[] = [];
         const start = performance.now();
         let last = start;
         let step = 45;
+        let expected = el.scrollTop;
+        let scrollTopOff = 0;
+        let rowsMoved = 0;
+        let shown = new Map<string, string>();
         const tick = () => {
           const t = performance.now();
           deltas.push(t - last);
           last = t;
+          if (Math.abs(el.scrollTop - expected) > 1) scrollTopOff++;
+          const now = new Map<string, string>();
+          for (const row of document.querySelectorAll<HTMLElement>('[data-track-row]')) {
+            const index = row.dataset.rowIndex!;
+            const title = row.querySelector('[data-col-key="title"]')?.textContent ?? '';
+            now.set(index, title);
+            const before = shown.get(index);
+            if (before !== undefined && before !== title) rowsMoved++;
+          }
+          shown = now;
           if (el.scrollTop + el.clientHeight >= el.scrollHeight - step || (step < 0 && el.scrollTop <= -step)) step = -step;
           el.scrollTop += step;
+          expected = el.scrollTop;
           if (t - start < ms) requestAnimationFrame(tick);
-          else resolve(deltas.slice(1));
+          else resolve({ deltas: deltas.slice(1), rowsMoved, scrollTopOff });
         };
         requestAnimationFrame(tick);
+      }),
+    ms,
+  );
+}
+
+function holdFor(page: Page, ms: number) {
+  return page.evaluate(
+    (ms) =>
+      new Promise<{ deltas: number[]; rowsShifted: number; rowAtTopChanges: number }>((resolve) => {
+        const el = document.querySelector('.ff-table__scroll') as HTMLElement;
+        el.scrollTop = Math.floor(el.scrollHeight / 2);
+        const deltas: number[] = [];
+        const start = performance.now();
+        let last = start;
+        let rowsShifted = 0;
+        let rowAtTopChanges = 0;
+        let onScreen = new Map<string, number>();
+        let topTitle: string | null = null;
+        const tick = () => {
+          const t = performance.now();
+          deltas.push(t - last);
+          last = t;
+          const view = el.getBoundingClientRect();
+          const probeY = view.top + 60;
+          const now = new Map<string, number>();
+          let top: string | null = null;
+          for (const row of document.querySelectorAll<HTMLElement>('[data-track-row]')) {
+            const box = row.getBoundingClientRect();
+            if (box.bottom <= view.top || box.top >= view.bottom) continue;
+            const title = row.querySelector('[data-col-key="title"]')?.textContent ?? '';
+            now.set(title, box.top);
+            const before = onScreen.get(title);
+            if (before !== undefined && Math.abs(before - box.top) > 1) rowsShifted++;
+            if (box.top <= probeY && box.bottom > probeY) top = title;
+          }
+          onScreen = now;
+          if (topTitle !== null && top !== topTitle) rowAtTopChanges++;
+          topTitle = top;
+          if (t - start < ms) requestAnimationFrame(tick);
+          else resolve({ deltas: deltas.slice(1), rowsShifted, rowAtTopChanges });
+        };
+        requestAnimationFrame(() => requestAnimationFrame(tick));
       }),
     ms,
   );
@@ -183,12 +252,58 @@ async function profiled<T>(page: Page, name: string, run: () => Promise<T>): Pro
   return value;
 }
 
-async function scrollWindow(page: Page, name: string, kind: 'fast' | 'grid' | 'none', rate: number) {
+type TraceEvent = { name: string; ph: string; dur?: number; tid: number; pid: number; ts: number; args?: { data?: { frame?: string } } };
+
+async function traced<T>(page: Page, name: string, run: () => Promise<T>): Promise<T> {
+  if (process.env.FF_PERF_TRACE !== name) return run();
+  const cdp = await page.context().newCDPSession(page);
+  const events: TraceEvent[] = [];
+  cdp.on('Tracing.dataCollected', (e: { value: TraceEvent[] }) => events.push(...e.value));
+  const done = new Promise<void>((resolve) => cdp.once('Tracing.tracingComplete', () => resolve()));
+  await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline', transferMode: 'ReportEvents' });
+  const value = await run();
+  await cdp.send('Tracing.end');
+  await done;
+  const main = events.find((e) => e.name === 'thread_name' && (e as unknown as { args: { name: string } }).args.name === 'CrRendererMain');
+  const byName = new Map<string, { ms: number; count: number; max: number }>();
+  for (const e of events) {
+    if (!main || e.tid !== main.tid || e.pid !== main.pid || e.ph !== 'X' || !e.dur) continue;
+    const entry = byName.get(e.name) ?? { ms: 0, count: 0, max: 0 };
+    entry.ms += e.dur / 1000;
+    entry.count++;
+    entry.max = Math.max(entry.max, e.dur / 1000);
+    byName.set(e.name, entry);
+  }
+  console.log(`trace ${name} (main thread, inclusive)`);
+  for (const [k, v] of [...byName.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, Number(process.env.FF_PERF_TOP ?? 30)))
+    console.log(`${v.ms.toFixed(0).padStart(7)} ms  ${String(v.count).padStart(6)}x  max ${v.max.toFixed(1).padStart(6)}  ${k}`);
+  const mainEvents = events.filter((e) => main && e.tid === main.tid && e.pid === main.pid && e.ph === 'X' && e.dur);
+  for (const task of mainEvents.filter((e) => e.name === 'RunTask' && e.dur! > 25000)) {
+    const inner = new Map<string, number>();
+    for (const e of mainEvents) {
+      if (e === task || e.ts < task.ts || e.ts + e.dur! > task.ts + task.dur!) continue;
+      inner.set(e.name, (inner.get(e.name) ?? 0) + e.dur! / 1000);
+    }
+    console.log(`long task ${(task.dur! / 1000).toFixed(1)} ms:`, [...inner.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', '));
+  }
+  await cdp.detach();
+  return value;
+}
+
+async function scrollWindow(page: Page, name: string, kind: 'fast' | 'grid' | 'none', rate: number, order: Order = 'sequential') {
   const before = await counters(page);
-  await startEvents(page, kind, rate, TRACKS);
-  const [deltas, busy] = await busyDuring(page, () => profiled(page, name, () => scrollFor(page, WINDOW_MS)));
+  await startEvents(page, kind, rate, TRACKS, order);
+  const [{ deltas, rowsMoved, scrollTopOff }, busy] = await busyDuring(page, () => traced(page, name, () => profiled(page, name, () => scrollFor(page, WINDOW_MS))));
   await startEvents(page, 'none', 0, TRACKS);
-  results[name] = { ...frameStats(deltas), ...busy, ...(await windowStats(page, before.now, before.emitted, before.fetches)) };
+  results[name] = { ...frameStats(deltas), rowsMoved, scrollTopOff, ...busy, ...(await windowStats(page, before.now, before.emitted, before.fetches)) };
+}
+
+async function holdWindow(page: Page, name: string, kind: 'fast' | 'grid', rate: number) {
+  const before = await counters(page);
+  await startEvents(page, kind, rate, TRACKS, 'scattered');
+  const [{ deltas, ...stability }, busy] = await busyDuring(page, () => holdFor(page, WINDOW_MS));
+  await startEvents(page, 'none', 0, TRACKS);
+  results[name] = { ...frameStats(deltas), ...stability, ...busy, ...(await windowStats(page, before.now, before.emitted, before.fetches)) };
 }
 
 const settle = (page: Page) =>
@@ -246,6 +361,7 @@ test.describe('bulk analysis responsiveness', () => {
     await page.locator('[data-track-row]').first().waitFor();
     await page.waitForTimeout(1500);
     await installBench(page);
+    await answerAnalysisInPage(page);
 
     await page.locator('[data-track-row]').nth(2).dblclick();
     await page.waitForTimeout(500);
@@ -267,6 +383,12 @@ test.describe('bulk analysis responsiveness', () => {
     await scrollWindow(page, 'scroll during fast pass', 'fast', FAST_RATE);
     await scrollWindow(page, 'scroll during grid pass', 'grid', GRID_RATE);
     await typingWindow(page, 'typing + palette during fast pass', 'fast', FAST_RATE);
+
+    await page.locator('.ff-colh__cell[data-col-key="bpm"] .ff-colh__label').click();
+    await page.waitForTimeout(500);
+    await holdWindow(page, 'held still, BPM sort, fast pass', 'fast', FAST_RATE);
+    await holdWindow(page, 'held still, BPM sort, grid pass', 'grid', 2);
+    await scrollWindow(page, 'scroll during fast pass, BPM sort', 'fast', FAST_RATE, 'scattered');
 
     console.log(JSON.stringify({ tracks: TRACKS, fastRate: FAST_RATE, gridRate: GRID_RATE, results }, null, 2));
     if (REPORT) writeFileSync(REPORT, JSON.stringify({ tracks: TRACKS, fastRate: FAST_RATE, gridRate: GRID_RATE, results }, null, 2));
@@ -315,7 +437,7 @@ async function playerWindow(page: Page, name: string, kind: 'fast' | 'grid' | 'n
   const before = await counters(page);
   await page.evaluate(() => (window as unknown as { __frameCost: Map<number, number> }).__frameCost.clear());
   await startEvents(page, kind, rate, TRACKS);
-  const [{ deltas, costs }, busy] = await busyDuring(page, () => profiled(page, name, () => watchWaveform(page, WINDOW_MS)));
+  const [{ deltas, costs }, busy] = await busyDuring(page, () => traced(page, name, () => profiled(page, name, () => watchWaveform(page, WINDOW_MS))));
   await startEvents(page, 'none', 0, TRACKS);
   results[name] = {
     ...frameStats(deltas),
@@ -341,6 +463,7 @@ test.describe('player waveform during bulk analysis', () => {
     await page.locator('[data-track-row]').first().waitFor();
     await page.waitForTimeout(1500);
     await installBench(page);
+    await answerAnalysisInPage(page);
 
     const title = `Smoke Track ${String(PLAYER_TRACK).padStart(2, '0')}`;
     await page.locator('.ff-gheader__search input').fill(title);
