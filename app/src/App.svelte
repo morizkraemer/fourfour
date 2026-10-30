@@ -1,7 +1,7 @@
 <!--
   App.svelte — fourfour Browse screen.
   Composes the six interactive modules into the "main layout v3" window frame:
-    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 340) ] ]
+    [ sidebar 240[ chrome + nav ] | body[ header / (table fill | detail 340 | organize) ] ]
     / player (full width)
     / status bar (full width)
 -->
@@ -137,14 +137,14 @@
             <Detail />
           </div>
         {/if}
+      <div
+        class="ff-browse__organize-dock"
+        class:ff-browse__organize-dock--inspector={inspectorVisible}
+        data-focus-region="organize"
+      >
+        <OrganizePanel containerEl={browseMainEl} />
       </div>
-    </div>
-    <div
-      class="ff-browse__organize-dock"
-      class:ff-browse__organize-dock--inspector={inspectorVisible}
-      data-focus-region="organize"
-    >
-      <OrganizePanel containerEl={browseMainEl} />
+      </div>
     </div>
   </div>
   <div class="ff-browse__slot ff-browse__slot--player" data-focus-region="player">
@@ -226,7 +226,7 @@
     background: var(--ff-bg);
   }
 
-  /* main area: [ sidebar | body[ header / content ] | organize ], fills space above player + status */
+  /* main area: [ sidebar | body[ header / content[ table | detail | organize ] ] ], fills space above player + status */
   .ff-browse__main {
     position: relative;
     flex: 1 1 0;

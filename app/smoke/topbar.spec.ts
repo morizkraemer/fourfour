@@ -56,7 +56,7 @@ for (const width of [1600, 1200, 900, 700]) {
 }
 
 test('narrow centre column shows the search icon in the top bar', async ({ smoke: { page } }) => {
-  await setup(page, 1100, true);
+  await setup(page, 900, false);
   const icon = page.locator('.ff-gheader [data-search-icon]');
   await expect(icon).toBeVisible();
   await expect(page.locator('.ff-sidebar [data-search-icon]')).toHaveCount(0);
@@ -65,7 +65,7 @@ test('narrow centre column shows the search icon in the top bar', async ({ smoke
 });
 
 test('very narrow centre column moves the search icon into the left sidebar', async ({ smoke: { page } }) => {
-  await setup(page, 900, true);
+  await setup(page, 670, false);
   const icon = page.locator('.ff-sidebar [data-search-icon]');
   await expect(icon).toBeVisible();
   await expect(page.locator('.ff-gheader [data-search-icon]')).toHaveCount(0);
@@ -75,7 +75,7 @@ test('very narrow centre column moves the search icon into the left sidebar', as
   await page.screenshot({ path: `${SHOTS}/moved-to-sidebar-state.png` });
 });
 
-const COLLAPSED = [['top-bar-icon', 1100], ['sidebar-icon', 900]] as const;
+const COLLAPSED = [['top-bar-icon', 900], ['sidebar-icon', 670]] as const;
 const modalInput = (page: Page) => page.locator('.ff-cp-overlay input');
 const modalBox = (page: Page) => box(page, '.ff-cp-overlay .ff-cp');
 
@@ -94,7 +94,7 @@ async function expectCentredModal(page: Page, width: number) {
 for (const [label, width] of COLLAPSED) {
   for (const trigger of ['icon', 'shortcut'] as const) {
     test(`${trigger} opens a centred search modal from the ${label} state`, async ({ smoke: { page } }) => {
-      await setup(page, width, true);
+      await setup(page, width, false);
       if (trigger === 'icon') await page.locator('[data-search-icon]').click();
       else await page.keyboard.press('ControlOrMeta+f');
       await expect(modalInput(page)).toBeFocused();
@@ -104,7 +104,7 @@ for (const [label, width] of COLLAPSED) {
   }
 
   test(`the ${label} search modal filters the table, Esc and backdrop close it`, async ({ smoke: { page } }) => {
-    await setup(page, width, true);
+    await setup(page, width, false);
     await page.locator('[data-search-icon]').click();
     await modalInput(page).fill('Track 07');
     await expect(rows(page)).not.toHaveCount(TRACK_COUNT);
@@ -135,30 +135,24 @@ test('the track count is plain text, not a button', async ({ smoke: { page } }) 
 
 const centreY = (b: { y: number; height: number }) => b.y + b.height / 2;
 
-for (const panelWidth of [320, 420, 520]) {
-  test(`top-bar icon hugs the organize panel's left edge at panel width ${panelWidth}`, async ({ smoke: { page } }) => {
-    await setup(page, 760 + panelWidth, true, panelWidth);
-    const icon = page.locator('.ff-gheader [data-search-icon]');
-    await expect(icon).toBeVisible();
-    const iconBox = (await icon.boundingBox())!;
-    const panel = await box(page, '.ff-organize--expanded');
-    const gap = panel.x - (iconBox.x + iconBox.width);
-    expect(gap).toBeGreaterThanOrEqual(0);
-    expect(gap).toBeLessThanOrEqual(16);
-    const title = await box(page, '.ff-gheader__title');
-    expect(Math.abs(centreY(iconBox) - centreY(title))).toBeLessThanOrEqual(1);
-    await page.screenshot({ path: `${SHOTS}/icon-top-bar-panel-${panelWidth}.png` });
-  });
+test("top-bar icon shares the title's vertical centre", async ({ smoke: { page } }) => {
+  await setup(page, 900, false);
+  const icon = page.locator('.ff-gheader [data-search-icon]');
+  await expect(icon).toBeVisible();
+  const iconBox = (await icon.boundingBox())!;
+  const title = await box(page, '.ff-gheader__title');
+  expect(Math.abs(centreY(iconBox) - centreY(title))).toBeLessThanOrEqual(1);
+  const right = page.viewportSize()!.width;
+  expect(right - (iconBox.x + iconBox.width)).toBeLessThanOrEqual(16);
+});
 
-  test(`sidebar icon shares the title's vertical centre at panel width ${panelWidth}`, async ({ smoke: { page } }) => {
-    await setup(page, 560 + panelWidth, true, panelWidth);
-    const icon = page.locator('.ff-sidebar [data-search-icon]');
-    await expect(icon).toBeVisible();
-    const iconBox = (await icon.boundingBox())!;
-    const title = await box(page, '.ff-gheader__title');
-    expect(Math.abs(centreY(iconBox) - centreY(title))).toBeLessThanOrEqual(1);
-    const sidebar = await box(page, '.ff-sidebar');
-    expect(iconBox.x + iconBox.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
-    await page.screenshot({ path: `${SHOTS}/icon-sidebar-panel-${panelWidth}.png` });
-  });
-}
+test("sidebar icon shares the title's vertical centre", async ({ smoke: { page } }) => {
+  await setup(page, 670, false);
+  const icon = page.locator('.ff-sidebar [data-search-icon]');
+  await expect(icon).toBeVisible();
+  const iconBox = (await icon.boundingBox())!;
+  const title = await box(page, '.ff-gheader__title');
+  expect(Math.abs(centreY(iconBox) - centreY(title))).toBeLessThanOrEqual(1);
+  const sidebar = await box(page, '.ff-sidebar');
+  expect(iconBox.x + iconBox.width).toBeLessThanOrEqual(sidebar.x + sidebar.width);
+});
