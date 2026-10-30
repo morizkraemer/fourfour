@@ -320,3 +320,4 @@
 2026-10-30 07:05 orchestrator - run-pause: Merlin said pause; stopped q50-report after it committed its summary (c3476bb, unmerged), worktree kept; ov-1028 green, on the Mac since 06:39
 2026-10-30 07:20 orchestrator - spawn: Merlin Mac feedback; fb-analysisfps (frame drops + scroll jumps during analysis, opus) and fb-uxfixes (empty-state flash -> skeleton, hotcue grid snap, clickable analysing indicator -> one combined activity panel, sonnet high); base ov-1028
 2026-10-30 07:55 orchestrator - spawn: fb-sidebarlayout (Merlin chose: top bar full width, right sidebar below it; drop showChips workaround; sonnet high); fb-uxfixes merged into ov-1028 5d03208, checks + install running
+2026-10-30 12:21 orchestrator - landed: fb-uxfixes on ov-1028 (5d03208) + test env fix 420508e (vitest env alias never resolved since e345fc1, runs exited 1); all checks green, Mac install 12:21
