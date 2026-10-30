@@ -330,3 +330,4 @@
 2026-10-30 09:22 orchestrator - spawn: fb-reviewr1 (review round 1: skeleton must match real rows; sidebar empty state at full width; status chip kept; Mac scroll lag -> run item 5)
 2026-10-30 09:38 orchestrator - landed: fb-reviewr1 on ov-1028 (skeleton = real rows, sticks empty card aligned); round 2 cards posted
 2026-10-30 18:06 orchestrator - run-start: PM queue start (Merlin: start all projects on the holiday queue now); plan per STATE Run; q50-report merged into ov-1028; spawn r1-perf10k (item 1: 10k+ fixture, budgets, Mac timing script, opus)
+2026-10-30 18:09 orchestrator - landed: review lab on labkit (master, :4220, trace logo, picks lowercased; labkit bugs sent to the labkit thread); spawn r9-dmg (item 9: unsigned .dmg on the Mac, headless + install check, sonnet)
