@@ -5,7 +5,9 @@ import { expect, rows, test } from './app.ts';
 import type { SmokeImport, SmokeWindow } from './tauri-mock.ts';
 
 const SHOTS = resolve(import.meta.dirname, '../../.agent/activity');
+const CHIP_SHOTS = resolve(import.meta.dirname, '../../.agent/statuschip');
 mkdirSync(SHOTS, { recursive: true });
+mkdirSync(CHIP_SHOTS, { recursive: true });
 
 const FOLDER = '/Downloads/Fresh Finds';
 const TOP_BAR_CLIP = { x: 0, y: 0, width: 1600, height: 120 };
@@ -61,12 +63,17 @@ async function withProblems(page: Page, missing: number[]) {
   await rows(page).first().waitFor();
 }
 
-test('the activity button rests as a quiet import icon with a tooltip', async ({ smoke: { page } }) => {
+test('the status chip rests as the track count and opens the panel while idle', async ({ smoke: { page } }) => {
   await expect(button(page)).toHaveAttribute('data-activity', 'rest');
-  await expect(button(page)).toHaveAttribute('title', 'Import…');
-  await expect(button(page)).toHaveText('');
-  await expect(button(page).locator('[data-import-icon]')).toBeVisible();
+  await expect(button(page)).toHaveText(/^[\d,]+ tracks$/);
   await page.screenshot({ path: `${SHOTS}/rest.png`, clip: TOP_BAR_CLIP });
+  await button(page).click();
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page).locator('[data-library-summary]')).toContainText('tracks');
+  await expect(entries(page).filter({ hasText: 'Import folder…' })).toBeEnabled();
+  await expect(entries(page).filter({ hasText: 'Import files…' })).toBeEnabled();
+  await expect(menu(page).locator('[data-import-progress], [data-analysis-progress]')).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/rest-popover.png`, clip: { x: 900, y: 0, width: 700, height: 360 } });
 });
 
 test('an import in progress shows counted progress on the button and in the popover', async ({ smoke }) => {
@@ -102,7 +109,7 @@ test('the result shows for a few seconds, then the button returns to rest', asyn
   await expect(button(page)).toHaveText('Added 2');
   await page.screenshot({ path: `${SHOTS}/result.png`, clip: TOP_BAR_CLIP });
   await expect(button(page)).toHaveAttribute('data-activity', 'rest', { timeout: 9000 });
-  await expect(button(page)).toHaveText('');
+  await expect(button(page)).toHaveText(/ tracks$/);
 });
 
 test('the popover keeps the full last-import summary after the button rests', async ({ smoke: { page } }) => {
@@ -212,7 +219,9 @@ test('Settings → Library can turn automatic analysis after import off again', 
 test('the Analyzing chip opens the same activity panel with the analysis progress', async ({ smoke }) => {
   const { page } = smoke;
   await emit(page, 'analysis-progress', { current: 1, total: 3, message: 'Analyzing' });
-  const chip = page.locator('[data-analysis-status]');
+  const chip = button(page);
+  await expect(chip).toHaveAttribute('data-activity', 'analyzing');
+  await expect(chip).toContainText('Analyzing');
   await expect(chip).toContainText('1 / 3');
   await chip.click();
   await expect(menu(page)).toBeVisible();
@@ -221,4 +230,29 @@ test('the Analyzing chip opens the same activity panel with the analysis progres
   await page.screenshot({ path: `${SHOTS}/analysis-panel.png`, clip: TOP_BAR_CLIP });
   await page.keyboard.press('Escape');
   await expect(menu(page)).toHaveCount(0);
+});
+
+test('status chip screenshots: idle, importing, analyzing, panel open while idle', async ({ smoke }) => {
+  const { page } = smoke;
+  const clip = { x: 0, y: 0, width: 1600, height: 60 };
+  await page.screenshot({ path: `${CHIP_SHOTS}/idle.png`, clip });
+  await button(page).click();
+  await expect(menu(page)).toBeVisible();
+  await page.screenshot({ path: `${CHIP_SHOTS}/panel-idle.png`, clip: { x: 900, y: 0, width: 700, height: 360 } });
+  await page.keyboard.press('Escape');
+
+  await emit(page, 'analysis-progress', { current: 1, total: 3, message: 'Analyzing' });
+  await expect(button(page)).toHaveAttribute('data-activity', 'analyzing');
+  await page.screenshot({ path: `${CHIP_SHOTS}/analyzing.png`, clip });
+  await button(page).click();
+  await page.screenshot({ path: `${CHIP_SHOTS}/panel-analyzing.png`, clip: { x: 900, y: 0, width: 700, height: 360 } });
+  await page.keyboard.press('Escape');
+
+  await setWindow(page, { __smokeHoldImport: true, __smokeImport: TWO_NEW });
+  await importFolder(page);
+  await emit(page, 'import-progress', { done: 12, total: 40 });
+  await expect(button(page)).toHaveAttribute('data-activity', 'importing');
+  await page.screenshot({ path: `${CHIP_SHOTS}/importing.png`, clip });
+  await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseImport?.());
+  await dismissAnalysisPrompt(page);
 });

@@ -75,7 +75,7 @@ test('resize handle still changes the sidebar width', async ({ smoke: { page } }
 test('Analyzing chip stays visible and clickable with the sidebar open', async ({ smoke: { page } }) => {
   await open(page);
   await page.evaluate(() => (window as unknown as SmokeWindow).__smokeEmit('analysis-progress', { current: 1, total: 3, message: 'Analyzing' }));
-  const chip = page.locator('[data-analysis-status]');
+  const chip = page.locator('[data-library-status]');
   await expect(chip).toBeVisible();
   await expect(chip).toContainText('1 / 3');
   await chip.click();

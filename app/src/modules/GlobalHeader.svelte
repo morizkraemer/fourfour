@@ -9,13 +9,13 @@
 -->
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
-  import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks, unanalyzedTrackCount } from '../stores/library.svelte.ts';
+  import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
   import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { stickSync } from '../stores/stick-sync.svelte.ts';
   import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
   import { searchModeForColumn } from '../lib/searchLayout.ts';
   import SearchIconButton from './SearchIconButton.svelte';
-  import { stickLabel, topbarIdleStatus } from '../lib/topbarStatus.ts';
+  import { stickLabel, topbarStickStatus } from '../lib/topbarStatus.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import { problemLabel } from '../lib/fileHealth.ts';
   import { libraryActivity } from '../lib/libraryActivity.ts';
@@ -30,9 +30,14 @@
       importing: importActivity.running,
       importDone: importActivity.done,
       importTotal: importActivity.total,
+      syncing: library.syncing,
+      analyzing,
+      analysisCurrent: library.analysisProgress.current,
+      analysisTotal: library.analysisProgress.total,
       resultHeadline: importActivity.resultVisible ? (importActivity.summary?.chip ?? null) : null,
       resultFailed: importActivity.failed,
       problems,
+      trackCount: library.tracks.length,
     }),
   );
   let searchEl = $state(null);
@@ -45,14 +50,11 @@
   let contextLabel = $derived(showingProblems ? 'Missing tracks' : sidebarSourceLabel(ui.activeSidebarRow));
   let searchCollapsed = $derived(ui.searchMode !== 'field');
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
-  let unanalyzedCount = $derived(unanalyzedTrackCount());
-  let idleStatus = $derived(
-    topbarIdleStatus({
+  let stick = $derived(
+    topbarStickStatus({
       volumes: library.volumes,
       activeVolume: library.activeVolume,
       stickTrackCount: (volume) => stickAllTrackIds(volume).length,
-      trackCount: library.tracks.length,
-      unanalyzedCount,
       sync: stickSync,
     }),
   );
@@ -164,52 +166,32 @@
       type="button"
       class="ff-gheader__chip ff-gheader__chip--idle ff-gheader__activity"
       class:ff-gheader__chip--warn={activity.kind === 'problems' || (activity.kind === 'result' && activity.failed)}
-      class:ff-gheader__activity--rest={activity.kind === 'rest'}
       data-library-status
       data-activity={activity.kind}
-      title={activity.kind === 'rest' ? 'Import…' : undefined}
-      aria-label={activity.kind === 'rest' ? 'Import…' : undefined}
+      title="Library activity"
       bind:this={statusButtonEl}
       aria-haspopup="menu"
       aria-expanded={statusMenu.open}
       onclick={toggleStatusMenu}
     >
-      {#if activity.kind === 'rest'}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-import-icon>
-          <path d="M12 10v6M9 13h6" />
-          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-        </svg>
-      {:else if activity.kind === 'importing'}
+      {#if activity.kind === 'importing'}
         <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
         <span class="ff-gheader__progress" class:ff-gheader__progress--indeterminate={activity.fraction === null} style:width={activity.fraction === null ? undefined : `${activity.fraction * 100}%`}></span>
+      {:else if activity.kind === 'syncing'}
+        <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
+      {:else if activity.kind === 'analyzing'}
+        <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span> <b>{activity.detail}</b>
+      {:else if activity.kind === 'rest'}
+        <span class="ff-gheader__activity-label">{activity.label}</span>
       {:else}
         <StatusDot status={activity.kind === 'result' && !activity.failed ? 'online' : 'warn'} />
         <span class="ff-gheader__activity-label">{activity.label}</span>
       {/if}
     </button>
-    {#if analyzing}
-      <button
-        type="button"
-        class="ff-gheader__chip ff-gheader__chip--idle"
-        data-analysis-status
-        aria-haspopup="menu"
-        aria-expanded={statusMenu.open}
-        onclick={toggleStatusMenu}
-      >
-        <Spinner size="small" /> Analyzing
-        <b>{library.analysisProgress.current} / {library.analysisProgress.total}</b>
+    {#if stick}
+      <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" data-stick-chip onclick={() => openIdleStick(stick.volume)}>
+        <StatusDot status="online" /> {stick.name} <b>{stick.detail}</b>
       </button>
-    {/if}
-    {#if library.syncing}
-      <span class="ff-gheader__chip"><Spinner size="small" /> Syncing</span>
-    {:else if !analyzing}
-      {#if idleStatus.kind === 'stick'}
-        <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" onclick={() => openIdleStick(idleStatus.volume)}>
-          <StatusDot status="online" /> {idleStatus.name} <b>{idleStatus.detail}</b>
-        </button>
-      {:else}
-        <span class="ff-gheader__plain">{idleStatus.text}</span>
-      {/if}
     {/if}
   </div>
   {#if ui.searchMode === 'icon'}
@@ -309,11 +291,6 @@
     min-width: 0;
     overflow: hidden;
   }
-  .ff-gheader__plain {
-    font-size: 11.5px;
-    color: var(--ff-muted);
-    white-space: nowrap;
-  }
   .ff-gheader__chip {
     display: inline-flex;
     align-items: center;
@@ -344,11 +321,6 @@
     position: relative;
     overflow: hidden;
     max-width: 280px;
-  }
-  .ff-gheader__activity--rest {
-    justify-content: center;
-    width: 24px;
-    padding: 0;
   }
   .ff-gheader__activity-label {
     overflow: hidden;
