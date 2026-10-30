@@ -124,7 +124,8 @@
   }
 
   let effectiveSource = $derived(sourceId ?? ui.activeSidebarRow);
-  let showLibraryEmpty = $derived(!embedded && library.trackCount === 0);
+  let showLibraryEmpty = $derived(!embedded && library.tracksLoaded && library.trackCount === 0);
+  const skeletonRows = Array.from({ length: 24 }, (_, i) => i);
 
   let activePlaylist = $derived.by(() => {
     const active = effectiveSource;
@@ -656,7 +657,13 @@
           <DropLine />
         </div>
       {/if}
-      {#if currentTracks.length === 0}
+      {#if currentTracks.length === 0 && !library.tracksLoaded}
+        <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
+          {#each skeletonRows as row (row)}
+            <div class="ff-table__skeleton-row"><span style:width="{30 + ((row * 17) % 40)}%"></span></div>
+          {/each}
+        </div>
+      {:else if currentTracks.length === 0}
         <div class="ff-table__empty-container ff-table__empty-drop">
           <EmptyState
             title="No tracks in this view"
@@ -833,6 +840,23 @@
   .ff-table__empty-container :global(.ff-empty-state) {
     width: 100%;
     max-width: 480px;
+  }
+  .ff-table__skeleton-row {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 var(--ff-space-4, 12px);
+    box-sizing: border-box;
+  }
+  .ff-table__skeleton-row span {
+    height: 10px;
+    border-radius: 3px;
+    background: var(--ff-border, rgba(128, 128, 128, 0.25));
+    animation: ff-table-skeleton-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes ff-table-skeleton-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.8; }
   }
   .ff-table__empty-drop:global(.ff-table__empty-drop) {
     min-height: 120px;

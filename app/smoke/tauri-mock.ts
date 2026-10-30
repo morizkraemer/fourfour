@@ -16,6 +16,8 @@ export interface SmokeWindow {
   __smokeReleaseExport: (() => void) | null;
   __smokeImport: SmokeImport | null;
   __smokeHoldImport: boolean;
+  __smokeHoldLoad: boolean;
+  __smokeReleaseLoad: (() => void) | null;
   __smokeAnalyzeAfterImport: boolean;
   __smokeReleaseImport: (() => void) | null;
   __smokeEmit: (event: string, payload: unknown) => void;
@@ -44,6 +46,8 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeReleaseExport = null;
   w.__smokeImport = null;
   w.__smokeHoldImport = false;
+  w.__smokeHoldLoad = false;
+  w.__smokeReleaseLoad = null;
   w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;
   w.__smokeDetail = 'none';
@@ -201,6 +205,7 @@ export function installTauriMock(initial: LoadedState) {
       case 'plugin:dialog|open':
         return w.__smokePickPath;
       case 'load_state':
+        if (w.__smokeHoldLoad) await new Promise<void>((done) => (w.__smokeReleaseLoad = done));
         return { tracks, playlists };
       case 'save_state':
         playlists = args.playlists;
