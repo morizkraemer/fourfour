@@ -305,6 +305,7 @@ export const library = $state({
   // App settings/status
   appVersion: '0.0.0',
   libraryPath: '',
+  tracksLoaded: false,
   analyzing: false,
   /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
   get analyzingTrackIds(): number[] {
@@ -932,6 +933,8 @@ export async function loadState() {
     console.error('loadState failed:', err);
     library.tauriError = lastTauriError;
     throw err;
+  } finally {
+    library.tracksLoaded = true;
   }
 }
 

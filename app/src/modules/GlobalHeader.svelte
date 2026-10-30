@@ -192,10 +192,17 @@
     </button>
     {#if showChips}
       {#if analyzing}
-        <span class="ff-gheader__chip">
+        <button
+          type="button"
+          class="ff-gheader__chip ff-gheader__chip--idle"
+          data-analysis-status
+          aria-haspopup="menu"
+          aria-expanded={statusMenu.open}
+          onclick={toggleStatusMenu}
+        >
           <Spinner size="small" /> Analyzing
           <b>{library.analysisProgress.current} / {library.analysisProgress.total}</b>
-        </span>
+        </button>
       {/if}
       {#if library.syncing}
         <span class="ff-gheader__chip"><Spinner size="small" /> Syncing</span>

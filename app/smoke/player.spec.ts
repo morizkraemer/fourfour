@@ -18,6 +18,13 @@ async function expandWithTrack(page: Page) {
   await expect(page.locator('.ff-xp')).toBeVisible();
 }
 
+async function quantizeOff(page: Page) {
+  const q = quantizeButton(page);
+  await expect(q).toHaveAttribute('aria-pressed', 'true');
+  await q.click();
+  await expect(q).toHaveAttribute('aria-pressed', 'false');
+}
+
 async function parkOnHotCueA(page: Page) {
   await page.locator('.ff-xp__pad[data-pad="A"]').click();
   await expect(page.locator('.ff-xp__play')).toHaveAttribute('aria-label', 'Pause');
@@ -115,7 +122,9 @@ test('Q is a text toggle next to MT, stays readable on hover and press, and is r
   const background = (button: typeof q) => button.evaluate((el) => getComputedStyle(el).backgroundColor);
   const blue = 'rgb(59, 130, 246)';
 
-  await expect(q).toHaveAttribute('aria-pressed', 'false');
+  await quantizeOff(page);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(400);
   const offColour = await colour(q);
   expect(offColour).not.toBe(blue);
   await q.hover();
@@ -165,6 +174,7 @@ test('Q is a text toggle next to MT, stays readable on hover and press, and is r
 test('a hot cue set at the playhead snaps to the grid only with Q on', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
+  await quantizeOff(page);
   await parkOnHotCueA(page);
   await page.keyboard.press('Shift+C');
   await expect.poll(async () => (await smoke.invokes('set_cues')).length).toBeGreaterThan(0);
@@ -185,6 +195,7 @@ test('a hot cue set at the playhead snaps to the grid only with Q on', async ({ 
 test('dragging a hot cue on the big waveform moves it, snapped to the grid with Q on; Alt places it freely', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
+  await quantizeOff(page);
   await parkOnHotCueA(page);
   await quantizeButton(page).click();
   await expect(quantizeButton(page)).toHaveAttribute('aria-pressed', 'true');
@@ -210,6 +221,7 @@ test('dragging a hot cue on the big waveform moves it, snapped to the grid with 
 test('without Q a dragged hot cue lands where it is dropped', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
+  await quantizeOff(page);
   await parkOnHotCueA(page);
   const saves = (await smoke.invokes('set_cues')).length;
   await dragCueA(page, 37, false);
@@ -221,6 +233,7 @@ test('without Q a dragged hot cue lands where it is dropped', async ({ smoke }) 
 test('CUE starts from the nearest grid beat with Q on, from the playhead with Q off', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
+  await quantizeOff(page);
   await page.keyboard.press('Space');
   await expect(page.locator('.ff-xp__play')).toHaveAttribute('aria-label', 'Play');
   const overview = (await page.locator('.ff-xp .waveform-display__overview').boundingBox())!;
