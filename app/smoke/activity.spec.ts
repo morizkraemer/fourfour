@@ -208,3 +208,17 @@ test('Settings → Library can turn automatic analysis after import off again', 
   await toggle.click();
   await expect.poll(async () => (await smoke.invokes('set_analyze_after_import')).at(-1)).toEqual({ enabled: false });
 });
+
+test('the Analyzing chip opens the same activity panel with the analysis progress', async ({ smoke }) => {
+  const { page } = smoke;
+  await emit(page, 'analysis-progress', { current: 1, total: 3, message: 'Analyzing' });
+  const chip = page.locator('[data-analysis-status]');
+  await expect(chip).toContainText('1 / 3');
+  await chip.click();
+  await expect(menu(page)).toBeVisible();
+  await expect(menu(page).locator('[data-analysis-progress]')).toContainText('1 of 3 tracks');
+  await expect(entries(page).filter({ hasText: 'Import folder…' })).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/analysis-panel.png`, clip: TOP_BAR_CLIP });
+  await page.keyboard.press('Escape');
+  await expect(menu(page)).toHaveCount(0);
+});

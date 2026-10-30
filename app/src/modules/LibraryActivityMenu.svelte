@@ -5,6 +5,7 @@
 -->
 <script>
   import { closeOnEscape } from '$ds/components/menuEscape.js';
+  import { library } from '../stores/library.svelte.ts';
   import { importActivity } from '../stores/import-activity.svelte.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import { checkLibraryAgain, openHealthDialog, relocateMissing, showProblemTracks } from '../stores/file-health.svelte.ts';
@@ -15,6 +16,18 @@
 
   let menuEl = $state(null);
   let importing = $derived(importActivity.running);
+  let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
+  const ANALYSIS_TITLES_SHOWN = 6;
+  let analyzingTitles = $derived.by(() => {
+    if (!open || !analyzing) return { shown: [], more: 0 };
+    const ids = new Set(library.analyzingTrackIds);
+    const titles = [];
+    for (const track of library.tracks) {
+      if (ids.has(track.id)) titles.push(track.title || `Track ${track.id}`);
+      if (titles.length === ANALYSIS_TITLES_SHOWN) break;
+    }
+    return { shown: titles, more: Math.max(0, ids.size - titles.length) };
+  });
 
   $effect(() => {
     if (!open) return;
@@ -60,6 +73,26 @@
 
 {#if open}
   <div class="ff-menu ff-context-menu ff-activity" data-library-activity-menu bind:this={menuEl} use:place style="position: fixed; left: {x}px; top: {y}px; z-index: 10000;">
+    {#if analyzing}
+      <div class="ff-activity__section" data-analysis-progress>
+        <span class="ff-activity__title">Analyzing</span>
+        <span class="ff-activity__headline">{library.analysisProgress.current} of {library.analysisProgress.total} tracks</span>
+        {#each analyzingTitles.shown as title}
+          <span class="ff-activity__line">{title}</span>
+        {/each}
+        {#if analyzingTitles.more > 0}
+          <span class="ff-activity__line">+{analyzingTitles.more} more</span>
+        {/if}
+      </div>
+      <div class="ff-menu__separator"></div>
+    {/if}
+    {#if library.syncing}
+      <div class="ff-activity__section" data-sync-progress>
+        <span class="ff-activity__title">Syncing</span>
+        <span class="ff-activity__headline">{library.statusMessage}</span>
+      </div>
+      <div class="ff-menu__separator"></div>
+    {/if}
     {#if importing}
       <div class="ff-activity__section" data-import-progress>
         <span class="ff-activity__title">Importing</span>
