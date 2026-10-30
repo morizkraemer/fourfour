@@ -50,6 +50,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 23. [accepted 2026-10-30 per rec] Q50 import: additive index idx_artwork_track (created on open, no version bump; cold track list 1.3 s → 0.1 s at 10k covers) and import commit with synchronous=NORMAL + background checkpoint (power loss right after an import can roll it back; DB stays consistent) - rec: keep - branch: ov-1028
 
+24. Beta .dmg: bundle id is com.pioneer.test-ui (Pioneer is a trademark; also the macOS data folder keys off it) - rec: pick a neutral id before any public beta, migrate app data once - branch: none
+
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
