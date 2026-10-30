@@ -27,3 +27,54 @@ test('a library that really has no tracks shows the empty state after loading', 
   await expect(page.getByText('No tracks loaded')).toBeVisible();
   await expect(page.locator('[data-table-skeleton]')).toHaveCount(0);
 });
+
+const bootSnapshotIds = (page: Page) =>
+  page.evaluate(() => {
+    const raw = localStorage.getItem('fourfour.bootSnapshot.v1');
+    return raw ? (JSON.parse(raw).rows as { cells: { id: number } }[]).map((r) => r.cells.id) : null;
+  });
+
+test('the last open list paints from the boot snapshot, then the real load replaces it', async ({ context }) => {
+  const first = await context.newPage();
+  await openApp(first, fixtureState());
+  await releaseLoad(first);
+  await first.locator('[data-track-row]').first().waitFor();
+  await expect.poll(() => bootSnapshotIds(first), { timeout: 10_000 }).not.toBeNull();
+  const snapshotIds = (await bootSnapshotIds(first))!;
+  expect(snapshotIds.length).toBeGreaterThan(5);
+  expect(snapshotIds.slice(0, 3)).toEqual([1, 2, 3]);
+  await first.close();
+
+  const base = fixtureState();
+  const changed = {
+    ...base,
+    tracks: base.tracks.filter((t) => t.id !== 1).map((t) => (t.id === 2 ? { ...t, title: 'Renamed Outside' } : t)),
+  };
+  const second = await context.newPage();
+  await openApp(second, changed);
+  await expect(second.locator('[data-boot-row]').first()).toBeVisible();
+  await expect(second.locator('[data-table-skeleton]')).toHaveCount(0);
+  await expect(second.locator('[data-table-boot]')).toHaveAttribute('inert', '');
+  await expect(second.locator('[data-boot-row]').first()).toContainText('Smoke Track 01');
+  await releaseLoad(second);
+  await second.locator('[data-track-row]').first().waitFor();
+  await expect(second.locator('[data-boot-row]')).toHaveCount(0);
+  await expect(second.locator('[data-track-row]').first()).toContainText('Renamed Outside');
+  await expect(second.getByText('Smoke Track 01', { exact: true })).toHaveCount(0);
+  await expect.poll(() => bootSnapshotIds(second), { timeout: 10_000 }).not.toContain(1);
+  expect(await bootSnapshotIds(second)).toEqual(expect.arrayContaining([2, 3]));
+});
+
+test('a snapshot from another library is not shown', async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem(
+      'fourfour.bootSnapshot.v1',
+      JSON.stringify({ libraryPath: '/other/library', view: 'x', total: 1, rows: [{ cells: { id: 99, title: 'Other Library' } }] }),
+    ),
+  );
+  await openApp(page, fixtureState());
+  await expect(page.locator('[data-table-skeleton]')).toBeVisible();
+  await expect(page.locator('[data-boot-row]')).toHaveCount(0);
+  await releaseLoad(page);
+  await page.locator('[data-track-row]').first().waitFor();
+});

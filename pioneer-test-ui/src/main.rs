@@ -1127,26 +1127,7 @@ async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, Stri
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-
-        let track_infos = build_track_infos(&lib)?;
-
-        let playlists = lib
-            .get_all_playlists()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|pl| PlaylistInput {
-                id: pl.id,
-                name: pl.name,
-                track_ids: pl.track_ids,
-                parent_id: pl.parent_id,
-                is_folder: pl.is_folder,
-            })
-            .collect();
-
-        Ok(LoadedState {
-            tracks: track_infos,
-            playlists,
-        })
+        track_infos::loaded_state(&lib)
     })
     .await
     .map_err(|e| e.to_string())?

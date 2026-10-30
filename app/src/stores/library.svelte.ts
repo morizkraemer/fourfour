@@ -47,6 +47,7 @@ import {
   readyAnalysisFields,
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
+import { readBootSnapshot, type BootSnapshot } from './boot-snapshot.ts';
 import { artwork } from './artwork.svelte.ts';
 import { loadCuesFromPayload } from './cues.svelte.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
@@ -347,6 +348,7 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   tracksLoaded: false,
+  bootSnapshot: null as BootSnapshot | null,
   analyzing: false,
   /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
   get analyzingTrackIds(): number[] {
@@ -980,6 +982,7 @@ export async function loadState() {
     throw err;
   } finally {
     library.tracksLoaded = true;
+    library.bootSnapshot = null;
   }
 }
 
@@ -1033,6 +1036,7 @@ export async function initLibrary() {
     const [version, path] = await Promise.all([getVersion(), getLibraryPath()]);
     library.appVersion = version;
     library.libraryPath = path;
+    if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
     await refreshVolumes();

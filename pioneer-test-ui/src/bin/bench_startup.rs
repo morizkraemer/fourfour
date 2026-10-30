@@ -165,6 +165,12 @@ fn run(dir: &Path) {
     );
 }
 
+fn dump(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let state = track_infos::loaded_state(&lib).unwrap();
+    std::fs::write(out, serde_json::to_vec(&state).unwrap()).unwrap();
+}
+
 fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     (v[v.len() / 2], v[(v.len() * 95 / 100).min(v.len() - 1)])
@@ -637,6 +643,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
+        Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
@@ -645,7 +652,7 @@ fn main() {
         Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"
+            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"
         ),
     }
 }

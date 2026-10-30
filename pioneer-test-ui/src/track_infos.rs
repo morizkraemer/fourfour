@@ -2,7 +2,7 @@ use pioneer_library::{LocalLibrary, RowPreview, analysis_stage};
 
 pub use pioneer_library::{effective_preview, row_bands};
 
-use crate::dto::TrackInfo;
+use crate::dto::{LoadedState, PlaylistInput, TrackInfo};
 
 /// Build TrackInfo list from the library's tracks + flags.
 ///
@@ -55,4 +55,21 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
             }
         })
         .collect())
+}
+
+pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
+    let tracks = build_track_infos(lib)?;
+    let playlists = lib
+        .get_all_playlists()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|pl| PlaylistInput {
+            id: pl.id,
+            name: pl.name,
+            track_ids: pl.track_ids,
+            parent_id: pl.parent_id,
+            is_folder: pl.is_folder,
+        })
+        .collect();
+    Ok(LoadedState { tracks, playlists })
 }

@@ -60,6 +60,7 @@
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
   import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
+  import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -232,6 +233,27 @@
   });
 
   let columns = $derived(visibleColumns(layoutKind));
+
+  let bootView = $derived(`${layoutKind}|${layout.sortKey ?? ''}|${layout.sortDir ?? ''}`);
+  let showsBootView = $derived(!embedded && (effectiveSource ?? 'All Tracks') === 'All Tracks' && !ui.listFilter.trim() && !showOnlyProblems);
+  let bootRows = $derived.by(() => {
+    const snapshot = library.bootSnapshot;
+    if (!snapshot || library.tracksLoaded || !showsBootView || snapshot.view !== bootView) return null;
+    return snapshot.rows.map(bootRowTrack);
+  });
+
+  const BOOT_SNAPSHOT_IDLE_MS = 1500;
+  let bootSnapshotTimer;
+  $effect(() => {
+    if (!library.tracksLoaded || !showsBootView || viewportHeight === 0) return;
+    const tracks = currentTracks;
+    const path = library.libraryPath;
+    const view = bootView;
+    const rows = Math.ceil(viewportHeight / ROW_HEIGHT) + 2;
+    clearTimeout(bootSnapshotTimer);
+    bootSnapshotTimer = setTimeout(() => writeBootSnapshot(bootSnapshotOf(path, view, tracks, rows)), BOOT_SNAPSHOT_IDLE_MS);
+    return () => clearTimeout(bootSnapshotTimer);
+  });
 
   let overscan = $state(0);
   let offscreenRowsScheduled = false;
@@ -717,7 +739,15 @@
           <DropLine />
         </div>
       {/if}
-      {#if currentTracks.length === 0 && !library.tracksLoaded}
+      {#if currentTracks.length === 0 && bootRows}
+        <div class="ff-table__boot" data-table-boot aria-busy="true" inert style:height="{rowTop(bootRows.length)}px">
+          {#each bootRows as track, index (index)}
+            <div class="ff-table__row" data-boot-row style:top="{rowTop(index)}px">
+              <TrackRow {track} {columns} />
+            </div>
+          {/each}
+        </div>
+      {:else if currentTracks.length === 0 && !library.tracksLoaded}
         <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
           {#each skeletonRows as row (row)}
             <div class="ff-table__skeleton-row" style:--skeleton-text="{55 + ((row * 17) % 40)}%">
@@ -905,6 +935,10 @@
   .ff-table__empty-container :global(.ff-empty-state) {
     width: 100%;
     max-width: 480px;
+  }
+  .ff-table__boot {
+    position: relative;
+    pointer-events: none;
   }
   .ff-table__skeleton {
     animation: ff-table-skeleton-pulse 1.4s ease-in-out infinite;
