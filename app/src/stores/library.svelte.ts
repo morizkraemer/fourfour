@@ -76,8 +76,49 @@ export function bumpLibraryTracks(changedIds: Iterable<number>) {
   const ids = [...changedIds];
   copyRowFieldsToPlainTracks(ids);
   if (haystackById) refreshHaystacks(ids);
+  const previous = trackList;
   trackList = trackList.slice();
+  recordTrackListBump(previous, trackList, ids);
   scheduleSearchIndexWarmup();
+}
+
+const BUMP_LOG_LIMIT = 64;
+const listVersions = new WeakMap<object, number>();
+let bumpLog: { version: number; ids: number[] }[] = [];
+let nextListVersion = 1;
+
+function recordTrackListBump(previous: object, next: object, ids: number[]) {
+  let from = listVersions.get(previous);
+  if (from === undefined) {
+    from = nextListVersion++;
+    listVersions.set(previous, from);
+    bumpLog = [];
+  }
+  const version = nextListVersion++;
+  listVersions.set(next, version);
+  bumpLog.push({ version, ids });
+  if (bumpLog.length > BUMP_LOG_LIMIT) bumpLog.shift();
+}
+
+/**
+ * The rows whose fields changed between an earlier `library.tracks` array and the current one, when the list was only
+ * bumped in between (`bumpLibraryTracks`); `null` when it was replaced or the change is too old to tell.
+ */
+export function libraryRowsChangedSince(earlier: object): object[] | null {
+  const current = untrack(() => trackList);
+  if (earlier === current) return [];
+  const from = listVersions.get(earlier);
+  const to = listVersions.get(current);
+  if (from === undefined || to === undefined || bumpLog.length === 0 || bumpLog[0].version > from + 1) return null;
+  const rows: object[] = [];
+  for (const entry of bumpLog) {
+    if (entry.version <= from || entry.version > to) continue;
+    for (const id of entry.ids) {
+      const row = current[trackIndexById(id)];
+      if (row?.id === id) rows.push(row);
+    }
+  }
+  return rows;
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -560,8 +601,12 @@ export function sidebarSourceLabel(source: string) {
   return source;
 }
 
+let analyzingIdSet: { ids: number[]; set: Set<number> } | null = null;
+
 export function isTrackAnalyzing(trackId: number): boolean {
-  return library.analyzingTrackIds.includes(trackId);
+  const ids = library.analyzingTrackIds;
+  if (analyzingIdSet?.ids !== ids) analyzingIdSet = { ids, set: new Set(ids) };
+  return analyzingIdSet.set.has(trackId);
 }
 
 function knownTrackIds(ids: number[]): number[] {

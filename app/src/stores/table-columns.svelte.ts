@@ -15,7 +15,7 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, playlistByName } from './library.svelte.ts';
+import { library, libraryRowsChangedSince, playlistByName } from './library.svelte.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
@@ -453,15 +453,20 @@ const sortValuesByKey = new Map<string, WeakMap<object, SortValue>>();
 /**
  * Sort keys per track, read without tracking and kept until the track list is replaced: library tracks change their
  * fields only together with `bumpLibraryTracks()` (and USB tracks are replaced whole), which swaps the list this
- * cache is checked against. A tracked read of the key of every track made each sort depend on 10k track signals.
+ * cache is checked against; after a bump only the changed rows are read again. A tracked read of the key of every track made each sort depend on 10k track signals.
  * `fav` stays a tracked read: favorite slots change in place (`syncTrackFavoriteFields`).
  */
 function sortValueReader(key: string): (track: Record<string, unknown>) => SortValue {
   const tracks = library.tracks;
   const usbTracks = library.usbTracks;
   if (!sortValuesVersion || sortValuesVersion.tracks !== tracks || sortValuesVersion.usbTracks !== usbTracks) {
+    const changed = sortValuesVersion?.usbTracks === usbTracks ? libraryRowsChangedSince(sortValuesVersion.tracks as object) : null;
+    if (changed) {
+      for (const values of sortValuesByKey.values()) for (const row of changed) values.delete(row);
+    } else {
+      sortValuesByKey.clear();
+    }
     sortValuesVersion = { tracks, usbTracks };
-    sortValuesByKey.clear();
   }
   let values = sortValuesByKey.get(key);
   if (!values) {

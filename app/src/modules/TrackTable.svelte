@@ -3,7 +3,7 @@
   column visibility menu, and playlist-aware row moves.
 -->
 <script>
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import {
     ColumnHeader,
     TrackRow,
@@ -58,7 +58,8 @@
   import { fileStatus, fileStateOf } from '../stores/file-status.svelte.ts';
   import { locateTrack } from '../stores/file-health.svelte.ts';
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
-  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS } from '../lib/rowWindow.ts';
+  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
+  import { anchorShift, sameMembers } from '../lib/stableSort.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -82,6 +83,10 @@
   let viewportHeight = $state(0);
   let headerHeight = $state(0);
   let scrollRaf = null;
+  const SCROLL_SETTLE_MS = 250;
+  let scrolling = $state(false);
+  let scrollSettleTimer = null;
+  let ownScrollTop = null;
 
   function syncScrollWindow() {
     scrollRaf = null;
@@ -94,6 +99,22 @@
 
   function onTableScroll() {
     if (scrollRaf == null) scrollRaf = requestAnimationFrame(syncScrollWindow);
+    if (ownScrollTop !== null && tableScrollEl?.scrollTop === ownScrollTop) {
+      ownScrollTop = null;
+      return;
+    }
+    ownScrollTop = null;
+    if (!scrolling) scrolling = true;
+    clearTimeout(scrollSettleTimer);
+    scrollSettleTimer = setTimeout(settleScroll, SCROLL_SETTLE_MS);
+  }
+
+  function settleScroll() {
+    scrolling = false;
+    if (resortWaiting) {
+      resortWaiting = false;
+      resortNonce++;
+    }
   }
 
   onMount(() => {
@@ -168,8 +189,46 @@
   let layoutKind = $derived(layoutKindOverride ?? resolveLayoutKind(effectiveSource));
   let layout = $derived(getLayout(layoutKind));
 
+  let sorted = null;
+  let resortWaiting = false;
+  let resortNonce = $state(0);
+  let pendingAnchorPx = 0;
+
   let currentTracks = $derived.by(() => {
-    return layout.sortKey ? sortTracks(filteredTracks, layoutKind) : filteredTracks;
+    resortNonce;
+    if (!layout.sortKey) {
+      sorted = null;
+      return filteredTracks;
+    }
+    const spec = `${layoutKind}|${layout.sortKey}|${layout.sortDir}`;
+    const previous = sorted;
+    const sameRows = previous !== null && previous.spec === spec && sameMembers(previous.members, filteredTracks);
+    if (sameRows && untrack(() => scrolling)) {
+      resortWaiting = true;
+      return previous.result;
+    }
+    const result = sortTracks(filteredTracks, layoutKind);
+    sorted = { spec, members: sameRows ? previous.members : new Set(filteredTracks), result };
+    if (sameRows && previous.result !== result) {
+      pendingAnchorPx = untrack(() => anchorShift(previous.result, result, visibleRowRange())) * ROW_HEIGHT;
+    }
+    return result;
+  });
+
+  function visibleRowRange() {
+    if (!tableScrollEl || tableScrollEl.scrollTop <= 0) return null;
+    const top = tableScrollEl.scrollTop;
+    return { first: Math.ceil(top / ROW_HEIGHT), end: Math.floor((top + tableScrollEl.clientHeight - headerHeight) / ROW_HEIGHT) };
+  }
+
+  $effect.pre(() => {
+    currentTracks;
+    if (pendingAnchorPx === 0 || !tableScrollEl) return;
+    const shift = pendingAnchorPx;
+    pendingAnchorPx = 0;
+    tableScrollEl.scrollTop += shift;
+    ownScrollTop = tableScrollEl.scrollTop;
+    scrollTop = tableScrollEl.scrollTop;
   });
 
   let columns = $derived(visibleColumns(layoutKind));
@@ -616,6 +675,7 @@
     <div
       class="ff-table__scroll"
       class:ff-table__scroll--dragging={dragging && embedded}
+      class:ff-table__scroll--scrolling={scrolling}
       bind:this={tableScrollEl}
       bind:clientHeight={viewportHeight}
       onscroll={onTableScroll}
@@ -755,6 +815,9 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
+  }
+  .ff-table__scroll--scrolling :global(.ff-waveform--analysing) {
+    animation: none;
   }
   .ff-table__scroll--dragging {
     overflow: hidden;
