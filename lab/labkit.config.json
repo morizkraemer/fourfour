@@ -1,0 +1,7 @@
+{
+  "name": "FourFour",
+  "logo": "/data/logo.svg",
+  "theme": "fourfour",
+  "port": 4220,
+  "hub": "data"
+}

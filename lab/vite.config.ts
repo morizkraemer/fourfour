@@ -1,11 +1,15 @@
+import fs from 'node:fs';
 import { defineConfig } from 'vite';
-import { labApi } from './server/plugin';
+import { labHub } from './node_modules/labkit/src/server';
 
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [labApi(import.meta.dirname)],
-  server: { allowedHosts: true, watch: null },
+  plugins: [labHub({ root: 'data' })],
+  server: {
+    allowedHosts: true,
+    watch: null,
+    fs: { allow: [import.meta.dirname, fs.realpathSync('node_modules/labkit')] },
+  },
   preview: { allowedHosts: true },
-  build: { outDir: 'dist', emptyOutDir: true },
-  test: { include: ['src/**/*.test.ts', 'server/**/*.test.ts'] },
+  build: { outDir: 'dist', emptyOutDir: true, rollupOptions: { input: ['lab.html', 'index.html'] } },
 });

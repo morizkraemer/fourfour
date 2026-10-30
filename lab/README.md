@@ -1,78 +1,52 @@
 # Review Lab
 
-Phone-first review inbox for fourfour UI states. Cards are media first (png, gif, mp4 side by side), one tap picks an option, an optional note goes with it. Picks are stored as JSON in this folder and committed.
+Phone-first review inbox for fourfour UI states, built on the shared labkit package. Rules, card format and the full workflow: `.claude/skills/labkit/SKILL.md` (repo root). Read it before adding a card, reading notes or locking a decision.
 
 ## Layout
 
-- `data/cards/<id>.json` card, `data/cards/<id>/notes/*.json` picks and notes, `data/.read.json` notes already printed by `hub:notes`
-- `media/<id>/` screenshots, gifs, mp4s (copied in by `hub:card`)
-- `src/` inbox page and card model, `server/` JSON store and the API plugin, `scripts/` CLIs
+- `lab.html`, `lab.ts`, `labkit.config.json` labkit entry (`index.html` is a copy so `/` works)
+- `data/cards/<id>.json` card, `data/cards/<id>/notes/*.json` picks and notes, `data/cards/<id>/media/` screenshots, gifs, mp4s
+- `data/locked/` locks, `data/logo.svg` header logo (the app icon source)
+- `scripts/review-shot.ts` fourfour-only capture tool (`hub:shot`)
 - `scenarios/` capture scenarios per branch (`ov-1028.ts`) and the card commands that go with them (`ov-1028.cards.sh`)
-- `.capture/` scratch output of `hub:shot` (gitignored)
 
 ## Commands (run in `lab/`)
 
 ```
 npm install
-npm test
 npm run build
+npm run lab:review
+npm run hub:card -- ...
+npm run hub:notes
+npm run hub:lock -- --kind <kind> --title ... --summary ...
 ```
 
-### Add a card from a fourfour branch
+`hub:lock` takes `--kind --title --summary` (the old one took a card id and marked it done). Closing a card is status `done` (see the skill).
 
-1. Capture. `hub:shot` builds the branch's `app/` with its own node_modules, serves it on a spare port, boots it against the smoke Tauri mock (`app/smoke/tauri-mock.ts`, `fixture.ts`) in headless Chromium at 1440x900, and runs the scenarios in a file. The branch needs the smoke harness and `app/node_modules`.
+### Capture media from a fourfour branch
+
+`hub:shot` builds the branch's `app/` with its own node_modules, serves it on a spare port, boots it against the smoke Tauri mock (`app/smoke/tauri-mock.ts`, `fixture.ts`) in headless Chromium at 1440x900, and runs the scenarios in a file. The branch needs the smoke harness and `app/node_modules`.
 
 ```
 npm run hub:shot -- --app <worktree or app dir> --scenarios scenarios/<branch>.ts [--only a,b] [--id card-id] [--tracks N] [--port 5399]
 ```
 
-   - Output goes to `.capture/<scenario name>/` (or `.capture/<card-id>` with `--id`): png screenshots, mp4 videos (H.264, phone friendly) and optional gifs. mp4 and gif need ffmpeg on the box
-   - `--tracks N` sets the fixture track count (use it for scroll scenarios, for example 150)
-   - A scenario is an async function in `scenarios/<branch>.ts`. `boot({ storage, holdLoad, video, viewport, state })` starts a fresh app, `shot(label, { clip })` writes a png, `emit(event, payload)` fires a Tauri event, `finishVideo(label, { gif })` stops recording and converts it. Copy `scenarios/ov-1028.ts` as a starting point
-   - Smoke hooks such as `__smokeHoldLoad`, `__smokeHoldImport` and `__smokeEmit` are described in `app/smoke/tauri-mock.ts`
+- Output goes straight to `data/cards/<card id>/media/` (the scenario name, or `--id`): png screenshots, mp4 videos (H.264) and optional gifs. mp4 and gif need ffmpeg
+- `--tracks N` sets the fixture track count (use it for scroll scenarios, for example 150)
+- A scenario is an async function in `scenarios/<branch>.ts`. `boot({ storage, holdLoad, video, viewport, state })` starts a fresh app, `shot(label, { clip })` writes a png, `emit(event, payload)` fires a Tauri event, `finishVideo(label, { gif })` stops recording and converts it. Copy `scenarios/ov-1028.ts` as a starting point
+- Smoke hooks such as `__smokeHoldLoad`, `__smokeHoldImport` and `__smokeEmit` are described in `app/smoke/tauri-mock.ts`
 
-2. Post the card with labelled images:
-
-```
-npm run hub:card -- --id <branch>-<topic> --title "Top-bar status chip" --question "Keep as is?" \
-  --media "idle=.capture/<name>/1-idle.png" --media "analysing=.capture/<name>/2-analysing.png" \
-  --options "K=Keep,C=Change (note)"
-```
-
-   `scenarios/ov-1028.cards.sh` is a full example. Use short option keys (one or two letters): the key is shown as a badge next to the label.
-
-3. Commit `lab/data` and `lab/media`. The review server reads them on every request, no rebuild needed.
-
-### hub:card flags
-
-- `--title` required, `--question` the one-line ask
-- `--media [label=]path` repeat for several, png jpg gif webp mp4 webm, swipe order = argument order. No label gives a, b, c
-- `--options a,b,c` or `a=Wide,b=Tight` (key=label). Without options the card takes a note only
-- `--url` optional link shown under the media
-- `--id slug` fixed id. Posting an existing id starts the next round on the same card: new media and question, earlier picks stay on disk but no longer count
-
-### Read his answers
-
-```
-npm run hub:notes            # unread picks and notes, then marks them read
-npm run hub:notes -- --all   # everything again
-```
-
-### Lock a decided card
-
-```
-npm run hub:lock -- <card-id>   # leaves the inbox
-```
+Then post the card with media urls of the form `/data/cards/<id>/media/<file>` (see `scenarios/ov-1028.cards.sh`). Option keys are lowercase. Commit `lab/data`.
 
 ### Review server
 
 Port 4220, bound to 127.0.0.1:
 
 ```
-cd lab && npm run review
+cd lab && npm run lab:review
 ```
 
-`vite build` then `vite preview`. The server reads `data/` and `media/` on every request, so new cards and picks show up on Refresh without a rebuild. Rebuild only after changing `src/`.
+`vite build` then `vite preview`. The server reads `data/` on every request, so new cards and picks show up on Refresh without a rebuild. Rebuild only after changing `lab.ts` or `labkit.config.json`.
 
 lab-infra row (`~/dev/projects/lab-infra/ports.tsv`, tab separated):
 
