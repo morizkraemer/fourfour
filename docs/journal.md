@@ -329,3 +329,4 @@
 2026-10-30 08:21 orchestrator - landed: review lab on master (lab/, port 4220 via lab-infra ports.tsv 7370f6d unpushed), 4 cards seeded for today's ov-1028 changes
 2026-10-30 09:22 orchestrator - spawn: fb-reviewr1 (review round 1: skeleton must match real rows; sidebar empty state at full width; status chip kept; Mac scroll lag -> run item 5)
 2026-10-30 09:38 orchestrator - landed: fb-reviewr1 on ov-1028 (skeleton = real rows, sticks empty card aligned); round 2 cards posted
+2026-10-30 18:06 orchestrator - run-start: PM queue start (Merlin: start all projects on the holiday queue now); plan per STATE Run; q50-report merged into ov-1028; spawn r1-perf10k (item 1: 10k+ fixture, budgets, Mac timing script, opus)
