@@ -327,3 +327,4 @@
 2026-10-30 05:14 orchestrator - landed: fb-analysisfps on ov-1028 (pulse off while scrolling, re-sort deferred + anchored; scroll drops 136-157 -> 44-66, rows moved 0)
 2026-10-30 08:04 orchestrator - spawn: fb-reviewlab (Merlin via audio_tools thread: copy the phone-first review lab, capture script against the smoke mock, seed cards for today's ov-1028 changes; sonnet high)
 2026-10-30 08:21 orchestrator - landed: review lab on master (lab/, port 4220 via lab-infra ports.tsv 7370f6d unpushed), 4 cards seeded for today's ov-1028 changes
+2026-10-30 09:22 orchestrator - spawn: fb-reviewr1 (review round 1: skeleton must match real rows; sidebar empty state at full width; status chip kept; Mac scroll lag -> run item 5)

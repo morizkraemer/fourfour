@@ -79,7 +79,7 @@ Week 1, speed (measured on a real-size 10k+ fixture, before/after each):
 2. startup to interactive at 10k-50k (cached last list, lazy work after first paint)
 3. analysis at 10k+: throughput (decode once, ONNX batching/threads), steady memory, resumable queue across restarts
 4. track load to first audio + full waveform; detail cache cap 2 GiB (Waiting 19)
-5. UI during analysis: remaining pulse cost, library mutex vs get_analysis_data, WKWebView-specific fixes after Mac numbers
+5. UI during analysis (Merlin 2026-10-30: still laggy on the Mac, analysis at ~75% CPU): leave UI headroom on the Mac (fewer analysis threads or a pause while scrolling/playing), measure in the Mac-night batch; remaining pulse cost, library mutex vs get_analysis_data, WKWebView-specific fixes after Mac numbers
 6. import of 10k+ files end to end
 Week 2, beta:
 7. analysis bars: key >=60% exact (now 58.3%), grid; bar 1 rule (Waiting 16) by data, listening check queued for Merlin
