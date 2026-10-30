@@ -11,5 +11,5 @@ export default defineConfig({
     fs: { allow: [import.meta.dirname, fs.realpathSync('node_modules/labkit')] },
   },
   preview: { allowedHosts: true },
-  build: { outDir: 'dist', emptyOutDir: true, rollupOptions: { input: ['lab.html', 'index.html'] } },
+  build: { outDir: 'dist', emptyOutDir: true, rollupOptions: { input: ['lab.html'] } },
 });
