@@ -88,6 +88,7 @@ Week 2, beta:
 10. sync UI round 3 on recs (Waiting 1-3: strip, keep-updated on, replace ui-sync-flow attempt)
 11. CI workflow (Q8) on branch ov-ci, no push (first run needs Merlin's push OK)
 12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
+review: https://dev.tail87069a.ts.net:4210 (ov-1028 build, browser preview without the Rust backend; restart: preview start fourfour app-review --dir <q41-int>/app --port 4210)
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
