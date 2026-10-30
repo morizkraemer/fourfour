@@ -26,7 +26,7 @@ async function withProblems(page: Page, missing: number[], unreadable: number[] 
   await rows(page).first().waitFor();
 }
 
-test('the activity button rests as a quiet import button and the status column stays empty while every file is found', async ({ smoke: { page } }) => {
+test('the status chip rests as the track count and the status column stays empty while every file is found', async ({ smoke: { page } }) => {
   await expect(page.locator('.ff-colh [data-col-key="status"]')).toHaveCount(1);
   await expect(page.locator('[data-track-row][data-file-status]')).toHaveCount(0);
   await expect(statusButton(page)).toHaveAttribute('data-activity', 'rest');

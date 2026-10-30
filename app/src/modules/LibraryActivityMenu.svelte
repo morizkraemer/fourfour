@@ -1,11 +1,12 @@
 <!--
   LibraryActivityMenu.svelte — Popover under the top-bar library activity button.
-  Shows the last import (this session), the missing-files actions while files are missing or
-  unreadable, and the import entry points. Uses the shared menu surface (.ff-menu).
+  Opens from the always-visible status chip. Lists the library summary, everything running (importing,
+  syncing, analyzing), the last import (this session), the missing-files actions while files are missing
+  or unreadable, and the import entry points. Uses the shared menu surface (.ff-menu).
 -->
 <script>
   import { closeOnEscape } from '$ds/components/menuEscape.js';
-  import { library } from '../stores/library.svelte.ts';
+  import { library, unanalyzedTrackCount } from '../stores/library.svelte.ts';
   import { importActivity } from '../stores/import-activity.svelte.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import { checkLibraryAgain, openHealthDialog, relocateMissing, showProblemTracks } from '../stores/file-health.svelte.ts';
@@ -16,6 +17,8 @@
 
   let menuEl = $state(null);
   let importing = $derived(importActivity.running);
+  let trackCount = $derived(library.tracks.length);
+  let unanalyzedCount = $derived(open ? unanalyzedTrackCount() : 0);
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
   const ANALYSIS_TITLES_SHOWN = 6;
   let analyzingTitles = $derived.by(() => {
@@ -73,6 +76,25 @@
 
 {#if open}
   <div class="ff-menu ff-context-menu ff-activity" data-library-activity-menu bind:this={menuEl} use:place style="position: fixed; left: {x}px; top: {y}px; z-index: 10000;">
+    <div class="ff-activity__section" data-library-summary>
+      <span class="ff-activity__title">Library</span>
+      <span class="ff-activity__headline">{trackCount.toLocaleString()} {trackCount === 1 ? 'track' : 'tracks'}</span>
+      {#if trackCount > 0}
+        <span class="ff-activity__line">
+          {unanalyzedCount > 0 ? `${(trackCount - unanalyzedCount).toLocaleString()} analysed, ${unanalyzedCount.toLocaleString()} not analysed` : 'All analysed'}
+        </span>
+      {/if}
+    </div>
+    <div class="ff-menu__separator"></div>
+    {#if importing}
+      <div class="ff-activity__section" data-import-progress>
+        <span class="ff-activity__title">Importing</span>
+        <span class="ff-activity__headline">
+          {importActivity.total > 0 ? `${importActivity.done} of ${importActivity.total} files` : 'Looking for audio files…'}
+        </span>
+      </div>
+      <div class="ff-menu__separator"></div>
+    {/if}
     {#if analyzing}
       <div class="ff-activity__section" data-analysis-progress>
         <span class="ff-activity__title">Analyzing</span>
@@ -93,15 +115,7 @@
       </div>
       <div class="ff-menu__separator"></div>
     {/if}
-    {#if importing}
-      <div class="ff-activity__section" data-import-progress>
-        <span class="ff-activity__title">Importing</span>
-        <span class="ff-activity__headline">
-          {importActivity.total > 0 ? `${importActivity.done} of ${importActivity.total} files` : 'Looking for audio files…'}
-        </span>
-      </div>
-      <div class="ff-menu__separator"></div>
-    {:else if importActivity.summary}
+    {#if !importing && importActivity.summary}
       <div class="ff-activity__section" data-last-import>
         <span class="ff-activity__title">Last import</span>
         <span class="ff-activity__headline">{importActivity.summary.headline}</span>

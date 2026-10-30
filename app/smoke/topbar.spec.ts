@@ -126,11 +126,13 @@ test('the full field state keeps the dropdown under the top bar field', async ({
   await page.screenshot({ path: `${SHOTS}/field-dropdown.png` });
 });
 
-test('the track count is plain text, not a button', async ({ smoke: { page } }) => {
-  const text = page.locator('.ff-gheader__plain');
-  await expect(text).toContainText('tracks');
-  await expect(page.locator('.ff-gheader__chip--idle:not([data-library-status])')).toHaveCount(0);
-  expect(await text.evaluate((el) => getComputedStyle(el).cursor)).not.toBe('pointer');
+test('the track count is the status chip button and opens the activity panel', async ({ smoke: { page } }) => {
+  const chip = page.locator('[data-library-status]');
+  await expect(chip).toContainText('tracks');
+  expect(await chip.evaluate((el) => el.tagName)).toBe('BUTTON');
+  expect(await chip.evaluate((el) => getComputedStyle(el).cursor)).toBe('pointer');
+  await chip.click();
+  await expect(page.locator('[data-library-activity-menu]')).toBeVisible();
 });
 
 const centreY = (b: { y: number; height: number }) => b.y + b.height / 2;
