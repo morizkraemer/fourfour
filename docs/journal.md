@@ -325,3 +325,4 @@
 2026-10-30 05:03 orchestrator - landed: fb-statuschip on ov-1028 (one status chip, idle = track count, panel always opens with library summary + import)
 2026-10-30 13:30 orchestrator - run-proposed: two-week travel run per Merlin Q&A (speed first at 10k+, then beta-ready; land on ov-1028 only; Mac-night batches weekly; nothing off limits within hard gates)
 2026-10-30 05:14 orchestrator - landed: fb-analysisfps on ov-1028 (pulse off while scrolling, re-sort deferred + anchored; scroll drops 136-157 -> 44-66, rows moved 0)
+2026-10-30 08:04 orchestrator - spawn: fb-reviewlab (Merlin via audio_tools thread: copy the phone-first review lab, capture script against the smoke mock, seed cards for today's ov-1028 changes; sonnet high)
