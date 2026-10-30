@@ -54,9 +54,13 @@ fn fake_track(i: usize) -> Track {
 }
 
 fn fake_analysis(i: usize) -> AnalysisResult {
+    fake_analysis_of(i, TRACK_SECS)
+}
+
+fn fake_analysis_of(i: usize, track_secs: f64) -> AnalysisResult {
     let bpm = 90.0 + (i % 80) as f64;
     let beat_ms = (60_000.0 / bpm) as u32;
-    let beats = (0..(TRACK_SECS * bpm / 60.0) as u32)
+    let beats = (0..(track_secs * bpm / 60.0) as u32)
         .map(|b| Beat {
             bar_position: (b % 4) as u8 + 1,
             time_ms: b * beat_ms,
@@ -67,7 +71,7 @@ fn fake_analysis(i: usize) -> AnalysisResult {
     for (n, byte) in data.iter_mut().enumerate() {
         *byte = (((n * 7 + i) % 31) as u8 + 1) | (((n + i) % 8) as u8) << 5;
     }
-    let detail_len = (TRACK_SECS * 150.0) as usize;
+    let detail_len = (track_secs * 150.0) as usize;
     let detail = (0..detail_len)
         .map(|n| [((n + i) % 120) as u8, ((n * 3) % 100) as u8, ((n * 5 + i) % 90) as u8])
         .collect();
@@ -632,6 +636,144 @@ fn detail_profile(list: &Path) {
     );
 }
 
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+fn fixture_lib(music: &Path, dir: &Path, analysed: f64, seed: u64) {
+    use pioneer_library::rekordbox::{ImportedMeta, SourceKind};
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut rng = Rng(seed.max(1));
+    let total = Instant::now();
+
+    let t = Instant::now();
+    let mut scanned = import_plan::scan_paths(&[music.to_string_lossy().into_owned()], &mut || {});
+    scanned.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    let scan_ms = ms(t);
+    let with_art = scanned.iter().filter(|t| t.artwork.is_some()).count();
+
+    let t = Instant::now();
+    let ids = lib.add_tracks(&scanned).unwrap();
+    let add_ms = ms(t);
+
+    let t = Instant::now();
+    let mut analysed_ids = Vec::new();
+    let mut batch: Vec<(i64, AnalysisResult)> = Vec::new();
+    let flush = |batch: &mut Vec<(i64, AnalysisResult)>| {
+        lib.set_analyses(&batch.iter().map(|(id, a)| (*id, a)).collect::<Vec<_>>()).unwrap();
+        batch.clear();
+    };
+    for (n, id) in ids.iter().enumerate() {
+        if rng.unit() >= analysed {
+            continue;
+        }
+        let nominal_secs = 180.0 + rng.below(300) as f64;
+        batch.push((*id, fake_analysis_of(n, nominal_secs)));
+        analysed_ids.push(*id);
+        if batch.len() == 500 {
+            flush(&mut batch);
+            eprintln!("[fixture] analysed {}/{}", analysed_ids.len(), ids.len());
+        }
+    }
+    flush(&mut batch);
+    let analysis_ms = ms(t);
+
+    let t = Instant::now();
+    let mut rated = 0;
+    let mut coloured = 0;
+    let colours = ["#ff0000", "#ff8c00", "#ffd700", "#00c853", "#00b0ff", "#2962ff", "#aa00ff", "#ff4081"];
+    for id in &ids {
+        if rng.unit() < 0.25 {
+            lib.set_user_rating(*id, 1 + rng.below(5) as u8).unwrap();
+            rated += 1;
+        }
+        if rng.unit() < 0.08 {
+            let meta = ImportedMeta {
+                source: SourceKind::Xml,
+                source_id: id.to_string(),
+                grid_locked: false,
+                cues_locked: false,
+                rating: None,
+                color: Some(colours[rng.below(colours.len())].to_string()),
+                cues: Vec::new(),
+                grid: Vec::new(),
+            };
+            meta.write(&dir.join("anlz").join(id.to_string())).unwrap();
+            coloured += 1;
+        }
+    }
+    let labels_ms = ms(t);
+
+    let t = Instant::now();
+    let mut playlists = 0;
+    let mut folders = 0;
+    let mut playlist_rows = 0;
+    let sizes = [12, 25, 40, 60, 80, 120, 150, 250, 400, 800];
+    let tops = ["Gigs", "Genres", "Crates", "2024", "2025", "Archive", "Radio Shows"];
+    for (f, top) in tops.iter().enumerate() {
+        let top_id = lib.create_folder(top, 0).unwrap() as u32;
+        folders += 1;
+        let subs: Vec<u32> = (0..rng.below(3))
+            .map(|s| {
+                folders += 1;
+                lib.create_folder(&format!("{top} {}", s + 1), top_id).unwrap() as u32
+            })
+            .collect();
+        for p in 0..(6 + rng.below(8)) {
+            let parent = if subs.is_empty() || rng.unit() < 0.5 { top_id } else { subs[rng.below(subs.len())] };
+            let pid = lib.create_playlist_in(&format!("{top} set {}", f * 20 + p + 1), parent).unwrap();
+            let len = sizes[rng.below(sizes.len())].min(ids.len());
+            let start = rng.below(ids.len());
+            let members: Vec<i64> = (0..len).map(|k| ids[(start + k * 7) % ids.len()]).collect();
+            playlist_rows += members.len();
+            lib.set_playlist_tracks(pid, &members).unwrap();
+            playlists += 1;
+        }
+    }
+    let big = lib.create_playlist("All Bangers").unwrap();
+    let members: Vec<i64> = ids.iter().step_by(5).copied().collect();
+    playlist_rows += members.len();
+    lib.set_playlist_tracks(big, &members).unwrap();
+    playlists += 1;
+    let playlists_ms = ms(t);
+
+    perf(
+        "fixture_library",
+        serde_json::json!({
+            "tracks": ids.len(), "with_artwork": with_art, "analysed": analysed_ids.len(),
+            "rated": rated, "coloured": coloured, "playlists": playlists, "folders": folders, "playlist_rows": playlist_rows,
+            "scan_ms": scan_ms, "add_tracks_ms": add_ms, "analysis_ms": analysis_ms, "labels_ms": labels_ms,
+            "playlists_ms": playlists_ms, "total_ms": ms(total),
+        }),
+    );
+}
+
+fn state_json(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let infos = track_infos::build_track_infos(&lib).unwrap();
+    let playlists: Vec<PlaylistInput> = lib
+        .get_all_playlists()
+        .unwrap()
+        .into_iter()
+        .map(|pl| PlaylistInput { id: pl.id, name: pl.name, track_ids: pl.track_ids, parent_id: pl.parent_id, is_folder: pl.is_folder })
+        .collect();
+    std::fs::write(out, serde_json::to_string(&LoadedState { tracks: infos, playlists }).unwrap()).unwrap();
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -644,8 +786,15 @@ fn main() {
         Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
         Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
+        Some("fixture-lib") => fixture_lib(
+            Path::new(&args[2]),
+            Path::new(&args[3]),
+            args.get(4).map_or(0.7, |a| a.parse().unwrap()),
+            args.get(5).map_or(4404, |s| s.parse().unwrap()),
+        ),
+        Some("state-json") => state_json(Path::new(&args[2]), Path::new(&args[3])),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"
+            "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | fixture-lib <music dir> <library dir> [analysed share] [seed] | state-json <library dir> <out.json>"
         ),
     }
 }

@@ -10,6 +10,7 @@ mod band_analysis;
 mod dto;
 mod file_health;
 mod import_plan;
+mod perf_probe;
 mod playback;
 mod tempo;
 mod track_fields;
@@ -1124,10 +1125,12 @@ fn save_state(
 #[tauri::command]
 async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, String> {
     let shared = state.inner().clone();
+    perf_probe::mark("load_state_start", serde_json::json!({}));
     tauri::async_runtime::spawn_blocking(move || {
         let lib = shared.lock().map_err(|e| e.to_string())?;
 
         let track_infos = build_track_infos(&lib)?;
+        perf_probe::mark("load_state_built", serde_json::json!({ "tracks": track_infos.len() }));
 
         let playlists = lib
             .get_all_playlists()
@@ -1286,7 +1289,8 @@ fn focus_main_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
-    tauri::Builder::default() // v0.1
+    perf_probe::start();
+    perf_probe::install(tauri::Builder::default()) // v0.1
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             plan_import,
@@ -1365,6 +1369,7 @@ fn main() {
             playback_set_tempo,
             playback_set_key_shift,
             playback_set_key_lock,
+            perf_probe::perf_mark,
         ])
         .setup(|app| {
             // Open (or create) the local library database at the stored/default path
@@ -1390,6 +1395,7 @@ fn main() {
             }
 
             focus_main_window(&app.handle());
+            perf_probe::mark("setup_done", serde_json::json!({}));
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -1397,6 +1403,7 @@ fn main() {
         .run(|app_handle, event| {
             match event {
                 tauri::RunEvent::Ready => {
+                    perf_probe::mark("ready", serde_json::json!({}));
                     focus_main_window(&app_handle);
                 }
                 #[cfg(target_os = "macos")]
