@@ -319,3 +319,4 @@
 2026-10-30 06:40 q50-staleplain installed on Mac; q50-testenv landed on ov-1028: vitest default env = Svelte client runtime (real $state proxies), 2 file-URL tests opt out to node; no new proxy bugs; alt-key test flaked once
 2026-10-30 07:05 orchestrator - run-pause: Merlin said pause; stopped q50-report after it committed its summary (c3476bb, unmerged), worktree kept; ov-1028 green, on the Mac since 06:39
 2026-10-30 07:20 orchestrator - spawn: Merlin Mac feedback; fb-analysisfps (frame drops + scroll jumps during analysis, opus) and fb-uxfixes (empty-state flash -> skeleton, hotcue grid snap, clickable analysing indicator -> one combined activity panel, sonnet high); base ov-1028
+2026-10-30 07:55 orchestrator - spawn: fb-sidebarlayout (Merlin chose: top bar full width, right sidebar below it; drop showChips workaround; sonnet high); fb-uxfixes merged into ov-1028 5d03208, checks + install running
