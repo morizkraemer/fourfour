@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,7 +21,6 @@ const appDir = existsSync(join(resolve(appArg), 'smoke')) ? resolve(appArg) : jo
 if (!existsSync(join(appDir, 'smoke', 'tauri-mock.ts'))) throw new Error(`no smoke/tauri-mock.ts under ${appArg}; the branch needs the smoke harness`);
 const only = flagValue(argv, 'only')?.split(',');
 const port = Number(flagValue(argv, 'port') ?? 5399);
-const captureRoot = resolve(labRoot, '.capture');
 const hasFfmpeg = spawnSync('ffmpeg', ['-version']).status === 0;
 
 const tracks = flagValue(argv, 'tracks');
@@ -78,11 +77,13 @@ async function main() {
 
   const browser: Browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
   const failures: string[] = [];
+  const cardMediaDirs = new Set<string>();
 
   for (const [name, scenario] of Object.entries(scenarios)) {
     if (only && !only.includes(name)) continue;
-    const outDir = join(captureRoot, id ?? name);
+    const outDir = join(labRoot, 'data', 'cards', id ?? name, 'media');
     mkdirSync(outDir, { recursive: true });
+    cardMediaDirs.add(outDir);
     let context: BrowserContext | null = null;
     let page: Page | null = null;
     let recording = false;
@@ -159,8 +160,8 @@ async function main() {
 
   await browser.close();
   server.kill();
-  for (const dir of readdirSync(captureRoot)) rmSync(join(captureRoot, dir, '.video'), { recursive: true, force: true });
-  console.log(`captured into ${captureRoot}`);
+  for (const dir of cardMediaDirs) rmSync(join(dir, '.video'), { recursive: true, force: true });
+  console.log(`captured into data/cards/<card id>/media`);
   if (failures.length) {
     console.error(failures.join('\n'));
     process.exit(1);

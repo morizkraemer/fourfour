@@ -1,23 +1,24 @@
 {
+  "url": "/lab.html",
   "title": "Right sidebar under full-width top bar",
   "question": "Sticks empty state at full width, now aligned with the search field (round 2): keep?",
   "gallery": [
     {
-      "url": "/media/ov1028-sidebar/r2-1-r1-3-3-open-max-width.png",
+      "url": "/data/cards/ov1028-sidebar/media/r2-1-r1-3-3-open-max-width.png",
       "label": "before"
     },
     {
-      "url": "/media/ov1028-sidebar/r2-2-3-open-max-width.png",
+      "url": "/data/cards/ov1028-sidebar/media/r2-2-3-open-max-width.png",
       "label": "after"
     }
   ],
   "options": [
     {
-      "key": "K",
+      "key": "k",
       "label": "Keep"
     },
     {
-      "key": "C",
+      "key": "c",
       "label": "Change (note)"
     }
   ],

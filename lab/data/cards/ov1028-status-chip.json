@@ -1,31 +1,32 @@
 {
+  "url": "/lab.html",
   "title": "Top-bar status chip",
   "question": "Status chip in the top bar: keep as is?",
   "gallery": [
     {
-      "url": "/media/ov1028-status-chip/r1-1-1-idle-track-count.png",
+      "url": "/data/cards/ov1028-status-chip/media/r1-1-1-idle-track-count.png",
       "label": "idle - track count"
     },
     {
-      "url": "/media/ov1028-status-chip/r1-2-2-analysing.png",
+      "url": "/data/cards/ov1028-status-chip/media/r1-2-2-analysing.png",
       "label": "analysing"
     },
     {
-      "url": "/media/ov1028-status-chip/r1-3-3-importing.png",
+      "url": "/data/cards/ov1028-status-chip/media/r1-3-3-importing.png",
       "label": "importing"
     },
     {
-      "url": "/media/ov1028-status-chip/r1-4-4-panel-open-idle.png",
+      "url": "/data/cards/ov1028-status-chip/media/r1-4-4-panel-open-idle.png",
       "label": "panel open while idle"
     }
   ],
   "options": [
     {
-      "key": "K",
+      "key": "k",
       "label": "Keep"
     },
     {
-      "key": "C",
+      "key": "c",
       "label": "Change (note)"
     }
   ],

@@ -1,27 +1,28 @@
 {
+  "url": "/lab.html",
   "title": "Skeleton rows on start",
   "question": "Skeleton now uses the real row layout (round 2): keep?",
   "gallery": [
     {
-      "url": "/media/ov1028-skeleton/r2-1-r1-1-1-skeleton-rows-on-start.png",
+      "url": "/data/cards/ov1028-skeleton/media/r2-1-r1-1-1-skeleton-rows-on-start.png",
       "label": "before"
     },
     {
-      "url": "/media/ov1028-skeleton/r2-2-1-skeleton-rows-on-start.png",
+      "url": "/data/cards/ov1028-skeleton/media/r2-2-1-skeleton-rows-on-start.png",
       "label": "after (skeleton)"
     },
     {
-      "url": "/media/ov1028-skeleton/r2-3-2-loaded.png",
+      "url": "/data/cards/ov1028-skeleton/media/r2-3-2-loaded.png",
       "label": "after (loaded, no shift)"
     }
   ],
   "options": [
     {
-      "key": "K",
+      "key": "k",
       "label": "Keep"
     },
     {
-      "key": "C",
+      "key": "c",
       "label": "Change (note)"
     }
   ],
