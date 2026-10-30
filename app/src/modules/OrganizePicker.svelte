@@ -247,7 +247,12 @@
 
   .ff-picker__sticks > :global([data-empty-sticks]) {
     grid-column: 1 / -1;
-    max-width: 400px;
+    max-width: 520px;
+    min-height: 120px;
+  }
+
+  .ff-picker__sticks > :global([data-empty-sticks] .ff-dcard__meta) {
+    max-width: 44ch;
   }
 
   .ff-picker__none {
