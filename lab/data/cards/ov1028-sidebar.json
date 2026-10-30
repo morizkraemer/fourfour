@@ -1,18 +1,14 @@
 {
   "title": "Right sidebar under full-width top bar",
-  "question": "Right sidebar below the full-width top bar: keep?",
+  "question": "Sticks empty state at full width, now aligned with the search field (round 2): keep?",
   "gallery": [
     {
-      "url": "/media/ov1028-sidebar/r1-1-1-closed.png",
-      "label": "closed"
+      "url": "/media/ov1028-sidebar/r2-1-r1-3-3-open-max-width.png",
+      "label": "before"
     },
     {
-      "url": "/media/ov1028-sidebar/r1-2-2-open.png",
-      "label": "open"
-    },
-    {
-      "url": "/media/ov1028-sidebar/r1-3-3-open-max-width.png",
-      "label": "open at max width"
+      "url": "/media/ov1028-sidebar/r2-2-3-open-max-width.png",
+      "label": "after"
     }
   ],
   "options": [
@@ -27,6 +23,6 @@
   ],
   "id": "ov1028-sidebar",
   "status": "open",
-  "round": 1,
+  "round": 2,
   "created": "2026-10-30T08:19:22.763Z"
 }

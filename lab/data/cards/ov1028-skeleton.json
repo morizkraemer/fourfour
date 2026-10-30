@@ -1,14 +1,18 @@
 {
   "title": "Skeleton rows on start",
-  "question": "Skeleton rows while the library loads, instead of the empty state: keep?",
+  "question": "Skeleton now uses the real row layout (round 2): keep?",
   "gallery": [
     {
-      "url": "/media/ov1028-skeleton/r1-1-1-skeleton-rows-on-start.png",
-      "label": "skeleton on start"
+      "url": "/media/ov1028-skeleton/r2-1-r1-1-1-skeleton-rows-on-start.png",
+      "label": "before"
     },
     {
-      "url": "/media/ov1028-skeleton/r1-2-2-loaded.png",
-      "label": "loaded"
+      "url": "/media/ov1028-skeleton/r2-2-1-skeleton-rows-on-start.png",
+      "label": "after (skeleton)"
+    },
+    {
+      "url": "/media/ov1028-skeleton/r2-3-2-loaded.png",
+      "label": "after (loaded, no shift)"
     }
   ],
   "options": [
@@ -23,6 +27,6 @@
   ],
   "id": "ov1028-skeleton",
   "status": "open",
-  "round": 1,
+  "round": 2,
   "created": "2026-10-30T08:19:23.990Z"
 }
