@@ -89,7 +89,7 @@ Week 2, beta:
 11. CI workflow (Q8) on branch ov-ci, no push (first run needs Merlin's push OK)
 12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; restart: preview start fourfour app-review --dir <q41-int>/app --port 4210)
-each finished user-visible item gets a review card; Grok gets the 4220 link
+each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
