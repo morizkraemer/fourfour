@@ -6,8 +6,6 @@
   Layout follows main-window option A: context title, search, status chips.
   The centre column width picks the search form: field (>= 720 px), an icon in this bar (>= 440 px),
   or an icon in the left sidebar's top-right corner. Either icon opens the palette as a centred modal over the window.
-  While the organize sidebar is open the chips are dropped (the status bar
-  already carries analysis and sync progress) so the narrower bar stays calm.
 -->
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
@@ -46,7 +44,6 @@
   let showingProblems = $derived(fileStatus.onlyProblems && ui.activeSidebarRow === 'All Tracks');
   let contextLabel = $derived(showingProblems ? 'Missing tracks' : sidebarSourceLabel(ui.activeSidebarRow));
   let searchCollapsed = $derived(ui.searchMode !== 'field');
-  let showChips = $derived(!ui.organize.expanded);
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
   let unanalyzedCount = $derived(unanalyzedTrackCount());
   let idleStatus = $derived(
@@ -190,30 +187,28 @@
         <span class="ff-gheader__activity-label">{activity.label}</span>
       {/if}
     </button>
-    {#if showChips}
-      {#if analyzing}
-        <button
-          type="button"
-          class="ff-gheader__chip ff-gheader__chip--idle"
-          data-analysis-status
-          aria-haspopup="menu"
-          aria-expanded={statusMenu.open}
-          onclick={toggleStatusMenu}
-        >
-          <Spinner size="small" /> Analyzing
-          <b>{library.analysisProgress.current} / {library.analysisProgress.total}</b>
+    {#if analyzing}
+      <button
+        type="button"
+        class="ff-gheader__chip ff-gheader__chip--idle"
+        data-analysis-status
+        aria-haspopup="menu"
+        aria-expanded={statusMenu.open}
+        onclick={toggleStatusMenu}
+      >
+        <Spinner size="small" /> Analyzing
+        <b>{library.analysisProgress.current} / {library.analysisProgress.total}</b>
+      </button>
+    {/if}
+    {#if library.syncing}
+      <span class="ff-gheader__chip"><Spinner size="small" /> Syncing</span>
+    {:else if !analyzing}
+      {#if idleStatus.kind === 'stick'}
+        <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" onclick={() => openIdleStick(idleStatus.volume)}>
+          <StatusDot status="online" /> {idleStatus.name} <b>{idleStatus.detail}</b>
         </button>
-      {/if}
-      {#if library.syncing}
-        <span class="ff-gheader__chip"><Spinner size="small" /> Syncing</span>
-      {:else if !analyzing}
-        {#if idleStatus.kind === 'stick'}
-          <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" onclick={() => openIdleStick(idleStatus.volume)}>
-            <StatusDot status="online" /> {idleStatus.name} <b>{idleStatus.detail}</b>
-          </button>
-        {:else}
-          <span class="ff-gheader__plain">{idleStatus.text}</span>
-        {/if}
+      {:else}
+        <span class="ff-gheader__plain">{idleStatus.text}</span>
       {/if}
     {/if}
   </div>
