@@ -1,0 +1,32 @@
+{
+  "title": "Right sidebar under full-width top bar",
+  "question": "Right sidebar below the full-width top bar: keep?",
+  "gallery": [
+    {
+      "url": "/media/ov1028-sidebar/r1-1-1-closed.png",
+      "label": "closed"
+    },
+    {
+      "url": "/media/ov1028-sidebar/r1-2-2-open.png",
+      "label": "open"
+    },
+    {
+      "url": "/media/ov1028-sidebar/r1-3-3-open-max-width.png",
+      "label": "open at max width"
+    }
+  ],
+  "options": [
+    {
+      "key": "K",
+      "label": "Keep"
+    },
+    {
+      "key": "C",
+      "label": "Change (note)"
+    }
+  ],
+  "id": "ov1028-sidebar",
+  "status": "open",
+  "round": 1,
+  "created": "2026-10-30T08:19:22.763Z"
+}

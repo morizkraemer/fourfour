@@ -1,0 +1,24 @@
+{
+  "title": "Scrolling while tracks analyse",
+  "question": "Scrolling a BPM-sorted list while tracks analyse: stable?",
+  "gallery": [
+    {
+      "url": "/media/ov1028-scroll-analysing/r1-1-scroll-while-analysing.mp4",
+      "label": "scroll + BPM sort + live analysis"
+    }
+  ],
+  "options": [
+    {
+      "key": "S",
+      "label": "Stable"
+    },
+    {
+      "key": "J",
+      "label": "Jumpy (note)"
+    }
+  ],
+  "id": "ov1028-scroll-analysing",
+  "status": "open",
+  "round": 1,
+  "created": "2026-10-30T08:19:25.280Z"
+}
