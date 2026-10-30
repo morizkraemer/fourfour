@@ -70,11 +70,26 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q50 Speed: lightning-fast startup, track load, import, analysis [running] [box] — Merlin 2026-10-29: "hyper optimize for speed … this needs to be lightning fast". Goal: measured budgets per path, then fix the worst first. Paths: cold/warm startup to interactive (10k-track library), track load to first audible + full waveform, import of a 1k-file folder (scan → plan → commit → UI), analysis throughput (tracks/min, per-stage profile: decode, resample, mel, ONNX, fit, key, bands, writes), UI responsiveness during all of them. Acceptance: a perf report with before/after per path, a repeatable perf suite (extend app/perf + smoke perf10k + a Rust bench), every win landed on a branch with green checks; BPM/grid/key results unchanged. Fleet split: one worker per path + one for the shared perf harness first; one writer per path set. Builds on fb-wave/fb-bulk findings (docs/analysis/grid-offset-2026-10-29.md, perf notes in journal 2026-10-29). Timebox: one overnight run. Run conditions (Merlin 2026-10-29): seat only, no API/credit runs; visible app runs on the Mac (mac-queue --visible) allowed only after 00:00 Mac local time (WITA, UTC+8); Mac on AC from bedtime. Merlin runs a Grokbot watcher that pings this thread when the seat limit resets → on that ping, resume every stopped worker (SendMessage), check limits first.
 
 ## Run
-status: paused · since 2026-10-30 07:05 WITA (Merlin; ran from 00:10) · cap 2 · tight · seat only (no API/credit runs)
-targets: Merlin 2026-10-29: Q50 speed fleet; player waveform lag during bulk analysis (fb-scroll) first; visible Mac app runs allowed after 00:00 WITA, Mac on AC
-plan: fb-scroll (player waveform lag) + Q50 harness/baseline in parallel → Q50 per-path workers (startup, track load, import, analysis) from the baseline's worst offenders → own priorities
-pm: started 2026-10-30 00:10 WITA on PM "go"
-resume from: q50-report stopped; it had committed its summary (c3476bb, branch q50-report, worktree agent-a5833f3c96d80daa8) - check it, merge the doc into ov-1028
+status: proposed · since 2026-10-30 13:30 WITA · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
+targets (Merlin Q&A 2026-10-30): beta-ready on ov-1028, and as fast as possible at 10k+ tracks (startup, analysing 10k+, track load, scroll). Order: speed first, then beta. "nothing's off limits": every item below may be built; hard gates and the brother's format bytes still hold
+plan:
+0. merge q50-report summary (c3476bb) into ov-1028
+Week 1, speed (measured on a real-size 10k+ fixture, before/after each):
+1. 10k+ fixture + perf budgets in scripts/perf.sh; Mac timing script for the Mac-night batch
+2. startup to interactive at 10k-50k (cached last list, lazy work after first paint)
+3. analysis at 10k+: throughput (decode once, ONNX batching/threads), steady memory, resumable queue across restarts
+4. track load to first audio + full waveform; detail cache cap 2 GiB (Waiting 19)
+5. UI during analysis: remaining pulse cost, library mutex vs get_analysis_data, WKWebView-specific fixes after Mac numbers
+6. import of 10k+ files end to end
+Week 2, beta:
+7. analysis bars: key >=60% exact (now 58.3%), grid; bar 1 rule (Waiting 16) by data, listening check queued for Merlin
+8. key templates refit on permissively licensed labels (Waiting 4), on a branch, licence note for Merlin
+9. unsigned .dmg build (Q5) via mac-queue + install check
+10. sync UI round 3 on recs (Waiting 1-3: strip, keep-updated on, replace ui-sync-flow attempt)
+11. CI workflow (Q8) on branch ov-ci, no push (first run needs Merlin's push OK)
+12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
+Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
+Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
 ## Rundown
 Overnight 2026-10-28 (ov-1028 232ca15, branch only, not on master): round 12–13 bug review (3 fixes), grid anchor persisted (×2/÷2 exact), new big-player layout A (pencil BPM/key, memory cue chips, no edit mode), Playwright smoke harness (13 flows), 10k perf pass (import 15.6 s → 0.5 s, save ~300 → 20 ms), Rust analyzer status (grid ±20 ms 80.5%, key 58.3%), truncated audio survives, weights bundled. CI on separate branch ov-ci (needs push OK).

@@ -323,3 +323,4 @@
 2026-10-30 12:21 orchestrator - landed: fb-uxfixes on ov-1028 (5d03208) + test env fix 420508e (vitest env alias never resolved since e345fc1, runs exited 1); all checks green, Mac install 12:21
 2026-10-30 04:33 orchestrator - landed: fb-sidebarlayout on ov-1028 (top bar to right edge, organize sidebar below it, showChips workaround removed)
 2026-10-30 05:03 orchestrator - landed: fb-statuschip on ov-1028 (one status chip, idle = track count, panel always opens with library summary + import)
+2026-10-30 13:30 orchestrator - run-proposed: two-week travel run per Merlin Q&A (speed first at 10k+, then beta-ready; land on ov-1028 only; Mac-night batches weekly; nothing off limits within hard gates)
