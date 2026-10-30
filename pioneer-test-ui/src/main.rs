@@ -11,6 +11,7 @@ mod dto;
 mod file_health;
 mod import_plan;
 mod playback;
+mod self_check;
 mod tempo;
 mod track_fields;
 mod track_infos;
@@ -1286,6 +1287,9 @@ fn focus_main_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    if self_check::requested() {
+        self_check::run_and_exit();
+    }
     tauri::Builder::default() // v0.1
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
