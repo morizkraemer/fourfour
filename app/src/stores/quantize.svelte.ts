@@ -2,9 +2,9 @@ export const QUANTIZE_STORAGE_KEY = 'fourfour.quantize.v1';
 
 function loadQuantize(): boolean {
   try {
-    return localStorage.getItem(QUANTIZE_STORAGE_KEY) === '1';
+    return localStorage.getItem(QUANTIZE_STORAGE_KEY) !== '0';
   } catch {
-    return false;
+    return true;
   }
 }
 

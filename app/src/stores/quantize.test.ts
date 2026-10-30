@@ -22,7 +22,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { cuePreviewStart, cuePreviewStop, loadPlayerTrack, player, resetPlayerTransport } from './player.svelte.ts';
-import { addHotCueAtPlayhead, moveHotCue } from './cue-actions.ts';
+import { addHotCueAtPlayhead, addMemoryCueAtPlayhead, moveHotCue } from './cue-actions.ts';
 import { cuesOf, flushCueEdits, loadCuesFromPayload } from './cues.svelte.ts';
 import { QUANTIZE_STORAGE_KEY, quantize, setQuantize } from './quantize.svelte.ts';
 
@@ -90,6 +90,23 @@ describe('quantize', () => {
     setQuantize(true);
     player.progress = 1740 / 20_000;
     addHotCueAtPlayhead(1);
+    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1500]);
+  });
+
+  it('is on when nothing was stored yet', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => undefined });
+    vi.resetModules();
+    const fresh = await import('./quantize.svelte.ts');
+    expect(fresh.quantize.on).toBe(true);
+    vi.stubGlobal('localStorage', { getItem: () => '0', setItem: () => undefined });
+    vi.resetModules();
+    expect((await import('./quantize.svelte.ts')).quantize.on).toBe(false);
+  });
+
+  it('snaps a memory cue to the nearest beat when on', () => {
+    setQuantize(true);
+    player.progress = 1740 / 20_000;
+    addMemoryCueAtPlayhead();
     expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1500]);
   });
 

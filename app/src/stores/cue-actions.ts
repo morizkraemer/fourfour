@@ -40,7 +40,7 @@ export function moveHotCue(trackId: number, key: string, timeMs: number): void {
 export function addMemoryCueAtPlayhead(): void {
   const track = player.track;
   if (!track) return;
-  editCues(track.id, (cues) => withMemoryCue(cues, currentPositionMs()).cues);
+  editCues(track.id, (cues) => withMemoryCue(cues, quantizedMs(track.beats ?? [], currentPositionMs(), quantize.on)).cues);
 }
 
 /** A hot cue pad: an empty slot is set at the playhead, a set one jumps there and plays. */
