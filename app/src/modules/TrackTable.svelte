@@ -720,7 +720,9 @@
       {#if currentTracks.length === 0 && !library.tracksLoaded}
         <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
           {#each skeletonRows as row (row)}
-            <div class="ff-table__skeleton-row"><span style:width="{30 + ((row * 17) % 40)}%"></span></div>
+            <div class="ff-table__skeleton-row" style:--skeleton-text="{55 + ((row * 17) % 40)}%">
+              <TrackRow track={EMPTY_TRACK} {columns} />
+            </div>
           {/each}
         </div>
       {:else if currentTracks.length === 0}
@@ -904,22 +906,50 @@
     width: 100%;
     max-width: 480px;
   }
-  .ff-table__skeleton-row {
-    display: flex;
-    align-items: center;
-    height: 28px;
-    padding: 0 var(--ff-space-4, 12px);
-    box-sizing: border-box;
+  .ff-table__skeleton {
+    animation: ff-table-skeleton-pulse 1.4s ease-in-out infinite;
+    pointer-events: none;
   }
-  .ff-table__skeleton-row span {
-    height: 10px;
+  .ff-table__skeleton-row {
+    height: 28px;
+  }
+  .ff-table__skeleton-row :global(.ff-trow:hover) {
+    background: none;
+  }
+  .ff-table__skeleton-row :global(.ff-trow__cell--text::before),
+  .ff-table__skeleton-row :global(.ff-trow__cell--wave::before) {
+    content: '';
+    display: block;
+    flex: none;
+    height: 8px;
     border-radius: 3px;
-    background: var(--ff-border, rgba(128, 128, 128, 0.25));
-    animation: ff-table-skeleton-pulse 1.2s ease-in-out infinite;
+    background: var(--ff-elev);
+  }
+  .ff-table__skeleton-row :global(.ff-trow__cell--text::before) {
+    width: var(--skeleton-text);
+    max-width: 100%;
+  }
+  .ff-table__skeleton-row :global(.ff-trow__cell--index::before),
+  .ff-table__skeleton-row :global(.ff-trow__cell--bpm::before),
+  .ff-table__skeleton-row :global(.ff-trow__cell--time::before),
+  .ff-table__skeleton-row :global(.ff-trow__cell--key::before) {
+    width: 70%;
+  }
+  .ff-table__skeleton-row :global(.ff-trow__cell--text .ff-trow__text),
+  .ff-table__skeleton-row :global(.ff-trow__cell--wave > *),
+  .ff-table__skeleton-row :global(.ff-trow__star) {
+    display: none;
+  }
+  .ff-table__skeleton-row :global(.ff-trow__cell--wave::before) {
+    width: 100%;
+    height: 14px;
+  }
+  .ff-table__skeleton-row :global(.ff-trow__cover) {
+    border-color: transparent;
   }
   @keyframes ff-table-skeleton-pulse {
-    0%, 100% { opacity: 0.35; }
-    50% { opacity: 0.8; }
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
   }
   .ff-table__empty-drop:global(.ff-table__empty-drop) {
     min-height: 120px;
