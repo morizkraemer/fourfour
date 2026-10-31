@@ -53,6 +53,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 24. Beta .dmg: bundle id is com.pioneer.test-ui (Pioneer is a trademark; also the macOS data folder keys off it) - rec: pick a neutral id before any public beta, migrate app data once - branch: none
 
 25. [accepted 2026-10-31 per rec] Boot snapshot shows the last All Tracks view (first ~40 rows, inert until the real load); reopening the last playlist on start is not built - rec: keep All Tracks - branch: ov-1028
+26. [accepted 2026-10-31 per rec] Boot snapshot is skipped below ~15k tracks (at 10k it delays real rows 100-170 ms because both lists paint waveforms; the real list lands within ~100 ms there anyway) - rec: keep - branch: to build in run item 4
 
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
@@ -96,9 +97,13 @@ review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with l
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
+progress 2026-10-31: 0, 1 (r1, rebasing onto ov-1028), 2 (r2 + r2b) merged; 9 dmg built (r9). Running: r1 rebase, r3-testhang (analysis_run test deadlocks under load, hangs cargo test). Next: 3, 4 (+ Waiting 26), 5, 6
+### Visible Mac batch
+- perf night: scripts/mac/perf-night.sh --size 10k --build (r1; startup, scroll, analysis timings) - needs the Mac online + Merlin's go
+- install ov-1028 + dmg check (scripts/mac/check-dmg.sh)
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
 ## Rundown
-Overnight 2026-10-28 (ov-1028 232ca15, branch only, not on master): round 12–13 bug review (3 fixes), grid anchor persisted (×2/÷2 exact), new big-player layout A (pencil BPM/key, memory cue chips, no edit mode), Playwright smoke harness (13 flows), 10k perf pass (import 15.6 s → 0.5 s, save ~300 → 20 ms), Rust analyzer status (grid ±20 ms 80.5%, key 58.3%), truncated audio survives, weights bundled. CI on separate branch ov-ci (needs push OK).
-Checks: 700 vitest, smoke 13/13, cargo all ok, cut-wav BPM/grid with real weights ok. One cargo test failed once under load (unidentified).
-Next: install ov-1028 on the Mac (offline overnight) → Merlin tests → merge to master; decisions 15–17 + bar 1 (16).
+Run 2026-10-30/31 (ov-1028, branch only): startup boot snapshot + lazy row previews (first rows 250-560 ms at 10k-50k), 50k row mapping 330 -> 40-115 ms, sidecar label cache, fonts bundled; 10k/25k/50k fixtures + targets; unsigned dmg 105 MB.
+Worst gaps at 10k: first waveform 1.05 s (target 0.12), import 18 s (2.5), analysis 9 trk/min (30).
+Blocked: Mac offline, so no installs or Mac timings. A test deadlock under load stalls cargo test (fix running).

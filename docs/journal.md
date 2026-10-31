@@ -333,3 +333,8 @@
 2026-10-30 18:09 orchestrator - landed: review lab on labkit (master, :4220, trace logo, picks lowercased; labkit bugs sent to the labkit thread); spawn r9-dmg (item 9: unsigned .dmg on the Mac, headless + install check, sonnet)
 2026-10-31 11:02 orchestrator - resumed: PM nudge after seat limit; resumed r1-perf10k and r2-startup
 2026-10-31 11:03 orchestrator - landed: r9-dmg on ov-1028 (unsigned dmg 105 MB sha 334700bc, headless checks pass; dmg in ~/.cache/fourfour-dmg); smoke 98 ok; Mac unreachable over ssh (travelling) so no install, installs wait until the Mac is online
+2026-10-31 13:36 orchestrator - landed: r2-startup on ov-1028 (d7081b7; boot snapshot, row previews on demand, load_state 2.6x smaller); smoke 101 ok, cargo test hung (see below)
+2026-10-31 13:36 orchestrator - landed: r2b-startup on ov-1028 (b56a650; plain track rows, 50k mapping 330 -> 40-115 ms, sidecar label cache, bundled Geist fonts); checks running
+2026-10-31 13:36 orchestrator - decided: Waiting 26 per rec, skip boot snapshot below ~15k tracks (10k regression 100-170 ms), built with run item 4
+2026-10-31 13:36 orchestrator - failed: cargo test hung 1.4 h and 18 h in an analysis_run test (deadlock under load); stopped both runs, r8-check now has a 40 min timeout
+2026-10-31 13:36 orchestrator - spawn: r3-testhang (opus medium) root-cause the analysis_run deadlock; resumed r1-perf10k to rebase onto ov-1028 (conflicts in main.rs, bench_startup.rs, perf doc)
