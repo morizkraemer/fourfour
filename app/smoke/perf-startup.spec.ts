@@ -8,8 +8,8 @@ const PAYLOADS = (process.env.FF_PERF_STARTUP ?? '')
   .split(',')
   .filter(Boolean)
   .map((entry) => {
-    const [tracks, path, previews] = entry.split('=');
-    return { tracks: Number(tracks), path, previews };
+    const [tracks, path, previews, backendMs] = entry.split('=');
+    return { tracks: Number(tracks), path, previews: previews || undefined, backendMs: Number(backendMs ?? 0) };
   });
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 3);
 const REPORT = process.env.FF_PERF_STARTUP_OUT;
@@ -43,7 +43,7 @@ interface Probe {
   longTasks: { start: number; duration: number }[];
 }
 
-function installProbes(payloadUrl: string) {
+function installProbes({ payloadUrl, backendMs }: { payloadUrl: string; backendMs: number }) {
   const w = window as unknown as {
     __boot: Probe;
     __TAURI_INTERNALS__: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> };
@@ -67,12 +67,14 @@ function installProbes(payloadUrl: string) {
     }
     if (cmd !== 'load_state') return invoke(cmd, args);
     w.__boot.loadRequested = performance.now();
+    if (backendMs > 0) await new Promise((resolve) => setTimeout(resolve, backendMs));
+    const fetchStart = performance.now();
     const response = await fetch(payloadUrl);
     const text = await response.text();
     const fetched = performance.now();
     const state = JSON.parse(text);
     const parsed = performance.now();
-    w.__boot.transferMs = fetched - w.__boot.loadRequested;
+    w.__boot.transferMs = fetched - fetchStart;
     w.__boot.parseMs = parsed - fetched;
     w.__boot.wireBytes = text.length;
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -107,12 +109,12 @@ function servePayload(body: Buffer, previews: Previews): Promise<{ server: Serve
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/state.json` })));
 }
 
-async function newContext(browser: Browser, payloadUrl: string, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>) {
+async function newContext(browser: Browser, payloadUrl: string, backendMs: number, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>) {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, storageState });
   if (BLOCK_FONTS) await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
   if (NO_SNAPSHOT) await context.addInitScript(() => localStorage.removeItem('fourfour.bootSnapshot.v1'));
   await context.addInitScript(installTauriMock, { tracks: [], playlists: [] });
-  await context.addInitScript(installProbes, payloadUrl);
+  await context.addInitScript(installProbes, { payloadUrl, backendMs });
   return context;
 }
 
@@ -155,13 +157,13 @@ test.describe('startup at scale', () => {
 
   test('boot to first row and interactive', async ({ browser }) => {
     const report: Record<string, Record<string, number>> = {};
-    for (const { tracks, path, previews } of PAYLOADS) {
+    for (const { tracks, path, previews, backendMs } of PAYLOADS) {
       const { server, url } = await servePayload(readFileSync(path), previewsOf(previews));
       const first: Boot[] = [];
       const cold: Boot[] = [];
       const warm: Boot[] = [];
       for (let run = 0; run < RUNS; run++) {
-        const seed = await newContext(browser, url);
+        const seed = await newContext(browser, url, backendMs);
         const seedPage = await seed.newPage();
         await seedPage.goto('/');
         first.push(await bootMetrics(seedPage));
@@ -169,7 +171,7 @@ test.describe('startup at scale', () => {
         const saved = await seed.storageState();
         await seed.close();
 
-        const context = await newContext(browser, url, saved);
+        const context = await newContext(browser, url, backendMs, saved);
         const page = await context.newPage();
         await page.goto('/');
         cold.push(await bootMetrics(page));

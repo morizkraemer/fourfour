@@ -1,6 +1,9 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { suppressNativeContextMenu } from './lib/native-menu.ts';
+import { startLoadStateEarly } from './services/tauri.svelte.ts';
+
+startLoadStateEarly();
 
 if (import.meta.env.PROD) suppressNativeContextMenu();
 

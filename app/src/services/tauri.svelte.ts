@@ -397,9 +397,20 @@ export async function updateTrackFields(trackId: number, edits: TrackFieldEdits)
   }
 }
 
+let earlyLoadState: Promise<LoadedState> | null = null;
+
+/** Starts `load_state` before the UI mounts, so the backend reads the library while the bundle builds the first frame. */
+export function startLoadStateEarly() {
+  if (!getIsTauri() || earlyLoadState) return;
+  earlyLoadState = invoke<LoadedState>('load_state');
+  earlyLoadState.catch(() => {});
+}
+
 export async function loadState(): Promise<LoadedState> {
+  const early = earlyLoadState;
+  earlyLoadState = null;
   try {
-    const res = await invoke<LoadedState>('load_state');
+    const res = await (early ?? invoke<LoadedState>('load_state'));
     lastTauriError = 'invoke(load_state) OK';
     return res;
   } catch (err) {
