@@ -113,21 +113,27 @@ def make_master(path, fmt, seconds, rng, art):
     root = 55.0 * 2 ** (rng.randrange(12) / 12) * 2
     rate = 48000 if fmt in ("flac", "wav") and rng.random() < 0.2 else 44100
     expr = synth_expr(round(bpm, 2), round(root, 3), rng.random() < 0.6, rng.randrange(1000))
+    encode = ENCODE[fmt](rng)
+    result = {"path": str(path), "format": fmt, "seconds": seconds, "bpm": round(bpm, 2), "art": bool(art and fmt in ART_FLAGS)}
+    if path.exists():
+        return result
     source = f"aevalsrc=exprs='{expr}':s={rate}:d={min(seconds, LOOP_SECONDS)}"
     if seconds > LOOP_SECONDS:
         loop = path.with_suffix(".loop.wav")
         ffmpeg(["-f", "lavfi", "-i", source, "-c:a", "pcm_f32le", str(loop)])
-        args = ["-stream_loop", "-1", "-i", str(loop), "-t", str(seconds)]
+        args = ["-stream_loop", "-1", "-i", str(loop)]
     else:
         loop = None
         args = ["-f", "lavfi", "-i", source]
     if art and fmt in ART_FLAGS:
         args += ["-i", str(art), "-map", "0:a", "-map", "1:v", *ART_FLAGS[fmt]]
-    args += ["-af", "volume=0.8", *ENCODE[fmt](rng), "-ar", str(rate), str(path)]
+    partial = path.with_name(f"{path.stem}.part{path.suffix}")
+    args += ["-af", "volume=0.8", *encode, "-ar", str(rate), "-t", str(seconds), str(partial)]
     ffmpeg(args)
+    partial.rename(path)
     if loop:
         loop.unlink()
-    return {"path": str(path), "format": fmt, "seconds": seconds, "bpm": round(bpm, 2), "art": bool(art and fmt in ART_FLAGS)}
+    return result
 
 
 class Names:
