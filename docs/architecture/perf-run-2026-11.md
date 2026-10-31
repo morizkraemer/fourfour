@@ -193,3 +193,50 @@ Split at 50k warm, after: `load_state` answered at about 750-960 ms, mapping 40-
 - `$state` proxy creation for every row (100-145 ms at 50k) is now the biggest frontend step; creating them lazily needs care, because a proxy created inside an effect does not register that effect as its reader.
 - Idle-time search index warmup still costs about 100 ms of CPU at 50k right after the first rows.
 - The list query itself (240 ms at 50k) walks the `analyses` rows with their preview blobs; a covering index would avoid that but is a schema change.
+
+## R4 track load (2026-10-31)
+
+Branch `worktree-agent-acdcf43b4154edf8e` from `ov-1028` (`ea7ad12`). Linux `dev` box, release `bench_startup`, the 12 long fixture files (5-7 min, aiff, flac, m4a, mp3). Box load was 16-65 the whole time (other workers), so every number below carries its load; read the ratios, not the absolute times.
+
+**Where the second went.** Click to first audio was already 2-8 ms; the time was the first open of the zoomed waveform (`get_waveform_detail`, a cache miss). Per file at load 16-33 (`bench_startup detail`): one-thread decode 410-1,390 ms, the 2400 columns/s meter 760-1,140 ms, and `measure_detail` 830-1,210 ms, i.e. the meter itself. The decode was already spread over 6 threads, but the meter ran on the one thread that received the segments in order, so the whole measurement took as long as the meter. IPC was not a factor: the series goes out as one binary response (4-5 MB, read zero-copy by `bandsFromDetailBytes`), cached reads take 2.5-3 ms, and the frontend draws it without copying.
+
+**Changed**
+
+- Parallel meter: each decode segment now measures its own stretch with a `DetailMeter::starting_at` its track frame, after warming the band filters on the preroll audio its decoder already makes; the frame a segment starts at is chained from the segment before (known once that one is decoded, not metered), and the caller `join`s the stretches. Bytes are identical to the one-thread meter on all aiff, flac and mp3 files (m4a's parallel decode already differed slightly before, unchanged). `measure_waveforms_and_detail` (analysis) is unchanged.
+- A pressed row warms its detail at UI priority, beside the background queue (`prefetch_waveform_detail { urgent: true }`); before, the press queued a warm at nice 10 / utility QoS and the click's `get_waveform_detail` then waited on its lock. A background warm no longer blocks `get_waveform_detail` for the same file: they measure side by side, both write the same bytes (partial files now have unique names; the cache trim skips them).
+- Detail cache cap 512 MiB to 2 GiB (about 450 tracks of 6 minutes).
+- Boot snapshot only from 20,000 tracks on (`BOOT_SNAPSHOT_MIN_TRACKS`); smaller libraries remove and ignore a stored one.
+
+**Waveform detail, first open** (`bench_startup audio`, 12 files, median / p95; before = `ov-1028` binary, interleaved with after)
+
+| Fixture | Load | Before | After |
+|---|---:|---:|---:|
+| 10k (per file, `bench_startup detail`) | 16-33 | 830-1,210 ms | 480-690 ms |
+| 10k | 44-51 | 1,309-1,326 / 1,967-2,499 ms | 773-830 / 1,066-1,184 ms |
+| 25k | 41-46 | 1,265 / 2,951 ms | 1,006 / 1,845 ms |
+| 25k | 49-52 | 2,478 / 3,456 ms | 1,662 / 2,437 ms |
+| cached read, all | 41-52 | 2.9-6.9 ms | 2.7-6.8 ms |
+| first audio packet after open | 41-52 | 0.5 ms | 0.5-0.8 ms |
+
+At load 16 the pipeline is limited by the six decode threads doing decode plus filters (about 40 ms of work per 256-packet segment); twelve threads gave nothing more on this loaded box. On a quiet 8-core machine the same split should land around 250-350 ms. The 50k fixture was not generated (35 GB more on a 76%-full disk); the detail numbers do not depend on library size, since they use the same 24 long files.
+
+**Boot snapshot threshold** (`app/smoke/perf-startup.spec.ts`, payloads from the 10k and 25k fixtures, 15k and 20k cut from the 25k one; backend time simulated at 65/100/135/173 ms; median of 3; load 19-27, a second pair at load 54-65 was too noisy to use)
+
+| Tracks | Case | First row with / without snapshot | Real rows with / without |
+|---|---|---:|---:|
+| 10k | cold | 894 / 1,060 ms | 1,579 / 1,060 ms |
+| 10k | warm | 463 / 772 ms | 1,100 / 772 ms |
+| 15k | cold | 898 / 818 ms | 1,742 / 818 ms |
+| 15k | warm | 487 / 650 ms | 1,095 / 650 ms |
+| 20k | cold | 597 / 1,053 ms | 1,244 / 1,053 ms |
+| 20k | warm | 272 / 716 ms | 860 / 716 ms |
+| 25k | cold | 563 / 1,145 ms | 1,351 / 1,145 ms |
+| 25k | warm | 363 / 852 ms | 990 / 852 ms |
+
+Up to 15k the snapshot rows come at most 300 ms earlier and push the real rows back 450-920 ms; from 20k on they come 450-580 ms earlier for 140-190 ms on the real rows. So the threshold is 20k, not 15k.
+
+**Next**
+
+- The biggest remaining lever is outside this item's lane: the Rust analysis path (`analysis_run.rs`, `Runner::Rust`) does not store the detail series; only the Python path calls `measure_waveforms_and_detail` + `store_detail`. With it, every analysed track opens from the cache (3 ms) and the 120 ms target is met for everything but unanalysed tracks.
+- Cache files are 12 KB per second of audio uncompressed; a compact encoding would let 2 GiB hold several thousand tracks.
+- Below the decode threads: the meter runs f64 biquads per frame; f32 would roughly halve it but change bytes slightly.

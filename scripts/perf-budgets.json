@@ -127,8 +127,8 @@
       "unit": "ms",
       "path": "track_load.track_audio_backend.waveform_detail_cold_ms_median",
       "now": {
-        "10k": 1051,
-        "25k": 986,
+        "10k": 800,
+        "25k": 1000,
         "50k": null
       },
       "target": {
@@ -136,7 +136,7 @@
         "25k": 120,
         "50k": 120
       },
-      "why": "decode is parallel already, the meter is not; a parallel meter on 8 cores leaves about 100 ms per 6-minute track"
+      "why": "the decode and the band filters now both run on the decode threads (R4); the rest is CPU per second of audio, so the target needs the analysis to store the series (then every open is a cached read) or fewer columns to measure"
     },
     {
       "id": "waveform_detail_cached",
