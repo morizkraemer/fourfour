@@ -361,3 +361,5 @@
 2026-10-31 19:32 orchestrator - run-idle: plan items done except Mac-only (9, Mac batch); open decisions 4, 15, 27, sync review card
 2026-10-31 16:08 orchestrator - resumed: PM relay (Merlin: keep working unsupervised, rec on reversible branch work, no pushes); spawn r9-ort (opus medium; onnxruntime beat backend behind feature, CoreML for Mac, measure vs rten) and b13-cleankey (sonnet medium; ship CLEAN_FSL key model + attribution); both branch only
 2026-10-31 16:40 orchestrator - parked: b13-cleankey ff942f2 (SHIPPED=CLEAN_FSL, attribution file bundled + NOTICE; key test 56.3%; cargo 509 + vitest 832 green; dmg path untested), unlanded per Waiting 4
+2026-10-31 17:50 orchestrator - parked: r9-ort 383ae88 (opt-in ort/coreml features; CPU no faster, 2x memory; grid eval same; ort build downloads 112 MB static lib) - Mac-only CoreML check pending
+2026-10-31 17:50 orchestrator - run-pause: idle; nothing left without Merlin or the Mac (stash@{0} is prototyping-only, skipped)
