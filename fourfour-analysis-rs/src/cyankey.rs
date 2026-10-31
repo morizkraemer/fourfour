@@ -26,6 +26,55 @@ const SHAATH: [[f64; 12]; 2] = [
     [7.00255045060284, 3.14360279015997, 4.35904319714963, 5.40418120718934, 3.67234420879306, 4.08971184917798, 3.90791435991554, 6.19960288562316, 3.63424625625277, 2.87241191079876, 5.35467999794543, 3.83242038595048],
 ];
 
+pub struct KeyModel {
+    pub name: &'static str,
+    pub band_compression: f32,
+    pub templates: [[f64; NB_FEAT]; 2],
+    pub major_bias: f64,
+    pub temperature: f64,
+    pub cal: [f64; 3],
+    pub shaath_tiebreak: bool,
+}
+
+pub const CYANBOX: KeyModel = KeyModel {
+    name: "cyanbox",
+    band_compression: BAND_COMPRESSION,
+    templates: TEMPLATES,
+    major_bias: MAJOR_BIAS,
+    temperature: TEMPERATURE,
+    cal: [CAL_A, CAL_B, CAL_C],
+    shaath_tiebreak: true,
+};
+
+pub const CLEAN_FSL: KeyModel = KeyModel {
+    name: "clean-fsl",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [1.14489, 0.0, 0.75727],
+    shaath_tiebreak: false,
+};
+
+pub const SHIPPED: &KeyModel = &CYANBOX;
+
+const CLEAN_FSL_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        3.424011, -0.401199, -0.122028, -1.485625, 0.492735, -0.616705, -1.205425, 2.659577, -1.118791, -0.586604, -1.558231, 0.550910,
+        6.898859, -2.224699, -0.940528, -3.118036, 3.397692, -0.302960, -3.185555, 4.003387, -2.653293, -1.718021, -2.774679, 0.158493,
+        6.207247, -2.362999, 1.706926, -3.011427, 4.068735, -1.312722, -1.911932, 3.950975, -2.160347, -0.485531, -2.712247, 0.280132,
+    ],
+    [
+        3.816879, -1.157226, -0.708132, 0.363439, -1.630114, 0.120492, -0.892678, 1.900433, 0.488568, -1.810114, 0.002079, -0.488073,
+        7.169435, -2.861626, 0.334710, 1.910585, -1.534369, -1.272278, -2.321456, 4.762376, -1.755528, -3.339475, 0.298639, -0.953472,
+        5.540063, -3.300362, 0.284672, 1.254265, -2.744346, -0.386343, -2.303418, 4.236576, -1.297062, -3.596907, 0.489643, -0.713528,
+    ],
+];
+
+pub fn model_by_name(name: &str) -> Option<&'static KeyModel> {
+    [&CYANBOX, &CLEAN_FSL].into_iter().find(|m| m.name == name)
+}
+
 const TEMPLATES: [[f64; NB_FEAT]; 2] = [
     [
         3.831086, 0.422911, -0.541941, -0.268662, -0.156559, -0.494596, -1.285167, 2.300662, -1.089226, -0.421346, -1.739469, -0.762827,
@@ -276,9 +325,9 @@ fn whiten(mut rows: Vec<f32>) -> Vec<f32> {
     rows
 }
 
-fn compress(mut rows: Vec<f32>) -> Vec<f32> {
+fn compress(mut rows: Vec<f32>, exponent: f32) -> Vec<f32> {
     for v in rows.iter_mut() {
-        *v = v.powf(BAND_COMPRESSION);
+        *v = v.powf(exponent);
     }
     rows
 }
@@ -303,14 +352,14 @@ fn chroma(rows: &[f32], f0: usize, f1: usize) -> [f64; NB_FEAT] {
     out
 }
 
-fn scores(x: &[f64; NB_FEAT]) -> [f64; 24] {
+fn scores(model: &KeyModel, x: &[f64; NB_FEAT]) -> [f64; 24] {
     let mut s = [0f64; 24];
     for mode in 0..2 {
         for k in 0..12 {
-            let mut acc = if mode == 0 { MAJOR_BIAS } else { 0.0 };
+            let mut acc = if mode == 0 { model.major_bias } else { 0.0 };
             for v in 0..3 {
                 for i in 0..12 {
-                    acc += TEMPLATES[mode][12 * v + i] * x[12 * v + (i + k) % 12];
+                    acc += model.templates[mode][12 * v + i] * x[12 * v + (i + k) % 12];
                 }
             }
             s[12 * mode + k] = acc;
@@ -335,13 +384,13 @@ fn shaath_cosine(x: &[f64; NB_FEAT], key: usize) -> f64 {
     if nc > 0.0 { dot / (nc * np).sqrt() } else { 0.0 }
 }
 
-fn best_key(x: &[f64; NB_FEAT], s: &[f64; 24]) -> usize {
+fn best_key(model: &KeyModel, x: &[f64; NB_FEAT], s: &[f64; 24]) -> usize {
     let mut best = 0;
     for k in 1..24 {
         let d = s[k] - s[best];
         if d > 1e-9 {
             best = k;
-        } else if d >= -1e-9 {
+        } else if model.shaath_tiebreak && d >= -1e-9 {
             let (sk, sb) = (shaath_cosine(x, k), shaath_cosine(x, best));
             if sk > sb + 1e-12 || ((sk - sb).abs() <= 1e-12 && k >= 12 && best < 12) {
                 best = k;
@@ -380,16 +429,20 @@ pub fn semitone_bands(mono: &[f32], rate: u32, threads: usize) -> Option<Bands> 
 }
 
 pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
+    detect_with(SHIPPED, mono, rate, threads)
+}
+
+pub fn detect_with(model: &KeyModel, mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
     let Bands { rows, nb_frames, tuning, fs } = semitone_bands(mono, rate, threads)?;
-    let rows = compress(whiten(rows));
+    let rows = compress(whiten(rows), model.band_compression);
 
     let xs = chroma(&rows, 0, nb_frames);
     if xs.iter().sum::<f64>() <= 0.0 {
         return None;
     }
-    let sc = scores(&xs);
-    let best = best_key(&xs, &sc);
-    let sum: f64 = sc.iter().map(|s| (TEMPERATURE * (s - sc[best])).exp()).sum();
+    let sc = scores(model, &xs);
+    let best = best_key(model, &xs, &sc);
+    let sum: f64 = sc.iter().map(|s| (model.temperature * (s - sc[best])).exp()).sum();
     let p = (1.0 / sum).clamp(1e-6, 1.0 - 1e-6);
 
     let seg = ((SEG_SECONDS * fs / HOP as f64).round() as usize).max(1);
@@ -405,13 +458,38 @@ pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
         if xseg.iter().sum::<f64>() <= 0.0 {
             continue;
         }
-        let ss = scores(&xseg);
-        if best_key(&xseg, &ss) == best {
+        let ss = scores(model, &xseg);
+        if best_key(model, &xseg, &ss) == best {
             nb_agree += 1;
         }
         nb_seg += 1;
     }
     let agreement = if nb_seg > 0 { nb_agree as f64 / nb_seg as f64 } else { 0.0 };
-    let confidence = 1.0 / (1.0 + (-(CAL_A * (p / (1.0 - p)).ln() + CAL_B * agreement + CAL_C)).exp());
+    let confidence = 1.0 / (1.0 + (-(model.cal[0] * (p / (1.0 - p)).ln() + model.cal[1] * agreement + model.cal[2])).exp());
     Some(CyanKey { class: best, confidence, tuning_cents: 100.0 * tuning })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shipped_model_is_cyanbox_and_both_models_resolve() {
+        assert_eq!(SHIPPED.name, "cyanbox");
+        assert_eq!(model_by_name("cyanbox").map(|m| m.name), Some("cyanbox"));
+        assert_eq!(model_by_name("clean-fsl").map(|m| m.name), Some("clean-fsl"));
+        assert!(model_by_name("other").is_none());
+    }
+
+    #[test]
+    fn models_agree_on_a_plain_a_minor_chord() {
+        let rate = 44100;
+        let tone = |f: f64, i: usize| (2.0 * PI * f * i as f64 / rate as f64).sin() as f32;
+        let mono: Vec<f32> = (0..rate as usize * 12).map(|i| 0.3 * (tone(220.0, i) + tone(261.63, i) + tone(329.63, i) + tone(110.0, i))).collect();
+        let a = detect(&mono, rate, 2).unwrap();
+        let b = detect_with(&CLEAN_FSL, &mono, rate, 2).unwrap();
+        assert_eq!(a.class, 21);
+        assert_eq!(b.class, 21);
+        assert!(b.confidence > 0.0 && b.confidence < 1.0);
+    }
 }
