@@ -193,3 +193,64 @@ Split at 50k warm, after: `load_state` answered at about 750-960 ms, mapping 40-
 - `$state` proxy creation for every row (100-145 ms at 50k) is now the biggest frontend step; creating them lazily needs care, because a proxy created inside an effect does not register that effect as its reader.
 - Idle-time search index warmup still costs about 100 ms of CPU at 50k right after the first rows.
 - The list query itself (240 ms at 50k) walks the `analyses` rows with their preview blobs; a covering index would avoid that but is a schema change.
+
+## R3 analysis throughput (2026-10-31, `r3-analysis`)
+
+Code: `ov-1028` plus the `analysis_run` test-harness fix (`8131af8`). Box: `dev`, 16 cores (Xeon Gold 6130, AVX-512), 64 GB, analysis at 12 threads, `nice -n 10`. Load average 14-50 from other workers the whole time, so wall-clock numbers swing by up to 2x between runs; CPU seconds and output identity are the reliable signals. Raw files: `~/.cache/r3-bench/` (`out-*`, `time-*`, `rss-*`, `dump-*`).
+
+### Where the time goes
+
+Per-thread CPU of a 12-track run (12 full-length fixture files, 5-7 min; `threads.sh`, final code): beat-model chunk threads (`rten-0`, one single-thread pool per chunk worker) **762 of 838 CPU-s = 91%**; the job threads (decode, 22.05k resample, mel driver, fit, DB/ANLZ write) 49 s = 6%; key and waveform threads 27 s = 3%. About 64 CPU-s per 6-min track, 13 chunks of 30 s at about 5 s each single-threaded on an idle core.
+
+Inside one chunk (`RunOptions::with_timing_by_shape`, 4.8 s): MatMul 43%, FusedMatMul (linear layers, GELU MLP) 21%, Softmax 12%, Concat/Split (rotary embeddings) 7%. The attention steps alone are about 2.4 s: the time attention of every block builds full 1500 x 1500 score matrices (`[32,1,1500,1500]` in the frontend, `[1,16,1500,1500]` in the 6 transformer layers), writes them, softmaxes them and reads them again. Those steps run at 1.3 ns per element, i.e. memory-bound, and they are also why one chunk holds about 300 MB of activations (rten reports `Max activation bytes 299 MB`), which is what limits the chunk slots on an 8 GB Mac to 3.
+
+Thread scaling (same binary, 12 tracks): 6 threads 3.1 trk/min, 12 threads 6.7-8.5 trk/min at the same ~800 CPU-s. The work scales linearly with cores and the CPU-s per track do not drop with fewer threads, so there is no headroom to win by running fewer model threads; it is plain CPU work.
+
+### What changed
+
+- **The model no longer waits for the fast passes** (`analysis_run.rs`, `take_next`). Before, every queued track got its fast pass (waveform, key) before any grid pass could start, so in a 10k queue the beat model sat idle until all 10k fast passes had been taken: about 10k x 2.5 CPU-s / 11 workers, roughly 40 min on this box and hours on a 2-worker Mac, before the first BPM. Now, while new tracks still wait for their fast pass, up to `min(2, workers - 1)` model jobs take the next new track **whole** (`Pass::All`: one decode, waveform and key stored first, then the grid); the other workers keep taking fast passes, so the waveforms-then-keys-then-grids order still holds for the rest of the queue. Once every track had its fast or whole pass, grid passes run with the full model-job cap as before. A lone track (a run of one) now runs whole with every thread instead of fast then grid (one decode instead of two).
+- **A resumed track that only needs its grid no longer blocks the queue**: when the model is busy it moves to the grid queue instead of sitting at the queue front and stopping the fast passes behind it.
+- **Key lands with the waveform** (`analyze.rs`, `service.rs`): the early partial result carries the key next to the waveform, so a whole job (now lane or the new model jobs) shows its key at once instead of with the grid; `partial_store` stores waveform and key stages and the track's key.
+- **The 44.1k resample runs beside the model** (`analyze.rs`): it moved into the key thread, so the model starts that much earlier, and the grid pass (no key) skips it entirely.
+- `bench_analysis --fast-first` keeps the old order for A/B in the same binary.
+
+### Before / after
+
+12 full-length tracks (`perf.sh` analysis sample), app path (`run_track_analysis`, staged), back to back:
+
+| Run | Load at start | Tracks/min | First result | All waveforms | All keys | CPU user + sys | Peak RSS |
+|---|---|---:|---:|---:|---:|---:|---:|
+| before 1 | 17 | 6.74 | 18.3 s | 6.6 s | 6.8 s | 785 + 74 s | 5.24 GB |
+| before 2 | 21 | 8.20 | 16.9 s | 6.3 s | 6.4 s | 778 + 68 s | 5.20 GB |
+| after 1 | 14 | 8.33 | 18.7 s | 9.7 s | 24.6 s * | 762 + 69 s | 5.43 GB |
+| after 2 | 21 | 8.52 | 18.3 s | 6.8 s | 23.5 s * | 759 + 67 s | 5.41 GB |
+| after, final (key with waveform) | 19 | 7.12 | 18.7 s | 8.6 s | 25.5 s * | 781 + 80 s | 5.29 GB |
+
+\* "All keys" is when the bench saw the last key. It counts a track's second partial event as its key; a whole job sends only one partial (waveform and, in the final code, the key together), so for the 1-2 whole jobs the bench falls back to their grid time. In runs after 1-2 those keys really did land only with the grid; in the final code they land with the waveform, and the bench column overstates it. Tracks that took the fast pass have their key at the same time as before.
+
+At 12 tracks the change is within noise (the fast phase is only 6 s of a 90-110 s run; CPU -2%). It matters with a long queue:
+
+| 500 tracks (476 short fixture clips + 24 full-length, interleaved), same binary | Load | First result | All waveforms | CPU-s / track | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| `--fast-first` (old order) | 19 → 53 | 15.2 s | 15.0 s | ~5.4 | 5.87 GB |
+| new order | 16 → 24 | **3.0 s** | 20.8 s | ~4.7 | 5.99 GB |
+
+With the old order the first result is always "all fast passes + one grid", so it grows with the queue: 15 s at 500 short clips, about 40 min at 10k full-length tracks here, hours on the Mac. With the new order it is one whole analysis regardless of queue length: 3 s for a 10 s clip, 17-19 s for a 6-min track at 12 threads on this loaded box (two rounds of chunks: 13 chunks on 12 threads). Waveform coverage of the whole queue takes a little longer (20.8 vs 15.0 s here) because two workers now run the model. Throughput of the two 500-track runs is not comparable (load went to 53 during the fast-first run).
+
+**Output identity.** Stored results (BPM, key, beat grid with bar positions, waveform preview, colour waveform) compared with `cmp.py` on `bench_analysis --dump`: 12/12 identical on the fixture set in every before/after pair (tracks that ran whole and tracks that ran fast + grid alike), and **49/49 identical on the 50-track o3 dev split** (real music; one file does not decode, as before). The 44.1k resample, the key and the model see the same samples as before, so this is expected. `tracks_sharing_the_chunk_threads_get_the_logits_they_get_alone_and_a_paused_one_waits` (`--ignored`, real weights) passes.
+
+**Memory.** RSS over the 500-track runs (`rss-mix500-*.txt`, sampled every 5 s) swings between 1.3-1.9 GB (between model chunks) and 5-6 GB (12 chunks in flight, ~300-400 MB of activations each); the troughs rose by about 0.3 GB over 7-19 minutes and the peaks did not grow. A full 10k run was not done, so "flat over 10k" is not proven; the per-track state (decoded audio, chunk results) is freed when a track ends and the queues hold only ids and paths.
+
+**Resume after restart.** Already works: at launch the app calls `resume_analysis`, which queues every track with missing stages first (`get_incomplete_analysis_ids`, they resume at the missing stage), then never-analysed tracks when "analyse new tracks" is on (default on). Not changed. Gap: tracks the user queued by hand while that setting is off are not resumed (the queue itself is not persisted).
+
+**Accuracy eval.** `ffa` built from this branch (`prototyping/analysis-packaging`, `--workers 4 --threads 1 --reference ref.json --list dev.txt`) scored with `benchmark/scripts/o3-score.py`: see the run report. Key: `cyankey::detect` is unchanged and gets the same samples; the app-path identity above covers it.
+
+### CPU share (for run item 5)
+
+Thread count per job is unchanged. On an 8 GB Mac (7 analysis threads, 2 workers by memory, 3 chunk slots) the fast phase now runs one whole job (3 chunk threads + its decode/mel and key/waveform threads) beside one fast worker, where it ran two fast workers before, so the peak is about the same 6-7 busy threads; the analysis just starts the model sooner and finishes the same work sooner. It did not get worse; it did not get better either. Lowering the share is a choice between fewer chunk slots (slower, linear) and leaving cores free while the user interacts.
+
+### Not done, and why
+
+- **Throughput target (30 trk/min) is out of reach on CPU with this model and runtime.** 91% of the CPU is the beat model and it scales linearly with cores; 30 trk/min of 6-min tracks needs about 32 cores of this box. Every in-scope trick moves a few percent at most: decode once for every track (fast + grid) ~1-2%; skipping the waveform recompute in the grid pass ~1% but would re-write ANLZ from a read-back (`get_analysis` → `set_analysis`), not proven lossless, left alone; prepacked weights no change (q50); jemalloc via `LD_PRELOAD` within noise (8.60 vs 8.52 trk/min, 723 vs 759 user-s, page faults up); fewer threads no gain (linear).
+- **First result 5 s** is reachable only for short tracks: one chunk is about 5 s on an idle core, so a 6-min track is at least one round of 13 parallel chunks plus decode and mel. The new order makes it independent of queue length, which was the 10k problem.
+- **The lever that would move both numbers** is the attention: a fused (flash-style) attention would not materialise the 1500 x 1500 matrices (about half the chunk time, and most of the 300 MB per chunk, so more chunk slots on the Mac). That needs a runtime with fused attention or a custom op, and is not bit-identical (softmax order), so it needs the grid/key eval. On the Mac, running the model on the GPU/ANE (onnxruntime with CoreML) is the other big lever. Both are new runtimes; decision for Merlin.
