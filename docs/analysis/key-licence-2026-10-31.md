@@ -125,3 +125,21 @@ $T/cyankey $B/manifests/beatport-edm-key-keyonly-clean-full.corpus.json $B/datas
 1. Ship `CLEAN_FSL` and accept about -4 points test / -7 dev, or
 2. Grow the clean set with more Freesound material. FSL10K has 2,403 more loops without a key annotation; the Freesound API serves more CC0 / CC BY loops with user key tags (noisy, needs an API key). Full tracks would fix the mode bias best: CC BY tracks on FMA labelled by hand or by agreement of two detectors.
 3. Fit `CAL_B` (segment agreement) on full-length clean audio once some exists.
+
+## Switched on b13-cleankey
+
+`cyankey::SHIPPED` is now `&CLEAN_FSL`. `detect` and the app use the clean model; `CYANBOX` stays in the code and in the tests (`models_agree_on_a_plain_a_minor_chord` scores both; `model_by_name` resolves both).
+
+Re-run with the release `cyankey` bin on Beatport EDM Key (598 tracks, 6 threads), on this branch:
+
+| Model | Split | Exact | Fifth | Rel. | Par. | Other |
+|---|---|---:|---:|---:|---:|---:|
+| `clean-fsl` (shipped now) | test (n = 199) | 112 = 56.3% | 23 | 11 | 22 | 31 |
+| | dev (n = 399) | 237 = 59.4% | 41 | 18 | 50 | 53 |
+| | all (n = 598) | 349 = 58.4% | 64 | 29 | 72 | 84 |
+| `cyanbox` (`cyankey` bin, model arg) | test | 120 = 60.3% | 22 | 8 | 21 | 28 |
+| | dev | 265 = 66.4% | 39 | 11 | 35 | 49 |
+
+Identical to the numbers above. Median detect time 360 ms (cyanbox 312 ms, single thread).
+
+Attribution ships with the app: `scripts/mac/LICENSE-key-model.txt` (Ramires et al. 2020 plus the 122 CC BY 3.0 uploaders of 309 loops, generated from `fsl-clean.json`) is bundled as `models/LICENSE-key-model.txt` next to the Beat This! licence (`pioneer-test-ui/tauri.bundle-weights.conf.json`, `scripts/mac/build-dmg.sh`, checked by `scripts/mac/check-dmg.sh`). `NOTICE` has a short entry. The 671 used loops are 362 CC0 and 309 CC BY 3.0; the file lists only the CC BY ones.

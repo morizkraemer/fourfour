@@ -47,6 +47,8 @@ check "weights beat_this.onnx" test -s "$RES/models/beat_this.onnx"
 check "weights mel_spectrogram.onnx" test -s "$RES/models/mel_spectrogram.onnx"
 check "licence LICENSE-beat-this.txt" test -s "$RES/models/LICENSE-beat-this.txt"
 check "licence is MIT" grep -q "MIT License" "$RES/models/LICENSE-beat-this.txt"
+check "licence LICENSE-key-model.txt" test -s "$RES/models/LICENSE-key-model.txt"
+check "key model credits FSL10K" grep -q "Ramires" "$RES/models/LICENSE-key-model.txt"
 
 echo "--- Info.plist"
 for key in CFBundleIdentifier CFBundleShortVersionString CFBundleVersion CFBundleName; do

@@ -25,6 +25,7 @@ if [ ! -f "$MODELS/beat_this.onnx" ] || [ ! -f "$MODELS/mel_spectrogram.onnx" ];
   "$ROOT/prototyping/analysis-packaging/fetch-models.sh"
 fi
 cp "$ROOT/scripts/mac/LICENSE-beat-this.txt" "$MODELS/LICENSE-beat-this.txt"
+cp "$ROOT/scripts/mac/LICENSE-key-model.txt" "$MODELS/LICENSE-key-model.txt"
 (cd "$MODELS" && shasum -a 256 beat_this.onnx mel_spectrogram.onnx LICENSE-beat-this.txt)
 
 (cd "$ROOT/app" && npm ci)
