@@ -339,3 +339,5 @@
 2026-10-31 13:36 orchestrator - failed: cargo test hung 1.4 h and 18 h in an analysis_run test (deadlock under load); stopped both runs, r8-check now has a 40 min timeout
 2026-10-31 13:36 orchestrator - spawn: r3-testhang (opus medium) root-cause the analysis_run deadlock; resumed r1-perf10k to rebase onto ov-1028 (conflicts in main.rs, bench_startup.rs, perf doc)
 2026-10-31 13:45 orchestrator - landed: ov-1028 b56a650 checks green (smoke 102, cargo 30 suites ok, vitest 820, svelte-check 0, build ok); no Mac install (offline)
+2026-10-31 13:57 orchestrator - done: r3-testhang (8131af8) root cause in test harness (prioritize tests assumed in-order fast passes; panic then runtime drop waited on held threads); stress 60/60 after vs 3/15 hangs before; merges after r1 checks
+2026-10-31 13:57 orchestrator - spawn: r4-trackload (opus medium; item 4 track load 1,051 -> 120 ms target, detail cap 2 GiB, Waiting 26) and r3-analysis (opus medium; item 3, 9 -> 30 trk/min, first result 16.8 -> 5 s)
