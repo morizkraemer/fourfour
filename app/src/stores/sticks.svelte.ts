@@ -142,8 +142,9 @@ export function removePlaylistFromStick(volumePath: string, playlistId: number):
 const GB = 1_000_000_000;
 
 function gb(bytes: number): string {
+  if (bytes < GB) return `${Math.round(bytes / 1_000_000)} MB`;
   const value = bytes / GB;
-  return value >= 100 ? String(Math.round(value)) : value.toFixed(1);
+  return `${value >= 100 ? Math.round(value) : value.toFixed(1)} GB`;
 }
 
 export interface StickSpace {
@@ -158,9 +159,9 @@ export function stickSpace(capacity: VolumeCapacity | null | undefined): StickSp
   if (!capacity || capacity.total_bytes <= 0) return null;
   const used = Math.max(0, capacity.total_bytes - capacity.free_bytes);
   return {
-    total: `${gb(capacity.total_bytes)} GB`,
-    used: `${gb(used)} GB`,
-    free: `${gb(capacity.free_bytes)} GB`,
+    total: gb(capacity.total_bytes),
+    used: gb(used),
+    free: gb(capacity.free_bytes),
     usedPct: Math.min(100, (used / capacity.total_bytes) * 100),
   };
 }

@@ -507,7 +507,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap"
-          class:drag-over={(dnd.kind === 'playlist' || dnd.kind === 'tracks') && dnd.dropStickPath === row.path}
+          class:drag-over={(dnd.kind === 'playlist' || dnd.kind === 'tracks') && dnd.dropStickPath === row.path && dnd.dropStickSurface === 'row'}
           data-drop-stick-path={row.path}
           data-drop-surface="row"
           oncontextmenu={(e) => openSourceMenu(e, row.path, row.label, true, row.path)}

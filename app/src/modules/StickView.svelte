@@ -269,6 +269,8 @@
   .ff-stickview {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-width: 0;
     height: 100%;
     min-height: 0;
     overflow: auto;
@@ -297,6 +299,7 @@
     color: var(--ff-text);
   }
   .ff-stickview__list {
+    container-type: inline-size;
     display: flex;
     flex-direction: column;
     padding: var(--ff-space-3) 0 var(--ff-space-8);
@@ -466,6 +469,15 @@
     gap: var(--ff-space-4);
     height: 28px;
     padding: 0 var(--ff-space-8);
+  }
+  @container (max-width: 640px) {
+    .ff-stickview__row {
+      grid-template-columns: minmax(120px, 1fr) 52px 80px 28px;
+    }
+    .ff-stickview__row > :nth-child(3),
+    .ff-stickview__row > :nth-child(5) {
+      display: none;
+    }
   }
   .ff-stickview__mid {
     overflow: hidden;

@@ -52,7 +52,7 @@
           {/if}
         </span>
         <span class="ff-stickhead__nums">
-          <span class="ff-stickhead__used">{space.used} used · </span><span>{space.free} free</span>
+          <span class="ff-stickhead__used">{`${space.used} used · `}</span><span>{space.free} free</span>
         </span>
       {:else}
         <span class="ff-stickhead__muted">Capacity unavailable</span>
@@ -203,7 +203,7 @@
     display: none;
   }
 
-  @container (min-width: 420px) {
+  @container (min-width: 380px) {
     .ff-stickhead__grid {
       grid-template-columns: auto minmax(0, 1fr) auto;
       grid-template-areas:
