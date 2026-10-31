@@ -31,3 +31,12 @@ Running log of Merlin's calls on the USB sync flow. Concepts: round 1 mockups (A
 - Removal threshold, remembering unplugged sticks (needs a stable stick id), backup stick copy vs mirror.
 
 - 2026-10-27 (Merlin): a track dropped on a stick goes into that stick's "All tracks" collection (no playlist picker). Engine impact for the brother: loose tracks on a stick need to be owned/synced like playlist tracks.
+
+## Round 3 built (2026-10-31, branch `b10-sync-ui-r3`, from `ov-1028`)
+Built on the recommendations for STATE "Waiting on Merlin" 1-3 (not overruled):
+- Panel closed: a sidebar playlist drag shows a "Put on {stick}" strip at the top of the stick view; only the strip takes the drop, the rest of the view does not. Hovered, it reads "Put on {stick} · Keep updated".
+- Copying a playlist row from one stick onto another (sidebar row or docked board) puts it on with Keep updated on ("Copy to {stick} · Keep updated").
+- Stick view on the left: stick header that adapts to its width (full: one row with size, counts, bar, used and free, status, Sync, Eject; half: free space only; panel: two lines; narrow: one row and a short bar), then the playlists on the stick (Tracks, Size, a quiet "Synced" mark, note) and an "Only on this stick" group for playlists made elsewhere. Clicking a row opens the stick playlist: crumb, name, counts, Keep updated switch with the sync age, or "as of {date}" when off.
+- Drop targets name the action in one line: the strip, the docked board, and a small label next to the pointer over a sidebar stick row.
+- Kept from ui-sync-flow: the stick header (name, capacity, last sync, Sync, Eject). The rest of that branch is superseded.
+- Needs engine: per-playlist Keep updated off (`stick_set_keep_updated`, `kept_as_is` on `get_stick`; until then the switch stays on and is disabled), `last_sync` in `read_usb_state`, importing or copying a stick-only playlist. Plug in = sync is still a Sync button.

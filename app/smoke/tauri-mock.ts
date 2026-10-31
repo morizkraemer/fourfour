@@ -24,7 +24,20 @@ export interface SmokeWindow {
   __smokeDetail: 'none' | 'serve' | 'hold';
   __smokeReleaseDetail: (() => void) | null;
   __smokeLabelChanges: { id: number; rating: number | null; color: string | null }[];
+  __smokeSticks: Record<string, SmokeStick>;
 }
+
+export interface SmokeStick {
+  total: number;
+  free: number;
+  contents: { stick_id: string; track_ids: number[]; playlist_ids: number[]; kept_as_is?: { playlist_id: number; as_of: string }[] };
+  written: number[];
+  foreign: number;
+  playlists: { id: number; name: string; track_count: number }[];
+  last_sync: string | null;
+}
+
+export const SMOKE_STICKS_KEY = 'smoke.sticks';
 
 export interface SmokeImport {
   tracks: TrackInfo[];
@@ -54,6 +67,44 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeDetail = 'none';
   w.__smokeReleaseDetail = null;
   w.__smokeLabelChanges ??= [];
+  const GB = 1_000_000_000;
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  w.__smokeSticks =
+    localStorage.getItem('smoke.sticks') === '1'
+      ? {
+          '/Volumes/SanDisk 32GB': {
+            total: 29.8 * GB,
+            free: 22.2 * GB,
+            contents: { stick_id: 'stick-a', track_ids: [7, 8], playlist_ids: [1], kept_as_is: [] },
+            written: [1, 2, 3, 7, 8, 11, 12],
+            foreign: 2,
+            playlists: [
+              { id: 1, name: 'Peak Time', track_count: 3 },
+              { id: 2, name: 'RB Warmup Edits', track_count: 18 },
+              { id: 3, name: 'Hamburg Oct 2023', track_count: 26 },
+            ],
+            last_sync: minutesAgo(2),
+          },
+          '/Volumes/BACKUP 32GB': {
+            total: 32 * GB,
+            free: 30.1 * GB,
+            contents: { stick_id: 'stick-b', track_ids: [], playlist_ids: [], kept_as_is: [] },
+            written: [],
+            foreign: 0,
+            playlists: [],
+            last_sync: null,
+          },
+          '/Volumes/PANORAMA 8GB': {
+            total: 8 * GB,
+            free: 20_000_000,
+            contents: { stick_id: 'stick-c', track_ids: [], playlist_ids: [1], kept_as_is: [] },
+            written: [],
+            foreign: 0,
+            playlists: [],
+            last_sync: minutesAgo(60 * 24 * 20),
+          },
+        }
+      : {};
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
 
@@ -150,8 +201,139 @@ export function installTauriMock(initial: LoadedState) {
     return ids.map((id) => ({ track_id: id, source_path: `${folder}/Smoke Track ${String(id).padStart(2, '0')}.mp3` }));
   }
 
+  function stickAt(path: string): SmokeStick {
+    const stick = w.__smokeSticks[path];
+    if (!stick) throw new Error(`smoke: no stick at ${path}`);
+    return stick;
+  }
+
+  function stickContents(stick: SmokeStick) {
+    const contents = JSON.parse(JSON.stringify(stick.contents));
+    if (localStorage.getItem('smoke.sticks.oldEngine') === '1') delete contents.kept_as_is;
+    return contents;
+  }
+
+  function editStick(path: string, edit: (stick: SmokeStick) => number) {
+    const stick = stickAt(path);
+    const changed = edit(stick);
+    return [changed, stickContents(stick)];
+  }
+
+  function addIds(list: number[], ids: number[]) {
+    const fresh = [...new Set(ids)].filter((id) => !list.includes(id));
+    list.push(...fresh);
+    return fresh.length;
+  }
+
+  function removeIds(list: number[], ids: number[]) {
+    const before = list.length;
+    const kept = list.filter((id) => !ids.includes(id));
+    list.splice(0, list.length, ...kept);
+    return before - kept.length;
+  }
+
+  function wantedIds(selection: { playlist_ids: number[]; track_ids: number[] }) {
+    const wanted = new Set<number>(selection.track_ids);
+    for (const p of playlists) if (selection.playlist_ids.includes(p.id)) p.track_ids.forEach((id) => wanted.add(id));
+    return [...wanted].filter((id) => tracks.some((t) => t.id === id));
+  }
+
+  function planTrack(id: number) {
+    const t = tracks.find((x) => x.id === id);
+    return { track_id: id, title: t?.title ?? `Track ${id}`, artist: t?.artist ?? '', size_bytes: t?.file_size ?? null };
+  }
+
+  function stickPlan(target: { volume: string; selection: { playlist_ids: number[]; track_ids: number[] } }) {
+    const stick = stickAt(target.volume);
+    const wanted = wantedIds(target.selection);
+    const add = wanted.filter((id) => !stick.written.includes(id)).map(planTrack);
+    const remove = stick.written.filter((id) => !wanted.includes(id)).map(planTrack);
+    const bytesToAdd = add.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
+    const needed = bytesToAdd + 16 * 1024 * 1024 + 128 * 1024 * wanted.length;
+    return {
+      volume: target.volume.split('/').pop(),
+      stick_id: stick.contents.stick_id,
+      playlist_count: target.selection.playlist_ids.length,
+      add,
+      remove,
+      update_count: 0,
+      unchanged_count: wanted.length - add.length,
+      skipped_unanalyzed: [],
+      foreign_kept_count: stick.foreign,
+      bytes_to_add: bytesToAdd,
+      bytes_to_free: remove.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0),
+      bytes_needed: needed,
+      free_bytes: stick.free,
+      fits: needed <= stick.free,
+    };
+  }
+
   async function handle(cmd: string, args: Record<string, any>): Promise<unknown> {
     switch (cmd) {
+      case 'get_stick':
+        return stickContents(stickAt(args.path));
+      case 'stick_add_tracks':
+        return editStick(args.path, (s) => addIds(s.contents.track_ids, args.trackIds));
+      case 'stick_remove_tracks':
+        return editStick(args.path, (s) => removeIds(s.contents.track_ids, args.trackIds));
+      case 'stick_add_playlists':
+        return editStick(args.path, (s) => addIds(s.contents.playlist_ids, args.playlistIds));
+      case 'stick_remove_playlists':
+        return editStick(args.path, (s) => removeIds(s.contents.playlist_ids, args.playlistIds));
+      case 'stick_set_keep_updated':
+        return editStick(args.path, (s) => {
+          const before = (s.contents.kept_as_is ?? []).length;
+          const kept = (s.contents.kept_as_is ?? []).filter((k) => k.playlist_id !== args.playlistId);
+          if (!args.keepUpdated) kept.push({ playlist_id: args.playlistId, as_of: new Date().toISOString() });
+          s.contents.kept_as_is = kept;
+          return kept.length === before ? 0 : 1;
+        });
+      case 'get_volume_capacity': {
+        const stick = stickAt(args.path);
+        return { total_bytes: stick.total, free_bytes: stick.free };
+      }
+      case 'read_usb_state': {
+        const stick = stickAt(args.path);
+        const onStick = tracks.filter((t) => stick.written.includes(t.id));
+        return {
+          tracks: onStick.map((t) => ({
+            id: t.id,
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            genre: t.genre,
+            key: t.key,
+            bpm: t.tempo / 100,
+            duration: t.duration_secs,
+            usb_path: `/Contents/${t.artist}/${t.title}.mp3`,
+          })),
+          playlists: stick.playlists,
+          last_sync: stick.last_sync
+            ? { at: stick.last_sync, report: { tracks_added: 0, tracks_updated: 0, tracks_replaced: 0, tracks_removed: 0, tracks_unchanged: onStick.length } }
+            : null,
+        };
+      }
+      case 'plan_usb_sync':
+        return stickPlan(args.target);
+      case 'sync_usb_many':
+        return args.targets.map((target: { volume: string; selection: { playlist_ids: number[]; track_ids: number[] } }) => {
+          const plan = stickPlan(target);
+          const stick = stickAt(target.volume);
+          stick.written = wantedIds(target.selection);
+          stick.last_sync = new Date().toISOString();
+          return {
+            volume: plan.volume,
+            path: target.volume,
+            status: 'done',
+            report: { tracks_added: plan.add.length, tracks_updated: 0, tracks_replaced: 0, tracks_removed: plan.remove.length, tracks_unchanged: plan.unchanged_count },
+            error: null,
+            skipped_unanalyzed: 0,
+            elapsed_ms: 10,
+          };
+        });
+      case 'eject_volume':
+        delete w.__smokeSticks[args.path];
+        return null;
       case 'get_library_health':
       case 'check_library_files':
         return health();
@@ -281,7 +463,7 @@ export function installTauriMock(initial: LoadedState) {
       case 'get_track_artwork':
         return new ArrayBuffer(0);
       case 'get_mounted_volumes':
-        return [];
+        return Object.keys(w.__smokeSticks);
       case 'app_version':
         return '0.0.0-smoke';
       case 'get_library_path':

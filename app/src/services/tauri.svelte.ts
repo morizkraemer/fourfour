@@ -101,9 +101,15 @@ export interface UsbPlaylistInfo {
   track_count: number;
 }
 
+export interface UsbLastSync {
+  at: string;
+  report: SyncReport;
+}
+
 export interface UsbStateResponse {
   tracks: UsbTrackInfo[];
   playlists: UsbPlaylistInfo[];
+  last_sync?: UsbLastSync | null;
 }
 
 // Fallback Mock Data for Browser Mode
@@ -807,10 +813,16 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
   }
 }
 
+export interface KeptAsIs {
+  playlist_id: number;
+  as_of: string;
+}
+
 export interface StickContents {
   stick_id: string | null;
   track_ids: number[];
   playlist_ids: number[];
+  kept_as_is?: KeptAsIs[];
 }
 
 export interface VolumeCapacity {
@@ -885,15 +897,16 @@ const mockWritten = new Map<string, Set<number>>([['/Volumes/SanDisk 64GB', new 
 const mockSyncListeners = new Set<(progress: StickProgress) => void>();
 
 function mockStick(path: string): StickContents {
-  return mockSticks.get(path) ?? { stick_id: null, track_ids: [], playlist_ids: [] };
+  return mockSticks.get(path) ?? { stick_id: null, track_ids: [], playlist_ids: [], kept_as_is: [] };
 }
 
 function mockEditStick(path: string, edit: (stick: StickContents) => number): [number, StickContents] {
   const current = mockStick(path);
-  const stick = {
+  const stick: StickContents = {
     stick_id: current.stick_id ?? `mock-${path.split('/').pop()}`,
     track_ids: [...current.track_ids],
     playlist_ids: [...current.playlist_ids],
+    kept_as_is: [...(current.kept_as_is ?? [])],
   };
   const changed = edit(stick);
   mockSticks.set(path, stick);
@@ -1045,6 +1058,16 @@ export function stickAddPlaylists(path: string, playlistIds: number[]) {
 
 export function stickRemovePlaylists(path: string, playlistIds: number[]) {
   return editStick('stick_remove_playlists', { playlistIds }, path, (s) => dropIds(s.playlist_ids, playlistIds));
+}
+
+export function stickSetKeepUpdated(path: string, playlistId: number, keepUpdated: boolean) {
+  return editStick('stick_set_keep_updated', { playlistId, keepUpdated }, path, (s) => {
+    const kept = (s.kept_as_is ?? []).filter((k) => k.playlist_id !== playlistId);
+    if (!keepUpdated) kept.push({ playlist_id: playlistId, as_of: new Date().toISOString() });
+    const changed = kept.length !== (s.kept_as_is ?? []).length ? 1 : 0;
+    s.kept_as_is = kept;
+    return changed;
+  });
 }
 
 export async function getVolumeCapacity(path: string): Promise<VolumeCapacity | null> {
