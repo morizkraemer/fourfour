@@ -10,6 +10,7 @@ import {
   getLibraryPath,
   loadState as tauriLoadState,
   getRowPreviews,
+  refreshTrackLabels,
   resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
   planImport,
@@ -1045,6 +1046,25 @@ export async function loadState() {
   }
 }
 
+async function applyChangedTrackLabels() {
+  let changes;
+  try {
+    changes = await refreshTrackLabels();
+  } catch (err) {
+    console.warn('track labels not refreshed:', err);
+    return;
+  }
+  const ids: number[] = [];
+  for (const change of changes) {
+    const track = libraryTrackById(change.id);
+    if (!track) continue;
+    track.rating = change.rating ?? 0;
+    track.color = change.color ?? null;
+    ids.push(change.id);
+  }
+  if (ids.length > 0) bumpLibraryTracks(ids);
+}
+
 /**
  * Appends freshly imported tracks: the backend gives them the next ids, so `load_state` would
  * list them last with the same fields, and nothing else in the state changes on import.
@@ -1098,6 +1118,7 @@ export async function initLibrary() {
     if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
+    whenIdle(() => void applyChangedTrackLabels());
     await refreshVolumes();
 
     if (!libraryListenersInstalled) {

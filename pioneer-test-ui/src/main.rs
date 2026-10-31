@@ -1128,6 +1128,16 @@ fn get_row_previews(track_ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Res
     track_infos::row_preview_infos(&lib, &track_ids)
 }
 
+/// Scans every track's sidecar files again (after the list is on screen) and returns the ratings and colours that
+/// changed since `load_state` served them from the labels cache.
+#[tauri::command]
+async fn refresh_track_labels(state: State<'_, SharedLibrary>) -> Result<Vec<dto::TrackLabelInfo>, String> {
+    let reader = state.lock().map_err(|e| e.to_string())?.track_labels_reader();
+    tauri::async_runtime::spawn_blocking(move || track_infos::changed_track_labels(&reader))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Load the library state. Returns all tracks and playlists.
 #[tauri::command]
 async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, String> {
@@ -1318,6 +1328,7 @@ fn main() {
             save_state,
             load_state,
             get_row_previews,
+            refresh_track_labels,
             app_version,
             rekordbox_default_master_db,
             rekordbox_import_preview,

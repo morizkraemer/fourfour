@@ -23,6 +23,7 @@ export interface SmokeWindow {
   __smokeEmit: (event: string, payload: unknown) => void;
   __smokeDetail: 'none' | 'serve' | 'hold';
   __smokeReleaseDetail: (() => void) | null;
+  __smokeLabelChanges: { id: number; rating: number | null; color: string | null }[];
 }
 
 export interface SmokeImport {
@@ -52,6 +53,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeReleaseImport = null;
   w.__smokeDetail = 'none';
   w.__smokeReleaseDetail = null;
+  w.__smokeLabelChanges ??= [];
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
 
@@ -213,6 +215,8 @@ export function installTauriMock(initial: LoadedState) {
           .filter((t) => wanted.has(t.id) && (t.waveform_bands || t.waveform_preview))
           .map((t) => ({ id: t.id, waveform_bands: t.waveform_bands ?? undefined, waveform_preview: t.waveform_preview ?? undefined }));
       }
+      case 'refresh_track_labels':
+        return w.__smokeLabelChanges;
       case 'save_state':
         playlists = args.playlists;
         return null;

@@ -364,6 +364,8 @@ impl LocalLibrary {
         let mut index = LibraryIndex::build(self)?;
         let mut report = RekordboxImportReport::default();
         let mut library_ids: HashMap<&str, i64> = HashMap::new();
+        let labels = self.track_labels_reader();
+        labels.invalidate();
 
         let tx = self.conn.unchecked_transaction()?;
         let total = source.tracks.len() as u32;
@@ -418,6 +420,7 @@ impl LocalLibrary {
         }
 
         tx.commit()?;
+        labels.invalidate();
         self.import_playlists(source, &library_ids, progress, &mut report)?;
         Ok(report)
     }

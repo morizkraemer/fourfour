@@ -103,6 +103,14 @@ pub struct RowPreviewInfo {
     pub waveform_preview: Option<Vec<u8>>,
 }
 
+/// The rating and colour of a track as its sidecar files give them now; both `None` when they were cleared.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct TrackLabelInfo {
+    pub id: u32,
+    pub rating: Option<u8>,
+    pub color: Option<String>,
+}
+
 /// Input from the frontend describing a playlist to create on the USB.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlaylistInput {

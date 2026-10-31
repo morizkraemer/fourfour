@@ -126,6 +126,16 @@ fn run(dir: &Path) {
     let labels_ms = ms(t);
     drop(labels);
 
+    let reader = lib.track_labels_reader();
+    let had_cache = dir.join(pioneer_library::LABELS_CACHE_FILE).exists();
+    let t = Instant::now();
+    drop(reader.read_cached());
+    let labels_cached_ms = ms(t);
+
+    let t = Instant::now();
+    let changed = track_infos::changed_track_labels(&reader).len();
+    let labels_refresh_ms = ms(t);
+
     let t = Instant::now();
     let infos = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
         track_infos::build_track_infos(&lib).unwrap()
@@ -149,7 +159,7 @@ fn run(dir: &Path) {
     let json_ms = ms(t);
 
     println!(
-        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
+        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} labels_cached_ms={labels_cached_ms:.1} (cache before: {had_cache}) labels_refresh_ms={labels_refresh_ms:.1} (changed {changed}) build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
         json.len(),
         build_ms + playlists_ms + json_ms,
     );
@@ -160,6 +170,8 @@ fn run(dir: &Path) {
             "open_ms": open_ms,
             "track_rows_ms": rows_ms,
             "track_labels_ms": labels_ms,
+            "track_labels_cached_ms": labels_cached_ms,
+            "track_labels_refresh_ms": labels_refresh_ms,
             "build_track_infos_ms": build_ms,
             "playlists_ms": playlists_ms,
             "json_ms": json_ms,

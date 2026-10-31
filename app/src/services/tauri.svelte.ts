@@ -438,6 +438,17 @@ export async function getRowPreviews(trackIds: number[]): Promise<RowPreviewInfo
   }
 }
 
+export interface TrackLabelInfo {
+  id: number;
+  rating: number | null;
+  color: string | null;
+}
+
+export async function refreshTrackLabels(): Promise<TrackLabelInfo[]> {
+  if (!getIsTauri()) return [];
+  return (await invoke<TrackLabelInfo[] | undefined>('refresh_track_labels')) ?? [];
+}
+
 export async function saveState(playlists: PlaylistInput[]): Promise<void> {
   try {
     return await invoke<void>('save_state', { playlists });

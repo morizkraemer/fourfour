@@ -1,8 +1,8 @@
-use pioneer_library::{LocalLibrary, RowPreview, analysis_stage};
+use pioneer_library::{LocalLibrary, RowPreview, TrackLabelsReader, analysis_stage};
 
 pub use pioneer_library::{effective_preview, row_bands};
 
-use crate::dto::{LoadedState, PlaylistInput, RowPreviewInfo, TrackInfo};
+use crate::dto::{LoadedState, PlaylistInput, RowPreviewInfo, TrackInfo, TrackLabelInfo};
 
 /// Build TrackInfo list from the library's tracks + flags.
 ///
@@ -16,10 +16,14 @@ use crate::dto::{LoadedState, PlaylistInput, RowPreviewInfo, TrackInfo};
 /// stays consistent with the player strip — see #waveform-bug.
 pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
     lib.backfill_row_previews().map_err(|e| e.to_string())?;
+    track_infos(lib, true)
+}
+
+fn track_infos(lib: &LocalLibrary, with_previews: bool) -> Result<Vec<TrackInfo>, String> {
     let labels_reader = lib.track_labels_reader();
     let (rows, mut labels) = std::thread::scope(|scope| {
-        let labels = scope.spawn(|| labels_reader.read_all());
-        let rows = lib.get_track_list_rows();
+        let labels = scope.spawn(|| labels_reader.read_cached());
+        let rows = if with_previews { lib.get_track_list_rows() } else { lib.get_track_list_rows_without_previews() };
         (rows, labels.join().expect("track label reader panicked"))
     });
     let rows = rows.map_err(|e| e.to_string())?;
@@ -63,12 +67,8 @@ fn split_preview(preview: RowPreview) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
 
 /// The track list without row previews: the list fetches them for the rows on screen with [`row_preview_infos`].
 pub fn list_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
-    let mut tracks = build_track_infos(lib)?;
-    for track in &mut tracks {
-        track.waveform_bands = None;
-        track.waveform_preview = None;
-    }
-    Ok(tracks)
+    lib.backfill_row_previews().map_err(|e| e.to_string())?;
+    track_infos(lib, false)
 }
 
 pub fn row_preview_infos(lib: &LocalLibrary, track_ids: &[u32]) -> Result<Vec<RowPreviewInfo>, String> {
@@ -86,6 +86,19 @@ pub fn row_preview_infos(lib: &LocalLibrary, track_ids: &[u32]) -> Result<Vec<Ro
             })
         })
         .collect())
+}
+
+/// Ratings and colours that changed in the sidecar files since the labels `load_state` served were cached.
+pub fn changed_track_labels(reader: &TrackLabelsReader) -> Vec<TrackLabelInfo> {
+    reader
+        .refresh()
+        .into_iter()
+        .map(|(id, labels)| TrackLabelInfo {
+            id: id as u32,
+            rating: labels.as_ref().and_then(|l| l.rating),
+            color: labels.and_then(|l| l.color),
+        })
+        .collect()
 }
 
 pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
