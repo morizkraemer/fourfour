@@ -710,6 +710,11 @@ impl LocalLibrary {
         Ok((tracks, analyses))
     }
 
+    /// Ids of the tracks with every analysis stage stored: the ones an export can write.
+    pub fn complete_analysis_track_ids(&self) -> Result<Vec<i64>> {
+        queries::select_complete_analysis_track_ids(&self.conn, analysis_stage::ALL)
+    }
+
     /// Return IDs of tracks that have no analysis data yet or only some of its stages.
     pub fn get_unanalyzed_track_ids(&self) -> Result<Vec<i64>> {
         queries::select_unanalyzed_track_ids(&self.conn, analysis_stage::ALL)

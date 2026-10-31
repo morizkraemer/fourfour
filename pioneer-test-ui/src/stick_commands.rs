@@ -98,10 +98,7 @@ pub async fn plan_usb_sync(
 ) -> Result<UsbSyncPlan, String> {
     let shared: SharedLibrary = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let prepared = {
-            let lib = shared.lock().map_err(|e| e.to_string())?;
-            lib.prepare_multi_sync(&[target]).map_err(|e| format!("{e:#}"))?
-        };
+        let prepared = crate::import_plan::prepare_sync_with_covers(&shared, &[target])?;
         prepared
             .plan()
             .into_iter()
