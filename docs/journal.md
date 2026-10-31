@@ -363,3 +363,4 @@
 2026-10-31 16:40 orchestrator - parked: b13-cleankey ff942f2 (SHIPPED=CLEAN_FSL, attribution file bundled + NOTICE; key test 56.3%; cargo 509 + vitest 832 green; dmg path untested), unlanded per Waiting 4
 2026-10-31 17:50 orchestrator - parked: r9-ort 383ae88 (opt-in ort/coreml features; CPU no faster, 2x memory; grid eval same; ort build downloads 112 MB static lib) - Mac-only CoreML check pending
 2026-10-31 17:50 orchestrator - run-pause: idle; nothing left without Merlin or the Mac (stash@{0} is prototyping-only, skipped)
+2026-10-31 19:24 orchestrator - resumed: PM relay (take recs, then own priorities); decided: land b13-cleankey on ov-1028 per Waiting 4 rec; spawn b14-cleankey60 (opus medium; licence-clean key model to >=60% Beatport test, FSL10K re-download allowed, Beatport eval only)
