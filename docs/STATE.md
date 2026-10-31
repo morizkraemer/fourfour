@@ -44,7 +44,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 19. Waveform detail cache cap is 512 MiB (~100 six-minute tracks at 5 MB each) - rec: raise to 2 GiB - branch: none (q50-trackload follow-up)
 
-20. Q50: analysis stores the waveform detail from its own decode, but MP3 differs from measure_detail (symphonia 0.6 vs 0.5) - rec: hold until the app moves to symphonia 0.6 - branch: q50-analysis2 (fe78598, not merged)
+20. [resolved 2026-10-31: r7 stores detail via the app's own 0.5 decode, bytes identical, +2.5% CPU] Q50: analysis stores the waveform detail from its own decode, but MP3 differs from measure_detail (symphonia 0.6 vs 0.5) - rec: hold until the app moves to symphonia 0.6 - branch: q50-analysis2 (fe78598, not merged)
 21. Q50: rten 0.27 bump - logits differ up to 8.6e-5, slower - rec: drop - branch: q50-rten27
 22. [accepted 2026-10-30 per rec] Q50: 8 GB Macs run 3 beat-model chunks at once (~2 GB peak, about half the model throughput) - rec: keep - branch: ov-1028
 
@@ -98,7 +98,7 @@ review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with l
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
-progress 2026-10-31: 0, 1 (r1, rebasing onto ov-1028), 2 (r2 + r2b) merged; 9 dmg built (r9). Running: r1 rebase, r3-testhang (analysis_run test deadlocks under load, hangs cargo test). Next: 3, 4 (+ Waiting 26), 5, 6
+progress 2026-10-31: merged 0, 1, 2, 3 (first BPM in seconds; throughput model-bound, Waiting 27), 4 (+ stored detail r7: zoom open 3 ms), test-hang fix; 9 dmg built. Running: 5 (r5-headroom), 6 (r6-import). Next: week 2 beta items 7-12
 ### Visible Mac batch
 - perf night: scripts/mac/perf-night.sh --size 10k --build (r1; startup, scroll, analysis timings) - needs the Mac online + Merlin's go
 - install ov-1028 + dmg check (scripts/mac/check-dmg.sh)
