@@ -332,3 +332,4 @@
 2026-10-30 18:06 orchestrator - run-start: PM queue start (Merlin: start all projects on the holiday queue now); plan per STATE Run; q50-report merged into ov-1028; spawn r1-perf10k (item 1: 10k+ fixture, budgets, Mac timing script, opus)
 2026-10-30 18:09 orchestrator - landed: review lab on labkit (master, :4220, trace logo, picks lowercased; labkit bugs sent to the labkit thread); spawn r9-dmg (item 9: unsigned .dmg on the Mac, headless + install check, sonnet)
 2026-10-31 11:02 orchestrator - resumed: PM nudge after seat limit; resumed r1-perf10k and r2-startup
+2026-10-31 11:03 orchestrator - landed: r9-dmg on ov-1028 (unsigned dmg 105 MB sha 334700bc, headless checks pass; dmg in ~/.cache/fourfour-dmg); smoke 98 ok; Mac unreachable over ssh (travelling) so no install, installs wait until the Mac is online
