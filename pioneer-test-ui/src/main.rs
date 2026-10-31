@@ -69,19 +69,12 @@ fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
 // Commands
 // ---------------------------------------------------------------------------
 
+/// Adds the tracks not yet in the library; their covers follow from `spawn_cover_fill`, so the
+/// rows come back without artwork and `import-covers` names the ones that got a cover.
 fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result<Vec<TrackInfo>, String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut fresh = Vec::new();
-    for track in scanned {
-        if !seen.insert(track.source_path.clone()) {
-            continue;
-        }
-        if lib.track_exists_by_path(&track.source_path).map_err(|e| e.to_string())? {
-            continue;
-        }
-        fresh.push(track);
-    }
-    let ids = lib.add_tracks(&fresh).map_err(|e| e.to_string())?;
+    let mut seen = lib.track_paths().map_err(|e| e.to_string())?;
+    let fresh: Vec<models::Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
+    let ids = lib.add_tracks_covers_later(&fresh).map_err(|e| e.to_string())?;
     Ok(fresh
         .iter()
         .zip(ids)
@@ -97,7 +90,7 @@ fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result
             duration_secs: track.duration_secs,
             bitrate: track.bitrate,
             file_size: track.file_size,
-            has_artwork: track.artwork.is_some(),
+            has_artwork: false,
             has_cues: false,
             has_analysis: false,
             analysis_pending: false,
@@ -107,6 +100,34 @@ fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result
             color: None,
         })
         .collect())
+}
+
+/// Set while a thread stores the covers of imported tracks; one at a time.
+#[derive(Default, Clone)]
+struct CoverFill(Arc<std::sync::atomic::AtomicBool>);
+
+/// Stores the covers queued by imports on a thread of its own and emits `import-covers` with
+/// the ids of each batch that got one. A no-op while a fill is already running: that one
+/// keeps going until the queue is empty.
+fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
+    use std::sync::atomic::Ordering;
+    if fill.0.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        let result = import_plan::store_pending_covers(&library, &mut |ids| {
+            app.emit("import-covers", ids).ok();
+        });
+        fill.0.store(false, Ordering::Release);
+        if let Err(e) = result {
+            debug_log(&app, "error", &format!("Storing imported covers failed: {e}"));
+            return;
+        }
+        let more = library.lock().ok().and_then(|lib| lib.pending_artwork(0, 1).ok()).is_some_and(|p| !p.is_empty());
+        if !more || fill.0.swap(true, Ordering::AcqRel) {
+            return;
+        }
+    });
 }
 
 #[derive(Serialize, Clone)]
@@ -127,12 +148,13 @@ async fn plan_import(
     let shared = state.inner().clone();
     let plans = plans.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let known = shared.lock().map_err(|e| e.to_string())?.track_paths().map_err(|e| e.to_string())?;
         let survey = import_plan::survey_files(&paths);
         let total = survey.audio_count();
         let mut done = 0;
         let mut last_emit = std::time::Instant::now();
         app.emit("import-progress", ImportProgress { done, total }).ok();
-        let scanned = import_plan::scan_paths(&paths, &mut || {
+        let scanned = import_plan::scan_paths(&survey, &known, &mut || {
             done += 1;
             if done == total || last_emit.elapsed() >= std::time::Duration::from_millis(80) {
                 last_emit = std::time::Instant::now();
@@ -157,14 +179,18 @@ struct ImportCommit {
 async fn commit_import(
     token: u64,
     skip_duplicates: bool,
+    app: AppHandle,
     state: State<'_, SharedLibrary>,
     plans: State<'_, Arc<ImportPlans>>,
+    covers: State<'_, CoverFill>,
 ) -> Result<ImportCommit, String> {
     let (tracks, skipped_ids) = plans.take(token)?.resolve(skip_duplicates);
     let shared = state.inner().clone();
+    let covers = covers.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let lib = shared.lock().map_err(|e| e.to_string())?;
-        Ok(ImportCommit { added: add_scanned_tracks(&lib, tracks)?, skipped_ids })
+        let added = add_scanned_tracks(&*shared.lock().map_err(|e| e.to_string())?, tracks)?;
+        spawn_cover_fill(app, shared, covers);
+        Ok(ImportCommit { added, skipped_ids })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1396,7 +1422,10 @@ fn main() {
             let health = file_health::SharedHealth::default();
             app.manage(library.clone());
             app.manage(health.clone());
-            file_health::spawn_check(app.handle().clone(), library, health);
+            file_health::spawn_check(app.handle().clone(), library.clone(), health);
+            let covers = CoverFill::default();
+            app.manage(covers.clone());
+            spawn_cover_fill(app.handle().clone(), library, covers);
             app.manage(Arc::new(ImportPlans::default()));
             app.manage(AnalysisCoordinator::default());
             app.manage(SharedArtworkThumbs::default());

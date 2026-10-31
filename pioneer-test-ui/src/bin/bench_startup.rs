@@ -406,16 +406,11 @@ fn read_list(file: &Path) -> Vec<PathBuf> {
 
 fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<Track>) -> (usize, f64, f64) {
     let t = Instant::now();
-    let mut seen = std::collections::HashSet::new();
-    let mut fresh = Vec::new();
-    for track in scanned {
-        if seen.insert(track.source_path.clone()) && !lib.track_exists_by_path(&track.source_path).unwrap() {
-            fresh.push(track);
-        }
-    }
+    let mut seen = lib.track_paths().unwrap();
+    let fresh: Vec<Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
     let exists_ms = ms(t);
     let t = Instant::now();
-    let added = lib.add_tracks(&fresh).unwrap().len();
+    let added = lib.add_tracks_covers_later(&fresh).unwrap().len();
     (added, exists_ms, ms(t))
 }
 
@@ -438,12 +433,15 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
 
     let total = Instant::now();
     let t = Instant::now();
+    let known = lib.track_paths().unwrap();
+    let known_ms = ms(t);
+    let t = Instant::now();
     let survey = import_plan::survey_files(&paths);
     let survey_ms = ms(t);
     let t = Instant::now();
-    let scanned = import_plan::scan_paths(&paths, &mut || {});
+    let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
     let scan_ms = ms(t);
-    let files = scanned.len();
+    let files = scanned.tracks.len() + scanned.known.len();
     let plans = import_plan::ImportPlans::default();
     let t = Instant::now();
     let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
@@ -456,8 +454,14 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let (tracks, _) = plans.take(plan.token).unwrap().resolve(false);
     let (added, exists_ms, insert_ms) = add_scanned_tracks(&lib, tracks);
     let commit_ms = ms(t);
+    let lib = std::sync::Mutex::new(lib);
+    let t = Instant::now();
+    let covers = import_plan::store_pending_covers(&lib, &mut |_| {}).unwrap();
+    let covers_ms = ms(t);
+    let lib = lib.into_inner().unwrap();
     println!(
-        "files={files} library_tracks={library_tracks} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} plan_import_ms={plan_import_ms:.1} commit_import_ms={commit_ms:.1} (exists_check_ms={exists_ms:.1} add_tracks_ms={insert_ms:.1}) added={added} duplicates={}",
+        "files={files} library_tracks={library_tracks} known_ms={known_ms:.1} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} plan_import_ms={plan_import_ms:.1} commit_import_ms={commit_ms:.1} (exists_check_ms={exists_ms:.1} add_tracks_ms={insert_ms:.1}) rows_ms={:.1} covers_ms={covers_ms:.1} covers={covers} added={added} duplicates={}",
+        plan_import_ms + commit_ms,
         plan.duplicates.len()
     );
     perf(
@@ -472,6 +476,9 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
             "commit_import_ms": commit_ms,
             "commit_exists_check_ms": exists_ms,
             "commit_add_tracks_ms": insert_ms,
+            "known_paths_ms": known_ms,
+            "covers_ms": covers_ms,
+            "covers": covers,
             "added": added,
             "duplicates": plan.duplicates.len(),
         }),
@@ -686,13 +693,15 @@ fn fixture_lib(music: &Path, dir: &Path, analysed: f64, seed: u64) {
     let total = Instant::now();
 
     let t = Instant::now();
-    let mut scanned = import_plan::scan_paths(&[music.to_string_lossy().into_owned()], &mut || {});
+    let mut scanned = import_plan::scan_paths(&import_plan::survey_files(&[music.to_string_lossy().into_owned()]), &Default::default(), &mut || {}).tracks;
     scanned.sort_by(|a, b| a.source_path.cmp(&b.source_path));
     let scan_ms = ms(t);
-    let with_art = scanned.iter().filter(|t| t.artwork.is_some()).count();
 
     let t = Instant::now();
-    let ids = lib.add_tracks(&scanned).unwrap();
+    let ids = lib.add_tracks_covers_later(&scanned).unwrap();
+    let lib = std::sync::Mutex::new(lib);
+    let with_art = import_plan::store_pending_covers(&lib, &mut |_| {}).unwrap();
+    let lib = lib.into_inner().unwrap();
     let add_ms = ms(t);
 
     let t = Instant::now();

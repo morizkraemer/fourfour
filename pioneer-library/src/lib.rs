@@ -202,32 +202,78 @@ impl LocalLibrary {
     /// writes the log (`synchronous=NORMAL`); the checkpoint, which syncs the log first and
     /// then the database, runs right after on a thread of its own.
     pub fn add_tracks(&self, tracks: &[Track]) -> Result<Vec<i64>> {
+        self.add_tracks_then(tracks, |tx, id, track| match &track.artwork {
+            Some(art) => queries::upsert_artwork(tx, id, art),
+            None => Ok(()),
+        })
+    }
+
+    /// Adds tracks like [`Self::add_tracks`] but leaves their covers out (`track.artwork` is
+    /// ignored) and queues every new track for [`Self::pending_artwork`]: the rows are there
+    /// at once, the covers follow through [`Self::store_pending_artwork`].
+    pub fn add_tracks_covers_later(&self, tracks: &[Track]) -> Result<Vec<i64>> {
+        self.add_tracks_then(tracks, |tx, id, _| queries::queue_pending_artwork(tx, id))
+    }
+
+    fn add_tracks_then(&self, tracks: &[Track], then: impl Fn(&Connection, i64, &Track) -> Result<()>) -> Result<Vec<i64>> {
+        self.write_bulk(|| self.insert_tracks(tracks, then))
+    }
+
+    /// Runs a large write that only has to reach the log (`synchronous=NORMAL`), with no
+    /// checkpoint inside it; the checkpoint runs right after on a thread of its own.
+    fn write_bulk<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
         let Some(db_path) = &self.db_path else {
-            return self.insert_tracks(tracks);
+            return write();
         };
         let pragma = |name: &str| self.conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get::<_, i64>(0));
         let (autocheckpoint, synchronous) = (pragma("wal_autocheckpoint")?, pragma("synchronous")?);
         self.conn.execute_batch("PRAGMA wal_autocheckpoint=0; PRAGMA synchronous=NORMAL")?;
-        let inserted = self.insert_tracks(tracks);
+        let written = write();
         self.conn
             .execute_batch(&format!("PRAGMA wal_autocheckpoint={autocheckpoint}; PRAGMA synchronous={synchronous}"))?;
-        let ids = inserted?;
+        let value = written?;
         checkpoint_in_background(db_path.clone());
-        Ok(ids)
+        Ok(value)
     }
 
-    fn insert_tracks(&self, tracks: &[Track]) -> Result<Vec<i64>> {
+    fn insert_tracks(&self, tracks: &[Track], then: impl Fn(&Connection, i64, &Track) -> Result<()>) -> Result<Vec<i64>> {
         let tx = self.conn.unchecked_transaction()?;
         let mut ids = Vec::with_capacity(tracks.len());
         for track in tracks {
             let id = queries::insert_track(&tx, track)?;
-            if let Some(ref art) = track.artwork {
-                queries::upsert_artwork(&tx, id, art)?;
-            }
+            then(&tx, id, track)?;
             ids.push(id);
         }
         tx.commit()?;
         Ok(ids)
+    }
+
+    /// Up to `limit` tracks with an id above `after` whose covers are still to be read, in id
+    /// order, with their audio files.
+    pub fn pending_artwork(&self, after: i64, limit: usize) -> Result<Vec<(i64, PathBuf)>> {
+        queries::select_pending_artwork(&self.conn, after, limit)
+    }
+
+    /// Stores the covers read for queued tracks and takes them off the queue, in one
+    /// transaction; `None` = the file has no cover. A track removed in the meantime is skipped,
+    /// and a cover set by hand in the meantime is kept.
+    pub fn store_pending_artwork(&self, covers: &[(i64, Option<Vec<u8>>)]) -> Result<()> {
+        self.write_bulk(|| {
+            let tx = self.conn.unchecked_transaction()?;
+            for (id, cover) in covers {
+                if let Some(cover) = cover {
+                    queries::insert_pending_artwork(&tx, *id, cover)?;
+                }
+                queries::unqueue_pending_artwork(&tx, *id)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// The audio paths of every library track.
+    pub fn track_paths(&self) -> Result<HashSet<PathBuf>> {
+        queries::select_track_paths(&self.conn)
     }
 
     /// Update metadata for an existing track (identified by library ID).
@@ -2421,5 +2467,31 @@ mod tests {
 
         let art = lib.get_artwork(id).unwrap().unwrap();
         assert_eq!(art, vec![0xFF, 0xD8, 0xFF, 0xE0]);
+    }
+
+    #[test]
+    fn covers_added_later_are_queued_then_stored_without_overwriting_or_reviving() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let mut tracks: Vec<Track> =
+            ["a", "b", "c", "d"].iter().map(|n| make_track(n, &format!("/music/{n}.mp3"))).collect();
+        tracks[0].artwork = Some(vec![9]);
+        let ids = lib.add_tracks_covers_later(&tracks).unwrap();
+        assert!(lib.get_artwork(ids[0]).unwrap().is_none());
+        assert!(lib.get_track_list_rows().unwrap().iter().all(|r| !r.has_artwork));
+        let queued: Vec<i64> = lib.pending_artwork(0, 10).unwrap().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(queued, ids);
+        assert_eq!(lib.pending_artwork(ids[1], 1).unwrap(), vec![(ids[2], PathBuf::from("/music/c.mp3"))]);
+
+        lib.set_artwork(ids[1], &[7]).unwrap();
+        lib.remove_track(ids[2]).unwrap();
+        lib.store_pending_artwork(&[(ids[0], Some(vec![1])), (ids[1], Some(vec![2])), (ids[2], Some(vec![3])), (ids[3], None)])
+            .unwrap();
+
+        assert_eq!(lib.get_artwork(ids[0]).unwrap(), Some(vec![1]));
+        assert_eq!(lib.get_artwork(ids[1]).unwrap(), Some(vec![7]));
+        assert!(lib.get_artwork(ids[2]).unwrap().is_none());
+        assert!(lib.get_artwork(ids[3]).unwrap().is_none());
+        assert!(lib.pending_artwork(0, 10).unwrap().is_empty());
+        assert_eq!(lib.track_paths().unwrap().len(), 3);
     }
 }
