@@ -148,7 +148,7 @@ Why 0.8: the threshold sweep on test is flat from 0.7 to 0.9 (79.4 / 80.0 / 79.4
 | 57 | 04. Wouter de Moor - Afternoon Thing.flac | 0.932 | 0.000 | 0.936 | old |
 | 72 | 39. Silverlining - Don't Forget Your Ambdo Knyper.flac | 1.793 | 0.409 | 0.004 | old |
 
-The first five are where the model is musically late by one to several beats and Rekordbox numbers bar 1 at the first beat; the last five are the regressions to listen to (the model's phase is right or at least Rekordbox-compatible, and the hybrid falls back to beat 0 because the vote is split). For id 72 our grid starts 0.405 s (about one beat) after Rekordbox's first beat, so "beat 0" is one beat off Rekordbox's bar 1 there; the model phase lines up modulo 4 beats. The question for ears: is the model's bar 1 the musical downbeat in the last five, and is Rekordbox's in the first five?
+In the first five the old rule puts bar 1 later than Rekordbox, which numbers it at the first beat; the last five are the regressions to listen to (the old model phase matches Rekordbox and the hybrid falls back to beat 0 because the vote is split). For id 72 our grid starts 0.405 s (about one beat) after Rekordbox's first beat, so "beat 0" is one beat off Rekordbox's bar 1 there; the model phase lines up modulo 4 beats. The question for ears: is the model's bar 1 the musical downbeat in the last five, and is Rekordbox's in the first five?
 
 ### Validation
 
