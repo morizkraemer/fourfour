@@ -420,3 +420,82 @@ Same box, `bench_analysis --list list8 --threads 12 --probe-reads 16`, nice 10, 
 | after | 1.3-7.3 ms (1.4 typical) | 0.1-7 ms | 0 |
 
 Byte identity: the ignored test `fixture_library_files_are_byte_identical_both_ways` (`FF_FIXTURE_LIBRARY=~/.cache/ff-fixture/10k/library FF_FIXTURE_TRACKS=1000`) stores 1000 fixture analyses (251 with `edits.json`) both ways and compares the three ANLZ files and the index row.
+
+## R9 onnxruntime (2026-10-31, `r9-ort`)
+
+Branch `r9-ort` from `ov-1028` (`b24b09b`), not landed. Box: `dev`, 16 cores (Xeon Gold 6130), load 10-34 from other workers during every run; read CPU seconds and the isolated per-chunk numbers, wall clock only as direction.
+
+**Recommendation: Mac-only.** On this CPU onnxruntime saves about 30% of the CPU per chunk in isolation but gives no throughput in the app path (2x memory, later first result), so rten stays the default everywhere and `ort` stays only as the route to CoreML (GPU/ANE) on the Mac; drop it if the Mac run below shows no gain.
+
+### What changed
+
+- `fourfour-analysis-rs` feature `ort` (off by default; the default build is unchanged and runs rten): the beat model runs on onnxruntime through the `ort` crate (`=2.0.0-rc.14`, MIT/Apache, `src/ort_beat.rs`). The mel model stays on rten (a few percent of the time). Same input/output contract (`spectrogram` in, `beat`/`downbeat` logits out), same chunking and border handling, same shared chunk threads (`share_chunk_threads`, `analysis_ui_busy`, cores-2 untouched): each chunk thread opens its own single-threaded session (`Session::run` takes `&mut self`); all sessions share one prepacked copy of the weights and one process-wide ORT environment (ORT allows only one per process).
+- `FOURFOUR_BEAT_RUNTIME=rten` switches an `ort` build back to rten at load time, so one binary does the A/B. `bt::beat_runtime()` says which one is active.
+- Feature `coreml` (implies `ort`): on macOS the session gets the CoreML execution provider (MLProgram, all compute units) with CPU fallback; elsewhere it is the same as `ort`. On macOS the `ort` dependency always pulls the CoreML build of ONNX Runtime (pyke ships only that one for `aarch64-apple-darwin`); the cargo feature only decides whether the EP is registered. The CoreML branch was type-checked on Linux against the ort API; it has not been built or run on a Mac.
+- `pioneer-test-ui` and `prototyping/analysis-packaging` forward both features (`--features ort` / `--features coreml`).
+- CPU allocator: arena on, memory pattern off. Arena off costs every chunk 300 MB of fresh pages (sys 239 s vs 52-95 s per 12 tracks, per-chunk CPU back to rten's); memory pattern on adds about 7 GB of RSS for nothing.
+- Ignored test `bt::ort_tests::ort_gives_the_rten_logits_for_a_chunk` (`--features ort`, real weights); with `FF_CHUNK_ROUNDS=7` and `--release --nocapture` it also prints the per-chunk CPU of both runtimes. The ignored `tests/generated_tracks.rs` (chunk sharing, pause, cancel) pass on `ort`.
+
+**Build impact (affects the .dmg).** With `ort`, the `ort-sys` build script **downloads a prebuilt ONNX Runtime 1.31.0 static library** from `cdn.pyke.io` at build time (here `x86_64-unknown-linux-gnu.tar.lzma2`, a 112 MB `libonnxruntime.a`, sha256-checked, cached in `~/.cache/ort.pyke.io/`) and links it statically, so nothing extra ships next to the app. The first build needs network (or `ORT_LIB_LOCATION` pointing at a local ONNX Runtime build). There is no prebuilt for Intel Macs (`x86_64-apple-darwin`). `ffa` with `ort` (release, LTO, stripped) is 31.5 MB. The default build downloads nothing.
+
+### Numbers (CPU execution provider vs rten, same tracks, same threads)
+
+Per chunk (one 1500-frame chunk, one thread, release, process CPU, median of 7, interleaved):
+
+| Config | rten | ort |
+|---|---:|---:|
+| arena on, memory pattern off (kept) | 4,900 ms | **3,360 ms** (-31%) |
+| arena on, memory pattern on | 4,880 ms | 3,320 ms |
+| arena off | 4,690 ms | 4,890 ms |
+
+Wall per chunk in `ffa --workers 1 --threads 1` (3 long fixture tracks, load about 30): rten 5.1-8.5 s, ort 5.6-5.8 s.
+
+App path (`bench_analysis --backend rust --threads 12`, the first 12 long files of `~/.cache/ff-fixture/pool-v1/long`, `nice -n 10`, interleaved, `/usr/bin/time`):
+
+| Run | Load at start | Tracks/min | First result | user + sys CPU | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| rten | 20 | 9.64 | 14.7 s | 756 + 63 s | 5.5 GB |
+| rten | 20 | 10.01 | 14.5 s | 746 + 60 s | 5.4 GB |
+| rten (earlier pair) | 11-24 | 6.6-8.6 | 17-31 s | 762 + 72 s | 5.2-5.4 GB |
+| ort | 10 | 8.14 | 35.2 s | 705 + 67 s | 10.7 GB |
+| ort | 21 | 9.13 | 31.8 s | 710 + 95 s | 10.7 GB |
+| ort, memory pattern on | 27 | 6.50 | 37.6 s | 720 + 105 s | 18.2 GB |
+| ort, arena off | 30 | 5.63 | 41.1 s | 702 + 239 s | 7.4 GB |
+
+- Throughput: no gain. User CPU drops 6-8%: the 31% per chunk mostly disappears when 12 chunks run side by side (the attention steps are memory-bound, see R3, and onnxruntime does not fuse them on this graph either). Wall is the same or worse.
+- First result about 2x later: every chunk thread builds its session (graph optimisation and weight prepack, about 2.5 s) on its first chunk, 12 at once. Fixable (build sessions at engine load, or cache the optimised model), not worth it while throughput is flat.
+- Memory about 2x (each session keeps its own arena at peak activations).
+- `ffa` on the 50-track dev split (`--workers 4 --threads 12`, memory pattern on) showed rten 4.48 vs ort 9.81 trk/min (peak RSS 6.2 vs 19.5 GB). The two ran back to back at load 25-35 and the interleaved app-path pairs did not reproduce it: load noise, not a result.
+
+Logits vs rten (dev split, 50 real tracks, whole-track logits from `ffa --dump`): **max abs logit diff 2.0e-4** (median per track 7.9e-5). Beat peak frames identical on 50/50; final grid within 0.21 us of rten, BPM within 6e-8; the `ffa` output (BPM, beats, downbeats, key, waveform checksum) identical on 50/50. Synthetic chunk test: 5.0e-6.
+
+Grid eval (`ffa ... --reference ref.json --list dev.txt` scored with `benchmark/scripts/o3-score.py`, dev split as in R3):
+
+| | rten | ort |
+|---|---:|---:|
+| Grid within 20 ms | 44 / 50 (88.0%) | **44 / 50 (88.0%)** |
+| BPM within 0.1 / 1.0 | 47 / 50, 50 / 50 | 47 / 50, 50 / 50 |
+| Bar right (of 46 aligned) | 27 | 27 |
+
+The grid bar does not drop. Key: `cyankey::detect` never sees the beat model, so the Beatport key eval (58.3% test) is unchanged by construction; the dev-split keys of both runtimes are identical on 50/50.
+
+Raw: `~/.cache/r9-ort-work/` (`dev-{rten,ort}.jsonl`, `dump-dev-*`, `m-*.err`, `tput-*.err`, `chunk-*.jsonl`).
+
+### Running it on the Mac (untested here)
+
+```bash
+# first build needs network: ort-sys downloads the aarch64-apple-darwin+coreml ONNX Runtime 1.31.0
+cargo build --release -p pioneer-test-ui --features coreml --bin bench_analysis
+export FOURFOUR_MODELS_DIR=<dir with beat_this.onnx and mel_spectrogram.onnx>
+target/release/bench_analysis --backend rust --list list12.txt --threads 3                              # CoreML
+FOURFOUR_BEAT_RUNTIME=rten target/release/bench_analysis --backend rust --list list12.txt --threads 3   # rten, same binary
+# accuracy with the CoreML build
+(cd prototyping/analysis-packaging && cargo build --release --features coreml --bin ffa)
+prototyping/analysis-packaging/target/release/ffa --models "$FOURFOUR_MODELS_DIR" --workers 2 --threads 3 \
+  --reference benchmark/results/o3/ref.json --list benchmark/results/o3/dev.txt --dump /tmp/dump-coreml --out /tmp/dev-coreml.jsonl
+python3 -I benchmark/scripts/o3-score.py benchmark/results/o3/ref.json /tmp/dev-coreml.jsonl
+# app bundle with CoreML
+fourfour-analysis-rs/scripts/bundle-app.sh --bundles dmg --features coreml
+```
+
+What to watch: every chunk thread opens its own session, so CoreML compiles the model once per thread (slow first chunk, memory per session); compare `--threads` 1-3. The GPU/ANE may run in fp16, so logits can drift more than on CPU: check the max logit diff (`ffa --dump` with both runtimes) and that grid within 20 ms stays at 44/50 on dev (165/205 on test). If CoreML is not clearly faster per track than rten at similar memory, drop the feature.
