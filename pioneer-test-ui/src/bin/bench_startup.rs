@@ -176,11 +176,11 @@ fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
 
 fn load(dir: &Path, samples: usize) {
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let ids = lib.get_unanalyzed_track_ids().unwrap();
+    let unanalysed: std::collections::HashSet<i64> = lib.get_unanalyzed_track_ids().unwrap().into_iter().collect();
     let total = lib.track_count().unwrap() as usize;
-    drop(ids);
-    let step = (total / samples).max(1);
-    let picked: Vec<i64> = (0..samples).map(|n| (n * step + 1) as i64).collect();
+    let analysed: Vec<i64> = (1..=total as i64).filter(|id| !unanalysed.contains(id)).collect();
+    let step = (analysed.len() / samples).max(1);
+    let picked: Vec<i64> = analysed.iter().step_by(step).take(samples).copied().collect();
 
     let mut parse = Vec::new();
     let mut build = Vec::new();
