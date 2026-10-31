@@ -780,8 +780,8 @@ async fn get_analysis_data(
 ) -> Result<serde_json::Value, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let lib = shared.lock().map_err(|e| e.to_string())?;
-        analysis_payload::build_analysis_json(&lib, track_id)
+        let stored = analysis_payload::read_stored_analysis(&*shared.lock().map_err(|e| e.to_string())?, track_id)?;
+        Ok::<_, String>(stored.into_json())
     })
     .await
     .map_err(|e| e.to_string())?

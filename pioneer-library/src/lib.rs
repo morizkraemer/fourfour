@@ -8,6 +8,7 @@
 //! files on disk alongside the database. The SQLite `analyses` table keeps only
 //! a lightweight index (bpm + key) for fast queries.
 
+mod analysis_write;
 pub mod backup;
 mod duplicates;
 mod edits;
@@ -32,6 +33,7 @@ use pioneer_usb_writer::models::{
 };
 use pioneer_usb_writer::{reader, writer};
 
+pub use analysis_write::{AnalysisWrite, StagedAnalysis};
 pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
@@ -1395,7 +1397,7 @@ mod tests {
         }
     }
 
-    fn banded_analysis() -> AnalysisResult {
+    pub(crate) fn banded_analysis() -> AnalysisResult {
         use pioneer_usb_writer::models::ColorWaveform;
         let mut a = make_analysis();
         a.color_waveform = Some(ColorWaveform {

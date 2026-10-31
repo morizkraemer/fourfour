@@ -121,71 +121,86 @@ pub fn build_analysis_json(
     lib: &LocalLibrary,
     track_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let analysis = lib.get_analysis(track_id).map_err(|e| e.to_string())?;
-
-    match analysis {
-        Some(a) => {
-            let duration_ms = lib
-                .get_track(track_id)
-                .map_err(|e| e.to_string())?
-                .map(|t| {
-                    let lead_s = fourfour_analysis::mp3::leading_silence_s(&t.source_path);
-                    ((t.duration_secs + lead_s) * 1000.0).round() as u64
-                })
-                .unwrap_or(0);
-
-            let preview = effective_preview(&a);
-            let preview_slice = preview.as_deref();
-
-            let pwv7 = a.color_waveform.as_ref().is_some_and(|cw| cw.exact.is_some());
-            let mut payload = waveform_fields(a.color_waveform.as_ref(), preview_slice, pwv7);
-
-            // Serialize beat grid for frontend waveform rendering
-            let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
-                serde_json::json!({
-                    "time_ms": b.time_ms,
-                    "bar_position": b.bar_position,
-                })
-            }).collect();
-
-            let cue_points: Vec<serde_json::Value> = lib
-                .get_cues(track_id)
-                .map_err(|e| e.to_string())?
-                .iter()
-                .map(|c| {
-                    serde_json::json!({
-                        "hot_cue_number": c.hot_cue_number,
-                        "time_ms": c.time_ms,
-                        "loop_time_ms": c.loop_time_ms,
-                        "color": c.color,
-                        "name": c.name,
-                    })
-                })
-                .collect();
-
-            payload.insert("waveform_preview".into(), serde_json::json!(preview.unwrap_or_default()));
-            payload.insert("waveform_peaks".into(), serde_json::Value::Array(vec![]));
-            payload.insert("bpm".into(), serde_json::json!(a.bpm));
-            payload.insert("key".into(), serde_json::json!(a.key));
-            let edits = lib.user_edits(track_id);
-            payload.insert("bpm_locked".into(), serde_json::json!(edits.bpm_locked));
-            payload.insert("key_locked".into(), serde_json::json!(edits.key_locked));
-            payload.insert("grid_offset_ms".into(), serde_json::json!(edits.grid_offset_ms.unwrap_or(0.0)));
-            payload.insert("grid_anchor_ms".into(), serde_json::json!(edits.grid_anchor_ms));
-            payload.insert("energy".into(), serde_json::json!(a.energy));
-            payload.insert("beats".into(), serde_json::Value::Array(beats));
-            payload.insert("cue_points".into(), serde_json::Value::Array(cue_points));
-            payload.insert("duration_ms".into(), serde_json::json!(duration_ms));
-            let stages = lib.analysis_stages(track_id).map_err(|e| e.to_string())?;
-            let pending = stages != Some(pioneer_library::analysis_stage::ALL);
-            payload.insert("analysis_pending".into(), serde_json::json!(pending));
-            payload.insert("analysis_stages".into(), serde_json::json!(stages.unwrap_or(0)));
-            Ok(serde_json::Value::Object(payload))
-        }
-        None => Err("No analysis data for this track".to_string()),
-    }
+    read_stored_analysis(lib, track_id).map(StoredAnalysis::into_json)
 }
 
+/// What [`build_analysis_json`] reads from the library; shaping it needs no library access.
+pub struct StoredAnalysis {
+    analysis: models::AnalysisResult,
+    track: Option<models::Track>,
+    cues: Vec<pioneer_library::rekordbox::ImportedCue>,
+    edits: pioneer_library::UserEdits,
+    stages: Option<u8>,
+}
+
+pub fn read_stored_analysis(lib: &LocalLibrary, track_id: i64) -> Result<StoredAnalysis, String> {
+    let analysis = lib
+        .get_analysis(track_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No analysis data for this track".to_string())?;
+    Ok(StoredAnalysis {
+        analysis,
+        track: lib.get_track(track_id).map_err(|e| e.to_string())?,
+        cues: lib.get_cues(track_id).map_err(|e| e.to_string())?,
+        edits: lib.user_edits(track_id),
+        stages: lib.analysis_stages(track_id).map_err(|e| e.to_string())?,
+    })
+}
+
+impl StoredAnalysis {
+    pub fn into_json(self) -> serde_json::Value {
+        let StoredAnalysis { analysis: a, track, cues, edits, stages } = self;
+        let duration_ms = track
+            .map(|t| {
+                let lead_s = fourfour_analysis::mp3::leading_silence_s(&t.source_path);
+                ((t.duration_secs + lead_s) * 1000.0).round() as u64
+            })
+            .unwrap_or(0);
+
+        let preview = effective_preview(&a);
+        let preview_slice = preview.as_deref();
+
+        let pwv7 = a.color_waveform.as_ref().is_some_and(|cw| cw.exact.is_some());
+        let mut payload = waveform_fields(a.color_waveform.as_ref(), preview_slice, pwv7);
+
+        let beats: Vec<serde_json::Value> = a.beat_grid.beats.iter().map(|b| {
+            serde_json::json!({
+                "time_ms": b.time_ms,
+                "bar_position": b.bar_position,
+            })
+        }).collect();
+
+        let cue_points: Vec<serde_json::Value> = cues
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "hot_cue_number": c.hot_cue_number,
+                    "time_ms": c.time_ms,
+                    "loop_time_ms": c.loop_time_ms,
+                    "color": c.color,
+                    "name": c.name,
+                })
+            })
+            .collect();
+
+        payload.insert("waveform_preview".into(), serde_json::json!(preview.unwrap_or_default()));
+        payload.insert("waveform_peaks".into(), serde_json::Value::Array(vec![]));
+        payload.insert("bpm".into(), serde_json::json!(a.bpm));
+        payload.insert("key".into(), serde_json::json!(a.key));
+        payload.insert("bpm_locked".into(), serde_json::json!(edits.bpm_locked));
+        payload.insert("key_locked".into(), serde_json::json!(edits.key_locked));
+        payload.insert("grid_offset_ms".into(), serde_json::json!(edits.grid_offset_ms.unwrap_or(0.0)));
+        payload.insert("grid_anchor_ms".into(), serde_json::json!(edits.grid_anchor_ms));
+        payload.insert("energy".into(), serde_json::json!(a.energy));
+        payload.insert("beats".into(), serde_json::Value::Array(beats));
+        payload.insert("cue_points".into(), serde_json::Value::Array(cue_points));
+        payload.insert("duration_ms".into(), serde_json::json!(duration_ms));
+        let pending = stages != Some(pioneer_library::analysis_stage::ALL);
+        payload.insert("analysis_pending".into(), serde_json::json!(pending));
+        payload.insert("analysis_stages".into(), serde_json::json!(stages.unwrap_or(0)));
+        serde_json::Value::Object(payload)
+    }
+}
 
 #[cfg(test)]
 mod tests {

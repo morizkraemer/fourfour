@@ -405,5 +405,18 @@ Rounds 1 and 4 (load 15-33) were clearly better after (grid pass p95 43 -> 27 an
 
 **Next**
 
-- Library writes outside the lock (`pioneer-library`, see above).
+- ~~Library writes outside the lock~~ done in R5b below.
 - If the Mac shows the drain is too slow for bursts: background QoS for the model threads by default (cost measured by the night), or a GPU/ANE runtime for the model (R3), which takes the model off the CPU entirely.
+
+## R5b library lock (2026-10-31)
+
+The analysis stores a track in three steps (`LocalLibrary::begin_analysis`, `AnalysisWrite::stage`, `commit_analysis`): read the track and what the stored analysis depends on (lock), build the ANLZ files into a staging folder in the track's folder (no lock), then rename them into place and write the track row and the index row in one transaction (lock). If the track, `edits.json`, `imported.json`, the index row or the stored DAT changed in between, the commit refuses and the analysis is stored the old way under the lock. Files are now replaced by rename instead of rewritten in place. `get_analysis_data` also scans the MP3 lead-in and builds the JSON after releasing the lock.
+
+Same box, `bench_analysis --list list8 --threads 12 --probe-reads 16`, nice 10, before/after alternated, 3 rounds, load 15-48:
+
+| | lock held per track store | probe wait max | probe waits > 16 ms |
+|---|---:|---:|---:|
+| before | 0.1-1.1 s (`DB+ANLZ write`) | 236-986 ms | 20-22 per run |
+| after | 1.3-7.3 ms (1.4 typical) | 0.1-7 ms | 0 |
+
+Byte identity: the ignored test `fixture_library_files_are_byte_identical_both_ways` (`FF_FIXTURE_LIBRARY=~/.cache/ff-fixture/10k/library FF_FIXTURE_TRACKS=1000`) stores 1000 fixture analyses (251 with `edits.json`) both ways and compares the three ANLZ files and the index row.
