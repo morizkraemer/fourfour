@@ -117,6 +117,7 @@ pub fn waveform_fields(
 }
 
 /// Stored analysis data for a track, shaped for the frontend.
+#[allow(dead_code)]
 pub fn build_analysis_json(
     lib: &LocalLibrary,
     track_id: i64,

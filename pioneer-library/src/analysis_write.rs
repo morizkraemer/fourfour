@@ -19,7 +19,7 @@ use crate::{LocalLibrary, RowPreview, queries, read_waveform_analysis};
 const DAT: &str = "ANLZ0000.DAT";
 const EXT: &str = "ANLZ0000.EXT";
 const TWO_EX: &str = "ANLZ0000.2EX";
-const STAGING_PREFIX: &str = ".staging-";
+pub(crate) const STAGING_PREFIX: &str = ".staging-";
 
 static NEXT_STAGING: AtomicU64 = AtomicU64::new(0);
 
@@ -183,6 +183,32 @@ impl LocalLibrary {
     }
 }
 
+/// Removes the staging folders that a process other than this one left inside the track folders of the library at
+/// `db_path` (a crash between staging and commit). Touches nothing else. Returns how many it removed.
+pub fn remove_stale_staging(db_path: &Path) -> usize {
+    let Some(root) = db_path.parent().map(|p| p.join("anlz")) else { return 0 };
+    let Ok(track_dirs) = std::fs::read_dir(&root) else { return 0 };
+    let own_pid = std::process::id();
+    let mut removed = 0;
+    for track_dir in track_dirs.flatten() {
+        let Ok(entries) = std::fs::read_dir(track_dir.path()) else { continue };
+        for entry in entries.flatten() {
+            let is_real_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+            let stale = is_real_dir && staging_pid(&entry.file_name().to_string_lossy()).is_some_and(|pid| pid != own_pid);
+            if stale && std::fs::remove_dir_all(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+fn staging_pid(folder_name: &str) -> Option<u32> {
+    let (pid, counter) = folder_name.strip_prefix(STAGING_PREFIX)?.split_once('-')?;
+    counter.parse::<u64>().ok()?;
+    pid.parse().ok()
+}
+
 fn move_into_place(files: &StagedFiles) -> Result<()> {
     let rename = |name: &str| {
         std::fs::rename(files.staging.join(name), files.dir.join(name))
@@ -220,6 +246,31 @@ mod tests {
             })
             .ok();
         (files, row)
+    }
+
+    #[test]
+    fn stale_staging_of_other_processes_is_removed_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db).unwrap();
+        let id = lib.add_track(&make_track("Stale", "/music/stale.mp3")).unwrap();
+        lib.set_analysis(id, &make_analysis()).unwrap();
+        let track_dir = lib.track_anlz_dir(id).unwrap();
+        let own = track_dir.join(format!("{STAGING_PREFIX}{}-0", std::process::id()));
+        let other = track_dir.join(format!("{STAGING_PREFIX}{}-7", std::process::id() + 1));
+        let odd_names = [".staging-abc-1", ".staging-12", "staging-1-1", ".staging-1-x"].map(|n| track_dir.join(n));
+        for folder in odd_names.iter().chain([&own, &other]) {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join(DAT), b"x").unwrap();
+        }
+        let before = stored(&lib, id);
+
+        assert_eq!(remove_stale_staging(&db), 1);
+
+        assert!(!other.exists());
+        assert!(own.exists());
+        assert!(odd_names.iter().all(|f| f.join(DAT).exists()));
+        assert_eq!(stored(&lib, id), before);
     }
 
     fn no_staging_left(lib: &LocalLibrary, id: i64) {

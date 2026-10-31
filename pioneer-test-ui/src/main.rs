@@ -142,6 +142,14 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
     });
 }
 
+/// Removes staging folders a crashed run left in the ANLZ folders; on a thread of its own because it
+/// lists every track folder.
+fn spawn_stale_staging_cleanup(db_path: PathBuf) {
+    std::thread::spawn(move || {
+        pioneer_library::remove_stale_staging(&db_path);
+    });
+}
+
 #[derive(Serialize, Clone)]
 struct ImportProgress {
     done: usize,
@@ -1274,6 +1282,7 @@ fn change_library_path(
 
     // Swap the active library
     *state.lock().map_err(|e| e.to_string())? = new_library;
+    spawn_stale_staging_cleanup(db_path.clone());
 
     // Remember the choice
     write_library_path(&app, &db_path)?;
@@ -1439,6 +1448,7 @@ fn main() {
                 .expect("Failed to determine library database path");
             let library = LocalLibrary::open(&db_path)
                 .expect("Failed to open library database");
+            spawn_stale_staging_cleanup(db_path);
             let library: SharedLibrary = Arc::new(Mutex::new(library));
             let health = file_health::SharedHealth::default();
             app.manage(library.clone());

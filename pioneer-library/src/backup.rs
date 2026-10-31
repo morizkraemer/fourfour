@@ -14,6 +14,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis_write::STAGING_PREFIX;
 use crate::{FileStatus, LocalLibrary, file_status, queries};
 
 pub const BACKUP_FORMAT: &str = "library-backup";
@@ -94,7 +95,9 @@ fn files_under(root: &Path) -> Vec<PathBuf> {
         for entry in entries.flatten() {
             let Ok(kind) = entry.file_type() else { continue };
             if kind.is_dir() {
-                pending.push(entry.path());
+                if !entry.file_name().to_string_lossy().starts_with(STAGING_PREFIX) {
+                    pending.push(entry.path());
+                }
             } else if kind.is_file() {
                 files.push(entry.path());
             }
@@ -597,6 +600,22 @@ mod tests {
         assert!(f.root.join("Music/House/a.mp3").exists());
         assert_eq!(restored.user_edits(1).rating, Some(4));
         assert_eq!(restored.user_edits(1).grid_offset_ms, Some(0.25));
+    }
+
+    #[test]
+    fn analysis_staging_folders_stay_out_of_the_backup() {
+        let f = fixture();
+        let sizes_without = f.lib.backup_sizes().unwrap().library_bytes;
+        let staging = f.lib.track_anlz_dir(1).unwrap().join(format!("{STAGING_PREFIX}1-0"));
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("ANLZ0000.DAT"), b"half written").unwrap();
+        assert_eq!(f.lib.backup_sizes().unwrap().library_bytes, sizes_without);
+        let archive = f.root.join("backup.tar.gz");
+        f.lib.export_backup(&archive, false, &settings(), &mut |_, _| {}).unwrap();
+
+        let unpacked = unpack_backup(&archive, &f.root.join("lib/.restore"), None, &mut |_, _| {}).unwrap();
+        assert!(!unpacked.anlz_path().join("1").join(format!("{STAGING_PREFIX}1-0")).exists());
+        unpacked.discard();
     }
 
     #[test]
