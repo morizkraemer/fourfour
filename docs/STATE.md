@@ -54,6 +54,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 25. [accepted 2026-10-31 per rec] Boot snapshot shows the last All Tracks view (first ~40 rows, inert until the real load); reopening the last playlist on start is not built - rec: keep All Tracks - branch: ov-1028
 26. [accepted 2026-10-31 per rec] Boot snapshot is skipped below ~15k tracks (at 10k it delays real rows 100-170 ms because both lists paint waveforms; the real list lands within ~100 ms there anyway) - rec: keep - branch: to build in run item 4
+27. Analysis speed is capped by the beat model on CPU (91% of time; ~8 trk/min on dev, 10k = ~18 h). Only a new runtime moves it: onnxruntime + CoreML (GPU/Neural Engine) on the Mac, or fused attention. Not bit-identical, needs the grid/key evals - rec: try onnxruntime+CoreML on a branch, measure on a Mac night, keep only if evals hold - branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
