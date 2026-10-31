@@ -50,6 +50,7 @@ the research, plans, and reverse-engineering notes.
 | [`benchmark-2026-10.md`](analysis/benchmark-2026-10.md) | current | October 2026 accuracy benchmark. |
 | [`bpm-grid-2026-10.md`](analysis/bpm-grid-2026-10.md) | current | BPM and beat-grid results. |
 | [`rust-status-2026-10-28.md`](analysis/rust-status-2026-10-28.md) | current | Rust analyzer status, gaps, accuracy vs bars, bar-1 question (O3). |
+| [`key-bar-2026-10-31.md`](analysis/key-bar-2026-10-31.md) | current | Key stage reaches the 60% bar: compressed semitone bands, before/after, mode trade-off, licence. |
 | [`grid-offset-2026-10-29.md`](analysis/grid-offset-2026-10-29.md) | current | Why the grid looked a little off: mp3 time bases (gapless trim, Info frame), one shared time base, offsets by codec. |
 | [`key-detector-2026-10.md`](analysis/key-detector-2026-10.md) | current | Key detector results. |
 | [`analyzer-backend-review.md`](analysis/analyzer-backend-review.md) | historical | Analyzer backend review (June 2026). |

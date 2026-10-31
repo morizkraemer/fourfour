@@ -19,6 +19,7 @@ const PEAK_HI: f64 = 4000.0;
 const PEAK_FLOOR: f32 = 1e-2;
 const TUNE_STEP: usize = N_FFT / HOP;
 const SEG_SECONDS: f64 = 20.0;
+const BAND_COMPRESSION: f32 = 0.75;
 
 const SHAATH: [[f64; 12]; 2] = [
     [7.23900502618145, 3.50351166725159, 3.58445177536649, 2.84511816478676, 5.81898892118550, 4.55865057415321, 2.44778850545507, 6.99473192146830, 3.39106613673505, 4.55614256655143, 4.07392666663524, 4.45932757378887],
@@ -230,7 +231,7 @@ fn kernel(fs: f64, tuning: f64) -> Kernel {
     k
 }
 
-fn bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> {
+fn raw_bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> {
     let mut rows = vec![0f32; nb_frames * NB_BANDS];
     let per = nb_frames.div_ceil(threads.max(1)).max(1);
     std::thread::scope(|s| {
@@ -253,6 +254,10 @@ fn bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> 
             });
         }
     });
+    rows
+}
+
+fn whiten(mut rows: Vec<f32>) -> Vec<f32> {
     let top = rows.iter().cloned().fold(0f32, f32::max);
     let floor_mag = 1e-6 * top + 1e-12;
     for row in rows.chunks_mut(NB_BANDS) {
@@ -267,6 +272,13 @@ fn bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> 
         for m in 0..NB_BANDS {
             row[m] /= env[m] + floor_mag;
         }
+    }
+    rows
+}
+
+fn compress(mut rows: Vec<f32>) -> Vec<f32> {
+    for v in rows.iter_mut() {
+        *v = v.powf(BAND_COMPRESSION);
     }
     rows
 }
@@ -339,7 +351,14 @@ fn best_key(x: &[f64; NB_FEAT], s: &[f64; 24]) -> usize {
     best
 }
 
-pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
+pub struct Bands {
+    pub rows: Vec<f32>,
+    pub nb_frames: usize,
+    pub tuning: f64,
+    pub fs: f64,
+}
+
+pub fn semitone_bands(mono: &[f32], rate: u32, threads: usize) -> Option<Bands> {
     if rate == 0 || mono.is_empty() {
         return None;
     }
@@ -356,7 +375,13 @@ pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
     let stft = Stft::new(x);
     let tuning = estimate_tuning(&stft, nb_frames, fs);
     let k = kernel(fs, tuning);
-    let rows = bands(&stft, nb_frames, &k, threads);
+    let rows = raw_bands(&stft, nb_frames, &k, threads);
+    Some(Bands { rows, nb_frames, tuning, fs })
+}
+
+pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
+    let Bands { rows, nb_frames, tuning, fs } = semitone_bands(mono, rate, threads)?;
+    let rows = compress(whiten(rows));
 
     let xs = chroma(&rows, 0, nb_frames);
     if xs.iter().sum::<f64>() <= 0.0 {

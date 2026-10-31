@@ -33,6 +33,7 @@ struct Tally {
     relative: usize,
     parallel: usize,
     fifth: usize,
+    other: usize,
 }
 
 impl Tally {
@@ -48,19 +49,22 @@ impl Tally {
             self.relative += 1;
         } else if pm == tm && ((pt + 12 - tt) % 12 == 7 || (tt + 12 - pt) % 12 == 7) {
             self.fifth += 1;
+        } else {
+            self.other += 1;
         }
     }
 
     fn report(&self, label: &str) {
         let p = |x: usize| 100.0 * x as f64 / self.n.max(1) as f64;
         println!(
-            "{label} n={} exact={} ({:.1}%) relative={:.1}% parallel={:.1}% fifth={:.1}% exact+rel+fifth={:.1}%",
+            "{label} n={} exact={} ({:.1}%) fifth={} relative={} parallel={} other={} exact+rel+fifth={:.1}%",
             self.n,
             self.exact,
             p(self.exact),
-            p(self.relative),
-            p(self.parallel),
-            p(self.fifth),
+            self.fifth,
+            self.relative,
+            self.parallel,
+            self.other,
             p(self.exact + self.relative + self.fifth)
         );
     }
