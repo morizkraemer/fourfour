@@ -109,6 +109,8 @@ describe('library track rows', () => {
     expect(filterTracks(library.tracks, 'aardvark')).toEqual([]);
     bumpLibraryTracks([3]);
     expect(filterTracks(library.tracks, 'aardvark').map((t) => t.id)).toEqual([3]);
+    expect(filterTracks(library.tracks, 'ARTIST 2 /m/2.MP3 house 8a').map((t) => t.id)).toEqual([2]);
+    expect(filterTracks(library.tracks, 'undefined')).toEqual([]);
     clearSort('library');
     setSort('library', 'title');
     expect(sortTracks(library.tracks, 'library').map((t) => t.id)).toEqual([3, 1, 2]);

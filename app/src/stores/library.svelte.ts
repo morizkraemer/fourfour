@@ -495,28 +495,16 @@ function scheduleSearchIndexWarmup() {
   }, WARMUP_DELAY_MS);
 }
 
+const text = (value: unknown) => (value == null ? '' : String(value));
+
 function trackHaystack(track: Record<string, unknown>): string {
-  const raw = track.raw as Record<string, unknown> | undefined;
-  return [
-    track.title,
-    track.artist,
-    track.album,
-    track.label,
-    track.genre,
-    track.key,
-    track.bpm,
-    track.time,
-    track.filePath,
-    track.index,
-    raw?.title,
-    raw?.artist,
-    raw?.album,
-    raw?.genre,
-    raw?.key,
-    raw?.source_path,
-  ]
-    .map((v) => String(v ?? '').toLowerCase())
-    .join(' ');
+  const raw = (track.raw ?? {}) as Record<string, unknown>;
+  return (
+    text(track.title) + ' ' + text(track.artist) + ' ' + text(track.album) + ' ' + text(track.label) + ' ' +
+    text(track.genre) + ' ' + text(track.key) + ' ' + text(track.bpm) + ' ' + text(track.time) + ' ' +
+    text(track.filePath) + ' ' + text(track.index) + ' ' + text(raw.title) + ' ' + text(raw.artist) + ' ' +
+    text(raw.album) + ' ' + text(raw.genre) + ' ' + text(raw.key) + ' ' + text(raw.source_path)
+  ).toLowerCase();
 }
 
 /**
