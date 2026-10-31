@@ -350,7 +350,7 @@ Branch from `ov-1028` (`6fe845f`). Linux `dev` box, 16 cores, release `bench_ana
 
 A beat-model chunk cannot be stopped once it runs (one rten call, about 5 s on an idle core here and longer under load), so the hold frees cores only as chunks end: on this box it takes about 4-5 s to drain. A short flick of the list hardly changes the CPU; continued browsing (scroll, read, scroll within 500 ms) does. On the Mac chunks are shorter (faster cores, 3 slots on 8 GB), so the drain is shorter, but still around a chunk. Decode, mel and key of jobs already running are not held either.
 
-**Throughput cost.** Wall time on this box swings 2x between identical runs (8 long files, 12 threads: 2.9-6.0 trk/min with no UI at all), so the cost is not measurable in wall time here; it follows from the held time instead. A held stretch costs at most the analysis work that would have run in it, and less, because running chunks finish: with the user scrolling 10% of the time (1 s of every 10 s) the run was held 14% of the time; 33% scrolling, 40% held. CPU-s per track did not change (634 vs 628 CPU-s for 8 tracks). The core cap costs nothing where memory already limits the model (8 GB Macs: 3 chunk slots and 3 threads per job either way) and up to 1/7 of model throughput where cores limit it (16 GB 8-core Mac: 7 -> 6 chunk slots; this box 15 -> 14, -7%).
+**Throughput cost.** Wall time on this box swings 2x between identical runs (8 long files, 12 threads: 2.9-6.0 trk/min with no UI at all), so the cost is not measurable in wall time here; it follows from the held time instead. A held stretch costs at most the analysis work that would have run in it, and less, because running chunks finish: with the user scrolling 10% of the time (1 s of every 10 s) the run was held 14% of the time; 33% scrolling, 40% held. Process CPU for the 8 tracks was 615-685 s with or without the hold. The core cap costs nothing where memory already limits the model (8 GB Macs: 3 chunk slots and 3 threads per job either way) and up to 1/7 of model throughput where cores limit it (16 GB 8-core Mac: 7 -> 6 chunk slots; this box 15 -> 14, -7%).
 
 **Scroll frames during a real analysis** (`perf-bulk-analysis.spec.ts` list scenario, real `bench_analysis` of the 24 long files as load; before = 15 threads, no hold; after = 14 threads, the page's own signals forwarded to the bench). Median of 4 rounds; the rounds ran at load 15-49:
 
@@ -358,7 +358,7 @@ A beat-model chunk cannot be stopped once it runs (one rten call, about 5 s on a
 |---|---:|---:|---:|
 | scroll during fast pass | 33 ms / 75 | 51 ms / 178 | 53 ms / 173 |
 | scroll during grid pass | 30 ms / 35 | 52 ms / 192 | 40 ms / 121 |
-| scroll, BPM sort, fast pass | 37 ms / 80 | 58 ms / 191 | 62 ms / 201 |
+| scroll, BPM sort, fast pass | 37 ms / 80 | 58 ms / 193 | 62 ms / 201 |
 
 Rounds 1 and 4 (load 15-33) were clearly better after (grid pass p95 43 -> 27 and 50 -> 30 ms, lost frames 166 -> 32 and 189 -> 59); rounds 2-3 were swamped by load 35-49 from other workers. On Linux the analysis at nice 10 takes little CPU time from Chromium in the first place, so most of the before/after gap here is cache and memory bandwidth plus the other workers. Raw: `~/.cache/r5-bench/frames-*.json`, `results.txt`, `cores.txt`.
 
