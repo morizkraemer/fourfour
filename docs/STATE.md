@@ -79,7 +79,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 ### Q50 Speed: lightning-fast startup, track load, import, analysis [running] [box] — Merlin 2026-10-29: "hyper optimize for speed … this needs to be lightning fast". Goal: measured budgets per path, then fix the worst first. Paths: cold/warm startup to interactive (10k-track library), track load to first audible + full waveform, import of a 1k-file folder (scan → plan → commit → UI), analysis throughput (tracks/min, per-stage profile: decode, resample, mel, ONNX, fit, key, bands, writes), UI responsiveness during all of them. Acceptance: a perf report with before/after per path, a repeatable perf suite (extend app/perf + smoke perf10k + a Rust bench), every win landed on a branch with green checks; BPM/grid/key results unchanged. Fleet split: one worker per path + one for the shared perf harness first; one writer per path set. Builds on fb-wave/fb-bulk findings (docs/analysis/grid-offset-2026-10-29.md, perf notes in journal 2026-10-29). Timebox: one overnight run. Run conditions (Merlin 2026-10-29): seat only, no API/credit runs; visible app runs on the Mac (mac-queue --visible) allowed only after 00:00 Mac local time (WITA, UTC+8); Mac on AC from bedtime. Merlin runs a Grokbot watcher that pings this thread when the seat limit resets → on that ping, resume every stopped worker (SendMessage), check limits first.
 
 ## Run
-status: running · since 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
+status: idle (2026-10-31: queue done; Mac offline, decisions open) · started 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
 targets (Merlin Q&A 2026-10-30): beta-ready on ov-1028, and as fast as possible at 10k+ tracks (startup, analysing 10k+, track load, scroll). Order: speed first, then beta. "nothing's off limits": every item below may be built; hard gates and the brother's format bytes still hold
 plan:
 0. merge q50-report summary (c3476bb) into ov-1028
@@ -101,13 +101,13 @@ review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with l
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
-progress 2026-10-31: merged 0, 1, 2, 3 (first BPM in seconds; throughput model-bound, Waiting 27), 4 (+ stored detail r7: zoom open 3 ms), test-hang fix; 9 dmg built. merged 5 (headroom), 6 (import + sync cover fix). Running: r5b-lock (analysis writes off the library lock), 7 (b7-keybar). Next: 8-12
+progress 2026-10-31: items 0-8, 10-12 merged on ov-1028 (checks green). Idle: 9 (dmg install) and the Mac batch wait for the Mac; the rest waits on Merlin (Waiting 1-3 review card, 4 key licence, 15 CI push, 27 runtime, 29 after Mac night)
 ### Visible Mac batch
 - perf night: scripts/mac/perf-night.sh --size 10k --build (r1; startup, scroll, analysis timings) - needs the Mac online + Merlin's go
 - install ov-1028 + dmg check (scripts/mac/check-dmg.sh)
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
 ## Rundown
-Run 2026-10-30/31 (ov-1028, branch only): startup boot snapshot + lazy row previews (first rows 250-560 ms at 10k-50k), 50k row mapping 330 -> 40-115 ms, sidecar label cache, fonts bundled; 10k/25k/50k fixtures + targets; unsigned dmg 105 MB.
-Worst gaps at 10k: first waveform 1.05 s (target 0.12), import 18 s (2.5), analysis 9 trk/min (30).
-Blocked: Mac offline, so no installs or Mac timings. A test deadlock under load stalls cargo test (fix running).
+Run 2026-10-30/31 on ov-1028 (branch only, checks green): startup snapshot from 20k tracks; zoomed waveform 605 -> 3 ms after analysis; import 10k 14 -> 2.1 s cold, re-import 0.14 s; first BPM in ~3 s; analysis lock 1 s -> 1.4 ms; UI hold while scrolling; key 60.3% (bar met); USB sync round 3; CI ready on ov-ci.
+Still slow: analysis 8 trk/min (beat model 91% CPU; Waiting 27).
+Waiting on Merlin: sync review card, key licence (4), CI push (15), runtime (27). Mac offline: installs, dmg check, perf night.
