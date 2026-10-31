@@ -344,3 +344,4 @@
 2026-10-31 13:58 orchestrator - landed: r1-perf10k on ov-1028 (ea7ad12; 10k-50k fixtures, perf budgets, perf probe, Mac perf-night script); checks green, fixture kept in ~/.cache/ff-fixture
 2026-10-31 14:03 orchestrator - landed: r3-testhang on ov-1028 (db51b30, test file only); cargo test --workspace green
 2026-10-31 15:47 orchestrator - done: r3-analysis (cd1a905) first BPM at 500 queued 15.2 -> 3.0 s via early whole-track jobs, results bit-identical, throughput unchanged (model 91% of CPU); runtime change to Waiting 27; spawn r7-storedetail (opus medium) for stored detail from Rust analysis
+2026-10-31 15:49 orchestrator - landed: r4-trackload on ov-1028 (67f6607; parallel detail meter, first zoomed waveform ~half at low load, 25-40% less at load 40-50; urgent prefetch on press; detail cache 2 GiB; boot snapshot from 20k tracks per measurements); 120 ms target needs stored detail from analysis, passed to r3-analysis
