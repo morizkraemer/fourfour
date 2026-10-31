@@ -52,7 +52,7 @@ impl TrackEngine for FakeEngine {
         self.log.lock().unwrap().push(Event::Start(name.clone(), threads));
         self.log.lock().unwrap().push(Event::Ran(name.clone(), pass));
         if let Some(emit) = on_partial {
-            emit(AnalysisResult { bpm: 0.0, key: String::new(), ..finished_result() });
+            emit(AnalysisResult { bpm: 0.0, ..finished_result() });
         }
         if pass == Pass::Fast {
             std::thread::sleep(FAST);

@@ -547,13 +547,19 @@ fn store_fast_pass(
 fn partial_store(shared: &SharedLibrary, sink: &Arc<dyn AnalysisSink>, track_id: i64, source_path: &Path, started: Instant) -> PartialStore {
     let (shared, sink, file_name) = (shared.clone(), sink.clone(), file_name_of(source_path));
     Arc::new(move |partial| {
-        let stored = shared
-            .lock()
-            .map_err(|e| e.to_string())
-            .and_then(|lib| lib.set_analysis_stages(track_id, &partial, analysis_stage::WAVEFORM).map_err(|e| e.to_string()));
+        let stages = if partial.key.is_empty() { analysis_stage::WAVEFORM } else { FAST_STAGES };
+        let stored = shared.lock().map_err(|e| e.to_string()).and_then(|lib| {
+            if stages == FAST_STAGES {
+                if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
+                    track.key = partial.key.clone();
+                    lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
+                }
+            }
+            lib.set_analysis_stages(track_id, &partial, stages).map_err(|e| e.to_string())
+        });
         match stored {
             Ok(()) => {
-                sink.log(LogLevel::Dim, format!("{file_name} waveform ready {:.1}s", started.elapsed().as_secs_f64()));
+                sink.log(LogLevel::Dim, format!("{file_name} waveform ready key={} {:.1}s", partial.key, started.elapsed().as_secs_f64()));
                 sink.partial(track_id);
             }
             Err(e) => sink.log(LogLevel::Err, format!("{file_name} waveform not stored: {e}")),
