@@ -329,3 +329,50 @@ Branch `worktree-agent-acffa3352ed21e257` from `ov-1028` plus `r3-analysis` (`cd
 - The meter in f32 (R4 "Next") would roughly halve the 2.5%; it changes bytes slightly, which is fine as long as both paths use it.
 - Moving playback to symphonia 0.6 would allow feeding the meter from the analysis decode and drop the extra decode.
 - Tracks analysed before this change get their detail on their first open, as before; a re-analysis or a background warm fills them.
+
+## R5 UI headroom (2026-10-31)
+
+Branch from `ov-1028` (`6fe845f`). Linux `dev` box, 16 cores, release `bench_analysis` at `nice -n 10`, headless Chromium with the smoke mock at 10,000 tracks. Load average 14-50 from other workers throughout; every number below names its load, and the box can only show direction, not the Mac's size of effect.
+
+**Changed**
+
+- **Two cores stay free.** The default analysis thread count is `cores - 2` (was `cores - 1`); `FOURFOUR_ANALYSIS_THREADS` still overrides it. The analysis already runs at utility QoS on macOS, which the scheduler puts behind the web view's user-interactive threads, so two free cores are two free performance cores there.
+- **Analysis holds while the user scrolls, wheels or drags.** One capture listener on the window (`app/src/services/ui-busy.ts`) sends `analysis_ui_busy` at most every 200 ms while `library.analyzing`; the coordinator then holds background work until 500 ms pass without a signal: no new model chunk, no new job. Chunks already on a thread finish. The now lane (the track being played) is not held. Playback alone does not hold the analysis: a DJ previews tracks for most of a prep session, and holding then would stop the analysis most of the time.
+- **Measuring knobs, not settings:** `FF_ANALYSIS_UI_PAUSE=off` (the command ignores the signal), `FF_ANALYSIS_QOS=background` (macOS: analysis on the efficiency cores only). `bench_analysis --ui-busy <busy ms>/<period ms>` (synthetic user), `--ui-busy-file <path>` (one signal per byte appended, used to forward the headless page's real signals), `--probe-reads <ms>` (a reader doing `build_analysis_json` under the library lock every few ms). The run log ends with "held for the UI Nx, S s".
+
+**How fast the hold frees cores.** Cores the analysis process used, inside vs outside the busy phases (8 long files, 12 threads):
+
+| synthetic user | load | analysis cores while busy | otherwise | held |
+|---|---:|---:|---:|---:|
+| 1.5 s busy every 5 s | 25 | 7.7 | 8.3 | 39% of the run |
+| 3 s busy every 6 s | 22 | 7.0 | 8.3 | 56% |
+| 8 s busy every 16 s | 23 | 2.5 | 8.5 | 50% |
+
+A beat-model chunk cannot be stopped once it runs (one rten call, about 5 s on an idle core here and longer under load), so the hold frees cores only as chunks end: on this box it takes about 4-5 s to drain. A short flick of the list hardly changes the CPU; continued browsing (scroll, read, scroll within 500 ms) does. On the Mac chunks are shorter (faster cores, 3 slots on 8 GB), so the drain is shorter, but still around a chunk. Decode, mel and key of jobs already running are not held either.
+
+**Throughput cost.** Wall time on this box swings 2x between identical runs (8 long files, 12 threads: 2.9-6.0 trk/min with no UI at all), so the cost is not measurable in wall time here; it follows from the held time instead. A held stretch costs at most the analysis work that would have run in it, and less, because running chunks finish: with the user scrolling 10% of the time (1 s of every 10 s) the run was held 14% of the time; 33% scrolling, 40% held. CPU-s per track did not change (634 vs 628 CPU-s for 8 tracks). The core cap costs nothing where memory already limits the model (8 GB Macs: 3 chunk slots and 3 threads per job either way) and up to 1/7 of model throughput where cores limit it (16 GB 8-core Mac: 7 -> 6 chunk slots; this box 15 -> 14, -7%).
+
+**Scroll frames during a real analysis** (`perf-bulk-analysis.spec.ts` list scenario, real `bench_analysis` of the 24 long files as load; before = 15 threads, no hold; after = 14 threads, the page's own signals forwarded to the bench). Median of 4 rounds; the rounds ran at load 15-49:
+
+| window | idle box p95 / lost | before p95 / lost | after p95 / lost |
+|---|---:|---:|---:|
+| scroll during fast pass | 33 ms / 75 | 51 ms / 178 | 53 ms / 173 |
+| scroll during grid pass | 30 ms / 35 | 52 ms / 192 | 40 ms / 121 |
+| scroll, BPM sort, fast pass | 37 ms / 80 | 58 ms / 191 | 62 ms / 201 |
+
+Rounds 1 and 4 (load 15-33) were clearly better after (grid pass p95 43 -> 27 and 50 -> 30 ms, lost frames 166 -> 32 and 189 -> 59); rounds 2-3 were swamped by load 35-49 from other workers. On Linux the analysis at nice 10 takes little CPU time from Chromium in the first place, so most of the before/after gap here is cache and memory bandwidth plus the other workers. Raw: `~/.cache/r5-bench/frames-*.json`, `results.txt`, `cores.txt`.
+
+**Library lock.** A reader taking the library lock every 16 ms during analysis (8 tracks): p50/p95/p99 wait 0 ms, but about 2.5 waits per track of 100-660 ms (max per run 205-662 ms). They are the analysis' own writes holding the lock: `set_analysis` (DB plus ANLZ files) takes 0.1-0.2 s per track in `record_outcome`, and the waveform partial stores hold it too. Any command that needs the lock in that moment waits: `get_analysis_data` for a finished row, loading a track into the player, the waveform detail's track lookup. Scrolling itself needs no lock (rows are in memory). Not changed here: the fix is to build the ANLZ bytes and the row outside the lock and hold it only for the SQLite write, which is in `pioneer-library` (outside this item). `build_analysis_json` itself takes 8.6-12 ms p50 per call.
+
+**Main thread.** Nothing left worth changing found: progress and partial events already land in batches of at most one library update per 250 ms (fb-analysisfps), and the per-track `debug-log` events have no listener in `app/`, so Tauri does not send them to the web view.
+
+**What only the Mac can confirm** (`scripts/mac/perf-night.sh` now runs three analysis app runs: `analysis-before` with `FF_ANALYSIS_UI_PAUSE=off` and `cores - 1` threads, `analysis` with the defaults, `analysis-bgqos` with background QoS; each scrolls 10 s, then 5 bursts of 1.5 s scroll + 2.5 s rest; plus four `bench_analysis` runs for the throughput cost: `cores - 1` threads, default, `--ui-busy 2000/6000`, background QoS. The summary has a "UI headroom" table.):
+
+- whether WKWebView frames improve, and by how much in the bursts (the realistic case),
+- the drain time with Apple Silicon chunk lengths,
+- what background QoS (efficiency cores only) costs in throughput and gains in frames; it is the only lever that frees performance cores at once, mid-chunk.
+
+**Next**
+
+- Library writes outside the lock (`pioneer-library`, see above).
+- If the Mac shows the drain is too slow for bursts: background QoS for the model threads by default (cost measured by the night), or a GPU/ANE runtime for the model (R3), which takes the model off the CPU entirely.

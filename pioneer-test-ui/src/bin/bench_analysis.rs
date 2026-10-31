@@ -315,9 +315,16 @@ fn main() {
     stop.store(true, Ordering::Relaxed);
     sampler.join().unwrap();
     if let Some(ui) = ui {
-        ui.join().unwrap();
+        let [(free_cpu, free_s), (busy_cpu, busy_s)] = ui.join().unwrap();
         let (pauses, held) = coordinator.ui_pause_totals();
-        println!("UI busy={:?} held={pauses}x {:.1}s ({:.0}% of the run)", ui_busy.unwrap(), held.as_secs_f64(), held.as_secs_f64() / wall_s * 100.0);
+        println!(
+            "UI busy={:?} held={pauses}x {:.1}s ({:.0}% of the run) cores_used_while_busy={:.1} cores_used_otherwise={:.1}",
+            ui_busy.unwrap(),
+            held.as_secs_f64(),
+            held.as_secs_f64() / wall_s * 100.0,
+            busy_cpu / busy_s,
+            free_cpu / free_s
+        );
     }
     if let Some(ui) = ui_from_file {
         let signals = ui.join().unwrap();
@@ -410,17 +417,26 @@ fn check_stored_detail(cache: &std::path::Path, paths: &[PathBuf]) {
     println!("DETAIL stored={stored}/{} identical={identical}/{}", paths.len(), paths.len());
 }
 
-fn simulate_ui(stop: &AtomicBool, coordinator: &AnalysisCoordinator, started: Instant, busy: Duration, period: Duration) {
+fn simulate_ui(stop: &AtomicBool, coordinator: &AnalysisCoordinator, started: Instant, busy: Duration, period: Duration) -> [(f64, f64); 2] {
     const SIGNAL_EVERY: Duration = Duration::from_millis(200);
+    let mut cpu_and_seconds = [(0.0, 0.0); 2];
+    let (mut last_cpu, mut last_at) = (process_cpu_s(), Instant::now());
     while !stop.load(Ordering::Relaxed) {
         let phase = Duration::from_nanos((started.elapsed().as_nanos() % period.as_nanos()) as u64);
-        if phase < busy {
+        let in_busy = phase < busy;
+        if in_busy {
             coordinator.ui_busy();
             std::thread::sleep(SIGNAL_EVERY.min(busy - phase));
         } else {
             std::thread::sleep((period - phase).min(Duration::from_millis(50)));
         }
+        let (cpu, at) = (process_cpu_s(), Instant::now());
+        let slot = &mut cpu_and_seconds[in_busy as usize];
+        slot.0 += cpu - last_cpu;
+        slot.1 += (at - last_at).as_secs_f64();
+        (last_cpu, last_at) = (cpu, at);
     }
+    cpu_and_seconds
 }
 
 struct ReadProbe {
