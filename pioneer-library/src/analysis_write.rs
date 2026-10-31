@@ -19,7 +19,7 @@ use crate::{LocalLibrary, RowPreview, queries, read_waveform_analysis};
 const DAT: &str = "ANLZ0000.DAT";
 const EXT: &str = "ANLZ0000.EXT";
 const TWO_EX: &str = "ANLZ0000.2EX";
-const STAGING_PREFIX: &str = ".staging-";
+pub(crate) const STAGING_PREFIX: &str = ".staging-";
 
 static NEXT_STAGING: AtomicU64 = AtomicU64::new(0);
 
