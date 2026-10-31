@@ -448,5 +448,29 @@ mod ort_tests {
         assert_eq!((rb.len(), rd.len()), (ob.len(), od.len()));
         let max_diff = rb.iter().chain(&rd).zip(ob.iter().chain(&od)).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
         assert!(max_diff < 1e-2, "max abs logit diff {max_diff}");
+
+        let rounds: usize = std::env::var("FF_CHUNK_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let thread_cpu_ms = || -> f64 {
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let fields: Vec<f64> = stat.rsplit(')').next().unwrap_or("").split_whitespace().map(|v| v.parse().unwrap_or(0.0)).collect();
+            (fields.get(11).unwrap_or(&0.0) + fields.get(12).unwrap_or(&0.0)) * 10.0
+        };
+        let mut session = ort.session().unwrap();
+        let (mut rten_ms, mut ort_ms) = (Vec::new(), Vec::new());
+        for _ in 0..rounds {
+            let t = thread_cpu_ms();
+            rten.run_chunk(&chunk, &options).unwrap();
+            rten_ms.push(thread_cpu_ms() - t);
+            let t = thread_cpu_ms();
+            session.run(&chunk).unwrap();
+            ort_ms.push(thread_cpu_ms() - t);
+        }
+        if rounds > 0 {
+            let median = |v: &mut Vec<f64>| {
+                v.sort_by(f64::total_cmp);
+                v[v.len() / 2]
+            };
+            println!("CHUNK cpu ms per chunk, median of {rounds}: rten {:.0} ort {:.0}; max abs logit diff {max_diff}", median(&mut rten_ms), median(&mut ort_ms));
+        }
     }
 }

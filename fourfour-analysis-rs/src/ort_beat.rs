@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
 use beat_this::Tensor;
@@ -35,20 +36,25 @@ fn ort_err(e: impl std::fmt::Display) -> anyhow::Error {
     anyhow!("onnxruntime: {e}")
 }
 
+fn cpu() -> ort::ep::CPU {
+    ort::ep::CPU::default().with_arena_allocator(true)
+}
+
 fn execution_providers(builder: SessionBuilder) -> ort::Result<SessionBuilder> {
     #[cfg(all(feature = "coreml", target_os = "macos"))]
     {
         use ort::ep::coreml::{ComputeUnits, ModelFormat};
         let coreml = ort::ep::CoreML::default().with_model_format(ModelFormat::MLProgram).with_compute_units(ComputeUnits::All);
-        return Ok(builder.with_execution_providers([coreml.build(), ort::ep::CPU::default().build()])?);
+        return Ok(builder.with_execution_providers([coreml.build(), cpu().build()])?);
     }
     #[allow(unreachable_code)]
-    Ok(builder)
+    Ok(builder.with_execution_providers([cpu().build()])?)
 }
 
 impl OrtBeat {
     pub fn load(path: &Path) -> Result<Self> {
-        let env = ort::init().with_name("fourfour-beat").build().map_err(ort_err)?;
+        static ENV: OnceLock<std::result::Result<Environment, String>> = OnceLock::new();
+        let env = ENV.get_or_init(|| ort::init().with_name("fourfour-beat").build().map_err(|e| e.to_string())).clone().map_err(ort_err)?;
         let mut beat = OrtBeat {
             path: path.to_path_buf(),
             env,
@@ -74,6 +80,7 @@ impl OrtBeat {
                 .with_inter_threads(1)?
                 .with_parallel_execution(false)?
                 .with_intra_op_spinning(false)?
+                .with_memory_pattern(false)?
                 .with_prepacked_weights(&self.prepacked)?;
             Ok(execution_providers(builder)?.commit_from_file(&self.path)?)
         };
