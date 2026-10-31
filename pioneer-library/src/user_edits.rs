@@ -1,7 +1,9 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, bail};
+use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::{Beat, BeatGrid};
 
@@ -42,7 +44,7 @@ pub fn is_camelot(key: &str) -> bool {
 }
 
 /// What the track list shows from a track's sidecar files.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackLabels {
     /// The hand-set rating over the imported one, as [`LocalLibrary::effective_rating`] gives it.
     pub rating: Option<u8>,
@@ -50,7 +52,37 @@ pub struct TrackLabels {
     pub color: Option<String>,
 }
 
+/// A label that changed on disk since the labels cache was written; `None` when the track has none any more.
+pub type TrackLabelsChange = (i64, Option<TrackLabels>);
+
+pub const LABELS_CACHE_FILE: &str = "track-labels.json";
+
+#[derive(Serialize, Deserialize)]
+struct LabelsCache {
+    anlz_modified_ns: u128,
+    labels: HashMap<i64, TrackLabels>,
+}
+
+fn modified_ns(path: &Path) -> Option<u128> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    Some(modified.duration_since(UNIX_EPOCH).ok()?.as_nanos())
+}
+
+fn read_track_labels(track_dir: &Path) -> Option<TrackLabels> {
+    let imported = ImportedMeta::read(track_dir);
+    let rating = UserEdits::read(track_dir)
+        .and_then(|edits| edits.rating)
+        .or(imported.as_ref().and_then(|meta| meta.rating))
+        .filter(|&r| r > 0);
+    let color = imported.and_then(|meta| meta.color);
+    (rating.is_some() || color.is_some()).then_some(TrackLabels { rating, color })
+}
+
 /// Reads [`TrackLabels`] from the sidecar files alone, so it can run on another thread while the library is queried.
+///
+/// Scanning every track folder costs about 230 ms at 50k tracks, so the last scan is kept in [`LABELS_CACHE_FILE`]
+/// next to the database. The cache is trusted only while the `anlz` folder is unchanged (no track folder added or
+/// removed); [`refresh`](Self::refresh) scans again after the list is on screen and reports what changed on disk.
 pub struct TrackLabelsReader {
     anlz_dir: Option<PathBuf>,
 }
@@ -61,15 +93,90 @@ impl TrackLabelsReader {
         let Some(anlz_dir) = &self.anlz_dir else { return HashMap::new() };
         let Ok(entries) = std::fs::read_dir(anlz_dir) else { return HashMap::new() };
         let ids: Vec<i64> = entries.filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok()).collect();
-        crate::read_track_dirs(anlz_dir, &ids, |dir| {
-            let imported = ImportedMeta::read(dir);
-            let rating = UserEdits::read(dir)
-                .and_then(|edits| edits.rating)
-                .or(imported.as_ref().and_then(|meta| meta.rating))
-                .filter(|&r| r > 0);
-            let color = imported.and_then(|meta| meta.color);
-            (rating.is_some() || color.is_some()).then_some(TrackLabels { rating, color })
-        })
+        crate::read_track_dirs(anlz_dir, &ids, read_track_labels)
+    }
+
+    /// The cached labels while the cache matches the `anlz` folder, else [`read_all`](Self::read_all), cached.
+    pub fn read_cached(&self) -> HashMap<i64, TrackLabels> {
+        if let Some(cache) = self.load_cache().filter(|cache| Some(cache.anlz_modified_ns) == self.anlz_modified_ns()) {
+            return cache.labels;
+        }
+        let labels = self.read_all();
+        self.store(&labels);
+        labels
+    }
+
+    /// Scans every track folder, caches the result and returns the labels that differ from the cache. Each change is
+    /// read once more before it is reported, so a rating set during the scan is not undone.
+    pub fn refresh(&self) -> Vec<TrackLabelsChange> {
+        let Some(anlz_dir) = &self.anlz_dir else { return Vec::new() };
+        let mut fresh = self.read_all();
+        let cached = self.load_cache().map(|cache| cache.labels).unwrap_or_default();
+        let changed: Vec<i64> = fresh
+            .iter()
+            .filter(|(id, labels)| cached.get(id) != Some(labels))
+            .map(|(id, _)| *id)
+            .chain(cached.keys().filter(|id| !fresh.contains_key(id)).copied())
+            .collect();
+        let mut changes = Vec::new();
+        for id in changed {
+            let now = read_track_labels(&anlz_dir.join(id.to_string()));
+            match &now {
+                Some(labels) => fresh.insert(id, labels.clone()),
+                None => fresh.remove(&id),
+            };
+            if cached.get(&id) != now.as_ref() {
+                changes.push((id, now));
+            }
+        }
+        self.store(&fresh);
+        changes
+    }
+
+    /// Re-reads one track's labels into the cache, when there is one.
+    pub fn update(&self, track_id: i64) {
+        let (Some(anlz_dir), Some(mut cache)) = (&self.anlz_dir, self.load_cache()) else { return };
+        match read_track_labels(&anlz_dir.join(track_id.to_string())) {
+            Some(labels) => cache.labels.insert(track_id, labels),
+            None => cache.labels.remove(&track_id),
+        };
+        self.write_cache(&cache);
+    }
+
+    /// Drops the cache, so the next start scans every track folder.
+    pub fn invalidate(&self) {
+        if let Some(path) = self.cache_path() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    fn cache_path(&self) -> Option<PathBuf> {
+        Some(self.anlz_dir.as_ref()?.parent()?.join(LABELS_CACHE_FILE))
+    }
+
+    fn anlz_modified_ns(&self) -> Option<u128> {
+        modified_ns(self.anlz_dir.as_ref()?)
+    }
+
+    fn load_cache(&self) -> Option<LabelsCache> {
+        serde_json::from_slice(&std::fs::read(self.cache_path()?).ok()?).ok()
+    }
+
+    fn store(&self, labels: &HashMap<i64, TrackLabels>) {
+        let Some(anlz_modified_ns) = self.anlz_modified_ns() else { return };
+        self.write_cache(&LabelsCache { anlz_modified_ns, labels: labels.clone() });
+    }
+
+    fn write_cache(&self, cache: &LabelsCache) {
+        let Some(path) = self.cache_path() else { return };
+        let tmp = path.with_extension("json.tmp");
+        let written = serde_json::to_vec(cache)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| Ok(std::fs::write(&tmp, bytes)?))
+            .and_then(|()| Ok(std::fs::rename(&tmp, &path)?));
+        if let Err(err) = written {
+            eprintln!("track labels cache not written: {err:#}");
+        }
     }
 }
 
@@ -132,7 +239,9 @@ impl LocalLibrary {
         if rating > MAX_RATING {
             bail!("Rating {rating} is above {MAX_RATING} stars");
         }
-        self.update_user_edits(track_id, |edits| edits.rating = Some(rating))
+        self.update_user_edits(track_id, |edits| edits.rating = Some(rating))?;
+        self.track_labels_reader().update(track_id);
+        Ok(())
     }
 
     /// The hand-set rating when there is one, else the imported one; `None` when unrated.

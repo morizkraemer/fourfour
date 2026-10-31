@@ -94,3 +94,32 @@ test('a snapshot from another library is not shown', async ({ page }) => {
   await releaseLoad(page);
   await page.locator('[data-track-row]').first().waitFor();
 });
+
+test('ratings changed outside the app since the last start land after the list shows', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      'fourfour.tableColumns.v3',
+      JSON.stringify({
+        layouts: {
+          library: {
+            columns: [
+              { key: 'title', label: 'TITLE', width: 220 },
+              { key: 'rating', label: 'RATING', width: 90 },
+            ],
+            sortKey: null,
+            sortDir: 'asc',
+          },
+        },
+      }),
+    );
+    (window as unknown as SmokeWindow).__smokeLabelChanges = [{ id: 2, rating: 4, color: null }];
+  });
+  await openApp(page, fixtureState());
+  await releaseLoad(page);
+  const row = page.locator('[data-track-row][data-row-index="1"]');
+  await expect(row).toContainText('Smoke Track 02');
+  await expect(row.locator('.ff-trow__star--on')).toHaveCount(4);
+  await expect(page.locator('[data-track-row][data-row-index="0"] .ff-trow__star--on')).toHaveCount(0);
+  const asked = await page.evaluate(() => (window as unknown as SmokeWindow).__smokeInvokes.filter((i) => i.cmd === 'refresh_track_labels').length);
+  expect(asked).toBe(1);
+});

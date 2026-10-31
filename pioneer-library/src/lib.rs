@@ -50,7 +50,7 @@ pub use multi_sync::{
     statvfs_available_bytes, volume_capacity,
 };
 pub use sticks::StickContents;
-pub use user_edits::{MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsReader, is_camelot};
+pub use user_edits::{LABELS_CACHE_FILE, MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsChange, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
 /// Runs `read` on the ANLZ directory of every track in `ids`, on as many threads as there are cores, and keeps the
@@ -685,7 +685,13 @@ impl LocalLibrary {
     /// stored before that column existed are missing until [`backfill_row_previews`](Self::backfill_row_previews)
     /// has run.
     pub fn get_track_list_rows(&self) -> Result<Vec<TrackListRow>> {
-        queries::select_track_list_rows(&self.conn)
+        queries::select_track_list_rows(&self.conn, true)
+    }
+
+    /// [`get_track_list_rows`](Self::get_track_list_rows) without the row previews, which the list fetches for the
+    /// rows on screen.
+    pub fn get_track_list_rows_without_previews(&self) -> Result<Vec<TrackListRow>> {
+        queries::select_track_list_rows(&self.conn, false)
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.
@@ -1573,6 +1579,12 @@ mod tests {
         assert_eq!(labels[&imported], TrackLabels { rating: None, color: Some("#ff0000".into()) });
 
         let rows = lib.get_track_list_rows().unwrap();
+        let bare = lib.get_track_list_rows_without_previews().unwrap();
+        assert!(bare.iter().all(|row| row.row_preview.is_none()));
+        assert_eq!(
+            rows.iter().map(|row| TrackListRow { row_preview: None, ..row.clone() }).collect::<Vec<_>>(),
+            bare
+        );
         let flags = lib.get_all_tracks_with_flags().unwrap();
         let previews = lib.get_row_previews().unwrap();
         assert_eq!(rows.len(), flags.len());
@@ -1597,6 +1609,84 @@ mod tests {
         assert!(some.iter().all(|(id, preview)| previews.get(id) == Some(preview)));
         assert_eq!(some.len(), previews.len());
         assert!(lib.get_row_previews_of(&[plain, 999_999]).unwrap().is_empty());
+    }
+
+    fn rated_library(ratings: &[u8]) -> (tempfile::TempDir, LocalLibrary, Vec<i64>) {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let ids: Vec<i64> = ratings
+            .iter()
+            .enumerate()
+            .map(|(n, &rating)| {
+                let id = lib.add_track(&make_track(&format!("T{n}"), &format!("/music/{n}.mp3"))).unwrap();
+                lib.set_analysis(id, &make_analysis()).unwrap();
+                if rating > 0 {
+                    lib.set_user_rating(id, rating).unwrap();
+                }
+                id
+            })
+            .collect();
+        (dir, lib, ids)
+    }
+
+    fn write_rating_outside_the_app(lib: &LocalLibrary, id: i64, rating: u8) {
+        let dir = lib.track_anlz_dir(id).unwrap();
+        let mut edits = UserEdits::read(&dir).unwrap_or_default();
+        edits.rating = Some(rating);
+        edits.write(&dir).unwrap();
+    }
+
+    fn rating(labels: &HashMap<i64, TrackLabels>, id: i64) -> Option<u8> {
+        labels.get(&id).and_then(|l| l.rating)
+    }
+
+    #[test]
+    fn labels_cache_serves_the_last_scan_and_refresh_reports_outside_changes() {
+        let (dir, lib, ids) = rated_library(&[3, 0, 5]);
+        let reader = lib.track_labels_reader();
+        let scanned = reader.read_cached();
+        assert_eq!(scanned, reader.read_all());
+        assert!(dir.path().join(LABELS_CACHE_FILE).exists());
+
+        write_rating_outside_the_app(&lib, ids[1], 2);
+        write_rating_outside_the_app(&lib, ids[2], 0);
+        assert_eq!(reader.read_cached(), scanned, "a sidecar change alone does not touch the anlz folder");
+
+        let mut changes = reader.refresh();
+        changes.sort_by_key(|(id, _)| *id);
+        assert_eq!(changes, vec![(ids[1], Some(TrackLabels { rating: Some(2), color: None })), (ids[2], None)]);
+        let cached = reader.read_cached();
+        assert_eq!(cached, reader.read_all());
+        assert_eq!((rating(&cached, ids[0]), rating(&cached, ids[1]), rating(&cached, ids[2])), (Some(3), Some(2), None));
+        assert!(reader.refresh().is_empty());
+    }
+
+    #[test]
+    fn labels_cache_follows_ratings_set_in_the_app() {
+        let (_dir, lib, ids) = rated_library(&[3, 0]);
+        lib.track_labels_reader().read_cached();
+        lib.set_user_rating(ids[0], 0).unwrap();
+        lib.set_user_rating(ids[1], 4).unwrap();
+        let cached = lib.track_labels_reader().read_cached();
+        assert_eq!((rating(&cached, ids[0]), rating(&cached, ids[1])), (None, Some(4)));
+        assert!(lib.track_labels_reader().refresh().is_empty());
+    }
+
+    #[test]
+    fn labels_cache_is_rescanned_when_track_folders_come_or_go() {
+        let (_dir, lib, ids) = rated_library(&[3, 4]);
+        let reader = lib.track_labels_reader();
+        reader.read_cached();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_rating_outside_the_app(&lib, ids[0], 1);
+        lib.remove_tracks(&[ids[1]]).unwrap();
+        let cached = reader.read_cached();
+        assert_eq!(cached, reader.read_all());
+        assert_eq!((rating(&cached, ids[0]), rating(&cached, ids[1])), (Some(1), None));
+
+        reader.invalidate();
+        assert!(!lib.db_path.as_ref().unwrap().parent().unwrap().join(LABELS_CACHE_FILE).exists());
+        assert_eq!(reader.read_cached(), cached);
     }
 
     #[test]

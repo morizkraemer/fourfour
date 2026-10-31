@@ -396,21 +396,21 @@ pub fn select_all_tracks_with_flags(
 
 /// Every track as the track list shows it, with its artwork and analysis flags, stored analysis stages and row
 /// preview: one query.
-pub fn select_track_list_rows(conn: &Connection) -> Result<Vec<crate::TrackListRow>> {
-    let mut stmt = conn.prepare(
+pub fn select_track_list_rows(conn: &Connection, with_previews: bool) -> Result<Vec<crate::TrackListRow>> {
+    let mut stmt = conn.prepare_cached(
         "SELECT t.id, t.source_path, t.title, t.artist, t.album, t.genre,
                 CASE WHEN a.bpm > 0 THEN CAST(ROUND(a.bpm * 100) AS INTEGER) ELSE t.tempo END,
                 COALESCE(NULLIF(a.key, ''), t.key),
                 t.duration_secs, t.bitrate, t.file_size,
                 (art.track_id IS NOT NULL),
                 a.stages,
-                a.row_preview
+                CASE WHEN ?1 THEN a.row_preview END
          FROM tracks t
          LEFT JOIN artwork art ON art.track_id = t.id
          LEFT JOIN analyses a ON a.track_id = t.id
          ORDER BY t.id",
     )?;
-    let rows = stmt.query_map([], |row| {
+    let rows = stmt.query_map([with_previews], |row| {
         Ok(crate::TrackListRow {
             id: row.get::<_, i64>(0)? as u32,
             source_path: row.get(1)?,
