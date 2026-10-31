@@ -42,6 +42,14 @@ struct BackgroundJob {
     stage: Stage,
 }
 
+/// How many jobs that run the beat model may be in flight: `max` in all, `whole` while new tracks still wait
+/// for their fast pass (each of those is analysed in one piece, so the model starts on the first track).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ModelJobs {
+    pub(crate) max: usize,
+    pub(crate) whole: usize,
+}
+
 #[derive(Default)]
 struct Jobs {
     grid_queue: VecDeque<AnalysisWorkItem>,
@@ -77,6 +85,7 @@ pub(crate) struct AnalysisCoordinator {
     background_paused: Arc<AtomicBool>,
     jobs: Arc<Mutex<Jobs>>,
     staged: bool,
+    whole_jobs: Option<usize>,
     pub(crate) analyzers: AnalyzerCache,
 }
 
@@ -92,6 +101,7 @@ impl Default for AnalysisCoordinator {
             background_paused: Arc::new(AtomicBool::new(false)),
             jobs: Arc::new(Mutex::new(Jobs::default())),
             staged: true,
+            whole_jobs: None,
             analyzers: AnalyzerCache::default(),
         }
     }
@@ -102,6 +112,13 @@ impl AnalysisCoordinator {
     #[allow(dead_code)]
     pub(crate) fn with_staging(mut self, staged: bool) -> Self {
         self.staged = staged;
+        self
+    }
+
+    /// Model jobs that start on new tracks while fast passes are still to come; 0 runs every fast pass first.
+    #[allow(dead_code)]
+    pub(crate) fn with_whole_jobs(mut self, jobs: usize) -> Self {
+        self.whole_jobs = Some(jobs);
         self
     }
 
@@ -190,33 +207,43 @@ impl AnalysisCoordinator {
 
     /// Pops the next track and registers it as a background job in one step, so a priority request can
     /// never miss a track that is between a queue and a worker. Fast passes of the whole library come
-    /// first; grid passes follow. `stages_of` tells which stages a track already has stored. At most
-    /// `model_jobs` jobs that run the beat model are in flight: the model's threads are shared by all of them,
-    /// so more would only hold more decoded audio in memory.
+    /// first and grid passes follow, but the model never waits for them: while fewer than `whole_jobs`
+    /// model jobs run, the next new track is analysed whole (one decode, waveform stored first).
+    /// `stages_of` tells which stages a track already has stored. At most `limits.max` jobs that run the
+    /// beat model are in flight: the model's threads are shared by all of them, so more would only hold
+    /// more decoded audio in memory.
     pub(crate) fn take_next(
         &self,
         staged: bool,
         stages_of: impl Fn(i64) -> u8,
-        model_jobs: usize,
+        limits: ModelJobs,
         threads_for: impl FnOnce(usize) -> usize,
     ) -> Option<BackgroundTask> {
         let mut guard = self.jobs.lock().ok()?;
         let jobs = &mut *guard;
-        let model_room = jobs.background.values().filter(|job| job.stage != Stage::Fast).count() < model_jobs;
-        let fresh = self.with_queue(|queue| queue.pop_front()).flatten();
-        let (track_id, source_path, stage) = match fresh {
-            Some((id, path)) => {
-                let stage = match () {
-                    () if !staged => Stage::Whole,
-                    () if stages_of(id) & FAST_STAGES == FAST_STAGES => Stage::Grid,
-                    () => Stage::Fast,
-                };
-                if stage != Stage::Fast && !model_room {
+        let model_running = jobs.background.values().filter(|job| job.stage != Stage::Fast).count();
+        let model_room = model_running < limits.max;
+        let fresh = loop {
+            let Some((id, path)) = self.with_queue(|queue| queue.pop_front()).flatten() else {
+                break None;
+            };
+            let stage = match () {
+                () if !staged => Stage::Whole,
+                () if stages_of(id) & FAST_STAGES == FAST_STAGES => Stage::Grid,
+                () if model_running < limits.whole.min(limits.max) => Stage::Whole,
+                () => Stage::Fast,
+            };
+            match stage {
+                Stage::Grid if !model_room => jobs.grid_queue.push_back((id, path)),
+                Stage::Whole if !model_room => {
                     self.with_queue(|queue| queue.push_front((id, path)));
                     return None;
                 }
-                (id, path, stage)
+                _ => break Some((id, path, stage)),
             }
+        };
+        let (track_id, source_path, stage) = match fresh {
+            Some(next) => next,
             None if model_room => {
                 let (id, path) = jobs.grid_queue.pop_front()?;
                 (id, path, Stage::Grid)
@@ -401,6 +428,8 @@ const DETAIL_CACHE_DIR: &str = "waveform-detail";
 /// Model jobs in flight: one per this many model threads, so the next tracks decode while the model runs.
 const MODEL_THREADS_PER_JOB: usize = 3;
 const MIN_MODEL_JOBS: usize = 3;
+/// Model jobs while fast passes are still to come; the other workers keep taking fast passes.
+const WHOLE_JOBS_DURING_FAST_PASSES: usize = 2;
 const RUST_TRACK_TIMEOUT: Duration = Duration::from_secs(900);
 const SCHEDULER_POLL: Duration = Duration::from_millis(100);
 
@@ -518,13 +547,19 @@ fn store_fast_pass(
 fn partial_store(shared: &SharedLibrary, sink: &Arc<dyn AnalysisSink>, track_id: i64, source_path: &Path, started: Instant) -> PartialStore {
     let (shared, sink, file_name) = (shared.clone(), sink.clone(), file_name_of(source_path));
     Arc::new(move |partial| {
-        let stored = shared
-            .lock()
-            .map_err(|e| e.to_string())
-            .and_then(|lib| lib.set_analysis_stages(track_id, &partial, analysis_stage::WAVEFORM).map_err(|e| e.to_string()));
+        let stages = if partial.key.is_empty() { analysis_stage::WAVEFORM } else { FAST_STAGES };
+        let stored = shared.lock().map_err(|e| e.to_string()).and_then(|lib| {
+            if stages == FAST_STAGES {
+                if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
+                    track.key = partial.key.clone();
+                    lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
+                }
+            }
+            lib.set_analysis_stages(track_id, &partial, stages).map_err(|e| e.to_string())
+        });
         match stored {
             Ok(()) => {
-                sink.log(LogLevel::Dim, format!("{file_name} waveform ready {:.1}s", started.elapsed().as_secs_f64()));
+                sink.log(LogLevel::Dim, format!("{file_name} waveform ready key={} {:.1}s", partial.key, started.elapsed().as_secs_f64()));
                 sink.partial(track_id);
             }
             Err(e) => sink.log(LogLevel::Err, format!("{file_name} waveform not stored: {e}")),
@@ -677,7 +712,7 @@ async fn run_with_runner(
     let (max_in_flight, model_jobs) = match &runner {
         Runner::Python { command } => {
             sink.log(LogLevel::Info, format!("Starting analysis: {initial_total} tracks, python={command}"));
-            (PYTHON_MAX_IN_FLIGHT, PYTHON_MAX_IN_FLIGHT)
+            (PYTHON_MAX_IN_FLIGHT, ModelJobs { max: PYTHON_MAX_IN_FLIGHT, whole: 0 })
         }
         Runner::Rust { engine } => {
             let plan = engine.plan(usize::MAX);
@@ -689,7 +724,7 @@ async fn run_with_runner(
                     plan.workers, plan.threads_per_track
                 ),
             );
-            (plan.workers, model_jobs)
+            (plan.workers, ModelJobs { max: model_jobs, whole: coordinator.whole_jobs.unwrap_or(WHOLE_JOBS_DURING_FAST_PASSES.min(plan.workers.saturating_sub(1).max(1))) })
         }
     };
 
@@ -714,7 +749,7 @@ async fn run_with_runner(
                     });
                 }
                 Runner::Rust { engine } => {
-                    let on_partial = (task.stage == Stage::Fast)
+                    let on_partial = matches!(task.stage, Stage::Fast | Stage::Whole)
                         .then(|| partial_store(&shared, &sink, task.track_id, &task.source_path, Instant::now()));
                     let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial };
                     join_set.spawn(async move {

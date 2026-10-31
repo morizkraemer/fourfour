@@ -186,6 +186,7 @@ fn main() {
     let mut play_index = 0usize;
     let mut legacy_priority = false;
     let mut unstaged = false;
+    let mut fast_first = false;
     let mut profile = 0usize;
     let mut dump: Option<PathBuf> = None;
     let mut it = std::env::args().skip(1);
@@ -200,6 +201,7 @@ fn main() {
             "--play-index" => play_index = it.next().unwrap().parse().unwrap(),
             "--legacy-priority" => legacy_priority = true,
             "--unstaged" => unstaged = true,
+            "--fast-first" => fast_first = true,
             "--profile" => profile = it.next().unwrap().parse().unwrap(),
             "--dump" => dump = Some(PathBuf::from(it.next().unwrap())),
             other => panic!("unknown argument {other}"),
@@ -229,6 +231,7 @@ fn main() {
 
     let env = BackendEnv { override_backend: Some(backend), max_threads: threads, ..BackendEnv::default() };
     let coordinator = AnalysisCoordinator::default().with_staging(!unstaged);
+    let coordinator = if fast_first { coordinator.with_whole_jobs(0) } else { coordinator };
     let started = Instant::now();
     let sink = Arc::new(BenchSink { started, first_result_ms: Mutex::new(None), partial_ms: Mutex::new(HashMap::new()), done_ms: Mutex::new(HashMap::new()), log: Mutex::new(Vec::new()), verbose });
 
