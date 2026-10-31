@@ -341,3 +341,4 @@
 2026-10-31 13:45 orchestrator - landed: ov-1028 b56a650 checks green (smoke 102, cargo 30 suites ok, vitest 820, svelte-check 0, build ok); no Mac install (offline)
 2026-10-31 13:57 orchestrator - done: r3-testhang (8131af8) root cause in test harness (prioritize tests assumed in-order fast passes; panic then runtime drop waited on held threads); stress 60/60 after vs 3/15 hangs before; merges after r1 checks
 2026-10-31 13:57 orchestrator - spawn: r4-trackload (opus medium; item 4 track load 1,051 -> 120 ms target, detail cap 2 GiB, Waiting 26) and r3-analysis (opus medium; item 3, 9 -> 30 trk/min, first result 16.8 -> 5 s)
+2026-10-31 13:58 orchestrator - landed: r1-perf10k on ov-1028 (ea7ad12; 10k-50k fixtures, perf budgets, perf probe, Mac perf-night script); checks green, fixture kept in ~/.cache/ff-fixture
