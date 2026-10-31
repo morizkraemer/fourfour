@@ -349,3 +349,4 @@
 2026-10-31 16:45 orchestrator - landed: r7-storedetail on ov-1028 (6fe845f; Rust analysis stores waveform detail, first zoom open of analysed track 605 -> 3 ms, 22/22 bytes identical, +2.5% analysis CPU); Waiting 20 resolved by separate 0.5 decode
 2026-10-31 17:13 orchestrator - followup: r6b-covers (sonnet medium) USB export must store pending covers for its tracks first (r6 risk); cover-skip in scanner.rs noted for brother
 2026-10-31 17:26 orchestrator - landed: r6-import on ov-1028 (a9ed03e; 10k import to rows 14 -> 2.1 s cold / 12.4 -> 0.8 s warm, re-import 1.97 -> 0.14 s, covers in background via additive pending_artwork table); checks green
+2026-10-31 17:38 orchestrator - landed: r6b-covers on ov-1028 (USB sync, dry run and write_usb fill pending covers of the tracks they write first); checks green
