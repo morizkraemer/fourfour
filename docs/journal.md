@@ -351,3 +351,4 @@
 2026-10-31 17:26 orchestrator - landed: r6-import on ov-1028 (a9ed03e; 10k import to rows 14 -> 2.1 s cold / 12.4 -> 0.8 s warm, re-import 1.97 -> 0.14 s, covers in background via additive pending_artwork table); checks green
 2026-10-31 17:38 orchestrator - landed: r6b-covers on ov-1028 (USB sync, dry run and write_usb fill pending covers of the tracks they write first); checks green
 2026-10-31 17:50 orchestrator - spawn: r5b-lock (opus medium; analysis set_analysis holds library lock 100-660 ms, UI commands wait) and b7-keybar (opus medium; key >=60% exact without licence-problem data)
+2026-10-31 18:03 orchestrator - landed: r5-headroom on ov-1028 (ea5ea9b; analysis threads cores-2, hold new model chunks while scrolling with 500 ms idle, now lane keeps running; grid-pass scroll p95 52 -> 40 ms on box, Mac night confirms); checks green
