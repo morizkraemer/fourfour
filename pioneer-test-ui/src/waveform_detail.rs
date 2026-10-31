@@ -11,7 +11,7 @@ use pioneer_usb_writer::waveform::{DetailSeries, WindowSeries};
 
 use crate::band_analysis::{measure_detail, measure_detail_window};
 
-const CACHE_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
+const CACHE_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const WINDOW_MAX_COLUMNS: usize = 16_384;
 const WINDOW_MAX_SECONDS: f64 = 30.0;
 
@@ -31,6 +31,7 @@ fn trim_cache(dir: &Path, limit_bytes: u64) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     let mut files: Vec<_> = entries
         .flatten()
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "ffwd"))
         .filter_map(|e| {
             let meta = e.metadata().ok()?;
             Some((meta.modified().ok()?, meta.len(), e.path()))
@@ -66,8 +67,9 @@ fn cached_bytes(file: &Path) -> Option<Vec<u8>> {
 
 /// The high-resolution series of `audio` as `DetailSeries::to_bytes`: read from the cache in `dir`, or measured now
 /// (one decode pass) and written there. One file is measured once at a time: a second caller waits for the first and
-/// reads its result. Nothing about the track is stored in the library, so every existing track gets it the first time
-/// its zoomed waveform opens or it is prefetched; the cache keeps the most recently used files up to 512 MiB.
+/// reads its result. A background `warm_detail` of the same file does not hold it up: both measure, both write the
+/// same bytes. The analysis stores the series of every track it analyses; the cache keeps the most recently used files
+/// up to 2 GiB (about 450 tracks of 6 minutes).
 pub fn detail_bytes(dir: &Path, audio: &Path) -> Result<Vec<u8>, String> {
     let file = cache_file(dir, audio)?;
     let lock = path_lock(&file);
@@ -82,7 +84,8 @@ pub fn detail_bytes(dir: &Path, audio: &Path) -> Result<Vec<u8>, String> {
 
 fn write_cache_file(dir: &Path, file: &Path, bytes: &[u8]) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
-    let partial = file.with_extension("part");
+    static WRITES: AtomicU64 = AtomicU64::new(0);
+    let partial = file.with_extension(format!("{}-{}.part", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     fs::write(&partial, bytes).map_err(|e| format!("write {}: {e}", partial.display()))?;
     fs::rename(&partial, file).map_err(|e| format!("rename {}: {e}", partial.display()))?;
     trim_cache(dir, CACHE_LIMIT_BYTES);
@@ -102,12 +105,23 @@ pub fn detail_series(dir: &Path, audio: &Path) -> Result<DetailSeries, String> {
     DetailSeries::from_bytes(&detail_bytes(dir, audio)?)
 }
 
-/// Measure the series of `audio` into the cache unless it is there already.
+/// Measure the series of `audio` into the cache unless it is there already, for work below the UI's priority: it waits
+/// only for other warms of the file, never makes `detail_bytes` wait, and leaves a file `detail_bytes` wrote meanwhile.
 pub fn warm_detail(dir: &Path, audio: &Path) -> Result<(), String> {
-    if cache_file(dir, audio)?.exists() {
+    let file = cache_file(dir, audio)?;
+    if file.exists() {
         return Ok(());
     }
-    detail_bytes(dir, audio).map(drop)
+    let lock = path_lock(&file.with_extension("warming"));
+    let _warming = lock.lock().unwrap_or_else(|e| e.into_inner());
+    if file.exists() {
+        return Ok(());
+    }
+    let bytes = measure_detail(audio)?.to_bytes();
+    if file.exists() {
+        return Ok(());
+    }
+    write_cache_file(dir, &file, &bytes)
 }
 
 /// Fine windows of the zoomed waveform. Only the newest request matters: a request supersedes the one before it, whose
@@ -236,6 +250,41 @@ mod tests {
 
         assert_eq!(measured.len(), 2400);
         assert_eq!(read, marked);
+    }
+
+    #[test]
+    fn a_reader_does_not_wait_for_a_warm_of_the_same_file() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-warm-reader-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("tone.wav");
+        write_wav(&audio);
+        let cache = dir.join("cache");
+        let file = cache_file(&cache, &audio).unwrap();
+        let warm_lock = path_lock(&file.with_extension("warming"));
+        let held = warm_lock.lock().unwrap();
+
+        let bytes = std::thread::scope(|s| s.spawn(|| detail_bytes(&cache, &audio)).join().unwrap()).unwrap();
+        drop(held);
+        warm_detail(&cache, &audio).unwrap();
+        let files: Vec<_> = fs::read_dir(&cache).unwrap().flatten().map(|e| e.file_name()).collect();
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(DetailSeries::from_bytes(&bytes).unwrap().len(), 2400);
+        assert_eq!(files.len(), 1, "{files:?}");
+    }
+
+    #[test]
+    fn the_cache_trim_leaves_files_being_written() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-trim-part-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.ffwd"), vec![0u8; 100]).unwrap();
+        fs::write(dir.join("b.1-2.part"), vec![0u8; 100]).unwrap();
+
+        trim_cache(&dir, 0);
+        let left: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(left, ["b.1-2.part"]);
     }
 
     #[test]

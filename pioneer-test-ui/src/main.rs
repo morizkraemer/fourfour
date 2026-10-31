@@ -766,10 +766,17 @@ async fn get_waveform_detail(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// Measure a track's high-resolution series into the cache ahead of its zoomed waveform (selection, the next rows),
-/// below the UI's priority like the analysis. Returns nothing: the series is read with `get_waveform_detail`.
+/// Measure a track's high-resolution series into the cache ahead of its zoomed waveform: below the UI's priority like
+/// the analysis (the next rows), or `urgent` at the UI's (a row being pressed, opened a moment later; its
+/// `get_waveform_detail` then waits for this measurement instead of starting its own). Returns nothing: the series is
+/// read with `get_waveform_detail`.
 #[tauri::command]
-async fn prefetch_waveform_detail(app: AppHandle, track_id: i64, state: State<'_, SharedLibrary>) -> Result<(), String> {
+async fn prefetch_waveform_detail(
+    app: AppHandle,
+    track_id: i64,
+    urgent: Option<bool>,
+    state: State<'_, SharedLibrary>,
+) -> Result<(), String> {
     let shared = state.inner().clone();
     let cache_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("waveform-detail");
     tauri::async_runtime::spawn_blocking(move || {
@@ -779,6 +786,9 @@ async fn prefetch_waveform_detail(app: AppHandle, track_id: i64, state: State<'_
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("Track {track_id} is not in the library"))?
         };
+        if urgent == Some(true) {
+            return waveform_detail::detail_bytes(&cache_dir, &track.source_path).map(drop);
+        }
         analysis_priority::run_below_ui(|| waveform_detail::warm_detail(&cache_dir, &track.source_path))?
     })
     .await

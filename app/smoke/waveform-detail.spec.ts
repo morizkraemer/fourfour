@@ -68,9 +68,11 @@ test('pressing a row warms its high-resolution series before the click lands', a
   const { page } = smoke;
   await page.locator('[data-track-row]').filter({ hasText: TRACK }).first().hover();
   await page.mouse.down();
-  const warmed = (await smoke.invokes('prefetch_waveform_detail')).map((args) => args.trackId);
+  const pressed = await smoke.invokes('prefetch_waveform_detail');
+  const warmed = pressed.map((args) => args.trackId);
   await page.mouse.up();
   expect(warmed).toHaveLength(1);
+  expect(pressed[0].urgent, 'a pressed row is warmed at the UI priority').toBe(true);
 
   await loadByDoubleClick(page, TRACK);
   await expect.poll(async () => (await smoke.invokes('get_waveform_detail')).length).toBeGreaterThan(0);
