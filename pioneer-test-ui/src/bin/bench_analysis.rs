@@ -100,6 +100,13 @@ fn process_tree_rss_mb(root: u32) -> f64 {
     total / 1024.0
 }
 
+fn process_cpu_s() -> f64 {
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+    let fields: Vec<&str> = stat.rsplit_once(") ").map_or(Vec::new(), |(_, rest)| rest.split_whitespace().collect());
+    let ticks = |i: usize| fields.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(f64::NAN);
+    (ticks(11) + ticks(12)) / 100.0
+}
+
 fn median(mut v: Vec<f64>) -> f64 {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     v.get(v.len() / 2).copied().unwrap_or(f64::NAN)
@@ -188,6 +195,7 @@ fn main() {
     let mut unstaged = false;
     let mut fast_first = false;
     let mut profile = 0usize;
+    let mut store_detail = false;
     let mut dump: Option<PathBuf> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -204,6 +212,7 @@ fn main() {
             "--fast-first" => fast_first = true,
             "--profile" => profile = it.next().unwrap().parse().unwrap(),
             "--dump" => dump = Some(PathBuf::from(it.next().unwrap())),
+            "--store-detail" => store_detail = true,
             other => panic!("unknown argument {other}"),
         }
     }
@@ -229,7 +238,8 @@ fn main() {
     }
     let shared = Arc::new(Mutex::new(library));
 
-    let env = BackendEnv { override_backend: Some(backend), max_threads: threads, ..BackendEnv::default() };
+    let app_data_dir = store_detail.then(|| dir.clone());
+    let env = BackendEnv { override_backend: Some(backend), max_threads: threads, app_data_dir, ..BackendEnv::default() };
     let coordinator = AnalysisCoordinator::default().with_staging(!unstaged);
     let coordinator = if fast_first { coordinator.with_whole_jobs(0) } else { coordinator };
     let started = Instant::now();
@@ -279,12 +289,13 @@ fn main() {
     let done = total - errors;
     let first = sink.first_result_ms.lock().unwrap().unwrap_or(0.0);
     println!(
-        "BENCH backend={} tracks={} errors={errors} wall={wall_s:.1}s tracks_per_min={:.2} first_result={:.1}s peak_rss_tree={:.0}MB",
+        "BENCH backend={} tracks={} errors={errors} wall={wall_s:.1}s tracks_per_min={:.2} first_result={:.1}s peak_rss_tree={:.0}MB cpu={:.1}s",
         backend.name(),
         done,
         done as f64 / wall_s * 60.0,
         first / 1000.0,
-        *peak.lock().unwrap()
+        *peak.lock().unwrap(),
+        process_cpu_s()
     );
     println!(
         "PERF {}",
@@ -327,5 +338,28 @@ fn main() {
             .collect();
         std::fs::write(file, serde_json::to_string(&stored).unwrap()).expect("write dump");
     }
+    if store_detail {
+        check_stored_detail(&dir.join("waveform-detail"), &paths);
+    }
     std::fs::remove_dir_all(&dir).ok();
+}
+
+fn check_stored_detail(cache: &std::path::Path, paths: &[PathBuf]) {
+    let stored = std::fs::read_dir(cache).map_or(0, |entries| {
+        entries.flatten().filter(|e| e.path().extension().is_some_and(|ext| ext == "ffwd")).count()
+    });
+    let mut identical = 0;
+    for path in paths {
+        let t = Instant::now();
+        let cached = waveform_detail::detail_bytes(cache, path).expect("detail from the cache");
+        let cached_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let (t, cpu) = (Instant::now(), process_cpu_s());
+        let measured = band_analysis::measure_detail(path).expect("measure detail").to_bytes();
+        let measured_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let measured_cpu_s = process_cpu_s() - cpu;
+        let same = cached == measured;
+        identical += same as usize;
+        println!("DETAIL identical={same} bytes={} cached_ms={cached_ms:.1} measured_ms={measured_ms:.0} measured_cpu={measured_cpu_s:.2}s {}", cached.len(), path.display());
+    }
+    println!("DETAIL stored={stored}/{} identical={identical}/{}", paths.len(), paths.len());
 }

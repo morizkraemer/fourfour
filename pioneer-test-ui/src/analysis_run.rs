@@ -440,6 +440,7 @@ struct JobControl {
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     on_partial: Option<PartialStore>,
+    detail_cache: Option<PathBuf>,
 }
 
 async fn analyze_one_track_rust(
@@ -453,8 +454,29 @@ async fn analyze_one_track_rust(
     let handle = tokio::task::spawn_blocking(move || {
         crate::analysis_priority::run_below_ui(|| {
             let control = Control { cancel: &job.cancel, pause: &job.pause, on_waveform: None };
-            let on_partial = job.on_partial.as_deref().map(|f| f as &(dyn Fn(models::AnalysisResult) + Sync));
-            engine.analyze(&source_path, &control, threads, pass, on_partial)
+            let detail_cache = job.detail_cache.as_deref().filter(|_| pass != Pass::Fast);
+            std::thread::scope(|scope| {
+                let (start_detail, detail_started) = std::sync::mpsc::channel::<()>();
+                if let Some(dir) = detail_cache {
+                    let (cancel, path) = (&job.cancel, &source_path);
+                    scope.spawn(move || {
+                        if detail_started.recv().is_ok() && !cancel.load(Ordering::Relaxed) {
+                            if let Err(e) = crate::waveform_detail::warm_detail(dir, path) {
+                                eprintln!("waveform detail of {} not cached: {e}", path.display());
+                            }
+                        }
+                    });
+                }
+                let Some(store_partial) = job.on_partial.as_deref() else {
+                    start_detail.send(()).ok();
+                    return engine.analyze(&source_path, &control, threads, pass, None);
+                };
+                let store_then_start_detail = move |partial: models::AnalysisResult| {
+                    store_partial(partial);
+                    start_detail.send(()).ok();
+                };
+                engine.analyze(&source_path, &control, threads, pass, Some(&store_then_start_detail))
+            })
         })?
     });
     let joined = tokio::time::timeout(RUST_TRACK_TIMEOUT, handle)
@@ -597,7 +619,7 @@ async fn run_now_lane(
     let outcome = match runner {
         Runner::Rust { engine } => {
             sink.log(LogLevel::Info, format!("Priority: {} on the now lane, threads={wide_threads}", file_name_of(&source_path)));
-            let job = JobControl { cancel, pause: Arc::new(AtomicBool::new(false)), on_partial: Some(on_partial) };
+            let job = JobControl { cancel, pause: Arc::new(AtomicBool::new(false)), on_partial: Some(on_partial), detail_cache: detail_dir };
             analyze_one_track_rust(engine, source_path.clone(), wide_threads, Pass::All, job).await
         }
         Runner::Python { command } => {
@@ -731,6 +753,7 @@ async fn run_with_runner(
     let mut join_set: tokio::task::JoinSet<(i64, PathBuf, Stage, TrackResult)> = tokio::task::JoinSet::new();
 
     let staged = coordinator.staged && matches!(runner, Runner::Rust { .. });
+    let detail_cache = env.app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
     loop {
         while join_set.len() < max_in_flight && !coordinator.is_cancelled() && !coordinator.background_paused() {
             let stored_stages = |id: i64| shared.lock().ok().and_then(|lib| lib.analysis_stages(id).ok().flatten()).unwrap_or(0);
@@ -751,7 +774,7 @@ async fn run_with_runner(
                 Runner::Rust { engine } => {
                     let on_partial = matches!(task.stage, Stage::Fast | Stage::Whole)
                         .then(|| partial_store(&shared, &sink, task.track_id, &task.source_path, Instant::now()));
-                    let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial };
+                    let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial, detail_cache: detail_cache.clone() };
                     join_set.spawn(async move {
                         let result = analyze_one_track_rust(engine, task.source_path.clone(), task.threads, task.stage.pass(), job).await;
                         (task.track_id, task.source_path, task.stage, result)
