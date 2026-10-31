@@ -106,18 +106,30 @@ fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result
 #[derive(Default, Clone)]
 struct CoverFill(Arc<std::sync::atomic::AtomicBool>);
 
+/// How often `import-covers` may reach the list: each one re-sorts and re-filters it.
+const COVER_EVENT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Stores the covers queued by imports on a thread of its own and emits `import-covers` with
-/// the ids of each batch that got one. A no-op while a fill is already running: that one
-/// keeps going until the queue is empty.
+/// the ids that got one, at most every [`COVER_EVENT_INTERVAL`]. A no-op while a fill is
+/// already running: that one keeps going until the queue is empty.
 fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
     use std::sync::atomic::Ordering;
     if fill.0.swap(true, Ordering::AcqRel) {
         return;
     }
     std::thread::spawn(move || loop {
+        let mut unsent: Vec<u32> = Vec::new();
+        let mut last_emit = std::time::Instant::now();
         let result = import_plan::store_pending_covers(&library, &mut |ids| {
-            app.emit("import-covers", ids).ok();
+            unsent.extend(ids);
+            if last_emit.elapsed() >= COVER_EVENT_INTERVAL {
+                app.emit("import-covers", std::mem::take(&mut unsent)).ok();
+                last_emit = std::time::Instant::now();
+            }
         });
+        if !unsent.is_empty() {
+            app.emit("import-covers", unsent).ok();
+        }
         fill.0.store(false, Ordering::Release);
         if let Err(e) = result {
             debug_log(&app, "error", &format!("Storing imported covers failed: {e}"));

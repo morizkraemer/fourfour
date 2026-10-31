@@ -29,6 +29,7 @@ import {
   listenToAnalysisPartial,
   listenToAnalysisComplete,
   listenToWriteComplete,
+  listenToImportCovers,
   lastTauriError,
   getIpcDiagnostic,
   getAnalysisData,
@@ -574,6 +575,18 @@ function trackIndexById(id: number): number {
   return indexCache.byId.get(id) ?? -1;
 }
 
+/** Imported tracks come back without artwork; their covers are stored afterwards. */
+export function markCoversStored(ids: number[]) {
+  const changed: number[] = [];
+  for (const id of ids) {
+    const track = libraryTrackById(id);
+    if (!track?.raw || track.raw.has_artwork) continue;
+    track.raw.has_artwork = true;
+    changed.push(id);
+  }
+  if (changed.length > 0) bumpLibraryTracks(changed);
+}
+
 function libraryTrackById(id: number) {
   const tracks = library.tracks;
   const track = tracks[trackIndexById(id)];
@@ -1114,6 +1127,7 @@ export async function initLibrary() {
       listenToAnalysisProgress(handleAnalysisProgressEvent);
       listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
+      listenToImportCovers(markCoversStored);
       listenToWriteComplete(() => {
         library.syncing = false;
         library.statusMessage = 'Ready';

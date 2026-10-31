@@ -49,7 +49,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
-import { bumpLibraryTracks, filterTracks, library, loadState, requestRowPreviews } from './library.svelte.ts';
+import { bumpLibraryTracks, filterTracks, library, loadState, markCoversStored, requestRowPreviews } from './library.svelte.ts';
 import { fileStatus } from './file-status.svelte.ts';
 import { sortTracks, setSort, clearSort } from './table-columns.svelte.ts';
 import { bootRowOf } from './boot-snapshot.ts';
@@ -119,6 +119,17 @@ describe('library track rows', () => {
     expect(boot.cells.title).toBe('Aardvark');
     expect(boot.cells.rating).toBe(5);
     expect(Object.keys(boot.cells)).not.toContain('status');
+  });
+
+  it('marks covers stored after an import and bumps only rows that changed', () => {
+    const before = library.tracks;
+    markCoversStored([2, 99]);
+    expect(row(2).raw.has_artwork).toBe(true);
+    expect(row(1).raw.has_artwork).toBe(false);
+    expect(library.tracks).not.toBe(before);
+    const after = library.tracks;
+    markCoversStored([2]);
+    expect(library.tracks).toBe(after);
   });
 
   it('stays the same reactive row when held in other state', async () => {
