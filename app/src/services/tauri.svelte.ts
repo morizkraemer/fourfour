@@ -742,6 +742,10 @@ export async function cancelAnalysis(): Promise<void> {
   await invokeOrMock('cancel_analysis', {});
 }
 
+export function signalAnalysisUiBusy(): void {
+  invoke('analysis_ui_busy').catch(() => {});
+}
+
 /** Queues stages left missing by an earlier session (and new tracks, per setting); returns how many. */
 export async function resumeAnalysis(): Promise<number> {
   try {

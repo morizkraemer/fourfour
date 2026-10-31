@@ -18,13 +18,20 @@ pub fn run_below_ui<T: Send>(work: impl FnOnce() -> T + Send) -> Result<T, Strin
     })
 }
 
+/// Background QoS confines threads to the efficiency cores on Apple Silicon (and throttles their I/O); utility may use
+/// the performance cores when the UI leaves them idle. Background is opt-in for measuring its throughput on a Mac.
 #[cfg(target_os = "macos")]
 fn lower_current_thread() -> Result<(), String> {
     const QOS_CLASS_UTILITY: u32 = 0x11;
+    const QOS_CLASS_BACKGROUND: u32 = 0x09;
     unsafe extern "C" {
         fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
     }
-    match unsafe { pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0) } {
+    let class = match std::env::var("FF_ANALYSIS_QOS").as_deref() {
+        Ok("background") => QOS_CLASS_BACKGROUND,
+        _ => QOS_CLASS_UTILITY,
+    };
+    match unsafe { pthread_set_qos_class_self_np(class, 0) } {
         0 => Ok(()),
         code => Err(format!("pthread_set_qos_class_self_np failed with {code}")),
     }

@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { test as base, expect, type Page } from '@playwright/test';
 import type { LoadedState, TrackInfo } from '../src/services/tauri.svelte.ts';
 import { mockAnalysisData } from '../src/mocks/analysis.ts';
@@ -12,6 +12,7 @@ const WINDOW_MS = Number(process.env.FF_PERF_WINDOW_MS ?? 6000);
 const REPORT = process.env.FF_PERF_OUT;
 const SCENARIO = process.env.FF_PERF_SCENARIO ?? 'list';
 const PLAYER_TRACK = 3;
+const UI_BUSY_FILE = process.env.FF_PERF_UI_BUSY_FILE;
 
 const test = base.extend<{ page: Page }>({});
 
@@ -108,6 +109,7 @@ async function windowStats(page: Page, since: number, emittedBefore: number, fet
       return {
         events: w.__bulk.emitted - emittedBefore,
         fetches: w.__smokeInvokes.filter((i) => i.cmd === 'get_analysis_data').length - fetchesBefore,
+        uiBusySignalsSoFar: w.__smokeInvokes.filter((i) => i.cmd === 'analysis_ui_busy').length,
         longTasks: tasks.length,
         longTaskMsTotal: Math.round(tasks.reduce((a, t) => a + t.duration, 0)),
         longTaskMsMax: Math.round(Math.max(0, ...tasks.map((t) => t.duration))),
@@ -356,6 +358,7 @@ test.describe('bulk analysis responsiveness', () => {
 
   test('measure', async ({ page }) => {
     await page.exposeFunction('__smokeAnalysis', (trackId: number) => mockAnalysisData(trackId, durationOf(trackId), 12400, '8A'));
+    if (UI_BUSY_FILE) await page.exposeFunction('__ffUiBusy', () => appendFileSync(UI_BUSY_FILE, 'b'));
     await page.addInitScript(installTauriMock, freshImportState());
     await page.goto('/');
     await page.locator('[data-track-row]').first().waitFor();

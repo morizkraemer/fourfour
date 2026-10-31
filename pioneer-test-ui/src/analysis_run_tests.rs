@@ -497,6 +497,73 @@ fn background_launches_wait_while_the_now_lane_is_busy() {
     assert!(!coordinator.background_paused());
 }
 
+fn active_coordinator() -> AnalysisCoordinator {
+    let coordinator = AnalysisCoordinator::default();
+    assert!(coordinator.try_begin());
+    let queue: SharedAnalysisQueue = Arc::new(Mutex::new(VecDeque::from([(1, PathBuf::from("/a.wav")), (2, PathBuf::from("/b.wav"))])));
+    coordinator.register_run(queue, 2);
+    coordinator
+}
+
+#[test]
+fn the_ui_holds_background_jobs_until_it_was_idle_for_a_moment() {
+    let coordinator = active_coordinator();
+    let started = Instant::now();
+    coordinator.ui_busy();
+    assert!(coordinator.background_paused());
+    std::thread::sleep(UI_IDLE_BEFORE_RESUME / 2);
+    coordinator.ui_busy();
+    std::thread::sleep(UI_IDLE_BEFORE_RESUME * 3 / 4);
+    assert!(coordinator.background_paused(), "the second signal moved the resume out");
+    while coordinator.background_paused() {
+        assert!(started.elapsed() < UI_IDLE_BEFORE_RESUME * 4, "never resumed");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(started.elapsed() >= UI_IDLE_BEFORE_RESUME * 3 / 2);
+    let (pauses, held) = coordinator.ui_pause_totals();
+    assert_eq!(pauses, 1);
+    assert!(held >= UI_IDLE_BEFORE_RESUME * 3 / 2, "{held:?}");
+}
+
+#[test]
+fn the_ui_and_the_now_lane_hold_background_jobs_independently() {
+    let coordinator = active_coordinator();
+    assert!(matches!(coordinator.claim_now(2, 8), NowClaim::Granted { .. }));
+    coordinator.ui_busy();
+    std::thread::sleep(UI_IDLE_BEFORE_RESUME * 2);
+    assert!(coordinator.background_paused(), "the now lane still runs");
+    coordinator.ui_busy();
+    coordinator.release_now(2);
+    assert!(coordinator.background_paused(), "the UI is still busy");
+    std::thread::sleep(UI_IDLE_BEFORE_RESUME * 2);
+    assert!(!coordinator.background_paused());
+}
+
+#[test]
+fn ui_signals_outside_a_run_hold_nothing() {
+    let coordinator = AnalysisCoordinator::default();
+    coordinator.ui_busy();
+    assert!(!coordinator.background_paused());
+}
+
+#[tokio::test]
+async fn model_jobs_wait_while_the_ui_is_busy_and_the_run_still_finishes() {
+    let h = harness(3, 2, 8);
+    let run = h.run_all(h.items.clone());
+    let busy = async {
+        h.wait_for(|e| e.iter().any(|ev| matches!(ev, Event::Ran(_, Pass::All) | Event::Ran(_, Pass::Grid))).then_some(())).await;
+        for _ in 0..20 {
+            h.coordinator.ui_busy();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    let (outcome, ()) = tokio::join!(run, busy);
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 3 }));
+    assert!(h.events().iter().any(|e| matches!(e, Event::Paused(_))), "{:?}", h.events());
+    assert!(h.unanalyzed().is_empty());
+    assert_eq!(h.coordinator.ui_pause_totals().0, 1);
+}
+
 #[test]
 fn cancel_reaches_every_job() {
     let coordinator = AnalysisCoordinator::default();

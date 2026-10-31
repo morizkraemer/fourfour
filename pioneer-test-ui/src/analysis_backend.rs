@@ -98,8 +98,16 @@ impl BackendEnv {
 
     pub fn pool_options(&self) -> PoolOptions {
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-        PoolOptions { max_threads: self.max_threads.unwrap_or_else(|| cores.saturating_sub(1).max(1)), ..PoolOptions::default() }
+        PoolOptions { max_threads: self.max_threads.unwrap_or_else(|| analysis_threads_for(cores)), ..PoolOptions::default() }
     }
+}
+
+/// Cores the analysis leaves to the web view, playback and the main thread. macOS schedules the UI's threads on
+/// performance cores ahead of the analysis' utility QoS, so two free cores are two free performance cores there.
+const UI_CORES: usize = 2;
+
+pub fn analysis_threads_for(cores: usize) -> usize {
+    cores.saturating_sub(UI_CORES).max(1)
 }
 
 pub fn read_setting(config_path: &Path) -> Option<AnalysisBackend> {
@@ -221,6 +229,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ff-backend-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_analysis_leaves_two_cores_to_the_ui() {
+        assert_eq!(analysis_threads_for(16), 14);
+        assert_eq!(analysis_threads_for(8), 6);
+        assert_eq!(analysis_threads_for(4), 2);
+        assert_eq!(analysis_threads_for(2), 1);
+        assert_eq!(analysis_threads_for(1), 1);
     }
 
     #[test]

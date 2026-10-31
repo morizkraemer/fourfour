@@ -67,6 +67,17 @@ pub(crate) struct BackgroundTask {
     pub(crate) cancel: Arc<AtomicBool>,
 }
 
+#[derive(Default)]
+struct PauseReasons {
+    now_lane: bool,
+    ui_busy_since: Option<Instant>,
+    ui_busy_until: Option<Instant>,
+    ui_pauses: u32,
+    ui_paused: Duration,
+}
+
+pub(crate) const UI_IDLE_BEFORE_RESUME: Duration = Duration::from_millis(500);
+
 pub(crate) enum NowClaim {
     Granted { cancel: Arc<AtomicBool> },
     AlreadyRunning,
@@ -83,6 +94,7 @@ pub(crate) struct AnalysisCoordinator {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
     background_paused: Arc<AtomicBool>,
+    pause_reasons: Arc<Mutex<PauseReasons>>,
     jobs: Arc<Mutex<Jobs>>,
     staged: bool,
     whole_jobs: Option<usize>,
@@ -99,6 +111,7 @@ impl Default for AnalysisCoordinator {
             running: Arc::new(AtomicBool::new(false)),
             cancel: Arc::new(AtomicBool::new(false)),
             background_paused: Arc::new(AtomicBool::new(false)),
+            pause_reasons: Arc::new(Mutex::new(PauseReasons::default())),
             jobs: Arc::new(Mutex::new(Jobs::default())),
             staged: true,
             whole_jobs: None,
@@ -139,6 +152,9 @@ impl AnalysisCoordinator {
         self.errors.store(0, Ordering::Relaxed);
         *self.active_queue.lock().expect("analysis coordinator lock") = Some(queue);
         self.total.store(total, Ordering::Relaxed);
+        let mut reasons = self.pause_reasons.lock().expect("analysis pause lock");
+        reasons.ui_pauses = 0;
+        reasons.ui_paused = Duration::ZERO;
     }
 
     pub(crate) fn cancel(&self) {
@@ -183,6 +199,59 @@ impl AnalysisCoordinator {
 
     pub(crate) fn background_paused(&self) -> bool {
         self.background_paused.load(Ordering::Relaxed)
+    }
+
+    fn set_paused_by_now_lane(&self, now_lane: bool) {
+        let mut reasons = self.pause_reasons.lock().expect("analysis pause lock");
+        reasons.now_lane = now_lane;
+        self.background_paused.store(now_lane || reasons.ui_busy_until.is_some(), Ordering::Relaxed);
+    }
+
+    pub(crate) fn ui_busy(&self) {
+        if !self.is_active() {
+            return;
+        }
+        let now = Instant::now();
+        let mut reasons = self.pause_reasons.lock().expect("analysis pause lock");
+        let idle_timer_running = reasons.ui_busy_until.is_some();
+        reasons.ui_busy_until = Some(now + UI_IDLE_BEFORE_RESUME);
+        reasons.ui_busy_since.get_or_insert(now);
+        self.background_paused.store(true, Ordering::Relaxed);
+        drop(reasons);
+        if !idle_timer_running {
+            let coordinator = self.clone();
+            std::thread::Builder::new()
+                .name("analysis-ui-idle".into())
+                .spawn(move || coordinator.resume_when_ui_idle())
+                .ok();
+        }
+    }
+
+    fn resume_when_ui_idle(&self) {
+        loop {
+            let wait = {
+                let mut reasons = self.pause_reasons.lock().expect("analysis pause lock");
+                let now = Instant::now();
+                match reasons.ui_busy_until {
+                    Some(until) if until > now => until - now,
+                    _ => {
+                        if let Some(since) = reasons.ui_busy_since.take() {
+                            reasons.ui_pauses += 1;
+                            reasons.ui_paused += now - since;
+                        }
+                        reasons.ui_busy_until = None;
+                        self.background_paused.store(reasons.now_lane, Ordering::Relaxed);
+                        return;
+                    }
+                }
+            };
+            std::thread::sleep(wait);
+        }
+    }
+
+    pub(crate) fn ui_pause_totals(&self) -> (u32, Duration) {
+        let reasons = self.pause_reasons.lock().expect("analysis pause lock");
+        (reasons.ui_pauses, reasons.ui_paused)
     }
 
     fn pause_flag(&self) -> Arc<AtomicBool> {
@@ -303,14 +372,14 @@ impl AnalysisCoordinator {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         jobs.now.insert(track_id, cancel.clone());
-        self.background_paused.store(true, Ordering::Relaxed);
+        self.set_paused_by_now_lane(true);
         NowClaim::Granted { cancel }
     }
 
     pub(crate) fn release_now(&self, track_id: i64) {
         let mut jobs = self.jobs.lock().expect("analysis jobs lock");
         jobs.now.remove(&track_id);
-        self.background_paused.store(!jobs.now.is_empty(), Ordering::Relaxed);
+        self.set_paused_by_now_lane(!jobs.now.is_empty());
     }
 
     /// Closes the run to new now-lane claims when none is running. The run loop ends only through this.
@@ -813,7 +882,11 @@ async fn run_with_runner(
     let completed = coordinator.completed.load(Ordering::Relaxed);
     let errors = coordinator.errors.load(Ordering::Relaxed);
     let total = coordinator.total();
-    sink.log(LogLevel::Info, format!("Analysis complete: {completed} done, {errors} errors out of {total}"));
+    let (ui_pauses, ui_paused) = coordinator.ui_pause_totals();
+    sink.log(
+        LogLevel::Info,
+        format!("Analysis complete: {completed} done, {errors} errors out of {total}; held for the UI {ui_pauses}x, {:.1}s", ui_paused.as_secs_f64()),
+    );
     sink.complete();
     Ok(RunOutcome::Finished { errors, total })
 }

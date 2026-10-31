@@ -77,6 +77,7 @@ wait_mark() {
 
 app_run() {
   local n="$1" probe="$2" home="$OUT/home-$1"
+  shift 2
   local data="$home/Library/Application Support/com.pioneer.test-ui"
   rm -rf "$home"
   mkdir -p "$data"
@@ -84,7 +85,7 @@ app_run() {
   printf '{"library_path":"%s"}\n' "$home/library/library.db" > "$data/config.json"
   local log="$OUT/app-run-$n.jsonl"
   : > "$log"
-  local env_args=(HOME="$home" FF_PERF_LOG="$log" FF_PERF_PROBE="$probe" FOURFOUR_MODELS_DIR="${FOURFOUR_MODELS_DIR:-$HOME/.cache/fourfour-models}")
+  local env_args=(HOME="$home" FF_PERF_LOG="$log" FF_PERF_PROBE="$probe" FOURFOUR_MODELS_DIR="${FOURFOUR_MODELS_DIR:-$HOME/.cache/fourfour-models}" "$@")
   if [ "$DRY" = 1 ]; then
     say "+ env ${env_args[*]} '$BIN'"
     return 0
@@ -105,7 +106,26 @@ app_run() {
 say "first launch on a fresh copy, then warm launches"
 app_run 1 '{"trackLoad":false,"scroll":false}'
 for n in $(seq 2 "$RUNS"); do app_run "$n" '{"trackLoad":true,"scroll":true}'; done
-app_run analysis '{"trackLoad":false,"scroll":true,"analyse":true,"analysisWarmupMs":8000,"analysisScrollSeconds":10}'
+ANALYSIS_PROBE='{"trackLoad":false,"scroll":true,"analyse":true,"analysisWarmupMs":8000,"analysisScrollSeconds":10,"analysisBursts":5}'
+CORES="$(sysctl -n hw.logicalcpu 2>/dev/null || nproc)"
+say "scroll during analysis: before R5 (no UI pause, $((CORES - 1)) threads), R5 default, R5 with background QoS"
+app_run analysis-before "$ANALYSIS_PROBE" FF_ANALYSIS_UI_PAUSE=off FOURFOUR_ANALYSIS_THREADS="$((CORES - 1))"
+app_run analysis "$ANALYSIS_PROBE"
+app_run analysis-bgqos "$ANALYSIS_PROBE" FF_ANALYSIS_QOS=background
+
+say "analysis throughput cost of the UI headroom (bench_analysis, 12 long fixture files each)"
+BENCH="$TARGET/release/bench_analysis"
+head -n 12 "${FF_FIXTURE_ROOT:-$HOME/.cache/ff-fixture}/$SIZE/long.txt" > "$OUT/headroom-list.txt"
+headroom() {
+  local name="$1" envs="$2" args="$3"
+  if [ "$DRY" = 1 ]; then say "+ env $envs $BENCH --list $OUT/headroom-list.txt --limit 12 $args"; return 0; fi
+  env $envs "$BENCH" --list "$OUT/headroom-list.txt" --limit 12 $args > "$OUT/headroom-$name.txt" 2> "$OUT/headroom-$name.log" ||
+    say "headroom $name failed"
+}
+headroom before-threads "" "--threads $((CORES - 1))"
+headroom default "" ""
+headroom ui-busy-1-in-3 "" "--ui-busy 2000/6000"
+headroom bgqos "FF_ANALYSIS_QOS=background" ""
 
 node "$ROOT/scripts/mac/perf-night-summary.mjs" "$OUT" "$SIZE" | tee "$OUT/summary.md"
 say "done: $OUT"

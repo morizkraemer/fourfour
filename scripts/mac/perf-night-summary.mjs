@@ -23,6 +23,7 @@ function readRun(file) {
     track_load_ms: by('track_load')?.values.player_ready_ms_median,
     scroll_idle: by('scroll_idle')?.values,
     scroll_analysis: by('scroll_during_analysis')?.values,
+    scroll_bursts: by('scroll_bursts_during_analysis')?.values,
     done: !!by('probe_done'),
     error: by('probe_done')?.values.error ?? by('analysis_error')?.values.error,
   };
@@ -65,6 +66,27 @@ for (const r of runs) {
 if (analysis?.scroll_analysis) {
   const s = analysis.scroll_analysis;
   lines.push('', `Scroll during analysis: ${s.frames} frames, p50 ${fmt(s.frame_p50_ms)} ms, p95 ${fmt(s.frame_p95_ms)} ms, max ${fmt(s.frame_max_ms)} ms, ${s.frames_dropped} dropped, ${s.long_frames} frames over 50 ms (${fmt(s.long_frame_ms_total)} ms). WKWebView has no long-task API; frames over 50 ms stand in for long tasks.`);
+}
+
+const headroomRuns = runs.filter((r) => r.file.startsWith('app-run-analysis'));
+if (headroomRuns.length) {
+  lines.push('', '## UI headroom during analysis (R5)', '', 'analysis-before: no UI pause, cores - 1 threads; analysis: R5 default (cores - 2, analysis held while scrolling); analysis-bgqos: R5 plus background QoS (efficiency cores only).', '');
+  lines.push('| run | scroll p50 / p95 / max ms | dropped | frames > 50 ms | bursts p50 / p95 / max ms | bursts dropped |', '|---|---|---:|---:|---|---:|');
+  for (const r of headroomRuns) {
+    const s = r.scroll_analysis ?? {};
+    const b = r.scroll_bursts ?? {};
+    lines.push(`| ${r.file} | ${fmt(s.frame_p50_ms)} / ${fmt(s.frame_p95_ms)} / ${fmt(s.frame_max_ms)} | ${fmt(s.frames_dropped)} | ${fmt(s.long_frames)} | ${fmt(b.frame_p50_ms)} / ${fmt(b.frame_p95_ms)} / ${fmt(b.frame_max_ms)} | ${fmt(b.frames_dropped)} |`);
+  }
+}
+const benchFiles = readdirSync(out).filter((f) => /^headroom-.*\.txt$/.test(f) && f !== 'headroom-list.txt').sort();
+if (benchFiles.length) {
+  lines.push('', '| bench_analysis (12 long files) | tracks/min | first result | CPU s | held for the UI |', '|---|---:|---:|---:|---|');
+  for (const f of benchFiles) {
+    const text = readFileSync(join(out, f), 'utf8');
+    const field = (name) => text.match(new RegExp(`${name}=([0-9.]+)`))?.[1];
+    const held = text.match(/held=(\d+x [0-9.]+s \(\d+% of the run\))/)?.[1] ?? '-';
+    lines.push(`| ${f.replace(/^headroom-|\.txt$/g, '')} | ${field('tracks_per_min') ?? '-'} | ${field('first_result') ?? '-'} s | ${field('cpu') ?? '-'} | ${held} |`);
+  }
 }
 
 const backendFile = join(out, 'backend.json');
