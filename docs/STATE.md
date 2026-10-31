@@ -24,7 +24,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 1. Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
 2. Copy a playlist to another stick: Keep updated on by default? — rec: yes — branch: none
 3. Build round 3 into the app (replaces ui-sync-flow's first attempt, keeps the stick header)? — rec: yes after 1–2 — branch: ui-sync-flow
-4. Key: shipped key stage is now the cyanbox port (BSD-2 code) whose templates were fit on GiantSteps MTG (annotations unlicensed); keydet weights fit on CC BY-SA. Both need your licence call — rec: refit templates on permissively licensed labels before shipping. Was: key detector weights fit on CC BY-SA 4.0 data — rec: ship only weights trained on permissively licensed data — branch: none
+4. Key licence: shipped cyanbox templates are fit on GiantSteps MTG (labels unlicensed). A clean model fit only on CC0/CC BY Freesound loops (FSL10K) is built behind a one-line switch: Beatport test exact 56.3% vs 60.3% shipped (below the 60% bar); needs attribution (Ramires et al. 2020 + CC BY uploaders). docs/analysis/key-licence-2026-10-31.md - rec: ship clean-fsl for the public beta (legal risk over 4 points), keep improving it - branch: ov-1028 (switch SHIPPED in cyankey.rs)
 5. Old stash@{0} (scrub-pause waveform tweaks) — rec: build on a branch for review — branch: none
 6. `.claude/settings.local.json` allows `git push *`, which bypasses the push ask rule — rec: remove that allow line (Merlin edits it) — branch: none
 8. [accepted 2026-10-23 per rec] Add vitest as an app dev dependency for unit tests (Q18, branch only) — rec: keep — branch: q18-app-tests
