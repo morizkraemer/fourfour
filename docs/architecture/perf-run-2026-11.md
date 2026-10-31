@@ -302,3 +302,30 @@ Thread count per job is unchanged. On an 8 GB Mac (7 analysis threads, 2 workers
 - **First result 5 s** is reachable only for short tracks: one chunk is about 5 s on an idle core, so a 6-min track is at least one round of 13 parallel chunks plus decode and mel. The new order makes it independent of queue length, which was the 10k problem.
 - **The lever that would move both numbers** is the attention: a fused (flash-style) attention would not materialise the 1500 x 1500 matrices (about half the chunk time, and most of the 300 MB per chunk, so more chunk slots on the Mac). That needs a runtime with fused attention or a custom op, and is not bit-identical (softmax order), so it needs the grid/key eval. On the Mac, running the model on the GPU/ANE (onnxruntime with CoreML) is the other big lever. Both are new runtimes; decision for Merlin.
 - **Next: waveform detail from the Rust analysis** (asked during this run, did not fit the timebox). The Rust path should store the detail series like the Python now lane (`store_detail`), so a zoom view opens from cache. Trap: the analysis decodes with symphonia 0.6, the app's detail path with 0.5, and MP3 bytes differ (q50-analysis2 `fe78598`). Plan: feed the detail meter from the same decoder the app path uses (or move both to one version), store only when a check on a few tracks shows identical bytes, and measure the extra cost per track against the 64 CPU-s of the model (expected around 1%).
+
+## R7 stored detail (2026-10-31)
+
+Branch `worktree-agent-acffa3352ed21e257` from `ov-1028` plus `r3-analysis` (`cd1a905`). Linux `dev` box, release `bench_analysis`, the 22 long fixture files of `~/.cache/ff-fixture/pool-v1/long` (2 aiff, 4 flac, 4 m4a, 12 mp3, 5-7 min). Load 15-36 during every run; the store runs always went second and each found a higher load than its plain run.
+
+**Changed.** The Rust analysis now puts the zoomed waveform's detail series of every track it analyses into the app's detail cache (`waveform-detail` under the app data dir, the cache `get_waveform_detail` reads, 2 GiB cap with trim, unique partial names). It calls the app's own `warm_detail` → `measure_detail` (symphonia 0.5, the parallel `DetailMeter` of R4), so the bytes are the ones a cache miss writes, by construction, for every codec. It runs on a thread of its own beside the job's analysis: a grid pass starts it at once (the model runs for 10+ s, the detail takes about 0.6 s), a whole pass (now lane, whole jobs) starts it once the waveform partial is stored, so the first waveform is not held up. Fast passes skip it, so the waveform phase of a long queue keeps its speed; every track still gets it once, in its grid or whole pass. A track already in the cache (opened by the user) is skipped; a concurrent `get_waveform_detail` does not wait for it (`warm_detail` semantics). The Python now lane is unchanged.
+
+**Why not share the analysis decode.** The analysis decodes with symphonia 0.6 (`fourfour-analysis-rs/decode.rs`), the app (playback and detail) with 0.5, and the two MP3 decoders give different samples (q50-analysis2 `fe78598`: 6 of 8 MP3s differ in 55-77k samples). One version for both would mean moving the analysis to 0.5 (changes analysis results on MP3) or the app's playback to 0.6 (outside this item's lane). m4a would not match either way: the app's parallel decode differs from a serial one there. Sharing the decode would save only the decode part of the cost; the meter is most of it (R4). So the detail meter gets its own 0.5 decode. When the app moves to symphonia 0.6, feeding the meter from the analysis decode for lossless and MP3 files saves roughly the decode share.
+
+**Byte identity** (`bench_analysis --store-detail`: after the run, the stored file read through the cache vs a fresh `measure_detail`): 22/22 stored and identical in each of three runs: aiff 2/2, flac 4/4, mp3 12/12, m4a 4/4. Unit test `every_analysed_track_leaves_the_detail_series_the_app_would_measure_in_the_cache` (mixed fast + whole passes, wav).
+
+**Analysis results unchanged.** The analysis crate is not touched. `--dump` of the stored results, plain vs store run: 22/22 identical in both pairs (and plain vs plain 22/22).
+
+**First open of an analysed track's zoomed waveform**
+
+| | Load | Median | Range |
+|---|---:|---:|---:|
+| before (cache miss, `measure_detail`) | 30-36 | 600 ms | 465-774 ms |
+| after (stored by the analysis, cache read) | 30-36 | 2.9 ms | 2.2-10 ms |
+
+**Cost.** `measure_detail` per track (process CPU around the call, 44 measurements): median 2.2 CPU-s (1.4-2.8; aiff/flac 1.4-2.3, mp3 1.7-2.8, m4a 1.9-2.8). The analysis is about 88 CPU-s per track here, so 2.5%, more than the 1% expected: the meter (f64 biquads at 2400 columns/s) is most of it and is the same work a cache miss does. Whole runs (22 tracks, median of 3): plain 1,922 CPU-s, store 1,996 CPU-s (+3.4 CPU-s per track, +3.9%, within the run-to-run noise of about 2% plus the rising load). Wall time and first result followed the load (plain 191-236 s / 20-25 s at load 15-25, store 205-304 s / 21-36 s at load 27-36), not separable from this box's noise; the detail work sits beside the model and starts after the first waveform. Peak RSS 6.7-7.0 GB plain vs 7.0-7.2 GB store (the model chunk peaks dominate; the detail holds at most 14 decoded segments and one series per job).
+
+**Next**
+
+- The meter in f32 (R4 "Next") would roughly halve the 2.5%; it changes bytes slightly, which is fine as long as both paths use it.
+- Moving playback to symphonia 0.6 would allow feeding the meter from the analysis decode and drop the extra decode.
+- Tracks analysed before this change get their detail on their first open, as before; a re-analysis or a background warm fills them.
