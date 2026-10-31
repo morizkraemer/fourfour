@@ -135,13 +135,17 @@ struct Block {
     samples: Vec<f32>,
 }
 
-type SegmentResult = Result<Vec<Block>, String>;
+/// The audio of one segment: `preroll` is what its decoder made of the packets before it (for state that carries over
+/// from earlier audio, such as filters), `blocks` the segment itself, consecutive packets of one format joined.
+pub(crate) struct Segment {
+    preroll: Vec<Block>,
+    blocks: Vec<Block>,
+}
 
-/// Decodes `packets` with a fresh decoder and returns the audio of all but the first `skip` of them, consecutive
-/// packets of one format joined into one block.
-fn decode_segment(params: &CodecParameters, packets: &[Packet], skip: usize) -> SegmentResult {
+/// Decodes `packets` with a fresh decoder; the first `skip` of them are the preroll.
+fn decode_segment(params: &CodecParameters, packets: &[Packet], skip: usize) -> Result<Segment, String> {
     let mut decoder = make_decoder(params)?;
-    let mut blocks: Vec<Block> = Vec::new();
+    let mut segment = Segment { preroll: Vec::new(), blocks: Vec::new() };
     let mut buffer: Option<SampleBuffer<f32>> = None;
     for (i, packet) in packets.iter().enumerate() {
         let decoded = match decoder.decode(packet) {
@@ -150,9 +154,6 @@ fn decode_segment(params: &CodecParameters, packets: &[Packet], skip: usize) -> 
             Err(_) if i < skip => continue,
             Err(e) => return Err(format!("decode: {e}")),
         };
-        if i < skip {
-            continue;
-        }
         let spec = *decoded.spec();
         let channels = spec.channels.count();
         let needed = decoded.capacity() * channels;
@@ -161,6 +162,7 @@ fn decode_segment(params: &CodecParameters, packets: &[Packet], skip: usize) -> 
         }
         let samples = buffer.as_mut().expect("buffer was just created");
         samples.copy_interleaved_ref(decoded);
+        let blocks = if i < skip { &mut segment.preroll } else { &mut segment.blocks };
         match blocks.last_mut() {
             Some(block) if block.rate == spec.rate && block.channels == channels => {
                 block.samples.extend_from_slice(samples.samples())
@@ -168,7 +170,7 @@ fn decode_segment(params: &CodecParameters, packets: &[Packet], skip: usize) -> 
             _ => blocks.push(Block { rate: spec.rate, channels, samples: samples.samples().to_vec() }),
         }
     }
-    Ok(blocks)
+    Ok(segment)
 }
 
 /// How many segments the reader may be ahead of the one handed to `on_block`, so memory stays bounded when
@@ -198,7 +200,22 @@ impl Lookahead {
     }
 }
 
-type Job = (Vec<Packet>, usize, SyncSender<SegmentResult>);
+type Job<T> = (Vec<Packet>, usize, StartChain, SyncSender<Result<T, String>>);
+
+/// The track frame a segment starts at, known once the segment before it is decoded: a segment's `claim` waits for its
+/// start and hands the start of the next one on. A segment that never claims leaves the ones after it without a start.
+pub(crate) struct StartChain {
+    start: Receiver<u64>,
+    next: SyncSender<u64>,
+}
+
+impl StartChain {
+    pub(crate) fn claim(self, frames: u64) -> Result<u64, String> {
+        let start = self.start.recv().map_err(|_| "an earlier segment failed".to_string())?;
+        let _ = self.next.send(start + frames);
+        Ok(start)
+    }
+}
 
 /// The audio `decode_blocks` hands over, bit for bit and in order (cut into blocks differently), decoded on `threads`
 /// threads: a reader thread splits the packets into segments of `SEGMENT_PACKETS`, each segment is decoded by a fresh
@@ -209,22 +226,50 @@ pub(crate) fn decode_blocks_parallel(
     threads: usize,
     mut on_block: impl FnMut(u32, usize, &[f32]),
 ) -> Result<(), String> {
+    decode_segments_parallel(path, threads, |segment, _| segment.blocks, |arrival| match arrival {
+        Arrival::Lead { rate, channels, frames } => on_block(rate, channels, &vec![0.0; frames * channels]),
+        Arrival::Segment(blocks) => {
+            for block in &blocks {
+                on_block(block.rate, block.channels, &block.samples);
+            }
+        }
+    })
+}
+
+pub(crate) enum Arrival<T> {
+    /// The leading silence of the track, before any segment.
+    Lead { rate: u32, channels: usize, frames: usize },
+    Segment(T),
+}
+
+/// The segments of `decode_blocks_parallel`, each turned into `T` by `process` on its decode thread and handed to
+/// `on_arrival` in order on the calling thread.
+pub(crate) fn decode_segments_parallel<T: Send>(
+    path: &Path,
+    threads: usize,
+    process: impl Fn(Segment, StartChain) -> T + Sync,
+    mut on_arrival: impl FnMut(Arrival<T>),
+) -> Result<(), String> {
     let OpenedAudio { mut format, track_id, params, lead } = open_audio(path)?;
+    let mut first_start = 0;
     if let (Some(rate), Some(channels), true) = (params.sample_rate, params.channels.map(|c| c.count()), lead > 0) {
-        on_block(rate, channels, &vec![0.0; lead as usize * channels]);
+        on_arrival(Arrival::Lead { rate, channels, frames: lead as usize });
+        first_start = lead;
     }
     let threads = threads.max(1);
     let lookahead = Lookahead { consumed: Mutex::new(0), advanced: Condvar::new(), limit: 2 * threads + 2 };
-    let (job_tx, job_rx) = mpsc::sync_channel::<Job>(threads);
+    let (job_tx, job_rx) = mpsc::sync_channel::<Job<T>>(threads);
     let job_rx = Mutex::new(job_rx);
-    let (order_tx, order_rx) = mpsc::sync_channel::<Receiver<SegmentResult>>(lookahead.limit);
+    let (order_tx, order_rx) = mpsc::sync_channel::<Receiver<Result<T, String>>>(lookahead.limit);
     let mut read_error: Option<String> = None;
 
     let outcome = std::thread::scope(|scope| {
-        let (params, lookahead, job_rx, read_error) = (&params, &lookahead, &job_rx, &mut read_error);
+        let (params, lookahead, job_rx, read_error, process) = (&params, &lookahead, &job_rx, &mut read_error, &process);
         scope.spawn(move || {
             let mut index = 0usize;
             let mut tail: Vec<Packet> = Vec::new();
+            let (first_tx, mut start_rx) = mpsc::sync_channel(1);
+            let _ = first_tx.send(first_start);
             let mut send = |segment: Vec<Packet>, tail: &mut Vec<Packet>| -> bool {
                 lookahead.wait_for_room(index);
                 let next_tail = segment[segment.len().saturating_sub(PREROLL_PACKETS)..].to_vec();
@@ -232,8 +277,10 @@ pub(crate) fn decode_blocks_parallel(
                 let skip = packets.len();
                 packets.extend(segment);
                 let (result_tx, result_rx) = mpsc::sync_channel(1);
+                let (next_tx, next_rx) = mpsc::sync_channel(1);
+                let chain = StartChain { start: std::mem::replace(&mut start_rx, next_rx), next: next_tx };
                 index += 1;
-                order_tx.send(result_rx).is_ok() && job_tx.send((packets, skip, result_tx)).is_ok()
+                order_tx.send(result_rx).is_ok() && job_tx.send((packets, skip, chain, result_tx)).is_ok()
             };
             let mut segment: Vec<Packet> = Vec::with_capacity(SEGMENT_PACKETS);
             loop {
@@ -263,8 +310,8 @@ pub(crate) fn decode_blocks_parallel(
             scope.spawn(move || {
                 loop {
                     let job = job_rx.lock().unwrap_or_else(|e| e.into_inner()).recv();
-                    let Ok((packets, skip, result_tx)) = job else { return };
-                    let _ = result_tx.send(decode_segment(params, &packets, skip));
+                    let Ok((packets, skip, chain, result_tx)) = job else { return };
+                    let _ = result_tx.send(decode_segment(params, &packets, skip).map(|segment| process(segment, chain)));
                 }
             });
         }
@@ -272,10 +319,8 @@ pub(crate) fn decode_blocks_parallel(
         let mut outcome = Ok(());
         for result_rx in order_rx {
             match result_rx.recv() {
-                Ok(Ok(blocks)) => {
-                    for block in &blocks {
-                        on_block(block.rate, block.channels, &block.samples);
-                    }
+                Ok(Ok(done)) => {
+                    on_arrival(Arrival::Segment(done));
                     lookahead.advance();
                 }
                 Ok(Err(e)) => {
@@ -311,12 +356,54 @@ pub fn measure_waveforms(path: &Path) -> Result<Waveforms, String> {
     Ok(analyze(&meter.finish()))
 }
 
-/// Decodes `path` (on several threads) and measures the app-only high-resolution series for the zoomed waveform.
+/// Decodes `path` and measures the app-only high-resolution series for the zoomed waveform, the decode and the band
+/// filters on several threads: each segment's filters are warmed on the audio its decoder made of the packets before
+/// it, so the series is the one a single meter over the whole track gives (within the rounding of the filter state).
 pub fn measure_detail(path: &Path) -> Result<DetailSeries, String> {
     let mut meter: Option<DetailMeter> = None;
-    decode_blocks_parallel(path, decode_threads(), |rate, channels, samples| {
-        meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(samples);
-    })?;
+    let mut failed: Option<String> = None;
+    decode_segments_parallel(
+        path,
+        decode_threads(),
+        |segment, chain| -> Result<Option<DetailMeter>, String> {
+            let frames: u64 = segment.blocks.iter().map(|b| (b.samples.len() / b.channels.max(1)) as u64).sum();
+            let start = chain.claim(frames)?;
+            let Some(first) = segment.blocks.first() else { return Ok(None) };
+            let mut part = DetailMeter::starting_at(first.rate, first.channels, start);
+            for block in segment.preroll.iter().filter(|b| b.rate == first.rate && b.channels == first.channels) {
+                part.warm(&block.samples);
+            }
+            for block in &segment.blocks {
+                part.push(&block.samples);
+            }
+            Ok(Some(part))
+        },
+        |arrival| {
+            let joined = match arrival {
+                Arrival::Lead { rate, channels, frames } => {
+                    meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(&vec![0.0; frames * channels]);
+                    Ok(())
+                }
+                Arrival::Segment(Ok(Some(part))) => match meter.as_mut() {
+                    Some(meter) => meter.join(part),
+                    None => {
+                        let mut first = DetailMeter::new(part.sample_rate(), part.channels());
+                        let joined = first.join(part);
+                        meter = Some(first);
+                        joined
+                    }
+                },
+                Arrival::Segment(Ok(None)) => Ok(()),
+                Arrival::Segment(Err(e)) => Err(e),
+            };
+            if let Err(e) = joined {
+                failed.get_or_insert(e);
+            }
+        },
+    )?;
+    if let Some(e) = failed {
+        return Err(e);
+    }
     meter.map(DetailMeter::finish).ok_or_else(|| "no audio decoded".to_string())
 }
 

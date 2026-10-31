@@ -100,6 +100,9 @@ pub struct DetailMeter {
     current: [f64; 3],
     extremes: Vec<[f32; 2]>,
     current_extremes: [f64; 2],
+    /// Track frame and column the meter starts at: 0 for a meter from the start of the track.
+    start: u64,
+    first_column: usize,
     /// Low, mid high-pass, mid low-pass, high.
     filters: [Biquad; 4],
 }
@@ -121,8 +124,91 @@ impl DetailMeter {
             current: [0.0; 3],
             extremes: Vec::new(),
             current_extremes: NO_EXTREMES,
+            start: 0,
+            first_column: 0,
             filters: band_filters(&tuning, rate),
         }
+    }
+
+    /// A meter for the audio from track frame `frame` on, so stretches of a track can be measured on separate threads
+    /// and put together with [`DetailMeter::join`]. Its filters start empty: [`DetailMeter::warm`] them on audio before
+    /// `frame` (a few thousand frames bring the short band filters to the state a meter from the start has there).
+    pub fn starting_at(sample_rate: u32, channels: usize, frame: u64) -> Self {
+        let mut meter = Self::new(sample_rate, channels);
+        let edge = |column: usize| (column as f64 * meter.rate / DETAIL_COLUMNS_PER_SECOND).round() as u64;
+        let mut column = (frame as f64 * DETAIL_COLUMNS_PER_SECOND / meter.rate).floor() as usize;
+        while column > 0 && edge(column) > frame {
+            column -= 1;
+        }
+        while edge(column + 1) <= frame {
+            column += 1;
+        }
+        meter.first_column = column;
+        meter.start = frame;
+        meter.frames = frame;
+        meter.next_edge = edge(column + 1);
+        meter
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.rate as u32
+    }
+
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Runs the band filters over audio that comes before this meter's first frame, without measuring it.
+    pub fn warm(&mut self, interleaved: &[f32]) {
+        let channels = self.channels.max(1);
+        let [mut low, mut mid_hp, mut mid_lp, mut high] = self.filters;
+        for frame in interleaved.chunks_exact(channels) {
+            let x = frame.iter().map(|&s| s as f64).sum::<f64>() / channels as f64;
+            low.step(x);
+            mid_lp.step(mid_hp.step(x));
+            high.step(x);
+        }
+        self.filters = [low, mid_hp, mid_lp, high];
+    }
+
+    /// Appends the columns of `later`, a [`DetailMeter::starting_at`] the frame this meter has reached; a column the
+    /// two share takes the peaks of both.
+    pub fn join(&mut self, later: DetailMeter) -> Result<(), String> {
+        if later.start != self.frames || later.rate != self.rate {
+            return Err(format!(
+                "a stretch from frame {} at {} Hz does not continue a meter at frame {} at {} Hz",
+                later.start, later.rate, self.frames, self.rate
+            ));
+        }
+        while self.first_column + self.peaks.len() < later.first_column {
+            self.close_current();
+        }
+        let closed = later.peaks.iter().zip(&later.extremes).map(|(p, e)| {
+            ([p[0] as f64, p[1] as f64, p[2] as f64], [e[0] as f64, e[1] as f64])
+        });
+        let mut columns = closed.chain(std::iter::once((later.current, later.current_extremes)));
+        if let Some((c, e)) = columns.next() {
+            for band in 0..3 {
+                self.current[band] = self.current[band].max(c[band]);
+            }
+            self.current_extremes = [self.current_extremes[0].min(e[0]), self.current_extremes[1].max(e[1])];
+        }
+        for (c, e) in columns {
+            self.close_current();
+            self.current = c;
+            self.current_extremes = e;
+        }
+        self.frames = later.frames;
+        self.next_edge = later.next_edge;
+        Ok(())
+    }
+
+    fn close_current(&mut self) {
+        let (c, e) = (self.current, self.current_extremes);
+        self.peaks.push([c[0] as f32, c[1] as f32, c[2] as f32]);
+        self.extremes.push([e[0] as f32, e[1] as f32]);
+        self.current = [0.0; 3];
+        self.current_extremes = NO_EXTREMES;
     }
 
     pub fn push(&mut self, interleaved: &[f32]) {
@@ -137,7 +223,8 @@ impl DetailMeter {
                 self.extremes.push([e[0] as f32, e[1] as f32]);
                 c = [0.0; 3];
                 e = NO_EXTREMES;
-                next_edge = ((self.peaks.len() + 1) as f64 * self.rate / DETAIL_COLUMNS_PER_SECOND).round() as u64;
+                next_edge = ((self.first_column + self.peaks.len() + 1) as f64 * self.rate / DETAIL_COLUMNS_PER_SECOND)
+                    .round() as u64;
             }
             let x = frame.iter().map(|&s| s as f64).sum::<f64>() / channels as f64;
             e = [e[0].min(x), e[1].max(x)];
@@ -453,6 +540,48 @@ mod tests {
         let tail_detail = low[onset + 600] as f64;
         let tail_pwv7 = pwv7[(onset + 600) / COLUMNS_PER_PWV7_COLUMN][0] as f64;
         assert!(tail_detail < tail_pwv7, "decay {tail_detail} vs PWV7 {tail_pwv7}");
+    }
+
+    #[test]
+    fn stretches_measured_apart_after_a_warm_up_join_into_the_series_of_one_meter() {
+        let samples = kick_track(9.0);
+        let (one, _) = measure(&samples);
+        let one = one.finish();
+
+        let stretch = 2 * 100_003;
+        let mut meter = DetailMeter::new(RATE, 2);
+        for (k, chunk) in samples.chunks(stretch).enumerate() {
+            let start = k * stretch;
+            let mut part = DetailMeter::starting_at(RATE, 2, (start / 2) as u64);
+            part.warm(&samples[start.saturating_sub(2 * 4096)..start]);
+            part.push(chunk);
+            meter.join(part).unwrap();
+        }
+        assert_eq!(meter.finish(), one);
+    }
+
+    #[test]
+    fn a_stretch_joins_only_where_the_meter_is() {
+        let mut meter = DetailMeter::new(RATE, 2);
+        meter.push(&[0.1; 2 * 1000]);
+        assert!(meter.join(DetailMeter::starting_at(RATE, 2, 999)).is_err());
+        assert!(meter.join(DetailMeter::starting_at(48_000, 2, 1000)).is_err());
+        assert!(meter.join(DetailMeter::starting_at(RATE, 2, 1000)).is_ok());
+    }
+
+    #[test]
+    fn a_stretch_that_starts_on_a_column_edge_closes_the_column_before_it() {
+        let samples = kick_track(1.0);
+        let (one, _) = measure(&samples);
+        let one = one.finish();
+        let edge = (40.0 * RATE as f64 / DETAIL_COLUMNS_PER_SECOND).round() as usize;
+        let mut meter = DetailMeter::new(RATE, 2);
+        meter.push(&samples[..2 * edge]);
+        let mut part = DetailMeter::starting_at(RATE, 2, edge as u64);
+        part.warm(&samples[..2 * edge]);
+        part.push(&samples[2 * edge..]);
+        meter.join(part).unwrap();
+        assert_eq!(meter.finish(), one);
     }
 
     #[test]
