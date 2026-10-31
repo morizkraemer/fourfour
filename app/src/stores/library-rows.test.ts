@@ -44,12 +44,16 @@ vi.mock('@tauri-apps/api/core', () => ({
       return { tracks: [info(1, 'Alpha', 3), info(2, 'Bravo'), info(3, 'Charlie')], playlists: [] };
     }
     if (command === 'get_row_previews') return args.trackIds.includes(1) ? [{ id: 1, waveform_bands: BANDS }] : [];
+    if (command === 'plan_import') {
+      return { token: 1, new_count: 1, already_in_library: 0, duplicates: [], skipped: { unsupported: 0, unsupported_exts: [], unreadable: 0 } };
+    }
+    if (command === 'commit_import') return { added: [info(4, 'Delta')], skipped_ids: [] };
     return undefined;
   }),
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
-import { bumpLibraryTracks, filterTracks, library, loadState, markCoversStored, requestRowPreviews } from './library.svelte.ts';
+import { bumpLibraryTracks, filterTracks, importFiles, library, loadState, markCoversStored, requestRowPreviews } from './library.svelte.ts';
 import { fileStatus } from './file-status.svelte.ts';
 import { sortTracks, setSort, clearSort } from './table-columns.svelte.ts';
 import { bootRowOf } from './boot-snapshot.ts';
@@ -130,6 +134,12 @@ describe('library track rows', () => {
     const after = library.tracks;
     markCoversStored([2]);
     expect(library.tracks).toBe(after);
+  });
+
+  it('keeps a cover that is stored before the imported row lands', async () => {
+    markCoversStored([4]);
+    await importFiles(['/m/4.mp3']);
+    expect(row(4).raw.has_artwork).toBe(true);
   });
 
   it('stays the same reactive row when held in other state', async () => {
