@@ -359,3 +359,4 @@
 2026-10-31 19:31 orchestrator - done: b11-ci, ov-ci moved to e7e6f3f (workflow for 3 OS, dmg check, weights; Linux validated locally, needs push OK for a first run); review card ov1028-sync-r3 posted
 2026-10-31 19:32 orchestrator - landed: b10-syncui on ov-1028 (USB sync round 3 on recs 1-3: stick view + header, Put on stick strip, copy keeps Keep updated, drop labels; 5 engine needs listed); checks green, review card ov1028-sync-r3
 2026-10-31 19:32 orchestrator - run-idle: plan items done except Mac-only (9, Mac batch); open decisions 4, 15, 27, sync review card
+2026-10-31 16:08 orchestrator - resumed: PM relay (Merlin: keep working unsupervised, rec on reversible branch work, no pushes); spawn r9-ort (opus medium; onnxruntime beat backend behind feature, CoreML for Mac, measure vs rten) and b13-cleankey (sonnet medium; ship CLEAN_FSL key model + attribution); both branch only
