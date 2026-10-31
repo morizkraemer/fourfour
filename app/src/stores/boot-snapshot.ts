@@ -2,6 +2,11 @@ import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.t
 
 export const BOOT_SNAPSHOT_KEY = 'fourfour.bootSnapshot.v1';
 export const BOOT_SNAPSHOT_MAX_ROWS = 120;
+/**
+ * Below this many tracks the real list is on screen about as soon as a snapshot would be, and painting the snapshot
+ * first (rows with waveforms, then the real rows again) delays it, so smaller libraries keep no snapshot.
+ */
+export const BOOT_SNAPSHOT_MIN_TRACKS = 20_000;
 
 const VIEW_GETTERS = new Set(['cover', 'rowCover', 'status', 'bands', 'raw']);
 
@@ -81,6 +86,7 @@ export function readBootSnapshot(libraryPath: string): BootSnapshot | null {
     if (!raw) return null;
     const snapshot = JSON.parse(raw);
     if (!isBootSnapshot(snapshot) || snapshot.libraryPath !== libraryPath || snapshot.rows.length === 0) return null;
+    if (snapshot.total < BOOT_SNAPSHOT_MIN_TRACKS) return null;
     return snapshot;
   } catch {
     return null;
@@ -89,7 +95,7 @@ export function readBootSnapshot(libraryPath: string): BootSnapshot | null {
 
 export function writeBootSnapshot(snapshot: BootSnapshot) {
   try {
-    if (snapshot.rows.length === 0) localStorage.removeItem(BOOT_SNAPSHOT_KEY);
+    if (snapshot.rows.length === 0 || snapshot.total < BOOT_SNAPSHOT_MIN_TRACKS) localStorage.removeItem(BOOT_SNAPSHOT_KEY);
     else localStorage.setItem(BOOT_SNAPSHOT_KEY, JSON.stringify(snapshot));
   } catch (err) {
     console.warn('boot snapshot not saved:', err);

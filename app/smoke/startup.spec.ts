@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtureAnalysis, fixtureState } from './fixture.ts';
+import { BOOT_SNAPSHOT_MIN_TRACKS } from '../src/stores/boot-snapshot.ts';
+import { fixtureAnalysis, fixtureState, largeFixtureState } from './fixture.ts';
 import { installTauriMock, type SmokeWindow } from './tauri-mock.ts';
 
 async function openApp(page: Page, state: ReturnType<typeof fixtureState>) {
@@ -34,9 +35,10 @@ const bootSnapshotIds = (page: Page) =>
     return raw ? (JSON.parse(raw).rows as { cells: { id: number } }[]).map((r) => r.cells.id) : null;
   });
 
-test('the last open list paints from the boot snapshot, then the real load replaces it', async ({ context }) => {
+test('the last open list of a large library paints from the boot snapshot, then the real load replaces it', async ({ context }) => {
   const first = await context.newPage();
-  await openApp(first, fixtureState());
+  const base = largeFixtureState(BOOT_SNAPSHOT_MIN_TRACKS + 1);
+  await openApp(first, base);
   await releaseLoad(first);
   await first.locator('[data-track-row]').first().waitFor();
   await expect.poll(() => bootSnapshotIds(first), { timeout: 10_000 }).not.toBeNull();
@@ -45,7 +47,6 @@ test('the last open list paints from the boot snapshot, then the real load repla
   expect(snapshotIds.slice(0, 3)).toEqual([1, 2, 3]);
   await first.close();
 
-  const base = fixtureState();
   const changed = {
     ...base,
     tracks: base.tracks.filter((t) => t.id !== 1).map((t) => (t.id === 2 ? { ...t, title: 'Renamed Outside' } : t)),
@@ -63,6 +64,14 @@ test('the last open list paints from the boot snapshot, then the real load repla
   await expect(second.getByText('Smoke Track 01', { exact: true })).toHaveCount(0);
   await expect.poll(() => bootSnapshotIds(second), { timeout: 10_000 }).not.toContain(1);
   expect(await bootSnapshotIds(second)).toEqual(expect.arrayContaining([2, 3]));
+});
+
+test('a library below the snapshot size keeps no boot snapshot', async ({ page }) => {
+  await openApp(page, fixtureState());
+  await releaseLoad(page);
+  await page.locator('[data-track-row]').first().waitFor();
+  await page.waitForTimeout(2_000);
+  expect(await bootSnapshotIds(page)).toBeNull();
 });
 
 test('rows on screen fetch their previews after the list loads', async ({ page }) => {
@@ -85,7 +94,7 @@ test('a snapshot from another library is not shown', async ({ page }) => {
   await page.addInitScript(() =>
     localStorage.setItem(
       'fourfour.bootSnapshot.v1',
-      JSON.stringify({ libraryPath: '/other/library', view: 'x', total: 1, rows: [{ cells: { id: 99, title: 'Other Library' } }] }),
+      JSON.stringify({ libraryPath: '/other/library', view: 'x', total: 20_000, rows: [{ cells: { id: 99, title: 'Other Library' } }] }),
     ),
   );
   await openApp(page, fixtureState());
