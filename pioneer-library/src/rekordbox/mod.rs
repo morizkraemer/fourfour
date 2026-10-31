@@ -29,6 +29,7 @@ pub use anlz::{LoadedAnalysis, load_all as load_analyses};
 pub use model::*;
 pub use remap::{CaseInsensitiveResolver, PathRemap, RemapPlan, detect_common_root};
 pub use sidecar::ImportedMeta;
+pub(crate) use sidecar::SIDECAR_FILE;
 
 pub(crate) use anlz::to_cue_points;
 
