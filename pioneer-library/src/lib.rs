@@ -33,7 +33,7 @@ use pioneer_usb_writer::models::{
 };
 use pioneer_usb_writer::{reader, writer};
 
-pub use analysis_write::{AnalysisWrite, StagedAnalysis};
+pub use analysis_write::{AnalysisWrite, StagedAnalysis, remove_stale_staging};
 pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
