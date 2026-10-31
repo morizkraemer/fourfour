@@ -357,3 +357,4 @@
 2026-10-31 19:12 orchestrator - landed: b12-sweep on ov-1028 (stale .staging folders removed at launch, backups skip staging, 0 build warnings; no flaky tests found under 24 busy loops); checks green
 2026-10-31 19:22 orchestrator - landed: b8-keylicence on ov-1028 (clean-fsl key model fit on CC0/CC BY FSL10K loops, Beatport test 56.3% vs 60.3% shipped; default unchanged, Waiting 4 updated); checks green
 2026-10-31 19:31 orchestrator - done: b11-ci, ov-ci moved to e7e6f3f (workflow for 3 OS, dmg check, weights; Linux validated locally, needs push OK for a first run); review card ov1028-sync-r3 posted
+2026-10-31 19:32 orchestrator - landed: b10-syncui on ov-1028 (USB sync round 3 on recs 1-3: stick view + header, Put on stick strip, copy keeps Keep updated, drop labels; 5 engine needs listed); checks green, review card ov1028-sync-r3
