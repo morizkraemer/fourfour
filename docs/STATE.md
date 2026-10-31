@@ -34,7 +34,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 14. [accepted 2026-10-28 per rec] O2 adds `@playwright/test` as an app devDependency for `npm run smoke` — rec: keep — branch: ov-1028
 
-15. O5 CI workflow ready (macOS/Windows/Linux, unsigned bundles as artifacts, untested) — rec: OK to push branch ov-ci and do a first run — branch: ov-ci (not in ov-1028)
+15. CI workflow refreshed for ov-1028 (macOS dmg + check, Windows nsis, Linux deb + smoke; weights bundled; actionlint clean, Linux steps pass locally, never run on GitHub) - rec: OK to push branch ov-ci for a first run - branch: ov-ci (e7e6f3f)
 
 16. Bar 1: Rekordbox bar 1 matches the model downbeats only 61.7%; "first grid beat = bar 1" matches 78.9%; hybrid 80.0% — rec: listen to ~5 disagreeing tracks on the Mac, then pick (docs/analysis/rust-status-2026-10-28.md) — branch: none
 
