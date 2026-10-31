@@ -21,6 +21,10 @@ symphonia = { version = "0.5", features = ["all"] }
 image = "0.25.10"
 fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
 
+[features]
+ort = ["fourfour-analysis-rs/ort"]
+coreml = ["fourfour-analysis-rs/coreml"]
+
 [[bin]]
 name = "waveform_dev"
 path = "src/bin/waveform_dev.rs"

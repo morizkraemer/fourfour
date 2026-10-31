@@ -6,5 +6,7 @@ pub mod fit;
 pub mod keymap;
 pub mod mp3;
 pub mod onset;
+#[cfg(feature = "ort")]
+pub mod ort_beat;
 pub mod waveform;
 pub mod service;
