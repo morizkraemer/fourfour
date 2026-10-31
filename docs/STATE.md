@@ -54,6 +54,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 25. [accepted 2026-10-31 per rec] Boot snapshot shows the last All Tracks view (first ~40 rows, inert until the real load); reopening the last playlist on start is not built - rec: keep All Tracks - branch: ov-1028
 26. [accepted 2026-10-31 per rec] Boot snapshot is skipped below ~15k tracks (at 10k it delays real rows 100-170 ms because both lists paint waveforms; the real list lands within ~100 ms there anyway) - rec: keep - branch: to build in run item 4
+28. [accepted 2026-10-31 per rec] r6 import adds an additive `pending_artwork` table (no version bump) so covers stored after the rows survive a quit - rec: keep - branch: ov-1028
 27. Analysis speed is capped by the beat model on CPU (91% of time; ~8 trk/min on dev, 10k = ~18 h). Only a new runtime moves it: onnxruntime + CoreML (GPU/Neural Engine) on the Mac, or fused attention. Not bit-identical, needs the grid/key evals - rec: try onnxruntime+CoreML on a branch, measure on a Mac night, keep only if evals hold - branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -64,6 +65,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - SQLCipher keys private; no PDB reader (docs/architecture/rekordbox-import.md).
 - From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
 - Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
+- Import (r6): a cold 10k import reads 2.7 GB because lofty reads ID3 picture frames even with read_cover_art(false); an ID3 reader that seeks past pictures in pioneer-usb-writer/src/scanner.rs would cut it.
 - Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
 
 ## Queue

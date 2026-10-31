@@ -347,3 +347,4 @@
 2026-10-31 15:49 orchestrator - landed: r4-trackload on ov-1028 (67f6607; parallel detail meter, first zoomed waveform ~half at low load, 25-40% less at load 40-50; urgent prefetch on press; detail cache 2 GiB; boot snapshot from 20k tracks per measurements); 120 ms target needs stored detail from analysis, passed to r3-analysis
 2026-10-31 15:59 orchestrator - landed: r3-analysis on ov-1028 (89ba479; early whole-track jobs, first BPM 15.2 -> 3.0 s at 500 queued, bit-identical); checks green
 2026-10-31 16:45 orchestrator - landed: r7-storedetail on ov-1028 (6fe845f; Rust analysis stores waveform detail, first zoom open of analysed track 605 -> 3 ms, 22/22 bytes identical, +2.5% analysis CPU); Waiting 20 resolved by separate 0.5 decode
+2026-10-31 17:13 orchestrator - followup: r6b-covers (sonnet medium) USB export must store pending covers for its tracks first (r6 risk); cover-skip in scanner.rs noted for brother
