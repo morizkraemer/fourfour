@@ -103,18 +103,17 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     let gapless = native.gapless_samples();
     let gapless_start_s = native.gapless.start as f64 / native.rate as f64;
     let t = Instant::now();
-    let mono44: Cow<[f32]> = if native.rate == 44100 {
-        Cow::Borrowed(gapless)
-    } else {
-        Cow::Owned(resample_to(gapless, native.rate, 44100)?)
+    let mono44: Option<Cow<[f32]>> = match (cfg.key, native.rate) {
+        (false, _) => None,
+        (true, 44100) => Some(Cow::Borrowed(gapless)),
+        (true, rate) => Some(Cow::Owned(resample_to(gapless, rate, 44100)?)),
     };
     let resample44_ms = ms(t);
-    let mono = &*mono44;
 
     let side_threads = if cfg.threads > 1 { 2 } else { 1 };
     let (beat_part, key_part, wf_part) = std::thread::scope(|s| {
-        let key = cfg.key.then(|| {
-            s.spawn(|| {
+        let key = mono44.as_deref().map(|mono| {
+            s.spawn(move || {
                 let t = Instant::now();
                 let r = cyankey::detect(mono, 44100, side_threads);
                 (r, ms(t))
