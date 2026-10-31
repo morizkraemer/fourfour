@@ -313,7 +313,7 @@ const COVER_BATCH: usize = 32;
 /// `on_stored` gets the ids of each batch's tracks that got a cover. Returns how many covers
 /// were stored.
 pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut(Vec<u32>)) -> Result<usize, String> {
-    type Batch = Result<Vec<(i64, Option<Vec<u8>>)>, String>;
+    type Batch = Result<Vec<(i64, PathBuf, Option<Vec<u8>>)>, String>;
     let mut stored = 0;
     loop {
         let mut batches = 0;
@@ -334,7 +334,8 @@ pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut
                     after = batch.last().map_or(after, |(id, _)| *id);
                     let files: Vec<&Path> = batch.iter().map(|(_, path)| path.as_path()).collect();
                     let covers = read_parallel(COVER_THREADS, &files, |path| read_track_metadata(path, 0).ok().and_then(|t| t.artwork), &mut || {});
-                    if sender.send(Ok(batch.iter().map(|(id, _)| *id).zip(covers).collect())).is_err() {
+                    let read = batch.into_iter().zip(covers).map(|((id, path), cover)| (id, path, cover)).collect();
+                    if sender.send(Ok(read)).is_err() {
                         return;
                     }
                 }
@@ -343,7 +344,7 @@ pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut
                 let covers = covers?;
                 batches += 1;
                 lib.lock().map_err(|e| e.to_string())?.store_pending_artwork(&covers).map_err(|e| e.to_string())?;
-                let with_cover: Vec<u32> = covers.iter().filter(|(_, c)| c.is_some()).map(|(id, _)| *id as u32).collect();
+                let with_cover: Vec<u32> = covers.iter().filter(|(_, _, c)| c.is_some()).map(|(id, _, _)| *id as u32).collect();
                 stored += with_cover.len();
                 if !with_cover.is_empty() {
                     on_stored(with_cover);

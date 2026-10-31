@@ -259,16 +259,17 @@ impl LocalLibrary {
     }
 
     /// Stores the covers read for queued tracks and takes them off the queue, in one
-    /// transaction; `None` = the file has no cover. A track removed in the meantime is skipped,
-    /// and a cover set by hand in the meantime is kept.
-    pub fn store_pending_artwork(&self, covers: &[(i64, Option<Vec<u8>>)]) -> Result<()> {
+    /// transaction; each cover comes with the track's id and the file it was read from, and
+    /// `None` = the file has no cover. A track removed or pointing at another file in the
+    /// meantime is skipped, and a cover set by hand in the meantime is kept.
+    pub fn store_pending_artwork(&self, covers: &[(i64, PathBuf, Option<Vec<u8>>)]) -> Result<()> {
         self.write_bulk(|| {
             let tx = self.conn.unchecked_transaction()?;
-            for (id, cover) in covers {
+            for (id, path, cover) in covers {
                 if let Some(cover) = cover {
-                    queries::insert_pending_artwork(&tx, *id, cover)?;
+                    queries::insert_pending_artwork(&tx, *id, path, cover)?;
                 }
-                queries::unqueue_pending_artwork(&tx, *id)?;
+                queries::unqueue_pending_artwork(&tx, *id, path)?;
             }
             tx.commit()?;
             Ok(())
@@ -2492,8 +2493,17 @@ mod tests {
 
         lib.set_artwork(ids[1], &[7]).unwrap();
         lib.remove_track(ids[2]).unwrap();
-        lib.store_pending_artwork(&[(ids[0], Some(vec![1])), (ids[1], Some(vec![2])), (ids[2], Some(vec![3])), (ids[3], None)])
-            .unwrap();
+        let path = |n: &str| PathBuf::from(format!("/music/{n}.mp3"));
+        lib.store_pending_artwork(&[
+            (ids[0], path("a"), Some(vec![1])),
+            (ids[1], path("b"), Some(vec![2])),
+            (ids[2], path("c"), Some(vec![3])),
+            (ids[3], path("other"), Some(vec![4])),
+        ])
+        .unwrap();
+        assert_eq!(lib.pending_artwork(0, 10).unwrap(), vec![(ids[3], path("d"))]);
+        assert!(lib.get_artwork(ids[3]).unwrap().is_none());
+        lib.store_pending_artwork(&[(ids[3], path("d"), None)]).unwrap();
 
         assert_eq!(lib.get_artwork(ids[0]).unwrap(), Some(vec![1]));
         assert_eq!(lib.get_artwork(ids[1]).unwrap(), Some(vec![7]));

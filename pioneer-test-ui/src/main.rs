@@ -1259,17 +1259,18 @@ fn change_library_path(
     folder_path: String,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    covers: State<'_, CoverFill>,
 ) -> Result<String, String> {
     let db_path = PathBuf::from(&folder_path).join("library.db");
 
     let new_library = LocalLibrary::open(&db_path).map_err(|e| e.to_string())?;
 
     // Swap the active library
-    let mut lib = state.lock().map_err(|e| e.to_string())?;
-    *lib = new_library;
+    *state.lock().map_err(|e| e.to_string())? = new_library;
 
     // Remember the choice
     write_library_path(&app, &db_path)?;
+    spawn_cover_fill(app, state.inner().clone(), covers.inner().clone());
 
     Ok(db_path.to_string_lossy().to_string())
 }

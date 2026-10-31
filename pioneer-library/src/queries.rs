@@ -211,18 +211,24 @@ pub fn select_pending_artwork(conn: &Connection, after: i64, limit: usize) -> Re
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
 }
 
-pub fn insert_pending_artwork(conn: &Connection, track_id: i64, image_data: &[u8]) -> Result<()> {
+pub fn insert_pending_artwork(conn: &Connection, track_id: i64, source_path: &Path, image_data: &[u8]) -> Result<()> {
     conn.prepare_cached(
         "INSERT INTO artwork (track_id, image_data)
-         SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM pending_artwork WHERE track_id = ?1)
+         SELECT ?1, ?3 WHERE EXISTS (
+             SELECT 1 FROM pending_artwork p JOIN tracks t ON t.id = p.track_id WHERE p.track_id = ?1 AND t.source_path = ?2
+         )
          ON CONFLICT(track_id) DO NOTHING",
     )?
-    .execute(params![track_id, image_data])?;
+    .execute(params![track_id, source_path.to_string_lossy().as_ref(), image_data])?;
     Ok(())
 }
 
-pub fn unqueue_pending_artwork(conn: &Connection, track_id: i64) -> Result<()> {
-    conn.prepare_cached("DELETE FROM pending_artwork WHERE track_id = ?1")?.execute([track_id])?;
+pub fn unqueue_pending_artwork(conn: &Connection, track_id: i64, source_path: &Path) -> Result<()> {
+    conn.prepare_cached(
+        "DELETE FROM pending_artwork WHERE track_id = ?1
+         AND EXISTS (SELECT 1 FROM tracks WHERE id = ?1 AND source_path = ?2)",
+    )?
+    .execute(params![track_id, source_path.to_string_lossy().as_ref()])?;
     Ok(())
 }
 
