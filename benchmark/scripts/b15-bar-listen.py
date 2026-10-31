@@ -47,7 +47,7 @@ def main():
     new_right = [x for x in rows if x[6] and not x[5]]
     old_right = [x for x in rows if x[5] and not x[6]]
     print(f"disagreeing beat-aligned tracks: {len(rows)}; new right {len(new_right)}, old right {len(old_right)}, neither {len(rows) - len(new_right) - len(old_right)}")
-    pick = new_right[: limit - limit // 3] + old_right[: limit // 3]
+    pick = new_right[: limit // 2] + old_right[: limit - limit // 2]
     print("| id | file | old bar 1 (s) | new bar 1 (s) | Rekordbox bar 1 (s) | right |")
     print("|---:|---|---:|---:|---:|---|")
     for id_, name, o, n, rbt, ok_old, ok_new in pick:
