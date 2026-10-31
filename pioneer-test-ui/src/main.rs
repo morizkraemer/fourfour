@@ -306,6 +306,15 @@ fn cancel_analysis(coordinator: State<'_, AnalysisCoordinator>) {
     coordinator.cancel();
 }
 
+#[tauri::command]
+async fn analysis_ui_busy(coordinator: State<'_, AnalysisCoordinator>) -> Result<(), String> {
+    if std::env::var_os("FF_ANALYSIS_UI_PAUSE").is_some_and(|v| v == "off") {
+        return Ok(());
+    }
+    coordinator.ui_busy();
+    Ok(())
+}
+
 /// Stored analysis backend setting: "rust", "python", or null for the default.
 #[tauri::command]
 fn get_analysis_backend(app: AppHandle) -> Option<String> {
@@ -1354,6 +1363,7 @@ fn main() {
             set_analyze_after_import,
             enqueue_analysis,
             prioritize_analysis,
+            analysis_ui_busy,
             write_usb,
             sync_usb_many,
             stick_commands::get_stick,

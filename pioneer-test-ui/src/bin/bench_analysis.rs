@@ -17,6 +17,16 @@ mod waveform_detail;
 #[path = "../analysis_run.rs"]
 mod analysis_run;
 
+#[allow(dead_code)]
+#[path = "../analysis_payload.rs"]
+mod analysis_payload;
+#[allow(dead_code)]
+#[path = "../dto.rs"]
+mod dto;
+#[allow(dead_code)]
+#[path = "../track_infos.rs"]
+mod track_infos;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -197,6 +207,9 @@ fn main() {
     let mut profile = 0usize;
     let mut store_detail = false;
     let mut dump: Option<PathBuf> = None;
+    let mut ui_busy: Option<(Duration, Duration)> = None;
+    let mut probe_reads: Option<Duration> = None;
+    let mut ui_busy_file: Option<PathBuf> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -213,6 +226,13 @@ fn main() {
             "--profile" => profile = it.next().unwrap().parse().unwrap(),
             "--dump" => dump = Some(PathBuf::from(it.next().unwrap())),
             "--store-detail" => store_detail = true,
+            "--ui-busy" => {
+                let spec = it.next().unwrap();
+                let (busy, period) = spec.split_once('/').expect("--ui-busy <busy ms>/<period ms>");
+                ui_busy = Some((Duration::from_millis(busy.parse().unwrap()), Duration::from_millis(period.parse().unwrap())));
+            }
+            "--ui-busy-file" => ui_busy_file = Some(PathBuf::from(it.next().unwrap())),
+            "--probe-reads" => probe_reads = Some(Duration::from_millis(it.next().unwrap().parse().unwrap())),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -260,6 +280,19 @@ fn main() {
         })
     };
 
+    let ui = ui_busy.map(|(busy, period)| {
+        let (stop, coordinator) = (stop.clone(), coordinator.clone());
+        std::thread::spawn(move || simulate_ui(&stop, &coordinator, started, busy, period))
+    });
+    let ui_from_file = ui_busy_file.map(|file| {
+        let (stop, coordinator) = (stop.clone(), coordinator.clone());
+        std::thread::spawn(move || follow_ui_busy_file(&stop, &coordinator, &file))
+    });
+    let reads = probe_reads.map(|every| {
+        let (stop, shared, ids) = (stop.clone(), shared.clone(), ids.clone());
+        std::thread::spawn(move || probe_row_reads(&stop, &shared, &ids, every))
+    });
+
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let outcome = runtime
         .block_on(async {
@@ -281,6 +314,26 @@ fn main() {
     let wall_s = started.elapsed().as_secs_f64();
     stop.store(true, Ordering::Relaxed);
     sampler.join().unwrap();
+    if let Some(ui) = ui {
+        let [(free_cpu, free_s), (busy_cpu, busy_s)] = ui.join().unwrap();
+        let (pauses, held) = coordinator.ui_pause_totals();
+        println!(
+            "UI busy={:?} held={pauses}x {:.1}s ({:.0}% of the run) cores_used_while_busy={:.1} cores_used_otherwise={:.1}",
+            ui_busy.unwrap(),
+            held.as_secs_f64(),
+            held.as_secs_f64() / wall_s * 100.0,
+            busy_cpu / busy_s,
+            free_cpu / free_s
+        );
+    }
+    if let Some(ui) = ui_from_file {
+        let signals = ui.join().unwrap();
+        let (pauses, held) = coordinator.ui_pause_totals();
+        println!("UI file signals={signals} held={pauses}x {:.1}s ({:.0}% of the run)", held.as_secs_f64(), held.as_secs_f64() / wall_s * 100.0);
+    }
+    if let Some(reads) = reads {
+        reads.join().unwrap().print();
+    }
 
     let (errors, total) = match outcome {
         RunOutcome::Finished { errors, total } => (errors, total),
@@ -362,4 +415,87 @@ fn check_stored_detail(cache: &std::path::Path, paths: &[PathBuf]) {
         println!("DETAIL identical={same} bytes={} cached_ms={cached_ms:.1} measured_ms={measured_ms:.0} measured_cpu={measured_cpu_s:.2}s {}", cached.len(), path.display());
     }
     println!("DETAIL stored={stored}/{} identical={identical}/{}", paths.len(), paths.len());
+}
+
+fn simulate_ui(stop: &AtomicBool, coordinator: &AnalysisCoordinator, started: Instant, busy: Duration, period: Duration) -> [(f64, f64); 2] {
+    const SIGNAL_EVERY: Duration = Duration::from_millis(200);
+    let mut cpu_and_seconds = [(0.0, 0.0); 2];
+    let (mut last_cpu, mut last_at) = (process_cpu_s(), Instant::now());
+    while !stop.load(Ordering::Relaxed) {
+        let phase = Duration::from_nanos((started.elapsed().as_nanos() % period.as_nanos()) as u64);
+        let in_busy = phase < busy;
+        if in_busy {
+            coordinator.ui_busy();
+            std::thread::sleep(SIGNAL_EVERY.min(busy - phase));
+        } else {
+            std::thread::sleep((period - phase).min(Duration::from_millis(50)));
+        }
+        let (cpu, at) = (process_cpu_s(), Instant::now());
+        let slot = &mut cpu_and_seconds[in_busy as usize];
+        slot.0 += cpu - last_cpu;
+        slot.1 += (at - last_at).as_secs_f64();
+        (last_cpu, last_at) = (cpu, at);
+    }
+    cpu_and_seconds
+}
+
+struct ReadProbe {
+    waits_ms: Vec<f64>,
+    calls_ms: Vec<f64>,
+}
+
+impl ReadProbe {
+    fn print(self) {
+        let pct = |v: &[f64], p: f64| {
+            let mut v = v.to_vec();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v.get(((v.len() as f64 * p) as usize).min(v.len().saturating_sub(1))).copied().unwrap_or(f64::NAN)
+        };
+        let over = |limit: f64| self.waits_ms.iter().filter(|&&w| w > limit).count();
+        println!(
+            "LOCK reads={} wait_p50={:.2}ms wait_p95={:.2}ms wait_p99={:.2}ms wait_max={:.1}ms waits_over_4ms={} waits_over_16ms={} call_p50={:.2}ms call_p95={:.2}ms",
+            self.waits_ms.len(),
+            pct(&self.waits_ms, 0.5),
+            pct(&self.waits_ms, 0.95),
+            pct(&self.waits_ms, 0.99),
+            self.waits_ms.iter().copied().fold(0.0, f64::max),
+            over(4.0),
+            over(16.0),
+            pct(&self.calls_ms, 0.5),
+            pct(&self.calls_ms, 0.95),
+        );
+    }
+}
+
+fn probe_row_reads(stop: &AtomicBool, shared: &Mutex<LocalLibrary>, ids: &[i64], every: Duration) -> ReadProbe {
+    let mut probe = ReadProbe { waits_ms: Vec::new(), calls_ms: Vec::new() };
+    let mut n = 0usize;
+    while !stop.load(Ordering::Relaxed) {
+        let id = ids[n % ids.len()];
+        n += 1;
+        let t = Instant::now();
+        let lib = shared.lock().unwrap();
+        probe.waits_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        analysis_payload::build_analysis_json(&lib, id).ok();
+        drop(lib);
+        probe.calls_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+        std::thread::sleep(every);
+    }
+    probe
+}
+
+fn follow_ui_busy_file(stop: &AtomicBool, coordinator: &AnalysisCoordinator, file: &std::path::Path) -> u64 {
+    let len = || std::fs::metadata(file).map_or(0, |m| m.len());
+    let mut seen = len();
+    let mut signals = 0;
+    while !stop.load(Ordering::Relaxed) {
+        let now = len();
+        if now > seen {
+            coordinator.ui_busy();
+            signals += now - seen;
+        }
+        seen = now;
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    signals
 }

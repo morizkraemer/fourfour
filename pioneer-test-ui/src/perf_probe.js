@@ -31,15 +31,11 @@
     return true;
   }
 
-  async function scroll(seconds, label) {
-    const el = document.querySelector('.ff-table__scroll');
-    if (!el) return send(`${label}_skipped`, { reason: 'no .ff-table__scroll' });
-    el.scrollTop = 0;
-    const gaps = [];
+  async function scrollGaps(el, ms, gaps) {
     const t0 = performance.now();
     let last = await frame();
     let direction = 1;
-    while (performance.now() - t0 < seconds * 1000) {
+    while (performance.now() - t0 < ms) {
       const max = el.scrollHeight - el.clientHeight;
       if (el.scrollTop >= max - 1) direction = -1;
       if (el.scrollTop <= 0) direction = 1;
@@ -47,6 +43,25 @@
       const now = await frame();
       gaps.push(now - last);
       last = now;
+    }
+  }
+
+  async function scroll(seconds, label) {
+    const el = document.querySelector('.ff-table__scroll');
+    if (!el) return send(`${label}_skipped`, { reason: 'no .ff-table__scroll' });
+    el.scrollTop = 0;
+    const gaps = [];
+    await scrollGaps(el, seconds * 1000, gaps);
+    send(label, frameStats(gaps));
+  }
+
+  async function scrollBursts(count, scrollMs, restMs, label) {
+    const el = document.querySelector('.ff-table__scroll');
+    if (!el) return send(`${label}_skipped`, { reason: 'no .ff-table__scroll' });
+    const gaps = [];
+    for (let i = 0; i < count; i++) {
+      await scrollGaps(el, scrollMs, gaps);
+      await sleep(restMs);
     }
     send(label, frameStats(gaps));
   }
@@ -105,6 +120,7 @@
       await sleep(cfg.analysisWarmupMs ?? 8000);
       send('scroll_analysis_start');
       await scroll(cfg.analysisScrollSeconds ?? 10, 'scroll_during_analysis');
+      if (cfg.analysisBursts) await scrollBursts(cfg.analysisBursts, 1500, 2500, 'scroll_bursts_during_analysis');
       await sleep(cfg.analysisRunMs ?? 0);
       await window.__TAURI_INTERNALS__.invoke('cancel_analysis').catch(() => {});
     }

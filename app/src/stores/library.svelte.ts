@@ -36,10 +36,12 @@ import {
   invalidateAnalysisCache,
   changeLibraryPath,
   resetLibrary as tauriResetLibrary,
+  signalAnalysisUiBusy,
   type TrackInfo,
   type PlaylistInput,
   type SyncReport
 } from '../services/tauri.svelte.ts';
+import { watchUiBusy } from '../services/ui-busy.ts';
 import { loadSticks } from './sticks.svelte.ts';
 import { onStickSyncFinished, stickSync, syncStick } from './stick-sync.svelte.ts';
 import {
@@ -1137,6 +1139,7 @@ export async function initLibrary() {
       listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
       listenToImportCovers(markCoversStored);
+      watchUiBusy(window, () => library.analyzing, signalAnalysisUiBusy);
       listenToWriteComplete(() => {
         library.syncing = false;
         library.statusMessage = 'Ready';
