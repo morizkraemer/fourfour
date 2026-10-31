@@ -188,6 +188,7 @@ fn main() {
     let mut unstaged = false;
     let mut fast_first = false;
     let mut profile = 0usize;
+    let mut store_detail = false;
     let mut dump: Option<PathBuf> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -204,6 +205,7 @@ fn main() {
             "--fast-first" => fast_first = true,
             "--profile" => profile = it.next().unwrap().parse().unwrap(),
             "--dump" => dump = Some(PathBuf::from(it.next().unwrap())),
+            "--store-detail" => store_detail = true,
             other => panic!("unknown argument {other}"),
         }
     }
@@ -229,7 +231,8 @@ fn main() {
     }
     let shared = Arc::new(Mutex::new(library));
 
-    let env = BackendEnv { override_backend: Some(backend), max_threads: threads, ..BackendEnv::default() };
+    let app_data_dir = store_detail.then(|| dir.clone());
+    let env = BackendEnv { override_backend: Some(backend), max_threads: threads, app_data_dir, ..BackendEnv::default() };
     let coordinator = AnalysisCoordinator::default().with_staging(!unstaged);
     let coordinator = if fast_first { coordinator.with_whole_jobs(0) } else { coordinator };
     let started = Instant::now();
@@ -327,5 +330,23 @@ fn main() {
             .collect();
         std::fs::write(file, serde_json::to_string(&stored).unwrap()).expect("write dump");
     }
+    if store_detail {
+        check_stored_detail(&dir.join("waveform-detail"), &paths);
+    }
     std::fs::remove_dir_all(&dir).ok();
+}
+
+fn check_stored_detail(cache: &std::path::Path, paths: &[PathBuf]) {
+    let stored = std::fs::read_dir(cache).map_or(0, |entries| {
+        entries.flatten().filter(|e| e.path().extension().is_some_and(|ext| ext == "ffwd")).count()
+    });
+    let mut identical = 0;
+    for path in paths {
+        let cached = waveform_detail::detail_bytes(cache, path).expect("detail from the cache");
+        let measured = band_analysis::measure_detail(path).expect("measure detail").to_bytes();
+        let same = cached == measured;
+        identical += same as usize;
+        println!("DETAIL identical={same} bytes={} {}", cached.len(), path.display());
+    }
+    println!("DETAIL stored={stored}/{} identical={identical}/{}", paths.len(), paths.len());
 }

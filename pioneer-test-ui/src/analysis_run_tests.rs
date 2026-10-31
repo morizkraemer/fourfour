@@ -586,3 +586,67 @@ async fn resumed_work_yields_to_a_played_track() {
     assert_eq!(h.count(&ran("t4.wav", Pass::All)), 1, "{:?}", h.events());
     assert!(h.unanalyzed().is_empty());
 }
+
+fn write_tone_wav(path: &Path, seconds: f64, hz: f64) {
+    let rate = 44_100u32;
+    let mut data = Vec::new();
+    for i in 0..(rate as f64 * seconds) as usize {
+        let t = i as f64 / rate as f64;
+        let left = ((2.0 * std::f64::consts::PI * hz * t).sin() * 12_000.0) as i16;
+        let right = ((2.0 * std::f64::consts::PI * hz * 3.1 * t).sin() * 9_000.0) as i16;
+        data.extend_from_slice(&left.to_le_bytes());
+        data.extend_from_slice(&right.to_le_bytes());
+    }
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&data);
+    std::fs::write(path, wav).unwrap();
+}
+
+#[tokio::test]
+async fn every_analysed_track_leaves_the_detail_series_the_app_would_measure_in_the_cache() {
+    let dir = std::env::temp_dir().join(format!("ff-run-detail-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut h = harness(0, 2, 8);
+    h.items = (1..=4)
+        .map(|n| {
+            let path = dir.join(format!("t{n}.wav"));
+            write_tone_wav(&path, 1.0 + n as f64 * 0.25, 60.0 * n as f64);
+            let t = Track { source_path: path.clone(), ..track(n) };
+            (h.shared.lock().unwrap().add_track(&t).unwrap(), path)
+        })
+        .collect();
+    let env = BackendEnv { app_data_dir: Some(dir.clone()), ..BackendEnv::default() };
+    let cache = dir.join(DETAIL_CACHE_DIR);
+
+    let outcome = run_with_runner(h.shared.clone(), h.coordinator.clone(), h.items.clone(), h.sink.clone(), env, Some(h.runner())).await.unwrap();
+    let stored = std::fs::read_dir(&cache).unwrap().count();
+    let pairs: Vec<_> = h
+        .items
+        .iter()
+        .map(|(_, path)| {
+            let cached = crate::waveform_detail::detail_bytes(&cache, path).unwrap();
+            (cached, crate::band_analysis::measure_detail(path).unwrap().to_bytes())
+        })
+        .collect();
+    let events = h.events();
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 4 }));
+    assert!(events.iter().any(|e| matches!(e, Event::Ran(_, Pass::Fast))), "the run mixes fast and whole passes: {events:?}");
+    assert_eq!(stored, 4);
+    for (cached, measured) in pairs {
+        assert_eq!(cached, measured);
+    }
+}
