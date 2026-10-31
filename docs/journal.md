@@ -355,3 +355,4 @@
 2026-10-31 18:14 orchestrator - landed: b7-keybar on ov-1028 (key band compression 0.75; Beatport test exact 116 -> 120/199 = 60.3%, dev 62.7 -> 66.4%; gain mostly leans minor, major-key tracks ~-5 pts; grid unchanged); checks green
 2026-10-31 18:36 orchestrator - landed: r5b-lock on ov-1028 (analysis lock hold per store 0.1-1.1 s -> ~1.4 ms, reader waits >16 ms 20-22 -> 0 per run, ANLZ bytes identical on 1000 fixture tracks; get_analysis_data scans outside the lock); checks green
 2026-10-31 19:12 orchestrator - landed: b12-sweep on ov-1028 (stale .staging folders removed at launch, backups skip staging, 0 build warnings; no flaky tests found under 24 busy loops); checks green
+2026-10-31 19:22 orchestrator - landed: b8-keylicence on ov-1028 (clean-fsl key model fit on CC0/CC BY FSL10K loops, Beatport test 56.3% vs 60.3% shipped; default unchanged, Waiting 4 updated); checks green
