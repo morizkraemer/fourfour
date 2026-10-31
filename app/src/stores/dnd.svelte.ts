@@ -5,6 +5,15 @@
 import { ROW_HEIGHT } from '../lib/rowWindow.ts';
 
 export type DragKind = 'tracks' | 'column' | 'playlist' | null;
+export type StickSurface = 'row' | 'strip' | 'board';
+
+/** The stick drop target under the pointer, if any, skipping the stick a drag started from. */
+export function stickTargetAt(clientX: number, clientY: number, except: string | null = null) {
+  const el = document.elementFromPoint(clientX, clientY)?.closest('[data-drop-stick-path]');
+  const path = el?.getAttribute('data-drop-stick-path') ?? null;
+  if (!el || !path || path === except) return { path: null, surface: null };
+  return { path, surface: (el.getAttribute('data-drop-surface') as StickSurface | null) ?? 'row' };
+}
 
 export const dnd = $state({
   kind: null as DragKind,
@@ -31,6 +40,12 @@ export const dnd = $state({
   dropCardPlaylistId: null as number | null,
   /** Organize-drawer stick card (volume path) receiving a drop */
   dropStickPath: null as string | null,
+  /** Which kind of stick target is hovered: a sidebar row, the put strip or the docked board */
+  dropStickSurface: null as StickSurface | null,
+  /** Playlists in a playlist drag */
+  playlistDragIds: [] as number[],
+  /** Stick the dragged playlist row came from, null when from the library */
+  playlistDragFromStick: null as string | null,
   /** Pointer is over the collapsed organize ribbon */
   dropRibbon: false,
   /** Pointer is over the player */
@@ -99,6 +114,7 @@ export function updateTrackDropTarget(clientX: number, clientY: number) {
   }
   dnd.dropCardPlaylistId = playlistCard ? Number(playlistCard.getAttribute('data-drop-playlist-id')) : null;
   dnd.dropStickPath = stickCard ? stickCard.getAttribute('data-drop-stick-path') : null;
+  dnd.dropStickSurface = stickCard ? ((stickCard.getAttribute('data-drop-surface') as StickSurface | null) ?? 'row') : null;
   if (playlistCard || stickCard) {
     dnd.dropNewPlaylist = false;
     dnd.dropPanelSourceId = null;
@@ -181,6 +197,9 @@ export function endDrag() {
   dnd.dropFolderId = null;
   dnd.dropCardPlaylistId = null;
   dnd.dropStickPath = null;
+  dnd.dropStickSurface = null;
+  dnd.playlistDragIds = [];
+  dnd.playlistDragFromStick = null;
   dnd.dropRibbon = false;
   dnd.dropPlayer = false;
   dnd.dropNewPlaylist = false;

@@ -1,5 +1,8 @@
 import { addTracksToPlaylist, library } from './library.svelte.ts';
-import { addPlaylistsToStick, addTracksToStickAll } from './sticks.svelte.ts';
+import { addPlaylistsToStick, addTracksToStickAll, stickName, stickPlaylistIds } from './sticks.svelte.ts';
+import { dnd } from './dnd.svelte.ts';
+import { playlistIdsInSelection } from '../lib/playlistSelection.ts';
+import { stickDropLabel } from '../lib/stickDrop.ts';
 import { expandOrganize, type OrganizeTarget } from './ui.svelte.ts';
 
 export type CardDropTarget =
@@ -62,17 +65,33 @@ export async function dropTracksOnCard(target: CardDropTarget, trackIds: number[
   return added;
 }
 
-export function playlistDropConfirmation(added: number): string {
-  return added > 0 ? 'Playlist on stick' : 'Already on stick';
+export function playlistDropConfirmation(added: number, copied = false): string {
+  if (added === 0) return 'Already on stick';
+  return copied ? 'Copied · Keep updated' : 'Playlist on stick';
 }
 
-/** Puts playlists on a stick; only playlists put on a stick are written to it. */
-export async function dropPlaylistsOnStick(volumePath: string, playlistIds: number[]): Promise<number> {
+/** Puts playlists on a stick, following the library ("Keep updated"); also how a playlist is copied from another stick. */
+export async function dropPlaylistsOnStick(volumePath: string, playlistIds: number[], copied = false): Promise<number> {
   const added = await addPlaylistsToStick(volumePath, playlistIds);
   const playlist = library.playlists.find((p) => p.id === playlistIds[0]);
   const cover = added > 0 && playlist ? firstCover(playlist.track_ids) : null;
-  showFlash(cardKey({ kind: 'stick', volumePath }), playlistDropConfirmation(added), added, cover);
+  showFlash(cardKey({ kind: 'stick', volumePath }), playlistDropConfirmation(added, copied), added, cover);
   return added;
+}
+
+/** What dropping the current drag on the hovered stick would do, in one line; empty when no stick is hovered. */
+export function hoveredStickDropLabel(): string {
+  const path = dnd.dropStickPath;
+  if (!path) return '';
+  if (dnd.kind === 'tracks') return stickDropLabel(stickName(path), { kind: 'tracks', count: dnd.trackIds.length });
+  if (dnd.kind !== 'playlist') return '';
+  const ids = playlistIdsInSelection(library.playlists, dnd.playlistDragIds);
+  const onStick = stickPlaylistIds(path);
+  return stickDropLabel(stickName(path), {
+    kind: 'playlist',
+    fromStick: dnd.playlistDragFromStick !== null,
+    alreadyThere: ids.length > 0 && ids.every((id) => onStick.includes(id)),
+  });
 }
 
 export function dropPlaylistOnStick(volumePath: string, playlistId: number): Promise<number> {

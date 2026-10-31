@@ -39,7 +39,8 @@ import {
   signalAnalysisUiBusy,
   type TrackInfo,
   type PlaylistInput,
-  type SyncReport
+  type SyncReport,
+  type UsbLastSync
 } from '../services/tauri.svelte.ts';
 import { watchUiBusy } from '../services/ui-busy.ts';
 import { loadSticks } from './sticks.svelte.ts';
@@ -363,6 +364,7 @@ export const library = $state({
   activeVolume: null as string | null,
   usbTracks: [] as any[],
   usbPlaylists: [] as any[],
+  usbLastSync: null as UsbLastSync | null,
 
   // App settings/status
   appVersion: '0.0.0',
@@ -596,7 +598,7 @@ export function markCoversStored(ids: number[]) {
   if (changed.length > 0) bumpLibraryTracks(changed);
 }
 
-function libraryTrackById(id: number) {
+export function libraryTrackById(id: number) {
   const tracks = library.tracks;
   const track = tracks[trackIndexById(id)];
   return track?.id === id ? track : tracks.find((t) => t.id === id);
@@ -1368,6 +1370,7 @@ export async function refreshVolumes() {
       library.activeVolume = null;
       library.usbTracks = [];
       library.usbPlaylists = [];
+      library.usbLastSync = null;
     }
   } catch (err) {
     console.error('refreshVolumes failed:', err);
@@ -1387,6 +1390,7 @@ export async function refreshUsbState() {
   if (!library.activeVolume) {
     library.usbTracks = [];
     library.usbPlaylists = [];
+    library.usbLastSync = null;
     return;
   }
   const volume = library.activeVolume;
@@ -1408,9 +1412,11 @@ export async function refreshUsbState() {
         filePath: t.usb_path
       }));
       library.usbPlaylists = res.playlists;
+      library.usbLastSync = res.last_sync ?? null;
     } else {
       library.usbTracks = [];
       library.usbPlaylists = [];
+      library.usbLastSync = null;
     }
   } catch (err) {
     console.error('refreshUsbState failed:', err);
@@ -1418,6 +1424,7 @@ export async function refreshUsbState() {
     library.statusMessage = 'Failed to read USB';
     library.usbTracks = [];
     library.usbPlaylists = [];
+    library.usbLastSync = null;
   }
 }
 
@@ -1726,6 +1733,7 @@ export async function resetLibraryDatabase() {
     library.libraryPath = dbPath;
     library.usbTracks = [];
     library.usbPlaylists = [];
+    library.usbLastSync = null;
     library.activeVolume = null;
 
     await loadState();

@@ -23,6 +23,8 @@
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import CommandPalette from './modules/CommandPalette.svelte';
   import StickSyncDialog from './modules/StickSyncDialog.svelte';
+  import StickView from './modules/StickView.svelte';
+  import StickDropTip from './modules/StickDropTip.svelte';
   import LibraryHealthDialog from './modules/LibraryHealthDialog.svelte';
   import ImportDuplicatesDialog from './modules/ImportDuplicatesDialog.svelte';
   import FileBlockedTip from './modules/FileBlockedTip.svelte';
@@ -61,6 +63,7 @@
   });
 
 
+  let stickOnLeft = $derived(library.volumes.includes(ui.activeSidebarRow) ? ui.activeSidebarRow : null);
   let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded);
 
   function onGlobalKeyDown(e) {
@@ -120,7 +123,11 @@
       </div>
       <div class="ff-browse__content" class:ff-browse__content--file-drop={fileDrop.overView} data-file-drop-content>
         <div class="ff-browse__slot ff-browse__slot--table" data-focus-region="tracks">
-          <TrackTable />
+          {#if stickOnLeft}
+            <StickView volumePath={stickOnLeft} />
+          {:else}
+            <TrackTable />
+          {/if}
         </div>
         {#if inspectorVisible}
           <div class="ff-browse__slot ff-browse__slot--detail" style:width="{ui.detailWidth}px">
@@ -158,6 +165,7 @@
 <Settings />
 <CommandPalette />
 <StickSyncDialog />
+<StickDropTip />
 <LibraryHealthDialog />
 <ImportDuplicatesDialog />
 <FileBlockedTip />

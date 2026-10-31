@@ -30,7 +30,7 @@
   import { PANEL_WIDTH } from '../lib/panelWidth.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
-  import { dnd, endDrag } from '../stores/dnd.svelte.ts';
+  import { dnd, endDrag, stickTargetAt, updatePointer } from '../stores/dnd.svelte.ts';
   import { dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
   import {
     sidebarSelection,
@@ -335,12 +335,14 @@
         moved = true;
         playlistDragIds = dragIds;
         dnd.kind = 'playlist';
+        dnd.playlistDragIds = dragIds;
+        dnd.playlistDragFromStick = null;
       }
       if (moved) {
-        const stick = !stickDroppable
-          ? null
-          : document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-stick-path]');
-        dnd.dropStickPath = stick ? stick.getAttribute('data-drop-stick-path') : null;
+        updatePointer(ev.clientX, ev.clientY);
+        const stick = stickDroppable ? stickTargetAt(ev.clientX, ev.clientY) : { path: null, surface: null };
+        dnd.dropStickPath = stick.path;
+        dnd.dropStickSurface = stick.surface;
         playlistDrop = playlistDropAt(ev.clientX, ev.clientY);
       }
     }
@@ -507,6 +509,7 @@
           class="ff-sidebar__drop-wrap"
           class:drag-over={(dnd.kind === 'playlist' || dnd.kind === 'tracks') && dnd.dropStickPath === row.path}
           data-drop-stick-path={row.path}
+          data-drop-surface="row"
           oncontextmenu={(e) => openSourceMenu(e, row.path, row.label, true, row.path)}
         >
           <SidebarRow
