@@ -30,6 +30,14 @@ baken (waveform rules)
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
 
+Key detection templates (FSL10K)
+  Used in: fourfour-analysis-rs/src/cyankey.rs (CLEAN_FSL)
+  Templates and calibration were fitted on CC0 / CC BY 3.0 loops of the
+  Freesound Loop Dataset (Ramires et al., ISMIR 2020, CC BY 4.0, Zenodo
+  3967852) and regularised towards the Krumhansl-Kessler (1982) profile.
+  The uploader credits ship with the app as models/LICENSE-key-model.txt
+  (source: scripts/mac/LICENSE-key-model.txt).
+
 Format facts (no code copied)
   PWV7 / PWV6 / PWVC in `.2EX`, band byte ranges and section order: Booth
   0.0.9 notes and cyanbox format docs (BSD-2), used as references only.

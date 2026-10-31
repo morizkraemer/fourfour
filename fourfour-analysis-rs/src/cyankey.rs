@@ -56,7 +56,7 @@ pub const CLEAN_FSL: KeyModel = KeyModel {
     shaath_tiebreak: false,
 };
 
-pub const SHIPPED: &KeyModel = &CYANBOX;
+pub const SHIPPED: &KeyModel = &CLEAN_FSL;
 
 const CLEAN_FSL_TEMPLATES: [[f64; NB_FEAT]; 2] = [
     [
@@ -474,8 +474,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shipped_model_is_cyanbox_and_both_models_resolve() {
-        assert_eq!(SHIPPED.name, "cyanbox");
+    fn shipped_model_is_clean_fsl_and_both_models_resolve() {
+        assert_eq!(SHIPPED.name, "clean-fsl");
         assert_eq!(model_by_name("cyanbox").map(|m| m.name), Some("cyanbox"));
         assert_eq!(model_by_name("clean-fsl").map(|m| m.name), Some("clean-fsl"));
         assert!(model_by_name("other").is_none());
@@ -486,8 +486,8 @@ mod tests {
         let rate = 44100;
         let tone = |f: f64, i: usize| (2.0 * PI * f * i as f64 / rate as f64).sin() as f32;
         let mono: Vec<f32> = (0..rate as usize * 12).map(|i| 0.3 * (tone(220.0, i) + tone(261.63, i) + tone(329.63, i) + tone(110.0, i))).collect();
-        let a = detect(&mono, rate, 2).unwrap();
-        let b = detect_with(&CLEAN_FSL, &mono, rate, 2).unwrap();
+        let a = detect_with(&CYANBOX, &mono, rate, 2).unwrap();
+        let b = detect(&mono, rate, 2).unwrap();
         assert_eq!(a.class, 21);
         assert_eq!(b.class, 21);
         assert!(b.confidence > 0.0 && b.confidence < 1.0);
