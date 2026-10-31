@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import type { LoadedState, TrackInfo } from '../src/services/tauri.svelte.ts';
 import { fixtureAnalysis, fixtureState } from './fixture.ts';
@@ -26,7 +26,10 @@ function rowBands(i: number) {
   return Buffer.from(bytes).toString('base64');
 }
 
+const REAL_STATE = process.env.FF_PERF_STATE;
+
 function state(): LoadedState {
+  if (REAL_STATE) return JSON.parse(readFileSync(REAL_STATE, 'utf8')) as LoadedState;
   const base = fixtureState();
   return { ...base, tracks: base.tracks.map((t, i) => ({ ...t, waveform_bands: rowBands(i) })) };
 }
@@ -241,6 +244,7 @@ test.describe('q50 perf paths', () => {
   test('startup, track load, import', async ({ browser }) => {
     const payload = state();
     record('tracks', TRACKS);
+    record('payload is the fixture library', REAL_STATE ? 1 : 0);
 
     const cold: Boot[] = [];
     const warm: Boot[] = [];
