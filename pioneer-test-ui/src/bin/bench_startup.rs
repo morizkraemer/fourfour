@@ -7,6 +7,7 @@ mod dto;
 #[allow(dead_code)]
 #[path = "../band_analysis.rs"]
 mod band_analysis;
+#[allow(dead_code)]
 #[path = "../track_infos.rs"]
 mod track_infos;
 #[allow(dead_code)]
