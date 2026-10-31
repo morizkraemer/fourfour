@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BOOT_SNAPSHOT_KEY,
   BOOT_SNAPSHOT_MAX_ROWS,
+  BOOT_SNAPSHOT_MIN_TRACKS,
   bootRowOf,
   bootRowTrack,
   bootSnapshotOf,
@@ -46,6 +47,8 @@ function track(id: number, extra: Record<string, unknown> = {}) {
   };
 }
 
+const library = (count: number) => Array.from({ length: count }, (_, i) => track(i + 1));
+
 let storage: ReturnType<typeof memoryStorage>;
 
 beforeEach(() => {
@@ -85,13 +88,23 @@ describe('boot snapshot rows', () => {
 
 describe('boot snapshot storage', () => {
   it('reads back only for the same library', () => {
-    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', [track(1)], 30));
-    expect(readBootSnapshot('/a/library.db')?.rows).toHaveLength(1);
+    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', library(BOOT_SNAPSHOT_MIN_TRACKS), 30));
+    expect(readBootSnapshot('/a/library.db')?.rows).toHaveLength(30);
     expect(readBootSnapshot('/b/library.db')).toBeNull();
   });
 
+  it('keeps no snapshot of a library below the size where it pays off, and drops one the library shrank under', () => {
+    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', library(BOOT_SNAPSHOT_MIN_TRACKS - 1), 30));
+    expect(storage.items.has(BOOT_SNAPSHOT_KEY)).toBe(false);
+    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', library(BOOT_SNAPSHOT_MIN_TRACKS), 30));
+    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', library(BOOT_SNAPSHOT_MIN_TRACKS - 1), 30));
+    expect(storage.items.has(BOOT_SNAPSHOT_KEY)).toBe(false);
+    storage.setItem(BOOT_SNAPSHOT_KEY, JSON.stringify(bootSnapshotOf('/a/library.db', 'v', library(100), 30)));
+    expect(readBootSnapshot('/a/library.db')).toBeNull();
+  });
+
   it('removes the snapshot when the view is empty', () => {
-    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', [track(1)], 30));
+    writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', library(BOOT_SNAPSHOT_MIN_TRACKS), 30));
     writeBootSnapshot(bootSnapshotOf('/a/library.db', 'v', [], 30));
     expect(storage.items.has(BOOT_SNAPSHOT_KEY)).toBe(false);
     expect(readBootSnapshot('/a/library.db')).toBeNull();

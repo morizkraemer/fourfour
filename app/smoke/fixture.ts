@@ -63,6 +63,11 @@ export function fixtureState(): LoadedState {
   return { tracks: fixtureTracks(), playlists: fixturePlaylists() };
 }
 
+/** The fixture with `count` tracks, the first ones as in `fixtureState`, for behaviour that depends on library size. */
+export function largeFixtureState(count: number): LoadedState {
+  return { tracks: Array.from({ length: count }, (_, i) => fixtureTrack(i)), playlists: fixturePlaylists() };
+}
+
 export function fixtureAnalysis(trackId: number) {
   const track = trackId >= 1 && trackId <= TRACK_COUNT ? fixtureTrack(trackId - 1) : undefined;
   if (!track) throw new Error(`fixture has no track ${trackId}`);
