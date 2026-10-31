@@ -338,3 +338,4 @@
 2026-10-31 13:36 orchestrator - decided: Waiting 26 per rec, skip boot snapshot below ~15k tracks (10k regression 100-170 ms), built with run item 4
 2026-10-31 13:36 orchestrator - failed: cargo test hung 1.4 h and 18 h in an analysis_run test (deadlock under load); stopped both runs, r8-check now has a 40 min timeout
 2026-10-31 13:36 orchestrator - spawn: r3-testhang (opus medium) root-cause the analysis_run deadlock; resumed r1-perf10k to rebase onto ov-1028 (conflicts in main.rs, bench_startup.rs, perf doc)
+2026-10-31 13:45 orchestrator - landed: ov-1028 b56a650 checks green (smoke 102, cargo 30 suites ok, vitest 820, svelte-check 0, build ok); no Mac install (offline)
