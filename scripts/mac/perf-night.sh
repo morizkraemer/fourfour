@@ -119,7 +119,7 @@ head -n 12 "${FF_FIXTURE_ROOT:-$HOME/.cache/ff-fixture}/$SIZE/long.txt" > "$OUT/
 headroom() {
   local name="$1" envs="$2" args="$3"
   if [ "$DRY" = 1 ]; then say "+ env $envs $BENCH --list $OUT/headroom-list.txt --limit 12 $args"; return 0; fi
-  env $envs "$BENCH" --list "$OUT/headroom-list.txt" --limit 12 $args > "$OUT/headroom-$name.txt" 2> "$OUT/headroom-$name.log" ||
+  env FOURFOUR_MODELS_DIR="${FOURFOUR_MODELS_DIR:-$HOME/.cache/fourfour-models}" $envs "$BENCH" --list "$OUT/headroom-list.txt" --limit 12 $args > "$OUT/headroom-$name.txt" 2> "$OUT/headroom-$name.log" ||
     say "headroom $name failed"
 }
 headroom before-threads "" "--threads $((CORES - 1))"
