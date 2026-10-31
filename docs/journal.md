@@ -365,3 +365,4 @@
 2026-10-31 17:50 orchestrator - run-pause: idle; nothing left without Merlin or the Mac (stash@{0} is prototyping-only, skipped)
 2026-10-31 19:24 orchestrator - resumed: PM relay (take recs, then own priorities); decided: land b13-cleankey on ov-1028 per Waiting 4 rec; spawn b14-cleankey60 (opus medium; licence-clean key model to >=60% Beatport test, FSL10K re-download allowed, Beatport eval only)
 2026-10-31 19:35 orchestrator - landed: b13-cleankey on ov-1028 (3e5ec61; shipped key model now CLEAN_FSL + attribution); smoke 112, vitest 832, CHECKS-OK
+2026-10-31 20:20 orchestrator - parked: b14-cleankey60 11784f5 (clean key v2 57.3% test, noise-level gain, extra FMA licence surface; Waiting 30 rec leave unlanded); run-pause: idle, nothing useful left without Merlin or the Mac; STATE trimmed (accepted/resolved Waiting moved to archive)
