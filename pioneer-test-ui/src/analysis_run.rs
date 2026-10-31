@@ -572,35 +572,34 @@ fn record_outcome(
     let total = coordinator.total().max(completed);
     let file_name = file_name_of(source_path);
     match outcome {
-        Ok((mut result, detail)) => {
+        Ok((result, detail)) => {
             let t_db = Instant::now();
-            let lib = shared.lock().map_err(|e| e.to_string())?;
-            let stored_track = lib.get_track(track_id).map_err(|e| e.to_string())?;
-            if stage == Stage::Grid {
-                if let Some(track) = &stored_track {
-                    result.key = track.key.clone();
+            let grid = stage == Stage::Grid;
+            let (stored, held) = store_analysis(shared, track_id, &result, analysis_stage::ALL, |track, analysis| {
+                if grid {
+                    if let Some(track) = track {
+                        analysis.key = track.key.clone();
+                    }
                 }
-            }
+                track.map(|track| models::Track { tempo: (analysis.bpm * 100.0) as u32, key: analysis.key.clone(), ..track.clone() })
+            })?;
             sink.log(
                 LogLevel::Ok,
                 format!(
                     "[{completed}/{total}] {file_name} — bpm={:.1} key={} beats={} cues={} {detail}",
-                    result.bpm,
-                    result.key,
-                    result.beat_grid.beats.len(),
-                    result.cue_points.len(),
+                    stored.bpm,
+                    stored.key,
+                    stored.beat_grid.beats.len(),
+                    stored.cue_points.len(),
                 ),
             );
-            if let Some(mut track) = stored_track {
-                track.tempo = (result.bpm * 100.0) as u32;
-                track.key = result.key.clone();
-                lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
-            }
-            lib.set_analysis(track_id, &result).map_err(|e| e.to_string())?;
-            drop(lib);
             sink.log(
                 LogLevel::Dim,
-                format!("[{completed}/{total}] {file_name} DB+ANLZ write {:.1}s", t_db.elapsed().as_secs_f64()),
+                format!(
+                    "[{completed}/{total}] {file_name} DB+ANLZ write {:.1}s, library lock held {:.1}ms",
+                    t_db.elapsed().as_secs_f64(),
+                    held.as_secs_f64() * 1000.0
+                ),
             );
             sink.progress(completed, total, format!("Analyzed {file_name} ({completed}/{total})"), track_id);
         }
@@ -613,6 +612,36 @@ fn record_outcome(
     Ok(())
 }
 
+fn store_analysis(
+    shared: &SharedLibrary,
+    track_id: i64,
+    analysis: &models::AnalysisResult,
+    stages: u8,
+    prepare: impl Fn(Option<&models::Track>, &mut models::AnalysisResult) -> Option<models::Track>,
+) -> Result<(models::AnalysisResult, Duration), String> {
+    let mut prepared = analysis.clone();
+    let (write, track_row, read_held) = {
+        let lib = shared.lock().map_err(|e| e.to_string())?;
+        let held = Instant::now();
+        let track = lib.get_track(track_id).map_err(|e| e.to_string())?;
+        let track_row = prepare(track.as_ref(), &mut prepared);
+        let write = lib.begin_analysis(track_id, &prepared, stages).map_err(|e| e.to_string())?;
+        (write, track_row, held.elapsed())
+    };
+    let staged = write.stage().map_err(|e| e.to_string())?;
+    let lib = shared.lock().map_err(|e| e.to_string())?;
+    let held = Instant::now();
+    if !lib.commit_analysis(staged, track_row.as_ref()).map_err(|e| e.to_string())? {
+        prepared = analysis.clone();
+        let track = lib.get_track(track_id).map_err(|e| e.to_string())?;
+        if let Some(track) = prepare(track.as_ref(), &mut prepared) {
+            lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
+        }
+        lib.set_analysis_stages(track_id, &prepared, stages).map_err(|e| e.to_string())?;
+    }
+    Ok((prepared, read_held + held.elapsed()))
+}
+
 fn store_fast_pass(
     shared: &SharedLibrary,
     sink: &Arc<dyn AnalysisSink>,
@@ -621,15 +650,9 @@ fn store_fast_pass(
     result: &models::AnalysisResult,
     detail: &str,
 ) -> Result<(), String> {
-    let lib = shared.lock().map_err(|e| e.to_string())?;
-    if !result.key.is_empty() {
-        if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
-            track.key = result.key.clone();
-            lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
-        }
-    }
-    lib.set_analysis_stages(track_id, result, FAST_STAGES).map_err(|e| e.to_string())?;
-    drop(lib);
+    store_analysis(shared, track_id, result, FAST_STAGES, |track, analysis| {
+        track.filter(|_| !analysis.key.is_empty()).map(|track| models::Track { key: analysis.key.clone(), ..track.clone() })
+    })?;
     sink.log(LogLevel::Dim, format!("{} waveform+key stored key={} {detail}", file_name_of(source_path), result.key));
     sink.partial(track_id);
     Ok(())
@@ -639,17 +662,11 @@ fn partial_store(shared: &SharedLibrary, sink: &Arc<dyn AnalysisSink>, track_id:
     let (shared, sink, file_name) = (shared.clone(), sink.clone(), file_name_of(source_path));
     Arc::new(move |partial| {
         let stages = if partial.key.is_empty() { analysis_stage::WAVEFORM } else { FAST_STAGES };
-        let stored = shared.lock().map_err(|e| e.to_string()).and_then(|lib| {
-            if stages == FAST_STAGES {
-                if let Some(mut track) = lib.get_track(track_id).map_err(|e| e.to_string())? {
-                    track.key = partial.key.clone();
-                    lib.update_track(track_id, &track).map_err(|e| e.to_string())?;
-                }
-            }
-            lib.set_analysis_stages(track_id, &partial, stages).map_err(|e| e.to_string())
+        let stored = store_analysis(&shared, track_id, &partial, stages, |track, analysis| {
+            track.filter(|_| stages == FAST_STAGES).map(|track| models::Track { key: analysis.key.clone(), ..track.clone() })
         });
         match stored {
-            Ok(()) => {
+            Ok(_) => {
                 sink.log(LogLevel::Dim, format!("{file_name} waveform ready key={} {:.1}s", partial.key, started.elapsed().as_secs_f64()));
                 sink.partial(track_id);
             }
