@@ -47,3 +47,49 @@ Split at 50k warm, after: bundle eval to first IPC about 170 ms, `load_state` re
 - Sidecar label scan: 50k directory reads on every start (230 ms at 50k).
 - Window shown on first frame: the window already opens on `#0a0a0a`, so no white flash; not changed.
 - Google Fonts stylesheet in `index.html` can hold the first script until it loads; no effect measured here (fast network), could stall an offline Mac.
+
+## R2b startup at 10k-50k (2026-10-31)
+
+Branch `worktree-agent-a0ac75e69e0fcf50f` from `ov-1028`. Linux `dev` box, headless Chromium, release `bench_startup`, same r2 bench libraries and payloads.
+
+**Changed**
+
+- Track mapping: track objects are plain data. The four derived row fields (`cover`, `rowCover`, `status`, `bands`) no longer sit on each object as getters; one shared proxy handler around each row's `$state` proxy computes them on read. Per-row reactivity, `'bands' in row`, identity in other state and the `bumpLibraryTracks(changedIds)` contract are unchanged (`library-rows.test.ts`). Mapping 50k tracks: about 330 ms to 40-115 ms. Map chunks yield through a `MessageChannel` instead of nested `setTimeout(0)`, which Chromium clamps to 4 ms after five levels.
+- Sidecar labels: `load_state` reads ratings and colours from `track-labels.json` next to `library.db` (the last scan), trusted while the `anlz` folder's mtime is unchanged (no track folder added or removed). Setting a rating updates the cache; a Rekordbox import drops it. After the list is on screen the app calls `refresh_track_labels`, which scans every track folder off the UI thread and returns only what changed outside the app; rows take it through `bumpLibraryTracks`. First launch (no cache) scans as before.
+- `load_state`'s list query no longer reads the row preview blobs it then dropped.
+- Fonts: Geist and Geist Mono are bundled (`app/src/assets/fonts`, OFL 1.1, same faces, weights and unicode ranges as the Google stylesheet). Nothing at start touches the network.
+- Search text warmup after the first rows builds each haystack with one `toLowerCase` (less GC at 50k).
+
+**Backend** (`bench_startup run`, before = `ov-1028` binary, after = this branch, interleaved; median of 3 cold (page cache of the library files dropped with `posix_fadvise`) and 5 warm runs; load 14.2-16.3)
+
+| Tracks | `load_state` cold before / after | warm before / after | labels scan (now after first paint) |
+|---|---:|---:|---:|
+| 10k | 84 / 66 ms | 87 / 65 ms | 47 ms |
+| 25k | 260 / 178 ms | 238 / 173 ms | 108 ms |
+| 50k | 449 / 334 ms | 446 / 319 ms | 222 ms |
+
+**Frontend** (`app/smoke/perf-startup.spec.ts`, backend time simulated with the warm medians above; each run is the spec's median of 3; before/after are the medians of 2-3 such runs at load 9-14.4)
+
+| Tracks | Case | First row before / after | Real rows before / after | Interactive before / after |
+|---|---|---:|---:|---:|
+| 10k | first launch | 750 / 680 ms | 750 / 680 ms | 812 / 740 ms |
+| 10k | cold | 495 / 501 ms | 895 / 859 ms | 895 / 873 ms |
+| 10k | warm | 238 / 264 ms | 509 / 525 ms | 677 / 525 ms |
+| 25k | first launch | 1,010 / 878 ms | 1,011 / 878 ms | 1,041 / 1,074 ms |
+| 25k | cold | 481 / 471 ms | 1,073 / 932 ms | 1,234 / 932 ms |
+| 25k | warm | 238 / 282 ms | 722 / 681 ms | 860 / 906 ms |
+| 50k | first launch | 1,532 / 1,150 ms | 1,532 / 1,150 ms | 1,784 / 1,546 ms |
+| 50k | cold | 467 / 457 ms | 1,484 / 1,245 ms | 1,691 / 1,518 ms |
+| 50k | warm | 262 / 277 ms | 1,296 / 896 ms | 1,711 / 1,263 ms |
+
+Split at 50k warm, after: `load_state` answered at about 750-960 ms, mapping 40-115 ms, `$state` proxies for 50k rows 100-145 ms, first real row 130-200 ms after the answer.
+
+**The 10k regression is real.** Same build, 10k, with and without the boot snapshot (`FF_PERF_NO_SNAPSHOT`), load about 11: real rows cold 859 / 689 ms, warm 496 / 399 ms. The snapshot paint keeps the main thread busy when the `load_state` answer lands (answered 776 vs 566 ms cold). Boot rows without waveforms cut about half of it (cold 750, warm 442 ms): the row waveform canvases are drawn for the boot rows and again for the real ones. At 25k-50k the answer lands well after the snapshot paint, so the snapshot is a clean win there. Not fixed here; options are in the run report.
+
+**Read with care.** Runs at load 9-16 still swing 50-150 ms between sets (see the 10k and 25k warm rows); differences under about 80 ms are noise.
+
+**Next**
+
+- `$state` proxy creation for every row (100-145 ms at 50k) is now the biggest frontend step; creating them lazily needs care, because a proxy created inside an effect does not register that effect as its reader.
+- Idle-time search index warmup still costs about 100 ms of CPU at 50k right after the first rows.
+- The list query itself (240 ms at 50k) walks the `analyses` rows with their preview blobs; a covering index would avoid that but is a schema change.
