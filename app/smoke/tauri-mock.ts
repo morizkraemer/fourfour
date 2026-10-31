@@ -206,7 +206,13 @@ export function installTauriMock(initial: LoadedState) {
         return w.__smokePickPath;
       case 'load_state':
         if (w.__smokeHoldLoad) await new Promise<void>((done) => (w.__smokeReleaseLoad = done));
-        return { tracks, playlists };
+        return { tracks: tracks.map(({ waveform_bands: _bands, waveform_preview: _preview, ...listed }) => listed), playlists };
+      case 'get_row_previews': {
+        const wanted = new Set(args.trackIds as number[]);
+        return tracks
+          .filter((t) => wanted.has(t.id) && (t.waveform_bands || t.waveform_preview))
+          .map((t) => ({ id: t.id, waveform_bands: t.waveform_bands ?? undefined, waveform_preview: t.waveform_preview ?? undefined }));
+      }
       case 'save_state':
         playlists = args.playlists;
         return null;

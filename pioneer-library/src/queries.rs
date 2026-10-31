@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -277,6 +277,19 @@ pub fn select_missing_row_preview_ids(conn: &Connection) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE row_preview IS NULL ORDER BY track_id")?;
     let rows = stmt.query_map([], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn select_row_previews_of(conn: &Connection, track_ids: &[i64]) -> Result<Vec<(i64, Vec<u8>)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT track_id, row_preview FROM analyses WHERE track_id = ?1 AND row_preview IS NOT NULL",
+    )?;
+    let mut out = Vec::with_capacity(track_ids.len());
+    for id in track_ids {
+        if let Some(row) = stmt.query_row([id], |row| Ok((row.get(0)?, row.get(1)?))).optional()? {
+            out.push(row);
+        }
+    }
+    Ok(out)
 }
 
 pub fn update_row_preview(conn: &Connection, track_id: i64, row_preview: &[u8]) -> Result<()> {

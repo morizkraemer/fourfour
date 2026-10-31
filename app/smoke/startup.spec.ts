@@ -65,6 +65,22 @@ test('the last open list paints from the boot snapshot, then the real load repla
   expect(await bootSnapshotIds(second)).toEqual(expect.arrayContaining([2, 3]));
 });
 
+test('rows on screen fetch their previews after the list loads', async ({ page }) => {
+  const base = fixtureState();
+  const bands = Buffer.from(new Uint8Array(384).map((_, i) => 20 + (i % 90))).toString('base64');
+  await openApp(page, { ...base, tracks: base.tracks.map((t) => ({ ...t, waveform_bands: bands })) });
+  await releaseLoad(page);
+  await page.locator('[data-track-row]').first().waitFor();
+  const asked = async () =>
+    (await page.evaluate(() => (window as unknown as SmokeWindow).__smokeInvokes.filter((i) => i.cmd === 'get_row_previews')))
+      .flatMap((i) => (i.args as { trackIds: number[] }).trackIds);
+  await expect.poll(asked).toContain(1);
+  const ids = await asked();
+  expect(new Set(ids).size).toBe(ids.length);
+  const shown = await page.locator('[data-track-row]').evaluateAll((rows) => rows.map((r) => Number((r as HTMLElement).dataset.rowIndex) + 1));
+  expect(ids).toEqual(expect.arrayContaining(shown));
+});
+
 test('a snapshot from another library is not shown', async ({ page }) => {
   await page.addInitScript(() =>
     localStorage.setItem(

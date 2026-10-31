@@ -23,6 +23,7 @@
     filterTracks,
     sidebarSourceLabel,
     isTrackAnalyzing,
+    requestRowPreviews,
   } from '../stores/library.svelte.ts';
   import { commitTrackRating } from '../stores/track-edits.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
@@ -270,6 +271,10 @@
   let endRow = $derived(rowWin.endRow);
   let poolSize = $derived(rowWin.poolSize);
   let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
+
+  $effect(() => {
+    requestRowPreviews(currentTracks.slice(firstRow, endRow));
+  });
 
   const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
 

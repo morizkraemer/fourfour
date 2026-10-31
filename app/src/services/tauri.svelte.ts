@@ -412,6 +412,21 @@ export async function loadState(): Promise<LoadedState> {
   }
 }
 
+export interface RowPreviewInfo {
+  id: number;
+  waveform_bands?: string;
+  waveform_preview?: string;
+}
+
+export async function getRowPreviews(trackIds: number[]): Promise<RowPreviewInfo[]> {
+  try {
+    return await invoke<RowPreviewInfo[]>('get_row_previews', { trackIds });
+  } catch (err) {
+    if (useBrowserMocks()) return [];
+    throw err;
+  }
+}
+
 export async function saveState(playlists: PlaylistInput[]): Promise<void> {
   try {
     return await invoke<void>('save_state', { playlists });

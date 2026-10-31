@@ -631,6 +631,14 @@ impl LocalLibrary {
         Ok(missing.len())
     }
 
+    /// Stored row previews of the given tracks; tracks without one are left out.
+    pub fn get_row_previews_of(&self, track_ids: &[i64]) -> Result<Vec<(i64, RowPreview)>> {
+        Ok(queries::select_row_previews_of(&self.conn, track_ids)?
+            .into_iter()
+            .map(|(id, blob)| (id, RowPreview::from_blob(blob)))
+            .collect())
+    }
+
     /// Retrieve all tracks that have analysis data, with artwork included.
     /// Returns parallel vecs suitable for passing to the writer.
     pub fn get_analyzed_tracks(&self) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
@@ -1582,6 +1590,13 @@ mod tests {
         }
         assert_eq!(rows.iter().find(|r| i64::from(r.id) == plain).unwrap().analysis_stages, None);
         assert_eq!(lib.get_incomplete_analysis_ids().unwrap(), vec![imported]);
+
+        let ids: Vec<i64> = rows.iter().map(|r| i64::from(r.id)).chain([999_999]).collect();
+        let some: Vec<(i64, RowPreview)> = lib.get_row_previews_of(&ids).unwrap();
+        assert!(!some.is_empty());
+        assert!(some.iter().all(|(id, preview)| previews.get(id) == Some(preview)));
+        assert_eq!(some.len(), previews.len());
+        assert!(lib.get_row_previews_of(&[plain, 999_999]).unwrap().is_empty());
     }
 
     #[test]

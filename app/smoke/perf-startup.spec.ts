@@ -1,4 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { installTauriMock } from './tauri-mock.ts';
 
@@ -6,12 +8,13 @@ const PAYLOADS = (process.env.FF_PERF_STARTUP ?? '')
   .split(',')
   .filter(Boolean)
   .map((entry) => {
-    const [tracks, path] = entry.split('=');
-    return { tracks: Number(tracks), path };
+    const [tracks, path, previews] = entry.split('=');
+    return { tracks: Number(tracks), path, previews };
   });
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 3);
 const REPORT = process.env.FF_PERF_STARTUP_OUT;
 const BLOCK_FONTS = !!process.env.FF_PERF_BLOCK_FONTS;
+const NO_SNAPSHOT = !!process.env.FF_PERF_NO_SNAPSHOT;
 
 interface Boot {
   firstInvoke: number;
@@ -40,7 +43,7 @@ interface Probe {
   longTasks: { start: number; duration: number }[];
 }
 
-function installProbes() {
+function installProbes(payloadUrl: string) {
   const w = window as unknown as {
     __boot: Probe;
     __TAURI_INTERNALS__: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> };
@@ -58,9 +61,13 @@ function installProbes() {
   const invoke = w.__TAURI_INTERNALS__.invoke;
   w.__TAURI_INTERNALS__.invoke = async (cmd, args = {}) => {
     if (!w.__boot.firstInvoke) w.__boot.firstInvoke = performance.now();
+    if (cmd === 'get_row_previews') {
+      const ids = (args.trackIds as number[]).join(',');
+      return (await fetch(payloadUrl.replace('/state.json', `/previews?ids=${ids}`))).json();
+    }
     if (cmd !== 'load_state') return invoke(cmd, args);
     w.__boot.loadRequested = performance.now();
-    const response = await fetch('/__perf/load_state');
+    const response = await fetch(payloadUrl);
     const text = await response.text();
     const fetched = performance.now();
     const state = JSON.parse(text);
@@ -74,12 +81,38 @@ function installProbes() {
   };
 }
 
-async function newContext(browser: Browser, body: Buffer, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>) {
+type Previews = Map<number, { id: number; waveform_bands?: string; waveform_preview?: string }>;
+
+function previewsOf(path: string | undefined): Previews {
+  const previews: Previews = new Map();
+  if (!path) return previews;
+  for (const t of JSON.parse(readFileSync(path, 'utf8')).tracks) {
+    if (t.waveform_bands || t.waveform_preview) previews.set(t.id, { id: t.id, waveform_bands: t.waveform_bands, waveform_preview: t.waveform_preview });
+  }
+  return previews;
+}
+
+function servePayload(body: Buffer, previews: Previews): Promise<{ server: Server; url: string }> {
+  const server = createServer((req, res) => {
+    const headers = { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+    if (req.url?.startsWith('/previews')) {
+      const ids = (new URL(req.url, 'http://x').searchParams.get('ids') ?? '').split(',').map(Number);
+      res.writeHead(200, headers);
+      res.end(JSON.stringify(ids.flatMap((id) => previews.get(id) ?? [])));
+      return;
+    }
+    res.writeHead(200, headers);
+    res.end(body);
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/state.json` })));
+}
+
+async function newContext(browser: Browser, payloadUrl: string, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>) {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, storageState });
-  await context.route('**/__perf/load_state', (route) => route.fulfill({ status: 200, contentType: 'application/json', body }));
   if (BLOCK_FONTS) await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
+  if (NO_SNAPSHOT) await context.addInitScript(() => localStorage.removeItem('fourfour.bootSnapshot.v1'));
   await context.addInitScript(installTauriMock, { tracks: [], playlists: [] });
-  await context.addInitScript(installProbes);
+  await context.addInitScript(installProbes, payloadUrl);
   return context;
 }
 
@@ -122,13 +155,13 @@ test.describe('startup at scale', () => {
 
   test('boot to first row and interactive', async ({ browser }) => {
     const report: Record<string, Record<string, number>> = {};
-    for (const { tracks, path } of PAYLOADS) {
-      const body = readFileSync(path);
+    for (const { tracks, path, previews } of PAYLOADS) {
+      const { server, url } = await servePayload(readFileSync(path), previewsOf(previews));
       const first: Boot[] = [];
       const cold: Boot[] = [];
       const warm: Boot[] = [];
       for (let run = 0; run < RUNS; run++) {
-        const seed = await newContext(browser, body);
+        const seed = await newContext(browser, url);
         const seedPage = await seed.newPage();
         await seedPage.goto('/');
         first.push(await bootMetrics(seedPage));
@@ -136,7 +169,7 @@ test.describe('startup at scale', () => {
         const saved = await seed.storageState();
         await seed.close();
 
-        const context = await newContext(browser, body, saved);
+        const context = await newContext(browser, url, saved);
         const page = await context.newPage();
         await page.goto('/');
         cold.push(await bootMetrics(page));
@@ -144,6 +177,7 @@ test.describe('startup at scale', () => {
         warm.push(await bootMetrics(page));
         await context.close();
       }
+      server.close();
       report[`${tracks} first launch`] = summarise(first);
       report[`${tracks} cold`] = summarise(cold);
       report[`${tracks} warm`] = summarise(warm);

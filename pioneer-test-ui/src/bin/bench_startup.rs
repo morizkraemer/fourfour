@@ -127,7 +127,11 @@ fn run(dir: &Path) {
     drop(labels);
 
     let t = Instant::now();
-    let infos = track_infos::build_track_infos(&lib).unwrap();
+    let infos = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        track_infos::build_track_infos(&lib).unwrap()
+    } else {
+        track_infos::list_track_infos(&lib).unwrap()
+    };
     let build_ms = ms(t);
 
     let t = Instant::now();
@@ -167,7 +171,10 @@ fn run(dir: &Path) {
 
 fn dump(dir: &Path, out: &Path) {
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let state = track_infos::loaded_state(&lib).unwrap();
+    let mut state = track_infos::loaded_state(&lib).unwrap();
+    if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        state.tracks = track_infos::build_track_infos(&lib).unwrap();
+    }
     std::fs::write(out, serde_json::to_vec(&state).unwrap()).unwrap();
 }
 
