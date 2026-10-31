@@ -55,6 +55,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 25. [accepted 2026-10-31 per rec] Boot snapshot shows the last All Tracks view (first ~40 rows, inert until the real load); reopening the last playlist on start is not built - rec: keep All Tracks - branch: ov-1028
 26. [accepted 2026-10-31 per rec] Boot snapshot is skipped below ~15k tracks (at 10k it delays real rows 100-170 ms because both lists paint waveforms; the real list lands within ~100 ms there anyway) - rec: keep - branch: to build in run item 4
 28. [accepted 2026-10-31 per rec] r6 import adds an additive `pending_artwork` table (no version bump) so covers stored after the rows survive a quit - rec: keep - branch: ov-1028
+29. UI headroom (r5): analysis now uses cores-2 and holds new model chunks while you scroll (500 ms idle); a running chunk (~5 s) can't be stopped, so short flicks gain little. Background QoS (E-cores only) is behind FF_ANALYSIS_QOS=background - rec: keep defaults, decide on background QoS after the Mac night measures it - branch: ov-1028
 27. Analysis speed is capped by the beat model on CPU (91% of time; ~8 trk/min on dev, 10k = ~18 h). Only a new runtime moves it: onnxruntime + CoreML (GPU/Neural Engine) on the Mac, or fused attention. Not bit-identical, needs the grid/key evals - rec: try onnxruntime+CoreML on a branch, measure on a Mac night, keep only if evals hold - branch: none
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -100,7 +101,7 @@ review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with l
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
-progress 2026-10-31: merged 0, 1, 2, 3 (first BPM in seconds; throughput model-bound, Waiting 27), 4 (+ stored detail r7: zoom open 3 ms), test-hang fix; 9 dmg built. Running: 5 (r5-headroom), 6 (r6-import). Next: week 2 beta items 7-12
+progress 2026-10-31: merged 0, 1, 2, 3 (first BPM in seconds; throughput model-bound, Waiting 27), 4 (+ stored detail r7: zoom open 3 ms), test-hang fix; 9 dmg built. merged 5 (headroom), 6 (import + sync cover fix). Running: r5b-lock (analysis writes off the library lock), 7 (b7-keybar). Next: 8-12
 ### Visible Mac batch
 - perf night: scripts/mac/perf-night.sh --size 10k --build (r1; startup, scroll, analysis timings) - needs the Mac online + Merlin's go
 - install ov-1028 + dmg check (scripts/mac/check-dmg.sh)
