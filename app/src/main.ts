@@ -1,3 +1,4 @@
+import './assets/fonts/geist.css';
 import { mount } from 'svelte';
 import App from './App.svelte';
 import { suppressNativeContextMenu } from './lib/native-menu.ts';
