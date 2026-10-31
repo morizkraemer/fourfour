@@ -21,6 +21,8 @@ function readRun(file) {
     interactive_ms: firstRow && interactive ? firstRow.ms + (interactive.values.at_page_ms - firstRow.values.page_ms) : undefined,
     longest_frame_after_first_row_ms: interactive?.values.longest_frame_ms,
     track_load_ms: by('track_load')?.values.player_ready_ms_median,
+    first_expand: by('first_expand')?.values,
+    first_expand_skipped: by('first_expand_skipped')?.values.reason,
     scroll_idle: by('scroll_idle')?.values,
     scroll_analysis: by('scroll_during_analysis')?.values,
     scroll_bursts: by('scroll_bursts_during_analysis')?.values,
@@ -66,6 +68,19 @@ for (const r of runs) {
 if (analysis?.scroll_analysis) {
   const s = analysis.scroll_analysis;
   lines.push('', `Scroll during analysis: ${s.frames} frames, p50 ${fmt(s.frame_p50_ms)} ms, p95 ${fmt(s.frame_p95_ms)} ms, max ${fmt(s.frame_max_ms)} ms, ${s.frames_dropped} dropped, ${s.long_frames} frames over 50 ms (${fmt(s.long_frame_ms_total)} ms). WKWebView has no long-task API; frames over 50 ms stand in for long tasks.`);
+}
+
+const expandRuns = runs.filter((r) => /^app-run-expand-\d+\.jsonl$/.test(r.file));
+if (expandRuns.length) {
+  const measured = expandRuns.map((r) => r.first_expand).filter(Boolean);
+  const longest = median(measured.map((e) => e.longest_frame_ms).filter(Number.isFinite));
+  const drawn = median(measured.map((e) => e.drawn_ms).filter(Number.isFinite));
+  lines.push('', '## Cold first expand (R10)', '', `Median of ${measured.length} launches: longest frame ${fmt(longest)} ms, click to detail drawn ${fmt(drawn)} ms. Trigger for the staged reveal (perf-run-2026-11.md, R10 option 1): median longest frame over 50 ms (${typeof longest === 'number' ? (longest > 50 ? 'over: build it' : 'under: not needed') : 'missing'}).`, '');
+  lines.push('| run | longest frame ms | click to drawn ms | frames > 50 ms |', '|---|---:|---:|---:|');
+  for (const r of expandRuns) {
+    const e = r.first_expand ?? {};
+    lines.push(`| ${r.file}${r.first_expand_skipped ? ` (skipped: ${r.first_expand_skipped})` : ''} | ${fmt(e.longest_frame_ms)} | ${fmt(e.drawn_ms)} | ${fmt(e.long_frames)} |`);
+  }
 }
 
 const headroomRuns = runs.filter((r) => r.file.startsWith('app-run-analysis'));
