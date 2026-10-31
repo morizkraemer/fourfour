@@ -9,6 +9,8 @@ import {
   getVersion,
   getLibraryPath,
   loadState as tauriLoadState,
+  getRowPreviews,
+  refreshTrackLabels,
   resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
   planImport,
@@ -47,6 +49,7 @@ import {
   readyAnalysisFields,
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
+import { readBootSnapshot, type BootSnapshot } from './boot-snapshot.ts';
 import { artwork } from './artwork.svelte.ts';
 import { loadCuesFromPayload } from './cues.svelte.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
@@ -270,9 +273,32 @@ export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
 let recentlyAddedCount = 0;
 let analyzingIds = $state.raw<number[]>([]);
 
+type TrackRow = Record<string, any>;
+
+const TRACK_VIEW_FIELDS: Record<string, (row: TrackRow) => unknown> = Object.assign(Object.create(null), {
+  cover: (row: TrackRow) => artwork.get(row.id, row.raw?.has_artwork),
+  rowCover: (row: TrackRow) => artwork.getRow(row.id, row.raw?.has_artwork),
+  status: (row: TrackRow) => fileStateGlyph(fileStateOf(row.id)),
+  bands: (row: TrackRow) => {
+    rowPreviewVersion;
+    if (row.bandsPreview) return rowBandsFromBandBytes(row.bandsPreview);
+    return row.preview ? rowBandsFor(row.preview) : rowBandsFromWire(row.bandsWire);
+  },
+});
+
+const trackRowHandler: ProxyHandler<TrackRow> = {
+  get(row, key, receiver) {
+    const view = typeof key === 'string' ? TRACK_VIEW_FIELDS[key] : undefined;
+    return view ? view(receiver) : Reflect.get(row, key, receiver);
+  },
+  has(row, key) {
+    return key in TRACK_VIEW_FIELDS || Reflect.has(row, key);
+  },
+};
+
 function reactiveTrack<T extends object>(track: T): T {
   const row = $state(track);
-  return row;
+  return new Proxy(row, trackRowHandler) as T;
 }
 
 /**
@@ -307,11 +333,6 @@ function plainValue(value: unknown): unknown {
   return value !== null && typeof value === 'object' && isPlainContainer(value) ? $state.snapshot(value) : value;
 }
 
-function isAccessor(object: object, key: string): boolean {
-  const descriptor = Object.getOwnPropertyDescriptor(object, key);
-  return descriptor !== undefined && !('value' in descriptor);
-}
-
 function copyRowFieldsToPlainTracks(ids: number[]) {
   untrack(() => {
     for (const id of ids) {
@@ -319,10 +340,7 @@ function copyRowFieldsToPlainTracks(ids: number[]) {
       const row = trackList[i];
       const plain = plainTracks[i];
       if (!row || plain?.id !== id || row === plain) continue;
-      for (const key of Object.keys(row)) {
-        if (isAccessor(plain, key)) continue;
-        plain[key] = plainValue(row[key]);
-      }
+      for (const key of Object.keys(row)) plain[key] = plainValue(row[key]);
     }
   });
 }
@@ -347,6 +365,7 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   tracksLoaded: false,
+  bootSnapshot: null as BootSnapshot | null,
   analyzing: false,
   /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
   get analyzingTrackIds(): number[] {
@@ -476,28 +495,16 @@ function scheduleSearchIndexWarmup() {
   }, WARMUP_DELAY_MS);
 }
 
+const text = (value: unknown) => (value == null ? '' : String(value));
+
 function trackHaystack(track: Record<string, unknown>): string {
-  const raw = track.raw as Record<string, unknown> | undefined;
-  return [
-    track.title,
-    track.artist,
-    track.album,
-    track.label,
-    track.genre,
-    track.key,
-    track.bpm,
-    track.time,
-    track.filePath,
-    track.index,
-    raw?.title,
-    raw?.artist,
-    raw?.album,
-    raw?.genre,
-    raw?.key,
-    raw?.source_path,
-  ]
-    .map((v) => String(v ?? '').toLowerCase())
-    .join(' ');
+  const raw = (track.raw ?? {}) as Record<string, unknown>;
+  return (
+    text(track.title) + ' ' + text(track.artist) + ' ' + text(track.album) + ' ' + text(track.label) + ' ' +
+    text(track.genre) + ' ' + text(track.key) + ' ' + text(track.bpm) + ' ' + text(track.time) + ' ' +
+    text(track.filePath) + ' ' + text(track.index) + ' ' + text(raw.title) + ' ' + text(raw.artist) + ' ' +
+    text(raw.album) + ' ' + text(raw.genre) + ' ' + text(raw.key) + ' ' + text(raw.source_path)
+  ).toLowerCase();
 }
 
 /**
@@ -892,7 +899,6 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined)
     timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
   }
 
-  // Prefer the authoritative DB flag; fall back to tempo for browser mocks.
   const analyzed = t.has_analysis ?? t.tempo > 0;
 
   const local: Record<string, any> = {
@@ -918,39 +924,83 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined)
     analyzed,
     analysisPending: t.analysis_pending ?? false,
     raw: t,
-    get cover() {
-      return artwork.get(this.id, this.raw?.has_artwork);
-    },
-    get rowCover() {
-      return artwork.getRow(this.id, this.raw?.has_artwork);
-    },
-    get status() {
-      return fileStateGlyph(fileStateOf(this.id));
-    },
-    get bands() {
-      if (this.bandsPreview) return rowBandsFromBandBytes(this.bandsPreview);
-      return this.preview ? rowBandsFor(this.preview) : rowBandsFromWire(this.bandsWire);
-    },
   };
 
-  if (t.waveform_bands) {
-    local.bandsWire = t.waveform_bands;
-  } else {
-    const preview = decodeTrackPreview(t.waveform_preview);
-    if (preview && isValidWaveformPreview(preview)) {
-      local.preview = Uint8Array.from(preview);
-    }
-  }
-
+  applyWirePreview(local, t);
   return local;
+}
+
+function applyWirePreview(local: Record<string, any>, wire: { waveform_bands?: string | number[] | null; waveform_preview?: string | number[] | null }) {
+  if (wire.waveform_bands) {
+    local.bandsWire = wire.waveform_bands;
+    return;
+  }
+  const preview = decodeTrackPreview(wire.waveform_preview);
+  if (preview && isValidWaveformPreview(preview)) local.preview = Uint8Array.from(preview);
+}
+
+let rowPreviewVersion = $state(0);
+const rowPreviewAsked = new WeakSet<object>();
+let rowPreviewQueue: Record<string, any>[] = [];
+
+function hasRowPreview(track: Record<string, any>) {
+  return !!(track.bandsWire || track.preview || track.bandsPreview);
+}
+
+/**
+ * The list answer carries no row previews; rows on screen ask for theirs here, batched into one
+ * `get_row_previews` call per task. Each track object asks once, so a reload (new objects) asks again.
+ */
+export function requestRowPreviews(tracks: readonly (Record<string, any> | undefined)[]) {
+  const queued = rowPreviewQueue.length;
+  for (const track of tracks) {
+    if (!track || !track.analyzed || hasRowPreview(track) || rowPreviewAsked.has(track)) continue;
+    rowPreviewAsked.add(track);
+    rowPreviewQueue.push(track);
+  }
+  if (queued === 0 && rowPreviewQueue.length > 0) queueMicrotask(flushRowPreviews);
+}
+
+async function flushRowPreviews() {
+  const batch = rowPreviewQueue;
+  rowPreviewQueue = [];
+  if (batch.length === 0) return;
+  let answers;
+  try {
+    answers = await getRowPreviews(batch.map((t) => t.id));
+  } catch (err) {
+    for (const track of batch) rowPreviewAsked.delete(track);
+    console.warn('row previews unavailable:', err);
+    return;
+  }
+  const byId = new Map(answers.map((a) => [a.id, a]));
+  let changed = false;
+  for (const track of batch) {
+    const answer = byId.get(track.id);
+    if (!answer || hasRowPreview(track)) continue;
+    applyWirePreview(track, answer);
+    changed ||= hasRowPreview(track);
+  }
+  if (changed) rowPreviewVersion++;
 }
 
 const TRACK_MAP_CHUNK = 2500;
 
+function nextTask(): Promise<void> {
+  const channel = new MessageChannel();
+  return new Promise((resolve) => {
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
+  });
+}
+
 async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>, firstIndex = 0) {
   const mapped: Record<string, any>[] = new Array(tracks.length);
   for (let start = 0; start < tracks.length; start += TRACK_MAP_CHUNK) {
-    if (start > 0) await new Promise((resolve) => setTimeout(resolve, 0));
+    if (start > 0) await nextTask();
     const end = Math.min(tracks.length, start + TRACK_MAP_CHUNK);
     for (let i = start; i < end; i++) mapped[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
   }
@@ -980,7 +1030,27 @@ export async function loadState() {
     throw err;
   } finally {
     library.tracksLoaded = true;
+    library.bootSnapshot = null;
   }
+}
+
+async function applyChangedTrackLabels() {
+  let changes;
+  try {
+    changes = await refreshTrackLabels();
+  } catch (err) {
+    console.warn('track labels not refreshed:', err);
+    return;
+  }
+  const ids: number[] = [];
+  for (const change of changes) {
+    const track = libraryTrackById(change.id);
+    if (!track) continue;
+    track.rating = change.rating ?? 0;
+    track.color = change.color ?? null;
+    ids.push(change.id);
+  }
+  if (ids.length > 0) bumpLibraryTracks(ids);
 }
 
 /**
@@ -1033,8 +1103,10 @@ export async function initLibrary() {
     const [version, path] = await Promise.all([getVersion(), getLibraryPath()]);
     library.appVersion = version;
     library.libraryPath = path;
+    if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
+    whenIdle(() => void applyChangedTrackLabels());
     await refreshVolumes();
 
     if (!libraryListenersInstalled) {

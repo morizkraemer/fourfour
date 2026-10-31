@@ -1,8 +1,8 @@
-use pioneer_library::{LocalLibrary, RowPreview, analysis_stage};
+use pioneer_library::{LocalLibrary, RowPreview, TrackLabelsReader, analysis_stage};
 
 pub use pioneer_library::{effective_preview, row_bands};
 
-use crate::dto::TrackInfo;
+use crate::dto::{LoadedState, PlaylistInput, RowPreviewInfo, TrackInfo, TrackLabelInfo};
 
 /// Build TrackInfo list from the library's tracks + flags.
 ///
@@ -16,21 +16,21 @@ use crate::dto::TrackInfo;
 /// stays consistent with the player strip — see #waveform-bug.
 pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
     lib.backfill_row_previews().map_err(|e| e.to_string())?;
+    track_infos(lib, true)
+}
+
+fn track_infos(lib: &LocalLibrary, with_previews: bool) -> Result<Vec<TrackInfo>, String> {
     let labels_reader = lib.track_labels_reader();
     let (rows, mut labels) = std::thread::scope(|scope| {
-        let labels = scope.spawn(|| labels_reader.read_all());
-        let rows = lib.get_track_list_rows();
+        let labels = scope.spawn(|| labels_reader.read_cached());
+        let rows = if with_previews { lib.get_track_list_rows() } else { lib.get_track_list_rows_without_previews() };
         (rows, labels.join().expect("track label reader panicked"))
     });
     let rows = rows.map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let (waveform_bands, waveform_preview) = match row.row_preview {
-                Some(RowPreview::Bands(bands)) => (Some(bands), None),
-                Some(RowPreview::Mono(mono)) => (None, Some(mono)),
-                Some(RowPreview::None) | None => (None, None),
-            };
+            let (waveform_bands, waveform_preview) = row.row_preview.map_or((None, None), split_preview);
             let labels = labels.remove(&i64::from(row.id));
             TrackInfo {
                 id: row.id,
@@ -55,4 +55,65 @@ pub fn build_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
             }
         })
         .collect())
+}
+
+fn split_preview(preview: RowPreview) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+    match preview {
+        RowPreview::Bands(bands) => (Some(bands), None),
+        RowPreview::Mono(mono) => (None, Some(mono)),
+        RowPreview::None => (None, None),
+    }
+}
+
+/// The track list without row previews: the list fetches them for the rows on screen with [`row_preview_infos`].
+pub fn list_track_infos(lib: &LocalLibrary) -> Result<Vec<TrackInfo>, String> {
+    lib.backfill_row_previews().map_err(|e| e.to_string())?;
+    track_infos(lib, false)
+}
+
+pub fn row_preview_infos(lib: &LocalLibrary, track_ids: &[u32]) -> Result<Vec<RowPreviewInfo>, String> {
+    let ids: Vec<i64> = track_ids.iter().map(|&id| i64::from(id)).collect();
+    Ok(lib
+        .get_row_previews_of(&ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|(id, preview)| {
+            let (waveform_bands, waveform_preview) = split_preview(preview);
+            (waveform_bands.is_some() || waveform_preview.is_some()).then(|| RowPreviewInfo {
+                id: id as u32,
+                waveform_bands,
+                waveform_preview,
+            })
+        })
+        .collect())
+}
+
+/// Ratings and colours that changed in the sidecar files since the labels `load_state` served were cached.
+pub fn changed_track_labels(reader: &TrackLabelsReader) -> Vec<TrackLabelInfo> {
+    reader
+        .refresh()
+        .into_iter()
+        .map(|(id, labels)| TrackLabelInfo {
+            id: id as u32,
+            rating: labels.as_ref().and_then(|l| l.rating),
+            color: labels.and_then(|l| l.color),
+        })
+        .collect()
+}
+
+pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
+    let tracks = list_track_infos(lib)?;
+    let playlists = lib
+        .get_all_playlists()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|pl| PlaylistInput {
+            id: pl.id,
+            name: pl.name,
+            track_ids: pl.track_ids,
+            parent_id: pl.parent_id,
+            is_folder: pl.is_folder,
+        })
+        .collect();
+    Ok(LoadedState { tracks, playlists })
 }

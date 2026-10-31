@@ -397,9 +397,20 @@ export async function updateTrackFields(trackId: number, edits: TrackFieldEdits)
   }
 }
 
+let earlyLoadState: Promise<LoadedState> | null = null;
+
+/** Starts `load_state` before the UI mounts, so the backend reads the library while the bundle builds the first frame. */
+export function startLoadStateEarly() {
+  if (!getIsTauri() || earlyLoadState) return;
+  earlyLoadState = invoke<LoadedState>('load_state');
+  earlyLoadState.catch(() => {});
+}
+
 export async function loadState(): Promise<LoadedState> {
+  const early = earlyLoadState;
+  earlyLoadState = null;
   try {
-    const res = await invoke<LoadedState>('load_state');
+    const res = await (early ?? invoke<LoadedState>('load_state'));
     lastTauriError = 'invoke(load_state) OK';
     return res;
   } catch (err) {
@@ -410,6 +421,32 @@ export async function loadState(): Promise<LoadedState> {
     }
     throw err;
   }
+}
+
+export interface RowPreviewInfo {
+  id: number;
+  waveform_bands?: string;
+  waveform_preview?: string;
+}
+
+export async function getRowPreviews(trackIds: number[]): Promise<RowPreviewInfo[]> {
+  try {
+    return await invoke<RowPreviewInfo[]>('get_row_previews', { trackIds });
+  } catch (err) {
+    if (useBrowserMocks()) return [];
+    throw err;
+  }
+}
+
+export interface TrackLabelInfo {
+  id: number;
+  rating: number | null;
+  color: string | null;
+}
+
+export async function refreshTrackLabels(): Promise<TrackLabelInfo[]> {
+  if (!getIsTauri()) return [];
+  return (await invoke<TrackLabelInfo[] | undefined>('refresh_track_labels')) ?? [];
 }
 
 export async function saveState(playlists: PlaylistInput[]): Promise<void> {

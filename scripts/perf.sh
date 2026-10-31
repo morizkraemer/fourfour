@@ -145,7 +145,7 @@ fi
 if ! skip frontend; then
   STATE_ENV=()
   if [ -n "$SIZE" ]; then
-    bench bench_startup state-json "$LIB" "$RAW/state.json"
+    bench bench_startup dump "$LIB" "$RAW/state.json"
     STATE_ENV=(FF_PERF_STATE="$RAW/state.json")
   fi
   say "frontend: production build + smoke Tauri mock at $TRACKS tracks (startup, track load, import, steady-state UI)"

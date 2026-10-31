@@ -130,8 +130,22 @@ fn run(dir: &Path) {
     let labels_ms = ms(t);
     drop(labels);
 
+    let reader = lib.track_labels_reader();
+    let had_cache = dir.join(pioneer_library::LABELS_CACHE_FILE).exists();
     let t = Instant::now();
-    let infos = track_infos::build_track_infos(&lib).unwrap();
+    drop(reader.read_cached());
+    let labels_cached_ms = ms(t);
+
+    let t = Instant::now();
+    let changed = track_infos::changed_track_labels(&reader).len();
+    let labels_refresh_ms = ms(t);
+
+    let t = Instant::now();
+    let infos = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        track_infos::build_track_infos(&lib).unwrap()
+    } else {
+        track_infos::list_track_infos(&lib).unwrap()
+    };
     let build_ms = ms(t);
 
     let t = Instant::now();
@@ -149,7 +163,7 @@ fn run(dir: &Path) {
     let json_ms = ms(t);
 
     println!(
-        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
+        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} labels_cached_ms={labels_cached_ms:.1} (cache before: {had_cache}) labels_refresh_ms={labels_refresh_ms:.1} (changed {changed}) build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
         json.len(),
         build_ms + playlists_ms + json_ms,
     );
@@ -160,6 +174,8 @@ fn run(dir: &Path) {
             "open_ms": open_ms,
             "track_rows_ms": rows_ms,
             "track_labels_ms": labels_ms,
+            "track_labels_cached_ms": labels_cached_ms,
+            "track_labels_refresh_ms": labels_refresh_ms,
             "build_track_infos_ms": build_ms,
             "playlists_ms": playlists_ms,
             "json_ms": json_ms,
@@ -167,6 +183,15 @@ fn run(dir: &Path) {
             "load_state_ms": build_ms + playlists_ms + json_ms,
         }),
     );
+}
+
+fn dump(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut state = track_infos::loaded_state(&lib).unwrap();
+    if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        state.tracks = track_infos::build_track_infos(&lib).unwrap();
+    }
+    std::fs::write(out, serde_json::to_vec(&state).unwrap()).unwrap();
 }
 
 fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
@@ -762,23 +787,12 @@ fn fixture_lib(music: &Path, dir: &Path, analysed: f64, seed: u64) {
     );
 }
 
-fn state_json(dir: &Path, out: &Path) {
-    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let infos = track_infos::build_track_infos(&lib).unwrap();
-    let playlists: Vec<PlaylistInput> = lib
-        .get_all_playlists()
-        .unwrap()
-        .into_iter()
-        .map(|pl| PlaylistInput { id: pl.id, name: pl.name, track_ids: pl.track_ids, parent_id: pl.parent_id, is_folder: pl.is_folder })
-        .collect();
-    std::fs::write(out, serde_json::to_string(&LoadedState { tracks: infos, playlists }).unwrap()).unwrap();
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
+        Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
@@ -792,9 +806,8 @@ fn main() {
             args.get(4).map_or(0.7, |a| a.parse().unwrap()),
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
-        Some("state-json") => state_json(Path::new(&args[2]), Path::new(&args[3])),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | fixture-lib <music dir> <library dir> [analysed share] [seed] | state-json <library dir> <out.json>"
+            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }
