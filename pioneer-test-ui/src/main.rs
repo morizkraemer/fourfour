@@ -120,7 +120,7 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
     std::thread::spawn(move || loop {
         let mut unsent: Vec<u32> = Vec::new();
         let mut last_emit = std::time::Instant::now();
-        let result = import_plan::store_pending_covers(&library, &mut |ids| {
+        let result = import_plan::store_pending_covers(&library, None, &mut |ids| {
             unsent.extend(ids);
             if last_emit.elapsed() >= COVER_EVENT_INTERVAL {
                 app.emit("import-covers", std::mem::take(&mut unsent)).ok();
@@ -415,13 +415,14 @@ fn write_usb(
 ) -> Result<models::SyncReport, String> {
     debug_info(&app, &format!("USB sync → {output_dir}"));
 
-    let lib = state.lock().map_err(|e| e.to_string())?;
-
-    // Save playlists to library before writing
-    sync_playlists_to_library(&lib, &playlists)?;
-
     let out = Path::new(&output_dir);
     volumes::require_removable_volume(out)?;
+
+    sync_playlists_to_library(&*state.lock().map_err(|e| e.to_string())?, &playlists)?;
+    let whole_library = pioneer_library::SyncTarget { volume: out.to_path_buf(), selection: pioneer_library::SyncSelection::WholeLibrary };
+    import_plan::store_covers_for_sync(&state, &[whole_library])?;
+
+    let lib = state.lock().map_err(|e| e.to_string())?;
     let report = lib.sync_usb(out).map_err(|e| e.to_string())?;
 
     debug_ok(&app, &format!(
@@ -463,10 +464,7 @@ async fn sync_usb_many(
         for target in &targets {
             volumes::require_removable_volume(&target.volume)?;
         }
-        let prepared = {
-            let lib = shared.lock().map_err(|e| e.to_string())?;
-            lib.prepare_multi_sync(&targets).map_err(|e| format!("{e:#}"))?
-        };
+        let prepared = import_plan::prepare_sync_with_covers(&shared, &targets)?;
         Ok(prepared.run(&TauriSyncSink(app)))
     })
     .await

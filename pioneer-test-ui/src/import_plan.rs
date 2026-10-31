@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use pioneer_library::{DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, LocalLibrary};
+use pioneer_library::{DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, LocalLibrary, PreparedMultiSync, SyncTarget};
 use pioneer_usb_writer::models::Track;
 use pioneer_usb_writer::scanner::{read_track_metadata, AUDIO_EXTENSIONS};
 use serde::Serialize;
@@ -311,8 +311,12 @@ const COVER_BATCH: usize = 32;
 /// files and stores them until the queue is empty: one thread reads the next batch while this
 /// one stores the last, and the library is locked only to take a batch and to store it.
 /// `on_stored` gets the ids of each batch's tracks that got a cover. Returns how many covers
-/// were stored.
-pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut(Vec<u32>)) -> Result<usize, String> {
+/// were stored. With `only`, tracks outside that set stay queued.
+pub fn store_pending_covers(
+    lib: &Mutex<LocalLibrary>,
+    only: Option<&HashSet<i64>>,
+    on_stored: &mut dyn FnMut(Vec<u32>),
+) -> Result<usize, String> {
     type Batch = Result<Vec<(i64, PathBuf, Option<Vec<u8>>)>, String>;
     let mut stored = 0;
     loop {
@@ -323,15 +327,19 @@ pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut
                 let mut after = 0;
                 loop {
                     let pending = lib.lock().map_err(|e| e.to_string()).and_then(|l| l.pending_artwork(after, COVER_BATCH).map_err(|e| e.to_string()));
-                    let batch = match pending {
-                        Ok(batch) if batch.is_empty() => return,
-                        Ok(batch) => batch,
+                    let page = match pending {
+                        Ok(page) if page.is_empty() => return,
+                        Ok(page) => page,
                         Err(e) => {
                             sender.send(Err(e)).ok();
                             return;
                         }
                     };
-                    after = batch.last().map_or(after, |(id, _)| *id);
+                    after = page.last().map_or(after, |(id, _)| *id);
+                    let batch: Vec<_> = page.into_iter().filter(|(id, _)| only.is_none_or(|ids| ids.contains(id))).collect();
+                    if batch.is_empty() {
+                        continue;
+                    }
                     let files: Vec<&Path> = batch.iter().map(|(_, path)| path.as_path()).collect();
                     let covers = read_parallel(COVER_THREADS, &files, |path| read_track_metadata(path, 0).ok().and_then(|t| t.artwork), &mut || {});
                     let read = batch.into_iter().zip(covers).map(|((id, path), cover)| (id, path, cover)).collect();
@@ -356,6 +364,20 @@ pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut
             return Ok(stored);
         }
     }
+}
+
+/// Stores the queued covers of the tracks the targets may write; the others stay queued.
+pub fn store_covers_for_sync(lib: &Mutex<LocalLibrary>, targets: &[SyncTarget]) -> Result<usize, String> {
+    let wanted = lib.lock().map_err(|e| e.to_string())?.sync_track_ids(targets).map_err(|e| format!("{e:#}"))?;
+    store_pending_covers(lib, Some(&wanted), &mut |_| {})
+}
+
+/// `prepare_multi_sync` after the covers of the tracks the targets will write are stored:
+/// imported covers are filled in the background, and a stick written before that would get
+/// no artwork. Tracks the targets do not write stay queued.
+pub fn prepare_sync_with_covers(lib: &Mutex<LocalLibrary>, targets: &[SyncTarget]) -> Result<PreparedMultiSync, String> {
+    store_covers_for_sync(lib, targets)?;
+    lib.lock().map_err(|e| e.to_string())?.prepare_multi_sync(targets).map_err(|e| format!("{e:#}"))
 }
 
 #[derive(Debug)]
@@ -712,7 +734,7 @@ mod tests {
         let ids = lib.add_tracks_covers_later(&scanned.tracks).unwrap();
         let lib = Mutex::new(lib);
         let mut announced = Vec::new();
-        let stored = store_pending_covers(&lib, &mut |ids| announced.extend(ids)).unwrap();
+        let stored = store_pending_covers(&lib, None, &mut |ids| announced.extend(ids)).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
 
         let lib = lib.into_inner().unwrap();

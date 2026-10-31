@@ -159,6 +159,31 @@ pub struct PreparedMultiSync {
 }
 
 impl LocalLibrary {
+    /// Ids of the tracks the targets may write: the analyzed tracks for a whole-library
+    /// target, the playlists' and chosen tracks for the others.
+    pub fn sync_track_ids(&self, targets: &[SyncTarget]) -> Result<HashSet<i64>> {
+        let mut ids = HashSet::new();
+        let mut playlists = None;
+        for target in targets {
+            match &target.selection {
+                SyncSelection::WholeLibrary => {
+                    ids.extend(self.complete_analysis_track_ids()?);
+                }
+                SyncSelection::Playlists { playlist_ids, track_ids } => {
+                    let all = match &playlists {
+                        Some(all) => all,
+                        None => playlists.insert(self.get_all_playlists()?),
+                    };
+                    ids.extend(track_ids.iter().copied());
+                    for playlist in selected_playlist_tree(all, playlist_ids) {
+                        ids.extend(playlist.track_ids.iter().map(|&id| id as i64));
+                    }
+                }
+            }
+        }
+        Ok(ids)
+    }
+
     /// Read the library once and prepare every distinct selection once.
     ///
     /// Rejects the whole call when two targets are the same directory or one

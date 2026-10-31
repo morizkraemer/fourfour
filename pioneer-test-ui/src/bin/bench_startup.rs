@@ -456,7 +456,7 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let commit_ms = ms(t);
     let lib = std::sync::Mutex::new(lib);
     let t = Instant::now();
-    let covers = import_plan::store_pending_covers(&lib, &mut |_| {}).unwrap();
+    let covers = import_plan::store_pending_covers(&lib, None, &mut |_| {}).unwrap();
     let covers_ms = ms(t);
     let lib = lib.into_inner().unwrap();
     println!(
@@ -700,7 +700,7 @@ fn fixture_lib(music: &Path, dir: &Path, analysed: f64, seed: u64) {
     let t = Instant::now();
     let ids = lib.add_tracks_covers_later(&scanned).unwrap();
     let lib = std::sync::Mutex::new(lib);
-    let with_art = import_plan::store_pending_covers(&lib, &mut |_| {}).unwrap();
+    let with_art = import_plan::store_pending_covers(&lib, None, &mut |_| {}).unwrap();
     let lib = lib.into_inner().unwrap();
     let add_ms = ms(t);
 
