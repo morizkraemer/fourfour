@@ -226,11 +226,15 @@ impl LocalLibrary {
             return write();
         };
         let pragma = |name: &str| self.conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get::<_, i64>(0));
-        let (autocheckpoint, synchronous) = (pragma("wal_autocheckpoint")?, pragma("synchronous")?);
-        self.conn.execute_batch("PRAGMA wal_autocheckpoint=0; PRAGMA synchronous=NORMAL")?;
+        let (autocheckpoint, synchronous, cache) = (pragma("wal_autocheckpoint")?, pragma("synchronous")?, pragma("cache_size")?);
+        self.conn.execute_batch(&format!(
+            "PRAGMA wal_autocheckpoint=0; PRAGMA synchronous=NORMAL; PRAGMA cache_size={}",
+            BULK_WRITE_CACHE_KIB.min(cache)
+        ))?;
         let written = write();
-        self.conn
-            .execute_batch(&format!("PRAGMA wal_autocheckpoint={autocheckpoint}; PRAGMA synchronous={synchronous}"))?;
+        self.conn.execute_batch(&format!(
+            "PRAGMA wal_autocheckpoint={autocheckpoint}; PRAGMA synchronous={synchronous}; PRAGMA cache_size={cache}"
+        ))?;
         let value = written?;
         checkpoint_in_background(db_path.clone());
         Ok(value)
@@ -949,6 +953,10 @@ impl LocalLibrary {
 /// Remap sparse library IDs to dense 1-based USB IDs.
 /// Copies the write-ahead log into the database file from a second connection. Passive: it
 /// never waits for, or blocks, the library's own reads and writes.
+/// Page cache for a bulk write, as SQLite's negative KiB: the default 2 MB spills the track
+/// indexes of a 25k-file import to the log mid-transaction.
+const BULK_WRITE_CACHE_KIB: i64 = -65_536;
+
 fn checkpoint_in_background(db_path: PathBuf) {
     std::thread::spawn(move || {
         let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
