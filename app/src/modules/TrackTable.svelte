@@ -23,6 +23,7 @@
     filterTracks,
     sidebarSourceLabel,
     isTrackAnalyzing,
+    requestRowPreviews,
   } from '../stores/library.svelte.ts';
   import { commitTrackRating } from '../stores/track-edits.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
@@ -60,6 +61,7 @@
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
   import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
+  import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
@@ -233,6 +235,29 @@
 
   let columns = $derived(visibleColumns(layoutKind));
 
+  let bootView = $derived(`${layoutKind}|${layout.sortKey ?? ''}|${layout.sortDir ?? ''}`);
+  let showsBootView = $derived(!embedded && (effectiveSource ?? 'All Tracks') === 'All Tracks' && !ui.listFilter.trim() && !showOnlyProblems);
+  let bootRows = $derived.by(() => {
+    const snapshot = library.bootSnapshot;
+    if (!snapshot || library.tracksLoaded || !showsBootView || snapshot.view !== bootView) return null;
+    return snapshot.rows.map(bootRowTrack);
+  });
+  let booting = $derived(currentTracks.length === 0 && bootRows !== null);
+  let shownTracks = $derived(booting ? bootRows : currentTracks);
+
+  const BOOT_SNAPSHOT_IDLE_MS = 1500;
+  let bootSnapshotTimer;
+  $effect(() => {
+    if (!library.tracksLoaded || !showsBootView || viewportHeight === 0) return;
+    const tracks = currentTracks;
+    const path = library.libraryPath;
+    const view = bootView;
+    const rows = Math.ceil(viewportHeight / ROW_HEIGHT) + 2;
+    clearTimeout(bootSnapshotTimer);
+    bootSnapshotTimer = setTimeout(() => writeBootSnapshot(bootSnapshotOf(path, view, tracks, rows)), BOOT_SNAPSHOT_IDLE_MS);
+    return () => clearTimeout(bootSnapshotTimer);
+  });
+
   let overscan = $state(0);
   let offscreenRowsScheduled = false;
   $effect(() => {
@@ -242,12 +267,16 @@
   });
 
   let rowWin = $derived(
-    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length, overscan })
+    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: shownTracks.length, overscan })
   );
   let firstRow = $derived(rowWin.firstRow);
   let endRow = $derived(rowWin.endRow);
   let poolSize = $derived(rowWin.poolSize);
   let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
+
+  $effect(() => {
+    requestRowPreviews(currentTracks.slice(firstRow, endRow));
+  });
 
   const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
 
@@ -706,7 +735,10 @@
         data-row-count={currentTracks.length}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
-        style:height={spacerHeight(currentTracks.length) !== undefined ? `${spacerHeight(currentTracks.length)}px` : undefined}
+        style:height={spacerHeight(shownTracks.length) !== undefined ? `${spacerHeight(shownTracks.length)}px` : undefined}
+        data-table-boot={booting ? '' : undefined}
+        aria-busy={booting ? 'true' : undefined}
+        inert={booting}
         role="list"
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
@@ -717,7 +749,7 @@
           <DropLine />
         </div>
       {/if}
-      {#if currentTracks.length === 0 && !library.tracksLoaded}
+      {#if shownTracks.length === 0 && !library.tracksLoaded}
         <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
           {#each skeletonRows as row (row)}
             <div class="ff-table__skeleton-row" style:--skeleton-text="{55 + ((row * 17) % 40)}%">
@@ -725,7 +757,7 @@
             </div>
           {/each}
         </div>
-      {:else if currentTracks.length === 0}
+      {:else if shownTracks.length === 0}
         <div class="ff-table__empty-container ff-table__empty-drop">
           <EmptyState
             title="No tracks in this view"
@@ -737,13 +769,14 @@
       {:else}
         {#each poolSlots as slot (slot)}
           {@const index = indexForSlot(slot, firstRow, poolSize)}
-          {@const track = index < endRow ? currentTracks[index] : undefined}
+          {@const track = index < endRow ? shownTracks[index] : undefined}
           {@const fileState = track && !isUsbView ? fileStateOf(track.id) : undefined}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="ff-table__row"
-            data-track-row={track ? '' : undefined}
+            data-track-row={track && !booting ? '' : undefined}
+            data-boot-row={track && booting ? '' : undefined}
             data-row-index={index}
             data-file-status={fileState}
             title={fileState ? fileStateTooltip(fileState, track.filePath) : undefined}
@@ -759,8 +792,8 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
-              onWaveSeek={track && !isUsbView ? (progress) => loadTrackAt(track, progress) : undefined}
-              onRate={track && !isUsbView ? (stars) => void commitTrackRating(track.id, stars) : undefined}
+              onWaveSeek={track && !isUsbView && !booting ? (progress) => loadTrackAt(track, progress) : undefined}
+              onRate={track && !isUsbView && !booting ? (stars) => void commitTrackRating(track.id, stars) : undefined}
             />
           </div>
         {/each}

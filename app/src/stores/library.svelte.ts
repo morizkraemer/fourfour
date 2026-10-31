@@ -9,6 +9,7 @@ import {
   getVersion,
   getLibraryPath,
   loadState as tauriLoadState,
+  getRowPreviews,
   resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
   planImport,
@@ -47,6 +48,7 @@ import {
   readyAnalysisFields,
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
+import { readBootSnapshot, type BootSnapshot } from './boot-snapshot.ts';
 import { artwork } from './artwork.svelte.ts';
 import { loadCuesFromPayload } from './cues.svelte.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
@@ -347,6 +349,7 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   tracksLoaded: false,
+  bootSnapshot: null as BootSnapshot | null,
   analyzing: false,
   /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
   get analyzingTrackIds(): number[] {
@@ -928,21 +931,68 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined)
       return fileStateGlyph(fileStateOf(this.id));
     },
     get bands() {
+      rowPreviewVersion;
       if (this.bandsPreview) return rowBandsFromBandBytes(this.bandsPreview);
       return this.preview ? rowBandsFor(this.preview) : rowBandsFromWire(this.bandsWire);
     },
   };
 
-  if (t.waveform_bands) {
-    local.bandsWire = t.waveform_bands;
-  } else {
-    const preview = decodeTrackPreview(t.waveform_preview);
-    if (preview && isValidWaveformPreview(preview)) {
-      local.preview = Uint8Array.from(preview);
-    }
-  }
-
+  applyWirePreview(local, t);
   return local;
+}
+
+function applyWirePreview(local: Record<string, any>, wire: { waveform_bands?: string | number[] | null; waveform_preview?: string | number[] | null }) {
+  if (wire.waveform_bands) {
+    local.bandsWire = wire.waveform_bands;
+    return;
+  }
+  const preview = decodeTrackPreview(wire.waveform_preview);
+  if (preview && isValidWaveformPreview(preview)) local.preview = Uint8Array.from(preview);
+}
+
+let rowPreviewVersion = $state(0);
+const rowPreviewAsked = new WeakSet<object>();
+let rowPreviewQueue: Record<string, any>[] = [];
+
+function hasRowPreview(track: Record<string, any>) {
+  return !!(track.bandsWire || track.preview || track.bandsPreview);
+}
+
+/**
+ * The list answer carries no row previews; rows on screen ask for theirs here, batched into one
+ * `get_row_previews` call per task. Each track object asks once, so a reload (new objects) asks again.
+ */
+export function requestRowPreviews(tracks: readonly (Record<string, any> | undefined)[]) {
+  const queued = rowPreviewQueue.length;
+  for (const track of tracks) {
+    if (!track || !track.analyzed || hasRowPreview(track) || rowPreviewAsked.has(track)) continue;
+    rowPreviewAsked.add(track);
+    rowPreviewQueue.push(track);
+  }
+  if (queued === 0 && rowPreviewQueue.length > 0) queueMicrotask(flushRowPreviews);
+}
+
+async function flushRowPreviews() {
+  const batch = rowPreviewQueue;
+  rowPreviewQueue = [];
+  if (batch.length === 0) return;
+  let answers;
+  try {
+    answers = await getRowPreviews(batch.map((t) => t.id));
+  } catch (err) {
+    for (const track of batch) rowPreviewAsked.delete(track);
+    console.warn('row previews unavailable:', err);
+    return;
+  }
+  const byId = new Map(answers.map((a) => [a.id, a]));
+  let changed = false;
+  for (const track of batch) {
+    const answer = byId.get(track.id);
+    if (!answer || hasRowPreview(track)) continue;
+    applyWirePreview(track, answer);
+    changed ||= hasRowPreview(track);
+  }
+  if (changed) rowPreviewVersion++;
 }
 
 const TRACK_MAP_CHUNK = 2500;
@@ -980,6 +1030,7 @@ export async function loadState() {
     throw err;
   } finally {
     library.tracksLoaded = true;
+    library.bootSnapshot = null;
   }
 }
 
@@ -1033,6 +1084,7 @@ export async function initLibrary() {
     const [version, path] = await Promise.all([getVersion(), getLibraryPath()]);
     library.appVersion = version;
     library.libraryPath = path;
+    if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
     await refreshVolumes();

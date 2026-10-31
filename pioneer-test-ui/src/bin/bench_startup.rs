@@ -127,7 +127,11 @@ fn run(dir: &Path) {
     drop(labels);
 
     let t = Instant::now();
-    let infos = track_infos::build_track_infos(&lib).unwrap();
+    let infos = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        track_infos::build_track_infos(&lib).unwrap()
+    } else {
+        track_infos::list_track_infos(&lib).unwrap()
+    };
     let build_ms = ms(t);
 
     let t = Instant::now();
@@ -163,6 +167,15 @@ fn run(dir: &Path) {
             "load_state_ms": build_ms + playlists_ms + json_ms,
         }),
     );
+}
+
+fn dump(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut state = track_infos::loaded_state(&lib).unwrap();
+    if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        state.tracks = track_infos::build_track_infos(&lib).unwrap();
+    }
+    std::fs::write(out, serde_json::to_vec(&state).unwrap()).unwrap();
 }
 
 fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
@@ -637,6 +650,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
+        Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
@@ -645,7 +659,7 @@ fn main() {
         Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"
+            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir>"
         ),
     }
 }

@@ -93,6 +93,16 @@ impl From<&Track> for TrackInfo {
     }
 }
 
+/// Row preview of one track, fetched for the rows on screen (same encoding as in [`TrackInfo`]).
+#[derive(Serialize, Clone)]
+pub struct RowPreviewInfo {
+    pub id: u32,
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_preview")]
+    pub waveform_bands: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "serialize_preview")]
+    pub waveform_preview: Option<Vec<u8>>,
+}
+
 /// Input from the frontend describing a playlist to create on the USB.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PlaylistInput {

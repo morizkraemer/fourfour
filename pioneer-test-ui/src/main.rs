@@ -1121,32 +1121,20 @@ fn save_state(
     sync_playlists_to_library(&lib, &playlists)
 }
 
+/// Row previews of the given tracks, for the list rows on screen.
+#[tauri::command]
+fn get_row_previews(track_ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<Vec<dto::RowPreviewInfo>, String> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    track_infos::row_preview_infos(&lib, &track_ids)
+}
+
 /// Load the library state. Returns all tracks and playlists.
 #[tauri::command]
 async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-
-        let track_infos = build_track_infos(&lib)?;
-
-        let playlists = lib
-            .get_all_playlists()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|pl| PlaylistInput {
-                id: pl.id,
-                name: pl.name,
-                track_ids: pl.track_ids,
-                parent_id: pl.parent_id,
-                is_folder: pl.is_folder,
-            })
-            .collect();
-
-        Ok(LoadedState {
-            tracks: track_infos,
-            playlists,
-        })
+        track_infos::loaded_state(&lib)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1329,6 +1317,7 @@ fn main() {
             wipe_usb,
             save_state,
             load_state,
+            get_row_previews,
             app_version,
             rekordbox_default_master_db,
             rekordbox_import_preview,
