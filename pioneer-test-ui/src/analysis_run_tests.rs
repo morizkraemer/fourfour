@@ -52,7 +52,7 @@ impl TrackEngine for FakeEngine {
         self.log.lock().unwrap().push(Event::Start(name.clone(), threads));
         self.log.lock().unwrap().push(Event::Ran(name.clone(), pass));
         if let Some(emit) = on_partial {
-            emit(AnalysisResult { bpm: 0.0, key: String::new(), ..finished_result() });
+            emit(AnalysisResult { bpm: 0.0, ..finished_result() });
         }
         if pass == Pass::Fast {
             std::thread::sleep(FAST);
@@ -186,6 +186,14 @@ fn harness(tracks: usize, workers: usize, max_threads: usize) -> Harness {
     }
 }
 
+/// A harness whose runs take every fast pass before the model starts, for the now-lane scenarios built on
+/// grid passes.
+fn fast_first_harness(tracks: usize, workers: usize, max_threads: usize) -> Harness {
+    let mut h = harness(tracks, workers, max_threads);
+    h.coordinator = AnalysisCoordinator::default().with_whole_jobs(0);
+    h
+}
+
 impl Harness {
     fn runner(&self) -> Runner {
         Runner::Rust { engine: self.engine.clone() }
@@ -288,7 +296,7 @@ async fn re_analysis_keeps_hand_edited_tags() {
 
 #[tokio::test]
 async fn the_fast_pass_of_every_track_comes_before_any_grid_pass_and_stores_waveform_and_key() {
-    let h = harness(5, 2, 8);
+    let h = fast_first_harness(5, 2, 8);
     let outcome = h.run_all(h.items.clone()).await;
 
     assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 5 }));
@@ -309,8 +317,32 @@ async fn the_fast_pass_of_every_track_comes_before_any_grid_pass_and_stores_wave
 }
 
 #[tokio::test]
+async fn the_model_starts_on_the_first_track_while_the_others_take_their_fast_pass() {
+    let h = harness(5, 2, 8);
+    let outcome = h.run_all(h.items.clone()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 5 }));
+    let events = h.events();
+    assert_eq!(h.count(&ran("t1.wav", Pass::All)), 1, "{events:?}");
+    let t1_end = events.iter().position(|e| *e == named(Event::End, "t1.wav")).unwrap();
+    assert!(events[..t1_end].contains(&Event::PartialStored(1, 0.0)), "the whole pass stores the waveform first: {events:?}");
+    let first_grid = events.iter().position(|e| matches!(e, Event::Ran(_, Pass::Grid))).unwrap();
+    let last_fast = events.iter().rposition(|e| matches!(e, Event::Ran(_, Pass::Fast))).unwrap();
+    assert!(last_fast < first_grid, "grid passes wait until every track had its fast or whole pass: {events:?}");
+    for n in 1..=5 {
+        let name = format!("t{n}.wav");
+        let (fast, grid, all) = (h.count(&ran(&name, Pass::Fast)), h.count(&ran(&name, Pass::Grid)), h.count(&ran(&name, Pass::All)));
+        assert!((fast, grid, all) == (1, 1, 0) || (fast, grid, all) == (0, 0, 1), "{name}: {events:?}");
+        assert_eq!(h.shared.lock().unwrap().analysis_stages(n).unwrap(), Some(analysis_stage::ALL));
+        let stored = h.shared.lock().unwrap().get_analysis(n).unwrap().unwrap();
+        assert_eq!((stored.bpm, stored.key.as_str()), (128.0, "8A"));
+    }
+    assert!(h.unanalyzed().is_empty());
+}
+
+#[tokio::test]
 async fn between_the_passes_a_track_is_waveform_and_key_only() {
-    let h = harness(3, 1, 8);
+    let h = fast_first_harness(3, 1, 8);
     let run = h.run_all(h.items.clone());
     let watch = async {
         let _held = h.hold_grid_passes();
@@ -331,7 +363,8 @@ async fn a_track_with_waveform_and_key_stored_goes_straight_to_the_grid_pass() {
 
     assert_eq!(h.count(&ran("t1.wav", Pass::Fast)), 0);
     assert_eq!(h.count(&ran("t1.wav", Pass::Grid)), 1);
-    assert_eq!(h.count(&ran("t2.wav", Pass::Fast)), 1);
+    assert_eq!(h.count(&ran("t2.wav", Pass::All)), 1, "the model is free again, so the new track runs whole: {:?}", h.events());
+    assert_eq!(h.count(&ran("t2.wav", Pass::Fast)), 0);
 }
 
 #[tokio::test]
@@ -347,7 +380,7 @@ async fn with_staging_off_every_track_is_analysed_in_one_piece() {
 
 #[tokio::test]
 async fn a_queued_track_jumps_to_the_now_lane_and_running_grid_passes_yield() {
-    let h = harness(6, 2, 8);
+    let h = fast_first_harness(6, 2, 8);
     h.engine.hold_grid.store(true, Ordering::Relaxed);
     let (outcome, priority) = h
         .run_and_prioritize_when(h.items.clone(), |e| {
@@ -377,7 +410,7 @@ async fn a_queued_track_jumps_to_the_now_lane_and_running_grid_passes_yield() {
 
 #[tokio::test]
 async fn the_now_lane_stores_the_waveform_before_the_full_result() {
-    let h = harness(3, 1, 8);
+    let h = fast_first_harness(3, 1, 8);
     h.engine.hold_grid.store(true, Ordering::Relaxed);
     h.run_and_prioritize_when(h.items.clone(), |e| has(e, &ran("t1.wav", Pass::Grid)).then_some(3)).await;
 
@@ -390,7 +423,7 @@ async fn the_now_lane_stores_the_waveform_before_the_full_result() {
 
 #[tokio::test]
 async fn a_narrow_grid_job_is_preempted_and_restarted_wide() {
-    let h = harness(6, 2, 8);
+    let h = fast_first_harness(6, 2, 8);
     h.engine.hold_grid.store(true, Ordering::Relaxed);
     let (outcome, priority) = h
         .run_and_prioritize_when(h.items.clone(), |e| grid_passes(e).first().map(|name| track_number(name)))
@@ -416,7 +449,7 @@ async fn a_track_missing_from_the_queue_joins_the_run_and_its_total() {
 
 #[tokio::test]
 async fn a_job_that_already_has_every_thread_is_left_alone() {
-    let h = harness(2, 1, 8);
+    let h = fast_first_harness(2, 1, 8);
     h.engine.hold_grid.store(true, Ordering::Relaxed);
     let (outcome, _) = h
         .run_and_prioritize_when(h.items[..1].to_vec(), |e| has(e, &ran("t1.wav", Pass::Grid)).then_some(1))
@@ -435,8 +468,9 @@ async fn prioritizing_while_idle_runs_the_track_alone_with_every_thread() {
         .await
         .unwrap();
 
-    assert_eq!(h.count(&start("t2.wav", 1)), 1, "the run starts with the fast pass");
-    assert_eq!(h.count(&start("t2.wav", 8)), 1, "the grid pass has every thread");
+    assert_eq!(h.count(&start("t2.wav", 8)), 1, "a lone track runs whole with every thread: {:?}", h.events());
+    assert_eq!(h.count(&ran("t2.wav", Pass::All)), 1);
+    assert!(h.position(&Event::PartialStored(2, 0.0)) < h.position(&named(Event::End, "t2.wav")));
     assert_eq!(h.count(&Event::Complete), 1);
     assert_eq!(h.unanalyzed(), vec![1]);
     assert!(!h.coordinator.is_active());
@@ -469,7 +503,7 @@ fn cancel_reaches_every_job() {
     assert!(coordinator.try_begin());
     let queue: SharedAnalysisQueue = Arc::new(Mutex::new(VecDeque::from([(1, PathBuf::from("/a.wav")), (2, PathBuf::from("/b.wav"))])));
     coordinator.register_run(queue, 2);
-    let background = coordinator.take_next(true, |_| 0, usize::MAX, |_| 1).unwrap();
+    let background = coordinator.take_next(true, |_| 0, ModelJobs { max: usize::MAX, whole: 0 }, |_| 1).unwrap();
     let NowClaim::Granted { cancel: now } = coordinator.claim_now(2, 8) else { panic!("claim refused") };
 
     coordinator.cancel();
@@ -535,8 +569,9 @@ async fn resuming_while_a_run_is_active_queues_no_track_twice() {
     assert_eq!(added, 0);
     assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 4 }));
     for n in 1..=4 {
-        assert_eq!(h.count(&ran(&format!("t{n}.wav"), Pass::Fast)), 1, "{:?}", h.events());
-        assert_eq!(h.count(&ran(&format!("t{n}.wav"), Pass::Grid)), 1);
+        let name = format!("t{n}.wav");
+        let passes = (h.count(&ran(&name, Pass::Fast)), h.count(&ran(&name, Pass::Grid)), h.count(&ran(&name, Pass::All)));
+        assert!(passes == (1, 1, 0) || passes == (0, 0, 1), "{name}: {:?}", h.events());
     }
 }
 

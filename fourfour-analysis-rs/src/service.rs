@@ -171,11 +171,17 @@ impl Analyzer {
         pass: Pass,
         on_partial: Option<&(dyn Fn(AnalysisResult) + Sync)>,
     ) -> Result<AnalysisResult> {
-        let partial = on_partial.map(|emit| move |w: &Waveforms| emit(waveform_only_result(w)));
+        let partial = on_partial.map(|emit| {
+            move |w: &Waveforms, key: Option<usize>| {
+                let mut result = waveform_only_result(w);
+                result.key = key.map(camelot).unwrap_or_default().to_string();
+                emit(result)
+            }
+        });
         let control = Control {
             cancel: control.cancel,
             pause: control.pause,
-            on_waveform: partial.as_ref().map(|f| f as &(dyn Fn(&Waveforms) + Sync)),
+            on_waveform: partial.as_ref().map(|f| f as &(dyn Fn(&Waveforms, Option<usize>) + Sync)),
         };
         let mut cfg = self.cfg.clone();
         cfg.threads = threads.max(1);

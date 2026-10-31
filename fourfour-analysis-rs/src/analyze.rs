@@ -70,7 +70,14 @@ static NEVER_PAUSED: AtomicBool = AtomicBool::new(false);
 pub struct Control<'a> {
     pub cancel: &'a AtomicBool,
     pub pause: &'a AtomicBool,
-    pub on_waveform: Option<&'a (dyn Fn(&Waveforms) + Sync)>,
+    /// Called once the waveform (and, when the pass detects it, the key class) is known, before the beat model ends.
+    pub on_waveform: Option<&'a (dyn Fn(&Waveforms, Option<usize>) + Sync)>,
+}
+
+struct KeyPart {
+    key: Option<cyankey::CyanKey>,
+    ms: f64,
+    resample_ms: f64,
 }
 
 impl<'a> Control<'a> {
@@ -102,35 +109,35 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     let duration_s = native.samples.len() as f64 / native.rate as f64;
     let gapless = native.gapless_samples();
     let gapless_start_s = native.gapless.start as f64 / native.rate as f64;
-    let t = Instant::now();
-    let mono44: Cow<[f32]> = if native.rate == 44100 {
-        Cow::Borrowed(gapless)
-    } else {
-        Cow::Owned(resample_to(gapless, native.rate, 44100)?)
-    };
-    let resample44_ms = ms(t);
-    let mono = &*mono44;
-
     let side_threads = if cfg.threads > 1 { 2 } else { 1 };
     let (beat_part, key_part, wf_part) = std::thread::scope(|s| {
         let key = cfg.key.then(|| {
-            s.spawn(|| {
+            s.spawn(|| -> Result<KeyPart> {
                 let t = Instant::now();
-                let r = cyankey::detect(mono, 44100, side_threads);
-                (r, ms(t))
+                let mono44: Cow<[f32]> = match native.rate {
+                    44100 => Cow::Borrowed(gapless),
+                    rate => Cow::Owned(resample_to(gapless, rate, 44100)?),
+                };
+                let resample_ms = ms(t);
+                let t = Instant::now();
+                let key = cyankey::detect(&mono44, 44100, side_threads);
+                Ok(KeyPart { key, ms: ms(t), resample_ms })
             })
         });
-        let wf = cfg.waveform.then(|| {
-            s.spawn(|| {
+        let fast = s.spawn(|| -> (Option<Result<KeyPart>>, Option<(Waveforms, f64)>) {
+            let wf = cfg.waveform.then(|| {
                 let t = Instant::now();
                 let w = waveform::compute(&native.samples, native.rate);
-                if let Some(on_waveform) = control.on_waveform {
-                    if !cancel.load(Ordering::Relaxed) {
-                        on_waveform(&w);
-                    }
-                }
                 (w, ms(t))
-            })
+            });
+            let key = key.map(|h| h.join().unwrap());
+            if let (Some((w, _)), Some(on_waveform)) = (&wf, control.on_waveform) {
+                if !cancel.load(Ordering::Relaxed) {
+                    let class = key.as_ref().and_then(|k| k.as_ref().ok()).and_then(|k| k.key.as_ref()).map(|k| k.class);
+                    on_waveform(w, class);
+                }
+            }
+            (key, wf)
         });
         let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
             if !cfg.beats {
@@ -157,7 +164,8 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
             let fit = fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless.len() as f64 / native.rate as f64, &w, &fp);
             Ok((bt, fit, delay, ms(t), mp3_ms))
         })();
-        (beat, key.map(|h| h.join().unwrap()), wf.map(|h| h.join().unwrap()))
+        let (key, wf) = fast.join().unwrap();
+        (beat, key, wf)
     });
     let (bt, fit, delay, fit_ms, mp3_ms) = beat_part?;
     if cancel.load(Ordering::Relaxed) {
@@ -172,9 +180,11 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
         }
         None => (Vec::new(), None, None, bt.beats.iter().map(|&b| b as f64).collect()),
     };
+    let key_part = key_part.transpose()?;
+    let resample44_ms = key_part.as_ref().map_or(0.0, |k| k.resample_ms);
     let (key_class, key_confidence, key_ms) = match &key_part {
-        Some((Some(k), t)) => (Some(k.class), k.confidence, *t),
-        Some((None, t)) => (None, 0.0, *t),
+        Some(KeyPart { key: Some(k), ms, .. }) => (Some(k.class), k.confidence, *ms),
+        Some(KeyPart { key: None, ms, .. }) => (None, 0.0, *ms),
         None => (None, 0.0, 0.0),
     };
     let (waveforms, wf_ms) = match wf_part {
