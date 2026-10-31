@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use pioneer_library::{DuplicateCandidate, DuplicateIndex, DuplicateReason, LocalLibrary};
+use pioneer_library::{DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, LocalLibrary};
 use pioneer_usb_writer::models::Track;
 use pioneer_usb_writer::scanner::{read_track_metadata, AUDIO_EXTENSIONS};
 use serde::Serialize;
@@ -36,46 +36,128 @@ pub struct SkippedFiles {
 
 const SIDECAR_EXTENSIONS: &[&str] = &["asd", "reapeaks", "pkf", "sfk"];
 
+/// What the dropped paths hold, from one walk: the audio files to read, grouped by dropped
+/// path, and the files that are not audio. Hidden files and folders are left out; symlinked
+/// folders are followed, symlink loops are not.
 #[derive(Debug, Default)]
 pub struct FileSurvey {
     audio: HashSet<PathBuf>,
+    groups: Vec<ScanGroup>,
     unsupported: usize,
     unsupported_exts: BTreeSet<String>,
 }
 
+/// The audio files of one dropped path, read as one group: a folder's tracks come back sorted
+/// by title, artist and path, loose files in the order given.
+#[derive(Debug)]
+struct ScanGroup {
+    files: Vec<PathBuf>,
+    sorted: bool,
+}
+
 pub fn survey_files(paths: &[String]) -> FileSurvey {
     let mut survey = FileSurvey::default();
+    let mut loose = Vec::new();
     for p in paths {
-        survey.visit(Path::new(p));
+        let path = Path::new(p);
+        if path.is_dir() {
+            let files = survey.visit_dropped_dir(path);
+            survey.groups.push(ScanGroup { files, sorted: true });
+        } else if path.is_file() {
+            survey.visit_file(path, &mut loose);
+        }
     }
+    survey.groups.insert(0, ScanGroup { files: loose, sorted: false });
     survey
 }
+
+/// Listing folders waits on the disk; the subfolders of a dropped folder are walked in parallel.
+const WALK_THREADS: usize = 8;
 
 impl FileSurvey {
     pub fn audio_count(&self) -> usize {
         self.audio.len()
     }
 
-    fn visit(&mut self, path: &Path) {
-        if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
-            return;
+    fn visit_dropped_dir(&mut self, root: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let Ok(anchor) = root.canonicalize() else { return files };
+        let mut chain = SymlinkChain { followed: Vec::new(), anchor };
+        if is_hidden(root) {
+            return files;
         }
-        if path.is_dir() {
-            let Ok(entries) = std::fs::read_dir(path) else { return };
-            for entry in entries.flatten() {
-                let is_symlinked_dir = entry.file_type().is_ok_and(|t| t.is_symlink()) && entry.path().is_dir();
-                if !is_symlinked_dir {
-                    self.visit(&entry.path());
-                }
+        let Ok(entries) = std::fs::read_dir(root) else { return files };
+        let mut subdirs = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry_kind(&entry) {
+                EntryKind::Dir => subdirs.push(path),
+                EntryKind::SymlinkToDir => self.visit_symlinked_dir(root, &path, &mut chain, &mut files),
+                EntryKind::File => self.visit_file(&path, &mut files),
+                EntryKind::Other => {}
             }
+        }
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let parts: Vec<(FileSurvey, Vec<PathBuf>)> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..WALK_THREADS.min(subdirs.len()))
+                .map(|_| {
+                    let (next, subdirs, mut chain) = (&next, &subdirs, chain.clone());
+                    scope.spawn(move || {
+                        let mut part = (FileSurvey::default(), Vec::new());
+                        while let Some(dir) = subdirs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                            part.0.visit_dir(dir, &mut chain, &mut part.1);
+                        }
+                        part
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|w| w.join().expect("folder walk thread panicked")).collect()
+        });
+        for (part, part_files) in parts {
+            self.audio.extend(part.audio);
+            self.unsupported += part.unsupported;
+            self.unsupported_exts.extend(part.unsupported_exts);
+            files.extend(part_files);
+        }
+        files
+    }
+
+    fn visit_dir(&mut self, dir: &Path, chain: &mut SymlinkChain, out: &mut Vec<PathBuf>) {
+        if is_hidden(dir) {
             return;
         }
-        if !path.is_file() {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry_kind(&entry) {
+                EntryKind::Dir => self.visit_dir(&path, chain, out),
+                EntryKind::SymlinkToDir => self.visit_symlinked_dir(dir, &path, chain, out),
+                EntryKind::File => self.visit_file(&path, out),
+                EntryKind::Other => {}
+            }
+        }
+    }
+
+    fn visit_symlinked_dir(&mut self, parent: &Path, link: &Path, chain: &mut SymlinkChain, out: &mut Vec<PathBuf>) {
+        let (Ok(target), Ok(here)) = (link.canonicalize(), parent.canonicalize()) else { return };
+        if chain.leads_back(&target, &here) {
+            return;
+        }
+        let anchor = std::mem::replace(&mut chain.anchor, target);
+        chain.followed.push((anchor, here));
+        self.visit_dir(link, chain, out);
+        let (anchor, _) = chain.followed.pop().expect("pushed above");
+        chain.anchor = anchor;
+    }
+
+    fn visit_file(&mut self, path: &Path, out: &mut Vec<PathBuf>) {
+        if is_hidden(path) {
             return;
         }
         let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
             self.audio.insert(path.to_path_buf());
+            out.push(path.to_path_buf());
         } else if !SIDECAR_EXTENSIONS.contains(&ext.as_str()) {
             self.unsupported += 1;
             if !ext.is_empty() {
@@ -85,98 +167,131 @@ impl FileSurvey {
     }
 }
 
-const SCAN_THREADS_MAX: usize = 8;
-
-/// The audio files of one dropped path, read as one group: a folder's tracks come back sorted
-/// by title, artist and path, loose files in the order given.
-struct ScanGroup {
-    files: Vec<PathBuf>,
-    sorted: bool,
+/// The folders on the way down from a dropped folder, as canonical stretches: each symlinked
+/// folder followed starts a new stretch at its target. Plain subfolders are not canonicalised
+/// (a library has about one folder per album); a symlink is.
+#[derive(Clone)]
+struct SymlinkChain {
+    followed: Vec<(PathBuf, PathBuf)>,
+    anchor: PathBuf,
 }
 
-fn has_audio_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|ext| AUDIO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-}
-
-/// Every audio file under `dir`, following symlinks and skipping symlink loops.
-fn audio_files_under(dir: &Path, ancestors: &mut Vec<PathBuf>, out: &mut Vec<PathBuf>) {
-    let Ok(canonical) = dir.canonicalize() else { return };
-    if ancestors.contains(&canonical) {
-        return;
+impl SymlinkChain {
+    /// Whether `target` is one of the folders already on the way down (`here` = where the
+    /// symlink is), so following it would walk in a loop.
+    fn leads_back(&self, target: &Path, here: &Path) -> bool {
+        let on_stretch = |anchor: &PathBuf, end: &Path| target.starts_with(anchor) && end.starts_with(target);
+        on_stretch(&self.anchor, here) || self.followed.iter().any(|(anchor, end)| on_stretch(anchor, end))
     }
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    ancestors.push(canonical);
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            audio_files_under(&path, ancestors, out);
-        } else if path.is_file() && has_audio_extension(&path) {
-            out.push(path);
-        }
-    }
-    ancestors.pop();
 }
 
-/// Reads the tags of every file on up to [`SCAN_THREADS_MAX`] threads; `on_file` runs on the
-/// calling thread once per file, in completion order.
-fn read_all(files: &[&Path], on_file: &mut dyn FnMut()) -> Vec<Option<Track>> {
+fn is_hidden(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))
+}
+
+enum EntryKind {
+    Dir,
+    SymlinkToDir,
+    File,
+    Other,
+}
+
+/// What a directory entry is, symlinks followed, from the type the directory listing already
+/// carries; only symlinks cost a `stat`.
+fn entry_kind(entry: &std::fs::DirEntry) -> EntryKind {
+    let Ok(kind) = entry.file_type() else { return EntryKind::Other };
+    if kind.is_dir() {
+        return EntryKind::Dir;
+    }
+    if kind.is_file() {
+        return EntryKind::File;
+    }
+    match std::fs::metadata(entry.path()) {
+        Ok(target) if kind.is_symlink() && target.is_dir() => EntryKind::SymlinkToDir,
+        Ok(target) if kind.is_symlink() && target.is_file() => EntryKind::File,
+        _ => EntryKind::Other,
+    }
+}
+
+/// Tag reads wait on the disk, not the CPU: on a cold cache 10k files took 5.8 s on 8 threads,
+/// 3.0 s on 16 and 2.2-2.6 s on 32 (dev box, R6 in `docs/architecture/perf-run-2026-11.md`).
+const SCAN_THREADS: usize = 32;
+
+/// The covers are read after the rows are on screen, next to whatever the user does next.
+const COVER_THREADS: usize = 8;
+
+/// Runs `read` on every file on up to `threads` threads and returns the results in file
+/// order; `on_file` runs on the calling thread once per file, in completion order.
+fn read_parallel<T: Send>(threads: usize, files: &[&Path], read: impl Fn(&Path) -> T + Sync, on_file: &mut dyn FnMut()) -> Vec<T> {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(SCAN_THREADS_MAX).min(files.len());
+    let threads = threads.min(files.len());
     let next = AtomicUsize::new(0);
-    let (sender, receiver) = std::sync::mpsc::channel::<(usize, Option<Track>)>();
-    let mut read: Vec<Option<Track>> = (0..files.len()).map(|_| None).collect();
+    let (sender, receiver) = std::sync::mpsc::channel::<(usize, T)>();
+    let mut out: Vec<Option<T>> = (0..files.len()).map(|_| None).collect();
     std::thread::scope(|scope| {
         for _ in 0..threads {
             let sender = sender.clone();
-            let next = &next;
+            let (next, read) = (&next, &read);
             scope.spawn(move || loop {
                 let i = next.fetch_add(1, Ordering::Relaxed);
                 let Some(path) = files.get(i) else { break };
-                let track = match read_track_metadata(path, 0) {
-                    Ok(track) => Some(track),
-                    Err(e) => {
-                        eprintln!("Warning: skipping {}: {}", path.display(), e);
-                        None
-                    }
-                };
-                if sender.send((i, track)).is_err() {
+                if sender.send((i, read(path))).is_err() {
                     break;
                 }
             });
         }
         drop(sender);
-        for (i, track) in receiver {
-            read[i] = track;
+        for (i, value) in receiver {
+            out[i] = Some(value);
             on_file();
         }
     });
-    read
+    out.into_iter().map(|v| v.expect("every file was read")).collect()
 }
 
-/// Scans dropped files and folders like `scanner::scan_files` and `scanner::scan_directory`
-/// (same tracks, order and ids: loose files first, then each folder), reading tags in parallel.
-pub fn scan_paths(paths: &[String], on_file: &mut dyn FnMut()) -> Vec<Track> {
-    let mut loose = ScanGroup { files: Vec::new(), sorted: false };
-    let mut folders = Vec::new();
-    for p in paths {
-        let path = PathBuf::from(p);
-        if path.is_dir() {
-            let mut files = Vec::new();
-            audio_files_under(&path, &mut Vec::new(), &mut files);
-            folders.push(ScanGroup { files, sorted: true });
-        } else if has_audio_extension(&path) {
-            loose.files.push(path);
+/// The tags of one file without its cover: covers are read again and stored after the rows
+/// are in the library ([`store_pending_covers`]), so a large import never holds them all.
+fn read_tags(path: &Path) -> Option<Track> {
+    match read_track_metadata(path, 0) {
+        Ok(track) => Some(Track { artwork: None, ..track }),
+        Err(e) => {
+            eprintln!("Warning: skipping {}: {}", path.display(), e);
+            None
         }
     }
-    let groups: Vec<ScanGroup> = std::iter::once(loose).chain(folders).collect();
-    let all: Vec<&Path> = groups.iter().flat_map(|g| g.files.iter().map(PathBuf::as_path)).collect();
-    let mut read = read_all(&all, on_file).into_iter();
-    let mut scanned = Vec::with_capacity(all.len());
-    for group in &groups {
-        let mut tracks: Vec<Track> = read.by_ref().take(group.files.len()).flatten().collect();
-        if group.sorted {
+}
+
+/// What a scan found: the tracks read (without covers) and the files skipped unread because
+/// their path is already in the library.
+#[derive(Debug, Default)]
+pub struct Scanned {
+    pub tracks: Vec<Track>,
+    pub known: Vec<PathBuf>,
+}
+
+/// Reads the tags of the surveyed audio files in parallel, like `scanner::scan_files` and
+/// `scanner::scan_directory` (same tracks, order and ids: loose files first, then each folder;
+/// covers left out). Files whose path is in `known` are not read; they come back in `known`.
+pub fn scan_paths(survey: &FileSurvey, known: &HashSet<PathBuf>, on_file: &mut dyn FnMut()) -> Scanned {
+    let mut scanned = Scanned::default();
+    let mut groups: Vec<(Vec<&Path>, bool)> = Vec::with_capacity(survey.groups.len());
+    for group in &survey.groups {
+        let mut unread = Vec::with_capacity(group.files.len());
+        for file in &group.files {
+            if known.contains(file) {
+                scanned.known.push(file.clone());
+                on_file();
+            } else {
+                unread.push(file.as_path());
+            }
+        }
+        groups.push((unread, group.sorted));
+    }
+    let all: Vec<&Path> = groups.iter().flat_map(|(files, _)| files.iter().copied()).collect();
+    let mut read = read_parallel(SCAN_THREADS, &all, read_tags, on_file).into_iter();
+    for (files, sorted) in &groups {
+        let mut tracks: Vec<Track> = read.by_ref().take(files.len()).flatten().collect();
+        if *sorted {
             tracks.sort_by(|a, b| {
                 a.title.cmp(&b.title).then_with(|| a.artist.cmp(&b.artist)).then_with(|| a.source_path.cmp(&b.source_path))
             });
@@ -184,9 +299,63 @@ pub fn scan_paths(paths: &[String], on_file: &mut dyn FnMut()) -> Vec<Track> {
         for (i, track) in tracks.iter_mut().enumerate() {
             track.id = (i + 1) as u32;
         }
-        scanned.extend(tracks);
+        scanned.tracks.extend(tracks);
     }
     scanned
+}
+
+/// About 6 MB of covers: the library stays locked for 25 ms (p50) to 60 ms (max) per batch.
+const COVER_BATCH: usize = 32;
+
+/// Reads the covers of the tracks queued by `LocalLibrary::add_tracks_covers_later` from their
+/// files and stores them until the queue is empty: one thread reads the next batch while this
+/// one stores the last, and the library is locked only to take a batch and to store it.
+/// `on_stored` gets the ids of each batch's tracks that got a cover. Returns how many covers
+/// were stored.
+pub fn store_pending_covers(lib: &Mutex<LocalLibrary>, on_stored: &mut dyn FnMut(Vec<u32>)) -> Result<usize, String> {
+    type Batch = Result<Vec<(i64, PathBuf, Option<Vec<u8>>)>, String>;
+    let mut stored = 0;
+    loop {
+        let mut batches = 0;
+        std::thread::scope(|scope| {
+            let (sender, receiver) = std::sync::mpsc::sync_channel::<Batch>(1);
+            scope.spawn(move || {
+                let mut after = 0;
+                loop {
+                    let pending = lib.lock().map_err(|e| e.to_string()).and_then(|l| l.pending_artwork(after, COVER_BATCH).map_err(|e| e.to_string()));
+                    let batch = match pending {
+                        Ok(batch) if batch.is_empty() => return,
+                        Ok(batch) => batch,
+                        Err(e) => {
+                            sender.send(Err(e)).ok();
+                            return;
+                        }
+                    };
+                    after = batch.last().map_or(after, |(id, _)| *id);
+                    let files: Vec<&Path> = batch.iter().map(|(_, path)| path.as_path()).collect();
+                    let covers = read_parallel(COVER_THREADS, &files, |path| read_track_metadata(path, 0).ok().and_then(|t| t.artwork), &mut || {});
+                    let read = batch.into_iter().zip(covers).map(|((id, path), cover)| (id, path, cover)).collect();
+                    if sender.send(Ok(read)).is_err() {
+                        return;
+                    }
+                }
+            });
+            for covers in receiver {
+                let covers = covers?;
+                batches += 1;
+                lib.lock().map_err(|e| e.to_string())?.store_pending_artwork(&covers).map_err(|e| e.to_string())?;
+                let with_cover: Vec<u32> = covers.iter().filter(|(_, _, c)| c.is_some()).map(|(id, _, _)| *id as u32).collect();
+                stored += with_cover.len();
+                if !with_cover.is_empty() {
+                    on_stored(with_cover);
+                }
+            }
+            Ok::<(), String>(())
+        })?;
+        if batches == 0 {
+            return Ok(stored);
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -239,21 +408,34 @@ impl ImportPlans {
     }
 }
 
+const FINDS_PER_THREAD: usize = 1024;
+
+/// `index.find` for every track, on several threads: each find normalises the track's tags.
+fn find_all(index: &DuplicateIndex, tracks: &[Track]) -> Vec<Option<DuplicateOf>> {
+    std::thread::scope(|scope| {
+        let parts: Vec<_> = tracks
+            .chunks(FINDS_PER_THREAD)
+            .map(|part| scope.spawn(move || part.iter().map(|t| index.find(t)).collect::<Vec<_>>()))
+            .collect();
+        parts.into_iter().flat_map(|part| part.join().expect("duplicate check thread panicked")).collect()
+    })
+}
+
 /// Splits scanned tracks into ones already in the library (same path, dropped silently),
 /// likely duplicates (asked about) and new tracks.
-pub fn plan_import(token: u64, library: &[DuplicateCandidate], scanned: Vec<Track>, survey: &FileSurvey) -> (PendingImport, ImportPlan) {
+pub fn plan_import(token: u64, library: &[DuplicateCandidate], scanned: Scanned, survey: &FileSurvey) -> (PendingImport, ImportPlan) {
     let index = DuplicateIndex::new(library);
     let by_id: HashMap<u32, &DuplicateCandidate> = library.iter().map(|t| (t.id, t)).collect();
     let mut seen = HashSet::new();
-    let mut already_in_library = 0;
+    let mut already_in_library = scanned.known.into_iter().filter(|path| seen.insert(path.clone())).count();
     let mut fresh = Vec::new();
     let mut duplicate_of = Vec::new();
     let mut duplicates = Vec::new();
-    for track in scanned {
+    let hits = find_all(&index, &scanned.tracks);
+    for (track, found) in scanned.tracks.into_iter().zip(hits) {
         if !seen.insert(track.source_path.clone()) {
             continue;
         }
-        let found = index.find(&track);
         match found {
             Some(hit) if hit.reason == DuplicateReason::SamePath => {
                 already_in_library += 1;
@@ -289,10 +471,10 @@ pub fn plan_import(token: u64, library: &[DuplicateCandidate], scanned: Vec<Trac
 pub fn plan_for_library(
     plans: &ImportPlans,
     lib: &LocalLibrary,
-    scanned: Vec<Track>,
+    scanned: Scanned,
     survey: &FileSurvey,
 ) -> Result<ImportPlan, String> {
-    let library = lib.duplicate_candidates().map_err(|e| e.to_string())?;
+    let library = if scanned.tracks.is_empty() { Vec::new() } else { lib.duplicate_candidates().map_err(|e| e.to_string())? };
     plans.store(|token| plan_import(token, &library, scanned, survey))
 }
 
@@ -328,13 +510,13 @@ mod tests {
 
     fn sample() -> (PendingImport, ImportPlan) {
         let library = vec![DuplicateCandidate::from(&track(7, "/Music/Glass Harbor.aiff", "Ode & Ash", "Glass Harbor", 425.0))];
-        let scanned = vec![
+        let tracks = vec![
             track(0, "/Music/Glass Harbor.aiff", "Ode & Ash", "Glass Harbor", 425.0),
             track(0, "/New/glass_harbor.mp3", "Ode & Ash", "Glass Harbor (Original Mix)", 426.0),
             track(0, "/New/fresh.mp3", "Hale", "Copper Lines", 380.0),
             track(0, "/New/fresh.mp3", "Hale", "Copper Lines", 380.0),
         ];
-        plan_import(3, &library, scanned, &FileSurvey::default())
+        plan_import(3, &library, Scanned { tracks, known: vec![] }, &FileSurvey::default())
     }
 
     #[test]
@@ -358,6 +540,19 @@ mod tests {
     }
 
     #[test]
+    fn files_skipped_unread_count_as_already_in_library_once_and_not_as_unreadable() {
+        let mut survey = FileSurvey::default();
+        survey.audio.extend(["/Music/a.mp3", "/Music/b.mp3"].map(PathBuf::from));
+        let scanned = Scanned {
+            tracks: vec![track(0, "/Music/b.mp3", "Hale", "Copper Lines", 380.0)],
+            known: vec![PathBuf::from("/Music/a.mp3"), PathBuf::from("/Music/a.mp3")],
+        };
+        let (pending, plan) = plan_import(1, &[], scanned, &survey);
+        assert_eq!((plan.already_in_library, plan.new_count, plan.skipped.unreadable), (1, 1, 0));
+        assert_eq!(pending.resolve(false).0.len(), 1);
+    }
+
+    #[test]
     fn skip_duplicates_adds_only_new_tracks_and_reports_the_existing_ids() {
         let (pending, _) = sample();
         let (add, skipped) = pending.resolve(true);
@@ -376,8 +571,8 @@ mod tests {
     #[test]
     fn only_the_latest_plan_can_be_committed() {
         let plans = ImportPlans::default();
-        let first = plans.store(|token| plan_import(token, &[], vec![], &FileSurvey::default())).unwrap();
-        let second = plans.store(|token| plan_import(token, &[], vec![], &FileSurvey::default())).unwrap();
+        let first = plans.store(|token| plan_import(token, &[], Scanned::default(), &FileSurvey::default())).unwrap();
+        let second = plans.store(|token| plan_import(token, &[], Scanned::default(), &FileSurvey::default())).unwrap();
         assert!(plans.take(first.token).is_err());
         assert!(plans.take(second.token).is_ok());
         assert!(plans.take(second.token).is_err());
@@ -392,7 +587,7 @@ mod tests {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
         let survey = survey_files(&[dir.to_string_lossy().into_owned()]);
-        let scanned = vec![track(0, &dir.join("a.mp3").to_string_lossy(), "", "a", 1.0)];
+        let scanned = Scanned { tracks: vec![track(0, &dir.join("a.mp3").to_string_lossy(), "", "a", 1.0)], known: vec![] };
         let (_, plan) = plan_import(1, &[], scanned, &survey);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
@@ -450,12 +645,82 @@ mod tests {
 
         let mut expected = scanner::scan_files(&loose).unwrap();
         expected.extend(scanner::scan_directory(&folder).unwrap());
+        let survey = survey_files(&paths);
         let mut files_seen = 0;
-        let scanned = scan_paths(&paths, &mut || files_seen += 1);
+        let scanned = scan_paths(&survey, &HashSet::new(), &mut || files_seen += 1);
+        let known: HashSet<PathBuf> = [folder.join("b.wav"), dir.join("loose/1.wav")].into();
+        let mut files_seen_known = 0;
+        let partly_known = scan_paths(&survey, &known, &mut || files_seen_known += 1);
         std::fs::remove_dir_all(&dir).unwrap();
 
-        assert_eq!(format!("{scanned:?}"), format!("{expected:?}"));
-        assert_eq!(scanned.len(), if cfg!(unix) { 8 } else { 7 });
-        assert_eq!(files_seen, scanned.len() + 3);
+        assert_eq!(format!("{:?}", scanned.tracks), format!("{expected:?}"));
+        assert!(scanned.known.is_empty());
+        assert_eq!(scanned.tracks.len(), if cfg!(unix) { 8 } else { 7 });
+        assert_eq!(files_seen, scanned.tracks.len() + 2);
+        assert_eq!(files_seen, survey.audio_count());
+
+        let mut unread: Vec<PathBuf> = partly_known.known.clone();
+        unread.sort();
+        let mut expected_unread: Vec<PathBuf> = known.into_iter().collect();
+        expected_unread.sort();
+        assert_eq!(unread, expected_unread);
+        assert_eq!(partly_known.tracks.len(), scanned.tracks.len() - 2);
+        assert!(partly_known.tracks.iter().all(|t| !expected_unread.contains(&t.source_path)));
+        assert_eq!(files_seen_known, files_seen);
+    }
+
+    fn wav_with_cover(cover: &[u8]) -> Vec<u8> {
+        let mut apic = vec![0u8];
+        apic.extend_from_slice(b"image/jpeg\0");
+        apic.push(3);
+        apic.push(0);
+        apic.extend_from_slice(cover);
+        let mut frame = b"APIC".to_vec();
+        frame.extend_from_slice(&(apic.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&apic);
+        let size = frame.len() as u32;
+        let mut tag = b"ID3\x03\x00\x00".to_vec();
+        tag.extend((0..4).rev().map(|i| ((size >> (7 * i)) & 0x7f) as u8));
+        tag.extend_from_slice(&frame);
+        if tag.len() % 2 == 1 {
+            tag.push(0);
+        }
+        let mut out = wav(1);
+        out.extend_from_slice(b"id3 ");
+        out.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+        out.extend_from_slice(&tag);
+        let riff_len = (out.len() - 8) as u32;
+        out[4..8].copy_from_slice(&riff_len.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn covers_are_left_out_of_the_scan_and_stored_after_the_rows() {
+        let dir = std::env::temp_dir().join(format!("ff-covers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cover = vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
+        std::fs::write(dir.join("with.wav"), wav_with_cover(&cover)).unwrap();
+        std::fs::write(dir.join("without.wav"), wav(1)).unwrap();
+        let survey = survey_files(&[dir.to_string_lossy().into_owned()]);
+        let scanned = scan_paths(&survey, &HashSet::new(), &mut || {});
+        assert_eq!(scanned.tracks.len(), 2);
+        assert!(scanned.tracks.iter().all(|t| t.artwork.is_none()));
+
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let ids = lib.add_tracks_covers_later(&scanned.tracks).unwrap();
+        let lib = Mutex::new(lib);
+        let mut announced = Vec::new();
+        let stored = store_pending_covers(&lib, &mut |ids| announced.extend(ids)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let lib = lib.into_inner().unwrap();
+        let with = scanned.tracks.iter().position(|t| t.source_path.ends_with("with.wav")).unwrap();
+        assert_eq!(stored, 1);
+        assert_eq!(announced, vec![ids[with] as u32]);
+        assert_eq!(lib.get_artwork(ids[with]).unwrap(), Some(cover));
+        assert!(lib.get_artwork(ids[1 - with]).unwrap().is_none());
+        assert!(lib.pending_artwork(0, 10).unwrap().is_empty());
     }
 }

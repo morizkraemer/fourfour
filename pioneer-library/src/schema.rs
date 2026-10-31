@@ -97,6 +97,12 @@ CREATE TABLE IF NOT EXISTS stick_playlists (
 /// one cover-sized table page per track (~1.3 s cold at 10k tracks with covers).
 const ARTWORK_INDEX_DDL: &str = "CREATE INDEX IF NOT EXISTS idx_artwork_track ON artwork(track_id);";
 
+/// Additive, no version bump: tracks added by an import whose covers are still to be read
+/// from their files (`LocalLibrary::add_tracks_covers_later`).
+const PENDING_ARTWORK_DDL: &str = "CREATE TABLE IF NOT EXISTS pending_artwork (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE
+);";
+
 pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .context("Failed to set WAL journal mode")?;
@@ -155,6 +161,7 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
         }
     }
     conn.execute_batch(ARTWORK_INDEX_DDL).context("Failed to create the artwork index")?;
+    conn.execute_batch(PENDING_ARTWORK_DDL).context("Failed to create the pending artwork queue")?;
 
     Ok(())
 }

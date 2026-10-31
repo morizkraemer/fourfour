@@ -230,8 +230,8 @@
       "unit": "ms",
       "path": "derived.all.import end to end ms",
       "now": {
-        "10k": 18008,
-        "25k": 42965,
+        "10k": 3700,
+        "25k": 12000,
         "50k": null
       },
       "target": {
@@ -239,7 +239,7 @@
         "25k": 6000,
         "50k": 12000
       },
-      "why": "tag reads are I/O plus lofty on 8 threads and add_tracks is one transaction; cover thumbnails off the commit path gives about 2x"
+      "why": "R6: covers are stored after the rows, so this is the cold tag scan (32 threads) plus a cover-less commit; the scan still reads every embedded cover through lofty, an ID3 reader that seeks past pictures is the next step"
     },
     {
       "id": "import_rescan",
@@ -247,8 +247,8 @@
       "unit": "ms",
       "path": "derived.all.import rescan into library ms",
       "now": {
-        "10k": 1894,
-        "25k": 4896,
+        "10k": 150,
+        "25k": 430,
         "50k": null
       },
       "target": {
@@ -256,7 +256,7 @@
         "25k": 1500,
         "50k": 3000
       },
-      "why": "every file is already known by path; a path and mtime check can skip the tag read entirely"
+      "why": "R6: known paths are not read again, so this is one parallel folder walk; met"
     },
     {
       "id": "import_ui_click_to_rows",

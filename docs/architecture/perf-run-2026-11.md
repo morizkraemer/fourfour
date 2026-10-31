@@ -329,3 +329,34 @@ Branch `worktree-agent-acffa3352ed21e257` from `ov-1028` plus `r3-analysis` (`cd
 - The meter in f32 (R4 "Next") would roughly halve the 2.5%; it changes bytes slightly, which is fine as long as both paths use it.
 - Moving playback to symphonia 0.6 would allow feeding the meter from the analysis decode and drop the extra decode.
 - Tracks analysed before this change get their detail on their first open, as before; a re-analysis or a background warm fills them.
+
+## R6 import (2026-10-31)
+
+Code: `ov-1028` (`67f6607`) plus `r6-import`. Box: `dev`, 16 cores, load 12-17 (calm runs) to 20-37 (busy). Base and new are the same bench (`bench_startup import`) built from both trees, run back to back on the fixture (read only): cold = page cache of the music evicted with `posix_fadvise(DONTNEED)` first (directory entries stay cached), warm = right after. Raw: `~/.cache/r6-import-work/cmp{10k,25k}.txt`.
+
+### Before and after (backend, median)
+
+"Rows" = scan + plan + commit: when `commit_import` returns and the frontend can append the rows (its own landing, `import ui click to rows`, is unchanged: 119 ms at 10k). "Covers" = the background fill after that.
+
+| | 10k before | 10k after | 25k before | 25k after |
+|---|---:|---:|---:|---:|
+| import, cold, to rows | 14.0 s | 2.1 s (load 13); 3.7-4.8 s (load 21-31) | 53.9 s | 7.8 s (load 15); 16.3 s (load 20, disk busy) |
+| import, warm, to rows | 12.4 s | 0.8 s (load 14); 1.1-1.6 s (load 21) | 36-38 s | 2.3-3.2 s |
+| covers stored, in the background | in the commit | 8-10 s more | in the commit | 21-31 s more |
+| re-import of the same folder | 1.97 s | 0.14 s | 9-10.6 s (r1: 4.9) | 0.26-0.58 s |
+| commit (library locked) | 10.1 s | 0.3 s | 30-33 s | 0.6-1.0 s |
+
+### What changed
+
+- **Covers after the rows.** The scan drops each cover as soon as the tags are read; `add_tracks_covers_later` inserts the rows only and queues their ids in `pending_artwork` (new table, additive, no version bump: it is what makes the deferral survive a quit). A background fill (`store_pending_covers`, started after `commit_import`, at launch and on a library switch) reads the covers again on 8 threads while it stores the previous batch of 32 (about 6 MB, library lock 25 ms p50, 60 ms max), and emits `import-covers` at most every 500 ms; the app sets `has_artwork` and calls `bumpLibraryTracks(ids)`. A cover is only stored if the queued track still points at the file it was read from; one set by hand meanwhile wins. Rows come back with `has_artwork: false`, so nothing asks for a cover that is not there yet. Side effect: the plan no longer holds every cover in memory (1.5 GB at 10k).
+- **Known paths are not read.** Paths already in the library skip the tag read (they were dropped as "already in library" after reading before); re-import is now one folder walk.
+- **One folder walk, in parallel, without stats.** Survey and scan walked the tree twice, each `stat`ing every entry and `canonicalize`-ing every folder (the fixture has 9,439 folders); now one walk uses the listing's file type, canonicalises only at symlinks (same loop rule as before) and walks the subfolders of a dropped folder on 8 threads: 440 ms to 70-150 ms at 10k. The walk now also skips hidden files for reading, not only for counting, and counts files in symlinked folders, so progress `total` matches the files read.
+- **Tag reads on 32 threads.** Cold 10k: 5.8 s on 8 threads, 3.0 s on 16, 2.2-2.6 s on 32, 1.7 s on 64 (same load).
+- **Duplicate checks in parallel**, skipped when nothing new was read: plan 170-220 ms to 60-110 ms.
+- **Commit.** One path query instead of one per track; bulk writes run with a 64 MB page cache (25k commit 1.2 s to 0.6 s); covers no longer in the transaction.
+
+### What is left
+
+- **The cold scan reads every embedded cover.** lofty reads an ID3v2 picture frame through even with `read_cover_art(false)` (it skips by reading), so a cold 10k import still reads 2.7 GB (1.5 GB of covers plus readahead) and is bound by the disk: 1.6 s on a calm box, 4-6 s when other workers use the disk. An ID3 frame walker that seeks past `APIC` (or a lofty change) is the next step; it sits in `pioneer-usb-writer/src/scanner.rs`, not touched here.
+- **Covers take 8-10 s (10k) to 21-31 s (25k) in the background** (1.5 GB / 3.7 GB written to the log and checkpointed). A USB export started in that window writes the tracks still queued without artwork.
+- Commit at 25k is 0.6-1.0 s, mostly the three indexes on `tracks` (`source_path` has both the UNIQUE index and `idx_tracks_source_path`; dropping the duplicate is a schema change).

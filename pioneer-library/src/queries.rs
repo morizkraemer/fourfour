@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pioneer_usb_writer::models::{Playlist, Track};
 
@@ -195,6 +195,47 @@ pub fn upsert_artwork(conn: &Connection, track_id: i64, image_data: &[u8]) -> Re
     )?
     .execute(params![track_id, image_data])?;
     Ok(())
+}
+
+pub fn queue_pending_artwork(conn: &Connection, track_id: i64) -> Result<()> {
+    conn.prepare_cached("INSERT OR IGNORE INTO pending_artwork (track_id) VALUES (?1)")?.execute([track_id])?;
+    Ok(())
+}
+
+pub fn select_pending_artwork(conn: &Connection, after: i64, limit: usize) -> Result<Vec<(i64, PathBuf)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT p.track_id, t.source_path FROM pending_artwork p JOIN tracks t ON t.id = p.track_id
+         WHERE p.track_id > ?1 ORDER BY p.track_id LIMIT ?2",
+    )?;
+    let rows = stmt.query_map([after, limit as i64], |row| Ok((row.get(0)?, PathBuf::from(row.get::<_, String>(1)?))))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn insert_pending_artwork(conn: &Connection, track_id: i64, source_path: &Path, image_data: &[u8]) -> Result<()> {
+    conn.prepare_cached(
+        "INSERT INTO artwork (track_id, image_data)
+         SELECT ?1, ?3 WHERE EXISTS (
+             SELECT 1 FROM pending_artwork p JOIN tracks t ON t.id = p.track_id WHERE p.track_id = ?1 AND t.source_path = ?2
+         )
+         ON CONFLICT(track_id) DO NOTHING",
+    )?
+    .execute(params![track_id, source_path.to_string_lossy().as_ref(), image_data])?;
+    Ok(())
+}
+
+pub fn unqueue_pending_artwork(conn: &Connection, track_id: i64, source_path: &Path) -> Result<()> {
+    conn.prepare_cached(
+        "DELETE FROM pending_artwork WHERE track_id = ?1
+         AND EXISTS (SELECT 1 FROM tracks WHERE id = ?1 AND source_path = ?2)",
+    )?
+    .execute(params![track_id, source_path.to_string_lossy().as_ref()])?;
+    Ok(())
+}
+
+pub fn select_track_paths(conn: &Connection) -> Result<std::collections::HashSet<PathBuf>> {
+    let mut stmt = conn.prepare("SELECT source_path FROM tracks")?;
+    let rows = stmt.query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
 pub fn select_artwork(conn: &Connection, track_id: i64) -> Result<Option<Vec<u8>>> {

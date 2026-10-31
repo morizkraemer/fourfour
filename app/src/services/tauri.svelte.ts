@@ -493,6 +493,11 @@ export function listenToImportProgress(callback: (progress: ImportProgress) => v
   return subscribe('import-progress', callback);
 }
 
+/** Ids of imported tracks whose covers were stored after their rows came back from `commit_import`. */
+export function listenToImportCovers(callback: (ids: number[]) => void) {
+  return subscribe('import-covers', callback);
+}
+
 export interface ImportCommit {
   added: TrackInfo[];
   skipped_ids: number[];

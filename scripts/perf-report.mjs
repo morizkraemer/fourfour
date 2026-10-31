@@ -57,6 +57,7 @@ const derived = {
   'startup warm interactive ms': sum('startup.startup_backend_warm.load_state_ms', 'startup.frontend.startup warm interactive ms'),
   'track load to first audio ms': sum('track_load.track_load_backend.get_analysis_data_ms_median', 'track_load.playback_engine.load(with duration) -> first audio median ms'),
   'import end to end ms': sum('import.import_backend_empty_cold.plan_import_ms', 'import.import_backend_empty_cold.commit_import_ms'),
+  'import with covers stored ms': sum('import.import_backend_empty_cold.plan_import_ms', 'import.import_backend_empty_cold.commit_import_ms', 'import.import_backend_empty_cold.covers_ms'),
   'import rescan into library ms': sum('import.import_backend_into_library.plan_import_ms', 'import.import_backend_into_library.commit_import_ms'),
 };
 const bytes = at('startup.startup_backend_warm.json_bytes');

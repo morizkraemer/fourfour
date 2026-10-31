@@ -29,6 +29,7 @@ import {
   listenToAnalysisPartial,
   listenToAnalysisComplete,
   listenToWriteComplete,
+  listenToImportCovers,
   lastTauriError,
   getIpcDiagnostic,
   getAnalysisData,
@@ -574,6 +575,25 @@ function trackIndexById(id: number): number {
   return indexCache.byId.get(id) ?? -1;
 }
 
+/** Covers stored for imported tracks whose rows have not landed yet (`landImportedTracks`). */
+const coversBeforeRows = new Set<number>();
+
+/** Imported tracks come back without artwork; their covers are stored afterwards. */
+export function markCoversStored(ids: number[]) {
+  const changed: number[] = [];
+  for (const id of ids) {
+    const track = libraryTrackById(id);
+    if (!track) {
+      coversBeforeRows.add(id);
+      continue;
+    }
+    if (!track.raw || track.raw.has_artwork) continue;
+    track.raw.has_artwork = true;
+    changed.push(id);
+  }
+  if (changed.length > 0) bumpLibraryTracks(changed);
+}
+
 function libraryTrackById(id: number) {
   const tracks = library.tracks;
   const track = tracks[trackIndexById(id)];
@@ -1064,6 +1084,8 @@ async function landImportedTracks(added: TrackInfo[]) {
   const mapped = await mapTracksInTaskSizedChunks(added, favorites, offset);
   recentlyAddedCount += added.filter((t) => t.tempo > 0).length;
   appendLibraryTracks(mapped);
+  const coveredEarly = added.filter((t) => coversBeforeRows.delete(t.id)).map((t) => t.id);
+  if (coveredEarly.length > 0) markCoversStored(coveredEarly);
   resetSearchIndex();
   scheduleSearchIndexWarmup();
 }
@@ -1114,6 +1136,7 @@ export async function initLibrary() {
       listenToAnalysisProgress(handleAnalysisProgressEvent);
       listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
+      listenToImportCovers(markCoversStored);
       listenToWriteComplete(() => {
         library.syncing = false;
         library.statusMessage = 'Ready';
