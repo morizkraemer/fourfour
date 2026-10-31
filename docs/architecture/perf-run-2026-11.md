@@ -420,3 +420,30 @@ Same box, `bench_analysis --list list8 --threads 12 --probe-reads 16`, nice 10, 
 | after | 1.3-7.3 ms (1.4 typical) | 0.1-7 ms | 0 |
 
 Byte identity: the ignored test `fixture_library_files_are_byte_identical_both_ways` (`FF_FIXTURE_LIBRARY=~/.cache/ff-fixture/10k/library FF_FIXTURE_TRACKS=1000`) stores 1000 fixture analyses (251 with `edits.json`) both ways and compares the three ANLZ files and the index row.
+
+## R10 first expand (2026-10-31, `r10-expand`, BLOCKED)
+
+Goal was the cold first expand (first time the expanded player and its waveform view mount) at or under 30 ms longest task, pixels unchanged. Not reached; no app code changed. What is left is a decision (below).
+
+Harness: `FF_PERF_PROFILE=first-expand` in `app/smoke/perf-q50.spec.ts` opens a fresh page per run (10k fixture state via `FF_PERF_STATE`), loads row 3, waits 1.5 s, expands once and records the longest task and click to detail drawn. `FF_PERF_TRACE_OUT=x.json` writes Chromium traces of the first three runs (`x-0.json` ...), `FF_PERF_PROFILE_OUT` a CPU profile of run 0. Raw files in `~/.cache/r10-expand/`.
+
+The box was at load 30-60 the whole time (other workers), so wall-clock numbers are inflated about 3x; the thread CPU time (`tdur`) from the traces is the stable number and matches the 82-93 ms that q50-render measured at load 4-8.
+
+| Before (`ov-1028`), 10k state | Value |
+|---|---|
+| longest task, wall, median of 7 (load 52-61) | 268 ms |
+| click to detail drawn, wall, median of 7 | 438 ms |
+| click task, thread CPU, 3 traces | 19-25 ms |
+| frame task, thread CPU, 3 traces | 97-100 ms |
+
+Where the frame task's ~100 ms CPU goes (median of 3 traces): animation-frame callback 63 ms = forced style and layout of the new panel ~18, zoom view first paint ~30 (`drawScrolledColumns` paints the full width of the ring once; later frames paint only the few new columns, 2-4 ms), overview ~7, rest of the paint ~8; then native paint 12, layerize 8, commit 7, Svelte microtasks 6, pre-paint 2. A playing idle frame in this headless software compositor already costs 12-15 ms (layerize + commit).
+
+Tried, no gain, reverted:
+- **Pre-warm** (`WaveformDisplay.warmUp`: paint the loaded track's data once in a hidden 640 px expanded display at idle after load). It ran, and the first real paint still cost the same 58-63 ms: the cost is per-pixel work for the full-width ring, not cold code.
+- **Layout in a task before the frame** (`setTimeout(0)` that forces layout after mount). Chromium runs the frame straight after the click task, so the queued task lands after it; layout stays inside the frame.
+
+Why 30 ms needs a decision: everything in the frame is needed for the first visible frame of the expanded panel (its layout, a full-width zoom paint, the overview, raster). Getting under 30 ms means doing that work in earlier frames while the panel is not yet shown:
+
+1. **Staged reveal**: mount the expanded player hidden at its final size in the click task (the compact player stays and keeps animating), take canvas sizes from the `ResizeObserver` instead of a forced layout, pre-paint the zoom ring and the overview cache in chunks of a few ms across tasks, then swap. The first visible frame blits and paints only the columns played meanwhile, so pixels are the same, but the panel shows a few frames later than the click's frame. Estimate on this box: reveal frame ~30-40 ms CPU (relayout after the player height change, panel paint, compositor), click and chunk tasks under 20. Touches `Player.svelte` and `waveform-display.js` (`paint: 'frame'` mount path).
+2. **Measure on the Mac first**: add the first expand to `scripts/mac/perf-night.sh`; WebKit with GPU compositing spends far less per frame than this headless software compositor. Build option 1 only if the Mac shows a task over 50 ms.
+3. **Draw the zoom view one frame after the panel** (q50-render's option): ~30 ms off the task, but the panel's first frame shows an empty zoom area. Visible, so not done.
