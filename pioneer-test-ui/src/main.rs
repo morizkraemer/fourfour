@@ -606,7 +606,7 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Eject a mounted volume (macOS: `diskutil eject`, others: `umount`).
+/// Eject a mounted volume (macOS: `diskutil eject`, Linux: `udisksctl unmount`, falling back to `umount`).
 #[tauri::command]
 fn eject_volume(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -621,18 +621,41 @@ fn eject_volume(path: String) -> Result<(), String> {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     {
-        let output = std::process::Command::new("umount")
-            .arg(&path)
-            .output()
-            .map_err(|e| format!("Failed to run umount: {e}"))?;
+        let _ = &path;
+        return Err("Eject is not supported on Windows yet. Use Safely Remove Hardware in the taskbar.".into());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let mut command = match volumes::mount_device(std::path::Path::new(&path)) {
+            Some(device) => {
+                let mut c = std::process::Command::new("udisksctl");
+                c.args(["unmount", "--block-device", &device]);
+                c
+            }
+            None => {
+                let mut c = std::process::Command::new("umount");
+                c.arg(&path);
+                c
+            }
+        };
+        let output = match command.output() {
+            Ok(output) => output,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::process::Command::new("umount")
+                .arg(&path)
+                .output()
+                .map_err(|e| format!("Failed to run umount: {e}"))?,
+            Err(e) => return Err(format!("Failed to run eject command: {e}")),
+        };
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("Eject failed: {stderr}"));
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     Ok(())
 }
 

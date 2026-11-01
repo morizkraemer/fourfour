@@ -48,7 +48,7 @@ uptime | sed -E 's/.*load averages?: /load_before=/' > "$RAW/load.txt"
 getconf _NPROCESSORS_ONLN >> "$RAW/load.txt"
 
 say "building release benches"
-cargo build --release --quiet --bin bench_startup --bin bench_analysis --manifest-path "$ROOT/Cargo.toml"
+cargo build --release --quiet --features pioneer-test-ui/dev-bins --bin bench_startup --bin bench_analysis --manifest-path "$ROOT/Cargo.toml"
 
 if [ -n "$SIZE" ]; then
   say "fixture: $SIZE (generated once; see scripts/ff-fixture.py)"

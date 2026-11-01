@@ -90,13 +90,27 @@ The weights land in `/usr/lib/fourfour/models/` (deb and AppImage), which is Tau
 
 **Runtime risks found**
 
-- The `.deb` ships the dev binaries `bench_analysis`, `bench_startup`, `waveform_*` in `/usr/bin` next to the app; the bundler picks up every bin of the crate.
-- `.deb` has no `libasound2` Depends although cpal links ALSA; on a machine without it the app fails to start.
-- Windows `is_removable` returns true for every drive, so internal data drives show up as USB sticks (the system drive is refused, other fixed drives are not; no home-overlap check on Windows).
-- `eject_volume` runs `umount` on Linux (needs root for most mounts; `udisksctl unmount` is the user-level call) and also on Windows, where it does not exist, so eject always errors there.
+- (fixed, r25) The `.deb` shipped the dev binaries `bench_analysis`, `bench_startup`, `waveform_*` in `/usr/bin` next to the app; the bundler picks up every bin of the crate.
+- (fixed, r25) `.deb` had no `libasound2` Depends although cpal links ALSA; on a machine without it the app fails to start.
+- (fixed, r25: `GetDriveTypeW == DRIVE_REMOVABLE`) Windows `is_removable` returned true for every drive, so internal data drives show up as USB sticks (the system drive is refused, other fixed drives are not; no home-overlap check on Windows).
+- (fixed, r25: `udisksctl unmount`, `umount` fallback on Linux; clear error on Windows) `eject_volume` ran `umount` on Linux (needs root for most mounts; `udisksctl unmount` is the user-level call) and also on Windows, where it does not exist, so eject always errors there.
 - `reveal_in_finder` on Linux opens the parent folder through `xdg-open` (no selection); fine, but absent in minimal installs.
 - `rekordbox_default_master_db` only checks `~/Library/Pioneer/...` and `%APPDATA%\Pioneer\...`; a Linux home never matches (no Rekordbox there, so harmless).
-- Frontend `path.split('/').pop()` without backslash normalising: `app/src/services/tauri.svelte.ts` lines about 524 and 964 (dropped track title, stick label). On Windows the full path shows as the name; other label helpers already normalise.
+- (fixed, r25: `pathBaseName` in `app/src/lib/pathName.ts`) Frontend `path.split('/').pop()` without backslash normalising: `app/src/services/tauri.svelte.ts` lines about 524 and 964 (dropped track title, stick label). On Windows the full path shows as the name; other label helpers already normalise.
 - Writer lane, not touched: `pioneer-usb-writer/src/writer/pdb.rs` matches the extension case-sensitively (`Some("mp3")`), so `TRACK.MP3` gets file type 0 in the legacy PDB (the scanner and `onelibrary.rs` lowercase first). Windows users often have upper-case extensions.
 - Writer lane: `usb_path` is built from artist and file name (known repeat bug above); on Windows or exFAT sticks the reserved names (`CON`, `NUL`) and trailing dots would also matter, not checked.
 - Already handled, checked: `/Volumes` is macOS-only behind `cfg`; Linux volume detection reads `/proc/mounts`; Windows lists drive letters; the audio extension filters in the app lowercase before matching; symlink and `statvfs` code is `cfg(unix)` with a stub for others (`statvfs_available_bytes` is a stub returning unlimited space on Windows, so the free-space guard in multi-USB sync does nothing there; `volume_capacity` is unix-only).
+
+**Fixed in r25-package**
+
+- Dev binaries: all eight `[[bin]]` targets other than the app (`bench_*`, `waveform_*`) have `required-features = ["dev-bins"]` and `autobins = false` in `pioneer-test-ui/Cargo.toml`, so `cargo tauri build` produces only `pioneer-test-ui` for the deb, AppImage, `.app` and NSIS. Dev use: `cargo build --release --features pioneer-test-ui/dev-bins --bin bench_startup`. `scripts/perf.sh` and `waveform-dev` pass the feature; `perf-night.sh` gets `bench_analysis` from the `perf.sh` build in the same target dir (it no longer comes from the bundle build); `check-dmg.sh` only used the app binary. Old doc commands with a bare `--bin bench_startup` now fail with cargo's "requires the features: dev-bins" message. `cargo check --workspace --all-targets` skips those bins unless the feature is given.
+- Deb Depends: `libasound2t64 | libasound2` and `libssl3t64 | libssl3` (sqlcipher links `libcrypto` dynamically, `libsqlite3-sys` `bundled-sqlcipher` without vendored OpenSSL), on top of Tauri's webkit and gtk entries. Config only: no deb was rebuilt, no `ldd` of a release binary was available on the box, so the list comes from the crates (cpal, libsqlite3-sys build script) and is not proven by `dpkg-deb -I`.
+- Windows `is_removable` now asks `GetDriveTypeW` (removable drives only; USB hard disks that report as fixed are no longer listed). Not compiled for Windows here.
+- Linux eject unmounts through `udisksctl unmount --block-device <dev>` (device from `/proc/mounts`), falling back to `umount` if `udisksctl` is missing; Windows returns an explicit "not supported" error instead of running `umount`.
+- Frontend: `pathBaseName` handles `\` and `/` and trailing separators; used at the three spots in `tauri.svelte.ts` (mock dropped track title, mock stick id, capacity volume label); unit tests in `pathName.test.ts`.
+
+**For the writer/sync lane (not touched)**
+
+- `pioneer-library/src/multi_sync.rs:696` `statvfs_available_bytes` Windows stub returns unlimited space, and `:721` `volume_capacity` is a stub on non-unix: the multi-USB free-space guard does nothing on Windows (suggest `GetDiskFreeSpaceExW`).
+- `pioneer-usb-writer/src/writer/pdb.rs` case-sensitive extension match (`Some("mp3")`), see above.
+- `usb_path` reserved Windows names and trailing dots, see above.

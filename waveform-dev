@@ -16,4 +16,4 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-exec cargo run --bin waveform_dev --release -- "$@"
+exec cargo run --features pioneer-test-ui/dev-bins --bin waveform_dev --release -- "$@"

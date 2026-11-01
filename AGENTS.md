@@ -41,6 +41,9 @@ cargo build
 # Desktop app — fast dev loop (rebuilds bundle, kills old instance, relaunches)
 cd pioneer-test-ui && ./dev.sh
 
+# Dev binaries (bench_startup, bench_analysis, waveform_*) are gated and not bundled
+cargo build --release --features pioneer-test-ui/dev-bins --bin bench_startup
+
 # Frontend alone (Vite dev server on :5200)
 cd app && npm run dev          # npm run check  → svelte-check
 

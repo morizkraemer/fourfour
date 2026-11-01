@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
+import { pathBaseName } from '../lib/pathName.ts';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
@@ -521,7 +522,7 @@ function mockScannedTrack(path: string, i: number): TrackInfo {
   return {
     id: Date.now() + i,
     source_path: path,
-    title: path.split('/').pop() || 'Dropped Track',
+    title: pathBaseName(path) || 'Dropped Track',
     artist: 'Dropped Artist',
     album: 'Dropped Album',
     genre: 'House',
@@ -909,7 +910,7 @@ function mockStick(path: string): StickContents {
 function mockEditStick(path: string, edit: (stick: StickContents) => number): [number, StickContents] {
   const current = mockStick(path);
   const stick: StickContents = {
-    stick_id: current.stick_id ?? `mock-${path.split('/').pop()}`,
+    stick_id: current.stick_id ?? `mock-${pathBaseName(path)}`,
     track_ids: [...current.track_ids],
     playlist_ids: [...current.playlist_ids],
     kept_as_is: [...(current.kept_as_is ?? [])],
@@ -961,7 +962,7 @@ function mockPlan(target: SyncTarget): UsbSyncPlan {
   const needed = bytesToAdd + MOCK_BASE_MARGIN + MOCK_TRACK_MARGIN * analyzed.length;
   const free = mockCapacities[target.volume]?.free_bytes ?? null;
   return {
-    volume: target.volume.split('/').pop() ?? target.volume,
+    volume: pathBaseName(target.volume) || target.volume,
     stick_id: mockStick(target.volume).stick_id,
     playlist_count: target.selection.kind === 'playlists' ? target.selection.playlist_ids.length : mockPlaylists.length,
     add,
