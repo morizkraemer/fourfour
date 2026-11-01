@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
@@ -109,29 +109,18 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch("PRAGMA foreign_keys=ON;")
         .context("Failed to enable foreign keys")?;
 
-    let version: Option<u32> = conn
-        .query_row(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'",
-            [],
-            |_| Ok(()),
-        )
-        .ok()
-        .and_then(|()| {
-            conn.query_row("SELECT version FROM schema_version", [], |row| row.get(0))
-                .ok()
-        });
-
-    match version {
+    match stored_version(conn)? {
         None => {
-            // Fresh database — create v2 schema.
-            conn.execute_batch(SCHEMA_DDL)
+            let tx = conn.unchecked_transaction().context("Failed to start creating the library")?;
+            tx.execute_batch(SCHEMA_DDL)
                 .context("Failed to create schema")?;
-            conn.execute_batch(STICK_DDL)
+            tx.execute_batch(STICK_DDL)
                 .context("Failed to create stick tables")?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO schema_version (version) VALUES (?1)",
                 [SCHEMA_VERSION],
             )?;
+            tx.commit().context("Failed to create the library")?;
         }
         Some(v) if (1..SCHEMA_VERSION).contains(&v) => {
             if v < 2 {
@@ -152,11 +141,10 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
             migrate_v6_to_v7(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
+        Some(0) => anyhow::bail!("The library has schema version 0, which no version of this app writes"),
         Some(v) => {
             anyhow::bail!(
-                "Unsupported schema version {} (expected {})",
-                v,
-                SCHEMA_VERSION
+                "The library was saved by a newer version of the app (schema version {v}, this app knows up to {SCHEMA_VERSION}); update the app to open it"
             );
         }
     }
@@ -164,6 +152,33 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch(PENDING_ARTWORK_DDL).context("Failed to create the pending artwork queue")?;
 
     Ok(())
+}
+
+fn stored_version(conn: &Connection) -> Result<Option<u32>> {
+    let table_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'", [], |row| row.get(0))
+        .context("Failed to read the library's table list")?;
+    if table_count == 0 {
+        return Ok(None);
+    }
+    let has_version_table: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .context("Failed to read the library's table list")?;
+    if !has_version_table {
+        anyhow::bail!("The library has tables but no schema version table; it was not opened so nothing in it is changed");
+    }
+    let version: Option<u32> = conn
+        .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+        .optional()
+        .context("The library's schema version is unreadable; it was not opened so nothing in it is changed")?;
+    match version {
+        Some(v) => Ok(Some(v)),
+        None => anyhow::bail!("The library has no schema version row; it was not opened so nothing in it is changed"),
+    }
 }
 
 /// Migrate from v1 (analyses stored as JSON blobs in SQLite) to v2 (ANLZ files on disk).

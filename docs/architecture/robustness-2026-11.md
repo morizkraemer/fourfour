@@ -56,10 +56,29 @@ Every case also checks: good neighbours imported and fully analysed, analysis ru
 - **Tags the reader rejects drop the file:** lofty fails on invalid UTF-8 in an ID3 UTF-8 frame, lone UTF-16 surrogates and lying tag sizes, so `read_track_metadata` errors and the file is skipped as unreadable although the audio plays. Suggest `ParsingMode::Relaxed` or a properties-only retry in `scanner.rs` (writer lane, read-only here).
 - **Huge junk files:** the tag reader and decoder scan an MP3 with no valid frames to its end (about 10 s per GB). Bounded by file size; needs a scan cap in lofty/symphonia use.
 - **Analysis failures are not stored** (no schema field): a file that cannot be decoded is retried at every launch while "analyse new tracks" is on. Cheap for undecodable files; needs a column to remember it.
-- **Startup `expect`:** `LocalLibrary::open(...).expect("Failed to open library database")` in `setup` panics on a damaged `library.db`. `schema::initialize` also treats an unreadable `schema_version` as a fresh database. Both are product decisions (quarantine the file? ask?).
+- **Library open recovery:** a library that fails to open leaves the app running with an empty list and the error in the status bar and Settings > Advanced (see "Library open safety"). There is no screen to pick another library, restore a backup or start fresh from that state yet; that is a product call.
 - **Duplicates inside one drop are not flagged** (only against the library), and symlinked folders or files import as separate rows under their link paths. Aliases of the same file count twice.
 - `normalise` path keys fold case, so on a case-sensitive volume `A.wav` next to `a.wav` counts as already in the library.
 - A WAV cut to 20% analyses as complete with BPM 0; the decoder's `truncated` flag is not shown anywhere.
+
+## Library open safety
+
+Branch `r27-dbsafe` from `ov-1028`. Tests: `cargo test -p pioneer-library --test robust_store` (`a_library_*`, `an_unreadable_version_*`, `a_damaged_header_*`, `a_locked_library_*`, `a_database_file_with_no_tables_*`) and `cargo test -p pioneer-test-ui --bin pioneer-test-ui startup_`.
+
+| Case | Before | After |
+|---|---|---|
+| `schema_version` row deleted, tracks present | opened, stamped as v7 without running migrations | error, nothing written, tracks untouched |
+| `schema_version` table dropped, tracks present | opened, created the table, stamped v7 | error, no table created |
+| Version stored as text (`'garbage'`) | opened, inserted a second version row | error, the one row stays |
+| Version newer than the app (99) | error "Unsupported schema version 99 (expected 7)" | error "saved by a newer version of the app ... update the app to open it"; not downgraded |
+| Damaged header (first 16 bytes) | error, file untouched | same |
+| Locked by another process (`locking_mode=EXCLUSIVE`) | error by luck (the init DDL also hit the lock) | error from the version read; opens once the lock is gone |
+| Empty file or a database with no tables | fresh library | same; the fresh schema is now created in one transaction, so a crash mid-init cannot leave tables without a version row |
+| Startup with a damaged `library.db` | `expect` panics in `setup`, no window | window opens, `load_state` returns "Couldn't open the library at <path>: <reason>", status bar shows "Failed to load library", the full text is in Settings > Advanced; the file is not touched and no side files appear |
+
+`schema::stored_version` returns `None` only when the database has no tables at all; tables without a readable version is an error. In the failed state the app does not manage `SharedLibrary`, so every library command (import, analysis, sync, backup restore, reset, change library) returns Tauri's "state not managed" error instead of acting; none of them can write to or delete the damaged file. The file health check and cover fill do not start.
+
+Left for a recovery screen (Merlin's call): offering "choose another library", "restore a backup" and "start a new library (keep the old file aside)" from the failed state, and a clearer message than "Failed to load library" in the status bar. `change_library_path` and `restore_backup` need the library state today, so they would need a small change to work from the failed state.
 
 ## Run
 

@@ -220,3 +220,108 @@ fn walkdir_files(root: &Path) -> Vec<PathBuf> {
     out.sort();
     out
 }
+
+fn library_with_tracks(dir: &Path) -> PathBuf {
+    let path = dir.join("library.db");
+    let library = LocalLibrary::open(&path).unwrap();
+    support::populate_library(&library, &dir.join("music"), 3, 0.2);
+    path
+}
+
+fn raw(path: &Path) -> rusqlite::Connection {
+    rusqlite::Connection::open(path).unwrap()
+}
+
+fn track_count(path: &Path) -> i64 {
+    raw(path).query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0)).unwrap()
+}
+
+fn version_rows(path: &Path) -> Vec<String> {
+    let conn = raw(path);
+    let mut stmt = conn.prepare("SELECT CAST(version AS TEXT) FROM schema_version").unwrap();
+    stmt.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+}
+
+#[test]
+fn a_library_without_its_version_row_is_an_error_not_a_fresh_init() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = library_with_tracks(dir.path());
+    raw(&path).execute("DELETE FROM schema_version", []).unwrap();
+    let err = LocalLibrary::open(&path).err().expect("missing version row must not open");
+    assert!(err.to_string().contains("version"), "{err:#}");
+    assert!(version_rows(&path).is_empty(), "the library must not be stamped as current");
+    assert_eq!(track_count(&path), 3);
+}
+
+#[test]
+fn a_library_without_its_version_table_is_an_error_not_a_fresh_init() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = library_with_tracks(dir.path());
+    raw(&path).execute("DROP TABLE schema_version", []).unwrap();
+    assert!(LocalLibrary::open(&path).is_err());
+    let has_table: bool = raw(&path)
+        .query_row("SELECT COUNT(*) > 0 FROM sqlite_master WHERE name = 'schema_version'", [], |r| r.get(0))
+        .unwrap();
+    assert!(!has_table, "no schema created over existing tables");
+    assert_eq!(track_count(&path), 3);
+}
+
+#[test]
+fn an_unreadable_version_is_an_error_not_a_fresh_init() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = library_with_tracks(dir.path());
+    raw(&path).execute("UPDATE schema_version SET version = 'garbage'", []).unwrap();
+    assert!(LocalLibrary::open(&path).is_err());
+    assert_eq!(version_rows(&path), vec!["garbage".to_string()]);
+    assert_eq!(track_count(&path), 3);
+}
+
+#[test]
+fn a_library_from_a_newer_app_is_a_clear_error_and_not_downgraded() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = library_with_tracks(dir.path());
+    raw(&path).execute("UPDATE schema_version SET version = 99", []).unwrap();
+    let err = LocalLibrary::open(&path).err().expect("newer version must not open");
+    assert!(err.to_string().contains("newer"), "{err:#}");
+    assert_eq!(version_rows(&path), vec!["99".to_string()]);
+    assert_eq!(track_count(&path), 3);
+}
+
+#[test]
+fn a_damaged_header_is_an_error_and_the_file_is_left_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = library_with_tracks(dir.path());
+    raw(&path).query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())).unwrap();
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes[..16].copy_from_slice(b"not sqlite head!");
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(LocalLibrary::open(&path).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+fn a_locked_library_is_an_error_and_is_never_initialised() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = library_with_tracks(dir.path());
+    let current = version_rows(&path);
+    let holder = raw(&path);
+    holder
+        .execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; DELETE FROM schema_version;")
+        .unwrap();
+    assert!(LocalLibrary::open(&path).is_err(), "a locked library must not open");
+    holder.execute_batch("ROLLBACK").unwrap();
+    drop(holder);
+    assert_eq!(version_rows(&path), current);
+    assert_eq!(track_count(&path), 3);
+    LocalLibrary::open(&path).expect("opens once the lock is gone");
+}
+
+#[test]
+fn a_database_file_with_no_tables_is_a_fresh_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.db");
+    raw(&path).execute_batch("PRAGMA user_version = 0; VACUUM;").unwrap();
+    let library = LocalLibrary::open(&path).unwrap();
+    assert!(library.get_all_tracks().unwrap().is_empty());
+    assert_eq!(version_rows(&path).len(), 1);
+}

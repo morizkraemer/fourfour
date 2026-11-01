@@ -1243,7 +1243,13 @@ async fn refresh_track_labels(state: State<'_, SharedLibrary>) -> Result<Vec<dto
 
 /// Load the library state. Returns all tracks and playlists.
 #[tauri::command]
-async fn load_state(state: State<'_, SharedLibrary>) -> Result<LoadedState, String> {
+async fn load_state(app: AppHandle) -> Result<LoadedState, String> {
+    let Some(state) = app.try_state::<SharedLibrary>() else {
+        return Err(app
+            .try_state::<LibraryOpenFailure>()
+            .map(|failure| failure.0.clone())
+            .unwrap_or_else(|| "The library is not open".to_string()));
+    };
     let shared = state.inner().clone();
     perf_probe::mark("load_state_start", serde_json::json!({}));
     tauri::async_runtime::spawn_blocking(move || {
@@ -1382,6 +1388,15 @@ fn remove_library_files(db_path: &Path) -> Result<(), String> {
 // Entry point
 // ---------------------------------------------------------------------------
 
+struct LibraryOpenFailure(String);
+
+fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, LocalLibrary), String> {
+    let db_path = db_path.map_err(|e| format!("Couldn't find where the library is stored: {e}"))?;
+    let library = LocalLibrary::open(&db_path)
+        .map_err(|e| format!("Couldn't open the library at {}: {e:#}", db_path.display()))?;
+    Ok((db_path, library))
+}
+
 fn focus_main_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         eprintln!("focus_main_window: no webview labeled \"main\"");
@@ -1482,23 +1497,26 @@ fn main() {
             perf_probe::perf_mark,
         ])
         .setup(|app| {
-            // Open (or create) the local library database at the stored/default path
-            let db_path = read_library_path(&app.handle())
-                .expect("Failed to determine library database path");
-            let library = LocalLibrary::open(&db_path)
-                .expect("Failed to open library database");
-            spawn_stale_staging_cleanup(db_path);
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 spawn_stale_part_sweep(app_data_dir.join("waveform-detail"));
             }
-            let library: SharedLibrary = Arc::new(Mutex::new(library));
             let health = file_health::SharedHealth::default();
-            app.manage(library.clone());
             app.manage(health.clone());
-            file_health::spawn_check(app.handle().clone(), library.clone(), health);
             let covers = CoverFill::default();
             app.manage(covers.clone());
-            spawn_cover_fill(app.handle().clone(), library, covers);
+            match open_startup_library(read_library_path(app.handle())) {
+                Ok((db_path, library)) => {
+                    spawn_stale_staging_cleanup(db_path);
+                    let library: SharedLibrary = Arc::new(Mutex::new(library));
+                    app.manage(library.clone());
+                    file_health::spawn_check(app.handle().clone(), library.clone(), health);
+                    spawn_cover_fill(app.handle().clone(), library, covers);
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    app.manage(LibraryOpenFailure(message));
+                }
+            }
             app.manage(Arc::new(ImportPlans::default()));
             app.manage(AnalysisCoordinator::default());
             app.manage(SharedArtworkThumbs::default());
@@ -1540,6 +1558,54 @@ mod tests {
         let mut out = std::io::Cursor::new(Vec::new());
         img.write_to(&mut out, image::ImageFormat::Png).expect("encode");
         out.into_inner()
+    }
+
+    struct ScratchDir(std::path::PathBuf);
+
+    impl ScratchDir {
+        fn new(name: &str) -> Self {
+            let path = std::env::temp_dir().join(format!("ff-startup-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn startup_with_a_damaged_library_is_an_error_and_leaves_the_file_alone() {
+        let dir = ScratchDir::new("damaged");
+        let db = dir.path().join("library.db");
+        let damaged = b"SQLite format 3\0 but the rest is junk".repeat(200);
+        std::fs::write(&db, &damaged).unwrap();
+        let outcome = std::panic::catch_unwind(|| super::open_startup_library(Ok(db.clone())).map(|_| ()));
+        let message = outcome.expect("startup must not panic").unwrap_err();
+        assert!(message.contains("library.db"), "{message}");
+        assert_eq!(std::fs::read(&db).unwrap(), damaged);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("library.db")], "no side files created or removed");
+    }
+
+    #[test]
+    fn startup_without_a_library_path_is_an_error() {
+        let message = super::open_startup_library(Err("no app data dir".into())).map(|_| ()).unwrap_err();
+        assert!(message.contains("no app data dir"), "{message}");
+    }
+
+    #[test]
+    fn startup_with_a_healthy_library_opens_it() {
+        let dir = ScratchDir::new("healthy");
+        let (path, library) = super::open_startup_library(Ok(dir.path().join("library.db"))).unwrap();
+        assert_eq!(path, dir.path().join("library.db"));
+        assert!(library.get_all_tracks().unwrap().is_empty());
     }
 
     #[test]
