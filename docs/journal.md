@@ -385,3 +385,4 @@
 2026-11-01 15:29 orchestrator r11-coreml parked: branch 6542279 (ort/CoreML never linked on macOS, fixed via build.rs clang_rt; coreml-bench.sh ready; 3-track sanity unrun, Mac slept); decided: own prio r16-quant (opus; int8/fp16 beat model on box, branch only)
 2026-11-01 15:31 orchestrator r13-50k landed: on ov-1028 f609c89 (analyze 2k selected at 50k >300 s -> 0.67 s, palette keystroke 225 -> 48 ms, 50k linked fixture); smoke 112, vitest 832, CHECKS-OK; schema follow-ups -> Waiting 31
 2026-11-01 16:03 orchestrator r14-resume handed back: 9 fixes (stuck runs/spinners, lost/doubled work, in-place ANLZ rewrites, stale-path results, quadratic resume), doc written by orchestrator (worker Write refused); merging; decided: own prio r19-tests (sonnet medium; flakes + 3-5 riskiest gaps)
+2026-11-01 16:19 orchestrator r14-resume landed: on ov-1028 a7131e7; smoke 112, vitest 833, CHECKS-OK; decided: queue order side file per rec (Waiting 32) -> backlog r21-order
