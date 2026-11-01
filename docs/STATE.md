@@ -32,6 +32,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 27. [built 2026-10-31 on r9-ort 383ae88, unlanded: onnxruntime CPU no faster than rten on box (8-9 vs 9.6-10 trk/min), 2x memory, first result 2x later; logits within 2e-4, grid eval identical; CoreML path untested - rec: Mac-only test on a Mac night, drop if no gain] Analysis speed is capped by the beat model on CPU (91% of time; ~8 trk/min on dev, 10k = ~18 h). Only a new runtime moves it: onnxruntime + CoreML (GPU/Neural Engine) on the Mac, or fused attention. Not bit-identical, needs the grid/key evals - rec: try onnxruntime+CoreML on a branch, measure on a Mac night, keep only if evals hold - branch: none
 31. Schema changes for 50k speed + robustness (r12/r13): store folded artist/title keys (import duplicate plan 1-1.5 s at 50k), move covers out of library.db (7.5 GB at 50k, slow commits), store analysis failures (no retry every launch) - rec: one schema bump with all three after the holiday - branch: none
 32. [accepted 2026-11-01 per rec, landed on ov-1028 3248199] Analysis order after restart is not persisted (resume goes by id) - rec: side file in app data with the last run's order, no schema - branch: r21-order (not built yet)
+33. Error messages (r18): 42 messages rewritten via app/src/lib/userErrors.ts, 13 silent failures surfaced. Real bugs inside: analyzeTrackIds/analyzeTracks and playlist saves fall back to the browser mock in the real app (fake "Analyzed" events, unsaved playlists look saved); player errors never rendered. Doc docs/ui/error-messages-2026-11.md - rec: land first thing after the holiday (bugs are real); open calls: library.db open panic needs a recovery screen, status bar gets clobbered by analysis progress (toast?) - branch: r18-errors
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -86,7 +87,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 17. r15-reveal: staged waveform reveal on a branch (unlanded; only if the Mac night shows first expand >50 ms)
 18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it) [dropped; branch r16-quant b7a274f: int8 -7% CPU, grid 43 vs 44/50; no VNNI, attention stays fp32; CoreML (r11) is the lever]
 19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded)
-20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin) [running, branch only]
+20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin) [built, branch r18-errors abae25a; Waiting 33]
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [landed d4b4ef3; 52 tests, vitest timeout fix, no bugs]
 22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [landed 3248199]
