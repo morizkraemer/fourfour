@@ -319,14 +319,14 @@ let trackList = $state.raw<any[]>([]);
  */
 let plainTracks: Record<string, any>[] = [];
 
-function setLibraryTracks(tracks: Record<string, any>[]) {
+function setLibraryTracks(tracks: Record<string, any>[], rows = tracks.map(reactiveTrack)) {
   plainTracks = tracks;
-  trackList = tracks.map(reactiveTrack);
+  trackList = rows;
 }
 
-function appendLibraryTracks(tracks: Record<string, any>[]) {
+function appendLibraryTracks(tracks: Record<string, any>[], rows: Record<string, any>[]) {
   plainTracks = plainTracks.concat(tracks);
-  trackList = trackList.concat(tracks.map(reactiveTrack));
+  trackList = trackList.concat(rows);
 }
 
 function isPlainContainer(value: object): boolean {
@@ -444,7 +444,8 @@ let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
 
-const WARMUP_CHUNK = 250;
+const WARMUP_CHUNK = 100;
+const WARMUP_SLICE_MS = 8;
 const WARMUP_IDLE_RESERVE_MS = 2;
 const WARMUP_DELAY_MS = 250;
 
@@ -489,8 +490,15 @@ function scheduleSearchIndexWarmup() {
     const step = (deadline?: IdleDeadline) => {
       if (generation !== warmupGeneration) return;
       if (haystackCursor < plainTracks.length) {
+        const sliceEnd = performance.now() + WARMUP_SLICE_MS;
         do fillSearchIndex(WARMUP_CHUNK);
-        while (haystackCursor < plainTracks.length && deadline && !deadline.didTimeout && deadline.timeRemaining() > WARMUP_IDLE_RESERVE_MS);
+        while (
+          haystackCursor < plainTracks.length &&
+          deadline &&
+          !deadline.didTimeout &&
+          deadline.timeRemaining() > WARMUP_IDLE_RESERVE_MS &&
+          performance.now() < sliceEnd
+        );
         whenIdle(step);
       } else {
         haystacksFor(library.tracks);
@@ -502,13 +510,24 @@ function scheduleSearchIndexWarmup() {
 
 const text = (value: unknown) => (value == null ? '' : String(value));
 
+const unlessSame = (value: unknown, shown: string) => {
+  const s = text(value);
+  return s === shown ? '' : ' ' + s;
+};
+
 function trackHaystack(track: Record<string, unknown>): string {
   const raw = (track.raw ?? {}) as Record<string, unknown>;
+  const title = text(track.title);
+  const artist = text(track.artist);
+  const album = text(track.album);
+  const genre = text(track.genre);
+  const key = text(track.key);
+  const filePath = text(track.filePath);
   return (
-    text(track.title) + ' ' + text(track.artist) + ' ' + text(track.album) + ' ' + text(track.label) + ' ' +
-    text(track.genre) + ' ' + text(track.key) + ' ' + text(track.bpm) + ' ' + text(track.time) + ' ' +
-    text(track.filePath) + ' ' + text(track.index) + ' ' + text(raw.title) + ' ' + text(raw.artist) + ' ' +
-    text(raw.album) + ' ' + text(raw.genre) + ' ' + text(raw.key) + ' ' + text(raw.source_path)
+    title + ' ' + artist + ' ' + album + ' ' + text(track.label) + ' ' + genre + ' ' + key + ' ' +
+    text(track.bpm) + ' ' + text(track.time) + ' ' + filePath + ' ' + text(track.index) +
+    unlessSame(raw.title, title) + unlessSame(raw.artist, artist) + unlessSame(raw.album, album) +
+    unlessSame(raw.genre, genre) + unlessSame(raw.key, key) + unlessSame(raw.source_path, filePath)
   ).toLowerCase();
 }
 
@@ -1032,13 +1051,17 @@ function nextTask(): Promise<void> {
 }
 
 async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>, firstIndex = 0) {
-  const mapped: Record<string, any>[] = new Array(tracks.length);
+  const plain: Record<string, any>[] = new Array(tracks.length);
+  const rows: Record<string, any>[] = new Array(tracks.length);
   for (let start = 0; start < tracks.length; start += TRACK_MAP_CHUNK) {
     if (start > 0) await nextTask();
     const end = Math.min(tracks.length, start + TRACK_MAP_CHUNK);
-    for (let i = start; i < end; i++) mapped[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
+    for (let i = start; i < end; i++) {
+      plain[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
+      rows[i] = reactiveTrack(plain[i]);
+    }
   }
-  return mapped;
+  return { plain, rows };
 }
 
 /* ── Actions ────────────────────────────────────────────────────────── */
@@ -1050,9 +1073,9 @@ export async function loadState() {
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
-    const tracks = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
+    const { plain, rows } = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
     resetSearchIndex();
-    setLibraryTracks(tracks);
+    setLibraryTracks(plain, rows);
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
 
@@ -1095,9 +1118,9 @@ async function landImportedTracks(added: TrackInfo[]) {
   if (added.length === 0) return;
   const offset = plainTracks.length;
   const favorites = lowestFavoriteSlots(library.playlists);
-  const mapped = await mapTracksInTaskSizedChunks(added, favorites, offset);
+  const { plain, rows } = await mapTracksInTaskSizedChunks(added, favorites, offset);
   recentlyAddedCount += added.filter((t) => t.tempo > 0).length;
-  appendLibraryTracks(mapped);
+  appendLibraryTracks(plain, rows);
   const coveredEarly = added.filter((t) => coversBeforeRows.delete(t.id)).map((t) => t.id);
   if (coveredEarly.length > 0) markCoversStored(coveredEarly);
   resetSearchIndex();

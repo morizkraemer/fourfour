@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::Track;
@@ -133,15 +135,203 @@ pub struct ProgressPayload {
 }
 
 /// State returned by `load_state` so the frontend can restore everything.
+///
+/// The tracks go over the wire as a [`TrackTable`] (`app/src/services/track-table.ts` decodes it back into
+/// `TrackInfo` objects): at 50k tracks the object list is 21.6 MB of JSON, mostly repeated keys and folders.
 #[derive(Serialize, Clone)]
 pub struct LoadedState {
+    #[serde(serialize_with = "serialize_track_table")]
     pub tracks: Vec<TrackInfo>,
     pub playlists: Vec<PlaylistInput>,
 }
 
+const TRACK_FLAG_ARTWORK: u8 = 1;
+const TRACK_FLAG_CUES: u8 = 2;
+const TRACK_FLAG_ANALYSIS: u8 = 4;
+const TRACK_FLAG_PENDING: u8 = 8;
+
+/// One array per field. A path is split after its last `/` or `\` into `dir` and `file`; titles and file
+/// names are sent as they are, the texts that repeat (folders, artists, albums, genres, keys, colours) as indexes
+/// into `strings`, which holds each of them once. `ratings` and `colors` are `[row, value, ...]`
+/// pairs for the tracks that have one (a colour value is a string index).
+#[derive(Serialize)]
+pub struct TrackTable<'a> {
+    strings: Vec<&'a str>,
+    id: Vec<u32>,
+    dir: Vec<u32>,
+    file: Vec<&'a str>,
+    title: Vec<&'a str>,
+    artist: Vec<u32>,
+    album: Vec<u32>,
+    genre: Vec<u32>,
+    key: Vec<u32>,
+    tempo: Vec<u32>,
+    duration_secs: Vec<f64>,
+    bitrate: Vec<u32>,
+    file_size: Vec<u64>,
+    flags: Vec<u8>,
+    ratings: Vec<u32>,
+    colors: Vec<u32>,
+}
+
+#[derive(Default)]
+struct StringTable<'a> {
+    list: Vec<&'a str>,
+    index: HashMap<&'a str, u32>,
+}
+
+impl<'a> StringTable<'a> {
+    fn intern(&mut self, text: &'a str) -> u32 {
+        let list = &mut self.list;
+        *self.index.entry(text).or_insert_with(|| {
+            list.push(text);
+            (list.len() - 1) as u32
+        })
+    }
+}
+
+impl<'a> TrackTable<'a> {
+    pub fn new(tracks: &'a [TrackInfo]) -> Result<Self, String> {
+        let n = tracks.len();
+        let mut strings = StringTable::default();
+        let mut table = TrackTable {
+            strings: Vec::new(),
+            id: Vec::with_capacity(n),
+            dir: Vec::with_capacity(n),
+            file: Vec::with_capacity(n),
+            title: Vec::with_capacity(n),
+            artist: Vec::with_capacity(n),
+            album: Vec::with_capacity(n),
+            genre: Vec::with_capacity(n),
+            key: Vec::with_capacity(n),
+            tempo: Vec::with_capacity(n),
+            duration_secs: Vec::with_capacity(n),
+            bitrate: Vec::with_capacity(n),
+            file_size: Vec::with_capacity(n),
+            flags: Vec::with_capacity(n),
+            ratings: Vec::new(),
+            colors: Vec::new(),
+        };
+        let mut runs: [Option<(&str, u32)>; 6] = [None; 6];
+        let mut intern = |column: usize, text: &'a str| match runs[column] {
+            Some((previous, index)) if previous == text => index,
+            _ => {
+                let index = strings.intern(text);
+                runs[column] = Some((text, index));
+                index
+            }
+        };
+        for (row, t) in tracks.iter().enumerate() {
+            if t.waveform_preview.is_some() || t.waveform_bands.is_some() {
+                return Err(format!("track {} carries a row preview, which the track table does not hold", t.id));
+            }
+            let cut = t.source_path.rfind(['/', '\\']).map_or(0, |i| i + 1);
+            table.id.push(t.id);
+            table.dir.push(intern(0, &t.source_path[..cut]));
+            table.file.push(&t.source_path[cut..]);
+            table.title.push(&t.title);
+            table.artist.push(intern(1, &t.artist));
+            table.album.push(intern(2, &t.album));
+            table.genre.push(intern(3, &t.genre));
+            table.key.push(intern(4, &t.key));
+            table.tempo.push(t.tempo);
+            table.duration_secs.push(t.duration_secs);
+            table.bitrate.push(t.bitrate);
+            table.file_size.push(t.file_size);
+            table.flags.push(
+                u8::from(t.has_artwork) * TRACK_FLAG_ARTWORK
+                    | u8::from(t.has_cues) * TRACK_FLAG_CUES
+                    | u8::from(t.has_analysis) * TRACK_FLAG_ANALYSIS
+                    | u8::from(t.analysis_pending) * TRACK_FLAG_PENDING,
+            );
+            if let Some(rating) = t.rating {
+                table.ratings.extend([row as u32, u32::from(rating)]);
+            }
+            if let Some(color) = &t.color {
+                table.colors.extend([row as u32, intern(5, color)]);
+            }
+        }
+        table.strings = strings.list;
+        Ok(table)
+    }
+}
+
+fn serialize_track_table<S: serde::Serializer>(tracks: &[TrackInfo], serializer: S) -> Result<S::Ok, S::Error> {
+    TrackTable::new(tracks).map_err(serde::ser::Error::custom)?.serialize(serializer)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::base64_encode;
+    use super::*;
+
+    fn info(id: u32, source_path: &str) -> TrackInfo {
+        TrackInfo {
+            id,
+            source_path: source_path.into(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            genre: String::new(),
+            tempo: 0,
+            key: String::new(),
+            duration_secs: 0.0,
+            bitrate: 0,
+            file_size: 0,
+            has_artwork: false,
+            has_cues: false,
+            has_analysis: false,
+            analysis_pending: false,
+            waveform_preview: None,
+            waveform_bands: None,
+            rating: None,
+            color: None,
+        }
+    }
+
+    #[test]
+    fn loaded_state_sends_tracks_as_the_table_the_app_decodes() {
+        let one = TrackInfo {
+            title: "One".into(),
+            artist: "Artist".into(),
+            genre: "House".into(),
+            tempo: 12800,
+            key: "8A".into(),
+            duration_secs: 200.5,
+            bitrate: 320,
+            file_size: 1234,
+            has_artwork: true,
+            has_analysis: true,
+            rating: Some(4),
+            ..info(7, "/m/Artist/one.mp3")
+        };
+        let two = TrackInfo {
+            artist: "Artist".into(),
+            file_size: 5,
+            has_analysis: true,
+            analysis_pending: true,
+            color: Some("#ff0000".into()),
+            ..info(9, "two.wav")
+        };
+        let json = serde_json::to_string(&LoadedState { tracks: vec![one, two], playlists: Vec::new() }).unwrap();
+        assert_eq!(
+            json,
+            concat!(
+                r##"{"tracks":{"strings":["/m/Artist/","Artist","","House","8A","#ff0000"],"id":[7,9],"dir":[0,2],"file":["one.mp3","two.wav"],"##,
+                r##""title":["One",""],"artist":[1,1],"album":[2,2],"genre":[3,2],"key":[4,2],"tempo":[12800,0],"duration_secs":[200.5,0.0],"##,
+                r##""bitrate":[320,0],"file_size":[1234,5],"flags":[5,12],"ratings":[0,4],"colors":[1,5]},"playlists":[]}"##
+            )
+        );
+    }
+
+    #[test]
+    fn track_table_splits_windows_paths_and_refuses_row_previews() {
+        let tracks = [info(1, r"C:\Music\a.flac"), info(2, "C:/Music/b.flac")];
+        let table = TrackTable::new(&tracks).unwrap();
+        assert_eq!((table.strings[0], table.file[0]), (r"C:\Music\", "a.flac"));
+        assert_eq!(table.strings[table.dir[1] as usize], "C:/Music/");
+        let with_preview = [TrackInfo { waveform_bands: Some(vec![1]), ..info(3, "/m/c.mp3") }];
+        assert!(TrackTable::new(&with_preview).is_err());
+    }
 
     #[test]
     fn base64_matches_rfc4648_vectors() {

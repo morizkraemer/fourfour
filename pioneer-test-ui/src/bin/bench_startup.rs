@@ -142,7 +142,8 @@ fn run(dir: &Path) {
     let labels_refresh_ms = ms(t);
 
     let t = Instant::now();
-    let infos = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+    let with_previews = std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some();
+    let infos = if with_previews {
         track_infos::build_track_infos(&lib).unwrap()
     } else {
         track_infos::list_track_infos(&lib).unwrap()
@@ -160,7 +161,11 @@ fn run(dir: &Path) {
 
     let count = infos.len();
     let t = Instant::now();
-    let json = serde_json::to_string(&LoadedState { tracks: infos, playlists }).unwrap();
+    let json = if with_previews {
+        serde_json::to_string(&serde_json::json!({ "tracks": infos, "playlists": playlists })).unwrap()
+    } else {
+        serde_json::to_string(&LoadedState { tracks: infos, playlists }).unwrap()
+    };
     let json_ms = ms(t);
 
     println!(
@@ -188,11 +193,12 @@ fn run(dir: &Path) {
 
 fn dump(dir: &Path, out: &Path) {
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let mut state = track_infos::loaded_state(&lib).unwrap();
-    if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
-        state.tracks = track_infos::build_track_infos(&lib).unwrap();
-    }
-    std::fs::write(out, serde_json::to_vec(&state).unwrap()).unwrap();
+    let json = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        serde_json::to_vec(&serde_json::json!({ "tracks": track_infos::build_track_infos(&lib).unwrap() }))
+    } else {
+        serde_json::to_vec(&track_infos::loaded_state(&lib).unwrap())
+    };
+    std::fs::write(out, json.unwrap()).unwrap();
 }
 
 fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
