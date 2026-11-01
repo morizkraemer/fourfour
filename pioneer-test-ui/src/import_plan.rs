@@ -45,6 +45,7 @@ pub struct FileSurvey {
     groups: Vec<ScanGroup>,
     unsupported: usize,
     unsupported_exts: BTreeSet<String>,
+    unreadable: usize,
 }
 
 /// The audio files of one dropped path, read as one group: a folder's tracks come back sorted
@@ -82,11 +83,14 @@ impl FileSurvey {
     fn visit_dropped_dir(&mut self, root: &Path) -> Vec<PathBuf> {
         let mut files = Vec::new();
         let Ok(anchor) = root.canonicalize() else { return files };
-        let mut chain = SymlinkChain { followed: Vec::new(), anchor };
+        let mut chain = SymlinkChain { followed: Vec::new(), anchor, entered: Default::default() };
         if is_hidden(root) {
             return files;
         }
-        let Ok(entries) = std::fs::read_dir(root) else { return files };
+        let Ok(entries) = std::fs::read_dir(root) else {
+            self.unreadable += 1;
+            return files;
+        };
         let mut subdirs = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
@@ -117,6 +121,7 @@ impl FileSurvey {
             self.audio.extend(part.audio);
             self.unsupported += part.unsupported;
             self.unsupported_exts.extend(part.unsupported_exts);
+            self.unreadable += part.unreadable;
             files.extend(part_files);
         }
         files
@@ -126,7 +131,10 @@ impl FileSurvey {
         if is_hidden(dir) {
             return;
         }
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            self.unreadable += 1;
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             match entry_kind(&entry) {
@@ -140,7 +148,7 @@ impl FileSurvey {
 
     fn visit_symlinked_dir(&mut self, parent: &Path, link: &Path, chain: &mut SymlinkChain, out: &mut Vec<PathBuf>) {
         let (Ok(target), Ok(here)) = (link.canonicalize(), parent.canonicalize()) else { return };
-        if chain.leads_back(&target, &here) {
+        if chain.leads_back(&target, &here) || !chain.entered.lock().expect("symlink targets lock").insert(target.clone()) {
             return;
         }
         let anchor = std::mem::replace(&mut chain.anchor, target);
@@ -156,6 +164,10 @@ impl FileSurvey {
         }
         let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
+            if path.to_str().is_none() {
+                self.unreadable += 1;
+                return;
+            }
             self.audio.insert(path.to_path_buf());
             out.push(path.to_path_buf());
         } else if !SIDECAR_EXTENSIONS.contains(&ext.as_str()) {
@@ -174,6 +186,7 @@ impl FileSurvey {
 struct SymlinkChain {
     followed: Vec<(PathBuf, PathBuf)>,
     anchor: PathBuf,
+    entered: std::sync::Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl SymlinkChain {
@@ -249,16 +262,52 @@ fn read_parallel<T: Send>(threads: usize, files: &[&Path], read: impl Fn(&Path) 
     out.into_iter().map(|v| v.expect("every file was read")).collect()
 }
 
-/// The tags of one file without its cover: covers are read again and stored after the rows
-/// are in the library ([`store_pending_covers`]), so a large import never holds them all.
-fn read_tags(path: &Path) -> Option<Track> {
-    match read_track_metadata(path, 0) {
-        Ok(track) => Some(Track { artwork: None, ..track }),
-        Err(e) => {
-            eprintln!("Warning: skipping {}: {}", path.display(), e);
+const MAX_TAG_CHARS: usize = 500;
+
+fn clamp_text(text: &mut String) {
+    if let Some((end, _)) = text.char_indices().nth(MAX_TAG_CHARS) {
+        text.truncate(end);
+    }
+    if text.contains('\0') {
+        text.retain(|c| c != '\0');
+    }
+}
+
+fn clamp_tags(track: Track) -> Track {
+    let mut track = track;
+    for field in [&mut track.title, &mut track.artist, &mut track.album, &mut track.genre, &mut track.label, &mut track.remixer, &mut track.comment] {
+        clamp_text(field);
+    }
+    let mut parts: Vec<String> = track.usb_path.splitn(4, '/').map(str::to_string).collect();
+    if let [_, _, artist_dir, _] = parts.as_mut_slice() {
+        clamp_text(artist_dir);
+    }
+    track.usb_path = parts.join("/");
+    track
+}
+
+pub(crate) fn guarded_read(path: &Path, read: impl FnOnce() -> anyhow::Result<Track> + std::panic::UnwindSafe) -> Option<Track> {
+    match std::panic::catch_unwind(read) {
+        Ok(Ok(track)) => Some(clamp_tags(track)),
+        Ok(Err(e)) => {
+            eprintln!("Warning: skipping {}: {e}", path.display());
+            None
+        }
+        Err(_) => {
+            eprintln!("Warning: skipping {}: the tag reader crashed on it", path.display());
             None
         }
     }
+}
+
+fn read_metadata_guarded(path: &Path) -> Option<Track> {
+    guarded_read(path, || read_track_metadata(path, 0))
+}
+
+/// The tags of one file without its cover: covers are read again and stored after the rows
+/// are in the library ([`store_pending_covers`]), so a large import never holds them all.
+fn read_tags(path: &Path) -> Option<Track> {
+    read_metadata_guarded(path).map(|track| Track { artwork: None, ..track })
 }
 
 /// What a scan found: the tracks read (without covers) and the files skipped unread because
@@ -341,7 +390,7 @@ pub fn store_pending_covers(
                         continue;
                     }
                     let files: Vec<&Path> = batch.iter().map(|(_, path)| path.as_path()).collect();
-                    let covers = read_parallel(COVER_THREADS, &files, |path| read_track_metadata(path, 0).ok().and_then(|t| t.artwork), &mut || {});
+                    let covers = read_parallel(COVER_THREADS, &files, |path| read_metadata_guarded(path).and_then(|t| t.artwork), &mut || {});
                     let read = batch.into_iter().zip(covers).map(|((id, path), cover)| (id, path, cover)).collect();
                     if sender.send(Ok(read)).is_err() {
                         return;
@@ -484,7 +533,7 @@ pub fn plan_import(token: u64, library: &[DuplicateCandidate], scanned: Scanned,
     let skipped = SkippedFiles {
         unsupported: survey.unsupported,
         unsupported_exts: survey.unsupported_exts.iter().cloned().collect(),
-        unreadable: survey.audio.len().saturating_sub(seen.len()),
+        unreadable: survey.audio.len().saturating_sub(seen.len()) + survey.unreadable,
     };
     let plan = ImportPlan { token, new_count: fresh.len() - duplicates.len(), already_in_library, duplicates, skipped };
     (PendingImport { token, fresh, duplicate_of }, plan)

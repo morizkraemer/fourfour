@@ -12,6 +12,12 @@ mod file_health;
 mod import_plan;
 mod perf_probe;
 mod playback;
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../fourfour-analysis-rs/tests/messy_fixtures/mod.rs"]
+mod messy_fixtures;
+#[cfg(test)]
+mod robustness_tests;
 mod self_check;
 mod tempo;
 mod track_fields;
