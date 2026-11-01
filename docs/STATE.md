@@ -84,7 +84,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 15. r13-50k: startup, scroll, search, import and memory at 50k tracks on the box; fix the worst regressions [landed f609c89; startup 50k still 2.5-3.2 s, rest in perf-run R13]
 16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours) [landed a7131e7; docs/architecture/analysis-resume-2026-11.md]
 17. r15-reveal: staged waveform reveal on a branch (unlanded; only if the Mac night shows first expand >50 ms)
-18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it) [running]
+18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it) [dropped; branch r16-quant b7a274f: int8 -7% CPU, grid 43 vs 44/50; no VNNI, attention stays fp32; CoreML (r11) is the lever]
 19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded)
 20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin)
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [landed d4b4ef3; 52 tests, vitest timeout fix, no bugs]
