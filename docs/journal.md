@@ -393,3 +393,4 @@
 2026-11-01 17:35 orchestrator r21-order landed: on ov-1028 3248199; smoke 112, vitest 876, CHECKS-OK
 2026-11-01 17:50 orchestrator r18-errors parked: branch abae25a (42 messages rewritten, 13 silent failures surfaced; found mock fallback in real app for analysis + playlist saves; user-visible so unlanded, Waiting 33)
 2026-11-01 17:50 orchestrator - decided: own prio r17-a11y (sonnet high; keyboard-only + screen-reader basics, branch only; r20-winlinux waits until r22 perf runs finish)
+2026-11-01 19:29 orchestrator - paused: seat limit hit (r22-startup, r17-a11y stopped mid-work, resets 11:00 UTC); resume both after reset
