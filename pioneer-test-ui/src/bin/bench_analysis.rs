@@ -15,6 +15,9 @@ mod analysis_priority;
 mod waveform_detail;
 
 #[allow(dead_code)]
+#[path = "../analysis_order.rs"]
+mod analysis_order;
+#[allow(dead_code)]
 #[path = "../analysis_run.rs"]
 mod analysis_run;
 
