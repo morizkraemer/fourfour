@@ -517,12 +517,12 @@ Branch `r22-startup` from `ov-1028`. Linux `dev` box, headless Chromium, `perf-s
 
 | Tracks | Case | Before | After |
 |---|---|---:|---:|
-| 10k | first launch | 1,100 / 1,317 | 914 / 1,118 |
-| 10k | cold | 1,148 / 1,454 | 964 / 1,234 |
-| 10k | warm | 688 / 1,043 | 638 / 827 |
-| 50k | first launch | 2,213 / 2,496 | 1,644 / 1,854 |
-| 50k | cold | 2,077 / 2,383 | 1,568 / 1,568 |
-| 50k | warm | 1,583 / 2,189 | 1,353 / 1,355 |
+| 10k | first launch | 1,101 / 1,317 | 914 / 1,118 |
+| 10k | cold | 1,225 / 1,454 | 964 / 1,234 |
+| 10k | warm | 775 / 1,043 | 638 / 827 |
+| 50k | first launch | 1,866 / 2,496 | 1,644 / 1,854 |
+| 50k | cold | 2,040 / 2,383 | 1,568 / 1,568 |
+| 50k | warm | 1,584 / 2,189 | 1,354 / 1,355 |
 
 Quietest single pair (load about 20): 50k warm 1,903 to 1,354 ms, cold 1,886 to 1,568, first launch 2,267 to 1,690; 10k warm 995 to 741. Interactive now equals the first real row in most runs (no long task after it); before, search warmup and GC added 300-700 ms at 50k.
 
