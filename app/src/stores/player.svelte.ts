@@ -30,6 +30,7 @@ import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cu
 import { initialCuePointMs } from '../lib/cues.ts';
 import { fileStateOf, noteBlockedLoad } from './file-status.svelte.ts';
 import { isUnplayable } from '../lib/fileHealth.ts';
+import { failureText, playbackFailureText } from '../lib/userErrors.ts';
 import { quantize } from './quantize.svelte.ts';
 import { quantizedMs } from '../lib/quantize.ts';
 import {
@@ -256,9 +257,11 @@ export async function initPlayerTransport() {
   await ensureTickListener();
 }
 
-function reportPlaybackFailure(message: string) {
+function reportPlaybackFailure(message: string, path?: string | null) {
   console.error('playback error:', message);
-  player.error = message;
+  const text = playbackFailureText(message, path ?? player.track?.sourcePath);
+  player.error = text;
+  library.statusMessage = text;
   player.playing = false;
   pausePending = false;
   seekTargetMs = null;
@@ -267,7 +270,7 @@ function reportPlaybackFailure(message: string) {
 async function ensureTickListener() {
   if (!errorUnlisten) {
     errorUnlisten = await subscribePlaybackError((event) => {
-      reportPlaybackFailure(event.message);
+      reportPlaybackFailure(event.message, event.path);
     });
   }
   if (tickUnlisten) return;
@@ -675,11 +678,13 @@ export async function pause() {
 // change only reaches the waveform as a new object) and schedules saving the grid.
 onCueSaveError((message) => {
   player.error = message;
+  library.statusMessage = message;
 });
 
 const gridPersister = createGridPersister<EditedGrid>(setBeatGrid, (err) => {
   console.error('saving the beat grid failed:', err);
-  player.error = `Could not save the beat grid: ${err}`;
+  player.error = failureText("Couldn't save the beat grid.", err);
+  library.statusMessage = player.error;
 });
 
 /**

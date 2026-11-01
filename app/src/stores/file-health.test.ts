@@ -127,10 +127,10 @@ describe('problemTrackIds', () => {
 
 describe('checking and relocating', () => {
   it('reports a failed check in the status line and stops the running marker', async () => {
-    hooks.checkLibraryFiles.mockRejectedValue('no disk');
+    hooks.checkLibraryFiles.mockRejectedValue('Cannot read the file list: Input/output error (os error 5)');
     await checkLibraryAgain();
     expect(fileStatus.running).toBe(false);
-    expect(library.statusMessage).toBe('Library check failed: no disk');
+    expect(library.statusMessage).toBe("Couldn't check your files. The drive stopped responding. Check the connection and try again.");
   });
 
   it('survives a failing health read at startup', async () => {
@@ -164,9 +164,13 @@ describe('checking and relocating', () => {
 
   it('keeps the error and still opens the dialog when relocating fails', async () => {
     hooks.pickDirectory.mockResolvedValue('/new');
-    hooks.relocateMissingInFolder.mockRejectedValue('folder unreadable');
+    hooks.relocateMissingInFolder.mockRejectedValue('/new is not a folder');
     await relocateMissing();
-    expect([relocateResult.error, fileStatus.dialogOpen, fileStatus.relocating]).toEqual(['folder unreadable', true, false]);
+    expect([relocateResult.error, fileStatus.dialogOpen, fileStatus.relocating]).toEqual([
+      "Couldn't relink the files. That isn't a folder. Choose a folder.",
+      true,
+      false,
+    ]);
   });
 
   it('moves a hand-located track from the open report lists into the matched list', async () => {

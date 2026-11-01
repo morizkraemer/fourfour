@@ -467,6 +467,7 @@ export async function saveState(playlists: PlaylistInput[]): Promise<void> {
     return await invoke<void>('save_state', { playlists });
   } catch (err) {
     lastTauriError = `save_state fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     mockPlaylists = playlists;
   }
 }
@@ -579,6 +580,7 @@ export async function removeTracks(ids: number[]): Promise<void> {
     return await invoke<void>('remove_tracks', { ids });
   } catch (err) {
     lastTauriError = `remove_tracks fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     mockTracks = mockTracks.filter(t => !ids.includes(t.id));
     mockPlaylists.forEach(pl => {
       pl.track_ids = pl.track_ids.filter(tid => !ids.includes(tid));
@@ -669,6 +671,7 @@ export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
     return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
   } catch (err) {
     lastTauriError = `analyze_track_ids fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return runMockAnalysis(ids);
   }
 }
@@ -779,6 +782,7 @@ export async function analyzeTracks(): Promise<TrackInfo[]> {
     return await invoke<TrackInfo[]>('analyze_tracks');
   } catch (err) {
     lastTauriError = `analyze_tracks fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return new Promise((resolve) => {
       setTimeout(() => {
         mockTracks.forEach(t => {

@@ -11,6 +11,7 @@ import {
   type BackupStatus,
 } from '../services/tauri.svelte.ts';
 import { applyUiSettings, backupFileName, collectUiSettings, parseUiSettings } from '../lib/backup.ts';
+import { backupReadFailureText, backupRestoreFailureText, backupSaveFailureText } from '../lib/userErrors.ts';
 
 export const backup = $state({
   status: null as BackupStatus | null,
@@ -22,10 +23,6 @@ export const backup = $state({
   restoring: false,
   restoreError: '',
 });
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 async function withProgress<T>(phase: 'export' | 'restore', run: () => Promise<T>): Promise<T> {
   backup.progress = null;
@@ -58,7 +55,8 @@ export async function saveBackup() {
     const last = await withProgress('export', () => exportBackup(path, backup.includeAudio, ui));
     backup.status = backup.status ? { ...backup.status, last } : { sizes: { library_bytes: 0, audio_bytes: 0, audio_files: 0 }, last };
   } catch (err) {
-    backup.exportError = `Backup failed: ${message(err)}`;
+    console.info('export_backup failed:', err);
+    backup.exportError = backupSaveFailureText(err);
   } finally {
     backup.exporting = false;
   }
@@ -71,7 +69,8 @@ export async function chooseRestoreFile() {
   try {
     backup.preview = await readBackup(path);
   } catch (err) {
-    backup.restoreError = message(err);
+    console.info('read_backup failed:', err);
+    backup.restoreError = backupReadFailureText(err);
   }
 }
 
@@ -93,7 +92,8 @@ export async function confirmRestore(reload: () => void = () => location.reload(
     if (ui) applyUiSettings(localStorage, ui);
     reload();
   } catch (err) {
-    backup.restoreError = message(err);
+    console.info('restore_backup failed:', err);
+    backup.restoreError = backupRestoreFailureText(err);
     backup.restoring = false;
   }
 }

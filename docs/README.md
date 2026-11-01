@@ -37,6 +37,7 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`design-round-wm-2.md`](ui/design-round-wm-2.md) | current | Mockup round 2: inspector (all fields editable, lock state) and settings overhaul; options and open questions. |
 | [`design-round-wm-3.md`](ui/design-round-wm-3.md) | current | Mockup round 3: calmer inspector (hierarchy first, edit on click, one lock marker); three options and open questions. |
 | [`waveform-dynamics.md`](ui/waveform-dynamics.md) | current | Waveform display dynamics — playhead, scroll, band rendering. |
+| [`error-messages-2026-11.md`](ui/error-messages-2026-11.md) | current | Every failure message a user can see: rules for new ones, inventory with before and after, silent failures, what is left. Branch `r18-errors`, copy awaits review. |
 
 ## analysis/ — analysis pipeline (research & plans)
 

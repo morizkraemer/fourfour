@@ -51,7 +51,7 @@ describe('commitTrackRating', () => {
     hooks.invoke.mockRejectedValue('no space');
     expect(await commitTrackRating(2, 5)).toBe(false);
     expect(row(1).rating).toBe(2);
-    expect(library.statusMessage).toContain('Setting the rating failed');
+    expect(library.statusMessage).toBe("Couldn't set the rating. Try again.");
   });
 
   it('sorts by the effective rating with unrated tracks last', async () => {

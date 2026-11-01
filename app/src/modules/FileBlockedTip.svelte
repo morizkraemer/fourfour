@@ -17,7 +17,7 @@
 
 {#if trackId != null}
   <div class="ff-file-tip" role="status" data-file-blocked-tip>
-    <span class="ff-file-tip__text">“{track?.title ?? `Track ${trackId}`}” {reason}. It can't be loaded.</span>
+    <span class="ff-file-tip__text">“{track?.title ?? `Track ${trackId}`}” {reason}, so it can't be loaded.</span>
     <Button label="Locate…" size="small" onclick={locate} />
   </div>
 {/if}

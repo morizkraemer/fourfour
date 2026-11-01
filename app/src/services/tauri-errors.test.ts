@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
-import { changeLibraryPath, getLibraryPath, readUsbState } from './tauri.svelte.ts';
+import { analyzeTrackIds, analyzeTracks, changeLibraryPath, getLibraryPath, readUsbState, removeTracks, saveState } from './tauri.svelte.ts';
 
 describe('inside the real app', () => {
   beforeEach(() => {
@@ -41,5 +41,23 @@ describe('in a browser preview', () => {
     expect(await getLibraryPath()).toBe('/mock/user/library.db');
     expect(await changeLibraryPath('/music')).toBe('/music/library.db');
     expect((await readUsbState('/media/usb'))?.tracks[0].title).toBe('USB Track 1');
+  });
+});
+
+describe('library actions inside the real app', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    invokeMock.mockRejectedValue(new Error('backend down'));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    invokeMock.mockReset();
+  });
+
+  it('analysis, remove and playlist saves rethrow instead of faking success', async () => {
+    await expect(analyzeTrackIds([1])).rejects.toThrow('backend down');
+    await expect(analyzeTracks()).rejects.toThrow('backend down');
+    await expect(removeTracks([1])).rejects.toThrow('backend down');
+    await expect(saveState([])).rejects.toThrow('backend down');
   });
 });
