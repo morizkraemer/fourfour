@@ -87,7 +87,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it) [running]
 19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded)
 20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin)
-21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt
+21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [running]
 22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec)
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
