@@ -144,23 +144,36 @@ pub fn track_exists_by_path(conn: &Connection, source_path: &Path) -> Result<boo
     Ok(count > 0)
 }
 
+fn row_to_duplicate_candidate(row: &rusqlite::Row) -> rusqlite::Result<DuplicateCandidate> {
+    let id: i64 = row.get(0)?;
+    let source_path: String = row.get(1)?;
+    let file_size: i64 = row.get(2)?;
+    Ok(DuplicateCandidate {
+        id: id as u32,
+        source_path: std::path::PathBuf::from(source_path),
+        file_size: file_size as u64,
+        artist: row.get(3)?,
+        title: row.get(4)?,
+        duration_secs: row.get(5)?,
+    })
+}
+
 pub fn select_duplicate_candidates(conn: &Connection) -> Result<Vec<DuplicateCandidate>> {
     let mut stmt =
         conn.prepare("SELECT id, source_path, file_size, artist, title, duration_secs FROM tracks ORDER BY id")?;
-    let rows = stmt.query_map([], |row| {
-        let id: i64 = row.get(0)?;
-        let source_path: String = row.get(1)?;
-        let file_size: i64 = row.get(2)?;
-        Ok(DuplicateCandidate {
-            id: id as u32,
-            source_path: std::path::PathBuf::from(source_path),
-            file_size: file_size as u64,
-            artist: row.get(3)?,
-            title: row.get(4)?,
-            duration_secs: row.get(5)?,
-        })
-    })?;
+    let rows = stmt.query_map([], row_to_duplicate_candidate)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn select_duplicate_candidates_of(conn: &Connection, ids: &[i64]) -> Result<Vec<DuplicateCandidate>> {
+    let mut stmt = conn.prepare_cached("SELECT id, source_path, file_size, artist, title, duration_secs FROM tracks WHERE id = ?1")?;
+    let mut found = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(candidate) = stmt.query_row([id], row_to_duplicate_candidate).optional()? {
+            found.push(candidate);
+        }
+    }
+    Ok(found)
 }
 
 pub fn select_track_files(conn: &Connection) -> Result<Vec<(i64, String, i64)>> {

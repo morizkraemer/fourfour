@@ -461,6 +461,21 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let (tracks, _) = plans.take(plan.token).unwrap().resolve(false);
     let (added, exists_ms, insert_ms) = add_scanned_tracks(&lib, tracks);
     let commit_ms = ms(t);
+    if let Ok(again) = std::env::var("FF_IMPORT_AGAIN") {
+        let t = Instant::now();
+        let known = lib.track_paths().unwrap();
+        let survey = import_plan::survey_files(&[again]);
+        let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
+        let second_scan_ms = ms(t);
+        let t = Instant::now();
+        let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+        let second_plan_ms = ms(t);
+        println!("second_import: scan_ms={second_scan_ms:.1} plan_ms={second_plan_ms:.1} duplicates={}", plan.duplicates.len());
+        perf(
+            "import_second",
+            serde_json::json!({ "scan_ms": second_scan_ms, "plan_ms": second_plan_ms, "duplicates": plan.duplicates.len() }),
+        );
+    }
     let lib = std::sync::Mutex::new(lib);
     let t = Instant::now();
     let covers = import_plan::store_pending_covers(&lib, None, &mut |_| {}).unwrap();
