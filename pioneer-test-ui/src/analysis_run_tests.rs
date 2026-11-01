@@ -838,6 +838,19 @@ async fn a_result_for_a_file_the_track_no_longer_points_at_is_not_stored() {
     std::fs::remove_dir_all(moved.parent().unwrap()).ok();
 }
 
+#[tokio::test]
+async fn a_priority_request_that_cannot_start_its_analyzer_still_tells_the_ui_it_is_over() {
+    let h = harness(2, 1, 8);
+
+    let outcome = prioritize_with_resolver(h.shared.clone(), h.coordinator.clone(), h.items[0].clone(), h.sink.clone(), BackendEnv::default(), || {
+        Err("no analyzer".to_string())
+    })
+    .await;
+
+    assert_eq!(outcome.err().as_deref(), Some("no analyzer"));
+    assert_eq!(h.sink.log_of_completions(), 1);
+}
+
 fn write_tone_wav(path: &Path, seconds: f64, hz: f64) {
     let rate = 44_100u32;
     let mut data = Vec::new();

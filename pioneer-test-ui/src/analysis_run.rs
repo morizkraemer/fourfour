@@ -774,8 +774,8 @@ pub(crate) async fn prioritize_track(
     sink: Arc<dyn AnalysisSink>,
     env: BackendEnv,
 ) -> Result<(), String> {
-    let (runner, _) = resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked)?;
-    prioritize_with_runner(shared, coordinator, item, sink, env, runner).await
+    let resolve = || resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked).map(|(runner, _)| runner);
+    prioritize_with_resolver(shared, coordinator.clone(), item, sink, env.clone(), resolve).await
 }
 
 async fn prioritize_with_runner(
@@ -786,6 +786,22 @@ async fn prioritize_with_runner(
     env: BackendEnv,
     runner: Runner,
 ) -> Result<(), String> {
+    prioritize_with_resolver(shared, coordinator, item, sink, env, || Ok(runner)).await
+}
+
+async fn prioritize_with_resolver(
+    shared: SharedLibrary,
+    coordinator: AnalysisCoordinator,
+    item: AnalysisWorkItem,
+    sink: Arc<dyn AnalysisSink>,
+    env: BackendEnv,
+    resolve: impl FnOnce() -> Result<Runner, String>,
+) -> Result<(), String> {
+    let runner = resolve().inspect_err(|_| {
+        if !coordinator.is_active() {
+            sink.complete();
+        }
+    })?;
     let wide_threads = match &runner {
         Runner::Rust { engine } => engine.plan(1).threads_per_track,
         Runner::Python { .. } => 0,
