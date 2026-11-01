@@ -76,10 +76,11 @@ if (expandRuns.length) {
   const longest = median(measured.map((e) => e.longest_frame_ms).filter(Number.isFinite));
   const drawn = median(measured.map((e) => e.drawn_ms).filter(Number.isFinite));
   lines.push('', '## Cold first expand (R10)', '', `Median of ${measured.length} launches: longest frame ${fmt(longest)} ms, click to detail drawn ${fmt(drawn)} ms. Trigger for the staged reveal (perf-run-2026-11.md, R10 option 1): median longest frame over 50 ms (${typeof longest === 'number' ? (longest > 50 ? 'over: build it' : 'under: not needed') : 'missing'}).`, '');
-  lines.push('| run | longest frame ms | click to drawn ms | frames > 50 ms |', '|---|---:|---:|---:|');
+  lines.push('Longest busy: the longest the page main thread went without running a task. It covers script and the web process own style, layout and paint; a longest frame far above it means the frame waited outside that thread (compositing, the UI process or the GPU process). Revealed: click to the first frame with the expanded panel shown (later with the R15 staged reveal). Pending frames: frames that showed the zoom view without its detail series.', '');
+  lines.push('| run | longest frame ms | at ms | longest busy ms | revealed ms | click to drawn ms | pending frames | frames > 50 ms |', '|---|---:|---:|---:|---:|---:|---:|---:|');
   for (const r of expandRuns) {
     const e = r.first_expand ?? {};
-    lines.push(`| ${r.file}${r.first_expand_skipped ? ` (skipped: ${r.first_expand_skipped})` : ''} | ${fmt(e.longest_frame_ms)} | ${fmt(e.drawn_ms)} | ${fmt(e.long_frames)} |`);
+    lines.push(`| ${r.file}${r.first_expand_skipped ? ` (skipped: ${r.first_expand_skipped})` : ''} | ${fmt(e.longest_frame_ms)} | ${fmt(e.longest_frame_at_ms)} | ${fmt(e.longest_busy_ms)} | ${fmt(e.revealed_ms)} | ${fmt(e.drawn_ms)} | ${fmt(e.pending_frames)} | ${fmt(e.long_frames)} |`);
   }
 }
 

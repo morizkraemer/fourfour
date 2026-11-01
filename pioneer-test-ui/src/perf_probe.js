@@ -94,14 +94,22 @@
     const button = document.querySelector('.ff-player-compact__expand-btn');
     if (!button) return send('first_expand_skipped', { reason: 'no expand button' });
     const gaps = [];
+    const busy = mainThreadBusy();
     let last = await frame();
     const t0 = performance.now();
     button.click();
-    const zoomDetail = () => document.querySelector('.ff-xp .waveform-display__zoom')?.dataset.bands === 'detail';
+    const zoomBands = () => document.querySelector('.ff-xp .waveform-display__zoom')?.dataset.bands;
+    const zoomDetail = () => zoomBands() === 'detail';
+    let revealedAt = null;
+    let pendingFrames = 0;
+    let longestAt = 0;
     while (!zoomDetail() && performance.now() - t0 < 15000) {
       const now = await frame();
+      if (now - last > Math.max(0, ...gaps)) longestAt = now - t0;
       gaps.push(now - last);
       last = now;
+      if (revealedAt === null && document.querySelector('.ff-xp')) revealedAt = now - t0;
+      if (zoomBands() === 'pending') pendingFrames += 1;
     }
     const drawnFrames = zoomDetail() ? 2 : 0;
     for (let i = 0; i < drawnFrames; i++) {
@@ -115,7 +123,37 @@
       gaps.push(now - last);
       last = now;
     }
-    send('first_expand', { drawn_ms: drawnFrames ? drawn : null, longest_frame_ms: Math.max(...gaps), frames: gaps.length, long_frames: gaps.filter((g) => g > 50).length });
+    send('first_expand', {
+      drawn_ms: drawnFrames ? drawn : null,
+      longest_frame_ms: Math.max(...gaps),
+      longest_frame_at_ms: longestAt,
+      longest_busy_ms: busy.stop(),
+      revealed_ms: revealedAt,
+      pending_frames: pendingFrames,
+      frames: gaps.length,
+      long_frames: gaps.filter((g) => g > 50).length,
+    });
+  }
+
+  function mainThreadBusy() {
+    const channel = new MessageChannel();
+    let last = performance.now();
+    let longest = 0;
+    let running = true;
+    channel.port1.onmessage = () => {
+      const now = performance.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+      if (running) setTimeout(() => channel.port2.postMessage(0), 1);
+    };
+    channel.port2.postMessage(0);
+    return {
+      stop() {
+        running = false;
+        channel.port1.close();
+        return longest;
+      },
+    };
   }
 
   async function run() {

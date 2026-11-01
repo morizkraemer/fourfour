@@ -829,3 +829,33 @@ Same results: only the 64 px row thumbnails are evicted; a visible row is never 
 - `trackAnalysisEpochs` (one small entry per track whose analysis changed), `detail-prefetch` and the other module maps are bounded by the library size or already capped (analysis cache 48, zoom detail 3, wire bands 512, bitmaps 800, row bands LRU).
 - The soak did not run the real backend with the real app (WKWebView, Tauri IPC, real audio decode and the playback callback); that is a Mac session. Real-library memory (50k with covers) was not soaked either: 10k synthetic tracks, 15-45 min.
 - Listener, interval and callback counts were flat in every sample of every run, so the open-close paths (palette, settings, expanded player, popovers, waveform detail) tear down what they set up.
+
+## R15 staged reveal (2026-11-01, `r15-reveal`, not landed)
+
+Branch `r15-reveal` = `ov-1028` + R10 option 1. Visible timing change (the panel shows a few frames after the click), so it waits for Merlin. Old path: `const STAGED_REVEAL = false` in `app/src/modules/Player.svelte`.
+
+**What changed.**
+- `Player.svelte`: on expand the expanded player mounts at once but hidden (`visibility: hidden`, absolute at its final size, `data-xp-staging`), the compact player stays and keeps animating. The panel is shown when its waveform reports ready, or after 1 s as a fallback. Revealed, its wrapper is `display: contents`, so the layout is the same as before.
+- `WaveformDisplay.stage(onReady)` (`waveform-display.js`): while staged, each paint gives the zoom ring a 6 ms budget and continues in the next task (`setTimeout`, not the next frame: in WebKit frames came 200-400 ms apart while the main thread was idle). `drawBandRange` takes a `deadline`; the ring (`drawScrolledColumns`) then fills in slices of 128 columns from a fixed left column and catches up with an ordinary scroll when full. Without a deadline nothing changes.
+- Pixels: each ring column still comes from its absolute index only. New test in `waveform-scroll-identity.test.ts`: the sliced fill draws nothing until full, then the same pixels as a full repaint over 20 scrolled frames.
+- Harness: `first-expand` records the longest frame gap (WebKit has no long-task API); `FF_SMOKE_BROWSER=webkit` runs the smoke config in Playwright WebKit (works on the box, no sudo). The probe and harness only count "drawn" once the panel is shown.
+
+**Where the WebKit time went (box, Playwright WebKit, instrumented, before).** Frame after the click: zoom first paint about 110-150 ms in JS (first `putImageData` into the new ring layer 25-35 ms, pixel fill 20 ms, the rest of the 3200 columns, beat grid text 14 ms first time), overview 10-20 ms. Then the next frame came 200-350 ms later while the main thread was idle: the wait is outside page script and main-thread layout (WebKit compositing of the new canvases). Chromium does all this in about 100 ms CPU (R10).
+
+**Numbers** (10k state, 5 cold launches each, interleaved A/B, two rounds; box load 46-35 in round 1, 25-14 in round 2; medians):
+
+| Browser | Round | Before longest frame | After longest frame | Before click to drawn | After click to drawn |
+|---|---|---:|---:|---:|---:|
+| Chromium | 1 | 217 ms | 133 ms | 332 ms | 456 ms |
+| Chromium | 2 | 83 ms | 67 ms | 146 ms | 185 ms |
+| WebKit | 1 | 439 ms | 315 ms | 707 ms | 1452 ms |
+| WebKit | 2 | 344 ms | 283 ms | 529 ms | 1329 ms |
+
+- Longest frame down 20-40 % in both engines, not to 30-50 ms. What is left in the reveal frame is the relayout (table shrinks, compact unmounts) plus WebKit compositing of the newly shown canvases (200-300 ms idle wait on this loaded box).
+- Click to drawn goes up, a lot in WebKit (about +0.7 s): the staging tasks run between slow frames, and in the smoke mock the playhead jumps 3-5 s on the first transport sync after reveal (also before; mock timers drift under load), so the first visible frames repaint the whole ring anyway.
+- Verdict on the box: a modest frame win, a clear latency loss in WebKit. Not worth landing on this evidence alone.
+
+**What to look at on the Mac.** The probe now reports per launch: `longest_frame_at_ms`, `longest_busy_ms` (longest the page main thread went without running a task; covers script, style, layout, paint), `revealed_ms` and `pending_frames` (frames showing the zoom view while its detail series was still pending). Run `scripts/mac/perf-night.sh --expand-runs 5` on `ov-1028` and on `r15-reveal`:
+- longest frame far above longest busy: the 500 ms is outside the web process main thread (UI process main thread blocked by a sync Tauri command, GPU process / IOSurface allocation for the big canvases). Staging does not fix that; look at the UI process (Instruments, Time Profiler on the app's main thread) during the click.
+- pending frames > 0 in the slow launches: the detail series (measured from audio on first use; each perf-night launch has a fresh HOME, so the cache is empty) was still loading; the 3-of-5 split may be whether the dblclick prefetch finished within the 1.5 s settle.
+- longest busy near the longest frame: page work; then compare `r15-reveal`.
