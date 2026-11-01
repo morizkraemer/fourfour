@@ -418,3 +418,4 @@
 2026-11-02 01:37 orchestrator r23-memory handed back (artwork rowCache FIFO 2,000 with revoke; soak/leak tooling; backend flat), merging after r26 checks; decided: own prio r30-coreml-mem (opus; cap bridge RSS, Mac headless)
 2026-11-02 01:43 orchestrator r26-coreml-ship landed: on ov-1028 fae2186 (CoreML default on macOS); smoke 112, vitest 882, CHECKS-OK; merged branches r24-coreml/r11-coreml/r9-ort deleted
 2026-11-02 01:57 orchestrator r23-memory landed: on ov-1028 30275a0; smoke 113, CHECKS-OK
+2026-11-02 02:03 orchestrator r28-deb-verify landed (docs): real deb 90 MB, Depends alsa/ssl/webkit/gtk, only app bin, self-check + xvfb ok; decided: own prio r31-cover-cap (sonnet high)

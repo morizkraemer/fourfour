@@ -98,11 +98,11 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 26. r25-package: release bundles without dev bins, deb Depends libasound2, Windows path names in the frontend, app-code platform guards [landed f82e56e; deb deps unverified until r28]
 27. r26-coreml-ship: CoreML as the Mac analysis default (w2 t2), rten fallback if CoreML fails to load, ort in the Mac bundle (min macOS 13.4), dmg check; memory per session [landed fae2186; app 1.4x on 12 tracks, peak RSS 7.0-7.7 GB vs rten 6.2 -> cap bridge threads follow-up]
 28. r27-dbsafe: library.db open never inits over real data (unreadable schema_version), no setup panic on a damaged DB [landed 5d7df87; recovery screen left for Merlin]
-29. r28-deb-verify: real Linux bundle + dpkg-deb -I + ldd to confirm deps and no dev bins (after r25) [running]
+29. r28-deb-verify: real Linux bundle + dpkg-deb -I + ldd to confirm deps and no dev bins (after r25) [landed 8511026; deb 90 MB, Depends + contents verified]
 30. r29-mac-startup: Mac WKWebView 10k startup first row 1.8-2.8 s / interactive 2.2-3.8 s (box 0.8-1.1 s): profile on the Mac, fix the gap
 31. r15 trigger hit: Mac cold first expand longest frame 472-520 ms in 3/5 launches -> build staged reveal on a branch (r15-reveal)
 32. r30-coreml-mem: cap the rten bridge so CoreML peak RSS <= rten (7.0-7.7 -> <=6.2 GB) [running]
-33. r31-cover-cap: cap the 512 px artwork.cache (UI-aware eviction, never blank a visible image)
+33. r31-cover-cap: cap the 512 px artwork.cache (UI-aware eviction, never blank a visible image) [running]
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
