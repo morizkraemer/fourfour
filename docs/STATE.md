@@ -90,6 +90,8 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [landed d4b4ef3; 52 tests, vitest timeout fix, no bugs]
 22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [running]
+24. r22-startup: 50k startup to interactive under 1.5 s (lazy row proxies, smaller load_state payload; R13 profile, no schema)
+25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks)
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
