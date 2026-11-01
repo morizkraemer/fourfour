@@ -528,3 +528,35 @@ Why 30 ms needs a decision: everything in the frame is needed for the first visi
 3. **Draw the zoom view one frame after the panel** (q50-render's option): ~30 ms off the task, but the panel's first frame shows an empty zoom area. Visible, so not done.
 
 Decided (orchestrator, 2026-10-31): measure on the Mac first. `scripts/mac/perf-night.sh` now launches the app `--expand-runs` times (default 5), each with the probe step `expand` (`perf_probe.js` `firstExpand`: load row 3, wait for `ff:player-ready` plus 1.5 s, click expand, record frame gaps until the zoom view shows `data-bands="detail"` plus two frames). `summary.md` gets a "Cold first expand (R10)" table with the median longest frame and click to detail drawn. WKWebView has no long-task API, so the longest frame gap stands in for the longest task. **Trigger: a median longest frame over 50 ms on the Mac means building the staged reveal (option 1 above); at or under 50 ms it is not built.**
+
+## R11 CoreML (2026-11-01, `r11-coreml`)
+
+Branch `r11-coreml` = `r9-ort` + `ov-1028`, not landed. Mac: `mbp`, Apple M5 Pro (15 cores: 5 performance, 10 efficiency), 24 GB, macOS 26.3. Headless clone `~/dev/build/fourfour-r11` (git bundle from the box); `~/dev/build/fourfour-mac` and /Applications untouched. Merlin was using the Mac, so only builds and a 3-track check ran, all under `nice -n 10 taskpolicy -b` (efficiency cores only): no number below is representative of speed.
+
+### Build on the Mac
+
+- **The `ort` build did not link on macOS.** The prebuilt ONNX Runtime 1.31.0 for `aarch64-apple-darwin` (pyke, CoreML build, downloaded to `~/Library/Caches/ort.pyke.io/`) calls `___isPlatformVersionAtLeast` (clang's `@available` helper in compiler-rt), and rustc links with `-nodefaultlibs`, so `ffa --features coreml` failed with an undefined symbol. Fix: `fourfour-analysis-rs/build.rs` links `libclang_rt.osx.a` from `clang --print-resource-dir` when the target is macOS and `ort` is on (a no-op everywhere else). This also affects `bundle-app.sh --features coreml`; R9's Mac steps could not have worked without it.
+- Linker warnings remain that the ORT objects were built for macOS 13.4 while the link targets 11.0: harmless here (macOS 26), but the `.dmg` with `ort` effectively needs macOS 13.4+.
+- `ffa --features coreml` (release, LTO, stripped): 24.0 MB, 2 min 12 s incremental at background priority.
+
+### Sanity (3 dev tracks, background priority)
+
+Not finished: the Mac went offline (asleep or off the tailnet) about 15 min into the check, while the one-chunk test was still compiling at background priority, and did not come back within the timebox. The check is `scripts/mac/coreml-bench.sh --no-build --limit 3 --reps 1 --rten "1 1" --coreml "1 1" --rounds 3 --background` (output `~/.cache/r11-work/sanity/`); it may have finished on its own once the Mac woke. Still unknown: whether CoreML takes the graph (node coverage), the logit diff vs rten, and the per-chunk time.
+
+### Tonight's run (`scripts/mac/coreml-bench.sh`)
+
+Headless (no window, no screen recording). Builds `ffa --features coreml`, runs the one-chunk test (rten vs CoreML in one process, wall ms per chunk and session open time), then `ffa` on the same track list for each runtime/config, interleaved, `--reps` times, with `/usr/bin/time -l` and `ORT_LOG=info` (the CoreML EP logs how many graph nodes it took). `scripts/mac/coreml-bench-summary.py` writes `summary.md`: tracks/min, first result, model load, peak RSS, model seconds, CoreML node coverage, median per-chunk model ms per run, max logit diff and beat/grid agreement vs rten, and the `o3-score.py` grid eval for every config. Dry run on the box: `scripts/mac/coreml-bench.sh --dry-run --o3 benchmark/results/o3`; the summary was checked against the R9 dumps (reproduces R9's 2.0e-4 logit diff, 50/50 peaks, 44/50 grid).
+
+Track data: the dev (50) and test (205) splits are all on the Mac under `~/local/2-Areas/1-Mukke/#02_DJ` (matched by file name and size, 255/255; the 10k fixture is not on the Mac). `~/.cache/r11-work/o3/` holds `ref.json`, `dev.txt`, `test.txt` rewritten to those paths (three box paths are duplicates of one Mac file each, so three test-split ids collapse); weights are in `~/.cache/fourfour-models`.
+
+```bash
+ssh mbp
+cd ~/dev/build/fourfour-r11 && export PATH=$HOME/.cargo/bin:$PATH FFA_TARGET_DIR=$PWD/target-ffa
+scripts/mac/coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7
+# optional, grid on the test split for the best CoreML config only (about 4x the dev time):
+scripts/mac/coreml-bench.sh --no-build --split test --reps 1 --rten "2 6" --coreml "2 2" --rounds 3
+```
+
+Output: `build/mac/coreml-<date>/summary.md`. Expected time for the dev command: 12 `ffa` runs over 50 tracks; at rten's box rate (5-10 tracks/min) about 5-10 min each, so 1-2 h; CoreML runs shorter if it helps.
+
+Decision rule (as R9): keep `coreml` only if a CoreML config beats the best rten config on tracks/min at similar or lower peak memory, with grid within 20 ms still 44/50 on dev and max logit diff small enough that beat peaks match on (nearly) all tracks. Otherwise drop the `ort`/`coreml` features.
