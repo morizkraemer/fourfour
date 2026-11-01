@@ -27,6 +27,12 @@ impl Drop for Scratch {
     }
 }
 
+#[cfg(not(unix))]
+fn make_tree_writable(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
 fn make_tree_writable(dir: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755))?;

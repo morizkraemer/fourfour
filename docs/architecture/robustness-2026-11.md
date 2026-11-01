@@ -64,3 +64,39 @@ Every case also checks: good neighbours imported and fully analysed, analysis ru
 ## Run
 
 `cargo test -p pioneer-test-ui --bin pioneer-test-ui robustness -- --nocapture` (about 15 s with the decode engine, 5 min with the real analyzer and `FOURFOUR_MODELS_DIR=~/.cache/fourfour-models`); `cargo test -p fourfour-analysis-rs --test messy_audio -- --include-ignored` with weights; `cargo test -p pioneer-library --test robust_store`. Permission cases skip as root.
+
+## Platforms 2026-11
+
+Branch `r20-winlinux` from `ov-1028`. Linux `dev` box (Debian 13, headless, load 45-60), 2026-11-01.
+
+**Linux bundle** (`fourfour-analysis-rs/scripts/bundle-app.sh --ci --bundles deb,appimage`, tauri-cli 2.10.1, weights from the local model cache): built in about 25 min at load 50 (cold target dir).
+
+| Artifact | Size |
+|---|---:|
+| `fourfour_0.1.0_amd64.deb` | 116.4 MB |
+| `fourfour_0.1.0_amd64.AppImage` | 216.1 MB |
+| inside the deb: `pioneer-test-ui` / `beat_this.onnx` | 45 MB / 81 MB |
+
+The weights land in `/usr/lib/fourfour/models/` (deb and AppImage), which is Tauri's `resource_dir` on Linux, so the runtime lookup (`locate_models_in`) finds them. `.deb` Depends is only `libwebkit2gtk-4.1-0, libgtk-3-0`.
+
+**Smoke** (deb extracted with `dpkg-deb -x` into a scratch dir, `HOME` and `XDG_*` in a temp dir, 50-track synthetic library made with the bundled `bench_startup gen`, `xvfb-run`): the app opened the library, `load_state` returned 50 tracks, first row at 10.5 s and interactive at 19.7 s on the loaded box (software GL), still alive at 25 s, then SIGTERM (exit 143; the app has no headless quit, so there is no exit 0 to check). stderr has only AT-SPI and ALSA "no card" lines plus `audio output unavailable at startup, will retry on play`, as expected without a sound card. The AppImage was run only for `--self-check` (`APPIMAGE_EXTRACT_AND_RUN=1`), not as a window.
+
+**Fixed here**
+
+- `--self-check` looked for the weights in the macOS layout (`../Resources/models`) and failed on Linux; it now uses `../lib/fourfour/models` on Linux and `<exe dir>/models` on Windows. Verified on the extracted deb: `self-check ok ... weights loaded`. The Windows path is not verified (NSIS layout assumed from Tauri's resource rules).
+- Tests that use `std::os::unix` (permissions, symlinks, fifos) are gated with `cfg(unix)` (`pioneer-library/tests/multi_sync.rs`, `robust_store.rs`, `robustness_tests` in `pioneer-test-ui`, `make_tree_writable` in `messy_fixtures`), so `cargo check --workspace --all-targets` passes for Windows.
+
+**Windows (compile check only, no run)**: `x86_64-pc-windows-gnu` was added with `rustup target add` (the MSVC target also installs, but the C parts need a Windows C toolchain). No mingw on the box, so the C and resource steps were stood in for: `zig cc -target x86_64-windows-gnu` for the C and C++ build scripts (stretch), the sqlcipher build script skipped through a `--config` override with the pre-generated bindings (it needs Windows OpenSSL headers), and a no-op `windres`. With that, `cargo check --workspace --all-targets` is clean for all five crates (one dead-code warning, `prioritize_with_runner`, shared with Linux). That proves the Rust compiles for Windows, not that it links, bundles with NSIS, or runs; OpenSSL and the sqlcipher C build on Windows are exercised only by the CI Windows job.
+
+**Runtime risks found**
+
+- The `.deb` ships the dev binaries `bench_analysis`, `bench_startup`, `waveform_*` in `/usr/bin` next to the app; the bundler picks up every bin of the crate.
+- `.deb` has no `libasound2` Depends although cpal links ALSA; on a machine without it the app fails to start.
+- Windows `is_removable` returns true for every drive, so internal data drives show up as USB sticks (the system drive is refused, other fixed drives are not; no home-overlap check on Windows).
+- `eject_volume` runs `umount` on Linux (needs root for most mounts; `udisksctl unmount` is the user-level call) and also on Windows, where it does not exist, so eject always errors there.
+- `reveal_in_finder` on Linux opens the parent folder through `xdg-open` (no selection); fine, but absent in minimal installs.
+- `rekordbox_default_master_db` only checks `~/Library/Pioneer/...` and `%APPDATA%\Pioneer\...`; a Linux home never matches (no Rekordbox there, so harmless).
+- Frontend `path.split('/').pop()` without backslash normalising: `app/src/services/tauri.svelte.ts` lines about 524 and 964 (dropped track title, stick label). On Windows the full path shows as the name; other label helpers already normalise.
+- Writer lane, not touched: `pioneer-usb-writer/src/writer/pdb.rs` matches the extension case-sensitively (`Some("mp3")`), so `TRACK.MP3` gets file type 0 in the legacy PDB (the scanner and `onelibrary.rs` lowercase first). Windows users often have upper-case extensions.
+- Writer lane: `usb_path` is built from artist and file name (known repeat bug above); on Windows or exFAT sticks the reserved names (`CON`, `NUL`) and trailing dots would also matter, not checked.
+- Already handled, checked: `/Volumes` is macOS-only behind `cfg`; Linux volume detection reads `/proc/mounts`; Windows lists drive letters; the audio extension filters in the app lowercase before matching; symlink and `statvfs` code is `cfg(unix)` with a stub for others (`statvfs_available_bytes` is a stub returning unlimited space on Windows, so the free-space guard in multi-USB sync does nothing there; `volume_capacity` is unix-only).
