@@ -94,7 +94,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [landed 19fc7bd; deb 116 MB + xvfb smoke ok, Windows cargo check clean]
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [landed 3248199]
 24. r22-startup: 50k startup to interactive under 1.5 s (lazy row proxies, smaller load_state payload; R13 profile, no schema) [landed 240d8cb; 50k warm 1.35 s, cold 1.57 s, first 1.85 s; payload 21.6 -> 8.4 MB]
-25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [built aea38f9, merging; 1 leak fixed (artwork row thumbnails), rest flat]
+25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [landed 30275a0; 1 leak fixed (artwork row thumbnails), rest flat]
 26. r25-package: release bundles without dev bins, deb Depends libasound2, Windows path names in the frontend, app-code platform guards [landed f82e56e; deb deps unverified until r28]
 27. r26-coreml-ship: CoreML as the Mac analysis default (w2 t2), rten fallback if CoreML fails to load, ort in the Mac bundle (min macOS 13.4), dmg check; memory per session [landed fae2186; app 1.4x on 12 tracks, peak RSS 7.0-7.7 GB vs rten 6.2 -> cap bridge threads follow-up]
 28. r27-dbsafe: library.db open never inits over real data (unreadable schema_version), no setup panic on a damaged DB [landed 5d7df87; recovery screen left for Merlin]
