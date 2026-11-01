@@ -388,3 +388,4 @@
 2026-11-01 16:19 orchestrator r14-resume landed: on ov-1028 a7131e7; smoke 112, vitest 833, CHECKS-OK; decided: queue order side file per rec (Waiting 32) -> backlog r21-order
 2026-11-01 17:05 orchestrator r19-tests landed: on ov-1028 d4b4ef3 (vitest timeouts 30s, 52 tests for settings/playlists/file health/sidebar/track_infos, no bugs); smoke 112, vitest 876, CHECKS-OK; decided: own prio r21-order (sonnet high; resume order side file + .part sweep)
 2026-11-01 17:15 orchestrator r16-quant dropped: branch b7a274f (int8 per-channel -7% CPU-s/track, grid 43 vs 44/50, 2 BPM changes; box lacks VNNI, attention 42% stays fp32); decided: close int8, CoreML on the Mac is the CPU lever; box swap full + load ~48, orphan vitest pid 3791291 from removed r13 worktree (1.5 GB) could not be killed (classifier)
+2026-11-01 17:16 orchestrator - decided: own prio r22-startup (opus medium; 50k startup to interactive <1.5 s, no schema)
