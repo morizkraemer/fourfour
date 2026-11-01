@@ -11,6 +11,7 @@ import { gridForStorage, type BeatMarker, type EditedGrid } from '../lib/beatGri
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
+import { decodeTrackTable, isTrackTable, type TrackTable } from './track-table.ts';
 
 export let lastTauriError = 'None';
 
@@ -403,12 +404,17 @@ export async function updateTrackFields(trackId: number, edits: TrackFieldEdits)
   }
 }
 
-let earlyLoadState: Promise<LoadedState> | null = null;
+interface LoadedStateWire {
+  tracks: TrackTable | TrackInfo[];
+  playlists: PlaylistInput[];
+}
+
+let earlyLoadState: Promise<LoadedStateWire> | null = null;
 
 /** Starts `load_state` before the UI mounts, so the backend reads the library while the bundle builds the first frame. */
 export function startLoadStateEarly() {
   if (!getIsTauri() || earlyLoadState) return;
-  earlyLoadState = invoke<LoadedState>('load_state');
+  earlyLoadState = invoke<LoadedStateWire>('load_state');
   earlyLoadState.catch(() => {});
 }
 
@@ -416,9 +422,9 @@ export async function loadState(): Promise<LoadedState> {
   const early = earlyLoadState;
   earlyLoadState = null;
   try {
-    const res = await (early ?? invoke<LoadedState>('load_state'));
+    const res = await (early ?? invoke<LoadedStateWire>('load_state'));
     lastTauriError = 'invoke(load_state) OK';
-    return res;
+    return { tracks: isTrackTable(res.tracks) ? decodeTrackTable(res.tracks) : res.tracks, playlists: res.playlists };
   } catch (err) {
     lastTauriError = `load_state fail: ${String(err)}`;
     if (useBrowserMocks()) {
