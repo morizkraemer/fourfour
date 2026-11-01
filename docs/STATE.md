@@ -106,7 +106,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 32. r30-coreml-mem: cap the rten bridge so CoreML peak RSS <= rten (7.0-7.7 -> <=6.2 GB) [landed 7dba30c; 6.1-6.2 GB, latency kept; accepted per rec, last 0.3 GB vs same-session rten left]
 33. r31-cover-cap: cap the 512 px artwork.cache (UI-aware eviction, never blank a visible image) [built, branch r31-cover-cap 857496a; Waiting 35]
 34. r32-probe: port r15's first-expand probe metrics + webkit smoke option to ov-1028 (no behaviour change) [landed]
-35. r33-dupplan: import duplicate plan at 50k (1-1.5 s) without schema: in-memory folded-key index kept across imports [built 9a16838, merging; later imports 50k 990 -> 74 ms]
+35. r33-dupplan: import duplicate plan at 50k (1-1.5 s) without schema: in-memory folded-key index kept across imports [landed; later imports 50k 990 -> 74 ms]
 36. r34-webkit-idle: WebKit idle scheduler (no rIC), Icon parse once, lighter skeleton rows; app code only, no prototyping edits [running]
 37. r35-ci: refresh ov-ci workflow for coreml/dev-bins/deb deps/webkit smoke (branch, push needs Waiting 15) [running]
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
