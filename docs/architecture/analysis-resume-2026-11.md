@@ -4,7 +4,7 @@ Scope: headless on the dev box. Queue logic tested with the stub engine; crash t
 
 ## How a run works
 
-- The queue lives in memory only (`AnalysisCoordinator`).
+- The queue lives in `AnalysisCoordinator`; its order is also kept in a side file (see Resume order).
 - Persisted per finished pass: `analyses.stages` bits plus the ANLZ files in `anlz/<id>/`.
 - A store is staged: files go to `.staging-<pid>-<n>/`, are renamed into place, then the row is written in one transaction. A crash leaves the previous stage.
 - At launch `remove_stale_staging` runs. After 5 s `resume_analysis` queues incomplete tracks first, then never-analysed ones if the setting is on, and runs only the missing passes.
@@ -24,7 +24,7 @@ Scope: headless on the dev box. Queue logic tested with the stub engine; crash t
 | 3e | Launch resume answered after its run already ended | Store set `analyzing=true` after complete: stuck spinner | Ignored |
 | 4a | Track removed while queued | Dropped, nothing left behind | Same |
 | 4b | File moved/relinked while queued, or track id reused (`INTEGER PRIMARY KEY` without AUTOINCREMENT) | Stale-path result stored on the track | Not stored; resume reads the new path |
-| 5 | Order after restart | Waveform+key-done first, then never analysed, by id. `resume_work` quadratic: 30k half-analysed tracks 17.3 s under the library lock (debug, loaded box) | Same order, 2.2 s |
+| 5 | Order after restart | Waveform+key-done first, then never analysed, by id. `resume_work` quadratic: 30k half-analysed tracks 17.3 s under the library lock (debug, loaded box) | Same default order, 2.2 s; the saved run order comes first when the side file has one (see Resume order) |
 
 ## Tests added
 
@@ -32,15 +32,23 @@ Scope: headless on the dev box. Queue logic tested with the stub engine; crash t
 - a test in `pioneer-library/src/analysis_write.rs`
 - 12 tests in `analysis_run_tests.rs` (pioneer-test-ui)
 - `app/src/stores/launch-analysis-race.test.ts`
+- `analysis_order.rs` unit tests, 4 resume/side-file tests in `analysis_run_tests.rs`, 2 `.part` sweep tests in `waveform_detail.rs`
 
 ## Needs Merlin
 
 - Analysis failures are not stored, so undecodable or missing files retry at every launch. Needs a per-track failure marker (schema).
-- Queue order is not persisted, so resume cannot restore selection-first or visible-first. Options: a side file in the app data dir with the last run's order (no schema; rec), a "recently added first" rule, or leave it.
+
+## Resume order
+
+- A run writes its pending order (in-flight tracks, then the queue, then the grid queue) to `analysis-order.json` in the app data dir. No schema change.
+- Writes are coalesced: the first one at run start, then at most one per 3 s and only when the order changed. Each write goes to a temp file and is renamed into place.
+- `resume_analysis` puts the tracks the file lists first, in its order, then the rest in the old order (incomplete first, then never analysed, by id). Ids that are removed, already finished or not in today's work are skipped.
+- A missing, stale or corrupt file gives the old order. A run that finishes or is cancelled deletes the file. A run that ends in an error leaves it.
+- A new run overwrites the file with its own order, so a short "Analyze" after a kill replaces the old list; the rest falls back to the old order.
+- At launch, `.part` files older than 10 minutes in `waveform-detail/` that belong to another pid are removed. Files of this process are never touched.
 
 ## Open items
 
 - A graceful quit does not cancel in-flight jobs; they die with the process like kill -9 (covered).
-- `.part` files in the waveform-detail cache left by a kill are never cleaned; a startup sweep of other pids' files would fix it.
 - After Cancel, rows that did not run stay pending with a "-" BPM until the next load (UI, unchanged).
 - Cases 3a, 3b and 4b are only partly exercised by direct tests of the grid/whole paths; the fast-pass handoff is tested and shares the code.

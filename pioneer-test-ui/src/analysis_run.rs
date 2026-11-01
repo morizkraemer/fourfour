@@ -9,6 +9,7 @@ use fourfour_analysis::service::Pass;
 use pioneer_library::{analysis_stage, LocalLibrary};
 use pioneer_usb_writer::models;
 
+use crate::analysis_order::{self, OrderJournal};
 use crate::analysis_backend::{resolve_runner, AnalyzerCache, BackendEnv, Runner, TrackEngine};
 use crate::analysis_python::{analyze_one_track, resolve_python_checked};
 
@@ -263,6 +264,17 @@ impl AnalysisCoordinator {
         self.with_queue(|queue| queue.len()).unwrap_or(0) + grid
     }
 
+    /// Ids of the tracks the run has yet to finish, in the order it will take them: tracks in flight, then the
+    /// queue, then the grid queue.
+    fn pending_order(&self) -> Vec<i64> {
+        let jobs = self.jobs.lock().expect("analysis jobs lock");
+        let mut in_flight: Vec<i64> = jobs.background.keys().chain(jobs.now.keys()).copied().collect();
+        in_flight.sort_unstable();
+        in_flight.dedup();
+        let queued = self.with_queue(|queue| queue.iter().map(|(id, _)| *id).collect::<Vec<_>>()).unwrap_or_default();
+        in_flight.into_iter().chain(queued).chain(jobs.grid_queue.iter().map(|(id, _)| *id)).collect()
+    }
+
     fn is_preempted(&self, track_id: i64) -> bool {
         self.jobs.lock().expect("analysis jobs lock").preempted.contains(&track_id)
     }
@@ -467,6 +479,19 @@ pub(crate) fn resume_work(lib: &LocalLibrary, include_new: bool) -> Result<Vec<A
         ids.extend(unanalyzed.into_iter().filter(|id| !partial.contains(id)));
     }
     resolve_analysis_work(lib, &ids)
+}
+
+/// `resume_work`, with the tracks of the last run's saved order (see `analysis_order`) first, in that order.
+pub(crate) fn resume_work_in_saved_order(
+    lib: &LocalLibrary,
+    include_new: bool,
+    app_data_dir: Option<&Path>,
+) -> Result<Vec<AnalysisWorkItem>, String> {
+    let work = resume_work(lib, include_new)?;
+    Ok(match app_data_dir {
+        Some(dir) => analysis_order::apply(work, &analysis_order::load(dir)),
+        None => work,
+    })
 }
 
 pub(crate) fn merge_into_analysis_queue(
@@ -914,7 +939,11 @@ async fn run_registered(
 
     let staged = coordinator.staged && matches!(runner, Runner::Rust { .. });
     let detail_cache = app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
+    let mut order_journal = OrderJournal::new(app_data_dir.clone());
     loop {
+        if let Err(e) = order_journal.tick(|| coordinator.pending_order()) {
+            sink.log(LogLevel::Dim, format!("Analysis order not saved: {e}"));
+        }
         while join_set.len() < max_in_flight && !coordinator.is_cancelled() && !coordinator.background_paused() {
             let stored_stages = |id: i64| shared.lock().ok().and_then(|lib| lib.analysis_stages(id).ok().flatten()).unwrap_or(0);
             let task = coordinator.take_next(staged, stored_stages, model_jobs, |jobs_left| match &runner {
@@ -977,6 +1006,9 @@ async fn run_registered(
         }
     }
 
+    if let Err(e) = order_journal.finish() {
+        sink.log(LogLevel::Dim, format!("Analysis order file not removed: {e}"));
+    }
     let completed = coordinator.completed.load(Ordering::Relaxed);
     let errors = coordinator.errors.load(Ordering::Relaxed);
     let total = coordinator.total();

@@ -945,3 +945,88 @@ async fn every_analysed_track_leaves_the_detail_series_the_app_would_measure_in_
         assert_eq!(cached, measured);
     }
 }
+
+fn order_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("ff-run-order-{name}-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn order_file_left(dir: &Path) -> bool {
+    std::fs::read_dir(dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("analysis-order"))
+}
+
+#[tokio::test]
+async fn a_run_keeps_its_pending_order_in_a_side_file_and_removes_it_when_it_finishes() {
+    let dir = order_dir("run");
+    let h = harness(5, 1, 8);
+    let queued: Vec<AnalysisWorkItem> = [3, 1, 2, 5, 4].iter().map(|id| h.items[*id as usize - 1].clone()).collect();
+    let seen: Arc<Mutex<Option<Vec<i64>>>> = Arc::default();
+    let seen_in_hook = seen.clone();
+    let hook_dir = dir.clone();
+    *h.sink.on_partial.lock().unwrap() = Some(Box::new(move |_| {
+        seen_in_hook.lock().unwrap().get_or_insert_with(|| crate::analysis_order::load(&hook_dir));
+    }));
+    let env = BackendEnv { app_data_dir: Some(dir.clone()), ..BackendEnv::default() };
+
+    let outcome = run_with_runner(h.shared.clone(), h.coordinator.clone(), queued, h.sink.clone(), env, Some(h.runner())).await.unwrap();
+    let file_left = order_file_left(&dir);
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 5 }));
+    assert_eq!(seen.lock().unwrap().clone(), Some(vec![3, 1, 2, 5, 4]));
+    assert!(!file_left);
+}
+
+#[tokio::test]
+async fn a_cancelled_run_removes_the_side_file_too() {
+    let dir = order_dir("cancel");
+    let h = harness(4, 1, 8);
+    let env = BackendEnv { app_data_dir: Some(dir.clone()), ..BackendEnv::default() };
+    let run = run_with_runner(h.shared.clone(), h.coordinator.clone(), h.items.clone(), h.sink.clone(), env, Some(h.runner()));
+    let cancel = async {
+        h.wait_for(|e| (!e.is_empty()).then_some(())).await;
+        h.coordinator.cancel();
+    };
+    let (outcome, ()) = tokio::join!(run, cancel);
+    let file_left = order_file_left(&dir);
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(matches!(outcome.unwrap(), RunOutcome::Finished { .. }));
+    assert!(!file_left);
+}
+
+#[test]
+fn resume_follows_the_saved_order_for_tracks_still_pending_and_skips_removed_and_finished_ones() {
+    let dir = order_dir("resume");
+    let h = harness(5, 1, 8);
+    let lib = h.shared.lock().unwrap();
+    lib.set_analysis(2, &finished_result()).unwrap();
+    crate::analysis_order::save(&dir, &[3, 99, 2, 5]).unwrap();
+
+    let work = resume_work_in_saved_order(&lib, true, Some(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(resume_ids(&work), vec![3, 5, 1, 4]);
+}
+
+#[test]
+fn resume_keeps_todays_order_without_a_usable_side_file() {
+    let dir = order_dir("fallback");
+    let h = harness(4, 1, 8);
+    let lib = h.shared.lock().unwrap();
+    lib.set_analysis_stages(4, &finished_result(), analysis_stage::WAVEFORM).unwrap();
+    let todays = resume_ids(&resume_work(&lib, true).unwrap());
+
+    let missing = resume_ids(&resume_work_in_saved_order(&lib, true, Some(&dir)).unwrap());
+    std::fs::write(dir.join("analysis-order.json"), b"[3, 2,").unwrap();
+    let corrupt = resume_ids(&resume_work_in_saved_order(&lib, true, Some(&dir)).unwrap());
+    let no_dir = resume_ids(&resume_work_in_saved_order(&lib, true, None).unwrap());
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(todays, vec![4, 1, 2, 3]);
+    assert_eq!(missing, todays);
+    assert_eq!(corrupt, todays);
+    assert_eq!(no_dir, todays);
+}
