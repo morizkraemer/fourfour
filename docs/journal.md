@@ -375,3 +375,4 @@
 2026-11-01 04:21 orchestrator - Mac: ov-1028 (29add96) installed 12:21 WITA; Merlin 12:21 (via PM): pause UI-taking Mac jobs, visible stuff after his go tonight -> perf night held; headless dmg build + check-dmg started
 2026-11-01 04:23 orchestrator - Mac: build-dmg + check-dmg on ov-1028 all PASS (fourfour_0.1.0_aarch64.dmg, ad-hoc, weights + licences + key credits, self-check 0); item 9 done; perf night held for Merlin's go
 2026-11-01 04:26 orchestrator - review servers were down (tailscale serve up, nothing on 127.0.0.1:4220/4210); restarted via preview start (review 4220, app-review 4210 on q41-int); curl over tailscale 200 + cards API 200 (5 open cards) + media 200
+2026-11-01 04:32 orchestrator - Merlin: keep review links always open; tmux previews replaced by user systemd ff-review (4220) + ff-app-review (4210), Restart=always, allowed host set; 4220 tailscale serve route restored; all 200 over Tailscale
