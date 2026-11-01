@@ -16,6 +16,7 @@ const REPORT = process.env.FF_PERF_STARTUP_OUT;
 const BLOCK_FONTS = !!process.env.FF_PERF_BLOCK_FONTS;
 const NO_SNAPSHOT = !!process.env.FF_PERF_NO_SNAPSHOT;
 const PROFILE_OUT = process.env.FF_PERF_STARTUP_PROFILE;
+const PROFILE_FIRST = !!process.env.FF_PERF_STARTUP_PROFILE_FIRST;
 
 interface Boot {
   firstInvoke: number;
@@ -183,8 +184,10 @@ test.describe('startup at scale', () => {
       for (let run = 0; run < RUNS; run++) {
         const seed = await newContext(browser, url, backendMs);
         const seedPage = await seed.newPage();
+        const profilingFirst = PROFILE_OUT && PROFILE_FIRST && run === RUNS - 1 ? await startProfile(seedPage) : null;
         await seedPage.goto('/');
         first.push(await bootMetrics(seedPage));
+        if (profilingFirst) await stopProfile(profilingFirst, `${PROFILE_OUT}-${tracks}-first.cpuprofile`, seedPage);
         await seedPage.close();
         const saved = await seed.storageState();
         await seed.close();
@@ -193,7 +196,7 @@ test.describe('startup at scale', () => {
         const page = await context.newPage();
         await page.goto('/');
         cold.push(await bootMetrics(page));
-        const profiling = PROFILE_OUT && run === RUNS - 1 ? await startProfile(page) : null;
+        const profiling = PROFILE_OUT && !PROFILE_FIRST && run === RUNS - 1 ? await startProfile(page) : null;
         await page.reload();
         warm.push(await bootMetrics(page));
         if (profiling) await stopProfile(profiling, `${PROFILE_OUT}-${tracks}.cpuprofile`, page);

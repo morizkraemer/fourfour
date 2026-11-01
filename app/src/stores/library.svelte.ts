@@ -940,17 +940,29 @@ function rowBandsFromWire(wire: string | number[] | undefined) {
 }
 
 /* ── Mapper ─────────────────────────────────────────────────────────── */
+const bpmTexts = new Map<number, string>();
+const timeTexts = new Map<number, string>();
+
+function bpmText(tempo: number): string {
+  let text = bpmTexts.get(tempo);
+  if (text === undefined) bpmTexts.set(tempo, (text = tempo > 0 ? (tempo / 100).toFixed(1) : '—'));
+  return text;
+}
+
+function timeText(durationSecs: number): string {
+  if (!(durationSecs > 0)) return '—';
+  const whole = Math.floor(durationSecs);
+  let text = timeTexts.get(whole);
+  if (text === undefined) timeTexts.set(whole, (text = `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`));
+  return text;
+}
+
 function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined) {
-  const indexStr = String(idx + 1).padStart(2, '0');
-  const bpmStr = t.tempo > 0 ? (t.tempo / 100).toFixed(1) : '—';
+  const position = idx + 1;
+  const indexStr = position < 10 ? '0' + position : String(position);
+  const bpmStr = bpmText(t.tempo);
   const keyStr = t.key || '—';
-  
-  let timeStr = '—';
-  if (t.duration_secs > 0) {
-    const mins = Math.floor(t.duration_secs / 60);
-    const secs = Math.floor(t.duration_secs % 60);
-    timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
-  }
+  const timeStr = timeText(t.duration_secs);
 
   const analyzed = t.has_analysis ?? t.tempo > 0;
 

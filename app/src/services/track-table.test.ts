@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { decodeTrackTable, isTrackTable, type TrackTable } from './track-table.ts';
 
 const WIRE =
-  '{"strings":["/m/Artist/","Artist","","House","8A","#ff0000"],"id":[7,9],"dir":[0,2],"file":["one.mp3","two.wav"],' +
-  '"title":["One",""],"artist":[1,1],"album":[2,2],"genre":[3,2],"key":[4,2],"tempo":[12800,0],"duration_secs":[200.5,0.0],' +
-  '"bitrate":[320,0],"file_size":[1234,5],"flags":[5,12],"ratings":[0,4],"colors":[1,5]}';
+  '{"strings":["Artist","","House","8A","#ff0000"],"folder_parent":[0,1,2,0],"folder_name":["/","m/","Artist/",""],' +
+  '"id":[7,9],"dir":[2,3],"file":["one.mp3","two.wav"],"title":["One",""],"artist":[0,0],"album":[1,1],"genre":[2,1],"key":[3,1],' +
+  '"tempo":[12800,0],"duration_secs":[200.5,0.0],"bitrate":[320,0],"file_size":[1234,5],"flags":[5,12],"ratings":[0,4],"colors":[1,4]}';
 
 describe('track table', () => {
   it('decodes the load_state wire table into the same track objects the old list carried', () => {

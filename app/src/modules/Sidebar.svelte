@@ -71,7 +71,8 @@
     if (intervalId) clearInterval(intervalId);
   });
 
-  let playlistRowOrder = $derived(library.sidebarData.playlists.rows.map((row) => row.id));
+  const sidebarData = $derived(library.sidebarData);
+  let playlistRowOrder = $derived(sidebarData.playlists.rows.map((row) => row.id));
 
   $effect(() => {
     pruneSidebarSelection(new Set(library.playlists.map((p) => p.id)));
@@ -392,10 +393,10 @@
   </div>
   <div class="ff-sidebar__top">
     <SidebarSection
-      label={library.sidebarData.favorites.label}
+      label={sidebarData.favorites.label}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'favorites')}
     >
-      {#each library.sidebarData.favorites.rows as row}
+      {#each sidebarData.favorites.rows as row}
         {@const pl = library.playlists.find(p => p.name === row.label && !p.is_folder)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -430,10 +431,10 @@
     </SidebarSection>
 
     <SidebarSection
-      label={library.sidebarData.library.label}
+      label={sidebarData.library.label}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'library')}
     >
-      {#each library.sidebarData.library.rows as row}
+      {#each sidebarData.library.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
@@ -451,13 +452,13 @@
     </SidebarSection>
 
     <SidebarSection
-      label={library.sidebarData.playlists.label}
+      label={sidebarData.playlists.label}
       showAdd
       addDropActive={dnd.dropNewPlaylist}
       onAdd={handleAddPlaylist}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
     >
-      {#each library.sidebarData.playlists.rows as row}
+      {#each sidebarData.playlists.rows as row}
         {@const isFolder = row.kind === 'folder'}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -500,10 +501,10 @@
 
   <div class="ff-sidebar__bottom">
     <SidebarSection
-      label={library.sidebarData.usb.label}
+      label={sidebarData.usb.label}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'usb')}
     >
-      {#each library.sidebarData.usb.rows as row}
+      {#each sidebarData.usb.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap"

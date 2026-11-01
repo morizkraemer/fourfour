@@ -150,13 +150,17 @@ const TRACK_FLAG_CUES: u8 = 2;
 const TRACK_FLAG_ANALYSIS: u8 = 4;
 const TRACK_FLAG_PENDING: u8 = 8;
 
-/// One array per field. A path is split after its last `/` or `\` into `dir` and `file`; titles and file
-/// names are sent as they are, the texts that repeat (folders, artists, albums, genres, keys, colours) as indexes
-/// into `strings`, which holds each of them once. `ratings` and `colors` are `[row, value, ...]`
-/// pairs for the tracks that have one (a colour value is a string index).
+/// One array per field. A path is split after its last `/` or `\` into its folder (`dir`, an index into the
+/// folder list) and `file`. Each folder is its parent's path plus `folder_name` (`folder_parent` is the
+/// parent's index plus one, 0 for none). Titles and file names are sent as they are, the other texts that
+/// repeat (artists, albums, genres, keys, colours) as indexes into `strings`, which holds each of them once.
+/// `ratings` and `colors` are `[row, value, ...]` pairs for the tracks that have one (a colour value is a
+/// string index).
 #[derive(Serialize)]
 pub struct TrackTable<'a> {
     strings: Vec<&'a str>,
+    folder_parent: Vec<u32>,
+    folder_name: Vec<&'a str>,
     id: Vec<u32>,
     dir: Vec<u32>,
     file: Vec<&'a str>,
@@ -190,12 +194,37 @@ impl<'a> StringTable<'a> {
     }
 }
 
+#[derive(Default)]
+struct FolderTable<'a> {
+    parent: Vec<u32>,
+    name: Vec<&'a str>,
+    index: HashMap<&'a str, u32>,
+}
+
+impl<'a> FolderTable<'a> {
+    fn folder(&mut self, dir: &'a str) -> u32 {
+        if let Some(&index) = self.index.get(dir) {
+            return index;
+        }
+        let cut = dir[..dir.len().saturating_sub(1)].rfind(['/', '\\']).map_or(0, |i| i + 1);
+        let parent = if cut == 0 { 0 } else { self.folder(&dir[..cut]) + 1 };
+        let index = self.name.len() as u32;
+        self.parent.push(parent);
+        self.name.push(&dir[cut..]);
+        self.index.insert(dir, index);
+        index
+    }
+}
+
 impl<'a> TrackTable<'a> {
     pub fn new(tracks: &'a [TrackInfo]) -> Result<Self, String> {
         let n = tracks.len();
         let mut strings = StringTable::default();
+        let mut folders = FolderTable::default();
         let mut table = TrackTable {
             strings: Vec::new(),
+            folder_parent: Vec::new(),
+            folder_name: Vec::new(),
             id: Vec::with_capacity(n),
             dir: Vec::with_capacity(n),
             file: Vec::with_capacity(n),
@@ -212,7 +241,8 @@ impl<'a> TrackTable<'a> {
             ratings: Vec::new(),
             colors: Vec::new(),
         };
-        let mut runs: [Option<(&str, u32)>; 6] = [None; 6];
+        let mut previous_dir: Option<(&str, u32)> = None;
+        let mut runs: [Option<(&str, u32)>; 5] = [None; 5];
         let mut intern = |column: usize, text: &'a str| match runs[column] {
             Some((previous, index)) if previous == text => index,
             _ => {
@@ -227,13 +257,19 @@ impl<'a> TrackTable<'a> {
             }
             let cut = t.source_path.rfind(['/', '\\']).map_or(0, |i| i + 1);
             table.id.push(t.id);
-            table.dir.push(intern(0, &t.source_path[..cut]));
+            let dir = &t.source_path[..cut];
+            let folder = match previous_dir {
+                Some((previous, folder)) if previous == dir => folder,
+                _ => folders.folder(dir),
+            };
+            previous_dir = Some((dir, folder));
+            table.dir.push(folder);
             table.file.push(&t.source_path[cut..]);
             table.title.push(&t.title);
-            table.artist.push(intern(1, &t.artist));
-            table.album.push(intern(2, &t.album));
-            table.genre.push(intern(3, &t.genre));
-            table.key.push(intern(4, &t.key));
+            table.artist.push(intern(0, &t.artist));
+            table.album.push(intern(1, &t.album));
+            table.genre.push(intern(2, &t.genre));
+            table.key.push(intern(3, &t.key));
             table.tempo.push(t.tempo);
             table.duration_secs.push(t.duration_secs);
             table.bitrate.push(t.bitrate);
@@ -248,10 +284,12 @@ impl<'a> TrackTable<'a> {
                 table.ratings.extend([row as u32, u32::from(rating)]);
             }
             if let Some(color) = &t.color {
-                table.colors.extend([row as u32, intern(5, color)]);
+                table.colors.extend([row as u32, intern(4, color)]);
             }
         }
         table.strings = strings.list;
+        table.folder_parent = folders.parent;
+        table.folder_name = folders.name;
         Ok(table)
     }
 }
@@ -316,9 +354,10 @@ mod tests {
         assert_eq!(
             json,
             concat!(
-                r##"{"tracks":{"strings":["/m/Artist/","Artist","","House","8A","#ff0000"],"id":[7,9],"dir":[0,2],"file":["one.mp3","two.wav"],"##,
-                r##""title":["One",""],"artist":[1,1],"album":[2,2],"genre":[3,2],"key":[4,2],"tempo":[12800,0],"duration_secs":[200.5,0.0],"##,
-                r##""bitrate":[320,0],"file_size":[1234,5],"flags":[5,12],"ratings":[0,4],"colors":[1,5]},"playlists":[]}"##
+                r##"{"tracks":{"strings":["Artist","","House","8A","#ff0000"],"folder_parent":[0,1,2,0],"folder_name":["/","m/","Artist/",""],"##,
+                r##""id":[7,9],"dir":[2,3],"file":["one.mp3","two.wav"],"title":["One",""],"artist":[0,0],"album":[1,1],"genre":[2,1],"key":[3,1],"##,
+                r##""tempo":[12800,0],"duration_secs":[200.5,0.0],"bitrate":[320,0],"file_size":[1234,5],"flags":[5,12],"ratings":[0,4],"colors":[1,4]},"##,
+                r##""playlists":[]}"##
             )
         );
     }
@@ -327,8 +366,9 @@ mod tests {
     fn track_table_splits_windows_paths_and_refuses_row_previews() {
         let tracks = [info(1, r"C:\Music\a.flac"), info(2, "C:/Music/b.flac")];
         let table = TrackTable::new(&tracks).unwrap();
-        assert_eq!((table.strings[0], table.file[0]), (r"C:\Music\", "a.flac"));
-        assert_eq!(table.strings[table.dir[1] as usize], "C:/Music/");
+        assert_eq!(table.folder_name, [r"C:\", r"Music\", "C:/", "Music/"]);
+        assert_eq!(table.folder_parent, [0, 1, 0, 3]);
+        assert_eq!((table.dir.as_slice(), table.file[0]), ([1, 3].as_slice(), "a.flac"));
         let with_preview = [TrackInfo { waveform_bands: Some(vec![1]), ..info(3, "/m/c.mp3") }];
         assert!(TrackTable::new(&with_preview).is_err());
     }
