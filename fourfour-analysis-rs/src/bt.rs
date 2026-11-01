@@ -212,7 +212,7 @@ impl BeatEngine {
         let beat_path = models_dir.join(beat_file);
         let beat = match beat_runtime() {
             #[cfg(feature = "ort")]
-            "ort" => BeatModel::Ort(crate::ort_beat::OrtBeat::load(&beat_path)?),
+            "ort" => BeatModel::Ort(crate::ort_beat::OrtBeat::load(&beat_path, CHUNK_SIZE)?),
             _ => {
                 let beat = load(&beat_path, prepack)?;
                 BeatModel::Rten(RtenBeat {
@@ -431,7 +431,7 @@ mod ort_tests {
             down_out: model.find_node("downbeat").or_else(|| model.find_node("downbeat_logits")).unwrap(),
             model,
         };
-        let ort = crate::ort_beat::OrtBeat::load(&path).unwrap();
+        let ort = crate::ort_beat::OrtBeat::load(&path, CHUNK_SIZE).unwrap();
         let mut seed = 0x2545_f491_u32;
         let data = (0..CHUNK_SIZE * N_MELS)
             .map(|_| {
