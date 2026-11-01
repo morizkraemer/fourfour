@@ -34,11 +34,33 @@ pub struct BeatEngine {
     shared_chunk_threads: AtomicUsize,
 }
 
-struct BeatModel {
+struct RtenBeat {
     model: rten::Model,
     input: NodeId,
     beat_out: NodeId,
     down_out: NodeId,
+}
+
+enum BeatModel {
+    Rten(RtenBeat),
+    #[cfg(feature = "ort")]
+    Ort(crate::ort_beat::OrtBeat),
+}
+
+enum ChunkRunner<'a> {
+    Rten(&'a RtenBeat, RunOptions),
+    #[cfg(feature = "ort")]
+    Ort(crate::ort_beat::OrtChunkSession<'a>),
+}
+
+/// The runtime the beat model runs on: `rten`, or `ort` when built with the `ort` feature and
+/// `FOURFOUR_BEAT_RUNTIME` is not `rten`.
+pub fn beat_runtime() -> &'static str {
+    if cfg!(feature = "ort") && std::env::var("FOURFOUR_BEAT_RUNTIME").map_or(true, |v| v != "rten") {
+        "ort"
+    } else {
+        "rten"
+    }
 }
 
 type ChunkLogits = (Vec<f32>, Vec<f32>);
@@ -90,11 +112,14 @@ impl ChunkExecutor {
     }
 
     fn work(&self, model: &BeatModel) {
-        let options = RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))));
+        let mut runner = model.runner();
         while let Some((track, i)) = self.take() {
             let chunk = extract_chunk(&track.mel, track.starts[i]);
-            let logits = catch_unwind(AssertUnwindSafe(|| model.run_chunk(&chunk, &options)))
-                .unwrap_or_else(|_| Err(anyhow!("beat model panicked on chunk {i}")));
+            let logits = match runner.as_mut() {
+                Ok(runner) => catch_unwind(AssertUnwindSafe(|| runner.run(&chunk)))
+                    .unwrap_or_else(|_| Err(anyhow!("beat model panicked on chunk {i}"))),
+                Err(e) => Err(anyhow!("beat model did not start: {e:#}")),
+            };
             track.results.lock().unwrap()[i] = Some(logits);
             track.finished.notify_all();
         }
@@ -102,6 +127,28 @@ impl ChunkExecutor {
 }
 
 impl BeatModel {
+    fn runner(&self) -> Result<ChunkRunner<'_>> {
+        match self {
+            BeatModel::Rten(m) => {
+                Ok(ChunkRunner::Rten(m, RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))))))
+            }
+            #[cfg(feature = "ort")]
+            BeatModel::Ort(m) => Ok(ChunkRunner::Ort(m.session()?)),
+        }
+    }
+}
+
+impl ChunkRunner<'_> {
+    fn run(&mut self, chunk: &Tensor) -> Result<ChunkLogits> {
+        match self {
+            ChunkRunner::Rten(m, options) => m.run_chunk(chunk, options),
+            #[cfg(feature = "ort")]
+            ChunkRunner::Ort(session) => session.run(chunk),
+        }
+    }
+}
+
+impl RtenBeat {
     fn run_chunk(&self, chunk: &Tensor, options: &RunOptions) -> Result<ChunkLogits> {
         let view = ValueView::from_shape(chunk.shape.as_slice(), chunk.data.as_slice()).map_err(|e| anyhow!("beat input: {e}"))?;
         let outs = self.model.run(vec![(self.input, ValueOrView::from(view))], &[self.beat_out, self.down_out], Some(options.clone()))?;
@@ -159,19 +206,27 @@ fn load(path: &Path, prepack: bool) -> Result<rten::Model> {
 impl BeatEngine {
     pub fn load(models_dir: &Path, beat_file: &str, prepack: bool) -> Result<Self> {
         let mel = load(&models_dir.join("mel_spectrogram.onnx"), prepack)?;
-        let beat = load(&models_dir.join(beat_file), prepack)?;
         let find = |m: &rten::Model, names: &[&str]| -> Result<NodeId> {
             names.iter().find_map(|n| m.find_node(n)).ok_or_else(|| anyhow!("model has none of the nodes {names:?}"))
+        };
+        let beat_path = models_dir.join(beat_file);
+        let beat = match beat_runtime() {
+            #[cfg(feature = "ort")]
+            "ort" => BeatModel::Ort(crate::ort_beat::OrtBeat::load(&beat_path, CHUNK_SIZE)?),
+            _ => {
+                let beat = load(&beat_path, prepack)?;
+                BeatModel::Rten(RtenBeat {
+                    input: find(&beat, &["spectrogram"])?,
+                    beat_out: find(&beat, &["beat", "beat_logits"])?,
+                    down_out: find(&beat, &["downbeat", "downbeat_logits"])?,
+                    model: beat,
+                })
+            }
         };
         Ok(BeatEngine {
             mel_in: find(&mel, &["audio_pcm"])?,
             mel_out: find(&mel, &["mel_spectrogram"])?,
-            beat: Arc::new(BeatModel {
-                input: find(&beat, &["spectrogram"])?,
-                beat_out: find(&beat, &["beat", "beat_logits"])?,
-                down_out: find(&beat, &["downbeat", "downbeat_logits"])?,
-                model: beat,
-            }),
+            beat: Arc::new(beat),
             mel: Arc::new(mel),
             chunks: Arc::new(ChunkExecutor::default()),
             chunk_threads: Mutex::new(Vec::new()),
@@ -353,4 +408,80 @@ fn pick_peaks(beat_logits: &[f32], down_logits: &[f32]) -> (Vec<f32>, Vec<f32>) 
         downbeats.dedup();
     }
     (beats, downbeats)
+}
+
+#[cfg(all(test, feature = "ort"))]
+mod ort_tests {
+    use super::*;
+
+    fn models_dir() -> std::path::PathBuf {
+        std::env::var_os("FOURFOUR_MODELS_DIR")
+            .map(Into::into)
+            .unwrap_or_else(|| std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".cache/fourfour-models"))
+    }
+
+    #[test]
+    #[ignore = "needs the beat model weights (FOURFOUR_MODELS_DIR)"]
+    fn ort_gives_the_rten_logits_for_a_chunk() {
+        let path = models_dir().join("beat_this.onnx");
+        let model = load(&path, false).unwrap();
+        let rten = RtenBeat {
+            input: model.find_node("spectrogram").unwrap(),
+            beat_out: model.find_node("beat").or_else(|| model.find_node("beat_logits")).unwrap(),
+            down_out: model.find_node("downbeat").or_else(|| model.find_node("downbeat_logits")).unwrap(),
+            model,
+        };
+        let ort = crate::ort_beat::OrtBeat::load(&path, CHUNK_SIZE).unwrap();
+        let mut seed = 0x2545_f491_u32;
+        let data = (0..CHUNK_SIZE * N_MELS)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                (seed % 1000) as f32 / 250.0
+            })
+            .collect();
+        let chunk = Tensor { shape: vec![1, CHUNK_SIZE, N_MELS], data };
+        let options = RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))));
+        let (rb, rd) = rten.run_chunk(&chunk, &options).unwrap();
+        let (ob, od) = ort.session().unwrap().run(&chunk).unwrap();
+        assert_eq!((rb.len(), rd.len()), (ob.len(), od.len()));
+        let max_diff = rb.iter().chain(&rd).zip(ob.iter().chain(&od)).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+        assert!(max_diff < 1e-2, "max abs logit diff {max_diff}");
+
+        let rounds: usize = std::env::var("FF_CHUNK_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let thread_cpu_ms = || -> f64 {
+            let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+            let fields: Vec<f64> = stat.rsplit(')').next().unwrap_or("").split_whitespace().map(|v| v.parse().unwrap_or(0.0)).collect();
+            (fields.get(11).unwrap_or(&0.0) + fields.get(12).unwrap_or(&0.0)) * 10.0
+        };
+        let wall_ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
+        let opened = std::time::Instant::now();
+        let mut session = ort.session().unwrap();
+        let open_ms = wall_ms(opened);
+        let (mut rten_ms, mut ort_ms, mut rten_wall, mut ort_wall) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for _ in 0..rounds {
+            let (t, w) = (thread_cpu_ms(), std::time::Instant::now());
+            rten.run_chunk(&chunk, &options).unwrap();
+            rten_ms.push(thread_cpu_ms() - t);
+            rten_wall.push(wall_ms(w));
+            let (t, w) = (thread_cpu_ms(), std::time::Instant::now());
+            session.run(&chunk).unwrap();
+            ort_ms.push(thread_cpu_ms() - t);
+            ort_wall.push(wall_ms(w));
+        }
+        if rounds > 0 {
+            let median = |v: &mut Vec<f64>| {
+                v.sort_by(f64::total_cmp);
+                v[v.len() / 2]
+            };
+            println!(
+                "CHUNK median of {rounds}: wall ms rten {:.0} ort {:.0}; process cpu ms rten {:.0} ort {:.0} (0 without /proc); session open {open_ms:.0} ms; max abs logit diff {max_diff}",
+                median(&mut rten_wall),
+                median(&mut ort_wall),
+                median(&mut rten_ms),
+                median(&mut ort_ms)
+            );
+        }
+    }
 }
