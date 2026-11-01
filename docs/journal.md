@@ -419,3 +419,4 @@
 2026-11-02 01:43 orchestrator r26-coreml-ship landed: on ov-1028 fae2186 (CoreML default on macOS); smoke 112, vitest 882, CHECKS-OK; merged branches r24-coreml/r11-coreml/r9-ort deleted
 2026-11-02 01:57 orchestrator r23-memory landed: on ov-1028 30275a0; smoke 113, CHECKS-OK
 2026-11-02 02:03 orchestrator r28-deb-verify landed (docs): real deb 90 MB, Depends alsa/ssl/webkit/gtk, only app bin, self-check + xvfb ok; decided: own prio r31-cover-cap (sonnet high)
+2026-11-02 02:22 orchestrator r30-coreml-mem handed back (CoreML peak 7.1-7.3 -> 6.1-6.2 GB, latency kept, identical), took rec accept, merging; decided: own prio r29-mac-startup (opus; reproduce WKWebView startup gap with WebKit on the box, no Mac)
