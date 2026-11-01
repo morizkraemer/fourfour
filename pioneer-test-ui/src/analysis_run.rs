@@ -263,13 +263,6 @@ impl AnalysisCoordinator {
         self.with_queue(|queue| queue.len()).unwrap_or(0) + grid
     }
 
-    fn is_scheduled(&self, track_id: i64) -> bool {
-        let jobs = self.jobs.lock().expect("analysis jobs lock");
-        jobs.background.contains_key(&track_id)
-            || jobs.now.contains_key(&track_id)
-            || jobs.grid_queue.iter().any(|(id, _)| *id == track_id)
-    }
-
     fn is_preempted(&self, track_id: i64) -> bool {
         self.jobs.lock().expect("analysis jobs lock").preempted.contains(&track_id)
     }
