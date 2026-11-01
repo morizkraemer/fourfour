@@ -412,3 +412,4 @@
 2026-11-01 22:07 orchestrator r25-package landed: on ov-1028 f82e56e; smoke 112, vitest 882, CHECKS-OK
 2026-11-01 22:33 orchestrator r27-dbsafe handed back (no init over unreadable version, newer DB refused, no setup panic; user-visible only on a damaged DB: status error instead of no window), merging per data-safety; decided: own prio r26-coreml-ship (opus; CoreML Mac default + rten fallback)
 2026-11-01 22:43 orchestrator r27-dbsafe landed: on ov-1028 5d7df87; smoke 112, CHECKS-OK
+2026-11-01 00:25 orchestrator - paused: seat limit (r26-coreml-ship, r23-memory stopped mid-work), resets 16:20 UTC; resume both then
