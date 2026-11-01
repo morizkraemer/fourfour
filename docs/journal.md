@@ -402,3 +402,4 @@
 2026-11-01 20:09 orchestrator r22-startup landed: on ov-1028 240d8cb; smoke 112, vitest 877, CHECKS-OK; Mac: installing ov-1028, then perf night 10k + 5 expand runs (visible, per Merlin's go)
 2026-11-01 20:11 orchestrator - Mac: ov-1028 240d8cb installed in /Applications (20:10); perf night started 20:11 after a fix (02afa7e: binary name from Info.plist, was hard-coded fourfour)
 2026-11-01 20:51 orchestrator r24-coreml built: branch 2eaed24 (CoreML Slice failure = free input dims; fixed by free-dim overrides batch=1 time=1500 + CPU session for short chunks + compiled-model cache); Mac chunk rten 1593 ms vs CoreML 283 ms (5.6x), logit diff 7.2e-6, peak RSS 3.2 GB vs 0.8 GB; dev bench queued on mbp after perf night (~/.cache/r24-work/bench-after-perf.sh)
+2026-11-01 20:52 orchestrator - decided: own prio r23-memory (sonnet high; 45-60 min soak, heap/DOM/listener drift, fix leaks)
