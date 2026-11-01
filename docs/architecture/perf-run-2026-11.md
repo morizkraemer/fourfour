@@ -449,3 +449,53 @@ Why 30 ms needs a decision: everything in the frame is needed for the first visi
 3. **Draw the zoom view one frame after the panel** (q50-render's option): ~30 ms off the task, but the panel's first frame shows an empty zoom area. Visible, so not done.
 
 Decided (orchestrator, 2026-10-31): measure on the Mac first. `scripts/mac/perf-night.sh` now launches the app `--expand-runs` times (default 5), each with the probe step `expand` (`perf_probe.js` `firstExpand`: load row 3, wait for `ff:player-ready` plus 1.5 s, click expand, record frame gaps until the zoom view shows `data-bands="detail"` plus two frames). `summary.md` gets a "Cold first expand (R10)" table with the median longest frame and click to detail drawn. WKWebView has no long-task API, so the longest frame gap stands in for the longest task. **Trigger: a median longest frame over 50 ms on the Mac means building the staged reveal (option 1 above); at or under 50 ms it is not built.**
+
+## R13 50k (2026-11-01, `r13-50k`)
+
+Branch `r13-50k` from `ov-1028` (`ea0ddaa`). Linux `dev` box, headless Chromium, release `bench_startup`. Box load 25-55 the whole time (other workers): absolute times are inflated about 2x against a quiet box; read the 10k-to-50k ratios and the before/after of the same step, not the absolute values.
+
+**Fixture.** `scripts/ff-fixture.py 50k --link-from 25k` builds the 50k fixture from hard links to the 25k fixture's files (`music/copy1`, `music/copy2`; no new audio on disk, a real 50k copy would be about 35 GB) and the library with the normal `bench_startup fixture-lib` scan: 50,000 tracks, 40,722 covers, 34,890 analysed, 12,520 rated, 3,935 coloured, 74 playlists. Titles of `copy2` get a " (copy 2)" suffix in the library so no artist and title pair repeats (same reason as the generator's redraw). `library.db` is 7.5 GB (covers are stored in it), 1.5 GB at 10k. Import samples: 1,000 hard-linked files new to each library (from the 25k fixture for the 10k library, from the 10k fixture for the 50k one; 2-3 duplicates each). Frontend scroll/search/sort use the synthetic smoke fixture (`FF_PERF_TRACKS`), startup the real `load_state` JSON of the fixture (`bench_startup dump`).
+
+**Fixed**
+
+- **Marking tracks for analysis was quadratic.** `markTracksPendingAnalysis`, `knownTrackIds` and `requestBackgroundAnalysis` looked up each id with a linear `find` over the reactive rows. Analyse a 2k selection: 25.7 s of frozen UI at 10k, over 5 min at 50k (the spec timed out). Now the indexed `libraryTrackById`: 0.56 s at 10k, 0.67 s at 50k, i.e. it no longer depends on library size. The same lookup is used by the track edits (`track-edits.svelte.ts`).
+- **The palette scanned every row proxy per keystroke.** The header search opens the anchored palette, whose `sources` re-runs every action's `when` on each keystroke; "Analyze all unanalyzed" ran `library.tracks.some((t) => !t.analyzed)` through 50k row proxies (about 650 ms of a 14-key run, the largest item in the profile; in a fully analysed library it never stops early). It is now `hasUnanalyzedTracks()` on the plain track objects, like `unanalyzedTrackCount`; the context menu uses the same.
+
+Same results: the lookups return the same row objects (the index falls back to `find`), and `analyzed` on the plain objects is kept in step by `bumpLibraryTracks`. No BPM, grid, key or library data path changed.
+
+**10k vs 50k** (before = `ov-1028`, after = this branch; frontend medians from one `perf10k` run each, before 50k at load about 45, after at about 30)
+
+| Metric | 10k before | 10k after | 50k before | 50k after | budget |
+|---|---:|---:|---:|---:|---:|
+| analyse 2k selected tracks (one task) | 25,745 ms | 559 ms | > 300 s | 665 ms | |
+| search keystroke median / worst | 73 / 116 ms | 62 / 100 ms | 188 / 389 ms | 77 / 111 ms | 50 ms |
+| palette open | 100 ms | 67 ms | 260 ms | 102 ms | |
+| palette filter keystroke median | 88 ms | 60 ms | 225 ms | 48 ms | 50 ms |
+| scroll frame p95 (steady) | 43 ms | 54 ms | 72 ms | 45 ms | |
+| fling frame p95 / max | 67 / 78 ms | 62 / 65 ms | 146 / 196 ms | 92 / 92 ms | 50 ms |
+| sort by title (asc) | 127 ms | 119 ms | 398 ms | 283 ms | |
+| select to inspector median | 29 ms | 27 ms | 34 ms | 25 ms | |
+| JS heap after boot (after GC) | 23 MB | 23 MB | 92 MB | 92 MB | |
+| backend `load_state` warm (median of 3) | 118 ms | same | 480 ms | same | |
+| `load_state` payload | 4.2 MB | same | 21.6 MB | same | |
+| backend RSS, `bench_startup run` | 26 MB | same | 87 MB | same | |
+| startup to interactive, first launch / cold / warm | 1,860 / 1,722 / 1,432 ms | same | 3,193 / 2,914 / 2,502 ms | same | 1.5 s |
+| startup longest task / TBT, warm | 274 / 438 ms | same | 330 / 985 ms | same | |
+| import 1k files: scan + plan | 400-704 ms | same | 1,415-3,366 ms | same | |
+| import 1k files: duplicate plan alone | 175-181 ms | same | 1,038-1,469 ms | same | |
+| import 1k files: commit (insert) | 86-114 ms | same | 242-5,005 ms | same | |
+| import 1k files: covers | 1.34-1.40 s | same | 1.20-1.28 s | same | |
+
+"same" = code path not changed here. Startup used `perf-startup.spec.ts` with the backend time simulated (118 / 480 ms), median of 3, load 31; R2b measured 1,263 ms warm at 50k on a quieter box with a smaller payload (16 MB synthetic paths against 21.6 MB real ones).
+
+**Scaling read.** Heap (4x), payload (5.1x), `load_state` (4x), backend RSS (3.4x) and startup (about 1.7x) grow linearly or better. Sorts grow as n log n. Search, palette and scroll were not size-bound after the fix. The two quadratic paths found are fixed. The import's duplicate plan grows 6-8x for 5x tracks: it reads every track and folds artist and title (Unicode NFKD) for the whole library on every import.
+
+**What is left**
+
+- Startup at 50k is over the 1.5 s budget on this box (interactive 2.5-3.2 s at load 31). The profile is spread out: search index warmup about 230 ms, GC 300 ms, `$state` proxies, first rows; nothing over 15% alone. Next steps are R2b's: lazy row proxies, and a smaller payload (21.6 MB at 50k, mostly paths).
+- Import plan at 50k: 1.0-1.5 s for the duplicate index before the dialog. Option: keep the folded keys in a column or cache them between imports (schema change, needs Merlin).
+- Import commit at 50k swung 65 ms to 4.7 s for the same 1,000 inserts: the bench copies the 7.5 GB `library.db` first, so writeback of that copy competes. Covers stored inside `library.db` make it 5x larger than everything else in it; storing covers as files is a schema change.
+- Analyse 2k selected still takes a 0.5-0.6 s task (marking rows, bumping the list); it no longer depends on library size.
+- Not measured here: WKWebView on the Mac (`scripts/mac/perf-night.sh --size 50k` now has a fixture to run on; on the Mac use `--link-from 25k` too).
+
+Reproduce: `scripts/perf.sh --size 50k` now builds the linked fixture (set `FF_FIXTURE_FULL=1` for real copies), or by hand `python3 scripts/ff-fixture.py 50k --link-from 25k --bench <target>/release/bench_startup`; frontend `FF_PERF_TRACKS=50000 FF_SMOKE_PORT=5314 FF_PERF_OUT=x.json npx playwright test perf10k --grep measure`; startup `FF_PERF_STARTUP=50000=state50k.json==480 npx playwright test perf-startup`; import `bench_startup import <1k folder> <work> ~/.cache/ff-fixture/50k/library/library.db`. Raw: `~/.cache/r13/`.
