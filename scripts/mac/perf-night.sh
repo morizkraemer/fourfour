@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mac-night perf batch: real WKWebView startup, scroll and analysis numbers on the 10k fixture, plus the backend suite.
 # Run on the Mac from the repo root (ssh mbp, or a mac-queue entry):
-#   scripts/mac/perf-night.sh [--size 10k] [--app /Applications/fourfour.app | --build] [--runs 3] [--dry-run]
+#   scripts/mac/perf-night.sh [--size 10k] [--app /Applications/fourfour.app | --build] [--runs 3] [--expand-runs 5] [--dry-run]
 # Writes build/mac/perf-<date>/: summary.md (pass/fail), backend.json, app-run-*.jsonl, screenshots, logs.
 # The app runs with HOME pointed at a scratch folder, so its config, library and caches never touch the real ones.
 # --dry-run: no app window. Prints the launch commands and checks everything else (works on Linux too).
@@ -11,6 +11,7 @@ SIZE=10k
 APP="/Applications/fourfour.app"
 BUILD=0
 RUNS=3
+EXPAND_RUNS=5
 DRY=0
 APP_TIMEOUT=240
 while [ $# -gt 0 ]; do
@@ -19,6 +20,7 @@ while [ $# -gt 0 ]; do
     --app) APP="$2"; shift 2 ;;
     --build) BUILD=1; shift ;;
     --runs) RUNS="$2"; shift 2 ;;
+    --expand-runs) EXPAND_RUNS="$2"; shift 2 ;;
     --dry-run) DRY=1; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -106,6 +108,8 @@ app_run() {
 say "first launch on a fresh copy, then warm launches"
 app_run 1 '{"trackLoad":false,"scroll":false}'
 for n in $(seq 2 "$RUNS"); do app_run "$n" '{"trackLoad":true,"scroll":true}'; done
+say "cold first expand: $EXPAND_RUNS launches, one expand each (R10; over 50 ms longest frame triggers the staged reveal)"
+for n in $(seq 1 "$EXPAND_RUNS"); do app_run "expand-$n" '{"trackLoad":false,"scroll":false,"expand":true}'; done
 ANALYSIS_PROBE='{"trackLoad":false,"scroll":true,"analyse":true,"analysisWarmupMs":8000,"analysisScrollSeconds":10,"analysisBursts":5}'
 CORES="$(sysctl -n hw.logicalcpu 2>/dev/null || nproc)"
 say "scroll during analysis: before R5 (no UI pause, $((CORES - 1)) threads), R5 default, R5 with background QoS"

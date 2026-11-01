@@ -400,3 +400,46 @@ test('q50 import profile', async ({ browser }) => {
   await cdp.detach();
   await context.close();
 });
+
+test('q50 first expand, cold', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'first-expand', 'set FF_PERF_PROFILE=first-expand [FF_PERF_RUNS=7] [FF_PERF_TRACE_OUT=trace.json]');
+  test.setTimeout(600_000);
+  const payload = state();
+  const traceOut = process.env.FF_PERF_TRACE_OUT;
+  const runs: { drawn: number; longest: number; tasks: string }[] = [];
+  for (let run = 0; run < Math.max(RUNS, 5); run++) {
+    const { context, page } = await openApp(browser, payload);
+    await page.goto('/');
+    await bootMetrics(page);
+    await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+    await loadTrack(page, 3);
+    await page.waitForTimeout(1500);
+    const tasksBefore = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.longTasks.length);
+    if (traceOut && run < 3) {
+      await browser.startTracing(page, {
+        path: traceOut.replace(/\.json$/, `-${run}.json`),
+        categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-v8.cpu_profiler', 'v8.execute', 'blink.user_timing'],
+      });
+    }
+    const cdp = !traceOut && run === 0 && process.env.FF_PERF_PROFILE_OUT ? await page.context().newCDPSession(page) : null;
+    if (cdp) {
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+      await cdp.send('Profiler.start');
+    }
+    const t0 = await page.evaluate(() => performance.now());
+    const expand = await expandToDetail(page);
+    if (traceOut && run < 3) await browser.stopTracing();
+    if (cdp) {
+      const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+      printProfile('first expand', profile);
+      writeFileSync(process.env.FF_PERF_PROFILE_OUT!, JSON.stringify(profile));
+      await cdp.detach();
+    }
+    const tasks = await page.evaluate((n) => (window as unknown as { __q50: Q50 }).__q50.longTasks.slice(n), tasksBefore);
+    runs.push({ ...expand, tasks: tasks.map((t) => `${(t.start - t0).toFixed(0)}+${t.duration.toFixed(0)}`).join(' ') });
+    await context.close();
+  }
+  for (const r of runs) console.log(`first expand: drawn ${r.drawn.toFixed(0)} ms, longest task ${r.longest.toFixed(0)} ms, tasks [${r.tasks}]`);
+  console.log(`first expand median: drawn ${median(runs.map((r) => r.drawn)).toFixed(0)} ms, longest task ${median(runs.map((r) => r.longest)).toFixed(0)} ms`);
+});

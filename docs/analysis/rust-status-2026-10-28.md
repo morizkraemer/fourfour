@@ -108,3 +108,55 @@ prototyping/analysis-packaging/target/release/cyankey benchmark/manifests/beatpo
 **Mac .dmg build.** `fourfour-analysis-rs/scripts/bundle-app.sh --bundles dmg` on the Mac (needs curl, cargo-tauri 2, node; if the CI flow adds `.github/tauri-ci-bundle.json`, merge the `bundle.resources` object into it or pass both configs). Installed app then finds the weights in `fourfour.app/Contents/Resources/models/`. Size impact: about +83.4 MB (83.16 MB beat_this + 0.27 MB mel), before dmg compression (ONNX float weights compress little).
 
 **Licence.** Beat This! (CPJKU/beat_this README, "License"): "The code and the published model weights are released under the MIT license. Note that some of the training files are fully copyrighted or under limited Creative Commons licenses, and it is up to the user to assess whether this may impact their use case." The ONNX conversion (danigb/beat-this-rs) is MIT and retains both copyright notices; MIT requires shipping the notice, so `LICENSE-beat-this.txt` is bundled next to the weights. Open risk: the training-data note (weights trained on partly restricted data) is the authors' disclaimer, not a restriction on the weights.
+
+## B15: bar 1 rule switch (branch `b15-bar1`, analysis target, not landed)
+
+**Change.** `fourfour-analysis-rs/src/service.rs`: `enum BarOneRule { ModelVote, FirstBeat, FirstBeatUnlessModelStrong }`, selected by `pub const BAR_ONE_RULE` (now `FirstBeatUnlessModelStrong`) with `MODEL_STRONG_SHARE = 0.8`. `bar_phase` uses the constant; `bar_phase_by(rule, ...)` takes the rule explicitly. The old behaviour is one line: `BAR_ONE_RULE = BarOneRule::ModelVote`. The hybrid is the rule from "Downbeat" above: grid beat 0 is bar 1, unless the model's top downbeat phase holds at least 80% of the downbeat votes, then the model phase wins. Nothing else moves: BPM and grid come from the fit, the rule only picks which beat is numbered 1.
+
+Why 0.8: the threshold sweep on test is flat from 0.7 to 0.9 (79.4 / 80.0 / 79.4%) and on dev 88.9 / 88.9 / 91.1%, so 0.8 is the middle of a plateau, not a tuned peak. Plain "first beat" is within one track of it on test (78.9%) and equal on dev (88.9%), so the hybrid's gain is small: it only keeps the model where it is nearly unanimous.
+
+**Eval plumbing.** `ffa` JSONL (`Analysis::to_json`) now writes `bar_phase` (active rule) and `bar_phase_model_vote` (old rule), both from the Rust code. `o3-score.py` scores the app's real phase (`--bar-field bar_phase_model_vote` gives the old rule). `fourfour-analysis-rs/examples/bar_replay.rs` re-applies both Rust rules to an older ffa JSONL (beats, downbeats and mp3 delay are the inputs, so the result is exactly what the new code would write for the same grid). `benchmark/scripts/b15-bar-listen.py` makes the listen list.
+
+### Results (Rekordbox as reference, `o3-score.py`)
+
+| Run | Bar 1 right, old (model vote) | Bar 1 right, new (hybrid) | Grid within 20 ms, old / new | BPM within 0.1 / 1.0, old / new |
+|---|---:|---:|---:|---:|
+| Test, 205 tracks, ffa JSONL of the 10-28 run replayed through the Rust rules; 174 beat-aligned | 107 = 61.5% | **138 = 79.3%** | 161 / 161 (78.5%) | 180 / 190, same |
+| Same, `o3-bar-rules.py` filter (175 aligned) | 108 = 61.7% | **140 = 80.0%** | | |
+| Dev, 49 scored (`dev-after.jsonl` replayed); 45 aligned | 26 = 57.8% | **40 = 88.9%** | 44 / 44 (89.8%) | 46 / 49, same |
+| Dev, fresh `ffa` end to end with this binary, first 26 of 50 tracks (stopped at the timebox); 25 aligned | 16 = 64.0% | **24 = 96.0%** | 24 / 24 of 26 | 25 / 26, same |
+
+- Bar agreement of the whole set: test 52.2% -> 67.3% of all 205 tracks; grid within 20 ms AND bar right 97 -> 130 (47.3% -> 63.4%).
+- Grid and BPM do not move because the rule runs after the fit. The fresh dev run confirms it: BPM equal and beat counts equal to the earlier run on all 25 shared tracks, 18 of them bit-identical, 7 within 2 to 3 ms (one-sample resample/decode differences from the perf branches since), and the same 24 tracks inside 20 ms. The 26th track (id 172, the truncated mp3 that failed before) now decodes and is one grid miss; it is not in the earlier 49.
+- The test JSONL is the pre-snap-fix run (161 grid). With the snap fix the app is at 165 = 80.5% (see Summary); the bar rule does not touch it. The full 205-track fresh `ffa` run was not done: at load average 40 to 60 on `dev` one track took about 3 minutes of wall clock (0.35 tracks/min with 4 workers), so test would have taken 10 hours. The replay is exact for the rule, not for the 4 tracks the snap fix changed.
+- Dev run speed was this slow because of box load; a single track's CPU cost is unchanged.
+
+### Listen list (old vs new bar 1, for the Mac)
+
+72 beat-aligned tracks (test + dev) get a different bar 1 from the two rules: the new rule matches Rekordbox on 59 of them, the old one on 13, none on neither. Times are the first beat each rule numbers 1, in the stored grid (seconds from file start); "Rekordbox" is its first bar-1 beat. Bar numbers repeat every 4 beats, so a time several beats off is the same bar position when the difference is a multiple of 4 beats.
+
+| id | file | old bar 1 (s) | new bar 1 (s) | Rekordbox bar 1 (s) | matches Rekordbox |
+|---:|---|---:|---:|---:|---|
+| 39 | Messenger Vox.mp3 | 1.153 | 0.250 | 0.250 | new |
+| 66 | 08. Nicolas Barnes - Shut It Down.flac | 0.578 | 0.094 | 0.094 | new |
+| 81 | 80. Tripmastaz - Dreezy Benz Dubb.flac | 1.176 | 0.208 | 0.202 | new |
+| 114 | 54. Guillaume & the Coutu Dumonts - Ubiquitous Gaze.flac | 1.001 | 0.049 | 0.047 | new |
+| 123 | 03. Ilario Liburni - Tiny Little Squares (Original Mix).flac | 0.987 | 0.004 | 0.000 | new |
+| 21 | Brooklyn Haunt.mp3 | 0.536 | 0.068 | 0.550 | old |
+| 30 | She's A Replicant - Afriqua Remix.mp3 | 0.566 | 0.090 | 0.563 | old |
+| 27 | And That Was The Way - Echospace's Shinjuku Sedative.mp3 | 1.975 | 0.359 | 1.972 | old |
+| 57 | 04. Wouter de Moor - Afternoon Thing.flac | 0.932 | 0.000 | 0.936 | old |
+| 72 | 39. Silverlining - Don't Forget Your Ambdo Knyper.flac | 1.793 | 0.409 | 0.004 | old |
+
+In the first five the old rule puts bar 1 later than Rekordbox, which numbers it at the first beat; the last five are the regressions to listen to (the old model phase matches Rekordbox and the hybrid falls back to beat 0 because the vote is split). For id 72 our grid starts 0.405 s (about one beat) after Rekordbox's first beat, so "beat 0" is one beat off Rekordbox's bar 1 there; the model phase lines up modulo 4 beats. The question for ears: is the model's bar 1 the musical downbeat in the last five, and is Rekordbox's in the first five?
+
+### Validation
+
+`cargo build` clean; `timeout 40m cargo test --workspace`: 510 passed, 0 failed across all crates (new unit test `rules_pick_the_expected_phase_for_a_split_and_a_unanimous_vote` in `service.rs`; the existing bar-position tests pass unchanged).
+
+```bash
+python3 -I benchmark/scripts/o3-score.py benchmark/results/o3/ref.json new.jsonl --bar-field bar_phase_model_vote   # old rule
+python3 -I benchmark/scripts/o3-score.py benchmark/results/o3/ref.json new.jsonl                                      # active rule
+cargo run -p fourfour-analysis-rs --example bar_replay -- old-ffa.jsonl > replayed.jsonl
+python3 -I benchmark/scripts/b15-bar-listen.py benchmark/results/o3/ref.json replayed.jsonl --max 10
+```

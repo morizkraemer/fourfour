@@ -257,8 +257,22 @@ pub fn analyze_batch(
     results.into_inner().unwrap()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarOneRule {
+    ModelVote,
+    FirstBeat,
+    FirstBeatUnlessModelStrong,
+}
+
+pub const BAR_ONE_RULE: BarOneRule = BarOneRule::FirstBeatUnlessModelStrong;
+pub const MODEL_STRONG_SHARE: f64 = 0.8;
+
 pub fn bar_phase(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
-    if beats_s.len() < 2 {
+    bar_phase_by(BAR_ONE_RULE, beats_s, downbeats_s, delay_s)
+}
+
+pub fn bar_phase_by(rule: BarOneRule, beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
+    if rule == BarOneRule::FirstBeat || beats_s.len() < 2 {
         return 0;
     }
     let period = (beats_s[beats_s.len() - 1] - beats_s[0]) / (beats_s.len() - 1) as f64;
@@ -275,7 +289,12 @@ pub fn bar_phase(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
             votes[nearest % 4] += 1;
         }
     }
-    (0..4).max_by_key(|&p| (votes[p], std::cmp::Reverse(p))).unwrap()
+    let top = (0..4).max_by_key(|&p| (votes[p], std::cmp::Reverse(p))).unwrap();
+    let total: usize = votes.iter().sum();
+    match rule {
+        BarOneRule::FirstBeatUnlessModelStrong if (votes[top] as f64) < MODEL_STRONG_SHARE * total.max(1) as f64 => 0,
+        _ => top,
+    }
 }
 
 pub fn beats_from_grid(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64, bpm: f64) -> Vec<Beat> {
@@ -357,6 +376,19 @@ mod tests {
         let mapped = beats_from_grid(&beats, &downbeats, 0.0, 120.0);
         let positions: Vec<u8> = mapped.iter().map(|b| b.bar_position).collect();
         assert_eq!(positions, vec![3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2]);
+    }
+
+    #[test]
+    fn rules_pick_the_expected_phase_for_a_split_and_a_unanimous_vote() {
+        let beats = grid(0.1, 0.5, 40);
+        let at = |idx: &[usize]| -> Vec<f32> { idx.iter().map(|&i| beats[i] as f32).collect() };
+        let split = at(&[2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 1, 5, 9, 13]);
+        let unanimous = at(&[2, 6, 10, 14, 18, 22, 26, 30, 34, 38]);
+        assert_eq!(bar_phase_by(BarOneRule::ModelVote, &beats, &split, 0.0), 2);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeat, &beats, &split, 0.0), 0);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeatUnlessModelStrong, &beats, &split, 0.0), 0);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeatUnlessModelStrong, &beats, &unanimous, 0.0), 2);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeat, &beats, &unanimous, 0.0), 0);
     }
 
     #[test]

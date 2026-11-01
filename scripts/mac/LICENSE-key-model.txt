@@ -1,0 +1,146 @@
+fourfour key detection model: data attribution
+
+The musical key detector ships templates (fourfour-analysis-rs/src/cyankey.rs,
+model "clean-fsl") that were fitted on the Freesound Loop Dataset (FSL10K).
+
+Dataset
+  Antonio Ramires et al. "The Freesound Loop Dataset and Annotation Tool." Proceedings of the
+  21st International Society for Music Information Retrieval Conference
+  (ISMIR), 2020. Zenodo record 3967852, licensed CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/).
+
+Audio
+  671 loops from the dataset were used: those licensed CC0 or CC BY 3.0 on
+  Freesound (https://freesound.org). No audio is distributed with the app;
+  only the fitted numbers are. CC BY 3.0
+  (https://creativecommons.org/licenses/by/3.0/) requires crediting the
+  uploaders. These Freesound users contributed CC BY 3.0 loops (309 loops,
+  122 uploaders):
+
+  -zin-
+  24thelement
+  @realdavidfloat
+  a.e
+  aishabag23
+  Akosombo
+  AlienXXX
+  alphasnk
+  Antifragility
+  asciiface
+  Azon
+  barryeuphorik
+  Bliss
+  CarlosCarty
+  CharlyBeck
+  cocojammin
+  copyc4t
+  crazymonke9
+  crushed bits
+  dekstromoramid
+  delphidebrain
+  Derek Lotek
+  Detski
+  DirtyJewbs
+  DiscordantScraps
+  Disquantic
+  dmyra
+  Dodgy C
+  Dronoise
+  eardeer
+  emceeciscokid
+  Erokia
+  fibers
+  Flick3r
+  fran_ky
+  frederic.font
+  GameGod0
+  gis_sweden
+  Goup_1
+  GRD-music-
+  guitarelement
+  harrybates01
+  hinzebeat
+  Hoerspielwerkstatt_HEF
+  humphreyswill
+  InspectorJ
+  itsmochajones
+  Jagadamba
+  james duckett
+  JarAxe
+  jim68000
+  JimPurbrick
+  jonnay
+  jovanovich
+  Jovica
+  junkfood2121
+  jus
+  k2tr
+  kaiodeleis
+  keplar
+  kev_durr
+  laban
+  lancelottjones
+  lavaande
+  Lemoncreme
+  LoopPacks
+  Louderest
+  LS
+  luckylittleraven
+  M-RED
+  mahammed
+  mammo
+  mansardian
+  MattiaGiovanetti
+  Mick Gibbs
+  mvrasseli
+  neverheardof.me
+  NoiseCollector
+  nosegrind
+  nuFF3
+  Nurykabe
+  Ongitak
+  ontology
+  orangefreesounds
+  OttoRecV8
+  Owl
+  oymaldonado
+  paul_sutyrin
+  Pax11
+  raaghav81
+  Raggaman
+  rap2h
+  RealRhodesSounds
+  REVEREND.BLACK
+  ReyHolliday
+  robcro6010
+  Robinhood76
+  Shangyne
+  shitefromaheight
+  simon wye
+  Slaking_97
+  sorohanro
+  SSS_Samples
+  starpause
+  StonedB
+  suonho
+  thatjeffcarter
+  THE_bizniss
+  tim.kahn
+  tnk
+  tyops
+  unfa
+  usinggarageband
+  Vicces1212
+  visual
+  waggstar
+  waveplay_old
+  Wrylytucker
+  Xcreenplay
+  XHALE303
+  Xinematix
+  zilverton
+
+Loops licensed CC0 (public domain dedication) need no credit; their uploaders
+are thanked here in general.
+
+The Krumhansl-Kessler (1982) key profile was used as a regularisation prior.

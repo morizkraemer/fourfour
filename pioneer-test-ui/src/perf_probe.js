@@ -84,6 +84,40 @@
     send('track_load', { samples: times.length, timed_out: times.length - done.length, player_ready_ms_median: pct(done, 0.5), player_ready_ms_max: done.length ? Math.max(...done) : 0 });
   }
 
+  async function firstExpand() {
+    const row = document.querySelectorAll('[data-track-row]')[3];
+    if (!row) return send('first_expand_skipped', { reason: 'no row 3' });
+    performance.clearMarks('ff:player-ready');
+    row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    if (!(await waitFor(() => performance.getEntriesByName('ff:player-ready').length > 0, 15000))) return send('first_expand_skipped', { reason: 'track load timed out' });
+    await sleep(cfg.expandSettleMs ?? 1500);
+    const button = document.querySelector('.ff-player-compact__expand-btn');
+    if (!button) return send('first_expand_skipped', { reason: 'no expand button' });
+    const gaps = [];
+    let last = await frame();
+    const t0 = performance.now();
+    button.click();
+    const zoomDetail = () => document.querySelector('.ff-xp .waveform-display__zoom')?.dataset.bands === 'detail';
+    while (!zoomDetail() && performance.now() - t0 < 15000) {
+      const now = await frame();
+      gaps.push(now - last);
+      last = now;
+    }
+    const drawnFrames = zoomDetail() ? 2 : 0;
+    for (let i = 0; i < drawnFrames; i++) {
+      const now = await frame();
+      gaps.push(now - last);
+      last = now;
+    }
+    const drawn = performance.now() - t0;
+    for (let i = 0; i < 10; i++) {
+      const now = await frame();
+      gaps.push(now - last);
+      last = now;
+    }
+    send('first_expand', { drawn_ms: drawnFrames ? drawn : null, longest_frame_ms: Math.max(...gaps), frames: gaps.length, long_frames: gaps.filter((g) => g > 50).length });
+  }
+
   async function run() {
     send('page_start', { time_origin: performance.timeOrigin });
     const found = await waitFor(() => document.querySelector('[data-track-row]'), 120000);
@@ -110,6 +144,7 @@
     }
     send('interactive', { at_page_ms: streakStart, longest_frame_ms: longest, frames_after_first_row: gaps.length });
     await sleep(cfg.settleMs ?? 2000);
+    if (cfg.expand) await firstExpand();
     if (cfg.trackLoad !== false) await loadTracks();
     if (cfg.scroll !== false) {
       send('scroll_idle_start');
