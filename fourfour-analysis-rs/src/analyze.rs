@@ -13,6 +13,7 @@ use crate::decode::{decode_mono, resample_to};
 use crate::fit::{self, FitParams, Window, FPS};
 use crate::keymap::camelot;
 use crate::mp3::{self, DelayRule};
+use crate::service;
 use crate::waveform::{self, Waveforms};
 
 #[derive(Clone)]
@@ -236,6 +237,8 @@ impl Analysis {
             "n_beats": self.beats_s.len(),
             "final_beats_s": self.beats_s,
             "downbeats_s": self.downbeats_s,
+            "bar_phase": service::bar_phase(&self.beats_s, &self.downbeats_s, self.mp3_delay_s),
+            "bar_phase_model_vote": service::bar_phase_by(service::BarOneRule::ModelVote, &self.beats_s, &self.downbeats_s, self.mp3_delay_s),
             "key": self.key_class.map(camelot),
             "key_confidence": self.key_confidence,
             "mp3_delay_ms": self.mp3_delay_s * 1000.0,

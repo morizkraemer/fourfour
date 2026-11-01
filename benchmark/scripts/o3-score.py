@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Scores ffa JSONL output (the app's final grid) against the Rekordbox reference: BPM, whole-grid +-20 ms, and bar position (downbeat).
-usage: o3-score.py <ref.json> <ffa.jsonl> [--rows out.json]
-Bar position uses the same vote as fourfour_analysis::service::bar_phase. A track's downbeat counts as right when at least 90% of the
+usage: o3-score.py <ref.json> <ffa.jsonl> [--rows out.json] [--bar-field bar_phase|bar_phase_model_vote]
+Bar position is the app's phase as written by ffa ("bar_phase" = the active BAR_ONE_RULE of fourfour_analysis::service, or the field named by
+--bar-field); older JSONL without the field falls back to the model vote below. A track's downbeat counts as right when at least 90% of the
 Rekordbox beats matched within 35 ms carry the same bar position (1..4) in both grids; scored only on tracks with BPM within 0.5 and
 median |offset| under 35 ms (beat-level agreement), because bar numbers are meaningless otherwise."""
 import bisect
@@ -28,6 +29,7 @@ def bar_phase(beats, downbeats, delay):
 def main():
     ref = json.load(open(sys.argv[1]))
     rows_out = sys.argv[sys.argv.index("--rows") + 1] if "--rows" in sys.argv else None
+    field = sys.argv[sys.argv.index("--bar-field") + 1] if "--bar-field" in sys.argv else "bar_phase"
     rows = []
     for line in open(sys.argv[2]):
         a = json.loads(line)
@@ -37,7 +39,7 @@ def main():
         rb = r["beats_ms"]
         rbar = r["bar_pos"]
         est = [round(t * 1000.0) for t in a["final_beats_s"]]
-        phase = bar_phase(a["final_beats_s"], a["downbeats_s"], a["mp3_delay_ms"] / 1000.0)
+        phase = a[field] if field in a else bar_phase(a["final_beats_s"], a["downbeats_s"], a["mp3_delay_ms"] / 1000.0)
         ebar = [(i + 4 - phase) % 4 + 1 for i in range(len(est))]
         offs, same, matched = [], 0, 0
         for t, b in zip(rb, rbar):
