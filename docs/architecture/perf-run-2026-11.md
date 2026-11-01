@@ -859,3 +859,58 @@ Branch `r15-reveal` = `ov-1028` + R10 option 1. Visible timing change (the panel
 - longest frame far above longest busy: the 500 ms is outside the web process main thread (UI process main thread blocked by a sync Tauri command, GPU process / IOSurface allocation for the big canvases). Staging does not fix that; look at the UI process (Instruments, Time Profiler on the app's main thread) during the click.
 - pending frames > 0 in the slow launches: the detail series (measured from audio on first use; each perf-night launch has a fresh HOME, so the cache is empty) was still loading; the 3-of-5 split may be whether the dblclick prefetch finished within the 1.5 s settle.
 - longest busy near the longest frame: page work; then compare `r15-reveal`.
+
+## R29 WebKit startup (2026-11-01, `r29-mac-startup`)
+
+Branch `r29-mac-startup` from `ov-1028`. Linux `dev` box, Playwright WebKit 27.2 (`npx playwright install webkit`, no sudo or system packages needed) and headless Chromium, `perf-startup.spec.ts` on the real 10k and 50k fixture payloads (`bench_startup dump`, column table), backend time simulated (118 / 480 ms). Box load 15-60 (other workers); every number below is from a before run and an after run back to back.
+
+**Where the Mac's "1 s" comes from.** The Mac night's first row (1,640-1,940 ms warm) counts from process start; the Chromium harness counts from the page's navigation start. Tauri creates the window before the `setup` hook and then runs `setup` on the main thread, where WKWebView's custom-protocol loads are answered, so the page cannot load before `setup_done` (290-400 ms on the Mac). Each Mac run also starts with a fresh HOME, so every WKWebView launch is a first launch (no boot snapshot, no cache); compare it with the harness's "first launch", not "warm". `scripts/mac/perf-night-summary.mjs` now prints the page origin (process start to navigation start, from the probe's `page_start` time origin), when `load_state` reached the backend and the first row counted from the page origin, so the next Mac night splits the time.
+
+**WebKit vs Chromium, same build and payload** (10k, warm, one profiled run each at load 25-40; WebKit Timeline + sampling profiler via the inspector session, Chromium trace; ms of main-thread work up to interactive)
+
+| Part | WebKit | Chromium | Note |
+|---|---:|---:|---|
+| bundle evaluate + mount (skeleton rows, sidebar, player) | 104-178 | about 55 | JS, includes 24 skeleton `TrackRow`s |
+| first forced layout after mount (`bind:clientHeight`) | 62 | under 15 | style and layout of the whole shell |
+| `load_state` JSON fetch + parse (1.7 MB) | 20-60 | 12-25 | not a WebKit problem since R22's table |
+| table decode | 10-14 | 8 | |
+| map + row proxies (10k) | 27-140 | 25 | |
+| answer to first row: Svelte render (rows, sidebar rebuild) | 184-229 | about 90 | `TrackRow`, `SidebarRow`, `Icon` (`{@html}` per icon) |
+| style recalcs, total | 260-310 | 49 | about 5x per element |
+| layout, total | 140-175 | 54 | about 2-3x |
+| off-screen rows after the first paint (24 rows) | 150-290 | about 60 | JS + style + layout + paint |
+| idle gap before frames settle | 210-380 | none | main thread idle, no rendering update; headless WPE compositor, see below |
+
+Per row, measured in the page (clone N rows into the list, force style, then layout; median of 7): WebKit 1.0-1.6 ms style + 1.0-1.5 ms layout, Chromium 0.2-0.3 + 0.5-0.75 ms.
+
+**Fixed**
+
+- **The reset rule `*, *::before, *::after { box-sizing: border-box }`** (`design-system/base.css`) made WebKit resolve a `::before` and an `::after` style for every element. Removing only that rule from the live page cut WebKit's style time per inserted row by about 40% (48 rows: 30-33 to 17-19 ms, three rounds; "no `::`" and "no `*`" rule sets gave the same, every other rule group did not). On branch `r29-mac-startup` (c89aeff, not landed: it edits the prototyping design system, which the AGENTS fence reserves) the reset is `* { box-sizing: border-box }`. Same picture: of the 28 pseudo-element rules in the app, 25 set no padding or border (box-sizing changes nothing), the other 3 are absolutely positioned with all four insets 0 and no size (same box either way); full-page screenshots of the booted 10k list are byte-identical before and after in WebKit and Chromium. A future pseudo-element that sets a size together with padding or a border needs `box-sizing: border-box` in its own rule (noted in `base.css`).
+
+**Before/after** (WebKit 10k warm, 8 back-to-back pairs, load 15-55; style = WebKit Timeline style recalcs up to interactive)
+
+| | before median | after median | pairwise |
+|---|---:|---:|---|
+| style recalc total | 526 ms | 330 ms | lower in 8 of 8 (-12% at load 16, -40-60% at load 30-50) |
+| first real row | 1,843 ms | 1,365 ms | -80 to +26 ms at load 16, -280 to -875 ms at load 30-55 |
+| interactive (10 frames under 50 ms) | 2,572 ms | 2,036 ms | |
+
+50k (3 pairs, load 18-38): style 306 to 179 ms in the quiet pair; end-to-end within noise. Chromium 10k (4 pairs): warm first row 445-738 before, 499-763 after, unchanged within the noise.
+
+**Tried, not kept**
+
+- Starting `app_version` and `get_library_path` together with `load_state` before mount (so `initLibrary` does not wait a round trip): in the real app under WebKitGTK the path still resolved 530-700 ms after `initLibrary` asked, because the answer waits for the busy page main thread, not for the backend. No gain, reverted.
+- Removing the skeleton rows, the inline cell styles, or the deferred off-screen rows: no gain measurable above the noise.
+
+**Real app on Linux (WebKitGTK under Xvfb).** Release app with the embedded frontend (`--features tauri/custom-protocol`), probe on: `load_state` reaches the backend 160-380 ms after the page origin and is built 80-370 ms later, but the first row comes at 3.0-3.8 s (page). Rendering updates are the cause: rAF ran 3 times in the first 8 s (for example at 374, 2,404 and 8,316 ms) while the main thread was idle most of that time; `WEBKIT_DISABLE_COMPOSITING_MODE=1` was worse. This is software compositing in Xvfb and is no measure of the Mac; the same kind of idle gap (210-380 ms, no main-thread work) shows up in headless Playwright WebKit right after the first rows, and the Chromium harness has none.
+
+**What is left (WebKit)**
+
+- Per-row style and layout are still 2-5x Chromium's. Next suspects in the bisection: rules with `var()` and `calc()`, and the 25 elements per row (5 star spans, the wave canvas and cursor).
+- WebKit has no `requestIdleCallback`: `whenIdle` falls back to `setTimeout(0)`, so the label refresh and the search warmup run right after the first rows instead of in idle time.
+- `Icon` parses its SVG with `{@html}` per instance (shows in the sidebar rebuild after `load_state`).
+- Skeleton rows are full `TrackRow`s, built at mount and thrown away when the data arrives.
+
+**Mac.** Not measured here; the Mac re-measure happens at the next Mac perf night (`scripts/mac/perf-night.sh`), whose summary now has the page-origin columns.
+
+**Harness.** `FF_SMOKE_BROWSER=webkit` runs the smoke specs in Playwright WebKit (`devices['Desktop Safari']`, no Chromium launch flags). `perf-startup.spec.ts` reports `frameInteractive` (start of the first 10 frames under 50 ms after the first real row, the Mac probe's definition; WebKit has no long-task API, so the old `interactive` equals the first row there) and `longestFrame`; `FF_PERF_STARTUP_PROFILE=<prefix>` under WebKit writes `<prefix>-<tracks>.webkit.json` (Timeline records plus JSC samples, through Playwright's inspector session). Reproduce: `FF_SMOKE_BROWSER=webkit FF_PERF_STARTUP=10000=table10k.json==118 FF_SMOKE_PORT=5328 npx playwright test perf-startup`. Raw: `~/.cache/r29/` (deleted after this item; numbers above).
