@@ -7,7 +7,8 @@
 # Env: FF_PERF_DIR (fixtures, default ~/.cache/q50-perf), FF_PERF_AUDIO (audio dataset root),
 # FF_PERF_TRACKS (library size, 10000), FF_PERF_IMPORT (files, 1000), FF_PERF_ANALYSIS (tracks, 6),
 # FF_PERF_PROFILE_TRACKS (3), FF_PERF_THREADS (analysis threads, app default), FF_PERF_JOBS (fixture jobs, 12),
-# FF_PERF_SKIP (comma list of: startup,load,import,analysis,playback,frontend), FF_SMOKE_PORT (5381), FF_PERF_OUT (report path).
+# FF_PERF_SKIP (comma list of: startup,load,import,analysis,playback,frontend), FF_SMOKE_PORT (5381), FF_PERF_OUT (report path),
+# FF_FIXTURE_FULL (50k: real copies, about 35 GB, instead of hard links to the 25k fixture).
 set -euo pipefail
 
 SIZE=""
@@ -51,7 +52,12 @@ cargo build --release --quiet --bin bench_startup --bin bench_analysis --manifes
 
 if [ -n "$SIZE" ]; then
   say "fixture: $SIZE (generated once; see scripts/ff-fixture.py)"
-  FIXTURE="$(python3 -I "$ROOT/scripts/ff-fixture.py" "$SIZE" --bench "$TARGET/release/bench_startup" --jobs "${FF_PERF_JOBS:-12}" | tail -n 1)"
+  LINK=()
+  if [ "$SIZE" = 50k ] && [ -z "${FF_FIXTURE_FULL:-}" ]; then
+    python3 -I "$ROOT/scripts/ff-fixture.py" 25k --bench "$TARGET/release/bench_startup" --jobs "${FF_PERF_JOBS:-12}" > /dev/null
+    LINK=(--link-from 25k)
+  fi
+  FIXTURE="$(python3 -I "$ROOT/scripts/ff-fixture.py" "$SIZE" ${LINK[@]+"${LINK[@]}"} --bench "$TARGET/release/bench_startup" --jobs "${FF_PERF_JOBS:-12}" | tail -n 1)"
   cp "$FIXTURE/fixture.json" "$RAW/fixture.json"
   LIB="$FIXTURE/library"
   TRACKS="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["files"])' "$FIXTURE/fixture.json")"

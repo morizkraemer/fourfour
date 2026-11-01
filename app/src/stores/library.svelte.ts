@@ -568,6 +568,13 @@ export function unanalyzedTrackCount(): number {
   return count;
 }
 
+/** Whether any track was never analysed; read on the plain objects like `unanalyzedTrackCount`, stops at the first. */
+export function hasUnanalyzedTracks(): boolean {
+  const tracks = library.tracks;
+  for (let i = 0; i < tracks.length; i++) if (!plainTracks[i].analyzed) return true;
+  return false;
+}
+
 function trackIndexById(id: number): number {
   if (!indexCache || indexCache.source !== plainTracks || indexCache.length !== plainTracks.length) {
     indexCache = {
@@ -641,7 +648,7 @@ export function isTrackAnalyzing(trackId: number): boolean {
 }
 
 function knownTrackIds(ids: number[]): number[] {
-  return [...new Set(ids)].filter((id) => id > 0 && library.tracks.some((t) => t.id === id));
+  return [...new Set(ids)].filter((id) => id > 0 && libraryTrackById(id) !== undefined);
 }
 
 const analysisStartListeners = new Set<(trackIds: number[]) => void>();
@@ -658,7 +665,7 @@ export function onAnalysisStart(listener: (trackIds: number[]) => void): () => v
  * the waveform arrives first as `analysis-partial`, the full result as `analysis-progress`.
  */
 export function requestBackgroundAnalysis(trackId: number) {
-  const track = library.tracks.find((t) => t.id === trackId);
+  const track = libraryTrackById(trackId);
   if (!track || (track.analyzed && !track.analysisPending)) return;
 
   if (isTrackAnalyzing(trackId)) {
@@ -842,7 +849,7 @@ function finishAnalyzingTrack(trackId: number) {
 function markTracksPendingAnalysis(ids: number[]) {
   const restarted: number[] = [];
   for (const id of ids) {
-    const track = library.tracks.find((t) => t.id === id);
+    const track = libraryTrackById(id);
     if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;

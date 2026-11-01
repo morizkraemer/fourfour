@@ -94,7 +94,15 @@ async function cdpMetrics(page: Page) {
   return read;
 }
 
-let readMetrics: (() => Promise<Record<string, number>>) | null = null;
+async function heapMb(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const { usedSize } = (await cdp.send('Runtime.getHeapUsage')) as { usedSize: number };
+  await cdp.detach();
+  return usedSize / 1e6;
+}
+
+let readMetrics:(() => Promise<Record<string, number>>) | null = null;
 
 async function timed(page: Page, name: string, action: () => Promise<void>) {
   readMetrics ??= await cdpMetrics(page);
@@ -148,6 +156,7 @@ test.describe('perf at scale', () => {
     record('boot dom nodes', boot.domNodes);
     record('boot rows in dom', boot.rowsInDom);
     await page.waitForTimeout(1500);
+    record('js heap after boot MB', await heapMb(page));
     await installProbes(page);
 
     const steady = await scrollFrames(page, 120, 90);
@@ -243,6 +252,30 @@ test.describe('perf at scale', () => {
       await page.evaluate(() => (window as unknown as { __smokeInvokes: { cmd: string }[] }).__smokeInvokes.filter((i) => i.cmd === 'save_state').length),
     );
 
+    await search.fill('');
+    await page.keyboard.press('Escape');
+    await sidebarPlaylist(page, 'Big Playlist').click();
+    await expect(page.locator('.ff-gheader__count')).toHaveText(Math.min(2000, TRACKS).toLocaleString('en-US'));
+    const clickRow = (which: 'first' | 'last') =>
+      page.evaluate((w) => {
+        const all = document.querySelectorAll('[data-track-row]');
+        const row = (w === 'first' ? all[0] : all[all.length - 1]) as HTMLElement;
+        row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: w === 'last' }));
+      }, which);
+    await clickRow('first');
+    await page.evaluate(() => {
+      const el = document.querySelector('.ff-table__scroll') as HTMLElement;
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(500);
+    await clickRow('last');
+    await page.waitForTimeout(300);
+    await page.keyboard.press('Control+k');
+    await page.keyboard.type('Analyze selection');
+    await timed(page, 'analyze 2k selected', () => page.keyboard.press('Enter'));
+    await expect(page.locator('.ff-cp')).toHaveCount(0);
+
+    record('js heap at end MB', await heapMb(page));
     console.log(JSON.stringify(results, null, 2));
     if (REPORT) writeFileSync(REPORT, JSON.stringify(results, null, 2));
   });

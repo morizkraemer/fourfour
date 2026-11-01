@@ -41,7 +41,7 @@ import { zoomWaveIn, zoomWaveOut, zoomWaveToFit } from '../stores/wave-zoom.ts';
 import { selectedTrack } from '../stores/selection.svelte.ts';
 import { cuesOf } from '../stores/cues.svelte.ts';
 import { confirmAction } from '../lib/confirmAction.ts';
-import { revealFile } from '../stores/library.svelte.ts';
+import { hasUnanalyzedTracks, revealFile } from '../stores/library.svelte.ts';
 import {
   addHotCueAtPlayhead,
   addMemoryCueAtPlayhead,
@@ -517,7 +517,7 @@ export function buildAppActions(): ShortcutAction[] {
       group: GROUP.library,
       defaultBinding: null,
       keywords: ['bpm', 'key', 'waveform', 'detect', 'everything'],
-      when: () => !library.syncing && library.tracks.some((t) => !t.analyzed),
+      when: () => !library.syncing && hasUnanalyzedTracks(),
       run: () => void analyzeTracks(),
     },
     {

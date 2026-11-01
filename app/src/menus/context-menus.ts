@@ -34,6 +34,7 @@ import {
   refreshVolumes,
   setTestCuesOnSelected,
   FAVORITE_SLOTS,
+  hasUnanalyzedTracks,
 } from '../stores/library.svelte.ts';
 import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
@@ -78,10 +79,6 @@ function busy() {
 /** Analysis can be queued while a run is already in progress. */
 function analyzeBusy() {
   return library.syncing;
-}
-
-function hasUnanalyzedTracks() {
-  return library.tracks.some((t) => !t.analyzed);
 }
 
 export async function importIntoSource(sourceId: string) {
