@@ -851,6 +851,22 @@ async fn a_priority_request_that_cannot_start_its_analyzer_still_tells_the_ui_it
     assert_eq!(h.sink.log_of_completions(), 1);
 }
 
+#[tokio::test]
+async fn runs_started_at_the_same_moment_analyse_each_track_once() {
+    let h = harness(6, 2, 8);
+
+    let (a, b, c) = tokio::join!(h.run_all(h.items.clone()), h.run_all(h.items.clone()), h.run_all(h.items.clone()));
+
+    let outcomes = [a, b, c];
+    assert_eq!(outcomes.iter().filter(|o| matches!(o, RunOutcome::Finished { .. })).count(), 1);
+    assert!(h.unanalyzed().is_empty());
+    for id in 1..=6 {
+        let name = name_of(id);
+        let passes = (h.count(&ran(&name, Pass::Fast)), h.count(&ran(&name, Pass::Grid)), h.count(&ran(&name, Pass::All)));
+        assert!(passes == (1, 1, 0) || passes == (0, 0, 1), "{name}: {:?}", h.events());
+    }
+}
+
 fn write_tone_wav(path: &Path, seconds: f64, hz: f64) {
     let rate = 44_100u32;
     let mut data = Vec::new();
