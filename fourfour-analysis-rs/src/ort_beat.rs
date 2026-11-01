@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{anyhow, Result};
@@ -24,6 +25,7 @@ pub struct OrtBeat {
     env: Environment,
     prepacked: PrepackedWeights,
     ready: Mutex<Vec<OrtChunkSession>>,
+    all_open: AtomicBool,
     failure: OnceLock<String>,
 }
 
@@ -90,6 +92,7 @@ impl OrtBeat {
             env,
             prepacked: PrepackedWeights::new(),
             ready: Mutex::new(Vec::new()),
+            all_open: AtomicBool::new(false),
             failure: OnceLock::new(),
         })
     }
@@ -124,6 +127,11 @@ impl OrtBeat {
                 Err(e) => return self.fail(format!("{e:#}")),
             }
         }
+        self.all_open.store(true, Ordering::Relaxed);
+    }
+
+    pub fn all_open(&self) -> bool {
+        self.all_open.load(Ordering::Relaxed)
     }
 
     fn open_session(&self) -> Result<OrtChunkSession> {

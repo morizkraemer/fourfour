@@ -100,10 +100,10 @@ struct TrackChunks {
 }
 
 impl ChunkExecutor {
-    fn take(&self) -> Option<(Arc<TrackChunks>, usize)> {
+    fn take(&self, runner: &mut ChunkRunner) -> Option<(Arc<TrackChunks>, usize)> {
         let mut queue = self.queue.lock().unwrap();
         loop {
-            if queue.shutdown {
+            if queue.shutdown || runner.surplus() {
                 return None;
             }
             queue.tracks.retain(|t| !t.cancelled.load(Ordering::Relaxed));
@@ -126,7 +126,7 @@ impl ChunkExecutor {
             #[cfg(feature = "ort")]
             ort: None,
         };
-        while let Some((track, i)) = self.take() {
+        while let Some((track, i)) = self.take(&mut runner) {
             let chunk = extract_chunk(&track.mel, track.starts[i]);
             let logits = catch_unwind(AssertUnwindSafe(|| runner.run(&chunk))).unwrap_or_else(|_| Err(anyhow!("beat model panicked on chunk {i}")));
             track.results.lock().unwrap()[i] = Some(logits);
@@ -143,7 +143,7 @@ impl BeatModel {
 
     fn max_chunk_threads(&self) -> usize {
         #[cfg(feature = "ort")]
-        if self.usable_ort().is_some() {
+        if self.usable_ort().is_some_and(|ort| ort.all_open()) {
             return ORT_SESSIONS;
         }
         usize::MAX
@@ -151,6 +151,19 @@ impl BeatModel {
 }
 
 impl ChunkRunner<'_> {
+    /// True for a thread without a session once all onnxruntime sessions are open: it ran rten chunks while they
+    /// opened and now leaves the model to the sessions.
+    fn surplus(&mut self) -> bool {
+        #[cfg(feature = "ort")]
+        if let Some(ort) = self.model.usable_ort() {
+            if self.ort.is_none() {
+                self.ort = ort.take_session();
+            }
+            return self.ort.is_none() && ort.all_open();
+        }
+        false
+    }
+
     /// Runs a chunk on onnxruntime once this thread has a session, on rten until then (the first CoreML sessions take
     /// seconds to open), for chunks onnxruntime does not take, and for good once onnxruntime failed.
     fn run(&mut self, chunk: &Tensor) -> Result<ChunkLogits> {
@@ -312,6 +325,7 @@ impl BeatEngine {
     fn ensure_chunk_threads(&self, wanted: usize) -> Result<()> {
         let wanted = wanted.min(self.beat.max_chunk_threads());
         let mut threads = self.chunk_threads.lock().unwrap();
+        threads.retain(|thread| !thread.is_finished());
         while threads.len() < wanted {
             let (chunks, model) = (self.chunks.clone(), self.beat.clone());
             threads.push(std::thread::Builder::new().name("beat-chunks".into()).spawn(move || chunks.work(&model))?);

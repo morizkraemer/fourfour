@@ -585,7 +585,27 @@ EP options tried first (Python, one 1500-frame chunk, single thread, Mac partly 
 
 **Acceptance (Rust, release, `--features coreml` on the Mac).** `ort_gives_the_rten_logits_for_a_chunk` passes: max abs logit diff 7.2e-6 (limit 1e-2), median of 5 one-thread chunks rten 1593 ms vs CoreML 283 ms, warm session open 3.3 s (cold about 19 s, was 42 s and failing), CoreML nodes 904 of 1052 (75 partitions). A 3-track `ffa` run (1 worker, 2 threads) worked end to end, but peak RSS was 3.2 GB (rten 0.8 GB in R11's sanity): every chunk thread holds its own CoreML session, so memory grows with threads. Box: `cargo test -p fourfour-analysis-rs` default and `--features ort` pass, including the ignored chunk test on ORT CPU.
 
-**Bench: not run yet.** The visible perf night (`perf-night.sh` in `~/dev/build/fourfour-mac`) started at 20:11 and was still running when this worker handed back, and the bench must not overlap it. A driver waits on the Mac (`~/.cache/r24-work/bench-after-perf.sh`, log `~/.cache/r24-work/bench-driver.log`): once `perf-night.sh` has been gone for 5 minutes it runs `nice -n 10 scripts/mac/coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7` into `build/mac/coreml-r24-dev/summary.md` and logs whether the perf night was running at the end. The `ffa` model load column will show the warm cache (the chunk test warms it first). Verdict pending that summary; the per-chunk numbers (5.6x faster per thread) make a keep likely if peak RSS at 2x2 / 4x2 stays acceptable.
+**Bench (verdict: keep).** Run by the waiting driver after the perf night: `coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7` on `mbp` (M5 Pro), 50 dev tracks, `nice -n 10`, warm compiled-model cache. From `~/dev/build/fourfour-r11/build/mac/coreml-r24-dev/summary.md` (`w` = tracks in parallel, `t` = beat-model chunk threads, so CoreML sessions):
+
+| Run | Tracks | Tracks/min | First result | Model load | Peak RSS | Model s (sum) | CoreML nodes |
+|---|---:|---:|---:|---:|---:|---:|---|
+| coreml-w1-t1-r1 | 50 | 18.00 | 10.5 s | 3849 ms | 2174 MB | 154 | 904 of 1052 |
+| coreml-w1-t1-r2 | 50 | 17.79 | 10.5 s | 3875 ms | 2042 MB | 155 | 904 of 1052 |
+| coreml-w2-t1-r1 | 50 | 21.22 | 10.2 s | 3601 ms | 2308 MB | 264 | 904 of 1052 |
+| coreml-w2-t1-r2 | 50 | 20.49 | 10.3 s | 3694 ms | 2376 MB | 274 | 904 of 1052 |
+| coreml-w2-t2-r1 | 50 | 30.89 | 11.6 s | 3553 ms | 3682 MB | 175 | 904 of 1052 |
+| coreml-w2-t2-r2 | 50 | 26.10 | 11.5 s | 3634 ms | 3830 MB | 205 | 904 of 1052 |
+| coreml-w4-t2-r1 | 50 | 31.97 | 11.1 s | 3585 ms | 4300 MB | 168 | 904 of 1052 |
+| coreml-w4-t2-r2 | 50 | 25.91 | 11.4 s | 3975 ms | 4064 MB | 205 | 904 of 1052 |
+| rten-w1-t12-r1 | 50 | 14.25 | 4.7 s | 15 ms | 5229 MB | 202 | - |
+| rten-w1-t12-r2 | 50 | 12.65 | 5.1 s | 14 ms | 5277 MB | 226 | - |
+| rten-w2-t6-r1 | 50 | 13.83 | 5.8 s | 21 ms | 3492 MB | 420 | - |
+| rten-w2-t6-r2 | 50 | 12.41 | 7.0 s | 19 ms | 3482 MB | 468 | - |
+
+- CoreML at 2 sessions (w2t2, w4t2) runs 26-32 tracks/min against rten's 12-14, about 2x, at 3.7-4.3 GB peak RSS against rten's 3.5-5.2 GB. One chunk on one thread: rten 1424 ms, CoreML 229 ms; session open 2.9 s warm.
+- First result is about 11 s against 5 s: the model load (3.6 s warm) plus one session per chunk thread opened on its first chunk. R26 bridges this with rten.
+- Agreement with rten (`ffa --dump`, every CoreML config): max abs logit diff 1.9e-4 (median per track 1.1e-4), beat peaks equal on 49/49, final grid within 1 ms and BPM within 0.01 on 49/49 (the summary pairs 49 of the 50 tracks). Grid eval identical for every config, CoreML and rten: grid within 20 ms 44/50, BPM within 0.1 47/50, bar right 41 of 46 aligned.
+- The decision rule from R11 holds (faster at similar memory, grid 44/50, peaks match), so `coreml` stays and ships in R26.
 
 ## R13 50k (2026-11-01, `r13-50k`)
 
