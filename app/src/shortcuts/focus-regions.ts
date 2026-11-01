@@ -6,5 +6,5 @@ export function focusRegion(step: 1 | -1, root: ParentNode = document) {
   if (regions.length === 0) return;
   const current = regions.findIndex((r) => r.contains(document.activeElement));
   const next = regions[(current + step + regions.length) % regions.length];
-  (next.querySelector<HTMLElement>(FOCUSABLE) ?? next).focus();
+  (next.querySelector<HTMLElement>('[data-focus-first]') ?? next.querySelector<HTMLElement>(FOCUSABLE) ?? next).focus();
 }

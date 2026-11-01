@@ -84,6 +84,7 @@
     class="ff-sbrow ff-sbrow--{rowState}"
     role="button"
     tabindex="0"
+    data-focus-first={rowState === 'active' ? '' : undefined}
     aria-current={rowState === 'active' ? 'page' : undefined}
     aria-expanded={expanded != null ? expanded : undefined}
     style:padding-left={depth > 0 ? `calc(var(--ff-space-6) + ${depth * 14}px)` : undefined}

@@ -813,6 +813,7 @@
         inert={booting}
         role="listbox"
         tabindex="0"
+        data-focus-first
         aria-label="Tracks"
         aria-multiselectable="true"
         aria-activedescendant={cursorIndex >= firstRow && cursorIndex < endRow && !booting ? rowId(cursorIndex) : undefined}

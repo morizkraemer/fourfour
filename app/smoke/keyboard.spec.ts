@@ -18,7 +18,11 @@ async function focusList(page: Page) {
 
 async function addFavorite(page: Page) {
   await page.keyboard.press('F6');
-  await tabTo(page, () => sidebarRow(page, 'Add favorite'));
+  for (let i = 0; i < 12; i++) {
+    if (await sidebarRow(page, 'Add favorite').evaluate((el) => el === document.activeElement)) break;
+    await page.keyboard.press('ArrowUp');
+  }
+  await expect(sidebarRow(page, 'Add favorite')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(sidebarRow(page, 'Favorites 1')).toBeVisible();
 }
@@ -255,5 +259,24 @@ test.describe('search and palette', () => {
     await page.keyboard.press('Enter');
     await expect(page.locator('.ff-gheader__title')).toHaveText('Warmup');
     await expect(page.getByRole('status')).toHaveCount(1);
+  });
+});
+
+test.describe('column headers', () => {
+  test('sort from the keyboard: Shift+Tab from the list, arrows between columns, Enter sorts', async ({ smoke: { page } }) => {
+    await focusList(page);
+    await page.keyboard.press('Shift+Tab');
+    const header = page.locator('.ff-colh__cell:focus');
+    await expect(header).toHaveAttribute('role', 'button');
+    for (let i = 0; i < 14; i++) {
+      if (((await header.getAttribute('aria-label')) ?? '').startsWith('Sort by ARTIST')) break;
+      await page.keyboard.press('ArrowRight');
+    }
+    await expect(header).toHaveAttribute('aria-label', 'Sort by ARTIST');
+    await page.keyboard.press('Enter');
+    await expect(header).toHaveAttribute('aria-label', 'Sort by ARTIST, ascending');
+    await expect(rows(page).first().locator('.ff-trow__cell--artist')).toHaveText('Ben Böhmer');
+    await page.keyboard.press('Space');
+    await expect(header).toHaveAttribute('aria-label', 'Sort by ARTIST, descending');
   });
 });
