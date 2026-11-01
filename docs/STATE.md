@@ -23,7 +23,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 5. Old stash@{0} (scrub-pause waveform tweaks; prototyping/viewport only, not the app, so not built in the run) — rec: build on a branch for review — branch: none
 6. `.claude/settings.local.json` allows `git push *`, which bypasses the push ask rule — rec: remove that allow line (Merlin edits it) — branch: none
 7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
-15. CI workflow refreshed for ov-1028 (macOS dmg + check, Windows nsis, Linux deb + smoke; weights bundled; actionlint clean, Linux steps pass locally, never run on GitHub) - rec: OK to push branch ov-ci for a first run - branch: ov-ci (e7e6f3f)
+15. CI workflow refreshed for ov-1028 (macOS dmg + check, Windows nsis, Linux deb + smoke; weights bundled; actionlint clean, Linux steps pass locally, never run on GitHub) - rec: OK to push branch r35-ci for a first run (supersedes ov-ci: refreshed for coreml, dev-bins, deb checks, webkit smoke, Windows OpenSSL; trigger now master + PRs only). Windows ships without libcrypto-3 DLL until bundled or vendored - decide after the first run - branch: r35-ci (24add8b)
 16. [accepted 2026-11-01 per PM relay "don't wait for reviews", landed on ov-1028 29add96; listen check still open] Bar 1: hybrid rule (grid beat 0 = bar 1 unless model downbeat vote >=80%) built on b15-bar1 e717de0 behind BAR_ONE_RULE: Rekordbox agreement test 61.5% -> 79.3%, dev 57.8% -> 88.9%; grid/BPM unchanged; 72 tracks differ (new right 59, old right 13), listen list in docs/analysis/rust-status-2026-10-28.md B15 - rec: listen to the 5 regressions on the Mac, then land - branch: b15-bar1
 19. Waveform detail cache cap is 512 MiB (~100 six-minute tracks at 5 MB each) - rec: raise to 2 GiB - branch: none (q50-trackload follow-up)
 21. Q50: rten 0.27 bump - logits differ up to 8.6e-5, slower - rec: drop - branch: q50-rten27
@@ -108,7 +108,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 34. r32-probe: port r15's first-expand probe metrics + webkit smoke option to ov-1028 (no behaviour change) [landed]
 35. r33-dupplan: import duplicate plan at 50k (1-1.5 s) without schema: in-memory folded-key index kept across imports [landed; later imports 50k 990 -> 74 ms]
 36. r34-webkit-idle: WebKit idle scheduler (no rIC), Icon parse once, lighter skeleton rows; app code only, no prototyping edits [running]
-37. r35-ci: refresh ov-ci workflow for coreml/dev-bins/deb deps/webkit smoke (branch, push needs Waiting 15) [running]
+37. r35-ci: refresh ov-ci workflow for coreml/dev-bins/deb deps/webkit smoke (branch, push needs Waiting 15) [built, branch r35-ci 24add8b]
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
