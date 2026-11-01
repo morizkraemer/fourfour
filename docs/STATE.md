@@ -50,6 +50,12 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 30. Clean key model v2 (b14): self-trained on CC BY FMA clips; Beatport test 57.3% vs 56.3% (2 tracks, within noise; dev +9), adds 264 FMA artist credits. The 36-weight template model is at its ceiling without ~1,500 permissively labelled tracks, so 60% clean is out of reach this way - rec: leave unlanded, ship CLEAN_FSL, accept ~56% for the beta - branch: b14-cleankey60 (11784f5)
 
+## Run review
+Checked 2026-11-01 over Tailscale (HTTP 200, real content):
+- https://dev.tail87069a.ts.net:4220/lab.html - review cards (5 open: status chip, sidebar, skeleton, scroll while analysing, USB sync round 3 with 9 screenshots); Keep / Change (note) per card
+- https://dev.tail87069a.ts.net:4210/ - the app UI on ov-1028 in the browser (no Rust backend, mock data)
+- Mac: ov-1028 installed in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221/
+
 ## Run
 status: running (2026-11-01: ov-1028 installed on the Mac 12:21; dmg built + check-dmg all PASS (ad-hoc signed, weights, licences incl. FSL10K credits, plist, self-check); perf night HELD until Merlin's go tonight (Merlin 12:21: no UI takeover now)) · started 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
 targets (Merlin Q&A 2026-10-30): beta-ready on ov-1028, and as fast as possible at 10k+ tracks (startup, analysing 10k+, track load, scroll). Order: speed first, then beta. "nothing's off limits": every item below may be built; hard gates and the brother's format bytes still hold
