@@ -371,3 +371,4 @@
 2026-10-31 22:12 orchestrator - landed: r10-expand on ov-1028 (first-expand perf spec + perf-night --expand-runs, env-gated probe step; Mac run pending); smoke 112, vitest 832, CHECKS-OK
 2026-10-31 22:57 orchestrator - parked: b15-bar1 e717de0 (hybrid bar-1 rule, Rekordbox agreement 61.5 -> 79.3% test, grid/BPM unchanged; Waiting 16 listen first); run-pause: idle, nothing useful left on the box without Merlin or the Mac. Orphan wait loop pid 3376044 (sleep loop on b15 log) could not be killed (classifier)
 2026-11-01 00:31 orchestrator - landed: b15-bar1 on ov-1028 (29add96; hybrid bar-1 rule, per PM relay not waiting for the listen check; revert = BAR_ONE_RULE ModelVote); checks green; run-pause: idle
+2026-11-01 04:20 orchestrator - resumed: Mac back (PM relay, Merlin 12:18 WITA "mac is up now"); Mac batch started: install ov-1028 build
