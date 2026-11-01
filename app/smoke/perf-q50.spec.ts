@@ -162,13 +162,23 @@ function loadTrack(page: Page, rowIndex: number) {
 function expandToDetail(page: Page) {
   return page.evaluate(
     () =>
-      new Promise<{ drawn: number; longest: number }>((resolve, reject) => {
+      new Promise<{ drawn: number; longest: number; frame: number }>((resolve, reject) => {
         const q = (window as unknown as { __q50: Q50 }).__q50;
+        const gaps: number[] = [];
+        let last = performance.now();
+        let framesLeft = Infinity;
+        const tick = (now: number) => {
+          gaps.push(now - last);
+          last = now;
+          if (--framesLeft > 0) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
         const t0 = performance.now();
         (document.querySelector('.ff-player-compact__expand-btn') as HTMLElement).click();
         const done = () => {
           const drawn = performance.now() - t0;
-          setTimeout(() => resolve({ drawn, longest: q.longTasks.filter((t) => t.start >= t0 - 1).reduce((m, t) => Math.max(m, t.duration), 0) }), 100);
+          framesLeft = 10;
+          setTimeout(() => resolve({ drawn, longest: q.longTasks.filter((t) => t.start >= t0 - 1).reduce((m, t) => Math.max(m, t.duration), 0), frame: Math.max(...gaps) }), 250);
         };
         const poll = () => {
           if (performance.now() - t0 > 15_000) return reject(new Error('expanded detail timed out'));
@@ -406,7 +416,7 @@ test('q50 first expand, cold', async ({ browser }) => {
   test.setTimeout(600_000);
   const payload = state();
   const traceOut = process.env.FF_PERF_TRACE_OUT;
-  const runs: { drawn: number; longest: number; tasks: string }[] = [];
+  const runs: { drawn: number; longest: number; frame: number; tasks: string }[] = [];
   for (let run = 0; run < Math.max(RUNS, 5); run++) {
     const { context, page } = await openApp(browser, payload);
     await page.goto('/');
@@ -440,6 +450,6 @@ test('q50 first expand, cold', async ({ browser }) => {
     runs.push({ ...expand, tasks: tasks.map((t) => `${(t.start - t0).toFixed(0)}+${t.duration.toFixed(0)}`).join(' ') });
     await context.close();
   }
-  for (const r of runs) console.log(`first expand: drawn ${r.drawn.toFixed(0)} ms, longest task ${r.longest.toFixed(0)} ms, tasks [${r.tasks}]`);
-  console.log(`first expand median: drawn ${median(runs.map((r) => r.drawn)).toFixed(0)} ms, longest task ${median(runs.map((r) => r.longest)).toFixed(0)} ms`);
+  for (const r of runs) console.log(`first expand: drawn ${r.drawn.toFixed(0)} ms, longest frame ${r.frame.toFixed(0)} ms, longest task ${r.longest.toFixed(0)} ms, tasks [${r.tasks}]`);
+  console.log(`first expand median: drawn ${median(runs.map((r) => r.drawn)).toFixed(0)} ms, longest frame ${median(runs.map((r) => r.frame)).toFixed(0)} ms, longest task ${median(runs.map((r) => r.longest)).toFixed(0)} ms`);
 });
