@@ -732,6 +732,48 @@ Same results: the lookups return the same row objects (the index falls back to `
 
 Reproduce: `scripts/perf.sh --size 50k` now builds the linked fixture (set `FF_FIXTURE_FULL=1` for real copies), or by hand `python3 scripts/ff-fixture.py 50k --link-from 25k --bench <target>/release/bench_startup`; frontend `FF_PERF_TRACKS=50000 FF_SMOKE_PORT=5314 FF_PERF_OUT=x.json npx playwright test perf10k --grep measure`; startup `FF_PERF_STARTUP=50000=state50k.json==480 npx playwright test perf-startup`; import `bench_startup import <1k folder> <work> ~/.cache/ff-fixture/50k/library/library.db`. Raw: `~/.cache/r13/`.
 
+## R33 duplicate plan (2026-11-01, `r33-dupplan`)
+
+Branch `r33-dupplan` from `ov-1028`. Linux `dev` box, release `bench_startup import` on the R13 fixtures (10k, and the 50k linked one), the same 1,000-file sample folders as R13. Box load 16-47 during the runs (other workers), so absolute times move a lot; each pair below is a before run and an after run back to back.
+
+**Problem.** R13: the duplicate plan of an import grows 6-8x for 5x tracks (175 ms at 10k, 1.0-1.5 s at 50k) because every import read all tracks and folded artist, title (Unicode NFKD), path and file name again. Caching folded keys in a column would be a schema change; this does it in memory.
+
+**Design.**
+
+- `DuplicateIndex` (`pioneer-library/src/duplicates.rs`) is now a mutable index: `insert_all(candidates)` and `remove(candidate)` beside `new` and `find`. Per key it keeps the lowest id and the rest sorted by id (`Slots`), so removing a track promotes the next one and a key shared by several tracks answers exactly as a fresh index over the library in id order does. It holds only keys and ids, not the track fields: about 37 MB at 50k tracks (about 7 MB at 10k; measured with 50k synthetic candidates of realistic path length), built from `DuplicateCandidate`s as before.
+- `LocalLibrary` owns the index (`duplicates: Mutex<Option<DuplicateIndex>>`) and hands it out through `with_duplicate_index`: built on the first import of a session, reused by every later one. It lives and dies with the `LocalLibrary` value, so change library, reset, restore and every reopen start with no index. `plan_for_library` uses it; `plan_import` takes the index plus a lookup for the existing track of each hit (title, artist, duration for the dialog row) instead of building an index and an id map itself.
+- Writes keep it current: the write paths read the affected tracks' stored values from the database before the write (one primary-key query each, only when an index exists), and after it succeeds take the old keys out and put the new ones in. A failed write changes nothing. A write that changes no matched field costs two key folds.
+- Safety net: before each use the index size is compared with `COUNT(*)` of the tracks table; a mismatch (a write path that missed an insert or delete) rebuilds it.
+
+**Invalidation paths covered.**
+
+| Write | What happens to the index |
+|---|---|
+| `add_track`, `add_tracks`, `add_tracks_covers_later` (import commit) | the new rows are inserted (after the commit; a failed batch adds nothing) |
+| `update_track` (tag edits, analysis result with track fields) | old keys out, new in |
+| `commit_analysis` with a track | old keys out, new in |
+| `remove_track`, `remove_tracks` | keys out |
+| `relink_track`, `relocate_in_folder` | path and file keys replaced |
+| `import_from_usb`, Rekordbox import, backup restore path relinking | index dropped, rebuilt on the next import |
+| change library, reset, restore, reopen | new `LocalLibrary`, no index |
+| any other change in the track count | rebuilt by the count check |
+
+The only direct writers of `tracks` are these (`queries::insert_track`, `update_track`, `delete_tracks`, `update_source_path`, checked with grep); the schema migrations run at open.
+
+**Equivalence tests.** `the_cached_duplicate_index_equals_a_fresh_scan_after_random_writes`: 600 random writes (adds with colliding paths, case variants, accents, equal tags and sizes, batch adds, updates that change path, size, tags and duration, single and double removes, analysis commits with a changed track, failing writes), after every one the cached index must equal (`PartialEq` over every map) `duplicate_index()` built from a full scan. Also relinks and relocations, the count check, tie handling in `Slots`, and `a_plan_from_the_cached_index_equals_one_from_a_fresh_index_after_library_writes` (whole `ImportPlan`, dialog rows included). Breaking the remove path or the analysis commit hook makes the random test fail at the first affected step. The existing import and duplicate tests pass unchanged apart from the new `plan_import` arguments.
+
+**Measured** (`FF_IMPORT_AGAIN=<folder>` added to `bench_startup import`: after the first import is committed, a second import of another 1,000-file folder runs in the same process, which is what a session of several imports does; medians of 3-4 interleaved pairs, ms)
+
+| Step | 10k before | 10k after | 50k before | 50k after |
+|---|---:|---:|---:|---:|
+| duplicate plan, first import of the session (builds the index) | 190 | 180 | 940 | 910 |
+| duplicate plan, every later import | 265 | 67 | 990 | 74 |
+| scan + plan, second import (1,000 files, 1,000 of them duplicates) | 435 | 234 | 1,090 | 307 |
+
+The later-import plan in the bench finds 1,000 duplicates (the second folder is the other fixture's copy of the library's own files), which is the worst case: each hit reads its existing track once, about 50 ms of the 67-74 ms. With the usual 2-3 duplicates the plan is the key folding of the 1,000 new files plus the lookups, a few ms, and no longer depends on library size. Scan (tag reads) is untouched and is now most of the second import: about 90-250 ms for 1,000 files. The first import of a session still pays the full build (the same folding as before, now with a hash lookup per key instead of two); building it in the background after startup would take the library lock for about a second at 50k and was left out.
+
+**What is left.** First import after launch at 50k: about 0.9 s for the plan, unchanged. Resident cost of the index at 50k: about 37 MB for the rest of the session (backend RSS at 50k was 87 MB).
+
 ## R22 startup (2026-11-01, `r22-startup`)
 
 Branch `r22-startup` from `ov-1028`. Linux `dev` box, headless Chromium, `perf-startup.spec.ts` on the real fixture libraries (`bench_startup dump`), backend time simulated as 118 ms (10k) and 480 ms (50k) for both sides so the frontend change is isolated. Box load 20-50 during the pairs below (other workers, swap full), so absolute times are high; each pair is a before run and an after run back to back.
