@@ -91,7 +91,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded) [built, branch r17-a11y e83fdd3; Waiting 34]
 20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin) [built, branch r18-errors abae25a; Waiting 33]
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [landed d4b4ef3; 52 tests, vitest timeout fix, no bugs]
-22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [built bc30b41, merging; deb 116 MB + xvfb smoke ok, Windows cargo check clean]
+22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [landed 19fc7bd; deb 116 MB + xvfb smoke ok, Windows cargo check clean]
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [landed 3248199]
 24. r22-startup: 50k startup to interactive under 1.5 s (lazy row proxies, smaller load_state payload; R13 profile, no schema) [landed 240d8cb; 50k warm 1.35 s, cold 1.57 s, first 1.85 s; payload 21.6 -> 8.4 MB]
 25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [running]
