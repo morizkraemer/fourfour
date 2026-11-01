@@ -139,8 +139,8 @@ if ! skip analysis; then
   say "analysis: per-stage profile of $PROFILE_TRACKS tracks, then throughput of $ANALYSIS (this takes minutes)"
   THREAD_ARGS=()
   [ -n "$THREADS" ] && THREAD_ARGS=(--threads "$THREADS")
-  bench bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" --profile "$PROFILE_TRACKS" "${THREAD_ARGS[@]}" 2>"$RAW/analysis-profile.log" | perf_lines > "$RAW/analysis.jsonl"
-  bench bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" "${THREAD_ARGS[@]}" 2>"$RAW/analysis-run.log" | perf_lines >> "$RAW/analysis.jsonl"
+  bench bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" --profile "$PROFILE_TRACKS" ${THREAD_ARGS[@]+"${THREAD_ARGS[@]}"} 2>"$RAW/analysis-profile.log" | perf_lines > "$RAW/analysis.jsonl"
+  bench bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" ${THREAD_ARGS[@]+"${THREAD_ARGS[@]}"} 2>"$RAW/analysis-run.log" | perf_lines >> "$RAW/analysis.jsonl"
 fi
 
 if ! skip playback; then
@@ -155,7 +155,7 @@ if ! skip frontend; then
     STATE_ENV=(FF_PERF_STATE="$RAW/state.json")
   fi
   say "frontend: production build + smoke Tauri mock at $TRACKS tracks (startup, track load, import, steady-state UI)"
-  (cd "$ROOT/app" && env "${STATE_ENV[@]}" FF_PERF_Q50=1 FF_PERF_TRACKS="$TRACKS" FF_PERF_IMPORT="$IMPORT" FF_SMOKE_PORT="$PORT" \
+  (cd "$ROOT/app" && env ${STATE_ENV[@]+"${STATE_ENV[@]}"} FF_PERF_Q50=1 FF_PERF_TRACKS="$TRACKS" FF_PERF_IMPORT="$IMPORT" FF_SMOKE_PORT="$PORT" \
     FF_PERF_Q50_OUT="$RAW/frontend-q50.json" FF_PERF_OUT="$RAW/frontend-perf10k.json" \
     npx playwright test perf-q50 perf10k --grep 'startup, track load|measure' --reporter=line > "$RAW/frontend.log" 2>&1) ||
     { tail -n 40 "$RAW/frontend.log" >&2; exit 1; }
