@@ -115,8 +115,17 @@ fn candidate_volumes() -> Result<Vec<PathBuf>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn is_removable(_path: &Path) -> bool {
-    true
+fn is_removable(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDriveTypeW(root_path_name: *const u16) -> u32;
+    }
+    const DRIVE_REMOVABLE: u32 = 2;
+
+    let root: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    unsafe { GetDriveTypeW(root.as_ptr()) == DRIVE_REMOVABLE }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -148,6 +157,20 @@ fn sysfs_removable_flag(device: &str) -> Option<bool> {
         .flatten()
         .find_map(|dir| std::fs::read_to_string(dir.join("removable")).ok())
         .map(|flag| flag.trim() == "1")
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn mount_device(mount_point: &Path) -> Option<String> {
+    let mounts = std::fs::read_to_string("/proc/mounts").ok()?;
+    device_for_mount_point(&mounts, mount_point)
+}
+
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+fn device_for_mount_point(proc_mounts: &str, mount_point: &Path) -> Option<String> {
+    parse_mounts(proc_mounts)
+        .into_iter()
+        .find(|entry| Path::new(&entry.mount_point) == mount_point)
+        .map(|entry| entry.device)
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -249,6 +272,16 @@ fn unescape_mount_point(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_the_device_behind_a_mount_point() {
+        let mounts = "/dev/sda1 /media/dj/MY\\040STICK vfat rw 0 0\n/dev/nvme0n1p2 / ext4 rw 0 0\n";
+        assert_eq!(
+            device_for_mount_point(mounts, Path::new("/media/dj/MY STICK")).as_deref(),
+            Some("/dev/sda1")
+        );
+        assert_eq!(device_for_mount_point(mounts, Path::new("/media/dj/other")), None);
+    }
 
     const BOOT_PLIST: &str = "<dict><key>Ejectable</key><false/><key>RemovableMedia</key><false/>\
         <key>RemovableMediaOrExternalDevice</key><false/></dict>";

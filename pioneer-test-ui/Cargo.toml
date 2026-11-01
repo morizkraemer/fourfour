@@ -3,6 +3,14 @@ name = "pioneer-test-ui"
 version = "0.1.0"
 edition = "2024"
 default-run = "pioneer-test-ui"
+autobins = false
+
+[features]
+dev-bins = []
+
+[[bin]]
+name = "pioneer-test-ui"
+path = "src/main.rs"
 
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
@@ -24,30 +32,42 @@ fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
 [[bin]]
 name = "waveform_dev"
 path = "src/bin/waveform_dev.rs"
+required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_ab"
 path = "src/bin/waveform_ab.rs"
+required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_grid"
 path = "src/bin/waveform_grid.rs"
+required-features = ["dev-bins"]
 
 [[bin]]
 name = "bench_analysis"
 path = "src/bin/bench_analysis.rs"
+required-features = ["dev-bins"]
 
 [[bin]]
 name = "bench_startup"
 path = "src/bin/bench_startup.rs"
+required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_fixtures"
 path = "src/bin/waveform_fixtures.rs"
+required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_detail_dump"
 path = "src/bin/waveform_detail_dump.rs"
+required-features = ["dev-bins"]
+
+[[bin]]
+name = "waveform_window_dump"
+path = "src/bin/waveform_window_dump.rs"
+required-features = ["dev-bins"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

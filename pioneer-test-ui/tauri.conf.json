@@ -41,6 +41,11 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libasound2t64 | libasound2", "libssl3t64 | libssl3"]
+      }
+    }
   }
 }
