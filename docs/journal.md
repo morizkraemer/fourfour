@@ -430,3 +430,4 @@
 2026-11-02 06:28 orchestrator r32-probe landed on ov-1028
 2026-11-02 06:36 orchestrator r29-mac-startup: WebKit is ~2x JS, ~5x style, 2-3x layout vs Chromium, no single item; Mac '1 s' partly measurement origin (process vs navigation start, fresh HOME = first launch); harness + doc cherry-picked to ov-1028 (a53c297), base.css pseudo-element reset fix parked (prototyping fence) -> Waiting 36
 2026-11-02 06:36 orchestrator - decided: own prio r34-webkit-idle (opus; WebKit idle scheduling + per-row costs in app code)
+2026-11-02 07:37 orchestrator r33-dupplan handed back (session duplicate index, equivalence-tested over 600 random writes; later import plan 50k 990 -> 74 ms), merging; decided: own prio r35-ci (sonnet medium; CI workflow refresh, no push)
