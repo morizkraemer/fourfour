@@ -101,7 +101,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 28. r27-dbsafe: library.db open never inits over real data (unreadable schema_version), no setup panic on a damaged DB [landed 5d7df87; recovery screen left for Merlin]
 29. r28-deb-verify: real Linux bundle + dpkg-deb -I + ldd to confirm deps and no dev bins (after r25) [landed 8511026; deb 90 MB, Depends + contents verified]
 30. r29-mac-startup: Mac WKWebView 10k startup first row 1.8-2.8 s / interactive 2.2-3.8 s (box 0.8-1.1 s): profile on the Mac, fix the gap [running on box via WebKit]
-31. r15 trigger hit: Mac cold first expand longest frame 472-520 ms in 3/5 launches -> build staged reveal on a branch (r15-reveal)
+31. r15 trigger hit: Mac cold first expand longest frame 472-520 ms in 3/5 launches -> build staged reveal on a branch (r15-reveal) [running, branch only]
 32. r30-coreml-mem: cap the rten bridge so CoreML peak RSS <= rten (7.0-7.7 -> <=6.2 GB) [built 68673e7, merging; 6.1-6.2 GB, latency kept; accepted per rec, last 0.3 GB vs same-session rten left]
 33. r31-cover-cap: cap the 512 px artwork.cache (UI-aware eviction, never blank a visible image) [built, branch r31-cover-cap 857496a; Waiting 35]
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)

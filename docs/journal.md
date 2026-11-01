@@ -421,3 +421,4 @@
 2026-11-02 02:03 orchestrator r28-deb-verify landed (docs): real deb 90 MB, Depends alsa/ssl/webkit/gtk, only app bin, self-check + xvfb ok; decided: own prio r31-cover-cap (sonnet high)
 2026-11-02 02:22 orchestrator r30-coreml-mem handed back (CoreML peak 7.1-7.3 -> 6.1-6.2 GB, latency kept, identical), took rec accept, merging; decided: own prio r29-mac-startup (opus; reproduce WKWebView startup gap with WebKit on the box, no Mac)
 2026-11-02 02:26 orchestrator r31-cover-cap parked: branch 857496a (LRU 96 + pins; organize views fetch only drawn covers; rail +N semantics change is visible -> Waiting 35)
+2026-11-02 02:26 orchestrator - decided: own prio r15-reveal (opus; staged first-expand reveal behind a switch, branch only)
