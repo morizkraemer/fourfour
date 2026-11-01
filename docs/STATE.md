@@ -81,7 +81,7 @@ Week 2, beta:
 11. CI workflow (Q8) on branch ov-ci, no push (first run needs Merlin's push OK)
 12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
 Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so you never run out of work"; refill before it runs dry):
-13. r11-coreml: build r9-ort with CoreML on the Mac headless + 3-track sanity now; full analysis bench tonight in the Mac batch [built, branch r11-coreml 6542279: Mac ort link fix (build.rs clang_rt), coreml-bench.sh; sanity unrun, Mac slept; first check ~/.cache/r11-work/sanity/ on mbp]
+13. r11-coreml: build r9-ort with CoreML on the Mac headless + 3-track sanity now; full analysis bench tonight in the Mac batch [built, branch r11-coreml 6542279: Mac ort link fix (build.rs clang_rt), coreml-bench.sh; sanity unrun, Mac slept; first check ~/.cache/r11-work/sanity/ on mbp] [-> r24-coreml 2eaed24: fixed, 5.6x per chunk, bench pending]
 14. r12-robust: import/analysis/sync with bad input (zero-byte, corrupt, unsupported, missing, read-only, huge files, odd tags/unicode paths); tests + fixes [landed ea0ddaa; open items in docs/architecture/robustness-2026-11.md]
 15. r13-50k: startup, scroll, search, import and memory at 50k tracks on the box; fix the worst regressions [landed f609c89; startup 50k still 2.5-3.2 s, rest in perf-run R13]
 16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours) [landed a7131e7; docs/architecture/analysis-resume-2026-11.md]
