@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pioneer_usb_writer::waveform::{DetailSeries, WindowSeries};
 
@@ -47,6 +47,34 @@ fn trim_cache(dir: &Path, limit_bytes: u64) {
             total -= len;
         }
     }
+}
+
+pub const STALE_PART_AGE: Duration = Duration::from_secs(600);
+
+fn part_file_pid(name: &str) -> Option<u32> {
+    let stem = name.strip_suffix(".part")?;
+    let writer = stem.rsplit('.').next()?;
+    writer.split('-').next()?.parse().ok()
+}
+
+/// Removes `.part` files a killed process left behind: only files at least `min_age` old that do not carry this
+/// process's pid, so a write in progress here is never touched. Returns how many were removed.
+pub fn sweep_stale_parts(dir: &Path, min_age: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else { return 0 };
+    let own_pid = std::process::id();
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".part") && part_file_pid(&name) != Some(own_pid)
+        })
+        .filter(|entry| {
+            let age = entry.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok());
+            age.is_some_and(|age| age >= min_age)
+        })
+        .filter(|entry| fs::remove_file(entry.path()).is_ok())
+        .count()
 }
 
 fn path_lock(file: &Path) -> Arc<Mutex<()>> {
@@ -285,6 +313,42 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
 
         assert_eq!(left, ["b.1-2.part"]);
+    }
+
+    #[test]
+    fn the_startup_sweep_removes_old_part_files_of_other_processes_and_keeps_the_rest() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-sweep-{}", std::process::id()));
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&dir).unwrap();
+        let mine = std::process::id();
+        let other = mine + 1;
+        let long_ago = SystemTime::now() - Duration::from_secs(2 * 3600);
+        let files = [
+            (format!("a.{other}-1.part"), long_ago),
+            ("junk.part".to_string(), long_ago),
+            (format!("b.{other}-2.part"), SystemTime::now()),
+            (format!("c.{mine}-3.part"), long_ago),
+            ("d.ffwd".to_string(), long_ago),
+        ];
+        for (name, modified) in &files {
+            let path = dir.join(name);
+            fs::write(&path, b"x").unwrap();
+            fs::File::options().write(true).open(&path).unwrap().set_modified(*modified).unwrap();
+        }
+
+        let removed = sweep_stale_parts(&dir, STALE_PART_AGE);
+        let mut left: Vec<_> = fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
+        left.sort();
+        fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(removed, 2);
+        assert_eq!(left, [format!("b.{other}-2.part"), format!("c.{mine}-3.part"), "d.ffwd".to_string()]);
+    }
+
+    #[test]
+    fn the_startup_sweep_of_a_missing_dir_does_nothing() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-sweep-missing-{}", std::process::id()));
+        assert_eq!(sweep_stale_parts(&dir, STALE_PART_AGE), 0);
     }
 
     #[test]
