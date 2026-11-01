@@ -595,9 +595,13 @@ fn record_outcome(
     stage: Stage,
     outcome: TrackResult,
 ) -> Result<(), String> {
+    let file_name = file_name_of(source_path);
+    if outcome.is_err() && coordinator.is_cancelled() {
+        sink.log(LogLevel::Dim, format!("{file_name} stopped by cancel"));
+        return Ok(());
+    }
     let completed = coordinator.completed.fetch_add(1, Ordering::Relaxed) + 1;
     let total = coordinator.total().max(completed);
-    let file_name = file_name_of(source_path);
     let t_db = Instant::now();
     let grid = stage == Stage::Grid;
     let stored = outcome.and_then(|(result, detail)| {

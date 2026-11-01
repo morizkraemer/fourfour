@@ -867,6 +867,21 @@ async fn runs_started_at_the_same_moment_analyse_each_track_once() {
     }
 }
 
+#[tokio::test]
+async fn a_track_stopped_by_cancelling_is_not_counted_as_a_failure() {
+    let h = harness(1, 1, 8);
+    let run = h.run_all(h.items.clone());
+    let quit = async {
+        h.wait_for(|e| has(e, &ran("t1.wav", Pass::All)).then_some(())).await;
+        h.coordinator.cancel();
+    };
+
+    let (outcome, ()) = tokio::join!(run, quit);
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, .. }), "{:?}", h.events());
+    assert_eq!(h.count(&named(Event::Cancelled, "t1.wav")), 1);
+}
+
 fn write_tone_wav(path: &Path, seconds: f64, hz: f64) {
     let rate = 44_100u32;
     let mut data = Vec::new();
