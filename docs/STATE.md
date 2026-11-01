@@ -94,13 +94,15 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [landed 19fc7bd; deb 116 MB + xvfb smoke ok, Windows cargo check clean]
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [landed 3248199]
 24. r22-startup: 50k startup to interactive under 1.5 s (lazy row proxies, smaller load_state payload; R13 profile, no schema) [landed 240d8cb; 50k warm 1.35 s, cold 1.57 s, first 1.85 s; payload 21.6 -> 8.4 MB]
-25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [running]
+25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [built aea38f9, merging; 1 leak fixed (artwork row thumbnails), rest flat]
 26. r25-package: release bundles without dev bins, deb Depends libasound2, Windows path names in the frontend, app-code platform guards [landed f82e56e; deb deps unverified until r28]
 27. r26-coreml-ship: CoreML as the Mac analysis default (w2 t2), rten fallback if CoreML fails to load, ort in the Mac bundle (min macOS 13.4), dmg check; memory per session [built 765b3dc, merging; app 1.4x on 12 tracks, peak RSS 7.0-7.7 GB vs rten 6.2 -> cap bridge threads follow-up]
 28. r27-dbsafe: library.db open never inits over real data (unreadable schema_version), no setup panic on a damaged DB [landed 5d7df87; recovery screen left for Merlin]
 29. r28-deb-verify: real Linux bundle + dpkg-deb -I + ldd to confirm deps and no dev bins (after r25) [running]
 30. r29-mac-startup: Mac WKWebView 10k startup first row 1.8-2.8 s / interactive 2.2-3.8 s (box 0.8-1.1 s): profile on the Mac, fix the gap
 31. r15 trigger hit: Mac cold first expand longest frame 472-520 ms in 3/5 launches -> build staged reveal on a branch (r15-reveal)
+32. r30-coreml-mem: cap the rten bridge so CoreML peak RSS <= rten (7.0-7.7 -> <=6.2 GB) [running]
+33. r31-cover-cap: cap the 512 px artwork.cache (UI-aware eviction, never blank a visible image)
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
