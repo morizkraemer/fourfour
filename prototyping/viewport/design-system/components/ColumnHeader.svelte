@@ -215,6 +215,7 @@
   {#each columns as col}
     {@const dragKey = col.key}
     {@const isDragging = columnDragKey === dragKey}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="ff-colh__cell{col.sort ? ' ff-colh__cell--active' : ''}{isDragging ? ' ff-colh__cell--dragging' : ''}"
       style={cellStyle(col)}

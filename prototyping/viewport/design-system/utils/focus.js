@@ -23,3 +23,27 @@ export function trapTab(e, container) {
     first.focus();
   }
 }
+
+const POINTER_FOCUS_WINDOW_MS = 300;
+
+export function trackFocusModality() {
+  const root = document.documentElement;
+  let lastPointerAt = -Infinity;
+  const onPointerDown = () => (lastPointerAt = performance.now());
+  const onFocusIn = () => {
+    root.dataset.focusModality = performance.now() - lastPointerAt > POINTER_FOCUS_WINDOW_MS ? 'keyboard' : 'pointer';
+  };
+  window.addEventListener('pointerdown', onPointerDown, true);
+  window.addEventListener('focusin', onFocusIn, true);
+  return () => {
+    window.removeEventListener('pointerdown', onPointerDown, true);
+    window.removeEventListener('focusin', onFocusIn, true);
+    delete root.dataset.focusModality;
+  };
+}
+
+export function isKeyboardFocused(element) {
+  if (!(element instanceof HTMLElement) || element === document.body || element !== document.activeElement) return false;
+  const modality = document.documentElement.dataset.focusModality;
+  return modality ? modality === 'keyboard' : element.matches(':focus-visible');
+}

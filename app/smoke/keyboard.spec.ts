@@ -112,6 +112,20 @@ test.describe('library list', () => {
     await expect(page.locator('.ff-xp')).toHaveCount(0);
     await expect(list(page)).not.toBeFocused();
   });
+
+  test('after mouse clicks the player shortcuts still win: Space plays and pauses, Tab expands the player', async ({ smoke: { page } }) => {
+    await rowByTitle(page, 'Smoke Track 02').dblclick();
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await sidebarRow(page, 'Peak Time').click();
+    await rows(page).first().click();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+    await sidebarRow(page, 'Warmup').click();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toBeVisible();
+  });
 });
 
 test.describe('sidebar', () => {

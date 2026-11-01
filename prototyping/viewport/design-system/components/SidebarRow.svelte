@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import TagBadge from './TagBadge.svelte';
   import StatusDot from './StatusDot.svelte';
+  import { isKeyboardFocused } from '../utils/focus.js';
 
   let {
     kind = 'leaf',
@@ -44,7 +45,7 @@
 
   function onRowKeydown(e) {
     if (e.target !== e.currentTarget || e.altKey) return;
-    if (e.key === 'Enter' || (e.key === ' ' && e.currentTarget.matches(':focus-visible'))) {
+    if (e.key === 'Enter' || (e.key === ' ' && isKeyboardFocused(e.currentTarget))) {
       e.preventDefault();
       onclick?.(e);
     } else if (e.key === 'F2' && ondblclick) {
