@@ -403,3 +403,4 @@
 2026-11-01 20:11 orchestrator - Mac: ov-1028 240d8cb installed in /Applications (20:10); perf night started 20:11 after a fix (02afa7e: binary name from Info.plist, was hard-coded fourfour)
 2026-11-01 20:51 orchestrator r24-coreml built: branch 2eaed24 (CoreML Slice failure = free input dims; fixed by free-dim overrides batch=1 time=1500 + CPU session for short chunks + compiled-model cache); Mac chunk rten 1593 ms vs CoreML 283 ms (5.6x), logit diff 7.2e-6, peak RSS 3.2 GB vs 0.8 GB; dev bench queued on mbp after perf night (~/.cache/r24-work/bench-after-perf.sh)
 2026-11-01 20:52 orchestrator - decided: own prio r23-memory (sonnet high; 45-60 min soak, heap/DOM/listener drift, fix leaks)
+2026-11-01 21:08 orchestrator r20-winlinux handed back (deb 116 MB, xvfb smoke ok, self-check weights per OS fixed, Windows check clean), merging; decided: own prio r25-package (sonnet medium; dev bins out of bundles, deb deps, Windows paths)

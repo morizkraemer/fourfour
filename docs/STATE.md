@@ -38,6 +38,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 ### Brother's lane
+- r20 Windows risks: is_removable true for every drive, eject via umount, statvfs stub unlimited, pdb.rs extension match case-sensitive (TRACK.MP3 -> type 0); see Platforms 2026-11 in robustness-2026-11.md.
 - r12: USB export puts two tracks with the same artist + file name (untagged "01 Intro.mp3") on one path; repro ignored test in pioneer-library/tests/robust_store.rs. Also lofty rejects some bad tags so playable files are skipped (relaxed parse in scanner.rs).
 - SQLCipher keys private; no PDB reader (docs/architecture/rekordbox-import.md).
 - From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
@@ -90,10 +91,12 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded) [built, branch r17-a11y e83fdd3; Waiting 34]
 20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin) [built, branch r18-errors abae25a; Waiting 33]
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [landed d4b4ef3; 52 tests, vitest timeout fix, no bugs]
-22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [running]
+22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [built bc30b41, merging; deb 116 MB + xvfb smoke ok, Windows cargo check clean]
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [landed 3248199]
 24. r22-startup: 50k startup to interactive under 1.5 s (lazy row proxies, smaller load_state payload; R13 profile, no schema) [landed 240d8cb; 50k warm 1.35 s, cold 1.57 s, first 1.85 s; payload 21.6 -> 8.4 MB]
 25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [running]
+26. r25-package: release bundles without dev bins, deb Depends libasound2, Windows path names in the frontend, app-code platform guards [running]
+27. r26-coreml-mem: CoreML session per worker instead of per chunk thread (3.2 GB vs 0.8 GB RSS), if the r24 bench keeps CoreML
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
