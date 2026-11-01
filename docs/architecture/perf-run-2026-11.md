@@ -645,6 +645,43 @@ Branch `r26-coreml-ship` = `ov-1028` + `r24-coreml`, not landed. CoreML is now t
 - **Bundle**: `scripts/mac/build-dmg.sh` built `fourfour_0.1.0_aarch64.dmg` (97 MB) with `coreml`, no linker warnings; `scripts/mac/check-dmg.sh` on it: failures=0 (ad-hoc signature, weights and licences, plist, `--self-check` ok). Inside: `LSMinimumSystemVersion` 13.4, binary `minos 13.4`, only the app binary in `Contents/MacOS` (59 MB). Not installed anywhere.
 - **Dev bins moved to `pioneer-test-ui/src/dev_bin/`** (was `src/bin/`): tauri-cli 2.10 adds every file under `src/bin` as a bundle binary even when its `[[bin]]` has unmet `required-features`, so a clean macOS bundle (this clone, and so the CI runner) failed with `Failed to copy binary ... bench_startup does not exist`, and a target dir that had them (the perf-night clone) shipped them. r25's `required-features` fix alone did not cover that. The `[[bin]]` paths point at the new directory; nothing else changed.
 
+## R30 CoreML memory (2026-11-02, `r30-coreml-mem`)
+
+Branch `r30-coreml-mem` = `ov-1028` + one commit, not landed. Mac `mbp` (M5 Pro, 24 GB), clone `~/dev/build/fourfour-r11`, `bench_analysis --backend rust` built with `--features coreml,dev-bins`, `nice -n 10`, headless, first 12 (or 1) tracks of the dev split, peak RSS from `/usr/bin/time -l`. The Mac was busy with other work (load 8-38), so read the interleaved pairs, not absolute numbers.
+
+**Where the extra memory was.** On the 24 GB Mac the engine shares 13 chunk slots (`chunk_slots`, 400 MB each). R26's bridge kept all 13 rten threads running until both CoreML sessions were open; the first session opens about 4 s in, the second about 8 s in (one after the other), so for about 4 s one running session (about 1-1.5 GB, R24) sat on top of 12 rten chunks. That window, not the session open, was most of the 1.3-1.5 GB over rten: a single track (13 chunks, done before the first session opens) was only 0.4 GB over rten, before and after.
+
+**Fix** (`fourfour-analysis-rs/src/bt.rs`, `src/ort_beat.rs`). Each open session takes 6 rten slots off the bridge (`RTEN_CHUNK_SLOTS_PER_OPEN_SESSION`): with 13 slots the engine runs 13 rten threads until the first session opens, then that session plus 7 rten threads, then the 2 sessions. A thread without a session leaves when more threads run than that (it finishes its chunk first); the count of running chunk threads is kept under the queue lock, so no more leave than needed. If CoreML fails, the cap lifts back to the rten slots as before. Without the `ort` feature nothing changes.
+
+Tried and dropped (12 tracks unless noted, same session):
+
+| Variant | Peak RSS | Tracks/min | First result | Verdict |
+|---|---:|---:|---:|---|
+| R26 as shipped | 7.1-7.4 GB | 24-33 | 3.3-5.2 s | baseline |
+| ORT CPU arena off | 7.3 GB | 31.0 | 3.6 s | no effect |
+| `malloc_zone_pressure_relief` when a bridge thread leaves | 7.1 GB | 31.3 | 3.6 s | frees 0 MB |
+| Bridge capped at 6 / 8 / 10 threads from the start | 5.3 / 5.6-5.7 / 6.1 GB | 31-33 | 4.7-5.8 s | single track 5.0-5.4 s (was 3.2 s) |
+| Each open session takes 3 / 4 / 5 slots | 6.7 / 6.1-6.5 / 6.3 GB | 26-32 | 3.2-4.5 s | 4 and up work |
+| Each open session takes 6 / 8 slots | 6.1-6.2 / 6.1 GB | 28-29 / 28 | 3.8-4.2 / 3.9-4.6 s | 6 kept |
+| 6 slots, plus 1 slot reserved while a session opens | 5.8 GB | 23-28 | 5.3-7.2 s | single track 5.7 s, dropped |
+
+**Before/after** (final binary, interleaved runs, loads in brackets):
+
+| Run | Before (R26) | After (R30) | rten |
+|---|---|---|---|
+| 12 tracks, peak RSS | 7.34, 7.13, 7.29 GB | 6.07, 6.21, 6.12 GB | 5.80, 5.89 GB |
+| 12 tracks, tracks/min | 32.9, 31.1, 25.8 | 27.2*, 30.1, 26.4 | 21.4, 19.3 |
+| 12 tracks, first result | 3.3, 3.8, 5.2 s | 3.0, 3.6, 4.6 s | 3.4, 3.7 s |
+| 1 track (load 33), time / peak RSS | 3.7 s / 5.53 GB | 3.5 s / 5.54 GB | 3.6 s / 5.12 GB |
+| Priority (`--play-after 3 --play-index 11`), to full / peak RSS | 7.1 s / 7.00 GB | 6.4 s / 6.45 GB | 7.2 s / 5.79 GB |
+
+\* first run of a freshly built binary: CoreML ran only 46 of 164 chunks. Every first run of a new binary in this session was like that (sessions open late) although the compiled-model cache entry stayed in place, so macOS seems to compile GPU code per executable once; the app will see this once after each update.
+
+- **Memory**: peak RSS down 1.0-1.2 GB to 6.1-6.2 GB on 12 tracks, at R26's rten level (6.2-6.3 GB) but still 0.2-0.4 GB above rten measured in the same session (5.8-5.9 GB); priority case 0.55 GB down, 0.65 GB above rten. The rest is the first session opening while all 13 rten slots run (the single-track 0.4 GB, unchanged). Closing it means fewer rten threads at the start, which costs every track of 13+ chunks one more chunk round (+2 s for a single track, row above), so it stays.
+- **Latency and throughput kept**: single track 3.5 s (before 3.7 s, rten 3.6 s, all at load 33), priority track fully analysed 6.4 s after the ask (before 7.1 s), 12 tracks 26-30 tracks/min (before 26-33 in the same pairs, rten 19-21).
+- **Results**: keys, BPM and every beat (time, tempo, bar position) of the stored results identical to rten on 12/12 tracks for every after run (plain and priority) and 1/1 on the single track.
+- Box: `cargo test --workspace` and `cargo test -p fourfour-analysis-rs --features ort` pass.
+
 ## R13 50k (2026-11-01, `r13-50k`)
 
 Branch `r13-50k` from `ov-1028` (`ea0ddaa`). Linux `dev` box, headless Chromium, release `bench_startup`. Box load 25-55 the whole time (other workers): absolute times are inflated about 2x against a quiet box; read the 10k-to-50k ratios and the before/after of the same step, not the absolute values.
