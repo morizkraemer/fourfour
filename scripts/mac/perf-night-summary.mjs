@@ -13,11 +13,16 @@ function readRun(file) {
   const by = (name) => marks.find((m) => m.mark === name);
   const firstRow = by('first_row');
   const interactive = by('interactive');
+  const pageStart = by('page_start');
+  const pageOrigin = pageStart?.values.time_origin ? pageStart.ms - (pageStart.wall_ms - pageStart.values.time_origin) : undefined;
   const run = {
     file,
     setup_ms: by('setup_done')?.ms,
     load_state_ms: by('load_state_built') && by('load_state_start') ? by('load_state_built').ms - by('load_state_start').ms : undefined,
     first_row_ms: firstRow?.ms,
+    page_origin_ms: pageOrigin,
+    load_state_asked_page_ms: pageOrigin !== undefined && by('load_state_start') ? by('load_state_start').ms - pageOrigin : undefined,
+    first_row_page_ms: firstRow?.values.page_ms,
     interactive_ms: firstRow && interactive ? firstRow.ms + (interactive.values.at_page_ms - firstRow.values.page_ms) : undefined,
     longest_frame_after_first_row_ms: interactive?.values.longest_frame_ms,
     track_load_ms: by('track_load')?.values.player_ready_ms_median,
@@ -61,10 +66,11 @@ for (const m of budgets.metrics) {
   verdicts.push(verdict);
   lines.push(`| ${m.label} | ${fmt(value)} ${m.unit} | ${fmt(target)} | ${verdict} |`);
 }
-lines.push('', '| per run | setup | load_state | first row | interactive | longest frame | track load | idle scroll p95 / dropped |', '|---|---:|---:|---:|---:|---:|---:|---|');
+lines.push('', '| per run | setup | page origin | load_state asked (page) | load_state | first row (page) | first row | interactive | longest frame | track load | idle scroll p95 / dropped |', '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|');
 for (const r of runs) {
-  lines.push(`| ${r.file}${r.done ? '' : ' (no probe_done)'}${r.error ? ` (${r.error})` : ''} | ${fmt(r.setup_ms)} | ${fmt(r.load_state_ms)} | ${fmt(r.first_row_ms)} | ${fmt(r.interactive_ms)} | ${fmt(r.longest_frame_after_first_row_ms)} | ${fmt(r.track_load_ms)} | ${fmt(r.scroll_idle?.frame_p95_ms)} / ${fmt(r.scroll_idle?.frames_dropped)} |`);
+  lines.push(`| ${r.file}${r.done ? '' : ' (no probe_done)'}${r.error ? ` (${r.error})` : ''} | ${fmt(r.setup_ms)} | ${fmt(r.page_origin_ms)} | ${fmt(r.load_state_asked_page_ms)} | ${fmt(r.load_state_ms)} | ${fmt(r.first_row_page_ms)} | ${fmt(r.first_row_ms)} | ${fmt(r.interactive_ms)} | ${fmt(r.longest_frame_after_first_row_ms)} | ${fmt(r.track_load_ms)} | ${fmt(r.scroll_idle?.frame_p95_ms)} / ${fmt(r.scroll_idle?.frames_dropped)} |`);
 }
+lines.push('', 'Page origin: process start to the page\'s navigation start. The "(page)" columns count from that origin (what the Chromium harness `perf-startup.spec.ts` measures), the others from process start.');
 if (analysis?.scroll_analysis) {
   const s = analysis.scroll_analysis;
   lines.push('', `Scroll during analysis: ${s.frames} frames, p50 ${fmt(s.frame_p50_ms)} ms, p95 ${fmt(s.frame_p95_ms)} ms, max ${fmt(s.frame_max_ms)} ms, ${s.frames_dropped} dropped, ${s.long_frames} frames over 50 ms (${fmt(s.long_frame_ms_total)} ms). WKWebView has no long-task API; frames over 50 ms stand in for long tasks.`);

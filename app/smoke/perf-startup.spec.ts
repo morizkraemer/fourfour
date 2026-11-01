@@ -31,6 +31,8 @@ interface Boot {
   tbt: number;
   bundleMs: number;
   wireBytes: number;
+  frameInteractive: number;
+  longestFrame: number;
 }
 
 interface Probe {
@@ -42,6 +44,8 @@ interface Probe {
   firstRow: number;
   firstRealRow: number;
   wireBytes: number;
+  frameInteractive: number;
+  longestFrame: number;
   longTasks: { start: number; duration: number }[];
 }
 
@@ -50,14 +54,28 @@ function installProbes({ payloadUrl, backendMs }: { payloadUrl: string; backendM
     __boot: Probe;
     __TAURI_INTERNALS__: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> };
   };
-  w.__boot = { firstInvoke: 0, loadRequested: 0, transferMs: 0, parseMs: 0, loadAnswered: 0, firstRow: 0, firstRealRow: 0, wireBytes: 0, longTasks: [] };
+  w.__boot = { firstInvoke: 0, loadRequested: 0, transferMs: 0, parseMs: 0, loadAnswered: 0, firstRow: 0, firstRealRow: 0, wireBytes: 0, frameInteractive: 0, longestFrame: 0, longTasks: [] };
   new PerformanceObserver((list) => {
     for (const e of list.getEntries()) w.__boot.longTasks.push({ start: e.startTime, duration: e.duration });
   }).observe({ type: 'longtask', buffered: true });
+  const watchFrames = (last: number, streakStart: number, streak: number) => {
+    requestAnimationFrame((now) => {
+      const gap = now - last;
+      w.__boot.longestFrame = Math.max(w.__boot.longestFrame, gap);
+      if (gap > 50) return watchFrames(now, now, 0);
+      if (streak + 1 >= 10) {
+        w.__boot.frameInteractive = streakStart;
+        return;
+      }
+      watchFrames(now, streakStart, streak + 1);
+    });
+  };
   const watchRows = () => {
     if (!w.__boot.firstRow && document.querySelector('[data-track-row], [data-boot-row]')) w.__boot.firstRow = performance.now();
-    if (document.querySelector('[data-track-row]')) w.__boot.firstRealRow = performance.now();
-    else requestAnimationFrame(watchRows);
+    if (document.querySelector('[data-track-row]')) {
+      w.__boot.firstRealRow = performance.now();
+      requestAnimationFrame((now) => watchFrames(now, now, 0));
+    } else requestAnimationFrame(watchRows);
   };
   requestAnimationFrame(watchRows);
   const invoke = w.__TAURI_INTERNALS__.invoke;
@@ -141,24 +159,57 @@ async function bootMetrics(page: Page): Promise<Boot> {
       tbt: tasks.reduce((sum, t) => sum + Math.max(0, t.duration - 50), 0),
       bundleMs: scripts.reduce((end, e) => Math.max(end, e.responseEnd), 0),
       wireBytes: b.wireBytes,
+      frameInteractive: b.frameInteractive,
+      longestFrame: b.longestFrame,
     };
   });
 }
 
-async function startProfile(page: Page) {
+interface InspectorSession {
+  send(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  on(event: string, listener: (payload: unknown) => void): void;
+}
+
+function webkitInspectorSession(page: Page): InspectorSession {
+  const internal = page as unknown as { _connection: { toImpl(x: unknown): { delegate: { _session: InspectorSession } } } };
+  return internal._connection.toImpl(page).delegate._session;
+}
+
+type Profiler =
+  | { kind: 'cdp'; cdp: Awaited<ReturnType<BrowserContext['newCDPSession']>> }
+  | { kind: 'webkit'; session: InspectorSession; timeline: unknown[]; samples: Promise<unknown> };
+
+async function startProfile(page: Page): Promise<Profiler> {
+  if (page.context().browser()?.browserType().name() === 'webkit') {
+    const session = webkitInspectorSession(page);
+    const timeline: unknown[] = [];
+    session.on('Timeline.eventRecorded', (event) => timeline.push(event));
+    const samples = new Promise((resolve) => session.on('ScriptProfiler.trackingComplete', resolve));
+    await session.send('Timeline.enable');
+    await session.send('ScriptProfiler.startTracking', { includeSamples: true });
+    await session.send('Timeline.start');
+    return { kind: 'webkit', session, timeline, samples };
+  }
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Profiler.enable');
   await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
   await cdp.send('Profiler.start');
-  return cdp;
+  return { kind: 'cdp', cdp };
 }
 
-async function stopProfile(cdp: Awaited<ReturnType<typeof startProfile>>, path: string, page: Page) {
-  const { profile } = await cdp.send('Profiler.stop');
+async function stopProfile(profiler: Profiler, path: string, page: Page) {
   const marks = await page.evaluate(() => {
     const b = (window as unknown as { __boot: Probe }).__boot;
-    return { timeOrigin: performance.timeOrigin, loadAnswered: b.loadAnswered, firstRealRow: b.firstRealRow, longTasks: b.longTasks };
+    return { timeOrigin: performance.timeOrigin, now: performance.now(), loadAnswered: b.loadAnswered, firstRealRow: b.firstRealRow, frameInteractive: b.frameInteractive, longTasks: b.longTasks };
   });
+  if (profiler.kind === 'webkit') {
+    await profiler.session.send('Timeline.stop');
+    await profiler.session.send('ScriptProfiler.stopTracking');
+    const samples = await profiler.samples;
+    writeFileSync(path.replace(/\.cpuprofile$/, '.webkit.json'), JSON.stringify({ marks, samples, timeline: profiler.timeline }));
+    return;
+  }
+  const { profile } = (await profiler.cdp.send('Profiler.stop')) as { profile: object };
   writeFileSync(path, JSON.stringify({ ...profile, marks }));
 }
 
