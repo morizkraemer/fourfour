@@ -57,7 +57,7 @@ Always on (user systemd ff-review.service + ff-app-review.service, Restart=alway
 - Mac: ov-1028 installed in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221/
 
 ## Run
-status: running (2026-11-01: ov-1028 installed on the Mac 12:21; dmg built + check-dmg all PASS (ad-hoc signed, weights, licences incl. FSL10K credits, plist, self-check); perf night HELD until Merlin's go tonight (Merlin 12:21: no UI takeover now)) · started 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
+status: running (2026-11-01: own-priority backlog 13-22; Mac visible batch held for Merlin's go tonight); perf night HELD until Merlin's go tonight (Merlin 12:21: no UI takeover now)) · started 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
 targets (Merlin Q&A 2026-10-30): beta-ready on ov-1028, and as fast as possible at 10k+ tracks (startup, analysing 10k+, track load, scroll). Order: speed first, then beta. "nothing's off limits": every item below may be built; hard gates and the brother's format bytes still hold
 plan:
 0. merge q50-report summary (c3476bb) into ov-1028
@@ -75,7 +75,18 @@ Week 2, beta:
 10. sync UI round 3 on recs (Waiting 1-3: strip, keep-updated on, replace ui-sync-flow attempt)
 11. CI workflow (Q8) on branch ov-ci, no push (first run needs Merlin's push OK)
 12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
-review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; restart: preview start fourfour app-review --dir <q41-int>/app --port 4210)
+Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so you never run out of work"; refill before it runs dry):
+13. r11-coreml: build r9-ort with CoreML on the Mac headless + 3-track sanity now; full analysis bench tonight in the Mac batch [running]
+14. r12-robust: import/analysis/sync with bad input (zero-byte, corrupt, unsupported, missing, read-only, huge files, odd tags/unicode paths); tests + fixes [running]
+15. r13-50k: startup, scroll, search, import and memory at 50k tracks on the box; fix the worst regressions
+16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours)
+17. r15-reveal: staged waveform reveal on a branch (unlanded; only if the Mac night shows first expand >50 ms)
+18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it)
+19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded)
+20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin)
+21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt
+22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box
+review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
 Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scroll/analysis timings, .dmg install; Grok told once per batch
