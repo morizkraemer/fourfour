@@ -42,6 +42,17 @@
     onOpenInPanel?.();
   }
 
+  function onRowKeydown(e) {
+    if (e.target !== e.currentTarget || e.altKey) return;
+    if (e.key === 'Enter' || (e.key === ' ' && e.currentTarget.matches(':focus-visible'))) {
+      e.preventDefault();
+      onclick?.(e);
+    } else if (e.key === 'F2' && ondblclick) {
+      e.preventDefault();
+      ondblclick(e);
+    }
+  }
+
   function handleRenameKeydown(e) {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -69,13 +80,16 @@
     {#if action}<span class="ff-sbrow__section-action">{action}</span>{/if}
   </div>
 {:else}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="ff-sbrow ff-sbrow--{rowState}"
+    role="button"
+    tabindex="0"
+    aria-current={rowState === 'active' ? 'page' : undefined}
+    aria-expanded={expanded != null ? expanded : undefined}
     style:padding-left={depth > 0 ? `calc(var(--ff-space-6) + ${depth * 14}px)` : undefined}
     {onclick}
     {ondblclick}
+    onkeydown={onRowKeydown}
   >
     {#if expanded != null}
       <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={11} class="ff-sbrow__chevron" />
@@ -94,6 +108,7 @@
         bind:this={renameInputEl}
         class="ff-sbrow__label ff-sbrow__label-input"
         type="text"
+        aria-label="Name"
         bind:value={renameValue}
         onkeydown={handleRenameKeydown}
         onblur={handleRenameBlur}

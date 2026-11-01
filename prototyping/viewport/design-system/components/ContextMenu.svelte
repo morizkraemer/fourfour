@@ -1,6 +1,7 @@
 <script>
   import './menu.css';
   import './checkbox.css';
+  import { tick } from 'svelte';
   import { closeOnEscape } from './menuEscape.js';
 
   const CHECK_SVG =
@@ -26,6 +27,16 @@
   let openSubmenuIndex = $state(null);
 
   $effect(() => {
+    if (!open) return;
+    const returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const typing = returnFocusTo?.matches('input, textarea, select, [contenteditable]');
+    if (!typing) void tick().then(() => menuEl?.focus());
+    return () => {
+      if (returnFocusTo?.isConnected && (document.activeElement === document.body || menuEl?.contains(document.activeElement))) returnFocusTo.focus();
+    };
+  });
+
+  $effect(() => {
     if (!open) {
       openSubmenuIndex = null;
       return;
@@ -34,7 +45,8 @@
       if (menuEl && !menuEl.contains(e.target)) onClose?.();
     }
     function onKey(e) {
-      closeOnEscape(e, onClose);
+      if (closeOnEscape(e, onClose)) return;
+      onMenuKey(e);
     }
     function onWindowBlur() {
       onClose?.();
@@ -56,6 +68,54 @@
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   });
+
+  const ITEM = '[role^="menuitem"]:not([aria-disabled="true"])';
+
+  const itemsIn = (container) => [...container.children].filter((child) => child.matches(ITEM));
+
+  function focusStep(container, step) {
+    const list = itemsIn(container);
+    if (list.length === 0) return;
+    const at = list.indexOf(document.activeElement);
+    const next = at < 0 ? (step > 0 ? 0 : list.length - 1) : (at + step + list.length) % list.length;
+    list[next].focus();
+  }
+
+  async function openSubmenuByKey(item) {
+    const index = [...menuEl.children].indexOf(item);
+    if (index < 0) return;
+    openSubmenu(index);
+    await tick();
+    item.querySelector('.ff-menu--submenu')?.querySelector(ITEM)?.focus();
+  }
+
+  function onMenuKey(e) {
+    if (e.altKey || e.ctrlKey || e.metaKey || !menuEl) return;
+    const active = document.activeElement;
+    const container = active instanceof Element ? active.closest('.ff-menu') : null;
+    const scope = container && menuEl.contains(container) ? container : menuEl;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      focusStep(scope, e.key === 'ArrowDown' ? 1 : -1);
+    } else if (e.key === 'Home' || e.key === 'End') {
+      const list = itemsIn(scope);
+      list[e.key === 'Home' ? 0 : list.length - 1]?.focus();
+    } else if (e.key === 'ArrowRight' && active instanceof HTMLElement && active.getAttribute('aria-haspopup') === 'menu') {
+      void openSubmenuByKey(active);
+    } else if (e.key === 'ArrowLeft' && scope !== menuEl) {
+      const parent = scope.parentElement;
+      closeSubmenu(openSubmenuIndex);
+      parent?.focus();
+    } else if ((e.key === 'Enter' || e.key === ' ') && active instanceof HTMLElement && active.matches(ITEM)) {
+      if (active.getAttribute('aria-haspopup') === 'menu') void openSubmenuByKey(active);
+      else active.click();
+    } else if (e.key === 'Tab') {
+      onClose?.();
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  }
 
   function clampMenu(node) {
     const rect = node.getBoundingClientRect();
@@ -111,7 +171,7 @@
 {#snippet menuItems(list, depth = 0)}
   {#each list as item, i}
     {#if item.isSeparator}
-      <div class="ff-menu__separator"></div>
+      <div class="ff-menu__separator" role="separator"></div>
     {:else}
       {@const variant = item.disabled ? 'disabled' : (item.variant || 'default')}
       {@const hasSub = (item.items?.length ?? 0) > 0}
@@ -120,6 +180,12 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="ff-menu__item ff-menu__item--{variant}"
+        role={item.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
+        tabindex="-1"
+        aria-checked={item.checked !== undefined ? item.checked : undefined}
+        aria-disabled={item.disabled ? 'true' : undefined}
+        aria-haspopup={hasSub ? 'menu' : undefined}
+        aria-expanded={hasSub ? subOpen : undefined}
         class:ff-menu__item--toggle={item.checked !== undefined}
         class:ff-menu__item--submenu={hasSub}
         class:ff-menu__item--submenu-open={subOpen}
@@ -159,19 +225,25 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="ff-menu ff-menu--submenu"
+            role="menu"
+            tabindex="-1"
             use:clampSubmenu
             onmouseenter={() => openSubmenu(i)}
             onclick={(e) => e.stopPropagation()}
           >
             {#each item.items as subItem}
               {#if subItem.isSeparator}
-                <div class="ff-menu__separator"></div>
+                <div class="ff-menu__separator" role="separator"></div>
               {:else}
                 {@const subVariant = subItem.disabled ? 'disabled' : (subItem.variant || 'default')}
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
                   class="ff-menu__item ff-menu__item--{subVariant}"
+                  role={subItem.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
+                  tabindex="-1"
+                  aria-checked={subItem.checked !== undefined ? subItem.checked : undefined}
+                  aria-disabled={subItem.disabled ? 'true' : undefined}
                   onclick={() => runSubItem(subItem)}
                 >
                   <span class="ff-menu__item-label">
@@ -210,6 +282,8 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="ff-menu ff-context-menu"
+    role="menu"
+    tabindex="-1"
     bind:this={menuEl}
     use:clampMenu
     style="position: fixed; left: {x}px; top: {y}px; z-index: 10000;"
@@ -220,6 +294,10 @@
 {/if}
 
 <style>
+  .ff-context-menu:focus {
+    outline: none;
+  }
+
   .ff-menu__checkbox {
     pointer-events: none;
   }
