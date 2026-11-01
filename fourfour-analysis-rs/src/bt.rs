@@ -455,22 +455,33 @@ mod ort_tests {
             let fields: Vec<f64> = stat.rsplit(')').next().unwrap_or("").split_whitespace().map(|v| v.parse().unwrap_or(0.0)).collect();
             (fields.get(11).unwrap_or(&0.0) + fields.get(12).unwrap_or(&0.0)) * 10.0
         };
+        let wall_ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
+        let opened = std::time::Instant::now();
         let mut session = ort.session().unwrap();
-        let (mut rten_ms, mut ort_ms) = (Vec::new(), Vec::new());
+        let open_ms = wall_ms(opened);
+        let (mut rten_ms, mut ort_ms, mut rten_wall, mut ort_wall) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for _ in 0..rounds {
-            let t = thread_cpu_ms();
+            let (t, w) = (thread_cpu_ms(), std::time::Instant::now());
             rten.run_chunk(&chunk, &options).unwrap();
             rten_ms.push(thread_cpu_ms() - t);
-            let t = thread_cpu_ms();
+            rten_wall.push(wall_ms(w));
+            let (t, w) = (thread_cpu_ms(), std::time::Instant::now());
             session.run(&chunk).unwrap();
             ort_ms.push(thread_cpu_ms() - t);
+            ort_wall.push(wall_ms(w));
         }
         if rounds > 0 {
             let median = |v: &mut Vec<f64>| {
                 v.sort_by(f64::total_cmp);
                 v[v.len() / 2]
             };
-            println!("CHUNK cpu ms per chunk, median of {rounds}: rten {:.0} ort {:.0}; max abs logit diff {max_diff}", median(&mut rten_ms), median(&mut ort_ms));
+            println!(
+                "CHUNK median of {rounds}: wall ms rten {:.0} ort {:.0}; process cpu ms rten {:.0} ort {:.0} (0 without /proc); session open {open_ms:.0} ms; max abs logit diff {max_diff}",
+                median(&mut rten_wall),
+                median(&mut ort_wall),
+                median(&mut rten_ms),
+                median(&mut ort_ms)
+            );
         }
     }
 }
