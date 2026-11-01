@@ -33,6 +33,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 31. Schema changes for 50k speed + robustness (r12/r13): store folded artist/title keys (import duplicate plan 1-1.5 s at 50k), move covers out of library.db (7.5 GB at 50k, slow commits), store analysis failures (no retry every launch) - rec: one schema bump with all three after the holiday - branch: none
 32. [accepted 2026-11-01 per rec, landed on ov-1028 3248199] Analysis order after restart is not persisted (resume goes by id) - rec: side file in app data with the last run's order, no schema - branch: r21-order (not built yet)
 33. Error messages (r18): 42 messages rewritten via app/src/lib/userErrors.ts, 13 silent failures surfaced. Real bugs inside: analyzeTrackIds/analyzeTracks and playlist saves fall back to the browser mock in the real app (fake "Analyzed" events, unsaved playlists look saved); player errors never rendered. Doc docs/ui/error-messages-2026-11.md - rec: land first thing after the holiday (bugs are real); open calls: library.db open panic needs a recovery screen, status bar gets clobbered by analysis progress (toast?) - branch: r18-errors
+34. Keyboard + screen reader (r17): list is a real listbox (arrows, Shift range, Enter plays, Shift+F10 menu), sidebar/menus/dialogs keyboard-reachable with focus trap + return, CUE by keyboard, 26 keyboard specs. Behaviour change: Tab/Space yield to keyboard-focused controls (mouse flows unchanged). Touches prototyping design-system (commit af739a7, AGENTS fence) - rec: land after a Mac WebKit check; open: keyboard reorder, waveform seek, rating by keys - branch: r17-a11y
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -86,7 +87,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours) [landed a7131e7; docs/architecture/analysis-resume-2026-11.md]
 17. r15-reveal: staged waveform reveal on a branch (unlanded; only if the Mac night shows first expand >50 ms)
 18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it) [dropped; branch r16-quant b7a274f: int8 -7% CPU, grid 43 vs 44/50; no VNNI, attention stays fp32; CoreML (r11) is the lever]
-19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded) [running, branch only]
+19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded) [built, branch r17-a11y e83fdd3; Waiting 34]
 20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin) [built, branch r18-errors abae25a; Waiting 33]
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt [landed d4b4ef3; 52 tests, vitest timeout fix, no bugs]
 22. r20-winlinux: Linux .deb + Windows cross-check builds and smoke on the box [running]
