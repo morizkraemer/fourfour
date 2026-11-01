@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -494,15 +494,19 @@ fn find_all(index: &DuplicateIndex, tracks: &[Track]) -> Vec<Option<DuplicateOf>
 
 /// Splits scanned tracks into ones already in the library (same path, dropped silently),
 /// likely duplicates (asked about) and new tracks.
-pub fn plan_import(token: u64, library: &[DuplicateCandidate], scanned: Scanned, survey: &FileSurvey) -> (PendingImport, ImportPlan) {
-    let index = DuplicateIndex::new(library);
-    let by_id: HashMap<u32, &DuplicateCandidate> = library.iter().map(|t| (t.id, t)).collect();
+pub fn plan_import(
+    token: u64,
+    index: &DuplicateIndex,
+    existing: &dyn Fn(u32) -> Option<DuplicateCandidate>,
+    scanned: Scanned,
+    survey: &FileSurvey,
+) -> (PendingImport, ImportPlan) {
     let mut seen = HashSet::new();
     let mut already_in_library = scanned.known.into_iter().filter(|path| seen.insert(path.clone())).count();
     let mut fresh = Vec::new();
     let mut duplicate_of = Vec::new();
     let mut duplicates = Vec::new();
-    let hits = find_all(&index, &scanned.tracks);
+    let hits = find_all(index, &scanned.tracks);
     for (track, found) in scanned.tracks.into_iter().zip(hits) {
         if !seen.insert(track.source_path.clone()) {
             continue;
@@ -514,14 +518,14 @@ pub fn plan_import(token: u64, library: &[DuplicateCandidate], scanned: Scanned,
             }
             Some(hit) => {
                 let existing_id = hit.existing_id as u32;
-                let existing = by_id.get(&existing_id);
+                let found = existing(existing_id);
                 duplicates.push(DuplicateRow {
                     new_path: track.source_path.to_string_lossy().into_owned(),
                     file_name: track.source_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                     existing_id,
-                    title: existing.map(|t| t.title.clone()).unwrap_or_default(),
-                    artist: existing.map(|t| t.artist.clone()).unwrap_or_default(),
-                    duration_secs: existing.map(|t| t.duration_secs).unwrap_or(track.duration_secs),
+                    title: found.as_ref().map(|t| t.title.clone()).unwrap_or_default(),
+                    artist: found.as_ref().map(|t| t.artist.clone()).unwrap_or_default(),
+                    duration_secs: found.map(|t| t.duration_secs).unwrap_or(track.duration_secs),
                     reason: hit.reason,
                 });
                 duplicate_of.push(Some(existing_id));
@@ -545,8 +549,12 @@ pub fn plan_for_library(
     scanned: Scanned,
     survey: &FileSurvey,
 ) -> Result<ImportPlan, String> {
-    let library = if scanned.tracks.is_empty() { Vec::new() } else { lib.duplicate_candidates().map_err(|e| e.to_string())? };
-    plans.store(|token| plan_import(token, &library, scanned, survey))
+    if scanned.tracks.is_empty() {
+        return plans.store(|token| plan_import(token, &DuplicateIndex::default(), &|_| None, scanned, survey));
+    }
+    let existing = |id: u32| lib.duplicate_candidate(id).ok().flatten();
+    lib.with_duplicate_index(|index| plans.store(|token| plan_import(token, index, &existing, scanned, survey))).map_err(|e| e.to_string())?
+
 }
 
 #[cfg(test)]
@@ -580,14 +588,16 @@ mod tests {
     }
 
     fn sample() -> (PendingImport, ImportPlan) {
-        let library = vec![DuplicateCandidate::from(&track(7, "/Music/Glass Harbor.aiff", "Ode & Ash", "Glass Harbor", 425.0))];
+        let stored = DuplicateCandidate::from(&track(7, "/Music/Glass Harbor.aiff", "Ode & Ash", "Glass Harbor", 425.0));
+        let library = DuplicateIndex::new(&[stored.clone()]);
+        let existing = |id: u32| (id == stored.id).then(|| stored.clone());
         let tracks = vec![
             track(0, "/Music/Glass Harbor.aiff", "Ode & Ash", "Glass Harbor", 425.0),
             track(0, "/New/glass_harbor.mp3", "Ode & Ash", "Glass Harbor (Original Mix)", 426.0),
             track(0, "/New/fresh.mp3", "Hale", "Copper Lines", 380.0),
             track(0, "/New/fresh.mp3", "Hale", "Copper Lines", 380.0),
         ];
-        plan_import(3, &library, Scanned { tracks, known: vec![] }, &FileSurvey::default())
+        plan_import(3, &library, &existing, Scanned { tracks, known: vec![] }, &FileSurvey::default())
     }
 
     #[test]
@@ -618,7 +628,7 @@ mod tests {
             tracks: vec![track(0, "/Music/b.mp3", "Hale", "Copper Lines", 380.0)],
             known: vec![PathBuf::from("/Music/a.mp3"), PathBuf::from("/Music/a.mp3")],
         };
-        let (pending, plan) = plan_import(1, &[], scanned, &survey);
+        let (pending, plan) = plan_import(1, &DuplicateIndex::default(), &|_| None, scanned, &survey);
         assert_eq!((plan.already_in_library, plan.new_count, plan.skipped.unreadable), (1, 1, 0));
         assert_eq!(pending.resolve(false).0.len(), 1);
     }
@@ -642,11 +652,35 @@ mod tests {
     #[test]
     fn only_the_latest_plan_can_be_committed() {
         let plans = ImportPlans::default();
-        let first = plans.store(|token| plan_import(token, &[], Scanned::default(), &FileSurvey::default())).unwrap();
-        let second = plans.store(|token| plan_import(token, &[], Scanned::default(), &FileSurvey::default())).unwrap();
+        let first = plans.store(|token| plan_import(token, &DuplicateIndex::default(), &|_| None, Scanned::default(), &FileSurvey::default())).unwrap();
+        let second = plans.store(|token| plan_import(token, &DuplicateIndex::default(), &|_| None, Scanned::default(), &FileSurvey::default())).unwrap();
         assert!(plans.take(first.token).is_err());
         assert!(plans.take(second.token).is_ok());
         assert!(plans.take(second.token).is_err());
+    }
+
+    #[test]
+    fn a_plan_from_the_cached_index_equals_one_from_a_fresh_index_after_library_writes() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let stored = |n: u32| track(0, &format!("/Music/{n}.mp3"), &format!("Artist {}", n % 4), &format!("Title {}", n % 7), 300.0 + (n % 3) as f64);
+        let ids = lib.add_tracks(&(1..=40).map(stored).collect::<Vec<_>>()).unwrap();
+        let incoming = || -> Vec<Track> {
+            (0..30).map(|n| track(0, &format!("/New/{n}.mp3"), &format!("artist {}", n % 5), &format!("TITLE {}", n % 9), 300.0 + (n % 4) as f64)).collect()
+        };
+        let plan_with = |index: &DuplicateIndex| {
+            let existing = |id: u32| lib.duplicate_candidate(id).ok().flatten();
+            plan_import(1, index, &existing, Scanned { tracks: incoming(), known: vec![] }, &FileSurvey::default()).1
+        };
+        let cached = |lib: &LocalLibrary| {
+            let plans = ImportPlans::default();
+            let plan = plan_for_library(&plans, lib, Scanned { tracks: incoming(), known: vec![] }, &FileSurvey::default()).unwrap();
+            ImportPlan { token: 1, ..plan }
+        };
+        assert_eq!(cached(&lib), plan_with(&lib.duplicate_index().unwrap()));
+        lib.update_track(ids[0], &track(0, "/Music/renamed.mp3", "Artist 0", "Title 0", 301.0)).unwrap();
+        lib.remove_tracks(&[ids[1], ids[5]]).unwrap();
+        lib.add_tracks(&[track(0, "/Music/extra.mp3", "Artist 2", "Title 3", 300.0)]).unwrap();
+        assert_eq!(cached(&lib), plan_with(&lib.duplicate_index().unwrap()));
     }
 
     #[test]
@@ -659,7 +693,7 @@ mod tests {
         }
         let survey = survey_files(&[dir.to_string_lossy().into_owned()]);
         let scanned = Scanned { tracks: vec![track(0, &dir.join("a.mp3").to_string_lossy(), "", "a", 1.0)], known: vec![] };
-        let (_, plan) = plan_import(1, &[], scanned, &survey);
+        let (_, plan) = plan_import(1, &DuplicateIndex::default(), &|_| None, scanned, &survey);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(
             plan.skipped,

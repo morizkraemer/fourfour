@@ -362,6 +362,7 @@ impl LocalLibrary {
             queries::update_source_path(&tx, *track_id, path)?;
         }
         tx.commit()?;
+        self.forget_duplicates();
         Ok(())
     }
 

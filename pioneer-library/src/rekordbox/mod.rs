@@ -421,6 +421,7 @@ impl LocalLibrary {
         }
 
         tx.commit()?;
+        self.forget_duplicates();
         labels.invalidate();
         self.import_playlists(source, &library_ids, progress, &mut report)?;
         Ok(report)

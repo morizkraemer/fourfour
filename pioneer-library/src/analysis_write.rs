@@ -14,7 +14,7 @@ use pioneer_usb_writer::writer;
 
 use crate::edits::EDITS_FILE;
 use crate::rekordbox::SIDECAR_FILE;
-use crate::{LocalLibrary, RowPreview, queries, read_waveform_analysis};
+use crate::{DuplicateCandidate, LocalLibrary, RowPreview, queries, read_waveform_analysis};
 
 const DAT: &str = "ANLZ0000.DAT";
 const EXT: &str = "ANLZ0000.EXT";
@@ -152,6 +152,7 @@ impl LocalLibrary {
             files.discard();
             moved?;
         }
+        let old = if track.is_some() { self.duplicates_before(&[staged.track_id])? } else { None };
         let tx = self.conn.unchecked_transaction()?;
         if let Some(track) = track {
             queries::update_track(&tx, staged.track_id, track)?;
@@ -166,6 +167,9 @@ impl LocalLibrary {
             staged.stages,
         )?;
         tx.commit()?;
+        if let Some(track) = track {
+            self.duplicates_after(old, |_| Some(DuplicateCandidate::stored(staged.track_id, track)));
+        }
         Ok(true)
     }
 

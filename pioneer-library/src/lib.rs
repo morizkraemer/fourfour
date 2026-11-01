@@ -23,6 +23,7 @@ mod user_edits;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -132,6 +133,10 @@ pub struct LocalLibrary {
     conn: Connection,
     /// Path to the database file. `None` for in-memory databases (tests).
     db_path: Option<PathBuf>,
+    /// Folded keys of every track for duplicate lookups, built by the first
+    /// [`Self::with_duplicate_index`] and kept current by every write that changes a track's
+    /// path, size, artist, title or duration, or adds or removes a track.
+    duplicates: Mutex<Option<DuplicateIndex>>,
 }
 
 impl LocalLibrary {
@@ -145,6 +150,7 @@ impl LocalLibrary {
         Ok(Self {
             conn,
             db_path: Some(db_path.to_path_buf()),
+            duplicates: Mutex::default(),
         })
     }
 
@@ -155,6 +161,7 @@ impl LocalLibrary {
         Ok(Self {
             conn,
             db_path: None,
+            duplicates: Mutex::default(),
         })
     }
 
@@ -191,6 +198,7 @@ impl LocalLibrary {
     /// The `track.id` field is ignored — the library assigns its own IDs.
     pub fn add_track(&self, track: &Track) -> Result<i64> {
         let id = queries::insert_track(&self.conn, track)?;
+        self.note_duplicates_added(&[DuplicateCandidate::stored(id, track)]);
         if let Some(ref art) = track.artwork {
             queries::upsert_artwork(&self.conn, id, art)?;
         }
@@ -218,7 +226,10 @@ impl LocalLibrary {
     }
 
     fn add_tracks_then(&self, tracks: &[Track], then: impl Fn(&Connection, i64, &Track) -> Result<()>) -> Result<Vec<i64>> {
-        self.write_bulk(|| self.insert_tracks(tracks, then))
+        let ids = self.write_bulk(|| self.insert_tracks(tracks, then))?;
+        let added: Vec<DuplicateCandidate> = ids.iter().zip(tracks).map(|(id, track)| DuplicateCandidate::stored(*id, track)).collect();
+        self.note_duplicates_added(&added);
+        Ok(ids)
     }
 
     /// Runs a large write that only has to reach the log (`synchronous=NORMAL`), with no
@@ -285,19 +296,26 @@ impl LocalLibrary {
 
     /// Update metadata for an existing track (identified by library ID).
     pub fn update_track(&self, id: i64, track: &Track) -> Result<()> {
-        queries::update_track(&self.conn, id, track)
+        let old = self.duplicates_before(&[id])?;
+        queries::update_track(&self.conn, id, track)?;
+        self.duplicates_after(old, |_| Some(DuplicateCandidate::stored(id, track)));
+        Ok(())
     }
 
     /// Remove a track (and its analysis + artwork via CASCADE), including ANLZ files.
     pub fn remove_track(&self, id: i64) -> Result<()> {
+        let old = self.duplicates_before(&[id])?;
         queries::delete_tracks(&self.conn, &[id])?;
+        self.duplicates_after(old, |_| None);
         self.remove_track_anlz(id);
         Ok(())
     }
 
     /// Remove multiple tracks in a single transaction, including ANLZ files.
     pub fn remove_tracks(&self, ids: &[i64]) -> Result<()> {
+        let old = self.duplicates_before(ids)?;
         queries::delete_tracks(&self.conn, ids)?;
+        self.duplicates_after(old, |_| None);
         for id in ids {
             self.remove_track_anlz(*id);
         }
@@ -324,8 +342,68 @@ impl LocalLibrary {
         queries::select_duplicate_candidates(&self.conn)
     }
 
+    /// A fresh index over the library, read from the database.
     pub fn duplicate_index(&self) -> Result<DuplicateIndex> {
         Ok(DuplicateIndex::new(&self.duplicate_candidates()?))
+    }
+
+    /// Runs `read` on the library's duplicate index. The index is built on first use and
+    /// kept current by the writes after that; it is rebuilt when its size no longer matches
+    /// the library's track count.
+    pub fn with_duplicate_index<T>(&self, read: impl FnOnce(&DuplicateIndex) -> T) -> Result<T> {
+        let mut cache = self.lock_duplicates();
+        let tracks = queries::track_count(&self.conn)? as usize;
+        if cache.as_ref().is_none_or(|index| index.len() != tracks) {
+            *cache = Some(self.duplicate_index()?);
+        }
+        Ok(read(cache.as_ref().expect("index built above")))
+    }
+
+    fn lock_duplicates(&self) -> MutexGuard<'_, Option<DuplicateIndex>> {
+        self.duplicates.lock().expect("duplicate index lock")
+    }
+
+    pub(crate) fn forget_duplicates(&self) {
+        *self.lock_duplicates() = None;
+    }
+
+    fn note_duplicates_added(&self, candidates: &[DuplicateCandidate]) {
+        if let Some(index) = self.lock_duplicates().as_mut() {
+            index.insert_all(candidates);
+        }
+    }
+
+    /// What the cached index holds for `ids`, read from the database before a write changes
+    /// them (`None` when no index is cached). Hand it to [`Self::duplicates_after`].
+    pub(crate) fn duplicates_before(&self, ids: &[i64]) -> Result<Option<Vec<DuplicateCandidate>>> {
+        if self.lock_duplicates().is_none() {
+            return Ok(None);
+        }
+        queries::select_duplicate_candidates_of(&self.conn, ids).map(Some)
+    }
+
+    /// After the write: takes the `old` tracks out of the cached index and puts back what
+    /// `rewrite` makes of each (`None` leaves it out).
+    pub(crate) fn duplicates_after(&self, old: Option<Vec<DuplicateCandidate>>, rewrite: impl Fn(&DuplicateCandidate) -> Option<DuplicateCandidate>) {
+        let Some(old) = old else { return };
+        let mut cache = self.lock_duplicates();
+        let Some(index) = cache.as_mut() else { return };
+        for candidate in &old {
+            index.remove(candidate);
+        }
+        index.insert_all(&old.iter().filter_map(rewrite).collect::<Vec<_>>());
+    }
+
+    fn duplicates_after_path_change(&self, old: Option<Vec<DuplicateCandidate>>, new_paths: &HashMap<i64, PathBuf>) {
+        self.duplicates_after(old, |candidate| {
+            let path = new_paths.get(&(candidate.id as i64))?;
+            Some(DuplicateCandidate { source_path: PathBuf::from(path.to_string_lossy().into_owned()), ..candidate.clone() })
+        });
+    }
+
+    /// A track's duplicate-detection fields.
+    pub fn duplicate_candidate(&self, id: u32) -> Result<Option<DuplicateCandidate>> {
+        Ok(queries::select_duplicate_candidates_of(&self.conn, &[id as i64])?.pop())
     }
 
     /// Every track's audio path and stored size, for the file health check.
@@ -342,9 +420,11 @@ impl LocalLibrary {
         if file_status(new_path) != FileStatus::Ok {
             anyhow::bail!("{} is not a readable file", new_path.display());
         }
+        let old = self.duplicates_before(&[track_id])?;
         if !queries::update_source_path(&self.conn, track_id, new_path)? {
             anyhow::bail!("Track {track_id} is not in the library");
         }
+        self.duplicates_after_path_change(old, &HashMap::from([(track_id, new_path.to_path_buf())]));
         Ok(())
     }
 
@@ -359,11 +439,14 @@ impl LocalLibrary {
             .filter(|f| wanted.contains(&f.track_id) && file_status(&f.path) != FileStatus::Ok)
             .collect();
         let (matched, ambiguous, not_found) = file_health::plan_relocation(&missing, folder, &taken);
+        let matched_ids: Vec<i64> = matched.iter().map(|(track_id, _)| *track_id).collect();
+        let old = self.duplicates_before(&matched_ids)?;
         let tx = self.conn.unchecked_transaction()?;
         for (track_id, path) in &matched {
             queries::update_source_path(&tx, *track_id, path)?;
         }
         tx.commit()?;
+        self.duplicates_after_path_change(old, &matched.iter().cloned().collect());
         Ok(RelocateReport {
             matched: matched
                 .into_iter()
@@ -928,6 +1011,7 @@ impl LocalLibrary {
         }
 
         tx.commit()?;
+        self.forget_duplicates();
 
         Ok(ImportReport {
             tracks_imported,
@@ -2497,5 +2581,111 @@ mod tests {
         assert!(lib.get_artwork(ids[3]).unwrap().is_none());
         assert!(lib.pending_artwork(0, 10).unwrap().is_empty());
         assert_eq!(lib.track_paths().unwrap().len(), 3);
+    }
+
+    struct Xorshift(u64);
+
+    impl Xorshift {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    fn random_track(rng: &mut Xorshift) -> Track {
+        const ARTISTS: [&str; 6] = ["Hale", "HAL\u{c9}", "Ode & Ash", "ode ash", "Unknown Artist", ""];
+        const TITLES: [&str; 5] = ["Copper Lines", "copper lines (Original Mix)", "Glass Harbor", "Intro", ""];
+        const DURATIONS: [f64; 5] = [0.0, 100.0, 101.5, 103.0, 300.0];
+        const SIZES: [u64; 3] = [0, 1000, 2000];
+        const FOLDERS: [&str; 3] = ["/music", "/Music", "/other"];
+        let path = format!("{}/{}.mp3", FOLDERS[rng.below(3)], rng.below(25));
+        Track {
+            artist: ARTISTS[rng.below(ARTISTS.len())].into(),
+            duration_secs: DURATIONS[rng.below(DURATIONS.len())],
+            file_size: SIZES[rng.below(SIZES.len())],
+            ..make_track(TITLES[rng.below(TITLES.len())], &path)
+        }
+    }
+
+    fn assert_cached_duplicates_equal_a_fresh_scan(lib: &LocalLibrary, context: &str) {
+        let fresh = lib.duplicate_index().unwrap();
+        assert!(lib.lock_duplicates().as_ref() == Some(&fresh), "{context}");
+    }
+
+    #[test]
+    fn the_cached_duplicate_index_equals_a_fresh_scan_after_random_writes() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let mut rng = Xorshift(0x2545_F491_4F6C_DD1D);
+        for _ in 0..30 {
+            let _ = lib.add_track(&random_track(&mut rng));
+        }
+        lib.with_duplicate_index(|_| ()).unwrap();
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "built");
+        for step in 0..600 {
+            let ids: Vec<i64> = lib.get_all_tracks().unwrap().iter().map(|t| t.id as i64).collect();
+            let some_id = |rng: &mut Xorshift| (!ids.is_empty()).then(|| ids[rng.below(ids.len())]);
+            let op = rng.below(7);
+            match (op, some_id(&mut rng)) {
+                (0, _) => {
+                    let _ = lib.add_track(&random_track(&mut rng));
+                }
+                (1, _) => {
+                    let batch: Vec<Track> = (0..1 + rng.below(4)).map(|_| random_track(&mut rng)).collect();
+                    let _ = lib.add_tracks(&batch);
+                }
+                (2, Some(id)) | (3, Some(id)) => {
+                    let _ = lib.update_track(id, &random_track(&mut rng));
+                }
+                (4, Some(id)) => lib.remove_track(id).unwrap(),
+                (5, Some(id)) => {
+                    let other = some_id(&mut rng).unwrap();
+                    lib.remove_tracks(&[id, other]).unwrap();
+                }
+                (6, Some(id)) => {
+                    let staged = lib.begin_analysis(id, &make_analysis(), analysis_stage::ALL).unwrap().stage().unwrap();
+                    let _ = lib.commit_analysis(staged, Some(&random_track(&mut rng)));
+                }
+                _ => {}
+            }
+            assert_cached_duplicates_equal_a_fresh_scan(&lib, &format!("after step {step} (op {op})"));
+        }
+        assert!(lib.track_count().unwrap() > 0);
+    }
+
+    #[test]
+    fn the_cached_duplicate_index_follows_relinks_and_relocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let (found, there) = (dir.path().join("found"), dir.path().join("there"));
+        std::fs::create_dir_all(&found).unwrap();
+        std::fs::create_dir_all(&there).unwrap();
+        for name in ["a.mp3", "b.mp3", "c.mp3"] {
+            std::fs::write(found.join(name), [0u8; 10]).unwrap();
+        }
+        std::fs::write(there.join("d.mp3"), [0u8; 10]).unwrap();
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let track = |name: &str, folder: &str| Track { file_size: 10, ..make_track(name, &format!("{folder}/{name}.mp3")) };
+        let ids = lib.add_tracks(&[track("a", "/gone"), track("b", "/gone"), track("c", "/gone"), track("d", "/gone")]).unwrap();
+        lib.with_duplicate_index(|_| ()).unwrap();
+
+        let report = lib.relocate_in_folder(&ids[..3], &found).unwrap();
+        assert_eq!(report.matched.len(), 3);
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "relocated");
+        lib.relink_track(ids[3], &there.join("d.mp3")).unwrap();
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "relinked");
+        let moved = lib.get_track(ids[3]).unwrap().unwrap();
+        let hit = lib.with_duplicate_index(|index| index.find(&moved)).unwrap();
+        assert_eq!(hit.map(|h| (h.existing_id, h.reason)), Some((ids[3], DuplicateReason::SamePath)));
+    }
+
+    #[test]
+    fn the_cached_duplicate_index_is_rebuilt_when_it_no_longer_matches_the_library() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let ids = lib.add_tracks(&[make_track("A", "/music/a.mp3"), make_track("B", "/music/b.mp3")]).unwrap();
+        lib.with_duplicate_index(|index| assert_eq!(index.len(), 2)).unwrap();
+        lib.conn.execute("DELETE FROM tracks WHERE id = ?1", [ids[0]]).unwrap();
+        lib.with_duplicate_index(|index| assert_eq!(index.len(), 1)).unwrap();
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "rebuilt");
     }
 }

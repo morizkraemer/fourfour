@@ -3,6 +3,7 @@
 //! artist and title with a duration within [`DURATION_TOLERANCE_SECS`].
 
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
 use pioneer_usb_writer::models::Track;
@@ -75,6 +76,21 @@ pub struct DuplicateCandidate {
     pub duration_secs: f64,
 }
 
+impl DuplicateCandidate {
+    /// The candidate as the library stores `track` under `id`: the path goes through the
+    /// database as lossy UTF-8.
+    pub fn stored(id: i64, track: &Track) -> Self {
+        Self {
+            id: id as u32,
+            source_path: PathBuf::from(track.source_path.to_string_lossy().into_owned()),
+            file_size: track.file_size,
+            artist: track.artist.clone(),
+            title: track.title.clone(),
+            duration_secs: track.duration_secs,
+        }
+    }
+}
+
 impl From<&Track> for DuplicateCandidate {
     fn from(track: &Track) -> Self {
         Self {
@@ -89,7 +105,7 @@ impl From<&Track> for DuplicateCandidate {
 }
 
 struct CandidateKeys {
-    id: i64,
+    id: u32,
     path: String,
     file: Option<(String, u64)>,
     tags: Option<(String, String)>,
@@ -99,7 +115,7 @@ struct CandidateKeys {
 impl CandidateKeys {
     fn of(candidate: &DuplicateCandidate) -> Self {
         Self {
-            id: candidate.id as i64,
+            id: candidate.id,
             path: path_key(&candidate.source_path),
             file: file_key(&candidate.source_path, candidate.file_size),
             tags: tags_key(&candidate.artist, &candidate.title),
@@ -128,40 +144,144 @@ fn candidate_keys(library: &[DuplicateCandidate]) -> Vec<CandidateKeys> {
     })
 }
 
+/// Entries by key, each key's lowest id in `first` and the rest, in id order, in `more`: nearly
+/// every key has one id, and those cost no list of their own.
+#[derive(Debug)]
+struct Slots<K, V> {
+    first: HashMap<K, (u32, V)>,
+    more: HashMap<K, Vec<(u32, V)>>,
+}
+
+impl<K: Hash + Eq, V: PartialEq> PartialEq for Slots<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.first == other.first && self.more == other.more
+    }
+}
+
+impl<K, V> Default for Slots<K, V> {
+    fn default() -> Self {
+        Self { first: HashMap::new(), more: HashMap::new() }
+    }
+}
+
+impl<K: Hash + Eq, V: Copy> Slots<K, V> {
+    fn insert(&mut self, key: K, entry: (u32, V)) {
+        let Some(first) = self.first.get_mut(&key) else {
+            self.first.insert(key, entry);
+            return;
+        };
+        let (lower, higher) = if entry.0 < first.0 { (entry, *first) } else { (*first, entry) };
+        *first = lower;
+        let rest = self.more.entry(key).or_default();
+        let at = rest.partition_point(|(id, _)| *id < higher.0);
+        rest.insert(at, higher);
+    }
+
+    fn remove(&mut self, key: &K, id: u32) -> bool {
+        let Some(first) = self.first.get(key) else { return false };
+        if first.0 != id {
+            let Some(rest) = self.more.get_mut(key) else { return false };
+            let Ok(at) = rest.binary_search_by_key(&id, |(id, _)| *id) else { return false };
+            rest.remove(at);
+            if rest.is_empty() {
+                self.more.remove(key);
+            }
+            return true;
+        }
+        match self.more.get_mut(key).map(|rest| rest.remove(0)) {
+            Some(next) => {
+                if let Some(slot) = self.first.get_mut(key) {
+                    *slot = next;
+                }
+                if self.more.get(key).is_some_and(Vec::is_empty) {
+                    self.more.remove(key);
+                }
+            }
+            None => {
+                self.first.remove(key);
+            }
+        }
+        true
+    }
+
+    fn lowest(&self, key: &K) -> Option<&(u32, V)> {
+        self.first.get(key)
+    }
+
+    fn all(&self, key: &K) -> impl Iterator<Item = &(u32, V)> {
+        self.first.get(key).into_iter().chain(self.more.get(key).into_iter().flatten())
+    }
+}
+
 /// The library's tracks, indexed for duplicate lookups. Ids are the library ids (`Track::id`).
-#[derive(Debug, Default)]
+/// A key shared by several tracks answers with the lowest id, as a fresh index over the
+/// library in id order would. It can be kept current with [`Self::insert_all`] and
+/// [`Self::remove`] instead of being rebuilt.
+#[derive(Debug, Default, PartialEq)]
 pub struct DuplicateIndex {
-    by_path: HashMap<String, i64>,
-    by_file: HashMap<(String, u64), i64>,
-    by_tags: HashMap<(String, String), Vec<(i64, f64)>>,
+    count: usize,
+    by_path: Slots<String, ()>,
+    by_file: Slots<(String, u64), ()>,
+    by_tags: Slots<(String, String), f64>,
 }
 
 impl DuplicateIndex {
     pub fn new(library: &[DuplicateCandidate]) -> Self {
         let mut index = Self::default();
-        for keys in candidate_keys(library) {
-            index.by_path.entry(keys.path).or_insert(keys.id);
-            if let Some(key) = keys.file {
-                index.by_file.entry(key).or_insert(keys.id);
-            }
-            if let Some(key) = keys.tags {
-                index.by_tags.entry(key).or_default().push((keys.id, keys.duration_secs));
-            }
-        }
+        index.insert_all(library);
         index
     }
 
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    /// Adds tracks that are not in the index yet.
+    pub fn insert_all(&mut self, candidates: &[DuplicateCandidate]) {
+        for keys in candidate_keys(candidates) {
+            let id = keys.id;
+            self.by_path.insert(keys.path, (id, ()));
+            if let Some(key) = keys.file {
+                self.by_file.insert(key, (id, ()));
+            }
+            if let Some(key) = keys.tags {
+                self.by_tags.insert(key, (id, keys.duration_secs));
+            }
+        }
+        self.count += candidates.len();
+    }
+
+    /// Takes a track out, given the values it was indexed with. Returns whether it was there.
+    pub fn remove(&mut self, candidate: &DuplicateCandidate) -> bool {
+        let keys = CandidateKeys::of(candidate);
+        let removed = self.by_path.remove(&keys.path, keys.id);
+        if let Some(key) = keys.file {
+            self.by_file.remove(&key, keys.id);
+        }
+        if let Some(key) = keys.tags {
+            self.by_tags.remove(&key, keys.id);
+        }
+        if removed {
+            self.count -= 1;
+        }
+        removed
+    }
+
     pub fn find(&self, track: &Track) -> Option<DuplicateOf> {
-        let hit = |existing_id, reason| Some(DuplicateOf { existing_id, reason });
-        if let Some(&id) = self.by_path.get(&path_key(&track.source_path)) {
+        let hit = |existing_id: u32, reason| Some(DuplicateOf { existing_id: existing_id as i64, reason });
+        if let Some(&(id, ())) = self.by_path.lowest(&path_key(&track.source_path)) {
             return hit(id, DuplicateReason::SamePath);
         }
-        if let Some(&id) = file_key(&track.source_path, track.file_size).and_then(|k| self.by_file.get(&k)) {
+        if let Some(&(id, ())) = file_key(&track.source_path, track.file_size).and_then(|k| self.by_file.lowest(&k)) {
             return hit(id, DuplicateReason::SameFile);
         }
-        let candidates = tags_key(&track.artist, &track.title).and_then(|k| self.by_tags.get(&k))?;
-        candidates
-            .iter()
+        let key = tags_key(&track.artist, &track.title)?;
+        self.by_tags
+            .all(&key)
             .find(|(_, duration)| durations_match(*duration, track.duration_secs))
             .and_then(|&(id, _)| hit(id, DuplicateReason::SameTags))
     }
@@ -257,5 +377,38 @@ mod tests {
         assert_eq!(probe("/New/t3.wav", "artist", "title 3", 300.2, 7), found(3, DuplicateReason::SameTags));
         assert_eq!(probe("/New/t5000.wav", "Artist", "Title 5000", 301.0, 7), found(5000, DuplicateReason::SameTags));
         assert_eq!(probe("/New/none.wav", "Artist", "Title 5001", 300.0, 7), None);
+    }
+
+    #[test]
+    fn removing_the_lowest_id_of_a_shared_key_promotes_the_next_one() {
+        let tracks: Vec<Track> = [(1, "/Music/a.mp3", "Hale", 380.0), (2, "/music/A.mp3", "HALE", 381.0), (3, "/MUSIC/a.MP3", "hale", 382.0)]
+            .map(|(id, path, artist, secs)| track(id, path, artist, "Copper Lines", secs, 10))
+            .into();
+        let candidate = |i: usize| DuplicateCandidate::from(&tracks[i]);
+        let mut index = index(&tracks);
+        let by = |index: &DuplicateIndex, secs: f64| index.find(&track(0, "/x/y.mp3", "Hale", "Copper Lines", secs, 1)).map(|h| h.existing_id);
+        let same_path = |index: &DuplicateIndex| index.find(&track(0, "/music/a.mp3", "", "", 0.0, 1)).map(|h| h.existing_id);
+        assert_eq!((same_path(&index), by(&index, 382.5)), (Some(1), Some(2)));
+        assert!(index.remove(&candidate(1)));
+        assert_eq!((same_path(&index), by(&index, 382.5)), (Some(1), Some(3)));
+        assert!(index.remove(&candidate(0)));
+        assert_eq!((same_path(&index), by(&index, 380.5), by(&index, 385.0)), (Some(3), Some(3), None));
+        index.insert_all(&[candidate(0)]);
+        assert_eq!(same_path(&index), Some(1));
+        assert!(index.remove(&candidate(2)) && index.remove(&candidate(0)));
+        assert!(!index.remove(&candidate(0)));
+        assert_eq!(index, DuplicateIndex::default());
+    }
+
+    #[test]
+    fn a_track_rewritten_by_remove_and_insert_is_found_under_its_new_values_only() {
+        let old = DuplicateCandidate::from(&track(1, "/m/a.mp3", "Hale", "Copper Lines", 380.0, 10));
+        let mut index = DuplicateIndex::new(&[old.clone()]);
+        assert!(index.remove(&old));
+        index.insert_all(&[DuplicateCandidate::from(&track(1, "/m/b.mp3", "Ode", "Glass Harbor", 300.0, 20))]);
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.find(&track(0, "/m/a.mp3", "Hale", "Copper Lines", 380.0, 10)), None);
+        let moved = track(0, "/x/b.mp3", "ode", "glass harbor", 300.0, 20);
+        assert_eq!(index.find(&moved), Some(DuplicateOf { existing_id: 1, reason: DuplicateReason::SameFile }));
     }
 }
