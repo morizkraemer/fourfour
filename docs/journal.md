@@ -378,3 +378,4 @@
 2026-11-01 04:32 orchestrator - Merlin: keep review links always open; tmux previews replaced by user systemd ff-review (4220) + ff-app-review (4210), Restart=always, allowed host set; 4220 tailscale serve route restored; all 200 over Tailscale
 2026-11-01 04:54 orchestrator - decided: Merlin "fill the queue with your own prios so you never run out of work"; own-prio backlog 13-22 added; spawn r11-coreml (opus medium) + r12-robust (sonnet high)
 2026-11-01 04:54 orchestrator - PM relay (lab hub mobile overflow): fourfour lab has no own CSS (labkit mountInbox + full-height body rule), nothing to fix here; restart ff-review after emberland's labkit exp/mobile-pass lands (PM unreachable by SendMessage)
+2026-11-01 04:56 orchestrator - Merlin: "still on holiday queue so i wont review... dont stop working until i say so"; run continues until stop, no review asks, recs taken on branches

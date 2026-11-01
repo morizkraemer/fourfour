@@ -57,7 +57,7 @@ Always on (user systemd ff-review.service + ff-app-review.service, Restart=alway
 - Mac: ov-1028 installed in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221/
 
 ## Run
-status: running (2026-11-01: own-priority backlog 13-22; Mac visible batch held for Merlin's go tonight); perf night HELD until Merlin's go tonight (Merlin 12:21: no UI takeover now)) · started 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
+status: running until Merlin says stop (2026-11-01: no reviews during holiday, take recs; own-priority backlog 13-22, refill before dry; Mac visible batch held for Merlin's go tonight); perf night HELD until Merlin's go tonight (Merlin 12:21: no UI takeover now)) · started 2026-10-30 18:06 WITA (PM queue start, Merlin: "start all projects on the holiday queue now") · two weeks to 2026-11-16 · cap 2 · seat only (5 h windows, resume after resets) · autonomy: green work lands on ov-1028 + Mac install; never master, never push
 targets (Merlin Q&A 2026-10-30): beta-ready on ov-1028, and as fast as possible at 10k+ tracks (startup, analysing 10k+, track load, scroll). Order: speed first, then beta. "nothing's off limits": every item below may be built; hard gates and the brother's format bytes still hold
 plan:
 0. merge q50-report summary (c3476bb) into ov-1028
