@@ -400,3 +400,4 @@
 2026-11-01 19:56 orchestrator r17-a11y parked: branch e83fdd3 (listbox, menus, focus trap/return, 26 keyboard specs; touches prototyping DS; Waiting 34)
 2026-11-01 19:57 orchestrator - decided: spawn r24-coreml-fix (opus; fix CoreML Slice failure headless on mbp, then coreml-bench after perf night)
 2026-11-01 20:09 orchestrator r22-startup landed: on ov-1028 240d8cb; smoke 112, vitest 877, CHECKS-OK; Mac: installing ov-1028, then perf night 10k + 5 expand runs (visible, per Merlin's go)
+2026-11-01 20:11 orchestrator - Mac: ov-1028 240d8cb installed in /Applications (20:10); perf night started 20:11 after a fix (02afa7e: binary name from Info.plist, was hard-coded fourfour)
