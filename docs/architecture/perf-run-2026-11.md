@@ -561,6 +561,32 @@ Output: `build/mac/coreml-<date>/summary.md`. Expected time for the dev command:
 
 Decision rule (as R9): keep `coreml` only if a CoreML config beats the best rten config on tracks/min at similar or lower peak memory, with grid within 20 ms still 44/50 on dev and max logit diff small enough that beat peaks match on (nearly) all tracks. Otherwise drop the `ort`/`coreml` features.
 
+## R24 CoreML fix (2026-11-01, `r24-coreml`)
+
+Branch `r24-coreml` = `r11-coreml` + `ov-1028`, not landed. Mac `mbp`, clone `~/dev/build/fourfour-r11`, everything under `nice -n 10`, headless.
+
+**Cause.** The exported model takes `spectrogram` as `[batch, time, 128]` with free dimensions, so the partial attention blocks compute their Slice `starts`/`ends` at run time from `Shape`/`Gather`/`Unsqueeze` chains (467 Shape, 425 Gather, 496 Unsqueeze nodes). ONNX Runtime 1.31's CoreML EP takes those shape nodes into its partitions (1372 of 1753 nodes) and hands the CPU Slice nodes left outside a 0-D tensor where the graph has a 1-D one, so the run fails at `/model/frontend/blocks/blocks.1/partial/attnF/Slice_6` ("Starts must be a 1-D array"). Reproduced with the Python `onnxruntime` 1.31.1 wheel on the Mac; ORT 1.19 does not fail but only takes 742 of 1813 nodes in 201 partitions and is slower than the CPU.
+
+**Fix (no model change).** The CoreML session is opened with free dimension overrides `batch = 1`, `time = 1500` (the chunk size): ORT then folds the whole shape arithmetic into constants before partitioning (1052 nodes left), CoreML takes 904 of them in 75 partitions, and every Slice gets constant 1-D inputs. Chunks of another length (only tracks shorter than one chunk, about 30 s) go to a CPU session opened on first use. The compiled CoreML model is cached in `~/Library/Caches/fourfour-coreml/<size>-<mtime>/` (keyed by the model file, so a new model gets a new cache). The rten path and the model file are unchanged. Code: `fourfour-analysis-rs/src/ort_beat.rs`.
+
+EP options tried first (Python, one 1500-frame chunk, single thread, Mac partly busy):
+
+| CoreML config | Session open | Chunk run | Max logit diff vs CPU |
+|---|---:|---:|---:|
+| MLProgram, ALL, dynamic shape (as R11) | - | fails (Slice_6) | - |
+| MLProgram, ALL, fixed shape, no cache | 19.1 s | 0.21 s | 3e-6 |
+| same, cache cold / warm | 18.8 s / 3.8 s | 0.22 s | 3e-6 |
+| MLProgram, CPUAndGPU, fixed | 17.0 s | 0.26 s | 3e-6 |
+| MLProgram, CPUAndNeuralEngine, fixed | 16.0 s | 0.76 s | 5e-6 |
+| MLProgram, CPUOnly, fixed | 11.2 s | 0.86 s | 5e-6 |
+| CPU EP (reference) | - | 0.58-0.84 s | - |
+
+`ALL` (in effect the GPU) is the fastest; the Neural Engine does not help this model. No offline graph edit was needed.
+
+**Acceptance (Rust, release, `--features coreml` on the Mac).** `ort_gives_the_rten_logits_for_a_chunk` passes: max abs logit diff 7.2e-6 (limit 1e-2), median of 5 one-thread chunks rten 1593 ms vs CoreML 283 ms, warm session open 3.3 s (cold about 19 s, was 42 s and failing), CoreML nodes 904 of 1052 (75 partitions). A 3-track `ffa` run (1 worker, 2 threads) worked end to end, but peak RSS was 3.2 GB (rten 0.8 GB in R11's sanity): every chunk thread holds its own CoreML session, so memory grows with threads. Box: `cargo test -p fourfour-analysis-rs` default and `--features ort` pass, including the ignored chunk test on ORT CPU.
+
+**Bench: not run yet.** The visible perf night (`perf-night.sh` in `~/dev/build/fourfour-mac`) started at 20:11 and was still running when this worker handed back, and the bench must not overlap it. A driver waits on the Mac (`~/.cache/r24-work/bench-after-perf.sh`, log `~/.cache/r24-work/bench-driver.log`): once `perf-night.sh` has been gone for 5 minutes it runs `nice -n 10 scripts/mac/coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7` into `build/mac/coreml-r24-dev/summary.md` and logs whether the perf night was running at the end. The `ffa` model load column will show the warm cache (the chunk test warms it first). Verdict pending that summary; the per-chunk numbers (5.6x faster per thread) make a keep likely if peak RSS at 2x2 / 4x2 stays acceptable.
+
 ## R13 50k (2026-11-01, `r13-50k`)
 
 Branch `r13-50k` from `ov-1028` (`ea0ddaa`). Linux `dev` box, headless Chromium, release `bench_startup`. Box load 25-55 the whole time (other workers): absolute times are inflated about 2x against a quiet box; read the 10k-to-50k ratios and the before/after of the same step, not the absolute values.
