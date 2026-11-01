@@ -394,3 +394,4 @@
 2026-11-01 17:50 orchestrator r18-errors parked: branch abae25a (42 messages rewritten, 13 silent failures surfaced; found mock fallback in real app for analysis + playlist saves; user-visible so unlanded, Waiting 33)
 2026-11-01 17:50 orchestrator - decided: own prio r17-a11y (sonnet high; keyboard-only + screen-reader basics, branch only; r20-winlinux waits until r22 perf runs finish)
 2026-11-01 19:29 orchestrator - paused: seat limit hit (r22-startup, r17-a11y stopped mid-work, resets 11:00 UTC); resume both after reset
+2026-11-01 19:29 orchestrator - resumed: r22-startup and r17-a11y after seat reset; PM relay (holiday, take recs, skip Mac-only): r18-errors stays unlanded per rec, Mac batch stays held
