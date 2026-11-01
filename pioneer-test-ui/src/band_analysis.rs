@@ -38,8 +38,11 @@ fn open_audio(path: &Path) -> Result<OpenedAudio, String> {
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         hint.with_extension(ext);
     }
-    let probed = symphonia::default::get_probe()
-        .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
+    let probe = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        symphonia::default::get_probe().format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
+    }));
+    let probed = probe
+        .map_err(|_| format!("probe {}: the decoder crashed on the file", path.display()))?
         .map_err(|e| format!("probe {}: {e}", path.display()))?;
     let format = probed.format;
     let track = format.default_track().ok_or("no audio track")?;
@@ -49,8 +52,8 @@ fn open_audio(path: &Path) -> Result<OpenedAudio, String> {
 }
 
 fn make_decoder(params: &CodecParameters) -> Result<Box<dyn Decoder>, String> {
-    symphonia::default::get_codecs()
-        .make(params, &DecoderOptions::default())
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| symphonia::default::get_codecs().make(params, &DecoderOptions::default())))
+        .map_err(|_| "decoder: the codec crashed on the file".to_string())?
         .map_err(|e| format!("decoder: {e}"))
 }
 

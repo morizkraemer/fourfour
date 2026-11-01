@@ -571,18 +571,22 @@ fn record_outcome(
     let completed = coordinator.completed.fetch_add(1, Ordering::Relaxed) + 1;
     let total = coordinator.total().max(completed);
     let file_name = file_name_of(source_path);
-    match outcome {
-        Ok((result, detail)) => {
-            let t_db = Instant::now();
-            let grid = stage == Stage::Grid;
-            let (stored, held) = store_analysis(shared, track_id, &result, analysis_stage::ALL, |track, analysis| {
-                if grid {
-                    if let Some(track) = track {
-                        analysis.key = track.key.clone();
-                    }
+    let t_db = Instant::now();
+    let grid = stage == Stage::Grid;
+    let stored = outcome.and_then(|(result, detail)| {
+        store_analysis(shared, track_id, &result, analysis_stage::ALL, |track, analysis| {
+            if grid {
+                if let Some(track) = track {
+                    analysis.key = track.key.clone();
                 }
-                track.map(|track| models::Track { tempo: (analysis.bpm * 100.0) as u32, key: analysis.key.clone(), ..track.clone() })
-            })?;
+            }
+            track.map(|track| models::Track { tempo: (analysis.bpm * 100.0) as u32, key: analysis.key.clone(), ..track.clone() })
+        })
+        .map(|(stored, held)| (stored, held, detail))
+        .map_err(|e| format!("result not stored: {e}"))
+    });
+    match stored {
+        Ok((stored, held, detail)) => {
             sink.log(
                 LogLevel::Ok,
                 format!(
@@ -776,7 +780,7 @@ pub(crate) async fn run_track_analysis(
     run_with_runner(shared, coordinator, pending, sink, env, None).await
 }
 
-async fn run_with_runner(
+pub(crate) async fn run_with_runner(
     shared: SharedLibrary,
     coordinator: AnalysisCoordinator,
     pending: Vec<AnalysisWorkItem>,
@@ -888,10 +892,10 @@ async fn run_with_runner(
             continue;
         }
         match (stage, analysis_result) {
-            (Stage::Fast, Ok((result, detail))) => {
-                store_fast_pass(&shared, &sink, track_id, &source_path, &result, &detail)?;
-                coordinator.push_grid((track_id, source_path));
-            }
+            (Stage::Fast, Ok((result, detail))) => match store_fast_pass(&shared, &sink, track_id, &source_path, &result, &detail) {
+                Ok(()) => coordinator.push_grid((track_id, source_path)),
+                Err(e) => record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, Err(format!("result not stored: {e}")))?,
+            },
             (_, outcome) => record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, outcome)?,
         }
     }
