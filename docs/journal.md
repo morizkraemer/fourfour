@@ -427,3 +427,4 @@
 2026-11-02 05:43 orchestrator r15-reveal parked: branch 00acf20 (staged reveal behind STAGED_REVEAL; partial win, WebKit click-to-drawn worse; WebKit stall looks like compositing outside page JS; better probe metrics on the branch)
 2026-11-02 05:43 orchestrator - decided: own prio r32-probe (sonnet medium; measurement-only port from r15-reveal)
 2026-11-02 06:17 orchestrator r32-probe handed back (probe metrics + webkit option + R15 guide; fixed a summary-script parse bug), merging; decided: own prio r33-dupplan (sonnet high; in-memory folded-key index, no schema)
+2026-11-02 06:28 orchestrator r32-probe landed on ov-1028
