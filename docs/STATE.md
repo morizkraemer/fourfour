@@ -77,12 +77,12 @@ Week 2, beta:
 11. CI workflow (Q8) on branch ov-ci, no push (first run needs Merlin's push OK)
 12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
 Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so you never run out of work"; refill before it runs dry):
-13. r11-coreml: build r9-ort with CoreML on the Mac headless + 3-track sanity now; full analysis bench tonight in the Mac batch [running]
+13. r11-coreml: build r9-ort with CoreML on the Mac headless + 3-track sanity now; full analysis bench tonight in the Mac batch [built, branch r11-coreml 6542279: Mac ort link fix (build.rs clang_rt), coreml-bench.sh; sanity unrun, Mac slept; first check ~/.cache/r11-work/sanity/ on mbp]
 14. r12-robust: import/analysis/sync with bad input (zero-byte, corrupt, unsupported, missing, read-only, huge files, odd tags/unicode paths); tests + fixes [landed ea0ddaa; open items in docs/architecture/robustness-2026-11.md]
 15. r13-50k: startup, scroll, search, import and memory at 50k tracks on the box; fix the worst regressions [running]
-16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours)
+16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours) [running]
 17. r15-reveal: staged waveform reveal on a branch (unlanded; only if the Mac night shows first expand >50 ms)
-18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it)
+18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it) [running]
 19. r17-a11y: keyboard-only pass over library, player, sync (branch, unlanded)
 20. r18-errors: user-facing error messages audit (branch, unlanded; copy for Merlin)
 21. r19-tests: Rust + vitest coverage gaps in sync/import/analysis store; flaky test hunt
@@ -94,6 +94,7 @@ Mac nights: one visible batch per week (### Visible Mac batch): 10k startup/scro
 progress 2026-10-31: items 0-8, 10-12 merged on ov-1028 (checks green). Idle: 9 (dmg install) and the Mac batch wait for the Mac; the rest waits on Merlin (Waiting 1-3 review card, 4 key licence, 15 CI push, 27 runtime, 29 after Mac night)
 ### Visible Mac batch
 - perf night: scripts/mac/perf-night.sh --size 10k --build (r1; startup, scroll, analysis timings) - needs the Mac online + Merlin's go
+- coreml bench (headless, but long and heavy): on mbp in ~/dev/build/fourfour-r11, `scripts/mac/coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7` (1-2 h); keep/drop rule in perf-run-2026-11.md R11
 - [done 2026-11-01] install ov-1028 + dmg check (headless, all PASS: build/mac/dmg-20261101-1221 on the Mac)
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
