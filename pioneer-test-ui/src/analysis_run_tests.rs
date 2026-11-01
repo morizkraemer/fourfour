@@ -806,6 +806,38 @@ async fn back_to_back_runs_never_analyse_a_track_twice_at_once() {
     }
 }
 
+#[tokio::test]
+async fn a_track_removed_while_queued_is_dropped_and_leaves_nothing_behind() {
+    let h = harness(3, 1, 8);
+    h.shared.lock().unwrap().remove_track(2).unwrap();
+
+    let outcome = h.run_all(h.items.clone()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { total: 3, .. }));
+    let lib = h.shared.lock().unwrap();
+    assert!(lib.get_track(2).unwrap().is_none());
+    assert_eq!(lib.analysis_stages(2).unwrap(), None);
+    assert_eq!(lib.complete_analysis_track_ids().unwrap(), vec![1, 3]);
+}
+
+#[tokio::test]
+async fn a_result_for_a_file_the_track_no_longer_points_at_is_not_stored() {
+    let h = harness(2, 1, 8);
+    let moved = std::env::temp_dir().join(format!("ff-relink-{}", std::process::id())).join("t1.wav");
+    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    write_tone_wav(&moved, 0.1, 440.0);
+    h.shared.lock().unwrap().relink_track(1, &moved).unwrap();
+
+    h.run_all(h.items.clone()).await;
+
+    let lib = h.shared.lock().unwrap();
+    assert_eq!(lib.analysis_stages(1).unwrap(), None);
+    assert_eq!(lib.analysis_stages(2).unwrap(), Some(analysis_stage::ALL));
+    let resumed = resume_work(&lib, true).unwrap();
+    assert_eq!(resumed, vec![(1, moved.clone())]);
+    std::fs::remove_dir_all(moved.parent().unwrap()).ok();
+}
+
 fn write_tone_wav(path: &Path, seconds: f64, hz: f64) {
     let rate = 44_100u32;
     let mut data = Vec::new();

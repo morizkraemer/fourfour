@@ -601,7 +601,7 @@ fn record_outcome(
     let t_db = Instant::now();
     let grid = stage == Stage::Grid;
     let stored = outcome.and_then(|(result, detail)| {
-        store_analysis(shared, track_id, &result, analysis_stage::ALL, |track, analysis| {
+        store_analysis(shared, track_id, source_path, &result, analysis_stage::ALL, |track, analysis| {
             if grid {
                 if let Some(track) = track {
                     analysis.key = track.key.clone();
@@ -646,6 +646,7 @@ fn record_outcome(
 fn store_analysis(
     shared: &SharedLibrary,
     track_id: i64,
+    source_path: &Path,
     analysis: &models::AnalysisResult,
     stages: u8,
     prepare: impl Fn(Option<&models::Track>, &mut models::AnalysisResult) -> Option<models::Track>,
@@ -655,6 +656,9 @@ fn store_analysis(
         let lib = shared.lock().map_err(|e| e.to_string())?;
         let held = Instant::now();
         let track = lib.get_track(track_id).map_err(|e| e.to_string())?;
+        if track.as_ref().is_some_and(|track| track.source_path != source_path) {
+            return Err(format!("track {track_id} no longer points at {}", source_path.display()));
+        }
         let track_row = prepare(track.as_ref(), &mut prepared);
         let write = lib.begin_analysis(track_id, &prepared, stages).map_err(|e| e.to_string())?;
         (write, track_row, held.elapsed())
@@ -681,7 +685,7 @@ fn store_fast_pass(
     result: &models::AnalysisResult,
     detail: &str,
 ) -> Result<(), String> {
-    store_analysis(shared, track_id, result, FAST_STAGES, |track, analysis| {
+    store_analysis(shared, track_id, source_path, result, FAST_STAGES, |track, analysis| {
         track.filter(|_| !analysis.key.is_empty()).map(|track| models::Track { key: analysis.key.clone(), ..track.clone() })
     })?;
     sink.log(LogLevel::Dim, format!("{} waveform+key stored key={} {detail}", file_name_of(source_path), result.key));
@@ -690,10 +694,10 @@ fn store_fast_pass(
 }
 
 fn partial_store(shared: &SharedLibrary, sink: &Arc<dyn AnalysisSink>, track_id: i64, source_path: &Path, started: Instant) -> PartialStore {
-    let (shared, sink, file_name) = (shared.clone(), sink.clone(), file_name_of(source_path));
+    let (shared, sink, file_name, source_path) = (shared.clone(), sink.clone(), file_name_of(source_path), source_path.to_path_buf());
     Arc::new(move |partial| {
         let stages = if partial.key.is_empty() { analysis_stage::WAVEFORM } else { FAST_STAGES };
-        let stored = store_analysis(&shared, track_id, &partial, stages, |track, analysis| {
+        let stored = store_analysis(&shared, track_id, &source_path, &partial, stages, |track, analysis| {
             track.filter(|_| stages == FAST_STAGES).map(|track| models::Track { key: analysis.key.clone(), ..track.clone() })
         });
         match stored {
