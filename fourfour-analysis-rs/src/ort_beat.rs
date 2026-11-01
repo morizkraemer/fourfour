@@ -117,17 +117,21 @@ impl OrtBeat {
         self.ready.lock().unwrap().pop()
     }
 
+    /// Opens the first session alone, so a model compiles into the cache once, then the others side by side.
     pub fn open_sessions(&self, count: usize) {
-        for _ in 0..count {
-            if self.failed().is_some() {
-                return;
+        let open_one = || match self.open_session() {
+            Ok(session) => self.ready.lock().unwrap().push(session),
+            Err(e) => self.fail(format!("{e:#}")),
+        };
+        open_one();
+        std::thread::scope(|s| {
+            for _ in 1..count {
+                if self.failed().is_none() {
+                    s.spawn(open_one);
+                }
             }
-            match self.open_session() {
-                Ok(session) => self.ready.lock().unwrap().push(session),
-                Err(e) => return self.fail(format!("{e:#}")),
-            }
-        }
-        self.all_open.store(true, Ordering::Relaxed);
+        });
+        self.all_open.store(self.failed().is_none(), Ordering::Relaxed);
     }
 
     pub fn all_open(&self) -> bool {
