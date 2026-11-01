@@ -3,6 +3,7 @@
 //! artist and title with a duration within [`DURATION_TOLERANCE_SECS`].
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
@@ -164,14 +165,18 @@ impl<K, V> Default for Slots<K, V> {
     }
 }
 
-impl<K: Hash + Eq, V: Copy> Slots<K, V> {
+impl<K: Hash + Eq + Clone, V: Copy> Slots<K, V> {
     fn insert(&mut self, key: K, entry: (u32, V)) {
-        let Some(first) = self.first.get_mut(&key) else {
-            self.first.insert(key, entry);
-            return;
+        let slot = match self.first.entry(key) {
+            Entry::Vacant(vacant) => {
+                vacant.insert(entry);
+                return;
+            }
+            Entry::Occupied(slot) => slot,
         };
-        let (lower, higher) = if entry.0 < first.0 { (entry, *first) } else { (*first, entry) };
-        *first = lower;
+        let (lower, higher) = if entry.0 < slot.get().0 { (entry, *slot.get()) } else { (*slot.get(), entry) };
+        let key = slot.key().clone();
+        *slot.into_mut() = lower;
         let rest = self.more.entry(key).or_default();
         let at = rest.partition_point(|(id, _)| *id < higher.0);
         rest.insert(at, higher);
