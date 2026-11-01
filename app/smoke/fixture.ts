@@ -24,7 +24,7 @@ function fixtureTrack(i: number): TrackInfo {
     duration_secs: 180 + i * 7,
     bitrate: 320,
     file_size: 9_000_000 + i * 100_000,
-    has_artwork: false,
+    has_artwork: !!process.env.FF_SOAK_ARTWORK,
     has_cues: true,
     has_analysis: true,
     analysis_pending: false,
