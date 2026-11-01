@@ -894,7 +894,10 @@ function handleAnalysisPartialEvent(payload: { track_id: number }) {
   queueAnalysisRefresh(payload.track_id, false);
 }
 
+let analysisRunsEnded = 0;
+
 function handleAnalysisCompleteEvent() {
+  analysisRunsEnded++;
   library.analyzing = false;
   library.analyzingTrackIds = [];
   library.analysisProgress = { current: 0, total: 0, message: '' };
@@ -1121,8 +1124,9 @@ let launchAnalysisTimer: ReturnType<typeof setTimeout> | undefined;
 export function scheduleLaunchAnalysis() {
   if (launchAnalysisTimer !== undefined) return;
   launchAnalysisTimer = setTimeout(async () => {
+    const runsEndedBefore = analysisRunsEnded;
     const queued = await tauriResumeAnalysis();
-    if (queued === 0) return;
+    if (queued === 0 || analysisRunsEnded !== runsEndedBefore) return;
     library.analyzing = true;
     if (!library.syncing) library.statusMessage = 'Resuming analysis…';
   }, LAUNCH_ANALYSIS_DELAY_MS);
