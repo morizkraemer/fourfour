@@ -10,7 +10,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "smoke": "playwright test",
-    "perf": "../scripts/perf.sh"
+    "perf": "../scripts/perf.sh",
+    "soak": "../scripts/soak.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.10.0",

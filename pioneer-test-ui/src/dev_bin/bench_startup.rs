@@ -803,6 +803,109 @@ fn fixture_lib(music: &Path, dir: &Path, analysed: f64, seed: u64) {
     );
 }
 
+fn rss_mb() -> f64 {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmRSS:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    kb / 1024.0
+}
+
+fn fake_detail_series(seed: usize) -> pioneer_usb_writer::waveform::DetailSeries {
+    let columns = 2400 * 60;
+    pioneer_usb_writer::waveform::DetailSeries {
+        columns_per_second: 2400,
+        gains: [1, 2, 3],
+        signal_gain: 1.0,
+        planes: [
+            (0..columns).map(|n| ((n + seed) % 120) as u8).collect(),
+            (0..columns).map(|n| ((n * 3 + seed) % 100) as u8).collect(),
+            (0..columns).map(|n| ((n * 5) % 90) as u8).collect(),
+        ],
+        signal: [vec![-20; columns], vec![20; columns]],
+    }
+}
+
+/// Library reads, analysis stores, playlist saves and detail-cache writes in a loop on a copy of the library, RSS sampled over time.
+fn soak(dir: &Path, seconds: u64) {
+    let work = dir.join(format!("soak-{}", std::process::id()));
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::copy(dir.join("library.db"), work.join("library.db")).unwrap();
+    let lib = LocalLibrary::open(&work.join("library.db")).unwrap();
+    let total = lib.track_count().unwrap() as usize;
+    let audio_files: Vec<PathBuf> = (0..40)
+        .map(|n| {
+            let path = work.join(format!("track{n}.wav"));
+            std::fs::write(&path, [n as u8]).unwrap();
+            path
+        })
+        .collect();
+    let cache = work.join("cache");
+    let reader = lib.track_labels_reader();
+    let mut playlists = lib.get_all_playlists().unwrap();
+    let parts = std::env::var("FF_SOAK_PARTS").unwrap_or_else(|_| "state,analysis,detail,playlists".to_string());
+    let part = |name: &str| parts.split(',').any(|p| p == name);
+    let started = Instant::now();
+    let mut rounds = 0usize;
+    let mut samples: Vec<(f64, usize, f64)> = Vec::new();
+    let mut next_sample = 0.0;
+    while started.elapsed().as_secs() < seconds {
+        if part("state") {
+            let infos = track_infos::list_track_infos(&lib).unwrap();
+            let state = LoadedState {
+                tracks: infos,
+                playlists: playlists
+                    .iter()
+                    .map(|pl| PlaylistInput { id: pl.id, name: pl.name.clone(), track_ids: pl.track_ids.clone(), parent_id: pl.parent_id, is_folder: pl.is_folder })
+                    .collect(),
+            };
+            drop(serde_json::to_string(&state).unwrap());
+            drop(state);
+            drop(track_infos::changed_track_labels(&reader));
+        }
+        if part("analysis") {
+            for n in 0..20 {
+                let id = ((rounds * 20 + n) * 7919 % total) as i64 + 1;
+                drop(analysis_payload::build_analysis_json(&lib, id).unwrap());
+                lib.set_analysis(id, &fake_analysis(rounds + n)).unwrap();
+            }
+        }
+        if part("detail") {
+            for (n, audio) in audio_files.iter().enumerate() {
+                waveform_detail::store_detail(&cache, audio, &fake_detail_series(rounds + n)).unwrap();
+                drop(waveform_detail::detail_bytes(&cache, audio).unwrap());
+            }
+        }
+        if part("playlists") {
+            playlists[0].name = format!("Soak {}", rounds % 7);
+            lib.replace_playlists(&playlists).unwrap();
+        }
+        rounds += 1;
+        if started.elapsed().as_secs_f64() >= next_sample {
+            let sample = (started.elapsed().as_secs_f64(), rounds, rss_mb());
+            println!("soak_backend t={:.0}s rounds={} rss_mb={:.1}", sample.0, sample.1, sample.2);
+            samples.push(sample);
+            next_sample += (seconds as f64 / 12.0).max(5.0);
+        }
+    }
+    let end = (started.elapsed().as_secs_f64(), rounds, rss_mb());
+    println!("soak_backend t={:.0}s rounds={} rss_mb={:.1} (end)", end.0, end.1, end.2);
+    std::fs::remove_dir_all(&work).ok();
+    perf(
+        "soak_backend",
+        serde_json::json!({
+            "tracks": total,
+            "rounds": end.1,
+            "rss_mb_first": samples.first().map_or(0.0, |s| s.2),
+            "rss_mb_last": end.2,
+            "samples": samples.iter().map(|s| serde_json::json!({ "t": s.0, "rounds": s.1, "rss_mb": s.2 })).collect::<Vec<_>>(),
+        }),
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
@@ -814,6 +917,7 @@ fn main() {
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("bands") => bands(&args[2..]),
         Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
+        Some("soak") => soak(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
         Some("fixture-lib") => fixture_lib(
@@ -823,7 +927,7 @@ fn main() {
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }

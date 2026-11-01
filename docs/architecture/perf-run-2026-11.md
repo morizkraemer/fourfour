@@ -732,3 +732,63 @@ Quietest single pair (load about 20): 50k warm 1,903 to 1,354 ms, cold 1,886 to 
 - The backend list query (about 240 ms at 50k) is unchanged; a covering index would be a schema change.
 - JS heap after boot not re-measured (perf10k uses the synthetic mock rows, which do not go through the table).
 - Real-app IPC on the Mac: WKWebView decodes the same JSON, so the smaller payload should help there too; not measured.
+
+## R23 memory (2026-11-01, `r23-memory`)
+
+Branch `r23-memory` from `ov-1028`. Linux `dev` box, headless Chromium, box load 25-55 the whole time (other workers), so cycle times are long (a cycle took 25 s to 2.5 min); read the growth, not the speed.
+
+**Method.** `app/smoke/soak.spec.ts` (skipped unless `FF_SOAK_MINUTES` is set) loops over: scroll flings (24 frames of 9,000 px), typing and clearing a search, opening and closing the palette, switching playlists (Big Playlist, Peak Time, Warmup, All Tracks), double-click loading a track, opening the expanded player, seeking in the overview four times and closing it, settings open (every page) and close, and 40 `analysis-partial` plus `analysis-progress` events and one `analysis-complete`. It runs on the 10k synthetic tracks (`FF_PERF_TRACKS=10000`) with the zoom detail served by the mock. Every `FF_SOAK_SAMPLE_SECS` it forces a GC (`HeapProfiler.collectGarbage`) and records the JS heap, DOM nodes and event listeners (`Memory.getDOMCounters`), registered Tauri callbacks, live `setInterval` ids and live object URLs. `FF_SOAK_SNAPSHOT_DIR` also writes heap snapshots of the first sample, the middle and the end; `app/perf/heap-diff.mjs first last` lists growth by constructor. `FF_SOAK_ACTIONS=search,palette` runs a subset to bisect, `FF_SOAK_ARTWORK=1` gives the tracks covers. The spec fails when listeners, documents or intervals grow, or more than 2,600 object URLs stay alive. Backend: `bench_startup soak <library dir> [seconds]` runs, on a copy of the library, `load_state` (list, labels, JSON), 20 analysis reads and stores, 40 waveform-detail cache writes and reads, and a playlist save per round and prints RSS over time (`FF_SOAK_PARTS=state,analysis,detail,playlists` to bisect). `scripts/soak.sh [minutes]` (or `npm run soak`) runs both.
+
+**Frontend, 45 min, 10k tracks** (first version of the loop; analysis events used ids up to 10,000, see below). Heap after GC:
+
+| Minute | Cycle | JS heap | DOM nodes | Listeners | Callbacks | Intervals |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1.7 | 2 | 87 MB | 5,688 | 112 | 17 | 1 |
+| 9.4 | 4 | 91 MB | 5,727 | 112 | 17 | 1 |
+| 18.8 | 14 | 111 MB | 5,905 | 112 | 17 | 1 |
+| 25.6 | 22 | 125 MB | 5,962 | 112 | 17 | 1 |
+| 31.7 | 26 | 133 MB | 5,975 | 112 | 17 | 1 |
+| 47.3 | 33 | 150 MB | 6,016 | 112 | 17 | 1 |
+
+Listeners, documents, callbacks and intervals stay flat. The heap climbed 2 MB per cycle until the snapshot diff showed why: 47 strings of 1.4-3.1 MB (108 MB) in the `waveform_color_detail.bands` of cached analysis payloads, held by `analysisCache` in `tauri.svelte.ts`, which is capped at 48 entries and was simply filling. The mock gives track `i` a duration of `180 + 7 i` s, so the ids up to 10,000 that the loop used made payloads of up to 70,000 s (a real one is 100-250 KB). It is a fixture effect, not a leak: the cache holds 48 entries and the heap stops growing when it is full. The loop now draws analysis ids from 1-60.
+
+**Frontend, 15 min, 10k tracks with covers, ids 1-60** (65 cycles before, 46 after the fix below; the after run was slower because the box was busier):
+
+| Minute | JS heap before | JS heap after | Live object URLs before | after |
+|---:|---:|---:|---:|---:|
+| 0.1 | 37.0 MB | 37.3 MB | 492 | 326 |
+| 3.6 / 4.5 | 38.1 MB | 37.0 MB | 1,060 | 819 |
+| 6.2 / 6.4 | 37.9 MB | 37.8 MB | 1,397 | 1,092 |
+| 9.1 / 9.2 | 38.9 MB | 39.2 MB | 1,397 | 1,404 |
+| 15.1 / 15.3 | 39.0 MB | 39.3 MB | 1,397 | 1,404 |
+
+Heap second half: +5.5 MB before, +5.0 MB after (JIT code and lazily built row proxies; the snapshot diff of the middle against the end shows 6 MB in `blink::NetworkResourcesData` (DevTools keeping the blob image responses Playwright's session records) and 0.1 MB of JS objects). Detached DOM: 289 nodes, of which 44 are the 120x14 row-waveform canvases of the bitmap cache (capped at 800) and 29 template fragments; no detached tree reaches the page. The DOM node counter grows by about 2 per cycle: DevTools and Blink undo steps of the search box (419 `UndoStep`, the browser's own undo stack, capped at 1,000), not app nodes.
+
+**Backend, `bench_startup soak`, 10k library** (RSS): rounds of `load_state` + 20 analysis stores + 40 cache writes + playlist save.
+
+| Seconds | Rounds | RSS |
+|---:|---:|---:|
+| 2 | 1 | 14.5 MB |
+| 250 | 116 | 24.7 MB |
+| 500 | 235 | 34.3 MB |
+| 751 | 401 | 48.3 MB |
+| 1001 | 565 | 54.9 MB |
+| 1251 | 722 | 54.9 MB |
+| 1500 | 879 | 54.9 MB |
+
+Each part alone is flat (75 s each: `state` 18.2 to 18.3 MB over 690 rounds, `analysis` 10.8 MB, `detail` 8.8 MB over 134 rounds, `playlists` 8.5 MB over 8,600 rounds); together RSS rises for about 1,000 s and then stops at 54.9 MB (allocator arenas filling with the 4 MB JSON strings; no growth over the last 500 s). The per-path lock map in `waveform_detail.rs` already drops unused locks.
+
+**Leak found and fixed**
+
+- **Thumbnail object URLs were never evicted.** `artwork.getRow` kept one blob URL (and a `$state` record key) per track ever scrolled into view, until the library was reloaded. Scrolling through a 50k library with covers accumulates tens of thousands of blobs. `rowCache` is now a first-in first-out cache of 2,000 thumbnails (about 6 MB); the oldest URL is revoked and its key deleted, a row that comes back after being evicted fetches again. Test `src/stores/artwork.test.ts` scrolls through 5,000 rows: 5,000 URLs created, 5,000 alive before the change, at most 2,000 after (the test fails before). The soak keeps its 1,397 live URLs under the cap, since its flings visit about 1,400 distinct rows; the cap only binds in longer scrolls.
+
+Same results: only the 64 px row thumbnails are evicted; a visible row is never one of the oldest 2,000 inserted.
+
+**Guards added.** `smoke/leaks.spec.ts` (in the normal smoke run) opens and closes the palette, settings (three pages) and the expanded player 6 times and asserts listeners (+2), registered callbacks (0) and DOM nodes (+40) after a GC. No leak was found there, so it passes before and after; it pins what was verified.
+
+**What is left**
+
+- `artwork.cache` (the 512 px covers of the inspector and player) is still not capped: one blob per track selected, about 40-60 KB each. Capping it needs to know which cover the player and inspector still show (an evicted URL under a visible image would blank it), so it is left for a change that may touch the UI.
+- `trackAnalysisEpochs` (one small entry per track whose analysis changed), `detail-prefetch` and the other module maps are bounded by the library size or already capped (analysis cache 48, zoom detail 3, wire bands 512, bitmaps 800, row bands LRU).
+- The soak did not run the real backend with the real app (WKWebView, Tauri IPC, real audio decode and the playback callback); that is a Mac session. Real-library memory (50k with covers) was not soaked either: 10k synthetic tracks, 15-45 min.
+- Listener, interval and callback counts were flat in every sample of every run, so the open-close paths (palette, settings, expanded player, popovers, waveform detail) tear down what they set up.

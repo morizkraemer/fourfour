@@ -25,6 +25,7 @@ export interface SmokeWindow {
   __smokeReleaseDetail: (() => void) | null;
   __smokeLabelChanges: { id: number; rating: number | null; color: string | null }[];
   __smokeSticks: Record<string, SmokeStick>;
+  __smokeArtwork: boolean;
 }
 
 export interface SmokeStick {
@@ -65,6 +66,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;
   w.__smokeDetail = 'none';
+  w.__smokeArtwork = false;
   w.__smokeReleaseDetail = null;
   w.__smokeLabelChanges ??= [];
   const GB = 1_000_000_000;
@@ -460,8 +462,15 @@ export function installTauriMock(initial: LoadedState) {
         throw new Error('smoke: no audio');
       case 'prefetch_waveform_detail':
         return null;
-      case 'get_track_artwork':
-        return new ArrayBuffer(0);
+      case 'get_track_artwork': {
+        if (!w.__smokeArtwork) return new ArrayBuffer(0);
+        const size = Math.min(args.maxPx ?? 512, 512);
+        const canvas = new OffscreenCanvas(size, size);
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = `hsl(${(args.trackId * 47) % 360} 60% 45%)`;
+        ctx.fillRect(0, 0, size, size);
+        return (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })).arrayBuffer();
+      }
       case 'get_mounted_volumes':
         return Object.keys(w.__smokeSticks);
       case 'app_version':
