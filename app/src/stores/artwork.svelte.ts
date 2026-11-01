@@ -7,11 +7,22 @@ let cacheGeneration = 0;
 const inflight = new Map<number, Promise<string | null>>();
 
 let rowCache = $state<Record<number, string>>({});
+const ROW_CACHE_LIMIT = 2000;
+const rowCached: number[] = [];
 const ROW_FETCH_CONCURRENCY = 4;
 const ROW_QUEUE_LIMIT = 64;
 const rowQueue: number[] = [];
 const rowQueued = new Set<number>();
 let rowActive = 0;
+
+function rememberRow(trackId: number, url: string) {
+  rowCache[trackId] = url;
+  rowCached.push(trackId);
+  if (rowCached.length <= ROW_CACHE_LIMIT) return;
+  const oldest = rowCached.shift()!;
+  if (rowCache[oldest]) URL.revokeObjectURL(rowCache[oldest]);
+  delete rowCache[oldest];
+}
 
 function pumpRowQueue() {
   while (rowActive < ROW_FETCH_CONCURRENCY && rowQueue.length > 0) {
@@ -22,7 +33,7 @@ function pumpRowQueue() {
     getTrackArtwork(trackId, ARTWORK_ROW_PX)
       .then((bytes) => {
         if (gen !== cacheGeneration) return;
-        rowCache[trackId] = bytes ? URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) : '';
+        rememberRow(trackId, bytes ? URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) : '');
       })
       .finally(() => {
         rowActive--;
@@ -115,6 +126,7 @@ export const artwork = {
       if (url) URL.revokeObjectURL(url);
     }
     rowCache = {};
+    rowCached.length = 0;
     rowQueue.length = 0;
     rowQueued.clear();
   }
