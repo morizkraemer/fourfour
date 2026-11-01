@@ -82,6 +82,13 @@ app_run() {
   shift 2
   local data="$home/Library/Application Support/com.pioneer.test-ui"
   rm -rf "$home"
+  local need_kb free_kb
+  need_kb=$(( $(du -sk "$FIXTURE/library" | cut -f1) * 2 ))
+  free_kb=$(df -Pk "$OUT" | awk 'NR==2 {print $4}')
+  if [ "$DRY" = 0 ] && [ "$free_kb" -lt "$need_kb" ]; then
+    say "run $n: not enough disk for a library copy (free ${free_kb} KB, need ${need_kb} KB); stopping"
+    exit 1
+  fi
   mkdir -p "$data"
   cp -R "$FIXTURE/library" "$home/fixture-library"
   printf '{"library_path":"%s"}\n' "$home/fixture-library/library.db" > "$data/config.json"
@@ -103,6 +110,7 @@ app_run() {
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   sleep 2
+  rm -rf "$home"
 }
 
 say "first launch on a fresh copy, then warm launches"
