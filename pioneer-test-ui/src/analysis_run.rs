@@ -927,8 +927,10 @@ async fn run_registered(
             sink.log(
                 LogLevel::Info,
                 format!(
-                    "Starting analysis: {initial_total} tracks, rust workers={} threads/track={} model jobs={model_jobs}",
-                    plan.workers, plan.threads_per_track
+                    "Starting analysis: {initial_total} tracks, rust workers={} threads/track={} model jobs={model_jobs} beat model={}",
+                    plan.workers,
+                    plan.threads_per_track,
+                    engine.beat_runtime()
                 ),
             );
             (plan.workers, ModelJobs { max: model_jobs, whole: coordinator.whole_jobs.unwrap_or(WHOLE_JOBS_DURING_FAST_PASSES.min(plan.workers.saturating_sub(1).max(1))) })

@@ -42,6 +42,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "13.4"
+    },
     "linux": {
       "deb": {
         "depends": ["libasound2t64 | libasound2", "libssl3t64 | libssl3"]

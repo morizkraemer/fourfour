@@ -7,6 +7,8 @@ autobins = false
 
 [features]
 dev-bins = []
+ort = ["fourfour-analysis-rs/ort"]
+coreml = ["fourfour-analysis-rs/coreml"]
 
 [[bin]]
 name = "pioneer-test-ui"
@@ -28,10 +30,6 @@ ringbuf = "0.4"
 symphonia = { version = "0.5", features = ["all"] }
 image = "0.25.10"
 fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
-
-[features]
-ort = ["fourfour-analysis-rs/ort"]
-coreml = ["fourfour-analysis-rs/coreml"]
 
 [[bin]]
 name = "waveform_dev"

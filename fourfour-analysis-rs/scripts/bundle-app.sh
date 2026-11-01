@@ -16,4 +16,8 @@ for f in $REQUIRED; do
   [ -s "$MODELS/$f" ] || { echo "bundle-app: $MODELS/$f missing or empty; refusing to bundle without model weights" >&2; exit 1; }
 done
 cd "$ROOT/pioneer-test-ui"
-exec cargo tauri build --config tauri.bundle-weights.conf.json "$@"
+FEATURES=()
+if [ "$(uname -s)" = "Darwin" ]; then
+  FEATURES=(--features coreml)
+fi
+exec cargo tauri build --config tauri.bundle-weights.conf.json ${FEATURES[@]+"${FEATURES[@]}"} "$@"
