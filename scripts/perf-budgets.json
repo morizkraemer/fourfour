@@ -93,7 +93,7 @@
       "unit": "MB",
       "path": "derived.all.load_state payload MB",
       "now": {
-        "10k": 7.9,
+        "10k": 1.7,
         "25k": 19.8,
         "50k": null
       },

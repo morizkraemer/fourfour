@@ -10,8 +10,16 @@ pub fn requested() -> bool {
 
 fn bundled_models_dir() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("current exe: {e}"))?;
-    let contents = exe.parent().and_then(|dir| dir.parent()).ok_or("executable is not inside a bundle")?;
-    Ok(contents.join("Resources").join("models"))
+    let exe_dir = exe.parent().ok_or("executable has no parent directory")?;
+    if cfg!(target_os = "macos") {
+        let contents = exe_dir.parent().ok_or("executable is not inside a bundle")?;
+        Ok(contents.join("Resources").join("models"))
+    } else if cfg!(windows) {
+        Ok(exe_dir.join("models"))
+    } else {
+        let prefix = exe_dir.parent().ok_or("executable is not inside an install prefix")?;
+        Ok(prefix.join("lib").join("fourfour").join("models"))
+    }
 }
 
 pub fn run() -> Result<String, String> {
