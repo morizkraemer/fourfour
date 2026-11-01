@@ -5,6 +5,7 @@
  */
 
 import { library } from './library.svelte.ts';
+import { artwork } from './artwork.svelte.ts';
 
 /* ── Reactive state ─────────────────────────────────────────────────── */
 
@@ -13,6 +14,7 @@ export const selection = $state({
   ids: new Set<number>(),
 });
 
+artwork.keep('inspector', () => (selection.ids.size === 1 ? selection.ids : []));
 
 export function selectionCount() {
   return selection.ids.size;

@@ -86,6 +86,7 @@ export interface PlayerTrack {
 }
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
+artwork.keep('player', () => (loadedTrack ? [loadedTrack.id] : []));
 
 export const player = $state({
   playing: false,

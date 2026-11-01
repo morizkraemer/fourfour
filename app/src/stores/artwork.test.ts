@@ -68,3 +68,97 @@ describe('row artwork cache', () => {
     expect(live.size).toBe(0);
   });
 });
+
+describe('cover artwork cache', () => {
+  let live: Set<string>;
+  let created = 0;
+  const COVER_LIMIT = 128;
+
+  beforeEach(() => {
+    live = new Set();
+    created = 0;
+    hooks.getTrackArtwork.mockReset();
+    hooks.getTrackArtwork.mockImplementation(async () => new ArrayBuffer(3000));
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
+      const url = `blob:cover/${created++}`;
+      live.add(url);
+      return url;
+    });
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation((url) => {
+      live.delete(url);
+    });
+  });
+
+  afterEach(() => {
+    artwork.clear();
+    vi.restoreAllMocks();
+  });
+
+  async function select(id: number) {
+    artwork.get(id, true);
+    await settle();
+  }
+
+  it('keeps a bounded number of covers while a thousand tracks are selected one after another', async () => {
+    for (let id = 1; id <= 1000; id++) await select(id);
+    expect(created).toBe(1000);
+    expect(live.size).toBeLessThanOrEqual(COVER_LIMIT);
+    expect(live.size).toBeGreaterThan(16);
+  });
+
+  it('never revokes the cover of a track that is in use while others are evicted', async () => {
+    const stop = artwork.keep('player', () => [1]);
+    await select(1);
+    const url = artwork.get(1, true);
+    expect(url).toMatch(/^blob:/);
+    for (let id = 2; id <= 600; id++) await select(id);
+    expect(live.has(url)).toBe(true);
+    expect(artwork.get(1, true)).toBe(url);
+    expect(live.size).toBeLessThanOrEqual(COVER_LIMIT + 1);
+    stop();
+  });
+
+  it('keeps every cover that any consumer still shows, even above the limit', async () => {
+    const shown = Array.from({ length: 150 }, (_, i) => i + 1);
+    const stopA = artwork.keep('a', () => shown.slice(0, 75));
+    const stopB = artwork.keep('b', () => shown.slice(75));
+    for (const id of shown) await select(id);
+    for (let id = 151; id <= 400; id++) await select(id);
+    const urls = shown.map((id) => artwork.get(id, true));
+    expect(urls.every((url) => /^blob:/.test(url) && live.has(url))).toBe(true);
+    stopA();
+    stopB();
+  });
+
+  it('lets a cover go once its consumer stops using it', async () => {
+    const stop = artwork.keep('inspector', () => [1]);
+    await select(1);
+    const url = artwork.get(1, true);
+    stop();
+    for (let id = 2; id <= 600; id++) await select(id);
+    expect(live.has(url)).toBe(false);
+  });
+
+  it('loads an evicted cover again when its track is selected again', async () => {
+    for (let id = 1; id <= 600; id++) await select(id);
+    expect(artwork.get(1, true)).toBe('');
+    await settle();
+    expect(artwork.get(1, true)).toMatch(/^blob:/);
+    expect(hooks.getTrackArtwork.mock.calls.filter(([id]) => id === 1).length).toBe(2);
+  });
+
+  it('serves a recently selected cover again without fetching it twice', async () => {
+    await select(5);
+    const fetches = hooks.getTrackArtwork.mock.calls.length;
+    expect(artwork.get(5, true)).toMatch(/^blob:/);
+    expect(hooks.getTrackArtwork.mock.calls.length).toBe(fetches);
+  });
+
+  it('revokes every cover when the library is cleared', async () => {
+    const stop = artwork.keep('player', () => [1]);
+    for (let id = 1; id <= 50; id++) await select(id);
+    artwork.clear();
+    expect(live.size).toBe(0);
+    stop();
+  });
+});

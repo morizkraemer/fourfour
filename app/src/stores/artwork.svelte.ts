@@ -6,6 +6,35 @@ let cache = $state<Record<number, string>>({});
 let cacheGeneration = 0;
 const inflight = new Map<number, Promise<string | null>>();
 
+const COVER_CACHE_LIMIT = 96;
+const coverRecency = new Set<number>();
+const coverUsers = new Map<string, () => Iterable<number>>();
+
+function touchCover(trackId: number) {
+  coverRecency.delete(trackId);
+  coverRecency.add(trackId);
+}
+
+function coversInUse(): Set<number> {
+  const inUse = new Set<number>();
+  for (const source of coverUsers.values()) for (const id of source()) inUse.add(id);
+  return inUse;
+}
+
+function rememberCover(trackId: number, url: string) {
+  cache[trackId] = url;
+  touchCover(trackId);
+  if (coverRecency.size <= COVER_CACHE_LIMIT) return;
+  const inUse = coversInUse();
+  for (const id of coverRecency) {
+    if (coverRecency.size <= COVER_CACHE_LIMIT) break;
+    if (id === trackId || inUse.has(id)) continue;
+    if (cache[id]) URL.revokeObjectURL(cache[id]);
+    delete cache[id];
+    coverRecency.delete(id);
+  }
+}
+
 let rowCache = $state<Record<number, string>>({});
 const ROW_CACHE_LIMIT = 2000;
 const rowCached: number[] = [];
@@ -50,7 +79,10 @@ export const artwork = {
     if (!trackId || !hasArtwork) return '';
     
     const cachedUrl = cache[trackId];
-    if (cachedUrl !== undefined) return cachedUrl;
+    if (cachedUrl !== undefined) {
+      touchCover(trackId);
+      return cachedUrl;
+    }
 
     void this.fetch(trackId);
     return ''; // Return empty string while loading
@@ -87,14 +119,14 @@ export const artwork = {
         if (bytes) {
           const blob = new Blob([bytes], { type: 'image/jpeg' });
           const url = URL.createObjectURL(blob);
-          cache[trackId] = url;
+          rememberCover(trackId, url);
           return url;
         }
-        cache[trackId] = ''; // No bytes — negative cache
+        rememberCover(trackId, '');
       } catch (err) {
         if (gen !== cacheGeneration) return null;
         console.warn(`Failed to fetch artwork for track ${trackId}:`, err);
-        cache[trackId] = '';
+        rememberCover(trackId, '');
       } finally {
         inflight.delete(trackId);
       }
@@ -103,6 +135,18 @@ export const artwork = {
 
     inflight.set(trackId, promise);
     await promise;
+  },
+
+  /**
+   * Declares the covers a consumer is showing right now. Covers returned by `source` are never
+   * evicted from the 512 px cache. `source` is read when the cache evicts, so it must return the
+   * current ids. Returns the function that releases the claim.
+   */
+  keep(owner: string, source: () => Iterable<number>): () => void {
+    coverUsers.set(owner, source);
+    return () => {
+      if (coverUsers.get(owner) === source) coverUsers.delete(owner);
+    };
   },
 
   /**
@@ -120,7 +164,8 @@ export const artwork = {
         }
       }
     }
-    cache = {}; // Reset the Svelte state reactively
+    cache = {};
+    coverRecency.clear();
     inflight.clear();
     for (const url of Object.values(rowCache)) {
       if (url) URL.revokeObjectURL(url);

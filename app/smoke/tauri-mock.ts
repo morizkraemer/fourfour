@@ -469,7 +469,11 @@ export function installTauriMock(initial: LoadedState) {
         const ctx = canvas.getContext('2d')!;
         ctx.fillStyle = `hsl(${(args.trackId * 47) % 360} 60% 45%)`;
         ctx.fillRect(0, 0, size, size);
-        return (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })).arrayBuffer();
+        const jpeg = await (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })).arrayBuffer();
+        if (size < 512) return jpeg;
+        const padded = new Uint8Array(jpeg.byteLength + 8192);
+        padded.set(new Uint8Array(jpeg));
+        return padded.buffer;
       }
       case 'get_mounted_volumes':
         return Object.keys(w.__smokeSticks);
