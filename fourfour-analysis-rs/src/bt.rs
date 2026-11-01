@@ -61,6 +61,9 @@ struct ChunkRunner<'a> {
 #[cfg(feature = "ort")]
 const ORT_SESSIONS: usize = 2;
 
+#[cfg(feature = "ort")]
+const RTEN_CHUNK_SLOTS_PER_OPEN_SESSION: usize = 6;
+
 /// The runtime the beat model is built to run on: `rten`, or onnxruntime (`coreml` on macOS with the `coreml`
 /// feature, `ort-cpu` otherwise) when built with the `ort` feature and `FOURFOUR_BEAT_RUNTIME` is not `rten`.
 pub fn beat_runtime() -> &'static str {
@@ -81,6 +84,8 @@ type ChunkLogits = (Vec<f32>, Vec<f32>);
 struct ChunkExecutor {
     queue: Mutex<ChunkQueue>,
     ready: Condvar,
+    wanted: AtomicUsize,
+    running: AtomicUsize,
 }
 
 #[derive(Default)]
@@ -103,7 +108,8 @@ impl ChunkExecutor {
     fn take(&self, runner: &mut ChunkRunner) -> Option<(Arc<TrackChunks>, usize)> {
         let mut queue = self.queue.lock().unwrap();
         loop {
-            if queue.shutdown || runner.surplus() {
+            if queue.shutdown || runner.surplus(self.running.load(Ordering::Relaxed), self.wanted.load(Ordering::Relaxed)) {
+                self.running.fetch_sub(1, Ordering::Relaxed);
                 return None;
             }
             queue.tracks.retain(|t| !t.cancelled.load(Ordering::Relaxed));
@@ -141,25 +147,30 @@ impl BeatModel {
         self.ort.as_ref().filter(|ort| ort.failed().is_none())
     }
 
-    fn max_chunk_threads(&self) -> usize {
+    fn max_chunk_threads(&self, wanted: usize) -> usize {
         #[cfg(feature = "ort")]
-        if self.usable_ort().is_some_and(|ort| ort.all_open()) {
-            return ORT_SESSIONS;
+        if let Some(ort) = self.usable_ort() {
+            if ort.all_open() {
+                return ORT_SESSIONS;
+            }
+            let open = ort.opened();
+            return open + wanted.saturating_sub(open * RTEN_CHUNK_SLOTS_PER_OPEN_SESSION).max(1);
         }
-        usize::MAX
+        wanted
     }
 }
 
 impl ChunkRunner<'_> {
-    /// True for a thread without a session once all onnxruntime sessions are open: it ran rten chunks while they
-    /// opened and now leaves the model to the sessions.
-    fn surplus(&mut self) -> bool {
+    /// True for a thread without a session while more threads run than the open sessions leave room for: it ran rten
+    /// chunks while they opened and now leaves the memory to the sessions.
+    #[cfg_attr(not(feature = "ort"), allow(unused_variables))]
+    fn surplus(&mut self, running: usize, wanted: usize) -> bool {
         #[cfg(feature = "ort")]
         if let Some(ort) = self.model.usable_ort() {
             if self.ort.is_none() {
                 self.ort = ort.take_session();
             }
-            return self.ort.is_none() && ort.all_open();
+            return self.ort.is_none() && running > self.model.max_chunk_threads(wanted);
         }
         false
     }
@@ -323,12 +334,20 @@ impl BeatEngine {
     }
 
     fn ensure_chunk_threads(&self, wanted: usize) -> Result<()> {
-        let wanted = wanted.min(self.beat.max_chunk_threads());
+        self.chunks.wanted.store(wanted, Ordering::Relaxed);
+        let limit = self.beat.max_chunk_threads(wanted);
         let mut threads = self.chunk_threads.lock().unwrap();
         threads.retain(|thread| !thread.is_finished());
-        while threads.len() < wanted {
+        while self.chunks.running.load(Ordering::Relaxed) < limit {
             let (chunks, model) = (self.chunks.clone(), self.beat.clone());
-            threads.push(std::thread::Builder::new().name("beat-chunks".into()).spawn(move || chunks.work(&model))?);
+            self.chunks.running.fetch_add(1, Ordering::Relaxed);
+            match std::thread::Builder::new().name("beat-chunks".into()).spawn(move || chunks.work(&model)) {
+                Ok(handle) => threads.push(handle),
+                Err(e) => {
+                    self.chunks.running.fetch_sub(1, Ordering::Relaxed);
+                    return Err(e.into());
+                }
+            }
         }
         Ok(())
     }

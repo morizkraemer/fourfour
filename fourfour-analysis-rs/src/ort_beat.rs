@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{anyhow, Result};
@@ -25,6 +25,7 @@ pub struct OrtBeat {
     env: Environment,
     prepacked: PrepackedWeights,
     ready: Mutex<Vec<OrtChunkSession>>,
+    opened: AtomicUsize,
     all_open: AtomicBool,
     failure: OnceLock<String>,
 }
@@ -92,6 +93,7 @@ impl OrtBeat {
             env,
             prepacked: PrepackedWeights::new(),
             ready: Mutex::new(Vec::new()),
+            opened: AtomicUsize::new(0),
             all_open: AtomicBool::new(false),
             failure: OnceLock::new(),
         })
@@ -120,7 +122,10 @@ impl OrtBeat {
     /// Opens the first session alone, so a model compiles into the cache once, then the others side by side.
     pub fn open_sessions(&self, count: usize) {
         let open_one = || match self.open_session() {
-            Ok(session) => self.ready.lock().unwrap().push(session),
+            Ok(session) => {
+                self.ready.lock().unwrap().push(session);
+                self.opened.fetch_add(1, Ordering::Relaxed);
+            }
             Err(e) => self.fail(format!("{e:#}")),
         };
         open_one();
@@ -132,6 +137,10 @@ impl OrtBeat {
             }
         });
         self.all_open.store(self.failed().is_none(), Ordering::Relaxed);
+    }
+
+    pub fn opened(&self) -> usize {
+        self.opened.load(Ordering::Relaxed)
     }
 
     pub fn all_open(&self) -> bool {
