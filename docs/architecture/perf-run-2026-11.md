@@ -607,6 +607,44 @@ EP options tried first (Python, one 1500-frame chunk, single thread, Mac partly 
 - Agreement with rten (`ffa --dump`, every CoreML config): max abs logit diff 1.9e-4 (median per track 1.1e-4), beat peaks equal on 49/49, final grid within 1 ms and BPM within 0.01 on 49/49 (the summary pairs 49 of the 50 tracks). Grid eval identical for every config, CoreML and rten: grid within 20 ms 44/50, BPM within 0.1 47/50, bar right 41 of 46 aligned.
 - The decision rule from R11 holds (faster at similar memory, grid 44/50, peaks match), so `coreml` stays and ships in R26.
 
+## R26 ship (2026-11-01, `r26-coreml-ship`)
+
+Branch `r26-coreml-ship` = `ov-1028` + `r24-coreml`, not landed. CoreML is now the beat-model engine of the macOS app, with rten as the bridge and the fallback. Linux and Windows builds are unchanged: no `ort` in them, rten only.
+
+### What ships
+
+- **macOS bundles build with `--features coreml`**: `scripts/mac/build-dmg.sh` passes it, and `fourfour-analysis-rs/scripts/bundle-app.sh` adds it when run on Darwin. The CI workflow lives on `ov-ci` and calls `build-dmg.sh` for the Mac job, so it picks this up when both land; the first build downloads ONNX Runtime from `cdn.pyke.io` (network needed) and needs Xcode's clang for `libclang_rt.osx.a` (R11). Apple Silicon only: pyke has no Intel macOS build, so an `x86_64-apple-darwin` or universal bundle does not build with this feature.
+- **`bundle.macOS.minimumSystemVersion` is `13.4`** in `pioneer-test-ui/tauri.conf.json`: the ORT objects are built for macOS 13.4, so the app now needs Ventura 13.4 or later (it was Tauri's default 10.13). Tauri sets `MACOSX_DEPLOYMENT_TARGET` from it, which also removes R11's linker warnings.
+- **Engine choice at run time** (`fourfour-analysis-rs/src/bt.rs`, `src/ort_beat.rs`). rten always loads (15 ms). With the `coreml` feature (and `FOURFOUR_BEAT_RUNTIME` not `rten`) a background thread opens the CoreML sessions at engine load: the first alone (so a new model compiles into the cache once), then the rest side by side. Until they are open, every chunk thread runs rten as before; then each thread with a session runs CoreML, and the threads without one finish their chunk and stop, leaving 2 chunk threads. Chunks that are not 1500 frames long (tracks under about 30 s) run on rten. If the environment, the cache directory, a session open or a chunk run fails, the reason is logged once (`beat model: coreml unavailable, using rten: ...`), the engine switches to rten for good, and the chunk-thread cap lifts back to the rten slot count. The app's analysis log line says `beat model=coreml` or `beat model=rten (coreml failed: ...)`; `bench_analysis` prints `BEAT runtime=... chunks_accelerated=N chunks_rten=M fallback=...`.
+- **Config: 2 CoreML sessions** (`ORT_SESSIONS`), the app's worker plan unchanged. R24's sweep: 1 session 18-21 tracks/min, 2 sessions 26-32; `w2t2` and `w4t2` gave the same tracks/min (medians 28.5 and 28.9) and `w4` cost 0.3-0.5 GB more, so the number that matters is the session count (each session holds its own compiled model and activations), and 2 it is. The app's workers (6 on the M5 Pro, 2 threads per track) do decode, mel, key and the fast pass on the CPU as they did with rten; more of them feed the 2 sessions, they do not add sessions.
+- **Compiled-model cache** `~/Library/Caches/fourfour-coreml/<content hash>-<chunk frames>/`: the key is a hash of the model file's bytes (was size and mtime), so any model change compiles afresh; entries of other keys are removed when a new key is created. If opening a session with the cache fails, the entry is deleted and the open retried once; if that fails too, rten takes over.
+- Analysis output format unchanged; no new dependencies.
+
+### Mac validation (`mbp`, M5 Pro, `~/dev/build/fourfour-r11`, `nice -n 10`, headless)
+
+`bench_analysis --backend rust` (the app's runner and engine selection, staged) built with `--features coreml,dev-bins`; the same binary with `FOURFOUR_BEAT_RUNTIME=rten` for the rten rows; the first 12 (or 1) tracks of the dev split. Load on the Mac was 4-38 from other work during the runs, so read pairs, not absolute numbers.
+
+| Run | Tracks/min | First result | Peak RSS | Chunks CoreML / rten |
+|---|---:|---:|---:|---:|
+| 12 tracks, CoreML (load 5) | 31.3 | 3.0 s | 7.7 GB | 114 / 50 |
+| 12 tracks, CoreML (load 35) | 25.1 | 5.6 s | 7.1 GB | 114 / 50 |
+| 12 tracks, CoreML, sessions opened one by one (loads 8-15) | 28.8, 26.9 | 3.5, 3.9 s | 7.0 GB | 114 / 50 |
+| 12 tracks, rten (loads 9-16) | 18.7-20.4 | 3.6-5.8 s | 6.2-6.3 GB | 0 / 164 |
+| 12 tracks, CoreML, cold cache (compiles, load 38) | 19.5 | 4.0 s | 7.4 GB | 10 / 154 |
+| 12 tracks, CoreML before the rten bridge | 30.2, 31.5 | 6.5, 7.1 s | 5.0-5.1 GB | 158 / 6 |
+| 12 tracks, rten, same session as the row above | 22.0, 22.9 | 3.1, 3.2 s | 6.3 GB | 0 / 164 |
+| 1 track, CoreML | - | 2.8 s | 6.0 GB | 0 / 13 |
+| 1 track, rten | - | 2.7-2.8 s | 5.5 GB | 0 / 13 |
+| 1 track, CoreML before the rten bridge | - | 10.6 s | 3.1 GB | 1 / 12 |
+
+- **Throughput**: CoreML 25-31 tracks/min against rten 19-23 in the app path, about 1.4x (the app's rten already runs 12 chunk threads and staged CPU work, so the gap is smaller than `ffa`'s 2x).
+- **First result / "analyze this track now"**: the model load did dominate. Without the bridge the 2 CoreML threads waited for their sessions (3.6 s warm each) and a single track took 10.6 s against rten's 2.7 s; with the bridge a single track runs entirely on rten while the sessions open (2.8 s), and a priority request 3 s into a 12-track run (`--play-after 3 --play-index 11`) was fully analysed 6.2 s later (rten 5.7 s). No early warm-up at app start was needed.
+- **Memory**: peak RSS is 0.8-1.4 GB above rten's because for a few seconds the rten bridge threads and the opening CoreML sessions overlap; before the bridge CoreML peaked 1.2 GB below rten. Steady state after the bridge is 2 sessions. If the peak matters, cap the bridge threads; not done here, first result was the brief.
+- **Results** (`--dump`, stored app results, 12 tracks): CoreML vs rten keys 12/12 identical, BPM within 0.01 12/12, every beat time identical to the millisecond on 12/12 (warm, cold and pre-bridge runs). R24's dev-split numbers (49/49 peaks, grid within 1 ms) stand for the model itself.
+- **Fallback**: `HOME=/nonexistent` (cache directory cannot be created) logged `beat model: coreml unavailable, using rten: Read-only file system (os error 30)` once and analysed on rten (13/13 chunks rten, result stored). **Broken cache**: every file of the cache entry truncated to 0 bytes; the next run opened CoreML without error (the entry was rebuilt, 408 non-empty files after), took about 13 s for one track on the rten bridge while recompiling, and the run after that used the cache again.
+- **Bundle**: `scripts/mac/build-dmg.sh` built `fourfour_0.1.0_aarch64.dmg` (97 MB) with `coreml`, no linker warnings; `scripts/mac/check-dmg.sh` on it: failures=0 (ad-hoc signature, weights and licences, plist, `--self-check` ok). Inside: `LSMinimumSystemVersion` 13.4, binary `minos 13.4`, only the app binary in `Contents/MacOS` (59 MB). Not installed anywhere.
+- **Dev bins moved to `pioneer-test-ui/src/dev_bin/`** (was `src/bin/`): tauri-cli 2.10 adds every file under `src/bin` as a bundle binary even when its `[[bin]]` has unmet `required-features`, so a clean macOS bundle (this clone, and so the CI runner) failed with `Failed to copy binary ... bench_startup does not exist`, and a target dir that had them (the perf-night clone) shipped them. r25's `required-features` fix alone did not cover that. The `[[bin]]` paths point at the new directory; nothing else changed.
+
 ## R13 50k (2026-11-01, `r13-50k`)
 
 Branch `r13-50k` from `ov-1028` (`ea0ddaa`). Linux `dev` box, headless Chromium, release `bench_startup`. Box load 25-55 the whole time (other workers): absolute times are inflated about 2x against a quiet box; read the 10k-to-50k ratios and the before/after of the same step, not the absolute values.
