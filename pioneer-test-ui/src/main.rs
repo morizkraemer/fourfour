@@ -17,7 +17,7 @@ mod playback;
 #[allow(dead_code)]
 #[path = "../../fourfour-analysis-rs/tests/messy_fixtures/mod.rs"]
 mod messy_fixtures;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod robustness_tests;
 mod self_check;
 mod tempo;
