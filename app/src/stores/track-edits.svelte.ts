@@ -4,7 +4,7 @@
  * row, the inspector and the loaded player track.
  */
 
-import { analyzeTrackIds, library, bumpLibraryTracks } from './library.svelte.ts';
+import { analyzeTrackIds, library, bumpLibraryTracks, libraryTrackById } from './library.svelte.ts';
 import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setTrackMode, toggleExpanded } from './player.svelte.ts';
 import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
@@ -24,7 +24,7 @@ import {
 } from '../services/tauri.svelte.ts';
 
 function trackById(trackId: number) {
-  return library.tracks.find((t) => t.id === trackId);
+  return libraryTrackById(trackId);
 }
 
 function reportFailure(what: string, err: unknown) {

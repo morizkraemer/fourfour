@@ -319,14 +319,14 @@ let trackList = $state.raw<any[]>([]);
  */
 let plainTracks: Record<string, any>[] = [];
 
-function setLibraryTracks(tracks: Record<string, any>[]) {
+function setLibraryTracks(tracks: Record<string, any>[], rows = tracks.map(reactiveTrack)) {
   plainTracks = tracks;
-  trackList = tracks.map(reactiveTrack);
+  trackList = rows;
 }
 
-function appendLibraryTracks(tracks: Record<string, any>[]) {
+function appendLibraryTracks(tracks: Record<string, any>[], rows: Record<string, any>[]) {
   plainTracks = plainTracks.concat(tracks);
-  trackList = trackList.concat(tracks.map(reactiveTrack));
+  trackList = trackList.concat(rows);
 }
 
 function isPlainContainer(value: object): boolean {
@@ -444,7 +444,8 @@ let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
 
-const WARMUP_CHUNK = 250;
+const WARMUP_CHUNK = 100;
+const WARMUP_SLICE_MS = 8;
 const WARMUP_IDLE_RESERVE_MS = 2;
 const WARMUP_DELAY_MS = 250;
 
@@ -489,8 +490,15 @@ function scheduleSearchIndexWarmup() {
     const step = (deadline?: IdleDeadline) => {
       if (generation !== warmupGeneration) return;
       if (haystackCursor < plainTracks.length) {
+        const sliceEnd = performance.now() + WARMUP_SLICE_MS;
         do fillSearchIndex(WARMUP_CHUNK);
-        while (haystackCursor < plainTracks.length && deadline && !deadline.didTimeout && deadline.timeRemaining() > WARMUP_IDLE_RESERVE_MS);
+        while (
+          haystackCursor < plainTracks.length &&
+          deadline &&
+          !deadline.didTimeout &&
+          deadline.timeRemaining() > WARMUP_IDLE_RESERVE_MS &&
+          performance.now() < sliceEnd
+        );
         whenIdle(step);
       } else {
         haystacksFor(library.tracks);
@@ -502,13 +510,24 @@ function scheduleSearchIndexWarmup() {
 
 const text = (value: unknown) => (value == null ? '' : String(value));
 
+const unlessSame = (value: unknown, shown: string) => {
+  const s = text(value);
+  return s === shown ? '' : ' ' + s;
+};
+
 function trackHaystack(track: Record<string, unknown>): string {
   const raw = (track.raw ?? {}) as Record<string, unknown>;
+  const title = text(track.title);
+  const artist = text(track.artist);
+  const album = text(track.album);
+  const genre = text(track.genre);
+  const key = text(track.key);
+  const filePath = text(track.filePath);
   return (
-    text(track.title) + ' ' + text(track.artist) + ' ' + text(track.album) + ' ' + text(track.label) + ' ' +
-    text(track.genre) + ' ' + text(track.key) + ' ' + text(track.bpm) + ' ' + text(track.time) + ' ' +
-    text(track.filePath) + ' ' + text(track.index) + ' ' + text(raw.title) + ' ' + text(raw.artist) + ' ' +
-    text(raw.album) + ' ' + text(raw.genre) + ' ' + text(raw.key) + ' ' + text(raw.source_path)
+    title + ' ' + artist + ' ' + album + ' ' + text(track.label) + ' ' + genre + ' ' + key + ' ' +
+    text(track.bpm) + ' ' + text(track.time) + ' ' + filePath + ' ' + text(track.index) +
+    unlessSame(raw.title, title) + unlessSame(raw.artist, artist) + unlessSame(raw.album, album) +
+    unlessSame(raw.genre, genre) + unlessSame(raw.key, key) + unlessSame(raw.source_path, filePath)
   ).toLowerCase();
 }
 
@@ -566,6 +585,13 @@ export function unanalyzedTrackCount(): number {
   let count = 0;
   for (let i = 0; i < tracks.length; i++) if (!plainTracks[i].analyzed) count++;
   return count;
+}
+
+/** Whether any track was never analysed; read on the plain objects like `unanalyzedTrackCount`, stops at the first. */
+export function hasUnanalyzedTracks(): boolean {
+  const tracks = library.tracks;
+  for (let i = 0; i < tracks.length; i++) if (!plainTracks[i].analyzed) return true;
+  return false;
 }
 
 function trackIndexById(id: number): number {
@@ -641,7 +667,7 @@ export function isTrackAnalyzing(trackId: number): boolean {
 }
 
 function knownTrackIds(ids: number[]): number[] {
-  return [...new Set(ids)].filter((id) => id > 0 && library.tracks.some((t) => t.id === id));
+  return [...new Set(ids)].filter((id) => id > 0 && libraryTrackById(id) !== undefined);
 }
 
 const analysisStartListeners = new Set<(trackIds: number[]) => void>();
@@ -658,7 +684,7 @@ export function onAnalysisStart(listener: (trackIds: number[]) => void): () => v
  * the waveform arrives first as `analysis-partial`, the full result as `analysis-progress`.
  */
 export function requestBackgroundAnalysis(trackId: number) {
-  const track = library.tracks.find((t) => t.id === trackId);
+  const track = libraryTrackById(trackId);
   if (!track || (track.analyzed && !track.analysisPending)) return;
 
   if (isTrackAnalyzing(trackId)) {
@@ -842,7 +868,7 @@ function finishAnalyzingTrack(trackId: number) {
 function markTracksPendingAnalysis(ids: number[]) {
   const restarted: number[] = [];
   for (const id of ids) {
-    const track = library.tracks.find((t) => t.id === id);
+    const track = libraryTrackById(id);
     if (!track || track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
@@ -887,7 +913,10 @@ function handleAnalysisPartialEvent(payload: { track_id: number }) {
   queueAnalysisRefresh(payload.track_id, false);
 }
 
+let analysisRunsEnded = 0;
+
 function handleAnalysisCompleteEvent() {
+  analysisRunsEnded++;
   library.analyzing = false;
   library.analyzingTrackIds = [];
   library.analysisProgress = { current: 0, total: 0, message: '' };
@@ -911,17 +940,29 @@ function rowBandsFromWire(wire: string | number[] | undefined) {
 }
 
 /* ── Mapper ─────────────────────────────────────────────────────────── */
+const bpmTexts = new Map<number, string>();
+const timeTexts = new Map<number, string>();
+
+function bpmText(tempo: number): string {
+  let text = bpmTexts.get(tempo);
+  if (text === undefined) bpmTexts.set(tempo, (text = tempo > 0 ? (tempo / 100).toFixed(1) : '—'));
+  return text;
+}
+
+function timeText(durationSecs: number): string {
+  if (!(durationSecs > 0)) return '—';
+  const whole = Math.floor(durationSecs);
+  let text = timeTexts.get(whole);
+  if (text === undefined) timeTexts.set(whole, (text = `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`));
+  return text;
+}
+
 function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined) {
-  const indexStr = String(idx + 1).padStart(2, '0');
-  const bpmStr = t.tempo > 0 ? (t.tempo / 100).toFixed(1) : '—';
+  const position = idx + 1;
+  const indexStr = position < 10 ? '0' + position : String(position);
+  const bpmStr = bpmText(t.tempo);
   const keyStr = t.key || '—';
-  
-  let timeStr = '—';
-  if (t.duration_secs > 0) {
-    const mins = Math.floor(t.duration_secs / 60);
-    const secs = Math.floor(t.duration_secs % 60);
-    timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
-  }
+  const timeStr = timeText(t.duration_secs);
 
   const analyzed = t.has_analysis ?? t.tempo > 0;
 
@@ -1022,13 +1063,17 @@ function nextTask(): Promise<void> {
 }
 
 async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>, firstIndex = 0) {
-  const mapped: Record<string, any>[] = new Array(tracks.length);
+  const plain: Record<string, any>[] = new Array(tracks.length);
+  const rows: Record<string, any>[] = new Array(tracks.length);
   for (let start = 0; start < tracks.length; start += TRACK_MAP_CHUNK) {
     if (start > 0) await nextTask();
     const end = Math.min(tracks.length, start + TRACK_MAP_CHUNK);
-    for (let i = start; i < end; i++) mapped[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
+    for (let i = start; i < end; i++) {
+      plain[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
+      rows[i] = reactiveTrack(plain[i]);
+    }
   }
-  return mapped;
+  return { plain, rows };
 }
 
 /* ── Actions ────────────────────────────────────────────────────────── */
@@ -1040,9 +1085,9 @@ export async function loadState() {
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
-    const tracks = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
+    const { plain, rows } = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
     resetSearchIndex();
-    setLibraryTracks(tracks);
+    setLibraryTracks(plain, rows);
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
 
@@ -1085,9 +1130,9 @@ async function landImportedTracks(added: TrackInfo[]) {
   if (added.length === 0) return;
   const offset = plainTracks.length;
   const favorites = lowestFavoriteSlots(library.playlists);
-  const mapped = await mapTracksInTaskSizedChunks(added, favorites, offset);
+  const { plain, rows } = await mapTracksInTaskSizedChunks(added, favorites, offset);
   recentlyAddedCount += added.filter((t) => t.tempo > 0).length;
-  appendLibraryTracks(mapped);
+  appendLibraryTracks(plain, rows);
   const coveredEarly = added.filter((t) => coversBeforeRows.delete(t.id)).map((t) => t.id);
   if (coveredEarly.length > 0) markCoversStored(coveredEarly);
   resetSearchIndex();
@@ -1114,8 +1159,9 @@ let launchAnalysisTimer: ReturnType<typeof setTimeout> | undefined;
 export function scheduleLaunchAnalysis() {
   if (launchAnalysisTimer !== undefined) return;
   launchAnalysisTimer = setTimeout(async () => {
+    const runsEndedBefore = analysisRunsEnded;
     const queued = await tauriResumeAnalysis();
-    if (queued === 0) return;
+    if (queued === 0 || analysisRunsEnded !== runsEndedBefore) return;
     library.analyzing = true;
     if (!library.syncing) library.statusMessage = 'Resuming analysis…';
   }, LAUNCH_ANALYSIS_DELAY_MS);

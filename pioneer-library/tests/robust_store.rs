@@ -1,0 +1,220 @@
+mod support;
+
+use std::path::{Path, PathBuf};
+
+use pioneer_library::{normalise_tag, DuplicateCandidate, DuplicateIndex, FileStatus, LocalLibrary, file_status};
+use pioneer_usb_writer::models::Track;
+
+fn track(path: &str) -> Track {
+    Track {
+        source_path: PathBuf::from(path),
+        usb_path: format!("/Contents/Unknown Artist/{}", path.rsplit('/').next().unwrap()),
+        title: "t".into(),
+        artist: "a".into(),
+        album: String::new(),
+        genre: String::new(),
+        label: String::new(),
+        remixer: String::new(),
+        comment: String::new(),
+        year: 0,
+        disc_number: 0,
+        track_number: 0,
+        tempo: 0,
+        key: String::new(),
+        duration_secs: 1.0,
+        sample_rate: 44_100,
+        bitrate: 320,
+        file_size: 1,
+        id: 0,
+        artwork: None,
+    }
+}
+
+fn open() -> (tempfile::TempDir, LocalLibrary) {
+    let dir = tempfile::tempdir().unwrap();
+    let library = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+    (dir, library)
+}
+
+#[test]
+fn extreme_field_values_store_and_read_back() {
+    let (_dir, library) = open();
+    let emoji = "\u{1F3A7}\u{1F525} \u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{645}\u{631}\u{62D}\u{628}\u{627} e\u{301}\u{202E}";
+    let mut cases = Vec::new();
+    for (i, mutate) in [
+        Box::new(|t: &mut Track| t.title = "A".repeat(3 * 1024 * 1024)) as Box<dyn Fn(&mut Track)>,
+        Box::new(|t: &mut Track| t.artist = "x\0y".into()),
+        Box::new(|t: &mut Track| t.title = emoji.repeat(100)),
+        Box::new(|t: &mut Track| {
+            t.title.clear();
+            t.artist.clear();
+        }),
+        Box::new(|t: &mut Track| t.sample_rate = 0),
+        Box::new(|t: &mut Track| t.bitrate = 0),
+        Box::new(|t: &mut Track| t.duration_secs = 0.0),
+        Box::new(|t: &mut Track| t.duration_secs = 36_000.0),
+        Box::new(|t: &mut Track| t.file_size = u64::MAX),
+        Box::new(|t: &mut Track| t.file_size = 0),
+        Box::new(|t: &mut Track| t.year = u16::MAX),
+        Box::new(|t: &mut Track| t.track_number = u32::MAX),
+        Box::new(|t: &mut Track| t.tempo = u32::MAX),
+        Box::new(|t: &mut Track| t.usb_path.clear()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut t = track(&format!("/music/case{i}.wav"));
+        mutate(&mut t);
+        cases.push(t);
+    }
+    let ids = library.add_tracks(&cases).expect("a batch of extreme rows is accepted");
+    assert_eq!(ids.len(), cases.len());
+    let all = library.get_all_tracks().unwrap();
+    assert_eq!(all.len(), cases.len());
+    library.get_track_list_rows().unwrap();
+    library.get_track_list_rows_without_previews().unwrap();
+    let candidates = library.duplicate_candidates().unwrap();
+    let index = DuplicateIndex::new(&candidates);
+    for t in &cases {
+        index.find(t);
+    }
+    library.track_files().unwrap();
+    for (id, t) in ids.iter().zip(&cases) {
+        library.update_track(*id, t).unwrap();
+        library.set_analysis(*id, &support::make_analysis()).unwrap();
+        assert!(library.get_analysis(*id).unwrap().is_some());
+    }
+}
+
+#[test]
+fn a_batch_with_one_repeated_path_fails_whole_and_leaves_the_library_usable() {
+    let (_dir, library) = open();
+    library.add_tracks(&[track("/music/keep.wav")]).unwrap();
+    let batch = [track("/music/new1.wav"), track("/music/new2.wav"), track("/music/keep.wav")];
+    assert!(library.add_tracks(&batch).is_err());
+    assert_eq!(library.track_count().unwrap(), 1, "no half-added batch");
+    library.add_tracks(&batch[..2]).unwrap();
+    assert_eq!(library.track_count().unwrap(), 3);
+}
+
+#[test]
+fn duplicate_detection_copes_with_odd_text() {
+    let big = "\u{1F3A7}".repeat(500_000);
+    assert!(normalise_tag(&big).len() <= big.len() * 4);
+    for text in ["", " ", "\0", "\u{202E}", "\u{FEFF}", "\u{200B}\u{200B}", "(Original Mix)", " original mix", "\u{FDFA}", "\u{1F1E9}\u{1F1EA}"] {
+        normalise_tag(text);
+    }
+    let candidates: Vec<DuplicateCandidate> = (0..50)
+        .map(|i| DuplicateCandidate {
+            id: i,
+            source_path: PathBuf::from(format!("/music/\u{1F525}{i}.wav")),
+            file_size: if i % 2 == 0 { 0 } else { u64::MAX },
+            artist: ["", "\0", "\u{202E}x", "Unknown Artist"][i as usize % 4].to_string(),
+            title: ["", "\u{FEFF}", "(Original Mix)", "\u{1F3A7}"][i as usize % 4].to_string(),
+            duration_secs: [f64::NAN, f64::INFINITY, -1.0, 0.0][i as usize % 4],
+        })
+        .collect();
+    let index = DuplicateIndex::new(&candidates);
+    for c in &candidates {
+        let mut t = track(&c.source_path.to_string_lossy());
+        t.artist = c.artist.clone();
+        t.title = c.title.clone();
+        t.duration_secs = c.duration_secs;
+        index.find(&t);
+    }
+}
+
+#[test]
+fn relocating_in_a_folder_with_loops_and_locked_subfolders_ends() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let dir = tempfile::tempdir().unwrap();
+    let library = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+    let music = dir.path().join("music");
+    let ids = support::populate_library(&library, &music, 3, 0.2);
+    let moved = dir.path().join("moved");
+    std::fs::rename(&music, &moved).unwrap();
+    symlink(&moved, moved.join("loop")).unwrap();
+    symlink("../moved", moved.join("artist00").join("up")).unwrap();
+    let locked = moved.join("locked");
+    std::fs::create_dir(&locked).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let report = library.relocate_in_folder(&ids, &moved).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(report.matched.len(), 3, "{report:?}");
+}
+
+#[test]
+fn file_status_handles_paths_that_cannot_exist() {
+    assert_eq!(file_status(Path::new("/definitely/not/here.wav")), FileStatus::Missing);
+    assert_eq!(file_status(Path::new("")), FileStatus::Missing);
+    assert_ne!(file_status(Path::new("/tmp")), FileStatus::Ok);
+    let nul = PathBuf::from(std::ffi::OsString::from("bad\0name.wav"));
+    assert_eq!(file_status(&nul), FileStatus::Error);
+    let long = PathBuf::from(format!("/{}", "x".repeat(5000)));
+    assert_ne!(file_status(&long), FileStatus::Ok);
+}
+
+#[test]
+fn opening_a_damaged_database_is_an_error_not_a_panic_or_silent_reset() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("library.db");
+    {
+        let library = LocalLibrary::open(&path).unwrap();
+        support::populate_library(&library, &dir.path().join("music"), 3, 0.2);
+    }
+    let good = std::fs::read(dir.path().join("library.db")).unwrap();
+    let garbage = dir.path().join("garbage.db");
+    std::fs::write(&garbage, b"this is not a sqlite database at all, just text").unwrap();
+    assert!(LocalLibrary::open(&garbage).is_err());
+    assert_eq!(std::fs::read(&garbage).unwrap(), b"this is not a sqlite database at all, just text", "a damaged file is left untouched");
+    let cut = dir.path().join("cut.db");
+    std::fs::write(&cut, &good[..good.len() / 2]).unwrap();
+    let outcome = std::panic::catch_unwind(|| LocalLibrary::open(&cut).and_then(|l| l.get_all_tracks()));
+    assert!(outcome.is_ok(), "a half database must not panic");
+    let empty = dir.path().join("empty.db");
+    std::fs::write(&empty, b"").unwrap();
+    LocalLibrary::open(&empty).expect("an empty file is a fresh library");
+}
+
+#[test]
+#[ignore = "export bug for the writer owner: two tracks with the same artist and file name share one USB path, see docs/architecture/robustness-2026-11.md"]
+fn export_keeps_every_track_when_artist_and_file_name_repeat() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+    let music = dir.path().join("music");
+    support::write_wav(&music.join("one").join("song.wav"), 220.0, 0.3);
+    support::write_wav(&music.join("two").join("song.wav"), 330.0, 0.3);
+    support::write_wav(&music.join("three").join("\u{1F3A7} \u{5E9}\u{5DC}\u{5D5}\u{5DD}.wav"), 440.0, 0.3);
+    let mut tracks = pioneer_usb_writer::scanner::scan_directory(&music).unwrap();
+    for t in &mut tracks {
+        t.artist = "Same Artist".into();
+        t.usb_path = format!("/Contents/Same Artist/{}", t.source_path.file_name().unwrap().to_string_lossy());
+    }
+    tracks[0].title = "\u{1F3A7}".repeat(3000);
+    tracks[1].title = "\u{202E}evil\nnew line".into();
+    let ids = library.add_tracks(&tracks).unwrap();
+    for id in &ids {
+        library.set_analysis(*id, &support::make_analysis()).unwrap();
+    }
+    let out = dir.path().join("usb");
+    std::fs::create_dir_all(&out).unwrap();
+    library.write_usb(&out).expect("export finishes");
+    let audio: Vec<PathBuf> = walkdir_files(&out).into_iter().filter(|p| p.starts_with(out.join("Contents"))).collect();
+    assert_eq!(audio.len(), 3, "every track needs its own audio file on the stick: {audio:?}");
+}
+
+fn walkdir_files(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            if entry.file_type().unwrap().is_dir() {
+                pending.push(entry.path());
+            } else {
+                out.push(entry.path());
+            }
+        }
+    }
+    out.sort();
+    out
+}

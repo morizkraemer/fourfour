@@ -112,9 +112,13 @@ fn track_number(name: &str) -> i64 {
     name.trim_start_matches('t').trim_end_matches(".wav").parse().expect("harness track name")
 }
 
+type SinkHook = Box<dyn Fn(i64) + Send + Sync>;
+
 struct TestSink {
     log: EventLog,
     shared: SharedLibrary,
+    on_partial: Mutex<Option<SinkHook>>,
+    on_complete: Mutex<Option<SinkHook>>,
 }
 
 impl AnalysisSink for TestSink {
@@ -127,10 +131,22 @@ impl AnalysisSink for TestSink {
     fn partial(&self, track_id: i64) {
         let bpm = self.shared.lock().unwrap().get_analysis(track_id).unwrap().map_or(-1.0, |a| a.bpm);
         self.log.lock().unwrap().push(Event::PartialStored(track_id, bpm));
+        if let Some(hook) = self.on_partial.lock().unwrap().as_ref() {
+            hook(track_id);
+        }
     }
 
     fn complete(&self) {
         self.log.lock().unwrap().push(Event::Complete);
+        if let Some(hook) = self.on_complete.lock().unwrap().as_ref() {
+            hook(0);
+        }
+    }
+}
+
+impl TestSink {
+    fn log_of_completions(&self) -> usize {
+        self.log.lock().unwrap().iter().filter(|e| **e == Event::Complete).count()
     }
 }
 
@@ -181,7 +197,7 @@ fn harness(tracks: usize, workers: usize, max_threads: usize) -> Harness {
         shared: shared.clone(),
         coordinator: AnalysisCoordinator::default(),
         engine: Arc::new(FakeEngine { log: log.clone(), workers, max_threads, hold_grid: AtomicBool::new(false) }),
-        sink: Arc::new(TestSink { log, shared }),
+        sink: Arc::new(TestSink { log, shared, on_partial: Mutex::new(None), on_complete: Mutex::new(None) }),
         items,
     }
 }
@@ -654,6 +670,218 @@ async fn resumed_work_yields_to_a_played_track() {
     assert!(h.unanalyzed().is_empty());
 }
 
+fn name_of(id: i64) -> String {
+    format!("t{id}.wav")
+}
+
+#[tokio::test]
+async fn cancelling_mid_run_keeps_finished_tracks_and_a_resume_runs_only_the_rest() {
+    let h = harness(8, 2, 8);
+    let run = h.run_all(h.items.clone());
+    let quit = async {
+        h.wait_for(|e| (e.iter().filter(|event| matches!(event, Event::Progress(_))).count() >= 3).then_some(())).await;
+        h.coordinator.cancel();
+    };
+    tokio::join!(run, quit);
+
+    let left = h.unanalyzed();
+    let finished: Vec<i64> = (1..=8).filter(|id| !left.contains(id)).collect();
+    assert!(!finished.is_empty() && !left.is_empty(), "{:?}", h.events());
+    let events_before = h.events().len();
+    let work = resume_work(&h.shared.lock().unwrap(), true).unwrap();
+    assert_eq!(resume_ids(&work), left);
+
+    let outcome = h.run_all(work).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, .. }));
+    let after = h.events()[events_before..].to_vec();
+    for id in finished {
+        assert!(after.iter().all(|e| !matches!(e, Event::Ran(name, _) if *name == name_of(id))), "t{id} ran again: {after:?}");
+    }
+    assert!(h.unanalyzed().is_empty());
+}
+
+#[tokio::test]
+async fn work_merged_while_a_fast_pass_is_stored_does_not_run_the_track_twice() {
+    let h = fast_first_harness(3, 2, 8);
+    let (coordinator, items) = (h.coordinator.clone(), h.items.clone());
+    *h.sink.on_partial.lock().unwrap() = Some(Box::new(move |id| {
+        merge_into_analysis_queue(&coordinator, items.iter().filter(|(item, _)| *item == id).cloned().collect(), false);
+    }));
+
+    let outcome = h.run_all(h.items.clone()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, .. }));
+    for id in 1..=3 {
+        let passes = (h.count(&ran(&name_of(id), Pass::Fast)), h.count(&ran(&name_of(id), Pass::Grid)));
+        assert_eq!(passes, (1, 1), "t{id}: {:?}", h.events());
+    }
+}
+
+#[test]
+fn a_run_that_is_closing_takes_no_more_work() {
+    let coordinator = active_coordinator();
+    coordinator.with_queue(|queue| queue.clear());
+    assert!(coordinator.seal_if_idle());
+
+    assert_eq!(merge_into_analysis_queue(&coordinator, vec![(3, PathBuf::from("/c.wav"))], false), 0);
+    assert_eq!(coordinator.queue_len(), 0);
+}
+
+#[test]
+fn a_run_with_queued_work_is_not_sealed() {
+    let coordinator = active_coordinator();
+    assert!(!coordinator.seal_if_idle());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn work_arriving_as_a_run_closes_is_not_lost() {
+    let h = harness(3, 2, 8);
+    let late = h.items[2].clone();
+    let handle = tokio::runtime::Handle::current();
+    let (shared, coordinator, sink, runner) = (h.shared.clone(), h.coordinator.clone(), h.sink.clone(), h.runner());
+    let late_run: Arc<Mutex<Option<std::thread::JoinHandle<()>>>> = Arc::default();
+    let slot = late_run.clone();
+    let fired = AtomicBool::new(false);
+    *h.sink.on_complete.lock().unwrap() = Some(Box::new(move |_| {
+        if fired.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let (shared, coordinator, sink, runner, late, handle) =
+            (shared.clone(), coordinator.clone(), sink.clone(), runner.clone(), late.clone(), handle.clone());
+        let join = std::thread::spawn(move || {
+            handle.block_on(prioritize_with_runner(shared, coordinator, late, sink, BackendEnv::default(), runner)).unwrap();
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        *slot.lock().unwrap() = Some(join);
+    }));
+
+    h.run_all(h.items[..2].to_vec()).await;
+    let join = late_run.lock().unwrap().take().expect("the late request was made while the run closed");
+    tokio::task::spawn_blocking(move || join.join().unwrap()).await.unwrap();
+
+    assert_eq!(h.unanalyzed(), Vec::<i64>::new(), "{:?}", h.events());
+    assert_eq!(h.count(&ran("t3.wav", Pass::All)), 1);
+    assert!(!h.coordinator.is_active());
+}
+
+#[tokio::test]
+async fn a_run_that_cannot_start_its_analyzer_still_tells_the_ui_it_is_over() {
+    let h = harness(2, 1, 8);
+
+    let outcome = run_with_resolver(h.shared.clone(), h.coordinator.clone(), h.items.clone(), h.sink.clone(), None, || Err("no analyzer".to_string())).await;
+
+    assert_eq!(outcome.err().as_deref(), Some("no analyzer"));
+    assert_eq!(h.sink.log_of_completions(), 1);
+    assert!(!h.coordinator.is_active());
+}
+
+#[tokio::test]
+async fn back_to_back_runs_never_analyse_a_track_twice_at_once() {
+    let h = harness(6, 2, 8);
+    for _ in 0..4 {
+        let run = h.run_all(h.items.clone());
+        let stop = async {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            h.coordinator.cancel();
+        };
+        tokio::time::timeout(Duration::from_secs(10), async { tokio::join!(run, stop) })
+            .await
+            .unwrap_or_else(|_| panic!("a cancelled run never ended: {:?}", h.events()));
+        assert!(!h.coordinator.is_active());
+    }
+    let work = resume_work(&h.shared.lock().unwrap(), true).unwrap();
+    h.run_all(work).await;
+
+    assert!(h.unanalyzed().is_empty());
+    let mut open: HashSet<String> = HashSet::new();
+    for event in h.events() {
+        match event {
+            Event::Start(name, _) => assert!(open.insert(name.clone()), "{name} started while still running: {:?}", h.events()),
+            Event::End(name) | Event::Cancelled(name) => {
+                open.remove(&name);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_track_removed_while_queued_is_dropped_and_leaves_nothing_behind() {
+    let h = harness(3, 1, 8);
+    h.shared.lock().unwrap().remove_track(2).unwrap();
+
+    let outcome = h.run_all(h.items.clone()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { total: 3, .. }));
+    let lib = h.shared.lock().unwrap();
+    assert!(lib.get_track(2).unwrap().is_none());
+    assert_eq!(lib.analysis_stages(2).unwrap(), None);
+    assert_eq!(lib.complete_analysis_track_ids().unwrap(), vec![1, 3]);
+}
+
+#[tokio::test]
+async fn a_result_for_a_file_the_track_no_longer_points_at_is_not_stored() {
+    let h = harness(2, 1, 8);
+    let moved = std::env::temp_dir().join(format!("ff-relink-{}", std::process::id())).join("t1.wav");
+    std::fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    write_tone_wav(&moved, 0.1, 440.0);
+    h.shared.lock().unwrap().relink_track(1, &moved).unwrap();
+
+    h.run_all(h.items.clone()).await;
+
+    let lib = h.shared.lock().unwrap();
+    assert_eq!(lib.analysis_stages(1).unwrap(), None);
+    assert_eq!(lib.analysis_stages(2).unwrap(), Some(analysis_stage::ALL));
+    let resumed = resume_work(&lib, true).unwrap();
+    assert_eq!(resumed, vec![(1, moved.clone())]);
+    std::fs::remove_dir_all(moved.parent().unwrap()).ok();
+}
+
+#[tokio::test]
+async fn a_priority_request_that_cannot_start_its_analyzer_still_tells_the_ui_it_is_over() {
+    let h = harness(2, 1, 8);
+
+    let outcome = prioritize_with_resolver(h.shared.clone(), h.coordinator.clone(), h.items[0].clone(), h.sink.clone(), BackendEnv::default(), || {
+        Err("no analyzer".to_string())
+    })
+    .await;
+
+    assert_eq!(outcome.err().as_deref(), Some("no analyzer"));
+    assert_eq!(h.sink.log_of_completions(), 1);
+}
+
+#[tokio::test]
+async fn runs_started_at_the_same_moment_analyse_each_track_once() {
+    let h = harness(6, 2, 8);
+
+    let (a, b, c) = tokio::join!(h.run_all(h.items.clone()), h.run_all(h.items.clone()), h.run_all(h.items.clone()));
+
+    let outcomes = [a, b, c];
+    assert_eq!(outcomes.iter().filter(|o| matches!(o, RunOutcome::Finished { .. })).count(), 1);
+    assert!(h.unanalyzed().is_empty());
+    for id in 1..=6 {
+        let name = name_of(id);
+        let passes = (h.count(&ran(&name, Pass::Fast)), h.count(&ran(&name, Pass::Grid)), h.count(&ran(&name, Pass::All)));
+        assert!(passes == (1, 1, 0) || passes == (0, 0, 1), "{name}: {:?}", h.events());
+    }
+}
+
+#[tokio::test]
+async fn a_track_stopped_by_cancelling_is_not_counted_as_a_failure() {
+    let h = harness(1, 1, 8);
+    let run = h.run_all(h.items.clone());
+    let quit = async {
+        h.wait_for(|e| has(e, &ran("t1.wav", Pass::All)).then_some(())).await;
+        h.coordinator.cancel();
+    };
+
+    let (outcome, ()) = tokio::join!(run, quit);
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, .. }), "{:?}", h.events());
+    assert_eq!(h.count(&named(Event::Cancelled, "t1.wav")), 1);
+}
+
 fn write_tone_wav(path: &Path, seconds: f64, hz: f64) {
     let rate = 44_100u32;
     let mut data = Vec::new();
@@ -716,4 +944,89 @@ async fn every_analysed_track_leaves_the_detail_series_the_app_would_measure_in_
     for (cached, measured) in pairs {
         assert_eq!(cached, measured);
     }
+}
+
+fn order_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("ff-run-order-{name}-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn order_file_left(dir: &Path) -> bool {
+    std::fs::read_dir(dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("analysis-order"))
+}
+
+#[tokio::test]
+async fn a_run_keeps_its_pending_order_in_a_side_file_and_removes_it_when_it_finishes() {
+    let dir = order_dir("run");
+    let h = harness(5, 1, 8);
+    let queued: Vec<AnalysisWorkItem> = [3, 1, 2, 5, 4].iter().map(|id| h.items[*id as usize - 1].clone()).collect();
+    let seen: Arc<Mutex<Option<Vec<i64>>>> = Arc::default();
+    let seen_in_hook = seen.clone();
+    let hook_dir = dir.clone();
+    *h.sink.on_partial.lock().unwrap() = Some(Box::new(move |_| {
+        seen_in_hook.lock().unwrap().get_or_insert_with(|| crate::analysis_order::load(&hook_dir));
+    }));
+    let env = BackendEnv { app_data_dir: Some(dir.clone()), ..BackendEnv::default() };
+
+    let outcome = run_with_runner(h.shared.clone(), h.coordinator.clone(), queued, h.sink.clone(), env, Some(h.runner())).await.unwrap();
+    let file_left = order_file_left(&dir);
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 5 }));
+    assert_eq!(seen.lock().unwrap().clone(), Some(vec![3, 1, 2, 5, 4]));
+    assert!(!file_left);
+}
+
+#[tokio::test]
+async fn a_cancelled_run_removes_the_side_file_too() {
+    let dir = order_dir("cancel");
+    let h = harness(4, 1, 8);
+    let env = BackendEnv { app_data_dir: Some(dir.clone()), ..BackendEnv::default() };
+    let run = run_with_runner(h.shared.clone(), h.coordinator.clone(), h.items.clone(), h.sink.clone(), env, Some(h.runner()));
+    let cancel = async {
+        h.wait_for(|e| (!e.is_empty()).then_some(())).await;
+        h.coordinator.cancel();
+    };
+    let (outcome, ()) = tokio::join!(run, cancel);
+    let file_left = order_file_left(&dir);
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(matches!(outcome.unwrap(), RunOutcome::Finished { .. }));
+    assert!(!file_left);
+}
+
+#[test]
+fn resume_follows_the_saved_order_for_tracks_still_pending_and_skips_removed_and_finished_ones() {
+    let dir = order_dir("resume");
+    let h = harness(5, 1, 8);
+    let lib = h.shared.lock().unwrap();
+    lib.set_analysis(2, &finished_result()).unwrap();
+    crate::analysis_order::save(&dir, &[3, 99, 2, 5]).unwrap();
+
+    let work = resume_work_in_saved_order(&lib, true, Some(&dir)).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(resume_ids(&work), vec![3, 5, 1, 4]);
+}
+
+#[test]
+fn resume_keeps_todays_order_without_a_usable_side_file() {
+    let dir = order_dir("fallback");
+    let h = harness(4, 1, 8);
+    let lib = h.shared.lock().unwrap();
+    lib.set_analysis_stages(4, &finished_result(), analysis_stage::WAVEFORM).unwrap();
+    let todays = resume_ids(&resume_work(&lib, true).unwrap());
+
+    let missing = resume_ids(&resume_work_in_saved_order(&lib, true, Some(&dir)).unwrap());
+    std::fs::write(dir.join("analysis-order.json"), b"[3, 2,").unwrap();
+    let corrupt = resume_ids(&resume_work_in_saved_order(&lib, true, Some(&dir)).unwrap());
+    let no_dir = resume_ids(&resume_work_in_saved_order(&lib, true, None).unwrap());
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert_eq!(todays, vec![4, 1, 2, 3]);
+    assert_eq!(missing, todays);
+    assert_eq!(corrupt, todays);
+    assert_eq!(no_dir, todays);
 }

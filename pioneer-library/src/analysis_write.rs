@@ -61,6 +61,12 @@ struct StagedFiles {
 }
 
 impl StagedFiles {
+    fn create(dir: &Path) -> Result<Self> {
+        let staging = dir.join(format!("{STAGING_PREFIX}{}-{}", std::process::id(), NEXT_STAGING.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&staging).with_context(|| format!("Failed to create ANLZ dir: {}", staging.display()))?;
+        Ok(StagedFiles { dir: dir.to_path_buf(), staging, has_2ex: false })
+    }
+
     fn discard(&self) {
         let _ = std::fs::remove_dir_all(&self.staging);
     }
@@ -78,14 +84,7 @@ impl AnalysisWrite {
         let (files, row_preview) = match &self.dir {
             Some(dir) => {
                 let track = self.track.as_ref().context("Track not found for analysis storage")?;
-                let staging = dir.join(format!(
-                    "{STAGING_PREFIX}{}-{}",
-                    std::process::id(),
-                    NEXT_STAGING.fetch_add(1, Ordering::Relaxed)
-                ));
-                std::fs::create_dir_all(&staging)
-                    .with_context(|| format!("Failed to create ANLZ dir: {}", staging.display()))?;
-                let files = StagedFiles { dir: dir.clone(), staging, has_2ex: false };
+                let files = StagedFiles::create(dir)?;
                 match write_files(&files.staging, track, &self.analysis) {
                     Ok(has_2ex) => {
                         let row_preview = read_waveform_analysis(&files.staging.join(DAT))
@@ -168,6 +167,20 @@ impl LocalLibrary {
         )?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// Replaces the ANLZ files of a track with ones built from `analysis`, each file moving in whole (never
+    /// truncated and rewritten in place), so a crash or a reader in between sees an old or a new file.
+    pub(crate) fn write_anlz_files(&self, track_id: i64, analysis: &AnalysisResult) -> Result<()> {
+        let Some(dir) = self.track_anlz_dir(track_id) else { return Ok(()) };
+        let track = self.get_track(track_id)?.context("Track not found for analysis storage")?;
+        let mut files = StagedFiles::create(&dir)?;
+        let moved = write_files(&files.staging, &track, analysis).and_then(|has_2ex| {
+            files.has_2ex = has_2ex;
+            move_into_place(&files)
+        });
+        files.discard();
+        moved
     }
 
     fn analysis_inputs(&self, track_id: i64) -> Result<Inputs> {
@@ -363,6 +376,40 @@ mod tests {
         let staged = write.stage().unwrap();
         assert!(!lib.commit_analysis(staged, None).unwrap());
         assert!(!lib.track_anlz_dir(id).unwrap().exists());
+    }
+
+    #[test]
+    fn storing_an_analysis_the_plain_way_never_shows_a_half_written_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let id = lib.add_track(&make_track("Plain", "/music/plain.mp3")).unwrap();
+        lib.set_analysis(id, &banded_analysis()).unwrap();
+        let files: Vec<PathBuf> = [DAT, EXT, TWO_EX].iter().map(|name| lib.track_anlz_dir(id).unwrap().join(name)).collect();
+        let sizes: Vec<u64> = files.iter().map(|f| std::fs::metadata(f).unwrap().len()).collect();
+        let done = std::sync::atomic::AtomicBool::new(false);
+
+        let torn = std::thread::scope(|scope| {
+            let reader = scope.spawn(|| {
+                let mut torn = Vec::new();
+                while !done.load(Ordering::Relaxed) {
+                    for (file, size) in files.iter().zip(&sizes) {
+                        match std::fs::metadata(file) {
+                            Ok(meta) if meta.len() == *size => {}
+                            other => torn.push(format!("{}: {other:?}", file.display())),
+                        }
+                    }
+                }
+                torn
+            });
+            for _ in 0..150 {
+                lib.set_analysis(id, &banded_analysis()).unwrap();
+            }
+            done.store(true, Ordering::Relaxed);
+            reader.join().unwrap()
+        });
+
+        assert!(torn.is_empty(), "{} reads saw a missing or short file, first: {:?}", torn.len(), torn.first());
+        no_staging_left(&lib, id);
     }
 
     #[test]

@@ -560,3 +560,91 @@ scripts/mac/coreml-bench.sh --no-build --split test --reps 1 --rten "2 6" --core
 Output: `build/mac/coreml-<date>/summary.md`. Expected time for the dev command: 12 `ffa` runs over 50 tracks; at rten's box rate (5-10 tracks/min) about 5-10 min each, so 1-2 h; CoreML runs shorter if it helps.
 
 Decision rule (as R9): keep `coreml` only if a CoreML config beats the best rten config on tracks/min at similar or lower peak memory, with grid within 20 ms still 44/50 on dev and max logit diff small enough that beat peaks match on (nearly) all tracks. Otherwise drop the `ort`/`coreml` features.
+
+## R13 50k (2026-11-01, `r13-50k`)
+
+Branch `r13-50k` from `ov-1028` (`ea0ddaa`). Linux `dev` box, headless Chromium, release `bench_startup`. Box load 25-55 the whole time (other workers): absolute times are inflated about 2x against a quiet box; read the 10k-to-50k ratios and the before/after of the same step, not the absolute values.
+
+**Fixture.** `scripts/ff-fixture.py 50k --link-from 25k` builds the 50k fixture from hard links to the 25k fixture's files (`music/copy1`, `music/copy2`; no new audio on disk, a real 50k copy would be about 35 GB) and the library with the normal `bench_startup fixture-lib` scan: 50,000 tracks, 40,722 covers, 34,890 analysed, 12,520 rated, 3,935 coloured, 74 playlists. Titles of `copy2` get a " (copy 2)" suffix in the library so no artist and title pair repeats (same reason as the generator's redraw). `library.db` is 7.5 GB (covers are stored in it), 1.5 GB at 10k. Import samples: 1,000 hard-linked files new to each library (from the 25k fixture for the 10k library, from the 10k fixture for the 50k one; 2-3 duplicates each). Frontend scroll/search/sort use the synthetic smoke fixture (`FF_PERF_TRACKS`), startup the real `load_state` JSON of the fixture (`bench_startup dump`).
+
+**Fixed**
+
+- **Marking tracks for analysis was quadratic.** `markTracksPendingAnalysis`, `knownTrackIds` and `requestBackgroundAnalysis` looked up each id with a linear `find` over the reactive rows. Analyse a 2k selection: 25.7 s of frozen UI at 10k, over 5 min at 50k (the spec timed out). Now the indexed `libraryTrackById`: 0.56 s at 10k, 0.67 s at 50k, i.e. it no longer depends on library size. The same lookup is used by the track edits (`track-edits.svelte.ts`).
+- **The palette scanned every row proxy per keystroke.** The header search opens the anchored palette, whose `sources` re-runs every action's `when` on each keystroke; "Analyze all unanalyzed" ran `library.tracks.some((t) => !t.analyzed)` through 50k row proxies (about 650 ms of a 14-key run, the largest item in the profile; in a fully analysed library it never stops early). It is now `hasUnanalyzedTracks()` on the plain track objects, like `unanalyzedTrackCount`; the context menu uses the same.
+
+Same results: the lookups return the same row objects (the index falls back to `find`), and `analyzed` on the plain objects is kept in step by `bumpLibraryTracks`. No BPM, grid, key or library data path changed.
+
+**10k vs 50k** (before = `ov-1028`, after = this branch; frontend medians from one `perf10k` run each, before 50k at load about 45, after at about 30)
+
+| Metric | 10k before | 10k after | 50k before | 50k after | budget |
+|---|---:|---:|---:|---:|---:|
+| analyse 2k selected tracks (one task) | 25,745 ms | 559 ms | > 300 s | 665 ms | |
+| search keystroke median / worst | 73 / 116 ms | 62 / 100 ms | 188 / 389 ms | 77 / 111 ms | 50 ms |
+| palette open | 100 ms | 67 ms | 260 ms | 102 ms | |
+| palette filter keystroke median | 88 ms | 60 ms | 225 ms | 48 ms | 50 ms |
+| scroll frame p95 (steady) | 43 ms | 54 ms | 72 ms | 45 ms | |
+| fling frame p95 / max | 67 / 78 ms | 62 / 65 ms | 146 / 196 ms | 92 / 92 ms | 50 ms |
+| sort by title (asc) | 127 ms | 119 ms | 398 ms | 283 ms | |
+| select to inspector median | 29 ms | 27 ms | 34 ms | 25 ms | |
+| JS heap after boot (after GC) | 23 MB | 23 MB | 92 MB | 92 MB | |
+| backend `load_state` warm (median of 3) | 118 ms | same | 480 ms | same | |
+| `load_state` payload | 4.2 MB | same | 21.6 MB | same | |
+| backend RSS, `bench_startup run` | 26 MB | same | 87 MB | same | |
+| startup to interactive, first launch / cold / warm | 1,860 / 1,722 / 1,432 ms | same | 3,193 / 2,914 / 2,502 ms | same | 1.5 s |
+| startup longest task / TBT, warm | 274 / 438 ms | same | 330 / 985 ms | same | |
+| import 1k files: scan + plan | 400-704 ms | same | 1,415-3,366 ms | same | |
+| import 1k files: duplicate plan alone | 175-181 ms | same | 1,038-1,469 ms | same | |
+| import 1k files: commit (insert) | 86-114 ms | same | 242-5,005 ms | same | |
+| import 1k files: covers | 1.34-1.40 s | same | 1.20-1.28 s | same | |
+
+"same" = code path not changed here. Startup used `perf-startup.spec.ts` with the backend time simulated (118 / 480 ms), median of 3, load 31; R2b measured 1,263 ms warm at 50k on a quieter box with a smaller payload (16 MB synthetic paths against 21.6 MB real ones).
+
+**Scaling read.** Heap (4x), payload (5.1x), `load_state` (4x), backend RSS (3.4x) and startup (about 1.7x) grow linearly or better. Sorts grow as n log n. Search, palette and scroll were not size-bound after the fix. The two quadratic paths found are fixed. The import's duplicate plan grows 6-8x for 5x tracks: it reads every track and folds artist and title (Unicode NFKD) for the whole library on every import.
+
+**What is left**
+
+- Startup at 50k is over the 1.5 s budget on this box (interactive 2.5-3.2 s at load 31). The profile is spread out: search index warmup about 230 ms, GC 300 ms, `$state` proxies, first rows; nothing over 15% alone. Next steps are R2b's: lazy row proxies, and a smaller payload (21.6 MB at 50k, mostly paths).
+- Import plan at 50k: 1.0-1.5 s for the duplicate index before the dialog. Option: keep the folded keys in a column or cache them between imports (schema change, needs Merlin).
+- Import commit at 50k swung 65 ms to 4.7 s for the same 1,000 inserts: the bench copies the 7.5 GB `library.db` first, so writeback of that copy competes. Covers stored inside `library.db` make it 5x larger than everything else in it; storing covers as files is a schema change.
+- Analyse 2k selected still takes a 0.5-0.6 s task (marking rows, bumping the list); it no longer depends on library size.
+- Not measured here: WKWebView on the Mac (`scripts/mac/perf-night.sh --size 50k` now has a fixture to run on; on the Mac use `--link-from 25k` too).
+
+Reproduce: `scripts/perf.sh --size 50k` now builds the linked fixture (set `FF_FIXTURE_FULL=1` for real copies), or by hand `python3 scripts/ff-fixture.py 50k --link-from 25k --bench <target>/release/bench_startup`; frontend `FF_PERF_TRACKS=50000 FF_SMOKE_PORT=5314 FF_PERF_OUT=x.json npx playwright test perf10k --grep measure`; startup `FF_PERF_STARTUP=50000=state50k.json==480 npx playwright test perf-startup`; import `bench_startup import <1k folder> <work> ~/.cache/ff-fixture/50k/library/library.db`. Raw: `~/.cache/r13/`.
+
+## R22 startup (2026-11-01, `r22-startup`)
+
+Branch `r22-startup` from `ov-1028`. Linux `dev` box, headless Chromium, `perf-startup.spec.ts` on the real fixture libraries (`bench_startup dump`), backend time simulated as 118 ms (10k) and 480 ms (50k) for both sides so the frontend change is isolated. Box load 20-50 during the pairs below (other workers, swap full), so absolute times are high; each pair is a before run and an after run back to back.
+
+**Changed**
+
+- `load_state` sends the tracks as a column table (`TrackTable` in `pioneer-test-ui/src/dto.rs`, decoded by `app/src/services/track-table.ts` into the same `TrackInfo` objects, same key order): one array per field, folders as a parent tree (each folder sent once), artists, albums, genres, keys and colours as indexes into one string list, flags as a bit field, ratings and colours as sparse pairs. Payload 21.6 to 8.4 MB at 50k, 4.2 to 1.7 MB at 10k; JSON parse at 50k 150-270 to 55-110 ms. Checked on both fixtures: every decoded track deep-equals the old JSON object and its key order (0 diffs at 10k and 50k), playlists unchanged. Browser mocks still pass the old array form, which `loadState` accepts as before.
+- Row `$state` proxies are built inside the existing 2,500-track map chunks instead of in one 50k pass after them (same proxies, no long task).
+- Track mapping caches the BPM and time texts by value (`toFixed` and `padStart` were half of the mapping); same strings.
+- Search warmup: idle slices stop after 8 ms (they ran to the 50 ms idle deadline plus a 250-track overrun, i.e. long tasks right after the first rows), and a track's haystack leaves out `raw` fields equal to the shown field (path, title, artist, album, genre, key), about half the text. Results are identical: query terms never contain spaces, so a match always lies inside one field, and a duplicate field adds no match. A search before the warmup ends builds the rest at once, as before.
+- Sidebar: `library.sidebarData` (a getter that rebuilds favourites, the playlist tree and USB rows) was called by each of the nine template reads; `Sidebar.svelte` now reads one `$derived` of it.
+- `perf-startup.spec.ts`: `FF_PERF_STARTUP_PROFILE=<prefix>` writes a CPU profile of the last warm reload (with `FF_PERF_STARTUP_PROFILE_FIRST=1` the last first launch) plus the probe marks.
+
+**Frontend** (first real row / interactive, ms; median of the three cleanest pairs, each run the spec's median of 3)
+
+| Tracks | Case | Before | After |
+|---|---|---:|---:|
+| 10k | first launch | 1,101 / 1,317 | 914 / 1,118 |
+| 10k | cold | 1,225 / 1,454 | 964 / 1,234 |
+| 10k | warm | 775 / 1,043 | 638 / 827 |
+| 50k | first launch | 1,866 / 2,496 | 1,644 / 1,854 |
+| 50k | cold | 2,040 / 2,383 | 1,568 / 1,568 |
+| 50k | warm | 1,584 / 2,189 | 1,354 / 1,355 |
+
+Quietest single pair (load about 20): 50k warm 1,903 to 1,354 ms, cold 1,886 to 1,568, first launch 2,267 to 1,690; 10k warm 995 to 741. Interactive now equals the first real row in most runs (no long task after it); before, search warmup and GC added 300-700 ms at 50k.
+
+**Backend.** `load_state` wall time is unchanged within the noise at load 45-70 (50k warm 600-950 ms both sides). Building the table costs about what the smaller JSON saves (string interning of 50k rows); total CPU of `bench_startup run` at 50k 1.06 s before, about 1.10 s after.
+
+**Split at 50k warm, after** (CPU profile, load about 25): answer to first real row about 390 ms: decode 50, map and proxies 130, first render 120 (sidebar rows 37, track rows 25), GC 50.
+
+**What is left**
+
+- 50k is at or under 1.5 s warm and cold on this box at load 20-30, first launch is not (1.6-1.9 s): it renders the whole table and its waveforms after the answer with no snapshot to show first.
+- `$state` proxy creation for 50k rows (about 60 ms plus GC) is still eager. Creating them lazily needs a way to create state outside the reading effect, which Svelte does not export.
+- The backend list query (about 240 ms at 50k) is unchanged; a covering index would be a schema change.
+- JS heap after boot not re-measured (perf10k uses the synthetic mock rows, which do not go through the table).
+- Real-app IPC on the Mac: WKWebView decodes the same JSON, so the smaller payload should help there too; not measured.

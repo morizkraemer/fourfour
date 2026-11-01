@@ -530,34 +530,13 @@ impl LocalLibrary {
     }
 
     fn write_analysis(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
-        // Write ANLZ files if we have a disk path.
-        if let Some(dir) = self.track_anlz_dir(track_id) {
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("Failed to create ANLZ dir: {}", dir.display()))?;
-
-            let track = self
-                .get_track(track_id)?
-                .context("Track not found for analysis storage")?;
-
-            // For local library ANLZ files, use source_path in the PPTH section
-            // (CDJs never read these files — they're only for local round-tripping).
-            let mut track_for_anlz = track.clone();
-            track_for_anlz.usb_path = track.source_path.to_string_lossy().to_string();
-
-            let dat_path = dir.join("ANLZ0000.DAT");
-            let ext_path = dir.join("ANLZ0000.EXT");
-
-            writer::anlz::write_anlz_dat(&dat_path, &track_for_anlz, analysis)?;
-            writer::anlz::write_anlz_ext(&ext_path, &track_for_anlz, analysis)?;
-            writer::anlz::write_anlz_2ex(&dir.join("ANLZ0000.2EX"), &track_for_anlz, analysis)?;
-        }
+        self.write_anlz_files(track_id, analysis)?;
 
         let row_preview = match self.track_anlz_dir(track_id) {
             Some(dir) => read_waveform_analysis(&dir.join("ANLZ0000.DAT")).map_or(RowPreview::None, |a| RowPreview::from_analysis(&a)),
             None => RowPreview::from_analysis(analysis),
         };
 
-        // Update lightweight DB index.
         queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob(), stages)?;
 
         Ok(())

@@ -14,6 +14,8 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`repo-overview.md`](architecture/repo-overview.md) | reference | Crate-by-crate map, what works on hardware, data flow, line counts. *(Predates the Svelte `app/`; for current UI see `ui/`.)* |
 | [`ui-architecture.md`](architecture/ui-architecture.md) | current | UI architecture for the desktop app — stores, modules, IPC. |
 | [`cues.md`](architecture/cues.md) | current | Hot and memory cues, CUE button, edit lock for cues and beat grid, shortcuts, what export does with cues, writer issues. |
+| [`robustness-2026-11.md`](architecture/robustness-2026-11.md) | current | Import, analysis and library store against messy folders: fixture cases, before and after, fixes, what is left (incl. a USB path collision for the writer owner). |
+| [`analysis-resume-2026-11.md`](architecture/analysis-resume-2026-11.md) | current | Analysis run across quit, kill -9 and restart: how resume works, cases before and after, fixes, what needs a schema or product call. |
 | [`performance-2026-10.md`](architecture/performance-2026-10.md) | reference | Startup and UI performance: before/after numbers at 1k/10k/30k tracks, method, what is left. |
 | [`rekordbox-import.md`](architecture/rekordbox-import.md) | current | Importing Rekordbox libraries (master.db, USB, XML): sources, field mapping, path remap, merge policy, test results, gaps. |
 | [`tempo-key-engine-plan.md`](architecture/tempo-key-engine-plan.md) | plan | Player BPM/KEY as real tempo and pitch controls: stretch engine choice, engine placement, UI, slices. |

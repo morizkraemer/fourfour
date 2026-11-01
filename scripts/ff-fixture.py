@@ -218,6 +218,41 @@ def run_pool(fn, jobs, workers, label):
                 print(f"[fixture] {label} {done}/{len(jobs)} ({time.time() - started:.0f} s)", file=sys.stderr)
 
 
+def linked_fixture(a, root, out, count, wanted, manifest_path):
+    source = root / a.link_from
+    have = json.loads((source / "fixture.json").read_text())
+    if count % have["files"]:
+        sys.exit(f"--link-from {a.link_from}: {count} is not a multiple of its {have['files']} files")
+    started = time.time()
+    music = out / "music"
+    if music.exists():
+        shutil.rmtree(music)
+    music.mkdir(parents=True)
+    copies = count // have["files"]
+    for n in range(1, copies + 1):
+        print(f"[fixture] linking copy {n}/{copies} of {source / 'music'}", file=sys.stderr)
+        subprocess.run(["cp", "-al", str(source / "music"), str(music / f"copy{n}")], check=True)
+    (out / "long.txt").write_text((source / "long.txt").read_text().replace(str(source / "music"), str(music / "copy1")))
+
+    lib = out / "library"
+    if lib.exists():
+        shutil.rmtree(lib)
+    print(f"[fixture] building the library from {music}", file=sys.stderr)
+    subprocess.run([a.bench, "fixture-lib", str(music), str(lib), str(a.analysed), str(SEED)], check=True)
+    import sqlite3
+    db = sqlite3.connect(lib / "library.db")
+    for n in range(2, copies + 1):
+        db.execute("UPDATE tracks SET title = title || ? WHERE source_path LIKE ?", (f" (copy {n})", f"{music / f'copy{n}'}/%"))
+    db.commit()
+    db.close()
+
+    manifest = {**wanted, "files": have["files"] * copies, "music_bytes": have["music_bytes"], "seconds": round(time.time() - started),
+                "pool": have["pool"], "formats": {f: v * copies for f, v in have["formats"].items()}}
+    manifest_path.write_text(json.dumps(manifest, indent=1))
+    print(f"[fixture] {out}: {manifest['files']} files linked from {a.link_from}, {manifest['seconds']} s", file=sys.stderr)
+    print(out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("size")
@@ -226,6 +261,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=min(12, os.cpu_count() or 4))
     ap.add_argument("--analysed", type=float, default=0.7)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--link-from", help="build music/ from hard links to this smaller fixture's files (no new audio on disk)")
     a = ap.parse_args()
 
     count = SIZES.get(a.size) or int(a.size)
@@ -233,12 +269,17 @@ def main():
     out = root / (a.size if a.size in SIZES else str(count))
     manifest_path = out / "fixture.json"
     wanted = {"version": VERSION, "seed": SEED, "tracks": count, "analysed": a.analysed}
+    if a.link_from:
+        wanted["linked_from"] = a.link_from
     if manifest_path.exists() and not a.force:
         have = json.loads(manifest_path.read_text())
         if all(have.get(k) == v for k, v in wanted.items()) and (out / "library/library.db").exists():
             print(f"[fixture] {out} is up to date", file=sys.stderr)
             print(out)
             return
+    if a.link_from:
+        linked_fixture(a, root, out, count, wanted, manifest_path)
+        return
     started = time.time()
     rng = random.Random(SEED)
     pool_dir = root / f"pool-v{VERSION}"

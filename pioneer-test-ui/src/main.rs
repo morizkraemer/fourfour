@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod analysis_backend;
+mod analysis_order;
 mod analysis_payload;
 mod analysis_priority;
 mod analysis_python;
@@ -12,6 +13,12 @@ mod file_health;
 mod import_plan;
 mod perf_probe;
 mod playback;
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../../fourfour-analysis-rs/tests/messy_fixtures/mod.rs"]
+mod messy_fixtures;
+#[cfg(test)]
+mod robustness_tests;
 mod self_check;
 mod tempo;
 mod track_fields;
@@ -147,6 +154,14 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
 fn spawn_stale_staging_cleanup(db_path: PathBuf) {
     std::thread::spawn(move || {
         pioneer_library::remove_stale_staging(&db_path);
+    });
+}
+
+/// Removes `.part` files a killed process left in the waveform-detail cache; on a thread of its own because
+/// the cache can hold many files.
+fn spawn_stale_part_sweep(cache_dir: PathBuf) {
+    std::thread::spawn(move || {
+        waveform_detail::sweep_stale_parts(&cache_dir, waveform_detail::STALE_PART_AGE);
     });
 }
 
@@ -366,9 +381,10 @@ fn resume_analysis(
 ) -> Result<usize, String> {
     let shared: SharedLibrary = state.inner().clone();
     let include_new = config_path(&app).map_or(true, |path| analysis_backend::read_auto_analyze_new(&path));
+    let app_data_dir = app.path().app_data_dir().ok();
     let pending = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        analysis_run::resume_work(&lib, include_new)?
+        analysis_run::resume_work_in_saved_order(&lib, include_new, app_data_dir.as_deref())?
     };
     let queued = pending.len();
     if queued > 0 {
@@ -1449,6 +1465,9 @@ fn main() {
             let library = LocalLibrary::open(&db_path)
                 .expect("Failed to open library database");
             spawn_stale_staging_cleanup(db_path);
+            if let Ok(app_data_dir) = app.path().app_data_dir() {
+                spawn_stale_part_sweep(app_data_dir.join("waveform-detail"));
+            }
             let library: SharedLibrary = Arc::new(Mutex::new(library));
             let health = file_health::SharedHealth::default();
             app.manage(library.clone());

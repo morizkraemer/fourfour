@@ -9,6 +9,7 @@ use fourfour_analysis::service::Pass;
 use pioneer_library::{analysis_stage, LocalLibrary};
 use pioneer_usb_writer::models;
 
+use crate::analysis_order::{self, OrderJournal};
 use crate::analysis_backend::{resolve_runner, AnalyzerCache, BackendEnv, Runner, TrackEngine};
 use crate::analysis_python::{analyze_one_track, resolve_python_checked};
 
@@ -263,15 +264,30 @@ impl AnalysisCoordinator {
         self.with_queue(|queue| queue.len()).unwrap_or(0) + grid
     }
 
-    fn is_scheduled(&self, track_id: i64) -> bool {
+    /// Ids of the tracks the run has yet to finish, in the order it will take them: tracks in flight, then the
+    /// queue, then the grid queue.
+    fn pending_order(&self) -> Vec<i64> {
         let jobs = self.jobs.lock().expect("analysis jobs lock");
-        jobs.background.contains_key(&track_id)
-            || jobs.now.contains_key(&track_id)
-            || jobs.grid_queue.iter().any(|(id, _)| *id == track_id)
+        let mut in_flight: Vec<i64> = jobs.background.keys().chain(jobs.now.keys()).copied().collect();
+        in_flight.sort_unstable();
+        in_flight.dedup();
+        let queued = self.with_queue(|queue| queue.iter().map(|(id, _)| *id).collect::<Vec<_>>()).unwrap_or_default();
+        in_flight.into_iter().chain(queued).chain(jobs.grid_queue.iter().map(|(id, _)| *id)).collect()
     }
 
-    fn push_grid(&self, item: AnalysisWorkItem) {
-        self.jobs.lock().expect("analysis jobs lock").grid_queue.push_back(item);
+    fn is_preempted(&self, track_id: i64) -> bool {
+        self.jobs.lock().expect("analysis jobs lock").preempted.contains(&track_id)
+    }
+
+    /// Ends a fast pass whose result is stored and queues the track's grid pass in one step, so the track is
+    /// never between the two where a merge of the same track would queue it again. A cancelled run queues nothing.
+    fn hand_to_grid(&self, item: AnalysisWorkItem) {
+        let mut jobs = self.jobs.lock().expect("analysis jobs lock");
+        jobs.background.remove(&item.0);
+        if jobs.preempted.remove(&item.0) || self.is_cancelled() {
+            return;
+        }
+        jobs.grid_queue.push_back(item);
     }
 
     /// Pops the next track and registers it as a background job in one step, so a priority request can
@@ -382,13 +398,52 @@ impl AnalysisCoordinator {
         self.set_paused_by_now_lane(!jobs.now.is_empty());
     }
 
-    /// Closes the run to new now-lane claims when none is running. The run loop ends only through this.
+    /// Closes the run to new work when nothing is running or waiting; the check and the closing are one step
+    /// under the jobs lock, which every merge holds too. The run loop ends only through this.
     fn seal_if_idle(&self) -> bool {
         let mut jobs = self.jobs.lock().expect("analysis jobs lock");
-        if jobs.now.is_empty() {
+        let queue_empty = self.with_queue(|queue| queue.is_empty()).unwrap_or(true);
+        if jobs.now.is_empty() && jobs.grid_queue.is_empty() && queue_empty {
             jobs.sealed = true;
         }
         jobs.sealed
+    }
+
+    /// Adds tracks to the active run and returns how many were new, or `None` when no run can take them: it is
+    /// closing (sealed) or has ended. Tracks that are queued, running or between two passes are left alone.
+    pub(crate) fn merge_work(&self, items: &[AnalysisWorkItem], front: bool) -> Option<u32> {
+        let jobs = self.jobs.lock().expect("analysis jobs lock");
+        if jobs.sealed {
+            return None;
+        }
+        let added = self.with_queue(|queue| {
+            let mut added = 0u32;
+            for item in items {
+                let track_id = item.0;
+                let scheduled = jobs.background.contains_key(&track_id)
+                    || jobs.now.contains_key(&track_id)
+                    || jobs.grid_queue.iter().any(|(id, _)| *id == track_id);
+                if scheduled {
+                    continue;
+                }
+                if let Some(pos) = queue.iter().position(|(id, _)| *id == track_id) {
+                    if front && pos > 0 {
+                        let existing = queue.remove(pos).unwrap();
+                        queue.push_front(existing);
+                    }
+                    continue;
+                }
+                if front {
+                    queue.push_front(item.clone());
+                } else {
+                    queue.push_back(item.clone());
+                }
+                added += 1;
+            }
+            added
+        })?;
+        self.bump_total(added);
+        Some(added)
     }
 }
 
@@ -417,13 +472,26 @@ pub(crate) fn rerun_work(lib: &LocalLibrary, ids: &[i64]) -> Result<Vec<Analysis
 /// Tracks to analyse at launch: partial analyses first (they resume at the missing stage), then,
 /// when `include_new` is set, tracks that were never analysed.
 pub(crate) fn resume_work(lib: &LocalLibrary, include_new: bool) -> Result<Vec<AnalysisWorkItem>, String> {
-    let partial = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?;
-    let mut ids = partial.clone();
+    let mut ids = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?;
     if include_new {
+        let partial: HashSet<i64> = ids.iter().copied().collect();
         let unanalyzed = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
         ids.extend(unanalyzed.into_iter().filter(|id| !partial.contains(id)));
     }
     resolve_analysis_work(lib, &ids)
+}
+
+/// `resume_work`, with the tracks of the last run's saved order (see `analysis_order`) first, in that order.
+pub(crate) fn resume_work_in_saved_order(
+    lib: &LocalLibrary,
+    include_new: bool,
+    app_data_dir: Option<&Path>,
+) -> Result<Vec<AnalysisWorkItem>, String> {
+    let work = resume_work(lib, include_new)?;
+    Ok(match app_data_dir {
+        Some(dir) => analysis_order::apply(work, &analysis_order::load(dir)),
+        None => work,
+    })
 }
 
 pub(crate) fn merge_into_analysis_queue(
@@ -431,30 +499,7 @@ pub(crate) fn merge_into_analysis_queue(
     items: Vec<AnalysisWorkItem>,
     front: bool,
 ) -> u32 {
-    let mut added = 0u32;
-    let items: Vec<AnalysisWorkItem> = items.into_iter().filter(|(id, _)| !coordinator.is_scheduled(*id)).collect();
-    coordinator.with_queue(|queue| {
-        for item in items {
-            let track_id = item.0;
-            if let Some(pos) = queue.iter().position(|(id, _)| *id == track_id) {
-                if front && pos > 0 {
-                    let existing = queue.remove(pos).unwrap();
-                    queue.push_front(existing);
-                }
-                continue;
-            }
-            if front {
-                queue.push_front(item);
-            } else {
-                queue.push_back(item);
-            }
-            added += 1;
-        }
-    });
-    if added > 0 {
-        coordinator.bump_total(added);
-    }
-    added
+    coordinator.merge_work(&items, front).unwrap_or(0)
 }
 
 #[derive(Clone, Copy)]
@@ -568,21 +613,29 @@ fn record_outcome(
     stage: Stage,
     outcome: TrackResult,
 ) -> Result<(), String> {
+    let file_name = file_name_of(source_path);
+    if outcome.is_err() && coordinator.is_cancelled() {
+        sink.log(LogLevel::Dim, format!("{file_name} stopped by cancel"));
+        return Ok(());
+    }
     let completed = coordinator.completed.fetch_add(1, Ordering::Relaxed) + 1;
     let total = coordinator.total().max(completed);
-    let file_name = file_name_of(source_path);
-    match outcome {
-        Ok((result, detail)) => {
-            let t_db = Instant::now();
-            let grid = stage == Stage::Grid;
-            let (stored, held) = store_analysis(shared, track_id, &result, analysis_stage::ALL, |track, analysis| {
-                if grid {
-                    if let Some(track) = track {
-                        analysis.key = track.key.clone();
-                    }
+    let t_db = Instant::now();
+    let grid = stage == Stage::Grid;
+    let stored = outcome.and_then(|(result, detail)| {
+        store_analysis(shared, track_id, source_path, &result, analysis_stage::ALL, |track, analysis| {
+            if grid {
+                if let Some(track) = track {
+                    analysis.key = track.key.clone();
                 }
-                track.map(|track| models::Track { tempo: (analysis.bpm * 100.0) as u32, key: analysis.key.clone(), ..track.clone() })
-            })?;
+            }
+            track.map(|track| models::Track { tempo: (analysis.bpm * 100.0) as u32, key: analysis.key.clone(), ..track.clone() })
+        })
+        .map(|(stored, held)| (stored, held, detail))
+        .map_err(|e| format!("result not stored: {e}"))
+    });
+    match stored {
+        Ok((stored, held, detail)) => {
             sink.log(
                 LogLevel::Ok,
                 format!(
@@ -615,6 +668,7 @@ fn record_outcome(
 fn store_analysis(
     shared: &SharedLibrary,
     track_id: i64,
+    source_path: &Path,
     analysis: &models::AnalysisResult,
     stages: u8,
     prepare: impl Fn(Option<&models::Track>, &mut models::AnalysisResult) -> Option<models::Track>,
@@ -624,6 +678,9 @@ fn store_analysis(
         let lib = shared.lock().map_err(|e| e.to_string())?;
         let held = Instant::now();
         let track = lib.get_track(track_id).map_err(|e| e.to_string())?;
+        if track.as_ref().is_some_and(|track| track.source_path != source_path) {
+            return Err(format!("track {track_id} no longer points at {}", source_path.display()));
+        }
         let track_row = prepare(track.as_ref(), &mut prepared);
         let write = lib.begin_analysis(track_id, &prepared, stages).map_err(|e| e.to_string())?;
         (write, track_row, held.elapsed())
@@ -650,7 +707,7 @@ fn store_fast_pass(
     result: &models::AnalysisResult,
     detail: &str,
 ) -> Result<(), String> {
-    store_analysis(shared, track_id, result, FAST_STAGES, |track, analysis| {
+    store_analysis(shared, track_id, source_path, result, FAST_STAGES, |track, analysis| {
         track.filter(|_| !analysis.key.is_empty()).map(|track| models::Track { key: analysis.key.clone(), ..track.clone() })
     })?;
     sink.log(LogLevel::Dim, format!("{} waveform+key stored key={} {detail}", file_name_of(source_path), result.key));
@@ -659,10 +716,10 @@ fn store_fast_pass(
 }
 
 fn partial_store(shared: &SharedLibrary, sink: &Arc<dyn AnalysisSink>, track_id: i64, source_path: &Path, started: Instant) -> PartialStore {
-    let (shared, sink, file_name) = (shared.clone(), sink.clone(), file_name_of(source_path));
+    let (shared, sink, file_name, source_path) = (shared.clone(), sink.clone(), file_name_of(source_path), source_path.to_path_buf());
     Arc::new(move |partial| {
         let stages = if partial.key.is_empty() { analysis_stage::WAVEFORM } else { FAST_STAGES };
-        let stored = store_analysis(&shared, track_id, &partial, stages, |track, analysis| {
+        let stored = store_analysis(&shared, track_id, &source_path, &partial, stages, |track, analysis| {
             track.filter(|_| stages == FAST_STAGES).map(|track| models::Track { key: analysis.key.clone(), ..track.clone() })
         });
         match stored {
@@ -739,8 +796,8 @@ pub(crate) async fn prioritize_track(
     sink: Arc<dyn AnalysisSink>,
     env: BackendEnv,
 ) -> Result<(), String> {
-    let (runner, _) = resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked)?;
-    prioritize_with_runner(shared, coordinator, item, sink, env, runner).await
+    let resolve = || resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked).map(|(runner, _)| runner);
+    prioritize_with_resolver(shared, coordinator.clone(), item, sink, env.clone(), resolve).await
 }
 
 async fn prioritize_with_runner(
@@ -751,6 +808,22 @@ async fn prioritize_with_runner(
     env: BackendEnv,
     runner: Runner,
 ) -> Result<(), String> {
+    prioritize_with_resolver(shared, coordinator, item, sink, env, || Ok(runner)).await
+}
+
+async fn prioritize_with_resolver(
+    shared: SharedLibrary,
+    coordinator: AnalysisCoordinator,
+    item: AnalysisWorkItem,
+    sink: Arc<dyn AnalysisSink>,
+    env: BackendEnv,
+    resolve: impl FnOnce() -> Result<Runner, String>,
+) -> Result<(), String> {
+    let runner = resolve().inspect_err(|_| {
+        if !coordinator.is_active() {
+            sink.complete();
+        }
+    })?;
     let wide_threads = match &runner {
         Runner::Rust { engine } => engine.plan(1).threads_per_track,
         Runner::Python { .. } => 0,
@@ -776,7 +849,7 @@ pub(crate) async fn run_track_analysis(
     run_with_runner(shared, coordinator, pending, sink, env, None).await
 }
 
-async fn run_with_runner(
+pub(crate) async fn run_with_runner(
     shared: SharedLibrary,
     coordinator: AnalysisCoordinator,
     pending: Vec<AnalysisWorkItem>,
@@ -784,14 +857,31 @@ async fn run_with_runner(
     env: BackendEnv,
     chosen_runner: Option<Runner>,
 ) -> Result<RunOutcome, String> {
+    let resolve = || match chosen_runner {
+        Some(runner) => Ok((runner, Vec::new())),
+        None => resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked),
+    };
+    run_with_resolver(shared, coordinator.clone(), pending, sink, env.app_data_dir.clone(), resolve).await
+}
+
+async fn run_with_resolver(
+    shared: SharedLibrary,
+    coordinator: AnalysisCoordinator,
+    pending: Vec<AnalysisWorkItem>,
+    sink: Arc<dyn AnalysisSink>,
+    app_data_dir: Option<PathBuf>,
+    resolve: impl FnOnce() -> Result<(Runner, Vec<String>), String>,
+) -> Result<RunOutcome, String> {
     if pending.is_empty() {
         sink.log(LogLevel::Info, "No unanalyzed tracks — nothing to do".to_string());
         return Ok(RunOutcome::NothingToDo);
     }
 
-    if !coordinator.try_begin() {
-        merge_into_analysis_queue(&coordinator, pending, false);
-        return Ok(RunOutcome::Merged);
+    while !coordinator.try_begin() {
+        if coordinator.merge_work(&pending, false).is_some() {
+            return Ok(RunOutcome::Merged);
+        }
+        tokio::time::sleep(SCHEDULER_POLL).await;
     }
 
     let queue: SharedAnalysisQueue = Arc::new(Mutex::new(VecDeque::from(pending)));
@@ -807,16 +897,25 @@ async fn run_with_runner(
     }
     let _run_guard = RunGuard { coordinator: coordinator.clone() };
 
-    let runner = match chosen_runner {
-        Some(runner) => runner,
-        None => {
-            let (runner, notes) = resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked)?;
-            for note in notes {
-                sink.log(LogLevel::Info, note);
-            }
-            runner
-        }
-    };
+    let outcome = run_registered(shared, coordinator, sink.clone(), app_data_dir, resolve, initial_total).await;
+    if outcome.is_err() {
+        sink.complete();
+    }
+    outcome
+}
+
+async fn run_registered(
+    shared: SharedLibrary,
+    coordinator: AnalysisCoordinator,
+    sink: Arc<dyn AnalysisSink>,
+    app_data_dir: Option<PathBuf>,
+    resolve: impl FnOnce() -> Result<(Runner, Vec<String>), String>,
+    initial_total: u32,
+) -> Result<RunOutcome, String> {
+    let (runner, notes) = resolve()?;
+    for note in notes {
+        sink.log(LogLevel::Info, note);
+    }
     let (max_in_flight, model_jobs) = match &runner {
         Runner::Python { command } => {
             sink.log(LogLevel::Info, format!("Starting analysis: {initial_total} tracks, python={command}"));
@@ -839,8 +938,12 @@ async fn run_with_runner(
     let mut join_set: tokio::task::JoinSet<(i64, PathBuf, Stage, TrackResult)> = tokio::task::JoinSet::new();
 
     let staged = coordinator.staged && matches!(runner, Runner::Rust { .. });
-    let detail_cache = env.app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
+    let detail_cache = app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
+    let mut order_journal = OrderJournal::new(app_data_dir.clone());
     loop {
+        if let Err(e) = order_journal.tick(|| coordinator.pending_order()) {
+            sink.log(LogLevel::Dim, format!("Analysis order not saved: {e}"));
+        }
         while join_set.len() < max_in_flight && !coordinator.is_cancelled() && !coordinator.background_paused() {
             let stored_stages = |id: i64| shared.lock().ok().and_then(|lib| lib.analysis_stages(id).ok().flatten()).unwrap_or(0);
             let task = coordinator.take_next(staged, stored_stages, model_jobs, |jobs_left| match &runner {
@@ -884,18 +987,28 @@ async fn run_with_runner(
             .ok_or_else(|| "analysis task ended".to_string())?
             .map_err(|e| format!("Task panicked: {e}"))?;
 
-        if coordinator.finish_background(track_id) {
+        if coordinator.is_preempted(track_id) {
+            coordinator.finish_background(track_id);
             continue;
         }
         match (stage, analysis_result) {
-            (Stage::Fast, Ok((result, detail))) => {
-                store_fast_pass(&shared, &sink, track_id, &source_path, &result, &detail)?;
-                coordinator.push_grid((track_id, source_path));
+            (Stage::Fast, Ok((result, detail))) => match store_fast_pass(&shared, &sink, track_id, &source_path, &result, &detail) {
+                Ok(()) => coordinator.hand_to_grid((track_id, source_path)),
+                Err(e) => {
+                    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, Err(format!("result not stored: {e}")))?;
+                    coordinator.finish_background(track_id);
+                }
+            },
+            (_, outcome) => {
+                record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, outcome)?;
+                coordinator.finish_background(track_id);
             }
-            (_, outcome) => record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, outcome)?,
         }
     }
 
+    if let Err(e) = order_journal.finish() {
+        sink.log(LogLevel::Dim, format!("Analysis order file not removed: {e}"));
+    }
     let completed = coordinator.completed.load(Ordering::Relaxed);
     let errors = coordinator.errors.load(Ordering::Relaxed);
     let total = coordinator.total();
