@@ -104,6 +104,8 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 31. r15 trigger hit: Mac cold first expand longest frame 472-520 ms in 3/5 launches -> build staged reveal on a branch (r15-reveal) [parked, branch r15-reveal 00acf20: longest frame -20-40% but click-to-drawn worse (WebKit +0.7 s), not worth landing; its probe metrics (longest_busy, pending_frames) tell next Mac night if the stall is outside the page]
 32. r30-coreml-mem: cap the rten bridge so CoreML peak RSS <= rten (7.0-7.7 -> <=6.2 GB) [landed 7dba30c; 6.1-6.2 GB, latency kept; accepted per rec, last 0.3 GB vs same-session rten left]
 33. r31-cover-cap: cap the 512 px artwork.cache (UI-aware eviction, never blank a visible image) [built, branch r31-cover-cap 857496a; Waiting 35]
+34. r32-probe: port r15's first-expand probe metrics + webkit smoke option to ov-1028 (no behaviour change) [running]
+35. r33-dupplan: import duplicate plan at 50k (1-1.5 s) without schema: in-memory folded-key index kept across imports
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
