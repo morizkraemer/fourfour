@@ -78,7 +78,7 @@ fn row_to_track(row: &rusqlite::Row) -> rusqlite::Result<Track> {
 }
 
 pub fn select_track(conn: &Connection, id: i64) -> Result<Option<Track>> {
-    let mut stmt = conn.prepare("SELECT * FROM tracks WHERE id = ?1")?;
+    let mut stmt = conn.prepare_cached("SELECT * FROM tracks WHERE id = ?1")?;
     let mut rows = stmt.query_map([id], row_to_track)?;
     match rows.next() {
         Some(Ok(track)) => Ok(Some(track)),

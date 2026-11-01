@@ -467,9 +467,9 @@ pub(crate) fn rerun_work(lib: &LocalLibrary, ids: &[i64]) -> Result<Vec<Analysis
 /// Tracks to analyse at launch: partial analyses first (they resume at the missing stage), then,
 /// when `include_new` is set, tracks that were never analysed.
 pub(crate) fn resume_work(lib: &LocalLibrary, include_new: bool) -> Result<Vec<AnalysisWorkItem>, String> {
-    let partial = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?;
-    let mut ids = partial.clone();
+    let mut ids = lib.get_incomplete_analysis_ids().map_err(|e| e.to_string())?;
     if include_new {
+        let partial: HashSet<i64> = ids.iter().copied().collect();
         let unanalyzed = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
         ids.extend(unanalyzed.into_iter().filter(|id| !partial.contains(id)));
     }
