@@ -34,6 +34,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 ### Brother's lane
+- r12: USB export puts two tracks with the same artist + file name (untagged "01 Intro.mp3") on one path; repro ignored test in pioneer-library/tests/robust_store.rs. Also lofty rejects some bad tags so playable files are skipped (relaxed parse in scanner.rs).
 - SQLCipher keys private; no PDB reader (docs/architecture/rekordbox-import.md).
 - From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
 - Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
@@ -77,8 +78,8 @@ Week 2, beta:
 12. bug sweep from smoke + journal followups; then own priorities (rulebook order)
 Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so you never run out of work"; refill before it runs dry):
 13. r11-coreml: build r9-ort with CoreML on the Mac headless + 3-track sanity now; full analysis bench tonight in the Mac batch [running]
-14. r12-robust: import/analysis/sync with bad input (zero-byte, corrupt, unsupported, missing, read-only, huge files, odd tags/unicode paths); tests + fixes [running]
-15. r13-50k: startup, scroll, search, import and memory at 50k tracks on the box; fix the worst regressions
+14. r12-robust: import/analysis/sync with bad input (zero-byte, corrupt, unsupported, missing, read-only, huge files, odd tags/unicode paths); tests + fixes [landed ea0ddaa; open items in docs/architecture/robustness-2026-11.md]
+15. r13-50k: startup, scroll, search, import and memory at 50k tracks on the box; fix the worst regressions [running]
 16. r14-resume: analysis queue across restarts and crashes at 10k (no lost/duplicated work, steady memory over hours)
 17. r15-reveal: staged waveform reveal on a branch (unlanded; only if the Mac night shows first expand >50 ms)
 18. r16-quant: beat model fp16/int8 weights experiment (prototype only, grid/key evals gate it)
