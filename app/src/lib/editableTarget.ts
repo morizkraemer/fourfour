@@ -13,3 +13,8 @@ export function isEditableTarget(target: unknown): boolean {
   if (element.closest('.ff-settings-screen')) return true;
   return !!element.closest('.ff-dialog-wrapper');
 }
+
+export function isKeyboardFocusedControl(target: unknown): boolean {
+  const element = target as { matches?(selector: string): boolean } | null;
+  return typeof element?.matches === 'function' && element.matches(':focus-visible');
+}
