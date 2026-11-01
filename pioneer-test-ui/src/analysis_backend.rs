@@ -163,6 +163,11 @@ fn update_config(config_path: &Path, key: &str, value: Option<serde_json::Value>
 pub struct AnalyzerCache(Arc<std::sync::Mutex<Option<(PathBuf, Arc<Analyzer>)>>>);
 
 impl AnalyzerCache {
+    #[allow(dead_code)]
+    pub fn loaded(&self) -> Option<Arc<Analyzer>> {
+        self.0.lock().ok()?.as_ref().map(|(_, analyzer)| analyzer.clone())
+    }
+
     fn get_or_load(&self, dir: &Path, pool: PoolOptions) -> Result<Arc<Analyzer>, String> {
         let mut slot = self.0.lock().map_err(|e| e.to_string())?;
         if let Some((loaded_dir, analyzer)) = slot.as_ref() {
@@ -181,11 +186,22 @@ pub type PartialResultSink<'a> = Option<&'a (dyn Fn(AnalysisResult) + Sync)>;
 pub trait TrackEngine: Send + Sync + 'static {
     fn plan(&self, jobs: usize) -> PoolPlan;
     fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String>;
+    fn beat_runtime(&self) -> String {
+        "rten".to_string()
+    }
 }
 
 impl TrackEngine for Analyzer {
     fn plan(&self, jobs: usize) -> PoolPlan {
         Analyzer::plan(self, jobs)
+    }
+
+    fn beat_runtime(&self) -> String {
+        let status = self.beat_status();
+        match status.fallback {
+            Some(why) => format!("{} ({why})", status.runtime),
+            None => status.runtime.to_string(),
+        }
     }
 
     fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {

@@ -31,7 +31,7 @@ cp "$ROOT/scripts/mac/LICENSE-key-model.txt" "$MODELS/LICENSE-key-model.txt"
 (cd "$ROOT/app" && npm ci)
 
 cd "$ROOT/pioneer-test-ui"
-caffeinate -i cargo tauri build --config tauri.bundle-weights.conf.json --bundles dmg
+caffeinate -i cargo tauri build --config tauri.bundle-weights.conf.json --features coreml --bundles dmg
 
 DMG="$(ls -t "$ROOT"/target/release/bundle/dmg/*.dmg | head -1)"
 [ -f "$DMG" ] || { echo "FAIL no dmg produced"; exit 1; }

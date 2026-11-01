@@ -362,6 +362,16 @@ fn main() {
             "first_result_s": first / 1000.0, "peak_rss_tree_mb": *peak.lock().unwrap(),
         }})
     );
+    if let Some(analyzer) = coordinator.analyzers.loaded() {
+        let status = analyzer.beat_status();
+        println!(
+            "BEAT runtime={} chunks_accelerated={} chunks_rten={} fallback={}",
+            status.runtime,
+            status.chunks_accelerated,
+            status.chunks_rten,
+            status.fallback.as_deref().unwrap_or("none")
+        );
+    }
     if let (Some(delay), Some((id, _))) = (play_after_s, played) {
         let rel = |ms: f64| (ms / 1000.0 - delay).max(0.0);
         let first_partial = sink.partial_ms.lock().unwrap().get(&id).and_then(|v| v.first().copied()).map(rel);

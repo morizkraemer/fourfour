@@ -8,7 +8,7 @@ Headline at 30k tracks: backend `load_state` 24.7 s → 0.5 s, browser first pai
 
 Two layers, measured separately because the box has no Tauri window.
 
-**Backend** (`pioneer-test-ui/src/bin/bench_startup.rs`, release build):
+**Backend** (`pioneer-test-ui/src/dev_bin/bench_startup.rs`, release build):
 - `gen` writes a temp library through `pioneer-library`: N tracks, one analysis each (240 s tracks, 90-169 BPM beat grid, 400-byte PWAV, 36k-sample color waveform), 20 playlists. 1k = 235 MB, 30k = 7.0 GB on disk.
 - `run` opens the library and times each `load_state` step: `open`, the track query, `build_track_infos` (includes the track query), playlists, JSON serialisation (`serde_json`, same as the Tauri IPC payload). It uses the real `track_infos.rs` and `dto.rs` from the app via `#[path]`.
 - Warm page cache, median of 3 runs. Cold-disk start is not measured (no root to drop caches).

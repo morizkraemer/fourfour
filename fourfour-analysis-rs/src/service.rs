@@ -7,7 +7,7 @@ use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, WaveformPreview
 use pioneer_usb_writer::waveform::Waveforms;
 
 use crate::analyze::{analyze_controlled, Analysis, Config, Control};
-use crate::bt::BeatEngine;
+use crate::bt::{BeatEngine, BeatStatus};
 use crate::keymap::camelot;
 
 pub const MODELS_ENV: &str = "FOURFOUR_MODELS_DIR";
@@ -153,6 +153,10 @@ impl Analyzer {
 
     pub fn plan(&self, jobs: usize) -> PoolPlan {
         plan_pool(&self.pool, available_memory_mb(), jobs)
+    }
+
+    pub fn beat_status(&self) -> BeatStatus {
+        self.engine.beat_status()
     }
 
     pub fn analyze(&self, path: &Path) -> Result<AnalysisResult> {

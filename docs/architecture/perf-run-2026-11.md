@@ -421,6 +421,85 @@ Same box, `bench_analysis --list list8 --threads 12 --probe-reads 16`, nice 10, 
 
 Byte identity: the ignored test `fixture_library_files_are_byte_identical_both_ways` (`FF_FIXTURE_LIBRARY=~/.cache/ff-fixture/10k/library FF_FIXTURE_TRACKS=1000`) stores 1000 fixture analyses (251 with `edits.json`) both ways and compares the three ANLZ files and the index row.
 
+## R9 onnxruntime (2026-10-31, `r9-ort`)
+
+Branch `r9-ort` from `ov-1028` (`b24b09b`), not landed. Box: `dev`, 16 cores (Xeon Gold 6130), load 10-34 from other workers during every run; read CPU seconds and the isolated per-chunk numbers, wall clock only as direction.
+
+**Recommendation: Mac-only.** On this CPU onnxruntime saves about 30% of the CPU per chunk in isolation but gives no throughput in the app path (2x memory, later first result), so rten stays the default everywhere and `ort` stays only as the route to CoreML (GPU/ANE) on the Mac; drop it if the Mac run below shows no gain.
+
+### What changed
+
+- `fourfour-analysis-rs` feature `ort` (off by default; the default build is unchanged and runs rten): the beat model runs on onnxruntime through the `ort` crate (`=2.0.0-rc.14`, MIT/Apache, `src/ort_beat.rs`). The mel model stays on rten (a few percent of the time). Same input/output contract (`spectrogram` in, `beat`/`downbeat` logits out), same chunking and border handling, same shared chunk threads (`share_chunk_threads`, `analysis_ui_busy`, cores-2 untouched): each chunk thread opens its own single-threaded session (`Session::run` takes `&mut self`); all sessions share one prepacked copy of the weights and one process-wide ORT environment (ORT allows only one per process).
+- `FOURFOUR_BEAT_RUNTIME=rten` switches an `ort` build back to rten at load time, so one binary does the A/B. `bt::beat_runtime()` says which one is active.
+- Feature `coreml` (implies `ort`): on macOS the session gets the CoreML execution provider (MLProgram, all compute units) with CPU fallback; elsewhere it is the same as `ort`. On macOS the `ort` dependency always pulls the CoreML build of ONNX Runtime (pyke ships only that one for `aarch64-apple-darwin`); the cargo feature only decides whether the EP is registered. The CoreML branch was type-checked on Linux against the ort API; it has not been built or run on a Mac.
+- `pioneer-test-ui` and `prototyping/analysis-packaging` forward both features (`--features ort` / `--features coreml`).
+- CPU allocator: arena on, memory pattern off. Arena off costs every chunk 300 MB of fresh pages (sys 239 s vs 52-95 s per 12 tracks, per-chunk CPU back to rten's); memory pattern on adds about 7 GB of RSS for nothing.
+- Ignored test `bt::ort_tests::ort_gives_the_rten_logits_for_a_chunk` (`--features ort`, real weights); with `FF_CHUNK_ROUNDS=7` and `--release --nocapture` it also prints the per-chunk CPU of both runtimes. The ignored `tests/generated_tracks.rs` (chunk sharing, pause, cancel) pass on `ort`.
+
+**Build impact (affects the .dmg).** With `ort`, the `ort-sys` build script **downloads a prebuilt ONNX Runtime 1.31.0 static library** from `cdn.pyke.io` at build time (here `x86_64-unknown-linux-gnu.tar.lzma2`, a 112 MB `libonnxruntime.a`, sha256-checked, cached in `~/.cache/ort.pyke.io/`) and links it statically, so nothing extra ships next to the app. The first build needs network (or `ORT_LIB_LOCATION` pointing at a local ONNX Runtime build). There is no prebuilt for Intel Macs (`x86_64-apple-darwin`). `ffa` with `ort` (release, LTO, stripped) is 31.5 MB. The default build downloads nothing.
+
+### Numbers (CPU execution provider vs rten, same tracks, same threads)
+
+Per chunk (one 1500-frame chunk, one thread, release, process CPU, median of 7, interleaved):
+
+| Config | rten | ort |
+|---|---:|---:|
+| arena on, memory pattern off (kept) | 4,900 ms | **3,360 ms** (-31%) |
+| arena on, memory pattern on | 4,880 ms | 3,320 ms |
+| arena off | 4,690 ms | 4,890 ms |
+
+Wall per chunk in `ffa --workers 1 --threads 1` (3 long fixture tracks, load about 30): rten 5.1-8.5 s, ort 5.6-5.8 s.
+
+App path (`bench_analysis --backend rust --threads 12`, the first 12 long files of `~/.cache/ff-fixture/pool-v1/long`, `nice -n 10`, interleaved, `/usr/bin/time`):
+
+| Run | Load at start | Tracks/min | First result | user + sys CPU | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| rten | 20 | 9.64 | 14.7 s | 756 + 63 s | 5.5 GB |
+| rten | 20 | 10.01 | 14.5 s | 746 + 60 s | 5.4 GB |
+| rten (earlier pair) | 11-24 | 6.6-8.6 | 17-31 s | 762 + 72 s | 5.2-5.4 GB |
+| ort | 10 | 8.14 | 35.2 s | 705 + 67 s | 10.7 GB |
+| ort | 21 | 9.13 | 31.8 s | 710 + 95 s | 10.7 GB |
+| ort, memory pattern on | 27 | 6.50 | 37.6 s | 720 + 105 s | 18.2 GB |
+| ort, arena off | 30 | 5.63 | 41.1 s | 702 + 239 s | 7.4 GB |
+
+- Throughput: no gain. User CPU drops 6-8%: the 31% per chunk mostly disappears when 12 chunks run side by side (the attention steps are memory-bound, see R3, and onnxruntime does not fuse them on this graph either). Wall is the same or worse.
+- First result about 2x later: every chunk thread builds its session (graph optimisation and weight prepack, about 2.5 s) on its first chunk, 12 at once. Fixable (build sessions at engine load, or cache the optimised model), not worth it while throughput is flat.
+- Memory about 2x (each session keeps its own arena at peak activations).
+- `ffa` on the 50-track dev split (`--workers 4 --threads 12`, memory pattern on) showed rten 4.48 vs ort 9.81 trk/min (peak RSS 6.2 vs 19.5 GB). The two ran back to back at load 25-35 and the interleaved app-path pairs did not reproduce it: load noise, not a result.
+
+Logits vs rten (dev split, 50 real tracks, whole-track logits from `ffa --dump`): **max abs logit diff 2.0e-4** (median per track 7.9e-5). Beat peak frames identical on 50/50; final grid within 0.21 us of rten, BPM within 6e-8; the `ffa` output (BPM, beats, downbeats, key, waveform checksum) identical on 50/50. Synthetic chunk test: 5.0e-6.
+
+Grid eval (`ffa ... --reference ref.json --list dev.txt` scored with `benchmark/scripts/o3-score.py`, dev split as in R3):
+
+| | rten | ort |
+|---|---:|---:|
+| Grid within 20 ms | 44 / 50 (88.0%) | **44 / 50 (88.0%)** |
+| BPM within 0.1 / 1.0 | 47 / 50, 50 / 50 | 47 / 50, 50 / 50 |
+| Bar right (of 46 aligned) | 27 | 27 |
+
+The grid bar does not drop. Key: `cyankey::detect` never sees the beat model, so the Beatport key eval (58.3% test) is unchanged by construction; the dev-split keys of both runtimes are identical on 50/50.
+
+Raw: `~/.cache/r9-ort-work/` (`dev-{rten,ort}.jsonl`, `dump-dev-*`, `m-*.err`, `tput-*.err`, `chunk-*.jsonl`).
+
+### Running it on the Mac (untested here)
+
+```bash
+# first build needs network: ort-sys downloads the aarch64-apple-darwin+coreml ONNX Runtime 1.31.0
+cargo build --release -p pioneer-test-ui --features coreml --bin bench_analysis
+export FOURFOUR_MODELS_DIR=<dir with beat_this.onnx and mel_spectrogram.onnx>
+target/release/bench_analysis --backend rust --list list12.txt --threads 3                              # CoreML
+FOURFOUR_BEAT_RUNTIME=rten target/release/bench_analysis --backend rust --list list12.txt --threads 3   # rten, same binary
+# accuracy with the CoreML build
+(cd prototyping/analysis-packaging && cargo build --release --features coreml --bin ffa)
+prototyping/analysis-packaging/target/release/ffa --models "$FOURFOUR_MODELS_DIR" --workers 2 --threads 3 \
+  --reference benchmark/results/o3/ref.json --list benchmark/results/o3/dev.txt --dump /tmp/dump-coreml --out /tmp/dev-coreml.jsonl
+python3 -I benchmark/scripts/o3-score.py benchmark/results/o3/ref.json /tmp/dev-coreml.jsonl
+# app bundle with CoreML
+fourfour-analysis-rs/scripts/bundle-app.sh --bundles dmg --features coreml
+```
+
+What to watch: every chunk thread opens its own session, so CoreML compiles the model once per thread (slow first chunk, memory per session); compare `--threads` 1-3. The GPU/ANE may run in fp16, so logits can drift more than on CPU: check the max logit diff (`ffa --dump` with both runtimes) and that grid within 20 ms stays at 44/50 on dev (165/205 on test). If CoreML is not clearly faster per track than rten at similar memory, drop the feature.
+
 ## R10 first expand (2026-10-31, `r10-expand`, BLOCKED)
 
 Goal was the cold first expand (first time the expanded player and its waveform view mount) at or under 30 ms longest task, pixels unchanged. Not reached; no app code changed. What is left is a decision (below).
@@ -449,6 +528,122 @@ Why 30 ms needs a decision: everything in the frame is needed for the first visi
 3. **Draw the zoom view one frame after the panel** (q50-render's option): ~30 ms off the task, but the panel's first frame shows an empty zoom area. Visible, so not done.
 
 Decided (orchestrator, 2026-10-31): measure on the Mac first. `scripts/mac/perf-night.sh` now launches the app `--expand-runs` times (default 5), each with the probe step `expand` (`perf_probe.js` `firstExpand`: load row 3, wait for `ff:player-ready` plus 1.5 s, click expand, record frame gaps until the zoom view shows `data-bands="detail"` plus two frames). `summary.md` gets a "Cold first expand (R10)" table with the median longest frame and click to detail drawn. WKWebView has no long-task API, so the longest frame gap stands in for the longest task. **Trigger: a median longest frame over 50 ms on the Mac means building the staged reveal (option 1 above); at or under 50 ms it is not built.**
+
+## R11 CoreML (2026-11-01, `r11-coreml`)
+
+Branch `r11-coreml` = `r9-ort` + `ov-1028`, not landed. Mac: `mbp`, Apple M5 Pro (15 cores: 5 performance, 10 efficiency), 24 GB, macOS 26.3. Headless clone `~/dev/build/fourfour-r11` (git bundle from the box); `~/dev/build/fourfour-mac` and /Applications untouched. Merlin was using the Mac, so only builds and a 3-track check ran, all under `nice -n 10 taskpolicy -b` (efficiency cores only): no number below is representative of speed.
+
+### Build on the Mac
+
+- **The `ort` build did not link on macOS.** The prebuilt ONNX Runtime 1.31.0 for `aarch64-apple-darwin` (pyke, CoreML build, downloaded to `~/Library/Caches/ort.pyke.io/`) calls `___isPlatformVersionAtLeast` (clang's `@available` helper in compiler-rt), and rustc links with `-nodefaultlibs`, so `ffa --features coreml` failed with an undefined symbol. Fix: `fourfour-analysis-rs/build.rs` links `libclang_rt.osx.a` from `clang --print-resource-dir` when the target is macOS and `ort` is on (a no-op everywhere else). This also affects `bundle-app.sh --features coreml`; R9's Mac steps could not have worked without it.
+- Linker warnings remain that the ORT objects were built for macOS 13.4 while the link targets 11.0: harmless here (macOS 26), but the `.dmg` with `ort` effectively needs macOS 13.4+.
+- `ffa --features coreml` (release, LTO, stripped): 24.0 MB, 2 min 12 s incremental at background priority.
+
+### Sanity (3 dev tracks, background priority)
+
+Not finished: the Mac went offline (asleep or off the tailnet) about 15 min into the check, while the one-chunk test was still compiling at background priority, and did not come back within the timebox. The check is `scripts/mac/coreml-bench.sh --no-build --limit 3 --reps 1 --rten "1 1" --coreml "1 1" --rounds 3 --background` (output `~/.cache/r11-work/sanity/`); it may have finished on its own once the Mac woke. Still unknown: whether CoreML takes the graph (node coverage), the logit diff vs rten, and the per-chunk time.
+
+### Tonight's run (`scripts/mac/coreml-bench.sh`)
+
+Headless (no window, no screen recording). Builds `ffa --features coreml`, runs the one-chunk test (rten vs CoreML in one process, wall ms per chunk and session open time), then `ffa` on the same track list for each runtime/config, interleaved, `--reps` times, with `/usr/bin/time -l` and `ORT_LOG=info` (the CoreML EP logs how many graph nodes it took). `scripts/mac/coreml-bench-summary.py` writes `summary.md`: tracks/min, first result, model load, peak RSS, model seconds, CoreML node coverage, median per-chunk model ms per run, max logit diff and beat/grid agreement vs rten, and the `o3-score.py` grid eval for every config. Dry run on the box: `scripts/mac/coreml-bench.sh --dry-run --o3 benchmark/results/o3`; the summary was checked against the R9 dumps (reproduces R9's 2.0e-4 logit diff, 50/50 peaks, 44/50 grid).
+
+Track data: the dev (50) and test (205) splits are all on the Mac under `~/local/2-Areas/1-Mukke/#02_DJ` (matched by file name and size, 255/255; the 10k fixture is not on the Mac). `~/.cache/r11-work/o3/` holds `ref.json`, `dev.txt`, `test.txt` rewritten to those paths (three box paths are duplicates of one Mac file each, so three test-split ids collapse); weights are in `~/.cache/fourfour-models`.
+
+```bash
+ssh mbp
+cd ~/dev/build/fourfour-r11 && export PATH=$HOME/.cargo/bin:$PATH FFA_TARGET_DIR=$PWD/target-ffa
+scripts/mac/coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7
+# optional, grid on the test split for the best CoreML config only (about 4x the dev time):
+scripts/mac/coreml-bench.sh --no-build --split test --reps 1 --rten "2 6" --coreml "2 2" --rounds 3
+```
+
+Output: `build/mac/coreml-<date>/summary.md`. Expected time for the dev command: 12 `ffa` runs over 50 tracks; at rten's box rate (5-10 tracks/min) about 5-10 min each, so 1-2 h; CoreML runs shorter if it helps.
+
+Decision rule (as R9): keep `coreml` only if a CoreML config beats the best rten config on tracks/min at similar or lower peak memory, with grid within 20 ms still 44/50 on dev and max logit diff small enough that beat peaks match on (nearly) all tracks. Otherwise drop the `ort`/`coreml` features.
+
+## R24 CoreML fix (2026-11-01, `r24-coreml`)
+
+Branch `r24-coreml` = `r11-coreml` + `ov-1028`, not landed. Mac `mbp`, clone `~/dev/build/fourfour-r11`, everything under `nice -n 10`, headless.
+
+**Cause.** The exported model takes `spectrogram` as `[batch, time, 128]` with free dimensions, so the partial attention blocks compute their Slice `starts`/`ends` at run time from `Shape`/`Gather`/`Unsqueeze` chains (467 Shape, 425 Gather, 496 Unsqueeze nodes). ONNX Runtime 1.31's CoreML EP takes those shape nodes into its partitions (1372 of 1753 nodes) and hands the CPU Slice nodes left outside a 0-D tensor where the graph has a 1-D one, so the run fails at `/model/frontend/blocks/blocks.1/partial/attnF/Slice_6` ("Starts must be a 1-D array"). Reproduced with the Python `onnxruntime` 1.31.1 wheel on the Mac; ORT 1.19 does not fail but only takes 742 of 1813 nodes in 201 partitions and is slower than the CPU.
+
+**Fix (no model change).** The CoreML session is opened with free dimension overrides `batch = 1`, `time = 1500` (the chunk size): ORT then folds the whole shape arithmetic into constants before partitioning (1052 nodes left), CoreML takes 904 of them in 75 partitions, and every Slice gets constant 1-D inputs. Chunks of another length (only tracks shorter than one chunk, about 30 s) go to a CPU session opened on first use. The compiled CoreML model is cached in `~/Library/Caches/fourfour-coreml/<size>-<mtime>/` (keyed by the model file, so a new model gets a new cache). The rten path and the model file are unchanged. Code: `fourfour-analysis-rs/src/ort_beat.rs`.
+
+EP options tried first (Python, one 1500-frame chunk, single thread, Mac partly busy):
+
+| CoreML config | Session open | Chunk run | Max logit diff vs CPU |
+|---|---:|---:|---:|
+| MLProgram, ALL, dynamic shape (as R11) | - | fails (Slice_6) | - |
+| MLProgram, ALL, fixed shape, no cache | 19.1 s | 0.21 s | 3e-6 |
+| same, cache cold / warm | 18.8 s / 3.8 s | 0.22 s | 3e-6 |
+| MLProgram, CPUAndGPU, fixed | 17.0 s | 0.26 s | 3e-6 |
+| MLProgram, CPUAndNeuralEngine, fixed | 16.0 s | 0.76 s | 5e-6 |
+| MLProgram, CPUOnly, fixed | 11.2 s | 0.86 s | 5e-6 |
+| CPU EP (reference) | - | 0.58-0.84 s | - |
+
+`ALL` (in effect the GPU) is the fastest; the Neural Engine does not help this model. No offline graph edit was needed.
+
+**Acceptance (Rust, release, `--features coreml` on the Mac).** `ort_gives_the_rten_logits_for_a_chunk` passes: max abs logit diff 7.2e-6 (limit 1e-2), median of 5 one-thread chunks rten 1593 ms vs CoreML 283 ms, warm session open 3.3 s (cold about 19 s, was 42 s and failing), CoreML nodes 904 of 1052 (75 partitions). A 3-track `ffa` run (1 worker, 2 threads) worked end to end, but peak RSS was 3.2 GB (rten 0.8 GB in R11's sanity): every chunk thread holds its own CoreML session, so memory grows with threads. Box: `cargo test -p fourfour-analysis-rs` default and `--features ort` pass, including the ignored chunk test on ORT CPU.
+
+**Bench (verdict: keep).** Run by the waiting driver after the perf night: `coreml-bench.sh --split dev --reps 2 --rten "2 6;1 12" --coreml "1 1;2 1;2 2;4 2" --rounds 7` on `mbp` (M5 Pro), 50 dev tracks, `nice -n 10`, warm compiled-model cache. From `~/dev/build/fourfour-r11/build/mac/coreml-r24-dev/summary.md` (`w` = tracks in parallel, `t` = beat-model chunk threads, so CoreML sessions):
+
+| Run | Tracks | Tracks/min | First result | Model load | Peak RSS | Model s (sum) | CoreML nodes |
+|---|---:|---:|---:|---:|---:|---:|---|
+| coreml-w1-t1-r1 | 50 | 18.00 | 10.5 s | 3849 ms | 2174 MB | 154 | 904 of 1052 |
+| coreml-w1-t1-r2 | 50 | 17.79 | 10.5 s | 3875 ms | 2042 MB | 155 | 904 of 1052 |
+| coreml-w2-t1-r1 | 50 | 21.22 | 10.2 s | 3601 ms | 2308 MB | 264 | 904 of 1052 |
+| coreml-w2-t1-r2 | 50 | 20.49 | 10.3 s | 3694 ms | 2376 MB | 274 | 904 of 1052 |
+| coreml-w2-t2-r1 | 50 | 30.89 | 11.6 s | 3553 ms | 3682 MB | 175 | 904 of 1052 |
+| coreml-w2-t2-r2 | 50 | 26.10 | 11.5 s | 3634 ms | 3830 MB | 205 | 904 of 1052 |
+| coreml-w4-t2-r1 | 50 | 31.97 | 11.1 s | 3585 ms | 4300 MB | 168 | 904 of 1052 |
+| coreml-w4-t2-r2 | 50 | 25.91 | 11.4 s | 3975 ms | 4064 MB | 205 | 904 of 1052 |
+| rten-w1-t12-r1 | 50 | 14.25 | 4.7 s | 15 ms | 5229 MB | 202 | - |
+| rten-w1-t12-r2 | 50 | 12.65 | 5.1 s | 14 ms | 5277 MB | 226 | - |
+| rten-w2-t6-r1 | 50 | 13.83 | 5.8 s | 21 ms | 3492 MB | 420 | - |
+| rten-w2-t6-r2 | 50 | 12.41 | 7.0 s | 19 ms | 3482 MB | 468 | - |
+
+- CoreML at 2 sessions (w2t2, w4t2) runs 26-32 tracks/min against rten's 12-14, about 2x, at 3.7-4.3 GB peak RSS against rten's 3.5-5.2 GB. One chunk on one thread: rten 1424 ms, CoreML 229 ms; session open 2.9 s warm.
+- First result is about 11 s against 5 s: the model load (3.6 s warm) plus one session per chunk thread opened on its first chunk. R26 bridges this with rten.
+- Agreement with rten (`ffa --dump`, every CoreML config): max abs logit diff 1.9e-4 (median per track 1.1e-4), beat peaks equal on 49/49, final grid within 1 ms and BPM within 0.01 on 49/49 (the summary pairs 49 of the 50 tracks). Grid eval identical for every config, CoreML and rten: grid within 20 ms 44/50, BPM within 0.1 47/50, bar right 41 of 46 aligned.
+- The decision rule from R11 holds (faster at similar memory, grid 44/50, peaks match), so `coreml` stays and ships in R26.
+
+## R26 ship (2026-11-01, `r26-coreml-ship`)
+
+Branch `r26-coreml-ship` = `ov-1028` + `r24-coreml`, not landed. CoreML is now the beat-model engine of the macOS app, with rten as the bridge and the fallback. Linux and Windows builds are unchanged: no `ort` in them, rten only.
+
+### What ships
+
+- **macOS bundles build with `--features coreml`**: `scripts/mac/build-dmg.sh` passes it, and `fourfour-analysis-rs/scripts/bundle-app.sh` adds it when run on Darwin. The CI workflow lives on `ov-ci` and calls `build-dmg.sh` for the Mac job, so it picks this up when both land; the first build downloads ONNX Runtime from `cdn.pyke.io` (network needed) and needs Xcode's clang for `libclang_rt.osx.a` (R11). Apple Silicon only: pyke has no Intel macOS build, so an `x86_64-apple-darwin` or universal bundle does not build with this feature.
+- **`bundle.macOS.minimumSystemVersion` is `13.4`** in `pioneer-test-ui/tauri.conf.json`: the ORT objects are built for macOS 13.4, so the app now needs Ventura 13.4 or later (it was Tauri's default 10.13). Tauri sets `MACOSX_DEPLOYMENT_TARGET` from it, which also removes R11's linker warnings.
+- **Engine choice at run time** (`fourfour-analysis-rs/src/bt.rs`, `src/ort_beat.rs`). rten always loads (15 ms). With the `coreml` feature (and `FOURFOUR_BEAT_RUNTIME` not `rten`) a background thread opens the CoreML sessions at engine load: the first alone (so a new model compiles into the cache once), then the rest side by side. Until they are open, every chunk thread runs rten as before; then each thread with a session runs CoreML, and the threads without one finish their chunk and stop, leaving 2 chunk threads. Chunks that are not 1500 frames long (tracks under about 30 s) run on rten. If the environment, the cache directory, a session open or a chunk run fails, the reason is logged once (`beat model: coreml unavailable, using rten: ...`), the engine switches to rten for good, and the chunk-thread cap lifts back to the rten slot count. The app's analysis log line says `beat model=coreml` or `beat model=rten (coreml failed: ...)`; `bench_analysis` prints `BEAT runtime=... chunks_accelerated=N chunks_rten=M fallback=...`.
+- **Config: 2 CoreML sessions** (`ORT_SESSIONS`), the app's worker plan unchanged. R24's sweep: 1 session 18-21 tracks/min, 2 sessions 26-32; `w2t2` and `w4t2` gave the same tracks/min (medians 28.5 and 28.9) and `w4` cost 0.3-0.5 GB more, so the number that matters is the session count (each session holds its own compiled model and activations), and 2 it is. The app's workers (6 on the M5 Pro, 2 threads per track) do decode, mel, key and the fast pass on the CPU as they did with rten; more of them feed the 2 sessions, they do not add sessions.
+- **Compiled-model cache** `~/Library/Caches/fourfour-coreml/<content hash>-<chunk frames>/`: the key is a hash of the model file's bytes (was size and mtime), so any model change compiles afresh; entries of other keys are removed when a new key is created. If opening a session with the cache fails, the entry is deleted and the open retried once; if that fails too, rten takes over.
+- Analysis output format unchanged; no new dependencies.
+
+### Mac validation (`mbp`, M5 Pro, `~/dev/build/fourfour-r11`, `nice -n 10`, headless)
+
+`bench_analysis --backend rust` (the app's runner and engine selection, staged) built with `--features coreml,dev-bins`; the same binary with `FOURFOUR_BEAT_RUNTIME=rten` for the rten rows; the first 12 (or 1) tracks of the dev split. Load on the Mac was 4-38 from other work during the runs, so read pairs, not absolute numbers.
+
+| Run | Tracks/min | First result | Peak RSS | Chunks CoreML / rten |
+|---|---:|---:|---:|---:|
+| 12 tracks, CoreML (load 5) | 31.3 | 3.0 s | 7.7 GB | 114 / 50 |
+| 12 tracks, CoreML (load 35) | 25.1 | 5.6 s | 7.1 GB | 114 / 50 |
+| 12 tracks, CoreML, sessions opened one by one (loads 8-15) | 28.8, 26.9 | 3.5, 3.9 s | 7.0 GB | 114 / 50 |
+| 12 tracks, rten (loads 9-16) | 18.7-20.4 | 3.6-5.8 s | 6.2-6.3 GB | 0 / 164 |
+| 12 tracks, CoreML, cold cache (compiles, load 38) | 19.5 | 4.0 s | 7.4 GB | 10 / 154 |
+| 12 tracks, CoreML before the rten bridge | 30.2, 31.5 | 6.5, 7.1 s | 5.0-5.1 GB | 158 / 6 |
+| 12 tracks, rten, same session as the row above | 22.0, 22.9 | 3.1, 3.2 s | 6.3 GB | 0 / 164 |
+| 1 track, CoreML | - | 2.8 s | 6.0 GB | 0 / 13 |
+| 1 track, rten | - | 2.7-2.8 s | 5.5 GB | 0 / 13 |
+| 1 track, CoreML before the rten bridge | - | 10.6 s | 3.1 GB | 1 / 12 |
+
+- **Throughput**: CoreML 25-31 tracks/min against rten 19-23 in the app path, about 1.4x (the app's rten already runs 12 chunk threads and staged CPU work, so the gap is smaller than `ffa`'s 2x).
+- **First result / "analyze this track now"**: the model load did dominate. Without the bridge the 2 CoreML threads waited for their sessions (3.6 s warm each) and a single track took 10.6 s against rten's 2.7 s; with the bridge a single track runs entirely on rten while the sessions open (2.8 s), and a priority request 3 s into a 12-track run (`--play-after 3 --play-index 11`) was fully analysed 6.2 s later (rten 5.7 s). No early warm-up at app start was needed.
+- **Memory**: peak RSS is 0.8-1.4 GB above rten's because for a few seconds the rten bridge threads and the opening CoreML sessions overlap; before the bridge CoreML peaked 1.2 GB below rten. Steady state after the bridge is 2 sessions. If the peak matters, cap the bridge threads; not done here, first result was the brief.
+- **Results** (`--dump`, stored app results, 12 tracks): CoreML vs rten keys 12/12 identical, BPM within 0.01 12/12, every beat time identical to the millisecond on 12/12 (warm, cold and pre-bridge runs). R24's dev-split numbers (49/49 peaks, grid within 1 ms) stand for the model itself.
+- **Fallback**: `HOME=/nonexistent` (cache directory cannot be created) logged `beat model: coreml unavailable, using rten: Read-only file system (os error 30)` once and analysed on rten (13/13 chunks rten, result stored). **Broken cache**: every file of the cache entry truncated to 0 bytes; the next run opened CoreML without error (the entry was rebuilt, 408 non-empty files after), took about 13 s for one track on the rten bridge while recompiling, and the run after that used the cache again.
+- **Bundle**: `scripts/mac/build-dmg.sh` built `fourfour_0.1.0_aarch64.dmg` (97 MB) with `coreml`, no linker warnings; `scripts/mac/check-dmg.sh` on it: failures=0 (ad-hoc signature, weights and licences, plist, `--self-check` ok). Inside: `LSMinimumSystemVersion` 13.4, binary `minos 13.4`, only the app binary in `Contents/MacOS` (59 MB). Not installed anywhere.
+- **Dev bins moved to `pioneer-test-ui/src/dev_bin/`** (was `src/bin/`): tauri-cli 2.10 adds every file under `src/bin` as a bundle binary even when its `[[bin]]` has unmet `required-features`, so a clean macOS bundle (this clone, and so the CI runner) failed with `Failed to copy binary ... bench_startup does not exist`, and a target dir that had them (the perf-night clone) shipped them. r25's `required-features` fix alone did not cover that. The `[[bin]]` paths point at the new directory; nothing else changed.
 
 ## R13 50k (2026-11-01, `r13-50k`)
 

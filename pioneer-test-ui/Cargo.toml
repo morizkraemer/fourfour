@@ -7,6 +7,8 @@ autobins = false
 
 [features]
 dev-bins = []
+ort = ["fourfour-analysis-rs/ort"]
+coreml = ["fourfour-analysis-rs/coreml"]
 
 [[bin]]
 name = "pioneer-test-ui"
@@ -31,42 +33,42 @@ fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
 
 [[bin]]
 name = "waveform_dev"
-path = "src/bin/waveform_dev.rs"
+path = "src/dev_bin/waveform_dev.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_ab"
-path = "src/bin/waveform_ab.rs"
+path = "src/dev_bin/waveform_ab.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_grid"
-path = "src/bin/waveform_grid.rs"
+path = "src/dev_bin/waveform_grid.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "bench_analysis"
-path = "src/bin/bench_analysis.rs"
+path = "src/dev_bin/bench_analysis.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "bench_startup"
-path = "src/bin/bench_startup.rs"
+path = "src/dev_bin/bench_startup.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_fixtures"
-path = "src/bin/waveform_fixtures.rs"
+path = "src/dev_bin/waveform_fixtures.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_detail_dump"
-path = "src/bin/waveform_detail_dump.rs"
+path = "src/dev_bin/waveform_detail_dump.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
 name = "waveform_window_dump"
-path = "src/bin/waveform_window_dump.rs"
+path = "src/dev_bin/waveform_window_dump.rs"
 required-features = ["dev-bins"]
 
 [build-dependencies]
