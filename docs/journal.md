@@ -423,3 +423,4 @@
 2026-11-02 02:26 orchestrator r31-cover-cap parked: branch 857496a (LRU 96 + pins; organize views fetch only drawn covers; rail +N semantics change is visible -> Waiting 35)
 2026-11-02 02:26 orchestrator - decided: own prio r15-reveal (opus; staged first-expand reveal behind a switch, branch only)
 2026-11-02 02:36 orchestrator r30-coreml-mem landed: on ov-1028 7dba30c; smoke 113, CHECKS-OK
+2026-11-02 05:30 orchestrator - resumed: r29-mac-startup and r15-reveal after seat limit (reset 21:20 UTC); PM holiday relay again: no new Mac work
