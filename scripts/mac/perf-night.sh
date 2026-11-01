@@ -83,8 +83,8 @@ app_run() {
   local data="$home/Library/Application Support/com.pioneer.test-ui"
   rm -rf "$home"
   mkdir -p "$data"
-  cp -R "$FIXTURE/library" "$home/library"
-  printf '{"library_path":"%s"}\n' "$home/library/library.db" > "$data/config.json"
+  cp -R "$FIXTURE/library" "$home/fixture-library"
+  printf '{"library_path":"%s"}\n' "$home/fixture-library/library.db" > "$data/config.json"
   local log="$OUT/app-run-$n.jsonl"
   : > "$log"
   local env_args=(HOME="$home" FF_PERF_LOG="$log" FF_PERF_PROBE="$probe" FOURFOUR_MODELS_DIR="${FOURFOUR_MODELS_DIR:-$HOME/.cache/fourfour-models}" "$@")
