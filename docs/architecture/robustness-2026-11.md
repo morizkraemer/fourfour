@@ -100,6 +100,15 @@ The weights land in `/usr/lib/fourfour/models/` (deb and AppImage), which is Tau
 
 **Smoke** (deb extracted with `dpkg-deb -x` into a scratch dir, `HOME` and `XDG_*` in a temp dir, 50-track synthetic library made with the bundled `bench_startup gen`, `xvfb-run`): the app opened the library, `load_state` returned 50 tracks, first row at 10.5 s and interactive at 19.7 s on the loaded box (software GL), still alive at 25 s, then SIGTERM (exit 143; the app has no headless quit, so there is no exit 0 to check). stderr has only AT-SPI and ALSA "no card" lines plus `audio output unavailable at startup, will retry on play`, as expected without a sound card. The AppImage was run only for `--self-check` (`APPIMAGE_EXTRACT_AND_RUN=1`), not as a window.
 
+**Verified in r28-deb-verify** (deb rebuilt from `ov-1028` with `bundle-app.sh --ci --bundles deb`, 11 min at load 43, weights from the local cache; no config change was needed):
+
+- `dpkg-deb -I`: `Depends: libasound2t64 | libasound2, libssl3t64 | libssl3, libwebkit2gtk-4.1-0, libgtk-3-0`; Installed-Size 126677 KB; deb 89.9 MB.
+- `dpkg-deb -c`: `/usr/bin/pioneer-test-ui` (46.2 MB) is the only binary; no `bench_*` or `waveform_*`. `/usr/lib/fourfour/models/` holds `beat_this.onnx` (83.2 MB), `mel_spectrogram.onnx`, `LICENSE-beat-this.txt`, `LICENSE-key-model.txt`; plus the `.desktop` file and icons.
+- `readelf -d` NEEDED of the binary: libasound, libcrypto.so.3 (covered by the ALSA and OpenSSL entries), libwebkit2gtk-4.1, libjavascriptcoregtk-4.1, libsoup-3.0, libgtk-3, libgdk-3, gdk_pixbuf, cairo, glib/gobject/gio, libstdc++, libgcc_s, libc, libm. The webkit, soup and JavaScriptCore libraries come in through `libwebkit2gtk-4.1-0`, the GTK, cairo and pixbuf ones through `libgtk-3-0`; nothing is missing and nothing in Depends is unused. sqlite is not a direct dependency (sqlcipher is built in; `ldd` only shows libsqlite3 through webkit).
+- Extracted binary `--self-check`: `self-check ok: fourfour 0.9.14 weights loaded from <extract>/usr/lib/fourfour/models`, exit 0.
+- `xvfb-run` start for 20 s with temp `HOME`/`XDG_*` and a 50-track `bench_startup gen` library in the app data dir: still running at 20 s (killed by `timeout`, exit 124); stderr only the ALSA/AT-SPI noise and `audio output unavailable at startup, will retry on play`.
+- Not checked: installing the deb (no root), the AppImage.
+
 **Fixed here**
 
 - `--self-check` looked for the weights in the macOS layout (`../Resources/models`) and failed on Linux; it now uses `../lib/fourfour/models` on Linux and `<exe dir>/models` on Windows. Verified on the extracted deb: `self-check ok ... weights loaded`. The Windows path is not verified (NSIS layout assumed from Tauri's resource rules).
@@ -123,7 +132,7 @@ The weights land in `/usr/lib/fourfour/models/` (deb and AppImage), which is Tau
 **Fixed in r25-package**
 
 - Dev binaries: all eight `[[bin]]` targets other than the app (`bench_*`, `waveform_*`) have `required-features = ["dev-bins"]` and `autobins = false` in `pioneer-test-ui/Cargo.toml`, so `cargo tauri build` produces only `pioneer-test-ui` for the deb, AppImage, `.app` and NSIS. Dev use: `cargo build --release --features pioneer-test-ui/dev-bins --bin bench_startup`. `scripts/perf.sh` and `waveform-dev` pass the feature; `perf-night.sh` gets `bench_analysis` from the `perf.sh` build in the same target dir (it no longer comes from the bundle build); `check-dmg.sh` only used the app binary. Old doc commands with a bare `--bin bench_startup` now fail with cargo's "requires the features: dev-bins" message. `cargo check --workspace --all-targets` skips those bins unless the feature is given.
-- Deb Depends: `libasound2t64 | libasound2` and `libssl3t64 | libssl3` (sqlcipher links `libcrypto` dynamically, `libsqlite3-sys` `bundled-sqlcipher` without vendored OpenSSL), on top of Tauri's webkit and gtk entries. Config only: no deb was rebuilt, no `ldd` of a release binary was available on the box, so the list comes from the crates (cpal, libsqlite3-sys build script) and is not proven by `dpkg-deb -I`.
+- Deb Depends: `libasound2t64 | libasound2` and `libssl3t64 | libssl3` (sqlcipher links `libcrypto` dynamically, `libsqlite3-sys` `bundled-sqlcipher` without vendored OpenSSL), on top of Tauri's webkit and gtk entries. Proven in r28-deb-verify, see below.
 - Windows `is_removable` now asks `GetDriveTypeW` (removable drives only; USB hard disks that report as fixed are no longer listed). Not compiled for Windows here.
 - Linux eject unmounts through `udisksctl unmount --block-device <dev>` (device from `/proc/mounts`), falling back to `umount` if `udisksctl` is missing; Windows returns an explicit "not supported" error instead of running `umount`.
 - Frontend: `pathBaseName` handles `\` and `/` and trailing separators; used at the three spots in `tauri.svelte.ts` (mock dropped track title, mock stick id, capacity volume label); unit tests in `pathName.test.ts`.
