@@ -409,3 +409,4 @@
 2026-11-01 21:43 orchestrator - Mac overnight go via PM (21:42); chain on mbp: coreml dev bench (running) -> perf night 10k rerun -> coreml test split (2 2) -> perf night 50k (~/.cache/ff-overnight-2.sh, /tmp/ff-overnight-2.log)
 2026-11-01 21:55 orchestrator r25-package handed back (dev bins behind dev-bins feature, deb depends, Windows paths/is_removable, Linux udisksctl eject), merging; decided: own prio r27-dbsafe (opus; no init over real data, no setup panic)
 2026-11-01 22:04 orchestrator - Mac results: CoreML dev bench KEEP (26-32 vs 12-14 trk/min, grid identical); perf night 10k rerun on 240d8cb: warm first row 1.6-1.9 s, cold 2.8 s (targets 300/500), scroll during analysis p95 18 ms, first expand 472-520 ms in 3/5 (R10 trigger); backlog r26-coreml-ship, r29-mac-startup, r15-reveal
+2026-11-01 22:07 orchestrator r25-package landed: on ov-1028 f82e56e; smoke 112, vitest 882, CHECKS-OK

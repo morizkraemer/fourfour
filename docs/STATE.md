@@ -95,7 +95,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 23. r21-order: persist the last run's analysis order in a side file (no schema) so resume keeps selection/visible-first; sweep stale waveform-cache .part files at startup (Waiting 32 rec) [landed 3248199]
 24. r22-startup: 50k startup to interactive under 1.5 s (lazy row proxies, smaller load_state payload; R13 profile, no schema) [landed 240d8cb; 50k warm 1.35 s, cold 1.57 s, first 1.85 s; payload 21.6 -> 8.4 MB]
 25. r23-memory: long-session soak on the box (hours of scroll/search/analysis, RSS + JS heap drift, leaks) [running]
-26. r25-package: release bundles without dev bins, deb Depends libasound2, Windows path names in the frontend, app-code platform guards [built 796b170, merging; deb deps unverified until next real bundle]
+26. r25-package: release bundles without dev bins, deb Depends libasound2, Windows path names in the frontend, app-code platform guards [landed f82e56e; deb deps unverified until r28]
 27. r26-coreml-ship: CoreML as the Mac analysis default (w2 t2), rten fallback if CoreML fails to load, ort in the Mac bundle (min macOS 13.4), dmg check; memory per session
 28. r27-dbsafe: library.db open never inits over real data (unreadable schema_version), no setup panic on a damaged DB [running]
 29. r28-deb-verify: real Linux bundle + dpkg-deb -I + ldd to confirm deps and no dev bins (after r25)
