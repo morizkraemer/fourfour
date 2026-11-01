@@ -373,3 +373,4 @@
 2026-11-01 00:31 orchestrator - landed: b15-bar1 on ov-1028 (29add96; hybrid bar-1 rule, per PM relay not waiting for the listen check; revert = BAR_ONE_RULE ModelVote); checks green; run-pause: idle
 2026-11-01 04:20 orchestrator - resumed: Mac back (PM relay, Merlin 12:18 WITA "mac is up now"); Mac batch started: install ov-1028 build
 2026-11-01 04:21 orchestrator - Mac: ov-1028 (29add96) installed 12:21 WITA; Merlin 12:21 (via PM): pause UI-taking Mac jobs, visible stuff after his go tonight -> perf night held; headless dmg build + check-dmg started
+2026-11-01 04:23 orchestrator - Mac: build-dmg + check-dmg on ov-1028 all PASS (fourfour_0.1.0_aarch64.dmg, ad-hoc, weights + licences + key credits, self-check 0); item 9 done; perf night held for Merlin's go
