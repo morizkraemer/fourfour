@@ -51,7 +51,7 @@ if [ "$BUILD" = 1 ]; then
   fi
   APP="$TARGET/release/bundle/macos/fourfour.app"
 fi
-BIN="$APP/Contents/MacOS/fourfour"
+BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist" 2>/dev/null || echo fourfour)"
 if [ "$DRY" = 0 ] && [ ! -x "$BIN" ]; then
   say "no app binary at $BIN (pass --app or --build)"
   exit 1
