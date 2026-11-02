@@ -490,3 +490,4 @@
 2026-11-02 12:25 orchestrator - decided: own prio r58-devbins (sonnet medium; dev bins break silently, make them compile and documented)
 2026-11-02 12:50 orchestrator r58-devbins handed back befa135 (bench bins missed app_log include), merged; dev-bins check added to the merge check script
 2026-11-02 12:56 orchestrator r53-user-docs: key accuracy corrected (vs Beatport labels) + BPM/bar-1 expectations (checklist 13); decided: own prio r59-smoke-flake (sonnet medium; smoke robust under load, failures named in last lines)
+2026-11-02 13:40 orchestrator r59-smoke-flake handed back 69d502e (load factor 1-4 on timeouts, warm-up, failed/flaky reporter; 4 clean runs at load 20-46, no before/after repro), merging
