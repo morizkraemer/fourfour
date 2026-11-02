@@ -447,3 +447,4 @@
 2026-11-02 11:23 orchestrator r39-errkinds handed back (CommandError {kind,message,path}, strings unchanged), merging
 2026-11-02 11:24 orchestrator - decided: own prio r41-failmemo (sonnet high; failed-analysis memo in a side file, no schema); r40 told to adopt r39 kinds in r18/r38 -v2
 2026-11-02 11:39 orchestrator r39-errkinds landed on ov-1028
+2026-11-02 12:24 orchestrator r41-failmemo handed back (FailureMemo side file, 18 tests), merging
