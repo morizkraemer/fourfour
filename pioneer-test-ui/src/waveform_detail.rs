@@ -11,7 +11,9 @@ use pioneer_usb_writer::waveform::{DetailSeries, WindowSeries};
 
 use crate::band_analysis::{measure_detail, measure_detail_window};
 
-const CACHE_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const CACHE_LIMIT_CEILING_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const CACHE_LIMIT_FLOOR_BYTES: u64 = 512 * 1024 * 1024;
+const CACHE_SHARE_OF_FREE_DISK: u64 = 20;
 const WINDOW_MAX_COLUMNS: usize = 16_384;
 const WINDOW_MAX_SECONDS: f64 = 30.0;
 
@@ -25,6 +27,22 @@ fn cache_file(dir: &Path, audio: &Path) -> Result<PathBuf, String> {
     let mut hasher = DefaultHasher::new();
     (audio, meta.len(), modified).hash(&mut hasher);
     Ok(dir.join(format!("{:016x}.ffwd", hasher.finish())))
+}
+
+fn cache_limit_for_free_space(free_bytes: u64) -> u64 {
+    (free_bytes / CACHE_SHARE_OF_FREE_DISK).clamp(CACHE_LIMIT_FLOOR_BYTES, CACHE_LIMIT_CEILING_BYTES)
+}
+
+fn free_space_of(dir: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+    (unsafe { libc::statvfs(path.as_ptr(), &mut stats) } == 0).then(|| stats.f_bavail as u64 * stats.f_frsize as u64)
+}
+
+fn cache_limit(dir: &Path) -> u64 {
+    static LIMIT: OnceLock<u64> = OnceLock::new();
+    *LIMIT.get_or_init(|| free_space_of(dir).map_or(CACHE_LIMIT_FLOOR_BYTES, cache_limit_for_free_space))
 }
 
 fn trim_cache(dir: &Path, limit_bytes: u64) {
@@ -116,7 +134,7 @@ fn write_cache_file(dir: &Path, file: &Path, bytes: &[u8]) -> Result<(), String>
     let partial = file.with_extension(format!("{}-{}.part", std::process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
     fs::write(&partial, bytes).map_err(|e| format!("write {}: {e}", partial.display()))?;
     fs::rename(&partial, file).map_err(|e| format!("rename {}: {e}", partial.display()))?;
-    trim_cache(dir, CACHE_LIMIT_BYTES);
+    trim_cache(dir, cache_limit(dir));
     Ok(())
 }
 
@@ -369,6 +387,32 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
 
         assert_eq!(left, ["mid.ffwd", "new.ffwd"]);
+    }
+
+    #[test]
+    fn the_cache_limit_is_five_percent_of_free_space_between_the_floor_and_two_gib() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(cache_limit_for_free_space(0), 512 * 1024 * 1024);
+        assert_eq!(cache_limit_for_free_space(8 * GIB), 512 * 1024 * 1024);
+        assert_eq!(cache_limit_for_free_space(32 * GIB), 32 * GIB / 20);
+        assert_eq!(cache_limit_for_free_space(1000 * GIB), 2 * GIB);
+    }
+
+    #[test]
+    fn trimming_a_dir_of_400_files_is_cheap() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-cost-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..400 {
+            fs::write(dir.join(format!("{i:04}.ffwd")), vec![0u8; 16]).unwrap();
+        }
+        let started = std::time::Instant::now();
+        for _ in 0..20 {
+            trim_cache(&dir, u64::MAX);
+        }
+        let per_call = started.elapsed() / 20;
+        fs::remove_dir_all(&dir).ok();
+        eprintln!("TRIM_COST_400_FILES {per_call:?}");
+        assert!(per_call < Duration::from_millis(50), "{per_call:?}");
     }
 
     #[test]
