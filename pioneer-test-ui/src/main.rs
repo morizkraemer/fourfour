@@ -307,7 +307,11 @@ impl AnalysisSink for TauriAnalysisSink {
 
 fn analysis_coordinator(app: &AppHandle) -> AnalysisCoordinator {
     match app.path().app_data_dir() {
-        Ok(dir) => AnalysisCoordinator::default().with_failure_memo(FailureMemo::in_dir(dir, pioneer_usb_writer::VERSION)),
+        Ok(dir) => {
+            let models = fourfour_analysis::service::locate_models_in(Some(&dir), app.path().resource_dir().ok().as_deref());
+            let key = fourfour_analysis::service::analysis_key(models.as_deref());
+            AnalysisCoordinator::default().with_failure_memo(FailureMemo::in_dir(dir, &key))
+        }
         Err(_) => AnalysisCoordinator::default(),
     }
 }
@@ -804,7 +808,7 @@ async fn rekordbox_import_run(
 /// Return the application version string.
 #[tauri::command]
 fn app_version() -> String {
-    pioneer_usb_writer::VERSION.to_string()
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 /// Run Python analysis CLI on a single track and return the result as JSON.

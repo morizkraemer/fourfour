@@ -69,7 +69,7 @@ overrides, and stratum-dsp is not a dependency.
 
 ## Versioning
 
-`pub const VERSION` in `pioneer-usb-writer/src/lib.rs`, shown in the UI toolbar.
+The app version is `pioneer-test-ui/Cargo.toml` `version` (tauri.conf.json has no `version`, so the bundle and dmg name use it); `app_version` and `--self-check` read it. `pioneer_usb_writer::VERSION` is the writer crate's own number. The analysis failure memo keys on `fourfour_analysis::service::analysis_key` (bump `ANALYSIS_VERSION` when analysis output can change).
 
 ## Architecture: the format pipeline
 
