@@ -72,14 +72,14 @@ fn edit_stick(
 }
 
 /// What the library remembers for the stick at `path`; empty for a stick fourfour never touched.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_stick(path: String, state: State<'_, SharedLibrary>) -> Result<StickContents, CommandError> {
     let lib = state.lock().map_err(|e| e.to_string())?;
     known_stick(Path::new(&path), &lib)
 }
 
 /// Adds tracks to the stick's "All tracks". Gives the stick an id on first use.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stick_add_tracks(
     path: String,
     track_ids: Vec<i64>,
@@ -88,7 +88,7 @@ pub fn stick_add_tracks(
     edit_stick(&path, &state, |lib, id| lib.add_stick_tracks(id, &track_ids))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stick_remove_tracks(
     path: String,
     track_ids: Vec<i64>,
@@ -97,7 +97,7 @@ pub fn stick_remove_tracks(
     edit_stick(&path, &state, |lib, id| lib.remove_stick_tracks(id, &track_ids))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stick_add_playlists(
     path: String,
     playlist_ids: Vec<i64>,
@@ -106,7 +106,7 @@ pub fn stick_add_playlists(
     edit_stick(&path, &state, |lib, id| lib.add_stick_playlists(id, &playlist_ids))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stick_remove_playlists(
     path: String,
     playlist_ids: Vec<i64>,
@@ -115,7 +115,7 @@ pub fn stick_remove_playlists(
     edit_stick(&path, &state, |lib, id| lib.remove_stick_playlists(id, &playlist_ids))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_volume_capacity(path: String) -> Result<VolumeCapacity, CommandError> {
     pioneer_library::volume_capacity(Path::new(&path))
         .map_err(|e| CommandError::from_anyhow_chain(e).with_path(&path).for_stick())

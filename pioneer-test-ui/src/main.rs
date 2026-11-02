@@ -595,7 +595,7 @@ fn set_test_cues(
 }
 
 /// List removable and external volumes so the frontend can offer a target-drive picker.
-#[tauri::command]
+#[tauri::command(async)]
 fn get_mounted_volumes() -> Result<Vec<String>, String> {
     volumes::list_removable_volumes()
 }
@@ -651,7 +651,7 @@ fn eject_failure(stderr: &str) -> CommandError {
 }
 
 /// Eject a mounted volume (macOS: `diskutil eject`, Linux: `udisksctl unmount`, falling back to `umount`).
-#[tauri::command]
+#[tauri::command(async)]
 fn eject_volume(path: String) -> Result<(), CommandError> {
     #[cfg(target_os = "macos")]
     {
@@ -1605,6 +1605,29 @@ mod tests {
     use crate::analysis_backend;
     use crate::command_error::ErrorKind;
     use crate::analysis_python::{parse_analyzer_stdout, python_result_to_analysis};
+
+    fn assert_off_main_thread(source: &str, commands: &[&str]) {
+        for name in commands {
+            let signature = source
+                .find(&format!("fn {name}("))
+                .unwrap_or_else(|| panic!("command {name} not found"));
+            let head = &source[..signature];
+            let attribute = &head[head.rfind("#[tauri::command").expect("tauri attribute")..];
+            assert!(
+                attribute.starts_with("#[tauri::command(async)]") || attribute.trim_end().ends_with("async"),
+                "{name} would run on the main thread"
+            );
+        }
+    }
+
+    #[test]
+    fn volume_and_stick_commands_run_off_the_main_thread() {
+        assert_off_main_thread(include_str!("main.rs"), &["get_mounted_volumes", "eject_volume"]);
+        assert_off_main_thread(
+            include_str!("stick_commands.rs"),
+            &["get_stick", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],
+        );
+    }
 
     fn png_bytes(width: u32, height: u32) -> Vec<u8> {
         let img = image::RgbImage::from_fn(width, height, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, 90]));
