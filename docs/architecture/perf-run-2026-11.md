@@ -914,3 +914,47 @@ Per row, measured in the page (clone N rows into the list, force style, then lay
 **Mac.** Not measured here; the Mac re-measure happens at the next Mac perf night (`scripts/mac/perf-night.sh`), whose summary now has the page-origin columns.
 
 **Harness.** `FF_SMOKE_BROWSER=webkit` runs the smoke specs in Playwright WebKit (`devices['Desktop Safari']`, no Chromium launch flags). `perf-startup.spec.ts` reports `frameInteractive` (start of the first 10 frames under 50 ms after the first real row, the Mac probe's definition; WebKit has no long-task API, so the old `interactive` equals the first row there) and `longestFrame`; `FF_PERF_STARTUP_PROFILE=<prefix>` under WebKit writes `<prefix>-<tracks>.webkit.json` (Timeline records plus JSC samples, through Playwright's inspector session). Reproduce: `FF_SMOKE_BROWSER=webkit FF_PERF_STARTUP=10000=table10k.json==118 FF_SMOKE_PORT=5328 npx playwright test perf-startup`. Raw: `~/.cache/r29/` (deleted after this item; numbers above).
+
+## R34 WebKit idle (2026-11-02, `r34-webkit-idle`)
+
+Branch `r34-webkit-idle` from `ov-1028`. Linux `dev` box, R29 harness (`perf-startup.spec.ts`, Playwright WebKit and headless Chromium), 10k fixture as a column table (`bench_startup dump`), backend simulated as 118 ms. Box load 17-60 (other workers, swap full); every comparison is a before run and an after run back to back, the order flipped every other pair.
+
+**What the "idle gap" was.** WebKit's Timeline shows that about 100 ms after the first real rows the whole page restyles and relays out (60-90 ms style plus 35-105 ms layout, scheduled by no script), and the next frame after it comes 150-250 ms later. The cause is the font: `geist.css` splits Geist and Geist Mono into unicode-range subsets, and the fixture's titles carry U+0301 (a combining accent, the decomposed form macOS file names use), which sits in the Cyrillic subset. The browser only fetches a subset when laid-out text needs it, so the first rows pull it in, show the fallback for those glyphs, and when it arrives (`font-display: swap`) WebKit restyles and relays out every element and repaints the viewport. A FontFace status probe showed exactly that: Latin subsets loaded before the rows, the Cyrillic subset 100 ms after them. Any library with non-Latin text (Latin Extended, Cyrillic, Vietnamese) hits it; real Mac libraries with decomposed accents hit it on every launch.
+
+**Changed**
+
+- `main.ts` asks every `@font-face` of the app's stylesheet to load at boot (`face.load()` for the 27 faces, 11 woff2 files, 150 KB, served locally), next to the early `load_state`. They are in before the rows arrive, so the first rows lay out with the final font and nothing restyles after the first paint. Final pixels are the same: full-page screenshots of the booted 10k list are byte-identical before and after in WebKit and in Chromium. Main-thread work before the first row is unchanged (WebKit Timeline, quiet pairs: 781 / 906 / 746 / 767 ms before, 771 / 724 / 799 ms after).
+
+**WebKit 10k** (ms; settle = frame interactive minus first real row; longest = longest frame gap after the first row)
+
+| Pair (load) | Case | Before real / fi / settle / longest | After real / fi / settle / longest |
+|---|---|---|---|
+| 1 (24-18) | first launch | 1,515 / 1,965 / 450 / 338 | 1,323 / 1,647 / 324 / 37 |
+| 1 | warm | 1,078 / 1,625 / 547 / 235 | 989 / 1,308 / 319 / 39 |
+| 1b (20-18) | first launch | 1,626 / 2,330 / 704 / 454 | 2,335 / 2,714 / 379 / 30 |
+| 1b | warm | 1,242 / 1,915 / 673 / 226 | 950 / 1,302 / 352 / 27 |
+| 3b (38-24) | first launch | 1,437 / 2,549 / 1,112 / 405 | 1,364 / 1,787 / 423 / 60 |
+| 3b | warm | 996 / 1,661 / 665 / 320 | 1,067 / 1,359 / 292 / 36 |
+| 7 pairs, median | warm | 1,242 / 1,926 / 707 / 327 | 1,329 / 1,619 / 382 / 32 |
+
+Over all 10 WebKit pairs the longest frame after the first row went from 190-644 ms to 24-122 ms (every run), and the settle time roughly halved. Profiled pairs at load about 20: main-thread work in the 1.5 s after the first row 356-459 to 272-285 ms, longest busy block 127-190 to 64-72 ms. The first real row itself is unchanged within the noise (pairs go both ways by up to the load swing).
+
+**Chromium 10k** (3 pairs, load 37-55, no regression): warm first row median 1,147 to 883 ms, frame interactive 1,434 to 1,075, longest frame 183-267 to 83-167 ms. Chromium had the same late font swap, only cheaper.
+
+**Tried, not kept**
+
+- Frame-aware idle scheduler for WebKit (no `requestIdleCallback`): wait for the next rendered frame (rAF, then a MessageChannel task) and give the work one 8 ms slice, with a timeout for hidden windows; used for the search warmup, `applyChangedTrackLabels` and the column-layout save. It works as designed (warmup runs one 7 ms slice per frame instead of a 1-2 ms `setTimeout(0)` task every 8 ms), but 4 interleaved pairs against the font fix alone showed no difference in settle time, longest frame or first row. The old fallback's tasks were already short; they never held a frame. Not kept (commit `d6efbc0`, unreferenced).
+- Growing the off-screen rows in idle steps of 3 instead of all 12 at once: with the font fix the one-shot block is about 80 ms in WebKit; splitting it added paints and was worse in its pair (settle 279 to 705 ms). Not kept.
+
+**Measured, not changed (fenced)**
+
+- `Icon` (`prototyping/viewport/design-system/components/Icon.svelte`): the booted page has 107 icons. Building 107 SVGs the `{@html}` way (parse a string per instance) vs cloning a parsed glyph once per name: WebKit 5-6 ms vs 2-3 ms, Chromium 3.4 vs 1.1 ms (median of 30, standalone page, load 30). A clone cache would save about 3 ms of a 175-230 ms first render in WebKit: not worth a design-system change.
+- Skeleton rows: not retried; R29 found no gain from removing them, and with the font fix the frames before the first row are not where the time goes.
+
+**What is left (WebKit)**
+
+- Per-row style and layout are still 2-5x Chromium's (R29). The answer-to-first-row render (175-230 ms at load 20) and the off-screen rows (one 80 ms frame) are the largest main-thread blocks left.
+- A 150-200 ms frame gap after the first big paint remains in headless WebKit with the main thread idle (compositor; R29 saw the same under Xvfb). Not app-side.
+- 50k not re-measured (the fixture dump binary was pruned).
+
+**Validation.** `npm test` (886 passed), `npm run check` (0 errors), Chromium smoke on port 5332 (113 passed). WebKit smoke: 96 passed, 17 failed (`leaks`, one `popups`, one `sticks`, 14 `topbar`); the same 17 fail on `ov-1028` without this change, so the WebKit smoke was not green before.
