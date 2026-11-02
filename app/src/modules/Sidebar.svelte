@@ -324,6 +324,38 @@
     };
   }
 
+  function openMenuFromKeyboard(e) {
+    const row = e.target instanceof Element ? e.target.closest('.ff-sbrow') : null;
+    if (!row || e.target !== row) return;
+    e.preventDefault();
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 16,
+        clientY: rect.bottom - 4,
+      }),
+    );
+  }
+
+  function onSidebarKeydown(e) {
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      openMenuFromKeyboard(e);
+      return;
+    }
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const row = e.target instanceof Element ? e.target.closest('.ff-sbrow') : null;
+    if (!row || e.target !== row) return;
+    const rows = [...e.currentTarget.querySelectorAll('.ff-sbrow[tabindex="0"]')];
+    const at = rows.indexOf(row);
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    const next = e.key === 'Home' ? rows[0] : e.key === 'End' ? rows[rows.length - 1] : rows[at + step];
+    e.preventDefault();
+    next?.focus();
+  }
+
   function onPlaylistRowPointerDown(e, playlistId, isFolder = false) {
     if (e.button !== 0 || renamingPlaylistId === playlistId) return;
     let moved = false;
@@ -364,7 +396,8 @@
   }
 </script>
 
-<div class="ff-sidebar" style:width="{ui.sidebarWidth}px">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="ff-sidebar" role="navigation" aria-label="Library and playlists" style:width="{ui.sidebarWidth}px" onkeydown={onSidebarKeydown}>
   <ResizeHandle
     edge="right"
     label="Resize sidebar"

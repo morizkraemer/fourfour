@@ -32,6 +32,7 @@
   import { initImportActivity } from './stores/import-activity.svelte.ts';
   import { unlistenWhenReady } from './lib/lateUnlisten.ts';
   import { isEditableTarget } from './lib/editableTarget.ts';
+  import { isKeyboardFocused, trackFocusModality } from '$ds/utils/focus.js';
 
   import {
     ui,
@@ -66,9 +67,17 @@
   let stickOnLeft = $derived(library.volumes.includes(ui.activeSidebarRow) ? ui.activeSidebarRow : null);
   let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded);
 
+  function yieldsToFocusedControl(e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (e.key === 'Tab') return isKeyboardFocused(e.target);
+    if (e.key === ' ') return isKeyboardFocused(e.target) && !e.target.closest('[role="listbox"]');
+    return false;
+  }
+
   function onGlobalKeyDown(e) {
     if (e.key === 'Escape') clearFileDropHover();
     if (e.defaultPrevented) return;
+    if (yieldsToFocusedControl(e)) return;
     shortcuts.dispatch(e, { typing: isEditableTarget(e.target) });
   }
 
@@ -81,6 +90,7 @@
     initImportActivity();
     void syncPlaybackAudioConfig();
     window.addEventListener('keydown', onGlobalKeyDown);
+    const stopFocusModality = trackFocusModality();
     const teardownWindowChrome = installMacWindowChrome();
 
     let stopDragDrop = () => {};
@@ -106,6 +116,7 @@
 
     return () => {
       window.removeEventListener('keydown', onGlobalKeyDown);
+      stopFocusModality();
       stopDragDrop();
       teardownWindowChrome();
     };

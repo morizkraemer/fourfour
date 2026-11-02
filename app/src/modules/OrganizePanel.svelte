@@ -208,6 +208,7 @@
           bind:this={renameHeaderEl}
           class="ff-organize__header-rename"
           type="text"
+          aria-label="Name"
           bind:value={renameDraft}
           onkeydown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); void commitHeaderRename(); }
