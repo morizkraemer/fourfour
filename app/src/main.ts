@@ -5,6 +5,11 @@ import { suppressNativeContextMenu } from './lib/native-menu.ts';
 import { startLoadStateEarly } from './services/tauri.svelte.ts';
 
 startLoadStateEarly();
+loadEveryFontSubsetNow();
+
+function loadEveryFontSubsetNow() {
+  for (const face of document.fonts) if (face.status === 'unloaded') void face.load();
+}
 
 if (import.meta.env.PROD) suppressNativeContextMenu();
 
