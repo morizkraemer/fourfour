@@ -7,6 +7,7 @@ interface ForwardingTarget {
 
 const BURST = 20;
 const WINDOW_MS = 10_000;
+const BENIGN_UNCAUGHT = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)\.?$/;
 
 export function describeValue(value: unknown): string {
   if (value instanceof Error) return value.stack ?? `${value.name}: ${value.message}`;
@@ -47,6 +48,7 @@ export function installErrorForwarding(
     forward('error', args.map(describeValue).join(' '));
   };
   target.addEventListener('error', (event) => {
+    if (BENIGN_UNCAUGHT.test(String(event.message))) return;
     const where = event.filename ? ` at ${event.filename}:${event.lineno}:${event.colno}` : '';
     forward('error', `uncaught ${describeValue(event.error ?? event.message)}${where}`);
   });

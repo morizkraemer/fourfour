@@ -35,6 +35,14 @@ describe('installErrorForwarding', () => {
     expect(send).toHaveBeenNthCalledWith(2, 'error', 'unhandled rejection: no luck');
   });
 
+  it('ignores the benign ResizeObserver loop notification', () => {
+    const win = fakeWindow();
+    const send = vi.fn().mockResolvedValue(undefined);
+    installErrorForwarding(win, send);
+    win.listeners.error({ message: 'ResizeObserver loop completed with undelivered notifications.' });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('rate limits a burst and resumes after the window', () => {
     const win = fakeWindow();
     const send = vi.fn().mockResolvedValue(undefined);
