@@ -602,7 +602,7 @@ async fn analyze_one_track_rust(
                     scope.spawn(move || {
                         if detail_started.recv().is_ok() && !cancel.load(Ordering::Relaxed) {
                             if let Err(e) = crate::waveform_detail::warm_detail(dir, path) {
-                                eprintln!("waveform detail of {} not cached: {e}", path.display());
+                                crate::app_log::warn(&format!("waveform detail of {} not cached: {e}", path.display()));
                             }
                         }
                     });
@@ -812,7 +812,7 @@ async fn run_now_lane(
                         on_partial(fourfour_analysis::service::waveform_only_result(&waves));
                         if let Some(dir) = &detail_dir {
                             if let Err(e) = crate::waveform_detail::store_detail(dir, &bands_path, &detail) {
-                                eprintln!("waveform detail of {} not cached: {e}", bands_path.display());
+                                crate::app_log::warn(&format!("waveform detail of {} not cached: {e}", bands_path.display()));
                             }
                         }
                     }

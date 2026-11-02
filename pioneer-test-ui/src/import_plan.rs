@@ -292,11 +292,11 @@ pub(crate) fn guarded_read(path: &Path, read: impl FnOnce() -> anyhow::Result<Tr
     match std::panic::catch_unwind(read) {
         Ok(Ok(track)) => Some(clamp_tags(track)),
         Ok(Err(e)) => {
-            eprintln!("Warning: skipping {}: {e}", path.display());
+            crate::app_log::warn(&format!("Warning: skipping {}: {e}", path.display()));
             None
         }
         Err(_) => {
-            eprintln!("Warning: skipping {}: the tag reader crashed on it", path.display());
+            crate::app_log::warn(&format!("Warning: skipping {}: the tag reader crashed on it", path.display()));
             None
         }
     }
