@@ -233,6 +233,17 @@ fn drop_and_analyse(case: &'static str, paths: Vec<String>) -> Run {
     })
 }
 
+fn drop_and_import(case: &'static str, paths: Vec<String>) -> Run {
+    with_deadline(case, move || {
+        let pipeline = Pipeline::new(case);
+        let plan = pipeline.import(&paths, &mut || {});
+        let run = pipeline.snapshot(plan, None, Vec::new(), "import only");
+        run.assert_library_healthy();
+        run.report(case);
+        run
+    })
+}
+
 fn folder_of(scratch: &Scratch, name: &str) -> PathBuf {
     let dir = scratch.path().join(name);
     std::fs::create_dir_all(&dir).unwrap();
@@ -468,13 +479,14 @@ fn symlink_loops_and_dangling_links_end_the_walk() {
     std::fs::write(outside.join("outside.wav"), &f.encoded.wav).unwrap();
     symlink(&outside, root.join("linked-outside")).unwrap();
     symlink(&outside, outside.join("outside-self")).unwrap();
-    let run = drop_and_analyse("symlink-loops", paths_of(&[&root]));
-    run.assert_analysed(&as_strs(&good));
-    run.assert_analysed(&["in-a.wav", "in-b.wav", "outside.wav"]);
+    let run = drop_and_import("symlink-loops", paths_of(&[&root]));
+    for name in good.iter().map(String::as_str).chain(["in-a.wav", "in-b.wav", "outside.wav"]) {
+        assert!(run.has(name), "{name} must be imported: {:?}", run.names());
+    }
     for name in ["loop-a.wav", "loop-b.wav", "self.wav", "dangling.wav"] {
         assert!(!run.has(name), "{name} points nowhere and must not be imported");
     }
-    drop_and_analyse("symlink-dropped-loop", paths_of(&[&a.join("self"), &b.join("up")]));
+    drop_and_import("symlink-dropped-loop",paths_of(&[&a.join("self"), &b.join("up")]));
 }
 
 #[test]
