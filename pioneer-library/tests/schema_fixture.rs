@@ -92,6 +92,9 @@ fn regenerate_fixture() {
     conn.execute_batch("VACUUM").unwrap();
     drop(conn);
     assert_eq!(stored_version(&path), FIXTURE_SCHEMA_VERSION);
+    for entry in std::fs::read_dir(dir.path().join("anlz")).unwrap().flatten() {
+        std::fs::remove_file(entry.path().join("ANLZ0000.EXT")).unwrap();
+    }
     let _ = std::fs::remove_dir_all(fixture_path());
     copy_tree(dir.path(), &fixture_path());
 }
