@@ -1227,3 +1227,33 @@ Evidence:
 After the Rust change, run `scripts/mac/perf-night.sh --expand-runs 5`. Expected: every first expand around 20-35 ms, no 400-500 ms frame in the idle-scroll windows, and possibly a faster cold "interactive".
 
 **Built on r67 (`r67-async-volumes`):** `get_mounted_volumes`, `eject_volume`, `get_stick`, `stick_add_tracks`, `stick_remove_tracks`, `stick_add_playlists`, `stick_remove_playlists` and `get_volume_capacity` are now `#[tauri::command(async)]`. `write_usb` and `wipe_usb` stay sync: nothing prevents a concurrent sync and wipe of one stick in the backend or the frontend (`sync_usb_many` has no guard either). Mac check pending (`perf-night --expand-runs 5`).
+
+## R70 main-thread audit (2026-11-02, `r70-sync-audit`)
+
+Every `#[tauri::command]` in `pioneer-test-ui/src` was checked. A sync `fn` runs on the UI process main thread, so one that blocks freezes WKWebView on macOS (R66). Measured with a throwaway `--release` test on the `bench_startup gen` fixture (10k and 50k tracks, 20 playlists), box under load (other builds running), so read these as upper-ish bounds. Commands taking the library mutex also block the main thread whenever `load_state`, a sync, an import or an analysis write holds that mutex.
+
+| Command | Was | ms at 10k / 50k | Decision |
+|---|---|---|---|
+| `enqueue_analysis` (select all) | sync | 261 / 822 (200 ids: 4 / 3) | `command(async)` |
+| `resume_analysis` (launch) | sync | 18 / 526 | `command(async)` |
+| `remove_tracks` (1 / 100 / 1000) | sync | 3, 81, 780 / 13, 194, 2130 | `command(async)` |
+| `set_test_cues` (rebuilds all infos) | sync | 98 / 288 | `command(async)` |
+| `read_backup` (`get_all_tracks` for a count) | sync | 214 / 488 | `command(async)` |
+| `save_state` (replace playlists; 30 big playlists of n/5 ids) | sync | 3 (generated) to 461 / 0.03 (generated) to 2320 | kept sync: ordering |
+| `get_row_previews` (60 ids, scroll path) | sync | 1.1 / 0.7 | `command(async)`: waits on the library mutex, result merged by id |
+| `reveal_in_finder` | sync | process spawn | `command(async)` |
+| `read_usb_state` | sync | stick I/O, SQLCipher open | `command(async)` |
+| `locate_track_file` | sync | library mutex + file check | `command(async)` |
+| `change_library_path`, `reset_library` | sync | DB open, file deletes | `command(async)` |
+| `get_track` / `resolve_analysis_work(1)` | inner | 0.05 / 0.13-0.19 | n/a (single ids are fast) |
+| `get_library_health` | sync | health mutex only, held briefly | kept sync |
+| settings getters and setters, `rekordbox_default_master_db`, `app_version`, `log_directory`, `log_frontend`, `perf_mark`, `cancel_analysis` | sync | microseconds (tiny config read or write, rate-limited log line) | kept sync |
+| `playback_*` | sync | audio engine, not measured (no audio device on the box) | kept sync: strict call order (play, seek, pause, tempo) |
+| `write_usb`, `wipe_usb` | sync | - | untouched (r69) |
+| everything else (`load_state`, `get_track_artwork`, waveform, edit and import commands) | `async fn` | - | already off the main thread |
+
+**Left open: `save_state`.** It is the largest remaining offender (460 ms at 10k and 2.3 s at 50k for very large playlists; a few ms for normal ones). The frontend sends a full playlists snapshot and callers do not serialise their calls (`saveState` in `library.svelte.ts`), so concurrent async runs could apply an older snapshot last. Moving it needs a frontend or backend queue that keeps the order, so it was not done here.
+
+`playback_play` may also touch the disk (`probe_duration_ms` when the frontend gives no duration hint, first-time output open). Measure it on the Mac before deciding.
+
+The r67 source-level test (`volume_and_stick_commands_run_off_the_main_thread` in `main.rs`) now covers all moved commands.
