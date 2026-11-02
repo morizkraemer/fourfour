@@ -18,6 +18,13 @@ pub fn models_present(dir: &Path) -> bool {
     dir.join(MEL_MODEL).is_file() && dir.join(BEAT_MODEL).is_file()
 }
 
+pub const ANALYSIS_VERSION: u32 = 1;
+
+pub fn analysis_key(models_dir: Option<&Path>) -> String {
+    let len = |name: &str| models_dir.and_then(|dir| std::fs::metadata(dir.join(name)).ok()).map_or(0, |m| m.len());
+    format!("analysis-{ANALYSIS_VERSION}-{}-{}", len(MEL_MODEL), len(BEAT_MODEL))
+}
+
 pub fn dev_models_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../prototyping/analysis-packaging/models")
 }
@@ -467,6 +474,20 @@ mod tests {
         std::fs::write(dir.join("models").join(MEL_MODEL), b"x").unwrap();
         std::fs::write(dir.join("models").join(BEAT_MODEL), b"x").unwrap();
         assert!(models_present(&dir.join("models")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn analysis_key_follows_the_model_files() {
+        let dir = std::env::temp_dir().join(format!("ff-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(analysis_key(None), format!("analysis-{ANALYSIS_VERSION}-0-0"));
+        std::fs::write(dir.join(MEL_MODEL), b"xx").unwrap();
+        std::fs::write(dir.join(BEAT_MODEL), b"yyy").unwrap();
+        let first = analysis_key(Some(&dir));
+        assert_eq!(first, format!("analysis-{ANALYSIS_VERSION}-2-3"));
+        std::fs::write(dir.join(BEAT_MODEL), b"yyyy").unwrap();
+        assert_ne!(analysis_key(Some(&dir)), first);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

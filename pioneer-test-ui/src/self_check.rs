@@ -28,7 +28,7 @@ pub fn run() -> Result<String, String> {
         return Err(format!("bundled model weights missing in {}", dir.display()));
     }
     Analyzer::load(&dir, PoolOptions::default()).map_err(|e| format!("loading model weights from {}: {e}", dir.display()))?;
-    Ok(format!("self-check ok: fourfour {} weights loaded from {}", pioneer_usb_writer::VERSION, dir.display()))
+    Ok(format!("self-check ok: fourfour {} weights loaded from {}", env!("CARGO_PKG_VERSION"), dir.display()))
 }
 
 pub fn run_and_exit() -> ! {
