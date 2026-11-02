@@ -6,10 +6,12 @@ import {
   pickBackupFile,
   pickDirectory,
   readBackup,
+  recoverRestoreBackup,
   restoreBackup,
   type BackupPreview,
   type BackupStatus,
 } from '../services/tauri.svelte.ts';
+import { library } from './library.svelte.ts';
 import { applyUiSettings, backupFileName, collectUiSettings, parseUiSettings } from '../lib/backup.ts';
 
 export const backup = $state({
@@ -88,7 +90,8 @@ export async function confirmRestore(reload: () => void = () => location.reload(
   backup.restoring = true;
   backup.restoreError = '';
   try {
-    const outcome = await withProgress('restore', () => restoreBackup(preview.path, audioFolder));
+    const restore: (path: string, audioFolder: string | null) => Promise<{ ui_settings: string | null }> = library.openFailure ? recoverRestoreBackup : restoreBackup;
+    const outcome = await withProgress('restore', () => restore(preview.path, audioFolder));
     const ui = parseUiSettings(outcome.ui_settings);
     if (ui) applyUiSettings(localStorage, ui);
     reload();

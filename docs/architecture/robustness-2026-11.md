@@ -56,7 +56,7 @@ Every case also checks: good neighbours imported and fully analysed, analysis ru
 - **Tags the reader rejects drop the file:** lofty fails on invalid UTF-8 in an ID3 UTF-8 frame, lone UTF-16 surrogates and lying tag sizes, so `read_track_metadata` errors and the file is skipped as unreadable although the audio plays. Suggest `ParsingMode::Relaxed` or a properties-only retry in `scanner.rs` (writer lane, read-only here).
 - **Huge junk files:** the tag reader and decoder scan an MP3 with no valid frames to its end (about 10 s per GB). Bounded by file size; needs a scan cap in lofty/symphonia use.
 - **Analysis failures** are remembered in the side file `analysis-failures.json` (r41, no schema change): launch resume and "Analyze all" skip a track that failed twice on an unchanged file; explicit requests retry. Open: no UI shows or clears the skipped tracks, and the count is only in the debug log (see `analysis-resume-2026-11.md`, Failure memo).
-- **Library open recovery:** a library that fails to open leaves the app running with an empty list and the error in the status bar and Settings > Advanced (see "Library open safety"). There is no screen to pick another library, restore a backup or start fresh from that state yet; that is a product call.
+- **Library open recovery:** a library that fails to open leaves the app running with an empty list and the error in the status bar and Settings > Advanced (see "Library open safety"). The recovery screen on branch `r38-recovery` (not landed) adds the way out from that state.
 - **Duplicates inside one drop are not flagged** (only against the library), and symlinked folders or files import as separate rows under their link paths. Aliases of the same file count twice.
 - `normalise` path keys fold case, so on a case-sensitive volume `A.wav` next to `a.wav` counts as already in the library.
 - A WAV cut to 20% analyses as complete with BPM 0; the decoder's `truncated` flag is not shown anywhere.
@@ -122,6 +122,36 @@ Tests: `cargo test -p pioneer-library failure`, `refused_backups_carry_a_failure
 ## Log file and panic hook (r48-logs)
 
 `pioneer-test-ui/src/app_log.rs`: std-only rotating log (`fourfour.log`, `.1.log`, `.2.log`, 5 MB each) in `app_log_dir`, opened first thing in `setup`. A panic hook installed at the top of `main` writes message, location, thread, app version and a forced backtrace before the default hook runs, so panics on analysis, import and tokio worker threads are logged even when a `catch_unwind` or a `join` turns them into an error. `debug_log` and the former `eprintln!` warnings also go to the file. The frontend forwards `console.error`, uncaught errors and unhandled rejections through `log_frontend` (rate limited on both sides). `log_directory` returns the folder. Tests: rotation cap, reopen, panic line, rate limit (Rust) and forwarding (vitest `errorForwarding.test.ts`). Not covered: hard crashes (signals, aborts), which macOS reports itself.
+### Recovery screen (branch r38-recovery)
+
+Branch `r38-recovery` from `ov-1028`, not landed: user-visible, Merlin reviews it. Tests: `cargo test -p pioneer-test-ui --bin pioneer-test-ui recovery_commands`, `npm test` (`libraryOpenFailure.test.ts`, `backup.test.ts`), smoke `recovery.spec.ts`.
+
+When `load_state` returns the open error, the list area shows the existing empty-state panel instead of "No tracks loaded". The title and text depend on the cause, read from the error text (`app/src/lib/libraryOpenFailure.ts`):
+
+| Cause | Title | Actions |
+|---|---|---|
+| newer version | This library was made by a newer version of fourfour | Open another library, Restore a backup, Start a new library |
+| damaged, or unknown | Couldn't open your library | same three |
+| locked | Your library is in use | Try again, then the same three |
+
+Every text says the library file has not been changed (or, for locked, to close the other program). An action that fails keeps the panel and shows one plain line under it; the raw text goes to the browser console.
+
+Backend (`pioneer-test-ui/src/recovery_commands.rs`): four commands that need no library state, serialised by a gate and refused once a library is registered.
+
+| Command | What it does |
+|---|---|
+| `recover_retry_library` | opens the configured path again (the locked case) |
+| `recover_open_library(folder)` | opens `library.db` in a folder that has one; a folder without it is refused so nothing new is created by accident |
+| `recover_new_library` | creates `Libraries/library-<stamp>/library.db` under the app data folder and opens it |
+| `recover_restore_backup(path, audio_folder)` | unpacks the backup into a new `Libraries/library-<stamp>/` folder with the existing `unpack_backup` and `install_backup`, merges the backup's settings like a normal restore |
+
+None of them writes to or deletes the failed file or its folder: the new library and the restore always go to a new folder, and a failed restore removes only the folder it just made. The restore's safety copy of the current library does not apply (there is no open library to copy); the untouched failed file is the safety copy, and its path is shown in the status bar afterwards ("Your previous library file is still at ..."). `read_backup` now also works without a library (current track count 0).
+
+After success the library is registered (`app.manage`), `config.json` points at the new path, and the same follow-ups as a normal start run (file check, cover fill, staging cleanup). The UI then loads it with `initLibrary()`, no relaunch. The restore flow reloads the window, like a restore from Settings, to pick up the restored UI settings.
+
+Rust tests (`recovery_commands`): each command works with no library state, the failed file is byte-identical and nothing else is created next to it, a second new library never reuses a folder, a bad backup leaves no half-made folder. Smoke (`recovery.spec.ts`, mock backend): newer, damaged and locked panels, Try again (still locked, then open), each of the three actions, a failing action.
+
+Open for Merlin: "Start a new library" picks the folder itself (no picker); a picker for it, or for where a restore goes, is a small add. Copy is in `libraryOpenFailure.ts`. The status bar still says "Failed to load library" next to the panel.
 
 ## Run
 

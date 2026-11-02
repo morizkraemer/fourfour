@@ -30,6 +30,7 @@
   import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
+  import LibraryRecoveryPanel from './LibraryRecoveryPanel.svelte';
   import { pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
   import { createDetailPrefetcher } from '../services/detail-prefetch.ts';
   import {
@@ -147,6 +148,7 @@
   }
 
   let effectiveSource = $derived(sourceId ?? ui.activeSidebarRow);
+  let showOpenFailure = $derived(!embedded && library.tracksLoaded && library.openFailure !== null);
   let showLibraryEmpty = $derived(!embedded && library.tracksLoaded && library.trackCount === 0);
   const skeletonRows = Array.from({ length: 24 }, (_, i) => i);
 
@@ -684,7 +686,9 @@
   onmousedown={() => {}}
   oncontextmenu={openListMenu}
 >
-  {#if showLibraryEmpty}
+  {#if showOpenFailure}
+    <LibraryRecoveryPanel />
+  {:else if showLibraryEmpty}
     <div class="ff-table__empty-container">
       <EmptyState
         title="No tracks loaded"
