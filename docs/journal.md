@@ -471,3 +471,4 @@
 2026-11-02 09:47 orchestrator r48-logs-fix handed back 79750de (cause: smoke mock rejected log_frontend sent for benign ResizeObserver notices; mock no-ops + filter; chromium+webkit smoke 113 passed 0 failed), merging with pipefail checks
 2026-11-02 09:59 orchestrator r48-logs-fix landed on ov-1028 19f34dd (CHECKS-OK, smoke 113 passed 0 failed)
 2026-11-02 10:00 orchestrator - decided: own prio r51-migration-test (sonnet medium; beta checklist 11.2: beta library fixture, newer-schema refusal)
+2026-11-02 10:19 orchestrator r51-migration-test handed back 7dc917d (refusal existed; fixture + tests only), merging; decided: own prio r52-no-python (sonnet medium; checklist 6.7: no path to AGPL Python analysis in beta builds)
