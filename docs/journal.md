@@ -438,3 +438,4 @@
 2026-11-02 08:49 orchestrator - decided: own prio r37-webkit-smoke (sonnet high; WebKit smoke failures: app bug vs Chromium-only test)
 2026-11-02 08:51 orchestrator r36-covers: no speed-up (store + WAL commit is the floor; covers are raw embedded bytes, no resize); test + doc merging; leaks smoke spec failed once under load (151 vs 40 DOM nodes) - r37 is looking at leaks spec
 2026-11-02 08:52 orchestrator - decided: own prio r38-recovery (sonnet high; recovery panel on a branch per decide-by-doing, unlanded)
+2026-11-02 09:04 orchestrator r34-webkit-idle landed e2f36d9 (smoke 113, CHECKS-OK); r36-covers landed 817d347 (doc conflict resolved, cover test ok)
