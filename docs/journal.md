@@ -467,3 +467,4 @@
 2026-11-02 15:17 orchestrator - decided: own prio r49-linux-arena (sonnet high; glibc arena return + 2 h web-process soak)
 2026-11-02 16:06 orchestrator - answered (Merlin via lab, relayed by PM): sync r3 Keep, skeleton r2 Keep, scroll stable, sidebar r2 Keep + narrower empty state idea; locked 4 decisions; r48-logs merging
 2026-11-02 16:21 orchestrator r48-logs merged then reverted (4f4a72d -> 67deaf2): smoke 16 failed, missed because the merge chain piped smoke into tail (exit code lost) and the worker reported only '97 passed'; merge chains now use pipefail; r48-logs-fix queued (worker could not resume: worktree removed)
+2026-11-02 16:34 orchestrator r50-sidebar-empty built (branch 4372b8c; empty organize panel capped at left sidebar width, docked list uses stored width; smoke 115/0 failed); lab card round 3 committed on master
