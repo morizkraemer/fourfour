@@ -501,3 +501,4 @@
 2026-11-02 15:20 orchestrator r61-chunk-ceiling handed back c7d2f10 (knob default off, sweep script; peak 5.5 GB -> 2.5 GB at 2048), merging; Mac-night sweep queued
 2026-11-02 15:32 orchestrator r61-chunk-ceiling landed (CHECKS-OK)
 2026-11-02 15:32 orchestrator - decided: own prio r63-ci-refresh (sonnet medium; r35-ci rebased on ov-1028 + dev-bins, notices drift, smoke factor; still unpushed)
+2026-11-02 15:40 orchestrator r63-ci handed back fbb1ba6 (5 jobs; local dev-bins, notices drift, smoke factor 2 green; actionlint unavailable), parked -> Waiting 15
