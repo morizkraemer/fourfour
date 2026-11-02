@@ -463,3 +463,4 @@
 2026-11-02 14:57 orchestrator r46-dsrows parked (220f237; no measurable startup gain at load 74-112, cheaper column resize, pixels identical); Waiting 36 offers r29-css-v2 or r46-dsrows
 2026-11-02 14:58 orchestrator - decided: own prio r47-beta-checklist (sonnet high; docs only, box load 25-50 and swap full make benchmarks noise)
 2026-11-02 15:05 orchestrator r47-beta-checklist landed fd36549 (docs); decided: own prio r48-logs (sonnet high; checklist area 9)
+2026-11-02 15:16 orchestrator r42-realsoak handed back (no leak; Linux glibc arena retention after analysis ~1.8 GB), merging; backlog r49-linux-arena
