@@ -2,12 +2,13 @@ use std::borrow::Cow;
 use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use crate::bt::{BeatEngine, BeatResult};
+use crate::bt::{BeatEngine, BeatResult, MODEL_RATE};
 use crate::cyankey;
 use crate::decode::{decode_mono, resample_to};
 use crate::fit::{self, FitParams, Window, FPS};
@@ -107,15 +108,20 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     if cancel.load(Ordering::Relaxed) {
         return Err(Cancelled.into());
     }
-    let duration_s = native.samples.len() as f64 / native.rate as f64;
-    let gapless = native.gapless_samples();
-    let gapless_start_s = native.gapless.start as f64 / native.rate as f64;
+    let rate = native.rate;
+    let truncated = native.truncated;
+    let duration_s = native.samples.len() as f64 / rate as f64;
+    let gapless_s = native.gapless.len() as f64 / rate as f64;
+    let gapless_start_s = native.gapless.start as f64 / rate as f64;
+    let native = Arc::new(native);
     let side_threads = if cfg.threads > 1 { 2 } else { 1 };
     let (beat_part, key_part, wf_part) = std::thread::scope(|s| {
         let key = cfg.key.then(|| {
-            s.spawn(|| -> Result<KeyPart> {
+            let native = native.clone();
+            s.spawn(move || -> Result<KeyPart> {
                 let t = Instant::now();
-                let mono44: Cow<[f32]> = match native.rate {
+                let gapless = native.gapless_samples();
+                let mono44: Cow<[f32]> = match rate {
                     44100 => Cow::Borrowed(gapless),
                     rate => Cow::Owned(resample_to(gapless, rate, 44100)?),
                 };
@@ -125,12 +131,14 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
                 Ok(KeyPart { key, ms: ms(t), resample_ms })
             })
         });
-        let fast = s.spawn(|| -> (Option<Result<KeyPart>>, Option<(Waveforms, f64)>) {
+        let wf_audio = native.clone();
+        let fast = s.spawn(move || -> (Option<Result<KeyPart>>, Option<(Waveforms, f64)>) {
             let wf = cfg.waveform.then(|| {
                 let t = Instant::now();
-                let w = waveform::compute(&native.samples, native.rate);
+                let w = waveform::compute(&wf_audio.samples, rate);
                 (w, ms(t))
             });
+            drop(wf_audio);
             let key = key.map(|h| h.join().unwrap());
             if let (Some((w, _)), Some(on_waveform)) = (&wf, control.on_waveform) {
                 if !cancel.load(Ordering::Relaxed) {
@@ -153,7 +161,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
                 };
                 return Ok((none, None, 0.0, 0.0, 0.0));
             }
-            let bt = engine.analyze(gapless, native.rate, cfg.threads, control)?;
+            let bt = engine.analyze_resampled(move || resample_to(native.gapless_samples(), rate, MODEL_RATE), cfg.threads, control)?;
             let t = Instant::now();
             let delay = mp3::timeline_shift_s(path, cfg.mp3_rule) + if cfg.mp3_rule == DelayRule::ModelLead { gapless_start_s } else { 0.0 };
             let mp3_ms = ms(t);
@@ -162,7 +170,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
             let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
             let mut fp = cfg.fit.clone();
             fp.threads = cfg.threads;
-            let fit = fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless.len() as f64 / native.rate as f64, &w, &fp);
+            let fit = fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless_s, &w, &fp);
             Ok((bt, fit, delay, ms(t), mp3_ms))
         })();
         let (key, wf) = fast.join().unwrap();
@@ -208,7 +216,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     });
     Ok(Analysis {
         duration_s,
-        truncated: native.truncated,
+        truncated,
         bpm,
         first_beat_s,
         beats_s,
