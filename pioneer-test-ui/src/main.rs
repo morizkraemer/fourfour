@@ -13,6 +13,7 @@ mod band_analysis;
 mod command_error;
 mod dto;
 mod file_health;
+mod heap;
 mod import_plan;
 mod perf_probe;
 mod playback;
@@ -1453,6 +1454,7 @@ fn focus_main_window(app: &tauri::AppHandle) {
 }
 
 fn main() {
+    heap::limit_arenas();
     if self_check::requested() {
         self_check::run_and_exit();
     }
