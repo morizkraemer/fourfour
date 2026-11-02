@@ -75,7 +75,8 @@ open own-priority items:
 - r44-version: [landed] app version now from the app crate (shown version 0.9.14 -> 0.1.0, matching the dmg; decided: lands, it corrects a wrong number); memo keyed on ANALYSIS_VERSION (bump by hand when analysis changes)
 - r45-rowcost: [landed] no app-side lever; all per-row WebKit gains are in the fenced design system (reset fix -32% style, cell geometry as custom properties ~10% more); bench_startup build fixed
 - r46-dsrows: [parked, branch r46-dsrows 220f237 on r29-css-v2] cell widths as table-level custom properties; pixel-identical incl. resize/reorder; resize touches 0 body attributes (was 560); per-row gain within noise
-- r47-beta-checklist: public macOS beta readiness checklist (docs only; box load too high for benchmarks) [running]
+- r47-beta-checklist: [landed fd36549] docs/release/beta-checklist-2026-11.md on ov-1028; top blockers: bundle id + data migration (24), no signing/notarization (Apple account), key 56% + bar-1 listen (4/30/16), CDJ-3000 test of current export + manifest-aware wipe (brother), no LICENSE/complete notices + first CI run (15)
+- r48-logs: rotating log file + panic hook + frontend error forwarding, no UI [running]
 parked for Merlin (land the -v2 branches, current with ov-1028; parked-all-v2 a87f361 = all at once): r18-errors-v2 (Waiting 33), r17-a11y-v2 (34), r31-cover-cap-v2 (35), r29-css-v2 (36), r38-recovery-v2 (37); r15-reveal (not worth landing), r16-quant (dropped), r35-ci (Waiting 15)
 next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028 (now with CoreML, font preload, error kinds; probe has longest_busy/pending_frames/page origin); compare r15-reveal and r29-css-v2; 50k only with >= 40 GB free (script now cleans up and stops when low)
 review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (app on ov-1028, mock data; rebuilt after merges)
