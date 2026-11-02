@@ -14,6 +14,9 @@ mod track_infos;
 #[path = "../import_plan.rs"]
 mod import_plan;
 #[allow(dead_code)]
+#[path = "../app_log.rs"]
+mod app_log;
+
 #[path = "../command_error.rs"]
 mod command_error;
 
