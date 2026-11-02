@@ -4,6 +4,7 @@
  */
 
 import { untrack } from 'svelte';
+import { parseOpenFailure, type OpenFailure } from '../lib/libraryOpenFailure.ts';
 import { appSettings, loadAppSettings, setAnalyzeAfterImport } from './app-settings.svelte.ts';
 import {
   getVersion,
@@ -380,6 +381,7 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   tracksLoaded: false,
+  openFailure: null as OpenFailure | null,
   bootSnapshot: null as BootSnapshot | null,
   analyzing: false,
   /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
@@ -1236,6 +1238,7 @@ export async function initLibrary() {
     if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
+    library.openFailure = null;
     whenIdle(() => void applyChangedTrackLabels());
     await refreshVolumes();
 
@@ -1256,6 +1259,7 @@ export async function initLibrary() {
   } catch (err) {
     loadFailed = true;
     library.statusMessage = failureText("Couldn't load your library.", err, { next: 'Restart fourfour. If it keeps happening, check the library file in Settings.' });
+    library.openFailure = parseOpenFailure(String(err));
     console.error('initLibrary failed:', err);
   } finally {
     if (!library.analyzing && !library.syncing && !loadFailed) library.statusMessage = 'Ready';

@@ -91,10 +91,12 @@ export function restoreSummary(preview: BackupPreview, now = new Date()): string
   return `${fileName(preview.path)} · ${tracks} · made ${made}`;
 }
 
-export function restoreLines(preview: BackupPreview): RestoreLine[] {
+export function restoreLines(preview: BackupPreview, recovering = false): RestoreLine[] {
   const current = preview.current_tracks === 1 ? '1 track' : `${preview.current_tracks} tracks`;
   const lines: RestoreLine[] = [
-    { status: 'warn', text: `Replaces your current ${current}, playlists and settings; they are saved as a backup first` },
+    recovering
+      ? { status: 'online', text: "The backup becomes your library. The library file that wouldn't open is left as it is" }
+      : { status: 'warn', text: `Replaces your current ${current}, playlists and settings; they are saved as a backup first` },
   ];
   if (preview.includes_audio) {
     const files = preview.audio_files === 1 ? '1 audio file' : `${preview.audio_files} audio files`;

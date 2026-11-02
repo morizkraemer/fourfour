@@ -320,6 +320,28 @@ export function restoreBackup(path: string, audioFolder: string | null): Promise
   return invoke<RestoreOutcome>('restore_backup', { path, audioFolder });
 }
 
+export interface RecoveryOutcome {
+  library_path: string;
+  kept_path: string | null;
+  ui_settings: string | null;
+}
+
+export function recoverRetryLibrary(): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_retry_library');
+}
+
+export function recoverOpenLibrary(folderPath: string): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_open_library', { folderPath });
+}
+
+export function recoverNewLibrary(): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_new_library');
+}
+
+export function recoverRestoreBackup(path: string, audioFolder: string | null): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_restore_backup', { path, audioFolder });
+}
+
 export function listenToBackupProgress(callback: (progress: BackupProgress) => void) {
   return subscribe('backup-progress', callback);
 }

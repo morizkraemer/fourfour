@@ -17,6 +17,7 @@ export interface SmokeWindow {
   __smokeImport: SmokeImport | null;
   __smokeHoldImport: boolean;
   __smokeHoldLoad: boolean;
+  __smokeLoadError: string | null;
   __smokeReleaseLoad: (() => void) | null;
   __smokeAnalyzeAfterImport: boolean;
   __smokeReleaseImport: (() => void) | null;
@@ -62,6 +63,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeImport = null;
   w.__smokeHoldImport = false;
   w.__smokeHoldLoad = false;
+  w.__smokeLoadError = localStorage.getItem('smoke.loadError');
   w.__smokeReleaseLoad = null;
   w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;
@@ -270,6 +272,12 @@ export function installTauriMock(initial: LoadedState) {
     };
   }
 
+  function recovered(libraryPath: string, keptPath: string | null) {
+    w.__smokeLoadError = null;
+    localStorage.removeItem('smoke.loadError');
+    return { library_path: libraryPath, kept_path: keptPath, ui_settings: null };
+  }
+
   async function handle(cmd: string, args: Record<string, any>): Promise<unknown> {
     switch (cmd) {
       case 'get_stick':
@@ -386,12 +394,24 @@ export function installTauriMock(initial: LoadedState) {
       case 'restore_backup':
         sessionStorage.setItem('smoke.restore', JSON.stringify(args));
         return { ui_settings: JSON.stringify({ 'fourfour.quantize.v1': '1' }), safety_path: '/smoke/Backups/before-restore.tar.gz', relinked: 0 };
+      case 'recover_retry_library':
+        if (w.__smokeLoadError) throw w.__smokeLoadError;
+        return recovered('/smoke/library/library.db', null);
+      case 'recover_open_library':
+        return recovered(`${args.folderPath}/library.db`, '/smoke/library/library.db');
+      case 'recover_new_library':
+        return recovered('/smoke/Libraries/library-2026-11-02-100000/library.db', '/smoke/library/library.db');
+      case 'recover_restore_backup':
+        sessionStorage.setItem('smoke.restore', JSON.stringify(args));
+        recovered('/smoke/Libraries/library-2026-11-02-100000/library.db', '/smoke/library/library.db');
+        return { library_path: '/smoke/Libraries/library-2026-11-02-100000/library.db', kept_path: '/smoke/library/library.db', ui_settings: JSON.stringify({ 'fourfour.quantize.v1': '1' }) };
       case 'plugin:dialog|save':
         return `/Backups/${args.options?.defaultPath ?? 'backup.tar.gz'}`;
       case 'plugin:dialog|open':
         return w.__smokePickPath;
       case 'load_state':
         if (w.__smokeHoldLoad) await new Promise<void>((done) => (w.__smokeReleaseLoad = done));
+        if (w.__smokeLoadError) throw w.__smokeLoadError;
         return { tracks: tracks.map(({ waveform_bands: _bands, waveform_preview: _preview, ...listed }) => listed), playlists };
       case 'get_row_previews': {
         const wanted = new Set(args.trackIds as number[]);

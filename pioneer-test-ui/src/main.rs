@@ -17,6 +17,7 @@ mod heap;
 mod import_plan;
 mod perf_probe;
 mod playback;
+mod recovery_commands;
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../../fourfour-analysis-rs/tests/messy_fixtures/mod.rs"]
@@ -1513,6 +1514,10 @@ fn main() {
             get_library_path,
             change_library_path,
             reset_library,
+            recovery_commands::recover_retry_library,
+            recovery_commands::recover_open_library,
+            recovery_commands::recover_new_library,
+            recovery_commands::recover_restore_backup,
             analyze_track_python,
             cancel_analysis,
             get_analysis_backend,
@@ -1553,6 +1558,7 @@ fn main() {
             }
             let health = file_health::SharedHealth::default();
             app.manage(health.clone());
+            app.manage(recovery_commands::RecoveryGate::default());
             let covers = CoverFill::default();
             app.manage(covers.clone());
             match open_startup_library(read_library_path(app.handle())) {
