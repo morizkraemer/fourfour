@@ -2,7 +2,7 @@
 
 Goal (STATE.md "Ship target"): a `.dmg` strangers can install, that scans a folder, analyzes it in Rust and exports a USB that plays on a CDJ-3000.
 
-Base: `ov-1028` (cf422ca). Evidence is file:line on that branch, doc links, branch names and "Waiting" numbers from `docs/STATE.md` on `master` (ddcb8c5; the STATE.md on `ov-1028` is older and lacks items 15-37). Docs-only run: nothing was built, run or installed. Claims about a signed build or a real Mac are marked "untested".
+Base: `ov-1028` (5649ea0; first written at cf422ca, refreshed 2026-11-02 after r48-r69). Evidence is file:line on that branch, doc links, branch names and "Waiting" numbers from `docs/STATE.md` on `master` (the STATE.md on `ov-1028` is older and lacks items 15-40). Work that landed on `ov-1028` is named by its merge commit; work still parked is named by branch. Docs-only run: nothing was built, run or installed. Claims about a signed build or a real Mac are marked "untested".
 
 Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHub account, listening or visual check), **needs brother** (morizkraemer: writer, sync, hardware), **needs work** (an agent can do it, no decision needed).
 
@@ -14,18 +14,18 @@ Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHu
 | 2 | Data location and migration | needs work | One-time copy of old app data to the new id | agent, after 1 |
 | 3 | Signing, hardened runtime, notarization | needs Merlin | Apple Developer account and Developer ID cert, then wire Tauri signing | Merlin, then agent |
 | 4 | Entitlements | needs work | Start with none; test a signed build on the Mac | agent, Mac night |
-| 5 | Gatekeeper first run, min macOS, arch | ready (unsigned) | Add "Apple Silicon, macOS 13.4+" to the install note | agent |
-| 6 | Licences and NOTICE | needs work | Add LICENSE, full third-party notice, fix About credits, drop Python fallback | agent; licence choice Merlin |
+| 5 | Gatekeeper first run, min macOS, arch | ready (unsigned) | Requirements line is in the docs draft `r53-user-docs-v2` (Waiting 39); landing it closes this | Merlin (land) |
+| 6 | Licences and NOTICE | partly done (r54) | Notices generator landed; still needed: LICENSE file, bundle the notices and add About rows (Merlin), land `r52-no-python-v2` (Waiting 38) | Merlin (licence, land), agent |
 | 7 | Key model licence and quality | needs Merlin | Accept 56% clean model for beta, or hold (Waiting 4, 30) | Merlin |
 | 8 | Privacy | ready | No network at run time in our code; state it after a Mac check | agent |
-| 9 | Crash reporting, logs | partly done (r48) | File log and panic hook landed; still needed: "Copy diagnostics" and "Reveal logs" UI, Merlin confirms no-upload | agent |
+| 9 | Crash reporting, logs | partly done (r48, r56) | File log, panic hook and early panic log landed; still needed: "Copy diagnostics" and "Reveal logs" UI, Merlin confirms no-upload | agent |
 | 10 | Auto-update | ready (none) | Confirm: no updater in beta 1 | Merlin |
-| 11 | Backup and restore | needs work | Land r38 recovery panel (Waiting 37); migration test | Merlin (land), agent |
+| 11 | Backup and restore | partly done (r51) | Library fixture test landed; still needed: land `r38-recovery-v3` (Waiting 37), FAQ entry | Merlin (land), agent |
 | 12 | USB export safety | needs brother | CDJ-3000 run of current export; manifest-aware wipe | brother |
-| 13 | Analysis quality bars | needs Merlin | Bar-1 listen check (Waiting 16); key call (7) | Merlin |
-| 14 | Open Waiting items touching beta | needs Merlin | Land parked -v2 branches (33-37) after one Mac check | Merlin |
-| 15 | CI | needs Merlin | OK to push `r35-ci` for a first run (Waiting 15) | Merlin |
-| 16 | User docs (README, install, FAQ) | needs work | Write user README and FAQ | agent |
+| 13 | Analysis quality bars | needs Merlin | Bar-1 listen check (Waiting 16); key call (7); "what to expect" numbers are in `r53-user-docs-v2` | Merlin |
+| 14 | Open Waiting items touching beta | needs Merlin | Land `parked-all-v3` (33-37 plus 38) after one Mac check; also 39, 40 | Merlin |
+| 15 | CI | needs Merlin | OK to push `r63-ci` for a first run (Waiting 15; supersedes `r35-ci`) | Merlin |
+| 16 | User docs (README, install, FAQ) | draft done | Read `r53-user-docs-v2` (Waiting 39), confirm 20 "(to confirm)" marks on a Mac | Merlin |
 | 17 | Support channel, release hosting | needs Merlin | Pick tracker, contact, dmg host, repo visibility | Merlin |
 
 ## Top 5 blockers
@@ -34,14 +34,16 @@ Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHu
 2. No Apple signing or notarization: strangers hit the Gatekeeper wall. Needs a paid Apple Developer account.
 3. Analysis bars: key 56.3% clean vs 60% bar (Waiting 4, 30); bar-1 listen check still open (Waiting 16).
 4. CDJ-3000 never saw the current export (cue names and colours, multi-page PDB, folders, 3-band waveforms: Waiting 0, 12; `docs/architecture/cdj-checklist-2026-10.md`), and wipe is not manifest-aware.
-5. No LICENSE file, incomplete third-party notice and About credits, no first CI run (Waiting 15).
+5. No LICENSE file; the notices file exists but is not bundled and About has no row for it; no first CI run (`r63-ci`, Waiting 15).
+
+Also open, not a blocker by itself: the Mac freeze fix (r67) landed but is not yet checked on the Mac, and the stick busy guard (r69) is parked (Waiting 40).
 
 ---
 
 ## 1. App identity - needs Merlin
 
 Evidence:
-- `pioneer-test-ui/tauri.conf.json:3` identifier `com.pioneer.test-ui`; `:2` productName `fourfour`. The Cargo package and binary names (`pioneer-test-ui`, in the r35-ci deb check `usr/bin/pioneer-test-ui`) and crate names (`pioneer-usb-writer`, `pioneer-library`) still say "pioneer".
+- `pioneer-test-ui/tauri.conf.json:3` identifier `com.pioneer.test-ui`; `:2` productName `fourfour`. The Cargo package and binary names (`pioneer-test-ui`, in the r63-ci deb check `usr/bin/pioneer-test-ui`) and crate names (`pioneer-usb-writer`, `pioneer-library`) still say "pioneer".
 - "Pioneer" is a trademark (Waiting 24). Naming the format in text ("Pioneer CDJ-compatible", "Wipe all Pioneer library contents" at `app/src/menus/context-menus.ts:162`, import copy at `app/src/modules/settings/LibraryPage.svelte:58`) is a different question from using it in the bundle id, crate names or product name. Not legal advice; Merlin decides whether to ask someone.
 - Rekordbox (AlphaTheta) and CDJ are also third-party marks used in copy and in the import feature. Same question.
 - Working title "fourfour" is temporary (memory: no name-based icons or branding). `app/src/modules/settings/AboutPage.svelte:11-13` shows "fourfour" and the tagline "Sync, play and organize your DJ library."
@@ -74,7 +76,7 @@ What Apple needs (general knowledge, not tested in this repo; follow Tauri v2 ma
 1. Apple Developer Program membership (paid, yearly) and a "Developer ID Application" certificate exported as .p12. No App Store, no sandbox: the app writes to arbitrary USB volumes and reads arbitrary music folders, so it stays unsandboxed.
 2. Hardened runtime and a secure timestamp on every Mach-O (Tauri enables hardened runtime when signing).
 3. Notarization with `notarytool`, using either Apple ID + app-specific password + team id, or an App Store Connect API key (Tauri reads `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` or `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH`), then stapling the ticket to the app and the dmg.
-4. In CI: base64 certificate and password as GitHub secrets and a temporary keychain on the runner. `r35-ci` has no secrets by design (`docs/process/ci.md` on that branch).
+4. In CI: base64 certificate and password as GitHub secrets and a temporary keychain on the runner. `r63-ci` has no secrets by design (`docs/process/ci.md` on that branch).
 5. Verify with `codesign --verify --deep --strict`, `spctl -a -vv`, `xcrun stapler validate`, then download the dmg on a second Mac or a fresh user so the quarantine flag is set, and open it normally.
 
 Next steps:
@@ -95,13 +97,13 @@ Next step: signed build on the Mac with an empty entitlements file, then run ana
 
 - First run: `docs/process/beta-install-macos.md` covers right-click Open, `xattr -dr com.apple.quarantine`, "Open Anyway" on macOS 15+, and `--self-check`. Fine for testers; rewrite to "open normally" once signed.
 - Minimum macOS 13.4: `tauri.conf.json:45`; binary `minos 13.4` and `LSMinimumSystemVersion` 13.4 (`perf-run-2026-11.md:645`), because the CoreML ONNX Runtime objects need it (`:539`).
-- Apple Silicon only: `build-dmg.sh` builds natively on the Mac (`fourfour_0.1.0_aarch64.dmg`); pyke ships no `x86_64-apple-darwin` ONNX Runtime (`perf-run-2026-11.md:439`); the r35-ci macOS job asserts arm64. The install note says neither "Apple Silicon only" nor "macOS 13.4 or newer". An Intel Mac user gets no explanation.
+- Apple Silicon only: `build-dmg.sh` builds natively on the Mac (`fourfour_0.1.0_aarch64.dmg`); pyke ships no `x86_64-apple-darwin` ONNX Runtime (`perf-run-2026-11.md:439`); the r63-ci macOS job asserts arm64. The install note says neither "Apple Silicon only" nor "macOS 13.4 or newer". An Intel Mac user gets no explanation.
 - Size: 97 MB dmg with CoreML and weights (`perf-run-2026-11.md:645`); `ship-dmg.sh:7` caps copies at 300 MB.
 - Version: 0.1.0 from `pioneer-test-ui/Cargo.toml` (r44-version). Pick the beta version string and where it is bumped.
 
 Next step (agent): add the requirements line to the install note and README; Merlin picks the version string.
 
-## 6. Licences and NOTICE - needs work (choices need Merlin)
+## 6. Licences and NOTICE - partly done (r54); choices need Merlin
 
 What exists:
 - `NOTICE` lists baken (MIT, full text), the FSL10K key templates, and format-fact references (Booth, cyanbox; no code copied).
@@ -111,12 +113,12 @@ What exists:
 
 What is missing:
 1. No repo `LICENSE` file, although AGENTS.md calls fourfour "open-source". Merlin and brother pick the licence.
-2. **Built on branch `r54-notices` (not wired in):** `python3 -I scripts/release/third-party-notices.py <out>` writes the notices for the 403 Rust crates linked into the macOS release build (`aarch64-apple-darwin`, no dev-deps, no dev-bins, plus the `coreml`/ort crates read from `Cargo.lock`) and the hand-kept non-cargo items in `scripts/release/third-party-extras.json`. Generated copy: `pioneer-test-ui/resources/THIRD-PARTY-NOTICES.txt`. Still to do, both user-visible, so left for Merlin: add it to `bundle.resources` (`tauri.bundle-weights.conf.json`) and add an About row. Regenerate after any dependency change. Manual standard-text fallback (crate ships no licence file) for 66 crates, listed in the file: all `symphonia*` 0.5.x, `rten*`, `lofty`, `objc2*`, `phf*`, `unic-*`, `fax*`, `profiling*`, `block2`, `dispatch2`, `audio-core`, `alloc-stdlib`, `convert_case`, `dasp_sample`, `flatbuffers`, `fxhash`, `mac`, `match_token`, `ogg_pager`, `realfft`, `selectors`, `simd_helpers`, `zune-inflate`. Original item: NOTICE and the app do not list: ONNX Runtime (MIT, statically linked, so its notice must ship), `ort`, `rten` and `lofty` (MIT OR Apache-2.0), Signalsmith Stretch (MIT), symphonia 0.5 and 0.6 (MPL-2.0, file-level copyleft: source availability for symphonia), SQLCipher via `bundled-sqlcipher` in `pioneer-usb-writer/Cargo.toml` (BSD-style, notice required; crypto backend on macOS believed to be CommonCrypto, unverified), Tauri, `tauri-plugin-dialog` and the rest of the 683 locked packages (`Cargo.lock`), Geist fonts (SIL OFL 1.1; `app/src/assets/fonts/OFL.txt` is in the source tree but ships nowhere a user can read it), Svelte runtime in `app/dist` (MIT).
+2. **Landed on `ov-1028` (r54 merge 847284b, not wired in):** `python3 -I scripts/release/third-party-notices.py <out>` writes the notices for the 403 Rust crates linked into the macOS release build (`aarch64-apple-darwin`, no dev-deps, no dev-bins, plus the `coreml`/ort crates read from `Cargo.lock`) and the hand-kept non-cargo items in `scripts/release/third-party-extras.json`. Generated copy: `pioneer-test-ui/resources/THIRD-PARTY-NOTICES.txt`. Still to do, both user-visible, so left for Merlin: add it to `bundle.resources` (`tauri.bundle-weights.conf.json`) and add an About row. Regenerate after any dependency change. Manual standard-text fallback (crate ships no licence file) for 66 crates, listed in the file: all `symphonia*` 0.5.x, `rten*`, `lofty`, `objc2*`, `phf*`, `unic-*`, `fax*`, `profiling*`, `block2`, `dispatch2`, `audio-core`, `alloc-stdlib`, `convert_case`, `dasp_sample`, `flatbuffers`, `fxhash`, `mac`, `match_token`, `ogg_pager`, `realfft`, `selectors`, `simd_helpers`, `zune-inflate`. Original item: NOTICE and the app do not list: ONNX Runtime (MIT, statically linked, so its notice must ship), `ort`, `rten` and `lofty` (MIT OR Apache-2.0), Signalsmith Stretch (MIT), symphonia 0.5 and 0.6 (MPL-2.0, file-level copyleft: source availability for symphonia), SQLCipher via `bundled-sqlcipher` in `pioneer-usb-writer/Cargo.toml` (BSD-style, notice required; crypto backend on macOS believed to be CommonCrypto, unverified), Tauri, `tauri-plugin-dialog` and the rest of the 683 locked packages (`Cargo.lock`), Geist fonts (SIL OFL 1.1; `app/src/assets/fonts/OFL.txt` is in the source tree but ships nowhere a user can read it), Svelte runtime in `app/dist` (MIT).
 3. About credits are two rows: Beat This! and beat-this-rs (`AboutPage.svelte:12-15`). No key model attribution (CC BY needs visible credit; the file is in Resources but nothing links to it), no "Third-party notices" row.
-4. **Substituted on branch `r54-notices`:** cargo-about and cargo-deny stay uninstalled; the stdlib script above replaces them and fails the run (exit 1) on any licence outside the allow list. A `deny.toml` for CI is still open. Original item: No tooling: `cargo-deny`, `cargo-about`, `cargo-license` and `cargo-audit` are not installed on the box (`~/.cargo/bin` holds only cargo, clippy, fmt, tauri, rustup shims) and the repo has no `deny.toml` or `about.toml`. Not installed here, per the rules. Next step: install them in a scratch `CARGO_HOME` on a CI runner or a Mac night, commit `deny.toml` (allow MIT, Apache-2.0, BSD-2/3, ISC, MPL-2.0, Unicode-3.0, Zlib, CC0), generate `THIRD-PARTY-NOTICES.html` into the bundle resources. npm: `app/package.json` has only `@tauri-apps/api` and `plugin-dialog` as runtime dependencies, so a short list is enough.
+4. **Substituted by the r54 generator on `ov-1028`:** cargo-about and cargo-deny stay uninstalled; the stdlib script above replaces them and fails the run (exit 1) on any licence outside the allow list. A `deny.toml` for CI is still open. Original item: No tooling: `cargo-deny`, `cargo-about`, `cargo-license` and `cargo-audit` are not installed on the box (`~/.cargo/bin` holds only cargo, clippy, fmt, tauri, rustup shims) and the repo has no `deny.toml` or `about.toml`. Not installed here, per the rules. Next step: install them in a scratch `CARGO_HOME` on a CI runner or a Mac night, commit `deny.toml` (allow MIT, Apache-2.0, BSD-2/3, ISC, MPL-2.0, Unicode-3.0, Zlib, CC0), generate `THIRD-PARTY-NOTICES.html` into the bundle resources. npm: `app/package.json` has only `@tauri-apps/api` and `plugin-dialog` as runtime dependencies, so a short list is enough.
 5. Beat This! weights: MIT, but upstream says some training files are copyrighted or under limited Creative Commons licences and users must assess impact (`docs/analysis/rust-status-2026-10-28.md` section O9, "Licence"). This is the authors' disclaimer, not a restriction, and it is the one open legal risk on the analysis path. Merlin decides (rec: accept for the beta, state it in the notices).
 6. Rekordbox import and Pioneer's OneLibrary SQLCipher key (AGENTS.md "OneLibrary encryption", used by the writer): interoperability use of a widely published key. Merlin decides whether it needs a look before public distribution. Not legal advice.
-7. Python fallback: `pioneer-test-ui/src/analysis_python.rs:7-17` still shells out to `analysis/.venv/bin/python` or `python3`, and `analysis_backend.rs:230` falls back to it when the Rust analyzer fails. That path leads to the AGPL Essentia and DeepRhythm stack (`packaging-decision.md`). A stranger's `python3` cannot import `fourfour_analysis`, so it normally errors, but a beta should not carry a path to AGPL code. Remove it or compile it out of release builds (small agent task).
+7. Python fallback: `pioneer-test-ui/src/analysis_python.rs:7-17` still shells out to `analysis/.venv/bin/python` or `python3`, and `analysis_backend.rs:230` falls back to it when the Rust analyzer fails. That path leads to the AGPL Essentia and DeepRhythm stack (`packaging-decision.md`). A stranger's `python3` cannot import `fourfour_analysis`, so it normally errors, but a beta should not carry a path to AGPL code. Built on branch `r52-no-python-v2` (099ed96, Waiting 38, not landed): the fallback is removed, a Rust failure is recorded as an analysis failure, and Settings > Engine loses the "Analysis engine" picker. Merlin lands it.
 
 ## 7. Key model licence and quality - needs Merlin
 
@@ -138,11 +140,11 @@ Checked in code on `ov-1028`:
 
 Next steps (agent): state "fourfour makes no network connections; your music and library stay on your Mac" in README and About only after confirming with `nettop` or Little Snitch on the real app during a Mac night (not done here); add a CSP; Merlin decides on devtools.
 
-## 9. Crash reporting and logs - needs work
+## 9. Crash reporting and logs - partly done (r48, r56)
 
-- Built (r48-logs): a rotating log `fourfour.log` plus `fourfour.1.log` and `fourfour.2.log` (5 MB each, std only, no new dependency) in Tauri's `app_log_dir` (`~/Library/Logs/com.pioneer.test-ui/` on macOS, `~/.local/share/com.pioneer.test-ui/logs/` on Linux, `%LOCALAPPDATA%\com.pioneer.test-ui\logs` on Windows; the folder follows the bundle id, see 1). Module `pioneer-test-ui/src/app_log.rs`. It gets every debug-panel line (`debug_log`), the former `eprintln!` warnings, panics from any thread (message, location, version, backtrace) and frontend `console.error`, uncaught errors and unhandled rejections (rate limited, 20 per 10 s). The command `log_directory` returns the folder for a later "Reveal logs" button; no UI was added.
-- Still open: the error text "see debug log" (`main.rs`, `all_tracks_failed`) should point at the log folder once the Reveal button exists. A panic before Tauri's setup (during `build`) is now written to the file: built on branch `r56-early-panic`.
-- Library open failure: `open_startup_library` (`main.rs:1434`) returns a typed error; the recovery panel is on `r38-recovery-v2` (Waiting 37), not landed.
+- Landed on `ov-1028` (r48 merge 19f34dd): a rotating log `fourfour.log` plus `fourfour.1.log` and `fourfour.2.log` (5 MB each, std only, no new dependency) in Tauri's `app_log_dir` (`~/Library/Logs/com.pioneer.test-ui/` on macOS, `~/.local/share/com.pioneer.test-ui/logs/` on Linux, `%LOCALAPPDATA%\com.pioneer.test-ui\logs` on Windows; the folder follows the bundle id, see 1). Module `pioneer-test-ui/src/app_log.rs`. It gets every debug-panel line (`debug_log`), the former `eprintln!` warnings, panics from any thread (message, location, version, backtrace) and frontend `console.error`, uncaught errors and unhandled rejections (rate limited, 20 per 10 s). The command `log_directory` returns the folder for a later "Reveal logs" button; no UI was added.
+- Still open: the error text "see debug log" (`main.rs`, `all_tracks_failed`) should point at the log folder once the Reveal button exists. A panic before Tauri's setup (during `build`) is now written to the file: landed on `ov-1028` (r56 merge 92fb0a4; the log file and panic hook start at the top of `main`, the bundle id is read from the tauri config).
+- Library open failure: `open_startup_library` (`main.rs:1434`) returns a typed error; the recovery panel is on `r38-recovery-v3` (c2084f8, Waiting 37), not landed.
 - Analysis failures are memoised (`pioneer-test-ui/src/analysis_failures.rs`); their messages reach the log through the debug panel line. macOS also writes its own crash report to `~/Library/Logs/DiagnosticReports/` for hard crashes (signals, aborts), which the panic hook does not see.
 
 Next steps (agent): a "Copy diagnostics" button in About (app version, macOS version, chip, library size, last 200 log lines; no file names unless the user ticks it). No automatic upload. Merlin confirms no-upload.
@@ -155,20 +157,20 @@ Next steps (agent): a "Copy diagnostics" button in About (app version, macOS ver
 
 Needs Merlin: confirm "no updater in beta 1".
 
-## 11. Backup and restore - needs work
+## 11. Backup and restore - partly done (r51)
 
 Built:
 - Library backup and restore are in the app: `pioneer-library/src/backup.rs` (tar with manifest, optional audio; `export_backup` `:394`, `unpack_backup` `:244`, `install_backup` `:348`; refuses a backup from a newer format `:187`) and `pioneer-test-ui/src/backup_commands.rs` (progress events, safety copy under `Backups/` before restore at `:19,175`, relinking of audio paths).
 - Schema migrations are additive and tested (v5 to v7: Q42, Waiting 9 and 12). The planned schema bump (Waiting 31) needs a migration test with a library written by the beta.
 
 Missing for a beta:
-1. Recovery when `library.db` does not open: `r38-recovery-v2` (Waiting 37; copy says "fourfour", swap for "the app").
+1. Recovery when `library.db` does not open: `r38-recovery-v3` (c2084f8, Waiting 37; copy says "fourfour", swap for "the app"), not landed.
 2. A migration promise: every beta version opens older libraries; downgrade is refused with a message. Add a test that opens a library written by this beta's schema.
 3. User-facing text: where backups go, how to restore, what is not backed up (audio is optional).
 
-Item 2 is built on branch `r51-migration-test`: the library already refused a newer schema with `LibraryFailure::NewerVersion` (mapped to `ErrorKind::LibraryNewerVersion`). `pioneer-library/tests/schema_fixture.rs` opens the committed `tests/fixtures/library-schema-v7-beta1/` (library.db plus its anlz tree) (3 tracks, analysis and cues, a folder and playlist) with data intact and asserts that a version above the fixture is refused and left unchanged. A schema bump must keep this fixture opening; regenerate a new one only with `cargo test -p pioneer-library --test schema_fixture -- --ignored` on the old code.
+Item 2 landed on `ov-1028` (r51 merge ebe080e): the library already refused a newer schema with `LibraryFailure::NewerVersion` (mapped to `ErrorKind::LibraryNewerVersion`). `pioneer-library/tests/schema_fixture.rs` opens the committed `tests/fixtures/library-schema-v7-beta1/` (library.db plus its anlz tree) (3 tracks, analysis and cues, a folder and playlist) with data intact and asserts that a version above the fixture is refused and left unchanged. A schema bump must keep this fixture opening; regenerate a new one only with `cargo test -p pioneer-library --test schema_fixture -- --ignored` on the old code.
 
-Next step: Merlin lands `r38-recovery-v2`; agent writes the migration test and the FAQ entry.
+Next step: Merlin lands `r38-recovery-v3`; agent writes the FAQ entry. The schema bump (Waiting 31) must keep the v7 fixture test green.
 
 ## 12. USB export safety - needs brother
 
@@ -200,7 +202,7 @@ Windows items (r20: `is_removable` true for every drive, `statvfs` stub) are not
 Next steps:
 1. Merlin: listen to the 5 bar-1 regressions on the Mac (list in `rust-status-2026-10-28.md` B15; Waiting 16). 72 tracks differ: 59 now right, 13 were right before.
 2. Merlin: the key call in 7.
-3. Agent: a one-page "what to expect" (grid about 80% within 20 ms, key about 56%, no cues or energy) for the README and FAQ, as a release note and not marketing copy.
+3. Done as a draft: the "what to expect" numbers are in `docs/user/` on `r53-user-docs-v2` (56f7625, Waiting 39). Merlin reads it; it lands with the docs draft.
 
 ## 14. Known open Waiting items touching the beta
 
@@ -208,33 +210,38 @@ From master STATE.md (ddcb8c5):
 - 4 key licence: accepted, landed. Needs About attribution (6).
 - 16 bar 1: landed, listen check open (13).
 - 24 bundle id: open (1).
-- 15 CI: open (15 below).
-- 33 error messages (`r18-errors-v2`): holds real bugs (analysis falls back to the browser mock in the real app, unsaved playlists look saved). Rec: land first. A beta blocker in practice.
-- 34 keyboard and screen reader (`r17-a11y-v2`): touches the design-system fence; needs a Mac WebKit check.
-- 35 cover cache cap (`r31-cover-cap-v2`), 36 WebKit startup CSS (`r29-css-v2`), 37 recovery panel (`r38-recovery-v2`): parked; `parked-all-v2` (a87f361) is all of them at once.
-- 19 waveform cache cap 512 MiB (rec 2 GiB); 21 rten bump (rec drop); 29 UI headroom and QoS (rec keep); 31 schema bump for 50k (after the holiday); 27 ORT and CoreML (CoreML shipped through r26 and r30).
+- 15 CI: open, now `r63-ci` (fbb1ba6; 15 below).
+- 33 error messages (`r18-errors-v3`, cba186d): holds real bugs (analysis falls back to the browser mock in the real app, unsaved playlists look saved). Rec: land first. A beta blocker in practice.
+- 34 keyboard and screen reader (`r17-a11y-v3`, 1ce679a): touches the design-system fence; needs a Mac WebKit check.
+- 35 cover cache cap (`r31-cover-cap-v3`, ec769e1), 36 WebKit startup CSS (`r29-css-v3`, f1fe319), 37 recovery panel (`r38-recovery-v3`, c2084f8), 38 no Python (`r52-no-python-v2`, 099ed96): parked; `parked-all-v3` (d816e99: r17, r18, r29, r31, r38, r52, green) is all of them at once. They were re-merged onto `ov-1028` at r64, before r67 and r68 landed; check they still merge before landing.
+- 39 user docs draft (`r53-user-docs-v2`, 56f7625): read, then confirm the Mac marks.
+- 40 stick busy guard (`r69-stick-busy`, 5a57a98): one mutating stick operation at a time, write and wipe off the main thread. Parked, rec land.
+- Mac freeze (r66, r67): the 450-500 ms freezes every 5 s were the sync volume poll on the main thread (`perf-run-2026-11.md` R66). The fix landed on `ov-1028` (r67 merge 6847736); Mac check pending, needs a Mac night go. Related r61: optional chunk budget ceiling `FOURFOUR_CHUNK_BUDGET_MB`, default off, the Mac sweep script `scripts/mac/chunk-budget-sweep.sh` picks the value. R57: long mixes use 600 MB to 1.2 GB less memory.
+- 19 waveform cache cap: done (r60, limit clamp(5% free, 512 MiB, 2 GiB)); 21 rten bump (rec drop); 29 UI headroom and QoS (rec keep); 31 schema bump for 50k (after the holiday); 27 ORT and CoreML (CoreML shipped through r26 and r30).
 - 1, 2, 3 USB sync round 3 UI; 5 old stash; 6 `.claude/settings.local.json` push rule; 7 push master (30+ commits ahead). Not beta blockers: 5, 6, and 31 until libraries reach 50k.
 
-Next step: Merlin takes the recs after the holiday in this order: 33, 37, 24, 15, then 34, 35, 36 with one Mac check, then the 16 listen.
+Next step: Merlin takes the recs after the holiday in this order: `parked-all-v3` (33, 37, 38, then 34, 35, 36 with one Mac check), 40, 24, 15, 39, then the 16 listen.
 
 ## 15. CI - needs Merlin
 
 - Nothing runs today: `ov-1028` has no `.github/` directory.
-- `r35-ci` (24add8b, Waiting 15, supersedes `ov-ci`) has `.github/workflows/ci.yml` with: linux (tests, Chromium smoke, deb checks, `--self-check` from the extracted deb), webkit-smoke (allowed to fail), macos-14 arm64 (`build-dmg.sh` and `check-dmg.sh`, unsigned, CoreML), windows-2022 (nsis, OpenSSL for sqlcipher). actionlint clean, Linux steps pass locally, never run on GitHub. Doc: `docs/process/ci.md` on that branch.
-- Known gaps listed there: Windows `libcrypto-3` DLL not bundled, ORT download on the runner, `hdiutil` on a hosted runner, durations unmeasured. Windows is out of scope for a macOS beta; the macOS job is the one that matters.
+- `r63-ci` (fbb1ba6, Waiting 15, supersedes `r35-ci` 24add8b) has `.github/workflows/ci.yml` with: linux (tests, Chromium smoke, deb checks, `--self-check` from the extracted deb, dev-bins check, notices drift job, smoke factor 2), webkit-smoke (allowed to fail), macos-14 arm64 (`build-dmg.sh` and `check-dmg.sh`, unsigned, CoreML), windows-2022 (nsis, OpenSSL for sqlcipher). actionlint clean, Linux steps pass locally, never run on GitHub. Doc: `docs/process/ci.md` on that branch.
+- Known gaps listed there: Windows `libcrypto-3` DLL not bundled (r65, `docs/release/windows-crypto-2026-11.md` on `ov-1028`: no crate pulls OpenSSL; `libsqlite3-sys` links the system libcrypto on Windows and Linux and CommonCrypto on macOS; proposal for the brother: feature `bundled-sqlcipher-vendored-openssl` under `cfg(windows)` only in `pioneer-usb-writer/Cargo.toml`, when a Windows release is planned), ORT download on the runner, `hdiutil` on a hosted runner, durations unmeasured. Windows is out of scope for a macOS beta; the macOS job is the one that matters.
 - No release workflow: no tag build, no notarization job, no checksum publication, no draft GitHub Release.
 
 Next steps:
-1. Merlin: OK to push `r35-ci` for a first run (shared repo `morizkraemer/fourfour`; STATE Q8 says the first run needs Merlin's OK). Agents never push.
+1. Merlin: OK to push `r63-ci` for a first run (shared repo `morizkraemer/fourfour`; STATE Q8 says the first run needs Merlin's OK). Agents never push.
 2. After the first green macOS run: a manual-trigger release workflow (build, sign, notarize, staple, SHA256, upload artifact; secrets from 3), no auto-publish.
 
-## 16. User docs - needs work
+## 16. User docs - draft done (needs Merlin)
 
 - `README.md` is a developer README ("Agent entry", `cargo build`, "Status: ... under active development"). No user description, download link, requirements or screenshots.
 - Exists: `docs/process/beta-install-macos.md` (Gatekeeper note and `--self-check`, with maintainer build steps mixed into the user page) and `docs/ui/keyboard-shortcuts.md` (reusable as a help page).
 - Missing: user README; install page without the maintainer section; requirements (Apple Silicon, macOS 13.4+); quick start (scan a folder, analyze, build a playlist, put it on a stick); what the export writes to the stick and what it never deletes; FAQ (supported CDJ models, "my USB is not recognised", key accuracy, analysis speed, backups, how to remove all data: `~/Library/Application Support/<id>`, `~/Library/Caches/fourfour-coreml`, `~/Library/WebKit/<id>`); known issues list (from 12 and 14); link to licences.
 
-Next step (agent): draft `docs/release/README-users.md` and `docs/release/FAQ.md` from the sources above; Merlin edits tone and the name after item 1. No marketing copy.
+Draft built on `r53-user-docs-v2` (56f7625, Waiting 39): `docs/user/` with README, install, quick start, USB, FAQ and known issues; plain words, no app name, 20 "(to confirm)" marks for Mac-only facts (data and log folders, removable-volume prompt, CDJ models, speed on Apple Silicon); UI paths in the quick start come from code, not from running the app. Not landed. The list above is the original gap list; no screenshots were made.
+
+Next step: Merlin reads it on the phone, then confirms the marks on a Mac night; the name is swapped after item 1.
 
 ## 17. Support channel and release hosting - needs Merlin
 
@@ -248,9 +255,10 @@ Next step: Merlin decides channel, hosting and repo visibility; the agent then a
 
 ## Suggested order
 
-1. Merlin, one sitting: 1 (name and id), 3 (sign or not), 7 (key), 10 (no updater), 17 (channel and repo visibility), 15 (push `r35-ci`).
-2. Agent work needing no decision: 6 (notice tooling, credits, Python fallback), 9 (logs), 16 (docs), 5 (requirements line), 13 (expectation page), 11 (migration test).
-3. Land `parked-all-v2` after one Mac WebKit check (14).
-4. After 1: migration (2), then signing path (3, 4) on a Mac night; first notarized dmg; install test on a clean user.
-5. Brother: CDJ-3000 checklist, manifest-aware wipe, duplicate path (12).
-6. Release candidate: tag, signed dmg, SHA256, release notes with known issues, support channel live.
+1. Merlin, one sitting: 1 (name and id), 3 (sign or not), 7 (key), 10 (no updater), 17 (channel and repo visibility), 15 (push `r63-ci`).
+2. Merlin, land after one Mac WebKit check: `parked-all-v3` (14; includes the no-Python removal, 6), `r69-stick-busy` (Waiting 40), `r53-user-docs-v2` (16, 13, 5).
+3. Next Mac night (needs a go): r67 freeze check, chunk-budget sweep, `perf-night.sh`, confirm the "(to confirm)" marks from the docs draft.
+4. Agent work needing no decision: 6 (bundle the notices, About rows, `deny.toml`; LICENSE once chosen), 9 ("Copy diagnostics" and "Reveal logs"), 11 (FAQ entry).
+5. After 1: migration (2), then signing path (3, 4) on a Mac night; first notarized dmg; install test on a clean user.
+6. Brother: CDJ-3000 checklist, manifest-aware wipe, duplicate path (12); Windows libcrypto proposal when a Windows release is planned (15).
+7. Release candidate: tag, signed dmg, SHA256, release notes with known issues, support channel live.
