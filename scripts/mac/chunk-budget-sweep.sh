@@ -64,11 +64,10 @@ TSV="$OUT/sweep.tsv"
 printf 'budget_mb\ttracks\terrors\twall_s\ttracks_per_min\tpeak_rss_mb\ttree_rss_mb\tcpu_s\texit\n' > "$TSV"
 
 for budget in $BUDGETS; do
-  ENVV=(env FOURFOUR_MODELS_DIR="$MODELS")
   if [ "$budget" = unset ]; then
-    ENVV+=(-u FOURFOUR_CHUNK_BUDGET_MB)
+    ENVV=(env -u FOURFOUR_CHUNK_BUDGET_MB FOURFOUR_MODELS_DIR="$MODELS")
   else
-    ENVV+=(FOURFOUR_CHUNK_BUDGET_MB="$budget")
+    ENVV=(env FOURFOUR_MODELS_DIR="$MODELS" FOURFOUR_CHUNK_BUDGET_MB="$budget")
   fi
   say "budget $budget: $COUNT tracks"
   if [ "$DRY" = 1 ]; then
