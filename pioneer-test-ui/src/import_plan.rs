@@ -7,6 +7,8 @@ use pioneer_usb_writer::models::Track;
 use pioneer_usb_writer::scanner::{read_track_metadata, AUDIO_EXTENSIONS};
 use serde::Serialize;
 
+use crate::command_error::CommandError;
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct DuplicateRow {
     pub new_path: String,
@@ -416,17 +418,17 @@ pub fn store_pending_covers(
 }
 
 /// Stores the queued covers of the tracks the targets may write; the others stay queued.
-pub fn store_covers_for_sync(lib: &Mutex<LocalLibrary>, targets: &[SyncTarget]) -> Result<usize, String> {
-    let wanted = lib.lock().map_err(|e| e.to_string())?.sync_track_ids(targets).map_err(|e| format!("{e:#}"))?;
-    store_pending_covers(lib, Some(&wanted), &mut |_| {})
+pub fn store_covers_for_sync(lib: &Mutex<LocalLibrary>, targets: &[SyncTarget]) -> Result<usize, CommandError> {
+    let wanted = lib.lock().map_err(|e| e.to_string())?.sync_track_ids(targets).map_err(CommandError::from_anyhow_chain)?;
+    Ok(store_pending_covers(lib, Some(&wanted), &mut |_| {})?)
 }
 
 /// `prepare_multi_sync` after the covers of the tracks the targets will write are stored:
 /// imported covers are filled in the background, and a stick written before that would get
 /// no artwork. Tracks the targets do not write stay queued.
-pub fn prepare_sync_with_covers(lib: &Mutex<LocalLibrary>, targets: &[SyncTarget]) -> Result<PreparedMultiSync, String> {
+pub fn prepare_sync_with_covers(lib: &Mutex<LocalLibrary>, targets: &[SyncTarget]) -> Result<PreparedMultiSync, CommandError> {
     store_covers_for_sync(lib, targets)?;
-    lib.lock().map_err(|e| e.to_string())?.prepare_multi_sync(targets).map_err(|e| format!("{e:#}"))
+    Ok(lib.lock().map_err(|e| e.to_string())?.prepare_multi_sync(targets).map_err(|e| CommandError::from_anyhow_chain(e).for_stick())?)
 }
 
 #[derive(Debug)]
@@ -548,12 +550,14 @@ pub fn plan_for_library(
     lib: &LocalLibrary,
     scanned: Scanned,
     survey: &FileSurvey,
-) -> Result<ImportPlan, String> {
+) -> Result<ImportPlan, CommandError> {
     if scanned.tracks.is_empty() {
-        return plans.store(|token| plan_import(token, &DuplicateIndex::default(), &|_| None, scanned, survey));
+        return Ok(plans.store(|token| plan_import(token, &DuplicateIndex::default(), &|_| None, scanned, survey))?);
     }
     let existing = |id: u32| lib.duplicate_candidate(id).ok().flatten();
-    lib.with_duplicate_index(|index| plans.store(|token| plan_import(token, index, &existing, scanned, survey))).map_err(|e| e.to_string())?
+    Ok(lib
+        .with_duplicate_index(|index| plans.store(|token| plan_import(token, index, &existing, scanned, survey)))
+        .map_err(CommandError::from_anyhow)??)
 
 }
 

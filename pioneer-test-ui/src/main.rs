@@ -8,6 +8,7 @@ mod analysis_python;
 mod analysis_run;
 mod backup_commands;
 mod band_analysis;
+mod command_error;
 mod dto;
 mod file_health;
 mod import_plan;
@@ -40,6 +41,7 @@ use pioneer_library::{BeatPosition, LocalLibrary};
 use pioneer_usb_writer::models;
 
 use analysis_backend::{AnalysisBackend, BackendEnv};
+use command_error::{CommandError, ErrorKind};
 use analysis_python::resolve_python;
 use analysis_run::{
     merge_into_analysis_queue, rerun_work, resolve_analysis_work, AnalysisCoordinator, AnalysisSink, AnalysisWorkItem, LogLevel,
@@ -78,10 +80,10 @@ fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
 
 /// Adds the tracks not yet in the library; their covers follow from `spawn_cover_fill`, so the
 /// rows come back without artwork and `import-covers` names the ones that got a cover.
-fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result<Vec<TrackInfo>, String> {
-    let mut seen = lib.track_paths().map_err(|e| e.to_string())?;
+fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result<Vec<TrackInfo>, CommandError> {
+    let mut seen = lib.track_paths().map_err(CommandError::from_anyhow)?;
     let fresh: Vec<models::Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
-    let ids = lib.add_tracks_covers_later(&fresh).map_err(|e| e.to_string())?;
+    let ids = lib.add_tracks_covers_later(&fresh).map_err(CommandError::from_anyhow)?;
     Ok(fresh
         .iter()
         .zip(ids)
@@ -179,11 +181,11 @@ async fn plan_import(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
     plans: State<'_, Arc<ImportPlans>>,
-) -> Result<ImportPlan, String> {
+) -> Result<ImportPlan, CommandError> {
     let shared = state.inner().clone();
     let plans = plans.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let known = shared.lock().map_err(|e| e.to_string())?.track_paths().map_err(|e| e.to_string())?;
+        let known = shared.lock().map_err(|e| e.to_string())?.track_paths().map_err(CommandError::from_anyhow)?;
         let survey = import_plan::survey_files(&paths);
         let total = survey.audio_count();
         let mut done = 0;
@@ -218,7 +220,7 @@ async fn commit_import(
     state: State<'_, SharedLibrary>,
     plans: State<'_, Arc<ImportPlans>>,
     covers: State<'_, CoverFill>,
-) -> Result<ImportCommit, String> {
+) -> Result<ImportCommit, CommandError> {
     let (tracks, skipped_ids) = plans.take(token)?.resolve(skip_duplicates);
     let shared = state.inner().clone();
     let covers = covers.inner().clone();
@@ -239,7 +241,7 @@ async fn prioritize_analysis(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
     coordinator: State<'_, AnalysisCoordinator>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let shared: SharedLibrary = state.inner().clone();
     let item = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
@@ -250,7 +252,9 @@ async fn prioritize_analysis(
     };
     let sink = Arc::new(TauriAnalysisSink(app.clone()));
     let env = analysis_backend_env(&app);
-    analysis_run::prioritize_track(shared, coordinator.inner().clone(), item, sink, env).await
+    analysis_run::prioritize_track(shared, coordinator.inner().clone(), item, sink, env)
+        .await
+        .map_err(analysis_start_error)
 }
 
 /// Append or prepend tracks to the active analysis run (no-op when idle).
@@ -303,6 +307,15 @@ fn analysis_backend_env(app: &AppHandle) -> BackendEnv {
     BackendEnv::from_process(config_path(app).ok(), app.path().app_data_dir().ok(), app.path().resource_dir().ok())
 }
 
+fn all_tracks_failed<T: std::fmt::Display>(total: T) -> CommandError {
+    CommandError::new(ErrorKind::AnalysisFailed, format!("Analysis failed for all {total} tracks — see debug log"))
+}
+
+fn analysis_start_error(message: String) -> CommandError {
+    let kind = if message == analysis_backend::NO_BACKEND_ERROR { ErrorKind::ModelsMissing } else { ErrorKind::Other };
+    CommandError::new(kind, message)
+}
+
 /// Run analysis for the given tracks with the configured backend (rust when model
 /// weights are present, python otherwise). Used by bulk and per-selection commands.
 async fn run_track_analysis(
@@ -310,17 +323,19 @@ async fn run_track_analysis(
     shared: SharedLibrary,
     coordinator: AnalysisCoordinator,
     pending: Vec<AnalysisWorkItem>,
-) -> Result<Vec<TrackInfo>, String> {
+) -> Result<Vec<TrackInfo>, CommandError> {
     let sink = Arc::new(TauriAnalysisSink(app.clone()));
     let env = analysis_backend_env(&app);
-    let outcome = analysis_run::run_track_analysis(shared.clone(), coordinator, pending, sink, env).await?;
+    let outcome = analysis_run::run_track_analysis(shared.clone(), coordinator, pending, sink, env)
+        .await
+        .map_err(analysis_start_error)?;
     if let RunOutcome::Finished { errors, total } = outcome {
         if errors > 0 && errors == total {
-            return Err(format!("Analysis failed for all {total} tracks — see debug log"));
+            return Err(all_tracks_failed(total));
         }
     }
     let lib = shared.lock().map_err(|e| e.to_string())?;
-    build_track_infos(&lib)
+    Ok(build_track_infos(&lib)?)
 }
 
 /// Stop the active analysis run: drop queued tracks, abort in-flight rust analyses.
@@ -361,11 +376,11 @@ async fn analyze_tracks(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
     coordinator: State<'_, AnalysisCoordinator>,
-) -> Result<Vec<TrackInfo>, String> {
+) -> Result<Vec<TrackInfo>, CommandError> {
     let shared: SharedLibrary = state.inner().clone();
     let pending: Vec<AnalysisWorkItem> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(|e| e.to_string())?;
+        let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(CommandError::from_anyhow)?;
         resolve_analysis_work(&lib, &unanalyzed_ids)?
     };
     run_track_analysis(app, shared, coordinator.inner().clone(), pending).await
@@ -425,7 +440,7 @@ async fn analyze_track_ids(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
     coordinator: State<'_, AnalysisCoordinator>,
-) -> Result<Vec<TrackInfo>, String> {
+) -> Result<Vec<TrackInfo>, CommandError> {
     let shared: SharedLibrary = state.inner().clone();
     let pending: Vec<AnalysisWorkItem> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
@@ -445,7 +460,7 @@ fn write_usb(
     playlists: Vec<PlaylistInput>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
-) -> Result<models::SyncReport, String> {
+) -> Result<models::SyncReport, CommandError> {
     debug_info(&app, &format!("USB sync → {output_dir}"));
 
     let out = Path::new(&output_dir);
@@ -456,7 +471,7 @@ fn write_usb(
     import_plan::store_covers_for_sync(&state, &[whole_library])?;
 
     let lib = state.lock().map_err(|e| e.to_string())?;
-    let report = lib.sync_usb(out).map_err(|e| e.to_string())?;
+    let report = lib.sync_usb(out).map_err(|e| CommandError::from_anyhow(e).for_stick())?;
 
     debug_ok(&app, &format!(
         "Sync done: +{} ~{} ↑{} −{} ({} unchanged)",
@@ -478,7 +493,7 @@ impl pioneer_library::ProgressSink for TauriSyncSink {
     }
 
     fn finished(&self, report: &pioneer_library::StickReport) {
-        self.0.emit("usb-sync-stick-report", report).ok();
+        self.0.emit("usb-sync-stick-report", stick_commands::StickReportWire::from(report.clone())).ok();
     }
 }
 
@@ -491,14 +506,14 @@ async fn sync_usb_many(
     targets: Vec<pioneer_library::SyncTarget>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
-) -> Result<Vec<pioneer_library::StickReport>, String> {
+) -> Result<Vec<stick_commands::StickReportWire>, CommandError> {
     let shared: SharedLibrary = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         for target in &targets {
             volumes::require_removable_volume(&target.volume)?;
         }
         let prepared = import_plan::prepare_sync_with_covers(&shared, &targets)?;
-        Ok(prepared.run(&TauriSyncSink(app)))
+        Ok(prepared.run(&TauriSyncSink(app)).into_iter().map(stick_commands::StickReportWire::from).collect())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -508,7 +523,7 @@ async fn sync_usb_many(
 fn sync_playlists_to_library(
     lib: &LocalLibrary,
     playlists: &[PlaylistInput],
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let playlists: Vec<models::Playlist> = playlists
         .iter()
         .map(|pl| models::Playlist {
@@ -519,15 +534,15 @@ fn sync_playlists_to_library(
             is_folder: pl.is_folder,
         })
         .collect();
-    lib.replace_playlists(&playlists).map_err(|e| e.to_string())
+    lib.replace_playlists(&playlists).map_err(CommandError::from_anyhow)
 }
 
 /// Remove tracks by ID from the library.
 #[tauri::command]
-fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<(), String> {
+fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<(), CommandError> {
     let lib = state.lock().map_err(|e| e.to_string())?;
     let ids_i64: Vec<i64> = ids.into_iter().map(|id| id as i64).collect();
-    lib.remove_tracks(&ids_i64).map_err(|e| e.to_string())
+    lib.remove_tracks(&ids_i64).map_err(CommandError::from_anyhow)
 }
 
 /// Set 2 test hot cues (A at 1:00, B at 1:30) on the selected tracks.
@@ -563,20 +578,20 @@ fn get_mounted_volumes() -> Result<Vec<String>, String> {
     volumes::list_removable_volumes()
 }
 
-fn validated_reveal_path(path: &str) -> Result<std::path::PathBuf, String> {
+fn validated_reveal_path(path: &str) -> Result<std::path::PathBuf, CommandError> {
     let p = std::path::PathBuf::from(path);
     if path.trim().is_empty() {
-        return Err("No file path to reveal".to_string());
+        return Err(CommandError::other("No file path to reveal"));
     }
     if !p.exists() {
-        return Err(format!("File not found: {path}"));
+        return Err(CommandError::new(ErrorKind::NotFound, format!("File not found: {path}")).with_path(&p));
     }
     Ok(p)
 }
 
 /// Reveal a file in the OS file manager (selects it where supported).
 #[tauri::command]
-fn reveal_in_finder(path: String) -> Result<(), String> {
+fn reveal_in_finder(path: String) -> Result<(), CommandError> {
     let p = validated_reveal_path(&path)?;
 
     #[cfg(target_os = "macos")]
@@ -602,22 +617,29 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
 
     command
         .spawn()
-        .map_err(|e| format!("Could not open file manager: {e}"))?;
+        .map_err(|e| CommandError::from_io(&e, format!("Could not open file manager: {e}")))?;
     Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn eject_failure(stderr: &str) -> CommandError {
+    let lowered = stderr.to_lowercase();
+    let busy = ["busy", "in use", "dissented"].iter().any(|word| lowered.contains(word));
+    CommandError::new(if busy { ErrorKind::StickBusy } else { ErrorKind::Other }, format!("Eject failed: {stderr}"))
 }
 
 /// Eject a mounted volume (macOS: `diskutil eject`, Linux: `udisksctl unmount`, falling back to `umount`).
 #[tauri::command]
-fn eject_volume(path: String) -> Result<(), String> {
+fn eject_volume(path: String) -> Result<(), CommandError> {
     #[cfg(target_os = "macos")]
     {
         let output = std::process::Command::new("diskutil")
             .args(["eject", &path])
             .output()
-            .map_err(|e| format!("Failed to run diskutil: {e}"))?;
+            .map_err(|e| CommandError::from_io(&e, format!("Failed to run diskutil: {e}")))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Eject failed: {stderr}"));
+            return Err(eject_failure(&stderr));
         }
     }
 
@@ -646,12 +668,12 @@ fn eject_volume(path: String) -> Result<(), String> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::process::Command::new("umount")
                 .arg(&path)
                 .output()
-                .map_err(|e| format!("Failed to run umount: {e}"))?,
-            Err(e) => return Err(format!("Failed to run eject command: {e}")),
+                .map_err(|e| CommandError::from_io(&e, format!("Failed to run umount: {e}")))?,
+            Err(e) => return Err(CommandError::from_io(&e, format!("Failed to run eject command: {e}"))),
         };
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Eject failed: {stderr}"));
+            return Err(eject_failure(&stderr));
         }
     }
 
@@ -661,10 +683,10 @@ fn eject_volume(path: String) -> Result<(), String> {
 
 /// Wipe all Pioneer data from a USB drive (removes PIONEER/ and Contents/ directories).
 #[tauri::command]
-fn wipe_usb(path: String) -> Result<(), String> {
+fn wipe_usb(path: String) -> Result<(), CommandError> {
     let usb = std::path::Path::new(&path);
     if !usb.is_dir() {
-        return Err("Not a valid directory".into());
+        return Err(CommandError::new(ErrorKind::DriveGone, "Not a valid directory").with_path(usb));
     }
     volumes::require_removable_volume(usb)?;
 
@@ -673,11 +695,11 @@ fn wipe_usb(path: String) -> Result<(), String> {
 
     if pioneer_dir.exists() {
         std::fs::remove_dir_all(&pioneer_dir)
-            .map_err(|e| format!("Failed to remove PIONEER/: {e}"))?;
+            .map_err(|e| CommandError::from_io(&e, format!("Failed to remove PIONEER/: {e}")).with_path(&pioneer_dir).for_stick())?;
     }
     if contents_dir.exists() {
         std::fs::remove_dir_all(&contents_dir)
-            .map_err(|e| format!("Failed to remove Contents/: {e}"))?;
+            .map_err(|e| CommandError::from_io(&e, format!("Failed to remove Contents/: {e}")).with_path(&contents_dir).for_stick())?;
     }
 
     Ok(())
@@ -1172,9 +1194,9 @@ struct UsbStateResponse {
 /// Read the existing Pioneer USB library state from the OneLibrary database.
 /// Returns `None` if no `exportLibrary.db` is found at the expected path.
 #[tauri::command]
-fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, String> {
+fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, CommandError> {
     let state = pioneer_usb_writer::reader::read_usb_state(Path::new(&path))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CommandError::from_anyhow(e).with_path(&path).for_stick())?;
 
     let Some(existing) = state else {
         return Ok(None);
@@ -1219,7 +1241,7 @@ fn save_state(
     playlists: Vec<PlaylistInput>,
     _app: AppHandle,
     state: State<'_, SharedLibrary>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let lib = state.lock().map_err(|e| e.to_string())?;
     sync_playlists_to_library(&lib, &playlists)
 }
@@ -1243,12 +1265,12 @@ async fn refresh_track_labels(state: State<'_, SharedLibrary>) -> Result<Vec<dto
 
 /// Load the library state. Returns all tracks and playlists.
 #[tauri::command]
-async fn load_state(app: AppHandle) -> Result<LoadedState, String> {
+async fn load_state(app: AppHandle) -> Result<LoadedState, CommandError> {
     let Some(state) = app.try_state::<SharedLibrary>() else {
         return Err(app
             .try_state::<LibraryOpenFailure>()
             .map(|failure| failure.0.clone())
-            .unwrap_or_else(|| "The library is not open".to_string()));
+            .unwrap_or_else(|| CommandError::other("The library is not open")));
     };
     let shared = state.inner().clone();
     perf_probe::mark("load_state_start", serde_json::json!({}));
@@ -1320,10 +1342,10 @@ fn change_library_path(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
     covers: State<'_, CoverFill>,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     let db_path = PathBuf::from(&folder_path).join("library.db");
 
-    let new_library = LocalLibrary::open(&db_path).map_err(|e| e.to_string())?;
+    let new_library = LocalLibrary::open(&db_path).map_err(|e| CommandError::from_anyhow(e).with_path(&db_path))?;
 
     // Swap the active library
     *state.lock().map_err(|e| e.to_string())? = new_library;
@@ -1342,7 +1364,7 @@ fn change_library_path(
 fn reset_library(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
-) -> Result<String, String> {
+) -> Result<String, CommandError> {
     let db_path = read_library_path(&app)?;
 
     // Release file handles before deleting SQLite files.
@@ -1353,7 +1375,7 @@ fn reset_library(
 
     remove_library_files(&db_path)?;
 
-    let fresh = LocalLibrary::open(&db_path).map_err(|e| e.to_string())?;
+    let fresh = LocalLibrary::open(&db_path).map_err(|e| CommandError::from_anyhow(e).with_path(&db_path))?;
     {
         let mut lib = state.lock().map_err(|e| e.to_string())?;
         *lib = fresh;
@@ -1363,13 +1385,13 @@ fn reset_library(
 }
 
 /// Remove SQLite library files and the sibling `anlz/` analysis cache directory.
-fn remove_library_files(db_path: &Path) -> Result<(), String> {
+fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
     let base = db_path.to_string_lossy();
     for suffix in ["", "-wal", "-shm"] {
         let path = PathBuf::from(format!("{base}{suffix}"));
         if path.exists() {
             std::fs::remove_file(&path)
-                .map_err(|e| format!("Failed to remove {}: {e}", path.display()))?;
+                .map_err(|e| CommandError::from_io(&e, format!("Failed to remove {}: {e}", path.display())).with_path(&path))?;
         }
     }
 
@@ -1377,7 +1399,7 @@ fn remove_library_files(db_path: &Path) -> Result<(), String> {
         let anlz = parent.join("anlz");
         if anlz.exists() {
             std::fs::remove_dir_all(&anlz)
-                .map_err(|e| format!("Failed to remove {}: {e}", anlz.display()))?;
+                .map_err(|e| CommandError::from_io(&e, format!("Failed to remove {}: {e}", anlz.display())).with_path(&anlz))?;
         }
     }
 
@@ -1388,12 +1410,14 @@ fn remove_library_files(db_path: &Path) -> Result<(), String> {
 // Entry point
 // ---------------------------------------------------------------------------
 
-struct LibraryOpenFailure(String);
+struct LibraryOpenFailure(CommandError);
 
-fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, LocalLibrary), String> {
-    let db_path = db_path.map_err(|e| format!("Couldn't find where the library is stored: {e}"))?;
-    let library = LocalLibrary::open(&db_path)
-        .map_err(|e| format!("Couldn't open the library at {}: {e:#}", db_path.display()))?;
+fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, LocalLibrary), CommandError> {
+    let db_path = db_path.map_err(|e| CommandError::other(format!("Couldn't find where the library is stored: {e}")))?;
+    let library = LocalLibrary::open(&db_path).map_err(|e| {
+        let message = format!("Couldn't open the library at {}: {e:#}", db_path.display());
+        CommandError::from_anyhow_chain(e).with_message(message).with_path(&db_path)
+    })?;
     Ok((db_path, library))
 }
 
@@ -1550,7 +1574,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{artwork_thumbnail, validated_reveal_path};
+    use super::{analysis_start_error, artwork_thumbnail, eject_failure, validated_reveal_path};
+    use crate::analysis_backend;
+    use crate::command_error::ErrorKind;
     use crate::analysis_python::{parse_analyzer_stdout, python_result_to_analysis};
 
     fn png_bytes(width: u32, height: u32) -> Vec<u8> {
@@ -1587,8 +1613,11 @@ mod tests {
         let damaged = b"SQLite format 3\0 but the rest is junk".repeat(200);
         std::fs::write(&db, &damaged).unwrap();
         let outcome = std::panic::catch_unwind(|| super::open_startup_library(Ok(db.clone())).map(|_| ()));
-        let message = outcome.expect("startup must not panic").unwrap_err();
-        assert!(message.contains("library.db"), "{message}");
+        let error = outcome.expect("startup must not panic").unwrap_err();
+        assert!(error.message.starts_with("Couldn't open the library at "), "{error}");
+        assert!(error.message.contains("library.db"), "{error}");
+        assert_eq!(error.kind, ErrorKind::LibraryDamaged);
+        assert_eq!(error.path.as_deref(), db.to_str());
         assert_eq!(std::fs::read(&db).unwrap(), damaged);
         let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(names, vec![std::ffi::OsString::from("library.db")], "no side files created or removed");
@@ -1596,8 +1625,9 @@ mod tests {
 
     #[test]
     fn startup_without_a_library_path_is_an_error() {
-        let message = super::open_startup_library(Err("no app data dir".into())).map(|_| ()).unwrap_err();
-        assert!(message.contains("no app data dir"), "{message}");
+        let error = super::open_startup_library(Err("no app data dir".into())).map(|_| ()).unwrap_err();
+        assert!(error.message.contains("no app data dir"), "{error}");
+        assert_eq!(error.kind, ErrorKind::Other);
     }
 
     #[test]
@@ -1612,7 +1642,34 @@ mod tests {
     fn reveal_path_rejects_empty_and_missing_paths() {
         assert!(validated_reveal_path("  ").is_err());
         let err = validated_reveal_path("/definitely/not/here.mp3").unwrap_err();
-        assert!(err.contains("File not found"));
+        assert!(err.message.contains("File not found"));
+        assert_eq!(err.kind, ErrorKind::NotFound);
+        assert_eq!(err.path.as_deref(), Some("/definitely/not/here.mp3"));
+    }
+
+    #[test]
+    fn a_missing_analysis_backend_is_models_missing_and_other_start_errors_are_other() {
+        let missing = analysis_start_error(analysis_backend::NO_BACKEND_ERROR.to_string());
+        assert_eq!(missing.kind, ErrorKind::ModelsMissing);
+        assert_eq!(missing.message, analysis_backend::NO_BACKEND_ERROR);
+        assert_eq!(analysis_start_error("something else".to_string()).kind, ErrorKind::Other);
+    }
+
+    #[test]
+    fn a_run_where_every_track_failed_is_analysis_failed_with_the_old_text() {
+        let error = super::all_tracks_failed(4);
+        assert_eq!(error.kind, ErrorKind::AnalysisFailed);
+        assert_eq!(error.message, "Analysis failed for all 4 tracks — see debug log");
+    }
+
+    #[test]
+    fn eject_output_that_says_busy_is_stick_busy() {
+        for stderr in ["Error unmounting: target is busy", "umount: /media/x: device is in use", "Volume failed to eject: dissented by PID 12"] {
+            assert_eq!(eject_failure(stderr).kind, ErrorKind::StickBusy, "{stderr}");
+        }
+        let other = eject_failure("Volume does not exist");
+        assert_eq!(other.kind, ErrorKind::Other);
+        assert_eq!(other.message, "Eject failed: Volume does not exist");
     }
 
     #[test]

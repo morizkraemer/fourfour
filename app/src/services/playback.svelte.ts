@@ -2,7 +2,7 @@
  * playback.svelte.ts — Tauri playback transport (CoreAudio / cpal backend).
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
 import { getIsTauri } from './tauri.svelte.ts';
 import {
@@ -30,6 +30,7 @@ export interface PlaybackTick {
 }
 
 export interface PlaybackErrorEvent {
+  kind?: ErrorKind;
   message: string;
   path?: string | null;
 }

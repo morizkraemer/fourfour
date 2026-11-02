@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::command_error::CommandError;
+
 pub fn list_removable_volumes() -> Result<Vec<String>, String> {
     let mut volumes: Vec<String> = candidate_volumes()?
         .into_iter()
@@ -10,10 +12,10 @@ pub fn list_removable_volumes() -> Result<Vec<String>, String> {
     Ok(volumes)
 }
 
-pub fn require_removable_volume(path: &Path) -> Result<(), String> {
+pub fn require_removable_volume(path: &Path) -> Result<(), CommandError> {
     let canonical = path
         .canonicalize()
-        .map_err(|e| format!("Cannot resolve {}: {e}", path.display()))?;
+        .map_err(|e| CommandError::from_io(&e, format!("Cannot resolve {}: {e}", path.display())).with_path(path).for_stick())?;
     #[cfg(test)]
     if fake_volumes::contains(&canonical) {
         return Ok(());
@@ -26,7 +28,7 @@ pub fn require_removable_volume(path: &Path) -> Result<(), String> {
     if is_listed {
         Ok(())
     } else {
-        Err(format!("{} is not a removable volume.", path.display()))
+        Err(CommandError::other(format!("{} is not a removable volume.", path.display())).with_path(path))
     }
 }
 

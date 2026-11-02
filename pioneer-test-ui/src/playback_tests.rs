@@ -252,6 +252,7 @@ impl Rig {
     fn play(&self, path: &Path, position_ms: u64, duration_ms: Option<u64>) -> Result<(), String> {
         self.engine
             .play(self.events(), path.to_str().unwrap(), position_ms, duration_ms)
+            .map_err(|e| e.message)
     }
 
     fn seek(&self, position_ms: u64) {
@@ -361,7 +362,7 @@ fn sink_error_mid_stream_is_returned() {
             }
         },
     );
-    assert_eq!(result, Err("device gone".to_string()));
+    assert_eq!(result.map_err(|e| e.message), Err("device gone".to_string()));
 }
 
 #[test]
@@ -759,6 +760,7 @@ fn device_error_is_reported_and_next_play_reopens_the_output() {
     let errors = rig.events.errors.lock().unwrap().clone();
     assert_eq!(errors.len(), 1);
     assert!(errors[0].message.contains("device unplugged"));
+    assert_eq!(errors[0].kind, ErrorKind::AudioOutputUnavailable);
     assert!(wait_until(Duration::from_secs(1), || rig.events.last_playing() == Some(false)));
 
     rig.play(&path, 0, Some(5_000)).unwrap();
@@ -779,8 +781,9 @@ fn failed_output_open_returns_an_error_and_recovers() {
     let err = engine
         .play(events.clone(), path.to_str().unwrap(), 0, Some(1_000))
         .unwrap_err();
-    assert!(err.contains("fake device unavailable"), "{err}");
-    assert!(engine.configure(44_100, 128).is_err());
+    assert!(err.message.contains("fake device unavailable"), "{err}");
+    assert_eq!(err.kind, ErrorKind::AudioOutputUnavailable);
+    assert_eq!(engine.configure(44_100, 128).unwrap_err().kind, ErrorKind::AudioOutputUnavailable);
 
     backend.fail_open.store(false, Ordering::SeqCst);
     engine
@@ -796,6 +799,63 @@ fn missing_file_is_a_command_error() {
         .play(Path::new("/nonexistent/nope.mp3"), 0, Some(1_000))
         .unwrap_err();
     assert!(err.contains("nope.mp3"), "{err}");
+}
+
+#[test]
+fn a_missing_file_is_not_found_and_names_its_path() {
+    let rig = rig();
+    let err = rig
+        .engine
+        .play(rig.events(), "/nonexistent/nope.mp3", 0, Some(1_000))
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::NotFound);
+    assert_eq!(err.message, "Open /nonexistent/nope.mp3: No such file or directory (os error 2)");
+    assert_eq!(err.path.as_deref(), Some("/nonexistent/nope.mp3"));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_is_permission_denied() {
+    use std::os::unix::fs::PermissionsExt;
+    let rig = rig();
+    let path = scratch("no_permission.wav");
+    sine_wav(&path, 48_000, 2, 1, 330.0);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&path).is_ok() {
+        return;
+    }
+    let err = rig.engine.play(rig.events(), path.to_str().unwrap(), 0, None).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::PermissionDenied);
+    assert_eq!(err.path.as_deref(), path.to_str());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+#[test]
+fn a_file_that_cannot_be_decoded_is_decode_failed_from_the_command_and_from_the_event() {
+    let rig = rig();
+    let garbage = scratch("not_audio.mp3");
+    std::fs::write(&garbage, b"this is not audio at all, just text").unwrap();
+
+    let err = rig.engine.play(rig.events(), garbage.to_str().unwrap(), 0, None).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::DecodeFailed);
+    assert_eq!(err.path.as_deref(), garbage.to_str());
+    assert!(err.message.starts_with("Unsupported or corrupt audio file "), "{err}");
+
+    rig.engine.play(rig.events(), garbage.to_str().unwrap(), 0, Some(1_000)).unwrap();
+    assert!(wait_until(Duration::from_secs(2), || {
+        rig.backend.pump(4, Duration::from_micros(200));
+        !rig.events.errors.lock().unwrap().is_empty()
+    }));
+    let event = rig.events.errors.lock().unwrap()[0].clone();
+    assert_eq!(event.kind, ErrorKind::DecodeFailed);
+    assert_eq!(event.path.as_deref(), garbage.to_str());
+    assert!(event.message.starts_with("Unsupported or corrupt audio file "), "{}", event.message);
+}
+
+#[test]
+fn the_error_event_serialises_with_its_kind() {
+    let event = PlaybackError { kind: ErrorKind::DecodeFailed, message: "x".into(), path: Some("/a.mp3".into()) };
+    assert_eq!(serde_json::to_value(event).unwrap(), serde_json::json!({ "kind": "decode_failed", "message": "x", "path": "/a.mp3" }));
 }
 
 #[test]

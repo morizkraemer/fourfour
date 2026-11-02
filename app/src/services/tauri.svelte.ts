@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { pathBaseName } from '../lib/pathName.ts';
@@ -886,6 +886,7 @@ export interface StickReport {
   status: 'done' | 'failed';
   report: SyncReport | null;
   error: string | null;
+  error_kind?: ErrorKind | null;
   skipped_unanalyzed: number;
   elapsed_ms: number;
 }

@@ -38,6 +38,8 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+
+use crate::command_error::{CommandError, ErrorKind};
 use tauri::{AppHandle, Emitter};
 
 use crate::tempo::{TempoEngine, TempoParams, CHUNK_FRAMES, MAX_DEVICE_CHANNELS};
@@ -91,6 +93,7 @@ pub struct PlaybackTick {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PlaybackError {
+    pub kind: ErrorKind,
     pub message: String,
     pub path: Option<String>,
 }
@@ -156,11 +159,11 @@ impl EventHub {
         *lock_ignoring_poison(&self.events) = Some(events);
     }
 
-    fn error(&self, message: String, path: Option<String>) {
-        eprintln!("playback error: {message}");
+    fn error(&self, error: CommandError) {
+        eprintln!("playback error: {}", error.message);
         let events = lock_ignoring_poison(&self.events).clone();
         if let Some(events) = events {
-            events.error(PlaybackError { message, path });
+            events.error(PlaybackError { kind: error.kind, message: error.message, path: error.path });
         }
     }
 }
@@ -467,7 +470,7 @@ impl PlaybackEngine {
         Ok(self.lock().device_name.clone())
     }
 
-    pub fn set_output_device(&self, name: Option<String>) -> Result<(), String> {
+    pub fn set_output_device(&self, name: Option<String>) -> Result<(), CommandError> {
         let mut inner = self.lock();
         self.stop_locked(&mut inner);
         inner.device_name = name;
@@ -478,7 +481,7 @@ impl PlaybackEngine {
         &self,
         sample_rate: u32,
         buffer_frames: u32,
-    ) -> Result<PlaybackAudioConfig, String> {
+    ) -> Result<PlaybackAudioConfig, CommandError> {
         let config = PlaybackAudioConfig {
             sample_rate: sample_rate.clamp(8_000, 192_000),
             buffer_frames: buffer_frames.clamp(32, 4096),
@@ -496,7 +499,7 @@ impl PlaybackEngine {
 
     /// Drops the old stream first (a device may not allow two streams), then opens a new one.
     /// On failure `output` stays `None` and the next play retries.
-    fn open_output(&self, inner: &mut Inner) -> Result<(), String> {
+    fn open_output(&self, inner: &mut Inner) -> Result<(), CommandError> {
         inner.stream = None;
         inner.output = None;
         let epoch = inner.output_epoch.fetch_add(1, Ordering::SeqCst) + 1;
@@ -528,15 +531,19 @@ impl PlaybackEngine {
         let device_lost = self.device_lost.clone();
         let on_error: OutputErrorFn = Box::new(move |message| {
             device_lost.store(true, Ordering::SeqCst);
-            hub.error(format!("Audio output error: {message}"), None);
+            hub.error(CommandError::new(ErrorKind::AudioOutputUnavailable, format!("Audio output error: {message}")));
         });
         let request = OutputRequest {
             device_name: inner.device_name.clone(),
             sample_rate: inner.config.sample_rate,
             buffer_frames: inner.config.buffer_frames,
         };
-        let opened = self.backend.open(&request, &mut make_render, on_error)?;
-        let pipe = built_pipe.ok_or_else(|| "Audio backend opened without a renderer".to_string())?;
+        let opened = self
+            .backend
+            .open(&request, &mut make_render, on_error)
+            .map_err(|message| CommandError::new(ErrorKind::AudioOutputUnavailable, message))?;
+        let pipe = built_pipe
+            .ok_or_else(|| CommandError::new(ErrorKind::AudioOutputUnavailable, "Audio backend opened without a renderer"))?;
         self.device_lost.store(false, Ordering::SeqCst);
         inner.pipe = pipe;
         inner.stream = Some(opened.stream);
@@ -548,7 +555,7 @@ impl PlaybackEngine {
         Ok(())
     }
 
-    fn ensure_output(&self, inner: &mut Inner) -> Result<(u32, u16, u64), String> {
+    fn ensure_output(&self, inner: &mut Inner) -> Result<(u32, u16, u64), CommandError> {
         if inner.output.is_none() || self.device_lost.load(Ordering::SeqCst) {
             self.stop_locked(inner);
             self.open_output(inner)?;
@@ -556,7 +563,7 @@ impl PlaybackEngine {
         let out = inner
             .output
             .as_ref()
-            .ok_or_else(|| "Audio output not initialized".to_string())?;
+            .ok_or_else(|| CommandError::new(ErrorKind::AudioOutputUnavailable, "Audio output not initialized"))?;
         Ok((out.sample_rate, out.channels, out.epoch))
     }
 
@@ -566,9 +573,9 @@ impl PlaybackEngine {
         path: &str,
         position_ms: u64,
         duration_ms_hint: Option<u64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), CommandError> {
         self.hub.set(events.clone());
-        std::fs::metadata(path).map_err(|e| format!("Open {path}: {e}"))?;
+        std::fs::metadata(path).map_err(|e| open_error(path, &e))?;
 
         let (_, _, epoch) = {
             let mut inner = self.lock();
@@ -583,7 +590,7 @@ impl PlaybackEngine {
         let mut inner = self.lock();
         let still_current = inner.output.as_ref().is_some_and(|o| o.epoch == epoch);
         if !still_current {
-            return Err("Audio output changed while loading; try again".to_string());
+            return Err(CommandError::other("Audio output changed while loading; try again"));
         }
         self.start_locked(&mut inner, events, path.to_string(), position_ms, duration_ms)
     }
@@ -595,7 +602,7 @@ impl PlaybackEngine {
         path: String,
         position_ms: u64,
         duration_ms: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), CommandError> {
         let (sample_rate, channels, _) = self.ensure_output(inner)?;
         inner.tick_stop.store(true, Ordering::SeqCst);
         let generation = inner.pipe.supersede();
@@ -681,7 +688,7 @@ impl PlaybackEngine {
         Ok(inner.position_ms.load(Ordering::SeqCst))
     }
 
-    pub fn resume(&self, events: Arc<dyn PlaybackEvents>) -> Result<(), String> {
+    pub fn resume(&self, events: Arc<dyn PlaybackEvents>) -> Result<(), CommandError> {
         self.hub.set(events.clone());
         let mut inner = self.lock();
         let Some(path) = inner.path.clone() else {
@@ -710,7 +717,7 @@ impl PlaybackEngine {
         &self,
         events: Arc<dyn PlaybackEvents>,
         position_ms: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), CommandError> {
         self.hub.set(events.clone());
         let mut inner = self.lock();
         let Some(path) = inner.path.clone() else {
@@ -955,10 +962,18 @@ fn resolve_output_device(name: Option<&str>) -> Result<cpal::Device, String> {
         .ok_or_else(|| "No default output audio device".to_string())
 }
 
+fn open_error(path: &str, err: &std::io::Error) -> CommandError {
+    CommandError::from_io(err, format!("Open {path}: {err}")).with_path(path)
+}
+
+fn decode_error(path: &str, message: String) -> CommandError {
+    CommandError::new(ErrorKind::DecodeFailed, message).with_path(path)
+}
+
 fn probe_format(
     path: &str,
-) -> Result<Box<dyn symphonia::core::formats::FormatReader>, String> {
-    let file = File::open(path).map_err(|e| format!("Open {path}: {e}"))?;
+) -> Result<Box<dyn symphonia::core::formats::FormatReader>, CommandError> {
+    let file = File::open(path).map_err(|e| open_error(path, &e))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();
     if let Some(ext) = std::path::Path::new(path)
@@ -974,20 +989,20 @@ fn probe_format(
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .map_err(|e| format!("Unsupported or corrupt audio file {path}: {e}"))?;
+        .map_err(|e| decode_error(path, format!("Unsupported or corrupt audio file {path}: {e}")))?;
     Ok(probed.format)
 }
 
-fn probe_duration_ms(path: &str) -> Result<u64, String> {
+fn probe_duration_ms(path: &str) -> Result<u64, CommandError> {
     catch_unwind(AssertUnwindSafe(|| probe_duration_ms_unguarded(path)))
-        .unwrap_or_else(|_| Err(format!("Decoder crashed probing {path}")))
+        .unwrap_or_else(|_| Err(decode_error(path, format!("Decoder crashed probing {path}"))))
 }
 
-fn probe_duration_ms_unguarded(path: &str) -> Result<u64, String> {
+fn probe_duration_ms_unguarded(path: &str) -> Result<u64, CommandError> {
     let format = probe_format(path)?;
     let track = format
         .default_track()
-        .ok_or_else(|| "No default audio track".to_string())?;
+        .ok_or_else(|| decode_error(path, "No default audio track".to_string()))?;
     let tb = track
         .codec_params
         .time_base
@@ -998,7 +1013,7 @@ fn probe_duration_ms_unguarded(path: &str) -> Result<u64, String> {
                 numer: 1,
                 denom: sr,
             }))
-        .ok_or_else(|| "Unknown track duration".to_string())?;
+        .ok_or_else(|| decode_error(path, "Unknown track duration".to_string()))?;
     let duration_frames = track.codec_params.n_frames.unwrap_or(0);
     if duration_frames == 0 {
         return Ok(0);
@@ -1083,11 +1098,11 @@ fn spawn_decode_thread(job: DecodeJob) {
             Ok(Ok(DecodeOutcome::Superseded)) => return,
             Ok(Ok(DecodeOutcome::Finished)) => None,
             Ok(Err(e)) => Some(e),
-            Err(_) => Some(format!("Decoder crashed on {path}")),
+            Err(_) => Some(decode_error(&path, format!("Decoder crashed on {path}"))),
         };
         if pipe.decode_generation.load(Ordering::SeqCst) == generation {
-            if let Some(message) = failure {
-                hub.error(message, Some(path));
+            if let Some(error) = failure {
+                hub.error(error);
             }
             pipe.ended_generation.store(generation, Ordering::Release);
         }
@@ -1107,7 +1122,7 @@ fn run_decode(
     out_channels: u16,
     is_current: &dyn Fn() -> bool,
     sink: &mut dyn FnMut(&[f32]) -> Result<bool, String>,
-) -> Result<DecodeOutcome, String> {
+) -> Result<DecodeOutcome, CommandError> {
     let out_ch = out_channels.max(1) as usize;
     let mut format = probe_format(path)?;
     if !is_current() {
@@ -1115,11 +1130,11 @@ fn run_decode(
     }
     let track = format
         .default_track()
-        .ok_or_else(|| "No default audio track".to_string())?;
+        .ok_or_else(|| decode_error(path, "No default audio track".to_string()))?;
     let track_id = track.id;
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| format!("Unsupported codec in {path}: {e}"))?;
+        .map_err(|e| decode_error(path, format!("Unsupported codec in {path}: {e}")))?;
     let params_rate = track.codec_params.sample_rate.unwrap_or(out_rate);
     let time_base = track.codec_params.time_base;
 
@@ -1172,7 +1187,7 @@ fn run_decode(
             Err(SymphoniaError::ResetRequired) => {
                 consecutive_resets += 1;
                 if consecutive_resets > MAX_CONSECUTIVE_RESETS {
-                    return Err(format!("Stream reset loop in {path}"));
+                    return Err(decode_error(path, format!("Stream reset loop in {path}")));
                 }
                 decoder.reset();
                 continue;
@@ -1180,7 +1195,10 @@ fn run_decode(
             Err(SymphoniaError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 break;
             }
-            Err(e) => return Err(format!("Read error in {path}: {e}")),
+            Err(SymphoniaError::IoError(e)) => {
+                return Err(CommandError::from_io(&e, format!("Read error in {path}: {e}")).with_path(path));
+            }
+            Err(e) => return Err(decode_error(path, format!("Read error in {path}: {e}"))),
         };
         if packet.track_id() != track_id {
             continue;
@@ -1191,7 +1209,7 @@ fn run_decode(
                 eprintln!("playback skipped undecodable packet ({path}): {e}");
                 continue;
             }
-            Err(e) => return Err(format!("Decode error in {path}: {e}")),
+            Err(e) => return Err(decode_error(path, format!("Decode error in {path}: {e}"))),
         };
         consecutive_resets = 0;
         let spec = *decoded.spec();
@@ -1206,7 +1224,7 @@ fn run_decode(
         }
         let buf = sample_buf
             .as_mut()
-            .ok_or_else(|| "decode buffer missing".to_string())?;
+            .ok_or_else(|| CommandError::other("decode buffer missing"))?;
         buf.copy_interleaved_ref(decoded);
         let mut frame_samples: &[f32] = buf.samples();
 
@@ -1219,7 +1237,7 @@ fn run_decode(
             }
             let rs = resampler
                 .as_mut()
-                .ok_or_else(|| "resampler missing".to_string())?;
+                .ok_or_else(|| CommandError::other("resampler missing"))?;
             resampled.clear();
             rs.process(frame_samples, &mut resampled);
             frame_samples = &resampled;
@@ -1405,7 +1423,7 @@ pub fn playback_configure(
     sample_rate: u32,
     buffer_frames: u32,
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
-) -> Result<PlaybackAudioConfig, String> {
+) -> Result<PlaybackAudioConfig, CommandError> {
     engine.configure(sample_rate, buffer_frames)
 }
 
@@ -1423,7 +1441,7 @@ pub fn playback_play(
     duration_ms: Option<u64>,
     app: AppHandle,
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     engine.play(Arc::new(app), &path, position_ms, duration_ms)
 }
 
@@ -1436,7 +1454,7 @@ pub fn playback_pause(engine: tauri::State<'_, Arc<PlaybackEngine>>) -> Result<u
 pub fn playback_resume(
     app: AppHandle,
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     engine.resume(Arc::new(app))
 }
 
@@ -1445,7 +1463,7 @@ pub fn playback_seek(
     position_ms: u64,
     app: AppHandle,
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     engine.seek(Arc::new(app), position_ms)
 }
 
@@ -1507,7 +1525,7 @@ pub fn playback_get_output_device(
 pub fn playback_set_output_device(
     name: Option<String>,
     engine: tauri::State<'_, Arc<PlaybackEngine>>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     engine.set_output_device(name)
 }
 

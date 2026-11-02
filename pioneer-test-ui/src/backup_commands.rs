@@ -8,6 +8,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::analysis_run::SharedLibrary;
+use crate::command_error::CommandError;
 use crate::file_health::{self, SharedHealth};
 
 pub const PROGRESS_EVENT: &str = "backup-progress";
@@ -130,7 +131,7 @@ pub async fn export_backup(
     ui_settings: String,
     app: AppHandle,
     library: State<'_, SharedLibrary>,
-) -> Result<LastBackup, String> {
+) -> Result<LastBackup, CommandError> {
     let library = library.inner().clone();
     let mut config = read_config(&app)?;
     let settings = vec![
@@ -139,9 +140,11 @@ pub async fn export_backup(
     ];
     let mut progress = progress_emitter(app.clone(), "export");
     let dest = PathBuf::from(&path);
-    let bytes = tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
-        let pending = lock(&library)?.begin_backup(&dest, include_audio, &settings, &mut progress).map_err(|e| format!("{e:#}"))?;
-        pending.finish(&mut progress).map_err(|e| format!("{e:#}"))?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || -> Result<u64, CommandError> {
+        let pending = lock(&library)?
+            .begin_backup(&dest, include_audio, &settings, &mut progress)
+            .map_err(CommandError::from_anyhow_chain)?;
+        pending.finish(&mut progress).map_err(CommandError::from_anyhow_chain)?;
         Ok(std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0))
     })
     .await
@@ -153,8 +156,9 @@ pub async fn export_backup(
 }
 
 #[tauri::command]
-pub fn read_backup(path: String, library: State<'_, SharedLibrary>) -> Result<BackupPreview, String> {
-    let manifest = backup::read_backup_manifest(Path::new(&path)).map_err(|e| format!("{e:#}"))?;
+pub fn read_backup(path: String, library: State<'_, SharedLibrary>) -> Result<BackupPreview, CommandError> {
+    let manifest = backup::read_backup_manifest(Path::new(&path))
+        .map_err(|e| CommandError::from_anyhow_chain(e).with_path(&path))?;
     let current_tracks = lock(&library)?.get_all_tracks().map_err(|e| e.to_string())?.len();
     Ok(BackupPreview {
         path,
@@ -184,7 +188,7 @@ pub async fn restore_backup(
     app: AppHandle,
     library: State<'_, SharedLibrary>,
     health: State<'_, SharedHealth>,
-) -> Result<RestoreOutcome, String> {
+) -> Result<RestoreOutcome, CommandError> {
     let shared = library.inner().clone();
     let db_path = crate::read_library_path(&app)?;
     let staging = db_path.parent().unwrap_or(Path::new(".")).join(format!(".restore-{}", now_ms()));
@@ -193,15 +197,17 @@ pub async fn restore_backup(
     let (outcome, settings) = {
         let shared = shared.clone();
         let safety = safety.clone();
-        tauri::async_runtime::spawn_blocking(move || -> Result<(usize, Vec<SettingsFile>), String> {
+        tauri::async_runtime::spawn_blocking(move || -> Result<(usize, Vec<SettingsFile>), CommandError> {
             let audio = audio_folder.as_deref().map(Path::new);
-            let unpacked = backup::unpack_backup(Path::new(&path), &staging, audio, &mut progress).map_err(|e| format!("{e:#}"))?;
+            let unpacked = backup::unpack_backup(Path::new(&path), &staging, audio, &mut progress)
+                .map_err(|e| CommandError::from_anyhow_chain(e).with_path(&path))?;
             let relinked = unpacked.audio_paths.len();
             let settings = unpacked.settings.clone();
             let mut lib = lock(&shared)?;
             if let Err(e) = lib.export_backup(&safety, false, &[], &mut |_, _| {}) {
                 unpacked.discard();
-                return Err(format!("Could not save the current library first, nothing was changed: {e:#}"));
+                let message = format!("Could not save the current library first, nothing was changed: {e:#}");
+                return Err(CommandError::from_anyhow_chain(e).with_message(message).with_path(&safety));
             }
             *lib = LocalLibrary::open_in_memory().map_err(|e| e.to_string())?;
             match backup::install_backup(unpacked, &db_path) {
@@ -213,7 +219,8 @@ pub async fn restore_backup(
                     if let Ok(reopened) = LocalLibrary::open(&db_path) {
                         *lib = reopened;
                     }
-                    Err(format!("Restore failed: {e:#}. Your previous library is saved at {}", safety.display()))
+                    let message = format!("Restore failed: {e:#}. Your previous library is saved at {}", safety.display());
+                    Err(CommandError::from_anyhow_chain(e).with_message(message).with_path(&safety))
                 }
             }
         })
