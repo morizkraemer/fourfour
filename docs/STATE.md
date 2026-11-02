@@ -75,7 +75,6 @@ targets: beta-ready on ov-1028, as fast as possible at 10k+ (startup, analysis, 
 done so far: plan items 0-12 and own-priority r11-r41 (detail: docs/state-archive-2026-10-28.md "Run plan as of 2026-11-02", journal, docs/architecture/perf-run-2026-11.md R-sections)
 open own-priority items:
 - r42-realsoak: [merging] real Linux app 50 min: app RSS flat, no leak; web process +5 MB/min under full loop (2 h run to settle); after launch analysis glibc keeps ~1.8 GB resident (MALLOC_ARENA_MAX=2 -> 650-800 MB; Linux only)
-- r49-linux-arena: return glibc arenas after analysis on Linux (malloc_trim / arena cap) + 2 h web-process soak [running]
 - r44-version: [landed] app version now from the app crate (shown version 0.9.14 -> 0.1.0, matching the dmg; decided: lands, it corrects a wrong number); memo keyed on ANALYSIS_VERSION (bump by hand when analysis changes)
 - r45-rowcost: [landed] no app-side lever; all per-row WebKit gains are in the fenced design system (reset fix -32% style, cell geometry as custom properties ~10% more); bench_startup build fixed
 - r46-dsrows: [parked, branch r46-dsrows 220f237 on r29-css-v2] cell widths as table-level custom properties; pixel-identical incl. resize/reorder; resize touches 0 body attributes (was 560); per-row gain within noise
@@ -83,6 +82,7 @@ open own-priority items:
 - r48-logs: landed on ov-1028 19f34dd via r48-logs-fix (first try reverted 67deaf2: smoke mock rejected log_frontend). Rotating log 3x5 MB, panic hook, frontend errors forwarded (benign ResizeObserver notice skipped), log_directory command; no UI. Checks 113 passed 0 failed, chromium + webkit
 - r51-migration-test: landed on ov-1028 ebe080e (beta-1 library fixture with ANLZ tree; first merge reverted for a test that only passed with truncated output). r52-no-python parked (Waiting 38). r53-user-docs parked (Waiting 39). r54-notices: landed (merge + f9e0a67 regen; scripts/release/third-party-notices.py, 403 crates, 37 MPL-2.0; not bundled, no About row yet)
 - r49-linux-arena: landed on ov-1028 3d80117 (glibc arena cap 4 + trim after runs; after-run RSS 2.1 GB -> 270-410 MB; web 2 h soak flat after analysis). Open: long mixes spike to 5.8 GB briefly (R42 finding 2), queued after r55
+- r56-early-panic: landed on ov-1028 92fb0a4 (log file + panic hook before Tauri setup). r55-symphonia-dedupe dropped (0.6.1 not bit-identical, riff panics; WIP branch kept). r57-longmix-mem running
 parked for Merlin (land the -v2 branches, current with ov-1028; parked-all-v2 a87f361 = all at once): r18-errors-v2 (Waiting 33), r17-a11y-v2 (34), r31-cover-cap-v2 (35), r29-css-v2 (36), r38-recovery-v2 (37); r15-reveal (not worth landing), r16-quant (dropped), r35-ci (Waiting 15)
 next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028 (now with CoreML, font preload, error kinds; probe has longest_busy/pending_frames/page origin); compare r15-reveal and r29-css-v2; 50k only with >= 40 GB free (script now cleans up and stops when low)
 review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (app on ov-1028, mock data; rebuilt after merges)
