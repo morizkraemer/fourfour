@@ -6,7 +6,7 @@ use pioneer_library::failure::{LibraryFailure, classify};
 use pioneer_library::LocalLibrary;
 use pioneer_usb_writer::models::{CuePoint, Track};
 
-const FIXTURE: &str = "tests/fixtures/library-schema-v7-beta1.db";
+const FIXTURE: &str = "tests/fixtures/library-schema-v7-beta1";
 const FIXTURE_SCHEMA_VERSION: u32 = 7;
 
 fn fixture_path() -> PathBuf {
@@ -38,10 +38,22 @@ fn track(title: &str) -> Track {
     }
 }
 
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
 fn copy_fixture() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
+    copy_tree(&fixture_path(), dir.path());
     let path = dir.path().join("library.db");
-    std::fs::copy(fixture_path(), &path).unwrap();
     (dir, path)
 }
 
@@ -80,8 +92,8 @@ fn regenerate_fixture() {
     conn.execute_batch("VACUUM").unwrap();
     drop(conn);
     assert_eq!(stored_version(&path), FIXTURE_SCHEMA_VERSION);
-    std::fs::create_dir_all(fixture_path().parent().unwrap()).unwrap();
-    std::fs::copy(&path, fixture_path()).unwrap();
+    let _ = std::fs::remove_dir_all(fixture_path());
+    copy_tree(dir.path(), &fixture_path());
 }
 
 #[test]
