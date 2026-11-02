@@ -496,3 +496,4 @@
 2026-11-02 14:20 orchestrator r57-longmix-mem handed back 723e65f (-1.2 GB at 120 min, identical results; real peak = chunk budget 14x400 MB, also on normal tracks), merging; decided: r61-chunk-ceiling (sonnet medium; ceiling knob default off + Mac sweep script; pick default on a Mac night)
 2026-11-02 14:22 orchestrator r60-detail-cache handed back 9f7036c (cap already 2 GiB; adds free-disk rule; trim 6 ms at 400 files), merge after r57 checks
 2026-11-02 14:30 orchestrator r57 merge smoke: leaks.spec.ts:49 failed once at load 49 (Rust-only change); passes 3/3 alone; r60 merged on top, full smoke + checks rerunning; followup: leaks spec flaky under load
+2026-11-02 14:49 orchestrator r57-longmix-mem + r60-detail-cache landed on ov-1028 (smoke 113 passed 0 flaky at load 49, CHECKS-OK)
