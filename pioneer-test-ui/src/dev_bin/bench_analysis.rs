@@ -27,6 +27,9 @@ mod heap;
 #[path = "../analysis_failures.rs"]
 mod analysis_failures;
 #[allow(dead_code)]
+#[path = "../app_log.rs"]
+mod app_log;
+
 #[path = "../command_error.rs"]
 mod command_error;
 

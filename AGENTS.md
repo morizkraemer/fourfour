@@ -43,6 +43,7 @@ cd pioneer-test-ui && ./dev.sh
 
 # Dev binaries (bench_startup, bench_analysis, waveform_*) are gated and not bundled
 cargo build --release --features pioneer-test-ui/dev-bins --bin bench_startup
+# Dev bins must keep compiling: cargo check -p pioneer-test-ui --features dev-bins --bins (they #[path]-include main.rs modules, so add new crate:: dependencies there too)
 
 # Frontend alone (Vite dev server on :5200)
 cd app && npm run dev          # npm run check  → svelte-check
