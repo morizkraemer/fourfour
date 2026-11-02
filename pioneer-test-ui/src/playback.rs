@@ -160,7 +160,7 @@ impl EventHub {
     }
 
     fn error(&self, error: CommandError) {
-        eprintln!("playback error: {}", error.message);
+        crate::app_log::error(&format!("playback error: {}", error.message));
         let events = lock_ignoring_poison(&self.events).clone();
         if let Some(events) = events {
             events.error(PlaybackError { kind: error.kind, message: error.message, path: error.path });
@@ -448,7 +448,7 @@ impl PlaybackEngine {
         {
             let mut inner = engine.lock();
             if let Err(e) = engine.open_output(&mut inner) {
-                eprintln!("audio output unavailable at startup, will retry on play: {e}");
+                crate::app_log::warn(&format!("audio output unavailable at startup, will retry on play: {e}"));
             }
         }
         engine
@@ -953,10 +953,9 @@ fn resolve_output_device(name: Option<&str>) -> Result<cpal::Device, String> {
                 return Ok(device);
             }
         }
-        eprintln!(
-            "Warning: Configured output device '{}' not found. Falling back to system default.",
-            name
-        );
+        crate::app_log::warn(&format!(
+            "Warning: Configured output device '{name}' not found. Falling back to system default."
+        ));
     }
     host.default_output_device()
         .ok_or_else(|| "No default output audio device".to_string())

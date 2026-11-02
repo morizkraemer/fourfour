@@ -18,7 +18,7 @@ Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHu
 | 6 | Licences and NOTICE | needs work | Add LICENSE, full third-party notice, fix About credits, drop Python fallback | agent; licence choice Merlin |
 | 7 | Key model licence and quality | needs Merlin | Accept 56% clean model for beta, or hold (Waiting 4, 30) | Merlin |
 | 8 | Privacy | ready | No network at run time in our code; state it after a Mac check | agent |
-| 9 | Crash reporting, logs | needs work | File log and "Copy diagnostics"; no upload | agent |
+| 9 | Crash reporting, logs | partly done (r48) | File log and panic hook landed; still needed: "Copy diagnostics" and "Reveal logs" UI, Merlin confirms no-upload | agent |
 | 10 | Auto-update | ready (none) | Confirm: no updater in beta 1 | Merlin |
 | 11 | Backup and restore | needs work | Land r38 recovery panel (Waiting 37); migration test | Merlin (land), agent |
 | 12 | USB export safety | needs brother | CDJ-3000 run of current export; manifest-aware wipe | brother |
@@ -140,12 +140,12 @@ Next steps (agent): state "fourfour makes no network connections; your music and
 
 ## 9. Crash reporting and logs - needs work
 
-- No log file. Debug output goes to the in-app debug panel through events (`pioneer-test-ui/src/main.rs:69`) and to `eprintln!` (`:1445,1559,1572`), which a GUI launch discards. Error text says "see debug log" (`main.rs:324`), which a stranger cannot find.
-- No panic hook or crash handler. macOS writes its own crash report to `~/Library/Logs/DiagnosticReports/`, which a tester would have to find and send.
+- Built (r48-logs): a rotating log `fourfour.log` plus `fourfour.1.log` and `fourfour.2.log` (5 MB each, std only, no new dependency) in Tauri's `app_log_dir` (`~/Library/Logs/com.pioneer.test-ui/` on macOS, `~/.local/share/com.pioneer.test-ui/logs/` on Linux, `%LOCALAPPDATA%\com.pioneer.test-ui\logs` on Windows; the folder follows the bundle id, see 1). Module `pioneer-test-ui/src/app_log.rs`. It gets every debug-panel line (`debug_log`), the former `eprintln!` warnings, panics from any thread (message, location, version, backtrace) and frontend `console.error`, uncaught errors and unhandled rejections (rate limited, 20 per 10 s). The command `log_directory` returns the folder for a later "Reveal logs" button; no UI was added.
+- Still open: the error text "see debug log" (`main.rs`, `all_tracks_failed`) should point at the log folder once the Reveal button exists. A panic before Tauri's setup (during `build`) is not in the file.
 - Library open failure: `open_startup_library` (`main.rs:1434`) returns a typed error; the recovery panel is on `r38-recovery-v2` (Waiting 37), not landed.
-- Analysis failures are memoised (`pioneer-test-ui/src/analysis_failures.rs`), not logged to disk.
+- Analysis failures are memoised (`pioneer-test-ui/src/analysis_failures.rs`); their messages reach the log through the debug panel line. macOS also writes its own crash report to `~/Library/Logs/DiagnosticReports/` for hard crashes (signals, aborts), which the panic hook does not see.
 
-Next steps (agent): rolling log in `~/Library/Logs/<app name>/` using std only (no new dependency without a flag), a panic hook that writes there, a "Copy diagnostics" button in About (app version, macOS version, chip, library size, last 200 log lines; no file names unless the user ticks it). No automatic upload. Merlin confirms no-upload.
+Next steps (agent): a "Copy diagnostics" button in About (app version, macOS version, chip, library size, last 200 log lines; no file names unless the user ticks it). No automatic upload. Merlin confirms no-upload.
 
 ## 10. Auto-update - ready (there is none)
 

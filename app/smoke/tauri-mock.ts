@@ -486,6 +486,10 @@ export function installTauriMock(initial: LoadedState) {
         return null;
       case 'get_analysis_backend':
         return null;
+      case 'log_frontend':
+        return null;
+      case 'log_directory':
+        return '/smoke/logs';
       case 'resume_analysis':
         return 0;
       case 'enqueue_analysis':
