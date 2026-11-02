@@ -25,7 +25,13 @@ async function settledCounters(page: Page, cdp: CDPSession | null): Promise<Coun
     await page.evaluate(
       () =>
         new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => requestIdleCallback(() => resolve(), { timeout: 1000 }))),
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() =>
+              typeof requestIdleCallback === 'function'
+                ? requestIdleCallback(() => resolve(), { timeout: 1000 })
+                : setTimeout(resolve, 50),
+            ),
+          ),
         ),
     );
     const current = await counters(page, cdp);
