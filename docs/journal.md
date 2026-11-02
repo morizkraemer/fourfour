@@ -507,3 +507,4 @@
 2026-11-02 16:02 orchestrator r62-leak-spec landed (CHECKS-OK, smoke 113 passed 0 flaky)
 2026-11-02 16:02 orchestrator - decided: own prio r65-win-crypto (sonnet medium; research doc on the Windows libcrypto gap, proposal for brother's Cargo.toml)
 2026-11-02 16:09 orchestrator r65-win-crypto doc merged on ov-1028; proposal added to brother's lane list
+2026-11-02 16:10 orchestrator STATE trimmed (run items -> archive; Waiting 30 moved back into the list); decided: own prio r66-expand-stall (opus medium; first expanded-player open stalls ~500 ms on Mac, pixel-identical fix)
