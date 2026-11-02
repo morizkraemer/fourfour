@@ -3,9 +3,9 @@ use std::io;
 use std::path::Path;
 
 use pioneer_library::failure::{self, LibraryFailure};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
     LibraryNewerVersion,
