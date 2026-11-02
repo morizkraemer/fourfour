@@ -451,3 +451,4 @@
 2026-11-02 12:25 orchestrator - decided: own prio r42-realsoak (sonnet high; real-stack soak under xvfb)
 2026-11-02 12:37 orchestrator r41-failmemo landed on ov-1028
 2026-11-02 12:37 orchestrator r40-refresh done: -v2 branches for r18/r17/r29-css/r31/r38 on ov-1028 b6c08a2 with error kinds adopted in r18/r38; parked-all-v2 aea0378 green except r17's WebKit Shift+F10 spec
+2026-11-02 12:37 orchestrator r41-failmemo landed c046e48 (smoke 113, CHECKS-OK); decided: own prio r43-a11y-webkit (sonnet medium; prep fix on parked branch)
