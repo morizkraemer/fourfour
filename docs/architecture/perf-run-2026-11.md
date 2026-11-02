@@ -1181,3 +1181,29 @@ CPU time is equal (no sign of arena lock contention), tracks/min within 5 % and 
 - **Web process: not a leak.** It rose from 850 MB to 1,260 MB over the first 40 minutes, while the launch analysis streamed results into the UI, then fell back to 930 MB as the analysis finished and stayed flat there for the last 40 minutes (minutes 80-120: 943, 923, 931, 933 MB average). Linear fit: +3.6 MB/min over minutes 10-60, -3.3 MB/min over 10-120, about 0 over 80-120. R42's +5 MB/min between minutes 10 and 50 was the same hump, seen while the analysis was still running; the loop itself adds nothing over 2 h.
 
 **Not covered:** the Mac allocator (unchanged by construction), audio playback (no sound card), a quiet-box throughput measurement, `M_MMAP_THRESHOLD`.
+
+## R57 long tracks (2026-11-02, `r57-longmix-mem`)
+
+Branch `r57-longmix-mem` from `ov-1028`. Linux `dev` box (16 cores, 62 GB, load 15-35 from other workers). Finding 2 of R42 and the 5.8 GB spike of R49. Fixtures (not committed): the 24 `_Long Mixes` of the 10k fixture decoded and concatenated with ffmpeg into a 60 min and a 120 min FLAC (44.1 kHz stereo) and a 120 min 320 kbit/s MP3 at 48 kHz. Measured with `cargo run --release --example stage_rss -- <file> 14 full` (`fourfour-analysis-rs/examples/stage_rss.rs`): one `analyze_controlled` run with the app's 14 analysis threads on this box, RSS sampled every 5 ms, peak per window of the `ms` timings (key and waveform run beside the beat resample); without `full` it runs the stages one after the other.
+
+**Peak RSS per stage (MB)**
+
+| Stage | 60 min before | 60 min after | 120 min before | 120 min after |
+|---|---:|---:|---:|---:|
+| decode | 705 | 705 | 1,311 | 1,311 |
+| beat resample + key + waveform | 1,027 | 1,018 | 1,934 | 1,935 |
+| mel spectrogram | 1,427 | 829 | 2,452 | 1,222 |
+| beat chunks + fit | 6,403 | 5,828 | 7,250 | 6,021 |
+| whole track (`time -v` max RSS) | 6,556 | 5,969 | 7,424 | 6,165 |
+
+**Where the memory goes**
+
+- **Beat-model chunks: about 370-450 MB each, 14 at once.** With one chunk thread the 60 min track peaks at 1,482 MB, with 16 at 7,259 MB. Every chunk of a track longer than 30 s is full size (1,500 frames), and the activations of the model (attention over 1,500 frames) are what costs; prepacking the weights changes nothing (372 MB above the mel stage either way, 10 min track, one thread). `chunk_slots` plans 400 MB per chunk inside a quarter of the machine, so on this 62 GB box it allows 14 chunks, about 5.6 GB. This is the spike of R42 and R49, and it does not need a long track: the 24 "long mixes" are 5-7 min and every other track of the fixture is 8 s (chunks of 400 frames, a fraction of the memory), so the fixture library hit full chunks only at the end of its queue. A real library of 3-7 min tracks keeps all chunk threads on full chunks for the whole run.
+- **Audio buffers that grow with length** (120 min, 44.1 kHz): the decoded mono track 1.27 GB, the 22.05 kHz copy for the beat model 635 MB, the 11 kHz decimation for the key 318 MB (plus a 44.1 kHz copy of 1.27 GB for 48 kHz sources), the mel spectrogram 184 MB. The decoded track stayed alive for the whole analysis, through the mel stage and all chunks.
+
+**Change.** `analyze_controlled` hands the decoded track to the key, waveform and beat paths as an `Arc`, each drops its handle when it is done with it, and the beat path drops it inside the new `BeatEngine::analyze_resampled` right after the 22.05 kHz resample, so it is freed before the mel spectrogram and the chunks run (`BeatEngine::analyze` keeps its signature). Saves the length of the track in f32 during the longest stages: -600 MB at 60 min, -1.2 GB at 120 min in the mel stage and under the chunks. Results unchanged: the JSON of `analyze-json --threads 14` (BPM, beat grid with bar positions, key, preview and color waveform bytes) hashes the same before and after on 58 fixture tracks (the 24 long mixes and 34 others) and on the three long files.
+
+**Not done (needs a decision):** the peak is still the chunk activations, about 400 MB times the chunk threads, and an under-1 GB peak for a 2 h track would need both of these:
+
+1. A fixed ceiling on the chunk budget (for example 2 GB, 3-4 chunk threads on any machine): peak about 2-2.5 GB for a 2 h track, but fewer model threads on large machines, so lower throughput there; needs a quiet-box throughput run before choosing the number.
+2. Streaming decode: feed the waveform meter, the 22.05 kHz resampler and the mel stream packet by packet instead of holding the decoded track (1.3 GB at 2 h); a larger rewrite of `decode.rs` and `analyze.rs`, and the streamed resampler and key decimation have to be shown bit-identical first.

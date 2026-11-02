@@ -22,6 +22,7 @@ const STRIDE: usize = CHUNK_SIZE - 2 * BORDER_SIZE;
 const MEL_STRIDE: usize = 1536;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
+pub const MODEL_RATE: u32 = 22050;
 const PAUSE_POLL: Duration = Duration::from_millis(50);
 
 pub struct BeatEngine {
@@ -353,8 +354,14 @@ impl BeatEngine {
     }
 
     pub fn analyze(&self, samples: &[f32], source_rate: u32, threads: usize, control: &Control) -> Result<BeatResult> {
+        self.analyze_resampled(|| resample_to(samples, source_rate, MODEL_RATE), threads, control)
+    }
+
+    /// `resample` returns the track at `MODEL_RATE`; the caller's source audio can be freed inside it, before the mel
+    /// spectrogram and the beat-model chunks run.
+    pub fn analyze_resampled(&self, resample: impl FnOnce() -> Result<Vec<f32>>, threads: usize, control: &Control) -> Result<BeatResult> {
         let t = Instant::now();
-        let samples = resample_to(samples, source_rate, 22050)?;
+        let samples = resample()?;
         let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
