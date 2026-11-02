@@ -1131,3 +1131,53 @@ Branch `r42-realsoak` from `ov-1028`. The release app (Tauri + WebKitGTK + real 
 - The same soak on the Mac with WKWebView: `performance.memory` is absent there as well; `vmmap`/`footprint` of the app and `com.apple.WebKit.WebContent` would replace `/proc`. Audio output and the playback callback (`playback_play`, tempo) were not exercised (no sound card).
 - Arena retention after bulk analysis on Linux (finding 1) if a Linux build ships.
 - Real 50k library with covers was not soaked in the real app (10k only).
+
+## R49 Linux arenas (2026-11-02, `r49-linux-arena`)
+
+Branch `r49-linux-arena` from `ov-1028`. Linux `dev` box (glibc 2.41, 16 cores), box load 15-85 from other workers during every run below, so numbers are compared in pairs that ran at the same time. Fixes finding 1 of R42: after the launch analysis the app stayed at about 2.1 GB although Rust held nothing.
+
+**Change** (`pioneer-test-ui/src/heap.rs`, `cfg(all(target_os = "linux", target_env = "gnu"))`, `libc` already in the lock file): `main` calls `mallopt(M_ARENA_MAX, 4)` before any thread exists (skipped when `MALLOC_ARENA_MAX` is set, so the env var still wins) and `run_with_resolver` calls `malloc_trim(0)` when an analysis run ends. macOS and other targets compile to no-ops. No thread-pool change: the analysis threads are scoped per track and glibc reuses the arenas of dead threads, so keeping threads alive would not lower the arena count.
+
+**Options measured** (`bench_analysis`, 500 short fixture tracks of the 10k library, default 14 threads, `FF_HEAP_MODE` env switch in the measuring build only; `--idle-secs` and an RSS line were added to the bench; it also needed `analysis_failures` and `command_error` in its module list to compile on `ov-1028`):
+
+| Option | Peak RSS | RSS after the run | Note |
+|---|---:|---:|---|
+| none (before) | 1,526 MB | 1,343 MB | |
+| `malloc_trim(0)` at run end | 1,583 MB | 1,057 MB | frees about 300 MB, peak unchanged: the retained memory is mostly fragmented, not whole free pages |
+| `M_ARENA_MAX=2` | 646 MB | 370 MB | |
+| `M_ARENA_MAX=4` | 760 MB | 620 MB | |
+
+In the app (real soak, 12 min of the launch analysis, idle probe) the same: before 2.0-2.4 GB for the whole run, trim alone 2.2-2.3 GB (it only acts when the run ends), `M_ARENA_MAX=2` 630-830 MB. `M_MMAP_THRESHOLD` tuning (more `mmap`/`munmap` per decode buffer) was not measured: the arena cap already removes the retention and costs nothing.
+
+**Throughput.** Variants ran at the same time on the same 150 tracks, so each saw the same load (the sequential runs were useless: wall time swung 408 s to 1,370 s with load 50-85, the analysis threads run at nice 10):
+
+| Round | Variant | Tracks/min | user + sys CPU | RSS peak / after run |
+|---|---|---:|---:|---:|
+| 2 (load 50) | before | 62.6 | 227.8 + 42.7 s | 1,426 / 1,294 MB |
+| 2 | arena 2 | 60.9 | 226.6 + 43.7 s | 583 / 355 MB |
+| 2 | arena 4 | 59.7 | 228.0 + 44.5 s | 678 / 485 MB |
+| 1 (load 55, all three stalled to 699 s) | before / arena 2 / arena 4 | 13.0 / 13.0 / 13.0 | 365 / 367 / 366 s | 1,357 / 595 / 678 MB peak |
+
+CPU time is equal (no sign of arena lock contention), tracks/min within 5 % and ordered arena 2 > arena 4, so inside noise. 4 chosen over 2 as the safer cap for a quiet 16-core box, where 14 analysis threads share the arenas without any other load to hide contention; the box could not show that case. Raise or lower `ARENA_MAX` in `heap.rs` if a quiet machine shows otherwise.
+
+**2 h full-loop soak on the final build** (`scripts/soak-real.sh 120`, all actions, 349 cycles, 0 failed actions, 120 samples; launch analysis of the 3,063 new tracks ran from minute 0 to 79 at load 20-75, 10,000 analysed at minute 79):
+
+| Minutes | App RSS (avg) | Web process (avg / max) |
+|---|---:|---:|
+| 0-10 | 672 MB | 847 / 1,043 MB |
+| 10-20 | 662 | 1,081 / 1,180 |
+| 20-30 | 705 | 1,197 / 1,247 |
+| 30-40 | 697 | 1,253 / 1,272 |
+| 40-50 | 693 | 1,260 / 1,305 |
+| 50-60 | 676 | 1,233 / 1,283 |
+| 60-70 | 600 | 1,141 / 1,182 |
+| 70-80 | 1,203 | 1,046 / 1,176 |
+| 80-90 | 306 | 943 / 964 |
+| 90-100 | 295 | 923 / 949 |
+| 100-110 | 318 | 931 / 999 |
+| 110-120 | 304 | 933 / 954 |
+
+- **App process:** 570-750 MB during the analysis (R42: 2.0-2.3 GB), 270-410 MB once it ended and the trim ran (R42: still 2.1 GB). Threads 106-124 and 43 fds throughout, DOM nodes 2,076 at the first sample, 2,068 at the last (max 2,327). One spike: 2.5 GB at minute 75 and 5.8 GB at minute 76 (`rten-0` and `analysis` threads on top), back to 275 MB three minutes later: the 24 long mixes at the end of the queue, finding 2 of R42, unchanged by this fix.
+- **Web process: not a leak.** It rose from 850 MB to 1,260 MB over the first 40 minutes, while the launch analysis streamed results into the UI, then fell back to 930 MB as the analysis finished and stayed flat there for the last 40 minutes (minutes 80-120: 943, 923, 931, 933 MB average). Linear fit: +3.6 MB/min over minutes 10-60, -3.3 MB/min over 10-120, about 0 over 80-120. R42's +5 MB/min between minutes 10 and 50 was the same hump, seen while the analysis was still running; the loop itself adds nothing over 2 h.
+
+**Not covered:** the Mac allocator (unchanged by construction), audio playback (no sound card), a quiet-box throughput measurement, `M_MMAP_THRESHOLD`.
