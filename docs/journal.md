@@ -436,3 +436,4 @@
 2026-11-02 08:00 orchestrator - decided: own prio r36-covers (sonnet high; import cover step speed, byte-identical)
 2026-11-02 08:48 orchestrator r34-webkit-idle handed back (font preload fixes WebKit post-first-row stall; idle scheduler measured no gain, dropped), merging; backlog r37-webkit-smoke (17 specs fail in WebKit on ov-1028)
 2026-11-02 08:49 orchestrator - decided: own prio r37-webkit-smoke (sonnet high; WebKit smoke failures: app bug vs Chromium-only test)
+2026-11-02 08:51 orchestrator r36-covers: no speed-up (store + WAL commit is the floor; covers are raw embedded bytes, no resize); test + doc merging; leaks smoke spec failed once under load (151 vs 40 DOM nodes) - r37 is looking at leaks spec

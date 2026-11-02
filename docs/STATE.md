@@ -109,7 +109,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 35. r33-dupplan: import duplicate plan at 50k (1-1.5 s) without schema: in-memory folded-key index kept across imports [landed; later imports 50k 990 -> 74 ms]
 36. r34-webkit-idle: WebKit idle scheduler (no rIC), Icon parse once, lighter skeleton rows; app code only, no prototyping edits [built 6d21390, merging: late font-subset swap (U+0301 in Cyrillic subset) fixed by preloading faces; WebKit longest frame after first row 190-644 -> 24-122 ms]
 37. r35-ci: refresh ov-ci workflow for coreml/dev-bins/deb deps/webkit smoke (branch, push needs Waiting 15) [built, branch r35-ci 24add8b]
-38. r36-covers: import covers step 1.2-1.4 s per 1k files, faster with identical stored bytes, no schema [running]
+38. r36-covers: import covers step 1.2-1.4 s per 1k files, faster with identical stored bytes, no schema [done: at SQLite floor (commit of ~190 MB WAL per 1k), no code change; byte-identity test + doc merging; real lever = covers out of library.db (Waiting 31)]
 39. r37-webkit-smoke: 17 smoke specs fail under FF_SMOKE_BROWSER=webkit on ov-1028 (topbar 14, leaks, popups, sticks): fix test or app, since WKWebView is the Mac target [running]
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
