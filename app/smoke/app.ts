@@ -9,13 +9,17 @@ export interface Smoke {
   dialogs(): Promise<string[]>;
 }
 
+const BENIGN_PAGE_ERRORS = [/^ResizeObserver loop completed with undelivered notifications\.?$/];
+
 export const test = base.extend<{ smoke: Smoke }>({
   smoke: async ({ page }, use) => {
     const problems: string[] = [];
     page.on('console', (message) => {
       if (message.type() === 'error' || message.type() === 'warning') problems.push(`console.${message.type()}: ${message.text()}`);
     });
-    page.on('pageerror', (error) => problems.push(`pageerror: ${error.message}`));
+    page.on('pageerror', (error) => {
+      if (!BENIGN_PAGE_ERRORS.some((benign) => benign.test(error.message))) problems.push(`pageerror: ${error.message}`);
+    });
     await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
     await page.addInitScript(installTauriMock, fixtureState());
     await page.goto('/');
