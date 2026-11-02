@@ -446,3 +446,4 @@
 2026-11-02 11:02 orchestrator r37-webkit-smoke landed 2faba7f (Chromium smoke 113 + CHECKS-OK, WebKit smoke 113 on ov-1028); resumed r39/r40 after seat limit (reset 02:30 UTC)
 2026-11-02 11:23 orchestrator r39-errkinds handed back (CommandError {kind,message,path}, strings unchanged), merging
 2026-11-02 11:24 orchestrator - decided: own prio r41-failmemo (sonnet high; failed-analysis memo in a side file, no schema); r40 told to adopt r39 kinds in r18/r38 -v2
+2026-11-02 11:39 orchestrator r39-errkinds landed on ov-1028
