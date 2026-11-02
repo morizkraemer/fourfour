@@ -460,3 +460,4 @@
 2026-11-02 14:09 orchestrator r45-rowcost handed back (no app-side lever; fenced design-system patch confirmed -32% WebKit row style; bench_startup build fix), merging; Waiting 36 updated
 2026-11-02 14:09 orchestrator - decided: own prio r46-dsrows (opus; decide-by-doing build of the fenced row patch on a parked branch)
 2026-11-02 14:23 orchestrator r45-rowcost landed on ov-1028 (CHECKS-OK, bench_startup builds)
+2026-11-02 14:57 orchestrator r46-dsrows parked (220f237; no measurable startup gain at load 74-112, cheaper column resize, pixels identical); Waiting 36 offers r29-css-v2 or r46-dsrows
