@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fourfour_analysis::analyze::Control;
+use fourfour_analysis::analyze::{analyze_controlled, Config, Control};
 use fourfour_analysis::bt::BeatEngine;
 use fourfour_analysis::decode::{decode_mono, resample_to};
 use fourfour_analysis::service::{chunk_slots, locate_models, total_memory_mb, available_memory_mb, BEAT_MODEL};
@@ -60,6 +60,32 @@ fn main() -> anyhow::Result<()> {
     engine.share_chunk_threads(chunk_slots(threads, 0.5, total_memory_mb(), available_memory_mb()));
     let t0 = s.now();
     report("models", 0.0, t0, &s);
+
+    if std::env::args().nth(3).as_deref() == Some("full") {
+        let cancel = AtomicBool::new(false);
+        let cfg = Config { threads, ..Config::default() };
+        let a = analyze_controlled(&engine, &path, &cfg, &Control::new(&cancel))?;
+        let end = s.now();
+        let stage = |k: &str| a.ms[k].as_f64().unwrap_or(0.0) / 1000.0;
+        let d = t0 + stage("decode");
+        let r = d + stage("model") - stage("mel") - stage("predict");
+        let m = r + stage("mel");
+        report("decode", t0, d, &s);
+        report("resample+key+wf", d, r, &s);
+        report("mel", r, m, &s);
+        report("beat chunks+fit", m, end, &s);
+        stop.store(true, Ordering::Relaxed);
+        println!(
+            "duration {:.0} s  bpm {:?}  key {:?}  beats {}  wf {:?}  overall peak {:.0} MB",
+            a.duration_s,
+            a.bpm,
+            a.key_class,
+            a.beats_s.len(),
+            a.waveform_checksum,
+            s.peak_between(0.0, end)
+        );
+        return Ok(());
+    }
 
     let native = decode_mono(&path)?;
     let t1 = s.now();
