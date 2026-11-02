@@ -1259,3 +1259,5 @@ R72 (2026-11-02): done. `saveState` is a queue (one save in flight, later calls 
 `playback_play` may also touch the disk (`probe_duration_ms` when the frontend gives no duration hint, first-time output open). Measure it on the Mac before deciding.
 
 The r67 source-level test (`volume_and_stick_commands_run_off_the_main_thread` in `main.rs`) now covers all moved commands.
+
+**R69 (`r69-stick-busy`):** `write_usb` and `wipe_usb` are now `#[tauri::command(async)]` too. A per-volume busy guard (`pioneer-test-ui/src/stick_busy.rs`, managed state `BusySticks`, RAII `BusyGuard` on the canonical volume path) is taken by `write_usb`, `sync_usb_many` (all targets up front, all or nothing), `wipe_usb`, `eject_volume` and `stick_add/remove_tracks/playlists`. A second operation on the same stick returns `ErrorKind::StickBusy` ("This stick is busy. Try again when the current sync finishes."). The r67 source test covers `write_usb` and `wipe_usb`.
