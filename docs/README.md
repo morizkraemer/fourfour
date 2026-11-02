@@ -74,6 +74,12 @@ the research, plans, and reverse-engineering notes.
 | [`synthesis-2026-10-15.md`](research/synthesis-2026-10-15.md) | reference | Synthesis of landscape and review. |
 | [`fourfour-map.html`](research/fourfour-map.html) | reference | Feature map (HTML). |
 
+## release/ - public beta
+
+| Doc | | Purpose |
+|---|---|---|
+| [`beta-checklist-2026-11.md`](release/beta-checklist-2026-11.md) | current | Public macOS beta readiness: identity, signing, licences, privacy, USB safety, bars, CI, docs, support; status, next step and owner per area. |
+
 ## process/ — working state
 
 | Doc | | Purpose |
