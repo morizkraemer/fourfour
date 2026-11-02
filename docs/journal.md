@@ -524,3 +524,4 @@
 2026-11-02 19:08 orchestrator - decided: own prio r72-ordered-save (sonnet medium; save_state async with latest-wins queue)
 2026-11-02 19:37 orchestrator r70-sync-audit landed f5962d7 (chromium smoke 113/0, CHECKS-OK); WebKit smoke caught an r62 bug: leaks spec used requestIdleCallback (missing in WebKit) -> setTimeout fallback committed on ov-1028, leaks spec 3x green in both browsers
 2026-11-02 19:38 orchestrator r72-ordered-save handed back 5ab0f83 (frontend save queue, save_state async, pagehide flush), merged; checks running (chromium + webkit smoke)
+2026-11-02 19:59 orchestrator r72-ordered-save landed (chromium smoke 113/0, CHECKS-OK); WebKit full run: startup.spec.ts:38 failed once (known WebKit load flake since r48), passes 4/4 alone on this head
