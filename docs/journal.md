@@ -449,3 +449,4 @@
 2026-11-02 11:39 orchestrator r39-errkinds landed on ov-1028
 2026-11-02 12:24 orchestrator r41-failmemo handed back (FailureMemo side file, 18 tests), merging
 2026-11-02 12:25 orchestrator - decided: own prio r42-realsoak (sonnet high; real-stack soak under xvfb)
+2026-11-02 12:37 orchestrator r41-failmemo landed on ov-1028
