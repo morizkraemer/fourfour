@@ -15,6 +15,7 @@ use flate2::write::GzEncoder;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis_write::STAGING_PREFIX;
+use crate::failure::{Failure, LibraryFailure};
 use crate::{FileStatus, LocalLibrary, file_status, queries};
 
 pub const BACKUP_FORMAT: &str = "library-backup";
@@ -150,17 +151,26 @@ fn safe_relative(name: &Path) -> Result<PathBuf> {
         match component {
             Component::Normal(part) => out.push(part),
             Component::CurDir => {}
-            _ => bail!("The backup contains an unsafe path: {}", name.display()),
+            _ => {
+                return Err(Failure::error(
+                    LibraryFailure::InvalidBackup,
+                    format!("The backup contains an unsafe path: {}", name.display()),
+                ));
+            }
         }
     }
     if out.as_os_str().is_empty() {
-        bail!("The backup contains an empty path");
+        return Err(Failure::error(LibraryFailure::InvalidBackup, "The backup contains an empty path"));
     }
     Ok(out)
 }
 
 fn not_a_backup() -> anyhow::Error {
-    anyhow!("This file is not a library backup")
+    Failure::error(LibraryFailure::InvalidBackup, "This file is not a library backup")
+}
+
+fn damaged_backup() -> Failure {
+    Failure::new(LibraryFailure::InvalidBackup, "The backup file is damaged")
 }
 
 fn read_manifest_entry<R: Read>(entries: &mut tar::Entries<'_, R>) -> Result<BackupManifest> {
@@ -175,7 +185,10 @@ fn read_manifest_entry<R: Read>(entries: &mut tar::Entries<'_, R>) -> Result<Bac
         return Err(not_a_backup());
     }
     if manifest.version > BACKUP_VERSION {
-        bail!("This backup was made by a newer version of the app (format {})", manifest.version);
+        return Err(Failure::error(
+            LibraryFailure::NewerVersion,
+            format!("This backup was made by a newer version of the app (format {})", manifest.version),
+        ));
     }
     Ok(manifest)
 }
@@ -212,7 +225,14 @@ fn write_new_file<R: Read>(target: &Path, reader: &mut R) -> Result<()> {
         .open(target)
         .with_context(|| format!("Failed to create {}", target.display()))?;
     let mut out = BufWriter::new(file);
-    std::io::copy(reader, &mut out).with_context(|| format!("Failed to write {}", target.display()))?;
+    std::io::copy(reader, &mut out).map_err(|e| {
+        let message = format!("Failed to write {}", target.display());
+        if matches!(e.kind(), std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::InvalidData) {
+            anyhow::Error::new(e).context(Failure::new(LibraryFailure::InvalidBackup, message))
+        } else {
+            anyhow::Error::new(e).context(message)
+        }
+    })?;
     out.flush()?;
     Ok(())
 }
@@ -252,18 +272,18 @@ fn unpack_into(
     let mut audio_paths = HashMap::new();
     let mut done = 0u64;
     for entry in entries {
-        let mut entry = entry.context("The backup file is damaged")?;
+        let mut entry = entry.context(damaged_backup())?;
         if !entry.header().entry_type().is_file() {
             continue;
         }
-        let name = safe_relative(&entry.path().context("The backup file is damaged")?)?;
+        let name = safe_relative(&entry.path().context(damaged_backup())?)?;
         let size = entry.size();
         let first = name.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
         match first.as_str() {
             LIBRARY_DIR => write_new_file(&staging.join(&name), &mut entry)?,
             SETTINGS_DIR => {
                 let mut bytes = Vec::new();
-                entry.read_to_end(&mut bytes).context("The backup file is damaged")?;
+                entry.read_to_end(&mut bytes).context(damaged_backup())?;
                 let file_name = name.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 settings.push(SettingsFile { name: file_name, bytes });
             }
@@ -274,7 +294,7 @@ fn unpack_into(
                         let below: PathBuf = name.components().skip(1).collect();
                         let wanted = dest.join(below);
                         let target = if wanted.exists() && file_len(&wanted) == size {
-                            std::io::copy(&mut entry, &mut std::io::sink()).context("The backup file is damaged")?;
+                            std::io::copy(&mut entry, &mut std::io::sink()).context(damaged_backup())?;
                             wanted
                         } else {
                             let target = if wanted.exists() { free_path(&wanted) } else { wanted };
@@ -284,12 +304,12 @@ fn unpack_into(
                         audio_paths.insert(track_id, target);
                     }
                     _ => {
-                        std::io::copy(&mut entry, &mut std::io::sink()).context("The backup file is damaged")?;
+                        std::io::copy(&mut entry, &mut std::io::sink()).context(damaged_backup())?;
                     }
                 }
             }
             _ => {
-                std::io::copy(&mut entry, &mut std::io::sink()).context("The backup file is damaged")?;
+                std::io::copy(&mut entry, &mut std::io::sink()).context(damaged_backup())?;
             }
         }
         done += size;
@@ -298,12 +318,15 @@ fn unpack_into(
     let unpacked = UnpackedBackup { manifest, staging: staging.to_path_buf(), settings, audio_paths };
     let db = unpacked.db_path();
     if !db.is_file() {
-        bail!("The backup has no library database");
+        return Err(Failure::error(LibraryFailure::InvalidBackup, "The backup has no library database"));
     }
-    let restored = LocalLibrary::open(&db).context("The library in the backup can't be opened")?;
+    let restored = LocalLibrary::open(&db).context(Failure::new(LibraryFailure::InvalidBackup, "The library in the backup can't be opened"))?;
     let tracks = queries::count_tracks(&restored.conn)?;
     if tracks != unpacked.manifest.track_count {
-        bail!("The backup is incomplete: {tracks} of {} tracks", unpacked.manifest.track_count);
+        return Err(Failure::error(
+            LibraryFailure::InvalidBackup,
+            format!("The backup is incomplete: {tracks} of {} tracks", unpacked.manifest.track_count),
+        ));
     }
     Ok(unpacked)
 }
@@ -676,6 +699,54 @@ mod tests {
         assert!(unpack_backup(&damaged, &staging, None, &mut |_, _| {}).is_err());
         assert!(!staging.exists());
         assert_eq!(f.lib.get_all_tracks().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn refused_backups_carry_a_failure_kind_and_keep_their_text() {
+        use crate::failure::{LibraryFailure, classify};
+        let f = fixture();
+
+        let foreign = f.root.join("foreign.tar.gz");
+        std::fs::write(&foreign, b"just some bytes").unwrap();
+        let err = read_backup_manifest(&foreign).unwrap_err();
+        assert_eq!(classify(&err), Some(LibraryFailure::InvalidBackup));
+        assert_eq!(err.to_string(), "This file is not a library backup");
+
+        let newer = f.root.join("newer.tar.gz");
+        {
+            let manifest = BackupManifest {
+                format: BACKUP_FORMAT.to_string(),
+                version: BACKUP_VERSION + 1,
+                created_at: String::new(),
+                track_count: 0,
+                playlist_count: 0,
+                total_bytes: 0,
+                includes_audio: false,
+                audio_root: None,
+                audio: Vec::new(),
+                audio_missing: Vec::new(),
+                settings: Vec::new(),
+            };
+            let mut tar = tar::Builder::new(GzEncoder::new(File::create(&newer).unwrap(), Compression::fast()));
+            append_bytes(&mut tar, MANIFEST, &serde_json::to_vec(&manifest).unwrap()).unwrap();
+            tar.into_inner().unwrap().finish().unwrap();
+        }
+        let err = read_backup_manifest(&newer).unwrap_err();
+        assert_eq!(classify(&err), Some(LibraryFailure::NewerVersion));
+        assert!(err.to_string().starts_with("This backup was made by a newer version of the app"), "{err}");
+
+        let archive = f.root.join("good.tar.gz");
+        f.lib.export_backup(&archive, false, &[], &mut |_, _| {}).unwrap();
+        let bytes = std::fs::read(&archive).unwrap();
+        let damaged = f.root.join("damaged.tar.gz");
+        std::fs::write(&damaged, &bytes[..bytes.len() * 2 / 3]).unwrap();
+        let err = unpack_backup(&damaged, &f.root.join("lib/.restore"), None, &mut |_, _| {}).err().unwrap();
+        assert_eq!(classify(&err), Some(LibraryFailure::InvalidBackup), "{err:#}");
+
+        let err = safe_relative(Path::new("../evil")).unwrap_err();
+        assert_eq!(classify(&err), Some(LibraryFailure::InvalidBackup));
+        assert!(err.to_string().starts_with("The backup contains an unsafe path"), "{err}");
+        assert_eq!(classify(&safe_relative(Path::new("")).unwrap_err()), Some(LibraryFailure::InvalidBackup));
     }
 
     #[test]

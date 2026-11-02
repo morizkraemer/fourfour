@@ -3,6 +3,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension};
 
+use crate::failure::{Failure, LibraryFailure};
+
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
 pub const SCHEMA_VERSION: u32 = 7;
@@ -141,11 +143,19 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
             migrate_v6_to_v7(conn)?;
         }
         Some(v) if v == SCHEMA_VERSION => {}
-        Some(0) => anyhow::bail!("The library has schema version 0, which no version of this app writes"),
+        Some(0) => {
+            return Err(Failure::error(
+                LibraryFailure::Damaged,
+                "The library has schema version 0, which no version of this app writes",
+            ));
+        }
         Some(v) => {
-            anyhow::bail!(
-                "The library was saved by a newer version of the app (schema version {v}, this app knows up to {SCHEMA_VERSION}); update the app to open it"
-            );
+            return Err(Failure::error(
+                LibraryFailure::NewerVersion,
+                format!(
+                    "The library was saved by a newer version of the app (schema version {v}, this app knows up to {SCHEMA_VERSION}); update the app to open it"
+                ),
+            ));
         }
     }
     conn.execute_batch(ARTWORK_INDEX_DDL).context("Failed to create the artwork index")?;
@@ -169,15 +179,24 @@ fn stored_version(conn: &Connection) -> Result<Option<u32>> {
         )
         .context("Failed to read the library's table list")?;
     if !has_version_table {
-        anyhow::bail!("The library has tables but no schema version table; it was not opened so nothing in it is changed");
+        return Err(Failure::error(
+            LibraryFailure::Damaged,
+            "The library has tables but no schema version table; it was not opened so nothing in it is changed",
+        ));
     }
     let version: Option<u32> = conn
         .query_row("SELECT version FROM schema_version", [], |row| row.get(0))
         .optional()
-        .context("The library's schema version is unreadable; it was not opened so nothing in it is changed")?;
+        .context(Failure::new(
+            LibraryFailure::Damaged,
+            "The library's schema version is unreadable; it was not opened so nothing in it is changed",
+        ))?;
     match version {
         Some(v) => Ok(Some(v)),
-        None => anyhow::bail!("The library has no schema version row; it was not opened so nothing in it is changed"),
+        None => Err(Failure::error(
+            LibraryFailure::Damaged,
+            "The library has no schema version row; it was not opened so nothing in it is changed",
+        )),
     }
 }
 
