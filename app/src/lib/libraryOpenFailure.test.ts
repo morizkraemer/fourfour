@@ -1,53 +1,56 @@
 import { describe, expect, it } from 'vitest';
+import { CommandError, type ErrorKind } from '../services/command-error.ts';
 import { openFailureKind, parseOpenFailure, recoveryFailureText } from './libraryOpenFailure.ts';
 
-const at = (reason: string) => `Couldn't open the library at /data/library.db: ${reason}`;
+const DB = '/data/library.db';
+const failure = (kind: ErrorKind, message = 'Anything the backend says', path: string | null = DB) => new CommandError(kind, message, path);
+const failed = (kind: ErrorKind) => failure(kind, `Couldn't open the library at ${DB}: reworded`);
 
 describe('openFailureKind', () => {
-  it('sorts the startup messages by cause', () => {
-    expect(
-      openFailureKind(at('The library was saved by a newer version of the app (schema version 99, this app knows up to 7); update the app to open it')),
-    ).toBe('newer');
-    expect(openFailureKind(at("The library's schema version is unreadable; it was not opened so nothing in it is changed: database is locked"))).toBe('locked');
-    expect(openFailureKind(at('file is not a database'))).toBe('damaged');
-    expect(openFailureKind(at('database disk image is malformed'))).toBe('damaged');
-    expect(openFailureKind(at('The library has no schema version row; it was not opened so nothing in it is changed'))).toBe('damaged');
-    expect(openFailureKind(at('something nobody planned for'))).toBe('unknown');
-    expect(openFailureKind("Couldn't find where the library is stored: no app data dir")).toBe('unknown');
+  it('reads the cause from the error kind, whatever the message says', () => {
+    expect(openFailureKind(failure('library_newer_version', 'rewritten'))).toBe('newer');
+    expect(openFailureKind(failure('library_locked', 'rewritten'))).toBe('locked');
+    expect(openFailureKind(failure('library_damaged', 'rewritten'))).toBe('damaged');
+    expect(openFailureKind(failure('permission_denied'))).toBe('unknown');
+    expect(openFailureKind(failure('other'))).toBe('unknown');
+    expect(openFailureKind(failure('library_not_open', 'The library is not open', null))).toBe('unknown');
   });
 
   it('ignores errors that are not about opening the library', () => {
-    expect(openFailureKind('poisoned lock: another task failed inside')).toBeNull();
-    expect(openFailureKind('Track 4 is not in the library')).toBeNull();
+    expect(openFailureKind(failure('other', 'poisoned lock: another task failed inside', null))).toBeNull();
+    expect(openFailureKind(failure('not_found', 'Track 4 is not in the library', null))).toBeNull();
+    expect(openFailureKind(failure('library_locked', 'busy while saving', null))).toBeNull();
+    expect(openFailureKind("Couldn't open the library at /data/library.db: database is locked")).toBeNull();
+    expect(openFailureKind(new Error('a newer version'))).toBeNull();
     expect(parseOpenFailure('database is locked')).toBeNull();
   });
 });
 
 describe('parseOpenFailure', () => {
   it('offers Try again only for a library that is in use', () => {
-    expect(parseOpenFailure(at('database is locked'))?.canRetry).toBe(true);
-    expect(parseOpenFailure(at('file is not a database'))?.canRetry).toBe(false);
-    expect(parseOpenFailure(at('The library was saved by a newer version of the app'))?.canRetry).toBe(false);
+    expect(parseOpenFailure(failed('library_locked'))?.canRetry).toBe(true);
+    expect(parseOpenFailure(failed('library_damaged'))?.canRetry).toBe(false);
+    expect(parseOpenFailure(failed('library_newer_version'))?.canRetry).toBe(false);
   });
 
   it('says what happened and what to do, in plain words', () => {
-    for (const reason of ['a newer version of the app', 'database is locked', 'file is not a database', 'something else']) {
-      const failure = parseOpenFailure(at(reason))!;
-      const copy = `${failure.title} ${failure.text}`;
+    for (const kind of ['library_newer_version', 'library_locked', 'library_damaged', 'other'] as const) {
+      const open = parseOpenFailure(failed(kind))!;
+      const copy = `${open.title} ${open.text}`;
       expect(copy).not.toMatch(/[–—!]/);
       expect(copy).not.toMatch(/schema|sqlite|database|error|library\.db|\//i);
-      expect(failure.text.length).toBeGreaterThan(40);
+      expect(open.text.length).toBeGreaterThan(40);
     }
-    expect(parseOpenFailure(at('file is not a database'))?.text).toContain('has not been changed');
+    expect(parseOpenFailure(failed('library_damaged'))?.text).toContain('has not been changed');
   });
 });
 
 describe('recoveryFailureText', () => {
   it('rewords open errors without internals and passes plain messages through', () => {
-    expect(recoveryFailureText(at('file is not a database'))).toBe("fourfour can't read that library file. It has not been changed.");
-    expect(recoveryFailureText(at('database is locked'))).toContain('in use');
-    expect(recoveryFailureText(at('a newer version of the app'))).toContain('Update fourfour');
-    expect(recoveryFailureText('There is no fourfour library in that folder. Choose the folder that holds your library.')).toBe(
+    expect(recoveryFailureText(failed('library_damaged'))).toBe("fourfour can't read that library file. It has not been changed.");
+    expect(recoveryFailureText(failed('library_locked'))).toContain('in use');
+    expect(recoveryFailureText(failed('library_newer_version'))).toContain('Update fourfour');
+    expect(recoveryFailureText(failure('not_found', 'There is no fourfour library in that folder. Choose the folder that holds your library.', null))).toBe(
       'There is no fourfour library in that folder. Choose the folder that holds your library.',
     );
   });

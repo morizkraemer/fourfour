@@ -1232,7 +1232,7 @@ export async function initLibrary() {
     scheduleLaunchAnalysis();
   } catch (err) {
     library.statusMessage = 'Failed to load library';
-    library.openFailure = parseOpenFailure(String(err));
+    library.openFailure = parseOpenFailure(err);
     console.error('initLibrary failed:', err);
   } finally {
     if (!library.analyzing && !library.syncing) {

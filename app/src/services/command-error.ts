@@ -4,6 +4,7 @@ export const ERROR_KINDS = [
   'library_newer_version',
   'library_damaged',
   'library_locked',
+  'library_not_open',
   'not_found',
   'permission_denied',
   'disk_full',
