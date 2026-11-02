@@ -441,3 +441,4 @@
 2026-11-02 09:04 orchestrator r34-webkit-idle landed e2f36d9 (smoke 113, CHECKS-OK); r36-covers landed 817d347 (doc conflict resolved, cover test ok)
 2026-11-02 09:21 orchestrator r38-recovery parked: branch 2e8b92a (recovery commands without library state, panel via EmptyState, 8 Rust + 7 smoke tests; copy names the working title) -> Waiting 37
 2026-11-02 09:21 orchestrator - decided: own prio r39-errkinds (sonnet high; structured error kinds, no visible change)
+2026-11-02 09:46 orchestrator r37-webkit-smoke handed back (WebKit smoke green, test-only), merging
