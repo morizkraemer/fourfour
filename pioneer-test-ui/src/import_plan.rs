@@ -828,4 +828,60 @@ mod tests {
         assert!(lib.get_artwork(ids[1 - with]).unwrap().is_none());
         assert!(lib.pending_artwork(0, 10).unwrap().is_empty());
     }
+
+    const PINNED_COVER_HASH: u64 = 8653687647319703617;
+
+    fn fnv1a(hash: u64, bytes: &[u8]) -> u64 {
+        bytes.iter().fold(hash, |h, b| (h ^ *b as u64).wrapping_mul(0x100_0000_01b3))
+    }
+
+    fn hash_covers(covers: &[(String, Option<Vec<u8>>)]) -> u64 {
+        covers.iter().fold(0xcbf2_9ce4_8422_2325, |hash, (name, cover)| {
+            let hash = fnv1a(hash, name.as_bytes());
+            match cover {
+                Some(cover) => fnv1a(fnv1a(hash, &(cover.len() as u64).to_le_bytes()), cover),
+                None => fnv1a(hash, &[0xff]),
+            }
+        })
+    }
+
+    #[test]
+    fn stored_covers_of_a_folder_are_the_embedded_bytes_and_hash_to_a_pinned_value() {
+        let dir = std::env::temp_dir().join(format!("ff-cover-hash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let files: Vec<(String, Option<Vec<u8>>)> = (0..70u32)
+            .map(|i| {
+                let cover = (i % 7 != 3).then(|| {
+                    let mut bytes = vec![0xFF, 0xD8, 0xFF, 0xE0];
+                    bytes.extend((0..1 + (i as usize * 997) % 40_000).map(|n| (n as u32).wrapping_mul(31).wrapping_add(i) as u8));
+                    bytes
+                });
+                (format!("t{i:02}.wav"), cover)
+            })
+            .collect();
+        for (name, cover) in &files {
+            let data = cover.as_deref().map_or_else(|| wav(1), wav_with_cover);
+            std::fs::write(dir.join(name), data).unwrap();
+        }
+        let survey = survey_files(&[dir.to_string_lossy().into_owned()]);
+        let scanned = scan_paths(&survey, &HashSet::new(), &mut || {});
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let ids = lib.add_tracks_covers_later(&scanned.tracks).unwrap();
+        let lib = Mutex::new(lib);
+        let stored = store_pending_covers(&lib, None, &mut |_| {}).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+
+        let lib = lib.into_inner().unwrap();
+        let mut stored_by_name: Vec<(String, Option<Vec<u8>>)> = scanned
+            .tracks
+            .iter()
+            .zip(&ids)
+            .map(|(t, id)| (t.source_path.file_name().unwrap().to_string_lossy().into_owned(), lib.get_artwork(*id).unwrap()))
+            .collect();
+        stored_by_name.sort();
+        assert_eq!(stored, files.iter().filter(|(_, cover)| cover.is_some()).count());
+        assert_eq!(stored_by_name, files);
+        assert_eq!(hash_covers(&stored_by_name), PINNED_COVER_HASH);
+    }
 }
