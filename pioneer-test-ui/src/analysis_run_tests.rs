@@ -27,6 +27,7 @@ struct FakeEngine {
     workers: usize,
     max_threads: usize,
     hold_grid: AtomicBool,
+    failing: Mutex<Vec<String>>,
 }
 
 fn finished_result() -> AnalysisResult {
@@ -51,6 +52,9 @@ impl TrackEngine for FakeEngine {
         let name = file_name_of(path);
         self.log.lock().unwrap().push(Event::Start(name.clone(), threads));
         self.log.lock().unwrap().push(Event::Ran(name.clone(), pass));
+        if self.failing.lock().unwrap().contains(&name) {
+            return Err("failed to decode any audio packets".to_string());
+        }
         if let Some(emit) = on_partial {
             emit(AnalysisResult { bpm: 0.0, ..finished_result() });
         }
@@ -196,7 +200,7 @@ fn harness(tracks: usize, workers: usize, max_threads: usize) -> Harness {
     Harness {
         shared: shared.clone(),
         coordinator: AnalysisCoordinator::default(),
-        engine: Arc::new(FakeEngine { log: log.clone(), workers, max_threads, hold_grid: AtomicBool::new(false) }),
+        engine: Arc::new(FakeEngine { log: log.clone(), workers, max_threads, hold_grid: AtomicBool::new(false), failing: Mutex::new(Vec::new()) }),
         sink: Arc::new(TestSink { log, shared, on_partial: Mutex::new(None), on_complete: Mutex::new(None) }),
         items,
     }
@@ -1029,4 +1033,128 @@ fn resume_keeps_todays_order_without_a_usable_side_file() {
     assert_eq!(missing, todays);
     assert_eq!(corrupt, todays);
     assert_eq!(no_dir, todays);
+}
+
+fn failure_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("ff-failmemo-{name}-{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+impl Harness {
+    fn remembering_failures(mut self, dir: &Path) -> Self {
+        self.coordinator = AnalysisCoordinator::default().with_failure_memo(FailureMemo::in_dir(dir.to_path_buf(), "test"));
+        self
+    }
+
+    fn runs_of(&self, name: &str) -> usize {
+        self.events().iter().filter(|e| matches!(e, Event::Ran(n, _) if n == name)).count()
+    }
+
+    fn fail_on(&self, names: &[&str]) {
+        *self.engine.failing.lock().unwrap() = names.iter().map(|n| n.to_string()).collect();
+    }
+
+    fn resume_without_known_failures(&self) -> (Vec<i64>, usize) {
+        let lib = self.shared.lock().unwrap();
+        let (work, skipped) = without_known_failures(&lib, &self.coordinator, resume_work(&lib, true).unwrap()).unwrap();
+        (resume_ids(&work), skipped)
+    }
+
+    fn work_for(&self, ids: &[i64]) -> Vec<AnalysisWorkItem> {
+        self.items.iter().filter(|(id, _)| ids.contains(id)).cloned().collect()
+    }
+}
+
+#[tokio::test]
+async fn resume_stops_retrying_a_track_after_two_failed_runs() {
+    let dir = failure_dir("resume");
+    let h = harness(3, 1, 8).remembering_failures(&dir);
+    h.fail_on(&["t2.wav"]);
+
+    let first = h.run_all(h.items.clone()).await;
+    assert!(matches!(first, RunOutcome::Finished { errors: 1, total: 3 }));
+    assert_eq!(h.resume_without_known_failures(), (vec![2], 0));
+
+    h.run_all(h.work_for(&[2])).await;
+
+    assert_eq!(h.resume_without_known_failures(), (vec![], 1));
+    assert_eq!(h.runs_of("t2.wav"), 2, "{:?}", h.events());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn an_explicit_request_for_a_skipped_track_runs_it_and_a_success_clears_the_entry() {
+    let dir = failure_dir("explicit");
+    let h = harness(2, 1, 8).remembering_failures(&dir);
+    h.fail_on(&["t2.wav"]);
+    h.run_all(h.items.clone()).await;
+    h.run_all(h.work_for(&[2])).await;
+    assert_eq!(h.resume_without_known_failures(), (vec![], 1));
+    let runs_before = h.runs_of("t2.wav");
+
+    let again = rerun_work(&h.shared.lock().unwrap(), &[2]).unwrap();
+    h.run_all(again).await;
+    assert_eq!(h.runs_of("t2.wav"), runs_before + 1, "the request ran although the track is skipped");
+    assert_eq!(h.resume_without_known_failures(), (vec![], 1), "it failed again, so it stays skipped");
+
+    h.fail_on(&[]);
+    let again = rerun_work(&h.shared.lock().unwrap(), &[2]).unwrap();
+    h.run_all(again).await;
+
+    assert!(h.unanalyzed().is_empty());
+    assert_eq!(h.resume_without_known_failures(), (vec![], 0));
+    assert!(!dir.join("analysis-failures.json").exists());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn a_priority_request_for_a_skipped_track_runs_it() {
+    let dir = failure_dir("priority");
+    let h = harness(2, 1, 8).remembering_failures(&dir);
+    h.fail_on(&["t2.wav"]);
+    h.run_all(h.items.clone()).await;
+    h.run_all(h.work_for(&[2])).await;
+    assert_eq!(h.resume_without_known_failures(), (vec![], 1));
+
+    h.fail_on(&[]);
+    prioritize_with_runner(h.shared.clone(), h.coordinator.clone(), h.items[1].clone(), h.sink.clone(), BackendEnv::default(), h.runner())
+        .await
+        .unwrap();
+
+    assert!(h.unanalyzed().is_empty());
+    assert_eq!(h.resume_without_known_failures(), (vec![], 0));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn a_result_that_cannot_be_stored_is_not_a_file_failure() {
+    let dir = failure_dir("not-stored");
+    let h = harness(2, 1, 8).remembering_failures(&dir);
+    let moved = dir.join("t1.wav");
+    write_tone_wav(&moved, 0.1, 440.0);
+    h.shared.lock().unwrap().relink_track(1, &moved).unwrap();
+
+    h.run_all(h.items.clone()).await;
+    h.run_all(h.work_for(&[1])).await;
+
+    assert_eq!(h.coordinator.failures().entry(1), None);
+    assert_eq!(h.coordinator.failures().entry(2), None);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn a_cancelled_analysis_is_not_a_file_failure() {
+    let dir = failure_dir("cancelled");
+    let h = harness(1, 1, 8).remembering_failures(&dir);
+    let run = h.run_all(h.items.clone());
+    let cancel = async {
+        h.wait_for(|e| e.iter().any(|e| matches!(e, Event::Start(..))).then_some(())).await;
+        h.coordinator.cancel();
+    };
+    tokio::join!(run, cancel);
+
+    assert_eq!(h.coordinator.failures().entry(1), None);
+    std::fs::remove_dir_all(&dir).ok();
 }

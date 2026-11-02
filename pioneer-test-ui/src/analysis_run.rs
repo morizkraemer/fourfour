@@ -9,6 +9,7 @@ use fourfour_analysis::service::Pass;
 use pioneer_library::{analysis_stage, LocalLibrary};
 use pioneer_usb_writer::models;
 
+use crate::analysis_failures::FailureMemo;
 use crate::analysis_order::{self, OrderJournal};
 use crate::analysis_backend::{resolve_runner, AnalyzerCache, BackendEnv, Runner, TrackEngine};
 use crate::analysis_python::{analyze_one_track, resolve_python_checked};
@@ -99,6 +100,7 @@ pub(crate) struct AnalysisCoordinator {
     jobs: Arc<Mutex<Jobs>>,
     staged: bool,
     whole_jobs: Option<usize>,
+    failures: FailureMemo,
     pub(crate) analyzers: AnalyzerCache,
 }
 
@@ -116,6 +118,7 @@ impl Default for AnalysisCoordinator {
             jobs: Arc::new(Mutex::new(Jobs::default())),
             staged: true,
             whole_jobs: None,
+            failures: FailureMemo::default(),
             analyzers: AnalyzerCache::default(),
         }
     }
@@ -134,6 +137,15 @@ impl AnalysisCoordinator {
     pub(crate) fn with_whole_jobs(mut self, jobs: usize) -> Self {
         self.whole_jobs = Some(jobs);
         self
+    }
+
+    pub(crate) fn with_failure_memo(mut self, failures: FailureMemo) -> Self {
+        self.failures = failures;
+        self
+    }
+
+    pub(crate) fn failures(&self) -> &FailureMemo {
+        &self.failures
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -494,6 +506,19 @@ pub(crate) fn resume_work_in_saved_order(
     })
 }
 
+/// Work for a launch or an "analyse all": `work` without the tracks whose file already failed twice (see
+/// `analysis_failures`). Explicit requests for tracks do not pass through here.
+pub(crate) fn without_known_failures(
+    lib: &LocalLibrary,
+    coordinator: &AnalysisCoordinator,
+    work: Vec<AnalysisWorkItem>,
+) -> Result<(Vec<AnalysisWorkItem>, usize), String> {
+    coordinator
+        .failures()
+        .skip_known(work, |id| lib.get_track(id).is_ok_and(|track| track.is_some()))
+        .map_err(|e| e.to_string())
+}
+
 pub(crate) fn merge_into_analysis_queue(
     coordinator: &AnalysisCoordinator,
     items: Vec<AnalysisWorkItem>,
@@ -535,6 +560,7 @@ pub(crate) enum RunOutcome {
     Finished { errors: u32, total: u32 },
 }
 
+const NOT_STORED: &str = "result not stored";
 const FAST_STAGES: u8 = analysis_stage::WAVEFORM | analysis_stage::KEY;
 const PYTHON_MAX_IN_FLIGHT: usize = 3;
 /// The waveform detail cache under the app data dir (`get_waveform_detail` in main.rs reads it).
@@ -604,6 +630,12 @@ fn file_name_of(path: &Path) -> String {
     path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string()
 }
 
+fn log_unsaved_failures(sink: &Arc<dyn AnalysisSink>, saved: std::io::Result<()>) {
+    if let Err(e) = saved {
+        sink.log(LogLevel::Dim, format!("Analysis failures not saved: {e}"));
+    }
+}
+
 fn record_outcome(
     shared: &SharedLibrary,
     sink: &Arc<dyn AnalysisSink>,
@@ -617,6 +649,11 @@ fn record_outcome(
     if outcome.is_err() && coordinator.is_cancelled() {
         sink.log(LogLevel::Dim, format!("{file_name} stopped by cancel"));
         return Ok(());
+    }
+    if let Err(message) = &outcome {
+        if !message.starts_with(NOT_STORED) {
+            log_unsaved_failures(sink, coordinator.failures().record_failure(track_id, source_path, message));
+        }
     }
     let completed = coordinator.completed.fetch_add(1, Ordering::Relaxed) + 1;
     let total = coordinator.total().max(completed);
@@ -632,10 +669,11 @@ fn record_outcome(
             track.map(|track| models::Track { tempo: (analysis.bpm * 100.0) as u32, key: analysis.key.clone(), ..track.clone() })
         })
         .map(|(stored, held)| (stored, held, detail))
-        .map_err(|e| format!("result not stored: {e}"))
+        .map_err(|e| format!("{NOT_STORED}: {e}"))
     });
     match stored {
         Ok((stored, held, detail)) => {
+            log_unsaved_failures(sink, coordinator.failures().record_success(track_id));
             sink.log(
                 LogLevel::Ok,
                 format!(
@@ -785,7 +823,9 @@ async fn run_now_lane(
             result
         }
     };
-    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, Stage::Whole, outcome)
+    let recorded = record_outcome(&shared, &sink, &coordinator, track_id, &source_path, Stage::Whole, outcome);
+    log_unsaved_failures(&sink, coordinator.failures().flush());
+    recorded
 }
 
 /// Analyse `item` as fast as possible: now lane inside an active run, a run of its own otherwise.
@@ -897,7 +937,8 @@ async fn run_with_resolver(
     }
     let _run_guard = RunGuard { coordinator: coordinator.clone() };
 
-    let outcome = run_registered(shared, coordinator, sink.clone(), app_data_dir, resolve, initial_total).await;
+    let outcome = run_registered(shared, coordinator.clone(), sink.clone(), app_data_dir, resolve, initial_total).await;
+    log_unsaved_failures(&sink, coordinator.failures().flush());
     if outcome.is_err() {
         sink.complete();
     }
@@ -997,7 +1038,7 @@ async fn run_registered(
             (Stage::Fast, Ok((result, detail))) => match store_fast_pass(&shared, &sink, track_id, &source_path, &result, &detail) {
                 Ok(()) => coordinator.hand_to_grid((track_id, source_path)),
                 Err(e) => {
-                    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, Err(format!("result not stored: {e}")))?;
+                    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, stage, Err(format!("{NOT_STORED}: {e}")))?;
                     coordinator.finish_background(track_id);
                 }
             },

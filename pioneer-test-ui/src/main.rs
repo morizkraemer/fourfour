@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod analysis_backend;
+mod analysis_failures;
 mod analysis_order;
 mod analysis_payload;
 mod analysis_priority;
@@ -41,11 +42,12 @@ use pioneer_library::{BeatPosition, LocalLibrary};
 use pioneer_usb_writer::models;
 
 use analysis_backend::{AnalysisBackend, BackendEnv};
+use analysis_failures::FailureMemo;
 use command_error::{CommandError, ErrorKind};
 use analysis_python::resolve_python;
 use analysis_run::{
-    merge_into_analysis_queue, rerun_work, resolve_analysis_work, AnalysisCoordinator, AnalysisSink, AnalysisWorkItem, LogLevel,
-    RunOutcome, SharedLibrary,
+    merge_into_analysis_queue, rerun_work, resolve_analysis_work, without_known_failures, AnalysisCoordinator, AnalysisSink,
+    AnalysisWorkItem, LogLevel, RunOutcome, SharedLibrary,
 };
 use track_fields::{apply_edits, TrackFieldEdits, TrackFields};
 use track_infos::build_track_infos;
@@ -303,6 +305,13 @@ impl AnalysisSink for TauriAnalysisSink {
     }
 }
 
+fn analysis_coordinator(app: &AppHandle) -> AnalysisCoordinator {
+    match app.path().app_data_dir() {
+        Ok(dir) => AnalysisCoordinator::default().with_failure_memo(FailureMemo::in_dir(dir, pioneer_usb_writer::VERSION)),
+        Err(_) => AnalysisCoordinator::default(),
+    }
+}
+
 fn analysis_backend_env(app: &AppHandle) -> BackendEnv {
     BackendEnv::from_process(config_path(app).ok(), app.path().app_data_dir().ok(), app.path().resource_dir().ok())
 }
@@ -381,7 +390,8 @@ async fn analyze_tracks(
     let pending: Vec<AnalysisWorkItem> = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
         let unanalyzed_ids = lib.get_unanalyzed_track_ids().map_err(CommandError::from_anyhow)?;
-        resolve_analysis_work(&lib, &unanalyzed_ids)?
+        let work = resolve_analysis_work(&lib, &unanalyzed_ids)?;
+        without_known_failures(&lib, &coordinator, work)?.0
     };
     run_track_analysis(app, shared, coordinator.inner().clone(), pending).await
 }
@@ -399,7 +409,12 @@ fn resume_analysis(
     let app_data_dir = app.path().app_data_dir().ok();
     let pending = {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        analysis_run::resume_work_in_saved_order(&lib, include_new, app_data_dir.as_deref())?
+        let work = analysis_run::resume_work_in_saved_order(&lib, include_new, app_data_dir.as_deref())?;
+        let (work, skipped) = without_known_failures(&lib, &coordinator, work)?;
+        if skipped > 0 {
+            debug_info(&app, &format!("Resume left out {skipped} tracks that failed analysis twice on an unchanged file"));
+        }
+        work
     };
     let queued = pending.len();
     if queued > 0 {
@@ -1542,7 +1557,7 @@ fn main() {
                 }
             }
             app.manage(Arc::new(ImportPlans::default()));
-            app.manage(AnalysisCoordinator::default());
+            app.manage(analysis_coordinator(app.handle()));
             app.manage(SharedArtworkThumbs::default());
             app.manage(Arc::new(waveform_detail::DetailWindows::default()));
 

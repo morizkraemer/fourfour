@@ -36,7 +36,7 @@ Scope: headless on the dev box. Queue logic tested with the stub engine; crash t
 
 ## Needs Merlin
 
-- Analysis failures are not stored, so undecodable or missing files retry at every launch. Needs a per-track failure marker (schema).
+- Nothing open for failures: they are remembered in a side file (see Failure memo). A per-track column would still be the cleaner home if the schema is opened for other reasons; the UI does not show the memo yet.
 
 ## Resume order
 
@@ -46,6 +46,21 @@ Scope: headless on the dev box. Queue logic tested with the stub engine; crash t
 - A missing, stale or corrupt file gives the old order. A run that finishes or is cancelled deletes the file. A run that ends in an error leaves it.
 - A new run overwrites the file with its own order, so a short "Analyze" after a kill replaces the old list; the rest falls back to the old order.
 - At launch, `.part` files older than 10 minutes in `waveform-detail/` that belong to another pid are removed. Files of this process are never touched.
+
+## Failure memo
+
+- A track whose analysis fails is remembered in `analysis-failures.json` in the app data dir, so launch resume and "Analyze all" stop retrying it. No schema change; same temp-file-then-rename write as the order file.
+- Per track id: the file path, size, mtime (ms), the error kind (`not_found`, `permission_denied`, `decode_failed`, `analysis_failed`, the `ErrorKind` names of r39), the attempt count and the time of the last attempt. The file also carries the app version (`pioneer_usb_writer::VERSION`); entries written by another version are ignored, so an analyzer fix retries everything once.
+- Kind: the file is gone (`not_found`) or unreadable (`permission_denied`) by stat; else `decode_failed` when the message names decoding, audio, a codec or an unsupported format; else `analysis_failed` (timeouts and anything else).
+- Skip rule: `resume_analysis` and `analyze_tracks` drop a track when its entry has 2 or more attempts and the track's path, size and mtime still equal the entry's. N is 2: one failure can be a hiccup (a file still being copied, a timeout on a loaded box, an unplugged drive), the second one in a later run is the file, and a hard failure costs at most two retries. A missing file stays skipped until it appears.
+- Cleared when: the file changed (size or mtime), the track points at another path (relink, relocate, id reuse), the track is gone, or the track analyses successfully. Those are checked when work is built, so a relink needs no hook. A failure after a change starts counting from 1.
+- Always retried: `analyze_track_ids` (Analyze selection, re-analyze), `prioritize_analysis` (play), `enqueue_analysis`. A failure there still counts, so a track that failed again stays skipped; a success clears it.
+- Not counted: cancels, a priority request that preempts a background job, and results that could not be stored (track removed or relinked while running).
+- Writes: the first failure of a run is written at once, then at most one write per 3 s; the run (and the now lane) flush what is left when they end. A kill -9 can lose the last 3 s of failures, which only means one more retry.
+- A missing, corrupt or wrong-version file, or no app data dir, is today's behaviour (nothing skipped); the next change rewrites it. Removed tracks are dropped the next time work is built.
+- Resume logs how many tracks it left out. There is no count on the status data yet: `resume_analysis` returns only the queued number, and changing that return is a UI contract change, so it is left for the UI task that renders it (`FailureMemo::skip_known` already returns the count).
+- Library switch: ids are per library, but entries are matched on path and file, so another library's entry for the same id is dropped, not applied.
+- Tests: `analysis_failures.rs` (skip after N, retry on changed size or mtime, missing file, relink, removed tracks, success, corrupt files, version, coalescing) and five in `analysis_run_tests.rs` (resume after two failed runs, explicit and priority requests retry, store failures and cancels do not count).
 
 ## Open items
 
