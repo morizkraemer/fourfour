@@ -505,3 +505,4 @@
 2026-11-02 15:40 orchestrator - decided: own prio r64-parked-refresh (sonnet medium; all parked review branches re-merged onto current ov-1028 as -v3 + parked-all-v3 incl. r52, validated)
 2026-11-02 15:53 orchestrator r62-leak-spec handed back ef0fbcb (no per-cycle leak under 6x/16x throttle; settle sampling + counters in failure message; 1/70 unexplained fail remains), merging
 2026-11-02 16:02 orchestrator r62-leak-spec landed (CHECKS-OK, smoke 113 passed 0 flaky)
+2026-11-02 16:02 orchestrator - decided: own prio r65-win-crypto (sonnet medium; research doc on the Windows libcrypto gap, proposal for brother's Cargo.toml)
