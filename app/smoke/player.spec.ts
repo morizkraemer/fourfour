@@ -195,11 +195,15 @@ test('a hot cue set at the playhead snaps to the grid only with Q on', async ({ 
   expect(Math.abs(free - HOT_CUE_A_MS)).toBeLessThan(2000);
   expect(distanceToBeat(free)).toBeGreaterThan(1);
 
+  const lastSaveHasCueB = async () => {
+    const last = (await smoke.invokes('set_cues')).at(-1);
+    return !!last && last.cues.some((c: { hot_cue_number: number }) => c.hot_cue_number === 2);
+  };
   await page.locator('.ff-xp__pad[data-pad="B"]').click({ modifiers: ['Alt'] });
+  await expect.poll(lastSaveHasCueB).toBe(false);
   await quantizeButton(page).click();
-  const saves = (await smoke.invokes('set_cues')).length;
   await page.keyboard.press('Shift+C');
-  await expect.poll(async () => (await smoke.invokes('set_cues')).length).toBeGreaterThan(saves);
+  await expect.poll(lastSaveHasCueB).toBe(true);
   const snapped = (await smoke.invokes('set_cues')).at(-1)!.cues.find((c: { hot_cue_number: number }) => c.hot_cue_number === 2).time_ms as number;
   expect(distanceToBeat(snapped)).toBeLessThan(1);
   expect(snapped).toBe(nearestBeat(free));
