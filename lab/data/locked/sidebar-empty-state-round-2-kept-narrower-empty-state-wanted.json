@@ -1,0 +1,8 @@
+{
+  "id": "sidebar-empty-state-round-2-kept-narrower-empty-state-wanted",
+  "kind": "decision",
+  "title": "Sidebar empty state round 2 kept, narrower empty state wanted",
+  "summary": "Merlin 2026-11-02: keep; idea: limit the sidebar empty-state width at full width and let it expand when a list is loaded",
+  "source": "ov1028-sidebar",
+  "date": "2026-11-02"
+}

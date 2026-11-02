@@ -16,7 +16,7 @@ Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a
 AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-1. Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
+1. [answered 2026-11-02: Keep as built (lab card)] Sync round 3 (https://claude.ai/artifact/1cCJTk3r92jC6kmJmz1nnJ): panel closed → whole stick view as drop target, or a "Put on stick" strip? — rec: strip — branch: none
 2. Copy a playlist to another stick: Keep updated on by default? — rec: yes — branch: none
 3. Build round 3 into the app (replaces ui-sync-flow's first attempt, keeps the stick header)? — rec: yes after 1–2 — branch: ui-sync-flow
 4. [accepted 2026-10-31 per rec, landed on ov-1028 3e5ec61; clean 56.3% test; dmg bundle path untested] Key licence: shipped cyanbox templates are fit on GiantSteps MTG (labels unlicensed). A clean model fit only on CC0/CC BY Freesound loops (FSL10K) is built behind a one-line switch: Beatport test exact 56.3% vs 60.3% shipped (below the 60% bar); needs attribution (Ramires et al. 2020 + CC BY uploaders). docs/analysis/key-licence-2026-10-31.md - rec: ship clean-fsl for the public beta (legal risk over 4 points), keep improving it - branch: ov-1028 (switch SHIPPED in cyankey.rs)
@@ -38,6 +38,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 36. WebKit startup (r29): the design-system reset `*, *::before, *::after { box-sizing }` makes WebKit resolve two pseudo styles per element; `* { box-sizing }` cuts row style time ~40%, WebKit 10k first row 1.84 -> 1.37 s (loaded box), screenshots byte-identical. Edits prototyping/viewport/design-system/base.css (AGENTS fence) - rec: allow and land (r45 confirmed in a full build: WebKit row style -32%, pixel-identical; a second fenced step - cell geometry as per-column custom properties - gives ~10% more) - branch: r29-css-v2 (or r46-dsrows = r29 fix + cell geometry patch; rec: land both together)
 37. Library recovery panel (r38): when library.db fails to open, the list shows why (newer version / damaged / in use) plus Open another library, Restore a backup, Start a new library, Try again (locked); failed file never touched; screenshots ~/.cache/r38/*.png on dev. Copy uses the working title ("newer version of fourfour") - rec: land after review, swap the name for "the app" - branch: r38-recovery
 Note on 33/34/35/36/37: land the -v2 branches (current with ov-1028), or parked-all-v2 for all of them at once (r18+r38 initLibrary conflict resolved there).
+Lab review 2026-11-02 (Merlin): sync round 3 Keep, skeleton round 2 Keep, scroll while analysing Stable, sidebar empty state round 2 Keep + idea: limit the empty-state width at full width, expand when a list loads (built as r50-sidebar-empty on a branch). Locked in lab/data/locked.
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -77,7 +78,7 @@ open own-priority items:
 - r45-rowcost: [landed] no app-side lever; all per-row WebKit gains are in the fenced design system (reset fix -32% style, cell geometry as custom properties ~10% more); bench_startup build fixed
 - r46-dsrows: [parked, branch r46-dsrows 220f237 on r29-css-v2] cell widths as table-level custom properties; pixel-identical incl. resize/reorder; resize touches 0 body attributes (was 560); per-row gain within noise
 - r47-beta-checklist: [landed fd36549] docs/release/beta-checklist-2026-11.md on ov-1028; top blockers: bundle id + data migration (24), no signing/notarization (Apple account), key 56% + bar-1 listen (4/30/16), CDJ-3000 test of current export + manifest-aware wipe (brother), no LICENSE/complete notices + first CI run (15)
-- r48-logs: rotating log file + panic hook + frontend error forwarding, no UI [running]
+- r48-logs: [merging] rotating log 3x5 MB (~/Library/Logs/<bundle id>), panic hook, frontend errors forwarded, log_directory command; no UI
 parked for Merlin (land the -v2 branches, current with ov-1028; parked-all-v2 a87f361 = all at once): r18-errors-v2 (Waiting 33), r17-a11y-v2 (34), r31-cover-cap-v2 (35), r29-css-v2 (36), r38-recovery-v2 (37); r15-reveal (not worth landing), r16-quant (dropped), r35-ci (Waiting 15)
 next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028 (now with CoreML, font preload, error kinds; probe has longest_busy/pending_frames/page origin); compare r15-reveal and r29-css-v2; 50k only with >= 40 GB free (script now cleans up and stops when low)
 review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (app on ov-1028, mock data; rebuilt after merges)

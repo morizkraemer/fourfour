@@ -1,0 +1,8 @@
+{
+  "id": "usb-sync-round-3-kept",
+  "kind": "decision",
+  "title": "USB sync round 3 kept",
+  "summary": "Merlin 2026-11-02: keep as built (stick view, Put on stick strip, copy with Keep updated on)",
+  "source": "ov1028-sync-r3",
+  "date": "2026-11-02"
+}

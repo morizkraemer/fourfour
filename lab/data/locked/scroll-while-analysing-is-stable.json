@@ -1,0 +1,8 @@
+{
+  "id": "scroll-while-analysing-is-stable",
+  "kind": "decision",
+  "title": "Scroll while analysing is stable",
+  "summary": "Merlin 2026-11-02: BPM-sorted list stays stable while tracks analyse",
+  "source": "ov1028-scroll-analysing",
+  "date": "2026-11-02"
+}

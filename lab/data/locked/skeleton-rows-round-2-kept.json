@@ -1,0 +1,8 @@
+{
+  "id": "skeleton-rows-round-2-kept",
+  "kind": "decision",
+  "title": "Skeleton rows round 2 kept",
+  "summary": "Merlin 2026-11-02: keep the skeleton that uses the real row layout",
+  "source": "ov1028-skeleton",
+  "date": "2026-11-02"
+}
