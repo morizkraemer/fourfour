@@ -476,3 +476,4 @@
 2026-11-02 10:58 orchestrator r52-no-python handed back 4d62fa8 (Python path removed, engine picker gone from Settings; smoke 113/0, npm 902 passed), parked: user-visible Settings change -> Waiting 38; r51 worker resumed for the ANLZ fixture fix
 2026-11-02 11:22 orchestrator r51-migration-test fixed a99016e (fixture dir with ANLZ tree, 531 passed 0 failed), merging; decided: own prio r53-user-docs (sonnet medium; checklist 16 draft, parked for review)
 2026-11-02 11:24 orchestrator r53-user-docs handed back 571a638 (6 pages, 20 to-confirm marks), parked -> Waiting 39
+2026-11-02 11:24 orchestrator - decided: own prio r54-notices (sonnet medium; checklist 6.2/6.4: stdlib notices generator from cargo metadata, no installs, not bundled)
