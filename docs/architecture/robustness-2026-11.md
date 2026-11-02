@@ -80,6 +80,45 @@ Branch `r27-dbsafe` from `ov-1028`. Tests: `cargo test -p pioneer-library --test
 
 Left for a recovery screen (Merlin's call): offering "choose another library", "restore a backup" and "start a new library (keep the old file aside)" from the failed state, and a clearer message than "Failed to load library" in the status bar. `change_library_path` and `restore_backup` need the library state today, so they would need a small change to work from the failed state.
 
+## Error kinds
+
+Branch `r39-errkinds` from `ov-1028`. No visible change: every `message` is the text the command sent before, and `String(err)` in the app is unchanged.
+
+A converted command rejects with `{ kind, message, path? }` (`CommandError`, `pioneer-test-ui/src/command_error.rs`). In the app, `app/src/services/command-error.ts` wraps `invoke`: a typed rejection becomes a `CommandError` (an `Error` whose `message` and `String(err)` are the old text, plus `.kind` and `.path`); a plain string rejection (Tauri's own errors such as "state not managed", commands not converted yet) passes through as the same string. New callers read `commandErrorKind(err)` and `commandErrorPath(err)`; they are `null` for a string.
+
+| Kind | Raised by |
+|---|---|
+| `library_newer_version` | library schema or backup format newer than the app (marked at the source in `pioneer-library`) |
+| `library_damaged` | not a database, corrupt, no schema version, version 0 (marked at the source, plus SQLite codes) |
+| `library_locked` | SQLite busy or locked |
+| `not_found` | `io::ErrorKind::NotFound` (play, reveal, backup read) |
+| `permission_denied` | `PermissionDenied`, read-only file system, SQLite read-only |
+| `disk_full` | `StorageFull`, ENOSPC, SQLite full |
+| `no_space_on_stick` | the sync engine's "Not enough space on X" (see below) |
+| `drive_gone` | a stick or volume path that is missing, ENODEV, ENXIO, EIO; "X is not mounted" |
+| `stick_busy` | "X is already being synced"; eject output that says busy, in use or dissented |
+| `decode_failed` | unsupported or corrupt audio, no audio track, decoder crash |
+| `audio_output_unavailable` | no output device, stream failed, device lost |
+| `models_missing` | `NO_BACKEND_ERROR` (no analysis backend) |
+| `analysis_failed` | every track of a run failed |
+| `invalid_backup` | not a backup, damaged, unsafe path, no library inside, incomplete |
+| `other` | everything else, including all errors of commands not converted |
+
+`path` is set when the command knows the file: the library file for open failures, the audio file for play, the stick folder for stick commands, the backup file for `read_backup` and `restore_backup`. After a restore that failed past the swap (and for "could not save the current library first"), `path` is the safety copy of the previous library.
+
+Converted commands: `load_state` (the startup open failure carries kind and the library path), `change_library_path`, `reset_library`, `save_state`, `remove_tracks`, `plan_import`, `commit_import`, `analyze_tracks`, `analyze_track_ids`, `prioritize_analysis`, `export_backup`, `read_backup`, `restore_backup`, `write_usb`, `sync_usb_many`, `plan_usb_sync`, `read_usb_state`, `get_volume_capacity`, `get_stick` and the four `stick_*` edits, `eject_volume`, `wipe_usb`, `reveal_in_finder`, `playback_play`, `playback_resume`, `playback_seek`, `playback_configure`, `playback_set_output_device`. The `playback-error` event (decode failures while playing) now also carries `kind`. `sync_usb_many` and the `usb-sync-stick-report` event add `error_kind` next to `error` in each stick report.
+
+Not converted (still `other`, text only): the edit commands (`set_track_bpm`, `set_track_key`, `update_track_fields`, ...), the Rekordbox import commands, settings toggles, `get_mounted_volumes`, and the plan errors of the sync engine other than the three above.
+
+How it is classified: `pioneer-library` marks its own failures where they are raised (`failure.rs`: `Failure` carries a `LibraryFailure`, same message text) and reads SQLite error codes from the error chain; `command_error.rs` reads `io::Error` from the chain. Nothing in `pioneer-usb-writer/src` or the sync engine changed. The engine reports a stick's failure as text only (`StickReport.error`), so `stick_commands.rs` reads its three sentences ("Not enough space on", "Cannot open" or "Cannot read free space on", "is already being synced"); its tests run the real engine and fail if the wording drifts. The same applies to the eject tool's stderr (busy words). If the engine later carries a kind itself, delete `sync_error_kind`.
+
+Tests: `cargo test -p pioneer-library failure`, `refused_backups_carry_a_failure_kind`, `robust_store`; `cargo test -p pioneer-test-ui --bin pioneer-test-ui command_error stick_commands playback::tests startup_`; `npm test` (`command-error.test.ts`).
+
+### Switching r18 and r38
+
+- r18 `userErrors.ts`: keep the `...FailureText` helpers and their copy, but branch on `commandErrorKind(err)` first and fall back to the pattern table only for a `null` kind or `other`. Mapping: `disk_full` and `no_space_on_stick` to the disk-full and "Not enough space" copy (the stick one passes its message through), `permission_denied`, `not_found`, `drive_gone`, `library_locked` ("busy"), `library_newer_version`, `library_damaged`, `models_missing` (row 13), `analysis_failed` (row 14), `stick_busy` (rows 50, 52: sync and eject read differently by call site), `decode_failed` (row 2), `audio_output_unavailable` (rows 3, 4). `invalid_backup` is one kind for the five backup refusals, so rows 58 and 60 lose their per-cause sentences unless Merlin wants them back as separate kinds. The restore safety path is `commandErrorPath(err)`; drop the `SAFETY_COPY` regex. Playback: `playback-error` events have `kind` and `path`, so `playbackFailureText` no longer needs the file name from the text. Still text-only until converted: edit validation (rows 32 to 34) and Rekordbox (rows 22 to 25).
+- r38 `libraryOpenFailure.ts`: for `load_state` (and `change_library_path`) read `commandErrorKind(err)`: `library_newer_version` is `newer`, `library_damaged` is `damaged`, `library_locked` is `locked`, anything else is `unknown`. Drop `OPEN_FAILURE_PREFIXES`, `LOCKED` and `DAMAGED`. A `load_state` failure is an open failure when its `path` is set (the open error carries the library file; the later "library is not open" and read errors do not). The `recover_*` commands in `recovery_commands.rs` should return `CommandError` the same way (`CommandError::from_anyhow_chain(e).with_path(...)`), so `recoveryFailureText` can read their kind instead of the text.
+
 ## Run
 
 `cargo test -p pioneer-test-ui --bin pioneer-test-ui robustness -- --nocapture` (about 15 s with the decode engine, 5 min with the real analyzer and `FOURFOUR_MODELS_DIR=~/.cache/fourfour-models`); `cargo test -p fourfour-analysis-rs --test messy_audio -- --include-ignored` with weights; `cargo test -p pioneer-library --test robust_store`. Permission cases skip as root.
