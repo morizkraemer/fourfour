@@ -3,8 +3,8 @@ export const RIBBON_TOP_PX = 28;
 export const RIBBON_TILE_PX = 40;
 export const RIBBON_GAP_PX = 6;
 
-export interface RibbonFit {
-  covers: string[];
+export interface RibbonFit<T = string> {
+  covers: T[];
   more: number;
 }
 
@@ -13,7 +13,7 @@ export function ribbonSlots(heightPx: number): number {
   return Math.max(0, Math.floor(room / (RIBBON_TILE_PX + RIBBON_GAP_PX)));
 }
 
-export function fitRibbonCovers(covers: string[], heightPx: number, reservedSlots = 0): RibbonFit {
+export function fitRibbonCovers<T = string>(covers: T[], heightPx: number, reservedSlots = 0): RibbonFit<T> {
   const slots = Math.max(0, ribbonSlots(heightPx) - reservedSlots);
   if (covers.length <= slots) return { covers, more: 0 };
   const shown = Math.max(0, slots - 1);

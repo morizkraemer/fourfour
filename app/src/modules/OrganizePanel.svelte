@@ -13,6 +13,8 @@
   import { dnd } from '../stores/dnd.svelte.ts';
   import { dropFlash, cardKey, boardDropTarget } from '../stores/organize-drop.svelte.ts';
   import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
+  import { artwork } from '../stores/artwork.svelte.ts';
+  import { trackIdsWithCover } from '../lib/coverTracks.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
   import { fitRibbonCovers } from '../lib/ribbonFit.ts';
@@ -96,13 +98,9 @@
 
   let railHeight = $state(0);
 
-  const allRailCovers = $derived.by(() => {
-    const target = ui.organize.target;
-    if (!target) return [];
-    return tracksForSidebarSource(target.id)
-      .map((t) => t.cover)
-      .filter(Boolean);
-  });
+  const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
+
+  const allRailCoverIds = $derived(trackIdsWithCover(boardTracks));
 
   const ribbonHover = $derived(dnd.kind === 'tracks' && dnd.dropRibbon);
   const boardDropKey = $derived.by(() => {
@@ -111,9 +109,10 @@
   });
   const landed = $derived(!!boardDropKey && dropFlash.key === boardDropKey && dropFlash.added > 0);
   const slotMode = $derived(landed ? 'landed' : ribbonHover && ui.organize.target ? 'hint' : null);
-  const railFit = $derived(fitRibbonCovers(allRailCovers, railHeight, slotMode ? 1 : 0));
+  const railFit = $derived(fitRibbonCovers(allRailCoverIds, railHeight, slotMode ? 1 : 0));
+  const railCovers = $derived(railFit.covers.map((id) => artwork.get(id, true)).filter(Boolean));
 
-  const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
+  $effect(() => artwork.keep('organize-rail', () => railFit.covers));
   const summary = $derived(summarizeBoard(boardTracks));
   const railTrackCount = $derived(summary.count);
   const subtitle = $derived(
@@ -305,7 +304,7 @@
           {/if}
         </div>
       {/if}
-      {#each railFit.covers as coverUrl}
+      {#each railCovers as coverUrl}
         <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
       {/each}
       {#if railFit.more > 0}

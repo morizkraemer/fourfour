@@ -4,6 +4,8 @@ import { dnd } from './dnd.svelte.ts';
 import { playlistIdsInSelection } from '../lib/playlistSelection.ts';
 import { stickDropLabel } from '../lib/stickDrop.ts';
 import { expandOrganize, type OrganizeTarget } from './ui.svelte.ts';
+import { artwork } from './artwork.svelte.ts';
+import { trackIdsWithCover } from '../lib/coverTracks.ts';
 
 export type CardDropTarget =
   | { kind: 'playlist'; playlistId: number }
@@ -16,7 +18,10 @@ export const dropFlash = $state({
   text: '',
   added: 0,
   cover: null as string | null,
+  coverTrackId: null as number | null,
 });
+
+artwork.keep('drop-flash', () => (dropFlash.coverTrackId === null ? [] : [dropFlash.coverTrackId]));
 
 let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -31,25 +36,35 @@ export function dropConfirmation(requested: number, added: number): string {
   return skipped > 0 ? `${addedText} · ${skipped} already there` : addedText;
 }
 
-function showFlash(key: string, text: string, added: number, cover: string | null) {
+interface FlashCover {
+  trackId: number;
+  url: string;
+}
+
+function showFlash(key: string, text: string, added: number, cover: FlashCover | null) {
   if (flashTimer) clearTimeout(flashTimer);
   dropFlash.key = key;
   dropFlash.text = text;
   dropFlash.added = added;
-  dropFlash.cover = cover;
+  dropFlash.cover = cover?.url ?? null;
+  dropFlash.coverTrackId = cover?.trackId ?? null;
   flashTimer = setTimeout(() => {
     dropFlash.key = null;
     dropFlash.text = '';
     dropFlash.added = 0;
     dropFlash.cover = null;
+    dropFlash.coverTrackId = null;
   }, FLASH_MS);
 }
 
-function firstCover(trackIds: number[]): string | null {
+const FLASH_COVER_CANDIDATES = 4;
+
+function firstCover(trackIds: number[]): FlashCover | null {
   const byId = new Map(library.tracks.map((t) => [t.id, t]));
-  for (const id of trackIds) {
-    const cover = byId.get(id)?.cover;
-    if (cover) return cover;
+  const tracks = trackIds.flatMap((id) => byId.get(id) ?? []);
+  for (const trackId of trackIdsWithCover(tracks, FLASH_COVER_CANDIDATES)) {
+    const url = artwork.get(trackId, true);
+    if (url) return { trackId, url };
   }
   return null;
 }

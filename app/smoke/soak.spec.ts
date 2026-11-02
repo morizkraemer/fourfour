@@ -10,6 +10,8 @@ const TRACKS = Number(process.env.FF_PERF_TRACKS ?? 0);
 const REPORT = process.env.FF_SOAK_OUT;
 const SNAPSHOT_DIR = process.env.FF_SOAK_SNAPSHOT_DIR;
 const ANALYSED_IDS = 60;
+const COVER_MIN_BYTES = 8192;
+const COVER_URL_LIMIT = 200;
 const WARMUP_CYCLES = Number(process.env.FF_SOAK_WARMUP ?? 3);
 
 interface Sample {
@@ -24,13 +26,14 @@ interface Sample {
   invokes: number;
   timers: number;
   blobUrls: number;
+  coverUrls: number;
 }
 
 async function sample(page: Page, cdp: CDPSession, started: number, cycle: number): Promise<Sample> {
   await cdp.send('HeapProfiler.collectGarbage');
   const { usedSize } = (await cdp.send('Runtime.getHeapUsage')) as { usedSize: number };
   const counters = (await cdp.send('Memory.getDOMCounters')) as { documents: number; nodes: number; jsEventListeners: number };
-  const inPage = await page.evaluate(() => {
+  const inPage = await page.evaluate((coverMinBytes) => {
     const w = window as unknown as SmokeWindow & Record<string, unknown>;
     const invokes = w.__smokeInvokes.length;
     w.__smokeInvokes.length = 0;
@@ -40,8 +43,9 @@ async function sample(page: Page, cdp: CDPSession, started: number, cycle: numbe
       invokes,
       timers: (window as unknown as { __soakTimers: Set<number> }).__soakTimers.size,
       blobUrls: (window as unknown as { __soakBlobUrls: Set<string> }).__soakBlobUrls.size,
+      coverUrls: [...(window as unknown as { __soakBlobSizes: Map<string, number> }).__soakBlobSizes.values()].filter((bytes) => bytes >= coverMinBytes).length,
     };
-  });
+  }, COVER_MIN_BYTES);
   return {
     minute: Math.round(((Date.now() - started) / 60_000) * 10) / 10,
     cycle,
@@ -77,6 +81,21 @@ async function fling(page: Page) {
         requestAnimationFrame(tick);
       }),
   );
+}
+
+async function selectManyTracks(page: Page) {
+  const scroll = page.locator('.ff-table__scroll');
+  await scroll.evaluate((el) => (el.scrollTop = 0));
+  for (let screen = 0; screen < 8; screen++) {
+    const boxes = await page.locator('[data-track-row]').evaluateAll((els) =>
+      els.map((el) => el.getBoundingClientRect()).filter((r) => r.height > 0).map((r) => ({ x: r.x + 120, y: r.y + r.height / 2 })),
+    );
+    for (const box of boxes) {
+      await page.mouse.click(box.x, box.y);
+      await page.waitForTimeout(20);
+    }
+    await scroll.evaluate((el) => (el.scrollTop += el.clientHeight - 60));
+  }
 }
 
 async function searchTypeAndClear(page: Page, round: number) {
@@ -169,16 +188,20 @@ test.describe('soak', () => {
       w.__smokeArtwork = true;
       w.__soakTimers = new Set();
       const blobUrls = new Set<string>();
+      const blobSizes = new Map<string, number>();
       (w as unknown as { __soakBlobUrls: Set<string> }).__soakBlobUrls = blobUrls;
+      (w as unknown as { __soakBlobSizes: Map<string, number> }).__soakBlobSizes = blobSizes;
       const create = URL.createObjectURL.bind(URL);
       const revoke = URL.revokeObjectURL.bind(URL);
       URL.createObjectURL = (source: Blob | MediaSource) => {
         const url = create(source);
         blobUrls.add(url);
+        blobSizes.set(url, (source as Blob).size ?? 0);
         return url;
       };
       URL.revokeObjectURL = (url: string) => {
         blobUrls.delete(url);
+        blobSizes.delete(url);
         revoke(url);
       };
       const set = window.setInterval.bind(window);
@@ -203,6 +226,7 @@ test.describe('soak', () => {
       ['palette', () => paletteOpenClose(page)],
       ['playlists', () => switchPlaylists(page)],
       ['load and seek', (round) => loadAndSeek(page, round)],
+      ['select tracks', () => selectManyTracks(page)],
       ['settings', () => settingsOpenClose(page)],
       ['analysis events', (round) => analysisEvents(page, round)],
     ];
@@ -263,6 +287,7 @@ test.describe('soak', () => {
       callbacks: last.callbacks - first.callbacks,
       timers: last.timers - first.timers,
       blobUrls: last.blobUrls - first.blobUrls,
+      coverUrls: last.coverUrls,
     };
     console.log(`soak growth ${JSON.stringify(growth)}`);
     if (REPORT) writeFileSync(REPORT, JSON.stringify({ samples, growth }, null, 2));
@@ -271,6 +296,7 @@ test.describe('soak', () => {
     expect(growth.documents, 'documents').toBeLessThanOrEqual(0);
     expect(growth.timers, 'intervals left running').toBeLessThanOrEqual(0);
     expect(last.blobUrls, 'object URLs alive').toBeLessThanOrEqual(2600);
+    expect(Math.max(...samples.map((x) => x.coverUrls)), 'cover object URLs alive').toBeLessThanOrEqual(COVER_URL_LIMIT);
     expect(rows(page).first()).toBeVisible();
   });
 });
