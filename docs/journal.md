@@ -504,3 +504,4 @@
 2026-11-02 15:40 orchestrator r63-ci handed back fbb1ba6 (5 jobs; local dev-bins, notices drift, smoke factor 2 green; actionlint unavailable), parked -> Waiting 15
 2026-11-02 15:40 orchestrator - decided: own prio r64-parked-refresh (sonnet medium; all parked review branches re-merged onto current ov-1028 as -v3 + parked-all-v3 incl. r52, validated)
 2026-11-02 15:53 orchestrator r62-leak-spec handed back ef0fbcb (no per-cycle leak under 6x/16x throttle; settle sampling + counters in failure message; 1/70 unexplained fail remains), merging
+2026-11-02 16:02 orchestrator r62-leak-spec landed (CHECKS-OK, smoke 113 passed 0 flaky)
