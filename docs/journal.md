@@ -470,3 +470,4 @@
 2026-11-02 16:34 orchestrator r50-sidebar-empty built (branch 4372b8c; empty organize panel capped at left sidebar width, docked list uses stored width; smoke 115/0 failed); lab card round 3 committed on master
 2026-11-02 09:47 orchestrator r48-logs-fix handed back 79750de (cause: smoke mock rejected log_frontend sent for benign ResizeObserver notices; mock no-ops + filter; chromium+webkit smoke 113 passed 0 failed), merging with pipefail checks
 2026-11-02 09:59 orchestrator r48-logs-fix landed on ov-1028 19f34dd (CHECKS-OK, smoke 113 passed 0 failed)
+2026-11-02 10:00 orchestrator - decided: own prio r51-migration-test (sonnet medium; beta checklist 11.2: beta library fixture, newer-schema refusal)
