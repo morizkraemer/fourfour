@@ -515,3 +515,4 @@
 2026-11-02 17:31 orchestrator r67-async-volumes landed 6847736 (CHECKS-OK, smoke 113 passed); decided: own prio r69-stick-busy (sonnet high; per-volume busy guard so write/wipe can leave the main thread)
 2026-11-02 17:46 orchestrator r68 handed back 1e14d01 (walk fine, test time was real-model analysis; symlink test now import-only 84 s -> 1 s); 12 more robustness tests HANG with models under load -> worker extended on same branch
 2026-11-02 17:59 orchestrator r69-stick-busy handed back 5a57a98 (BusySticks guard, write/wipe async, reused StickBusy kind), parked -> Waiting 40: new copy + multi-stick sync refusal is user-visible
+2026-11-02 17:59 orchestrator - decided: own prio r70-sync-audit (sonnet medium; measure every sync Tauri command at 10k/50k, move slow ones off the main thread)
