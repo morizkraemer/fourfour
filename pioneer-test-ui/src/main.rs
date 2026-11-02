@@ -595,7 +595,7 @@ fn set_test_cues(
 }
 
 /// List removable and external volumes so the frontend can offer a target-drive picker.
-#[tauri::command]
+#[tauri::command(async)]
 fn get_mounted_volumes() -> Result<Vec<String>, String> {
     volumes::list_removable_volumes()
 }
@@ -651,7 +651,7 @@ fn eject_failure(stderr: &str) -> CommandError {
 }
 
 /// Eject a mounted volume (macOS: `diskutil eject`, Linux: `udisksctl unmount`, falling back to `umount`).
-#[tauri::command]
+#[tauri::command(async)]
 fn eject_volume(path: String) -> Result<(), CommandError> {
     #[cfg(target_os = "macos")]
     {
