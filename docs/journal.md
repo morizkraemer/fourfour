@@ -457,3 +457,4 @@
 2026-11-02 13:24 orchestrator r44-version handed back (single version source = pioneer-test-ui crate; tauri.conf version removed; ANALYSIS_VERSION const for the failure memo), merging; decided: land although Settings > Advanced now shows 0.1.0 instead of 0.9.14 (the writer crate's number was wrong there)
 2026-11-02 13:25 orchestrator - decided: own prio r45-rowcost (opus; WebKit row style/layout cost)
 2026-11-02 13:37 orchestrator r44-version landed on ov-1028
+2026-11-02 14:09 orchestrator r45-rowcost handed back (no app-side lever; fenced design-system patch confirmed -32% WebKit row style; bench_startup build fix), merging; Waiting 36 updated
