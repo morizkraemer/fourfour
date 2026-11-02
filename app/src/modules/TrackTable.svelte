@@ -12,6 +12,7 @@
     ContextMenu,
     DragGhost,
     DropLine,
+    columnVars,
   } from '$ds';
   import {
     library,
@@ -716,6 +717,7 @@
   class="ff-table"
   class:ff-table--embedded={embedded}
   class:ff-table--drop-target={isDropTarget}
+  style={columnVars(columns)}
   data-source-id={effectiveSource}
   onmousedown={() => {}}
   oncontextmenu={openListMenu}

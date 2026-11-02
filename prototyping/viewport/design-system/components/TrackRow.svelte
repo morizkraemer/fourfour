@@ -1,5 +1,5 @@
 <script module>
-  import { columnCellStyle } from '../utils/column-layout.js';
+  import { columnCellClass } from '../utils/column-layout.js';
 
   // Default text column layout. The table module passes its own Pencil-matching
   // column set; this is the fallback so the standalone artboard stays aligned.
@@ -15,14 +15,14 @@
 
   const SPECIAL_KEYS = new Set(['tag', 'fav', 'wave', 'cover', 'key', 'rating', 'color']);
   const DASH_KEYS = new Set(['album', 'genre', 'year']);
+  const TEXT_KINDS = new Set(['text', 'dash', 'key']);
 
   function buildPlan(columns) {
-    return columns.map((col) => ({
-      col,
-      kind: SPECIAL_KEYS.has(col.key) ? col.key : DASH_KEYS.has(col.key) ? 'dash' : 'text',
-      cls: `ff-trow__cell ff-trow__cell--${col.key} ff-trow__cell--text`,
-      style: columnCellStyle(col),
-    }));
+    return columns.map((col) => {
+      const kind = SPECIAL_KEYS.has(col.key) ? col.key : DASH_KEYS.has(col.key) ? 'dash' : 'text';
+      const base = `ff-trow__cell ff-trow__cell--${col.key}`;
+      return { col, kind, cls: (TEXT_KINDS.has(kind) ? `${base} ff-trow__cell--text` : base) + columnCellClass(col) };
+    });
   }
 
   // Every row of a table gets the same columns, and a sort hands them over as a new array with the same layout: one
@@ -32,7 +32,7 @@
   const plansByLayout = new Map();
 
   function layoutSignature(columns) {
-    return columns.map((c) => `${c.key}|${c.flex ? 1 : 0}|${c.width}|${c.minWidth}|${c.align}`).join(';');
+    return columns.map((c) => `${c.key}|${c.flex ? 1 : 0}|${c.align}`).join(';');
   }
 
   function cellPlan(columns) {
@@ -75,6 +75,7 @@
   let previewStars = $state(0);
 
   let plan = $derived(cellPlan(columns));
+  let waveWidth = $derived(columns.find((c) => c.key === 'wave')?.width ?? 120);
 
   function waveRect(e) {
     return (e.currentTarget.querySelector('canvas') ?? e.currentTarget).getBoundingClientRect();
@@ -101,7 +102,7 @@
   {#each plan as cell}
     {@const col = cell.col}
     {#if cell.kind === 'tag'}
-      <div class="ff-trow__cell ff-trow__cell--tag" style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         {#if track.tag && track.tag.type === 'digit'}
           <TagBadge value={track.tag.value} variant="color" color={track.tag.color} size="sm" />
         {:else if track.tag}
@@ -109,7 +110,7 @@
         {/if}
       </div>
     {:else if cell.kind === 'fav'}
-      <div class="ff-trow__cell ff-trow__cell--fav" style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         <div class="ff-trow__fav{favOn(track.fav) ? ' ff-trow__fav--on' : ''}">
           {#if favOn(track.fav) && track.fav !== true}
             <span class="ff-trow__fav-digit">{track.fav}</span>
@@ -120,8 +121,8 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="ff-trow__cell ff-trow__cell--wave{onWaveSeek ? ' ff-trow__cell--seekable' : ''}"
-        style={cell.style}
+        class="{cell.cls}{onWaveSeek ? ' ff-trow__cell--seekable' : ''}"
+       
         data-col-key={col.key}
         data-wave-seek={onWaveSeek ? '' : undefined}
         onpointermove={onWaveSeek ? showWaveCursor : undefined}
@@ -130,14 +131,14 @@
           bands={track.bands ?? null}
           peaks={track.peaks ?? null}
           animating={analyzing && !track.bands && !track.peaks?.length}
-          width={col.width ?? 120}
+          width={waveWidth}
           height={14}
           variant="mini"
           hold={holdWave} />
         {#if onWaveSeek}<div class="ff-trow__wave-cursor"></div>{/if}
       </div>
     {:else if cell.kind === 'cover'}
-      <div class="ff-trow__cell ff-trow__cell--cover" style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         <div
           class="ff-trow__cover"
           style={cover(track) ? `background-image:url(${cover(track)})` : undefined}>
@@ -149,8 +150,8 @@
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="ff-trow__cell ff-trow__cell--rating{onRate ? ' ff-trow__cell--rateable' : ''}"
-        style={cell.style}
+        class="{cell.cls}{onRate ? ' ff-trow__cell--rateable' : ''}"
+       
         data-col-key={col.key}
         data-rate={onRate ? '' : undefined}
         onpointerleave={onRate ? () => (previewStars = 0) : undefined}
@@ -165,22 +166,22 @@
         {/each}
       </div>
     {:else if cell.kind === 'color'}
-      <div class="ff-trow__cell ff-trow__cell--color" style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         {#if labelColor(track.color)}
           <ColorSwatch color={labelColor(track.color)} />
         {/if}
       </div>
     {:else if cell.kind === 'key'}
       {@const k = String(track.key ?? '—')}
-      <div class={cell.cls} style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         <span class="ff-trow__text" style="color:{k === '—' ? 'var(--ff-muted)' : keyColor(k)}">{k}</span>
       </div>
     {:else if cell.kind === 'dash'}
-      <div class={cell.cls} style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         <span class="ff-trow__text">{track[col.key] ?? '—'}</span>
       </div>
     {:else}
-      <div class={cell.cls} style={cell.style} data-col-key={col.key}>
+      <div class={cell.cls} data-col-key={col.key}>
         <span class="ff-trow__text">{track[col.key] ?? ''}</span>
       </div>
     {/if}

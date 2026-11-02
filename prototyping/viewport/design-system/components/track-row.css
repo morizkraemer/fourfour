@@ -18,6 +18,31 @@
 .ff-trow__cell--text {
   overflow: visible;
 }
+.ff-trow__cell--status { flex: 0 0 var(--ff-col-status, auto); width: var(--ff-col-status, auto); min-width: var(--ff-col-status, 0); max-width: var(--ff-col-status, 100%); }
+.ff-trow__cell--tag { flex: 0 0 var(--ff-col-tag, auto); width: var(--ff-col-tag, auto); min-width: var(--ff-col-tag, 0); max-width: var(--ff-col-tag, 100%); }
+.ff-trow__cell--fav { flex: 0 0 var(--ff-col-fav, auto); width: var(--ff-col-fav, auto); min-width: var(--ff-col-fav, 0); max-width: var(--ff-col-fav, 100%); }
+.ff-trow__cell--index { flex: 0 0 var(--ff-col-index, auto); width: var(--ff-col-index, auto); min-width: var(--ff-col-index, 0); max-width: var(--ff-col-index, 100%); }
+.ff-trow__cell--wave { flex: 0 0 var(--ff-col-wave, auto); width: var(--ff-col-wave, auto); min-width: var(--ff-col-wave, 0); max-width: var(--ff-col-wave, 100%); }
+.ff-trow__cell--cover { flex: 0 0 var(--ff-col-cover, auto); width: var(--ff-col-cover, auto); min-width: var(--ff-col-cover, 0); max-width: var(--ff-col-cover, 100%); }
+.ff-trow__cell--title { flex: 0 0 var(--ff-col-title, auto); width: var(--ff-col-title, auto); min-width: var(--ff-col-title, 0); max-width: var(--ff-col-title, 100%); }
+.ff-trow__cell--artist { flex: 0 0 var(--ff-col-artist, auto); width: var(--ff-col-artist, auto); min-width: var(--ff-col-artist, 0); max-width: var(--ff-col-artist, 100%); }
+.ff-trow__cell--album { flex: 0 0 var(--ff-col-album, auto); width: var(--ff-col-album, auto); min-width: var(--ff-col-album, 0); max-width: var(--ff-col-album, 100%); }
+.ff-trow__cell--label { flex: 0 0 var(--ff-col-label, auto); width: var(--ff-col-label, auto); min-width: var(--ff-col-label, 0); max-width: var(--ff-col-label, 100%); }
+.ff-trow__cell--genre { flex: 0 0 var(--ff-col-genre, auto); width: var(--ff-col-genre, auto); min-width: var(--ff-col-genre, 0); max-width: var(--ff-col-genre, 100%); }
+.ff-trow__cell--year { flex: 0 0 var(--ff-col-year, auto); width: var(--ff-col-year, auto); min-width: var(--ff-col-year, 0); max-width: var(--ff-col-year, 100%); }
+.ff-trow__cell--rating { flex: 0 0 var(--ff-col-rating, auto); width: var(--ff-col-rating, auto); min-width: var(--ff-col-rating, 0); max-width: var(--ff-col-rating, 100%); }
+.ff-trow__cell--color { flex: 0 0 var(--ff-col-color, auto); width: var(--ff-col-color, auto); min-width: var(--ff-col-color, 0); max-width: var(--ff-col-color, 100%); }
+.ff-trow__cell--bpm { flex: 0 0 var(--ff-col-bpm, auto); width: var(--ff-col-bpm, auto); min-width: var(--ff-col-bpm, 0); max-width: var(--ff-col-bpm, 100%); }
+.ff-trow__cell--key { flex: 0 0 var(--ff-col-key, auto); width: var(--ff-col-key, auto); min-width: var(--ff-col-key, 0); max-width: var(--ff-col-key, 100%); }
+.ff-trow__cell--time { flex: 0 0 var(--ff-col-time, auto); width: var(--ff-col-time, auto); min-width: var(--ff-col-time, 0); max-width: var(--ff-col-time, 100%); }
+.ff-trow__cell.ff-trow__cell--flex {
+  flex: 1 1 0;
+  width: auto;
+  max-width: none;
+}
+.ff-trow__cell.ff-trow__cell--end {
+  justify-content: flex-end;
+}
 .ff-trow__text {
   flex: 1 1 0;
   min-width: 0;

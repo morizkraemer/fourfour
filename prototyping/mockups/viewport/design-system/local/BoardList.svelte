@@ -1,5 +1,5 @@
 <script>
-  import { ColumnHeader, TrackRow } from '../../../../viewport/design-system/svelte.js';
+  import { ColumnHeader, TrackRow, columnVars } from '../../../../viewport/design-system/svelte.js';
   import { PLAYLIST_ROWS } from './data.js';
 
   let { tracks = PLAYLIST_ROWS, dropAfter = -1, columns = null, selectedId = -1, header = true, placeholderRow = false } = $props();
@@ -14,7 +14,7 @@
   let list = $derived(tracks.map((t, i) => ({ ...t, index: i + 1 })));
 </script>
 
-<div class="bl">
+<div class="bl" style={columnVars(cols)}>
   {#if header}<ColumnHeader columns={cols} />{/if}
   {#each list as track, i (track.id)}
     <TrackRow {track} columns={cols} state={track.id === selectedId ? 'selected' : 'rest'} />
