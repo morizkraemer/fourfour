@@ -477,3 +477,4 @@
 2026-11-02 11:22 orchestrator r51-migration-test fixed a99016e (fixture dir with ANLZ tree, 531 passed 0 failed), merging; decided: own prio r53-user-docs (sonnet medium; checklist 16 draft, parked for review)
 2026-11-02 11:24 orchestrator r53-user-docs handed back 571a638 (6 pages, 20 to-confirm marks), parked -> Waiting 39
 2026-11-02 11:24 orchestrator - decided: own prio r54-notices (sonnet medium; checklist 6.2/6.4: stdlib notices generator from cargo metadata, no installs, not bundled)
+2026-11-02 11:29 orchestrator r54-notices handed back 251e70b (403 crates, 37 MPL-2.0 incl. Tauri css stack, 66 standard-text fallbacks, deterministic, fails on GPL), merge after r51 checks
