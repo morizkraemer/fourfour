@@ -494,3 +494,4 @@
 2026-11-02 13:51 orchestrator r59-smoke-flake landed 7a8fd26 (CHECKS-OK, smoke 113 passed 0 flaky at load 43)
 2026-11-02 13:52 orchestrator - decided: own prio r60-detail-cache (sonnet medium; Waiting 19 decide-by-doing: disk cap min(2 GiB, 5% free), floor 512 MiB)
 2026-11-02 14:20 orchestrator r57-longmix-mem handed back 723e65f (-1.2 GB at 120 min, identical results; real peak = chunk budget 14x400 MB, also on normal tracks), merging; decided: r61-chunk-ceiling (sonnet medium; ceiling knob default off + Mac sweep script; pick default on a Mac night)
+2026-11-02 14:22 orchestrator r60-detail-cache handed back 9f7036c (cap already 2 GiB; adds free-disk rule; trim 6 ms at 400 files), merge after r57 checks
