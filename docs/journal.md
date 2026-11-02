@@ -497,3 +497,4 @@
 2026-11-02 14:22 orchestrator r60-detail-cache handed back 9f7036c (cap already 2 GiB; adds free-disk rule; trim 6 ms at 400 files), merge after r57 checks
 2026-11-02 14:30 orchestrator r57 merge smoke: leaks.spec.ts:49 failed once at load 49 (Rust-only change); passes 3/3 alone; r60 merged on top, full smoke + checks rerunning; followup: leaks spec flaky under load
 2026-11-02 14:49 orchestrator r57-longmix-mem + r60-detail-cache landed on ov-1028 (smoke 113 passed 0 flaky at load 49, CHECKS-OK)
+2026-11-02 14:50 orchestrator - decided: own prio r62-leak-spec (sonnet medium; leaks.spec.ts:49 flaky under load: real leak or settle timing)
