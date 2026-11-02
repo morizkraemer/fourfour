@@ -488,3 +488,4 @@
 2026-11-02 12:19 orchestrator - decided: own prio r57-longmix-mem (opus medium; 5.8 GB RSS spike on 1-3 h mixes, bit-identical results)
 2026-11-02 12:25 orchestrator r56-early-panic landed 92fb0a4 (first smoke 112 passed 1 failed under load ~50, no frontend change; rerun 113 passed 0 failed, CHECKS-OK)
 2026-11-02 12:25 orchestrator - decided: own prio r58-devbins (sonnet medium; dev bins break silently, make them compile and documented)
+2026-11-02 12:50 orchestrator r58-devbins handed back befa135 (bench bins missed app_log include), merged; dev-bins check added to the merge check script
