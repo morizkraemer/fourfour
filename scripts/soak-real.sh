@@ -33,6 +33,10 @@ trap cleanup EXIT
 say "copying the library to $WORK"
 cp -r "$FIXTURE_LIBRARY"/. "$WORK/data/com.pioneer.test-ui/"
 
+if [ "${FF_SOAK_AUTO_ANALYZE:-on}" = "off" ]; then
+  echo '{"auto_analyze_new_tracks": false}' >"$WORK/data/com.pioneer.test-ui/config.json"
+fi
+
 IDS="$(seq -s, 7 250 10000)"
 ACTIONS_JSON=""
 if [ "$ACTIONS" = "none" ]; then ACTIONS_JSON='"soakActions":[],"soakPauseMs":1000,'
@@ -64,7 +68,16 @@ sum_pids() {
 }
 children_named() { local pid; for pid in $(pgrep -P "$APP_PID" 2>/dev/null); do [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = "$1" ] && echo "$pid"; done; true; }
 
-echo "elapsed_s,app_rss_kb,app_pss_kb,app_threads,app_fds,web_rss_kb,web_pss_kb,web_procs,net_rss_kb,net_pss_kb" >"$CSV"
+analysed_tracks() {
+  python3 -I -c 'import sqlite3,sys; print(sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True, timeout=5).execute("select count(*) from analyses").fetchone()[0])' "$WORK/data/com.pioneer.test-ui/library.db" 2>/dev/null || echo -1
+}
+dump_spike() {
+  { echo "== $1 s"; grep -E "^(Rss|Pss|Anonymous|Private_Dirty|Swap):" "/proc/$APP_PID/smaps_rollup"
+    ps -L -o tid,pcpu,comm -p "$APP_PID" | sort -k2 -nr | head -12
+    ps -L -o comm= -p "$APP_PID" | sort | uniq -c | sort -rn | head -8; } >>"$OUT/spikes.txt" 2>&1
+}
+: >"$OUT/spikes.txt"
+echo "elapsed_s,app_rss_kb,app_pss_kb,app_threads,app_fds,web_rss_kb,web_pss_kb,web_procs,net_rss_kb,net_pss_kb,analysed_tracks" >"$CSV"
 start=$(date +%s)
 deadline=$((start + MINUTES * 60 + 900))
 while kill -0 "$APP_PID" 2>/dev/null; do
@@ -75,7 +88,8 @@ while kill -0 "$APP_PID" 2>/dev/null; do
   fds="$(ls "/proc/$APP_PID/fd" 2>/dev/null | wc -l)"
   read -r w_rss w_pss w_n <<<"$(sum_pids $(children_named WebKitWebProces))"
   read -r n_rss n_pss _ <<<"$(sum_pids $(children_named WebKitNetworkPr))"
-  echo "$elapsed,$a_rss,$a_pss,$threads,$fds,$w_rss,$w_pss,$w_n,$n_rss,$n_pss" >>"$CSV"
+  echo "$elapsed,$a_rss,$a_pss,$threads,$fds,$w_rss,$w_pss,$w_n,$n_rss,$n_pss,$(analysed_tracks)" >>"$CSV"
+  [ "$a_rss" -gt 3000000 ] && dump_spike "$elapsed"
   if grep -q '"mark": *"probe_done"' "$LOG"; then say "probe done"; break; fi
   [ "$now" -ge "$deadline" ] && { say "deadline reached without probe_done"; break; }
   sleep 60
