@@ -19,6 +19,24 @@ async function counters(page: Page, cdp: CDPSession | null): Promise<Counters> {
   return { listeners: dom.jsEventListeners, nodes: dom.nodes, callbacks };
 }
 
+async function settledCounters(page: Page, cdp: CDPSession | null): Promise<Counters> {
+  let previous = await counters(page, cdp);
+  for (let attempt = 0; attempt < 40; attempt++) {
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => requestIdleCallback(() => resolve(), { timeout: 1000 }))),
+        ),
+    );
+    const current = await counters(page, cdp);
+    if (current.listeners === previous.listeners && current.nodes === previous.nodes && current.callbacks === previous.callbacks) {
+      return current;
+    }
+    previous = current;
+  }
+  return previous;
+}
+
 async function openAndClosePalette(page: Page) {
   await page.keyboard.press('Control+k');
   await expect(page.locator('.ff-cp')).toBeVisible();
@@ -60,12 +78,13 @@ test(title, async ({ smoke }) => {
     await expandAndCollapsePlayer(page);
   };
   await cycle();
-  const before = await counters(page, cdp);
+  const before = await settledCounters(page, cdp);
   for (let i = 0; i < CYCLES; i++) await cycle();
-  const after = await counters(page, cdp);
+  const after = await settledCounters(page, cdp);
 
-  expect(after.callbacks - before.callbacks, 'registered event callbacks').toBe(0);
+  const detail = `before ${JSON.stringify(before)} after ${JSON.stringify(after)}`;
+  expect(after.callbacks - before.callbacks, `registered event callbacks, ${detail}`).toBe(0);
   if (!cdp) return;
-  expect(after.listeners - before.listeners, `event listeners after ${CYCLES} cycles`).toBeLessThanOrEqual(2);
-  expect(after.nodes - before.nodes, 'DOM nodes, attached or detached').toBeLessThanOrEqual(40);
+  expect(after.listeners - before.listeners, `event listeners after ${CYCLES} cycles, ${detail}`).toBeLessThanOrEqual(2);
+  expect(after.nodes - before.nodes, `DOM nodes, attached or detached, ${detail}`).toBeLessThanOrEqual(40);
 });
