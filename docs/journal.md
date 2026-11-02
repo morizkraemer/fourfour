@@ -487,3 +487,4 @@
 2026-11-02 12:19 orchestrator r55-symphonia-dedupe dropped per worker rec (0.6.1 not bit-identical: mp3 seek priming differs, riff panics on mutated headers, zero-rate WAV 404 s); WIP kept on branch r55-symphonia-dedupe a807719 for a later symphonia release
 2026-11-02 12:19 orchestrator - decided: own prio r57-longmix-mem (opus medium; 5.8 GB RSS spike on 1-3 h mixes, bit-identical results)
 2026-11-02 12:25 orchestrator r56-early-panic landed 92fb0a4 (first smoke 112 passed 1 failed under load ~50, no frontend change; rerun 113 passed 0 failed, CHECKS-OK)
+2026-11-02 12:25 orchestrator - decided: own prio r58-devbins (sonnet medium; dev bins break silently, make them compile and documented)
