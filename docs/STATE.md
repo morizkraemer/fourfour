@@ -84,6 +84,7 @@ review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
 ## Rundown
-Run 2026-10-30 to 11-02 on ov-1028 (checks green): Mac analysis on CoreML 2-3x faster with identical grids (33 vs 10.5 trk/min on 205 tracks), peak RSS at rten level; 50k startup 2.2 -> 1.35 s warm; WebKit post-first-row stall fixed (font preload); import duplicate plan at 50k 990 -> 74 ms; analysis survives quit/kill/restart and remembers order + failed files; damaged library.db never overwritten; Linux deb verified; Windows compiles; WebKit smoke green; error kinds on commands.
-Mac numbers (2026-11-01): 10k warm first row 1.6-1.9 s (fresh HOME each run), scroll during analysis p95 18 ms, first expand stall ~500 ms in 3/5.
-Waiting on Merlin: parked -v2 branches (33-37), schema bump (31), CI push (15), sync round 3 (1-3), key licence (4), bar-1 listen (16), bundle id (24).
+Run 2026-10-30 to 11-02 on ov-1028 (checks green, 113 smoke): Mac analysis on CoreML 2-3x faster with identical grids; 50k startup 2.2 -> 1.35 s warm; WebKit stall fixed (font preload); Linux RSS after analysis 2.1 -> 0.3-0.4 GB; long mixes -1.2 GB; logs + early crash log; beta library fixture; licence notices generator; smoke robust under load.
+Found 2026-11-02: Mac 450-500 ms freezes every 5 s = USB volume poll on the main thread (fix r67 running). Analysis peak RSS = 14 parallel model chunks (~5.6 GB); ceiling knob landed, default off, Mac sweep picks it.
+Mac numbers (2026-11-01): 10k warm first row 1.6-1.9 s, scroll during analysis p95 18 ms.
+Waiting on Merlin: land parked-all-v3 (33-37 + 38 no-Python), CI push r63-ci (15), docs draft (39), schema bump (31), key licence (4), bar-1 listen (16), bundle id (24). Next Mac night needs a go: perf-night, chunk-budget sweep, r67 freeze check.
