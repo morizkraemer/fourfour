@@ -528,3 +528,5 @@
 2026-11-02 19:59 orchestrator - decided: own prio r73-webkit-startup (sonnet medium; WebKit startup.spec.ts:38 fails ~1x per full run)
 2026-11-02 21:05 orchestrator r73-webkit-startup handed back 87fb99c (cause inferred: 30 s test timeout too tight under full-suite load, passed at 29.5 s; test.slow + load-scaled polls; webkit 3/3 green), merging; also found player.spec.ts:187 flake
 2026-11-02 21:08 orchestrator - decided: own prio r74-player-flake (sonnet medium; hot cue test reads the clear's save, not the Shift+C save); stale caches r16/r3 deleted (-12.5 GB)
+2026-11-02 22:10 orchestrator r73-webkit-startup + r74-player-flake landed on ov-1028 (0a80690; chromium + webkit smoke 0 failed, CHECKS-OK); smoke-only, no preview rebuild
+2026-11-02 22:12 orchestrator - decided: own prio r75-parked-refresh (sonnet medium; rebase parked -v3 branches onto ov-1028 after r67-r74, rebuild parked-all, full checks)
