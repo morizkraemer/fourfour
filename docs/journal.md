@@ -433,3 +433,4 @@
 2026-11-02 07:37 orchestrator r33-dupplan handed back (session duplicate index, equivalence-tested over 600 random writes; later import plan 50k 990 -> 74 ms), merging; decided: own prio r35-ci (sonnet medium; CI workflow refresh, no push)
 2026-11-02 07:52 orchestrator r33-dupplan landed on ov-1028
 2026-11-02 07:59 orchestrator r35-ci parked: branch 24add8b (4 jobs: linux, webkit-smoke optional, macos-14 dmg + check, windows nsis; action-validator ok; local Linux steps green); Waiting 15 updated
+2026-11-02 08:00 orchestrator - decided: own prio r36-covers (sonnet high; import cover step speed, byte-identical)
