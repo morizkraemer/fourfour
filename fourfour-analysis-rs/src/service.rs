@@ -90,11 +90,29 @@ const ANALYSIS_BASE_MB: f64 = 600.0;
 /// Activations of one beat-model chunk while it runs (rten builds a fresh buffer pool for every run).
 const CHUNK_ACTIVATION_MB: f64 = 400.0;
 
+pub const CHUNK_BUDGET_CEILING_MB: Option<u64> = None;
+
+fn chunk_budget_ceiling_mb() -> Option<u64> {
+    static CEILING: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *CEILING.get_or_init(|| match std::env::var("FOURFOUR_CHUNK_BUDGET_MB") {
+        Ok(v) => Some(v.trim().parse().unwrap_or_else(|_| panic!("FOURFOUR_CHUNK_BUDGET_MB must be a whole number of MB, got {v:?}"))),
+        Err(_) => CHUNK_BUDGET_CEILING_MB,
+    })
+}
+
 /// Beat-model chunks that may run at once: what fits into a quarter of the machine's memory, and into `mem_fraction`
-/// of what is available now. At least one, at most `max_threads`.
+/// of what is available now, and under the optional chunk budget ceiling (`FOURFOUR_CHUNK_BUDGET_MB`). At least one,
+/// at most `max_threads`.
 pub fn chunk_slots(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64) -> usize {
+    chunk_slots_with_ceiling(max_threads, mem_fraction, total_mb, available_mb, chunk_budget_ceiling_mb())
+}
+
+fn chunk_slots_with_ceiling(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64, ceiling_mb: Option<u64>) -> usize {
     let budget = (total_mb * ANALYSIS_MEMORY_FRACTION).min(available_mb * mem_fraction);
-    let slots = ((budget - ANALYSIS_BASE_MB) / CHUNK_ACTIVATION_MB).floor().max(1.0) as usize;
+    let mut slots = ((budget - ANALYSIS_BASE_MB) / CHUNK_ACTIVATION_MB).floor().max(1.0) as usize;
+    if let Some(ceiling) = ceiling_mb {
+        slots = slots.min((ceiling as f64 / CHUNK_ACTIVATION_MB).floor().max(1.0) as usize);
+    }
     slots.min(max_threads.max(1))
 }
 
@@ -455,6 +473,19 @@ mod tests {
         assert_eq!(chunk_slots(15, 0.5, 65536.0, 32000.0), 15);
         assert_eq!(chunk_slots(15, 0.5, 65536.0, 1500.0), 1);
         assert_eq!(chunk_slots(1, 0.5, 65536.0, 32000.0), 1);
+    }
+
+    #[test]
+    fn chunk_budget_ceiling_caps_the_slots_and_never_raises_them() {
+        let slots = |ceiling| chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, ceiling);
+        assert_eq!(slots(None), 15);
+        assert_eq!(slots(Some(2048)), 5);
+        assert_eq!(slots(Some(1024)), 2);
+        assert_eq!(slots(Some(100)), 1);
+        assert_eq!(slots(Some(0)), 1);
+        assert_eq!(slots(Some(1_000_000)), 15);
+        assert_eq!(chunk_slots_with_ceiling(7, 0.5, 8192.0, 4096.0, Some(4096)), 3);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 1500.0, Some(4096)), 1);
     }
 
     #[test]
