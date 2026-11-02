@@ -121,7 +121,7 @@ async function writeStick(volumePath: string) {
     if (!report || report.status === 'failed') {
       stickSync.stage = 'failed';
       if (report?.error) console.info('sync failed:', report.error);
-      stickSync.error = syncFailureText(report?.error ?? 'The sync did not report a result.');
+      stickSync.error = syncFailureText(report?.error ?? 'The sync did not report a result.', report?.error_kind ?? null);
     } else {
       stickSync.stage = 'done';
     }

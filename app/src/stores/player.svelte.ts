@@ -30,6 +30,7 @@ import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cu
 import { initialCuePointMs } from '../lib/cues.ts';
 import { fileStateOf, noteBlockedLoad } from './file-status.svelte.ts';
 import { isUnplayable } from '../lib/fileHealth.ts';
+import { commandErrorKind, commandErrorPath, type ErrorKind } from '../services/command-error.ts';
 import { failureText, playbackFailureText } from '../lib/userErrors.ts';
 import { quantize } from './quantize.svelte.ts';
 import { quantizedMs } from '../lib/quantize.ts';
@@ -257,9 +258,9 @@ export async function initPlayerTransport() {
   await ensureTickListener();
 }
 
-function reportPlaybackFailure(message: string, path?: string | null) {
+function reportPlaybackFailure(message: string, path?: string | null, kind?: ErrorKind | null) {
   console.error('playback error:', message);
-  const text = playbackFailureText(message, path ?? player.track?.sourcePath);
+  const text = playbackFailureText(message, path ?? player.track?.sourcePath, kind);
   player.error = text;
   library.statusMessage = text;
   player.playing = false;
@@ -270,7 +271,7 @@ function reportPlaybackFailure(message: string, path?: string | null) {
 async function ensureTickListener() {
   if (!errorUnlisten) {
     errorUnlisten = await subscribePlaybackError((event) => {
-      reportPlaybackFailure(event.message, event.path);
+      reportPlaybackFailure(event.message, event.path, event.kind);
     });
   }
   if (tickUnlisten) return;
@@ -520,7 +521,7 @@ export async function playFromStart() {
     await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
     player.playing = true;
   } catch (err) {
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -597,7 +598,7 @@ export async function togglePlay() {
       player.playing = true;
     }
   } catch (err) {
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -628,7 +629,7 @@ async function runCueCommand(command: CueCommand) {
     }
   } catch (err) {
     cueButton = { ...cueButton, previewing: false };
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -665,7 +666,7 @@ export async function play() {
     await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
     player.playing = true;
   } catch (err) {
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -779,7 +780,7 @@ export async function seekToProgress(progress: number) {
     try {
       await playbackSeek(ms);
     } catch (err) {
-      reportPlaybackFailure(String(err));
+      reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
     }
   } else {
     // Paused/stopped: persist the position so play/resume starts from here.

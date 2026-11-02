@@ -1,3 +1,4 @@
+import { CommandError } from '../services/command-error';
 import { describe, expect, it } from 'vitest';
 import {
   analysisFailureText,
@@ -65,7 +66,11 @@ describe('playbackFailureText', () => {
 
 describe('backup messages', () => {
   it('keeps the restore safety copy location', () => {
-    const raw = 'Restore failed: The backup file is damaged. Your previous library is saved at /Users/dj/before-restore-1.ffbackup.gz';
+    const raw = new CommandError(
+      'invalid_backup',
+      'Restore failed: The backup file is damaged. Your previous library is saved at /Users/dj/before-restore-1.ffbackup.gz',
+      '/Users/dj/before-restore-1.ffbackup.gz',
+    );
     expect(backupRestoreFailureText(raw)).toBe(
       "Couldn't restore the backup. That backup file is damaged. Choose another one. Your previous library is saved at /Users/dj/before-restore-1.ffbackup.gz",
     );
@@ -111,5 +116,29 @@ describe('sync, eject, analysis and rekordbox', () => {
 
   it('points a Rekordbox decryption failure at the XML export', () => {
     expect(rekordboxFailureText('master.db decryption failed: not a Rekordbox master.db or wrong key')).toContain('XML export');
+  });
+});
+
+describe('typed errors', () => {
+  it('prefers the kind over the message text', () => {
+    expect(failureText('Nope.', new CommandError('disk_full', 'something unrelated'))).toBe(
+      'Nope. The disk is full. Free up some space and try again.',
+    );
+    expect(failureText('Nope.', new CommandError('other', 'No space left on device'))).toContain('disk is full');
+  });
+
+  it('keeps backup specific copy', () => {
+    expect(backupReadFailureText(new CommandError('library_newer_version', 'x'))).toContain('That backup was made by a newer version');
+    expect(backupReadFailureText(new CommandError('invalid_backup', 'This file is not a library backup'))).toContain("isn't a fourfour library backup");
+  });
+
+  it('reads sync, eject, analysis and playback kinds', () => {
+    expect(syncFailureText(new CommandError('stick_busy', 'E is already being synced'))).toContain('already syncing');
+    expect(syncFailureText(new CommandError('no_space_on_stick', 'Not enough space on E: need 4 GB'))).toBe('Not enough space on E: need 4 GB');
+    expect(ejectFailureText(new CommandError('stick_busy', 'x'))).toContain('still using');
+    expect(analysisFailureText(new CommandError('analysis_failed', 'x'))).toContain('None of the tracks');
+    expect(analysisFailureText(new CommandError('models_missing', 'x'))).toContain('models are missing');
+    expect(playbackFailureText('whatever', '/m/a.mp3', 'not_found')).toContain('missing');
+    expect(playbackFailureText('whatever', '/m/a.mp3', 'audio_output_unavailable')).toContain('audio output');
   });
 });

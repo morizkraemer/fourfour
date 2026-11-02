@@ -1,3 +1,5 @@
+import { CommandError, commandErrorKind, commandErrorPath, type ErrorKind } from '../services/command-error';
+
 type Reply = string | ((match: RegExpMatchArray) => string);
 
 interface Rule {
@@ -30,6 +32,23 @@ const SHARED_RULES: Rule[] = [
     reply: "That library file is damaged or isn't a fourfour library.",
   },
 ];
+
+type KindCauses = Partial<Record<ErrorKind, string>>;
+
+const SHARED_KIND_CAUSES: KindCauses = {
+  disk_full: 'The disk is full. Free up some space and try again.',
+  no_space_on_stick: 'The disk is full. Free up some space and try again.',
+  permission_denied: "fourfour doesn't have permission to use that location. Pick another one.",
+  not_found: 'A file or folder is missing. Check that the drive is connected, then try again.',
+  drive_gone: 'The drive stopped responding. Check the connection and try again.',
+  library_locked: 'The library is busy. Wait a moment and try again.',
+  library_newer_version: 'This library was made by a newer version of fourfour. Update the app to open it.',
+  library_damaged: "That library file is damaged or isn't a fourfour library.",
+};
+
+const BACKUP_KIND_CAUSES: KindCauses = {
+  library_newer_version: 'That backup was made by a newer version of fourfour. Update the app, then try again.',
+};
 
 const BACKUP_RULES: Rule[] = [
   { test: /not a library backup/i, reply: "That file isn't a fourfour library backup. Choose another file." },
@@ -106,6 +125,13 @@ export function rawText(err: unknown): string {
 export interface FailureOptions {
   next?: string;
   rules?: Rule[];
+  kinds?: KindCauses;
+}
+
+function kindCause(err: unknown, overrides?: KindCauses): string | null {
+  const kind = commandErrorKind(err);
+  if (!kind || kind === 'other') return null;
+  return overrides?.[kind] ?? SHARED_KIND_CAUSES[kind] ?? null;
 }
 
 function match(raw: string, rules: Rule[]): string | null {
@@ -123,7 +149,7 @@ function fileNameOf(path: string): string {
 /** What went wrong, in words a DJ can act on; `what` leads ("Couldn't import those files."), then the cause and next step. */
 export function failureText(what: string, err: unknown, options: FailureOptions = {}): string {
   const raw = rawText(err);
-  const cause = match(raw, [...(options.rules ?? []), ...SHARED_RULES]);
+  const cause = kindCause(err, options.kinds) ?? match(raw, [...(options.rules ?? []), ...SHARED_RULES]);
   return `${what} ${cause ?? options.next ?? 'Try again.'}`;
 }
 
@@ -136,31 +162,37 @@ export function importFailureText(err: unknown): string {
 }
 
 export function backupSaveFailureText(err: unknown): string {
-  return failureText("Couldn't save the backup.", err, { rules: BACKUP_RULES, next: 'Try again, or save it somewhere else.' });
+  return failureText("Couldn't save the backup.", err, { rules: BACKUP_RULES, kinds: BACKUP_KIND_CAUSES, next: 'Try again, or save it somewhere else.' });
 }
 
 export function backupReadFailureText(err: unknown): string {
-  return failureText("Couldn't open that backup.", err, { rules: BACKUP_RULES, next: 'Choose another file.' });
+  return failureText("Couldn't open that backup.", err, { rules: BACKUP_RULES, kinds: BACKUP_KIND_CAUSES, next: 'Choose another file.' });
 }
 
-const SAFETY_COPY = /\s*Your previous library is saved at (.+)$/;
+const SAFETY_COPY_SENTENCE = 'Your previous library is saved at';
 
 export function backupRestoreFailureText(err: unknown): string {
-  const raw = rawText(err);
-  const safety = raw.match(SAFETY_COPY);
-  if (!safety) return failureText("Couldn't restore the backup. Your library was not changed.", raw, { rules: BACKUP_RULES });
-  const cause = match(raw.replace(SAFETY_COPY, ''), [...BACKUP_RULES, ...SHARED_RULES]);
-  return `Couldn't restore the backup. ${cause ? `${cause} ` : ''}Your previous library is saved at ${safety[1]}`;
+  const safetyPath = rawText(err).includes(SAFETY_COPY_SENTENCE) ? commandErrorPath(err) : null;
+  const options = { rules: BACKUP_RULES, kinds: BACKUP_KIND_CAUSES };
+  if (!safetyPath) return failureText("Couldn't restore the backup. Your library was not changed.", err, options);
+  const cause = kindCause(err, options.kinds) ?? match(rawText(err), [...BACKUP_RULES, ...SHARED_RULES]);
+  return `Couldn't restore the backup. ${cause ? `${cause} ` : ''}${SAFETY_COPY_SENTENCE} ${safetyPath}`;
 }
 
 export function rekordboxFailureText(err: unknown, what = "Couldn't read the Rekordbox library."): string {
   return failureText(what, err, { rules: REKORDBOX_RULES, next: 'Check the file or folder, then try again.' });
 }
 
-export function syncFailureText(err: unknown): string {
+const SYNC_KIND_CAUSES: KindCauses = {
+  stick_busy: 'That stick is already syncing. Wait for it to finish.',
+  drive_gone: "fourfour can't reach the stick. Check that it is still plugged in, then sync again.",
+};
+
+export function syncFailureText(err: unknown, kind: ErrorKind | null = commandErrorKind(err)): string {
   const raw = rawText(err);
-  if (/^Not enough space/i.test(raw)) return raw;
-  return failureText('The sync stopped.', err, { rules: SYNC_RULES, next: 'Check the stick, then sync again.' });
+  if (kind === 'no_space_on_stick' || /^Not enough space/i.test(raw)) return raw;
+  const typed = kind ? new CommandError(kind, raw) : err;
+  return failureText('The sync stopped.', typed, { rules: SYNC_RULES, kinds: SYNC_KIND_CAUSES, next: 'Check the stick, then sync again.' });
 }
 
 export function relocateFailureText(err: unknown): string {
@@ -179,15 +211,21 @@ export function libraryOpenFailureText(err: unknown): string {
 }
 
 export function analysisFailureText(err: unknown): string {
-  if (/Analysis failed for all/i.test(rawText(err))) {
+  const kind = commandErrorKind(err);
+  if (kind === 'analysis_failed' || /Analysis failed for all/i.test(rawText(err))) {
     return "None of the tracks could be analyzed. Check that the files play, then try again.";
   }
-  return failureText("Couldn't start the analysis.", err, { rules: ANALYSIS_RULES, next: 'Try again.' });
+  return failureText("Couldn't start the analysis.", err, {
+    rules: ANALYSIS_RULES,
+    kinds: { models_missing: "Analysis isn't available because its models are missing. Reinstall fourfour." },
+    next: 'Try again.',
+  });
 }
 
 export function revealFailureText(err: unknown): string {
   return failureText("Couldn't show the file.", err, {
     rules: [{ test: /File not found/i, reply: 'It may have been moved or deleted.' }],
+    kinds: { not_found: 'It may have been moved or deleted.' },
     next: 'Try again.',
   });
 }
@@ -195,13 +233,23 @@ export function revealFailureText(err: unknown): string {
 export function ejectFailureText(err: unknown): string {
   return failureText("Couldn't eject the stick.", err, {
     rules: [{ test: /busy|in use|resource busy|dissented/i, reply: 'Something is still using it. Close other apps using the stick, then try again.' }],
+    kinds: { stick_busy: 'Something is still using it. Close other apps using the stick, then try again.' },
     next: 'Close anything using it, then try again.',
   });
 }
 
-export function playbackFailureText(rawMessage: string, trackPath?: string | null): string {
+const PLAYBACK_KIND_CAUSES: KindCauses = {
+  not_found: 'The file is missing or its drive is off. Reconnect the drive or relocate the file.',
+  drive_gone: 'The file is missing or its drive is off. Reconnect the drive or relocate the file.',
+  permission_denied: "fourfour doesn't have permission to read the file.",
+  decode_failed: "The file is damaged or in a format fourfour can't read.",
+  audio_output_unavailable:
+    "fourfour can't reach the audio output. Check your speakers or interface, or choose another output in Settings.",
+};
+
+export function playbackFailureText(rawMessage: string, trackPath?: string | null, kind: ErrorKind | null = null): string {
   const name = trackPath ? fileNameOf(trackPath) : null;
-  const cause = match(rawMessage, PLAYBACK_RULES);
+  const cause = (kind && kind !== 'other' ? PLAYBACK_KIND_CAUSES[kind] : null) ?? match(rawMessage, PLAYBACK_RULES);
   const lead = name ? `Can't play "${name}".` : "Can't play.";
   return `${lead} ${cause}`;
 }
