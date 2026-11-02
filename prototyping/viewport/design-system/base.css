@@ -1,7 +1,7 @@
-/* Minimal reset shared by every primitive. Lifts into Tauri with tokens.css. */
-*,
-*::before,
-*::after {
+/* WebKit quirk: a universal *::before / *::after rule makes it resolve both pseudo styles for every element (about
+   40% of a track row's style time). Pseudo-elements stay content-box; one that sets a size with padding or a border
+   gets border-box in its own rule. */
+* {
   box-sizing: border-box;
 }
 
@@ -43,7 +43,6 @@ textarea {
   caret-color: var(--ff-accent);
 }
 
-/* macOS title band — Tauri overlay: data-tauri-drag-region on the element */
 .ff-titlebar-band {
   flex: none;
   box-sizing: border-box;
@@ -62,7 +61,6 @@ textarea {
   padding-bottom: var(--ff-titlebar-search-padding-y);
 }
 
-/* Rule only under the search row; sidebar chrome stays flush with nav */
 .ff-titlebar-band--ruled {
   border-bottom: 1px solid var(--ff-border);
 }
