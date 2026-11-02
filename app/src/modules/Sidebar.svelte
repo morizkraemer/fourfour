@@ -324,7 +324,26 @@
     };
   }
 
+  function openMenuFromKeyboard(e) {
+    const row = e.target instanceof Element ? e.target.closest('.ff-sbrow') : null;
+    if (!row || e.target !== row) return;
+    e.preventDefault();
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 16,
+        clientY: rect.bottom - 4,
+      }),
+    );
+  }
+
   function onSidebarKeydown(e) {
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      openMenuFromKeyboard(e);
+      return;
+    }
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
     const row = e.target instanceof Element ? e.target.closest('.ff-sbrow') : null;
