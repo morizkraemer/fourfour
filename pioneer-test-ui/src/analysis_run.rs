@@ -939,6 +939,7 @@ async fn run_with_resolver(
 
     let outcome = run_registered(shared, coordinator.clone(), sink.clone(), app_data_dir, resolve, initial_total).await;
     log_unsaved_failures(&sink, coordinator.failures().flush());
+    crate::heap::trim_after_analysis();
     if outcome.is_err() {
         sink.complete();
     }

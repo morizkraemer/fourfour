@@ -31,6 +31,9 @@ symphonia = { version = "0.5", features = ["all"] }
 image = "0.25.10"
 fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
 
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = "0.2"
+
 [[bin]]
 name = "waveform_dev"
 path = "src/dev_bin/waveform_dev.rs"

@@ -20,6 +20,15 @@ mod analysis_order;
 #[allow(dead_code)]
 #[path = "../analysis_run.rs"]
 mod analysis_run;
+#[allow(dead_code)]
+#[path = "../heap.rs"]
+mod heap;
+#[allow(dead_code)]
+#[path = "../analysis_failures.rs"]
+mod analysis_failures;
+#[allow(dead_code)]
+#[path = "../command_error.rs"]
+mod command_error;
 
 #[allow(dead_code)]
 #[path = "../analysis_payload.rs"]
@@ -198,6 +207,7 @@ fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Opt
 }
 
 fn main() {
+    heap::limit_arenas();
     let mut backend = AnalysisBackend::Rust;
     let mut list: Option<PathBuf> = None;
     let mut limit = 50usize;
@@ -213,6 +223,7 @@ fn main() {
     let mut dump: Option<PathBuf> = None;
     let mut ui_busy: Option<(Duration, Duration)> = None;
     let mut probe_reads: Option<Duration> = None;
+    let mut idle_s = 0u64;
     let mut ui_busy_file: Option<PathBuf> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -236,6 +247,7 @@ fn main() {
                 ui_busy = Some((Duration::from_millis(busy.parse().unwrap()), Duration::from_millis(period.parse().unwrap())));
             }
             "--ui-busy-file" => ui_busy_file = Some(PathBuf::from(it.next().unwrap())),
+            "--idle-secs" => idle_s = it.next().unwrap().parse().unwrap(),
             "--probe-reads" => probe_reads = Some(Duration::from_millis(it.next().unwrap().parse().unwrap())),
             other => panic!("unknown argument {other}"),
         }
@@ -316,8 +328,13 @@ fn main() {
         })
         .expect("run");
     let wall_s = started.elapsed().as_secs_f64();
+    let rss_after_run = process_tree_rss_mb(std::process::id());
     stop.store(true, Ordering::Relaxed);
     sampler.join().unwrap();
+    if idle_s > 0 {
+        std::thread::sleep(Duration::from_secs(idle_s));
+        println!("RSS peak={:.0}MB after_run={rss_after_run:.0}MB after_idle_{idle_s}s={:.0}MB", *peak.lock().unwrap(), process_tree_rss_mb(std::process::id()));
+    }
     if let Some(ui) = ui {
         let [(free_cpu, free_s), (busy_cpu, busy_s)] = ui.join().unwrap();
         let (pauses, held) = coordinator.ui_pause_totals();
