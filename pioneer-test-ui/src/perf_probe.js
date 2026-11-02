@@ -156,6 +156,153 @@
     };
   }
 
+  const setInputValue = (input, value) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  const pressKey = (key, code, extra = {}) => {
+    const target = document.activeElement || document.body;
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true, ...extra }));
+  };
+
+  const soakActions = {
+    async fling() {
+      const el = document.querySelector('.ff-table__scroll');
+      if (!el) throw new Error('no .ff-table__scroll');
+      for (let n = 0; n < 24; n++) {
+        el.scrollTop = n % 2 === 0 ? el.scrollTop + 9000 : el.scrollTop - 4000;
+        await frame();
+      }
+    },
+
+    async search(round) {
+      const input = document.querySelector('.ff-gheader__search input');
+      if (!input) throw new Error('no search input');
+      input.focus();
+      const query = ['smoke track 1', 'solomun', 'melodic', 'bicep 12'][round % 4];
+      for (let i = 1; i <= query.length; i++) {
+        setInputValue(input, query.slice(0, i));
+        await sleep(30);
+      }
+      await sleep(400);
+      setInputValue(input, '');
+      pressKey('Escape', 'Escape');
+      await sleep(200);
+    },
+
+    async palette() {
+      pressKey('k', 'KeyK', { ctrlKey: true });
+      if (!(await waitFor(() => document.querySelector('.ff-cp'), 3000))) throw new Error('palette did not open');
+      const input = document.activeElement;
+      if (input instanceof HTMLInputElement) setInputValue(input, 'set');
+      await sleep(250);
+      pressKey('Escape', 'Escape');
+      const search = document.querySelector('.ff-gheader__search input');
+      if (search) setInputValue(search, '');
+      pressKey('Escape', 'Escape');
+      await waitFor(() => !document.querySelector('.ff-cp'), 3000);
+    },
+
+    async playlists() {
+      const rows = [...document.querySelectorAll('[data-drop-track-playlist-id]')].slice(0, 4);
+      for (const row of rows) {
+        row.click();
+        await sleep(600);
+      }
+      const all = [...document.querySelectorAll('.ff-sbrow__label')].find((el) => el.textContent.trim() === 'All Tracks');
+      if (all) all.click();
+      await sleep(400);
+    },
+
+    async loadAndSeek(round) {
+      const scroll = document.querySelector('.ff-table__scroll');
+      if (scroll) scroll.scrollTop = 0;
+      await sleep(300);
+      const rows = [...document.querySelectorAll('[data-track-row]')];
+      const row = rows[(round % 10) + 2];
+      if (!row) throw new Error('no track row');
+      performance.clearMarks('ff:player-ready');
+      row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+      if (!(await waitFor(() => performance.getEntriesByName('ff:player-ready').length > 0, 30000))) throw new Error('track did not become ready');
+      const expand = document.querySelector('.ff-player-compact__expand-btn');
+      if (!expand) throw new Error('no expand button');
+      expand.click();
+      if (!(await waitFor(() => document.querySelector('.ff-xp .waveform-display__zoom')?.dataset.bands === 'detail', 30000))) {
+        pressKey('Escape', 'Escape');
+        throw new Error('zoom detail did not arrive');
+      }
+      const overview = document.querySelector('.ff-xp .waveform-display__overview');
+      if (overview) {
+        const box = overview.getBoundingClientRect();
+        for (const fraction of [0.2, 0.55, 0.8, 0.35]) {
+          overview.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: box.left + box.width * fraction, clientY: box.top + box.height / 2 }));
+          await sleep(150);
+        }
+      }
+      pressKey('Escape', 'Escape');
+      await waitFor(() => !document.querySelector('.ff-xp'), 5000);
+    },
+
+    async settings() {
+      pressKey(',', 'Comma', { ctrlKey: true });
+      if (!(await waitFor(() => document.querySelector('.ff-settings-sheet__nav-item'), 3000))) throw new Error('settings did not open');
+      for (const item of document.querySelectorAll('.ff-settings-sheet__nav-item')) {
+        item.click();
+        await sleep(120);
+      }
+      pressKey('Escape', 'Escape');
+      await waitFor(() => !document.querySelector('.ff-settings-sheet__nav-item'), 3000);
+    },
+
+    async analysis(round) {
+      const pool = cfg.soakAnalysisIds || [];
+      if (!pool.length) return;
+      const ids = [0, 1].map((i) => pool[(round * 2 + i) % pool.length]);
+      const run = window.__TAURI_INTERNALS__.invoke('analyze_track_ids', { ids });
+      const outcome = await Promise.race([run.then(() => 'done'), sleep(180000).then(() => 'timeout')]);
+      if (outcome === 'timeout') {
+        await window.__TAURI_INTERNALS__.invoke('cancel_analysis').catch(() => {});
+        throw new Error('analysis timed out');
+      }
+    },
+  };
+
+  async function soak() {
+    const names = cfg.soakActions || Object.keys(soakActions);
+    const started = performance.now();
+    const failures = {};
+    let cycle = 0;
+    const takeSample = () =>
+      send('soak_sample', {
+        minute: (performance.now() - started) / 60000,
+        cycle,
+        js_heap_mb: performance.memory ? performance.memory.usedJSHeapSize / 1e6 : null,
+        dom_nodes: document.getElementsByTagName('*').length,
+        failures: { ...failures },
+      });
+    send('soak_start', { actions: names, minutes: cfg.soakMinutes, js_heap_api: Boolean(performance.memory) });
+    const sampler = setInterval(takeSample, (cfg.soakSampleSecs ?? 60) * 1000);
+    while (performance.now() - started < cfg.soakMinutes * 60000) {
+      const cycleStart = performance.now();
+      for (const name of names) {
+        try {
+          await soakActions[name](cycle);
+        } catch (error) {
+          failures[name] = (failures[name] || 0) + 1;
+          send('soak_failure', { action: name, cycle, error: String(error) });
+          pressKey('Escape', 'Escape');
+        }
+      }
+      cycle += 1;
+      send('soak_cycle', { cycle, cycle_ms: performance.now() - cycleStart });
+      await sleep(cfg.soakPauseMs ?? 0);
+    }
+    clearInterval(sampler);
+    takeSample();
+    send('soak_done', { cycles: cycle, failures });
+  }
+
   async function run() {
     send('page_start', { time_origin: performance.timeOrigin });
     const found = await waitFor(() => document.querySelector('[data-track-row]'), 120000);
@@ -182,6 +329,10 @@
     }
     send('interactive', { at_page_ms: streakStart, longest_frame_ms: longest, frames_after_first_row: gaps.length });
     await sleep(cfg.settleMs ?? 2000);
+    if (cfg.soakMinutes) {
+      await soak();
+      return send('probe_done');
+    }
     if (cfg.expand) await firstExpand();
     if (cfg.trackLoad !== false) await loadTracks();
     if (cfg.scroll !== false) {

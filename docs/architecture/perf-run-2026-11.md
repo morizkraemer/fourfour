@@ -1090,3 +1090,44 @@ Style per row -32% in WebKit (lower in 6 of 6 pairs), layout unchanged; first ro
 3. Text cells without the inner span (and the wave cursor only while hovered): fewer elements, about 0.1 ms layout per row in WebKit, but the vertical centering must be matched exactly before it can be called pixel-identical; not verified.
 
 **Harness.** Kept out of the repo (one-off): spec, config and the Vite plugin were in `~/.cache/r45/` and deleted after this item; the method above is enough to redo it.
+
+## R42 real-app soak (2026-11-02, `r42-realsoak`)
+
+Branch `r42-realsoak` from `ov-1028`. The release app (Tauri + WebKitGTK + real IPC + real backend, `cargo build --release -p pioneer-test-ui --features tauri/custom-protocol`, frontend embedded, no `.deb`) under `xvfb-run` on the Linux `dev` box (16 cores, 62 GB, box load 15-45 from other workers), temp `HOME` and `XDG_*`, a copy of the 10k fixture library (`~/.cache/ff-fixture/10k/library`, 10,000 tracks, 6,937 analysed, covers; the 7 GB of audio is read in place, the app never writes it), the real model weights (`FOURFOUR_MODELS_DIR`). No audio device on the box: `audio output unavailable at startup`, loading and seeking still work; playback itself and the cpal callback were not exercised.
+
+**Method.** `FF_PERF_PROBE='{"soakMinutes":50,...}'` (with `FF_PERF_LOG`; off by default, so no change without those env vars) makes `perf_probe.js` loop, after the first interactive frame: scroll flings (24 frames of 9,000 px), typing and clearing a search, palette open/type/close (Ctrl+K), switching four playlists and back to All Tracks, double-click load of a track + expand + wait for the zoom detail + four overview seeks + close (the waveform detail open/close), settings open with every page and close, and `analyze_track_ids` on two real fixture tracks per cycle (real beat model, real stage passes). `soakActions` (a JSON list) runs a subset, `soakPauseMs` paces an empty list (idle control). `scripts/soak-real.sh [minutes]` starts the app, samples every 60 s from `/proc`: RSS and PSS of the app process (Rust backend plus the WebKitGTK UI process), thread and fd counts, RSS and PSS of the `WebKitWebProcess` child and the network process, the number of rows in `analyses`, and dumps threads and `smaps_rollup` when the app passes 3 GB. The probe logs DOM nodes and failures per sample (`performance.memory` does not exist in WebKitGTK, so there is no JS heap number; RSS of the web process is what is left). Env: `FF_SOAK_ACTIONS` (comma list or `none`), `FF_SOAK_AUTO_ANALYZE=off` (writes `auto_analyze_new_tracks: false` into the temp config), `FF_SOAK_SAMPLE_SECS`, `FF_SOAK_LIBRARY`, `FF_SOAK_MODELS`.
+
+**50 min, all actions** (134 cycles, 19-47 s each; the first two cycles in the launch analysis, 2 of 134 loads timed out at 30 s there) next to a 50 min idle control (no actions) of the same build:
+
+| Minute | App RSS (actions) | Web process (actions) | Threads / fds | App RSS (idle) | Web process (idle) |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 1,409 MB | 656 MB | 396 / 46 | 1,423 MB | 570 MB |
+| 3 | 2,161 MB | 780 MB | 127 / 43 | 2,009 MB | 615 MB |
+| 5 | 2,068 MB | 846 MB | 120 / 43 | 2,092 MB | 485 MB |
+| 10 | 2,253 MB | 884 MB | 121 / 43 | 2,154 MB | 613 MB |
+| 15 | 2,161 MB | 822 MB | 122 / 43 | 2,002 MB | 379 MB |
+| 20 | 2,204 MB | 934 MB | 123 / 46 | 2,018 MB | 351 MB |
+| 25 | 2,229 MB | 945 MB | 121 / 43 | 1,974 MB | 349 MB |
+| 30 | 2,170 MB | 964 MB | 116 / 43 | 2,020 MB | 382 MB |
+| 35 | 2,148 MB | 1,001 MB | 124 / 44 | 2,087 MB | 381 MB |
+| 40 | 2,124 MB | 932 MB | 119 / 43 | 2,044 MB | 386 MB |
+| 45 | 2,101 MB | 1,154 MB | 122 / 44 | 2,004 MB | 404 MB |
+| 50 | 2,128 MB | 1,065 MB | 120 / 43 | 2,001 MB | 454 MB |
+
+- **App process: flat.** Slope after minute 10: -2.0 MB/min (actions), -0.5 and -1.3 MB/min (two idle runs). Threads and fds do not grow (43-46 fds, about 120 threads), DOM nodes 2,076 at the first sample, 2,074 at the last (max 2,685 while a panel is open). No failed action except the two launch-time load timeouts.
+- **Web process: 650-1,150 MB under the loop, 350-750 MB idle.** Linear fit after minute 10 is +5.1 MB/min for the full loop (880 MB at minutes 10-20, 951, 958, 1,060 MB at 40-52) but the 32 min subset runs (fling only, load+seek only, search+palette+playlists+settings only) are flat after about minute 16 (fling 642, 766, 834, 733 MB; load 705, 731, 790, 784; ui 722, 715, 744, 688). Not shown to be unbounded in 50 min; 180 MB over 40 min is inside what JSC garbage, the 2,000-thumbnail row cache and the waveform bitmap caches explain. A 2 h run would settle it.
+
+**Findings**
+
+1. **Launch analysis leaves about 1.8 GB resident, then stays flat (glibc arenas, not a leak).** With defaults the app queues the 3,063 never-analysed tracks at launch; RSS climbs from 0.3 GB to 2.1-2.3 GB in 3-5 minutes and stays there for the rest of the run, in the idle control as well. With `FF_SOAK_AUTO_ANALYZE=off` the same app is at 277 MB idle and 584 MB under the full loop for 16 min (flat, 0 failures, 6,937 analyses). With `MALLOC_ARENA_MAX=2` the launch analysis ends at 646-800 MB. So what stays is freed memory the allocator keeps in the per-thread arenas of the 16 analysis and rten threads, not data Rust still references (the analysis `Analyzer`, the model pool and the 48-entry caches are bounded). macOS's allocator does not behave like this. A Linux build could cap arenas or trim after a run; not done here (needs `mallopt`/`malloc_trim` through libc, a new dependency, and the Linux target is not shipping yet).
+2. **Analysis peaks at 5-7 GB RSS for 2-4 minutes, in four of twelve runs** (6.1, 6.7, 6.6 and 5.5 GB at minutes 39, 18, 4 and 4, back to 2.3 GB afterwards; `analysis`, `rten-0` and `beat-chunks` threads at the top of the dump, all 10,000 tracks already counted as analysed). Probably the 24 long mixes (7 minute aiff/flac, last in the queue) decoded and chunked in parallel; not confirmed per track. The analysis plan allows a quarter of the machine (15 GB here, 4 GB on a 16 GB Mac), so it is the transient the plan allows, not growth; the 50 min full run never hit it, the UI-busy pauses probably kept the queue short of those files.
+3. **No Rust cache or map grows**: with the analysis out of the way (`FF_SOAK_AUTO_ANALYZE=off`) the app process is 584 MB at minute 3 and 584 MB at minute 16 under the full loop; the artwork thumbnail cache (400), the analysis cache and the waveform-detail lock map hold.
+
+**No leak found, no fix made.** The only code change is the env-gated soak mode in `perf_probe.js` and `scripts/soak-real.sh`.
+
+**What is left**
+
+- A 2 h run of the full loop to settle the web-process slope (+5 MB/min between minutes 10 and 50).
+- The same soak on the Mac with WKWebView: `performance.memory` is absent there as well; `vmmap`/`footprint` of the app and `com.apple.WebKit.WebContent` would replace `/proc`. Audio output and the playback callback (`playback_play`, tempo) were not exercised (no sound card).
+- Arena retention after bulk analysis on Linux (finding 1) if a Linux build ships.
+- Real 50k library with covers was not soaked in the real app (10k only).
