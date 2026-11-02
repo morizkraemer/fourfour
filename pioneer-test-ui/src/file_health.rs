@@ -162,7 +162,7 @@ pub async fn relocate_missing_in_folder(
         .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn locate_track_file(
     track_id: i64,
     path: String,
