@@ -139,3 +139,15 @@ progress 2026-10-31: items 0-8, 10-12 merged on ov-1028 (checks green). Idle: 9 
 - [done 2026-11-01] install ov-1028 + dmg check (headless, all PASS: build/mac/dmg-20261101-1221 on the Mac)
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
+
+
+## Run own-priority items as of 2026-11-02 evening
+- r42-realsoak: [merging] real Linux app 50 min: app RSS flat, no leak; web process +5 MB/min under full loop (2 h run to settle); after launch analysis glibc keeps ~1.8 GB resident (MALLOC_ARENA_MAX=2 -> 650-800 MB; Linux only)
+- r44-version: [landed] app version now from the app crate (shown version 0.9.14 -> 0.1.0, matching the dmg; decided: lands, it corrects a wrong number); memo keyed on ANALYSIS_VERSION (bump by hand when analysis changes)
+- r45-rowcost: [landed] no app-side lever; all per-row WebKit gains are in the fenced design system (reset fix -32% style, cell geometry as custom properties ~10% more); bench_startup build fixed
+- r46-dsrows: [parked, branch r46-dsrows 220f237 on r29-css-v2] cell widths as table-level custom properties; pixel-identical incl. resize/reorder; resize touches 0 body attributes (was 560); per-row gain within noise
+- r47-beta-checklist: [landed fd36549] docs/release/beta-checklist-2026-11.md on ov-1028; top blockers: bundle id + data migration (24), no signing/notarization (Apple account), key 56% + bar-1 listen (4/30/16), CDJ-3000 test of current export + manifest-aware wipe (brother), no LICENSE/complete notices + first CI run (15)
+- r48-logs: landed on ov-1028 19f34dd via r48-logs-fix (first try reverted 67deaf2: smoke mock rejected log_frontend). Rotating log 3x5 MB, panic hook, frontend errors forwarded (benign ResizeObserver notice skipped), log_directory command; no UI. Checks 113 passed 0 failed, chromium + webkit
+- r51-migration-test: landed on ov-1028 ebe080e (beta-1 library fixture with ANLZ tree; first merge reverted for a test that only passed with truncated output). r52-no-python parked (Waiting 38). r53-user-docs parked (Waiting 39). r54-notices: landed (merge + f9e0a67 regen; scripts/release/third-party-notices.py, 403 crates, 37 MPL-2.0; not bundled, no About row yet)
+- r49-linux-arena: landed on ov-1028 3d80117 (glibc arena cap 4 + trim after runs; after-run RSS 2.1 GB -> 270-410 MB; web 2 h soak flat after analysis). Open: long mixes spike to 5.8 GB briefly (R42 finding 2), queued after r55
+- r56-early-panic: landed on ov-1028 92fb0a4 (log file + panic hook before Tauri setup). r55-symphonia-dedupe dropped (0.6.1 not bit-identical, riff panics; WIP branch kept). r57-longmix-mem running. r58-devbins: landed (bench bins compile; merge checks now build dev bins). r59-smoke-flake: landed 7a8fd26 (load-scaled timeouts; last line "smoke: status ..., N failed, N flaky"). r57-longmix-mem: landed 5895565 (-1.2 GB at 120 min; real peak = chunk budget; r61 ceiling knob running). r60-detail-cache: landed (free-disk rule). r61-chunk-ceiling: landed (knob default off; Mac sweep picks the default). r62-leak-spec: landed (settled counters, no leak found). r63-ci parked (Waiting 15). r64-parked-refresh running
