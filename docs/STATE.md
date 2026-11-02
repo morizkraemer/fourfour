@@ -72,7 +72,7 @@ targets: beta-ready on ov-1028, as fast as possible at 10k+ (startup, analysis, 
 done so far: plan items 0-12 and own-priority r11-r41 (detail: docs/state-archive-2026-10-28.md "Run plan as of 2026-11-02", journal, docs/architecture/perf-run-2026-11.md R-sections)
 open own-priority items:
 - r42-realsoak: [merging] real Linux app 50 min: app RSS flat, no leak; web process +5 MB/min under full loop (2 h run to settle); after launch analysis glibc keeps ~1.8 GB resident (MALLOC_ARENA_MAX=2 -> 650-800 MB; Linux only)
-- r49-linux-arena: return glibc arenas after analysis on Linux (malloc_trim / arena cap) + 2 h web-process soak
+- r49-linux-arena: return glibc arenas after analysis on Linux (malloc_trim / arena cap) + 2 h web-process soak [running]
 - r44-version: [landed] app version now from the app crate (shown version 0.9.14 -> 0.1.0, matching the dmg; decided: lands, it corrects a wrong number); memo keyed on ANALYSIS_VERSION (bump by hand when analysis changes)
 - r45-rowcost: [landed] no app-side lever; all per-row WebKit gains are in the fenced design system (reset fix -32% style, cell geometry as custom properties ~10% more); bench_startup build fixed
 - r46-dsrows: [parked, branch r46-dsrows 220f237 on r29-css-v2] cell widths as table-level custom properties; pixel-identical incl. resize/reorder; resize touches 0 body attributes (was 560); per-row gain within noise

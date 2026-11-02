@@ -464,3 +464,4 @@
 2026-11-02 14:58 orchestrator - decided: own prio r47-beta-checklist (sonnet high; docs only, box load 25-50 and swap full make benchmarks noise)
 2026-11-02 15:05 orchestrator r47-beta-checklist landed fd36549 (docs); decided: own prio r48-logs (sonnet high; checklist area 9)
 2026-11-02 15:16 orchestrator r42-realsoak handed back (no leak; Linux glibc arena retention after analysis ~1.8 GB), merging; backlog r49-linux-arena
+2026-11-02 15:17 orchestrator - decided: own prio r49-linux-arena (sonnet high; glibc arena return + 2 h web-process soak)
