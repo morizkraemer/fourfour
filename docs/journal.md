@@ -530,3 +530,5 @@
 2026-11-02 21:08 orchestrator - decided: own prio r74-player-flake (sonnet medium; hot cue test reads the clear's save, not the Shift+C save); stale caches r16/r3 deleted (-12.5 GB)
 2026-11-02 22:10 orchestrator r73-webkit-startup + r74-player-flake landed on ov-1028 (0a80690; chromium + webkit smoke 0 failed, CHECKS-OK); smoke-only, no preview rebuild
 2026-11-02 22:12 orchestrator - decided: own prio r75-parked-refresh (sonnet medium; rebase parked -v3 branches onto ov-1028 after r67-r74, rebuild parked-all, full checks)
+2026-11-02 23:05 orchestrator r75-parked-refresh handed back: 10 branches replayed onto ov-1028 0a80690 as -v4 (r38 read_backup + recovery_commands CommandError fixes, r69 async lists merged), parked-all-v4 full checks + smoke green
+2026-11-02 23:15 orchestrator r75 followup: r52-no-python-v3 broke the analysis bench dev-bin (deleted analysis_python.rs, --backend flag); fixed 2933305, merged into parked-all-v4 54893bc; dev-bins check green
