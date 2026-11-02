@@ -39,7 +39,22 @@ async function cueATime(smoke: { invokes(cmd: string): Promise<Record<string, an
 }
 
 async function cueAFlag(page: Page) {
-  const found = await page.evaluate(() => {
+  let previous = await readCueAFlag(page);
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await page.waitForTimeout(100);
+    const current = await readCueAFlag(page);
+    if (current && previous && current.x === previous.x) {
+      previous = current;
+      break;
+    }
+    previous = current;
+  }
+  expect(previous, 'hot cue A flag on the zoom view').not.toBeNull();
+  return { x: previous!.x + 6, y: previous!.y };
+}
+
+async function readCueAFlag(page: Page) {
+  return page.evaluate(() => {
     const canvas = document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     const scale = canvas.width / rect.width;
@@ -54,8 +69,6 @@ async function cueAFlag(page: Page) {
     }
     return null;
   });
-  expect(found, 'hot cue A flag on the zoom view').not.toBeNull();
-  return { x: found!.x + 6, y: found!.y };
 }
 
 async function dragCueA(page: Page, dx: number, alt: boolean) {

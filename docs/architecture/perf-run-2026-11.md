@@ -1037,3 +1037,13 @@ The commit-time checkpoint thread overlaps the next batch's write. Dropping it a
 **What would move it.** Less written, i.e. storing covers as files or at a smaller size (a schema change, already listed under R13), or writing the covers during the track insert transaction instead of afterwards (same bytes, same cost, no longer deferred). Neither is a change inside this brief.
 
 Raw: `~/.cache/r36/` (scripts `ab.py`, `exp.sh`, `mb.py`).
+
+## R37 WebKit smoke (2026-11-02, `r37-webkit-smoke`)
+
+Branch `r37-webkit-smoke` from `ov-1028`. The 17 WebKit smoke failures (`FF_SMOKE_BROWSER=webkit`) have two causes, both in the test harness; no app bug.
+
+- **16 specs (14 `topbar`, 1 `popups`, 1 `sticks`): `ResizeObserver loop completed with undelivered notifications.`** The fixture in `smoke/app.ts` fails a test on any `pageerror`. Playwright WebKit reports the window `error` event that this condition raises as a page error; Playwright Chromium takes page errors from CDP exceptions and never sees it. The event fires in Chromium too (a probe with a `window` `error` listener logged the same sequence at 900 px in both browsers: the `GlobalHeader` observer sets `ui.searchMode`, the waveform observer runs, the header observer is re-delivered next frame). It only reaches `window.onerror`, the app has no handler, and the header settles on the next frame, so Mac users see nothing. `app.ts` now ignores exactly that message. The specs hit are the ones where the search field collapses (900, 700, 670 px), because the header observer changes the layout during boot.
+- **`leaks`: `newCDPSession` and `Memory.getDOMCounters`.** CDP only exists in Chromium. Under WebKit the test still checks that no `_<n>` Tauri callbacks pile up over the cycles; the listener and node counters stay Chromium-only (the WebKit test name says so).
+- **Also found, not one of the 17: `player` "without Q a dragged hot cue lands where it is dropped" failed about 1 run in 6 under WebKit** (0 in 8 under Chromium). Right after the Pause label shows, the zoom view is still settling for about 100-300 ms (the hot cue A flag sat 10-20 px left of its final spot, then moved), and the test read the flag position once and pressed there, missing the grab zone. `cueAFlag` now waits until two reads 100 ms apart agree. After the change 20 of 20 WebKit runs of the two cue-drag specs passed. The settle itself is app behavior in both browsers (the view corrects after the pause), not a Mac-only bug.
+
+**Validation.** WebKit smoke and Chromium smoke green (numbers in the run report).

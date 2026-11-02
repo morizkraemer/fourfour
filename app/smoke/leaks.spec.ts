@@ -3,6 +3,7 @@ import { expect, loadByDoubleClick, test } from './app.ts';
 import type { SmokeWindow } from './tauri-mock.ts';
 
 const CYCLES = 6;
+const CDP_COUNTERS = process.env.FF_SMOKE_BROWSER !== 'webkit';
 
 interface Counters {
   listeners: number;
@@ -10,10 +11,11 @@ interface Counters {
   callbacks: number;
 }
 
-async function counters(page: Page, cdp: CDPSession): Promise<Counters> {
+async function counters(page: Page, cdp: CDPSession | null): Promise<Counters> {
+  const callbacks = await page.evaluate(() => Object.keys(window).filter((key) => /^_\d+$/.test(key)).length);
+  if (!cdp) return { listeners: 0, nodes: 0, callbacks };
   await cdp.send('HeapProfiler.collectGarbage');
   const dom = (await cdp.send('Memory.getDOMCounters')) as { nodes: number; jsEventListeners: number };
-  const callbacks = await page.evaluate(() => Object.keys(window).filter((key) => /^_\d+$/.test(key)).length);
   return { listeners: dom.jsEventListeners, nodes: dom.nodes, callbacks };
 }
 
@@ -40,13 +42,17 @@ async function expandAndCollapsePlayer(page: Page) {
   await expect(page.locator('.ff-xp')).toHaveCount(0);
 }
 
-test('opening and closing the palette, settings and the expanded player leaves no listeners, nodes or callbacks behind', async ({ smoke }) => {
+const title = CDP_COUNTERS
+  ? 'opening and closing the palette, settings and the expanded player leaves no listeners, nodes or callbacks behind'
+  : 'opening and closing the palette, settings and the expanded player leaves no callbacks behind (listener and node counters are Chromium-only)';
+
+test(title, async ({ smoke }) => {
   test.setTimeout(180_000);
   const { page } = smoke;
   await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
   await loadByDoubleClick(page, 'Smoke Track 03');
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Memory.getDOMCounters');
+  const cdp = CDP_COUNTERS ? await page.context().newCDPSession(page) : null;
+  await cdp?.send('Memory.getDOMCounters');
 
   const cycle = async () => {
     await openAndClosePalette(page);
@@ -58,7 +64,8 @@ test('opening and closing the palette, settings and the expanded player leaves n
   for (let i = 0; i < CYCLES; i++) await cycle();
   const after = await counters(page, cdp);
 
-  expect(after.listeners - before.listeners, `event listeners after ${CYCLES} cycles`).toBeLessThanOrEqual(2);
   expect(after.callbacks - before.callbacks, 'registered event callbacks').toBe(0);
+  if (!cdp) return;
+  expect(after.listeners - before.listeners, `event listeners after ${CYCLES} cycles`).toBeLessThanOrEqual(2);
   expect(after.nodes - before.nodes, 'DOM nodes, attached or detached').toBeLessThanOrEqual(40);
 });
