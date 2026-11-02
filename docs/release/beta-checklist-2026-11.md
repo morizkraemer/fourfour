@@ -141,7 +141,7 @@ Next steps (agent): state "fourfour makes no network connections; your music and
 ## 9. Crash reporting and logs - needs work
 
 - Built (r48-logs): a rotating log `fourfour.log` plus `fourfour.1.log` and `fourfour.2.log` (5 MB each, std only, no new dependency) in Tauri's `app_log_dir` (`~/Library/Logs/com.pioneer.test-ui/` on macOS, `~/.local/share/com.pioneer.test-ui/logs/` on Linux, `%LOCALAPPDATA%\com.pioneer.test-ui\logs` on Windows; the folder follows the bundle id, see 1). Module `pioneer-test-ui/src/app_log.rs`. It gets every debug-panel line (`debug_log`), the former `eprintln!` warnings, panics from any thread (message, location, version, backtrace) and frontend `console.error`, uncaught errors and unhandled rejections (rate limited, 20 per 10 s). The command `log_directory` returns the folder for a later "Reveal logs" button; no UI was added.
-- Still open: the error text "see debug log" (`main.rs`, `all_tracks_failed`) should point at the log folder once the Reveal button exists. A panic before Tauri's setup (during `build`) is not in the file.
+- Still open: the error text "see debug log" (`main.rs`, `all_tracks_failed`) should point at the log folder once the Reveal button exists. A panic before Tauri's setup (during `build`) is now written to the file: built on branch `r56-early-panic`.
 - Library open failure: `open_startup_library` (`main.rs:1434`) returns a typed error; the recovery panel is on `r38-recovery-v2` (Waiting 37), not landed.
 - Analysis failures are memoised (`pioneer-test-ui/src/analysis_failures.rs`); their messages reach the log through the debug panel line. macOS also writes its own crash report to `~/Library/Logs/DiagnosticReports/` for hard crashes (signals, aborts), which the panic hook does not see.
 
