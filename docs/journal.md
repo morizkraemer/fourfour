@@ -499,3 +499,4 @@
 2026-11-02 14:49 orchestrator r57-longmix-mem + r60-detail-cache landed on ov-1028 (smoke 113 passed 0 flaky at load 49, CHECKS-OK)
 2026-11-02 14:50 orchestrator - decided: own prio r62-leak-spec (sonnet medium; leaks.spec.ts:49 flaky under load: real leak or settle timing)
 2026-11-02 15:20 orchestrator r61-chunk-ceiling handed back c7d2f10 (knob default off, sweep script; peak 5.5 GB -> 2.5 GB at 2048), merging; Mac-night sweep queued
+2026-11-02 15:32 orchestrator r61-chunk-ceiling landed (CHECKS-OK)
