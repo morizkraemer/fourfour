@@ -518,3 +518,4 @@
 2026-11-02 17:59 orchestrator - decided: own prio r70-sync-audit (sonnet medium; measure every sync Tauri command at 10k/50k, move slow ones off the main thread)
 2026-11-02 18:17 orchestrator r68 extended b76d80c (12 more robustness tests on decode engine; real models only in messy-library, serialised; with models 537 passed 0 failed, binary 226 s -> 87 s), merging
 2026-11-02 18:22 orchestrator r68-symlink-test landed (CHECKS-OK; Rust only, smoke not rerun)
+2026-11-02 18:23 orchestrator - decided: own prio r71-checklist-refresh (sonnet low; beta checklist statuses after today's landings)
