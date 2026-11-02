@@ -520,3 +520,4 @@
 2026-11-02 18:22 orchestrator r68-symlink-test landed (CHECKS-OK; Rust only, smoke not rerun)
 2026-11-02 18:23 orchestrator - decided: own prio r71-checklist-refresh (sonnet low; beta checklist statuses after today's landings)
 2026-11-02 18:25 orchestrator r71 beta checklist refresh merged on ov-1028; STATE notes now point at -v3
+2026-11-02 19:07 orchestrator r70-sync-audit handed back ee46f11 (12 commands async; save_state 2.3 s at 50k with big playlists kept sync: unordered snapshots), merging with chromium+webkit smoke
