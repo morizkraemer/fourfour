@@ -3,18 +3,13 @@
   import { library } from '../../stores/library.svelte.ts';
   import {
     appSettings,
-    ANALYSIS_ENGINE_CHOICES,
     setAutoAnalyzeNew,
-    setAnalysisEngine,
   } from '../../stores/app-settings.svelte.ts';
   import { cancelAnalysis } from '../../services/tauri.svelte.ts';
 
   let progress = $derived(library.analysisProgress);
   let percent = $derived(progress.total > 0 ? (progress.current / progress.total) * 100 : 0);
   let unanalyzed = $derived(library.tracks.filter((t) => !t.analyzed || t.analysisPending).length);
-  let engineIndex = $derived(
-    Math.max(0, ANALYSIS_ENGINE_CHOICES.findIndex((c) => c.value === appSettings.analysisEngine)),
-  );
   let cores = $derived(typeof navigator === 'undefined' ? 1 : navigator.hardwareConcurrency || 1);
 </script>
 
@@ -54,18 +49,6 @@
 
 <div class="ff-settings-section">Engine</div>
 <div class="ff-settings-card">
-  <SettingRow
-    title="Analysis engine"
-    description="Automatic uses the built-in engine when its model files are installed, otherwise Python. Applies to the next run."
-  >
-    {#snippet control()}
-      <SegmentedControl
-        items={ANALYSIS_ENGINE_CHOICES.map((c) => c.label)}
-        activeIndex={engineIndex}
-        onChange={(index) => void setAnalysisEngine(ANALYSIS_ENGINE_CHOICES[index].value)}
-      />
-    {/snippet}
-  </SettingRow>
   <SettingRow
     title="Parallel workers"
     description="Fixed at launch: all cores but one. Override with the FOURFOUR_ANALYSIS_THREADS environment variable."

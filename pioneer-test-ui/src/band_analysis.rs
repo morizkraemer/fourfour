@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::path::Path;
 
-use pioneer_usb_writer::models::AnalysisResult;
 use pioneer_usb_writer::waveform::{analyze, measure_window, DetailMeter, DetailSeries, Meter, Waveforms, WindowSeries};
 use symphonia::core::audio::SampleBuffer;
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -469,14 +468,6 @@ pub fn measure_detail_window(
     }
     let first_frame = first_frame.unwrap_or(0);
     Ok(Some(measure_window(&mono, first_frame, sample_rate, gains, start_s, end_s, columns)))
-}
-
-/// Replaces the colour data of `analysis` with bands measured from the audio at `path`,
-/// so it no longer depends on the Python filter bank. The mono preview keeps its source.
-pub fn apply_measured_bands(analysis: &mut AnalysisResult, path: &Path) -> Result<(), String> {
-    let waves = measure_waveforms(path)?;
-    analysis.color_waveform = Some(waves.color_waveform());
-    Ok(())
 }
 
 #[cfg(test)]

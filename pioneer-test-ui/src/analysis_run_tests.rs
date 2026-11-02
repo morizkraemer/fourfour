@@ -216,7 +216,7 @@ fn fast_first_harness(tracks: usize, workers: usize, max_threads: usize) -> Harn
 
 impl Harness {
     fn runner(&self) -> Runner {
-        Runner::Rust { engine: self.engine.clone() }
+        Runner { engine: self.engine.clone() }
     }
 
     fn events(&self) -> Vec<Event> {
@@ -1081,6 +1081,21 @@ async fn resume_stops_retrying_a_track_after_two_failed_runs() {
 
     assert_eq!(h.resume_without_known_failures(), (vec![], 1));
     assert_eq!(h.runs_of("t2.wav"), 2, "{:?}", h.events());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn a_rust_analyzer_failure_is_recorded_as_a_failure_and_the_track_is_not_analysed_another_way() {
+    let dir = failure_dir("no-fallback");
+    let h = harness(2, 1, 8).remembering_failures(&dir);
+    h.fail_on(&["t2.wav"]);
+
+    let outcome = h.run_all(h.items.clone()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 1, total: 2 }));
+    assert_eq!(h.runs_of("t2.wav"), 1, "{:?}", h.events());
+    assert_eq!(h.unanalyzed(), vec![2]);
+    assert!(dir.join("analysis-failures.json").exists());
     std::fs::remove_dir_all(&dir).ok();
 }
 

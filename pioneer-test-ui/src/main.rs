@@ -5,7 +5,6 @@ mod analysis_failures;
 mod analysis_order;
 mod analysis_payload;
 mod analysis_priority;
-mod analysis_python;
 mod analysis_run;
 mod app_log;
 mod backup_commands;
@@ -44,10 +43,9 @@ use pioneer_library::rekordbox;
 use pioneer_library::{BeatPosition, LocalLibrary};
 use pioneer_usb_writer::models;
 
-use analysis_backend::{AnalysisBackend, BackendEnv};
+use analysis_backend::BackendEnv;
 use analysis_failures::FailureMemo;
 use command_error::{CommandError, ErrorKind};
-use analysis_python::resolve_python;
 use analysis_run::{
     merge_into_analysis_queue, rerun_work, resolve_analysis_work, without_known_failures, AnalysisCoordinator, AnalysisSink,
     AnalysisWorkItem, LogLevel, RunOutcome, SharedLibrary,
@@ -321,7 +319,7 @@ fn analysis_coordinator(app: &AppHandle) -> AnalysisCoordinator {
 }
 
 fn analysis_backend_env(app: &AppHandle) -> BackendEnv {
-    BackendEnv::from_process(config_path(app).ok(), app.path().app_data_dir().ok(), app.path().resource_dir().ok())
+    BackendEnv::from_process(app.path().app_data_dir().ok(), app.path().resource_dir().ok())
 }
 
 fn all_tracks_failed<T: std::fmt::Display>(total: T) -> CommandError {
@@ -333,8 +331,7 @@ fn analysis_start_error(message: String) -> CommandError {
     CommandError::new(kind, message)
 }
 
-/// Run analysis for the given tracks with the configured backend (rust when model
-/// weights are present, python otherwise). Used by bulk and per-selection commands.
+/// Run analysis for the given tracks with the analyzer. Used by bulk and per-selection commands.
 async fn run_track_analysis(
     app: AppHandle,
     shared: SharedLibrary,
@@ -369,23 +366,6 @@ async fn analysis_ui_busy(coordinator: State<'_, AnalysisCoordinator>) -> Result
     coordinator.ui_busy();
     Ok(())
 }
-
-/// Stored analysis backend setting: "rust", "python", or null for the default.
-#[tauri::command]
-fn get_analysis_backend(app: AppHandle) -> Option<String> {
-    let path = config_path(&app).ok()?;
-    analysis_backend::read_setting(&path).map(|b| b.name().to_string())
-}
-
-#[tauri::command]
-fn set_analysis_backend(backend: Option<String>, app: AppHandle) -> Result<(), String> {
-    let parsed = match backend.as_deref() {
-        None => None,
-        Some(text) => Some(AnalysisBackend::parse(text).ok_or_else(|| format!("unknown analysis backend: {text}"))?),
-    };
-    analysis_backend::write_setting(&config_path(&app)?, parsed)
-}
-
 
 /// Analyze all tracks that have not yet been analyzed.
 #[tauri::command]
@@ -813,55 +793,6 @@ async fn rekordbox_import_run(
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
-}
-
-/// Run Python analysis CLI on a single track and return the result as JSON.
-/// Uses the venv Python at `analysis/.venv/bin/python`.
-#[tauri::command]
-async fn analyze_track_python(path: String) -> Result<serde_json::Value, String> {
-    let python = resolve_python();
-
-    let output = tokio::task::spawn_blocking(move || {
-        let child = std::process::Command::new(&python)
-            .args(["-m", "fourfour_analysis", "analyze", &path, "--backend", "deeprhythm_essentia", "--json"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn analyzer: {e}"))?;
-
-        let timeout = std::time::Duration::from_secs(120);
-        let wait_result = std::thread::scope(|s| {
-            let handle = s.spawn(move || child.wait_with_output());
-            let start = std::time::Instant::now();
-            loop {
-                if handle.is_finished() {
-                    return Some(handle.join().expect("wait thread panicked"));
-                }
-                if start.elapsed() > timeout {
-                    return None;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        });
-
-        match wait_result {
-            Some(Ok(output)) => {
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("Python analyzer failed: {stderr}"));
-                }
-                let results: Vec<serde_json::Value> =
-                    serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-                results.into_iter().next().ok_or_else(|| "No results".to_string())
-            }
-            Some(Err(e)) => Err(format!("Analyzer wait failed: {e}")),
-            None => Err(format!("Analyzer timed out after {}s", timeout.as_secs())),
-        }
-    })
-    .await
-    .map_err(|e| format!("Task join error: {e}"))?;
-
-    output
 }
 
 /// Get stored analysis data for a track from the local library DB.
@@ -1518,10 +1449,7 @@ fn main() {
             recovery_commands::recover_open_library,
             recovery_commands::recover_new_library,
             recovery_commands::recover_restore_backup,
-            analyze_track_python,
             cancel_analysis,
-            get_analysis_backend,
-            set_analysis_backend,
             get_analysis_data,
             get_waveform_detail,
             prefetch_waveform_detail,
@@ -1610,7 +1538,6 @@ mod tests {
     use super::{analysis_start_error, artwork_thumbnail, eject_failure, validated_reveal_path};
     use crate::analysis_backend;
     use crate::command_error::ErrorKind;
-    use crate::analysis_python::{parse_analyzer_stdout, python_result_to_analysis};
 
     fn assert_off_main_thread(source: &str, commands: &[&str]) {
         for name in commands {
@@ -1765,22 +1692,5 @@ mod tests {
         let small = png_bytes(100, 80);
         assert_eq!(artwork_thumbnail(&small, 512), small);
         assert_eq!(artwork_thumbnail(b"not an image", 512), b"not an image".to_vec());
-    }
-
-    #[test]
-    fn parse_backend_keyed_analyzer_json() {
-        let stdout = br#"{"deeprhythm_essentia":{"bpm":128.0,"key":"8A","waveform_preview":[63]}}"#;
-        let json = parse_analyzer_stdout(stdout).expect("parse");
-        let analysis = python_result_to_analysis(&json);
-        assert!((analysis.bpm - 128.0).abs() < f64::EPSILON);
-        assert_eq!(analysis.key, "8A");
-    }
-
-    #[test]
-    fn parse_legacy_array_analyzer_json() {
-        let stdout = br#"[{"bpm":120.0,"key":"1A","waveform_preview":[1,2,3]}]"#;
-        let json = parse_analyzer_stdout(stdout).expect("parse");
-        let analysis = python_result_to_analysis(&json);
-        assert!((analysis.bpm - 120.0).abs() < f64::EPSILON);
     }
 }
