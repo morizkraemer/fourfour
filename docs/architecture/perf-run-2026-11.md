@@ -1239,7 +1239,7 @@ Every `#[tauri::command]` in `pioneer-test-ui/src` was checked. A sync `fn` runs
 | `remove_tracks` (1 / 100 / 1000) | sync | 3, 81, 780 / 13, 194, 2130 | `command(async)` |
 | `set_test_cues` (rebuilds all infos) | sync | 98 / 288 | `command(async)` |
 | `read_backup` (`get_all_tracks` for a count) | sync | 214 / 488 | `command(async)` |
-| `save_state` (replace playlists; 30 big playlists of n/5 ids) | sync | 3 (generated) to 461 / 0.03 (generated) to 2320 | kept sync: ordering |
+| `save_state` (replace playlists; 30 big playlists of n/5 ids) | async (r72) | 3 (generated) to 461 / 0.03 (generated) to 2320 | moved in r72 with an ordered frontend save queue |
 | `get_row_previews` (60 ids, scroll path) | sync | 1.1 / 0.7 | `command(async)`: waits on the library mutex, result merged by id |
 | `reveal_in_finder` | sync | process spawn | `command(async)` |
 | `read_usb_state` | sync | stick I/O, SQLCipher open | `command(async)` |
@@ -1253,6 +1253,8 @@ Every `#[tauri::command]` in `pioneer-test-ui/src` was checked. A sync `fn` runs
 | everything else (`load_state`, `get_track_artwork`, waveform, edit and import commands) | `async fn` | - | already off the main thread |
 
 **Left open: `save_state`.** It is the largest remaining offender (460 ms at 10k and 2.3 s at 50k for very large playlists; a few ms for normal ones). The frontend sends a full playlists snapshot and callers do not serialise their calls (`saveState` in `library.svelte.ts`), so concurrent async runs could apply an older snapshot last. Moving it needs a frontend or backend queue that keeps the order, so it was not done here.
+
+R72 (2026-11-02): done. `saveState` is a queue (one save in flight, later calls coalesce into one follow-up that reads the newest playlists when sent; a pagehide listener flushes a waiting save), and `save_state` is `#[tauri::command(async)]`.
 
 `playback_play` may also touch the disk (`probe_duration_ms` when the frontend gives no duration hint, first-time output open). Measure it on the Mac before deciding.
 
