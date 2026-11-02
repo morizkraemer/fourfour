@@ -1258,7 +1258,7 @@ fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, CommandError
 // ---------------------------------------------------------------------------
 
 /// Save playlists to the library. Tracks are already persisted automatically.
-#[tauri::command]
+#[tauri::command(async)]
 fn save_state(
     playlists: Vec<PlaylistInput>,
     _app: AppHandle,
@@ -1634,6 +1634,7 @@ mod tests {
                 "reveal_in_finder",
                 "read_usb_state",
                 "get_row_previews",
+                "save_state",
                 "change_library_path",
                 "reset_library",
             ],
