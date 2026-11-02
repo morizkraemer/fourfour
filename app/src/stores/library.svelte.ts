@@ -1139,14 +1139,46 @@ async function landImportedTracks(added: TrackInfo[]) {
   scheduleSearchIndexWarmup();
 }
 
-/** Saves playlists to backend. Tracks are already auto-persisted. */
-export async function saveState() {
+let saveInFlight: Promise<void> | null = null;
+let savePending: Promise<void> | null = null;
+
+async function writePlaylists() {
   try {
     await tauriSaveState(library.playlists);
   } catch (err) {
     console.error('saveState failed:', err);
   }
 }
+
+function startSave(): Promise<void> {
+  const run: Promise<void> = writePlaylists().finally(() => {
+    if (saveInFlight === run) saveInFlight = null;
+  });
+  saveInFlight = run;
+  return run;
+}
+
+/**
+ * Saves playlists to backend. Tracks are already auto-persisted.
+ * One save runs at a time; calls made meanwhile share one follow-up save that sends the newest playlists.
+ */
+export function saveState(): Promise<void> {
+  if (!saveInFlight) return startSave();
+  if (!savePending) {
+    savePending = saveInFlight.then(() => {
+      savePending = null;
+      return startSave();
+    });
+  }
+  return savePending;
+}
+
+export function flushPendingSave() {
+  if (!savePending) return;
+  void writePlaylists();
+}
+
+if (typeof addEventListener === 'function') addEventListener('pagehide', flushPendingSave);
 
 let libraryListenersInstalled = false;
 
