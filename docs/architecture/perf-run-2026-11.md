@@ -1047,3 +1047,46 @@ Branch `r37-webkit-smoke` from `ov-1028`. The 17 WebKit smoke failures (`FF_SMOK
 - **Also found, not one of the 17: `player` "without Q a dragged hot cue lands where it is dropped" failed about 1 run in 6 under WebKit** (0 in 8 under Chromium). Right after the Pause label shows, the zoom view is still settling for about 100-300 ms (the hot cue A flag sat 10-20 px left of its final spot, then moved), and the test read the flag position once and pressed there, missing the grab zone. `cueAFlag` now waits until two reads 100 ms apart agree. After the change 20 of 20 WebKit runs of the two cue-drag specs passed. The settle itself is app behavior in both browsers (the view corrects after the pause), not a Mac-only bug.
 
 **Validation.** WebKit smoke and Chromium smoke green (numbers in the run report).
+
+## R45 row cost (2026-11-02, `r45-rowcost`)
+
+Branch `r45-rowcost` from `ov-1028`. Linux `dev` box, Playwright WebKit and headless Chromium at 1600x1000, 10k fixture as a column table (`bench_startup dump` of a copy of `~/.cache/ff-fixture/10k/library`; the dev bin did not build on `ov-1028`, fixed here), backend simulated as 118 ms. Box load 24-54 (other workers).
+
+**Where the row markup and CSS live.** The row is `TrackRow.svelte` and `track-row.css` in `prototyping/viewport/design-system/components/`, cell geometry comes from `columnCellStyle` (`design-system/utils/column-layout.js`) and the reset from `design-system/base.css`: all fenced. App code owns only the `.ff-table__row` wrapper (one div with `top`, `contain: layout paint style`) and the scoped rules in `TrackTable.svelte`.
+
+**Method.** R29's micro-measure, done in the booted 10k page: clone 48 of the visible rows into the list body, read a computed style (style time), then read an offset of the last cell (layout time; `document.body.offsetHeight` is not enough in WebKit, it skips the layout of absolutely positioned rows), remove, 9-11 rounds, median per row. Candidates were tried in the same page and interleaved round by round (inject a style tag, delete matching rules from the live sheets, or rewrite the cloned rows), so boot noise drops out. A row is 25 elements: the wrapper, `.ff-trow`, 11 cells, 8 text spans, fav box, canvas, wave cursor, cover.
+
+**Per row, same page, interleaved** (ms style / layout, WebKit, two pages each)
+
+| Variant | WebKit | Chromium |
+|---|---|---|
+| as is | 0.71-0.94 / 0.54-0.77 | 0.15-0.16 / 0.20-0.30 |
+| reset `*, ::before, ::after` -> `*` (fenced, `base.css`) | 0.38-0.54 / 0.54-0.69 | 0.13-0.16 / 0.19-0.23 |
+| plus cell geometry as classes instead of inline `style` (fenced) | 0.33-0.38 / 0.52-0.54 | |
+| plus text in the cell instead of a span, no wave cursor (fenced, not pixel-identical as tried) | 0.27-0.33 / 0.42-0.52 | |
+| no TrackTable rules (`data-file-status`, skeleton `::before`, `:hover`) | no change | no change |
+| `contain: strict` on the row, `contain: layout` on cells or `.ff-trow`, no `contain` | no change or worse | |
+| no canvas / no wave cursor element | -0.05 to -0.1 style, noise | |
+| empty text spans (for scale only) | layout 0.33-0.40 | |
+
+Rules that match a row element: 20, all plain class selectors except the universal reset and one `.ff-table__row .ff-trow__cell--status`. Only the universal reset costs measurable style time: it makes WebKit resolve a `::before` and `::after` style for each of the 25 elements. Layout is mostly text: emptying the spans cuts it by a third; the flex nesting and `contain` settings do not move it. Changing text rendering properties (`text-rendering`, `text-overflow`) made layout 2-3x slower in the measure (cold text caches), so they say nothing.
+
+**App code: nothing to cut.** None of the app-owned per-row work (wrapper div, inline `top`, TrackTable's scoped rules, `contain` on the wrapper) is measurable; every gain sits in the fenced design system. No app change made.
+
+**The fenced patch, measured as a build** (`base.css` from R29's `c89aeff`, `* { box-sizing: border-box }`, swapped in at build time by a Vite plugin outside the repo; no file under `prototyping/` edited). Booted page, interleaved, first launch each:
+
+| | WebKit as is | WebKit patched | Chromium as is | Chromium patched |
+|---|---:|---:|---:|---:|
+| per row style (median, range) | 0.69-0.71 (0.58-0.88), 12 runs | 0.47 (0.40-0.56), 6 runs | 0.22 (0.17-0.28) | 0.19 (0.17-0.20) |
+| per row layout (median) | 0.52-0.54 | 0.55 | 0.24 | 0.22 |
+| first real row from navigation (median) | 1,287-1,290 ms | 1,357 ms | 839 ms | 794 ms |
+
+Style per row -32% in WebKit (lower in 6 of 6 pairs), layout unchanged; first row within the noise at this load (R29 saw -280 to -875 ms only at load 30-55 in the warm case). Full-page screenshots of the booted 10k list are byte-identical between as-is and patched in WebKit and in Chromium (and as-is vs as-is, as a control).
+
+**Proposed fenced patch** (needs the fence lifted for `prototyping/viewport/design-system`):
+
+1. `base.css`: the reset becomes `* { box-sizing: border-box }` (R29 `c89aeff`, unlanded). Biggest lever: about a third of WebKit's per-row style time, pixel-identical.
+2. `TrackRow.svelte` + `column-layout.js`: drop the per-cell inline `style`; the table sets each column's width once as a custom property (`--ff-col-<key>`) on the table root and `track-row.css` has `.ff-trow__cell--<key> { flex: 0 0 var(--ff-col-<key>); width: ...; min-width: ...; max-width: ... }`, flex columns as a class. Same declarations, so same pixels; about 0.05 ms style per row more in WebKit (10%).
+3. Text cells without the inner span (and the wave cursor only while hovered): fewer elements, about 0.1 ms layout per row in WebKit, but the vertical centering must be matched exactly before it can be called pixel-identical; not verified.
+
+**Harness.** Kept out of the repo (one-off): spec, config and the Vite plugin were in `~/.cache/r45/` and deleted after this item; the method above is enough to redo it.
