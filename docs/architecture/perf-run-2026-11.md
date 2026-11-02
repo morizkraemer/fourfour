@@ -956,3 +956,40 @@ Per row, measured in the page (clone N rows into the list, force style, then lay
 **Mac.** Not measured here; the Mac re-measure happens at the next Mac perf night (`scripts/mac/perf-night.sh`), whose summary now has the page-origin columns.
 
 **Harness.** `FF_SMOKE_BROWSER=webkit` runs the smoke specs in Playwright WebKit (`devices['Desktop Safari']`, no Chromium launch flags). `perf-startup.spec.ts` reports `frameInteractive` (start of the first 10 frames under 50 ms after the first real row, the Mac probe's definition; WebKit has no long-task API, so the old `interactive` equals the first row there) and `longestFrame`; `FF_PERF_STARTUP_PROFILE=<prefix>` under WebKit writes `<prefix>-<tracks>.webkit.json` (Timeline records plus JSC samples, through Playwright's inspector session). Reproduce: `FF_SMOKE_BROWSER=webkit FF_PERF_STARTUP=10000=table10k.json==118 FF_SMOKE_PORT=5328 npx playwright test perf-startup`. Raw: `~/.cache/r29/` (deleted after this item; numbers above).
+
+## R36 covers (2026-11-02, `r36-covers`)
+
+Branch `r36-covers` from `ov-1028`. Linux `dev` box, release `bench_startup import` on the R13 fixtures and 1,000-file sample folders (10k and the linked 50k), 16 cores, box load 18-60 (other workers; the A/B runs below are interleaved in random order and quote the load).
+
+**Outcome: no speed-up shipped; the step is at its floor.** Nothing in the covers path decodes, resizes or encodes: `store_pending_covers` re-reads each file's tags with `read_track_metadata` and stores the embedded picture bytes as they are (`pioneer-usb-writer/src/scanner.rs`, read only). The levers from the brief that assume an image pipeline (parallel decode and resize, skipping a re-encode, a faster filter) have nothing to act on. What the step costs is writing the covers into SQLite.
+
+**Profile** (10k, one run of 1,000 files, 806 covers, about 6 MB per 32-file batch, load 18; temporary timers, not kept; medians of 2-3 runs)
+
+| Part | Time | Note |
+|---|---:|---|
+| covers step, wall | 880-980 ms | `covers_ms` |
+| reading the files (8 threads, summed per batch) | 250-300 ms | hidden: it runs one batch ahead of the store |
+| storing (library locked), total | 800-900 ms | this is the wall time |
+| - building the rows (insert loop, inside the transaction) | 225-257 ms | copies each cover into the b-tree pages |
+| - commit (about 190 MB into the WAL) | 584-672 ms | 46k pages, two `pwrite` calls per page |
+
+Reading a cover alone (lofty with `read_properties(false)`, same picture choice, byte-equal output on all 806) against the full tag read: 0.28-0.56 against 0.35-0.54 ms per file serially (three rounds), the same within noise, so it was dropped (it would also have added `lofty` to a second crate).
+
+Floor: plain SQLite (Python `sqlite3`, WAL, `synchronous=NORMAL`, 800 blobs of 236 KB, 25 per transaction, same disk) takes 0.20 s for the inserts and 0.72 s for the commits at load 18-20. The library already runs this at 0.23 and 0.45-0.60 s. The bytes cannot shrink (stored bytes must stay identical, no schema change, so no larger page size either), and a raw 190 MB write to the same disk is 0.6 s in large writes and 1.2 s in page-sized ones.
+
+**Tried and measured**
+
+| Change | 10k, covers ms (median, min of 12 interleaved rounds, load 22) | 50k (3 interleaved rounds, load 22) |
+|---|---:|---:|
+| before (checkpoint after every batch) | 963 / 916 | 929 / 920 |
+| checkpoint every 32 MB of covers and once at the end | 990 / 790 | 839 / 809 |
+| checkpoint every 64 MB and once at the end | 983 / 802 | not run |
+| batch of 128 instead of 32 (one early run, load 18) | 981-1,063 against 913-1,063 | |
+
+The commit-time checkpoint thread overlaps the next batch's write. Dropping it altogether took the step from 913-1,063 to 672-754 ms (two interleaved pairs at load 18), but the log then grows to the size of all covers (190 MB per 1,000 files, 4.7 GB for 25k) and the next user write would run that checkpoint inside the library lock. Checkpointing less often (32 and 64 MB) leaves the same checkpoint I/O overlapping the writes, and gave 0 to 10% (no difference at 10k over 12 rounds, 10% at 50k over 3), within the noise of a loaded box, for a larger log during the fill. Not kept.
+
+**Kept.** Only a test: `stored_covers_of_a_folder_are_the_embedded_bytes_and_hash_to_a_pinned_value` (`pioneer-test-ui/src/import_plan.rs`) imports a folder of 70 files (covers of 1 byte to 40 KB, every seventh file without one, three store batches), checks each stored cover equals the embedded bytes and the whole set hashes to a pinned FNV-1a value, so any future speed-up of this path has to keep the stored bytes identical.
+
+**What would move it.** Less written, i.e. storing covers as files or at a smaller size (a schema change, already listed under R13), or writing the covers during the track insert transaction instead of afterwards (same bytes, same cost, no longer deferred). Neither is a change inside this brief.
+
+Raw: `~/.cache/r36/` (scripts `ab.py`, `exp.sh`, `mb.py`).
