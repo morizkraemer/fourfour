@@ -526,3 +526,5 @@
 2026-11-02 19:38 orchestrator r72-ordered-save handed back 5ab0f83 (frontend save queue, save_state async, pagehide flush), merged; checks running (chromium + webkit smoke)
 2026-11-02 19:59 orchestrator r72-ordered-save landed (chromium smoke 113/0, CHECKS-OK); WebKit full run: startup.spec.ts:38 failed once (known WebKit load flake since r48), passes 4/4 alone on this head
 2026-11-02 19:59 orchestrator - decided: own prio r73-webkit-startup (sonnet medium; WebKit startup.spec.ts:38 fails ~1x per full run)
+2026-11-02 21:05 orchestrator r73-webkit-startup handed back 87fb99c (cause inferred: 30 s test timeout too tight under full-suite load, passed at 29.5 s; test.slow + load-scaled polls; webkit 3/3 green), merging; also found player.spec.ts:187 flake
+2026-11-02 21:08 orchestrator - decided: own prio r74-player-flake (sonnet medium; hot cue test reads the clear's save, not the Shift+C save); stale caches r16/r3 deleted (-12.5 GB)
