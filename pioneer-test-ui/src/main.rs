@@ -1224,7 +1224,7 @@ async fn load_state(app: AppHandle) -> Result<LoadedState, CommandError> {
         return Err(app
             .try_state::<LibraryOpenFailure>()
             .map(|failure| failure.0.clone())
-            .unwrap_or_else(|| CommandError::other("The library is not open")));
+            .unwrap_or_else(|| CommandError::new(ErrorKind::LibraryNotOpen, "The library is not open")));
     };
     let shared = state.inner().clone();
     perf_probe::mark("load_state_start", serde_json::json!({}));
@@ -1367,7 +1367,7 @@ fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
 struct LibraryOpenFailure(CommandError);
 
 fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, LocalLibrary), CommandError> {
-    let db_path = db_path.map_err(|e| CommandError::other(format!("Couldn't find where the library is stored: {e}")))?;
+    let db_path = db_path.map_err(|e| CommandError::new(ErrorKind::LibraryNotOpen, format!("Couldn't find where the library is stored: {e}")))?;
     let library = LocalLibrary::open(&db_path).map_err(|e| {
         let message = format!("Couldn't open the library at {}: {e:#}", db_path.display());
         CommandError::from_anyhow_chain(e).with_message(message).with_path(&db_path)
@@ -1628,7 +1628,8 @@ mod tests {
     fn startup_without_a_library_path_is_an_error() {
         let error = super::open_startup_library(Err("no app data dir".into())).map(|_| ()).unwrap_err();
         assert!(error.message.contains("no app data dir"), "{error}");
-        assert_eq!(error.kind, ErrorKind::Other);
+        assert_eq!(error.kind, ErrorKind::LibraryNotOpen);
+        assert_eq!(error.path, None);
     }
 
     #[test]

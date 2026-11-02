@@ -91,6 +91,7 @@ A converted command rejects with `{ kind, message, path? }` (`CommandError`, `pi
 | `library_newer_version` | library schema or backup format newer than the app (marked at the source in `pioneer-library`) |
 | `library_damaged` | not a database, corrupt, no schema version, version 0 (marked at the source, plus SQLite codes) |
 | `library_locked` | SQLite busy or locked |
+| `library_not_open` | startup could not find the library path, or `load_state` ran with no library open and no open error kept |
 | `not_found` | `io::ErrorKind::NotFound` (play, reveal, backup read) |
 | `permission_denied` | `PermissionDenied`, read-only file system, SQLite read-only |
 | `disk_full` | `StorageFull`, ENOSPC, SQLite full |
@@ -117,7 +118,7 @@ Tests: `cargo test -p pioneer-library failure`, `refused_backups_carry_a_failure
 ### Switching r18 and r38
 
 - r18 `userErrors.ts`: keep the `...FailureText` helpers and their copy, but branch on `commandErrorKind(err)` first and fall back to the pattern table only for a `null` kind or `other`. Mapping: `disk_full` and `no_space_on_stick` to the disk-full and "Not enough space" copy (the stick one passes its message through), `permission_denied`, `not_found`, `drive_gone`, `library_locked` ("busy"), `library_newer_version`, `library_damaged`, `models_missing` (row 13), `analysis_failed` (row 14), `stick_busy` (rows 50, 52: sync and eject read differently by call site), `decode_failed` (row 2), `audio_output_unavailable` (rows 3, 4). `invalid_backup` is one kind for the five backup refusals, so rows 58 and 60 lose their per-cause sentences unless Merlin wants them back as separate kinds. The restore safety path is `commandErrorPath(err)`; drop the `SAFETY_COPY` regex. Playback: `playback-error` events have `kind` and `path`, so `playbackFailureText` no longer needs the file name from the text. Still text-only until converted: edit validation (rows 32 to 34) and Rekordbox (rows 22 to 25).
-- r38 `libraryOpenFailure.ts`: for `load_state` (and `change_library_path`) read `commandErrorKind(err)`: `library_newer_version` is `newer`, `library_damaged` is `damaged`, `library_locked` is `locked`, anything else is `unknown`. Drop `OPEN_FAILURE_PREFIXES`, `LOCKED` and `DAMAGED`. A `load_state` failure is an open failure when its `path` is set (the open error carries the library file; the later "library is not open" and read errors do not). The `recover_*` commands in `recovery_commands.rs` should return `CommandError` the same way (`CommandError::from_anyhow_chain(e).with_path(...)`), so `recoveryFailureText` can read their kind instead of the text.
+- r38 `libraryOpenFailure.ts` (done on `r76-recovery-kind`): reads `CommandError.kind` of the `load_state` and `recover_*` rejections: `library_newer_version` is `newer`, `library_damaged` is `damaged`, `library_locked` is `locked`, anything else is `unknown`. The message text is no longer read; `OPEN_FAILURE_PREFIXES`, `LOCKED` and `DAMAGED` are gone and there is no text fallback (a plain string is never an open failure). An error is an open failure when its `path` is set (the open error carries the library file) or its kind is `library_not_open`, a kind added for the two open errors without a file: "Couldn't find where the library is stored" and "The library is not open" (so a later read error with kind `library_locked` and no path is not a recovery screen). The `recover_*` commands return `CommandError` (`from_anyhow_chain(e).with_message(..).with_path(db)`; a folder without a library is `not_found`, no path), so `recoveryFailureText` reads their kind too. Copy is unchanged.
 
 ## Log file and panic hook (r48-logs)
 
@@ -126,7 +127,7 @@ Tests: `cargo test -p pioneer-library failure`, `refused_backups_carry_a_failure
 
 Branch `r38-recovery` from `ov-1028`, not landed: user-visible, Merlin reviews it. Tests: `cargo test -p pioneer-test-ui --bin pioneer-test-ui recovery_commands`, `npm test` (`libraryOpenFailure.test.ts`, `backup.test.ts`), smoke `recovery.spec.ts`.
 
-When `load_state` returns the open error, the list area shows the existing empty-state panel instead of "No tracks loaded". The title and text depend on the cause, read from the error text (`app/src/lib/libraryOpenFailure.ts`):
+When `load_state` returns the open error, the list area shows the existing empty-state panel instead of "No tracks loaded". The title and text depend on the cause, read from the error kind (`app/src/lib/libraryOpenFailure.ts`):
 
 | Cause | Title | Actions |
 |---|---|---|

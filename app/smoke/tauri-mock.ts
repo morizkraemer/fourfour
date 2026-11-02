@@ -17,7 +17,7 @@ export interface SmokeWindow {
   __smokeImport: SmokeImport | null;
   __smokeHoldImport: boolean;
   __smokeHoldLoad: boolean;
-  __smokeLoadError: string | null;
+  __smokeLoadError: { kind: string; message: string; path?: string } | null;
   __smokeReleaseLoad: (() => void) | null;
   __smokeAnalyzeAfterImport: boolean;
   __smokeReleaseImport: (() => void) | null;
@@ -63,7 +63,8 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeImport = null;
   w.__smokeHoldImport = false;
   w.__smokeHoldLoad = false;
-  w.__smokeLoadError = localStorage.getItem('smoke.loadError');
+  const storedLoadError = localStorage.getItem('smoke.loadError');
+  w.__smokeLoadError = storedLoadError ? JSON.parse(storedLoadError) : null;
   w.__smokeReleaseLoad = null;
   w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;

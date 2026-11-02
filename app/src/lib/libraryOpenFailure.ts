@@ -1,3 +1,5 @@
+import { CommandError, type ErrorKind } from '../services/command-error.ts';
+
 export type OpenFailureKind = 'newer' | 'damaged' | 'locked' | 'unknown';
 
 export interface OpenFailure {
@@ -7,17 +9,18 @@ export interface OpenFailure {
   canRetry: boolean;
 }
 
-const OPEN_FAILURE_PREFIXES = ["Couldn't open the library", "Couldn't find where the library is stored", 'The library is not open'];
+const KINDS: Partial<Record<ErrorKind, OpenFailureKind>> = {
+  library_newer_version: 'newer',
+  library_damaged: 'damaged',
+  library_locked: 'locked',
+  library_not_open: 'unknown',
+};
 
-const LOCKED = /database is locked|database table is locked|busy/i;
-const DAMAGED = /not a database|malformed|corrupt|unreadable|no schema version|schema version 0|has tables but no|no tables/i;
-
-export function openFailureKind(raw: string): OpenFailureKind | null {
-  if (!OPEN_FAILURE_PREFIXES.some((prefix) => raw.startsWith(prefix))) return null;
-  if (/newer version/i.test(raw)) return 'newer';
-  if (LOCKED.test(raw)) return 'locked';
-  if (DAMAGED.test(raw)) return 'damaged';
-  return 'unknown';
+export function openFailureKind(err: unknown): OpenFailureKind | null {
+  if (!(err instanceof CommandError)) return null;
+  const kind = KINDS[err.kind];
+  if (kind) return err.kind === 'library_not_open' || err.path !== null ? kind : null;
+  return err.path !== null ? 'unknown' : null;
 }
 
 const FAILURES: Record<OpenFailureKind, Omit<OpenFailure, 'kind'>> = {
@@ -43,8 +46,8 @@ const FAILURES: Record<OpenFailureKind, Omit<OpenFailure, 'kind'>> = {
   },
 };
 
-export function parseOpenFailure(raw: string): OpenFailure | null {
-  const kind = openFailureKind(raw);
+export function parseOpenFailure(err: unknown): OpenFailure | null {
+  const kind = openFailureKind(err);
   return kind ? { kind, ...FAILURES[kind] } : null;
 }
 
@@ -55,7 +58,7 @@ const RECOVERY_FAILURES: Record<OpenFailureKind, string> = {
   unknown: "fourfour can't open that library. It has not been changed.",
 };
 
-export function recoveryFailureText(raw: string): string {
-  const kind = openFailureKind(raw);
-  return kind ? RECOVERY_FAILURES[kind] : raw;
+export function recoveryFailureText(err: unknown): string {
+  const kind = openFailureKind(err);
+  return kind ? RECOVERY_FAILURES[kind] : err instanceof Error ? err.message : String(err);
 }

@@ -1259,7 +1259,7 @@ export async function initLibrary() {
   } catch (err) {
     loadFailed = true;
     library.statusMessage = failureText("Couldn't load your library.", err, { next: 'Restart fourfour. If it keeps happening, check the library file in Settings.' });
-    library.openFailure = parseOpenFailure(String(err));
+    library.openFailure = parseOpenFailure(err);
     console.error('initLibrary failed:', err);
   } finally {
     if (!library.analyzing && !library.syncing && !loadFailed) library.statusMessage = 'Ready';

@@ -7,6 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::analysis_run::SharedLibrary;
+use crate::command_error::{CommandError, ErrorKind};
 use crate::backup_commands::{CONFIG_SETTINGS, UI_SETTINGS, merge_restored_config, progress_emitter, read_config, write_config};
 use crate::file_health::{self, SharedHealth};
 
@@ -30,44 +31,46 @@ struct Recovered {
     settings: Vec<SettingsFile>,
 }
 
-fn new_library_folder(libraries_dir: &Path, stamp: &str) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(libraries_dir).map_err(|e| format!("Couldn't create a folder for the new library: {e}"))?;
+fn new_library_folder(libraries_dir: &Path, stamp: &str) -> Result<PathBuf, CommandError> {
+    std::fs::create_dir_all(libraries_dir).map_err(|e| CommandError::from_io(&e, format!("Couldn't create a folder for the new library: {e}")))?;
     for attempt in 0..100 {
         let name = if attempt == 0 { format!("library-{stamp}") } else { format!("library-{stamp}-{}", attempt + 1) };
         let folder = libraries_dir.join(name);
         match std::fs::create_dir(&folder) {
             Ok(()) => return Ok(folder),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(format!("Couldn't create a folder for the new library: {e}")),
+            Err(e) => return Err(CommandError::from_io(&e, format!("Couldn't create a folder for the new library: {e}"))),
         }
     }
-    Err("Couldn't find a free folder name for the new library.".to_string())
+    Err(CommandError::other("Couldn't find a free folder name for the new library."))
 }
 
 fn discard_new_folder(folder: &Path) {
     let _ = std::fs::remove_dir_all(folder);
 }
 
-fn open_in(db_path: PathBuf) -> Result<Recovered, String> {
-    let library = LocalLibrary::open(&db_path)
-        .map_err(|e| format!("Couldn't open the library at {}: {e:#}", db_path.display()))?;
+fn open_in(db_path: PathBuf) -> Result<Recovered, CommandError> {
+    let library = LocalLibrary::open(&db_path).map_err(|e| {
+        let message = format!("Couldn't open the library at {}: {e:#}", db_path.display());
+        CommandError::from_anyhow_chain(e).with_message(message).with_path(&db_path)
+    })?;
     Ok(Recovered { library, db_path, settings: Vec::new() })
 }
 
-fn retry_failed(db_path: Result<PathBuf, String>) -> Result<Recovered, String> {
-    let (db_path, library) = crate::open_startup_library(db_path).map_err(|e| e.message)?;
+fn retry_failed(db_path: Result<PathBuf, String>) -> Result<Recovered, CommandError> {
+    let (db_path, library) = crate::open_startup_library(db_path)?;
     Ok(Recovered { library, db_path, settings: Vec::new() })
 }
 
-fn open_existing(folder: &Path) -> Result<Recovered, String> {
+fn open_existing(folder: &Path) -> Result<Recovered, CommandError> {
     let db_path = folder.join(DB_FILE);
     if !db_path.is_file() {
-        return Err("There is no fourfour library in that folder. Choose the folder that holds your library.".to_string());
+        return Err(CommandError::new(ErrorKind::NotFound, "There is no fourfour library in that folder. Choose the folder that holds your library."));
     }
     open_in(db_path)
 }
 
-fn start_fresh(libraries_dir: &Path, stamp: &str) -> Result<Recovered, String> {
+fn start_fresh(libraries_dir: &Path, stamp: &str) -> Result<Recovered, CommandError> {
     let folder = new_library_folder(libraries_dir, stamp)?;
     open_in(folder.join(DB_FILE)).inspect_err(|_| discard_new_folder(&folder))
 }
@@ -78,21 +81,24 @@ fn restore_into_new(
     libraries_dir: &Path,
     stamp: &str,
     progress: &mut dyn FnMut(u64, u64),
-) -> Result<Recovered, String> {
+) -> Result<Recovered, CommandError> {
     let folder = new_library_folder(libraries_dir, stamp)?;
     let staging = folder.join(format!(".restore-{stamp}"));
     let db_path = folder.join(DB_FILE);
     let restored = backup::unpack_backup(archive, &staging, audio_folder, progress)
-        .map_err(|e| format!("{e:#}"))
+        .map_err(CommandError::from_anyhow_chain)
         .and_then(|unpacked| {
             let settings = unpacked.settings.clone();
-            let library = backup::install_backup(unpacked, &db_path).map_err(|e| format!("Restore failed: {e:#}"))?;
+            let library = backup::install_backup(unpacked, &db_path).map_err(|e| {
+                let message = format!("Restore failed: {e:#}");
+                CommandError::from_anyhow_chain(e).with_message(message)
+            })?;
             Ok(Recovered { library, db_path, settings })
         });
     restored.inspect_err(|_| discard_new_folder(&folder))
 }
 
-fn adopt(app: &AppHandle, recovered: Recovered) -> Result<RecoveryOutcome, String> {
+fn adopt(app: &AppHandle, recovered: Recovered) -> Result<RecoveryOutcome, CommandError> {
     let kept_path = crate::read_library_path(app).ok().filter(|previous| *previous != recovered.db_path);
     if let Some(restored) = recovered.settings.iter().find(|s| s.name == CONFIG_SETTINGS) {
         let restored: serde_json::Value = serde_json::from_slice(&restored.bytes).unwrap_or(serde_json::Value::Null);
@@ -118,18 +124,18 @@ fn adopt(app: &AppHandle, recovered: Recovered) -> Result<RecoveryOutcome, Strin
     })
 }
 
-async fn recover(app: AppHandle, open: impl FnOnce(&AppHandle) -> Result<Recovered, String> + Send + 'static) -> Result<RecoveryOutcome, String> {
+async fn recover(app: AppHandle, open: impl FnOnce(&AppHandle) -> Result<Recovered, CommandError> + Send + 'static) -> Result<RecoveryOutcome, CommandError> {
     let gate = app.state::<RecoveryGate>().inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _turn = gate.0.lock().map_err(|e| e.to_string())?;
+        let _turn = gate.0.lock().map_err(|e| CommandError::other(e.to_string()))?;
         if app.try_state::<SharedLibrary>().is_some() {
-            return Err(ALREADY_OPEN.to_string());
+            return Err(CommandError::other(ALREADY_OPEN));
         }
         let recovered = open(&app)?;
         adopt(&app, recovered)
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| CommandError::other(e.to_string()))?
 }
 
 fn libraries_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -141,22 +147,22 @@ fn stamp() -> String {
 }
 
 #[tauri::command]
-pub async fn recover_retry_library(app: AppHandle) -> Result<RecoveryOutcome, String> {
+pub async fn recover_retry_library(app: AppHandle) -> Result<RecoveryOutcome, CommandError> {
     recover(app, |app| retry_failed(crate::read_library_path(app))).await
 }
 
 #[tauri::command]
-pub async fn recover_open_library(folder_path: String, app: AppHandle) -> Result<RecoveryOutcome, String> {
+pub async fn recover_open_library(folder_path: String, app: AppHandle) -> Result<RecoveryOutcome, CommandError> {
     recover(app, move |_| open_existing(Path::new(&folder_path))).await
 }
 
 #[tauri::command]
-pub async fn recover_new_library(app: AppHandle) -> Result<RecoveryOutcome, String> {
+pub async fn recover_new_library(app: AppHandle) -> Result<RecoveryOutcome, CommandError> {
     recover(app, |app| start_fresh(&libraries_dir(app)?, &stamp())).await
 }
 
 #[tauri::command]
-pub async fn recover_restore_backup(path: String, audio_folder: Option<String>, app: AppHandle) -> Result<RecoveryOutcome, String> {
+pub async fn recover_restore_backup(path: String, audio_folder: Option<String>, app: AppHandle) -> Result<RecoveryOutcome, CommandError> {
     let mut progress = progress_emitter(app.clone(), "restore");
     recover(app, move |app| {
         let audio = audio_folder.as_deref().map(Path::new);
@@ -277,8 +283,9 @@ mod tests {
         let dir = Scratch::new("open-empty");
         let empty = dir.path().join("empty");
         std::fs::create_dir_all(&empty).unwrap();
-        let message = open_existing(&empty).map(|_| ()).unwrap_err();
-        assert!(message.contains("no fourfour library"), "{message}");
+        let error = open_existing(&empty).map(|_| ()).unwrap_err();
+        assert!(error.message.contains("no fourfour library"), "{error}");
+        assert_eq!(error.path, None);
         assert_eq!(std::fs::read_dir(&empty).unwrap().count(), 0);
     }
 
@@ -286,8 +293,10 @@ mod tests {
     fn opening_the_failed_folder_again_is_an_error_and_changes_nothing() {
         let dir = Scratch::new("open-same");
         let failed = Failed::damaged_in(dir.path());
-        let message = open_existing(&failed.folder).map(|_| ()).unwrap_err();
-        assert!(message.starts_with("Couldn't open the library"), "{message}");
+        let error = open_existing(&failed.folder).map(|_| ()).unwrap_err();
+        assert!(error.message.starts_with("Couldn't open the library"), "{error}");
+        assert_eq!(error.kind, ErrorKind::LibraryDamaged);
+        assert_eq!(error.path.as_deref(), failed.db.to_str());
         failed.assert_untouched();
     }
 
@@ -295,8 +304,10 @@ mod tests {
     fn retrying_a_failed_library_is_an_error_and_changes_nothing() {
         let dir = Scratch::new("retry");
         let failed = Failed::damaged_in(dir.path());
-        let message = retry_failed(Ok(failed.db.clone())).map(|_| ()).unwrap_err();
-        assert!(message.starts_with("Couldn't open the library"), "{message}");
+        let error = retry_failed(Ok(failed.db.clone())).map(|_| ()).unwrap_err();
+        assert!(error.message.starts_with("Couldn't open the library"), "{error}");
+        assert_eq!(error.kind, ErrorKind::LibraryDamaged);
+        assert_eq!(error.path.as_deref(), failed.db.to_str());
         failed.assert_untouched();
     }
 
@@ -344,8 +355,9 @@ mod tests {
         let failed = Failed::damaged_in(dir.path());
         let not_a_backup = dir.path().join("notes.tar.gz");
         std::fs::write(&not_a_backup, b"not a backup").unwrap();
-        let message = restore_into_new(&not_a_backup, None, &failed.libraries(), "2026-11-02-100000", &mut |_, _| {}).map(|_| ()).unwrap_err();
-        assert!(!message.is_empty());
+        let error = restore_into_new(&not_a_backup, None, &failed.libraries(), "2026-11-02-100000", &mut |_, _| {}).map(|_| ()).unwrap_err();
+        assert!(!error.message.is_empty());
+        assert_eq!(error.path, None, "a failed restore is not a library open failure");
         assert_eq!(std::fs::read_dir(failed.libraries()).unwrap().count(), 0, "the half-made folder is removed");
         failed.assert_untouched();
     }

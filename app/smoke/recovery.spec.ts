@@ -7,18 +7,24 @@ import { installTauriMock, type SmokeWindow } from './tauri-mock.ts';
 const SHOTS = process.env.FF_RECOVERY_SHOTS ?? resolve(import.meta.dirname, '../../.agent/recovery');
 mkdirSync(SHOTS, { recursive: true });
 
-const startupError = (reason: string) => `Couldn't open the library at /smoke/library/library.db: ${reason}`;
-const NEWER = startupError('The library was saved by a newer version of the app (schema version 99, this app knows up to 7); update the app to open it');
-const DAMAGED = startupError('file is not a database');
-const LOCKED = startupError("The library's schema version is unreadable; it was not opened so nothing in it is changed: database is locked");
+const LIBRARY_DB = '/smoke/library/library.db';
+type WireError = { kind: string; message: string; path?: string };
+const startupError = (kind: string, reason: string): WireError => ({
+  kind,
+  message: `Couldn't open the library at ${LIBRARY_DB}: ${reason}`,
+  path: LIBRARY_DB,
+});
+const NEWER = startupError('library_newer_version', 'The library was saved by a newer version of the app (schema version 99, this app knows up to 7); update the app to open it');
+const DAMAGED = startupError('library_damaged', 'file is not a database');
+const LOCKED = startupError('library_locked', "The library's schema version is unreadable; it was not opened so nothing in it is changed: database is locked");
 
 type MockWindow = SmokeWindow & { __smokePickPath: string };
 
-async function openFailedApp(page: Page, error: string) {
+async function openFailedApp(page: Page, error: WireError) {
   await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
   await page.addInitScript(installTauriMock, fixtureState());
   await page.goto('/');
-  await page.evaluate((message) => localStorage.setItem('smoke.loadError', message), error);
+  await page.evaluate((message) => localStorage.setItem('smoke.loadError', JSON.stringify(message)), error);
   await page.reload();
   await page.locator('[data-library-recovery]').waitFor();
 }
@@ -114,7 +120,7 @@ test('an action that fails keeps the panel and says why in plain words', async (
     const real = w.__TAURI_INTERNALS__.invoke;
     w.__TAURI_INTERNALS__.invoke = (cmd, args) =>
       cmd === 'recover_open_library'
-        ? Promise.reject("Couldn't open the library at /Music/Other/library.db: file is not a database")
+        ? Promise.reject({ kind: 'library_damaged', message: "Couldn't open the library at /Music/Other/library.db: file is not a database", path: '/Music/Other/library.db' })
         : real(cmd, args);
   });
   await panel(page).getByRole('button', { name: 'Open another library' }).click();

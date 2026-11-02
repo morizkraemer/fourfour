@@ -15,7 +15,7 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function run(action: () => Promise<RecoveryOutcome>, onFailure?: (raw: string) => void) {
+async function run(action: () => Promise<RecoveryOutcome>, onFailure?: (err: unknown) => void) {
   if (recovery.busy) return;
   recovery.busy = true;
   recovery.error = '';
@@ -25,8 +25,8 @@ async function run(action: () => Promise<RecoveryOutcome>, onFailure?: (raw: str
   } catch (err) {
     const raw = message(err);
     console.info('library recovery failed:', raw);
-    recovery.error = recoveryFailureText(raw);
-    onFailure?.(raw);
+    recovery.error = recoveryFailureText(err);
+    onFailure?.(err);
   } finally {
     recovery.busy = false;
   }
@@ -42,8 +42,8 @@ export async function finishRecovery(outcome: RecoveryOutcome) {
 }
 
 export function retryOpeningLibrary() {
-  return run(recoverRetryLibrary, (raw) => {
-    library.openFailure = parseOpenFailure(raw) ?? library.openFailure;
+  return run(recoverRetryLibrary, (err) => {
+    library.openFailure = parseOpenFailure(err) ?? library.openFailure;
     recovery.error = "Still can't open the library. " + (library.openFailure?.kind === 'locked' ? 'Close the other program and try again.' : 'Choose another option below.');
   });
 }
