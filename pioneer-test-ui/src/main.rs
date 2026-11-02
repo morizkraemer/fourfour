@@ -1458,7 +1458,8 @@ fn main() {
     if self_check::requested() {
         self_check::run_and_exit();
     }
-    app_log::install_panic_hook();
+    let context = tauri::generate_context!();
+    app_log::start_early(&context.config().identifier);
     perf_probe::start();
     perf_probe::install(tauri::Builder::default()) // v0.1
         .plugin(tauri_plugin_dialog::init())
@@ -1547,10 +1548,6 @@ fn main() {
             perf_probe::perf_mark,
         ])
         .setup(|app| {
-            match app.path().app_log_dir() {
-                Ok(dir) => app_log::init(&dir),
-                Err(e) => eprintln!("no log folder: {e}"),
-            }
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 spawn_stale_part_sweep(app_data_dir.join("waveform-detail"));
             }
@@ -1587,7 +1584,7 @@ fn main() {
             perf_probe::mark("setup_done", serde_json::json!({}));
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             match event {

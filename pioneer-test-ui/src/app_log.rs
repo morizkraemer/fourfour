@@ -139,6 +139,26 @@ pub fn init(dir: &Path) {
     }
 }
 
+pub fn log_dir_for(identifier: &str, env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.is_absolute());
+    #[cfg(target_os = "macos")]
+    return absolute("HOME").map(|home| home.join("Library/Logs").join(identifier));
+    #[cfg(windows)]
+    return absolute("LOCALAPPDATA").map(|base| base.join(identifier).join("logs"));
+    #[cfg(not(any(target_os = "macos", windows)))]
+    return absolute("XDG_DATA_HOME")
+        .or_else(|| absolute("HOME").map(|home| home.join(".local/share")))
+        .map(|base| base.join(identifier).join("logs"));
+}
+
+pub fn start_early(identifier: &str) {
+    match log_dir_for(identifier, |name| std::env::var_os(name)) {
+        Some(dir) => init(&dir),
+        None => eprintln!("no log folder: could not resolve the platform log directory"),
+    }
+    install_panic_hook();
+}
+
 pub fn directory() -> Option<PathBuf> {
     LOG.get().map(|log| log.dir.clone())
 }
@@ -289,6 +309,63 @@ mod tests {
         assert!(line.contains(env!("CARGO_PKG_VERSION")), "{line}");
         assert!(line.contains("app_log.rs"), "{line}");
         assert!(text.contains("\n    "), "backtrace lines are indented under the panic record");
+    }
+
+    fn env_of(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<std::ffi::OsString> {
+        move |name| pairs.iter().find(|(k, _)| *k == name).map(|(_, v)| std::ffi::OsString::from(*v))
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_log_dir_is_library_logs_under_the_identifier_on_macos() {
+        let dir = log_dir_for("com.example.app", env_of(&[("HOME", "/Users/dj")]));
+        assert_eq!(dir, Some(PathBuf::from("/Users/dj/Library/Logs/com.example.app")));
+        assert_eq!(log_dir_for("com.example.app", env_of(&[])), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_log_dir_is_localappdata_identifier_logs_on_windows() {
+        let base = "C:\\Users\\dj\\AppData\\Local";
+        let dir = log_dir_for("com.example.app", env_of(&[("LOCALAPPDATA", "C:\\Users\\dj\\AppData\\Local")]));
+        assert_eq!(dir, Some(PathBuf::from(base).join("com.example.app").join("logs")));
+        assert_eq!(log_dir_for("com.example.app", env_of(&[])), None);
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    #[test]
+    fn the_log_dir_follows_xdg_data_home_then_home_on_linux() {
+        let xdg = log_dir_for("com.example.app", env_of(&[("XDG_DATA_HOME", "/xdg"), ("HOME", "/home/dj")]));
+        assert_eq!(xdg, Some(PathBuf::from("/xdg/com.example.app/logs")));
+        let home = log_dir_for("com.example.app", env_of(&[("HOME", "/home/dj")]));
+        assert_eq!(home, Some(PathBuf::from("/home/dj/.local/share/com.example.app/logs")));
+        let relative = log_dir_for("com.example.app", env_of(&[("XDG_DATA_HOME", "rel"), ("HOME", "/home/dj")]));
+        assert_eq!(relative, home);
+        assert_eq!(log_dir_for("com.example.app", env_of(&[])), None);
+    }
+
+    const CHILD_DIR_VAR: &str = "FF_TEST_EARLY_PANIC_DIR";
+
+    #[test]
+    fn early_panic_child_entry() {
+        let Some(dir) = std::env::var_os(CHILD_DIR_VAR) else { return };
+        init(Path::new(&dir));
+        install_panic_hook();
+        panic!("r56 early marker panic");
+    }
+
+    #[test]
+    fn a_panic_before_setup_in_a_separate_process_reaches_the_log_file() {
+        let dir = ScratchDir::new("early-child");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "app_log::tests::early_panic_child_entry", "--test-threads=1"])
+            .env(CHILD_DIR_VAR, &dir.0)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let text = fs::read_to_string(dir.0.join("fourfour.log")).unwrap();
+        let line = text.lines().find(|l| l.contains("r56 early marker panic")).expect("panic line in the log");
+        assert!(line.contains("PANIC"), "{line}");
     }
 
     #[test]
