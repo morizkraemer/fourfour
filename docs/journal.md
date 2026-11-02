@@ -479,3 +479,4 @@
 2026-11-02 11:24 orchestrator - decided: own prio r54-notices (sonnet medium; checklist 6.2/6.4: stdlib notices generator from cargo metadata, no installs, not bundled)
 2026-11-02 11:29 orchestrator r54-notices handed back 251e70b (403 crates, 37 MPL-2.0 incl. Tauri css stack, 66 standard-text fallbacks, deterministic, fails on GPL), merge after r51 checks
 2026-11-02 11:33 orchestrator r51-migration-test landed ebe080e (CHECKS-OK, smoke 113/0); r54-notices landed (scripts/docs/resource only, no code; regenerated with node_modules present for real npm texts)
+2026-11-02 11:33 orchestrator - decided: own prio r55-symphonia-dedupe (sonnet medium; one decoder version, bit-identical decode)
