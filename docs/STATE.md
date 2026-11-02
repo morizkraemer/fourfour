@@ -116,6 +116,7 @@ Own-priority backlog (Merlin 2026-11-01: "fill the queue with your own prios so 
 41. r39-errkinds: machine-readable error kinds on command errors (strings unchanged) so r18/r38 stop matching error text [landed; 15 kinds, ~30 commands; sync engine sentences classified at our boundary (brother: add a kind to StickReport)]
 42. r40-refresh: -v2 copies of parked branches (r18, r17, r29-css, r31, r38, r15) merged with current ov-1028 + an all-together branch, so they land cleanly after the holiday [running]
 43. r41-failmemo: analysis-failures.json side file so broken files stop retrying every launch (no schema) [built 0d36395, merging; skip after 2 unchanged failures, explicit request retries; app version bump retries all]
+44. r42-realsoak: 45-60 min soak of the real Linux app (Tauri + WebKitGTK + real IPC) under xvfb, RSS of app + web process [running]
 review: https://dev.tail87069a.ts.net:4220 (phone review cards: lab/, add with lab/scripts/review-shot.ts + hub:card, read answers with hub:notes) · app preview https://dev.tail87069a.ts.net:4210 (ov-1028, no Rust backend; always on via user systemd ff-review / ff-app-review)
 each finished user-visible item gets a review card; when emberland says @lab/kit (lab-infra packages/lab-kit) landed, swap lab/ inbox UI to mountInbox (keep cards/media/capture script; no name-based logo, working title); Grok gets the 4220 link
 mac: unreachable over ssh since 2026-10-31 (travelling); merges stay on ov-1028 with box checks, install + dmg rebuild when it is back online
