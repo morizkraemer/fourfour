@@ -1,10 +1,8 @@
 import {
   getAutoAnalyzeNew,
   setAutoAnalyzeNew as saveAutoAnalyzeNew,
-  getAnalysisBackend,
   getAnalyzeAfterImport,
   setAnalyzeAfterImport as saveAnalyzeAfterImport,
-  setAnalysisBackend as saveAnalysisBackend,
   getIsTauri,
 } from '../services/tauri.svelte.ts';
 import {
@@ -15,37 +13,22 @@ import {
 } from './playback-settings.svelte.ts';
 import { playbackStop, syncPlaybackAudioConfig } from '../services/playback.svelte.ts';
 
-export type AnalysisEngineChoice = 'auto' | 'rust' | 'python';
-
-export const ANALYSIS_ENGINE_CHOICES: ReadonlyArray<{ value: AnalysisEngineChoice; label: string }> = [
-  { value: 'auto', label: 'Automatic' },
-  { value: 'rust', label: 'Built-in' },
-  { value: 'python', label: 'Python' },
-];
-
 export const appSettings = $state({
   autoAnalyzeNew: true,
   analyzeAfterImport: false,
-  analysisEngine: 'auto' as AnalysisEngineChoice,
   loaded: false,
 });
 
 let loading: Promise<void> | null = null;
 
-function engineChoice(stored: string | null): AnalysisEngineChoice {
-  return stored === 'rust' || stored === 'python' ? stored : 'auto';
-}
-
 export function loadAppSettings(): Promise<void> {
   loading ??= (async () => {
-    const [autoAnalyzeNew, analyzeAfterImport, backend] = await Promise.all([
+    const [autoAnalyzeNew, analyzeAfterImport] = await Promise.all([
       getAutoAnalyzeNew().catch(() => true),
       getAnalyzeAfterImport().catch(() => false),
-      getAnalysisBackend().catch(() => null),
     ]);
     appSettings.autoAnalyzeNew = autoAnalyzeNew;
     appSettings.analyzeAfterImport = analyzeAfterImport;
-    appSettings.analysisEngine = engineChoice(backend);
     appSettings.loaded = true;
   })();
   return loading;
@@ -69,17 +52,6 @@ export async function setAnalyzeAfterImport(enabled: boolean): Promise<void> {
     await saveAnalyzeAfterImport(enabled);
   } catch (err) {
     appSettings.analyzeAfterImport = previous;
-    throw err;
-  }
-}
-
-export async function setAnalysisEngine(choice: AnalysisEngineChoice): Promise<void> {
-  const previous = appSettings.analysisEngine;
-  appSettings.analysisEngine = choice;
-  try {
-    await saveAnalysisBackend(choice === 'auto' ? null : choice);
-  } catch (err) {
-    appSettings.analysisEngine = previous;
     throw err;
   }
 }

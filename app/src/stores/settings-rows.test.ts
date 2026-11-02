@@ -10,7 +10,6 @@ const find = (id: string, audio = false) => buildSettingSources(audio).find((r) 
 describe('setting rows', () => {
   beforeEach(() => {
     appSettings.autoAnalyzeNew = true;
-    appSettings.analysisEngine = 'auto';
     ui.settingsOpen = false;
   });
 
@@ -23,13 +22,6 @@ describe('setting rows', () => {
   it('flips the switch in the shared store', () => {
     find('analysis.autoAnalyzeNew').change();
     expect(appSettings.autoAnalyzeNew).toBe(false);
-  });
-
-  it('picks and cycles the analysis engine', () => {
-    find('analysis.engine').change('python');
-    expect(appSettings.analysisEngine).toBe('python');
-    find('analysis.engine').change();
-    expect(appSettings.analysisEngine).toBe('auto');
   });
 
   it('lists audio rows only when the desktop audio engine is available', () => {

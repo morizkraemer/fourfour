@@ -736,25 +736,6 @@ export async function setAnalyzeAfterImport(enabled: boolean): Promise<void> {
   }
 }
 
-/** Stored analysis backend: 'rust', 'python', or null for automatic. */
-export async function getAnalysisBackend(): Promise<string | null> {
-  try {
-    return await invoke<string | null>('get_analysis_backend');
-  } catch (err) {
-    if (!useBrowserMocks()) throw err;
-    return readMockSetting<string | null>('analysis_backend', null);
-  }
-}
-
-export async function setAnalysisBackend(backend: string | null): Promise<void> {
-  try {
-    await invoke('set_analysis_backend', { backend });
-  } catch (err) {
-    if (!useBrowserMocks()) throw err;
-    writeMockSetting('analysis_backend', backend);
-  }
-}
-
 /** Stop the active analysis run: queued tracks are dropped, in-flight ones aborted. */
 export async function cancelAnalysis(): Promise<void> {
   await invokeOrMock('cancel_analysis', {});
