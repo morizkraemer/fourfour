@@ -127,7 +127,7 @@ pub fn spawn_check(app: AppHandle, library: SharedLibrary, health: SharedHealth)
         Ok(result) => {
             let _ = app.emit(HEALTH_EVENT, result);
         }
-        Err(e) => crate::app_log::warn(&format!("library file check failed: {e}")),
+        Err(e) => eprintln!("library file check failed: {e}"),
     });
 }
 

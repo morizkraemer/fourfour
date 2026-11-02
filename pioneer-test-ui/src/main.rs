@@ -7,7 +7,6 @@ mod analysis_payload;
 mod analysis_priority;
 mod analysis_python;
 mod analysis_run;
-mod app_log;
 mod backup_commands;
 mod band_analysis;
 mod command_error;
@@ -71,7 +70,6 @@ use playback::{
 // ---------------------------------------------------------------------------
 
 fn debug_log(app: &AppHandle, level: &str, message: &str) {
-    app_log::write(level, message);
     app.emit("debug-log", serde_json::json!({ "level": level, "message": message })).ok();
 }
 
@@ -1444,7 +1442,7 @@ fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, Lo
 
 fn focus_main_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
-        app_log::warn("focus_main_window: no webview labeled \"main\"");
+        eprintln!("focus_main_window: no webview labeled \"main\"");
         return;
     };
     let _ = window.unminimize();
@@ -1456,7 +1454,6 @@ fn main() {
     if self_check::requested() {
         self_check::run_and_exit();
     }
-    app_log::install_panic_hook();
     perf_probe::start();
     perf_probe::install(tauri::Builder::default()) // v0.1
         .plugin(tauri_plugin_dialog::init())
@@ -1501,8 +1498,6 @@ fn main() {
             get_row_previews,
             refresh_track_labels,
             app_version,
-            app_log::log_directory,
-            app_log::log_frontend,
             rekordbox_default_master_db,
             rekordbox_import_preview,
             rekordbox_import_run,
@@ -1545,10 +1540,6 @@ fn main() {
             perf_probe::perf_mark,
         ])
         .setup(|app| {
-            match app.path().app_log_dir() {
-                Ok(dir) => app_log::init(&dir),
-                Err(e) => eprintln!("no log folder: {e}"),
-            }
             if let Ok(app_data_dir) = app.path().app_data_dir() {
                 spawn_stale_part_sweep(app_data_dir.join("waveform-detail"));
             }
@@ -1565,7 +1556,7 @@ fn main() {
                     spawn_cover_fill(app.handle().clone(), library, covers);
                 }
                 Err(message) => {
-                    app_log::error(&message.to_string());
+                    eprintln!("{message}");
                     app.manage(LibraryOpenFailure(message));
                 }
             }
@@ -1578,7 +1569,7 @@ fn main() {
                 Ok(playback) => {
                     app.manage(Arc::new(playback));
                 }
-                Err(e) => app_log::warn(&format!("audio playback unavailable: {e}")),
+                Err(e) => eprintln!("audio playback unavailable: {e}"),
             }
 
             focus_main_window(&app.handle());
