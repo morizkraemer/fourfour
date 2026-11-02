@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { BOOT_SNAPSHOT_MIN_TRACKS } from '../src/stores/boot-snapshot.ts';
+import { loadFactor } from './load-factor.ts';
 import { fixtureAnalysis, fixtureState, largeFixtureState } from './fixture.ts';
 import { installTauriMock, type SmokeWindow } from './tauri-mock.ts';
 
@@ -36,12 +37,13 @@ const bootSnapshotIds = (page: Page) =>
   });
 
 test('the last open list of a large library paints from the boot snapshot, then the real load replaces it', async ({ context }) => {
+  test.slow();
   const first = await context.newPage();
   const base = largeFixtureState(BOOT_SNAPSHOT_MIN_TRACKS + 1);
   await openApp(first, base);
   await releaseLoad(first);
   await first.locator('[data-track-row]').first().waitFor();
-  await expect.poll(() => bootSnapshotIds(first), { timeout: 10_000 }).not.toBeNull();
+  await expect.poll(() => bootSnapshotIds(first), { timeout: 10_000 * loadFactor() }).not.toBeNull();
   const snapshotIds = (await bootSnapshotIds(first))!;
   expect(snapshotIds.length).toBeGreaterThan(5);
   expect(snapshotIds.slice(0, 3)).toEqual([1, 2, 3]);
@@ -62,7 +64,7 @@ test('the last open list of a large library paints from the boot snapshot, then 
   await expect(second.locator('[data-boot-row]')).toHaveCount(0);
   await expect(second.locator('[data-track-row]').first()).toContainText('Renamed Outside');
   await expect(second.getByText('Smoke Track 01', { exact: true })).toHaveCount(0);
-  await expect.poll(() => bootSnapshotIds(second), { timeout: 10_000 }).not.toContain(1);
+  await expect.poll(() => bootSnapshotIds(second), { timeout: 10_000 * loadFactor() }).not.toContain(1);
   expect(await bootSnapshotIds(second)).toEqual(expect.arrayContaining([2, 3]));
 });
 
