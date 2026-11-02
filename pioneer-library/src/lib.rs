@@ -12,6 +12,7 @@ mod analysis_write;
 pub mod backup;
 mod duplicates;
 mod edits;
+pub mod failure;
 mod file_health;
 mod multi_sync;
 mod queries;

@@ -4,6 +4,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
+use pioneer_library::failure::{LibraryFailure, classify};
 use pioneer_library::{normalise_tag, DuplicateCandidate, DuplicateIndex, FileStatus, LocalLibrary, file_status};
 use pioneer_usb_writer::models::Track;
 
@@ -249,6 +250,7 @@ fn a_library_without_its_version_row_is_an_error_not_a_fresh_init() {
     raw(&path).execute("DELETE FROM schema_version", []).unwrap();
     let err = LocalLibrary::open(&path).err().expect("missing version row must not open");
     assert!(err.to_string().contains("version"), "{err:#}");
+    assert_eq!(classify(&err), Some(LibraryFailure::Damaged));
     assert!(version_rows(&path).is_empty(), "the library must not be stamped as current");
     assert_eq!(track_count(&path), 3);
 }
@@ -258,7 +260,8 @@ fn a_library_without_its_version_table_is_an_error_not_a_fresh_init() {
     let dir = tempfile::tempdir().unwrap();
     let path = library_with_tracks(dir.path());
     raw(&path).execute("DROP TABLE schema_version", []).unwrap();
-    assert!(LocalLibrary::open(&path).is_err());
+    let err = LocalLibrary::open(&path).err().expect("missing version table must not open");
+    assert_eq!(classify(&err), Some(LibraryFailure::Damaged));
     let has_table: bool = raw(&path)
         .query_row("SELECT COUNT(*) > 0 FROM sqlite_master WHERE name = 'schema_version'", [], |r| r.get(0))
         .unwrap();
@@ -271,7 +274,8 @@ fn an_unreadable_version_is_an_error_not_a_fresh_init() {
     let dir = tempfile::tempdir().unwrap();
     let path = library_with_tracks(dir.path());
     raw(&path).execute("UPDATE schema_version SET version = 'garbage'", []).unwrap();
-    assert!(LocalLibrary::open(&path).is_err());
+    let err = LocalLibrary::open(&path).err().expect("unreadable version must not open");
+    assert_eq!(classify(&err), Some(LibraryFailure::Damaged));
     assert_eq!(version_rows(&path), vec!["garbage".to_string()]);
     assert_eq!(track_count(&path), 3);
 }
@@ -283,6 +287,7 @@ fn a_library_from_a_newer_app_is_a_clear_error_and_not_downgraded() {
     raw(&path).execute("UPDATE schema_version SET version = 99", []).unwrap();
     let err = LocalLibrary::open(&path).err().expect("newer version must not open");
     assert!(err.to_string().contains("newer"), "{err:#}");
+    assert_eq!(classify(&err), Some(LibraryFailure::NewerVersion));
     assert_eq!(version_rows(&path), vec!["99".to_string()]);
     assert_eq!(track_count(&path), 3);
 }
@@ -295,7 +300,8 @@ fn a_damaged_header_is_an_error_and_the_file_is_left_alone() {
     let mut bytes = std::fs::read(&path).unwrap();
     bytes[..16].copy_from_slice(b"not sqlite head!");
     std::fs::write(&path, &bytes).unwrap();
-    assert!(LocalLibrary::open(&path).is_err());
+    let err = LocalLibrary::open(&path).err().expect("a damaged header must not open");
+    assert_eq!(classify(&err), Some(LibraryFailure::Damaged));
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
 
@@ -308,7 +314,8 @@ fn a_locked_library_is_an_error_and_is_never_initialised() {
     holder
         .execute_batch("PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; DELETE FROM schema_version;")
         .unwrap();
-    assert!(LocalLibrary::open(&path).is_err(), "a locked library must not open");
+    let err = LocalLibrary::open(&path).err().expect("a locked library must not open");
+    assert_eq!(classify(&err), Some(LibraryFailure::Locked), "{err:#}");
     holder.execute_batch("ROLLBACK").unwrap();
     drop(holder);
     assert_eq!(version_rows(&path), current);
