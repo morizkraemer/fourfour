@@ -166,6 +166,8 @@ Missing for a beta:
 2. A migration promise: every beta version opens older libraries; downgrade is refused with a message. Add a test that opens a library written by this beta's schema.
 3. User-facing text: where backups go, how to restore, what is not backed up (audio is optional).
 
+Item 2 is built on branch `r51-migration-test`: the library already refused a newer schema with `LibraryFailure::NewerVersion` (mapped to `ErrorKind::LibraryNewerVersion`). `pioneer-library/tests/schema_fixture.rs` opens the committed `tests/fixtures/library-schema-v7-beta1.db` (3 tracks, analysis and cues, a folder and playlist) with data intact and asserts that a version above the fixture is refused and left unchanged. A schema bump must keep this fixture opening; regenerate a new one only with `cargo test -p pioneer-library --test schema_fixture -- --ignored` on the old code.
+
 Next step: Merlin lands `r38-recovery-v2`; agent writes the migration test and the FAQ entry.
 
 ## 12. USB export safety - needs brother
