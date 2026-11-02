@@ -1,0 +1,90 @@
+{
+  "allowed_licenses": [
+    "MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "MPL-2.0",
+    "Unicode-3.0", "Unicode-DFS-2016", "Zlib", "CC0-1.0", "BSL-1.0", "OFL-1.1", "0BSD"
+  ],
+  "source_availability_licenses": {
+    "MPL-2.0": "Source code for MPL-2.0 licensed components is available from the crate sources on https://crates.io, and for symphonia from https://github.com/pdeljanov/Symphonia. fourfour does not modify these crates. The MPL-2.0 applies to those files only; the rest of the application is not covered by it."
+  },
+  "feature_extras": {
+    "note": "Release DMGs are built with --features coreml (scripts/mac/build-dmg.sh), which links ONNX Runtime through the ort crate. cargo metadata cannot resolve that feature offline on this box, so the linked crates are taken from Cargo.lock below ort. ort-sys build-script download dependencies (ureq, hmac-sha256, lzma-rust2 and below) are not linked into the app.",
+    "roots": ["ort"],
+    "prune": ["ureq", "hmac-sha256", "lzma-rust2"]
+  },
+  "license_overrides": {},
+  "components": [
+    {
+      "name": "ONNX Runtime",
+      "version": "static, via the ort crate",
+      "license": "MIT",
+      "url": "https://github.com/microsoft/onnxruntime",
+      "note": "Statically linked into the app binary.",
+      "texts": [{"standard": "MIT", "holder": "Microsoft Corporation"}]
+    },
+    {
+      "name": "Signalsmith Stretch",
+      "version": "vendored in fourfour-stretch/vendor",
+      "license": "MIT",
+      "url": "https://github.com/Signalsmith-Audio/signalsmith-stretch",
+      "texts": [{"repo_file": "fourfour-stretch/vendor/LICENSE.txt"}]
+    },
+    {
+      "name": "Signalsmith Linear",
+      "version": "vendored in fourfour-stretch/vendor",
+      "license": "MIT",
+      "url": "https://github.com/Signalsmith-Audio/linear",
+      "texts": [{"repo_file": "fourfour-stretch/vendor/signalsmith-linear/LICENSE.txt"}]
+    },
+    {
+      "name": "Geist and Geist Mono fonts",
+      "version": "app/src/assets/fonts",
+      "license": "OFL-1.1",
+      "url": "https://github.com/vercel/geist-font",
+      "texts": [{"repo_file": "app/src/assets/fonts/OFL.txt"}]
+    },
+    {
+      "name": "Svelte runtime",
+      "version": "compiled into app/dist",
+      "license": "MIT",
+      "url": "https://github.com/sveltejs/svelte",
+      "texts": [{"node_module": "svelte", "standard": "MIT", "holder": "2016-2025 Svelte contributors"}]
+    },
+    {
+      "name": "@tauri-apps/api",
+      "version": "app/package.json",
+      "license": "MIT",
+      "url": "https://github.com/tauri-apps/tauri",
+      "texts": [{"node_module": "@tauri-apps/api", "standard": "MIT", "holder": "2017 - Present Tauri Apps Contributors"}]
+    },
+    {
+      "name": "@tauri-apps/plugin-dialog",
+      "version": "app/package.json",
+      "license": "MIT",
+      "url": "https://github.com/tauri-apps/plugins-workspace",
+      "texts": [{"node_module": "@tauri-apps/plugin-dialog", "standard": "MIT", "holder": "2017 - Present Tauri Apps Contributors"}]
+    },
+    {
+      "name": "Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx)",
+      "version": "bundled in Resources/models",
+      "license": "MIT",
+      "url": "https://github.com/CPJKU/beat_this",
+      "note": "ONNX conversion: https://github.com/danigb/beat-this-rs (MIT). Upstream disclaimer (CPJKU/beat_this README, \"License\"): \"The code and the published model weights are released under the MIT license. Note that some of the training files are fully copyrighted or under limited Creative Commons licenses, and it is up to the user to assess whether this may impact their use case.\" This is the authors' statement about their training data, not a restriction on the weights.",
+      "texts": [{"repo_file": "scripts/mac/LICENSE-beat-this.txt"}]
+    },
+    {
+      "name": "Key detection model (clean-fsl templates)",
+      "version": "fourfour-analysis-rs/src/cyankey.rs",
+      "license": "CC-BY-4.0 data attribution (see text below)",
+      "url": "https://zenodo.org/records/3967852",
+      "note": "Fitted numbers only; no audio is distributed. Credits are required by the dataset licences. The same file ships as Resources/models/LICENSE-key-model.txt.",
+      "texts": [{"repo_file": "scripts/mac/LICENSE-key-model.txt"}]
+    },
+    {
+      "name": "SQLCipher",
+      "version": "bundled via rusqlite bundled-sqlcipher (libsqlite3-sys)",
+      "license": "BSD-style (Zetetic LLC, 3-clause)",
+      "url": "https://www.zetetic.net/sqlcipher/",
+      "texts": [{"cargo_crate_file": ["libsqlite3-sys", "sqlcipher/LICENSE"]}]
+    }
+  ]
+}
