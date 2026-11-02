@@ -454,3 +454,4 @@
 2026-11-02 12:37 orchestrator r41-failmemo landed c046e48 (smoke 113, CHECKS-OK); decided: own prio r43-a11y-webkit (sonnet medium; prep fix on parked branch)
 2026-11-02 13:04 orchestrator r43-a11y-webkit done on parked branches (sidebar Shift+F10 dispatch for WebKit)
 2026-11-02 13:05 orchestrator - STATE trimmed (Run plan archived to state-archive), r44-version spawned (sonnet medium)
+2026-11-02 13:24 orchestrator r44-version handed back (single version source = pioneer-test-ui crate; tauri.conf version removed; ANALYSIS_VERSION const for the failure memo), merging; decided: land although Settings > Advanced now shows 0.1.0 instead of 0.9.14 (the writer crate's number was wrong there)
