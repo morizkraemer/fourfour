@@ -6,6 +6,7 @@
 
 import { setCues } from '../services/tauri.svelte.ts';
 import { createPersister } from '../lib/persister.ts';
+import { failureText } from '../lib/userErrors.ts';
 import { cuesFromPayload, cuesToPayload, sameCues, type Cue, type CuePointPayload } from '../lib/cues.ts';
 
 let byTrack = $state.raw<Record<number, Cue[]>>({});
@@ -17,7 +18,7 @@ const persister = createPersister<Cue[]>(
     await setCues(trackId, cuesToPayload(cues));
     if (byTrack[trackId] === cues) unsaved.delete(trackId);
   },
-  (err) => onSaveError(`Could not save the cues: ${err}`),
+  (err) => onSaveError(failureText("Couldn't save the cues.", err)),
 );
 
 const NO_CUES: Cue[] = [];

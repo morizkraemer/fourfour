@@ -16,7 +16,7 @@ export function fileStateGlyph(state: FileState | undefined): string {
 
 export function fileStateTooltip(state: FileState | undefined, path: string): string | undefined {
   if (state === 'missing') return `File missing: ${path}\nRelocate it from the library status button in the top bar.`;
-  if (state === 'error') return `Can't read this file: ${path}`;
+  if (state === 'error') return `Can't read this file: ${path}\nCheck that it opens in another app, or relocate it from the library status button in the top bar.`;
   if (state === 'relocated') return `Relinked to ${path}`;
   return undefined;
 }

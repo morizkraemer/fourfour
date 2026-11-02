@@ -73,6 +73,6 @@ test('a file that is not a backup is refused before anything is asked', async ({
   await page.evaluate(() => ((window as unknown as MockWindow).__smokePickPath = '/Downloads/notes.txt'));
   await openBackupPage(page);
   await restoreCard(page).getByRole('button', { name: 'Choose file…' }).click();
-  await expect(restoreCard(page)).toContainText('This file is not a library backup');
+  await expect(restoreCard(page)).toContainText("That file isn't a fourfour library backup. Choose another file.");
   await expect(page.locator('[data-restore-dialog]')).toHaveCount(0);
 });

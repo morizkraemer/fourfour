@@ -103,7 +103,7 @@ describe('cue store', () => {
     editCues(track, (cues) => withHotCue(cues, 500)!.cues);
     await flushCueEdits();
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toContain('disk full');
+    expect(errors[0]).toBe("Couldn't save the cues. The disk is full. Free up some space and try again.");
     expect(cuesOf(track)).toHaveLength(1);
     onCueSaveError(() => undefined);
   });

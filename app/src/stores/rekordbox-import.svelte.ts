@@ -12,6 +12,7 @@ import {
   type RekordboxSourceKind,
 } from '../services/tauri.svelte.ts';
 import { loadState } from './library.svelte.ts';
+import { rekordboxFailureText } from '../lib/userErrors.ts';
 
 export type RekordboxImportPhase = 'idle' | 'scanning' | 'ready' | 'importing' | 'done' | 'error';
 
@@ -143,7 +144,8 @@ export async function scanRekordboxSource() {
     rekordboxImport.phase = 'ready';
   } catch (err) {
     rekordboxImport.preview = null;
-    rekordboxImport.error = String(err);
+    console.info('rekordbox preview failed:', err);
+    rekordboxImport.error = rekordboxFailureText(err);
     rekordboxImport.phase = 'error';
   }
 }
@@ -160,7 +162,8 @@ export async function runRekordboxImport() {
     await loadState();
     rekordboxImport.phase = 'done';
   } catch (err) {
-    rekordboxImport.error = String(err);
+    console.info('rekordbox import failed:', err);
+    rekordboxImport.error = rekordboxFailureText(err, "Couldn't import the Rekordbox library.");
     rekordboxImport.phase = 'error';
   } finally {
     stopListening();
