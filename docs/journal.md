@@ -492,3 +492,4 @@
 2026-11-02 12:56 orchestrator r53-user-docs: key accuracy corrected (vs Beatport labels) + BPM/bar-1 expectations (checklist 13); decided: own prio r59-smoke-flake (sonnet medium; smoke robust under load, failures named in last lines)
 2026-11-02 13:40 orchestrator r59-smoke-flake handed back 69d502e (load factor 1-4 on timeouts, warm-up, failed/flaky reporter; 4 clean runs at load 20-46, no before/after repro), merging
 2026-11-02 13:51 orchestrator r59-smoke-flake landed 7a8fd26 (CHECKS-OK, smoke 113 passed 0 flaky at load 43)
+2026-11-02 13:52 orchestrator - decided: own prio r60-detail-cache (sonnet medium; Waiting 19 decide-by-doing: disk cap min(2 GiB, 5% free), floor 512 MiB)
