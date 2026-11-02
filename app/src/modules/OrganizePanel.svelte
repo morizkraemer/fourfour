@@ -16,6 +16,7 @@
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
   import { fitRibbonCovers } from '../lib/ribbonFit.ts';
+  import { organizePanelWidth } from '../lib/panelWidth.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
   import StickBoard from './StickBoard.svelte';
@@ -95,6 +96,9 @@
   }
 
   let railHeight = $state(0);
+
+  const showingBoard = $derived(ui.organize.target !== null);
+  const shownWidth = $derived(organizePanelWidth(ui.organize.width, showingBoard, ui.sidebarWidth));
 
   const allRailCovers = $derived.by(() => {
     const target = ui.organize.target;
@@ -191,15 +195,17 @@
 <svelte:window onpointerdowncapture={onWindowPointerDown} onkeydowncapture={onWindowKeydown} />
 
 {#if ui.organize.expanded}
-  <div class="ff-organize ff-organize--expanded" style:width="{ui.organize.width}px" bind:this={drawerEl}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="ff-organize__resize-handle"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize organize panel"
-      onpointerdown={onResizeHandlePointerDown}
-    ></div>
+  <div class="ff-organize ff-organize--expanded" style:width="{shownWidth}px" bind:this={drawerEl}>
+    {#if showingBoard}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="ff-organize__resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize organize panel"
+        onpointerdown={onResizeHandlePointerDown}
+      ></div>
+    {/if}
 
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ff-organize__header" oncontextmenu={openHeaderMenu}>
@@ -234,15 +240,17 @@
         <span class="ff-organize__header-title">Put tracks into</span>
       {/if}
       <div class="ff-organize__header-actions">
-        <Button
-          icon={widthBeforeWiden !== null ? 'minimize' : 'maximize'}
-          iconOnly
-          variant="ghost"
-          size="small"
-          ariaLabel={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
-          title={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
-          onclick={toggleWiden}
-        />
+        {#if showingBoard}
+          <Button
+            icon={widthBeforeWiden !== null ? 'minimize' : 'maximize'}
+            iconOnly
+            variant="ghost"
+            size="small"
+            ariaLabel={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
+            title={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
+            onclick={toggleWiden}
+          />
+        {/if}
         <Button
           icon="chevron-right"
           iconOnly

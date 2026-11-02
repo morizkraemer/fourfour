@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clampPanelWidth, loadPanelWidth, parseStoredPanelWidth, PANEL_WIDTH, savePanelWidth } from './panelWidth.ts';
+import { clampPanelWidth, loadPanelWidth, organizePanelWidth, parseStoredPanelWidth, PANEL_WIDTH, savePanelWidth } from './panelWidth.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -42,5 +42,19 @@ describe('persistence', () => {
     vi.stubGlobal('localStorage', { getItem: blocked, setItem: blocked });
     expect(loadPanelWidth('sidebar')).toBe(240);
     expect(() => savePanelWidth('sidebar', 300)).not.toThrow();
+  });
+});
+
+describe('organizePanelWidth', () => {
+  it('caps the empty state to the given width', () => {
+    expect(organizePanelWidth(900, false, 240)).toBe(240);
+    expect(organizePanelWidth(420, false, 240)).toBe(240);
+  });
+  it('keeps a user width narrower than the cap in the empty state', () => {
+    expect(organizePanelWidth(210, false, 240)).toBe(210);
+  });
+  it('uses the stored width once a list is loaded', () => {
+    expect(organizePanelWidth(420, true, 240)).toBe(420);
+    expect(organizePanelWidth(900, true, 240)).toBe(900);
   });
 });
