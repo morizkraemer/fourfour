@@ -489,3 +489,4 @@
 2026-11-02 12:25 orchestrator r56-early-panic landed 92fb0a4 (first smoke 112 passed 1 failed under load ~50, no frontend change; rerun 113 passed 0 failed, CHECKS-OK)
 2026-11-02 12:25 orchestrator - decided: own prio r58-devbins (sonnet medium; dev bins break silently, make them compile and documented)
 2026-11-02 12:50 orchestrator r58-devbins handed back befa135 (bench bins missed app_log include), merged; dev-bins check added to the merge check script
+2026-11-02 12:56 orchestrator r53-user-docs: key accuracy corrected (vs Beatport labels) + BPM/bar-1 expectations (checklist 13); decided: own prio r59-smoke-flake (sonnet medium; smoke robust under load, failures named in last lines)
