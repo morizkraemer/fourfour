@@ -55,7 +55,7 @@ fn open_in(db_path: PathBuf) -> Result<Recovered, String> {
 }
 
 fn retry_failed(db_path: Result<PathBuf, String>) -> Result<Recovered, String> {
-    let (db_path, library) = crate::open_startup_library(db_path)?;
+    let (db_path, library) = crate::open_startup_library(db_path).map_err(|e| e.message)?;
     Ok(Recovered { library, db_path, settings: Vec::new() })
 }
 
