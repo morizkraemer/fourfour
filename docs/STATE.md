@@ -72,7 +72,7 @@ targets: beta-ready on ov-1028, as fast as possible at 10k+ (startup, analysis, 
 done so far: plan items 0-12 and own-priority r11-r41 (detail: docs/state-archive-2026-10-28.md "Run plan as of 2026-11-02", journal, docs/architecture/perf-run-2026-11.md R-sections)
 open own-priority items:
 - r42-realsoak: 45-60 min soak of the real Linux app under xvfb [running]
-- r44-version: [merging] app version now from the app crate (shown version 0.9.14 -> 0.1.0, matching the dmg; decided: lands, it corrects a wrong number); memo keyed on ANALYSIS_VERSION (bump by hand when analysis changes)
+- r44-version: [landed] app version now from the app crate (shown version 0.9.14 -> 0.1.0, matching the dmg; decided: lands, it corrects a wrong number); memo keyed on ANALYSIS_VERSION (bump by hand when analysis changes)
 - r45-rowcost: WebKit per-row style/layout cost in app code, pixel-identical [running]
 parked for Merlin (land the -v2 branches, current with ov-1028; parked-all-v2 a87f361 = all at once): r18-errors-v2 (Waiting 33), r17-a11y-v2 (34), r31-cover-cap-v2 (35), r29-css-v2 (36), r38-recovery-v2 (37); r15-reveal (not worth landing), r16-quant (dropped), r35-ci (Waiting 15)
 next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028 (now with CoreML, font preload, error kinds; probe has longest_busy/pending_frames/page origin); compare r15-reveal and r29-css-v2; 50k only with >= 40 GB free (script now cleans up and stops when low)

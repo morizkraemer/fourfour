@@ -456,3 +456,4 @@
 2026-11-02 13:05 orchestrator - STATE trimmed (Run plan archived to state-archive), r44-version spawned (sonnet medium)
 2026-11-02 13:24 orchestrator r44-version handed back (single version source = pioneer-test-ui crate; tauri.conf version removed; ANALYSIS_VERSION const for the failure memo), merging; decided: land although Settings > Advanced now shows 0.1.0 instead of 0.9.14 (the writer crate's number was wrong there)
 2026-11-02 13:25 orchestrator - decided: own prio r45-rowcost (opus; WebKit row style/layout cost)
+2026-11-02 13:37 orchestrator r44-version landed on ov-1028
