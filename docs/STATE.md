@@ -46,6 +46,7 @@ Lab review 2026-11-02 (Merlin): sync round 3 Keep, skeleton round 2 Keep, scroll
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
 ### Brother's lane
 - r20 Windows risks: is_removable true for every drive, eject via umount, statvfs stub unlimited, pdb.rs extension match case-sensitive (TRACK.MP3 -> type 0); see Platforms 2026-11 in robustness-2026-11.md.
+- Windows libcrypto (r65, docs/release/windows-crypto-2026-11.md on ov-1028): no openssl-sys; libsqlite3-sys links system libcrypto on Windows/Linux, CommonCrypto on macOS. Proposal: rusqlite feature bundled-sqlcipher-vendored-openssl under cfg(windows) only in pioneer-usb-writer/Cargo.toml, when a Windows release is planned
 - r12: USB export puts two tracks with the same artist + file name (untagged "01 Intro.mp3") on one path; repro ignored test in pioneer-library/tests/robust_store.rs. Also lofty rejects some bad tags so playable files are skipped (relaxed parse in scanner.rs).
 - SQLCipher keys private; no PDB reader (docs/architecture/rekordbox-import.md).
 - From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
