@@ -481,3 +481,4 @@
 2026-11-02 11:33 orchestrator r51-migration-test landed ebe080e (CHECKS-OK, smoke 113/0); r54-notices landed (scripts/docs/resource only, no code; regenerated with node_modules present for real npm texts)
 2026-11-02 11:33 orchestrator - decided: own prio r55-symphonia-dedupe (sonnet medium; one decoder version, bit-identical decode)
 2026-11-02 11:36 orchestrator r49-linux-arena handed back d4cc472 (M_ARENA_MAX 4 + malloc_trim after runs; app after-run RSS 2.1 GB -> 270-410 MB; web 2 h soak hump not leak; bench_analysis build fix), merging
+2026-11-02 11:46 orchestrator r49-linux-arena landed 3d80117 (CHECKS-OK, smoke 113 passed)
