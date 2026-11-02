@@ -533,3 +533,4 @@
 2026-11-02 23:05 orchestrator r75-parked-refresh handed back: 10 branches replayed onto ov-1028 0a80690 as -v4 (r38 read_backup + recovery_commands CommandError fixes, r69 async lists merged), parked-all-v4 full checks + smoke green
 2026-11-02 23:15 orchestrator r75 followup: r52-no-python-v3 broke the analysis bench dev-bin (deleted analysis_python.rs, --backend flag); fixed 2933305, merged into parked-all-v4 54893bc; dev-bins check green
 2026-11-02 23:20 orchestrator - decided: own prio r76-recovery-kind (sonnet medium; r38 recovery classifies by CommandError kind, not message text; parked-all-v5)
+2026-11-02 23:59 orchestrator r76-recovery-kind handed back b4171e5 (recovery reads CommandError kind; new kind library_not_open; no copy change); parked-all-v5 f6751cd full checks + smoke green
