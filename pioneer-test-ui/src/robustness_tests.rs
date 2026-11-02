@@ -39,7 +39,12 @@ impl TrackEngine for DecodeEngine {
     }
 }
 
-fn engine() -> (Arc<dyn TrackEngine>, &'static str) {
+static REAL_ANALYSIS: Mutex<()> = Mutex::new(());
+
+fn engine(real_models: bool) -> (Arc<dyn TrackEngine>, &'static str) {
+    if !real_models {
+        return (Arc::new(DecodeEngine), "DecodeEngine");
+    }
     static REAL: OnceLock<Option<Arc<Analyzer>>> = OnceLock::new();
     let real = REAL.get_or_init(|| locate_models(None).and_then(|dir| Analyzer::load(&dir, PoolOptions { max_threads: 2, max_workers: Some(2), ..PoolOptions::default() }).ok().map(Arc::new)));
     match real {
@@ -182,8 +187,8 @@ impl Pipeline {
         plan
     }
 
-    fn analyse(&self) -> (Option<(u32, u32)>, Vec<String>, &'static str) {
-        let (runner, name) = engine();
+    fn analyse(&self, real_models: bool) -> (Option<(u32, u32)>, Vec<String>, &'static str) {
+        let (runner, name) = engine(real_models);
         let work = crate::analysis_run::resume_work(&self.library.lock().unwrap(), true).unwrap();
         let sink = Arc::new(Sink { lines: Mutex::new(Vec::new()) });
         let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
@@ -216,17 +221,26 @@ impl Pipeline {
         Run { plan, rows, finished, log, engine, library: self.library.clone(), _db: self.db_dir.clone() }
     }
 
-    fn run(&self, paths: &[String]) -> Run {
+    fn run(&self, paths: &[String], real_models: bool) -> Run {
         let plan = self.import(paths, &mut || {});
-        let (finished, log, engine) = self.analyse();
+        let (finished, log, engine) = self.analyse(real_models);
         self.snapshot(plan, finished, log, engine)
     }
 }
 
 fn drop_and_analyse(case: &'static str, paths: Vec<String>) -> Run {
+    drop_and_analyse_with(case, paths, false)
+}
+
+fn drop_and_analyse_real(case: &'static str, paths: Vec<String>) -> Run {
+    let _alone = REAL_ANALYSIS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    drop_and_analyse_with(case, paths, true)
+}
+
+fn drop_and_analyse_with(case: &'static str, paths: Vec<String>, real_models: bool) -> Run {
     with_deadline(case, move || {
         let pipeline = Pipeline::new(case);
-        let run = pipeline.run(&paths);
+        let run = pipeline.run(&paths, real_models);
         run.assert_library_healthy();
         run.report(case);
         run
@@ -566,7 +580,7 @@ fn files_deleted_between_scan_and_analysis_fail_alone() {
             std::fs::remove_file(root_s_path(&root_s).join(format!("doomed{i}.wav"))).unwrap();
         }
         std::fs::write(root_s_path(&root_s).join("doomed1.wav"), b"replaced by garbage").unwrap();
-        let (finished, log, engine) = pipeline.analyse();
+        let (finished, log, engine) = pipeline.analyse(false);
         let run = pipeline.snapshot(plan, finished, log, engine);
         run
     });
@@ -604,7 +618,7 @@ fn files_deleted_between_the_survey_and_the_scan_are_reported_unreadable() {
         let plan = plan_for_library(&pipeline.plans, &pipeline.library.lock().unwrap(), scanned, &survey).unwrap();
         let (tracks, _) = pipeline.plans.take(plan.token).unwrap().resolve(false);
         crate::add_scanned_tracks(&pipeline.library.lock().unwrap(), tracks).unwrap();
-        let (finished, log, engine) = pipeline.analyse();
+        let (finished, log, engine) = pipeline.analyse(false);
         pipeline.snapshot(plan, finished, log, engine)
     });
     run.report("vanish-between-survey-and-scan");
@@ -710,7 +724,7 @@ fn a_messy_library_imports_everything_good_and_survives_the_rest() {
     symlink("..", messy.join("loop")).unwrap();
     symlink("nowhere.wav", messy.join("dangling.wav")).unwrap();
     std::fs::write(messy.join("notes.txt"), b"x").unwrap();
-    let run = drop_and_analyse("everything-at-once", paths_of(&[&root]));
+    let run = drop_and_analyse_real("everything-at-once",paths_of(&[&root]));
     run.assert_analysed(&as_strs(&good));
     let (errors, total) = run.finished.expect("finished");
     assert_eq!(total as usize, run.rows.len());
@@ -804,7 +818,7 @@ fn tracks_removed_while_queued_do_not_stop_the_run() {
         let work = crate::analysis_run::resume_work(&pipeline.library.lock().unwrap(), true).unwrap();
         assert_eq!(work.len(), 6);
         pipeline.library.lock().unwrap().remove_tracks(&[work[1].0, work[4].0]).unwrap();
-        let (runner, engine_name) = engine();
+        let (runner, engine_name) = engine(false);
         let sink = Arc::new(Sink { lines: Mutex::new(Vec::new()) });
         let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
         let outcome = runtime.block_on(run_with_runner(pipeline.library.clone(), AnalysisCoordinator::default(), work, sink.clone(), BackendEnv::default(), Some(Runner::Rust { engine: runner })));
