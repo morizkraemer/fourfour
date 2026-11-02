@@ -472,3 +472,4 @@
 2026-11-02 09:59 orchestrator r48-logs-fix landed on ov-1028 19f34dd (CHECKS-OK, smoke 113 passed 0 failed)
 2026-11-02 10:00 orchestrator - decided: own prio r51-migration-test (sonnet medium; beta checklist 11.2: beta library fixture, newer-schema refusal)
 2026-11-02 10:19 orchestrator r51-migration-test handed back 7dc917d (refusal existed; fixture + tests only), merging; decided: own prio r52-no-python (sonnet medium; checklist 6.7: no path to AGPL Python analysis in beta builds)
+2026-11-02 10:37 orchestrator r51-migration-test merge 902f7a7 reverted c7ad8e3: schema_fixture test fails (get_analysis reads grid/cues from ANLZ files next to the db; fixture ships only the db; worker's truncated output hid it). Fix queued: resume r51 worker when a slot frees (cap 2: r49, r52 running)
