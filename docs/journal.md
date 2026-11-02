@@ -484,3 +484,4 @@
 2026-11-02 11:46 orchestrator r49-linux-arena landed 3d80117 (CHECKS-OK, smoke 113 passed)
 2026-11-02 11:46 orchestrator - decided: own prio r56-early-panic (sonnet medium; checklist 9: log file + panic hook before Tauri setup)
 2026-11-02 12:05 orchestrator r56-early-panic handed back ca8af08 (534 passed 0 failed; real panic inside Builder::build not exercised), merging
+2026-11-02 12:19 orchestrator r55-symphonia-dedupe dropped per worker rec (0.6.1 not bit-identical: mp3 seek priming differs, riff panics on mutated headers, zero-rate WAV 404 s); WIP kept on branch r55-symphonia-dedupe a807719 for a later symphonia release
