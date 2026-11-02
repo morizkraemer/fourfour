@@ -12,7 +12,6 @@ use pioneer_usb_writer::models;
 use crate::analysis_failures::FailureMemo;
 use crate::analysis_order::{self, OrderJournal};
 use crate::analysis_backend::{resolve_runner, AnalyzerCache, BackendEnv, Runner, TrackEngine};
-use crate::analysis_python::{analyze_one_track, resolve_python_checked};
 
 pub(crate) type SharedLibrary = Arc<Mutex<LocalLibrary>>;
 
@@ -20,7 +19,7 @@ pub(crate) type AnalysisWorkItem = (i64, PathBuf);
 pub(crate) type SharedAnalysisQueue = Arc<Mutex<VecDeque<AnalysisWorkItem>>>;
 
 /// What one background job computes: the fast pass (waveform and key, one decode, no model),
-/// the grid pass (Beat This! and fit), or everything at once (Python, or staging off).
+/// the grid pass (Beat This! and fit), or everything at once (staging off).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Stage {
     Fast,
@@ -562,7 +561,6 @@ pub(crate) enum RunOutcome {
 
 const NOT_STORED: &str = "result not stored";
 const FAST_STAGES: u8 = analysis_stage::WAVEFORM | analysis_stage::KEY;
-const PYTHON_MAX_IN_FLIGHT: usize = 3;
 /// The waveform detail cache under the app data dir (`get_waveform_detail` in main.rs reads it).
 const DETAIL_CACHE_DIR: &str = "waveform-detail";
 /// Model jobs in flight: one per this many model threads, so the next tracks decode while the model runs.
@@ -797,32 +795,9 @@ async fn run_now_lane(
     let _guard = NowGuard { coordinator: coordinator.clone(), track_id };
     let started = Instant::now();
     let on_partial = partial_store(&shared, &sink, track_id, &source_path, started);
-    let outcome = match runner {
-        Runner::Rust { engine } => {
-            sink.log(LogLevel::Info, format!("Priority: {} on the now lane, threads={wide_threads}", file_name_of(&source_path)));
-            let job = JobControl { cancel, pause: Arc::new(AtomicBool::new(false)), on_partial: Some(on_partial), detail_cache: detail_dir };
-            analyze_one_track_rust(engine, source_path.clone(), wide_threads, Pass::All, job).await
-        }
-        Runner::Python { command } => {
-            sink.log(LogLevel::Info, format!("Priority: {} starts at once, background paused", file_name_of(&source_path)));
-            let bands_path = source_path.clone();
-            let bands = tokio::task::spawn_blocking(move || {
-                crate::analysis_priority::run_below_ui(|| {
-                    if let Ok((waves, detail)) = crate::band_analysis::measure_waveforms_and_detail(&bands_path) {
-                        on_partial(fourfour_analysis::service::waveform_only_result(&waves));
-                        if let Some(dir) = &detail_dir {
-                            if let Err(e) = crate::waveform_detail::store_detail(dir, &bands_path, &detail) {
-                                crate::app_log::warn(&format!("waveform detail of {} not cached: {e}", bands_path.display()));
-                            }
-                        }
-                    }
-                })
-            });
-            let result = analyze_one_track(&command, track_id, &source_path).await;
-            bands.await.ok();
-            result
-        }
-    };
+    sink.log(LogLevel::Info, format!("Priority: {} on the now lane, threads={wide_threads}", file_name_of(&source_path)));
+    let job = JobControl { cancel, pause: Arc::new(AtomicBool::new(false)), on_partial: Some(on_partial), detail_cache: detail_dir };
+    let outcome = analyze_one_track_rust(runner.engine, source_path.clone(), wide_threads, Pass::All, job).await;
     let recorded = record_outcome(&shared, &sink, &coordinator, track_id, &source_path, Stage::Whole, outcome);
     log_unsaved_failures(&sink, coordinator.failures().flush());
     recorded
@@ -836,7 +811,7 @@ pub(crate) async fn prioritize_track(
     sink: Arc<dyn AnalysisSink>,
     env: BackendEnv,
 ) -> Result<(), String> {
-    let resolve = || resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked).map(|(runner, _)| runner);
+    let resolve = || resolve_runner(&env, env.locate_weights(), &coordinator.analyzers);
     prioritize_with_resolver(shared, coordinator.clone(), item, sink, env.clone(), resolve).await
 }
 
@@ -864,10 +839,7 @@ async fn prioritize_with_resolver(
             sink.complete();
         }
     })?;
-    let wide_threads = match &runner {
-        Runner::Rust { engine } => engine.plan(1).threads_per_track,
-        Runner::Python { .. } => 0,
-    };
+    let wide_threads = runner.engine.plan(1).threads_per_track;
     match coordinator.claim_now(item.0, wide_threads) {
         NowClaim::AlreadyRunning => Ok(()),
         NowClaim::NoRun => run_with_runner(shared, coordinator, vec![item], sink, env, Some(runner)).await.map(|_| ()),
@@ -898,8 +870,8 @@ pub(crate) async fn run_with_runner(
     chosen_runner: Option<Runner>,
 ) -> Result<RunOutcome, String> {
     let resolve = || match chosen_runner {
-        Some(runner) => Ok((runner, Vec::new())),
-        None => resolve_runner(&env, env.locate_weights(), &coordinator.analyzers, resolve_python_checked),
+        Some(runner) => Ok(runner),
+        None => resolve_runner(&env, env.locate_weights(), &coordinator.analyzers),
     };
     run_with_resolver(shared, coordinator.clone(), pending, sink, env.app_data_dir.clone(), resolve).await
 }
@@ -910,7 +882,7 @@ async fn run_with_resolver(
     pending: Vec<AnalysisWorkItem>,
     sink: Arc<dyn AnalysisSink>,
     app_data_dir: Option<PathBuf>,
-    resolve: impl FnOnce() -> Result<(Runner, Vec<String>), String>,
+    resolve: impl FnOnce() -> Result<Runner, String>,
 ) -> Result<RunOutcome, String> {
     if pending.is_empty() {
         sink.log(LogLevel::Info, "No unanalyzed tracks — nothing to do".to_string());
@@ -951,37 +923,27 @@ async fn run_registered(
     coordinator: AnalysisCoordinator,
     sink: Arc<dyn AnalysisSink>,
     app_data_dir: Option<PathBuf>,
-    resolve: impl FnOnce() -> Result<(Runner, Vec<String>), String>,
+    resolve: impl FnOnce() -> Result<Runner, String>,
     initial_total: u32,
 ) -> Result<RunOutcome, String> {
-    let (runner, notes) = resolve()?;
-    for note in notes {
-        sink.log(LogLevel::Info, note);
-    }
-    let (max_in_flight, model_jobs) = match &runner {
-        Runner::Python { command } => {
-            sink.log(LogLevel::Info, format!("Starting analysis: {initial_total} tracks, python={command}"));
-            (PYTHON_MAX_IN_FLIGHT, ModelJobs { max: PYTHON_MAX_IN_FLIGHT, whole: 0 })
-        }
-        Runner::Rust { engine } => {
-            let plan = engine.plan(usize::MAX);
-            let model_jobs = (engine.plan(1).threads_per_track / MODEL_THREADS_PER_JOB).max(MIN_MODEL_JOBS);
-            sink.log(
-                LogLevel::Info,
-                format!(
-                    "Starting analysis: {initial_total} tracks, rust workers={} threads/track={} model jobs={model_jobs} beat model={}",
-                    plan.workers,
-                    plan.threads_per_track,
-                    engine.beat_runtime()
-                ),
-            );
-            (plan.workers, ModelJobs { max: model_jobs, whole: coordinator.whole_jobs.unwrap_or(WHOLE_JOBS_DURING_FAST_PASSES.min(plan.workers.saturating_sub(1).max(1))) })
-        }
-    };
+    let engine = resolve()?.engine;
+    let plan = engine.plan(usize::MAX);
+    let max_in_flight = plan.workers;
+    let model_jobs = (engine.plan(1).threads_per_track / MODEL_THREADS_PER_JOB).max(MIN_MODEL_JOBS);
+    sink.log(
+        LogLevel::Info,
+        format!(
+            "Starting analysis: {initial_total} tracks, rust workers={} threads/track={} model jobs={model_jobs} beat model={}",
+            plan.workers,
+            plan.threads_per_track,
+            engine.beat_runtime()
+        ),
+    );
+    let model_jobs = ModelJobs { max: model_jobs, whole: coordinator.whole_jobs.unwrap_or(WHOLE_JOBS_DURING_FAST_PASSES.min(plan.workers.saturating_sub(1).max(1))) };
 
     let mut join_set: tokio::task::JoinSet<(i64, PathBuf, Stage, TrackResult)> = tokio::task::JoinSet::new();
 
-    let staged = coordinator.staged && matches!(runner, Runner::Rust { .. });
+    let staged = coordinator.staged;
     let detail_cache = app_data_dir.as_ref().map(|dir| dir.join(DETAIL_CACHE_DIR));
     let mut order_journal = OrderJournal::new(app_data_dir.clone());
     loop {
@@ -990,30 +952,18 @@ async fn run_registered(
         }
         while join_set.len() < max_in_flight && !coordinator.is_cancelled() && !coordinator.background_paused() {
             let stored_stages = |id: i64| shared.lock().ok().and_then(|lib| lib.analysis_stages(id).ok().flatten()).unwrap_or(0);
-            let task = coordinator.take_next(staged, stored_stages, model_jobs, |jobs_left| match &runner {
-                Runner::Python { .. } => 0,
-                Runner::Rust { engine } => engine.plan(jobs_left).threads_per_track,
-            });
+            let task = coordinator.take_next(staged, stored_stages, model_jobs, |jobs_left| engine.plan(jobs_left).threads_per_track);
             let Some(task) = task else {
                 break;
             };
-            match runner.clone() {
-                Runner::Python { command } => {
-                    join_set.spawn(async move {
-                        let result = analyze_one_track(&command, task.track_id, &task.source_path).await;
-                        (task.track_id, task.source_path, task.stage, result)
-                    });
-                }
-                Runner::Rust { engine } => {
-                    let on_partial = matches!(task.stage, Stage::Fast | Stage::Whole)
-                        .then(|| partial_store(&shared, &sink, task.track_id, &task.source_path, Instant::now()));
-                    let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial, detail_cache: detail_cache.clone() };
-                    join_set.spawn(async move {
-                        let result = analyze_one_track_rust(engine, task.source_path.clone(), task.threads, task.stage.pass(), job).await;
-                        (task.track_id, task.source_path, task.stage, result)
-                    });
-                }
-            }
+            let engine = engine.clone();
+            let on_partial = matches!(task.stage, Stage::Fast | Stage::Whole)
+                .then(|| partial_store(&shared, &sink, task.track_id, &task.source_path, Instant::now()));
+            let job = JobControl { cancel: task.cancel, pause: coordinator.pause_flag(), on_partial, detail_cache: detail_cache.clone() };
+            join_set.spawn(async move {
+                let result = analyze_one_track_rust(engine, task.source_path.clone(), task.threads, task.stage.pass(), job).await;
+                (task.track_id, task.source_path, task.stage, result)
+            });
         }
 
         if join_set.is_empty() {

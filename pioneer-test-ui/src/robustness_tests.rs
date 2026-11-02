@@ -193,7 +193,7 @@ impl Pipeline {
         let sink = Arc::new(Sink { lines: Mutex::new(Vec::new()) });
         let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
         let outcome = runtime
-            .block_on(run_with_runner(self.library.clone(), AnalysisCoordinator::default(), work, sink.clone(), BackendEnv::default(), Some(Runner::Rust { engine: runner })))
+            .block_on(run_with_runner(self.library.clone(), AnalysisCoordinator::default(), work, sink.clone(), BackendEnv::default(), Some(Runner { engine: runner })))
             .expect("the analysis run ends without an error");
         let finished = match outcome {
             RunOutcome::Finished { errors, total } => Some((errors, total)),
@@ -821,7 +821,7 @@ fn tracks_removed_while_queued_do_not_stop_the_run() {
         let (runner, engine_name) = engine(false);
         let sink = Arc::new(Sink { lines: Mutex::new(Vec::new()) });
         let runtime = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
-        let outcome = runtime.block_on(run_with_runner(pipeline.library.clone(), AnalysisCoordinator::default(), work, sink.clone(), BackendEnv::default(), Some(Runner::Rust { engine: runner })));
+        let outcome = runtime.block_on(run_with_runner(pipeline.library.clone(), AnalysisCoordinator::default(), work, sink.clone(), BackendEnv::default(), Some(Runner { engine: runner })));
         let finished = match outcome {
             Ok(RunOutcome::Finished { errors, total }) => Some((errors, total)),
             Ok(_) => None,
