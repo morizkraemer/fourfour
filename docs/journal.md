@@ -443,3 +443,4 @@
 2026-11-02 09:21 orchestrator - decided: own prio r39-errkinds (sonnet high; structured error kinds, no visible change)
 2026-11-02 09:46 orchestrator r37-webkit-smoke handed back (WebKit smoke green, test-only), merging
 2026-11-02 09:46 orchestrator - decided: own prio r40-refresh (sonnet medium; refresh parked branches onto ov-1028, cross-branch conflicts)
+2026-11-02 11:02 orchestrator r37-webkit-smoke landed 2faba7f (Chromium smoke 113 + CHECKS-OK, WebKit smoke 113 on ov-1028); resumed r39/r40 after seat limit (reset 02:30 UTC)
