@@ -155,7 +155,7 @@ pub async fn export_backup(
     Ok(last)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_backup(path: String, library: State<'_, SharedLibrary>) -> Result<BackupPreview, CommandError> {
     let manifest = backup::read_backup_manifest(Path::new(&path))
         .map_err(|e| CommandError::from_anyhow_chain(e).with_path(&path))?;

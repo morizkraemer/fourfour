@@ -263,7 +263,7 @@ async fn prioritize_analysis(
 }
 
 /// Append or prepend tracks to the active analysis run (no-op when idle).
-#[tauri::command]
+#[tauri::command(async)]
 fn enqueue_analysis(
     ids: Vec<i64>,
     front: bool,
@@ -405,7 +405,7 @@ async fn analyze_tracks(
 
 /// Queue tracks left with missing stages (and, with the setting on, never-analysed ones) at launch.
 /// Returns how many tracks were queued; the run continues in the background.
-#[tauri::command]
+#[tauri::command(async)]
 fn resume_analysis(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
@@ -560,7 +560,7 @@ fn sync_playlists_to_library(
 }
 
 /// Remove tracks by ID from the library.
-#[tauri::command]
+#[tauri::command(async)]
 fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<(), CommandError> {
     let lib = state.lock().map_err(|e| e.to_string())?;
     let ids_i64: Vec<i64> = ids.into_iter().map(|id| id as i64).collect();
@@ -569,7 +569,7 @@ fn remove_tracks(ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<(), C
 
 /// Set 2 test hot cues (A at 1:00, B at 1:30) on the selected tracks.
 /// Replaces any existing cues on those tracks.
-#[tauri::command]
+#[tauri::command(async)]
 fn set_test_cues(
     ids: Vec<u32>,
     state: State<'_, SharedLibrary>,
@@ -612,7 +612,7 @@ fn validated_reveal_path(path: &str) -> Result<std::path::PathBuf, CommandError>
 }
 
 /// Reveal a file in the OS file manager (selects it where supported).
-#[tauri::command]
+#[tauri::command(async)]
 fn reveal_in_finder(path: String) -> Result<(), CommandError> {
     let p = validated_reveal_path(&path)?;
 
@@ -1215,7 +1215,7 @@ struct UsbStateResponse {
 
 /// Read the existing Pioneer USB library state from the OneLibrary database.
 /// Returns `None` if no `exportLibrary.db` is found at the expected path.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_usb_state(path: String) -> Result<Option<UsbStateResponse>, CommandError> {
     let state = pioneer_usb_writer::reader::read_usb_state(Path::new(&path))
         .map_err(|e| CommandError::from_anyhow(e).with_path(&path).for_stick())?;
@@ -1269,7 +1269,7 @@ fn save_state(
 }
 
 /// Row previews of the given tracks, for the list rows on screen.
-#[tauri::command]
+#[tauri::command(async)]
 fn get_row_previews(track_ids: Vec<u32>, state: State<'_, SharedLibrary>) -> Result<Vec<dto::RowPreviewInfo>, String> {
     let lib = state.lock().map_err(|e| e.to_string())?;
     track_infos::row_preview_infos(&lib, &track_ids)
@@ -1358,7 +1358,7 @@ fn get_library_path(app: AppHandle) -> Result<String, String> {
 
 /// Open or create a library at the given directory path.
 /// Creates `library.db` inside the chosen directory and swaps the active library.
-#[tauri::command]
+#[tauri::command(async)]
 fn change_library_path(
     folder_path: String,
     app: AppHandle,
@@ -1382,7 +1382,7 @@ fn change_library_path(
 
 /// Delete the on-disk library database (and ANLZ cache), then open a fresh empty library
 /// at the configured path. Playlists and tracks are wiped; `config.json` library_path is kept.
-#[tauri::command]
+#[tauri::command(async)]
 fn reset_library(
     app: AppHandle,
     state: State<'_, SharedLibrary>,
@@ -1622,7 +1622,24 @@ mod tests {
 
     #[test]
     fn volume_and_stick_commands_run_off_the_main_thread() {
-        assert_off_main_thread(include_str!("main.rs"), &["get_mounted_volumes", "eject_volume"]);
+        assert_off_main_thread(
+            include_str!("main.rs"),
+            &[
+                "get_mounted_volumes",
+                "eject_volume",
+                "enqueue_analysis",
+                "resume_analysis",
+                "remove_tracks",
+                "set_test_cues",
+                "reveal_in_finder",
+                "read_usb_state",
+                "get_row_previews",
+                "change_library_path",
+                "reset_library",
+            ],
+        );
+        assert_off_main_thread(include_str!("backup_commands.rs"), &["read_backup"]);
+        assert_off_main_thread(include_str!("file_health.rs"), &["locate_track_file"]);
         assert_off_main_thread(
             include_str!("stick_commands.rs"),
             &["get_stick", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],
