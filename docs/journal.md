@@ -522,3 +522,4 @@
 2026-11-02 18:25 orchestrator r71 beta checklist refresh merged on ov-1028; STATE notes now point at -v3
 2026-11-02 19:07 orchestrator r70-sync-audit handed back ee46f11 (12 commands async; save_state 2.3 s at 50k with big playlists kept sync: unordered snapshots), merging with chromium+webkit smoke
 2026-11-02 19:08 orchestrator - decided: own prio r72-ordered-save (sonnet medium; save_state async with latest-wins queue)
+2026-11-02 19:37 orchestrator r70-sync-audit landed f5962d7 (chromium smoke 113/0, CHECKS-OK); WebKit smoke caught an r62 bug: leaks spec used requestIdleCallback (missing in WebKit) -> setTimeout fallback committed on ov-1028, leaks spec 3x green in both browsers
