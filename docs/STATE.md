@@ -77,7 +77,7 @@ done so far: plan items 0-12 and own-priority r11-r41 (detail: docs/state-archiv
 open own-priority items:
 - 2026-11-02 landed on ov-1028: r42 soak (no leak), r44 version, r45 rowcost, r47 beta checklist, r48 logs, r49 Linux arenas (after-run RSS 2.1 GB -> 0.3-0.4 GB), r51 library fixture, r54 notices, r56 early panic log, r57 long-mix memory (-1.2 GB), r58 dev bins, r59 smoke under load, r60 cache disk rule, r61 chunk ceiling knob (default off), r62 leak spec, r65 Windows crypto doc. Dropped: r55 symphonia 0.6 (not bit-identical). Detail: journal + perf-run-2026-11.md R-sections.
 - parked (Waiting): r46-dsrows (36), r52-no-python (38), r53-user-docs (39), r63-ci (15), r50-sidebar-empty (lab card)
-- r64: all parked branches re-merged onto ov-1028 2026-11-02 and green (-v3 / -v2 names in Waiting); r50-sidebar-empty-v2 6cf8f9c. running: r67-async-volumes
+- r64: all parked branches re-merged onto ov-1028 2026-11-02 and green (-v3 / -v2 names in Waiting); r50-sidebar-empty-v2 6cf8f9c. r67-async-volumes landed 6847736 (Mac freeze fix, Mac check pending). running: r68-symlink-test, r69-stick-busy
 parked for Merlin (land the -v2 branches, current with ov-1028; parked-all-v3 d816e99 (r17+r18+r29+r31+r38+r52, green) = all at once): r18-errors-v3 (cba186d) (Waiting 33), r17-a11y-v3 (1ce679a) (34), r31-cover-cap-v3 (ec769e1) (35), r29-css-v3 (f1fe319) (36), r38-recovery-v3 (c2084f8) (37); r15-reveal (not worth landing), r16-quant (dropped), r35-ci (Waiting 15)
 next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028 (now with CoreML, font preload, error kinds; probe has longest_busy/pending_frames/page origin); compare r15-reveal and r29-css-v3 (f1fe319); 50k only with >= 40 GB free (script now cleans up and stops when low); chunk-budget sweep: scripts/mac/chunk-budget-sweep.sh --n 200 (pick CHUNK_BUDGET_CEILING_MB; box dry-run: unset 5.5 GB, 2048 -> 2.5 GB peak)
 review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (app on ov-1028, mock data; rebuilt after merges)
@@ -85,6 +85,6 @@ Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's fo
 
 ## Rundown
 Run 2026-10-30 to 11-02 on ov-1028 (checks green, 113 smoke): Mac analysis on CoreML 2-3x faster with identical grids; 50k startup 2.2 -> 1.35 s warm; WebKit stall fixed (font preload); Linux RSS after analysis 2.1 -> 0.3-0.4 GB; long mixes -1.2 GB; logs + early crash log; beta library fixture; licence notices generator; smoke robust under load.
-Found 2026-11-02: Mac 450-500 ms freezes every 5 s = USB volume poll on the main thread (fix r67 running). Analysis peak RSS = 14 parallel model chunks (~5.6 GB); ceiling knob landed, default off, Mac sweep picks it.
+Found 2026-11-02: Mac 450-500 ms freezes every 5 s = USB volume poll on the main thread (fix r67 landed, Mac check pending). Analysis peak RSS = 14 parallel model chunks (~5.6 GB); ceiling knob landed, default off, Mac sweep picks it.
 Mac numbers (2026-11-01): 10k warm first row 1.6-1.9 s, scroll during analysis p95 18 ms.
 Waiting on Merlin: land parked-all-v3 (33-37 + 38 no-Python), CI push r63-ci (15), docs draft (39), schema bump (31), key licence (4), bar-1 listen (16), bundle id (24). Next Mac night needs a go: perf-night, chunk-budget sweep, r67 freeze check.

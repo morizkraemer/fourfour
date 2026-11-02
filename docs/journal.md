@@ -512,3 +512,4 @@
 2026-11-02 17:04 orchestrator r64-parked-refresh done: 10 branches re-merged onto ov-1028, all green; parked-all-v3 d816e99 (2 conflicts resolved: initLibrary catch keeps r18 text + r38 openFailure; invoke list keeps recover_* drops analyze_track_python); STATE Waiting refs updated
 2026-11-02 17:04 orchestrator - decided: own prio r68-symlink-test (sonnet medium; symlink-loop walk test hangs with models present); Rundown rewritten
 2026-11-02 17:19 orchestrator r67-async-volumes handed back 82ca62e (8 commands async; write_usb/wipe_usb kept sync: no per-volume busy guard, concurrent sync+wipe would become possible), merging
+2026-11-02 17:31 orchestrator r67-async-volumes landed 6847736 (CHECKS-OK, smoke 113 passed); decided: own prio r69-stick-busy (sonnet high; per-volume busy guard so write/wipe can leave the main thread)
