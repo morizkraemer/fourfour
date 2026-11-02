@@ -14,6 +14,9 @@ mod track_infos;
 #[path = "../import_plan.rs"]
 mod import_plan;
 #[allow(dead_code)]
+#[path = "../command_error.rs"]
+mod command_error;
+
 #[path = "../waveform_detail.rs"]
 mod waveform_detail;
 
