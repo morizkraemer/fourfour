@@ -483,3 +483,4 @@
 2026-11-02 11:36 orchestrator r49-linux-arena handed back d4cc472 (M_ARENA_MAX 4 + malloc_trim after runs; app after-run RSS 2.1 GB -> 270-410 MB; web 2 h soak hump not leak; bench_analysis build fix), merging
 2026-11-02 11:46 orchestrator r49-linux-arena landed 3d80117 (CHECKS-OK, smoke 113 passed)
 2026-11-02 11:46 orchestrator - decided: own prio r56-early-panic (sonnet medium; checklist 9: log file + panic hook before Tauri setup)
+2026-11-02 12:05 orchestrator r56-early-panic handed back ca8af08 (534 passed 0 failed; real panic inside Builder::build not exercised), merging
