@@ -537,3 +537,4 @@
 2026-11-03 00:05 orchestrator - decided: own prio r77-grid-drift (opus medium; analysis target: constant-tempo refinement for ~16 drifting grids, dev split only, parked behind a switch)
 2026-11-03 00:20 orchestrator - PM relay (holiday mode, unsupervised): keep taking recs on reversible branch work, skip Mac-only, no pushes/deploys; only blocking decisions go to the PM inbox prefixed [fourfour]
 2026-11-03 00:25 orchestrator - decided: own prio r78-a11y-followups (sonnet high; Waiting 34 open items on r17-a11y-v4: rating keys, waveform seek slider, Alt+arrow reorder; parked)
+2026-11-03 00:30 orchestrator - PM ack not delivered (no PM session reachable); ack recorded here: holiday mode on, r77 + r78 running, parked-all-v5 current
