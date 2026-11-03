@@ -160,3 +160,114 @@ python3 -I benchmark/scripts/o3-score.py benchmark/results/o3/ref.json new.jsonl
 cargo run -p fourfour-analysis-rs --example bar_replay -- old-ffa.jsonl > replayed.jsonl
 python3 -I benchmark/scripts/b15-bar-listen.py benchmark/results/o3/ref.json replayed.jsonl --max 10
 ```
+
+## R77: tempo refinement in the grid fit (branch `r77-grid-drift`, not adopted)
+
+**Question.** Do tracks with the right BPM and a median offset within 20 ms, but drift or a few outlier beats, get fixed by a better tempo refinement after the coarse comb fit? The grid stays one constant BPM + phase.
+
+**Data.** Re-fits of stored logits in the app's current time base (gapless model input, beats rebased by trim + lead, `ModelLead` -10 ms, as in grid-offset-2026-10-29.md). Developed on dev (49 tracks, id % 12 == 4) and on a new non-test "train" set: 74 tracks with id % 3 != 0 and id % 12 != 4, dumped for this task (random order of the 357 eligible, stopped at the timebox). Test (205) scored once at the end. The "before" re-fit reproduces the published numbers: test 167/205, dev 44/49.
+
+**The class is small now.** Of the 16 tracks pipeline-review-2026-10.md lists, most were fixed by the snap-score fix (above) and the time-base fix, or have dynamic reference grids. Misses today with BPM within 0.1 and a median offset within 20 ms: dev 0, train 2, test 4. Only 2 test tracks are drift against a constant reference: id 492 (Rekordbox 125.01, we snap to 125.00, +41 ms) and id 516 (124.58 vs 124.6016, -49 ms). On train: id 25 (127.00 vs 127.0095, snap rejected, -41 ms) and id 470 (120.54 vs 120.531).
+
+**Variants tried** (all after the existing coarse-to-fine comb scan and `refine_comb`, before the integer snap):
+
+| Variant | What it does |
+|---|---|
+| `lsq` | least-squares line over the centroid-refined model peaks, nearest-beat assignment, tolerance 40 / 30 / 20 ms |
+| `lsq-robust` | same, then 3 rounds dropping peaks beyond 3 MADs (floor 4 ms) |
+| `lsq-weighted` | robust, weighted by the beat activation at the peak |
+| `comb-logit` | second `refine_comb` over clipped logits (max(x, -4) + 4) instead of the saturating sigmoid, so the peak top is not flat |
+| `comb-sharp` | second `refine_comb` over sigmoid^4 |
+| `segment` | local phase per 32-beat segment (comb, +-30 ms, parabolic), robust weighted line through the segment phases gives the tempo correction |
+
+Finer tempo steps were not tried: the scan already steps 1e-5 relative and `refine_comb` goes to about 3e-6, 20 to 100 times finer than the errors seen. A 0.01 BPM snap (Rekordbox's master.db resolution) was ruled out from the reference itself: Rekordbox's own beat spacing on non-integer tracks differs from the rounded master.db BPM by a median 0.0015 BPM (up to 0.005), so rounding would add up to 20 ms of drift.
+
+**Results** (grid = every Rekordbox beat within +-20 ms; BPM within 0.1; fit time median per track, this box at load 13 to 25):
+
+| Variant | Dev grid / BPM (49) | Train grid / BPM (74) | Test grid / BPM (205) | Fit ms (test) | Raw tempo error, train, unsnapped (median / p90 drift over the track) |
+|---|---:|---:|---:|---:|---:|
+| `comb` (shipped) | 44 / 46 | 59 / 68 | **167 / 180** | 192 | 2.4 / 11.5 ms |
+| `lsq` | 44 / 46 | 58 / 68 (lost 518) | | | |
+| `lsq-robust` | 44 / 46 | 58 / 68 (lost 518) | 167 / 180 | 187 | 3.3 / 13.9 ms |
+| `lsq-weighted` | 44 / 46 | 58 / 68 (lost 518) | | | |
+| `comb-logit` | 44 / 46 | 59 / 68 | 167 / 180 | 187 | **1.7** / 10.9 ms |
+| `comb-sharp` | 44 / 46 | 59 / 68 | 166 / 180 (lost 531: 19.8 -> 20.0 ms) | 192 | |
+| `segment` | 44 / 46 | 59 / 68 | 167 / 180 | 194 | 2.6 / 12.2 ms |
+
+- **No variant gains a track on any split.** Gained: none. Lost: train id 518 (145.55, 15 -> 48 to 57 ms) with all three least-squares variants; test id 531 with `comb-sharp` (by 0.2 ms).
+- **BPM never changes on a track that was right.** Every BPM change beyond 0.01 is on a track that was already wrong by more than 0.1 (test ids 6, 12, 36, 144, 246, 402, 405, 501, 507, 522, 528; train 13, 265, 503), and none of them becomes right.
+- Least squares over model peaks is worse than the comb (raw tempo error 3.3 vs 2.4 ms median on train, 3.6 vs 2.3 on dev): the per-beat peaks are noisier than the activation-weighted comb. The segment fit is no better either.
+- `comb-logit` is the only consistent raw improvement (unsnapped tempo error median 2.4 -> 1.7 ms train, 2.3 -> 1.8 ms dev), but after the integer snap it changes no grid result on dev, train or test, so it is not worth a switch.
+- The remaining drift tracks are model-side: every variant lands on the same tempo for ids 25, 470, 492, 516 (within 0.002 BPM), so the model's beats themselves drift against Rekordbox there. Fixing them would mean overriding the model with a snap rule, and two train tracks are too few to tune one.
+
+**Decision.** Nothing committed to the fit; this section only. The variant code and the re-fit harness (`examples/grid_refit.rs`, a `fit_track_with(.., TempoRefine)` entry point, `r77-refit.sh`, `r77-compare.py`, `r77-tempo-error.py`) are kept as a patch in `benchmark/results/r77/r77-variants.patch` (gitignored, on `dev`). The 74 new train dumps are in `benchmark/results/r77/dump-train` (logits for later fit work, same format as `o3/dump`).
+
+Reproduce (after `git apply benchmark/results/r77/r77-variants.patch`):
+
+```bash
+cargo build --release -p fourfour-analysis-rs --example grid_refit --example grid_offset
+R=benchmark/results/r77
+FOURFOUR_MODELS_DIR=~/.cache/fourfour-models target/release/examples/grid_offset run benchmark/results/o3/ref.json $R/train-ids.txt $R/dump-train 3
+R77_WORKERS=4 benchmark/scripts/r77-refit.sh dev benchmark/results/o3/dump $R/dev-ids.txt comb lsq-robust comb-logit comb-sharp segment "comb nosnap"
+R77_WORKERS=4 benchmark/scripts/r77-refit.sh train $R/dump-train $R/train-ids.txt comb lsq lsq-robust lsq-weighted comb-logit comb-sharp segment
+python3 -I benchmark/scripts/r77-tempo-error.py benchmark/results/o3/ref.json $R/train-comb_nosnap.jsonl $R/train-comb-logit_nosnap.jsonl
+```
+
+## R79: BPM misses (branch `r79-bpm-misses`, not landed)
+
+**Question.** What are the BPM misses (not within 0.1 of Rekordbox's master.db BPM) and can one rule fix some without losing right tracks?
+
+**Data.** Re-fits of stored logits, same harness and time base as R77. Dev 49 (`o3/dump`), train 74 (`r77/dump-train`), plus 55 new train tracks dumped for this task ("train2", same rule id % 3 != 0 and id % 12 != 4, stopped at the timebox; logits in `benchmark/results/r79/dump-train2`, gitignored). Test 205 scored once at the end. Caveat: the R77 test JSONL (miss list only) was looked at before developing; the rule was chosen and fixed on dev + train.
+
+### Miss classes (dev + train, old rules)
+
+| Class | Count | Ids |
+|---|---:|---|
+| Rekordbox reference is a dynamic grid, our constant BPM equals Rekordbox's own grid tempo (median beat tempo), master.db BPM differs | 4 | dev 460, 580; train 365, 503 |
+| Dynamic grid, genuinely variable or multi-tempo music (live drums, tempo sections), no constant BPM fits | 9 | dev 196; train 13, 152, 265, 529; train2 41, 248, 259, 262 |
+| Constant reference, fit stuck on a local comb maximum 0.75 to 2% from the tempo the model's beat activation actually prefers | 3 | train2 5 (147.37 vs 146), 118 (133 vs 132), 511 (116.36 vs 114) |
+| Constant reference, near-miss where the model's beats really sit at a different tempo (comb at the reference tempo scores lower) | 1 | train2 482 (79.22 vs 80.19) |
+| Octave x2 / x0.5, x3/2, x2/3, wrong decode or time base | 0 | |
+
+- **master.db BPM is quantized on dynamic tracks.** On 28 of 40 dynamic reference grids in `ref.json` the master.db BPM is exactly 60000 / (a multiple of 10 ms), e.g. 111.11, 120.00, 122.45, 130.43, 133.33, 139.53; on constant grids that happens only by chance (51 of 603). So for dynamic tracks master.db stores a coarse beat period, up to about +-1.2 BPM off Rekordbox's own grid. Scoring those against the grid's median tempo instead: dev 48/49, train 70/74 (old rules).
+- Octave errors exist on test (240, 423 are x0.5) but none on 178 non-test tracks, so no octave rule was developed.
+
+### What was tried
+
+The coarse estimate (IBI mode, then a line fit over model peaks) is often 0.3 to 0.6% off; the comb scan only covers +-0.3% around it, and the integer snap (+-1.5 BPM) rescues it only for integer tempos (e.g. dev 184 / train 134 leave the scan at its edge and snap to 128). Rules, all after the existing scan:
+
+| Rule | Dev / train / train2 BPM 0.1 | Result |
+|---|---|---|
+| Wider comb scan (`scan_pct` 0.6 / 1.0 instead of 0.3) | no gain; train 152 moves on the grid-median metric only | fit time 1.9x / 3.2x; dropped |
+| Integer snap with a full-beat phase search when the +-15 ms one fails | train2 gains 5 but puts its grid a half beat off; 511 moves to 116 (still wrong) | dropped |
+| **Global fold peak** (`TempoSearch::LineAndGlobalPeak`): fold the beat activation modulo each period within +-4% of the scan result (relative step 1e-4, 4 ms bins, 20 ms window), take the best period, run the normal scan + refine there too, keep whichever has the higher comb score | gains 5, 118, 511, loses none | **kept** |
+
+The global peak only replaces the near result when its comb score is higher, so it can only move a fit to a better comb optimum of the same objective. Range sensitivity: 2.5% gives the same gains; 8% sends 511 to 122 (wrong, no loss on a right track), so 4% is in the safe part.
+
+### Results (old -> new, Rekordbox master.db BPM, grid = every Rekordbox beat within +-20 ms)
+
+| Split | BPM within 0.1 | Grid within 20 ms | Fit ms, median (box at load 15 to 30) |
+|---|---:|---:|---:|
+| Dev (49) | 46 -> 46 | 44 -> 44 | 213 -> 382 |
+| Train (74) | 68 -> 68 | 59 -> 59 | 237 -> 372 |
+| Train2 (55) | 47 -> **50** | 44 -> **45** | 224 -> 391 |
+| Test (205, scored once) | 180 -> **186** | 167 -> **171** | 247 -> 659 (load 31 during this run) |
+
+- **Gained:** train2 5, 118 (also grid: 225 -> 0.6 ms), 511; test 144, 264 (also grid), 378, 501 (also grid), 507 (also grid), 528 (also grid).
+- **Lost:** none on any split, BPM or grid.
+- **Changed but wrong before and after:** train 13, 152; train2 248; test 6, 12, 36, 168, 246, 255, 402, 411. Every other track is unchanged (BPM within 1e-6, median offset and max deviation within 0.5 ms).
+- Gains 5, 511 and test 144, 378 get the right BPM with the grid a fraction of a beat off Rekordbox's (median -200 / +254 / -178 / +112 ms): the model's beat activation peaks there, so the phase is model-side.
+- Fit cost is about +150 ms per track (the fold over +-4%), against roughly 95 s of decode + model per track on this box.
+
+**Decision.** Committed behind `fit::TEMPO_SEARCH` (`TempoSearch::LineAndGlobalPeak`, default ON, `GLOBAL_SEARCH_PCT = 4.0`); `TempoSearch::NearLine` is the old behaviour. Unit test `global_peak_finds_the_tempo_outside_the_near_scan`.
+
+Reproduce:
+
+```bash
+cargo build --release -p fourfour-analysis-rs --example grid_refit --example grid_offset
+FOURFOUR_MODELS_DIR=~/.cache/fourfour-models target/release/examples/grid_offset run benchmark/results/o3/ref.json benchmark/results/r79/train2-ids.txt benchmark/results/r79/dump-train2 4
+GRID_REFIT=target/release/examples/grid_refit benchmark/scripts/r79-sweep.sh
+GRID_REFIT=target/release/examples/grid_refit R79_SPLITS=test benchmark/scripts/r79-sweep.sh
+python3 -I benchmark/scripts/r79-classify.py benchmark/results/o3/ref.json benchmark/results/r79/train2-old.jsonl
+python3 -I benchmark/scripts/r79-comb-at.py benchmark/results/r79/dump-train2 benchmark/results/o3/ref.json 5:147.373 511:116.363
+```
