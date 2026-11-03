@@ -82,7 +82,7 @@ const peakLoadInflight = new Map<number, Promise<void>>();
 export function bumpLibraryTracks(changedIds: Iterable<number>) {
   const ids = [...changedIds];
   copyRowFieldsToPlainTracks(ids);
-  if (haystackById) refreshHaystacks(ids);
+  if (haystackList) refreshHaystacks(ids);
   const previous = trackList;
   trackList = trackList.slice();
   recordTrackListBump(previous, trackList, ids);
@@ -487,7 +487,7 @@ export const library = $state({
 
 const haystackCache = new WeakMap<object, string[]>();
 
-let haystackById: Map<number, string> | null = null;
+let haystackList: string[] | null = null;
 let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
@@ -498,31 +498,29 @@ const WARMUP_IDLE_RESERVE_MS = 2;
 const WARMUP_DELAY_MS = 250;
 
 function resetSearchIndex() {
-  haystackById = null;
+  haystackList = null;
   haystackCursor = 0;
   warmupGeneration++;
 }
 
 function fillSearchIndex(limit: number) {
-  if (!haystackById) haystackById = new Map();
+  if (!haystackList) haystackList = [];
   const end = Math.min(plainTracks.length, haystackCursor + limit);
-  for (; haystackCursor < end; haystackCursor++) {
-    const t = plainTracks[haystackCursor];
-    haystackById.set(t.id as number, trackHaystack(t));
-  }
+  for (; haystackCursor < end; haystackCursor++) haystackList.push(trackHaystack(plainTracks[haystackCursor]));
 }
 
 function refreshHaystacks(ids: number[]) {
   for (const id of ids) {
-    if (!haystackById!.has(id)) continue;
-    const plain = plainTracks[trackIndexById(id)];
-    if (plain?.id === id) haystackById!.set(id, trackHaystack(plain));
+    const index = trackIndexById(id);
+    if (index < 0 || index >= haystackCursor) continue;
+    const plain = plainTracks[index];
+    if (plain?.id === id) haystackList![index] = trackHaystack(plain);
   }
 }
 
-function haystackByIdFor(): Map<number, string> {
+function haystackListFor(): string[] {
   fillSearchIndex(plainTracks.length);
-  return haystackById!;
+  return haystackList!;
 }
 
 function whenIdle(run: (deadline?: IdleDeadline) => void) {
@@ -586,9 +584,14 @@ function trackHaystack(track: Record<string, unknown>): string {
 function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] {
   let haystacks = haystackCache.get(tracks);
   if (!haystacks) {
-    const byId = haystackByIdFor();
-    const source = tracks === library.tracks ? plainTracks : tracks;
-    haystacks = source.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
+    const list = haystackListFor();
+    haystacks =
+      tracks === library.tracks
+        ? list
+        : tracks.map((t) => {
+            const index = trackIndexById(t.id as number);
+            return index >= 0 && plainTracks[index].id === t.id ? list[index] : trackHaystack(t);
+          });
     haystackCache.set(tracks, haystacks);
   }
   return haystacks;
