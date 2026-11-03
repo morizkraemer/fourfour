@@ -27,6 +27,7 @@ mod self_check;
 mod tempo;
 mod track_fields;
 mod track_infos;
+mod stick_busy;
 mod stick_commands;
 mod volumes;
 mod waveform_detail;
@@ -504,16 +505,18 @@ async fn analyze_track_ids(
 /// Only tracks that have been analyzed are included because the writer
 /// requires an `AnalysisResult` for every track. Unchanged tracks are
 /// skipped (no audio re-copy), and removed tracks are cleaned up.
-#[tauri::command]
+#[tauri::command(async)]
 fn write_usb(
     output_dir: String,
     playlists: Vec<PlaylistInput>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, stick_busy::BusySticks>,
 ) -> Result<models::SyncReport, CommandError> {
     debug_info(&app, &format!("USB sync → {output_dir}"));
 
     let out = Path::new(&output_dir);
+    let _busy = busy.acquire(out)?;
     volumes::require_removable_volume(out)?;
 
     sync_playlists_to_library(&*state.lock().map_err(|e| e.to_string())?, &playlists)?;
@@ -556,9 +559,12 @@ async fn sync_usb_many(
     targets: Vec<pioneer_library::SyncTarget>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, stick_busy::BusySticks>,
 ) -> Result<Vec<stick_commands::StickReportWire>, CommandError> {
     let shared: SharedLibrary = state.inner().clone();
+    let guards = busy.acquire_all(targets.iter().map(|target| target.volume.as_path()))?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guards = guards;
         for target in &targets {
             volumes::require_removable_volume(&target.volume)?;
         }
@@ -680,7 +686,8 @@ fn eject_failure(stderr: &str) -> CommandError {
 
 /// Eject a mounted volume (macOS: `diskutil eject`, Linux: `udisksctl unmount`, falling back to `umount`).
 #[tauri::command(async)]
-fn eject_volume(path: String) -> Result<(), CommandError> {
+fn eject_volume(path: String, busy: State<'_, stick_busy::BusySticks>) -> Result<(), CommandError> {
+    let _busy = busy.acquire(Path::new(&path))?;
     #[cfg(target_os = "macos")]
     {
         let output = std::process::Command::new("diskutil")
@@ -732,9 +739,10 @@ fn eject_volume(path: String) -> Result<(), CommandError> {
 }
 
 /// Wipe all Pioneer data from a USB drive (removes PIONEER/ and Contents/ directories).
-#[tauri::command]
-fn wipe_usb(path: String) -> Result<(), CommandError> {
+#[tauri::command(async)]
+fn wipe_usb(path: String, busy: State<'_, stick_busy::BusySticks>) -> Result<(), CommandError> {
     let usb = std::path::Path::new(&path);
+    let _busy = busy.acquire(usb)?;
     if !usb.is_dir() {
         return Err(CommandError::new(ErrorKind::DriveGone, "Not a valid directory").with_path(usb));
     }
@@ -1551,6 +1559,7 @@ fn main() {
                 }
             }
             app.manage(Arc::new(ImportPlans::default()));
+            app.manage(stick_busy::BusySticks::default());
             app.manage(analysis_coordinator(app.handle()));
             app.manage(SharedArtworkThumbs::default());
             app.manage(Arc::new(waveform_detail::DetailWindows::default()));
@@ -1618,6 +1627,8 @@ mod tests {
                 "save_state",
                 "change_library_path",
                 "reset_library",
+                "write_usb",
+                "wipe_usb",
             ],
         );
         assert_off_main_thread(include_str!("backup_commands.rs"), &["read_backup"]);
