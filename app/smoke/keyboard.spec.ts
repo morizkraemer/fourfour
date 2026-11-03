@@ -36,6 +36,12 @@ async function tabTo(page: Page, matches: () => ReturnType<Page['locator']>) {
 }
 
 test.describe('library list', () => {
+  test('F6 skips the collapsed search field in a narrow window and still reaches the list', async ({ smoke: { page } }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await focusList(page);
+    await expect(list(page)).toBeFocused();
+  });
+
   test('F6 lands on the list, arrows move and select, Shift extends, Enter loads', async ({ smoke: { page } }) => {
     await focusList(page);
     await expect(list(page)).toHaveAttribute('aria-multiselectable', 'true');

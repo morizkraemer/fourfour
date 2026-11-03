@@ -345,7 +345,15 @@
   .ff-xp__collapse:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.06)); color: var(--ff-text, #fff); }
 
   .ff-xp__wave { flex: 1; min-height: 0; position: relative; }
-  .ff-xp__wave:focus-visible { outline: 2px solid var(--ff-accent); outline-offset: -2px; }
+  .ff-xp__wave:focus-visible { outline: none; }
+  .ff-xp__wave:focus-visible::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    border: 2px solid var(--ff-accent);
+    pointer-events: none;
+  }
 
   .ff-xp__transport {
     display: flex; align-items: center; justify-content: flex-start;
