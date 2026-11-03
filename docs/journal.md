@@ -541,3 +541,4 @@
 2026-11-03 01:40 orchestrator r77-grid-drift landed doc-only (684f71b): six tempo refinements, none gains on dev/train/test; drift class now 2 test tracks (492, 516), cause in model beats; patch + 74 train dumps kept in benchmark/results/r77
 2026-11-03 01:45 orchestrator - decided: own prio r79-bpm-misses (opus medium; classify BPM misses on dev+train, try a tempo/octave rule, parked behind a switch)
 2026-11-03 02:30 orchestrator r78-a11y-followups handed back 1847c23 (rating Mod+0-5, waveform slider, Alt+arrow reorder, live region), parked under Waiting 34; one leaks.spec.ts:73 failure in its first full run, passed on rerun
+2026-11-03 02:35 orchestrator - decided: own prio r80-leaks-flake (sonnet medium; leaks.spec.ts:49/:73 fail under load now and then; smoke-only fix unless a real leak)
