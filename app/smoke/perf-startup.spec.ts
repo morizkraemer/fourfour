@@ -17,6 +17,7 @@ const BLOCK_FONTS = !!process.env.FF_PERF_BLOCK_FONTS;
 const NO_SNAPSHOT = !!process.env.FF_PERF_NO_SNAPSHOT;
 const PROFILE_OUT = process.env.FF_PERF_STARTUP_PROFILE;
 const PROFILE_FIRST = !!process.env.FF_PERF_STARTUP_PROFILE_FIRST;
+const SORT_KEY = process.env.FF_PERF_SORT;
 
 interface Boot {
   firstInvoke: number;
@@ -33,6 +34,7 @@ interface Boot {
   wireBytes: number;
   frameInteractive: number;
   longestFrame: number;
+  heapMB: number;
 }
 
 interface Probe {
@@ -133,15 +135,29 @@ async function newContext(browser: Browser, payloadUrl: string, backendMs: numbe
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, storageState });
   if (BLOCK_FONTS) await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
   if (NO_SNAPSHOT) await context.addInitScript(() => localStorage.removeItem('fourfour.bootSnapshot.v1'));
+  if (SORT_KEY) {
+    await context.addInitScript((sortKey) => {
+      localStorage.setItem('fourfour.tableColumns.v3', JSON.stringify({ layouts: { library: { columns: [], sortKey, sortDir: 'asc' } } }));
+    }, SORT_KEY);
+  }
   await context.addInitScript(installTauriMock, { tracks: [], playlists: [] });
   await context.addInitScript(installProbes, { payloadUrl, backendMs });
   return context;
 }
 
+async function heapAfterGc(page: Page): Promise<number> {
+  if (page.context().browser()?.browserType().name() !== 'chromium') return 0;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const { usedSize } = (await cdp.send('Runtime.getHeapUsage')) as { usedSize: number };
+  await cdp.detach();
+  return usedSize / 1048576;
+}
+
 async function bootMetrics(page: Page): Promise<Boot> {
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
   await page.waitForTimeout(2500);
-  return page.evaluate(() => {
+  const metrics = await page.evaluate(() => {
     const b = (window as unknown as { __boot: Probe }).__boot;
     const tasks = b.longTasks;
     const lastEnd = tasks.reduce((end, t) => Math.max(end, t.start + t.duration), 0);
@@ -161,8 +177,10 @@ async function bootMetrics(page: Page): Promise<Boot> {
       wireBytes: b.wireBytes,
       frameInteractive: b.frameInteractive,
       longestFrame: b.longestFrame,
+      heapMB: 0,
     };
   });
+  return { ...metrics, heapMB: await heapAfterGc(page) };
 }
 
 interface InspectorSession {

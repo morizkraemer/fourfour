@@ -167,10 +167,11 @@ export function syncTrackFavoriteFields() {
   const lowest = lowestFavoriteSlots(library.playlists);
   library.tracks.forEach((track, i) => {
     const fav = lowest.get(track.id);
-    if (track.fav === fav) return;
-    track.fav = fav;
     const plain = plainTracks[i];
-    if (plain?.id === track.id) plain.fav = fav;
+    const hasPlain = plain?.id === track.id;
+    if (hasPlain ? plain.fav === fav : track.fav === fav) return;
+    track.fav = fav;
+    if (hasPlain) plain.fav = fav;
   });
 }
 
@@ -309,9 +310,17 @@ function rowStateOf(track: TrackRow): TrackRow {
   return state;
 }
 
+const rowPlainObject = Symbol('rowPlainObject');
+
+/** The plain object behind a library row (its own fields as of the last `bumpLibraryTracks`), or the row itself. */
+export function plainRowOf<T extends object>(row: T): T {
+  return (row as Record<symbol, T>)[rowPlainObject] ?? row;
+}
+
 const trackRowHandler: ProxyHandler<TrackRow> = {
   get(track, key, receiver) {
     if (key === 'id') return track.id;
+    if (key === rowPlainObject) return track;
     const view = typeof key === 'string' ? TRACK_VIEW_FIELDS[key] : undefined;
     return view ? view(receiver) : Reflect.get(rowStateOf(track), key, receiver);
   },
@@ -676,7 +685,7 @@ export function tracksForSidebarSource(source: string | null | undefined) {
     return library.tracks;
   }
   if (active === 'Recently Added') {
-    return library.tracks.filter((t) => t.raw?.tempo > 0);
+    return library.tracks.filter((_, i) => plainTracks[i]?.raw?.tempo > 0);
   }
   if (library.volumes.includes(active)) {
     return library.usbTracks;

@@ -53,7 +53,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
-import { bumpLibraryTracks, filterTracks, importFiles, library, loadState, markCoversStored, requestRowPreviews } from './library.svelte.ts';
+import { bumpLibraryTracks, filterTracks, importFiles, library, loadState, markCoversStored, requestRowPreviews, tracksForSidebarSource } from './library.svelte.ts';
 import { fileStatus } from './file-status.svelte.ts';
 import { sortTracks, setSort, clearSort } from './table-columns.svelte.ts';
 import { bootRowOf } from './boot-snapshot.ts';
@@ -150,5 +150,15 @@ describe('library track rows', () => {
     await settle();
     expect(title.values).toEqual(['Alpha', 'Held']);
     title.stop();
+  });
+
+  it('lists the analysed rows for Recently Added and sorts them from the plain objects', () => {
+    expect(tracksForSidebarSource('Recently Added').map((t) => t.id)).toEqual([1, 2, 3]);
+    setSort('library', 'artist');
+    expect(sortTracks(library.tracks, 'library').map((t) => t.id)).toEqual([1, 2, 3]);
+    row(2).artist = 'Zed';
+    bumpLibraryTracks([2]);
+    expect(sortTracks(library.tracks, 'library').map((t) => t.id)).toEqual([1, 3, 2]);
+    clearSort('library');
   });
 });
