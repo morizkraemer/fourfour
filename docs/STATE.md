@@ -72,7 +72,6 @@ Mac: ov-1028 installed in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
 
 ## Rundown
-Run 2026-10-30 to 11-02 on ov-1028 (checks green, 113 smoke): Mac analysis on CoreML 2-3x faster with identical grids; 50k startup 2.2 -> 1.35 s warm; WebKit stall fixed (font preload); Linux RSS after analysis 2.1 -> 0.3-0.4 GB; long mixes -1.2 GB; logs + early crash log; beta library fixture; licence notices generator; smoke robust under load.
-Found 2026-11-02: Mac 450-500 ms freezes every 5 s = USB volume poll on the main thread (fix r67 landed, Mac check pending). Analysis peak RSS = 14 parallel model chunks (~5.6 GB); ceiling knob landed, default off, Mac sweep picks it.
-Mac numbers (2026-11-01): 10k warm first row 1.6-1.9 s, scroll during analysis p95 18 ms.
-Waiting on Merlin: land parked-all-v7 (33-38, 31, 34 follow-ups, 40, 41 + 38 no-Python), CI push r63-ci (15), docs draft (39), schema bump (31), key licence (4), bar-1 listen (16), bundle id (24). Next Mac night needs a go: perf-night, chunk-budget sweep, r67 freeze check.
+Run 2026-10-30 to 11-03 on ov-1028 (checks green, Chromium + WebKit smoke): Mac analysis on CoreML 2-3x faster, 50k startup 2.2 -> 1.35 s warm, Linux RSS after analysis 2.1 -> 0.3-0.4 GB, long mixes -1.2 GB, Tauri commands off the main thread (Mac 5 s freeze fix, saves ordered), smoke stable under load.
+Parked 2026-11-03 (all in parked-all-v7, preview :4211): schema v8 (50k library.db 7.5 GB -> 59 MB), BPM search (test 180 -> 186/205), keyboard rating/seek/reorder, recovery by error kind, stick busy guard. Tried and dropped: grid drift refinements (r77, no gain).
+Waiting on Merlin: land parked-all-v7, CI push r63-ci (15), docs draft (39), key licence (4), bar-1 listen (16), bundle id (24), a11y taste calls (34). Next Mac night needs a go: perf-night, chunk-budget sweep, r67 freeze check.
