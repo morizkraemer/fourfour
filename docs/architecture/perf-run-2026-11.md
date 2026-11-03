@@ -1359,3 +1359,14 @@ Run at 22:41-23:00 with Merlin using the Mac (load 9-11). The 25k and 50k fixtur
 | Import, 50k end to end | - | 2.7 s |
 
 The 50k Mac numbers match R22's box numbers; warm first row is 1.0-1.5 s against the 1.0 s target, so the 50k Mac targets are within 5-50%.
+
+## R93 chunk ceiling default (2026-11-03, `r93-chunk-ceiling`)
+
+`chunk_slots` now always applies a ceiling: 2048 MB when the beat model runs on CoreML (`beat_runtime() == "coreml"`), 4096 MB on rten and ort-cpu, as R89 recommended. `FOURFOUR_CHUNK_BUDGET_MB` still overrides it; the old `CHUNK_BUDGET_CEILING_MB` constant is gone. In `scripts/mac/chunk-budget-sweep.sh`, `unset` now means this runtime default; pass `1000000` for the old no-ceiling behaviour. The ceiling only changes how many chunks run at once, so results are bit-identical: `bench_analysis --dump` of 20 tracks (3 long mixes + 17 files over 2 MB of the 10k fixture, 16 threads, dev box, rten) is byte-identical before and after.
+
+| Dev box, rten, 20 tracks | before (no ceiling) | after (4096) |
+|---|---|---|
+| tracks/min | 25.1 | 23.7 |
+| peak RSS | 6.4 GB | 4.1 GB |
+
+The box was busy (load 27-37 from other workers), so the 5% speed gap is within noise (an earlier run at 8 threads, where 4096 does not bind, was 3.3 GB for both). Unit tests cover the runtime selection.

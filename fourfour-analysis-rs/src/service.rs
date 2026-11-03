@@ -90,18 +90,27 @@ const ANALYSIS_BASE_MB: f64 = 600.0;
 /// Activations of one beat-model chunk while it runs (rten builds a fresh buffer pool for every run).
 const CHUNK_ACTIVATION_MB: f64 = 400.0;
 
-pub const CHUNK_BUDGET_CEILING_MB: Option<u64> = None;
+const CHUNK_BUDGET_CEILING_COREML_MB: u64 = 2048;
+const CHUNK_BUDGET_CEILING_CPU_MB: u64 = 4096;
+
+fn default_chunk_budget_ceiling_mb(runtime: &str) -> u64 {
+    if runtime == "coreml" {
+        CHUNK_BUDGET_CEILING_COREML_MB
+    } else {
+        CHUNK_BUDGET_CEILING_CPU_MB
+    }
+}
 
 fn chunk_budget_ceiling_mb() -> Option<u64> {
     static CEILING: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     *CEILING.get_or_init(|| match std::env::var("FOURFOUR_CHUNK_BUDGET_MB") {
         Ok(v) => Some(v.trim().parse().unwrap_or_else(|_| panic!("FOURFOUR_CHUNK_BUDGET_MB must be a whole number of MB, got {v:?}"))),
-        Err(_) => CHUNK_BUDGET_CEILING_MB,
+        Err(_) => Some(default_chunk_budget_ceiling_mb(crate::bt::beat_runtime())),
     })
 }
 
 /// Beat-model chunks that may run at once: what fits into a quarter of the machine's memory, and into `mem_fraction`
-/// of what is available now, and under the optional chunk budget ceiling (`FOURFOUR_CHUNK_BUDGET_MB`). At least one,
+/// of what is available now, and under the chunk budget ceiling (2048 MB with CoreML, 4096 MB otherwise, `FOURFOUR_CHUNK_BUDGET_MB` overrides). At least one,
 /// at most `max_threads`.
 pub fn chunk_slots(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64) -> usize {
     chunk_slots_with_ceiling(max_threads, mem_fraction, total_mb, available_mb, chunk_budget_ceiling_mb())
@@ -468,11 +477,12 @@ mod tests {
 
     #[test]
     fn chunk_slots_fit_the_memory_budget_and_the_threads() {
-        assert_eq!(chunk_slots(7, 0.5, 8192.0, 4096.0), 3);
-        assert_eq!(chunk_slots(9, 0.5, 16384.0, 8192.0), 8);
-        assert_eq!(chunk_slots(15, 0.5, 65536.0, 32000.0), 15);
-        assert_eq!(chunk_slots(15, 0.5, 65536.0, 1500.0), 1);
-        assert_eq!(chunk_slots(1, 0.5, 65536.0, 32000.0), 1);
+        let chunk_slots_uncapped = |t, f, tot, av| chunk_slots_with_ceiling(t, f, tot, av, None);
+        assert_eq!(chunk_slots_uncapped(7, 0.5, 8192.0, 4096.0), 3);
+        assert_eq!(chunk_slots_uncapped(9, 0.5, 16384.0, 8192.0), 8);
+        assert_eq!(chunk_slots_uncapped(15, 0.5, 65536.0, 32000.0), 15);
+        assert_eq!(chunk_slots_uncapped(15, 0.5, 65536.0, 1500.0), 1);
+        assert_eq!(chunk_slots_uncapped(1, 0.5, 65536.0, 32000.0), 1);
     }
 
     #[test]
@@ -486,6 +496,15 @@ mod tests {
         assert_eq!(slots(Some(1_000_000)), 15);
         assert_eq!(chunk_slots_with_ceiling(7, 0.5, 8192.0, 4096.0, Some(4096)), 3);
         assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 1500.0, Some(4096)), 1);
+    }
+
+    #[test]
+    fn default_ceiling_is_2048_with_coreml_and_4096_elsewhere() {
+        assert_eq!(default_chunk_budget_ceiling_mb("coreml"), 2048);
+        assert_eq!(default_chunk_budget_ceiling_mb("rten"), 4096);
+        assert_eq!(default_chunk_budget_ceiling_mb("ort-cpu"), 4096);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("rten"))), 10);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("coreml"))), 5);
     }
 
     #[test]
