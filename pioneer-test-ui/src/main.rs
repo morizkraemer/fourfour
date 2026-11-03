@@ -131,10 +131,57 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
     if fill.0.swap(true, Ordering::AcqRel) {
         return;
     }
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
+        move_legacy_covers(&app, &library);
+        fill_pending_covers(&app, &library, &fill);
+    });
+}
+
+/// Moves the covers a v7 library kept in its database into the cover store, a batch at a time with the library
+/// lock let go in between. Stops (covers stay readable in the database) when the volume lacks the space or a
+/// batch fails; the next launch tries again.
+fn move_legacy_covers(app: &AppHandle, library: &SharedLibrary) {
+    let check = library
+        .lock()
+        .map_err(|e| e.to_string())
+        .and_then(|lib| lib.check_space_for_legacy_covers(&pioneer_library::statvfs_available_bytes).map_err(|e| format!("{e:#}")));
+    if let Err(e) = check {
+        debug_log(app, "error", &e);
+        return;
+    }
+    let started = std::time::Instant::now();
+    let mut moved = 0;
+    loop {
+        let step = library
+            .lock()
+            .map_err(|e| e.to_string())
+            .and_then(|lib| lib.move_legacy_covers(LEGACY_COVER_BATCH).map_err(|e| format!("{e:#}")));
+        match step {
+            Ok(step) => {
+                moved += step.moved;
+                if step.remaining == 0 {
+                    break;
+                }
+            }
+            Err(e) => {
+                debug_log(app, "error", &format!("Moving covers out of the library failed: {e}"));
+                return;
+            }
+        }
+    }
+    if moved > 0 {
+        debug_log(app, "info", &format!("Moved {moved} covers out of the library database in {:.1} s", started.elapsed().as_secs_f64()));
+    }
+}
+
+const LEGACY_COVER_BATCH: usize = 32;
+
+fn fill_pending_covers(app: &AppHandle, library: &SharedLibrary, fill: &CoverFill) {
+    use std::sync::atomic::Ordering;
+    loop {
         let mut unsent: Vec<u32> = Vec::new();
         let mut last_emit = std::time::Instant::now();
-        let result = import_plan::store_pending_covers(&library, None, &mut |ids| {
+        let result = import_plan::store_pending_covers(library, None, &mut |ids| {
             unsent.extend(ids);
             if last_emit.elapsed() >= COVER_EVENT_INTERVAL {
                 app.emit("import-covers", std::mem::take(&mut unsent)).ok();
@@ -146,14 +193,14 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
         }
         fill.0.store(false, Ordering::Release);
         if let Err(e) = result {
-            debug_log(&app, "error", &format!("Storing imported covers failed: {e}"));
+            debug_log(app, "error", &format!("Storing imported covers failed: {e}"));
             return;
         }
         let more = library.lock().ok().and_then(|lib| lib.pending_artwork(0, 1).ok()).is_some_and(|p| !p.is_empty());
         if !more || fill.0.swap(true, Ordering::AcqRel) {
             return;
         }
-    });
+    }
 }
 
 /// Removes staging folders a crashed run left in the ANLZ folders; on a thread of its own because it
@@ -1406,7 +1453,7 @@ fn reset_library(
     Ok(db_path.to_string_lossy().to_string())
 }
 
-/// Remove SQLite library files and the sibling `anlz/` analysis cache directory.
+/// Remove SQLite library files and the sibling `anlz/` analysis cache and `covers/` cover store directories.
 fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
     let base = db_path.to_string_lossy();
     for suffix in ["", "-wal", "-shm"] {
@@ -1418,10 +1465,11 @@ fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
     }
 
     if let Some(parent) = db_path.parent() {
-        let anlz = parent.join("anlz");
-        if anlz.exists() {
-            std::fs::remove_dir_all(&anlz)
-                .map_err(|e| CommandError::from_io(&e, format!("Failed to remove {}: {e}", anlz.display())).with_path(&anlz))?;
+        for folder in [parent.join("anlz"), pioneer_library::covers_dir_of(db_path)] {
+            if folder.exists() {
+                std::fs::remove_dir_all(&folder)
+                    .map_err(|e| CommandError::from_io(&e, format!("Failed to remove {}: {e}", folder.display())).with_path(&folder))?;
+            }
         }
     }
 

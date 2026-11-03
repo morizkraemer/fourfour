@@ -513,10 +513,7 @@ pub(crate) fn without_known_failures(
     coordinator: &AnalysisCoordinator,
     work: Vec<AnalysisWorkItem>,
 ) -> Result<(Vec<AnalysisWorkItem>, usize), String> {
-    coordinator
-        .failures()
-        .skip_known(work, |id| lib.get_track(id).is_ok_and(|track| track.is_some()))
-        .map_err(|e| e.to_string())
+    coordinator.failures().skip_known(lib, work)
 }
 
 pub(crate) fn merge_into_analysis_queue(
@@ -630,7 +627,7 @@ fn file_name_of(path: &Path) -> String {
     path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown").to_string()
 }
 
-fn log_unsaved_failures(sink: &Arc<dyn AnalysisSink>, saved: std::io::Result<()>) {
+fn log_unsaved_failures(sink: &Arc<dyn AnalysisSink>, saved: Result<(), String>) {
     if let Err(e) = saved {
         sink.log(LogLevel::Dim, format!("Analysis failures not saved: {e}"));
     }
@@ -652,7 +649,11 @@ fn record_outcome(
     }
     if let Err(message) = &outcome {
         if !message.starts_with(NOT_STORED) {
-            log_unsaved_failures(sink, coordinator.failures().record_failure(track_id, source_path, message));
+            let saved = shared
+                .lock()
+                .map_err(|e| e.to_string())
+                .and_then(|lib| coordinator.failures().record_failure(&lib, track_id, source_path, message));
+            log_unsaved_failures(sink, saved);
         }
     }
     let completed = coordinator.completed.fetch_add(1, Ordering::Relaxed) + 1;
@@ -673,7 +674,8 @@ fn record_outcome(
     });
     match stored {
         Ok((stored, held, detail)) => {
-            log_unsaved_failures(sink, coordinator.failures().record_success(track_id));
+            let saved = shared.lock().map_err(|e| e.to_string()).and_then(|lib| coordinator.failures().record_success(&lib, track_id));
+            log_unsaved_failures(sink, saved);
             sink.log(
                 LogLevel::Ok,
                 format!(
@@ -823,9 +825,7 @@ async fn run_now_lane(
             result
         }
     };
-    let recorded = record_outcome(&shared, &sink, &coordinator, track_id, &source_path, Stage::Whole, outcome);
-    log_unsaved_failures(&sink, coordinator.failures().flush());
-    recorded
+    record_outcome(&shared, &sink, &coordinator, track_id, &source_path, Stage::Whole, outcome)
 }
 
 /// Analyse `item` as fast as possible: now lane inside an active run, a run of its own otherwise.
@@ -938,7 +938,6 @@ async fn run_with_resolver(
     let _run_guard = RunGuard { coordinator: coordinator.clone() };
 
     let outcome = run_registered(shared, coordinator.clone(), sink.clone(), app_data_dir, resolve, initial_total).await;
-    log_unsaved_failures(&sink, coordinator.failures().flush());
     crate::heap::trim_after_analysis();
     if outcome.is_err() {
         sink.complete();
