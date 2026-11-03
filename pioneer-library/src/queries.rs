@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use pioneer_usb_writer::models::{Playlist, Track};
 
 use crate::schema::LEGACY_ARTWORK_TABLE;
-use crate::{AnalysisFailure, DuplicateCandidate, normalise_tag};
+use crate::{AnalysisFailure, DuplicateCandidate, file_name_key, normalise_tag, path_key};
 
 // ---------------------------------------------------------------------------
 // Track queries
@@ -17,11 +17,11 @@ pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
         "INSERT INTO tracks (
             source_path, usb_path, title, artist, album, genre, label, remixer,
             comment, year, disc_number, track_number, tempo, key, duration_secs,
-            sample_rate, bitrate, file_size, date_added, artist_key, title_key
+            sample_rate, bitrate, file_size, date_added, artist_key, title_key, path_key, file_name_key
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
             ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19, ?20, ?21
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
         )",
     )?
     .execute(params![
@@ -46,6 +46,8 @@ pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
             chrono::Utc::now().format("%Y-%m-%d").to_string(),
             normalise_tag(&track.artist),
             normalise_tag(&track.title),
+            path_key(&track.source_path),
+            file_name_key(&track.source_path),
         ])
     .context("Failed to insert track")?;
 
@@ -103,7 +105,7 @@ pub fn update_track(conn: &Connection, id: i64, track: &Track) -> Result<()> {
             genre = ?6, label = ?7, remixer = ?8, comment = ?9, year = ?10,
             disc_number = ?11, track_number = ?12, tempo = ?13, key = ?14,
             duration_secs = ?15, sample_rate = ?16, bitrate = ?17, file_size = ?18,
-            artist_key = ?20, title_key = ?21
+            artist_key = ?20, title_key = ?21, path_key = ?22, file_name_key = ?23
         WHERE id = ?19",
         params![
             track.source_path.to_string_lossy().as_ref(),
@@ -127,6 +129,8 @@ pub fn update_track(conn: &Connection, id: i64, track: &Track) -> Result<()> {
             id,
             normalise_tag(&track.artist),
             normalise_tag(&track.title),
+            path_key(&track.source_path),
+            file_name_key(&track.source_path),
         ],
     )?;
     Ok(())
@@ -163,10 +167,12 @@ fn row_to_duplicate_candidate(row: &rusqlite::Row) -> rusqlite::Result<Duplicate
         duration_secs: row.get(5)?,
         artist_key: row.get(6)?,
         title_key: row.get(7)?,
+        path_key: row.get(8)?,
+        file_name_key: row.get(9)?,
     })
 }
 
-const DUPLICATE_CANDIDATE_COLUMNS: &str = "id, source_path, file_size, artist, title, duration_secs, artist_key, title_key";
+const DUPLICATE_CANDIDATE_COLUMNS: &str = "id, source_path, file_size, artist, title, duration_secs, artist_key, title_key, path_key, file_name_key";
 
 pub fn select_duplicate_candidates(conn: &Connection) -> Result<Vec<DuplicateCandidate>> {
     let mut stmt = conn.prepare(&format!("SELECT {DUPLICATE_CANDIDATE_COLUMNS} FROM tracks ORDER BY id"))?;
@@ -194,8 +200,8 @@ pub fn select_track_files(conn: &Connection) -> Result<Vec<(i64, String, i64)>> 
 pub fn update_source_path(conn: &Connection, id: i64, source_path: &Path) -> Result<bool> {
     let changed = conn
         .execute(
-            "UPDATE tracks SET source_path = ?2 WHERE id = ?1",
-            params![id, source_path.to_string_lossy().as_ref()],
+            "UPDATE tracks SET source_path = ?2, path_key = ?3, file_name_key = ?4 WHERE id = ?1",
+            params![id, source_path.to_string_lossy().as_ref(), path_key(source_path), file_name_key(source_path)],
         )
         .with_context(|| format!("Failed to relink track {id} to {}", source_path.display()))?;
     Ok(changed > 0)

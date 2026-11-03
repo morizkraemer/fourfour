@@ -17,7 +17,7 @@ import {
 import { changeLibraryPath, loadState, readUsbState } from './tauri.svelte.ts';
 
 const WIRE_MESSAGES: Array<[string, string]> = [
-  ['library_newer_version', 'Couldn\'t open the library at /lib/library.db: The library was saved by a newer version of the app (schema version 99, this app knows up to 7); update the app to open it'],
+  ['library_newer_version', 'Couldn\'t open the library at /lib/library.db: The library was saved by a newer version of the app (schema version 99, this app knows up to 8); update the app to open it'],
   ['library_damaged', "Couldn't open the library at /lib/library.db: file is not a database"],
   ['library_locked', 'database is locked'],
   ['not_found', 'File not found: /music/a.mp3'],

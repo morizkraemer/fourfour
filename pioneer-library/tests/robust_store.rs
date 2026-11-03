@@ -5,7 +5,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use pioneer_library::failure::{LibraryFailure, classify};
-use pioneer_library::{normalise_tag, DuplicateCandidate, DuplicateIndex, FileStatus, LocalLibrary, file_status};
+use pioneer_library::{file_name_key, normalise_tag, path_key, DuplicateCandidate, DuplicateIndex, FileStatus, LocalLibrary, file_status};
 use pioneer_usb_writer::models::Track;
 
 fn track(path: &str) -> Track {
@@ -120,6 +120,8 @@ fn duplicate_detection_copes_with_odd_text() {
                 duration_secs: [f64::NAN, f64::INFINITY, -1.0, 0.0][i as usize % 4],
                 artist_key: normalise_tag(artist),
                 title_key: normalise_tag(title),
+                path_key: path_key(Path::new(&format!("/music/\u{1F525}{i}.wav"))),
+                file_name_key: file_name_key(Path::new(&format!("/music/\u{1F525}{i}.wav"))),
             }
         })
         .collect();
