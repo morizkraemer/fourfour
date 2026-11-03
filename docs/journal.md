@@ -548,3 +548,4 @@
 2026-11-03 05:20 orchestrator r79 branch: full workspace cargo test green (0 failed)
 2026-11-03 05:25 orchestrator - decided: own prio r82-r78-screens (sonnet medium; headless Chromium+WebKit screenshots of r78 focus ring/slider/rating/reorder, fix clear bugs on r82-r78-fix)
 2026-11-03 06:15 orchestrator r82 handed back: r82-r78-fix 788db39 (waveform focus ring under canvas, F6 skip hidden search at narrow width + smoke); 4 taste calls added to Waiting 34
+2026-11-03 07:40 orchestrator r81-schema-bump handed back 9faae58 (schema v8: folded keys, content-addressed cover store, failure table; 548 Rust tests, smoke green), parked under Waiting 31
