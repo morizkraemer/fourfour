@@ -62,7 +62,7 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- r89 Mac night 2 [running]; r90 phrase [parked, Waiting 42]; r91 key mode [dropped: no clean gain, doc on r91-key-mode 80f6a03]; r92 import cover skip [running]; r89 Mac night 2 [done, merging]; r93 chunk ceiling by runtime [running]
+- r89 Mac night 2 [running]; r90 phrase [parked, Waiting 42]; r91 key mode [dropped: no clean gain, doc on r91-key-mode 80f6a03]; r92 import cover skip [green, landing]; r94 smaller beat model [running]; r89 Mac night 2 [done, merging]; r93 chunk ceiling by runtime [running]
 - next: key mode (oracle mode +35 dev); import skip APIC covers; 50k startup (lazy rows, payload); LUFS/gain; energy 1-10 (Rust, no Lexicon); auto cues from phrases; BPM >1 misses; zoom first open; WebKit row cost; long-track RSS. Genre dropped: no labels/model
 
 ## Run
