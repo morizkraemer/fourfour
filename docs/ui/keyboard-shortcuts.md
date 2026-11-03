@@ -35,7 +35,21 @@ Rebinding: click the binding, press the keys. Esc cancels, Backspace clears. If 
 | Toggle organize drawer (right sidebar) | Shift+Tab |
 | Focus next / previous region | F6 / Shift+F6 |
 | Toggle favorite 1 to 9 on selection | 1 to 9 |
+| Rate selection 1 to 5 stars, 0 clears (focus in the track list, not in a stick view) | Mod+1 to Mod+5, Mod+0 |
 | Analyze selection, Sync stick, Toggle inspector, Show keyboard shortcuts | unassigned |
+
+## Keys inside a focused control
+
+These work only while that control itself has focus, so they never change the global keys.
+
+| Control | Keys |
+|---|---|
+| Waveform (compact and expanded player, `role="slider"`, "Playback position") | Left / Right: one beat (one second without a beat grid). Shift+Left / Shift+Right: four bars (ten seconds without a grid). Home / End: track start / end. Value text is `m:ss of m:ss`. |
+| Track list in a playlist (no sort active, no search filter) | Alt+Up / Alt+Down: move the selected tracks one row, saved like a drag reorder. The move is announced in the live region ("Moved X down, position 2 of 3", "Already at the top"). |
+
+Rating uses Mod+digit because the plain digits are already the favorite toggles (1 to 9), and Shift+digit and Alt+Shift+digit are the hot cues. Mod+1 to 5 is also what Rekordbox and most players use for stars. The rating keys are the same registry actions as everything else, so they can be rebound in Preferences; they only fire when the track list has focus and not in an input.
+
+The live region is one visually hidden `role="status"` element in `App.svelte`, driven by `announce()` in `stores/announce.svelte.ts`.
 
 ## Typing guard and accessibility
 

@@ -227,6 +227,20 @@
 }
 
 /* 3. Waveform (canvas drawn in WaveformView, mode="compact") */
+.ff-player-compact__waveform:focus-visible {
+  outline: none;
+}
+
+.ff-player-compact__waveform:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  border: 2px solid var(--ff-accent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .ff-player-compact__waveform {
   height: 46px;
   background-color: var(--ff-wave-bg);
