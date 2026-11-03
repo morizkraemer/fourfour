@@ -82,7 +82,7 @@ const peakLoadInflight = new Map<number, Promise<void>>();
 export function bumpLibraryTracks(changedIds: Iterable<number>) {
   const ids = [...changedIds];
   copyRowFieldsToPlainTracks(ids);
-  if (haystackById) refreshHaystacks(ids);
+  if (haystackList) refreshHaystacks(ids);
   const previous = trackList;
   trackList = trackList.slice();
   recordTrackListBump(previous, trackList, ids);
@@ -167,10 +167,11 @@ export function syncTrackFavoriteFields() {
   const lowest = lowestFavoriteSlots(library.playlists);
   library.tracks.forEach((track, i) => {
     const fav = lowest.get(track.id);
-    if (track.fav === fav) return;
-    track.fav = fav;
     const plain = plainTracks[i];
-    if (plain?.id === track.id) plain.fav = fav;
+    const hasPlain = plain?.id === track.id;
+    if (hasPlain ? plain.fav === fav : track.fav === fav) return;
+    track.fav = fav;
+    if (hasPlain) plain.fav = fav;
   });
 }
 
@@ -290,19 +291,66 @@ const TRACK_VIEW_FIELDS: Record<string, (row: TrackRow) => unknown> = Object.ass
   },
 });
 
+const rowStates = new WeakMap<TrackRow, TrackRow>();
+
+function createRowState(track: TrackRow): TrackRow {
+  const created = $derived.by(() => {
+    const row = $state(track);
+    return row;
+  });
+  return untrack(() => created);
+}
+
+function rowStateOf(track: TrackRow): TrackRow {
+  let state = rowStates.get(track);
+  if (!state) {
+    state = createRowState(track);
+    rowStates.set(track, state);
+  }
+  return state;
+}
+
+const rowPlainObject = Symbol('rowPlainObject');
+
+/** The plain object behind a library row (its own fields as of the last `bumpLibraryTracks`), or the row itself. */
+export function plainRowOf<T extends object>(row: T): T {
+  return (row as Record<symbol, T>)[rowPlainObject] ?? row;
+}
+
 const trackRowHandler: ProxyHandler<TrackRow> = {
-  get(row, key, receiver) {
+  get(track, key, receiver) {
+    if (key === 'id') return track.id;
+    if (key === rowPlainObject) return track;
     const view = typeof key === 'string' ? TRACK_VIEW_FIELDS[key] : undefined;
-    return view ? view(receiver) : Reflect.get(row, key, receiver);
+    return view ? view(receiver) : Reflect.get(rowStateOf(track), key, receiver);
   },
-  has(row, key) {
-    return key in TRACK_VIEW_FIELDS || Reflect.has(row, key);
+  has(track, key) {
+    return key in TRACK_VIEW_FIELDS || Reflect.has(rowStateOf(track), key);
+  },
+  set(track, key, value) {
+    return Reflect.set(rowStateOf(track), key, value);
+  },
+  defineProperty(track, key, descriptor) {
+    return Reflect.defineProperty(rowStateOf(track), key, descriptor);
+  },
+  deleteProperty(track, key) {
+    return Reflect.deleteProperty(rowStateOf(track), key);
+  },
+  ownKeys(track) {
+    return Reflect.ownKeys(rowStateOf(track));
+  },
+  getOwnPropertyDescriptor(track, key) {
+    return Reflect.getOwnPropertyDescriptor(rowStateOf(track), key);
   },
 };
 
+/**
+ * A row is its plain object behind a handler that creates the `$state` proxy on the first read or write of anything but
+ * `id`, so rows nobody has touched cost one `Proxy`. The proxy is created inside its own derived: a state created while
+ * an effect runs would not be tracked by that effect's first reads.
+ */
 function reactiveTrack<T extends object>(track: T): T {
-  const row = $state(track);
-  return new Proxy(row, trackRowHandler) as T;
+  return new Proxy(track, trackRowHandler as ProxyHandler<T>);
 }
 
 /**
@@ -439,7 +487,7 @@ export const library = $state({
 
 const haystackCache = new WeakMap<object, string[]>();
 
-let haystackById: Map<number, string> | null = null;
+let haystackList: string[] | null = null;
 let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
@@ -450,31 +498,29 @@ const WARMUP_IDLE_RESERVE_MS = 2;
 const WARMUP_DELAY_MS = 250;
 
 function resetSearchIndex() {
-  haystackById = null;
+  haystackList = null;
   haystackCursor = 0;
   warmupGeneration++;
 }
 
 function fillSearchIndex(limit: number) {
-  if (!haystackById) haystackById = new Map();
+  if (!haystackList) haystackList = [];
   const end = Math.min(plainTracks.length, haystackCursor + limit);
-  for (; haystackCursor < end; haystackCursor++) {
-    const t = plainTracks[haystackCursor];
-    haystackById.set(t.id as number, trackHaystack(t));
-  }
+  for (; haystackCursor < end; haystackCursor++) haystackList.push(trackHaystack(plainTracks[haystackCursor]));
 }
 
 function refreshHaystacks(ids: number[]) {
   for (const id of ids) {
-    if (!haystackById!.has(id)) continue;
-    const plain = plainTracks[trackIndexById(id)];
-    if (plain?.id === id) haystackById!.set(id, trackHaystack(plain));
+    const index = trackIndexById(id);
+    if (index < 0 || index >= haystackCursor) continue;
+    const plain = plainTracks[index];
+    if (plain?.id === id) haystackList![index] = trackHaystack(plain);
   }
 }
 
-function haystackByIdFor(): Map<number, string> {
+function haystackListFor(): string[] {
   fillSearchIndex(plainTracks.length);
-  return haystackById!;
+  return haystackList!;
 }
 
 function whenIdle(run: (deadline?: IdleDeadline) => void) {
@@ -538,9 +584,14 @@ function trackHaystack(track: Record<string, unknown>): string {
 function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] {
   let haystacks = haystackCache.get(tracks);
   if (!haystacks) {
-    const byId = haystackByIdFor();
-    const source = tracks === library.tracks ? plainTracks : tracks;
-    haystacks = source.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
+    const list = haystackListFor();
+    haystacks =
+      tracks === library.tracks
+        ? list
+        : tracks.map((t) => {
+            const index = trackIndexById(t.id as number);
+            return index >= 0 && plainTracks[index].id === t.id ? list[index] : trackHaystack(t);
+          });
     haystackCache.set(tracks, haystacks);
   }
   return haystacks;
@@ -637,7 +688,7 @@ export function tracksForSidebarSource(source: string | null | undefined) {
     return library.tracks;
   }
   if (active === 'Recently Added') {
-    return library.tracks.filter((t) => t.raw?.tempo > 0);
+    return library.tracks.filter((_, i) => plainTracks[i]?.raw?.tempo > 0);
   }
   if (library.volumes.includes(active)) {
     return library.usbTracks;

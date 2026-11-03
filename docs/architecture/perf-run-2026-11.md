@@ -1370,3 +1370,44 @@ The 50k Mac numbers match R22's box numbers; warm first row is 1.0-1.5 s against
 | peak RSS | 6.4 GB | 4.1 GB |
 
 The box was busy (load 27-37 from other workers), so the 5% speed gap is within noise (an earlier run at 8 threads, where 4096 does not bind, was 3.3 GB for both). Unit tests cover the runtime selection.
+## R95 50k startup (2026-11-03, `r95-50k-startup`)
+
+Branch `r95-50k-startup` from `r89-mac-night-2`. Linux `dev` box, headless Chromium and Playwright WebKit, `perf-startup.spec.ts` on the real 10k and 50k fixture payloads (`bench_startup dump`, column table, 1.7 and 8.4 MB), backend time simulated as 118 / 450 ms. Box load 25-57 the whole time (other workers), so absolute times are 1.5-2x the quiet-box ones in R22; every number below comes from a base run and a new run back to back (base = the same probe against `r89-mac-night-2`'s library store).
+
+**Where the 50k time went** (CPU profile of the unminified build, warm, answer to first real row, about 290 ms at load 34): the `$state` row proxies were the biggest piece of the frontend share. Timed inside the map loop: mapping the 50k plain objects 100-150 ms, creating their `$state` proxies 150-265 ms (each proxy allocates a handler with about nine closures, two maps and a source; they are what the 50 ms GC pauses collect). After that came the first render (rows, sidebar), the search warmup (`trackHaystack`, `fillSearchIndex`, `text`, about 300 ms of CPU spread over 1.2 s, no long task but heavy GC) and decode (30-45 ms).
+
+**Changed** (`app/src/stores/library.svelte.ts`, `table-columns.svelte.ts`; no markup, no CSS, same rows, columns, order and search results)
+
+- **Row state proxies are created on first touch.** A row is now its plain object behind one shared handler; the `$state` proxy for it is created the first time anything but `id` is read or written (`rowStateOf`), and every trap forwards to it. Reads of `id` (the `find`/`trackIndexById` loops) never create one. The proxy is created inside its own derived: `$state` created while an effect runs is registered as "created in this reaction" and that effect would not track its first reads (`library-rows.test.ts` "follows a field write on that row only" fails without the derived). Per-row reactivity, identity in other state, `'bands' in row`, `bumpLibraryTracks(ids)` and the derived fields are unchanged (`library-rows.test.ts`, 911 tests).
+- **Sorting, favourites and Recently Added read the plain objects.** With a saved sort, the first sort read every row's sort key through its proxy, which now would create all 50k states. `sortValue` reads `plainRowOf(row)` (the plain object, kept current by `bumpLibraryTracks`, which is also what invalidates the sort cache) and falls back to the row for derived fields (`status`, `cover`); `syncTrackFavoriteFields` compares against the plain object; the Recently Added filter reads `raw.tempo` from the plain objects (it also no longer makes the filter depend on 50k `raw` signals).
+- **Search text is a list aligned with the plain tracks** instead of a `Map` by id plus a second 50k-element copy: same strings, same refresh on bump, 15-25% less CPU for the build in a microbench (min of 10, `process.cpuUsage`, 50k real rows) and less GC.
+- `perf-startup.spec.ts`: reports `heapMB` (after a forced GC), `cpuMs` (main-thread `ThreadTime` from navigation start to 2.5 s after the first row, Chromium, first launch and cold only: a reload gets a new thread, so warm reads negative and is not printed as a result) and `FF_PERF_SORT=<column>` to boot with a saved sort.
+
+**Before / after** (median of the interleaved pairs; "answer to first row" = `firstRealRow - loadAnswered`, the part the frontend owns; 7-8 pairs each, load 25-57)
+
+| Tracks | Case | Answer to first row base / new | New faster in |
+|---|---|---:|---:|
+| 10k | first launch | 388 / 272 ms | 7 of 7 pairs |
+| 10k | cold | 388 / 366 ms | 7 of 7 (median pair -95 ms) |
+| 10k | warm | 388 / 265 ms | 7 of 7 |
+| 50k | first launch | 785 / 629 ms | 6 of 8 (median pair -206 ms) |
+| 50k | cold | 586 / 357 ms | 7 of 8 (median pair -212 ms) |
+| 50k | warm | 540 / 358 ms | 5 of 8 (median pair -79 ms) |
+
+| Tracks | JS heap after boot, forced GC (base / new) | Main-thread CPU, boot to 2.5 s after the first row (first launch, cold) |
+|---|---:|---:|
+| 10k | 20.2 / 15.3 MB | 830-868 / 795-820 ms |
+| 50k | 72.6 / 48.8 MB | 1,476-1,541 / 1,414-1,507 ms |
+
+Absolute first row and interactive were 1.1-1.9 s (10k) and 1.5-2.5 s (50k) in these runs because of the load and move with it; do not compare them with R22's. Long-task numbers (`longestTask` 350-600 ms, `tbt`) did not change: the mount of the app shell (about 280 ms of the boot task at 50k, `TrackTable` skeleton rows 120 ms) and the first render after the answer are untouched by this change.
+
+Steady-state UI at 10k (`perf10k` `measure`, one base and one new run, load 41-52): sort by title script time 76 / 39 ms, by artist 103 / 41 ms (first sort now reads plain objects), scroll p95 58 / 36 ms, search first keystroke 157 / 103 ms, JS heap 21 / 16 MB; nothing slower beyond the noise.
+
+**Read with care.** Wall-clock pairs swing +-150 ms at this load (the 50k warm row won in 5 of 8 pairs only); the heap numbers are exact, the CPU numbers repeat within 2-3%, and the CPU gain (50-100 ms at 50k) is smaller than the wall gain because the proxy cost was largely GC. The real Mac app waits for the busy page main thread before it handles the `load_state` answer (R29), so the saved main-thread work should count there too; not measured (no Mac).
+
+**Looked at, not changed**
+
+- Search index build still costs about 300 ms CPU at 50k and runs after the first rows (8 ms slices, 250 ms delay). Deferring it to the first keystroke would put a 100-250 ms hitch on the first search; a 1.5 s start delay did not move `frameInteractive` in WebKit (the 200-400 ms gap after the first row there is the headless compositor idle gap of R29). Lowercasing per field with caches, one joined chunk string and the default string sort all measured no better than the current code.
+- Payload: at 50k file names (2.6 MB) and titles (1.6 MB) are 50% of the 8.4 MB; ids, dirs and folder parents are 0.8 MB and delta-coding them would save under 6%, about 6 ms of parse. Not done.
+- Backend `load_state` on the box at 50k is 450-470 ms (list query 300, `build_track_infos` 275 and JSON 160 overlap); on the Mac it is 60 ms, so it is not the Mac's cost. Not touched.
+- The app shell mount before the answer (about 280 ms in the profile) is visual/markup territory, not touched.

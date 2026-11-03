@@ -17,6 +17,7 @@ const BLOCK_FONTS = !!process.env.FF_PERF_BLOCK_FONTS;
 const NO_SNAPSHOT = !!process.env.FF_PERF_NO_SNAPSHOT;
 const PROFILE_OUT = process.env.FF_PERF_STARTUP_PROFILE;
 const PROFILE_FIRST = !!process.env.FF_PERF_STARTUP_PROFILE_FIRST;
+const SORT_KEY = process.env.FF_PERF_SORT;
 
 interface Boot {
   firstInvoke: number;
@@ -33,6 +34,8 @@ interface Boot {
   wireBytes: number;
   frameInteractive: number;
   longestFrame: number;
+  heapMB: number;
+  cpuMs: number;
 }
 
 interface Probe {
@@ -133,15 +136,44 @@ async function newContext(browser: Browser, payloadUrl: string, backendMs: numbe
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 }, storageState });
   if (BLOCK_FONTS) await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
   if (NO_SNAPSHOT) await context.addInitScript(() => localStorage.removeItem('fourfour.bootSnapshot.v1'));
+  if (SORT_KEY) {
+    await context.addInitScript((sortKey) => {
+      localStorage.setItem('fourfour.tableColumns.v3', JSON.stringify({ layouts: { library: { columns: [], sortKey, sortDir: 'asc' } } }));
+    }, SORT_KEY);
+  }
   await context.addInitScript(installTauriMock, { tracks: [], playlists: [] });
   await context.addInitScript(installProbes, { payloadUrl, backendMs });
   return context;
 }
 
-async function bootMetrics(page: Page): Promise<Boot> {
+const metricSessions = new WeakMap<Page, Awaited<ReturnType<BrowserContext['newCDPSession']>>>();
+
+async function mainThreadCpuMs(page: Page): Promise<number> {
+  if (page.context().browser()?.browserType().name() !== 'chromium') return 0;
+  let cdp = metricSessions.get(page);
+  if (!cdp) {
+    cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    metricSessions.set(page, cdp);
+  }
+  const { metrics } = (await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] };
+  return (metrics.find((m) => m.name === 'ThreadTime')?.value ?? 0) * 1000;
+}
+
+async function heapAfterGc(page: Page): Promise<number> {
+  if (page.context().browser()?.browserType().name() !== 'chromium') return 0;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const { usedSize } = (await cdp.send('Runtime.getHeapUsage')) as { usedSize: number };
+  await cdp.detach();
+  return usedSize / 1048576;
+}
+
+async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
   await page.waitForTimeout(2500);
-  return page.evaluate(() => {
+  const cpuMs = (await mainThreadCpuMs(page)) - cpuBase;
+  const metrics = await page.evaluate(() => {
     const b = (window as unknown as { __boot: Probe }).__boot;
     const tasks = b.longTasks;
     const lastEnd = tasks.reduce((end, t) => Math.max(end, t.start + t.duration), 0);
@@ -161,8 +193,11 @@ async function bootMetrics(page: Page): Promise<Boot> {
       wireBytes: b.wireBytes,
       frameInteractive: b.frameInteractive,
       longestFrame: b.longestFrame,
+      heapMB: 0,
+      cpuMs: 0,
     };
   });
+  return { ...metrics, cpuMs, heapMB: await heapAfterGc(page) };
 }
 
 interface InspectorSession {
@@ -236,8 +271,9 @@ test.describe('startup at scale', () => {
         const seed = await newContext(browser, url, backendMs);
         const seedPage = await seed.newPage();
         const profilingFirst = PROFILE_OUT && PROFILE_FIRST && run === RUNS - 1 ? await startProfile(seedPage) : null;
+        const seedBase = await mainThreadCpuMs(seedPage);
         await seedPage.goto('/');
-        first.push(await bootMetrics(seedPage));
+        first.push(await bootMetrics(seedPage, seedBase));
         if (profilingFirst) await stopProfile(profilingFirst, `${PROFILE_OUT}-${tracks}-first.cpuprofile`, seedPage);
         await seedPage.close();
         const saved = await seed.storageState();
@@ -245,11 +281,13 @@ test.describe('startup at scale', () => {
 
         const context = await newContext(browser, url, backendMs, saved);
         const page = await context.newPage();
+        const coldBase = await mainThreadCpuMs(page);
         await page.goto('/');
-        cold.push(await bootMetrics(page));
+        cold.push(await bootMetrics(page, coldBase));
         const profiling = PROFILE_OUT && !PROFILE_FIRST && run === RUNS - 1 ? await startProfile(page) : null;
+        const warmBase = await mainThreadCpuMs(page);
         await page.reload();
-        warm.push(await bootMetrics(page));
+        warm.push(await bootMetrics(page, warmBase));
         if (profiling) await stopProfile(profiling, `${PROFILE_OUT}-${tracks}.cpuprofile`, page);
         await context.close();
       }

@@ -15,7 +15,7 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, libraryRowsChangedSince, playlistByName } from './library.svelte.ts';
+import { library, libraryRowsChangedSince, plainRowOf, playlistByName } from './library.svelte.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
@@ -512,7 +512,8 @@ export function durationSeconds(time: string): number | null {
 }
 
 function sortValue(track: Record<string, unknown>, key: string): string | number | null {
-  const text = String(track[key] ?? '').trim();
+  const plain = plainRowOf(track);
+  const text = String((Object.hasOwn(plain, key) ? plain[key] : track[key]) ?? '').trim();
   if (isBlank(text)) return null;
   if (key === 'bpm') {
     const n = parseFloat(text);
