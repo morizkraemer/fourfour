@@ -571,3 +571,4 @@
 2026-11-03 22:30 orchestrator r93-chunk-ceiling handed back 322bafd (default ceiling 2048 CoreML / 4096 rten; box rten peak 6.4 -> 4.1 GB, byte-identical; CoreML only unit-tested; if CoreML falls back at runtime ceiling stays 2048); lands after r89 + r92. decided: own prio r95-50k-startup (sonnet high; no visual change)
 2026-11-03 23:40 orchestrator r89-mac-night-2 landed on ov-1028 030a2a4 (CHECKS-OK, both smokes 0 failed); merging r92 + r93
 2026-11-04 00:40 orchestrator r92 backed out of ov-1028 before landing: import robustness test 11 s -> 150-156 s with r92 (HANG once under load), bisected to r92; ov-1028 reset to 030a2a4 + r93 merge 0711fd4, checks running; spawned r92b-import-covers fix (sonnet medium). Note: 3 workers in flight briefly (r94, r95, r92b), over cap 2; no new spawns until one finishes
+2026-11-04 01:30 orchestrator r93-chunk-ceiling landed on ov-1028 0711fd4 (26 Rust suites ok, CHECKS-OK, both smokes 0 failed)
