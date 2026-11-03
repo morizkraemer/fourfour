@@ -59,6 +59,10 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q14 USB sync UI [waiting on Merlin] - round 3 mockups decide the rebuild; branch ui-sync-flow b510e70
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
+### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
+- r89 Mac night 2 [running]; r90 phrase detection vs Rekordbox PSSI (1455 ANLZ .EXT refs) [running]
+- next: key mode (oracle mode +35 dev); import skip APIC covers; 50k startup (lazy rows, payload); LUFS/gain; energy 1-10 (Rust, no Lexicon); auto cues from phrases; BPM >1 misses; zoom first open; WebKit row cost; long-track RSS. Genre dropped: no labels/model
+
 ## Run
 status: running since 2026-11-03 15:10 (Merlin go: Mac night 2 r89 + 2-week push on analysis quality and speed to 2026-11-16; identical-result speed wins land on ov-1028, result changes park with evals) · runs until Merlin says stop · holiday to 2026-11-16 · cap 2 · seat only · no reviews, take recs · green work lands on ov-1028 (+ Mac install); never master, never push · Mac only on Merlin's go (last 2026-11-01 21:42)
 targets: beta-ready on ov-1028, fastest at 10k+ (startup, analysis, track load, scroll); speed first, then beta
