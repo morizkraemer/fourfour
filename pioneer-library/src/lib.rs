@@ -40,7 +40,7 @@ pub use analysis_write::{AnalysisWrite, StagedAnalysis, remove_stale_staging};
 pub use cover_store::{COVERS_DIR, covers_dir_of};
 pub use schema::{SCHEMA_VERSION, TAG_FOLD_VERSION};
 use cover_store::CoverStore;
-pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
+pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag, file_name_key, path_key};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 use rekordbox::ImportedCue;
@@ -433,7 +433,7 @@ impl LocalLibrary {
     fn duplicates_after_path_change(&self, old: Option<Vec<DuplicateCandidate>>, new_paths: &HashMap<i64, PathBuf>) {
         self.duplicates_after(old, |candidate| {
             let path = new_paths.get(&(candidate.id as i64))?;
-            Some(DuplicateCandidate { source_path: PathBuf::from(path.to_string_lossy().into_owned()), ..candidate.clone() })
+            Some(candidate.clone().with_source_path(PathBuf::from(path.to_string_lossy().into_owned())))
         });
     }
 
@@ -1507,16 +1507,60 @@ mod tests {
     }
 
     #[test]
+    fn the_duplicate_index_reads_the_stored_path_and_file_name_keys() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { file_size: 500, ..make_track("A", "/Music/Ä/Song.MP3") }).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("/music/\u{e4}/song.mp3".to_string(), "song.mp3".to_string()));
+
+        lib.conn.execute("UPDATE tracks SET path_key = '/stored/path.mp3', file_name_key = 'stored.mp3' WHERE id = ?1", [id]).unwrap();
+        let probe = |path: &str, size: u64| Track { artist: "Other".into(), file_size: size, ..make_track("Different", path) };
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&probe("/Stored/Path.mp3", 1)).map(|hit| (hit.existing_id, hit.reason)), Some((id, DuplicateReason::SamePath)));
+        assert_eq!(index.find(&probe("/elsewhere/STORED.mp3", 500)).map(|hit| hit.reason), Some(DuplicateReason::SameFile));
+        assert_eq!(index.find(&probe("/Music/Ä/Song.MP3", 500)), None);
+
+        let moved = Track { source_path: PathBuf::from("/new/Place.mp3"), ..lib.get_track(id).unwrap().unwrap() };
+        lib.update_track(id, &moved).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("/new/place.mp3".to_string(), "place.mp3".to_string()), "an edit writes the keys again");
+    }
+
+    #[test]
+    fn relinking_a_track_writes_its_path_keys_and_moves_it_in_the_cached_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let new_path = dir.path().join("New Home.wav");
+        std::fs::write(&new_path, b"audio").unwrap();
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { file_size: 5, ..make_track("A", "/gone/Old.wav") }).unwrap();
+        assert!(lib.duplicate_index().unwrap().find(&make_track("Z", "/gone/old.wav")).is_some());
+        lib.relink_track(id, &new_path).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, (crate::path_key(&new_path), "new home.wav".to_string()));
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&make_track("Z", "/gone/old.wav")), None);
+        let hit = index.find(&Track { artist: "Other".into(), ..make_track("Z", &new_path.to_string_lossy()) });
+        assert_eq!(hit.map(|h| (h.existing_id, h.reason)), Some((id, DuplicateReason::SamePath)));
+        assert_eq!(lib.duplicate_candidate(id as u32).unwrap().unwrap().file_name_key, "new home.wav");
+    }
+
+    #[test]
     fn stored_keys_are_refilled_when_the_fold_version_changes() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("library.db");
         let lib = LocalLibrary::open(&db_path).unwrap();
         let id = lib.add_track(&Track { artist: "Ärtist".into(), ..make_track("Títle", "/music/a.mp3") }).unwrap();
         lib.conn
-            .execute_batch("UPDATE tracks SET artist_key = 'stale', title_key = 'stale'; UPDATE library_meta SET value = '0' WHERE name = 'tag_fold';")
+            .execute_batch("UPDATE tracks SET artist_key = 'stale', title_key = 'stale', path_key = 'stale', file_name_key = 'stale'; UPDATE library_meta SET value = '0' WHERE name = 'tag_fold';")
             .unwrap();
         drop(lib);
         let lib = LocalLibrary::open(&db_path).unwrap();
+        let path_keys: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(path_keys, ("/music/a.mp3".to_string(), "a.mp3".to_string()));
         let keys: (String, String, String) = lib
             .conn
             .query_row(

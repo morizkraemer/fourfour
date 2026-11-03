@@ -102,6 +102,12 @@ fn stored_keys(path: &Path) -> Vec<(String, String)> {
     stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap()
 }
 
+fn stored_path_keys(path: &Path) -> Vec<(String, String, String)> {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    let mut stmt = conn.prepare("SELECT source_path, path_key, file_name_key FROM tracks ORDER BY id").unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().collect::<rusqlite::Result<_>>().unwrap()
+}
+
 fn assert_fixture_data(library: &LocalLibrary) {
     let tracks = library.get_all_tracks().unwrap();
     let titles: Vec<&str> = tracks.iter().map(|t| t.title.as_str()).collect();
@@ -190,6 +196,13 @@ fn v7_migrates_to_v8_with_keys_filled_and_covers_moved_out_of_the_database() {
     let expected_keys: Vec<(String, String)> =
         ["Alpha", "Bravo", "Charlie"].iter().map(|t| (normalise_tag("Fixture Artist"), normalise_tag(t))).collect();
     assert_eq!(stored_keys(&path), expected_keys);
+    let path_keys = stored_path_keys(&path);
+    assert_eq!(path_keys.len(), 3);
+    for (source_path, stored_path_key, stored_name_key) in path_keys {
+        assert!(!stored_path_key.is_empty() && !stored_name_key.is_empty());
+        assert_eq!(stored_path_key, pioneer_library::path_key(Path::new(&source_path)));
+        assert_eq!(stored_name_key, pioneer_library::file_name_key(Path::new(&source_path)));
+    }
 
     assert_eq!(library.legacy_covers().unwrap().map(|(rows, _)| rows), Some(3), "the open does not touch the blobs");
     assert_fixture_covers(&library);

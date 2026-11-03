@@ -47,13 +47,19 @@ pub fn normalise_tag(text: &str) -> String {
     }
 }
 
-fn path_key(path: &Path) -> String {
+/// Comparison form of a file path (NFC, lowercase), as the library stores it in `tracks.path_key`.
+pub fn path_key(path: &Path) -> String {
     path.to_string_lossy().nfc().collect::<String>().to_lowercase()
 }
 
-fn file_key(path: &Path, file_size: u64) -> Option<(String, u64)> {
-    let name = path.file_name()?.to_string_lossy().nfc().collect::<String>().to_lowercase();
-    (file_size > 0).then_some((name, file_size))
+/// Comparison form of a path's file name, as the library stores it in `tracks.file_name_key`; empty when the
+/// path has no file name.
+pub fn file_name_key(path: &Path) -> String {
+    path.file_name().map(|name| name.to_string_lossy().nfc().collect::<String>().to_lowercase()).unwrap_or_default()
+}
+
+fn file_key(name_key: String, file_size: u64) -> Option<(String, u64)> {
+    (file_size > 0 && !name_key.is_empty()).then_some((name_key, file_size))
 }
 
 fn tags_key(artist: &str, title: &str) -> Option<(String, String)> {
@@ -80,6 +86,9 @@ pub struct DuplicateCandidate {
     /// [`normalise_tag`] of `artist` and `title`, as the library stores them (`tracks.artist_key`, `title_key`).
     pub artist_key: String,
     pub title_key: String,
+    /// [`path_key`] and [`file_name_key`] of `source_path` (`tracks.path_key`, `file_name_key`).
+    pub path_key: String,
+    pub file_name_key: String,
 }
 
 impl DuplicateCandidate {
@@ -95,7 +104,14 @@ impl DuplicateCandidate {
             duration_secs: track.duration_secs,
             artist_key: normalise_tag(&track.artist),
             title_key: normalise_tag(&track.title),
+            path_key: path_key(&track.source_path),
+            file_name_key: file_name_key(&track.source_path),
         }
+    }
+
+    /// The candidate with its path (and the path keys) replaced.
+    pub fn with_source_path(self, source_path: PathBuf) -> Self {
+        Self { path_key: path_key(&source_path), file_name_key: file_name_key(&source_path), source_path, ..self }
     }
 }
 
@@ -110,6 +126,8 @@ impl From<&Track> for DuplicateCandidate {
             duration_secs: track.duration_secs,
             artist_key: normalise_tag(&track.artist),
             title_key: normalise_tag(&track.title),
+            path_key: path_key(&track.source_path),
+            file_name_key: file_name_key(&track.source_path),
         }
     }
 }
@@ -126,8 +144,8 @@ impl CandidateKeys {
     fn of(candidate: &DuplicateCandidate) -> Self {
         Self {
             id: candidate.id,
-            path: path_key(&candidate.source_path),
-            file: file_key(&candidate.source_path, candidate.file_size),
+            path: candidate.path_key.clone(),
+            file: file_key(candidate.file_name_key.clone(), candidate.file_size),
             tags: folded_tags_key(candidate.artist_key.clone(), candidate.title_key.clone()),
             duration_secs: candidate.duration_secs,
         }
@@ -137,8 +155,8 @@ impl CandidateKeys {
 const KEYS_PER_THREAD_MIN: usize = 1024;
 const KEY_THREADS_MAX: usize = 8;
 
-/// The keys of every candidate, in library order. The Unicode folding is the cost, so large
-/// libraries are split over a few threads.
+/// The keys of every candidate, in library order. Building them is cheap now that the folded
+/// keys are stored; large libraries are still split over a few threads.
 fn candidate_keys(library: &[DuplicateCandidate]) -> Vec<CandidateKeys> {
     let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(KEY_THREADS_MAX);
     let chunk = library.len().div_ceil(threads).max(KEYS_PER_THREAD_MIN);
@@ -290,7 +308,7 @@ impl DuplicateIndex {
         if let Some(&(id, ())) = self.by_path.lowest(&path_key(&track.source_path)) {
             return hit(id, DuplicateReason::SamePath);
         }
-        if let Some(&(id, ())) = file_key(&track.source_path, track.file_size).and_then(|k| self.by_file.lowest(&k)) {
+        if let Some(&(id, ())) = file_key(file_name_key(&track.source_path), track.file_size).and_then(|k| self.by_file.lowest(&k)) {
             return hit(id, DuplicateReason::SameFile);
         }
         let key = tags_key(&track.artist, &track.title)?;

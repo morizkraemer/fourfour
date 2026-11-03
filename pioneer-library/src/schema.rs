@@ -3,14 +3,14 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::duplicates::normalise_tag;
+use crate::duplicates::{file_name_key, normalise_tag, path_key};
 use crate::failure::{Failure, LibraryFailure};
 
 use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, CuePoint, WaveformPreview};
 
 pub const SCHEMA_VERSION: u32 = 8;
 
-/// Version of `normalise_tag` the stored `artist_key` / `title_key` were made with; bump it when the fold
+/// Version of the folds (`normalise_tag`, `path_key`, `file_name_key`) the stored keys were made with; bump it when the fold
 /// changes and the keys are refilled at the next open.
 pub const TAG_FOLD_VERSION: &str = "1";
 
@@ -46,7 +46,9 @@ CREATE TABLE IF NOT EXISTS tracks (
     file_size     INTEGER NOT NULL DEFAULT 0,
     date_added    TEXT    NOT NULL DEFAULT '',
     artist_key    TEXT    NOT NULL DEFAULT '',
-    title_key     TEXT    NOT NULL DEFAULT ''
+    title_key     TEXT    NOT NULL DEFAULT '',
+    path_key      TEXT    NOT NULL DEFAULT '',
+    file_name_key TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS analyses (
@@ -438,7 +440,7 @@ fn migrate_v7_to_v8(conn: &Connection) -> Result<()> {
             |row| row.get(0),
         )?)
     };
-    for key in ["artist_key", "title_key"] {
+    for key in ["artist_key", "title_key", "path_key", "file_name_key"] {
         if !has_column("tracks", key)? {
             tx.execute_batch(&format!("ALTER TABLE tracks ADD COLUMN {key} TEXT NOT NULL DEFAULT '';"))
                 .context("Failed to add the folded tag keys")?;
@@ -474,13 +476,14 @@ fn refill_tag_keys_if_stale(conn: &Connection) -> Result<()> {
 }
 
 fn fill_tag_keys(conn: &Connection) -> Result<()> {
-    let tracks: Vec<(i64, String, String)> = conn
-        .prepare("SELECT id, artist, title FROM tracks")?
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+    let tracks: Vec<(i64, String, String, String)> = conn
+        .prepare("SELECT id, artist, title, source_path FROM tracks")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
         .collect::<rusqlite::Result<_>>()?;
-    let mut update = conn.prepare("UPDATE tracks SET artist_key = ?2, title_key = ?3 WHERE id = ?1")?;
-    for (id, artist, title) in &tracks {
-        update.execute(rusqlite::params![id, normalise_tag(artist), normalise_tag(title)])?;
+    let mut update = conn.prepare("UPDATE tracks SET artist_key = ?2, title_key = ?3, path_key = ?4, file_name_key = ?5 WHERE id = ?1")?;
+    for (id, artist, title, source_path) in &tracks {
+        let source_path = Path::new(source_path);
+        update.execute(rusqlite::params![id, normalise_tag(artist), normalise_tag(title), path_key(source_path), file_name_key(source_path)])?;
     }
     conn.execute(
         "INSERT INTO library_meta (name, value) VALUES ('tag_fold', ?1) ON CONFLICT(name) DO UPDATE SET value = excluded.value",
