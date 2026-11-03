@@ -561,3 +561,4 @@
 2026-11-03 13:40 orchestrator r87 deb check: bundle + self-check green, CI deb grep SIGPIPE flake fixed on r63-ci-v3 f0827da. run-pause: idle, own-priority box work done; left: Mac night items (need go), Waiting reviews, pushes
 2026-11-03 14:10 orchestrator - resumed per PM relay; decided: own prio r88-grid-misses (sonnet medium; classify remaining test grid misses on r79, fix one class on branch if test+dev gain with 0 losses)
 2026-11-03 14:25 orchestrator r88 handed back: doc only f90fd39 (34 grid misses classified, no clean fix: half-beat cases have our grid on the kick); run idle again
+2026-11-03 14:50 orchestrator cleanup: removed unused q41-target + ff-q41-target caches (16 GB, disk 86% -> 81%), killed a 4.6-day hung cargo test and a self-matching wait loop; STATE trimmed to 7.9k chars (ba6d00f, detail in archive); run idle
