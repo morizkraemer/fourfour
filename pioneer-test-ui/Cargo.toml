@@ -31,7 +31,7 @@ symphonia = { version = "0.5", features = ["all"] }
 image = "0.25.10"
 fourfour-analysis-rs = { path = "../fourfour-analysis-rs" }
 
-[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [[bin]]
