@@ -119,6 +119,82 @@ Decision in code: `DEFAULT_CHUNK_SIZE` is 500, except 1500 in builds with the `c
 - Remaining model cost is mostly the weight MatMuls, which int8 could cut (r16 measured -11% per chunk at 1500 frames, where attention was a bigger share; at 500 frames the weight share is larger, so int8 may now pay more). Worth one re-measure at chunk 500 with quality scored.
 - First-result latency: shorter chunks already halve it; ordering visible tracks first is the scheduling worker's lane.
 
+## int8 at 500 (r97, 2026-11-03)
+
+Branch `r97-int8-500` (from `r96-chunk500`). Question: does a dynamic-int8 beat model give a real gain at chunk 500 on rten, with no quality loss? Gate: test grid 20 ms and BPM 0.1 not lower than fp32@500, dev grid at most -1, gain >= 15% tracks/min.
+
+**Answer: platform dependent. On the x86 box: no real gain (-10% CPU in `ffa`, about 0% in the app bench) and -2 grid / -2 BPM on test, so the gate fails. On the Mac (M5 Pro, rten): +43% to +60% tracks/min, -37% CPU, and test grid +1 / BPM +1, so the gate passes there. Default stays unchanged; int8 is opt-in through `FOURFOUR_BEAT_MODEL`.**
+
+### The model
+
+- Tool: `fourfour-analysis-rs/scripts/quantize_beat_int8.py` (onnxruntime `quantize_dynamic`, MIT; offline only, never in the app). It quantizes the 62 MatMuls with constant weights to int8 (per-channel, s8); attention (activation x activation), Conv and everything else stay f32. 83 MB -> 23 MB.
+- Files live in `~/.cache/r97-models/` (not committed): `beat_this_q8sc.onnx` is the scored one; `q8s` (per-tensor) and `q8all` (MatMul + Conv) were only microbenched.
+- Regenerate (venv `~/.cache/r97-venv` with `onnx onnxruntime numpy`):
+
+```bash
+~/.cache/r97-venv/bin/python fourfour-analysis-rs/scripts/quantize_beat_int8.py ~/.cache/fourfour-models/beat_this.onnx ~/.cache/r97-models/beat_this_q8sc.onnx --per-channel
+FOURFOUR_BEAT_MODEL=beat_this_q8sc.onnx   # file next to mel_spectrogram.onnx; ffa: --beat-model beat_this_q8sc.onnx
+```
+
+- rten gotchas found: u8 weights (`--weight-type u8`) produce no output (every track fails); the default `quant_pre_process` optimizer renames a Split output to the node's own name and rten then fails with `Missing input "/model/task_heads/Split"`, so the script passes `skip_optimization=True`.
+
+### Per-chunk microbench (`chunk_bench`, 1 thread, random input, median of 6)
+
+| Host | Frames | fp32 | q8 per-tensor | q8 per-channel | q8 + Conv |
+|---|---:|---:|---:|---:|---:|
+| box (Xeon Gold 6130, AVX512, no VNNI), CPU ms | 500 | 990 | 950 (-4%) | 930 (-6%) | 910 (-8%) |
+| box | 1500 | 4670 | 4610 (-1%) | 4460 (-4%) | - |
+| Mac M5 Pro, wall ms (load about 6) | 500 | 331 | 199 (-40%) | 199 (-40%) | - |
+| Mac | 1500 | 1444 | 1041 (-28%) | 1039 (-28%) | - |
+
+The weight share is larger at 500 as predicted, but the x86 int8 kernel in rten barely beats its f32 one on a CPU without VNNI; the Mac has the int8 dot-product units. r16's -11% at 1500 does not reproduce on the box (-4%, same direction, smaller).
+
+### Quality (`o3-score.py`, chunk 500, rten)
+
+| Host | Split | Variant | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right | Grid + bar |
+|---|---|---|---:|---:|---:|---:|---:|
+| box | test 205 | fp32 | 167 | 180 | 192 | 138 | 135 |
+| box | test 205 | int8 | 165 (-2) | 178 (-2) | 192 | 136 | 133 |
+| box | dev 50 | fp32 | 43 | 47 | 50 | 41 | 40 |
+| box | dev 50 | int8 | 43 | 46 | 50 | 41 | 40 |
+| Mac | test 205 | fp32 | 167 | 180 | 192 | 138 | 135 |
+| Mac | test 205 | int8 | 168 (+1) | 181 (+1) | 192 | 139 | 136 |
+| Mac | dev 50 | fp32 | 43 | 47 | 50 | 41 | 40 |
+| Mac | dev 50 | int8 | 43 | 47 | 50 | 41 | 40 |
+
+fp32 numbers equal r96 on both hosts. The same int8 file scores differently on x86 and ARM (the int8 arithmetic is not bit-identical). The x86 -2/-2 on 205 tracks is at the +-3 noise level from r94 but below the "not lower" gate.
+
+### Speed
+
+Box, `ffa --workers 2 --threads 2`, fp32 and int8 run at the same time, load 8-47 (the int8 run finished earlier, so its load was lower at the end):
+
+| Split | Variant | CPU s/track | Tracks/min | First result | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| test 205 | fp32 | 46.3 | 2.15 | 12.8 s | 810 MB |
+| test 205 | int8 | 41.5 (-10%) | 2.38 (+11%) | 16.7 s | 769 MB |
+| dev 50 | fp32 | 46.1 | 2.48 | 24.5 s | 735 MB |
+| dev 50 | int8 | 42.1 (-9%) | 2.75 (+11%) | 22.1 s | 666 MB |
+
+Box, `bench_analysis --limit 8 --threads 2`, fp32 and int8 simultaneously, two rounds (app path, load 17-75): fp32 2.31 / 2.44 tracks/min, CPU 491 / 467 s; int8 2.37 / 2.43, CPU 470 / 461 s; first result 31-35 s for both; RSS 437-535 MB. In the app path the box gain is within noise (-3% CPU).
+
+Mac, `ffa --workers 2 --threads 6`, rten, chunk 500, fp32 then int8 back to back (shared Mac, load 3-12):
+
+| Split | Variant | Tracks/min | CPU s (user+sys) | First result | Peak RSS |
+|---|---|---:|---:|---:|---:|
+| dev 50 | fp32 | 20.75 | 893 | 3.3 s | 1.59 GB |
+| dev 50 | int8 | 34.29 (+65%) | 554 (-38%) | 2.3 s | 1.32 GB |
+| test 205 | fp32 | 19.46 | 3918 | 2.0 s | 1.43 GB |
+| test 205 | int8 | 31.13 (+60%) | 2501 (-36%) | 1.3 s | 1.96 GB |
+
+Mac, `bench_analysis` (48 unique dev tracks, 6 workers, `FOURFOUR_BEAT_RUNTIME=rten`, chunk 500), 5 fp32 and 5 int8 runs interleaved: fp32 30.6 / 23.4 / 27.4 / 20.7 / 23.5 tracks/min, int8 30.8 / 30.0 / 46.6 / 33.6 / 35.5. Medians 23.5 -> 33.6 (+43%), user CPU 1498 -> 950 s (-37%), first result about 4.2 -> 3.1 s, peak RSS about 2.4 GB for both. The Mac was shared with other work, so the spread is wide; the worst int8 run ties the best fp32 run.
+
+### Decision
+
+- Wiring: nothing new needed. `FOURFOUR_BEAT_MODEL` (r94) already selects the file; default stays `beat_this.onnx`. `analysis_key` already includes the beat model file size.
+- Linux/Windows x86 (no VNNI): do not ship int8; no real gain, small quality loss.
+- Mac: worth a decision. rten int8 at 500 on the Mac runs about as fast as CoreML at 1500 did in r96 (31.5 tracks/min in the app bench, 4.9-6.3 GB RSS) at about 2.4 GB, with a 23 MB model instead of 83 MB; CoreML at 500 was slower (25.9). The comparison across sessions is noisy: a same-session Mac pair (CoreML 1500 vs rten int8 500, `ffa` and `bench_analysis`, test-split scores) is the next step before changing the shipped Mac default. Shipping it also needs the model in the app bundle and the models fetch script, and a per-platform choice (x86 keeps fp32).
+- Not checked: Linux Arm and Windows; only beat/BPM quality was scored, not key.
+
 ## Reproduce
 
 ```bash
