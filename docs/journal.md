@@ -552,3 +552,4 @@
 2026-11-03 07:45 orchestrator - decided: own prio r83-parked-all-v6 (sonnet medium; parked-all-v5 + r82-r78-fix + r79 + r81 + r69-v2, full checks both browsers)
 2026-11-03 09:00 orchestrator r83 parked-all-v6 f46cfe7 built (one conflict: r81 vs no-Python run lane, Rust-only kept; failure test moved to db table); 556 Rust tests, chromium + webkit smoke 0 failed
 2026-11-03 09:30 orchestrator parked review preview: https://dev.tail87069a.ts.net:4211 = parked-all-v6 build (systemd ff-parked-review, ports.tsv row in lab-infra)
+2026-11-03 10:40 orchestrator r84-path-keys handed back 05ebecd (path/file-name keys stored, 50k plan 438 -> 392 ms), parked on top of r81; building parked-all-v7 = v6 + r84, checks running
