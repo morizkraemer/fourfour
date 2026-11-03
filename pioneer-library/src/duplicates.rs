@@ -57,8 +57,10 @@ fn file_key(path: &Path, file_size: u64) -> Option<(String, u64)> {
 }
 
 fn tags_key(artist: &str, title: &str) -> Option<(String, String)> {
-    let artist = normalise_tag(artist);
-    let title = normalise_tag(title);
+    folded_tags_key(normalise_tag(artist), normalise_tag(title))
+}
+
+fn folded_tags_key(artist: String, title: String) -> Option<(String, String)> {
     (!artist.is_empty() && artist != PLACEHOLDER_ARTIST && !title.is_empty()).then_some((artist, title))
 }
 
@@ -75,6 +77,9 @@ pub struct DuplicateCandidate {
     pub artist: String,
     pub title: String,
     pub duration_secs: f64,
+    /// [`normalise_tag`] of `artist` and `title`, as the library stores them (`tracks.artist_key`, `title_key`).
+    pub artist_key: String,
+    pub title_key: String,
 }
 
 impl DuplicateCandidate {
@@ -88,6 +93,8 @@ impl DuplicateCandidate {
             artist: track.artist.clone(),
             title: track.title.clone(),
             duration_secs: track.duration_secs,
+            artist_key: normalise_tag(&track.artist),
+            title_key: normalise_tag(&track.title),
         }
     }
 }
@@ -101,6 +108,8 @@ impl From<&Track> for DuplicateCandidate {
             artist: track.artist.clone(),
             title: track.title.clone(),
             duration_secs: track.duration_secs,
+            artist_key: normalise_tag(&track.artist),
+            title_key: normalise_tag(&track.title),
         }
     }
 }
@@ -119,7 +128,7 @@ impl CandidateKeys {
             id: candidate.id,
             path: path_key(&candidate.source_path),
             file: file_key(&candidate.source_path, candidate.file_size),
-            tags: tags_key(&candidate.artist, &candidate.title),
+            tags: folded_tags_key(candidate.artist_key.clone(), candidate.title_key.clone()),
             duration_secs: candidate.duration_secs,
         }
     }
