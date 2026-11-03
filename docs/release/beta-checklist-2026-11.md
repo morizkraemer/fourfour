@@ -1,8 +1,8 @@
-# Public macOS beta checklist (2026-11-02)
+# Public macOS beta checklist (2026-11-03)
 
 Goal (STATE.md "Ship target"): a `.dmg` strangers can install, that scans a folder, analyzes it in Rust and exports a USB that plays on a CDJ-3000.
 
-Base: `ov-1028` (5649ea0; first written at cf422ca, refreshed 2026-11-02 after r48-r69). Evidence is file:line on that branch, doc links, branch names and "Waiting" numbers from `docs/STATE.md` on `master` (the STATE.md on `ov-1028` is older and lacks items 15-40). Work that landed on `ov-1028` is named by its merge commit; work still parked is named by branch. Docs-only run: nothing was built, run or installed. Claims about a signed build or a real Mac are marked "untested".
+Base: `ov-1028` (cce1f77; first written at cf422ca, refreshed 2026-11-03 after r72-r80). Review branch: `parked-all-v7` (15fd864, see section 14). Evidence is file:line on that branch, doc links, branch names and "Waiting" numbers from `docs/STATE.md` on `master` (the STATE.md on `ov-1028` is older and lacks items 15-41). Work that landed on `ov-1028` is named by its merge commit; work still parked is named by branch. Docs-only run: nothing was built, run or installed. Claims about a signed build or a real Mac are marked "untested".
 
 Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHub account, listening or visual check), **needs brother** (morizkraemer: writer, sync, hardware), **needs work** (an agent can do it, no decision needed).
 
@@ -15,15 +15,15 @@ Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHu
 | 3 | Signing, hardened runtime, notarization | needs Merlin | Apple Developer account and Developer ID cert, then wire Tauri signing | Merlin, then agent |
 | 4 | Entitlements | needs work | Start with none; test a signed build on the Mac | agent, Mac night |
 | 5 | Gatekeeper first run, min macOS, arch | ready (unsigned) | Requirements line is in the docs draft `r53-user-docs-v2` (Waiting 39); landing it closes this | Merlin (land) |
-| 6 | Licences and NOTICE | partly done (r54) | Notices generator landed; still needed: LICENSE file, bundle the notices and add About rows (Merlin), land `r52-no-python-v2` (Waiting 38) | Merlin (licence, land), agent |
+| 6 | Licences and NOTICE | partly done (r54) | Notices generator landed; still needed: LICENSE file, bundle the notices and add About rows (Merlin), land the no-Python removal (r52, in `parked-all-v7`, Waiting 38) | Merlin (licence, land), agent |
 | 7 | Key model licence and quality | needs Merlin | Accept 56% clean model for beta, or hold (Waiting 4, 30) | Merlin |
 | 8 | Privacy | ready | No network at run time in our code; state it after a Mac check | agent |
 | 9 | Crash reporting, logs | partly done (r48, r56) | File log, panic hook and early panic log landed; still needed: "Copy diagnostics" and "Reveal logs" UI, Merlin confirms no-upload | agent |
 | 10 | Auto-update | ready (none) | Confirm: no updater in beta 1 | Merlin |
-| 11 | Backup and restore | partly done (r51) | Library fixture test landed; still needed: land `r38-recovery-v3` (Waiting 37), FAQ entry | Merlin (land), agent |
+| 11 | Backup and restore | partly done (r51) | Library fixture test landed (v8 fixture and migration tests in `parked-all-v7`); still needed: land the recovery panel (r38 with r76, in `parked-all-v7`, Waiting 37), FAQ entry | Merlin (land), agent |
 | 12 | USB export safety | needs brother | CDJ-3000 run of current export; manifest-aware wipe | brother |
 | 13 | Analysis quality bars | needs Merlin | Bar-1 listen check (Waiting 16); key call (7); "what to expect" numbers are in `r53-user-docs-v2` | Merlin |
-| 14 | Open Waiting items touching beta | needs Merlin | Land `parked-all-v3` (33-37 plus 38) after one Mac check; also 39, 40 | Merlin |
+| 14 | Open Waiting items touching beta | needs Merlin | Land `parked-all-v7` (33-38, 40, 41, 31) after one Mac check; also 39 | Merlin |
 | 15 | CI | needs Merlin | OK to push `r63-ci` for a first run (Waiting 15; supersedes `r35-ci`) | Merlin |
 | 16 | User docs (README, install, FAQ) | draft done | Read `r53-user-docs-v2` (Waiting 39), confirm 20 "(to confirm)" marks on a Mac | Merlin |
 | 17 | Support channel, release hosting | needs Merlin | Pick tracker, contact, dmg host, repo visibility | Merlin |
@@ -36,7 +36,7 @@ Status words: **ready** (nothing to do), **needs Merlin** (decision, Apple/GitHu
 4. CDJ-3000 never saw the current export (cue names and colours, multi-page PDB, folders, 3-band waveforms: Waiting 0, 12; `docs/architecture/cdj-checklist-2026-10.md`), and wipe is not manifest-aware.
 5. No LICENSE file; the notices file exists but is not bundled and About has no row for it; no first CI run (`r63-ci`, Waiting 15).
 
-Also open, not a blocker by itself: the Mac freeze fix (r67) landed but is not yet checked on the Mac, and the stick busy guard (r69) is parked (Waiting 40).
+Also open, not a blocker by itself: the Mac freeze fix (r67) landed but is not yet checked on the Mac, and the stick busy guard (r69) is parked in `parked-all-v7` (Waiting 40).
 
 ---
 
@@ -62,7 +62,7 @@ Where data lives (keyed on the bundle id through Tauri's `app_data_dir`):
 - Not keyed on the id: the CoreML compiled-model cache `~/Library/Caches/fourfour-coreml/` (`fourfour-analysis-rs/src/ort_beat.rs:74`). A custom library path is stored as an absolute path in `config.json` (`main.rs:1357-1365`) and survives.
 - Merlin's installed copy is under the old id. Changing the id makes the new build start with an empty library; the old folder is not deleted.
 
-Next step: on first start of the new id, if the old folder exists and the new one does not, copy (not move) `library.db`, `config.json`, `ui.json`, `waveform-detail/`; show one notice; leave the old folder. Test with a library at the current schema (`pioneer-library/src/lib.rs` migrations, v7).
+Next step: on first start of the new id, if the old folder exists and the new one does not, copy (not move) `library.db`, `config.json`, `ui.json`, `waveform-detail/`; show one notice; leave the old folder. Test with a library at the current schema (`pioneer-library/src/lib.rs` migrations; v8 on `parked-all-v7`, v7 on `ov-1028`).
 
 ## 3. Signing, notarization, hardened runtime - needs Merlin (account), then agent
 
@@ -144,7 +144,7 @@ Next steps (agent): state "fourfour makes no network connections; your music and
 
 - Landed on `ov-1028` (r48 merge 19f34dd): a rotating log `fourfour.log` plus `fourfour.1.log` and `fourfour.2.log` (5 MB each, std only, no new dependency) in Tauri's `app_log_dir` (`~/Library/Logs/com.pioneer.test-ui/` on macOS, `~/.local/share/com.pioneer.test-ui/logs/` on Linux, `%LOCALAPPDATA%\com.pioneer.test-ui\logs` on Windows; the folder follows the bundle id, see 1). Module `pioneer-test-ui/src/app_log.rs`. It gets every debug-panel line (`debug_log`), the former `eprintln!` warnings, panics from any thread (message, location, version, backtrace) and frontend `console.error`, uncaught errors and unhandled rejections (rate limited, 20 per 10 s). The command `log_directory` returns the folder for a later "Reveal logs" button; no UI was added.
 - Still open: the error text "see debug log" (`main.rs`, `all_tracks_failed`) should point at the log folder once the Reveal button exists. A panic before Tauri's setup (during `build`) is now written to the file: landed on `ov-1028` (r56 merge 92fb0a4; the log file and panic hook start at the top of `main`, the bundle id is read from the tauri config).
-- Library open failure: `open_startup_library` (`main.rs:1434`) returns a typed error; the recovery panel is on `r38-recovery-v3` (c2084f8, Waiting 37), not landed.
+- Library open failure: `open_startup_library` (`main.rs:1434`) returns a typed error; the recovery panel is on `r76-recovery-kind` (b4171e5, Waiting 37; = r38 plus errors classified by kind), part of `parked-all-v7`, not landed on `ov-1028`.
 - Analysis failures are memoised (`pioneer-test-ui/src/analysis_failures.rs`); their messages reach the log through the debug panel line. macOS also writes its own crash report to `~/Library/Logs/DiagnosticReports/` for hard crashes (signals, aborts), which the panic hook does not see.
 
 Next steps (agent): a "Copy diagnostics" button in About (app version, macOS version, chip, library size, last 200 log lines; no file names unless the user ticks it). No automatic upload. Merlin confirms no-upload.
@@ -161,16 +161,18 @@ Needs Merlin: confirm "no updater in beta 1".
 
 Built:
 - Library backup and restore are in the app: `pioneer-library/src/backup.rs` (tar with manifest, optional audio; `export_backup` `:394`, `unpack_backup` `:244`, `install_backup` `:348`; refuses a backup from a newer format `:187`) and `pioneer-test-ui/src/backup_commands.rs` (progress events, safety copy under `Backups/` before restore at `:19,175`, relinking of audio paths).
-- Schema migrations are additive and tested (v5 to v7: Q42, Waiting 9 and 12). The planned schema bump (Waiting 31) needs a migration test with a library written by the beta.
+- Schema migrations are additive and tested (v5 to v7: Q42, Waiting 9 and 12). The schema bump to v8 (Waiting 31, r81 and r84) is built on `parked-all-v7`, not on `ov-1028`: folded artist, title, path and file-name keys, covers in a store outside `library.db`, an `analysis_failures` table. It comes with a v8 fixture and migration tests (below).
 
 Missing for a beta:
-1. Recovery when `library.db` does not open: `r38-recovery-v3` (c2084f8, Waiting 37; copy says "fourfour", swap for "the app"), not landed.
+1. Recovery when `library.db` does not open: `r76-recovery-kind` (b4171e5, Waiting 37; copy says "fourfour", swap for "the app"), in `parked-all-v7`, not landed. The panel shows why (newer version, damaged, in use) and offers: open another library, restore a backup, start a new library, try again (locked). The failed file is never touched.
 2. A migration promise: every beta version opens older libraries; downgrade is refused with a message. Add a test that opens a library written by this beta's schema.
 3. User-facing text: where backups go, how to restore, what is not backed up (audio is optional).
 
-Item 2 landed on `ov-1028` (r51 merge ebe080e): the library already refused a newer schema with `LibraryFailure::NewerVersion` (mapped to `ErrorKind::LibraryNewerVersion`). `pioneer-library/tests/schema_fixture.rs` opens the committed `tests/fixtures/library-schema-v7-beta1/` (library.db plus its anlz tree) (3 tracks, analysis and cues, a folder and playlist) with data intact and asserts that a version above the fixture is refused and left unchanged. A schema bump must keep this fixture opening; regenerate a new one only with `cargo test -p pioneer-library --test schema_fixture -- --ignored` on the old code.
+Item 2 landed on `ov-1028` (r51 merge ebe080e): the library already refused a newer schema with `LibraryFailure::NewerVersion` (mapped to `ErrorKind::LibraryNewerVersion`). `pioneer-library/tests/schema_fixture.rs` opens the committed `tests/fixtures/library-schema-v7-beta1/` (library.db plus its anlz tree) (3 tracks, analysis and cues, a folder and playlist) with data intact and asserts that a version above the fixture is refused and left unchanged. A schema bump must keep this fixture opening (it does on `parked-all-v7`); regenerate a new one only with `cargo test -p pioneer-library --test schema_fixture -- --ignored` on the old code.
 
-Next step: Merlin lands `r38-recovery-v3`; agent writes the FAQ entry. The schema bump (Waiting 31) must keep the v7 fixture test green.
+On `parked-all-v7` (r81, r84) the same test file also holds `tests/fixtures/library-schema-v8/` and a test that migrates a v7 library with covers to v8: keys filled, covers moved out of the database. The v7 fixture still opens with data intact. Cost at 50k tracks: `library.db` 7.5 GB to 59 MB, migration 3.5 s plus a background cover move of about 240 s (Waiting 31). The migration promise therefore holds for v7 and v8 once `parked-all-v7` lands.
+
+Next step: Merlin lands `parked-all-v7`; agent writes the FAQ entry. Later schema changes must keep both fixture tests green.
 
 ## 12. USB export safety - needs brother
 
@@ -193,8 +195,8 @@ Windows items (r20: `is_removable` true for every drive, `statvfs` stub) are not
 | Bar | Target | Now | Evidence | Status |
 |---|---|---|---|---|
 | Key exact (Beatport test, n=199) | >=60% | 56.3% clean model (60.3% with unlicensed templates) | `key-licence-2026-10-31.md`, Waiting 4 | not met; accepted for beta per rec |
-| Beat grid within 20 ms of Rekordbox | no number set besides this metric | 80.5% test, 87.3% on constant grids | `rust-status-2026-10-28.md` line 16, AGENTS.md "targets" | Merlin to confirm it is enough |
-| BPM within 0.1 / 1.0 of Rekordbox | | 180 and 190 of 205 (87.8%, 92.7%) | `rust-status-2026-10-28.md` B15 table | ok |
+| Beat grid within 20 ms of Rekordbox | no number set besides this metric | `ov-1028`: 80.5% test, 87.3% on constant grids. `parked-all-v7`: 171 of 205 within 20 ms (was 167) | `rust-status-2026-10-28.md` line 16, AGENTS.md "targets" | Merlin to confirm it is enough |
+| BPM within 0.1 / 1.0 of Rekordbox | | `ov-1028`: 180 and 190 of 205 (87.8%, 92.7%). `parked-all-v7` (r79 tempo search): 186 within 0.1 | `rust-status-2026-10-28.md` B15 table; Waiting 41 | ok; r79 is parked, not landed |
 | Bar 1 (downbeat) vs Rekordbox | | 79.3% test (was 61.5%), dev 88.9% | Waiting 16; `BAR_ONE_RULE` at `fourfour-analysis-rs/src/service.rs:278`; landed on ov-1028 29add96 | listen check open |
 | Cues, energy | | Rust emits none (`cue_points: []`, `energy: None`) | `rust-status-2026-10-28.md:25` | say so in FAQ |
 | CoreML vs rten results | identical | keys 12/12, every beat time identical to the ms | `perf-run-2026-11.md:640-645` | ready |
@@ -206,21 +208,23 @@ Next steps:
 
 ## 14. Known open Waiting items touching the beta
 
-From master STATE.md (ddcb8c5):
+From master STATE.md (2026-11-03):
 - 4 key licence: accepted, landed. Needs About attribution (6).
 - 16 bar 1: landed, listen check open (13).
 - 24 bundle id: open (1).
 - 15 CI: open, now `r63-ci` (fbb1ba6; 15 below).
-- 33 error messages (`r18-errors-v3`, cba186d): holds real bugs (analysis falls back to the browser mock in the real app, unsaved playlists look saved). Rec: land first. A beta blocker in practice.
-- 34 keyboard and screen reader (`r17-a11y-v3`, 1ce679a): touches the design-system fence; needs a Mac WebKit check.
-- 35 cover cache cap (`r31-cover-cap-v3`, ec769e1), 36 WebKit startup CSS (`r29-css-v3`, f1fe319), 37 recovery panel (`r38-recovery-v3`, c2084f8), 38 no Python (`r52-no-python-v2`, 099ed96): parked; `parked-all-v3` (d816e99: r17, r18, r29, r31, r38, r52, green) is all of them at once. They were re-merged onto `ov-1028` at r64, before r67 and r68 landed; check they still merge before landing.
+- 33 error messages (`r18-errors-v4`, ad6ed3f; reads the error kind first, pattern table as fallback): holds real bugs (analysis falls back to the browser mock in the real app, unsaved playlists look saved). Rec: land first. A beta blocker in practice.
+- 34 keyboard and screen reader (`r17-a11y-v4`, 5258d54, plus follow-ups r78 and r82 in `r82-r78-fix`, 788db39): touches the design-system fence; needs a Mac WebKit check. Follow-ups: rating by Mod+0-5, waveform as a keyboard slider, Alt+Up/Down reorder in unsorted playlists, focus ring and F6 fixes. Open taste calls: Rating column hidden by default so Mod+3 shows no feedback; F6 through search opens the palette.
+- 35 cover cache cap (`r31-cover-cap-v4`, 39ed323), 36 WebKit startup CSS (`r29-css-v4`, 2c37766), 37 recovery panel (`r76-recovery-kind`, b4171e5; = `r38-recovery-v4` plus errors classified by kind), 38 no Python (`r52-no-python-v3`, 2933305; analysis bench dev-bin fixed): parked. `parked-all-v7` (15fd864) is the combined review branch: `ov-1028` plus r17 (with r82-r78-fix), r18, r29, r31, r38 (with r76), r52, r79, r81 and r84 (schema v8), r69. Green 2026-11-03: 558 Rust tests, 958 vitest, check 0, Chromium and WebKit smoke 0 failed. Phone preview: https://dev.tail87069a.ts.net:4211.
 - 39 user docs draft (`r53-user-docs-v2`, 56f7625): read, then confirm the Mac marks.
-- 40 stick busy guard (`r69-stick-busy`, 5a57a98): one mutating stick operation at a time, write and wipe off the main thread. Parked, rec land.
+- 40 stick busy guard (`r69-stick-busy-v2`, 9a928da): one mutating stick operation at a time, write and wipe off the main thread; a multi-stick sync now refuses as a whole if any stick is busy. In `parked-all-v7`. Rec land.
+- 41 BPM fit stuck on a nearby tempo peak (`r79-bpm-misses`, ce1d8b1): global fold-peak search, test BPM within 0.1 180 to 186 of 205, grid within 20 ms 167 to 171, dev and train unchanged, about 150 ms more fit time per track. In `parked-all-v7`, not on `ov-1028`. Rec land (results change for about 3% of tracks, all toward Rekordbox).
 - Mac freeze (r66, r67): the 450-500 ms freezes every 5 s were the sync volume poll on the main thread (`perf-run-2026-11.md` R66). The fix landed on `ov-1028` (r67 merge 6847736); Mac check pending, needs a Mac night go. Related r61: optional chunk budget ceiling `FOURFOUR_CHUNK_BUDGET_MB`, default off, the Mac sweep script `scripts/mac/chunk-budget-sweep.sh` picks the value. R57: long mixes use 600 MB to 1.2 GB less memory.
-- 19 waveform cache cap: done (r60, limit clamp(5% free, 512 MiB, 2 GiB)); 21 rten bump (rec drop); 29 UI headroom and QoS (rec keep); 31 schema bump for 50k (after the holiday); 27 ORT and CoreML (CoreML shipped through r26 and r30).
+- Landed on `ov-1028` since the last refresh: r72 ordered save (`save_state` async, frontend save queue, one in flight, latest snapshot wins; e07c97c), r73, r74 and r80 smoke flake fixes (f4f2e5f, 0a80690, cce1f77), r77 tempo refinement doc (684f71b; six refinements tried, none adopted, no code change).
+- 19 waveform cache cap: done (r60, limit clamp(5% free, 512 MiB, 2 GiB)); 21 rten bump (rec drop); 29 UI headroom and QoS (rec keep); 31 schema bump for 50k (built as `r81-schema-bump` and `r84-path-keys`, 05ebecd, schema v8: folded keys including path and file name, covers outside `library.db`, analysis failures table; 50k `library.db` 7.5 GB to 59 MB; in `parked-all-v7`, design `docs/architecture/schema-v8-2026-11.md`; open: per-file fsync makes the background cover fill slower, keep durability, rec); 27 ORT and CoreML (CoreML shipped through r26 and r30).
 - 1, 2, 3 USB sync round 3 UI; 5 old stash; 6 `.claude/settings.local.json` push rule; 7 push master (30+ commits ahead). Not beta blockers: 5, 6, and 31 until libraries reach 50k.
 
-Next step: Merlin takes the recs after the holiday in this order: `parked-all-v3` (33, 37, 38, then 34, 35, 36 with one Mac check), 40, 24, 15, 39, then the 16 listen.
+Next step: Merlin takes the recs after the holiday in this order: `parked-all-v7` (33, 37, 38, 31, then 34, 35, 36, 40, 41 with one Mac check), 24, 15, 39, then the 16 listen. Merlin judges the r79 tempo results first if he wants them out of the combined landing.
 
 ## 15. CI - needs Merlin
 
@@ -256,7 +260,7 @@ Next step: Merlin decides channel, hosting and repo visibility; the agent then a
 ## Suggested order
 
 1. Merlin, one sitting: 1 (name and id), 3 (sign or not), 7 (key), 10 (no updater), 17 (channel and repo visibility), 15 (push `r63-ci`).
-2. Merlin, land after one Mac WebKit check: `parked-all-v3` (14; includes the no-Python removal, 6), `r69-stick-busy` (Waiting 40), `r53-user-docs-v2` (16, 13, 5).
+2. Merlin, land after one Mac WebKit check: `parked-all-v7` (14; includes the no-Python removal, 6, the schema v8 bump, r69 stick guard and r79 tempo search), `r53-user-docs-v2` (16, 13, 5).
 3. Next Mac night (needs a go): r67 freeze check, chunk-budget sweep, `perf-night.sh`, confirm the "(to confirm)" marks from the docs draft.
 4. Agent work needing no decision: 6 (bundle the notices, About rows, `deny.toml`; LICENSE once chosen), 9 ("Copy diagnostics" and "Reveal logs"), 11 (FAQ entry).
 5. After 1: migration (2), then signing path (3, 4) on a Mac night; first notarized dmg; install test on a clean user.
