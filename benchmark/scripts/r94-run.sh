@@ -20,7 +20,7 @@ avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
 if [ "$avail" -lt 1500 ]; then echo "$label: MemAvailable $avail MB < 1500, not starting" >&2; exit 3; fi
 load0=$(cut -d' ' -f1 /proc/loadavg)
 env "${envs[@]+"${envs[@]}"}" /usr/bin/time -f "cpu_user %U cpu_sys %S wall %e maxrss_kb %M" -o "$out/$label.time" \
-  "$ffa" --models "$models" --beat-model "$model" --workers 4 --threads 4 --no-key --no-waveform \
+  "$ffa" --models "$models" --beat-model "$model" --workers "${WORKERS:-4}" --threads "${THREADS:-4}" --no-key --no-waveform \
   --reference "$data/ref.json" --list "$list" --out "$out/$label.jsonl" 2> "$out/$label.err"
 load1=$(cut -d' ' -f1 /proc/loadavg)
 n=$(wc -l < "$out/$label.jsonl")

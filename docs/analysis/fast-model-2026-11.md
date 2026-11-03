@@ -80,6 +80,39 @@ On dev c750 and c500 are equal; on test c750 lost 2 grid / 3 BPM on 75 tracks wh
 2. Drop the small checkpoints: same speed as chunk 500 with 6-13 grid points lost (as in the October test).
 3. Do not go below 500: 300 frames gains only 5% more and starts losing BPM.
 
+## Confirmation (r96, 2026-11-03)
+
+Branch `r96-chunk500`. Gate (grid and BPM 0.1 each within 2 tracks of base on test, no worse than -2 on dev): **passed**.
+
+Quality, `o3-score.py`, ffa `--workers 2 --threads 2` on the box (base and c500 ran at the same time, load 13-25, test base split in two halves because of the run limits):
+
+| Split | Variant | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right | Grid + bar | CPU s/track |
+|---|---|---:|---:|---:|---:|---:|---:|
+| test 205 | base 1500 | 167 | 180 | 190 | 138 | 133 | 80.3 |
+| test 205 | chunk 500 | **167** | **180** | 192 | 138 | 135 | 45.8 |
+| dev 50 | base 1500 | 44 | 47 | 50 | 41/46 | 40 | 81.2 |
+| dev 50 | chunk 500 | 43 | 47 | 50 | 41/45 | 40 | 46.8 |
+
+BPM differs by more than 0.01 on 22 of the 205 test tracks, but the tolerance counts do not move. Dev matches r94 (44 -> 43).
+
+Mac `mbp` (M5 Pro, 24 GB, AC, headless, `nice -n 10`, HOME scratch, no Pioneer data touched), dev split, same code:
+
+| App path (`bench_analysis`, 48 unique tracks, 6 workers) | Tracks/min | First result | Peak RSS |
+|---|---:|---:|---:|
+| CoreML 1500 | 31.5 | 5.2 s | 6.3 GB |
+| CoreML 500 | 25.9 (-18%) | 3.6 s | 2.7 GB |
+| rten 1500 | 15.9 | 5.8 s | 6.1 GB |
+| rten 500 | 24.9 (+57%) | 3.9 s | 2.3 GB |
+
+`ffa` (2 workers) agrees: CoreML 31.0/30.2 -> 22.1/22.9 tracks/min (RSS 4.9/4.4 -> 2.1/2.2 GB), rten 12.7/13.0 -> 19.7/19.4 (3.1/3.2 -> 1.7/1.3 GB).
+
+- CoreML output equals rten output at the same chunk length: 49/49 tracks, every beat time identical, BPM within 0.01 (R24 criterion holds at 500 too). Mac dev scores: 1500 grid 44, BPM 47; 500 grid 43, BPM 47, equal on CoreML and rten.
+- **CoreML is slower at 500**: three times as many calls, and its per-call cost does not fall with the chunk length the way rten's does. It trades 18% speed for 57% less memory and a 30% sooner first result.
+
+Decision in code: `DEFAULT_CHUNK_SIZE` is 500, except 1500 in builds with the `coreml` feature on macOS (the shipped Mac app), so the Mac path is unchanged. `FOURFOUR_BEAT_CHUNK` still overrides. Making the Mac 500 as well is one constant (`COREML_CHUNK_SIZE` in `bt.rs`) and is a speed against memory call for Merlin.
+
+`ANALYSIS_VERSION` 1 -> 2. It only feeds `analysis_key`, which keys `analysis-failures.json` (the memo of tracks that failed analysis): after the bump the memo is dropped once and failed tracks are retried. It does not re-analyse the library and does not touch stored results, so existing tracks keep their 1500-chunk analyses (grid differences are within the 1-3 track noise above). The earlier "cached analyses are redone" note was wrong. Re-analysis of existing tracks stays the user's action.
+
 ## Next (to reach 2x+)
 
 - Chunk 500 leaves the model at about 85% of analysis CPU. Small1 at chunk 500 would be about 3x the base model speed but carries the small-model quality loss; not recommended.

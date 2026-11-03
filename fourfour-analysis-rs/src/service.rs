@@ -23,7 +23,7 @@ pub fn models_present(dir: &Path) -> bool {
     dir.join(MEL_MODEL).is_file() && dir.join(beat_model()).is_file()
 }
 
-pub const ANALYSIS_VERSION: u32 = 1;
+pub const ANALYSIS_VERSION: u32 = 2;
 
 pub fn analysis_key(models_dir: Option<&Path>) -> String {
     let len = |name: &str| models_dir.and_then(|dir| std::fs::metadata(dir.join(name)).ok()).map_or(0, |m| m.len());

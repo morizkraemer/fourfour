@@ -16,7 +16,9 @@ use crate::decode::resample_to;
 use beat_this::{Model as BtModel, Tensor};
 use rten::{ModelOptions, NodeId, RunOptions, ThreadPool, ValueOrView, ValueView};
 
-const DEFAULT_CHUNK_SIZE: usize = 1500;
+const COREML_CHUNK_SIZE: usize = 1500;
+const RTEN_CHUNK_SIZE: usize = 500;
+const DEFAULT_CHUNK_SIZE: usize = if cfg!(all(feature = "coreml", target_os = "macos")) { COREML_CHUNK_SIZE } else { RTEN_CHUNK_SIZE };
 const BORDER_SIZE: usize = 6;
 const MEL_STRIDE: usize = 1536;
 const N_MELS: usize = 128;
@@ -548,6 +550,17 @@ fn pick_peaks(beat_logits: &[f32], down_logits: &[f32]) -> (Vec<f32>, Vec<f32>) 
         downbeats.dedup();
     }
     (beats, downbeats)
+}
+
+#[cfg(test)]
+mod chunk_default_tests {
+    use super::*;
+
+    #[test]
+    fn coreml_builds_keep_the_long_chunk_and_the_rest_use_the_short_one() {
+        let coreml_on_mac = cfg!(all(feature = "coreml", target_os = "macos"));
+        assert_eq!(DEFAULT_CHUNK_SIZE, if coreml_on_mac { 1500 } else { 500 });
+    }
 }
 
 #[cfg(all(test, feature = "ort"))]
