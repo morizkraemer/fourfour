@@ -1,7 +1,7 @@
-# fourfour — state
+# fourfour - state
 
 _Updated: 2026-11-03 by orchestrator on `dev`. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
-_Archived detail (trimmed 2026-10-27, 2026-11-03): docs/state-archive-2026-10-28.md_
+_Archived detail (trimmed 2026-10-27, 2026-11-03 twice): docs/state-archive-2026-10-28.md_
 
 ## Direction
 Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bounce). Quiet engineering only; never takes Merlin's focus hours. Holiday 2026-10-30 → 2026-11-16: nothing user-visible lands.
@@ -16,62 +16,59 @@ Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a
 AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-4. [accepted 2026-10-31 per rec, landed on ov-1028 3e5ec61; clean 56.3% test; dmg bundle path untested] Key licence: shipped cyanbox templates are fit on GiantSteps MTG (labels unlicensed). A clean model fit only on CC0/CC BY Freesound loops (FSL10K) is built behind a one-line switch: Beatport test exact 56.3% vs 60.3% shipped (below the 60% bar); needs attribution (Ramires et al. 2020 + CC BY uploaders). docs/analysis/key-licence-2026-10-31.md - rec: ship clean-fsl for the public beta (legal risk over 4 points), keep improving it - branch: ov-1028 (switch SHIPPED in cyankey.rs)
-5. Old stash@{0} (scrub-pause waveform tweaks; prototyping/viewport only, not the app, so not built in the run) — rec: build on a branch for review — branch: none
-6. `.claude/settings.local.json` allows `git push *`, which bypasses the push ask rule — rec: remove that allow line (Merlin edits it) — branch: none
-7. Push master (30 commits ahead, docs + analysis prototype + tests) — rec: push — branch: master
-15. [refreshed 2026-11-02 on r63-ci fbb1ba6: + dev-bins check, notices drift job, smoke factor 2; local Linux steps green; supersedes r35-ci] CI workflow refreshed for ov-1028 (macOS dmg + check, Windows nsis, Linux deb + smoke; weights bundled; actionlint clean, Linux steps pass locally, never run on GitHub) - rec: OK to push branch r35-ci for a first run (supersedes ov-ci: refreshed for coreml, dev-bins, deb checks, webkit smoke, Windows OpenSSL; trigger now master + PRs only). Windows ships without libcrypto-3 DLL until bundled or vendored - decide after the first run - branch: r63-ci-v3 (f0827da = r63-ci-v2 + deb check without SIGPIPE pipe; Linux tests, smoke, deb bundle 86 MiB and deb --self-check all green locally 2026-11-03; macOS, Windows, notices and webkit jobs not run)
-16. [accepted 2026-11-01 per PM relay "don't wait for reviews", landed on ov-1028 29add96; listen check still open] Bar 1: hybrid rule (grid beat 0 = bar 1 unless model downbeat vote >=80%) built on b15-bar1 e717de0 behind BAR_ONE_RULE: Rekordbox agreement test 61.5% -> 79.3%, dev 57.8% -> 88.9%; grid/BPM unchanged; 72 tracks differ (new right 59, old right 13), listen list in docs/analysis/rust-status-2026-10-28.md B15 - rec: listen to the 5 regressions on the Mac, then land - branch: b15-bar1
-21. Q50: rten 0.27 bump - logits differ up to 8.6e-5, slower - rec: drop - branch: q50-rten27
-24. Beta .dmg: bundle id is com.pioneer.test-ui (Pioneer is a trademark; also the macOS data folder keys off it) - rec: pick a neutral id before any public beta, migrate app data once - branch: none
-29. UI headroom (r5): analysis now uses cores-2 and holds new model chunks while you scroll (500 ms idle); a running chunk (~5 s) can't be stopped, so short flicks gain little. Background QoS (E-cores only) is behind FF_ANALYSIS_QOS=background - rec: keep defaults, decide on background QoS after the Mac night measures it - branch: ov-1028
-27. [built 2026-10-31 on r9-ort 383ae88, unlanded: onnxruntime CPU no faster than rten on box (8-9 vs 9.6-10 trk/min), 2x memory, first result 2x later; logits within 2e-4, grid eval identical; CoreML path untested - rec: Mac-only test on a Mac night, drop if no gain] Analysis speed is capped by the beat model on CPU (91% of time; ~8 trk/min on dev, 10k = ~18 h). Only a new runtime moves it: onnxruntime + CoreML (GPU/Neural Engine) on the Mac, or fused attention. Not bit-identical, needs the grid/key evals - rec: try onnxruntime+CoreML on a branch, measure on a Mac night, keep only if evals hold - branch: none
-30. Clean key model v2 (b14): self-trained on CC BY FMA clips; Beatport test 57.3% vs 56.3% (2 tracks, within noise; dev +9), adds 264 FMA artist credits. The 36-weight template model is at its ceiling without ~1,500 permissively labelled tracks, so 60% clean is out of reach this way - rec: leave unlanded, ship CLEAN_FSL, accept ~56% for the beta - branch: b14-cleankey60 (11784f5)
-31. Schema changes for 50k speed + robustness (r12/r13): store folded artist/title keys (import duplicate plan 1-1.5 s at 50k), move covers out of library.db (7.5 GB at 50k, slow commits), store analysis failures (no retry every launch) - rec: one schema bump with all three after the holiday - [built 2026-11-03 per rec on r81-schema-bump 9faae58, design docs/architecture/schema-v8-2026-11.md: library.db 7.5 GB -> 59 MB at 50k, first duplicate plan -30% at 50k, migration 3.5 s + background cover move 240 s at 50k; all checks + smoke green. Open: per-file fsync makes background cover fill 2.5x slower (keep durability, rec) ; restored v7 backup moves covers at next launch. r84 adds stored path/file-name keys: 50k first plan 438 -> 392 ms] - branch: r84-path-keys 05ebecd (includes r81)
-33. Error messages (r18): 42 messages rewritten via app/src/lib/userErrors.ts, 13 silent failures surfaced. Real bugs inside: analyzeTrackIds/analyzeTracks and playlist saves fall back to the browser mock in the real app (fake "Analyzed" events, unsaved playlists look saved); player errors never rendered. Doc docs/ui/error-messages-2026-11.md - rec: land first thing after the holiday (bugs are real); open calls: library.db open panic needs a recovery screen, status bar gets clobbered by analysis progress (toast?) - branch: r18-errors-v4 (ad6ed3f)
-34. Keyboard + screen reader (r17): list is a real listbox (arrows, Shift range, Enter plays, Shift+F10 menu), sidebar/menus/dialogs keyboard-reachable with focus trap + return, CUE by keyboard, 26 keyboard specs. Behaviour change: Tab/Space yield to keyboard-focused controls (mouse flows unchanged). Touches prototyping design-system (commit af739a7, AGENTS fence) - rec: land after a Mac WebKit check; open: keyboard reorder, waveform seek, rating by keys - branch: r17-a11y-v4 (5258d54). [built 2026-11-03 per rec on r78-a11y-followups 1847c23 (on top of r17-a11y-v4): Mod+0-5 rating (plain digits are favourites), waveform as keyboard slider (beat / 4-bar steps, Home/End), Alt+Up/Down reorder in unsorted playlists, new live region; edits PlayerCompact.svelte + player-compact.css (fence, files r17 already edits); both smokes green. r82 headless screenshots (~/.cache/r82 on dev): fixed waveform focus ring hidden under the canvas + F6 stuck on sidebar below ~720px (r17 bug) -> branch r82-r78-fix 788db39 (use this one). Taste calls: Rating column hidden by default so Mod+3 shows no feedback (toast? column on?); waveform rings 2px vs 1px elsewhere; F6 through search opens the palette]
-35. Cover cache cap (r31): 512 px covers LRU 96 with pins (player, inspector, organize rail/picker, drop flash); organize views now load only the covers they draw. Visible: the rail's "+N" counts tracks with artwork, not covers loaded so far - rec: land after a quick look (rapid selection: inspector, player, organize rail never blank) - branch: r31-cover-cap-v4 (39ed323)
-36. WebKit startup (r29): the design-system reset `*, *::before, *::after { box-sizing }` makes WebKit resolve two pseudo styles per element; `* { box-sizing }` cuts row style time ~40%, WebKit 10k first row 1.84 -> 1.37 s (loaded box), screenshots byte-identical. Edits prototyping/viewport/design-system/base.css (AGENTS fence) - rec: allow and land (r45 confirmed in a full build: WebKit row style -32%, pixel-identical; a second fenced step - cell geometry as per-column custom properties - gives ~10% more) - branch: r29-css-v4 (2c37766) (or r46-dsrows-v3 63c5b94 = r29 fix + cell geometry patch; rec: land both together)
-37. Library recovery panel (r38): when library.db fails to open, the list shows why (newer version / damaged / in use) plus Open another library, Restore a backup, Start a new library, Try again (locked); failed file never touched; screenshots ~/.cache/r38/*.png on dev. Copy uses the working title ("newer version of fourfour") - rec: land after review, swap the name for "the app" - branch: r76-recovery-kind (b4171e5; = r38-recovery-v4 + classification by error kind, no copy change)
-38. No Python in the beta (r52, checklist 6.7): the Python analysis fallback (path to AGPL Essentia/DeepRhythm) is removed; a Rust failure is recorded as an analysis failure. Visible: Settings > Engine loses the "Analysis engine" picker (only "Parallel workers" left). All checks green; analysis bench dev-bin fixed for it (2933305) - rec: land - branch: r52-no-python-v3 (2933305)
-39. Beta user docs draft (r53, checklist 16): docs/user/ README, install, quick start, USB, FAQ, known issues; plain words, no app name; 20 "(to confirm)" marks (Mac-only facts: data/log folders, removable-volume prompt, CDJ models, speed on Apple Silicon); UI paths in quick start from code, not from running the app - rec: read on the phone, then confirm the marks on a Mac night - branch: r53-user-docs-v2 56f7625 (now incl. the "what to expect" numbers, checklist 13)
-40. Stick busy guard (r69): one mutating stick operation at a time per stick (sync, write, wipe, eject, stick edits); write_usb and wipe_usb now run off the main thread (no window freeze during a sync or wipe). Visible: a second operation on a busy stick shows "This stick is busy. Try again when the current sync finishes."; a multi-stick sync now refuses as a whole if any stick is busy (was a per-stick report). 544 Rust tests green - rec: land - branch: r69-stick-busy-v2 (9a928da)
-41. BPM fit stuck on a nearby tempo peak (r79): new global fold-peak search (+-4%, kept only if it scores higher), switch fit::TEMPO_SEARCH default ON. Test BPM within 0.1 180 -> 186/205, grid within 20 ms 167 -> 171; dev/train unchanged, zero losses on any split; +150 ms fit per track. Remaining misses mostly dynamic Rekordbox grids (master.db BPM coarse there) - rec: land (analysis results change for ~3% of tracks, all toward Rekordbox) - branch: r79-bpm-misses (ce1d8b1; full workspace cargo test green 2026-11-03) [r88 2026-11-03, doc only on r88-grid-misses f90fd39 (on r79): 34 test misses left = 15 dynamic Rekordbox grids, 6 half-beat (our grid on the kick, Rekordbox off it), 4 model tempo errors, 3 drift, 3 other offset, 2 octave, 1 flat; no clean fix (kick tie-break +1 / -many), grid is at its ceiling for this model]
-Note on 33-38: land the -v4 branches (r75: replayed onto ov-1028 0a80690 2026-11-02, each npm test/check green), or parked-all-v7 15fd864 for all at once (v5 + r82-r78-fix + r79 + r81/r84 schema v8 + r69-v2; 558 Rust tests, 958 vitest, both smokes green 2026-11-03) (r17+r18+r29+r31+r38+r52; full checks + smoke green; r18+r38 initLibrary and r38 read_backup conflicts resolved there).
-Lab review 2026-11-02 (Merlin): sync round 3 Keep, skeleton round 2 Keep, scroll while analysing Stable, sidebar empty state round 2 Keep + idea: limit the empty-state width at full width, expand when a list loads (built: branch r50-sidebar-empty 4372b8c, lab card ov1028-sidebar round 3 posted; note: in a 900 px window the narrow picker cuts off its last card). Locked in lab/data/locked.
-### Needs Merlin's ears/eyes (laptop)
-- Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM, restart by hand.
-- Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
-### Brother's lane
-- r20 Windows risks: is_removable true for every drive, eject via umount, statvfs stub unlimited, pdb.rs extension match case-sensitive (TRACK.MP3 -> type 0); see Platforms 2026-11 in robustness-2026-11.md.
-- Windows libcrypto (r65, docs/release/windows-crypto-2026-11.md on ov-1028): no openssl-sys; libsqlite3-sys links system libcrypto on Windows/Linux, CommonCrypto on macOS. Proposal: rusqlite feature bundled-sqlcipher-vendored-openssl under cfg(windows) only in pioneer-usb-writer/Cargo.toml, when a Windows release is planned
-- r12: USB export puts two tracks with the same artist + file name (untagged "01 Intro.mp3") on one path; repro ignored test in pioneer-library/tests/robust_store.rs. Also lofty rejects some bad tags so playable files are skipped (relaxed parse in scanner.rs).
-- SQLCipher keys private; no PDB reader (docs/architecture/rekordbox-import.md).
-- From clone research: Booth 0.0.9 CDJ-3000 fw 3.22 fixes, baken waveform/PVB2/PSSI (MIT), cyanbox MP3 timeline rule + PWAV min heights — see docs/research/clones-2026-10-23.md "Format facts".
-- Sync engine changes per docs/ui/usb-sync-spec.md (playlist scope, ownership manifest, dry-run plan, progress events, capacity, removable-drive filter, wipe guard).
-- Import (r6): a cold 10k import reads 2.7 GB because lofty reads ID3 picture frames even with read_cover_art(false); an ID3 reader that seeks past pictures in pioneer-usb-writer/src/scanner.rs would cut it.
-- Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 placement for CDJ-3000X; CDJ-3000 round-trip of a current export.
-## Queue
-### Q5 Unsigned macOS build [queued] [mac] — `cargo tauri build` via mac-queue; report artifact + log; no signing. 30 min
-### Q6 Key source PDB vs OneLibrary [handed to brother]
-### Q8 Cross-platform CI [queued] [box] — Actions on macOS/Windows/Linux (build, test, check, unsigned tauri build). Branch only; first run on the shared repo needs Merlin's OK. 45 min
-### Q14 USB sync UI [waiting on Merlin] — first attempt on ui-sync-flow (b510e70, preview :4240 when started); round 3 mockups decide the rebuild.
+4. [accepted 2026-10-31] Key licence: clean FSL model ships, Beatport 56.3% (below 60% bar). Needs attribution. rec: ship clean-fsl for beta - branch: ov-1028 (switch in cyankey.rs)
+5. Old stash@{0} (waveform tweaks, prototyping only). rec: build on a branch for review - branch: none
+6. `.claude/settings.local.json` allows `git push *`, bypassing the push ask. rec: remove that allow line (Merlin edits it) - branch: none
+7. Push master (30 commits ahead). rec: push - branch: master
+15. [refreshed 2026-11-02] CI for macOS, Windows, Linux; never run on GitHub. Windows lacks libcrypto DLL. rec: OK to push r63-ci-v3 for a first run - branch: r63-ci-v3 f0827da
+16. [accepted 2026-11-01] Bar 1 rule: Rekordbox agreement 61.5% -> 79.3%. 5 regressions to listen to. rec: listen on the Mac, then land - branch: b15-bar1 e717de0
+21. Q50 rten 0.27 bump: slower, logits drift. rec: drop - branch: q50-rten27
+24. Beta .dmg bundle id com.pioneer.test-ui (Pioneer is a trademark). rec: pick a neutral id before public beta, migrate data once - branch: none
+27. [built 2026-10-31, unlanded] onnxruntime+CoreML: no CPU gain on dev. rec: Mac test on a Mac night, drop if no gain - branch: r9-ort 383ae88
+29. UI headroom: analysis pauses while scrolling. Background QoS behind FF_ANALYSIS_QOS. rec: keep defaults, decide after Mac night - branch: ov-1028
+30. Clean key model v2: Beatport 57.3%, within noise. rec: leave unlanded, ship CLEAN_FSL, accept ~56% - branch: b14-cleankey60 11784f5
+31. [built 2026-11-03, schema v8] library.db 7.5 GB -> 59 MB at 50k. Open: fsync makes cover fill 2.5x slower. rec: keep durability - branch: r84-path-keys 05ebecd (includes r81)
+33. [built 2026-11-03] Error messages (r18): 42 rewritten, 13 silent failures surfaced; analysis and playlist saves hit the browser mock. rec: land first after holiday - branch: r18-errors-v4 ad6ed3f. Open: recovery screen for open panic; status bar vs progress (toast?)
+34. [built 2026-11-03] Keyboard + screen reader (r17/r78/r82). rec: land after a Mac WebKit check. Taste calls: rating column default, waveform ring width, F6 through search - branch: r82-r78-fix 788db39
+35. Cover cache cap (r31). rec: land after a quick look (no blank rail, inspector or player) - branch: r31-cover-cap-v4 39ed323
+36. WebKit startup (r29): row style -32 to -40%, pixel-identical. Edits AGENTS fence. rec: land both steps together - branch: r29-css-v4 2c37766 (or r46-dsrows-v3 63c5b94)
+37. Library recovery panel (r38): shows why library.db will not open, plus retry/restore/new. rec: land after review, say "the app" not "fourfour" - branch: r76-recovery-kind b4171e5
+38. No Python in beta (r52): Python fallback removed, engine picker gone. rec: land - branch: r52-no-python-v3 2933305
+39. Beta user docs draft (r53): 20 "(to confirm)" marks need a Mac. rec: read on the phone, confirm marks on a Mac night - branch: r53-user-docs-v2 56f7625
+40. Stick busy guard (r69): one stick operation at a time, sync off main thread. rec: land - branch: r69-stick-busy-v2 9a928da
+41. [r88 2026-11-03, grid at ceiling] BPM fold-peak search on by default: test 180 -> 186/205. rec: land (~3% of tracks change, toward Rekordbox) - branch: r79-bpm-misses ce1d8b1
 
-### Q50 Speed: startup, track load, import, analysis [running as the holiday run] [box] — full brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
+Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once.
+
+### Needs Merlin's ears/eyes (laptop)
+- Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM.
+- Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
+
+### Brother's lane
+- Windows risks (r20): eject, removable flag, case-sensitive extensions. See robustness-2026-11.md, Platforms 2026-11.
+- Windows libcrypto (r65): vendored-openssl SQLCipher feature under cfg(windows), when a Windows release is planned.
+- r12: two same-name tracks collide on one USB path (repro: pioneer-library/tests/robust_store.rs).
+- r6: cold 10k import reads 2.7 GB of ID3 pictures; seek-past reader in pioneer-usb-writer/src/scanner.rs.
+- Sync engine per docs/ui/usb-sync-spec.md. Clone facts: docs/research/clones-2026-10-23.md.
+- Open: Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 for CDJ-3000X; CDJ-3000 round-trip.
+
+## Queue
+### Q5 Unsigned macOS build [queued] [mac] - cargo tauri build via mac-queue. 30 min
+### Q6 Key source PDB vs OneLibrary [handed to brother]
+### Q8 Cross-platform CI [queued] [box] - build, test, check on 3 OSes; branch only; first run needs Merlin's OK. 45 min
+### Q14 USB sync UI [waiting on Merlin] - round 3 mockups decide the rebuild; branch ui-sync-flow b510e70
+### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ## Run
-status: idle since 2026-11-03 14:25 (r88 found no clean grid fix; box work done, rest needs a Mac night go or Merlin) · was running until Merlin says stop · holiday 2026-10-30 to 2026-11-16 · cap 2 · seat only · no reviews during holiday, take recs, log decisions here · green work lands on ov-1028 (+ Mac install); never master, never push · Mac: only on Merlin's go (last go 2026-11-01 21:42 for that night)
-targets: beta-ready on ov-1028, as fast as possible at 10k+ (startup, analysis, track load, scroll); speed first, then beta
-done so far: plan items 0-12 and own-priority r11-r41 (detail: docs/state-archive-2026-10-28.md "Run plan as of 2026-11-02", journal, docs/architecture/perf-run-2026-11.md R-sections)
-open own-priority items:
-- 2026-11-02/03 landings and parked builds: see journal; all parked work is in parked-all-v7 (Waiting list above)
-parked for Merlin (land the -v4 branches; parked-all-v7 15fd864 = all at once): r18-errors-v4 (Waiting 33), r17-a11y-v4 (34), r31-cover-cap-v4 (35), r29-css-v4 (36), r76-recovery-kind (37), r52-no-python-v3 (38); r15-reveal (not worth landing), r16-quant (dropped), r35-ci (Waiting 15)
-next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028 (now with CoreML, font preload, error kinds; probe has longest_busy/pending_frames/page origin); compare r15-reveal and r29-css-v4 (2c37766); 50k only with >= 40 GB free (script now cleans up and stops when low); chunk-budget sweep: scripts/mac/chunk-budget-sweep.sh --n 200 (pick CHUNK_BUDGET_CEILING_MB; box dry-run: unset 5.5 GB, 2048 -> 2.5 GB peak)
-review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (app on ov-1028, mock data; rebuilt after merges) · https://dev.tail87069a.ts.net:4211 (parked-all-v7 15fd864, everything waiting for review, mock data; systemd ff-parked-review, rebuild into ~/.cache/preview/fourfour-parked)
-Mac: ov-1028 installed in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221/
-Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's format/engine lane read-only
+status: idle since 2026-11-03 14:25 (r88: no clean grid fix) · runs until Merlin says stop · holiday to 2026-11-16 · cap 2 · seat only · no reviews, take recs · green work lands on ov-1028 (+ Mac install); never master, never push · Mac only on Merlin's go (last 2026-11-01 21:42)
+targets: beta-ready on ov-1028, fastest at 10k+ (startup, analysis, track load, scroll); speed first, then beta
+parked for Merlin: r18-errors-v4 (33), r17-a11y-v4 (34), r31-cover-cap-v4 (35), r29-css-v4 (36), r76-recovery-kind (37), r52-no-python-v3 (38); all at once: parked-all-v7 15fd864. Not landing: r15-reveal, r16-quant (dropped), r35-ci (15)
+next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028; compare r15-reveal and r29-css-v4; 50k only with >= 40 GB free; chunk-budget sweep: scripts/mac/chunk-budget-sweep.sh --n 200
+review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (ov-1028, mock) · https://dev.tail87069a.ts.net:4211 (parked-all-v7, mock)
+Mac: ov-1028 in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221/
+Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's lane read-only
 
 ## Rundown
-Run 2026-10-30 to 11-03 on ov-1028 (checks green, Chromium + WebKit smoke): Mac analysis on CoreML 2-3x faster, 50k startup 2.2 -> 1.35 s warm, Linux RSS after analysis 2.1 -> 0.3-0.4 GB, long mixes -1.2 GB, Tauri commands off the main thread (Mac 5 s freeze fix, saves ordered), smoke stable under load.
-Parked 2026-11-03 (all in parked-all-v7, preview :4211): schema v8 (50k library.db 7.5 GB -> 59 MB), BPM search (test 180 -> 186/205), keyboard rating/seek/reorder, recovery by error kind, stick busy guard. Tried and dropped: grid drift refinements (r77, no gain).
-Waiting on Merlin: land parked-all-v7, CI push r63-ci-v3 (15), docs draft (39), key licence (4), bar-1 listen (16), bundle id (24), a11y taste calls (34). Next Mac night needs a go: perf-night, chunk-budget sweep, r67 freeze check.
+Run 2026-10-30 to 11-03 on ov-1028 (checks and smoke green): Mac analysis 2-3x faster on CoreML, 50k startup 2.2 -> 1.35 s, Linux RSS after analysis 2.1 -> 0.4 GB, Mac 5 s freeze fixed.
+Parked 2026-11-03 (parked-all-v7, :4211): schema v8, BPM search, keyboard rating/seek/reorder, recovery by error kind, stick busy guard. Dropped: grid drift refinements (r77).
+Waiting on Merlin: land parked-all-v7, CI r63-ci-v3 (15), docs (39), key licence (4), bar-1 listen (16), bundle id (24), a11y taste calls (34). Next Mac night needs a go.
