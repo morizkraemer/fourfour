@@ -60,7 +60,7 @@ Lab review 2026-11-02 (Merlin): sync round 3 Keep, skeleton round 2 Keep, scroll
 ### Q50 Speed: startup, track load, import, analysis [running as the holiday run] [box] — full brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ## Run
-status: idle since 2026-11-03 13:40 (box work done; rest needs a Mac night go or Merlin) · was running until Merlin says stop · holiday 2026-10-30 to 2026-11-16 · cap 2 · seat only · no reviews during holiday, take recs, log decisions here · green work lands on ov-1028 (+ Mac install); never master, never push · Mac: only on Merlin's go (last go 2026-11-01 21:42 for that night)
+status: running since 2026-11-03 14:10 (resumed per PM relay; r88 grid miss classes on branch) · was running until Merlin says stop · holiday 2026-10-30 to 2026-11-16 · cap 2 · seat only · no reviews during holiday, take recs, log decisions here · green work lands on ov-1028 (+ Mac install); never master, never push · Mac: only on Merlin's go (last go 2026-11-01 21:42 for that night)
 targets: beta-ready on ov-1028, as fast as possible at 10k+ (startup, analysis, track load, scroll); speed first, then beta
 done so far: plan items 0-12 and own-priority r11-r41 (detail: docs/state-archive-2026-10-28.md "Run plan as of 2026-11-02", journal, docs/architecture/perf-run-2026-11.md R-sections)
 open own-priority items:

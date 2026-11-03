@@ -559,3 +559,4 @@
 2026-11-03 12:50 orchestrator r86 handed back r63-ci-v2 aabce89 (no workflow drift; Linux steps + smoke green locally); Waiting 15 now points at it
 2026-11-03 12:55 orchestrator - decided: own prio r87-deb-check (sonnet low; run the CI Linux deb bundle + checks + --self-check locally, headless)
 2026-11-03 13:40 orchestrator r87 deb check: bundle + self-check green, CI deb grep SIGPIPE flake fixed on r63-ci-v3 f0827da. run-pause: idle, own-priority box work done; left: Mac night items (need go), Waiting reviews, pushes
+2026-11-03 14:10 orchestrator - resumed per PM relay; decided: own prio r88-grid-misses (sonnet medium; classify remaining test grid misses on r79, fix one class on branch if test+dev gain with 0 losses)
