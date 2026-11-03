@@ -557,3 +557,4 @@
 2026-11-03 11:50 orchestrator r85-checklist-refresh landed doc-only on ov-1028 (beta checklist points at parked-all-v7)
 2026-11-03 12:00 orchestrator - decided: own prio r86-ci-refresh (sonnet low; r63-ci replayed on current ov-1028 as r63-ci-v2, check ci.yml for drift; push still needs Merlin)
 2026-11-03 12:50 orchestrator r86 handed back r63-ci-v2 aabce89 (no workflow drift; Linux steps + smoke green locally); Waiting 15 now points at it
+2026-11-03 12:55 orchestrator - decided: own prio r87-deb-check (sonnet low; run the CI Linux deb bundle + checks + --self-check locally, headless)
