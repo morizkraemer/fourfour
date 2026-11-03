@@ -290,19 +290,58 @@ const TRACK_VIEW_FIELDS: Record<string, (row: TrackRow) => unknown> = Object.ass
   },
 });
 
+const rowStates = new WeakMap<TrackRow, TrackRow>();
+
+function createRowState(track: TrackRow): TrackRow {
+  const created = $derived.by(() => {
+    const row = $state(track);
+    return row;
+  });
+  return untrack(() => created);
+}
+
+function rowStateOf(track: TrackRow): TrackRow {
+  let state = rowStates.get(track);
+  if (!state) {
+    state = createRowState(track);
+    rowStates.set(track, state);
+  }
+  return state;
+}
+
 const trackRowHandler: ProxyHandler<TrackRow> = {
-  get(row, key, receiver) {
+  get(track, key, receiver) {
+    if (key === 'id') return track.id;
     const view = typeof key === 'string' ? TRACK_VIEW_FIELDS[key] : undefined;
-    return view ? view(receiver) : Reflect.get(row, key, receiver);
+    return view ? view(receiver) : Reflect.get(rowStateOf(track), key, receiver);
   },
-  has(row, key) {
-    return key in TRACK_VIEW_FIELDS || Reflect.has(row, key);
+  has(track, key) {
+    return key in TRACK_VIEW_FIELDS || Reflect.has(rowStateOf(track), key);
+  },
+  set(track, key, value) {
+    return Reflect.set(rowStateOf(track), key, value);
+  },
+  defineProperty(track, key, descriptor) {
+    return Reflect.defineProperty(rowStateOf(track), key, descriptor);
+  },
+  deleteProperty(track, key) {
+    return Reflect.deleteProperty(rowStateOf(track), key);
+  },
+  ownKeys(track) {
+    return Reflect.ownKeys(rowStateOf(track));
+  },
+  getOwnPropertyDescriptor(track, key) {
+    return Reflect.getOwnPropertyDescriptor(rowStateOf(track), key);
   },
 };
 
+/**
+ * A row is its plain object behind a handler that creates the `$state` proxy on the first read or write of anything but
+ * `id`, so rows nobody has touched cost one `Proxy`. The proxy is created inside its own derived: a state created while
+ * an effect runs would not be tracked by that effect's first reads.
+ */
 function reactiveTrack<T extends object>(track: T): T {
-  const row = $state(track);
-  return new Proxy(row, trackRowHandler) as T;
+  return new Proxy(track, trackRowHandler as ProxyHandler<T>);
 }
 
 /**
