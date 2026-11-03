@@ -3375,6 +3375,7 @@ dependencies = [
  "fourfour-stretch",
  "image",
  "libc",
+ "lofty",
  "pioneer-library",
  "pioneer-usb-writer",
  "ringbuf",

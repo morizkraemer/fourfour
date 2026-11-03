@@ -28,6 +28,7 @@ mod tempo;
 mod track_fields;
 mod track_infos;
 mod stick_commands;
+mod tag_scan;
 mod volumes;
 mod waveform_detail;
 

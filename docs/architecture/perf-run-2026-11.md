@@ -1259,3 +1259,23 @@ R72 (2026-11-02): done. `saveState` is a queue (one save in flight, later calls 
 `playback_play` may also touch the disk (`probe_duration_ms` when the frontend gives no duration hint, first-time output open). Measure it on the Mac before deciding.
 
 The r67 source-level test (`volume_and_stick_commands_run_off_the_main_thread` in `main.rs`) now covers all moved commands.
+
+## R92 import without covers (2026-11-03, `r92-import-covers`)
+
+Branch `r92-import-covers` from `ov-1028` (`c2bd463`). Linux `dev` box, release `bench_startup import`, the R13 fixtures (10k, 25k), cold = page cache of the music evicted with `posix_fadvise(DONTNEED)`, before and after built from the same tree and run interleaved (load 12-17 at 10k, 18-24 at 25k, 35 for the large-cover folder; other workers were running). Raw: `~/.cache/r92/`.
+
+**Change.** The first tag pass (`import_plan::read_tags`) no longer goes through `scanner::read_track_metadata` but through `tag_scan::read_track_tags`, which reads the same fields with the same defaults and the same file type choice (extension), with lofty's `read_cover_art(false)` and a reader that serves zeros for the picture bodies instead of reading them from disk. lofty skips an ID3 `APIC` frame and an MP4 `covr` atom by reading them through (see R6), so the option alone saves the disk reads for FLAC only. A small walker finds the picture bodies by seeking over frame and atom headers (ID3v2.2-2.4 at the start of an MP3, in the `id3 ` chunk of WAV and AIFF; `moov/udta/meta/ilst/covr` in MP4), and the reader returns zeros for those byte ranges. Anything unexpected (tag-level unsynchronisation, extended header, a frame that does not chain to the tag end, a non-syncsafe v2.4 size, a truncated tag, an odd atom layout) gives no ranges and the file is read as before. The cover pass (`store_pending_covers`) still uses `read_track_metadata`, unchanged. `pioneer-usb-writer/src/scanner.rs` is not touched, so the field mapping is duplicated in `pioneer-test-ui/src/tag_scan.rs`; a test compares both readers on generated MP3 (ID3v2.3 and 2.4, covers of 0 B to 300 KB), broken tags and MP4. `pioneer-test-ui/Cargo.toml` gains `lofty = "0.24"` (same version `pioneer-usb-writer` already uses, nothing new in `Cargo.lock` but the edge).
+
+| scan, backend (median of 3, 25k: 2) | 10k before | 10k after | 25k before | 25k after | 300 files, 6.8 MB covers |
+|---|---:|---:|---:|---:|---:|
+| scan, cold | 1.47 s | 1.01 s | 7.4 s (3.4-11.3) | 3.9 s (2.3-5.6) | 0.82 s to 0.16 s |
+| scan, warm | 0.34 s | 0.26 s | 1.06 s | 0.67 s | |
+| rows (plan_import), cold | 1.6 s | 1.15 s | | | |
+
+`perf.sh --size 10k` import step on the new build: 2,648 ms end to end (budget row "import of the fixture, end to end": pass).
+
+The 10k cold scan is now 1.0 s; a plain parallel read of the first 16 KB of each file (32 threads, cold) takes 1.5-2 s here, so what is left is the per-file open and first-page latency, not cover bytes. The 25k cold numbers swing with disk load from the other workers (the two rounds are 5.6 and 2.3 s after, 11.3 and 3.4 s before). `posix_fadvise(RANDOM)` on each file made no difference and was dropped. The background cover pass is unchanged (8 s at 10k, 19-26 s at 25k).
+
+**Identity.** Same 10k fixture imported by both builds, library kept after the cover pass: `tracks` table (all 20 columns, 10,000 rows, ordered by path) byte-identical; `artwork` table identical (8,132 covers, 1,515,238,096 bytes, md5 per cover), `pending_artwork` empty. `cargo test -p pioneer-test-ui`: 274 passed (the existing `parallel_scan_returns_what_the_scanner_returns` test also checks the new reader against `scanner::scan_files` and `scan_directory`).
+
+Not covered by the skip: Ogg and Opus pictures (the comment is read whole), APE, and MP4 files whose tags are not under `moov/udta/meta/ilst`; they are read as before.
