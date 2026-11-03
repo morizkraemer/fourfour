@@ -554,3 +554,4 @@
 2026-11-03 09:30 orchestrator parked review preview: https://dev.tail87069a.ts.net:4211 = parked-all-v6 build (systemd ff-parked-review, ports.tsv row in lab-infra)
 2026-11-03 10:40 orchestrator r84-path-keys handed back 05ebecd (path/file-name keys stored, 50k plan 438 -> 392 ms), parked on top of r81; building parked-all-v7 = v6 + r84, checks running
 2026-11-03 11:20 orchestrator parked-all-v7 15fd864 green (558 Rust, 958 vitest, check 0, chromium + webkit smoke 0 failed); 4211 preview rebuilt from it
+2026-11-03 11:50 orchestrator r85-checklist-refresh landed doc-only on ov-1028 (beta checklist points at parked-all-v7)
