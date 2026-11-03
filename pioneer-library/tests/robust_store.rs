@@ -108,13 +108,19 @@ fn duplicate_detection_copes_with_odd_text() {
         normalise_tag(text);
     }
     let candidates: Vec<DuplicateCandidate> = (0..50)
-        .map(|i| DuplicateCandidate {
-            id: i,
-            source_path: PathBuf::from(format!("/music/\u{1F525}{i}.wav")),
-            file_size: if i % 2 == 0 { 0 } else { u64::MAX },
-            artist: ["", "\0", "\u{202E}x", "Unknown Artist"][i as usize % 4].to_string(),
-            title: ["", "\u{FEFF}", "(Original Mix)", "\u{1F3A7}"][i as usize % 4].to_string(),
-            duration_secs: [f64::NAN, f64::INFINITY, -1.0, 0.0][i as usize % 4],
+        .map(|i| {
+            let artist = ["", "\0", "\u{202E}x", "Unknown Artist"][i as usize % 4];
+            let title = ["", "\u{FEFF}", "(Original Mix)", "\u{1F3A7}"][i as usize % 4];
+            DuplicateCandidate {
+                id: i,
+                source_path: PathBuf::from(format!("/music/\u{1F525}{i}.wav")),
+                file_size: if i % 2 == 0 { 0 } else { u64::MAX },
+                artist: artist.to_string(),
+                title: title.to_string(),
+                duration_secs: [f64::NAN, f64::INFINITY, -1.0, 0.0][i as usize % 4],
+                artist_key: normalise_tag(artist),
+                title_key: normalise_tag(title),
+            }
         })
         .collect();
     let index = DuplicateIndex::new(&candidates);

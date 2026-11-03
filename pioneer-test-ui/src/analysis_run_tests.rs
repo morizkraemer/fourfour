@@ -1154,8 +1154,10 @@ async fn a_result_that_cannot_be_stored_is_not_a_file_failure() {
     h.run_all(h.items.clone()).await;
     h.run_all(h.work_for(&[1])).await;
 
-    assert_eq!(h.coordinator.failures().entry(1), None);
-    assert_eq!(h.coordinator.failures().entry(2), None);
+    let lib = h.shared.lock().unwrap();
+    assert_eq!(h.coordinator.failures().entry(&lib, 1), None);
+    assert_eq!(h.coordinator.failures().entry(&lib, 2), None);
+    drop(lib);
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -1170,6 +1172,6 @@ async fn a_cancelled_analysis_is_not_a_file_failure() {
     };
     tokio::join!(run, cancel);
 
-    assert_eq!(h.coordinator.failures().entry(1), None);
+    assert_eq!(h.coordinator.failures().entry(&h.shared.lock().unwrap(), 1), None);
     std::fs::remove_dir_all(&dir).ok();
 }

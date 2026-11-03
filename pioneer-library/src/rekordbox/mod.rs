@@ -411,10 +411,10 @@ impl LocalLibrary {
             library_ids.insert(&src.source_id, id);
 
             if let Some(art) = src.artwork.as_ref()
-                && queries::select_artwork(&self.conn, id)?.is_none()
+                && queries::select_artwork_hash(&self.conn, id)?.is_none()
                 && let Ok(bytes) = std::fs::read(art)
             {
-                queries::upsert_artwork(&self.conn, id, &bytes)?;
+                self.store_cover(&self.conn, id, &bytes)?;
             }
 
             self.import_analysis_and_meta(id, source.kind, src, analyses.get(&src.source_id), &mut report)?;
