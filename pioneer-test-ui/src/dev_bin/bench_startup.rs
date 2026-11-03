@@ -17,6 +17,9 @@ mod import_plan;
 #[path = "../app_log.rs"]
 mod app_log;
 
+#[path = "../tag_scan.rs"]
+mod tag_scan;
+
 #[path = "../command_error.rs"]
 mod command_error;
 

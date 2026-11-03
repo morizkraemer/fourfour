@@ -309,7 +309,7 @@ fn read_metadata_guarded(path: &Path) -> Option<Track> {
 /// The tags of one file without its cover: covers are read again and stored after the rows
 /// are in the library ([`store_pending_covers`]), so a large import never holds them all.
 fn read_tags(path: &Path) -> Option<Track> {
-    read_metadata_guarded(path).map(|track| Track { artwork: None, ..track })
+    guarded_read(path, || crate::tag_scan::read_track_tags(path, 0))
 }
 
 /// What a scan found: the tracks read (without covers) and the files skipped unread because
