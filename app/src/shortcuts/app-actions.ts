@@ -56,6 +56,7 @@ import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 import { deleteSidebarSelection, sidebarDeleteReady } from '../stores/sidebar-delete.ts';
 import {
   bpmTargetId,
+  commitTrackRating,
   doubleTrackBpm,
   halveTrackBpm,
   loadedTrackHasBpm,
@@ -63,6 +64,7 @@ import {
   stepTrackBpm,
   stepTrackKey,
 } from '../stores/track-edits.svelte.ts';
+import { announce } from '../stores/announce.svelte.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
 
@@ -90,6 +92,14 @@ function dismissTopLayer() {
   else toggleExpanded();
 }
 
+async function rateSelection(stars: number) {
+  const ids = [...selection.ids];
+  const results = await Promise.all(ids.map((id) => commitTrackRating(id, stars)));
+  if (!results.every(Boolean)) return;
+  const what = stars === 0 ? 'Rating cleared' : `Rated ${stars} ${stars === 1 ? 'star' : 'stars'}`;
+  announce(ids.length === 1 ? what : `${what} on ${ids.length} tracks`);
+}
+
 const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS }, (_, i) => {
   const slot = i + 1;
   return {
@@ -102,6 +112,24 @@ const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS },
     run: () => void toggleFavoriteSlot(slot, [...selection.ids]),
   };
 });
+
+const RATING_STEPS = [0, 1, 2, 3, 4, 5];
+
+function listHasFocus(): boolean {
+  return document.activeElement?.closest('[role="listbox"]') != null;
+}
+
+const ratingActions: ShortcutAction[] = RATING_STEPS.map((stars) => ({
+  id: `library.rate${stars}`,
+  label: stars === 0 ? 'Clear rating on selection' : `Rate selection ${stars} ${stars === 1 ? 'star' : 'stars'}`,
+  group: GROUP.library,
+  defaultBinding: `Mod+${stars}`,
+  keywords: ['rating', 'stars', 'rate'],
+  palette: false,
+  inInput: false,
+  when: () => selectionCount() > 0 && listHasFocus() && !library.volumes.includes(ui.activeSidebarRow),
+  run: () => void rateSelection(stars),
+}));
 
 const hotCueActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_, i) => {
   const slot = i + 1;
@@ -591,5 +619,6 @@ export function buildAppActions(): ShortcutAction[] {
     },
     ...bpmActions,
     ...favoriteActions,
+    ...ratingActions,
   ];
 }

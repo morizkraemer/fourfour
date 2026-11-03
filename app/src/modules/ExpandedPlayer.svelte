@@ -27,6 +27,7 @@
     triggerHotCue,
   } from '../stores/cue-actions.ts';
   import { gridNudgeMs } from '../lib/beatGrid.ts';
+  import { waveSliderProps } from '../stores/wave-seek.ts';
   import { getWaveformWindow } from '../services/tauri.svelte.ts';
   import { windowFromBytes } from '../services/waveform-bands.ts';
   import { CUE_PALETTE, HOT_CUE_SLOTS, cueChip, cueColor, cueKey, cueMarkers, formatCueTime, hotCueIn, memoryCues, slotLetter } from '../lib/cues.ts';
@@ -137,7 +138,7 @@
     </div>
   </header>
 
-  <div class="ff-xp__wave">
+  <div class="ff-xp__wave" {...waveSliderProps()}>
     <WaveformView
       bind:this={wave}
       mode="expanded"
@@ -344,6 +345,7 @@
   .ff-xp__collapse:hover { background: var(--ff-elev, rgba(255, 255, 255, 0.06)); color: var(--ff-text, #fff); }
 
   .ff-xp__wave { flex: 1; min-height: 0; position: relative; }
+  .ff-xp__wave:focus-visible { outline: 2px solid var(--ff-accent); outline-offset: -2px; }
 
   .ff-xp__transport {
     display: flex; align-items: center; justify-content: flex-start;

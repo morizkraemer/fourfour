@@ -272,7 +272,7 @@ test.describe('search and palette', () => {
     await expect(page.getByRole('option', { name: /Warmup/ }).first()).toBeVisible();
     await page.keyboard.press('Enter');
     await expect(page.locator('.ff-gheader__title')).toHaveText('Warmup');
-    await expect(page.getByRole('status')).toHaveCount(1);
+    await expect(page.locator('[role="status"]:not([data-live-region])')).toHaveCount(1);
   });
 });
 

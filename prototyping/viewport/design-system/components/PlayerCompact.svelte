@@ -40,6 +40,7 @@
     onExpand,
     controls = undefined,
     disabled = false,
+    waveformProps = {},
   } = $props();
 
   const stop = (fn) => (e) => {
@@ -138,7 +139,7 @@
       </div>
     </div>
 
-    <div class="ff-player-compact__waveform">
+    <div class="ff-player-compact__waveform" {...waveformProps}>
       <WaveformView
         mode="compact"
         {bands}

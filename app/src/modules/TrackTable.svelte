@@ -25,6 +25,8 @@
     isTrackAnalyzing,
     requestRowPreviews,
   } from '../stores/library.svelte.ts';
+  import { announce } from '../stores/announce.svelte.ts';
+  import { moveSelectedByOne } from '../lib/playlistReorder.ts';
   import { commitTrackRating } from '../stores/track-edits.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
@@ -366,8 +368,33 @@
     rowMenu = { open: true, x: rect.left + 24, y: rect.bottom, trackId: track.id };
   }
 
+  async function moveSelectionByKey(direction) {
+    const playlist = activePlaylist;
+    if (!canReorderRows || !playlist || currentTracks.length !== playlist.track_ids.length) return;
+    const order = currentTracks.map((t) => t.id);
+    const next = moveSelectedByOne(order, selection.ids, direction);
+    if (!next) {
+      announce(direction === 'up' ? 'Already at the top' : 'Already at the bottom');
+      return;
+    }
+    const cursorId = currentTracks[cursorIndex]?.id;
+    await reorderPlaylistTracks(playlist.id, next);
+    const newCursor = next.indexOf(cursorId);
+    if (newCursor >= 0) cursorIndex = newCursor;
+    revealRow(cursorIndex);
+    const count = selection.ids.size;
+    const where = `position ${cursorIndex + 1} of ${next.length}`;
+    announce(count === 1 ? `Moved ${currentTracks[cursorIndex]?.title ?? 'track'} ${direction}, ${where}` : `Moved ${count} tracks ${direction}, cursor at ${where}`);
+  }
+
   function onListKeydown(e) {
-    if (e.target !== e.currentTarget || e.altKey || currentTracks.length === 0) return;
+    if (e.target !== e.currentTarget || currentTracks.length === 0) return;
+    if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      void moveSelectionByKey(e.key === 'ArrowUp' ? 'up' : 'down');
+      return;
+    }
+    if (e.altKey) return;
     const last = currentTracks.length - 1;
     const stored = cursorIndex >= 0 && cursorIndex <= last ? cursorIndex : currentTracks.findIndex((t) => selection.ids.has(t.id));
     const page = Math.max(1, Math.floor(((tableScrollEl?.clientHeight ?? 0) - headerHeight) / ROW_HEIGHT) - 1);

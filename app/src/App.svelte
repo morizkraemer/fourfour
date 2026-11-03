@@ -28,6 +28,7 @@
   import LibraryHealthDialog from './modules/LibraryHealthDialog.svelte';
   import ImportDuplicatesDialog from './modules/ImportDuplicatesDialog.svelte';
   import FileBlockedTip from './modules/FileBlockedTip.svelte';
+  import { announcer } from './stores/announce.svelte.ts';
   import { initFileHealth } from './stores/file-health.svelte.ts';
   import { initImportActivity } from './stores/import-activity.svelte.ts';
   import { unlistenWhenReady } from './lib/lateUnlisten.ts';
@@ -70,7 +71,7 @@
   function yieldsToFocusedControl(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (e.key === 'Tab') return isKeyboardFocused(e.target);
-    if (e.key === ' ') return isKeyboardFocused(e.target) && !e.target.closest('[role="listbox"]');
+    if (e.key === ' ') return isKeyboardFocused(e.target) && !e.target.closest('[role="listbox"], [data-wave-slider]');
     return false;
   }
 
@@ -173,6 +174,8 @@
   </div>
 </div>
 
+<div class="ff-sr-only" role="status" aria-live="polite" aria-atomic="true" data-live-region>{#key announcer.nonce}{announcer.message}{/key}</div>
+
 <Settings />
 <CommandPalette />
 <StickSyncDialog />
@@ -223,6 +226,18 @@
 
 
 <style>
+  .ff-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .ff-analyze-prompt__text {
     margin: 0 0 var(--ff-space-5);
   }
