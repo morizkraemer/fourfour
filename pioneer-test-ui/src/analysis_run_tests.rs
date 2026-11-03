@@ -1095,7 +1095,7 @@ async fn a_rust_analyzer_failure_is_recorded_as_a_failure_and_the_track_is_not_a
     assert!(matches!(outcome, RunOutcome::Finished { errors: 1, total: 2 }));
     assert_eq!(h.runs_of("t2.wav"), 1, "{:?}", h.events());
     assert_eq!(h.unanalyzed(), vec![2]);
-    assert!(dir.join("analysis-failures.json").exists());
+    assert_eq!(h.shared.lock().unwrap().analysis_failures().unwrap().len(), 1);
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -1120,7 +1120,7 @@ async fn an_explicit_request_for_a_skipped_track_runs_it_and_a_success_clears_th
 
     assert!(h.unanalyzed().is_empty());
     assert_eq!(h.resume_without_known_failures(), (vec![], 0));
-    assert!(!dir.join("analysis-failures.json").exists());
+    assert!(h.shared.lock().unwrap().analysis_failures().unwrap().is_empty());
     std::fs::remove_dir_all(&dir).ok();
 }
 
