@@ -52,6 +52,8 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 - Sync engine per docs/ui/usb-sync-spec.md. Clone facts: docs/research/clones-2026-10-23.md.
 - Open: Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 for CDJ-3000X; CDJ-3000 round-trip.
 
+42. Phrase detection (r90): first Rust detector, off by default, other results byte-identical; only 57 Rekordbox phrase refs exist, F 0.48 at +-1 bar (8-bar grid baseline 0.45), mood off - rec: you run Rekordbox phrase analysis on 200+ testdata tracks and copy the library to dev, then train labels - branch: r90-phrase f62246d. Brother: writer sets analysedBits 105 (phrase) but writes no PSSI, needs a CDJ check
+
 ## Queue
 ### Q5 Unsigned macOS build [queued] [mac] - cargo tauri build via mac-queue. 30 min
 ### Q6 Key source PDB vs OneLibrary [handed to brother]
@@ -60,7 +62,7 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- r89 Mac night 2 [running]; r90 phrase detection vs Rekordbox PSSI (1455 ANLZ .EXT refs) [running]
+- r89 Mac night 2 [running]; r90 phrase [parked, Waiting 42]; r91 key mode [running]
 - next: key mode (oracle mode +35 dev); import skip APIC covers; 50k startup (lazy rows, payload); LUFS/gain; energy 1-10 (Rust, no Lexicon); auto cues from phrases; BPM >1 misses; zoom first open; WebKit row cost; long-track RSS. Genre dropped: no labels/model
 
 ## Run
