@@ -62,7 +62,7 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- r89 Mac night 2 [running]; r90 phrase [parked, Waiting 42]; r91 key mode [dropped: no clean gain, doc on r91-key-mode 80f6a03]; r92 import cover skip [backed out: robustness test 13x slower, r92b fixing]; r94 fast model [chunk 500 = 1.86x, no quality loss on 100 test tracks, branch r94-fast-model f4d1df4; small models rejected]; next r96 confirm chunk 500 (full test + Mac CoreML) then int8 at 500; r89 Mac night 2 [landed 030a2a4]; r93 chunk ceiling by runtime [landed 0711fd4]; r95 50k startup [running]
+- r89 Mac night 2 [running]; r90 phrase [parked, Waiting 42]; r91 key mode [dropped: no clean gain, doc on r91-key-mode 80f6a03]; r92 import cover skip [backed out: robustness test 13x slower, r92b fixing]; r94 fast model [chunk 500 = 1.86x, no quality loss on 100 test tracks, branch r94-fast-model f4d1df4; small models rejected]; next r96 confirm chunk 500 (full test + Mac CoreML) then int8 at 500; r89 Mac night 2 [landed 030a2a4]; r93 chunk ceiling by runtime [landed 0711fd4]; r95 50k startup [merging fe40da9]; r92b [fixed 32e8a7c, merges next]; r96 chunk 500 confirm [running]
 - next: key mode (oracle mode +35 dev); import skip APIC covers; 50k startup (lazy rows, payload); LUFS/gain; energy 1-10 (Rust, no Lexicon); auto cues from phrases; BPM >1 misses; zoom first open; WebKit row cost; long-track RSS. Genre dropped: no labels/model
 
 ## Run
