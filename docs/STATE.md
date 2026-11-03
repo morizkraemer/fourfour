@@ -42,6 +42,8 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once.
 
+44. [built 2026-11-03] int8 beat model at chunk 500 (r97): Mac rten +43-60% trk/min, scores equal or +1, RAM ~2.4 GB vs CoreML 4.9-6.3 GB; x86 only -10% CPU and -2 grid, so Linux/Windows keep fp32. rec: after the same-session Mac check (r98), Mac ships rten int8 at 500 instead of CoreML 1500 - branch: r97-int8-500 1b3a972
+
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -64,7 +66,7 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Running: r97 int8 at 500
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44). Running: r98 Mac pair CoreML 1500 vs int8 500, r99 LUFS/gain
 - next: LUFS/gain; energy 1-10 (Rust, no Lexicon); auto cues from phrases; BPM >1 misses; zoom first open; WebKit row cost; long-track RSS; parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
