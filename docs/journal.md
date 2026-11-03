@@ -543,3 +543,4 @@
 2026-11-03 02:30 orchestrator r78-a11y-followups handed back 1847c23 (rating Mod+0-5, waveform slider, Alt+arrow reorder, live region), parked under Waiting 34; one leaks.spec.ts:73 failure in its first full run, passed on rerun
 2026-11-03 02:35 orchestrator - decided: own prio r80-leaks-flake (sonnet medium; leaks.spec.ts:49/:73 fail under load now and then; smoke-only fix unless a real leak)
 2026-11-03 04:10 orchestrator r79-bpm-misses handed back ce1d8b1 (global fold-peak tempo search, test BPM 180->186, grid 167->171, zero losses), parked -> Waiting 41 (changes analysis results)
+2026-11-03 04:15 orchestrator - decided: own prio r81-schema-bump (opus medium; Waiting 31 rec built on a branch per holiday-mode relay: folded keys, cover store, failure records; design doc first; parked)
