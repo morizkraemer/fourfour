@@ -35,6 +35,7 @@ interface Boot {
   frameInteractive: number;
   longestFrame: number;
   heapMB: number;
+  cpuMs: number;
 }
 
 interface Probe {
@@ -145,6 +146,20 @@ async function newContext(browser: Browser, payloadUrl: string, backendMs: numbe
   return context;
 }
 
+const metricSessions = new WeakMap<Page, Awaited<ReturnType<BrowserContext['newCDPSession']>>>();
+
+async function mainThreadCpuMs(page: Page): Promise<number> {
+  if (page.context().browser()?.browserType().name() !== 'chromium') return 0;
+  let cdp = metricSessions.get(page);
+  if (!cdp) {
+    cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    metricSessions.set(page, cdp);
+  }
+  const { metrics } = (await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] };
+  return (metrics.find((m) => m.name === 'ThreadTime')?.value ?? 0) * 1000;
+}
+
 async function heapAfterGc(page: Page): Promise<number> {
   if (page.context().browser()?.browserType().name() !== 'chromium') return 0;
   const cdp = await page.context().newCDPSession(page);
@@ -154,9 +169,10 @@ async function heapAfterGc(page: Page): Promise<number> {
   return usedSize / 1048576;
 }
 
-async function bootMetrics(page: Page): Promise<Boot> {
+async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
   await page.waitForTimeout(2500);
+  const cpuMs = (await mainThreadCpuMs(page)) - cpuBase;
   const metrics = await page.evaluate(() => {
     const b = (window as unknown as { __boot: Probe }).__boot;
     const tasks = b.longTasks;
@@ -178,9 +194,10 @@ async function bootMetrics(page: Page): Promise<Boot> {
       frameInteractive: b.frameInteractive,
       longestFrame: b.longestFrame,
       heapMB: 0,
+      cpuMs: 0,
     };
   });
-  return { ...metrics, heapMB: await heapAfterGc(page) };
+  return { ...metrics, cpuMs, heapMB: await heapAfterGc(page) };
 }
 
 interface InspectorSession {
@@ -254,8 +271,9 @@ test.describe('startup at scale', () => {
         const seed = await newContext(browser, url, backendMs);
         const seedPage = await seed.newPage();
         const profilingFirst = PROFILE_OUT && PROFILE_FIRST && run === RUNS - 1 ? await startProfile(seedPage) : null;
+        const seedBase = await mainThreadCpuMs(seedPage);
         await seedPage.goto('/');
-        first.push(await bootMetrics(seedPage));
+        first.push(await bootMetrics(seedPage, seedBase));
         if (profilingFirst) await stopProfile(profilingFirst, `${PROFILE_OUT}-${tracks}-first.cpuprofile`, seedPage);
         await seedPage.close();
         const saved = await seed.storageState();
@@ -263,11 +281,13 @@ test.describe('startup at scale', () => {
 
         const context = await newContext(browser, url, backendMs, saved);
         const page = await context.newPage();
+        const coldBase = await mainThreadCpuMs(page);
         await page.goto('/');
-        cold.push(await bootMetrics(page));
+        cold.push(await bootMetrics(page, coldBase));
         const profiling = PROFILE_OUT && !PROFILE_FIRST && run === RUNS - 1 ? await startProfile(page) : null;
+        const warmBase = await mainThreadCpuMs(page);
         await page.reload();
-        warm.push(await bootMetrics(page));
+        warm.push(await bootMetrics(page, warmBase));
         if (profiling) await stopProfile(profiling, `${PROFILE_OUT}-${tracks}.cpuprofile`, page);
         await context.close();
       }
