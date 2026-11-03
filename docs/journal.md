@@ -562,3 +562,4 @@
 2026-11-03 14:10 orchestrator - resumed per PM relay; decided: own prio r88-grid-misses (sonnet medium; classify remaining test grid misses on r79, fix one class on branch if test+dev gain with 0 losses)
 2026-11-03 14:25 orchestrator r88 handed back: doc only f90fd39 (34 grid misses classified, no clean fix: half-beat cases have our grid on the kick); run idle again
 2026-11-03 14:50 orchestrator cleanup: removed unused q41-target + ff-q41-target caches (16 GB, disk 86% -> 81%), killed a 4.6-day hung cargo test and a self-matching wait loop; STATE trimmed to 7.9k chars (ba6d00f, detail in archive); run idle
+2026-11-03 15:10 orchestrator - Merlin: "mac night is go" + 2 weeks incremental work on analysis quality (key, bpm, grid, phrase, energy, genre) and speed (analysis, app, import, open); spawned r89-mac-night-2 (sonnet high) and a read-only backlog scout
