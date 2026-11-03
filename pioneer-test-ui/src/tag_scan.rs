@@ -10,12 +10,15 @@ use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
 use pioneer_usb_writer::models::Track;
+use pioneer_usb_writer::scanner::read_track_metadata;
 
 const ID3_HEADER_LEN: u64 = 10;
 const MAX_GAPS: usize = 64;
+const MAX_RIFF_CHUNKS: usize = 256;
+const READ_BUFFER_LEN: usize = 8 * 1024;
 
 struct GapReader {
-    file: BufReader<File>,
+    file: File,
     gaps: Vec<Range<u64>>,
     len: u64,
     pos: u64,
@@ -27,7 +30,7 @@ impl GapReader {
         file.seek(SeekFrom::Start(0))?;
         let len = file.metadata()?.len();
         let gaps = gaps.into_iter().filter(|g| g.start < g.end && g.end <= len).collect();
-        Ok(Self { file: BufReader::new(file), gaps, len, pos: 0, file_pos: 0 })
+        Ok(Self { file, gaps, len, pos: 0, file_pos: 0 })
     }
 }
 
@@ -130,7 +133,12 @@ fn id3_picture_gaps(file: &mut File, tag_start: u64, file_len: u64) -> io::Resul
 
 fn riff_id3_picture_gaps(file: &mut File, file_len: u64, big_endian: bool) -> io::Result<Vec<Range<u64>>> {
     let mut pos = 12;
+    let mut seen = 0;
     while pos + 8 <= file_len {
+        seen += 1;
+        if seen > MAX_RIFF_CHUNKS {
+            return Err(bad_layout());
+        }
         let mut ch = [0u8; 8];
         read_at(file, pos, &mut ch)?;
         let raw = [ch[4], ch[5], ch[6], ch[7]];
@@ -213,15 +221,32 @@ fn sanitize_path_component(s: &str) -> String {
 }
 
 pub fn read_track_tags(path: &Path, id: u32) -> Result<Track> {
+    let is_regular = std::fs::metadata(path).map(|m| m.is_file()).with_context(|| format!("Failed to open {}", path.display()))?;
+    anyhow::ensure!(is_regular, "{} is not a regular file", path.display());
     let mut file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
     let file_type = FileType::from_path(path);
     let gaps = file_type.map_or_else(Vec::new, |ft| picture_gaps(&mut file, ft));
-    let reader = GapReader::new(file, gaps).with_context(|| format!("Failed to open {}", path.display()))?;
-    let mut probe = Probe::new(reader).options(ParseOptions::new().read_cover_art(false));
-    if let Some(ft) = file_type {
-        probe = probe.set_file_type(ft);
+    let has_gap_support = matches!(file_type, Some(FileType::Mpeg | FileType::Wav | FileType::Aiff | FileType::Mp4));
+    if gaps.is_empty() && has_gap_support {
+        return read_track_metadata(path, id).map(|track| Track { artwork: None, ..track });
     }
-    let tagged_file = probe.read().with_context(|| format!("Failed to read tags from {}", path.display()))?;
+    let options = ParseOptions::new().read_cover_art(false);
+    let tagged_file = if gaps.is_empty() {
+        file.seek(SeekFrom::Start(0))?;
+        let mut probe = Probe::new(BufReader::new(file)).options(options);
+        if let Some(ft) = file_type {
+            probe = probe.set_file_type(ft);
+        }
+        probe.read()
+    } else {
+        let reader = GapReader::new(file, gaps).with_context(|| format!("Failed to open {}", path.display()))?;
+        let mut probe = Probe::new(BufReader::with_capacity(READ_BUFFER_LEN, reader)).options(options);
+        if let Some(ft) = file_type {
+            probe = probe.set_file_type(ft);
+        }
+        probe.read()
+    }
+    .with_context(|| format!("Failed to read tags from {}", path.display()))?;
 
     let properties = tagged_file.properties();
     let duration = properties.duration();
@@ -274,7 +299,7 @@ pub fn read_track_tags(path: &Path, id: u32) -> Result<Track> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pioneer_usb_writer::scanner::read_track_metadata;
+    use std::io::Write;
 
     fn id3_frame(id: &[u8], body: &[u8], version: u8) -> Vec<u8> {
         let mut f = id.to_vec();
@@ -321,7 +346,7 @@ mod tests {
     }
 
     fn same_as_full_read(name: &str, bytes: &[u8]) {
-        let dir = std::env::temp_dir().join(format!("ff-tagscan-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(name);
         std::fs::write(&path, bytes).unwrap();
@@ -427,6 +452,66 @@ mod tests {
         assert_eq!(&buf[..5], &[0; 5]);
         assert_eq!(&buf[5..], &bytes[20..25]);
         assert_eq!(r.seek(SeekFrom::End(-1)).unwrap(), 99);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn sparse_zero_files_read_as_fast_as_the_plain_reader() {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-sparse-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for ext in ["mp3", "wav", "aiff", "m4a", "flac"] {
+            let path = dir.join(format!("zeros.{ext}"));
+            std::fs::File::create(&path).unwrap().set_len(64 << 20).unwrap();
+            let started = std::time::Instant::now();
+            let quick = read_track_tags(&path, 1);
+            let quick_secs = started.elapsed().as_secs_f64();
+            let started = std::time::Instant::now();
+            let full = read_track_metadata(&path, 1);
+            let full_secs = started.elapsed().as_secs_f64();
+            assert_eq!(quick.is_ok(), full.is_ok(), "{ext}");
+            assert!(quick_secs < full_secs * 4.0 + 1.0, "{ext}: {quick_secs:.2}s against {full_secs:.2}s");
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn mp3_with_a_real_head_and_a_sparse_body_reads_as_fast_as_the_plain_reader() {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-head-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("head.mp3");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let frames = text_frame(b"TIT2", "A Title", 4);
+        let mut head = b"ID3".to_vec();
+        head.extend_from_slice(&[4, 0, 0]);
+        head.extend((0..4).rev().map(|i| ((frames.len() >> (7 * i)) & 0x7f) as u8));
+        head.extend(frames);
+        for _ in 0..4 {
+            head.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+            head.extend(vec![0u8; 413]);
+        }
+        file.write_all(&head).unwrap();
+        file.set_len(64 << 20).unwrap();
+        let started = std::time::Instant::now();
+        let quick = read_track_tags(&path, 1);
+        let quick_secs = started.elapsed().as_secs_f64();
+        let started = std::time::Instant::now();
+        let full = read_track_metadata(&path, 1);
+        let full_secs = started.elapsed().as_secs_f64();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(quick.is_ok(), full.is_ok());
+        assert!(quick_secs < full_secs * 4.0 + 1.0, "{quick_secs:.2}s against {full_secs:.2}s");
+    }
+
+    #[test]
+    fn special_files_are_refused_without_opening_them() {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-special-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let fifo = dir.join("pipe.mp3");
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status().map(|s| s.success()).unwrap_or(false);
+        if made {
+            assert!(read_track_tags(&fifo, 1).is_err());
+        }
+        assert!(read_track_tags(Path::new("/dev/zero"), 1).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
