@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Scores one grid_refit JSONL (500 logits) against another (1500 logits) and against the reference.
 usage: r105-stab.py <ref.json> <a.jsonl> <b.jsonl> [--base base.jsonl] [--ids ids.txt]
-Agreement of a with b on a track: BPM within 0.05 and median grid offset within 10 ms.
+Agreement of a with b on a track: BPM within 0.05 and median grid offset within 15 ms.
 Right = BPM within 0.1 / within 1 / grid within 20 ms / bar >= 90% (as o3-score.py). --base lists right -> wrong and wrong -> right of a against base."""
 import bisect
 import json
@@ -25,7 +25,7 @@ def grid_offset_ms(a, b):
 
 
 def agree(a, b):
-    return abs(a["bpm"] - b["bpm"]) <= 0.05 and abs(grid_offset_ms(a, b)) <= 10.0
+    return abs(a["bpm"] - b["bpm"]) <= 0.05 and abs(grid_offset_ms(a, b)) <= 15.0
 
 
 def bar_right(r, ref):

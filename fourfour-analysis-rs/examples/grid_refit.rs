@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use anyhow::{anyhow, Result};
-use fourfour_analysis::fit::{finalize_beats, fit_track, FitParams, SnapPick, TempoSearch, Window, FPS};
+use fourfour_analysis::fit::{finalize_beats, fit_track, FitParams, TempoSearch, Window, FPS};
 use fourfour_analysis::mp3::{self, DelayRule};
 use fourfour_analysis::service;
 use serde_json::{json, Value};
@@ -122,27 +122,11 @@ fn main() -> Result<()> {
     if let Some(v) = std::env::var("R79_SNAP_WIDE").ok().and_then(|s| s.parse().ok()) {
         params.snap_wide = v;
     }
-    if std::env::var("R101_HALF_TIME").as_deref() == Ok("off") {
-        params.half_time_band = (0.0, 0.0);
-    }
-    let env_f = |k: &str| std::env::var(k).ok().and_then(|s| s.parse::<f64>().ok());
-    if let Some(v) = env_f("R105_FAR_SKIP_PCT") {
+    if let Some(v) = std::env::var("R105_FAR_SKIP_PCT").ok().and_then(|s| s.parse().ok()) {
         params.far_skip_pct = v;
     }
-    if let Some(v) = env_f("R105_SNAP_RATIO") {
-        params.snap_ratio = v;
-    }
-    if std::env::var("R105_SNAP_PICK").as_deref() == Ok("best") {
-        params.snap_pick = SnapPick::Best;
-    }
-    if let Some(v) = env_f("R105_SEGMENTS") {
-        params.snap_segments = v as usize;
-    }
-    if let Some(v) = env_f("R105_SEG_RATIO") {
-        params.snap_segment_ratio = v;
-    }
-    if let Some(v) = env_f("R105_SPREAD_MS") {
-        params.snap_spread_ms = v;
+    if std::env::var("R101_HALF_TIME").as_deref() == Ok("off") {
+        params.half_time_band = (0.0, 0.0);
     }
     if args.get(5).is_some_and(|s| s == "nosnap") {
         params.snap_tol = 0.0;
