@@ -616,3 +616,4 @@
 2026-11-04 21:47 orchestrator r120 landed 7056104 (both smokes 0 failed, 26 suites, vitest 935, CHECKS-OK)
 2026-11-04 22:23 orchestrator r121 handed back 8cafdab (mount CPU 172 -> 136 ms, 10k first row -49/-51 ms Chromium, WebKit within noise; first screen byte-identical), merged a7500d8, chain running. decided: own prio r123 idle/playing CPU audit (sonnet high)
 2026-11-04 22:38 orchestrator r121 landed a7500d8 (both smokes 0 failed, 26 suites, vitest 940, CHECKS-OK)
+2026-11-04 23:27 orchestrator r122 handed back ef8dbdc: fused decode+map neutral; lazy rows give 50k first row -50 to -140 ms (WebKit up to -370) but +105 ms idle script, +170 ms first-keystroke hitch in the first 1-2 s, Proxy per row; decided: not landed, branch kept (engineering call, reversible)
