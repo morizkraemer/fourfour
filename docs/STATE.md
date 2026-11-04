@@ -38,7 +38,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 40. Stick busy guard (r69): one stick operation at a time, sync off main thread. rec: land - branch: r69-stick-busy-v2 9a928da
 41. [r88 2026-11-03, grid at ceiling] BPM fold-peak search on by default: test 180 -> 186/205. rec: land (~3% of tracks change, toward Rekordbox) - branch: r79-bpm-misses ce1d8b1
 
-43. [built 2026-11-03] Beat chunk 500 default (r96): test 205 grid 167=167, BPM 0.1 180=180, CPU/track -43%; dev grid 44 -> 43. Mac app keeps 1500 (CoreML 500 is 18% slower but -57% RAM, first result 30% sooner). ANALYSIS_VERSION 2 only resets the failed-track memo. rec: land; Mac at 500 is your call. r102: with r79's BPM search, 500 costs 2-3 test tracks (grid 171->168-169, BPM 0.1 186->183-184) on thin margins; chunk stitching is not the cause - branch: r96-chunk500 30ddf42 (stitch switches: r102-chunk-stitch b3dad1a)
+43. [built 2026-11-03] Beat chunk 500 default (r96): test 205 grid 167=167, BPM 0.1 180=180, CPU/track -43%; dev grid 44 -> 43. Mac app keeps 1500 (CoreML 500 is 18% slower but -57% RAM, first result 30% sooner). ANALYSIS_VERSION 2 only resets the failed-track memo. rec: land; Mac at 500 is your call. r102: with r79's BPM search, 500 costs 2-3 test tracks (grid 171->168-169, BPM 0.1 186->183-184) on thin margins; chunk stitching is not the cause. r105 fix (far fold-peak search was skipped too eagerly): 500 now grid 171=171, BPM 0.1 185 vs 186 (track 144, flat comb), zero right->wrong, 1500 unchanged - branch: r105-snap 903b702 (r96 + r79 + fix; older: r96-chunk500 30ddf42) (stitch switches: r102-chunk-stitch b3dad1a)
 
 Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 6d371fd on today's ov-1028, all checks green, preview :4212.
 
@@ -73,7 +73,7 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers; r104 key/decode speed. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Landed: r104 non-model stages a1b37c0. Running: r106 model sys time, r105 grid snap acceptance
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers; r104 key/decode speed. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Landed: r104 non-model stages a1b37c0. Parked: r105 fit fix into 43. Running: r106 model sys time
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
