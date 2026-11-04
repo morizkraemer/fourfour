@@ -10,7 +10,7 @@ pub enum TempoSearch {
 
 pub const TEMPO_SEARCH: TempoSearch = TempoSearch::LineAndGlobalPeak;
 pub const GLOBAL_SEARCH_PCT: f64 = 4.0;
-pub const HALF_TIME_BAND: (f64, f64) = (84.0, 92.5);
+pub const HALF_TIME_BAND: (f64, f64) = (0.0, 0.0);
 
 #[derive(Clone, Debug)]
 pub struct FitParams {
