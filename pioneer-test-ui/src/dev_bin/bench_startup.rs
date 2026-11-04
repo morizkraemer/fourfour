@@ -170,6 +170,13 @@ fn run(dir: &Path) {
 
     let count = infos.len();
     let t = Instant::now();
+    let table = (!with_previews).then(|| dto::TrackTable::new(&infos).unwrap());
+    let table_ms = ms(t);
+    let t = Instant::now();
+    let table_json_len = table.as_ref().map_or(0, |table| serde_json::to_string(table).unwrap().len());
+    let table_json_ms = ms(t);
+    drop(table);
+    let t = Instant::now();
     let json = if with_previews {
         serde_json::to_string(&serde_json::json!({ "tracks": infos, "playlists": playlists })).unwrap()
     } else {
@@ -194,6 +201,9 @@ fn run(dir: &Path) {
             "build_track_infos_ms": build_ms,
             "playlists_ms": playlists_ms,
             "json_ms": json_ms,
+            "table_build_ms": table_ms,
+            "table_json_ms": table_json_ms,
+            "table_json_bytes": table_json_len,
             "json_bytes": json.len(),
             "load_state_ms": build_ms + playlists_ms + json_ms,
         }),
