@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareSortValues, MAX_REPOSITIONED, sortedOrder, sortedSubset, withChangedValues, type SortValue } from './sortOrder.ts';
+import { compareSortValues, MAX_REPOSITIONED, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortValue } from './sortOrder.ts';
 
 function generator(seed: number) {
   let state = seed;
@@ -23,7 +23,7 @@ function reference(values: readonly SortValue[], direction: 1 | -1): number[] {
     .map((entry) => entry.position);
 }
 
-const WORDS = ['', 'a', 'B', 'alpha', 'Alpha', 'alpha 2', 'beta', 'ä', 'z', 'zz', '10', '9', ' x'].map((w) => w.toLowerCase());
+const WORDS = ['', 'a', 'B', 'alpha', 'Alpha', 'alpha 2', 'beta', 'ä', 'z', 'zz', '10', '9', ' x', 'ß', 'É', 'é', 'İstanbul', 'Σίσυφος', '日本', '日本語', '😀', '\u{10000}', '\uFFFD', 'a\u0301', 'á'].map((w) => w.toLowerCase());
 
 function randomValues(random: () => number, n: number, kind: 'string' | 'number'): SortValue[] {
   return Array.from({ length: n }, () => {
@@ -47,6 +47,47 @@ describe('sortedOrder', () => {
         }
       }
     }
+  });
+
+  it('gives the same order in any chunking of the steps', () => {
+    const random = generator(31);
+    for (const kind of ['string', 'number'] as const) {
+      for (let round = 0; round < 30; round++) {
+        const values = randomValues(random, Math.floor(random() * 90), kind);
+        const whole = valueClasses(values)!;
+        for (const chunk of [1, 2, 3, 7, 16, 1000]) {
+          const steps = valueClassesSteps(values, chunk);
+          let step = steps.next();
+          while (!step.done) step = steps.next();
+          expect(step.value!.count).toBe(whole.count);
+          expect([...step.value!.classes]).toEqual([...whole.classes]);
+          for (const direction of [1, -1] as const) {
+            expect([...orderFromClasses(step.value!, direction).order]).toEqual(reference(values, direction));
+          }
+        }
+      }
+    }
+  });
+
+  it('orders many distinct strings and ties across chunk borders like the comparator', () => {
+    const random = generator(5);
+    const values: SortValue[] = Array.from({ length: 3000 }, () => (random() < 0.1 ? null : WORDS[Math.floor(random() * WORDS.length)] + String(Math.floor(random() * 400)).padStart(3, '0')));
+    for (const direction of [1, -1] as const) {
+      expect([...sortedOrder(values, direction).order]).toEqual(reference(values, direction));
+      const steps = valueClassesSteps(values, 64);
+      let step = steps.next();
+      while (!step.done) step = steps.next();
+      expect([...orderFromClasses(step.value!, direction).order]).toEqual(reference(values, direction));
+    }
+  });
+
+  it('keeps the old comparator order for lists that are not all strings or all numbers', () => {
+    const mixed: SortValue[] = ['b', 2, null, 'a', 1, 'c'];
+    expect(valueClasses(mixed)).toBeNull();
+    expect(valueClasses([1, NaN, 2])).toBeNull();
+    const order = [...sortedOrder(mixed, 1).order];
+    expect(order.slice().sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(order[order.length - 1]).toBe(2);
   });
 
   it('handles an empty list and a list without values', () => {

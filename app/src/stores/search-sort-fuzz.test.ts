@@ -17,7 +17,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
 import { bumpLibraryTracks, filterTracks, library, libraryPositionsOf, loadState } from './library.svelte.ts';
-import { clearSort, setSort, sortTracks } from './table-columns.svelte.ts';
+import { camelotRank, clearSort, durationSeconds, setSort, sortTracks, startLibrarySortWarmup } from './table-columns.svelte.ts';
 
 function generator(seed: number) {
   let state = seed;
@@ -27,8 +27,8 @@ function generator(seed: number) {
   };
 }
 
-const WORDS = ['alpha', 'beta', 'gamma', 'delta', 'dub', 'deep', 'house', 'Zed', 'amor', 'bells', 'ghosts', 'x1', ''];
-const KEYS = ['title', 'bpm', 'artist'] as const;
+const WORDS = ['alpha', 'beta', 'gamma', 'delta', 'dub', 'deep', 'house', 'Zed', 'amor', 'bells', 'ghosts', 'x1', 'Éclair', 'ünder', 'ßeta', 'İstanbul', '日本', '😀 a', 'z\u{10000}', 'Σίσυφος', ''];
+const KEYS = ['title', 'bpm', 'artist', 'album', 'genre', 'key', 'time'] as const;
 type Key = (typeof KEYS)[number];
 
 type Row = { id: number; title: string; artist: string; bpm: string; album: string; genre: string; key: string; label: string; time: string; filePath: string; index: string; raw: Record<string, string> };
@@ -40,11 +40,11 @@ function randomInfo(random: () => number, id: number) {
     source_path: `/m/${id}.mp3`,
     title: `${pick()} ${pick()}`.trim(),
     artist: pick(),
-    album: '',
-    genre: '',
+    album: random() < 0.3 ? '' : pick(),
+    genre: random() < 0.3 ? '' : pick(),
     tempo: random() < 0.15 ? 0 : (90 + Math.floor(random() * 60)) * 100,
-    key: '',
-    duration_secs: 200,
+    key: random() < 0.2 ? '' : `${1 + Math.floor(random() * 12)}${random() < 0.5 ? 'A' : 'B'}`,
+    duration_secs: random() < 0.1 ? 0 : 60 + Math.floor(random() * 500),
     bitrate: 320,
     file_size: 1,
     has_artwork: false,
@@ -72,7 +72,10 @@ function referenceMatches(row: Row, query: string): boolean {
 function referenceValue(row: Row, key: Key): string | number | null {
   const text = String(row[key] ?? '').trim();
   if (text === '' || text === '—' || text === 'undefined') return null;
-  return key === 'bpm' ? parseFloat(text) : text.toLowerCase();
+  if (key === 'bpm') return parseFloat(text);
+  if (key === 'key') return camelotRank(text);
+  if (key === 'time') return durationSeconds(text);
+  return text.toLowerCase();
 }
 
 function referenceSorted(rows: Row[], key: Key, dir: 1 | -1): Row[] {
@@ -98,8 +101,9 @@ describe('filter and sort of the library against a plain reference', () => {
     let second = '';
     let sort: { key: Key; dir: 1 | -1 } | null = null;
     const log: string[] = [];
+    const warmups: ReturnType<typeof startLibrarySortWarmup>[] = [];
 
-    for (let step = 0; step < 600; step++) {
+    for (let step = 0; step < 900; step++) {
       const r = random();
       if (r < 0.45) {
         const move = random();
@@ -119,6 +123,8 @@ describe('filter and sort of the library against a plain reference', () => {
           row.title = fresh.title;
           row.bpm = fresh.tempo ? (fresh.tempo / 100).toFixed(1) : '—';
           row.artist = fresh.artist;
+          row.album = fresh.album || '—';
+          row.key = fresh.key || '—';
           ids.push(row.id);
         }
         bumpLibraryTracks(ids);
@@ -131,11 +137,18 @@ describe('filter and sort of the library against a plain reference', () => {
         if (dir === -1) setSort('library', key);
         sort = { key, dir };
         log.push(`sort ${key} ${dir}`);
-      } else if (r < 0.95) {
+      } else if (r < 0.93) {
         clearSort('library');
         sort = null;
         log.push('unsort');
+      } else if (r < 0.97) {
+        warmups.push(startLibrarySortWarmup(KEYS.filter(() => random() < 0.6), { read: 1 + Math.floor(random() * 40), sort: 1 + Math.floor(random() * 30) }));
+        log.push('warmup');
+      } else {
+        await loadState();
+        log.push('reload');
       }
+      for (const warmup of warmups) for (let n = 0; n < Math.floor(random() * 4); n++) warmup.step(0);
 
       const filtered = filterTracks(library.tracks, query);
       const shown = sort ? sortTracks(filtered, 'library') : filtered;
@@ -148,6 +161,26 @@ describe('filter and sort of the library against a plain reference', () => {
       }
     }
     clearSort('library');
+  });
+
+  it('finds one-character and short queries by letters and digits exactly like a plain search', async () => {
+    const random = generator(4242);
+    await loadRandomLibrary(random, 300);
+    const current = () => library.tracks as Row[];
+    const characters = [...'abcdefghijklmnopqrstuvwxyz0123456789 .-_é日\u{10000}'];
+    const check = (query: string) =>
+      expect(filterTracks(library.tracks, query).map((row) => row.id), `query "${query}"`).toEqual(current().filter((row) => referenceMatches(row, query)).map((row) => row.id));
+    for (const ch of characters) if (ch.trim()) check(ch);
+    for (const ch of characters) if (ch.trim()) check(ch.toUpperCase());
+    for (let n = 0; n < 80; n++) check(characters[Math.floor(random() * 36)] + characters[Math.floor(random() * 36)]);
+    const ids: number[] = [];
+    for (let n = 0; n < 40; n++) {
+      const row = current()[Math.floor(random() * 300)];
+      row.title = `${characters[Math.floor(random() * 36)]}${characters[Math.floor(random() * 36)]} ${row.title}`;
+      ids.push(row.id);
+    }
+    bumpLibraryTracks(ids);
+    for (const ch of characters) if (ch.trim()) check(ch);
   });
 
   it('knows result positions only for results of the current library list', async () => {

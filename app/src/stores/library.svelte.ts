@@ -75,6 +75,12 @@ import { fileStateGlyph } from '../lib/fileHealth.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
+const trackListLoadedListeners: (() => void)[] = [];
+
+export function onTrackListLoaded(listener: () => void) {
+  trackListLoadedListeners.push(listener);
+}
+
 /**
  * Call after changing fields of the tracks `changedIds` through their rows: copies them to the plain objects the search
  * text, counts and lookups read, rebuilds their search text and swaps the list so sorts and filters run again.
@@ -501,6 +507,8 @@ export const library = $state({
 const haystackCache = new WeakMap<object, string[]>();
 
 let haystackList: string[] | null = null;
+let haystackLetters = new Int32Array(0);
+let haystackDigits = new Int16Array(0);
 let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
@@ -516,10 +524,37 @@ function resetSearchIndex() {
   warmupGeneration++;
 }
 
+const LETTER_BITS = new Int32Array(128);
+const DIGIT_BITS = new Int16Array(128);
+for (let code = 97; code <= 122; code++) LETTER_BITS[code] = 1 << (code - 97);
+for (let code = 48; code <= 57; code++) DIGIT_BITS[code] = 1 << (code - 48);
+
+function markCharacters(index: number, haystack: string) {
+  let letters = 0;
+  let digits = 0;
+  for (let k = 0; k < haystack.length; k++) {
+    const code = haystack.charCodeAt(k);
+    if (code < 128) {
+      letters |= LETTER_BITS[code];
+      digits |= DIGIT_BITS[code];
+    }
+  }
+  haystackLetters[index] = letters;
+  haystackDigits[index] = digits;
+}
+
 function fillSearchIndex(limit: number) {
-  if (!haystackList) haystackList = [];
+  if (!haystackList) {
+    haystackList = [];
+    haystackLetters = new Int32Array(plainTracks.length);
+    haystackDigits = new Int16Array(plainTracks.length);
+  }
   const end = Math.min(plainTracks.length, haystackCursor + limit);
-  for (; haystackCursor < end; haystackCursor++) haystackList.push(trackHaystack(plainTracks[haystackCursor]));
+  for (; haystackCursor < end; haystackCursor++) {
+    const haystack = trackHaystack(plainTracks[haystackCursor]);
+    haystackList.push(haystack);
+    markCharacters(haystackCursor, haystack);
+  }
 }
 
 function refreshHaystacks(ids: number[]) {
@@ -527,7 +562,10 @@ function refreshHaystacks(ids: number[]) {
     const index = trackIndexById(id);
     if (index < 0 || index >= haystackCursor) continue;
     const plain = plainTracks[index];
-    if (plain?.id === id) haystackList![index] = trackHaystack(plain);
+    if (plain?.id !== id) continue;
+    const haystack = trackHaystack(plain);
+    haystackList![index] = haystack;
+    markCharacters(index, haystack);
   }
 }
 
@@ -636,9 +674,34 @@ function narrows(older: string[], terms: string[]): boolean {
   return older.every((old) => terms.some((term) => term.includes(old)));
 }
 
-function matchingIndices(haystacks: string[], terms: string[], candidates: number[] | null): number[] {
+function singleCharacterBits(terms: string[]): { letters: number; digits: number } | null {
+  if (terms.length !== 1 || terms[0].length !== 1) return null;
+  const code = terms[0].charCodeAt(0);
+  if (code >= 97 && code <= 122) return { letters: 1 << (code - 97), digits: 0 };
+  if (code >= 48 && code <= 57) return { letters: 0, digits: 1 << (code - 48) };
+  return null;
+}
+
+/** `masked`: `haystacks` is the search text of `plainTracks`, whose letters and digits were noted in `haystackLetters` and `haystackDigits`. */
+function matchingIndices(haystacks: string[], terms: string[], candidates: number[] | null, masked: boolean): number[] {
   const indices: number[] = [];
   const first = terms[0];
+  const bits = masked ? singleCharacterBits(terms) : null;
+  if (bits) {
+    const letters = haystackLetters;
+    const digits = haystackDigits;
+    const wantLetters = bits.letters;
+    const wantDigits = bits.digits;
+    if (candidates) {
+      for (let c = 0; c < candidates.length; c++) {
+        const i = candidates[c];
+        if ((letters[i] & wantLetters) !== 0 || (digits[i] & wantDigits) !== 0) indices.push(i);
+      }
+    } else {
+      for (let i = 0; i < haystacks.length; i++) if ((letters[i] & wantLetters) !== 0 || (digits[i] & wantDigits) !== 0) indices.push(i);
+    }
+    return indices;
+  }
   if (terms.length === 1) {
     if (candidates) {
       for (let c = 0; c < candidates.length; c++) {
@@ -692,7 +755,7 @@ export function filterTracks<T extends Record<string, unknown>>(
   for (const entry of history.values()) {
     if (narrows(entry.terms, terms) && (!candidates || entry.indices.length < candidates.length)) candidates = entry.indices;
   }
-  return remember(history, trimmed, terms, matchingIndices(haystacks, terms, candidates), tracks, isLibrary);
+  return remember(history, trimmed, terms, matchingIndices(haystacks, terms, candidates, isLibrary), tracks, isLibrary);
 }
 
 function remember<T>(history: Map<string, FilterEntry>, query: string, terms: string[], indices: number[], tracks: T[], isLibrary: boolean): T[] {
@@ -1233,6 +1296,7 @@ export async function loadState() {
     setLibraryTracks(plain, rows);
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
+    for (const listener of trackListLoadedListeners) listener();
 
     await ensureFavoriteSlots();
     library.tauriError = lastTauriError;
@@ -1280,6 +1344,7 @@ async function landImportedTracks(added: TrackInfo[]) {
   if (coveredEarly.length > 0) markCoversStored(coveredEarly);
   resetSearchIndex();
   scheduleSearchIndexWarmup();
+  for (const listener of trackListLoadedListeners) listener();
 }
 
 let saveInFlight: Promise<void> | null = null;

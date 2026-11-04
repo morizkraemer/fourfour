@@ -20,48 +20,117 @@ function ranksFromOrder(order: Int32Array): Int32Array {
   return rank;
 }
 
-function uniformKind(values: readonly SortValue[]): 'string' | 'number' | 'mixed' | 'none' {
-  let kind: 'string' | 'number' | 'mixed' | 'none' = 'none';
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i];
-    if (v === null) continue;
-    const next = typeof v === 'string' ? 'string' : 'number';
-    if (kind === 'none') kind = next;
-    else if (kind !== next) return 'mixed';
+/** Where each value sits among the distinct values: `classes[p]` 0 for the lowest, `count` for no value. */
+export interface ValueClasses {
+  classes: Int32Array;
+  count: number;
+}
+
+function* mergeRuns(a: string[], b: string[], step: number): Generator<void, string[]> {
+  const out: string[] = new Array(a.length + b.length);
+  let i = 0;
+  let j = 0;
+  let k = 0;
+  while (i < a.length && j < b.length) {
+    const limit = k + step;
+    while (k < limit && i < a.length && j < b.length) out[k++] = a[i] < b[j] ? a[i++] : b[j++];
+    yield;
   }
-  return kind;
+  while (i < a.length) out[k++] = a[i++];
+  while (j < b.length) out[k++] = b[j++];
+  return out;
+}
+
+function* sortDistinctStrings(list: string[], chunk: number): Generator<void, string[]> {
+  if (list.length <= chunk) return list.sort();
+  let runs: string[][] = [];
+  for (let start = 0; start < list.length; start += chunk) {
+    runs.push(list.slice(start, start + chunk).sort());
+    yield;
+  }
+  while (runs.length > 1) {
+    const merged: string[][] = [];
+    for (let r = 0; r + 1 < runs.length; r += 2) merged.push(yield* mergeRuns(runs[r], runs[r + 1], chunk));
+    if (runs.length % 2 === 1) merged.push(runs[runs.length - 1]);
+    runs = merged;
+  }
+  return runs[0];
+}
+
+/**
+ * The classes of `values` (equal values share one), in steps of about `chunk` values or distinct strings so a caller can
+ * stop between them; `chunk` `Infinity` runs it as one piece. Ends with `null` for values that are not all strings or
+ * all numbers (or hold a NaN), which have no stable order of classes.
+ */
+export function* valueClassesSteps(values: readonly SortValue[], chunk: number): Generator<void, ValueClasses | null> {
+  const n = values.length;
+  const ids = new Map<string | number, number>();
+  const distinct: (string | number)[] = [];
+  const classes = new Int32Array(n);
+  let kind: 'string' | 'number' | null = null;
+  for (let start = 0; start < n; start += chunk) {
+    const end = Math.min(n, start + chunk);
+    for (let i = start; i < end; i++) {
+      const v = values[i];
+      if (v === null) {
+        classes[i] = -1;
+        continue;
+      }
+      let id = ids.get(v);
+      if (id === undefined) {
+        const next = typeof v === 'string' ? 'string' : 'number';
+        if ((kind !== null && kind !== next) || v !== v) return null;
+        kind = next;
+        id = distinct.length;
+        ids.set(v, id);
+        distinct.push(v);
+      }
+      classes[i] = id;
+    }
+    if (end < n) yield;
+  }
+  const rankOfId = new Int32Array(distinct.length);
+  if (kind === 'string') {
+    const sorted = yield* sortDistinctStrings(distinct as string[], chunk);
+    for (let r = 0; r < sorted.length; r++) rankOfId[ids.get(sorted[r])!] = r;
+  } else if (kind === 'number') {
+    const sorted = Float64Array.from(distinct as number[]).sort();
+    for (let r = 0; r < sorted.length; r++) rankOfId[ids.get(sorted[r])!] = r;
+  }
+  const count = distinct.length;
+  for (let i = 0; i < n; i++) classes[i] = classes[i] < 0 ? count : rankOfId[classes[i]];
+  return { classes, count };
+}
+
+/** `valueClassesSteps` in one piece. */
+export function valueClasses(values: readonly SortValue[]): ValueClasses | null {
+  const steps = valueClassesSteps(values, Infinity);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** The order of `classes` by counting sort: `direction` 1 ascending, -1 descending, no value last, equal values in position order. */
+export function orderFromClasses({ classes, count }: ValueClasses, direction: 1 | -1): SortedOrder {
+  const n = classes.length;
+  const slot = (k: number) => (k === count || direction === 1 ? k : count - 1 - k);
+  const start = new Int32Array(count + 2);
+  for (let i = 0; i < n; i++) start[slot(classes[i]) + 1]++;
+  for (let s = 0; s <= count; s++) start[s + 1] += start[s];
+  const order = new Int32Array(n);
+  for (let i = 0; i < n; i++) order[start[slot(classes[i])]++] = i;
+  return { order, rank: ranksFromOrder(order) };
 }
 
 /**
  * The order `Array.prototype.sort` gives positions compared by value: `direction` 1 ascending, -1 descending, no value
- * last in both, equal values in position order. One native numeric sort over `rank * n + position` instead of a
- * comparator call per comparison.
+ * last in both, equal values in position order.
  */
 export function sortedOrder(values: readonly SortValue[], direction: 1 | -1): SortedOrder {
-  const n = values.length;
-  const kind = uniformKind(values);
-  if (kind === 'mixed') {
-    const order = Int32Array.from({ length: n }, (_, i) => i).sort((a, b) => compareSortValues(values[a], values[b], direction) || a - b);
-    return { order, rank: ranksFromOrder(order) };
-  }
-  const distinct = new Set<string | number>();
-  for (let i = 0; i < n; i++) {
-    const v = values[i];
-    if (v !== null) distinct.add(v);
-  }
-  const list = [...distinct];
-  if (kind === 'number') (list as number[]).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  else list.sort();
-  const rankOfValue = new Map<string | number, number>();
-  for (let i = 0; i < list.length; i++) rankOfValue.set(list[i], direction === 1 ? i : list.length - 1 - i);
-  const keys = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const v = values[i];
-    keys[i] = (v === null ? list.length : rankOfValue.get(v)!) * n + i;
-  }
-  keys.sort();
-  const order = new Int32Array(n);
-  for (let i = 0; i < n; i++) order[i] = keys[i] % n;
+  const classes = valueClasses(values);
+  if (classes) return orderFromClasses(classes, direction);
+  const order = Int32Array.from({ length: values.length }, (_, i) => i).sort((a, b) => compareSortValues(values[a], values[b], direction) || a - b);
   return { order, rank: ranksFromOrder(order) };
 }
 

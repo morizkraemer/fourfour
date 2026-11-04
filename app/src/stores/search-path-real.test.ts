@@ -82,6 +82,25 @@ function script(): Script {
   steps.push({ name: 'sorted dub', run: () => view('dub', true) });
   steps.push({ name: 'sorted clear 2', run: () => view('', true) });
   clearSort('library');
+  for (const key of ['album', 'genre', 'time', 'label', 'index', 'year', 'rating', 'color', 'title', 'artist', 'bpm', 'key']) {
+    steps.push({
+      name: `column ${key} asc`,
+      run: () => {
+        clearSort('library');
+        setSort('library', key);
+        return view('', true);
+      },
+    });
+    steps.push({
+      name: `column ${key} desc`,
+      run: () => {
+        setSort('library', key);
+        return view('', true);
+      },
+    });
+    steps.push({ name: `column ${key} desc, filter house`, run: () => view('house', true) });
+  }
+  clearSort('library');
   return steps;
 }
 

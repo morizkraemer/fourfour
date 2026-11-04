@@ -1950,3 +1950,76 @@ Earlier variants of the same change, 4 pairs each: lazy views only (CSS split): 
 - Skeleton rows (`TrackTable`, 54 ms), sidebar rows (29 ms) and the first forced layout (32 ms) are what is left before the answer; cutting them changes the first screen (R15 looked at the staged reveal) and `TrackTable` is in r113's lane.
 - Moving the browser mocks out of `tauri.svelte.ts` (17 kB rendered, about 7 kB minified) and lazy `OrganizePicker`/`StickBoard` (12 kB rendered): small, and the second changes what users with the panel expanded see at boot.
 - Not measured: the Mac (no GUI here). JavaScriptCore parses the whole script on the page thread, so the 140 kB cut from the entry script should count more there than in V8's background streaming; the next Mac night's `page_start` and first-row columns will show it.
+## R115 first sort (2026-11-04, `r115-first-sort`)
+
+Branch `r115-first-sort` from `ov-1028` after the r113 merge (`1d9fdb1`). Linux `dev` box, load average 13-22 from other workers during all runs, headless Chromium and Playwright WebKit. Base = `ov-1028` in a second worktree, same spec files, runs interleaved (base, new, base, new ...). Real payloads from `bench_startup dump` (10k and 50k, the r95 dumps). `total` is key or pointer down to the second animation frame after it; `script` is the Chromium `ScriptDuration` delta of the step. In WebKit the `js` number is not meaningful for header clicks (pointerdown), so only `total` is compared there.
+
+### Where the first sort went
+
+R113 left the first sort of a column at 125 ms (artist) and 190 ms (title) of script at 50k. In the browser it split into three parts: reading the sort value of every row (10-15 ms), one `Array.sort` over the distinct strings (5 ms for 7.7k artists, 50 ms for 36k titles) and a numeric sort of `rank * n + position` keys (11 ms), plus building the Map from value to rank. The second direction of a column was a new sort (30-55 ms at 50k).
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `app/src/lib/sortOrder.ts`: `sortedOrder` now builds value classes (equal values share one class, 0 for the lowest, `count` for no value; one Map pass, distinct values sorted, ranks looked up per distinct value) and turns them into the order with a counting sort (`orderFromClasses`), which gives equal values in position order and "no value last" in both directions without a second sort. The classes serve both directions, so the second direction costs about 3 ms at 50k instead of 30-55 ms. Lists that are not all strings or all numbers (or hold a NaN) keep the old comparator sort. `valueClassesSteps` is the same code as a generator that yields every `chunk` values (and sorts distinct strings as sorted runs of `chunk` merged), so it can run in short slices; `valueClasses` runs it in one piece (`chunk` Infinity, one native sort, as before).
+- `app/src/stores/table-columns.svelte.ts`: the library sort cache is now one entry per column (values, classes, orders per direction, the list they were read for) instead of one cache per list generation. An entry for an older list is brought up to date from the bump log (`libraryPositionsChangedSince`): changed rows are read again and moved in each cached order, as in R113; any other list change drops it. Sort values are memoized by raw text per read except for the title and `#` columns.
+- Warm-up: `startLibrarySortWarmup(keys)` reads and sorts the visible library columns (not status, fav, wave, cover, `#`) in slices of about 6 ms (2048 rows per read chunk, 4096 strings per sort chunk), starting 1 s after `loadState` or an import (`onTrackListLoaded`, new in `library.svelte.ts`) with `requestIdleCallback` (12 ms gaps with `setTimeout` where it does not exist). A finished column is kept only if nothing built it meanwhile and the list was at most bumped since. The first click on a header finds the order ready; a click before that behaves as before, only faster.
+- `app/src/stores/library.svelte.ts`: while the search text is built (already in idle slices since R95) a bit set of the letters a-z and digits 0-9 of each row is kept (`haystackLetters`, `haystackDigits`, refreshed with the row on a bump). A query of one letter or digit on the library list is answered from those sets (exact: the search text holds the character if and only if its bit is set) instead of `includes` over 50k texts; every other query takes the old path.
+- Tests: `sortOrder.test.ts` (non-ASCII, astral and combining characters, ties, chunk sizes 1 to 1000 of the steps against the one-piece result, 3000 distinct strings across chunk borders, mixed lists and NaN fall back); `search-sort-fuzz.test.ts` now sorts 7 columns (title, artist, album, genre, bpm, key, time) with non-ASCII words, interleaves warm-ups with random small chunk sizes (several at once, started before bumps and reloads) and has a test of every letter, digit and some other single characters, upper case, and after bumps (deliberate breaks of the bump refresh, of the chunked read and of the bit sets make it fail, checked); `search-path-real.test.ts` sorts every sortable column in both directions and with a filter, and hashes the ids.
+- `app/smoke/perf-warmup.spec.ts` (new, Chromium, `FF_PERF_STATE=<dump>`): script time per second and long tasks in the 10 seconds after the first rows.
+
+### Identity
+
+- Store level, real payload through `loadState`, hash of every id of every result list in order: 94 of 94 equal between base and new at 10k and at 50k (90 scripted steps: typing, backspacing, clearing, sorts with and without filters, every column asc and desc and desc with a filter, plus 4 bump scenarios), `FF_PERF_STATE=... npx vitest run src/stores/search-path-real.test.ts` in both trees (the same file).
+- Warm against cold: the fuzz compares sorted lists of 900 random steps (with warm-ups, bumps and reloads in between) against a plain reference sort; the real-payload hashes above were taken with the new tree's cold path, the browser runs below with the warmed path.
+- UI level: the rows on screen (every cell, 3 scroll positions per checkpoint) after each step of the scenario, hashed in the page: 63 of 63 idle steps identical across all runs of base and new, in Chromium 10k and 50k and WebKit 10k and 50k.
+
+### Before / after (browser, interleaved)
+
+Chromium 50k, 5 pairs, none dropped (a run is dropped when its median over all steps exceeds 1.5 x the pooled median). ms, median with (min-max):
+
+| Step | total base | total new | script base | script new |
+|---|---:|---:|---:|---:|
+| first sort artist asc | 186 (154-441) | 89 (67-100) | 108 (98-373) | 29 (27-47) |
+| artist desc | 119 (105-139) | 85 (70-103) | 57 (45-83) | 26 (20-37) |
+| first sort title asc | 228 (205-257) | 87 (70-118) | 161 (149-204) | 30 (22-37) |
+| first sort bpm asc | 121 (106-135) | 87 (75-90) | 64 (58-73) | 23 (22-32) |
+| first sort key asc | 145 (122-230) | 72 (55-88) | 79 (66-137) | 24 (20-28) |
+| title desc, filtered "a" | 157 (141-204) | 73 (64-103) | 106 (96-131) | 20 (18-24) |
+| first keystroke "g" | 139 (128-161) | 99 (94-117) | 53 (39-66) | 37 (34-39) |
+| first keystroke "h" after a clear | 68 (66-99) | 67 (54-76) | 21 (18-32) | 14 (11-20) |
+
+Chromium 10k, 5 pairs, none dropped:
+
+| Step | total base | total new | script base | script new |
+|---|---:|---:|---:|---:|
+| first sort artist asc | 101 (75-108) | 73 (58-90) | 47 (34-71) | 21 (18-24) |
+| artist desc | 81 (66-98) | 69 (41-74) | 24 (20-39) | 14 (11-18) |
+| first sort title asc | 101 (87-108) | 84 (72-106) | 49 (38-57) | 21 (15-30) |
+| first sort bpm asc | 87 (74-115) | 80 (72-88) | 26 (20-42) | 19 (16-30) |
+| first sort key asc | 88 (73-99) | 84 (61-88) | 26 (24-47) | 15 (13-23) |
+| first keystroke "g" | 109 (84-114) | 91 (77-125) | 32 (30-40) | 29 (28-40) |
+| first keystroke "h" after a clear | 59 (41-69) | 70 (65-88) | 15 (14-16) | 17 (15-32) |
+
+WebKit (`total` only), 3 pairs each, none dropped:
+
+| Step | 50k base | 50k new | 10k base | 10k new |
+|---|---:|---:|---:|---:|
+| first sort artist asc | 374 (364-396) | 215 (208-305) | 262 (180-294) | 217 (210-219) |
+| artist desc | 297 (280-329) | 306 (302-1616) | 350 (277-398) | 208 (184-222) |
+| first sort title asc | 394 (348-634) | 241 (200-914) | 250 (182-281) | 189 (182-228) |
+| first sort bpm asc | 260 (228-279) | 268 (204-546) | 246 (218-269) | 192 (181-251) |
+| first sort key asc | 316 (257-381) | 238 (182-366) | 237 (217-238) | 180 (179-198) |
+| first keystroke "g" | 667 (618-860) | 600 (504-1157) | 551 (546-775) | 536 (497-606) |
+| first keystroke "h" after a clear | 341 (287-551) | 361 (275-430) | 307 (262-568) | 277 (267-284) |
+
+Store level (Node, one thread, `search-path-real.test.ts`, median of 3): the sort itself, not the value read, fell: `sortedOrder` of 50k titles 89 to 73 ms, artists 30 to 16 ms, albums 24 to 9 ms, bpm 16 to 5 ms; the second direction of a column 30 to 3 ms. The value read costs 3-5 times more under Vitest than in the browser, so the Node numbers of first sorts (114 vs 132 ms artist) are not comparable to the browser ones.
+
+Cost of the warm-up (`perf-warmup.spec.ts`, Chromium, 4 pairs, script time in the 10 seconds after the first rows): 50k 354 ms (316-362) base, 788 ms (707-807) new, 10k 111 ms (67-128) base, 195 ms (168-216) new; no long task (50 ms) in any run. The added time is spent in slices of at most about 9 ms in the first 4 seconds after the 1 s delay: about 250 ms sorting and reading seven columns, about 100 ms noting the letters and digits of the search text.
+
+### Read with care
+
+- The first sort is fast only when the warm-up had finished (about 4-5 s after the first rows at 50k on this loaded box); a click before that costs what it did before minus the faster sort (50k artist about 115 ms of script). Columns shown later than at load are not warmed.
+- The remaining 20-30 ms of script of a click at 50k is the Svelte update of the visible rows and the `TrackTable` bookkeeping; the click-to-painted time is 70-90 ms, mostly layout and paint.
+- The first keystroke still carries 33-37 ms of script at 50k: 10 ms were the scan (the letter sets remove it, about 9 ms on later single letters after a clear), the rest is the Svelte update of the result and first-use code.
+- WebKit headless adds a compositor gap of 170-300 ms to every step (R29), so differences there are about 40-150 ms in the first sorts and within noise for the keystrokes; one new run at 50k had a spike (1616 and 914 ms) that the median hides.
+- Idle script time per column grows with the row count; at 10k the warm-up is about 85 ms in total.
