@@ -1,8 +1,10 @@
-use pioneer_library::{LocalLibrary, RowPreview, TrackLabelsReader, analysis_stage};
+use std::collections::HashMap;
+
+use pioneer_library::{LocalLibrary, RowPreview, TrackLabels, TrackLabelsReader, TrackListRowRef, analysis_stage};
 
 pub use pioneer_library::{effective_preview, row_bands};
 
-use crate::dto::{LoadedState, PlaylistInput, RowPreviewInfo, TrackInfo, TrackLabelInfo, TrackRow, TrackTableBuilder};
+use crate::dto::{LoadedState, PlaylistInput, RowPreviewInfo, TrackInfo, TrackLabelInfo, TrackRow, TrackTable, TrackTableBuilder};
 
 /// Build TrackInfo list from the library's tracks + flags.
 ///
@@ -101,9 +103,12 @@ pub fn changed_track_labels(reader: &TrackLabelsReader) -> Vec<TrackLabelInfo> {
         .collect()
 }
 
+const PARALLEL_SCAN_MIN_IDS: i64 = 4_000;
+const MAX_SCAN_THREADS: usize = 4;
+
 pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
     let labels_reader = lib.track_labels_reader();
-    let (playlists, mut labels) = std::thread::scope(|scope| {
+    let (playlists, labels) = std::thread::scope(|scope| {
         let labels = scope.spawn(|| labels_reader.read_cached());
         let playlists = lib.get_all_playlists();
         (playlists, labels.join().expect("track label reader panicked"))
@@ -119,9 +124,62 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
             is_folder: pl.is_folder,
         })
         .collect();
+    let (tracks, missing_previews) = track_table(lib, &labels)?;
+    if missing_previews > 0 {
+        lib.backfill_row_previews().map_err(|e| e.to_string())?;
+    }
+    Ok(LoadedState { tracks, playlists })
+}
+
+/// The rows of the whole library as a table, and how many tracks still lack a row preview. A large library is
+/// scanned in id ranges on several threads (the first on `lib`'s connection, the others on their own); the tables
+/// of the ranges are joined in id order, which gives the table one scan would.
+fn track_table(lib: &LocalLibrary, labels: &HashMap<i64, TrackLabels>) -> Result<(TrackTable, usize), String> {
+    let Some((first_id, last_id)) = lib.track_id_bounds().map_err(|e| e.to_string())? else {
+        return Ok((TrackTable::default(), 0));
+    };
+    let scanner = lib.track_list_scanner();
+    let threads = if scanner.is_some() && last_id - first_id >= PARALLEL_SCAN_MIN_IDS {
+        std::thread::available_parallelism().map_or(1, usize::from).min(MAX_SCAN_THREADS)
+    } else {
+        1
+    };
+    let width = (last_id - first_id) / threads as i64 + 1;
+    let ranges: Vec<_> = (0..threads as i64)
+        .map(|part| {
+            let start = if part == 0 { i64::MIN } else { first_id + part * width };
+            let end = if part + 1 == threads as i64 { i64::MAX } else { first_id + (part + 1) * width - 1 };
+            start..=end
+        })
+        .collect();
+    std::thread::scope(|scope| {
+        let others: Vec<_> = ranges[1..]
+            .iter()
+            .map(|ids| {
+                let scanner = scanner.as_ref().expect("several ranges need a scanner");
+                scope.spawn(move || {
+                    let (builder, missing) = scan_rows(labels, |visit| scanner.for_each_track_list_row(ids.clone(), visit))?;
+                    Ok::<_, String>((builder.finish(), missing))
+                })
+            })
+            .collect();
+        let (mut table, mut missing) = scan_rows(labels, |visit| lib.for_each_track_list_row(ranges[0].clone(), visit))?;
+        for other in others {
+            let (part, part_missing) = other.join().expect("track scan thread panicked")?;
+            table.append(part);
+            missing += part_missing;
+        }
+        Ok((table.finish(), missing))
+    })
+}
+
+fn scan_rows(
+    labels: &HashMap<i64, TrackLabels>,
+    scan: impl FnOnce(&mut dyn FnMut(TrackListRowRef<'_>)) -> anyhow::Result<usize>,
+) -> Result<(TrackTableBuilder, usize), String> {
     let mut table = TrackTableBuilder::default();
-    let missing_previews = lib.for_each_track_list_row(|row| {
-        let labels = labels.remove(&i64::from(row.id));
+    let missing_previews = scan(&mut |row| {
+        let labels = labels.get(&i64::from(row.id));
         table.push(&TrackRow {
             id: row.id,
             source_path: row.source_path,
@@ -138,15 +196,12 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
             has_cues: false,
             has_analysis: row.analysis_stages.is_some(),
             analysis_pending: row.analysis_stages.is_some_and(|stages| stages != analysis_stage::ALL),
-            rating: labels.as_ref().and_then(|l| l.rating),
-            color: labels.as_ref().and_then(|l| l.color.as_deref()),
+            rating: labels.and_then(|l| l.rating),
+            color: labels.and_then(|l| l.color.as_deref()),
         });
     })
     .map_err(|e| e.to_string())?;
-    if missing_previews > 0 {
-        lib.backfill_row_previews().map_err(|e| e.to_string())?;
-    }
-    Ok(LoadedState { tracks: table.finish(), playlists })
+    Ok((table, missing_previews))
 }
 
 #[cfg(test)]

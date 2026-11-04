@@ -124,6 +124,27 @@ pub struct TrackListRowRef<'a> {
     pub row_preview: Option<&'a [u8]>,
 }
 
+/// See [`LocalLibrary::track_list_scanner`].
+pub struct TrackListScanner {
+    db_path: PathBuf,
+}
+
+impl TrackListScanner {
+    /// [`LocalLibrary::for_each_track_list_row`] on a new read-only connection.
+    pub fn for_each_track_list_row(
+        &self,
+        ids: std::ops::RangeInclusive<i64>,
+        visit: impl FnMut(TrackListRowRef<'_>),
+    ) -> Result<usize> {
+        let conn = Connection::open_with_flags(
+            &self.db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("Failed to open {} to read tracks", self.db_path.display()))?;
+        queries::for_each_track_list_row(&conn, ids, false, visit)
+    }
+}
+
 /// Bits of `analyses.stages`: which parts of a track's analysis are stored.
 pub mod analysis_stage {
     pub const WAVEFORM: u8 = 1;
@@ -833,11 +854,26 @@ impl LocalLibrary {
         queries::select_track_list_rows(&self.conn, false)
     }
 
-    /// The rows of [`get_track_list_rows_without_previews`](Self::get_track_list_rows_without_previews), handed over
-    /// one by one without copying their texts. Returns how many tracks have an analysis whose row preview is still
-    /// to be filled by [`backfill_row_previews`](Self::backfill_row_previews).
-    pub fn for_each_track_list_row(&self, visit: impl FnMut(TrackListRowRef<'_>)) -> Result<usize> {
-        queries::for_each_track_list_row(&self.conn, false, visit)
+    /// The rows of [`get_track_list_rows_without_previews`](Self::get_track_list_rows_without_previews) of the tracks
+    /// with these ids, handed over one by one without copying their texts. Returns how many of them have an analysis
+    /// whose row preview is still to be filled by [`backfill_row_previews`](Self::backfill_row_previews).
+    pub fn for_each_track_list_row(
+        &self,
+        ids: std::ops::RangeInclusive<i64>,
+        visit: impl FnMut(TrackListRowRef<'_>),
+    ) -> Result<usize> {
+        queries::for_each_track_list_row(&self.conn, ids, false, visit)
+    }
+
+    /// The lowest and highest track id; `None` without tracks.
+    pub fn track_id_bounds(&self) -> Result<Option<(i64, i64)>> {
+        queries::track_id_bounds(&self.conn)
+    }
+
+    /// Reads track list rows on its own connection, so that several threads can scan id ranges at once; `None` for a
+    /// library without a file.
+    pub fn track_list_scanner(&self) -> Option<TrackListScanner> {
+        self.db_path.clone().map(|db_path| TrackListScanner { db_path })
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.

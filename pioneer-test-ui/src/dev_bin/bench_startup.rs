@@ -950,7 +950,7 @@ fn rep(dir: &Path, runs: usize) {
         columns[0].push(ms(t));
         let t = Instant::now();
         let mut rows = 0;
-        lib.for_each_track_list_row(|row| rows += usize::from(row.id != 0)).unwrap();
+        lib.for_each_track_list_row(i64::MIN..=i64::MAX, |row| rows += usize::from(row.id != 0)).unwrap();
         assert!(rows > 0);
         columns[3].push(ms(t));
         let t = Instant::now();

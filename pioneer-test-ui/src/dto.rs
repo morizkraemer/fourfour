@@ -194,6 +194,12 @@ impl TextColumn {
         self.ends.len()
     }
 
+    fn append(&mut self, other: &TextColumn) {
+        let shift = self.text.len();
+        self.text.push_str(&other.text);
+        self.ends.extend(other.ends.iter().map(|end| end + shift));
+    }
+
     fn get(&self, index: usize) -> &str {
         let start = if index == 0 { 0 } else { self.ends[index - 1] };
         &self.text[start..self.ends[index]]
@@ -422,6 +428,46 @@ impl TrackTableBuilder {
             let color = self.intern(4, color);
             self.table.colors.extend([index, color]);
         }
+    }
+
+    /// Adds the rows of `other`, built from the tracks that follow this builder's, as if they had been pushed here.
+    pub fn append(&mut self, other: TrackTable) {
+        let first_row = self.table.id.len() as u32;
+        let strings: Vec<u32> = other.strings.iter().map(|text| self.strings.intern(text)).collect();
+        let mut paths = TextColumn::default();
+        let mut path = String::new();
+        let mut folders = Vec::with_capacity(other.folder_name.len());
+        for (index, &parent) in other.folder_parent.iter().enumerate() {
+            path.clear();
+            if parent > 0 {
+                path.push_str(paths.get(parent as usize - 1));
+            }
+            path.push_str(other.folder_name.get(index));
+            paths.push(&path);
+            folders.push(self.folders.folder(&path));
+        }
+        let table = &mut self.table;
+        table.id.extend(&other.id);
+        table.dir.extend(other.dir.iter().map(|&folder| folders[folder as usize]));
+        table.file.append(&other.file);
+        table.title.append(&other.title);
+        table.artist.extend(other.artist.iter().map(|&text| strings[text as usize]));
+        table.album.extend(other.album.iter().map(|&text| strings[text as usize]));
+        table.genre.extend(other.genre.iter().map(|&text| strings[text as usize]));
+        table.key.extend(other.key.iter().map(|&text| strings[text as usize]));
+        table.tempo.extend(&other.tempo);
+        table.duration_secs.extend(&other.duration_secs);
+        table.bitrate.extend(&other.bitrate);
+        table.file_size.extend(&other.file_size);
+        table.flags.extend(&other.flags);
+        for rating in other.ratings.chunks_exact(2) {
+            table.ratings.extend([first_row + rating[0], rating[1]]);
+        }
+        for color in other.colors.chunks_exact(2) {
+            table.colors.extend([first_row + color[0], strings[color[1] as usize]]);
+        }
+        self.previous_dir.1 = u32::MAX;
+        self.runs.iter_mut().for_each(|run| run.1 = u32::MAX);
     }
 
     pub fn finish(self) -> TrackTable {

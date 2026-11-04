@@ -452,7 +452,7 @@ pub fn select_all_tracks_with_flags(
 /// preview.
 pub fn select_track_list_rows(conn: &Connection, with_previews: bool) -> Result<Vec<crate::TrackListRow>> {
     let mut rows = Vec::new();
-    for_each_track_list_row(conn, with_previews, |row| {
+    for_each_track_list_row(conn, i64::MIN..=i64::MAX, with_previews, |row| {
         rows.push(crate::TrackListRow {
             id: row.id,
             source_path: row.source_path.to_owned(),
@@ -478,23 +478,28 @@ pub fn select_track_list_rows(conn: &Connection, with_previews: bool) -> Result<
 /// a third less than joining them in SQL, where each analysis and artwork row is a separate lookup.
 pub fn for_each_track_list_row(
     conn: &Connection,
+    ids: std::ops::RangeInclusive<i64>,
     with_previews: bool,
     mut visit: impl FnMut(crate::TrackListRowRef<'_>),
 ) -> Result<usize> {
     let snapshot = conn.unchecked_transaction()?;
     let mut tracks = snapshot.prepare_cached(
         "SELECT id, source_path, title, artist, album, genre, tempo, key, duration_secs, bitrate, file_size
-         FROM tracks ORDER BY id",
+         FROM tracks WHERE id BETWEEN ?1 AND ?2 ORDER BY id",
     )?;
     let mut analyses = snapshot.prepare_cached(if with_previews {
-        "SELECT track_id, bpm, key, stages, row_preview IS NULL, row_preview FROM analyses ORDER BY track_id"
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL, row_preview
+         FROM analyses WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id"
     } else {
-        "SELECT track_id, bpm, key, stages, row_preview IS NULL FROM analyses ORDER BY track_id"
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL
+         FROM analyses WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id"
     })?;
-    let mut artwork = snapshot.prepare_cached("SELECT track_id FROM artwork ORDER BY track_id")?;
-    let mut analyses = AnalysisCursor::start(analyses.query([])?, with_previews)?;
-    let mut artwork = ArtworkCursor::start(artwork.query([])?)?;
-    let mut tracks = tracks.query([])?;
+    let mut artwork =
+        snapshot.prepare_cached("SELECT track_id FROM artwork WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id")?;
+    let bounds = [*ids.start(), *ids.end()];
+    let mut analyses = AnalysisCursor::start(analyses.query(bounds)?, with_previews)?;
+    let mut artwork = ArtworkCursor::start(artwork.query(bounds)?)?;
+    let mut tracks = tracks.query(bounds)?;
     let mut missing_previews = 0;
     while let Some(row) = tracks.next()? {
         let id: i64 = row.get(0)?;
@@ -524,6 +529,12 @@ pub fn for_each_track_list_row(
         });
     }
     Ok(missing_previews)
+}
+
+pub fn track_id_bounds(conn: &Connection) -> Result<Option<(i64, i64)>> {
+    let (first, last): (Option<i64>, Option<i64>) =
+        conn.query_row("SELECT MIN(id), MAX(id) FROM tracks", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(first.zip(last))
 }
 
 fn text<'r>(row: &'r rusqlite::Row<'_>, column: usize) -> Result<&'r str> {
