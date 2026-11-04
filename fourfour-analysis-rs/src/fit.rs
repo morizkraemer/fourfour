@@ -12,6 +12,12 @@ pub const TEMPO_SEARCH: TempoSearch = TempoSearch::LineAndGlobalPeak;
 pub const GLOBAL_SEARCH_PCT: f64 = 4.0;
 pub const HALF_TIME_BAND: (f64, f64) = (0.0, 0.0);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapPick {
+    Nearest,
+    Best,
+}
+
 #[derive(Clone, Debug)]
 pub struct FitParams {
     pub lo: f64,
@@ -24,7 +30,12 @@ pub struct FitParams {
     pub global_pct: f64,
     pub snap_wide: f64,
     pub scan_pct: f64,
+    pub far_skip_pct: f64,
     pub snap_ratio: f64,
+    pub snap_pick: SnapPick,
+    pub snap_segments: usize,
+    pub snap_segment_ratio: f64,
+    pub snap_spread_ms: f64,
     pub keep_native: (f64, f64),
     pub half_time_band: (f64, f64),
     pub threads: usize,
@@ -43,7 +54,12 @@ impl Default for FitParams {
             global_pct: GLOBAL_SEARCH_PCT,
             snap_wide: 1.5,
             scan_pct: 0.3,
+            far_skip_pct: 0.3,
             snap_ratio: 0.97,
+            snap_pick: SnapPick::Nearest,
+            snap_segments: 0,
+            snap_segment_ratio: 0.0,
+            snap_spread_ms: f64::MAX,
             keep_native: (150.0, 185.0),
             half_time_band: HALF_TIME_BAND,
             threads: 1,
@@ -294,6 +310,76 @@ fn scan_tempo(act: &[f64], w: &Window, t0: f64, p: f64, steps: i64, threads: usi
     (best.1, best.2)
 }
 
+struct Segment<'a> {
+    act: &'a [f64],
+    w: Window,
+}
+
+fn segments<'a>(act: &'a [f64], w: &Window, n: usize) -> Vec<Segment<'a>> {
+    let per = act.len() / n;
+    (0..n)
+        .map(|i| {
+            let (from, to) = (i * per, if i + 1 == n { act.len() } else { (i + 1) * per });
+            Segment { act: &act[from..to], w: Window { offset: w.offset + from as f64 / FPS, len: (to - from) as f64 / FPS } }
+        })
+        .collect()
+}
+
+fn best_phase_in(act: &[f64], w: &Window, t: f64, p: f64, reach_s: f64) -> (f64, f64) {
+    let mut best = (comb_score(act, w, t, p), t);
+    let mut dt = -reach_s;
+    while dt <= reach_s {
+        let s = comb_score(act, w, t + dt, p);
+        if s > best.0 {
+            best = (s, t + dt);
+        }
+        dt += 0.0005;
+    }
+    best
+}
+
+fn snap_to_integer(act: &[f64], w: &Window, t0: f64, p: f64, params: &FitParams) -> Option<(f64, f64)> {
+    let folded = fold_bpm(60.0 / p, params.lo);
+    let mid = w.offset + w.len / 2.0;
+    let current = comb_score(act, w, t0, p);
+    let reach = params.snap_wide.max(params.snap_tol);
+    let mut candidates: Vec<f64> = ((folded - reach).ceil() as i64..=(folded + reach).floor() as i64).map(|n| n as f64).collect();
+    candidates.sort_by(|a, b| (a - folded).abs().total_cmp(&(b - folded).abs()));
+    let segs = if params.snap_segments > 1 { segments(act, w, params.snap_segments) } else { Vec::new() };
+    let reach_s = params.snap_phase_ms / 1000.0;
+    let mut accepted: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for snapped in candidates {
+        let delta = (folded - snapped).abs();
+        let p_new = p * folded / snapped;
+        let t_new = t0 + (p - p_new) * ((mid - t0) / p);
+        let best = best_phase_in(act, w, t_new, p_new, reach_s);
+        let unchecked = params.snap_tol_unchecked && delta < params.snap_tol;
+        let mut ok = unchecked || best.0 >= params.snap_ratio * current;
+        if ok && !segs.is_empty() && !unchecked {
+            let mut phases = Vec::new();
+            for seg in &segs {
+                let here = comb_score(seg.act, &seg.w, t0, p);
+                let (score, t_seg) = best_phase_in(seg.act, &seg.w, t_new, p_new, reach_s);
+                phases.push(t_seg - t_new);
+                ok &= score >= params.snap_segment_ratio * here;
+            }
+            let spread = phases.iter().cloned().fold(f64::MIN, f64::max) - phases.iter().cloned().fold(f64::MAX, f64::min);
+            ok &= spread * 1000.0 <= params.snap_spread_ms;
+        }
+        if ok {
+            accepted.push((delta, best.0, best.1, p_new));
+            if params.snap_pick == SnapPick::Nearest {
+                break;
+            }
+        }
+    }
+    let pick = match params.snap_pick {
+        SnapPick::Nearest => accepted.first(),
+        SnapPick::Best => accepted.iter().max_by(|a, b| a.1.total_cmp(&b.1)),
+    };
+    pick.map(|&(_, _, t, p_new)| (t, p_new))
+}
+
 pub fn fit_track(
     peaks_s: &[f64],
     beat_logits: &[f32],
@@ -322,7 +408,7 @@ pub fn fit_track(
         (t0, p) = near;
         if params.tempo_search == TempoSearch::LineAndGlobalPeak {
             let peak = global_fold_peak(&act, w, p, params.global_pct);
-            if (peak / p - 1.0).abs() > params.scan_pct / 100.0 {
+            if (peak / p - 1.0).abs() > params.far_skip_pct / 100.0 {
                 let mid = w.offset + w.len / 2.0;
                 let far = scan_from(t0 + (p - peak) * ((mid - t0) / p), peak);
                 if comb_score(&act, w, far.0, far.1) > comb_score(&act, w, near.0, near.1) {
@@ -333,31 +419,9 @@ pub fn fit_track(
     }
 
     if params.snap_tol > 0.0 {
-        let folded = fold_bpm(60.0 / p, params.lo);
-        let mid = w.offset + w.len / 2.0;
-        let current = comb_score(&act, w, t0, p);
-        let reach = params.snap_wide.max(params.snap_tol);
-        let mut candidates: Vec<f64> = ((folded - reach).ceil() as i64..=(folded + reach).floor() as i64).map(|n| n as f64).collect();
-        candidates.sort_by(|a, b| (a - folded).abs().total_cmp(&(b - folded).abs()));
-        for snapped in candidates {
-            let delta = (folded - snapped).abs();
-            let p_new = p * folded / snapped;
-            let t_new = t0 + (p - p_new) * ((mid - t0) / p);
-            let mut best = (comb_score(&act, w, t_new, p_new), t_new);
-            let mut dt = -params.snap_phase_ms / 1000.0;
-            while dt <= params.snap_phase_ms / 1000.0 {
-                let s = comb_score(&act, w, t_new + dt, p_new);
-                if s > best.0 {
-                    best = (s, t_new + dt);
-                }
-                dt += 0.0005;
-            }
-            let unchecked = params.snap_tol_unchecked && delta < params.snap_tol;
-            if unchecked || best.0 >= params.snap_ratio * current {
-                p = p_new;
-                t0 = best.1;
-                break;
-            }
+        if let Some((t_snap, p_snap)) = snap_to_integer(&act, w, t0, p, params) {
+            t0 = t_snap;
+            p = p_snap;
         }
     }
 
@@ -467,6 +531,24 @@ mod tests {
         let global = fit_from_peaks_off_the_true_tempo(TempoSearch::LineAndGlobalPeak);
         assert!((near - 114.0).abs() > 0.1, "near-only fitted {near}");
         assert_eq!(global, 114.0);
+    }
+
+    fn fit_from_peaks_just_outside_the_near_scan(far_skip_pct: f64) -> f64 {
+        let (_, strong) = synthetic(128.0);
+        let (_, weak) = synthetic(128.3);
+        let logits: Vec<f32> = strong.iter().zip(&weak).map(|(&s, &w)| s.max(w - 1.0)).collect();
+        let (peaks, _) = synthetic(128.6);
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        let params = FitParams { far_skip_pct, snap_tol: 0.0, ..FitParams::default() };
+        fit_track(&peaks, &logits, &logits, DURATION, &w, &params).unwrap().bpm
+    }
+
+    #[test]
+    fn global_peak_is_searched_even_when_it_is_close_to_the_near_result() {
+        let skipped = fit_from_peaks_just_outside_the_near_scan(0.3);
+        let searched = fit_from_peaks_just_outside_the_near_scan(0.05);
+        assert!((skipped - 128.0).abs() > 0.05, "skipped fitted {skipped}");
+        assert!((searched - 128.0).abs() < 0.003, "searched fitted {searched}");
     }
 
     #[test]
