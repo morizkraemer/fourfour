@@ -613,3 +613,4 @@
 2026-11-04 20:15 orchestrator r119 handed back parked-all-v9 3a135a7 (v8 + r108 on ov-1028 0e01eba; 5 conflicts resolved, nothing dropped; v8-schema payload byte-identical; cargo, vitest 978, check, both smokes green); :4212 now serves v9
 2026-11-04 20:16 orchestrator decided: own prio r121 first-screen mount cost (skeleton rows, sidebar, forced layout; sonnet high)
 2026-11-04 21:29 orchestrator r120 handed back 52536cc (load_state as one binary buffer; page decode -30 to -65%, encode 1.5-1.8x, 50k first row -118 to -282 ms; row JSON sha256-identical; real Tauri IPC unmeasured, Mac check), merged 7056104, chain running. decided: own prio r122 row mapping without TrackInfo (sonnet high)
+2026-11-04 21:47 orchestrator r120 landed 7056104 (both smokes 0 failed, 26 suites, vitest 935, CHECKS-OK)
