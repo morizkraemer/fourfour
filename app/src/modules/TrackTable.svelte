@@ -800,29 +800,35 @@
   {/if}
 </div>
 
-<ContextMenu
-  open={columnMenu.open}
-  x={columnMenu.x}
-  y={columnMenu.y}
-  items={columnMenuItems()}
-  onClose={() => (columnMenu = { ...columnMenu, open: false })}
-/>
+{#if columnMenu.open}
+  <ContextMenu
+    open
+    x={columnMenu.x}
+    y={columnMenu.y}
+    items={columnMenuItems()}
+    onClose={() => (columnMenu = { ...columnMenu, open: false })}
+  />
+{/if}
 
-<ContextMenu
-  open={rowMenu.open}
-  x={rowMenu.x}
-  y={rowMenu.y}
-  items={rowMenuItems()}
-  onClose={() => (rowMenu = { ...rowMenu, open: false, trackId: null })}
-/>
+{#if rowMenu.open}
+  <ContextMenu
+    open
+    x={rowMenu.x}
+    y={rowMenu.y}
+    items={rowMenuItems()}
+    onClose={() => (rowMenu = { ...rowMenu, open: false, trackId: null })}
+  />
+{/if}
 
-<ContextMenu
-  open={listMenu.open}
-  x={listMenu.x}
-  y={listMenu.y}
-  items={listMenuItems()}
-  onClose={() => (listMenu = { ...listMenu, open: false })}
-/>
+{#if listMenu.open}
+  <ContextMenu
+    open
+    x={listMenu.x}
+    y={listMenu.y}
+    items={listMenuItems()}
+    onClose={() => (listMenu = { ...listMenu, open: false })}
+  />
+{/if}
 
 <DragGhost
   visible={dnd.kind === 'tracks'}
