@@ -1619,14 +1619,14 @@ Branch `r111-rows-query` from `ov-1028` (r109 merge). Linux `dev` box (16 cores)
 
 | Library | Pairs x runs | `load_state` base | `load_state` new | Rows query alone base / new | Table build, base | JSON, base / new |
 |---|---|---:|---:|---:|---:|---:|
-| 10k, fixture folders | 5 x 15 | 84.5 ms (83.5-91.6) | 46.2 ms (43.5-49.9) | 50.8 / 38.3 | 14.1 | 8.2 / 7.3 |
-| 10k, 295 folders | 5 x 15 | 80.1 ms (75.2-167.7) | 51.1 ms (34.0-70.5) | 53.9 / 41.2 | 7.6 | 7.7 / 7.0 |
-| 50k, fixture folders | 4 x 8 | 455.9 ms (436-498) | 296.0 ms (240-300) | 284 / 226 | 91.1 | 46.5 / 33.9 |
-| 50k, 500 folders | 4 x 8 | 372.8 ms (354-439) | 208.4 ms (199-224) | 288 / 220 | 47.9 | 29.6 / 30.5 |
+| 10k, fixture folders | 5 x 15 | 83.7 ms (81.5-84.3) | 44.1 ms (40.8-48.3) | 50.2 / 38.9 | 14.0 | 8.2 / 6.7 |
+| 10k, 295 folders | 5 x 15 | 74.8 ms (72.9-77.7) | 37.0 ms (35.9-41.6) | 49.1 / 38.4 | 7.6 | 7.3 / 5.9 |
+| 50k, fixture folders | 4 x 8 | 466.1 ms (405.6-521.5) | 194.4 ms (161.1-295.4) | 284.1 / 224.2 | 81.2 | 46.0 / 39.9 |
+| 50k, 500 folders | 4 x 8 | 417.4 ms (341.3-504.4) | 154.8 ms (148.7-280.6) | 314.8 / 229.2 | 41.9 | 30.3 / 31.7 |
 
-Fastest single runs: 10k fixture 79.9 / 37.1 ms, 10k realistic 71.6 / 31.1, 50k fixture 398.9 / 197.3, 50k realistic 327.6 / 144.3. In the new code the table is built while the rows are read, so "table build, base" has no new counterpart (the JSON column of the base is its `serialize_ms` minus the table build). The 10k realistic pair spread is wide because box load changed during that run (medians 34-70 ms); the 10k fixture and 50k pairs ran at 13-18. The scan threads need idle cores: with the box at load 30 and above they gain much less. Without threads (commit `aa1d569`) the same code ran at 54-64 ms (10k fixture) and 223-229 ms (50k realistic).
+Fastest single runs (base / new): 10k fixture 79.3 / 35.1 ms, 10k realistic 68.7 / 27.9, 50k fixture 389.2 / 149.1, 50k realistic 320.6 / 120.3. Box load was 13-20 during these pairs, with spikes from other workers (slowest single runs up to 1.9 s at 50k), which is why the 50k ranges are wide. An earlier set of pairs on the commit before the hash-function cleanup (load 13-18) gave 84.5 / 46.2, 80.1 / 51.1, 455.9 / 296.0 and 372.8 / 208.4 ms for the four rows: the same direction, the new side 40-60 ms slower at 50k there because of less idle CPU for the scan threads. In the new code the table is built while the rows are read, so "table build, base" has no new counterpart (the JSON column of the base is its `serialize_ms` minus the table build). The scan threads need idle cores: with the box at load 30 and above they gain much less. Without threads (commit `aa1d569`) the same code ran at 54-64 ms (10k fixture) and 223-229 ms (50k realistic).
 
-The 60 ms target for 10k is met (46 and 51 ms median, fastest 37 and 31). What is left at 50k (realistic, quiet box): rows scan 140 ms of CPU (about 2.7 us per row, split over the threads), playlists 9 ms, JSON 30 ms, joining the range tables about 10 ms.
+The 60 ms target for 10k is met (44 and 37 ms median, fastest 35 and 28). What is left at 50k (realistic): rows scan 138-161 ms of CPU (about 2.8 us per row, split over the threads), playlists 9 ms, JSON 30 ms, joining the range tables about 10 ms.
 
 ### Identity
 
