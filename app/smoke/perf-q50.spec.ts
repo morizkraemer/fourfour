@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import type { LoadedState, TrackInfo } from '../src/services/tauri.svelte.ts';
+import { decodeTrackTable, isTrackTable } from '../src/services/track-table.ts';
 import { fixtureAnalysis, fixtureState } from './fixture.ts';
 import { installTauriMock, type SmokeWindow } from './tauri-mock.ts';
 
@@ -29,7 +30,10 @@ function rowBands(i: number) {
 const REAL_STATE = process.env.FF_PERF_STATE;
 
 function state(): LoadedState {
-  if (REAL_STATE) return JSON.parse(readFileSync(REAL_STATE, 'utf8')) as LoadedState;
+  if (REAL_STATE) {
+    const dumped = JSON.parse(readFileSync(REAL_STATE, 'utf8'));
+    return { ...dumped, tracks: isTrackTable(dumped.tracks) ? decodeTrackTable(dumped.tracks) : dumped.tracks } as LoadedState;
+  }
   const base = fixtureState();
   return { ...base, tracks: base.tracks.map((t, i) => ({ ...t, waveform_bands: rowBands(i) })) };
 }
