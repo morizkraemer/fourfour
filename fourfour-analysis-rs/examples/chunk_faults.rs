@@ -13,6 +13,7 @@ static BIG_ALLOCS: AtomicUsize = AtomicUsize::new(0);
 static BIG_BYTES: AtomicUsize = AtomicUsize::new(0);
 static HUGE_ALLOCS: AtomicUsize = AtomicUsize::new(0);
 static BIG_FREES: AtomicUsize = AtomicUsize::new(0);
+static HUGE_SIZES: [AtomicUsize; 16] = [const { AtomicUsize::new(0) }; 16];
 
 struct Counting;
 
@@ -22,7 +23,10 @@ unsafe impl GlobalAlloc for Counting {
             BIG_ALLOCS.fetch_add(1, Ordering::Relaxed);
             BIG_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
             if layout.size() >= HUGE {
-                HUGE_ALLOCS.fetch_add(1, Ordering::Relaxed);
+                let i = HUGE_ALLOCS.fetch_add(1, Ordering::Relaxed);
+                if i < HUGE_SIZES.len() {
+                    HUGE_SIZES[i].store(layout.size(), Ordering::Relaxed);
+                }
             }
         }
         System.alloc(layout)
@@ -55,9 +59,6 @@ fn thread_stat() -> (u64, f64, f64) {
 }
 
 fn main() -> anyhow::Result<()> {
-    if std::env::var_os("CHUNK_HEAP").is_some() {
-        fourfour_analysis::heap::keep_freed_memory();
-    }
     let dir = std::env::var_os("FOURFOUR_MODELS_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap()).join(".cache/fourfour-models"));
@@ -109,6 +110,10 @@ fn main() -> anyhow::Result<()> {
             BIG_FREES.load(Ordering::Relaxed) - fr0
         );
     }
+    let sizes: Vec<usize> = HUGE_SIZES.iter().map(|s| s.load(Ordering::Relaxed) >> 20).filter(|&mb| mb > 0).collect();
+    println!("first blocks of 32 MB and more (MB): {sizes:?}");
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    println!("{}", status.lines().filter(|l| l.starts_with("VmHWM") || l.starts_with("VmRSS")).collect::<Vec<_>>().join("; "));
     println!("hash {hash:016x}");
     Ok(())
 }

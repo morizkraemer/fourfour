@@ -1500,3 +1500,46 @@ The stage savings are about 5.7 CPU-s over the 12 tracks, against a 27 s differe
 - Decode is now mostly symphonia (MP3 300 ms, FLAC 590 ms per 120-330 s of audio) and first-touch page faults of the sample buffer.
 
 Commits on `r104-stages`: `ae35686` decode, `0698573` + `5d33804` key, `aa12a4f`, `fbb86e5`, `2b3f40f` bench example. Validation: `cargo test --workspace`: 26 `test result: ok` lines, 549 passed, 0 failed.
+
+## R106 model sys time (2026-11-04, `r106-model-faults`)
+
+Branch `r106-model-faults` from `ov-1028` (`a1b37c0`). Linux `dev` box (16 vCPU, glibc 2.41), release builds, baseline from a clean `git archive` of `a1b37c0`, load average 15-45 from other workers, base and new interleaved, 2 analysis threads (`analyze-json --threads 2`, box rule). Tracks: the 12 of `~/.cache/r106-work/tracks.txt` (4 MP3, 4 FLAC, 4 WAV from `rekordbox-testdata-2025`, 255-420 s, mean 316 s) and one 46 min WAV (8 of them concatenated). `perf` and `strace` are not available, so the fault source was found with a counting `#[global_allocator]` and `/proc/self/stat` around single chunk runs (`fourfour-analysis-rs/examples/chunk_faults.rs`, `CHUNK_FRAMES`, `CHUNK_ROUNDS`). **Result: the cause is found and a fix exists (-22% CPU, outputs byte-identical), but it costs +10% to +23% peak RSS, so it is not the default; doc-only, no behaviour change on the branch.**
+
+### Where the faults come from
+
+- rten creates a fresh `BufferPool` inside every `Model::run` (`graph.rs`, `let pool = BufferPool::new()`, same in 0.27) and drops it when the run ends. `RunOptions` has no way to pass a pool in, so nothing the caller does can keep activations alive between chunks, and a persistent worker thread changes nothing.
+- One beat-model chunk of 1500 frames allocates 38 blocks of 128 KB and more, 1,082 MB in total. Six of them are the attention matrices: one of 274 MB and five of 137 MB (959 MB, 88% of the bytes). All are freed at the end of the run.
+- glibc cannot keep those: blocks above 32 MB (the largest `M_MMAP_THRESHOLD`) are always `mmap`ed and `munmap`ed, and the per-thread arenas that serve the rest are 64 MB heaps that glibc deletes and trims as soon as they are free. So every chunk faults in about 235k pages (about 940 MB) again: 1.0-1.2 s of system time against 4.7-5 s of user time (17-20%). The R104 `MALLOC_MMAP_THRESHOLD_`, `MALLOC_TRIM_THRESHOLD_` and `MALLOC_TOP_PAD_` runs changed nothing because they left the arenas and the 137/274 MB blocks alone.
+- **At chunk 500 the problem does not exist.** `chunk_faults` with `CHUNK_FRAMES=500`: 30 blocks, 146 MB, none above 32 MB, 0-543 faults and 0 ms system time per chunk with the default allocator. The faults are the attention matrices of the 1500 frame chunk (they grow with the square of the length). If the parked chunk 500 (r96) lands, this item is gone without any allocator setting. `FOURFOUR_BEAT_CHUNK` does not exist on `ov-1028`.
+- Not the cause: our own per-chunk `Vec`s (`extract_chunk` 768 KB, the output logits), the mel stream, decode (R104), or the thread pool scratch.
+
+### What fixes it
+
+`MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1073741824` (env vars, no code): one arena, so everything lives in the brk heap; no mmap, so the big blocks live there too; trim only above 1 GB free at the top. All three are needed (single thread, `chunk_faults`, per chunk): default 235k faults and 1.1 s sys; `ARENA_MAX=1` alone 264k; `MMAP_MAX=0` + trim without `ARENA_MAX=1` 224-246k (heaps of non-main arenas are deleted regardless of the trim threshold); `ARENA_MAX=1` + `MMAP_THRESHOLD=32 MB` (mmap kept) 238k; all three 0 faults, 0 ms sys, wall 6.2 s to 5.1 s. `MALLOC_ARENA_MAX=4` + `MMAP_MAX=0` + trim (the app's R49 cap with the rest) did nothing in the full run (sys 52.9 s, 11.4 M faults), so the app's four arenas do not give this for free. A trim threshold of 256 MB kept 4.5 M of the 12 M faults (sys 20.8 s), 64 MB 5.9 M; 1 GB and 2 GB both reach 0.3 M.
+
+### Numbers (12 tracks, `analyze-json --threads 2`, mean of 2 runs each, interleaved base, new, new, base)
+
+| | user | sys | CPU per track | minor faults | wall | peak RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| base (default glibc) | 787 s | 167.6 s | 79.6 s | 36.9 M | 463 s | 1,168 MB (1,189 / 1,147) |
+| `ARENA_MAX=1 MMAP_MAX=0 TRIM=1G` | 740 s | 2.4 s | 61.8 s | 0.33 M | 353 s | 1,284 MB (1,269 / 1,299) |
+| change | -6% | -98.6% | **-22.3%** | -99% | -24% | **+9.9%** (+6.7% to +13.3%) |
+
+The 46 min WAV (one track, 2 threads): base user 511 s, sys 110 s, 24.6 M faults, wall 324 s, RSS 1,161 MB; with the settings user 488 s, sys 3 s, 0.35 M faults, wall 261 s (-21% CPU), **RSS 1,426 MB (+23%)**. A 4 track list (3 runs per setting, `small.txt`) gave the same picture: CPU 80.7 / 79.8 / 77.4 to 61.5 and 63.2 (trim 1 GB, 2 GB), RSS 1,078-1,085 to 1,147-1,176.
+
+The load was 15-45 during the runs; user and sys CPU are what to read, wall followed them. Every run, base or not, produced the same bytes: `analyze-json` output of the 12 tracks sha256 `420835363d5a...` (4 runs), 4 track list `755c474e7c12...` (all 16 runs, every setting), the 46 min file `6774687d1668...` (all runs). The full sha256 of the 12 track output is in `~/.cache/r106-work/out/*.json` while the scratch dir lives; the first 12 hex digits above are what the run script printed.
+
+### Why not default
+
+- **Peak RSS +10% on typical tracks, +23% on a long mix at 2 threads**, over the +10% allowed. With the brk heap the 137/274 MB blocks of the threads interleave and the heap ratchets up in steps (46 min file: 1,013, 1,287, 1,425, 1,466 MB during the chunks) and freed audio buffers (decode, resample) leave holes that stay resident; mmap returned both at once. A `malloc_trim(0)` after the mel stage did not lower the peak and doubled the faults (0.53 M). The cost grows with the number of chunk threads, which this box would not let me run (rule: 2 threads); at 14 threads the 4 GB ceiling of `chunk_slots` plans 400 MB per chunk and the shared heap would be the first thing to exceed it.
+- **A block cache in a `#[global_allocator]`** (keep freed blocks of 32 MB and more for reuse by the same size, only once a size was requested twice, 3 GB cap, `release_cached` at the end of a run) also reaches 8-11k faults and sys 4 s per 4 tracks (CPU -22%, same bytes), but retains every block of the chunk, not only the live ones: single thread chunk RSS 489 -> 630 MB (+29%), 4 track list 1,360 MB (+25%), 46 min file 1,470 MB (+27%). More code (unsafe allocator in the app binary) and worse RSS than the three env vars; dropped.
+- `GLIBC_TUNABLES=glibc.malloc.hugetlb=1` (transparent huge pages for malloc): 253k -> 112k faults, sys 990 -> 670 ms per chunk, RSS equal; only half the effect and it has to be set before the process starts. THP is `always` on this box but does not apply to most of these blocks.
+- mimalloc / jemalloc: not in the offline crate cache and a C dependency in the app binary; not tried. The retention trade-off would be the same kind (memory kept to avoid faults).
+
+### Recommendation
+
+- Do nothing in the app. If chunk 500 (r96) lands the faults disappear without a setting.
+- For Linux batch runs where RSS does not matter (benchmarks, the 10k fixture on `dev`), set the three env vars: -22% CPU, same output.
+- If 1500 stays the default and Linux throughput matters, the real fix is in rten: reuse the `BufferPool` across runs (an upstream change; not possible with 0.24 or 0.27 from outside). That would keep about 490 MB per thread (the live peak) instead of the 630-650 MB a cache or a shared heap ends up holding.
+
+Commits on `r106-model-faults`: `03c3018` `chunk_faults` example (allocation count and size, faults, user and sys per chunk run, peak RSS), plus this section. Not measured: 14 threads, the app (Tauri, its arena cap), the Mac.
