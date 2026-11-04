@@ -1,10 +1,13 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { Session } from 'node:inspector';
 import { describe, it, vi } from 'vitest';
 
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
 const STATE = env.FF_PERF_STATE;
 const OUT = env.FF_PERF_OUT;
 const REPEATS = Number(env.FF_PERF_REPEATS ?? 5);
+const PROFILE = env.FF_PERF_PROFILE;
+const WARM = env.FF_PERF_WARM !== '0';
 const SIZES = (env.FF_PERF_PLAYLISTS ?? 'R124 1k,R124 5k,R124 20k').split(',');
 
 const saveCost = { calls: 0, ms: 0 };
@@ -35,6 +38,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 import {
   addTracksToPlaylist,
   bumpLibraryTracks,
+  filterTracks,
   library,
   loadState,
   moveTracksToPlaylist,
@@ -43,7 +47,17 @@ import {
   reorderPlaylistTracks,
 } from './library.svelte.ts';
 import { openTableView } from './playlist-view-probe.svelte.ts';
-import { clearSort, setSort } from './table-columns.svelte.ts';
+import { clearSort, setSort, startLibrarySortWarmup } from './table-columns.svelte.ts';
+
+const WARMED_COLUMNS = ['title', 'artist', 'label', 'bpm', 'key', 'time'];
+
+async function loadWarm() {
+  await loadState();
+  if (!WARM) return;
+  filterTracks(library.tracks, 'zzzz');
+  const warmup = startLibrarySortWarmup(WARMED_COLUMNS);
+  while (!warmup.step(50));
+}
 
 type Row = { id: number };
 
@@ -66,10 +80,15 @@ function rowsHash(rows: readonly Row[]): string {
 
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
+interface Outcome {
+  rows: readonly Row[];
+  extra?: () => string;
+}
+
 interface Step {
   name: string;
   prepare?: () => void;
-  run: () => Promise<string> | string;
+  run: () => Promise<Outcome | readonly Row[]> | Outcome | readonly Row[];
 }
 
 const COLUMNS = ['title', 'artist', 'album', 'genre', 'time', 'label', 'bpm', 'key', 'index', 'year', 'rating', 'color'];
@@ -77,7 +96,7 @@ const COLUMNS = ['title', 'artist', 'album', 'genre', 'time', 'label', 'bpm', 'k
 function script(name: string): Step[] {
   const view = openTableView('All Tracks');
   const steps: Step[] = [];
-  const rows = () => rowsHash(view.rows as Row[]);
+  const rows = () => view.rows as Row[];
   const playlistIds = () => idsHash([...playlistByName(name)!.track_ids]);
   steps.push({ name: `${name}: show All Tracks`, run: () => (view.show('All Tracks'), rows()) });
   steps.push({ name: `${name}: switch`, run: () => (view.show(name), rows()) });
@@ -134,7 +153,7 @@ function script(name: string): Step[] {
     prepare: plan(outside(10)),
     run: async () => {
       await addTracksToPlaylist(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -142,7 +161,7 @@ function script(name: string): Step[] {
     prepare: plan(outside(500)),
     run: async () => {
       await addTracksToPlaylist(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -150,7 +169,7 @@ function script(name: string): Step[] {
     prepare: plan(outside(10)),
     run: async () => {
       await moveTracksToPlaylist({ trackIds: planned, toPlaylistId: playlistByName(name)!.id, insertIndex: 100, removeFromSource: false });
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -158,7 +177,7 @@ function script(name: string): Step[] {
     prepare: plan(() => members().filter((_, i) => i % 7 === 3).slice(0, 10)),
     run: async () => {
       await removeTracksFromPlaylist(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -166,7 +185,7 @@ function script(name: string): Step[] {
     prepare: plan(() => members().filter((_, i) => i % 5 === 1).slice(0, 500)),
     run: async () => {
       await removeTracksFromPlaylist(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -179,7 +198,7 @@ function script(name: string): Step[] {
     }),
     run: async () => {
       await reorderPlaylistTracks(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -191,7 +210,7 @@ function script(name: string): Step[] {
     },
     run: async () => {
       await addTracksToPlaylist(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({
@@ -199,14 +218,14 @@ function script(name: string): Step[] {
     prepare: plan(() => members().filter((_, i) => i % 13 === 4).slice(0, 10)),
     run: async () => {
       await removeTracksFromPlaylist(playlistByName(name)!.id, planned);
-      return `${rows()} ${playlistIds()}`;
+      return { rows: rows(), extra: playlistIds };
     },
   });
   steps.push({ name: `${name}: end`, run: () => (clearSort('playlist'), view.show('All Tracks'), rows()) });
   return steps;
 }
 
-function bumpBpm(name: string, rows: () => string): string {
+function bumpBpm(name: string, rows: () => Row[]): Row[] {
   const members = playlistByName(name)!.track_ids;
   const byId = new Map(library.tracks.map((t) => [t.id, t]));
   for (let n = 0; n < 5; n++) {
@@ -219,24 +238,35 @@ function bumpBpm(name: string, rows: () => string): string {
 
 describe.skipIf(!STATE)('playlist views on the real payload', () => {
   it('prints step timings and the hash of every result list', async () => {
+    const session = PROFILE ? new Session() : null;
+    session?.connect();
+    const post = (method: string, params?: object) => new Promise<any>((resolve, reject) => session!.post(method, params, (err, result) => (err ? reject(err) : resolve(result))));
     const timings = new Map<string, number[]>();
     const hashes = new Map<string, string>();
     const order: string[] = [];
     for (let repeat = 0; repeat < REPEATS; repeat++) {
       for (const name of SIZES) {
-        await loadState();
+        await loadWarm();
         clearSort('playlist');
         const steps = script(name);
         clearSort('playlist');
+        if (session) {
+          await post('Profiler.enable');
+          await post('Profiler.setSamplingInterval', { interval: 100 });
+          await post('Profiler.start');
+        }
         for (const step of steps) {
           step.prepare?.();
           const t0 = performance.now();
-          const result = await step.run();
+          const outcome = await step.run();
           const ms = performance.now() - t0;
+          const result = 'rows' in outcome ? `${rowsHash(outcome.rows)} ${outcome.extra?.() ?? ''}` : rowsHash(outcome);
           if (!order.includes(step.name)) order.push(step.name);
           (timings.get(step.name) ?? timings.set(step.name, []).get(step.name)!).push(ms);
           if (repeat === 0) hashes.set(step.name, result);
         }
+        if (session && repeat === REPEATS - 1) writeFileSync(`${PROFILE}-${name.replace(/\W+/g, '')}.cpuprofile`, JSON.stringify((await post('Profiler.stop')).profile));
+        else if (session) await post('Profiler.stop');
       }
     }
     clearSort('playlist');

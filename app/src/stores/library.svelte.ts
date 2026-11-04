@@ -908,6 +908,7 @@ function buildPlaylistRows(ids: readonly number[], tracks: any[]): { rows: any[]
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
     const position = trackIndexById(id);
+    if (position < 0) continue;
     let row = tracks[position];
     if (row?.id !== id) {
       row = tracks.find((t) => t.id === id);

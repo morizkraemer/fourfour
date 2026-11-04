@@ -658,6 +658,7 @@ function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plai
 export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupChunks = { read: WARMUP_READ_CHUNK, sort: WARMUP_SORT_CHUNK }): { step(budgetMs: number): boolean } {
   const rows = untrack(() => library.tracks) as Record<string, unknown>[];
   const plains = libraryPlainRows();
+  dropUnusableColumnSorts();
   const queue = rows.length === plains.length ? keys.filter((key) => !columnSorts.has(key)) : [];
   let current: { key: string; job: Generator<void, ColumnSort> } | null = null;
   return {
