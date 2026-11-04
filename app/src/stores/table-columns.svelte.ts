@@ -565,13 +565,18 @@ const WARMUP_READ_CHUNK = 2048;
 const WARMUP_SORT_CHUNK = 4096;
 const UNSORTABLE_COLUMNS = new Set(['status', 'fav', 'wave', 'cover']);
 
-function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plains: readonly Record<string, any>[]): Generator<void, ColumnSort> {
+interface WarmupChunks {
+  read: number;
+  sort: number;
+}
+
+function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plains: readonly Record<string, any>[], chunks: WarmupChunks): Generator<void, ColumnSort> {
   const values = new Array<SortValue>(rows.length);
-  for (let from = 0; from < rows.length; from += WARMUP_READ_CHUNK) {
-    readLibraryValues(rows, plains, key, null, values, from, Math.min(rows.length, from + WARMUP_READ_CHUNK));
+  for (let from = 0; from < rows.length; from += chunks.read) {
+    readLibraryValues(rows, plains, key, null, values, from, Math.min(rows.length, from + chunks.read));
     yield;
   }
-  const classes = yield* valueClassesSteps(values, WARMUP_SORT_CHUNK);
+  const classes = yield* valueClassesSteps(values, chunks.sort);
   const entry: ColumnSort = { tracks: rows, values, classes, orders: new Map() };
   if (classes) {
     entry.orders.set(1, orderFromClasses(classes, 1));
@@ -586,7 +591,7 @@ function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plai
  * header finds them ready. Each result is kept only if nothing built that column meanwhile and the list was at most
  * bumped since; `step` returns true when all columns are done.
  */
-export function startLibrarySortWarmup(keys: readonly string[]): { step(budgetMs: number): boolean } {
+export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupChunks = { read: WARMUP_READ_CHUNK, sort: WARMUP_SORT_CHUNK }): { step(budgetMs: number): boolean } {
   const rows = untrack(() => library.tracks) as Record<string, unknown>[];
   const plains = libraryPlainRows();
   const queue = rows.length === plains.length ? keys.filter((key) => !columnSorts.has(key)) : [];
@@ -598,7 +603,7 @@ export function startLibrarySortWarmup(keys: readonly string[]): { step(budgetMs
         if (!current) {
           const key = queue.shift();
           if (key === undefined) return true;
-          current = { key, job: warmColumn(key, rows, plains) };
+          current = { key, job: warmColumn(key, rows, plains, chunks) };
         }
         const next = current.job.next();
         if (!next.done) continue;
