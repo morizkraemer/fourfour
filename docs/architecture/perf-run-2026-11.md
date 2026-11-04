@@ -1527,7 +1527,7 @@ Branch `r106-model-faults` from `ov-1028` (`a1b37c0`). Linux `dev` box (16 vCPU,
 
 The 46 min WAV (one track, 2 threads): base user 511 s, sys 110 s, 24.6 M faults, wall 324 s, RSS 1,161 MB; with the settings user 488 s, sys 3 s, 0.35 M faults, wall 261 s (-21% CPU), **RSS 1,426 MB (+23%)**. A 4 track list (3 runs per setting, `small.txt`) gave the same picture: CPU 80.7 / 79.8 / 77.4 to 61.5 and 63.2 (trim 1 GB, 2 GB), RSS 1,078-1,085 to 1,147-1,176.
 
-The load was 15-45 during the runs; user and sys CPU are what to read, wall followed them. Every run, base or not, produced the same bytes: `analyze-json` output of the 12 tracks sha256 `420835363d5a...` (4 runs), 4 track list `755c474e7c12...` (all 16 runs, every setting), the 46 min file `6774687d1668...` (all runs). The full sha256 of the 12 track output is in `~/.cache/r106-work/out/*.json` while the scratch dir lives; the first 12 hex digits above are what the run script printed.
+The load was 15-45 during the runs; user and sys CPU are what to read, wall followed them. Every run, base or not, produced the same bytes (`cmp`-equal by sha256): the 12 track `analyze-json` output `420835363d5a2b7aebd601db15940d87962381aab65610fbce25720a76cfb89a` (2 base and 2 new runs), the 4 track list `755c474e7c1201fa715baba4cccafd0c7a5e80a47ce7bd2232eb5ab8736986ad` (16 runs, every setting and the block cache), the 46 min file `6774687d1668460fd677d81f677522ff12de7a44992221a4393ef210c45354ae` (every run).
 
 ### Why not default
 
