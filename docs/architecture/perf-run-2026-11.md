@@ -1653,3 +1653,91 @@ No schema or index change is needed and none would help much: the scan is CPU-bo
 - Raw sqlite3 calls through `rusqlite::ffi` would cut the three API calls per text column to one, but rusqlite 0.33 does not expose the statement handle, so it means preparing and stepping statements by hand with `unsafe`; not worth the risk for another 20-25% of the scan.
 - The labels cache is needed before the first row (colours are interned in row order), so it cannot overlap with the scan; reading playlists on another connection while the first range scans would save about 9 ms at 50k.
 - Ranges are cut by id value, so a library with many deleted ids gets uneven ranges (the result is still the same table). Each range sees its own read snapshot: a track imported while `load_state` runs can be missing from one range and present in the next (the old single query was one snapshot).
+
+## R112 expand detail (2026-11-04, `r112-expand-detail`)
+
+Branch `r112-expand-detail` from `ov-1028` (`6ec34d9`, r109 and r111 included). Linux `dev` box, headless Chromium 1217 and Playwright WebKit, the 10k fixture's real `load_state` as mock payload (`~/.cache/r95/state10k.json`), the mock serving the detail series (`__smokeDetail = 'serve'`), load average 15-30 (other workers). Result: **the 111 ms does not come from work the app can drop; no change to `app/src` or `$ds` code landed.** What landed is the measuring: three new profile tests in `perf-q50.spec.ts`, `scripts/perf-trace-phases.mjs`, and a second budget row that separates the work from the frame cadence. A fix for a steady-state cost found on the way is written up below as a proposal (it lives in the fenced `prototyping/viewport/design-system/waveform-display.js`) with its identity proof.
+
+### Where the 111-120 ms goes
+
+`expand to detail drawn` is: click, then the zoom canvas gets `data-bands="detail"`, then the harness's poll sees it in the next rAF, then two more rAFs. Phases from a Chromium trace of 5 expands (`FF_PERF_PROFILE=expand-phases`, `node scripts/perf-trace-phases.mjs trace.json`; main-thread exclusive time, median of the 5, tracing on so a little slower than the plain metric):
+
+| Phase | ms | Notes |
+|---|---:|---|
+| wall, click to drawn | 129 | plain metric, 8 runs per round: 96-130 over four rounds |
+| painted (data-bands set, JS side done) | 38 | plain metric: 27-35 (new row `expand to detail painted`) |
+| main thread busy | 121 | wait (vsync, rAF scheduling) 8 |
+| JS | 44 | Svelte mount of `ExpandedPlayer` 6-9, first full paint of both canvases 20-29 (zoom 13-18, overview 6-10), one 20 Hz `playback-tick` flush 3 |
+| style + layout | 12.5 | |
+| Paint | 7 | |
+| Layerize | 23 | 9 in frame 1, 6.6-7 in each later frame |
+| Commit | 22 | 6-6.6 in every frame |
+| GC | 0-11 | one minor GC in some runs |
+| frames | 4 | start at +7, +66, +99, +119 ms and last 57, 21, 19, 14 ms |
+
+- **The work is about 38 ms** (click task 7-11 ms with the mount, frame 1 up to the paint). The first frame that shows the detail is presented about 65 ms after the click (frame 1 is 57 ms long: layout 5, rAF paint 20, Paint 5, Layerize 9, Commit 6).
+- **The other 55-65 ms are three more frames.** The poll's rAF is registered before the display's own rAF (the poll starts synchronously after `click()`, the mount happens in the microtask after), so in frame 1 it runs before the paint and sees nothing; frame 2 sees `detail`, two more frames follow. Each of these frames costs 14-21 ms of main thread in headless Chromium (Layerize 6.6-7 + Commit 6-6.6 are both every-frame costs here) and starts 17-27 ms after the previous one.
+- **Decode, band prep, the zero-copy read** and the Tauri call are not in it: the series is cached from the track load (`loadZoomDetail` at `loadTrack`), expand finds `bandsZoom` already on the track and `setDetailBands` is a no-op. `getBoundingClientRect` forces one layout (0.4 ms in the trace). No canvas resize churn (one resize per canvas, at the first paint), no repeated full redraw (the 20 Hz tick repaints only the scrolled columns, 1-4 ms).
+- WebKit (Playwright, software compositing): drawn 335-580 ms, painted 64 ms. The frames are 80-100 ms each there (R15, R34); the work is the same 40-60 ms.
+
+So the 50 ms target cannot be reached by cutting work: even with zero app work the harness waits three frames after the paint. `painted` is 27-38 ms, under 50. I left the `drawn` definition alone (budgets and earlier sections use it) and added `expand to detail painted ms (data-bands set)` next to it (`expand_detail_painted` in `perf-budgets.json`, now 33 ms, target 50, met). The `drawn` row now says what it measures.
+
+### A steady-state cost found on the way (not landed: fenced file)
+
+While playing with the expanded player open, **Layerize runs in every frame (87 of 87 frames, median 6.6 ms, 658 ms of a 1.5 s window, 44% of the main thread)** and Commit adds 2.2 ms. Chromium re-layerizes the whole page whenever a non-composited element's `transform` changes, and the overview playhead's `style.transform` changes every frame (position quantised to 1/64 px, 0.083 px per frame on a 5 minute track). The cost grows with the page's cc layers: the visible table rows have about 33 canvases (33 texture layers); hiding the row canvases halves it (6.7 to 3.0 ms), hiding the table to 0.4. Hiding only the overview playhead takes Layerize to 0.0 per frame (`FF_PERF_PROFILE=frame-cost`, variants in the test). `will-change: transform`, `translate3d` and the individual `translate` property all still re-layerize every frame; `left` does not re-layerize but snaps to whole pixels (different pixels). Driving the playhead with a paused Web Animation (`el.animate(...)`, `currentTime = x`) is composited, so a position change costs no Layerize at all.
+
+Proposal for `prototyping/viewport/design-system/waveform-display.js` (the same change covers the overview playhead, the compact strip's played mask and the zoom playhead):
+
+```diff
+@@
+ const WHEEL_LINE_PX = 16;
++const SLIDE_PX = 100000;
+@@ constructor
+         this._playheadX = new WeakMap();
++        this._slides = new WeakMap();
+@@ _showPlayhead
+         this._playheadX.set(el, x);
+-        el.style.transform = `translateX(${x}px)`;
++        this._moveTo(el, x);
+     }
+@@ _showPlayedMask
+         this._playheadX.set(mask, x);
+-        mask.style.transform = `translateX(${x}px)`;
++        this._moveTo(mask, x);
+     }
++
++    _moveTo(el, x) {
++        let slide = this._slides.get(el);
++        if (!slide) {
++            slide = el.animate([{ transform: `translateX(${-SLIDE_PX}px)` }, { transform: `translateX(${SLIDE_PX}px)` }], { duration: 2 * SLIDE_PX, fill: 'both' });
++            slide.pause();
++            this._slides.set(el, slide);
++        }
++        slide.currentTime = x + SLIDE_PX;
++    }
+```
+
+Measured with the change applied temporarily (reverted, nothing in the tree), expanded player playing, 1.5 s trace windows, base and new interleaved on the same box:
+
+| | Layerize | Commit | frames |
+|---|---:|---:|---:|
+| before | 87 x 6.6 ms = 658 ms (also 611 ms in a second pair at load 29) | 87 x 2.3 = 242 ms | 87 |
+| after | 92 x 0.0 ms = 27 ms (29 ms in the second pair) | 92 x 2.8 = 279 ms | 92 |
+
+Effect on `expand to detail drawn` is none within the noise (the frames are vsync-bound, not work-bound): chromium, 4 interleaved rounds of 8 expands, round medians base 108 / 130 / (load 30, 400+) / 96 ms against new 112 / 118 / (load 30, 347) / 107 ms; WebKit, 3 rounds, base 475 / 446 / 400 ms against new 515 / 373 / 448 ms. The gain is the steady-state main thread while a track plays with the player open (7 ms per frame, 40% of the thread in headless Chromium). On WebKit (the Mac webview) it is unmeasured as a cost; the change was only checked for identity there.
+
+**Identity** (`FF_PERF_PROFILE=expand-identity`, 3 tracks, 6 seek positions, 4 zoom levels per seek = 72 snapshots; each: sha1 of `toDataURL` of the overview canvas and of the zoom canvas, plus the sha1 of a screenshot of both canvases with the DOM playhead on top; the player paused so playheads are static):
+
+- Chromium: 72 of 72 identical in overview canvas, zoom canvas and screenshot, base against new (60 distinct zoom canvases, all with `data-bands="detail"`).
+- WebKit: base against new, 72 of 72 screenshots identical; 71 of 72 canvases identical. The one that differs (`track7 seek0.1 wheel0`, zoom canvas) also differs between two runs of the unchanged base (WebKit timing of the zoom view's window fetch), and base-run-2 against new is 72 of 72.
+- Toy page, playhead at 40 sub-pixel positions at device pixel ratio 1 and 2: painted `translateX` and the paused animation give byte-identical PNGs (40 of 40 each).
+
+### Not done
+
+- Typing during analysis (worst keystroke 224 ms): not the same root cause. The keystroke path is the filter (under 10 ms) plus native layout and paint of the table (R109); the playhead is not involved. The only link is the per-frame Layerize/Commit cost that scales with the table's row canvases (33 texture layers); replacing a static row canvas by an image would cut it, but that is a change to how rows are drawn, so not done here.
+- Moving the first paint into the click task would make the poll see it one frame earlier (about 20-30 ms on `drawn`), but the paint was deliberately moved out of the caller's task (`paint: 'frame'`) and that code is fenced.
+- Not done: the `drawn` definition, a quiet-box run (load never under 15), the Mac.
+
+### Tools added
+
+`app/smoke/perf-q50.spec.ts`: `expandToDetail` now also returns `painted` and writes the marks `ex-click`, `ex-detail`, `ex-drawn`; tests `q50 expand phases` (trace of 5-12 expands, `FF_PERF_NOTRACE=1` for the plain metric only, `FF_PERF_CSS` injects a stylesheet), `q50 expanded frame cost` (traces of the playing expanded player, variants via `FF_PERF_VARIANTS`) and `q50 expand identity`. `scripts/perf-trace-phases.mjs` prints the phase table above.
