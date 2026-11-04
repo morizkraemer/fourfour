@@ -17,6 +17,10 @@ fn process_cpu_ms() -> f64 {
     (ticks(11) + ticks(12)) * 10.0
 }
 
+fn fnv(bits: impl Iterator<Item = u64>) -> u64 {
+    bits.fold(0xcbf29ce484222325u64, |h, b| (h ^ b).wrapping_mul(0x100000001b3))
+}
+
 fn timed<T>(name: &str, line: &mut Vec<String>, mut f: impl FnMut() -> T) -> T {
     let (c, t) = (process_cpu_ms(), Instant::now());
     let mut out = f();
@@ -45,10 +49,15 @@ fn main() -> anyhow::Result<()> {
             44100 => Cow::Borrowed(gapless),
             rate => Cow::Owned(timed("resample44", &mut line, || resample_to(gapless, rate, 44100))?),
         };
-        let _key = timed("key", &mut line, || cyankey::detect(&mono44, 44100, threads));
+        let key = timed("key", &mut line, || cyankey::detect(&mono44, 44100, threads));
+        let samples_hash = fnv(native.samples.iter().map(|s| s.to_bits() as u64));
+        let key_hash = key.map_or(0, |k| fnv([k.class as u64, k.confidence.to_bits(), k.tuning_cents.to_bits()].into_iter()));
+        let mono44_hash = fnv(mono44.iter().map(|s| s.to_bits() as u64));
         drop(mono44);
         let _r22 = timed("resample22", &mut line, || resample_to(gapless, rate, MODEL_RATE))?;
+        let r22_hash = fnv(_r22.iter().map(|s| s.to_bits() as u64));
         println!("{}\t{}\t{:.0}\t{}", path.file_name().unwrap().to_string_lossy(), rate, native.samples.len() as f64 / rate as f64, line.join(" "));
+        eprintln!("HASH\t{}\tsamples={samples_hash:016x} key={key_hash:016x} r22={r22_hash:016x} m44={mono44_hash:016x}", path.file_name().unwrap().to_string_lossy());
     }
     Ok(())
 }
