@@ -1741,3 +1741,79 @@ Effect on `expand to detail drawn` is none within the noise (the frames are vsyn
 ### Tools added
 
 `app/smoke/perf-q50.spec.ts`: `expandToDetail` now also returns `painted` and writes the marks `ex-click`, `ex-detail`, `ex-drawn`; tests `q50 expand phases` (trace of 5-12 expands, `FF_PERF_NOTRACE=1` for the plain metric only, `FF_PERF_CSS` injects a stylesheet), `q50 expanded frame cost` (traces of the playing expanded player, variants via `FF_PERF_VARIANTS`) and `q50 expand identity`. `scripts/perf-trace-phases.mjs` prints the phase table above.
+
+## R114 bundle (2026-11-04, `r114-bundle`)
+
+Branch `r114-bundle` from `ov-1028` (`eb9d84f`, r109 and r111 included). Linux `dev` box, headless Chromium 1217 and Playwright WebKit, `perf-startup.spec.ts` with the 10k fixture's real `load_state` payload (`~/.cache/r95/state10k.json`, backend simulated as 118 ms), load average 12-17 (other workers). Base and new were built from separate copies of the tree and alternated (base, new, base, new ...), 3-4 pairs of 3 runs each; every number is the median of the pair medians, range in brackets. Result: **first real row 25-90 ms earlier at 10k (4-10%), no visible change; the 300 / 330 ms targets are far away, the rest of the start is the first-screen mount and the harness's own wait for the page main thread.**
+
+### Where the start goes (what was measured)
+
+Chromium trace of a warm reload at 10k (`FF_PERF_STARTUP_TRACE`, minified build), page main thread, three traced pairs:
+
+| Phase | base | new |
+|---|---:|---:|
+| entry script requested / fetched | 80-91 / 139-151 ms (32 / 89 in a fourth run) | 36-93 / 99-147 ms |
+| background parse of the entry script (V8 streaming) | 44-59 ms | 39-48 ms |
+| module evaluation (imports, `mount(App)`, first effects) | 156-194 ms | 131-170 ms |
+| module evaluation ends | 303-334 ms | 267-302 ms |
+| `load_state` sent (R109) | 96-129 ms | 106-149 ms |
+| `load_state` answered (harness: timer, fetch, parse, then the main thread must be free) | 506-548 ms | 528-562 ms |
+| first real row | 670-798 ms | 687-705 ms |
+
+Tracing makes single runs noisy (+-60 ms); the untraced pairs below are the evidence. In the CPU profile of the unminified build, module top-level code outside `mount` is about 13 ms (the stores, shortcut registry, persisters: nothing worth deferring); `mount(App)` is 125 ms: `TrackTable` skeleton rows 54, `Sidebar` rows 29, `Player` 12, `Settings` 9, `GlobalHeader` 8, `AppStatusBar` 6, plus a forced layout of 32 ms from the size bindings. So the bundle matters through the mount of components that are not on the first screen and through parse, not through module evaluation. The skeleton rows, sidebar rows and the first layout are the first screen and stay (identity requirement); they are the rest of the main-thread time before the answer.
+
+### What changed (`app/src`, `app/vite.config.ts`; no markup, CSS or behaviour change)
+
+- **`lib/lazy.svelte.ts`, `lib/LazyMount.svelte`, `lib/afterFirstScreen.ts`, `lib/lazy-views.ts`** (new): `lazyView(() => import(...))` loads a view's chunk on first need (`LazyMount` mounts it; `needed` for views that are always mounted but closed) or, at the latest, one at a time in idle slots after the first screen is shown (`App` marks it when `initLibrary()` has resolved, two animation frames later; fallback 4 s after mount). A loaded view renders synchronously, so a preloaded dialog opens in the same task as before. A failed import is retried on the next request (`lazy-view.test.ts`); a failed preload is silent, the on-demand call reports it.
+- Deferred this way: the dialogs `AppDialogs` (Settings with its pages, Rekordbox import and restore, command palette, stick sync, library health, import duplicates, file-blocked tip, stick drop tip; opened by `ui.settingsOpen` / `ui.paletteOpen` immediately), the inspector (`Detail` with `DetailPane`, `CueEditor`), `StickView`, `ExpandedPlayer`, `LibraryActivityMenu`, `TrackKeyPopup` and `TrackBpmPopup`. Their stores stay in the main chunk (shortcuts and context menus use them).
+- **Tauri window API on demand** (`services/webview-window.ts`): `getCurrentWebviewWindow` and `PhysicalSize` come in with `import()` from `installMacWindowChrome` and the drag-drop registration, both still started in `onMount` (traffic-light nudge, drop target); 95 kB less to parse in the entry script. Not measurable alone.
+- **`vite.config.ts`**: `build.target: 'safari16'` (`minimumSystemVersion` 13.4 in `tauri.conf.json` is Safari 16.5; the default `modules` target lowers class fields with helper calls), design-system `.svelte` components are side-effect free for tree shaking (their `$.delegate(...)` calls kept every unused component of the `$ds` barrel in the entry chunk, `DetailPane` and `CommandPalette` among them), `modulePreload.resolveDependencies: () => []` (Vite's preload links for lazy chunks made WebKit warn "preloaded but not used", a console warning the smoke counts as a failure), and **`cssCodeSplit: false`**.
+- **Why one stylesheet**: with per-chunk CSS, WebKit (Playwright) stalled one frame for 150-220 ms every time a lazy chunk's `<link rel=stylesheet>` was added (`longestFrame` 183-224 ms against 19-27 ms in base, `frameInteractive` +430-630 ms), seven times in the first 2 s. Chromium did not show it. Putting all CSS back in one file removed the stall (longestFrame 21-23 ms) at the price of the CSS saving (139.7 to 133.8 kB). Not checked on the Mac.
+- `perf-startup.spec.ts`: `FF_PERF_STARTUP_TRACE=<prefix>` (Chromium trace of the last warm reload), `FF_PERF_STARTUP_SNAPSHOT=<prefix>` (writes the page HTML and a screenshot 4 s after the first row, last run).
+
+### Bundle sizes (`npm run build`, minified)
+
+| | base | new |
+|---|---:|---:|
+| entry JS (loaded before the first row) | 512.50 kB (168.50 gzip) | 370.86 kB (127.21 gzip), -27.6% |
+| CSS (one file, render-blocking) | 139.66 kB (20.90 gzip) | 133.77 kB (20.15 gzip) |
+| deferred JS, 12 chunks | 0 | 134.4 kB: `AppDialogs` 58.6, `Detail` 22.3, `webviewWindow` 15.7, `StickView` 9.8, `ExpandedPlayer` 9.7, `LibraryActivityMenu` 5.3, `TrackKeyPopup` 2.8, `TrackBpmPopup` 2.6, `alt-key` 2.6, `Popover` 2.3, `dpi` 2.1, `Switch` 0.7 |
+| all JS | 512.5 kB | 505.3 kB |
+
+What is left in the entry chunk (rendered, unminified): `waveform-display.js` 59 kB (the strip's display, first screen), the library store 47, `tauri.svelte.ts` 37 (17 of it browser-only mocks, imported at its top and used by `?mock=` and the browser fallback; moving them needs a restructure of that file, not done), `TrackTable` 31, the Svelte runtime about 150, `Sidebar` 22, `OrganizePanel` 17 with `OrganizePicker` and `StickBoard` (the panel is persisted expanded, so its picker is first screen for those users; left alone), context menus 12 + 11.
+
+### Before / after, 10k, Chromium (3 pairs of 3 runs, final build, load 13-17; ms, median of pair medians, base / new; pair diff = median of new minus base in the same pair)
+
+| Case | load_state answered | first real row (range base / new) | pair diff | interactive | pair diff | frameInteractive | longest task |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| first launch | 568 / 552 | 742 (719-781) / 718 (655-720) | -61, new faster 3/3 | 826 / 802 | -69 | 904 / 887 | 277 / 253 |
+| cold | 573 / 558 | 706 (680-758) / 700 (696-738) | +20, 1/3 | 780 / 873 | +36 | 863 / 873 | 254 / 248 |
+| warm | 509 / 482 | 667 (626-700) / 604 (576-610) | -91, 3/3 | 718 / 668 | -88 | 783 / 735 | 205 / 196 |
+
+Earlier variants of the same change, 4 pairs each: lazy views only (CSS split): first row -91 / -31 / -12 ms (first launch / cold / warm), interactive -81 / -17 / -53; with the window API deferred, `safari16` and the DS side-effect change (CSS still split): first row -65 / -77 / -26, interactive -60 / -20 / -24 (new faster in 3 or 4 of 4 pairs in every row). The cold row is the weakest and swings with the box; in the final set it is a wash (+20). Main-thread CPU from navigation to 2.5 s after the first row (`cpuMs`, first launch and cold) was 16-62 ms higher in the CSS-split variants and is -3 / +11 in the final one: the work moved after the first row (chunk loads, mounting the closed dialogs, each in its own idle task) is what it costs.
+
+### WebKit (Playwright, 3 pairs of 3 runs, final build, load 12-16)
+
+| Case | first real row (= interactive here) | pair diff | frameInteractive | longestFrame |
+|---|---:|---:|---:|---:|
+| first launch | 1,191 / 1,148 | -43 (2/3) | 1,490 / 1,384 | 18 / 21 |
+| cold | 1,217 / 1,092 | -126 (3/3) | 1,478 / 1,356 | 22 / 23 |
+| warm | 739 / 713 | -50 (2/3) | 940 / 937 | 19 / 21 |
+
+`longestTask` and `tbt` are 0 in WebKit (no long-task API).
+
+### Identity
+
+`FF_PERF_STARTUP_SNAPSHOT` on the 10k payload (warm reload, body HTML and screenshot 4 s after the first row, so the lazy chunks have loaded and mounted), base against new, both browsers:
+
+- Chromium: screenshot **byte-identical** (sha256 `27ffd42c...`, 149,472 bytes); body HTML identical (`68912381...`, 3,597 lines) after removing comment anchors and the `svelte-<hash>` class suffixes (they derive from the checkout path; base and new were built in different folders).
+- WebKit: screenshot **byte-identical** (`6e561349...`, 571,823 bytes); body HTML identical (`4cfc7d19...`).
+- Deferred features: the whole smoke suite opens them (Settings and its pages, palette, Rekordbox import, health dialog, duplicates, stick sync, inspector, expanded player, popovers, activity menu).
+- A WebKit smoke run failed once (`files.spec.ts:131`) with `console.error: preload failed: TypeError: Importing a module script failed` (a preload aborted by the test's page navigation; the first version logged preload failures). Preloads are silent now and a failed import is retried when the view is first needed (and reported then). An earlier WebKit failure (`file-drop.spec.ts:77`) was the "preloaded but not used" warning fixed by the preload setting above.
+
+### Looked at, not changed
+
+- `loadEveryFontSubsetNow()` asks for all 11 Geist faces at boot (about 150 kB, 4 ms main thread in the trace); narrowing it could change visible text, not touched.
+- Skeleton rows (`TrackTable`, 54 ms), sidebar rows (29 ms) and the first forced layout (32 ms) are what is left before the answer; cutting them changes the first screen (R15 looked at the staged reveal) and `TrackTable` is in r113's lane.
+- Moving the browser mocks out of `tauri.svelte.ts` (17 kB rendered, about 7 kB minified) and lazy `OrganizePicker`/`StickBoard` (12 kB rendered): small, and the second changes what users with the panel expanded see at boot.
+- Not measured: the Mac (no GUI here). JavaScriptCore parses the whole script on the page thread, so the 140 kB cut from the entry script should count more there than in V8's background streaming; the next Mac night's `page_start` and first-row columns will show it.

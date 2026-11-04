@@ -17,7 +17,7 @@ function nextIdle(): Promise<void> {
 async function drain() {
   await nextIdle();
   for (let i = 0; i < pending.length; i++) {
-    await pending[i]().catch((err) => console.error('preload failed:', err));
+    await pending[i]().catch(() => {});
     await nextIdle();
   }
 }

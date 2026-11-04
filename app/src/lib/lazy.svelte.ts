@@ -14,9 +14,14 @@ export function lazyView(importView: () => Promise<{ default: Component<any> }>)
       return component;
     },
     load() {
-      loading ??= importView().then((module) => {
-        component = module.default;
-      });
+      loading ??= importView()
+        .then((module) => {
+          component = module.default;
+        })
+        .catch((err) => {
+          loading = null;
+          throw err;
+        });
       return loading;
     },
   };
