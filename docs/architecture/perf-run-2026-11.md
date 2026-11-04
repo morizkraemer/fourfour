@@ -2313,3 +2313,76 @@ The 50k rows move the same way as with the fixture (the Chromium 50k warm row is
 ### Tools added
 
 `bench_startup dump-bytes <dir> <out>` (the binary answer) and `binary_ms` / `binary_bytes` in `rep`; `perf-startup.spec.ts`: a `.bin` payload is served as an `ArrayBuffer`, `decodeMs` and `mapMs` per boot (from the three marks), payload kinds are interleaved run by run, `FF_PERF_STARTUP_RAW=<file>` writes every run; `benchmark/scripts/r120-edge-variant.py`; `app/src/services/state-bytes-real.test.ts` (skips without `FF_STATE_PAIRS`).
+
+## R121 mount (2026-11-04, `r121-mount`)
+
+Branch `r121-mount` cut from `ov-1028` at `13dee70` (r114 to r118 included; everything below was measured on that base and on that base plus this change), rebased onto `7056104` (r120) afterwards. Linux `dev` box, headless Chromium 1217 and Playwright WebKit, 10k fixture payload (`~/.cache/r95/state10k.json`, backend simulated as 118 ms), 1600x1000, box load 12-20 (other workers, one of them running Playwright too). Base and new were built from separate copies of the tree and run alternately (base, new, base, new ...), 3 runs per side per pair. Result: **`mount(App)` 106 to 65 ms and 36 ms less main-thread CPU from the start of the mount to the first paint (172 to 136 ms, -21%); first real row 35-50 ms earlier in Chromium on first launch and warm, a wash cold and in WebKit (below); the first screen is byte-identical in both browsers.**
+
+### Where the mount went (what was measured)
+
+Chromium trace of a warm reload (`FF_PERF_STARTUP_TRACE`, minified build, `performance.mark` around `mount(App)` added to `main.ts` in the scratch copies only), 5 interleaved rounds, ms, median (range), CPU = `tdur` of the main-thread tasks:
+
+| Phase, mount start to first commit | base | new |
+|---|---:|---:|
+| `mount(App)` wall | 105.8 (94-138) | 65.3 (55-73) |
+| `mount(App)` main-thread CPU | 94.4 (86-129) | 56.6 (53-62) |
+| effects flushed after the mount (JS, includes the first `WaveformDisplay` transport) | 40.4 (33-48) | 33.7 (30-38) |
+| style recalculation (5 passes) | 18.1 (17-19) | 14.3 (13-20) |
+| layout (4 passes) | 18.6 (17-22) | 17.7 (16-21) |
+| paint, pre-paint, layerize, commit | 7.6 | 7.6 |
+| **CPU, mount start to first commit** | **172.4 (166-215)** | **136.1 (123-142)** |
+| wall, mount start to first commit | 199.9 (186-232) | 154.4 (131-202) |
+
+Per component (CPU profile of the unminified build, one profile per side, inclusive ms inside `mount`): `TrackTable` 47.2 to 11.3 (24 `TrackRow` components 31.7 to 0), whole `mount` 107.5 to 72.2; `Sidebar` 25.2 to 26.4 (its cold-code cost did not move: the shared runtime paths the skeleton rows warmed are now first run by the sidebar), `Player` 11.3 to 10.3, `GlobalHeader` 5.0, `AppStatusBar` 4.2-4.7, `ColumnHeader` 3.9-4.1. Settings and the other dialogs are not in the first screen any more (r114); what was still eager and closed was four `ContextMenu` components, two `Dialog`s (about 2-4 ms together).
+
+The forced layout of r114 (32 ms) is not extra work. The first read of a layout-dependent value in the effects after the mount (the compact player's first `setTransport`, `WaveformDisplay._canvasSize`, then `getBoundingClientRect`) makes the engine lay out the page there instead of in the frame; the style and layout passes cost the same wherever they run (see "Tried" below). A second full-document layout (1,046 layout objects, 8-10 ms, in the task of the `load` event) is the font swap after the 11 faces requested by `loadEveryFontSubsetNow()` finish; it is also unchanged.
+
+### What changed (`app/src`, no visible change)
+
+- **Skeleton rows are one HTML string** (`lib/skeletonRows.ts`, `TrackTable.svelte`). The 24 placeholder rows were 24 mounted `TrackRow` components with an empty track: 13 cells each, a `Waveform` canvas with its effects and drawing per row, five rating stars, all hidden by the skeleton CSS but built and laid out (577 elements, 337 of them rows in the skeleton alone). Now each row is built from a string with the same wrapper, `.ff-trow`, cell classes, `data-col-key` and per-column layout style (`columnCellStyle`, the function `TrackRow` uses), minus the children the skeleton CSS hides (`.ff-trow__text`, wave canvas, stars, fav box); only the cover thumbnail keeps its child. 337 elements for the whole skeleton, 571 for the page (811 before). The skeleton CSS selectors moved under `.ff-table__skeleton :global(...)` because the injected rows do not carry Svelte's scoping class; the same rules, one class more of specificity in both of the places that matter. `skeletonRows.test.ts`: row count and the text-width cycle, cell classes and layout style equal to the `TrackRow` plan for every column kind, escaping of a hostile column key.
+- **Closed menus and dialogs mount when they open** (`{#if menu.open}`): the three `ContextMenu`s of `TrackTable`, the one of `Sidebar`, the board menu of `OrganizePanel`, the remove-favourite `Dialog` of `Sidebar` and the analyse prompt of `App`. Same props, same open behaviour (`ContextMenu` and `Dialog` render nothing when closed and have no exit transition); their item builders run on open instead of at every prop change.
+- `perf-first-screen.spec.ts` (new, env-gated, below).
+
+### Before / after, 10k
+
+Chromium, 6 pairs of 3 runs (n = 18 per side, one pair is a median of 3), ms, median (range); pair diff = median over the pairs of the pair medians, new minus base:
+
+| Case | first real row base / new | pair diff | interactive base / new | pair diff | longest task base / new | pair diff |
+|---|---:|---:|---:|---:|---:|---:|
+| first launch | 737 (602-2055) / 679 (590-785) | -51, new faster 5/6 | 816 / 758 | -46, 5/6 | 274 / 214 | -47, 6/6 |
+| cold | 674 (610-1056) / 665 (605-750) | +13, 3/6 | 835 / 758 | +17, 3/6 | 245 / 206 | -49, 6/6 |
+| warm | 641 (518-723) / 597 (514-730) | -49, 4/6 | 707 / 668 | -21, 4/6 | 186 / 147 | -37, 6/6 |
+
+`frameInteractive`: 879 / 829 (-43), 830 / 797 (-8), 779 / 743 (-53). The cold row is the weak one again (as in R114); the pooled medians move by 9-77 ms in the new build's favour but the pair medians of first row and interactive are inside the noise there. The longest task falls in every pair (6/6) in all three cases, which is the mount.
+
+WebKit (Playwright, 5 pairs of 3 runs, n = 15 per side): first real row 1,152 (1,077-2,063) / 1,110 (1,031-1,756) first launch, 1,170 (1,046-4,642) / 1,116 (991-1,912) cold, 726 (614-948) / 667 (587-947) warm; pair-median diffs +14, -41, -13 ms with new faster in 2, 3 and 3 of 5 pairs; `frameInteractive` -8, +6, -28; `longestFrame` 23-25 ms on both sides. Headless WebKit adds the compositor gap of R29 and the box load swings the single runs by hundreds of ms, so this is "not worse, probably 40-60 ms better", not a measured win. Not measured: the Mac (JavaScriptCore compiles on first call on the page thread, so the 36 ms of CPU should count at least as much there).
+
+### Identity
+
+`app/smoke/perf-first-screen.spec.ts` (`FF_PERF_FIRST_SCREEN=<state.json> FF_PERF_FIRST_SCREEN_OUT=<prefix> [FF_PERF_FIRST_SCREEN_BOOT=1] npx playwright test perf-first-screen`, `FF_SMOKE_BROWSER=webkit` for WebKit): captures four states of the same page, with the CSS animations paused at 700 ms and fonts ready, as a screenshot (sha256 prefix) and the normalised `body.outerHTML` (comment anchors and `svelte-<hash>` classes removed): `skeleton` (the answer never comes), `boot` (a 20,000+ track payload with the boot snapshot of the last run), `row` (first real rows, `get_row_previews` held so the state is stable, 1.5 s after the first row) and `late` (4 s after the first row, normal previews). Base and new built from separate folders, 10k payload:
+
+| | Chromium base / new | WebKit base / new |
+|---|---|---|
+| skeleton, screenshot | `3751aaa37576` / `3751aaa37576` (43,457 B) | `07f7d4c7f9f1` / `07f7d4c7f9f1` (135,915 B) |
+| first rows, screenshot | `27ffd42c6b36` / `27ffd42c6b36` (149,472 B) | `6e5613496435` / `6e5613496435` (571,823 B) |
+| first rows, body HTML | `b9558933c5e9` / `b9558933c5e9` | `da09626953d8` / `da09626953d8` |
+| 4 s later, screenshot and HTML | same as first rows, both sides | same as first rows, both sides |
+
+The screenshot hashes of the first rows and of the settled screen are the ones R114 recorded (`27ffd42c...` and `6e561349...`), so nothing changed since then either. Only the skeleton's own HTML differs (fewer elements: `87c36072dcfc` / `13dbb499f505` Chromium, `e9f4020a4d27` / `a5b04f57ff82` WebKit); its pixels are identical. Control: base against base twice gave the same hashes in Chromium. 50k payload with boot rows (Chromium): skeleton screenshot identical, boot rows `d4d83b4c363c` / `d4d83b4c363c` (131,659 B) with the same HTML `442b43705...`, first rows and later `650195cc537b` / `650195cc537b` with the same HTML `6e2edc6f7e35`. The whole smoke suite (both browsers) opens every menu and dialog that is mounted on open now.
+
+### Tried, not landed
+
+| Try | Result |
+|---|---|
+| `bind:clientHeight` of the table and the organize rail as a `ResizeObserver` attachment (no read at mount; `TrackTable`, `OrganizePanel`) | the layout is forced one step later by `WaveformDisplay._canvasSize` (fenced design-system component, `setTransport` of the compact player at mount); main-thread CPU mount start to first commit 153 ms against 146 ms (one trace each, load 26 vs 14): no saving, so reverted |
+| `<link rel=preload>` for the two latin font files in `index.html` | the full relayout at the `load` event stays (the nine other subsets still finish there); CPU 121-136 against 127-132 ms: nothing |
+| `font-family: sans-serif` on the skeleton (no text in it, so no font dependence) | the font-swap relayout touches 277 layout objects instead of 1,046 but takes 8.5 against 10.7 ms (-2 ms): not worth a hack |
+| `Icon` as a cached `<template>` clone instead of `{@html}` (proposal for the fenced `Icon.svelte`; 109 `<svg>` on the settled screen, `html()` 7 ms self in the profile) | no difference beyond the noise: mount start to first commit 145-188 against 133-203 ms CPU, 4 rounds each at load 20-24; not proposed |
+
+### What is left, and why it is not in this lane
+
+`mount(App)` is about 65 ms wall, `Sidebar` 26 ms (cold code; its playlist rows come with the answer), `TrackTable` 11 ms (`ColumnHeader`, derived state), `Player` 10 ms, header and status bar 5 ms each. What is left is the design-system components' first run (`SidebarRow`, `Icon`, `ResizeHandle`, `PlayerCompact` internals, `TrackRow` for the real rows: `set_style` per cell is 7.6 of its 71 ms in the profile), the 40 ms of module evaluation before the mount (trace; the profile shows 12 ms of JS in it), style recalculation of 570 elements (14 ms) and the layouts. After the answer the first real rows cost about 39 ms (`TrackRow`), the 82 sidebar rows 32 ms and `sidebarData` 7 ms (`sidebarTreeRows` over `$state` playlist proxies, in `library.svelte.ts`, r120's file). Deferring the sidebar's playlist rows or the rows below the fold would cut the first-row time but changes the DOM at the first-row moment, which this item may not do.
+
+After the rebase onto `7056104`: `npx vitest run` 940 passed (2 skipped), `npm run check` 0 errors, `npm run build` ok, smoke 114 passed and 0 failed in Chromium and in WebKit, and all the screenshot and HTML hashes above are the same against a fresh build of `7056104` in both browsers. The timings above were not repeated on the rebased tree (r120 changes the answer path, not the mount).
+
+Scratch (`~/.cache/r121-work`, with the scripts that read the traces and profiles) is deleted after this item.

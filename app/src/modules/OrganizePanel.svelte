@@ -314,13 +314,15 @@
   </button>
 {/if}
 
-<ContextMenu
-  open={headerMenu.open}
-  x={headerMenu.x}
-  y={headerMenu.y}
-  items={headerMenuItems()}
-  onClose={() => (headerMenu = { ...headerMenu, open: false })}
-/>
+{#if headerMenu.open}
+  <ContextMenu
+    open
+    x={headerMenu.x}
+    y={headerMenu.y}
+    items={headerMenuItems()}
+    onClose={() => (headerMenu = { ...headerMenu, open: false })}
+  />
+{/if}
 
 <style>
   .ff-organize {

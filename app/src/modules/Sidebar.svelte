@@ -527,33 +527,37 @@
   </div>
 </div>
 
-<ContextMenu
-  open={contextMenu.open}
-  x={contextMenu.x}
-  y={contextMenu.y}
-  items={contextMenuItems()}
-  onClose={closeContextMenu}
-/>
+{#if contextMenu.open}
+  <ContextMenu
+    open
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenuItems()}
+    onClose={closeContextMenu}
+  />
+{/if}
 
-<Dialog
-  open={removeFavoriteDialog != null}
-  title="Remove favorite?"
-  bodyText={removeFavoriteDialogBody}
-  onClose={() => (removeFavoriteDialog = null)}
->
-  {#snippet actions()}
-    <Button
-      label="Cancel"
-      variant="ghost"
-      onclick={() => (removeFavoriteDialog = null)}
-    />
-    <Button
-      label="Remove"
-      variant="destructive"
-      onclick={() => removeFavoriteDialog && commitRemoveFavorite(removeFavoriteDialog.id)}
-    />
-  {/snippet}
-</Dialog>
+{#if removeFavoriteDialog != null}
+  <Dialog
+    open
+    title="Remove favorite?"
+    bodyText={removeFavoriteDialogBody}
+    onClose={() => (removeFavoriteDialog = null)}
+  >
+    {#snippet actions()}
+      <Button
+        label="Cancel"
+        variant="ghost"
+        onclick={() => (removeFavoriteDialog = null)}
+      />
+      <Button
+        label="Remove"
+        variant="destructive"
+        onclick={() => removeFavoriteDialog && commitRemoveFavorite(removeFavoriteDialog.id)}
+      />
+    {/snippet}
+  </Dialog>
+{/if}
 
 <style>
   .ff-sidebar {

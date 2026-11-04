@@ -158,45 +158,47 @@
 
 <LazyMount view={appDialogs} needed={ui.settingsOpen || ui.paletteOpen} />
 
-<Dialog
-  open={library.showAnalysisPrompt}
-  title="Analyze imported tracks?"
-  onClose={dismissAnalysisPrompt}
->
-  {#snippet body()}
-    <p class="ff-analyze-prompt__text">
-      {library.pendingAnalyzeTrackIds.length === 1
-        ? '1 track was added. Run BPM, key, and waveform analysis now?'
-        : `${library.pendingAnalyzeTrackIds.length} tracks were added. Run BPM, key, and waveform analysis now?`}
-    </p>
-    <span
-      class="ff-checkbox ff-analyze-prompt__always"
-      class:ff-checkbox--on={analyzeAlways}
-      role="checkbox"
-      aria-checked={analyzeAlways}
-      tabindex="0"
-      data-analyze-always
-      onclick={() => (analyzeAlways = !analyzeAlways)}
-      onkeydown={(e) => {
-        if (e.key === ' ') {
-          e.preventDefault();
-          analyzeAlways = !analyzeAlways;
-        }
-      }}
-    >
-      <span class="ff-checkbox__box">
-        <svg class="ff-checkbox__icon" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
-          <polyline points="2,5.5 4.2,7.5 8,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
+{#if library.showAnalysisPrompt}
+  <Dialog
+    open
+    title="Analyze imported tracks?"
+    onClose={dismissAnalysisPrompt}
+  >
+    {#snippet body()}
+      <p class="ff-analyze-prompt__text">
+        {library.pendingAnalyzeTrackIds.length === 1
+          ? '1 track was added. Run BPM, key, and waveform analysis now?'
+          : `${library.pendingAnalyzeTrackIds.length} tracks were added. Run BPM, key, and waveform analysis now?`}
+      </p>
+      <span
+        class="ff-checkbox ff-analyze-prompt__always"
+        class:ff-checkbox--on={analyzeAlways}
+        role="checkbox"
+        aria-checked={analyzeAlways}
+        tabindex="0"
+        data-analyze-always
+        onclick={() => (analyzeAlways = !analyzeAlways)}
+        onkeydown={(e) => {
+          if (e.key === ' ') {
+            e.preventDefault();
+            analyzeAlways = !analyzeAlways;
+          }
+        }}
+      >
+        <span class="ff-checkbox__box">
+          <svg class="ff-checkbox__icon" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+            <polyline points="2,5.5 4.2,7.5 8,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span class="ff-checkbox__label">Always analyze new tracks automatically</span>
       </span>
-      <span class="ff-checkbox__label">Always analyze new tracks automatically</span>
-    </span>
-  {/snippet}
-  {#snippet actions()}
-    <Button label="Not now" variant="ghost" onclick={dismissAnalysisPrompt} />
-    <Button label="Analyze" variant="primary" onclick={() => void confirmAnalysisPrompt(analyzeAlways)} />
-  {/snippet}
-</Dialog>
+    {/snippet}
+    {#snippet actions()}
+      <Button label="Not now" variant="ghost" onclick={dismissAnalysisPrompt} />
+      <Button label="Analyze" variant="primary" onclick={() => void confirmAnalysisPrompt(analyzeAlways)} />
+    {/snippet}
+  </Dialog>
+{/if}
 
 
 <style>
