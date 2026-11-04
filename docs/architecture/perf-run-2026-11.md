@@ -1590,7 +1590,7 @@ Why this one was picked: the worst x-off is waveform detail first time (7.1x), b
 
 ### Identity
 
-No Rust or stored-data change. `load_state` is the same command with the same arguments, issued once; its payload, the `library.db`, and the rendered rows are produced by unchanged code. Smoke (Chromium and WebKit, which load the page with the mock installed before the bundle) and vitest cover the page-level behaviour; `app/smoke` `startup.spec.ts` asserts the first row from the same call.
+No Rust or stored-data change. `load_state` is the same command with the same arguments, issued once; its payload, the `library.db`, and the rendered rows are produced by unchanged code. Smoke (Chromium and WebKit, whose mock is installed before the page, so the inline script takes the mock path) and vitest pass.
 
 ### Other findings
 
