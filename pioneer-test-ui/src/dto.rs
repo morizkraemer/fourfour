@@ -135,8 +135,10 @@ pub struct ProgressPayload {
 
 /// State returned by `load_state` so the frontend can restore everything.
 ///
-/// The tracks go over the wire as a [`TrackTable`] (`app/src/services/track-table.ts` decodes it back into
-/// `TrackInfo` objects): at 50k tracks the object list is 21.6 MB of JSON, mostly repeated keys and folders.
+/// The tracks are a [`TrackTable`] (`app/src/services/track-table.ts` decodes it back into `TrackInfo` objects):
+/// at 50k tracks the object list is 21.6 MB of JSON, mostly repeated keys and folders. The command sends it as the
+/// binary buffer of [`LoadedState::to_bytes`]; the JSON form (`serde_json::to_vec`) is the logical payload that
+/// `bench_startup dump` writes and the browser mocks and tests use.
 #[derive(Serialize, Clone)]
 pub struct LoadedState {
     pub tracks: TrackTable,
