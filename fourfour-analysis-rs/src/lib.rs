@@ -4,6 +4,7 @@ pub mod decode;
 pub mod cyankey;
 pub mod fit;
 pub mod keymap;
+pub mod loudness;
 pub mod mp3;
 pub mod onset;
 #[cfg(feature = "ort")]
