@@ -103,6 +103,9 @@ def main():
     idle = [re.search(r"waited ([\d.]+) s", l) for l in err_lines if l.startswith("Beat model threads waited")]
     if idle:
         row["chunk_idle_s"] = float(idle[-1].group(1))
+    beat = re.search(r"^BEAT .*chunk_idle_s=([\d.]+)", text, re.M)
+    if beat:
+        row["chunk_idle_s"] = float(beat.group(1))
     starting = [l for l in err_lines if "Starting" in l]
     if starting:
         row["starting"] = starting[-1]
