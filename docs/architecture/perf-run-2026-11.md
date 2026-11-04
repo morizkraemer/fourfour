@@ -2023,3 +2023,180 @@ Cost of the warm-up (`perf-warmup.spec.ts`, Chromium, 4 pairs, script time in th
 - The first keystroke still carries 33-37 ms of script at 50k: 10 ms were the scan (the letter sets remove it, about 9 ms on later single letters after a clear), the rest is the Svelte update of the result and first-use code.
 - WebKit headless adds a compositor gap of 170-300 ms to every step (R29), so differences there are about 40-150 ms in the first sorts and within noise for the keystrokes; one new run at 50k had a spike (1616 and 914 ms) that the median hides.
 - Idle script time per column grows with the row count; at 10k the warm-up is about 85 ms in total.
+
+## R118 row layers (2026-11-04, `r118-row-layers`)
+
+Branch `r118-row-layers` from `ov-1028` (`0e01eba`, r112, r113, r114, r115 included). Linux `dev` box, headless Chromium 1217 and Playwright WebKit, 10k fixture payload (`~/.cache/r95/state10k.json`, two thirds of the rows given synthetic 3-band data so rows show real previews, one third left as placeholders), 1600x1000, box load 13-23 (other workers). Result: **the per-frame cost is real and sits in the row canvases, but every way of removing it needs the fenced `Waveform.svelte` (the row preview is that file's `mini` variant, drawn by `TrackRow.svelte`), and the only one that works (rows as `<img>`) is not pixel-identical in Chromium, retains memory the app cannot bound, and is slower on scroll in WebKit. Nothing landed in `app/src`; the proposal and its numbers are below.**
+
+### Where the Layerize time comes from
+
+Layer tree of the expanded, playing player over the 10k table (CDP `LayerTree`, `FF_PERF_R118=1 ... -g 'layer tree'`): 84 layers, 77 drawing: **37 `Canvas` layers (one per row preview, all of them composited whatever the canvas size or `willReadFrequently`) and 37 `Overlap` layers** (the hidden 1 px `.ff-trow__wave-cursor`, `opacity: 0`, paints above its row's canvas, so the row's later content cannot merge back below the canvas layer), 3 others. The table pool keeps its canvases: a 300-frame fling over 25,000 px adds and removes 0 canvases and 0 rows (42 rows, 42 canvases before and after; `FF_PERF_R118=pool`).
+
+Layerize per frame (expanded player playing, 1.5 s traces) by what is hidden, same page, one trace each: base 8.1, row canvases hidden 3.2-3.8, canvases and cursor hidden 2.7, whole table hidden 1.5 (the rest of the page). With no canvases left, the 25 elements of a row still cost about 2 ms: the text spans are about 1.1 ms of it (hide-text 3.5 to 2.4), cells, cover, fav and rating together the rest.
+
+### What was tried in app code (no change, nothing landed)
+
+| Try (CSS injected into the page, expanded player playing, Layerize ms per frame) | Result |
+|---|---|
+| `will-change: transform` on `.ff-table__scroll` or `.ff-table__body`, `isolation: isolate; contain: paint` on the scroller, `contain: layout paint style` on the body | 6.5-7.4 against 7.0-7.7 base (v6, one trace each): no change |
+| `.ff-table__row { contain: none }` | inconclusive: 7.0 (6.6-10.0) against 8.7 (8.1-9.9), 3 traces against 4, inside the spread; not pursued (the row's `contain: layout` is what keeps a text change from relaying out the list) |
+| wave cursor `display: none` unless the wave cell is hovered (so the 37 `Overlap` layers go, 84 to 47 layers; written as app CSS in `TrackTable.svelte`) | **worse**: Layerize 10.3 (9.5-11.0) against 7.4 (7.0-8.0), Commit unchanged (2.1 against 2.3); and not byte-identical (fav checkbox corner pixels, see below) |
+| `getContext('2d', { willReadFrequently: true })` on the row canvas | still 37 `Canvas` layers |
+| `contain`, `content-visibility: auto` on rows, hiding the canvases of overscan rows | already tried in `performance-2026-10.md` (no Layerize change; the overscan protects against blank rows on a compositor-thread fling); not repeated |
+
+### The change that works (proposal, fenced: not landed)
+
+Draw the `mini` preview into an offscreen canvas as before, turn it into a PNG data URL and show it in an `<img class="ff-waveform ff-waveform--mini">`; keep the URL in an 800-entry LRU keyed like the existing bitmap cache (key includes data, size, dpr and palette version; the placeholder bars get their own key); `TrackRow.waveRect` asks for `.ff-waveform` instead of `canvas`. Measured with this diff applied temporarily and reverted (nothing under `prototyping/` is in the tree):
+
+```diff
+--- a/prototyping/viewport/design-system/components/TrackRow.svelte
++++ b/prototyping/viewport/design-system/components/TrackRow.svelte
+@@ -76,7 +76,7 @@
+   function waveRect(e) {
+-    return (e.currentTarget.querySelector('canvas') ?? e.currentTarget).getBoundingClientRect();
++    return (e.currentTarget.querySelector('.ff-waveform') ?? e.currentTarget).getBoundingClientRect();
+   }
+--- a/prototyping/viewport/design-system/components/Waveform.svelte
++++ b/prototyping/viewport/design-system/components/Waveform.svelte
+@@ (module)
++  const urlCache = new Map();
++
++  function rememberUrl(key, url) {
++    urlCache.set(key, url);
++    if (urlCache.size > BITMAP_CACHE_LIMIT) urlCache.delete(urlCache.keys().next().value);
++  }
++
++  function recallUrl(key) {
++    const hit = urlCache.get(key);
++    if (hit === undefined) return null;
++    urlCache.delete(key);
++    urlCache.set(key, hit);
++    return hit;
++  }
+@@ (instance)
+   let canvas;
++  let image;
++  const asImage = variant === 'mini';
+@@
++  function pictureKey(dpr, data) {
++    return data ? bitmapKey(dpr, data) : `ph|${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${animating ? 1 : 0}`;
++  }
++
++  function imageUrl(pixelW, pixelH, dpr) {
++    const data = source();
++    const key = pictureKey(dpr, data);
++    let url = recallUrl(key);
++    if (url) return url;
++    const bitmap = document.createElement('canvas');
++    bitmap.width = pixelW;
++    bitmap.height = pixelH;
++    const ctx = bitmap.getContext('2d');
++    if (data) paintData(ctx, data, pixelW, pixelH, dpr);
++    else paintPlaceholder(ctx, dpr, 0);
++    url = bitmap.toDataURL();
++    rememberUrl(key, url);
++    return url;
++  }
++
++  function drawImageElement() {
++    if (!image) return;
++    const dpr = window.devicePixelRatio || 1;
++    const cssW = `${width}px`;
++    const cssH = `${height}px`;
++    if (image.style.width !== cssW) image.style.width = cssW;
++    if (image.style.height !== cssH) image.style.height = cssH;
++    const url = imageUrl(Math.round(width * dpr), Math.round(height * dpr), dpr);
++    if (image.getAttribute('src') !== url) image.setAttribute('src', url);
++  }
++
+   function draw(phase) {
++    if (asImage) return drawImageElement();
+     if (!canvas) return;
+@@ ($effect)
+-    if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
++    if (asImage) {
++      if (urlCache.has(pictureKey(window.devicePixelRatio || 1, data))) {
++        run();
++        return;
++      }
++    } else if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
+@@ (markup)
+-<canvas ...></canvas>
++{#if asImage}
++  <img bind:this={image} alt="" draggable="false" class="ff-waveform ff-waveform--{variant}" class:ff-waveform--analysing={animating && !source()} />
++{:else}
++  <canvas ...></canvas>
++{/if}
+```
+
+(The measured version computed the placeholder key inline in `imageUrl` and in the effect; `pictureKey` is that line pulled out. The other hunks are as measured.)
+
+Layer tree with it: 16 layers (3 canvases of the player, 5 overlap), 84 before.
+
+The smoke suite with the proposal applied (Chromium): 113 passed, 1 failed: `leaks.spec.ts` "opening and closing the palette, settings and the expanded player leaves no listeners, nodes or callbacks behind" reports DOM nodes 6,791 before and 10,007 after six cycles (listeners and callbacks flat). Base passes it, 2 of 2 runs; the proposal fails it, 2 of 2 runs. Cause not investigated (the open and close of the expanded player resizes the table, which mounts and unmounts pool rows, so the row preview elements are the likely owners).
+
+### Frame cost, Chromium (interleaved base, new, base, new; per-frame medians with the range of the per-trace values)
+
+Expanded player playing, 4 rounds x 3 traces of 1.5 s per side (n = 12), load 19-23:
+
+| ms per frame | base | new | |
+|---|---:|---:|---|
+| Layerize | 8.40 (7.32-9.45) | 3.24 (2.90-4.10) | -61% |
+| Commit | 3.81 (2.99-4.75) | 2.55 (2.32-3.62) | -33% |
+| Paint | 0.61 (0.50-1.11) | 0.66 (0.43-1.44) | |
+| PrePaint / Layout / Style | 0.29 / 0.33 / 0.24 | 0.28 / 0.27 / 0.27 | |
+| main thread busy | 18.9 (16.5-22.2) | 11.4 (10.7-16.8) | -40% |
+| frames in 1.5 s | 74 (64-83) | 90 (68-92) | |
+
+Table fling (150 frames at 84 px/frame = 3 rows per frame, `FF_PERF_R118=scroll`), 4 rounds x 3 passes; pass 1 of each load is cold (every row is new to the preview cache, the new code encodes a PNG per row), passes 2 and 3 are warm (rows seen before):
+
+| ms per frame | cold base | cold new | warm base | warm new |
+|---|---:|---:|---:|---:|
+| Layerize | 8.23 (7.49-8.36) | 3.92 (3.24-3.96) | 7.97 (7.38-8.40) | 3.69 (3.41-3.90) |
+| Commit | 2.77 (1.76-2.85) | 1.39 (0.47-1.60) | 1.76 (1.23-2.03) | 0.86 (0.46-1.40) |
+| Paint | 1.96 | 2.59 | 1.89 | 2.29 |
+| Layout / Style | 1.61 / 1.80 | 1.69 / 1.84 | 1.53 / 1.64 | 1.59 / 1.75 |
+| main thread busy | 27.3 (21.9-27.9) | 26.8 (18.8-27.7) | 22.7 (19.6-24.5) | 17.4 (15.3-20.7) |
+| script in rAF (trace, 150 frames) | 1,258-1,352 ms | 1,862-1,941 ms | 956 | 686 |
+| frames over 20 ms (of 149) | 89 (49-92) | 84 (26-89) | 57 (28-72) | 16 (3-45) |
+
+Cold, the PNG encode (0.45 ms per row at dpr 1, 0.86 ms at dpr 2 on this box) eats the compositor gain: busy 27.3 against 26.8. Warm it is -24% busy and 57 against 16 slow frames.
+
+Typing in the header search (`house`, then five backspaces, 120 ms apart, `FF_PERF_R118=typing`, 3 rounds x 3 passes, load 13-19): keystroke to second frame, median 67-71 ms base against 70-72 new, worst 88-112 base against 91-112 new; Layerize 6.4 against 5.2, Paint 3.2 against 5.1 per frame. No gain and no regression beyond the noise (a keystroke that replaces the 42 visible previews pays the encodes once; the backspaces hit the cache). The `typing during analysis: worst keystroke` budget row was not re-run.
+
+### Frame cost, WebKit (Timeline through the inspector session, 3 rounds x 3 passes, headless software compositing; this build does not report compositor work, so Layerize and Commit have no counterpart)
+
+| per frame | expanded playing base | new | fling warm base | new |
+|---|---:|---:|---:|---:|
+| Layout | 0.54 | 0.52 | 3.62 | 3.86 |
+| Paint | 0.87 | 0.70 | 15.66 | 16.97 |
+| Recalculate styles | 1.44 | 1.34 | 3.88 | 3.98 |
+| FireAnimationFrame (script) | 2.55 | 2.33 | 9.69 | 13.15 |
+| frame gap p50 / p95 ms | 18 / 30 | 17 / 27 | 110 / 142 | 112 / 148 |
+
+In WebKit the fling is compositor-bound (110 ms frames, R29, R34), and setting `img.src` to a data URL costs 0.13 ms the first time and 0.7 ms for a URL it already knows (Chromium: 0.03 and 0.01 ms), so script grows by 3.5 ms per frame in a fling; the PNG encode is 0.65 ms (dpr 1) and 1.4-1.8 ms (dpr 2). A URL seen for the first time is not loaded until a later task (`img.complete` is false in the same task and after the microtask, true after `setTimeout(0)`; Chromium is loaded by the microtask), so a recycled row can show its previous preview for a frame. Playing steady state improves slightly (-20% Paint), scrolling is slower. No Mac measurement (no Mac here); the per-canvas CALayer cost there is the unknown that could change this.
+
+### Pixel identity
+
+`FF_PERF_R118=identity`: screenshot of the table area (`.ff-table__scroll`, animations disabled) in 12 states at device pixel ratio 1 and 2: top, row 100, row 5,000, the end of the list, a 111-step scroll back and forth, hover on a row, hover on a wave cell (cursor shown), one selected row, a selected range, the playing row, "Analyze all unanalyzed" running (pulsing placeholders), and the same scrolled to row 100. Rows with data and rows without (placeholders) are both on screen.
+
+- **WebKit: 24 of 24 screenshots byte-identical, base against new**, and base against base (control) 24 of 24.
+- **Chromium: 3 of 24 byte-identical, 21 differ by at most 1 to 4 levels of 255**, in two places: (1) at dpr 1, 290-350 pixels per screenshot at the corners of the fav checkbox (x 266-267 and 282-283, one level, up to 3 in four screenshots); the same pixels differ with only the cursor CSS above applied, so this comes from the `Overlap` layers disappearing (the box is rastered in another layer before), not from the preview; the preview pixels at dpr 1 are identical; (2) at dpr 2, the preview of highlighted rows (selected, range, hover, playing: 130-11,757 pixels, 1-2 levels): the translucent row tint blends under the image in the page's layer instead of under a composited canvas, and 8-bit rounding differs. Control, base against base in Chromium: 23 of 24 byte-identical, one screenshot differs in 2 pixels by 4 levels (the fav corner again), so the harness itself is not perfectly stable there. In a toy page (canvas against the same PNG as `<img>`, rest and tinted row, dpr 1 and 2) the PNG route was byte-identical in Chromium and WebKit; an SVG path instead of the PNG differed (4-253 pixels, 1-21 levels) and was dropped.
+
+So Chromium identity to the byte is not possible with any change that removes the layers; WebKit (the Mac webview) is exact.
+
+### Memory
+
+- JS heap after a forced GC is the same (52 MB base and new after two full sweeps of the 10k list).
+- The app's cache is smaller and bounded: 800 data URLs of 1.6 KB (dpr 2) or 0.8 KB (dpr 1), at most 1.3 MB, against up to 800 canvases of 27 KB (dpr 2, 21.5 MB) or 6.7 KB (dpr 1, 5.4 MB) now.
+- **The browser retains the images the app lets go of.** Browser process RSS (all Chromium processes, `FF_PERF_R118=memory`: scroll the whole 10k list twice at 20 rows per frame, then force GC and wait 8 s), 2 runs each: base +64 and +40 MB at dpr 2, +44 and +59 MB at dpr 1; new +152 and +145 MB at dpr 2, +128 and +131 MB at dpr 1. A page that only sets `img.src` to 2k, 5k, 10k, 12k and 40k distinct data URLs on 60 images grows by +74, +90, +115, +117 and +309 MB, GC or not: about 5.6 KB per distinct image, with no plateau seen, so a 50k library scrolled end to end would hold about 280 MB more in headless Chromium. Blob URLs revoked after 800 grew more (+154 MB for 10k). Whether WebKit or a GPU-raster Chromium keeps them is not measured. This fails the "row image cache must be bounded" bar as the proposal stands; a hard cap on distinct images ever created (and canvas for the rows past it) would bound it.
+
+### Recommendation
+
+1. Take the R112 proposal first (compositor-driven playhead): it takes Layerize in this very scenario from 658 ms to 27 ms per 1.5 s with rows untouched, which is more than the 61% here and needs no identity trade-off.
+2. Do not take rows-as-images now: Layerize and Commit fall by 61% and 33% while a track plays and the fling gets 24% cheaper when warm, but Chromium is not byte-identical, memory grows without a bound the app controls, an existing leak smoke test fails with it, WebKit scrolls slower, and the Mac effect is unmeasured. If it is wanted after a Mac measurement, lift the fence for `Waveform.svelte` and `TrackRow.svelte` and add (a) a cap on distinct images created, (b) conversion only after the table has been idle, so scrolling and typing keep today's cost.
+3. App-only levers on rows (will-change, contain, isolation, cursor visibility, willReadFrequently) do not help, see the table above.
+
+### Tools added
+
+`app/smoke/perf-rowlayers.spec.ts` (all tests skip unless `FF_PERF_R118` is set): `FF_PERF_R118=1` layer tree by compositing reason; `FF_PERF_R118=frames` per-frame trace of the expanded player playing, with CSS variants (`FF_PERF_VARIANTS=base,no-row-canvas,...`); `identity` screenshots of the table in twelve states (`FF_PERF_DPRS`, `FF_PERF_R118_OUT=dir/prefix`); `scroll` and `typing` traces with frame-gap statistics; `memory` (RSS of the browser's processes and JS heap, `FF_PERF_DPR`); `webkit-frames` (WebKit Timeline per frame, `FF_PERF_SCENARIO=expanded|scroll`); `pool` (canvas and row churn during a fling). Per-frame numbers come from summing `Layerize`, `Commit`, `Paint`, `Layout`, `UpdateLayoutTree` on the main thread of a `devtools.timeline` trace and dividing by the `Commit` count (`scripts/perf-trace-phases.mjs` has the bucketing). Raw and the interleaving scripts were in `~/.cache/r118-work/` and are deleted after this item.
