@@ -1432,3 +1432,71 @@ The 10k cold scan is now 1.0 s; a plain parallel read of the first 16 KB of each
 Not covered by the skip: Ogg and Opus pictures (the comment is read whole), APE, and MP4 files whose tags are not under `moov/udta/meta/ilst`; they are read as before.
 
 **R92b fix (`r92b-import-covers`).** `robustness_tests::huge_and_special_files_do_not_hang_the_import` went from 11 s to 150 s with R92 (debug build, 256 MB sparse zero files). Two causes. (1) The RIFF walker stepped over zero-size chunks 8 bytes at a time, one seek and read per step (32 million for a 256 MB WAV or AIFF of zeros, 150-190 s); it now gives up after 256 chunks. (2) lofty's per-byte zero skip and frame sync scan, run through the custom reader, is compiled in `pioneer-test-ui` at the debug opt-level, while `scanner::read_track_metadata` is instantiated in `pioneer-usb-writer`, which builds at opt-level 3 in debug; on a 256 MB MP3 of zeros that was 97 s against 1.5 s. The custom reader now serves only files where the walker found picture bodies; MP3, WAV, AIFF and MP4 files with no picture found go to `read_track_metadata` (same fields, `artwork` dropped), other types use a plain `BufReader<File>` with `read_cover_art(false)`. `read_track_tags` also refuses non-regular files before opening them. The test takes 9.3 s (base 11 s, R92 150 s, loaded box). 10k cold scan, interleaved, load 36-40: 1.02-1.05 s fixed against 1.12-1.19 s for R92 (the 8 KB read buffer matters: 64 KB cost 0.2 s cold).
+
+## R104 non-model stages (2026-11-04, `r104-stages`)
+
+Branch `r104-stages` from `ov-1028` (`8249974`). Linux `dev` box (Xeon Gold 6130, 16 vCPU), release builds, baseline built from a clean `git archive` of `8249974`, load average 14-23 during every run (other workers), base and new interleaved. `FOURFOUR_BEAT_CHUNK` does not exist on `ov-1028` (r96, chunk 500, is parked), so everything ran at the `ov-1028` default of 1500 frames; the beat model share at chunk 500 is scaled with the 1.86x of R94, not measured. `perf` is not usable here (`perf_event_paranoid` is 3), so stage CPU comes from `/proc/self/stat` around each stage (`fourfour-analysis-rs/examples/stage_cpu.rs`, 3 repetitions per stage, 10 ms tick).
+
+**Tracks (12, read-only from `benchmark/datasets`).** 3 MP3 44.1 kHz (beatport) and 1 MP3 48 kHz, 4 FLAC 44.1 kHz, 3 WAV 44.1 kHz and 1 WAV 48 kHz; 120-535 s, mean 309 s.
+
+### Stage profile, before (CPU ms per track, mean of 2 rounds)
+
+| stage | CPU ms | share of non-model | share of all CPU, chunk 1500 | share of all CPU, chunk 500 (est.) | owner |
+|---|---:|---:|---:|---:|---|
+| decode (symphonia + mono downmix) | 700 | 15.6% | 1.0% | 1.7% | `decode.rs` |
+| resample to 22.05 kHz (rubato sinc) | 937 | 20.9% | 1.3% | 2.3% | beat-this / rubato |
+| resample to 44.1 kHz for the key (48 kHz sources only; 2 of 12 tracks, 2.5 s and 4.1 s each) | 547 | 12.2% | 0.8% | 1.3% | beat-this / rubato |
+| mel spectrogram (rten ONNX, from a first single-thread run) | ~800 | 17.9% | 1.1% | 1.9% | model |
+| waveform (3-band meter, 97% of it `Meter::push`) | 740 | 16.5% | 1.0% | 1.8% | `pioneer-usb-writer/src/waveform` |
+| key (`cyankey`) | 582 | 13.0% | 0.8% | 1.4% | `cyankey.rs` |
+| grid fit (single-thread run) | ~170 | 3.8% | 0.2% | 0.4% | `fit.rs` |
+| mp3 timeline scan | 0 | | | | |
+| **non-model total** | **~4,480** | | **6.2%** | **10.9%** | |
+| beat model (`predict`, 1 thread, 0.22 CPU-s per audio-s at chunk 1500) | ~68,000 (chunk 500: ~36,600) | | 93.8% | 89.1% | model |
+
+Cover and tag reads are not part of this pipeline (they belong to the import pass, R6 and R92). A full run shows 17% of the CPU as system time and about 1.3 million minor page faults per 120 s track (about 5 GB touched); the non-model stages only touch a few hundred MB. `MALLOC_TRIM_THRESHOLD_`, `MALLOC_MMAP_THRESHOLD_` (32 MB) and `MALLOC_TOP_PAD_` changed nothing (1.29-1.35 M faults, 5.8-6.2 s sys in all three runs). The faults come from the model runtime, not from these stages; a fault costs about 4.6 us on this VM, which is also why the plain `Vec` growth in `decode_mono` is not free.
+
+### Changes (all bit-identical)
+
+1. **Key decimation** (`cyankey::decimate`, 70-80% of the key stage). The 65-tap FIR was one scalar `f32` accumulator per output, so each output waited on a chain of 65 dependent adds (about 113 ns). Now 32 neighbouring outputs advance together in 32 lanes (compiled to SSE vectors); every lane still adds `h[i] * x` in tap order `i = 0..64`, so each output is the same sum with the same rounding, and no FMA is used. The input is deinterleaved into its `d` phases per segment of 2048 outputs so the lanes read contiguous floats; the taps' offsets are computed once (a `div` per tap in the inner loop was the first version's bottleneck). Edge outputs keep the old scalar path. 3.75 M outputs: 425 ms scalar, 77-95 ms now.
+2. **Key STFT window fill** (`Stft::magnitudes`): the zero-padding at both ends is two `fill`s and the middle a plain multiply loop, same products as before.
+3. **Decode downmix** (`decode_mono`): stereo goes through `(l + r) / 2.0` over `chunks_exact(2)` instead of the generic `chunks(channels)` + `iter().sum()` + runtime divide (`Sum` of two floats starts from -0.0, so the result is the same value). Mono and more than two channels are unchanged.
+
+Tests: `decimation_matches_the_scalar_filter_bit_for_bit` (d = 2, 4, 7; 11 lengths around the lane, segment and edge limits; 1 and 3 threads; compares `to_bits` with the old per-tap loop) and `stft_frames_match_the_bounds_checked_fill_at_both_ends`.
+
+### Result (CPU ms per track, mean of 2 rounds, 12 tracks)
+
+| stage | before | after | change |
+|---|---:|---:|---:|
+| key | 582 | 231 | -60% (MP3 1.92 -> 0.81, FLAC 1.84 -> 0.74, WAV 1.91 -> 0.73 ms per audio-s) |
+| decode | 700 | 609 | -13% (MP3 3.61 -> 3.36, FLAC 2.68 -> 2.44, WAV 1.20 -> 0.83 ms per audio-s) |
+| waveform, resample 22.05, resample 44.1 | 740, 937, 547 | 730, 947, 514 | unchanged (noise) |
+| non-model total | ~4,480 | ~4,000 | -10.7% |
+
+That is -0.65% of a track's total CPU at chunk 1500 and about -1.2% at chunk 500: the stages were 6-11% of the analysis, so a 60% cut of one and a 13% cut of another is small in the full pipeline. Wall time per stage fell the same (decode 729 -> 637 ms, key 608 -> 249 ms); at 2 threads the key runs beside the beat model and only the decode is on the critical path, so the per-track wall gain is about 90 ms.
+
+**Full pipeline, `analyze-json --threads 2`, 12 tracks (dominated by the model and by the load; read as "no regression"):**
+
+| run | order | wall | user | sys | CPU per track | load at start |
+|---|---|---:|---:|---:|---:|---:|
+| base | 1 | 426.7 s | 732.2 s | 153.3 s | 73.8 s | 15.0 |
+| new | 2 | 411.3 s | 718.4 s | 137.5 s | 71.3 s | 16.3 |
+| new | 3 | 412.1 s | 707.8 s | 143.9 s | 71.0 s | 16.4 |
+| base | 4 | 507.2 s | 727.4 s | 148.2 s | 73.0 s | 18.1 |
+
+The stage savings are about 5.7 CPU-s over the 12 tracks, against a 27 s difference in the table, so most of that gap is system-time and load noise.
+
+### Proof
+
+- `cmp` of the `analyze-json` output of the baseline build and this branch, 12 tracks, run twice: identical, 11,255,993 bytes, sha256 `7717f075a856eb0a3954eab2e5f3641a2fc8dccc91e650f8f93e19ec3803e547` (both builds, both rounds). Beat grid, bpm, key, waveforms and every other field are in that JSON.
+- The key's confidence and tuning are not in the JSON, so `stage_cpu` also hashes (FNV-1a over `f32`/`f64` bits) the decoded mono samples, the 44.1 kHz and 22.05 kHz resampled audio and the key class, confidence and tuning of every track: identical between baseline and branch for all 12 tracks, in both rounds.
+
+### Looked at, not changed
+
+- **Waveform `Meter::push`: 740 ms per track, the largest controllable stage left, in the `pioneer-usb-writer` lane (measured only).** It costs 53 ns per sample whatever the signal (noise, sine, real music; 5 `f64` biquads and 5 `max`es per sample), while one biquad in a plain loop here costs 8.5 ns per sample (the add chain is the floor) and the five filters are independent except mid-low-pass after mid-high-pass. So there should be 4x or more headroom without changing a single float operation (a `channels == 1` fast path that skips the per-sample channel sum and divide, filter state in locals); not tried, because the `Meter` fields are private and `waveform.rs` in this crate cannot do it from outside.
+- **Resampling (rubato) is the biggest single block**: 3.1 ms per audio-s at 44.1 -> 22.05 kHz and 6.9 ms per audio-s at 48 -> 44.1 kHz (a 48 kHz track pays 2.5-4.1 s extra for the key). rubato already runs AVX+FMA kernels chosen at run time, and its output for 48 kHz depends on the 8192-frame chunking (beat-this documents it), so nothing here can change it bit for bit. The 44.1 kHz resample could only go if the key algorithm took 48 kHz input, which changes its output.
+- **Mel (rten) and the beat model** are the model; not touched.
+- **Key tuning pass**: its frames (every second one) are transformed again by the band pass. Keeping their spectra (about 7 KB per frame) would save about 13% of the key stage (about 1% of the non-model total) for a buffer that grows with the track; not done. A replacement for `Complex::norm` (libm `hypotf`, about 25% of the key frame cost) would risk differences in the last bit, so it was left alone.
+- Decode is now mostly symphonia (MP3 300 ms, FLAC 590 ms per 120-330 s of audio) and first-touch page faults of the sample buffer.
+
+Commits on `r104-stages`: `ae35686` decode, `0698573` + `5d33804` key, `aa12a4f`, `fbb86e5`, `2b3f40f` bench example. Validation: `cargo test --workspace`: 26 `test result: ok` lines, 549 passed, 0 failed.
