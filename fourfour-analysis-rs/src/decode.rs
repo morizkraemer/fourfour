@@ -69,6 +69,8 @@ pub fn decode_mono(path: &Path) -> Result<Mono> {
                 decoded.copy_to_vec_interleaved(&mut scratch);
                 if channels == 1 {
                     samples.extend_from_slice(&scratch);
+                } else if channels == 2 {
+                    samples.extend(scratch.chunks_exact(2).map(|frame| (frame[0] + frame[1]) / 2.0));
                 } else {
                     samples.extend(scratch.chunks(channels).map(|frame| frame.iter().sum::<f32>() / channels as f32));
                 }
