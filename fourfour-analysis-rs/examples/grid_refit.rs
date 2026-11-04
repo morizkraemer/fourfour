@@ -116,6 +116,9 @@ fn main() -> Result<()> {
     if let Some(v) = std::env::var("R79_SNAP_WIDE").ok().and_then(|s| s.parse().ok()) {
         params.snap_wide = v;
     }
+    if std::env::var("R101_HALF_TIME").as_deref() == Ok("off") {
+        params.half_time_band = (0.0, 0.0);
+    }
     if args.get(5).is_some_and(|s| s == "nosnap") {
         params.snap_tol = 0.0;
     }

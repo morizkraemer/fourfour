@@ -10,6 +10,7 @@ pub enum TempoSearch {
 
 pub const TEMPO_SEARCH: TempoSearch = TempoSearch::LineAndGlobalPeak;
 pub const GLOBAL_SEARCH_PCT: f64 = 4.0;
+pub const HALF_TIME_BAND: (f64, f64) = (84.0, 92.5);
 
 #[derive(Clone, Debug)]
 pub struct FitParams {
@@ -25,6 +26,7 @@ pub struct FitParams {
     pub scan_pct: f64,
     pub snap_ratio: f64,
     pub keep_native: (f64, f64),
+    pub half_time_band: (f64, f64),
     pub threads: usize,
 }
 
@@ -43,6 +45,7 @@ impl Default for FitParams {
             scan_pct: 0.3,
             snap_ratio: 0.97,
             keep_native: (150.0, 185.0),
+            half_time_band: HALF_TIME_BAND,
             threads: 1,
         }
     }
@@ -379,6 +382,11 @@ pub fn fit_track(
         p_out = p * n as f64;
     }
 
+    let out_bpm = 60.0 / p_out;
+    if out_bpm >= params.half_time_band.0 && out_bpm <= params.half_time_band.1 {
+        p_out /= 2.0;
+    }
+
     let shift = params.shift_ms / 1000.0;
     let mut first = (t0_out + shift) % p_out;
     if first < 0.0 {
@@ -459,6 +467,14 @@ mod tests {
         let global = fit_from_peaks_off_the_true_tempo(TempoSearch::LineAndGlobalPeak);
         assert!((near - 114.0).abs() > 0.1, "near-only fitted {near}");
         assert_eq!(global, 114.0);
+    }
+
+    #[test]
+    fn half_time_tempo_in_the_band_is_doubled() {
+        assert_eq!(fitted_bpm(88.0, &FitParams::default()), 176.0);
+        assert_eq!(fitted_bpm(88.0, &FitParams { half_time_band: (0.0, 0.0), ..FitParams::default() }), 88.0);
+        assert_eq!(fitted_bpm(80.0, &FitParams::default()), 80.0);
+        assert_eq!(fitted_bpm(94.0, &FitParams::default()), 94.0);
     }
 
     #[test]
