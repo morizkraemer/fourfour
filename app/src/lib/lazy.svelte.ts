@@ -2,12 +2,12 @@ import type { Component } from 'svelte';
 import { preloadAfterFirstScreen } from './afterFirstScreen.ts';
 
 export interface LazyView {
-  readonly component: Component | null;
+  readonly component: Component<any> | null;
   load(): Promise<void>;
 }
 
-export function lazyView(importView: () => Promise<{ default: Component }>): LazyView {
-  let component = $state.raw<Component | null>(null);
+export function lazyView(importView: () => Promise<{ default: Component<any> }>): LazyView {
+  let component = $state.raw<Component<any> | null>(null);
   let loading: Promise<void> | null = null;
   const view: LazyView = {
     get component() {
