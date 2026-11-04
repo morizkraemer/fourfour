@@ -610,3 +610,4 @@
 2026-11-04 19:42 orchestrator r117 handed back ddacd15: beat-sync/chord/Tonnetz key features add nothing (finalist test 56.8%, p 1.0), dropped, noted in 49. decided: own prio r119 parked-all-v9 (all parked work on today's ov-1028 + r108 chunk-500 stack; sonnet medium)
 2026-11-04 19:56 orchestrator r118 handed back 5348e0f: 84 layers (37 canvas + 37 overlap); app-only levers do nothing; rows-as-images cuts Layerize 8.4 -> 3.2 ms but not pixel-identical in Chromium and unbounded image RSS; dropped, spec + doc merged 13dee70; supports Waiting 48. decided: own prio r120 load_state page-side decode (sonnet high)
 2026-11-04 20:04 orchestrator r118 spec+doc landed 13dee70 (chromium smoke 0 failed, CHECKS-OK)
+2026-11-04 20:15 orchestrator r119 handed back parked-all-v9 3a135a7 (v8 + r108 on ov-1028 0e01eba; 5 conflicts resolved, nothing dropped; v8-schema payload byte-identical; cargo, vitest 978, check, both smokes green); :4212 now serves v9
