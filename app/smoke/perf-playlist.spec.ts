@@ -209,6 +209,14 @@ test.describe('playlist view latency', () => {
     test(`run ${run}`, async ({ page }) => {
       await page.exposeFunction('__smokeAnalysis', (trackId: number) => mockAnalysisData(trackId, 180 + ((trackId * 7) % 300), 12400, '8A'));
       await page.addInitScript(installTauriMock, state());
+      await page.addInitScript(() => {
+        const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__;
+        const invoke = internals.invoke.bind(internals);
+        internals.invoke = (cmd, args) => {
+          if (cmd === 'save_state') JSON.stringify(args);
+          return invoke(cmd, args);
+        };
+      });
       await page.goto('/');
       await rowLocator(page).first().waitFor({ timeout: 120_000 });
       await page.waitForTimeout(6000);

@@ -1,12 +1,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { Session } from 'node:inspector';
 import { describe, it, vi } from 'vitest';
 
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
 const STATE = env.FF_PERF_STATE;
 const OUT = env.FF_PERF_OUT;
 const REPEATS = Number(env.FF_PERF_REPEATS ?? 5);
-const PROFILE = env.FF_PERF_PROFILE;
 const WARM = env.FF_PERF_WARM !== '0';
 const SIZES = (env.FF_PERF_PLAYLISTS ?? 'R124 1k,R124 5k,R124 20k').split(',');
 
@@ -238,9 +236,6 @@ function bumpBpm(name: string, rows: () => Row[]): Row[] {
 
 describe.skipIf(!STATE)('playlist views on the real payload', () => {
   it('prints step timings and the hash of every result list', async () => {
-    const session = PROFILE ? new Session() : null;
-    session?.connect();
-    const post = (method: string, params?: object) => new Promise<any>((resolve, reject) => session!.post(method, params, (err, result) => (err ? reject(err) : resolve(result))));
     const timings = new Map<string, number[]>();
     const hashes = new Map<string, string>();
     const order: string[] = [];
@@ -250,11 +245,6 @@ describe.skipIf(!STATE)('playlist views on the real payload', () => {
         clearSort('playlist');
         const steps = script(name);
         clearSort('playlist');
-        if (session) {
-          await post('Profiler.enable');
-          await post('Profiler.setSamplingInterval', { interval: 100 });
-          await post('Profiler.start');
-        }
         for (const step of steps) {
           step.prepare?.();
           const t0 = performance.now();
@@ -265,8 +255,6 @@ describe.skipIf(!STATE)('playlist views on the real payload', () => {
           (timings.get(step.name) ?? timings.set(step.name, []).get(step.name)!).push(ms);
           if (repeat === 0) hashes.set(step.name, result);
         }
-        if (session && repeat === REPEATS - 1) writeFileSync(`${PROFILE}-${name.replace(/\W+/g, '')}.cpuprofile`, JSON.stringify((await post('Profiler.stop')).profile));
-        else if (session) await post('Profiler.stop');
       }
     }
     clearSort('playlist');

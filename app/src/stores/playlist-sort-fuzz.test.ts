@@ -29,6 +29,8 @@ import {
   reorderPlaylistTracks,
   tracksForSidebarSource,
 } from './library.svelte.ts';
+import { isRawIds } from '../lib/playlistIds.ts';
+import { openTableView } from './playlist-view-probe.svelte.ts';
 import { camelotRank, clearSort, durationSeconds, setSort, sortTracks, startLibrarySortWarmup } from './table-columns.svelte.ts';
 
 function generator(seed: number) {
@@ -251,5 +253,32 @@ describe('playlist rows, filter and sort against a plain reference', () => {
     function current() {
       return library.tracks as Row[];
     }
+  });
+
+  it('keeps playlist ids as raw arrays that serialize as arrays and that a table view follows through edits', async () => {
+    const random = generator(11);
+    await loadRandomLibrary(random, 40);
+    const playlist = playlistByName('many')!;
+    const ids = playlist.track_ids;
+    expect(isRawIds(ids)).toBe(true);
+    expect(playlist.track_ids).toBe(ids);
+    expect(Array.isArray(ids)).toBe(true);
+    expect(JSON.parse(JSON.stringify({ playlists: library.playlists })).playlists[0].track_ids).toEqual([...ids]);
+
+    const view = openTableView('many');
+    expect(view.rows.map((row) => row.id)).toEqual(ids);
+    const outside = (library.tracks as Row[]).filter((row) => !ids.includes(row.id)).slice(0, 3).map((row) => row.id);
+    await addTracksToPlaylist(playlist.id, outside);
+    expect(isRawIds(playlistByName('many')!.track_ids)).toBe(true);
+    expect(view.rows.map((row) => row.id)).toEqual([...ids, ...outside]);
+    await removeTracksFromPlaylist(playlist.id, [outside[0]]);
+    expect(view.rows.map((row) => row.id)).toEqual([...ids, ...outside.slice(1)]);
+    await reorderPlaylistTracks(playlist.id, [outside[2], outside[1]]);
+    expect(view.rows.map((row) => row.id)).toEqual([outside[2], outside[1]]);
+    view.search('zzzz-not-there');
+    expect(view.rows).toEqual([]);
+    view.search('');
+    view.show('all');
+    expect(view.rows.length).toBe(40);
   });
 });
