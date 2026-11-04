@@ -604,3 +604,4 @@
 2026-11-04 15:51 orchestrator r113 landed 1d9fdb1 (both smokes 0 failed, 26 suites, vitest 923, CHECKS-OK)
 2026-11-04 16:35 orchestrator r114 handed back a9df8b2 (lazy dialogs/inspector/stick/expanded player, safari16 target, single CSS; entry JS -28%, first row -25 to -126 ms, first screen byte-identical both engines), merged 1f9e6c8 (doc conflict resolved), chain running. decided: own prio r116 key misses classification (sonnet high; key is below the 60% bar)
 2026-11-04 16:54 orchestrator r114 landed 1f9e6c8 (both smokes 0 failed, 26 suites, vitest 926, CHECKS-OK)
+2026-11-04 17:26 orchestrator r116 handed back 53c9e39: key misses 74% mode/neighbour, 20-45% label noise, linear model saturated; clean-fsl-harmonic 59.9% but 16% key churn, p~0.3; parked as Waiting 49 (rec keep clean-fsl). decided: own prio r117 beat-synchronous key features (sonnet high, from r116-key-misses, FSL-only training, McNemar gate)
