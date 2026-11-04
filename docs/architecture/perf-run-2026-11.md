@@ -1543,3 +1543,57 @@ The load was 15-45 during the runs; user and sys CPU are what to read, wall foll
 - If 1500 stays the default and Linux throughput matters, the real fix is in rten: reuse the `BufferPool` across runs (an upstream change; not possible with 0.24 or 0.27 from outside). That would keep about 490 MB per thread (the live peak) instead of the 630-650 MB a cache or a shared heap ends up holding.
 
 Commits on `r106-model-faults`: `03c3018` `chunk_faults` example (allocation count and size, faults, user and sys per chunk run, peak RSS), plus this section. Not measured: 14 threads, the app (Tauri, its arena cap), the Mac.
+
+## R109 budget refresh (2026-11-04, `r109-budget`)
+
+Branch `r109-budget` from `ov-1028` (`78f4e32`). Linux `dev` box, release `bench_startup`, headless Chromium, `scripts/perf.sh --size 10k` (analysis and playback steps skipped: analysis rows belong to r108, the playback test needs a separate test build). Load average 17-22 during the suite (other workers). Everything under `nice -n 10`.
+
+### Budget table, 10k (old = `now` in `perf-budgets.json` before this item)
+
+| Metric | old | now | target | x off | note |
+|---|---:|---:|---:|---:|---|
+| cold startup to first row | 1,085 ms | 1,212 | 500 | 2.4 | frontend 1,113 + backend |
+| cold startup to interactive | 1,319 ms | 1,304 | 550 | 2.4 | |
+| warm startup to first row | 694 ms | 873 | 300 | 2.9 | load 17-22; was measured quieter |
+| warm startup to interactive | 748 ms | 1,009 | 330 | 3.1 | |
+| backend `load_state`, warm | 108 ms | 129 (8 extra runs: median 101) | 60 | 1.7-2.1 | rows query 56-64, playlists 10, table build 15, JSON 6 |
+| `load_state` payload | 1.7 MB | 1.7 | 4 | met | |
+| waveform detail, first time | 800 ms | 849 | 120 | 7.1 | decode plus `DetailMeter` (usb-writer crate, fenced) |
+| waveform detail, cached | 2.5 ms | 3.3 | 2 | 1.6 | |
+| expand to detail drawn | 102 ms | 111 | 50 | 2.2 | |
+| import of the fixture, end to end | 3,700 ms | 1,911 | 2,500 | met | R92 |
+| re-import the same folder | 150 ms | 158 | 600 | met | |
+| import UI click to rows | 119 ms | 38.7 | 100 | met | |
+| scroll during analysis, frame p95 | 32.8 ms | 43 | 28 | 1.5 | idle scroll in the same run: p95 41 ms, 116 frames lost |
+| scroll during analysis, frames dropped | 66 | 145 | 40 | 3.6 | idle scroll without any analysis: 116 |
+| scroll during analysis, long tasks | 57 ms | 55 | 0 | open | one task per window |
+| typing during analysis, worst keystroke | 150 ms | 224 | 100 | 2.2 | idle keystroke worst 120 ms |
+| track load to first audio, analysis rows | not rerun | | | | other work |
+
+The rows that got worse against the old `now` (warm startup, scroll, typing) were measured at load 17-22 and 2-3x the box's quiet load; the "old" numbers came from quieter runs. The scroll and typing rows are dominated by the headless software compositor: with no analysis running, idle scroll already loses 116 frames (the budget said 66), and a keystroke at idle is 62 ms median and 120 ms for the first (`(program)` time, native layout and paint, is 1.1 s of the 2.0 s in a profile of 14 keystrokes; the filter itself is under 10 ms per keystroke). `import end to end` and `import UI click to rows` were refreshed in `perf-budgets.json` (R92 and the R6 landing made them faster than the old `now`); the others were not touched, because a load-affected `now` would make quiet runs pass anything.
+
+Why this one was picked: the worst x-off is waveform detail first time (7.1x), but its time is the band meter in `pioneer-usb-writer/src/waveform/` (fenced) plus the decode, which the app already runs on six threads. Next are the scroll and typing rows (harness-bound, see above), then startup (2.4-3.1x), which sits in the app and has a measurable lever.
+
+### What changed: `load_state` is sent when the page begins
+
+`app/index.html` now has a small classic inline script before the bundle: if `window.__TAURI_INTERNALS__` exists it calls `invoke('load_state', {}, undefined)` and parks the promise on `window`. `startLoadStateEarly()` (called first in `main.ts`) takes that promise over (and gives it the same `toCommandError` mapping `invoke` applies) instead of sending the command itself; with no parked promise it sends it as before. So there is still exactly one `load_state` call, with the same arguments, answered and decoded by the same code. Before, the call went out after the browser fetched, parsed and evaluated the 512 kB bundle and every module it imports (page time 190-270 ms in the headless harness); now it goes out when the HTML is parsed. Unit tests: `early-load-state.test.ts` (the parked call is the one `loadState` waits for and no second `invoke` happens; a rejection becomes the typed `CommandError`; without a parked call the bundle sends it).
+
+**Before / after** (`perf-startup.spec.ts`, 50k real payload from `bench_startup dump`, backend simulated as 480 ms, 3 runs per case and median, base and new alternated, 4 pairs, load 12-24; "base" is the same tree without this change; ms, median of the pairs):
+
+| 50k | first `load_state` call, base / new | first real row, base / new | median pair diff | new faster in |
+|---|---:|---:|---:|---:|
+| first launch | 191 / 67 | 1,556 / 1,203 | -85 | 3 of 4 |
+| cold | 196 / 70 | 1,464 / 1,224 | -13 | 2 of 4 |
+| warm | 208 / 79 | 1,415 / 1,366 | -49 | 3 of 4 |
+
+10k (backend simulated as 118 ms, 3-4 pairs, load 13-36): the call goes out 113-190 ms earlier in 3 of 3 pairs, but first row moves by -13 to +27 ms (inside the noise). That is expected: the answer is read by the page main thread, which is busy with the bundle and the shell until about 650-700 ms, longer than the 10k backend takes. The call only helps while the backend is slower than the page's own start: 50k (450 ms on this box), a cold page cache (the first library query after a reboot is 490 ms at 10k), and slow disks. The harness runs its fake backend (a timer, a `fetch` of the 1.7-8.4 MB payload and `JSON.parse`) on the page main thread, so it understates the gain; the real app does the library work on a Rust thread. Not measured in the real app (no Mac, no GUI here): the Mac night should show `load_state` reaching the backend earlier (`page_start` columns) and, at 50k, first row 50-100 ms earlier.
+
+### Identity
+
+No Rust or stored-data change. `load_state` is the same command with the same arguments, issued once; its payload, the `library.db`, and the rendered rows are produced by unchanged code. Smoke (Chromium and WebKit, which load the page with the mock installed before the bundle) and vitest cover the page-level behaviour; `app/smoke` `startup.spec.ts` asserts the first row from the same call.
+
+### Other findings
+
+- `bench_startup run` now prints `table_build_ms`, `table_json_ms` and `table_json_bytes`: at 10k the column table costs 15 ms to build and 6 ms to serialise of the 28 ms JSON stage; the rest is the playlists (60, up to 800 ids each). Callgrind of the run (`valgrind --tool=callgrind`, `perf` is blocked here): `FolderTable::folder` is half of `TrackTable::new` (about 8,600 distinct folders in the 10k fixture, 0.86 per track; a real library has one folder per album, so a fixture-driven fix would not move a real library), the string interning 30%. `get_track_list_rows` (56-64 ms warm, pioneer-library, fenced) is the largest part of `load_state`; its 120,000 `String` columns (113,951 allocations in one run) and `sqlite3_step` are what it spends.
+- `perf-q50.spec.ts` with `FF_PERF_STATE` (what `perf.sh --size` passes) failed since R22: the dump is a column table and the mock expects `TrackInfo[]`, so the page showed 3 tracks and `loadTrack` read a missing row. The spec decodes the table now (`decodeTrackTable`); `perf.sh --size 10k` runs through again.
+- Not done, by lane: the detail meter (usb-writer) and the library queries (pioneer-library).
