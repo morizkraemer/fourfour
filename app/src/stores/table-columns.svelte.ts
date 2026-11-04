@@ -494,11 +494,32 @@ interface ColumnSort {
 
 const columnSorts = new Map<string, ColumnSort>();
 
-function readLibraryValues(rows: readonly Record<string, unknown>[], plains: readonly Record<string, any>[], key: string, positions: readonly number[] | null, into: SortValue[], from = 0, to = rows.length) {
+const UNIQUE_VALUE_KEYS = new Set(['title', 'index']);
+
+function readLibraryValues(
+  rows: readonly Record<string, unknown>[],
+  plains: readonly Record<string, any>[],
+  key: string,
+  positions: readonly number[] | null,
+  into: SortValue[],
+  from = 0,
+  to = rows.length,
+  memo: Map<unknown, SortValue> | null = UNIQUE_VALUE_KEYS.has(key) ? null : new Map(),
+) {
   const aligned = plains.length === rows.length;
   const read = (p: number) => {
     const plain = aligned ? plains[p] : plainRowOf(rows[p]);
-    into[p] = sortValueOfRaw(Object.hasOwn(plain, key) ? plain[key] : rows[p][key], key);
+    const raw = Object.hasOwn(plain, key) ? plain[key] : rows[p][key];
+    if (!memo || (typeof raw !== 'string' && typeof raw !== 'number')) {
+      into[p] = sortValueOfRaw(raw, key);
+      return;
+    }
+    let value = memo.get(raw);
+    if (value === undefined) {
+      value = sortValueOfRaw(raw, key);
+      memo.set(raw, value);
+    }
+    into[p] = value;
   };
   untrack(() => {
     if (positions) for (let i = 0; i < positions.length; i++) read(positions[i]);
@@ -563,7 +584,7 @@ const WARMUP_SLICE_MS = 6;
 const WARMUP_FALLBACK_GAP_MS = 12;
 const WARMUP_READ_CHUNK = 2048;
 const WARMUP_SORT_CHUNK = 4096;
-const UNSORTABLE_COLUMNS = new Set(['status', 'fav', 'wave', 'cover']);
+const NOT_WARMED_COLUMNS = new Set(['status', 'fav', 'wave', 'cover', 'index']);
 
 interface WarmupChunks {
   read: number;
@@ -572,8 +593,9 @@ interface WarmupChunks {
 
 function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plains: readonly Record<string, any>[], chunks: WarmupChunks): Generator<void, ColumnSort> {
   const values = new Array<SortValue>(rows.length);
+  const memo = UNIQUE_VALUE_KEYS.has(key) ? null : new Map<unknown, SortValue>();
   for (let from = 0; from < rows.length; from += chunks.read) {
-    readLibraryValues(rows, plains, key, null, values, from, Math.min(rows.length, from + chunks.read));
+    readLibraryValues(rows, plains, key, null, values, from, Math.min(rows.length, from + chunks.read), memo);
     yield;
   }
   const classes = yield* valueClassesSteps(values, chunks.sort);
@@ -619,7 +641,7 @@ let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupRun = 0;
 
 function warmableLibraryColumns(): string[] {
-  return untrack(() => visibleColumns('library')).map((column) => column.key).filter((key) => !UNSORTABLE_COLUMNS.has(key));
+  return untrack(() => visibleColumns('library')).map((column) => column.key).filter((key) => !NOT_WARMED_COLUMNS.has(key));
 }
 
 function scheduleLibrarySortWarmup() {

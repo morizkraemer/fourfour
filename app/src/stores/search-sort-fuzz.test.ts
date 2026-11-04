@@ -163,6 +163,26 @@ describe('filter and sort of the library against a plain reference', () => {
     clearSort('library');
   });
 
+  it('finds one-character and short queries by letters and digits exactly like a plain search', async () => {
+    const random = generator(4242);
+    await loadRandomLibrary(random, 300);
+    const current = () => library.tracks as Row[];
+    const characters = [...'abcdefghijklmnopqrstuvwxyz0123456789 .-_é日\u{10000}'];
+    const check = (query: string) =>
+      expect(filterTracks(library.tracks, query).map((row) => row.id), `query "${query}"`).toEqual(current().filter((row) => referenceMatches(row, query)).map((row) => row.id));
+    for (const ch of characters) if (ch.trim()) check(ch);
+    for (const ch of characters) if (ch.trim()) check(ch.toUpperCase());
+    for (let n = 0; n < 80; n++) check(characters[Math.floor(random() * 36)] + characters[Math.floor(random() * 36)]);
+    const ids: number[] = [];
+    for (let n = 0; n < 40; n++) {
+      const row = current()[Math.floor(random() * 300)];
+      row.title = `${characters[Math.floor(random() * 36)]}${characters[Math.floor(random() * 36)]} ${row.title}`;
+      ids.push(row.id);
+    }
+    bumpLibraryTracks(ids);
+    for (const ch of characters) if (ch.trim()) check(ch);
+  });
+
   it('knows result positions only for results of the current library list', async () => {
     loaded.tracks = Array.from({ length: 5 }, (_, i) => ({ ...randomInfo(() => 0.5, i + 1), title: i % 2 ? 'odd' : 'even' }));
     await loadState();
