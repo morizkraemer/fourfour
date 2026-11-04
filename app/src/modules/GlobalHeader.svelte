@@ -15,12 +15,13 @@
   import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
   import { searchModeForColumn } from '../lib/searchLayout.ts';
   import SearchIconButton from './SearchIconButton.svelte';
+  import LazyMount from '../lib/LazyMount.svelte';
+  import { libraryActivityMenu } from '../lib/lazy-views.ts';
   import { stickLabel, topbarStickStatus } from '../lib/topbarStatus.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import { problemLabel } from '../lib/fileHealth.ts';
   import { libraryActivity } from '../lib/libraryActivity.ts';
   import { importActivity } from '../stores/import-activity.svelte.ts';
-  import LibraryActivityMenu from './LibraryActivityMenu.svelte';
 
   let filterInputEl = $state(null);
   let statusMenu = $state({ open: false, x: 0, y: 0 });
@@ -199,12 +200,10 @@
   {/if}
 </div>
 
-<LibraryActivityMenu
-  open={statusMenu.open}
-  x={statusMenu.x}
-  y={statusMenu.y}
-  hasProblems={!!problems}
-  onClose={closeStatusMenu}
+<LazyMount
+  view={libraryActivityMenu}
+  needed={statusMenu.open}
+  props={{ open: statusMenu.open, x: statusMenu.x, y: statusMenu.y, hasProblems: !!problems, onClose: closeStatusMenu }}
 />
 
 <style>

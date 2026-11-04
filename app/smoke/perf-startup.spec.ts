@@ -18,6 +18,8 @@ const NO_SNAPSHOT = !!process.env.FF_PERF_NO_SNAPSHOT;
 const PROFILE_OUT = process.env.FF_PERF_STARTUP_PROFILE;
 const PROFILE_FIRST = !!process.env.FF_PERF_STARTUP_PROFILE_FIRST;
 const SORT_KEY = process.env.FF_PERF_SORT;
+const TRACE_OUT = process.env.FF_PERF_STARTUP_TRACE;
+const SNAPSHOT_OUT = process.env.FF_PERF_STARTUP_SNAPSHOT;
 
 interface Boot {
   firstInvoke: number;
@@ -200,6 +202,13 @@ async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
   return { ...metrics, cpuMs, heapMB: await heapAfterGc(page) };
 }
 
+async function writeFirstScreen(page: Page, prefix: string) {
+  await page.waitForTimeout(1500);
+  const html = await page.evaluate(() => document.documentElement.outerHTML);
+  writeFileSync(`${prefix}.html`, html);
+  writeFileSync(`${prefix}.png`, await page.screenshot());
+}
+
 interface InspectorSession {
   send(method: string, params?: Record<string, unknown>): Promise<unknown>;
   on(event: string, listener: (payload: unknown) => void): void;
@@ -286,8 +295,12 @@ test.describe('startup at scale', () => {
         cold.push(await bootMetrics(page, coldBase));
         const profiling = PROFILE_OUT && !PROFILE_FIRST && run === RUNS - 1 ? await startProfile(page) : null;
         const warmBase = await mainThreadCpuMs(page);
+        const tracing = TRACE_OUT && run === RUNS - 1 && browser.browserType().name() === 'chromium';
+        if (tracing) await browser.startTracing(page, { categories: ['devtools.timeline', 'v8', 'v8.execute', 'blink.user_timing', 'disabled-by-default-devtools.timeline'] });
         await page.reload();
         warm.push(await bootMetrics(page, warmBase));
+        if (tracing) writeFileSync(`${TRACE_OUT}-${tracks}.json`, await browser.stopTracing());
+        if (SNAPSHOT_OUT && run === RUNS - 1) await writeFirstScreen(page, `${SNAPSHOT_OUT}-${tracks}`);
         if (profiling) await stopProfile(profiling, `${PROFILE_OUT}-${tracks}.cpuprofile`, page);
         await context.close();
       }

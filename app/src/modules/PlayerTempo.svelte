@@ -8,8 +8,8 @@
 <script lang="ts">
   import { Icon, keyColor } from '$ds';
   import TempoField from './TempoField.svelte';
-  import TrackBpmPopup from './TrackBpmPopup.svelte';
-  import TrackKeyPopup from './TrackKeyPopup.svelte';
+  import LazyMount from '../lib/LazyMount.svelte';
+  import { trackBpmPopup, trackKeyPopup } from '../lib/lazy-views.ts';
   import { endTrackModes, player, setTrackMode } from '../stores/player.svelte.ts';
     import { tempo, setKeyLock, setKeyShift, setTempoPercent } from '../stores/tempo.svelte.ts';
   import { quantize, setQuantize } from '../stores/quantize.svelte.ts';
@@ -153,8 +153,8 @@
       </button>
     </div>
   </div>
-  {#if keyTrackMode}<TrackKeyPopup anchor={keyPen} />{/if}
-  {#if bpmTrackMode}<TrackBpmPopup anchor={bpmPen} />{/if}
+  {#if keyTrackMode}<LazyMount view={trackKeyPopup} props={{ anchor: keyPen }} />{/if}
+  {#if bpmTrackMode}<LazyMount view={trackBpmPopup} props={{ anchor: bpmPen }} />{/if}
 {:else}
 <div class="ff-ptempo" class:ff-ptempo--idle={!player.track} role="group" aria-label="Tempo and key">
     <button
