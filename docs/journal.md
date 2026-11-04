@@ -601,3 +601,4 @@
 2026-11-04 14:35 orchestrator state trimmed 13.4k -> 11.6k chars (old 43, Q51 history, rundown moved to state-archive-2026-10-28.md)
 2026-11-04 14:50 orchestrator r112 landed eb9d84f (both smokes 0 failed, vitest 914, CHECKS-OK). decided: own prio r114 startup bundle cost (sonnet high; page start is the 10k bottleneck per r109)
 2026-11-04 15:36 orchestrator r113 handed back 12fb420 (rank sort order + filter cache; 50k sorted clear 182 -> 74 ms, bump while sorted 208 -> 3 ms script; worst keystroke during analysis 174 -> 151, target 100 not met: 80% native layout/paint), merged 1d9fdb1 (doc conflict resolved), chain running. decided: own prio r115 first column sort at 50k (sonnet high)
+2026-11-04 15:51 orchestrator r113 landed 1d9fdb1 (both smokes 0 failed, 26 suites, vitest 923, CHECKS-OK)
