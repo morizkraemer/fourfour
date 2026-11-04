@@ -13,16 +13,21 @@ use crate::keymap::camelot;
 pub const MODELS_ENV: &str = "FOURFOUR_MODELS_DIR";
 pub const MEL_MODEL: &str = "mel_spectrogram.onnx";
 pub const BEAT_MODEL: &str = "beat_this.onnx";
+pub const BEAT_MODEL_ENV: &str = "FOURFOUR_BEAT_MODEL";
 
-pub fn models_present(dir: &Path) -> bool {
-    dir.join(MEL_MODEL).is_file() && dir.join(BEAT_MODEL).is_file()
+pub fn beat_model() -> String {
+    std::env::var(BEAT_MODEL_ENV).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| BEAT_MODEL.to_string())
 }
 
-pub const ANALYSIS_VERSION: u32 = 1;
+pub fn models_present(dir: &Path) -> bool {
+    dir.join(MEL_MODEL).is_file() && dir.join(beat_model()).is_file()
+}
+
+pub const ANALYSIS_VERSION: u32 = 2;
 
 pub fn analysis_key(models_dir: Option<&Path>) -> String {
     let len = |name: &str| models_dir.and_then(|dir| std::fs::metadata(dir.join(name)).ok()).map_or(0, |m| m.len());
-    format!("analysis-{ANALYSIS_VERSION}-{}-{}", len(MEL_MODEL), len(BEAT_MODEL))
+    format!("analysis-{ANALYSIS_VERSION}-{}-{}", len(MEL_MODEL), len(&beat_model()))
 }
 
 pub fn dev_models_dir() -> PathBuf {
@@ -166,7 +171,7 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
-        let engine = BeatEngine::load(models_dir, BEAT_MODEL, false)?;
+        let engine = BeatEngine::load(models_dir, &beat_model(), false)?;
         engine.share_chunk_threads(chunk_slots(pool.max_threads, pool.mem_fraction, total_memory_mb(), available_memory_mb()));
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }

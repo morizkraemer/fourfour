@@ -1259,3 +1259,103 @@ R72 (2026-11-02): done. `saveState` is a queue (one save in flight, later calls 
 `playback_play` may also touch the disk (`probe_duration_ms` when the frontend gives no duration hint, first-time output open). Measure it on the Mac before deciding.
 
 The r67 source-level test (`volume_and_stick_commands_run_off_the_main_thread` in `main.rs`) now covers all moved commands.
+
+## R89 Mac night 2 (2026-11-03, `r89-mac-night-2`)
+
+Mac `mbp` (M5 Pro, 24 GB, macOS 26.3, on AC), headless runs under `nice -n 10`, one launch at a time, `HOME` pointed at a scratch folder as `perf-night.sh` does. Code: `ov-1028` c2bd463 plus one build fix (23534cc, below). Merlin was using the Mac from about 22:00 (load 11-18, Chrome and WindowServer busy), so the first four jobs ran on a quiet machine and the variant comparison (job 7) ran under load; read it as pairs. Never touched: `~/Library/Application Support/Pioneer`, any USB or CDJ, GitHub (code went over a `git bundle` + scp).
+
+**Build fix on this branch.** `cargo tauri build` failed on macOS for ov-1028 (`unresolved module or unlinked crate libc` in `waveform_detail.rs` `free_space_of`): `libc` was only a dependency of `cfg(all(target_os = "linux", target_env = "gnu"))`, the function uses it on every unix. Now `[target.'cfg(unix)'.dependencies]`. `parked-all-v7` has the same line and needs the same change.
+
+### 1. Install
+
+`scripts/mac/build-dmg.sh` (coreml): `fourfour_0.1.0_aarch64.dmg` 97 MB, sha256 46aaeb9b...81ce3, `check-dmg.sh` failures=0, `--self-check` ok. Copied to `/Applications/fourfour.app` (the binary inside is `pioneer-test-ui`), replacing the 11-01 install; the 11-01 dmg is kept at `~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221`. `codesign -v` on the installed copy says "code has no resources but signature indicates they must be present" (ad-hoc signature, not checked on the 11-01 install; the dmg check passed).
+
+### 2. perf-night 10k on the new install (`perf-night.sh --size 10k --runs 3 --expand-runs 5`)
+
+| Metric | 11-01 (240d8cb) | 11-03 (ov-1028) |
+|---|---:|---:|
+| Warm startup to first row | 1.6-1.9 s | 0.60-0.64 s (621, 635) |
+| Warm startup to interactive | - | 0.64-0.65 s |
+| Cold startup to first row / interactive | 2.8 s | 0.87 s / 0.91 s |
+| Scroll during analysis, frame p95 | 18 ms | 18 ms (max 20, 0 dropped) |
+| First expand, longest frame | 472-520 ms in 3 of 5 | 29-38 ms (median 34), click to detail drawn 66-84 ms, 0 pending frames |
+| `load_state` (app) | - | 53-67 ms |
+| Backend `load_state` / payload | 13.8 ms / 1.7 MB | 13 ms / 1.7 MB |
+| Waveform detail first / cached | 93 ms / - | 74 ms / 0.6 ms |
+| Import 10k fixture / re-import | 540 ms / - | 504 ms / 112 ms |
+| Analysis, rten (perf.sh, 5-7 min tracks) | 16.2 trk/min | 24.8 trk/min (12 long files: 22.1-23.3) |
+| Analysis, CoreML (`bench_analysis`, 12 long files, 2 runs) | 26-32 | 32.8 and 33.4 trk/min, first result 5.4-5.6 s, 114 chunks CoreML / 40 rten |
+
+Still open against the targets: warm first row 300 ms and cold 500 ms (now 2x and 1.7x, down from 6x), analysis throughput on rten. The `perf-night.sh` analysis rows use the rten `bench_analysis`; the CoreML row comes from the same binary built with `--features pioneer-test-ui/dev-bins,pioneer-test-ui/coreml` (the app and dmg are built with coreml).
+
+### 3. R66/R67 freeze check
+
+Gone. In the new build the idle-scroll windows (5 s apart each) have 0 frames over 50 ms and max frame 19 ms (11-01: one 407-514 ms frame per window). First expand: longest frame 29-38 ms, longest main-thread busy 14-24 ms, 0 frames over 50 ms in all 5 launches. Scroll during analysis: max 20 ms, 0 dropped, bursts 5 runs max 33 ms (1 burst with 5 dropped frames in the R5 default analysis run, no frame over 50 ms).
+
+### 4. Chunk budget sweep (`scripts/mac/chunk-budget-sweep.sh --n 200`)
+
+The fixture has 24 real long mixes; the other 176 of the 200 tracks are the 2-3 MB files, so the 200-track sweep is mostly short tracks. A second sweep on the 24 long mixes only is included. Same binary, `FOURFOUR_BEAT_RUNTIME=rten` for the rten rows.
+
+CoreML (the shipped Mac path), 200 tracks:
+
+| Budget MB | tracks/min | vs unset | peak RSS MB |
+|---|---:|---:|---:|
+| unset | 141.6 | 100% | 6444 |
+| 1024 | 143.0 | 101% | 4681 |
+| 2048 | 143.7 | 101% | 4653 |
+| 3072 | 141.5 | 100% | 4435 |
+| 4096 | 137.6 | 97% | 5327 |
+
+CoreML, the 24 long mixes: 36.2 / 37.1 / 36.6 / 36.2 / 36.8 trk/min for unset / 512 / 1024 / 2048 / 4096, peak RSS 6132 / 4956 / 4488 / 4224 / 5496 MB.
+
+rten, 200 tracks: unset 120.8 trk/min (6155 MB), 1024 41.2 (34%, 1961 MB), 2048 84.9 (70%, 3311 MB), 3072 103.9 (86%, 3964 MB), 4096 122.4 (101%, 5032 MB).
+
+rten, the 24 long mixes: unset 22.2 (6349 MB), 512 3.3 (15%, 1679 MB), 1024 5.8 (26%, 2096 MB), 2048 11.8 (53%, 3095 MB), 4096 19.4 (88%, 4978 MB).
+
+**Recommendation.** With CoreML the budget costs nothing (within 3% of unset at every value) and lowers peak RSS by 1.0-2.2 GB, so a Mac with CoreML can run a 2048 ceiling. With rten the ceiling is a direct speed cap on long tracks (2048 halves long-mix throughput, 4096 costs 12%), so one global constant must not be below 4096. `CHUNK_BUDGET_CEILING_MB`: set it to 4096 as the global default (rten 101% on mixed material, 88% on pure long mixes, peak RSS 5.0 GB instead of 6.2-6.3 GB), or keep `None` if rten-only machines matter more than the 1.2 GB; if the ceiling can depend on the runtime, use 2048 when CoreML is active and none (or 4096) for rten. The 24 GB Mac peaks at 6.1-6.4 GB unset, about a quarter of its RAM, which is fine for a foreground analysis run but is the number a 8-16 GB machine would feel. Noise in peak RSS between neighbouring budgets is about 0.3-0.5 GB (4096 above 3072 on CoreML).
+
+### 5. Playback command timing
+
+`perf.sh` has `latency_load_and_seek_to_first_audio` (engine level, no audio device in the path): load with duration hint 0.6 ms, load without hint 0.6 ms, seek to first audio 1.7 ms, track load to first audio 0.7 ms (target 10). The time from a `playback_play` command through the real Tauri IPC, the output device and the first audible frame is not measured by any perf script (the probe covers startup, scroll, expand and track load to `ff:player-ready` only), so that part is skipped. The R70 note about `playback_play` touching the disk (`probe_duration_ms`, first output open) stays unmeasured; the 0.6 ms no-hint load says the duration probe is cheap on this fixture.
+
+### 6. parked-all-v7 (15fd864, schema v8) on the Mac
+
+Built in `~/dev/build/fourfour-parked` (own clone and target dir, with the libc fix above applied locally) as an unsigned `.app` (coreml), run with `perf-night.sh --app <that .app>`; `/Applications` untouched. **Isolation:** every app run uses `HOME=<scratch>` and a `config.json` there pointing at a scratch copy of the fixture library; the installed app's `~/Library/Application Support/com.pioneer.test-ui` (library, config, anlz, waveform-detail, 471 files) was snapshotted before and after the parked runs and is byte-for-byte unchanged (size, mtime, content hash). The only thing that moved was `~/Library/Caches/com.pioneer.test-ui` (Apple's CoreML `e5rt` compiled-model cache and the WebKit cache, which the OS keeps under the real home per bundle id): 1400 to 2663 files, system-managed, not app data. The v7 backend binaries in the mac clone refuse a v8 library ("saved by a newer version of the app"), which is the intended guard, so the backend table was not rerun on v8.
+
+| Run | Warm first row | Warm interactive | Cold first row | App `load_state` | First expand longest frame (median of 5) | Scroll during analysis p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| ov-1028 (job 2) | 621-635 ms | 637-652 ms | 868 ms | 53-67 ms | 34 ms | 18 ms |
+| parked-all-v7, fresh v7 fixture copy per run (migrates v7 to v8 every launch) | 5.6 s | 5.65 s | 6.3 s | 4.9-5.4 s | 32 ms | 18 ms |
+| parked-all-v7, fixture migrated once beforehand | 591-610 ms | 635-651 ms | 639 ms | 52-65 ms | 26 ms | 18 ms |
+
+The one-off v7 to v8 migration of the 10k library takes 5.1-5.5 s (7.0 s when the box was loaded) inside the first `load_state`, so a user upgrading with a 10k library waits that long once (expect several times that at 50k, not measured). After it, schema v8 is neutral to slightly positive on the Mac: warm first row within noise of ov-1028, `load_state` about 5 ms lower, first expand 26 vs 34 ms. Analysis throughput on the v7 backend bench is the same (25.2 vs 24.8 trk/min), so v8 does not change analysis. Verdict: schema v8 is not a Mac performance win to wait for or a risk to avoid; the case for parked-all-v7 is the other features, with the one-time migration time to be shown in the UI.
+
+### 7. r15-reveal (00acf20) and r29-css-v4 (2c37766) against ov-1028
+
+Both branches are not on ov-1028's base; each was merged into r89-mac-night-2 in the parked clone (r29: clean; r15: conflicts in the probe, summary script, doc and playwright config resolved to ov-1028's side, so only the WaveformView and waveform-render/display changes come from r15), built as an `.app` and run with `perf-night --expand-runs 5` interleaved with the installed ov-1028 build, with Merlin using the Mac (load 11-18, so absolute startup numbers are worse than job 2).
+
+| Build | First expand longest frame (median of 5, ms) | Range | Click to detail drawn | Warm first row | Cold first row |
+|---|---:|---:|---:|---:|---:|
+| ov-1028 (installed) | 28 | 22-31 | 66 ms | 648 ms | 734 ms |
+| + r29-css-v4 | 27 | 23-29 | 66 ms | 643 ms | 669 ms |
+| + r15-reveal | 19 | 18-20 | 65 ms | 676 ms | 679 ms |
+
+(The first, quieter pass of the same variants gave the same picture: expand 25 ms for r29 and 19 ms for r15 against 34 ms for ov-1028.) Reading: with the r67 fix in place the first expand is already under the 50 ms R10 trigger, so r15's staged reveal is not needed for it; it still shaves about 9 ms off the longest frame and the click to drawn time does not change (65 vs 66 ms), and startup is unchanged. r29's CSS change is invisible in these numbers (expand, startup), because the probe measures neither row style cost nor scrolling through 10k rows. Neither is worth landing on first-expand grounds; r29 is harmless, r15 is only worth it if its other changes (sliced ring fill is pixel-identical) are wanted.
+
+### 8. 50k on the installed ov-1028 build (`perf-night.sh --size 50k --runs 3 --expand-runs 3`)
+
+Run at 22:41-23:00 with Merlin using the Mac (load 9-11). The 25k and 50k fixtures were generated for this (20 GB + 8.4 GB, free disk bottomed at about 69 GB) and deleted afterwards; the 10k fixture stays.
+
+| Metric | 11-01 R22 (headless-equivalent, box) / 11-01 Mac | 11-03 Mac |
+|---|---:|---:|
+| Warm startup to first row | 1.35 s (R22, box) | 1.34-1.47 s (3 launches) |
+| Warm startup to interactive | - | 1.39-1.53 s |
+| Cold startup to first row / interactive | 1.57 s (R22, box) | 1.58 s / 1.63 s (targets 1.5 / 1.6 s, open by 5%) |
+| App `load_state` | - | 399-531 ms |
+| First expand, longest frame | - | 29-37 ms (3 launches, no frame over 50 ms) |
+| Scroll during analysis p95 | - | 18 ms (max 39 ms, 2 dropped) |
+| Backend `load_state` / payload | - | 60 ms / 8.4 MB |
+| Analysis rten, 5-7 min tracks | - | 21.5 trk/min |
+| Import, 50k end to end | - | 2.7 s |
+
+The 50k Mac numbers match R22's box numbers; warm first row is 1.0-1.5 s against the 1.0 s target, so the 50k Mac targets are within 5-50%.
