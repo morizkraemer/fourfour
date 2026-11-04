@@ -19,7 +19,8 @@ export default defineConfig({
   },
   build: {
     target: 'safari16',
-    modulePreload: { resolveDependencies: (_file, deps) => deps.filter((dep) => dep.endsWith('.css')) },
+    cssCodeSplit: false,
+    modulePreload: { resolveDependencies: () => [] },
     rollupOptions: {
       treeshake: { moduleSideEffects: (id) => !id.startsWith(`${designSystem}/components/`) || !id.endsWith('.svelte') },
     },
