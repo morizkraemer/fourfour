@@ -21,7 +21,7 @@ if [ "$avail" -lt 1500 ]; then echo "$label: MemAvailable $avail MB < 1500, not 
 load0=$(cut -d' ' -f1 /proc/loadavg)
 env "${envs[@]+"${envs[@]}"}" /usr/bin/time -f "cpu_user %U cpu_sys %S wall %e maxrss_kb %M" -o "$out/$label.time" \
   "$ffa" --models "$models" --beat-model "$model" --workers "${WORKERS:-4}" --threads "${THREADS:-4}" --no-key --no-waveform \
-  --reference "$data/ref.json" --list "$list" --out "$out/$label.jsonl" 2> "$out/$label.err"
+  ${DUMP:+--dump "$DUMP"} --reference "$data/ref.json" --list "$list" --out "$out/$label.jsonl" 2> "$out/$label.err"
 load1=$(cut -d' ' -f1 /proc/loadavg)
 n=$(wc -l < "$out/$label.jsonl")
 read -r user sys <<< "$(awk '{print $2, $4}' "$out/$label.time")"

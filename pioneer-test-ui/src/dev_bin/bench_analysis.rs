@@ -379,10 +379,11 @@ fn main() {
     if let Some(analyzer) = coordinator.analyzers.loaded() {
         let status = analyzer.beat_status();
         println!(
-            "BEAT runtime={} chunks_accelerated={} chunks_rten={} fallback={}",
+            "BEAT runtime={} chunks_accelerated={} chunks_rten={} chunk_idle_s={:.1} fallback={}",
             status.runtime,
             status.chunks_accelerated,
             status.chunks_rten,
+            status.chunk_idle_s,
             status.fallback.as_deref().unwrap_or("none")
         );
     }

@@ -132,3 +132,89 @@ CARGO_TARGET_DIR=~/.cache/r94-target cargo build --release -p fourfour-analysis-
 ```
 
 Results JSONL in `benchmark/results/r94/` (gitignored).
+
+## r102 chunk stitching (2026-11-04)
+
+Question: can a cheaper stitch win back the BPM results that chunk 500 loses against chunk 1500 (r101: tracks 144, 231 and 528 go wrong; 42 goes right), keeping at least 30% less CPU per track?
+
+Answer: **no variant passes the gate.** Better stitching removes the chunk-border error completely, but that error is only about a tenth of the difference between the 500 and 1500 logits; the rest comes from the shorter context and no overlap can recover it. The best variant (overlap 72 with a linear cross-fade) brings two of the three tracks back, loses another one, and ends where chunk 500 was: test BPM 0.1 184 (1500: 186), grid 168 (171). The default stays 500 frames, border 6, no overlap (Mac CoreML 1500, as before).
+
+Baseline: branch `r102-chunk-stitch` = `r101-bpm-misses` with `HALF_TIME_BAND = (0.0, 0.0)` (the half-time rule is parked; the unit test now sets the band explicitly). The 1500 reference is the October full-model dump (`benchmark/results/o3/dump`, 254 of the 255 test + dev tracks; dev track 172 has none) re-fitted with the current fit (`grid_refit`): test 171 grid / 186 BPM 0.1 / 194 BPM 1, which are exactly the r79 numbers in the r101 doc; dev (49 tracks) 44 / 46 / 49.
+
+### Switches (new, all optional)
+
+| Env | Default | Effect |
+|---|---|---|
+| `FOURFOUR_BEAT_BORDER` | 6 | frames dropped at each end of a chunk (valid region = chunk - 2 x border) |
+| `FOURFOUR_BEAT_OVERLAP` | 0 | extra frames the valid regions of neighbouring chunks overlap (the chunk step shrinks by this) |
+| `FOURFOUR_BEAT_BLEND` | 1 if overlap > 0 | cross-fade the overlap linearly (weights ramp over the overlap) instead of letting the earlier chunk win |
+
+With the three unset the logits are the r101 ones; unit tests check that every stitching mode returns position-consistent chunk logits unchanged for track lengths from 100 to 13790 frames, and that the cross-fade rises monotonically across the overlap. A hard-cut overlap on a track shorter than the step exposed a negative start for the last chunk (the original geometry cannot reach it); the last start is now clamped to the first chunk's.
+
+### Why 144, 231 and 528 flip
+
+Beat logits of the chunk-500 run against the 1500 dump on 39 tracks (the 3 flips plus 36 spread over test and dev; 727k frames), mean absolute difference by distance to the nearest 500-chunk border:
+
+| Frames from a border | 0-6 | 6-25 | 25-60 | 60-120 | over 120 | All |
+|---|---:|---:|---:|---:|---:|---:|
+| chunk 500, border 6 | 1.70 | 1.48 | 1.23 | 1.01 | 0.91 | 1.043 |
+| chunk 500, border 25 | 1.42 | 1.30 | 1.14 | 0.98 | 0.90 | 1.005 |
+| chunk 500, overlap 72, blend | 0.97 | 1.00 | 1.03 | 0.99 | 0.91 | 0.963 |
+| chunk 500, overlap 88, blend | 0.98 | 0.96 | 1.00 | 0.97 | 0.91 | 0.950 |
+| chunk 640, border 6 | 1.60 | 1.44 | 1.18 | 0.96 | 0.82 | 0.938 |
+
+- The border does hurt: the logits within 25 frames of a border are 60 to 90% further from the 1500 logits than the chunk middle. A cross-fade of 72 or more frames flattens that completely.
+- It does not matter much for the result: the middle of a chunk is still about 0.9 logits away from 1500 (0.82 at 640), so the 3.5% of beat peaks that exist in only one of the two runs hardly move (1098 only in 1500 for chunk 500, 1055 with the cross-fade, 1081 with overlap 88). Beat This! reads the whole chunk through self-attention; a 10 s window simply sees less context than a 30 s one, and the 1500 border artefacts (every 1488 frames) are in the reference too.
+- The three tracks sit on thin margins. 231 and 528 (reference 128.00 and 118.02): the snap and fold search takes a neighbouring comb peak on slightly different logits (as r101 found); 528 is 15 ms off at 1500 and 294 ms at chunk 500. 144 (reference 127.40, a 3:2 track): chunk 1500 gives raw 129.47 which the fit pulls to 127.386; border 6, border 25 and chunk 640 land on another tempo (170, 113, 172) and only the overlap-72 and overlap-88 cross-fades keep it (127.388, 127.394), so it is a coin flip on the model's tempo, not a stitch defect. Which tracks flip changes with every variant (201, 507 with border 25; 477 with chunk 640; 540 and 525 with overlap 72): each variant moves 1 to 3 right/wrong calls per 40 tracks in both directions.
+
+### Variants
+
+Subset S39 = tracks 144, 231, 528 + every 7th test track + every 6th dev track (31 test + 8 dev), all variants through `ffa` (2 workers x 2 threads, base and variant runs at the same time, box load 14 to 37). 1500 on the same 39: grid 33, BPM 0.1 36, BPM 1 36. CPU is user + sys per track from `/usr/bin/time`; the "8-track pair" column is the first 8 tracks of S39 run back to back (1500 and overlap 72 together, then 500 and 640 together), the better speed number (the two rounds ran at load 14 to 18; the reductions use the 1500 run of the first round); the S39 column was measured at different loads and is only good to about 10%.
+
+| Variant (chunk / border / overlap) | CPU s/track S39 | CPU 8-track pair | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right | Right -> wrong vs 1500 (BPM 0.1) | Wrong -> right | Mean abs logit diff |
+|---|---:|---:|---:|---:|---:|---:|---|---|---:|
+| 1500 / 6 / 0 (reference) | 80.3 (r96) | 69.2 | 33 | 36 | 36 | - | - | - | - |
+| 500 / 6 / 0 (current default) | 47.6 | 39.7 (-43%) | 31 | 33 | 35 | 26 | 3: 144, 231, 528 | 0 | 1.043 |
+| 500 / 25 / 0 | 51.2 | - | 31 | 34 | 35 | 25 | 2: 144, 201 | 0 | 1.005 |
+| 500 / 6 / 72 blend | 52.9 (full run) | 45.0 (-35%) | 32 | 35 | 36 | - | 1: 231 | 0 | 0.963 |
+| 500 / 6 / 88 blend | 56.3 | - | 32 | 35 | 37 | 26 | 1: 528 | 0 | 0.950 |
+| 640 / 6 / 0 | 49.2 | 41.6 (-40%) | 31 | 33 | 36 | 27 | 3: 144, 231, 477 | 0 | 0.938 |
+
+Chunk 500 with border 50 and 100, an overlap of 200, chunk 800 and 1000 were planned for a 3-track screen and not run: the box load made one 3-track run take 4.5 minutes, and a stride at or below 400 (border 50 and up) costs 22% or more per track, which already leaves too little of the 30% CPU margin. Border 36 (stride 416, the largest border the margin allows) was started and stopped for the full-set run below.
+
+### Full test and dev for the best trade-off (500 / 6 / 72, cross-fade)
+
+Full 205 + 50 through `ffa` (two halves at the same time, 2 workers x 2 threads each, 52.9 CPU s/track at load 15). Against the r101 chunk-500 numbers and the 1500 re-fit:
+
+| Split | Variant | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right (of all) |
+|---|---|---:|---:|---:|---:|
+| test 205 | 1500 (r79) | 171 | 186 | 194 | - |
+| test 205 | 500 / 6 / 0 (r101) | 169 | 183 | 193 | 140 |
+| test 205 | **500 / 6 / 72 blend** | **168** | **184** | **194** | 138 |
+| dev 50 | 1500 (49 tracks) | 44 | 46 | 49 | - |
+| dev 50 | 500 / 6 / 0 (r101) | 44 | 47 | 50 | 42 |
+| dev 50 | **500 / 6 / 72 blend** | 44 | 47 | 50 | 42 |
+
+Right -> wrong against 1500: BPM 0.1 on test 231 (128.123 against 128.000) and 540 (134.329 against 134.000); grid on test 231, 525 (16 -> 27 ms) and 540; none on dev (49 tracks), none at BPM 1. 144 (127.388) and 528 (118.016) are back; 42 stays right.
+
+Gate: test BPM 0.1 >= 186 and grid >= 171 **fail** (184, 168), dev not lower passes, CPU at least 30% below 1500 passes (-35% in the pair), zero right -> wrong flips fails (2 on BPM 0.1, 3 on grid). The cross-fade variant is within one or two tracks of chunk 500 in every column, so it is not a win worth 13% more CPU.
+
+### Decision and what is left
+
+- Default unchanged: chunk 500, border 6, no overlap. The switches stay for experiments.
+- Chunk 640 (-40% CPU) and the cross-fades are no better than 500 on the quality columns; border 25 is +8% CPU for nothing measurable.
+- What would have to change is not the stitch. The flips come from the beat model seeing 10 s instead of 30 s; to hold the 1500 result the fit would have to be less sensitive to a 0.9-logit wobble, the next candidate in the r101 doc (a stricter snap acceptance), or the chunk would have to be longer than the 30% CPU margin allows (750 and up).
+- Not verified: bar position for the 1500 reference (not run), the Mac CoreML path (unchanged, 1500, no overlap by default), the overlap with CoreML shapes (the last chunks are shorter than the session shape and run on rten, as before).
+
+### Reproduce
+
+```bash
+CARGO_TARGET_DIR=~/.cache/r102-target cargo build --release --manifest-path prototyping/analysis-packaging/Cargo.toml --bin ffa
+CARGO_TARGET_DIR=~/.cache/r102-target cargo build --release -p fourfour-analysis-rs --example grid_refit
+grid_refit benchmark/results/o3/ref.json benchmark/results/o3/dump <test+dev ids> ref1500.jsonl 2
+FFA=~/.cache/r102-target/release/ffa WORKERS=2 THREADS=2 DUMP=~/.cache/r102-dump/bl72 benchmark/scripts/r94-run.sh bl72 <list> FOURFOUR_BEAT_CHUNK=500 FOURFOUR_BEAT_OVERLAP=72 FOURFOUR_BEAT_BLEND=1
+python3 -I benchmark/scripts/o3-score.py benchmark/results/o3/ref.json benchmark/results/r94/bl72.jsonl --rows bl72.rows.json
+python3 -I benchmark/scripts/r102-flips.py ref1500.jsonl bl72.rows.json          # right -> wrong lists
+python3 -I benchmark/scripts/r102-chunkdiff.py benchmark/results/o3/dump ~/.cache/r102-dump/bl72 <ids> 416 --peaks   # logit difference by distance to a border
+python3 -I benchmark/scripts/r102-bpms.py benchmark/results/o3/ref.json benchmark/results/r94/bl72.jsonl
+```

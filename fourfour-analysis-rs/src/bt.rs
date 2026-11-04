@@ -3,7 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -19,7 +19,8 @@ use rten::{ModelOptions, NodeId, RunOptions, ThreadPool, ValueOrView, ValueView}
 const COREML_CHUNK_SIZE: usize = 1500;
 const RTEN_CHUNK_SIZE: usize = 500;
 const DEFAULT_CHUNK_SIZE: usize = if cfg!(all(feature = "coreml", target_os = "macos")) { COREML_CHUNK_SIZE } else { RTEN_CHUNK_SIZE };
-const BORDER_SIZE: usize = 6;
+const DEFAULT_BORDER_SIZE: usize = 6;
+const RTEN_OVERLAP: usize = 0;
 const MEL_STRIDE: usize = 1536;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
@@ -27,19 +28,38 @@ pub const MODEL_RATE: u32 = 22050;
 const PAUSE_POLL: Duration = Duration::from_millis(50);
 const SILENT_CHUNK_LOGIT: f32 = -1000.0;
 
-fn chunk_size() -> usize {
-    static SIZE: OnceLock<usize> = OnceLock::new();
-    *SIZE.get_or_init(|| {
-        std::env::var("FOURFOUR_BEAT_CHUNK")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .filter(|&n| n > 4 * BORDER_SIZE)
-            .unwrap_or(DEFAULT_CHUNK_SIZE)
-    })
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Chunking {
+    size: usize,
+    border: usize,
+    overlap: usize,
+    blend: bool,
 }
 
-fn stride() -> usize {
-    chunk_size() - 2 * BORDER_SIZE
+impl Chunking {
+    fn from_env() -> Self {
+        let env_frames = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<usize>().ok());
+        let size = env_frames("FOURFOUR_BEAT_CHUNK").filter(|&n| n > 4 * DEFAULT_BORDER_SIZE).unwrap_or(DEFAULT_CHUNK_SIZE);
+        let border = env_frames("FOURFOUR_BEAT_BORDER").filter(|&n| 4 * n < size).unwrap_or(DEFAULT_BORDER_SIZE);
+        let default_overlap = if size == RTEN_CHUNK_SIZE { RTEN_OVERLAP } else { 0 };
+        let overlap = env_frames("FOURFOUR_BEAT_OVERLAP").unwrap_or(default_overlap).min(size - 2 * border - 1);
+        let blend = std::env::var("FOURFOUR_BEAT_BLEND").map_or(overlap > 0, |v| v == "1");
+        Chunking { size, border, overlap, blend }
+    }
+
+    fn stride(&self) -> usize {
+        self.size - 2 * self.border - self.overlap
+    }
+}
+
+fn chunking() -> &'static Chunking {
+    static CHUNKING: OnceLock<Chunking> = OnceLock::new();
+    CHUNKING.get_or_init(Chunking::from_env)
+}
+
+/// Frames of one beat-model chunk.
+pub fn chunk_frames() -> usize {
+    chunking().size
 }
 
 fn skip_silence() -> bool {
@@ -110,6 +130,7 @@ struct ChunkExecutor {
     ready: Condvar,
     wanted: AtomicUsize,
     running: AtomicUsize,
+    idle_ns: AtomicU64,
 }
 
 #[derive(Default)]
@@ -145,7 +166,9 @@ impl ChunkExecutor {
                 }
                 return Some((track, i));
             }
+            let waited = Instant::now();
             queue = self.ready.wait_timeout(queue, PAUSE_POLL).unwrap().0;
+            self.idle_ns.fetch_add(waited.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
     }
 
@@ -157,7 +180,7 @@ impl ChunkExecutor {
             ort: None,
         };
         while let Some((track, i)) = self.take(&mut runner) {
-            let chunk = extract_chunk(&track.mel, track.starts[i]);
+            let chunk = extract_chunk(&track.mel, track.starts[i], chunking());
             if skip_silence() && chunk.data.iter().all(|&v| v == 0.0) {
                 let frames = chunk.shape[1];
                 model.chunks_silent.fetch_add(1, Ordering::Relaxed);
@@ -262,6 +285,8 @@ pub struct BeatStatus {
     pub chunks_accelerated: usize,
     pub chunks_rten: usize,
     pub chunks_silent: usize,
+    /// Seconds the beat-model threads, added up, waited for a chunk to run.
+    pub chunk_idle_s: f64,
 }
 
 pub struct BeatResult {
@@ -315,7 +340,7 @@ impl BeatEngine {
             },
             #[cfg(feature = "ort")]
             ort: (beat_runtime() != "rten")
-                .then(|| crate::ort_beat::OrtBeat::new(&beat_path, chunk_size()))
+                .then(|| crate::ort_beat::OrtBeat::new(&beat_path, chunking().size))
                 .and_then(|ort| ort.inspect_err(|e| eprintln!("beat model: {} unavailable, using rten: {e:#}", crate::ort_beat::ENGINE)).ok()),
             chunks_accelerated: AtomicUsize::new(0),
             chunks_rten: AtomicUsize::new(0),
@@ -364,6 +389,7 @@ impl BeatEngine {
             chunks_accelerated: self.beat.chunks_accelerated.load(Ordering::Relaxed),
             chunks_rten: self.beat.chunks_rten.load(Ordering::Relaxed),
             chunks_silent: self.beat.chunks_silent.load(Ordering::Relaxed),
+            chunk_idle_s: self.chunks.idle_ns.load(Ordering::Relaxed) as f64 / 1e9,
         }
     }
 
@@ -415,7 +441,7 @@ impl BeatEngine {
 
     fn predict(&self, mel: Tensor, threads: usize, control: &Control) -> Result<ChunkLogits> {
         let full_time = mel.shape[1];
-        let starts = generate_starts(full_time);
+        let starts = generate_starts(full_time, chunking());
         let shared = self.shared_chunk_threads.load(Ordering::Relaxed);
         self.ensure_chunk_threads(if shared > 0 { shared } else { threads.max(1) })?;
         let track = Arc::new(TrackChunks {
@@ -446,48 +472,85 @@ impl BeatEngine {
         if control.cancel.load(Ordering::Relaxed) {
             return Err(Cancelled.into());
         }
-        let mut beat_logits = vec![-1000.0f32; full_time];
-        let mut down_logits = vec![-1000.0f32; full_time];
-        for (i, &start) in track.starts.iter().enumerate().rev() {
-            let (beat, down) = results[i].take().unwrap()?;
-            let chunk_time = beat.len();
-            let valid = BORDER_SIZE..chunk_time - BORDER_SIZE;
-            let write_start = (start + BORDER_SIZE as i32) as usize;
-            for (k, j) in valid.enumerate() {
-                let dest = write_start + k;
-                if dest < full_time {
-                    beat_logits[dest] = beat[j];
-                    down_logits[dest] = down[j];
-                }
-            }
+        let mut chunks = Vec::with_capacity(track.starts.len());
+        for (i, &start) in track.starts.iter().enumerate() {
+            chunks.push((start, results[i].take().unwrap()?));
         }
-        Ok((beat_logits, down_logits))
+        Ok(stitch(&chunks, full_time, chunking()))
     }
 }
 
-fn generate_starts(full_time: usize) -> Vec<i32> {
+fn stitch(chunks: &[(i32, ChunkLogits)], full_time: usize, plan: &Chunking) -> ChunkLogits {
+    let border = plan.border;
+    if plan.blend {
+        let mut beat_logits = vec![0.0f32; full_time];
+        let mut down_logits = vec![0.0f32; full_time];
+        let mut weight_sum = vec![0.0f32; full_time];
+        let ramp = (plan.overlap + 1) as f32;
+        for (start, (beat, down)) in chunks {
+            let chunk_time = beat.len();
+            for j in border..chunk_time - border {
+                let dest = (*start + j as i32) as usize;
+                if dest >= full_time {
+                    continue;
+                }
+                let weight = ((j - border + 1) as f32 / ramp).min((chunk_time - border - j) as f32 / ramp).min(1.0);
+                beat_logits[dest] += weight * beat[j];
+                down_logits[dest] += weight * down[j];
+                weight_sum[dest] += weight;
+            }
+        }
+        for i in 0..full_time {
+            if weight_sum[i] > 0.0 {
+                beat_logits[i] /= weight_sum[i];
+                down_logits[i] /= weight_sum[i];
+            } else {
+                beat_logits[i] = SILENT_CHUNK_LOGIT;
+                down_logits[i] = SILENT_CHUNK_LOGIT;
+            }
+        }
+        return (beat_logits, down_logits);
+    }
+    let mut beat_logits = vec![SILENT_CHUNK_LOGIT; full_time];
+    let mut down_logits = vec![SILENT_CHUNK_LOGIT; full_time];
+    for (start, (beat, down)) in chunks.iter().rev() {
+        let chunk_time = beat.len();
+        let write_start = (*start + border as i32) as usize;
+        for (k, j) in (border..chunk_time - border).enumerate() {
+            let dest = write_start + k;
+            if dest < full_time {
+                beat_logits[dest] = beat[j];
+                down_logits[dest] = down[j];
+            }
+        }
+    }
+    (beat_logits, down_logits)
+}
+
+fn generate_starts(full_time: usize, plan: &Chunking) -> Vec<i32> {
     let mut starts = Vec::new();
-    let mut pos = -(BORDER_SIZE as i32);
-    let limit = full_time as i32 - BORDER_SIZE as i32;
+    let mut pos = -(plan.border as i32);
+    let limit = full_time as i32 - plan.border as i32;
     while pos < limit {
         starts.push(pos);
-        pos += stride() as i32;
+        pos += plan.stride() as i32;
     }
-    if full_time > stride() {
+    if full_time > plan.stride() {
         if let Some(last) = starts.last_mut() {
-            *last = full_time as i32 - (chunk_size() as i32 - BORDER_SIZE as i32);
+            *last = (full_time as i32 - (plan.size as i32 - plan.border as i32)).max(-(plan.border as i32));
         }
     }
     starts
 }
 
-fn extract_chunk(mel: &Tensor, start: i32) -> Tensor {
+fn extract_chunk(mel: &Tensor, start: i32, plan: &Chunking) -> Tensor {
+    let (size, border) = (plan.size, plan.border);
     let full_time = mel.shape[1];
     let actual_start = start.max(0) as usize;
-    let actual_end = ((start + chunk_size() as i32) as usize).min(full_time);
+    let actual_end = ((start + size as i32) as usize).min(full_time);
     let pad_left = (-start).max(0) as usize;
     let n_frames = actual_end - actual_start;
-    let pad_right = 0.max((start + chunk_size() as i32 - full_time as i32).min(BORDER_SIZE as i32)) as usize;
+    let pad_right = 0.max((start + size as i32 - full_time as i32).min(border as i32)) as usize;
     let chunk_time = pad_left + n_frames + pad_right;
     let mut data = vec![0.0f32; chunk_time * N_MELS];
     data[pad_left * N_MELS..(pad_left + n_frames) * N_MELS].copy_from_slice(&mel.data[actual_start * N_MELS..actual_end * N_MELS]);
@@ -560,6 +623,49 @@ mod chunk_default_tests {
     fn coreml_builds_keep_the_long_chunk_and_the_rest_use_the_short_one() {
         let coreml_on_mac = cfg!(all(feature = "coreml", target_os = "macos"));
         assert_eq!(DEFAULT_CHUNK_SIZE, if coreml_on_mac { 1500 } else { 500 });
+    }
+
+    fn position_logits(full_time: usize, plan: &Chunking) -> Vec<(i32, ChunkLogits)> {
+        let mel = Tensor { shape: vec![1, full_time, N_MELS], data: vec![0.0; full_time * N_MELS] };
+        generate_starts(full_time, plan)
+            .into_iter()
+            .map(|start| {
+                let chunk_time = extract_chunk(&mel, start, plan).shape[1];
+                let logits: Vec<f32> = (0..chunk_time).map(|j| (start + j as i32) as f32).collect();
+                (start, (logits.clone(), logits))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stitching_position_consistent_chunks_gives_the_positions_back() {
+        let plans = [
+            Chunking { size: 500, border: 6, overlap: 0, blend: false },
+            Chunking { size: 500, border: 25, overlap: 0, blend: false },
+            Chunking { size: 500, border: 6, overlap: 72, blend: false },
+            Chunking { size: 500, border: 6, overlap: 72, blend: true },
+            Chunking { size: 1500, border: 6, overlap: 0, blend: false },
+        ];
+        for plan in plans {
+            for full_time in [100, 480, 488, 500, 1000, 4321, 13790] {
+                let (beat, down) = stitch(&position_logits(full_time, &plan), full_time, &plan);
+                for k in 0..full_time {
+                    assert!((beat[k] - k as f32).abs() < 1e-2 && (down[k] - k as f32).abs() < 1e-2, "{plan:?} full_time {full_time} frame {k}: {} {}", beat[k], down[k]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blending_crossfades_two_chunks_across_the_overlap() {
+        let plan = Chunking { size: 100, border: 5, overlap: 10, blend: true };
+        let chunks = vec![(-5, (vec![0.0; 100], vec![0.0; 100])), (75, (vec![10.0; 100], vec![10.0; 100]))];
+        let (beat, _) = stitch(&chunks, 150, &plan);
+        assert_eq!(beat[10], 0.0);
+        assert_eq!(beat[149], 10.0);
+        let overlap: Vec<f32> = (80..90).map(|k| beat[k]).collect();
+        assert!(overlap.windows(2).all(|w| w[0] < w[1]), "{overlap:?}");
+        assert!(overlap[0] > 0.0 && overlap[9] < 10.0);
     }
 }
 

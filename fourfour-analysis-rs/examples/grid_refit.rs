@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use anyhow::{anyhow, Result};
 use fourfour_analysis::fit::{finalize_beats, fit_track, FitParams, TempoSearch, Window, FPS};
 use fourfour_analysis::mp3::{self, DelayRule};
+use fourfour_analysis::service;
 use serde_json::{json, Value};
 use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, TrackType};
@@ -48,7 +49,10 @@ fn track(id: u64, reference: &Value, dump: &Path, params: &FitParams) -> Result<
     let (trim, rate) = leading_trim_samples(&path)?;
     let to_decoded = (trim + mp3::leading_silence_frames(&path)) as f64 / rate as f64;
     let rebased: Vec<f64> = fit.beats_s.iter().map(|b| b + to_decoded).collect();
+    let delay = to_decoded + mp3::timeline_shift_s(&path, DelayRule::ModelLead);
     let app = finalize_beats(&rebased, mp3::timeline_shift_s(&path, DelayRule::ModelLead));
+    let downbeats: Vec<f32> = doc["downbeats"].as_array().map(|v| v.iter().filter_map(|x| x.as_f64()).map(|x| x as f32).collect()).unwrap_or_default();
+    let bar_phase = service::bar_phase(&app, &downbeats, delay);
 
     let rb: Vec<f64> = reference["beats_ms"].as_array().map(|v| v.iter().filter_map(|x| x.as_f64()).map(|x| x / 1000.0).collect()).unwrap_or_default();
     let offs: Vec<(f64, f64)> = rb
@@ -85,6 +89,8 @@ fn track(id: u64, reference: &Value, dump: &Path, params: &FitParams) -> Result<
         "drift_ms": slope * span,
         "detrended_max_ms": detrended,
         "fit_us": fit.fit_us,
+        "bar_phase": bar_phase,
+        "final_beats_s": app,
     }))
 }
 
@@ -115,6 +121,12 @@ fn main() -> Result<()> {
     }
     if let Some(v) = std::env::var("R79_SNAP_WIDE").ok().and_then(|s| s.parse().ok()) {
         params.snap_wide = v;
+    }
+    if let Some(v) = std::env::var("R105_FAR_SKIP_PCT").ok().and_then(|s| s.parse().ok()) {
+        params.far_skip_pct = v;
+    }
+    if std::env::var("R101_HALF_TIME").as_deref() == Ok("off") {
+        params.half_time_band = (0.0, 0.0);
     }
     if args.get(5).is_some_and(|s| s == "nosnap") {
         params.snap_tol = 0.0;

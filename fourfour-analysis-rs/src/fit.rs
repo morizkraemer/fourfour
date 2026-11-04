@@ -10,6 +10,7 @@ pub enum TempoSearch {
 
 pub const TEMPO_SEARCH: TempoSearch = TempoSearch::LineAndGlobalPeak;
 pub const GLOBAL_SEARCH_PCT: f64 = 4.0;
+pub const HALF_TIME_BAND: (f64, f64) = (0.0, 0.0);
 
 #[derive(Clone, Debug)]
 pub struct FitParams {
@@ -23,8 +24,10 @@ pub struct FitParams {
     pub global_pct: f64,
     pub snap_wide: f64,
     pub scan_pct: f64,
+    pub far_skip_pct: f64,
     pub snap_ratio: f64,
     pub keep_native: (f64, f64),
+    pub half_time_band: (f64, f64),
     pub threads: usize,
 }
 
@@ -41,8 +44,10 @@ impl Default for FitParams {
             global_pct: GLOBAL_SEARCH_PCT,
             snap_wide: 1.5,
             scan_pct: 0.3,
+            far_skip_pct: 0.05,
             snap_ratio: 0.97,
             keep_native: (150.0, 185.0),
+            half_time_band: HALF_TIME_BAND,
             threads: 1,
         }
     }
@@ -319,7 +324,7 @@ pub fn fit_track(
         (t0, p) = near;
         if params.tempo_search == TempoSearch::LineAndGlobalPeak {
             let peak = global_fold_peak(&act, w, p, params.global_pct);
-            if (peak / p - 1.0).abs() > params.scan_pct / 100.0 {
+            if (peak / p - 1.0).abs() > params.far_skip_pct / 100.0 {
                 let mid = w.offset + w.len / 2.0;
                 let far = scan_from(t0 + (p - peak) * ((mid - t0) / p), peak);
                 if comb_score(&act, w, far.0, far.1) > comb_score(&act, w, near.0, near.1) {
@@ -377,6 +382,11 @@ pub fn fit_track(
         }
         t0_out = best.1;
         p_out = p * n as f64;
+    }
+
+    let out_bpm = 60.0 / p_out;
+    if out_bpm >= params.half_time_band.0 && out_bpm <= params.half_time_band.1 {
+        p_out /= 2.0;
     }
 
     let shift = params.shift_ms / 1000.0;
@@ -459,6 +469,33 @@ mod tests {
         let global = fit_from_peaks_off_the_true_tempo(TempoSearch::LineAndGlobalPeak);
         assert!((near - 114.0).abs() > 0.1, "near-only fitted {near}");
         assert_eq!(global, 114.0);
+    }
+
+    fn fit_from_peaks_just_outside_the_near_scan(far_skip_pct: f64) -> f64 {
+        let (_, strong) = synthetic(128.0);
+        let (_, weak) = synthetic(128.3);
+        let logits: Vec<f32> = strong.iter().zip(&weak).map(|(&s, &w)| s.max(w - 1.0)).collect();
+        let (peaks, _) = synthetic(128.6);
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        let params = FitParams { far_skip_pct, snap_tol: 0.0, ..FitParams::default() };
+        fit_track(&peaks, &logits, &logits, DURATION, &w, &params).unwrap().bpm
+    }
+
+    #[test]
+    fn global_peak_is_searched_even_when_it_is_close_to_the_near_result() {
+        let skipped = fit_from_peaks_just_outside_the_near_scan(0.3);
+        let searched = fit_from_peaks_just_outside_the_near_scan(FitParams::default().far_skip_pct);
+        assert!((skipped - 128.0).abs() > 0.05, "skipped fitted {skipped}");
+        assert!((searched - 128.0).abs() < 0.003, "searched fitted {searched}");
+    }
+
+    #[test]
+    fn half_time_tempo_in_the_band_is_doubled() {
+        let on = FitParams { half_time_band: (84.0, 92.5), ..FitParams::default() };
+        assert_eq!(fitted_bpm(88.0, &on), 176.0);
+        assert_eq!(fitted_bpm(88.0, &FitParams::default()), 88.0);
+        assert_eq!(fitted_bpm(80.0, &on), 80.0);
+        assert_eq!(fitted_bpm(94.0, &on), 94.0);
     }
 
     #[test]
