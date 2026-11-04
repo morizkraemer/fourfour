@@ -1,6 +1,7 @@
 pub mod analyze;
 pub mod bt;
 pub mod decode;
+pub mod energy;
 pub mod cyankey;
 pub mod fit;
 pub mod keymap;

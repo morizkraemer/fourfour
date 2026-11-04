@@ -372,7 +372,7 @@ pub fn to_app_result(a: &Analysis) -> AnalysisResult {
         waveform,
         bpm,
         key: a.key_class.map(camelot).unwrap_or_default().to_string(),
-        energy: None,
+        energy: a.energy.as_ref().map(|e| e.rating),
         cue_points: Vec::new(),
         color_waveform,
     }
@@ -402,6 +402,7 @@ mod tests {
             waveform_checksum: None,
             detail_entries: 10,
             mp3_delay_s: 0.0,
+            energy: None,
             logits: None,
             ms: serde_json::Value::Null,
         }
