@@ -12,7 +12,7 @@ import { gridForStorage, type BeatMarker, type EditedGrid } from '../lib/beatGri
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
-import { decodeTrackTable, isTrackTable, type TrackTable } from './track-table.ts';
+import { decodeStateBytes, decodeTrackTable, isTrackTable, type TrackTable } from './track-table.ts';
 
 export let lastTauriError = 'None';
 
@@ -405,10 +405,7 @@ export async function updateTrackFields(trackId: number, edits: TrackFieldEdits)
   }
 }
 
-interface LoadedStateWire {
-  tracks: TrackTable | TrackInfo[];
-  playlists: PlaylistInput[];
-}
+type LoadedStateWire = ArrayBuffer | { tracks: TrackTable | TrackInfo[]; playlists: PlaylistInput[] };
 
 let earlyLoadState: Promise<LoadedStateWire> | null = null;
 
@@ -436,7 +433,13 @@ export async function loadState(): Promise<LoadedState> {
   try {
     const res = await (early ?? invoke<LoadedStateWire>('load_state'));
     lastTauriError = 'invoke(load_state) OK';
-    return { tracks: isTrackTable(res.tracks) ? decodeTrackTable(res.tracks) : res.tracks, playlists: res.playlists };
+    performance.mark('ff:state-answer');
+    const state: LoadedState =
+      res instanceof ArrayBuffer
+        ? decodeStateBytes(res)
+        : { tracks: isTrackTable(res.tracks) ? decodeTrackTable(res.tracks) : res.tracks, playlists: res.playlists };
+    performance.mark('ff:state-decoded');
+    return state;
   } catch (err) {
     lastTauriError = `load_state fail: ${String(err)}`;
     if (useBrowserMocks()) {

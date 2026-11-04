@@ -220,6 +220,11 @@ fn dump(dir: &Path, out: &Path) {
     std::fs::write(out, json.unwrap()).unwrap();
 }
 
+fn dump_bytes(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    std::fs::write(out, track_infos::loaded_state(&lib).unwrap().to_bytes().unwrap()).unwrap();
+}
+
 fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap());
     (v[v.len() / 2], v[(v.len() * 95 / 100).min(v.len() - 1)])
@@ -942,8 +947,9 @@ fn soak(dir: &Path, seconds: u64) {
 
 fn rep(dir: &Path, runs: usize) {
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let mut columns: [Vec<f64>; 5] = Default::default();
+    let mut columns: [Vec<f64>; 6] = Default::default();
     let mut bytes = 0;
+    let mut binary_bytes = 0;
     for _ in 0..runs {
         let t = Instant::now();
         drop(lib.get_track_list_rows_without_previews().unwrap());
@@ -962,6 +968,9 @@ fn rep(dir: &Path, runs: usize) {
         let t = Instant::now();
         bytes = serde_json::to_vec(&state).unwrap().len();
         columns[2].push(ms(t));
+        let t = Instant::now();
+        binary_bytes = state.to_bytes().unwrap().len();
+        columns[5].push(ms(t));
     }
     let total: Vec<f64> = columns[1].iter().zip(&columns[2]).map(|(a, b)| a + b).collect();
     let summary = |name: &str, v: &[f64]| {
@@ -970,12 +979,13 @@ fn rep(dir: &Path, runs: usize) {
         format!("{name}={:.1} ({:.1}-{:.1})", sorted[sorted.len() / 2], sorted[0], sorted[sorted.len() - 1])
     };
     println!(
-        "REP runs={runs} bytes={bytes} {} {} {} {} {} {}",
+        "REP runs={runs} bytes={bytes} binary_bytes={binary_bytes} {} {} {} {} {} {} {}",
         summary("rows_ms", &columns[0]),
         summary("scan_ms", &columns[3]),
         summary("playlists_ms", &columns[4]),
         summary("loaded_state_ms", &columns[1]),
         summary("serialize_ms", &columns[2]),
+        summary("binary_ms", &columns[5]),
         summary("load_state_ms", &total),
     );
 }
@@ -987,6 +997,7 @@ fn main() {
         Some("run") => run(Path::new(&args[2])),
         Some("rep") => rep(Path::new(&args[2]), args.get(3).map_or(15, |n| n.parse().unwrap())),
         Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
+        Some("dump-bytes") => dump_bytes(Path::new(&args[2]), Path::new(&args[3])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
