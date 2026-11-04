@@ -1,6 +1,6 @@
 # fourfour - state
 
-_Updated: 2026-11-03 by orchestrator on `dev`. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
+_Updated: 2026-11-04 by orchestrator on `dev`. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
 _Archived detail (trimmed 2026-10-27, 2026-11-03 twice): docs/state-archive-2026-10-28.md_
 
 ## Direction
@@ -37,19 +37,14 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 39. Beta user docs draft (r53): 20 "(to confirm)" marks need a Mac. rec: read on the phone, confirm marks on a Mac night - branch: r53-user-docs-v2 56f7625
 40. Stick busy guard (r69): one stick operation at a time, sync off main thread. rec: land - branch: r69-stick-busy-v2 9a928da
 41. [r88 2026-11-03, grid at ceiling] BPM fold-peak search on by default: test 180 -> 186/205. rec: land (~3% of tracks change, toward Rekordbox) - branch: r79-bpm-misses ce1d8b1
-
-43. [built 2026-11-03] Beat chunk 500 default (r96): test 205 grid 167=167, BPM 0.1 180=180, CPU/track -43%; dev grid 44 -> 43. Mac app keeps 1500 (CoreML 500 is 18% slower but -57% RAM, first result 30% sooner). ANALYSIS_VERSION 2 only resets the failed-track memo. rec: land; Mac at 500 is your call. r102: with r79's BPM search, 500 costs 2-3 test tracks (grid 171->168-169, BPM 0.1 186->183-184) on thin margins; chunk stitching is not the cause. r105 fix (far fold-peak search was skipped too eagerly): 500 now grid 171=171, BPM 0.1 185 vs 186 (track 144, flat comb), zero right->wrong, 1500 unchanged - branch: r105-snap 903b702 (r96 + r79 + fix; older: r96-chunk500 30ddf42). r108 on top: chunk-500 memory plan per thread 400 -> 120 MB, 2.1x trk/min on 8 GB/8-core machines, byte-identical - branch: r108-throughput 1ee34d2 (stitch switches: r102-chunk-stitch b3dad1a)
-
+43. [built 2026-11-03] Beat chunk 500 default (r96+r105+r108): CPU/track -43%, no sys-time waste (r106), 2.1x on 8 GB machines; test grid 171=171, BPM 0.1 185 vs 186, zero right->wrong, dev 44 -> 43. Mac app keeps 1500. rec: land; Mac at 500 is your call - branch: r108-throughput 1ee34d2 (on r105-snap 903b702)
 Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 6d371fd on today's ov-1028, all checks green, preview :4212.
-
 44. [built 2026-11-04, Mac-checked] int8 beat model at chunk 500 for the Mac (r97/r98): same Mac session vs CoreML 1500: +22% trk/min, RAM 6.9 -> 2.4 GB, first result 6.7 -> 4.2 s, scores equal within 1 track; but 2.7x CPU (about 11 cores vs 4: fans, battery). x86 keeps fp32. rec: ship on Mac with fewer analysis workers on battery - branch: r98-mac-pair 87548eb (on r97-int8-500)
-
 45. [built 2026-11-04] Loudness (r99): Rust LUFS + true peak, within 0.013 LU of ffmpeg on 22 tracks, ~1% CPU, off by default, outputs byte-identical. Showing it needs a library.db column (schema) and a writer field (brother). Reference -14 LUFS gives -1.5 to -8.8 dB on club tracks; reference level is your call. rec: land the analysis part, decide reference + display later - branch: r99-lufs cae9320
-
 46. [built 2026-11-04] Remaining BPM misses (r101, on r79+r96): 12 test misses classified; only octave errors are rule-fixable. A half-time band (84-92.5 BPM doubled) fixes 2, no flips, test BPM 1 193 -> 195. Fitted to 2 tracks and wrong for hip-hop/downtempo. rec: ship it off; later a Rekordbox-style BPM range setting (your UI call). Also: chunk 500 costs 3 BPM results vs r79 alone (test 186 -> 183) - branch: r101-bpm-misses 11d94ba
 
+42. Phrase detection (r90): Rust detector, off by default; F 0.48 vs 57 Rekordbox refs (baseline 0.45). rec: run Rekordbox phrase analysis on 200+ testdata tracks and copy the library to dev - branch: r90-phrase f62246d. Brother: writer sets phrase bit but writes no PSSI
 47. [built 2026-11-04] Energy 1-10 (r100): Rust, off by default, outputs byte-identical, <1% CPU, stable across re-encodes. No real labels exist; vs a genre proxy Spearman 0.48 (ends right, middle noisy), ratings skew low on your library. rec: rate ~100 tracks 1-10 on the phone (or share any MIK/Lexicon ratings) so it can be calibrated before it shows - branch: r100-energy 9c9f226
-
 48. [built 2026-11-04] Playhead without per-frame relayout (r112): drive the waveform playhead with a paused Web Animation instead of style.transform; pixel-identical (72 snapshots), Layerize 658 -> 27 ms per 1.5 s while a track plays with the player open. File is in prototyping/ (AGENTS fence). rec: OK the fence edit - branch: none, diff in perf-run-2026-11.md R112
 
 ### Needs Merlin's ears/eyes (laptop)
@@ -65,7 +60,6 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 - Sync engine per docs/ui/usb-sync-spec.md. Clone facts: docs/research/clones-2026-10-23.md.
 - Open: Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 for CDJ-3000X; CDJ-3000 round-trip.
 
-42. Phrase detection (r90): first Rust detector, off by default, other results byte-identical; only 57 Rekordbox phrase refs exist, F 0.48 at +-1 bar (8-bar grid baseline 0.45), mood off - rec: you run Rekordbox phrase analysis on 200+ testdata tracks and copy the library to dev, then train labels - branch: r90-phrase f62246d. Brother: writer sets analysedBits 105 (phrase) but writes no PSSI, needs a CDJ check
 
 ## Queue
 ### Q5 Unsigned macOS build [queued] [mac] - cargo tauri build via mac-queue. 30 min
@@ -75,7 +69,7 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers; r104 key/decode speed. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Landed: r104 non-model stages a1b37c0. Parked: r105 fit fix into 43. r106: at chunk 1500 rten refaults ~1 GB per chunk (22% CPU wasted as sys); chunk 500 has none, so another reason for 43; doc merged. Dropped: r107 grid misses (14 right-BPM misses: half/quarter-beat and drift where the model has no activation on the Rekordbox grid; no rule fixes them; branch r107-grid-misses docs). Parked: r108 memory plan into 43 (split already optimal). r109 budget refresh: import rows now met; load_state sent before the bundle loads (50k first row -13 to -85 ms), landed 271f371. r111 rows query: warm load_state 10k 84 -> 44 ms, 50k 466 -> 194 ms, payload identical, landed 6ec34d9. Parked: r110 first-result burst (no gain shown under box load, +30% RSS; quiet-run script on branch r110-first-result d4adc3c). r112: expand cost is 27-38 ms painted, rest is frame-bound; harness rows merged; fence proposal = Waiting 48. Running: r113 search keystrokes
+- landed on ov-1028: r89, r93, r95, r92b, r104, r106 (doc), r109 early load_state, r111 load_state 2x, r112 (harness). Parked: 42-48. Dropped: r91 key mode, small models, r107 grid misses, r110 first-result burst (branch kept). Running: r113 search keystrokes. History: journal + archive
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
@@ -88,6 +82,5 @@ Mac: ov-1028 in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/four
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's lane read-only
 
 ## Rundown
-Run 2026-10-30 to 11-03 on ov-1028 (checks and smoke green): Mac analysis 2-3x faster on CoreML, 50k startup 2.2 -> 1.35 s, Linux RSS after analysis 2.1 -> 0.4 GB, Mac 5 s freeze fixed.
-Parked 2026-11-03 (parked-all-v7, :4211): schema v8, BPM search, keyboard rating/seek/reorder, recovery by error kind, stick busy guard. Dropped: grid drift refinements (r77).
-Waiting on Merlin: land parked-all-v7, CI r63-ci-v3 (15), docs (39), key licence (4), bar-1 listen (16), bundle id (24), a11y taste calls (34). Next Mac night needs a go.
+Run 2026-10-30 to 11-04 on ov-1028 (all checks green): Mac analysis 2-3x faster, 50k startup 2.2 -> 1.35 s, load_state 2x faster, import end to end 1.9 s at 10k, key -60% and decode -13% CPU.
+Parked for Merlin: parked-all-v8 (:4212), chunk 500 (43), Mac int8 (44), loudness (45), BPM range (46), energy labels (47), playhead fence edit (48). Next Mac night needs a go.

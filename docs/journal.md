@@ -598,3 +598,4 @@
 2026-11-04 13:19 orchestrator r110 handed back d4adc3c: start-order chunk queue + burst threads, identical output, no first-result gain provable under box load, +30% peak RSS; parked (quiet-machine run on a Mac night). decided: own prio r113 search/filter keystroke latency (sonnet high)
 2026-11-04 13:37 orchestrator r111 landed 6ec34d9 (both smokes 0 failed incl. webkit, 26 suites, vitest 914, CHECKS-OK)
 2026-11-04 14:34 orchestrator r112 handed back f44afc9: no avoidable app work in expand (painted 27-38 ms, rest frame-bound); harness rows + trace script merged into ov-1028, checks running; playhead Web Animation proposal for the fenced waveform-display.js -> Waiting 48 (answered worker: fence holds)
+2026-11-04 14:35 orchestrator state trimmed 13.4k -> 11.6k chars (old 43, Q51 history, rundown moved to state-archive-2026-10-28.md)
