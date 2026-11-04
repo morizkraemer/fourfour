@@ -2200,3 +2200,116 @@ So Chromium identity to the byte is not possible with any change that removes th
 ### Tools added
 
 `app/smoke/perf-rowlayers.spec.ts` (all tests skip unless `FF_PERF_R118` is set): `FF_PERF_R118=1` layer tree by compositing reason; `FF_PERF_R118=frames` per-frame trace of the expanded player playing, with CSS variants (`FF_PERF_VARIANTS=base,no-row-canvas,...`); `identity` screenshots of the table in twelve states (`FF_PERF_DPRS`, `FF_PERF_R118_OUT=dir/prefix`); `scroll` and `typing` traces with frame-gap statistics; `memory` (RSS of the browser's processes and JS heap, `FF_PERF_DPR`); `webkit-frames` (WebKit Timeline per frame, `FF_PERF_SCENARIO=expanded|scroll`); `pool` (canvas and row churn during a fling). Per-frame numbers come from summing `Layerize`, `Commit`, `Paint`, `Layout`, `UpdateLayoutTree` on the main thread of a `devtools.timeline` trace and dividing by the `Commit` count (`scripts/perf-trace-phases.mjs` has the bucketing). Raw and the interleaving scripts were in `~/.cache/r118-work/` and are deleted after this item.
+
+
+## R120 state decode (2026-11-04, `r120-state-decode`)
+
+Branch `r120-state-decode` from `ov-1028` (`13dee70`). Linux `dev` box (16 cores, load average 10-25 from other workers, everything under `nice`), headless Chromium 1217 and Playwright WebKit, the 10k and 50k `ff-fixture` libraries (the r95 `bench_startup dump` payloads: 1.70 and 8.42 MB of JSON, the same sha256 as in R111) and two more per size: the realistic-folder copies of R111 (295 and 500 album folders) and, at 10k, an edge-data copy (`benchmark/scripts/r120-edge-variant.py`). Result: **at 50k the page spent 160-215 ms between the bytes and the track objects, so `load_state` now answers with one binary buffer. Page-side that is 30-65% less (Chromium 214 to 126 ms, WebKit 182 to 71 ms at 50k; 10k 59 to 40 and 42 to 21 ms), the backend encode 1.5-1.8x faster, first row at 50k 120-280 ms earlier in the boot harness; at 10k the first row did not move (inside the noise). The data in the page is the same, row by row and key by key.**
+
+### Measured first (the JSON path, `load_state` answer as bytes to `TrackInfo[]`, fresh page, 15 runs, base and new alternated, median with min-max)
+
+Bytes to objects in the page, as `Response.json()` does it for the JSON answer (UTF-8 decode of the text, `JSON.parse`, `decodeTrackTable`) and as the new code does it (`decodeStateBytes` on the buffer):
+
+| Library | Browser | JSON: text decode | parse | build (`decodeTrackTable`) | JSON total | Binary |
+|---|---|---:|---:|---:|---:|---:|
+| 10k fixture | Chromium | 15 (13-20) | 21 (18-28) | 23 (18-29) | 59 (53-74) | **40 (37-65)** |
+| 10k fixture | WebKit | 13 (10-17) | 19 (18-29) | 9 (8-16) | 42 (37-59) | **21 (18-37)** |
+| 10k, 295 folders | Chromium | 14 (11-16) | 17 (16-25) | 20 (17-23) | 51 (45-60) | **41 (32-57)** |
+| 10k, 295 folders | WebKit | 12 (8-16) | 16 (14-29) | 7 (6-15) | 36 (29-58) | **18 (15-36)** |
+| 50k fixture | Chromium | 67 (64-77) | 87 (84-107) | 59 (50-68) | 214 (201-243) | **126 (112-152)** |
+| 50k fixture | WebKit | 65 (62-89) | 83 (80-126) | 33 (28-42) | 182 (172-253) | **71 (65-103)** |
+| 50k, 500 folders | Chromium | 59 (55-63) | 77 (74-111) | 48 (39-64) | 184 (171-219) | **103 (94-118)** |
+| 50k, 500 folders | WebKit | 57 (53-65) | 66 (64-87) | 36 (30-48) | 159 (151-198) | **56 (51-81)** |
+
+That is far over the 20 ms bar at 50k, so the change was made. What the numbers say: the floor is allocating about 150,000 strings and 50,000 objects (a V8 `slice` or `split` of an arena costs the same as `JSON.parse` creating the strings; a fused loop that cuts the title and file slices inside the object loop was not faster; the object loop alone is 60 ms cold in Chromium), so the gain comes from what the binary form does not have to do: decode 8.4 MB of UTF-8 text into a string, tokenise and validate it, and parse 9 numbers per row (the numeric columns are typed-array views over the buffer, no copy).
+
+Backend encode (`bench_startup rep`, in one process, JSON and binary measured in the same loop on the same state, median of 3 rounds of 10-15 runs):
+
+| Library | JSON (`serde_json::to_vec`) | Binary (`to_bytes`) | Bytes JSON / binary |
+|---|---:|---:|---|
+| 10k fixture | 7.9 ms (6.0-13.4) | **4.4 ms** (4.0-11.0) | 1.70 / 1.72 MB |
+| 10k, 295 folders | 6.9 (5.2-13.2) | **3.9** (3.4-5.5) | 1.50 / 1.52 MB |
+| 50k fixture | 29.2 (28.5-50.5) | **18.9** (18.1-27.0) | 8.42 / 8.32 MB |
+| 50k, 500 folders | 27.8 (24.8-89.7) | **15.7** (15.4-60.7) | 7.32 / 7.35 MB |
+
+In the single-thread encoder at 50k about 15 ms go to the four text columns (154,000 texts; the per-text work is not the whole of it, see below), 2 ms to copy the arenas and 2.6 ms to write the number columns. A version with one thread per text column and a version that copies ASCII runs in bulk instead of per text both produced the same bytes in the same time (19-20 ms and 18 ms at 50k, the fixture), so neither stayed; the rest looks like page faults of the fresh 8 MB output in this VM. The size on the wire is the same: titles and file names are most of it in both forms. Transfer through the Tauri IPC was not measured (no GUI here): the buffer goes through the same custom protocol as `get_waveform_detail`, without the JSON text decode on the other side.
+
+### Changed (no markup, no CSS, same rows)
+
+- **`dto.rs`: `LoadedState::to_bytes`** writes the table and the playlists as one little-endian buffer (header of 10 words, playlists as JSON, a plain-ASCII text arena and a "wide" UTF-8 arena, one end offset per text in UTF-16 units with a top bit for the wide arena, `f64` durations and sizes, `u32` columns, flags; every section starts on a multiple of 8 so the page reads it as typed arrays in place). The layout is documented on the function. The split of the text in two arenas is what keeps the page's strings one-byte: with one arena a single CJK title makes `TextDecoder` return one two-byte string for all 4.7 MB (decode 40 ms instead of 21 ms at 50k, and twice the heap behind every slice). `file_size` goes as `f64`, which is what `JSON.parse` gives for the same integer, so even sizes above 2^53 come out equal.
+- **`main.rs`: `load_state` returns `tauri::ipc::Response`** (the pattern of `get_waveform_detail`); `load_state_encoded` perf mark after `load_state_built`.
+- **`track-table.ts`: `decodeStateBytes`** builds the same `TrackInfo` objects (same keys in the same order, `rating` and `color` added last) from the buffer; `tauri.svelte.ts` `loadState` takes an `ArrayBuffer` or the old object (browser mocks, `perf-q50`, smoke mock and tests keep sending JSON, and `decodeTrackTable` stays), and sets `ff:state-answer` and `ff:state-decoded` marks (`library.svelte.ts` `ff:state-rows`, after the rows are set) that the boot harness reads.
+- Not changed on purpose: `mapTrackInfoToLocal` and the row proxies (47-97 ms wall at 50k in the harness, same before and after), the early call in `index.html`, the JSON form of `LoadedState` (still the logical payload: `bench_startup dump` writes it and its sha256 below is unchanged).
+
+### Boot harness (`perf-startup.spec.ts`, `FF_PERF_STARTUP=<n>=<state.json|state.bin>==<backend ms>,...`, same app build, JSON payload against binary payload alternated run by run, 7 runs each, backend simulated as 45 ms at 10k and 200 ms at 50k, load 12-20; ms, median (min-max); pair diff = median of bin minus JSON in the same run)
+
+Chromium, first real row / interactive:
+
+| Library | Case | JSON first row | binary first row | pair diff | bin lower in | JSON interactive | binary interactive | pair diff |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 10k | first launch | 749 (636-5508) | 694 (610-6818) | -26 | 4 of 7 | 771 | 764 | +15 |
+| 10k | cold | 687 (601-4020) | 729 (695-4275) | +42 | 2 of 7 | 761 | 816 | +68 |
+| 10k | warm | 608 (528-4505) | 631 (561-3616) | -3 | 4 of 7 | 676 | 703 | -23 |
+| 50k | first launch | 1,055 (1,023-5,895) | 882 (835-3,646) | -212 | 7 of 7 | 1,223 | 1,029 | -209 |
+| 50k | cold | 1,241 (1,091-5,145) | 967 (934-2,261) | -282 | 7 of 7 | 1,248 | 967 | -306 |
+| 50k | warm | 1,075 (957-2,732) | 852 (790-3,258) | -210 | 6 of 7 | 1,178 | 880 | -231 |
+
+WebKit (first row is interactive there):
+
+| Library | Case | JSON | binary | pair diff | bin lower in |
+|---|---|---:|---:|---:|---:|
+| 10k | first launch | 1,118 (1,093-1,335) | 1,046 (1,022-1,247) | -71 | 6 of 7 |
+| 10k | cold | 1,089 (1,075-1,267) | 1,116 (1,043-1,160) | +20 | 3 of 7 |
+| 10k | warm | 698 (655-768) | 705 (588-743) | +14 | 3 of 7 |
+| 50k | first launch | 1,779 (1,535-1,901) | 1,488 (1,448-1,929) | -263 | 6 of 7 |
+| 50k | cold | 1,674 (1,622-1,790) | 1,619 (1,507-1,712) | -118 | 6 of 7 |
+| 50k | warm | 1,187 (1,115-1,313) | 1,040 (964-1,194) | -162 | 7 of 7 |
+
+The pieces of the same runs (Chromium 50k first launch / cold / warm, JSON then binary): bytes to answer in the harness (fetch plus `text()` or `arrayBuffer()`) 333 / 371 / 371 against 155 / 177 / 171; `JSON.parse` 81 / 94 / 67 against 0; `decodeTrackTable` or `decodeStateBytes` (`ff:state-answer` to `ff:state-decoded`) 61 / 28 / 28 against 134 / 129 / 128; row mapping 47 / 91 / 81 against 74 / 77 / 77; `load_state` answered 812 / 1,042 / 918 against 566 / 714 / 595. WebKit 50k first launch: transfer 395 / 248, parse 84 / 0, decode 31 / 108, map 78 / 78, answered 1,347 / 1,022. At 10k the pieces are within 10-20 ms of each other and the first row is the same, so **at 10k only the backend's 3-4 ms and WebKit's 10 ms of page work are saved; the first screen does not come earlier.** Read with care: the in-boot decode of the binary form is as large as parse plus build of the JSON form (the main thread is warm for neither, and the boot is 100-300 ms of other tasks); what the JSON form pays on top is the text decode of the 8.4 MB response, which in this harness happens inside `fetch().text()` on the busy page main thread (the 130-200 ms of `transferMs` difference), and the webview's `Response.json()` should do the same work there. The size of the first-row gain in the real app is not measured (no Mac, no GUI); the in-isolation table above is the part that does not depend on the harness. JS heap after boot (forced GC) 51.7 to 48.2 MB at 50k, 16.0 to 15.4 MB at 10k.
+
+Same harness, realistic folders (295 and 500 album folders; load 13-24, so the ranges are wider), first real row, median (min-max), pair diff, binary lower in:
+
+| Browser | Library | Case | JSON | binary | pair diff | bin lower in |
+|---|---|---|---:|---:|---:|---:|
+| Chromium | 10k | first launch | 688 (604-6380) | 631 (593-3347) | +5 | 3 of 7 |
+| Chromium | 10k | cold | 713 (614-5010) | 733 (584-3676) | -46 | 5 of 7 |
+| Chromium | 10k | warm | 706 (558-3666) | 616 (566-4392) | +10 | 2 of 7 |
+| Chromium | 50k | first launch | 1,008 (904-6,582) | 897 (753-5,299) | -189 | 6 of 7 |
+| Chromium | 50k | cold | 1,160 (1,082-7,630) | 939 (836-10,646) | -256 | 6 of 7 |
+| Chromium | 50k | warm | 1,030 (930-8,123) | 1,137 (726-6,663) | -139 | 6 of 7 |
+| WebKit | 10k | first launch | 1,176 (1,052-1,230) | 1,059 (974-1,377) | -46 | 5 of 7 |
+| WebKit | 10k | cold | 1,166 (1,077-1,302) | 1,175 (999-1,408) | -82 | 5 of 7 |
+| WebKit | 10k | warm | 685 (575-893) | 784 (619-826) | +92 | 2 of 7 |
+| WebKit | 50k | first launch | 1,617 (1,371-1,637) | 1,518 (1,323-1,589) | -48 | 6 of 7 |
+| WebKit | 50k | cold | 1,731 (1,549-1,878) | 1,536 (1,426-1,737) | -141 | 7 of 7 |
+| WebKit | 50k | warm | 1,143 (1,057-1,294) | 987 (924-1,123) | -187 | 6 of 7 |
+
+The 50k rows move the same way as with the fixture (the Chromium 50k warm row is the one that disagrees with itself: median 1,030 against 1,137, yet lower in 6 of 7 pairs, pair diff -139; the load swung during that run); at 10k the sign flips from row to row. `decodeMs` of the binary form (Chromium 10k 32-57 ms, 50k 92-152 ms; WebKit 17-19 and 55-93 ms) is above the JSON form's `decodeMs` and below its parse plus decode plus text decode, as in the fixture runs.
+
+
+### Identity
+
+- **Logical payload unchanged.** `bench_startup dump` (`serde_json::to_vec` of `loaded_state`) on the new code gives the R111 sha256: 10k `38fe2965bc4aa7d3218fbb616669960f466e297f282bac861d8dd0dcd2249eb0` (1,699,963 bytes), 50k `297cb41d20496dc9c9a74e93c71f3e4f248c6fca76e0a855225339bdd41c0dc9`, 10k with 295 folders `1817f860d6c7a7137ecb36b3a67899a2091bb0adfd61461ff93ea8e9614231cf`, 50k with 500 folders `6b7ceabd09beffdf34a64ba8a773a3b04a6b39061b34b74b5969f42bda448b81`, and for the new edge copy `4d2bfc155860f3f2feab9b88b36fab97209e3635a1b11194dfd84d7ef12eb719` (no base binary of this one: `loaded_state` and the JSON form were not touched, the other four equal R111's).
+- **Page level, every row, every field, key order.** For each library `decodeStateBytes(state.bin)` against `decodeTrackTable(JSON.parse(state.json))`: `JSON.stringify` of each row (so key order counts, `rating`/`color` position included) hashed with sha256 over all rows, plus the playlists compared as JSON, in Chromium and WebKit (`crypto.subtle`, in the page) and in node (vitest `state-bytes-real.test.ts`, `FF_STATE_PAIRS=<state.json>=<state.bin>,...`). All 10 page runs and the 5 node runs: identical, first differing row none.
+
+| Library | Rows | sha256 of the rows (JSON path = binary path, Chromium = WebKit) |
+|---|---:|---|
+| 10k fixture | 10,000 | `9d2c2115772ebd4f62f5d9b0ece86b245e1373bf682a8c210d4ba99dbf1265cb` |
+| 50k fixture | 50,000 | `e015b861aeb97a46ae92290d88c708f5d574f9436258180c48b8688007a7cf64` |
+| 10k with edge data | 10,000 | `baf4b5869063ab3cc052bf5ff895c6b5c07eea5817feaad9ed6db03e8242c322` |
+| 10k, 295 folders | 10,000 | `540a1bc5e09ac75d31170975e6073d6cd53613e3df7f2263b60c3e800538cdfb` |
+| 50k, 500 folders | 50,000 | `31ed1ad3802f2fcee771e08e8e99b34333e000769aab040949eca5dccffb4e5e` |
+
+- The edge copy has an empty first and every 7th, 11th, 13th and 19th artist, album, genre and title, empty keys, quotes and backslashes in titles and genres, non-ASCII titles, artists and albums (accents, Japanese, an astral emoji, a leading U+FEFF that `TextDecoder` would drop without `ignoreBOM`), Windows (`C:\...`), bare and Japanese paths, tempo 0, bpm 127.995 and 128.005, analyses without a key or row preview, stages 3 and a fifth of the covers deleted.
+- **Golden files, both sides.** `dto::tests::state_bytes_match_the_golden_files_the_app_decodes` builds a 5-row edge table (empty strings, quotes, backslash and Windows paths, BOM, astral and CJK text, a NUL, `u32::MAX` id, `u64::MAX` size, 1e21 duration, rating 0 and empty colour, playlists with quotes and an empty folder) and an empty state and compares the bytes and the JSON with `app/src/services/fixtures/state-{edge,empty}.{bin,json}` (`FF_UPDATE_FIXTURES=1` rewrites them); `track-table.test.ts` decodes the `.bin` and expects `toStrictEqual` and equal key lists against the decoded `.json`, and `early-load-state.test.ts` does it through `loadState()`.
+- One difference by construction, not by data: a non-finite `duration_secs` would be `null` in JSON and NaN in the buffer; the backend never produces one (it is `as_secs_f64` of a decoded length).
+
+### Not done, and why
+
+- **Lazy or chunked object creation** (decode `TrackInfo` per 2,500 rows inside `mapTracksInTaskSizedChunks`): every row's fields are read at once by `mapTrackInfoToLocal` and `raw` must stay a `TrackInfo` (it is written to, `track.raw = {...}`), so it moves the same work into smaller tasks; the longest task of the boot (230-310 ms) is the shell mount, not the decode. Not done.
+- **Rows without the intermediate `TrackInfo`** or lazy strings: the way to get below the allocation floor above, but it changes `library.svelte.ts` and what `raw` is; a question for the orchestrator if the 50k first row still matters.
+- **Mac / real IPC**: untested here; the expectation is the larger gain on WebKit (JavaScriptCore's `JSON.parse` plus text decode is slower than V8's: 182 ms against 71 ms above) and no extra cost in the transfer (the waveform detail uses the same response type).
+
+### Tools added
+
+`bench_startup dump-bytes <dir> <out>` (the binary answer) and `binary_ms` / `binary_bytes` in `rep`; `perf-startup.spec.ts`: a `.bin` payload is served as an `ArrayBuffer`, `decodeMs` and `mapMs` per boot (from the three marks), payload kinds are interleaved run by run, `FF_PERF_STARTUP_RAW=<file>` writes every run; `benchmark/scripts/r120-edge-variant.py`; `app/src/services/state-bytes-real.test.ts` (skips without `FF_STATE_PAIRS`).
