@@ -69,7 +69,7 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89, r93, r95, r92b, r104, r106 (doc), r109 early load_state, r111 load_state 2x, r112 (harness) eb9d84f. Parked: 42-48. Dropped: r91 key mode, small models, r107 grid misses, r110 first-result burst (branch kept). Running: r113 search keystrokes, r114 startup bundle. History: journal + archive
+- landed on ov-1028: r89, r93, r95, r92b, r104, r106 (doc), r109 early load_state, r111 load_state 2x, r112 (harness) eb9d84f. Parked: 42-48. Dropped: r91 key mode, small models, r107 grid misses, r110 first-result burst (branch kept). r113 search: 50k sorted clear 182 -> 74 ms, sort click 172 -> 137, identical order; merged 1d9fdb1, checks running. Running: r114 startup bundle, r115 first column sort. History: journal + archive
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
