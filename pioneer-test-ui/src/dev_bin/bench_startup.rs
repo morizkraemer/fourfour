@@ -180,7 +180,7 @@ fn run(dir: &Path) {
     let json = if with_previews {
         serde_json::to_string(&serde_json::json!({ "tracks": infos, "playlists": playlists })).unwrap()
     } else {
-        serde_json::to_string(&LoadedState { tracks: infos, playlists }).unwrap()
+        serde_json::to_string(&LoadedState { tracks: dto::TrackTable::new(&infos).unwrap(), playlists }).unwrap()
     };
     let json_ms = ms(t);
 
@@ -890,7 +890,7 @@ fn soak(dir: &Path, seconds: u64) {
         if part("state") {
             let infos = track_infos::list_track_infos(&lib).unwrap();
             let state = LoadedState {
-                tracks: infos,
+                tracks: dto::TrackTable::new(&infos).unwrap(),
                 playlists: playlists
                     .iter()
                     .map(|pl| PlaylistInput { id: pl.id, name: pl.name.clone(), track_ids: pl.track_ids.clone(), parent_id: pl.parent_id, is_folder: pl.is_folder })
@@ -942,7 +942,7 @@ fn soak(dir: &Path, seconds: u64) {
 
 fn rep(dir: &Path, runs: usize) {
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let mut columns: [Vec<f64>; 4] = Default::default();
+    let mut columns: [Vec<f64>; 3] = Default::default();
     let mut bytes = 0;
     for _ in 0..runs {
         let t = Instant::now();
@@ -952,24 +952,20 @@ fn rep(dir: &Path, runs: usize) {
         let state = track_infos::loaded_state(&lib).unwrap();
         columns[1].push(ms(t));
         let t = Instant::now();
-        drop(dto::TrackTable::new(&state.tracks).unwrap());
-        columns[2].push(ms(t));
-        let t = Instant::now();
         bytes = serde_json::to_vec(&state).unwrap().len();
-        columns[3].push(ms(t));
+        columns[2].push(ms(t));
     }
-    let total: Vec<f64> = columns[1].iter().zip(&columns[3]).map(|(a, b)| a + b).collect();
+    let total: Vec<f64> = columns[1].iter().zip(&columns[2]).map(|(a, b)| a + b).collect();
     let summary = |name: &str, v: &[f64]| {
         let mut sorted = v.to_vec();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         format!("{name}={:.1} ({:.1}-{:.1})", sorted[sorted.len() / 2], sorted[0], sorted[sorted.len() - 1])
     };
     println!(
-        "REP runs={runs} bytes={bytes} {} {} {} {} {}",
+        "REP runs={runs} bytes={bytes} {} {} {} {}",
         summary("rows_ms", &columns[0]),
         summary("loaded_state_ms", &columns[1]),
-        summary("table_build_ms", &columns[2]),
-        summary("serialize_ms", &columns[3]),
+        summary("serialize_ms", &columns[2]),
         summary("load_state_ms", &total),
     );
 }

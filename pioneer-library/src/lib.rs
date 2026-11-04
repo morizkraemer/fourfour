@@ -106,6 +106,24 @@ pub struct TrackListRow {
     pub row_preview: Option<RowPreview>,
 }
 
+/// A [`TrackListRow`] whose texts borrow from the query: valid inside the visit that receives it.
+pub struct TrackListRowRef<'a> {
+    pub id: u32,
+    pub source_path: &'a str,
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub album: &'a str,
+    pub genre: &'a str,
+    pub tempo: u32,
+    pub key: &'a str,
+    pub duration_secs: f64,
+    pub bitrate: u32,
+    pub file_size: u64,
+    pub has_artwork: bool,
+    pub analysis_stages: Option<u8>,
+    pub row_preview: Option<&'a [u8]>,
+}
+
 /// Bits of `analyses.stages`: which parts of a track's analysis are stored.
 pub mod analysis_stage {
     pub const WAVEFORM: u8 = 1;
@@ -813,6 +831,12 @@ impl LocalLibrary {
     /// rows on screen.
     pub fn get_track_list_rows_without_previews(&self) -> Result<Vec<TrackListRow>> {
         queries::select_track_list_rows(&self.conn, false)
+    }
+
+    /// The rows of [`get_track_list_rows_without_previews`](Self::get_track_list_rows_without_previews), handed over
+    /// one by one without copying their texts.
+    pub fn for_each_track_list_row(&self, visit: impl FnMut(TrackListRowRef<'_>)) -> Result<()> {
+        queries::for_each_track_list_row(&self.conn, false, visit)
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.

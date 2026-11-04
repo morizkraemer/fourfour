@@ -140,8 +140,7 @@ pub struct ProgressPayload {
 /// `TrackInfo` objects): at 50k tracks the object list is 21.6 MB of JSON, mostly repeated keys and folders.
 #[derive(Serialize, Clone)]
 pub struct LoadedState {
-    #[serde(serialize_with = "serialize_track_table")]
-    pub tracks: Vec<TrackInfo>,
+    pub tracks: TrackTable,
     pub playlists: Vec<PlaylistInput>,
 }
 
@@ -156,15 +155,15 @@ const TRACK_FLAG_PENDING: u8 = 8;
 /// repeat (artists, albums, genres, keys, colours) as indexes into `strings`, which holds each of them once.
 /// `ratings` and `colors` are `[row, value, ...]` pairs for the tracks that have one (a colour value is a
 /// string index).
-#[derive(Serialize)]
-pub struct TrackTable<'a> {
-    strings: Vec<&'a str>,
+#[derive(Serialize, Clone, Default)]
+pub struct TrackTable {
+    strings: Vec<Box<str>>,
     folder_parent: Vec<u32>,
-    folder_name: Vec<&'a str>,
+    folder_name: Vec<Box<str>>,
     id: Vec<u32>,
     dir: Vec<u32>,
-    file: Vec<&'a str>,
-    title: Vec<&'a str>,
+    file: TextColumn,
+    title: TextColumn,
     artist: Vec<u32>,
     album: Vec<u32>,
     genre: Vec<u32>,
@@ -178,31 +177,99 @@ pub struct TrackTable<'a> {
     colors: Vec<u32>,
 }
 
-#[derive(Default)]
-struct StringTable<'a> {
-    list: Vec<&'a str>,
-    index: HashMap<&'a str, u32>,
+/// Texts stored back to back, sent as an array of strings.
+#[derive(Clone, Default)]
+struct TextColumn {
+    text: String,
+    ends: Vec<usize>,
 }
 
-impl<'a> StringTable<'a> {
-    fn intern(&mut self, text: &'a str) -> u32 {
-        let list = &mut self.list;
-        *self.index.entry(text).or_insert_with(|| {
-            list.push(text);
-            (list.len() - 1) as u32
-        })
+impl TextColumn {
+    fn with_capacity(rows: usize) -> Self {
+        TextColumn { text: String::new(), ends: Vec::with_capacity(rows) }
+    }
+
+    fn push(&mut self, text: &str) {
+        self.text.push_str(text);
+        self.ends.push(self.text.len());
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &str> {
+        let starts = std::iter::once(0).chain(self.ends.iter().copied());
+        starts.zip(self.ends.iter().copied()).map(|(start, end)| &self.text[start..end])
+    }
+}
+
+impl Serialize for TextColumn {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.iter())
+    }
+}
+
+#[derive(Default, Clone, Copy)]
+struct FastHasher(u64);
+
+impl FastHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl std::hash::Hasher for FastHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for word in &mut words {
+            self.add(u64::from_le_bytes(word.try_into().expect("a chunk of 8 bytes")));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut last = [0u8; 8];
+            last[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(last));
+        }
+    }
+
+    fn write_u8(&mut self, byte: u8) {
+        self.add(u64::from(byte));
+    }
+
+    fn finish(&self) -> u64 {
+        let mut mixed = self.0;
+        mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        mixed ^ (mixed >> 31)
+    }
+}
+
+type FastMap = HashMap<Box<str>, u32, std::hash::BuildHasherDefault<FastHasher>>;
+
+#[derive(Default)]
+struct StringTable {
+    list: Vec<Box<str>>,
+    index: FastMap,
+}
+
+impl StringTable {
+    fn intern(&mut self, text: &str) -> u32 {
+        if let Some(&index) = self.index.get(text) {
+            return index;
+        }
+        let index = self.list.len() as u32;
+        self.list.push(text.into());
+        self.index.insert(text.into(), index);
+        index
     }
 }
 
 #[derive(Default)]
-struct FolderTable<'a> {
+struct FolderTable {
     parent: Vec<u32>,
-    name: Vec<&'a str>,
-    index: HashMap<&'a str, u32>,
+    name: Vec<Box<str>>,
+    index: FastMap,
 }
 
-impl<'a> FolderTable<'a> {
-    fn folder(&mut self, dir: &'a str) -> u32 {
+impl FolderTable {
+    fn folder(&mut self, dir: &str) -> u32 {
         if let Some(&index) = self.index.get(dir) {
             return index;
         }
@@ -210,92 +277,164 @@ impl<'a> FolderTable<'a> {
         let parent = if cut == 0 { 0 } else { self.folder(&dir[..cut]) + 1 };
         let index = self.name.len() as u32;
         self.parent.push(parent);
-        self.name.push(&dir[cut..]);
-        self.index.insert(dir, index);
+        self.name.push(dir[cut..].into());
+        self.index.insert(dir.into(), index);
         index
     }
 }
 
-impl<'a> TrackTable<'a> {
-    pub fn new(tracks: &'a [TrackInfo]) -> Result<Self, String> {
-        let n = tracks.len();
-        let mut strings = StringTable::default();
-        let mut folders = FolderTable::default();
-        let mut table = TrackTable {
-            strings: Vec::new(),
-            folder_parent: Vec::new(),
-            folder_name: Vec::new(),
-            id: Vec::with_capacity(n),
-            dir: Vec::with_capacity(n),
-            file: Vec::with_capacity(n),
-            title: Vec::with_capacity(n),
-            artist: Vec::with_capacity(n),
-            album: Vec::with_capacity(n),
-            genre: Vec::with_capacity(n),
-            key: Vec::with_capacity(n),
-            tempo: Vec::with_capacity(n),
-            duration_secs: Vec::with_capacity(n),
-            bitrate: Vec::with_capacity(n),
-            file_size: Vec::with_capacity(n),
-            flags: Vec::with_capacity(n),
-            ratings: Vec::new(),
-            colors: Vec::new(),
-        };
-        let mut previous_dir: Option<(&str, u32)> = None;
-        let mut runs: [Option<(&str, u32)>; 5] = [None; 5];
-        let mut intern = |column: usize, text: &'a str| match runs[column] {
-            Some((previous, index)) if previous == text => index,
-            _ => {
-                let index = strings.intern(text);
-                runs[column] = Some((text, index));
-                index
-            }
-        };
-        for (row, t) in tracks.iter().enumerate() {
-            if t.waveform_preview.is_some() || t.waveform_bands.is_some() {
-                return Err(format!("track {} carries a row preview, which the track table does not hold", t.id));
-            }
-            let cut = t.source_path.rfind(['/', '\\']).map_or(0, |i| i + 1);
-            table.id.push(t.id);
-            let dir = &t.source_path[..cut];
-            let folder = match previous_dir {
-                Some((previous, folder)) if previous == dir => folder,
-                _ => folders.folder(dir),
-            };
-            previous_dir = Some((dir, folder));
-            table.dir.push(folder);
-            table.file.push(&t.source_path[cut..]);
-            table.title.push(&t.title);
-            table.artist.push(intern(0, &t.artist));
-            table.album.push(intern(1, &t.album));
-            table.genre.push(intern(2, &t.genre));
-            table.key.push(intern(3, &t.key));
-            table.tempo.push(t.tempo);
-            table.duration_secs.push(t.duration_secs);
-            table.bitrate.push(t.bitrate);
-            table.file_size.push(t.file_size);
-            table.flags.push(
-                u8::from(t.has_artwork) * TRACK_FLAG_ARTWORK
-                    | u8::from(t.has_cues) * TRACK_FLAG_CUES
-                    | u8::from(t.has_analysis) * TRACK_FLAG_ANALYSIS
-                    | u8::from(t.analysis_pending) * TRACK_FLAG_PENDING,
-            );
-            if let Some(rating) = t.rating {
-                table.ratings.extend([row as u32, u32::from(rating)]);
-            }
-            if let Some(color) = &t.color {
-                table.colors.extend([row as u32, intern(4, color)]);
-            }
+/// What the track table holds of one track.
+pub struct TrackRow<'a> {
+    pub id: u32,
+    pub source_path: &'a str,
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub album: &'a str,
+    pub genre: &'a str,
+    pub key: &'a str,
+    pub tempo: u32,
+    pub duration_secs: f64,
+    pub bitrate: u32,
+    pub file_size: u64,
+    pub has_artwork: bool,
+    pub has_cues: bool,
+    pub has_analysis: bool,
+    pub analysis_pending: bool,
+    pub rating: Option<u8>,
+    pub color: Option<&'a str>,
+}
+
+/// Builds a [`TrackTable`] from rows handed over one by one, without a copy of each text per row.
+pub struct TrackTableBuilder {
+    table: TrackTable,
+    strings: StringTable,
+    folders: FolderTable,
+    previous_dir: (String, u32),
+    runs: [(String, u32); 5],
+}
+
+impl TrackTableBuilder {
+    pub fn with_capacity(rows: usize) -> Self {
+        TrackTableBuilder {
+            table: TrackTable {
+                id: Vec::with_capacity(rows),
+                dir: Vec::with_capacity(rows),
+                file: TextColumn::with_capacity(rows),
+                title: TextColumn::with_capacity(rows),
+                artist: Vec::with_capacity(rows),
+                album: Vec::with_capacity(rows),
+                genre: Vec::with_capacity(rows),
+                key: Vec::with_capacity(rows),
+                tempo: Vec::with_capacity(rows),
+                duration_secs: Vec::with_capacity(rows),
+                bitrate: Vec::with_capacity(rows),
+                file_size: Vec::with_capacity(rows),
+                flags: Vec::with_capacity(rows),
+                ..TrackTable::default()
+            },
+            strings: StringTable::default(),
+            folders: FolderTable::default(),
+            previous_dir: (String::new(), u32::MAX),
+            runs: Default::default(),
         }
-        table.strings = strings.list;
-        table.folder_parent = folders.parent;
-        table.folder_name = folders.name;
-        Ok(table)
+    }
+
+    fn intern(&mut self, column: usize, text: &str) -> u32 {
+        let (previous, index) = &mut self.runs[column];
+        if *index != u32::MAX && previous.as_str() == text {
+            return *index;
+        }
+        let interned = self.strings.intern(text);
+        previous.clear();
+        previous.push_str(text);
+        self.runs[column].1 = interned;
+        interned
+    }
+
+    pub fn push(&mut self, row: &TrackRow<'_>) {
+        let index = self.table.id.len() as u32;
+        let cut = row.source_path.rfind(['/', '\\']).map_or(0, |i| i + 1);
+        let dir = &row.source_path[..cut];
+        let folder = if self.previous_dir.1 != u32::MAX && self.previous_dir.0 == dir {
+            self.previous_dir.1
+        } else {
+            let folder = self.folders.folder(dir);
+            self.previous_dir.0.clear();
+            self.previous_dir.0.push_str(dir);
+            self.previous_dir.1 = folder;
+            folder
+        };
+        let artist = self.intern(0, row.artist);
+        let album = self.intern(1, row.album);
+        let genre = self.intern(2, row.genre);
+        let key = self.intern(3, row.key);
+        let table = &mut self.table;
+        table.id.push(row.id);
+        table.dir.push(folder);
+        table.file.push(&row.source_path[cut..]);
+        table.title.push(row.title);
+        table.artist.push(artist);
+        table.album.push(album);
+        table.genre.push(genre);
+        table.key.push(key);
+        table.tempo.push(row.tempo);
+        table.duration_secs.push(row.duration_secs);
+        table.bitrate.push(row.bitrate);
+        table.file_size.push(row.file_size);
+        table.flags.push(
+            u8::from(row.has_artwork) * TRACK_FLAG_ARTWORK
+                | u8::from(row.has_cues) * TRACK_FLAG_CUES
+                | u8::from(row.has_analysis) * TRACK_FLAG_ANALYSIS
+                | u8::from(row.analysis_pending) * TRACK_FLAG_PENDING,
+        );
+        if let Some(rating) = row.rating {
+            self.table.ratings.extend([index, u32::from(rating)]);
+        }
+        if let Some(color) = row.color {
+            let color = self.intern(4, color);
+            self.table.colors.extend([index, color]);
+        }
+    }
+
+    pub fn finish(self) -> TrackTable {
+        TrackTable {
+            strings: self.strings.list,
+            folder_parent: self.folders.parent,
+            folder_name: self.folders.name,
+            ..self.table
+        }
     }
 }
 
-fn serialize_track_table<S: serde::Serializer>(tracks: &[TrackInfo], serializer: S) -> Result<S::Ok, S::Error> {
-    TrackTable::new(tracks).map_err(serde::ser::Error::custom)?.serialize(serializer)
+impl TrackTable {
+    pub fn new(tracks: &[TrackInfo]) -> Result<Self, String> {
+        let mut builder = TrackTableBuilder::with_capacity(tracks.len());
+        for t in tracks {
+            if t.waveform_preview.is_some() || t.waveform_bands.is_some() {
+                return Err(format!("track {} carries a row preview, which the track table does not hold", t.id));
+            }
+            builder.push(&TrackRow {
+                id: t.id,
+                source_path: &t.source_path,
+                title: &t.title,
+                artist: &t.artist,
+                album: &t.album,
+                genre: &t.genre,
+                key: &t.key,
+                tempo: t.tempo,
+                duration_secs: t.duration_secs,
+                bitrate: t.bitrate,
+                file_size: t.file_size,
+                has_artwork: t.has_artwork,
+                has_cues: t.has_cues,
+                has_analysis: t.has_analysis,
+                analysis_pending: t.analysis_pending,
+                rating: t.rating,
+                color: t.color.as_deref(),
+            });
+        }
+        Ok(builder.finish())
+    }
 }
 
 #[cfg(test)]
@@ -350,7 +489,8 @@ mod tests {
             color: Some("#ff0000".into()),
             ..info(9, "two.wav")
         };
-        let json = serde_json::to_string(&LoadedState { tracks: vec![one, two], playlists: Vec::new() }).unwrap();
+        let tracks = TrackTable::new(&[one, two]).unwrap();
+        let json = serde_json::to_string(&LoadedState { tracks, playlists: Vec::new() }).unwrap();
         assert_eq!(
             json,
             concat!(
@@ -366,9 +506,9 @@ mod tests {
     fn track_table_splits_windows_paths_and_refuses_row_previews() {
         let tracks = [info(1, r"C:\Music\a.flac"), info(2, "C:/Music/b.flac")];
         let table = TrackTable::new(&tracks).unwrap();
-        assert_eq!(table.folder_name, [r"C:\", r"Music\", "C:/", "Music/"]);
+        assert_eq!(table.folder_name.iter().map(|name| &**name).collect::<Vec<_>>(), [r"C:\", r"Music\", "C:/", "Music/"]);
         assert_eq!(table.folder_parent, [0, 1, 0, 3]);
-        assert_eq!((table.dir.as_slice(), table.file[0]), ([1, 3].as_slice(), "a.flac"));
+        assert_eq!((table.dir.as_slice(), table.file.iter().next()), ([1, 3].as_slice(), Some("a.flac")));
         let with_preview = [TrackInfo { waveform_bands: Some(vec![1]), ..info(3, "/m/c.mp3") }];
         assert!(TrackTable::new(&with_preview).is_err());
     }
