@@ -6,6 +6,7 @@
    */
   import { tick } from 'svelte';
   import './dialog.css';
+  import { trapTab } from '../utils/focus.js';
 
   let {
     open = false,
@@ -22,6 +23,7 @@
 
   $effect(() => {
     if (!open) return;
+    const returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     function onKeydown(e) {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -41,7 +43,10 @@
       focusTarget?.focus();
     })();
 
-    return () => window.removeEventListener('keydown', onKeydown);
+    return () => {
+      window.removeEventListener('keydown', onKeydown);
+      if (returnFocusTo?.isConnected) returnFocusTo.focus();
+    };
   });
 
   function handleBackdropClick(e) {
@@ -64,6 +69,7 @@
       aria-modal="true"
       aria-labelledby={title ? 'ff-dialog-title' : undefined}
       tabindex="-1"
+      onkeydown={(e) => panelEl && trapTab(e, panelEl)}
       onclick={(e) => e.stopPropagation()}
     >
       {#if title}

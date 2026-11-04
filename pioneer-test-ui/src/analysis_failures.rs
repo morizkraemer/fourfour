@@ -2,16 +2,16 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
+use pioneer_library::{AnalysisFailure, LocalLibrary};
 use serde::{Deserialize, Serialize};
 
 use crate::analysis_run::AnalysisWorkItem;
 use crate::command_error::ErrorKind;
 
-const FAILURE_FILE: &str = "analysis-failures.json";
-const WRITE_INTERVAL: Duration = Duration::from_secs(3);
+const SIDE_FILE: &str = "analysis-failures.json";
 const DECODE_WORDS: [&str; 5] = ["decod", "audio", "codec", "no suitable format", "unsupported"];
 
 /// Failed attempts on an unchanged file after which resume and "analyse all" leave the track out. One failure
@@ -33,28 +33,50 @@ impl FailureEntry {
     fn describes(&self, path: &Path) -> bool {
         self.path == path && (self.size, self.modified_ms) == fingerprint(&fs::metadata(path))
     }
+
+    fn of(stored: AnalysisFailure) -> Option<Self> {
+        Some(Self {
+            path: stored.source_path,
+            size: stored.file_size,
+            modified_ms: stored.modified_ms,
+            kind: serde_json::from_value(serde_json::Value::String(stored.kind)).ok()?,
+            attempts: stored.attempts,
+            last_attempt_ms: stored.failed_at_ms,
+        })
+    }
+
+    fn stored(&self, track_id: i64, analyzer_version: &str) -> AnalysisFailure {
+        AnalysisFailure {
+            track_id,
+            source_path: self.path.clone(),
+            file_size: self.size,
+            modified_ms: self.modified_ms,
+            kind: serde_json::to_value(self.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default(),
+            attempts: self.attempts,
+            analyzer_version: analyzer_version.to_string(),
+            failed_at_ms: self.last_attempt_ms,
+        }
+    }
 }
 
-#[derive(Serialize, Deserialize)]
+/// The side file earlier builds kept in the app data folder.
+#[derive(Deserialize)]
 struct SideFile {
     app_version: String,
     entries: BTreeMap<i64, FailureEntry>,
 }
 
 struct Memory {
-    file: PathBuf,
-    app_version: String,
-    interval: Duration,
-    entries: BTreeMap<i64, FailureEntry>,
-    dirty: bool,
-    last_write: Option<Instant>,
+    analyzer_version: String,
+    side_file: Mutex<Option<PathBuf>>,
 }
 
-/// Remembers which tracks failed analysis, in `analysis-failures.json` next to `analysis-order.json`, so a file
-/// that cannot be analysed is not retried at every launch. Without a directory it remembers nothing.
+/// Remembers which tracks failed analysis, in the library's `analysis_failures` table, so a file that cannot be
+/// analysed is not retried at every launch. A record made by another analyzer version counts as none: a new
+/// analyzer retries every failed track. Without a version it remembers nothing.
 #[derive(Clone, Default)]
 pub(crate) struct FailureMemo {
-    inner: Arc<Mutex<Option<Memory>>>,
+    inner: Option<Arc<Memory>>,
 }
 
 fn fingerprint(meta: &io::Result<fs::Metadata>) -> (Option<u64>, Option<u64>) {
@@ -83,70 +105,41 @@ fn kind_of(meta: &io::Result<fs::Metadata>, message: &str) -> ErrorKind {
     }
 }
 
-impl Memory {
-    fn load(dir: &Path, app_version: &str) -> Self {
-        let file = dir.join(FAILURE_FILE);
-        let saved: Option<SideFile> = fs::read(&file).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
-        let entries = saved.filter(|saved| saved.app_version == app_version).map(|saved| saved.entries).unwrap_or_default();
-        Self { file, app_version: app_version.to_string(), interval: WRITE_INTERVAL, entries, dirty: false, last_write: None }
-    }
-
-    fn write_if_due(&mut self, force: bool) -> io::Result<()> {
-        if !self.dirty || (!force && self.last_write.is_some_and(|at| at.elapsed() < self.interval)) {
-            return Ok(());
-        }
-        self.last_write = Some(Instant::now());
-        self.write()?;
-        self.dirty = false;
-        Ok(())
-    }
-
-    fn write(&self) -> io::Result<()> {
-        if self.entries.is_empty() {
-            return match fs::remove_file(&self.file) {
-                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
-                _ => Ok(()),
-            };
-        }
-        if let Some(dir) = self.file.parent() {
-            fs::create_dir_all(dir)?;
-        }
-        let partial = self.file.with_extension(format!("{}.tmp", std::process::id()));
-        let saved = SideFile { app_version: self.app_version.clone(), entries: self.entries.clone() };
-        fs::write(&partial, serde_json::to_vec(&saved).map_err(io::Error::other)?)?;
-        fs::rename(&partial, &self.file)
-    }
-}
-
 impl FailureMemo {
-    pub(crate) fn in_dir(dir: PathBuf, app_version: &str) -> Self {
-        Self { inner: Arc::new(Mutex::new(Some(Memory::load(&dir, app_version)))) }
-    }
-
-    pub(crate) fn with_interval(self, interval: Duration) -> Self {
-        if let Some(memory) = self.lock().as_mut() {
-            memory.interval = interval;
+    /// Records under `analyzer_version`; the side file of earlier builds in `dir` is taken over by the first
+    /// [`Self::skip_known`].
+    pub(crate) fn in_dir(dir: PathBuf, analyzer_version: &str) -> Self {
+        Self {
+            inner: Some(Arc::new(Memory {
+                analyzer_version: analyzer_version.to_string(),
+                side_file: Mutex::new(Some(dir.join(SIDE_FILE))),
+            })),
         }
-        self
     }
 
-    fn lock(&self) -> MutexGuard<'_, Option<Memory>> {
-        self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    fn stored(&self, lib: &LocalLibrary, track_id: i64) -> Result<Option<(AnalysisFailure, Option<FailureEntry>)>, String> {
+        let Some(memory) = &self.inner else { return Ok(None) };
+        let Some(stored) = lib.analysis_failure(track_id).map_err(|e| e.to_string())? else { return Ok(None) };
+        let entry = (stored.analyzer_version == memory.analyzer_version).then(|| FailureEntry::of(stored.clone())).flatten();
+        Ok(Some((stored, entry)))
     }
 
-    pub(crate) fn entry(&self, track_id: i64) -> Option<FailureEntry> {
-        self.lock().as_ref()?.entries.get(&track_id).cloned()
+    #[cfg(test)]
+    pub(crate) fn entry(&self, lib: &LocalLibrary, track_id: i64) -> Option<FailureEntry> {
+        self.stored(lib, track_id).ok().flatten().and_then(|(_, entry)| entry)
     }
 
-    /// One more failed attempt on the file as it is now; the count starts again when the path or the file changed.
-    pub(crate) fn record_failure(&self, track_id: i64, path: &Path, message: &str) -> io::Result<()> {
-        let mut guard = self.lock();
-        let Some(memory) = guard.as_mut() else {
-            return Ok(());
-        };
+    /// One more failed attempt on the file as it is now; the count starts again when the path, the file or the
+    /// analyzer changed.
+    pub(crate) fn record_failure(&self, lib: &LocalLibrary, track_id: i64, path: &Path, message: &str) -> Result<(), String> {
+        let Some(memory) = &self.inner else { return Ok(()) };
         let meta = fs::metadata(path);
         let (size, modified_ms) = fingerprint(&meta);
-        let previous_attempts = memory.entries.get(&track_id).filter(|entry| entry.path == path && (entry.size, entry.modified_ms) == (size, modified_ms)).map_or(0, |entry| entry.attempts);
+        let previous_attempts = self
+            .stored(lib, track_id)?
+            .and_then(|(_, entry)| entry)
+            .filter(|entry| entry.path == path && (entry.size, entry.modified_ms) == (size, modified_ms))
+            .map_or(0, |entry| entry.attempts);
         let entry = FailureEntry {
             path: path.to_path_buf(),
             size,
@@ -155,58 +148,60 @@ impl FailureMemo {
             attempts: previous_attempts + 1,
             last_attempt_ms: millis(SystemTime::now()),
         };
-        memory.entries.insert(track_id, entry);
-        memory.dirty = true;
-        memory.write_if_due(false)
+        lib.record_analysis_failure(&entry.stored(track_id, &memory.analyzer_version)).map_err(|e| e.to_string())
     }
 
-    pub(crate) fn record_success(&self, track_id: i64) -> io::Result<()> {
-        let mut guard = self.lock();
-        let Some(memory) = guard.as_mut() else {
+    pub(crate) fn record_success(&self, lib: &LocalLibrary, track_id: i64) -> Result<(), String> {
+        if self.inner.is_none() {
             return Ok(());
-        };
-        if memory.entries.remove(&track_id).is_some() {
-            memory.dirty = true;
         }
-        memory.write_if_due(false)
+        lib.clear_analysis_failures(&[track_id]).map(|_| ()).map_err(|e| e.to_string())
     }
 
-    pub(crate) fn flush(&self) -> io::Result<()> {
-        self.lock().as_mut().map_or(Ok(()), |memory| memory.write_if_due(true))
-    }
-
-    /// `work` without the tracks that failed `SKIP_AFTER_ATTEMPTS` times on this very file, and how many that
-    /// were. Entries whose file changed or whose track points elsewhere now are dropped (the track is retried),
-    /// and so are entries of tracks that are gone.
-    pub(crate) fn skip_known(&self, work: Vec<AnalysisWorkItem>, is_track: impl Fn(i64) -> bool) -> io::Result<(Vec<AnalysisWorkItem>, usize)> {
-        let mut guard = self.lock();
-        let Some(memory) = guard.as_mut() else {
-            return Ok((work, 0));
-        };
-        let before = memory.entries.len();
-        memory.entries.retain(|id, _| is_track(*id));
+    /// `work` without the tracks that failed `SKIP_AFTER_ATTEMPTS` times on this very file with this analyzer, and
+    /// how many that were. Records whose file changed, whose track points elsewhere now or that another analyzer
+    /// made are dropped (the track is retried); records of removed tracks went with the track.
+    pub(crate) fn skip_known(&self, lib: &LocalLibrary, work: Vec<AnalysisWorkItem>) -> Result<(Vec<AnalysisWorkItem>, usize), String> {
+        let Some(memory) = &self.inner else { return Ok((work, 0)) };
+        self.adopt_side_file(lib, memory);
+        let mut stale = Vec::new();
         let mut skipped = 0;
         let mut kept = Vec::with_capacity(work.len());
         for item in work {
-            match memory.entries.get(&item.0) {
-                Some(entry) if entry.describes(&item.1) => {
+            match self.stored(lib, item.0)? {
+                Some((_, Some(entry))) if entry.describes(&item.1) => {
                     if entry.attempts >= SKIP_AFTER_ATTEMPTS {
                         skipped += 1;
                         continue;
                     }
                 }
-                Some(_) => {
-                    memory.entries.remove(&item.0);
-                }
+                Some(_) => stale.push(item.0),
                 None => {}
             }
             kept.push(item);
         }
-        if memory.entries.len() != before {
-            memory.dirty = true;
-            memory.write_if_due(true)?;
+        if !stale.is_empty() {
+            lib.clear_analysis_failures(&stale).map_err(|e| e.to_string())?;
         }
         Ok((kept, skipped))
+    }
+
+    /// Takes over the entries of the side file earlier builds wrote, for tracks that still point at the same file,
+    /// and removes the file. Once per memo.
+    fn adopt_side_file(&self, lib: &LocalLibrary, memory: &Memory) {
+        let Some(file) = memory.side_file.lock().unwrap_or_else(|p| p.into_inner()).take() else { return };
+        let Ok(bytes) = fs::read(&file) else { return };
+        if let Ok(saved) = serde_json::from_slice::<SideFile>(&bytes)
+            && saved.app_version == memory.analyzer_version
+        {
+            for (track_id, entry) in saved.entries {
+                let same_file = lib.get_track(track_id).ok().flatten().is_some_and(|track| track.source_path == entry.path);
+                if same_file && lib.analysis_failure(track_id).ok().flatten().is_none() {
+                    let _ = lib.record_analysis_failure(&entry.stored(track_id, &memory.analyzer_version));
+                }
+            }
+        }
+        let _ = fs::remove_file(&file);
     }
 }
 
@@ -214,12 +209,15 @@ impl FailureMemo {
 mod tests {
     use super::*;
     use std::fs;
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
+
+    use pioneer_usb_writer::models::Track;
 
     const VERSION: &str = "1.0.0";
 
     struct Scratch {
         dir: PathBuf,
+        lib: LocalLibrary,
     }
 
     impl Scratch {
@@ -228,7 +226,33 @@ mod tests {
             fs::remove_dir_all(&dir).ok();
             fs::create_dir_all(dir.join("data")).unwrap();
             fs::create_dir_all(dir.join("music")).unwrap();
-            Self { dir }
+            let lib = LocalLibrary::open_in_memory().unwrap();
+            for id in 1..=3 {
+                let track = Track {
+                    id: 0,
+                    source_path: dir.join("music").join(format!("track{id}.mp3")),
+                    usb_path: format!("/Contents/track{id}.mp3"),
+                    title: format!("Track {id}"),
+                    artist: String::new(),
+                    album: String::new(),
+                    genre: String::new(),
+                    label: String::new(),
+                    remixer: String::new(),
+                    comment: String::new(),
+                    year: 0,
+                    disc_number: 0,
+                    track_number: 0,
+                    tempo: 0,
+                    key: String::new(),
+                    duration_secs: 1.0,
+                    sample_rate: 44_100,
+                    bitrate: 0,
+                    file_size: 0,
+                    artwork: None,
+                };
+                assert_eq!(lib.add_track(&track).unwrap(), id);
+            }
+            Self { dir, lib }
         }
 
         fn data(&self) -> PathBuf {
@@ -242,11 +266,26 @@ mod tests {
         }
 
         fn memo(&self) -> FailureMemo {
-            FailureMemo::in_dir(self.data(), VERSION).with_interval(Duration::ZERO)
+            FailureMemo::in_dir(self.data(), VERSION)
         }
 
         fn side_file(&self) -> PathBuf {
-            self.data().join("analysis-failures.json")
+            self.data().join(SIDE_FILE)
+        }
+
+        fn fail(&self, memo: &FailureMemo, id: i64, path: &Path, times: u32) {
+            for _ in 0..times {
+                memo.record_failure(&self.lib, id, path, "failed to decode any audio packets").unwrap();
+            }
+        }
+
+        fn kept(&self, memo: &FailureMemo, work: Vec<AnalysisWorkItem>) -> (Vec<i64>, usize) {
+            let (work, skipped) = memo.skip_known(&self.lib, work).unwrap();
+            (work.into_iter().map(|(id, _)| id).collect(), skipped)
+        }
+
+        fn entry(&self, memo: &FailureMemo, id: i64) -> Option<FailureEntry> {
+            memo.entry(&self.lib, id)
         }
     }
 
@@ -261,26 +300,15 @@ mod tests {
         file.set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(seconds_after_epoch)).unwrap();
     }
 
-    fn fail(memo: &FailureMemo, id: i64, path: &Path, times: u32) {
-        for _ in 0..times {
-            memo.record_failure(id, path, "failed to decode any audio packets").unwrap();
-        }
-    }
-
-    fn kept(memo: &FailureMemo, work: Vec<AnalysisWorkItem>) -> (Vec<i64>, usize) {
-        let (work, skipped) = memo.skip_known(work, |_| true).unwrap();
-        (work.into_iter().map(|(id, _)| id).collect(), skipped)
-    }
-
     #[test]
     fn a_track_is_skipped_after_two_failed_attempts_on_the_same_file() {
         let s = Scratch::new("skip");
         let bad = s.file("bad.mp3", b"junk");
         let fine = s.file("fine.mp3", b"ok");
         let memo = s.memo();
-        fail(&memo, 1, &bad, 2);
+        s.fail(&memo, 1, &bad, 2);
 
-        assert_eq!(kept(&memo, vec![(1, bad), (2, fine)]), (vec![2], 1));
+        assert_eq!(s.kept(&memo, vec![(1, bad), (2, fine)]), (vec![2], 1));
     }
 
     #[test]
@@ -288,10 +316,10 @@ mod tests {
         let s = Scratch::new("one");
         let bad = s.file("bad.mp3", b"junk");
         let memo = s.memo();
-        fail(&memo, 1, &bad, 1);
+        s.fail(&memo, 1, &bad, 1);
 
-        assert_eq!(kept(&memo, vec![(1, bad)]), (vec![1], 0));
-        assert_eq!(memo.entry(1).unwrap().attempts, 1);
+        assert_eq!(s.kept(&memo, vec![(1, bad)]), (vec![1], 0));
+        assert_eq!(s.entry(&memo, 1).unwrap().attempts, 1);
     }
 
     #[test]
@@ -302,14 +330,15 @@ mod tests {
         touch(&by_time, 1_000);
         touch(&by_size, 1_000);
         let memo = s.memo();
-        fail(&memo, 1, &by_time, 2);
-        fail(&memo, 2, &by_size, 2);
+        s.fail(&memo, 1, &by_time, 2);
+        s.fail(&memo, 2, &by_size, 2);
         touch(&by_time, 2_000);
         fs::write(&by_size, b"junk, but longer").unwrap();
         touch(&by_size, 1_000);
 
-        assert_eq!(kept(&memo, vec![(1, by_time), (2, by_size)]), (vec![1, 2], 0));
-        assert_eq!((memo.entry(1), memo.entry(2)), (None, None));
+        assert_eq!(s.kept(&memo, vec![(1, by_time), (2, by_size)]), (vec![1, 2], 0));
+        assert_eq!((s.entry(&memo, 1), s.entry(&memo, 2)), (None, None));
+        assert!(s.lib.analysis_failures().unwrap().is_empty());
     }
 
     #[test]
@@ -318,12 +347,12 @@ mod tests {
         let bad = s.file("bad.mp3", b"junk");
         touch(&bad, 1_000);
         let memo = s.memo();
-        fail(&memo, 1, &bad, 2);
+        s.fail(&memo, 1, &bad, 2);
         touch(&bad, 2_000);
-        fail(&memo, 1, &bad, 1);
+        s.fail(&memo, 1, &bad, 1);
 
-        assert_eq!(memo.entry(1).unwrap().attempts, 1);
-        assert_eq!(kept(&memo, vec![(1, bad)]), (vec![1], 0));
+        assert_eq!(s.entry(&memo, 1).unwrap().attempts, 1);
+        assert_eq!(s.kept(&memo, vec![(1, bad)]), (vec![1], 0));
     }
 
     #[test]
@@ -331,12 +360,12 @@ mod tests {
         let s = Scratch::new("missing");
         let path = s.dir.join("music").join("gone.mp3");
         let memo = s.memo();
-        fail(&memo, 1, &path, 2);
-        assert_eq!(memo.entry(1).unwrap().kind, ErrorKind::NotFound);
-        assert_eq!(kept(&memo, vec![(1, path.clone())]), (vec![], 1));
+        s.fail(&memo, 1, &path, 2);
+        assert_eq!(s.entry(&memo, 1).unwrap().kind, ErrorKind::NotFound);
+        assert_eq!(s.kept(&memo, vec![(1, path.clone())]), (vec![], 1));
 
         fs::write(&path, b"back").unwrap();
-        assert_eq!(kept(&memo, vec![(1, path)]), (vec![1], 0));
+        assert_eq!(s.kept(&memo, vec![(1, path)]), (vec![1], 0));
     }
 
     #[test]
@@ -345,26 +374,26 @@ mod tests {
         let old = s.file("old.mp3", b"junk");
         let moved = s.file("moved.mp3", b"junk");
         let memo = s.memo();
-        fail(&memo, 1, &old, 2);
+        s.fail(&memo, 1, &old, 2);
 
-        assert_eq!(kept(&memo, vec![(1, moved)]), (vec![1], 0));
-        assert_eq!(memo.entry(1), None);
+        assert_eq!(s.kept(&memo, vec![(1, moved)]), (vec![1], 0));
+        assert_eq!(s.entry(&memo, 1), None);
     }
 
     #[test]
-    fn removed_tracks_drop_out_of_the_memo() {
+    fn removed_tracks_take_their_record_with_them() {
         let s = Scratch::new("removed");
         let a = s.file("a.mp3", b"junk");
         let b = s.file("b.mp3", b"junk");
         let memo = s.memo();
-        fail(&memo, 1, &a, 2);
-        fail(&memo, 2, &b, 2);
+        s.fail(&memo, 1, &a, 2);
+        s.fail(&memo, 2, &b, 2);
 
-        memo.skip_known(Vec::new(), |id| id == 2).unwrap();
+        s.lib.remove_track(1).unwrap();
 
-        assert_eq!((memo.entry(1), memo.entry(2).map(|e| e.attempts)), (None, Some(2)));
+        assert_eq!((s.entry(&memo, 1), s.entry(&memo, 2).map(|e| e.attempts)), (None, Some(2)));
         let reloaded = s.memo();
-        assert_eq!((reloaded.entry(1), reloaded.entry(2).map(|e| e.attempts)), (None, Some(2)));
+        assert_eq!(s.entry(&reloaded, 2).map(|e| e.attempts), Some(2));
     }
 
     #[test]
@@ -372,106 +401,96 @@ mod tests {
         let s = Scratch::new("success");
         let bad = s.file("bad.mp3", b"junk");
         let memo = s.memo();
-        fail(&memo, 1, &bad, 2);
-        memo.record_success(1).unwrap();
+        s.fail(&memo, 1, &bad, 2);
+        memo.record_success(&s.lib, 1).unwrap();
 
-        assert_eq!(memo.entry(1), None);
-        assert!(!s.side_file().exists());
-        assert_eq!(kept(&memo, vec![(1, bad)]), (vec![1], 0));
+        assert_eq!(s.entry(&memo, 1), None);
+        assert!(s.lib.analysis_failures().unwrap().is_empty());
+        assert_eq!(s.kept(&memo, vec![(1, bad)]), (vec![1], 0));
     }
 
     #[test]
-    fn entries_read_back_with_their_kind_and_leave_no_temp_file() {
+    fn entries_read_back_with_their_kind_and_write_no_side_file() {
         let s = Scratch::new("roundtrip");
         let bad = s.file("bad.mp3", b"junk");
         let slow = s.file("slow.mp3", b"junk");
         let memo = s.memo();
-        memo.record_failure(1, &bad, "failed to decode any audio packets").unwrap();
-        memo.record_failure(2, &slow, "TIMEOUT after 900s").unwrap();
-        memo.record_failure(3, &s.dir.join("music").join("gone.mp3"), "No such file or directory").unwrap();
+        memo.record_failure(&s.lib, 1, &bad, "failed to decode any audio packets").unwrap();
+        memo.record_failure(&s.lib, 2, &slow, "TIMEOUT after 900s").unwrap();
+        memo.record_failure(&s.lib, 3, &s.dir.join("music").join("gone.mp3"), "No such file or directory").unwrap();
 
         let reloaded = s.memo();
-        let kinds: Vec<_> = (1..=3).map(|id| reloaded.entry(id).unwrap().kind).collect();
-        let names: Vec<_> = fs::read_dir(s.data()).unwrap().flatten().map(|e| e.file_name().into_string().unwrap()).collect();
-        let first = reloaded.entry(1).unwrap();
+        let kinds: Vec<_> = (1..=3).map(|id| s.entry(&reloaded, id).unwrap().kind).collect();
+        let first = s.entry(&reloaded, 1).unwrap();
 
         assert_eq!(kinds, vec![ErrorKind::DecodeFailed, ErrorKind::AnalysisFailed, ErrorKind::NotFound]);
-        assert_eq!(names, ["analysis-failures.json"]);
+        assert_eq!(fs::read_dir(s.data()).unwrap().count(), 0);
         assert_eq!((first.path, first.size, first.attempts), (bad, Some(4), 1));
         assert!(first.last_attempt_ms > 0);
+        assert_eq!(s.lib.analysis_failures().unwrap()[1].kind, "analysis_failed");
     }
 
     #[test]
-    fn a_missing_or_corrupt_side_file_skips_nothing() {
-        let s = Scratch::new("corrupt");
-        let bad = s.file("bad.mp3", b"junk");
-        assert_eq!(kept(&s.memo(), vec![(1, bad.clone())]), (vec![1], 0));
-
-        let good = {
-            let memo = s.memo();
-            fail(&memo, 1, &bad, 2);
-            fs::read(s.side_file()).unwrap()
-        };
-        let broken: [&[u8]; 6] = [
-            &good[..good.len() / 2],
-            b"[]",
-            b"{\"app_version\": 3, \"entries\": 7}",
-            b"{\"app_version\": \"1.0.0\", \"entries\": {\"1\": {\"path\": 5}}}",
-            b"{\"app_version\": \"1.0.0\", \"entries\": {\"x\": {}}}",
-            &[0xff, 0xfe, 0x00],
-        ];
-        for bytes in broken {
-            fs::write(s.side_file(), bytes).unwrap();
-            assert_eq!(kept(&s.memo(), vec![(1, bad.clone())]), (vec![1], 0), "{}", String::from_utf8_lossy(bytes));
-        }
-
-        fs::write(s.side_file(), b"{ not json").unwrap();
-        let memo = s.memo();
-        fail(&memo, 1, &bad, 1);
-        assert_eq!(memo.entry(1).unwrap().attempts, 1, "a corrupt file is replaced by the next write");
-        assert_eq!(s.memo().entry(1).unwrap().attempts, 1);
-    }
-
-    #[test]
-    fn entries_of_another_app_version_are_ignored() {
+    fn records_of_another_analyzer_version_are_retried_and_dropped() {
         let s = Scratch::new("version");
         let bad = s.file("bad.mp3", b"junk");
-        let old = FailureMemo::in_dir(s.data(), "0.9.0").with_interval(Duration::ZERO);
-        fail(&old, 1, &bad, 2);
+        let old = FailureMemo::in_dir(s.data(), "0.9.0");
+        s.fail(&old, 1, &bad, 2);
+        assert_eq!(s.kept(&old, vec![(1, bad.clone())]), (vec![], 1));
 
-        assert_eq!(kept(&s.memo(), vec![(1, bad.clone())]), (vec![1], 0));
-        assert_eq!(kept(&old, vec![(1, bad)]), (vec![], 1));
+        let new = s.memo();
+        assert_eq!(s.entry(&new, 1), None);
+        s.fail(&new, 1, &bad, 1);
+        assert_eq!(s.entry(&new, 1).unwrap().attempts, 1, "the count starts again with the new analyzer");
+        assert_eq!(s.kept(&new, vec![(1, bad.clone())]), (vec![1], 0));
+
+        s.fail(&old, 1, &bad, 2);
+        assert_eq!(s.kept(&new, vec![(1, bad)]), (vec![1], 0));
+        assert!(s.lib.analysis_failures().unwrap().is_empty(), "the other version's record is dropped");
     }
 
     #[test]
-    fn writes_are_coalesced_and_a_flush_catches_up() {
-        let s = Scratch::new("coalesce");
-        let a = s.file("a.mp3", b"junk");
-        let memo = FailureMemo::in_dir(s.data(), VERSION).with_interval(Duration::from_secs(3600));
-        memo.record_failure(1, &a, "x").unwrap();
-        memo.record_failure(2, &a, "x").unwrap();
+    fn the_side_file_of_earlier_builds_is_taken_over_once_and_removed() {
+        let s = Scratch::new("adopt");
+        let path_1 = s.lib.get_track(1).unwrap().unwrap().source_path;
+        fs::write(&path_1, b"junk").unwrap();
+        let (size, modified_ms) = fingerprint(&fs::metadata(&path_1));
+        let entry = |path: &Path| FailureEntry {
+            path: path.to_path_buf(),
+            size,
+            modified_ms,
+            kind: ErrorKind::DecodeFailed,
+            attempts: 2,
+            last_attempt_ms: 7,
+        };
+        let side = serde_json::json!({
+            "app_version": VERSION,
+            "entries": { "1": entry(&path_1), "2": entry(Path::new("/elsewhere/other.mp3")), "99": entry(&path_1) },
+        });
+        fs::write(s.side_file(), serde_json::to_vec(&side).unwrap()).unwrap();
 
-        let after_two = FailureMemo::in_dir(s.data(), VERSION);
-        assert_eq!((after_two.entry(1).is_some(), after_two.entry(2).is_some()), (true, false));
+        let memo = s.memo();
+        assert_eq!(s.kept(&memo, vec![(1, path_1.clone())]), (vec![], 1));
+        assert!(!s.side_file().exists());
+        let ids: Vec<i64> = s.lib.analysis_failures().unwrap().iter().map(|f| f.track_id).collect();
+        assert_eq!(ids, [1], "only the entry whose track still points at the file");
 
-        memo.flush().unwrap();
-        let after_flush = FailureMemo::in_dir(s.data(), VERSION);
-        assert_eq!((after_flush.entry(1).is_some(), after_flush.entry(2).is_some()), (true, true));
-
-        fs::remove_file(s.side_file()).unwrap();
-        memo.flush().unwrap();
-        assert!(!s.side_file().exists(), "nothing changed since the last write");
+        fs::write(s.side_file(), b"{ not json").unwrap();
+        assert_eq!(s.kept(&memo, vec![(1, path_1)]), (vec![], 1));
+        assert!(s.side_file().exists(), "taken over once per memo");
+        assert_eq!(s.kept(&s.memo(), Vec::new()), (vec![], 0));
+        assert!(!s.side_file().exists(), "an unreadable side file is removed without changes");
     }
 
     #[test]
-    fn a_memo_without_a_dir_remembers_nothing() {
+    fn a_memo_without_a_version_remembers_nothing() {
+        let s = Scratch::new("none");
         let memo = FailureMemo::default();
         let path = PathBuf::from("/music/t1.wav");
-        memo.record_failure(1, &path, "x").unwrap();
-        memo.record_failure(1, &path, "x").unwrap();
-        memo.flush().unwrap();
+        memo.record_failure(&s.lib, 1, &path, "x").unwrap();
+        memo.record_failure(&s.lib, 1, &path, "x").unwrap();
 
-        assert_eq!(memo.entry(1), None);
-        assert_eq!(kept(&memo, vec![(1, path)]), (vec![1], 0));
+        assert_eq!(s.entry(&memo, 1), None);
+        assert_eq!(s.kept(&memo, vec![(1, path)]), (vec![1], 0));
     }
 }

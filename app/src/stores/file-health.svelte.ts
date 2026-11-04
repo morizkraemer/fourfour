@@ -11,6 +11,7 @@ import {
   type RelocateReport,
 } from '../services/tauri.svelte.ts';
 import { RELOCATED_MARK_MS, type FileState } from '../lib/fileHealth.ts';
+import { failureText, relocateFailureText } from '../lib/userErrors.ts';
 import { fileStatus } from './file-status.svelte.ts';
 import { library, bumpLibraryTracks } from './library.svelte.ts';
 import { ui } from './ui.svelte.ts';
@@ -80,7 +81,8 @@ export async function checkLibraryAgain() {
     applyHealth(await checkLibraryFiles());
   } catch (err) {
     fileStatus.running = false;
-    library.statusMessage = `Library check failed: ${String(err)}`;
+    console.info('checkLibraryFiles failed:', err);
+    library.statusMessage = failureText("Couldn't check your files.", err);
   }
 }
 
@@ -107,7 +109,8 @@ export async function relocateMissing() {
     applyHealth(health, report.matched.map((m) => m.track_id));
     relocateResult.report = report;
   } catch (err) {
-    relocateResult.error = String(err);
+    console.info('relocate failed:', err);
+    relocateResult.error = relocateFailureText(err);
   } finally {
     fileStatus.relocating = false;
     fileStatus.dialogOpen = true;
@@ -131,7 +134,8 @@ export async function locateTrack(trackId: number) {
       };
     }
   } catch (err) {
-    relocateResult.error = String(err);
+    console.info('relocate failed:', err);
+    relocateResult.error = relocateFailureText(err);
   }
 }
 

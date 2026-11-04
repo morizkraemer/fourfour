@@ -10,9 +10,11 @@ use serde_json::{json, Value};
 
 use crate::bt::{BeatEngine, BeatResult, MODEL_RATE};
 use crate::cyankey;
-use crate::decode::{decode_mono, resample_to};
+use crate::decode::{decode_mono_measured, resample_to};
+use crate::energy::{self, Energy};
 use crate::fit::{self, FitParams, Window, FPS};
 use crate::keymap::camelot;
+use crate::loudness::Loudness;
 use crate::mp3::{self, DelayRule};
 use crate::service;
 use crate::waveform::{self, Waveforms};
@@ -25,12 +27,14 @@ pub struct Config {
     pub beats: bool,
     pub key: bool,
     pub waveform: bool,
+    pub energy: bool,
     pub keep_logits: bool,
+    pub loudness: bool,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::ModelLead, beats: true, key: true, waveform: true, keep_logits: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::ModelLead, beats: true, key: true, waveform: true, energy: false, keep_logits: false, loudness: false }
     }
 }
 
@@ -48,7 +52,9 @@ pub struct Analysis {
     pub waveform_checksum: Option<u64>,
     pub detail_entries: usize,
     pub mp3_delay_s: f64,
+    pub energy: Option<Energy>,
     pub logits: Option<(Vec<f32>, Vec<f32>)>,
+    pub loudness: Option<Loudness>,
     pub ms: Value,
 }
 
@@ -100,7 +106,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     let cancel = control.cancel;
     let total = Instant::now();
     let t = Instant::now();
-    let native = decode_mono(path)?;
+    let native = decode_mono_measured(path, cfg.loudness)?;
     let decode_ms = ms(t);
     if native.samples.is_empty() {
         return Err(anyhow!("no audio decoded"));
@@ -110,12 +116,22 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
     }
     let rate = native.rate;
     let truncated = native.truncated;
+    let loudness = native.loudness;
+    let loudness_ms = native.loudness_ms;
     let duration_s = native.samples.len() as f64 / rate as f64;
     let gapless_s = native.gapless.len() as f64 / rate as f64;
     let gapless_start_s = native.gapless.start as f64 / rate as f64;
     let native = Arc::new(native);
     let side_threads = if cfg.threads > 1 { 2 } else { 1 };
-    let (beat_part, key_part, wf_part) = std::thread::scope(|s| {
+    let (beat_part, key_part, wf_part, energy_part) = std::thread::scope(|s| {
+        let energy_thread = cfg.energy.then(|| {
+            let native = native.clone();
+            s.spawn(move || {
+                let t = Instant::now();
+                let energy = energy::analyze(native.gapless_samples(), rate);
+                (energy, ms(t))
+            })
+        });
         let key = cfg.key.then(|| {
             let native = native.clone();
             s.spawn(move || -> Result<KeyPart> {
@@ -174,7 +190,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
             Ok((bt, fit, delay, ms(t), mp3_ms))
         })();
         let (key, wf) = fast.join().unwrap();
-        (beat, key, wf)
+        (beat, key, wf, energy_thread.map(|h| h.join().unwrap()))
     });
     let (bt, fit, delay, fit_ms, mp3_ms) = beat_part?;
     if cancel.load(Ordering::Relaxed) {
@@ -200,9 +216,13 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
         Some((w, t)) => (Some(w), t),
         None => (None, 0.0),
     };
+    let (energy, energy_ms) = match energy_part {
+        Some((energy, energy_ms)) => (energy, Some(energy_ms)),
+        None => (None, None),
+    };
     let waveform_checksum = waveforms.as_ref().map(waveform::checksum);
     let detail_entries = waveforms.as_ref().map_or(0, |w| w.pwv7.len());
-    let ms_doc = json!({
+    let mut ms_doc = json!({
         "decode": decode_ms,
         "resample": bt.resample_ms + resample44_ms,
         "mel": bt.mel_ms,
@@ -214,6 +234,12 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
         "waveform": wf_ms,
         "total": ms(total),
     });
+    if cfg.loudness {
+        ms_doc["loudness"] = json!(loudness_ms);
+    }
+    if let Some(energy_ms) = energy_ms {
+        ms_doc["energy"] = json!(energy_ms);
+    }
     Ok(Analysis {
         duration_s,
         truncated,
@@ -228,14 +254,16 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
         waveform_checksum,
         detail_entries,
         mp3_delay_s: delay,
+        energy,
         logits: cfg.keep_logits.then(|| (bt.beat_logits, bt.down_logits)),
+        loudness,
         ms: ms_doc,
     })
 }
 
 impl Analysis {
     pub fn to_json(&self, path: &Path, id: Option<u64>) -> Value {
-        json!({
+        let mut doc = json!({
             "id": id,
             "path": path,
             "duration_s": self.duration_s,
@@ -253,6 +281,49 @@ impl Analysis {
             "waveform_checksum": self.waveform_checksum,
             "detail_entries": self.detail_entries,
             "ms": self.ms,
-        })
+        });
+        if let Some(l) = &self.loudness {
+            doc["loudness"] = json!({ "lufs": l.lufs, "peak_db": l.peak_db, "gain_db": l.gain_db });
+        }
+        if let Some(energy) = &self.energy {
+            doc["energy"] = energy.to_json();
+        }
+        doc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn analysis(loudness: Option<Loudness>) -> Analysis {
+        Analysis {
+            duration_s: 1.0,
+            truncated: false,
+            bpm: None,
+            first_beat_s: None,
+            beats_s: Vec::new(),
+            raw_beats_s: Vec::new(),
+            downbeats_s: Vec::new(),
+            key_class: None,
+            key_confidence: 0.0,
+            waveforms: None,
+            waveform_checksum: None,
+            detail_entries: 0,
+            mp3_delay_s: 0.0,
+            energy: None,
+            logits: None,
+            loudness,
+            ms: Value::Null,
+        }
+    }
+
+    #[test]
+    fn loudness_is_off_by_default_and_absent_from_the_json_unless_measured() {
+        assert!(!Config::default().loudness);
+        let absent = analysis(None).to_json(Path::new("a.wav"), None);
+        assert!(absent.get("loudness").is_none());
+        let present = analysis(Some(Loudness { lufs: -9.5, peak_db: -0.3, gain_db: -4.5 })).to_json(Path::new("a.wav"), None);
+        assert_eq!(present["loudness"], json!({ "lufs": -9.5, "peak_db": -0.3, "gain_db": -4.5 }));
     }
 }

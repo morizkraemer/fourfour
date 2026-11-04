@@ -127,8 +127,8 @@ describe('buildPaletteGroups', () => {
     const page = rows.find((r) => r.id === 'setting:page.audio')!;
     expect(engine.keepOpen).toBe(true);
     expect(page.keepOpen).toBe(false);
-    engine.choose!('python');
-    expect(change).toHaveBeenCalledWith('python');
+    engine.choose!('built-in');
+    expect(change).toHaveBeenCalledWith('built-in');
     engine.run();
     expect(change).toHaveBeenLastCalledWith();
   });

@@ -148,7 +148,8 @@ describe('saving', () => {
     });
     stepTrackBpm(4, 5, 'coarse');
     await vi.advanceTimersByTimeAsync(500);
-    expect(library.statusMessage).toContain('Setting the BPM failed');
+    expect(library.statusMessage).toBe("Couldn't set the BPM. The disk is full. Free up some space and try again.");
+    expect(library.statusMessage).not.toContain('disk full');
     expect(row().bpmExact).toBe(120);
   });
 });

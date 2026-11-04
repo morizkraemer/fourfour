@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analysis_write::STAGING_PREFIX;
 use crate::failure::{Failure, LibraryFailure};
-use crate::{FileStatus, LocalLibrary, file_status, queries};
+use crate::{COVERS_DIR, FileStatus, LocalLibrary, file_status, queries};
 
 pub const BACKUP_FORMAT: &str = "library-backup";
 pub const BACKUP_VERSION: u32 = 1;
@@ -26,6 +26,8 @@ const MANIFEST: &str = "manifest.json";
 const LIBRARY_DIR: &str = "library";
 const DB_FILE: &str = "library.db";
 const ANLZ_DIR: &str = "anlz";
+/// Folders next to `library.db` that belong to the library and go into a backup.
+const LIBRARY_FOLDERS: [&str; 2] = [ANLZ_DIR, COVERS_DIR];
 const SETTINGS_DIR: &str = "settings";
 const AUDIO_DIR: &str = "audio";
 
@@ -79,8 +81,13 @@ impl UnpackedBackup {
         self.staging.join(LIBRARY_DIR).join(DB_FILE)
     }
 
+    #[cfg(test)]
     fn anlz_path(&self) -> PathBuf {
-        self.staging.join(LIBRARY_DIR).join(ANLZ_DIR)
+        self.folder_path(ANLZ_DIR)
+    }
+
+    fn folder_path(&self, name: &str) -> PathBuf {
+        self.staging.join(LIBRARY_DIR).join(name)
     }
 
     pub fn discard(self) {
@@ -347,16 +354,22 @@ fn remove_db_files(db: &Path) -> Result<()> {
 /// must be closed. Returns the reopened library.
 pub fn install_backup(unpacked: UnpackedBackup, library_db: &Path) -> Result<LocalLibrary> {
     let folder = library_db.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let anlz = folder.join(ANLZ_DIR);
     let aside = unpacked.staging.join("previous");
     std::fs::create_dir_all(&aside)?;
-    if anlz.exists() {
-        std::fs::rename(&anlz, aside.join(ANLZ_DIR)).with_context(|| format!("Failed to move {}", anlz.display()))?;
+    for name in LIBRARY_FOLDERS {
+        let current = folder.join(name);
+        if current.exists() {
+            std::fs::rename(&current, aside.join(name)).with_context(|| format!("Failed to move {}", current.display()))?;
+        }
     }
     remove_db_files(library_db)?;
     std::fs::rename(unpacked.db_path(), library_db).with_context(|| format!("Failed to write {}", library_db.display()))?;
-    if unpacked.anlz_path().exists() {
-        std::fs::rename(unpacked.anlz_path(), &anlz).with_context(|| format!("Failed to write {}", anlz.display()))?;
+    for name in LIBRARY_FOLDERS {
+        let restored = unpacked.folder_path(name);
+        if restored.exists() {
+            let target = folder.join(name);
+            std::fs::rename(&restored, &target).with_context(|| format!("Failed to write {}", target.display()))?;
+        }
     }
     let library = LocalLibrary::open(library_db)?;
     library.relink_paths(&unpacked.audio_paths)?;
@@ -368,8 +381,8 @@ impl LocalLibrary {
     /// What a backup would hold, for the Settings page: library data and the audio that is there.
     pub fn backup_sizes(&self) -> Result<BackupSizes> {
         let Some(db) = &self.db_path else { return Ok(BackupSizes::default()) };
-        let anlz: u64 = self.anlz_dir().map(|d| files_under(&d).iter().map(|f| file_len(f)).sum()).unwrap_or(0);
-        let mut sizes = BackupSizes { library_bytes: file_len(db) + anlz, ..BackupSizes::default() };
+        let folders: u64 = self.library_folder_files().iter().flat_map(|(_, _, files)| files).map(|f| file_len(f)).sum();
+        let mut sizes = BackupSizes { library_bytes: file_len(db) + folders, ..BackupSizes::default() };
         for file in self.track_files()? {
             if file_status(&file.path) == FileStatus::Ok {
                 sizes.audio_bytes += file_len(&file.path);
@@ -377,6 +390,20 @@ impl LocalLibrary {
             }
         }
         Ok(sizes)
+    }
+
+    /// Each library folder's name, root and files.
+    fn library_folder_files(&self) -> Vec<(&'static str, PathBuf, Vec<PathBuf>)> {
+        let Some(db) = &self.db_path else { return Vec::new() };
+        let parent = db.parent().unwrap_or(Path::new("."));
+        LIBRARY_FOLDERS
+            .iter()
+            .map(|name| {
+                let root = parent.join(name);
+                let files = files_under(&root);
+                (*name, root, files)
+            })
+            .collect()
     }
 
     fn relink_paths(&self, paths: &HashMap<i64, PathBuf>) -> Result<()> {
@@ -437,8 +464,7 @@ impl LocalLibrary {
         self.conn
             .execute("VACUUM INTO ?1", [snapshot.to_string_lossy()])
             .with_context(|| format!("Failed to copy the library database {}", db.display()))?;
-        let anlz_root = self.anlz_dir().unwrap_or_default();
-        let anlz_files = files_under(&anlz_root);
+        let folders = self.library_folder_files();
 
         let mut audio = Vec::new();
         let mut audio_missing = Vec::new();
@@ -461,7 +487,7 @@ impl LocalLibrary {
         }
 
         let total_bytes = file_len(snapshot)
-            + anlz_files.iter().map(|f| file_len(f)).sum::<u64>()
+            + folders.iter().flat_map(|(_, _, files)| files).map(|f| file_len(f)).sum::<u64>()
             + audio.iter().map(|a| file_len(Path::new(&a.original_path))).sum::<u64>()
             + settings.iter().map(|s| s.bytes.len() as u64).sum::<u64>();
         let manifest = BackupManifest {
@@ -485,11 +511,13 @@ impl LocalLibrary {
         let mut done = 0u64;
         append_file(&mut tar, &format!("{LIBRARY_DIR}/{DB_FILE}"), snapshot, &mut done)?;
         progress(done, total_bytes);
-        for file in &anlz_files {
-            let rel = file.strip_prefix(&anlz_root).unwrap_or(file);
-            let rel = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
-            append_file(&mut tar, &format!("{LIBRARY_DIR}/{ANLZ_DIR}/{rel}"), file, &mut done)?;
-            progress(done, total_bytes);
+        for (name, root, files) in &folders {
+            for file in files {
+                let rel = file.strip_prefix(root).unwrap_or(file);
+                let rel = rel.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
+                append_file(&mut tar, &format!("{LIBRARY_DIR}/{name}/{rel}"), file, &mut done)?;
+                progress(done, total_bytes);
+            }
         }
         for setting in settings {
             append_bytes(&mut tar, &format!("{SETTINGS_DIR}/{}", setting.name), &setting.bytes)?;
@@ -578,6 +606,7 @@ mod tests {
         let set = lib.create_playlist("Set").unwrap();
         lib.set_playlist_tracks(set, &[b, a]).unwrap();
         lib.set_analysis(a, &make_analysis()).unwrap();
+        lib.set_artwork(a, b"cover-a").unwrap();
         lib.set_user_rating(a, 4).unwrap();
         let grid = [BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }];
         lib.set_beat_grid(a, &grid, Some(0.25), Some(120.25)).unwrap();
@@ -624,6 +653,7 @@ mod tests {
         assert!(f.root.join("Music/House/a.mp3").exists());
         assert_eq!(restored.user_edits(1).rating, Some(4));
         assert_eq!(restored.user_edits(1).grid_offset_ms, Some(0.25));
+        assert_eq!(restored.get_artwork(1).unwrap(), Some(b"cover-a".to_vec()), "the cover store is in the backup");
     }
 
     #[test]

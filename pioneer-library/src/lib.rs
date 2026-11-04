@@ -10,6 +10,7 @@
 
 mod analysis_write;
 pub mod backup;
+mod cover_store;
 mod duplicates;
 mod edits;
 pub mod failure;
@@ -36,7 +37,10 @@ use pioneer_usb_writer::models::{
 use pioneer_usb_writer::{reader, writer};
 
 pub use analysis_write::{AnalysisWrite, StagedAnalysis, remove_stale_staging};
-pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag};
+pub use cover_store::{COVERS_DIR, covers_dir_of};
+pub use schema::{SCHEMA_VERSION, TAG_FOLD_VERSION};
+use cover_store::CoverStore;
+pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag, file_name_key, path_key};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 use rekordbox::ImportedCue;
@@ -153,6 +157,32 @@ pub mod analysis_stage {
     pub const ALL: u8 = WAVEFORM | KEY | GRID;
 }
 
+/// A track whose analysis failed, as the analysis run stores it so the next launch does not retry the same file
+/// with the same analyzer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisFailure {
+    pub track_id: i64,
+    pub source_path: PathBuf,
+    pub file_size: Option<u64>,
+    pub modified_ms: Option<u64>,
+    pub kind: String,
+    pub attempts: u32,
+    pub analyzer_version: String,
+    pub failed_at_ms: u64,
+}
+
+/// Where the move of v7 cover blobs into the cover store stands after a call to
+/// [`LocalLibrary::move_legacy_covers`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoverMove {
+    pub moved: u64,
+    pub remaining: u64,
+}
+
+/// Free space the cover move keeps on top of the bytes it is about to write (the `VACUUM` at the end writes a copy
+/// of what is left of the database).
+pub const COVER_MOVE_SPARE_BYTES: u64 = 256 * 1024 * 1024;
+
 /// Summary report from importing a Pioneer USB into the local library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportReport {
@@ -177,6 +207,7 @@ pub struct LocalLibrary {
     /// [`Self::with_duplicate_index`] and kept current by every write that changes a track's
     /// path, size, artist, title or duration, or adds or removes a track.
     duplicates: Mutex<Option<DuplicateIndex>>,
+    covers: CoverStore,
 }
 
 impl LocalLibrary {
@@ -191,6 +222,7 @@ impl LocalLibrary {
             conn,
             db_path: Some(db_path.to_path_buf()),
             duplicates: Mutex::default(),
+            covers: CoverStore::for_library(Some(db_path)),
         })
     }
 
@@ -202,6 +234,7 @@ impl LocalLibrary {
             conn,
             db_path: None,
             duplicates: Mutex::default(),
+            covers: CoverStore::for_library(None),
         })
     }
 
@@ -240,7 +273,7 @@ impl LocalLibrary {
         let id = queries::insert_track(&self.conn, track)?;
         self.note_duplicates_added(&[DuplicateCandidate::stored(id, track)]);
         if let Some(ref art) = track.artwork {
-            queries::upsert_artwork(&self.conn, id, art)?;
+            self.store_cover(&self.conn, id, art)?;
         }
         Ok(id)
     }
@@ -253,7 +286,7 @@ impl LocalLibrary {
     /// then the database, runs right after on a thread of its own.
     pub fn add_tracks(&self, tracks: &[Track]) -> Result<Vec<i64>> {
         self.add_tracks_then(tracks, |tx, id, track| match &track.artwork {
-            Some(art) => queries::upsert_artwork(tx, id, art),
+            Some(art) => self.store_cover(tx, id, art).map(|_| ()),
             None => Ok(()),
         })
     }
@@ -316,17 +349,22 @@ impl LocalLibrary {
     /// `None` = the file has no cover. A track removed or pointing at another file in the
     /// meantime is skipped, and a cover set by hand in the meantime is kept.
     pub fn store_pending_artwork(&self, covers: &[(i64, PathBuf, Option<Vec<u8>>)]) -> Result<()> {
+        let mut unused = Vec::new();
         self.write_bulk(|| {
             let tx = self.conn.unchecked_transaction()?;
             for (id, path, cover) in covers {
                 if let Some(cover) = cover {
-                    queries::insert_pending_artwork(&tx, *id, path, cover)?;
+                    let hash = self.covers.put(cover)?;
+                    if !queries::insert_pending_artwork(&tx, *id, path, &hash)? {
+                        unused.push(hash);
+                    }
                 }
                 queries::unqueue_pending_artwork(&tx, *id, path)?;
             }
             tx.commit()?;
             Ok(())
-        })
+        })?;
+        self.release_covers(&unused)
     }
 
     /// The audio paths of every library track.
@@ -344,22 +382,19 @@ impl LocalLibrary {
 
     /// Remove a track (and its analysis + artwork via CASCADE), including ANLZ files.
     pub fn remove_track(&self, id: i64) -> Result<()> {
-        let old = self.duplicates_before(&[id])?;
-        queries::delete_tracks(&self.conn, &[id])?;
-        self.duplicates_after(old, |_| None);
-        self.remove_track_anlz(id);
-        Ok(())
+        self.remove_tracks(&[id])
     }
 
     /// Remove multiple tracks in a single transaction, including ANLZ files.
     pub fn remove_tracks(&self, ids: &[i64]) -> Result<()> {
         let old = self.duplicates_before(ids)?;
+        let covers = queries::select_artwork_hashes_of(&self.conn, ids)?;
         queries::delete_tracks(&self.conn, ids)?;
         self.duplicates_after(old, |_| None);
         for id in ids {
             self.remove_track_anlz(*id);
         }
-        Ok(())
+        self.release_covers(&covers)
     }
 
     /// Retrieve a single track by library ID. Artwork is not loaded (use `get_artwork`).
@@ -437,7 +472,7 @@ impl LocalLibrary {
     fn duplicates_after_path_change(&self, old: Option<Vec<DuplicateCandidate>>, new_paths: &HashMap<i64, PathBuf>) {
         self.duplicates_after(old, |candidate| {
             let path = new_paths.get(&(candidate.id as i64))?;
-            Some(DuplicateCandidate { source_path: PathBuf::from(path.to_string_lossy().into_owned()), ..candidate.clone() })
+            Some(candidate.clone().with_source_path(PathBuf::from(path.to_string_lossy().into_owned())))
         });
     }
 
@@ -508,17 +543,150 @@ impl LocalLibrary {
 
     /// Store (or replace) artwork for a track.
     pub fn set_artwork(&self, track_id: i64, image_data: &[u8]) -> Result<()> {
-        queries::upsert_artwork(&self.conn, track_id, image_data)
+        self.store_cover(&self.conn, track_id, image_data)?;
+        Ok(())
     }
 
     /// Retrieve artwork for a track. Returns `None` if no artwork stored.
     pub fn get_artwork(&self, track_id: i64) -> Result<Option<Vec<u8>>> {
-        queries::select_artwork(&self.conn, track_id)
+        match queries::select_artwork_hash(&self.conn, track_id)? {
+            None => Ok(None),
+            Some(Some(hash)) => self.covers.get(&hash),
+            Some(None) => queries::select_legacy_artwork(&self.conn, track_id),
+        }
     }
 
     /// Remove artwork for a track.
     pub fn remove_artwork(&self, track_id: i64) -> Result<()> {
-        queries::delete_artwork(&self.conn, track_id)
+        let old = queries::select_artwork_hashes_of(&self.conn, &[track_id])?;
+        queries::delete_artwork(&self.conn, track_id)?;
+        self.release_covers(&old)
+    }
+
+    /// Writes the image to the cover store and points the track at it, on `conn` (the library's connection, maybe
+    /// inside a transaction). The image the track had before is deleted once the write is committed and no other
+    /// track uses it: here when `conn` is not in a transaction, else by the next sweep.
+    fn store_cover(&self, conn: &Connection, track_id: i64, image_data: &[u8]) -> Result<String> {
+        let old = queries::select_artwork_hashes_of(conn, &[track_id])?;
+        let hash = self.covers.put(image_data)?;
+        queries::upsert_artwork(conn, track_id, &hash)?;
+        if conn.is_autocommit() {
+            self.release_covers(&old)?;
+        }
+        Ok(hash)
+    }
+
+    /// Deletes the stored images among `hashes` that no track references any more.
+    fn release_covers(&self, hashes: &[String]) -> Result<()> {
+        for hash in hashes {
+            if !queries::cover_is_referenced(&self.conn, hash)? {
+                self.covers.remove(hash);
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes stored images no track references (left by a write that did not commit) and temp files of killed
+    /// writes. Returns how many files went.
+    pub fn sweep_covers(&self) -> Result<usize> {
+        let referenced = queries::select_referenced_covers(&self.conn)?;
+        let (stored, temps) = self.covers.list();
+        let mut removed = 0;
+        for hash in stored.iter().filter(|hash| !referenced.contains(*hash)) {
+            self.covers.remove(hash);
+            removed += 1;
+        }
+        for temp in &temps {
+            if std::fs::remove_file(temp).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    /// The cover store folder (`None` for an in-memory library).
+    pub fn covers_dir(&self) -> Option<&Path> {
+        self.covers.dir()
+    }
+
+    /// Rows and bytes of v7 covers still in the database (`None` when all are moved).
+    pub fn legacy_covers(&self) -> Result<Option<(u64, u64)>> {
+        if !queries::legacy_artwork_exists(&self.conn)? {
+            return Ok(None);
+        }
+        queries::legacy_artwork_size(&self.conn).map(Some)
+    }
+
+    /// Checks that the cover move fits on the library's volume: the bytes still in the database plus
+    /// [`COVER_MOVE_SPARE_BYTES`]. `available` returns the free bytes of a folder (`statvfs_available_bytes`).
+    pub fn check_space_for_legacy_covers(&self, available: &dyn Fn(&Path) -> Result<u64>) -> Result<()> {
+        let (Some((_, bytes)), Some(dir)) = (self.legacy_covers()?, self.db_path.as_deref().and_then(Path::parent)) else {
+            return Ok(());
+        };
+        let free = available(dir)?;
+        let needed = bytes + COVER_MOVE_SPARE_BYTES;
+        if free < needed {
+            return Err(failure::Failure::error(
+                failure::LibraryFailure::DiskFull,
+                format!(
+                    "Not enough space to move the covers out of the library: {} MB needed, {} MB free; they stay in the database for now",
+                    needed / 1_000_000,
+                    free / 1_000_000
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Moves up to `batch` v7 cover blobs into the cover store, in one transaction: each image is written first,
+    /// then the track's artwork row points at it and the blob row goes. A cover set or removed since the migration
+    /// is kept as it is. When the last blob is moved the blob table is dropped, the database vacuumed and the store
+    /// swept. Safe to stop at any point: the next call continues with what is left.
+    pub fn move_legacy_covers(&self, batch: usize) -> Result<CoverMove> {
+        if !queries::legacy_artwork_exists(&self.conn)? {
+            return Ok(CoverMove { moved: 0, remaining: 0 });
+        }
+        let blobs = queries::select_legacy_artwork_batch(&self.conn, batch.max(1))?;
+        let tx = self.conn.unchecked_transaction()?;
+        for (track_id, image) in &blobs {
+            let hash = self.covers.put(image)?;
+            queries::finish_legacy_artwork(&tx, *track_id, &hash)?;
+        }
+        tx.commit().context("Failed to store moved covers")?;
+        let (remaining, _) = queries::legacy_artwork_size(&self.conn)?;
+        if remaining == 0 {
+            queries::drop_legacy_artwork(&self.conn)?;
+            if self.db_path.is_some() {
+                self.conn.execute_batch("VACUUM").context("Failed to compact the library after moving the covers")?;
+            }
+            self.sweep_covers()?;
+        }
+        Ok(CoverMove { moved: blobs.len() as u64, remaining })
+    }
+
+    // -----------------------------------------------------------------------
+    // Analysis failures
+    // -----------------------------------------------------------------------
+
+    pub fn analysis_failure(&self, track_id: i64) -> Result<Option<AnalysisFailure>> {
+        queries::select_analysis_failure(&self.conn, track_id)
+    }
+
+    pub fn analysis_failures(&self) -> Result<Vec<AnalysisFailure>> {
+        queries::select_analysis_failures(&self.conn)
+    }
+
+    /// Stores (or replaces) the track's failure record; nothing is stored for a track that is not in the library.
+    pub fn record_analysis_failure(&self, failure: &AnalysisFailure) -> Result<()> {
+        queries::upsert_analysis_failure(&self.conn, failure)
+    }
+
+    /// Forgets the failures of `track_ids`; returns how many there were.
+    pub fn clear_analysis_failures(&self, track_ids: &[i64]) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let removed = queries::delete_analysis_failures(&tx, track_ids)?;
+        tx.commit()?;
+        Ok(removed)
     }
 
     // -----------------------------------------------------------------------
@@ -805,7 +973,7 @@ impl LocalLibrary {
         for id in track_ids {
             if let (Some(mut track), Some(analysis)) = (self.get_track(id)?, self.get_analysis(id)?) {
                 // Load artwork for USB export.
-                track.artwork = queries::select_artwork(&self.conn, id)?;
+                track.artwork = self.get_artwork(id)?;
                 tracks.push(track);
                 analyses.push(analysis);
             }
@@ -1031,7 +1199,7 @@ impl LocalLibrary {
             if existing_track.has_artwork {
                 let art_path = artwork_dir.join(format!("a{}_m.jpg", existing_track.id));
                 if let Ok(art_data) = std::fs::read(&art_path) {
-                    let _ = queries::upsert_artwork(&tx, library_id, &art_data);
+                    let _ = self.store_cover(&tx, library_id, &art_data);
                 }
             }
 
@@ -1279,26 +1447,35 @@ mod tests {
     }
 
     #[test]
-    fn the_artwork_flag_reads_the_artwork_index_which_an_older_library_gets_on_open() {
+    fn covers_live_in_the_cover_store_and_the_database_keeps_only_their_hash() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("library.db");
         let lib = LocalLibrary::open(&db_path).unwrap();
-        let id = lib.add_track(&make_track("T", "/music/t.mp3")).unwrap();
-        lib.set_artwork(id, &[1, 2, 3]).unwrap();
-        lib.conn.execute_batch("DROP INDEX idx_artwork_track").unwrap();
-        drop(lib);
-
-        let lib = LocalLibrary::open(&db_path).unwrap();
-        let plan: Vec<String> = lib
+        let a = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let b = lib.add_track(&make_track("B", "/music/b.mp3")).unwrap();
+        lib.set_artwork(a, &[1, 2, 3]).unwrap();
+        lib.set_artwork(b, &[1, 2, 3]).unwrap();
+        let columns: Vec<String> = lib
             .conn
-            .prepare("EXPLAIN QUERY PLAN SELECT (art.track_id IS NOT NULL) FROM tracks t LEFT JOIN artwork art ON art.track_id = t.id")
+            .prepare("SELECT name FROM pragma_table_info('artwork')")
             .unwrap()
-            .query_map([], |row| row.get::<_, String>(3))
+            .query_map([], |row| row.get(0))
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        assert!(plan.iter().any(|step| step.contains("COVERING INDEX idx_artwork_track")), "{plan:?}");
-        assert!(lib.get_track_list_rows().unwrap()[0].has_artwork);
+        assert_eq!(columns, ["track_id", "cover_hash"]);
+        let hash = cover_store::sha256_hex(&[1, 2, 3]);
+        let file = dir.path().join(COVERS_DIR).join(&hash[..2]).join(&hash);
+        assert_eq!(std::fs::read(&file).unwrap(), [1, 2, 3]);
+        assert!(lib.get_track_list_rows().unwrap().iter().all(|row| row.has_artwork));
+
+        lib.set_artwork(a, &[4]).unwrap();
+        assert!(file.is_file(), "still used by the other track");
+        lib.remove_track(b).unwrap();
+        assert!(!file.exists(), "no track uses it any more");
+        lib.remove_artwork(a).unwrap();
+        assert!(lib.covers.list().0.is_empty());
+        assert_eq!(lib.get_artwork(a).unwrap(), None);
     }
 
     #[test]
@@ -1368,6 +1545,118 @@ mod tests {
         let expected: Vec<DuplicateCandidate> = lib.get_all_tracks().unwrap().iter().map(DuplicateCandidate::from).collect();
         assert_eq!(lib.duplicate_candidates().unwrap(), expected);
         assert_eq!(expected.len(), 2);
+    }
+
+    #[test]
+    fn the_duplicate_index_reads_the_stored_folded_keys_instead_of_folding_again() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { artist: "Hålé".into(), ..make_track("Cöpper Lines (Original Mix)", "/music/a.mp3") }).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT artist_key, title_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("hale".to_string(), "copper lines".to_string()));
+
+        lib.conn.execute("UPDATE tracks SET artist_key = 'stored', title_key = 'key' WHERE id = ?1", [id]).unwrap();
+        let probe = |artist: &str, title: &str| Track { artist: artist.into(), ..make_track(title, "/elsewhere/x.mp3") };
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&probe("Stored", "Key")).map(|hit| hit.existing_id), Some(id));
+        assert_eq!(index.find(&probe("Hale", "Copper Lines")), None);
+
+        let update = Track { artist: "Other".into(), ..lib.get_track(id).unwrap().unwrap() };
+        lib.update_track(id, &update).unwrap();
+        let stored: String = lib.conn.query_row("SELECT artist_key FROM tracks WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(stored, "other", "an edit writes the key again");
+    }
+
+    #[test]
+    fn the_duplicate_index_reads_the_stored_path_and_file_name_keys() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { file_size: 500, ..make_track("A", "/Music/Ä/Song.MP3") }).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("/music/\u{e4}/song.mp3".to_string(), "song.mp3".to_string()));
+
+        lib.conn.execute("UPDATE tracks SET path_key = '/stored/path.mp3', file_name_key = 'stored.mp3' WHERE id = ?1", [id]).unwrap();
+        let probe = |path: &str, size: u64| Track { artist: "Other".into(), file_size: size, ..make_track("Different", path) };
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&probe("/Stored/Path.mp3", 1)).map(|hit| (hit.existing_id, hit.reason)), Some((id, DuplicateReason::SamePath)));
+        assert_eq!(index.find(&probe("/elsewhere/STORED.mp3", 500)).map(|hit| hit.reason), Some(DuplicateReason::SameFile));
+        assert_eq!(index.find(&probe("/Music/Ä/Song.MP3", 500)), None);
+
+        let moved = Track { source_path: PathBuf::from("/new/Place.mp3"), ..lib.get_track(id).unwrap().unwrap() };
+        lib.update_track(id, &moved).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("/new/place.mp3".to_string(), "place.mp3".to_string()), "an edit writes the keys again");
+    }
+
+    #[test]
+    fn relinking_a_track_writes_its_path_keys_and_moves_it_in_the_cached_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let new_path = dir.path().join("New Home.wav");
+        std::fs::write(&new_path, b"audio").unwrap();
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { file_size: 5, ..make_track("A", "/gone/Old.wav") }).unwrap();
+        assert!(lib.duplicate_index().unwrap().find(&make_track("Z", "/gone/old.wav")).is_some());
+        lib.relink_track(id, &new_path).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, (crate::path_key(&new_path), "new home.wav".to_string()));
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&make_track("Z", "/gone/old.wav")), None);
+        let hit = index.find(&Track { artist: "Other".into(), ..make_track("Z", &new_path.to_string_lossy()) });
+        assert_eq!(hit.map(|h| (h.existing_id, h.reason)), Some((id, DuplicateReason::SamePath)));
+        assert_eq!(lib.duplicate_candidate(id as u32).unwrap().unwrap().file_name_key, "new home.wav");
+    }
+
+    #[test]
+    fn stored_keys_are_refilled_when_the_fold_version_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let id = lib.add_track(&Track { artist: "Ärtist".into(), ..make_track("Títle", "/music/a.mp3") }).unwrap();
+        lib.conn
+            .execute_batch("UPDATE tracks SET artist_key = 'stale', title_key = 'stale', path_key = 'stale', file_name_key = 'stale'; UPDATE library_meta SET value = '0' WHERE name = 'tag_fold';")
+            .unwrap();
+        drop(lib);
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let path_keys: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(path_keys, ("/music/a.mp3".to_string(), "a.mp3".to_string()));
+        let keys: (String, String, String) = lib
+            .conn
+            .query_row(
+                "SELECT artist_key, title_key, (SELECT value FROM library_meta WHERE name = 'tag_fold') FROM tracks WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(keys, ("artist".to_string(), "title".to_string(), TAG_FOLD_VERSION.to_string()));
+    }
+
+    #[test]
+    fn analysis_failures_are_stored_replaced_cleared_and_go_with_their_track() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let failure = AnalysisFailure {
+            track_id: id,
+            source_path: PathBuf::from("/music/a.mp3"),
+            file_size: Some(10),
+            modified_ms: None,
+            kind: "decode_failed".into(),
+            attempts: 1,
+            analyzer_version: "analysis-1".into(),
+            failed_at_ms: 5,
+        };
+        lib.record_analysis_failure(&failure).unwrap();
+        lib.record_analysis_failure(&AnalysisFailure { attempts: 2, ..failure.clone() }).unwrap();
+        assert_eq!(lib.analysis_failure(id).unwrap().map(|f| f.attempts), Some(2));
+        lib.record_analysis_failure(&AnalysisFailure { track_id: 999, ..failure.clone() }).unwrap();
+        assert_eq!(lib.analysis_failures().unwrap().len(), 1, "no row for a track that is not there");
+        assert_eq!(lib.clear_analysis_failures(&[id, 999]).unwrap(), 1);
+        assert_eq!(lib.analysis_failure(id).unwrap(), None);
+        lib.record_analysis_failure(&failure).unwrap();
+        lib.remove_track(id).unwrap();
+        assert!(lib.analysis_failures().unwrap().is_empty());
     }
 
     #[test]

@@ -40,11 +40,19 @@
     onExpand,
     controls = undefined,
     disabled = false,
+    waveformProps = {},
   } = $props();
 
   const stop = (fn) => (e) => {
     e.stopPropagation();
     fn?.(e);
+  };
+
+  const cueKey = (fn) => (e) => {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.repeat) fn?.(e);
   };
 </script>
 
@@ -65,7 +73,9 @@
       onpointerdown={stop(onCueDown)}
       onpointerup={stop(onCueUp)}
       onpointercancel={stop(onCueUp)}
-      onpointerleave={stop(onCueUp)}>
+      onpointerleave={stop(onCueUp)}
+      onkeydown={cueKey(onCueDown)}
+      onkeyup={cueKey(onCueUp)}>
       <span class="ff-player-compact__cue-txt">CUE</span>
     </button>
     <button
@@ -111,6 +121,7 @@
           class="ff-player-compact__expand-btn"
           title="Expand player"
           aria-label="Expand player"
+          aria-expanded="false"
           onclick={stop(onExpand)}>
           <svg
             class="ff-player-compact__expand-chevron"
@@ -128,7 +139,7 @@
       </div>
     </div>
 
-    <div class="ff-player-compact__waveform">
+    <div class="ff-player-compact__waveform" {...waveformProps}>
       <WaveformView
         mode="compact"
         {bands}

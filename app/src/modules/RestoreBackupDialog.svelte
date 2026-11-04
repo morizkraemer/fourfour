@@ -1,5 +1,6 @@
 <script>
   import { Dialog, Button, StatusDot, ProgressBar } from '$ds';
+  import { library } from '../stores/library.svelte.ts';
   import { backup, cancelRestore, confirmRestore } from '../stores/backup.svelte.ts';
   import { progressText, restoreLines, restoreSummary } from '../lib/backup.ts';
 
@@ -13,7 +14,7 @@
       <div class="ff-restore" data-restore-dialog>
         <p class="ff-restore__sum">{restoreSummary(preview)}</p>
         <div class="ff-restore__lines">
-          {#each restoreLines(preview) as line (line.text)}
+          {#each restoreLines(preview, library.openFailure !== null) as line (line.text)}
             <div class="ff-restore__line">
               <StatusDot status={line.status} />
               <span class="ff-restore__text">{line.text}</span>

@@ -7,6 +7,7 @@ use tauri::State;
 
 use crate::analysis_run::SharedLibrary;
 use crate::command_error::{CommandError, ErrorKind};
+use crate::stick_busy::BusySticks;
 
 /// A stick's report with the kind of its failure. The sync engine reports failures as text only, so the
 /// kind is read from the engine's own sentences here; the tests below run the real engine against them.
@@ -62,10 +63,12 @@ fn claimed_stick(path: &Path, lib: &LocalLibrary) -> Result<String, CommandError
 fn edit_stick(
     path: &str,
     state: &State<'_, SharedLibrary>,
+    busy: &State<'_, BusySticks>,
     edit: impl FnOnce(&LocalLibrary, &str) -> anyhow::Result<usize>,
 ) -> Result<(usize, StickContents), CommandError> {
-    let lib = state.lock().map_err(|e| e.to_string())?;
     let path = Path::new(path);
+    let _busy = busy.acquire(path)?;
+    let lib = state.lock().map_err(|e| e.to_string())?;
     let id = claimed_stick(path, &lib)?;
     let changed = edit(&lib, &id).map_err(CommandError::from_anyhow)?;
     Ok((changed, lib.stick_contents(&id).map_err(CommandError::from_anyhow)?))
@@ -84,8 +87,9 @@ pub fn stick_add_tracks(
     path: String,
     track_ids: Vec<i64>,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, BusySticks>,
 ) -> Result<(usize, StickContents), CommandError> {
-    edit_stick(&path, &state, |lib, id| lib.add_stick_tracks(id, &track_ids))
+    edit_stick(&path, &state, &busy, |lib, id| lib.add_stick_tracks(id, &track_ids))
 }
 
 #[tauri::command(async)]
@@ -93,8 +97,9 @@ pub fn stick_remove_tracks(
     path: String,
     track_ids: Vec<i64>,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, BusySticks>,
 ) -> Result<(usize, StickContents), CommandError> {
-    edit_stick(&path, &state, |lib, id| lib.remove_stick_tracks(id, &track_ids))
+    edit_stick(&path, &state, &busy, |lib, id| lib.remove_stick_tracks(id, &track_ids))
 }
 
 #[tauri::command(async)]
@@ -102,8 +107,9 @@ pub fn stick_add_playlists(
     path: String,
     playlist_ids: Vec<i64>,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, BusySticks>,
 ) -> Result<(usize, StickContents), CommandError> {
-    edit_stick(&path, &state, |lib, id| lib.add_stick_playlists(id, &playlist_ids))
+    edit_stick(&path, &state, &busy, |lib, id| lib.add_stick_playlists(id, &playlist_ids))
 }
 
 #[tauri::command(async)]
@@ -111,8 +117,9 @@ pub fn stick_remove_playlists(
     path: String,
     playlist_ids: Vec<i64>,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, BusySticks>,
 ) -> Result<(usize, StickContents), CommandError> {
-    edit_stick(&path, &state, |lib, id| lib.remove_stick_playlists(id, &playlist_ids))
+    edit_stick(&path, &state, &busy, |lib, id| lib.remove_stick_playlists(id, &playlist_ids))
 }
 
 #[tauri::command(async)]

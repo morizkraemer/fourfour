@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const hooks = vi.hoisted(() => ({
   getAutoAnalyzeNew: vi.fn(),
   setAutoAnalyzeNew: vi.fn(),
-  getAnalysisBackend: vi.fn(),
-  setAnalysisBackend: vi.fn(),
   getAnalyzeAfterImport: vi.fn(),
   setAnalyzeAfterImport: vi.fn(),
   playbackStop: vi.fn(),
@@ -15,8 +13,6 @@ const hooks = vi.hoisted(() => ({
 vi.mock('../services/tauri.svelte.ts', () => ({
   getAutoAnalyzeNew: hooks.getAutoAnalyzeNew,
   setAutoAnalyzeNew: hooks.setAutoAnalyzeNew,
-  getAnalysisBackend: hooks.getAnalysisBackend,
-  setAnalysisBackend: hooks.setAnalysisBackend,
   getAnalyzeAfterImport: hooks.getAnalyzeAfterImport,
   setAnalyzeAfterImport: hooks.setAnalyzeAfterImport,
   getIsTauri: () => hooks.tauri.on,
@@ -39,7 +35,6 @@ import {
   changeOutputDevice,
   changeSampleRate,
   loadAppSettings,
-  setAnalysisEngine,
   setAnalyzeAfterImport,
   setAutoAnalyzeNew,
 } from './app-settings.svelte.ts';
@@ -50,31 +45,23 @@ beforeEach(() => {
   hooks.tauri.on = true;
   hooks.setAutoAnalyzeNew.mockResolvedValue(undefined);
   hooks.setAnalyzeAfterImport.mockResolvedValue(undefined);
-  hooks.setAnalysisBackend.mockResolvedValue(undefined);
   hooks.playbackStop.mockResolvedValue(undefined);
   hooks.syncPlaybackAudioConfig.mockResolvedValue(undefined);
   storage.clear();
   appSettings.autoAnalyzeNew = true;
   appSettings.analyzeAfterImport = false;
-  appSettings.analysisEngine = 'auto';
 });
 
 describe('loadAppSettings', () => {
   it('reads the stored values once and marks the settings loaded', async () => {
     hooks.getAutoAnalyzeNew.mockResolvedValue(false);
     hooks.getAnalyzeAfterImport.mockResolvedValue(true);
-    hooks.getAnalysisBackend.mockResolvedValue('python');
 
     await loadAppSettings();
     await loadAppSettings();
 
     expect(hooks.getAutoAnalyzeNew).toHaveBeenCalledTimes(1);
-    expect([appSettings.autoAnalyzeNew, appSettings.analyzeAfterImport, appSettings.analysisEngine, appSettings.loaded]).toEqual([
-      false,
-      true,
-      'python',
-      true,
-    ]);
+    expect([appSettings.autoAnalyzeNew, appSettings.analyzeAfterImport, appSettings.loaded]).toEqual([false, true, true]);
   });
 });
 
@@ -82,28 +69,18 @@ describe('saving a setting', () => {
   it('shows the new value and keeps it once the save worked', async () => {
     await setAutoAnalyzeNew(false);
     await setAnalyzeAfterImport(true);
-    await setAnalysisEngine('rust');
 
-    expect([appSettings.autoAnalyzeNew, appSettings.analyzeAfterImport, appSettings.analysisEngine]).toEqual([false, true, 'rust']);
-    expect(hooks.setAnalysisBackend).toHaveBeenCalledWith('rust');
-  });
-
-  it('stores automatic as no backend choice', async () => {
-    appSettings.analysisEngine = 'python';
-    await setAnalysisEngine('auto');
-    expect(hooks.setAnalysisBackend).toHaveBeenCalledWith(null);
+    expect([appSettings.autoAnalyzeNew, appSettings.analyzeAfterImport]).toEqual([false, true]);
   });
 
   it('puts the previous value back and rethrows when the save fails', async () => {
     hooks.setAutoAnalyzeNew.mockRejectedValue(new Error('disk full'));
     hooks.setAnalyzeAfterImport.mockRejectedValue(new Error('disk full'));
-    hooks.setAnalysisBackend.mockRejectedValue(new Error('disk full'));
 
     await expect(setAutoAnalyzeNew(false)).rejects.toThrow('disk full');
     await expect(setAnalyzeAfterImport(true)).rejects.toThrow('disk full');
-    await expect(setAnalysisEngine('python')).rejects.toThrow('disk full');
 
-    expect([appSettings.autoAnalyzeNew, appSettings.analyzeAfterImport, appSettings.analysisEngine]).toEqual([true, false, 'auto']);
+    expect([appSettings.autoAnalyzeNew, appSettings.analyzeAfterImport]).toEqual([true, false]);
   });
 });
 

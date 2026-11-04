@@ -4,6 +4,7 @@
  */
 
 import { untrack } from 'svelte';
+import { parseOpenFailure, type OpenFailure } from '../lib/libraryOpenFailure.ts';
 import { appSettings, loadAppSettings, setAnalyzeAfterImport } from './app-settings.svelte.ts';
 import {
   getVersion,
@@ -67,6 +68,16 @@ import {
 import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
 import { importWithDuplicateCheck, type ImportOutcome } from '../lib/importDuplicates.ts';
 import { completeImportActivity, failImportActivity, startImportActivity } from './import-activity.svelte.ts';
+import {
+  analysisFailureText,
+  analysisFileFailureText,
+  analysisRunFailureText,
+  ejectFailureText,
+  failureText,
+  importFailureText,
+  libraryOpenFailureText,
+  revealFailureText,
+} from '../lib/userErrors.ts';
 import { askAboutDuplicates } from './import-duplicates.svelte.ts';
 import { outermostIds } from '../lib/playlistSelection.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
@@ -437,6 +448,7 @@ export const library = $state({
   appVersion: '0.0.0',
   libraryPath: '',
   tracksLoaded: false,
+  openFailure: null as OpenFailure | null,
   bootSnapshot: null as BootSnapshot | null,
   analyzing: false,
   /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
@@ -1093,6 +1105,18 @@ function markTracksPendingAnalysis(ids: number[]) {
   analysisStartListeners.forEach((listener) => listener(restarted));
 }
 
+const ANALYSIS_FAILED_MESSAGE = /^Failed (.+?) \(\d+\/\d+\)$/;
+let analysisFailures = 0;
+
+function analysisProgressText(progress: { current: number; total: number; message: string }): string {
+  const failed = progress.message.match(ANALYSIS_FAILED_MESSAGE);
+  if (failed) {
+    analysisFailures++;
+    return analysisFileFailureText(failed[1]);
+  }
+  return progress.message || `Analyzing (${progress.current}/${progress.total})`;
+}
+
 function handleAnalysisProgressEvent(progress: {
   current: number;
   total: number;
@@ -1101,7 +1125,7 @@ function handleAnalysisProgressEvent(progress: {
 }) {
   library.analyzing = true;
   library.analysisProgress = progress;
-  library.statusMessage = progress.message || `Analyzing (${progress.current}/${progress.total})`;
+  library.statusMessage = analysisProgressText(progress);
 
   if (progress.track_id) {
     finishAnalyzingTrack(progress.track_id);
@@ -1126,8 +1150,10 @@ function handleAnalysisCompleteEvent() {
   library.analyzing = false;
   library.analyzingTrackIds = [];
   library.analysisProgress = { current: 0, total: 0, message: '' };
+  const failures = analysisFailures;
+  analysisFailures = 0;
   if (!library.syncing) {
-    library.statusMessage = 'Ready';
+    library.statusMessage = failures > 0 ? analysisRunFailureText(failures) : 'Ready';
   }
 }
 
@@ -1355,6 +1381,7 @@ async function writePlaylists() {
     await tauriSaveState(library.playlists);
   } catch (err) {
     console.error('saveState failed:', err);
+    library.statusMessage = failureText("Couldn't save your playlists. Recent changes may be lost.", err, { next: 'Try again.' });
   }
 }
 
@@ -1408,6 +1435,7 @@ export function scheduleLaunchAnalysis() {
 }
 
 export async function initLibrary() {
+  let loadFailed = false;
   library.ipcDiagnostic = getIpcDiagnostic();
   library.statusMessage = 'Loading library…';
 
@@ -1418,6 +1446,7 @@ export async function initLibrary() {
     if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
+    library.openFailure = null;
     whenIdle(() => void applyChangedTrackLabels());
     await refreshVolumes();
 
@@ -1436,14 +1465,12 @@ export async function initLibrary() {
     }
     scheduleLaunchAnalysis();
   } catch (err) {
-    library.statusMessage = 'Failed to load library';
+    loadFailed = true;
+    library.statusMessage = failureText("Couldn't load your library.", err, { next: 'Restart fourfour. If it keeps happening, check the library file in Settings.' });
+    library.openFailure = parseOpenFailure(err);
     console.error('initLibrary failed:', err);
   } finally {
-    if (!library.analyzing && !library.syncing) {
-      library.statusMessage = library.statusMessage.startsWith('Failed')
-        ? library.statusMessage
-        : 'Ready';
-    }
+    if (!library.analyzing && !library.syncing && !loadFailed) library.statusMessage = 'Ready';
   }
 }
 
@@ -1466,10 +1493,6 @@ export function playlistForSidebarSource(source: string | null | undefined) {
     return null;
   }
   return library.playlists.find((p) => p.name === active && !p.is_folder) ?? null;
-}
-
-function importErrorDetail(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
@@ -1529,7 +1552,7 @@ export async function importFiles(paths: string[], options?: ImportOptions) {
     library.tauriError = lastTauriError;
     completeImportActivity(outcome);
   } catch (err) {
-    failImportActivity(importErrorDetail(err));
+    failImportActivity(importFailureText(err));
     library.tauriError = lastTauriError;
     console.error('importFiles failed:', err);
   }
@@ -1545,7 +1568,7 @@ export async function importDroppedTracks(paths: string[]): Promise<{ outcome: I
     const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
     return { outcome, ids };
   } catch (err) {
-    failImportActivity(importErrorDetail(err));
+    failImportActivity(importFailureText(err));
     library.tauriError = lastTauriError;
     console.error('importDroppedTracks failed:', err);
     return null;
@@ -1562,7 +1585,15 @@ export async function removeTracks(ids: number[]) {
     await loadState();
   } catch (err) {
     console.error('removeTracks failed:', err);
+    library.statusMessage = failureText("Couldn't remove the tracks.", err);
   }
+}
+
+function stopAnalysisAfterFailure(ids: number[], err: unknown) {
+  const stopped = new Set(ids);
+  library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => !stopped.has(id));
+  if (library.analyzingTrackIds.length === 0) library.analyzing = false;
+  if (!library.syncing) library.statusMessage = analysisFailureText(err);
 }
 
 /** Trigger analysis on all pending tracks */
@@ -1578,7 +1609,7 @@ export async function analyzeTracks() {
     await tauriAnalyzeTracks();
   } catch (err) {
     console.error('analyzeTracks failed:', err);
-    if (!library.syncing) library.statusMessage = 'Analysis failed';
+    stopAnalysisAfterFailure(pendingIds, err);
   }
 }
 
@@ -1596,7 +1627,7 @@ export async function analyzeTrackIds(ids: number[]) {
     await tauriAnalyzeTrackIds(unique);
   } catch (err) {
     console.error('analyzeTrackIds failed:', err);
-    if (!library.syncing) library.statusMessage = 'Analysis failed';
+    stopAnalysisAfterFailure(unique, err);
   }
 }
 
@@ -1707,7 +1738,7 @@ export async function refreshUsbState() {
   } catch (err) {
     console.error('refreshUsbState failed:', err);
     if (library.activeVolume !== volume) return;
-    library.statusMessage = 'Failed to read USB';
+    library.statusMessage = failureText("Couldn't read the stick.", err, { next: 'Check that it is plugged in, then reselect it.' });
     library.usbTracks = [];
     library.usbPlaylists = [];
     library.usbLastSync = null;
@@ -1720,6 +1751,7 @@ export async function wipeVolume(path: string) {
     await refreshUsbState();
   } catch (err) {
     console.error('wipeVolume failed:', err);
+    library.statusMessage = failureText("Couldn't clear the stick.", err);
   }
 }
 
@@ -1727,7 +1759,7 @@ export async function revealFile(path: string) {
   try {
     await revealInFileManager(path);
   } catch (err) {
-    library.statusMessage = String(err);
+    library.statusMessage = revealFailureText(err);
   }
 }
 
@@ -1737,6 +1769,7 @@ export async function ejectVolume(path: string) {
     await refreshVolumes();
   } catch (err) {
     console.error('ejectVolume failed:', err);
+    library.statusMessage = ejectFailureText(err);
   }
 }
 
@@ -1993,7 +2026,7 @@ export async function changeLocalLibraryPath(folderPath: string) {
     await loadState();
     library.statusMessage = 'Ready';
   } catch (err) {
-    library.statusMessage = 'Failed to open library';
+    library.statusMessage = libraryOpenFailureText(err);
     console.error('changeLocalLibraryPath failed:', err);
     throw err;
   }
@@ -2025,7 +2058,7 @@ export async function resetLibraryDatabase() {
     await loadState();
     library.statusMessage = 'Library reset — empty';
   } catch (err) {
-    library.statusMessage = 'Library reset failed';
+    library.statusMessage = failureText("Couldn't reset the library.", err);
     console.error('resetLibraryDatabase failed:', err);
     throw err;
   }

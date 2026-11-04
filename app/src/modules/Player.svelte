@@ -5,6 +5,7 @@
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
+  import { waveSliderProps } from '../stores/wave-seek.ts';
   import PlayerTempo from './PlayerTempo.svelte';
   import LazyMount from '../lib/LazyMount.svelte';
   import { expandedPlayer } from '../lib/lazy-views.ts';
@@ -74,6 +75,7 @@
     analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
     disabled={!player.track}
     onScrub={player.track ? seekToProgress : undefined}
+    waveformProps={waveSliderProps()}
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
     onCueUp={player.track ? cuePreviewStop : undefined}

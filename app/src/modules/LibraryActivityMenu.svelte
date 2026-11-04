@@ -5,6 +5,7 @@
   or unreadable, and the import entry points. Uses the shared menu surface (.ff-menu).
 -->
 <script>
+  import { tick } from 'svelte';
   import { closeOnEscape } from '$ds/components/menuEscape.js';
   import { library, unanalyzedTrackCount } from '../stores/library.svelte.ts';
   import { importActivity } from '../stores/import-activity.svelte.ts';
@@ -30,6 +31,15 @@
       if (titles.length === ANALYSIS_TITLES_SHOWN) break;
     }
     return { shown: titles, more: Math.max(0, ids.size - titles.length) };
+  });
+
+  $effect(() => {
+    if (!open) return;
+    const returnFocusTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    void tick().then(() => menuEl?.querySelector('button:not([disabled])')?.focus());
+    return () => {
+      if (returnFocusTo?.isConnected && (document.activeElement === document.body || menuEl?.contains(document.activeElement))) returnFocusTo.focus();
+    };
   });
 
   $effect(() => {
