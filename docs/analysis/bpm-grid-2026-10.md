@@ -428,3 +428,75 @@ grid_refit benchmark/results/o3/ref.json ~/.cache/r101-dump <ids> on.jsonl 2
 python3 -I benchmark/scripts/r101-compare.py <dir> off on dev test
 python3 -I benchmark/scripts/r101-splice.py base.jsonl patch.jsonl out.jsonl
 ```
+
+# R105 snap acceptance (2026-11-04)
+
+Question: can the fit be made robust to a 0.9-logit wobble, so that chunk-500 logits (r96 default) stop losing the tracks that chunk-1500 logits get right (r101/r102: 144, 231, 528)?
+
+Answer: **yes for two of the three, and the cause is not the snap acceptance.** On 231 and 528 the snap stage never sees the true tempo: the global fold peak search finds it, but its result is thrown away by a skip rule. Fixing the skip (`FitParams::far_skip_pct`, 0.3 -> 0.05) brings both back at chunk 500, changes nothing at chunk 1500 and nothing on dev. 144 stays wrong (no signal on either logit set). Stricter snap acceptance (per-segment ratio, phase agreement across thirds) and the other tie-breaks add nothing.
+
+Branch `r105-snap` = `r102-chunk-stitch` + the fix. Measured by re-fitting saved logits with `grid_refit` (`benchmark/scripts/r105-refit.sh`): chunk-500 logits dumped once with `ffa` (`r94-run.sh`, `DUMP=`, test 205 + dev 50, default chunk 500, border 6, no overlap), chunk-1500 logits are the October dump (`benchmark/results/o3/dump`, dev 49 tracks). The old fit on the 500 dump gives exactly the r101 ffa counts (test 183 / 193 / 169, bar 140; dev 47 / 50 / 44, bar 42), the old fit on the 1500 dump the r79 counts (171 / 186 / 194).
+
+## Why 231 and 528 flip
+
+Fit stages (`fit_track`): mode period of the model's beat peaks -> line fit -> near scan (+-0.3% around the line, then comb hill-climb) -> global fold peak (+-4%, histogram of the activation folded at each tempo) -> far scan around the fold peak, used only if its comb score is higher -> snap to an integer BPM.
+
+The far scan was skipped when the fold peak lay within `scan_pct` (0.3%) of the near result. Trace at chunk 500 (comb score = sum of the beat activation on the grid teeth):
+
+| Track | Reference | Mode period of peaks | Near scan result (comb) | Fold peak | Far scan result (comb) | Far scan run |
+|---|---:|---:|---:|---:|---:|---|
+| 231 | 128.00 | 128.61 | 128.272 (85.0) | 128.003 | 128.001 (529.7) | skipped (0.21% < 0.3%) |
+| 528 | 118.02 | 117.34 | 117.734 (175.0) | 118.018 | 118.016 (573.0) | skipped (0.24% < 0.3%) |
+
+The peak lists of the 500 run differ from the 1500 ones (231: 570 against 590 peaks, 528: 689 against 640), the mode period of their intervals starts 0.47% (231) and 0.58% (528) off the true tempo, outside the near scan, which then settles on a weak local comb at the edge of its range. The comb at the true tempo is a 0.05 BPM wide spike (231 at chunk 500: 528 at 128.00, 214 at 127.95 and 128.05) that is as tall on the 500 logits as on the 1500 logits (528 against 551); only the search missed it. Wrong comb, then the snap stage had nothing to snap to (candidate 128 scores 17% of the wrong tempo's comb, so it is rejected correctly). Widening the near scan instead (`scan_pct` 0.6) moves the problem: 528 then fails at chunk 1500.
+
+144 (reference 127.40) is a different case: its comb is flat on both logit sets (88 at 127.4 and 100 to 113 around 170 on the 1500 logits, a background level of 80 to 100), the 1500 fit only lands on 127.386 because its line fit starts there, and the 500 line starts at 166. No fit rule can read a tempo out of that.
+
+## Variants
+
+All rows re-fit from the same two dumps (test 205; the dev columns use the 49 dev tracks both dumps have, dev 50 is in the result table). Cell = chunk 500 / chunk 1500. "Agree" = tracks where the 500 and the 1500 fit give the same BPM (0.05) and grid (median offset 15 ms): `r105-stab.py`. Right -> wrong is counted against the old fit on the same logits (500 against 500, 1500 against 1500).
+
+| Variant | Test grid 20 ms | Test BPM 0.1 | Test BPM 1 | Test bar | Dev grid | Dev BPM 0.1 | Dev BPM 1 | Right -> wrong (grid, BPM 0.1), 500 / 1500 | Agree test / dev |
+|---|---|---|---|---|---|---|---|---|---|
+| old fit (r102 default) | 169 / 171 | 183 / 186 | 193 / 194 | 140 / 141 | 44 / 44 | 46 / 46 | 49 / 49 | - | 196/205, 49/49 |
+| **far search at > 0.05%** (default) | **171 / 171** | **185 / 186** | 193 / 194 | **142 / 141** | 44 / 44 | 46 / 46 | 49 / 49 | none / none | **199/205**, 49/49 |
+| + pick the best-scoring accepted integer, not the nearest | 171 / 171 | 185 / 186 | 193 / 194 | 142 / 141 | 44 / 44 | 46 / 46 | 49 / 49 | none / none | 199/205, 49/49 |
+| + snap ratio 0.90 (was 0.97) | 170 / 170 | 185 / 186 | 193 / 194 | 143 / 142 | 44 / 44 | 46 / 46 | 49 / 49 | none / 528 (grid) | 199/205, 49/49 |
+| + snap also needs both halves at ratio 0.5 and half-phases within 10 ms | 170 / 170 | 185 / 186 | 193 / 194 | 142 / 141 | 43 / 43 | 46 / 46 | 49 / 49 | 543, 52 / 543, 52 (grid) | 199/205, 49/49 |
+| + the same on thirds | 171 / 170 | 185 / 186 | 193 / 194 | 142 / 141 | 44 / 43 | 46 / 46 | 49 / 49 | none / 543, 52 (grid) | 199/205, 49/49 |
+| wider near scan (0.6%), far skip unchanged | 170 / 170 | 185 / 185 | 193 / 194 | 141 / 140 | 44 / 44 | 46 / 46 | 49 / 49 | 507 (grid) / 528 | 195/205, 49/49 |
+
+The extra snap variants are `ede19b3` (`R105_SNAP_PICK`, `R105_SEGMENTS`, `R105_SEG_RATIO`, `R105_SPREAD_MS`, `R105_SNAP_RATIO` on `grid_refit`); they were dropped from the fit afterwards because none beats the plain fix. Snap ratio on the 1500 logits alone (0.85 / 0.90 / 0.94 / 0.97 / 0.99): test grid 169 / 170 / 171 / 171 / 170, BPM 0.1 185 / 186 / 186 / 186 / 186, dev grid 44 / 44 / 44 / 44 / 43, so 0.97 is on the plateau. `far_skip_pct` 0, 0.05 and 0.2 give the same results on the 168 chunk-500 tracks dumped at the time, 0.02 and 0.1 the same on the full 1500 logits.
+
+Downbeat tie-break: not built. On the weak-comb tracks that stay wrong (12, 36, 144) the model's own downbeats have no steady spacing (median bar 0.82 s at chunk 500 and 0.42 s at 1500 on 144, which is 4 and 2 beats of a 127 BPM grid); on 231 and 528 they agree at both chunk sizes already. The remaining phase disagreements are 42 (half a beat; the 500 grid is the right one, as r101 found) and tracks that differ by 10 to 15 ms.
+
+## Result and gate (chunk 500 logits, new default against old)
+
+| Split | | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right (of all) |
+|---|---|---:|---:|---:|---:|
+| test 205 | old, chunk 500 | 169 | 183 | 193 | 140 |
+| test 205 | **new, chunk 500** | **171** | **185** | 193 | **142** |
+| test 205 | new, chunk 1500 (= old) | 171 | 186 | 194 | 141 |
+| dev 50 | old and new, chunk 500 | 44 | 47 | 50 | 42 |
+| dev 49 | old and new, chunk 1500 | 44 | 46 | 49 | 40 |
+
+- Grid >= 171: passes (171). **BPM 0.1 >= 186: misses by one (185); the missing track is 144**, a flat-comb 3:2 track. BPM 1: 193 against 194 for the same reason.
+- Dev not down: passes (identical rows, dev 500 is 47 / 50 / 44).
+- Right -> wrong against the old 500 fit: none at grid, BPM 0.1, BPM 1 and bar. One movement without a gate: 408 (dynamic reference grid, 127.93) goes from 128.33 to 128.51, wrong at 0.1 before and after.
+- Chunk 1500 logits: unchanged at BPM, grid, bar and agreement; the grid deviation of two 128 BPM tracks moves by 2 and 5 ms (195: 7 -> 5 ms, 184: 6 -> 11 ms).
+- 500 against 1500 agreement: 196 -> 199 of 205 on test (231, 528 and 408 agree now). The six left: 12, 36, 168 (wrong-tempo tracks with dynamic references, wrong on both logit sets, different tempo each), 144, 42 (500 is right), 522 (dynamic reference, 120.55 against 120.66).
+- End to end through `ffa` (new fit, chunk 500) on 231, 528, 144, 42 and 540: all right except 144.
+- Cost: the far scan now runs on almost every track; fit time stays at 0.7 s per track (single thread, loaded box) against about 47 s for the model.
+
+Reproduce:
+
+```bash
+CARGO_TARGET_DIR=~/.cache/r105-target cargo build --release --manifest-path prototyping/analysis-packaging/Cargo.toml --bin ffa
+CARGO_TARGET_DIR=~/.cache/r105-target cargo build --release -p fourfour-analysis-rs --example grid_refit
+FFA=~/.cache/r105-target/release/ffa WORKERS=2 THREADS=2 DUMP=~/.cache/r105-work/dump500 benchmark/scripts/r94-run.sh r105-c500 <list of paths>
+benchmark/scripts/r105-refit.sh old-500 ~/.cache/r105-work/dump500 test R105_FAR_SKIP_PCT=0.3
+benchmark/scripts/r105-refit.sh new-500 ~/.cache/r105-work/dump500 test
+python3 -I benchmark/scripts/r105-stab.py benchmark/results/o3/ref.json <new-500.jsonl> <new-1500.jsonl> --base <old-500.jsonl> --list
+```
+
+`r105-refit.sh` reads `$R105/<split>.ids` (one track id per line, from `o3/dev.txt` and `o3/test.txt` through `ref.json`) and writes `$R105/res/`; `r105-sweep.sh` runs test and dev for one switch set.
