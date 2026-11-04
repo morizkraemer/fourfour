@@ -48,6 +48,8 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 
 46. [built 2026-11-04] Remaining BPM misses (r101, on r79+r96): 12 test misses classified; only octave errors are rule-fixable. A half-time band (84-92.5 BPM doubled) fixes 2, no flips, test BPM 1 193 -> 195. Fitted to 2 tracks and wrong for hip-hop/downtempo. rec: ship it off; later a Rekordbox-style BPM range setting (your UI call). Also: chunk 500 costs 3 BPM results vs r79 alone (test 186 -> 183) - branch: r101-bpm-misses 11d94ba
 
+47. [built 2026-11-04] Energy 1-10 (r100): Rust, off by default, outputs byte-identical, <1% CPU, stable across re-encodes. No real labels exist; vs a genre proxy Spearman 0.48 (ends right, middle noisy), ratings skew low on your library. rec: rate ~100 tracks 1-10 on the phone (or share any MIK/Lexicon ratings) so it can be calibrated before it shows - branch: r100-energy 9c9f226
+
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM.
 - Playback ear check: 8 steps in docs/architecture/audio-engine-2026-10.md (branch q22-audio).
@@ -70,7 +72,7 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Running: r100 energy 1-10, r102 chunk 500 BPM losses
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Running: r103 parked-all-v8, r102 chunk 500 BPM losses
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
