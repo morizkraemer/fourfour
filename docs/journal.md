@@ -614,3 +614,4 @@
 2026-11-04 20:16 orchestrator decided: own prio r121 first-screen mount cost (skeleton rows, sidebar, forced layout; sonnet high)
 2026-11-04 21:29 orchestrator r120 handed back 52536cc (load_state as one binary buffer; page decode -30 to -65%, encode 1.5-1.8x, 50k first row -118 to -282 ms; row JSON sha256-identical; real Tauri IPC unmeasured, Mac check), merged 7056104, chain running. decided: own prio r122 row mapping without TrackInfo (sonnet high)
 2026-11-04 21:47 orchestrator r120 landed 7056104 (both smokes 0 failed, 26 suites, vitest 935, CHECKS-OK)
+2026-11-04 22:23 orchestrator r121 handed back 8cafdab (mount CPU 172 -> 136 ms, 10k first row -49/-51 ms Chromium, WebKit within noise; first screen byte-identical), merged a7500d8, chain running. decided: own prio r123 idle/playing CPU audit (sonnet high)
