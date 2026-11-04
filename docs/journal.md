@@ -590,3 +590,4 @@
 2026-11-04 07:33 orchestrator r107-grid-misses decided: own prio (classify right-BPM/wrong-grid test tracks at chunk 500, fix rule-fixable), spawned sonnet high from r105-snap
 2026-11-04 08:42 orchestrator r106 handed back aef2f77: rten builds a fresh BufferPool per run, 1500 chunk = 235k refaulted pages, sys 22% of CPU; malloc env vars fix it but +10-23% RSS, so no default; chunk 500 has no faults. Doc + bench merged. decided: own prio r108 throughput sweep (sonnet high, from r105-snap)
 2026-11-04 08:47 orchestrator r106 landed 78f4e32 (doc + bench only; 26 suites, CHECKS-OK; smokes skipped, no app files)
+2026-11-04 10:03 orchestrator r107 handed back 0dec485: no rule-fixable class (half/quarter-beat, drift; model activation ~0 on the Rekordbox grid), default unchanged, dropped (docs on branch). decided: own prio r109 budget refresh + fix worst non-analysis metric (sonnet high, from ov-1028)
