@@ -1,11 +1,13 @@
 {
-  "url": "/lab.html",
+  "id": "ov1028-scroll-analysing",
   "title": "Scrolling while tracks analyse",
   "question": "Scrolling a BPM-sorted list while tracks analyse: stable?",
+  "url": "/lab.html",
   "gallery": [
     {
       "url": "/data/cards/ov1028-scroll-analysing/media/r1-1-scroll-while-analysing.mp4",
-      "label": "scroll + BPM sort + live analysis"
+      "label": "scroll + BPM sort + live analysis",
+      "thumb": "/data/cards/ov1028-scroll-analysing/media/r1-1-scroll-while-analysing.mp4.thumb.webp"
     }
   ],
   "options": [
@@ -18,7 +20,7 @@
       "label": "Jumpy (note)"
     }
   ],
-  "id": "ov1028-scroll-analysing",
+  "rank": 100,
   "status": "open",
   "round": 1,
   "created": "2026-10-30T08:19:25.280Z"
