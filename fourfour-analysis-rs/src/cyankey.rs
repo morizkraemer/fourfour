@@ -248,10 +248,13 @@ impl<'a> Stft<'a> {
 
     fn magnitudes(&self, f: usize, nb: usize, buf: &mut [Complex<f32>], mag: &mut [f32]) {
         let start = f as i64 * HOP as i64 - (N_FFT / 2) as i64;
-        for (i, c) in buf.iter_mut().enumerate() {
-            let j = start + i as i64;
-            let v = if j >= 0 && (j as usize) < self.x.len() { self.x[j as usize] * self.win[i] } else { 0.0 };
-            *c = Complex { re: v, im: 0.0 };
+        let from = (-start).clamp(0, N_FFT as i64) as usize;
+        let to = (self.x.len() as i64 - start).clamp(from as i64, N_FFT as i64) as usize;
+        buf[..from].fill(Complex { re: 0.0, im: 0.0 });
+        buf[to..].fill(Complex { re: 0.0, im: 0.0 });
+        let first = (start + from as i64) as usize;
+        for ((c, x), w) in buf[from..to].iter_mut().zip(&self.x[first..first + (to - from)]).zip(&self.win[from..to]) {
+            *c = Complex { re: x * w, im: 0.0 };
         }
         self.fft.process(buf);
         for b in 0..nb {
@@ -572,6 +575,27 @@ mod tests {
                     assert!(fast.iter().zip(&slow).all(|(a, b)| a.to_bits() == b.to_bits()), "d {d} len {len} threads {threads}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn stft_frames_match_the_bounds_checked_fill_at_both_ends() {
+        let x: Vec<f32> = (0..3 * HOP + 777).map(|i| ((i * 31 % 101) as f32 - 50.0) / 50.0).collect();
+        let stft = Stft::new(&x);
+        let mut buf = vec![Complex { re: 0f32, im: 0f32 }; N_FFT];
+        let mut mag = vec![0f32; N_FFT / 2 + 1];
+        for f in 0..x.len() / HOP + 1 {
+            stft.magnitudes(f, N_FFT / 2, &mut buf, &mut mag);
+            let start = f as i64 * HOP as i64 - (N_FFT / 2) as i64;
+            let mut expected: Vec<Complex<f32>> = (0..N_FFT)
+                .map(|i| {
+                    let j = start + i as i64;
+                    let v = if j >= 0 && (j as usize) < x.len() { x[j as usize] * stft.win[i] } else { 0.0 };
+                    Complex { re: v, im: 0.0 }
+                })
+                .collect();
+            stft.fft.process(&mut expected);
+            assert!((0..N_FFT / 2).all(|b| mag[b].to_bits() == expected[b].norm().to_bits()), "frame {f}");
         }
     }
 
