@@ -1741,3 +1741,136 @@ Effect on `expand to detail drawn` is none within the noise (the frames are vsyn
 ### Tools added
 
 `app/smoke/perf-q50.spec.ts`: `expandToDetail` now also returns `painted` and writes the marks `ex-click`, `ex-detail`, `ex-drawn`; tests `q50 expand phases` (trace of 5-12 expands, `FF_PERF_NOTRACE=1` for the plain metric only, `FF_PERF_CSS` injects a stylesheet), `q50 expanded frame cost` (traces of the playing expanded player, variants via `FF_PERF_VARIANTS`) and `q50 expand identity`. `scripts/perf-trace-phases.mjs` prints the phase table above.
+## R113 search (2026-11-04, `r113-search`)
+
+Branch `r113-search` from `ov-1028` (`6ec34d9`, r95 lazy rows and r111 column table included). Linux `dev` box (16 cores), headless Chromium and Playwright WebKit. Load average 10-17 for most of the work with spikes to 40 from other workers; every browser number below comes from interleaved base and new runs (base = `ov-1028` unchanged, same spec file), and a run whose median over all steps is above 1.5 x the pooled median was dropped as a load spike (the count is under each table). Real payloads from `bench_startup dump` (10k: 1.7 MB, 50k: 8.4 MB, the r95 dumps), `FF_PERF_STATE` as in R109. Headless compositor caveat from R109 applies: `total` is key (or pointer) down to the second animation frame after it and is mostly native layout, paint and compositor time; `script` is the Chromium `ScriptDuration` delta of that step (CDP, not available in WebKit; there `js` is key down to a `setTimeout(0)` queued by the same event, which is the handler plus the Svelte flush).
+
+### Where a keystroke goes
+
+- **Typing without a sort is already cheap in script.** Median keystroke at 10k and 50k: 11-13 ms of script out of 55-57 ms total in Chromium; the rest (about 80%) is native style, layout, paint and the compositor frame, which this item does not touch. The filter itself: narrowing a previous result costs 0.01-3 ms at 10k; only a full scan costs 2 ms (10k) or 10-15 ms (50k, first letters and widened queries).
+- **A sort multiplies that by 10 to 100.** The sorted list was re-sorted from scratch whenever the filtered set changed (every keystroke, backspace and clear while a sort is set) and whenever a bump swapped the list (every analysed track while sorted). `sortTracks` mapped every row to `{track, value}` (a `WeakMap` lookup per proxy), ran a comparator sort and mapped back. Store level, one thread, real 50k payload: sorted typing "a" 196 ms, clear search 172 ms, one analysed track while sorted by BPM 208 ms; at 10k 36, 34 and 41 ms.
+- **Other per-keystroke work** (Svelte flush of 40-50 visible rows, palette groups, `mark_reactions` for `ui.searchText`): 6-10 ms of script at the floor, not reduced.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `app/src/lib/sortOrder.ts` (new): `sortedOrder(values, direction)` gives the order the comparator sort gave (no value last in both directions, equal values in list order) as one native numeric sort over `rank * n + position` plus the inverse rank; `sortedSubset` orders any subset of positions by that rank (a numeric typed-array sort, no comparator); `withChangedValues` moves the positions whose value changed with a binary search (up to 64, else it sorts anew).
+- `app/src/stores/table-columns.svelte.ts`: `sortTracks` of rows that are `library.tracks` or a `filterTracks` result of it takes the order from a cache of the whole library by `key` and direction (sort values read from the plain objects by position, no per-row `WeakMap` or proxy read) and sorts only the subset by rank. After a bump (`bumpLibraryTracks`) the cached values of the bumped rows are read again and those rows are moved; any other change of the list (load, import, append) sorts anew. Playlists, USB lists, the Only-problems list and the `fav` key keep the old comparator path.
+- `app/src/stores/library.svelte.ts`: `filterTracks` keeps up to 16 queries per source list (a `WeakMap` by list, so the palette's `library.tracks` and a playlist table no longer evict each other) and narrows from the smallest earlier result whose terms are all contained in the new terms; a backspace is a map hit. Single-term queries skip the closure. Results of `library.tracks` carry their positions (`libraryPositionsOf`, valid only while the list is the one they came from). After a bump the result of the same query is rebuilt from the earlier one by testing only the bumped rows (`libraryPositionsChangedSince`, new; `libraryRowsChangedSince` is built on it), not by scanning the whole library.
+- Tests: `sortOrder.test.ts` (random strings, numbers, ties, blanks, both directions against a comparator sort; subsets; moved values), `search-sort-fuzz.test.ts` (600 random steps of typing, backspacing, edits with bumps and sort changes on a loaded library against a plain reference; results, positions, other source lists), and the env-gated `search-path-real.test.ts` (real payload through `loadState`, 54 scripted queries and sorts plus 4 bump scenarios: step timings and a hash of the full ordered id list of every result). The perf spec `perf-search.spec.ts` (`FF_PERF_STATE=<dump> FF_PERF_RUNS=n [FF_PERF_FRESH=1] npx playwright test perf-search`) types, backspaces, clears and sorts through the real UI, idle and while `analysis-partial` events arrive at 6 per second, and hashes the rows on screen at the top, middle and bottom of the list after each stage.
+
+### Identity
+
+- Store level, whole lists: 58 result lists (queries typed letter by letter, backspaces, clears, five sorts, sorted typing, filtered sorts, four bump scenarios) hashed over every id in order, base (`ov-1028`) against new, on the 10k and the 50k payload: 58 of 58 equal at both sizes (`FF_PERF_STATE=... npx vitest run src/stores/search-path-real.test.ts`; the same test file ran against both trees). Examples at 50k: "g" gives 37,232 rows (`6f22cb7d-1d56bbe3`), sorted by artist 50,000 rows (`c66ddf75-15d2b004`), sorted by artist then "a" `aa0d7f077a24f7f5`; bump while sorted by BPM `ce147c01412a44c3`.
+- UI level: the rows on screen (text of every cell, row index) at the top, middle and bottom of the list after each of 11 stages per scenario, hashed in the page: equal between base and new in every run of every browser and size (idle scenarios compared; the analysis scenario shows the same hashes as well, which it need not).
+- Fuzz: `search-sort-fuzz.test.ts` compares 600 steps of random operations against a reference that filters and sorts the plain rows with the old comparator; deliberate breaks of the incremental filter and of the sort-order update make it fail (checked).
+
+### Before / after
+
+Store level (script ms, one thread in Node, the real payload through `loadState`, median of 7 repeats, `search-path-real.test.ts`; "sorted type a" etc. are the steps of that script):
+
+| Step (script ms, one thread, median of 7) | 10k base | 10k new | 50k base | 50k new |
+|---|---:|---:|---:|---:|
+| type 'g' | 7.5 | 2.1 | 10.3 | 10.2 |
+| type 'hou' | 2.9 | 3.2 | 15.5 | 14.9 |
+| backspace 1 | 2.9 | 0.0 | 13.6 | 0.0 |
+| clear | 0.0 | 0.0 | 0.0 | 0.0 |
+| sort artist asc | 73.5 | 27.5 | 406.0 | 125.2 |
+| sort artist desc | 56.6 | 7.4 | 304.0 | 30.8 |
+| sort title asc | 94.2 | 35.0 | 513.6 | 190.3 |
+| sort bpm asc | 54.4 | 10.5 | 289.7 | 52.1 |
+| sorted type 'a' | 36.4 | 1.7 | 195.7 | 10.4 |
+| sorted type 'am' | 11.2 | 5.0 | 57.0 | 22.0 |
+| sorted backspace 1 | 4.8 | 0.0 | 24.0 | 0.0 |
+| sorted clear | 34.1 | 0.1 | 172.1 | 1.0 |
+| sorted house | 9.7 | 0.2 | 48.5 | 1.3 |
+| bump, no filter, no sort | 0.7 | 0.7 | 1.3 | 1.3 |
+| bump, filter house | 3.5 | 0.7 | 21.0 | 1.9 |
+| bump, sorted bpm | 41.3 | 1.2 | 207.7 | 3.2 |
+| bump, filter house, sorted bpm | 11.5 | 1.2 | 55.9 | 4.0 |
+
+Browser (`perf-search.spec.ts`; ms, median of the per-run medians with the range of the run medians in brackets; "total worst" = the median over runs of each run's worst step in that group; every key is 120 ms apart; analysis = fast-pass events at 6 per second after "Analyze all unanalyzed"):
+
+#### chromium 10k: runs kept base 10 / new 9, dropped 1 (run median over all steps above 1.5 x 66 ms, the load spikes)
+| Mode | Case | total median base / new | total worst base / new | script median base / new |
+|---|---|---:|---:|---:|
+| idle | typing, no sort | 54 (51-64) / 55 (53-64) | 118 (92-332) / 99 (94-116) | 13 (10-15) / 12 (11-13) |
+| idle | typing, sorted by artist | 58 (55-68) / 55 (53-63) | 90 (72-116) / 87 (61-121) | 13 (11-15) / 13 (11-13) |
+| idle | backspace, sorted | 65 (59-73) / 57 (51-66) | 81 (70-110) / 79 (64-110) | 18 (14-20) / 10 (8-11) |
+| idle | clear search, sorted | 92 (70-103) / 79 (54-106) | 92 (70-103) / 79 (54-106) | 27 (23-36) / 15 (13-28) |
+| idle | sort click, all tracks | 90 (82-104) / 74 (73-118) | 117 (104-130) / 103 (82-204) | 36 (30-40) / 26 (24-44) |
+| idle | sort click, filtered "a" | 89 (73-176) / 72 (63-116) | 94 (82-266) / 74 (71-127) | 32 (28-114) / 23 (17-29) |
+| analysis | typing, no sort | 63 (56-80) / 62 (55-71) | 133 (112-508) / 120 (100-168) | 12 (11-19) / 11 (9-15) |
+| analysis | typing, sorted by artist | 63 (57-69) / 67 (61-74) | 101 (85-112) / 106 (84-128) | 12 (10-13) / 13 (12-14) |
+| analysis | backspace, sorted | 79 (60-97) / 83 (72-249) | 103 (88-120) / 108 (93-480) | 17 (13-29) / 16 (15-47) |
+| analysis | clear search, sorted | 109 (93-153) / 108 (78-536) | 109 (93-153) / 108 (78-536) | 31 (25-44) / 18 (14-74) |
+| analysis | sort click, all tracks | 89 (82-103) / 95 (84-103) | 115 (88-135) / 134 (106-343) | 29 (26-36) / 32 (24-36) |
+| analysis | sort click, filtered "a" | 98 (89-124) / 100 (81-136) | 104 (89-158) / 103 (88-158) | 34 (29-45) / 38 (27-43) |
+
+#### chromium 50k: runs kept base 3 / new 3, dropped 0 (run median over all steps above 1.5 x 75 ms, the load spikes)
+| Mode | Case | total median base / new | total worst base / new | script median base / new |
+|---|---|---:|---:|---:|
+| idle | typing, no sort | 57 (56-62) / 56 (55-67) | 127 (117-149) / 110 (98-115) | 12 (11-13) / 11 (11-21) |
+| idle | typing, sorted by artist | 66 (64-72) / 63 (62-67) | 98 (90-111) / 85 (84-104) | 17 (17-19) / 16 (15-16) |
+| idle | backspace, sorted | 87 (84-91) / 61 (58-63) | 102 (101-104) / 82 (71-101) | 37 (37-37) / 10 (9-13) |
+| idle | clear search, sorted | 182 (156-184) / 74 (63-90) | 182 (156-184) / 74 (63-90) | 114 (85-119) / 24 (19-35) |
+| idle | sort click, all tracks | 172 (171-172) / 137 (124-156) | 204 (202-206) / 220 (219-223) | 121 (105-125) / 77 (69-107) |
+| idle | sort click, filtered "a" | 205 (201-210) / 113 (107-114) | 206 (205-232) / 156 (146-156) | 141 (139-152) / 63 (60-63) |
+| analysis | typing, no sort | 74 (69-85) / 68 (60-70) | 230 (227-233) / 141 (126-162) | 22 (21-25) / 13 (11-19) |
+| analysis | typing, sorted by artist | 80 (65-82) / 70 (62-74) | 134 (103-155) / 107 (101-133) | 17 (15-17) / 13 (13-15) |
+| analysis | backspace, sorted | 97 (86-120) / 91 (89-99) | 134 (116-288) / 107 (101-128) | 43 (34-45) / 35 (32-39) |
+| analysis | clear search, sorted | 163 (159-284) / 90 (87-122) | 163 (159-284) / 90 (87-122) | 93 (93-214) / 21 (19-27) |
+| analysis | sort click, all tracks | 165 (155-187) / 134 (122-138) | 208 (206-400) / 238 (205-240) | 160 (112-195) / 68 (64-79) |
+| analysis | sort click, filtered "a" | 230 (222-315) / 195 (189-196) | 270 (238-426) / 222 (218-237) | 165 (157-236) / 124 (120-128) |
+
+#### webkit 10k: runs kept base 5 / new 4, dropped 1 (run median over all steps above 1.5 x 228 ms, the load spikes)
+| Mode | Case | total median base / new | total worst base / new | js median base / new |
+|---|---|---:|---:|---:|
+| idle | typing, no sort | 191 (176-210) / 186 (176-210) | 445 (395-535) / 451 (408-495) | 43 (38-47) / 40 (34-44) |
+| idle | typing, sorted by artist | 200 (186-203) / 204 (168-266) | 446 (324-525) / 409 (298-499) | 46 (42-48) / 49 (43-60) |
+| idle | backspace, sorted | 215 (181-232) / 190 (178-228) | 235 (189-258) / 250 (203-282) | 52 (45-58) / 44 (40-48) |
+| idle | clear search, sorted | 300 (259-323) / 312 (287-469) | 300 (259-323) / 312 (287-469) | 79 (77-97) / 72 (68-96) |
+| idle | sort click, all tracks | 230 (224-285) / 212 (199-221) | 281 (262-431) / 294 (264-413) | n/a |
+| idle | sort click, filtered "a" | 241 (200-310) / 241 (186-304) | 291 (202-374) / 288 (192-362) | n/a |
+| analysis | typing, no sort | 234 (200-314) / 222 (214-251) | 419 (393-600) / 463 (431-476) | 48 (44-52) / 42 (37-46) |
+| analysis | typing, sorted by artist | 251 (224-316) / 245 (214-335) | 384 (361-413) / 391 (358-624) | 45 (42-49) / 43 (38-51) |
+| analysis | backspace, sorted | 261 (259-348) / 256 (232-281) | 328 (294-444) / 294 (273-385) | 60 (53-64) / 58 (56-60) |
+| analysis | clear search, sorted | 398 (315-577) / 425 (384-547) | 398 (315-577) / 425 (384-547) | 107 (66-130) / 73 (56-123) |
+| analysis | sort click, all tracks | 252 (250-311) / 248 (231-290) | 331 (308-420) / 291 (287-348) | n/a |
+| analysis | sort click, filtered "a" | 338 (281-374) / 290 (248-334) | 388 (281-480) / 312 (259-355) | n/a |
+
+#### webkit 50k: runs kept base 2 / new 2, dropped 0 (run median over all steps above 1.5 x 260 ms, the load spikes)
+| Mode | Case | total median base / new | total worst base / new | js median base / new |
+|---|---|---:|---:|---:|
+| idle | typing, no sort | 230 (226-236) / 206 (188-225) | 570 (559-581) / 736 (427-1046) | 50 (41-58) / 49 (40-57) |
+| idle | typing, sorted by artist | 253 (237-270) / 227 (220-233) | 460 (420-501) / 416 (407-425) | 56 (56-58) / 59 (52-65) |
+| idle | backspace, sorted | 218 (204-231) / 195 (190-200) | 310 (237-384) / 266 (262-270) | 66 (66-66) / 46 (44-50) |
+| idle | clear search, sorted | 357 (356-358) / 296 (285-307) | 357 (356-358) / 296 (285-307) | 158 (140-175) / 76 (75-76) |
+| idle | sort click, all tracks | 288 (266-310) / 251 (249-253) | 336 (310-361) / 386 (332-439) | n/a |
+| idle | sort click, filtered "a" | 325 (304-345) / 254 (235-273) | 365 (341-389) / 293 (270-316) | n/a |
+| analysis | typing, no sort | 274 (254-295) / 256 (246-266) | 530 (458-602) / 449 (397-501) | 76 (72-80) / 50 (47-52) |
+| analysis | typing, sorted by artist | 278 (254-301) / 272 (270-272) | 608 (369-846) / 436 (414-458) | 68 (65-72) / 56 (56-56) |
+| analysis | backspace, sorted | 290 (280-298) / 268 (243-294) | 344 (304-384) / 303 (294-312) | 87 (74-99) / 80 (78-82) |
+| analysis | clear search, sorted | 587 (545-629) / 460 (391-529) | 587 (545-629) / 460 (391-529) | 145 (136-154) / 74 (66-82) |
+| analysis | sort click, all tracks | 353 (353-353) / 334 (312-356) | 418 (367-469) / 390 (373-407) | n/a |
+| analysis | sort click, filtered "a" | 455 (388-522) / 388 (341-435) | 473 (396-550) / 410 (364-457) | n/a |
+
+Headline row of the budget table, `typing during analysis: worst keystroke` (`perf-bulk-analysis.spec.ts`, 10k synthetic fixture tracks all unanalysed, typing "smoke track 12" during the fast pass; worst of 14 keystrokes; ms):
+
+| | runs | worst keystroke | median keystroke | palette open worst |
+| base | 7 | 174 (118-196) | 100 (80-112) | 165 (129-184) |
+| new | 7 | 151 (120-676) | 88 (85-117) | 166 (130-408) |
+
+Seven runs each (three pairs and four more pairs later), interleaved, none dropped; the base runs include one at load 37 (idle scroll p95 214 ms) and the 676 ms new run (378 ms long task in the typing window, idle scroll p95 25 ms, did not recur in the other six new runs: 120-175 ms).
+
+### Read with care
+
+- The 100 ms target for the worst keystroke is not met by script changes alone and was not met here: a keystroke without a sort is 55 ms at the median in Chromium at both sizes, 80% of it native, and the worst keystroke of a run (new: 99 ms idle and 120 ms during analysis at 10k, 110 and 141 ms at 50k; base: 118, 133, 127 and 230 ms) is one that changes many visible rows or crosses the viewport size (rows created or destroyed). During analysis at 50k the worst keystroke improved most (230 to 141 ms; script of it 163 to 65 ms), because the bumps no longer rescan the library. The gain is where a sort is active and the result set changes: 50k clear search while sorted 182 ms to 74 ms, backspace while sorted 87 to 61 ms, sort click on a filtered list 205 to 113 ms, and every bump while sorted by BPM (analysis running) from 41 ms (10k) and 208 ms (50k) of script to 1 and 3 ms.
+- First sort of a column is still a full sort: 50k by artist 125 ms and by title 190 ms of script at store level (reading 50k values, a sort of 50k distinct strings); it moved from 406 and 514 ms but a click stays at 130-220 ms total at 50k. The second direction of the same column is a new sort (30-52 ms at 50k, not derived from the first one).
+- WebKit headless: `total` is 170-300 ms for every step including a bare keystroke (the compositor idle gap of R29), so differences of 10-30 ms between base and new do not show in it; the script side (`js`) moves the same way as Chromium where it matters (50k sorted clear 158 to 76 ms) and is within noise at 10k. One WebKit 10k run hit a load spike of 40 and was dropped by the rule above; three more pairs were run afterwards (5 base and 4 new kept).
+- The Chromium outliers of single runs (up to 1.4 s for one keystroke) coincide with load average 39-42 on the box (other workers); they were dropped from the tables by the run-median rule and the count is printed. One of the three first `perf-bulk-analysis` new runs had a worst keystroke of 676 ms and a 378 ms long task in the typing window, with the rest of that run (idle scroll p95 25 ms) normal; four more pairs were run (table above).
+
+### Not done
+
+- The first keystroke after a clear still scans every search text (10 ms at 50k); a joined text with `indexOf` would need rebuilding at every bump while analysis runs, which costs about what it saves.
+- `TrackTable` builds `new Set(filteredTracks)` per sorted evaluation (about 5 ms at 50k) for the keep-position-while-scrolling logic; unchanged.
+- Layout, paint and the compositor frame (the 80%) are markup and CSS territory and were not touched.

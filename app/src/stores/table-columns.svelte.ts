@@ -15,7 +15,8 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, libraryRowsChangedSince, plainRowOf, playlistByName } from './library.svelte.ts';
+import { library, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, plainRowOf, playlistByName } from './library.svelte.ts';
+import { sortedOrder, sortedSubset, withChangedValues, type SortedOrder, type SortValue } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
@@ -430,6 +431,8 @@ export function sortTracks<T extends Record<string, unknown>>(
   const key = tableLayouts[kind].sortKey;
   if (!key) return tracks;
   const dir = tableLayouts[kind].sortDir === 'asc' ? 1 : -1;
+  const positions = key === 'fav' ? null : libraryPositionsOf(tracks);
+  if (positions) return sortLibraryRows(tracks, positions, key, dir);
   const keyed =
     key === 'fav'
       ? tracks.map((track) => ({ track, value: favSlot(track) }))
@@ -444,8 +447,6 @@ export function sortTracks<T extends Record<string, unknown>>(
   });
   return keyed.map((entry) => entry.track);
 }
-
-type SortValue = string | number | null;
 
 let sortValuesVersion: { tracks: unknown; usbTracks: unknown } | null = null;
 const sortValuesByKey = new Map<string, WeakMap<object, SortValue>>();
@@ -484,6 +485,70 @@ function sortValueReader(key: string): (track: Record<string, unknown>) => SortV
   };
 }
 
+interface LibrarySorts {
+  tracks: object;
+  values: Map<string, SortValue[]>;
+  orders: Map<string, SortedOrder>;
+  from: { values: Map<string, SortValue[]>; orders: Map<string, SortedOrder>; changed: number[] } | null;
+}
+
+let librarySorts: LibrarySorts | null = null;
+
+function libraryValues(rows: readonly Record<string, unknown>[], key: string, positions: readonly number[] | null, into: SortValue[]) {
+  const plains = libraryPlainRows();
+  const aligned = plains.length === rows.length;
+  const read = (p: number) => {
+    const plain = aligned ? plains[p] : plainRowOf(rows[p]);
+    into[p] = sortValueOfRaw(Object.hasOwn(plain, key) ? plain[key] : rows[p][key], key);
+  };
+  untrack(() => {
+    if (positions) for (let i = 0; i < positions.length; i++) read(positions[i]);
+    else for (let p = 0; p < rows.length; p++) read(p);
+  });
+}
+
+function librarySort(key: string, dir: 1 | -1): SortedOrder {
+  const rows = untrack(() => library.tracks);
+  if (librarySorts?.tracks !== rows) {
+    const previous = librarySorts;
+    const changed = previous ? libraryPositionsChangedSince(previous.tracks) : null;
+    librarySorts = {
+      tracks: rows,
+      values: new Map(),
+      orders: new Map(),
+      from: previous && changed ? { values: previous.values, orders: previous.orders, changed } : null,
+    };
+  }
+  const cache = librarySorts!;
+  let values = cache.values.get(key);
+  if (!values) {
+    values = cache.from?.values.get(key);
+    if (values) libraryValues(rows, key, cache.from!.changed, values);
+    else {
+      values = new Array<SortValue>(rows.length);
+      libraryValues(rows, key, null, values);
+    }
+    cache.values.set(key, values);
+  }
+  const orderKey = `${key}|${dir}`;
+  let sorted = cache.orders.get(orderKey);
+  if (!sorted) {
+    const earlier = cache.from?.values.get(key) === values ? cache.from.orders.get(orderKey) : undefined;
+    sorted = (earlier && withChangedValues(earlier, values, cache.from!.changed, dir)) || sortedOrder(values, dir);
+    cache.orders.set(orderKey, sorted);
+  }
+  return sorted;
+}
+
+function sortLibraryRows<T extends Record<string, unknown>>(tracks: T[], positions: readonly number[] | 'all', key: string, dir: 1 | -1): T[] {
+  const rows = untrack(() => library.tracks) as T[];
+  const sorted = librarySort(key, dir);
+  const order = positions === 'all' ? sorted.order : sortedSubset(positions, sorted);
+  const out = new Array<T>(order.length);
+  for (let i = 0; i < order.length; i++) out[i] = rows[order[i]];
+  return out;
+}
+
 function sortKeyed<T extends Record<string, unknown>>(tracks: T[], valueOf: (track: T) => SortValue) {
   return untrack(() => tracks.map((track) => ({ track, value: valueOf(track) })));
 }
@@ -513,7 +578,11 @@ export function durationSeconds(time: string): number | null {
 
 function sortValue(track: Record<string, unknown>, key: string): string | number | null {
   const plain = plainRowOf(track);
-  const text = String((Object.hasOwn(plain, key) ? plain[key] : track[key]) ?? '').trim();
+  return sortValueOfRaw(Object.hasOwn(plain, key) ? plain[key] : track[key], key);
+}
+
+function sortValueOfRaw(raw: unknown, key: string): string | number | null {
+  const text = String(raw ?? '').trim();
   if (isBlank(text)) return null;
   if (key === 'bpm') {
     const n = parseFloat(text);
