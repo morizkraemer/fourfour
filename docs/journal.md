@@ -579,3 +579,4 @@
 2026-11-03 23:21 orchestrator r97 handed back 1b3a972 (int8 at 500: Mac rten +43-60% trk/min, scores equal; x86 -2 grid, ~10% gain, fails gate), parked as Waiting 44; spawning r98 Mac same-session pair (sonnet medium) and r99 LUFS/gain (sonnet high)
 2026-11-04 00:42 orchestrator r99 handed back cae9320 (LUFS within 0.013 LU of ffmpeg, ~1% CPU, off by default, byte-identical), parked as Waiting 45; spawning r100 energy 1-10 (sonnet high)
 2026-11-04 00:58 orchestrator r98 handed back 87548eb (same-session Mac: int8 rten 500 +22% trk/min, RSS -64%, scores equal, CPU 2.7x), Waiting 44 updated; spawning r101 BPM >1 misses on r79+r96 (sonnet high); long-track RSS dropped: chunk 500 + r93 ceiling already halve it
+2026-11-04 02:56 orchestrator r101 handed back 11d94ba (12 misses classified; half-time band fixes 2, fitted to 2 tracks, rec off), parked as Waiting 46; spawning r102 WebKit row cost (sonnet high)
