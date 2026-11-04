@@ -588,3 +588,4 @@
 2026-11-04 06:06 orchestrator r104 landed a1b37c0 (both smokes, 26 suites, CHECKS-OK)
 2026-11-04 07:32 orchestrator r105 handed back 903b702: far fold-peak skip 0.3% -> 0.05% fixes chunk-500 losses (test grid 169->171, BPM 0.1 183->185 vs 186 at 1500), zero right->wrong, 1500 unchanged; snap switches tried and removed. Parked into Waiting 43 (changes results)
 2026-11-04 07:33 orchestrator r107-grid-misses decided: own prio (classify right-BPM/wrong-grid test tracks at chunk 500, fix rule-fixable), spawned sonnet high from r105-snap
+2026-11-04 08:42 orchestrator r106 handed back aef2f77: rten builds a fresh BufferPool per run, 1500 chunk = 235k refaulted pages, sys 22% of CPU; malloc env vars fix it but +10-23% RSS, so no default; chunk 500 has no faults. Doc + bench merged into ov-1028, checks running. decided: own prio r108 throughput sweep (sonnet high, from r105-snap)
