@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """How far the beat logits of a chunked run are from a reference run (ffa --dump dirs), by distance to the nearest chunk border.
-usage: r102-chunkdiff.py <ref dump> <run dump> <ids file | id> <stride> [--peaks]
+usage: r102-chunkdiff.py <ref dump> <run dump[,run dump...]> <ids file | id> <stride> [--peaks]
 <stride> is the frame distance between valid regions of the run (chunk - 2 * border - overlap). Prints, over all tracks, the mean absolute
 beat-logit difference in bins of distance to the nearest border, and (with --peaks) the beat peaks (logit > 0, local maximum over 7 frames)
 that only one side has."""
@@ -24,7 +24,7 @@ def peaks(x):
 
 
 def main():
-    ref, run, ids_arg, stride = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+    ref, runs, ids_arg, stride = sys.argv[1], sys.argv[2].split(","), sys.argv[3], int(sys.argv[4])
     ids = open(ids_arg).read().split() if os.path.exists(ids_arg) else [ids_arg]
     sums = [0.0] * len(BINS)
     counts = [0] * len(BINS)
@@ -33,7 +33,8 @@ def main():
     only_ref = only_run = peaks_ref = peaks_run = 0
     used = 0
     for i in ids:
-        if not (os.path.exists(f"{ref}/{i}.json") and os.path.exists(f"{run}/{i}.json")):
+        run = next((d for d in runs if os.path.exists(f"{d}/{i}.json")), None)
+        if run is None or not os.path.exists(f"{ref}/{i}.json"):
             continue
         used += 1
         a, b = load(ref, i), load(run, i)
