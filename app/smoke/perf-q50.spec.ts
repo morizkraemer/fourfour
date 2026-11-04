@@ -166,8 +166,15 @@ function loadTrack(page: Page, rowIndex: number) {
 function expandToDetail(page: Page) {
   return page.evaluate(
     () =>
-      new Promise<{ drawn: number; longest: number; frame: number }>((resolve, reject) => {
+      new Promise<{ drawn: number; painted: number; longest: number; frame: number }>((resolve, reject) => {
         const q = (window as unknown as { __q50: Q50 }).__q50;
+        let painted = 0;
+        const paintWatch = new MutationObserver(() => {
+          if (painted || document.querySelector('.ff-xp .waveform-display__zoom')?.getAttribute('data-bands') !== 'detail') return;
+          painted = performance.now() - t0;
+          performance.mark('ex-detail');
+        });
+        paintWatch.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-bands'] });
         const gaps: number[] = [];
         let last = performance.now();
         let framesLeft = Infinity;
@@ -178,11 +185,14 @@ function expandToDetail(page: Page) {
         };
         requestAnimationFrame(tick);
         const t0 = performance.now();
+        performance.mark('ex-click');
         (document.querySelector('.ff-player-compact__expand-btn') as HTMLElement).click();
         const done = () => {
           const drawn = performance.now() - t0;
+          performance.mark('ex-drawn');
+          paintWatch.disconnect();
           framesLeft = 10;
-          setTimeout(() => resolve({ drawn, longest: q.longTasks.filter((t) => t.start >= t0 - 1).reduce((m, t) => Math.max(m, t.duration), 0), frame: Math.max(...gaps) }), 250);
+          setTimeout(() => resolve({ drawn, painted, longest: q.longTasks.filter((t) => t.start >= t0 - 1).reduce((m, t) => Math.max(m, t.duration), 0), frame: Math.max(...gaps) }), 250);
         };
         const poll = () => {
           if (performance.now() - t0 > 15_000) return reject(new Error('expanded detail timed out'));
@@ -298,6 +308,7 @@ test.describe('q50 perf paths', () => {
     record('track load long-task ms', median(loads.map((l) => l.longTask)));
     record('track load overview painted after backend answer ms', median(loads.map((l) => l.afterAnswer)));
     record('expand to detail drawn ms', median(expands.map((e) => e.drawn)));
+    record('expand to detail painted ms (data-bands set)', median(expands.map((e) => e.painted)));
     record('expand longest task ms', median(expands.map((e) => e.longest)));
     const mockMs = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.mockMs);
     record('mock get_analysis_data ms (not app time)', median(mockMs.get_analysis_data ?? [0]));
@@ -373,6 +384,109 @@ test('q50 expand-to-detail profile', async ({ browser }) => {
   }
   console.log(`expand to detail drawn ms: ${expands.map((e) => e.drawn.toFixed(0)).join(', ')}`);
   console.log(`expand longest task ms: ${expands.map((e) => e.longest.toFixed(0)).join(', ')}`);
+  await context.close();
+});
+
+test('q50 expand phases', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'expand-phases', 'set FF_PERF_PROFILE=expand-phases FF_PERF_TRACE_OUT=trace.json [FF_PERF_RUNS=5]');
+  test.setTimeout(600_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  if (process.env.FF_PERF_CSS) await page.addStyleTag({ content: process.env.FF_PERF_CSS });
+  const traceOut = process.env.FF_PERF_TRACE_OUT ?? 'smoke/.results/expand-phases.json';
+  const rows = [];
+  const traced = !process.env.FF_PERF_NOTRACE;
+  if (traced) await browser.startTracing(page, { path: traceOut, categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute', 'blink.user_timing', 'cc', 'viz'] });
+  for (const index of [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25].slice(0, Math.max(RUNS, 5))) {
+    await loadTrack(page, index);
+    await page.waitForTimeout(600);
+    rows.push(await expandToDetail(page));
+    await page.locator('.ff-xp__collapse').click();
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+    await page.waitForTimeout(300);
+  }
+  if (traced) await browser.stopTracing();
+  console.log(`expand to detail drawn ms: ${rows.map((e) => e.drawn.toFixed(0)).join(', ')}`);
+  console.log(`expand to detail painted ms: ${rows.map((e) => e.painted.toFixed(0)).join(', ')}`);
+  await context.close();
+});
+
+test('q50 expand identity', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'expand-identity', 'set FF_PERF_PROFILE=expand-identity FF_PERF_IDENT_OUT=hashes.json');
+  test.setTimeout(600_000);
+  const { createHash } = await import('node:crypto');
+  const sha = (data: string | Buffer) => createHash('sha1').update(data).digest('hex').slice(0, 12);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  const hashes: Record<string, string> = {};
+  for (const index of [3, 7, 11]) {
+    await loadTrack(page, index);
+    await expandToDetail(page);
+    if ((await page.locator('.ff-xp__play').getAttribute('aria-label')) === 'Pause') await page.locator('.ff-xp__play').click();
+    await page.waitForTimeout(300);
+    const overview = page.locator('.ff-xp .waveform-display__overview');
+    const zoom = page.locator('.ff-xp .waveform-display__zoom');
+    const box = (await overview.boundingBox())!;
+    const zbox = (await zoom.boundingBox())!;
+    for (const frac of [0.02, 0.1, 0.37, 0.5, 0.731, 0.93]) {
+      await page.mouse.click(box.x + box.width * frac, box.y + box.height / 2);
+      await page.waitForTimeout(250);
+      for (const wheel of [0, -250, -400, 300]) {
+        if (wheel) {
+          await page.mouse.move(zbox.x + zbox.width / 2, zbox.y + zbox.height / 2);
+          await page.mouse.wheel(0, wheel);
+          await page.waitForTimeout(250);
+        }
+        const key = `track${index} seek${frac} wheel${wheel}`;
+        const canvases = await page.evaluate(() => ({
+          overview: (document.querySelector('.ff-xp .waveform-display__overview') as HTMLCanvasElement).toDataURL(),
+          zoom: (document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement).toDataURL(),
+          bands: (document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement).dataset.bands ?? '',
+        }));
+        const shot = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height: box.height + zbox.height } });
+        hashes[key] = `${sha(canvases.overview)} ${sha(canvases.zoom)} ${canvases.bands} ${sha(shot)}`;
+      }
+    }
+    await page.locator('.ff-xp__collapse').click();
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+  }
+  writeFileSync(process.env.FF_PERF_IDENT_OUT ?? 'smoke/.results/expand-identity.json', JSON.stringify(hashes, null, 1));
+  console.log(`identity: ${Object.keys(hashes).length} snapshots`);
+  await context.close();
+});
+
+test('q50 expanded frame cost', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'frame-cost', 'set FF_PERF_PROFILE=frame-cost FF_PERF_TRACE_OUT=prefix');
+  test.setTimeout(600_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  await loadTrack(page, 3);
+  await expandToDetail(page);
+  const prefix = process.env.FF_PERF_TRACE_OUT ?? 'smoke/.results/frame-cost';
+  const variants: Record<string, string> = {
+    base: '',
+    'no-ov-playhead': '.ff-xp .waveform-display > div:first-child > div { display: none !important }',
+    'no-row-canvas': '[data-track-row] canvas { display: none !important }',
+    'few-rows': '[data-track-row]:nth-child(n+8) { display: none !important }',
+    'ov-willchange': '.ff-xp .waveform-display > div:first-child > div { will-change: transform }',
+  };
+  let n = 0;
+  for (const name of (process.env.FF_PERF_VARIANTS ?? 'base').split(',')) {
+    const css = variants[name];
+    await loadTrack(page, 5 + 2 * n++);
+    const handle = css ? await page.addStyleTag({ content: css }) : null;
+    await page.waitForTimeout(600);
+    await browser.startTracing(page, { path: `${prefix}-${name}.json`, categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute', 'blink.user_timing', ...(process.env.FF_PERF_TRACE_CATS?.split(',') ?? [])] });
+    await page.waitForTimeout(1500);
+    await browser.stopTracing();
+    await handle?.evaluate((el) => el.remove());
+  }
   await context.close();
 });
 

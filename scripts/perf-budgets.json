@@ -170,7 +170,24 @@
         "25k": 50,
         "50k": 50
       },
-      "why": "three frames; the zoom paint is one task now and can be split per frame"
+      "why": "click, the paint, and three more frames: the harness sees the paint one frame late and then waits two frames, each 17-27 ms headless; the work itself is the painted row below (R112)"
+    },
+    {
+      "id": "expand_detail_painted",
+      "label": "expand to detail painted (frontend, data-bands set)",
+      "unit": "ms",
+      "path": "track_load.frontend.expand to detail painted ms (data-bands set)",
+      "now": {
+        "10k": 33,
+        "25k": null,
+        "50k": null
+      },
+      "target": {
+        "10k": 50,
+        "25k": 50,
+        "50k": 50
+      },
+      "why": "Svelte mount 7-10 ms, layout 5 ms and the first full paint of both canvases 20 ms; already under the target, so a regression here is real work added to the expand (R112)"
     },
     {
       "id": "analysis_tpm",
