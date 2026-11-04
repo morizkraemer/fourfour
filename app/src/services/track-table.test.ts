@@ -1,6 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { fixtureBuffer, fixtureText } from './fixtures.ts';
 import { decodeStateBytes, decodeTrackTable, isTrackTable, type TrackTable } from './track-table.ts';
 
 const WIRE =
@@ -60,12 +59,8 @@ describe('track table', () => {
 });
 
 describe('binary load_state answer', () => {
-  const fixturePath = (name: string) => resolve(process.cwd(), 'src/services/fixtures', name);
-  const fixture = (name: string) => {
-    const bytes = readFileSync(fixturePath(name));
-    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  };
-  const jsonState = (name: string) => JSON.parse(readFileSync(fixturePath(name), 'utf8'));
+  const fixture = fixtureBuffer;
+  const jsonState = (name: string) => JSON.parse(fixtureText(name));
 
   for (const name of ['state-edge', 'state-empty']) {
     it(`${name}: decodes to the objects the JSON table gives, field by field and key by key`, () => {

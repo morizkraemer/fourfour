@@ -1,19 +1,19 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { bufferOf, env } from './fixtures.ts';
 import { describe, expect, it } from 'vitest';
 import { decodeStateBytes, decodeTrackTable } from './track-table.ts';
 
-const PAIRS = (process.env.FF_STATE_PAIRS ?? '')
+const PAIRS = (env.FF_STATE_PAIRS ?? '')
   .split(',')
   .filter(Boolean)
-  .map((entry) => entry.split('='));
+  .map((entry) => entry.split('=') as [string, string]);
 
 describe.skipIf(PAIRS.length === 0)('binary load_state answer of a real library (FF_STATE_PAIRS=<state.json>=<state.bin>,...)', () => {
   for (const [jsonPath, binPath] of PAIRS) {
     it(`${binPath} decodes to the tracks and playlists of ${jsonPath}, row by row`, () => {
       const json = JSON.parse(readFileSync(jsonPath, 'utf8'));
-      const bytes = readFileSync(binPath);
-      const decoded = decodeStateBytes(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+      const decoded = decodeStateBytes(bufferOf(binPath));
       const expected = decodeTrackTable(json.tracks);
       expect(decoded.tracks.length).toBe(expected.length);
       const hash = (tracks: unknown[]) => {

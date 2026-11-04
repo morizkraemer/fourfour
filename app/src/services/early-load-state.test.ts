@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { fixtureBuffer, fixtureText } from './fixtures.ts';
 
 const invokeMock = vi.hoisted(() => vi.fn());
 
@@ -59,9 +59,8 @@ describe('load_state sent by index.html', () => {
   });
 
   it('decodes a binary answer into the tracks and playlists of the JSON answer', async () => {
-    const bytes = readFileSync(resolve(process.cwd(), 'src/services/fixtures/state-edge.bin'));
-    const json = JSON.parse(readFileSync(resolve(process.cwd(), 'src/services/fixtures/state-edge.json'), 'utf8'));
-    invokeMock.mockResolvedValue(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const json = JSON.parse(fixtureText('state-edge.json'));
+    invokeMock.mockResolvedValue(fixtureBuffer('state-edge.bin'));
     const { loadState } = await freshTauriService();
     const { decodeTrackTable } = await import('./track-table.ts');
 
