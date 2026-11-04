@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -183,7 +182,6 @@ impl TrackTable {
     }
 }
 
-/// Texts stored back to back, sent as an array of strings.
 #[derive(Clone, Default)]
 struct TextColumn {
     text: String,
@@ -223,42 +221,22 @@ impl Serialize for TextColumn {
     }
 }
 
-#[derive(Default, Clone, Copy)]
-struct FastHasher(u64);
-
-impl FastHasher {
-    fn add(&mut self, word: u64) {
-        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+fn hash_text(text: &str) -> usize {
+    const MULTIPLIER: u64 = 0x517c_c1b7_2722_0a95;
+    let mut hash = text.len() as u64;
+    let mut words = text.as_bytes().chunks_exact(8);
+    for word in &mut words {
+        let word = u64::from_le_bytes(word.try_into().expect("a chunk of 8 bytes"));
+        hash = (hash.rotate_left(5) ^ word).wrapping_mul(MULTIPLIER);
     }
+    let mut last = [0u8; 8];
+    last[..words.remainder().len()].copy_from_slice(words.remainder());
+    hash = (hash.rotate_left(5) ^ u64::from_le_bytes(last)).wrapping_mul(MULTIPLIER);
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    (hash ^ (hash >> 31)) as usize
 }
 
-impl std::hash::Hasher for FastHasher {
-    fn write(&mut self, bytes: &[u8]) {
-        let mut words = bytes.chunks_exact(8);
-        for word in &mut words {
-            self.add(u64::from_le_bytes(word.try_into().expect("a chunk of 8 bytes")));
-        }
-        let rest = words.remainder();
-        if !rest.is_empty() {
-            let mut last = [0u8; 8];
-            last[..rest.len()].copy_from_slice(rest);
-            self.add(u64::from_le_bytes(last));
-        }
-    }
-
-    fn write_u8(&mut self, byte: u8) {
-        self.add(u64::from(byte));
-    }
-
-    fn finish(&self) -> u64 {
-        let mut mixed = self.0;
-        mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-        mixed ^ (mixed >> 31)
-    }
-}
-
-/// Distinct texts, found again by an open-addressing table of indexes into the texts.
 #[derive(Default)]
 struct TextIndex {
     texts: TextColumn,
@@ -266,19 +244,12 @@ struct TextIndex {
 }
 
 impl TextIndex {
-    fn hash(text: &str) -> usize {
-        use std::hash::Hasher;
-        let mut hasher = FastHasher::default();
-        hasher.write(text.as_bytes());
-        hasher.finish() as usize
-    }
-
     fn find(&self, text: &str) -> Option<u32> {
         if self.slots.is_empty() {
             return None;
         }
         let mask = self.slots.len() - 1;
-        let mut slot = Self::hash(text) & mask;
+        let mut slot = hash_text(text) & mask;
         loop {
             match self.slots[slot] {
                 0 => return None,
@@ -293,12 +264,12 @@ impl TextIndex {
             let size = (self.slots.len() * 2).max(64);
             self.slots = vec![0; size];
             for index in 0..self.texts.len() {
-                self.place(Self::hash(self.texts.get(index)), index as u32);
+                self.place(hash_text(self.texts.get(index)), index as u32);
             }
         }
         let index = self.texts.len() as u32;
         self.texts.push(text);
-        self.place(Self::hash(text), index);
+        self.place(hash_text(text), index);
         index
     }
 

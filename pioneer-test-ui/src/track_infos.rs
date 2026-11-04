@@ -132,8 +132,6 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
     Ok(LoadedState { tracks, playlists })
 }
 
-/// The rows of the whole library as a table, and how many tracks still lack a row preview. A large library is
-/// scanned in id ranges on several threads (the first on `lib`'s connection, the others on their own).
 fn track_table(lib: &LocalLibrary, labels: &HashMap<i64, TrackLabels>) -> Result<(TrackTable, usize), String> {
     let Some((first_id, last_id)) = lib.track_id_bounds().map_err(|e| e.to_string())? else {
         return Ok((TrackTable::default(), 0));
@@ -160,7 +158,6 @@ fn id_ranges(first_id: i64, last_id: i64, count: usize) -> Vec<RangeInclusive<i6
         .collect()
 }
 
-/// The tables of the ranges are joined in id order, which gives the table that one scan would.
 fn track_table_in_ranges(
     lib: &LocalLibrary,
     labels: &HashMap<i64, TrackLabels>,
