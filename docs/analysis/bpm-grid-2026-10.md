@@ -359,3 +359,72 @@ $S/q30-sum.sh hb $R/frz2 dev --onset-dir $R/onsets && python3 -I $S/q30-hb-analy
 ```
 
 `q30-sum.sh` writes `last-<label>.json` next to the cache. The extra flags of `grid` added in Q30: `--pcm-shift-ms`, `--keep-native LO HI`, `--onset-dir`, `--mp3-rule enc+header+l3100`.
+
+# R101 BPM misses (2026-11-04)
+
+Branch `r101-bpm-misses` = `r79-bpm-misses` (global fold peak) + `r96-chunk500` (chunk 500), merged without conflicts. Scored with `benchmark/scripts/r94-run.sh` (ffa, 2 workers x 2 threads, 47.7 CPU s/track) on test 205 and dev 50, then re-fitted from the saved chunk-500 logits (`DUMP=` in `r94-run.sh`, `grid_refit`) for the fix runs. The re-fit reproduces the ffa counts exactly (test 183 / 193 / 169, dev 47 / 50 / 44).
+
+## Combined state before the fix
+
+| Split | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right (of all) | Misses > 1 BPM |
+|---|---:|---:|---:|---:|---:|
+| test 205 | 169 | 183 | 193 | 140 | 12 |
+| dev 50 | 44 | 47 | 50 | 42 | 0 |
+
+Against r79 alone (171 / 186 / 194 on the same test tracks), chunk 500 moves three BPM results: 144 (127.386 -> 170.0), 231 (128.0 -> 128.27) and 528 (118.02 -> 117.73) go wrong; 42 (grid) goes right. That is the 1-3 track noise r96 reported; the counts net to -3 BPM 0.1 and -2 grid here because r96's base was the pre-r79 fit.
+
+## The 12 test tracks more than 1 BPM off
+
+Dev has none. "Model thirds" are the median tempo of the raw model beats in the first, middle and last third of the track (`r101-misses.py` with the dump dir).
+
+| Class | n | Tracks (ours vs master.db BPM) |
+|---|---:|---|
+| Octave x0.5 (reference above 150, model reports half) | 2 | 240 (85.03 vs 170.07), 423 (91.0 vs 181.82) |
+| Meter 3:2 / 4:3 on a constant reference | 2 | 9 (145.0 vs 99.02, thirds 142.9 x3), 144 (170.0 vs 127.40, new with chunk 500) |
+| Other wrong tempo on a constant reference | 2 | 6 (112.0 vs 88.2), 402 (140.0 vs 133.0, thirds 69.8 x3) |
+| Dynamic Rekordbox grid, no constant BPM fits | 4 | 12 (144 vs 82.19), 36 (140.7 vs 78.53), 168 (132.7 vs 95.24), 243 (140.0 vs 106.51; also 4:3) |
+| Reference inconsistent with its own grid | 1 | 273 (124.0 vs 122.45; the Rekordbox grid median is 123.91) |
+| Model tempo changes inside the track (intro or outro dominated) | 1 | 255 (145.8 vs 130.02; thirds 78 / 71 / 130: only the last third matches the reference) |
+| Reference wrong | 0 | 273 is the only candidate; counted above |
+
+Observations:
+- The model's tempo is wrong, not the fit: 9, 243, 402 and 144 sit at 140 to 145 or 170 while the reference is 99 to 133, with no constant ratio (0.68 to 0.76). Beat This! reports a steady 70 or 143 over the whole track, so a meter rule has nothing to key on. r88 measured the comb at our tempo as 1.1 to 9x the comb at the reference tempo for these tracks.
+- The octave class is the only one with a fixed ratio. It is 2 of 12.
+- 10 more tracks are between 0.1 and 1 BPM off (mostly dynamic reference grids); they are not misses at the 1 BPM gate.
+
+## Fix tried: half-time band (octave x0.5, post-processing)
+
+`fit::HALF_TIME_BAND = (84.0, 92.5)`: if the final tempo (after the 75 to 150 fold and the keep-native rule) lies in the band, the output tempo is doubled (the beats are the same grid with the in-between beats added). 92.5 x 2 = 185 is the top of the keep-native range (150 to 185). `FitParams::half_time_band` holds it, `(0.0, 0.0)` turns it off; unit test `half_time_tempo_in_the_band_is_doubled`. Default ON.
+
+Why a band and not model evidence: the extra comb score at 2x tempo (mean beat activation on the in-between teeth) does not separate 240 (+7.5%), 423 (0.0%) from correct slow tracks (482 at 80.19: +35%). The only separator found is the tempo itself: in all 383 re-fitted tracks of test, dev and the two train sets only five end up between 75 and 93 BPM, and the three right ones are at 75.5, 79.0 and 79.2; the two wrong ones at 85.0 and 91.0. Reference BPMs of the 622 tracks with audio: 3 between 85 and 95 (88.2, 93.8, 94.0), 6 above 170.
+
+Result (re-fit from the logits; tracks 240 and 423 re-run through `ffa` and spliced in for the bar column):
+
+| Split | | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right |
+|---|---|---:|---:|---:|---:|
+| test 205 | before | 169 | 183 | 193 | 140 |
+| test 205 | after | **170** | **184** | **195** | **141** |
+| dev 50 | before | 44 | 47 | 50 | 42 |
+| dev 50 | after | 44 | 47 | 50 | 42 |
+
+Flips (right -> wrong): none. Only 240 and 423 change, on test; the 1500-chunk logits of dev, train and train2 (383 tracks in all) change on exactly those two as well. 240 lands at 13 ms grid deviation, 423 at 26 ms (its reference grid is dynamic); 423 is 0.18 BPM off the reference (182.00 vs 181.82), so BPM 0.1 gains one, BPM 1 gains two.
+
+Caveat, read before merging: the band is fitted to two tracks and a prior. The model cannot tell a half-time 176 BPM track from a real 88 BPM one (same beats, same activations), so the rule doubles every track the model reports between 84 and 92.5. This library has almost no hip-hop or downtempo (3 of 622 references between 85 and 95, only track 6 at 88.2 inside the band and already wrong for another reason); a library with 85 to 92 BPM hip-hop would see those tracks turn into 170 to 185. Turn it off with `HALF_TIME_BAND = (0.0, 0.0)` if that matters more than drum and bass labelled at half tempo.
+
+## Not tried (one fix per round)
+
+- chunk-500 regressions 144, 231, 528 (BPM 0.1; 144 also 1): 231 and 528 are the snap and fold search picking a neighbouring comb peak on slightly different logits; a stricter snap acceptance would be the next candidate.
+- The wrong-tempo constant class (6, 9, 144, 402, and 255) has no signal in the model output or in the post-processing; it needs a different model or a tempo prior from the audio (onset autocorrelation) and cannot be validated on dev, which has no such track.
+
+Reproduce:
+
+```bash
+CARGO_TARGET_DIR=~/.cache/r101-target cargo build --release --manifest-path prototyping/analysis-packaging/Cargo.toml --bin ffa
+CARGO_TARGET_DIR=~/.cache/r101-target cargo build --release -p fourfour-analysis-rs --example grid_refit
+FFA=~/.cache/r101-target/release/ffa WORKERS=2 THREADS=2 DUMP=~/.cache/r101-dump benchmark/scripts/r94-run.sh r101-test test
+python3 -I benchmark/scripts/r101-misses.py benchmark/results/o3/ref.json benchmark/results/r94/r101-test.jsonl ~/.cache/r101-dump
+R101_HALF_TIME=off grid_refit benchmark/results/o3/ref.json ~/.cache/r101-dump <ids> off.jsonl 2
+grid_refit benchmark/results/o3/ref.json ~/.cache/r101-dump <ids> on.jsonl 2
+python3 -I benchmark/scripts/r101-compare.py <dir> off on dev test
+python3 -I benchmark/scripts/r101-splice.py base.jsonl patch.jsonl out.jsonl
+```
