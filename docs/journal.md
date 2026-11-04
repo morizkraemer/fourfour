@@ -587,3 +587,4 @@
 2026-11-04 05:45 orchestrator r104 handed back e7427c3 (byte-identical: key -60%, decode -13%, ~1% of total CPU), merging into ov-1028, checks running; Meter::push finding added to brother's lane; spawned r106 model sys time/page faults (sonnet high)
 2026-11-04 06:06 orchestrator r104 landed a1b37c0 (both smokes, 26 suites, CHECKS-OK)
 2026-11-04 07:32 orchestrator r105 handed back 903b702: far fold-peak skip 0.3% -> 0.05% fixes chunk-500 losses (test grid 169->171, BPM 0.1 183->185 vs 186 at 1500), zero right->wrong, 1500 unchanged; snap switches tried and removed. Parked into Waiting 43 (changes results)
+2026-11-04 07:33 orchestrator r107-grid-misses decided: own prio (classify right-BPM/wrong-grid test tracks at chunk 500, fix rule-fixable), spawned sonnet high from r105-snap

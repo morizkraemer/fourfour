@@ -73,7 +73,7 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers; r104 key/decode speed. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Landed: r104 non-model stages a1b37c0. Parked: r105 fit fix into 43. Running: r106 model sys time
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers; r104 key/decode speed. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Landed: r104 non-model stages a1b37c0. Parked: r105 fit fix into 43. Running: r106 model sys time, r107 grid misses (right BPM, wrong grid)
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
