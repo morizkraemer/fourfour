@@ -27,6 +27,8 @@ interface Boot {
   transferMs: number;
   parseMs: number;
   loadAnswered: number;
+  decodeMs: number;
+  mapMs: number;
   firstRow: number;
   firstRealRow: number;
   interactive: number;
@@ -88,13 +90,21 @@ function installProbes({ payloadUrl, backendMs }: { payloadUrl: string; backendM
     if (!w.__boot.firstInvoke) w.__boot.firstInvoke = performance.now();
     if (cmd === 'get_row_previews') {
       const ids = (args.trackIds as number[]).join(',');
-      return (await fetch(payloadUrl.replace('/state.json', `/previews?ids=${ids}`))).json();
+      return (await fetch(payloadUrl.replace(/\/state\.(json|bin)$/, `/previews?ids=${ids}`))).json();
     }
     if (cmd !== 'load_state') return invoke(cmd, args);
     w.__boot.loadRequested = performance.now();
     if (backendMs > 0) await new Promise((resolve) => setTimeout(resolve, backendMs));
     const fetchStart = performance.now();
     const response = await fetch(payloadUrl);
+    if (payloadUrl.endsWith('.bin')) {
+      const bytes = await response.arrayBuffer();
+      w.__boot.transferMs = performance.now() - fetchStart;
+      w.__boot.wireBytes = bytes.byteLength;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      w.__boot.loadAnswered = performance.now();
+      return bytes;
+    }
     const text = await response.text();
     const fetched = performance.now();
     const state = JSON.parse(text);
@@ -119,7 +129,7 @@ function previewsOf(path: string | undefined): Previews {
   return previews;
 }
 
-function servePayload(body: Buffer, previews: Previews): Promise<{ server: Server; url: string }> {
+function servePayload(body: Buffer, previews: Previews, binary: boolean): Promise<{ server: Server; url: string }> {
   const server = createServer((req, res) => {
     const headers = { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
     if (req.url?.startsWith('/previews')) {
@@ -128,10 +138,10 @@ function servePayload(body: Buffer, previews: Previews): Promise<{ server: Serve
       res.end(JSON.stringify(ids.flatMap((id) => previews.get(id) ?? [])));
       return;
     }
-    res.writeHead(200, headers);
+    res.writeHead(200, binary ? { ...headers, 'content-type': 'application/octet-stream' } : headers);
     res.end(body);
   });
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/state.json` })));
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/state.${binary ? 'bin' : 'json'}` })));
 }
 
 async function newContext(browser: Browser, payloadUrl: string, backendMs: number, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>) {
@@ -179,6 +189,7 @@ async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
     const b = (window as unknown as { __boot: Probe }).__boot;
     const tasks = b.longTasks;
     const lastEnd = tasks.reduce((end, t) => Math.max(end, t.start + t.duration), 0);
+    const markTime = (name: string) => performance.getEntriesByName(name).at(-1)?.startTime ?? 0;
     const scripts = performance.getEntriesByType('resource').filter((e) => e.name.endsWith('.js')) as PerformanceResourceTiming[];
     return {
       firstInvoke: b.firstInvoke,
@@ -186,6 +197,8 @@ async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
       transferMs: b.transferMs,
       parseMs: b.parseMs,
       loadAnswered: b.loadAnswered,
+      decodeMs: markTime('ff:state-decoded') - markTime('ff:state-answer'),
+      mapMs: markTime('ff:state-rows') - markTime('ff:state-decoded'),
       firstRow: b.firstRow,
       firstRealRow: b.firstRealRow,
       interactive: Math.max(b.firstRealRow, lastEnd),
@@ -272,7 +285,7 @@ test.describe('startup at scale', () => {
   test('boot to first row and interactive', async ({ browser }) => {
     const report: Record<string, Record<string, number>> = {};
     for (const { tracks, path, previews, backendMs } of PAYLOADS) {
-      const { server, url } = await servePayload(readFileSync(path), previewsOf(previews));
+      const { server, url } = await servePayload(readFileSync(path), previewsOf(previews), path.endsWith('.bin'));
       const first: Boot[] = [];
       const cold: Boot[] = [];
       const warm: Boot[] = [];

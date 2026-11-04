@@ -494,6 +494,158 @@ impl TrackTable {
     }
 }
 
+
+/// First four bytes of the binary `load_state` answer: `FFT1`.
+const STATE_BYTES_MAGIC: [u8; 4] = *b"FFT1";
+const STATE_BYTES_VERSION: u32 = 2;
+const STATE_BYTES_HEADER_WORDS: usize = 10;
+const WIDE_TEXT: u32 = 1 << 31;
+
+fn pad_to_eight(out: &mut Vec<u8>) {
+    out.resize(out.len().next_multiple_of(8), 0);
+}
+
+fn put_u32s(out: &mut Vec<u8>, values: &[u32]) {
+    out.reserve(values.len() * 4);
+    for value in values {
+        out.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
+fn header_word(value: usize) -> Result<u32, String> {
+    u32::try_from(value).map_err(|_| format!("{value} does not fit a 32-bit count"))
+}
+
+/// The texts of the table in two arenas, so that the page decodes the plain ASCII ones (nearly all of them) into a
+/// one-byte string and only the others into a two-byte one.
+#[derive(Default)]
+struct TextArenas {
+    ascii: Vec<u8>,
+    wide: Vec<u8>,
+    wide_units: usize,
+    ends: Vec<u32>,
+}
+
+fn utf16_units(utf8: &[u8]) -> usize {
+    let continuations = utf8.iter().filter(|&&byte| (byte as i8) < -0x40).count();
+    let four_byte_leads = utf8.iter().filter(|&&byte| byte >= 0xf0).count();
+    utf8.len() - continuations + four_byte_leads
+}
+
+impl TextArenas {
+    fn push_column(&mut self, column: &TextColumn) -> Result<(), String> {
+        let bytes = column.text.as_bytes();
+        if bytes.is_ascii() {
+            let base = self.ascii.len();
+            self.ascii.extend_from_slice(bytes);
+            self.ends.extend(column.ends.iter().map(|&end| (base + end) as u32));
+        } else {
+            let mut start = 0;
+            for &end in &column.ends {
+                let text = &bytes[start..end];
+                start = end;
+                if text.is_ascii() {
+                    self.ascii.extend_from_slice(text);
+                    self.ends.push(self.ascii.len() as u32);
+                } else {
+                    self.wide.extend_from_slice(text);
+                    self.wide_units += utf16_units(text);
+                    self.ends.push(self.wide_units as u32 | WIDE_TEXT);
+                }
+            }
+        }
+        if self.ascii.len().max(self.wide_units) >= WIDE_TEXT as usize {
+            return Err("the texts of the library are too long for one buffer".into());
+        }
+        Ok(())
+    }
+}
+
+impl LoadedState {
+    /// The answer of `load_state` as one buffer (`app/src/services/track-table.ts`, `decodeStateBytes`, reads it):
+    /// the same table and playlists as the JSON form, without the text. Little endian throughout, every section starts on
+    /// a multiple of 8 bytes so the page can view it as typed arrays without a copy.
+    ///
+    /// - header, 10 `u32`: the bytes `FFT1`, version 2, then the counts: tracks, strings, folders, ratings values,
+    ///   colours values, ASCII arena bytes, wide arena bytes, playlists JSON bytes
+    /// - playlists as JSON (UTF-8)
+    /// - ASCII arena: the texts that are plain ASCII, one after the other
+    /// - wide arena (UTF-8): the other texts
+    /// - text ends, `u32`, one per text in the order `strings`, `folder_name`, `file`, `title`: where the text ends in its
+    ///   arena once the arena is a JavaScript string (UTF-16 code units); the top bit says the text is in the wide
+    ///   arena. A text starts where the previous text of the same arena ended.
+    /// - `duration_secs` and `file_size` as `f64`
+    /// - `u32` columns: `folder_parent`, `id`, `dir`, `artist`, `album`, `genre`, `key`, `tempo`, `bitrate`, `ratings`, `colors`
+    /// - `flags`, one byte per track
+    pub fn to_bytes(&self) -> Result<Vec<u8>, String> {
+        let table = &self.tracks;
+        let playlists = serde_json::to_vec(&self.playlists).map_err(|e| e.to_string())?;
+        let mut texts = TextArenas::default();
+        let text_columns = [&table.strings, &table.folder_name, &table.file, &table.title];
+        let text_count: usize = text_columns.iter().map(|column| column.len()).sum();
+        texts.ends.reserve(text_count);
+        texts.ascii.reserve(text_columns.iter().map(|column| column.text.len()).sum());
+        for column in text_columns {
+            texts.push_column(column)?;
+        }
+        let capacity = STATE_BYTES_HEADER_WORDS * 4
+            + playlists.len()
+            + texts.ascii.len()
+            + texts.wide.len()
+            + text_count * 4
+            + table.len() * 17
+            + (table.folder_parent.len() + table.len() * 8 + table.ratings.len() + table.colors.len()) * 4;
+        let mut out = Vec::with_capacity(capacity + 64);
+        out.extend_from_slice(&STATE_BYTES_MAGIC);
+        out.extend_from_slice(&STATE_BYTES_VERSION.to_le_bytes());
+        for count in [
+            table.len(),
+            table.strings.len(),
+            table.folder_name.len(),
+            table.ratings.len(),
+            table.colors.len(),
+            texts.ascii.len(),
+            texts.wide.len(),
+            playlists.len(),
+        ] {
+            out.extend_from_slice(&header_word(count)?.to_le_bytes());
+        }
+        out.extend_from_slice(&playlists);
+        pad_to_eight(&mut out);
+        out.extend_from_slice(&texts.ascii);
+        pad_to_eight(&mut out);
+        out.extend_from_slice(&texts.wide);
+        pad_to_eight(&mut out);
+        put_u32s(&mut out, &texts.ends);
+        pad_to_eight(&mut out);
+        for value in &table.duration_secs {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in &table.file_size {
+            out.extend_from_slice(&(*value as f64).to_le_bytes());
+        }
+        for column in [
+            &table.folder_parent,
+            &table.id,
+            &table.dir,
+            &table.artist,
+            &table.album,
+            &table.genre,
+            &table.key,
+            &table.tempo,
+            &table.bitrate,
+            &table.ratings,
+            &table.colors,
+        ] {
+            put_u32s(&mut out, column);
+        }
+        pad_to_eight(&mut out);
+        out.extend_from_slice(&table.flags);
+        pad_to_eight(&mut out);
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,6 +709,73 @@ mod tests {
                 r##""playlists":[]}"##
             )
         );
+    }
+
+    fn edge_state() -> LoadedState {
+        let tracks = [
+            info(1, "/m/a.mp3"),
+            TrackInfo {
+                title: r#"He said "hi" \ bye"#.into(),
+                artist: "Beyonc\u{e9}".into(),
+                album: "\u{65e5}\u{672c}\u{8a9e} \u{30a2}\u{30eb}\u{30d0}\u{30e0}".into(),
+                genre: "\u{1f600} emoji".into(),
+                key: "8A".into(),
+                tempo: 12799,
+                duration_secs: 0.1 + 0.2,
+                bitrate: 320,
+                file_size: (1 << 53) + 1,
+                has_artwork: true,
+                has_cues: true,
+                ..info(2, r#"C:\Music\Ünï\song "x".flac"#)
+            },
+            TrackInfo {
+                title: "\u{feff}BOM title".into(),
+                artist: "Beyonc\u{e9}".into(),
+                rating: Some(0),
+                color: Some(String::new()),
+                has_analysis: true,
+                ..info(3, "relative.mp3")
+            },
+            TrackInfo {
+                title: "a\u{0}b\n\t".into(),
+                album: "\u{65e5}\u{672c}\u{8a9e} \u{30a2}\u{30eb}\u{30d0}\u{30e0}".into(),
+                duration_secs: 1e-7,
+                rating: Some(5),
+                color: Some("\u{65e5}\u{672c}".into()),
+                analysis_pending: true,
+                ..info(4, "/m/\u{65e5}\u{672c}/\u{66f2}.mp3")
+            },
+            TrackInfo { tempo: 0, duration_secs: 1e21, file_size: u64::MAX, ..info(u32::MAX, "/m/a.mp3") },
+        ];
+        let playlists = vec![
+            PlaylistInput { id: 1, name: "Set \"A\" \u{1f3a7}".into(), track_ids: vec![2, 1, 3], parent_id: 0, is_folder: false },
+            PlaylistInput { id: 2, name: String::new(), track_ids: Vec::new(), parent_id: 1, is_folder: true },
+        ];
+        LoadedState { tracks: TrackTable::new(&tracks).unwrap(), playlists }
+    }
+
+    fn fixture_path(name: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../app/src/services/fixtures").join(name)
+    }
+
+    #[test]
+    fn state_bytes_match_the_golden_files_the_app_decodes() {
+        let cases = [
+            ("state-edge", edge_state()),
+            ("state-empty", LoadedState { tracks: TrackTable::default(), playlists: Vec::new() }),
+        ];
+        for (name, state) in cases {
+            let bytes = state.to_bytes().unwrap();
+            let json = serde_json::to_string(&state).unwrap();
+            assert_eq!(bytes.len() % 8, 0);
+            if std::env::var_os("FF_UPDATE_FIXTURES").is_some() {
+                std::fs::create_dir_all(fixture_path("")).unwrap();
+                std::fs::write(fixture_path(&format!("{name}.bin")), &bytes).unwrap();
+                std::fs::write(fixture_path(&format!("{name}.json")), &json).unwrap();
+            }
+            assert_eq!(bytes, std::fs::read(fixture_path(&format!("{name}.bin"))).unwrap(), "{name}.bin");
+            assert_eq!(json, std::fs::read_to_string(fixture_path(&format!("{name}.json"))).unwrap(), "{name}.json");
+        }
     }
 
     #[test]

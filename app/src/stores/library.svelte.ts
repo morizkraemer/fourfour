@@ -1294,6 +1294,7 @@ export async function loadState() {
     const { plain, rows } = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
     resetSearchIndex();
     setLibraryTracks(plain, rows);
+    performance.mark('ff:state-rows');
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
     for (const listener of trackListLoadedListeners) listener();
