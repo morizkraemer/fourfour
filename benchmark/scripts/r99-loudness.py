@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Compare fourfour's integrated loudness against ffmpeg's ebur128 filter on real tracks.
-
-usage: r99-loudness.py <datasets-dir> <scratch-dir> <loudness_report binary>
-
-Picks 21 tracks (7 Beatport mp3, 5 library mp3, 4 flac, 3 wav 44.1 kHz, 1 wav 48 kHz, fixed seed, 1-10 min), adds a
-mono and a 48 kHz derivative of the first one, runs both meters, prints a table and summary. ffmpeg is a reference only.
-"""
 import glob
 import json
 import math
@@ -16,7 +9,9 @@ import statistics
 import subprocess
 import sys
 
-datasets, scratch, binary = sys.argv[1], sys.argv[2], sys.argv[3]
+if len(sys.argv) != 4:
+    sys.exit("usage: r99-loudness.py <datasets-dir> <scratch-dir> <loudness_report binary>")
+datasets, scratch, binary = sys.argv[1:]
 os.makedirs(scratch, exist_ok=True)
 random.seed(99)
 
