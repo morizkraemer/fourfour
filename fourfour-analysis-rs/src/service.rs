@@ -403,6 +403,7 @@ mod tests {
             detail_entries: 10,
             mp3_delay_s: 0.0,
             logits: None,
+            loudness: None,
             ms: serde_json::Value::Null,
         }
     }
