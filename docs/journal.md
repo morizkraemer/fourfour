@@ -603,3 +603,4 @@
 2026-11-04 15:36 orchestrator r113 handed back 12fb420 (rank sort order + filter cache; 50k sorted clear 182 -> 74 ms, bump while sorted 208 -> 3 ms script; worst keystroke during analysis 174 -> 151, target 100 not met: 80% native layout/paint), merged 1d9fdb1 (doc conflict resolved), chain running. decided: own prio r115 first column sort at 50k (sonnet high)
 2026-11-04 15:51 orchestrator r113 landed 1d9fdb1 (both smokes 0 failed, 26 suites, vitest 923, CHECKS-OK)
 2026-11-04 16:35 orchestrator r114 handed back a9df8b2 (lazy dialogs/inspector/stick/expanded player, safari16 target, single CSS; entry JS -28%, first row -25 to -126 ms, first screen byte-identical both engines), merged 1f9e6c8 (doc conflict resolved), chain running. decided: own prio r116 key misses classification (sonnet high; key is below the 60% bar)
+2026-11-04 16:54 orchestrator r114 landed 1f9e6c8 (both smokes 0 failed, 26 suites, vitest 926, CHECKS-OK)
