@@ -15,7 +15,7 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
+import { library, libraryMembersOf, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
 import { orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
@@ -433,6 +433,9 @@ export function sortTracks<T extends Record<string, unknown>>(
   const dir = tableLayouts[kind].sortDir === 'asc' ? 1 : -1;
   const positions = key === 'fav' ? null : libraryPositionsOf(tracks);
   if (positions) return sortLibraryRows(tracks, positions, key, dir);
+  const members = key === 'fav' ? null : libraryMembersOf(tracks);
+  const byRank = members && sortMemberRows(tracks, members, key, dir);
+  if (byRank) return byRank;
   const keyed =
     key === 'fav'
       ? tracks.map((track) => ({ track, value: favSlot(track) }))
@@ -576,6 +579,45 @@ function sortLibraryRows<T extends Record<string, unknown>>(tracks: T[], positio
   const order = positions === 'all' ? sorted.order : sortedSubset(positions, sorted);
   const out = new Array<T>(order.length);
   for (let i = 0; i < order.length; i++) out[i] = rows[order[i]];
+  return out;
+}
+
+let memberSlots = new Int32Array(0);
+
+/**
+ * `tracks` (rows of a playlist, at `members` of `library.tracks`, each position once) in the order the comparator gives: by
+ * their place in the order of the whole column, where equal values are in library order and need their order in `tracks`
+ * back. `null` when that column's order would be built just for a small list.
+ */
+function sortMemberRows<T extends Record<string, unknown>>(tracks: T[], members: Int32Array, key: string, dir: 1 | -1): T[] | null {
+  const rows = untrack(() => library.tracks) as T[];
+  const known = columnSorts.get(key);
+  const reusable = known !== undefined && libraryPositionsChangedSince(known.tracks) !== null;
+  if (!reusable && members.length * 8 < rows.length) return null;
+  const entry = columnSortOf(rows, key);
+  const sorted = orderOf(entry, dir);
+  const count = members.length;
+  if (memberSlots.length < rows.length) memberSlots = new Int32Array(rows.length);
+  const ranks = new Int32Array(count);
+  for (let i = 0; i < count; i++) {
+    const rank = sorted.rank[members[i]];
+    ranks[i] = rank;
+    memberSlots[rank] = i;
+  }
+  ranks.sort();
+  const slots = new Int32Array(count);
+  const values = entry.values;
+  let from = 0;
+  while (from < count) {
+    const value = values[sorted.order[ranks[from]]];
+    let to = from + 1;
+    while (to < count && values[sorted.order[ranks[to]]] === value) to++;
+    for (let k = from; k < to; k++) slots[k] = memberSlots[ranks[k]];
+    if (to - from > 1) slots.subarray(from, to).sort();
+    from = to;
+  }
+  const out = new Array<T>(count);
+  for (let k = 0; k < count; k++) out[k] = tracks[slots[k]];
   return out;
 }
 
