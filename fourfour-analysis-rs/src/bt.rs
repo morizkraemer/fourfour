@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -16,14 +16,36 @@ use crate::decode::resample_to;
 use beat_this::{Model as BtModel, Tensor};
 use rten::{ModelOptions, NodeId, RunOptions, ThreadPool, ValueOrView, ValueView};
 
-const CHUNK_SIZE: usize = 1500;
+const COREML_CHUNK_SIZE: usize = 1500;
+const RTEN_CHUNK_SIZE: usize = 500;
+const DEFAULT_CHUNK_SIZE: usize = if cfg!(all(feature = "coreml", target_os = "macos")) { COREML_CHUNK_SIZE } else { RTEN_CHUNK_SIZE };
 const BORDER_SIZE: usize = 6;
-const STRIDE: usize = CHUNK_SIZE - 2 * BORDER_SIZE;
 const MEL_STRIDE: usize = 1536;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
 pub const MODEL_RATE: u32 = 22050;
 const PAUSE_POLL: Duration = Duration::from_millis(50);
+const SILENT_CHUNK_LOGIT: f32 = -1000.0;
+
+fn chunk_size() -> usize {
+    static SIZE: OnceLock<usize> = OnceLock::new();
+    *SIZE.get_or_init(|| {
+        std::env::var("FOURFOUR_BEAT_CHUNK")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 4 * BORDER_SIZE)
+            .unwrap_or(DEFAULT_CHUNK_SIZE)
+    })
+}
+
+fn stride() -> usize {
+    chunk_size() - 2 * BORDER_SIZE
+}
+
+fn skip_silence() -> bool {
+    static SKIP: OnceLock<bool> = OnceLock::new();
+    *SKIP.get_or_init(|| std::env::var("FOURFOUR_BEAT_SKIP_SILENCE").is_ok_and(|v| v == "1"))
+}
 
 pub struct BeatEngine {
     mel: Arc<rten::Model>,
@@ -48,6 +70,7 @@ struct BeatModel {
     ort: Option<crate::ort_beat::OrtBeat>,
     chunks_accelerated: AtomicUsize,
     chunks_rten: AtomicUsize,
+    chunks_silent: AtomicUsize,
 }
 
 struct ChunkRunner<'a> {
@@ -135,6 +158,13 @@ impl ChunkExecutor {
         };
         while let Some((track, i)) = self.take(&mut runner) {
             let chunk = extract_chunk(&track.mel, track.starts[i]);
+            if skip_silence() && chunk.data.iter().all(|&v| v == 0.0) {
+                let frames = chunk.shape[1];
+                model.chunks_silent.fetch_add(1, Ordering::Relaxed);
+                track.results.lock().unwrap()[i] = Some(Ok((vec![SILENT_CHUNK_LOGIT; frames], vec![SILENT_CHUNK_LOGIT; frames])));
+                track.finished.notify_all();
+                continue;
+            }
             let logits = catch_unwind(AssertUnwindSafe(|| runner.run(&chunk))).unwrap_or_else(|_| Err(anyhow!("beat model panicked on chunk {i}")));
             track.results.lock().unwrap()[i] = Some(logits);
             track.finished.notify_all();
@@ -231,6 +261,7 @@ pub struct BeatStatus {
     pub fallback: Option<String>,
     pub chunks_accelerated: usize,
     pub chunks_rten: usize,
+    pub chunks_silent: usize,
 }
 
 pub struct BeatResult {
@@ -284,10 +315,11 @@ impl BeatEngine {
             },
             #[cfg(feature = "ort")]
             ort: (beat_runtime() != "rten")
-                .then(|| crate::ort_beat::OrtBeat::new(&beat_path, CHUNK_SIZE))
+                .then(|| crate::ort_beat::OrtBeat::new(&beat_path, chunk_size()))
                 .and_then(|ort| ort.inspect_err(|e| eprintln!("beat model: {} unavailable, using rten: {e:#}", crate::ort_beat::ENGINE)).ok()),
             chunks_accelerated: AtomicUsize::new(0),
             chunks_rten: AtomicUsize::new(0),
+            chunks_silent: AtomicUsize::new(0),
         });
         #[cfg(feature = "ort")]
         if beat.ort.is_some() {
@@ -331,6 +363,7 @@ impl BeatEngine {
             fallback,
             chunks_accelerated: self.beat.chunks_accelerated.load(Ordering::Relaxed),
             chunks_rten: self.beat.chunks_rten.load(Ordering::Relaxed),
+            chunks_silent: self.beat.chunks_silent.load(Ordering::Relaxed),
         }
     }
 
@@ -438,11 +471,11 @@ fn generate_starts(full_time: usize) -> Vec<i32> {
     let limit = full_time as i32 - BORDER_SIZE as i32;
     while pos < limit {
         starts.push(pos);
-        pos += STRIDE as i32;
+        pos += stride() as i32;
     }
-    if full_time > STRIDE {
+    if full_time > stride() {
         if let Some(last) = starts.last_mut() {
-            *last = full_time as i32 - (CHUNK_SIZE as i32 - BORDER_SIZE as i32);
+            *last = full_time as i32 - (chunk_size() as i32 - BORDER_SIZE as i32);
         }
     }
     starts
@@ -451,10 +484,10 @@ fn generate_starts(full_time: usize) -> Vec<i32> {
 fn extract_chunk(mel: &Tensor, start: i32) -> Tensor {
     let full_time = mel.shape[1];
     let actual_start = start.max(0) as usize;
-    let actual_end = ((start + CHUNK_SIZE as i32) as usize).min(full_time);
+    let actual_end = ((start + chunk_size() as i32) as usize).min(full_time);
     let pad_left = (-start).max(0) as usize;
     let n_frames = actual_end - actual_start;
-    let pad_right = 0.max((start + CHUNK_SIZE as i32 - full_time as i32).min(BORDER_SIZE as i32)) as usize;
+    let pad_right = 0.max((start + chunk_size() as i32 - full_time as i32).min(BORDER_SIZE as i32)) as usize;
     let chunk_time = pad_left + n_frames + pad_right;
     let mut data = vec![0.0f32; chunk_time * N_MELS];
     data[pad_left * N_MELS..(pad_left + n_frames) * N_MELS].copy_from_slice(&mel.data[actual_start * N_MELS..actual_end * N_MELS]);
@@ -519,6 +552,17 @@ fn pick_peaks(beat_logits: &[f32], down_logits: &[f32]) -> (Vec<f32>, Vec<f32>) 
     (beats, downbeats)
 }
 
+#[cfg(test)]
+mod chunk_default_tests {
+    use super::*;
+
+    #[test]
+    fn coreml_builds_keep_the_long_chunk_and_the_rest_use_the_short_one() {
+        let coreml_on_mac = cfg!(all(feature = "coreml", target_os = "macos"));
+        assert_eq!(DEFAULT_CHUNK_SIZE, if coreml_on_mac { 1500 } else { 500 });
+    }
+}
+
 #[cfg(all(test, feature = "ort"))]
 mod ort_tests {
     use super::*;
@@ -540,13 +584,13 @@ mod ort_tests {
             down_out: model.find_node("downbeat").or_else(|| model.find_node("downbeat_logits")).unwrap(),
             model,
         };
-        let ort = crate::ort_beat::OrtBeat::new(&path, CHUNK_SIZE).unwrap();
+        let ort = crate::ort_beat::OrtBeat::new(&path, DEFAULT_CHUNK_SIZE).unwrap();
         let open = || {
             ort.open_sessions(1);
             ort.take_session().unwrap_or_else(|| panic!("no session: {:?}", ort.failed()))
         };
         let mut seed = 0x2545_f491_u32;
-        let data = (0..CHUNK_SIZE * N_MELS)
+        let data = (0..DEFAULT_CHUNK_SIZE * N_MELS)
             .map(|_| {
                 seed ^= seed << 13;
                 seed ^= seed >> 17;
@@ -554,7 +598,7 @@ mod ort_tests {
                 (seed % 1000) as f32 / 250.0
             })
             .collect();
-        let chunk = Tensor { shape: vec![1, CHUNK_SIZE, N_MELS], data };
+        let chunk = Tensor { shape: vec![1, DEFAULT_CHUNK_SIZE, N_MELS], data };
         let options = RunOptions::default().with_thread_pool(Some(Arc::new(ThreadPool::with_num_threads(1))));
         let (rb, rd) = rten.run_chunk(&chunk, &options).unwrap();
         let (ob, od) = open().run(&chunk).unwrap();
