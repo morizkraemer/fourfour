@@ -195,6 +195,37 @@ Mac, `bench_analysis` (48 unique dev tracks, 6 workers, `FOURFOUR_BEAT_RUNTIME=r
 - Mac: worth a decision. rten int8 at 500 on the Mac runs about as fast as CoreML at 1500 did in r96 (31.5 tracks/min in the app bench, 4.9-6.3 GB RSS) at about 2.4 GB, with a 23 MB model instead of 83 MB; CoreML at 500 was slower (25.9). The comparison across sessions is noisy: a same-session Mac pair (CoreML 1500 vs rten int8 500, `ffa` and `bench_analysis`, test-split scores) is the next step before changing the shipped Mac default. Shipping it also needs the model in the app bundle and the models fetch script, and a per-platform choice (x86 keeps fp32).
 - Not checked: Linux Arm and Windows; only beat/BPM quality was scored, not key.
 
+## r98 Mac pair (2026-11-04)
+
+Branch `r98-mac-pair` (from `r97-int8-500`, no code change). Same-session Mac pair on `mbp` (M5 Pro, 24 GB, AC): (a) the shipped Mac path, `coreml` feature build, chunk 1500, fp32; (b) the same binary with `FOURFOUR_BEAT_RUNTIME=rten FOURFOUR_BEAT_CHUNK=500 FOURFOUR_BEAT_MODEL=beat_this_q8sc.onnx` (r97 int8). `bench_analysis --list dev` (50 paths, 49 analysed: one wav fails tag read in both), default 6 workers, `nice -n 10`, `/usr/bin/time -l` for CPU and RSS (the bench's own RSS and CPU fields read 0 and NaN on macOS), five runs each, interleaved a b a b. Scoring: `ffa --workers 2 --threads 6` and `o3-score.py` on the same builds.
+
+Load on the Mac: 3-4 before the first run (Chrome, WindowServer, Tailscale; someone was using the machine), 6-29 during (the benchmark's own threads count in that; run 1 started at about 7). An audio copy from the box to the Mac ran in the background during the first runs (about 1 MB/s through a Tailscale relay, negligible CPU). Run 1 was the quietest and has the biggest gap; runs 2-5 are consistent with each other.
+
+| App path, `bench_analysis`, 5 runs, median | Tracks/min | Min / max | CPU s (user+sys) | First result | Peak RSS |
+|---|---:|---|---:|---:|---:|
+| (a) CoreML fp32, chunk 1500 | 26.6 | 26.1 / 31.8 | 368 | 6.7 s | 6.87 GB |
+| (b) rten int8, chunk 500 | 32.6 (+22%) | 32.5 / 40.7 | 988 (2.7x) | 4.2 s | 2.44 GB |
+
+Per round (b / a): 1.28, 1.20, 1.22, 1.23, 1.25. CoreML runs ran 627 chunks on CoreML and 40 on rten (the short tail chunks), no fallback.
+
+| Quality (`o3-score.py`) | Grid 20 ms | BPM 0.1 | BPM 1 | Bar right |
+|---|---:|---:|---:|---:|
+| dev 50, (a) CoreML 1500 | 44 | 47 | 50 | 41 |
+| dev 50, (b) rten int8 500 | 43 (-1) | 47 | 50 | 41 |
+| test 126 of 205, (a) | 94 | 105 | 112 | 72 |
+| test 126 of 205, (b) | 95 (+1) | 106 (+1) | 114 | 72 |
+
+`ffa --workers 2 --threads 6` (same session, same load): dev (a) 32.1 tracks/min, 236 CPU s, first 6.1 s, 4.8 GB; (b) 22.4, 812 CPU s, 2.9 s, 1.4 GB. test-126 (a) 27.4, 510 CPU s, 3.9 s, 5.1 GB; (b) 28.4, 1676 CPU s, 2.6 s, 1.9 GB. With only 2 track workers rten does not keep the cores busy the way CoreML does, so the ffa speed gap does not follow the app path.
+
+Caveats:
+- **Test is a 126-track subset, not 205.** The box to Mac link is a Tailscale relay at about 1 MB/s; the full 8.7 GB did not fit the timebox. The subset is the 126 smallest test files (shorter tracks), the same tracks for both variants. Dev 50 is complete.
+- **CPU is 2.7x.** `user+sys` for CoreML leaves out the Neural Engine and GPU work, so this is not an energy number, but rten int8 loads all cores for the whole run (about 11 cores busy against about 4 for CoreML). On a Mac that is also showing the UI this may cost more in fan, battery and UI headroom than the RSS saving buys.
+- Both variants differ from the shipped app only by the runtime switch; the chunk and model are env overrides, not the code defaults.
+
+Gate: tracks/min >= CoreML minus 5% (pass, +22%); test grid 20 ms and BPM 0.1 not lower (pass on the 126-track subset, +1/+1; dev grid -1, same as the chunk-500 effect in r96); RSS lower (pass, 2.44 against 6.87 GB).
+
+Verdict: int8-rten-500 passes the Mac-default gate (+22% tracks/min, 64% less RSS, 37% sooner first result, quality equal within 1 track), with two open points before shipping: the full test-205 score, and the 2.7x CPU load (decide against battery and UI feel, or run the app with fewer analysis workers on the Mac).
+
 ## Reproduce
 
 ```bash
