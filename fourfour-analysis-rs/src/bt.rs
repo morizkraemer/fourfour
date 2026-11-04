@@ -57,10 +57,6 @@ fn chunking() -> &'static Chunking {
     CHUNKING.get_or_init(Chunking::from_env)
 }
 
-fn chunk_size() -> usize {
-    chunking().size
-}
-
 fn skip_silence() -> bool {
     static SKIP: OnceLock<bool> = OnceLock::new();
     *SKIP.get_or_init(|| std::env::var("FOURFOUR_BEAT_SKIP_SILENCE").is_ok_and(|v| v == "1"))
@@ -334,7 +330,7 @@ impl BeatEngine {
             },
             #[cfg(feature = "ort")]
             ort: (beat_runtime() != "rten")
-                .then(|| crate::ort_beat::OrtBeat::new(&beat_path, chunk_size()))
+                .then(|| crate::ort_beat::OrtBeat::new(&beat_path, chunking().size))
                 .and_then(|ort| ort.inspect_err(|e| eprintln!("beat model: {} unavailable, using rten: {e:#}", crate::ort_beat::ENGINE)).ok()),
             chunks_accelerated: AtomicUsize::new(0),
             chunks_rten: AtomicUsize::new(0),
