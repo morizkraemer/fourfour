@@ -68,8 +68,8 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Running: r100 energy 1-10, r101 long-track RSS
-- next: auto cues from phrases; BPM >1 misses; zoom first open; WebKit row cost; parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Running: r100 energy 1-10, r101 BPM >1 misses
+- next: auto cues from phrases; zoom first open (mostly done R25-R57); WebKit row cost; parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
 status: running since 2026-11-03 15:10 (Merlin go: Mac night 2 r89 + 2-week push on analysis quality and speed to 2026-11-16; identical-result speed wins land on ov-1028, result changes park with evals) · runs until Merlin says stop · holiday to 2026-11-16 · cap 2 · seat only · no reviews, take recs · green work lands on ov-1028 (+ Mac install); never master, never push · Mac only on Merlin's go (last 2026-11-01 21:42)
