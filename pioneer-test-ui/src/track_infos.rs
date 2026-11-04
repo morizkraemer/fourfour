@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 
 use pioneer_library::{LocalLibrary, RowPreview, TrackLabels, TrackLabelsReader, TrackListRowRef, analysis_stage};
 
@@ -132,26 +133,40 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
 }
 
 /// The rows of the whole library as a table, and how many tracks still lack a row preview. A large library is
-/// scanned in id ranges on several threads (the first on `lib`'s connection, the others on their own); the tables
-/// of the ranges are joined in id order, which gives the table one scan would.
+/// scanned in id ranges on several threads (the first on `lib`'s connection, the others on their own).
 fn track_table(lib: &LocalLibrary, labels: &HashMap<i64, TrackLabels>) -> Result<(TrackTable, usize), String> {
     let Some((first_id, last_id)) = lib.track_id_bounds().map_err(|e| e.to_string())? else {
         return Ok((TrackTable::default(), 0));
     };
-    let scanner = lib.track_list_scanner();
-    let threads = if scanner.is_some() && last_id - first_id >= PARALLEL_SCAN_MIN_IDS {
+    let threads = if lib.track_list_scanner().is_some() && last_id - first_id >= PARALLEL_SCAN_MIN_IDS {
         std::thread::available_parallelism().map_or(1, usize::from).min(MAX_SCAN_THREADS)
     } else {
         1
     };
-    let width = (last_id - first_id) / threads as i64 + 1;
-    let ranges: Vec<_> = (0..threads as i64)
+    track_table_in_ranges(lib, labels, id_ranges(first_id, last_id, threads))
+}
+
+/// Ranges of equal width that cover every id: the first starts at the lowest and the last ends at the highest
+/// possible id, so that tracks added since `first_id` and `last_id` were read are not lost.
+fn id_ranges(first_id: i64, last_id: i64, count: usize) -> Vec<RangeInclusive<i64>> {
+    let count = count as i64;
+    let width = (last_id - first_id) / count + 1;
+    (0..count)
         .map(|part| {
             let start = if part == 0 { i64::MIN } else { first_id + part * width };
-            let end = if part + 1 == threads as i64 { i64::MAX } else { first_id + (part + 1) * width - 1 };
+            let end = if part + 1 == count { i64::MAX } else { first_id + (part + 1) * width - 1 };
             start..=end
         })
-        .collect();
+        .collect()
+}
+
+/// The tables of the ranges are joined in id order, which gives the table that one scan would.
+fn track_table_in_ranges(
+    lib: &LocalLibrary,
+    labels: &HashMap<i64, TrackLabels>,
+    ranges: Vec<RangeInclusive<i64>>,
+) -> Result<(TrackTable, usize), String> {
+    let scanner = lib.track_list_scanner();
     std::thread::scope(|scope| {
         let others: Vec<_> = ranges[1..]
             .iter()
@@ -306,6 +321,58 @@ mod tests {
         assert_eq!(friday.track_ids, vec![done as u32, fresh as u32]);
         assert_eq!((friday.parent_id, friday.is_folder), (folder as u32, false));
         assert!(sets.is_folder);
+    }
+
+    #[test]
+    fn id_ranges_cover_every_id_once() {
+        assert_eq!(id_ranges(5, 5, 1), vec![i64::MIN..=i64::MAX]);
+        assert_eq!(id_ranges(1, 10, 3), vec![i64::MIN..=4, 5..=8, 9..=i64::MAX]);
+        assert_eq!(id_ranges(100, 103, 4), vec![i64::MIN..=100, 101..=101, 102..=102, 103..=i64::MAX]);
+    }
+
+    #[test]
+    fn scanning_in_ranges_gives_the_table_of_one_scan() {
+        let dir = std::env::temp_dir().join(format!("ff-track-ranges-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+        let mut ids = Vec::new();
+        for n in 0..40 {
+            let mut t = track(&format!("/m/artist {}/album {}/{n}.mp3", n % 7, n % 3), &format!("Title {n}"));
+            t.artist = format!("Artist {}", n % 7);
+            t.album = format!("Album {}", n % 3);
+            t.genre = ["House", "", "Techno"][n % 3].into();
+            t.tempo = 9000 + n as u32;
+            t.key = if n % 4 == 0 { "5A".into() } else { String::new() };
+            ids.push(lib.add_track(&t).unwrap());
+        }
+        for &id in ids.iter().step_by(3) {
+            lib.set_analysis(id, &analysis()).unwrap();
+        }
+        lib.set_analysis_stages(ids[1], &analysis(), analysis_stage::WAVEFORM).unwrap();
+        let labels: HashMap<i64, TrackLabels> = ids
+            .iter()
+            .enumerate()
+            .filter(|(n, _)| n % 5 != 2)
+            .map(|(n, &id)| {
+                let color = (n % 2 == 0).then(|| ["#ff0000", "#00ff00"][n % 4 / 2].to_string());
+                (id, TrackLabels { rating: (n % 3 != 0).then_some((n % 6) as u8), color })
+            })
+            .collect();
+        let (first, last) = lib.track_id_bounds().unwrap().unwrap();
+
+        let json = |ranges| {
+            let (table, missing) = track_table_in_ranges(&lib, &labels, ranges).unwrap();
+            (serde_json::to_string(&table).unwrap(), missing)
+        };
+        let whole = json(id_ranges(first, last, 1));
+        assert!(whole.0.contains("#00ff00") && whole.0.contains("\"ratings\":[1,"));
+        for threads in [2, 3, 7] {
+            assert_eq!(json(id_ranges(first, last, threads)), whole, "{threads} ranges");
+        }
+        assert_eq!(whole.1, 0);
+        drop(lib);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

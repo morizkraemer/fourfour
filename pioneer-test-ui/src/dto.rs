@@ -177,6 +177,12 @@ pub struct TrackTable {
     colors: Vec<u32>,
 }
 
+impl TrackTable {
+    pub fn len(&self) -> usize {
+        self.id.len()
+    }
+}
+
 /// Texts stored back to back, sent as an array of strings.
 #[derive(Clone, Default)]
 struct TextColumn {
@@ -351,6 +357,30 @@ pub struct TrackRow<'a> {
     pub color: Option<&'a str>,
 }
 
+impl<'a> TrackRow<'a> {
+    fn of(t: &'a TrackInfo) -> Self {
+        TrackRow {
+            id: t.id,
+            source_path: &t.source_path,
+            title: &t.title,
+            artist: &t.artist,
+            album: &t.album,
+            genre: &t.genre,
+            key: &t.key,
+            tempo: t.tempo,
+            duration_secs: t.duration_secs,
+            bitrate: t.bitrate,
+            file_size: t.file_size,
+            has_artwork: t.has_artwork,
+            has_cues: t.has_cues,
+            has_analysis: t.has_analysis,
+            analysis_pending: t.analysis_pending,
+            rating: t.rating,
+            color: t.color.as_deref(),
+        }
+    }
+}
+
 /// Builds a [`TrackTable`] from rows handed over one by one, without a copy of each text per row.
 pub struct TrackTableBuilder {
     table: TrackTable,
@@ -367,7 +397,7 @@ impl Default for TrackTableBuilder {
             strings: TextIndex::default(),
             folders: FolderTable::default(),
             previous_dir: (String::new(), u32::MAX),
-            runs: Default::default(),
+            runs: std::array::from_fn(|_| (String::new(), u32::MAX)),
         }
     }
 }
@@ -487,25 +517,7 @@ impl TrackTable {
             if t.waveform_preview.is_some() || t.waveform_bands.is_some() {
                 return Err(format!("track {} carries a row preview, which the track table does not hold", t.id));
             }
-            builder.push(&TrackRow {
-                id: t.id,
-                source_path: &t.source_path,
-                title: &t.title,
-                artist: &t.artist,
-                album: &t.album,
-                genre: &t.genre,
-                key: &t.key,
-                tempo: t.tempo,
-                duration_secs: t.duration_secs,
-                bitrate: t.bitrate,
-                file_size: t.file_size,
-                has_artwork: t.has_artwork,
-                has_cues: t.has_cues,
-                has_analysis: t.has_analysis,
-                analysis_pending: t.analysis_pending,
-                rating: t.rating,
-                color: t.color.as_deref(),
-            });
+            builder.push(&TrackRow::of(t));
         }
         Ok(builder.finish())
     }
@@ -574,6 +586,40 @@ mod tests {
                 r##""playlists":[]}"##
             )
         );
+    }
+
+    #[test]
+    fn appended_tables_equal_the_table_of_all_rows() {
+        let tracks: Vec<TrackInfo> = (0..30)
+            .map(|n| TrackInfo {
+                title: format!("Title {n}"),
+                artist: format!("Artist {}", n % 4),
+                album: if n < 12 { String::new() } else { format!("Album {}", n % 5) },
+                genre: ["House", "Techno"][n % 2].into(),
+                key: format!("{}A", n % 3),
+                tempo: 12000 + n as u32,
+                rating: (n % 4 == 1).then_some(n as u8 % 6),
+                color: (n % 5 == 0).then(|| ["#f00", "#0f0", "Artist 2"][n % 3].to_string()),
+                has_analysis: n % 2 == 0,
+                ..info(n as u32 + 1, &format!("/m/dir {}/{}sub {}/{n}.mp3", n % 3, if n % 2 == 0 { "" } else { "x/" }, n % 6))
+            })
+            .collect();
+        let json = |table: &TrackTable| serde_json::to_string(table).unwrap();
+        let whole = json(&TrackTable::new(&tracks).unwrap());
+        for cut in [0, 1, 11, 12, 29, 30] {
+            let mut builder = TrackTableBuilder::default();
+            let (head, tail) = tracks.split_at(cut);
+            for t in head {
+                builder.push(&TrackRow::of(t));
+            }
+            builder.append(TrackTable::new(tail).unwrap());
+            assert_eq!(json(&builder.finish()), whole, "cut at {cut}");
+        }
+        let mut builder = TrackTableBuilder::default();
+        for chunk in tracks.chunks(7) {
+            builder.append(TrackTable::new(chunk).unwrap());
+        }
+        assert_eq!(json(&builder.finish()), whole);
     }
 
     #[test]
