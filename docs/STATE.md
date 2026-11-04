@@ -40,7 +40,7 @@ AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Ta
 
 43. [built 2026-11-03] Beat chunk 500 default (r96): test 205 grid 167=167, BPM 0.1 180=180, CPU/track -43%; dev grid 44 -> 43. Mac app keeps 1500 (CoreML 500 is 18% slower but -57% RAM, first result 30% sooner). ANALYSIS_VERSION 2 only resets the failed-track memo. rec: land; Mac at 500 is your call - branch: r96-chunk500 30ddf42
 
-Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once.
+Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 6d371fd on today's ov-1028, all checks green, preview :4212.
 
 44. [built 2026-11-04, Mac-checked] int8 beat model at chunk 500 for the Mac (r97/r98): same Mac session vs CoreML 1500: +22% trk/min, RAM 6.9 -> 2.4 GB, first result 6.7 -> 4.2 s, scores equal within 1 track; but 2.7x CPU (about 11 cores vs 4: fans, battery). x86 keeps fp32. rec: ship on Mac with fewer analysis workers on battery - branch: r98-mac-pair 87548eb (on r97-int8-500)
 
@@ -72,7 +72,7 @@ Note: land the -v4 branches (33-38) one by one, or parked-all-v7 15fd864 at once
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Running: r103 parked-all-v8, r102 chunk 500 BPM losses
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Running: r102 chunk 500 BPM losses
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
@@ -80,7 +80,7 @@ status: running since 2026-11-03 15:10 (Merlin go: Mac night 2 r89 + 2-week push
 targets: beta-ready on ov-1028, fastest at 10k+ (startup, analysis, track load, scroll); speed first, then beta
 parked for Merlin: r18-errors-v4 (33), r17-a11y-v4 (34), r31-cover-cap-v4 (35), r29-css-v4 (36), r76-recovery-kind (37), r52-no-python-v3 (38); all at once: parked-all-v7 15fd864. Not landing: r15-reveal, r16-quant (dropped), r35-ci (15)
 next Mac night (needs go): perf-night.sh --size 10k --expand-runs 5 on ov-1028; compare r15-reveal and r29-css-v4; 50k only with >= 40 GB free; chunk-budget sweep: scripts/mac/chunk-budget-sweep.sh --n 200
-review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (ov-1028, mock) · https://dev.tail87069a.ts.net:4211 (parked-all-v7, mock)
+review: https://dev.tail87069a.ts.net:4220 (cards) · https://dev.tail87069a.ts.net:4210 (ov-1028, mock) · https://dev.tail87069a.ts.net:4212 (parked-all-v8, mock; worktree agent-a5897e946a999da28 kept for it)
 Mac: ov-1028 in /Applications/fourfour.app (12:21 WITA); dmg at ~/dev/build/fourfour-mac/build/mac/dmg-20261101-1221/
 Hard gates: no push, no master merge, no deploy, no CDJ/USB writes, brother's lane read-only
 
