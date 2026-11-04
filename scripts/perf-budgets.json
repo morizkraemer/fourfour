@@ -230,7 +230,7 @@
       "unit": "ms",
       "path": "derived.all.import end to end ms",
       "now": {
-        "10k": 3700,
+        "10k": 1911,
         "25k": 12000,
         "50k": null
       },
@@ -264,7 +264,7 @@
       "unit": "ms",
       "path": "import.frontend.import ui click to rows ms",
       "now": {
-        "10k": 119,
+        "10k": 38.7,
         "25k": 806,
         "50k": null
       },

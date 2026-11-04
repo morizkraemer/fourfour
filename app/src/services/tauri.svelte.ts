@@ -1,4 +1,4 @@
-import { invoke, type ErrorKind } from './command-error.ts';
+import { invoke, toCommandError, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { pathBaseName } from '../lib/pathName.ts';
@@ -412,10 +412,21 @@ interface LoadedStateWire {
 
 let earlyLoadState: Promise<LoadedStateWire> | null = null;
 
-/** Starts `load_state` before the UI mounts, so the backend reads the library while the bundle builds the first frame. */
+/**
+ * Starts `load_state` before the UI mounts, so the backend reads the library while the bundle builds the first frame.
+ * `index.html` has already sent it when the page began (before the bundle was fetched and evaluated); this takes that
+ * call over instead of sending a second one.
+ */
 export function startLoadStateEarly() {
   if (!getIsTauri() || earlyLoadState) return;
-  earlyLoadState = invoke<LoadedStateWire>('load_state');
+  const w = window as unknown as { __ffLoadStateStarted?: Promise<LoadedStateWire> };
+  const sentByPage = w.__ffLoadStateStarted;
+  delete w.__ffLoadStateStarted;
+  earlyLoadState = sentByPage
+    ? sentByPage.catch((err) => {
+        throw toCommandError(err);
+      })
+    : invoke<LoadedStateWire>('load_state');
   earlyLoadState.catch(() => {});
 }
 

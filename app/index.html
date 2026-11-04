@@ -7,6 +7,15 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      (function () {
+        var internals = window.__TAURI_INTERNALS__;
+        if (!internals || typeof internals.invoke !== 'function') return;
+        var started = internals.invoke('load_state', {}, undefined);
+        started.catch(function () {});
+        window.__ffLoadStateStarted = started;
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
