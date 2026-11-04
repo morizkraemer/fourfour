@@ -57,6 +57,11 @@ fn chunking() -> &'static Chunking {
     CHUNKING.get_or_init(Chunking::from_env)
 }
 
+/// Frames of one beat-model chunk.
+pub fn chunk_frames() -> usize {
+    chunking().size
+}
+
 fn skip_silence() -> bool {
     static SKIP: OnceLock<bool> = OnceLock::new();
     *SKIP.get_or_init(|| std::env::var("FOURFOUR_BEAT_SKIP_SILENCE").is_ok_and(|v| v == "1"))
