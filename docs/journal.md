@@ -599,3 +599,4 @@
 2026-11-04 13:37 orchestrator r111 landed 6ec34d9 (both smokes 0 failed incl. webkit, 26 suites, vitest 914, CHECKS-OK)
 2026-11-04 14:34 orchestrator r112 handed back f44afc9: no avoidable app work in expand (painted 27-38 ms, rest frame-bound); harness rows + trace script merged into ov-1028, checks running; playhead Web Animation proposal for the fenced waveform-display.js -> Waiting 48 (answered worker: fence holds)
 2026-11-04 14:35 orchestrator state trimmed 13.4k -> 11.6k chars (old 43, Q51 history, rundown moved to state-archive-2026-10-28.md)
+2026-11-04 14:50 orchestrator r112 landed eb9d84f (both smokes 0 failed, vitest 914, CHECKS-OK). decided: own prio r114 startup bundle cost (sonnet high; page start is the 10k bottleneck per r109)
