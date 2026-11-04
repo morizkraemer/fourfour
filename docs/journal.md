@@ -578,3 +578,4 @@
 2026-11-03 21:05 orchestrator r92b landed 8249974 (26 suites, CHECKS-OK, webkit smoke green; chromium backup.spec restore failed once at load 58, rerun green, merge touches no app files)
 2026-11-03 23:21 orchestrator r97 handed back 1b3a972 (int8 at 500: Mac rten +43-60% trk/min, scores equal; x86 -2 grid, ~10% gain, fails gate), parked as Waiting 44; spawning r98 Mac same-session pair (sonnet medium) and r99 LUFS/gain (sonnet high)
 2026-11-04 00:42 orchestrator r99 handed back cae9320 (LUFS within 0.013 LU of ffmpeg, ~1% CPU, off by default, byte-identical), parked as Waiting 45; spawning r100 energy 1-10 (sonnet high)
+2026-11-04 00:58 orchestrator r98 handed back 87548eb (same-session Mac: int8 rten 500 +22% trk/min, RSS -64%, scores equal, CPU 2.7x), Waiting 44 updated; spawning r101 long-track RSS (sonnet high)
