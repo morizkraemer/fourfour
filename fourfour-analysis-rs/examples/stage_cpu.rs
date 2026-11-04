@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use fourfour_analysis::bt::MODEL_RATE;
 use fourfour_analysis::decode::{decode_mono, resample_to};
-use fourfour_analysis::{cyankey, waveform};
+use fourfour_analysis::cyankey;
+use pioneer_usb_writer::waveform::{analyze, Meter};
 
 const REPS: usize = 3;
 
@@ -34,7 +35,12 @@ fn main() -> anyhow::Result<()> {
         let native = timed("decode", &mut line, || decode_mono(&path))?;
         let rate = native.rate;
         let gapless = native.gapless_samples();
-        let _wf = timed("waveform", &mut line, || waveform::compute(&native.samples, rate));
+        let measured = timed("wf_meter", &mut line, || {
+            let mut meter = Meter::new(rate, 1);
+            meter.push(&native.samples);
+            meter.finish()
+        });
+        let _wf = timed("wf_columns", &mut line, || analyze(&measured));
         let mono44: Cow<[f32]> = match rate {
             44100 => Cow::Borrowed(gapless),
             rate => Cow::Owned(timed("resample44", &mut line, || resample_to(gapless, rate, 44100))?),
