@@ -58,6 +58,7 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 - Windows risks (r20): eject, removable flag, case-sensitive extensions. See robustness-2026-11.md, Platforms 2026-11.
 - Windows libcrypto (r65): vendored-openssl SQLCipher feature under cfg(windows), when a Windows release is planned.
 - r12: two same-name tracks collide on one USB path (repro: pioneer-library/tests/robust_store.rs).
+- r104: waveform Meter::push (pioneer-usb-writer) is the biggest non-model stage, 740 ms/track at 53 ns/sample vs 8.5 ns for a plain biquad; mono fast path + state in locals could be 4x, bit-identical.
 - r6: cold 10k import reads 2.7 GB of ID3 pictures; seek-past reader in pioneer-usb-writer/src/scanner.rs.
 - Sync engine per docs/ui/usb-sync-spec.md. Clone facts: docs/research/clones-2026-10-23.md.
 - Open: Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 for CDJ-3000X; CDJ-3000 round-trip.
@@ -72,7 +73,7 @@ Note: everything parked (33-38, 41, 43, 45, 47 + schema v8) is in parked-all-v8 
 ### Q50 Speed [running as holiday run] [box] - brief in docs/state-archive-2026-10-28.md (2026-11-03 section)
 
 ### Q51 Analysis + speed push to 2026-11-16 [running] [box+mac] - Merlin 2026-11-03: max gains, incremental. Result changes park with evals; identical-result speed lands on ov-1028. Order (refill as results come):
-- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Running: r104 non-model stages, r105 grid snap acceptance
+- landed on ov-1028: r89 Mac night 2, r93 chunk ceiling, r95 50k startup; r92b import covers. Parked: r90 phrase (42), r96 chunk 500 (43). Dropped: r91 key mode, small models. Parked: r97 int8 (44), r99 loudness (45). Parked: r101 BPM misses (46). Parked: r100 energy (47). Built: parked-all-v8 6d371fd. Merging: r104 non-model stages (key -60%, decode -13%, byte-identical). Running: r106 model sys time, r105 grid snap acceptance
 - next: auto cues from phrases; zoom first open (mostly done R25-R57); parked-all-v7 refresh (libc fix). Genre dropped: no labels/model
 
 ## Run
