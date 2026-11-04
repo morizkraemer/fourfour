@@ -606,3 +606,4 @@
 2026-11-04 16:54 orchestrator r114 landed 1f9e6c8 (both smokes 0 failed, 26 suites, vitest 926, CHECKS-OK)
 2026-11-04 17:26 orchestrator r116 handed back 53c9e39: key misses 74% mode/neighbour, 20-45% label noise, linear model saturated; clean-fsl-harmonic 59.9% but 16% key churn, p~0.3; parked as Waiting 49 (rec keep clean-fsl). decided: own prio r117 beat-synchronous key features (sonnet high, from r116-key-misses, FSL-only training, McNemar gate)
 2026-11-04 17:49 orchestrator r115 handed back 8250cdc (counting-sort classes, idle warm-up ~0.8 s CPU in 6 ms slices at 50k, letter bit sets; first sort 50k 186-228 -> 87-89 ms; identical order 94/94), merged 0e01eba, chain running. decided: own prio r118 row canvas compositor cost (sonnet high)
+2026-11-04 18:05 orchestrator r115 landed 0e01eba (both smokes 0 failed, 26 suites, vitest 930, CHECKS-OK)
