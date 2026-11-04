@@ -131,6 +131,9 @@ fn decimation_taps(d: usize) -> Vec<f32> {
     h
 }
 
+const DECIMATE_LANES: usize = 32;
+const DECIMATE_SEGMENT_BLOCKS: usize = 64;
+
 fn decimate(x: &[f32], d: usize, threads: usize) -> Vec<f32> {
     let h = decimation_taps(d);
     let half = 8 * d;
@@ -153,20 +156,82 @@ fn decimate(x: &[f32], d: usize, threads: usize) -> Vec<f32> {
         }
         acc
     };
+    let first_inner = half.div_ceil(d);
+    let end_inner = if x.len() > half { ((x.len() - half - 1) / d + 1).min(ny) } else { 0 };
     let mut out = vec![0f32; ny];
     let threads = threads.max(1);
     let per = ny.div_ceil(threads).max(1);
     std::thread::scope(|s| {
         for (ci, chunk) in out.chunks_mut(per).enumerate() {
-            let at = &at;
+            let (at, h) = (&at, &h);
             s.spawn(move || {
-                for (i, o) in chunk.iter_mut().enumerate() {
-                    *o = at(ci * per + i);
+                let base = ci * per;
+                let inner_from = base.max(first_inner).min(base + chunk.len());
+                let inner_to = (base + chunk.len()).min(end_inner).max(inner_from);
+                let inner_end = inner_from + (inner_to - inner_from) / DECIMATE_LANES * DECIMATE_LANES;
+                for (i, o) in chunk[..inner_from - base].iter_mut().enumerate() {
+                    *o = at(base + i);
+                }
+                decimate_inner(x, h, d, inner_from, &mut chunk[inner_from - base..inner_end - base]);
+                for (i, o) in chunk[inner_end - base..].iter_mut().enumerate() {
+                    *o = at(inner_end + i);
                 }
             });
         }
     });
     out
+}
+
+fn split_phases_of_four(span: &[f32], phases: &mut [f32], phase_len: usize) {
+    let (p0, rest) = phases.split_at_mut(phase_len);
+    let (p1, rest) = rest.split_at_mut(phase_len);
+    let (p2, p3) = rest.split_at_mut(phase_len);
+    let rows = span.chunks_exact(4);
+    let tail = rows.remainder();
+    let full = rows.len().min(phase_len);
+    for ((((row, a), b), c), e) in rows.zip(p0.iter_mut()).zip(p1.iter_mut()).zip(p2.iter_mut()).zip(p3.iter_mut()) {
+        *a = row[0];
+        *b = row[1];
+        *c = row[2];
+        *e = row[3];
+    }
+    for (phase, v) in [&mut *p0, &mut *p1, &mut *p2, &mut *p3].into_iter().zip(tail) {
+        if full < phase_len {
+            phase[full] = *v;
+        }
+    }
+}
+
+fn decimate_inner(x: &[f32], h: &[f32], d: usize, first: usize, out: &mut [f32]) {
+    let half = 8 * d;
+    let phase_len = DECIMATE_SEGMENT_BLOCKS * DECIMATE_LANES + (h.len() - 1) / d;
+    let mut phases = vec![0f32; d * phase_len];
+    let tap_offsets: Vec<usize> = (0..h.len()).map(|tap| (tap % d) * phase_len + tap / d).collect();
+    for (segment, out) in out.chunks_mut(DECIMATE_SEGMENT_BLOCKS * DECIMATE_LANES).enumerate() {
+        let k0 = first + segment * DECIMATE_SEGMENT_BLOCKS * DECIMATE_LANES;
+        let from = k0 * d - half;
+        let span = &x[from..(from + phase_len * d).min(x.len())];
+        if d == 4 {
+            split_phases_of_four(span, &mut phases, phase_len);
+        } else {
+            for (p, phase) in phases.chunks_exact_mut(phase_len).enumerate() {
+                for (dst, src) in phase.iter_mut().zip(span[p..].iter().step_by(d)) {
+                    *dst = *src;
+                }
+            }
+        }
+        for (block, out) in out.chunks_exact_mut(DECIMATE_LANES).enumerate() {
+            let mut acc = [0f32; DECIMATE_LANES];
+            for (&tap_offset, &hv) in tap_offsets.iter().zip(h) {
+                let at = tap_offset + block * DECIMATE_LANES;
+                let src: &[f32; DECIMATE_LANES] = phases[at..at + DECIMATE_LANES].try_into().unwrap();
+                for j in 0..DECIMATE_LANES {
+                    acc[j] += hv * src[j];
+                }
+            }
+            out.copy_from_slice(&acc);
+        }
+    }
 }
 
 struct Stft<'a> {
@@ -472,6 +537,43 @@ pub fn detect_with(model: &KeyModel, mono: &[f32], rate: u32, threads: usize) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn decimate_reference(x: &[f32], d: usize) -> Vec<f32> {
+        let h = decimation_taps(d);
+        let half = 8 * d;
+        (0..x.len().div_ceil(d))
+            .map(|k| {
+                let mut acc = 0f32;
+                for (i, hv) in h.iter().enumerate() {
+                    let j = (k * d + i) as i64 - half as i64;
+                    if j >= 0 && (j as usize) < x.len() {
+                        acc += hv * x[j as usize];
+                    }
+                }
+                acc
+            })
+            .collect()
+    }
+
+    #[test]
+    fn decimation_matches_the_scalar_filter_bit_for_bit() {
+        let mut seed = 0x9e3779b9u32;
+        let mut noise = move || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f32 / (1u32 << 23) as f32 - 1.0
+        };
+        for d in [2, 4, 7] {
+            for len in [0, 1, 5, 33, 64 * d, 400 * d + 3, 12_345, 40_000, 40_001, 40_002, 40_003] {
+                let x: Vec<f32> = (0..len).map(|_| noise()).collect();
+                for threads in [1, 3] {
+                    let fast = decimate(&x, d, threads);
+                    let slow = decimate_reference(&x, d);
+                    assert_eq!(fast.len(), slow.len());
+                    assert!(fast.iter().zip(&slow).all(|(a, b)| a.to_bits() == b.to_bits()), "d {d} len {len} threads {threads}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn shipped_model_is_clean_fsl_and_both_models_resolve() {
