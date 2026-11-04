@@ -471,10 +471,11 @@ mod tests {
 
     #[test]
     fn half_time_tempo_in_the_band_is_doubled() {
-        assert_eq!(fitted_bpm(88.0, &FitParams::default()), 176.0);
-        assert_eq!(fitted_bpm(88.0, &FitParams { half_time_band: (0.0, 0.0), ..FitParams::default() }), 88.0);
-        assert_eq!(fitted_bpm(80.0, &FitParams::default()), 80.0);
-        assert_eq!(fitted_bpm(94.0, &FitParams::default()), 94.0);
+        let on = FitParams { half_time_band: (84.0, 92.5), ..FitParams::default() };
+        assert_eq!(fitted_bpm(88.0, &on), 176.0);
+        assert_eq!(fitted_bpm(88.0, &FitParams::default()), 88.0);
+        assert_eq!(fitted_bpm(80.0, &on), 80.0);
+        assert_eq!(fitted_bpm(94.0, &on), 94.0);
     }
 
     #[test]
