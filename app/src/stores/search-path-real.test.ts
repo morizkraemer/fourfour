@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { describe, it, vi } from 'vitest';
 
-const STATE = process.env.FF_PERF_STATE;
-const OUT = process.env.FF_PERF_OUT;
-const REPEATS = Number(process.env.FF_PERF_REPEATS ?? 7);
+const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+const STATE = env.FF_PERF_STATE;
+const OUT = env.FF_PERF_OUT;
+const REPEATS = Number(env.FF_PERF_REPEATS ?? 7);
 
 vi.mock('../services/playback.svelte.ts', () => ({
   playbackPause: vi.fn(),
@@ -23,7 +23,16 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) })
 import { bumpLibraryTracks, filterTracks, library, loadState, tracksForSidebarSource } from './library.svelte.ts';
 import { clearSort, setSort, sortTracks } from './table-columns.svelte.ts';
 
-const ids = (rows: { id: number }[]) => createHash('sha1').update(rows.map((r) => r.id).join(',')).digest('hex').slice(0, 12);
+function ids(rows: { id: number }[]): string {
+  let a = 0x811c9dc5;
+  let b = 0x9e3779b9;
+  for (const row of rows) {
+    a = Math.imul(a ^ row.id, 0x01000193) >>> 0;
+    b = Math.imul(b + row.id + 1, 0x85ebca6b) >>> 0;
+    b ^= b >>> 13;
+  }
+  return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
+}
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 
 type Script = { name: string; run: () => { id: number }[] }[];

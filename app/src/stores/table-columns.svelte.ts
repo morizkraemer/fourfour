@@ -15,7 +15,7 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, plainRowOf, playlistByName } from './library.svelte.ts';
+import { library, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, plainRowOf, playlistByName } from './library.svelte.ts';
 import { sortedOrder, sortedSubset, withChangedValues, type SortedOrder, type SortValue } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
@@ -485,46 +485,69 @@ function sortValueReader(key: string): (track: Record<string, unknown>) => SortV
   };
 }
 
-interface LibrarySort {
-  values: SortValue[];
-  sorted: SortedOrder;
+interface LibrarySorts {
+  tracks: object;
+  values: Map<string, SortValue[]>;
+  orders: Map<string, SortedOrder>;
+  from: { values: Map<string, SortValue[]>; orders: Map<string, SortedOrder>; changed: number[] } | null;
 }
 
-let librarySorts: { tracks: object; byKey: Map<string, LibrarySort> } | null = null;
+let librarySorts: LibrarySorts | null = null;
 
-/** Order of `library.tracks` by `key` and `dir`, kept while the list is only bumped: the rows whose values changed are moved. */
-function librarySort(key: string, dir: 1 | -1): LibrarySort {
+function libraryValues(rows: readonly Record<string, unknown>[], key: string, positions: readonly number[] | null, into: SortValue[]) {
+  const plains = libraryPlainRows();
+  const aligned = plains.length === rows.length;
+  const read = (p: number) => {
+    const plain = aligned ? plains[p] : plainRowOf(rows[p]);
+    into[p] = sortValueOfRaw(Object.hasOwn(plain, key) ? plain[key] : rows[p][key], key);
+  };
+  untrack(() => {
+    if (positions) for (let i = 0; i < positions.length; i++) read(positions[i]);
+    else for (let p = 0; p < rows.length; p++) read(p);
+  });
+}
+
+/**
+ * Order of `library.tracks` by `key` and `dir`, and the sort values it came from, by position. Kept while the list is
+ * only bumped (`bumpLibraryTracks`): the values of the bumped rows are read again and those rows moved; any other change
+ * to the list sorts anew. Library rows change their fields only together with a bump.
+ */
+function librarySort(key: string, dir: 1 | -1): SortedOrder {
   const rows = untrack(() => library.tracks);
-  const read = sortValueReader(key);
-  const cacheKey = `${key}|${dir}`;
-  const earlier = librarySorts;
-  if (earlier?.tracks !== rows) librarySorts = { tracks: rows, byKey: new Map() };
-  const cache = librarySorts!;
-  const previous = earlier && earlier.tracks !== rows ? earlier : null;
-  const stale = previous?.byKey.get(cacheKey);
-  if (stale) {
-    const changed = libraryPositionsChangedSince(previous!.tracks);
-    if (changed) {
-      for (const position of changed) stale.values[position] = untrack(() => read(rows[position]));
-      const sorted = withChangedValues(stale.sorted, stale.values, changed, dir);
-      if (sorted) {
-        const moved = { values: stale.values, sorted };
-        cache.byKey.set(cacheKey, moved);
-        return moved;
-      }
-    }
+  if (librarySorts?.tracks !== rows) {
+    const previous = librarySorts;
+    const changed = previous ? libraryPositionsChangedSince(previous.tracks) : null;
+    librarySorts = {
+      tracks: rows,
+      values: new Map(),
+      orders: new Map(),
+      from: previous && changed ? { values: previous.values, orders: previous.orders, changed } : null,
+    };
   }
-  const current = cache.byKey.get(cacheKey);
-  if (current) return current;
-  const values = untrack(() => rows.map((row) => read(row)));
-  const made = { values, sorted: sortedOrder(values, dir) };
-  cache.byKey.set(cacheKey, made);
-  return made;
+  const cache = librarySorts!;
+  let values = cache.values.get(key);
+  if (!values) {
+    values = cache.from?.values.get(key);
+    if (values) libraryValues(rows, key, cache.from!.changed, values);
+    else {
+      values = new Array<SortValue>(rows.length);
+      libraryValues(rows, key, null, values);
+    }
+    cache.values.set(key, values);
+  }
+  const orderKey = `${key}|${dir}`;
+  let sorted = cache.orders.get(orderKey);
+  if (!sorted) {
+    const earlier = cache.from?.values.get(key) === values ? cache.from.orders.get(orderKey) : undefined;
+    sorted = (earlier && withChangedValues(earlier, values, cache.from!.changed, dir)) || sortedOrder(values, dir);
+    cache.orders.set(orderKey, sorted);
+  }
+  return sorted;
 }
 
 function sortLibraryRows<T extends Record<string, unknown>>(tracks: T[], positions: readonly number[] | 'all', key: string, dir: 1 | -1): T[] {
   const rows = untrack(() => library.tracks) as T[];
-  const { sorted } = librarySort(key, dir);
+  const sorted = librarySort(key, dir);
   const order = positions === 'all' ? sorted.order : sortedSubset(positions, sorted);
   const out = new Array<T>(order.length);
   for (let i = 0; i < order.length; i++) out[i] = rows[order[i]];
@@ -560,7 +583,11 @@ export function durationSeconds(time: string): number | null {
 
 function sortValue(track: Record<string, unknown>, key: string): string | number | null {
   const plain = plainRowOf(track);
-  const text = String((Object.hasOwn(plain, key) ? plain[key] : track[key]) ?? '').trim();
+  return sortValueOfRaw(Object.hasOwn(plain, key) ? plain[key] : track[key], key);
+}
+
+function sortValueOfRaw(raw: unknown, key: string): string | number | null {
+  const text = String(raw ?? '').trim();
   if (isBlank(text)) return null;
   if (key === 'bpm') {
     const n = parseFloat(text);

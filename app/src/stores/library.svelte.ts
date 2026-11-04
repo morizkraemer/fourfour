@@ -375,6 +375,11 @@ let trackList = $state.raw<any[]>([]);
  */
 let plainTracks: Record<string, any>[] = [];
 
+/** The plain objects behind `library.tracks`, by position. */
+export function libraryPlainRows(): readonly Record<string, any>[] {
+  return plainTracks;
+}
+
 function setLibraryTracks(tracks: Record<string, any>[], rows = tracks.map(reactiveTrack)) {
   plainTracks = tracks;
   trackList = rows;
@@ -614,6 +619,7 @@ interface FilterEntry {
 const FILTER_HISTORY = 16;
 const filterHistory = new WeakMap<object, Map<string, FilterEntry>>();
 const filterSources = new WeakMap<object, { source: object; positions: number[] }>();
+let libraryFilters: { tracks: object; history: Map<string, FilterEntry> } | null = null;
 
 /**
  * Where the rows of a `filterTracks` result of `library.tracks` sit in it (ascending), or `'all'` for `library.tracks`
@@ -667,22 +673,52 @@ export function filterTracks<T extends Record<string, unknown>>(
   let history = filterHistory.get(tracks);
   const known = history?.get(trimmed);
   if (known) return known.result as T[];
+  const isLibrary = tracks === untrack(() => trackList);
   if (!history) {
     history = new Map();
     filterHistory.set(tracks, history);
   }
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const haystacks = haystacksFor(tracks);
+  if (isLibrary && libraryFilters && libraryFilters.tracks !== tracks) {
+    const changed = libraryPositionsChangedSince(libraryFilters.tracks);
+    const earlier = libraryFilters.history.get(trimmed);
+    if (changed && earlier) {
+      const indices = withChangedMatches(earlier.indices, changed, haystacks, terms);
+      return remember(history, trimmed, terms, indices, tracks, true);
+    }
+  }
   let candidates: number[] | null = null;
   for (const entry of history.values()) {
     if (narrows(entry.terms, terms) && (!candidates || entry.indices.length < candidates.length)) candidates = entry.indices;
   }
-  const indices = matchingIndices(haystacks, terms, candidates);
+  return remember(history, trimmed, terms, matchingIndices(haystacks, terms, candidates), tracks, isLibrary);
+}
+
+function remember<T>(history: Map<string, FilterEntry>, query: string, terms: string[], indices: number[], tracks: T[], isLibrary: boolean): T[] {
   const result = indices.length === tracks.length ? tracks : indices.map((i) => tracks[i]);
-  history.set(trimmed, { terms, indices, result });
+  history.set(query, { terms, indices, result });
   if (history.size > FILTER_HISTORY) history.delete(history.keys().next().value!);
-  if (result !== tracks && tracks === untrack(() => trackList)) filterSources.set(result, { source: tracks, positions: indices });
+  if (isLibrary) {
+    libraryFilters = { tracks, history };
+    if (result !== tracks) filterSources.set(result, { source: tracks, positions: indices });
+  }
   return result;
+}
+
+/** The ascending positions `earlier` matched, after only the rows at `changed` positions changed their text. */
+function withChangedMatches(earlier: number[], changed: number[], haystacks: string[], terms: string[]): number[] {
+  const moved = new Set(changed);
+  const kept = earlier.filter((i) => !moved.has(i));
+  const matching = [...moved].filter((i) => terms.every((term) => haystacks[i].includes(term))).sort((a, b) => a - b);
+  if (matching.length === 0) return kept;
+  const merged: number[] = [];
+  let a = 0;
+  let b = 0;
+  while (a < kept.length && b < matching.length) merged.push(kept[a] < matching[b] ? kept[a++] : matching[b++]);
+  while (a < kept.length) merged.push(kept[a++]);
+  while (b < matching.length) merged.push(matching[b++]);
+  return merged;
 }
 
 let indexCache: { source: object; length: number; byId: Map<number, number> } | null = null;
