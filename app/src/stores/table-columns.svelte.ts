@@ -507,11 +507,6 @@ function libraryValues(rows: readonly Record<string, unknown>[], key: string, po
   });
 }
 
-/**
- * Order of `library.tracks` by `key` and `dir`, and the sort values it came from, by position. Kept while the list is
- * only bumped (`bumpLibraryTracks`): the values of the bumped rows are read again and those rows moved; any other change
- * to the list sorts anew. Library rows change their fields only together with a bump.
- */
 function librarySort(key: string, dir: 1 | -1): SortedOrder {
   const rows = untrack(() => library.tracks);
   if (librarySorts?.tracks !== rows) {

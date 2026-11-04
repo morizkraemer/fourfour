@@ -19,6 +19,7 @@ interface Step {
   script: number;
   task: number;
   layout: number;
+  js: number;
   view: string;
 }
 
@@ -30,6 +31,7 @@ function state(): LoadedState {
 }
 
 async function metrics(page: Page) {
+  if (process.env.FF_SMOKE_BROWSER === 'webkit') return async () => ({ script: 0, task: 0, layout: 0 });
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
   return async () => {
@@ -46,6 +48,8 @@ const settle = (page: Page) =>
         setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve(performance.now() - t0))), 0);
       }),
   );
+
+const jsDone = (page: Page) => page.evaluate(() => (window as unknown as { __jsAt: number; __inputAt: number }).__jsAt - (window as unknown as { __inputAt: number }).__inputAt);
 
 const topRows = (page: Page) =>
   page.evaluate(() =>
@@ -116,9 +120,10 @@ async function runScenario(page: Page, mode: string, read: () => Promise<{ scrip
     const before = await read();
     await action();
     const total = await settle(page);
+    const js = await jsDone(page);
     const after = await read();
     const view = sha(await topRows(page));
-    steps.push({ name: `${mode} ${name}`, total, script: after.script - before.script, task: after.task - before.task, layout: after.layout - before.layout, view });
+    steps.push({ name: `${mode} ${name}`, total, script: after.script - before.script, task: after.task - before.task, layout: after.layout - before.layout, js, view });
     await page.waitForTimeout(gap);
   };
   const type = async (query: string, label: string) => {
@@ -129,7 +134,7 @@ async function runScenario(page: Page, mode: string, read: () => Promise<{ scrip
   };
   const checkpoint = async (name: string) => {
     const view = await fullView(page);
-    steps.push({ name: `${mode} VIEW ${name}`, total: 0, script: 0, task: 0, layout: 0, view });
+    steps.push({ name: `${mode} VIEW ${name}`, total: 0, script: 0, task: 0, layout: 0, js: 0, view });
   };
   const sortBy = (key: string, name: string) => measure(`sort ${name}`, () => page.locator(`.ff-colh__cell[data-col-key="${key}"] .ff-colh__label`).click(), 400);
 
@@ -186,7 +191,11 @@ test.describe('search and sort latency', () => {
       await page.waitForTimeout(3000);
       await page.evaluate(() => {
         const w = window as unknown as { __inputAt: number };
-        for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, () => (w.__inputAt = performance.now()), true);
+        const mark = () => {
+          w.__inputAt = performance.now();
+          setTimeout(() => ((w as unknown as { __jsAt: number }).__jsAt = performance.now()), 0);
+        };
+        for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, mark, true);
         const smoke = window as unknown as SmokeWindow;
         smoke.__smokeAnalysis = (trackId) => (smoke.__smokeAnalysis as never) && Promise.resolve({ track_id: trackId });
       });

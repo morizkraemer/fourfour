@@ -706,7 +706,6 @@ function remember<T>(history: Map<string, FilterEntry>, query: string, terms: st
   return result;
 }
 
-/** The ascending positions `earlier` matched, after only the rows at `changed` positions changed their text. */
 function withChangedMatches(earlier: number[], changed: number[], haystacks: string[], terms: string[]): number[] {
   const moved = new Set(changed);
   const kept = earlier.filter((i) => !moved.has(i));
