@@ -596,3 +596,4 @@
 2026-11-04 11:43 orchestrator r109 landed 271f371 (both smokes 0 failed at load 70-78, 26 suites, vitest 914, CHECKS-OK)
 2026-11-04 13:19 orchestrator r111 handed back 7427d7f (id-ordered scans merged in Rust + range threads; load_state 10k 84 -> 44 ms, 50k 466 -> 194 ms, sha256-identical payload), merged into ov-1028, chain running. decided: own prio r112 expand-to-detail draw time (sonnet high)
 2026-11-04 13:19 orchestrator r110 handed back d4adc3c: start-order chunk queue + burst threads, identical output, no first-result gain provable under box load, +30% peak RSS; parked (quiet-machine run on a Mac night). decided: own prio r113 search/filter keystroke latency (sonnet high)
+2026-11-04 13:37 orchestrator r111 landed 6ec34d9 (both smokes 0 failed incl. webkit, 26 suites, vitest 914, CHECKS-OK)
