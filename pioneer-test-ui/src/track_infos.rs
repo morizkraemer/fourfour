@@ -102,7 +102,6 @@ pub fn changed_track_labels(reader: &TrackLabelsReader) -> Vec<TrackLabelInfo> {
 }
 
 pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
-    lib.backfill_row_previews().map_err(|e| e.to_string())?;
     let labels_reader = lib.track_labels_reader();
     let (playlists, mut labels) = std::thread::scope(|scope| {
         let labels = scope.spawn(|| labels_reader.read_cached());
@@ -120,8 +119,8 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
             is_folder: pl.is_folder,
         })
         .collect();
-    let mut table = TrackTableBuilder::with_capacity(lib.track_count().map_err(|e| e.to_string())? as usize);
-    lib.for_each_track_list_row(|row| {
+    let mut table = TrackTableBuilder::default();
+    let missing_previews = lib.for_each_track_list_row(|row| {
         let labels = labels.remove(&i64::from(row.id));
         table.push(&TrackRow {
             id: row.id,
@@ -144,6 +143,9 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
         });
     })
     .map_err(|e| e.to_string())?;
+    if missing_previews > 0 {
+        lib.backfill_row_previews().map_err(|e| e.to_string())?;
+    }
     Ok(LoadedState { tracks: table.finish(), playlists })
 }
 

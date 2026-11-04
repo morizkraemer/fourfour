@@ -157,9 +157,9 @@ const TRACK_FLAG_PENDING: u8 = 8;
 /// string index).
 #[derive(Serialize, Clone, Default)]
 pub struct TrackTable {
-    strings: Vec<Box<str>>,
+    strings: TextColumn,
     folder_parent: Vec<u32>,
-    folder_name: Vec<Box<str>>,
+    folder_name: TextColumn,
     id: Vec<u32>,
     dir: Vec<u32>,
     file: TextColumn,
@@ -185,13 +185,18 @@ struct TextColumn {
 }
 
 impl TextColumn {
-    fn with_capacity(rows: usize) -> Self {
-        TextColumn { text: String::new(), ends: Vec::with_capacity(rows) }
-    }
-
     fn push(&mut self, text: &str) {
         self.text.push_str(text);
         self.ends.push(self.text.len());
+    }
+
+    fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    fn get(&self, index: usize) -> &str {
+        let start = if index == 0 { 0 } else { self.ends[index - 1] };
+        &self.text[start..self.ends[index]]
     }
 
     fn iter(&self) -> impl Iterator<Item = &str> {
@@ -241,45 +246,81 @@ impl std::hash::Hasher for FastHasher {
     }
 }
 
-type FastMap = HashMap<Box<str>, u32, std::hash::BuildHasherDefault<FastHasher>>;
-
+/// Distinct texts, found again by an open-addressing table of indexes into the texts.
 #[derive(Default)]
-struct StringTable {
-    list: Vec<Box<str>>,
-    index: FastMap,
+struct TextIndex {
+    texts: TextColumn,
+    slots: Vec<u32>,
 }
 
-impl StringTable {
-    fn intern(&mut self, text: &str) -> u32 {
-        if let Some(&index) = self.index.get(text) {
-            return index;
+impl TextIndex {
+    fn hash(text: &str) -> usize {
+        use std::hash::Hasher;
+        let mut hasher = FastHasher::default();
+        hasher.write(text.as_bytes());
+        hasher.finish() as usize
+    }
+
+    fn find(&self, text: &str) -> Option<u32> {
+        if self.slots.is_empty() {
+            return None;
         }
-        let index = self.list.len() as u32;
-        self.list.push(text.into());
-        self.index.insert(text.into(), index);
+        let mask = self.slots.len() - 1;
+        let mut slot = Self::hash(text) & mask;
+        loop {
+            match self.slots[slot] {
+                0 => return None,
+                found if self.texts.get(found as usize - 1) == text => return Some(found - 1),
+                _ => slot = (slot + 1) & mask,
+            }
+        }
+    }
+
+    fn insert(&mut self, text: &str) -> u32 {
+        if (self.texts.len() + 1) * 2 > self.slots.len() {
+            let size = (self.slots.len() * 2).max(64);
+            self.slots = vec![0; size];
+            for index in 0..self.texts.len() {
+                self.place(Self::hash(self.texts.get(index)), index as u32);
+            }
+        }
+        let index = self.texts.len() as u32;
+        self.texts.push(text);
+        self.place(Self::hash(text), index);
         index
+    }
+
+    fn place(&mut self, hash: usize, index: u32) {
+        let mask = self.slots.len() - 1;
+        let mut slot = hash & mask;
+        while self.slots[slot] != 0 {
+            slot = (slot + 1) & mask;
+        }
+        self.slots[slot] = index + 1;
+    }
+
+    fn intern(&mut self, text: &str) -> u32 {
+        self.find(text).unwrap_or_else(|| self.insert(text))
     }
 }
 
 #[derive(Default)]
 struct FolderTable {
+    paths: TextIndex,
     parent: Vec<u32>,
-    name: Vec<Box<str>>,
-    index: FastMap,
+    name: TextColumn,
 }
 
 impl FolderTable {
     fn folder(&mut self, dir: &str) -> u32 {
-        if let Some(&index) = self.index.get(dir) {
+        if let Some(index) = self.paths.find(dir) {
             return index;
         }
         let cut = dir[..dir.len().saturating_sub(1)].rfind(['/', '\\']).map_or(0, |i| i + 1);
         let parent = if cut == 0 { 0 } else { self.folder(&dir[..cut]) + 1 };
-        let index = self.name.len() as u32;
         self.parent.push(parent);
-        self.name.push(dir[cut..].into());
-        self.index.insert(dir.into(), index);
-        index
+        self.name.push(&dir[cut..]);
+        self.paths.insert(dir)
     }
 }
 
@@ -307,38 +348,25 @@ pub struct TrackRow<'a> {
 /// Builds a [`TrackTable`] from rows handed over one by one, without a copy of each text per row.
 pub struct TrackTableBuilder {
     table: TrackTable,
-    strings: StringTable,
+    strings: TextIndex,
     folders: FolderTable,
     previous_dir: (String, u32),
     runs: [(String, u32); 5],
 }
 
-impl TrackTableBuilder {
-    pub fn with_capacity(rows: usize) -> Self {
+impl Default for TrackTableBuilder {
+    fn default() -> Self {
         TrackTableBuilder {
-            table: TrackTable {
-                id: Vec::with_capacity(rows),
-                dir: Vec::with_capacity(rows),
-                file: TextColumn::with_capacity(rows),
-                title: TextColumn::with_capacity(rows),
-                artist: Vec::with_capacity(rows),
-                album: Vec::with_capacity(rows),
-                genre: Vec::with_capacity(rows),
-                key: Vec::with_capacity(rows),
-                tempo: Vec::with_capacity(rows),
-                duration_secs: Vec::with_capacity(rows),
-                bitrate: Vec::with_capacity(rows),
-                file_size: Vec::with_capacity(rows),
-                flags: Vec::with_capacity(rows),
-                ..TrackTable::default()
-            },
-            strings: StringTable::default(),
+            table: TrackTable::default(),
+            strings: TextIndex::default(),
             folders: FolderTable::default(),
             previous_dir: (String::new(), u32::MAX),
             runs: Default::default(),
         }
     }
+}
 
+impl TrackTableBuilder {
     fn intern(&mut self, column: usize, text: &str) -> u32 {
         let (previous, index) = &mut self.runs[column];
         if *index != u32::MAX && previous.as_str() == text {
@@ -398,7 +426,7 @@ impl TrackTableBuilder {
 
     pub fn finish(self) -> TrackTable {
         TrackTable {
-            strings: self.strings.list,
+            strings: self.strings.texts,
             folder_parent: self.folders.parent,
             folder_name: self.folders.name,
             ..self.table
@@ -408,7 +436,7 @@ impl TrackTableBuilder {
 
 impl TrackTable {
     pub fn new(tracks: &[TrackInfo]) -> Result<Self, String> {
-        let mut builder = TrackTableBuilder::with_capacity(tracks.len());
+        let mut builder = TrackTableBuilder::default();
         for t in tracks {
             if t.waveform_preview.is_some() || t.waveform_bands.is_some() {
                 return Err(format!("track {} carries a row preview, which the track table does not hold", t.id));
@@ -506,7 +534,7 @@ mod tests {
     fn track_table_splits_windows_paths_and_refuses_row_previews() {
         let tracks = [info(1, r"C:\Music\a.flac"), info(2, "C:/Music/b.flac")];
         let table = TrackTable::new(&tracks).unwrap();
-        assert_eq!(table.folder_name.iter().map(|name| &**name).collect::<Vec<_>>(), [r"C:\", r"Music\", "C:/", "Music/"]);
+        assert_eq!(table.folder_name.iter().collect::<Vec<_>>(), [r"C:\", r"Music\", "C:/", "Music/"]);
         assert_eq!(table.folder_parent, [0, 1, 0, 3]);
         assert_eq!((table.dir.as_slice(), table.file.iter().next()), ([1, 3].as_slice(), Some("a.flac")));
         let with_preview = [TrackInfo { waveform_bands: Some(vec![1]), ..info(3, "/m/c.mp3") }];

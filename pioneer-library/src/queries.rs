@@ -473,31 +473,33 @@ pub fn select_track_list_rows(conn: &Connection, with_previews: bool) -> Result<
     Ok(rows)
 }
 
-/// [`select_track_list_rows`] without collecting the rows. The tracks, the analyses and the artwork ids are three
-/// scans in track id order, merged here: that costs a third less than joining them in SQL, where each analysis and
-/// artwork row is a separate lookup.
+/// [`select_track_list_rows`] without collecting the rows; returns how many tracks have an analysis without a row
+/// preview. The tracks, the analyses and the artwork ids are three scans in track id order, merged here: that costs
+/// a third less than joining them in SQL, where each analysis and artwork row is a separate lookup.
 pub fn for_each_track_list_row(
     conn: &Connection,
     with_previews: bool,
     mut visit: impl FnMut(crate::TrackListRowRef<'_>),
-) -> Result<()> {
+) -> Result<usize> {
     let snapshot = conn.unchecked_transaction()?;
     let mut tracks = snapshot.prepare_cached(
         "SELECT id, source_path, title, artist, album, genre, tempo, key, duration_secs, bitrate, file_size
          FROM tracks ORDER BY id",
     )?;
     let mut analyses = snapshot.prepare_cached(if with_previews {
-        "SELECT track_id, bpm, key, stages, row_preview FROM analyses ORDER BY track_id"
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL, row_preview FROM analyses ORDER BY track_id"
     } else {
-        "SELECT track_id, bpm, key, stages FROM analyses ORDER BY track_id"
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL FROM analyses ORDER BY track_id"
     })?;
     let mut artwork = snapshot.prepare_cached("SELECT track_id FROM artwork ORDER BY track_id")?;
     let mut analyses = AnalysisCursor::start(analyses.query([])?, with_previews)?;
     let mut artwork = ArtworkCursor::start(artwork.query([])?)?;
     let mut tracks = tracks.query([])?;
+    let mut missing_previews = 0;
     while let Some(row) = tracks.next()? {
         let id: i64 = row.get(0)?;
         let analysed = analyses.reach(id)?;
+        missing_previews += usize::from(analysed && analyses.preview_missing);
         let tempo = if analysed && analyses.bpm > 0.0 {
             sqlite_round(analyses.bpm * 100.0)
         } else {
@@ -521,7 +523,7 @@ pub fn for_each_track_list_row(
             row_preview: analysed.then_some(analyses.preview.as_deref()).flatten(),
         });
     }
-    Ok(())
+    Ok(missing_previews)
 }
 
 fn text<'r>(row: &'r rusqlite::Row<'_>, column: usize) -> Result<&'r str> {
@@ -539,6 +541,7 @@ struct AnalysisCursor<'s> {
     bpm: f64,
     key: String,
     stages: u8,
+    preview_missing: bool,
     preview: Option<Vec<u8>>,
 }
 
@@ -551,6 +554,7 @@ impl<'s> AnalysisCursor<'s> {
             bpm: 0.0,
             key: String::new(),
             stages: 0,
+            preview_missing: false,
             preview: None,
         };
         cursor.step()?;
@@ -567,8 +571,9 @@ impl<'s> AnalysisCursor<'s> {
         self.key.clear();
         self.key.push_str(text(row, 2)?);
         self.stages = row.get(3)?;
+        self.preview_missing = row.get(4)?;
         if self.with_previews {
-            self.preview = row.get(4)?;
+            self.preview = row.get(5)?;
         }
         Ok(())
     }

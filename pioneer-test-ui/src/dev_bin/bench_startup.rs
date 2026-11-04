@@ -942,12 +942,20 @@ fn soak(dir: &Path, seconds: u64) {
 
 fn rep(dir: &Path, runs: usize) {
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let mut columns: [Vec<f64>; 3] = Default::default();
+    let mut columns: [Vec<f64>; 5] = Default::default();
     let mut bytes = 0;
     for _ in 0..runs {
         let t = Instant::now();
         drop(lib.get_track_list_rows_without_previews().unwrap());
         columns[0].push(ms(t));
+        let t = Instant::now();
+        let mut rows = 0;
+        lib.for_each_track_list_row(|row| rows += usize::from(row.id != 0)).unwrap();
+        assert!(rows > 0);
+        columns[3].push(ms(t));
+        let t = Instant::now();
+        drop(lib.get_all_playlists().unwrap());
+        columns[4].push(ms(t));
         let t = Instant::now();
         let state = track_infos::loaded_state(&lib).unwrap();
         columns[1].push(ms(t));
@@ -962,8 +970,10 @@ fn rep(dir: &Path, runs: usize) {
         format!("{name}={:.1} ({:.1}-{:.1})", sorted[sorted.len() / 2], sorted[0], sorted[sorted.len() - 1])
     };
     println!(
-        "REP runs={runs} bytes={bytes} {} {} {} {}",
+        "REP runs={runs} bytes={bytes} {} {} {} {} {} {}",
         summary("rows_ms", &columns[0]),
+        summary("scan_ms", &columns[3]),
+        summary("playlists_ms", &columns[4]),
         summary("loaded_state_ms", &columns[1]),
         summary("serialize_ms", &columns[2]),
         summary("load_state_ms", &total),

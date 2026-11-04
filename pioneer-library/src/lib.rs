@@ -834,8 +834,9 @@ impl LocalLibrary {
     }
 
     /// The rows of [`get_track_list_rows_without_previews`](Self::get_track_list_rows_without_previews), handed over
-    /// one by one without copying their texts.
-    pub fn for_each_track_list_row(&self, visit: impl FnMut(TrackListRowRef<'_>)) -> Result<()> {
+    /// one by one without copying their texts. Returns how many tracks have an analysis whose row preview is still
+    /// to be filled by [`backfill_row_previews`](Self::backfill_row_previews).
+    pub fn for_each_track_list_row(&self, visit: impl FnMut(TrackListRowRef<'_>)) -> Result<usize> {
         queries::for_each_track_list_row(&self.conn, false, visit)
     }
 
