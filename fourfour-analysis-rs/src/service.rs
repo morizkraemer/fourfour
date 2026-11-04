@@ -121,6 +121,9 @@ fn chunk_slots_with_ceiling(max_threads: usize, mem_fraction: f64, total_mb: f64
     slots.min(max_threads.max(1))
 }
 
+/// Caps how many tracks the analysis works on at once (default: as many as it has threads).
+pub const WORKERS_ENV: &str = "FOURFOUR_ANALYSIS_WORKERS";
+
 #[derive(Clone, Debug)]
 pub struct PoolOptions {
     pub max_threads: usize,
@@ -133,7 +136,7 @@ impl Default for PoolOptions {
     fn default() -> Self {
         PoolOptions {
             max_threads: std::thread::available_parallelism().map_or(1, |n| n.get()),
-            max_workers: None,
+            max_workers: std::env::var(WORKERS_ENV).ok().and_then(|v| v.trim().parse().ok()),
             mem_fraction: 0.5,
             rss_mb_per_worker: 900.0,
         }

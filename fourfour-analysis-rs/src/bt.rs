@@ -3,7 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -125,6 +125,7 @@ struct ChunkExecutor {
     ready: Condvar,
     wanted: AtomicUsize,
     running: AtomicUsize,
+    idle_ns: AtomicU64,
 }
 
 #[derive(Default)]
@@ -160,7 +161,9 @@ impl ChunkExecutor {
                 }
                 return Some((track, i));
             }
+            let waited = Instant::now();
             queue = self.ready.wait_timeout(queue, PAUSE_POLL).unwrap().0;
+            self.idle_ns.fetch_add(waited.elapsed().as_nanos() as u64, Ordering::Relaxed);
         }
     }
 
@@ -277,6 +280,8 @@ pub struct BeatStatus {
     pub chunks_accelerated: usize,
     pub chunks_rten: usize,
     pub chunks_silent: usize,
+    /// Seconds the beat-model threads, added up, waited for a chunk to run.
+    pub chunk_idle_s: f64,
 }
 
 pub struct BeatResult {
@@ -379,6 +384,7 @@ impl BeatEngine {
             chunks_accelerated: self.beat.chunks_accelerated.load(Ordering::Relaxed),
             chunks_rten: self.beat.chunks_rten.load(Ordering::Relaxed),
             chunks_silent: self.beat.chunks_silent.load(Ordering::Relaxed),
+            chunk_idle_s: self.chunks.idle_ns.load(Ordering::Relaxed) as f64 / 1e9,
         }
     }
 
