@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invokeMock = vi.hoisted(() => vi.fn());
@@ -54,5 +56,18 @@ describe('load_state sent by index.html', () => {
 
     expect(invokeMock).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenCalledWith('load_state');
+  });
+
+  it('decodes a binary answer into the tracks and playlists of the JSON answer', async () => {
+    const bytes = readFileSync(resolve(process.cwd(), 'src/services/fixtures/state-edge.bin'));
+    const json = JSON.parse(readFileSync(resolve(process.cwd(), 'src/services/fixtures/state-edge.json'), 'utf8'));
+    invokeMock.mockResolvedValue(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const { loadState } = await freshTauriService();
+    const { decodeTrackTable } = await import('./track-table.ts');
+
+    const state = await loadState();
+
+    expect(state.tracks).toStrictEqual(decodeTrackTable(json.tracks));
+    expect(state.playlists).toStrictEqual(json.playlists);
   });
 });

@@ -13,6 +13,7 @@ const PAYLOADS = (process.env.FF_PERF_STARTUP ?? '')
   });
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 3);
 const REPORT = process.env.FF_PERF_STARTUP_OUT;
+const RAW = process.env.FF_PERF_STARTUP_RAW;
 const BLOCK_FONTS = !!process.env.FF_PERF_BLOCK_FONTS;
 const NO_SNAPSHOT = !!process.env.FF_PERF_NO_SNAPSHOT;
 const PROFILE_OUT = process.env.FF_PERF_STARTUP_PROFILE;
@@ -284,19 +285,25 @@ test.describe('startup at scale', () => {
 
   test('boot to first row and interactive', async ({ browser }) => {
     const report: Record<string, Record<string, number>> = {};
-    for (const { tracks, path, previews, backendMs } of PAYLOADS) {
-      const { server, url } = await servePayload(readFileSync(path), previewsOf(previews), path.endsWith('.bin'));
-      const first: Boot[] = [];
-      const cold: Boot[] = [];
-      const warm: Boot[] = [];
-      for (let run = 0; run < RUNS; run++) {
+    const served = await Promise.all(
+      PAYLOADS.map(async (payload) => ({
+        ...payload,
+        label: `${payload.tracks}${payload.path.endsWith('.bin') ? ' bin' : ''}`,
+        ...(await servePayload(readFileSync(payload.path), previewsOf(payload.previews), payload.path.endsWith('.bin'))),
+        first: [] as Boot[],
+        cold: [] as Boot[],
+        warm: [] as Boot[],
+      })),
+    );
+    for (let run = 0; run < RUNS; run++) {
+      for (const { label, url, backendMs, first, cold, warm } of served) {
         const seed = await newContext(browser, url, backendMs);
         const seedPage = await seed.newPage();
         const profilingFirst = PROFILE_OUT && PROFILE_FIRST && run === RUNS - 1 ? await startProfile(seedPage) : null;
         const seedBase = await mainThreadCpuMs(seedPage);
         await seedPage.goto('/');
         first.push(await bootMetrics(seedPage, seedBase));
-        if (profilingFirst) await stopProfile(profilingFirst, `${PROFILE_OUT}-${tracks}-first.cpuprofile`, seedPage);
+        if (profilingFirst) await stopProfile(profilingFirst, `${PROFILE_OUT}-${label}-first.cpuprofile`, seedPage);
         await seedPage.close();
         const saved = await seed.storageState();
         await seed.close();
@@ -312,15 +319,18 @@ test.describe('startup at scale', () => {
         if (tracing) await browser.startTracing(page, { categories: ['devtools.timeline', 'v8', 'v8.execute', 'blink.user_timing', 'disabled-by-default-devtools.timeline'] });
         await page.reload();
         warm.push(await bootMetrics(page, warmBase));
-        if (tracing) writeFileSync(`${TRACE_OUT}-${tracks}.json`, await browser.stopTracing());
-        if (SNAPSHOT_OUT && run === RUNS - 1) await writeFirstScreen(page, `${SNAPSHOT_OUT}-${tracks}`);
-        if (profiling) await stopProfile(profiling, `${PROFILE_OUT}-${tracks}.cpuprofile`, page);
+        if (tracing) writeFileSync(`${TRACE_OUT}-${label}.json`, await browser.stopTracing());
+        if (SNAPSHOT_OUT && run === RUNS - 1) await writeFirstScreen(page, `${SNAPSHOT_OUT}-${label}`);
+        if (profiling) await stopProfile(profiling, `${PROFILE_OUT}-${label}.cpuprofile`, page);
         await context.close();
       }
+    }
+    if (RAW) writeFileSync(RAW, JSON.stringify(Object.fromEntries(served.map(({ label, first, cold, warm }) => [label, { first, cold, warm }]))));
+    for (const { label, server, first, cold, warm } of served) {
       server.close();
-      report[`${tracks} first launch`] = summarise(first);
-      report[`${tracks} cold`] = summarise(cold);
-      report[`${tracks} warm`] = summarise(warm);
+      report[`${label} first launch`] = summarise(first);
+      report[`${label} cold`] = summarise(cold);
+      report[`${label} warm`] = summarise(warm);
     }
     console.log(JSON.stringify(report, null, 2));
     if (REPORT) writeFileSync(REPORT, JSON.stringify(report, null, 2));

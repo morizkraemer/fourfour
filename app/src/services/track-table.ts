@@ -153,6 +153,10 @@ export function decodeStateBytes(buffer: ArrayBuffer): { tracks: TrackInfo[]; pl
     const parent = folder_parent[i];
     paths[i] = parent === 0 ? folder_name[i] : paths[parent - 1] + folder_name[i];
   }
+  const hasArtwork = TRACK_FLAG.artwork;
+  const hasCues = TRACK_FLAG.cues;
+  const hasAnalysis = TRACK_FLAG.analysis;
+  const isPending = TRACK_FLAG.pending;
   const tracks: TrackInfo[] = new Array(count);
   for (let i = 0; i < count; i++) {
     const f = flags[i];
@@ -168,10 +172,10 @@ export function decodeStateBytes(buffer: ArrayBuffer): { tracks: TrackInfo[]; pl
       duration_secs: duration_secs[i],
       bitrate: bitrate[i],
       file_size: file_size[i],
-      has_artwork: (f & TRACK_FLAG.artwork) !== 0,
-      has_cues: (f & TRACK_FLAG.cues) !== 0,
-      has_analysis: (f & TRACK_FLAG.analysis) !== 0,
-      analysis_pending: (f & TRACK_FLAG.pending) !== 0,
+      has_artwork: (f & hasArtwork) !== 0,
+      has_cues: (f & hasCues) !== 0,
+      has_analysis: (f & hasAnalysis) !== 0,
+      analysis_pending: (f & isPending) !== 0,
     };
   }
   for (let i = 0; i < ratings.length; i += 2) tracks[ratings[i]].rating = ratings[i + 1];
