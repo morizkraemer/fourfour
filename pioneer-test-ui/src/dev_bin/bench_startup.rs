@@ -180,7 +180,7 @@ fn run(dir: &Path) {
     let json = if with_previews {
         serde_json::to_string(&serde_json::json!({ "tracks": infos, "playlists": playlists })).unwrap()
     } else {
-        serde_json::to_string(&LoadedState { tracks: infos, playlists }).unwrap()
+        serde_json::to_string(&LoadedState { tracks: dto::TrackTable::new(&infos).unwrap(), playlists }).unwrap()
     };
     let json_ms = ms(t);
 
@@ -890,7 +890,7 @@ fn soak(dir: &Path, seconds: u64) {
         if part("state") {
             let infos = track_infos::list_track_infos(&lib).unwrap();
             let state = LoadedState {
-                tracks: infos,
+                tracks: dto::TrackTable::new(&infos).unwrap(),
                 playlists: playlists
                     .iter()
                     .map(|pl| PlaylistInput { id: pl.id, name: pl.name.clone(), track_ids: pl.track_ids.clone(), parent_id: pl.parent_id, is_folder: pl.is_folder })
@@ -940,11 +940,52 @@ fn soak(dir: &Path, seconds: u64) {
     );
 }
 
+fn rep(dir: &Path, runs: usize) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut columns: [Vec<f64>; 5] = Default::default();
+    let mut bytes = 0;
+    for _ in 0..runs {
+        let t = Instant::now();
+        drop(lib.get_track_list_rows_without_previews().unwrap());
+        columns[0].push(ms(t));
+        let t = Instant::now();
+        let mut rows = 0;
+        lib.for_each_track_list_row(i64::MIN..=i64::MAX, |row| rows += usize::from(row.id != 0)).unwrap();
+        assert!(rows > 0);
+        columns[3].push(ms(t));
+        let t = Instant::now();
+        drop(lib.get_all_playlists().unwrap());
+        columns[4].push(ms(t));
+        let t = Instant::now();
+        let state = track_infos::loaded_state(&lib).unwrap();
+        columns[1].push(ms(t));
+        let t = Instant::now();
+        bytes = serde_json::to_vec(&state).unwrap().len();
+        columns[2].push(ms(t));
+    }
+    let total: Vec<f64> = columns[1].iter().zip(&columns[2]).map(|(a, b)| a + b).collect();
+    let summary = |name: &str, v: &[f64]| {
+        let mut sorted = v.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        format!("{name}={:.1} ({:.1}-{:.1})", sorted[sorted.len() / 2], sorted[0], sorted[sorted.len() - 1])
+    };
+    println!(
+        "REP runs={runs} bytes={bytes} {} {} {} {} {} {}",
+        summary("rows_ms", &columns[0]),
+        summary("scan_ms", &columns[3]),
+        summary("playlists_ms", &columns[4]),
+        summary("loaded_state_ms", &columns[1]),
+        summary("serialize_ms", &columns[2]),
+        summary("load_state_ms", &total),
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
+        Some("rep") => rep(Path::new(&args[2]), args.get(3).map_or(15, |n| n.parse().unwrap())),
         Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
         Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
@@ -961,7 +1002,7 @@ fn main() {
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }

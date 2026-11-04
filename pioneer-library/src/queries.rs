@@ -449,40 +449,180 @@ pub fn select_all_tracks_with_flags(
 }
 
 /// Every track as the track list shows it, with its artwork and analysis flags, stored analysis stages and row
-/// preview: one query.
+/// preview.
 pub fn select_track_list_rows(conn: &Connection, with_previews: bool) -> Result<Vec<crate::TrackListRow>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT t.id, t.source_path, t.title, t.artist, t.album, t.genre,
-                CASE WHEN a.bpm > 0 THEN CAST(ROUND(a.bpm * 100) AS INTEGER) ELSE t.tempo END,
-                COALESCE(NULLIF(a.key, ''), t.key),
-                t.duration_secs, t.bitrate, t.file_size,
-                (art.track_id IS NOT NULL),
-                a.stages,
-                CASE WHEN ?1 THEN a.row_preview END
-         FROM tracks t
-         LEFT JOIN artwork art ON art.track_id = t.id
-         LEFT JOIN analyses a ON a.track_id = t.id
-         ORDER BY t.id",
+    let mut rows = Vec::new();
+    for_each_track_list_row(conn, i64::MIN..=i64::MAX, with_previews, |row| {
+        rows.push(crate::TrackListRow {
+            id: row.id,
+            source_path: row.source_path.to_owned(),
+            title: row.title.to_owned(),
+            artist: row.artist.to_owned(),
+            album: row.album.to_owned(),
+            genre: row.genre.to_owned(),
+            tempo: row.tempo,
+            key: row.key.to_owned(),
+            duration_secs: row.duration_secs,
+            bitrate: row.bitrate,
+            file_size: row.file_size,
+            has_artwork: row.has_artwork,
+            analysis_stages: row.analysis_stages,
+            row_preview: row.row_preview.map(|blob| crate::RowPreview::from_blob(blob.to_vec())),
+        });
+    })?;
+    Ok(rows)
+}
+
+/// [`select_track_list_rows`] without collecting the rows; returns how many tracks have an analysis without a row
+/// preview. The tracks, the analyses and the artwork ids are three scans in track id order, merged here: that costs
+/// a third less than joining them in SQL, where each analysis and artwork row is a separate lookup.
+pub fn for_each_track_list_row(
+    conn: &Connection,
+    ids: std::ops::RangeInclusive<i64>,
+    with_previews: bool,
+    mut visit: impl FnMut(crate::TrackListRowRef<'_>),
+) -> Result<usize> {
+    let snapshot = conn.unchecked_transaction()?;
+    let mut tracks = snapshot.prepare_cached(
+        "SELECT id, source_path, title, artist, album, genre, tempo, key, duration_secs, bitrate, file_size
+         FROM tracks WHERE id BETWEEN ?1 AND ?2 ORDER BY id",
     )?;
-    let rows = stmt.query_map([with_previews], |row| {
-        Ok(crate::TrackListRow {
-            id: row.get::<_, i64>(0)? as u32,
-            source_path: row.get(1)?,
-            title: row.get(2)?,
-            artist: row.get(3)?,
-            album: row.get(4)?,
-            genre: row.get(5)?,
-            tempo: row.get(6)?,
-            key: row.get(7)?,
+    let mut analyses = snapshot.prepare_cached(if with_previews {
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL, row_preview
+         FROM analyses WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id"
+    } else {
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL
+         FROM analyses WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id"
+    })?;
+    let mut artwork =
+        snapshot.prepare_cached("SELECT track_id FROM artwork WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id")?;
+    let bounds = [*ids.start(), *ids.end()];
+    let mut analyses = AnalysisCursor::start(analyses.query(bounds)?, with_previews)?;
+    let mut artwork = ArtworkCursor::start(artwork.query(bounds)?)?;
+    let mut tracks = tracks.query(bounds)?;
+    let mut missing_previews = 0;
+    while let Some(row) = tracks.next()? {
+        let id: i64 = row.get(0)?;
+        let analysed = analyses.reach(id)?;
+        missing_previews += usize::from(analysed && analyses.preview_missing);
+        let tempo = if analysed && analyses.bpm > 0.0 {
+            sqlite_round(analyses.bpm * 100.0)
+        } else {
+            row.get(6)?
+        };
+        let key = if analysed && !analyses.key.is_empty() { analyses.key.as_str() } else { text(row, 7)? };
+        visit(crate::TrackListRowRef {
+            id: id as u32,
+            source_path: text(row, 1)?,
+            title: text(row, 2)?,
+            artist: text(row, 3)?,
+            album: text(row, 4)?,
+            genre: text(row, 5)?,
+            tempo: u32::try_from(tempo)?,
+            key,
             duration_secs: row.get(8)?,
             bitrate: row.get(9)?,
             file_size: row.get::<_, i64>(10)? as u64,
-            has_artwork: row.get(11)?,
-            analysis_stages: row.get(12)?,
-            row_preview: row.get::<_, Option<Vec<u8>>>(13)?.map(crate::RowPreview::from_blob),
-        })
-    })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+            has_artwork: artwork.reach(id)?,
+            analysis_stages: analysed.then_some(analyses.stages),
+            row_preview: analysed.then_some(analyses.preview.as_deref()).flatten(),
+        });
+    }
+    Ok(missing_previews)
+}
+
+pub fn track_id_bounds(conn: &Connection) -> Result<Option<(i64, i64)>> {
+    let (first, last): (Option<i64>, Option<i64>) =
+        conn.query_row("SELECT MIN(id), MAX(id) FROM tracks", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(first.zip(last))
+}
+
+fn text<'r>(row: &'r rusqlite::Row<'_>, column: usize) -> Result<&'r str> {
+    Ok(row.get_ref(column)?.as_str()?)
+}
+
+fn sqlite_round(x: f64) -> i64 {
+    (x + 0.5) as i64
+}
+
+struct AnalysisCursor<'s> {
+    rows: rusqlite::Rows<'s>,
+    with_previews: bool,
+    track_id: i64,
+    bpm: f64,
+    key: String,
+    stages: u8,
+    preview_missing: bool,
+    preview: Option<Vec<u8>>,
+}
+
+impl<'s> AnalysisCursor<'s> {
+    fn start(rows: rusqlite::Rows<'s>, with_previews: bool) -> Result<Self> {
+        let mut cursor = AnalysisCursor {
+            rows,
+            with_previews,
+            track_id: i64::MIN,
+            bpm: 0.0,
+            key: String::new(),
+            stages: 0,
+            preview_missing: false,
+            preview: None,
+        };
+        cursor.step()?;
+        Ok(cursor)
+    }
+
+    fn step(&mut self) -> Result<()> {
+        let Some(row) = self.rows.next()? else {
+            self.track_id = i64::MAX;
+            return Ok(());
+        };
+        self.track_id = row.get(0)?;
+        self.bpm = row.get(1)?;
+        self.key.clear();
+        self.key.push_str(text(row, 2)?);
+        self.stages = row.get(3)?;
+        self.preview_missing = row.get(4)?;
+        if self.with_previews {
+            self.preview = row.get(5)?;
+        }
+        Ok(())
+    }
+
+    fn reach(&mut self, track_id: i64) -> Result<bool> {
+        while self.track_id < track_id {
+            self.step()?;
+        }
+        Ok(self.track_id == track_id)
+    }
+}
+
+struct ArtworkCursor<'s> {
+    rows: rusqlite::Rows<'s>,
+    track_id: i64,
+}
+
+impl<'s> ArtworkCursor<'s> {
+    fn start(rows: rusqlite::Rows<'s>) -> Result<Self> {
+        let mut cursor = ArtworkCursor { rows, track_id: i64::MIN };
+        cursor.step()?;
+        Ok(cursor)
+    }
+
+    fn step(&mut self) -> Result<()> {
+        self.track_id = match self.rows.next()? {
+            Some(row) => row.get(0)?,
+            None => i64::MAX,
+        };
+        Ok(())
+    }
+
+    fn reach(&mut self, track_id: i64) -> Result<bool> {
+        while self.track_id < track_id {
+            self.step()?;
+        }
+        Ok(self.track_id == track_id)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -609,13 +749,20 @@ pub fn select_all_playlists(conn: &Connection) -> Result<Vec<Playlist>> {
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
+    let mut members = conn
+        .prepare_cached("SELECT playlist_id, position, track_id FROM playlist_tracks")?
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    members.sort_unstable();
+
     let mut playlists = Vec::with_capacity(playlist_rows.len());
     for (id, name, parent_id, is_folder) in playlist_rows {
-        let track_ids = select_playlist_track_ids(conn, id)?;
+        let start = members.partition_point(|&(playlist_id, ..)| playlist_id < id);
+        let end = members.partition_point(|&(playlist_id, ..)| playlist_id <= id);
         playlists.push(Playlist {
             id: id as u32,
             name,
-            track_ids: track_ids.into_iter().map(|id| id as u32).collect(),
+            track_ids: members[start..end].iter().map(|&(.., track_id)| track_id as u32).collect(),
             parent_id: parent_id as u32,
             is_folder,
         });

@@ -1597,3 +1597,59 @@ No Rust or stored-data change. `load_state` is the same command with the same ar
 - `bench_startup run` now prints `table_build_ms`, `table_json_ms` and `table_json_bytes`: at 10k the column table costs 15 ms to build and 6 ms to serialise of the 28 ms JSON stage; the rest is the playlists (60, up to 800 ids each). Callgrind of the run (`valgrind --tool=callgrind`, `perf` is blocked here): `FolderTable::folder` is half of `TrackTable::new` (about 8,600 distinct folders in the 10k fixture, 0.86 per track; a real library has one folder per album, so a fixture-driven fix would not move a real library), the string interning 30%. `get_track_list_rows` (56-64 ms warm, pioneer-library, fenced) is the largest part of `load_state`; its 120,000 `String` columns (113,951 allocations in one run) and `sqlite3_step` are what it spends.
 - `perf-q50.spec.ts` with `FF_PERF_STATE` (what `perf.sh --size` passes) failed since R22: the dump is a column table and the mock expects `TrackInfo[]`, so the page showed 3 tracks and `loadTrack` read a missing row. The spec decodes the table now (`decodeTrackTable`); `perf.sh --size 10k` runs through again.
 - Not done, by lane: the detail meter (usb-writer) and the library queries (pioneer-library).
+
+## R111 rows query (2026-11-04, `r111-rows-query`)
+
+Branch `r111-rows-query` from `ov-1028` (r109 merge). Linux `dev` box (16 cores), release `bench_startup`, load average 13-18 for the final pairs (30-65 earlier in the work; other workers). Datasets are copies of the `ff-fixture` 10k and 50k libraries (`library.db`, `track-labels.json`, `anlz` linked), plus a realistic-folder variant of each made by `benchmark/scripts/r111-folder-variant.py` (300 and 500 album folders, 5 per artist; the fixture has about 0.86 folders per track: 8,620 at 10k and 43,200 at 50k). `bench_startup rep <dir> <runs>` (new) repeats the whole backend `load_state` (state build plus JSON) in one process and prints median (min-max) per phase; `benchmark/scripts/r111-load-state.sh pairs` runs base and new binaries alternately and `r111-summarize.py` reduces the lines.
+
+### Where the time went (callgrind, 10k fixture, instructions of one warm pass)
+
+- Rows query 218 M Ir on the first call of a process (the one `load_state` makes; 111 M when repeated, malloc reuses the memory): the query itself (`sqlite3_step` 144 M over two passes, `sqlite3VdbeExec` 73 M of it) with rusqlite's three API calls per text column (`sqlite3_column_type`, `_text`, `_bytes`, about 550 Ir per column, 13 columns per row), and `Row::get::<String>` (six `String` per row: allocation, copy, UTF-8 check; 120,000 allocations). The two `LEFT JOIN` lookups (artwork index, analysis rowid) and the `CASE`/`ROUND`/`COALESCE` columns cost 29 M more than three plain scans merged in Rust (stand-alone copy of the query, startup removed: joined 102 M, tracks scan 60 M, analyses scan 12 M, artwork ids 1 M).
+- `TrackTable::new` 74 M: `FolderTable::folder` 36 M (8,600 folders in the fixture) and SipHash over every artist, album, genre, key and folder string 29 M, plus the 60,000 `String` of `TrackListRow` and `TrackInfo` that exist only to be read once.
+- Playlists 34 M: one query plus one `ORDER BY position` sort per playlist (77 playlists, 11,559 rows).
+- `backfill_row_previews` scanned all analyses once more before the rows were read (3.7 ms at 10k, 19 ms at 50k) to find the NULL previews, and `track_count` was another table walk (1.3 ms at 10k).
+
+### Changed (payload bytes identical, no schema or index change)
+
+- `pioneer-library`: `for_each_track_list_row` (borrowed texts, no `String` per column) reads `tracks`, `analyses` and the `artwork` ids as three scans in id order and merges them in Rust (tempo, key and stage bits computed the way the SQL did; `sqlite_round` is SQLite's `ROUND`). `get_track_list_rows*` are built on it, so there is one definition of a list row. The scans run in one read transaction. The scan also counts analyses with a missing row preview, so `load_state` calls `backfill_row_previews` only when there is something to fill instead of scanning for it first. `get_all_playlists` reads `playlist_tracks` once and groups it in memory (same order: position, then track id) instead of one sorted query per playlist.
+- `pioneer-test-ui`: `loaded_state` builds the column table straight from the borrowed rows (`TrackTableBuilder`): titles, file names, artists, albums, genres, keys and folders live in arenas with an open-addressing index, so a text is allocated once when it is new and never per row. `LoadedState` holds the table. Same strings table order (first seen, column by column, colours last in each row), same folder order.
+- Large libraries (track ids spanning at least 4,000) are scanned in up to four id ranges on separate threads (`TrackListScanner`: a read-only connection each, the first range on the library's own connection); the tables are joined in id order (`TrackTableBuilder::append`), which gives the table one scan gives. Playlists and the labels cache are read concurrently before that, as before.
+
+### Before / after (median of the per-process medians over interleaved pairs; range of those medians in brackets; `load_state` = state build plus JSON, warm)
+
+| Library | Pairs x runs | `load_state` base | `load_state` new | Rows query alone base / new | Table build, base | JSON, base / new |
+|---|---|---:|---:|---:|---:|---:|
+| 10k, fixture folders | 5 x 15 | 83.7 ms (81.5-84.3) | 44.1 ms (40.8-48.3) | 50.2 / 38.9 | 14.0 | 8.2 / 6.7 |
+| 10k, 295 folders | 5 x 15 | 74.8 ms (72.9-77.7) | 37.0 ms (35.9-41.6) | 49.1 / 38.4 | 7.6 | 7.3 / 5.9 |
+| 50k, fixture folders | 4 x 8 | 466.1 ms (405.6-521.5) | 194.4 ms (161.1-295.4) | 284.1 / 224.2 | 81.2 | 46.0 / 39.9 |
+| 50k, 500 folders | 4 x 8 | 417.4 ms (341.3-504.4) | 154.8 ms (148.7-280.6) | 314.8 / 229.2 | 41.9 | 30.3 / 31.7 |
+
+Fastest single runs (base / new): 10k fixture 79.3 / 35.1 ms, 10k realistic 68.7 / 27.9, 50k fixture 389.2 / 149.1, 50k realistic 320.6 / 120.3. Box load was 13-20 during these pairs, with spikes from other workers (slowest single runs up to 1.9 s at 50k), which is why the 50k ranges are wide. An earlier set of pairs on the commit before the hash-function cleanup (load 13-18) gave 84.5 / 46.2, 80.1 / 51.1, 455.9 / 296.0 and 372.8 / 208.4 ms for the four rows: the same direction, the new side 40-60 ms slower at 50k there because of less idle CPU for the scan threads. In the new code the table is built while the rows are read, so "table build, base" has no new counterpart (the JSON column of the base is its `serialize_ms` minus the table build). The scan threads need idle cores: with the box at load 30 and above they gain much less. Without threads (commit `aa1d569`) the same code ran at 54-64 ms (10k fixture) and 223-229 ms (50k realistic).
+
+The 60 ms target for 10k is met (44 and 37 ms median, fastest 35 and 28). What is left at 50k (realistic): rows scan 138-161 ms of CPU (about 2.8 us per row, split over the threads), playlists 9 ms, JSON 30 ms, joining the range tables about 10 ms.
+
+### Identity
+
+`bench_startup dump` writes the `load_state` response as `serde_json::to_vec(&loaded_state)`; sha256 of the base build (`f877cb0`, old code plus the `rep` command) and the final build:
+
+| Dataset | Bytes | sha256 (base and new equal) |
+|---|---:|---|
+| 10k fixture | 1,699,963 | `38fe2965bc4aa7d3218fbb616669960f466e297f282bac861d8dd0dcd2249eb0` |
+| 10k, 295 folders | 1,495,634 | `1817f860d6c7a7137ecb36b3a67899a2091bb0adfd61461ff93ea8e9614231cf` |
+| 50k fixture | 8,416,233 | `297cb41d20496dc9c9a74e93c71f3e4f248c6fca76e0a855225339bdd41c0dc9` |
+| 50k, 500 folders | 7,315,166 | `6b7ceabd09beffdf34a64ba8a773a3b04a6b39061b34b74b5969f42bda448b81` |
+| 10k with edge data | | `7476e12bb6619ef408e7f00d97ec7e6231b5f9576442eb0d6346d661138f2814` |
+
+The edge copy of the 10k library has empty first and every n-th artist, album, genre, key and title, bare, backslash and `C:\` paths, quotes and non-ASCII in titles, analyses with bpm 0, an empty key, bpm 127.995 and 128.005 (rounding), stages 3, 3% of the analyses without a row preview and a fifth of the covers deleted; the base ran on one copy and the new build on another (so it also filled the previews on the new path: the `analyses` table of both ends with the same sha256, `8e90e3c3...`). `library.db` and `track-labels.json` of the 10k and 50k copies have the same sha256 as the untouched fixtures after dozens of runs of both builds. The empty-string case found a bug in the first version of the builder (the per-column run caches started at index 0, so an empty first album was read as the first artist); the fixtures never have it, `loaded_state_sends_tracks_as_the_table_the_app_decodes` and the new tests do.
+
+New tests: `dto::appended_tables_equal_the_table_of_all_rows` (joined tables equal one table at several cuts, shared strings across columns, ratings and colours), `track_infos::scanning_in_ranges_gives_the_table_of_one_scan` (1, 2, 3 and 7 id ranges on a library file give the JSON of one scan, ratings and colours included) and `id_ranges_cover_every_id_once`.
+
+### Schema and the r84 branch
+
+No schema or index change is needed and none would help much: the scan is CPU-bound in the per-column API (about 550 Ir per column), not in page reads (`mmap_size` changed nothing measurable and a larger `cache_size` was no better; a covering index would shrink 900 pages to about 600 at 10k and leave the 13 column reads). `r84-path-keys` (schema v8) does not change this: it adds four key columns to the end of `tracks` and replaces the `artwork` blob with a cover hash, which keeps the `artwork` id scan as it is. It touches `bench_startup.rs` as this branch does (a plain textual merge), not `queries.rs` or `lib.rs`.
+
+### Looked at, not changed
+
+- Raw sqlite3 calls through `rusqlite::ffi` would cut the three API calls per text column to one, but rusqlite 0.33 does not expose the statement handle, so it means preparing and stepping statements by hand with `unsafe`; not worth the risk for another 20-25% of the scan.
+- The labels cache is needed before the first row (colours are interned in row order), so it cannot overlap with the scan; reading playlists on another connection while the first range scans would save about 9 ms at 50k.
+- Ranges are cut by id value, so a library with many deleted ids gets uneven ranges (the result is still the same table). Each range sees its own read snapshot: a track imported while `load_state` runs can be missing from one range and present in the next (the old single query was one snapshot).
