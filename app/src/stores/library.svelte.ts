@@ -112,20 +112,28 @@ function recordTrackListBump(previous: object, next: object, ids: number[]) {
  * bumped in between (`bumpLibraryTracks`); `null` when it was replaced or the change is too old to tell.
  */
 export function libraryRowsChangedSince(earlier: object): object[] | null {
+  const positions = libraryPositionsChangedSince(earlier);
+  if (!positions) return null;
+  const current = untrack(() => trackList);
+  return positions.map((position) => current[position]);
+}
+
+/** Like `libraryRowsChangedSince`, as positions in `library.tracks` (in the order the bumps touched them). */
+export function libraryPositionsChangedSince(earlier: object): number[] | null {
   const current = untrack(() => trackList);
   if (earlier === current) return [];
   const from = listVersions.get(earlier);
   const to = listVersions.get(current);
   if (from === undefined || to === undefined || bumpLog.length === 0 || bumpLog[0].version > from + 1) return null;
-  const rows: object[] = [];
+  const positions: number[] = [];
   for (const entry of bumpLog) {
     if (entry.version <= from || entry.version > to) continue;
     for (const id of entry.ids) {
-      const row = current[trackIndexById(id)];
-      if (row?.id === id) rows.push(row);
+      const position = trackIndexById(id);
+      if (current[position]?.id === id) positions.push(position);
     }
   }
-  return rows;
+  return positions;
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -597,10 +605,56 @@ function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] 
   return haystacks;
 }
 
-let lastFilter: { tracks: object; query: string; terms: string[]; indices: number[]; result: unknown[] } | null = null;
+interface FilterEntry {
+  terms: string[];
+  indices: number[];
+  result: unknown[];
+}
 
-function narrowsLastFilter(terms: string[]): boolean {
-  return !!lastFilter && lastFilter.terms.every((old) => terms.some((term) => term.includes(old)));
+const FILTER_HISTORY = 16;
+const filterHistory = new WeakMap<object, Map<string, FilterEntry>>();
+const filterSources = new WeakMap<object, { source: object; positions: number[] }>();
+
+/**
+ * Where the rows of a `filterTracks` result of `library.tracks` sit in it (ascending), or `'all'` for `library.tracks`
+ * itself; `null` for any other list, and for a result of a list that was replaced since.
+ */
+export function libraryPositionsOf(rows: readonly unknown[]): readonly number[] | 'all' | null {
+  const current = untrack(() => trackList);
+  if (rows === current) return 'all';
+  const found = filterSources.get(rows);
+  return found && found.source === current ? found.positions : null;
+}
+
+function narrows(older: string[], terms: string[]): boolean {
+  return older.every((old) => terms.some((term) => term.includes(old)));
+}
+
+function matchingIndices(haystacks: string[], terms: string[], candidates: number[] | null): number[] {
+  const indices: number[] = [];
+  const first = terms[0];
+  if (terms.length === 1) {
+    if (candidates) {
+      for (let c = 0; c < candidates.length; c++) {
+        const i = candidates[c];
+        if (haystacks[i].includes(first)) indices.push(i);
+      }
+    } else {
+      for (let i = 0; i < haystacks.length; i++) if (haystacks[i].includes(first)) indices.push(i);
+    }
+    return indices;
+  }
+  const matches = (i: number) => {
+    const haystack = haystacks[i];
+    for (let t = 0; t < terms.length; t++) if (!haystack.includes(terms[t])) return false;
+    return true;
+  };
+  if (candidates) {
+    for (let c = 0; c < candidates.length; c++) if (matches(candidates[c])) indices.push(candidates[c]);
+  } else {
+    for (let i = 0; i < haystacks.length; i++) if (matches(i)) indices.push(i);
+  }
+  return indices;
 }
 
 /** Match tracks against a whitespace-separated query (all terms must match). */
@@ -610,21 +664,24 @@ export function filterTracks<T extends Record<string, unknown>>(
 ): T[] {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return tracks;
-  if (lastFilter && lastFilter.tracks === tracks && lastFilter.query === trimmed) {
-    return lastFilter.result as T[];
+  let history = filterHistory.get(tracks);
+  const known = history?.get(trimmed);
+  if (known) return known.result as T[];
+  if (!history) {
+    history = new Map();
+    filterHistory.set(tracks, history);
   }
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const haystacks = haystacksFor(tracks);
-  const candidates = lastFilter && lastFilter.tracks === tracks && narrowsLastFilter(terms) ? lastFilter.indices : null;
-  const indices: number[] = [];
-  const matches = (i: number) => terms.every((term) => haystacks[i].includes(term));
-  if (candidates) {
-    for (const i of candidates) if (matches(i)) indices.push(i);
-  } else {
-    for (let i = 0; i < haystacks.length; i++) if (matches(i)) indices.push(i);
+  let candidates: number[] | null = null;
+  for (const entry of history.values()) {
+    if (narrows(entry.terms, terms) && (!candidates || entry.indices.length < candidates.length)) candidates = entry.indices;
   }
+  const indices = matchingIndices(haystacks, terms, candidates);
   const result = indices.length === tracks.length ? tracks : indices.map((i) => tracks[i]);
-  lastFilter = { tracks, query: trimmed, terms, indices, result };
+  history.set(trimmed, { terms, indices, result });
+  if (history.size > FILTER_HISTORY) history.delete(history.keys().next().value!);
+  if (result !== tracks && tracks === untrack(() => trackList)) filterSources.set(result, { source: tracks, positions: indices });
   return result;
 }
 
