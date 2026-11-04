@@ -5,8 +5,9 @@
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
-  import ExpandedPlayer from './ExpandedPlayer.svelte';
   import PlayerTempo from './PlayerTempo.svelte';
+  import LazyMount from '../lib/LazyMount.svelte';
+  import { expandedPlayer } from '../lib/lazy-views.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { cueMarkers } from '../lib/cues.ts';
   import { dnd } from '../stores/dnd.svelte.ts';
@@ -53,7 +54,7 @@
       onCommit={commitPlayerHeight}
       onReset={resetPlayerHeight}
     />
-    <ExpandedPlayer />
+    <LazyMount view={expandedPlayer} />
   {:else}
   <PlayerCompact
     cover={player.cover}

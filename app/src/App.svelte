@@ -10,24 +10,17 @@
   // Side-effect import: loads tokens.css + base.css globally
   import '$ds';
   import { Dialog, Button, ResizeHandle } from '$ds';
-  import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
   // Modules
   import Sidebar        from './modules/Sidebar.svelte';
   import GlobalHeader   from './modules/GlobalHeader.svelte';
   import TrackTable     from './modules/TrackTable.svelte';
-  import Detail         from './modules/Detail.svelte';
   import Player         from './modules/Player.svelte';
   import AppStatusBar   from './modules/AppStatusBar.svelte';
-  import Settings       from './modules/Settings.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
-  import CommandPalette from './modules/CommandPalette.svelte';
-  import StickSyncDialog from './modules/StickSyncDialog.svelte';
-  import StickView from './modules/StickView.svelte';
-  import StickDropTip from './modules/StickDropTip.svelte';
-  import LibraryHealthDialog from './modules/LibraryHealthDialog.svelte';
-  import ImportDuplicatesDialog from './modules/ImportDuplicatesDialog.svelte';
-  import FileBlockedTip from './modules/FileBlockedTip.svelte';
+  import LazyMount from './lib/LazyMount.svelte';
+  import { appDialogs, inspector, stickView } from './lib/lazy-views.ts';
+  import { firstScreenShown, releaseAfterFallback } from './lib/afterFirstScreen.ts';
   import { initFileHealth } from './stores/file-health.svelte.ts';
   import { initImportActivity } from './stores/import-activity.svelte.ts';
   import { unlistenWhenReady } from './lib/lateUnlisten.ts';
@@ -54,6 +47,7 @@
   import { getIsTauri } from './services/tauri.svelte.ts';
   import { syncPlaybackAudioConfig } from './services/playback.svelte.ts';
   import { installMacWindowChrome } from './services/window-chrome.ts';
+  import { currentWebviewWindow } from './services/webview-window.ts';
   
   let browseMainEl = $state(null);
   let analyzeAlways = $state(false);
@@ -73,9 +67,11 @@
   }
 
   onMount(() => {
+    releaseAfterFallback();
     initLibrary().then(() => {
       reconcileOrganizeTarget(library.playlists, library.volumes);
       void initFileHealth();
+      firstScreenShown();
     });
     initOrganize();
     initImportActivity();
@@ -85,9 +81,8 @@
 
     let stopDragDrop = () => {};
     if (getIsTauri()) {
-      try {
-        const appWindow = getCurrentWebviewWindow();
-        stopDragDrop = unlistenWhenReady(appWindow.onDragDropEvent((event) => {
+      stopDragDrop = unlistenWhenReady(
+        currentWebviewWindow().then((appWindow) => appWindow.onDragDropEvent((event) => {
           const p = event.payload;
           if (p.type === 'enter' || p.type === 'over') {
             hoverFileDrop(p.position);
@@ -98,10 +93,9 @@
           } else {
             clearFileDropHover();
           }
-        }), (err) => console.warn('File drag-drop unavailable:', err));
-      } catch (err) {
-        console.warn('File drag-drop unavailable:', err);
-      }
+        })),
+        (err) => console.warn('File drag-drop unavailable:', err),
+      );
     }
 
     return () => {
@@ -124,7 +118,7 @@
       <div class="ff-browse__content" class:ff-browse__content--file-drop={fileDrop.overView} data-file-drop-content>
         <div class="ff-browse__slot ff-browse__slot--table" data-focus-region="tracks">
           {#if stickOnLeft}
-            <StickView volumePath={stickOnLeft} />
+            <LazyMount view={stickView} props={{ volumePath: stickOnLeft }} />
           {:else}
             <TrackTable />
           {/if}
@@ -141,7 +135,7 @@
               onCommit={() => commitPanelWidth('inspector')}
               onReset={() => resetPanelWidth('inspector')}
             />
-            <Detail />
+            <LazyMount view={inspector} />
           </div>
         {/if}
       <div
@@ -162,13 +156,7 @@
   </div>
 </div>
 
-<Settings />
-<CommandPalette />
-<StickSyncDialog />
-<StickDropTip />
-<LibraryHealthDialog />
-<ImportDuplicatesDialog />
-<FileBlockedTip />
+<LazyMount view={appDialogs} needed={ui.settingsOpen || ui.paletteOpen} />
 
 <Dialog
   open={library.showAnalysisPrompt}

@@ -17,6 +17,12 @@ export default defineConfig({
       { find: /^\$ds\//, replacement: `${designSystem}/` },
     ],
   },
+  build: {
+    target: 'safari16',
+    rollupOptions: {
+      treeshake: { moduleSideEffects: (id) => !id.startsWith(`${designSystem}/components/`) || !id.endsWith('.svelte') },
+    },
+  },
   server: {
     port: 5200,
     strictPort: true,
