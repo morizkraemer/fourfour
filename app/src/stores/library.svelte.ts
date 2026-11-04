@@ -75,6 +75,12 @@ import { fileStateGlyph } from '../lib/fileHealth.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
+const trackListLoadedListeners: (() => void)[] = [];
+
+export function onTrackListLoaded(listener: () => void) {
+  trackListLoadedListeners.push(listener);
+}
+
 /**
  * Call after changing fields of the tracks `changedIds` through their rows: copies them to the plain objects the search
  * text, counts and lookups read, rebuilds their search text and swaps the list so sorts and filters run again.
@@ -1233,6 +1239,7 @@ export async function loadState() {
     setLibraryTracks(plain, rows);
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
+    for (const listener of trackListLoadedListeners) listener();
 
     await ensureFavoriteSlots();
     library.tauriError = lastTauriError;
@@ -1280,6 +1287,7 @@ async function landImportedTracks(added: TrackInfo[]) {
   if (coveredEarly.length > 0) markCoversStored(coveredEarly);
   resetSearchIndex();
   scheduleSearchIndexWarmup();
+  for (const listener of trackListLoadedListeners) listener();
 }
 
 let saveInFlight: Promise<void> | null = null;
