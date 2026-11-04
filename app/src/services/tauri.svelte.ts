@@ -320,6 +320,28 @@ export function restoreBackup(path: string, audioFolder: string | null): Promise
   return invoke<RestoreOutcome>('restore_backup', { path, audioFolder });
 }
 
+export interface RecoveryOutcome {
+  library_path: string;
+  kept_path: string | null;
+  ui_settings: string | null;
+}
+
+export function recoverRetryLibrary(): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_retry_library');
+}
+
+export function recoverOpenLibrary(folderPath: string): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_open_library', { folderPath });
+}
+
+export function recoverNewLibrary(): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_new_library');
+}
+
+export function recoverRestoreBackup(path: string, audioFolder: string | null): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_restore_backup', { path, audioFolder });
+}
+
 export function listenToBackupProgress(callback: (progress: BackupProgress) => void) {
   return subscribe('backup-progress', callback);
 }
@@ -467,6 +489,7 @@ export async function saveState(playlists: PlaylistInput[]): Promise<void> {
     return await invoke<void>('save_state', { playlists });
   } catch (err) {
     lastTauriError = `save_state fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     mockPlaylists = playlists;
   }
 }
@@ -579,6 +602,7 @@ export async function removeTracks(ids: number[]): Promise<void> {
     return await invoke<void>('remove_tracks', { ids });
   } catch (err) {
     lastTauriError = `remove_tracks fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     mockTracks = mockTracks.filter(t => !ids.includes(t.id));
     mockPlaylists.forEach(pl => {
       pl.track_ids = pl.track_ids.filter(tid => !ids.includes(tid));
@@ -669,6 +693,7 @@ export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
     return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
   } catch (err) {
     lastTauriError = `analyze_track_ids fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return runMockAnalysis(ids);
   }
 }
@@ -736,25 +761,6 @@ export async function setAnalyzeAfterImport(enabled: boolean): Promise<void> {
   }
 }
 
-/** Stored analysis backend: 'rust', 'python', or null for automatic. */
-export async function getAnalysisBackend(): Promise<string | null> {
-  try {
-    return await invoke<string | null>('get_analysis_backend');
-  } catch (err) {
-    if (!useBrowserMocks()) throw err;
-    return readMockSetting<string | null>('analysis_backend', null);
-  }
-}
-
-export async function setAnalysisBackend(backend: string | null): Promise<void> {
-  try {
-    await invoke('set_analysis_backend', { backend });
-  } catch (err) {
-    if (!useBrowserMocks()) throw err;
-    writeMockSetting('analysis_backend', backend);
-  }
-}
-
 /** Stop the active analysis run: queued tracks are dropped, in-flight ones aborted. */
 export async function cancelAnalysis(): Promise<void> {
   await invokeOrMock('cancel_analysis', {});
@@ -779,6 +785,7 @@ export async function analyzeTracks(): Promise<TrackInfo[]> {
     return await invoke<TrackInfo[]>('analyze_tracks');
   } catch (err) {
     lastTauriError = `analyze_tracks fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return new Promise((resolve) => {
       setTimeout(() => {
         mockTracks.forEach(t => {

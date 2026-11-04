@@ -10,6 +10,7 @@ import { selectedTrack } from './selection.svelte.ts';
 import { tick } from 'svelte';
 import { gridAnchorMs, rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
 import { createPersister } from '../lib/persister.ts';
+import { editFailureText } from '../lib/userErrors.ts';
 import { BPM_MAX, BPM_MIN, camelotStep, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
 import type { Tier } from '../lib/tempo.ts';
 import {
@@ -29,7 +30,7 @@ function trackById(trackId: number) {
 
 function reportFailure(what: string, err: unknown) {
   console.error(`${what} failed:`, err);
-  library.statusMessage = `${what} failed: ${err}`;
+  library.statusMessage = editFailureText(what, err);
 }
 
 function showBpm(trackId: number, bpm: number) {
@@ -58,7 +59,7 @@ function respaceLoadedGrid(trackId: number, bpm: number) {
   player.track = { ...loaded, beats: to, gridAnchorMs: gridAnchorMs(from, fromAnchorMs) };
 }
 
-const bpmPersister = createPersister<number>(saveBpmAndGrid, (err) => reportFailure('Setting the BPM', err));
+const bpmPersister = createPersister<number>(saveBpmAndGrid, (err) => reportFailure('set the BPM', err));
 
 function currentBpm(trackId: number): number {
   const row = trackById(trackId);
@@ -72,7 +73,7 @@ async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
   try {
     await rescaleBeatGrid(trackId, bpm);
   } catch (err) {
-    reportFailure('Setting the BPM', err);
+    reportFailure('set the BPM', err);
     const stored = await getAnalysisData(trackId, true);
     if (stored?.bpm) showBpm(trackId, Number(stored.bpm));
     await refreshLoadedBeatGrid(trackId);
@@ -143,7 +144,7 @@ async function saveTrackKey(trackId: number, key: string): Promise<boolean> {
   try {
     await setTrackKey(trackId, key);
   } catch (err) {
-    reportFailure('Setting the key', err);
+    reportFailure('set the key', err);
     return false;
   }
   const track = trackById(trackId);
@@ -166,7 +167,7 @@ export async function commitTrackRating(trackId: number, rating: number): Promis
   try {
     await setTrackRating(trackId, rating);
   } catch (err) {
-    reportFailure('Setting the rating', err);
+    reportFailure('set the rating', err);
     return false;
   }
   const track = trackById(trackId);
@@ -181,7 +182,7 @@ export async function releaseTrackEdits(trackId: number): Promise<void> {
   try {
     await releaseUserEdits(trackId);
   } catch (err) {
-    reportFailure('Releasing the hand-set values', err);
+    reportFailure('give the hand-set values back to the analysis', err);
     return;
   }
   const track = trackById(trackId);
@@ -197,7 +198,7 @@ export async function resetTrackFieldToAnalyzed(trackId: number, field: 'bpm' | 
   try {
     await releaseUserField(trackId, field);
   } catch (err) {
-    reportFailure('Releasing the hand-set value', err);
+    reportFailure('give the hand-set value back to the analysis', err);
     return;
   }
   const track = trackById(trackId);
@@ -214,7 +215,7 @@ export async function commitTrackFields(trackId: number, edits: TrackFieldEdits)
   try {
     saved = await updateTrackFields(trackId, edits);
   } catch (err) {
-    reportFailure('Saving the tags', err);
+    reportFailure('save the tags', err);
     return false;
   }
   const track = trackById(trackId);

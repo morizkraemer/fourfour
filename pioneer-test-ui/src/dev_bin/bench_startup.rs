@@ -930,9 +930,37 @@ fn soak(dir: &Path, seconds: u64) {
     );
 }
 
+/// Opens (and so migrates) the library at `db` and moves its v7 covers into the cover store, timing both.
+fn migrate(db: &Path) {
+    let size_before = std::fs::metadata(db).map_or(0, |m| m.len());
+    let t = Instant::now();
+    let lib = LocalLibrary::open(db).unwrap();
+    let open_ms = ms(t);
+    let legacy = lib.legacy_covers().unwrap();
+    let t = Instant::now();
+    lib.check_space_for_legacy_covers(&pioneer_library::statvfs_available_bytes).unwrap();
+    let mut moved = 0;
+    loop {
+        let step = lib.move_legacy_covers(32).unwrap();
+        moved += step.moved;
+        if step.remaining == 0 {
+            break;
+        }
+    }
+    let move_ms = ms(t);
+    let size_after = std::fs::metadata(db).map_or(0, |m| m.len());
+    let files = lib.covers_dir().map_or(0, |dir| {
+        std::fs::read_dir(dir).into_iter().flatten().flatten().map(|shard| std::fs::read_dir(shard.path()).map_or(0, |f| f.count())).sum::<usize>()
+    });
+    println!(
+        "migrate: open_ms={open_ms:.1} legacy={legacy:?} move_ms={move_ms:.1} moved={moved} cover_files={files} db_bytes {size_before} -> {size_after}"
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("migrate") => migrate(Path::new(&args[2])),
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
         Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
@@ -951,7 +979,7 @@ fn main() {
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+            "usage: bench_startup gen <dir> <count> | migrate <library.db> | run <dir> | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }

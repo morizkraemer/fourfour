@@ -56,7 +56,7 @@ Every case also checks: good neighbours imported and fully analysed, analysis ru
 - **Tags the reader rejects drop the file:** lofty fails on invalid UTF-8 in an ID3 UTF-8 frame, lone UTF-16 surrogates and lying tag sizes, so `read_track_metadata` errors and the file is skipped as unreadable although the audio plays. Suggest `ParsingMode::Relaxed` or a properties-only retry in `scanner.rs` (writer lane, read-only here).
 - **Huge junk files:** the tag reader and decoder scan an MP3 with no valid frames to its end (about 10 s per GB). Bounded by file size; needs a scan cap in lofty/symphonia use.
 - **Analysis failures** are remembered in the side file `analysis-failures.json` (r41, no schema change): launch resume and "Analyze all" skip a track that failed twice on an unchanged file; explicit requests retry. Open: no UI shows or clears the skipped tracks, and the count is only in the debug log (see `analysis-resume-2026-11.md`, Failure memo).
-- **Library open recovery:** a library that fails to open leaves the app running with an empty list and the error in the status bar and Settings > Advanced (see "Library open safety"). There is no screen to pick another library, restore a backup or start fresh from that state yet; that is a product call.
+- **Library open recovery:** a library that fails to open leaves the app running with an empty list and the error in the status bar and Settings > Advanced (see "Library open safety"). The recovery screen on branch `r38-recovery` (not landed) adds the way out from that state.
 - **Duplicates inside one drop are not flagged** (only against the library), and symlinked folders or files import as separate rows under their link paths. Aliases of the same file count twice.
 - `normalise` path keys fold case, so on a case-sensitive volume `A.wav` next to `a.wav` counts as already in the library.
 - A WAV cut to 20% analyses as complete with BPM 0; the decoder's `truncated` flag is not shown anywhere.
@@ -91,6 +91,7 @@ A converted command rejects with `{ kind, message, path? }` (`CommandError`, `pi
 | `library_newer_version` | library schema or backup format newer than the app (marked at the source in `pioneer-library`) |
 | `library_damaged` | not a database, corrupt, no schema version, version 0 (marked at the source, plus SQLite codes) |
 | `library_locked` | SQLite busy or locked |
+| `library_not_open` | startup could not find the library path, or `load_state` ran with no library open and no open error kept |
 | `not_found` | `io::ErrorKind::NotFound` (play, reveal, backup read) |
 | `permission_denied` | `PermissionDenied`, read-only file system, SQLite read-only |
 | `disk_full` | `StorageFull`, ENOSPC, SQLite full |
@@ -117,11 +118,41 @@ Tests: `cargo test -p pioneer-library failure`, `refused_backups_carry_a_failure
 ### Switching r18 and r38
 
 - r18 `userErrors.ts`: keep the `...FailureText` helpers and their copy, but branch on `commandErrorKind(err)` first and fall back to the pattern table only for a `null` kind or `other`. Mapping: `disk_full` and `no_space_on_stick` to the disk-full and "Not enough space" copy (the stick one passes its message through), `permission_denied`, `not_found`, `drive_gone`, `library_locked` ("busy"), `library_newer_version`, `library_damaged`, `models_missing` (row 13), `analysis_failed` (row 14), `stick_busy` (rows 50, 52: sync and eject read differently by call site), `decode_failed` (row 2), `audio_output_unavailable` (rows 3, 4). `invalid_backup` is one kind for the five backup refusals, so rows 58 and 60 lose their per-cause sentences unless Merlin wants them back as separate kinds. The restore safety path is `commandErrorPath(err)`; drop the `SAFETY_COPY` regex. Playback: `playback-error` events have `kind` and `path`, so `playbackFailureText` no longer needs the file name from the text. Still text-only until converted: edit validation (rows 32 to 34) and Rekordbox (rows 22 to 25).
-- r38 `libraryOpenFailure.ts`: for `load_state` (and `change_library_path`) read `commandErrorKind(err)`: `library_newer_version` is `newer`, `library_damaged` is `damaged`, `library_locked` is `locked`, anything else is `unknown`. Drop `OPEN_FAILURE_PREFIXES`, `LOCKED` and `DAMAGED`. A `load_state` failure is an open failure when its `path` is set (the open error carries the library file; the later "library is not open" and read errors do not). The `recover_*` commands in `recovery_commands.rs` should return `CommandError` the same way (`CommandError::from_anyhow_chain(e).with_path(...)`), so `recoveryFailureText` can read their kind instead of the text.
+- r38 `libraryOpenFailure.ts` (done on `r76-recovery-kind`): reads `CommandError.kind` of the `load_state` and `recover_*` rejections: `library_newer_version` is `newer`, `library_damaged` is `damaged`, `library_locked` is `locked`, anything else is `unknown`. The message text is no longer read; `OPEN_FAILURE_PREFIXES`, `LOCKED` and `DAMAGED` are gone and there is no text fallback (a plain string is never an open failure). An error is an open failure when its `path` is set (the open error carries the library file) or its kind is `library_not_open`, a kind added for the two open errors without a file: "Couldn't find where the library is stored" and "The library is not open" (so a later read error with kind `library_locked` and no path is not a recovery screen). The `recover_*` commands return `CommandError` (`from_anyhow_chain(e).with_message(..).with_path(db)`; a folder without a library is `not_found`, no path), so `recoveryFailureText` reads their kind too. Copy is unchanged.
 
 ## Log file and panic hook (r48-logs)
 
 `pioneer-test-ui/src/app_log.rs`: std-only rotating log (`fourfour.log`, `.1.log`, `.2.log`, 5 MB each) in `app_log_dir`, opened first thing in `setup`. A panic hook installed at the top of `main` writes message, location, thread, app version and a forced backtrace before the default hook runs, so panics on analysis, import and tokio worker threads are logged even when a `catch_unwind` or a `join` turns them into an error. `debug_log` and the former `eprintln!` warnings also go to the file. The frontend forwards `console.error`, uncaught errors and unhandled rejections through `log_frontend` (rate limited on both sides). `log_directory` returns the folder. Tests: rotation cap, reopen, panic line, rate limit (Rust) and forwarding (vitest `errorForwarding.test.ts`). Not covered: hard crashes (signals, aborts), which macOS reports itself.
+### Recovery screen (branch r38-recovery)
+
+Branch `r38-recovery` from `ov-1028`, not landed: user-visible, Merlin reviews it. Tests: `cargo test -p pioneer-test-ui --bin pioneer-test-ui recovery_commands`, `npm test` (`libraryOpenFailure.test.ts`, `backup.test.ts`), smoke `recovery.spec.ts`.
+
+When `load_state` returns the open error, the list area shows the existing empty-state panel instead of "No tracks loaded". The title and text depend on the cause, read from the error kind (`app/src/lib/libraryOpenFailure.ts`):
+
+| Cause | Title | Actions |
+|---|---|---|
+| newer version | This library was made by a newer version of fourfour | Open another library, Restore a backup, Start a new library |
+| damaged, or unknown | Couldn't open your library | same three |
+| locked | Your library is in use | Try again, then the same three |
+
+Every text says the library file has not been changed (or, for locked, to close the other program). An action that fails keeps the panel and shows one plain line under it; the raw text goes to the browser console.
+
+Backend (`pioneer-test-ui/src/recovery_commands.rs`): four commands that need no library state, serialised by a gate and refused once a library is registered.
+
+| Command | What it does |
+|---|---|
+| `recover_retry_library` | opens the configured path again (the locked case) |
+| `recover_open_library(folder)` | opens `library.db` in a folder that has one; a folder without it is refused so nothing new is created by accident |
+| `recover_new_library` | creates `Libraries/library-<stamp>/library.db` under the app data folder and opens it |
+| `recover_restore_backup(path, audio_folder)` | unpacks the backup into a new `Libraries/library-<stamp>/` folder with the existing `unpack_backup` and `install_backup`, merges the backup's settings like a normal restore |
+
+None of them writes to or deletes the failed file or its folder: the new library and the restore always go to a new folder, and a failed restore removes only the folder it just made. The restore's safety copy of the current library does not apply (there is no open library to copy); the untouched failed file is the safety copy, and its path is shown in the status bar afterwards ("Your previous library file is still at ..."). `read_backup` now also works without a library (current track count 0).
+
+After success the library is registered (`app.manage`), `config.json` points at the new path, and the same follow-ups as a normal start run (file check, cover fill, staging cleanup). The UI then loads it with `initLibrary()`, no relaunch. The restore flow reloads the window, like a restore from Settings, to pick up the restored UI settings.
+
+Rust tests (`recovery_commands`): each command works with no library state, the failed file is byte-identical and nothing else is created next to it, a second new library never reuses a folder, a bad backup leaves no half-made folder. Smoke (`recovery.spec.ts`, mock backend): newer, damaged and locked panels, Try again (still locked, then open), each of the three actions, a failing action.
+
+Open for Merlin: "Start a new library" picks the folder itself (no picker); a picker for it, or for where a restore goes, is a small add. Copy is in `libraryOpenFailure.ts`. The status bar still says "Failed to load library" next to the panel.
 
 ## Run
 

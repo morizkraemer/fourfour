@@ -2,9 +2,6 @@
 #[path = "../analysis_backend.rs"]
 mod analysis_backend;
 #[allow(dead_code)]
-#[path = "../analysis_python.rs"]
-mod analysis_python;
-#[allow(dead_code)]
 #[path = "../band_analysis.rs"]
 mod band_analysis;
 #[allow(dead_code)]
@@ -49,7 +46,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use analysis_backend::{AnalysisBackend, BackendEnv};
+use analysis_backend::BackendEnv;
 use analysis_run::{AnalysisCoordinator, AnalysisSink, LogLevel, RunOutcome};
 use pioneer_library::LocalLibrary;
 use pioneer_usb_writer::scanner;
@@ -211,7 +208,6 @@ fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Opt
 
 fn main() {
     heap::limit_arenas();
-    let mut backend = AnalysisBackend::Rust;
     let mut list: Option<PathBuf> = None;
     let mut limit = 50usize;
     let mut threads: Option<usize> = None;
@@ -231,7 +227,6 @@ fn main() {
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--backend" => backend = AnalysisBackend::parse(&it.next().unwrap()).expect("rust|python"),
             "--list" => list = Some(PathBuf::from(it.next().unwrap())),
             "--limit" => limit = it.next().unwrap().parse().unwrap(),
             "--threads" => threads = Some(it.next().unwrap().parse().unwrap()),
@@ -263,7 +258,7 @@ fn main() {
         .map(PathBuf::from)
         .collect();
 
-    let dir = std::env::temp_dir().join(format!("bench-analysis-{}-{}", backend.name(), std::process::id()));
+    let dir = std::env::temp_dir().join(format!("bench-analysis-rust-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let library = LocalLibrary::open(&dir.join("library.db")).expect("open library");
     let tracks = scanner::scan_files(&paths).expect("scan");
@@ -278,7 +273,7 @@ fn main() {
     let shared = Arc::new(Mutex::new(library));
 
     let app_data_dir = store_detail.then(|| dir.clone());
-    let env = BackendEnv { override_backend: Some(backend), max_threads: threads, app_data_dir, ..BackendEnv::default() };
+    let env = BackendEnv { max_threads: threads, app_data_dir, ..BackendEnv::default() };
     let coordinator = AnalysisCoordinator::default().with_staging(!unstaged);
     let coordinator = if fast_first { coordinator.with_whole_jobs(0) } else { coordinator };
     let started = Instant::now();
@@ -366,8 +361,7 @@ fn main() {
     let done = total - errors;
     let first = sink.first_result_ms.lock().unwrap().unwrap_or(0.0);
     println!(
-        "BENCH backend={} tracks={} errors={errors} wall={wall_s:.1}s tracks_per_min={:.2} first_result={:.1}s peak_rss_tree={:.0}MB cpu={:.1}s",
-        backend.name(),
+        "BENCH backend=rust tracks={} errors={errors} wall={wall_s:.1}s tracks_per_min={:.2} first_result={:.1}s peak_rss_tree={:.0}MB cpu={:.1}s",
         done,
         done as f64 / wall_s * 60.0,
         first / 1000.0,
@@ -377,7 +371,7 @@ fn main() {
     println!(
         "PERF {}",
         serde_json::json!({ "bench": "analysis_throughput", "values": {
-            "backend": backend.name(), "staged": !unstaged, "tracks": done, "errors": errors,
+            "backend": "rust", "staged": !unstaged, "tracks": done, "errors": errors,
             "wall_s": wall_s, "tracks_per_min": done as f64 / wall_s * 60.0,
             "first_result_s": first / 1000.0, "peak_rss_tree_mb": *peak.lock().unwrap(),
         }})

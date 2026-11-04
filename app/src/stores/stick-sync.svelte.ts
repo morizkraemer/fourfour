@@ -8,6 +8,7 @@ import {
   type UsbSyncPlan,
 } from '../services/tauri.svelte.ts';
 import { loadCapacity, stickAllTrackIds, stickPlaylistIds } from './sticks.svelte.ts';
+import { syncFailureText } from '../lib/userErrors.ts';
 
 export type StickSyncStage = 'idle' | 'planning' | 'confirm' | 'writing' | 'done' | 'failed';
 
@@ -81,8 +82,9 @@ export async function syncStick(volumePath: string): Promise<void> {
       return;
     }
   } catch (err) {
+    console.info('plan_usb_sync failed:', err);
     stickSync.stage = 'failed';
-    stickSync.error = String(err);
+    stickSync.error = syncFailureText(err);
     return;
   }
   await writeStick(volumePath);
@@ -118,13 +120,15 @@ async function writeStick(volumePath: string) {
     stickSync.report = report ?? null;
     if (!report || report.status === 'failed') {
       stickSync.stage = 'failed';
-      stickSync.error = report?.error ?? 'Sync failed.';
+      if (report?.error) console.info('sync failed:', report.error);
+      stickSync.error = syncFailureText(report?.error ?? 'The sync did not report a result.', report?.error_kind ?? null);
     } else {
       stickSync.stage = 'done';
     }
   } catch (err) {
+    console.info('sync_usb_many failed:', err);
     stickSync.stage = 'failed';
-    stickSync.error = String(err);
+    stickSync.error = syncFailureText(err);
   }
   await loadCapacity(volumePath);
   await onFinished?.(volumePath);
@@ -153,6 +157,6 @@ export function syncStatusLine(): string {
     if (r.tracks_updated + r.tracks_replaced > 0) parts.push(`${r.tracks_updated + r.tracks_replaced} updated`);
     return `Synced · ${parts.join(' · ')} · Safe to eject`;
   }
-  if (stage === 'failed') return error || 'Sync failed.';
+  if (stage === 'failed') return error || 'The sync stopped. Check the stick, then sync again.';
   return '';
 }

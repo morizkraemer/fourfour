@@ -79,6 +79,7 @@
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
+      if (anchor?.isConnected && (document.activeElement === document.body || card?.contains(document.activeElement))) anchor.focus();
     };
   });
 

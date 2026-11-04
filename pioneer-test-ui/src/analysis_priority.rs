@@ -40,22 +40,6 @@ fn lower_current_thread() -> Result<(), String> {
 #[cfg(unix)]
 const ANALYSIS_NICE: i32 = 10;
 
-/// The Python analyzer and anything else the analysis starts as a process of its own run at the analysis nice level.
-pub fn lower_child(command: &mut std::process::Command) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            command.pre_exec(|| {
-                unix::setpriority(unix::PRIO_PROCESS, 0, ANALYSIS_NICE);
-                Ok(())
-            });
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = command;
-}
-
 #[cfg(target_os = "linux")]
 fn lower_current_thread() -> Result<(), String> {
     if unsafe { unix::setpriority(unix::PRIO_PROCESS, linux::gettid() as u32, ANALYSIS_NICE) } == 0 {
@@ -102,15 +86,6 @@ mod tests {
         assert_eq!(inside, ANALYSIS_NICE.max(caller));
         assert_eq!(spawned, inside);
         assert_eq!(own_nice(), caller);
-    }
-
-    #[test]
-    fn a_child_process_starts_at_the_analysis_nice_level() {
-        let mut command = std::process::Command::new("nice");
-        lower_child(&mut command);
-        let output = command.output().unwrap();
-        let nice: i32 = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap();
-        assert_eq!(nice, ANALYSIS_NICE.max(own_nice()));
     }
 
     #[test]

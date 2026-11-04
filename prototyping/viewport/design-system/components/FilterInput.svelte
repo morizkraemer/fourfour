@@ -22,6 +22,7 @@
     class="ff-filter-input__field"
     type="search"
     {placeholder}
+    aria-label={placeholder}
     bind:value
     {onkeydown}
     autocomplete="off"

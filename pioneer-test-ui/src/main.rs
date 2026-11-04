@@ -5,7 +5,6 @@ mod analysis_failures;
 mod analysis_order;
 mod analysis_payload;
 mod analysis_priority;
-mod analysis_python;
 mod analysis_run;
 mod app_log;
 mod backup_commands;
@@ -17,6 +16,7 @@ mod heap;
 mod import_plan;
 mod perf_probe;
 mod playback;
+mod recovery_commands;
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../../fourfour-analysis-rs/tests/messy_fixtures/mod.rs"]
@@ -27,6 +27,7 @@ mod self_check;
 mod tempo;
 mod track_fields;
 mod track_infos;
+mod stick_busy;
 mod stick_commands;
 mod tag_scan;
 mod volumes;
@@ -44,10 +45,9 @@ use pioneer_library::rekordbox;
 use pioneer_library::{BeatPosition, LocalLibrary};
 use pioneer_usb_writer::models;
 
-use analysis_backend::{AnalysisBackend, BackendEnv};
+use analysis_backend::BackendEnv;
 use analysis_failures::FailureMemo;
 use command_error::{CommandError, ErrorKind};
-use analysis_python::resolve_python;
 use analysis_run::{
     merge_into_analysis_queue, rerun_work, resolve_analysis_work, without_known_failures, AnalysisCoordinator, AnalysisSink,
     AnalysisWorkItem, LogLevel, RunOutcome, SharedLibrary,
@@ -132,10 +132,57 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
     if fill.0.swap(true, Ordering::AcqRel) {
         return;
     }
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
+        move_legacy_covers(&app, &library);
+        fill_pending_covers(&app, &library, &fill);
+    });
+}
+
+/// Moves the covers a v7 library kept in its database into the cover store, a batch at a time with the library
+/// lock let go in between. Stops (covers stay readable in the database) when the volume lacks the space or a
+/// batch fails; the next launch tries again.
+fn move_legacy_covers(app: &AppHandle, library: &SharedLibrary) {
+    let check = library
+        .lock()
+        .map_err(|e| e.to_string())
+        .and_then(|lib| lib.check_space_for_legacy_covers(&pioneer_library::statvfs_available_bytes).map_err(|e| format!("{e:#}")));
+    if let Err(e) = check {
+        debug_log(app, "error", &e);
+        return;
+    }
+    let started = std::time::Instant::now();
+    let mut moved = 0;
+    loop {
+        let step = library
+            .lock()
+            .map_err(|e| e.to_string())
+            .and_then(|lib| lib.move_legacy_covers(LEGACY_COVER_BATCH).map_err(|e| format!("{e:#}")));
+        match step {
+            Ok(step) => {
+                moved += step.moved;
+                if step.remaining == 0 {
+                    break;
+                }
+            }
+            Err(e) => {
+                debug_log(app, "error", &format!("Moving covers out of the library failed: {e}"));
+                return;
+            }
+        }
+    }
+    if moved > 0 {
+        debug_log(app, "info", &format!("Moved {moved} covers out of the library database in {:.1} s", started.elapsed().as_secs_f64()));
+    }
+}
+
+const LEGACY_COVER_BATCH: usize = 32;
+
+fn fill_pending_covers(app: &AppHandle, library: &SharedLibrary, fill: &CoverFill) {
+    use std::sync::atomic::Ordering;
+    loop {
         let mut unsent: Vec<u32> = Vec::new();
         let mut last_emit = std::time::Instant::now();
-        let result = import_plan::store_pending_covers(&library, None, &mut |ids| {
+        let result = import_plan::store_pending_covers(library, None, &mut |ids| {
             unsent.extend(ids);
             if last_emit.elapsed() >= COVER_EVENT_INTERVAL {
                 app.emit("import-covers", std::mem::take(&mut unsent)).ok();
@@ -147,14 +194,14 @@ fn spawn_cover_fill(app: AppHandle, library: SharedLibrary, fill: CoverFill) {
         }
         fill.0.store(false, Ordering::Release);
         if let Err(e) = result {
-            debug_log(&app, "error", &format!("Storing imported covers failed: {e}"));
+            debug_log(app, "error", &format!("Storing imported covers failed: {e}"));
             return;
         }
         let more = library.lock().ok().and_then(|lib| lib.pending_artwork(0, 1).ok()).is_some_and(|p| !p.is_empty());
         if !more || fill.0.swap(true, Ordering::AcqRel) {
             return;
         }
-    });
+    }
 }
 
 /// Removes staging folders a crashed run left in the ANLZ folders; on a thread of its own because it
@@ -321,7 +368,7 @@ fn analysis_coordinator(app: &AppHandle) -> AnalysisCoordinator {
 }
 
 fn analysis_backend_env(app: &AppHandle) -> BackendEnv {
-    BackendEnv::from_process(config_path(app).ok(), app.path().app_data_dir().ok(), app.path().resource_dir().ok())
+    BackendEnv::from_process(app.path().app_data_dir().ok(), app.path().resource_dir().ok())
 }
 
 fn all_tracks_failed<T: std::fmt::Display>(total: T) -> CommandError {
@@ -333,8 +380,7 @@ fn analysis_start_error(message: String) -> CommandError {
     CommandError::new(kind, message)
 }
 
-/// Run analysis for the given tracks with the configured backend (rust when model
-/// weights are present, python otherwise). Used by bulk and per-selection commands.
+/// Run analysis for the given tracks with the analyzer. Used by bulk and per-selection commands.
 async fn run_track_analysis(
     app: AppHandle,
     shared: SharedLibrary,
@@ -369,23 +415,6 @@ async fn analysis_ui_busy(coordinator: State<'_, AnalysisCoordinator>) -> Result
     coordinator.ui_busy();
     Ok(())
 }
-
-/// Stored analysis backend setting: "rust", "python", or null for the default.
-#[tauri::command]
-fn get_analysis_backend(app: AppHandle) -> Option<String> {
-    let path = config_path(&app).ok()?;
-    analysis_backend::read_setting(&path).map(|b| b.name().to_string())
-}
-
-#[tauri::command]
-fn set_analysis_backend(backend: Option<String>, app: AppHandle) -> Result<(), String> {
-    let parsed = match backend.as_deref() {
-        None => None,
-        Some(text) => Some(AnalysisBackend::parse(text).ok_or_else(|| format!("unknown analysis backend: {text}"))?),
-    };
-    analysis_backend::write_setting(&config_path(&app)?, parsed)
-}
-
 
 /// Analyze all tracks that have not yet been analyzed.
 #[tauri::command]
@@ -477,16 +506,18 @@ async fn analyze_track_ids(
 /// Only tracks that have been analyzed are included because the writer
 /// requires an `AnalysisResult` for every track. Unchanged tracks are
 /// skipped (no audio re-copy), and removed tracks are cleaned up.
-#[tauri::command]
+#[tauri::command(async)]
 fn write_usb(
     output_dir: String,
     playlists: Vec<PlaylistInput>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, stick_busy::BusySticks>,
 ) -> Result<models::SyncReport, CommandError> {
     debug_info(&app, &format!("USB sync → {output_dir}"));
 
     let out = Path::new(&output_dir);
+    let _busy = busy.acquire(out)?;
     volumes::require_removable_volume(out)?;
 
     sync_playlists_to_library(&*state.lock().map_err(|e| e.to_string())?, &playlists)?;
@@ -529,9 +560,12 @@ async fn sync_usb_many(
     targets: Vec<pioneer_library::SyncTarget>,
     app: AppHandle,
     state: State<'_, SharedLibrary>,
+    busy: State<'_, stick_busy::BusySticks>,
 ) -> Result<Vec<stick_commands::StickReportWire>, CommandError> {
     let shared: SharedLibrary = state.inner().clone();
+    let guards = busy.acquire_all(targets.iter().map(|target| target.volume.as_path()))?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _guards = guards;
         for target in &targets {
             volumes::require_removable_volume(&target.volume)?;
         }
@@ -653,7 +687,8 @@ fn eject_failure(stderr: &str) -> CommandError {
 
 /// Eject a mounted volume (macOS: `diskutil eject`, Linux: `udisksctl unmount`, falling back to `umount`).
 #[tauri::command(async)]
-fn eject_volume(path: String) -> Result<(), CommandError> {
+fn eject_volume(path: String, busy: State<'_, stick_busy::BusySticks>) -> Result<(), CommandError> {
+    let _busy = busy.acquire(Path::new(&path))?;
     #[cfg(target_os = "macos")]
     {
         let output = std::process::Command::new("diskutil")
@@ -705,9 +740,10 @@ fn eject_volume(path: String) -> Result<(), CommandError> {
 }
 
 /// Wipe all Pioneer data from a USB drive (removes PIONEER/ and Contents/ directories).
-#[tauri::command]
-fn wipe_usb(path: String) -> Result<(), CommandError> {
+#[tauri::command(async)]
+fn wipe_usb(path: String, busy: State<'_, stick_busy::BusySticks>) -> Result<(), CommandError> {
     let usb = std::path::Path::new(&path);
+    let _busy = busy.acquire(usb)?;
     if !usb.is_dir() {
         return Err(CommandError::new(ErrorKind::DriveGone, "Not a valid directory").with_path(usb));
     }
@@ -813,55 +849,6 @@ async fn rekordbox_import_run(
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
-}
-
-/// Run Python analysis CLI on a single track and return the result as JSON.
-/// Uses the venv Python at `analysis/.venv/bin/python`.
-#[tauri::command]
-async fn analyze_track_python(path: String) -> Result<serde_json::Value, String> {
-    let python = resolve_python();
-
-    let output = tokio::task::spawn_blocking(move || {
-        let child = std::process::Command::new(&python)
-            .args(["-m", "fourfour_analysis", "analyze", &path, "--backend", "deeprhythm_essentia", "--json"])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| format!("Failed to spawn analyzer: {e}"))?;
-
-        let timeout = std::time::Duration::from_secs(120);
-        let wait_result = std::thread::scope(|s| {
-            let handle = s.spawn(move || child.wait_with_output());
-            let start = std::time::Instant::now();
-            loop {
-                if handle.is_finished() {
-                    return Some(handle.join().expect("wait thread panicked"));
-                }
-                if start.elapsed() > timeout {
-                    return None;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        });
-
-        match wait_result {
-            Some(Ok(output)) => {
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(format!("Python analyzer failed: {stderr}"));
-                }
-                let results: Vec<serde_json::Value> =
-                    serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
-                results.into_iter().next().ok_or_else(|| "No results".to_string())
-            }
-            Some(Err(e)) => Err(format!("Analyzer wait failed: {e}")),
-            None => Err(format!("Analyzer timed out after {}s", timeout.as_secs())),
-        }
-    })
-    .await
-    .map_err(|e| format!("Task join error: {e}"))?;
-
-    output
 }
 
 /// Get stored analysis data for a track from the local library DB.
@@ -1293,7 +1280,7 @@ async fn load_state(app: AppHandle) -> Result<LoadedState, CommandError> {
         return Err(app
             .try_state::<LibraryOpenFailure>()
             .map(|failure| failure.0.clone())
-            .unwrap_or_else(|| CommandError::other("The library is not open")));
+            .unwrap_or_else(|| CommandError::new(ErrorKind::LibraryNotOpen, "The library is not open")));
     };
     let shared = state.inner().clone();
     perf_probe::mark("load_state_start", serde_json::json!({}));
@@ -1407,7 +1394,7 @@ fn reset_library(
     Ok(db_path.to_string_lossy().to_string())
 }
 
-/// Remove SQLite library files and the sibling `anlz/` analysis cache directory.
+/// Remove SQLite library files and the sibling `anlz/` analysis cache and `covers/` cover store directories.
 fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
     let base = db_path.to_string_lossy();
     for suffix in ["", "-wal", "-shm"] {
@@ -1419,10 +1406,11 @@ fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
     }
 
     if let Some(parent) = db_path.parent() {
-        let anlz = parent.join("anlz");
-        if anlz.exists() {
-            std::fs::remove_dir_all(&anlz)
-                .map_err(|e| CommandError::from_io(&e, format!("Failed to remove {}: {e}", anlz.display())).with_path(&anlz))?;
+        for folder in [parent.join("anlz"), pioneer_library::covers_dir_of(db_path)] {
+            if folder.exists() {
+                std::fs::remove_dir_all(&folder)
+                    .map_err(|e| CommandError::from_io(&e, format!("Failed to remove {}: {e}", folder.display())).with_path(&folder))?;
+            }
         }
     }
 
@@ -1436,7 +1424,7 @@ fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
 struct LibraryOpenFailure(CommandError);
 
 fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, LocalLibrary), CommandError> {
-    let db_path = db_path.map_err(|e| CommandError::other(format!("Couldn't find where the library is stored: {e}")))?;
+    let db_path = db_path.map_err(|e| CommandError::new(ErrorKind::LibraryNotOpen, format!("Couldn't find where the library is stored: {e}")))?;
     let library = LocalLibrary::open(&db_path).map_err(|e| {
         let message = format!("Couldn't open the library at {}: {e:#}", db_path.display());
         CommandError::from_anyhow_chain(e).with_message(message).with_path(&db_path)
@@ -1514,10 +1502,11 @@ fn main() {
             get_library_path,
             change_library_path,
             reset_library,
-            analyze_track_python,
+            recovery_commands::recover_retry_library,
+            recovery_commands::recover_open_library,
+            recovery_commands::recover_new_library,
+            recovery_commands::recover_restore_backup,
             cancel_analysis,
-            get_analysis_backend,
-            set_analysis_backend,
             get_analysis_data,
             get_waveform_detail,
             prefetch_waveform_detail,
@@ -1554,6 +1543,7 @@ fn main() {
             }
             let health = file_health::SharedHealth::default();
             app.manage(health.clone());
+            app.manage(recovery_commands::RecoveryGate::default());
             let covers = CoverFill::default();
             app.manage(covers.clone());
             match open_startup_library(read_library_path(app.handle())) {
@@ -1570,6 +1560,7 @@ fn main() {
                 }
             }
             app.manage(Arc::new(ImportPlans::default()));
+            app.manage(stick_busy::BusySticks::default());
             app.manage(analysis_coordinator(app.handle()));
             app.manage(SharedArtworkThumbs::default());
             app.manage(Arc::new(waveform_detail::DetailWindows::default()));
@@ -1605,7 +1596,6 @@ mod tests {
     use super::{analysis_start_error, artwork_thumbnail, eject_failure, validated_reveal_path};
     use crate::analysis_backend;
     use crate::command_error::ErrorKind;
-    use crate::analysis_python::{parse_analyzer_stdout, python_result_to_analysis};
 
     fn assert_off_main_thread(source: &str, commands: &[&str]) {
         for name in commands {
@@ -1638,6 +1628,8 @@ mod tests {
                 "save_state",
                 "change_library_path",
                 "reset_library",
+                "write_usb",
+                "wipe_usb",
             ],
         );
         assert_off_main_thread(include_str!("backup_commands.rs"), &["read_backup"]);
@@ -1696,7 +1688,8 @@ mod tests {
     fn startup_without_a_library_path_is_an_error() {
         let error = super::open_startup_library(Err("no app data dir".into())).map(|_| ()).unwrap_err();
         assert!(error.message.contains("no app data dir"), "{error}");
-        assert_eq!(error.kind, ErrorKind::Other);
+        assert_eq!(error.kind, ErrorKind::LibraryNotOpen);
+        assert_eq!(error.path, None);
     }
 
     #[test]
@@ -1760,22 +1753,5 @@ mod tests {
         let small = png_bytes(100, 80);
         assert_eq!(artwork_thumbnail(&small, 512), small);
         assert_eq!(artwork_thumbnail(b"not an image", 512), b"not an image".to_vec());
-    }
-
-    #[test]
-    fn parse_backend_keyed_analyzer_json() {
-        let stdout = br#"{"deeprhythm_essentia":{"bpm":128.0,"key":"8A","waveform_preview":[63]}}"#;
-        let json = parse_analyzer_stdout(stdout).expect("parse");
-        let analysis = python_result_to_analysis(&json);
-        assert!((analysis.bpm - 128.0).abs() < f64::EPSILON);
-        assert_eq!(analysis.key, "8A");
-    }
-
-    #[test]
-    fn parse_legacy_array_analyzer_json() {
-        let stdout = br#"[{"bpm":120.0,"key":"1A","waveform_preview":[1,2,3]}]"#;
-        let json = parse_analyzer_stdout(stdout).expect("parse");
-        let analysis = python_result_to_analysis(&json);
-        assert!((analysis.bpm - 120.0).abs() < f64::EPSILON);
     }
 }

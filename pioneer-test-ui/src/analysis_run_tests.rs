@@ -216,7 +216,7 @@ fn fast_first_harness(tracks: usize, workers: usize, max_threads: usize) -> Harn
 
 impl Harness {
     fn runner(&self) -> Runner {
-        Runner::Rust { engine: self.engine.clone() }
+        Runner { engine: self.engine.clone() }
     }
 
     fn events(&self) -> Vec<Event> {
@@ -1085,6 +1085,21 @@ async fn resume_stops_retrying_a_track_after_two_failed_runs() {
 }
 
 #[tokio::test]
+async fn a_rust_analyzer_failure_is_recorded_as_a_failure_and_the_track_is_not_analysed_another_way() {
+    let dir = failure_dir("no-fallback");
+    let h = harness(2, 1, 8).remembering_failures(&dir);
+    h.fail_on(&["t2.wav"]);
+
+    let outcome = h.run_all(h.items.clone()).await;
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 1, total: 2 }));
+    assert_eq!(h.runs_of("t2.wav"), 1, "{:?}", h.events());
+    assert_eq!(h.unanalyzed(), vec![2]);
+    assert_eq!(h.shared.lock().unwrap().analysis_failures().unwrap().len(), 1);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
 async fn an_explicit_request_for_a_skipped_track_runs_it_and_a_success_clears_the_entry() {
     let dir = failure_dir("explicit");
     let h = harness(2, 1, 8).remembering_failures(&dir);
@@ -1105,7 +1120,7 @@ async fn an_explicit_request_for_a_skipped_track_runs_it_and_a_success_clears_th
 
     assert!(h.unanalyzed().is_empty());
     assert_eq!(h.resume_without_known_failures(), (vec![], 0));
-    assert!(!dir.join("analysis-failures.json").exists());
+    assert!(h.shared.lock().unwrap().analysis_failures().unwrap().is_empty());
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -1139,8 +1154,10 @@ async fn a_result_that_cannot_be_stored_is_not_a_file_failure() {
     h.run_all(h.items.clone()).await;
     h.run_all(h.work_for(&[1])).await;
 
-    assert_eq!(h.coordinator.failures().entry(1), None);
-    assert_eq!(h.coordinator.failures().entry(2), None);
+    let lib = h.shared.lock().unwrap();
+    assert_eq!(h.coordinator.failures().entry(&lib, 1), None);
+    assert_eq!(h.coordinator.failures().entry(&lib, 2), None);
+    drop(lib);
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -1155,6 +1172,6 @@ async fn a_cancelled_analysis_is_not_a_file_failure() {
     };
     tokio::join!(run, cancel);
 
-    assert_eq!(h.coordinator.failures().entry(1), None);
+    assert_eq!(h.coordinator.failures().entry(&h.shared.lock().unwrap(), 1), None);
     std::fs::remove_dir_all(&dir).ok();
 }

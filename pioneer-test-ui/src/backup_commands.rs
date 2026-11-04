@@ -12,8 +12,8 @@ use crate::command_error::CommandError;
 use crate::file_health::{self, SharedHealth};
 
 pub const PROGRESS_EVENT: &str = "backup-progress";
-const CONFIG_SETTINGS: &str = "config.json";
-const UI_SETTINGS: &str = "ui.json";
+pub(crate) const CONFIG_SETTINGS: &str = "config.json";
+pub(crate) const UI_SETTINGS: &str = "ui.json";
 const LAST_BACKUP_KEY: &str = "last_backup";
 const MACHINE_KEYS: [&str; 2] = ["library_path", LAST_BACKUP_KEY];
 const SAFETY_DIR: &str = "Backups";
@@ -57,11 +57,11 @@ struct Progress {
     total: u64,
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-fn read_config(app: &AppHandle) -> Result<Value, String> {
+pub(crate) fn read_config(app: &AppHandle) -> Result<Value, String> {
     let path = crate::config_path(app)?;
     Ok(std::fs::read_to_string(path)
         .ok()
@@ -70,7 +70,7 @@ fn read_config(app: &AppHandle) -> Result<Value, String> {
         .unwrap_or_else(|| serde_json::json!({})))
 }
 
-fn write_config(app: &AppHandle, config: &Value) -> Result<(), String> {
+pub(crate) fn write_config(app: &AppHandle, config: &Value) -> Result<(), String> {
     std::fs::write(crate::config_path(app)?, config.to_string()).map_err(|e| e.to_string())
 }
 
@@ -99,7 +99,7 @@ pub fn merge_restored_config(current: &Value, restored: &Value) -> Value {
     out
 }
 
-fn progress_emitter(app: AppHandle, phase: &'static str) -> impl FnMut(u64, u64) + Send + 'static {
+pub(crate) fn progress_emitter(app: AppHandle, phase: &'static str) -> impl FnMut(u64, u64) + Send + 'static {
     let mut last_percent = u64::MAX;
     move |done, total| {
         let percent = if total == 0 { 100 } else { done.saturating_mul(100) / total };
@@ -156,10 +156,13 @@ pub async fn export_backup(
 }
 
 #[tauri::command(async)]
-pub fn read_backup(path: String, library: State<'_, SharedLibrary>) -> Result<BackupPreview, CommandError> {
+pub fn read_backup(path: String, app: AppHandle) -> Result<BackupPreview, CommandError> {
     let manifest = backup::read_backup_manifest(Path::new(&path))
         .map_err(|e| CommandError::from_anyhow_chain(e).with_path(&path))?;
-    let current_tracks = lock(&library)?.get_all_tracks().map_err(|e| e.to_string())?.len();
+    let current_tracks = match app.try_state::<SharedLibrary>() {
+        Some(library) => lock(&library)?.get_all_tracks().map_err(|e| e.to_string())?.len(),
+        None => 0,
+    };
     Ok(BackupPreview {
         path,
         created_at: manifest.created_at,

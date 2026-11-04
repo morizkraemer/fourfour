@@ -7,6 +7,7 @@
   import './settings-sheet.css';
   import Icon from './Icon.svelte';
   import Kbd from './Kbd.svelte';
+  import { trapTab } from '../utils/focus.js';
 
   /** @typedef {{ key: string, label: string, status?: string }} SheetPage */
 
@@ -28,6 +29,7 @@
   });
 
   function onKeydown(e) {
+    if (sheetEl) trapTab(e, sheetEl);
     if (e.key === 'Escape' && !e.defaultPrevented) {
       e.preventDefault();
       e.stopPropagation();
@@ -65,6 +67,7 @@
               class="ff-settings-sheet__nav-item"
               class:ff-settings-sheet__nav-item--on={page.key === activeKey}
               data-page={page.key}
+              aria-current={page.key === activeKey ? 'page' : undefined}
               onclick={() => onSelect?.(page.key)}
             >
               <span class="ff-settings-sheet__nav-label">{page.label}</span>

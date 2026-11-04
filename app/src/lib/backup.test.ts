@@ -78,4 +78,19 @@ describe('backup copy', () => {
     ]);
     expect(restoreLines({ ...preview, includes_audio: true, audio_files: 1 })[1].text).toBe('1 audio file inside: you choose a folder for them next');
   });
+
+  it('leaves the library that would not open alone when restoring from the recovery screen', () => {
+    const preview = {
+      path: '/b/library-backup-2026-10-17.tar.gz',
+      created_at: new Date(2026, 9, 17, 20).toISOString(),
+      track_count: 176,
+      playlist_count: 4,
+      includes_audio: false,
+      audio_files: 0,
+      current_tracks: 0,
+    };
+    const lines = restoreLines(preview, true);
+    expect(lines[0]).toEqual({ status: 'online', text: "The backup becomes your library. The library file that wouldn't open is left as it is" });
+    expect(lines.map((l) => l.text).join(' ')).not.toMatch(/Replaces|saved as a backup/);
+  });
 });

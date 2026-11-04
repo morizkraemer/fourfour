@@ -76,11 +76,20 @@
 .ff-sbrow:hover:not(.ff-sbrow--active):not(.ff-sbrow--selected) {
   background: var(--ff-hover);
 }
-.ff-sbrow:hover .ff-sbrow__count {
+.ff-sbrow:hover .ff-sbrow__count,
+.ff-sbrow:focus-within .ff-sbrow__count {
   display: none;
 }
-.ff-sbrow:hover .ff-sbrow__action {
+.ff-sbrow:hover .ff-sbrow__action,
+.ff-sbrow:focus-within .ff-sbrow__action {
   display: flex;
+}
+.ff-sbrow:focus-visible {
+  outline: 1px solid var(--ff-accent);
+  outline-offset: -1px;
+}
+.ff-sbrow__action:focus-visible {
+  outline: 1px solid var(--ff-accent);
 }
 .ff-sbrow--active,
 .ff-sbrow--selected {

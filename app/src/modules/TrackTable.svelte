@@ -25,11 +25,14 @@
     isTrackAnalyzing,
     requestRowPreviews,
   } from '../stores/library.svelte.ts';
+  import { announce } from '../stores/announce.svelte.ts';
+  import { moveSelectedByOne } from '../lib/playlistReorder.ts';
   import { commitTrackRating } from '../stores/track-edits.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
+  import LibraryRecoveryPanel from './LibraryRecoveryPanel.svelte';
   import { pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
   import { createDetailPrefetcher } from '../services/detail-prefetch.ts';
   import {
@@ -67,7 +70,9 @@
   /** organize=true marks this table as the docked organize-panel destination. */
   let { sourceId = undefined, embedded = false, layoutKindOverride = undefined, organize = false } = $props();
 
+  const uid = $props.id();
   let lastSelectedId = null;
+  let cursorIndex = $state(-1);
   let tableBodyEl = $state(null);
   let columnMenu = $state({ open: false, x: 0, y: 0 });
   let rowMenu = $state({ open: false, x: 0, y: 0, trackId: null });
@@ -147,6 +152,7 @@
   }
 
   let effectiveSource = $derived(sourceId ?? ui.activeSidebarRow);
+  let showOpenFailure = $derived(!embedded && library.tracksLoaded && library.openFailure !== null);
   let showLibraryEmpty = $derived(!embedded && library.tracksLoaded && library.trackCount === 0);
   const skeletonRows = Array.from({ length: 24 }, (_, i) => i);
 
@@ -292,6 +298,7 @@
       return;
     }
     if (dragging || marqueeActive) return;
+    cursorIndex = rowIndex;
     if (event.shiftKey && lastSelectedId !== null) {
       selectRange(lastSelectedId, track.id, currentTracks);
     } else if (event.metaKey || event.ctrlKey) {
@@ -306,16 +313,110 @@
 
   function handleRowDblClick(track, event) {
     event.preventDefault();
+    openTrack(track, !!event.target.closest?.('[data-wave-seek]'));
+  }
+
+  function openTrack(track, fromWave) {
     if (dragging || isUsbView) return;
     select(track.id);
     lastSelectedId = track.id;
-    if (player.track?.id === track.id && !player.loading && event.target.closest?.('[data-wave-seek]')) {
+    if (player.track?.id === track.id && !player.loading && fromWave) {
       if (!player.playing) void play();
     } else if (player.track?.id === track.id && !player.loading) {
       void playFromStart();
     } else {
       queuePlayAfterLoad();
       void loadPlayerTrack(track);
+    }
+  }
+
+  function rowId(index) {
+    return `${uid}-row-${index}`;
+  }
+
+  function revealRow(index) {
+    if (!tableScrollEl) return;
+    const header = headerHeight || tableScrollEl.querySelector('.ff-colh')?.offsetHeight || 0;
+    const top = scrollTopToReveal(index, {
+      scrollTop: tableScrollEl.scrollTop,
+      viewportHeight: tableScrollEl.clientHeight,
+      headerHeight: header,
+      rowCount: currentTracks.length,
+    });
+    if (top !== tableScrollEl.scrollTop) tableScrollEl.scrollTop = top;
+  }
+
+  function moveCursor(from, to, event) {
+    const index = Math.min(Math.max(to, 0), currentTracks.length - 1);
+    const track = currentTracks[index];
+    cursorIndex = index;
+    if (event.shiftKey) {
+      if (lastSelectedId === null) lastSelectedId = currentTracks[Math.max(from, 0)]?.id ?? track.id;
+      const anchor = Math.max(0, currentTracks.findIndex((t) => t.id === lastSelectedId));
+      setSelection(currentTracks.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map((t) => t.id));
+    } else {
+      select(track.id);
+      lastSelectedId = track.id;
+      prefetchNeighbours(index);
+    }
+    revealRow(index);
+  }
+
+  function openRowMenuAtCursor(index) {
+    const track = currentTracks[index];
+    if (!track) return;
+    const rect = (tableBodyEl.querySelector(`[data-row-index="${index}"]`) ?? tableBodyEl).getBoundingClientRect();
+    closeTableMenus();
+    rowMenu = { open: true, x: rect.left + 24, y: rect.bottom, trackId: track.id };
+  }
+
+  async function moveSelectionByKey(direction) {
+    const playlist = activePlaylist;
+    if (!canReorderRows || !playlist || currentTracks.length !== playlist.track_ids.length) return;
+    const order = currentTracks.map((t) => t.id);
+    const next = moveSelectedByOne(order, selection.ids, direction);
+    if (!next) {
+      announce(direction === 'up' ? 'Already at the top' : 'Already at the bottom');
+      return;
+    }
+    const cursorId = currentTracks[cursorIndex]?.id;
+    await reorderPlaylistTracks(playlist.id, next);
+    const newCursor = next.indexOf(cursorId);
+    if (newCursor >= 0) cursorIndex = newCursor;
+    revealRow(cursorIndex);
+    const count = selection.ids.size;
+    const where = `position ${cursorIndex + 1} of ${next.length}`;
+    announce(count === 1 ? `Moved ${currentTracks[cursorIndex]?.title ?? 'track'} ${direction}, ${where}` : `Moved ${count} tracks ${direction}, cursor at ${where}`);
+  }
+
+  function onListKeydown(e) {
+    if (e.target !== e.currentTarget || currentTracks.length === 0) return;
+    if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      void moveSelectionByKey(e.key === 'ArrowUp' ? 'up' : 'down');
+      return;
+    }
+    if (e.altKey) return;
+    const last = currentTracks.length - 1;
+    const stored = cursorIndex >= 0 && cursorIndex <= last ? cursorIndex : currentTracks.findIndex((t) => selection.ids.has(t.id));
+    const page = Math.max(1, Math.floor(((tableScrollEl?.clientHeight ?? 0) - headerHeight) / ROW_HEIGHT) - 1);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      setSelection(currentTracks.map((t) => t.id));
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) return;
+    const targets = { ArrowDown: stored + 1, ArrowUp: stored - 1, PageDown: stored + page, PageUp: stored - page, Home: 0, End: last };
+    if (e.key in targets) {
+      e.preventDefault();
+      moveCursor(stored, targets[e.key], e);
+    } else if (e.key === 'Enter' && stored >= 0) {
+      e.preventDefault();
+      openTrack(currentTracks[stored], false);
+    } else if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && stored >= 0) {
+      e.preventDefault();
+      if (!selection.ids.has(currentTracks[stored].id)) select(currentTracks[stored].id);
+      openRowMenuAtCursor(stored);
     }
   }
 
@@ -684,7 +785,9 @@
   onmousedown={() => {}}
   oncontextmenu={openListMenu}
 >
-  {#if showLibraryEmpty}
+  {#if showOpenFailure}
+    <LibraryRecoveryPanel />
+  {:else if showLibraryEmpty}
     <div class="ff-table__empty-container">
       <EmptyState
         title="No tracks loaded"
@@ -739,7 +842,13 @@
         data-table-boot={booting ? '' : undefined}
         aria-busy={booting ? 'true' : undefined}
         inert={booting}
-        role="list"
+        role="listbox"
+        tabindex="0"
+        data-focus-first
+        aria-label="Tracks"
+        aria-multiselectable="true"
+        aria-activedescendant={cursorIndex >= firstRow && cursorIndex < endRow && !booting ? rowId(cursorIndex) : undefined}
+        onkeydown={onListKeydown}
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
         onselectstart={(e) => e.preventDefault()}
@@ -778,6 +887,12 @@
             data-track-row={track && !booting ? '' : undefined}
             data-boot-row={track && booting ? '' : undefined}
             data-row-index={index}
+            data-cursor={index === cursorIndex ? '' : undefined}
+            id={rowId(index)}
+            role={track ? 'option' : undefined}
+            aria-selected={track ? selection.ids.has(track.id) : undefined}
+            aria-posinset={track ? index + 1 : undefined}
+            aria-setsize={track ? shownTracks.length : undefined}
             data-file-status={fileState}
             title={fileState ? fileStateTooltip(fileState, track.filePath) : undefined}
             style:top="{rowTop(index)}px"
@@ -883,6 +998,13 @@
   }
   .ff-table__body--marquee {
     cursor: default;
+  }
+  .ff-table__body:focus {
+    outline: none;
+  }
+  .ff-table__body:focus-visible .ff-table__row[data-cursor] {
+    outline: 1px solid var(--ff-accent);
+    outline-offset: -1px;
   }
   .ff-table {
     -webkit-user-select: none;
