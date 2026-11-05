@@ -434,7 +434,7 @@ export function sortTracks<T extends Record<string, unknown>>(
   const positions = key === 'fav' ? null : libraryPositionsOf(tracks);
   if (positions) return sortLibraryRows(tracks, positions, key, dir);
   const members = key === 'fav' ? null : libraryMembersOf(tracks);
-  const byRank = members && sortMemberRows(tracks, members, key, dir);
+  const byRank = members && sortByColumnRank(tracks, members, key, dir);
   if (byRank) return byRank;
   const keyed =
     key === 'fav'
@@ -582,14 +582,9 @@ function sortLibraryRows<T extends Record<string, unknown>>(tracks: T[], positio
   return out;
 }
 
-let memberSlots = new Int32Array(0);
+let slotOfRank = new Int32Array(0);
 
-/**
- * `tracks` (rows of a playlist, at `members` of `library.tracks`, each position once) in the order the comparator gives: by
- * their place in the order of the whole column, where equal values are in library order and need their order in `tracks`
- * back. `null` when that column's order would be built just for a small list.
- */
-function sortMemberRows<T extends Record<string, unknown>>(tracks: T[], members: Int32Array, key: string, dir: 1 | -1): T[] | null {
+function sortByColumnRank<T extends Record<string, unknown>>(tracks: T[], members: Int32Array, key: string, dir: 1 | -1): T[] | null {
   const rows = untrack(() => library.tracks) as T[];
   const known = columnSorts.get(key);
   const reusable = known !== undefined && libraryPositionsChangedSince(known.tracks) !== null;
@@ -597,12 +592,12 @@ function sortMemberRows<T extends Record<string, unknown>>(tracks: T[], members:
   const entry = columnSortOf(rows, key);
   const sorted = orderOf(entry, dir);
   const count = members.length;
-  if (memberSlots.length < rows.length) memberSlots = new Int32Array(rows.length);
+  if (slotOfRank.length < rows.length) slotOfRank = new Int32Array(rows.length);
   const ranks = new Int32Array(count);
   for (let i = 0; i < count; i++) {
     const rank = sorted.rank[members[i]];
     ranks[i] = rank;
-    memberSlots[rank] = i;
+    slotOfRank[rank] = i;
   }
   ranks.sort();
   const slots = new Int32Array(count);
@@ -612,7 +607,7 @@ function sortMemberRows<T extends Record<string, unknown>>(tracks: T[], members:
     const value = values[sorted.order[ranks[from]]];
     let to = from + 1;
     while (to < count && values[sorted.order[ranks[to]]] === value) to++;
-    for (let k = from; k < to; k++) slots[k] = memberSlots[ranks[k]];
+    for (let k = from; k < to; k++) slots[k] = slotOfRank[ranks[k]];
     if (to - from > 1) slots.subarray(from, to).sort();
     from = to;
   }

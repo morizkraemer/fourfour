@@ -818,7 +818,6 @@ export function hasUnanalyzedTracks(): boolean {
   return false;
 }
 
-/** Ids that are small whole numbers get a table of positions (plus one) by id: a lookup there is a read, not a hash. */
 function positionsByIdTable(tracks: readonly Record<string, any>[]): Int32Array | null {
   let highest = 0;
   for (let i = 0; i < tracks.length; i++) {
@@ -905,16 +904,15 @@ interface MemberRows {
 const memberRows = new WeakMap<object, MemberRows>();
 const playlistViews = new WeakMap<number[], { list: object; rows: any[] }>();
 
-/**
- * Where the rows of a playlist (or of a `filterTracks` result of one) sit in `library.tracks`, in the order of the rows;
- * `null` for any other list, and when the library list was replaced since (bumps keep positions).
- */
 function membersOf(rows: readonly unknown[]): MemberRows | null {
   const found = memberRows.get(rows);
   return found && libraryPositionsChangedSince(found.list) !== null ? found : null;
 }
 
-/** `membersOf(rows)` for rows whose positions are all different. */
+/**
+ * Where the rows of a playlist, or of a `filterTracks` result of one, sit in `library.tracks` (in the order of the rows,
+ * each position once); `null` for any other list and once the library list was replaced (bumps keep positions).
+ */
 export function libraryMembersOf(rows: readonly unknown[]): Int32Array | null {
   const found = membersOf(rows);
   return found?.unique ? found.members : null;
@@ -941,7 +939,6 @@ function buildPlaylistRows(ids: readonly number[], tracks: any[]): { rows: any[]
   return { rows, found: { list: tracks, members: members.subarray(0, count), unique } };
 }
 
-/** The rows of a playlist: the same array while neither its ids nor the fields of its tracks changed. */
 function playlistRowsOf(ids: number[]): any[] {
   const tracks = library.tracks;
   const view = playlistViews.get(ids);
