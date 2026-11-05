@@ -2386,3 +2386,38 @@ The screenshot hashes of the first rows and of the settled screen are the ones R
 After the rebase onto `7056104`: `npx vitest run` 940 passed (2 skipped), `npm run check` 0 errors, `npm run build` ok, smoke 114 passed and 0 failed in Chromium and in WebKit, and all the screenshot and HTML hashes above are the same against a fresh build of `7056104` in both browsers. The timings above were not repeated on the rebased tree (r120 changes the answer path, not the mount).
 
 Scratch (`~/.cache/r121-work`, with the scripts that read the traces and profiles) is deleted after this item.
+
+## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
+
+One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
+
+**Go (from the dev box, after Merlin's go):**
+
+```bash
+cd /home/merlin/dev/projects/fourfour/.claude/worktrees/agent-a1492114039f883d9 && scripts/mac/night3.sh --remote
+```
+
+It bundles the branches, copies them and the int8 model to `mbp` (the `ship-dmg.sh` method: `git bundle` + rsync, GitHub never touched), starts the run there under `caffeinate -i` with `nohup`, waits, and copies `summary.md` and the per-item results back to `build/mac/night3-<date>/` on the box. If the ssh session drops the Mac run goes on; `scripts/mac/night3.sh --remote --collect` waits for it and fetches. `--only 3,4` reruns single items. `--dry-run` prints every command (nothing runs).
+
+**mac-queue does not carry this.** `mac-queue add` knows Swift/Xcode job kinds and rejects arbitrary commands, and it has no fourfour profile. Earlier fourfour nights (R89, R26) ran by `ssh mbp` on Merlin's go; this does the same with one command. A `night` job kind in lab-infra would be the clean fix, and is not part of this task.
+
+| # | Item | How | Gate |
+|---|---|---|---|
+| 1 | ov-1028 (r109 early load_state, r111, r113-r115, r114 lazy dialogs, r120 binary load_state, r121 mount): build, scratch-HOME launch, rows on screen, first row, interactive, first Settings open | `cargo tauri build --features coreml --bundles app` from a worktree of `ov-1028`; one launch with the perf probe, soak action `settings` (cycle 1 is the first, lazy open) | opens, first row and interactive marks, first row within 15% of the last cold Mac number (868 ms, R89) |
+| 2 | `perf-night.sh --size 10k --runs 3 --expand-runs 5` on that app | the existing script, from the worktree, scratch output under the night directory | warm first row, warm interactive, cold first row within 15% of R89 (628 / 645 / 868 ms), first expand median under 50 ms, scroll during analysis p95 under 25 ms |
+| 3 | r110 first result on a quiet machine | `scripts/mac/night3-first.py` (macOS port of `r110-first.py`), rten (the burst is rten only), 24 masters, 6 interleaved rounds, a trial starts at 80% idle or after 60 s | r110 median below ov-1028, and at least 3 quiet trials per build |
+| 4 | Chunk 500 on CoreML (Waiting 43) and int8 rten at 500 (Waiting 44) against CoreML 1500 | `bench_analysis` of `r98-mac-pair` (the only build with `FOURFOUR_BEAT_CHUNK` / `FOURFOUR_BEAT_MODEL`), 200 fixture tracks, 3 interleaved rounds, plus the ov-1028 binary as a drift row; `time -l` for RSS and CPU | tracks/min at least 95% of CoreML 1500 and peak RSS not higher (the r98 gate). Quality is not scored here |
+| 5 | cores-1 against cores-2 with the UI busy (Waiting 29) | `bench_analysis` of ov-1028, `--threads cores-1` / `cores-2`, `--ui-busy 2000/6000`, 24 masters, 3 interleaved rounds | runs clean; the throughput gain is the answer (r108 predicted +13% on 16 cores, +24% on 8) |
+| 6 | Ears and eyes | not automated, see below | Merlin |
+
+**Expected duration:** about 2.5 hours on `mbp` (cold builds of four targets in one shared cargo target about 25 min, items 1-2 about 35 min, item 3 about 15 min, item 4 about 25 min, item 5 about 6 min, plus waits for quiet). A window opens for each app launch in items 1-2 (about 25 min in all); leave the Mac alone while items 2-5 run, the numbers want a quiet machine. **Free disk needed:** 35 GB at the start (the script refuses below that; `NIGHT3_MIN_FREE_GB`): one shared cargo target 15-20 GB, three worktrees with `node_modules` about 3 GB, app and bench binaries 0.5 GB, a copy of the 10k library for one launch, models 0.5 GB. The 10k fixture (`~/.cache/ff-fixture/10k`), the beat models (`~/.cache/fourfour-models`) and an ssh path from the box are assumed present, as in R89. `--clean` removes the worktrees and scratch at the end; the cargo target stays (delete `build/mac/night3-target` by hand when done, see "Prune worker caches").
+
+**Reading the summary.** `summary.md` has one row per item (PASS, FAIL, or SKIP with the numbers), the protected-paths result, then one table per item. FAIL means a gate above was missed, not that the script broke; a broken step says so in the row and in `night.log`. Item 3 prints FAIL when the machine was not quiet, so the number is not read as a verdict.
+
+**Things this does not cover.** The Settings number is a proxy (a whole soak cycle; the probe has no mark for the first dialog open, adding one is a change in `pioneer-test-ui/src/perf_probe.js`, outside this task). Item 4 has no quality score (the o3 reference set is not on the Mac); the r96/r98 scores stand. r123 is not in ov-1028, so the r123 check below needs its own install.
+
+### Merlin's ears and eyes (phone checklist, not automated)
+
+1. **r123 audio (branch `r123-idle-cpu`, needs a Mac install of that branch first, ask for it).** Long track (over 6 min). Set the buffer to 32, then 64 frames. Play 2 min: any click or dropout? Seek 5 times (bar jumps, scrub): any glitch? Minimise the window for 30 s while playing, bring it back: sound unbroken, meters alive again at once.
+2. **Waiting 16, bar 1 (b15-bar1 e717de0).** Open the ten tracks listed in `docs/analysis/rust-status-2026-10-28.md` ("the last five are the regressions to listen to"). For each: does bar 1 sit on the first downbeat as Rekordbox has it? Verdict per track: ok / wrong. Land the rule if the five regressions are ok.
+3. **Waiting 39, user docs marks (branch `r53-user-docs-v2` 56f7625, `docs/user/`).** 20 "(to confirm)" marks: faq 10, usb 3, known-issues 4, install 1, quick-start 1, README 1 (`grep -n "(to confirm)" docs/user/*.md`). Read on the phone, confirm each on the Mac: right, or what the app really does. Send back the list of answers.
