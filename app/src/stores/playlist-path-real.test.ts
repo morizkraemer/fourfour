@@ -134,7 +134,16 @@ function script(name: string): Step[] {
   steps.push({ name: `${name}: sorted clear`, run: () => (view.search(''), rows()) });
   steps.push({ name: `${name}: sorted switch away`, run: () => (view.show('All Tracks'), rows()) });
   steps.push({ name: `${name}: sorted switch back`, run: () => (view.show(name), rows()) });
-  steps.push({ name: `${name}: sorted bump bpm`, run: () => bumpBpm(name, rows) });
+  let bumped: Row[] = [];
+  steps.push({
+    name: `${name}: sorted bump bpm`,
+    prepare: () => {
+      const members = playlistByName(name)!.track_ids;
+      const byId = new Map(library.tracks.map((t) => [t.id, t]));
+      bumped = [0, 1, 2, 3, 4].map((n) => byId.get(members[(n * 331 + 17) % members.length])!);
+    },
+    run: () => bumpBpm(name, rows, bumped),
+  });
   steps.push({ name: `${name}: unsort`, run: () => (clearSort('playlist'), rows()) });
 
   const members = () => [...playlistByName(name)!.track_ids];
@@ -223,14 +232,11 @@ function script(name: string): Step[] {
   return steps;
 }
 
-function bumpBpm(name: string, rows: () => Row[]): Row[] {
-  const members = playlistByName(name)!.track_ids;
-  const byId = new Map(library.tracks.map((t) => [t.id, t]));
-  for (let n = 0; n < 5; n++) {
-    const row = byId.get(members[(n * 331 + 17) % members.length])!;
+function bumpBpm(name: string, rows: () => Row[], targets: Row[]): Row[] {
+  targets.forEach((row, n) => {
     row.bpm = (90 + n * 7).toFixed(1);
     bumpLibraryTracks([row.id]);
-  }
+  });
   return rows();
 }
 

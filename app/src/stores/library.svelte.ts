@@ -801,7 +801,7 @@ function withChangedMatches(earlier: number[], changed: number[], haystacks: str
   return merged;
 }
 
-let indexCache: { source: object; length: number; byId: Map<number, number> } | null = null;
+let indexCache: { source: object; length: number; byId: Map<number, number> | null; slots: Int32Array | null } | null = null;
 
 /** Tracks never analysed. Changes with the track list (every field change bumps it); counted on the plain objects. */
 export function unanalyzedTrackCount(): number {
@@ -818,15 +818,37 @@ export function hasUnanalyzedTracks(): boolean {
   return false;
 }
 
-function trackIndexById(id: number): number {
+/** Ids that are small whole numbers get a table of positions (plus one) by id: a lookup there is a read, not a hash. */
+function positionsByIdTable(tracks: readonly Record<string, any>[]): Int32Array | null {
+  let highest = 0;
+  for (let i = 0; i < tracks.length; i++) {
+    const id = tracks[i].id;
+    if (!Number.isInteger(id) || id < 0) return null;
+    if (id > highest) highest = id;
+  }
+  if (highest > tracks.length * 8 + 4096) return null;
+  const slots = new Int32Array(highest + 1);
+  for (let i = 0; i < tracks.length; i++) slots[tracks[i].id] = i + 1;
+  return slots;
+}
+
+function trackIndexTables() {
   if (!indexCache || indexCache.source !== plainTracks || indexCache.length !== plainTracks.length) {
+    const slots = positionsByIdTable(plainTracks);
     indexCache = {
       source: plainTracks,
       length: plainTracks.length,
-      byId: new Map(plainTracks.map((t, i) => [t.id as number, i])),
+      byId: slots ? null : new Map(plainTracks.map((t, i) => [t.id as number, i])),
+      slots,
     };
   }
-  return indexCache.byId.get(id) ?? -1;
+  return indexCache;
+}
+
+function trackIndexById(id: number): number {
+  const { slots, byId } = trackIndexTables();
+  if (slots) return (id >>> 0) === id && id < slots.length ? slots[id] - 1 : -1;
+  return byId!.get(id) ?? -1;
 }
 
 /** Covers stored for imported tracks whose rows have not landed yet (`landImportedTracks`). */
@@ -899,29 +921,24 @@ export function libraryMembersOf(rows: readonly unknown[]): Int32Array | null {
 }
 
 function buildPlaylistRows(ids: readonly number[], tracks: any[]): { rows: any[]; found: MemberRows | null } {
+  if (tracks.length !== plainTracks.length) return { rows: ids.map(libraryTrackById).filter(Boolean), found: null };
   const rows: any[] = new Array(ids.length);
   const members = new Int32Array(ids.length);
   const seen = new Uint8Array(tracks.length);
   let count = 0;
-  let aligned = true;
   let unique = true;
+  const { slots, byId } = trackIndexTables();
   for (let i = 0; i < ids.length; i++) {
     const id = ids[i];
-    const position = trackIndexById(id);
+    const position = slots ? ((id >>> 0) === id && id < slots.length ? slots[id] - 1 : -1) : (byId!.get(id) ?? -1);
     if (position < 0) continue;
-    let row = tracks[position];
-    if (row?.id !== id) {
-      row = tracks.find((t) => t.id === id);
-      if (row === undefined) continue;
-      aligned = false;
-    }
-    rows[count] = row;
+    rows[count] = tracks[position];
     members[count++] = position;
     if (seen[position] === 1) unique = false;
     seen[position] = 1;
   }
   rows.length = count;
-  return { rows, found: aligned ? { list: tracks, members: members.subarray(0, count), unique } : null };
+  return { rows, found: { list: tracks, members: members.subarray(0, count), unique } };
 }
 
 /** The rows of a playlist: the same array while neither its ids nor the fields of its tracks changed. */

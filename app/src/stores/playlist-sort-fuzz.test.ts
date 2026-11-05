@@ -281,4 +281,15 @@ describe('playlist rows, filter and sort against a plain reference', () => {
     view.show('all');
     expect(view.rows.length).toBe(40);
   });
+
+  it('resolves playlist ids against dense, sparse and huge track ids', async () => {
+    for (const ids of [[1, 2, 3, 4, 5, 6], [1, 40000, 7, 1e6, 5, 6], [1, 2, 4294967295, 4, 5, 6]]) {
+      loaded.tracks = ids.map((id) => ({ ...randomInfo(() => 0.5, id), title: `t${id}` }));
+      loaded.playlists = [{ id: 1, name: 'mixed', track_ids: [ids[2], 3, ids[0], ids[5], 99, ids[2]], parent_id: 0, is_folder: false }];
+      await loadState();
+      const rows = tracksForSidebarSource('mixed').map((row) => (row as Row).id);
+      expect(rows).toEqual([ids[2], 3, ids[0], ids[5], ids[2]].filter((id) => ids.includes(id)));
+      expect(libraryMembersOf(tracksForSidebarSource('mixed'))).toBeNull();
+    }
+  });
 });
