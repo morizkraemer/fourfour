@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { LoadedState } from '../src/services/tauri.svelte.ts';
 import { decodeTrackTable, isTrackTable } from '../src/services/track-table.ts';
@@ -90,6 +90,20 @@ async function rowAt(page: Page, index: number): Promise<Locator> {
   const row = page.locator(`[data-track-row][data-row-index="${index}"]`);
   await row.waitFor();
   return row;
+}
+
+type Profile = { nodes: { id: number; children?: number[]; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples: number[]; timeDeltas: number[] };
+
+async function startProfile(page: Page, out: string) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+  await cdp.send('Profiler.start');
+  return async () => {
+    const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+    writeFileSync(out, JSON.stringify(profile));
+    await cdp.detach();
+  };
 }
 
 async function runScenario(page: Page, read: () => Promise<{ script: number; task: number; layout: number }>, steps: Step[]) {
@@ -232,7 +246,9 @@ test.describe('playlist view latency', () => {
       });
       const read = await metrics(page);
       const steps: Step[] = [];
+      const stopProfile = process.env.FF_PERF_PROFILE_JSON ? await startProfile(page, process.env.FF_PERF_PROFILE_JSON) : null;
       await runScenario(page, read, steps);
+      await stopProfile?.();
       expect(steps.length).toBeGreaterThan(0);
       const line = JSON.stringify({ label: LABEL, run, steps });
       if (REPORT) appendFileSync(REPORT, line + '\n');
