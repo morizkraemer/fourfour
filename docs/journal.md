@@ -618,3 +618,4 @@
 2026-11-04 22:38 orchestrator r121 landed a7500d8 (both smokes 0 failed, 26 suites, vitest 940, CHECKS-OK)
 2026-11-04 23:27 orchestrator r122 handed back ef8dbdc: fused decode+map neutral; lazy rows give 50k first row -50 to -140 ms (WebKit up to -370) but +105 ms idle script, +170 ms first-keystroke hitch in the first 1-2 s, Proxy per row; decided: not landed, branch kept (engineering call, reversible)
 2026-11-04 23:27 orchestrator decided: own prio r124 playlist view speed at 1k/5k/20k in 50k (sonnet high; r113/r115 sped up All Tracks only)
+2026-11-05 00:40 orchestrator r123 handed back 491ffcb: page idle already ~0; backend decoder 0.5 ms poll -> 50 ms (wakeups 1580 -> 39/s), hidden-window tick 1/s, volume poll/diskutil cache; identical screen output; audio unverified on a real device -> parked as Waiting 50; playhead proposal numbers added to 48
