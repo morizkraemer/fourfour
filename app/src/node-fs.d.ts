@@ -7,3 +7,12 @@ declare module 'node:fs' {
 declare module 'node:crypto' {
   export function createHash(algorithm: 'sha256'): { update(data: string): void; digest(encoding: 'hex'): string };
 }
+
+declare module 'node:inspector' {
+  export class Session {
+    connect(): void;
+    disconnect(): void;
+    post(method: string, params?: object, callback?: (error: unknown, result: { profile: unknown }) => void): void;
+    post(method: string, callback: (error: unknown, result: { profile: unknown }) => void): void;
+  }
+}

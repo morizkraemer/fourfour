@@ -88,8 +88,8 @@ export function onTrackListLoaded(listener: () => void) {
  */
 export function bumpLibraryTracks(changedIds: Iterable<number>) {
   const ids = [...changedIds];
-  copyRowFieldsToPlainTracks(ids);
-  if (haystackList) refreshHaystacks(ids);
+  const searchTextChanged = copyRowFieldsToPlainTracks(ids);
+  if (haystackList) refreshHaystacks(searchTextChanged);
   const previous = trackList;
   trackList = trackList.slice();
   recordTrackListBump(previous, trackList, ids);
@@ -308,7 +308,13 @@ const TRACK_VIEW_FIELDS: Record<string, (row: TrackRow) => unknown> = Object.ass
   },
 });
 
-const rowStates = new WeakMap<TrackRow, TrackRow>();
+interface RowEntry {
+  state: TrackRow;
+  touched: Set<string> | null;
+  exposed: Set<string> | null;
+}
+
+const rowEntries = new WeakMap<TrackRow, RowEntry>();
 
 function createRowState(track: TrackRow): TrackRow {
   const created = $derived.by(() => {
@@ -318,13 +324,30 @@ function createRowState(track: TrackRow): TrackRow {
   return untrack(() => created);
 }
 
-function rowStateOf(track: TrackRow): TrackRow {
-  let state = rowStates.get(track);
-  if (!state) {
-    state = createRowState(track);
-    rowStates.set(track, state);
+function rowEntryOf(track: TrackRow): RowEntry {
+  let entry = rowEntries.get(track);
+  if (!entry) {
+    entry = { state: createRowState(track), touched: null, exposed: null };
+    rowEntries.set(track, entry);
   }
-  return state;
+  return entry;
+}
+
+function rowStateOf(track: TrackRow): TrackRow {
+  return rowEntryOf(track).state;
+}
+
+function exposeContainer(entry: RowEntry, key: string | symbol, value: unknown) {
+  if (typeof key === 'string' && value !== null && typeof value === 'object' && isPlainContainer(value)) (entry.exposed ??= new Set()).add(key);
+}
+
+function touchedEntryOf(track: TrackRow, key: string | symbol, value?: unknown): RowEntry {
+  const entry = rowEntryOf(track);
+  if (typeof key === 'string') {
+    (entry.touched ??= new Set()).add(key);
+    exposeContainer(entry, key, value);
+  }
+  return entry;
 }
 
 const rowPlainObject = Symbol('rowPlainObject');
@@ -339,25 +362,32 @@ const trackRowHandler: ProxyHandler<TrackRow> = {
     if (key === 'id') return track.id;
     if (key === rowPlainObject) return track;
     const view = typeof key === 'string' ? TRACK_VIEW_FIELDS[key] : undefined;
-    return view ? view(receiver) : Reflect.get(rowStateOf(track), key, receiver);
+    if (view) return view(receiver);
+    const entry = rowEntryOf(track);
+    const value = Reflect.get(entry.state, key, receiver);
+    exposeContainer(entry, key, value);
+    return value;
   },
   has(track, key) {
     return key in TRACK_VIEW_FIELDS || Reflect.has(rowStateOf(track), key);
   },
   set(track, key, value) {
-    return Reflect.set(rowStateOf(track), key, value);
+    return Reflect.set(touchedEntryOf(track, key, value).state, key, value);
   },
   defineProperty(track, key, descriptor) {
-    return Reflect.defineProperty(rowStateOf(track), key, descriptor);
+    return Reflect.defineProperty(touchedEntryOf(track, key, descriptor.value).state, key, descriptor);
   },
   deleteProperty(track, key) {
-    return Reflect.deleteProperty(rowStateOf(track), key);
+    return Reflect.deleteProperty(touchedEntryOf(track, key).state, key);
   },
   ownKeys(track) {
     return Reflect.ownKeys(rowStateOf(track));
   },
   getOwnPropertyDescriptor(track, key) {
-    return Reflect.getOwnPropertyDescriptor(rowStateOf(track), key);
+    const entry = rowEntryOf(track);
+    const descriptor = Reflect.getOwnPropertyDescriptor(entry.state, key);
+    if (descriptor) exposeContainer(entry, key, descriptor.value);
+    return descriptor;
   },
 };
 
@@ -403,20 +433,64 @@ function isPlainContainer(value: object): boolean {
   return Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype;
 }
 
-function plainValue(value: unknown): unknown {
-  return value !== null && typeof value === 'object' && isPlainContainer(value) ? $state.snapshot(value) : value;
+function ownStringKeys(value: object): string[] {
+  const keys: string[] = [];
+  for (const key of Reflect.ownKeys(value)) if (typeof key === 'string') keys.push(key);
+  return keys;
 }
 
-function copyRowFieldsToPlainTracks(ids: number[]) {
+function plainCopy(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    const copy: unknown[] = new Array(value.length);
+    for (let i = 0; i < value.length; i++) if (i in value) copy[i] = plainCopy(value[i]);
+    return copy;
+  }
+  if (Object.getPrototypeOf(value) === Object.prototype) {
+    const copy: Record<string, unknown> = {};
+    for (const key of ownStringKeys(value)) copy[key] = plainCopy((value as Record<string, unknown>)[key]);
+    return copy;
+  }
+  return $state.snapshot(value);
+}
+
+function plainValue(value: unknown): unknown {
+  return value !== null && typeof value === 'object' && isPlainContainer(value) ? plainCopy(value) : value;
+}
+
+const SEARCH_TEXT_FIELDS = new Set(['title', 'artist', 'album', 'label', 'genre', 'key', 'bpm', 'time', 'filePath', 'index', 'raw']);
+
+function copyRowFieldsToPlainTracks(ids: number[]): number[] {
+  const searchTextChanged: number[] = [];
   untrack(() => {
     for (const id of ids) {
       const i = trackIndexById(id);
       const row = trackList[i];
       const plain = plainTracks[i];
       if (!row || plain?.id !== id || row === plain) continue;
-      for (const key of Object.keys(row)) plain[key] = plainValue(row[key]);
+      const entry = rowEntries.get(plain);
+      if (!entry) continue;
+      const { state, touched, exposed } = entry;
+      entry.touched = null;
+      let changed = false;
+      if (touched) {
+        for (const key of touched) {
+          if (!Reflect.has(state, key)) continue;
+          plain[key] = plainValue(key in TRACK_VIEW_FIELDS ? row[key] : state[key]);
+          changed ||= SEARCH_TEXT_FIELDS.has(key);
+        }
+      }
+      if (exposed) {
+        for (const key of exposed) {
+          if (touched?.has(key) || !Reflect.has(state, key)) continue;
+          plain[key] = plainValue(state[key]);
+          changed ||= SEARCH_TEXT_FIELDS.has(key);
+        }
+      }
+      if (changed) searchTextChanged.push(id);
     }
   });
+  return searchTextChanged;
 }
 
 export const library = $state({
