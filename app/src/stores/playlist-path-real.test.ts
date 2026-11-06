@@ -57,7 +57,7 @@ async function loadWarm() {
   while (!warmup.step(50));
 }
 
-type Row = { id: number };
+type Row = { id: number; bpm?: string };
 
 function idsHash(ids: readonly number[]): string {
   let a = 0x811c9dc5;
