@@ -350,11 +350,9 @@ fn trackload(dir: &Path, work: &Path, samples: usize) {
             };
             let read_ms = ms(t);
             let t = Instant::now();
-            let value = stored.into_json();
+            let text = stored.into_wire();
             let shape_ms = ms(t);
-            let t = Instant::now();
-            let text = serde_json::to_vec(&value).unwrap();
-            let ser_ms = ms(t);
+            let ser_ms = 0.0;
 
             let t = Instant::now();
             let detail = waveform_detail::detail_bytes(&cache, &path).unwrap();
@@ -369,7 +367,7 @@ fn trackload(dir: &Path, work: &Path, samples: usize) {
                         let lib = shared.lock().unwrap();
                         analysis_payload::read_stored_analysis(&lib, *id).unwrap()
                     };
-                    serde_json::to_vec(&stored.into_json()).unwrap()
+                    stored.into_wire()
                 });
                 let detail = scope.spawn(|| {
                     let _track = shared.lock().unwrap().get_track(*id).unwrap().unwrap();
@@ -401,7 +399,10 @@ fn trackload(dir: &Path, work: &Path, samples: usize) {
                 }
                 payload_bytes.push(text.len() as f64);
                 detail_bytes_len.push(detail.len() as f64);
-                hashes.push(format!("{id} {} {}", sha_hex(&text), sha_hex(&detail)));
+                let logical = serde_json::to_vec(&analysis_payload::read_stored_analysis(&shared.lock().unwrap(), *id).unwrap().into_json()).unwrap();
+                let rebuilt = serde_json::to_vec(&analysis_payload::wire_to_json(&text).unwrap()).unwrap();
+                assert!(logical == rebuilt, "track {id}: the wire answer does not carry the logical payload");
+                hashes.push(format!("{id} {} {}", sha_hex(&logical), sha_hex(&detail)));
             }
         }
     }
@@ -430,7 +431,7 @@ fn dump_load(dir: &Path, work: &Path, out: &Path) {
     for id in (1..=total as i64).filter(|id| !unanalysed.contains(id)) {
         let path = lib.get_track(id).unwrap().unwrap().source_path;
         let stored = analysis_payload::read_stored_analysis(&lib, id).unwrap();
-        std::fs::write(out.join(format!("{k}.analysis")), serde_json::to_vec(&stored.into_json()).unwrap()).unwrap();
+        std::fs::write(out.join(format!("{k}.analysis")), stored.into_wire()).unwrap();
         std::fs::write(out.join(format!("{k}.detail")), waveform_detail::detail_bytes(&cache, &path).unwrap()).unwrap();
         k += 1;
     }

@@ -5,6 +5,7 @@ import { pathBaseName } from '../lib/pathName.ts';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
+  decodeAnalysisBytes,
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
@@ -1305,7 +1306,7 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
   };
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
-    const clean = sanitizeAnalysisPayload(data);
+    const clean = sanitizeAnalysisPayload(data instanceof ArrayBuffer ? decodeAnalysisBytes(data) : data);
     if (!clean) {
       throw new Error('Invalid analysis payload from backend');
     }
