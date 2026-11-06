@@ -754,6 +754,31 @@ export function libraryPositionsOf(rows: readonly unknown[]): readonly number[] 
   return found && found.source === current ? found.positions : null;
 }
 
+function libraryMembership(rows: readonly unknown[]): { list: object; positions: ArrayLike<number> | 'all' } | null {
+  if (rows === untrack(() => trackList) || listVersions.has(rows)) return { list: rows, positions: 'all' };
+  const filtered = filterSources.get(rows);
+  if (filtered) return { list: filtered.source, positions: filtered.positions };
+  const playlist = memberRows.get(rows);
+  return playlist ? { list: playlist.list, positions: playlist.members } : null;
+}
+
+/**
+ * Whether two lists of library rows (`library.tracks`, a `filterTracks` result of it, or the rows of a playlist) hold the
+ * same rows in the same order, answered from where the rows sit in `library.tracks` when both were taken before and after
+ * only bumps; `false` when that cannot be told (the rows may still be the same).
+ */
+export function sameLibraryMembers(earlier: readonly unknown[], rows: readonly unknown[]): boolean {
+  if (earlier === rows) return true;
+  const a = libraryMembership(earlier);
+  const b = libraryMembership(rows);
+  if (!a || !b || libraryPositionsChangedSince(a.list) === null || libraryPositionsChangedSince(b.list) === null) return false;
+  if (a.positions === 'all' || b.positions === 'all') return a.positions === b.positions;
+  if (a.positions === b.positions) return true;
+  if (a.positions.length !== b.positions.length) return false;
+  for (let i = 0; i < a.positions.length; i++) if (a.positions[i] !== b.positions[i]) return false;
+  return true;
+}
+
 function narrows(older: string[], terms: string[]): boolean {
   return older.every((old) => terms.some((term) => term.includes(old)));
 }
@@ -841,6 +866,7 @@ export function filterTracks<T extends Record<string, unknown>>(
     const earlier = libraryFilters.history.get(trimmed);
     if (changed && earlier) {
       const indices = withChangedMatches(earlier.indices, changed, haystacks, terms);
+      if (indices === earlier.indices) return remember(history, trimmed, terms, indices, tracks, true, null, earlier.result);
       return remember(history, trimmed, terms, indices, tracks, true);
     }
   }
@@ -852,8 +878,8 @@ export function filterTracks<T extends Record<string, unknown>>(
   return remember(history, trimmed, terms, matchingIndices(haystacks, terms, candidates, masked), tracks, isLibrary, member);
 }
 
-function remember<T>(history: Map<string, FilterEntry>, query: string, terms: string[], indices: number[], tracks: T[], isLibrary: boolean, member: MemberRows | null = null): T[] {
-  const result = indices.length === tracks.length ? tracks : indices.map((i) => tracks[i]);
+function remember<T>(history: Map<string, FilterEntry>, query: string, terms: string[], indices: number[], tracks: T[], isLibrary: boolean, member: MemberRows | null = null, sameRows: readonly unknown[] | null = null): T[] {
+  const result = indices.length === tracks.length ? tracks : sameRows ? (sameRows.slice() as T[]) : indices.map((i) => tracks[i]);
   history.set(query, { terms, indices, result });
   if (history.size > FILTER_HISTORY) history.delete(history.keys().next().value!);
   if (isLibrary) {
@@ -866,9 +892,12 @@ function remember<T>(history: Map<string, FilterEntry>, query: string, terms: st
 }
 
 function withChangedMatches(earlier: number[], changed: number[], haystacks: string[], terms: string[]): number[] {
-  const moved = new Set(changed);
-  const kept = earlier.filter((i) => !moved.has(i));
-  const matching = [...moved].filter((i) => terms.every((term) => haystacks[i].includes(term))).sort((a, b) => a - b);
+  const moved = [...new Set(changed)].sort((a, b) => a - b);
+  const matching = moved.filter((i) => terms.every((term) => haystacks[i].includes(term)));
+  const nowMatching = new Set(matching);
+  if (moved.every((i) => isAmong(earlier, i) === nowMatching.has(i))) return earlier;
+  const dropped = new Set(moved);
+  const kept = earlier.filter((i) => !dropped.has(i));
   if (matching.length === 0) return kept;
   const merged: number[] = [];
   let a = 0;
@@ -877,6 +906,17 @@ function withChangedMatches(earlier: number[], changed: number[], haystacks: str
   while (a < kept.length) merged.push(kept[a++]);
   while (b < matching.length) merged.push(matching[b++]);
   return merged;
+}
+
+function isAmong(ascending: readonly number[], value: number): boolean {
+  let low = 0;
+  let high = ascending.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (ascending[mid] < value) low = mid + 1;
+    else high = mid;
+  }
+  return ascending[low] === value;
 }
 
 let indexCache: { source: object; length: number; byId: Map<number, number> | null; slots: Int32Array | null } | null = null;

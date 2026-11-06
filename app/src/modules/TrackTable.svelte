@@ -24,6 +24,7 @@
     sidebarSourceLabel,
     isTrackAnalyzing,
     requestRowPreviews,
+    sameLibraryMembers,
   } from '../stores/library.svelte.ts';
   import { commitTrackRating } from '../stores/track-edits.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
@@ -205,13 +206,16 @@
     }
     const spec = `${layoutKind}|${layout.sortKey}|${layout.sortDir}`;
     const previous = sorted;
-    const sameRows = previous !== null && previous.spec === spec && sameMembers(previous.members, filteredTracks);
+    const sameRows =
+      previous !== null &&
+      previous.spec === spec &&
+      (sameLibraryMembers(previous.rows, filteredTracks) || sameMembers((previous.members ??= new Set(previous.rows)), filteredTracks));
     if (sameRows && untrack(() => scrolling)) {
       resortWaiting = true;
       return previous.result;
     }
     const result = sortTracks(filteredTracks, layoutKind);
-    sorted = { spec, members: sameRows ? previous.members : new Set(filteredTracks), result };
+    sorted = { spec, rows: filteredTracks, members: sameRows ? previous.members : null, result };
     if (sameRows && previous.result !== result) {
       pendingAnchorPx = untrack(() => anchorShift(previous.result, result, visibleRowRange())) * ROW_HEIGHT;
     }

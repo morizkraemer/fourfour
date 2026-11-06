@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compareSortValues, MAX_REPOSITIONED, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortValue } from './sortOrder.ts';
+import { compareSortValues, MAX_MOVED_IN_PLACE, MAX_REPOSITIONED, moveChangedValues, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortValue } from './sortOrder.ts';
 
 function generator(seed: number) {
   let state = seed;
@@ -162,5 +162,52 @@ describe('withChangedValues', () => {
     expect(withChangedValues(sorted, [3, 1, 2], [], 1)).toBe(sorted);
     const many = Array.from({ length: MAX_REPOSITIONED + 1 }, (_, i) => i);
     expect(withChangedValues(sorted, [3, 1, 2], many, 1)).toBeNull();
+  });
+});
+
+describe('moveChangedValues', () => {
+  it('moves the order in place to where a new sort puts it, repeated over many bumps, and drops the rank', () => {
+    const random = generator(139);
+    for (const kind of ['string', 'number'] as const) {
+      for (let round = 0; round < 40; round++) {
+        const values = randomValues(random, 5 + Math.floor(random() * 300), kind);
+        const direction = round % 2 ? 1 : -1;
+        const sorted = sortedOrder(values, direction);
+        const order = sorted.order;
+        for (let bump = 0; bump < 12; bump++) {
+          expect(sorted.rank.length).toBe(values.length);
+          const changed = Array.from({ length: Math.floor(random() * (MAX_MOVED_IN_PLACE + 1)) }, () => Math.floor(random() * values.length));
+          const fresh = randomValues(random, values.length, kind);
+          for (const p of changed) values[p] = random() < 0.15 ? null : fresh[random() < 0.5 ? p : Math.floor(random() * values.length)];
+          expect(moveChangedValues(sorted, values, changed, direction)).toBe(true);
+          expect(sorted.order).toBe(order);
+          expect([...sorted.order]).toEqual(reference(values, direction));
+          expect(sorted.rankIsBuilt()).toBe(changed.length === 0);
+          sorted.order.forEach((position, i) => expect(sorted.rank[position]).toBe(i));
+        }
+      }
+    }
+  });
+
+  it('touches nothing past the limit', () => {
+    const sorted = sortedOrder([3, 1, 2], 1);
+    const many = Array.from({ length: MAX_MOVED_IN_PLACE + 1 }, (_, i) => i);
+    expect(moveChangedValues(sorted, [9, 8, 7], many, 1)).toBe(false);
+    expect([...sorted.order]).toEqual([1, 2, 0]);
+  });
+});
+
+describe('sortedSubset without a rank', () => {
+  it('gives the same rows with and without the rank of the order', () => {
+    const random = generator(77);
+    for (let round = 0; round < 60; round++) {
+      const values = randomValues(random, 80, 'number');
+      const direction = round % 2 ? 1 : -1;
+      const picked = Array.from({ length: 80 }, (_, i) => i).filter(() => random() < (round % 3 === 0 ? 0.05 : 0.6));
+      const without = sortedSubset(picked, sortedOrder(values, direction));
+      const ranked = sortedOrder(values, direction);
+      void ranked.rank;
+      expect([...without]).toEqual([...sortedSubset(picked, ranked)]);
+    }
   });
 });
