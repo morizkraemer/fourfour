@@ -22,7 +22,7 @@
       : undefined
   );
 
-  let versionStr = $derived(library.appVersion ? `v${library.appVersion}` : '');
+  let versionStr = $derived(library.appVersion ? `v${library.appVersion} · build ${__FF_BUILD__.number}` : '');
 </script>
 
 <div class="ff-statusbar-module">

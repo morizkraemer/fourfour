@@ -10,6 +10,7 @@
   <img class="ff-about__icon" src={appIcon} alt="" width="96" height="96" />
   <div class="ff-about__name">fourfour</div>
   <div class="ff-about__version" data-about-version>{version}</div>
+  <div class="ff-about__version" data-about-build>Build {__FF_BUILD__.number}{__FF_BUILD__.commit ? ` (${__FF_BUILD__.commit})` : ''}</div>
   <div class="ff-about__tagline">Sync, play and organize your DJ library.</div>
 </div>
 
