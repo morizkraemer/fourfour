@@ -139,6 +139,24 @@ describe('withChangedValues', () => {
     }
   });
 
+  it('moves hundreds of positions at once, with repeats, ties and blanks', () => {
+    const random = generator(41);
+    for (const kind of ['string', 'number'] as const) {
+      for (let round = 0; round < 40; round++) {
+        const size = 200 + Math.floor(random() * 600);
+        const values = randomValues(random, size, kind);
+        const direction = round % 2 ? 1 : -1;
+        const sorted = sortedOrder(values, direction);
+        const changed = Array.from({ length: 70 + Math.floor(random() * 500) }, () => Math.floor(random() * size));
+        const fresh = randomValues(random, size, kind);
+        for (const p of changed) values[p] = random() < 0.1 ? null : fresh[random() < 0.5 ? p : Math.floor(random() * size)];
+        const moved = withChangedValues(sorted, values, changed, direction)!;
+        expect([...moved.order]).toEqual(reference(values, direction));
+        moved.order.forEach((position, i) => expect(moved.rank[position]).toBe(i));
+      }
+    }
+  });
+
   it('gives up past the limit and returns the same order for no change', () => {
     const sorted = sortedOrder([3, 1, 2], 1);
     expect(withChangedValues(sorted, [3, 1, 2], [], 1)).toBe(sorted);
