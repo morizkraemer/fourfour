@@ -2825,6 +2825,20 @@ So the 89-154 ms of R129 is not fully gone: the cold-column rebuild (the part wi
 
 Scratch (`~/.cache/r137`) is deleted after this item.
 
+## R138 allocator env (2026-11-06, `r138-alloc-env`)
+
+R106's three glibc variables (`MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1073741824`) are set for the Linux `bench_analysis` runs in `scripts/perf.sh` only, through a `bench_analysis` wrapper that applies them when `uname -s` is Linux. The app, the macOS path and the startup and load steps are unchanged. `benchmark/scripts/` has no Linux `analyze-json` or `bench_analysis` caller (its Python batch runs `fourfour-analyze`). `fourfour-analysis-rs/scripts/parity_run.py` runs `analyze-json` but is outside this scope and is not changed.
+
+Identity and cost: `analyze-json --threads 2` on 10 tracks (every 63rd file of `benchmark/datasets/rekordbox-testdata-2025`: 4 MP3, 4 WAV, 2 FLAC), one run each, base then env, box load average 16-37 from other workers.
+
+| | user | sys | CPU | wall | output sha256 |
+|---|---:|---:|---:|---:|---|
+| base (default glibc) | 715.7 s | 145.2 s | 860.9 s | 709.1 s | `2b9c235b55f5625bcd1c35dd1f0f157bc30f50ed4fcfb9c51a7879487bf8fa12` |
+| env (R106 variables) | 689.5 s | 4.4 s | 693.9 s | 627.9 s | `2b9c235b55f5625bcd1c35dd1f0f157bc30f50ed4fcfb9c51a7879487bf8fa12` |
+| change | -3.7% | -97% | **-19.4%** | -11.4% | equal |
+
+Same as R106 in direction: sys time goes to near zero and CPU drops about a fifth. Wall moved less than in R106 (-11% against -24%) under heavier, uneven load, and only one pair ran, so read the wall number as a rough figure. Peak RSS was not measured in this run (R106: +10%).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
