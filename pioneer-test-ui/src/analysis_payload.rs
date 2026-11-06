@@ -23,17 +23,27 @@ fn downsample_3band(source: &[[u8; 3]], max_samples: usize) -> Cow<'_, [[u8; 3]]
         return Cow::Borrowed(source);
     }
     let n = source.len();
-    Cow::Owned(
-        (0..max_samples)
-            .map(|i| {
-                let start = i * n / max_samples;
-                let end = ((i + 1) * n / max_samples).max(start + 1).min(n);
-                source[start..end].iter().copied().fold([0u8; 3], |[l, m, h], [l2, m2, h2]| {
-                    [l.max(l2), m.max(m2), h.max(h2)]
-                })
-            })
-            .collect(),
-    )
+    let mut out = Vec::with_capacity(max_samples);
+    let (whole, fraction) = (n / max_samples, n % max_samples);
+    let (mut start, mut next, mut carry) = (0, 0, 0);
+    for _ in 0..max_samples {
+        next += whole;
+        carry += fraction;
+        if carry >= max_samples {
+            carry -= max_samples;
+            next += 1;
+        }
+        let end = next.max(start + 1).min(n);
+        let mut peak = [0u8; 3];
+        for column in &source[start..end] {
+            peak[0] = peak[0].max(column[0]);
+            peak[1] = peak[1].max(column[1]);
+            peak[2] = peak[2].max(column[2]);
+        }
+        out.push(peak);
+        start = next;
+    }
+    Cow::Owned(out)
 }
 
 fn color_detail_for_player(cw: &models::ColorWaveform) -> Cow<'_, [[u8; 3]]> {
@@ -320,6 +330,30 @@ mod tests {
         let source: Vec<[u8; 3]> = (0..10u8).map(|n| [n, 0, 0]).collect();
         let out = downsample_3band(&source, 5);
         assert_eq!(out, vec![[1, 0, 0], [3, 0, 0], [5, 0, 0], [7, 0, 0], [9, 0, 0]]);
+    }
+
+    fn downsample_by_windows(source: &[[u8; 3]], max_samples: usize) -> Vec<[u8; 3]> {
+        let n = source.len();
+        (0..max_samples)
+            .map(|i| {
+                let start = i * n / max_samples;
+                let end = ((i + 1) * n / max_samples).max(start + 1).min(n);
+                source[start..end].iter().copied().fold([0u8; 3], |[l, m, h], [l2, m2, h2]| [l.max(l2), m.max(m2), h.max(h2)])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn downsample_equals_the_window_fold_for_any_ratio() {
+        let mut seed = 7u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as u8
+        };
+        for (n, max) in [(10, 5), (11, 5), (1200, 1199), (585_000, 500_000), (4_000, 2048), (2049, 2048), (7, 3), (100_000, 1200)] {
+            let source: Vec<[u8; 3]> = (0..n).map(|_| [next(), next(), next()]).collect();
+            assert_eq!(downsample_3band(&source, max).as_ref(), downsample_by_windows(&source, max).as_slice(), "{n} to {max}");
+        }
     }
 
     fn base64_decode(text: &str) -> Vec<u8> {
