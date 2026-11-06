@@ -34,26 +34,53 @@ pub struct DuplicateOf {
 /// Comparison form of an artist or title: accents and case folded, punctuation dropped,
 /// whitespace collapsed, and a trailing "(Original Mix)" removed.
 pub fn normalise_tag(text: &str) -> String {
-    let folded: String = text
-        .nfkd()
-        .filter(|c| !is_combining_mark(*c))
-        .flat_map(char::to_lowercase)
-        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
-        .collect();
-    let collapsed = folded.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = if text.is_ascii() { collapse_ascii(text) } else { collapse_unicode(text) };
     match collapsed.strip_suffix(NEUTRAL_TITLE_SUFFIX) {
         Some(stripped) if !stripped.is_empty() => stripped.to_string(),
         _ => collapsed,
     }
 }
 
+fn collapse_unicode(text: &str) -> String {
+    let folded: String = text
+        .nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .flat_map(char::to_lowercase)
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// [`collapse_unicode`] for ASCII text, where normalisation changes nothing and case folding
+/// is `to_ascii_lowercase`.
+fn collapse_ascii(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut gap = false;
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            if gap && !out.is_empty() {
+                out.push(' ');
+            }
+            gap = false;
+            out.push(byte.to_ascii_lowercase() as char);
+        } else {
+            gap = true;
+        }
+    }
+    out
+}
+
 fn path_key(path: &Path) -> String {
-    path.to_string_lossy().nfc().collect::<String>().to_lowercase()
+    lowercase_nfc(&path.to_string_lossy())
 }
 
 fn file_key(path: &Path, file_size: u64) -> Option<(String, u64)> {
-    let name = path.file_name()?.to_string_lossy().nfc().collect::<String>().to_lowercase();
+    let name = lowercase_nfc(&path.file_name()?.to_string_lossy());
     (file_size > 0).then_some((name, file_size))
+}
+
+fn lowercase_nfc(text: &str) -> String {
+    if text.is_ascii() { text.to_ascii_lowercase() } else { text.nfc().collect::<String>().to_lowercase() }
 }
 
 fn tags_key(artist: &str, title: &str) -> Option<(String, String)> {
@@ -247,6 +274,9 @@ impl DuplicateIndex {
 
     /// Adds tracks that are not in the index yet.
     pub fn insert_all(&mut self, candidates: &[DuplicateCandidate]) {
+        self.by_path.first.reserve(candidates.len());
+        self.by_file.first.reserve(candidates.len());
+        self.by_tags.first.reserve(candidates.len());
         for keys in candidate_keys(candidates) {
             let id = keys.id;
             self.by_path.insert(keys.path, (id, ()));
@@ -317,6 +347,43 @@ mod tests {
             track(2, "/Music/Copper Lines.flac", "Hale", "Copper Lines", 380.0, 40_000_000),
             track(3, "/Music/Intro.mp3", "Unknown Artist", "Intro", 60.0, 1_000_000),
         ])
+    }
+
+    fn lcg_strings(count: usize, alphabet: &[char]) -> Vec<String> {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (state >> 33) as usize
+        };
+        (0..count).map(|_| (0..next() % 24).map(|_| alphabet[next() % alphabet.len()]).collect()).collect()
+    }
+
+    #[test]
+    fn ascii_fast_paths_match_the_unicode_paths() {
+        let alphabet: Vec<char> = (0u8..128).map(char::from).collect();
+        let mut texts = lcg_strings(20_000, &alphabet);
+        texts.extend((0u8..128).map(|b| char::from(b).to_string()));
+        texts.extend(["", " ", "  a  ", "A-B", "x (Original Mix)", " Original Mix", "a\tb\nc", "Track_01.MP3"].map(String::from));
+        for text in &texts {
+            assert_eq!(collapse_ascii(text), collapse_unicode(text), "{text:?}");
+            assert_eq!(lowercase_nfc(text), text.nfc().collect::<String>().to_lowercase(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn non_ascii_text_still_goes_through_unicode_folding() {
+        assert_eq!(normalise_tag("Beyoncé (Original Mix)"), "beyonce");
+        assert_eq!(lowercase_nfc("Cafe\u{301} Ö.MP3"), "caf\u{e9} ö.mp3");
+        let mixed: Vec<char> = "aZ09 -_()&é\u{301}ÖÅß\u{ff21}\u{3042}".chars().collect();
+        for text in lcg_strings(5_000, &mixed) {
+            let expected = text.nfkd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase).map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>();
+            let expected = expected.split_whitespace().collect::<Vec<_>>().join(" ");
+            let expected = match expected.strip_suffix(NEUTRAL_TITLE_SUFFIX) {
+                Some(stripped) if !stripped.is_empty() => stripped.to_string(),
+                _ => expected,
+            };
+            assert_eq!(normalise_tag(&text), expected, "{text:?}");
+        }
     }
 
     #[test]

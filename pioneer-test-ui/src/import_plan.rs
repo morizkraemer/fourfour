@@ -43,7 +43,7 @@ const SIDECAR_EXTENSIONS: &[&str] = &["asd", "reapeaks", "pkf", "sfk"];
 /// folders are followed, symlink loops are not.
 #[derive(Debug, Default)]
 pub struct FileSurvey {
-    audio: HashSet<PathBuf>,
+    audio_count: usize,
     groups: Vec<ScanGroup>,
     unsupported: usize,
     unsupported_exts: BTreeSet<String>,
@@ -67,19 +67,21 @@ pub fn survey_files(paths: &[String]) -> FileSurvey {
             let files = survey.visit_dropped_dir(path);
             survey.groups.push(ScanGroup { files, sorted: true });
         } else if path.is_file() {
-            survey.visit_file(path, &mut loose);
+            survey.visit_file(path.to_path_buf(), &mut loose);
         }
     }
     survey.groups.insert(0, ScanGroup { files: loose, sorted: false });
+    let distinct: HashSet<&Path> = survey.groups.iter().flat_map(|group| group.files.iter().map(PathBuf::as_path)).collect();
+    survey.audio_count = distinct.len();
     survey
 }
 
-/// Listing folders waits on the disk; the subfolders of a dropped folder are walked in parallel.
+/// Listing folders waits on the disk; the folders below a dropped folder are listed in parallel.
 const WALK_THREADS: usize = 8;
 
 impl FileSurvey {
     pub fn audio_count(&self) -> usize {
-        self.audio.len()
+        self.audio_count
     }
 
     fn visit_dropped_dir(&mut self, root: &Path) -> Vec<PathBuf> {
@@ -99,19 +101,20 @@ impl FileSurvey {
             match entry_kind(&entry) {
                 EntryKind::Dir => subdirs.push(path),
                 EntryKind::SymlinkToDir => self.visit_symlinked_dir(root, &path, &mut chain, &mut files),
-                EntryKind::File => self.visit_file(&path, &mut files),
+                EntryKind::File => self.visit_file(path, &mut files),
                 EntryKind::Other => {}
             }
         }
-        let next = std::sync::atomic::AtomicUsize::new(0);
+        let queue = WalkQueue::new(subdirs.into_iter().map(|dir| (dir, chain.clone())).collect());
         let parts: Vec<(FileSurvey, Vec<PathBuf>)> = std::thread::scope(|scope| {
-            let workers: Vec<_> = (0..WALK_THREADS.min(subdirs.len()))
+            let workers: Vec<_> = (0..WALK_THREADS)
                 .map(|_| {
-                    let (next, subdirs, mut chain) = (&next, &subdirs, chain.clone());
+                    let queue = &queue;
                     scope.spawn(move || {
                         let mut part = (FileSurvey::default(), Vec::new());
-                        while let Some(dir) = subdirs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
-                            part.0.visit_dir(dir, &mut chain, &mut part.1);
+                        while let Some((dir, mut chain)) = queue.take() {
+                            let subdirs = part.0.list_dir(&dir, &mut chain, &mut part.1);
+                            queue.finish(subdirs.into_iter().map(|sub| (sub, chain.clone())).collect());
                         }
                         part
                     })
@@ -120,13 +123,35 @@ impl FileSurvey {
             workers.into_iter().map(|w| w.join().expect("folder walk thread panicked")).collect()
         });
         for (part, part_files) in parts {
-            self.audio.extend(part.audio);
             self.unsupported += part.unsupported;
             self.unsupported_exts.extend(part.unsupported_exts);
             self.unreadable += part.unreadable;
             files.extend(part_files);
         }
         files
+    }
+
+    /// Lists one folder: files and symlinked folders are handled here, plain subfolders come
+    /// back for the caller to walk.
+    fn list_dir(&mut self, dir: &Path, chain: &mut SymlinkChain, out: &mut Vec<PathBuf>) -> Vec<PathBuf> {
+        let mut subdirs = Vec::new();
+        if is_hidden(dir) {
+            return subdirs;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            self.unreadable += 1;
+            return subdirs;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry_kind(&entry) {
+                EntryKind::Dir => subdirs.push(path),
+                EntryKind::SymlinkToDir => self.visit_symlinked_dir(dir, &path, chain, out),
+                EntryKind::File => self.visit_file(path, out),
+                EntryKind::Other => {}
+            }
+        }
+        subdirs
     }
 
     fn visit_dir(&mut self, dir: &Path, chain: &mut SymlinkChain, out: &mut Vec<PathBuf>) {
@@ -142,7 +167,7 @@ impl FileSurvey {
             match entry_kind(&entry) {
                 EntryKind::Dir => self.visit_dir(&path, chain, out),
                 EntryKind::SymlinkToDir => self.visit_symlinked_dir(dir, &path, chain, out),
-                EntryKind::File => self.visit_file(&path, out),
+                EntryKind::File => self.visit_file(path, out),
                 EntryKind::Other => {}
             }
         }
@@ -160,23 +185,69 @@ impl FileSurvey {
         chain.anchor = anchor;
     }
 
-    fn visit_file(&mut self, path: &Path, out: &mut Vec<PathBuf>) {
-        if is_hidden(path) {
+    fn visit_file(&mut self, path: PathBuf, out: &mut Vec<PathBuf>) {
+        if is_hidden(&path) {
             return;
         }
-        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-        if AUDIO_EXTENSIONS.contains(&ext.as_str()) {
-            if path.to_str().is_none() {
-                self.unreadable += 1;
-                return;
+        match file_kind(path.extension()) {
+            FileKind::Audio => {
+                if path.to_str().is_none() {
+                    self.unreadable += 1;
+                    return;
+                }
+                out.push(path);
             }
-            self.audio.insert(path.to_path_buf());
-            out.push(path.to_path_buf());
-        } else if !SIDECAR_EXTENSIONS.contains(&ext.as_str()) {
-            self.unsupported += 1;
-            if !ext.is_empty() {
-                self.unsupported_exts.insert(format!(".{ext}"));
+            FileKind::Sidecar => {}
+            FileKind::Unsupported(ext) => {
+                self.unsupported += 1;
+                if !ext.is_empty() {
+                    self.unsupported_exts.insert(format!(".{ext}"));
+                }
             }
+        }
+    }
+}
+
+/// Folders still to list, shared by the walk threads: a thread takes one, lists it and hands
+/// back its subfolders, so a library with two top folders walks as wide as one with two hundred.
+struct WalkQueue {
+    state: Mutex<WalkQueueState>,
+    wake: std::sync::Condvar,
+}
+
+struct WalkQueueState {
+    waiting: Vec<(PathBuf, SymlinkChain)>,
+    listing: usize,
+}
+
+impl WalkQueue {
+    fn new(waiting: Vec<(PathBuf, SymlinkChain)>) -> Self {
+        Self { state: Mutex::new(WalkQueueState { waiting, listing: 0 }), wake: std::sync::Condvar::new() }
+    }
+
+    /// The next folder to list, waiting while others are still being listed; `None` once the
+    /// whole tree is done.
+    fn take(&self) -> Option<(PathBuf, SymlinkChain)> {
+        let mut state = self.state.lock().expect("folder walk queue lock");
+        loop {
+            if let Some(job) = state.waiting.pop() {
+                state.listing += 1;
+                return Some(job);
+            }
+            if state.listing == 0 {
+                return None;
+            }
+            state = self.wake.wait(state).expect("folder walk queue lock");
+        }
+    }
+
+    fn finish(&self, subdirs: Vec<(PathBuf, SymlinkChain)>) {
+        let mut state = self.state.lock().expect("folder walk queue lock");
+        state.listing -= 1;
+        let more = !subdirs.is_empty();
+        state.waiting.extend(subdirs);
+        if more || state.listing == 0 {
+            self.wake.notify_all();
         }
     }
 }
@@ -197,6 +268,35 @@ impl SymlinkChain {
     fn leads_back(&self, target: &Path, here: &Path) -> bool {
         let on_stretch = |anchor: &PathBuf, end: &Path| target.starts_with(anchor) && end.starts_with(target);
         on_stretch(&self.anchor, here) || self.followed.iter().any(|(anchor, end)| on_stretch(anchor, end))
+    }
+}
+
+enum FileKind {
+    Audio,
+    Sidecar,
+    Unsupported(String),
+}
+
+/// What a file with this extension is, case ignored; an ASCII extension needs no allocation
+/// to compare.
+fn file_kind(ext: Option<&std::ffi::OsStr>) -> FileKind {
+    let listed = |list: &[&str], ext: &str| list.iter().any(|known| known.eq_ignore_ascii_case(ext));
+    if let Some(ext) = ext.and_then(|e| e.to_str()).filter(|e| e.is_ascii()) {
+        return if listed(AUDIO_EXTENSIONS, ext) {
+            FileKind::Audio
+        } else if listed(SIDECAR_EXTENSIONS, ext) {
+            FileKind::Sidecar
+        } else {
+            FileKind::Unsupported(ext.to_ascii_lowercase())
+        };
+    }
+    let lower = ext.map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if AUDIO_EXTENSIONS.contains(&lower.as_str()) {
+        FileKind::Audio
+    } else if SIDECAR_EXTENSIONS.contains(&lower.as_str()) {
+        FileKind::Sidecar
+    } else {
+        FileKind::Unsupported(lower)
     }
 }
 
@@ -503,8 +603,11 @@ pub fn plan_import(
     scanned: Scanned,
     survey: &FileSurvey,
 ) -> (PendingImport, ImportPlan) {
-    let mut seen = HashSet::new();
-    let mut already_in_library = scanned.known.into_iter().filter(|path| seen.insert(path.clone())).count();
+    let mut seen = HashSet::with_capacity(scanned.known.len() + scanned.tracks.len());
+    let mut already_in_library = 0;
+    for path in scanned.known {
+        already_in_library += usize::from(seen.insert(path));
+    }
     let mut fresh = Vec::new();
     let mut duplicate_of = Vec::new();
     let mut duplicates = Vec::new();
@@ -539,7 +642,7 @@ pub fn plan_import(
     let skipped = SkippedFiles {
         unsupported: survey.unsupported,
         unsupported_exts: survey.unsupported_exts.iter().cloned().collect(),
-        unreadable: survey.audio.len().saturating_sub(seen.len()) + survey.unreadable,
+        unreadable: survey.audio_count.saturating_sub(seen.len()) + survey.unreadable,
     };
     let plan = ImportPlan { token, new_count: fresh.len() - duplicates.len(), already_in_library, duplicates, skipped };
     (PendingImport { token, fresh, duplicate_of }, plan)
@@ -627,7 +730,7 @@ mod tests {
     #[test]
     fn files_skipped_unread_count_as_already_in_library_once_and_not_as_unreadable() {
         let mut survey = FileSurvey::default();
-        survey.audio.extend(["/Music/a.mp3", "/Music/b.mp3"].map(PathBuf::from));
+        survey.audio_count = 2;
         let scanned = Scanned {
             tracks: vec![track(0, "/Music/b.mp3", "Hale", "Copper Lines", 380.0)],
             known: vec![PathBuf::from("/Music/a.mp3"), PathBuf::from("/Music/a.mp3")],
@@ -703,6 +806,54 @@ mod tests {
             plan.skipped,
             SkippedFiles { unsupported: 4, unsupported_exts: vec![".m4p".into(), ".txt".into()], unreadable: 1 }
         );
+    }
+
+    #[test]
+    fn survey_lists_every_depth_of_one_top_folder_and_counts_each_file_once() {
+        let dir = std::env::temp_dir().join(format!("ff-survey-deep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut expected = Vec::new();
+        for a in 0..4 {
+            for b in 0..5 {
+                let folder = dir.join(format!("a{a}/b{b}/c"));
+                std::fs::create_dir_all(&folder).unwrap();
+                for name in ["1.mp3", "2.FLAC", "cover.jpg"] {
+                    std::fs::write(folder.join(name), b"x").unwrap();
+                }
+                expected.push(folder.join("1.mp3"));
+                expected.push(folder.join("2.FLAC"));
+            }
+        }
+        std::fs::create_dir_all(dir.join(".hidden")).unwrap();
+        std::fs::write(dir.join(".hidden/h.mp3"), b"x").unwrap();
+        let survey = survey_files(&[dir.to_string_lossy().into_owned(), dir.join("a0").to_string_lossy().into_owned()]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(survey.audio_count(), expected.len());
+        assert_eq!(survey.unsupported, 25);
+        let mut found: Vec<PathBuf> = survey.groups[1].files.clone();
+        found.sort();
+        expected.sort();
+        assert_eq!(found, expected);
+        assert_eq!(survey.groups[2].files.len(), 10);
+    }
+
+    #[test]
+    fn file_kind_ignores_case_and_keeps_non_ascii_extensions_unsupported() {
+        use std::ffi::OsStr;
+        let kind = |ext: &str| match file_kind(Some(OsStr::new(ext))) {
+            FileKind::Audio => "audio".to_string(),
+            FileKind::Sidecar => "sidecar".to_string(),
+            FileKind::Unsupported(lower) => lower,
+        };
+        assert_eq!(kind("mp3"), "audio");
+        assert_eq!(kind("FlAc"), "audio");
+        assert_eq!(kind("AIF"), "audio");
+        assert_eq!(kind("Asd"), "sidecar");
+        assert_eq!(kind("PKF"), "sidecar");
+        assert_eq!(kind("JPG"), "jpg");
+        assert_eq!(kind("ÜBER"), "über");
+        assert_eq!(kind(""), "");
+        assert!(matches!(file_kind(None), FileKind::Unsupported(lower) if lower.is_empty()));
     }
 
     fn wav(seconds: u32) -> Vec<u8> {

@@ -436,6 +436,9 @@ fn read_list(file: &Path) -> Vec<PathBuf> {
 }
 
 fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<Track>) -> (usize, f64, f64) {
+    if scanned.is_empty() {
+        return (0, 0.0, 0.0);
+    }
     let t = Instant::now();
     let mut seen = lib.track_paths().unwrap();
     let fresh: Vec<Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
