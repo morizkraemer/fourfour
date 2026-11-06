@@ -261,6 +261,13 @@ async fn plan_import(
     .map_err(|e| e.to_string())?
 }
 
+/// The audio files under each dropped path, without reading tags: fast enough to lay out
+/// playlists for a drop before `plan_import` finishes.
+#[tauri::command]
+async fn survey_import(paths: Vec<String>) -> Result<Vec<import_plan::DroppedPath>, CommandError> {
+    Ok(tauri::async_runtime::spawn_blocking(move || import_plan::dropped_audio(&paths)).await.map_err(|e| e.to_string())?)
+}
+
 #[derive(Serialize)]
 struct ImportCommit {
     added: Vec<TrackInfo>,
@@ -1459,6 +1466,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             plan_import,
+            survey_import,
             commit_import,
             analyze_tracks,
             analyze_track_ids,

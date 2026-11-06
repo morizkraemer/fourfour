@@ -225,7 +225,8 @@ test('the Analyzing chip opens the same activity panel with the analysis progres
   await expect(chip).toContainText('1 / 3');
   await chip.click();
   await expect(menu(page)).toBeVisible();
-  await expect(menu(page).locator('[data-analysis-progress]')).toContainText('1 of 3 tracks');
+  await expect(menu(page).locator('[data-analysis-progress]')).toContainText('1 of 3');
+  await expect(menu(page).locator('[data-analysis-left]')).toHaveText('2 tracks to go');
   await expect(entries(page).filter({ hasText: 'Import folder…' })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/analysis-panel.png`, clip: TOP_BAR_CLIP });
   await page.keyboard.press('Escape');
@@ -255,4 +256,70 @@ test('status chip screenshots: idle, importing, analyzing, panel open while idle
   await page.screenshot({ path: `${CHIP_SHOTS}/importing.png`, clip });
   await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseImport?.());
   await dismissAnalysisPrompt(page);
+});
+
+const progressWidth = (page: Page) =>
+  button(page).locator('[data-activity-progress]').evaluate((el) => el.getBoundingClientRect().width / el.parentElement!.getBoundingClientRect().width);
+
+test('the chip bar follows import progress, then analysis progress, instead of sitting full', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokeHoldImport: true, __smokeImport: TWO_NEW, __smokeAnalyzeAfterImport: true });
+  await importFolder(page);
+  await emit(page, 'import-progress', { done: 10, total: 40 });
+  await expect(button(page)).toHaveAttribute('data-activity', 'importing');
+  await expect.poll(() => progressWidth(page)).toBeCloseTo(0.25, 1);
+  await button(page).click();
+  await expect(menu(page).locator('[data-import-progress]')).toContainText('10 of 40 files');
+  await expect(menu(page).locator('[data-import-progress] [role="progressbar"]')).toHaveAttribute('aria-valuenow', '25');
+  await page.screenshot({ path: `${SHOTS}/importing-panel.png`, clip: { x: 900, y: 0, width: 700, height: 420 } });
+  await page.keyboard.press('Escape');
+
+  await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseImport?.());
+  await expect.poll(async () => (await smoke.invokes('analyze_track_ids')).length).toBe(1);
+  await emit(page, 'analysis-progress', { current: 0, total: 2, message: 'Analyzing' });
+  await expect(button(page)).toHaveAttribute('data-activity', 'analyzing');
+  await expect.poll(() => progressWidth(page)).toBeCloseTo(0, 1);
+  await emit(page, 'analysis-progress', { current: 1, total: 2, message: 'Analyzing' });
+  await expect.poll(() => progressWidth(page)).toBeCloseTo(0.5, 1);
+  await page.waitForTimeout(450);
+  await button(page).click();
+  const analysis = menu(page).locator('[data-analysis-progress]');
+  await expect(analysis).toContainText('1 of 2');
+  await expect(analysis.locator('[data-analysis-now]')).toHaveText('Now Low Sun');
+  await expect(analysis.locator('[data-analysis-left]')).toHaveText('1 track to go');
+  await page.screenshot({ path: `${SHOTS}/analyzing-panel.png`, clip: { x: 900, y: 0, width: 700, height: 420 } });
+});
+
+test('after a folder import the panel turns the folder into a new playlist', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokePickPath: FOLDER, __smokeImport: TWO_NEW });
+  await importFolder(page);
+  await expect(button(page)).toHaveText('Added 2');
+  await dismissAnalysisPrompt(page);
+  await button(page).click();
+  const actions = menu(page).locator('[data-import-folder-actions]');
+  await expect(actions).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/folder-actions.png`, clip: { x: 900, y: 0, width: 700, height: 420 } });
+  await actions.getByRole('button', { name: 'New playlist from folder' }).click();
+  await expect(menu(page)).toHaveCount(0);
+  await expect(page.locator('.ff-gheader__title')).toHaveText('Fresh Finds');
+  await expect(rows(page)).toHaveCount(2);
+});
+
+test('after a folder import the panel adds the folder to a playlist picked from a list', async ({ smoke }) => {
+  const { page } = smoke;
+  await setWindow(page, { __smokePickPath: FOLDER, __smokeImport: TWO_NEW });
+  await importFolder(page);
+  await expect(button(page)).toHaveText('Added 2');
+  await dismissAnalysisPrompt(page);
+  await button(page).click();
+  await menu(page).getByRole('button', { name: 'Add to playlist…' }).click();
+  const picker = menu(page).locator('[data-import-playlist-picker]');
+  await expect(picker.locator('.ff-menu__item').first()).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/folder-add-to-playlist.png`, clip: { x: 900, y: 0, width: 700, height: 520 } });
+  await picker.locator('.ff-menu__item', { hasText: /^Warmup$/ }).click();
+  await expect(menu(page).locator('[data-import-placed]')).toHaveText('Added 2 to ‘Warmup’');
+  const saves = await smoke.invokes('save_state');
+  const warmup = (saves.at(-1)!.playlists as { name: string; track_ids: number[] }[]).find((p) => p.name === 'Warmup')!;
+  expect(warmup.track_ids.slice(-2)).toEqual([101, 102]);
 });

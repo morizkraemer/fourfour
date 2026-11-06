@@ -233,3 +233,47 @@ test('with several folders dropped the last new playlist opens', async ({ smoke 
   await expect(page.locator('.ff-sbrow__label', { hasText: /^Alpha$/ })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/new-playlists-last-opened.png` });
 });
+
+test('a nested folder drop lays out a playlist folder tree at once with placeholder rows, then fills it', async ({ smoke }) => {
+  const { page } = smoke;
+  const at = (path: string, id: number) => ({ ...newTrack(id, path.split('/').pop()!), source_path: `/Downloads/Crate/${path}` });
+  await nextImport(page, {
+    tracks: [at('Intro.mp3', 301), at('Openers/Slow Burn.mp3', 302), at('Openers/Warm Air.flac', 303), at('Peak/Big Room.mp3', 304)],
+    already: 0,
+  });
+  await page.evaluate(() => Object.assign(window, { __smokeHoldImport: true, __smokeAnalyzeAfterImport: true }));
+  await dropOn(page, fill(page), ['/Downloads/Crate']);
+
+  const label = (name: string) => page.locator('.ff-sbrow__label', { hasText: new RegExp(`^${name}$`) });
+  for (const name of ['Crate', 'Openers', 'Peak']) await expect(label(name).first()).toBeVisible();
+  await expect(page.locator('.ff-gheader__title')).toHaveText('Crate');
+  await expect(table(page).locator('[data-pending-row]')).toHaveText(['Intro']);
+  await page.screenshot({ path: `${SHOTS}/nested-drop-pending.png` });
+
+  await sidebarPlaylist(page, 'Openers').click();
+  await expect(table(page).locator('[data-pending-row]')).toHaveText(['Slow Burn', 'Warm Air']);
+
+  await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseImport?.());
+  await expect(table(page).locator('[data-track-row]')).toHaveCount(2);
+  await expect(table(page).locator('[data-pending-row]')).toHaveCount(0);
+  const saved = await savedPlaylists(smoke);
+  const byName = (name: string) => saved.find((p) => p.name === name)!;
+  const crateFolder = saved.find((p) => p.name === 'Crate' && (p as { is_folder?: boolean }).is_folder)!;
+  expect(crateFolder.parent_id).toBe(0);
+  expect(byName('Openers').track_ids).toEqual([302, 303]);
+  expect(byName('Peak').track_ids).toEqual([304]);
+  expect(byName('Openers').parent_id).toBe(crateFolder.id);
+  await page.screenshot({ path: `${SHOTS}/nested-drop-filled.png` });
+});
+
+test('a folder drop whose files all fail to import leaves no empty playlists behind', async ({ smoke }) => {
+  const { page } = smoke;
+  await page.evaluate(() => {
+    const w = window as unknown as SmokeWindow;
+    w.__smokeSurvey = [{ path: '/Downloads/Broken', folder: true, files: ['/Downloads/Broken/x.mp3'] }];
+  });
+  await nextImport(page, { tracks: [], already: 0, skipped: { unreadable: 1 } });
+  await dropOn(page, fill(page), ['/Downloads/Broken']);
+  await expect(activity(page)).toHaveText('Nothing imported');
+  expect((await savedPlaylists(smoke)).some((p) => p.name === 'Broken')).toBe(false);
+});

@@ -573,6 +573,22 @@ function mockScannedTrack(path: string, i: number): TrackInfo {
   };
 }
 
+export interface DroppedPath {
+  path: string;
+  folder: boolean;
+  files: string[];
+}
+
+export async function surveyImport(paths: string[]): Promise<DroppedPath[]> {
+  try {
+    return await invoke<DroppedPath[]>('survey_import', { paths });
+  } catch (err) {
+    lastTauriError = `survey_import fail: ${String(err)}`;
+    if (useBrowserMocks()) return paths.map((path) => ({ path, folder: false, files: [path] }));
+    throw err;
+  }
+}
+
 export async function planImport(paths: string[]): Promise<ImportPlan> {
   try {
     return await invoke<ImportPlan>('plan_import', { paths });

@@ -15,6 +15,7 @@ export interface SmokeWindow {
   __smokeHoldExport: boolean;
   __smokeReleaseExport: (() => void) | null;
   __smokeImport: SmokeImport | null;
+  __smokeSurvey: { path: string; folder: boolean; files: string[] }[] | null;
   __smokeHoldImport: boolean;
   __smokeHoldLoad: boolean;
   __smokeLoadError: { kind: string; message: string; path?: string } | null;
@@ -61,6 +62,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeHoldExport = false;
   w.__smokeReleaseExport = null;
   w.__smokeImport = null;
+  w.__smokeSurvey = null;
   w.__smokeHoldImport = false;
   w.__smokeHoldLoad = false;
   const storedLoadError = localStorage.getItem('smoke.loadError');
@@ -355,6 +357,13 @@ export function installTauriMock(initial: LoadedState) {
       }
       case 'locate_track_file':
         return { relinked: { track_id: args.trackId, source_path: args.path }, health: (relink([args.trackId], ''), health()) };
+      case 'survey_import': {
+        if (w.__smokeSurvey) return w.__smokeSurvey;
+        const files = (w.__smokeImport?.tracks ?? []).map((t) => t.source_path);
+        return (args.paths as string[]).map((path) =>
+          files.includes(path) ? { path, folder: false, files: [path] } : { path, folder: true, files: files.filter((f) => f.startsWith(`${path}/`)) },
+        );
+      }
       case 'plan_import': {
         const next = w.__smokeImport;
         pendingImport = next?.tracks ?? [];

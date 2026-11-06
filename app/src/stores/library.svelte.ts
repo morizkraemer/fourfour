@@ -67,7 +67,9 @@ import {
 } from '../lib/playlistTree.ts';
 import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
 import { importWithDuplicateCheck, type ImportOutcome } from '../lib/importDuplicates.ts';
-import { completeImportActivity, failImportActivity, startImportActivity } from './import-activity.svelte.ts';
+import { completeImportActivity, failImportActivity, rememberImportedFolder, startImportActivity } from './import-activity.svelte.ts';
+import type { PlannedPlaylist } from '../lib/importPlaylists.ts';
+import { nextAnalysisPace, type AnalysisPace } from '../lib/libraryActivity.ts';
 import {
   analysisFailureText,
   analysisFileFailureText,
@@ -464,6 +466,7 @@ export const library = $state({
   syncing: false,
   statusMessage: 'Ready',
   analysisProgress: { current: 0, total: 0, message: '' },
+  analysisPace: null as AnalysisPace | null,
   showAnalysisPrompt: false,
   /** Track IDs from the last import; used by the post-import analyze dialog. */
   pendingAnalyzeTrackIds: [] as number[],
@@ -1227,6 +1230,7 @@ function handleAnalysisProgressEvent(progress: {
   track_id?: number;
 }) {
   library.analyzing = true;
+  library.analysisPace = nextAnalysisPace(library.analysisPace, progress.current, Date.now());
   library.analysisProgress = progress;
   library.statusMessage = analysisProgressText(progress);
 
@@ -1253,6 +1257,7 @@ function handleAnalysisCompleteEvent() {
   library.analyzing = false;
   library.analyzingTrackIds = [];
   library.analysisProgress = { current: 0, total: 0, message: '' };
+  library.analysisPace = null;
   const failures = analysisFailures;
   analysisFailures = 0;
   if (!library.syncing) {
@@ -1610,8 +1615,11 @@ async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
   }
 
   await landImportedTracks(newTracks);
+}
 
-  await offerAnalysis(newTracks.map((t) => t.id), options?.analyze);
+/** Starts analysis (or the analysis prompt) for imported tracks without waiting for the run to end. */
+export function analyzeImported(ids: number[], analyzeNow = false) {
+  offerAnalysis(ids, analyzeNow).catch((err) => console.error('offerAnalysis failed:', err));
 }
 
 async function offerAnalysis(ids: number[], analyzeNow = false) {
@@ -1644,34 +1652,48 @@ function scanAndAdd(paths: string[]) {
 }
 
 /** Scan directory for new tracks */
-export function importDirectory(path: string, options?: ImportOptions) {
-  return importFiles([path], options);
+export async function importDirectory(path: string, options?: ImportOptions) {
+  const outcome = await importFiles([path], options);
+  if (outcome) rememberImportedFolder(path, importedTrackIds(outcome, [path]), duplicateMatches(outcome));
+  return outcome;
+}
+
+function importedTrackIds(outcome: ImportOutcome, paths: string[]): number[] {
+  return [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
+}
+
+/** Files skipped as likely duplicates, each with the library track it duplicates. */
+export function duplicateMatches(outcome: ImportOutcome) {
+  const skipped = new Set(outcome.skipped_ids);
+  return outcome.plan.duplicates.filter((d) => skipped.has(d.existing_id)).map((d) => ({ path: d.new_path, id: d.existing_id }));
 }
 
 /** Scan dropped files/folders */
-export async function importFiles(paths: string[], options?: ImportOptions) {
+export async function importFiles(paths: string[], options?: ImportOptions): Promise<ImportOutcome | null> {
   try {
     startImportActivity();
     const outcome = await scanAndAdd(paths);
     await finishImport(outcome.added, options);
     library.tauriError = lastTauriError;
     completeImportActivity(outcome);
+    analyzeImported(outcome.added.map((t) => t.id), options?.analyze);
+    return outcome;
   } catch (err) {
     failImportActivity(importFailureText(err));
     library.tauriError = lastTauriError;
     console.error('importFiles failed:', err);
+    return null;
   }
 }
 
+/** Imports dropped files and lands their rows; the caller places them, then starts analysis with `analyzeImported`. */
 export async function importDroppedTracks(paths: string[]): Promise<{ outcome: ImportOutcome; ids: number[] } | null> {
   try {
     startImportActivity();
     const outcome = await scanAndAdd(paths);
     await landImportedTracks(outcome.added);
     library.tauriError = lastTauriError;
-    await offerAnalysis(outcome.added.map((t) => t.id));
-    const ids = [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
-    return { outcome, ids };
+    return { outcome, ids: importedTrackIds(outcome, paths) };
   } catch (err) {
     failImportActivity(importFailureText(err));
     library.tauriError = lastTauriError;
@@ -1933,6 +1955,45 @@ export async function addPlaylist(name: string, trackIds: number[] = [], parentI
 
 export function defaultFolderName(): string {
   return uniqueName(library.playlists.map((p) => p.name), 'New folder');
+}
+
+/** Creates planned playlists and folders in one save (playlist names unique among playlists, folder names among folders); returns the playlists with their files (and which plan they belong to) and the folder ids. */
+export async function addPlannedPlaylists(plans: PlannedPlaylist[], parentId = 0) {
+  const taken = {
+    folder: library.playlists.filter((p) => p.is_folder).map((p) => p.name),
+    playlist: library.playlists.filter((p) => !p.is_folder).map((p) => p.name),
+  };
+  const leaves: { id: number; name: string; files: string[]; top: number }[] = [];
+  const folderIds: number[] = [];
+  const add = (plan: PlannedPlaylist, parent: number, top: number) => {
+    const id = nextPlaylistId();
+    const name = uniqueName(taken[plan.kind], plan.name);
+    taken[plan.kind].push(name);
+    library.playlists.push({ id, name, track_ids: rawIds([]), parent_id: parent, is_folder: plan.kind === 'folder' });
+    if (plan.kind === 'folder') {
+      folderIds.push(id);
+      plan.children.forEach((child) => add(child, id, top));
+    } else leaves.push({ id, name, files: plan.files, top });
+  };
+  plans.forEach((plan, top) => add(plan, parentId, top));
+  if (parentId !== 0) expandFolder(parentId);
+  await saveState();
+  return { leaves, folderIds };
+}
+
+/** Fills playlists in one save; returns how many tracks were new to them. */
+export async function fillPlaylists(fills: { id: number; trackIds: number[] }[]): Promise<number> {
+  let added = 0;
+  for (const fill of fills) {
+    const pl = library.playlists.find((p) => p.id === fill.id);
+    if (!pl) continue;
+    const members = new Set(pl.track_ids);
+    const fresh = [...new Set(fill.trackIds)].filter((id) => !members.has(id));
+    added += fresh.length;
+    if (fresh.length > 0) pl.track_ids = rawIds([...pl.track_ids, ...fresh]);
+  }
+  await saveState();
+  return added;
 }
 
 export async function addFolder(parentId = 0, name = defaultFolderName()): Promise<number> {
