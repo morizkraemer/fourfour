@@ -13,6 +13,8 @@ const REPORT = process.env.FF_PERF_OUT;
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 1);
 const LABEL = process.env.FF_PERF_LABEL ?? '';
 const LISTS = (process.env.FF_PERF_PLAYLISTS ?? 'R124 1k,R124 5k,R124 20k').split(',');
+const COLUMN_SWEEP = process.env.FF_PERF_SCENARIO === 'columns';
+const SORTABLE = ['status', 'fav', 'index', 'title', 'artist', 'album', 'label', 'genre', 'year', 'rating', 'color', 'bpm', 'key', 'time'];
 
 interface Step {
   name: string;
@@ -215,6 +217,32 @@ async function runScenario(page: Page, read: () => Promise<{ script: number; tas
   }
 }
 
+async function runColumnSweep(page: Page, read: () => Promise<{ script: number; task: number; layout: number }>, steps: Step[]) {
+  const measure = async (name: string, action: () => Promise<void>, gap = 400) => {
+    const before = await read();
+    await action();
+    const total = await settle(page);
+    const js = await jsDone(page);
+    const after = await read();
+    steps.push({ name, total, script: after.script - before.script, task: after.task - before.task, layout: after.layout - before.layout, js, view: sha(await topRows(page)) });
+    await page.waitForTimeout(gap);
+  };
+  const checkpoint = async (name: string) => {
+    steps.push({ name: `VIEW ${name}`, total: 0, script: 0, task: 0, layout: 0, js: 0, view: await fullView(page) });
+  };
+  for (const list of LISTS) {
+    await measure(`switch ${list}`, () => sidebarPlaylist(page, list).click());
+    await checkpoint(`${list} opened`);
+    for (const key of SORTABLE) {
+      for (const dir of ['asc', 'desc']) {
+        await measure(`sort ${list} ${key} ${dir}`, () => page.locator(`.ff-colh__cell[data-col-key="${key}"]`).click({ position: { x: 6, y: 8 } }));
+        await checkpoint(`${list} ${key} ${dir}`);
+      }
+    }
+    await measure(`switch All Tracks after ${list}`, () => page.locator('.ff-sbrow__label', { hasText: /^All Tracks$/ }).click());
+  }
+}
+
 test.describe('playlist view latency', () => {
   test.skip(!STATE, 'set FF_PERF_STATE=/path/state.json (r124-playlist-variant.py of a bench_startup dump)');
   test.setTimeout(900_000);
@@ -223,6 +251,16 @@ test.describe('playlist view latency', () => {
     test(`run ${run}`, async ({ page }) => {
       await page.exposeFunction('__smokeAnalysis', (trackId: number) => mockAnalysisData(trackId, 180 + ((trackId * 7) % 300), 12400, '8A'));
       await page.addInitScript(installTauriMock, state());
+      if (COLUMN_SWEEP) {
+        await page.addInitScript((keys: string[]) => {
+          const columns = [
+            ...keys.map((key) => ({ key, label: key.toUpperCase(), width: key === 'title' || key === 'artist' ? 140 : 64 })),
+            { key: 'wave', hidden: true },
+            { key: 'cover', hidden: true },
+          ];
+          localStorage.setItem('fourfour.tableColumns.v3', JSON.stringify({ layouts: { playlist: { columns, sortKey: null, sortDir: 'asc' } } }));
+        }, SORTABLE);
+      }
       await page.addInitScript(() => {
         const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> } }).__TAURI_INTERNALS__;
         const invoke = internals.invoke.bind(internals);
@@ -247,7 +285,7 @@ test.describe('playlist view latency', () => {
       const read = await metrics(page);
       const steps: Step[] = [];
       const stopProfile = process.env.FF_PERF_PROFILE_JSON ? await startProfile(page, process.env.FF_PERF_PROFILE_JSON) : null;
-      await runScenario(page, read, steps);
+      await (COLUMN_SWEEP ? runColumnSweep : runScenario)(page, read, steps);
       await stopProfile?.();
       expect(steps.length).toBeGreaterThan(0);
       const line = JSON.stringify({ label: LABEL, run, steps });
