@@ -64,6 +64,7 @@
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
   import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
+  import { skeletonRowsHtml } from '../lib/skeletonRows.ts';
   import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
 
   /** When set, show this sidebar source instead of the active row. */
@@ -154,7 +155,7 @@
   let effectiveSource = $derived(sourceId ?? ui.activeSidebarRow);
   let showOpenFailure = $derived(!embedded && library.tracksLoaded && library.openFailure !== null);
   let showLibraryEmpty = $derived(!embedded && library.tracksLoaded && library.trackCount === 0);
-  const skeletonRows = Array.from({ length: 24 }, (_, i) => i);
+  const SKELETON_ROWS = 24;
 
   let activePlaylist = $derived.by(() => {
     const active = effectiveSource;
@@ -860,11 +861,7 @@
       {/if}
       {#if shownTracks.length === 0 && !library.tracksLoaded}
         <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
-          {#each skeletonRows as row (row)}
-            <div class="ff-table__skeleton-row" style:--skeleton-text="{55 + ((row * 17) % 40)}%">
-              <TrackRow track={EMPTY_TRACK} {columns} />
-            </div>
-          {/each}
+          {@html skeletonRowsHtml(columns, SKELETON_ROWS)}
         </div>
       {:else if shownTracks.length === 0}
         <div class="ff-table__empty-container ff-table__empty-drop">
@@ -918,29 +915,35 @@
   {/if}
 </div>
 
-<ContextMenu
-  open={columnMenu.open}
-  x={columnMenu.x}
-  y={columnMenu.y}
-  items={columnMenuItems()}
-  onClose={() => (columnMenu = { ...columnMenu, open: false })}
-/>
+{#if columnMenu.open}
+  <ContextMenu
+    open
+    x={columnMenu.x}
+    y={columnMenu.y}
+    items={columnMenuItems()}
+    onClose={() => (columnMenu = { ...columnMenu, open: false })}
+  />
+{/if}
 
-<ContextMenu
-  open={rowMenu.open}
-  x={rowMenu.x}
-  y={rowMenu.y}
-  items={rowMenuItems()}
-  onClose={() => (rowMenu = { ...rowMenu, open: false, trackId: null })}
-/>
+{#if rowMenu.open}
+  <ContextMenu
+    open
+    x={rowMenu.x}
+    y={rowMenu.y}
+    items={rowMenuItems()}
+    onClose={() => (rowMenu = { ...rowMenu, open: false, trackId: null })}
+  />
+{/if}
 
-<ContextMenu
-  open={listMenu.open}
-  x={listMenu.x}
-  y={listMenu.y}
-  items={listMenuItems()}
-  onClose={() => (listMenu = { ...listMenu, open: false })}
-/>
+{#if listMenu.open}
+  <ContextMenu
+    open
+    x={listMenu.x}
+    y={listMenu.y}
+    items={listMenuItems()}
+    onClose={() => (listMenu = { ...listMenu, open: false })}
+  />
+{/if}
 
 <DragGhost
   visible={dnd.kind === 'tracks'}
@@ -1065,14 +1068,14 @@
     animation: ff-table-skeleton-pulse 1.4s ease-in-out infinite;
     pointer-events: none;
   }
-  .ff-table__skeleton-row {
+  .ff-table__skeleton :global(.ff-table__skeleton-row) {
     height: 28px;
   }
-  .ff-table__skeleton-row :global(.ff-trow:hover) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow:hover) {
     background: none;
   }
-  .ff-table__skeleton-row :global(.ff-trow__cell--text::before),
-  .ff-table__skeleton-row :global(.ff-trow__cell--wave::before) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--text::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--wave::before) {
     content: '';
     display: block;
     flex: none;
@@ -1080,26 +1083,26 @@
     border-radius: 3px;
     background: var(--ff-elev);
   }
-  .ff-table__skeleton-row :global(.ff-trow__cell--text::before) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--text::before) {
     width: var(--skeleton-text);
     max-width: 100%;
   }
-  .ff-table__skeleton-row :global(.ff-trow__cell--index::before),
-  .ff-table__skeleton-row :global(.ff-trow__cell--bpm::before),
-  .ff-table__skeleton-row :global(.ff-trow__cell--time::before),
-  .ff-table__skeleton-row :global(.ff-trow__cell--key::before) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--index::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--bpm::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--time::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--key::before) {
     width: 70%;
   }
-  .ff-table__skeleton-row :global(.ff-trow__cell--text .ff-trow__text),
-  .ff-table__skeleton-row :global(.ff-trow__cell--wave > *),
-  .ff-table__skeleton-row :global(.ff-trow__star) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--text .ff-trow__text),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--wave > *),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__star) {
     display: none;
   }
-  .ff-table__skeleton-row :global(.ff-trow__cell--wave::before) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--wave::before) {
     width: 100%;
     height: 14px;
   }
-  .ff-table__skeleton-row :global(.ff-trow__cover) {
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cover) {
     border-color: transparent;
   }
   @keyframes ff-table-skeleton-pulse {

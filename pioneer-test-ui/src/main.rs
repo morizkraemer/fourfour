@@ -55,7 +55,7 @@ use analysis_run::{
 use track_fields::{apply_edits, TrackFieldEdits, TrackFields};
 use track_infos::build_track_infos;
 use import_plan::{ImportPlan, ImportPlans};
-use dto::{LoadedState, PlaylistInput, ProgressPayload, TrackInfo};
+use dto::{PlaylistInput, ProgressPayload, TrackInfo};
 use playback::{
     playback_configure, playback_get_config, playback_pause, playback_play, playback_resume,
     playback_get_output_device, playback_list_output_devices, playback_seek,
@@ -87,6 +87,9 @@ fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
 /// Adds the tracks not yet in the library; their covers follow from `spawn_cover_fill`, so the
 /// rows come back without artwork and `import-covers` names the ones that got a cover.
 fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result<Vec<TrackInfo>, CommandError> {
+    if scanned.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut seen = lib.track_paths().map_err(CommandError::from_anyhow)?;
     let fresh: Vec<models::Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
     let ids = lib.add_tracks_covers_later(&fresh).map_err(CommandError::from_anyhow)?;
@@ -1273,9 +1276,9 @@ async fn refresh_track_labels(state: State<'_, SharedLibrary>) -> Result<Vec<dto
         .map_err(|e| e.to_string())
 }
 
-/// Load the library state. Returns all tracks and playlists.
+/// Load the library state. Returns all tracks and playlists as one binary buffer (`LoadedState::to_bytes`).
 #[tauri::command]
-async fn load_state(app: AppHandle) -> Result<LoadedState, CommandError> {
+async fn load_state(app: AppHandle) -> Result<tauri::ipc::Response, CommandError> {
     let Some(state) = app.try_state::<SharedLibrary>() else {
         return Err(app
             .try_state::<LibraryOpenFailure>()
@@ -1288,7 +1291,9 @@ async fn load_state(app: AppHandle) -> Result<LoadedState, CommandError> {
         let lib = shared.lock().map_err(|e| e.to_string())?;
         let state = track_infos::loaded_state(&lib)?;
         perf_probe::mark("load_state_built", serde_json::json!({ "tracks": state.tracks.len() }));
-        Ok(state)
+        let bytes = state.to_bytes()?;
+        perf_probe::mark("load_state_encoded", serde_json::json!({ "bytes": bytes.len() }));
+        Ok(tauri::ipc::Response::new(bytes))
     })
     .await
     .map_err(|e| e.to_string())?

@@ -2107,3 +2107,603 @@ At full width the staging costs 1.5% CPU (the second decode and waveform of the 
 - Mac CoreML path (2 sessions, chunk 1500, ANE/GPU): not simulable on Linux; the sweeps above are the rten CPU path. There the CPU lanes (decode, resample, mel, key, waveform) are what parallel tracks buy, and W has to cover those, not the chunk queue.
 - Wall-clock differences between worker counts above 4: none exist on a free machine; the loaded box cannot show them without the share bias described above.
 - A separate decode prefetch lane: redundant with 3-4 workers (idle 1%); with 2 workers and 16 threads it would recover part of the 14% idle, but that needs a machine that is both wide and short of memory, and the chunk estimate above removes the shortage that would produce it.
+## R118 row layers (2026-11-04, `r118-row-layers`)
+
+Branch `r118-row-layers` from `ov-1028` (`0e01eba`, r112, r113, r114, r115 included). Linux `dev` box, headless Chromium 1217 and Playwright WebKit, 10k fixture payload (`~/.cache/r95/state10k.json`, two thirds of the rows given synthetic 3-band data so rows show real previews, one third left as placeholders), 1600x1000, box load 13-23 (other workers). Result: **the per-frame cost is real and sits in the row canvases, but every way of removing it needs the fenced `Waveform.svelte` (the row preview is that file's `mini` variant, drawn by `TrackRow.svelte`), and the only one that works (rows as `<img>`) is not pixel-identical in Chromium, retains memory the app cannot bound, and is slower on scroll in WebKit. Nothing landed in `app/src`; the proposal and its numbers are below.**
+
+### Where the Layerize time comes from
+
+Layer tree of the expanded, playing player over the 10k table (CDP `LayerTree`, `FF_PERF_R118=1 ... -g 'layer tree'`): 84 layers, 77 drawing: **37 `Canvas` layers (one per row preview, all of them composited whatever the canvas size or `willReadFrequently`) and 37 `Overlap` layers** (the hidden 1 px `.ff-trow__wave-cursor`, `opacity: 0`, paints above its row's canvas, so the row's later content cannot merge back below the canvas layer), 3 others. The table pool keeps its canvases: a 300-frame fling over 25,000 px adds and removes 0 canvases and 0 rows (42 rows, 42 canvases before and after; `FF_PERF_R118=pool`).
+
+Layerize per frame (expanded player playing, 1.5 s traces) by what is hidden, same page, one trace each: base 8.1, row canvases hidden 3.2-3.8, canvases and cursor hidden 2.7, whole table hidden 1.5 (the rest of the page). With no canvases left, the 25 elements of a row still cost about 2 ms: the text spans are about 1.1 ms of it (hide-text 3.5 to 2.4), cells, cover, fav and rating together the rest.
+
+### What was tried in app code (no change, nothing landed)
+
+| Try (CSS injected into the page, expanded player playing, Layerize ms per frame) | Result |
+|---|---|
+| `will-change: transform` on `.ff-table__scroll` or `.ff-table__body`, `isolation: isolate; contain: paint` on the scroller, `contain: layout paint style` on the body | 6.5-7.4 against 7.0-7.7 base (v6, one trace each): no change |
+| `.ff-table__row { contain: none }` | inconclusive: 7.0 (6.6-10.0) against 8.7 (8.1-9.9), 3 traces against 4, inside the spread; not pursued (the row's `contain: layout` is what keeps a text change from relaying out the list) |
+| wave cursor `display: none` unless the wave cell is hovered (so the 37 `Overlap` layers go, 84 to 47 layers; written as app CSS in `TrackTable.svelte`) | **worse**: Layerize 10.3 (9.5-11.0) against 7.4 (7.0-8.0), Commit unchanged (2.1 against 2.3); and not byte-identical (fav checkbox corner pixels, see below) |
+| `getContext('2d', { willReadFrequently: true })` on the row canvas | still 37 `Canvas` layers |
+| `contain`, `content-visibility: auto` on rows, hiding the canvases of overscan rows | already tried in `performance-2026-10.md` (no Layerize change; the overscan protects against blank rows on a compositor-thread fling); not repeated |
+
+### The change that works (proposal, fenced: not landed)
+
+Draw the `mini` preview into an offscreen canvas as before, turn it into a PNG data URL and show it in an `<img class="ff-waveform ff-waveform--mini">`; keep the URL in an 800-entry LRU keyed like the existing bitmap cache (key includes data, size, dpr and palette version; the placeholder bars get their own key); `TrackRow.waveRect` asks for `.ff-waveform` instead of `canvas`. Measured with this diff applied temporarily and reverted (nothing under `prototyping/` is in the tree):
+
+```diff
+--- a/prototyping/viewport/design-system/components/TrackRow.svelte
++++ b/prototyping/viewport/design-system/components/TrackRow.svelte
+@@ -76,7 +76,7 @@
+   function waveRect(e) {
+-    return (e.currentTarget.querySelector('canvas') ?? e.currentTarget).getBoundingClientRect();
++    return (e.currentTarget.querySelector('.ff-waveform') ?? e.currentTarget).getBoundingClientRect();
+   }
+--- a/prototyping/viewport/design-system/components/Waveform.svelte
++++ b/prototyping/viewport/design-system/components/Waveform.svelte
+@@ (module)
++  const urlCache = new Map();
++
++  function rememberUrl(key, url) {
++    urlCache.set(key, url);
++    if (urlCache.size > BITMAP_CACHE_LIMIT) urlCache.delete(urlCache.keys().next().value);
++  }
++
++  function recallUrl(key) {
++    const hit = urlCache.get(key);
++    if (hit === undefined) return null;
++    urlCache.delete(key);
++    urlCache.set(key, hit);
++    return hit;
++  }
+@@ (instance)
+   let canvas;
++  let image;
++  const asImage = variant === 'mini';
+@@
++  function pictureKey(dpr, data) {
++    return data ? bitmapKey(dpr, data) : `ph|${variant}|${width}|${height}|${dpr}|${paletteVersion()}|${animating ? 1 : 0}`;
++  }
++
++  function imageUrl(pixelW, pixelH, dpr) {
++    const data = source();
++    const key = pictureKey(dpr, data);
++    let url = recallUrl(key);
++    if (url) return url;
++    const bitmap = document.createElement('canvas');
++    bitmap.width = pixelW;
++    bitmap.height = pixelH;
++    const ctx = bitmap.getContext('2d');
++    if (data) paintData(ctx, data, pixelW, pixelH, dpr);
++    else paintPlaceholder(ctx, dpr, 0);
++    url = bitmap.toDataURL();
++    rememberUrl(key, url);
++    return url;
++  }
++
++  function drawImageElement() {
++    if (!image) return;
++    const dpr = window.devicePixelRatio || 1;
++    const cssW = `${width}px`;
++    const cssH = `${height}px`;
++    if (image.style.width !== cssW) image.style.width = cssW;
++    if (image.style.height !== cssH) image.style.height = cssH;
++    const url = imageUrl(Math.round(width * dpr), Math.round(height * dpr), dpr);
++    if (image.getAttribute('src') !== url) image.setAttribute('src', url);
++  }
++
+   function draw(phase) {
++    if (asImage) return drawImageElement();
+     if (!canvas) return;
+@@ ($effect)
+-    if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
++    if (asImage) {
++      if (urlCache.has(pictureKey(window.devicePixelRatio || 1, data))) {
++        run();
++        return;
++      }
++    } else if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
+@@ (markup)
+-<canvas ...></canvas>
++{#if asImage}
++  <img bind:this={image} alt="" draggable="false" class="ff-waveform ff-waveform--{variant}" class:ff-waveform--analysing={animating && !source()} />
++{:else}
++  <canvas ...></canvas>
++{/if}
+```
+
+(The measured version computed the placeholder key inline in `imageUrl` and in the effect; `pictureKey` is that line pulled out. The other hunks are as measured.)
+
+Layer tree with it: 16 layers (3 canvases of the player, 5 overlap), 84 before.
+
+The smoke suite with the proposal applied (Chromium): 113 passed, 1 failed: `leaks.spec.ts` "opening and closing the palette, settings and the expanded player leaves no listeners, nodes or callbacks behind" reports DOM nodes 6,791 before and 10,007 after six cycles (listeners and callbacks flat). Base passes it, 2 of 2 runs; the proposal fails it, 2 of 2 runs. Cause not investigated (the open and close of the expanded player resizes the table, which mounts and unmounts pool rows, so the row preview elements are the likely owners).
+
+### Frame cost, Chromium (interleaved base, new, base, new; per-frame medians with the range of the per-trace values)
+
+Expanded player playing, 4 rounds x 3 traces of 1.5 s per side (n = 12), load 19-23:
+
+| ms per frame | base | new | |
+|---|---:|---:|---|
+| Layerize | 8.40 (7.32-9.45) | 3.24 (2.90-4.10) | -61% |
+| Commit | 3.81 (2.99-4.75) | 2.55 (2.32-3.62) | -33% |
+| Paint | 0.61 (0.50-1.11) | 0.66 (0.43-1.44) | |
+| PrePaint / Layout / Style | 0.29 / 0.33 / 0.24 | 0.28 / 0.27 / 0.27 | |
+| main thread busy | 18.9 (16.5-22.2) | 11.4 (10.7-16.8) | -40% |
+| frames in 1.5 s | 74 (64-83) | 90 (68-92) | |
+
+Table fling (150 frames at 84 px/frame = 3 rows per frame, `FF_PERF_R118=scroll`), 4 rounds x 3 passes; pass 1 of each load is cold (every row is new to the preview cache, the new code encodes a PNG per row), passes 2 and 3 are warm (rows seen before):
+
+| ms per frame | cold base | cold new | warm base | warm new |
+|---|---:|---:|---:|---:|
+| Layerize | 8.23 (7.49-8.36) | 3.92 (3.24-3.96) | 7.97 (7.38-8.40) | 3.69 (3.41-3.90) |
+| Commit | 2.77 (1.76-2.85) | 1.39 (0.47-1.60) | 1.76 (1.23-2.03) | 0.86 (0.46-1.40) |
+| Paint | 1.96 | 2.59 | 1.89 | 2.29 |
+| Layout / Style | 1.61 / 1.80 | 1.69 / 1.84 | 1.53 / 1.64 | 1.59 / 1.75 |
+| main thread busy | 27.3 (21.9-27.9) | 26.8 (18.8-27.7) | 22.7 (19.6-24.5) | 17.4 (15.3-20.7) |
+| script in rAF (trace, 150 frames) | 1,258-1,352 ms | 1,862-1,941 ms | 956 | 686 |
+| frames over 20 ms (of 149) | 89 (49-92) | 84 (26-89) | 57 (28-72) | 16 (3-45) |
+
+Cold, the PNG encode (0.45 ms per row at dpr 1, 0.86 ms at dpr 2 on this box) eats the compositor gain: busy 27.3 against 26.8. Warm it is -24% busy and 57 against 16 slow frames.
+
+Typing in the header search (`house`, then five backspaces, 120 ms apart, `FF_PERF_R118=typing`, 3 rounds x 3 passes, load 13-19): keystroke to second frame, median 67-71 ms base against 70-72 new, worst 88-112 base against 91-112 new; Layerize 6.4 against 5.2, Paint 3.2 against 5.1 per frame. No gain and no regression beyond the noise (a keystroke that replaces the 42 visible previews pays the encodes once; the backspaces hit the cache). The `typing during analysis: worst keystroke` budget row was not re-run.
+
+### Frame cost, WebKit (Timeline through the inspector session, 3 rounds x 3 passes, headless software compositing; this build does not report compositor work, so Layerize and Commit have no counterpart)
+
+| per frame | expanded playing base | new | fling warm base | new |
+|---|---:|---:|---:|---:|
+| Layout | 0.54 | 0.52 | 3.62 | 3.86 |
+| Paint | 0.87 | 0.70 | 15.66 | 16.97 |
+| Recalculate styles | 1.44 | 1.34 | 3.88 | 3.98 |
+| FireAnimationFrame (script) | 2.55 | 2.33 | 9.69 | 13.15 |
+| frame gap p50 / p95 ms | 18 / 30 | 17 / 27 | 110 / 142 | 112 / 148 |
+
+In WebKit the fling is compositor-bound (110 ms frames, R29, R34), and setting `img.src` to a data URL costs 0.13 ms the first time and 0.7 ms for a URL it already knows (Chromium: 0.03 and 0.01 ms), so script grows by 3.5 ms per frame in a fling; the PNG encode is 0.65 ms (dpr 1) and 1.4-1.8 ms (dpr 2). A URL seen for the first time is not loaded until a later task (`img.complete` is false in the same task and after the microtask, true after `setTimeout(0)`; Chromium is loaded by the microtask), so a recycled row can show its previous preview for a frame. Playing steady state improves slightly (-20% Paint), scrolling is slower. No Mac measurement (no Mac here); the per-canvas CALayer cost there is the unknown that could change this.
+
+### Pixel identity
+
+`FF_PERF_R118=identity`: screenshot of the table area (`.ff-table__scroll`, animations disabled) in 12 states at device pixel ratio 1 and 2: top, row 100, row 5,000, the end of the list, a 111-step scroll back and forth, hover on a row, hover on a wave cell (cursor shown), one selected row, a selected range, the playing row, "Analyze all unanalyzed" running (pulsing placeholders), and the same scrolled to row 100. Rows with data and rows without (placeholders) are both on screen.
+
+- **WebKit: 24 of 24 screenshots byte-identical, base against new**, and base against base (control) 24 of 24.
+- **Chromium: 3 of 24 byte-identical, 21 differ by at most 1 to 4 levels of 255**, in two places: (1) at dpr 1, 290-350 pixels per screenshot at the corners of the fav checkbox (x 266-267 and 282-283, one level, up to 3 in four screenshots); the same pixels differ with only the cursor CSS above applied, so this comes from the `Overlap` layers disappearing (the box is rastered in another layer before), not from the preview; the preview pixels at dpr 1 are identical; (2) at dpr 2, the preview of highlighted rows (selected, range, hover, playing: 130-11,757 pixels, 1-2 levels): the translucent row tint blends under the image in the page's layer instead of under a composited canvas, and 8-bit rounding differs. Control, base against base in Chromium: 23 of 24 byte-identical, one screenshot differs in 2 pixels by 4 levels (the fav corner again), so the harness itself is not perfectly stable there. In a toy page (canvas against the same PNG as `<img>`, rest and tinted row, dpr 1 and 2) the PNG route was byte-identical in Chromium and WebKit; an SVG path instead of the PNG differed (4-253 pixels, 1-21 levels) and was dropped.
+
+So Chromium identity to the byte is not possible with any change that removes the layers; WebKit (the Mac webview) is exact.
+
+### Memory
+
+- JS heap after a forced GC is the same (52 MB base and new after two full sweeps of the 10k list).
+- The app's cache is smaller and bounded: 800 data URLs of 1.6 KB (dpr 2) or 0.8 KB (dpr 1), at most 1.3 MB, against up to 800 canvases of 27 KB (dpr 2, 21.5 MB) or 6.7 KB (dpr 1, 5.4 MB) now.
+- **The browser retains the images the app lets go of.** Browser process RSS (all Chromium processes, `FF_PERF_R118=memory`: scroll the whole 10k list twice at 20 rows per frame, then force GC and wait 8 s), 2 runs each: base +64 and +40 MB at dpr 2, +44 and +59 MB at dpr 1; new +152 and +145 MB at dpr 2, +128 and +131 MB at dpr 1. A page that only sets `img.src` to 2k, 5k, 10k, 12k and 40k distinct data URLs on 60 images grows by +74, +90, +115, +117 and +309 MB, GC or not: about 5.6 KB per distinct image, with no plateau seen, so a 50k library scrolled end to end would hold about 280 MB more in headless Chromium. Blob URLs revoked after 800 grew more (+154 MB for 10k). Whether WebKit or a GPU-raster Chromium keeps them is not measured. This fails the "row image cache must be bounded" bar as the proposal stands; a hard cap on distinct images ever created (and canvas for the rows past it) would bound it.
+
+### Recommendation
+
+1. Take the R112 proposal first (compositor-driven playhead): it takes Layerize in this very scenario from 658 ms to 27 ms per 1.5 s with rows untouched, which is more than the 61% here and needs no identity trade-off.
+2. Do not take rows-as-images now: Layerize and Commit fall by 61% and 33% while a track plays and the fling gets 24% cheaper when warm, but Chromium is not byte-identical, memory grows without a bound the app controls, an existing leak smoke test fails with it, WebKit scrolls slower, and the Mac effect is unmeasured. If it is wanted after a Mac measurement, lift the fence for `Waveform.svelte` and `TrackRow.svelte` and add (a) a cap on distinct images created, (b) conversion only after the table has been idle, so scrolling and typing keep today's cost.
+3. App-only levers on rows (will-change, contain, isolation, cursor visibility, willReadFrequently) do not help, see the table above.
+
+### Tools added
+
+`app/smoke/perf-rowlayers.spec.ts` (all tests skip unless `FF_PERF_R118` is set): `FF_PERF_R118=1` layer tree by compositing reason; `FF_PERF_R118=frames` per-frame trace of the expanded player playing, with CSS variants (`FF_PERF_VARIANTS=base,no-row-canvas,...`); `identity` screenshots of the table in twelve states (`FF_PERF_DPRS`, `FF_PERF_R118_OUT=dir/prefix`); `scroll` and `typing` traces with frame-gap statistics; `memory` (RSS of the browser's processes and JS heap, `FF_PERF_DPR`); `webkit-frames` (WebKit Timeline per frame, `FF_PERF_SCENARIO=expanded|scroll`); `pool` (canvas and row churn during a fling). Per-frame numbers come from summing `Layerize`, `Commit`, `Paint`, `Layout`, `UpdateLayoutTree` on the main thread of a `devtools.timeline` trace and dividing by the `Commit` count (`scripts/perf-trace-phases.mjs` has the bucketing). Raw and the interleaving scripts were in `~/.cache/r118-work/` and are deleted after this item.
+
+
+## R120 state decode (2026-11-04, `r120-state-decode`)
+
+Branch `r120-state-decode` from `ov-1028` (`13dee70`). Linux `dev` box (16 cores, load average 10-25 from other workers, everything under `nice`), headless Chromium 1217 and Playwright WebKit, the 10k and 50k `ff-fixture` libraries (the r95 `bench_startup dump` payloads: 1.70 and 8.42 MB of JSON, the same sha256 as in R111) and two more per size: the realistic-folder copies of R111 (295 and 500 album folders) and, at 10k, an edge-data copy (`benchmark/scripts/r120-edge-variant.py`). Result: **at 50k the page spent 160-215 ms between the bytes and the track objects, so `load_state` now answers with one binary buffer. Page-side that is 30-65% less (Chromium 214 to 126 ms, WebKit 182 to 71 ms at 50k; 10k 59 to 40 and 42 to 21 ms), the backend encode 1.5-1.8x faster, first row at 50k 120-280 ms earlier in the boot harness; at 10k the first row did not move (inside the noise). The data in the page is the same, row by row and key by key.**
+
+### Measured first (the JSON path, `load_state` answer as bytes to `TrackInfo[]`, fresh page, 15 runs, base and new alternated, median with min-max)
+
+Bytes to objects in the page, as `Response.json()` does it for the JSON answer (UTF-8 decode of the text, `JSON.parse`, `decodeTrackTable`) and as the new code does it (`decodeStateBytes` on the buffer):
+
+| Library | Browser | JSON: text decode | parse | build (`decodeTrackTable`) | JSON total | Binary |
+|---|---|---:|---:|---:|---:|---:|
+| 10k fixture | Chromium | 15 (13-20) | 21 (18-28) | 23 (18-29) | 59 (53-74) | **40 (37-65)** |
+| 10k fixture | WebKit | 13 (10-17) | 19 (18-29) | 9 (8-16) | 42 (37-59) | **21 (18-37)** |
+| 10k, 295 folders | Chromium | 14 (11-16) | 17 (16-25) | 20 (17-23) | 51 (45-60) | **41 (32-57)** |
+| 10k, 295 folders | WebKit | 12 (8-16) | 16 (14-29) | 7 (6-15) | 36 (29-58) | **18 (15-36)** |
+| 50k fixture | Chromium | 67 (64-77) | 87 (84-107) | 59 (50-68) | 214 (201-243) | **126 (112-152)** |
+| 50k fixture | WebKit | 65 (62-89) | 83 (80-126) | 33 (28-42) | 182 (172-253) | **71 (65-103)** |
+| 50k, 500 folders | Chromium | 59 (55-63) | 77 (74-111) | 48 (39-64) | 184 (171-219) | **103 (94-118)** |
+| 50k, 500 folders | WebKit | 57 (53-65) | 66 (64-87) | 36 (30-48) | 159 (151-198) | **56 (51-81)** |
+
+That is far over the 20 ms bar at 50k, so the change was made. What the numbers say: the floor is allocating about 150,000 strings and 50,000 objects (a V8 `slice` or `split` of an arena costs the same as `JSON.parse` creating the strings; a fused loop that cuts the title and file slices inside the object loop was not faster; the object loop alone is 60 ms cold in Chromium), so the gain comes from what the binary form does not have to do: decode 8.4 MB of UTF-8 text into a string, tokenise and validate it, and parse 9 numbers per row (the numeric columns are typed-array views over the buffer, no copy).
+
+Backend encode (`bench_startup rep`, in one process, JSON and binary measured in the same loop on the same state, median of 3 rounds of 10-15 runs):
+
+| Library | JSON (`serde_json::to_vec`) | Binary (`to_bytes`) | Bytes JSON / binary |
+|---|---:|---:|---|
+| 10k fixture | 7.9 ms (6.0-13.4) | **4.4 ms** (4.0-11.0) | 1.70 / 1.72 MB |
+| 10k, 295 folders | 6.9 (5.2-13.2) | **3.9** (3.4-5.5) | 1.50 / 1.52 MB |
+| 50k fixture | 29.2 (28.5-50.5) | **18.9** (18.1-27.0) | 8.42 / 8.32 MB |
+| 50k, 500 folders | 27.8 (24.8-89.7) | **15.7** (15.4-60.7) | 7.32 / 7.35 MB |
+
+In the single-thread encoder at 50k about 15 ms go to the four text columns (154,000 texts; the per-text work is not the whole of it, see below), 2 ms to copy the arenas and 2.6 ms to write the number columns. A version with one thread per text column and a version that copies ASCII runs in bulk instead of per text both produced the same bytes in the same time (19-20 ms and 18 ms at 50k, the fixture), so neither stayed; the rest looks like page faults of the fresh 8 MB output in this VM. The size on the wire is the same: titles and file names are most of it in both forms. Transfer through the Tauri IPC was not measured (no GUI here): the buffer goes through the same custom protocol as `get_waveform_detail`, without the JSON text decode on the other side.
+
+### Changed (no markup, no CSS, same rows)
+
+- **`dto.rs`: `LoadedState::to_bytes`** writes the table and the playlists as one little-endian buffer (header of 10 words, playlists as JSON, a plain-ASCII text arena and a "wide" UTF-8 arena, one end offset per text in UTF-16 units with a top bit for the wide arena, `f64` durations and sizes, `u32` columns, flags; every section starts on a multiple of 8 so the page reads it as typed arrays in place). The layout is documented on the function. The split of the text in two arenas is what keeps the page's strings one-byte: with one arena a single CJK title makes `TextDecoder` return one two-byte string for all 4.7 MB (decode 40 ms instead of 21 ms at 50k, and twice the heap behind every slice). `file_size` goes as `f64`, which is what `JSON.parse` gives for the same integer, so even sizes above 2^53 come out equal.
+- **`main.rs`: `load_state` returns `tauri::ipc::Response`** (the pattern of `get_waveform_detail`); `load_state_encoded` perf mark after `load_state_built`.
+- **`track-table.ts`: `decodeStateBytes`** builds the same `TrackInfo` objects (same keys in the same order, `rating` and `color` added last) from the buffer; `tauri.svelte.ts` `loadState` takes an `ArrayBuffer` or the old object (browser mocks, `perf-q50`, smoke mock and tests keep sending JSON, and `decodeTrackTable` stays), and sets `ff:state-answer` and `ff:state-decoded` marks (`library.svelte.ts` `ff:state-rows`, after the rows are set) that the boot harness reads.
+- Not changed on purpose: `mapTrackInfoToLocal` and the row proxies (47-97 ms wall at 50k in the harness, same before and after), the early call in `index.html`, the JSON form of `LoadedState` (still the logical payload: `bench_startup dump` writes it and its sha256 below is unchanged).
+
+### Boot harness (`perf-startup.spec.ts`, `FF_PERF_STARTUP=<n>=<state.json|state.bin>==<backend ms>,...`, same app build, JSON payload against binary payload alternated run by run, 7 runs each, backend simulated as 45 ms at 10k and 200 ms at 50k, load 12-20; ms, median (min-max); pair diff = median of bin minus JSON in the same run)
+
+Chromium, first real row / interactive:
+
+| Library | Case | JSON first row | binary first row | pair diff | bin lower in | JSON interactive | binary interactive | pair diff |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 10k | first launch | 749 (636-5508) | 694 (610-6818) | -26 | 4 of 7 | 771 | 764 | +15 |
+| 10k | cold | 687 (601-4020) | 729 (695-4275) | +42 | 2 of 7 | 761 | 816 | +68 |
+| 10k | warm | 608 (528-4505) | 631 (561-3616) | -3 | 4 of 7 | 676 | 703 | -23 |
+| 50k | first launch | 1,055 (1,023-5,895) | 882 (835-3,646) | -212 | 7 of 7 | 1,223 | 1,029 | -209 |
+| 50k | cold | 1,241 (1,091-5,145) | 967 (934-2,261) | -282 | 7 of 7 | 1,248 | 967 | -306 |
+| 50k | warm | 1,075 (957-2,732) | 852 (790-3,258) | -210 | 6 of 7 | 1,178 | 880 | -231 |
+
+WebKit (first row is interactive there):
+
+| Library | Case | JSON | binary | pair diff | bin lower in |
+|---|---|---:|---:|---:|---:|
+| 10k | first launch | 1,118 (1,093-1,335) | 1,046 (1,022-1,247) | -71 | 6 of 7 |
+| 10k | cold | 1,089 (1,075-1,267) | 1,116 (1,043-1,160) | +20 | 3 of 7 |
+| 10k | warm | 698 (655-768) | 705 (588-743) | +14 | 3 of 7 |
+| 50k | first launch | 1,779 (1,535-1,901) | 1,488 (1,448-1,929) | -263 | 6 of 7 |
+| 50k | cold | 1,674 (1,622-1,790) | 1,619 (1,507-1,712) | -118 | 6 of 7 |
+| 50k | warm | 1,187 (1,115-1,313) | 1,040 (964-1,194) | -162 | 7 of 7 |
+
+The pieces of the same runs (Chromium 50k first launch / cold / warm, JSON then binary): bytes to answer in the harness (fetch plus `text()` or `arrayBuffer()`) 333 / 371 / 371 against 155 / 177 / 171; `JSON.parse` 81 / 94 / 67 against 0; `decodeTrackTable` or `decodeStateBytes` (`ff:state-answer` to `ff:state-decoded`) 61 / 28 / 28 against 134 / 129 / 128; row mapping 47 / 91 / 81 against 74 / 77 / 77; `load_state` answered 812 / 1,042 / 918 against 566 / 714 / 595. WebKit 50k first launch: transfer 395 / 248, parse 84 / 0, decode 31 / 108, map 78 / 78, answered 1,347 / 1,022. At 10k the pieces are within 10-20 ms of each other and the first row is the same, so **at 10k only the backend's 3-4 ms and WebKit's 10 ms of page work are saved; the first screen does not come earlier.** Read with care: the in-boot decode of the binary form is as large as parse plus build of the JSON form (the main thread is warm for neither, and the boot is 100-300 ms of other tasks); what the JSON form pays on top is the text decode of the 8.4 MB response, which in this harness happens inside `fetch().text()` on the busy page main thread (the 130-200 ms of `transferMs` difference), and the webview's `Response.json()` should do the same work there. The size of the first-row gain in the real app is not measured (no Mac, no GUI); the in-isolation table above is the part that does not depend on the harness. JS heap after boot (forced GC) 51.7 to 48.2 MB at 50k, 16.0 to 15.4 MB at 10k.
+
+Same harness, realistic folders (295 and 500 album folders; load 13-24, so the ranges are wider), first real row, median (min-max), pair diff, binary lower in:
+
+| Browser | Library | Case | JSON | binary | pair diff | bin lower in |
+|---|---|---|---:|---:|---:|---:|
+| Chromium | 10k | first launch | 688 (604-6380) | 631 (593-3347) | +5 | 3 of 7 |
+| Chromium | 10k | cold | 713 (614-5010) | 733 (584-3676) | -46 | 5 of 7 |
+| Chromium | 10k | warm | 706 (558-3666) | 616 (566-4392) | +10 | 2 of 7 |
+| Chromium | 50k | first launch | 1,008 (904-6,582) | 897 (753-5,299) | -189 | 6 of 7 |
+| Chromium | 50k | cold | 1,160 (1,082-7,630) | 939 (836-10,646) | -256 | 6 of 7 |
+| Chromium | 50k | warm | 1,030 (930-8,123) | 1,137 (726-6,663) | -139 | 6 of 7 |
+| WebKit | 10k | first launch | 1,176 (1,052-1,230) | 1,059 (974-1,377) | -46 | 5 of 7 |
+| WebKit | 10k | cold | 1,166 (1,077-1,302) | 1,175 (999-1,408) | -82 | 5 of 7 |
+| WebKit | 10k | warm | 685 (575-893) | 784 (619-826) | +92 | 2 of 7 |
+| WebKit | 50k | first launch | 1,617 (1,371-1,637) | 1,518 (1,323-1,589) | -48 | 6 of 7 |
+| WebKit | 50k | cold | 1,731 (1,549-1,878) | 1,536 (1,426-1,737) | -141 | 7 of 7 |
+| WebKit | 50k | warm | 1,143 (1,057-1,294) | 987 (924-1,123) | -187 | 6 of 7 |
+
+The 50k rows move the same way as with the fixture (the Chromium 50k warm row is the one that disagrees with itself: median 1,030 against 1,137, yet lower in 6 of 7 pairs, pair diff -139; the load swung during that run); at 10k the sign flips from row to row. `decodeMs` of the binary form (Chromium 10k 32-57 ms, 50k 92-152 ms; WebKit 17-19 and 55-93 ms) is above the JSON form's `decodeMs` and below its parse plus decode plus text decode, as in the fixture runs.
+
+
+### Identity
+
+- **Logical payload unchanged.** `bench_startup dump` (`serde_json::to_vec` of `loaded_state`) on the new code gives the R111 sha256: 10k `38fe2965bc4aa7d3218fbb616669960f466e297f282bac861d8dd0dcd2249eb0` (1,699,963 bytes), 50k `297cb41d20496dc9c9a74e93c71f3e4f248c6fca76e0a855225339bdd41c0dc9`, 10k with 295 folders `1817f860d6c7a7137ecb36b3a67899a2091bb0adfd61461ff93ea8e9614231cf`, 50k with 500 folders `6b7ceabd09beffdf34a64ba8a773a3b04a6b39061b34b74b5969f42bda448b81`, and for the new edge copy `4d2bfc155860f3f2feab9b88b36fab97209e3635a1b11194dfd84d7ef12eb719` (no base binary of this one: `loaded_state` and the JSON form were not touched, the other four equal R111's).
+- **Page level, every row, every field, key order.** For each library `decodeStateBytes(state.bin)` against `decodeTrackTable(JSON.parse(state.json))`: `JSON.stringify` of each row (so key order counts, `rating`/`color` position included) hashed with sha256 over all rows, plus the playlists compared as JSON, in Chromium and WebKit (`crypto.subtle`, in the page) and in node (vitest `state-bytes-real.test.ts`, `FF_STATE_PAIRS=<state.json>=<state.bin>,...`). All 10 page runs and the 5 node runs: identical, first differing row none.
+
+| Library | Rows | sha256 of the rows (JSON path = binary path, Chromium = WebKit) |
+|---|---:|---|
+| 10k fixture | 10,000 | `9d2c2115772ebd4f62f5d9b0ece86b245e1373bf682a8c210d4ba99dbf1265cb` |
+| 50k fixture | 50,000 | `e015b861aeb97a46ae92290d88c708f5d574f9436258180c48b8688007a7cf64` |
+| 10k with edge data | 10,000 | `baf4b5869063ab3cc052bf5ff895c6b5c07eea5817feaad9ed6db03e8242c322` |
+| 10k, 295 folders | 10,000 | `540a1bc5e09ac75d31170975e6073d6cd53613e3df7f2263b60c3e800538cdfb` |
+| 50k, 500 folders | 50,000 | `31ed1ad3802f2fcee771e08e8e99b34333e000769aab040949eca5dccffb4e5e` |
+
+- The edge copy has an empty first and every 7th, 11th, 13th and 19th artist, album, genre and title, empty keys, quotes and backslashes in titles and genres, non-ASCII titles, artists and albums (accents, Japanese, an astral emoji, a leading U+FEFF that `TextDecoder` would drop without `ignoreBOM`), Windows (`C:\...`), bare and Japanese paths, tempo 0, bpm 127.995 and 128.005, analyses without a key or row preview, stages 3 and a fifth of the covers deleted.
+- **Golden files, both sides.** `dto::tests::state_bytes_match_the_golden_files_the_app_decodes` builds a 5-row edge table (empty strings, quotes, backslash and Windows paths, BOM, astral and CJK text, a NUL, `u32::MAX` id, `u64::MAX` size, 1e21 duration, rating 0 and empty colour, playlists with quotes and an empty folder) and an empty state and compares the bytes and the JSON with `app/src/services/fixtures/state-{edge,empty}.{bin,json}` (`FF_UPDATE_FIXTURES=1` rewrites them); `track-table.test.ts` decodes the `.bin` and expects `toStrictEqual` and equal key lists against the decoded `.json`, and `early-load-state.test.ts` does it through `loadState()`.
+- One difference by construction, not by data: a non-finite `duration_secs` would be `null` in JSON and NaN in the buffer; the backend never produces one (it is `as_secs_f64` of a decoded length).
+
+### Not done, and why
+
+- **Lazy or chunked object creation** (decode `TrackInfo` per 2,500 rows inside `mapTracksInTaskSizedChunks`): every row's fields are read at once by `mapTrackInfoToLocal` and `raw` must stay a `TrackInfo` (it is written to, `track.raw = {...}`), so it moves the same work into smaller tasks; the longest task of the boot (230-310 ms) is the shell mount, not the decode. Not done.
+- **Rows without the intermediate `TrackInfo`** or lazy strings: the way to get below the allocation floor above, but it changes `library.svelte.ts` and what `raw` is; a question for the orchestrator if the 50k first row still matters.
+- **Mac / real IPC**: untested here; the expectation is the larger gain on WebKit (JavaScriptCore's `JSON.parse` plus text decode is slower than V8's: 182 ms against 71 ms above) and no extra cost in the transfer (the waveform detail uses the same response type).
+
+### Tools added
+
+`bench_startup dump-bytes <dir> <out>` (the binary answer) and `binary_ms` / `binary_bytes` in `rep`; `perf-startup.spec.ts`: a `.bin` payload is served as an `ArrayBuffer`, `decodeMs` and `mapMs` per boot (from the three marks), payload kinds are interleaved run by run, `FF_PERF_STARTUP_RAW=<file>` writes every run; `benchmark/scripts/r120-edge-variant.py`; `app/src/services/state-bytes-real.test.ts` (skips without `FF_STATE_PAIRS`).
+
+## R121 mount (2026-11-04, `r121-mount`)
+
+Branch `r121-mount` cut from `ov-1028` at `13dee70` (r114 to r118 included; everything below was measured on that base and on that base plus this change), rebased onto `7056104` (r120) afterwards. Linux `dev` box, headless Chromium 1217 and Playwright WebKit, 10k fixture payload (`~/.cache/r95/state10k.json`, backend simulated as 118 ms), 1600x1000, box load 12-20 (other workers, one of them running Playwright too). Base and new were built from separate copies of the tree and run alternately (base, new, base, new ...), 3 runs per side per pair. Result: **`mount(App)` 106 to 65 ms and 36 ms less main-thread CPU from the start of the mount to the first paint (172 to 136 ms, -21%); first real row 35-50 ms earlier in Chromium on first launch and warm, a wash cold and in WebKit (below); the first screen is byte-identical in both browsers.**
+
+### Where the mount went (what was measured)
+
+Chromium trace of a warm reload (`FF_PERF_STARTUP_TRACE`, minified build, `performance.mark` around `mount(App)` added to `main.ts` in the scratch copies only), 5 interleaved rounds, ms, median (range), CPU = `tdur` of the main-thread tasks:
+
+| Phase, mount start to first commit | base | new |
+|---|---:|---:|
+| `mount(App)` wall | 105.8 (94-138) | 65.3 (55-73) |
+| `mount(App)` main-thread CPU | 94.4 (86-129) | 56.6 (53-62) |
+| effects flushed after the mount (JS, includes the first `WaveformDisplay` transport) | 40.4 (33-48) | 33.7 (30-38) |
+| style recalculation (5 passes) | 18.1 (17-19) | 14.3 (13-20) |
+| layout (4 passes) | 18.6 (17-22) | 17.7 (16-21) |
+| paint, pre-paint, layerize, commit | 7.6 | 7.6 |
+| **CPU, mount start to first commit** | **172.4 (166-215)** | **136.1 (123-142)** |
+| wall, mount start to first commit | 199.9 (186-232) | 154.4 (131-202) |
+
+Per component (CPU profile of the unminified build, one profile per side, inclusive ms inside `mount`): `TrackTable` 47.2 to 11.3 (24 `TrackRow` components 31.7 to 0), whole `mount` 107.5 to 72.2; `Sidebar` 25.2 to 26.4 (its cold-code cost did not move: the shared runtime paths the skeleton rows warmed are now first run by the sidebar), `Player` 11.3 to 10.3, `GlobalHeader` 5.0, `AppStatusBar` 4.2-4.7, `ColumnHeader` 3.9-4.1. Settings and the other dialogs are not in the first screen any more (r114); what was still eager and closed was four `ContextMenu` components, two `Dialog`s (about 2-4 ms together).
+
+The forced layout of r114 (32 ms) is not extra work. The first read of a layout-dependent value in the effects after the mount (the compact player's first `setTransport`, `WaveformDisplay._canvasSize`, then `getBoundingClientRect`) makes the engine lay out the page there instead of in the frame; the style and layout passes cost the same wherever they run (see "Tried" below). A second full-document layout (1,046 layout objects, 8-10 ms, in the task of the `load` event) is the font swap after the 11 faces requested by `loadEveryFontSubsetNow()` finish; it is also unchanged.
+
+### What changed (`app/src`, no visible change)
+
+- **Skeleton rows are one HTML string** (`lib/skeletonRows.ts`, `TrackTable.svelte`). The 24 placeholder rows were 24 mounted `TrackRow` components with an empty track: 13 cells each, a `Waveform` canvas with its effects and drawing per row, five rating stars, all hidden by the skeleton CSS but built and laid out (577 elements, 337 of them rows in the skeleton alone). Now each row is built from a string with the same wrapper, `.ff-trow`, cell classes, `data-col-key` and per-column layout style (`columnCellStyle`, the function `TrackRow` uses), minus the children the skeleton CSS hides (`.ff-trow__text`, wave canvas, stars, fav box); only the cover thumbnail keeps its child. 337 elements for the whole skeleton, 571 for the page (811 before). The skeleton CSS selectors moved under `.ff-table__skeleton :global(...)` because the injected rows do not carry Svelte's scoping class; the same rules, one class more of specificity in both of the places that matter. `skeletonRows.test.ts`: row count and the text-width cycle, cell classes and layout style equal to the `TrackRow` plan for every column kind, escaping of a hostile column key.
+- **Closed menus and dialogs mount when they open** (`{#if menu.open}`): the three `ContextMenu`s of `TrackTable`, the one of `Sidebar`, the board menu of `OrganizePanel`, the remove-favourite `Dialog` of `Sidebar` and the analyse prompt of `App`. Same props, same open behaviour (`ContextMenu` and `Dialog` render nothing when closed and have no exit transition); their item builders run on open instead of at every prop change.
+- `perf-first-screen.spec.ts` (new, env-gated, below).
+
+### Before / after, 10k
+
+Chromium, 6 pairs of 3 runs (n = 18 per side, one pair is a median of 3), ms, median (range); pair diff = median over the pairs of the pair medians, new minus base:
+
+| Case | first real row base / new | pair diff | interactive base / new | pair diff | longest task base / new | pair diff |
+|---|---:|---:|---:|---:|---:|---:|
+| first launch | 737 (602-2055) / 679 (590-785) | -51, new faster 5/6 | 816 / 758 | -46, 5/6 | 274 / 214 | -47, 6/6 |
+| cold | 674 (610-1056) / 665 (605-750) | +13, 3/6 | 835 / 758 | +17, 3/6 | 245 / 206 | -49, 6/6 |
+| warm | 641 (518-723) / 597 (514-730) | -49, 4/6 | 707 / 668 | -21, 4/6 | 186 / 147 | -37, 6/6 |
+
+`frameInteractive`: 879 / 829 (-43), 830 / 797 (-8), 779 / 743 (-53). The cold row is the weak one again (as in R114); the pooled medians move by 9-77 ms in the new build's favour but the pair medians of first row and interactive are inside the noise there. The longest task falls in every pair (6/6) in all three cases, which is the mount.
+
+WebKit (Playwright, 5 pairs of 3 runs, n = 15 per side): first real row 1,152 (1,077-2,063) / 1,110 (1,031-1,756) first launch, 1,170 (1,046-4,642) / 1,116 (991-1,912) cold, 726 (614-948) / 667 (587-947) warm; pair-median diffs +14, -41, -13 ms with new faster in 2, 3 and 3 of 5 pairs; `frameInteractive` -8, +6, -28; `longestFrame` 23-25 ms on both sides. Headless WebKit adds the compositor gap of R29 and the box load swings the single runs by hundreds of ms, so this is "not worse, probably 40-60 ms better", not a measured win. Not measured: the Mac (JavaScriptCore compiles on first call on the page thread, so the 36 ms of CPU should count at least as much there).
+
+### Identity
+
+`app/smoke/perf-first-screen.spec.ts` (`FF_PERF_FIRST_SCREEN=<state.json> FF_PERF_FIRST_SCREEN_OUT=<prefix> [FF_PERF_FIRST_SCREEN_BOOT=1] npx playwright test perf-first-screen`, `FF_SMOKE_BROWSER=webkit` for WebKit): captures four states of the same page, with the CSS animations paused at 700 ms and fonts ready, as a screenshot (sha256 prefix) and the normalised `body.outerHTML` (comment anchors and `svelte-<hash>` classes removed): `skeleton` (the answer never comes), `boot` (a 20,000+ track payload with the boot snapshot of the last run), `row` (first real rows, `get_row_previews` held so the state is stable, 1.5 s after the first row) and `late` (4 s after the first row, normal previews). Base and new built from separate folders, 10k payload:
+
+| | Chromium base / new | WebKit base / new |
+|---|---|---|
+| skeleton, screenshot | `3751aaa37576` / `3751aaa37576` (43,457 B) | `07f7d4c7f9f1` / `07f7d4c7f9f1` (135,915 B) |
+| first rows, screenshot | `27ffd42c6b36` / `27ffd42c6b36` (149,472 B) | `6e5613496435` / `6e5613496435` (571,823 B) |
+| first rows, body HTML | `b9558933c5e9` / `b9558933c5e9` | `da09626953d8` / `da09626953d8` |
+| 4 s later, screenshot and HTML | same as first rows, both sides | same as first rows, both sides |
+
+The screenshot hashes of the first rows and of the settled screen are the ones R114 recorded (`27ffd42c...` and `6e561349...`), so nothing changed since then either. Only the skeleton's own HTML differs (fewer elements: `87c36072dcfc` / `13dbb499f505` Chromium, `e9f4020a4d27` / `a5b04f57ff82` WebKit); its pixels are identical. Control: base against base twice gave the same hashes in Chromium. 50k payload with boot rows (Chromium): skeleton screenshot identical, boot rows `d4d83b4c363c` / `d4d83b4c363c` (131,659 B) with the same HTML `442b43705...`, first rows and later `650195cc537b` / `650195cc537b` with the same HTML `6e2edc6f7e35`. The whole smoke suite (both browsers) opens every menu and dialog that is mounted on open now.
+
+### Tried, not landed
+
+| Try | Result |
+|---|---|
+| `bind:clientHeight` of the table and the organize rail as a `ResizeObserver` attachment (no read at mount; `TrackTable`, `OrganizePanel`) | the layout is forced one step later by `WaveformDisplay._canvasSize` (fenced design-system component, `setTransport` of the compact player at mount); main-thread CPU mount start to first commit 153 ms against 146 ms (one trace each, load 26 vs 14): no saving, so reverted |
+| `<link rel=preload>` for the two latin font files in `index.html` | the full relayout at the `load` event stays (the nine other subsets still finish there); CPU 121-136 against 127-132 ms: nothing |
+| `font-family: sans-serif` on the skeleton (no text in it, so no font dependence) | the font-swap relayout touches 277 layout objects instead of 1,046 but takes 8.5 against 10.7 ms (-2 ms): not worth a hack |
+| `Icon` as a cached `<template>` clone instead of `{@html}` (proposal for the fenced `Icon.svelte`; 109 `<svg>` on the settled screen, `html()` 7 ms self in the profile) | no difference beyond the noise: mount start to first commit 145-188 against 133-203 ms CPU, 4 rounds each at load 20-24; not proposed |
+
+### What is left, and why it is not in this lane
+
+`mount(App)` is about 65 ms wall, `Sidebar` 26 ms (cold code; its playlist rows come with the answer), `TrackTable` 11 ms (`ColumnHeader`, derived state), `Player` 10 ms, header and status bar 5 ms each. What is left is the design-system components' first run (`SidebarRow`, `Icon`, `ResizeHandle`, `PlayerCompact` internals, `TrackRow` for the real rows: `set_style` per cell is 7.6 of its 71 ms in the profile), the 40 ms of module evaluation before the mount (trace; the profile shows 12 ms of JS in it), style recalculation of 570 elements (14 ms) and the layouts. After the answer the first real rows cost about 39 ms (`TrackRow`), the 82 sidebar rows 32 ms and `sidebarData` 7 ms (`sidebarTreeRows` over `$state` playlist proxies, in `library.svelte.ts`, r120's file). Deferring the sidebar's playlist rows or the rows below the fold would cut the first-row time but changes the DOM at the first-row moment, which this item may not do.
+
+After the rebase onto `7056104`: `npx vitest run` 940 passed (2 skipped), `npm run check` 0 errors, `npm run build` ok, smoke 114 passed and 0 failed in Chromium and in WebKit, and all the screenshot and HTML hashes above are the same against a fresh build of `7056104` in both browsers. The timings above were not repeated on the rebased tree (r120 changes the answer path, not the mount).
+
+Scratch (`~/.cache/r121-work`, with the scripts that read the traces and profiles) is deleted after this item.
+
+## R124 playlists (2026-11-06, `r124-playlists`)
+
+Goal: a playlist view as fast as All Tracks at 50k: switching to it, sorting, searching in it and adding, removing and reordering tracks, for playlists of 1k, 5k and 20k tracks, with the same rows in the same order. R113 and R115 made sort and search fast for `library.tracks` only; a playlist took the old comparator sort, the old filter and rebuilt its rows from a `$state` proxy of its ids on every visit. Branch `r124-playlists` (work commits from the first worker, continued as `r124-playlists-cont`, rebased onto `ov-1028` `e51d9e7`). Linux `dev` box, headless Chromium and Playwright WebKit, box load 11-44 (other workers). Base = `ov-1028` in a separate copy of the tree with the same spec and test files; base and new runs interleaved. Payload: the r95 50k dump plus three playlists of 1,000, 5,000 and 20,000 distinct library ids in random order, each with two ids that are not in the library (`benchmark/scripts/r124-playlist-variant.py`; 998, 4,998 and 19,998 rows show).
+
+### Where the time went (base)
+
+- **The ids were a `$state` proxy.** Svelte wraps every plain array in `library.playlists` in a proxy with one signal per element it reads: reading a 20k-id playlist once cost 100-200 ms and left 20,000 signals, and `JSON.stringify` of the playlists for `save_state` walked the proxies: 100-1,000 ms per save at 50k (store level, every save of the scripted edits).
+- **Rows were rebuilt on every visit** (`track_ids.map(libraryTrackById).filter(Boolean)` through that proxy): 250 ms script for the second visit of a 20k list.
+- **Sort and search of a playlist took the pre-R113 paths:** a comparator sort over `{track, value}` per row (225-450 ms at 20k per click), a filter that looked up each row's haystack by id.
+- **Edits were quadratic:** `addTracksToPlaylist` filtered with `track_ids.includes` per new id (40 s to add 500 tracks to the 20k list at store level), `moveTracksToPlaylist` and `removeTracks` likewise.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `app/src/lib/playlistIds.ts` (new): playlist ids are arrays with a marker prototype (`rawIds`), which Svelte's `$state` leaves unproxied. Every writer in `library.svelte.ts` replaces the array instead of changing it in place (`addTracksToPlaylist`, `moveTracksToPlaylist`, `removeTracksFromPlaylist`, `reorderPlaylistTracks`, favourites, duplicate, clear, remove tracks, `loadState`), so `track_ids` stays the one signal that follows a playlist. Ids that are not marked (a playlist from anywhere else) take the old path.
+- `tracksForSidebarSource` for a playlist: the rows are kept per ids array and library list, built once through a position table by id (`Int32Array`, a `Map` only for sparse or huge ids), and keep the positions of their members in `library.tracks`. After a bump the same rows are reused (copied only when a member was bumped), so a sorted or filtered view follows field changes as before.
+- `filterTracks` on playlist rows takes the haystacks and the letter/digit masks of R113 by member position; its results carry their member positions too.
+- `sortTracks` on playlist rows whose members are all different: the order comes from the whole-column rank cache of R113/R115 (built when it does not exist yet only for a list of at least 1/8 of the library), ties in playlist order; duplicates, `fav` and small lists keep the comparator. The sort warm-up drops stale column entries before it starts.
+- Edits use `Set` membership instead of `includes`.
+- Tests: `playlist-sort-fuzz.test.ts` (random switching, typing, edits, bumps, sort changes and reloads against a plain reference; raw ids, a table view following edits, dense, sparse and huge ids), the env-gated `playlist-path-real.test.ts` (real payload, 65 scripted steps per playlist, timing and a hash of every result list, every save serialization timed) and `playlist-view-probe.svelte.ts` (the table's derived chain for tests). Perf spec `perf-playlist.spec.ts` (`FF_PERF_STATE=<state> FF_PERF_RUNS=n [FF_PERF_SCENARIO=columns] npx playwright test perf-playlist`), with `save_state` arguments serialized as Tauri's IPC does.
+
+### Before / after, store level (script ms, one thread in Node, real 50k payload through `loadState`, warmed column sorts, 3 interleaved pairs, median (range), the awaited save included)
+
+| Step | 1k base | 1k new | 5k base | 5k new | 20k base | 20k new |
+|---|---:|---:|---:|---:|---:|---:|
+| first switch | 191 | 30 | 369 | 25 | 582 (433-1501) | 63 (29-86) |
+| switch again | 92 | 2.8 | 114 | 9.8 | 254 (252-317) | 6.8 (1.7-7.2) |
+| type 'h' | 54 | 2.0 | 29 | 17 | 79 | 19 |
+| backspace | 0.7 | 0.3 | 2.1 | 0.3 | 8.6 | 0.4 |
+| sort title asc | 23 | 5.6 | 129 | 11 | 375 (276-706) | 39 (23-64) |
+| sort artist asc | 11 | 3.0 | 52 | 15 | 294 | 26 |
+| sorted clear search | 5.4 | 1.2 | 42 | 3.5 | 221 | 9.8 |
+| sorted switch back | 245 | 2.3 | 170 | 8.2 | 627 | 22 |
+| 5 tracks analysed while sorted by BPM | 152 | 37 | 217 | 30 | 503 | 52 |
+| add 10 | 229 | 10 | 318 | 14 | 860 | 38 |
+| add 500 | 2,667 | 13 | 11,814 | 20 | 39,765 | 57 |
+| remove 10 | 372 | 8.6 | 374 | 29 | 518 | 33 |
+| reorder 10 | 174 | 17 | 291 | 143 | 454 | 153 (15-251) |
+| one `save_state` serialization | 184-326 | 6-9 | 128-475 | 10-65 | 235-995 | 6-20 |
+
+All 24 sorts (12 columns, both directions) at 20k: base 45-452 ms, new 10-144 ms (the first click of a column whose order is not cached yet is the slow one: index, album, genre, rating, colour 61-144 ms). For reference, showing All Tracks is 3-5 ms in the same test.
+
+### Before / after, page level (`perf-playlist.spec.ts`, 50k)
+
+Chromium, 6 interleaved pairs (4 at load 10-44 on the first worker's tree, 2 at load 12-28 after the rebase), ms, median over runs of the per-run median (range); `total` = pointer or key down to the second animation frame after it, `script` = Chromium `ScriptDuration` of the step:
+
+| Step | size | total base | total new | script base | script new |
+|---|---|---:|---:|---:|---:|
+| switch from All Tracks | 1k | 189 (111-1312) | 102 (84-158) | 95 | 30 |
+| | 5k | 158 (116-1142) | 77 (66-93) | 81 | 19 |
+| | 20k | 285 (206-862) | 82 (66-144) | 216 | 16 |
+| switch, list sorted | 20k | 315 (251-2177) | 104 (77-152) | 250 | 38 |
+| first sort click (title asc) | 5k | 113 (88-2251) | 72 (68-103) | 46 | 21 |
+| | 20k | 143 (132-6517) | 87 (84-116) | 75 | 31 |
+| other sort clicks | 20k | 124 (108-1199) | 72 (68-88) | 66 | 25 |
+| search keystroke | 20k | 81 (66-166) | 58 (52-64) | 32 | 14 |
+| search keystroke, sorted | 20k | 84 (70-751) | 57 (52-65) | 36 | 13 |
+| backspace | 20k | 87 (64-355) | 54 (49-54) | 38 | 9 |
+| clear search | 20k | 90 (70-146) | 65 (60-87) | 16 | 13 |
+| add 10 rows (drag to sidebar) | 5k | 143 (134-1002) | 75 (58-121) | 87 | 29 |
+| | 20k | 165 (154-2572) | 63 (55-85) | 112 | 21 |
+| reorder 10 rows (drag in list) | 5k | 188 (170-1546) | 101 (88-159) | 117 | 31 |
+| | 20k | 530 (444-2437) | 130 (90-1339) | 469 | 70 |
+| remove 10 rows (menu) | 5k | 179 (152-1607) | 87 (76-124) | 112 | 28 |
+| | 20k | 325 (305-1229) | 86 (78-3686) | 270 | 34 |
+
+At 1k search and sort were already near the floor (search keystroke 70 vs 74 total, 25 vs 23 script; sort clicks 85 vs 76). Reference, switch back to All Tracks in the same runs: 70 (62-150) / 68 (61-72) total, 13 / 11 script; a 20k playlist now switches in 82 total and 16 script, a sorted one in 104 and 38. The column sweep (every sortable column, both directions, 28 clicks per list, one pair): 20k median 108 to 90 total (p90 238 to 136), 52 to 27 script.
+
+WebKit, 5 interleaved pairs (3 + 2 as above), `total` only (no `ScriptDuration`; headless WebKit adds a compositor floor of about 160-200 ms to every step, R29):
+
+| Step | 1k base / new | 5k base / new | 20k base / new |
+|---|---:|---:|---:|
+| switch from All Tracks | 347 / 300 | 290 / 234 | 357 / 256 |
+| switch, list sorted | 258 / 200 | 291 / 194 | 390 / 256 |
+| first sort click | 209 / 215 | 247 / 193 | 294 / 293 |
+| other sort clicks | 189 / 200 | 215 / 182 | 238 / 215 |
+| search keystroke | 247 / 237 | 229 / 254 | 232 / 230 |
+| backspace | 218 / 220 | 210 / 198 | 243 / 198 |
+| add 10 rows | - | 332 / 289 | 412 / 417 |
+| reorder 10 rows | - | 446 / 368 | 733 / 452 |
+| remove 10 rows | - | 383 / 335 | 561 / 370 |
+
+All Tracks switch in WebKit: 263 / 252. Key down to the handler's `setTimeout(0)` (`js`) for the switch at 20k: 137 to 48 ms, sorted 263 to 13; remove 10 rows at 20k 302 to 94. Keystrokes and the 1k list are inside the noise of the compositor floor in WebKit. Not measured: the Mac (JavaScriptCore on the page thread; the script savings above should count at least as much there).
+
+### Identity
+
+- Store level: a hash of every id in order of all 195 result lists (65 steps x 3 playlists: switch, switch away and back, "house dub" typed letter by letter, 4 backspaces, clear, "a", all 12 sortable columns of the store in both directions, sorted typing, backspace, clear, switch away and back while sorted, 5 analysed tracks while sorted, unsort, add 10, add 500, insert 10 at 100, remove 10, remove 500, reorder 10, sorted add and remove; edits also hash the playlist's stored ids): **195 of 195 equal** between base and new, every repeat. Examples: 20k switch `19998/c3f2f6a3-3429cd94`, 20k "house" `3917/ea54a20e-73f586ab`, 20k after reorder `20008/4e1e3fec4be6072c`.
+- Page level, Chromium and WebKit: the rows on screen (every cell's text and row index) after each of 79 steps, and at the top, middle and bottom of the whole list at 30 checkpoints (open, typed, every sort, sorted search, after add, reorder and remove): **79 of 79 and 30 of 30 equal** in every run of both builds, in both browsers. Column sweep (`FF_PERF_SCENARIO=columns`, the playlist layout seeded with all 14 sortable columns: status, fav, #, title, artist, album, label, genre, year, rating, colour, BPM, key, time): **87 of 87 checkpoints and 90 of 90 on-screen states equal** in Chromium and in WebKit (61 distinct views).
+- Fuzz: `playlist-sort-fuzz.test.ts` against a plain reference, in the normal `vitest` run.
+
+### Read with care
+
+- Reordering 10 tracks inside the 20k list is still 70 ms script in Chromium (store level 15-251 ms): a reorder replaces the ids, so the rows and their member positions are built again from the new ids, and the drag end and the save follow. Not profiled further.
+- The first sort of a column whose order is not cached costs what R115's first sort costs for the whole library (the playlist uses the library order); the warm-up of R115 builds the columns visible in the library layout after start (by default title, artist, label, BPM, key and time), so those are warm.
+
+Scratch (`~/.cache/r124-work`) is deleted after this item.
+
+## R126 rescan (2026-11-06, `r126-rescan`)
+
+Branch `r126-rescan` from `ov-1028` (`d77ce38`). Linux `dev` box, release `bench_startup rescan`, warm page cache (a cold cache cannot be dropped here), box load 15-60 the whole time (other workers), so read the base-against-new pairs, not the absolute values. Base and new are built from the same tree (the bench commit alone against the bench plus the fix), run interleaved, 5 rounds each, median. Raw and scripts: `~/.cache/r126/`.
+
+**What a rescan is.** Importing a folder that is already in the library: `plan_import` (known paths, one folder walk, tag reads of unknown files only, duplicate check) and `commit_import`. R6 already made a known path cost no tag read, so the no-change case was a folder walk plus bookkeeping. A file that changed on disk under a known path is not read again (before and after); no stat, mtime or size is compared, and adding that would change results, so it is not done. Removed files stay in the library (an import never removes).
+
+**Datasets.** Hard-link trees of the R13 fixtures (`cp -al`, nothing copied, fixtures untouched) with libraries built by the same scan, covers stripped (`DELETE FROM artwork` + `VACUUM`; the rescan never reads them): 10k (9.4k folders), 25k, 50k (`copy1` + `copy2` of the 25k tree: 2 top folders, 18.8k folders). Scenario A = nothing changed. Scenario B = 1% changed: 0.33% added (hard links of other fixture files, new to the library), 0.33% removed (unlinked in the tree), 0.33% rewritten (copy with a later mtime). `bench_startup rescan <folder> <library.db>` does what the two commands do (known paths, walk, scan, plan, take, commit), per stage, plus process CPU.
+
+### Before and after (backend, median of 5, ms; "rows" = until `commit_import` returns)
+
+| | rows before | rows after | known paths | walk | scan | plan | commit | CPU user+sys before | after |
+|---|---:|---:|---|---|---|---|---|---:|---:|
+| 10k, A (no change) | 320 | 236 | 50 / 36 | 150 / 144 | 24 / 25 | 37 / 24 | 50 / 0 | 0.36 s | 0.33 s |
+| 25k, A | 598 | 430 | 84 / 40 | 299 / 295 | 55 / 58 | 79 / 39 | 78 / 0 | 0.83 s | 0.76 s |
+| 50k, A | 1,438 | 723 | 125 / 86 | 984 / 502 | 83 / 72 | 109 / 45 | 125 / 0 | 1.70 s | 1.50 s |
+| 10k, B (33 added) | 521 | 410 | 44 / 19 | 119 / 118 | 77 / 69 | 190 / 133 | 50 / 48 | 0.59 s | 0.48 s |
+| 25k, B (83 added) | 969 | 864 | 57 / 50 | 265 / 318 | 92 / 89 | 390 / 292 | 111 / 126 | 1.39 s | 1.13 s |
+| 50k, B (166 added) | 1,602 | 926 | 104 / 73 | 737 / 258 | 70 / 69 | 509 / 363 | 197 / 170 | 2.83 s | 2.58 s |
+
+(stage columns: before / after.) Spread of the "rows" runs under load: 50k A 1,311-1,597 before, 608-864 after; 50k B 1,503-2,164 before, 924-1,451 after. The stages are summed from separate medians, so they do not add up to the row median.
+
+Calls into libc per run (`LD_PRELOAD` counter, `~/.cache/r126/shim`; no `strace` or `perf` here): the walk makes no per-file `stat` (3 `statx`, a dozen `stat`/`lstat` in A at every size; 630 `statx` at 50k B are the 166 tag reads, 3 per file), `readdir` 47.8k at 10k and 229.5k at 50k (one per entry plus end), `fsync` 0 in A and 5 in B. DB writes in A: none beyond opening the file (8 `pwrite` before and after; the empty commit wrote no rows, took the paths again and queued a WAL checkpoint). B: the 166 new rows, 1,617 `pwrite` and 5 `fsync` before and after (same rows). Remaining cost in A is the kernel listing 19k folders: 0.8-0.9 s of system time at 50k, unchanged by this work (a plain `find -printf` over the same tree takes 0.45 s single-threaded).
+
+### What changed (`pioneer-test-ui/src/import_plan.rs`, `main.rs`, `pioneer-library/src/duplicates.rs`, `queries.rs`)
+
+- **The walk takes folders from one shared queue.** The folders below the dropped one were handed to 8 threads by the dropped folder's direct subfolders only: the 50k tree has two, so two threads walked it. Now every thread takes one folder, lists it and pushes its subfolders (`WalkQueue`); symlinked folders are still followed inside the listing thread with the same loop rule. 50k: 984 to 502 ms in A, 737 to 258 ms in B. 10k and 25k have more top folders and do not change (the 25k B pair in the table is noise: 265 / 318). 16 threads measured the same as 8 on the warm cache and were not taken; cold storage was not measurable here.
+- **No allocation or hashing per file in the walk.** The extension is compared case-insensitively without a lowercase copy for ASCII extensions (others keep the old lowercase path), the audio path moves into the file list instead of being cloned twice, and the distinct-file count is made once after the walk instead of one set per thread merged serially. User CPU 0.86 s to 0.66-0.70 s at 50k A.
+- **An import with nothing to add does not touch the library.** `add_scanned_tracks` returns when the plan resolved to no tracks: no second read of all paths, no empty write transaction with its pragmas and a checkpoint thread (50k: 125 ms to 0). The result is the same empty list.
+- **Known paths and the dedupe set are sized up front** (`track_paths` and `plan_import` no longer grow and rehash 17 times): 125 to 86 ms for the paths, 109 to 45 ms for the plan at 50k A.
+- **The duplicate index build (first plan with new files after start) is 2-3x cheaper.** It was rebuilt from every track on the first import with something new (the cache lives for the process): the three key maps were grown from empty and the Unicode folding ran on every ASCII string. The maps are reserved, and pure ASCII text takes a byte loop (`collapse_ascii`, `lowercase_nfc`) with the same result; anything else takes the old code. `DuplicateIndex::new` over the 50k library: 650-800 ms to 180-230 ms wall, CPU 0.85 s to 0.50 s (profile with the bench, 3 runs each). In the table that is the plan column in B (50k: 509 to 363 ms with the read of 50k rows, 100 ms, and the finds for the new files left).
+
+### Identity
+
+Same inputs, base build against new build, plan JSON (counts, duplicate rows with reasons and ids, skipped counts; token only differs in value and is blanked) and every table of the resulting `library.db` (`tracks` all 20 columns, `pending_artwork`, `analyses`, `playlists`, `sticks` and the rest: row count and SHA-256 of all rows in rowid order, plus the schema text), after the run:
+
+| input | result |
+|---|---|
+| A at 10k, 25k, 50k (all known, nothing written) | plan identical, db dump identical (10,000 / 25,000 / 50,000 `tracks` rows) |
+| B at 10k, 25k, 50k (33 / 83 / 166 added) | plan identical, db dump identical (10,033 / 25,083 / 50,166 rows, `pending_artwork` 33 / 83 / 166) |
+| the 10k tree under another path against the 10k library (nothing known by path, 10,000 `same_file` duplicates) | plan identical, db dump identical |
+| the 10k fixture against the 25k library (3 `same_file`, 8 `same_tags`) | plan identical, db dump identical |
+
+No timestamp had to be ignored: the `tracks` table has none that the scan writes, and no column differed. Unit tests: `ascii_fast_paths_match_the_unicode_paths` (20k random ASCII strings and every single ASCII byte through the old and the new folding), `non_ascii_text_still_goes_through_unicode_folding`, `survey_lists_every_depth_of_one_top_folder_and_counts_each_file_once`, `file_kind_ignores_case_and_keeps_non_ascii_extensions_unsupported`.
+
+### One difference, only with symlinks
+
+Two symlinks to the same folder: which of the two paths the survey keeps depends on which thread gets there first. That was already racy between the dropped folder's subfolders (8 threads); now it also holds between deeper folders. Symlink loops and the file set are handled as before (`robustness_tests` and the survey tests pass).
+
+### Not done
+
+- **Skipping unchanged folders by their mtime** would make the no-change walk almost free, but needs a stored mtime per folder (library schema, needs Merlin) and the plan's counts of unsupported and already-in-library files would then have to be stored too.
+- **Re-reading a file that changed under a known path** (mtime and size) is a behaviour change, not a speed fix.
+- `Scanned.known` still clones each known path (about 30-60 ms at 50k); the `COUNT(*)` that sizes the path set is one more index scan (a few thousand page reads at 50k, not visible in the times).
+- Cold-cache and Mac (APFS, `getattrlistbulk`) walks were not measured.
+
+Reproduce: build `bench_startup` (`--features pioneer-test-ui/dev-bins`), `bench_startup import <tree> <work>` for a library, then `bench_startup rescan <tree> <library.db copy>`; `FF_IMPORT_PLAN_OUT=<file>` writes the plan.
+
+## R129 budget (2026-11-07, `r129-budget`)
+
+Read-mostly audit: where the time goes now, to pick the next speed levers. No app code changed, no harness added. Branch `r129-budget` from `ov-1028` (`8dbf8f0`, r126 included; r127 and r128 are not merged and their numbers are cited, not repeated). Linux `dev` box, release `bench_startup` and `bench_analysis` built into `~/.cache/r129-target`, headless Chromium 1217 and Playwright WebKit, the `ff-fixture` 10k and 50k libraries (read only; `bench_startup dump` payloads for the page). **Box load was 9 to 33 for the whole session and swap was full, so single runs swing by 2-10x (a 50k scroll run at load 13-32 showed p95 231 ms, the same run at load 9 showed 25 ms). Read the minimum and the median, not a single run; where a number is from a loaded run it says so.**
+
+Commands (all existing specs, run one at a time, ports 5471-5477): `bench_startup run|rep|load|import|rescan`, `bench_analysis --profile 3 --threads 4` and a 6-track staged run, `perf-q50` (startup, track load, import), `perf-startup` (`FF_PERF_STARTUP=10000=<state>==70,50000=<state>==380`, 7 runs, backend simulated at the quiet `load_state`), `perf-search` (real payload, 3 runs), `perf10k` (synthetic rows, scroll, inspector, bulk), `perf-warmup` (script ms per second after the first rows).
+
+### Budget by flow (Chromium unless noted; `x / y` = 10k / 50k)
+
+| Flow | Current total | Top 3 cost centres | Class |
+|---|---|---|---|
+| Cold open to first row | 603-626 ms / 1,031-1,147 (warm 538 / 982); WebKit 1,100-1,173 / 1,632-1,722 (warm 777 / 1,227) | 1. page main thread until the first rows: bundle evaluation 40 ms, `mount(App)` 65, effects 34, style and layout 32, first `TrackRow`s 39, `Sidebar` 32 (R121 trace; not re-traced, the box was too loaded) | b (design-system `TrackRow`, `Sidebar` rows, `Icon`) and a (app glue) |
+| | | 2. `load_state` backend 50 ms (min 34) / 210 (min 165), of which the SQLite row scan 29 / 157 | a (`pioneer-library`, no schema change) |
+| | | 3. answer to track objects in the page 40 / 126 ms (Chromium; the answer is 1.7 / 8.3 MB) and the webview start itself | a (done in R120) and c (webview) |
+| Cold open, disk cold | first library query 1.5 s (10k) and 4.1 s (50k) after `posix_fadvise(DONTNEED)` on a contended disk (R109 saw 490 ms at 10k on a quieter one) | the rows query reading `tracks` and `analyses` pages from storage | c (storage); a for hiding it behind the webview start |
+| Cold open to interactive | 672-692 ms / 1,098-1,147 (warm 600 / 993); longest task 191-202 / 195-256 ms, total blocking 221-255 / 392-454 | the same as first row plus the long task of the mount | b and a |
+| First search keystroke | 100 ms / 234 (script 29 / 120, layout 17 / 18); median key 51 / 79; with analysis running 100 / 122 | 1. compositor and paint floor (about 35-40 ms of every step in headless Chromium) 2. layout and paint of the 42 rows 3. at 50k the sort-column warm-up still running in the typing window (`warmColumn` 410 ms of script, `durationSeconds` 169 ms self, `readLibraryValues` 353 ms inclusive, profile of the synthetic 50k page at load 32) | c, b, a |
+| First sort click | 63-73 ms / 72-74 (script 12-19 / 24-27, layout 7-9); **with analysis running, 50k: 89-154 ms (script 41-90)** | 1. floor 2. `sortTracks` and the column rank (cached after R115) 3. under analysis: bumped rows make the cached orders move (`withChangedValues`) before the click | c, a, a |
+| Scroll a full screen | frame p50 17-19 ms and p95 25-26 at both sizes (flat in library size); fling p95 41-52 | row canvas layers and layerize (37 canvases + 37 overlap layers per 42 rows, R118), style and layout 3 ms, `flushRowPreviews` | b (fenced `Waveform` / `TrackRow`) |
+| Open inspector (select a row) | 12.4 ms median, 33 worst / 13.3, 45 worst | store update, inspector bindings; markers data from the answer after 0.7 ms in the backend | floor |
+| Load a track into the player | backend `get_analysis_data` 0.65 ms median (p95 29 / 73 ms when a page is cold), parse 0.2, JSON 0.1; page overview painted 35-39 ms after the answer; expand to detail drawn 90 / 116 ms; first-time detail of a track without a stored series about 850 ms (R109) | 1. page paint after the answer 2. detail first time: decode 543 ms of 413 s of audio plus `DetailMeter` 3. expand draw | a, c (symphonia) and b (`DetailMeter` in `pioneer-usb-writer/src`) |
+| Analysis start and first result, fresh import | first result 29.4 s at 4 threads (R3: 17-19 s at 12 threads); 2.75 trk/min at 4 threads on a loaded box (R3: 8.5 at 12); 584 CPU-s for 6 tracks of 343-413 s; peak RSS 1.9 GB | stage profile per audio minute at 4 threads: beat model 3,762 ms of 4,181 (90%), mel 181 (4.3%), resample 175 (4.2%), waveform 141 (3.4%), decode 79, key 27, fit 12, write 13 | c (model), c (rubato), b (`Meter::push`) |
+| Import 10k files | rows after 0.74-0.90 s (plan 370-541 incl. scan 255-343, commit 290-360); UI click to rows 47 ms / 93 (50k); the cover pass runs after: 7.3-10.3 s for 8,132 covers (1.5 GB of blobs) | 1. tag scan (open and first page per file) 2. commit 3. cover pass | c (storage), a, b (schema for cover dedupe) |
+| Rescan (nothing changed) | 90-99 ms at 10k (R126: 723 ms at 50k) | the folder walk (kernel readdir), known paths | c |
+| Idle CPU, page open | script ms per second after the first rows: 10k 121, 32, 0, 0, 12, 0, 0, 0, 0, 94 (260 in 10 s, one 94 ms task at second 9); 50k 244, 351, 117, 0, 10, 0, 0, 0, 0, 10 (731 in 10 s); about 0 after 4 s | the sort and search warm-up in idle chunks (first 3 s) | a |
+| Memory after open | JS heap 16.7 MB / 59 after boot, 31 / 122 at the end of the interaction script; backend bench RSS 24 MB / 74 (real app RSS needs a window: not measured, R23 and R42 hold the soak numbers) | the track table (150,000 strings at 50k) | a |
+
+### Findings that are not in the table
+
+- **Analysing a selection freezes the page: 373-393 ms long task for 2,000 rows at 10k and 50k, and the "script" metric sees only 19 ms.** CPU profile (profiler on, so inflated about 7x; read the shares): of 2.6 s, 2.14 s is `analyzeTrackIds` to `markTracksPendingAnalysis` to `bumpLibraryTracks` to `copyRowFieldsToPlainTracks` to `plainValue` to `$state.snapshot` to `structuredClone` (757 ms self in `structuredClone`, 444 ms GC). Every bulk edit that calls `bumpLibraryTracks` takes the same path. The cost is per row and independent of the library size, so selecting all 50k rows would be about 10 s of main thread (linear extrapolation, not measured).
+- **The first 3 s after the first rows are busy at 50k (about 700 ms of script, in chunks, no long task) and the first keystroke lands in them.** That is the idle warm-up of R113 and R115, and its biggest parts are string work that the binary table already holds as numbers (`durationSeconds` parses "m:ss" for 50k rows).
+- **Box swing.** Idle load 9, other workers 20-33: the same page run gives 25 or 231 ms p95 scroll, 70 or 320 ms warm `load_state` at 10k. Budget `now` values should stay as they are (R109 reason).
+- Cold disk: the first rows query was 1.5 s at 10k here against 490 ms in R109. A cold start is the only flow where one stage (storage) is bigger than all of the page.
+- WebKit adds 240-600 ms to every start step in headless software compositing (R29); only the ratios carry over to the Mac.
+
+### The 5 best next levers of kind (a)
+
+Ranked by gain per effort. "Proof" is how to show the same rows, the same order, the same bytes.
+
+| # | Lever | Expected gain | Effort | Proof of identity |
+|---|---|---|---|---|
+| 1 | **Make `copyRowFieldsToPlainTracks` copy values, not `$state.snapshot` clones** (`app/src/stores/library.svelte.ts`): copy scalar fields directly, and for object fields (the `raw` record, preview arrays) copy only what the bump changed or share the frozen value | analyze 2k selected 380 ms to under 30 ms (estimate: the clone is 80% of the task); same for rating, colour, tag and bulk edits; select-all at 50k about 10 s to under 1 s | S | vitest: random bump sequences, `plainTracks` deep-equal to a reference that still snapshots; haystack and column-rank hashes after each step equal; `perf10k` "analyze 2k selected" long task before and after; smoke in both browsers |
+| 2 | **Warm the sort columns from the table's numeric columns** (`readLibraryValues`, `sortValueOfRaw`, `durationSeconds` in `table-columns.svelte.ts`): read tempo, duration and key ranks from the typed arrays the decoder already builds instead of formatting and parsing text per row | 50k: warm-up script in the first 3 s 700 ms to about 200 ms, first keystroke 234 to about 100 ms; 10k: about 100 ms less in the first 2 s | M | R113 and R115 method: hash of every sorted order (all sortable columns, both directions, with and without search) equal to base on the 10k and 50k payloads and the edge variant; `playlist-sort-fuzz.test.ts`; on-screen row hashes at checkpoints |
+| 3 | **Compute the `load_state` answer at process setup, in parallel with the webview start**, and let the command take it (same function, same bytes; recompute when the library changed, guarded by a revision counter) | removes the backend from the path to the first row: 50k about 150-200 ms (210 ms backend, the page is ready for the answer at about 300 ms after its invoke), cold start up to the whole first-query time (1.5-4 s on a cold disk here; likely 0.2-0.5 s on a Mac SSD, not measured) | S-M | sha256 of the `load_state` payload from the early path equals the on-demand path for the 10k, 50k, 295-folder and edge libraries (the R111 hashes are the reference); test: an import or edit between setup and the command returns the new state; `bench_startup rep` shows the unchanged cost of the compute itself |
+| 4 | **Profile and fix sort and search under analysis at 50k** (`columnSortOf` / `withChangedValues` after bumps, `scheduleSearchIndexWarmup` restarts on every bump): sort click 89-154 ms against 73 idle, script 41-90 against 25 | about 60-80 ms per sort click while analysis runs (the long state of a fresh library); fewer restarts of the haystack warm-up | M (profile first; the cause above is read from the code path, not yet measured) | same hashes as #2 but with scripted `analysis-partial` events between steps (the `perf-search` "analysis" mode already does this); `libraryRowsChangedSince` results equal |
+| 5 | **Linux analysis runs: set the three allocator variables for batch runs** (`MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1073741824`, R106) in `scripts/` and the CI or dev-box benchmark entry points, not in the app | -22% analysis CPU and -24% wall on the box (sys time 17% to 0), none on the Mac; costs +10% peak RSS, so not for the shipped app | S | `analyze-json` sha256 equal with and without the variables (R106 did this for 12 tracks, 4 tracks and a 46 min file); no app change |
+
+Not on the list, and why: the beat model (90% of analysis CPU: chunk 500 changes the output, quantisation too; rten buffer reuse is upstream), `Meter::push` (740 ms per track, `pioneer-usb-writer/src`, 4x headroom measured in R104), rubato resampling (external, output depends on its chunking), the row canvas layers (R118, fenced `Waveform.svelte`), the cover pass (1.5 GB of blobs in one table: storage-bound, and per-album dedupe needs the schema change that `r84-path-keys` holds), the folder walk (kernel time, R126), the mount (design-system components, R121), Mac-only startup (`mbp` night, not run here).
+
+Scratch (`~/.cache/r129-work`, `~/.cache/r129-target`) is deleted after this item.
+
+## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
+
+One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
+
+**Go (from the dev box, after Merlin's go):**
+
+```bash
+cd /home/merlin/dev/projects/fourfour/.claude/worktrees/agent-a1492114039f883d9 && scripts/mac/night3.sh --remote
+```
+
+It bundles the branches, copies them and the int8 model to `mbp` (the `ship-dmg.sh` method: `git bundle` + rsync, GitHub never touched), starts the run there under `caffeinate -i` with `nohup`, waits, and copies `summary.md` and the per-item results back to `build/mac/night3-<date>/` on the box. If the ssh session drops the Mac run goes on; `scripts/mac/night3.sh --remote --collect` waits for it and fetches. `--only 3,4` reruns single items. `--dry-run` prints every command (nothing runs).
+
+**mac-queue does not carry this.** `mac-queue add` knows Swift/Xcode job kinds and rejects arbitrary commands, and it has no fourfour profile. Earlier fourfour nights (R89, R26) ran by `ssh mbp` on Merlin's go; this does the same with one command. A `night` job kind in lab-infra would be the clean fix, and is not part of this task.
+
+| # | Item | How | Gate |
+|---|---|---|---|
+| 1 | ov-1028 (r109 early load_state, r111, r113-r115, r114 lazy dialogs, r120 binary load_state, r121 mount): build, scratch-HOME launch, rows on screen, first row, interactive, first Settings open | `cargo tauri build --features coreml --bundles app` from a worktree of `ov-1028`; one launch with the perf probe, soak action `settings` (cycle 1 is the first, lazy open) | opens, first row and interactive marks, first row within 15% of the last cold Mac number (868 ms, R89) |
+| 2 | `perf-night.sh --size 10k --runs 3 --expand-runs 5` on that app | the existing script, from the worktree, scratch output under the night directory | warm first row, warm interactive, cold first row within 15% of R89 (628 / 645 / 868 ms), first expand median under 50 ms, scroll during analysis p95 under 25 ms |
+| 3 | r110 first result on a quiet machine | `scripts/mac/night3-first.py` (macOS port of `r110-first.py`), rten (the burst is rten only), 24 masters, 6 interleaved rounds, a trial starts at 80% idle or after 60 s | r110 median below ov-1028, and at least 3 quiet trials per build |
+| 4 | Chunk 500 on CoreML (Waiting 43) and int8 rten at 500 (Waiting 44) against CoreML 1500 | `bench_analysis` of `r98-mac-pair` (the only build with `FOURFOUR_BEAT_CHUNK` / `FOURFOUR_BEAT_MODEL`), 200 fixture tracks, 3 interleaved rounds, plus the ov-1028 binary as a drift row; `time -l` for RSS and CPU | tracks/min at least 95% of CoreML 1500 and peak RSS not higher (the r98 gate). Quality is not scored here |
+| 5 | cores-1 against cores-2 with the UI busy (Waiting 29) | `bench_analysis` of ov-1028, `--threads cores-1` / `cores-2`, `--ui-busy 2000/6000`, 24 masters, 3 interleaved rounds | runs clean; the throughput gain is the answer (r108 predicted +13% on 16 cores, +24% on 8) |
+| 6 | Ears and eyes | not automated, see below | Merlin |
+
+**Expected duration:** about 2.5 hours on `mbp` (cold builds of four targets in one shared cargo target about 25 min, items 1-2 about 35 min, item 3 about 15 min, item 4 about 25 min, item 5 about 6 min, plus waits for quiet). A window opens for each app launch in items 1-2 (about 25 min in all); leave the Mac alone while items 2-5 run, the numbers want a quiet machine. **Free disk needed:** 35 GB at the start (the script refuses below that; `NIGHT3_MIN_FREE_GB`): one shared cargo target 15-20 GB, three worktrees with `node_modules` about 3 GB, app and bench binaries 0.5 GB, a copy of the 10k library for one launch, models 0.5 GB. The 10k fixture (`~/.cache/ff-fixture/10k`), the beat models (`~/.cache/fourfour-models`) and an ssh path from the box are assumed present, as in R89. `--clean` removes the worktrees and scratch at the end; the cargo target stays (delete `build/mac/night3-target` by hand when done, see "Prune worker caches").
+
+**Reading the summary.** `summary.md` has one row per item (PASS, FAIL, or SKIP with the numbers), the protected-paths result, then one table per item. FAIL means a gate above was missed, not that the script broke; a broken step says so in the row and in `night.log`. Item 3 prints FAIL when the machine was not quiet, so the number is not read as a verdict.
+
+**Things this does not cover.** The Settings number is a proxy (a whole soak cycle; the probe has no mark for the first dialog open, adding one is a change in `pioneer-test-ui/src/perf_probe.js`, outside this task). Item 4 has no quality score (the o3 reference set is not on the Mac); the r96/r98 scores stand. r123 is not in ov-1028, so the r123 check below needs its own install.
+
+### Merlin's ears and eyes (phone checklist, not automated)
+
+1. **r123 audio (branch `r123-idle-cpu`, needs a Mac install of that branch first, ask for it).** Long track (over 6 min). Set the buffer to 32, then 64 frames. Play 2 min: any click or dropout? Seek 5 times (bar jumps, scrub): any glitch? Minimise the window for 30 s while playing, bring it back: sound unbroken, meters alive again at once.
+2. **Waiting 16, bar 1 (b15-bar1 e717de0).** Open the ten tracks listed in `docs/analysis/rust-status-2026-10-28.md` ("the last five are the regressions to listen to"). For each: does bar 1 sit on the first downbeat as Rekordbox has it? Verdict per track: ok / wrong. Land the rule if the five regressions are ok.
+3. **Waiting 39, user docs marks (branch `r53-user-docs-v2` 56f7625, `docs/user/`).** 20 "(to confirm)" marks: faq 10, usb 3, known-issues 4, install 1, quick-start 1, README 1 (`grep -n "(to confirm)" docs/user/*.md`). Read on the phone, confirm each on the Mac: right, or what the app really does. Send back the list of answers.

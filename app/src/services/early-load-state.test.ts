@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { fixtureBuffer, fixtureText } from './fixtures.ts';
+
 const invokeMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
@@ -54,5 +56,17 @@ describe('load_state sent by index.html', () => {
 
     expect(invokeMock).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenCalledWith('load_state');
+  });
+
+  it('decodes a binary answer into the tracks and playlists of the JSON answer', async () => {
+    const json = JSON.parse(fixtureText('state-edge.json'));
+    invokeMock.mockResolvedValue(fixtureBuffer('state-edge.bin'));
+    const { loadState } = await freshTauriService();
+    const { decodeTrackTable } = await import('./track-table.ts');
+
+    const state = await loadState();
+
+    expect(state.tracks).toStrictEqual(decodeTrackTable(json.tracks));
+    expect(state.playlists).toStrictEqual(json.playlists);
   });
 });
