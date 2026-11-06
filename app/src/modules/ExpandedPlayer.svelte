@@ -52,6 +52,10 @@
   $effect(() => {
     if (wave) return registerWaveZoom(wave);
   });
+  let analyzing = $derived(player.track ? isTrackAnalyzing(player.track.id) : false);
+  let emptyLabel = $derived(
+    !player.track || (player.loading && !analyzing) ? null : analyzing ? 'Analyzing' : 'Not analysed yet',
+  );
   let hasBeats = $derived((player.track?.beats.length ?? 0) > 1);
   let windowTrackId = $derived(player.track?.bandsZoom ? player.track.id : null);
   let windowSource = $derived(
@@ -153,7 +157,8 @@
       bpm={player.track?.bpm ?? 0}
       durationMs={player.track?.durationMs ?? 0}
       trackKey={player.track?.id ?? null}
-      analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
+      {analyzing}
+      {emptyLabel}
       progress={player.progress}
       playing={player.playing}
       onSeek={player.track ? seekToProgress : undefined}

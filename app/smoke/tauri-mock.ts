@@ -7,6 +7,7 @@ export interface SmokeWindow {
   __smokeDialogs: string[];
   __smokeAnswerDialog: boolean;
   __smokeAnalysis: (trackId: number) => Promise<Record<string, unknown>>;
+  __smokeNoAnalysis: number[];
   __smokeMissing: number[];
   __smokeUnreadable: number[];
   __smokeNotFound: number[];
@@ -69,6 +70,7 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeAnalyzeAfterImport = false;
   w.__smokeReleaseImport = null;
   w.__smokeDetail = 'none';
+  w.__smokeNoAnalysis = [];
   w.__smokeArtwork = false;
   w.__smokeReleaseDetail = null;
   w.__smokeLabelChanges ??= [];
@@ -157,6 +159,7 @@ export function installTauriMock(initial: LoadedState) {
   }
 
   async function analysisFor(trackId: number) {
+    if (w.__smokeNoAnalysis.includes(trackId)) throw new Error('smoke: track not analysed');
     const data = await w.__smokeAnalysis(trackId);
     const grid = edits.grids.get(trackId);
     const cues = edits.cues.get(trackId);

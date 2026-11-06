@@ -10,12 +10,13 @@ export interface Smoke {
 }
 
 const BENIGN_PAGE_ERRORS = [/^ResizeObserver loop completed with undelivered notifications\.?$/];
+const BENIGN_CONSOLE = [/smoke: track not analysed/];
 
 export const test = base.extend<{ smoke: Smoke }>({
   smoke: async ({ page }, use) => {
     const problems: string[] = [];
     page.on('console', (message) => {
-      if (message.type() === 'error' || message.type() === 'warning') problems.push(`console.${message.type()}: ${message.text()}`);
+      if ((message.type() === 'error' || message.type() === 'warning') && !BENIGN_CONSOLE.some((benign) => benign.test(message.text()))) problems.push(`console.${message.type()}: ${message.text()}`);
     });
     page.on('pageerror', (error) => {
       if (!BENIGN_PAGE_ERRORS.some((benign) => benign.test(error.message))) problems.push(`pageerror: ${error.message}`);
