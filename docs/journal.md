@@ -630,3 +630,4 @@
 2026-11-07 03:36 orchestrator decided: own prio r128 track load latency (pick -> waveform drawn + ready; sonnet high)
 2026-11-07 04:10 orchestrator r127 handed back 3a4d21f: non-model stages are now symphonia/rubato internals (external) and Meter::push 44% (writer crate, brother lane); own downmix fix -3 to -9% decode instructions, wall within noise; outputs byte-identical. Not merged (no measurable gain); branch kept. Waiting 51 added (Meter::push for the brother)
 2026-11-07 04:11 orchestrator decided: own prio r129 fresh speed budget audit to rank the next levers (sonnet medium)
+2026-11-07 03:56 orchestrator r126 landed 8dbf8f0 on ov-1028 (both smokes 0 failed, 26 suites, vitest 944, CHECKS-OK)
