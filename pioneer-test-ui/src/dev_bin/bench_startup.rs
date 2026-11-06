@@ -321,6 +321,28 @@ fn trackload(dir: &Path, work: &Path, samples: usize) {
             let path = shared.lock().unwrap().get_track(*id).unwrap().unwrap().source_path;
             waveform_detail::detail_bytes(&cache, &path).unwrap();
 
+            let parts = {
+                let lib = shared.lock().unwrap();
+                let t = Instant::now();
+                let _ = lib.get_analysis(*id).unwrap();
+                let a = ms(t);
+                let t = Instant::now();
+                let _ = lib.get_track(*id).unwrap();
+                let b = ms(t);
+                let t = Instant::now();
+                let _ = lib.get_cues(*id).unwrap();
+                let c = ms(t);
+                let t = Instant::now();
+                let _ = lib.user_edits(*id);
+                let d = ms(t);
+                let t = Instant::now();
+                let _ = lib.analysis_stages(*id).unwrap();
+                let e = ms(t);
+                let t = Instant::now();
+                let _ = fourfour_analysis::mp3::leading_silence_s(&path);
+                let f = ms(t);
+                [a, b, c, d, e, f]
+            };
             let t = Instant::now();
             let stored = {
                 let lib = shared.lock().unwrap();
@@ -361,6 +383,12 @@ fn trackload(dir: &Path, work: &Path, samples: usize) {
             if pass == 2 {
                 for (name, v) in [
                     ("analysis_read_ms", read_ms),
+                    ("part_get_analysis_ms", parts[0]),
+                    ("part_get_track_ms", parts[1]),
+                    ("part_get_cues_ms", parts[2]),
+                    ("part_user_edits_ms", parts[3]),
+                    ("part_stages_ms", parts[4]),
+                    ("part_leading_silence_ms", parts[5]),
                     ("analysis_shape_ms", shape_ms),
                     ("analysis_serialize_ms", ser_ms),
                     ("analysis_total_ms", read_ms + shape_ms + ser_ms),
@@ -392,14 +420,33 @@ fn trackload(dir: &Path, work: &Path, samples: usize) {
     }
 }
 
-fn long_lib(audio: &Path, dir: &Path) {
+fn dump_load(dir: &Path, work: &Path, out: &Path) {
+    std::fs::create_dir_all(out).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let unanalysed: std::collections::HashSet<i64> = lib.get_unanalyzed_track_ids().unwrap().into_iter().collect();
+    let total = lib.track_count().unwrap() as usize;
+    let cache = work.join("waveform-detail");
+    let mut k = 0;
+    for id in (1..=total as i64).filter(|id| !unanalysed.contains(id)) {
+        let path = lib.get_track(id).unwrap().unwrap().source_path;
+        let stored = analysis_payload::read_stored_analysis(&lib, id).unwrap();
+        std::fs::write(out.join(format!("{k}.analysis")), serde_json::to_vec(&stored.into_json()).unwrap()).unwrap();
+        std::fs::write(out.join(format!("{k}.detail")), waveform_detail::detail_bytes(&cache, &path).unwrap()).unwrap();
+        k += 1;
+    }
+    println!("dumped {k}");
+}
+
+fn long_lib(dir: &Path, audio: &[String]) {
     std::fs::create_dir_all(dir).unwrap();
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
-    let scanned = import_plan::scan_paths(&import_plan::survey_files(&[audio.to_string_lossy().into_owned()]), &Default::default(), &mut || {}).tracks;
+    let mut scanned = import_plan::scan_paths(&import_plan::survey_files(audio), &Default::default(), &mut || {}).tracks;
+    scanned.sort_by(|a, b| a.source_path.cmp(&b.source_path));
     let ids = lib.add_tracks_covers_later(&scanned).unwrap();
     for (n, id) in ids.iter().enumerate() {
         lib.set_analysis(*id, &fake_analysis_of(n, scanned[n].duration_secs)).unwrap();
     }
+    println!("tracks={} secs={:?}", ids.len(), scanned.iter().map(|t| t.duration_secs as u64).collect::<Vec<_>>());
 }
 
 fn bands(paths: &[String]) {
@@ -1169,7 +1216,8 @@ fn main() {
         Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
         Some("soak") => soak(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("trackload") => trackload(Path::new(&args[2]), Path::new(&args[3]), args[4].parse().unwrap()),
-        Some("long-lib") => long_lib(Path::new(&args[2]), Path::new(&args[3])),
+        Some("dump-load") => dump_load(Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[4])),
+        Some("long-lib") => long_lib(Path::new(&args[2]), &args[3..]),
         Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
         Some("fixture-lib") => fixture_lib(
