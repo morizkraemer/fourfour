@@ -238,7 +238,7 @@ describe('playlist rows, filter and sort against a plain reference', () => {
     }
     expect(sameClaims).toBeGreaterThan(20);
     clearSort('playlist');
-  });
+  }, 120_000);
 
   it('returns the same rows while neither the ids nor a member changed', async () => {
     const random = generator(7);

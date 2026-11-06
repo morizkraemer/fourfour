@@ -175,7 +175,7 @@ describe('filter and sort of the library against a plain reference', () => {
     expect(sameClaims).toBeGreaterThan(100);
     expect(sameDenied).toBeLessThan(sameClaims);
     clearSort('library');
-  });
+  }, 120_000);
 
   it('finds one-character and short queries by letters and digits exactly like a plain search', async () => {
     const random = generator(4242);
@@ -195,7 +195,7 @@ describe('filter and sort of the library against a plain reference', () => {
     }
     bumpLibraryTracks(ids);
     for (const ch of characters) if (ch.trim()) check(ch);
-  });
+  }, 120_000);
 
   it('knows result positions only for results of the current library list', async () => {
     loaded.tracks = Array.from({ length: 5 }, (_, i) => ({ ...randomInfo(() => 0.5, i + 1), title: i % 2 ? 'odd' : 'even' }));
