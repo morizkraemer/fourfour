@@ -288,6 +288,120 @@ fn load(dir: &Path, samples: usize) {
     );
 }
 
+
+fn sha_hex(bytes: &[u8]) -> String {
+    use std::process::{Command, Stdio};
+    use std::io::Write;
+    let mut child = Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(bytes).unwrap();
+    let out = child.wait_with_output().unwrap();
+    String::from_utf8(out.stdout).unwrap().split_whitespace().next().unwrap().to_string()
+}
+
+fn trackload(dir: &Path, work: &Path, samples: usize) {
+    use std::sync::{Arc, Mutex};
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let unanalysed: std::collections::HashSet<i64> = lib.get_unanalyzed_track_ids().unwrap().into_iter().collect();
+    let total = lib.track_count().unwrap() as usize;
+    let analysed: Vec<i64> = (1..=total as i64).filter(|id| !unanalysed.contains(id)).collect();
+    let analysed: Vec<i64> = analysed
+        .into_iter()
+        .filter(|id| lib.get_track(*id).unwrap().is_some_and(|t| t.source_path.exists()))
+        .collect();
+    let step = (analysed.len() / samples).max(1);
+    let picked: Vec<i64> = analysed.iter().step_by(step).take(samples).copied().collect();
+    let cache = work.join("waveform-detail");
+    let shared = Arc::new(Mutex::new(lib));
+    let mut cols: std::collections::BTreeMap<&str, Vec<f64>> = Default::default();
+    let mut payload_bytes = Vec::new();
+    let mut detail_bytes_len = Vec::new();
+    let mut hashes = Vec::new();
+    for pass in 0..3 {
+        for id in &picked {
+            let path = shared.lock().unwrap().get_track(*id).unwrap().unwrap().source_path;
+            waveform_detail::detail_bytes(&cache, &path).unwrap();
+
+            let t = Instant::now();
+            let stored = {
+                let lib = shared.lock().unwrap();
+                analysis_payload::read_stored_analysis(&lib, *id).unwrap()
+            };
+            let read_ms = ms(t);
+            let t = Instant::now();
+            let value = stored.into_json();
+            let shape_ms = ms(t);
+            let t = Instant::now();
+            let text = serde_json::to_vec(&value).unwrap();
+            let ser_ms = ms(t);
+
+            let t = Instant::now();
+            let detail = waveform_detail::detail_bytes(&cache, &path).unwrap();
+            let detail_ms = ms(t);
+
+            let (probe_ms, first_ms, _) = decode_start(&path);
+
+            let t = Instant::now();
+            std::thread::scope(|scope| {
+                let analysis = scope.spawn(|| {
+                    let stored = {
+                        let lib = shared.lock().unwrap();
+                        analysis_payload::read_stored_analysis(&lib, *id).unwrap()
+                    };
+                    serde_json::to_vec(&stored.into_json()).unwrap()
+                });
+                let detail = scope.spawn(|| {
+                    let _track = shared.lock().unwrap().get_track(*id).unwrap().unwrap();
+                    waveform_detail::detail_bytes(&cache, &path).unwrap()
+                });
+                analysis.join().unwrap();
+                detail.join().unwrap();
+            });
+            let both_ms = ms(t);
+
+            if pass == 2 {
+                for (name, v) in [
+                    ("analysis_read_ms", read_ms),
+                    ("analysis_shape_ms", shape_ms),
+                    ("analysis_serialize_ms", ser_ms),
+                    ("analysis_total_ms", read_ms + shape_ms + ser_ms),
+                    ("detail_cached_ms", detail_ms),
+                    ("decode_probe_ms", probe_ms),
+                    ("decode_first_packet_ms", first_ms),
+                    ("analysis_and_detail_parallel_ms", both_ms),
+                ] {
+                    cols.entry(name).or_default().push(v);
+                }
+                payload_bytes.push(text.len() as f64);
+                detail_bytes_len.push(detail.len() as f64);
+                hashes.push(format!("{id} {} {}", sha_hex(&text), sha_hex(&detail)));
+            }
+        }
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("tracks".into(), picked.len().into());
+    for (name, v) in cols {
+        let (m, p) = median_and_p95(v);
+        out.insert(format!("{name}_median"), m.into());
+        out.insert(format!("{name}_p95"), p.into());
+    }
+    out.insert("analysis_payload_bytes_median".into(), median_and_p95(payload_bytes).0.into());
+    out.insert("detail_bytes_median".into(), median_and_p95(detail_bytes_len).0.into());
+    perf("trackload_backend", serde_json::Value::Object(out));
+    if let Some(path) = std::env::var_os("FF_TRACKLOAD_HASHES") {
+        std::fs::write(path, hashes.join("\n") + "\n").unwrap();
+    }
+}
+
+fn long_lib(audio: &Path, dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let scanned = import_plan::scan_paths(&import_plan::survey_files(&[audio.to_string_lossy().into_owned()]), &Default::default(), &mut || {}).tracks;
+    let ids = lib.add_tracks_covers_later(&scanned).unwrap();
+    for (n, id) in ids.iter().enumerate() {
+        lib.set_analysis(*id, &fake_analysis_of(n, scanned[n].duration_secs)).unwrap();
+    }
+}
+
 fn bands(paths: &[String]) {
     let mut ratios = Vec::new();
     for path in paths {
@@ -1054,6 +1168,8 @@ fn main() {
         Some("rescan") => rescan(Path::new(&args[2]), Path::new(&args[3])),
         Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
         Some("soak") => soak(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
+        Some("trackload") => trackload(Path::new(&args[2]), Path::new(&args[3]), args[4].parse().unwrap()),
+        Some("long-lib") => long_lib(Path::new(&args[2]), Path::new(&args[3])),
         Some("detail") => detail_profile(Path::new(&args[2])),
         Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
         Some("fixture-lib") => fixture_lib(
