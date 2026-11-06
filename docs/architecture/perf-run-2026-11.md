@@ -2673,6 +2673,191 @@ Not on the list, and why: the beat model (90% of analysis CPU: chunk 500 changes
 
 Scratch (`~/.cache/r129-work`, `~/.cache/r129-target`) is deleted after this item.
 
+## R130 bulk bump (2026-11-06, `r130b-bulk-bump`)
+
+Bulk row bumps (analyze selection, analysis results, rating/colour, genre/raw, relink) no longer snapshot every row. Branch from `ov-1028`. Linux `dev` box at load 40-55, real r95 payloads, base = `ov-1028` in a separate tree, runs one after the other.
+
+### Change
+
+- `copyRowFieldsToPlainTracks` (`app/src/stores/library.svelte.ts`) copies without `$state.snapshot` / `structuredClone`. Each row keeps the keys written through its proxy since the last bump and the plain container fields (like `raw`) it has handed out; a bump copies only those, with a plain recursive copy. Rows never written or read for a container are skipped. `refreshHaystacks` runs only for rows whose search text fields changed.
+- R129 profile blamed `structuredClone` for 80%; unprofiled it was about a quarter, the rest was proxy reads through `Object.keys` / `ownKeys`.
+
+### Before and after (Chromium, base to new)
+
+| Step (bump only unless noted) | 2k | 10k | 50k |
+|---|---|---|---|
+| Page, analyze selection, long task (ms) | 580 to 206 | 2,915 to 794 | 9,364 to 2,416 |
+| Store, analyze selected, sync part (ms) | 912 to 323 | 4,463 to 1,447 | 23,049 to 7,681 |
+| Store, analysis results bump | 628 to 93 | 2,920 to 352 | 14,202 to 2,493 |
+| Store, rating + colour bump | 494 to 46 | 2,792 to 180 | 14,050 to 986 |
+| Store, genre + raw bump (raw handed out, copied) | 507 to 222 | 2,815 to 1,126 | 14,255 to 6,068 |
+| Store, relink bump | 565 to 138 | 2,782 to 728 | 14,622 to 4,064 |
+
+The store numbers are Node in dev mode under load, so only the ratios carry. What is left in the page analyze step at 50k (about 2.4 s) is the field writes through the row proxies (about 1.3 s, Svelte `set`, row state creation), the plain copy (about 0.3 s) and the search text (about 0.25 s).
+
+### Identity proof
+
+- Store level, real payloads (`bulk-bump-real.test.ts`, needs `FF_PERF_STATE`): after each of 5 bulk steps, hashes of every plain row, of 24 sorted orders and of 43 search results are equal between base and new at 2k, 10k and 50k.
+- Page level (`perf-bulk-bump.spec.ts`): rows on screen (top, middle, bottom, playlist and All Tracks) equal base and new after analyze at 2k, 10k, 50k and after results at 2k, 10k, in Chromium and in WebKit (WebKit run again in this round, all view hashes equal base and new).
+- `bulk-bump-fuzz.test.ts`: random writes (scalars, typed arrays, nested `raw`, held nested references, added and deleted keys) and bumps against a reference that still snapshots; `toStrictEqual` on plain rows and search results after each step. Passes on base and new; two deliberate breaks fail it. Default is 1 seed; `FF_FUZZ_FULL=1` runs 4 seeds.
+- Known difference: key order of plain rows for keys added by writes follows first write, not first read. Deep-equal, not observed anywhere.
+
+### Validation
+
+- `npx vitest run`: 948 passed, 4 skipped (the real-payload test skips without `FF_PERF_STATE`); about 31 s wall; the bulk-bump tests went from 17 s to 6 s with the 1-seed default.
+- `npm run check`: 0 errors (the two bulk-bump test files needed `node:inspector` types in `src/node-fs.d.ts` and no `Buffer`).
+- Chromium smoke: 114 passed, 28 skipped.
+- WebKit smoke: 113 passed, 1 failed (`activity.spec.ts:137`, Import folder and files) at load 51; the same test passes alone. Not related to the bump.
+- WebKit `perf-bulk-bump`: WebKit has no long-task or CDP timings, so only the identity hashes are compared, and they are equal at 2k, 10k, 50k (`FF_PERF_ARRIVE=0` at 50k). The 50k results-arrival step in WebKit did not finish within 20 minutes on base either (stopped by hand), so that hang is not caused by this change.
+## R128 track load (2026-11-06, `r128b-track-load`)
+
+Branch `r128-track-load` finished as `r128b-track-load`, based on `ov-1028` at 8dbf8f0, no push. Measured on the shared dev box (load 10-55), headless Chromium and Playwright WebKit, 1k and 50k libraries, 6 minute real tracks and a 65 minute FLAC; the real `get_analysis_data` answer and detail series were dumped and replayed.
+
+**Trace.** Double-click, `loadPlayerTrack`: `playback_stop`, `get_analysis_data` (cached when the selecting click or the neighbour prefetch already read it), `get_waveform_detail` (47 MB for 65 min), then `playback_play` after the stop. Audio start is not a lever (first packet 0.3-1.3 ms). Base `get_analysis_data` parsed the ANLZ files twice (`get_analysis` plus `get_cues`) and sent about 2 MB of base64 in JSON for a long track.
+
+**Changed (all output-identical)**
+- `get_analysis_data` answers with a binary frame (`FFAN`, JSON head, band bytes); the page decodes it (`decodeAnalysisBytes`); no base64, no atob loop.
+- One ANLZ parse per load (`LocalLibrary::get_cues_with_analysis`).
+- Peak-hold downsample without per-column divisions; detail cache check without copying the 47 MB series.
+- Zoom series requested after the first paint (pending state set at once); `bandsFromInterleavedBytes` gain table; `libraryTrackById` instead of a 50k `find`.
+
+**Backend (`bench_startup trackload`, base to new, ms)**
+
+| Track | Analysis answer | Cached detail | Answer bytes |
+|---|---|---|---|
+| 6 min | 5.1 to 2.8 | 3.0 to 1.9 | |
+| 65 min | 68 to 23 | 124 to 48 | 2.23 to 1.73 MB |
+
+**Page (Chromium, medians of 15 distinct rows, ready / painted, ms)**
+
+| Case | Base | New |
+|---|---|---|
+| 50k, 65 min, cold | 150 / 196 | 40 / 68 |
+| 50k, 65 min, warm | 55 / 151 | 21 / 48 |
+| 50k, 6 min, cold | 32 / 57 | 20 / 44 |
+
+1k numbers were noisy (load swings). WebKit: ready 20-60% lower, painted 15-30% lower (frames of 200 ms dominate); the zoom series arrives 80-110 ms later there (deferral).
+
+**Identity proof**
+- Logical payload sha256 per track equal base vs new (24 mid, 1 long, 30 fixture tracks), plus detail bytes.
+- `player.track` hashes equal for 25 real answers (`player-load-real.test.ts`); first 10 s of decoded audio (start and 30 s seek) equal for 30 files.
+- Golden `.bin/.json` pairs in `app/src/services/fixtures/analysis-*` (`analysis-bytes.test.ts`).
+- Canvas hashes equal in Chromium and WebKit.
+- Screenshot hashes, final run (Chromium, 28 mid tracks plus a 44 minute FLAC, tracks at rows 3, 5 and the long one, compact view and three seeks each = 12 snapshots, all canvases and the `.ff-xp` screenshot): 12 of 12 equal in two runs of the new build and one run of the base build (base fed the same answers re-encoded as base64 JSON, `app/smoke/perf-trackload.spec.ts` with `FF_R128_SETTLE=1`).
+
+**The differing screenshot hashes.** Not data and not the playhead. Canvas hashes were equal in every run; only the element screenshot of `.ff-xp` varied, and the same build differed from itself between runs (5 of 12 in one pair, 4 of 12 in another). A pixel diff of two runs of the new build showed 8 x 6 and 9 x 3 pixel boxes at the pencil icon and the collapse chevron in the header: icon colour mid-transition (hover/CSS transition still running at screenshot time). With transitions and animations turned off (`animations: 'disabled'`) 2 of 12 still varied; additionally parking the mouse and injecting `transition: none` gave 12 of 12 equal across both builds. Product code did not change; the harness settles the page before it hashes.
+
+**Validation.** `cargo test -p pioneer-library -p pioneer-test-ui` (120 and 288 tests passed), `cargo check -p pioneer-test-ui --features dev-bins --bins`, `npx vitest run` (962 passed), `npm run check` (0 errors), `npm run smoke` Chromium and WebKit (114 passed, 30 skipped each). `perf-budgets.json` not refreshed. Harness: `app/smoke/perf-trackload.spec.ts` (`FF_R128_MODE=timing|profile|identity`, `FF_R128_INDEX`, `FF_R128_SETTLE`, `FF_R128_SHOTS`), bench `trackload`, `dump-load`, `long-lib`.
+
+## R133 Mac first launch (2026-11-06, `r133-mac-startup`)
+
+Mac night 3 (below) reported a first-launch regression in item 1 and a failed item 2. Both were looked at on `mbp` (on AC, scratch HOMEs under `~/dev/build/fourfour-r133` and the night directory, `/Applications` and the real app data untouched).
+
+**Item 1: not a code regression, the night machine was loaded.** Night 3 measured 1405 ms to first row and 6990 ms to interactive (5f77028), against 868 / 910 ms in R89 (c2bd463). Rerun on a quiet Mac (1-minute load about 4), each launch a fresh HOME with a copy of the 10k library and the night 3 item 1 probe:
+
+| build | launches | first row, ms (median, range) | interactive, ms (median) |
+|---|---:|---:|---:|
+| R89 code (23534cc = c2bd463 + libc fix, + boot probe) | 8 | 631 (594-748) | 677 |
+| night 3 app (5f77028, the binary night 3 measured; the first launch after idle left out, below) | 8 | 617 (588-660) | 666 |
+| ov-1028 head (7f2325e, + boot probe), order new, base, n3 | 3 | 609 (596-692) | 657 |
+| night 3 item 1 rerun with the fixed runner (ov-1028 head, first launch right after the app build) | 1 | 886 | 959 |
+
+All three builds are within noise of each other and faster than R89's 868 ms. In the first interleaved block (base then new, 5 pairs) ov-1028 head was 764 ms against 625 ms, but the whole gap sat before the page (Rust `setup_done` 405 ms against 290 ms), there is no Rust change between 5f77028 and 7f2325e, and the gap was gone when the order changed; read it as machine state in that window (`setup` opens the CoreAudio device and the library, unverified which one varied). The page part (page start to first row) was 175-192 ms on ov-1028 head against 196-223 ms on the R89 code. The one slow launch outside night 3 was the first launch after about 10 idle minutes: 1222 ms, with `setup_done` at 710 ms.
+
+Night 3 itself: item 1 started two minutes after the night began, right after four builds; the 5-minute load at the start was 11.6, and item 3 a minute later saw load 12-19 while the CPU was 87-90% idle (I/O or scheduler pressure, not CPU). In the item 1 log the page took 763 ms from page start to first row (quiet: about 190), 92 frames passed before 10 frames in a row were under 50 ms (quiet: 10), the longest frame was 205 ms, and the first Settings open timed out at 3 s ("settings did not open"; quiet runs: no failure, 853-857 ms per cycle). A starved WebContent process explains all of it; nothing in the code between c2bd463 and 5f77028 does.
+
+**Item 2 failed on a runner bug.** `item2` checked for the night 3 scratch marker in `perf/home-1`, a HOME that `perf-night.sh` creates (and deletes) itself, so it always stopped with "was not created by night3"; the dry run skips that check, so it never showed. It now only checks that the path is inside the night directory (the same guard as preflight).
+
+**Runner changes (`scripts/mac/night3.sh`).** Item 2 fix above. Items 1 and 2 wait up to 300 s for the 1-minute load to fall below a third of the cores before launching the app and log the load (or say they launched loaded), so a launch is no longer read against R89 while the machine is still busy from the builds.
+
+**Probe change (`perf_probe.js`).** After `interactive`, a `boot_timeline` mark lists the long frames (over 50 ms) between first row and interactive, the page's `performance` marks (`ff:state-answer`, `ff:state-decoded`, `ff:state-rows`) and resource timings. Only active with `FF_PERF_LOG`. Together with `setup_done` and `page_start.time_origin` this splits a launch into Rust setup, page load and page work, which is how the window effect above was found.
+
+**Item 2 rerun (fixed runner, ov-1028 head 7f2325e + boot probe, quiet start at load 4.8): it runs now; the first rerun missed one gate.**
+
+| metric | R89 | night 3 rerun | gate |
+|---|---:|---:|---|
+| cold first row / interactive, ms | 868 / 910 | 673 / 730 | pass |
+| warm first row (median of runs 2-3), ms | 628 | 702 | pass (within 15%) |
+| warm interactive, ms | 645 | 807 | FAIL |
+| first expand, longest frame (median of 5), ms | 34 | 26 | pass |
+| scroll during analysis, frame p95, ms | 18 | 18 | pass |
+| app load_state, ms | 53-67 | 81 | |
+
+A second item 2 run on the same head right after (runner 41e5eb2): cold first row / interactive 694 / 746 ms, first expand 27 ms, scroll during analysis p95 17 ms, warm first row 579 and 586 ms (median 583), warm interactive 629 and 646 ms (median 638, passes against 645), no frame over 50 ms in any of the 8 startup launches (longest 33-45 ms). Every item 2 gate passed in that run.
+
+The warm interactive miss is one frame. Run 3 had a single 70 ms frame about 75 ms after the first row (expand runs 1 and 2: 73 and 55 ms at the same spot), and one frame over 50 ms restarts the probe's 10-frame count, so that run's interactive moves by about 90 ms; with two warm runs the median follows. The same frame shows up for the R89 code on today's Mac: longest frame before interactive 32-44 ms for 23534cc and 33-47 ms for ov-1028 head over the quiet A/B launches (R89 itself saw 17-31 ms in its warm runs), so the frame grew with the machine, not the code, and it sits just around the 50 ms threshold. Tried and dropped: delaying the first lazy-view preload to 500 ms after the first screen when there is no `requestIdleCallback` (WebKit). In 6 interleaved pairs the 55 ms frame still came at the same spot (page 246 ms) in one launch, so the preload is not that frame; no app change was kept. What the frame is was not pinned down (WebKit has no long-task API; candidates are the row previews and covers that arrive right after the first rows).
+## R134 sort warm-up (2026-11-06, `r134-sort-warmup`)
+
+R129 lever 2 (warm the sort columns from the table's numeric columns) was measured and **not applied: the premise does not hold, and the two changes that were tried gave no gain. No product code changed.** Branch `r134-sort-warmup` from `ov-1028` (`43ee68f`). Linux `dev` box at load 13-33 (other workers), headless Chromium, `ff-fixture` 50k r95 payload. Added: `app/smoke/perf-sort-warmup.spec.ts` (`FF_PERF_MODE=warm|key|sort`, `FF_PERF_STATE`, `FF_PERF_KEY_AT`, `FF_PERF_SORT_AT`; a `requestAnimationFrame` loop keeps frames running in key and sort mode) and `app/src/stores/sort-warmup-real.test.ts` (env-gated: hash of every sorted order of 11 columns, both directions, with "", "house" and "a", cold and after the warm-up, and CPU time of the warm-up).
+
+### Where the 700 ms goes
+
+- Script in the first 3 s after the first rows at 50k, base: median 739 ms (674-1,084, 8 runs). With the sort warm-up switched off it was 415 ms (one run), so the sort warm-up is about 300 ms of it; the rest is the search text build and the mount.
+- Per column in the page (one run, load about 20, ms read / ms value classes): title 27 / 143, artist 20 / 29, label 7 / 3, bpm 13 / 7, key 11 / 4, time 9 / 5. **The three numeric columns together are about 50 ms of about 280. Even a free read of tempo, duration and key would not take 700 ms to 200 ms.** Half of the cost is the 36k distinct lowercase titles (a Map pass and one string sort).
+- `durationSeconds` runs once per distinct text (the read memoizes by raw text), not per row; the "169 ms self" of R129 was profiler inflation.
+- Reading from `raw.tempo` / `raw.duration_secs` would not give the same orders: `track-edits.svelte.ts` and `library.svelte.ts` (relink, analysis results) write the `bpm` text and `bpmExact` and not `raw.tempo`, so the text is the source of truth.
+
+### Tried, not kept
+
+- Reading all warmed columns in one pass per chunk of rows (cache theory): CPU of six columns 380 ms against 355-395 (Node, min of 7), no change.
+- Sorting the distinct strings with native numeric sorts of two-code-unit prefix keys (radix by two characters, no comparator): same classes on the 50k titles, 57 ms against 67 for title and 12.8 against 14.0 for artist (Node). Too little for the code.
+- Starting the sort warm-up only after the search text is built (`whenSearchIndexBuilt`): warm-up script in the first 3 s 739 to 574 ms, but over 10 s 761 to 884 ms, first title sort 125 to 171 ms total (medians of 8, Chromium, 50k), first key unchanged (169 to 159 ms). The work only moves later.
+
+### The first key
+
+R129's 234 ms first key is a harness effect. In headless Chromium without frames `requestIdleCallback` fires only at its timeout, the search text build lags, and a key at 0.8-1.5 s completes it synchronously (script 216-304 ms; the same page also left the title sort cold at 7 s: 189-470 ms). With frames running (as in a window), base at 1.5 s after the first rows: script median 54 ms (36-78), total 169 ms (114-206), 8 runs. WKWebView has no `requestIdleCallback` (timer fallback).
+
+### Identity and validation
+
+No product file changed, so every order is the base order by construction. `sort-warmup-real.test.ts` on the 50k payload (base tree): cold and warmed hashes of all 66 orders equal. `npx vitest run`: 963 passed, 6 skipped. `npm run check`: 0 errors. Chromium smoke (port 5511) 114 passed, 32 skipped; WebKit smoke (port 5512) 114 passed, 32 skipped. Not run: 10k and WebKit before/after, the edge payload (nothing to compare).
+
+## R135 early state (2026-11-06, `r135-early-state`)
+
+Branch `r135-early-state` from `ov-1028`; lever 3 of R129. Linux `dev` box, release `bench_startup` in `~/.cache/r135-target`, headless Chromium and Playwright WebKit, copies of the `ff-fixture` 10k and 50k `library.db` (anlz linked) plus the R120 edge copy of the 10k. Box load 14-41 the whole time (other workers).
+
+### What changed
+
+- `setup` starts a thread (`spawn_early_state`) that locks the library, builds the `load_state` answer (same `loaded_state` and `to_bytes`) and parks the bytes in `EarlyState` (`early_state.rs`). `load_state` locks the library like before and asks `encoded_state`: it gets the parked bytes when they are still current, else builds on demand. The slot is handed out once (a second `load_state`, such as a page reload, builds on demand), and a request that arrives before the thread has the lock builds on demand and the thread then skips.
+- **Staleness guard.** The parked answer carries the `LibraryRevision` taken right after the build and the labels map it was built from. It is served only when the library's revision is unchanged and `read_cached()` of the labels equals the stored map; both checks and the reply happen with the library locked, so no write lands in between. `LibraryRevision` (`pioneer-library/src/revision.rs`, no schema change) is the library object (a counter per `LocalLibrary`, so `change_library_path` and `reset_library` can never match an old answer), `SELECT total_changes()` of its connection (every row any write path changed, so no write path has to remember to bump anything), `PRAGMA data_version` (commits of other connections) and `PRAGMA schema_version`. The labels compare covers ratings and colours, which live in sidecar files and not in the database.
+- Tests: `early_state::tests` (an import, an analysis result, a playlist edit and a removal between setup and the command each return the new bytes, equal to on-demand; a write through another connection; a rating set after setup; a replaced library; once-only; untouched library gets the early answer and equal bytes) and `revision::tests`. `load_state_built` mark stays (now with `early`), plus `early_state_ready`.
+- `bench_startup early <dir> [request ms list] [out.bin]`: runs the thread and a request arriving `ms` after it started, prints request-to-answer, the on-demand build, and the sha256 of both.
+
+### Backend (`bench_startup early`, request arrives N ms after the thread started; request_to_answer = what the page waits for after its invoke)
+
+| Library | on-demand build | early, request at 150 / 300 ms | cost of the check |
+|---|---:|---:|---:|
+| 10k warm | 61-77 ms | 5 / 4 ms | 2-4 ms |
+| 50k warm | 190-270 ms | 118 / 22 ms (thread done at 250-290 ms) | 17-22 ms (label cache read and compare) |
+| 10k cold file cache | 60-77 ms (first query 230 ms) | 36 / 4 ms | |
+| 50k cold file cache | 200-270 ms (first query 640 ms) | 422 / 293 ms (thread done at 555-575 ms) | |
+
+The compute itself is unchanged (`rep` numbers); what moves is when it runs. How much a real launch gains depends on the head start: the time from `setup` to the page's invoke (webview creation, HTML parse), which a headless run does not have; the Mac R133 launches had `setup_done` at 290-405 ms. A request that comes after the thread finished costs only the check (2-22 ms).
+
+### Identity
+
+`bench_startup early` compares the early bytes with a fresh on-demand build in the same process on each library: **equal**, sha256 of the binary answer 10k `189c1084156ec70db43f1005134df010ae92b5cadde3e1f6d57074c6d86b36ad` (1,715,152 bytes), 50k `893a4522aa3716187953bf68054de31c73768fe174ae242c904bbf299fcccbe9` (8,319,832), edge 10k `c24f015ae53a7a1f0333903581210f512a12acef4e99f3777cee09c0cfc824da`. The logical JSON payload of the unchanged code (`bench_startup dump`) still gives the R111/R120 hashes: 10k `38fe2965...49eb0` (1,699,963 bytes), 50k `297cb41d...c0dc9` (8,416,233), edge `4d2bfc15...2eb719`.
+
+### Page harness (`perf-startup.spec.ts`, binary payloads, 5 runs per case, 2 alternated rounds, median of the two round medians; the harness backend is a timer, so base = the measured on-demand time and early = the measured request-to-answer for a request after the head start: warm 10k 62 / 4 ms, 50k 230 / 21 ms)
+
+| Browser | Library | Case | `load_state` answered base / early | first real row base / early |
+|---|---|---|---:|---:|
+| Chromium | 10k | first launch | 529 / 105 | 741 / 592 |
+| Chromium | 10k | cold | 488 / 110 | 681 / 610 |
+| Chromium | 10k | warm | 405 / 142 | 621 / 557 |
+| Chromium | 50k | first launch | 568 / 467 | 869 / 826 |
+| Chromium | 50k | cold | 706 / 607 | 978 / 947 |
+| Chromium | 50k | warm | 682 / 558 | 992 / 932 |
+| WebKit | 10k | first launch | 859 / 741 | 1,219 / 1,087 |
+| WebKit | 10k | warm | 416 / 370 | 711 / 686 |
+| WebKit | 50k | first launch | 1,056 / 979 | 1,530 / 1,483 |
+| WebKit | 50k | warm | 716 / 696 | 1,052 / 1,011 |
+
+Read with care: load 14-41 and two rounds only; per-round values moved by 100-500 ms (Chromium 50k warm first row: base 853 and 992, early 932 and 860). The direction is the same in every row (answer earlier, first row 25-150 ms earlier) but the first-row gain at 50k is inside the noise of this harness: the page main thread, not the backend, is the gate for the first row here (R109), and the harness backend is simulated. A cold-disk run in the harness (base 230 / 640 ms against early 4 / 293 ms for 10k / 50k) was dominated by load spikes and is not reported as a result. The saving that does not depend on the harness is the backend table above: about 200 ms at 50k and about 60 ms at 10k leave the path once the page asks later than the thread finishes; on a cold disk everything up to the first-query time overlaps the webview start. Not measured: a real launch on the Mac (no window here).
+
+### Validation
+
+`cargo test -p pioneer-library` and `-p pioneer-test-ui` (294 passed), `cargo check -p pioneer-test-ui --features dev-bins --bins`, vitest (963 passed), `npm run check` (0 errors), smoke in Chromium and WebKit (114 passed each). Not done: the 50k edge library (the edge script copies a 7.5 GB database).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

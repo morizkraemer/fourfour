@@ -102,9 +102,24 @@ fn path_lock(file: &Path) -> Arc<Mutex<()>> {
     locks.entry(file.to_path_buf()).or_default().clone()
 }
 
+const DETAIL_MAGIC: &[u8; 4] = b"FFWD";
+const DETAIL_FORMAT_VERSION: u8 = 3;
+const DETAIL_HEADER_LEN: usize = 28;
+const DETAIL_BYTES_PER_COLUMN: usize = 5;
+
+fn is_detail_file(bytes: &[u8]) -> bool {
+    if bytes.len() < DETAIL_HEADER_LEN || &bytes[..4] != DETAIL_MAGIC || bytes[4] != DETAIL_FORMAT_VERSION {
+        return false;
+    }
+    let columns = u32::from_le_bytes(bytes[12..16].try_into().expect("4 bytes")) as usize;
+    bytes.len() == DETAIL_HEADER_LEN + DETAIL_BYTES_PER_COLUMN * columns
+}
+
 fn cached_bytes(file: &Path) -> Option<Vec<u8>> {
     let bytes = fs::read(file).ok()?;
-    DetailSeries::from_bytes(&bytes).ok()?;
+    if !is_detail_file(&bytes) {
+        return None;
+    }
     if let Ok(handle) = fs::File::options().write(true).open(file) {
         handle.set_modified(SystemTime::now()).ok();
     }
@@ -438,5 +453,26 @@ mod tests {
         let detail_low = *series.planes[0][1200..1440].iter().max().unwrap() as i32;
         assert!((low - detail_low).abs() <= 4, "window {low} vs detail {detail_low}");
         assert!(bad.iter().all(|r| r.is_err()));
+    }
+
+    #[test]
+    fn cache_check_accepts_what_the_series_reader_accepts() {
+        let dir = std::env::temp_dir().join(format!("ff-detail-check-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let audio = dir.join("tone.wav");
+        write_wav(&audio);
+        let bytes = measure_detail(&audio).unwrap().to_bytes();
+        fs::remove_dir_all(&dir).ok();
+        assert!(is_detail_file(&bytes) && DetailSeries::from_bytes(&bytes).is_ok());
+        for broken in [bytes[..bytes.len() - 1].to_vec(), bytes[..20].to_vec(), Vec::new(), [bytes.clone(), vec![0]].concat()] {
+            assert!(!is_detail_file(&broken) && DetailSeries::from_bytes(&broken).is_err());
+        }
+        let mut other_version = bytes.clone();
+        other_version[4] += 1;
+        let mut other_magic = bytes.clone();
+        other_magic[0] = b'X';
+        for broken in [other_version, other_magic] {
+            assert!(!is_detail_file(&broken) && DetailSeries::from_bytes(&broken).is_err());
+        }
     }
 }

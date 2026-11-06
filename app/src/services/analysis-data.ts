@@ -39,11 +39,11 @@ export interface ColorWaveSample {
   b: number;
 }
 
-/** Colour waveform as sent by `get_analysis_data`: base64 band bytes (low, mid, high per column) plus the PWAV calibration. */
+/** Colour waveform as sent by `get_analysis_data`: band bytes (low, mid, high per column; base64 text in browser mocks) plus the PWAV calibration. */
 export interface EncodedColorWaveform {
   len: number;
   calibration: number;
-  bands: string;
+  bands: string | Uint8Array;
   /** The bytes are the stick's PWV7 / PWV6 values: drawn as `byte / 127`, no calibration or balancing. */
   pwv7?: boolean;
 }
@@ -58,12 +58,21 @@ function isEncodedColorWaveform(color: unknown): color is EncodedColorWaveform {
     len >= MIN_COLOR_COLUMNS &&
     typeof calibration === 'number' &&
     Number.isFinite(calibration) &&
-    typeof bands === 'string'
+    (typeof bands === 'string' || bands instanceof Uint8Array)
   );
 }
 
 function isUsableColorWaveform(color: unknown): boolean {
   return isEncodedColorWaveform(color) || isValidColorWaveform(color);
+}
+
+/** The bytes of a colour waveform's `bands`: as they came in the binary answer, or decoded from base64 text. */
+export function bandBytes(bands: string | Uint8Array): Uint8Array {
+  if (typeof bands !== 'string') return bands;
+  const binary = atob(bands);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 const decodedColorWaveforms = new WeakMap<object, ColorWaveSample[]>();
@@ -74,13 +83,13 @@ export function decodeColorWaveform(color: unknown): ColorWaveSample[] | null {
   if (!isEncodedColorWaveform(color)) return null;
   const memo = decodedColorWaveforms.get(color);
   if (memo) return memo;
-  const binary = atob(color.bands);
-  const columns = Math.floor(binary.length / 3);
+  const bytes = bandBytes(color.bands);
+  const columns = Math.floor(bytes.length / 3);
   const out = new Array<ColorWaveSample>(columns);
   for (let i = 0; i < columns; i++) {
-    const low = binary.charCodeAt(i * 3);
-    const mid = binary.charCodeAt(i * 3 + 1);
-    const high = binary.charCodeAt(i * 3 + 2);
+    const low = bytes[i * 3];
+    const mid = bytes[i * 3 + 1];
+    const high = bytes[i * 3 + 2];
     const max = Math.max(low, mid, high);
     const scale = max > 0 ? 1 / max : 0;
     out[i] = {
@@ -92,6 +101,34 @@ export function decodeColorWaveform(color: unknown): ColorWaveSample[] | null {
   }
   decodedColorWaveforms.set(color, out);
   return out;
+}
+
+const ANALYSIS_MAGIC = 0x4e414646;
+
+/**
+ * The answer of `get_analysis_data` (`FFAN`, the length of the JSON head as u32, the JSON head, then the band bytes) as
+ * the payload object the base64 form had: the same fields, with the `bands` of `waveform_color`,
+ * `waveform_color_detail` and `waveform_overview` and `waveform_row_bands` as `Uint8Array` views of the answer
+ * (`waveform_row_bands` is copied, rows keep it) instead of base64 text.
+ */
+export function decodeAnalysisBytes(buffer: ArrayBuffer): any {
+  const view = new DataView(buffer);
+  if (buffer.byteLength < 8 || view.getUint32(0, true) !== ANALYSIS_MAGIC) throw new Error('Invalid analysis answer from backend');
+  const headLength = view.getUint32(4, true);
+  if (8 + headLength > buffer.byteLength) throw new Error('Truncated analysis answer from backend');
+  const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 8, headLength)));
+  const arena = 8 + headLength;
+  const slice = (ref: { offset: number; length: number }) => {
+    if (arena + ref.offset + ref.length > buffer.byteLength) throw new Error('Truncated analysis answer from backend');
+    return new Uint8Array(buffer, arena + ref.offset, ref.length);
+  };
+  for (const field of ['waveform_color', 'waveform_color_detail', 'waveform_overview']) {
+    const color = head[field];
+    if (color && typeof color.bands === 'object') color.bands = slice(color.bands);
+  }
+  const row = head.waveform_row_bands;
+  if (row && typeof row === 'object') head.waveform_row_bands = slice(row).slice();
+  return head;
 }
 
 /** True when the payload is safe to cache and render (mono preview required). */
@@ -127,8 +164,9 @@ export function decodeTrackPreview(preview: string | number[] | null | undefined
 }
 
 /** `load_state` and `get_analysis_data` carry the 3-band row preview as base64 (or a byte array in mocks). */
-export function decodeBandPreview(preview: string | number[] | null | undefined): Uint8Array | null {
+export function decodeBandPreview(preview: string | number[] | Uint8Array | null | undefined): Uint8Array | null {
   if (!preview || preview.length === 0) return null;
+  if (preview instanceof Uint8Array) return preview.length % 3 === 0 ? preview.slice() : null;
   if (typeof preview !== 'string') return preview.length % 3 === 0 ? Uint8Array.from(preview) : null;
   const binary = atob(preview);
   if (binary.length === 0 || binary.length % 3 !== 0) return null;

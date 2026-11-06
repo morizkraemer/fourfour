@@ -347,6 +347,23 @@ wait_mark() {
   return 1
 }
 
+wait_quiet() {
+  local i load
+  if [ "$DRY" = 1 ]; then
+    say "+ wait up to 300 s for the 1-minute load to fall below a third of $CORES cores"
+    return 0
+  fi
+  for i in $(seq 1 60); do
+    load="$(sysctl -n vm.loadavg | awk '{print $2}')"
+    if awk -v l="$load" -v c="$CORES" 'BEGIN { exit !(l < c / 3) }'; then
+      say "quiet before launch: load $load"
+      return 0
+    fi
+    sleep 5
+  done
+  say "not quiet after 300 s (load $load), launching anyway: read the launch numbers as loaded"
+}
+
 app_bin() {
   local name
   name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist" 2> /dev/null || echo pioneer-test-ui)"
@@ -383,13 +400,15 @@ launch_app() {
 
 item1() {
   [ -x "$(app_bin)" ] || [ "$DRY" = 1 ] || die "ov-1028 app was not built"
+  wait_quiet
   launch_app settings '{"trackLoad":false,"scroll":false,"soakActions":["settings"],"soakMinutes":0.2,"soakPauseMs":1500,"soakSampleSecs":5}'
   run python3 -I "$HELPERS/night3-summary.py" item1 "$NIGHT/app/settings.jsonl" "$RESULTS/item1"
 }
 
 item2() {
   [ -x "$(app_bin)" ] || [ "$DRY" = 1 ] || die "ov-1028 app was not built"
-  scratch_home_check "$NIGHT/perf/home-1"
+  refuse_unsafe_path "$NIGHT/perf/home-1"
+  wait_quiet
   run_in "$WT/ov-1028" env "CARGO_TARGET_DIR=$TARGET" "FF_PERF_NIGHT_OUT=$NIGHT/perf" "FOURFOUR_MODELS_DIR=$MODELS" "$WT/ov-1028/scripts/mac/perf-night.sh" --size 10k --app "$APP" --runs 3 --expand-runs 5
   run python3 -I "$HELPERS/night3-summary.py" item2 "$NIGHT/perf" "$RESULTS/item2"
 }

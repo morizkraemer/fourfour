@@ -11,6 +11,7 @@ mod backup_commands;
 mod band_analysis;
 mod command_error;
 mod dto;
+mod early_state;
 mod file_health;
 mod heap;
 mod import_plan;
@@ -205,6 +206,17 @@ fn fill_pending_covers(app: &AppHandle, library: &SharedLibrary, fill: &CoverFil
             return;
         }
     }
+}
+
+/// Builds the `load_state` answer while the webview starts, so the page's first request finds it ready.
+fn spawn_early_state(library: SharedLibrary, early: Arc<early_state::EarlyState>) {
+    std::thread::spawn(move || {
+        let Ok(lib) = library.lock() else { return };
+        match early.prepare(&lib) {
+            Ok(()) => perf_probe::mark("early_state_ready", serde_json::json!({})),
+            Err(e) => app_log::warn(&format!("early library state not built: {e}")),
+        }
+    });
 }
 
 /// Removes staging folders a crashed run left in the ANLZ folders; on a thread of its own because it
@@ -861,19 +873,21 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Get stored analysis data for a track from the local library DB.
+/// Get stored analysis data for a track from the local library DB, as `StoredAnalysis::into_wire` bytes (a binary IPC
+/// response: the JSON head and the band bytes after it, no base64).
 #[tauri::command]
 async fn get_analysis_data(
     track_id: i64,
     state: State<'_, SharedLibrary>,
-) -> Result<serde_json::Value, String> {
+) -> Result<tauri::ipc::Response, String> {
     let shared = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
         let stored = analysis_payload::read_stored_analysis(&*shared.lock().map_err(|e| e.to_string())?, track_id)?;
-        Ok::<_, String>(stored.into_json())
+        Ok::<_, String>(stored.into_wire())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// The high-resolution 3-band series of a track for the zoomed waveform (`DetailSeries::to_bytes`),
@@ -1293,12 +1307,15 @@ async fn load_state(app: AppHandle) -> Result<tauri::ipc::Response, CommandError
             .unwrap_or_else(|| CommandError::new(ErrorKind::LibraryNotOpen, "The library is not open")));
     };
     let shared = state.inner().clone();
+    let early = app.try_state::<Arc<early_state::EarlyState>>().map(|early| early.inner().clone());
     perf_probe::mark("load_state_start", serde_json::json!({}));
     tauri::async_runtime::spawn_blocking(move || {
         let lib = shared.lock().map_err(|e| e.to_string())?;
-        let state = track_infos::loaded_state(&lib)?;
-        perf_probe::mark("load_state_built", serde_json::json!({ "tracks": state.tracks.len() }));
-        let bytes = state.to_bytes()?;
+        let (bytes, was_early) = match early {
+            Some(early) => early_state::encoded_state(&lib, &early)?,
+            None => (track_infos::loaded_state(&lib)?.to_bytes()?, false),
+        };
+        perf_probe::mark("load_state_built", serde_json::json!({ "early": was_early }));
         perf_probe::mark("load_state_encoded", serde_json::json!({ "bytes": bytes.len() }));
         Ok(tauri::ipc::Response::new(bytes))
     })
@@ -1564,6 +1581,9 @@ fn main() {
                     spawn_stale_staging_cleanup(db_path);
                     let library: SharedLibrary = Arc::new(Mutex::new(library));
                     app.manage(library.clone());
+                    let early = Arc::new(early_state::EarlyState::default());
+                    app.manage(early.clone());
+                    spawn_early_state(library.clone(), early);
                     file_health::spawn_check(app.handle().clone(), library.clone(), health);
                     spawn_cover_fill(app.handle().clone(), library, covers);
                 }

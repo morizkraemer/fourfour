@@ -108,6 +108,10 @@ const PARALLEL_SCAN_MIN_IDS: i64 = 4_000;
 const MAX_SCAN_THREADS: usize = 4;
 
 pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
+    loaded_state_with_labels(lib).map(|(state, _)| state)
+}
+
+pub fn loaded_state_with_labels(lib: &LocalLibrary) -> Result<(LoadedState, HashMap<i64, TrackLabels>), String> {
     let labels_reader = lib.track_labels_reader();
     let (playlists, labels) = std::thread::scope(|scope| {
         let labels = scope.spawn(|| labels_reader.read_cached());
@@ -129,7 +133,7 @@ pub fn loaded_state(lib: &LocalLibrary) -> Result<LoadedState, String> {
     if missing_previews > 0 {
         lib.backfill_row_previews().map_err(|e| e.to_string())?;
     }
-    Ok(LoadedState { tracks, playlists })
+    Ok((LoadedState { tracks, playlists }, labels))
 }
 
 fn track_table(lib: &LocalLibrary, labels: &HashMap<i64, TrackLabels>) -> Result<(TrackTable, usize), String> {

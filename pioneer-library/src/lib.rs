@@ -18,6 +18,7 @@ mod file_health;
 mod multi_sync;
 mod queries;
 pub mod rekordbox;
+mod revision;
 mod row_preview;
 mod schema;
 pub mod sticks;
@@ -57,6 +58,7 @@ pub use multi_sync::{
     StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
     statvfs_available_bytes, volume_capacity,
 };
+pub use revision::LibraryRevision;
 pub use sticks::StickContents;
 pub use user_edits::{LABELS_CACHE_FILE, MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsChange, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
@@ -201,6 +203,7 @@ pub struct ImportReport {
 /// or import from an existing USB.
 pub struct LocalLibrary {
     conn: Connection,
+    instance: u64,
     /// Path to the database file. `None` for in-memory databases (tests).
     db_path: Option<PathBuf>,
     /// Folded keys of every track for duplicate lookups, built by the first
@@ -220,6 +223,7 @@ impl LocalLibrary {
         schema::initialize(&conn, Some(db_path))?;
         Ok(Self {
             conn,
+            instance: revision::next_instance(),
             db_path: Some(db_path.to_path_buf()),
             duplicates: Mutex::default(),
             covers: CoverStore::for_library(Some(db_path)),
@@ -232,6 +236,7 @@ impl LocalLibrary {
         schema::initialize(&conn, None)?;
         Ok(Self {
             conn,
+            instance: revision::next_instance(),
             db_path: None,
             duplicates: Mutex::default(),
             covers: CoverStore::for_library(None),
@@ -761,28 +766,24 @@ impl LocalLibrary {
     /// The cues of a track with their names and colours: the user's list if they edited it, else the
     /// imported one, else what the analysis stored (no names or colours).
     pub fn get_cues(&self, track_id: i64) -> Result<Vec<ImportedCue>> {
+        if let Some(cues) = self.chosen_cues(track_id) {
+            return Ok(cues);
+        }
+        Ok(self.get_analysis(track_id)?.map(|a| cues_of_analysis(&a)).unwrap_or_default())
+    }
+
+    /// [`Self::get_cues`] for a caller that has just read the track's analysis (`get_analysis`): the stored cues come
+    /// from it instead of a second parse of the same ANLZ files.
+    pub fn get_cues_with_analysis(&self, track_id: i64, analysis: &AnalysisResult) -> Vec<ImportedCue> {
+        self.chosen_cues(track_id).unwrap_or_else(|| cues_of_analysis(analysis))
+    }
+
+    fn chosen_cues(&self, track_id: i64) -> Option<Vec<ImportedCue>> {
         let dir = self.track_anlz_dir(track_id);
         if let Some(edits) = dir.as_deref().and_then(UserEdits::read).filter(|e| e.cues_locked) {
-            return Ok(edits.cues);
+            return Some(edits.cues);
         }
-        if let Some(meta) = self.imported_meta(track_id).filter(|m| m.cues_locked) {
-            return Ok(meta.cues);
-        }
-        Ok(self
-            .get_analysis(track_id)?
-            .map(|a| {
-                a.cue_points
-                    .iter()
-                    .map(|c| ImportedCue {
-                        hot_cue_number: c.hot_cue_number,
-                        time_ms: c.time_ms,
-                        loop_time_ms: c.loop_time_ms,
-                        color: c.color.clone(),
-                        name: c.name.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        self.imported_meta(track_id).filter(|m| m.cues_locked).map(|meta| meta.cues)
     }
 
     /// Replace all cues of a track with an edited list (hot cue slots 1 to 8 are A to H, 0 is a memory
@@ -1370,6 +1371,20 @@ fn read_waveform_analysis(dat_path: &Path) -> Option<AnalysisResult> {
         });
     }
     reader::anlz::read_anlz(dat_path).ok()
+}
+
+fn cues_of_analysis(analysis: &AnalysisResult) -> Vec<ImportedCue> {
+    analysis
+        .cue_points
+        .iter()
+        .map(|c| ImportedCue {
+            hot_cue_number: c.hot_cue_number,
+            time_ms: c.time_ms,
+            loop_time_ms: c.loop_time_ms,
+            color: c.color.clone(),
+            name: c.name.clone(),
+        })
+        .collect()
 }
 
 #[cfg(test)]
