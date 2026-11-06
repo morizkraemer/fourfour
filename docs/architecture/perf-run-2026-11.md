@@ -2590,6 +2590,39 @@ Not on the list, and why: the beat model (90% of analysis CPU: chunk 500 changes
 
 Scratch (`~/.cache/r129-work`, `~/.cache/r129-target`) is deleted after this item.
 
+## R130 (paused, 2026-11-06, `r130-bulk-bump`)
+
+Paused by the coordinator before validation. Branch `r130-bulk-bump` from `ov-1028`. Linux `dev` box, load 14-44, Chromium only, real r95 payloads, base = `ov-1028` in a separate tree, runs one after the other.
+
+### Done
+
+- `copyRowFieldsToPlainTracks` (`app/src/stores/library.svelte.ts`) no longer snapshots with `$state.snapshot` / `structuredClone`. Each row keeps the keys written through its proxy since the last bump and the plain container fields (like `raw`) it has handed out; a bump copies only those, with a plain recursive copy. Rows never written or read for a container are skipped. `refreshHaystacks` runs only for rows whose search text fields changed.
+- Measured (R129 profile blamed `structuredClone` for 80%; unprofiled it was about a quarter, the rest was proxy reads through `Object.keys` / `ownKeys`).
+
+| Step (bump only unless noted) | 2k | 10k | 50k |
+|---|---|---|---|
+| Page, analyze selection, long task, base to new (ms) | 580 to 206 | 2,915 to 794 | 9,364 to 2,416 |
+| Store, analyze selected, sync part (ms) | 912 to 323 | 4,463 to 1,447 | 23,049 to 7,681 |
+| Store, analysis results bump | 628 to 93 | 2,920 to 352 | 14,202 to 2,493 |
+| Store, rating + colour bump | 494 to 46 | 2,792 to 180 | 14,050 to 986 |
+| Store, genre + raw bump (raw handed out, copied) | 507 to 222 | 2,815 to 1,126 | 14,255 to 6,068 |
+| Store, relink bump | 565 to 138 | 2,782 to 728 | 14,622 to 4,064 |
+
+The store numbers are Node in dev mode under load, so only the ratios carry. What is left in the page analyze step at 50k (about 2.4 s) is the field writes through the row proxies (about 1.3 s, Svelte `set`, row state creation), the plain copy (about 0.3 s) and the search text (about 0.25 s).
+
+### Identity so far
+
+- Store level, real payloads, `bulk-bump-real.test.ts`: after each of 5 bulk steps (analyze, results, rating+colour, genre+raw, relink) hashes of every plain row, of 24 sorted orders and of 43 search results are equal between base and new at 2k, 10k and 50k (all equal).
+- Page level (`perf-bulk-bump.spec.ts`): rows on screen (top, middle, bottom, playlist and All Tracks) equal base and new after analyze at 2k, 10k, 50k and after results at 2k, 10k.
+- `bulk-bump-fuzz.test.ts`: 4 seeds of random writes (scalars, typed arrays, nested `raw`, held nested references, added and deleted keys) and bumps against a reference that still snapshots; `toStrictEqual` on plain rows and search results after each step. Passes on base and new; two deliberate breaks fail it.
+- Known difference: key order of plain rows for keys added by writes follows first write, not first read (deep-equal, not observed anywhere).
+
+### Left
+
+- Run `cd app && npx vitest run`, `npm run check`, `npm run smoke` (`FF_SMOKE_PORT=5481`) and `FF_SMOKE_BROWSER=webkit npm run smoke` (`FF_SMOKE_PORT=5482`): none run yet.
+- WebKit numbers of `perf-bulk-bump` (`FF_PERF_STATE=<dump> FF_PERF_SIZES=2000,10000 npx playwright test perf-bulk-bump`; `FF_PERF_ARRIVE=0` for 50k, the arrival step crashes the page there).
+- Optional: the fuzz and real-payload tests are slow; trim if the suite time matters.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
