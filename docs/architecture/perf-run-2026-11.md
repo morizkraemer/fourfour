@@ -2666,6 +2666,31 @@ Branch `r128-track-load` finished as `r128b-track-load`, based on `ov-1028` at 8
 
 **Validation.** `cargo test -p pioneer-library -p pioneer-test-ui` (120 and 288 tests passed), `cargo check -p pioneer-test-ui --features dev-bins --bins`, `npx vitest run` (962 passed), `npm run check` (0 errors), `npm run smoke` Chromium and WebKit (114 passed, 30 skipped each). `perf-budgets.json` not refreshed. Harness: `app/smoke/perf-trackload.spec.ts` (`FF_R128_MODE=timing|profile|identity`, `FF_R128_INDEX`, `FF_R128_SETTLE`, `FF_R128_SHOTS`), bench `trackload`, `dump-load`, `long-lib`.
 
+## R134 sort warm-up (2026-11-06, `r134-sort-warmup`)
+
+R129 lever 2 (warm the sort columns from the table's numeric columns) was measured and **not applied: the premise does not hold, and the two changes that were tried gave no gain. No product code changed.** Branch `r134-sort-warmup` from `ov-1028` (`43ee68f`). Linux `dev` box at load 13-33 (other workers), headless Chromium, `ff-fixture` 50k r95 payload. Added: `app/smoke/perf-sort-warmup.spec.ts` (`FF_PERF_MODE=warm|key|sort`, `FF_PERF_STATE`, `FF_PERF_KEY_AT`, `FF_PERF_SORT_AT`; a `requestAnimationFrame` loop keeps frames running in key and sort mode) and `app/src/stores/sort-warmup-real.test.ts` (env-gated: hash of every sorted order of 11 columns, both directions, with "", "house" and "a", cold and after the warm-up, and CPU time of the warm-up).
+
+### Where the 700 ms goes
+
+- Script in the first 3 s after the first rows at 50k, base: median 739 ms (674-1,084, 8 runs). With the sort warm-up switched off it was 415 ms (one run), so the sort warm-up is about 300 ms of it; the rest is the search text build and the mount.
+- Per column in the page (one run, load about 20, ms read / ms value classes): title 27 / 143, artist 20 / 29, label 7 / 3, bpm 13 / 7, key 11 / 4, time 9 / 5. **The three numeric columns together are about 50 ms of about 280. Even a free read of tempo, duration and key would not take 700 ms to 200 ms.** Half of the cost is the 36k distinct lowercase titles (a Map pass and one string sort).
+- `durationSeconds` runs once per distinct text (the read memoizes by raw text), not per row; the "169 ms self" of R129 was profiler inflation.
+- Reading from `raw.tempo` / `raw.duration_secs` would not give the same orders: `track-edits.svelte.ts` and `library.svelte.ts` (relink, analysis results) write the `bpm` text and `bpmExact` and not `raw.tempo`, so the text is the source of truth.
+
+### Tried, not kept
+
+- Reading all warmed columns in one pass per chunk of rows (cache theory): CPU of six columns 380 ms against 355-395 (Node, min of 7), no change.
+- Sorting the distinct strings with native numeric sorts of two-code-unit prefix keys (radix by two characters, no comparator): same classes on the 50k titles, 57 ms against 67 for title and 12.8 against 14.0 for artist (Node). Too little for the code.
+- Starting the sort warm-up only after the search text is built (`whenSearchIndexBuilt`): warm-up script in the first 3 s 739 to 574 ms, but over 10 s 761 to 884 ms, first title sort 125 to 171 ms total (medians of 8, Chromium, 50k), first key unchanged (169 to 159 ms). The work only moves later.
+
+### The first key
+
+R129's 234 ms first key is a harness effect. In headless Chromium without frames `requestIdleCallback` fires only at its timeout, the search text build lags, and a key at 0.8-1.5 s completes it synchronously (script 216-304 ms; the same page also left the title sort cold at 7 s: 189-470 ms). With frames running (as in a window), base at 1.5 s after the first rows: script median 54 ms (36-78), total 169 ms (114-206), 8 runs. WKWebView has no `requestIdleCallback` (timer fallback).
+
+### Identity and validation
+
+No product file changed, so every order is the base order by construction. `sort-warmup-real.test.ts` on the 50k payload (base tree): cold and warmed hashes of all 66 orders equal. `npx vitest run`: 963 passed, 6 skipped. `npm run check`: 0 errors. Chromium smoke (port 5511) 114 passed, 32 skipped; WebKit smoke (port 5512) 114 passed, 32 skipped. Not run: 10k and WebKit before/after, the edge payload (nothing to compare).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
