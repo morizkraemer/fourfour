@@ -48,7 +48,7 @@
         if (!getIsTauri()) return 'Desktop app only';
         return `${playbackSettings.outputDevice ?? 'System default'} · ${playbackSettings.sampleRate / 1000} kHz`;
       case 'about':
-        return library.appVersion ? `v${library.appVersion}` : '';
+        return library.appVersion ? `v${library.appVersion} · build ${__FF_BUILD__.number}` : '';
       case 'keyboard':
         return shortcuts.hasCustom() ? 'Customized' : `${shortcuts.actions.length} shortcuts`;
       default:
