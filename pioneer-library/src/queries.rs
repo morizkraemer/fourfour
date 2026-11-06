@@ -246,9 +246,13 @@ pub fn unqueue_pending_artwork(conn: &Connection, track_id: i64, source_path: &P
 }
 
 pub fn select_track_paths(conn: &Connection) -> Result<std::collections::HashSet<PathBuf>> {
+    let mut paths = std::collections::HashSet::with_capacity(track_count(conn)? as usize);
     let mut stmt = conn.prepare("SELECT source_path FROM tracks")?;
     let rows = stmt.query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?;
-    rows.collect::<Result<_, _>>().map_err(Into::into)
+    for path in rows {
+        paths.insert(path?);
+    }
+    Ok(paths)
 }
 
 pub fn select_artwork(conn: &Connection, track_id: i64) -> Result<Option<Vec<u8>>> {

@@ -87,6 +87,9 @@ fn debug_ok(app: &AppHandle, msg: &str)    { debug_log(app, "ok", msg); }
 /// Adds the tracks not yet in the library; their covers follow from `spawn_cover_fill`, so the
 /// rows come back without artwork and `import-covers` names the ones that got a cover.
 fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<models::Track>) -> Result<Vec<TrackInfo>, CommandError> {
+    if scanned.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut seen = lib.track_paths().map_err(CommandError::from_anyhow)?;
     let fresh: Vec<models::Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
     let ids = lib.add_tracks_covers_later(&fresh).map_err(CommandError::from_anyhow)?;

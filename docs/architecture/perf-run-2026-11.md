@@ -2483,6 +2483,63 @@ All Tracks switch in WebKit: 263 / 252. Key down to the handler's `setTimeout(0)
 
 Scratch (`~/.cache/r124-work`) is deleted after this item.
 
+## R126 rescan (2026-11-06, `r126-rescan`)
+
+Branch `r126-rescan` from `ov-1028` (`d77ce38`). Linux `dev` box, release `bench_startup rescan`, warm page cache (a cold cache cannot be dropped here), box load 15-60 the whole time (other workers), so read the base-against-new pairs, not the absolute values. Base and new are built from the same tree (the bench commit alone against the bench plus the fix), run interleaved, 5 rounds each, median. Raw and scripts: `~/.cache/r126/`.
+
+**What a rescan is.** Importing a folder that is already in the library: `plan_import` (known paths, one folder walk, tag reads of unknown files only, duplicate check) and `commit_import`. R6 already made a known path cost no tag read, so the no-change case was a folder walk plus bookkeeping. A file that changed on disk under a known path is not read again (before and after); no stat, mtime or size is compared, and adding that would change results, so it is not done. Removed files stay in the library (an import never removes).
+
+**Datasets.** Hard-link trees of the R13 fixtures (`cp -al`, nothing copied, fixtures untouched) with libraries built by the same scan, covers stripped (`DELETE FROM artwork` + `VACUUM`; the rescan never reads them): 10k (9.4k folders), 25k, 50k (`copy1` + `copy2` of the 25k tree: 2 top folders, 18.8k folders). Scenario A = nothing changed. Scenario B = 1% changed: 0.33% added (hard links of other fixture files, new to the library), 0.33% removed (unlinked in the tree), 0.33% rewritten (copy with a later mtime). `bench_startup rescan <folder> <library.db>` does what the two commands do (known paths, walk, scan, plan, take, commit), per stage, plus process CPU.
+
+### Before and after (backend, median of 5, ms; "rows" = until `commit_import` returns)
+
+| | rows before | rows after | known paths | walk | scan | plan | commit | CPU user+sys before | after |
+|---|---:|---:|---|---|---|---|---|---:|---:|
+| 10k, A (no change) | 320 | 236 | 50 / 36 | 150 / 144 | 24 / 25 | 37 / 24 | 50 / 0 | 0.36 s | 0.33 s |
+| 25k, A | 598 | 430 | 84 / 40 | 299 / 295 | 55 / 58 | 79 / 39 | 78 / 0 | 0.83 s | 0.76 s |
+| 50k, A | 1,438 | 723 | 125 / 86 | 984 / 502 | 83 / 72 | 109 / 45 | 125 / 0 | 1.70 s | 1.50 s |
+| 10k, B (33 added) | 521 | 410 | 44 / 19 | 119 / 118 | 77 / 69 | 190 / 133 | 50 / 48 | 0.59 s | 0.48 s |
+| 25k, B (83 added) | 969 | 864 | 57 / 50 | 265 / 318 | 92 / 89 | 390 / 292 | 111 / 126 | 1.39 s | 1.13 s |
+| 50k, B (166 added) | 1,602 | 926 | 104 / 73 | 737 / 258 | 70 / 69 | 509 / 363 | 197 / 170 | 2.83 s | 2.58 s |
+
+(stage columns: before / after.) Spread of the "rows" runs under load: 50k A 1,311-1,597 before, 608-864 after; 50k B 1,503-2,164 before, 924-1,451 after. The stages are summed from separate medians, so they do not add up to the row median.
+
+Calls into libc per run (`LD_PRELOAD` counter, `~/.cache/r126/shim`; no `strace` or `perf` here): the walk makes no per-file `stat` (3 `statx`, a dozen `stat`/`lstat` in A at every size; 630 `statx` at 50k B are the 166 tag reads, 3 per file), `readdir` 47.8k at 10k and 229.5k at 50k (one per entry plus end), `fsync` 0 in A and 5 in B. DB writes in A: none beyond opening the file (8 `pwrite` before and after; the empty commit wrote no rows, took the paths again and queued a WAL checkpoint). B: the 166 new rows, 1,617 `pwrite` and 5 `fsync` before and after (same rows). Remaining cost in A is the kernel listing 19k folders: 0.8-0.9 s of system time at 50k, unchanged by this work (a plain `find -printf` over the same tree takes 0.45 s single-threaded).
+
+### What changed (`pioneer-test-ui/src/import_plan.rs`, `main.rs`, `pioneer-library/src/duplicates.rs`, `queries.rs`)
+
+- **The walk takes folders from one shared queue.** The folders below the dropped one were handed to 8 threads by the dropped folder's direct subfolders only: the 50k tree has two, so two threads walked it. Now every thread takes one folder, lists it and pushes its subfolders (`WalkQueue`); symlinked folders are still followed inside the listing thread with the same loop rule. 50k: 984 to 502 ms in A, 737 to 258 ms in B. 10k and 25k have more top folders and do not change (the 25k B pair in the table is noise: 265 / 318). 16 threads measured the same as 8 on the warm cache and were not taken; cold storage was not measurable here.
+- **No allocation or hashing per file in the walk.** The extension is compared case-insensitively without a lowercase copy for ASCII extensions (others keep the old lowercase path), the audio path moves into the file list instead of being cloned twice, and the distinct-file count is made once after the walk instead of one set per thread merged serially. User CPU 0.86 s to 0.66-0.70 s at 50k A.
+- **An import with nothing to add does not touch the library.** `add_scanned_tracks` returns when the plan resolved to no tracks: no second read of all paths, no empty write transaction with its pragmas and a checkpoint thread (50k: 125 ms to 0). The result is the same empty list.
+- **Known paths and the dedupe set are sized up front** (`track_paths` and `plan_import` no longer grow and rehash 17 times): 125 to 86 ms for the paths, 109 to 45 ms for the plan at 50k A.
+- **The duplicate index build (first plan with new files after start) is 2-3x cheaper.** It was rebuilt from every track on the first import with something new (the cache lives for the process): the three key maps were grown from empty and the Unicode folding ran on every ASCII string. The maps are reserved, and pure ASCII text takes a byte loop (`collapse_ascii`, `lowercase_nfc`) with the same result; anything else takes the old code. `DuplicateIndex::new` over the 50k library: 650-800 ms to 180-230 ms wall, CPU 0.85 s to 0.50 s (profile with the bench, 3 runs each). In the table that is the plan column in B (50k: 509 to 363 ms with the read of 50k rows, 100 ms, and the finds for the new files left).
+
+### Identity
+
+Same inputs, base build against new build, plan JSON (counts, duplicate rows with reasons and ids, skipped counts; token only differs in value and is blanked) and every table of the resulting `library.db` (`tracks` all 20 columns, `pending_artwork`, `analyses`, `playlists`, `sticks` and the rest: row count and SHA-256 of all rows in rowid order, plus the schema text), after the run:
+
+| input | result |
+|---|---|
+| A at 10k, 25k, 50k (all known, nothing written) | plan identical, db dump identical (10,000 / 25,000 / 50,000 `tracks` rows) |
+| B at 10k, 25k, 50k (33 / 83 / 166 added) | plan identical, db dump identical (10,033 / 25,083 / 50,166 rows, `pending_artwork` 33 / 83 / 166) |
+| the 10k tree under another path against the 10k library (nothing known by path, 10,000 `same_file` duplicates) | plan identical, db dump identical |
+| the 10k fixture against the 25k library (3 `same_file`, 8 `same_tags`) | plan identical, db dump identical |
+
+No timestamp had to be ignored: the `tracks` table has none that the scan writes, and no column differed. Unit tests: `ascii_fast_paths_match_the_unicode_paths` (20k random ASCII strings and every single ASCII byte through the old and the new folding), `non_ascii_text_still_goes_through_unicode_folding`, `survey_lists_every_depth_of_one_top_folder_and_counts_each_file_once`, `file_kind_ignores_case_and_keeps_non_ascii_extensions_unsupported`.
+
+### One difference, only with symlinks
+
+Two symlinks to the same folder: which of the two paths the survey keeps depends on which thread gets there first. That was already racy between the dropped folder's subfolders (8 threads); now it also holds between deeper folders. Symlink loops and the file set are handled as before (`robustness_tests` and the survey tests pass).
+
+### Not done
+
+- **Skipping unchanged folders by their mtime** would make the no-change walk almost free, but needs a stored mtime per folder (library schema, needs Merlin) and the plan's counts of unsupported and already-in-library files would then have to be stored too.
+- **Re-reading a file that changed under a known path** (mtime and size) is a behaviour change, not a speed fix.
+- `Scanned.known` still clones each known path (about 30-60 ms at 50k); the `COUNT(*)` that sizes the path set is one more index scan (a few thousand page reads at 50k, not visible in the times).
+- Cold-cache and Mac (APFS, `getattrlistbulk`) walks were not measured.
+
+Reproduce: build `bench_startup` (`--features pioneer-test-ui/dev-bins`), `bench_startup import <tree> <work>` for a library, then `bench_startup rescan <tree> <library.db copy>`; `FF_IMPORT_PLAN_OUT=<file>` writes the plan.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

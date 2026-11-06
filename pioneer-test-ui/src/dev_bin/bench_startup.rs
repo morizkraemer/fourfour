@@ -436,6 +436,9 @@ fn read_list(file: &Path) -> Vec<PathBuf> {
 }
 
 fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<Track>) -> (usize, f64, f64) {
+    if scanned.is_empty() {
+        return (0, 0.0, 0.0);
+    }
     let t = Instant::now();
     let mut seen = lib.track_paths().unwrap();
     let fresh: Vec<Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
@@ -443,6 +446,52 @@ fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<Track>) -> (usize, f64, f
     let t = Instant::now();
     let added = lib.add_tracks_covers_later(&fresh).unwrap().len();
     (added, exists_ms, ms(t))
+}
+
+fn cpu_seconds() -> (f64, f64) {
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+    let fields: Vec<&str> = stat[stat.rfind(')').unwrap() + 2..].split(' ').collect();
+    let ticks = |i: usize| fields[i].parse::<f64>().unwrap() / 100.0;
+    (ticks(11), ticks(12))
+}
+
+fn rescan(folder: &Path, db: &Path) {
+    let lib = LocalLibrary::open(db).unwrap();
+    let library_tracks = lib.track_count().unwrap();
+    let paths = vec![folder.to_string_lossy().into_owned()];
+    let (user0, sys0) = cpu_seconds();
+    let total = Instant::now();
+    let t = Instant::now();
+    let known = lib.track_paths().unwrap();
+    let known_ms = ms(t);
+    let t = Instant::now();
+    let survey = import_plan::survey_files(&paths);
+    let survey_ms = ms(t);
+    let t = Instant::now();
+    let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
+    let scan_ms = ms(t);
+    let read = scanned.tracks.len();
+    let plans = import_plan::ImportPlans::default();
+    let t = Instant::now();
+    let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+    let plan_ms = ms(t);
+    if let Ok(out) = std::env::var("FF_IMPORT_PLAN_OUT") {
+        let mut json = serde_json::to_value(&plan).unwrap();
+        json["token"] = serde_json::Value::Null;
+        std::fs::write(out, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    }
+    let t = Instant::now();
+    let (tracks, _) = plans.take(plan.token).unwrap().resolve(false);
+    let (added, _, _) = add_scanned_tracks(&lib, tracks);
+    let commit_ms = ms(t);
+    let rows_ms = ms(total);
+    let (user1, sys1) = cpu_seconds();
+    println!(
+        "files={} library_tracks={library_tracks} read={read} added={added} known_paths_ms={known_ms:.1} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} commit_ms={commit_ms:.1} rows_ms={rows_ms:.1} cpu_user_s={:.2} cpu_sys_s={:.2}",
+        survey.audio_count(),
+        user1 - user0,
+        sys1 - sys0
+    );
 }
 
 fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
@@ -1002,6 +1051,7 @@ fn main() {
         Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("bands") => bands(&args[2..]),
+        Some("rescan") => rescan(Path::new(&args[2]), Path::new(&args[3])),
         Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
         Some("soak") => soak(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
         Some("detail") => detail_profile(Path::new(&args[2])),
@@ -1013,7 +1063,7 @@ fn main() {
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | rescan <folder> <library.db> | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }
