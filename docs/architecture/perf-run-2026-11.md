@@ -2857,6 +2857,58 @@ Read with care: load 14-41 and two rounds only; per-round values moved by 100-50
 ### Validation
 
 `cargo test -p pioneer-library` and `-p pioneer-test-ui` (294 passed), `cargo check -p pioneer-test-ui --features dev-bins --bins`, vitest (963 passed), `npm run check` (0 errors), smoke in Chromium and WebKit (114 passed each). Not done: the 50k edge library (the edge script copies a 7.5 GB database).
+## R136 cover batch (2026-11-06, `r136-cover-batch`)
+
+Branch `r136-cover-batch` from `parked-all-v12` (build 1292, with r132's scroll prefetch). Linux `dev` box (16 cores, load average 13-25 from other workers), headless Chromium and Playwright WebKit. Result: **list thumbnails now come from one backend call per batch of 16 rows (`get_track_artworks`, one binary buffer), three batches in flight. In r132's scroll-fill harness the empty-cover frames fell from 15.7% to 4.7% of the frames at 84 px/frame and from 70% to 4.7% at 280 px/frame (Chromium, 10k and 50k alike); WebKit from 3.5-10% to 0.8-1.2%. Every thumbnail is byte-identical to the single-fetch path (sha256 equal on 1,500 covers, and a Rust test).**
+
+### Measured first: the old baseline was partly a warm-up artefact
+
+r132's harness measured the first speed (84 px/frame) cold: in Chromium the first 50-55 frames of that run were 100% empty and then 0% (`coverSeries`: `100 x9, 0 x12`), which is the mock encoding its first JPEG per size and the first image decodes, not the fetch rate. Its "66 -> 47%" at 84 px/frame was mostly that start. The harness now runs one unmeasured pass at 84 px/frame first (`WARMUP_SPEED`), so both speeds measure the steady fetch rate. Both columns below use this harness; the old store was run in it again for the "before" numbers (the 84 px/frame cold figure of the old harness was 47-51% before and 41-43% after, which shows why it could not tell the two apart).
+
+### Page numbers (`perf-scrollfill.spec.ts`, `FF_PERF_SCROLLFILL=1 FF_PERF_ROW_BANDS=1 FF_SOAK_ARTWORK=1 FF_PERF_TRACKS=<10000|50000>`, mock IPC delay 10 ms per call as in r132, 120 frames per speed, two runs each, mean share of the visible rows without a cover per frame, `framesAffected` in brackets, requests = cover IPC calls during the scroll)
+
+| Browser | Library | Speed px/frame | Before (single fetch, 6 in flight) | After (batch 16, 3 in flight) | Requests before / after |
+|---|---|---:|---|---|---|
+| Chromium | 10k | 84 | 15.7% (21), 15.7% (21) | **4.5% (6), 4.9% (6)** | 379 / 89 |
+| Chromium | 10k | 280 | 70.2% (120), 71.4% (120) | **4.7% (6), 4.7% (6)** | 480 / 128 |
+| Chromium | 50k | 84 | 15.1% (20), 15.7% (21) | **4.9% (6), 4.9% (6)** | 380 / 89 |
+| Chromium | 50k | 280 | 68.5% (120), 68.9% (120) | **4.7% (6), 4.7% (6)** | 503 / 128 |
+| WebKit | 10k | 84 | 4.5% (7), 3.5% (5) | **0.8% (1), 0.8% (1)** | 425 / 93 |
+| WebKit | 10k | 280 | 9.3% (24), 8.5% (30) | **0.8% (1), 0.8% (1)** | 1,225 / 132 |
+| WebKit | 50k | 84 | 3.8% (5), 4.1% (6) | **1.2% (2), 0.8% (1)** | 425 / 93 |
+| WebKit | 50k | 280 | 5.3% (11), 10.1% (28) | **0.8% (1), 0.8% (1)** | 1,255 / 120 |
+
+The 5-6 frames that stay at 100% are the first frames of a run: the first batch has not come back yet (one mock delay plus the page work). Settle time after the scroll stopped is the same (30-80 ms Chromium, 140-220 ms WebKit). Frames in the box are 30 ms or longer under the load, so the scripted scroll is gentler than a real 60 Hz fling; the ratios carry over, the absolute percentages do not.
+
+Batch size and requests in flight (Chromium 10k, two runs each, empty-cover mean at 84 / 280): batch 4 x 6 in flight 8.0 / 7.7%; 8 x 4 6.4 / 5.8%; 16 x 3 4.1-4.9 / 3.9-5.0%; 32 x 2 4.1 / 3.0%. 16 x 3 kept: the 32 batch is a little better at 280 px/frame but makes the first visible rows wait for 32 thumbnails (about 140 ms of backend work cold against 75 ms for 16).
+
+### Backend (`bench_covers`, release, 300 distinct 600 px JPEG covers of 175 KB from a library on disk, 64 px row thumbnails, covers per second, median of 5 rounds, load 23, so read the ratios; cold = fresh thumbnail cache, warm = the same ids again)
+
+| Path | Cold | Warm |
+|---|---:|---:|
+| single call, 1 in flight | 69 | 4,343 |
+| single call, 6 in flight (the old page) | 384 | 5,228 |
+| batch 8, 4 threads | 206 | 4,215 |
+| batch 16, 1 / 2 / 4 / 8 threads | 66 / 91 / 214 / 312 | 2,656 / 2,417 / 3,777 / 2,960 |
+| batch 32, 1 / 2 / 4 / 8 threads | 71 / 132 / 231 / 320 | 2,335 / 2,715 / 3,105 / 2,264 |
+| batch 64, 1 / 2 / 4 / 8 threads | 69 / 107 / 169 / 280 | 2,132 / 2,310 / 2,026 / 2,655 |
+
+The backend is not what the batch speeds up: a cold thumbnail is one JPEG decode and resize, 14 ms on this loaded box, in every variant (one thread: 66-71 covers/s however it is called). The batch matches the old path only because it decodes on 4 threads per call (`BATCH_THUMBNAIL_THREADS`) and the page keeps 3 calls in flight; a cold batch of 16 takes about 75 ms. Warm calls are 20-50% slower per cover than the single path (thread start and one output buffer per call, 0.25-0.4 ms per cover), which is far below one frame for the 30 covers a frame needs. What the batch removes is the per-call cost: IPC round trip, a `setTimeout`-sized wait per call in the mock, one blob and one task per cover in the answer path, and the library lock taken once per batch instead of once per cover. Scrolling 10k rows cold now needs 15% of the calls (89 against 379).
+
+Not done: a decoded-thumbnail cache that survives the 400-entry memory cache (that is storage, a schema or file layout change) and a faster decode (DCT scaling changes pixels).
+
+### Identity
+
+`bench_covers identity` writes the 64 px thumbnail of each of 1,500 distinct covers through the single path (`cached_artwork_thumbnail`, what `get_track_artwork` calls) and through `thumbnail_batch` (batches of 32, 4 threads), then each file is hashed with sha256: **1,500 of 1,500 equal** (digest of the digests `baeb61887e0765ed70094a5f456b7f65ab41287a55be5a22db4e6a7ba9cccef5`). Unit tests: `artwork_thumbs::tests::batch_entries_are_the_bytes_of_the_single_track_path` (JPEG and PNG covers above and below the box, garbage bytes, a track without a cover, an unknown id; 1, 3 and 16 threads; cached second call) and `decodeArtworkBatch` round trips in the page. The page makes a blob of the same bytes it made before.
+
+### Changed
+
+- `pioneer-test-ui/src/artwork_thumbs.rs` (new; the thumbnail cache and `artwork_thumbnail` moved out of `main.rs` unchanged so the bench can share them): `stored_covers` (reads the covers under one library lock), `thumbnail_batch` (the thumbnails on scoped threads, one buffer: `u32` count, one `u32` length per track with 0 for none, the images in request order, little-endian).
+- `main.rs`: command `get_track_artworks(track_ids, max_px)` (async, `spawn_blocking`, binary `tauri::ipc::Response`). `get_track_artwork` is unchanged and still serves the 512 px covers.
+- `app`: `getTrackArtworks` in `tauri.svelte.ts`, `lib/artworkBatch.ts` (decode), `artwork.svelte.ts` pumps the row queue in batches of 16, 3 in flight, most urgent first as r132 ordered it (the focus, queue limit and drop rules are untouched). Smoke mock answers `get_track_artworks`; `perf-scrollfill.spec.ts` counts both commands and warms up.
+- `bench_covers` dev bin (`gen`, `run`, `identity`).
+
+Validation: `cargo test -p pioneer-test-ui` 293 passed, 11 ignored; `npx vitest run` 1,017 passed, 3 skipped; `npm run check` 0 errors; smoke Chromium 161 passed, 28 skipped; smoke WebKit 161 passed, 28 skipped. Scratch (`~/.cache/r136*`) is deleted after this item.
 
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 

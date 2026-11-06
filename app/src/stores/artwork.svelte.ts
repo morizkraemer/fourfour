@@ -1,4 +1,4 @@
-import { getTrackArtwork, ARTWORK_ROW_PX } from '../services/tauri.svelte.ts';
+import { getTrackArtwork, getTrackArtworks, ARTWORK_ROW_PX } from '../services/tauri.svelte.ts';
 
 // Reactive state containing the cached blob URLs
 let cache = $state<Record<number, string>>({});
@@ -38,7 +38,8 @@ function rememberCover(trackId: number, url: string) {
 let rowCache = $state<Record<number, string>>({});
 const ROW_CACHE_LIMIT = 2000;
 const rowCached: number[] = [];
-const ROW_FETCH_CONCURRENCY = 6;
+const ROW_FETCH_CONCURRENCY = 3;
+const ROW_FETCH_BATCH = 16;
 const ROW_QUEUE_LIMIT = 256;
 const rowQueue: number[] = [];
 const rowQueued = new Set<number>();
@@ -98,18 +99,25 @@ function rememberRow(trackId: number, url: string) {
 
 function pumpRowQueue() {
   while (rowActive < ROW_FETCH_CONCURRENCY && rowQueue.length > 0) {
-    const trackId = rowQueue.splice(nextRowRequest(), 1)[0];
-    rowQueued.delete(trackId);
-    rowFetching.add(trackId);
+    const batch: number[] = [];
+    while (batch.length < ROW_FETCH_BATCH && rowQueue.length > 0) {
+      const trackId = rowQueue.splice(nextRowRequest(), 1)[0];
+      rowQueued.delete(trackId);
+      rowFetching.add(trackId);
+      batch.push(trackId);
+    }
     const gen = cacheGeneration;
     rowActive++;
-    getTrackArtwork(trackId, ARTWORK_ROW_PX)
-      .then((bytes) => {
+    getTrackArtworks(batch, ARTWORK_ROW_PX)
+      .then((images) => {
         if (gen !== cacheGeneration) return;
-        rememberRow(trackId, bytes ? URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) : '');
+        batch.forEach((trackId, i) => {
+          const bytes = images[i];
+          rememberRow(trackId, bytes ? URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) : '');
+        });
       })
       .finally(() => {
-        rowFetching.delete(trackId);
+        for (const trackId of batch) rowFetching.delete(trackId);
         rowActive--;
         pumpRowQueue();
       });

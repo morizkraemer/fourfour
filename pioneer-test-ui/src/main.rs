@@ -6,6 +6,7 @@ mod analysis_order;
 mod analysis_payload;
 mod analysis_priority;
 mod analysis_run;
+mod artwork_thumbs;
 mod app_log;
 mod backup_commands;
 mod band_analysis;
@@ -34,8 +35,6 @@ mod tag_scan;
 mod volumes;
 mod waveform_detail;
 
-use std::collections::{HashMap, VecDeque};
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -48,6 +47,7 @@ use pioneer_usb_writer::models;
 
 use analysis_backend::BackendEnv;
 use analysis_failures::FailureMemo;
+use artwork_thumbs::{BATCH_THUMBNAIL_THREADS, cached_artwork_thumbnail, stored_covers, thumbnail_batch, SharedArtworkThumbs};
 use command_error::{CommandError, ErrorKind};
 use analysis_run::{
     merge_into_analysis_queue, rerun_work, resolve_analysis_work, without_known_failures, AnalysisCoordinator, AnalysisSink,
@@ -1109,63 +1109,6 @@ async fn rescale_beat_grid(track_id: i64, bpm: f64, state: State<'_, SharedLibra
     .map_err(|e| e.to_string())?
 }
 
-const ARTWORK_THUMB_CACHE_LIMIT: usize = 400;
-const ARTWORK_THUMB_JPEG_QUALITY: u8 = 85;
-
-#[derive(Default)]
-struct ArtworkThumbCache {
-    entries: HashMap<(i64, u32, u64), Arc<Vec<u8>>>,
-    order: VecDeque<(i64, u32, u64)>,
-}
-
-type SharedArtworkThumbs = Arc<Mutex<ArtworkThumbCache>>;
-
-fn bytes_fingerprint(bytes: &[u8]) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn artwork_thumbnail(bytes: &[u8], max_px: u32) -> Vec<u8> {
-    let Ok(decoded) = image::load_from_memory(bytes) else {
-        return bytes.to_vec();
-    };
-    if decoded.width() <= max_px && decoded.height() <= max_px {
-        return bytes.to_vec();
-    }
-    let thumb = decoded.thumbnail(max_px, max_px).to_rgb8();
-    let mut out = Vec::new();
-    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, ARTWORK_THUMB_JPEG_QUALITY);
-    match thumb.write_with_encoder(encoder) {
-        Ok(()) => out,
-        Err(_) => bytes.to_vec(),
-    }
-}
-
-fn cached_artwork_thumbnail(
-    cache: &SharedArtworkThumbs,
-    track_id: i64,
-    bytes: &[u8],
-    max_px: u32,
-) -> Arc<Vec<u8>> {
-    let key = (track_id, max_px, bytes_fingerprint(bytes));
-    if let Some(hit) = cache.lock().ok().and_then(|c| c.entries.get(&key).cloned()) {
-        return hit;
-    }
-    let thumb = Arc::new(artwork_thumbnail(bytes, max_px));
-    if let Ok(mut c) = cache.lock() {
-        if c.entries.insert(key, thumb.clone()).is_none() {
-            c.order.push_back(key);
-            if c.order.len() > ARTWORK_THUMB_CACHE_LIMIT {
-                if let Some(oldest) = c.order.pop_front() {
-                    c.entries.remove(&oldest);
-                }
-            }
-        }
-    }
-    thumb
-}
-
 /// Get artwork bytes for a track from the local library DB. With `max_px` the image is
 /// downscaled to fit that box (JPEG, cached in memory); without it the stored bytes are
 /// returned unchanged. Sent as a binary IPC response (an `ArrayBuffer`).
@@ -1189,6 +1132,29 @@ async fn get_track_artwork(
             }
             (stored, _) => stored.unwrap_or_default(),
         })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Thumbnails of many tracks in one call, for the list rows on screen: one binary response in the layout of
+/// `artwork_thumbs::thumbnail_batch`, each entry the same bytes `get_track_artwork` sends for that track and `max_px`.
+#[tauri::command]
+async fn get_track_artworks(
+    track_ids: Vec<i64>,
+    max_px: u32,
+    state: State<'_, SharedLibrary>,
+    thumbs: State<'_, SharedArtworkThumbs>,
+) -> Result<tauri::ipc::Response, String> {
+    let shared = state.inner().clone();
+    let thumbs = thumbs.inner().clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let stored = {
+            let lib = shared.lock().map_err(|e| e.to_string())?;
+            stored_covers(&lib, &track_ids)?
+        };
+        Ok::<_, String>(thumbnail_batch(&thumbs, &track_ids, &stored, max_px, BATCH_THUMBNAIL_THREADS))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1551,6 +1517,7 @@ fn main() {
             rescale_beat_grid,
             set_cues,
             get_track_artwork,
+            get_track_artworks,
             playback_play,
             playback_pause,
             playback_resume,
@@ -1626,7 +1593,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{analysis_start_error, artwork_thumbnail, eject_failure, validated_reveal_path};
+    use super::artwork_thumbs::artwork_thumbnail;
+    use super::{analysis_start_error, eject_failure, validated_reveal_path};
     use crate::analysis_backend;
     use crate::command_error::ErrorKind;
 

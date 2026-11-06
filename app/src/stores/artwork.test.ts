@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const hooks = vi.hoisted(() => ({ getTrackArtwork: vi.fn() }));
+const hooks = vi.hoisted(() => ({ getTrackArtwork: vi.fn(), getTrackArtworks: vi.fn() }));
 vi.mock('../services/tauri.svelte.ts', () => ({
   getTrackArtwork: hooks.getTrackArtwork,
+  getTrackArtworks: hooks.getTrackArtworks,
   ARTWORK_ROW_PX: 64,
 }));
 
@@ -25,7 +26,7 @@ describe('row artwork cache', () => {
   beforeEach(() => {
     live = new Set();
     created = 0;
-    hooks.getTrackArtwork.mockImplementation(async () => new ArrayBuffer(3000));
+    hooks.getTrackArtworks.mockImplementation(async (ids: number[]) => ids.map(() => new ArrayBuffer(3000)));
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => {
       const url = `blob:test/${created++}`;
       live.add(url);
@@ -50,9 +51,9 @@ describe('row artwork cache', () => {
 
   it('serves a thumbnail that was just fetched from the cache without fetching again', async () => {
     await scrollThrough(10);
-    const fetches = hooks.getTrackArtwork.mock.calls.length;
+    const fetches = hooks.getTrackArtworks.mock.calls.length;
     expect(artwork.getRow(10, true)).toMatch(/^blob:/);
-    expect(hooks.getTrackArtwork.mock.calls.length).toBe(fetches);
+    expect(hooks.getTrackArtworks.mock.calls.length).toBe(fetches);
   });
 
   it('fetches an evicted thumbnail again when its row comes back', async () => {
@@ -76,12 +77,12 @@ describe('row artwork focus', () => {
   beforeEach(() => {
     started = [];
     releases = [];
-    hooks.getTrackArtwork.mockReset();
-    hooks.getTrackArtwork.mockImplementation(
-      (id: number) =>
-        new Promise<ArrayBuffer>((resolve) => {
-          started.push(id);
-          releases.push(() => resolve(new ArrayBuffer(3000)));
+    hooks.getTrackArtworks.mockReset();
+    hooks.getTrackArtworks.mockImplementation(
+      (ids: number[]) =>
+        new Promise<ArrayBuffer[]>((resolve) => {
+          started.push(...ids);
+          releases.push(() => resolve(ids.map(() => new ArrayBuffer(3000))));
         }),
     );
     vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:focus');
@@ -99,7 +100,7 @@ describe('row artwork focus', () => {
     artwork.focusRows('list', rows(Array.from({ length: 40 }, (_, i) => 100 + i)));
     await settle();
     const firstWave = [...started];
-    expect(firstWave).toEqual([100, 101, 102, 103, 104, 105]);
+    expect(firstWave).toEqual(Array.from({ length: 48 }, (_, i) => 100 + i).slice(0, 40));
     artwork.focusRows('list', rows([500, 501]));
     releases.splice(0).forEach((release) => release());
     await settle();
@@ -116,13 +117,15 @@ describe('row artwork focus', () => {
   });
 
   it('keeps what another list still wants', async () => {
-    artwork.focusRows('a', rows([1, 2, 3, 4, 5, 6]));
+    artwork.focusRows('a', rows(Array.from({ length: 80 }, (_, i) => i + 1)));
     artwork.focusRows('b', rows([900]));
     await settle();
+    const firstWave = [...started];
     artwork.focusRows('a', rows([10]));
     releases.splice(0).forEach((release) => release());
     await settle();
-    expect(started.slice(6).sort((x, y) => x - y)).toEqual([10, 900].filter((id) => !started.slice(0, 6).includes(id)));
+    const later = started.slice(firstWave.length);
+    expect(later.sort((x, y) => x - y)).toEqual([10, 900].filter((id) => !firstWave.includes(id)));
   });
 });
 
