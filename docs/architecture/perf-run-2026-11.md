@@ -2704,6 +2704,53 @@ A second item 2 run on the same head right after (runner 41e5eb2): cold first ro
 
 The warm interactive miss is one frame. Run 3 had a single 70 ms frame about 75 ms after the first row (expand runs 1 and 2: 73 and 55 ms at the same spot), and one frame over 50 ms restarts the probe's 10-frame count, so that run's interactive moves by about 90 ms; with two warm runs the median follows. The same frame shows up for the R89 code on today's Mac: longest frame before interactive 32-44 ms for 23534cc and 33-47 ms for ov-1028 head over the quiet A/B launches (R89 itself saw 17-31 ms in its warm runs), so the frame grew with the machine, not the code, and it sits just around the 50 ms threshold. Tried and dropped: delaying the first lazy-view preload to 500 ms after the first screen when there is no `requestIdleCallback` (WebKit). In 6 interleaved pairs the 55 ms frame still came at the same spot (page 246 ms) in one launch, so the preload is not that frame; no app change was kept. What the frame is was not pinned down (WebKit has no long-task API; candidates are the row previews and covers that arrive right after the first rows).
 
+## R135 early state (2026-11-06, `r135-early-state`)
+
+Branch `r135-early-state` from `ov-1028`; lever 3 of R129. Linux `dev` box, release `bench_startup` in `~/.cache/r135-target`, headless Chromium and Playwright WebKit, copies of the `ff-fixture` 10k and 50k `library.db` (anlz linked) plus the R120 edge copy of the 10k. Box load 14-41 the whole time (other workers).
+
+### What changed
+
+- `setup` starts a thread (`spawn_early_state`) that locks the library, builds the `load_state` answer (same `loaded_state` and `to_bytes`) and parks the bytes in `EarlyState` (`early_state.rs`). `load_state` locks the library like before and asks `encoded_state`: it gets the parked bytes when they are still current, else builds on demand. The slot is handed out once (a second `load_state`, such as a page reload, builds on demand), and a request that arrives before the thread has the lock builds on demand and the thread then skips.
+- **Staleness guard.** The parked answer carries the `LibraryRevision` taken right after the build and the labels map it was built from. It is served only when the library's revision is unchanged and `read_cached()` of the labels equals the stored map; both checks and the reply happen with the library locked, so no write lands in between. `LibraryRevision` (`pioneer-library/src/revision.rs`, no schema change) is the library object (a counter per `LocalLibrary`, so `change_library_path` and `reset_library` can never match an old answer), `SELECT total_changes()` of its connection (every row any write path changed, so no write path has to remember to bump anything), `PRAGMA data_version` (commits of other connections) and `PRAGMA schema_version`. The labels compare covers ratings and colours, which live in sidecar files and not in the database.
+- Tests: `early_state::tests` (an import, an analysis result, a playlist edit and a removal between setup and the command each return the new bytes, equal to on-demand; a write through another connection; a rating set after setup; a replaced library; once-only; untouched library gets the early answer and equal bytes) and `revision::tests`. `load_state_built` mark stays (now with `early`), plus `early_state_ready`.
+- `bench_startup early <dir> [request ms list] [out.bin]`: runs the thread and a request arriving `ms` after it started, prints request-to-answer, the on-demand build, and the sha256 of both.
+
+### Backend (`bench_startup early`, request arrives N ms after the thread started; request_to_answer = what the page waits for after its invoke)
+
+| Library | on-demand build | early, request at 150 / 300 ms | cost of the check |
+|---|---:|---:|---:|
+| 10k warm | 61-77 ms | 5 / 4 ms | 2-4 ms |
+| 50k warm | 190-270 ms | 118 / 22 ms (thread done at 250-290 ms) | 17-22 ms (label cache read and compare) |
+| 10k cold file cache | 60-77 ms (first query 230 ms) | 36 / 4 ms | |
+| 50k cold file cache | 200-270 ms (first query 640 ms) | 422 / 293 ms (thread done at 555-575 ms) | |
+
+The compute itself is unchanged (`rep` numbers); what moves is when it runs. How much a real launch gains depends on the head start: the time from `setup` to the page's invoke (webview creation, HTML parse), which a headless run does not have; the Mac R133 launches had `setup_done` at 290-405 ms. A request that comes after the thread finished costs only the check (2-22 ms).
+
+### Identity
+
+`bench_startup early` compares the early bytes with a fresh on-demand build in the same process on each library: **equal**, sha256 of the binary answer 10k `189c1084156ec70db43f1005134df010ae92b5cadde3e1f6d57074c6d86b36ad` (1,715,152 bytes), 50k `893a4522aa3716187953bf68054de31c73768fe174ae242c904bbf299fcccbe9` (8,319,832), edge 10k `c24f015ae53a7a1f0333903581210f512a12acef4e99f3777cee09c0cfc824da`. The logical JSON payload of the unchanged code (`bench_startup dump`) still gives the R111/R120 hashes: 10k `38fe2965...49eb0` (1,699,963 bytes), 50k `297cb41d...c0dc9` (8,416,233), edge `4d2bfc15...2eb719`.
+
+### Page harness (`perf-startup.spec.ts`, binary payloads, 5 runs per case, 2 alternated rounds, median of the two round medians; the harness backend is a timer, so base = the measured on-demand time and early = the measured request-to-answer for a request after the head start: warm 10k 62 / 4 ms, 50k 230 / 21 ms)
+
+| Browser | Library | Case | `load_state` answered base / early | first real row base / early |
+|---|---|---|---:|---:|
+| Chromium | 10k | first launch | 529 / 105 | 741 / 592 |
+| Chromium | 10k | cold | 488 / 110 | 681 / 610 |
+| Chromium | 10k | warm | 405 / 142 | 621 / 557 |
+| Chromium | 50k | first launch | 568 / 467 | 869 / 826 |
+| Chromium | 50k | cold | 706 / 607 | 978 / 947 |
+| Chromium | 50k | warm | 682 / 558 | 992 / 932 |
+| WebKit | 10k | first launch | 859 / 741 | 1,219 / 1,087 |
+| WebKit | 10k | warm | 416 / 370 | 711 / 686 |
+| WebKit | 50k | first launch | 1,056 / 979 | 1,530 / 1,483 |
+| WebKit | 50k | warm | 716 / 696 | 1,052 / 1,011 |
+
+Read with care: load 14-41 and two rounds only; per-round values moved by 100-500 ms (Chromium 50k warm first row: base 853 and 992, early 932 and 860). The direction is the same in every row (answer earlier, first row 25-150 ms earlier) but the first-row gain at 50k is inside the noise of this harness: the page main thread, not the backend, is the gate for the first row here (R109), and the harness backend is simulated. A cold-disk run in the harness (base 230 / 640 ms against early 4 / 293 ms for 10k / 50k) was dominated by load spikes and is not reported as a result. The saving that does not depend on the harness is the backend table above: about 200 ms at 50k and about 60 ms at 10k leave the path once the page asks later than the thread finishes; on a cold disk everything up to the first-query time overlaps the webview start. Not measured: a real launch on the Mac (no window here).
+
+### Validation
+
+`cargo test -p pioneer-library` and `-p pioneer-test-ui` (294 passed), `cargo check -p pioneer-test-ui --features dev-bins --bins`, vitest (963 passed), `npm run check` (0 errors), smoke in Chromium and WebKit (114 passed each). Not done: the 50k edge library (the edge script copies a 7.5 GB database).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
