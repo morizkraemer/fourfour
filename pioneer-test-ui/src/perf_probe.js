@@ -313,6 +313,7 @@
     let streakStart = last;
     let streak = 0;
     let longest = 0;
+    const longFrames = [];
     const t0 = last;
     while (streak < 10 && last - t0 < 30000) {
       const now = await frame();
@@ -320,6 +321,7 @@
       gaps.push(gap);
       longest = Math.max(longest, gap);
       if (gap > 50) {
+        longFrames.push([Math.round(last), Math.round(gap)]);
         streak = 0;
         streakStart = now;
       } else {
@@ -328,6 +330,13 @@
       last = now;
     }
     send('interactive', { at_page_ms: streakStart, longest_frame_ms: longest, frames_after_first_row: gaps.length });
+    send('boot_timeline', {
+      long_frames: longFrames,
+      marks: performance.getEntriesByType('mark').map((m) => [m.name, Math.round(m.startTime)]),
+      resources: performance
+        .getEntriesByType('resource')
+        .map((r) => [r.name.split('/').pop(), Math.round(r.startTime), Math.round(r.responseEnd)]),
+    });
     await sleep(cfg.settleMs ?? 2000);
     if (cfg.soakMinutes) {
       await soak();
