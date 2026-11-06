@@ -2910,6 +2910,21 @@ Not done: a decoded-thumbnail cache that survives the 400-entry memory cache (th
 
 Validation: `cargo test -p pioneer-test-ui` 293 passed, 11 ignored; `npx vitest run` 1,017 passed, 3 skipped; `npm run check` 0 errors; smoke Chromium 161 passed, 28 skipped; smoke WebKit 161 passed, 28 skipped. Scratch (`~/.cache/r136*`) is deleted after this item.
 
+## R140 Mac soak (build 1314)
+
+**Status: blocked, only the idle-after-open row was measured.** `mbp` was screen-locked for the whole run (`CGSSessionScreenIsLocked` true, `screencapture` fails with "could not create image from display"; nobody at the Mac, and unlocking is not something a worker does). A locked screen occludes every window, WKWebView stops animation frames, and the probe's first-row wait (`requestAnimationFrame`) never returns: the pilot launch logged `load_state_encoded` at 6.0 s and nothing after it for 200 s. Everything in the plan that needs a live page is therefore not measured: scripted scroll, expanded player, soak loop, and the analysis of 50 tracks (analysis is started by the frontend calling `analyze_tracks`; a backend-only launch with 50 un-analysed tracks sat at 0 CPU for 10 minutes and analysed none). No 50k fixture exists on the Mac (only `~/.cache/ff-fixture/10k` and `pool-v1`), so 50k was not run either.
+
+**Setup.** Copy of the installed bundle (`pioneer-test-ui` byte-identical to `/Applications/fourfour.app`, built at `~/dev/build/fourfour-wt2-target`) in `~/dev/build/fourfour-r140/fourfour.app`, HOME in a scratch folder under that directory, copy of the 10k fixture library, `auto_analyze_new_tracks: false`, real model weights read in place, on AC power, no audio played, no USB, the protected paths (Pioneer, rekordbox, `com.pioneer.test-ui`) hashed before and after (unchanged). `scripts/mac/r140-soak.py` samples every 2 s with `ps` (RSS and cumulative CPU time of the app and the three WebKit XPC processes that appeared after the launch: WebContent, GPU, Networking) and every 30 s with `footprint -p`.
+
+| Phase (10k, launch with page loaded but screen locked) | App RSS | WebKit RSS (3 processes) | App CPU | WebKit CPU | Footprint app / WebKit |
+|---|---:|---:|---:|---:|---:|
+| first 30 s after `load_state` | 214 MB | 160 MB | 0% | 0% | 131 / 112 MB |
+| next 108 s idle | 214 MB | 160 MB | 0% | 0% | 131 / 112 MB |
+
+Idle is flat and silent (0% CPU over 108 s, RSS identical). Treat the WebKit figure as a floor: the page is not rendering, so no rows, covers or canvases were drawn. The Linux soak (R42) saw 277 MB app RSS idle with analysis off; the Mac app is lower at 214 MB. Audio: the app opens the output device at launch (coreaudiod shows an audio-out assertion for the app) and plays nothing.
+
+**To finish it.** Unlock the Mac (or keep the session unlocked), then `scripts/mac/r140-soak.sh` on `mbp` (3 scroll + analysis launches, 3 expand launches, one 25 minute soak, then the summary table). `r140-soak.py` refuses to run the page-driven kinds while the screen is locked. A 50k fixture needs `scripts/perf.sh --size 50k` there first (cargo is not on the Mac's default PATH).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
