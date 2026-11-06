@@ -2838,6 +2838,59 @@ Identity and cost: `analyze-json --threads 2` on 10 tracks (every 63rd file of `
 | change | -3.7% | -97% | **-19.4%** | -11.4% | equal |
 
 Same as R106 in direction: sys time goes to near zero and CPU drops about a fifth. Wall moved less than in R106 (-11% against -24%) under heavier, uneven load, and only one pair ran, so read the wall number as a rough figure. Peak RSS was not measured in this run (R106: +10%).
+## R139 bump cost (2026-11-06, `r139-bump-cost`)
+
+R137 left the work every analysis bump does on the whole library (4 bumps per second while analysis runs): `sameMembers` over every row, a rebuild of the sort order and rank of both directions, the array of filtered rows. Branch from `ov-1028` (has R137). Linux `dev` box at load 15-40, real r95 payloads, base = `ov-1028` in a separate tree with the same spec and test files, runs interleaved.
+
+### Change (no markup, no CSS, same rows, same order)
+
+- `app/src/modules/TrackTable.svelte`: "same rows as the last sort?" asks `sameLibraryMembers` first (new, `library.svelte.ts`): two lists of library rows (`library.tracks`, a `filterTracks` result, a playlist's rows) are the same when both sit in one unbroken bump chain and have the same positions, an integer compare or a reference compare. Only when that cannot be told is the `Set` built, lazily, as before.
+- `app/src/lib/sortOrder.ts`: `moveChangedValues` moves up to 16 changed rows in `order` itself (`indexOf`, a binary search and one block move per row; no new arrays). More rows still go through `withChangedValues`. `SortedOrder` is a class whose `rank` is built when first read and dropped when `order` moves, so a bump no longer rebuilds 50k ranks nobody reads; `sortedSubset` without a built rank takes a mask pass over `order` instead of ranking and sorting the subset.
+- `app/src/stores/table-columns.svelte.ts`: each direction of a column order keeps the list it is valid for and is brought up to date when that direction is sorted (was: both directions on every bump, `columnSortOf`).
+- `app/src/stores/library.svelte.ts` `withChangedMatches`: when the bumped rows match the query exactly as before, the result indices stay the same array and the row array is a `slice` of the earlier one (was: a filter and a merge over every match, then a map over all of them).
+- Tests: `sortOrder.test.ts` (in-place moves over many bumps, rank dropped and rebuilt, subset with and without rank), `search-sort-fuzz.test.ts` and `playlist-sort-fuzz.test.ts` (every `sameLibraryMembers` claim must be the same rows in the same order, over 900 and the playlist steps), `bump-cost-real.test.ts` (env-gated, the measurement below), `perf-sort-analysis.spec.ts` (`FF_PERF_QUIET=<seconds>`: script and task time of a window of analysis with no input, after the clicks).
+
+### Before / after, store level (`bump-cost-real.test.ts`, Node, real payload, a bump of 2 rows then the view the table computes, 400 bumps, median of 3 interleaved runs, ms per bump; "bump" = write the fields and `bumpLibraryTracks`)
+
+| Case | 10k base to new | 50k base to new |
+|---|---|---|
+| sorted by artist, whole view | 1.21 to 0.46 | 8.83 to 2.38 |
+| sorted by bpm, whole view | 1.15 to 0.29 | 6.17 to 2.10 |
+| sorted by artist, query "house", whole view | 1.09 to 0.73 | 4.68 to 2.46 |
+| of which same-rows check (artist) | 0.61 to 0.03 | 5.58 to 0.03 |
+| of which sort (artist) | 0.75 to 0.33 | 2.83 to 1.44 |
+| of which filter (query "house") | 0.42 to 0.11 | 1.26 to 0.12 |
+| GC per bump (artist / bpm / query) | 0.15 to 0.10 / 0.04 to 0.06 / 0.45 to 0.26 | 0.37 to 0.25 / 0.34 to 0.36 / 0.55 to 0.30 |
+
+The `Set` check was the largest part at 50k (Set lookups of 50k row proxies, 5.6 ms in Node dev mode; the R137 estimate in Chromium was 1.2 ms). What is left per bump at 50k is the array of rows the sort hands to the table (about 1.4 ms, a new 50k array each bump, needed because the table compares the old and the new one) and `trackList.slice()` in the bump itself (about 0.9 ms); both are copies of 50k pointers and stay linear.
+
+### Before / after, page level (`perf-sort-analysis.spec.ts`, Chromium, 6 events per second, 20 s before the first click, median over runs; base n=5, new n=6 at 50k)
+
+- Script time of a 12 s window of analysis with the table sorted and no input: 34.9 to 30.5 ms per second at 50k (noisy, one set of three pairs 34 to 22); 10k (2 pairs) 24.6 to 23.6. Per bump that is about 8 ms of script at 50k that is now mostly the table (effects, rows), not the library size. Task time (includes GC and layout) did not move beyond the noise.
+- Sort click, script ms, all sort steps pooled: 43 to 28 at 50k with analysis (idle, 2 pairs: 29 to 18, the lazy rank also saves the rank build of a first sort); 10k 29 to 28. Totals (click to second frame): 89 to 82 at 50k, inside the 70-250 ms swing of this box.
+- Typing in the sorted table, script ms: 33 to 38 (type 'a' 26 to 31, 'm' 64 to 64, clear 31 to 25), no change beyond noise.
+- WebKit 50k analysis, 2 pairs: sort click totals 267 to 279 ms, typing 355 to 371 (no script metric in WebKit; the compositor floor of R29 dominates), no difference.
+
+### Identity
+
+- Store level (`sort-analysis-real.test.ts`, the R137 test, same file in both trees): **601 of 601 hashes equal base and new at 10k and at 50k** (242 and 240 distinct views).
+- `search-sort-fuzz.test.ts` (with the new soundness check), `playlist-sort-fuzz.test.ts` (same), `bulk-bump-fuzz.test.ts` and `sortOrder.test.ts` pass.
+- Page level, events stopped before the clicks (`FF_PERF_STOP=1`, `FF_PERF_AGE=15`): the rows on screen after each of the 12 steps are equal between base and new at 50k and 10k (12 of 12 each).
+
+### Validation
+
+- `npx vitest run`: 109 files passed, 9 skipped; 967 tests passed, 8 skipped.
+- `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5551`): 114 passed, 33 skipped (perf specs without a payload).
+- WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5552`): 114 passed, 33 skipped.
+
+### Not done
+
+- The array of rows handed to the table is still built per bump (linear, about 1.4 ms at 50k); patching the previous array would save about half of it and needs the moves reported out of `moveChangedValues`.
+- The bump itself (`trackList.slice()`, version log) and what the table does per bump (effects, row updates) are not touched.
+- A stale direction (not sorted for more than 16 rows of bumps) still goes through `withChangedValues`, linear, as in R137.
+
+Scratch (`~/.cache/r139*`) is deleted after this item.
 
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 

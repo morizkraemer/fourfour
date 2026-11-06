@@ -17,3 +17,10 @@ declare module 'node:inspector' {
     post(method: string, callback: (error: unknown, result: { profile: unknown }) => void): void;
   }
 }
+
+declare module 'node:perf_hooks' {
+  export class PerformanceObserver {
+    constructor(callback: (list: { getEntries(): { duration: number }[] }) => void);
+    observe(options: { entryTypes: string[] }): void;
+  }
+}

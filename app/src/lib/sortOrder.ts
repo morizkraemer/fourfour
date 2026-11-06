@@ -1,9 +1,26 @@
 export type SortValue = string | number | null;
 
-/** Positions in sorted order, and the inverse: `rank[order[i]] === i`. */
-export interface SortedOrder {
-  order: Int32Array;
-  rank: Int32Array;
+/** Positions in sorted order, and the inverse (`rank[order[i]] === i`, built when first read and again after `order` moved in place). */
+export class SortedOrder {
+  readonly order: Int32Array;
+  private ranks: Int32Array | null = null;
+
+  constructor(order: Int32Array) {
+    this.order = order;
+  }
+
+  get rank(): Int32Array {
+    if (this.ranks === null) this.ranks = ranksFromOrder(this.order);
+    return this.ranks;
+  }
+
+  rankIsBuilt(): boolean {
+    return this.ranks !== null;
+  }
+
+  orderMoved() {
+    this.ranks = null;
+  }
 }
 
 export function compareSortValues(a: SortValue, b: SortValue, direction: 1 | -1): number {
@@ -120,7 +137,7 @@ export function orderFromClasses({ classes, count }: ValueClasses, direction: 1 
   for (let s = 0; s <= count; s++) start[s + 1] += start[s];
   const order = new Int32Array(n);
   for (let i = 0; i < n; i++) order[start[slot(classes[i])]++] = i;
-  return { order, rank: ranksFromOrder(order) };
+  return new SortedOrder(order);
 }
 
 /**
@@ -131,16 +148,67 @@ export function sortedOrder(values: readonly SortValue[], direction: 1 | -1): So
   const classes = valueClasses(values);
   if (classes) return orderFromClasses(classes, direction);
   const order = Int32Array.from({ length: values.length }, (_, i) => i).sort((a, b) => compareSortValues(values[a], values[b], direction) || a - b);
-  return { order, rank: ranksFromOrder(order) };
+  return new SortedOrder(order);
 }
 
 /** `positions` (any order) sorted by their place in `sorted`; the same as sorting just those positions. */
 export function sortedSubset(positions: ArrayLike<number>, sorted: SortedOrder): Int32Array {
+  const n = sorted.order.length;
+  if (!sorted.rankIsBuilt() && positions.length * 4 > n) {
+    const wanted = new Uint8Array(n);
+    for (let i = 0; i < positions.length; i++) wanted[positions[i]] = 1;
+    const out = new Int32Array(positions.length);
+    let count = 0;
+    for (let i = 0; i < n && count < out.length; i++) {
+      const p = sorted.order[i];
+      if (wanted[p] === 1) out[count++] = p;
+    }
+    return out;
+  }
   const keys = new Int32Array(positions.length);
   for (let i = 0; i < positions.length; i++) keys[i] = sorted.rank[positions[i]];
   keys.sort();
   for (let i = 0; i < keys.length; i++) keys[i] = sorted.order[keys[i]];
   return keys;
+}
+
+/** Most positions `moveChangedValues` moves one by one. */
+export const MAX_MOVED_IN_PLACE = 16;
+
+/**
+ * Like `withChangedValues`, in `sorted.order` itself, one binary search and one block move per changed position, so a
+ * bump of a few rows costs next to nothing at any list size. `false` (nothing touched) when more than `MAX_MOVED_IN_PLACE`
+ * positions changed.
+ */
+export function moveChangedValues(sorted: SortedOrder, values: readonly SortValue[], changed: readonly number[], direction: 1 | -1): boolean {
+  const moving = [...new Set(changed)];
+  if (moving.length > MAX_MOVED_IN_PLACE) return false;
+  if (moving.length === 0) return true;
+  const order = sorted.order;
+  let placed = order.length;
+  for (const p of moving) {
+    const at = order.subarray(0, placed).indexOf(p);
+    order.copyWithin(at, at + 1, placed);
+    placed--;
+  }
+  moving.sort((a, b) => compareSortValues(values[a], values[b], direction) || a - b);
+  for (const p of moving) {
+    const value = values[p];
+    let low = 0;
+    let high = placed;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      const other = order[mid];
+      const c = compareSortValues(values[other], value, direction);
+      if (c < 0 || (c === 0 && other < p)) low = mid + 1;
+      else high = mid;
+    }
+    order.copyWithin(low + 1, low, placed);
+    order[low] = p;
+    placed++;
+  }
+  sorted.orderMoved();
+  return true;
 }
 
 /** Most positions `withChangedValues` repositions before a new sort is cheaper. */
@@ -185,5 +253,5 @@ export function withChangedValues(sorted: SortedOrder, values: readonly SortValu
     order[written++] = p;
   }
   order.set(kept.subarray(from), written);
-  return { order, rank: ranksFromOrder(order) };
+  return new SortedOrder(order);
 }

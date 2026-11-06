@@ -25,9 +25,9 @@ async function metrics(page: Page) {
   if (WEBKIT) return async () => 0;
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
-  return async () => {
+  return async (name = 'ScriptDuration') => {
     const m = (await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] };
-    return m.metrics.find((x) => x.name === 'ScriptDuration')!.value * 1000;
+    return m.metrics.find((x) => x.name === name)!.value * 1000;
   };
 }
 
@@ -117,8 +117,15 @@ test.describe('sort and search while analysis bumps rows', () => {
         const { profile } = (await profiler.send('Profiler.stop')) as { profile: unknown };
         writeFileSync(process.env.FF_PERF_PROFILE_JSON ?? '/tmp/r137.cpuprofile', JSON.stringify(profile));
       }
+      let quiet: { seconds: number; script: number; task: number } | null = null;
+      if (MODE === 'analysis' && !process.env.FF_PERF_STOP && process.env.FF_PERF_QUIET) {
+        const seconds = Number(process.env.FF_PERF_QUIET);
+        const [script0, task0] = [await script(), await script('TaskDuration')];
+        await page.waitForTimeout(seconds * 1000);
+        quiet = { seconds, script: Math.round((await script()) - script0), task: Math.round((await script('TaskDuration')) - task0) };
+      }
       if (MODE === 'analysis' && !process.env.FF_PERF_STOP) await page.evaluate(() => clearInterval((window as unknown as { __emitter: number }).__emitter));
-      const line = JSON.stringify({ label: LABEL, mode: MODE, age: AGE_SECONDS, run, steps });
+      const line = JSON.stringify({ label: LABEL, mode: MODE, age: AGE_SECONDS, run, quiet, steps });
       if (REPORT) appendFileSync(REPORT, line + '\n');
       else console.log(line);
     });
