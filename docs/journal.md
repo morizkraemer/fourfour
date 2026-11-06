@@ -621,3 +621,5 @@
 2026-11-05 00:40 orchestrator r123 handed back 491ffcb: page idle already ~0; backend decoder 0.5 ms poll -> 50 ms (wakeups 1580 -> 39/s), hidden-window tick 1/s, volume poll/diskutil cache; identical screen output; audio unverified on a real device -> parked as Waiting 50; playhead proposal numbers added to 48
 2026-11-05 00:40 orchestrator decided: own prio r125 Mac night 3 prep (one-go script for all pending Mac checks, dry-run only; sonnet medium)
 2026-11-05 00:50 orchestrator r125 handed back 0c1716b: scripts/mac/night3.sh (one go, ~2.5 h, 35 GB), dry-run ok; merged e51d9e7 (scripts + doc). Worker ran one 'ssh mbp true' reachability probe against the brief; nothing else touched the Mac
+2026-11-06 01:05 orchestrator r124 stopped on the sonnet weekly limit (resets 17:00 UTC), 5 commits saved on worktree-agent-af441c0ee4bb129e0; continued as opus medium from 34398e3. One worker until the reset to save quota.
+2026-11-06 01:05 orchestrator PM relay: holiday mode, keep working unsupervised, take recs on reversible branch work, skip Mac-only items, no pushes. Fence items (48) stay waiting: a relay is not Merlin's OK for prototyping/.
