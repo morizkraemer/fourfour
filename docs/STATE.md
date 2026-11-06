@@ -51,6 +51,7 @@ Note: everything parked is in parked-all-v13 fd35232 = build 1314 (v12 + ov-1028
 
 50. [built 2026-11-05] Idle/playing backend wakeups (r123): playback decoder poll 0.5 -> 50 ms and tick 1/s when the window is hidden (backend wakeups while playing 1580 -> 39 per s, CPU 64 -> 17 ms/s); volume poll paused when hidden and diskutil cached. Screen output identical; audio path untested on a real device. rec: listen on the Mac (long track, small buffer, seek) then land - branch: r123-idle-cpu 491ffcb
 51. [built 2026-11-07] Waveform Meter::push is 44% of non-model analysis instructions; R104 estimates 4x on that stage (~0.7 s/track) with unchanged float ops. File is in pioneer-usb-writer/src (brother lane). rec: hand to your brother as a speed ask - branch: none, see perf-run-2026-11.md R127
+52. [built 2026-11-07] Real-app Mac soak (r140) needs the Mac unlocked: a locked screen stops WebKit frames, so only idle was measured (10k: app 214 MB, WebKit 160 MB, 0% CPU). rec: leave the Mac unlocked on power one evening, I run scripts/mac/r140-soak.sh (~1 h) - branch: r140-mac-soak 9d53fae
 
 ### Needs Merlin's ears/eyes (laptop)
 - Preview, master: https://dev.tail87069a.ts.net:4200 (`preview start fourfour app-review`); dies on OOM.

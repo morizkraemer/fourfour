@@ -657,3 +657,4 @@
 2026-11-07 10:49 orchestrator build 1314 checks green (vitest 1036, both smokes 0 failed, cargo 0 failing); installed on the Mac 18:48 WITA, embedded number 1314/fd35232 verified
 2026-11-07 11:18 orchestrator r137 chain: smokes green but vitest 2 failed in r8-check (second time; 3 manual reruns clean); check script now keeps the full vitest log to name them. r138 handed back 3c4bb52 (allocator env in scripts/perf.sh, Linux only; analyze-json sha256 equal, CPU -19%), merged 7398cce; chain rerunning on both
 2026-11-07 11:33 orchestrator r137 + r138 landed 7398cce on ov-1028 (both smokes 0 failed, 26 suites, vitest 964, CHECKS-OK on rerun; flaky pair still unnamed, log kept on next failure)
+2026-11-07 11:59 orchestrator r140 BLOCKED partial 9d53fae: Mac screen locked, WebKit frames stop, only idle measured (10k: 214 MB app, 160 MB WebKit, 0% CPU, flat). Waiting 52 added (unlocked Mac for scripts/mac/r140-soak.sh). Branch kept
