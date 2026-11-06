@@ -2535,7 +2535,7 @@ Two symlinks to the same folder: which of the two paths the survey keeps depends
 
 - **Skipping unchanged folders by their mtime** would make the no-change walk almost free, but needs a stored mtime per folder (library schema, needs Merlin) and the plan's counts of unsupported and already-in-library files would then have to be stored too.
 - **Re-reading a file that changed under a known path** (mtime and size) is a behaviour change, not a speed fix.
-- `Scanned.known` still clones each known path (about 30-60 ms at 50k); the 8 `pread` more per 1k tracks from the `COUNT(*)` that sizes the path set are not visible in the times.
+- `Scanned.known` still clones each known path (about 30-60 ms at 50k); the `COUNT(*)` that sizes the path set is one more index scan (a few thousand page reads at 50k, not visible in the times).
 - Cold-cache and Mac (APFS, `getattrlistbulk`) walks were not measured.
 
 Reproduce: build `bench_startup` (`--features pioneer-test-ui/dev-bins`), `bench_startup import <tree> <work>` for a library, then `bench_startup rescan <tree> <library.db copy>`; `FF_IMPORT_PLAN_OUT=<file>` writes the plan.
