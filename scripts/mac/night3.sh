@@ -30,6 +30,7 @@ ROUNDS_CORES=3
 N=200
 REF_PREFIX=""
 CLEAN=0
+ORIGINAL_ARGS=("$@")
 while [ $# -gt 0 ]; do
   case "$1" in
     --remote) REMOTE=1; shift ;;
@@ -163,7 +164,7 @@ if [ "$DRY" = 0 ] && [ "$(uname -s)" != Darwin ]; then
   die "night3.sh measures the Mac (WKWebView, CoreML) and runs on macOS only; use --dry-run here or --remote from the dev box"
 fi
 if [ "$DRY" = 0 ] && [ -z "${NIGHT3_CAFFEINATED:-}" ] && command -v caffeinate > /dev/null; then
-  NIGHT3_CAFFEINATED=1 exec caffeinate -i "$0" "$@"
+  NIGHT3_CAFFEINATED=1 exec caffeinate -i "$0" "${ORIGINAL_ARGS[@]}"
 fi
 if [ "$(uname -s)" = Darwin ]; then
   export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:$PATH"
