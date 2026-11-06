@@ -38,11 +38,54 @@ function rememberCover(trackId: number, url: string) {
 let rowCache = $state<Record<number, string>>({});
 const ROW_CACHE_LIMIT = 2000;
 const rowCached: number[] = [];
-const ROW_FETCH_CONCURRENCY = 4;
-const ROW_QUEUE_LIMIT = 64;
+const ROW_FETCH_CONCURRENCY = 6;
+const ROW_QUEUE_LIMIT = 256;
 const rowQueue: number[] = [];
 const rowQueued = new Set<number>();
+const rowFetching = new Set<number>();
+const rowFocus = new Map<string, Map<number, number>>();
 let rowActive = 0;
+
+function rowRank(trackId: number): number {
+  let best = Infinity;
+  for (const ranks of rowFocus.values()) best = Math.min(best, ranks.get(trackId) ?? Infinity);
+  return best;
+}
+
+function nextRowRequest(): number {
+  let best = rowQueue.length - 1;
+  if (rowFocus.size === 0) return best;
+  let bestRank = rowRank(rowQueue[best]);
+  for (let i = best - 1; i >= 0 && bestRank > 0; i--) {
+    const rank = rowRank(rowQueue[i]);
+    if (rank < bestRank) {
+      best = i;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
+
+function nextRowRequestToDrop(): number {
+  let worst = 0;
+  let worstRank = rowRank(rowQueue[0]);
+  for (let i = 1; i < rowQueue.length; i++) {
+    const rank = rowRank(rowQueue[i]);
+    if (rank > worstRank) {
+      worst = i;
+      worstRank = rank;
+    }
+  }
+  return worst;
+}
+
+function dropUnfocusedRowRequests() {
+  for (let i = rowQueue.length - 1; i >= 0; i--) {
+    if (rowRank(rowQueue[i]) !== Infinity) continue;
+    rowQueued.delete(rowQueue[i]);
+    rowQueue.splice(i, 1);
+  }
+}
 
 function rememberRow(trackId: number, url: string) {
   rowCache[trackId] = url;
@@ -55,8 +98,9 @@ function rememberRow(trackId: number, url: string) {
 
 function pumpRowQueue() {
   while (rowActive < ROW_FETCH_CONCURRENCY && rowQueue.length > 0) {
-    const trackId = rowQueue.pop()!;
+    const trackId = rowQueue.splice(nextRowRequest(), 1)[0];
     rowQueued.delete(trackId);
+    rowFetching.add(trackId);
     const gen = cacheGeneration;
     rowActive++;
     getTrackArtwork(trackId, ARTWORK_ROW_PX)
@@ -65,6 +109,7 @@ function pumpRowQueue() {
         rememberRow(trackId, bytes ? URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' })) : '');
       })
       .finally(() => {
+        rowFetching.delete(trackId);
         rowActive--;
         pumpRowQueue();
       });
@@ -96,13 +141,31 @@ export const artwork = {
     if (!trackId || !hasArtwork) return '';
     const cachedUrl = rowCache[trackId];
     if (cachedUrl !== undefined) return cachedUrl;
-    if (!rowQueued.has(trackId)) {
+    if (!rowQueued.has(trackId) && !rowFetching.has(trackId)) {
       rowQueued.add(trackId);
       rowQueue.push(trackId);
-      if (rowQueue.length > ROW_QUEUE_LIMIT) rowQueued.delete(rowQueue.shift()!);
+      if (rowQueue.length > ROW_QUEUE_LIMIT) rowQueued.delete(rowQueue.splice(nextRowRequestToDrop(), 1)[0]);
       queueMicrotask(pumpRowQueue);
     }
     return '';
+  },
+
+  /**
+   * Declares which row thumbnails `owner` (one list) wants, most urgent first. They are requested now, in this
+   * order, and queued requests that no list wants any more are dropped. An empty list withdraws the claim.
+   */
+  focusRows(owner: string, wanted: readonly { id: number; hasArtwork: boolean | undefined }[]) {
+    if (wanted.length === 0) rowFocus.delete(owner);
+    else rowFocus.set(owner, new Map(wanted.map((row, rank) => [row.id, rank])));
+    dropUnfocusedRowRequests();
+    for (let i = wanted.length - 1; i >= 0; i--) {
+      const { id, hasArtwork } = wanted[i];
+      if (!hasArtwork || rowCache[id] !== undefined || rowQueued.has(id) || rowFetching.has(id)) continue;
+      rowQueued.add(id);
+      rowQueue.push(id);
+    }
+    while (rowQueue.length > ROW_QUEUE_LIMIT) rowQueued.delete(rowQueue.splice(nextRowRequestToDrop(), 1)[0]);
+    queueMicrotask(pumpRowQueue);
   },
 
   /**
@@ -174,5 +237,7 @@ export const artwork = {
     rowCached.length = 0;
     rowQueue.length = 0;
     rowQueued.clear();
+    rowFetching.clear();
+    rowFocus.clear();
   }
 };

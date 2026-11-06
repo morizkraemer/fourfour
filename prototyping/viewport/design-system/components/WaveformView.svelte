@@ -29,6 +29,7 @@
     durationMs = 0,
     trackKey = null,
     analyzing = false,
+    emptyLabel = null,
     onSeek = undefined,
     onCueMove = undefined,
     cueSnap = null,
@@ -120,7 +121,17 @@
 </script>
 
 <div class="ff-waveform-view" bind:this={container}>
-  {#if analyzing && !bands}
+  {#if mode === 'expanded' && !bands && emptyLabel}
+    <div class="ff-waveform-view__empty" class:ff-waveform-view__empty--analyzing={analyzing}>
+      <div class="ff-waveform-view__empty-strip" bind:clientWidth={placeholderWidth} bind:clientHeight={placeholderHeight}>
+        <Waveform width={placeholderWidth || 300} height={placeholderHeight || 48} variant="strip" look="bands" animating={analyzing} />
+      </div>
+      <div class="ff-waveform-view__empty-body">
+        <span class="ff-waveform-view__empty-line"></span>
+        <span class="ff-waveform-view__empty-label">{emptyLabel}</span>
+      </div>
+    </div>
+  {:else if analyzing && !bands}
     <div class="ff-waveform-view__analyzing" bind:clientWidth={placeholderWidth} bind:clientHeight={placeholderHeight}>
       <Waveform width={placeholderWidth || 300} height={placeholderHeight || 48} variant="strip" look="bands" animating />
     </div>
@@ -143,6 +154,67 @@
     align-items: center;
     background: var(--ff-wave-bg, #0d0d0d);
     pointer-events: none;
+  }
+
+  .ff-waveform-view__empty {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--ff-wave-bg, #0d0d0d);
+    pointer-events: none;
+  }
+
+  .ff-waveform-view__empty-strip {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(var(--ff-wave-ink, 255, 255, 255), 0.08);
+  }
+
+  .ff-waveform-view__empty-body {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ff-waveform-view__empty-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: rgba(var(--ff-wave-ink, 255, 255, 255), 0.08);
+  }
+
+  .ff-waveform-view__empty-label {
+    position: relative;
+    padding: 4px 12px;
+    background: var(--ff-wave-bg, #0d0d0d);
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-label-sm);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ff-muted);
+  }
+
+  .ff-waveform-view__empty--analyzing .ff-waveform-view__empty-label {
+    animation: ff-waveform-view-empty-pulse 1.1s ease-in-out infinite alternate;
+  }
+
+  @keyframes ff-waveform-view-empty-pulse {
+    from { opacity: 1; }
+    to { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ff-waveform-view__empty--analyzing .ff-waveform-view__empty-label {
+      animation: none;
+    }
   }
 
   :global(.ff-waveform-view .waveform-display) {

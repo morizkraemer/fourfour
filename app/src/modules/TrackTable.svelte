@@ -3,7 +3,7 @@
   column visibility menu, and playlist-aware row moves.
 -->
 <script>
-  import { onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import {
     ColumnHeader,
     TrackRow,
@@ -62,6 +62,8 @@
   import { fileStatus, fileStateOf } from '../stores/file-status.svelte.ts';
   import { locateTrack } from '../stores/file-health.svelte.ts';
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
+  import { rowFocusOrder } from '../lib/rowFocus.ts';
+  import { artwork } from '../stores/artwork.svelte.ts';
   import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
   import { pendingRowsHtml, skeletonRowsHtml } from '../lib/skeletonRows.ts';
@@ -92,6 +94,8 @@
   let viewportHeight = $state(0);
   let headerHeight = $state(0);
   let scrollRaf = null;
+  let rowsPerFrame = 0;
+  const rowFocusOwner = `rows-${Math.random().toString(36).slice(2)}`;
   const SCROLL_SETTLE_MS = 250;
   let scrolling = $state(false);
   let scrollSettleTimer = null;
@@ -100,6 +104,8 @@
   function syncScrollWindow() {
     scrollRaf = null;
     if (!tableScrollEl) return;
+    const movedRows = (tableScrollEl.scrollTop - scrollTop) / ROW_HEIGHT;
+    rowsPerFrame = movedRows === 0 ? rowsPerFrame / 2 : (rowsPerFrame + movedRows) / 2;
     scrollTop = tableScrollEl.scrollTop;
     if (headerHeight === 0) {
       headerHeight = tableScrollEl.querySelector('.ff-colh')?.offsetHeight ?? 0;
@@ -285,8 +291,22 @@
   let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
 
   $effect(() => {
-    requestRowPreviews(currentTracks.slice(firstRow, endRow));
+    const tracks = currentTracks;
+    const top = scrollTop - headerHeight;
+    const order = rowFocusOrder({
+      firstRow,
+      endRow,
+      visibleFirst: Math.max(0, Math.floor(top / ROW_HEIGHT)),
+      visibleLast: Math.ceil((top + viewportHeight) / ROW_HEIGHT) - 1,
+      rowCount: tracks.length,
+      rowsPerFrame,
+    });
+    const wanted = order.map((i) => tracks[i]).filter(Boolean);
+    requestRowPreviews(wanted);
+    untrack(() => artwork.focusRows(rowFocusOwner, wanted.map((t) => ({ id: t.id, hasArtwork: t.raw?.has_artwork }))));
   });
+
+  onDestroy(() => artwork.focusRows(rowFocusOwner, []));
 
   const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
 

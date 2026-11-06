@@ -274,6 +274,7 @@ export default class WaveformDisplay {
     setBeats(beats) {
         if (!this._data || this._data.beats === beats) return;
         this._data = { ...this._data, beats };
+        this._overviewDirty = true;
         this._invalidate();
     }
 
@@ -673,6 +674,7 @@ export default class WaveformDisplay {
         }
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this._renderBeatGrid(ctx, w, h, 0, 1, palette, 'compact');
         const cues = this._data?.cues;
         if (cues) {
             for (const cue of cues) {
@@ -1010,7 +1012,7 @@ export default class WaveformDisplay {
         ctx.fillText(label, x + 4, fontSize + 2);
     }
 
-    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette) {
+    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette, mode = this._mode) {
         const beats = this._data?.beats;
         const durationMs = this._data?.duration_ms;
         if (!beats || beats.length === 0 || !durationMs) return;
@@ -1019,7 +1021,7 @@ export default class WaveformDisplay {
         if (span <= 0) return;
 
         // Compact shows the whole track — phrase ticks only.
-        if (this._mode === 'compact') {
+        if (mode === 'compact') {
             this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, false, palette);
             return;
         }
