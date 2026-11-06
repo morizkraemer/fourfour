@@ -8,7 +8,7 @@ const REPEATS = Number(env.FF_PERF_REPEATS ?? 5);
 const WARM = env.FF_PERF_WARM !== '0';
 const SIZES = (env.FF_PERF_PLAYLISTS ?? 'R124 1k,R124 5k,R124 20k').split(',');
 
-const saveCost = { calls: 0, ms: 0 };
+const saveCost = { calls: 0, ms: 0, each: [] as number[] };
 
 vi.mock('../services/playback.svelte.ts', () => ({
   playbackPause: vi.fn(),
@@ -27,6 +27,7 @@ vi.mock('@tauri-apps/api/core', () => ({
       JSON.stringify(args);
       saveCost.calls++;
       saveCost.ms += performance.now() - t0;
+      saveCost.each.push(Math.round(performance.now() - t0));
     }
     return undefined;
   }),
@@ -267,6 +268,7 @@ describe.skipIf(!STATE)('playlist views on the real payload', () => {
     const report = {
       saveCalls: saveCost.calls,
       saveStringifyMsPerCall: saveCost.ms / Math.max(1, saveCost.calls),
+      saveStringifyMs: saveCost.each,
       steps: order.map((name) => ({ name, ms: median(timings.get(name)!), min: Math.min(...timings.get(name)!), hash: hashes.get(name) })),
     };
     const text = JSON.stringify(report, null, 1);
