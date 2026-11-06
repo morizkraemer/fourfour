@@ -625,3 +625,4 @@
 2026-11-06 01:05 orchestrator PM relay: holiday mode, keep working unsupervised, take recs on reversible branch work, skip Mac-only items, no pushes. Fence items (48) stay waiting: a relay is not Merlin's OK for prototyping/.
 2026-11-07 02:20 orchestrator r124 handed back e1b695e (opus continuation; playlists: 20k switch 285 -> 82 ms, add 500 39.8 s -> 57 ms, saves 100-1000 -> 6-24 ms; 195/195 store, 79/79 page, 87/87 column checkpoints identical), merged into ov-1028, chain running; both r124 worktrees removed
 2026-11-07 02:22 orchestrator decided: own prio r126 rescan speed (sonnet high) and r127 non-model analysis stages, byte-identical (sonnet high); sonnet limit reset passed, 2 workers
+2026-11-07 02:43 orchestrator r124 landed d77ce38 on ov-1028 (both smokes 0 failed, 26 suites, vitest 944, CHECKS-OK)
