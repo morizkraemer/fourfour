@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hooks = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -21,12 +21,26 @@ Object.assign(globalThis, { window: { __TAURI_INTERNALS__: {} } });
 
 type Held = { resolve: () => void; reject: (e: unknown) => void; names: string[] };
 
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
 function saves() {
   return hooks.invoke.mock.calls.filter(([command]) => command === 'save_state');
 }
 
+const heldSaves: Held[] = [];
+
+async function drainSaves() {
+  hooks.invoke.mockReset();
+  hooks.invoke.mockResolvedValue(undefined);
+  for (let i = 0; i < 20; i++) {
+    for (const h of heldSaves.splice(0)) h.resolve();
+    await tick();
+  }
+}
+
 function holdSaves() {
-  const held: Held[] = [];
+  const held = heldSaves;
+  held.length = 0;
   hooks.invoke.mockImplementation((_cmd: string, args: { playlists: { name: string }[] }) => {
     return new Promise<void>((resolve, reject) => {
       held.push({ resolve, reject, names: args.playlists.map((p) => p.name) });
@@ -39,13 +53,14 @@ function setNames(...names: string[]) {
   library.playlists = names.map((name, i) => ({ id: i + 1, name, track_ids: [], parent_id: 0, is_folder: false })) as never;
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
   hooks.invoke.mockReset();
   hooks.invoke.mockResolvedValue(undefined);
   setNames('a');
 });
+
+afterEach(drainSaves);
 
 describe('saveState queue', () => {
   it('sends the first save immediately', async () => {

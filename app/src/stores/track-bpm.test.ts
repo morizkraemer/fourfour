@@ -74,7 +74,10 @@ beforeEach(async () => {
   invokeMock.mockClear();
 });
 
-afterEach(() => vi.useRealTimers());
+afterEach(async () => {
+  await vi.runAllTimersAsync();
+  vi.useRealTimers();
+});
 
 describe('stepTrackBpm', () => {
   it('steps by 0.1 in the normal tier', () => {

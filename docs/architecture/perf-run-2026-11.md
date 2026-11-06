@@ -2910,6 +2910,123 @@ Not done: a decoded-thumbnail cache that survives the 400-entry memory cache (th
 
 Validation: `cargo test -p pioneer-test-ui` 293 passed, 11 ignored; `npx vitest run` 1,017 passed, 3 skipped; `npm run check` 0 errors; smoke Chromium 161 passed, 28 skipped; smoke WebKit 161 passed, 28 skipped. Scratch (`~/.cache/r136*`) is deleted after this item.
 
+## R137 sort during analysis (2026-11-06, `r137-sort-during-analysis`)
+
+R129 lever 4: a sort click at 50k while analysis runs took 89-154 ms against 72-74 ms idle. Branch from `ov-1028`. Linux `dev` box at load 13-26 (other workers), headless Chromium and Playwright WebKit, real r95 payloads, base = `ov-1028` in a separate copy of the tree (same spec and test files), runs interleaved. New harness `app/smoke/perf-sort-analysis.spec.ts` (`FF_PERF_STATE`, `FF_PERF_MODE=idle|analysis`, `FF_PERF_AGE` seconds of analysis before the first click, `FF_PERF_STOP=1` stops the events before the clicks, `FF_PERF_PROFILE=1` writes a CPU profile of the clicks); a `requestAnimationFrame` loop keeps frames running (R134), `analysis-partial` events arrive at 6 per second (the app applies them in batches, at most 4 bumps per second), then 12 steps: seven first sorts of columns (artist, title, bpm, key, time, label, both directions of artist), sorted typing and clearing, two more sorts.
+
+### Cause (measured)
+
+- Two parts of the R129 guess hold, one does not.
+- **Holds: stale column orders were thrown away.** `bumpLog` kept the last 64 bumps. A cached column order (R115 warm-up) is brought up to date lazily when that column is sorted, from the bumps since it was built. After 64 bumps (about 16 s of analysis at 4 bumps per second) every cached column that was not the one being sorted had no usable history, `dropUnusableColumnSorts` deleted all of them and the first click on each rebuilt it from scratch (read 50k values, value classes, sort): title 100-120 ms of script, the other columns 15-40 ms more. Even inside the log, `withChangedValues` gave up past 64 moved rows and sorted anew.
+- **Does not hold: the search warm-up restart.** `scheduleSearchIndexWarmup` does restart on every bump, but typing during analysis is not slower than idle in the same harness (sorted type 'a': idle 100 ms total, analysis 91 ms, base, 50k).
+- **Left as is: per-bump work while a sort is active** (the derived chain: `sameMembers` over 50k rows about 1.2 ms, `withChangedValues` and the rank array about 1.5 ms, GC, in all about 8-10 ms per bump in a profile of the sorted phase). A click that lands next to a bump pays part of it: that is the remaining 20 ms of script over idle. It is not specific to clicks and was not touched.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `app/src/stores/library.svelte.ts`: the bump log keeps up to 4096 bumps and 16,384 ids (was 64 bumps), so a column order built before a long stretch of analysis is moved to the current list instead of dropped; `libraryPositionsChangedSince` users (filters, sort values, playlists) get the same longer memory.
+- `app/src/lib/sortOrder.ts`: `withChangedValues` removes the changed positions, sorts them by value and position and merges them into the rest in one pass (a binary search per moved row, then block copies) instead of one `copyWithin` per row; `MAX_REPOSITIONED` 64 to 4096, counted after removing repeats (a stale column sees the same row many times).
+- Tests: `sortOrder.test.ts` (hundreds of moved rows with repeats, ties, blanks, both directions), `sort-analysis-real.test.ts` (env-gated, below).
+
+### Before / after
+
+Chromium 50k, analysis running (6 events per second, 20 s before the first click), 4 interleaved pairs, ms, median over runs:
+
+| Step | total base | total new | script base | script new |
+|---|---:|---:|---:|---:|
+| sort title asc | 168 | 92 | 121 | 52 |
+| sort artist asc | 114 | 134 | 62 | 56 |
+| sort artist desc | 102 | 100 | 59 | 42 |
+| sort bpm asc | 96 | 192 | 46 | 52 |
+| sort key, time, label asc | 96, 92, 88 | 128, 88, 90 | 50, 44, 41 | 50, 42, 47 |
+| all 7 first sorts, median per run | 95-121 | 88-100 | 37-57 | 43-53 |
+| sorted type 'a' / clear | 91 / 84 | 90 / 84 | 27 / 27 | 34 / 32 |
+
+Same harness with the events stopped 1.5 s before the clicks (3 pairs; isolates the stale-column cost from the bumps landing in the click window): title asc total 154 to 88, script 101 to 31; bpm script 42 to 28; every other step equal. The idle run of the same spec: sort clicks 64-144 total (median about 82), script 16-32 (median about 24). The totals of single steps swing by 100-300 ms on this box (the 192 and 378-407 ms new values in single runs are load, the script column did not move); read the script column and the stopped-events table.
+
+Chromium 10k, 3 pairs: sort-click median per run total 88.5-90 to 72-82, script 26-35 to 24-28. WebKit 50k, 2 pairs (`total` only, compositor floor of R29): 236 and 248 to 216 and 260, inside the noise.
+
+So the 89-154 ms of R129 is not fully gone: the cold-column rebuild (the part with a code cause) is, the click next to a bump costs about 20 ms of script more than idle.
+
+### Identity
+
+- Store level (`sort-analysis-real.test.ts`, `FF_PERF_STATE=<dump> npx vitest run src/stores/sort-analysis-real.test.ts`, the same file in both trees): after a warm-up of 11 columns, hashes of the ordered ids of every column, both directions, with the queries "", "house" and "a" (66 views) after each of 6 scripted bump steps (1 bump, 3 bumps of 2 rows, 70 bumps, 130 bumps of 3 rows, 500 bumps, one bump of 5,000 rows; rows get new BPM and key, some a new artist, title, genre or rating), and the stale case (reload, warm-up, then 80 bumps before each column is sorted, two rounds over all 11 columns): **601 of 601 hashes equal base and new at 10k and at 50k** (172-174 distinct fresh views).
+- `sortOrder.test.ts` compares moved orders with a comparator sort; `search-sort-fuzz.test.ts`, `playlist-sort-fuzz.test.ts` and `bulk-bump-fuzz.test.ts` pass unchanged.
+- Page level: `perf-sort-analysis` records a hash of the rows on screen after every step; the runs with the events stopped are equal between base and new, the runs with events change with the event timing by design.
+
+### Not done
+
+- Per-bump cost while a sort is active (`sameMembers` over the whole list, the order and rank rebuild per bump): about 1 ms each at 50k, left for a later item.
+- Memory of the log: at most 16,384 ids plus 4,096 small arrays.
+
+Scratch (`~/.cache/r137`) is deleted after this item.
+
+## R138 allocator env (2026-11-06, `r138-alloc-env`)
+
+R106's three glibc variables (`MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1073741824`) are set for the Linux `bench_analysis` runs in `scripts/perf.sh` only, through a `bench_analysis` wrapper that applies them when `uname -s` is Linux. The app, the macOS path and the startup and load steps are unchanged. `benchmark/scripts/` has no Linux `analyze-json` or `bench_analysis` caller (its Python batch runs `fourfour-analyze`). `fourfour-analysis-rs/scripts/parity_run.py` runs `analyze-json` but is outside this scope and is not changed.
+
+Identity and cost: `analyze-json --threads 2` on 10 tracks (every 63rd file of `benchmark/datasets/rekordbox-testdata-2025`: 4 MP3, 4 WAV, 2 FLAC), one run each, base then env, box load average 16-37 from other workers.
+
+| | user | sys | CPU | wall | output sha256 |
+|---|---:|---:|---:|---:|---|
+| base (default glibc) | 715.7 s | 145.2 s | 860.9 s | 709.1 s | `2b9c235b55f5625bcd1c35dd1f0f157bc30f50ed4fcfb9c51a7879487bf8fa12` |
+| env (R106 variables) | 689.5 s | 4.4 s | 693.9 s | 627.9 s | `2b9c235b55f5625bcd1c35dd1f0f157bc30f50ed4fcfb9c51a7879487bf8fa12` |
+| change | -3.7% | -97% | **-19.4%** | -11.4% | equal |
+
+Same as R106 in direction: sys time goes to near zero and CPU drops about a fifth. Wall moved less than in R106 (-11% against -24%) under heavier, uneven load, and only one pair ran, so read the wall number as a rough figure. Peak RSS was not measured in this run (R106: +10%).
+## R139 bump cost (2026-11-06, `r139-bump-cost`)
+
+R137 left the work every analysis bump does on the whole library (4 bumps per second while analysis runs): `sameMembers` over every row, a rebuild of the sort order and rank of both directions, the array of filtered rows. Branch from `ov-1028` (has R137). Linux `dev` box at load 15-40, real r95 payloads, base = `ov-1028` in a separate tree with the same spec and test files, runs interleaved.
+
+### Change (no markup, no CSS, same rows, same order)
+
+- `app/src/modules/TrackTable.svelte`: "same rows as the last sort?" asks `sameLibraryMembers` first (new, `library.svelte.ts`): two lists of library rows (`library.tracks`, a `filterTracks` result, a playlist's rows) are the same when both sit in one unbroken bump chain and have the same positions, an integer compare or a reference compare. Only when that cannot be told is the `Set` built, lazily, as before.
+- `app/src/lib/sortOrder.ts`: `moveChangedValues` moves up to 16 changed rows in `order` itself (`indexOf`, a binary search and one block move per row; no new arrays). More rows still go through `withChangedValues`. `SortedOrder` is a class whose `rank` is built when first read and dropped when `order` moves, so a bump no longer rebuilds 50k ranks nobody reads; `sortedSubset` without a built rank takes a mask pass over `order` instead of ranking and sorting the subset.
+- `app/src/stores/table-columns.svelte.ts`: each direction of a column order keeps the list it is valid for and is brought up to date when that direction is sorted (was: both directions on every bump, `columnSortOf`).
+- `app/src/stores/library.svelte.ts` `withChangedMatches`: when the bumped rows match the query exactly as before, the result indices stay the same array and the row array is a `slice` of the earlier one (was: a filter and a merge over every match, then a map over all of them).
+- Tests: `sortOrder.test.ts` (in-place moves over many bumps, rank dropped and rebuilt, subset with and without rank), `search-sort-fuzz.test.ts` and `playlist-sort-fuzz.test.ts` (every `sameLibraryMembers` claim must be the same rows in the same order, over 900 and the playlist steps), `bump-cost-real.test.ts` (env-gated, the measurement below), `perf-sort-analysis.spec.ts` (`FF_PERF_QUIET=<seconds>`: script and task time of a window of analysis with no input, after the clicks).
+
+### Before / after, store level (`bump-cost-real.test.ts`, Node, real payload, a bump of 2 rows then the view the table computes, 400 bumps, median of 3 interleaved runs, ms per bump; "bump" = write the fields and `bumpLibraryTracks`)
+
+| Case | 10k base to new | 50k base to new |
+|---|---|---|
+| sorted by artist, whole view | 1.21 to 0.46 | 8.83 to 2.38 |
+| sorted by bpm, whole view | 1.15 to 0.29 | 6.17 to 2.10 |
+| sorted by artist, query "house", whole view | 1.09 to 0.73 | 4.68 to 2.46 |
+| of which same-rows check (artist) | 0.61 to 0.03 | 5.58 to 0.03 |
+| of which sort (artist) | 0.75 to 0.33 | 2.83 to 1.44 |
+| of which filter (query "house") | 0.42 to 0.11 | 1.26 to 0.12 |
+| GC per bump (artist / bpm / query) | 0.15 to 0.10 / 0.04 to 0.06 / 0.45 to 0.26 | 0.37 to 0.25 / 0.34 to 0.36 / 0.55 to 0.30 |
+
+The `Set` check was the largest part at 50k (Set lookups of 50k row proxies, 5.6 ms in Node dev mode; the R137 estimate in Chromium was 1.2 ms). What is left per bump at 50k is the array of rows the sort hands to the table (about 1.4 ms, a new 50k array each bump, needed because the table compares the old and the new one) and `trackList.slice()` in the bump itself (about 0.9 ms); both are copies of 50k pointers and stay linear.
+
+### Before / after, page level (`perf-sort-analysis.spec.ts`, Chromium, 6 events per second, 20 s before the first click, median over runs; base n=5, new n=6 at 50k)
+
+- Script time of a 12 s window of analysis with the table sorted and no input: 34.9 to 30.5 ms per second at 50k (noisy, one set of three pairs 34 to 22); 10k (2 pairs) 24.6 to 23.6. Per bump that is about 8 ms of script at 50k that is now mostly the table (effects, rows), not the library size. Task time (includes GC and layout) did not move beyond the noise.
+- Sort click, script ms, all sort steps pooled: 43 to 28 at 50k with analysis (idle, 2 pairs: 29 to 18, the lazy rank also saves the rank build of a first sort); 10k 29 to 28. Totals (click to second frame): 89 to 82 at 50k, inside the 70-250 ms swing of this box.
+- Typing in the sorted table, script ms: 33 to 38 (type 'a' 26 to 31, 'm' 64 to 64, clear 31 to 25), no change beyond noise.
+- WebKit 50k analysis, 2 pairs: sort click totals 267 to 279 ms, typing 355 to 371 (no script metric in WebKit; the compositor floor of R29 dominates), no difference.
+
+### Identity
+
+- Store level (`sort-analysis-real.test.ts`, the R137 test, same file in both trees): **601 of 601 hashes equal base and new at 10k and at 50k** (242 and 240 distinct views).
+- `search-sort-fuzz.test.ts` (with the new soundness check), `playlist-sort-fuzz.test.ts` (same), `bulk-bump-fuzz.test.ts` and `sortOrder.test.ts` pass.
+- Page level, events stopped before the clicks (`FF_PERF_STOP=1`, `FF_PERF_AGE=15`): the rows on screen after each of the 12 steps are equal between base and new at 50k and 10k (12 of 12 each).
+
+### Validation
+
+- `npx vitest run`: 109 files passed, 9 skipped; 967 tests passed, 8 skipped.
+- `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5551`): 114 passed, 33 skipped (perf specs without a payload).
+- WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5552`): 114 passed, 33 skipped.
+
+### Not done
+
+- The array of rows handed to the table is still built per bump (linear, about 1.4 ms at 50k); patching the previous array would save about half of it and needs the moves reported out of `moveChangedValues`.
+- The bump itself (`trackList.slice()`, version log) and what the table does per bump (effects, row updates) are not touched.
+- A stale direction (not sorted for more than 16 rows of bumps) still goes through `withChangedValues`, linear, as in R137.
+
+Scratch (`~/.cache/r139*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

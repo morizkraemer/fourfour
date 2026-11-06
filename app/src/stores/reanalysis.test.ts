@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hooks = vi.hoisted(() => ({
   events: {} as Record<string, ((event: { payload: unknown }) => void)[]>,
@@ -89,7 +89,11 @@ function row(id: number) {
   return library.tracks.find((t) => t.id === id)!;
 }
 
+const ANALYSIS_BATCH_SETTLE_MS = 600;
+let eventsEmitted = false;
+
 function emit(name: string, body: unknown) {
+  eventsEmitted = true;
   for (const callback of hooks.events[name] ?? []) callback({ payload: body });
 }
 
@@ -100,6 +104,12 @@ beforeEach(async () => {
   hooks.analysis[2] = payload(128, '8A', ALL_STAGES);
   await initLibrary();
   library.analyzingTrackIds = [];
+});
+
+afterEach(async () => {
+  if (!eventsEmitted) return;
+  eventsEmitted = false;
+  await new Promise((resolve) => setTimeout(resolve, ANALYSIS_BATCH_SETTLE_MS));
 });
 
 describe('re-analysis of analysed tracks', () => {

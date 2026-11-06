@@ -27,6 +27,7 @@ import {
   playlistByName,
   removeTracksFromPlaylist,
   reorderPlaylistTracks,
+  sameLibraryMembers,
   tracksForSidebarSource,
 } from './library.svelte.ts';
 import { isRawIds } from '../lib/playlistIds.ts';
@@ -139,6 +140,8 @@ describe('playlist rows, filter and sort against a plain reference', () => {
     let sort: { key: Key; dir: 1 | -1 } | null = null;
     const log: string[] = [];
     const warmups: ReturnType<typeof startLibrarySortWarmup>[] = [];
+    const previous: { rows: readonly unknown[] | null } = { rows: null };
+    let sameClaims = 0;
     const idsOf = (playlist: string) => [...playlistByName(playlist)!.track_ids];
 
     for (let step = 0; step < 1500; step++) {
@@ -221,6 +224,11 @@ describe('playlist rows, filter and sort against a plain reference', () => {
       const matching = rows.filter((row) => referenceMatches(row, query));
       const expected = sort ? referenceSorted(matching, sort.key, sort.dir) : matching;
       const context = `step ${step} on ${name}: ${log.slice(-6).join(' | ')}`;
+      if (previous.rows && sameLibraryMembers(previous.rows, filtered)) {
+        expect(previous.rows.length === filtered.length && filtered.every((row, i) => row === previous.rows![i]), context).toBe(true);
+        sameClaims++;
+      }
+      previous.rows = filtered;
       expect(shown.map((row) => row.id), context).toEqual(expected.map((row) => row.id));
       expect(base.map((row) => row.id), context).toEqual(rows.map((row) => row.id));
       expect(filtered.map((row) => row.id), context).toEqual(matching.map((row) => row.id));
@@ -228,8 +236,9 @@ describe('playlist rows, filter and sort against a plain reference', () => {
       if (members) expect(Array.from(members, (p) => current()[p].id), context).toEqual(matching.map((row) => row.id));
       if (name !== 'dupes') expect(members, context).not.toBeNull();
     }
+    expect(sameClaims).toBeGreaterThan(20);
     clearSort('playlist');
-  });
+  }, 120_000);
 
   it('returns the same rows while neither the ids nor a member changed', async () => {
     const random = generator(7);

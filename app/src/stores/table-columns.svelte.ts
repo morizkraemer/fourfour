@@ -16,7 +16,7 @@ import {
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
 import { library, libraryMembersOf, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
-import { orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
+import { moveChangedValues, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
@@ -492,7 +492,12 @@ interface ColumnSort {
   tracks: object;
   values: SortValue[];
   classes: ValueClasses | null | undefined;
-  orders: Map<1 | -1, SortedOrder>;
+  orders: Map<1 | -1, HeldOrder>;
+}
+
+interface HeldOrder {
+  sorted: SortedOrder;
+  tracks: object;
 }
 
 const columnSorts = new Map<string, ColumnSort>();
@@ -541,11 +546,6 @@ function columnSortOf(rows: readonly Record<string, unknown>[], key: string): Co
     if (changed) {
       if (changed.length > 0) {
         readLibraryValues(rows, libraryPlainRows(), key, changed, entry.values);
-        for (const [direction, order] of entry.orders) {
-          const moved = withChangedValues(order, entry.values, changed, direction);
-          if (moved) entry.orders.set(direction, moved);
-          else entry.orders.delete(direction);
-        }
         entry.classes = undefined;
       }
       entry.tracks = rows;
@@ -564,13 +564,22 @@ function columnSortOf(rows: readonly Record<string, unknown>[], key: string): Co
 }
 
 function orderOf(entry: ColumnSort, direction: 1 | -1): SortedOrder {
-  let order = entry.orders.get(direction);
-  if (!order) {
-    if (entry.classes === undefined) entry.classes = valueClasses(entry.values);
-    order = entry.classes ? orderFromClasses(entry.classes, direction) : sortedOrder(entry.values, direction);
-    entry.orders.set(direction, order);
+  const held = entry.orders.get(direction);
+  if (held) {
+    if (held.tracks === entry.tracks) return held.sorted;
+    const changed = libraryPositionsChangedSince(held.tracks);
+    const moved = changed && (changed.length === 0 || moveChangedValues(held.sorted, entry.values, changed, direction) ? held.sorted : withChangedValues(held.sorted, entry.values, changed, direction));
+    if (moved) {
+      held.sorted = moved;
+      held.tracks = entry.tracks;
+      return moved;
+    }
+    entry.orders.delete(direction);
   }
-  return order;
+  if (entry.classes === undefined) entry.classes = valueClasses(entry.values);
+  const sorted = entry.classes ? orderFromClasses(entry.classes, direction) : sortedOrder(entry.values, direction);
+  entry.orders.set(direction, { sorted, tracks: entry.tracks });
+  return sorted;
 }
 
 function sortLibraryRows<T extends Record<string, unknown>>(tracks: T[], positions: readonly number[] | 'all', key: string, dir: 1 | -1): T[] {
@@ -638,9 +647,9 @@ function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plai
   const classes = yield* valueClassesSteps(values, chunks.sort);
   const entry: ColumnSort = { tracks: rows, values, classes, orders: new Map() };
   if (classes) {
-    entry.orders.set(1, orderFromClasses(classes, 1));
+    entry.orders.set(1, { sorted: orderFromClasses(classes, 1), tracks: rows });
     yield;
-    entry.orders.set(-1, orderFromClasses(classes, -1));
+    entry.orders.set(-1, { sorted: orderFromClasses(classes, -1), tracks: rows });
   }
   return entry;
 }

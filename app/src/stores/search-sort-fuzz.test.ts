@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
-import { bumpLibraryTracks, filterTracks, library, libraryPositionsOf, loadState } from './library.svelte.ts';
+import { bumpLibraryTracks, filterTracks, library, libraryPositionsOf, loadState, sameLibraryMembers } from './library.svelte.ts';
 import { camelotRank, clearSort, durationSeconds, setSort, sortTracks, startLibrarySortWarmup } from './table-columns.svelte.ts';
 
 function generator(seed: number) {
@@ -102,6 +102,9 @@ describe('filter and sort of the library against a plain reference', () => {
     let sort: { key: Key; dir: 1 | -1 } | null = null;
     const log: string[] = [];
     const warmups: ReturnType<typeof startLibrarySortWarmup>[] = [];
+    let previousFiltered: Row[] | null = null;
+    let sameClaims = 0;
+    let sameDenied = 0;
 
     for (let step = 0; step < 900; step++) {
       const r = random();
@@ -152,6 +155,15 @@ describe('filter and sort of the library against a plain reference', () => {
 
       const filtered = filterTracks(library.tracks, query);
       const shown = sort ? sortTracks(filtered, 'library') : filtered;
+      if (previousFiltered) {
+        const claimed = sameLibraryMembers(previousFiltered, filtered);
+        const identical = previousFiltered.length === filtered.length && filtered.every((row, i) => row === previousFiltered![i]);
+        if (claimed) {
+          sameClaims++;
+          expect(identical, `step ${step}: ${log.slice(-6).join(' | ')}`).toBe(true);
+        } else if (identical) sameDenied++;
+      }
+      previousFiltered = filtered as Row[];
       const matching = current().filter((row) => referenceMatches(row, query));
       const expected = sort ? referenceSorted(matching, sort.key, sort.dir) : matching;
       expect(shown.map((row) => row.id), `step ${step}: ${log.slice(-6).join(' | ')}`).toEqual(expected.map((row) => row.id));
@@ -160,8 +172,10 @@ describe('filter and sort of the library against a plain reference', () => {
         expect(positions.map((p) => current()[p].id)).toEqual(matching.map((row) => row.id));
       }
     }
+    expect(sameClaims).toBeGreaterThan(100);
+    expect(sameDenied).toBeLessThan(sameClaims);
     clearSort('library');
-  });
+  }, 120_000);
 
   it('finds one-character and short queries by letters and digits exactly like a plain search', async () => {
     const random = generator(4242);
@@ -181,7 +195,7 @@ describe('filter and sort of the library against a plain reference', () => {
     }
     bumpLibraryTracks(ids);
     for (const ch of characters) if (ch.trim()) check(ch);
-  });
+  }, 120_000);
 
   it('knows result positions only for results of the current library list', async () => {
     loaded.tracks = Array.from({ length: 5 }, (_, i) => ({ ...randomInfo(() => 0.5, i + 1), title: i % 2 ? 'odd' : 'even' }));

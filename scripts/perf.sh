@@ -42,6 +42,13 @@ mkdir -p "$DIR" "$RAW" "$(dirname "$OUT")"
 skip() { [[ "$SKIP" == *",$1,"* ]]; }
 say() { echo "[perf] $*" >&2; }
 bench() { "$TARGET/release/$1" "${@:2}"; }
+bench_analysis() {
+  if [ "$(uname -s)" = Linux ]; then
+    env MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1073741824 "$TARGET/release/bench_analysis" "$@"
+  else
+    bench bench_analysis "$@"
+  fi
+}
 perf_lines() { grep '^PERF ' | sed 's/^PERF //'; }
 
 uptime | sed -E 's/.*load averages?: /load_before=/' > "$RAW/load.txt"
@@ -139,8 +146,8 @@ if ! skip analysis; then
   say "analysis: per-stage profile of $PROFILE_TRACKS tracks, then throughput of $ANALYSIS (this takes minutes)"
   THREAD_ARGS=()
   [ -n "$THREADS" ] && THREAD_ARGS=(--threads "$THREADS")
-  bench bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" --profile "$PROFILE_TRACKS" ${THREAD_ARGS[@]+"${THREAD_ARGS[@]}"} 2>"$RAW/analysis-profile.log" | perf_lines > "$RAW/analysis.jsonl"
-  bench bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" ${THREAD_ARGS[@]+"${THREAD_ARGS[@]}"} 2>"$RAW/analysis-run.log" | perf_lines >> "$RAW/analysis.jsonl"
+  bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" --profile "$PROFILE_TRACKS" ${THREAD_ARGS[@]+"${THREAD_ARGS[@]}"} 2>"$RAW/analysis-profile.log" | perf_lines > "$RAW/analysis.jsonl"
+  bench_analysis --list "$ANALYSIS_LIST" --limit "$ANALYSIS" ${THREAD_ARGS[@]+"${THREAD_ARGS[@]}"} 2>"$RAW/analysis-run.log" | perf_lines >> "$RAW/analysis.jsonl"
 fi
 
 if ! skip playback; then
