@@ -68,7 +68,9 @@ type PlannedLayout = Awaited<ReturnType<typeof addPlannedPlaylists>>;
 async function createPlannedPlaylists(paths: string[], parentId: number): Promise<PlannedLayout> {
   const layout = await addPlannedPlaylists(dropPlan(await surveyImport(paths), LOOSE_FILES_PLAYLIST_NAME), parentId);
   showPendingRows(Object.fromEntries(layout.leaves.map((leaf) => [leaf.id, pendingNames(leaf.files)])));
-  if (layout.leaves.length > 0) await showPlaylist(layout.leaves[0].name);
+  const lastTop = layout.leaves.at(-1)?.top;
+  const opened = layout.leaves.find((leaf) => leaf.top === lastTop);
+  if (opened) await showPlaylist(opened.name);
   return layout;
 }
 
@@ -104,7 +106,7 @@ async function importIntoNewPlaylists(paths: string[], parentId: number) {
     completeImportActivity(outcome, await createPlaylistsFromDrop(paths, outcome, parentId));
   } else {
     const filled = await fillPlannedPlaylists(layout, duplicateMatches(outcome));
-    if (filled.length > 0 && !filled.some((fill) => fill.name === ui.activeSidebarRow)) await showPlaylist(filled[0].name);
+    if (filled.length > 0 && !filled.some((fill) => fill.name === ui.activeSidebarRow)) await showPlaylist(filled[filled.length - 1].name);
     const tracks = new Set(filled.flatMap((fill) => fill.trackIds)).size;
     const names = filled.map((fill) => fill.name);
     completeImportActivity(outcome, names.length > 0 ? playlistImportMessage(outcome, { kind: 'created', names, tracks }) : undefined);

@@ -1957,22 +1957,25 @@ export function defaultFolderName(): string {
   return uniqueName(library.playlists.map((p) => p.name), 'New folder');
 }
 
-/** Creates planned playlists and folders (names made unique) in one save; returns the playlists with their files and the folder ids. */
+/** Creates planned playlists and folders in one save (playlist names unique among playlists, folder names among folders); returns the playlists with their files (and which plan they belong to) and the folder ids. */
 export async function addPlannedPlaylists(plans: PlannedPlaylist[], parentId = 0) {
-  const taken = library.playlists.map((p) => p.name);
-  const leaves: { id: number; name: string; files: string[] }[] = [];
+  const taken = {
+    folder: library.playlists.filter((p) => p.is_folder).map((p) => p.name),
+    playlist: library.playlists.filter((p) => !p.is_folder).map((p) => p.name),
+  };
+  const leaves: { id: number; name: string; files: string[]; top: number }[] = [];
   const folderIds: number[] = [];
-  const add = (plan: PlannedPlaylist, parent: number) => {
+  const add = (plan: PlannedPlaylist, parent: number, top: number) => {
     const id = nextPlaylistId();
-    const name = uniqueName(taken, plan.name);
-    taken.push(name);
+    const name = uniqueName(taken[plan.kind], plan.name);
+    taken[plan.kind].push(name);
     library.playlists.push({ id, name, track_ids: rawIds([]), parent_id: parent, is_folder: plan.kind === 'folder' });
     if (plan.kind === 'folder') {
       folderIds.push(id);
-      plan.children.forEach((child) => add(child, id));
-    } else leaves.push({ id, name, files: plan.files });
+      plan.children.forEach((child) => add(child, id, top));
+    } else leaves.push({ id, name, files: plan.files, top });
   };
-  plans.forEach((plan) => add(plan, parentId));
+  plans.forEach((plan, top) => add(plan, parentId, top));
   if (parentId !== 0) expandFolder(parentId);
   await saveState();
   return { leaves, folderIds };
