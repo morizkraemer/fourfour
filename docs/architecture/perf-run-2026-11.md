@@ -2703,6 +2703,30 @@ Night 3 itself: item 1 started two minutes after the night began, right after fo
 A second item 2 run on the same head right after (runner 41e5eb2): cold first row / interactive 694 / 746 ms, first expand 27 ms, scroll during analysis p95 17 ms, warm first row 579 and 586 ms (median 583), warm interactive 629 and 646 ms (median 638, passes against 645), no frame over 50 ms in any of the 8 startup launches (longest 33-45 ms). Every item 2 gate passed in that run.
 
 The warm interactive miss is one frame. Run 3 had a single 70 ms frame about 75 ms after the first row (expand runs 1 and 2: 73 and 55 ms at the same spot), and one frame over 50 ms restarts the probe's 10-frame count, so that run's interactive moves by about 90 ms; with two warm runs the median follows. The same frame shows up for the R89 code on today's Mac: longest frame before interactive 32-44 ms for 23534cc and 33-47 ms for ov-1028 head over the quiet A/B launches (R89 itself saw 17-31 ms in its warm runs), so the frame grew with the machine, not the code, and it sits just around the 50 ms threshold. Tried and dropped: delaying the first lazy-view preload to 500 ms after the first screen when there is no `requestIdleCallback` (WebKit). In 6 interleaved pairs the 55 ms frame still came at the same spot (page 246 ms) in one launch, so the preload is not that frame; no app change was kept. What the frame is was not pinned down (WebKit has no long-task API; candidates are the row previews and covers that arrive right after the first rows).
+## R134 sort warm-up (2026-11-06, `r134-sort-warmup`)
+
+R129 lever 2 (warm the sort columns from the table's numeric columns) was measured and **not applied: the premise does not hold, and the two changes that were tried gave no gain. No product code changed.** Branch `r134-sort-warmup` from `ov-1028` (`43ee68f`). Linux `dev` box at load 13-33 (other workers), headless Chromium, `ff-fixture` 50k r95 payload. Added: `app/smoke/perf-sort-warmup.spec.ts` (`FF_PERF_MODE=warm|key|sort`, `FF_PERF_STATE`, `FF_PERF_KEY_AT`, `FF_PERF_SORT_AT`; a `requestAnimationFrame` loop keeps frames running in key and sort mode) and `app/src/stores/sort-warmup-real.test.ts` (env-gated: hash of every sorted order of 11 columns, both directions, with "", "house" and "a", cold and after the warm-up, and CPU time of the warm-up).
+
+### Where the 700 ms goes
+
+- Script in the first 3 s after the first rows at 50k, base: median 739 ms (674-1,084, 8 runs). With the sort warm-up switched off it was 415 ms (one run), so the sort warm-up is about 300 ms of it; the rest is the search text build and the mount.
+- Per column in the page (one run, load about 20, ms read / ms value classes): title 27 / 143, artist 20 / 29, label 7 / 3, bpm 13 / 7, key 11 / 4, time 9 / 5. **The three numeric columns together are about 50 ms of about 280. Even a free read of tempo, duration and key would not take 700 ms to 200 ms.** Half of the cost is the 36k distinct lowercase titles (a Map pass and one string sort).
+- `durationSeconds` runs once per distinct text (the read memoizes by raw text), not per row; the "169 ms self" of R129 was profiler inflation.
+- Reading from `raw.tempo` / `raw.duration_secs` would not give the same orders: `track-edits.svelte.ts` and `library.svelte.ts` (relink, analysis results) write the `bpm` text and `bpmExact` and not `raw.tempo`, so the text is the source of truth.
+
+### Tried, not kept
+
+- Reading all warmed columns in one pass per chunk of rows (cache theory): CPU of six columns 380 ms against 355-395 (Node, min of 7), no change.
+- Sorting the distinct strings with native numeric sorts of two-code-unit prefix keys (radix by two characters, no comparator): same classes on the 50k titles, 57 ms against 67 for title and 12.8 against 14.0 for artist (Node). Too little for the code.
+- Starting the sort warm-up only after the search text is built (`whenSearchIndexBuilt`): warm-up script in the first 3 s 739 to 574 ms, but over 10 s 761 to 884 ms, first title sort 125 to 171 ms total (medians of 8, Chromium, 50k), first key unchanged (169 to 159 ms). The work only moves later.
+
+### The first key
+
+R129's 234 ms first key is a harness effect. In headless Chromium without frames `requestIdleCallback` fires only at its timeout, the search text build lags, and a key at 0.8-1.5 s completes it synchronously (script 216-304 ms; the same page also left the title sort cold at 7 s: 189-470 ms). With frames running (as in a window), base at 1.5 s after the first rows: script median 54 ms (36-78), total 169 ms (114-206), 8 runs. WKWebView has no `requestIdleCallback` (timer fallback).
+
+### Identity and validation
+
+No product file changed, so every order is the base order by construction. `sort-warmup-real.test.ts` on the 50k payload (base tree): cold and warmed hashes of all 66 orders equal. `npx vitest run`: 963 passed, 6 skipped. `npm run check`: 0 errors. Chromium smoke (port 5511) 114 passed, 32 skipped; WebKit smoke (port 5512) 114 passed, 32 skipped. Not run: 10k and WebKit before/after, the edge payload (nothing to compare).
 
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
