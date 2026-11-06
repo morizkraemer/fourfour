@@ -17,6 +17,10 @@ mod import_plan;
 #[path = "../app_log.rs"]
 mod app_log;
 
+#[allow(dead_code)]
+#[path = "../early_state.rs"]
+mod early_state;
+
 #[path = "../tag_scan.rs"]
 mod tag_scan;
 
@@ -293,6 +297,42 @@ fn sha_hex(bytes: &[u8]) -> String {
     child.stdin.take().unwrap().write_all(bytes).unwrap();
     let out = child.wait_with_output().unwrap();
     String::from_utf8(out.stdout).unwrap().split_whitespace().next().unwrap().to_string()
+}
+
+fn early(dir: &Path, request_at_ms: &[u64], dump: Option<&Path>) {
+    for &at in request_at_ms {
+        let library = std::sync::Arc::new(std::sync::Mutex::new(LocalLibrary::open(&dir.join("library.db")).unwrap()));
+        let early = std::sync::Arc::new(early_state::EarlyState::default());
+        let started = Instant::now();
+        let worker = {
+            let (library, early) = (library.clone(), early.clone());
+            std::thread::spawn(move || {
+                let lib = library.lock().unwrap();
+                early.prepare(&lib).unwrap();
+                ms(started)
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(at));
+        let requested = Instant::now();
+        let lib = library.lock().unwrap();
+        let (bytes, was_early) = early_state::encoded_state(&lib, &early).unwrap();
+        let answered_ms = ms(requested);
+        let t = Instant::now();
+        let on_demand = track_infos::loaded_state(&lib).unwrap().to_bytes().unwrap();
+        let on_demand_ms = ms(t);
+        drop(lib);
+        let ready_ms = worker.join().unwrap();
+        println!(
+            "EARLY request_at={at}ms early_hit={was_early} prepare_done_at={ready_ms:.1}ms request_to_answer={answered_ms:.1}ms on_demand_build={on_demand_ms:.1}ms bytes={} sha256_early={} sha256_on_demand={} equal={}",
+            bytes.len(),
+            sha_hex(&bytes),
+            sha_hex(&on_demand),
+            bytes == on_demand,
+        );
+        if let Some(out) = dump {
+            std::fs::write(out, &bytes).unwrap();
+        }
+    }
 }
 
 fn trackload(dir: &Path, work: &Path, samples: usize) {
@@ -1203,6 +1243,11 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
         Some("run") => run(Path::new(&args[2])),
+        Some("early") => early(
+            Path::new(&args[2]),
+            &args.get(3).map_or(vec![0, 100, 400], |list| list.split(',').map(|n| n.parse().unwrap()).collect::<Vec<u64>>()),
+            args.get(4).map(Path::new),
+        ),
         Some("rep") => rep(Path::new(&args[2]), args.get(3).map_or(15, |n| n.parse().unwrap())),
         Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
         Some("dump-bytes") => dump_bytes(Path::new(&args[2]), Path::new(&args[3])),
@@ -1225,7 +1270,7 @@ fn main() {
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | rescan <folder> <library.db> | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | early <dir> [request ms list] [out.bin] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | rescan <folder> <library.db> | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }

@@ -17,6 +17,7 @@ mod file_health;
 mod multi_sync;
 mod queries;
 pub mod rekordbox;
+mod revision;
 mod row_preview;
 mod schema;
 pub mod sticks;
@@ -53,6 +54,7 @@ pub use multi_sync::{
     StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
     statvfs_available_bytes, volume_capacity,
 };
+pub use revision::LibraryRevision;
 pub use sticks::StickContents;
 pub use user_edits::{LABELS_CACHE_FILE, MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsChange, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
@@ -171,6 +173,7 @@ pub struct ImportReport {
 /// or import from an existing USB.
 pub struct LocalLibrary {
     conn: Connection,
+    instance: u64,
     /// Path to the database file. `None` for in-memory databases (tests).
     db_path: Option<PathBuf>,
     /// Folded keys of every track for duplicate lookups, built by the first
@@ -189,6 +192,7 @@ impl LocalLibrary {
         schema::initialize(&conn, Some(db_path))?;
         Ok(Self {
             conn,
+            instance: revision::next_instance(),
             db_path: Some(db_path.to_path_buf()),
             duplicates: Mutex::default(),
         })
@@ -200,6 +204,7 @@ impl LocalLibrary {
         schema::initialize(&conn, None)?;
         Ok(Self {
             conn,
+            instance: revision::next_instance(),
             db_path: None,
             duplicates: Mutex::default(),
         })
