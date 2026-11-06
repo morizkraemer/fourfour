@@ -631,3 +631,5 @@
 2026-11-07 04:10 orchestrator r127 handed back 3a4d21f: non-model stages are now symphonia/rubato internals (external) and Meter::push 44% (writer crate, brother lane); own downmix fix -3 to -9% decode instructions, wall within noise; outputs byte-identical. Not merged (no measurable gain); branch kept. Waiting 51 added (Meter::push for the brother)
 2026-11-07 04:11 orchestrator decided: own prio r129 fresh speed budget audit to rank the next levers (sonnet medium)
 2026-11-07 03:56 orchestrator r126 landed 8dbf8f0 on ov-1028 (both smokes 0 failed, 26 suites, vitest 944, CHECKS-OK)
+2026-11-07 05:05 orchestrator r129 handed back df0fbce (budget doc; levers: 1 bulk bump snapshot 380 ms/2k rows, 2 sort warm-up from numeric columns, 3 load_state at process setup, 4 sort/search under analysis, 5 allocator env for Linux batch scripts); doc merged into ov-1028. Box swap full (other projects), numbers noisy
+2026-11-07 05:06 orchestrator decided: own prio r130 bulk bump without $state.snapshot (R129 lever 1; sonnet high)
