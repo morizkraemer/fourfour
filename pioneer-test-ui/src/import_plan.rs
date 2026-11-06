@@ -76,6 +76,33 @@ pub fn survey_files(paths: &[String]) -> FileSurvey {
     survey
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DroppedPath {
+    pub path: String,
+    pub folder: bool,
+    pub files: Vec<String>,
+}
+
+/// The audio files under each dropped path, from the folder walk alone (no tags read), so
+/// playlists can be laid out before the import finishes.
+pub fn dropped_audio(paths: &[String]) -> Vec<DroppedPath> {
+    let survey = survey_files(paths);
+    let mut folders = survey.groups.iter().skip(1);
+    let loose: HashSet<&Path> = survey.groups[0].files.iter().map(PathBuf::as_path).collect();
+    let mut dropped = Vec::new();
+    for p in paths {
+        let path = Path::new(p);
+        if path.is_dir() {
+            let Some(group) = folders.next() else { break };
+            let files = group.files.iter().filter_map(|f| f.to_str().map(str::to_string)).collect();
+            dropped.push(DroppedPath { path: p.clone(), folder: true, files });
+        } else if loose.contains(path) {
+            dropped.push(DroppedPath { path: p.clone(), folder: false, files: vec![p.clone()] });
+        }
+    }
+    dropped
+}
+
 /// Listing folders waits on the disk; the folders below a dropped folder are listed in parallel.
 const WALK_THREADS: usize = 8;
 
@@ -806,6 +833,25 @@ mod tests {
             plan.skipped,
             SkippedFiles { unsupported: 4, unsupported_exts: vec![".m4p".into(), ".txt".into()], unreadable: 1 }
         );
+    }
+
+    #[test]
+    fn dropped_audio_lists_each_folder_and_loose_audio_file() {
+        let dir = std::env::temp_dir().join(format!("ff-dropped-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Set/Openers")).unwrap();
+        for name in ["Set/a.mp3", "Set/Openers/b.flac", "Set/notes.txt", "loose.wav", "readme.txt"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let s = |p: &str| dir.join(p).to_string_lossy().into_owned();
+        let dropped = dropped_audio(&[s("Set"), s("loose.wav"), s("readme.txt")]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(dropped.len(), 2);
+        assert_eq!((dropped[0].path.as_str(), dropped[0].folder), (s("Set").as_str(), true));
+        let mut files = dropped[0].files.clone();
+        files.sort();
+        assert_eq!(files, vec![s("Set/Openers/b.flac"), s("Set/a.mp3")]);
+        assert_eq!(dropped[1], DroppedPath { path: s("loose.wav"), folder: false, files: vec![s("loose.wav")] });
     }
 
     #[test]
