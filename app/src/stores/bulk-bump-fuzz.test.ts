@@ -129,8 +129,10 @@ function haystackOf(row: Record<string, any>): string {
   ).toLowerCase();
 }
 
+const FUZZ_SEEDS = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env.FF_FUZZ_FULL ? [1, 2, 3, 4] : [1];
+
 describe('bulk bump copies row fields to the plain tracks like the snapshotting reference', () => {
-  for (const seed of [1, 2, 3, 4]) {
+  for (const seed of FUZZ_SEEDS) {
     it(`seed ${seed}: plain rows and search results stay equal over random writes and bumps`, async () => {
       held.clear();
       const random = generator(seed * 7919);

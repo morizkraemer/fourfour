@@ -2590,18 +2590,20 @@ Not on the list, and why: the beat model (90% of analysis CPU: chunk 500 changes
 
 Scratch (`~/.cache/r129-work`, `~/.cache/r129-target`) is deleted after this item.
 
-## R130 (paused, 2026-11-06, `r130-bulk-bump`)
+## R130 bulk bump (2026-11-06, `r130b-bulk-bump`)
 
-Paused by the coordinator before validation. Branch `r130-bulk-bump` from `ov-1028`. Linux `dev` box, load 14-44, Chromium only, real r95 payloads, base = `ov-1028` in a separate tree, runs one after the other.
+Bulk row bumps (analyze selection, analysis results, rating/colour, genre/raw, relink) no longer snapshot every row. Branch from `ov-1028`. Linux `dev` box at load 40-55, real r95 payloads, base = `ov-1028` in a separate tree, runs one after the other.
 
-### Done
+### Change
 
-- `copyRowFieldsToPlainTracks` (`app/src/stores/library.svelte.ts`) no longer snapshots with `$state.snapshot` / `structuredClone`. Each row keeps the keys written through its proxy since the last bump and the plain container fields (like `raw`) it has handed out; a bump copies only those, with a plain recursive copy. Rows never written or read for a container are skipped. `refreshHaystacks` runs only for rows whose search text fields changed.
-- Measured (R129 profile blamed `structuredClone` for 80%; unprofiled it was about a quarter, the rest was proxy reads through `Object.keys` / `ownKeys`).
+- `copyRowFieldsToPlainTracks` (`app/src/stores/library.svelte.ts`) copies without `$state.snapshot` / `structuredClone`. Each row keeps the keys written through its proxy since the last bump and the plain container fields (like `raw`) it has handed out; a bump copies only those, with a plain recursive copy. Rows never written or read for a container are skipped. `refreshHaystacks` runs only for rows whose search text fields changed.
+- R129 profile blamed `structuredClone` for 80%; unprofiled it was about a quarter, the rest was proxy reads through `Object.keys` / `ownKeys`.
+
+### Before and after (Chromium, base to new)
 
 | Step (bump only unless noted) | 2k | 10k | 50k |
 |---|---|---|---|
-| Page, analyze selection, long task, base to new (ms) | 580 to 206 | 2,915 to 794 | 9,364 to 2,416 |
+| Page, analyze selection, long task (ms) | 580 to 206 | 2,915 to 794 | 9,364 to 2,416 |
 | Store, analyze selected, sync part (ms) | 912 to 323 | 4,463 to 1,447 | 23,049 to 7,681 |
 | Store, analysis results bump | 628 to 93 | 2,920 to 352 | 14,202 to 2,493 |
 | Store, rating + colour bump | 494 to 46 | 2,792 to 180 | 14,050 to 986 |
@@ -2610,18 +2612,20 @@ Paused by the coordinator before validation. Branch `r130-bulk-bump` from `ov-10
 
 The store numbers are Node in dev mode under load, so only the ratios carry. What is left in the page analyze step at 50k (about 2.4 s) is the field writes through the row proxies (about 1.3 s, Svelte `set`, row state creation), the plain copy (about 0.3 s) and the search text (about 0.25 s).
 
-### Identity so far
+### Identity proof
 
-- Store level, real payloads, `bulk-bump-real.test.ts`: after each of 5 bulk steps (analyze, results, rating+colour, genre+raw, relink) hashes of every plain row, of 24 sorted orders and of 43 search results are equal between base and new at 2k, 10k and 50k (all equal).
-- Page level (`perf-bulk-bump.spec.ts`): rows on screen (top, middle, bottom, playlist and All Tracks) equal base and new after analyze at 2k, 10k, 50k and after results at 2k, 10k.
-- `bulk-bump-fuzz.test.ts`: 4 seeds of random writes (scalars, typed arrays, nested `raw`, held nested references, added and deleted keys) and bumps against a reference that still snapshots; `toStrictEqual` on plain rows and search results after each step. Passes on base and new; two deliberate breaks fail it.
-- Known difference: key order of plain rows for keys added by writes follows first write, not first read (deep-equal, not observed anywhere).
+- Store level, real payloads (`bulk-bump-real.test.ts`, needs `FF_PERF_STATE`): after each of 5 bulk steps, hashes of every plain row, of 24 sorted orders and of 43 search results are equal between base and new at 2k, 10k and 50k.
+- Page level (`perf-bulk-bump.spec.ts`): rows on screen (top, middle, bottom, playlist and All Tracks) equal base and new after analyze at 2k, 10k, 50k and after results at 2k, 10k, in Chromium and in WebKit (WebKit run again in this round, all view hashes equal base and new).
+- `bulk-bump-fuzz.test.ts`: random writes (scalars, typed arrays, nested `raw`, held nested references, added and deleted keys) and bumps against a reference that still snapshots; `toStrictEqual` on plain rows and search results after each step. Passes on base and new; two deliberate breaks fail it. Default is 1 seed; `FF_FUZZ_FULL=1` runs 4 seeds.
+- Known difference: key order of plain rows for keys added by writes follows first write, not first read. Deep-equal, not observed anywhere.
 
-### Left
+### Validation
 
-- Run `cd app && npx vitest run`, `npm run check`, `npm run smoke` (`FF_SMOKE_PORT=5481`) and `FF_SMOKE_BROWSER=webkit npm run smoke` (`FF_SMOKE_PORT=5482`): none run yet.
-- WebKit numbers of `perf-bulk-bump` (`FF_PERF_STATE=<dump> FF_PERF_SIZES=2000,10000 npx playwright test perf-bulk-bump`; `FF_PERF_ARRIVE=0` for 50k, the arrival step crashes the page there).
-- Optional: the fuzz and real-payload tests are slow; trim if the suite time matters.
+- `npx vitest run`: 948 passed, 4 skipped (the real-payload test skips without `FF_PERF_STATE`); about 31 s wall; the bulk-bump tests went from 17 s to 6 s with the 1-seed default.
+- `npm run check`: 0 errors (the two bulk-bump test files needed `node:inspector` types in `src/node-fs.d.ts` and no `Buffer`).
+- Chromium smoke: 114 passed, 28 skipped.
+- WebKit smoke: 113 passed, 1 failed (`activity.spec.ts:137`, Import folder and files) at load 51; the same test passes alone. Not related to the bump.
+- WebKit `perf-bulk-bump`: WebKit has no long-task or CDP timings, so only the identity hashes are compared, and they are equal at 2k, 10k, 50k (`FF_PERF_ARRIVE=0` at 50k). The 50k results-arrival step in WebKit did not finish within 20 minutes on base either (stopped by hand), so that hang is not caused by this change.
 
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 

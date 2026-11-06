@@ -44,7 +44,7 @@ const hex = ([a, b]: Hash) => (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0
 
 function serialize(value: unknown): string {
   return JSON.stringify(value, (_key, v) =>
-    ArrayBuffer.isView(v) ? { type: v.constructor.name, bytes: Buffer.from(v.buffer, v.byteOffset, v.byteLength).toString('base64') } : v,
+    ArrayBuffer.isView(v) ? { type: v.constructor.name, bytes: Array.from(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)).join(',') } : v,
   );
 }
 
@@ -193,7 +193,7 @@ describe.skipIf(!STATE)('bulk bump on the real payload', () => {
             const t1 = performance.now();
             bumpLibraryTracks(ids);
             bumpMs = performance.now() - t1;
-            session?.post('Profiler.stop', (_err, result) => writeFileSync(PROFILE_OUT!, JSON.stringify(result.profile)));
+            session?.post('Profiler.stop', (_err: unknown, result: { profile: unknown }) => writeFileSync(PROFILE_OUT!, JSON.stringify(result.profile)));
             session?.disconnect();
           }
           const entry = timings.get(scenario.name) ?? timings.set(scenario.name, { write: [], bump: [] }).get(scenario.name)!;
