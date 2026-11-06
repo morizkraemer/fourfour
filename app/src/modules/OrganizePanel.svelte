@@ -18,7 +18,7 @@
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
   import { fitRibbonCovers } from '../lib/ribbonFit.ts';
-  import { organizePanelWidth } from '../lib/panelWidth.ts';
+  import { ORGANIZE_EMPTY_WIDTH, organizePanelWidth } from '../lib/panelWidth.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
   import StickBoard from './StickBoard.svelte';
@@ -104,7 +104,7 @@
   const allRailCoverIds = $derived(trackIdsWithCover(boardTracks));
 
   const showingBoard = $derived(ui.organize.target !== null);
-  const shownWidth = $derived(organizePanelWidth(ui.organize.width, showingBoard, ui.sidebarWidth));
+  const shownWidth = $derived(organizePanelWidth(ui.organize.width, showingBoard, ORGANIZE_EMPTY_WIDTH));
 
   const ribbonHover = $derived(dnd.kind === 'tracks' && dnd.dropRibbon);
   const boardDropKey = $derived.by(() => {

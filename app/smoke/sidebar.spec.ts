@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Page } from '@playwright/test';
+import { ORGANIZE_EMPTY_WIDTH } from '../src/lib/panelWidth.ts';
 import { expect, rows, test } from './app.ts';
 import type { SmokeWindow } from './tauri-mock.ts';
 
@@ -76,11 +77,12 @@ test('resize handle still changes the sidebar width', async ({ smoke: { page } }
   expect(after.width).toBeGreaterThan(before.width + 80);
 });
 
-test('empty sidebar is capped to the left sidebar width, a loaded list expands it', async ({ smoke: { page } }) => {
+test('empty sidebar is capped to two picker columns, a loaded list expands it', async ({ smoke: { page } }) => {
   await open(page, 420, false);
-  const sidebar = await box(page, '.ff-sidebar');
   const empty = await box(page, '.ff-organize--expanded');
-  expect(empty.width).toBeCloseTo(sidebar.width, 0);
+  expect(empty.width).toBeCloseTo(ORGANIZE_EMPTY_WIDTH, 0);
+  const cards = await page.locator('.ff-picker__cards > *').evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().x))).size);
+  expect(cards).toBe(2);
   await expect(page.locator('.ff-organize__resize-handle')).toHaveCount(0);
   await open(page, 420, true);
   expect((await box(page, '.ff-organize--expanded')).width).toBeCloseTo(420, 0);
