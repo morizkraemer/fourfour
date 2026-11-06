@@ -886,7 +886,7 @@ fn damaged_cover_images_come_back_unchanged_instead_of_failing() {
         ("png header only", png[..30].to_vec()),
         ("png with a mangled middle", flip_bytes(&png, 0.3, 0.6)),
     ] {
-        let thumb = std::panic::catch_unwind(|| crate::artwork_thumbnail(&bytes, 240)).unwrap_or_else(|_| panic!("{label}: the thumbnail code panicked"));
+        let thumb = std::panic::catch_unwind(|| crate::artwork_thumbs::artwork_thumbnail(&bytes, 240)).unwrap_or_else(|_| panic!("{label}: the thumbnail code panicked"));
         assert!(!thumb.is_empty() || bytes.is_empty(), "{label}");
     }
 }

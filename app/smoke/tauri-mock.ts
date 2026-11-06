@@ -77,6 +77,22 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeIpcMs = 0;
   const artworkBySize = new Map<number, ArrayBuffer>();
   w.__smokeArtwork = false;
+  const smokeArtwork = async (trackId: number, maxPx: number | undefined): Promise<ArrayBuffer> => {
+    if (!w.__smokeArtwork) return new ArrayBuffer(0);
+    const size = Math.min(maxPx ?? 512, 512);
+    const encoded = w.__smokeIpcMs ? artworkBySize.get(size) : undefined;
+    if (encoded) return encoded.slice(0);
+    const canvas = new OffscreenCanvas(size, size);
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = `hsl(${(trackId * 47) % 360} 60% 45%)`;
+    ctx.fillRect(0, 0, size, size);
+    const jpeg = await (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })).arrayBuffer();
+    if (w.__smokeIpcMs) artworkBySize.set(size, jpeg);
+    if (size < 512) return jpeg;
+    const padded = new Uint8Array(jpeg.byteLength + 8192);
+    padded.set(new Uint8Array(jpeg));
+    return padded.buffer;
+  };
   w.__smokeReleaseDetail = null;
   w.__smokeLabelChanges ??= [];
   const GB = 1_000_000_000;
@@ -501,20 +517,22 @@ export function installTauriMock(initial: LoadedState) {
         return null;
       case 'get_track_artwork': {
         if (w.__smokeIpcMs) await new Promise((done) => setTimeout(done, w.__smokeIpcMs));
-        if (!w.__smokeArtwork) return new ArrayBuffer(0);
-        const size = Math.min(args.maxPx ?? 512, 512);
-        const encoded = w.__smokeIpcMs ? artworkBySize.get(size) : undefined;
-        if (encoded) return encoded.slice(0);
-        const canvas = new OffscreenCanvas(size, size);
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = `hsl(${(args.trackId * 47) % 360} 60% 45%)`;
-        ctx.fillRect(0, 0, size, size);
-        const jpeg = await (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })).arrayBuffer();
-        if (w.__smokeIpcMs) artworkBySize.set(size, jpeg);
-        if (size < 512) return jpeg;
-        const padded = new Uint8Array(jpeg.byteLength + 8192);
-        padded.set(new Uint8Array(jpeg));
-        return padded.buffer;
+        return smokeArtwork(args.trackId, args.maxPx);
+      }
+      case 'get_track_artworks': {
+        if (w.__smokeIpcMs) await new Promise((done) => setTimeout(done, w.__smokeIpcMs));
+        const images = await Promise.all((args.trackIds as number[]).map((id) => smokeArtwork(id, args.maxPx)));
+        const total = images.reduce((sum, image) => sum + image.byteLength, 0);
+        const out = new Uint8Array(4 + 4 * images.length + total);
+        const view = new DataView(out.buffer);
+        view.setUint32(0, images.length, true);
+        let at = 4 + 4 * images.length;
+        images.forEach((image, i) => {
+          view.setUint32(4 + 4 * i, image.byteLength, true);
+          out.set(new Uint8Array(image), at);
+          at += image.byteLength;
+        });
+        return out.buffer;
       }
       case 'get_mounted_volumes':
         return Object.keys(w.__smokeSticks);

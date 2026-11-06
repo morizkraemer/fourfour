@@ -7,6 +7,7 @@ const OUT = process.env.FF_PERF_OUT;
 const IPC_MS = Number(process.env.FF_PERF_IPC_MS ?? 10);
 const FRAMES = 120;
 const SPEEDS = [84, 280];
+const WARMUP_SPEED = 84;
 
 interface Part {
   meanPct: number;
@@ -39,8 +40,8 @@ test('scroll fill: rows, previews and covers during a scripted fast scroll', asy
   await page.waitForTimeout(1500);
 
   const results: FillStats[] = [];
-  let startTop = 60_000;
-  for (const speed of SPEEDS) {
+  let startTop = 30_000;
+  for (const [run, speed] of [WARMUP_SPEED, ...SPEEDS].entries()) {
     const stats = await page.evaluate(
       ({ speed, frames, startTop }) =>
         new Promise<FillStats>((resolve) => {
@@ -115,7 +116,8 @@ test('scroll fill: rows, previews and covers during a scripted fast scroll', asy
           };
 
           const asked = (cmd: string) => (window as unknown as SmokeWindow).__smokeInvokes.filter((i) => i.cmd === cmd).length;
-          const coversAtStart = asked('get_track_artwork');
+          const askedCovers = () => asked('get_track_artwork') + asked('get_track_artworks');
+          const coversAtStart = askedCovers();
           const previewsAtStart = asked('get_row_previews');
           const startedAt = performance.now();
           el.scrollTop = startTop;
@@ -140,7 +142,7 @@ test('scroll fill: rows, previews and covers during a scripted fast scroll', asy
                   coversEmpty: part(noCover),
                   settledAfterMs: Math.round(performance.now() - stopped),
                   scrollMs,
-                  coverRequests: asked('get_track_artwork') - coversAtStart,
+                  coverRequests: askedCovers() - coversAtStart,
                   previewRequests: asked('get_row_previews') - previewsAtStart,
                   coverSeries: noCover.filter((_, i) => i % 6 === 0).map(Math.round),
                 });
@@ -154,7 +156,7 @@ test('scroll fill: rows, previews and covers during a scripted fast scroll', asy
         }),
       { speed, frames: FRAMES, startTop },
     );
-    results.push(stats);
+    if (run > 0) results.push(stats);
     startTop += 30_000;
     await page.waitForTimeout(800);
   }

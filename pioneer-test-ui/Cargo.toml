@@ -61,6 +61,11 @@ path = "src/dev_bin/bench_startup.rs"
 required-features = ["dev-bins"]
 
 [[bin]]
+name = "bench_covers"
+path = "src/dev_bin/bench_covers.rs"
+required-features = ["dev-bins"]
+
+[[bin]]
 name = "waveform_fixtures"
 path = "src/dev_bin/waveform_fixtures.rs"
 required-features = ["dev-bins"]

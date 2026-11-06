@@ -2,6 +2,7 @@ import { invoke, toCommandError, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { pathBaseName } from '../lib/pathName.ts';
+import { decodeArtworkBatch } from '../lib/artworkBatch.ts';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
@@ -1395,6 +1396,17 @@ export async function getTrackArtwork(trackId: number, maxPx = ARTWORK_DETAIL_PX
   } catch (err) {
     lastTauriError = `get_track_artwork fail: ${String(err)}`;
     return null;
+  }
+}
+
+/** Thumbnails of many tracks in one call, in the order asked; `null` for a track without a cover. */
+export async function getTrackArtworks(trackIds: number[], maxPx = ARTWORK_ROW_PX): Promise<(ArrayBuffer | null)[]> {
+  if (useBrowserMocks() && mockArtworkDelayMs > 0) return Promise.all(trackIds.map((id) => mockArtworkBytes(id, maxPx)));
+  try {
+    return decodeArtworkBatch(await invoke<ArrayBuffer>('get_track_artworks', { trackIds, maxPx }));
+  } catch (err) {
+    lastTauriError = `get_track_artworks fail: ${String(err)}`;
+    return trackIds.map(() => null);
   }
 }
 
