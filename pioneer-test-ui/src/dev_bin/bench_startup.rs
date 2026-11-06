@@ -250,12 +250,9 @@ fn load(dir: &Path, samples: usize) {
             drop(analysis);
 
             let t = Instant::now();
-            let value = analysis_payload::build_analysis_json(&lib, *id).unwrap();
+            let text = analysis_payload::read_stored_analysis(&lib, *id).unwrap().into_wire();
             let build_ms = ms(t);
-
-            let t = Instant::now();
-            let text = serde_json::to_string(&value).unwrap();
-            let json_ms = ms(t);
+            let json_ms = 0.0;
             if pass == 1 {
                 parse.push(parse_ms);
                 build.push(build_ms);

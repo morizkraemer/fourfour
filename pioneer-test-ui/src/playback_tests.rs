@@ -99,6 +99,38 @@ pub(crate) fn decode_to_vec(path: &Path, start_sample: u64, rate: u32, channels:
     out
 }
 
+fn hash_of_first_seconds(path: &Path, start_sample: u64, rate: u32, channels: u16, seconds: u64) -> (usize, u64) {
+    let wanted = (seconds * rate as u64 * channels as u64) as usize;
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut taken = 0usize;
+    run_decode(path.to_str().unwrap(), start_sample, rate, channels, &|| true, &mut |samples| {
+        let room = wanted - taken;
+        for sample in &samples[..samples.len().min(room)] {
+            for byte in sample.to_le_bytes() {
+                hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+            }
+        }
+        taken += samples.len().min(room);
+        Ok(taken < wanted)
+    })
+    .unwrap();
+    (taken, hash)
+}
+
+#[test]
+#[ignore = "prints the hash of the first seconds a decode of FF_AUDIO_HASH_LIST files hands the output (run with --ignored --nocapture)"]
+fn print_audio_frame_hashes() {
+    let list = std::env::var("FF_AUDIO_HASH_LIST").expect("FF_AUDIO_HASH_LIST=<file with one audio path per line>");
+    let seconds: u64 = std::env::var("FF_AUDIO_HASH_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
+    for line in std::fs::read_to_string(list).unwrap().lines().filter(|l| !l.trim().is_empty()) {
+        for (label, start_s) in [("start", 0u64), ("seek30s", 30)] {
+            let start_sample = start_s * 48_000 * 2;
+            let (samples, hash) = hash_of_first_seconds(Path::new(line), start_sample, 48_000, 2, seconds);
+            println!("AUDIOHASH {label} {samples} {hash:016x} {}", Path::new(line).file_name().unwrap().to_string_lossy());
+        }
+    }
+}
+
 fn peak(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0, |m, s| m.max(s.abs()))
 }

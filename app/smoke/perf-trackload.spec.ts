@@ -203,7 +203,7 @@ test.describe('r128 track load', () => {
     const { context, page } = await openApp(browser, dumpsOf(DUMPS!));
     const runs: Record<string, number>[] = [];
     for (let i = 0; i < RUNS + 1; i++) {
-      const index = 3 + (i % 8);
+      const index = 3 + (i % 24);
       if (GAP_MS > 0) await pressRowFirst(page, index, GAP_MS);
       const run = await loadTrack(page, index);
       if (i > 0) runs.push(run);
@@ -221,7 +221,7 @@ test.describe('r128 track load', () => {
     const { context, page } = await openApp(browser, dumpsOf(DUMPS!));
     const profiles: Profile[] = [];
     for (let i = 0; i < RUNS + 1; i++) {
-      const index = 3 + (i % 8);
+      const index = 3 + (i % 24);
       const cdp = await page.context().newCDPSession(page);
       await cdp.send('Profiler.enable');
       await cdp.send('Profiler.setSamplingInterval', { interval: 100 });

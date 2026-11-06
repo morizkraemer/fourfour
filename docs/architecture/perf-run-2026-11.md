@@ -2540,6 +2540,26 @@ Two symlinks to the same folder: which of the two paths the survey keeps depends
 
 Reproduce: build `bench_startup` (`--features pioneer-test-ui/dev-bins`), `bench_startup import <tree> <work>` for a library, then `bench_startup rescan <tree> <library.db copy>`; `FF_IMPORT_PLAN_OUT=<file>` writes the plan.
 
+## R128 (paused) track load (2026-11-06, `r128-track-load`)
+
+Paused on request; branch `r128-track-load` from `ov-1028`, no push. Measured on the shared dev box (load 10-55), headless Chromium and Playwright WebKit, 1k and 50k libraries, 6 minute real tracks and a 65 minute FLAC, dumps of the real `get_analysis_data` answer and detail series.
+
+**Trace.** Double-click, `loadPlayerTrack`: `playback_stop`, `get_analysis_data` (cached when the selecting click or the neighbour prefetch already read it), `get_waveform_detail` (47 MB for 65 min), then `playback_play` after the stop. Audio start is not a lever (first packet 0.3-1.3 ms). Backend `get_analysis_data` parsed the ANLZ files twice (`get_analysis` plus `get_cues`) and sent about 2 MB of base64 in JSON for a long track.
+
+**Changed (all output-identical)**
+- `get_analysis_data` answers with a binary frame (`FFAN`, JSON head, band bytes), page decodes it (`decodeAnalysisBytes`); no base64, no atob loop.
+- One ANLZ parse per load (`LocalLibrary::get_cues_with_analysis`).
+- Peak-hold downsample without per-column divisions; cache hit check without copying the 47 MB series.
+- Zoom series requested after the first paint (pending state set at once); `bandsFromInterleavedBytes` gain table; `libraryTrackById` instead of a 50k `find`.
+
+**Backend (`bench_startup trackload`, base vs new)**: 6 min track analysis answer 5.1 to 2.8 ms, cached detail 3.0 to 1.9 ms; 65 min track 68 to 23 ms and 124 to 48 ms, bytes 2.23 to 1.73 MB.
+
+**Page (Chromium, medians of 15 distinct rows, ready / painted, ms)**: 50k, 65 min, cold 150 / 196 to 40 / 68; 50k, 65 min, warm 55 / 151 to 21 / 48; 50k, 6 min cold 32 / 57 to 20 / 44; 1k numbers were noisy (load swings). WebKit: ready 20-60% lower, painted 15-30% lower (frames of 200 ms dominate); zoom series arrives 80-110 ms later there (deferral).
+
+**Identity**: logical payload sha256 per track equal base vs new (24 mid, 1 long, 30 fixture tracks) plus detail bytes; `player.track` hashes equal for 25 real answers; first 10 s of decoded audio (start and 30 s seek) equal for 30 files; golden `.bin/.json` pairs in `app/src/services/fixtures/analysis-*`. Canvas hashes equal in Chromium and WebKit (webkit mid fully equal); in Chromium 4 of 12 screenshot hashes differ per run (likely playhead timing, not investigated).
+
+**Left**: WebKit `long` identity run, ablation of deferral vs binary, final tables, validation (`cargo test` passed for pioneer-library and pioneer-test-ui before the last bench-only edits; vitest and svelte-check passed earlier; `npm run smoke` chromium and webkit NOT run), screenshot-hash difference check, `perf-budgets.json` refresh. Harness: `app/smoke/perf-trackload.spec.ts` (`FF_R128_MODE=timing|profile|identity`), bench `trackload`, `dump-load`, `long-lib`.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
