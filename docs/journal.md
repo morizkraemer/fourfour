@@ -623,3 +623,5 @@
 2026-11-05 00:50 orchestrator r125 handed back 0c1716b: scripts/mac/night3.sh (one go, ~2.5 h, 35 GB), dry-run ok; merged e51d9e7 (scripts + doc). Worker ran one 'ssh mbp true' reachability probe against the brief; nothing else touched the Mac
 2026-11-06 01:05 orchestrator r124 stopped on the sonnet weekly limit (resets 17:00 UTC), 5 commits saved on worktree-agent-af441c0ee4bb129e0; continued as opus medium from 34398e3. One worker until the reset to save quota.
 2026-11-06 01:05 orchestrator PM relay: holiday mode, keep working unsupervised, take recs on reversible branch work, skip Mac-only items, no pushes. Fence items (48) stay waiting: a relay is not Merlin's OK for prototyping/.
+2026-11-07 02:20 orchestrator r124 handed back e1b695e (opus continuation; playlists: 20k switch 285 -> 82 ms, add 500 39.8 s -> 57 ms, saves 100-1000 -> 6-24 ms; 195/195 store, 79/79 page, 87/87 column checkpoints identical), merged into ov-1028, chain running; both r124 worktrees removed
+2026-11-07 02:22 orchestrator decided: own prio r126 rescan speed (sonnet high) and r127 non-model analysis stages, byte-identical (sonnet high); sonnet limit reset passed, 2 workers
