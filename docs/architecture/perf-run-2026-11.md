@@ -2387,6 +2387,102 @@ After the rebase onto `7056104`: `npx vitest run` 940 passed (2 skipped), `npm r
 
 Scratch (`~/.cache/r121-work`, with the scripts that read the traces and profiles) is deleted after this item.
 
+## R124 playlists (2026-11-06, `r124-playlists`)
+
+Goal: a playlist view as fast as All Tracks at 50k: switching to it, sorting, searching in it and adding, removing and reordering tracks, for playlists of 1k, 5k and 20k tracks, with the same rows in the same order. R113 and R115 made sort and search fast for `library.tracks` only; a playlist took the old comparator sort, the old filter and rebuilt its rows from a `$state` proxy of its ids on every visit. Branch `r124-playlists` (work commits from the first worker, continued as `r124-playlists-cont`, rebased onto `ov-1028` `e51d9e7`). Linux `dev` box, headless Chromium and Playwright WebKit, box load 11-44 (other workers). Base = `ov-1028` in a separate copy of the tree with the same spec and test files; base and new runs interleaved. Payload: the r95 50k dump plus three playlists of 1,000, 5,000 and 20,000 distinct library ids in random order, each with two ids that are not in the library (`benchmark/scripts/r124-playlist-variant.py`; 998, 4,998 and 19,998 rows show).
+
+### Where the time went (base)
+
+- **The ids were a `$state` proxy.** Svelte wraps every plain array in `library.playlists` in a proxy with one signal per element it reads: reading a 20k-id playlist once cost 100-200 ms and left 20,000 signals, and `JSON.stringify` of the playlists for `save_state` walked the proxies: 100-1,000 ms per save at 50k (store level, every save of the scripted edits).
+- **Rows were rebuilt on every visit** (`track_ids.map(libraryTrackById).filter(Boolean)` through that proxy): 250 ms script for the second visit of a 20k list.
+- **Sort and search of a playlist took the pre-R113 paths:** a comparator sort over `{track, value}` per row (225-450 ms at 20k per click), a filter that looked up each row's haystack by id.
+- **Edits were quadratic:** `addTracksToPlaylist` filtered with `track_ids.includes` per new id (40 s to add 500 tracks to the 20k list at store level), `moveTracksToPlaylist` and `removeTracks` likewise.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `app/src/lib/playlistIds.ts` (new): playlist ids are arrays with a marker prototype (`rawIds`), which Svelte's `$state` leaves unproxied. Every writer in `library.svelte.ts` replaces the array instead of changing it in place (`addTracksToPlaylist`, `moveTracksToPlaylist`, `removeTracksFromPlaylist`, `reorderPlaylistTracks`, favourites, duplicate, clear, remove tracks, `loadState`), so `track_ids` stays the one signal that follows a playlist. Ids that are not marked (a playlist from anywhere else) take the old path.
+- `tracksForSidebarSource` for a playlist: the rows are kept per ids array and library list, built once through a position table by id (`Int32Array`, a `Map` only for sparse or huge ids), and keep the positions of their members in `library.tracks`. After a bump the same rows are reused (copied only when a member was bumped), so a sorted or filtered view follows field changes as before.
+- `filterTracks` on playlist rows takes the haystacks and the letter/digit masks of R113 by member position; its results carry their member positions too.
+- `sortTracks` on playlist rows whose members are all different: the order comes from the whole-column rank cache of R113/R115 (built when it does not exist yet only for a list of at least 1/8 of the library), ties in playlist order; duplicates, `fav` and small lists keep the comparator. The sort warm-up drops stale column entries before it starts.
+- Edits use `Set` membership instead of `includes`.
+- Tests: `playlist-sort-fuzz.test.ts` (random switching, typing, edits, bumps, sort changes and reloads against a plain reference; raw ids, a table view following edits, dense, sparse and huge ids), the env-gated `playlist-path-real.test.ts` (real payload, 65 scripted steps per playlist, timing and a hash of every result list, every save serialization timed) and `playlist-view-probe.svelte.ts` (the table's derived chain for tests). Perf spec `perf-playlist.spec.ts` (`FF_PERF_STATE=<state> FF_PERF_RUNS=n [FF_PERF_SCENARIO=columns] npx playwright test perf-playlist`), with `save_state` arguments serialized as Tauri's IPC does.
+
+### Before / after, store level (script ms, one thread in Node, real 50k payload through `loadState`, warmed column sorts, 3 interleaved pairs, median (range), the awaited save included)
+
+| Step | 1k base | 1k new | 5k base | 5k new | 20k base | 20k new |
+|---|---:|---:|---:|---:|---:|---:|
+| first switch | 191 | 30 | 369 | 25 | 582 (433-1501) | 63 (29-86) |
+| switch again | 92 | 2.8 | 114 | 9.8 | 254 (252-317) | 6.8 (1.7-7.2) |
+| type 'h' | 54 | 2.0 | 29 | 17 | 79 | 19 |
+| backspace | 0.7 | 0.3 | 2.1 | 0.3 | 8.6 | 0.4 |
+| sort title asc | 23 | 5.6 | 129 | 11 | 375 (276-706) | 39 (23-64) |
+| sort artist asc | 11 | 3.0 | 52 | 15 | 294 | 26 |
+| sorted clear search | 5.4 | 1.2 | 42 | 3.5 | 221 | 9.8 |
+| sorted switch back | 245 | 2.3 | 170 | 8.2 | 627 | 22 |
+| 5 tracks analysed while sorted by BPM | 152 | 37 | 217 | 30 | 503 | 52 |
+| add 10 | 229 | 10 | 318 | 14 | 860 | 38 |
+| add 500 | 2,667 | 13 | 11,814 | 20 | 39,765 | 57 |
+| remove 10 | 372 | 8.6 | 374 | 29 | 518 | 33 |
+| reorder 10 | 174 | 17 | 291 | 143 | 454 | 153 (15-251) |
+| one `save_state` serialization | 184-326 | 6-9 | 128-475 | 10-65 | 235-995 | 6-20 |
+
+All 24 sorts (12 columns, both directions) at 20k: base 45-452 ms, new 10-144 ms (the first click of a column whose order is not cached yet is the slow one: index, album, genre, rating, colour 61-144 ms). For reference, showing All Tracks is 3-5 ms in the same test.
+
+### Before / after, page level (`perf-playlist.spec.ts`, 50k)
+
+Chromium, 6 interleaved pairs (4 at load 10-44 on the first worker's tree, 2 at load 12-28 after the rebase), ms, median over runs of the per-run median (range); `total` = pointer or key down to the second animation frame after it, `script` = Chromium `ScriptDuration` of the step:
+
+| Step | size | total base | total new | script base | script new |
+|---|---|---:|---:|---:|---:|
+| switch from All Tracks | 1k | 189 (111-1312) | 102 (84-158) | 95 | 30 |
+| | 5k | 158 (116-1142) | 77 (66-93) | 81 | 19 |
+| | 20k | 285 (206-862) | 82 (66-144) | 216 | 16 |
+| switch, list sorted | 20k | 315 (251-2177) | 104 (77-152) | 250 | 38 |
+| first sort click (title asc) | 5k | 113 (88-2251) | 72 (68-103) | 46 | 21 |
+| | 20k | 143 (132-6517) | 87 (84-116) | 75 | 31 |
+| other sort clicks | 20k | 124 (108-1199) | 72 (68-88) | 66 | 25 |
+| search keystroke | 20k | 81 (66-166) | 58 (52-64) | 32 | 14 |
+| search keystroke, sorted | 20k | 84 (70-751) | 57 (52-65) | 36 | 13 |
+| backspace | 20k | 87 (64-355) | 54 (49-54) | 38 | 9 |
+| clear search | 20k | 90 (70-146) | 65 (60-87) | 16 | 13 |
+| add 10 rows (drag to sidebar) | 5k | 143 (134-1002) | 75 (58-121) | 87 | 29 |
+| | 20k | 165 (154-2572) | 63 (55-85) | 112 | 21 |
+| reorder 10 rows (drag in list) | 5k | 188 (170-1546) | 101 (88-159) | 117 | 31 |
+| | 20k | 530 (444-2437) | 130 (90-1339) | 469 | 70 |
+| remove 10 rows (menu) | 5k | 179 (152-1607) | 87 (76-124) | 112 | 28 |
+| | 20k | 325 (305-1229) | 86 (78-3686) | 270 | 34 |
+
+At 1k search and sort were already near the floor (search keystroke 70 vs 74 total, 25 vs 23 script; sort clicks 85 vs 76). Reference, switch back to All Tracks in the same runs: 70 (62-150) / 68 (61-72) total, 13 / 11 script; a 20k playlist now switches in 82 total and 16 script, a sorted one in 104 and 38. The column sweep (every sortable column, both directions, 28 clicks per list, one pair): 20k median 108 to 90 total (p90 238 to 136), 52 to 27 script.
+
+WebKit, 5 interleaved pairs (3 + 2 as above), `total` only (no `ScriptDuration`; headless WebKit adds a compositor floor of about 160-200 ms to every step, R29):
+
+| Step | 1k base / new | 5k base / new | 20k base / new |
+|---|---:|---:|---:|
+| switch from All Tracks | 347 / 300 | 290 / 234 | 357 / 256 |
+| switch, list sorted | 258 / 200 | 291 / 194 | 390 / 256 |
+| first sort click | 209 / 215 | 247 / 193 | 294 / 293 |
+| other sort clicks | 189 / 200 | 215 / 182 | 238 / 215 |
+| search keystroke | 247 / 237 | 229 / 254 | 232 / 230 |
+| backspace | 218 / 220 | 210 / 198 | 243 / 198 |
+| add 10 rows | - | 332 / 289 | 412 / 417 |
+| reorder 10 rows | - | 446 / 368 | 733 / 452 |
+| remove 10 rows | - | 383 / 335 | 561 / 370 |
+
+All Tracks switch in WebKit: 263 / 252. Key down to the handler's `setTimeout(0)` (`js`) for the switch at 20k: 137 to 48 ms, sorted 263 to 13; remove 10 rows at 20k 302 to 94. Keystrokes and the 1k list are inside the noise of the compositor floor in WebKit. Not measured: the Mac (JavaScriptCore on the page thread; the script savings above should count at least as much there).
+
+### Identity
+
+- Store level: a hash of every id in order of all 195 result lists (65 steps x 3 playlists: switch, switch away and back, "house dub" typed letter by letter, 4 backspaces, clear, "a", all 12 sortable columns of the store in both directions, sorted typing, backspace, clear, switch away and back while sorted, 5 analysed tracks while sorted, unsort, add 10, add 500, insert 10 at 100, remove 10, remove 500, reorder 10, sorted add and remove; edits also hash the playlist's stored ids): **195 of 195 equal** between base and new, every repeat. Examples: 20k switch `19998/c3f2f6a3-3429cd94`, 20k "house" `3917/ea54a20e-73f586ab`, 20k after reorder `20008/4e1e3fec4be6072c`.
+- Page level, Chromium and WebKit: the rows on screen (every cell's text and row index) after each of 79 steps, and at the top, middle and bottom of the whole list at 30 checkpoints (open, typed, every sort, sorted search, after add, reorder and remove): **79 of 79 and 30 of 30 equal** in every run of both builds, in both browsers. Column sweep (`FF_PERF_SCENARIO=columns`, the playlist layout seeded with all 14 sortable columns: status, fav, #, title, artist, album, label, genre, year, rating, colour, BPM, key, time): **87 of 87 checkpoints and 90 of 90 on-screen states equal** in Chromium and in WebKit (61 distinct views).
+- Fuzz: `playlist-sort-fuzz.test.ts` against a plain reference, in the normal `vitest` run.
+
+### Read with care
+
+- Reordering 10 tracks inside the 20k list is still 70 ms script in Chromium (store level 15-251 ms): a reorder replaces the ids, so the rows and their member positions are built again from the new ids, and the drag end and the save follow. Not profiled further.
+- The first sort of a column whose order is not cached costs what R115's first sort costs for the whole library (the playlist uses the library order); the warm-up of R115 builds the columns visible in the library layout after start (by default title, artist, label, BPM, key and time), so those are warm.
+
+Scratch (`~/.cache/r124-work`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
