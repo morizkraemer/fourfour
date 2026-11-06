@@ -16,6 +16,12 @@ test.describe('idle work after load', () => {
     const dumped = JSON.parse(readFileSync(STATE!, 'utf8'));
     const loaded = { ...dumped, tracks: isTrackTable(dumped.tracks) ? decodeTrackTable(dumped.tracks) : dumped.tracks } as LoadedState;
     await page.addInitScript(installTauriMock, loaded);
+    if (process.env.FF_PERF_FRAMES) {
+      await page.addInitScript(() => {
+        const frame = () => requestAnimationFrame(frame);
+        frame();
+      });
+    }
     await page.addInitScript(() => {
       const tasks: number[] = [];
       (window as unknown as { __longTasks: number[] }).__longTasks = tasks;
