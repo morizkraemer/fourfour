@@ -389,7 +389,7 @@ item1() {
 
 item2() {
   [ -x "$(app_bin)" ] || [ "$DRY" = 1 ] || die "ov-1028 app was not built"
-  scratch_home_check "$NIGHT/perf/home-1"
+  refuse_unsafe_path "$NIGHT/perf/home-1"
   run_in "$WT/ov-1028" env "CARGO_TARGET_DIR=$TARGET" "FF_PERF_NIGHT_OUT=$NIGHT/perf" "FOURFOUR_MODELS_DIR=$MODELS" "$WT/ov-1028/scripts/mac/perf-night.sh" --size 10k --app "$APP" --runs 3 --expand-runs 5
   run python3 -I "$HELPERS/night3-summary.py" item2 "$NIGHT/perf" "$RESULTS/item2"
 }
