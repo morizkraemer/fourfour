@@ -5,6 +5,10 @@ export const PANEL_WIDTH: Record<ResizablePanel, { min: number; max: number; ini
   inspector: { min: 300, max: 520, initial: 340, key: 'fourfour.inspector.width' },
 };
 
+export function organizePanelWidth(userWidth: number, hasTarget: boolean, emptyCap: number): number {
+  return hasTarget ? userWidth : Math.min(userWidth, emptyCap);
+}
+
 export function clampPanelWidth(panel: ResizablePanel, px: number): number {
   const { min, max, initial } = PANEL_WIDTH[panel];
   if (!Number.isFinite(px)) return initial;

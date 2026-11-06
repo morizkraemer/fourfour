@@ -7,13 +7,17 @@ import type { SmokeWindow } from './tauri-mock.ts';
 const SHOTS = resolve(import.meta.dirname, '../../.agent/sidebar');
 mkdirSync(SHOTS, { recursive: true });
 
-async function open(page: Page, width = 420) {
+const PEAK_TIME = JSON.stringify({ kind: 'playlist', id: 'Peak Time', label: 'Peak Time', playlistId: 1 });
+
+async function open(page: Page, width = 420, withList = true) {
   await page.evaluate(
-    (w) => {
+    ([w, list]) => {
       localStorage.setItem('fourfour.organize.expanded', 'true');
       localStorage.setItem('fourfour.organize.width', String(w));
+      if (list) localStorage.setItem('fourfour.organize.target', list);
+      else localStorage.removeItem('fourfour.organize.target');
     },
-    width,
+    [width, withList ? PEAK_TIME : ''] as const,
   );
   await page.reload();
   await rows(page).first().waitFor();
@@ -70,6 +74,23 @@ test('resize handle still changes the sidebar width', async ({ smoke: { page } }
   await page.mouse.up();
   const after = await box(page, '.ff-organize--expanded');
   expect(after.width).toBeGreaterThan(before.width + 80);
+});
+
+test('empty sidebar is capped to the left sidebar width, a loaded list expands it', async ({ smoke: { page } }) => {
+  await open(page, 420, false);
+  const sidebar = await box(page, '.ff-sidebar');
+  const empty = await box(page, '.ff-organize--expanded');
+  expect(empty.width).toBeCloseTo(sidebar.width, 0);
+  await expect(page.locator('.ff-organize__resize-handle')).toHaveCount(0);
+  await open(page, 420, true);
+  expect((await box(page, '.ff-organize--expanded')).width).toBeCloseTo(420, 0);
+});
+
+test('empty sidebar fills a user width narrower than the cap, a loaded list keeps the user width', async ({ smoke: { page } }) => {
+  await open(page, 210, false);
+  expect((await box(page, '.ff-organize--expanded')).width).toBeCloseTo(210, 0);
+  await open(page, 480, true);
+  expect((await box(page, '.ff-organize--expanded')).width).toBeCloseTo(480, 0);
 });
 
 test('Analyzing chip stays visible and clickable with the sidebar open', async ({ smoke: { page } }) => {
