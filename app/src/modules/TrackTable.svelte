@@ -64,7 +64,8 @@
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
   import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
-  import { skeletonRowsHtml } from '../lib/skeletonRows.ts';
+  import { pendingRowsHtml, skeletonRowsHtml } from '../lib/skeletonRows.ts';
+  import { importActivity } from '../stores/import-activity.svelte.ts';
   import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
 
   /** When set, show this sidebar source instead of the active row. */
@@ -156,6 +157,7 @@
   let showOpenFailure = $derived(!embedded && library.tracksLoaded && library.openFailure !== null);
   let showLibraryEmpty = $derived(!embedded && library.tracksLoaded && library.trackCount === 0);
   const SKELETON_ROWS = 24;
+  const PENDING_ROWS_SHOWN = 300;
 
   let activePlaylist = $derived.by(() => {
     const active = effectiveSource;
@@ -164,6 +166,7 @@
   });
 
   let isUsbView = $derived(library.volumes.includes(effectiveSource ?? ''));
+  let pendingRows = $derived(activePlaylist ? (importActivity.pendingRows[activePlaylist.id] ?? []) : []);
 
   let canReorderRows = $derived(!!activePlaylist && !isUsbView && !layout.sortKey);
 
@@ -863,6 +866,10 @@
         <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
           {@html skeletonRowsHtml(columns, SKELETON_ROWS)}
         </div>
+      {:else if shownTracks.length === 0 && pendingRows.length > 0}
+        <div class="ff-table__pending" data-table-pending aria-busy="true" title="Importing — these tracks are not analysed yet">
+          {@html pendingRowsHtml(columns, pendingRows.slice(0, PENDING_ROWS_SHOWN))}
+        </div>
       {:else if shownTracks.length === 0}
         <div class="ff-table__empty-container ff-table__empty-drop">
           <EmptyState
@@ -1104,6 +1111,20 @@
   }
   .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cover) {
     border-color: transparent;
+  }
+  .ff-table__pending {
+    animation: ff-table-skeleton-pulse 1.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .ff-table__pending :global(.ff-table__pending-row) {
+    height: 28px;
+  }
+  .ff-table__pending :global(.ff-table__pending-row .ff-trow__text) {
+    color: var(--ff-text-mid);
+  }
+  .ff-table__pending :global(.ff-table__pending-row .ff-trow__cover) {
+    border-color: transparent;
+    background: var(--ff-elev);
   }
   @keyframes ff-table-skeleton-pulse {
     0%, 100% { opacity: 0.55; }

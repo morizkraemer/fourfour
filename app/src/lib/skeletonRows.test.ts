@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { columnCellStyle } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
-import { skeletonRowsHtml, skeletonTextWidth } from './skeletonRows.ts';
+import { pendingRowsHtml, skeletonRowsHtml, skeletonTextWidth } from './skeletonRows.ts';
 
 const COLUMNS = [
   { key: 'status', label: '', width: 20 },
@@ -53,5 +53,15 @@ describe('skeletonRowsHtml', () => {
 
   it('has no rows for an empty count', () => {
     expect(skeletonRowsHtml(COLUMNS, 0)).toBe('');
+  });
+});
+
+describe('pendingRowsHtml', () => {
+  it('has a row per file with its name, escaped, in the title cell only', () => {
+    const html = pendingRowsHtml(COLUMNS, ['Low Sun', 'A <b> & B']);
+    expect(html.match(/data-pending-row/g)).toHaveLength(2);
+    expect(html.match(/<span class="ff-trow__text">/g)).toHaveLength(2);
+    expect(html).toContain(`data-col-key="title"><span class="ff-trow__text">Low Sun</span>`);
+    expect(html).toContain('A &#60;b&#62; &#38; B');
   });
 });

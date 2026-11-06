@@ -177,11 +177,12 @@
     >
       {#if activity.kind === 'importing'}
         <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
-        <span class="ff-gheader__progress" class:ff-gheader__progress--indeterminate={activity.fraction === null} style:width={activity.fraction === null ? undefined : `${activity.fraction * 100}%`}></span>
+        <span class="ff-gheader__progress" data-activity-progress class:ff-gheader__progress--indeterminate={activity.fraction === null} style:width={activity.fraction === null ? undefined : `${activity.fraction * 100}%`}></span>
       {:else if activity.kind === 'syncing'}
         <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
       {:else if activity.kind === 'analyzing'}
         <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span> <b>{activity.detail}</b>
+        <span class="ff-gheader__progress" data-activity-progress style:width={`${activity.fraction * 100}%`}></span>
       {:else if activity.kind === 'rest'}
         <span class="ff-gheader__activity-label">{activity.label}</span>
       {:else}
