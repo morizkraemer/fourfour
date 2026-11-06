@@ -867,19 +867,21 @@ async fn analyze_track_python(path: String) -> Result<serde_json::Value, String>
     output
 }
 
-/// Get stored analysis data for a track from the local library DB.
+/// Get stored analysis data for a track from the local library DB, as `StoredAnalysis::into_wire` bytes (a binary IPC
+/// response: the JSON head and the band bytes after it, no base64).
 #[tauri::command]
 async fn get_analysis_data(
     track_id: i64,
     state: State<'_, SharedLibrary>,
-) -> Result<serde_json::Value, String> {
+) -> Result<tauri::ipc::Response, String> {
     let shared = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
         let stored = analysis_payload::read_stored_analysis(&*shared.lock().map_err(|e| e.to_string())?, track_id)?;
-        Ok::<_, String>(stored.into_json())
+        Ok::<_, String>(stored.into_wire())
     })
     .await
-    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// The high-resolution 3-band series of a track for the zoomed waveform (`DetailSeries::to_bytes`),

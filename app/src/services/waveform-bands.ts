@@ -12,6 +12,7 @@
  */
 import { STACK_GAIN, STACK_GAMMA, displayAmp } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import {
+  bandBytes,
   decodeColorWaveform,
   type ColorWaveSample,
   type EncodedColorWaveform,
@@ -83,13 +84,15 @@ export function bandsFromInterleavedBytes(
 ): BandColumns {
   const columns = Math.floor(bytes.length / 3);
   const out = emptyBands(columns);
+  const gains = new Float64Array(256);
+  for (let max = 1; max < 256; max++) gains[max] = Math.min((max / fullScale) * calibration, 1) / max;
   for (let i = 0; i < columns; i++) {
     const low = bytes[i * 3];
     const mid = bytes[i * 3 + 1];
     const high = bytes[i * 3 + 2];
     const max = Math.max(low, mid, high);
     if (max === 0) continue;
-    const gain = Math.min((max / fullScale) * calibration, 1) / max;
+    const gain = max < 256 ? gains[max] : Math.min((max / fullScale) * calibration, 1) / max;
     out.low[i] = low * gain;
     out.mid[i] = mid * gain;
     out.high[i] = high * gain;
@@ -215,14 +218,9 @@ export function balanceBands(bands: BandColumns): BandColumns {
 }
 
 function isEncoded(color: unknown): color is EncodedColorWaveform {
-  return !!color && typeof color === 'object' && !Array.isArray(color) && typeof (color as EncodedColorWaveform).bands === 'string';
-}
-
-function decodeBase64(text: string): Uint8Array {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  if (!color || typeof color !== 'object' || Array.isArray(color)) return false;
+  const { bands } = color as EncodedColorWaveform;
+  return typeof bands === 'string' || bands instanceof Uint8Array;
 }
 
 const payloadBands = new WeakMap<object, BandColumns>();
@@ -234,13 +232,13 @@ export function colorBandsFromPayload(color: unknown): BandColumns | null {
   if (memo) return memo;
   let bands: BandColumns | null = null;
   if (isEncoded(color) && color.pwv7) {
-    bands = bandsFromStickBytes(decodeBase64(color.bands));
+    bands = bandsFromStickBytes(bandBytes(color.bands));
     if (bands.low.length === 0) return null;
     payloadBands.set(color, bands);
     return bands;
   }
   if (isEncoded(color)) {
-    bands = bandsFromInterleavedBytes(decodeBase64(color.bands), WIRE_FULL_SCALE, color.calibration * LEGACY_LEVEL);
+    bands = bandsFromInterleavedBytes(bandBytes(color.bands), WIRE_FULL_SCALE, color.calibration * LEGACY_LEVEL);
   } else {
     const samples = decodeColorWaveform(color);
     if (samples) bands = bandsFromColorSamples(samples, LEGACY_LEVEL);

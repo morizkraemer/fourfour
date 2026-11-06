@@ -22,7 +22,7 @@ import {
   subscribePlaybackError,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
-import { library, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
+import { library, libraryTrackById, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
 import { resetTempoForNewTrack, tempo } from './tempo.svelte.ts';
 import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
@@ -368,6 +368,32 @@ export async function loadZoomDetail(trackId: number) {
   }
 }
 
+const ZOOM_DETAIL_START_FALLBACK_MS = 120;
+
+function afterNextPaint(task: () => void) {
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    task();
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(run));
+  setTimeout(run, ZOOM_DETAIL_START_FALLBACK_MS);
+}
+
+/** The loaded track's zoom series is requested once the overview has painted, so its (large) answer does not queue ahead of the strip. */
+function loadZoomDetailAfterPaint(trackId: number, generation: number) {
+  if (zoomDetailCache.has(trackId)) {
+    void loadZoomDetail(trackId);
+    return;
+  }
+  player.zoomDetailLoadingId = trackId;
+  afterNextPaint(() => {
+    if (generation === loadGeneration) void loadZoomDetail(trackId);
+    else if (player.zoomDetailLoadingId === trackId) player.zoomDetailLoadingId = null;
+  });
+}
+
 function giveLoadedTrackZoomDetail(trackId: number, bands: DetailBandColumns) {
   const loaded = player.track;
   if (loaded?.id === trackId && loaded.bandsZoom !== bands) player.track = { ...loaded, bandsZoom: bands };
@@ -441,7 +467,7 @@ export function initPlayerAnalysisRefresh() {
 }
 
 function prioritizeIfUnanalyzed(trackId: number, completeFallback: boolean) {
-  const libTrack = library.tracks.find((t) => t.id === trackId);
+  const libTrack = libraryTrackById(trackId);
   const complete = libTrack ? libTrack.analyzed && !libTrack.analysisPending : completeFallback;
   if (!complete) requestBackgroundAnalysis(trackId);
 }
@@ -476,7 +502,7 @@ export async function loadPlayerTrack(input: any) {
   const base = buildBaseTrack(trackInfo);
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
-  void loadZoomDetail(trackInfo.id);
+  loadZoomDetailAfterPaint(trackInfo.id, gen);
   player.loading = !cached;
   if (cached) performance.mark('ff:player-ready');
 
