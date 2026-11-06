@@ -8,6 +8,7 @@ export interface SmokeWindow {
   __smokeAnswerDialog: boolean;
   __smokeAnalysis: (trackId: number) => Promise<Record<string, unknown>>;
   __smokeNoAnalysis: number[];
+  __smokeIpcMs: number;
   __smokeMissing: number[];
   __smokeUnreadable: number[];
   __smokeNotFound: number[];
@@ -71,6 +72,8 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeReleaseImport = null;
   w.__smokeDetail = 'none';
   w.__smokeNoAnalysis = [];
+  w.__smokeIpcMs = 0;
+  const artworkBySize = new Map<number, ArrayBuffer>();
   w.__smokeArtwork = false;
   w.__smokeReleaseDetail = null;
   w.__smokeLabelChanges ??= [];
@@ -418,6 +421,7 @@ export function installTauriMock(initial: LoadedState) {
         if (w.__smokeLoadError) throw w.__smokeLoadError;
         return { tracks: tracks.map(({ waveform_bands: _bands, waveform_preview: _preview, ...listed }) => listed), playlists };
       case 'get_row_previews': {
+        if (w.__smokeIpcMs) await new Promise((done) => setTimeout(done, w.__smokeIpcMs));
         const wanted = new Set(args.trackIds as number[]);
         return tracks
           .filter((t) => wanted.has(t.id) && (t.waveform_bands || t.waveform_preview))
@@ -487,13 +491,17 @@ export function installTauriMock(initial: LoadedState) {
       case 'prefetch_waveform_detail':
         return null;
       case 'get_track_artwork': {
+        if (w.__smokeIpcMs) await new Promise((done) => setTimeout(done, w.__smokeIpcMs));
         if (!w.__smokeArtwork) return new ArrayBuffer(0);
         const size = Math.min(args.maxPx ?? 512, 512);
+        const encoded = w.__smokeIpcMs ? artworkBySize.get(size) : undefined;
+        if (encoded) return encoded.slice(0);
         const canvas = new OffscreenCanvas(size, size);
         const ctx = canvas.getContext('2d')!;
         ctx.fillStyle = `hsl(${(args.trackId * 47) % 360} 60% 45%)`;
         ctx.fillRect(0, 0, size, size);
         const jpeg = await (await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 })).arrayBuffer();
+        if (w.__smokeIpcMs) artworkBySize.set(size, jpeg);
         if (size < 512) return jpeg;
         const padded = new Uint8Array(jpeg.byteLength + 8192);
         padded.set(new Uint8Array(jpeg));

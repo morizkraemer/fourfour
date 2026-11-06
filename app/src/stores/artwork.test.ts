@@ -69,6 +69,63 @@ describe('row artwork cache', () => {
   });
 });
 
+describe('row artwork focus', () => {
+  let started: number[];
+  let releases: (() => void)[];
+
+  beforeEach(() => {
+    started = [];
+    releases = [];
+    hooks.getTrackArtwork.mockReset();
+    hooks.getTrackArtwork.mockImplementation(
+      (id: number) =>
+        new Promise<ArrayBuffer>((resolve) => {
+          started.push(id);
+          releases.push(() => resolve(new ArrayBuffer(3000)));
+        }),
+    );
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:focus');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    artwork.clear();
+    vi.restoreAllMocks();
+  });
+
+  const rows = (ids: number[]) => ids.map((id) => ({ id, hasArtwork: true }));
+
+  it('fetches the most urgent rows first and drops queued rows that left the list focus', async () => {
+    artwork.focusRows('list', rows(Array.from({ length: 40 }, (_, i) => 100 + i)));
+    await settle();
+    const firstWave = [...started];
+    expect(firstWave).toEqual([100, 101, 102, 103, 104, 105]);
+    artwork.focusRows('list', rows([500, 501]));
+    releases.splice(0).forEach((release) => release());
+    await settle();
+    expect(started.slice(firstWave.length)).toEqual([500, 501]);
+  });
+
+  it('asks once for a row whose fetch is still running', async () => {
+    artwork.focusRows('list', rows([7]));
+    await settle();
+    artwork.focusRows('list', rows([7]));
+    artwork.getRow(7, true);
+    await settle();
+    expect(started).toEqual([7]);
+  });
+
+  it('keeps what another list still wants', async () => {
+    artwork.focusRows('a', rows([1, 2, 3, 4, 5, 6]));
+    artwork.focusRows('b', rows([900]));
+    await settle();
+    artwork.focusRows('a', rows([10]));
+    releases.splice(0).forEach((release) => release());
+    await settle();
+    expect(started.slice(6).sort((x, y) => x - y)).toEqual([10, 900].filter((id) => !started.slice(0, 6).includes(id)));
+  });
+});
+
 describe('cover artwork cache', () => {
   let live: Set<string>;
   let created = 0;
