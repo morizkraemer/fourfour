@@ -628,3 +628,5 @@
 2026-11-07 02:43 orchestrator r124 landed d77ce38 on ov-1028 (both smokes 0 failed, 26 suites, vitest 944, CHECKS-OK)
 2026-11-07 03:35 orchestrator r126 handed back c1a141e (rescan: shared walk queue, no-op import skips write txn, duplicate index 650-800 -> 180-230 ms; 50k no-change 1438 -> 723 ms, 1% change 1602 -> 926 ms; plan JSON + all library.db tables identical at 10k/25k/50k; symlink twin choice was already racy, now also at deeper levels), merged 8dbf8f0, chain running; ~/.cache/r126 deleted. Folder-mtime skip needs schema (not done)
 2026-11-07 03:36 orchestrator decided: own prio r128 track load latency (pick -> waveform drawn + ready; sonnet high)
+2026-11-07 04:10 orchestrator r127 handed back 3a4d21f: non-model stages are now symphonia/rubato internals (external) and Meter::push 44% (writer crate, brother lane); own downmix fix -3 to -9% decode instructions, wall within noise; outputs byte-identical. Not merged (no measurable gain); branch kept. Waiting 51 added (Meter::push for the brother)
+2026-11-07 04:11 orchestrator decided: own prio r129 fresh speed budget audit to rank the next levers (sonnet medium)
