@@ -96,10 +96,12 @@ export function bumpLibraryTracks(changedIds: Iterable<number>) {
   scheduleSearchIndexWarmup();
 }
 
-const BUMP_LOG_LIMIT = 64;
+const BUMP_LOG_LIMIT = 4096;
+const BUMP_LOG_ID_LIMIT = 16384;
 const listVersions = new WeakMap<object, number>();
 let bumpLog: { version: number; ids: number[] }[] = [];
 let nextListVersion = 1;
+let bumpLogIds = 0;
 
 function recordTrackListBump(previous: object, next: object, ids: number[]) {
   let from = listVersions.get(previous);
@@ -107,11 +109,13 @@ function recordTrackListBump(previous: object, next: object, ids: number[]) {
     from = nextListVersion++;
     listVersions.set(previous, from);
     bumpLog = [];
+    bumpLogIds = 0;
   }
   const version = nextListVersion++;
   listVersions.set(next, version);
   bumpLog.push({ version, ids });
-  if (bumpLog.length > BUMP_LOG_LIMIT) bumpLog.shift();
+  bumpLogIds += ids.length;
+  while (bumpLog.length > 1 && (bumpLog.length > BUMP_LOG_LIMIT || bumpLogIds > BUMP_LOG_ID_LIMIT)) bumpLogIds -= bumpLog.shift()!.ids.length;
 }
 
 /**
