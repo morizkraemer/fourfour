@@ -12,6 +12,9 @@ const RUNS = Number(process.env.FF_R128_RUNS ?? 7);
 const MODE = process.env.FF_R128_MODE ?? 'timing';
 const OUT = process.env.FF_R128_OUT;
 const GAP_MS = Number(process.env.FF_R128_GAP_MS ?? 0);
+const INDICES = (process.env.FF_R128_INDEX ?? '3,5,7').split(',').map(Number);
+const SETTLE = process.env.FF_R128_SETTLE === '1';
+const SHOTS = process.env.FF_R128_SHOTS;
 
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
 const sha = (data: string | Buffer) => createHash('sha1').update(data).digest('hex').slice(0, 12);
@@ -241,7 +244,7 @@ test.describe('r128 track load', () => {
     const hashes: Record<string, string> = {};
     const canvasHashes = (selector: string) =>
       page.evaluate((selector) => Array.from(document.querySelectorAll(selector)).map((c) => (c as HTMLCanvasElement).toDataURL()), selector);
-    for (const index of [3, 5, 7]) {
+    for (const index of INDICES) {
       await loadTrack(page, index);
       await page.waitForTimeout(300);
       if ((await page.locator('.ff-player-compact__play').getAttribute('aria-label').catch(() => null)) === 'Pause') await page.keyboard.press('Space');
@@ -256,8 +259,14 @@ test.describe('r128 track load', () => {
       for (const frac of [0.02, 0.37, 0.731]) {
         await page.mouse.click(box.x + box.width * frac, box.y + box.height / 2);
         await page.waitForTimeout(300);
+        if (SETTLE) {
+          await page.mouse.move(2, 2);
+          await page.addStyleTag({ content: '*,*::before,*::after{transition:none!important;animation:none!important;caret-color:transparent!important}' });
+          await page.waitForTimeout(300);
+        }
         const canvases = await canvasHashes('.ff-xp canvas');
-        const shot = await page.locator('.ff-xp').screenshot();
+        const shot = await page.locator('.ff-xp').screenshot(SETTLE ? { animations: 'disabled' } : undefined);
+        if (SHOTS) writeFileSync(`${SHOTS}/track${index}-seek${frac}.png`, shot);
         hashes[`track${index} seek${frac}`] = `${canvases.map(sha).join(' ')} ${sha(shot)}`;
       }
       await page.locator('.ff-xp__collapse').click();

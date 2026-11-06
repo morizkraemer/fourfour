@@ -24,7 +24,7 @@ import { loadPlayerTrack, player } from './player.svelte.ts';
 
 const invokeMock = vi.mocked(invoke);
 
-function feed(bytes: Buffer): ArrayBuffer {
+function feed(bytes: Uint8Array): ArrayBuffer {
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
@@ -51,14 +51,14 @@ function digest(value: unknown): string {
 
 describe.skipIf(!dumpDir)('the player track built from real get_analysis_data answers', () => {
   it('hashes every field the player receives', async () => {
-    const files = readdirSync(dumpDir!).filter((f) => f.endsWith('.analysis')).length;
+    const files = readdirSync(dumpDir!).filter((f: string) => f.endsWith('.analysis')).length;
     const lines: string[] = [];
     for (let k = 0; k < files; k++) {
       const analysis = readFileSync(`${dumpDir}/${k}.analysis`);
       const detail = feed(readFileSync(`${dumpDir}/${k}.detail`));
       invokeMock.mockReset();
       invokeMock.mockImplementation(async (command: string): Promise<any> => {
-        if (command === 'get_analysis_data') return analysis[0] === 0x7b ? JSON.parse(analysis.toString('utf8')) : feed(analysis);
+        if (command === 'get_analysis_data') return analysis[0] === 0x7b ? JSON.parse(new TextDecoder().decode(analysis)) : feed(analysis);
         if (command === 'get_waveform_detail') return detail.slice(0);
         return undefined;
       });

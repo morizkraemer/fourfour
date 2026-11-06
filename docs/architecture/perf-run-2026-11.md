@@ -2540,25 +2540,45 @@ Two symlinks to the same folder: which of the two paths the survey keeps depends
 
 Reproduce: build `bench_startup` (`--features pioneer-test-ui/dev-bins`), `bench_startup import <tree> <work>` for a library, then `bench_startup rescan <tree> <library.db copy>`; `FF_IMPORT_PLAN_OUT=<file>` writes the plan.
 
-## R128 (paused) track load (2026-11-06, `r128-track-load`)
+## R128 track load (2026-11-06, `r128b-track-load`)
 
-Paused on request; branch `r128-track-load` from `ov-1028`, no push. Measured on the shared dev box (load 10-55), headless Chromium and Playwright WebKit, 1k and 50k libraries, 6 minute real tracks and a 65 minute FLAC, dumps of the real `get_analysis_data` answer and detail series.
+Branch `r128-track-load` finished as `r128b-track-load`, based on `ov-1028` at 8dbf8f0, no push. Measured on the shared dev box (load 10-55), headless Chromium and Playwright WebKit, 1k and 50k libraries, 6 minute real tracks and a 65 minute FLAC; the real `get_analysis_data` answer and detail series were dumped and replayed.
 
-**Trace.** Double-click, `loadPlayerTrack`: `playback_stop`, `get_analysis_data` (cached when the selecting click or the neighbour prefetch already read it), `get_waveform_detail` (47 MB for 65 min), then `playback_play` after the stop. Audio start is not a lever (first packet 0.3-1.3 ms). Backend `get_analysis_data` parsed the ANLZ files twice (`get_analysis` plus `get_cues`) and sent about 2 MB of base64 in JSON for a long track.
+**Trace.** Double-click, `loadPlayerTrack`: `playback_stop`, `get_analysis_data` (cached when the selecting click or the neighbour prefetch already read it), `get_waveform_detail` (47 MB for 65 min), then `playback_play` after the stop. Audio start is not a lever (first packet 0.3-1.3 ms). Base `get_analysis_data` parsed the ANLZ files twice (`get_analysis` plus `get_cues`) and sent about 2 MB of base64 in JSON for a long track.
 
 **Changed (all output-identical)**
-- `get_analysis_data` answers with a binary frame (`FFAN`, JSON head, band bytes), page decodes it (`decodeAnalysisBytes`); no base64, no atob loop.
+- `get_analysis_data` answers with a binary frame (`FFAN`, JSON head, band bytes); the page decodes it (`decodeAnalysisBytes`); no base64, no atob loop.
 - One ANLZ parse per load (`LocalLibrary::get_cues_with_analysis`).
-- Peak-hold downsample without per-column divisions; cache hit check without copying the 47 MB series.
+- Peak-hold downsample without per-column divisions; detail cache check without copying the 47 MB series.
 - Zoom series requested after the first paint (pending state set at once); `bandsFromInterleavedBytes` gain table; `libraryTrackById` instead of a 50k `find`.
 
-**Backend (`bench_startup trackload`, base vs new)**: 6 min track analysis answer 5.1 to 2.8 ms, cached detail 3.0 to 1.9 ms; 65 min track 68 to 23 ms and 124 to 48 ms, bytes 2.23 to 1.73 MB.
+**Backend (`bench_startup trackload`, base to new, ms)**
 
-**Page (Chromium, medians of 15 distinct rows, ready / painted, ms)**: 50k, 65 min, cold 150 / 196 to 40 / 68; 50k, 65 min, warm 55 / 151 to 21 / 48; 50k, 6 min cold 32 / 57 to 20 / 44; 1k numbers were noisy (load swings). WebKit: ready 20-60% lower, painted 15-30% lower (frames of 200 ms dominate); zoom series arrives 80-110 ms later there (deferral).
+| Track | Analysis answer | Cached detail | Answer bytes |
+|---|---|---|---|
+| 6 min | 5.1 to 2.8 | 3.0 to 1.9 | |
+| 65 min | 68 to 23 | 124 to 48 | 2.23 to 1.73 MB |
 
-**Identity**: logical payload sha256 per track equal base vs new (24 mid, 1 long, 30 fixture tracks) plus detail bytes; `player.track` hashes equal for 25 real answers; first 10 s of decoded audio (start and 30 s seek) equal for 30 files; golden `.bin/.json` pairs in `app/src/services/fixtures/analysis-*`. Canvas hashes equal in Chromium and WebKit (webkit mid fully equal); in Chromium 4 of 12 screenshot hashes differ per run (likely playhead timing, not investigated).
+**Page (Chromium, medians of 15 distinct rows, ready / painted, ms)**
 
-**Left**: WebKit `long` identity run, ablation of deferral vs binary, final tables, validation (`cargo test` passed for pioneer-library and pioneer-test-ui before the last bench-only edits; vitest and svelte-check passed earlier; `npm run smoke` chromium and webkit NOT run), screenshot-hash difference check, `perf-budgets.json` refresh. Harness: `app/smoke/perf-trackload.spec.ts` (`FF_R128_MODE=timing|profile|identity`), bench `trackload`, `dump-load`, `long-lib`.
+| Case | Base | New |
+|---|---|---|
+| 50k, 65 min, cold | 150 / 196 | 40 / 68 |
+| 50k, 65 min, warm | 55 / 151 | 21 / 48 |
+| 50k, 6 min, cold | 32 / 57 | 20 / 44 |
+
+1k numbers were noisy (load swings). WebKit: ready 20-60% lower, painted 15-30% lower (frames of 200 ms dominate); the zoom series arrives 80-110 ms later there (deferral).
+
+**Identity proof**
+- Logical payload sha256 per track equal base vs new (24 mid, 1 long, 30 fixture tracks), plus detail bytes.
+- `player.track` hashes equal for 25 real answers (`player-load-real.test.ts`); first 10 s of decoded audio (start and 30 s seek) equal for 30 files.
+- Golden `.bin/.json` pairs in `app/src/services/fixtures/analysis-*` (`analysis-bytes.test.ts`).
+- Canvas hashes equal in Chromium and WebKit.
+- Screenshot hashes, final run (Chromium, 28 mid tracks plus a 44 minute FLAC, tracks at rows 3, 5 and the long one, compact view and three seeks each = 12 snapshots, all canvases and the `.ff-xp` screenshot): 12 of 12 equal in two runs of the new build and one run of the base build (base fed the same answers re-encoded as base64 JSON, `app/smoke/perf-trackload.spec.ts` with `FF_R128_SETTLE=1`).
+
+**The differing screenshot hashes.** Not data and not the playhead. Canvas hashes were equal in every run; only the element screenshot of `.ff-xp` varied, and the same build differed from itself between runs (5 of 12 in one pair, 4 of 12 in another). A pixel diff of two runs of the new build showed 8 x 6 and 9 x 3 pixel boxes at the pencil icon and the collapse chevron in the header: icon colour mid-transition (hover/CSS transition still running at screenshot time). With transitions and animations turned off (`animations: 'disabled'`) 2 of 12 still varied; additionally parking the mouse and injecting `transition: none` gave 12 of 12 equal across both builds. Product code did not change; the harness settles the page before it hashes.
+
+**Validation.** `cargo test -p pioneer-library -p pioneer-test-ui` (120 and 288 tests passed), `cargo check -p pioneer-test-ui --features dev-bins --bins`, `npx vitest run` (962 passed), `npm run check` (0 errors), `npm run smoke` Chromium and WebKit (114 passed, 30 skipped each). `perf-budgets.json` not refreshed. Harness: `app/smoke/perf-trackload.spec.ts` (`FF_R128_MODE=timing|profile|identity`, `FF_R128_INDEX`, `FF_R128_SETTLE`, `FF_R128_SHOTS`), bench `trackload`, `dump-load`, `long-lib`.
 
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
