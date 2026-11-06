@@ -2627,6 +2627,44 @@ The store numbers are Node in dev mode under load, so only the ratios carry. Wha
 - WebKit smoke: 113 passed, 1 failed (`activity.spec.ts:137`, Import folder and files) at load 51; the same test passes alone. Not related to the bump.
 - WebKit `perf-bulk-bump`: WebKit has no long-task or CDP timings, so only the identity hashes are compared, and they are equal at 2k, 10k, 50k (`FF_PERF_ARRIVE=0` at 50k). The 50k results-arrival step in WebKit did not finish within 20 minutes on base either (stopped by hand), so that hang is not caused by this change.
 
+## R133 Mac first launch (2026-11-06, `r133-mac-startup`)
+
+Mac night 3 (below) reported a first-launch regression in item 1 and a failed item 2. Both were looked at on `mbp` (on AC, scratch HOMEs under `~/dev/build/fourfour-r133` and the night directory, `/Applications` and the real app data untouched).
+
+**Item 1: not a code regression, the night machine was loaded.** Night 3 measured 1405 ms to first row and 6990 ms to interactive (5f77028), against 868 / 910 ms in R89 (c2bd463). Rerun on a quiet Mac (1-minute load about 4), each launch a fresh HOME with a copy of the 10k library and the night 3 item 1 probe:
+
+| build | launches | first row, ms (median, range) | interactive, ms (median) |
+|---|---:|---:|---:|
+| R89 code (23534cc = c2bd463 + libc fix, + boot probe) | 8 | 631 (594-748) | 677 |
+| night 3 app (5f77028, the binary night 3 measured; the first launch after idle left out, below) | 8 | 617 (588-660) | 666 |
+| ov-1028 head (7f2325e, + boot probe), order new, base, n3 | 3 | 609 (596-692) | 657 |
+| night 3 item 1 rerun with the fixed runner (ov-1028 head, first launch right after the app build) | 1 | 886 | 959 |
+
+All three builds are within noise of each other and faster than R89's 868 ms. In the first interleaved block (base then new, 5 pairs) ov-1028 head was 764 ms against 625 ms, but the whole gap sat before the page (Rust `setup_done` 405 ms against 290 ms), there is no Rust change between 5f77028 and 7f2325e, and the gap was gone when the order changed; read it as machine state in that window (`setup` opens the CoreAudio device and the library, unverified which one varied). The page part (page start to first row) was 175-192 ms on ov-1028 head against 196-223 ms on the R89 code. The one slow launch outside night 3 was the first launch after about 10 idle minutes: 1222 ms, with `setup_done` at 710 ms.
+
+Night 3 itself: item 1 started two minutes after the night began, right after four builds; the 5-minute load at the start was 11.6, and item 3 a minute later saw load 12-19 while the CPU was 87-90% idle (I/O or scheduler pressure, not CPU). In the item 1 log the page took 763 ms from page start to first row (quiet: about 190), 92 frames passed before 10 frames in a row were under 50 ms (quiet: 10), the longest frame was 205 ms, and the first Settings open timed out at 3 s ("settings did not open"; quiet runs: no failure, 853-857 ms per cycle). A starved WebContent process explains all of it; nothing in the code between c2bd463 and 5f77028 does.
+
+**Item 2 failed on a runner bug.** `item2` checked for the night 3 scratch marker in `perf/home-1`, a HOME that `perf-night.sh` creates (and deletes) itself, so it always stopped with "was not created by night3"; the dry run skips that check, so it never showed. It now only checks that the path is inside the night directory (the same guard as preflight).
+
+**Runner changes (`scripts/mac/night3.sh`).** Item 2 fix above. Items 1 and 2 wait up to 300 s for the 1-minute load to fall below a third of the cores before launching the app and log the load (or say they launched loaded), so a launch is no longer read against R89 while the machine is still busy from the builds.
+
+**Probe change (`perf_probe.js`).** After `interactive`, a `boot_timeline` mark lists the long frames (over 50 ms) between first row and interactive, the page's `performance` marks (`ff:state-answer`, `ff:state-decoded`, `ff:state-rows`) and resource timings. Only active with `FF_PERF_LOG`. Together with `setup_done` and `page_start.time_origin` this splits a launch into Rust setup, page load and page work, which is how the window effect above was found.
+
+**Item 2 rerun (fixed runner, ov-1028 head 7f2325e + boot probe, quiet start at load 4.8): it runs now; the first rerun missed one gate.**
+
+| metric | R89 | night 3 rerun | gate |
+|---|---:|---:|---|
+| cold first row / interactive, ms | 868 / 910 | 673 / 730 | pass |
+| warm first row (median of runs 2-3), ms | 628 | 702 | pass (within 15%) |
+| warm interactive, ms | 645 | 807 | FAIL |
+| first expand, longest frame (median of 5), ms | 34 | 26 | pass |
+| scroll during analysis, frame p95, ms | 18 | 18 | pass |
+| app load_state, ms | 53-67 | 81 | |
+
+A second item 2 run on the same head right after (runner 41e5eb2): cold first row / interactive 694 / 746 ms, first expand 27 ms, scroll during analysis p95 17 ms, warm first row 579 and 586 ms (median 583), warm interactive 629 and 646 ms (median 638, passes against 645), no frame over 50 ms in any of the 8 startup launches (longest 33-45 ms). Every item 2 gate passed in that run.
+
+The warm interactive miss is one frame. Run 3 had a single 70 ms frame about 75 ms after the first row (expand runs 1 and 2: 73 and 55 ms at the same spot), and one frame over 50 ms restarts the probe's 10-frame count, so that run's interactive moves by about 90 ms; with two warm runs the median follows. The same frame shows up for the R89 code on today's Mac: longest frame before interactive 32-44 ms for 23534cc and 33-47 ms for ov-1028 head over the quiet A/B launches (R89 itself saw 17-31 ms in its warm runs), so the frame grew with the machine, not the code, and it sits just around the 50 ms threshold. Tried and dropped: delaying the first lazy-view preload to 500 ms after the first screen when there is no `requestIdleCallback` (WebKit). In 6 interleaved pairs the 55 ms frame still came at the same spot (page 246 ms) in one launch, so the preload is not that frame; no app change was kept. What the frame is was not pinned down (WebKit has no long-task API; candidates are the row previews and covers that arrive right after the first rows).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
