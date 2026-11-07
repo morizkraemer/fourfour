@@ -335,6 +335,64 @@ fn early(dir: &Path, request_at_ms: &[u64], dump: Option<&Path>) {
     }
 }
 
+/// One simulated launch: `setup_ms` after process start the setup hook runs (it needs the library), `request_ms`
+/// after process start the page asks for `load_state`. `base` opens the library in the setup and starts the early
+/// build there (R135); `new` starts the open and the build before the window exists (R154) and the setup only
+/// waits for the opened library. Prints the time from process start to the answer.
+fn boot(dir: &Path, mode: &str, setup_ms: u64, request_ms: u64, dump: Option<&Path>) {
+    let db = dir.join("library.db");
+    let early = std::sync::Arc::new(early_state::EarlyState::default());
+    let t0 = Instant::now();
+    let sleep_until = |at_ms: u64| {
+        let at = std::time::Duration::from_millis(at_ms);
+        if let Some(left) = at.checked_sub(t0.elapsed()) {
+            std::thread::sleep(left);
+        }
+    };
+    let (library, setup_wait_ms) = match mode {
+        "new" => {
+            let opened = early_state::open_and_prepare(
+                {
+                    let db = db.clone();
+                    move || LocalLibrary::open(&db).map(|lib| (db, lib))
+                },
+                early.clone(),
+                |built| built.unwrap(),
+            );
+            sleep_until(setup_ms);
+            let waited = Instant::now();
+            let (_, library) = opened.recv().unwrap().unwrap();
+            (library, ms(waited))
+        }
+        "base" => {
+            sleep_until(setup_ms);
+            let waited = Instant::now();
+            let library = std::sync::Arc::new(std::sync::Mutex::new(LocalLibrary::open(&db).unwrap()));
+            let setup_wait = ms(waited);
+            let (thread_library, thread_early) = (library.clone(), early.clone());
+            std::thread::spawn(move || {
+                let lib = thread_library.lock().unwrap();
+                thread_early.prepare(&lib).unwrap();
+            });
+            (library, setup_wait)
+        }
+        other => panic!("mode must be base or new, not {other}"),
+    };
+    sleep_until(request_ms);
+    let lib = library.lock().unwrap();
+    let (bytes, was_early) = early_state::encoded_state(&lib, &early).unwrap();
+    let answered_at = ms(t0);
+    println!(
+        "BOOT mode={mode} setup_at={setup_ms} request_at={request_ms} setup_blocked_ms={setup_wait_ms:.1} answered_at_ms={answered_at:.1} request_to_answer_ms={:.1} early_hit={was_early} bytes={} sha256={}",
+        (answered_at - request_ms as f64).max(0.0),
+        bytes.len(),
+        sha_hex(&bytes),
+    );
+    if let Some(out) = dump {
+        std::fs::write(out, &bytes).unwrap();
+    }
+}
+
 fn trackload(dir: &Path, work: &Path, samples: usize) {
     use std::sync::{Arc, Mutex};
     let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
@@ -1248,6 +1306,13 @@ fn main() {
             &args.get(3).map_or(vec![0, 100, 400], |list| list.split(',').map(|n| n.parse().unwrap()).collect::<Vec<u64>>()),
             args.get(4).map(Path::new),
         ),
+        Some("boot") => boot(
+            Path::new(&args[2]),
+            &args[3],
+            args[4].parse().unwrap(),
+            args[5].parse().unwrap(),
+            args.get(6).map(Path::new),
+        ),
         Some("rep") => rep(Path::new(&args[2]), args.get(3).map_or(15, |n| n.parse().unwrap())),
         Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
         Some("dump-bytes") => dump_bytes(Path::new(&args[2]), Path::new(&args[3])),
@@ -1270,7 +1335,7 @@ fn main() {
             args.get(5).map_or(4404, |s| s.parse().unwrap()),
         ),
         _ => eprintln!(
-            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | early <dir> [request ms list] [out.bin] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | rescan <folder> <library.db> | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+            "usage: bench_startup gen <dir> <count> | run <dir> | rep <dir> [runs] | early <dir> [request ms list] [out.bin] | boot <dir> base|new <setup ms> <request ms> [out.bin] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | rescan <folder> <library.db> | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
         ),
     }
 }

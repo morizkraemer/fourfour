@@ -3261,6 +3261,44 @@ Heap rises 21 MB in the first minute of analysis events and then stays flat for 
 
 Scratch (`~/.cache/r152*`) is deleted after this item.
 
+## R154 early load_state (2026-11-07, `r154-early-load-state`)
+
+Branch `r154-early-load-state` from `ov-1028`. R135 already builds the answer on a thread at setup and hands the bytes to the first `load_state`, so that is not redone. What R135 left: the thread starts inside the `setup` hook, and Tauri 2.10.3 builds the config windows (`WebviewWindowBuilder::build`) before it calls the hook (`tauri::app::setup`), so the webview and page start loading first. The library open (`read_library_path`, `create_dir_all`, `LocalLibrary::open`, about 2 ms warm here) also ran on the main thread inside the hook, before the thread was spawned.
+
+### What changed
+
+- `early_state::open_and_prepare` runs the library open and the answer build on one thread. `main` calls it right after `Builder::build` (the `App` and its path resolver exist, no window yet) and before `run`. The setup hook takes the opened library from a channel (`StartupLibrary`) instead of opening it itself and keeps the rest of its work (staging sweep, file health, cover fill, playback) as it was. The thread holds the library lock before it sends the library, so the answer is built before the health check or cover fill can take the lock, as in R135.
+- Same functions and checks: `read_library_path`, `open_startup_library` (unchanged), `EarlyState::prepare`, `encoded_state` with the revision and labels guard. An open error is sent unchanged and nothing is built; the setup manages `LibraryOpenFailure` as before and `load_state` returns the same error (the recovery path).
+- `EarlyState` is now managed at start (before, only after a successful open); `load_state` checks the library state first, so a failed open still answers with the failure.
+- New mark (with `FF_PERF_LOG`): `library_opened`; `early_state_ready` now comes from the thread.
+- Tests: `early_state::tests` (the thread hands back the library and the first request gets the early answer with equal bytes; a write after the build returns the new state; an open error is returned unchanged and nothing is built) and in `main` (a damaged `library.db` and a missing library path through the thread give the same error, kind, path and untouched file as the direct open; a missing `library.db` is created and answered from the thread).
+- `bench_startup boot <dir> base|new <setup ms> <request ms> [out.bin]`: one simulated launch with the real functions. `base` is the R135 flow (open in the hook at `setup ms`, build thread after it), `new` is this one (open and build from time 0, the hook only waits for the library).
+
+### Identity
+
+`bench_startup boot` prints the sha256 of the answer in both modes: 10k `189c1084156ec70db43f1005134df010ae92b5cadde3e1f6d57074c6d86b36ad` (1,715,152 bytes), 50k `893a4522aa3716187953bf68054de31c73768fe174ae242c904bbf299fcccbe9` (8,319,832). Equal in `base` and `new`, and equal to the R135 values.
+
+### Backend, process start to `load_state` answered (simulation, warm file cache)
+
+The time from `build` to the hook cannot be measured without a window. The table takes the hook at 100 ms (an assumption; the Mac R133 launches had `setup_done` at 290-405 ms, which includes playback) and the page's request at 250 or 400 ms. The shared fixtures had been migrated to schema 8 by another branch, so the runs use copies downgraded to schema 7 (v7 cover table put back; the answer hashes match R135). 4 interleaved base/new pairs per cell, box load 37-38 the whole time (other workers), so read the direction, not the digits.
+
+| Library | Request at | Answered at, base / new (median, ms) | Request to answer, base / new (median, ms) | New faster in |
+|---|---:|---:|---:|---:|
+| 10k | 250 | 253 / 255 | 3 / 5 | no change (answer ready before the request either way) |
+| 10k | 400 | 405 / 403 | 5 / 3 | no change |
+| 50k | 250 | 571 / 394 | 322 / 144 | 4 of 4 pairs |
+| 50k | 400 | 534 / 428 | 134 / 28 | 4 of 4 pairs |
+
+Raw 50k answered-at, base against new: request 250: 587, 606, 483, 556 against 354, 444, 395, 393; request 400: 596, 509, 510, 558 against 423, 473, 433, 422. The gain is the head start itself (the assumed 100 ms before the hook, more under load), so it is as large as the time Tauri takes from `build` to the hook and only shows where the build is longer than the page's wait: 50k. At 10k the 60 ms answer was already ready.
+
+### What this means on the Mac (not measured)
+
+A Mac launch has a real head start (R133: `setup_done` at 290-405 ms), and the library open is a few ms there. The saving is the time between `build` and the hook (window creation) that the build now overlaps. At 10k expect nothing visible, since the answer was already ready before the page asked in R135. At 50k expect up to the same 100-150 ms as above, only if the page asks within the build time. On a cold disk (first query 1.5-4 s on the box) it matters most: the first read now starts before the window is created.
+
+### Not done
+
+No real window run (rules), so the time from process start to `build` and from `build` to the hook is assumed, not measured. The cold-disk case was not run (the page cache cannot be dropped here without root).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
