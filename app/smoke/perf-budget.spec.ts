@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { test, type Browser, type CDPSession, type Page } from '@playwright/test';
 import type { LoadedState, TrackInfo } from '../src/services/tauri.svelte.ts';
@@ -96,7 +96,12 @@ function installProbes() {
 async function openApp(browser: Browser, payload: LoadedState) {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
   const page = await context.newPage();
-  await page.exposeFunction('__smokeAnalysis', (trackId: number) => mockAnalysisData(trackId, 180 + ((trackId * 7) % 300), 12400, '8A'));
+  await page.exposeFunction('__smokeAnalysisRemote', (trackId: number) => mockAnalysisData(trackId, 180 + ((trackId * 7) % 300), 12400, '8A'));
+  await page.addInitScript(() => {
+    const w = window as unknown as { __smokeAnalysisCache: Map<number, unknown>; __smokeAnalysisRemote: (id: number) => Promise<unknown>; __smokeAnalysis: (id: number) => Promise<unknown> };
+    w.__smokeAnalysisCache = new Map();
+    w.__smokeAnalysis = (id) => (w.__smokeAnalysisCache.has(id) ? Promise.resolve(w.__smokeAnalysisCache.get(id)) : w.__smokeAnalysisRemote(id));
+  });
   await page.addInitScript(installTauriMock, payload);
   await page.addInitScript(installProbes);
   const cdp = WEBKIT ? null : await context.newCDPSession(page);
@@ -247,8 +252,20 @@ async function heap(page: Page, cdp: CDPSession | null) {
   return { preGcMb: round(pre / 1048576), mb: round(usage.usedSize / 1048576), totalMb: round(usage.totalSize / 1048576), nodes: metrics.find((m) => m.name === 'Nodes')?.value ?? 0 };
 }
 
-function startAnalysis(page: Page, ids: number[], perSecond: number) {
-  return page.evaluate(
+const PREFETCH_EVENTS = 250;
+
+async function startAnalysis(page: Page, ids: number[], perSecond: number) {
+  await page.evaluate(
+    async ({ ids, count }) => {
+      const w = window as unknown as { __smokeAnalysisCache: Map<number, unknown>; __smokeAnalysisRemote: (id: number) => Promise<unknown> };
+      for (let n = 0; n < count; n++) {
+        const id = ids[(n * 7919) % ids.length];
+        if (!w.__smokeAnalysisCache.has(id)) w.__smokeAnalysisCache.set(id, await w.__smokeAnalysisRemote(id));
+      }
+    },
+    { ids, count: PREFETCH_EVENTS },
+  );
+  await page.evaluate(
     ({ ids, perSecond }) => {
       const w = window as unknown as SmokeWindow & { __emitter?: number; __cursor?: number };
       if (w.__emitter) clearInterval(w.__emitter);
@@ -478,6 +495,65 @@ test.describe('r152 budget', () => {
       await page.waitForTimeout(1000);
       await sample('big player playing, no analysis');
       report('analysis', run, windows);
+      await context.close();
+    }
+  });
+
+  test('analysis-list: main-thread busy and GC per second, list visible, 1 and 6 events/s', async ({ browser }) => {
+    test.skip(!PARTS.has('analysis-list') || WEBKIT);
+    const payload = state();
+    const ids = payload.tracks.map((t) => t.id);
+    for (let run = 0; run < RUNS; run++) {
+      const { context, page, cdp } = await openApp(browser, payload);
+      await boot(page, cdp);
+      await page.waitForTimeout(10_000);
+      const windows: Record<string, { busyPerSecond: number[]; scriptPerSecond: number[]; layoutStylePerSecond: number[]; gcMsPerSecond: number; eventsPerSecond: number; top: string[] }> = {};
+      const sample = async (name: string, eventsPerSecond: number) => {
+        const busy: number[] = [];
+        const script: number[] = [];
+        const layoutStyle: number[] = [];
+        await cdp!.send('Profiler.enable');
+        await cdp!.send('Profiler.setSamplingInterval', { interval: 1000 });
+        await cdp!.send('Profiler.start');
+        const traced: unknown[] = [];
+        if (process.env.FF_PERF_TRACE && eventsPerSecond > 0) {
+          cdp!.on('Tracing.dataCollected', (e: { value: unknown[] }) => traced.push(...e.value));
+          await cdp!.send('Tracing.start', { traceConfig: { includedCategories: ['devtools.timeline', 'v8', 'disabled-by-default-devtools.timeline', 'blink', 'cc', 'toplevel'] } });
+        }
+        let last = await counters(cdp);
+        for (let s = 0; s < WINDOW_SECONDS; s++) {
+          await page.waitForTimeout(1000);
+          const now = await counters(cdp);
+          busy.push(round(now.task - last.task));
+          script.push(round(now.script - last.script));
+          layoutStyle.push(round(now.layout - last.layout + now.style - last.style));
+          last = now;
+        }
+        if (traced.length === 0 && process.env.FF_PERF_TRACE && eventsPerSecond > 0) traced.push(0);
+        if (process.env.FF_PERF_TRACE && eventsPerSecond > 0) {
+          const done = new Promise((r) => cdp!.once('Tracing.tracingComplete', r));
+          await cdp!.send('Tracing.end');
+          await done;
+          writeFileSync(`${process.env.FF_PERF_TRACE}-${eventsPerSecond}.json`, JSON.stringify(traced));
+        }
+        const profile = ((await cdp!.send('Profiler.stop')) as { profile: Profile }).profile;
+        if (process.env.FF_PERF_DUMP_PROFILE) writeFileSync(`${process.env.FF_PERF_DUMP_PROFILE}-${eventsPerSecond}.json`, JSON.stringify(profile));
+        const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+        let gc = 0;
+        profile.samples.forEach((id, i) => {
+          if (byId.get(id)!.callFrame.functionName === '(garbage collector)') gc += profile.timeDeltas[i] / 1000;
+        });
+        windows[name] = { busyPerSecond: busy, scriptPerSecond: script, layoutStylePerSecond: layoutStyle, gcMsPerSecond: round(gc / WINDOW_SECONDS), eventsPerSecond, top: PROFILE ? topFunctions(profile, 14) : [] };
+      };
+      await sample('list, no analysis', 0);
+      await startAnalysis(page, ids, 1);
+      await page.waitForTimeout(2000);
+      await sample('list, analysis 1 event/s', 1);
+      await startAnalysis(page, ids, 6);
+      await page.waitForTimeout(2000);
+      await sample('list, analysis 6 events/s', 6);
+      await stopAnalysis(page);
+      report('analysis-list', run, windows);
       await context.close();
     }
   });
