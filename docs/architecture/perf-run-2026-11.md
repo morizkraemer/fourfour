@@ -3472,6 +3472,32 @@ Claimed: script time at both rates is down by more than the noise (at 6 events/s
 
 Scratch (`~/.cache/r156*`) is deleted after this item.
 
+## R158 Mac analysis ship (2026-11-07, `r158-mac-analysis`)
+
+Merlin's decision (2026-11-07, Waiting 43 and 44: "1 yes"): beat chunk 500 on every build, the Mac too, and the int8 beat model with weight prepacking on the Mac. x86 keeps fp32. Branch `r158-mac-analysis` from `ov-1028` (7e00d28).
+
+**What went in.** `r108-throughput` (1ee34d2, which carries `r96-chunk500`, the R79 fold peak, R101 with the half-time band off, R102 switches and `r105-snap` 903b702) as one merge; then `r98-mac-pair` (87548eb, with `r97-int8-500`: the quantize script and docs); then `r150-int8-prepack` (e779648). Conflicts: `service.rs` tests (kept ov-1028's R93 ceiling test, gave it r108's activation argument) and this doc (both sides kept, R108 placed after R106).
+
+**Code on top** (`fourfour-analysis-rs/src/bt.rs`, `service.rs`):
+
+- `DEFAULT_CHUNK_SIZE` is 500 everywhere; the CoreML-only 1500 is gone. `FOURFOUR_BEAT_CHUNK` still overrides.
+- `DEFAULT_BEAT_MODEL` is `beat_this_q8sc.onnx` on macOS (`cfg!(target_os = "macos")`), `beat_this.onnx` elsewhere. `FOURFOUR_BEAT_MODEL` still overrides. Prepacking follows the file (`prepacks_weights`: any file but fp32), so the Mac gets R150's prepack and x86 does not.
+- Runtime: in an `ort`/`coreml` build the beat model goes to onnxruntime when `FOURFOUR_BEAT_RUNTIME` names anything but `rten`, or when it is unset and the model is the fp32 file. The int8 model runs on rten unless asked otherwise. So the Mac app (still built with `--features coreml`) runs int8 on rten by default, and `FOURFOUR_BEAT_MODEL=beat_this.onnx` alone brings back CoreML (at chunk 500; add `FOURFOUR_BEAT_CHUNK=1500` for the old path) if the fp32 file is in the models dir.
+- `bench_analysis`'s per-stage profile loads the default model (it loaded fp32 by name before).
+
+**The int8 file.** Not in git (like the fp32 weights). `scripts/mac/int8-model.sh [models dir]` makes it from the sha-checked `beat_this.onnx` with `fourfour-analysis-rs/scripts/quantize_beat_int8.py --per-channel` (R97) in a throwaway venv (`~/.cache/fourfour-quant-venv`, pinned onnx 1.23.2, onnxruntime 1.31.1, numpy 2.5.4) and checks the result: sha256 `f315e4684715999897fea9d9c7581e53b43fa73dc32f96aabee0cc58d9b2fe78`, 23,905,596 bytes. On dev it reproduces that hash exactly, from the R97 venv and from a fresh venv with the pins. If the Mac's wheels give other bytes it stops and says so; `FOURFOUR_INT8_MODEL=<file>` then copies a known file (dev: `~/.cache/r97-models/beat_this_q8sc.onnx`) and still checks it. `scripts/mac/build-dmg.sh` and `fourfour-analysis-rs/scripts/bundle-app.sh` (on Darwin) run it, then bundle with `pioneer-test-ui/tauri.bundle-weights-mac.conf.json`: int8, mel, `LICENSE-beat-this.txt`, `LICENSE-key-model.txt` (the fp32 file is not bundled on the Mac: 83 MB the app never loads). `check-dmg.sh` checks the int8 file. Licence: the int8 file is the MIT Beat This! weights, quantized; the same `LICENSE-beat-this.txt` ships next to it, and the notices entry (`scripts/release/third-party-extras.json`, `pioneer-test-ui/resources/THIRD-PARTY-NOTICES.txt`) names it.
+
+**Battery.** No branch had a "fewer workers on battery" cut in code; r98 only recommended one because rten int8 used 2.7x the CPU of CoreML 1500 (988 vs 368 s). Mac night 3 measured int8 at 500 at 614 CPU s against 644 for CoreML 1500, so the reason is gone. Not added.
+
+**Acceptance on x86 (dev box, fp32, chunk 500, at most 2 analysis threads).**
+
+- Output identity with `r108-throughput`: `analyze-json --threads 2 --workers 1` over 8 tracks of `rekordbox-testdata-2025` from the test split (3 MP3, 3 FLAC, 2 WAV; full app result: grid, BPM, key, waveforms) is byte-identical, 8,276,547 bytes, sha256 `974a7f995d45b03e63e01c97b7cd442c13339dfa01f4f92ec74ace30dbc0e90b`, both builds, 8 of 8 analysed. CPU 366 s (r158) and 370 s (r108).
+- Scores (`benchmark/scripts/r94-run.sh` with this branch's `ffa`, `WORKERS=1 THREADS=2`, fp32, `o3-score.py`): test 205: grid 20 ms **171**, BPM 0.1 **185**, BPM 1 193, bar right 142 of all. These are exactly the R105 chunk-500 numbers that R108 carried (171 / 185 / 193 / 142; gate 171 = 171 passes, BPM 0.1 equals R108's 185, one under the 1500 reference as before). 46.1 CPU s per track, 1.97 tracks/min at load 15-50, peak RSS 678 MB. The dev split was not rerun (timebox; the box was at load 50 for half the run); the byte identity above covers the code path.
+
+Validation: `cargo test --workspace`: 26 `test result: ok` lines, 587 passed, 0 failed (new: `every_build_uses_the_500_frame_chunk`, `only_the_fp32_model_goes_to_onnxruntime_by_default`, `the_mac_defaults_to_the_int8_beat_model_and_the_rest_to_fp32`). `cargo check -p fourfour-analysis-rs --features ort --tests` clean. `app`: `npx vitest run` 980 passed, 9 skipped; `npm run check` 0 errors, 0 warnings (app code unchanged). Not checked: `aarch64-apple-darwin` (target not installed on dev), the Mac build and the `coreml` feature on the Mac.
+
+**Mac checks for Merlin** (not run here: no Mac access, no `aarch64-apple-darwin` target on dev). See the commands in the report: int8 file, `build-dmg.sh`, `check-dmg.sh`, a 49-track `bench_analysis` against night 3's int8 row, and a look at `beat_runtime` in the app's analysis status (should read `rten`).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

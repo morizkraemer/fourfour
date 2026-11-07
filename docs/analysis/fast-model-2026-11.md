@@ -111,6 +111,8 @@ Mac `mbp` (M5 Pro, 24 GB, AC, headless, `nice -n 10`, HOME scratch, no Pioneer d
 
 Decision in code: `DEFAULT_CHUNK_SIZE` is 500, except 1500 in builds with the `coreml` feature on macOS (the shipped Mac app), so the Mac path is unchanged. `FOURFOUR_BEAT_CHUNK` still overrides. Making the Mac 500 as well is one constant (`COREML_CHUNK_SIZE` in `bt.rs`) and is a speed against memory call for Merlin.
 
+Superseded by R158 (2026-11-07, Merlin: ship): 500 on every build, and the Mac defaults to the int8 model on rten with prepacked weights. See "R158 Mac analysis ship" in `docs/architecture/perf-run-2026-11.md`.
+
 `ANALYSIS_VERSION` 1 -> 2. It only feeds `analysis_key`, which keys `analysis-failures.json` (the memo of tracks that failed analysis): after the bump the memo is dropped once and failed tracks are retried. It does not re-analyse the library and does not touch stored results, so existing tracks keep their 1500-chunk analyses (grid differences are within the 1-3 track noise above). The earlier "cached analyses are redone" note was wrong. Re-analysis of existing tracks stays the user's action.
 
 ## Next (to reach 2x+)
