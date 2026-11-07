@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{mpsc, Arc, Mutex};
 
 use pioneer_library::{LibraryRevision, LocalLibrary, TrackLabels};
 
@@ -57,6 +58,32 @@ impl EarlyState {
             _ => Ok(None),
         }
     }
+}
+
+pub type OpenedLibrary = (PathBuf, Arc<Mutex<LocalLibrary>>);
+
+/// Opens the library and builds the `load_state` answer on a thread of its own, so both run while the webview
+/// is created. The opened library comes back on the channel with its lock already held by the thread, so the
+/// answer is built before anything else the setup starts can use the library. `ready` gets the build's result.
+/// An open error is sent as it is and nothing is built.
+pub fn open_and_prepare<E: Send + 'static>(
+    open: impl FnOnce() -> Result<(PathBuf, LocalLibrary), E> + Send + 'static,
+    early: Arc<EarlyState>,
+    ready: impl FnOnce(Result<(), String>) + Send + 'static,
+) -> mpsc::Receiver<Result<OpenedLibrary, E>> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || match open() {
+        Err(error) => {
+            let _ = sender.send(Err(error));
+        }
+        Ok((path, library)) => {
+            let library = Arc::new(Mutex::new(library));
+            let Ok(locked) = library.lock() else { return };
+            let _ = sender.send(Ok((path, library.clone())));
+            ready(early.prepare(&locked));
+        }
+    });
+    receiver
 }
 
 /// The `load_state` answer: the early one when it is still current, else built now. The library must be locked.
@@ -213,5 +240,66 @@ mod tests {
         let (bytes, was_early) = encoded_state(&replacement, &early).unwrap();
         assert!(!was_early);
         assert_eq!(bytes, on_demand(&replacement));
+    }
+    #[test]
+    fn the_thread_hands_back_the_opened_library_and_has_the_answer_ready_for_the_first_request() {
+        let (seed, dir) = file_library("thread-ok");
+        for title in ["a", "b", "c"] {
+            seed.add_track(&track(title)).unwrap();
+        }
+        drop(seed);
+        let db = dir.join("library.db");
+        let early = Arc::new(EarlyState::default());
+        let (built_tx, built_rx) = mpsc::channel();
+        let opened = open_and_prepare(
+            {
+                let db = db.clone();
+                move || LocalLibrary::open(&db).map(|lib| (db, lib)).map_err(|e| e.to_string())
+            },
+            early.clone(),
+            move |built| built_tx.send(built).unwrap(),
+        );
+        let (path, library) = opened.recv().unwrap().unwrap();
+        assert_eq!(path, db);
+        let lib = library.lock().unwrap();
+        let (bytes, was_early) = encoded_state(&lib, &early).unwrap();
+        assert!(was_early);
+        assert_eq!(bytes, on_demand(&lib));
+        assert_eq!(built_rx.recv().unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn a_write_after_the_thread_built_the_answer_returns_the_new_state() {
+        let (_seed, dir) = file_library("thread-write");
+        let db = dir.join("library.db");
+        let early = Arc::new(EarlyState::default());
+        let opened = open_and_prepare(
+            {
+                let db = db.clone();
+                move || LocalLibrary::open(&db).map(|lib| (db, lib)).map_err(|e| e.to_string())
+            },
+            early.clone(),
+            |_| {},
+        );
+        let (_, library) = opened.recv().unwrap().unwrap();
+        let lib = library.lock().unwrap();
+        lib.add_track(&track("late")).unwrap();
+        let (bytes, was_early) = encoded_state(&lib, &early).unwrap();
+        assert!(!was_early);
+        assert_eq!(bytes, on_demand(&lib));
+    }
+
+    #[test]
+    fn an_open_error_is_handed_back_unchanged_and_nothing_is_built() {
+        let early = Arc::new(EarlyState::default());
+        let (built_tx, built_rx) = mpsc::channel::<Result<(), String>>();
+        let opened = open_and_prepare(
+            || Err::<(PathBuf, LocalLibrary), String>("cannot open".into()),
+            early.clone(),
+            move |built| built_tx.send(built).unwrap(),
+        );
+        assert_eq!(opened.recv().unwrap().err().unwrap(), "cannot open");
+        assert!(built_rx.recv().is_err());
+        assert!(matches!(*early.slot.lock().unwrap(), Slot::Waiting));
     }
 }
