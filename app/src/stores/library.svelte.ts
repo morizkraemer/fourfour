@@ -734,6 +734,7 @@ function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] 
 }
 
 interface FilterEntry {
+  list: object;
   terms: string[];
   indices: number[];
   result: unknown[];
@@ -785,11 +786,16 @@ function narrows(older: string[], terms: string[]): boolean {
 }
 
 function singleCharacterBits(terms: string[]): { letters: number; digits: number } | null {
-  if (terms.length !== 1 || terms[0].length !== 1) return null;
-  const code = terms[0].charCodeAt(0);
-  if (code >= 97 && code <= 122) return { letters: 1 << (code - 97), digits: 0 };
-  if (code >= 48 && code <= 57) return { letters: 0, digits: 1 << (code - 48) };
-  return null;
+  let letters = 0;
+  let digits = 0;
+  for (const term of terms) {
+    if (term.length !== 1) return null;
+    const code = term.charCodeAt(0);
+    if (code >= 97 && code <= 122) letters |= 1 << (code - 97);
+    else if (code >= 48 && code <= 57) digits |= 1 << (code - 48);
+    else return null;
+  }
+  return { letters, digits };
 }
 
 /**
@@ -810,12 +816,12 @@ function matchingIndices(haystacks: string[], terms: string[], candidates: numbe
       for (let c = 0; c < candidates.length; c++) {
         const i = candidates[c];
         const p = positions ? positions[i] : i;
-        if ((letters[p] & wantLetters) !== 0 || (digits[p] & wantDigits) !== 0) indices.push(i);
+        if ((letters[p] & wantLetters) === wantLetters && (digits[p] & wantDigits) === wantDigits) indices.push(i);
       }
     } else {
       for (let i = 0; i < haystacks.length; i++) {
         const p = positions ? positions[i] : i;
-        if ((letters[p] & wantLetters) !== 0 || (digits[p] & wantDigits) !== 0) indices.push(i);
+        if ((letters[p] & wantLetters) === wantLetters && (digits[p] & wantDigits) === wantDigits) indices.push(i);
       }
     }
     return indices;
@@ -851,37 +857,63 @@ export function filterTracks<T extends Record<string, unknown>>(
 ): T[] {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return tracks;
-  let history = filterHistory.get(tracks);
-  const known = history?.get(trimmed);
-  if (known) return known.result as T[];
   const isLibrary = tracks === untrack(() => trackList);
+  let history = filterHistory.get(tracks);
   if (!history) {
-    history = new Map();
+    history = isLibrary && libraryFilters && libraryPositionsChangedSince(libraryFilters.tracks) !== null ? new Map(libraryFilters.history) : new Map();
     filterHistory.set(tracks, history);
   }
+  const known = history.get(trimmed);
+  if (known && known.list === tracks) return known.result as T[];
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const haystacks = haystacksFor(tracks);
   const member = isLibrary ? null : membersOf(tracks);
-  if (isLibrary && libraryFilters && libraryFilters.tracks !== tracks) {
-    const changed = libraryPositionsChangedSince(libraryFilters.tracks);
-    const earlier = libraryFilters.history.get(trimmed);
-    if (changed && earlier) {
-      const indices = withChangedMatches(earlier.indices, changed, haystacks, terms);
-      if (indices === earlier.indices) return remember(history, trimmed, terms, indices, tracks, true, null, earlier.result);
+  if (isLibrary && known) {
+    const changed = libraryPositionsChangedSince(known.list);
+    if (changed) {
+      const indices = withChangedMatches(known.indices, changed, haystacks, terms);
+      if (indices === known.indices) return remember(history, trimmed, terms, indices, tracks, true, null, known.result);
       return remember(history, trimmed, terms, indices, tracks, true);
     }
   }
   let candidates: number[] | null = null;
+  let changedSinceCandidates: number[] = [];
   for (const entry of history.values()) {
-    if (narrows(entry.terms, terms) && (!candidates || entry.indices.length < candidates.length)) candidates = entry.indices;
+    if (!narrows(entry.terms, terms) || (candidates && entry.indices.length >= candidates.length)) continue;
+    if (entry.list === tracks) {
+      candidates = entry.indices;
+      changedSinceCandidates = [];
+      continue;
+    }
+    const changed = isLibrary ? libraryPositionsChangedSince(entry.list) : null;
+    if (changed) {
+      candidates = entry.indices;
+      changedSinceCandidates = changed;
+    }
   }
   const masked = isLibrary ? 'all' : (member?.members ?? null);
-  return remember(history, trimmed, terms, matchingIndices(haystacks, terms, candidates, masked), tracks, isLibrary, member);
+  let indices = matchingIndices(haystacks, terms, candidates, masked);
+  if (candidates && changedSinceCandidates.length > 0) {
+    const outside = [...new Set(changedSinceCandidates)].sort((x, y) => x - y).filter((i) => !isAmong(candidates, i));
+    if (outside.length > 0) indices = mergeAscending(indices, matchingIndices(haystacks, terms, outside, masked));
+  }
+  return remember(history, trimmed, terms, indices, tracks, isLibrary, member);
+}
+
+function mergeAscending(first: number[], second: number[]): number[] {
+  if (second.length === 0) return first;
+  const merged: number[] = [];
+  let a = 0;
+  let b = 0;
+  while (a < first.length && b < second.length) merged.push(first[a] < second[b] ? first[a++] : second[b++]);
+  while (a < first.length) merged.push(first[a++]);
+  while (b < second.length) merged.push(second[b++]);
+  return merged;
 }
 
 function remember<T>(history: Map<string, FilterEntry>, query: string, terms: string[], indices: number[], tracks: T[], isLibrary: boolean, member: MemberRows | null = null, sameRows: readonly unknown[] | null = null): T[] {
   const result = indices.length === tracks.length ? tracks : sameRows ? (sameRows.slice() as T[]) : indices.map((i) => tracks[i]);
-  history.set(query, { terms, indices, result });
+  history.set(query, { list: tracks, terms, indices, result });
   if (history.size > FILTER_HISTORY) history.delete(history.keys().next().value!);
   if (isLibrary) {
     libraryFilters = { tracks, history };

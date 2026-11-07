@@ -2955,6 +2955,62 @@ Not in the build's string work: the allocation volume per row (path, title, join
 
 Scratch (`~/.cache/r146*`) deleted after this item.
 
+## R147 sorted typing (2026-11-07, `r147-sorted-typing`)
+
+R143 lever 5: at 50k the second key of a query in a sorted view cost 58-74 ms of script against 28 ms for the first key. Branch from `ov-1028`. Linux `dev` box (load 8-35, other workers), headless Chromium and Playwright WebKit, r95 10k and 50k payloads, base = `ov-1028` in a separate tree with the same spec and test files, runs interleaved. New harness `app/smoke/perf-sorted-typing.spec.ts` (`FF_PERF_STATE`, `FF_PERF_SORTS=none,title,artist,bpm`, `FF_PERF_ANALYSIS=1` for 6 `analysis-partial` events per second 10 s before the keys, `FF_PERF_PROFILE=1 FF_PERF_PROFILE_EACH=<dir>` for one CPU profile per key; frames run, R134): per sort, typing "house", backspacing to empty, typing "a b", backspacing to empty; per key script, total and a hash of the rows on screen. `app/src/stores/sorted-typing-real.test.ts` (env-gated): filter and sort time of 24 queries for 9 sorts, with and without a bump of 2 rows before every key, and the hash of every ordered result.
+
+### Cause (measured)
+
+- **The second key is the first key after a bump.** `filterHistory` is per list array and a bump makes a new array, so after every analysis bump (up to 4 per second) the history of earlier queries was gone: any query that was not the exact one asked before did a full scan of every search text. "a" is answered from the letter sets (8 ms at 50k in Node); "am", "hou", "a b" are `includes` over 37-50k texts (14-22 ms in Node, 50k, each bump in between). Without bumps between keys the old code narrowed from the earlier key and was as fast as the new code. Store level, sorted by title, bump before each key, ms (filter + sort): "hous" 16.7 to 4.4, "hou" back from "hous" 17.2 to 1.8, "house" 17.7 to 4.3, "house dub" 16.7 to 5.3, "am" after "a" and "a b" after "a" unchanged (the fixture's "a" matches all 50k rows, nothing to narrow).
+- **The sort is not the cause.** Sorting 50k by title, artist or bpm adds 0.5-2 ms to a key at store level ("a b" asc 6.5 once for the rank); in the page the sorted and the unsorted view cost the same per key after the change (50k analysis script sum over 24 keys: none 252, title 252, artist 234, bpm 195 ms).
+- **Keys that change the rows on screen cost script in any view**: Svelte updates of 40-50 rows, 20-35 ms against 8-12 ms for a key that leaves the visible rows alone ("hou" after "ho", "a b", backspace to "ho" and "a "). That is the remaining difference between a first and a second key; it is not sort or filter work and not touched.
+- `matches` for a query of several terms ran `includes` for every term, also for one-letter terms ("a b"), though the letter and digit sets answer those exactly (R115).
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `app/src/stores/library.svelte.ts` `filterTracks`: the history of the library list is carried over to the new list array after a bump (`new Map(libraryFilters.history)` when the bump log reaches back to it); each entry knows the list it was computed for (`FilterEntry.list`). A query that narrows an older entry (`narrows`, all old terms inside new terms) starts from that entry's rows plus the rows bumped since (`libraryPositionsChangedSince`, those not already among the candidates are tested separately and merged in order), which is the full-scan result by construction: an unchanged row that matches the new terms matches the old ones. The same query asked before still takes `withChangedMatches`. A list replaced by anything but bumps drops the carried entries (as before the history was empty).
+- `singleCharacterBits` takes several terms: when every term is one letter or digit, a row matches when all their bits are set in its letter and digit sets (one term: the same test as before). "a b" no longer calls `includes` (not separable in the store run: Svelte's dev build turns every `===` into a call, so the Node timing of that loop is not the browser's; the browser total above includes it).
+- Tests: `filter-after-bump.test.ts` (rows that move into and out of the earlier result by edits and bumps, longer queries typed after them, several one-character terms in any order; breaking the merge of outside rows makes it fail, checked), `search-sort-fuzz.test.ts` fails with the merge or the bit test broken (checked), `sorted-typing-real.test.ts`, `perf-sorted-typing.spec.ts`.
+
+### Before / after
+
+Chromium 50k, analysis running (10 s old), 3 interleaved pairs, ms, median over runs (script / total):
+
+| Key (sorted by title) | base | new |
+|---|---|---|
+| "ho" | 31 / 88 | 11 / 61 |
+| "hou" | 45 / 98 | 36 / 94 |
+| back to "hous" | 28 / 60 | 16 / 59 |
+| back to "hou" | 26 / 62 | 10 / 60 |
+| back to "ho" | 28 / 178 | 21 / 105 |
+| "a b" | 46 / 112 | 36 / 104 |
+
+| Script sum over the 24 keys, ms | none | title | artist | bpm |
+|---|---|---|---|---|
+| base | 281 | 321 | 293 | 295 |
+| new | 252 | 252 | 234 | 195 |
+
+Totals (key to second frame), mean per key: title 77 to 70, artist 73 to 65, bpm 70 to 65, none 69 to 71. Idle (no analysis, 2 pairs): title 365 to 244, artist 235 to 237, bpm 228 to 194, none 340 to 296 (noisy; there is no bump to lose the history). 10k analysis (2 pairs): 273/236/232/258 to 240/232/231/235, inside the noise (the scan is 3-4 ms). WebKit 50k analysis (2 pairs, `js` = key to a `setTimeout(0)`; compositor floor of R29 in `total`): none 868 to 914, title 815 to 794, artist 1022 to 827, bpm 868 to 1934 (one new run 1797, the other 977), totals 230-286 to 238-485 with that one run; no WebKit gain claimed.
+
+### Identity
+
+- Store level, hash of every ordered id of every result, base against new, 10k and 50k: `sorted-typing-real.test.ts` 432 of 432 at both sizes (9 sorts, 24 queries typed, backspaced and widened, with and without a bump of 2 rows before each key); `search-path-real.test.ts` (R113 script) 94 of 94; `sort-analysis-real.test.ts` (R137/R139) 601 of 601.
+- Page level: the rows on screen after every key (hash, 3 sorts and unsorted, typing and backspacing "house" and "a b") equal between base and new in every run, also the analysis runs (one view-hash sequence in all 6 runs at 50k, all 4 at 10k, all 4 in WebKit).
+- Fuzz: `FF_FUZZ_FULL=1` `bulk-bump-fuzz`, `search-sort-fuzz`, `playlist-sort-fuzz` 12 of 12.
+
+### Validation
+
+- `npx vitest run`: 110 files passed, 10 skipped; 970 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5591`): 114 passed, 34 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5592`): 114 passed, 34 skipped.
+
+### Not done
+
+- A key that scans (a second character on a set that did not shrink, "am" after "a" when "a" matches every row) still costs one `includes` per row, about 12-20 ms at 50k: per-call overhead of `includes` on 150-200 character texts; a per-row bigram set would pay for it with more search-text build time (R146: the build is the floor).
+- The Svelte update of the visible rows after a key that changes them (20-35 ms script) is markup territory.
+- Carried entries keep their old list arrays alive (at most 16 entries, each a 50k-pointer array).
+
+Scratch (`~/.cache/r147`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
