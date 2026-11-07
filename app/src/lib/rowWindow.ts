@@ -1,5 +1,5 @@
 export const ROW_HEIGHT = 28;
-export const OVERSCAN_ROWS = 12;
+export const OVERSCAN_ROWS = 20;
 export const MIN_TRAILING_ROWS = 4;
 export const LEAD_STEP_ROWS = 4;
 export const LEAD_LOOKAHEAD_MS = 60;

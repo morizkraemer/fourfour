@@ -114,6 +114,7 @@ async function open(browser: import('@playwright/test').Browser, payload: Loaded
   await page.goto('/');
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
   await page.waitForTimeout(4000);
+  if (process.env.FF_PERF_EDGES_CSS) await page.addStyleTag({ content: process.env.FF_PERF_EDGES_CSS });
   return { context, page, videoStart };
 }
 
@@ -277,7 +278,7 @@ test.describe('scroll edges', () => {
       if (PARTS.has('gesture') && !WEBKIT) {
         const cdp = await context.newCDPSession(page);
         const scroller = await page.locator('.ff-table__scroll').boundingBox();
-        for (const speed of [2000, 6000, 15000]) {
+        for (const speed of [2000, 4000, 6000, 15000]) {
           await page.evaluate(() => ((document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop = 0));
           await page.waitForTimeout(800);
           const from = Date.now() - t0;
@@ -323,13 +324,13 @@ test.describe('scroll edges', () => {
           await page.mouse.move(5, 5);
           await page.waitForTimeout(1500);
           const top = await page.evaluate(() => (document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop);
-          const png = await page.screenshot({ animations: 'disabled' });
+          const png = await page.locator('.ff-table__scroll').screenshot({ animations: 'disabled' });
           shots.push(`top ${top} shot ${sha(png)} rows ${sha(await visibleRowsText(page))} waves ${sha(await canvasHash(page))}`);
         }
         await rafFling(page, 30);
         await page.waitForTimeout(1500);
         const top = await page.evaluate(() => (document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop);
-        shots.push(`after fling top ${top} shot ${sha(await page.screenshot({ animations: 'disabled' }))} rows ${sha(await visibleRowsText(page))} waves ${sha(await canvasHash(page))}`);
+        shots.push(`after fling top ${top} shot ${sha(await page.locator('.ff-table__scroll').screenshot({ animations: 'disabled' }))} rows ${sha(await visibleRowsText(page))} waves ${sha(await canvasHash(page))}`);
         report('settle', run, shots);
       }
       const video = page.video();
