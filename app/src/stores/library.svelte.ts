@@ -145,34 +145,33 @@ export function libraryRowsChangedSince(earlier: object): object[] | null {
 
 /** Like `libraryRowsChangedSince`, as positions in `library.tracks` (in the order the bumps touched them). */
 export function libraryPositionsChangedSince(earlier: object): number[] | null {
-  return changesSince(earlier, false)?.positions ?? null;
+  const changes = libraryChangesSince(earlier);
+  return changes && !changes.grown ? changes.positions : null;
 }
 
 /**
- * Like `libraryPositionsChangedSince`, and also across `landImportedTracks`: the rows from `appendedFrom` on (the length
- * of `earlier`) were appended, the positions are the earlier rows whose fields changed.
+ * What happened to `library.tracks` since an earlier array when it was only bumped and had rows appended in between
+ * (`landImportedTracks`): `grown` when rows were appended (they sit after the `earlier.length` rows that were there,
+ * and `positions` may name them too), `positions` of bumped rows; `null` when the list was replaced or the change is too
+ * old to tell.
  */
-export function libraryChangesSince(earlier: object): { positions: number[]; appendedFrom: number } | null {
-  return changesSince(earlier, true);
-}
-
-function changesSince(earlier: object, acrossAppends: boolean): { positions: number[]; appendedFrom: number } | null {
+export function libraryChangesSince(earlier: object): { positions: number[]; grown: boolean } | null {
   const current = untrack(() => trackList);
-  const appendedFrom = (earlier as readonly unknown[]).length;
-  if (earlier === current) return { positions: [], appendedFrom };
+  if (earlier === current) return { positions: [], grown: false };
   const from = listVersions.get(earlier);
   const to = listVersions.get(current);
   if (from === undefined || to === undefined || bumpLog.length === 0 || bumpLog[0].version > from + 1) return null;
   const positions: number[] = [];
+  let grown = false;
   for (const entry of bumpLog) {
     if (entry.version <= from || entry.version > to) continue;
-    if (entry.appended && !acrossAppends) return null;
+    grown ||= entry.appended;
     for (const id of entry.ids) {
       const position = trackIndexById(id);
       if (current[position]?.id === id) positions.push(position);
     }
   }
-  return { positions, appendedFrom };
+  return { positions, grown };
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -638,6 +637,8 @@ const WARMUP_DELAY_MS = 250;
 
 function resetSearchIndex() {
   haystackList = null;
+  haystackLetters = new Int32Array(0);
+  haystackDigits = new Int16Array(0);
   haystackCursor = 0;
   warmupGeneration++;
 }
@@ -668,16 +669,13 @@ function markCharacters(index: number, haystack: string) {
 }
 
 function fillSearchIndex(limit: number) {
-  if (!haystackList) {
-    haystackList = [];
-    haystackLetters = new Int32Array(plainTracks.length);
-    haystackDigits = new Int16Array(plainTracks.length);
-  } else if (haystackLetters.length < plainTracks.length) {
+  haystackList ??= [];
+  if (haystackLetters.length < plainTracks.length) {
     const letters = new Int32Array(plainTracks.length);
-    letters.set(haystackLetters);
-    haystackLetters = letters;
     const digits = new Int16Array(plainTracks.length);
+    letters.set(haystackLetters);
     digits.set(haystackDigits);
+    haystackLetters = letters;
     haystackDigits = digits;
   }
   const end = Math.min(plainTracks.length, haystackCursor + limit);

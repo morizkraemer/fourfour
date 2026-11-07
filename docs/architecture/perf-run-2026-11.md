@@ -3255,6 +3255,337 @@ Totals (key to second frame), mean per key: title 77 to 70, artist 73 to 65, bpm
 
 Scratch (`~/.cache/r147`) is deleted after this item.
 
+## R148 row updates (2026-11-07, `r148-row-updates`)
+
+R147 said a key that changes the rows on screen costs 20-35 ms of script at 50k, mostly Svelte updates of the visible rows. Branch from `ov-1028`. Linux `dev` box (load 10-30), headless Chromium and Playwright WebKit, r95 50k payload, base = `ov-1028` in a separate tree with the same spec files, runs interleaved.
+
+### Cause (measured)
+
+- CPU profile per key (`FF_PERF_PROFILE_EACH`, 50k, sorted by title, no analysis; "hou", "a b", back to "ho"): of 91 ms flush time over the three keys, 65 ms is derived values (`filterTracks` 25, `currentTracks` self 14, `sortTracks` 12) and 22 ms is effects (`update_effect`, the row updates, 5-8 ms per key; `create_item` inside it 2-4 ms, `set_text` 1-3 ms). The rows are 40-50 recycled slots (R95), each a `TrackRow` whose cells only change text and classes. The row update is about a fifth of a key, not most of it.
+- The visible-row cost is in `prototyping/viewport/design-system/components/TrackRow.svelte` and `Waveform.svelte` (AGENTS fence, not touched). No change there was needed to find a lever: nothing in them stood out above 1-3 ms per key.
+- Outside the rows, `currentTracks` in `app/src/modules/TrackTable.svelte` built `new Set(previous.rows)` (up to 50k entries, 8-12 ms self) on every key whose result had a different size from the previous one, only to have `sameMembers` return false on the length check straight after.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `TrackTable.svelte` `currentTracks`: `previous.rows.length === filteredTracks.length` is tested before `sameLibraryMembers` and the lazy member Set. A different length can never be the same rows, so `sameRows` is the same value as before; the Set is only built when the lengths are equal.
+
+### Before / after
+
+Chromium 50k, sorts none, title, bpm, 16 keys each, mean script ms over the keys that change the rows on screen (13 per run), one value per run. Pairs are base and new back to back, order flipped every pair (a stray earlier run left an extra new run in the analysis series):
+
+| | base | new |
+|---|---|---|
+| analysis running, 3 pairs | 30.0, 25.3, 26.8 | 24.9, 26.2 (21.0, 25.8), 21.2 |
+| idle, 3 pairs | 27.7, 24.9, 33.0 | 26.2, 20.1, 19.9 |
+
+Mean over runs: analysis 27.4 to 23.8, idle 28.5 to 22.1. New is lower in 5 of 6 pairs, but the ranges overlap (base 24.9-33.0, new 19.9-26.2), so the gain, about 4-6 ms on a row-changing key, is small and only just outside the box noise; not a large claim. Keys that leave the rows alone (median 12-15 ms) are unchanged. Total (key to second frame) for row-changing keys, median over keys: analysis 92 to 86, idle 95 to 90. WebKit: not timed (no script counter; identity only).
+
+### Identity
+
+- Page level, `perf-sorted-typing.spec.ts` row hash per key: one view-hash sequence in every base and new run, equal across the two.
+- New `app/smoke/perf-row-dom.spec.ts`: after every key (7 queries typed and backspaced, "house", "hou", "a b", "dub", "x", "a", "mix remix", for unsorted, title and bpm; 150 steps) the `outerHTML` of every visible row (canvas attributes removed) and the pixel data of every row canvas are hashed. Base against new, Chromium and WebKit: 150 of 150 identical in both, 0 canvas differences (23 distinct row sets in each run).
+
+### Not done
+
+- The remaining 5-8 ms per key of row effects and the 25 ms of `filterTracks` per scanning key stay. Cutting row effects further means changing `TrackRow` and `Waveform` in `prototyping/` (fenced); nothing there showed a lever above a few ms.
+
+### Validation
+
+- `npx vitest run`: 110 files passed, 10 skipped; 970 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5595`): 113 passed, 35 skipped, 1 failed (`leaks.spec.ts:110` at load average 35); that spec alone passes on rerun. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5596`): 114 passed, 35 skipped.
+
+Scratch (`~/.cache/r148`, base worktree) is deleted after this item.
+
+## R149 filter scan (2026-11-07, `r149-filter-scan`)
+
+R147 and R148 left a scanning key (a second character on a set that did not shrink, "am" after "a") at about 25 ms in `filterTracks` at 50k. Branch from `ov-1028`. Linux `dev` box (load 11-22), Node 22 (V8 as in Chromium) on the real r95 50k search text (`haystackListFor()` dumped once: 50,000 rows, 211.6 characters on average), best of 15. **Result: no product change kept.** Every variant that is clearly faster on a scanning key costs more build time than it saves in realistic use.
+
+### Measured
+
+Cold store keys after "a" (`filterTracks`, 50k, ms, 3 runs): am 25, an 20, ou 26-28, th 17, er 16 (all rows), mix 16, ng 18, on 20, in 14, lo 16, zz 7, xq 9. Plain `includes` over the 50k texts is 15-20 ms of that; the rest (push, row array) is 3-5 ms.
+
+| Variant (50k, "am" / "ou" / "th" / "amo") | scan | build | memory |
+|---|---|---|---|
+| base, `includes` per row | 19.6 / 19.4 / 15.7 / 21.5 | none | none |
+| one concatenated haystack, `indexOf` jumping from hit to hit, row from a start-offset table | 17.6 / 18.3 / 13.8 / n.m. (about -10%, "zz" 6.9 to 3.7) | 55 ms join, plus a copy of the text (about 10-20 MB) | +10-20 MB |
+| hashed bigram bits per row (1,024 bits, test the bits, then `includes` to confirm) | 6.7 / 6.6 / 6.8 / 3.7 (-60 to -80%) | 120 ms standalone; piggybacked on `markCharacters`: 84-134 to 121-213 ms, so +37-80 ms | 6.4 MB |
+| the same with 512 bits | 8.1 / 9.0 / 9.2 / 3.3 | same | 3.2 MB |
+
+Both give the same rows as the base for every term tried (am, an, ou, th, zz, xq, er, mix, house, amo).
+
+### Why none is kept
+
+- The bigram bits cut a scanning key by about 12 ms (60%) but add 40-120 ms to a search text build that is already 250 ms (R146: the build is the floor) and 3-6 MB of heap. A full scan is also rare: a key that extends the previous one narrows from its rows (R147), and a bump no longer loses the history. Break-even is about 4-10 scanning keys per session; building the bits lazily on the first scanning key would stall that key by 80-120 ms to save 12 on the later ones.
+- The concatenated haystack saves 2-3 ms and needs a rebuild or a stale-row check after every bump (`refreshHaystacks` edits single rows, offsets would move).
+- Off the main thread: `filterTracks` is a synchronous `$derived` input to the sort and the row window; a worker would need its own copy of the text (10-20 MB), and the result would arrive a frame later with rows that do not match the query for that frame. For 15-25 ms at 50k that is not worth a changed contract.
+- Scanning only candidates in chunks is what R147 already does when the set shrinks; when it does not (the letter "a" matches every row) the candidate list is the whole list.
+- The per-call overhead is not the cost: `indexOf` over one 10M-character string runs at the same 1.7 ns per character as 50k separate `includes` calls. The scan is bound by V8's string search on 10-20 MB of text.
+
+### Identity / validation
+
+No product code changed, so the identity tests and smoke runs were not repeated; the variants were compared with the base only on the term list above (equal rows). Scratch (`~/.cache/r149`) deleted.
+
+## R150 model ops (2026-11-07, `r150-model-ops`)
+
+Question: are there CPU gains inside the beat model run, at chunk 500, for the fp32 and the int8 model, with output that stays the same to the last bit? Branch `r150-model-ops` from `ov-1028` (f327a90): this section and a profiling example. One lever pays, and only for int8, so it lives on a side branch from the parked int8 branch: `r150-int8-prepack` from `r97-int8-500` (1b3a972). Linux `dev` box (Xeon Gold 6130, 16 vCPU, AVX-512 without VNNI), release builds, at most 2 analysis threads. **Result: rten weight prepacking cuts int8 CPU by about 4% with byte-identical output; for fp32 it gives nothing and costs 90-130 MB RSS. Nothing else found is both identical and faster.**
+
+### Op profile (`fourfour-analysis-rs/examples/model_ops.rs`, one 500 frame chunk, 1 thread, rten `RunOptions` timing)
+
+| op | fp32 ms (share) | int8 ms (share) | what it is |
+|---|---:|---:|---|
+| FusedMatMul (MatMul + bias) | 285 (29.2%) | - | feed-forward and frontend weight GEMMs |
+| MatMulIntegerToFloat | - | 372 (38.1%) | the same weight GEMMs in int8 |
+| MatMul | 282 (28.8%) | 157 (16.0%) | qkv/out projections (fp32 only, about 150 ms) and attention QK^T and AV (about 130-210 ms) |
+| Softmax | 83 (8.5%) | 83 (8.5%) | attention |
+| Concat, Split, Reshape, Transpose, TransformInputs(Split), Slice, Expand | 189 (19.3%) | 188 (19.2%) | data movement; most of it is the rotary embedding (`rotate_every_two`) in all 24 attention blocks |
+| Conv | 39 (4.0%) | 43 (4.4%) | frontend |
+| Gelu, Mul, Add, Div, ReduceL2, Neg | 94 (9.6%) | 101 (10.3%) | elementwise |
+| DynamicQuantizeLinear | - | 25 (2.6%) | int8 only |
+| total | 977 | 977 | 2,777 / 2,802 ops; max activation 39 MB |
+
+By shape, the 6 big transformer layers are about 60% of the time: the feed-forward GEMMs [500, 512] x [512, 2048] and back (21 + 19 ms each), the qkv projection (15 ms) and the 16-head attention (9 + 5 ms + 6 ms softmax). One odd entry: the first frontend time attention (`blocks.0/partial/attnT/attend/MatMul`, [32, 1, 500, 32] x [32, 1, 32, 500]) takes 50 ms where blocks 1 and 2 do the same 32 matrices of the same size in 12 ms; same graph pattern, both inputs contiguous. Not explained; inside rten.
+
+### Levers
+
+| lever | identical? | CPU | kept? |
+|---|---|---|---|
+| Prepack weights at load (`ModelOptions::prepack_weights`, rten packs MatMul, FusedMatMul and MatMulInteger B matrices once) | yes: logits and the full `analyze-json` output byte-equal, both models | fp32: none (user 374.2 s base vs 375.2 s new, mean of 2); int8: **-4.4%** (user 346.9 s base vs 331.6 s new, mean of 3) | int8 only, side branch |
+| 2 threads per chunk instead of 1 (`ThreadPool` per chunk) | yes (same logits at 2 threads) | +12% CPU per chunk (wall -28%) | no; 1 thread per chunk with one chunk thread per analysis thread stays the cheapest per track |
+| ONNX rewrite of the rotary `Split / Neg / Concat / Reshape` as `Gather(perm) * sign` | yes (same logits: only copies and an exact sign flip) | +9% (rten `Gather` 124 ms) | no |
+| the same as `Slice(step -1) * [-1, 1]` | yes | +10% (rten negative-step `Slice` 98 ms) | no |
+| our code around `Model::run` (`extract_chunk` 256 KB copy, `RunOptions` clone, logits `into_data`, stitching) | - | about 0.03 ms of a 1,000 ms chunk | nothing to gain |
+| rten cargo features | - | - | none apply: the GEMM kernels (AVX2/FMA, AVX-512, VNNI on x86; NEON and the i8 dot product on aarch64) are picked at run time in 0.24, the only features are file formats, `fft`, `random`, `mmap` |
+| graph constant folding and fusion at load | - | - | rten already does it (`FusedMatMul`, `Gelu`, `AddSoftmax` and others); a further fused rotary or attention op would be an rten change |
+| a buffer pool kept across runs | - | - | not reachable from outside in 0.24 (R106); at chunk 500 the per-run pool costs about 0 sys time (max activation 39 MB, no blocks above the mmap threshold) |
+
+Why prepacking helps int8 and not fp32: without it rten packs every weight matrix on every call. For fp32 that is a copy of K x N floats against 500 x K x N multiply-adds, about 0.2%. The int8 packing also reorders into the dot-product layout and computes the column sums for the zero point, which is a larger share next to the int8 kernel. The fp32 RSS cost is the packed second copy of the 83 MB of weights; for int8 the copy is about 23 MB.
+
+### Before / after (`analyze-json --threads 2`, 8 tracks: 3 MP3, 3 FLAC, 2 WAV from `rekordbox-testdata-2025`, chunk 500 (r97 default), interleaved base, new, new, base, plus one more new, base pair for int8)
+
+| model | build | user s | sys s | CPU per track | wall s | peak RSS MB | load at start |
+|---|---|---:|---:|---:|---:|---:|---|
+| fp32 | base | 374.8 / 373.6 | 2.3 / 2.1 | 47.1 s | 186 / 172 | 483 / 488 | 11 / 12 |
+| fp32 | prepack | 378.6 / 371.8 | 3.5 / 2.9 | 47.3 s | 247 / 192 | 611 / 571 | 23 / 33 |
+| int8 | base | 346.5 / 340.1 / 354.1 | 1.9 / 1.7 / 3.1 | 43.6 s | 158 / 155 / 237 | 442 / 455 / 481 | 6 / 9 / 28 |
+| int8 | prepack | 331.7 / 334.1 / 328.8 | 1.7 / 1.7 / 2.0 | 41.7 s (**-4.4%**) | 152 / 152 / 173 | 475 / 475 / 475 | 6 / 7 / 7 |
+
+Every int8 prepack run is below every int8 base run (329-334 against 340-354 s user; the 354 s base ran at load 28, the two quiet ones were 340 and 346). fp32 is within noise both ways. RSS: int8 +20-33 MB (+5-7%) against the two quiet base runs, fp32 +90-130 MB (+18-27%).
+
+**Identity.** `cmp`-equal output for every run of a model: fp32 8,952,482 bytes, sha256 prefix `097fba2ee30b5b8a` (4 runs, both builds); int8 8,952,495 bytes, `bccdf469f94b44c7` (6 runs, both builds). `model_ops` gives the same logit hashes with and without prepacking for both models (fp32 beat `2e33ac0a8585c976`, int8 beat `cb2294a4618d881b`).
+
+### What changed
+
+- `r150-model-ops` (from `ov-1028`): `examples/model_ops.rs` (per-op timing, `BY_SHAPE=1` for shapes, `PREPACK`, `POOL_THREADS`, `CHUNK_FRAMES`, `MODEL_FILE`, logit hash) and this section. No product change: on `ov-1028` the model is fp32, where prepacking only costs memory.
+- `r150-int8-prepack` (from `r97-int8-500`, e779648, not merged anywhere): `Analyzer::load` prepacks the weights when the beat model is not the default fp32 file (`prepacks_weights`, the int8 file chosen with `FOURFOUR_BEAT_MODEL`). If int8 ships, land this with it. Its own binary was checked once more: int8 user 333.7 s, RSS 474 MB, sha `bccdf469f94b44c7`; fp32 user 368.8 s, RSS 483 MB (no prepack, as base), sha `097fba2ee30b5b8a`.
+
+Validation: `cargo test --workspace` on `r150-model-ops`: 26 `test result: ok` lines, 570 passed, 0 failed. `cargo test -p fourfour-analysis-rs` on `r150-int8-prepack`: all ok (24 unit tests, new `only_a_non_default_beat_model_prepacks_its_weights`). Scratch (`~/.cache/r150*`, the int8 model regenerated with the r97 script) deleted.
+
+### Not measured
+
+- The Mac. int8 runs on rten's aarch64 CPU path there (i8 dot product kernels); the same per-call packing exists, so a similar or larger gain is likely, but it needs a Mac pair (add `r150-int8-prepack` to the next Mac night next to `r98-mac-pair`).
+- Chunk 1500 on `ov-1028` (the current default): prepacking was not measured there; the weight-packing share is smaller at 1500 than at 500.
+- The rotary data movement (about 12% of the run) and the slow first frontend attention are the largest identical-output targets left, both inside rten (a fused rotary op or a faster strided copy for an innermost axis of 2).
+
+## R151 first attention MatMul (2026-11-07, `r151-first-matmul`)
+
+Question: R150 saw the first frontend time attention (`blocks.0/partial/attnT/attend/MatMul`, [32, 1, 500, 32] x [32, 1, 32, 500]) take about 50 ms in a 500 frame chunk, where blocks 1 and 2 do the same 32 matrices in about 12 ms. Why, and can it be cut with identical output? Branch `r151-first-matmul` from `ov-1028` (a807485). Linux `dev` box, release build, 1 thread, `model_ops` (now also prints minor page faults per run). **Result: it is not the MatMul. It is first-touch page faults on a fresh 32 MB output buffer, and at chunk 500 only in the first 3 runs of a thread. From the 4th run on the op takes 12.5 ms, like blocks 1 and 2. Nothing to cut in our code; doc only, no product change.**
+
+### Cause
+
+- The QK^T output (the attention scores) is 32 x 500 x 500 floats = 32,000,000 bytes, the largest buffer of the run up to that point. Blocks 1 and 2 produce the same element count ([16, 2, 500, 500], [8, 4, 500, 500]), so rten's `BufferPool` hands them block 0's buffer again once Softmax and the AV MatMul are done with it. Only block 0 gets fresh memory from malloc, and the first write to it faults in about 7,800 pages. The kernel, the layout and the shapes are the same in all three blocks.
+- rten 0.24 creates a new `BufferPool` in every `Model::run` (`graph.rs`, R106), so each chunk starts with an empty pool. Whether the 32 MB then costs faults depends on glibc: in the first runs the block is `mmap`ed (dynamic mmap threshold still low) or lands in fresh arena heap pages; once the threshold has risen and the arena heap has its final size, the freed 32 MB stays mapped and is reused by the next run without faults.
+- Evidence (`model_ops`, 500 frames, 1 thread, minor faults per run): runs 1 to 4 fault 22,188 / 12,308 / 7,698 / 1 pages (four repeats, same sequence each time, then 1-245 per run up to run 8). Run 3 faults 7,698 pages, which is the 32 MB score buffer (7,813 pages). The op time follows: 53-54 ms when the timed run is run 2 or 3, 12.3-12.9 ms when it is run 4, 5 or 8.
+- Cross-checks: with `MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1G` (R106) the op takes 13.8 ms already in run 3. With `RTEN_USE_POOL=0` (no buffer reuse inside the run) blocks 1 and 2 would have to fault too; in run 3 all three took 12.3-12.6 ms because the warm-up had already happened in runs 1 and 2 (186k and 154k faults there). Logits are the same in every run and setting (beat `2e33ac0a8585c976`, down `082582f6ea64f9f4`).
+- R150's 50 ms figure matches such a warm-up reading: 53-54 ms came back here whenever the timed run was run 2 or 3, never from run 4 on.
+
+### What it costs in the app
+
+- The beat chunk threads are long-lived (`ChunkExecutor`, one 1-thread rten pool each), so each thread pays the warm-up once for its first 3 chunks: about 42k faults, about 150-200 ms of system time per chunk thread per process. Per track that is nothing; R150's 8-track `analyze-json` at chunk 500 had 2.1-2.3 s sys against 374 s user in total (0.6%), an upper bound for all faults.
+- So the "4% of a chunk" does not exist in steady state, for fp32 or int8 (same graph, same buffer).
+
+### Chunk 1500 (the `ov-1028` default)
+
+Here the slow first MatMul is real in every run, but it is R106: blocks above 32 MiB are always `mmap`ed by glibc and unmapped on free, so the 288 MB score buffer (and the 144 MB ones of the 6 transformer layers) fault every chunk. `model_ops`, 1500 frames, 1 thread:
+
+| | blocks.0 QK^T | blocks.1 / 2 QK^T | transformer QK^T (mean of 6) | user / sys ms per run | faults per run |
+|---|---:|---:|---:|---:|---:|
+| default glibc | 535 ms | 149 / 158 ms | 265 ms | 5,130-5,420 / 1,120-1,320 | 257k-276k (runs 1-3) |
+| R106 env vars (run 3) | 134 ms | 133 / 134 ms | 68 ms | 4,470 / 10 | 27 |
+
+Without faults every attention QK^T runs at the same 4.2 ms per 1500 x 1500 matrix, so the kernel is fine there too. Same logits both ways (beat `91f79fb92dd29326`). The levers are the ones R106 already weighed: the three malloc env vars (-22% CPU, +10-23% peak RSS, not default), chunk 500 (r96, faults go away), or an rten change that keeps the `BufferPool` across runs.
+
+### Levers checked
+
+| lever | result |
+|---|---|
+| operand layout, transposed K, batch shape [32, 1] vs [16, 2] / [8, 4] | not the cause: without faults all three blocks take 12.3-13.8 ms at 500 and 133-134 ms at 1500 |
+| a load-time graph tweak so block 0 reuses an earlier buffer | nothing earlier in the run is 32 MB or larger; an extra early allocation would only move the faults |
+| our chunk tensor (`extract_chunk`) | 256 KB, already contiguous [1, 500, 128]; not involved |
+| `mallopt` at startup to skip the warm-up | would save about 150-200 ms of sys per chunk thread per process at 500; not worth the global allocator change. At 1500 it is R106 with its RSS cost |
+| keep the pool across runs | not reachable from outside rten 0.24 (no pool in `RunOptions`); an upstream change |
+
+### What changed
+
+`fourfour-analysis-rs/examples/model_ops.rs` prints minor page faults per run next to user and sys ms, plus this section. No library or app code changed, so `analyze-json` output is the same binary path as `ov-1028`. Validation: `cargo test --workspace`: 26 `test result: ok` lines, 570 passed, 0 failed. Not measured: the Mac (a different allocator, so a different warm-up; not checked), and `analyze-json` timing, since there is no product change to compare.
+
+## R152 budget (2026-11-07, `r152-budget`)
+
+Measurement only, no product change. Branch `r152-budget` from `ov-1028`. New harness `app/smoke/perf-budget.spec.ts` (boot, flows, import, analysis, memory; one JSON line per run). Linux `dev` box (16 cores), headless Chromium 1217 and Playwright WebKit, the r95 `bench_startup dump` payloads of the `ff-fixture` 10k and 50k libraries (read only, `~/.cache/r95/state{10k,50k}.json`, same schema the page decodes today). `bench_startup` was not rebuilt, so the backend share is cited from R129 (`load_state` 50 / 210 ms), not re-measured.
+
+Commands (one at a time, 3 runs unless noted, load average recorded in each line):
+
+```
+FF_PERF_STATE=<state.json> FF_PERF_BUDGET=boot,flows,import,analysis FF_PERF_RUNS=3 FF_PERF_LABEL=x FF_PERF_BUDGET_OUT=out.jsonl npx playwright test smoke/perf-budget.spec.ts
+FF_PERF_BUDGET=memory FF_PERF_SOAK_MIN=10 ...            # heap: open, 2 full scrolls, 10 min idle with 1 analysis event per second
+FF_PERF_PROFILE=1 ...                                    # unminified build plus a CDP sampling profile per step (top 3 self-time functions)
+FF_SMOKE_BROWSER=webkit ...                              # WebKit: wall time only (no CDP: no script/layout split, no profile)
+FF_PERF_STARTUP=10000=<state>==50,50000=<state>==210 FF_PERF_RUNS=5 npx playwright test smoke/perf-startup.spec.ts   # cold open (backend simulated at 50 / 210 ms)
+```
+
+Read with care:
+
+- **Load.** Quiet runs had load 5.7-6.1 (flows 50k, cold open); the first batch ran at 8-11 and the 10k analysis and import runs at 16-37. Numbers below come from the quiet runs where there is one; 10k analysis numbers are not usable (load 16-36) and are left out. Profile runs (load 30) show shares, not times.
+- **Click timing** = hardware timestamp of the click until the screen shows the result plus two animation frames (about 35-40 ms of that is the headless compositor floor, as in R129). "rest" in the split is main-thread task time that is not script, layout or style (paint, layerize, commit, GC); it cannot be split further without a trace.
+- **Harness costs removed.** The mock's `get_waveform_detail` builds a 4.8 MB buffer in about 316 ms on the page's main thread; the first version of the track-load step carried it (700 ms). The final step answers it from a cache filled before the click. The mock also hands the 50k payload to the page as init-script JSON, which delays the first row by about 1.2 s; cold open therefore comes from `perf-startup.spec.ts` (payload by fetch, backend simulated), not from the new spec.
+- **WebKit** is headless software compositing (R29): 2-6x slower on every step, scroll 120-170 ms per frame. Only the ratios carry to the Mac.
+
+### Budget table, ranked by user-felt ms (Chromium, 50k, quiet; `x / y` = 10k / 50k where both exist)
+
+| # | Flow | Felt ms | Script / layout+style / rest | Top 3 (CPU profile, self ms) | Top cause | Class | Fenced | Lever idea |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Cold open to first rows, then interactive | 628 / 1,035 first rows, interactive 691 / 1,035 (warm 573 / 910); WebKit cold 898 / 1,410; backend inside this (50 / 210 simulated) | to first rows 320 / 406, 118 / 113, rest not split (mock-inflated); longest task 196 / 280, TBT 234 / 332 | GC 674, `trackHaystack` 220 + `markCharacters` 101 (search text), `valueClassesSteps` 136 + `sortDistinctStrings` 79 + `orderFromClasses` 52 (sort warm-up); profile at load 31, shares only | mount (design-system rows, sidebar) plus the idle index warm-up that starts with the first rows (R121, R129) | a for the warm-up and `load_state`, b for the mount | partly (mount: `TrackRow`, `Sidebar` rows) | start the `load_state` compute at process setup (R129 lever 3); defer the warm-up past the first click window |
+| 2 | Import 1k folder into the 50k library, after the rows appear | 555-653 ms of script in the 3.5 s after the rows (10k: 217-338), worst frame 169 / 191 ms; UI click to rows 30 / 53 ms with the mock | script 555-653, layout 6, rest 164-219 | `trackHaystack` 194, `markCharacters` 85, `sortDistinctStrings` 82 | adding 1,000 rows throws away and rebuilds the search text and sort classes of all 51,000 rows | a | no (`library.svelte.ts`, `table-columns.svelte.ts`) | append the new rows to the search index and sort classes instead of rebuilding |
+| 3 | Fast fling over the library | 49 ms per frame p50, p95 63, max 89; 89 of 90 frames over 25 ms, 32 over 50 ms; 18-31 long tasks, 1.0-1.8 s of 4.6 s; wheel fling 46 / 62 / 69 | per 90 frames: script 1,214, layout+style 1,123, rest 2,156 | `handle` 230, `get` 173, `(anon)` 136 (Svelte row updates and bindings; no source for `handle`) | every frame replaces all 42 row components (R118: 37 canvases and 37 overlap layers per 42 rows); steady scroll (90 px per frame) is 23 p50, 28 p95, 32 of 120 frames over 25 ms | b | yes (`TrackRow`, `Waveform` row canvases) | no per-row canvas work while a fling is faster than N rows per frame (changes what is shown) |
+| 4 | Track double click to player ready | 293 ms (10k: 243-634 loaded) | 46 / 15 / 229 | `colorBandsFromPayload` 20, anon 42, anon 19 (load 31, shares) | player overview paint and the answer path; includes the mock answer through Playwright (not app time) | a, b | partly (overview in `Waveform`) | reuse the decoded bands across a double click and the inspector load |
+| 5 | First row select (inspector opens) | 275 ms (10k 340 loaded; R129 measured 12 ms for later selects) | 43 / 19 / 95 | anon 59 (`index`), `set_attribute` 13, `Detail` chunk | first select mounts the lazily loaded `Detail` inspector (chunk, component tree, bindings); later selects are cheap | a | no (`Detail.svelte`) | preload the `Detail` chunk and mount it hidden after the first rows |
+| 6 | First click right after the first rows (sort by title) | 227 ms at 50k (10k 131); a later first click on a settled page is 105 (second click 91) | 191 / 13 / 73 (boot click) against 24 / 9 / 57 settled | `sortDistinctStrings` 54, `valueClassesSteps` 53, `sortValueOfRaw` 26 | the sort-column warm-up is still running (about 800 ms of main thread after the first rows, 400-500 ms of TBT) | a | no (`table-columns.svelte.ts`) | R129 lever 2: rank from the typed arrays the decoder already built, not from text |
+| 7 | Expand the big player | 180 ms (10k 187); one 70 ms task | 77 / 22 / 146 | `fillRect` 17, `reduceBands` 14, `measureText` 9 (load 30) | first draw of the detail canvases and the expanded layout | b | yes (`waveform-display.js`, `Waveform`) | draw the detail canvas in two slices, label metrics measured once |
+| 8 | Analysis running, list visible | main thread busy 61 ms/s at 1 event/s (idle page 7), 248 ms/s at 6 events/s (worst second 324); about 50 ms per event | script 10-14 ms/s; the rest is GC and rendering | GC 60-98 ms/s, `get` 27-39, `is_dirty` 27 (Svelte reactive reads) | each `analysis-partial` bumps rows through the store, and GC follows (R129 finding: `structuredClone` of row fields) | a | no (`library.svelte.ts`) | R129 lever 1: copy fields instead of `$state.snapshot` clones; batch events per frame |
+| 9 | Player playing (strip) | idle 13 ms/s (worst second 105-180); big player 6 ms/s; with analysis 1 event/s 56 / 52 ms/s | script 2 ms/s | GC 100 ms in a 15 s window, anon, `walk` | a periodic GC second in the strip; analysis cost is the same as row 8 (no extra from the player) | a | no | none needed beyond row 8 |
+| 10 | Clicks that open something: playlist (10,000 tracks), analysis panel, settings, sort | 106, 101, 117, 105 ms | playlist 31 / 12 / 51; panel 9 / 11 / 120; settings 16 / 18 / 117 | `positionsByIdTable` 11 (playlist), `focus` 73 ms in the loaded profile (settings), `lastCheckText` 18 | compositor floor plus one forced layout (`focus`) in the settings sheet | c, a | partly (sheet is design-system) | focus the sheet after the first paint |
+
+Also measured:
+
+| Item | Chromium | WebKit (software) |
+|---|---|---|
+| Sort click (first / second), 10k | 103 / 90 ms | 212 / 178 |
+| Playlist, 10k (2,000 tracks) | 91 ms | 200 |
+| Inspector first select, 10k | 340 ms (loaded) | 581 |
+| Track load, 10k | 590 ms (loaded; 243 in the quiet run) | 711 |
+| Expand, 10k | 187 ms | 461 |
+| Settings, 10k | 165 ms (loaded) | 476 |
+| Import 1k, UI to rows (mock), 10k / 50k | 53 / 30 ms | 41 / 44 ms (worst frame 409) |
+| Scroll steady, p50 / p95, 50k | 23 / 28 ms | 148 / 191 |
+| Scroll steady, p50 / p95, 10k | 25 / 41 ms (loaded) | 122 / 167 |
+
+### Memory (Chromium, 50k, forced GC before each reading, `Runtime.getHeapUsage`)
+
+| Moment | JS heap MB | DOM nodes |
+|---|---|---|
+| after open (6 s settled) | 98 | 6,402 |
+| after two full scrolls | 107 | 6,401 |
+| idle with analysis 1 event/s, minute 1 / 5 / 10 | 119 / 120 / 120 | 6,433 |
+
+Heap rises 21 MB in the first minute of analysis events and then stays flat for 10 minutes (no leak seen), DOM nodes are flat, and the idle page costs 52-56 ms of main thread per second the whole time (that is row 8, not a leak). 10k: 25 MB after open, 43 after a scroll and playlist walk. Real app RSS needs a window and was not measured (R23, R42).
+
+### What the list says
+
+- The search text and the sort classes are the biggest repeated main-thread work at 50k: they run once in the first seconds (row 1, 6), again after an import (row 2), and the same rows are bumped by every analysis event (row 8). One incremental index (append and patch, never rebuild) would touch rows 1, 2, 6 and 8 with identical results.
+- The felt costs of single clicks are at the floor (100-117 ms of which about 40 is compositor); only the first select (275) and the first click inside the warm-up window (227) stand out.
+- Fling scroll is the one flow that is slow in every phase, and its hot code is in `prototyping/` (fenced).
+- Not measured: real Tauri window start, real backend `load_state`, cold-disk first query (R129: 1.5 s at 10k, 4.1 s at 50k), real audio playback, a Mac.
+
+### Top 5 next items
+
+1. **Incremental search index and sort classes** (`library.svelte.ts`, `table-columns.svelte.ts`): append and patch on import and bumps, never rebuild all rows. Identical result, can land. Targets rows 2 and 8 and part of 1 and 6 (about 600 ms after an import, about 270 ms of boot warm-up).
+2. **Analysis events: copy row fields, batch per frame** (R129 lever 1, plus one flush per frame): about 50 ms of main thread per event to a few ms. Identical result, can land.
+3. **Sort warm-up from the decoder's typed arrays and later than the first click window** (R129 lever 2): first click right after the first rows 227 to about 110 ms, and 400-500 ms less blocking after open. Identical result, can land.
+4. **`load_state` computed at process setup** (R129 lever 3): takes the 210 ms backend (50k) off the path to the first row, and the storage wait on a cold disk. Identical bytes, can land (Rust, `pioneer-test-ui`).
+5. **Fling scroll: no per-row canvas work while rows pass faster than they can be read** (R118 proposal): 49 ms per frame to near the steady 23. Changes what is shown during a fling and the hot code is fenced, so it needs Merlin and a prototyping change first.
+
+Scratch (`~/.cache/r152*`) is deleted after this item.
+
+## R154 early load_state (2026-11-07, `r154-early-load-state`)
+
+Branch `r154-early-load-state` from `ov-1028`. R135 already builds the answer on a thread at setup and hands the bytes to the first `load_state`, so that is not redone. What R135 left: the thread starts inside the `setup` hook, and Tauri 2.10.3 builds the config windows (`WebviewWindowBuilder::build`) before it calls the hook (`tauri::app::setup`), so the webview and page start loading first. The library open (`read_library_path`, `create_dir_all`, `LocalLibrary::open`, about 2 ms warm here) also ran on the main thread inside the hook, before the thread was spawned.
+
+### What changed
+
+- `early_state::open_and_prepare` runs the library open and the answer build on one thread. `main` calls it right after `Builder::build` (the `App` and its path resolver exist, no window yet) and before `run`. The setup hook takes the opened library from a channel (`StartupLibrary`) instead of opening it itself and keeps the rest of its work (staging sweep, file health, cover fill, playback) as it was. The thread holds the library lock before it sends the library, so the answer is built before the health check or cover fill can take the lock, as in R135.
+- Same functions and checks: `read_library_path`, `open_startup_library` (unchanged), `EarlyState::prepare`, `encoded_state` with the revision and labels guard. An open error is sent unchanged and nothing is built; the setup manages `LibraryOpenFailure` as before and `load_state` returns the same error (the recovery path).
+- `EarlyState` is now managed at start (before, only after a successful open); `load_state` checks the library state first, so a failed open still answers with the failure.
+- New mark (with `FF_PERF_LOG`): `library_opened`; `early_state_ready` now comes from the thread.
+- Tests: `early_state::tests` (the thread hands back the library and the first request gets the early answer with equal bytes; a write after the build returns the new state; an open error is returned unchanged and nothing is built) and in `main` (a damaged `library.db` and a missing library path through the thread give the same error, kind, path and untouched file as the direct open; a missing `library.db` is created and answered from the thread).
+- `bench_startup boot <dir> base|new <setup ms> <request ms> [out.bin]`: one simulated launch with the real functions. `base` is the R135 flow (open in the hook at `setup ms`, build thread after it), `new` is this one (open and build from time 0, the hook only waits for the library).
+
+### Identity
+
+`bench_startup boot` prints the sha256 of the answer in both modes: 10k `189c1084156ec70db43f1005134df010ae92b5cadde3e1f6d57074c6d86b36ad` (1,715,152 bytes), 50k `893a4522aa3716187953bf68054de31c73768fe174ae242c904bbf299fcccbe9` (8,319,832). Equal in `base` and `new`, and equal to the R135 values.
+
+### Backend, process start to `load_state` answered (simulation, warm file cache)
+
+The time from `build` to the hook cannot be measured without a window. The table takes the hook at 100 ms (an assumption; the Mac R133 launches had `setup_done` at 290-405 ms, which includes playback) and the page's request at 250 or 400 ms. The shared fixtures had been migrated to schema 8 by another branch, so the runs use copies downgraded to schema 7 (v7 cover table put back; the answer hashes match R135). 4 interleaved base/new pairs per cell, box load 37-38 the whole time (other workers), so read the direction, not the digits.
+
+| Library | Request at | Answered at, base / new (median, ms) | Request to answer, base / new (median, ms) | New faster in |
+|---|---:|---:|---:|---:|
+| 10k | 250 | 253 / 255 | 3 / 5 | no change (answer ready before the request either way) |
+| 10k | 400 | 405 / 403 | 5 / 3 | no change |
+| 50k | 250 | 571 / 394 | 322 / 144 | 4 of 4 pairs |
+| 50k | 400 | 534 / 428 | 134 / 28 | 4 of 4 pairs |
+
+Raw 50k answered-at, base against new: request 250: 587, 606, 483, 556 against 354, 444, 395, 393; request 400: 596, 509, 510, 558 against 423, 473, 433, 422. The gain is the head start itself (the assumed 100 ms before the hook, more under load), so it is as large as the time Tauri takes from `build` to the hook and only shows where the build is longer than the page's wait: 50k. At 10k the 60 ms answer was already ready.
+
+### What this means on the Mac (not measured)
+
+A Mac launch has a real head start (R133: `setup_done` at 290-405 ms), and the library open is a few ms there. The saving is the time between `build` and the hook (window creation) that the build now overlaps. At 10k expect nothing visible, since the answer was already ready before the page asked in R135. At 50k expect up to the same 100-150 ms as above, only if the page asks within the build time. On a cold disk (first query 1.5-4 s on the box) it matters most: the first read now starts before the window is created.
+
+### Not done
+
+No real window run (rules), so the time from process start to `build` and from `build` to the hook is assumed, not measured. The cold-disk case was not run (the page cache cannot be dropped here without root).
+## R153 import index (2026-11-07, `r153-import-index`)
+
+R152 top item 1 for the import path (budget row 2). Branch from `ov-1028`. Linux `dev` box, load 16-54 the whole time (other workers), r95 50k payload, headless Chromium, `app/smoke/perf-budget.spec.ts` with `FF_PERF_BUDGET=import` (1,000 tracks into 50,000, 3 s window after the rows appear). Base = `ov-1028` in a separate tree, same spec, runs interleaved (3 rounds of base then new, 2 runs each).
+
+### Cause
+
+`landImportedTracks` called `resetSearchIndex()` (search text of all rows rebuilt) and the new `library.tracks` array had no bump history, so every cached column sort (`columnSorts`) was dropped and rebuilt (`valueClassesSteps` plus `sortDistinctStrings` over 51,000 values per column).
+
+### Changed (no markup, same rows, same order)
+
+- `library.svelte.ts`: an import no longer resets the search index. The search text list and the letter and digit sets are extended from the cursor (`fillSearchIndex` grows the typed arrays); only the new rows are built. The change log of the track list (`recordTrackListBump`) records an append (`appended`), `libraryChangesSince` reports `grown` plus the bumped positions, and `libraryPositionsChangedSince` still answers `null` across an append, so every other consumer (filter history, playlist members, sort order moves) behaves as before.
+- `sortOrder.ts`: `extendValueClasses(held, values, from)` folds appended values into the held classes: new distinct values are sorted (a few), binary-searched into the held sorted distinct list, old classes are remapped by a shift table (one typed-array pass). Gives up (`undefined`, full rebuild) on NaN, values of the other kind, or no held distinct values. The sorted distinct list is kept in a `WeakMap` next to the classes, so `ValueClasses` is unchanged.
+- `table-columns.svelte.ts`: `columnSortOf` reads only the appended rows (and bumped ones) and folds the classes (bumped rows plus an append falls back to a full class build); the sort warm-up refreshes stale columns (`refreshColumn`, rebuilding the orders that were held by counting sort from the folded classes) instead of building them from scratch. Loads, removals, renames that go through `loadState` are untouched (full rebuild as before).
+
+### Before / after (Chromium 50k, import 1k, ms)
+
+| | base (6 runs) | new (6 runs) |
+|---|---|---|
+| Script in the 3 s after the rows | median 713 (563-802) | median 153 (114-253) |
+| Main-thread rest (paint, GC) | 180-243 | 99-146 |
+| Click to rows (mock) | 31-92 | 37-107 |
+| Worst frame | median 315 (177-400) | median 254 (196-591) |
+
+Per pair (load in brackets) the script was 563/653 (17) against 157/148 (20-26), 740/686 (38) against 114/120 (38), 775/802 (49-54) against 253/196 (53). The script gain holds in every pair, also at load above 50. The worst frame is not a gain outside noise: it moved with the load (177-400 base, 196-591 new) and is not in the profile of the index work (profile of the new build: top self time `columnSortOf` 30 ms, `orderFromClasses` 15-18, `extendValueClasses` 15-35, no `trackHaystack`; run at load 50). The frame spike belongs to landing the rows themselves (row mapping, Svelte updates), not to the index.
+
+### Identity
+
+- New `import-index.test.ts`: imports of none, 1 and 1,000 rows (also into an empty library), copies of existing titles, artists, paths and values, renamed and moved rows bumped before and after an import, tracks removed and the library reloaded, then imports again; after every step the hash (count and ordered ids) of 12 sorts (title, artist, album, genre, bpm, key, time, label, both directions where noted, none) times 20 queries equals the one of a full `loadState` rebuild (240 of 240 each time). Warm-up refresh runs in some steps, not in others. Breaking the shift table makes it fail (checked).
+- New `sortOrder-extend.test.ts`: folded classes equal `valueClasses` of the whole list (120 random splits, strings and numbers, repeats, no value, zero and negative zero, a second fold).
+- Store level, base against new, hash of every ordered id, 10k and 50k: `sorted-typing-real` 432 of 432, `search-path-real` 94 of 94, `sort-analysis-real` 601 of 601 (these load, not import, so they confirm the load path is unchanged). `FF_FUZZ_FULL=1` `bulk-bump-fuzz`, `search-sort-fuzz`, `playlist-sort-fuzz`: 12 of 12.
+
+### Validation
+
+- `npx vitest run`: 112 files passed, 10 skipped; 978 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5601`): 114 passed, 40 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5602`): 114 passed, 40 skipped.
+
+### Not done
+
+- First sort click right after an import on a column that was never built still pays the full build (as before).
+- After an import the filter history of the old list is dropped (the first query scans once, 14-22 ms at 50k).
+- Bumped rows during an import (analysis running) make `columnSortOf` rebuild the classes of that column in full.
+
+Scratch (`~/.cache/r153*`) deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

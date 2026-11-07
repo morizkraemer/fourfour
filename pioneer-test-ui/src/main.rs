@@ -208,17 +208,6 @@ fn fill_pending_covers(app: &AppHandle, library: &SharedLibrary, fill: &CoverFil
     }
 }
 
-/// Builds the `load_state` answer while the webview starts, so the page's first request finds it ready.
-fn spawn_early_state(library: SharedLibrary, early: Arc<early_state::EarlyState>) {
-    std::thread::spawn(move || {
-        let Ok(lib) = library.lock() else { return };
-        match early.prepare(&lib) {
-            Ok(()) => perf_probe::mark("early_state_ready", serde_json::json!({})),
-            Err(e) => app_log::warn(&format!("early library state not built: {e}")),
-        }
-    });
-}
-
 /// Removes staging folders a crashed run left in the ANLZ folders; on a thread of its own because it
 /// lists every track folder.
 fn spawn_stale_staging_cleanup(db_path: PathBuf) {
@@ -1418,6 +1407,36 @@ fn remove_library_files(db_path: &Path) -> Result<(), CommandError> {
 
 struct LibraryOpenFailure(CommandError);
 
+/// The library opened (and its `load_state` answer built) before the webview window exists; the setup takes it.
+struct StartupLibrary(Mutex<Option<std::sync::mpsc::Receiver<Result<early_state::OpenedLibrary, CommandError>>>>);
+
+impl StartupLibrary {
+    fn take(&self) -> std::sync::mpsc::Receiver<Result<early_state::OpenedLibrary, CommandError>> {
+        self.0.lock().expect("startup library lock").take().expect("the startup library was already taken")
+    }
+}
+
+/// Starts opening the library and building the `load_state` answer. Needs the app handle for the data directory,
+/// so it runs right after `build`, before `run` creates the window.
+fn start_library(app: &tauri::App) {
+    let early = Arc::new(early_state::EarlyState::default());
+    app.manage(early.clone());
+    let handle = app.handle().clone();
+    let opened = early_state::open_and_prepare(
+        move || {
+            let opened = open_startup_library(read_library_path(&handle));
+            perf_probe::mark("library_opened", serde_json::json!({}));
+            opened
+        },
+        early,
+        |built| match built {
+            Ok(()) => perf_probe::mark("early_state_ready", serde_json::json!({})),
+            Err(e) => app_log::warn(&format!("early library state not built: {e}")),
+        },
+    );
+    app.manage(StartupLibrary(Mutex::new(Some(opened))));
+}
+
 fn open_startup_library(db_path: Result<PathBuf, String>) -> Result<(PathBuf, LocalLibrary), CommandError> {
     let db_path = db_path.map_err(|e| CommandError::new(ErrorKind::LibraryNotOpen, format!("Couldn't find where the library is stored: {e}")))?;
     let library = LocalLibrary::open(&db_path).map_err(|e| {
@@ -1445,7 +1464,7 @@ fn main() {
     let context = tauri::generate_context!();
     app_log::start_early(&context.config().identifier);
     perf_probe::start();
-    perf_probe::install(tauri::Builder::default()) // v0.1
+    let app = perf_probe::install(tauri::Builder::default()) // v0.1
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             plan_import,
@@ -1543,14 +1562,11 @@ fn main() {
             app.manage(recovery_commands::RecoveryGate::default());
             let covers = CoverFill::default();
             app.manage(covers.clone());
-            match open_startup_library(read_library_path(app.handle())) {
+            let startup = app.state::<StartupLibrary>().take();
+            match startup.recv().expect("the library open thread stopped without a result") {
                 Ok((db_path, library)) => {
                     spawn_stale_staging_cleanup(db_path);
-                    let library: SharedLibrary = Arc::new(Mutex::new(library));
                     app.manage(library.clone());
-                    let early = Arc::new(early_state::EarlyState::default());
-                    app.manage(early.clone());
-                    spawn_early_state(library.clone(), early);
                     file_health::spawn_check(app.handle().clone(), library.clone(), health);
                     spawn_cover_fill(app.handle().clone(), library, covers);
                 }
@@ -1577,18 +1593,19 @@ fn main() {
             Ok(())
         })
         .build(context)
-        .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            match event {
-                tauri::RunEvent::Ready => {
-                    perf_probe::mark("ready", serde_json::json!({}));
-                    focus_main_window(&app_handle);
-                }
-                #[cfg(target_os = "macos")]
-                tauri::RunEvent::Reopen { .. } => focus_main_window(&app_handle),
-                _ => {}
+        .expect("error while building tauri application");
+    start_library(&app);
+    app.run(|app_handle, event| {
+        match event {
+            tauri::RunEvent::Ready => {
+                perf_probe::mark("ready", serde_json::json!({}));
+                focus_main_window(&app_handle);
             }
-        });
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => focus_main_window(&app_handle),
+            _ => {}
+        }
+    });
 }
 
 #[cfg(test)]
@@ -1596,7 +1613,9 @@ mod tests {
     use super::artwork_thumbs::artwork_thumbnail;
     use super::{analysis_start_error, eject_failure, validated_reveal_path};
     use crate::analysis_backend;
-    use crate::command_error::ErrorKind;
+    use crate::command_error::{CommandError, ErrorKind};
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn assert_off_main_thread(source: &str, commands: &[&str]) {
         for name in commands {
@@ -1691,6 +1710,56 @@ mod tests {
         assert!(error.message.contains("no app data dir"), "{error}");
         assert_eq!(error.kind, ErrorKind::LibraryNotOpen);
         assert_eq!(error.path, None);
+    }
+
+    fn open_on_the_startup_thread(db_path: Result<PathBuf, String>) -> Result<(PathBuf, super::SharedLibrary), CommandError> {
+        let early = Arc::new(super::early_state::EarlyState::default());
+        super::early_state::open_and_prepare(move || super::open_startup_library(db_path), early, |_| {})
+            .recv()
+            .expect("the open thread sends a result")
+    }
+
+    #[test]
+    fn the_startup_thread_reports_a_damaged_library_exactly_like_the_direct_open() {
+        let dir = ScratchDir::new("damaged-thread");
+        let db = dir.path().join("library.db");
+        let damaged = b"SQLite format 3\0 but the rest is junk".repeat(200);
+        std::fs::write(&db, &damaged).unwrap();
+        let direct = super::open_startup_library(Ok(db.clone())).map(|_| ()).unwrap_err();
+        let threaded = open_on_the_startup_thread(Ok(db.clone())).map(|_| ()).unwrap_err();
+        assert_eq!(threaded, direct);
+        assert_eq!(threaded.kind, ErrorKind::LibraryDamaged);
+        assert_eq!(std::fs::read(&db).unwrap(), damaged);
+        let names: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("library.db")]);
+    }
+
+    #[test]
+    fn the_startup_thread_reports_a_missing_library_path_exactly_like_the_direct_open() {
+        let direct = super::open_startup_library(Err("no app data dir".into())).map(|_| ()).unwrap_err();
+        let threaded = open_on_the_startup_thread(Err("no app data dir".into())).map(|_| ()).unwrap_err();
+        assert_eq!(threaded, direct);
+    }
+
+    #[test]
+    fn the_startup_thread_creates_a_missing_library_file_and_answers_load_state_from_it() {
+        let dir = ScratchDir::new("missing-thread");
+        let db = dir.path().join("library.db");
+        let early = Arc::new(super::early_state::EarlyState::default());
+        let opened = super::early_state::open_and_prepare(
+            {
+                let db = db.clone();
+                move || super::open_startup_library(Ok(db))
+            },
+            early.clone(),
+            |_| {},
+        );
+        let (path, library) = opened.recv().unwrap().unwrap();
+        assert_eq!(path, db);
+        let lib = library.lock().unwrap();
+        let (bytes, was_early) = super::early_state::encoded_state(&lib, &early).unwrap();
+        assert!(was_early);
+        assert_eq!(bytes, super::track_infos::loaded_state(&lib).unwrap().to_bytes().unwrap());
     }
 
     #[test]
