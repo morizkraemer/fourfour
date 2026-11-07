@@ -3052,6 +3052,35 @@ Mean over runs: analysis 27.4 to 23.8, idle 28.5 to 22.1. New is lower in 5 of 6
 
 Scratch (`~/.cache/r148`, base worktree) is deleted after this item.
 
+## R149 filter scan (2026-11-07, `r149-filter-scan`)
+
+R147 and R148 left a scanning key (a second character on a set that did not shrink, "am" after "a") at about 25 ms in `filterTracks` at 50k. Branch from `ov-1028`. Linux `dev` box (load 11-22), Node 22 (V8 as in Chromium) on the real r95 50k search text (`haystackListFor()` dumped once: 50,000 rows, 211.6 characters on average), best of 15. **Result: no product change kept.** Every variant that is clearly faster on a scanning key costs more build time than it saves in realistic use.
+
+### Measured
+
+Cold store keys after "a" (`filterTracks`, 50k, ms, 3 runs): am 25, an 20, ou 26-28, th 17, er 16 (all rows), mix 16, ng 18, on 20, in 14, lo 16, zz 7, xq 9. Plain `includes` over the 50k texts is 15-20 ms of that; the rest (push, row array) is 3-5 ms.
+
+| Variant (50k, "am" / "ou" / "th" / "amo") | scan | build | memory |
+|---|---|---|---|
+| base, `includes` per row | 19.6 / 19.4 / 15.7 / 21.5 | none | none |
+| one concatenated haystack, `indexOf` jumping from hit to hit, row from a start-offset table | 17.6 / 18.3 / 13.8 / n.m. (about -10%, "zz" 6.9 to 3.7) | 55 ms join, plus a copy of the text (about 10-20 MB) | +10-20 MB |
+| hashed bigram bits per row (1,024 bits, test the bits, then `includes` to confirm) | 6.7 / 6.6 / 6.8 / 3.7 (-60 to -80%) | 120 ms standalone; piggybacked on `markCharacters`: 84-134 to 121-213 ms, so +37-80 ms | 6.4 MB |
+| the same with 512 bits | 8.1 / 9.0 / 9.2 / 3.3 | same | 3.2 MB |
+
+Both give the same rows as the base for every term tried (am, an, ou, th, zz, xq, er, mix, house, amo).
+
+### Why none is kept
+
+- The bigram bits cut a scanning key by about 12 ms (60%) but add 40-120 ms to a search text build that is already 250 ms (R146: the build is the floor) and 3-6 MB of heap. A full scan is also rare: a key that extends the previous one narrows from its rows (R147), and a bump no longer loses the history. Break-even is about 4-10 scanning keys per session; building the bits lazily on the first scanning key would stall that key by 80-120 ms to save 12 on the later ones.
+- The concatenated haystack saves 2-3 ms and needs a rebuild or a stale-row check after every bump (`refreshHaystacks` edits single rows, offsets would move).
+- Off the main thread: `filterTracks` is a synchronous `$derived` input to the sort and the row window; a worker would need its own copy of the text (10-20 MB), and the result would arrive a frame later with rows that do not match the query for that frame. For 15-25 ms at 50k that is not worth a changed contract.
+- Scanning only candidates in chunks is what R147 already does when the set shrinks; when it does not (the letter "a" matches every row) the candidate list is the whole list.
+- The per-call overhead is not the cost: `indexOf` over one 10M-character string runs at the same 1.7 ns per character as 50k separate `includes` calls. The scan is bound by V8's string search on 10-20 MB of text.
+
+### Identity / validation
+
+No product code changed, so the identity tests and smoke runs were not repeated; the variants were compared with the base only on the term list above (equal rows). Scratch (`~/.cache/r149`) deleted.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
