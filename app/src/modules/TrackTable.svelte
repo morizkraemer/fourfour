@@ -102,11 +102,40 @@
   let scrollSettleTimer = null;
   let ownScrollTop = null;
 
+  const WAVE_HOLD_PX_PER_MS = 3;
+  const WAVE_RELEASE_PX_PER_MS = 1.5;
+  const WAVE_RELEASE_IDLE_MS = 120;
+  const SPEED_SAMPLE_MAX_MS = 50;
+  let scrollVelocity = $state(0);
+  let waveHeld = $state(false);
+  let lastScrollSample = { t: 0, top: 0 };
+  let waveReleaseTimer = null;
+
+  function trackScrollSpeed(top) {
+    const now = performance.now();
+    const elapsed = Math.min(now - lastScrollSample.t, SPEED_SAMPLE_MAX_MS);
+    const instant = elapsed > 0 ? (top - lastScrollSample.top) / elapsed : 0;
+    const fresh = now - lastScrollSample.t < SPEED_SAMPLE_MAX_MS * 4;
+    lastScrollSample = { t: now, top };
+    scrollVelocity = fresh ? (scrollVelocity + instant) / 2 : instant;
+    const speed = Math.abs(scrollVelocity);
+    if (!waveHeld && speed > WAVE_HOLD_PX_PER_MS) waveHeld = true;
+    else if (waveHeld && speed < WAVE_RELEASE_PX_PER_MS) waveHeld = false;
+    clearTimeout(waveReleaseTimer);
+    waveReleaseTimer = setTimeout(scrollStopped, WAVE_RELEASE_IDLE_MS);
+  }
+
+  function scrollStopped() {
+    scrollVelocity = 0;
+    waveHeld = false;
+  }
+
   function syncScrollWindow() {
     scrollRaf = null;
     if (!tableScrollEl) return;
     const movedRows = (tableScrollEl.scrollTop - scrollTop) / ROW_HEIGHT;
     rowsPerFrame = movedRows === 0 ? rowsPerFrame / 2 : (rowsPerFrame + movedRows) / 2;
+    if (tableScrollEl.scrollTop !== scrollTop) trackScrollSpeed(tableScrollEl.scrollTop);
     scrollTop = tableScrollEl.scrollTop;
     if (headerHeight === 0) {
       headerHeight = tableScrollEl.querySelector('.ff-colh')?.offsetHeight ?? 0;
@@ -252,6 +281,7 @@
     tableScrollEl.scrollTop += shift;
     ownScrollTop = tableScrollEl.scrollTop;
     scrollTop = tableScrollEl.scrollTop;
+    lastScrollSample = { ...lastScrollSample, top: scrollTop };
   });
 
   let columns = $derived(visibleColumns(layoutKind));
@@ -288,7 +318,7 @@
   });
 
   let rowWin = $derived(
-    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: shownTracks.length, overscan })
+    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: shownTracks.length, overscan, velocity: scrollVelocity })
   );
   let firstRow = $derived(rowWin.firstRow);
   let endRow = $derived(rowWin.endRow);
@@ -936,6 +966,7 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
+              holdWave={waveHeld}
               onWaveSeek={track && !isUsbView && !booting ? (progress) => loadTrackAt(track, progress) : undefined}
               onRate={track && !isUsbView && !booting ? (stars) => void commitTrackRating(track.id, stars) : undefined}
             />

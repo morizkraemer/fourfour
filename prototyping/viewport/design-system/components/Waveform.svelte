@@ -70,6 +70,7 @@
 </script>
 
 <script>
+  import { untrack } from 'svelte';
   /*
     Static preview for list rows (variant "mini") and the detail pane (variant "strip").
     `look` "envelope" (default, rows) is one loudness envelope; "bands" is the 3-band picture of the
@@ -89,9 +90,12 @@
     animating = false,
     /** Given: a click seeks, with the track fraction under the pointer. */
     onSeek = undefined,
+    /** While true, new data is not drawn: the canvas hides its old picture and draws once this turns false. */
+    hold = false,
   } = $props();
 
   let canvas;
+  let stale = false;
 
   function seekAt(event) {
     const rect = canvas.getBoundingClientRect();
@@ -148,6 +152,8 @@
 
   function draw(phase) {
     if (!canvas) return;
+    stale = false;
+    if (canvas.style.visibility) canvas.style.visibility = '';
     const dpr = window.devicePixelRatio || 1;
     const pixelW = Math.round(width * dpr);
     const pixelH = Math.round(height * dpr);
@@ -205,6 +211,21 @@
     cueStyle;
     animating;
 
+    if (untrack(() => hold)) {
+      stale = true;
+      if (canvas) canvas.style.visibility = 'hidden';
+      return;
+    }
+    stale = false;
+    return drawSoon();
+  });
+
+  $effect(() => {
+    if (hold || !stale) return;
+    return drawSoon();
+  });
+
+  function drawSoon() {
     const data = source();
     const run = () => draw(0);
     if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
@@ -213,7 +234,7 @@
     }
     scheduleDraw(run);
     return () => cancelDraw(run);
-  });
+  }
 </script>
 
 <canvas
