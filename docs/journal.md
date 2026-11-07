@@ -689,3 +689,4 @@
 2026-11-07 18:13 orchestrator r154 handed back 12cfa91 (library open + load_state build now start before the window: 50k answer 100-175 ms sooner in simulated boot, 10k unchanged, payload sha256 equal; real window not run), merged on ov-1028, chain running; needs a Mac launch check in the next build
 2026-11-07 18:23 orchestrator r153 handed back c6d5090 (import extends search index + sort classes instead of rebuilding: 50k import 1k script after rows 713 -> 153 ms median; worst frame inside noise; 432/94/601 hashes + fuzz 12/12 + new import-index test equal); merge after r154 chain
 2026-11-07 18:46 orchestrator r154 landed on ov-1028 (Chromium smoke 0 failed; WebKit 1 failed then rerun 0 failed (Rust-only change, smoke uses the browser mock); r8 CHECKS-OK; pioneer-test-ui 300 passed). r153 merged, chain running
+2026-11-07 19:03 orchestrator r153 landed 2ad68dc on ov-1028 (both smokes 0 failed, vitest 978, CHECKS-OK)
