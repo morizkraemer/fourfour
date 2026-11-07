@@ -112,11 +112,11 @@ export function bumpLibraryTracks(changedIds: Iterable<number>) {
 const BUMP_LOG_LIMIT = 4096;
 const BUMP_LOG_ID_LIMIT = 16384;
 const listVersions = new WeakMap<object, number>();
-let bumpLog: { version: number; ids: number[] }[] = [];
+let bumpLog: { version: number; ids: number[]; appended: boolean }[] = [];
 let nextListVersion = 1;
 let bumpLogIds = 0;
 
-function recordTrackListBump(previous: object, next: object, ids: number[]) {
+function recordTrackListBump(previous: object, next: object, ids: number[], appended = false) {
   let from = listVersions.get(previous);
   if (from === undefined) {
     from = nextListVersion++;
@@ -126,7 +126,7 @@ function recordTrackListBump(previous: object, next: object, ids: number[]) {
   }
   const version = nextListVersion++;
   listVersions.set(next, version);
-  bumpLog.push({ version, ids });
+  bumpLog.push({ version, ids, appended });
   bumpLogIds += ids.length;
   while (bumpLog.length > 1 && (bumpLog.length > BUMP_LOG_LIMIT || bumpLogIds > BUMP_LOG_ID_LIMIT)) bumpLogIds -= bumpLog.shift()!.ids.length;
 }
@@ -144,20 +144,34 @@ export function libraryRowsChangedSince(earlier: object): object[] | null {
 
 /** Like `libraryRowsChangedSince`, as positions in `library.tracks` (in the order the bumps touched them). */
 export function libraryPositionsChangedSince(earlier: object): number[] | null {
+  return changesSince(earlier, false)?.positions ?? null;
+}
+
+/**
+ * Like `libraryPositionsChangedSince`, and also across `landImportedTracks`: the rows from `appendedFrom` on (the length
+ * of `earlier`) were appended, the positions are the earlier rows whose fields changed.
+ */
+export function libraryChangesSince(earlier: object): { positions: number[]; appendedFrom: number } | null {
+  return changesSince(earlier, true);
+}
+
+function changesSince(earlier: object, acrossAppends: boolean): { positions: number[]; appendedFrom: number } | null {
   const current = untrack(() => trackList);
-  if (earlier === current) return [];
+  const appendedFrom = (earlier as readonly unknown[]).length;
+  if (earlier === current) return { positions: [], appendedFrom };
   const from = listVersions.get(earlier);
   const to = listVersions.get(current);
   if (from === undefined || to === undefined || bumpLog.length === 0 || bumpLog[0].version > from + 1) return null;
   const positions: number[] = [];
   for (const entry of bumpLog) {
     if (entry.version <= from || entry.version > to) continue;
+    if (entry.appended && !acrossAppends) return null;
     for (const id of entry.ids) {
       const position = trackIndexById(id);
       if (current[position]?.id === id) positions.push(position);
     }
   }
-  return positions;
+  return { positions, appendedFrom };
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -436,14 +450,21 @@ export function libraryPlainRows(): readonly Record<string, any>[] {
   return plainTracks;
 }
 
+/** The plain objects behind `library.tracks` as far as paths go: no row state is created by reading them. */
+export function libraryPathRows(): readonly { id: number; filePath?: string }[] {
+  return plainTracks as { id: number; filePath?: string }[];
+}
+
 function setLibraryTracks(tracks: Record<string, any>[], rows = tracks.map(reactiveTrack)) {
   plainTracks = tracks;
   trackList = rows;
 }
 
 function appendLibraryTracks(tracks: Record<string, any>[], rows: Record<string, any>[]) {
+  const previous = trackList;
   plainTracks = plainTracks.concat(tracks);
   trackList = trackList.concat(rows);
+  recordTrackListBump(previous, trackList, [], true);
 }
 
 function isPlainContainer(value: object): boolean {
@@ -620,6 +641,12 @@ function resetSearchIndex() {
   warmupGeneration++;
 }
 
+/** After rows were appended: the search text built so far stays, the new rows are filled in behind it. */
+function extendSearchIndex() {
+  if (haystackList) haystackList = haystackList.slice();
+  warmupGeneration++;
+}
+
 const LETTER_BITS = new Int32Array(128);
 const DIGIT_BITS = new Int16Array(128);
 for (let code = 97; code <= 122; code++) LETTER_BITS[code] = 1 << (code - 97);
@@ -644,6 +671,13 @@ function fillSearchIndex(limit: number) {
     haystackList = [];
     haystackLetters = new Int32Array(plainTracks.length);
     haystackDigits = new Int16Array(plainTracks.length);
+  } else if (haystackLetters.length < plainTracks.length) {
+    const letters = new Int32Array(plainTracks.length);
+    letters.set(haystackLetters);
+    haystackLetters = letters;
+    const digits = new Int16Array(plainTracks.length);
+    digits.set(haystackDigits);
+    haystackDigits = digits;
   }
   const end = Math.min(plainTracks.length, haystackCursor + limit);
   for (; haystackCursor < end; haystackCursor++) {
@@ -668,6 +702,11 @@ function refreshHaystacks(ids: number[]) {
 function haystackListFor(): string[] {
   fillSearchIndex(plainTracks.length);
   return haystackList!;
+}
+
+/** The search text of every library row, in order. */
+export function librarySearchTexts(): readonly string[] {
+  return haystackListFor();
 }
 
 function whenIdle(run: (deadline?: IdleDeadline) => void) {
@@ -1596,7 +1635,7 @@ async function landImportedTracks(added: TrackInfo[]) {
   appendLibraryTracks(plain, rows);
   const coveredEarly = added.filter((t) => coversBeforeRows.delete(t.id)).map((t) => t.id);
   if (coveredEarly.length > 0) markCoversStored(coveredEarly);
-  resetSearchIndex();
+  extendSearchIndex();
   scheduleSearchIndexWarmup();
   for (const listener of trackListLoadedListeners) listener();
 }
@@ -1777,7 +1816,7 @@ export async function importDirectory(path: string, options?: ImportOptions) {
 }
 
 function importedTrackIds(outcome: ImportOutcome, paths: string[]): number[] {
-  return [...new Set([...trackIdsUnderPaths(library.tracks, paths), ...outcome.skipped_ids])];
+  return [...new Set([...trackIdsUnderPaths(libraryPathRows(), paths), ...outcome.skipped_ids])];
 }
 
 /** Files skipped as likely duplicates, each with the library track it duplicates. */

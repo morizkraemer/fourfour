@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { test, type Page } from '@playwright/test';
 import type { LoadedState } from '../src/services/tauri.svelte.ts';
@@ -20,6 +21,22 @@ function state(): LoadedState {
   const dumped = JSON.parse(readFileSync(STATE!, 'utf8'));
   return { ...dumped, tracks: isTrackTable(dumped.tracks) ? decodeTrackTable(dumped.tracks) : dumped.tracks } as LoadedState;
 }
+
+const sha = (text: string) => createHash('sha1').update(text).digest('hex').slice(0, 12);
+
+const visibleRows = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[data-track-row]')]
+      .map((row) => `${row.dataset.rowIndex}:${row.textContent?.replace(/\s+/g, ' ').trim()}`)
+      .join('\n'),
+  );
+
+const savedPlaylists = (page: Page) =>
+  page.evaluate(async () => {
+    const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke(cmd: string): Promise<{ playlists: { id: number; name: string; parent_id: number; is_folder: boolean; track_ids: ArrayLike<number> }[] }> } }).__TAURI_INTERNALS__;
+    const { playlists } = await internals.invoke('load_state');
+    return JSON.stringify(playlists.map((p) => [p.id, p.name, p.parent_id, p.is_folder, Array.from(p.track_ids ?? [])]));
+  });
 
 async function metrics(page: Page) {
   if (WEBKIT) return async () => 0;
@@ -137,6 +154,9 @@ test.describe('import flow in the page', () => {
       const idleBefore = await script();
       await page.waitForTimeout(IDLE_MS);
       const afterIdleScript = (await script()) - idleBefore;
+      const rowsHash = sha(await visibleRows(page));
+      const playlists = await savedPlaylists(page);
+      const playlistsHash = sha(playlists);
       await page.evaluate(() => {
         const w = window as unknown as { __inputAt: number };
         for (const type of ['keydown', 'pointerdown']) document.addEventListener(type, () => (w.__inputAt = performance.now()), true);
@@ -187,6 +207,8 @@ test.describe('import flow in the page', () => {
         realLongTotal: Math.round(realTasks.reduce((a, l) => a + l.duration, 0)),
         taskMs: Math.round((await script('TaskDuration')) - taskBefore),
         afterIdleScript: Math.round(afterIdleScript),
+        rowsHash,
+        playlistsHash,
         ...steps,
       };
       if (REPORT) appendFileSync(REPORT, JSON.stringify(out) + '\n');

@@ -157,6 +157,26 @@ describe('withChangedValues', () => {
     }
   });
 
+  it('puts appended rows, with changed ones, where a new sort puts them', () => {
+    const random = generator(77);
+    for (const kind of ['string', 'number'] as const) {
+      for (let round = 0; round < 80; round++) {
+        const size = Math.floor(random() * 120);
+        const values = randomValues(random, size, kind);
+        const direction = round % 2 ? 1 : -1;
+        const sorted = sortedOrder(values, direction);
+        const appended = randomValues(random, 1 + Math.floor(random() * (random() < 0.2 ? 300 : 20)), kind);
+        const changed = size === 0 ? [] : Array.from({ length: Math.floor(random() * 8) }, () => Math.floor(random() * size));
+        const fresh = randomValues(random, size, kind);
+        for (const p of changed) values[p] = random() < 0.1 ? null : fresh[p];
+        values.push(...appended);
+        const moved = withChangedValues(sorted, values, [...changed, size + Math.floor(random() * appended.length)], direction)!;
+        expect([...moved.order]).toEqual(reference(values, direction));
+        moved.order.forEach((position, i) => expect(moved.rank[position]).toBe(i));
+      }
+    }
+  });
+
   it('gives up past the limit and returns the same order for no change', () => {
     const sorted = sortedOrder([3, 1, 2], 1);
     expect(withChangedValues(sorted, [3, 1, 2], [], 1)).toBe(sorted);

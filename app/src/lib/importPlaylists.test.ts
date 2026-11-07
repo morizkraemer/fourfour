@@ -66,8 +66,31 @@ describe('pendingNames', () => {
   });
 });
 
+function referenceIdsForFiles(
+  tracks: ReadonlyArray<{ id: number; filePath?: string }>,
+  matches: ReadonlyArray<{ path: string; id: number }>,
+): (files: readonly string[]) => number[] {
+  const normalize = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
+  const order = new Map<number, number>();
+  const byPath = new Map<string, number>();
+  tracks.forEach((track, index) => {
+    order.set(track.id, index);
+    if (track.filePath) byPath.set(normalize(track.filePath), track.id);
+  });
+  for (const match of matches) byPath.set(normalize(match.path), match.id);
+  return (files) => {
+    const ids = new Set<number>();
+    for (const file of files) {
+      const id = byPath.get(normalize(file));
+      if (id !== undefined) ids.add(id);
+    }
+    return [...ids].sort((a, b) => (order.get(a) ?? Infinity) - (order.get(b) ?? Infinity));
+  };
+}
+
 describe('trackIdsForFiles', () => {
   it('finds library ids by path, including skipped duplicates, in library order', () => {
+    const files = ['/Set/a.mp3', '/Set/dupe.mp3', '/Set/b.mp3', '/Set/missing.mp3'];
     const idsFor = trackIdsForFiles(
       [
         { id: 5, filePath: '/Set/b.mp3' },
@@ -75,7 +98,45 @@ describe('trackIdsForFiles', () => {
         { id: 9, filePath: '/Set/a.mp3' },
       ],
       [{ path: '/Set/dupe.mp3', id: 3 }],
+      files,
     );
-    expect(idsFor(['/Set/a.mp3', '/Set/dupe.mp3', '/Set/b.mp3', '/Set/missing.mp3'])).toEqual([5, 3, 9]);
+    expect(idsFor(files)).toEqual([5, 3, 9]);
+  });
+
+  it('gives the ids and the order the walk over every row gave, on random libraries', () => {
+    let state = 12345;
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 0x100000000;
+    };
+    const names = ['a', 'B', 'c d', 'Track 1', 'x'];
+    const pathOf = () => {
+      const folder = ['/Music/Set', '/Music/Set/deep', 'C:\\Music\\Mix', '/Downloads/Crate/F1', '/other'][Math.floor(random() * 5)];
+      const file = `${names[Math.floor(random() * names.length)]}${Math.floor(random() * 30)}.mp3`;
+      const slash = folder.includes('\\') ? '\\' : '/';
+      const trailing = random() < 0.1 ? slash : '';
+      return `${folder}${slash}${file}${trailing}`;
+    };
+    for (let round = 0; round < 300; round++) {
+      const count = Math.floor(random() * 60);
+      const ids = Array.from({ length: count }, (_, i) => i + 1);
+      for (let i = ids.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [ids[i], ids[j]] = [ids[j], ids[i]];
+      }
+      const tracks = ids.map((id) => ({ id, filePath: random() < 0.05 ? undefined : pathOf() }));
+      const asked = Array.from({ length: Math.floor(random() * 40) }, () => (random() < 0.5 && tracks.length > 0 ? tracks[Math.floor(random() * tracks.length)].filePath ?? pathOf() : pathOf()));
+      const matches = Array.from({ length: Math.floor(random() * 6) }, () => ({
+        path: random() < 0.6 && asked.length > 0 ? asked[Math.floor(random() * asked.length)] : pathOf(),
+        id: random() < 0.15 ? 1000 + Math.floor(random() * 5) : 1 + Math.floor(random() * Math.max(1, count)),
+      }));
+      const expected = referenceIdsForFiles(tracks, matches);
+      const actual = trackIdsForFiles(tracks, matches, asked);
+      for (let slice = 0; slice < 4; slice++) {
+        const files = asked.filter(() => random() < 0.5);
+        expect(actual(files)).toEqual(expected(files));
+      }
+      expect(actual(asked)).toEqual(expected(asked));
+    }
   });
 });

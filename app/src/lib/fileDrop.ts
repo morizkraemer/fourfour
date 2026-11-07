@@ -38,6 +38,7 @@ export function fileDropTargetFor(hit: HitElement | null): FileDropTarget {
 }
 
 function normalizePath(path: string): string {
+  if (path.indexOf('\\') < 0 && !path.endsWith('/')) return path;
   return path.replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
@@ -51,12 +52,14 @@ export function trackIdsUnderPaths(
   droppedPaths: readonly string[]
 ): number[] {
   const files = new Set(droppedPaths.map(normalizePath));
-  return tracks
-    .filter((t) => {
-      if (!t.filePath) return false;
-      return files.has(normalizePath(t.filePath)) || droppedPaths.some((p) => isInside(p, t.filePath!));
-    })
-    .map((t) => t.id);
+  const folders = droppedPaths.map((p) => `${normalizePath(p)}/`);
+  const ids: number[] = [];
+  for (const track of tracks) {
+    if (!track.filePath) continue;
+    const path = normalizePath(track.filePath);
+    if (files.has(path) || folders.some((folder) => path.startsWith(folder))) ids.push(track.id);
+  }
+  return ids;
 }
 
 function isSame(a: string, b: string): boolean {

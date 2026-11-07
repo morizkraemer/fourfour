@@ -15,6 +15,7 @@ interface FolderNode {
 }
 
 function normalizePath(path: string): string {
+  if (path.indexOf('\\') < 0 && !path.endsWith('/')) return path;
   return path.replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
@@ -82,18 +83,25 @@ export function pendingNames(files: readonly string[]): string[] {
 
 /**
  * The library ids of a playlist's files, in library order. `matches` maps files that were skipped as
- * duplicates to the library track they duplicate.
+ * duplicates to the library track they duplicate. `wanted` is every file the returned function will be asked about;
+ * only those paths are looked up, so the library is read once without keeping a path for every row.
  */
 export function trackIdsForFiles(
   tracks: ReadonlyArray<{ id: number; filePath?: string }>,
   matches: ReadonlyArray<{ path: string; id: number }>,
+  wanted: readonly string[],
 ): (files: readonly string[]) => number[] {
+  const wantedPaths = new Set(wanted.map(normalizePath));
+  const matched = new Set(matches.map((match) => match.id));
   const order = new Map<number, number>();
   const byPath = new Map<string, number>();
-  tracks.forEach((track, index) => {
-    order.set(track.id, index);
-    if (track.filePath) byPath.set(normalizePath(track.filePath), track.id);
-  });
+  for (let index = 0; index < tracks.length; index++) {
+    const track = tracks[index];
+    const path = track.filePath ? normalizePath(track.filePath) : null;
+    const found = path !== null && wantedPaths.has(path);
+    if (found) byPath.set(path, track.id);
+    if (found || matched.has(track.id)) order.set(track.id, index);
+  }
   for (const match of matches) byPath.set(normalizePath(match.path), match.id);
   return (files) => {
     const ids = new Set<number>();
