@@ -6,8 +6,16 @@ const BEAT_MS = 60000 / 126;
 const HOT_CUE_A_MS = 97000;
 const SHOTS = process.env.SHOTS_DIR;
 
-const distanceToBeat = (ms: number) => Math.abs(ms - Math.round(ms / BEAT_MS) * BEAT_MS);
-const nearestBeat = (ms: number) => Math.round(Math.round(ms / BEAT_MS) * BEAT_MS);
+const beatAt = (n: number) => Math.round(n * BEAT_MS);
+const exactStep = (ms: number) => {
+  let n = Math.floor(ms / BEAT_MS);
+  if (beatAt(n) > ms) n--;
+  if (beatAt(n + 1) <= ms) n++;
+  const step = (beatAt(n + 1) - beatAt(n)) / 4;
+  return beatAt(n) + Math.ceil((ms - beatAt(n)) / step - 0.5) * step;
+};
+const distanceToStep = (ms: number) => Math.abs(ms - exactStep(ms));
+const nearestStep = (ms: number) => Math.round(exactStep(ms));
 
 const quantizeButton = (page: Page) => page.locator('.ff-xp, .ff-player-compact').getByRole('button', { name: 'Q', exact: true }).first();
 const masterTempoButton = (page: Page) => page.locator('.ff-xp, .ff-player-compact').getByRole('button', { name: 'MT', exact: true }).first();
@@ -193,7 +201,7 @@ test('a hot cue set at the playhead snaps to the grid only with Q on', async ({ 
   await expect.poll(async () => (await smoke.invokes('set_cues')).length).toBeGreaterThan(0);
   const free = (await smoke.invokes('set_cues')).at(-1)!.cues.find((c: { hot_cue_number: number }) => c.hot_cue_number === 2).time_ms as number;
   expect(Math.abs(free - HOT_CUE_A_MS)).toBeLessThan(2000);
-  expect(distanceToBeat(free)).toBeGreaterThan(1);
+  expect(distanceToStep(free)).toBeGreaterThan(1);
 
   const lastSaveHasCueB = async () => {
     const last = (await smoke.invokes('set_cues')).at(-1);
@@ -205,8 +213,8 @@ test('a hot cue set at the playhead snaps to the grid only with Q on', async ({ 
   await page.keyboard.press('Shift+C');
   await expect.poll(lastSaveHasCueB).toBe(true);
   const snapped = (await smoke.invokes('set_cues')).at(-1)!.cues.find((c: { hot_cue_number: number }) => c.hot_cue_number === 2).time_ms as number;
-  expect(distanceToBeat(snapped)).toBeLessThan(1);
-  expect(snapped).toBe(nearestBeat(free));
+  expect(distanceToStep(snapped)).toBeLessThan(1);
+  expect(snapped).toBe(nearestStep(free));
 });
 
 test('dragging a hot cue on the big waveform moves it, snapped to the grid with Q on; Alt places it freely', async ({ smoke }) => {
@@ -225,14 +233,14 @@ test('dragging a hot cue on the big waveform moves it, snapped to the grid with 
 
   await dragCueA(page, 61, false);
   const snapped = await cueATime(smoke, saves);
-  expect(distanceToBeat(snapped)).toBeLessThan(1);
+  expect(distanceToStep(snapped)).toBeLessThan(1);
   expect(snapped).toBeGreaterThan(HOT_CUE_A_MS);
 
   const afterSnap = (await smoke.invokes('set_cues')).length;
   await dragCueA(page, 29, true);
   const free = await cueATime(smoke, afterSnap);
   expect(Math.abs(free - snapped)).toBeGreaterThan(20);
-  expect(distanceToBeat(free)).toBeGreaterThan(8);
+  expect(distanceToStep(free)).toBeGreaterThan(1);
 });
 
 test('without Q a dragged hot cue lands where it is dropped', async ({ smoke }) => {
@@ -244,10 +252,10 @@ test('without Q a dragged hot cue lands where it is dropped', async ({ smoke }) 
   await dragCueA(page, 37, false);
   const moved = await cueATime(smoke, saves);
   expect(moved).toBeGreaterThan(HOT_CUE_A_MS + 20);
-  expect(distanceToBeat(moved)).toBeGreaterThan(1);
+  expect(distanceToStep(moved)).toBeGreaterThan(1);
 });
 
-test('CUE starts from the nearest grid beat with Q on, from the playhead with Q off', async ({ smoke }) => {
+test('CUE starts from the nearest grid sixteenth with Q on, from the playhead with Q off', async ({ smoke }) => {
   const { page } = smoke;
   await expandWithTrack(page);
   await quantizeOff(page);
@@ -257,7 +265,7 @@ test('CUE starts from the nearest grid beat with Q on, from the playhead with Q 
   await page.mouse.click(overview.x + overview.width * 0.3, overview.y + overview.height / 2);
   await expect.poll(async () => (await smoke.invokes('playback_seek')).length + (await smoke.invokes('playback_set_position')).length).toBeGreaterThan(0);
   const position = [...(await smoke.invokes('playback_seek')), ...(await smoke.invokes('playback_set_position'))].at(-1)!.positionMs as number;
-  expect(distanceToBeat(position)).toBeGreaterThan(40);
+  expect(distanceToStep(position)).toBeGreaterThan(5);
 
   const pressCue = async () => {
     const cue = page.locator('.ff-xp__cue-btn');
@@ -276,7 +284,7 @@ test('CUE starts from the nearest grid beat with Q on, from the playhead with Q 
   await pressCue();
   const quantized = await smoke.invokes('playback_play');
   expect(quantized.length).toBeGreaterThan(plays.length);
-  expect(quantized.at(-1)!.positionMs).toBe(nearestBeat(position));
+  expect(quantized.at(-1)!.positionMs).toBe(nearestStep(position));
 });
 
 test('holding Alt shows a big x centred on a set inspector pad and keeps its letter', async ({ smoke: { page } }) => {
