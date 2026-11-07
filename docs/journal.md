@@ -691,3 +691,4 @@
 2026-11-07 18:46 orchestrator r154 landed on ov-1028 (Chromium smoke 0 failed; WebKit 1 failed then rerun 0 failed (Rust-only change, smoke uses the browser mock); r8 CHECKS-OK; pioneer-test-ui 300 passed). r153 merged, chain running
 2026-11-07 19:03 orchestrator r153 landed 2ad68dc on ov-1028 (both smokes 0 failed, vitest 978, CHECKS-OK)
 2026-11-07 19:04 orchestrator parked-all-v17 merge conflicts in code (library/table-columns stores, main.rs, bench_startup) between parked features and r153/r154; spawned r155 (opus) to resolve and validate, Mac install by orchestrator after
+2026-11-07 19:04 orchestrator decided: own prio r156 analysis events (copy fields + batch per frame; R152 row 8), spawned sonnet/default
