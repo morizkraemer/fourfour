@@ -695,3 +695,4 @@
 2026-11-07 19:29 orchestrator r155 handed back parked-all-v17 1a97ae3 = build 1355 (r144+r153 import paths merged; vitest 1055, check 0, both smokes 0 failed, cargo pioneer-test-ui 310, identity 432/94/601 vs v16); preview :4212 swapped to 1355, Mac install running
 2026-11-07 19:29 orchestrator parked-all-v17 build 1355 installed on the Mac 19:29 (number verified in bundle); r154 startup change not yet launched in a real window
 2026-11-07 20:16 orchestrator r156 handed back d90bf9d (R152's 248 ms/s was mostly harness IPC; real fix: track count as its own derived value so bumps stop rebuilding the sidebar: 6 events/s busy median 90 -> 61 ms/s; batching already existed), merged on ov-1028, chain running
+2026-11-07 20:17 orchestrator decided: own prio r157 first clicks after open (sort warm-up yields to input; prefetch Detail chunk; R152 rows 5-6), spawned sonnet/default
