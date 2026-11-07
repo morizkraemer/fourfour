@@ -3537,6 +3537,31 @@ Validation: `cargo test --workspace`: 26 `test result: ok` lines, 587 passed, 0 
 
 **Mac checks for Merlin** (not run here: no Mac access, no `aarch64-apple-darwin` target on dev). See the commands in the report: int8 file, `build-dmg.sh`, `check-dmg.sh`, a 49-track `bench_analysis` against night 3's int8 row, and a look at `beat_runtime` in the app's analysis status (should read `rten`).
 
+## R160 cues and grid (2026-11-07, `r160-cues-grid`)
+
+Branch `r160-cues-grid` from `ov-1028` (`b31813d`). Merlin 2026-11-07: hot cue presses pop, the grid is not fine enough, quantize should go to sixteenths. He OK'd the R112 playhead change in `prototyping/` (STATE Waiting 48). Linux `dev` box, headless Chromium and Playwright WebKit, no audio played.
+
+**Hot cue pops (Rust callback, `pioneer-test-ui/src/playback.rs`).** The app plays through the Rust engine (cpal), not Web Audio. Root cause: on every seek (hot cue, scrub, pause, stop) the callback flushed the ring at once and held the last sample with a 0.98 per-frame decay. That is a corner in the waveform plus a DC pulse of about 1 ms, up to the full sample level: a pop on bass-heavy material. The fade-in after it was linear. Now a switch first fades the old audio out over 256 frames (raised cosine, about 5 ms at 48 kHz), then flushes and acknowledges only the newest switch: presses during a fade are coalesced, nothing of a superseded press is ever played, and a decode thread still pushes only after the ack. The fade-in is a raised cosine too. Silent output (paused, run dry) switches at once. Cost: a seek is heard about 5 ms later.
+
+Offline test (`twenty_hot_cue_presses_in_a_second_do_not_click`: the real callback, a stand-in decoder obeying the ack protocol, 20 presses in 1 s on a 0.9 level 55 Hz tone, decode delay 0/1/3 buffers; `hot_cue_presses_inside_one_fade_are_coalesced`: 5 presses one buffer apart):
+
+| | worst sample step at a jump | worst second difference |
+|---|---:|---:|
+| base | 0.0180 (2.78x the tone's own) | 0.0190 (407x) |
+| new | 0.0068 (1.05x) | 0.00012 (2.5x) |
+
+`tempo_tests::Lab::locate` now waits for the ack like the decode thread does (it pushed before the flush, which the fade-out would have dropped).
+
+**Quantize to sixteenths (`app/src/lib/quantize.ts`).** `nearestGridStepMs` splits each beat span into `division / 4` steps (tempo changes followed beat by beat, first span repeated before the first beat, last span after the last, never before 0). `quantize.division` (default `DEFAULT_QUANTIZE_DIVISION = 16`) is the one setting for a later dropdown. Used for setting hot and memory cues, dragging a hot cue, the CUE button and now also jumping to a hot cue (`triggerHotCue`, `jumpToHotCue` snap the target). No grid, no snap.
+
+**Grid (`waveform-display.js`, tokens `--ff-wave-grid-{bar,beat,eighth,sixteenth}-alpha` = 0.7 / 0.34 / 0.18 / 0.1 over `--ff-wave-ink`).** One `_renderBeatGrid` for the zoom view, the compact strip and the expanded overview (which had no grid). Each level fades in with its own spacing (12 to 24 px); zoomed out only every 4th and 16th downbeat stays, at 0.45 of the downbeat strength. Bar labels as before. Review card `r160-cues-grid` (base and new, 3 zoom levels and the small player).
+
+**Playhead (R112 diff).** Applied as written. `app/smoke/playhead.spec.ts` swaps each paused animation back to the `style.transform` it replaced and compares screenshots: 6 positions x 2 zooms in the expanded view and 6 positions in the compact strip, at DPR 1 and 2. Expanded: identical in all 24. Compact: identical at 4 of 6 positions; at the 2 positions near the start, 6 (DPR 1) or 10 (DPR 2) pixels differ by 1/255 (composited blend rounding of the played mask); the test allows 1/255 there. WebKit: identical in all 36. `destroy()` cancels the animations: a paused animation stays on the document timeline and kept a closed expanded player's nodes alive (`leaks.spec.ts`, +22 nodes per cycle until fixed).
+
+Check by ear on the Mac: press one hot cue fast and repeatedly on a bass-heavy track, at tempo 1.00 and with key lock at a changed tempo; scrub; pause and play. Expect no pops; the jump lands about 5 ms later than before.
+
+Validation: `cargo test --workspace` 26 result lines, 589 passed, 0 failed. `app`: `npx vitest run` 986 passed, 9 skipped; `npm run check` 0 errors, 0 warnings; Chromium smoke 116 passed; WebKit smoke 116 passed.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

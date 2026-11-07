@@ -76,6 +76,13 @@ selection (1 track) ──► loadPlayerTrack() ──► get_analysis_data
 ### CP5 — Frontend playback wiring ✅
 - [x] `playback.svelte.ts` + store transport + waveform scrub.
 
+## Cues, grid, playhead (R160, 2026-11-07)
+
+- Seeks fade the old audio out (5 ms raised cosine) before the flush, and the new audio in; presses during a fade are coalesced (`playback.rs`).
+- Quantize snaps cues to the nearest 1/16 of the beat grid; the step is `quantize.division` (`app/src/stores/quantize.svelte.ts`).
+- Grid: downbeats, beats, eighths, sixteenths with falling strength (`--ff-wave-grid-*-alpha`); finer levels fade in with spacing. Compact strip and expanded overview share the whole-track grid.
+- Playheads and the played mask move with a paused Web Animation (R112), not `style.transform`.
+
 ## Out of scope (follow-ups)
 
 - Expanded player (`player-expanded.js` artboard).
