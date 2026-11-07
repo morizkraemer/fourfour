@@ -680,3 +680,4 @@
 2026-11-07 15:05 orchestrator r149 handed back 436b07c doc only (bigram bits save ~12 ms per full scan but cost 40-120 ms build + 3-6 MB; full scans rare after R147; search path now saturated), merged on ov-1028
 2026-11-07 15:06 orchestrator decided: own prio r150 beat model op profile + identical-output CPU levers at chunk 500, fp32 and int8 (model is ~90% of analysis CPU; search path saturated after r149), spawned opus/default, branch only
 2026-11-07 16:12 orchestrator r150 handed back: op profile (weight GEMMs 29-38%, attention MatMul 16-29%, rotary data movement 19%); int8 weight prepack -4.4% CPU byte-identical on side branch r150-int8-prepack e779648 (Waiting 44); doc+example merged a807485 on ov-1028, chain running
+2026-11-07 16:16 orchestrator r150 doc landed a807485 on ov-1028 (CHECKS-OK). decided: own prio r151 slow first attention MatMul (50 vs 12 ms per chunk, ~4% if avoidable), spawned opus/default
