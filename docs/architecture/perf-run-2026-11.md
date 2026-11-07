@@ -3342,6 +3342,56 @@ Per pair (load in brackets) the script was 563/653 (17) against 157/148 (20-26),
 
 Scratch (`~/.cache/r153*`) deleted after this item.
 
+## R156 analysis events (2026-11-07, `r156-analysis-events`)
+
+Row 8 of R152 (analysis running, list visible: 61 ms/s at 1 event/s, 248 ms/s at 6 events/s). Branch from `ov-1028`. Linux `dev` box (load 10-53, other workers), headless Chromium, r95 50k payload, base = `ov-1028` in a separate tree with the same spec file, runs interleaved (base, new, new, base, base, new, new, base).
+
+### Finding 1: most of the R152 number was the harness
+
+- `perf-budget.spec.ts` answered every `get_analysis_data` from the page through a Playwright `exposeFunction`. A trace (CDP `Tracing`, main thread) of the 6 events/s window shows 51 `Receive mojo message` entries on `blink.mojom.DevToolsSession` of 52-74 KB each, 20-47 ms apiece: 1,100-1,500 ms of main thread per 8 s, about 170 ms/s. That is the DevTools channel delivering the mock payload, not app work, and the real app gets its payload over Tauri IPC. Blanking the three big waveform fields did not remove it (206-279 ms/s with the payload at 60 KB).
+- The harness now fills a page-side cache with the payloads of the first 250 emitted events before the window (`startAnalysis`), and `__smokeAnalysis` answers from that cache. Base on the new harness: 17 ms/s at 1 event/s and 71-114 ms/s at 6 events/s (R152: 61 and 248).
+- New part `FF_PERF_BUDGET=analysis-list` (list only, 1 and 6 events/s, `FF_PERF_WINDOW` seconds each, busy per second, script, layout+style, GC share from a 1 ms CPU profile, load). `FF_PERF_TRACE=<prefix>` writes the main-thread trace, `FF_PERF_DUMP_PROFILE=<prefix>` the CPU profile.
+
+### Finding 2: what was left, and the change
+
+- Events already arrive batched: `queueAnalysisRefresh` collects ids and `applyQueuedAnalysis` applies them at most every 250 ms with one `bumpLibraryTracks`. R130 already copies only the touched fields. So the two ideas from R152 (copy fields, batch per frame) were in the code; nothing batches coarser or finer now, and event timing is unchanged.
+- CPU profile of the 6 events/s window (self + callees): the Svelte flush after each bump re-ran `library.sidebarData`, one getter that builds all four sidebar sections and also reads `this.tracks.length`. A bump replaces `library.tracks` (new array, same length), so every bump rebuilt favorites, the playlist tree (`sidebarTreeRows`, 80 ms in 10 s) and the USB rows, and the sidebar compared new objects. Flush time dropped from 345 to 98 ms in the same 10 s window, GC from 127 to 13 ms.
+- Change (`app/src/stores/library.svelte.ts`): `trackListLength = $derived(trackList.length)`; `library.trackCount` and the "All Tracks" count read it. A bump leaves the number unchanged, so nothing that reads only the count (sidebar, status bar, settings) is marked dirty. Values on screen are the same; the count still follows every replacement or append of the list.
+
+### Before / after (Chromium, 50k, interleaved pairs, run = 12 s window, mean busy ms/s over the window, load = 1-minute average at the end of the run)
+
+| Metric | base, 4 runs | new, 4 runs | Pairs (base to new, same round) |
+|---|---|---|---|
+| 6 events/s, busy ms/s | 71.2, 108.9, 114.4, 72.0 (median 90) | 57.0, 65.4, 65.7, 53.3 (median 61) | 71 to 57, 109 to 65, 114 to 66, 72 to 53 |
+| 6 events/s, script ms/s | 35.7, 52.0, 64.6, 35.1 | 14.2, 13.2, 23.3, 15.2 | script ranges do not overlap |
+| 6 events/s, layout+style ms/s | 4.6, 4.2, 3.2, 4.7 | 3.7, 4.0, 2.7, 4.4 | no change |
+| 6 events/s, GC ms/s (1 ms profile) | 1.6, 14.4, 5.0, 1.7 | 0.8, 13.7, 1.8, 2.2 | inside noise (GC share follows load) |
+| 1 event/s, busy ms/s | 40.5, 52.1, 86.5, 32.4 | 40.1, 32.2, 79.5, 35.2 | inside noise |
+| 1 event/s, script ms/s | 15.2, 18.6, 28.1, 11.1 | 6.6, 5.7, 12.9, 10.3 | lower in 4 of 4 pairs |
+| idle list (no analysis), busy ms/s | 2.9, 3.9, 22.6, 2.7 | 3.8, 17.4, 3.3, 26.0 | noise (load 10-53) |
+| load (base / new) | 10.3, 30.4, 50.9, 9.9 | 30.1, 32.4, 53.0, 35.5 | new runs followed a base run, so their load is higher by the leftover |
+
+Claimed: script time at both rates is down by more than the noise (at 6 events/s 47 to 17 ms/s on average), and main-thread busy time at 6 events/s is lower in every pair (about 30 percent at the median, 90 to 61). Not claimed: busy time at 1 event/s (a few ms, hidden in the swing of the box), GC share, layout and style, idle. What is left at 6 events/s is about 10 ms per event: a 50k-pointer `slice` per bump (about 0.4 ms), Svelte marking and re-checking the table and row deriveds, and the 1 ms profiler of the harness itself.
+
+### Identity
+
+- Store level, hash of every ordered id of every result, base against new, 10k and 50k: `sorted-typing-real.test.ts` 432 of 432, `search-path-real.test.ts` 94 of 94, `sort-analysis-real.test.ts` 601 of 601 (all six runs equal).
+- `FF_FUZZ_FULL=1` `bulk-bump-fuzz`, `search-sort-fuzz`, `playlist-sort-fuzz` and `import-index.test.ts`: 17 passed.
+- New `analysis-events.test.ts`: the same event stream (4 frames, 13 events, partial and finished, some ids in several frames) applied together per frame and one event per apply interval; after every frame the plain rows (bpm, key, analysed, pending, loaded, preview length), the analysing ids, the track count, the sidebar count, 5 search results and 6 sorted views (3 columns, with and without a query) are `toStrictEqual`. Second test: the track count and the sidebar "All Tracks" count equal the list length across a bump and a replacement.
+- Timing: the events are applied exactly when they were before (same 250 ms apply interval, one bump per batch). An event can land at most one apply interval later than the same event sent alone, as before this change; nothing in R156 moves it.
+
+### Validation
+
+- `npx vitest run`: 113 files passed, 10 skipped; 980 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5621`): 114 passed, 41 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5622`): 114 passed, 41 skipped.
+
+### Not done
+
+- The array copy in `bumpLibraryTracks` and the table-side effects are as in R139.
+- The harness cost is about 30 ms per event on the page thread for a 60 KB payload through DevTools; real Tauri IPC cost per payload was not measured here (no window).
+
+Scratch (`~/.cache/r156*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
