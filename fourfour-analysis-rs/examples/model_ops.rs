@@ -8,11 +8,11 @@ fn env<T: std::str::FromStr>(name: &str, default: T) -> T {
     std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
-fn process_cpu_ms() -> (f64, f64) {
+fn process_cpu_ms_and_faults() -> (f64, f64, f64) {
     let text = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
     let fields: Vec<&str> = text.rsplit(')').next().unwrap_or("").split_whitespace().collect();
     let n = |i: usize| fields.get(i).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
-    (n(11) * 10.0, n(12) * 10.0)
+    (n(11) * 10.0, n(12) * 10.0, n(7))
 }
 
 fn fnv(values: &[f32]) -> u64 {
@@ -55,12 +55,12 @@ fn main() -> anyhow::Result<()> {
         let last = round + 1 == rounds;
         let opts = RunOptions::default().with_thread_pool(Some(pool.clone())).with_timing(timing && last).with_timing_by_shape(env("BY_SHAPE", 0u8) == 1);
         let view = ValueView::from_shape([1, frames, 128].as_slice(), data.as_slice()).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let (u0, s0) = process_cpu_ms();
+        let (u0, s0, f0) = process_cpu_ms_and_faults();
         let t = Instant::now();
         let outs = model.run(vec![(input, ValueOrView::from(view))], &[beat, down], Some(opts))?;
         wall.push(t.elapsed().as_secs_f64() * 1000.0);
-        let (u1, s1) = process_cpu_ms();
-        cpu.push((u1 - u0, s1 - s0));
+        let (u1, s1, f1) = process_cpu_ms_and_faults();
+        cpu.push((u1 - u0, s1 - s0, f1 - f0));
         if last {
             let mut it = outs.into_iter();
             let b = it.next().unwrap().into_tensor::<f32>().unwrap().into_data();
@@ -71,10 +71,10 @@ fn main() -> anyhow::Result<()> {
     let mut sorted = wall.clone();
     sorted.sort_by(f64::total_cmp);
     println!(
-        "RUN {file} frames={frames} threads={threads} prepack={prepack}: wall ms median {:.0} min {:.0}; user/sys ms per run {:?}",
+        "RUN {file} frames={frames} threads={threads} prepack={prepack}: wall ms median {:.0} min {:.0}; user ms, sys ms, minor faults per run {:?}",
         sorted[sorted.len() / 2],
         sorted[0],
-        cpu.iter().map(|(u, s)| (u.round() as i64, s.round() as i64)).collect::<Vec<_>>()
+        cpu.iter().map(|(u, s, f)| (u.round() as i64, s.round() as i64, *f as i64)).collect::<Vec<_>>()
     );
     Ok(())
 }
