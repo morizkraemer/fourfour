@@ -209,6 +209,7 @@
     const sameRows =
       previous !== null &&
       previous.spec === spec &&
+      previous.rows.length === filteredTracks.length &&
       (sameLibraryMembers(previous.rows, filteredTracks) || sameMembers((previous.members ??= new Set(previous.rows)), filteredTracks));
     if (sameRows && untrack(() => scrolling)) {
       resortWaiting = true;
