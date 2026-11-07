@@ -676,3 +676,4 @@
 2026-11-07 13:55 orchestrator parked-all-v16 be2343d = build 1338 (v15 + ov-1028 with r145+r147): dev checks and Mac install running. decided: own prio r148 row updates per key (R147 rest, 20-35 ms/key), spawned sonnet/default
 2026-11-07 14:15 orchestrator parked-all-v16 build 1338 installed on the Mac 13:55 (number verified in bundle), preview :4212 swapped; v16 vitest 1047, check 0 errors, both smokes 0 failed
 2026-11-07 14:41 orchestrator r148 handed back 5b6f8ae (row updates are only 5-8 ms/key; R147's 20-35 ms is mostly filter/sort derived work; 1-line length check before the 50k member Set: row-changing keys about 4-6 ms less script, 150/150 DOM+canvas identical), merged 9a6a10f, chain running
+2026-11-07 15:01 orchestrator r148 landed 9a6a10f on ov-1028 (both smokes 0 failed, 26 suites, vitest 970, CHECKS-OK). decided: own prio r149 filterTracks on scanning keys (about 25 ms/key at 50k), sonnet
