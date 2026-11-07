@@ -100,11 +100,11 @@ export function bumpLibraryTracks(changedIds: Iterable<number>, writtenToPlain: 
 const BUMP_LOG_LIMIT = 4096;
 const BUMP_LOG_ID_LIMIT = 16384;
 const listVersions = new WeakMap<object, number>();
-let bumpLog: { version: number; ids: number[] }[] = [];
+let bumpLog: { version: number; ids: number[]; appended: boolean }[] = [];
 let nextListVersion = 1;
 let bumpLogIds = 0;
 
-function recordTrackListBump(previous: object, next: object, ids: number[]) {
+function recordTrackListBump(previous: object, next: object, ids: number[], appended = false) {
   let from = listVersions.get(previous);
   if (from === undefined) {
     from = nextListVersion++;
@@ -114,7 +114,7 @@ function recordTrackListBump(previous: object, next: object, ids: number[]) {
   }
   const version = nextListVersion++;
   listVersions.set(next, version);
-  bumpLog.push({ version, ids });
+  bumpLog.push({ version, ids, appended });
   bumpLogIds += ids.length;
   while (bumpLog.length > 1 && (bumpLog.length > BUMP_LOG_LIMIT || bumpLogIds > BUMP_LOG_ID_LIMIT)) bumpLogIds -= bumpLog.shift()!.ids.length;
 }
@@ -132,20 +132,33 @@ export function libraryRowsChangedSince(earlier: object): object[] | null {
 
 /** Like `libraryRowsChangedSince`, as positions in `library.tracks` (in the order the bumps touched them). */
 export function libraryPositionsChangedSince(earlier: object): number[] | null {
+  const changes = libraryChangesSince(earlier);
+  return changes && !changes.grown ? changes.positions : null;
+}
+
+/**
+ * What happened to `library.tracks` since an earlier array when it was only bumped and had rows appended in between
+ * (`landImportedTracks`): `grown` when rows were appended (they sit after the `earlier.length` rows that were there,
+ * and `positions` may name them too), `positions` of bumped rows; `null` when the list was replaced or the change is too
+ * old to tell.
+ */
+export function libraryChangesSince(earlier: object): { positions: number[]; grown: boolean } | null {
   const current = untrack(() => trackList);
-  if (earlier === current) return [];
+  if (earlier === current) return { positions: [], grown: false };
   const from = listVersions.get(earlier);
   const to = listVersions.get(current);
   if (from === undefined || to === undefined || bumpLog.length === 0 || bumpLog[0].version > from + 1) return null;
   const positions: number[] = [];
+  let grown = false;
   for (const entry of bumpLog) {
     if (entry.version <= from || entry.version > to) continue;
+    grown ||= entry.appended;
     for (const id of entry.ids) {
       const position = trackIndexById(id);
       if (current[position]?.id === id) positions.push(position);
     }
   }
-  return positions;
+  return { positions, grown };
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -431,7 +444,9 @@ function setLibraryTracks(tracks: Record<string, any>[], rows = tracks.map(react
 
 function appendLibraryTracks(tracks: Record<string, any>[], rows: Record<string, any>[]) {
   plainTracks = plainTracks.concat(tracks);
+  const previous = trackList;
   trackList = trackList.concat(rows);
+  recordTrackListBump(previous, trackList, [], true);
 }
 
 function isPlainContainer(value: object): boolean {
@@ -602,6 +617,8 @@ const WARMUP_DELAY_MS = 250;
 
 function resetSearchIndex() {
   haystackList = null;
+  haystackLetters = new Int32Array(0);
+  haystackDigits = new Int16Array(0);
   haystackCursor = 0;
   warmupGeneration++;
 }
@@ -626,10 +643,14 @@ function markCharacters(index: number, haystack: string) {
 }
 
 function fillSearchIndex(limit: number) {
-  if (!haystackList) {
-    haystackList = [];
-    haystackLetters = new Int32Array(plainTracks.length);
-    haystackDigits = new Int16Array(plainTracks.length);
+  haystackList ??= [];
+  if (haystackLetters.length < plainTracks.length) {
+    const letters = new Int32Array(plainTracks.length);
+    const digits = new Int16Array(plainTracks.length);
+    letters.set(haystackLetters);
+    digits.set(haystackDigits);
+    haystackLetters = letters;
+    haystackDigits = digits;
   }
   const end = Math.min(plainTracks.length, haystackCursor + limit);
   for (; haystackCursor < end; haystackCursor++) {
@@ -1613,7 +1634,7 @@ async function landImportedTracks(added: TrackInfo[]) {
   appendLibraryTracks(plain, rows);
   const coveredEarly = added.filter((t) => coversBeforeRows.delete(t.id)).map((t) => t.id);
   if (coveredEarly.length > 0) markCoversStored(coveredEarly);
-  resetSearchIndex();
+  warmupGeneration++;
   scheduleSearchIndexWarmup();
   for (const listener of trackListLoadedListeners) listener();
 }

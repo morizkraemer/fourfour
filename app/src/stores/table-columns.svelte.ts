@@ -15,8 +15,8 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, libraryMembersOf, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
-import { moveChangedValues, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
+import { library, libraryChangesSince, libraryMembersOf, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
+import { extendValueClasses, moveChangedValues, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
@@ -536,16 +536,23 @@ function readLibraryValues(
 }
 
 function dropUnusableColumnSorts() {
-  for (const [key, entry] of columnSorts) if (libraryPositionsChangedSince(entry.tracks) === null) columnSorts.delete(key);
+  for (const [key, entry] of columnSorts) if (libraryChangesSince(entry.tracks) === null) columnSorts.delete(key);
 }
 
 function columnSortOf(rows: readonly Record<string, unknown>[], key: string): ColumnSort {
   let entry = columnSorts.get(key);
   if (entry && entry.tracks !== rows) {
-    const changed = libraryPositionsChangedSince(entry.tracks);
-    if (changed) {
-      if (changed.length > 0) {
-        readLibraryValues(rows, libraryPlainRows(), key, changed, entry.values);
+    const changes = libraryChangesSince(entry.tracks);
+    if (changes) {
+      const known = entry.values.length;
+      const plains = libraryPlainRows();
+      const changed = changes.grown ? changes.positions.filter((position) => position < known) : changes.positions;
+      if (changed.length > 0) readLibraryValues(rows, plains, key, changed, entry.values);
+      if (changes.grown) {
+        readLibraryValues(rows, plains, key, null, entry.values, known, rows.length);
+        if (changed.length > 0) entry.classes = undefined;
+        else if (entry.classes) entry.classes = extendValueClasses(entry.classes, entry.values, known);
+      } else if (changed.length > 0) {
         entry.classes = undefined;
       }
       entry.tracks = rows;
@@ -596,7 +603,7 @@ let slotOfRank = new Int32Array(0);
 function sortByColumnRank<T extends Record<string, unknown>>(tracks: T[], members: Int32Array, key: string, dir: 1 | -1): T[] | null {
   const rows = untrack(() => library.tracks) as T[];
   const known = columnSorts.get(key);
-  const reusable = known !== undefined && libraryPositionsChangedSince(known.tracks) !== null;
+  const reusable = known !== undefined && libraryChangesSince(known.tracks) !== null;
   if (!reusable && members.length * 8 < rows.length) return null;
   const entry = columnSortOf(rows, key);
   const sorted = orderOf(entry, dir);
@@ -623,6 +630,18 @@ function sortByColumnRank<T extends Record<string, unknown>>(tracks: T[], member
   const out = new Array<T>(count);
   for (let k = 0; k < count; k++) out[k] = tracks[slots[k]];
   return out;
+}
+
+function* refreshColumn(key: string): Generator<void, ColumnSort> {
+  const rows = untrack(() => library.tracks) as Record<string, unknown>[];
+  const directions = [...(columnSorts.get(key)?.orders.keys() ?? [])];
+  const entry = columnSortOf(rows, key);
+  yield;
+  for (const direction of directions) {
+    orderOf(entry, direction);
+    yield;
+  }
+  return entry;
 }
 
 const WARMUP_DELAY_MS = 1000;
@@ -663,20 +682,27 @@ export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupCh
   const rows = untrack(() => library.tracks) as Record<string, unknown>[];
   const plains = libraryPlainRows();
   dropUnusableColumnSorts();
-  const queue = rows.length === plains.length ? keys.filter((key) => !columnSorts.has(key)) : [];
+  const aligned = rows.length === plains.length;
+  const queue = aligned ? keys.filter((key) => !columnSorts.has(key)) : [];
+  const stale = aligned ? keys.filter((key) => columnSorts.has(key) && columnSorts.get(key)!.tracks !== rows) : [];
   let current: { key: string; job: Generator<void, ColumnSort> } | null = null;
   return {
     step(budgetMs) {
       const end = performance.now() + budgetMs;
       do {
         if (!current) {
+          const staleKey = stale.shift();
+          if (staleKey !== undefined) {
+            current = { key: staleKey, job: refreshColumn(staleKey) };
+            continue;
+          }
           const key = queue.shift();
           if (key === undefined) return true;
           current = { key, job: warmColumn(key, rows, plains, chunks) };
         }
         const next = current.job.next();
         if (!next.done) continue;
-        if (!columnSorts.has(current.key) && libraryPositionsChangedSince(next.value.tracks) !== null) columnSorts.set(current.key, next.value);
+        if (!columnSorts.has(current.key) && libraryChangesSince(next.value.tracks) !== null) columnSorts.set(current.key, next.value);
         current = null;
       } while (performance.now() < end);
       return false;

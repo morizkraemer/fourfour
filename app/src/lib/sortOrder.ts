@@ -43,6 +43,8 @@ export interface ValueClasses {
   count: number;
 }
 
+const distinctSorted = new WeakMap<ValueClasses, (string | number)[]>();
+
 function* mergeRuns(a: string[], b: string[], step: number): Generator<void, string[]> {
   const out: string[] = new Array(a.length + b.length);
   let i = 0;
@@ -107,16 +109,89 @@ export function* valueClassesSteps(values: readonly SortValue[], chunk: number):
     if (end < n) yield;
   }
   const rankOfId = new Int32Array(distinct.length);
+  let sortedDistinct: (string | number)[] = [];
   if (kind === 'string') {
     const sorted = yield* sortDistinctStrings(distinct as string[], chunk);
     for (let r = 0; r < sorted.length; r++) rankOfId[ids.get(sorted[r])!] = r;
+    sortedDistinct = sorted;
   } else if (kind === 'number') {
     const sorted = Float64Array.from(distinct as number[]).sort();
     for (let r = 0; r < sorted.length; r++) rankOfId[ids.get(sorted[r])!] = r;
+    sortedDistinct = Array.from(sorted);
   }
   const count = distinct.length;
   for (let i = 0; i < n; i++) classes[i] = classes[i] < 0 ? count : rankOfId[classes[i]];
-  return { classes, count };
+  const result = { classes, count };
+  distinctSorted.set(result, sortedDistinct);
+  return result;
+}
+
+function lowerBound(sorted: readonly (string | number)[], value: string | number): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (sorted[mid] < value) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+}
+
+/**
+ * `held` (the classes of `values` before the rows from `from` on were appended) folded with the appended values: the same
+ * classes `valueClasses(values)` gives, from sorting only the appended values that are new. `undefined` when that cannot
+ * be told cheaply (no distinct values held, a NaN, or values of the other kind); the caller then builds the classes again.
+ */
+export function extendValueClasses(held: ValueClasses, values: readonly SortValue[], from: number): ValueClasses | undefined {
+  const old = distinctSorted.get(held);
+  if (!old || old.length === 0 || held.classes.length !== from) return undefined;
+  const kind = typeof old[0];
+  const n = values.length;
+  const fresh = new Set<string | number>();
+  const freshValues: (string | number)[] = [];
+  for (let i = from; i < n; i++) {
+    const v = values[i];
+    if (v === null) continue;
+    if (typeof v !== kind || v !== v) return undefined;
+    if (fresh.has(v)) continue;
+    const at = lowerBound(old, v);
+    if (old[at] === v) continue;
+    fresh.add(v);
+    freshValues.push(v);
+  }
+  const added = kind === 'string' ? (freshValues as string[]).sort() : Array.from(Float64Array.from(freshValues as number[]).sort());
+  const count = old.length + added.length;
+  const newRankOfOld = new Int32Array(old.length + 1);
+  const sorted: (string | number)[] = new Array(count);
+  const rankOfFresh = new Map<string | number, number>();
+  let previousAt = 0;
+  let written = 0;
+  for (let j = 0; j <= added.length; j++) {
+    const at = j < added.length ? lowerBound(old, added[j]) : old.length;
+    for (let r = previousAt; r < at; r++) {
+      newRankOfOld[r] = r + j;
+      sorted[written++] = old[r];
+    }
+    if (j < added.length) {
+      rankOfFresh.set(added[j], written);
+      sorted[written++] = added[j];
+    }
+    previousAt = at;
+  }
+  newRankOfOld[old.length] = count;
+  const classes = new Int32Array(n);
+  for (let i = 0; i < from; i++) classes[i] = newRankOfOld[held.classes[i]];
+  for (let i = from; i < n; i++) {
+    const v = values[i];
+    if (v === null) classes[i] = count;
+    else {
+      const rank = rankOfFresh.get(v);
+      classes[i] = rank !== undefined ? rank : newRankOfOld[lowerBound(old, v)];
+    }
+  }
+  const result = { classes, count };
+  distinctSorted.set(result, sorted);
+  return result;
 }
 
 /** `valueClassesSteps` in one piece. */
