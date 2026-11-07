@@ -233,5 +233,6 @@ Don't optimize for phone-sized viewports.
 - Mobile / touch
 - Multi-window / detached panels
 - Plugin / extension system
+- Quantize settings (a dropdown for the hot cue quantize step: off, 1 beat, 1/8, 1/16 ...). For now hot cues quantize to 1/16 by default. Belongs in a later Perform mode (Merlin, 2026-11-07).
 
 Revisit when the core flow is solid.
