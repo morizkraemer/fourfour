@@ -43,7 +43,7 @@ else
 fi
 if echo "$SIGN" | grep -q "^Authority="; then fail "signature has an authority"; fi
 
-check "weights beat_this.onnx" test -s "$RES/models/beat_this.onnx"
+check "weights beat_this_q8sc.onnx" test -s "$RES/models/beat_this_q8sc.onnx"
 check "weights mel_spectrogram.onnx" test -s "$RES/models/mel_spectrogram.onnx"
 check "licence LICENSE-beat-this.txt" test -s "$RES/models/LICENSE-beat-this.txt"
 check "licence is MIT" grep -q "MIT License" "$RES/models/LICENSE-beat-this.txt"

@@ -144,11 +144,12 @@ fn median(mut v: Vec<f64>) -> f64 {
 fn profile_stages(library: &LocalLibrary, items: &[(i64, PathBuf)], threads: Option<usize>, dump: Option<&PathBuf>) {
     use fourfour_analysis::analyze::{analyze_controlled, Config, Control};
     use fourfour_analysis::bt::BeatEngine;
-    use fourfour_analysis::service::{locate_models, plan_pool, available_memory_mb, to_app_result, BEAT_MODEL};
+    use fourfour_analysis::service::{beat_model, locate_models, plan_pool, prepacks_weights, available_memory_mb, to_app_result};
 
     let models = locate_models(None).expect("model weights (FOURFOUR_MODELS_DIR)");
     let t = Instant::now();
-    let engine = BeatEngine::load(&models, BEAT_MODEL, false).expect("load models");
+    let beat_file = beat_model();
+    let engine = BeatEngine::load(&models, &beat_file, prepacks_weights(&beat_file)).expect("load models");
     let model_load_ms = t.elapsed().as_secs_f64() * 1000.0;
     let env = BackendEnv { max_threads: threads, ..BackendEnv::default() };
     let threads = plan_pool(&env.pool_options(), available_memory_mb(), 1).threads_per_track;
