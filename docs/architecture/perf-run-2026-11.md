@@ -3184,6 +3184,83 @@ Without faults every attention QK^T runs at the same 4.2 ms per 1500 x 1500 matr
 
 `fourfour-analysis-rs/examples/model_ops.rs` prints minor page faults per run next to user and sys ms, plus this section. No library or app code changed, so `analyze-json` output is the same binary path as `ov-1028`. Validation: `cargo test --workspace`: 26 `test result: ok` lines, 570 passed, 0 failed. Not measured: the Mac (a different allocator, so a different warm-up; not checked), and `analyze-json` timing, since there is no product change to compare.
 
+## R152 budget (2026-11-07, `r152-budget`)
+
+Measurement only, no product change. Branch `r152-budget` from `ov-1028`. New harness `app/smoke/perf-budget.spec.ts` (boot, flows, import, analysis, memory; one JSON line per run). Linux `dev` box (16 cores), headless Chromium 1217 and Playwright WebKit, the r95 `bench_startup dump` payloads of the `ff-fixture` 10k and 50k libraries (read only, `~/.cache/r95/state{10k,50k}.json`, same schema the page decodes today). `bench_startup` was not rebuilt, so the backend share is cited from R129 (`load_state` 50 / 210 ms), not re-measured.
+
+Commands (one at a time, 3 runs unless noted, load average recorded in each line):
+
+```
+FF_PERF_STATE=<state.json> FF_PERF_BUDGET=boot,flows,import,analysis FF_PERF_RUNS=3 FF_PERF_LABEL=x FF_PERF_BUDGET_OUT=out.jsonl npx playwright test smoke/perf-budget.spec.ts
+FF_PERF_BUDGET=memory FF_PERF_SOAK_MIN=10 ...            # heap: open, 2 full scrolls, 10 min idle with 1 analysis event per second
+FF_PERF_PROFILE=1 ...                                    # unminified build plus a CDP sampling profile per step (top 3 self-time functions)
+FF_SMOKE_BROWSER=webkit ...                              # WebKit: wall time only (no CDP: no script/layout split, no profile)
+FF_PERF_STARTUP=10000=<state>==50,50000=<state>==210 FF_PERF_RUNS=5 npx playwright test smoke/perf-startup.spec.ts   # cold open (backend simulated at 50 / 210 ms)
+```
+
+Read with care:
+
+- **Load.** Quiet runs had load 5.7-6.1 (flows 50k, cold open); the first batch ran at 8-11 and the 10k analysis and import runs at 16-37. Numbers below come from the quiet runs where there is one; 10k analysis numbers are not usable (load 16-36) and are left out. Profile runs (load 30) show shares, not times.
+- **Click timing** = hardware timestamp of the click until the screen shows the result plus two animation frames (about 35-40 ms of that is the headless compositor floor, as in R129). "rest" in the split is main-thread task time that is not script, layout or style (paint, layerize, commit, GC); it cannot be split further without a trace.
+- **Harness costs removed.** The mock's `get_waveform_detail` builds a 4.8 MB buffer in about 316 ms on the page's main thread; the first version of the track-load step carried it (700 ms). The final step answers it from a cache filled before the click. The mock also hands the 50k payload to the page as init-script JSON, which delays the first row by about 1.2 s; cold open therefore comes from `perf-startup.spec.ts` (payload by fetch, backend simulated), not from the new spec.
+- **WebKit** is headless software compositing (R29): 2-6x slower on every step, scroll 120-170 ms per frame. Only the ratios carry to the Mac.
+
+### Budget table, ranked by user-felt ms (Chromium, 50k, quiet; `x / y` = 10k / 50k where both exist)
+
+| # | Flow | Felt ms | Script / layout+style / rest | Top 3 (CPU profile, self ms) | Top cause | Class | Fenced | Lever idea |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Cold open to first rows, then interactive | 628 / 1,035 first rows, interactive 691 / 1,035 (warm 573 / 910); WebKit cold 898 / 1,410; backend inside this (50 / 210 simulated) | to first rows 320 / 406, 118 / 113, rest not split (mock-inflated); longest task 196 / 280, TBT 234 / 332 | GC 674, `trackHaystack` 220 + `markCharacters` 101 (search text), `valueClassesSteps` 136 + `sortDistinctStrings` 79 + `orderFromClasses` 52 (sort warm-up); profile at load 31, shares only | mount (design-system rows, sidebar) plus the idle index warm-up that starts with the first rows (R121, R129) | a for the warm-up and `load_state`, b for the mount | partly (mount: `TrackRow`, `Sidebar` rows) | start the `load_state` compute at process setup (R129 lever 3); defer the warm-up past the first click window |
+| 2 | Import 1k folder into the 50k library, after the rows appear | 555-653 ms of script in the 3.5 s after the rows (10k: 217-338), worst frame 169 / 191 ms; UI click to rows 30 / 53 ms with the mock | script 555-653, layout 6, rest 164-219 | `trackHaystack` 194, `markCharacters` 85, `sortDistinctStrings` 82 | adding 1,000 rows throws away and rebuilds the search text and sort classes of all 51,000 rows | a | no (`library.svelte.ts`, `table-columns.svelte.ts`) | append the new rows to the search index and sort classes instead of rebuilding |
+| 3 | Fast fling over the library | 49 ms per frame p50, p95 63, max 89; 89 of 90 frames over 25 ms, 32 over 50 ms; 18-31 long tasks, 1.0-1.8 s of 4.6 s; wheel fling 46 / 62 / 69 | per 90 frames: script 1,214, layout+style 1,123, rest 2,156 | `handle` 230, `get` 173, `(anon)` 136 (Svelte row updates and bindings; no source for `handle`) | every frame replaces all 42 row components (R118: 37 canvases and 37 overlap layers per 42 rows); steady scroll (90 px per frame) is 23 p50, 28 p95, 32 of 120 frames over 25 ms | b | yes (`TrackRow`, `Waveform` row canvases) | no per-row canvas work while a fling is faster than N rows per frame (changes what is shown) |
+| 4 | Track double click to player ready | 293 ms (10k: 243-634 loaded) | 46 / 15 / 229 | `colorBandsFromPayload` 20, anon 42, anon 19 (load 31, shares) | player overview paint and the answer path; includes the mock answer through Playwright (not app time) | a, b | partly (overview in `Waveform`) | reuse the decoded bands across a double click and the inspector load |
+| 5 | First row select (inspector opens) | 275 ms (10k 340 loaded; R129 measured 12 ms for later selects) | 43 / 19 / 95 | anon 59 (`index`), `set_attribute` 13, `Detail` chunk | first select mounts the lazily loaded `Detail` inspector (chunk, component tree, bindings); later selects are cheap | a | no (`Detail.svelte`) | preload the `Detail` chunk and mount it hidden after the first rows |
+| 6 | First click right after the first rows (sort by title) | 227 ms at 50k (10k 131); a later first click on a settled page is 105 (second click 91) | 191 / 13 / 73 (boot click) against 24 / 9 / 57 settled | `sortDistinctStrings` 54, `valueClassesSteps` 53, `sortValueOfRaw` 26 | the sort-column warm-up is still running (about 800 ms of main thread after the first rows, 400-500 ms of TBT) | a | no (`table-columns.svelte.ts`) | R129 lever 2: rank from the typed arrays the decoder already built, not from text |
+| 7 | Expand the big player | 180 ms (10k 187); one 70 ms task | 77 / 22 / 146 | `fillRect` 17, `reduceBands` 14, `measureText` 9 (load 30) | first draw of the detail canvases and the expanded layout | b | yes (`waveform-display.js`, `Waveform`) | draw the detail canvas in two slices, label metrics measured once |
+| 8 | Analysis running, list visible | main thread busy 61 ms/s at 1 event/s (idle page 7), 248 ms/s at 6 events/s (worst second 324); about 50 ms per event | script 10-14 ms/s; the rest is GC and rendering | GC 60-98 ms/s, `get` 27-39, `is_dirty` 27 (Svelte reactive reads) | each `analysis-partial` bumps rows through the store, and GC follows (R129 finding: `structuredClone` of row fields) | a | no (`library.svelte.ts`) | R129 lever 1: copy fields instead of `$state.snapshot` clones; batch events per frame |
+| 9 | Player playing (strip) | idle 13 ms/s (worst second 105-180); big player 6 ms/s; with analysis 1 event/s 56 / 52 ms/s | script 2 ms/s | GC 100 ms in a 15 s window, anon, `walk` | a periodic GC second in the strip; analysis cost is the same as row 8 (no extra from the player) | a | no | none needed beyond row 8 |
+| 10 | Clicks that open something: playlist (10,000 tracks), analysis panel, settings, sort | 106, 101, 117, 105 ms | playlist 31 / 12 / 51; panel 9 / 11 / 120; settings 16 / 18 / 117 | `positionsByIdTable` 11 (playlist), `focus` 73 ms in the loaded profile (settings), `lastCheckText` 18 | compositor floor plus one forced layout (`focus`) in the settings sheet | c, a | partly (sheet is design-system) | focus the sheet after the first paint |
+
+Also measured:
+
+| Item | Chromium | WebKit (software) |
+|---|---|---|
+| Sort click (first / second), 10k | 103 / 90 ms | 212 / 178 |
+| Playlist, 10k (2,000 tracks) | 91 ms | 200 |
+| Inspector first select, 10k | 340 ms (loaded) | 581 |
+| Track load, 10k | 590 ms (loaded; 243 in the quiet run) | 711 |
+| Expand, 10k | 187 ms | 461 |
+| Settings, 10k | 165 ms (loaded) | 476 |
+| Import 1k, UI to rows (mock), 10k / 50k | 53 / 30 ms | 41 / 44 ms (worst frame 409) |
+| Scroll steady, p50 / p95, 50k | 23 / 28 ms | 148 / 191 |
+| Scroll steady, p50 / p95, 10k | 25 / 41 ms (loaded) | 122 / 167 |
+
+### Memory (Chromium, 50k, forced GC before each reading, `Runtime.getHeapUsage`)
+
+| Moment | JS heap MB | DOM nodes |
+|---|---|---|
+| after open (6 s settled) | 98 | 6,402 |
+| after two full scrolls | 107 | 6,401 |
+| idle with analysis 1 event/s, minute 1 / 5 / 10 | 119 / 120 / 120 | 6,433 |
+
+Heap rises 21 MB in the first minute of analysis events and then stays flat for 10 minutes (no leak seen), DOM nodes are flat, and the idle page costs 52-56 ms of main thread per second the whole time (that is row 8, not a leak). 10k: 25 MB after open, 43 after a scroll and playlist walk. Real app RSS needs a window and was not measured (R23, R42).
+
+### What the list says
+
+- The search text and the sort classes are the biggest repeated main-thread work at 50k: they run once in the first seconds (row 1, 6), again after an import (row 2), and the same rows are bumped by every analysis event (row 8). One incremental index (append and patch, never rebuild) would touch rows 1, 2, 6 and 8 with identical results.
+- The felt costs of single clicks are at the floor (100-117 ms of which about 40 is compositor); only the first select (275) and the first click inside the warm-up window (227) stand out.
+- Fling scroll is the one flow that is slow in every phase, and its hot code is in `prototyping/` (fenced).
+- Not measured: real Tauri window start, real backend `load_state`, cold-disk first query (R129: 1.5 s at 10k, 4.1 s at 50k), real audio playback, a Mac.
+
+### Top 5 next items
+
+1. **Incremental search index and sort classes** (`library.svelte.ts`, `table-columns.svelte.ts`): append and patch on import and bumps, never rebuild all rows. Identical result, can land. Targets rows 2 and 8 and part of 1 and 6 (about 600 ms after an import, about 270 ms of boot warm-up).
+2. **Analysis events: copy row fields, batch per frame** (R129 lever 1, plus one flush per frame): about 50 ms of main thread per event to a few ms. Identical result, can land.
+3. **Sort warm-up from the decoder's typed arrays and later than the first click window** (R129 lever 2): first click right after the first rows 227 to about 110 ms, and 400-500 ms less blocking after open. Identical result, can land.
+4. **`load_state` computed at process setup** (R129 lever 3): takes the 210 ms backend (50k) off the path to the first row, and the storage wait on a cold disk. Identical bytes, can land (Rust, `pioneer-test-ui`).
+5. **Fling scroll: no per-row canvas work while rows pass faster than they can be read** (R118 proposal): 49 ms per frame to near the steady 23. Changes what is shown during a fling and the hot code is fenced, so it needs Merlin and a prototyping change first.
+
+Scratch (`~/.cache/r152*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
