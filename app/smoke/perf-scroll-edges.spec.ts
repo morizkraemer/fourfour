@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import { join } from 'node:path';
 import { test, type Page } from '@playwright/test';
@@ -52,6 +52,7 @@ interface FrameSample {
   top: number;
   pre: number;
   post: number;
+  hidden: number;
 }
 
 function installEdgeProbe() {
@@ -88,7 +89,7 @@ function installEdgeProbe() {
     if (!w.__edges.on) return;
     const sample = blankSlots();
     pre = sample.blank;
-    w.__edges.frames.push({ t: performance.now(), top: sample.top, pre: sample.blank, post: sample.blank });
+    w.__edges.frames.push({ t: performance.now(), top: sample.top, pre: sample.blank, post: sample.blank, hidden: document.querySelectorAll('[data-track-row] canvas[style*="hidden"]').length });
     scrolled = false;
   };
   requestAnimationFrame(frame);
@@ -169,6 +170,8 @@ function summarise(samples: FrameSample[]) {
     postBlankFrames: samples.filter((s) => s.post > 0).length,
     postBlankMax: Math.max(0, ...samples.map((s) => s.post)),
     postBlankSum: samples.reduce((a, s) => a + s.post, 0),
+    heldFrames: samples.filter((s) => s.hidden > 0).length,
+    heldMax: Math.max(0, ...samples.map((s) => s.hidden)),
   };
 }
 
@@ -199,7 +202,12 @@ function rafFling(page: Page, count: number) {
 const visibleRowsText = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('[data-track-row]')]
-      .filter((r) => r.style.display !== 'none')
+      .filter((r) => {
+        const scroller = document.querySelector('.ff-table__scroll') as HTMLElement;
+        const header = (scroller.querySelector('.ff-colh') as HTMLElement).offsetHeight;
+        const i = Number(r.dataset.rowIndex);
+        return r.style.display !== 'none' && (i + 1) * 28 > scroller.scrollTop && i * 28 < scroller.scrollTop + scroller.clientHeight - header;
+      })
       .sort((a, b) => Number(a.dataset.rowIndex) - Number(b.dataset.rowIndex))
       .map((r) => `${r.dataset.rowIndex}:${r.textContent}`)
       .join('\n'),
@@ -208,7 +216,12 @@ const visibleRowsText = (page: Page) =>
 const canvasHash = (page: Page) =>
   page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('[data-track-row]')]
-      .filter((r) => r.style.display !== 'none')
+      .filter((r) => {
+        const scroller = document.querySelector('.ff-table__scroll') as HTMLElement;
+        const header = (scroller.querySelector('.ff-colh') as HTMLElement).offsetHeight;
+        const i = Number(r.dataset.rowIndex);
+        return r.style.display !== 'none' && (i + 1) * 28 > scroller.scrollTop && i * 28 < scroller.scrollTop + scroller.clientHeight - header;
+      })
       .sort((a, b) => Number(a.dataset.rowIndex) - Number(b.dataset.rowIndex))
       .map((r) => {
         const c = r.querySelector('canvas');
@@ -300,9 +313,20 @@ test.describe('scroll edges', () => {
         await page.waitForTimeout(800);
         const from = Date.now() - t0;
         let deltas: number[] = [];
+        const cdp = WEBKIT ? null : await context.newCDPSession(page);
+        const metrics = async () => {
+          if (!cdp) return { script: 0, layout: 0, task: 0 };
+          await cdp.send('Performance.enable');
+          const { metrics: m } = (await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] };
+          const get = (name: string) => (m.find((x) => x.name === name)?.value ?? 0) * 1000;
+          return { script: get('ScriptDuration'), layout: get('LayoutDuration') + get('RecalcStyleDuration'), task: get('TaskDuration') };
+        };
+        const before = await metrics();
         const samples = await frames(page, async () => {
-          deltas = await rafFling(page, 90);
+          deltas = await rafFling(page, Number(process.env.FF_PERF_FLING_FRAMES ?? 90));
         });
+        const after = await metrics();
+        const split = { script: round(after.script - before.script), layoutStyle: round(after.layout - before.layout), rest: round(after.task - before.task - (after.script - before.script) - (after.layout - before.layout)) };
         videoMarks.push({ name: 'raf', from, to: Date.now() - t0 });
         const f = deltas.slice(1);
         report('raf-fling', run, {
@@ -313,6 +337,7 @@ test.describe('scroll edges', () => {
           max: round(Math.max(...f)),
           over25: f.filter((d) => d > 25).length,
           over50: f.filter((d) => d > 50).length,
+          split,
         });
       }
       if (PARTS.has('settle')) {
@@ -325,6 +350,7 @@ test.describe('scroll edges', () => {
           await page.waitForTimeout(1500);
           const top = await page.evaluate(() => (document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop);
           const png = await page.locator('.ff-table__scroll').screenshot({ animations: 'disabled' });
+          if (process.env.FF_PERF_EDGES_SHOTS) writeFileSync(`${process.env.FF_PERF_EDGES_SHOTS}/${LABEL}-${target}.png`, png);
           shots.push(`top ${top} shot ${sha(png)} rows ${sha(await visibleRowsText(page))} waves ${sha(await canvasHash(page))}`);
         }
         await rafFling(page, 30);
