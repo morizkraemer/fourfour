@@ -86,9 +86,10 @@ export function onTrackListLoaded(listener: () => void) {
  * Call after changing fields of the tracks `changedIds` through their rows: copies them to the plain objects the search
  * text, counts and lookups read, rebuilds their search text and swaps the list so sorts and filters run again.
  */
-export function bumpLibraryTracks(changedIds: Iterable<number>) {
+export function bumpLibraryTracks(changedIds: Iterable<number>, writtenToPlain: readonly number[] = []) {
   const ids = [...changedIds];
   const searchTextChanged = copyRowFieldsToPlainTracks(ids);
+  for (const id of writtenToPlain) searchTextChanged.push(id);
   if (haystackList) refreshHaystacks(searchTextChanged);
   const previous = trackList;
   trackList = trackList.slice();
@@ -1093,8 +1094,12 @@ export function isTrackAnalyzing(trackId: number): boolean {
   return analyzingIdSet.set.has(trackId);
 }
 
+function isKnownTrackId(id: number): boolean {
+  return plainTracks[trackIndexById(id)]?.id === id || plainTracks.some((t) => t.id === id);
+}
+
 function knownTrackIds(ids: number[]): number[] {
-  return [...new Set(ids)].filter((id) => id > 0 && libraryTrackById(id) !== undefined);
+  return [...new Set(ids)].filter((id) => id > 0 && isKnownTrackId(id));
 }
 
 const analysisStartListeners = new Set<(trackIds: number[]) => void>();
@@ -1294,23 +1299,34 @@ function finishAnalyzingTrack(trackId: number) {
 /** Puts tracks into the state a first analysis starts from: no waveform, and no BPM or key unless hand-set. */
 function markTracksPendingAnalysis(ids: number[]) {
   const restarted: number[] = [];
+  const searchTextWrittenToPlain: number[] = [];
   for (const id of ids) {
-    const track = libraryTrackById(id);
-    if (!track || track.analysisPending) continue;
+    const row = libraryTrackById(id);
+    if (!row) continue;
+    const plain = plainRowOf(row);
+    const writtenToPlain = !rowEntries.has(plain);
+    const track = writtenToPlain ? plain : row;
+    if (track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
     track.bandsWire = undefined;
     track.analysisLoaded = false;
     track.analysisPending = true;
+    let searchTextWritten = false;
     if (!track.bpmLocked) {
       track.bpm = '—';
       track.bpmExact = 0;
+      searchTextWritten = true;
     }
-    if (!track.keyLocked) track.key = '—';
+    if (!track.keyLocked) {
+      track.key = '—';
+      searchTextWritten = true;
+    }
+    if (writtenToPlain && searchTextWritten) searchTextWrittenToPlain.push(id);
     restarted.push(id);
   }
   if (restarted.length === 0) return;
-  bumpLibraryTracks(restarted);
+  bumpLibraryTracks(restarted, searchTextWrittenToPlain);
   analysisStartListeners.forEach((listener) => listener(restarted));
 }
 
