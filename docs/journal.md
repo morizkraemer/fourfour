@@ -686,3 +686,4 @@
 2026-11-07 16:40 orchestrator r151 doc landed on ov-1028 (CHECKS-OK)
 2026-11-07 17:48 orchestrator r152 handed back 925fbd6 (50k budget: cold open 1035 ms, import 1k burst 555-653 ms, fling 49 ms/frame (fenced, needs Merlin), first select 275, analysis 55 ms/s per event/s; heap flat 120 MB), merged on ov-1028, chain running. decided: own prio r153 incremental import index (sonnet) + r154 early load_state (sonnet), disjoint paths
 2026-11-07 18:13 orchestrator r152 landed on ov-1028 (both smokes 0 failed, vitest 970, CHECKS-OK). Asked Merlin: fling scroll fix (skip row canvases mid-fling, fenced)
+2026-11-07 18:13 orchestrator r154 handed back 12cfa91 (library open + load_state build now start before the window: 50k answer 100-175 ms sooner in simulated boot, 10k unchanged, payload sha256 equal; real window not run), merged on ov-1028, chain running; needs a Mac launch check in the next build
