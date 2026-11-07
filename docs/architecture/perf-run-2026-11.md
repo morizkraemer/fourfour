@@ -3142,6 +3142,48 @@ Validation: `cargo test --workspace` on `r150-model-ops`: 26 `test result: ok` l
 - Chunk 1500 on `ov-1028` (the current default): prepacking was not measured there; the weight-packing share is smaller at 1500 than at 500.
 - The rotary data movement (about 12% of the run) and the slow first frontend attention are the largest identical-output targets left, both inside rten (a fused rotary op or a faster strided copy for an innermost axis of 2).
 
+## R151 first attention MatMul (2026-11-07, `r151-first-matmul`)
+
+Question: R150 saw the first frontend time attention (`blocks.0/partial/attnT/attend/MatMul`, [32, 1, 500, 32] x [32, 1, 32, 500]) take about 50 ms in a 500 frame chunk, where blocks 1 and 2 do the same 32 matrices in about 12 ms. Why, and can it be cut with identical output? Branch `r151-first-matmul` from `ov-1028` (a807485). Linux `dev` box, release build, 1 thread, `model_ops` (now also prints minor page faults per run). **Result: it is not the MatMul. It is first-touch page faults on a fresh 32 MB output buffer, and at chunk 500 only in the first 3 runs of a thread. From the 4th run on the op takes 12.5 ms, like blocks 1 and 2. Nothing to cut in our code; doc only, no product change.**
+
+### Cause
+
+- The QK^T output (the attention scores) is 32 x 500 x 500 floats = 32,000,000 bytes, the largest buffer of the run up to that point. Blocks 1 and 2 produce the same element count ([16, 2, 500, 500], [8, 4, 500, 500]), so rten's `BufferPool` hands them block 0's buffer again once Softmax and the AV MatMul are done with it. Only block 0 gets fresh memory from malloc, and the first write to it faults in about 7,800 pages. The kernel, the layout and the shapes are the same in all three blocks.
+- rten 0.24 creates a new `BufferPool` in every `Model::run` (`graph.rs`, R106), so each chunk starts with an empty pool. Whether the 32 MB then costs faults depends on glibc: in the first runs the block is `mmap`ed (dynamic mmap threshold still low) or lands in fresh arena heap pages; once the threshold has risen and the arena heap has its final size, the freed 32 MB stays mapped and is reused by the next run without faults.
+- Evidence (`model_ops`, 500 frames, 1 thread, minor faults per run): runs 1 to 4 fault 22,188 / 12,308 / 7,698 / 1 pages (four repeats, same sequence each time, then 1-245 per run up to run 8). Run 3 faults 7,698 pages, which is the 32 MB score buffer (7,813 pages). The op time follows: 53-54 ms when the timed run is run 2 or 3, 12.3-12.9 ms when it is run 4, 5 or 8.
+- Cross-checks: with `MALLOC_ARENA_MAX=1 MALLOC_MMAP_MAX_=0 MALLOC_TRIM_THRESHOLD_=1G` (R106) the op takes 13.8 ms already in run 3. With `RTEN_USE_POOL=0` (no buffer reuse inside the run) blocks 1 and 2 would have to fault too; in run 3 all three took 12.3-12.6 ms because the warm-up had already happened in runs 1 and 2 (186k and 154k faults there). Logits are the same in every run and setting (beat `2e33ac0a8585c976`, down `082582f6ea64f9f4`).
+- R150's 50 ms figure matches such a warm-up reading: 53-54 ms came back here whenever the timed run was run 2 or 3, never from run 4 on.
+
+### What it costs in the app
+
+- The beat chunk threads are long-lived (`ChunkExecutor`, one 1-thread rten pool each), so each thread pays the warm-up once for its first 3 chunks: about 42k faults, about 150-200 ms of system time per chunk thread per process. Per track that is nothing; R150's 8-track `analyze-json` at chunk 500 had 2.1-2.3 s sys against 374 s user in total (0.6%), an upper bound for all faults.
+- So the "4% of a chunk" does not exist in steady state, for fp32 or int8 (same graph, same buffer).
+
+### Chunk 1500 (the `ov-1028` default)
+
+Here the slow first MatMul is real in every run, but it is R106: blocks above 32 MiB are always `mmap`ed by glibc and unmapped on free, so the 288 MB score buffer (and the 144 MB ones of the 6 transformer layers) fault every chunk. `model_ops`, 1500 frames, 1 thread:
+
+| | blocks.0 QK^T | blocks.1 / 2 QK^T | transformer QK^T (mean of 6) | user / sys ms per run | faults per run |
+|---|---:|---:|---:|---:|---:|
+| default glibc | 535 ms | 149 / 158 ms | 265 ms | 5,130-5,420 / 1,120-1,320 | 257k-276k (runs 1-3) |
+| R106 env vars (run 3) | 134 ms | 133 / 134 ms | 68 ms | 4,470 / 10 | 27 |
+
+Without faults every attention QK^T runs at the same 4.2 ms per 1500 x 1500 matrix, so the kernel is fine there too. Same logits both ways (beat `91f79fb92dd29326`). The levers are the ones R106 already weighed: the three malloc env vars (-22% CPU, +10-23% peak RSS, not default), chunk 500 (r96, faults go away), or an rten change that keeps the `BufferPool` across runs.
+
+### Levers checked
+
+| lever | result |
+|---|---|
+| operand layout, transposed K, batch shape [32, 1] vs [16, 2] / [8, 4] | not the cause: without faults all three blocks take 12.3-13.8 ms at 500 and 133-134 ms at 1500 |
+| a load-time graph tweak so block 0 reuses an earlier buffer | nothing earlier in the run is 32 MB or larger; an extra early allocation would only move the faults |
+| our chunk tensor (`extract_chunk`) | 256 KB, already contiguous [1, 500, 128]; not involved |
+| `mallopt` at startup to skip the warm-up | would save about 150-200 ms of sys per chunk thread per process at 500; not worth the global allocator change. At 1500 it is R106 with its RSS cost |
+| keep the pool across runs | not reachable from outside rten 0.24 (no pool in `RunOptions`); an upstream change |
+
+### What changed
+
+`fourfour-analysis-rs/examples/model_ops.rs` prints minor page faults per run next to user and sys ms, plus this section. No library or app code changed, so `analyze-json` output is the same binary path as `ov-1028`. Validation: `cargo test --workspace`: 26 `test result: ok` lines, 570 passed, 0 failed. Not measured: the Mac (a different allocator, so a different warm-up; not checked), and `analyze-json` timing, since there is no product change to compare.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
