@@ -7,22 +7,27 @@ use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, WaveformPreview
 use pioneer_usb_writer::waveform::Waveforms;
 
 use crate::analyze::{analyze_controlled, Analysis, Config, Control};
-use crate::bt::{BeatEngine, BeatStatus};
+use crate::bt::{chunk_frames, BeatEngine, BeatStatus};
 use crate::keymap::camelot;
 
 pub const MODELS_ENV: &str = "FOURFOUR_MODELS_DIR";
 pub const MEL_MODEL: &str = "mel_spectrogram.onnx";
 pub const BEAT_MODEL: &str = "beat_this.onnx";
+pub const BEAT_MODEL_ENV: &str = "FOURFOUR_BEAT_MODEL";
 
-pub fn models_present(dir: &Path) -> bool {
-    dir.join(MEL_MODEL).is_file() && dir.join(BEAT_MODEL).is_file()
+pub fn beat_model() -> String {
+    std::env::var(BEAT_MODEL_ENV).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| BEAT_MODEL.to_string())
 }
 
-pub const ANALYSIS_VERSION: u32 = 1;
+pub fn models_present(dir: &Path) -> bool {
+    dir.join(MEL_MODEL).is_file() && dir.join(beat_model()).is_file()
+}
+
+pub const ANALYSIS_VERSION: u32 = 2;
 
 pub fn analysis_key(models_dir: Option<&Path>) -> String {
     let len = |name: &str| models_dir.and_then(|dir| std::fs::metadata(dir.join(name)).ok()).map_or(0, |m| m.len());
-    format!("analysis-{ANALYSIS_VERSION}-{}-{}", len(MEL_MODEL), len(BEAT_MODEL))
+    format!("analysis-{ANALYSIS_VERSION}-{}-{}", len(MEL_MODEL), len(&beat_model()))
 }
 
 pub fn dev_models_dir() -> PathBuf {
@@ -87,8 +92,17 @@ pub fn available_memory_mb() -> f64 {
 const ANALYSIS_MEMORY_FRACTION: f64 = 0.25;
 /// Model weights and the decoded audio of the tracks in flight, before any beat-model chunk runs.
 const ANALYSIS_BASE_MB: f64 = 600.0;
-/// Activations of one beat-model chunk while it runs (rten builds a fresh buffer pool for every run).
-const CHUNK_ACTIVATION_MB: f64 = 400.0;
+/// Activations of one beat-model chunk while it runs (rten builds a fresh buffer pool for every run): about 400 MB
+/// for the 1500 frames CoreML takes (R57), about 120 MB for the 500 frames rten takes (R108, peak RSS against the chunk
+/// threads of a batch). The attention matrices grow with the square of the length, so between the two sizes the
+/// estimate is a straight line through both.
+const CHUNK_ACTIVATION_MB_AT_1500: f64 = 400.0;
+const CHUNK_ACTIVATION_MB_AT_500: f64 = 120.0;
+
+fn chunk_activation_mb(frames: usize) -> f64 {
+    let share = ((frames as f64 - 500.0) / 1000.0).max(0.0);
+    CHUNK_ACTIVATION_MB_AT_500 + (CHUNK_ACTIVATION_MB_AT_1500 - CHUNK_ACTIVATION_MB_AT_500) * share
+}
 
 const CHUNK_BUDGET_CEILING_COREML_MB: u64 = 2048;
 const CHUNK_BUDGET_CEILING_CPU_MB: u64 = 4096;
@@ -113,17 +127,20 @@ fn chunk_budget_ceiling_mb() -> Option<u64> {
 /// of what is available now, and under the chunk budget ceiling (2048 MB with CoreML, 4096 MB otherwise, `FOURFOUR_CHUNK_BUDGET_MB` overrides). At least one,
 /// at most `max_threads`.
 pub fn chunk_slots(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64) -> usize {
-    chunk_slots_with_ceiling(max_threads, mem_fraction, total_mb, available_mb, chunk_budget_ceiling_mb())
+    chunk_slots_with_ceiling(max_threads, mem_fraction, total_mb, available_mb, chunk_budget_ceiling_mb(), chunk_activation_mb(chunk_frames()))
 }
 
-fn chunk_slots_with_ceiling(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64, ceiling_mb: Option<u64>) -> usize {
+fn chunk_slots_with_ceiling(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64, ceiling_mb: Option<u64>, activation_mb: f64) -> usize {
     let budget = (total_mb * ANALYSIS_MEMORY_FRACTION).min(available_mb * mem_fraction);
-    let mut slots = ((budget - ANALYSIS_BASE_MB) / CHUNK_ACTIVATION_MB).floor().max(1.0) as usize;
+    let mut slots = ((budget - ANALYSIS_BASE_MB) / activation_mb).floor().max(1.0) as usize;
     if let Some(ceiling) = ceiling_mb {
-        slots = slots.min((ceiling as f64 / CHUNK_ACTIVATION_MB).floor().max(1.0) as usize);
+        slots = slots.min((ceiling as f64 / activation_mb).floor().max(1.0) as usize);
     }
     slots.min(max_threads.max(1))
 }
+
+/// Caps how many tracks the analysis works on at once (default: as many as it has threads).
+pub const WORKERS_ENV: &str = "FOURFOUR_ANALYSIS_WORKERS";
 
 #[derive(Clone, Debug)]
 pub struct PoolOptions {
@@ -137,7 +154,7 @@ impl Default for PoolOptions {
     fn default() -> Self {
         PoolOptions {
             max_threads: std::thread::available_parallelism().map_or(1, |n| n.get()),
-            max_workers: None,
+            max_workers: std::env::var(WORKERS_ENV).ok().and_then(|v| v.trim().parse().ok()),
             mem_fraction: 0.5,
             rss_mb_per_worker: 900.0,
         }
@@ -175,7 +192,7 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
-        let engine = BeatEngine::load(models_dir, BEAT_MODEL, false)?;
+        let engine = BeatEngine::load(models_dir, &beat_model(), false)?;
         engine.share_chunk_threads(chunk_slots(pool.max_threads, pool.mem_fraction, total_memory_mb(), available_memory_mb()));
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }
@@ -477,25 +494,40 @@ mod tests {
 
     #[test]
     fn chunk_slots_fit_the_memory_budget_and_the_threads() {
-        let chunk_slots_uncapped = |t, f, tot, av| chunk_slots_with_ceiling(t, f, tot, av, None);
-        assert_eq!(chunk_slots_uncapped(7, 0.5, 8192.0, 4096.0), 3);
-        assert_eq!(chunk_slots_uncapped(9, 0.5, 16384.0, 8192.0), 8);
-        assert_eq!(chunk_slots_uncapped(15, 0.5, 65536.0, 32000.0), 15);
-        assert_eq!(chunk_slots_uncapped(15, 0.5, 65536.0, 1500.0), 1);
-        assert_eq!(chunk_slots_uncapped(1, 0.5, 65536.0, 32000.0), 1);
+        let slots = |threads, total, available| chunk_slots_with_ceiling(threads, 0.5, total, available, None, 400.0);
+        assert_eq!(slots(7, 8192.0, 4096.0), 3);
+        assert_eq!(slots(9, 16384.0, 8192.0), 8);
+        assert_eq!(slots(15, 65536.0, 32000.0), 15);
+        assert_eq!(slots(15, 65536.0, 1500.0), 1);
+        assert_eq!(slots(1, 65536.0, 32000.0), 1);
+    }
+
+    #[test]
+    fn chunk_activation_follows_the_chunk_length() {
+        assert_eq!(chunk_activation_mb(1500), 400.0);
+        assert_eq!(chunk_activation_mb(500), 120.0);
+        assert_eq!(chunk_activation_mb(100), 120.0);
+        assert_eq!(chunk_activation_mb(1000), 260.0);
+    }
+
+    #[test]
+    fn short_chunks_leave_room_for_every_thread_on_a_small_machine() {
+        let slots = |activation| chunk_slots_with_ceiling(6, 0.5, 8192.0, 4096.0, None, activation);
+        assert_eq!(slots(chunk_activation_mb(1500)), 3);
+        assert_eq!(slots(chunk_activation_mb(500)), 6);
     }
 
     #[test]
     fn chunk_budget_ceiling_caps_the_slots_and_never_raises_them() {
-        let slots = |ceiling| chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, ceiling);
+        let slots = |ceiling| chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, ceiling, 400.0);
         assert_eq!(slots(None), 15);
         assert_eq!(slots(Some(2048)), 5);
         assert_eq!(slots(Some(1024)), 2);
         assert_eq!(slots(Some(100)), 1);
         assert_eq!(slots(Some(0)), 1);
         assert_eq!(slots(Some(1_000_000)), 15);
-        assert_eq!(chunk_slots_with_ceiling(7, 0.5, 8192.0, 4096.0, Some(4096)), 3);
-        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 1500.0, Some(4096)), 1);
+        assert_eq!(chunk_slots_with_ceiling(7, 0.5, 8192.0, 4096.0, Some(4096), 400.0), 3);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 1500.0, Some(4096), 400.0), 1);
     }
 
     #[test]
@@ -503,8 +535,8 @@ mod tests {
         assert_eq!(default_chunk_budget_ceiling_mb("coreml"), 2048);
         assert_eq!(default_chunk_budget_ceiling_mb("rten"), 4096);
         assert_eq!(default_chunk_budget_ceiling_mb("ort-cpu"), 4096);
-        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("rten"))), 10);
-        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("coreml"))), 5);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("rten")), 400.0), 10);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("coreml")), 400.0), 5);
     }
 
     #[test]
