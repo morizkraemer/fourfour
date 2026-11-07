@@ -3091,6 +3091,52 @@ Class c, for the record: the 72 ms floor of any sort or key step (compositor and
 
 Scratch (`~/.cache/r143*`, the release target) is deleted after this item.
 
+## R144 import commit (2026-11-07, `r144-import-commit`)
+
+R143 levers 1 and 2. Branch from `r143-budget` (build 1327). Linux `dev` box at load 9-17 (other workers), headless Chromium and Playwright WebKit, the r95 10k and 50k payloads, harness `perf-import.spec.ts` (1,000 files in 10 folders dropped on the sidebar, frames running; it now also records a hash of the rows on screen and of the saved playlists' `track_ids`). Base = `r143-budget` copied to a second tree with the same spec; runs: 3 per case in Chromium, 2 in WebKit, base and new alternated by case.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `lib/fileDrop.ts` `trackIdsUnderPaths`, `lib/importPlaylists.ts` `trackIdsForFiles`: read the plain rows (`libraryPathRows`, new) so no row state is created for rows nobody reads (106 of the 149 ms of `fillPlannedPlaylists`); `normalizePath` returns the string at once when it has no backslash and no trailing slash; the folder prefixes are built once; `trackIdsForFiles` takes the files it will be asked about and keeps only those paths. One pass over the library remains (a string compare per row, a few ms at 50k); a path index was not built because `filePath` changes on relink.
+- `stores/library.svelte.ts`: `landImportedTracks` extends the search text instead of resetting it (`extendSearchIndex`: the haystacks and the letter and digit masks built so far stay, the typed arrays grow, the warm-up fills the new rows). An append is recorded in the bump log (`appended`); `libraryChangesSince` returns the changed positions and where the appended rows start, `libraryPositionsChangedSince` still returns `null` across an append, so playlist views, filters and member checks rebuild as before.
+- `lib/sortOrder.ts` `withChangedValues` accepts appended values (positions from the order's length on) and merges them with the changed rows in one pass; `stores/table-columns.svelte.ts` keeps each column's values and both directions across an append (values read for the new rows only, each direction moved when it is next sorted).
+
+### Before / after (Chromium, ms, median (min-max) of 3; `idle` = wait after the rows before the first sort and key)
+
+| Metric | 10k base | 10k new | 50k base | 50k new |
+|---|---|---|---|---|
+| release to real rows | 205 (190-226) | 124 (116-138) | 568 (566-569) | 107 (103-110) |
+| release to frame | 339 | 279 | 691 | 230 |
+| script in the 3 s after the import | 149 (143-158) | 37 (36-43) | 456 (452-538) | 30 (28-33) |
+| first sort title script, idle 3 s | 19 | 30 | 17 | 33 |
+| first sort title script, idle 0.3 s | 17 | 27 | 113 (111-133) | 32 (28-38) |
+| first key script, idle 3 s / 0.3 s | 29 / 26 | 24 / 25 | 25 / 25 | 22 / 24 |
+| script in 0.3 s idle window | 52 | 6 | 88 | 7 |
+
+WebKit (release to rows / to frame, 2 runs): 10k 302 / 760 to 169 / 516; 50k 615 / 1,072 to 195 / 572.
+
+Read with care: the first sort now pays a lazy move of the 1,000 rows in the order (about 15 ms at 50k in Node, 10-15 ms more script in the page than a column that was rebuilt in idle), so with a 3 s wait it is a little slower than base (17 to 33 at 50k) and with a 0.3 s wait much faster (113 to 32). The longest task in the window stays 70-87 ms in both (the measure sees continuation tasks only partly, see R143). The 16 ms estimate of R143 was not reached.
+
+### Identity
+
+- `fileDrop.test.ts` and `importPlaylists.test.ts`: the new `trackIdsUnderPaths` and `trackIdsForFiles` against the old walks on 400 and 300 random libraries (trailing slashes, backslashes, nested folders, duplicate paths, ids out of library order, matches to rows that are not in the library): equal ids and order.
+- `import-append-fuzz.test.ts` (40 random scripts of appends, bumps and checks, columns warmed first or not) and `import-append-real.test.ts` (`FF_PERF_STATE=<dump>`, 1,000 + 1 + 250 rows appended with bumps between, 2 checks): every haystack (one hash of the list) and 12 columns x 2 directions x 4 queries plus the unsorted view equal to the same library loaded whole. 10k and 50k: no mismatch. Breaking the appended read, the tie order or the index extension each makes the fuzz fail (checked). `sortOrder.test.ts` has a random append test.
+- Page level: the hash of the rows on screen and of the saved playlists' `track_ids` after the import is equal between base and new in every run, both sizes, both browsers (10k `bcab9ba63cb8` / `bc34bf672e3e`, 50k `1952cd408dff` / `c5d0858d1bac`).
+- `search-sort-fuzz`, `playlist-sort-fuzz`, `bulk-bump-fuzz` (`FF_FUZZ_FULL=1`) green.
+
+### Validation
+
+- `npx vitest run`: 118 files passed, 10 skipped; 1,044 tests passed, 9 skipped.
+- `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5561`): 161 passed, 35 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5562`): 161 passed, 35 skipped.
+
+### Not done
+
+- The library is still walked once per import (path compare, a few ms at 50k); a path index needs invalidation on relink.
+- The lazy order move could run in the sort warm-up to take the 10-15 ms off the first click.
+
+Scratch (`~/.cache/r144*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
