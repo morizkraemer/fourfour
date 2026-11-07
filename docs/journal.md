@@ -697,3 +697,4 @@
 2026-11-07 20:16 orchestrator r156 handed back d90bf9d (R152's 248 ms/s was mostly harness IPC; real fix: track count as its own derived value so bumps stop rebuilding the sidebar: 6 events/s busy median 90 -> 61 ms/s; batching already existed), merged on ov-1028, chain running
 2026-11-07 20:17 orchestrator decided: own prio r157 first clicks after open (sort warm-up yields to input; prefetch Detail chunk; R152 rows 5-6), spawned sonnet/default
 2026-11-07 20:35 orchestrator r156 landed 7e00d28 on ov-1028 (both smokes 0 failed, vitest 980, CHECKS-OK)
+2026-11-07 20:53 Merlin: "1 yes 2 yes 3 yes - the weird scrolling hiddne stuff at the bottom /top is still there tho" = ship Mac analysis chunk 500 + int8 (+prepack) (Waiting 43/44); prototyping fence OK for playhead (48) and fling-scroll fix; build 1355 opens fine on the Mac (r154 real-window OK). Open: scroll top/bottom issue unclear, asked
