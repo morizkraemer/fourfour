@@ -309,6 +309,23 @@ test.describe('scroll edges', () => {
           report(`gesture-${speed}`, run, summarise(samples));
         }
       }
+      if (PARTS.has('clip') && !WEBKIT) {
+        const cdp = await context.newCDPSession(page);
+        const scroller = await page.locator('.ff-table__scroll').boundingBox();
+        await page.evaluate(() => ((document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop = 0));
+        await page.waitForTimeout(1200);
+        const from = Date.now() - t0;
+        await cdp.send('Input.synthesizeScrollGesture', {
+          x: Math.round(scroller!.x + scroller!.width / 2),
+          y: Math.round(scroller!.y + scroller!.height / 2),
+          yDistance: -7000,
+          speed: 5000,
+          gestureSourceType: 'mouse',
+          preventFling: true,
+        });
+        await page.waitForTimeout(1500);
+        videoMarks.push({ name: 'clip', from, to: Date.now() - t0 });
+      }
       if (PARTS.has('raf')) {
         await page.waitForTimeout(800);
         const from = Date.now() - t0;
