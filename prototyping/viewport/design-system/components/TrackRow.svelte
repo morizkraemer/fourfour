@@ -69,7 +69,8 @@
 
   // onWaveSeek(frac): the mini waveform becomes a seek strip (hover shows where, a click passes the track fraction).
   // onRate(stars): the rating cell takes clicks (the current rating again clears it) and previews on hover.
-  let { track = {}, state: rowState = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined, onRate = undefined } = $props();
+  // holdWave: the table is flinging; the mini waveform waits to draw new data until this turns false.
+  let { track = {}, state: rowState = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined, onRate = undefined, holdWave = false } = $props();
 
   let previewStars = $state(0);
 
@@ -131,7 +132,8 @@
           animating={analyzing && !track.bands && !track.peaks?.length}
           width={col.width ?? 120}
           height={14}
-          variant="mini" />
+          variant="mini"
+          hold={holdWave} />
         {#if onWaveSeek}<div class="ff-trow__wave-cursor"></div>{/if}
       </div>
     {:else if cell.kind === 'cover'}
