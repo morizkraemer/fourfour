@@ -3132,7 +3132,9 @@ Every int8 prepack run is below every int8 base run (329-334 against 340-354 s u
 ### What changed
 
 - `r150-model-ops` (from `ov-1028`): `examples/model_ops.rs` (per-op timing, `BY_SHAPE=1` for shapes, `PREPACK`, `POOL_THREADS`, `CHUNK_FRAMES`, `MODEL_FILE`, logit hash) and this section. No product change: on `ov-1028` the model is fp32, where prepacking only costs memory.
-- `r150-int8-prepack` (from `r97-int8-500`, not merged anywhere): `Analyzer::load` prepacks the weights when the beat model is not the default fp32 file (the int8 file chosen with `FOURFOUR_BEAT_MODEL`). If int8 ships, land this with it.
+- `r150-int8-prepack` (from `r97-int8-500`, e779648, not merged anywhere): `Analyzer::load` prepacks the weights when the beat model is not the default fp32 file (`prepacks_weights`, the int8 file chosen with `FOURFOUR_BEAT_MODEL`). If int8 ships, land this with it. Its own binary was checked once more: int8 user 333.7 s, RSS 474 MB, sha `bccdf469f94b44c7`; fp32 user 368.8 s, RSS 483 MB (no prepack, as base), sha `097fba2ee30b5b8a`.
+
+Validation: `cargo test --workspace` on `r150-model-ops`: 26 `test result: ok` lines, 570 passed, 0 failed. `cargo test -p fourfour-analysis-rs` on `r150-int8-prepack`: all ok (24 unit tests, new `only_a_non_default_beat_model_prepacks_its_weights`). Scratch (`~/.cache/r150*`, the int8 model regenerated with the r97 script) deleted.
 
 ### Not measured
 
