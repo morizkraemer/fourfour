@@ -683,3 +683,4 @@
 2026-11-07 16:16 orchestrator r150 doc landed a807485 on ov-1028 (CHECKS-OK). decided: own prio r151 slow first attention MatMul (50 vs 12 ms per chunk, ~4% if avoidable), spawned opus/default
 2026-11-07 16:36 orchestrator r151 handed back 360df19 doc only: slow first QK^T = page faults of a fresh 32 MB buffer, only in a thread's first 3 runs at chunk 500 (no steady-state gain); merged on ov-1028, checks running. Model CPU path now exhausted without Merlin's chunk/int8 call
 2026-11-07 16:37 orchestrator decided: own prio r152 fresh 50k budget survey (open, first clicks, fling, import, analysis busy, heap) to rank next speed work, spawned sonnet/default, harness + doc only
+2026-11-07 16:40 orchestrator r151 doc landed on ov-1028 (CHECKS-OK)
