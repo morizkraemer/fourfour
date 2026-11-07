@@ -678,3 +678,4 @@
 2026-11-07 14:41 orchestrator r148 handed back 5b6f8ae (row updates are only 5-8 ms/key; R147's 20-35 ms is mostly filter/sort derived work; 1-line length check before the 50k member Set: row-changing keys about 4-6 ms less script, 150/150 DOM+canvas identical), merged 9a6a10f, chain running
 2026-11-07 15:01 orchestrator r148 landed 9a6a10f on ov-1028 (both smokes 0 failed, 26 suites, vitest 970, CHECKS-OK). decided: own prio r149 filterTracks on scanning keys (about 25 ms/key at 50k), sonnet
 2026-11-07 15:05 orchestrator r149 handed back 436b07c doc only (bigram bits save ~12 ms per full scan but cost 40-120 ms build + 3-6 MB; full scans rare after R147; search path now saturated), merged on ov-1028
+2026-11-07 15:06 orchestrator decided: own prio r150 beat model op profile + identical-output CPU levers at chunk 500, fp32 and int8 (model is ~90% of analysis CPU; search path saturated after r149), spawned opus/default, branch only
