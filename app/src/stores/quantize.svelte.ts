@@ -1,3 +1,6 @@
+import type { BeatMarker } from '../lib/beatGrid.ts';
+import { DEFAULT_QUANTIZE_DIVISION, quantizedMs, type QuantizeDivision } from '../lib/quantize.ts';
+
 export const QUANTIZE_STORAGE_KEY = 'fourfour.quantize.v1';
 
 function loadQuantize(): boolean {
@@ -8,7 +11,7 @@ function loadQuantize(): boolean {
   }
 }
 
-export const quantize = $state({ on: loadQuantize() });
+export const quantize = $state<{ on: boolean; division: QuantizeDivision }>({ on: loadQuantize(), division: DEFAULT_QUANTIZE_DIVISION });
 
 export function setQuantize(on: boolean) {
   quantize.on = on;
@@ -17,4 +20,9 @@ export function setQuantize(on: boolean) {
   } catch {
     return;
   }
+}
+
+/** `ms` on the quantize grid step when quantize is on and the track has a grid, else unchanged. */
+export function quantizeMs(beats: BeatMarker[], ms: number): number {
+  return quantizedMs(beats, ms, quantize.on, quantize.division);
 }

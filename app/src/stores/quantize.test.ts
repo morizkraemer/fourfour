@@ -22,7 +22,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { cuePreviewStart, cuePreviewStop, loadPlayerTrack, player, resetPlayerTransport } from './player.svelte.ts';
-import { addHotCueAtPlayhead, addMemoryCueAtPlayhead, moveHotCue } from './cue-actions.ts';
+import { addHotCueAtPlayhead, addMemoryCueAtPlayhead, moveHotCue, triggerHotCue } from './cue-actions.ts';
 import { cuesOf, flushCueEdits, loadCuesFromPayload } from './cues.svelte.ts';
 import { QUANTIZE_STORAGE_KEY, quantize, setQuantize } from './quantize.svelte.ts';
 
@@ -86,11 +86,11 @@ describe('quantize', () => {
     expect(localStorage.getItem(QUANTIZE_STORAGE_KEY)).toBe('0');
   });
 
-  it('snaps a hot cue set at the playhead to the nearest beat when on', () => {
+  it('snaps a hot cue set at the playhead to the nearest sixteenth when on', () => {
     setQuantize(true);
     player.progress = 1740 / 20_000;
     addHotCueAtPlayhead(1);
-    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1500]);
+    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1750]);
   });
 
   it('is on when nothing was stored yet', async () => {
@@ -103,11 +103,11 @@ describe('quantize', () => {
     expect((await import('./quantize.svelte.ts')).quantize.on).toBe(false);
   });
 
-  it('snaps a memory cue to the nearest beat when on', () => {
+  it('snaps a memory cue to the nearest sixteenth when on', () => {
     setQuantize(true);
     player.progress = 1740 / 20_000;
     addMemoryCueAtPlayhead();
-    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1500]);
+    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1750]);
   });
 
   it('sets a hot cue exactly at the playhead when off', () => {
@@ -116,14 +116,37 @@ describe('quantize', () => {
     expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1740]);
   });
 
-  it('plays the CUE preview from the nearest beat when on, and returns there', async () => {
+  it('plays the CUE preview from the nearest sixteenth when on, and returns there', async () => {
     setQuantize(true);
     player.progress = 1740 / 20_000;
     await cuePreviewStart();
-    expect(engine.played).toEqual([1500]);
+    expect(engine.played).toEqual([1750]);
     player.playing = false;
     await cuePreviewStop();
-    expect(engine.positions).toEqual([1500]);
+    expect(engine.positions).toEqual([1750]);
+  });
+
+  it('jumps to a hot cue on the nearest sixteenth when on, and to its exact place when off', async () => {
+    player.progress = 1610 / 20_000;
+    addHotCueAtPlayhead(1);
+    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1610]);
+    setQuantize(true);
+    await triggerHotCue(1);
+    expect(engine.played).toEqual([1625]);
+    setQuantize(false);
+    player.playing = false;
+    await triggerHotCue(1);
+    expect(engine.played).toEqual([1625, 1610]);
+  });
+
+  it('keeps the quantize step in one setting, sixteenths unless changed', () => {
+    expect(quantize.division).toBe(16);
+    setQuantize(true);
+    player.progress = 1740 / 20_000;
+    quantize.division = 4;
+    addHotCueAtPlayhead(1);
+    quantize.division = 16;
+    expect(cuesOf(7).map((c) => c.timeMs)).toEqual([1500]);
   });
 
   it('plays the CUE preview from the playhead when off', async () => {

@@ -5,8 +5,7 @@
 
 import { player, currentPositionMs, seekToMs, seekToMsAndPlay } from './player.svelte.ts';
 import { cuesOf, editCues } from './cues.svelte.ts';
-import { quantize } from './quantize.svelte.ts';
-import { quantizedMs } from '../lib/quantize.ts';
+import { quantizeMs } from './quantize.svelte.ts';
 import {
   hotCueIn,
   withCueColor,
@@ -25,7 +24,7 @@ export function addHotCueAtPlayhead(slot: number | null = null): boolean {
   if (!track) return false;
   let added = false;
   editCues(track.id, (cues) => {
-    const result = withHotCue(cues, quantizedMs(track.beats ?? [], currentPositionMs(), quantize.on), slot);
+    const result = withHotCue(cues, quantizeMs(track.beats ?? [], currentPositionMs()), slot);
     added = result !== null;
     return result ? result.cues : cues;
   });
@@ -40,7 +39,7 @@ export function moveHotCue(trackId: number, key: string, timeMs: number): void {
 export function addMemoryCueAtPlayhead(): void {
   const track = player.track;
   if (!track) return;
-  editCues(track.id, (cues) => withMemoryCue(cues, quantizedMs(track.beats ?? [], currentPositionMs(), quantize.on)).cues);
+  editCues(track.id, (cues) => withMemoryCue(cues, quantizeMs(track.beats ?? [], currentPositionMs())).cues);
 }
 
 /** A hot cue pad: an empty slot is set at the playhead, a set one jumps there and plays. */
@@ -52,13 +51,13 @@ export async function triggerHotCue(slot: number): Promise<void> {
     addHotCueAtPlayhead(slot);
     return;
   }
-  await seekToMsAndPlay(cue.timeMs);
+  await seekToMsAndPlay(quantizeMs(track.beats ?? [], cue.timeMs));
 }
 
 export async function jumpToHotCue(slot: number): Promise<void> {
   const track = player.track;
   const cue = track && hotCueIn(cuesOf(track.id), slot);
-  if (cue) await seekToMs(cue.timeMs);
+  if (cue) await seekToMs(quantizeMs(track.beats ?? [], cue.timeMs));
 }
 
 export function clearAllCues(): void {

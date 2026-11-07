@@ -30,8 +30,7 @@ import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cu
 import { initialCuePointMs } from '../lib/cues.ts';
 import { fileStateOf, noteBlockedLoad } from './file-status.svelte.ts';
 import { isUnplayable } from '../lib/fileHealth.ts';
-import { quantize } from './quantize.svelte.ts';
-import { quantizedMs } from '../lib/quantize.ts';
+import { quantizeMs } from './quantize.svelte.ts';
 import {
   cuePress,
   cueRelease,
@@ -628,7 +627,7 @@ function cueTransport(): CueTransport {
   const positionMs = currentPositionMs();
   return {
     playing: player.playing,
-    positionMs: player.playing ? positionMs : quantizedMs(player.track?.beats ?? [], positionMs, quantize.on),
+    positionMs: player.playing ? positionMs : quantizeMs(player.track?.beats ?? [], positionMs),
   };
 }
 
