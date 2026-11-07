@@ -3011,6 +3011,47 @@ Totals (key to second frame), mean per key: title 77 to 70, artist 73 to 65, bpm
 
 Scratch (`~/.cache/r147`) is deleted after this item.
 
+## R148 row updates (2026-11-07, `r148-row-updates`)
+
+R147 said a key that changes the rows on screen costs 20-35 ms of script at 50k, mostly Svelte updates of the visible rows. Branch from `ov-1028`. Linux `dev` box (load 10-30), headless Chromium and Playwright WebKit, r95 50k payload, base = `ov-1028` in a separate tree with the same spec files, runs interleaved.
+
+### Cause (measured)
+
+- CPU profile per key (`FF_PERF_PROFILE_EACH`, 50k, sorted by title, no analysis; "hou", "a b", back to "ho"): of 91 ms flush time over the three keys, 65 ms is derived values (`filterTracks` 25, `currentTracks` self 14, `sortTracks` 12) and 22 ms is effects (`update_effect`, the row updates, 5-8 ms per key; `create_item` inside it 2-4 ms, `set_text` 1-3 ms). The rows are 40-50 recycled slots (R95), each a `TrackRow` whose cells only change text and classes. The row update is about a fifth of a key, not most of it.
+- The visible-row cost is in `prototyping/viewport/design-system/components/TrackRow.svelte` and `Waveform.svelte` (AGENTS fence, not touched). No change there was needed to find a lever: nothing in them stood out above 1-3 ms per key.
+- Outside the rows, `currentTracks` in `app/src/modules/TrackTable.svelte` built `new Set(previous.rows)` (up to 50k entries, 8-12 ms self) on every key whose result had a different size from the previous one, only to have `sameMembers` return false on the length check straight after.
+
+### Changed (no markup, no CSS, same rows, same order)
+
+- `TrackTable.svelte` `currentTracks`: `previous.rows.length === filteredTracks.length` is tested before `sameLibraryMembers` and the lazy member Set. A different length can never be the same rows, so `sameRows` is the same value as before; the Set is only built when the lengths are equal.
+
+### Before / after
+
+Chromium 50k, sorts none, title, bpm, 16 keys each, mean script ms over the keys that change the rows on screen (13 per run), one value per run. Pairs are base and new back to back, order flipped every pair (a stray earlier run left an extra new run in the analysis series):
+
+| | base | new |
+|---|---|---|
+| analysis running, 3 pairs | 30.0, 25.3, 26.8 | 24.9, 26.2 (21.0, 25.8), 21.2 |
+| idle, 3 pairs | 27.7, 24.9, 33.0 | 26.2, 20.1, 19.9 |
+
+Mean over runs: analysis 27.4 to 23.8, idle 28.5 to 22.1. New is lower in 5 of 6 pairs, but the ranges overlap (base 24.9-33.0, new 19.9-26.2), so the gain, about 4-6 ms on a row-changing key, is small and only just outside the box noise; not a large claim. Keys that leave the rows alone (median 12-15 ms) are unchanged. Total (key to second frame) for row-changing keys, median over keys: analysis 92 to 86, idle 95 to 90. WebKit: not timed (no script counter; identity only).
+
+### Identity
+
+- Page level, `perf-sorted-typing.spec.ts` row hash per key: one view-hash sequence in every base and new run, equal across the two.
+- New `app/smoke/perf-row-dom.spec.ts`: after every key (7 queries typed and backspaced, "house", "hou", "a b", "dub", "x", "a", "mix remix", for unsorted, title and bpm; 150 steps) the `outerHTML` of every visible row (canvas attributes removed) and the pixel data of every row canvas are hashed. Base against new, Chromium and WebKit: 150 of 150 identical in both, 0 canvas differences (23 distinct row sets in each run).
+
+### Not done
+
+- The remaining 5-8 ms per key of row effects and the 25 ms of `filterTracks` per scanning key stay. Cutting row effects further means changing `TrackRow` and `Waveform` in `prototyping/` (fenced); nothing there showed a lever above a few ms.
+
+### Validation
+
+- `npx vitest run`: 110 files passed, 10 skipped; 970 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5595`): 113 passed, 35 skipped, 1 failed (`leaks.spec.ts:110` at load average 35); that spec alone passes on rerun. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5596`): 114 passed, 35 skipped.
+
+Scratch (`~/.cache/r148`, base worktree) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
