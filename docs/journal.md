@@ -670,3 +670,4 @@
 2026-11-07 03:14 orchestrator build 1331 checks green (vitest 1044, check 0, both smokes 0 failed, cargo 0 failing); installed on the Mac 11:13 WITA, embedded 1331/397b30d verified; preview :4212 now 1331
 2026-11-07 03:38 orchestrator r145 handed back 0e6b2ed (analyze-start writes untouched rows' plain objects; 50k analyze selection 2387 -> 487 ms; hashes identical, reactivity test), merged 2d986ff, chain running. decided: own prio r146 cheaper search-text build (R143 lever 4; sonnet high)
 2026-11-07 03:54 orchestrator r145 landed 2d986ff on ov-1028 (both smokes 0 failed, 26 suites, vitest 968, CHECKS-OK)
+2026-11-07 04:14 orchestrator r146 handed back c82f8c0: fused search text -15 to -25% in microbench but inside page noise; no product change, doc merged ec98da2. decided: own prio r147 second key in sorted view (R143 lever 5; sonnet high)
