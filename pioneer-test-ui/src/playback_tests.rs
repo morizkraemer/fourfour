@@ -1420,3 +1420,122 @@ fn playback_and_analysis_share_the_time_base() {
         assert_eq!((player_lag, detail_lag, seek_lag), (0, 0, 0), "{file}");
     }
 }
+
+const CUE_TONE_HZ: f32 = 55.0;
+const CUE_TONE_LEVEL: f32 = 0.9;
+
+fn cue_tone(frame: u64) -> f32 {
+    CUE_TONE_LEVEL * (2.0 * std::f64::consts::PI * CUE_TONE_HZ as f64 * frame as f64 / 48_000.0).sin() as f32
+}
+
+fn cue_tone_step() -> f32 {
+    CUE_TONE_LEVEL * 2.0 * std::f32::consts::PI * CUE_TONE_HZ / 48_000.0
+}
+
+fn cue_tone_bend() -> f32 {
+    cue_tone_step() * 2.0 * std::f32::consts::PI * CUE_TONE_HZ / 48_000.0
+}
+
+struct JumpWindow {
+    max_step: f32,
+    max_bend: f32,
+}
+
+fn render_cue_presses(presses: &[(usize, u64)], total_frames: usize, decode_delay_buffers: usize) -> (Vec<f32>, Vec<u64>) {
+    let (mut render, pipe) = render_pipeline(
+        Arc::new(AtomicU32::new(0)),
+        Arc::new(AtomicU32::new(0)),
+        Arc::new(TempoParams::new()),
+        48_000,
+        2,
+        STRETCH_PRESET,
+    );
+    let mut next_source_frame = 0u64;
+    let mut pushing = true;
+    let mut waiting: Option<(u64, u64, usize)> = None;
+    let mut out = vec![0.0f32; 128 * 2];
+    let mut heard = Vec::with_capacity(total_frames);
+    let mut started = Vec::new();
+    let mut presses = presses.iter().peekable();
+    let mut frame = 0usize;
+    while frame < total_frames {
+        while let Some(&&(at, cue)) = presses.peek() {
+            if at > frame {
+                break;
+            }
+            pipe.supersede();
+            waiting = Some((pipe.stream_generation.load(Ordering::SeqCst), cue, decode_delay_buffers));
+            pushing = false;
+            presses.next();
+        }
+        if let Some((target, cue, delay)) = waiting {
+            if pipe.ack_generation.load(Ordering::SeqCst) == target {
+                if delay == 0 {
+                    next_source_frame = cue;
+                    started.push(cue);
+                    pushing = true;
+                    waiting = None;
+                } else {
+                    waiting = Some((target, cue, delay - 1));
+                }
+            }
+        }
+        if pushing {
+            let mut producer = pipe.producer.lock().unwrap();
+            while producer.occupied_len() < 4_096 * 2 {
+                let v = cue_tone(next_source_frame);
+                producer.push_slice(&[v, v]);
+                next_source_frame += 1;
+            }
+        }
+        render.render(&mut out, 2);
+        heard.extend(out.chunks(2).map(|f| f[0]));
+        frame += 128;
+    }
+    (heard, started)
+}
+
+fn jump_window(heard: &[f32], from: usize, to: usize) -> JumpWindow {
+    let w = &heard[from.saturating_sub(2)..to.min(heard.len())];
+    let max_step = w.windows(2).map(|p| (p[1] - p[0]).abs()).fold(0.0, f32::max);
+    let max_bend = w.windows(3).map(|p| (p[2] - 2.0 * p[1] + p[0]).abs()).fold(0.0, f32::max);
+    JumpWindow { max_step, max_bend }
+}
+
+#[test]
+fn twenty_hot_cue_presses_in_a_second_do_not_click() {
+    let presses: Vec<(usize, u64)> = (0..20).map(|k| (4_800 + k * 2_400, 480_000 + k as u64 * 7_919)).collect();
+    for delay in [0usize, 1, 3] {
+        let (heard, started) = render_cue_presses(&presses, 4_800 + 20 * 2_400 + 4_800, delay);
+        assert_eq!(started.len(), 20, "every press was played");
+        let mut worst = JumpWindow { max_step: 0.0, max_bend: 0.0 };
+        for &(at, _) in &presses {
+            let window = jump_window(&heard, at, at + 2_400);
+            worst.max_step = worst.max_step.max(window.max_step);
+            worst.max_bend = worst.max_bend.max(window.max_bend);
+        }
+        let settled = &heard[heard.len() - 2_400..];
+        println!(
+            "HOTCUE decode delay {delay} buffers: worst step {:.5} ({:.2}x the tone's own), worst bend {:.6} ({:.1}x the tone's own)",
+            worst.max_step,
+            worst.max_step / cue_tone_step(),
+            worst.max_bend,
+            worst.max_bend / cue_tone_bend()
+        );
+        assert!(peak(settled) > 0.85, "audio did not come back after the last press");
+        assert!(worst.max_step < 1.5 * cue_tone_step(), "step {} at a jump, tone {}", worst.max_step, cue_tone_step());
+        assert!(worst.max_bend < 4.0 * cue_tone_bend(), "bend {} at a jump, tone {}", worst.max_bend, cue_tone_bend());
+    }
+}
+
+#[test]
+fn hot_cue_presses_inside_one_fade_are_coalesced() {
+    let presses: Vec<(usize, u64)> = (0..5).map(|k| (9_600 + k * 128, 480_000 + k as u64 * 7_919)).collect();
+    let (heard, started) = render_cue_presses(&presses, 24_000, 1);
+    assert_eq!(started, vec![presses[4].1], "a superseded press was played");
+    let window = jump_window(&heard, 9_600, 14_400);
+    println!("HOTCUE burst: step {:.5} ({:.2}x tone), bend {:.6} ({:.1}x tone)", window.max_step, window.max_step / cue_tone_step(), window.max_bend, window.max_bend / cue_tone_bend());
+    assert!(window.max_step < 1.5 * cue_tone_step(), "step {}", window.max_step);
+    assert!(window.max_bend < 4.0 * cue_tone_bend(), "bend {}", window.max_bend);
+    assert!(peak(&heard[heard.len() - 2_400..]) > 0.85, "audio did not come back");
+}

@@ -103,7 +103,12 @@ impl Lab {
 
     pub fn locate(&mut self, frame: usize) {
         self.pipe.supersede();
+        let target = self.pipe.stream_generation.load(Ordering::SeqCst);
+        let mut fade = vec![0.0f32; 64 * 2];
         self.state.render(&mut [], 2);
+        while self.pipe.ack_generation.load(Ordering::SeqCst) != target {
+            self.state.render(&mut fade, 2);
+        }
         self.next_frame = frame;
         self.start_frame = frame;
         self.fill();
