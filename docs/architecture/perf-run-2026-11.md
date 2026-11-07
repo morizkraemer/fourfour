@@ -3392,6 +3392,46 @@ Claimed: script time at both rates is down by more than the noise (at 6 events/s
 
 Scratch (`~/.cache/r156*`) is deleted after this item.
 
+## R157 first clicks (2026-11-07, `r157-first-clicks`)
+
+Branch from `ov-1028`. Linux `dev` box, load 15-43 from other workers during every run, headless Chromium 50k (r95 payload) and Playwright WebKit. Base = `ov-1028` in a second worktree, same spec file, runs interleaved (base, new, base, new, ...), 3 pairs for Chromium, 2 for WebKit.
+
+### Findings
+
+- The R152 cause was only half right. The warm-up never blocks a click: it runs in 6 ms slices and no long task came from it (`tasks` part, 6 s after the first rows: the only long tasks were the search text build in the first 170 ms). The 227 ms first click is the clicked column being built cold, because the title warm-up had not reached it yet (it started 1,000 ms after the list loaded). Clicks at +0 to +1,000 ms after the first rows cost 190-240 ms of script in one 160 ms task; from +1,500 ms on 25-50 ms.
+- Harness inflation: in headless Chromium without frames `requestIdleCallback` only fires at its timeout (R134), so the warm-up looked far slower than in a window; the new `early` part therefore runs an empty `requestAnimationFrame` loop (`FF_PERF_FRAMES=1`). The first select in `flows` also waited for the 60 KB analysis payload delivered through DevTools (R156): the harness now answers it from a page-side template (`answerAnalysisLocally`).
+- The `Detail` chunk was already prefetched after the first screen (`preloadAfterFirstScreen`, in `lazy.svelte.ts`); it was loaded by +300 ms in every run. What a first select costs is the mount (about 120-150 ms on an idle box, script 25-115 ms, GC and layout), which the task forbids prefetching. Only change: `inspector` is first in the prefetch queue (it was second, behind `AppDialogs`), so the chunk is in at +0.
+
+### Changed (no visible change)
+
+- `table-columns.svelte.ts`: sort warm-up delay 1,000 to 250 ms (the title column is warmed first, as before); the warm-up pauses 400 ms after a pointerdown, keydown or click and stops a slice when `navigator.scheduling.isInputPending()` is true (Chromium; WKWebView has only the quiet time); a click on a column whose warm-up job is in flight finishes that job instead of building the column again (`finishColumn`, not re-entrant while the job runs).
+- `lazy-views.ts`: `inspector` before `appDialogs`.
+- `perf-budget.spec.ts`: parts `early` (sort or select at fixed delays after the first rows, `FF_PERF_CLICK_AT`, `FF_PERF_ACTIONS`) and `tasks`, `FF_PERF_FRAMES`, `FF_PERF_TOP`, local analysis answers.
+
+### Before / after (Chromium, 50k, `early`, sort title; ms click to painted, 3 interleaved pairs, medians; script ms in brackets)
+
+| Click at | base | new | Verdict |
+|---|---|---|---|
+| +0 | 507 (332-513) | 400 (235-432) | cold either way, not claimed |
+| +300 | 608 (312-566) | 304 (126-308) | lower in 3 of 3 pairs (an earlier batch, 3 pairs: 276 to 143) |
+| +600 | 587 (305-742) | 204 (51-204) | lower in 3 of 3 pairs (earlier batch 256 to 194) |
+| +1000 | 211 | 268 | not better, ranges overlap, not claimed (earlier batch 134 to 192, worse) |
+| +1500, +3000 | 209 / 184 | 225 / 195 | no change |
+
+Both batches ran at load 15-43, base values in the first early2 pairs are inflated by load (script is the safer column). First select (`select`, same delays): 131-247 base, 121-240 new, no difference, not claimed. Cold open to first rows (`boot`, 3 interleaved pairs, harness payload inflates it): 2,451 / 2,533 / 2,661 base, 2,444 / 2,661 / 2,570 new, same; TBT 537-609 base, 526-680 new, same; click at +0 297 / 315 / 272 base, 282 / 333 / 277 new (cold build both). WebKit (2 pairs, wall time only, load 21-32): sort +600 398 / 351 base, 255 / 261 new; +0 and +1500 mixed (+1500 worse in new, 523 against 357); select mixed; nothing claimed.
+
+Net: the first click is faster only when it lands about 250-700 ms after the first rows. Before 250 ms the column must be built cold and nothing can fix that without doing the work before the click; the +1000 ms window is not better and may be a little worse (the warm-up job in flight is finished by the click, but the box was saturated). The select goal is not met: the prefetch already existed.
+
+### Identity
+
+Store level, hash of every result, base against new, `FF_PERF_STATE` r95 payloads: `sorted-typing-real` 432 of 432 (10k and 50k), `search-path-real` 90 of 90 (10k and 50k, one repeat), `sort-analysis-real` top-level digests 3 of 3 (10k and 50k). `FF_FUZZ_FULL=1` fuzz tests (`search-sort-fuzz`, `playlist-sort-fuzz`, `bulk-bump-fuzz`), `import-index.test.ts`, `analysis-events.test.ts`: 19 passed. Orders cannot differ by construction: the same generators build the same entries, only the start time and who drives the generator changed. Not done: page-level row hashes after a sort click (the existing R115 UI hash spec was not re-run).
+
+### Validation
+
+`npx vitest run` with `FF_FUZZ_FULL=1` and the 50k payload: 989 passed, 2 skipped, 1 failed (`playlist-path-real`, needs a playlist name of another payload; not related). `npm run check`: 0 errors. Chromium smoke: 114 passed, 43 skipped. WebKit smoke: 114 passed, 43 skipped.
+
+Scratch (`~/.cache/r157*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

@@ -100,7 +100,11 @@ async function openApp(browser: Browser, payload: LoadedState) {
   await page.addInitScript(() => {
     const w = window as unknown as { __smokeAnalysisCache: Map<number, unknown>; __smokeAnalysisRemote: (id: number) => Promise<unknown>; __smokeAnalysis: (id: number) => Promise<unknown> };
     w.__smokeAnalysisCache = new Map();
-    w.__smokeAnalysis = (id) => (w.__smokeAnalysisCache.has(id) ? Promise.resolve(w.__smokeAnalysisCache.get(id)) : w.__smokeAnalysisRemote(id));
+    w.__smokeAnalysis = (id) => {
+      if (w.__smokeAnalysisCache.has(id)) return Promise.resolve(w.__smokeAnalysisCache.get(id));
+      const local = (window as unknown as { __smokeAnalysisTemplate?: unknown }).__smokeAnalysisTemplate;
+      return local ? Promise.resolve(local) : w.__smokeAnalysisRemote(id);
+    };
   });
   await page.addInitScript(installTauriMock, payload);
   await page.addInitScript(installProbes);
@@ -127,7 +131,7 @@ interface Profile {
   timeDeltas: number[];
 }
 
-function topFunctions(profile: Profile, count = 3) {
+function topFunctions(profile: Profile, count = Number(process.env.FF_PERF_TOP ?? 3)) {
   const byId = new Map(profile.nodes.map((n) => [n.id, n]));
   const self = new Map<string, number>();
   profile.samples.forEach((id, i) => {
@@ -182,6 +186,7 @@ async function measured(page: Page, cdp: CDPSession | null, name: string, action
 async function boot(page: Page, cdp: CDPSession | null) {
   await page.goto('/');
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
+  if (process.env.FF_PERF_FRAMES) await page.evaluate(() => { const frame = () => requestAnimationFrame(frame); frame(); });
   const atRows = await counters(cdp);
   const firstRow = await page.evaluate(() => (window as unknown as { __p: Probe }).__p.firstRow);
   return { firstRow, atRows };
@@ -254,6 +259,13 @@ async function heap(page: Page, cdp: CDPSession | null) {
 
 const PREFETCH_EVENTS = 250;
 
+async function answerAnalysisLocally(page: Page) {
+  await page.evaluate(async () => {
+    const w = window as unknown as { __smokeAnalysisRemote: (id: number) => Promise<unknown>; __smokeAnalysisTemplate?: unknown };
+    w.__smokeAnalysisTemplate = await w.__smokeAnalysisRemote(1);
+  });
+}
+
 async function startAnalysis(page: Page, ids: number[], perSecond: number) {
   await page.evaluate(
     async ({ ids, count }) => {
@@ -324,6 +336,46 @@ test.describe('r152 budget', () => {
     }
   });
 
+  test('tasks: long tasks after the first rows, no input', async ({ browser }) => {
+    test.skip(!PARTS.has('tasks'));
+    const payload = state();
+    for (let run = 0; run < RUNS; run++) {
+      const { context, page, cdp } = await openApp(browser, payload);
+      const { firstRow } = await boot(page, cdp);
+      await profileStart(cdp);
+      await page.waitForTimeout(Number(process.env.FF_PERF_TASKS_MS ?? 6000));
+      const top = await profileStop(cdp);
+      const tasks = await page.evaluate(() => (window as unknown as { __p: Probe }).__p.longTasks);
+      report('tasks', run, { firstRow: round(firstRow), tasks: tasks.map((t) => [round(t.start - firstRow), round(t.duration)]), top });
+      await context.close();
+    }
+  });
+
+  test('early: sort click and row select at a fixed delay after the first rows', async ({ browser }) => {
+    test.skip(!PARTS.has('early'));
+    const payload = state();
+    const delays = (process.env.FF_PERF_CLICK_AT ?? '0,100,300').split(',').map(Number);
+    const detailChunkLoaded = (page: Page) => page.evaluate(() => performance.getEntriesByType('resource').some((e) => /Detail/.test(e.name)));
+    for (let run = 0; run < RUNS; run++) {
+      for (const delay of delays) {
+        for (const action of (process.env.FF_PERF_ACTIONS ?? 'sort,select').split(',') as ('sort' | 'select')[]) {
+          const { context, page, cdp } = await openApp(browser, payload);
+          await boot(page, cdp);
+          if (action === 'select') await answerAnalysisLocally(page);
+          if (delay > 0) await page.waitForTimeout(delay);
+          const chunkBefore = await detailChunkLoaded(page);
+          const wanted = await page.evaluate(() => document.querySelectorAll('[data-track-row]')[4].querySelector('.ff-trow__cell--title .ff-trow__text')!.textContent!.trim());
+          const step =
+            action === 'sort'
+              ? await measured(page, cdp, `sort title at +${delay}`, () => page.locator(SORT_LABEL('title')).click(), FIRST_ROW_TEXT, await firstRowText(page))
+              : await measured(page, cdp, `select row at +${delay}`, () => page.locator('[data-track-row]').nth(4).click(), `document.querySelector('.ff-inspector input[aria-label="Title"]')?.value === ${JSON.stringify(wanted)}`);
+          report('early', run, { action, delay, chunkBefore, step });
+          await context.close();
+        }
+      }
+    }
+  });
+
   test('flows: first click on sort, playlist, track, expand, analysis panel, settings, scroll', async ({ browser }) => {
     test.skip(!PARTS.has('flows'));
     const payload = state();
@@ -335,6 +387,7 @@ test.describe('r152 budget', () => {
       await page.waitForTimeout(8000);
       const steps: Step[] = [];
       const gap = () => page.waitForTimeout(900);
+      await answerAnalysisLocally(page);
 
       steps.push(await measured(page, cdp, 'sort header (artist, first click)', () => page.locator(SORT_LABEL('artist')).click(), FIRST_ROW_TEXT, await firstRowText(page)));
       await gap();
