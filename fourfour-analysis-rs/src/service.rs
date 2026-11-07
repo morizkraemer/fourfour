@@ -19,6 +19,12 @@ pub fn beat_model() -> String {
     std::env::var(BEAT_MODEL_ENV).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| BEAT_MODEL.to_string())
 }
 
+/// Packs the GEMM weights once at load instead of on every chunk. It pays for the int8 beat model (R150: -4% CPU,
+/// +25 MB, same output) and not for the fp32 default (no gain, +90-130 MB), so only a non-default model file gets it.
+pub fn prepacks_weights(beat_file: &str) -> bool {
+    beat_file != BEAT_MODEL
+}
+
 pub fn models_present(dir: &Path) -> bool {
     dir.join(MEL_MODEL).is_file() && dir.join(beat_model()).is_file()
 }
@@ -171,7 +177,8 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
-        let engine = BeatEngine::load(models_dir, &beat_model(), false)?;
+        let beat_file = beat_model();
+        let engine = BeatEngine::load(models_dir, &beat_file, prepacks_weights(&beat_file))?;
         engine.share_chunk_threads(chunk_slots(pool.max_threads, pool.mem_fraction, total_memory_mb(), available_memory_mb()));
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }
@@ -469,6 +476,12 @@ mod tests {
         assert_eq!(plan_pool(&opts, 3_700.0, 100), PoolPlan { workers: 2, threads_per_track: 4 });
         assert_eq!(plan_pool(&opts, 500.0, 100), PoolPlan { workers: 1, threads_per_track: 8 });
         assert_eq!(plan_pool(&opts, 64_000.0, 3), PoolPlan { workers: 3, threads_per_track: 2 });
+    }
+
+    #[test]
+    fn only_a_non_default_beat_model_prepacks_its_weights() {
+        assert!(!prepacks_weights(BEAT_MODEL));
+        assert!(prepacks_weights("beat_this_q8sc.onnx"));
     }
 
     #[test]
