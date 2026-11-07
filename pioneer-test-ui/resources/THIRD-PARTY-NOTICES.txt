@@ -466,7 +466,7 @@ Zlib (1)
   Licence: MIT
   Source:  https://github.com/tauri-apps/plugins-workspace
 
-Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx)
+Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx; beat_this_q8sc.onnx on macOS: beat_this.onnx with int8 MatMul weights, quantized by fourfour)
   Version: bundled in Resources/models
   Licence: MIT
   Source:  https://github.com/CPJKU/beat_this
@@ -2033,7 +2033,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ==============================================================================
-Applies to: Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx), beat-this 1.1.0
+Applies to: Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx; beat_this_q8sc.onnx on macOS: beat_this.onnx with int8 MatMul weights, quantized by fourfour), beat-this 1.1.0
 ==============================================================================
 
 MIT License

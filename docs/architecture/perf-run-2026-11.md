@@ -1544,6 +1544,86 @@ The load was 15-45 during the runs; user and sys CPU are what to read, wall foll
 
 Commits on `r106-model-faults`: `03c3018` `chunk_faults` example (allocation count and size, faults, user and sys per chunk run, peak RSS), plus this section. Not measured: 14 threads, the app (Tauri, its arena cap), the Mac.
 
+## R108 throughput (2026-11-04, `r108-throughput`)
+
+Branch `r108-throughput` from `r105-snap` (`903b702`: chunk 500 default, fit fix). Question: what split of parallel tracks, threads per track and beat-model threads gives the most tracks per minute at chunk 500, with identical output, on this box (Xeon Gold 6130, 16 vCPU, one thread per core, 64 GB) and on an 8 performance-core Mac-like budget (`taskset -c 0-7`, plus `FOURFOUR_ANALYSIS_MEMORY_MB` for the memory of the machine). rten on the CPU only: the Mac's CoreML path (2 sessions, chunk 1500) cannot be simulated here.
+
+**Bench set.** The 24 full-length masters of the 10k fixture (`~/.cache/ff-fixture/10k/long.txt`: 5 formats, 304-415 s, 8,816 s of audio); a 12-track half of it for the 8-core runs. Release builds, `nice -n 5`, interleaved configs (rotated order per repetition). The box carried load 15-45 from other workers the whole time.
+
+### How the pipeline uses threads today
+
+- The beat model runs on one pool of **chunk threads shared by all tracks** (`BeatEngine::share_chunk_threads`, `chunk_slots`); each chunk runs on a single-thread rten pool (the setup whose logits match the reference bit for bit), so "model intra-op threads" is always 1 and the parallelism is across chunks. A track queues its chunks, the pool serves tracks in arrival order, and a track whose chunks are taken leaves its threads to the next one.
+- **Worker threads** (`plan_pool`: min(threads, memory / 900 MB, tracks left)) each run one track end to end: decode, then in parallel the waveform plus key lane and the beat prefix (resample to 22.05 kHz, mel on a pool of `threads_per_track`), then wait for their chunks, then fit. `threads_per_track` = threads / workers (1 on this box) only widens the mel pool, the key lanes and the fit.
+- **Decode of track N+1 during the model on N already happens**: with W workers, W-1 other tracks are in their prefix or their chunk phase while one waits. There is no separate prefetch to add; what matters is whether W is large enough that the chunk queue never runs empty. In the app the model stage is further capped at `max(threads/3, 3)` model jobs (4 on 14 threads); the other in-flight slots take fast passes.
+
+### Measuring on a shared box
+
+Wall-clock tracks/min on this box is biased by the other work: the scheduler gives a process cores in proportion to its runnable threads, so a config with more threads gets a bigger share and looks faster (8 cores, W=8 against W=4: 9.2 against 7.3 tracks/min measured, with the same CPU per track and 1% idle chunk threads in both). Every table therefore has, next to the measured number, a **quiet** estimate: the batch's CPU seconds plus the seconds the chunk threads waited for a chunk (`BeatStatus::chunk_idle_s`, new), spread over the cores the run may use (at most its thread count). It is what a machine with nothing else on it would take if the CPU time stays what it was. `benchmark/scripts/r108-table.py` prints both.
+
+### Sweep, this box (analyze-json, 24 tracks, 3 reps, medians (min-max))
+
+| config (threads x workers) | measured trk/min | quiet trk/min | CPU / track | peak RSS | first result | chunk threads idle |
+|---|---:|---:|---:|---:|---:|---:|
+| 16 x 14 (default plan) | 10.70 (10.03-11.56) | 19.6 | 48.2 s | 2,533 MB | 15.9 s | 1% |
+| 16 x 8 | 10.20 (10.02-11.20) | 19.3 | 49.2 s | 2,152 MB | 14.4 s | 1% |
+| 16 x 4 | 10.33 (10.02-10.90) | 19.4 | 49.0 s | 2,081 MB | 11.1 s | 1% |
+| 16 x 2 | 8.93 (8.62-9.58) | 14.7 | 50.6 s | 2,077 MB | 11.5 s | 14% |
+| 14 x 14 (the app's cores - 2) | 10.35 (9.63-10.99) | 17.1 | 48.6 s | 2,273 MB | 17.1 s | 1% |
+
+### Sweep, 8 cores (`taskset -c 0-7`, 12 tracks, 2 reps)
+
+| config | measured trk/min | quiet trk/min | CPU / track | peak RSS | first result | chunk threads idle |
+|---|---:|---:|---:|---:|---:|---:|
+| 8 x 8 | 9.16 (9.01-9.32) | 10.0 | 47.2 s | 1,284 MB | 13.0 s | 1% |
+| 8 x 4 | 7.26 (6.61-7.91) | 9.9 | 48.0 s | 1,160 MB | 12.6 s | 1% |
+| 8 x 2 | 7.17 (7.01-7.34) | 9.9 | 47.4 s | 1,147 MB | 13.0 s | 1% |
+| 6 x 6 (the app's cores - 2) | 6.43 (6.37-6.48) | 7.6 | 47.3 s | 1,074 MB | 14.1 s | 1% |
+
+### What the sweep says
+
+- **The beat model is the whole cost and the default already keeps every core on it.** Chunk threads wait 1% of the time at every worker count from the default down to 4 (16 threads) and to 2 (8 threads); CPU per track is 47-49 s whatever the split (0.13 CPU-s per audio-s: 0.118 beat model, 0.013 the rest, as R104). There is no throughput left in the split on a free machine; oversubscription costs nothing measurable (sys time 2% of CPU).
+- **Workers: 4 are enough for 16 chunk threads, 2 for 8.** With 2 workers and 16 chunk threads the pool starves 14% of the time (the prefix of a track, about 2.8 CPU-s of decode, resample and mel on one thread, is longer than the chunk phase of the other: 37 CPU-s over 16 threads) and the quiet rate falls 25%. Fewer workers than the default save memory and first-result time at equal rate: 4 instead of 14 is -18% peak RSS and -30% first result. The app already runs only `max(threads/3, 3)` model jobs, so its model stage is in that regime; no change.
+- **Threads per track and intra-op threads do not pay.** Giving a track more threads only widens the mel pool, the key lanes and the fit (about 10% of the CPU); running one chunk on several rten threads would trade the efficiency of independent chunks for a lower per-track latency and changes how many chunks hold memory at once. The chunk stays on one thread (it is also what keeps the logits equal to the reference), so this was not swept.
+- **The one big lever is the number of cores the app leaves to the UI.** `UI_CORES = 2` takes 12.5% of the quiet rate on 16 cores (17.1 against 19.6) and **24% on 8 cores (7.6 against 10.0)**. Left unchanged: it is a UI-smoothness decision (`analysis_backend::analysis_threads_for`), and the effect on the UI while analysis runs cannot be judged here. If the Mac's QoS (analysis below the UI) is enough, `cores - 1` is worth a Mac test.
+
+### The app scheduler (bench_analysis, `--features dev-bins`)
+
+| 16 cores, 24 tracks, app defaults (14 threads, 14 in flight, 4 model jobs), 2 reps | measured trk/min | CPU / track | peak RSS | first result | chunk threads idle |
+|---|---:|---:|---:|---:|---:|
+| staged (fast pass, then grid pass; the app) | 8.97 (8.16-9.79) | 52.8 s | 1,936 MB | 16.7 s | 1% |
+| `--unstaged` (one whole pass per track) | 8.27 (8.20-8.34) | 52.0 s | 1,380 MB | 14.4 s | 1% |
+
+At full width the staging costs 1.5% CPU (the second decode and waveform of the grid pass) and nothing in throughput; the chunk threads are busy in both. Not touched.
+
+### Change: the memory plan was sized for 1500-frame chunks
+
+`chunk_slots` plans `CHUNK_ACTIVATION_MB = 400` per chunk thread inside a quarter of the machine's memory. That is the 1500-frame chunk (R57); the default is now 500 frames. Peak RSS against the chunk threads (same worker count 4, other tracks the same size: 2,081 MB at 16 threads, 1,160 MB at 8) is **about 115 MB per chunk thread at chunk 500**. On a machine whose quarter-of-memory budget is small, the 400 MB estimate gives fewer threads than there are cores: an 8 GB machine (budget 2 GB) ran **3** chunk threads of the 6 it was given.
+
+`chunk_activation_mb(frames)` now takes 400 MB at 1500 frames (unchanged, so CoreML's chunk size plans as before) and 120 MB at 500, a straight line between; `chunk_slots` reads the chunk size with the new `bt::chunk_frames()`. Tests: `chunk_activation_follows_the_chunk_length`, `short_chunks_leave_room_for_every_thread_on_a_small_machine` (6 threads on an 8 GB machine: 3 slots at 1500 frames, 6 at 500); the old slot tests keep their 400 MB through `chunk_slots_with_ceiling`.
+
+| 8 cores, `FOURFOUR_ANALYSIS_MEMORY_MB=8192` (4 GB available), bench_analysis app defaults (6 threads, 2 workers), 12 tracks, 2 reps interleaved | measured trk/min | CPU / track | peak RSS | first result |
+|---|---:|---:|---:|---:|
+| base (3 chunk threads) | 3.17 (2.34-4.01) | 56.6 s | 555 MB | 34.8 s |
+| new (6 chunk threads) | 6.56 (6.06-7.06) | 53.3 s | 748 MB | 17.1 s |
+
+**2.1x on an 8 GB machine** (3 chunk threads can use 3 cores, 6 use 6; the measured ratio sits at that bound). Nothing changes where memory is not the limit: this box (16 and 8 cores, 26-64 GB) plans the same threads before and after, and a 16 GB machine already had 8 slots. On the same simulated machine with the new binary, 2 reps: 2 workers (the memory-planned count) 7.19 (7.05-7.32) trk/min against 6.92 (6.81-7.03) with 4 workers, so no worker floor is needed; `--unstaged` 7.53 (7.23-7.82) with chunk threads idle 1% against 8% staged (one fast pass and one model job share the 2 in-flight slots), the price of waveforms first on a 2-worker machine, not changed.
+
+### Knobs and instrumentation added (bench only, defaults unchanged)
+
+- `FOURFOUR_ANALYSIS_WORKERS` (`PoolOptions::default`, so the app path and `bench_analysis` read it too) and `analyze-json --workers`: caps the tracks in flight.
+- `BeatStatus::chunk_idle_s`: seconds the beat-model threads, added up, waited for a chunk; printed by `analyze-json` (stderr) and `bench_analysis` (`BEAT` line).
+- `benchmark/scripts/r108-run.py` (one batch: wall, CPU, peak RSS, first result, per-track finish times, sha256 of the output), `r108-sweep.sh` (interleaved configs, taskset, simulated memory, analyze-json or bench_analysis), `r108-table.py` (medians, spread, quiet rate).
+
+### Proof
+
+`analyze-json` over the 24 tracks, sha256 of stdout (beat grid, bpm, key, waveforms, bar phase): base `r105-snap` and new default both `523dc97f64be81ec8679e613f09ed968791b59d7bdaf4f0cef6ccea4647322cc`; base and new on 8 cores with 8 GB simulated (new: 2 workers, 3 threads per track, 6 chunk threads; base: 3) the same hash each; in those two runs the 24 tracks took 346 s (base) and 190 s (new), one run each, load 20-30. `cargo test --workspace`: 26 `test result: ok` lines, 546 passed, 0 failed.
+
+### Not done, and why
+
+- Mac CoreML path (2 sessions, chunk 1500, ANE/GPU): not simulable on Linux; the sweeps above are the rten CPU path. There the CPU lanes (decode, resample, mel, key, waveform) are what parallel tracks buy, and W has to cover those, not the chunk queue.
+- Wall-clock differences between worker counts above 4: none exist on a free machine; the loaded box cannot show them without the share bias described above.
+- A separate decode prefetch lane: redundant with 3-4 workers (idle 1%); with 2 workers and 16 threads it would recover part of the 14% idle, but that needs a machine that is both wide and short of memory, and the chunk estimate above removes the shortage that would produce it.
+
 ## R109 budget refresh (2026-11-04, `r109-budget`)
 
 Branch `r109-budget` from `ov-1028` (`78f4e32`). Linux `dev` box, release `bench_startup`, headless Chromium, `scripts/perf.sh --size 10k` (analysis and playback steps skipped: analysis rows belong to r108, the playback test needs a separate test build). Load average 17-22 during the suite (other workers). Everything under `nice -n 10`.
@@ -3431,6 +3511,31 @@ Store level, hash of every result, base against new, `FF_PERF_STATE` r95 payload
 `npx vitest run` with `FF_FUZZ_FULL=1` and the 50k payload: 989 passed, 2 skipped, 1 failed (`playlist-path-real`, needs a playlist name of another payload; not related). `npm run check`: 0 errors. Chromium smoke: 114 passed, 43 skipped. WebKit smoke: 114 passed, 43 skipped.
 
 Scratch (`~/.cache/r157*`) is deleted after this item.
+## R158 Mac analysis ship (2026-11-07, `r158-mac-analysis`)
+
+Merlin's decision (2026-11-07, Waiting 43 and 44: "1 yes"): beat chunk 500 on every build, the Mac too, and the int8 beat model with weight prepacking on the Mac. x86 keeps fp32. Branch `r158-mac-analysis` from `ov-1028` (7e00d28).
+
+**What went in.** `r108-throughput` (1ee34d2, which carries `r96-chunk500`, the R79 fold peak, R101 with the half-time band off, R102 switches and `r105-snap` 903b702) as one merge; then `r98-mac-pair` (87548eb, with `r97-int8-500`: the quantize script and docs); then `r150-int8-prepack` (e779648). Conflicts: `service.rs` tests (kept ov-1028's R93 ceiling test, gave it r108's activation argument) and this doc (both sides kept, R108 placed after R106).
+
+**Code on top** (`fourfour-analysis-rs/src/bt.rs`, `service.rs`):
+
+- `DEFAULT_CHUNK_SIZE` is 500 everywhere; the CoreML-only 1500 is gone. `FOURFOUR_BEAT_CHUNK` still overrides.
+- `DEFAULT_BEAT_MODEL` is `beat_this_q8sc.onnx` on macOS (`cfg!(target_os = "macos")`), `beat_this.onnx` elsewhere. `FOURFOUR_BEAT_MODEL` still overrides. Prepacking follows the file (`prepacks_weights`: any file but fp32), so the Mac gets R150's prepack and x86 does not.
+- Runtime: in an `ort`/`coreml` build the beat model goes to onnxruntime when `FOURFOUR_BEAT_RUNTIME` names anything but `rten`, or when it is unset and the model is the fp32 file. The int8 model runs on rten unless asked otherwise. So the Mac app (still built with `--features coreml`) runs int8 on rten by default, and `FOURFOUR_BEAT_MODEL=beat_this.onnx` alone brings back CoreML (at chunk 500; add `FOURFOUR_BEAT_CHUNK=1500` for the old path) if the fp32 file is in the models dir.
+- `bench_analysis`'s per-stage profile loads the default model (it loaded fp32 by name before).
+
+**The int8 file.** Not in git (like the fp32 weights). `scripts/mac/int8-model.sh [models dir]` makes it from the sha-checked `beat_this.onnx` with `fourfour-analysis-rs/scripts/quantize_beat_int8.py --per-channel` (R97) in a throwaway venv (`~/.cache/fourfour-quant-venv`, pinned onnx 1.23.2, onnxruntime 1.31.1, numpy 2.5.4) and checks the result: sha256 `f315e4684715999897fea9d9c7581e53b43fa73dc32f96aabee0cc58d9b2fe78`, 23,905,596 bytes. On dev it reproduces that hash exactly, from the R97 venv and from a fresh venv with the pins. If the Mac's wheels give other bytes it stops and says so; `FOURFOUR_INT8_MODEL=<file>` then copies a known file (dev: `~/.cache/r97-models/beat_this_q8sc.onnx`) and still checks it. `scripts/mac/build-dmg.sh` and `fourfour-analysis-rs/scripts/bundle-app.sh` (on Darwin) run it, then bundle with `pioneer-test-ui/tauri.bundle-weights-mac.conf.json`: int8, mel, `LICENSE-beat-this.txt`, `LICENSE-key-model.txt` (the fp32 file is not bundled on the Mac: 83 MB the app never loads). `check-dmg.sh` checks the int8 file. Licence: the int8 file is the MIT Beat This! weights, quantized; the same `LICENSE-beat-this.txt` ships next to it, and the notices entry (`scripts/release/third-party-extras.json`, `pioneer-test-ui/resources/THIRD-PARTY-NOTICES.txt`) names it.
+
+**Battery.** No branch had a "fewer workers on battery" cut in code; r98 only recommended one because rten int8 used 2.7x the CPU of CoreML 1500 (988 vs 368 s). Mac night 3 measured int8 at 500 at 614 CPU s against 644 for CoreML 1500, so the reason is gone. Not added.
+
+**Acceptance on x86 (dev box, fp32, chunk 500, at most 2 analysis threads).**
+
+- Output identity with `r108-throughput`: `analyze-json --threads 2 --workers 1` over 8 tracks of `rekordbox-testdata-2025` from the test split (3 MP3, 3 FLAC, 2 WAV; full app result: grid, BPM, key, waveforms) is byte-identical, 8,276,547 bytes, sha256 `974a7f995d45b03e63e01c97b7cd442c13339dfa01f4f92ec74ace30dbc0e90b`, both builds, 8 of 8 analysed. CPU 366 s (r158) and 370 s (r108).
+- Scores (`benchmark/scripts/r94-run.sh` with this branch's `ffa`, `WORKERS=1 THREADS=2`, fp32, `o3-score.py`): test 205: grid 20 ms **171**, BPM 0.1 **185**, BPM 1 193, bar right 142 of all. These are exactly the R105 chunk-500 numbers that R108 carried (171 / 185 / 193 / 142; gate 171 = 171 passes, BPM 0.1 equals R108's 185, one under the 1500 reference as before). 46.1 CPU s per track, 1.97 tracks/min at load 15-50, peak RSS 678 MB. The dev split was not rerun (timebox; the box was at load 50 for half the run); the byte identity above covers the code path.
+
+Validation: `cargo test --workspace`: 26 `test result: ok` lines, 587 passed, 0 failed (new: `every_build_uses_the_500_frame_chunk`, `only_the_fp32_model_goes_to_onnxruntime_by_default`, `the_mac_defaults_to_the_int8_beat_model_and_the_rest_to_fp32`). `cargo check -p fourfour-analysis-rs --features ort --tests` clean. `app`: `npx vitest run` 980 passed, 9 skipped; `npm run check` 0 errors, 0 warnings (app code unchanged). Not checked: `aarch64-apple-darwin` (target not installed on dev), the Mac build and the `coreml` feature on the Mac.
+
+**Mac checks for Merlin** (not run here: no Mac access, no `aarch64-apple-darwin` target on dev). See the commands in the report: int8 file, `build-dmg.sh`, `check-dmg.sh`, a 49-track `bench_analysis` against night 3's int8 row, and a look at `beat_runtime` in the app's analysis status (should read `rten`).
 
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
