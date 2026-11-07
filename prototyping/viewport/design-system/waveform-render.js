@@ -20,7 +20,13 @@ const FALLBACK = {
   dim: 'rgba(13, 13, 13, 0.58)',
   ink: '255, 255, 255',
   playhead: '#ffffff',
+  gridBar: 0.7,
+  gridBeat: 0.34,
+  gridEighth: 0.18,
+  gridSixteenth: 0.1,
 };
+
+const NUMBER_TOKENS = new Set(['gridBar', 'gridBeat', 'gridEighth', 'gridSixteenth']);
 
 const TOKEN_NAMES = {
   bg: '--ff-wave-bg',
@@ -33,6 +39,10 @@ const TOKEN_NAMES = {
   dim: '--ff-wave-dim',
   ink: '--ff-wave-ink',
   playhead: '--ff-wave-playhead',
+  gridBar: '--ff-wave-grid-bar-alpha',
+  gridBeat: '--ff-wave-grid-beat-alpha',
+  gridEighth: '--ff-wave-grid-eighth-alpha',
+  gridSixteenth: '--ff-wave-grid-sixteenth-alpha',
 };
 
 const ENVELOPE_LEAD_CSS_PX = 64;
@@ -64,7 +74,7 @@ export function wavePalette() {
   for (const [key, token] of Object.entries(TOKEN_NAMES)) {
     const value = style.getPropertyValue(token).trim();
     if (!value) complete = false;
-    palette[key] = value || FALLBACK[key];
+    palette[key] = !value ? FALLBACK[key] : NUMBER_TOKENS.has(key) ? Number(value) : value;
   }
   if (complete) cached = palette;
   return palette;

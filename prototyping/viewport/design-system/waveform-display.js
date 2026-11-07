@@ -51,6 +51,14 @@ const WINDOW_MAX_MS = 30000;
 const ASSUMED_SAMPLE_RATE = 44100;
 const WHEEL_ZOOM_PER_PIXEL = 0.0025;
 const WHEEL_LINE_PX = 16;
+const GRID_FADE_FROM_PX = 12;
+const GRID_FADE_FULL_PX = 24;
+const GRID_THINNED_BAR = 0.45;
+const GRID_MIN_ALPHA = 0.01;
+
+function gridFade(spacingPx) {
+    return Math.max(0, Math.min(1, (spacingPx - GRID_FADE_FROM_PX) / (GRID_FADE_FULL_PX - GRID_FADE_FROM_PX)));
+}
 
 export default class WaveformDisplay {
     /**
@@ -274,6 +282,7 @@ export default class WaveformDisplay {
     setBeats(beats) {
         if (!this._data || this._data.beats === beats) return;
         this._data = { ...this._data, beats };
+        this._overviewDirty = true;
         this._invalidate();
     }
 
@@ -673,6 +682,7 @@ export default class WaveformDisplay {
         }
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this._renderBeatGrid(ctx, w, h, 0, 1, palette, false);
         const cues = this._data?.cues;
         if (cues) {
             for (const cue of cues) {
@@ -1010,92 +1020,67 @@ export default class WaveformDisplay {
         ctx.fillText(label, x + 4, fontSize + 2);
     }
 
-    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette) {
+    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette, labels = this._mode === 'expanded') {
         const beats = this._data?.beats;
         const durationMs = this._data?.duration_ms;
         if (!beats || beats.length === 0 || !durationMs) return;
-
         const span = endFrac - startFrac;
         if (span <= 0) return;
 
-        // Compact shows the whole track — phrase ticks only.
-        if (this._mode === 'compact') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, false, palette);
-            return;
-        }
+        const pxPerBeat = this._pxPerBeat(w, startFrac, endFrac, beats, durationMs);
+        const detail = this._beatGridDetail(pxPerBeat);
+        const labelAll = labels && detail === 'full';
+        const labelPhrases = labels && detail !== 'sections';
+        const barFade = gridFade(pxPerBeat * 4);
+        const phraseFade = gridFade(pxPerBeat * 16);
+        const sectionFade = gridFade(pxPerBeat * 64);
+        const beatAlpha = palette.gridBeat * gridFade(pxPerBeat);
+        const eighthAlpha = palette.gridEighth * gridFade(pxPerBeat / 2);
+        const sixteenthAlpha = palette.gridSixteenth * gridFade(pxPerBeat / 4);
+        const fine = 1 / devicePixelRatio;
+        const xOf = (ms) => ((ms / durationMs - startFrac) / span) * w;
 
-        const detail = this._beatGridDetail(
-            this._pxPerBeat(w, startFrac, endFrac, beats, durationMs));
-
-        if (detail === 'sections') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 16, true, palette);
-            return;
-        }
-        if (detail === 'phrases') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, true, palette);
-            return;
-        }
-
-        let barNumber = 0;
-        const showBeats = detail === 'full' || detail === 'bars+beats';
-        const labelBars = detail === 'full' || detail === 'bars' || detail === 'bars+beats';
-        const labelPhrasesOnly = detail === 'bars' || detail === 'bars+beats';
-
-        for (const beat of beats) {
-            const frac = beat.time_ms / durationMs;
-            if (beat.bar_position === 1) barNumber++;
-            if (frac < startFrac || frac > endFrac) continue;
-
-            const x = this._beatX(frac, startFrac, endFrac, w);
-            const isBar = beat.bar_position === 1;
-            const isPhrase = isBar && barNumber % 4 === 1;
-
-            if (!isBar) {
-                if (!showBeats) continue;
-                ctx.strokeStyle = ink(palette, 0.3);
-                ctx.lineWidth = 0.5;
-                const beatX = this._lineAt(x, 0.5);
-                ctx.beginPath();
-                ctx.moveTo(beatX, 0);
-                ctx.lineTo(beatX, h);
-                ctx.stroke();
-            } else {
-                ctx.strokeStyle = ink(palette, detail === 'bars+beats' ? 0.55 : 0.7);
-                ctx.lineWidth = 1;
-                const barX = this._lineAt(x, 1);
-                ctx.beginPath();
-                ctx.moveTo(barX, 0);
-                ctx.lineTo(barX, h);
-                ctx.stroke();
-
-                if (labelBars && (!labelPhrasesOnly || isPhrase)) {
-                    this._drawBarLabel(ctx, this._lineAt(x, 1), barNumber, isPhrase, palette);
-                }
-            }
-        }
-    }
-
-    // Sparse bar grid — every `barStride` bars (4 = phrase, 16 = section).
-    _renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, barStride, labelPhrases, palette) {
-        const span = endFrac - startFrac;
-        if (span <= 0) return;
-        let barNumber = 0;
-        ctx.strokeStyle = ink(palette, barStride >= 16 ? 0.22 : 0.28);
-        ctx.lineWidth = 1;
-        for (const beat of beats) {
-            if (beat.bar_position !== 1) continue;
-            barNumber++;
-            if (barNumber % barStride !== 1) continue;
-            const frac = beat.time_ms / durationMs;
-            if (frac < startFrac || frac > endFrac) continue;
-            const x = this._beatX(frac, startFrac, endFrac, w);
-            const lineX = this._lineAt(x, 1);
+        const line = (x, width, alpha) => {
+            if (alpha < GRID_MIN_ALPHA || x < -1 || x > w + 1) return;
+            const lineX = this._lineAt(x, width);
+            ctx.strokeStyle = ink(palette, alpha);
+            ctx.lineWidth = width;
             ctx.beginPath();
             ctx.moveTo(lineX, 0);
             ctx.lineTo(lineX, h);
             ctx.stroke();
-            if (labelPhrases && barStride === 4) {
-                this._drawBarLabel(ctx, this._lineAt(x, 1), barNumber, true, palette);
+        };
+
+        let barNumber = 0;
+        for (let i = 0; i < beats.length; i++) {
+            const beat = beats[i];
+            const isBar = beat.bar_position === 1;
+            if (isBar) barNumber++;
+            const x = xOf(beat.time_ms);
+            const next = beats[i + 1];
+            const nextX = next ? xOf(next.time_ms) : x;
+            if (nextX < -1) continue;
+            if (x > w + 1) break;
+
+            if (next && (eighthAlpha >= GRID_MIN_ALPHA || sixteenthAlpha >= GRID_MIN_ALPHA)) {
+                const step = (nextX - x) / 4;
+                line(x + step, fine, sixteenthAlpha);
+                line(x + 2 * step, fine, eighthAlpha);
+                line(x + 3 * step, fine, sixteenthAlpha);
+            }
+
+            if (!isBar) {
+                line(x, fine, beatAlpha);
+                continue;
+            }
+            const isPhrase = barNumber % 4 === 1;
+            const isSection = barNumber % 16 === 1;
+            const thinned = Math.max(isPhrase ? phraseFade : 0, isSection ? sectionFade : 0);
+            const strength = Math.max(barFade, GRID_THINNED_BAR * thinned);
+            if (strength <= 0) continue;
+            line(x, 1, palette.gridBar * strength);
+            if (x >= 0 && x <= w && (labelAll || (labelPhrases && isPhrase && strength >= 1))) {
+                this._drawBarLabel(ctx, this._lineAt(x, 1), barNumber, isPhrase, palette);
             }
         }
     }
