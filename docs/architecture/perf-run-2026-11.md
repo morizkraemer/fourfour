@@ -2892,6 +2892,38 @@ The `Set` check was the largest part at 50k (Set lookups of 50k row proxies, 5.6
 
 Scratch (`~/.cache/r139*`) is deleted after this item.
 
+## R145 bulk writes (2026-11-07, `r145-bulk-writes`)
+
+R143 lever 3, from `ov-1028`. Linux `dev` box (load 13-38), headless Chromium and Playwright WebKit, r95 50k payload. Base and new runs back to back (new, base, base, new).
+
+### Change
+
+- `markTracksPendingAnalysis` (analyze selection, analyze all) writes the plain object of a row directly when that row has no `$state` entry yet (`rowEntries`), and goes through the row proxy as before when it has one. A row without an entry has had nothing but `id` read through it, so no view, effect or derived can show the old value; the entry that is created later starts from the plain object. Rows that were written directly are handed to `bumpLibraryTracks(ids, writtenToPlain)` for the search text; the copy step skips them anyway (no entry).
+- The reads of that function (`analysisPending`, `bpmLocked`, `keyLocked`) also come from the plain object, so they no longer create the entry. `knownTrackIds` checks `plainTracks` instead of `libraryTrackById(id) !== undefined`: in dev builds Svelte compiles `!==` to `strict_equals`, which reads through the row proxy and created every entry (the store tests run in dev mode and showed no gain until this).
+- Rows that already have an entry (shown rows, rows edited earlier, all rows after analysis results arrived) still take the proxy path, so a second analyze of the same rows in one session costs what it did. Results arrival, rating, colour, genre and relink writes are unchanged (no gain measured or claimed).
+
+### Before and after
+
+| Step | 2k | 10k | 50k |
+|---|---|---|---|
+| Page, analyze selection, task ms (Chromium, base to new) | 162 to 68 | 426 to 202 | 2,387 to 487 |
+| Page, long task ms | 136 to none | 400 to 159 | 2,359 to 448 |
+| Store (dev mode), analyze selected, sync part ms | 395 to 149 | 1,411 to 335 | 7,999 to 1,561 |
+
+Other store steps (results, rating + colour, genre + raw, relink) are equal within noise (for example 50k results 2,540 to 2,648, rating + colour 896 to 859).
+
+### Identity proof
+
+- `bulk-bump-real.test.ts` (r95 payload, 2k, 10k, 50k): plain row, 24-order and 43-search hashes after each of the 5 steps equal base and new.
+- `perf-bulk-bump.spec.ts`: on-screen rows before analyze, after analyze (playlist and All Tracks view), after results (2k, 10k) equal base and new in Chromium at 2k, 10k, 50k; WebKit new gives the same view hashes at 2k, 10k, 50k.
+- `bulk-bump-fuzz.test.ts` with `FF_FUZZ_FULL=1`: 4 passed.
+- Reactivity: `library-rows.test.ts` "shows a bulk analyze start on mounted rows and on rows nobody has read yet": a watched row (proxy path) shows the new values, a row first read after the analyze shows them and follows a later write, search and the plain rows agree.
+
+### Validation
+
+- `npx vitest run`: 968 passed, 8 skipped. `npm run check`: 0 errors.
+- Chromium smoke: 114 passed, 33 skipped. WebKit smoke: 114 passed, 33 skipped.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.

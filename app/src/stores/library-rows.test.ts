@@ -53,7 +53,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
-import { bumpLibraryTracks, filterTracks, importFiles, library, loadState, markCoversStored, requestRowPreviews, tracksForSidebarSource } from './library.svelte.ts';
+import { analyzeTrackIds, bumpLibraryTracks, filterTracks, importFiles, library, libraryPlainRows, loadState, markCoversStored, requestRowPreviews, tracksForSidebarSource } from './library.svelte.ts';
 import { fileStatus } from './file-status.svelte.ts';
 import { sortTracks, setSort, clearSort } from './table-columns.svelte.ts';
 import { bootRowOf } from './boot-snapshot.ts';
@@ -86,6 +86,23 @@ describe('library track rows', () => {
     expect(second.values).toEqual(['Bravo']);
     first.stop();
     second.stop();
+  });
+
+  it('shows a bulk analyze start on mounted rows and on rows nobody has read yet', async () => {
+    const mounted = watchValues(() => `${row(1).bpm}|${row(1).key}|${row(1).analysisPending}`);
+    await analyzeTrackIds([1, 2, 3]);
+    await settle();
+    expect(mounted.values).toHaveLength(2);
+    expect(mounted.values[1]).toBe('—|—|true');
+    const late = watchValues(() => `${row(3).bpm}|${row(3).key}|${row(3).analysisPending}|${row(3).analysisLoaded}`);
+    expect(late.values).toEqual(['—|—|true|false']);
+    row(3).bpm = '99.0';
+    await settle();
+    expect(late.values).toEqual(['—|—|true|false', '99.0|—|true|false']);
+    expect(filterTracks(library.tracks, 'Bravo').map((t) => t.id)).toEqual([2]);
+    expect(libraryPlainRows().map((t) => [t.bpm, t.key])).toEqual([['—', '—'], ['—', '—'], ['—', '—']]);
+    mounted.stop();
+    late.stop();
   });
 
   it('shows the derived row fields and follows what they derive from', async () => {
