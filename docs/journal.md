@@ -693,3 +693,4 @@
 2026-11-07 19:04 orchestrator parked-all-v17 merge conflicts in code (library/table-columns stores, main.rs, bench_startup) between parked features and r153/r154; spawned r155 (opus) to resolve and validate, Mac install by orchestrator after
 2026-11-07 19:04 orchestrator decided: own prio r156 analysis events (copy fields + batch per frame; R152 row 8), spawned sonnet/default
 2026-11-07 19:29 orchestrator r155 handed back parked-all-v17 1a97ae3 = build 1355 (r144+r153 import paths merged; vitest 1055, check 0, both smokes 0 failed, cargo pioneer-test-ui 310, identity 432/94/601 vs v16); preview :4212 swapped to 1355, Mac install running
+2026-11-07 19:29 orchestrator parked-all-v17 build 1355 installed on the Mac 19:29 (number verified in bundle); r154 startup change not yet launched in a real window
