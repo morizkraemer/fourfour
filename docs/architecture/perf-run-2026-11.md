@@ -3261,6 +3261,50 @@ Heap rises 21 MB in the first minute of analysis events and then stays flat for 
 
 Scratch (`~/.cache/r152*`) is deleted after this item.
 
+## R153 import index (2026-11-07, `r153-import-index`)
+
+R152 top item 1 for the import path (budget row 2). Branch from `ov-1028`. Linux `dev` box, load 16-54 the whole time (other workers), r95 50k payload, headless Chromium, `app/smoke/perf-budget.spec.ts` with `FF_PERF_BUDGET=import` (1,000 tracks into 50,000, 3 s window after the rows appear). Base = `ov-1028` in a separate tree, same spec, runs interleaved (3 rounds of base then new, 2 runs each).
+
+### Cause
+
+`landImportedTracks` called `resetSearchIndex()` (search text of all rows rebuilt) and the new `library.tracks` array had no bump history, so every cached column sort (`columnSorts`) was dropped and rebuilt (`valueClassesSteps` plus `sortDistinctStrings` over 51,000 values per column).
+
+### Changed (no markup, same rows, same order)
+
+- `library.svelte.ts`: an import no longer resets the search index. The search text list and the letter and digit sets are extended from the cursor (`fillSearchIndex` grows the typed arrays); only the new rows are built. The change log of the track list (`recordTrackListBump`) records an append (`appended`), `libraryChangesSince` reports `grown` plus the bumped positions, and `libraryPositionsChangedSince` still answers `null` across an append, so every other consumer (filter history, playlist members, sort order moves) behaves as before.
+- `sortOrder.ts`: `extendValueClasses(held, values, from)` folds appended values into the held classes: new distinct values are sorted (a few), binary-searched into the held sorted distinct list, old classes are remapped by a shift table (one typed-array pass). Gives up (`undefined`, full rebuild) on NaN, values of the other kind, or no held distinct values. The sorted distinct list is kept in a `WeakMap` next to the classes, so `ValueClasses` is unchanged.
+- `table-columns.svelte.ts`: `columnSortOf` reads only the appended rows (and bumped ones) and folds the classes (bumped rows plus an append falls back to a full class build); the sort warm-up refreshes stale columns (`refreshColumn`, rebuilding the orders that were held by counting sort from the folded classes) instead of building them from scratch. Loads, removals, renames that go through `loadState` are untouched (full rebuild as before).
+
+### Before / after (Chromium 50k, import 1k, ms)
+
+| | base (6 runs) | new (6 runs) |
+|---|---|---|
+| Script in the 3 s after the rows | median 713 (563-802) | median 153 (114-253) |
+| Main-thread rest (paint, GC) | 180-243 | 99-146 |
+| Click to rows (mock) | 31-92 | 37-107 |
+| Worst frame | median 315 (177-400) | median 254 (196-591) |
+
+Per pair (load in brackets) the script was 563/653 (17) against 157/148 (20-26), 740/686 (38) against 114/120 (38), 775/802 (49-54) against 253/196 (53). The script gain holds in every pair, also at load above 50. The worst frame is not a gain outside noise: it moved with the load (177-400 base, 196-591 new) and is not in the profile of the index work (profile of the new build: top self time `columnSortOf` 30 ms, `orderFromClasses` 15-18, `extendValueClasses` 15-35, no `trackHaystack`; run at load 50). The frame spike belongs to landing the rows themselves (row mapping, Svelte updates), not to the index.
+
+### Identity
+
+- New `import-index.test.ts`: imports of none, 1 and 1,000 rows (also into an empty library), copies of existing titles, artists, paths and values, renamed and moved rows bumped before and after an import, tracks removed and the library reloaded, then imports again; after every step the hash (count and ordered ids) of 12 sorts (title, artist, album, genre, bpm, key, time, label, both directions where noted, none) times 20 queries equals the one of a full `loadState` rebuild (240 of 240 each time). Warm-up refresh runs in some steps, not in others. Breaking the shift table makes it fail (checked).
+- New `sortOrder-extend.test.ts`: folded classes equal `valueClasses` of the whole list (120 random splits, strings and numbers, repeats, no value, zero and negative zero, a second fold).
+- Store level, base against new, hash of every ordered id, 10k and 50k: `sorted-typing-real` 432 of 432, `search-path-real` 94 of 94, `sort-analysis-real` 601 of 601 (these load, not import, so they confirm the load path is unchanged). `FF_FUZZ_FULL=1` `bulk-bump-fuzz`, `search-sort-fuzz`, `playlist-sort-fuzz`: 12 of 12.
+
+### Validation
+
+- `npx vitest run`: 112 files passed, 10 skipped; 978 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings.
+- Chromium smoke (`FF_SMOKE_PORT=5601`): 114 passed, 40 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5602`): 114 passed, 40 skipped.
+
+### Not done
+
+- First sort click right after an import on a column that was never built still pays the full build (as before).
+- After an import the filter history of the old list is dropped (the first query scans once, 14-22 ms at 50k).
+- Bumped rows during an import (analysis running) make `columnSortOf` rebuild the classes of that column in full.
+
+Scratch (`~/.cache/r153*`) deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
