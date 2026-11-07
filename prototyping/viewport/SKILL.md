@@ -86,3 +86,21 @@ export default function render() {
 ```
 
 When a primitive changes, Vite HMR updates every artboard that imports it while Viewport keeps canvas pan, zoom, and card positions intact.
+
+## Comments
+
+The user comments on cards in the canvas, usually from a phone; the comments land in `viewport/comments.json`, keyed by artboard id: `{ id, text, at, resolved, by? }`.
+
+**Every turn, run `npx viewport comments` first** and answer or act on every comment it prints, the same way you handle a user message. It lists only comments you have not seen (board id, author, time, the thread), then marks them read. `--peek` looks without marking, `--all` prints everything.
+
+- `npx viewport comments reply <board> "<text>"` answers on that board (written as `by: "agent"`). Say what you changed or what you need decided.
+- `npx viewport comments resolve <board> <comment id>` after you acted on one.
+- Open comments are feedback on that card's file (the id maps to the file as above). Never delete the user's comments; keep `comments.json` valid JSON.
+- A key `<artboard id>#<name>` is a comment on one variation inside that card: the element with `data-variant="<name>"`. Give every variation in a multi-variation card a stable `data-variant` name on its outermost element so the user can comment on it alone.
+
+### Review workflow
+
+- The user reviews a whole page at once by commenting on its cards and variations, then tells you which page's comments to act on.
+- Act on that page's open comments. The next round replaces the commented boards with new versions; delete the old boards, do not keep them. Git history keeps them.
+- Commented boards stay visible. There are no done or reviewed marks.
+
