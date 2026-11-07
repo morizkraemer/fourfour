@@ -51,6 +51,7 @@ const WINDOW_MAX_MS = 30000;
 const ASSUMED_SAMPLE_RATE = 44100;
 const WHEEL_ZOOM_PER_PIXEL = 0.0025;
 const WHEEL_LINE_PX = 16;
+const SLIDE_PX = 100000;
 const GRID_FADE_FROM_PX = 12;
 const GRID_FADE_FULL_PX = 24;
 const GRID_THINNED_BAR = 0.45;
@@ -147,6 +148,7 @@ export default class WaveformDisplay {
             this._sizeObserver.observe(this._zoomCanvas);
         }
         this._playheadX = new WeakMap();
+        this._slides = new WeakMap();
 
         // Offscreen cache of the overview waveform (bars + cues). The overview
         // image never changes during playback — only the viewport rectangle
@@ -461,7 +463,7 @@ export default class WaveformDisplay {
         const x = Math.round(frac * this._canvasSize(canvas).w * 64) / 64 - 0.5;
         if (this._playheadX.get(el) === x) return;
         this._playheadX.set(el, x);
-        el.style.transform = `translateX(${x}px)`;
+        this._moveTo(el, x);
     }
 
     _showPlayedMask(frac) {
@@ -471,7 +473,17 @@ export default class WaveformDisplay {
         const x = Math.round(frac * w * 64) / 64 - w;
         if (this._playheadX.get(mask) === x) return;
         this._playheadX.set(mask, x);
-        mask.style.transform = `translateX(${x}px)`;
+        this._moveTo(mask, x);
+    }
+
+    _moveTo(el, x) {
+        let slide = this._slides.get(el);
+        if (!slide) {
+            slide = el.animate([{ transform: `translateX(${-SLIDE_PX}px)` }, { transform: `translateX(${SLIDE_PX}px)` }], { duration: 2 * SLIDE_PX, fill: 'both' });
+            slide.pause();
+            this._slides.set(el, slide);
+        }
+        slide.currentTime = x + SLIDE_PX;
     }
 
     _hidePlayhead(el) {
