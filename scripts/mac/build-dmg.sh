@@ -16,7 +16,7 @@ unset APPLE_SIGNING_IDENTITY APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_
 export CI=true
 
 mkdir -p "$MODELS"
-for f in beat_this.onnx mel_spectrogram.onnx; do
+for f in beat_this.onnx beat_this_q8sc.onnx mel_spectrogram.onnx; do
   if [ ! -f "$MODELS/$f" ] && [ -f "$DEV_INSTALL_MODELS/$f" ]; then
     cp "$DEV_INSTALL_MODELS/$f" "$MODELS/$f"
   fi
@@ -24,14 +24,15 @@ done
 if [ ! -f "$MODELS/beat_this.onnx" ] || [ ! -f "$MODELS/mel_spectrogram.onnx" ]; then
   "$ROOT/prototyping/analysis-packaging/fetch-models.sh"
 fi
+"$ROOT/scripts/mac/int8-model.sh" "$MODELS"
 cp "$ROOT/scripts/mac/LICENSE-beat-this.txt" "$MODELS/LICENSE-beat-this.txt"
 cp "$ROOT/scripts/mac/LICENSE-key-model.txt" "$MODELS/LICENSE-key-model.txt"
-(cd "$MODELS" && shasum -a 256 beat_this.onnx mel_spectrogram.onnx LICENSE-beat-this.txt)
+(cd "$MODELS" && shasum -a 256 beat_this_q8sc.onnx mel_spectrogram.onnx LICENSE-beat-this.txt)
 
 (cd "$ROOT/app" && npm ci)
 
 cd "$ROOT/pioneer-test-ui"
-caffeinate -i cargo tauri build --config tauri.bundle-weights.conf.json --features coreml --bundles dmg
+caffeinate -i cargo tauri build --config tauri.bundle-weights-mac.conf.json --features coreml --bundles dmg
 
 DMG="$(ls -t "$ROOT"/target/release/bundle/dmg/*.dmg | head -1)"
 [ -f "$DMG" ] || { echo "FAIL no dmg produced"; exit 1; }

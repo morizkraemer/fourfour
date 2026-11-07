@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "resources": {
+      "../prototyping/analysis-packaging/models/beat_this_q8sc.onnx": "models/beat_this_q8sc.onnx",
+      "../prototyping/analysis-packaging/models/mel_spectrogram.onnx": "models/mel_spectrogram.onnx",
+      "../prototyping/analysis-packaging/models/LICENSE-beat-this.txt": "models/LICENSE-beat-this.txt",
+      "../scripts/mac/LICENSE-key-model.txt": "models/LICENSE-key-model.txt"
+    }
+  }
+}

@@ -64,7 +64,7 @@
       "texts": [{"node_module": "@tauri-apps/plugin-dialog", "standard": "MIT", "holder": "2017 - Present Tauri Apps Contributors"}]
     },
     {
-      "name": "Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx)",
+      "name": "Beat This! model weights (beat_this.onnx, mel_spectrogram.onnx; beat_this_q8sc.onnx on macOS: beat_this.onnx with int8 MatMul weights, quantized by fourfour)",
       "version": "bundled in Resources/models",
       "license": "MIT",
       "url": "https://github.com/CPJKU/beat_this",

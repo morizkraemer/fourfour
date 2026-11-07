@@ -502,6 +502,13 @@ interface HeldOrder {
 
 const columnSorts = new Map<string, ColumnSort>();
 
+interface LibrarySortWarmup {
+  step(budgetMs: number, stop?: () => boolean): boolean;
+  finishColumn(key: string): void;
+}
+
+let latestWarmup: LibrarySortWarmup | null = null;
+
 const UNIQUE_VALUE_KEYS = new Set(['title', 'index']);
 
 function readLibraryValues(
@@ -540,6 +547,7 @@ function dropUnusableColumnSorts() {
 }
 
 function columnSortOf(rows: readonly Record<string, unknown>[], key: string): ColumnSort {
+  if (!columnSorts.has(key)) latestWarmup?.finishColumn(key);
   let entry = columnSorts.get(key);
   if (entry && entry.tracks !== rows) {
     const changes = libraryChangesSince(entry.tracks);
@@ -646,7 +654,8 @@ function* refreshColumn(key: string): Generator<void, ColumnSort> {
   return entry;
 }
 
-const WARMUP_DELAY_MS = 1000;
+const WARMUP_DELAY_MS = 250;
+const WARMUP_INPUT_QUIET_MS = 400;
 const WARMUP_SLICE_MS = 6;
 const WARMUP_FALLBACK_GAP_MS = 12;
 const WARMUP_READ_CHUNK = 2048;
@@ -680,7 +689,7 @@ function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plai
  * header finds them ready. Each result is kept only if nothing built that column meanwhile and the list was at most
  * bumped since; `step` returns true when all columns are done.
  */
-export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupChunks = { read: WARMUP_READ_CHUNK, sort: WARMUP_SORT_CHUNK }): { step(budgetMs: number): boolean } {
+export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupChunks = { read: WARMUP_READ_CHUNK, sort: WARMUP_SORT_CHUNK }): LibrarySortWarmup {
   const rows = untrack(() => library.tracks) as Record<string, unknown>[];
   const plains = libraryPlainRows();
   dropUnusableColumnSorts();
@@ -688,8 +697,12 @@ export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupCh
   const queue = aligned ? keys.filter((key) => !columnSorts.has(key)) : [];
   const stale = aligned ? keys.filter((key) => columnSorts.has(key) && columnSorts.get(key)!.tracks !== rows) : [];
   let current: { key: string; job: Generator<void, ColumnSort> } | null = null;
-  return {
-    step(budgetMs) {
+  let running = false;
+  const keepFinished = (finished: { key: string }, entry: ColumnSort) => {
+    if (!columnSorts.has(finished.key) && libraryChangesSince(entry.tracks) !== null) columnSorts.set(finished.key, entry);
+  };
+  const warmup: LibrarySortWarmup = {
+    step(budgetMs, stop) {
       const end = performance.now() + budgetMs;
       do {
         if (!current) {
@@ -702,18 +715,43 @@ export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupCh
           if (key === undefined) return true;
           current = { key, job: warmColumn(key, rows, plains, chunks) };
         }
-        const next = current.job.next();
+        running = true;
+        let next: IteratorResult<void, ColumnSort>;
+        try {
+          next = current.job.next();
+        } finally {
+          running = false;
+        }
         if (!next.done) continue;
-        if (!columnSorts.has(current.key) && libraryChangesSince(next.value.tracks) !== null) columnSorts.set(current.key, next.value);
+        keepFinished(current, next.value);
         current = null;
-      } while (performance.now() < end);
+      } while (performance.now() < end && !stop?.());
       return false;
     },
+    finishColumn(key) {
+      if (running || !current || current.key !== key || columnSorts.has(key)) return;
+      let next = current.job.next();
+      while (!next.done) next = current.job.next();
+      keepFinished(current, next.value);
+      current = null;
+    },
   };
+  latestWarmup = warmup;
+  return warmup;
 }
 
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupRun = 0;
+let lastInputAt = -Infinity;
+
+if (typeof window !== 'undefined') {
+  for (const type of ['pointerdown', 'keydown', 'click']) window.addEventListener(type, () => (lastInputAt = performance.now()), { capture: true, passive: true });
+}
+
+function inputPending(): boolean {
+  const scheduling = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & { scheduling?: { isInputPending?: () => boolean } }).scheduling;
+  return scheduling?.isInputPending?.() === true;
+}
 
 function warmableLibraryColumns(): string[] {
   return untrack(() => visibleColumns('library')).map((column) => column.key).filter((key) => !NOT_WARMED_COLUMNS.has(key));
@@ -726,12 +764,17 @@ function scheduleLibrarySortWarmup() {
     const warmup = startLibrarySortWarmup(warmableLibraryColumns());
     const next = () => {
       if (run !== warmupRun) return;
+      const quietFor = WARMUP_INPUT_QUIET_MS - (performance.now() - lastInputAt);
+      if (quietFor > 0) {
+        setTimeout(next, quietFor);
+        return;
+      }
       if (typeof requestIdleCallback === 'function') requestIdleCallback(slice, { timeout: 4000 });
       else setTimeout(slice, WARMUP_FALLBACK_GAP_MS);
     };
     const slice = () => {
       if (run !== warmupRun) return;
-      if (!warmup.step(WARMUP_SLICE_MS)) next();
+      if (!warmup.step(WARMUP_SLICE_MS, inputPending)) next();
     };
     next();
   }, WARMUP_DELAY_MS);

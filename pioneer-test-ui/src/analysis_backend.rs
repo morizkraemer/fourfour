@@ -214,7 +214,7 @@ mod tests {
         }
         let env = BackendEnv { resource_dir: Some(resources.clone()), app_data_dir: Some(app_data.clone()), ..BackendEnv::default() };
         let touch = |dir: &Path| {
-            for name in [fourfour_analysis::service::MEL_MODEL, fourfour_analysis::service::BEAT_MODEL] {
+            for name in [fourfour_analysis::service::MEL_MODEL, fourfour_analysis::service::DEFAULT_BEAT_MODEL] {
                 std::fs::write(dir.join("models").join(name), b"x").unwrap();
             }
         };

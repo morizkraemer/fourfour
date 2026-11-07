@@ -13,10 +13,21 @@ use crate::keymap::camelot;
 pub const MODELS_ENV: &str = "FOURFOUR_MODELS_DIR";
 pub const MEL_MODEL: &str = "mel_spectrogram.onnx";
 pub const BEAT_MODEL: &str = "beat_this.onnx";
+/// `BEAT_MODEL` with its MatMul weights quantized to int8 by `scripts/quantize_beat_int8.py --per-channel` (R97).
+pub const BEAT_MODEL_INT8: &str = "beat_this_q8sc.onnx";
+/// The Mac runs the int8 model on rten (R98, Mac night 3: faster than CoreML at the same CPU, a third of the RAM);
+/// x86 has no int8 dot-product units and keeps fp32 (R97).
+pub const DEFAULT_BEAT_MODEL: &str = if cfg!(target_os = "macos") { BEAT_MODEL_INT8 } else { BEAT_MODEL };
 pub const BEAT_MODEL_ENV: &str = "FOURFOUR_BEAT_MODEL";
 
 pub fn beat_model() -> String {
-    std::env::var(BEAT_MODEL_ENV).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| BEAT_MODEL.to_string())
+    std::env::var(BEAT_MODEL_ENV).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| DEFAULT_BEAT_MODEL.to_string())
+}
+
+/// Packs the GEMM weights once at load instead of on every chunk. It pays for the int8 beat model (R150: -4% CPU,
+/// +25 MB, same output) and not for the fp32 default (no gain, +90-130 MB), so only a non-default model file gets it.
+pub fn prepacks_weights(beat_file: &str) -> bool {
+    beat_file != BEAT_MODEL
 }
 
 pub fn models_present(dir: &Path) -> bool {
@@ -192,7 +203,8 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
-        let engine = BeatEngine::load(models_dir, &beat_model(), false)?;
+        let beat_file = beat_model();
+        let engine = BeatEngine::load(models_dir, &beat_file, prepacks_weights(&beat_file))?;
         engine.share_chunk_threads(chunk_slots(pool.max_threads, pool.mem_fraction, total_memory_mb(), available_memory_mb()));
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }
@@ -495,6 +507,21 @@ mod tests {
     }
 
     #[test]
+    fn only_a_non_default_beat_model_prepacks_its_weights() {
+        assert!(!prepacks_weights(BEAT_MODEL));
+        assert!(prepacks_weights(BEAT_MODEL_INT8));
+    }
+
+    #[test]
+    fn the_mac_defaults_to_the_int8_beat_model_and_the_rest_to_fp32() {
+        let expected = if cfg!(target_os = "macos") { BEAT_MODEL_INT8 } else { BEAT_MODEL };
+        assert_eq!(DEFAULT_BEAT_MODEL, expected);
+        if std::env::var_os(BEAT_MODEL_ENV).is_none() {
+            assert_eq!(beat_model(), expected);
+        }
+    }
+
+    #[test]
     fn chunk_slots_fit_the_memory_budget_and_the_threads() {
         let slots = |threads, total, available| chunk_slots_with_ceiling(threads, 0.5, total, available, None, 400.0);
         assert_eq!(slots(7, 8192.0, 4096.0), 3);
@@ -556,7 +583,7 @@ mod tests {
         std::fs::create_dir_all(dir.join("models")).unwrap();
         assert!(!models_present(&dir.join("models")));
         std::fs::write(dir.join("models").join(MEL_MODEL), b"x").unwrap();
-        std::fs::write(dir.join("models").join(BEAT_MODEL), b"x").unwrap();
+        std::fs::write(dir.join("models").join(DEFAULT_BEAT_MODEL), b"x").unwrap();
         assert!(models_present(&dir.join("models")));
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -567,10 +594,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(analysis_key(None), format!("analysis-{ANALYSIS_VERSION}-0-0"));
         std::fs::write(dir.join(MEL_MODEL), b"xx").unwrap();
-        std::fs::write(dir.join(BEAT_MODEL), b"yyy").unwrap();
+        std::fs::write(dir.join(DEFAULT_BEAT_MODEL), b"yyy").unwrap();
         let first = analysis_key(Some(&dir));
         assert_eq!(first, format!("analysis-{ANALYSIS_VERSION}-2-3"));
-        std::fs::write(dir.join(BEAT_MODEL), b"yyyy").unwrap();
+        std::fs::write(dir.join(DEFAULT_BEAT_MODEL), b"yyyy").unwrap();
         assert_ne!(analysis_key(Some(&dir)), first);
         std::fs::remove_dir_all(&dir).ok();
     }

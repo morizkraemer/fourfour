@@ -16,9 +16,7 @@ use crate::decode::resample_to;
 use beat_this::{Model as BtModel, Tensor};
 use rten::{ModelOptions, NodeId, RunOptions, ThreadPool, ValueOrView, ValueView};
 
-const COREML_CHUNK_SIZE: usize = 1500;
-const RTEN_CHUNK_SIZE: usize = 500;
-const DEFAULT_CHUNK_SIZE: usize = if cfg!(all(feature = "coreml", target_os = "macos")) { COREML_CHUNK_SIZE } else { RTEN_CHUNK_SIZE };
+const DEFAULT_CHUNK_SIZE: usize = 500;
 const DEFAULT_BORDER_SIZE: usize = 6;
 const RTEN_OVERLAP: usize = 0;
 const MEL_STRIDE: usize = 1536;
@@ -41,7 +39,7 @@ impl Chunking {
         let env_frames = |name: &str| std::env::var(name).ok().and_then(|v| v.parse::<usize>().ok());
         let size = env_frames("FOURFOUR_BEAT_CHUNK").filter(|&n| n > 4 * DEFAULT_BORDER_SIZE).unwrap_or(DEFAULT_CHUNK_SIZE);
         let border = env_frames("FOURFOUR_BEAT_BORDER").filter(|&n| 4 * n < size).unwrap_or(DEFAULT_BORDER_SIZE);
-        let default_overlap = if size == RTEN_CHUNK_SIZE { RTEN_OVERLAP } else { 0 };
+        let default_overlap = if size == DEFAULT_CHUNK_SIZE { RTEN_OVERLAP } else { 0 };
         let overlap = env_frames("FOURFOUR_BEAT_OVERLAP").unwrap_or(default_overlap).min(size - 2 * border - 1);
         let blend = std::env::var("FOURFOUR_BEAT_BLEND").map_or(overlap > 0, |v| v == "1");
         Chunking { size, border, overlap, blend }
@@ -109,13 +107,23 @@ const ORT_SESSIONS: usize = 2;
 const RTEN_CHUNK_SLOTS_PER_OPEN_SESSION: usize = 6;
 
 /// The runtime the beat model is built to run on: `rten`, or onnxruntime (`coreml` on macOS with the `coreml`
-/// feature, `ort-cpu` otherwise) when built with the `ort` feature and `FOURFOUR_BEAT_RUNTIME` is not `rten`.
+/// feature, `ort-cpu` otherwise) when built with the `ort` feature and `FOURFOUR_BEAT_RUNTIME` asks for it, or is
+/// unset while the beat model is the fp32 file. The int8 model runs on rten unless asked otherwise (R98).
 pub fn beat_runtime() -> &'static str {
     #[cfg(feature = "ort")]
-    if std::env::var("FOURFOUR_BEAT_RUNTIME").map_or(true, |v| v != "rten") {
+    if runs_on_ort(std::env::var("FOURFOUR_BEAT_RUNTIME").ok().as_deref(), &crate::service::beat_model()) {
         return crate::ort_beat::ENGINE;
     }
     "rten"
+}
+
+#[cfg(any(feature = "ort", test))]
+fn runs_on_ort(runtime_env: Option<&str>, beat_file: &str) -> bool {
+    match runtime_env {
+        Some("rten") => false,
+        Some(_) => true,
+        None => beat_file == crate::service::BEAT_MODEL,
+    }
 }
 
 type ChunkLogits = (Vec<f32>, Vec<f32>);
@@ -620,9 +628,17 @@ mod chunk_default_tests {
     use super::*;
 
     #[test]
-    fn coreml_builds_keep_the_long_chunk_and_the_rest_use_the_short_one() {
-        let coreml_on_mac = cfg!(all(feature = "coreml", target_os = "macos"));
-        assert_eq!(DEFAULT_CHUNK_SIZE, if coreml_on_mac { 1500 } else { 500 });
+    fn every_build_uses_the_500_frame_chunk() {
+        assert_eq!(DEFAULT_CHUNK_SIZE, 500);
+    }
+
+    #[test]
+    fn only_the_fp32_model_goes_to_onnxruntime_by_default() {
+        use crate::service::{BEAT_MODEL, BEAT_MODEL_INT8};
+        assert!(runs_on_ort(None, BEAT_MODEL));
+        assert!(!runs_on_ort(None, BEAT_MODEL_INT8));
+        assert!(!runs_on_ort(Some("rten"), BEAT_MODEL));
+        assert!(runs_on_ort(Some("coreml"), BEAT_MODEL_INT8));
     }
 
     fn position_logits(full_time: usize, plan: &Chunking) -> Vec<(i32, ChunkLogits)> {

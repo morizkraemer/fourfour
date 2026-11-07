@@ -438,6 +438,8 @@ function reactiveTrack<T extends object>(track: T): T {
  */
 let trackList = $state.raw<any[]>([]);
 
+const trackListLength = $derived(trackList.length);
+
 /**
  * The plain objects behind `library.tracks`, same order. Reading text through the row proxies costs ~1 s at 30k
  * tracks; these are read instead. A write through a row does not reach its plain object (a `$state` proxy keeps its
@@ -576,7 +578,7 @@ export const library = $state({
 
   // Getters
   get trackCount() {
-    return this.tracks.length;
+    return trackListLength;
   },
 
   get sidebarData() {
@@ -588,7 +590,7 @@ export const library = $state({
       library: {
         label: 'LIBRARY',
         rows: [
-          { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: this.tracks.length },
+          { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: trackListLength },
           { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: recentlyAddedCount },
         ],
       },
