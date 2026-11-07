@@ -1,0 +1,34 @@
+{
+  "id": "r159-scroll-edges",
+  "title": "Scroll edges and fling",
+  "question": "Scrolling: rows at the edges no longer blank, waveforms catch up after a fling. Good?",
+  "url": "/lab.html",
+  "check": "- Fast flick at 50k, half speed: old shows empty rows at the bottom edge for a few frames\n- New: the edge stays filled; row waveforms are empty while flinging and draw when it slows\n- Slow scrolling looks the same as before",
+  "media": "/data/cards/r159-scroll-edges/media/old.mp4",
+  "gallery": [
+    {
+      "url": "/data/cards/r159-scroll-edges/media/old.mp4",
+      "label": "old",
+      "thumb": "/data/cards/r159-scroll-edges/media/old.mp4.thumb.webp"
+    },
+    {
+      "url": "/data/cards/r159-scroll-edges/media/new.mp4",
+      "label": "new",
+      "thumb": "/data/cards/r159-scroll-edges/media/new.mp4.thumb.webp"
+    }
+  ],
+  "options": [
+    {
+      "key": "k",
+      "label": "Keep"
+    },
+    {
+      "key": "c",
+      "label": "Change (note)"
+    }
+  ],
+  "rank": 100,
+  "status": "backlog",
+  "round": 1,
+  "created": "2026-11-07T15:53:56.446Z"
+}
