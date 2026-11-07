@@ -13,7 +13,7 @@
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
   import { quantize } from '../stores/quantize.svelte.ts';
-  import { nearestBeatMs } from '../lib/quantize.ts';
+  import { nearestGridStepMs } from '../lib/quantize.ts';
   import { registerWaveZoom } from '../stores/wave-zoom.ts';
   import { padAction, padFace } from '../lib/padModifier.ts';
   import {
@@ -78,7 +78,7 @@
     }),
   );
   let memory = $derived(memoryCues(trackCues));
-  let cueSnap = $derived(quantize.on ? (ms) => nearestBeatMs(player.track?.beats ?? [], ms) : null);
+  let cueSnap = $derived(quantize.on ? (ms) => nearestGridStepMs(player.track?.beats ?? [], ms, quantize.division) : null);
   const moveCue = (key, ms) => player.track && moveHotCue(player.track.id, key, ms);
   let editingSlot = $state(null);
   let editingChip = $derived(pads.find((p) => p.slot === editingSlot)?.chip ?? null);

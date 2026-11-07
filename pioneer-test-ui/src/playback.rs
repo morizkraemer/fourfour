@@ -49,12 +49,13 @@ pub const DEFAULT_SAMPLE_RATE: u32 = 48_000;
 pub const DEFAULT_BUFFER_FRAMES: u32 = 128;
 const RING_HEADROOM_SECONDS: usize = 2;
 const UNOPENED_RING_SAMPLES: usize = 1;
-/// Crossfade length applied when new audio follows a stream switch (play/seek/stop) or a
-/// dropout. Ramps from the last sample played into the new position so the waveform
-/// discontinuity doesn't produce an audible click/pop. The ramp starts when the new audio
-/// arrives, not at the switch: a slow decoder must not use it up while the ring is empty.
-/// ~5ms at 48 kHz.
+/// Length of the raised-cosine fades around a stream switch (play/seek/stop) and a dropout, ~5 ms
+/// at 48 kHz. A switch first fades the old audio out over this many frames and only then flushes
+/// it, so a jump never cuts a waveform mid-swing; the new audio fades in from the last sample
+/// played. The fade-in starts when the new audio arrives, not at the switch: a slow decoder must
+/// not use it up while the ring is empty.
 const DECLICK_FRAMES: usize = 256;
+const SILENT_LEVEL: f32 = 1e-4;
 /// Per-frame decay applied to the last sample while the ring is empty (underrun), so running dry
 /// fades to silence in about 2 ms instead of cutting off.
 const UNDERRUN_DECAY: f32 = 0.98;
@@ -244,6 +245,8 @@ struct RenderState {
     chunk: Vec<f32>,
     callback_generation: u64,
     declick_remaining: usize,
+    fade_out_remaining: usize,
+    switch_due: bool,
     starved: bool,
     seam: [f32; MAX_CH],
     last_sample: [f32; MAX_CH],
@@ -268,22 +271,41 @@ impl RenderState {
             chunk: vec![0.0; CHUNK_FRAMES * MAX_DEVICE_CHANNELS],
             callback_generation: 0,
             declick_remaining: 0,
-            starved: false,
+            fade_out_remaining: 0,
+            switch_due: false,
+            starved: true,
             seam: [0.0; MAX_CH],
             last_sample: [0.0; MAX_CH],
         }
     }
 
+    fn is_silent(&self) -> bool {
+        self.starved
+            && self.declick_remaining == 0
+            && self.last_sample.iter().all(|v| v.abs() < SILENT_LEVEL)
+    }
+
+    fn switch_stream(&mut self) {
+        let stream_gen = self.pipe.stream_generation.load(Ordering::Acquire);
+        self.cons.clear();
+        self.engine.flush();
+        self.pipe.frames_played.store(0, Ordering::Relaxed);
+        self.callback_generation = stream_gen;
+        self.declick_remaining = 0;
+        self.fade_out_remaining = 0;
+        self.switch_due = false;
+        self.starved = true;
+        self.pipe.ack_generation.store(stream_gen, Ordering::Release);
+    }
+
     fn render(&mut self, data: &mut [f32], channels: u16) {
         let stream_gen = self.pipe.stream_generation.load(Ordering::Acquire);
-        if stream_gen != self.callback_generation {
-            self.cons.clear();
-            self.engine.flush();
-            self.pipe.frames_played.store(0, Ordering::Relaxed);
-            self.callback_generation = stream_gen;
-            self.declick_remaining = 0;
-            self.starved = true;
-            self.pipe.ack_generation.store(stream_gen, Ordering::Release);
+        if stream_gen != self.callback_generation && self.fade_out_remaining == 0 {
+            if self.is_silent() {
+                self.switch_stream();
+            } else {
+                self.fade_out_remaining = DECLICK_FRAMES;
+            }
         }
 
         let ch = (channels.max(1) as usize).min(MAX_DEVICE_CHANNELS);
@@ -294,6 +316,10 @@ impl RenderState {
         let chunk_frames = CHUNK_FRAMES.min(CHUNK_FRAMES * MAX_DEVICE_CHANNELS / ch);
 
         for block in data.chunks_mut(chunk_frames * ch) {
+            if self.switch_due {
+                block.fill(0.0);
+                continue;
+            }
             let frames = block.len() / ch;
             let result = self.engine.process_chunk(
                 self.cons.as_slices(),
@@ -305,6 +331,10 @@ impl RenderState {
             self.cons.skip(result.popped_frames * ch);
 
             for (index, frame) in block.chunks_mut(ch).enumerate() {
+                if self.switch_due {
+                    frame.fill(0.0);
+                    continue;
+                }
                 let has_data = index < result.valid_frames;
                 if has_data && self.starved {
                     self.starved = false;
@@ -312,10 +342,15 @@ impl RenderState {
                     self.declick_remaining = DECLICK_FRAMES;
                 }
                 let (mix_old, mix_new) = if self.declick_remaining > 0 {
-                    let t = 1.0 - (self.declick_remaining as f32 / ramp);
+                    let t = raised_cosine(1.0 - (self.declick_remaining as f32 / ramp));
                     (1.0 - t, t)
                 } else {
                     (0.0, 1.0)
+                };
+                let fade_out = if self.fade_out_remaining > 0 {
+                    raised_cosine((self.fade_out_remaining - 1) as f32 / ramp)
+                } else {
+                    1.0
                 };
                 for (c, slot) in frame.iter_mut().enumerate() {
                     let seam_v = if c < MAX_CH { self.seam[c] } else { 0.0 };
@@ -331,6 +366,7 @@ impl RenderState {
                             0.0
                         }
                     };
+                    let out = out * fade_out;
                     *slot = out;
                     if c < MAX_CH {
                         self.last_sample[c] = out;
@@ -339,7 +375,14 @@ impl RenderState {
                 if self.declick_remaining > 0 {
                     self.declick_remaining -= 1;
                 }
+                if self.fade_out_remaining > 0 {
+                    self.fade_out_remaining -= 1;
+                    self.switch_due = self.fade_out_remaining == 0;
+                }
             }
+        }
+        if self.switch_due {
+            self.switch_stream();
         }
 
         self.pipe
@@ -354,6 +397,10 @@ impl RenderState {
         }
         attack_meter_levels(data, channels, &self.level_left, &self.level_right);
     }
+}
+
+fn raised_cosine(t: f32) -> f32 {
+    0.5 - 0.5 * (std::f32::consts::PI * t.clamp(0.0, 1.0)).cos()
 }
 
 fn render_pipeline(
