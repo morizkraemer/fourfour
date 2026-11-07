@@ -3081,6 +3081,65 @@ Both give the same rows as the base for every term tried (am, an, ou, th, zz, xq
 
 No product code changed, so the identity tests and smoke runs were not repeated; the variants were compared with the base only on the term list above (equal rows). Scratch (`~/.cache/r149`) deleted.
 
+## R150 model ops (2026-11-07, `r150-model-ops`)
+
+Question: are there CPU gains inside the beat model run, at chunk 500, for the fp32 and the int8 model, with output that stays the same to the last bit? Branch `r150-model-ops` from `ov-1028` (f327a90): this section and a profiling example. One lever pays, and only for int8, so it lives on a side branch from the parked int8 branch: `r150-int8-prepack` from `r97-int8-500` (1b3a972). Linux `dev` box (Xeon Gold 6130, 16 vCPU, AVX-512 without VNNI), release builds, at most 2 analysis threads. **Result: rten weight prepacking cuts int8 CPU by about 4% with byte-identical output; for fp32 it gives nothing and costs 90-130 MB RSS. Nothing else found is both identical and faster.**
+
+### Op profile (`fourfour-analysis-rs/examples/model_ops.rs`, one 500 frame chunk, 1 thread, rten `RunOptions` timing)
+
+| op | fp32 ms (share) | int8 ms (share) | what it is |
+|---|---:|---:|---|
+| FusedMatMul (MatMul + bias) | 285 (29.2%) | - | feed-forward and frontend weight GEMMs |
+| MatMulIntegerToFloat | - | 372 (38.1%) | the same weight GEMMs in int8 |
+| MatMul | 282 (28.8%) | 157 (16.0%) | qkv/out projections (fp32 only, about 150 ms) and attention QK^T and AV (about 130-210 ms) |
+| Softmax | 83 (8.5%) | 83 (8.5%) | attention |
+| Concat, Split, Reshape, Transpose, TransformInputs(Split), Slice, Expand | 189 (19.3%) | 188 (19.2%) | data movement; most of it is the rotary embedding (`rotate_every_two`) in all 24 attention blocks |
+| Conv | 39 (4.0%) | 43 (4.4%) | frontend |
+| Gelu, Mul, Add, Div, ReduceL2, Neg | 94 (9.6%) | 101 (10.3%) | elementwise |
+| DynamicQuantizeLinear | - | 25 (2.6%) | int8 only |
+| total | 977 | 977 | 2,777 / 2,802 ops; max activation 39 MB |
+
+By shape, the 6 big transformer layers are about 60% of the time: the feed-forward GEMMs [500, 512] x [512, 2048] and back (21 + 19 ms each), the qkv projection (15 ms) and the 16-head attention (9 + 5 ms + 6 ms softmax). One odd entry: the first frontend time attention (`blocks.0/partial/attnT/attend/MatMul`, [32, 1, 500, 32] x [32, 1, 32, 500]) takes 50 ms where blocks 1 and 2 do the same 32 matrices of the same size in 12 ms; same graph pattern, both inputs contiguous. Not explained; inside rten.
+
+### Levers
+
+| lever | identical? | CPU | kept? |
+|---|---|---|---|
+| Prepack weights at load (`ModelOptions::prepack_weights`, rten packs MatMul, FusedMatMul and MatMulInteger B matrices once) | yes: logits and the full `analyze-json` output byte-equal, both models | fp32: none (user 374.2 s base vs 375.2 s new, mean of 2); int8: **-4.4%** (user 346.9 s base vs 331.6 s new, mean of 3) | int8 only, side branch |
+| 2 threads per chunk instead of 1 (`ThreadPool` per chunk) | yes (same logits at 2 threads) | +12% CPU per chunk (wall -28%) | no; 1 thread per chunk with one chunk thread per analysis thread stays the cheapest per track |
+| ONNX rewrite of the rotary `Split / Neg / Concat / Reshape` as `Gather(perm) * sign` | yes (same logits: only copies and an exact sign flip) | +9% (rten `Gather` 124 ms) | no |
+| the same as `Slice(step -1) * [-1, 1]` | yes | +10% (rten negative-step `Slice` 98 ms) | no |
+| our code around `Model::run` (`extract_chunk` 256 KB copy, `RunOptions` clone, logits `into_data`, stitching) | - | about 0.03 ms of a 1,000 ms chunk | nothing to gain |
+| rten cargo features | - | - | none apply: the GEMM kernels (AVX2/FMA, AVX-512, VNNI on x86; NEON and the i8 dot product on aarch64) are picked at run time in 0.24, the only features are file formats, `fft`, `random`, `mmap` |
+| graph constant folding and fusion at load | - | - | rten already does it (`FusedMatMul`, `Gelu`, `AddSoftmax` and others); a further fused rotary or attention op would be an rten change |
+| a buffer pool kept across runs | - | - | not reachable from outside in 0.24 (R106); at chunk 500 the per-run pool costs about 0 sys time (max activation 39 MB, no blocks above the mmap threshold) |
+
+Why prepacking helps int8 and not fp32: without it rten packs every weight matrix on every call. For fp32 that is a copy of K x N floats against 500 x K x N multiply-adds, about 0.2%. The int8 packing also reorders into the dot-product layout and computes the column sums for the zero point, which is a larger share next to the int8 kernel. The fp32 RSS cost is the packed second copy of the 83 MB of weights; for int8 the copy is about 23 MB.
+
+### Before / after (`analyze-json --threads 2`, 8 tracks: 3 MP3, 3 FLAC, 2 WAV from `rekordbox-testdata-2025`, chunk 500 (r97 default), interleaved base, new, new, base, plus one more new, base pair for int8)
+
+| model | build | user s | sys s | CPU per track | wall s | peak RSS MB | load at start |
+|---|---|---:|---:|---:|---:|---:|---|
+| fp32 | base | 374.8 / 373.6 | 2.3 / 2.1 | 47.1 s | 186 / 172 | 483 / 488 | 11 / 12 |
+| fp32 | prepack | 378.6 / 371.8 | 3.5 / 2.9 | 47.3 s | 247 / 192 | 611 / 571 | 23 / 33 |
+| int8 | base | 346.5 / 340.1 / 354.1 | 1.9 / 1.7 / 3.1 | 43.6 s | 158 / 155 / 237 | 442 / 455 / 481 | 6 / 9 / 28 |
+| int8 | prepack | 331.7 / 334.1 / 328.8 | 1.7 / 1.7 / 2.0 | 41.7 s (**-4.4%**) | 152 / 152 / 173 | 475 / 475 / 475 | 6 / 7 / 7 |
+
+Every int8 prepack run is below every int8 base run (329-334 against 340-354 s user; the 354 s base ran at load 28, the two quiet ones were 340 and 346). fp32 is within noise both ways. RSS: int8 +20-33 MB (+5-7%) against the two quiet base runs, fp32 +90-130 MB (+18-27%).
+
+**Identity.** `cmp`-equal output for every run of a model: fp32 8,952,482 bytes, sha256 prefix `097fba2ee30b5b8a` (4 runs, both builds); int8 8,952,495 bytes, `bccdf469f94b44c7` (6 runs, both builds). `model_ops` gives the same logit hashes with and without prepacking for both models (fp32 beat `2e33ac0a8585c976`, int8 beat `cb2294a4618d881b`).
+
+### What changed
+
+- `r150-model-ops` (from `ov-1028`): `examples/model_ops.rs` (per-op timing, `BY_SHAPE=1` for shapes, `PREPACK`, `POOL_THREADS`, `CHUNK_FRAMES`, `MODEL_FILE`, logit hash) and this section. No product change: on `ov-1028` the model is fp32, where prepacking only costs memory.
+- `r150-int8-prepack` (from `r97-int8-500`, not merged anywhere): `Analyzer::load` prepacks the weights when the beat model is not the default fp32 file (the int8 file chosen with `FOURFOUR_BEAT_MODEL`). If int8 ships, land this with it.
+
+### Not measured
+
+- The Mac. int8 runs on rten's aarch64 CPU path there (i8 dot product kernels); the same per-call packing exists, so a similar or larger gain is likely, but it needs a Mac pair (add `r150-int8-prepack` to the next Mac night next to `r98-mac-pair`).
+- Chunk 1500 on `ov-1028` (the current default): prepacking was not measured there; the weight-packing share is smaller at 1500 than at 500.
+- The rotary data movement (about 12% of the run) and the slow first frontend attention are the largest identical-output targets left, both inside rten (a fused rotary op or a faster strided copy for an innermost axis of 2).
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
