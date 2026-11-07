@@ -64,6 +64,34 @@ describe('trackIdsUnderPaths', () => {
   });
 });
 
+describe('trackIdsUnderPaths against the walk it replaced', () => {
+  it('gives the same ids in the same order on random libraries and dropped paths', () => {
+    let state = 777;
+    const random = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 0x100000000;
+    };
+    const folders = ['/Music/Set', '/Music/Set/deep', 'C:\\Music\\Mix', '/Music/Set Extra', '/Downloads/Crate', '/Music/Set/'];
+    const pathOf = () => {
+      const folder = folders[Math.floor(random() * folders.length)].replace(/[\\/]+$/, '');
+      const slash = folder.includes('\\') ? '\\' : '/';
+      return `${folder}${slash}${Math.floor(random() * 40)}.mp3${random() < 0.05 ? slash : ''}`;
+    };
+    const reference = (rows: { id: number; filePath?: string }[], dropped: string[]) => {
+      const normalize = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
+      const files = new Set(dropped.map(normalize));
+      return rows
+        .filter((t) => t.filePath && (files.has(normalize(t.filePath)) || dropped.some((p) => normalize(t.filePath!).startsWith(`${normalize(p)}/`))))
+        .map((t) => t.id);
+    };
+    for (let round = 0; round < 400; round++) {
+      const rows = Array.from({ length: Math.floor(random() * 80) }, () => ({ id: Math.floor(random() * 1000), filePath: random() < 0.05 ? undefined : pathOf() }));
+      const dropped = Array.from({ length: 1 + Math.floor(random() * 3) }, () => (random() < 0.5 ? folders[Math.floor(random() * folders.length)] : pathOf()));
+      expect(trackIdsUnderPaths(rows, dropped)).toEqual(reference(rows, dropped));
+    }
+  });
+});
+
 describe('dropGroups', () => {
   it('makes one group per dropped folder, named after it', () => {
     expect(dropGroups(tracks, ['/Music/Set One/', '/Music/Set One Extra'])).toEqual([

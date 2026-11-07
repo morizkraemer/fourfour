@@ -215,28 +215,34 @@ export function moveChangedValues(sorted: SortedOrder, values: readonly SortValu
 export const MAX_REPOSITIONED = 4096;
 
 /**
- * `sorted` after the values at `changed` positions were replaced in `values` (already written): the same order a new
- * `sortedOrder(values, direction)` gives, by moving only those positions. `null` when more than `MAX_REPOSITIONED` moved.
+ * `sorted` after the values at `changed` positions were replaced in `values` (already written) and after rows were
+ * appended to `values` (the positions from `sorted.order.length` on): the same order a new `sortedOrder(values, direction)`
+ * gives, by moving only those positions. `null` when more than `MAX_REPOSITIONED` earlier positions moved.
  */
 export function withChangedValues(sorted: SortedOrder, values: readonly SortValue[], changed: readonly number[], direction: 1 | -1): SortedOrder | null {
-  if (changed.length === 0) return sorted;
-  const moving = [...new Set(changed)];
-  if (moving.length > MAX_REPOSITIONED) return null;
-  const n = sorted.order.length;
-  const isMoving = new Uint8Array(n);
+  const before = sorted.order.length;
+  const total = values.length;
+  const distinct = new Set(changed);
+  if (distinct.size > MAX_REPOSITIONED) return null;
+  const replaced = [...distinct].filter((p) => p < before);
+  if (replaced.length === 0 && total === before) return sorted;
+  const keptSize = before - replaced.length;
+  const moving = replaced;
+  for (let p = before; p < total; p++) moving.push(p);
+  const isMoving = new Uint8Array(total);
   for (const p of moving) isMoving[p] = 1;
-  const kept = new Int32Array(n - moving.length);
+  const kept = new Int32Array(keptSize);
   let keptCount = 0;
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < before; i++) {
     const p = sorted.order[i];
     if (!isMoving[p]) kept[keptCount++] = p;
   }
-  const before = (position: number, value: SortValue, other: number) => {
+  const sortsBefore = (position: number, value: SortValue, other: number) => {
     const c = compareSortValues(values[other], value, direction);
     return c < 0 || (c === 0 && other < position);
   };
   moving.sort((a, b) => compareSortValues(values[a], values[b], direction) || a - b);
-  const order = new Int32Array(n);
+  const order = new Int32Array(total);
   let from = 0;
   let written = 0;
   for (const p of moving) {
@@ -244,7 +250,7 @@ export function withChangedValues(sorted: SortedOrder, values: readonly SortValu
     let high = keptCount;
     while (low < high) {
       const mid = (low + high) >>> 1;
-      if (before(p, values[p], kept[mid])) low = mid + 1;
+      if (sortsBefore(p, values[p], kept[mid])) low = mid + 1;
       else high = mid;
     }
     order.set(kept.subarray(from, low), written);

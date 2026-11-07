@@ -8,6 +8,7 @@ import {
   importDroppedTracks,
   importFiles,
   library,
+  libraryPathRows,
   selectVolume,
   playlistForSidebarSource,
 } from './library.svelte.ts';
@@ -76,7 +77,7 @@ async function createPlannedPlaylists(paths: string[], parentId: number): Promis
 
 /** Puts imported tracks into the laid-out playlists; playlists and folders left empty are removed. */
 export async function fillPlannedPlaylists(layout: PlannedLayout, matches: { path: string; id: number }[]) {
-  const idsFor = trackIdsForFiles(library.tracks, matches);
+  const idsFor = trackIdsForFiles(libraryPathRows(), matches, layout.leaves.flatMap((leaf) => leaf.files));
   const fills = layout.leaves.map((leaf) => ({ id: leaf.id, name: leaf.name, trackIds: idsFor(leaf.files) }));
   await fillPlaylists(fills);
   clearPendingRows(layout.leaves.map((leaf) => leaf.id));
@@ -118,7 +119,7 @@ async function importIntoNewPlaylists(paths: string[], parentId: number) {
 export async function playlistsFromImportedFolder(folder: ImportedFolder): Promise<string[]> {
   const ids = new Set(folder.ids);
   const files = [
-    ...library.tracks.filter((t) => ids.has(t.id) && t.filePath).map((t) => t.filePath!),
+    ...libraryPathRows().filter((t) => ids.has(t.id) && t.filePath).map((t) => t.filePath!),
     ...folder.matches.map((m) => m.path),
   ];
   const plan = folderPlan(folder.path, files);
@@ -129,7 +130,7 @@ export async function playlistsFromImportedFolder(folder: ImportedFolder): Promi
 }
 
 async function createPlaylistsFromDrop(paths: string[], outcome: ImportOutcome, parentId: number): Promise<string> {
-  const groups = dropGroups(library.tracks, paths, duplicateMatches(outcome));
+  const groups = dropGroups(libraryPathRows(), paths, duplicateMatches(outcome));
   const taken = library.playlists.map((p) => p.name);
   const names: string[] = [];
   for (const group of groups) {

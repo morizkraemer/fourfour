@@ -15,7 +15,7 @@ import {
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
 import { untrack } from 'svelte';
-import { library, libraryMembersOf, libraryPlainRows, libraryPositionsChangedSince, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
+import { library, libraryChangesSince, libraryMembersOf, libraryPlainRows, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
 import { moveChangedValues, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
@@ -536,18 +536,19 @@ function readLibraryValues(
 }
 
 function dropUnusableColumnSorts() {
-  for (const [key, entry] of columnSorts) if (libraryPositionsChangedSince(entry.tracks) === null) columnSorts.delete(key);
+  for (const [key, entry] of columnSorts) if (libraryChangesSince(entry.tracks) === null) columnSorts.delete(key);
 }
 
 function columnSortOf(rows: readonly Record<string, unknown>[], key: string): ColumnSort {
   let entry = columnSorts.get(key);
   if (entry && entry.tracks !== rows) {
-    const changed = libraryPositionsChangedSince(entry.tracks);
-    if (changed) {
-      if (changed.length > 0) {
-        readLibraryValues(rows, libraryPlainRows(), key, changed, entry.values);
-        entry.classes = undefined;
-      }
+    const changes = libraryChangesSince(entry.tracks);
+    if (changes) {
+      const plains = libraryPlainRows();
+      const known = entry.values.length;
+      if (changes.positions.length > 0) readLibraryValues(rows, plains, key, changes.positions, entry.values);
+      if (rows.length > known) readLibraryValues(rows, plains, key, null, entry.values, known, rows.length);
+      if (changes.positions.length > 0 || rows.length > known) entry.classes = undefined;
       entry.tracks = rows;
     } else {
       dropUnusableColumnSorts();
@@ -567,8 +568,10 @@ function orderOf(entry: ColumnSort, direction: 1 | -1): SortedOrder {
   const held = entry.orders.get(direction);
   if (held) {
     if (held.tracks === entry.tracks) return held.sorted;
-    const changed = libraryPositionsChangedSince(held.tracks);
-    const moved = changed && (changed.length === 0 || moveChangedValues(held.sorted, entry.values, changed, direction) ? held.sorted : withChangedValues(held.sorted, entry.values, changed, direction));
+    const changes = libraryChangesSince(held.tracks);
+    const grown = entry.values.length > held.sorted.order.length;
+    const inPlace = changes && !grown && (changes.positions.length === 0 || moveChangedValues(held.sorted, entry.values, changes.positions, direction));
+    const moved = changes && (inPlace ? held.sorted : withChangedValues(held.sorted, entry.values, changes.positions, direction));
     if (moved) {
       held.sorted = moved;
       held.tracks = entry.tracks;
@@ -596,7 +599,7 @@ let slotOfRank = new Int32Array(0);
 function sortByColumnRank<T extends Record<string, unknown>>(tracks: T[], members: Int32Array, key: string, dir: 1 | -1): T[] | null {
   const rows = untrack(() => library.tracks) as T[];
   const known = columnSorts.get(key);
-  const reusable = known !== undefined && libraryPositionsChangedSince(known.tracks) !== null;
+  const reusable = known !== undefined && libraryChangesSince(known.tracks) !== null;
   if (!reusable && members.length * 8 < rows.length) return null;
   const entry = columnSortOf(rows, key);
   const sorted = orderOf(entry, dir);
@@ -676,7 +679,7 @@ export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupCh
         }
         const next = current.job.next();
         if (!next.done) continue;
-        if (!columnSorts.has(current.key) && libraryPositionsChangedSince(next.value.tracks) !== null) columnSorts.set(current.key, next.value);
+        if (!columnSorts.has(current.key) && libraryChangesSince(next.value.tracks) !== null) columnSorts.set(current.key, next.value);
         current = null;
       } while (performance.now() < end);
       return false;
