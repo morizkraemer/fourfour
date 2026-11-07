@@ -2924,6 +2924,37 @@ Other store steps (results, rating + colour, genre + raw, relink) are equal with
 - `npx vitest run`: 968 passed, 8 skipped. `npm run check`: 0 errors.
 - Chromium smoke: 114 passed, 33 skipped. WebKit smoke: 114 passed, 33 skipped.
 
+## R146 search text (2026-11-07, `r146-haystack`)
+
+R143 lever 4, from `ov-1028` (with R145). Linux `dev` box, load 10-60 the whole time (other workers), r95 50k and 10k payloads, headless Chromium. **Result: no product change kept.** The gain in a microbench is real but small; in the page it is inside the noise.
+
+### What was tried
+
+One fused function replacing `trackHaystack` plus `markCharacters`: lower-case the pieces instead of the joined text, memoise lower text and letter/digit bits per distinct artist, album, label, genre, key, tempo, time (and the raw fields when they differ), scan only title, path and index per row, build the string with `Array.join` (a flat string; plain `+` leaves a cons string that retains every piece, 40 MB against 22.5 MB for 50k rows, and flattens at the first search). Tried and dropped: a directory-prefix memo for the path (slower, the hash of the slice costs what the scan saves; the fixture has 2.6 tracks per folder), `TextEncoder.encodeInto` plus a byte scan (no gain), 64K character tables (slower).
+
+Unicode: per-piece lower case equals whole-string lower case because every piece is space-delimited and a space ends the look-behind and look-ahead of the final-sigma rule, the only context-dependent mapping in `toLowerCase`. No ASCII fast path was needed: the native `toLowerCase` is the fast path, and half of the fixture rows carry non-ASCII text (20% non-Latin-1), so a JS ASCII loop would not have been taken.
+
+### Measurements
+
+| | base | fused |
+|---|---|---|
+| Node 22, 50k, build + bits, median / min of 25 | 295-352 / 283-309 ms | 245-270 / 207-243 ms (-15 to -25%) |
+| Chromium microbench, 50k, median / min of 9 | 219-252 / 213-227 ms | 198-219 / 175-178 ms (-10 to -18%) |
+| Page, `fillSearchIndex` wall total in the first 10 s, 50k (9 base, 8 new runs, loaded box) | median 424 ms (333-652) | median 470 ms (279-1,533) |
+| Page, script in the first 10 s (`perf-warmup`, frames on), quiet runs | 726 / 727 / 734 / 767 | 650 / 780 / 868 / 875 / 906 / 913 / 930 / 951 / 971 |
+
+The microbench saving (about 40-50 ms at 50k, 6-7% of the 700 ms the first 10 s cost) is smaller than the run-to-run spread of the page. Of the 700 ms, the search text is about 250 ms; the rest is decode, row mapping and mount.
+
+### Identity (of the discarded change)
+
+Haystack strings and letter and digit sets equal the base for every row of the 10k and 50k payloads (SHA-256 of all strings and masks equal, 3c3a59a7... and 818b2eaa...), on 5 seeds of 4,000 random rows (ASCII, Latin-1, Greek capital sigma next to separators and slashes, dotted I, combining marks, joiners, surrogate pairs and lone surrogates, null and numeric fields, empty fields, missing `raw`) and on edge rows (5,000-character fields). The change was then removed; the store tests were not rerun because no product code remains.
+
+### Where a real gain would be
+
+Not in the build's string work: the allocation volume per row (path, title, joined text) is the floor, and the memo only removes about a quarter of it. A larger step would be to avoid the stored string altogether (per-field search with the letter masks as the only per-row state), which changes the filter and needs its own item.
+
+Scratch (`~/.cache/r146*`) deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
