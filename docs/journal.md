@@ -674,3 +674,4 @@
 2026-11-07 13:35 orchestrator r147 handed back 036e973 (search history kept across analysis bumps: 50k sorted key after a bump 31 -> 11 ms script; 24-key script sum title 321 -> 252, bpm 295 -> 195; 432/432 + 94/94 + 601/601 hashes equal; rest of the gap is Svelte row updates 20-35 ms/key), merged 8000d65 on ov-1028, chain running
 2026-11-07 13:54 orchestrator r147 landed 8000d65 on ov-1028 (both smokes 0 failed, 26 suites, vitest 970, CHECKS-OK)
 2026-11-07 13:55 orchestrator parked-all-v16 be2343d = build 1338 (v15 + ov-1028 with r145+r147): dev checks and Mac install running. decided: own prio r148 row updates per key (R147 rest, 20-35 ms/key), spawned sonnet/default
+2026-11-07 14:15 orchestrator parked-all-v16 build 1338 installed on the Mac 13:55 (number verified in bundle), preview :4212 swapped; v16 vitest 1047, check 0 errors, both smokes 0 failed
