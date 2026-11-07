@@ -1,0 +1,56 @@
+{
+  "id": "r160-cues-grid",
+  "title": "Waveform grid",
+  "question": "Grid: downbeats, beats, 8ths, 16ths. Prominence right?",
+  "url": "/lab.html",
+  "check": "- Downbeat strongest, then beat, 8th, 16th faintest\n- No crowding when zoomed out\n- Small player and big player overview show the same grid",
+  "media": "/data/cards/r160-cues-grid/media/new-big-zoomed-in.png",
+  "gallery": [
+    {
+      "url": "/data/cards/r160-cues-grid/media/new-big-zoomed-in.png",
+      "label": "new zoomed in"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/old-big-zoomed-in.png",
+      "label": "old zoomed in"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/new-big-default.png",
+      "label": "new default zoom"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/old-big-default.png",
+      "label": "old default zoom"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/new-big-zoomed-out.png",
+      "label": "new zoomed out"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/old-big-zoomed-out.png",
+      "label": "old zoomed out"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/new-small-player.png",
+      "label": "new small player"
+    },
+    {
+      "url": "/data/cards/r160-cues-grid/media/old-small-player.png",
+      "label": "old small player"
+    }
+  ],
+  "options": [
+    {
+      "key": "k",
+      "label": "Keep"
+    },
+    {
+      "key": "c",
+      "label": "Change (note)"
+    }
+  ],
+  "rank": 100,
+  "status": "open",
+  "round": 1,
+  "created": "2026-11-07T15:54:00.842Z"
+}
