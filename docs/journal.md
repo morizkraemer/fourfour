@@ -685,3 +685,4 @@
 2026-11-07 16:37 orchestrator decided: own prio r152 fresh 50k budget survey (open, first clicks, fling, import, analysis busy, heap) to rank next speed work, spawned sonnet/default, harness + doc only
 2026-11-07 16:40 orchestrator r151 doc landed on ov-1028 (CHECKS-OK)
 2026-11-07 17:48 orchestrator r152 handed back 925fbd6 (50k budget: cold open 1035 ms, import 1k burst 555-653 ms, fling 49 ms/frame (fenced, needs Merlin), first select 275, analysis 55 ms/s per event/s; heap flat 120 MB), merged on ov-1028, chain running. decided: own prio r153 incremental import index (sonnet) + r154 early load_state (sonnet), disjoint paths
+2026-11-07 18:13 orchestrator r152 landed on ov-1028 (both smokes 0 failed, vitest 970, CHECKS-OK). Asked Merlin: fling scroll fix (skip row canvases mid-fling, fenced)
