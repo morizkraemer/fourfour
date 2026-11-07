@@ -564,6 +564,7 @@ export default class WaveformDisplay {
         if (this._sizeObserver) this._sizeObserver.disconnect();
         this._themeObserver.disconnect();
         this._unbindEvents();
+        for (const el of [this._overviewPlayhead, this._zoomPlayhead, this._playedMask]) this._slides.get(el)?.cancel();
         this._wrapper.remove();
     }
 
