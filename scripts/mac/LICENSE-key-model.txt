@@ -1,10 +1,11 @@
 fourfour key detection model: data attribution
 
 The musical key detector ships templates (fourfour-analysis-rs/src/cyankey.rs,
-models "clean-fsl" and "clean-fsl-fma", the default) that were fitted on the
-Freesound Loop Dataset (FSL10K). "clean-fsl-fma" was also fitted on Free Music
-Archive clips that carry no key labels: the FSL10K model labelled them, and the
-templates were refitted on both sets.
+models "clean-fsl", "clean-fsl-fma" and "clean-fsl-fma-seg", the default) that
+were fitted on the Freesound Loop Dataset (FSL10K). "clean-fsl-fma" and
+"clean-fsl-fma-seg" were also fitted on Free Music Archive clips that carry no
+key labels: the FSL10K model labelled them (whole clips, or 10 s segments for
+"clean-fsl-fma-seg"), and the templates were refitted on both sets.
 
 Dataset
   Antonio Ramires et al. "The Freesound Loop Dataset and Annotation Tool." Proceedings of the
@@ -148,7 +149,7 @@ are thanked here in general.
 
 The Krumhansl-Kessler (1982) key profile was used as a regularisation prior.
 
-Free Music Archive (model "clean-fsl-fma")
+Free Music Archive (models "clean-fsl-fma" and "clean-fsl-fma-seg")
   Michael Defferrard, Kirell Benzi, Pierre Vandergheynst, Xavier Bresson.
   "FMA: A Dataset for Music Analysis." Proceedings of the 18th International
   Society for Music Information Retrieval Conference (ISMIR), 2017.

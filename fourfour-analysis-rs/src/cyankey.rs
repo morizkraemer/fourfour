@@ -66,7 +66,30 @@ pub const CLEAN_FSL_FMA: KeyModel = KeyModel {
     shaath_tiebreak: false,
 };
 
-pub const SHIPPED: &KeyModel = &CLEAN_FSL_FMA;
+pub const CLEAN_FSL_FMA_SEG: KeyModel = KeyModel {
+    name: "clean-fsl-fma-seg",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_FMA_SEG_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [0.98842, 0.0, 0.24367],
+    shaath_tiebreak: false,
+};
+
+pub const SHIPPED: &KeyModel = &CLEAN_FSL_FMA_SEG;
+
+const CLEAN_FSL_FMA_SEG_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        5.403224, -0.701404, -0.420334, -1.759262, 0.348578, -0.357027, -1.712305, 3.151240, -1.719116, -0.558927, -2.089633, 0.486698,
+        8.362542, -2.159355, -0.939946, -4.157830, 4.144632, -0.680573, -3.179370, 4.526097, -3.102159, -1.893362, -4.055714, -0.300687,
+        7.078479, -2.815611, 1.507245, -3.776138, 4.704119, -1.889591, -2.388789, 4.402141, -2.458541, -0.701399, -3.846111, 0.939193,
+    ],
+    [
+        5.758326, -1.518470, -1.517025, 0.335343, -2.128803, -0.254021, -1.311714, 2.131411, 0.566716, -1.996130, -0.172108, -0.564264,
+        8.413291, -2.641669, -0.064287, 2.670573, -2.599590, -2.427386, -2.381382, 5.242627, -1.866008, -3.795288, 0.279486, -0.973740,
+        6.448446, -2.601338, 0.238508, 1.861849, -3.619182, -1.173074, -2.147989, 5.212681, -1.644832, -3.914416, 0.981498, -1.120456,
+    ],
+];
 
 const CLEAN_FSL_FMA_TEMPLATES: [[f64; NB_FEAT]; 2] = [
     [
@@ -95,7 +118,7 @@ const CLEAN_FSL_TEMPLATES: [[f64; NB_FEAT]; 2] = [
 ];
 
 pub fn model_by_name(name: &str) -> Option<&'static KeyModel> {
-    [&CYANBOX, &CLEAN_FSL, &CLEAN_FSL_FMA].into_iter().find(|m| m.name == name)
+    [&CYANBOX, &CLEAN_FSL, &CLEAN_FSL_FMA, &CLEAN_FSL_FMA_SEG].into_iter().find(|m| m.name == name)
 }
 
 const TEMPLATES: [[f64; NB_FEAT]; 2] = [
@@ -624,7 +647,8 @@ mod tests {
 
     #[test]
     fn shipped_model_is_clean_fsl_fma_and_all_models_resolve() {
-        assert_eq!(SHIPPED.name, "clean-fsl-fma");
+        assert_eq!(SHIPPED.name, "clean-fsl-fma-seg");
+        assert_eq!(model_by_name("clean-fsl-fma-seg").map(|m| m.name), Some("clean-fsl-fma-seg"));
         assert_eq!(model_by_name("clean-fsl-fma").map(|m| m.name), Some("clean-fsl-fma"));
         assert_eq!(model_by_name("cyanbox").map(|m| m.name), Some("cyanbox"));
         assert_eq!(model_by_name("clean-fsl").map(|m| m.name), Some("clean-fsl"));
