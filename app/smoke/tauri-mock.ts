@@ -497,6 +497,7 @@ export function installTauriMock(initial: LoadedState) {
       case 'analysis_ui_busy':
         (w.__ffUiBusy as (() => void) | undefined)?.();
         return null;
+      case 'focus_analysis':
       case 'prioritize_analysis':
       case 'cancel_analysis':
       case 'set_track_key':

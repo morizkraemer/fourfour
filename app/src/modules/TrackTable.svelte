@@ -31,7 +31,8 @@
   import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
-  import { pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
+  import { focusAnalysis, pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
+  import { createAnalysisFocus } from '../services/analysis-focus.ts';
   import { createDetailPrefetcher } from '../services/detail-prefetch.ts';
   import {
     getLayout,
@@ -60,7 +61,7 @@
   import { fileStatus, fileStateOf } from '../stores/file-status.svelte.ts';
   import { locateTrack } from '../stores/file-health.svelte.ts';
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
-  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
+  import { rowWindow, rowsOnScreen, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
   import { skeletonRowsHtml } from '../lib/skeletonRows.ts';
   import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
@@ -283,6 +284,14 @@
   $effect(() => {
     requestRowPreviews(currentTracks.slice(firstRow, endRow));
   });
+
+  const analysisFocus = createAnalysisFocus(focusAnalysis);
+  let onScreen = $derived(rowsOnScreen({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length }));
+  $effect(() => {
+    if (embedded || isUsbView || viewportHeight === 0) return;
+    analysisFocus.request(currentTracks, onScreen.first, onScreen.end);
+  });
+  $effect(() => () => analysisFocus.dispose());
 
   const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
 

@@ -6,6 +6,7 @@ import {
   indexForSlot,
   rowTop,
   rowWindow,
+  rowsOnScreen,
   scrollTopToReveal,
   spacerHeight,
 } from './rowWindow.ts';
@@ -119,5 +120,16 @@ describe('scrollTopToReveal', () => {
   it('returns 0 for an empty list and for a list shorter than the viewport', () => {
     expect(scrollTopToReveal(0, { ...view, scrollTop: 300, rowCount: 0 })).toBe(0);
     expect(scrollTopToReveal(3, { ...view, scrollTop: 300, rowCount: 5 })).toBe(0);
+  });
+});
+
+describe('rowsOnScreen', () => {
+  it('starts at the row under the sticky header and ends at the last row partly in view', () => {
+    expect(rowsOnScreen({ ...view, scrollTop: 0, rowCount: 1000 })).toEqual({ first: 0, end: Math.ceil(672 / ROW_HEIGHT) });
+    expect(rowsOnScreen({ ...view, scrollTop: ROW_HEIGHT * 100 + 5, rowCount: 1000 })).toEqual({ first: 100, end: 125 });
+  });
+  it('stays inside the list', () => {
+    expect(rowsOnScreen({ ...view, scrollTop: 0, rowCount: 5 })).toEqual({ first: 0, end: 5 });
+    expect(rowsOnScreen({ ...view, scrollTop: 0, rowCount: 0 })).toEqual({ first: 0, end: 0 });
   });
 });

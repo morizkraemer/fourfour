@@ -31,6 +31,20 @@ export function rowWindow({
   };
 }
 
+/** Rows [first, end) at least partly visible below the sticky header. */
+export function rowsOnScreen({
+  scrollTop,
+  viewportHeight,
+  headerHeight,
+  rowCount,
+  rowHeight = ROW_HEIGHT,
+}: Omit<RowWindowInput, 'overscan'>): { first: number; end: number } {
+  return {
+    first: Math.min(rowCount, Math.max(0, Math.floor(scrollTop / rowHeight))),
+    end: Math.min(rowCount, Math.max(0, Math.ceil((scrollTop + viewportHeight - headerHeight) / rowHeight))),
+  };
+}
+
 /** Row index shown by pool slot `slot`: slots keep their row while the window slides. */
 export function indexForSlot(slot: number, firstRow: number, poolSize: number): number {
   return firstRow + ((((slot - firstRow) % poolSize) + poolSize) % poolSize);

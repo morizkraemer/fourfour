@@ -624,6 +624,14 @@ export async function enqueueAnalysis(ids: number[], front = false): Promise<num
   }
 }
 
+export async function focusAnalysis(ids: number[]): Promise<void> {
+  try {
+    await invoke<void>('focus_analysis', { ids });
+  } catch (err) {
+    lastTauriError = `focus_analysis fail: ${String(err)}`;
+  }
+}
+
 export async function prioritizeAnalysis(trackId: number): Promise<void> {
   try {
     await invoke<void>('prioritize_analysis', { trackId });
