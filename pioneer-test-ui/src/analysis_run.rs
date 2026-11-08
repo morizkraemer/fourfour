@@ -108,7 +108,7 @@ impl Jobs {
     }
 
     fn sort_ranked(&self, queue: &mut VecDeque<AnalysisWorkItem>) {
-        queue.make_contiguous().sort_by_key(|(id, _)| self.rank(*id));
+        queue.make_contiguous().sort_by_cached_key(|(id, _)| self.rank(*id));
     }
 
     fn focus_rank(&self, item: Option<&AnalysisWorkItem>) -> Option<usize> {

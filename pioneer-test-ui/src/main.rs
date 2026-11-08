@@ -284,7 +284,7 @@ fn enqueue_analysis(
 }
 
 /// The tracks on screen, most wanted first: queued ones among them are analysed next (see `AnalysisCoordinator::focus`).
-#[tauri::command]
+#[tauri::command(async)]
 fn focus_analysis(ids: Vec<i64>, coordinator: State<'_, AnalysisCoordinator>) {
     coordinator.focus(&ids);
 }
@@ -1680,6 +1680,7 @@ mod tests {
                 "get_mounted_volumes",
                 "eject_volume",
                 "enqueue_analysis",
+                "focus_analysis",
                 "resume_analysis",
                 "remove_tracks",
                 "set_test_cues",
