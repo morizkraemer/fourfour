@@ -143,3 +143,58 @@ Re-run with the release `cyankey` bin on Beatport EDM Key (598 tracks, 6 threads
 Identical to the numbers above. Median detect time 360 ms (cyanbox 312 ms, single thread).
 
 Attribution ships with the app: `scripts/mac/LICENSE-key-model.txt` (Ramires et al. 2020 plus the 122 CC BY 3.0 uploaders of 309 loops, generated from `fsl-clean.json`) is bundled as `models/LICENSE-key-model.txt` next to the Beat This! licence (`pioneer-test-ui/tauri.bundle-weights.conf.json`, `scripts/mac/build-dmg.sh`, checked by `scripts/mac/check-dmg.sh`). `NOTICE` has a short entry. The 671 used loops are 362 CC0 and 309 CC BY 3.0; the file lists only the CC BY ones.
+
+## b14: FSL + unlabelled FMA (`CLEAN_FSL_FMA`), 2026-10-31
+
+Goal: >= 60% exact on Beatport test with permissive data only. **Not reached: the new clean model scores 57.3% test (114 of 199), up from 56.3% (112). It is now `SHIPPED`** (rule: switch if test >= the current clean model). Every model choice below was made on Beatport dev; test was read once, for the final model.
+
+| Model | Every fitted number from | Dev exact (n = 399) | Test exact (n = 199) | Test f / r / p / o |
+|---|---|---:|---:|---|
+| `cyanbox` | GiantSteps MTG (no licence) | 265 = 66.4% | 120 = 60.3% | 22 / 8 / 21 / 28 |
+| `clean-fsl` | FSL10K CC0 / CC BY loops | 237 = 59.4% | 112 = 56.3% | 23 / 11 / 22 / 31 |
+| **`clean-fsl-fma` (shipped)** | FSL10K + 2,150 unlabelled CC BY / CC0 / PDM FMA clips | **246 = 61.7%** | **114 = 57.3%** | 19 / 12 / 19 / 35 |
+
+Rust (`cyankey` bin, model `clean-fsl-fma`, 598 tracks) gives the same counts as the numpy lab. Median detect 234 ms single thread. Confidence (`CAL_A` 1.068, `CAL_C` 0.243, fit out-of-fold on FSL with the same two-step fit inside each fold): mean 0.51 vs accuracy 0.62 on dev, 0.48 vs 0.57 on test, Brier 0.23 / 0.22, so still slightly under-confident.
+
+How it is made: fit `clean-fsl` exactly as before (FSL loops, x^0.75, L2 1e-3 towards 3 x harmonic Krumhansl). Let it label 2,150 FMA clips (one round, hard labels). Refit the 72 template weights on FSL + the labelled clips with the major bias frozen at the FSL value (-1.0626). The clips: `fma_large` 30 s clips, genre Electronic (or an electronic sub-genre), track licence "Attribution" / "Creative Commons Attribution" / CC BY 3.0 / CC0 / Public Domain Mark per `fma_metadata/tracks.csv`, minus noise / drone / collage genres, >= 60 s tracks. 264 credited artists. Per-track record: `benchmark/manifests/fma-electronic-cc-unlabelled.json`. Credits: `scripts/mac/LICENSE-key-model.txt` (FMA section added, checked by `check-dmg.sh`), `NOTICE`.
+
+What was tried (dev exact, n = 399; the plain FSL fit is 237):
+
+| Idea | Best dev | Reading |
+|---|---:|---|
+| Pitch-roll augmentation of FSL bands (+-1 semitone) | 230 | hurts |
+| Mixtures of 2-3 same-key FSL loops (2,000) | 225 | hurts; bias drifts to minor |
+| Front end: 4 or 6 chroma bands, whitening 3 / 9, x^0.5 / log, per-frame norm, peak picking, time median | 226-240 | all within noise |
+| L2 1e-4 ... 1e-2, priors (Krumhansl, Albrecht, Temperley, TKP, Aarden, none) | 231-243 | within noise (best comp 0.5, L2 3e-3: 243) |
+| FSL filters by tags (no drums, chord-ish, no bass, multi-annotator only) | 241 | within noise |
+| Quadratic features (frame-chroma covariance, transposition-equivariant) | 242 | no gain |
+| FSL10K loops with a key in the uploader's name / tags | ~100 more loops, many wrong (e.g. "fm" as F minor) | not used |
+| Self-training on FMA, 1 round, bias refit | 244 | |
+| **Self-training on FMA, 1 round, bias frozen** | **246** | **shipped** |
+| Self-training, 2-4 rounds | 227-245 | drifts: bias goes to +1.5 (FMA leans major), "other" errors grow |
+| Self-training on the dance-genre subset only (449 clips) | 242 | |
+| Feasibility probe: self-training on half of Beatport dev audio (labels unused), scored on the other half | +3 of 199 | removed from the lab after it pointed to FMA |
+
+The in-domain ceiling explains why: refitting the same model on 4/5 of Beatport dev and testing on the held-out fifth gives 59.4-62.9% for every front end tried (5-fold within dev, labels used only for this ceiling probe, nothing shipped). The 36-weight linear template model needs about 1,500 labelled full EDM tracks (cyanbox's GiantSteps MTG set) to reach 66% dev; no permissively labelled set of that kind exists. Self-training on unlabelled CC audio is the only lever that moved the number, and it mostly fixes parallel major/minor errors (dev parallel 50 -> 37; test 22 -> 19).
+
+Licence notes:
+- FMA licences are what the artists chose on upload. "Attribution" without a version is taken as CC BY (any version). The share-alike, no-derivatives and non-commercial tracks were excluded.
+- FMA labels are not used (FMA has none for key); the pseudo-labels come from `clean-fsl`, which is fit on FSL10K only.
+- The x^0.75 compression and the front-end constants are inherited as before (see "Licence status" above).
+
+Reproduce (lab in `benchmark/scripts/key-lab`; `run.sh` sets `KEY_BANDS`, `FSL_BANDS`, `FSL_MANIFEST`, `UNL_BANDS`):
+
+```bash
+D=$HOME/.cache/b14-data; W=$HOME/.cache/b14-work; L=benchmark/scripts/key-lab
+ZIP_URL=https://os.unil.cloud.switch.ch/fma/fma_metadata.zip python3 -I $L/httpzip.py $D/fma-meta list   # then get tracks.csv, genres.csv
+python3 -I $L/fmaselect.py $D/fma-meta/tracks.csv $D/fma-meta/genres.csv $W/fma-cands.json
+# fetch the clips: ZIP_URL=https://os.unil.cloud.switch.ch/fma/fma_large.zip httpzip.py $D/fma-large get <list of NNNNNN.mp3> (2.2 GB)
+python3 -I $L/fma_manifest.py $W/fma-cands.json $D/fma-large $W/fma.corpus.json
+$T/keybands $W/fma.corpus.json $D/fma-large 4 $W/fmabands
+python3 -I $L/fma_attrib.py $W/fma-cands.json $W/fmabands/index.json benchmark/manifests/fma-electronic-cc-unlabelled.json $W/fma-artists.txt
+SHOW_TEST=1 uv run --no-project --with numpy python final_fma.py $W/clean-fma.json   # templates, bias, calibration
+uv run --no-project --with numpy python selftrain.py 'fixbias=1 rounds=4'                # dev sweep (front.py, quad.py, filters.py, aug.py for the other rows)
+$T/cyankey <beatport manifest> <beatport audio> 4 - clean-fsl-fma
+```
+
+Next if 60% clean is still wanted: a larger unlabelled pool closer to the target (full-length CC BY dance tracks, e.g. `fma_full` range-read, with a dance-genre filter and a mode-balanced pseudo-label rule), or a bigger model form (the linear template model is at its in-domain ceiling around 60-62% dev on this front end).

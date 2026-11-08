@@ -143,3 +143,113 @@ M=../../benchmark/manifests/beatport-edm-key-keyonly-clean-full.corpus.json
 ./keydet-eval.sh method=net split=test chan=1100 hidden=0 aug=8 keep=0.7 lr=0.05 seeds=3 load=../../benchmark/results/q16/final-net.json
 ./keydet-sweep.sh sweep.txt     # one eval config per line
 ```
+
+## R162, 2026-11-08
+
+Goal: at least 60% exact on the Beatport test split (199 tracks, manifest `id % 3 == 0`) with licence-clean methods, every choice made on the 399 dev tracks. Branch `r162-key-accuracy` from `ov-1028`, with b14 (`CLEAN_FSL_FMA`, commit 11784f5) cherry-picked because it is the best clean model so far.
+
+**Result: not reached. The best honest clean model scores 58.3% exact on test (116 of 199).** Shipped on `ov-1028` (`CLEAN_FSL`) scores 56.3% (112), b14 57.3% (114). The +2 / +4 tracks are inside the noise of n = 199 (about +-7 points). The new model is `cyankey::CLEAN_FSL_FMA_SEG` and is `SHIPPED` on this branch.
+
+### Final pick vs shipped (Beatport EDM Key)
+
+E+R+F = exact + relative + fifth. MIREX = exact + 0.5 fifth + 0.3 relative + 0.2 parallel.
+
+| Model | Split | Exact | Relative | Parallel | Fifth | E+R+F | MIREX |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `clean-fsl` (shipped on ov-1028) | test (199) | 112 = 56.3% | 11 | 22 | 23 | 73.4% | 65.9 |
+| `clean-fsl-fma` (b14) | test | 114 = 57.3% | 12 | 19 | 19 | 72.9% | 65.8 |
+| **`clean-fsl-fma-seg` (R162 pick)** | test | **116 = 58.3%** | 9 | 19 | 21 | 73.4% | 66.8 |
+| `clean-fsl` | dev (399) | 237 = 59.4% | 18 | 50 | 41 | 74.2% | 68.4 |
+| `clean-fsl-fma` | dev | 246 = 61.7% | 16 | 37 | 42 | 76.2% | 70.0 |
+| **`clean-fsl-fma-seg`** | dev | **248 = 62.2%** | 16 | 34 | 41 | 76.4% | 70.2 |
+| `clean-fsl` | all (598) | 349 = 58.4% | 29 | 72 | 64 | 73.9% | 67.6 |
+| `clean-fsl-fma` | all | 360 = 60.2% | 28 | 56 | 61 | 75.1% | 68.6 |
+| **`clean-fsl-fma-seg`** | all | **364 = 60.9%** | 25 | 53 | 62 | 75.4% | 69.1 |
+
+No number of these models is fit on Beatport labels, so their 598-track score is already out of sample. The only Beatport-dependent step is choosing the variant among the clean candidates. Doing that choice inside 5-fold CV (pick on 4/5, score the held-out 1/5) gives **61.2% on dev (244 / 399)** and **60.7% over all 598 (363)**. The pick was the same in 8 of 10 folds.
+
+Mode errors (relative + parallel) on test: 28 for the pick, 33 for `clean-fsl`.
+
+### What changed
+
+The b14 recipe, with one change in the self-training step: the 2,150 unlabelled FMA clips (30 s) are cut into 10 s segments (27 frames, 3 per clip), the FSL teacher labels each segment, and the student is trained on FSL loops plus the 6,450 labelled segments (each segment weight 1, same as one FSL loop). Major bias frozen at the FSL value (-1.0626) as in b14. Same front end, same 72 weights + bias form, so it is a drop-in template swap. Confidence calibration `CAL_A` / `CAL_C` refit out-of-fold on FSL (0.98842 / 0.24367): mean confidence 0.52 vs accuracy 0.62 on dev, 0.50 vs 0.58 on test, Brier 0.23 / 0.22 (slightly under-confident, as before).
+
+### Every variant (dev, n = 399, exact; nothing fit on Beatport unless marked)
+
+| Idea | Variant | Dev exact |
+|---|---|---:|
+| baseline | `clean-fsl` / `clean-fsl-fma` (b14 recipe reproduced) | 237 / 246 |
+| major bias offset (1 scalar, picked by inner 5-fold CV on dev) | on `clean-fsl` / on `clean-fsl-fma` | 239 / 242 |
+| more unlabelled data? | b14 recipe with 500 / 1000 / 1500 / 2150 FMA clips | 242 / 241 / 240 / 246 (flat) |
+| pseudo-label filter | keep top 70 / 50 / 30% teacher confidence | 237 / 238 / 233 |
+| | keep only clips whose two 10 s halves agree with the clip label (943) | 245 |
+| soft pseudo-labels | teacher softmax at temperature x0.5 / x1 / x2 | 238 / 234 / 238 |
+| unlabelled weight | 0.5 / 2 | 244 / 242 |
+| segments as training examples | 5 s segments, weight raw / normalised 1 / 0.5 | 243 / 244 / 238 |
+| | **10 s segments, raw (pick)** / 1 / 0.5 | **248** / 246 / 242 |
+| | 20 s segments, raw / 1 / 0.5 | 246 / 246 / 244 |
+| segment voting at predict time | 20 s segments, probability sum, energy weight 0 / 1 | 240 / 240 |
+| second front end (keydet-like: log, 8-harmonic sum, whitening, bass + mid chroma, computed from the cached semitone bands) | trained on FSL / FSL + FMA student | 199-211 / 221-222 |
+| ensemble of the two clean front ends | weight 0.3 / 0.5 / 0.7 on the keydet-like model | 233-239 / 227-232 / 222-226 |
+| co-training (pseudo-labels where both teachers agree, 1,686 clips; or summed teacher scores) | cyan student / ensemble 0.2-0.5 | 238-239 / 216-234 |
+| joint 5-band linear model (both front ends) | FSL / student | 218 / 216 |
+| mode re-ranker (choose among predicted key, relative, parallel; logistic on rotated chroma + score; fit on FSL out-of-fold) | on `clean-fsl`, L2 1e-3 / 1e-2 / 1e-1 | 240 / 240 / 236 |
+| | on `clean-fsl-fma`, L2 1e-3 / 1e-2 / 1e-1 | 243 / 246 / 247 |
+
+Reference, **not licence-clean** (fit on Beatport labels, CC BY-SA 4.0; measured because the brief asked for the ensemble with the R12 learned profile). R12 itself needs the keydet front end over the audio; a keydet-like front end from the cached bands stands in for it here.
+
+| Model (5-fold CV) | Dev (399) | All (598) |
+|---|---:|---:|
+| keydet-like 2-band, Beatport-fit | 229 = 57.4% | 350 = 58.5% |
+| cyan 3-band, Beatport-fit | 239 = 59.9% | 351 = 58.7% |
+| `clean-fsl-fma` + keydet-like Beatport-fit, weight by inner CV | 242 = 60.7% | 365 = 61.0% |
+| `clean-fsl-fma` + cyan Beatport-fit, weight by inner CV | 239 = 59.9% | 360 = 60.2% |
+
+Reading: even with Beatport labels the ensemble lands around 60-61% in CV, the same as the clean model. Everything that does not remove information lands within about +-2 points of 61.7% dev (CV noise is about +-2.4). The FMA data curve is flat from 500 to 2,150 clips, so more clips of the same kind will not move it. The keydet-like front end is much weaker when trained on loops (FSL is often one instrument), so the ensemble the brief proposed only helps when that model is fit on in-domain labels, which is not clean. The linear template model on this front end is at its ceiling; a clear step needs a few hundred to 1,500 permissively labelled full EDM tracks, which do not exist as far as Q46, b8 and b14 found.
+
+### Rekordbox agreement (library set)
+
+The findings doc's Rekordbox number is on Beatport audio, but no per-track Rekordbox keys for it are stored. The per-track Rekordbox set on this box is Merlin's library playlist (`benchmark/manifests/rekordbox-testdata-2025.corpus.json`, keys from `master.db`): 622 of 652 tracks have a key and decode (one file fails in symphonia). Full-length tracks; 86% of them are minor per Rekordbox. Agreement with Rekordbox (not accuracy):
+
+| Model | Exact agree | Relative | Parallel | Fifth | E+R+F | Predicted minor |
+|---|---:|---:|---:|---:|---:|---:|
+| `clean-fsl` (shipped) | 269 = 43.2% | 18 | 20 | 102 | 62.5% | 90% |
+| `clean-fsl-fma` | 271 = 43.6% | 16 | 18 | 101 | 62.4% | 95% |
+| **`clean-fsl-fma-seg`** | **274 = 44.1%** | 18 | 15 | 100 | 63.0% | 96% |
+
+It does not move away from Rekordbox (+5 tracks). Many disagreements are a fifth apart (100 tracks), where Rekordbox and this detector often hear the dominant differently.
+
+### Runtime and size
+
+Same front end and the same 73 numbers plus 2 calibration constants, so runtime and binary size are unchanged: `cyankey` median detect 125 ms per 120 s clip (decode excluded, single thread, box load average 20 to 40; b14 measured 234 ms for the same code path under a different load, so the difference is load). The Rust bin reproduces the lab predictions on all 598 tracks (0 mismatches). No new dependencies.
+
+### Licences
+
+| Piece | Source | Licence | Used for |
+|---|---|---|---|
+| FSL10K loops (671, CC0 / CC BY 3.0) and annotations | Zenodo 3967852 | CC BY 4.0 dataset, per-loop CC0 / CC BY 3.0 | labelled training (as b8) |
+| FMA clips (2,150, Electronic, CC BY / CC0 / PDM) | `fma_large`, per-track licence from `tracks.csv` | CC BY / CC0 / PDM | unlabelled audio; labels are our own model's (as b14) |
+| Krumhansl-Kessler profile | Krumhansl 1990 (paper numbers) | n/a | L2 prior |
+| Beatport EDM Key | Zenodo 1101082 | CC BY-SA 4.0 | evaluation and variant choice only (about 40 variants compared on dev); the Beatport-fit rows above are reference only and are not shipped |
+| code (`key-lab/r162*.py`, `cyankey.rs`) | own | MIT OR Apache-2.0 | |
+
+No label in the shipped model comes from a non-permissive source. The caveats from b8 and b14 remain: x^0.75 compression and the variant were chosen on Beatport dev (selection, not fitting), and the front-end constants come from the BSD-2 cyanbox port. Attribution files (`scripts/mac/LICENSE-key-model.txt`, `NOTICE`, `benchmark/manifests/fma-electronic-cc-unlabelled.json`) come with the b14 cherry-pick and cover the same FMA clips.
+
+### Reproduce
+
+```bash
+# band caches from b8 / b14 (keybands bin): beatbands, fslbands, fmabands
+cd benchmark/scripts/key-lab
+export KEY_BANDS=<beatbands> FSL_BANDS=<fslbands> FSL_MANIFEST=<fsl.corpus.json> UNL_BANDS=<fmabands>
+uv run --no-project --with numpy python r162_e1.py    # baselines, bias offset, keydet-like front end, ensembles
+uv run --no-project --with numpy python r162_e2.py    # self-training variants, segment voting
+uv run --no-project --with numpy python r162_e3.py    # co-training, joint model, mode re-ranker
+uv run --no-project --with numpy python r162_e4.py    # Beatport-fit reference, segment students (writes cands.npz)
+uv run --no-project --with numpy python r162_e5.py    # variant choice by inner CV (SHOW_TEST=1 adds all 598)
+SHOW_TEST=1 uv run --no-project --with numpy python r162_final.py
+SHOW_TEST=1 uv run --no-project --with numpy python r162_export.py   # templates, bias, calibration for cyankey.rs
+KEY_BANDS=<rekordbox bands> uv run --no-project --with numpy python r162_rekordbox.py
+cyankey <beatport manifest> <beatport audio> 4 rows.txt clean-fsl-fma-seg
+```
+
+Caches go to `~/.cache/r162-work` (`R162_CACHE`).

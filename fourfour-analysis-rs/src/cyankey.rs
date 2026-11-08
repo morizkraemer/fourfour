@@ -56,7 +56,53 @@ pub const CLEAN_FSL: KeyModel = KeyModel {
     shaath_tiebreak: false,
 };
 
-pub const SHIPPED: &KeyModel = &CLEAN_FSL;
+pub const CLEAN_FSL_FMA: KeyModel = KeyModel {
+    name: "clean-fsl-fma",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_FMA_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [1.06842, 0.0, 0.24273],
+    shaath_tiebreak: false,
+};
+
+pub const CLEAN_FSL_FMA_SEG: KeyModel = KeyModel {
+    name: "clean-fsl-fma-seg",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_FMA_SEG_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [0.98842, 0.0, 0.24367],
+    shaath_tiebreak: false,
+};
+
+pub const SHIPPED: &KeyModel = &CLEAN_FSL_FMA_SEG;
+
+const CLEAN_FSL_FMA_SEG_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        5.403224, -0.701404, -0.420334, -1.759262, 0.348578, -0.357027, -1.712305, 3.151240, -1.719116, -0.558927, -2.089633, 0.486698,
+        8.362542, -2.159355, -0.939946, -4.157830, 4.144632, -0.680573, -3.179370, 4.526097, -3.102159, -1.893362, -4.055714, -0.300687,
+        7.078479, -2.815611, 1.507245, -3.776138, 4.704119, -1.889591, -2.388789, 4.402141, -2.458541, -0.701399, -3.846111, 0.939193,
+    ],
+    [
+        5.758326, -1.518470, -1.517025, 0.335343, -2.128803, -0.254021, -1.311714, 2.131411, 0.566716, -1.996130, -0.172108, -0.564264,
+        8.413291, -2.641669, -0.064287, 2.670573, -2.599590, -2.427386, -2.381382, 5.242627, -1.866008, -3.795288, 0.279486, -0.973740,
+        6.448446, -2.601338, 0.238508, 1.861849, -3.619182, -1.173074, -2.147989, 5.212681, -1.644832, -3.914416, 0.981498, -1.120456,
+    ],
+];
+
+const CLEAN_FSL_FMA_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        5.247594, -0.539637, -0.194286, -1.441820, 0.012073, -0.451592, -1.599774, 2.866406, -1.670382, -0.609044, -1.946012, 0.286849,
+        8.229498, -2.246683, -1.001166, -4.080767, 4.099496, -0.373058, -3.213686, 4.383755, -3.166371, -1.626284, -3.747497, -0.271996,
+        6.899778, -2.617012, 1.567395, -3.551419, 4.550060, -1.773182, -2.476445, 4.417309, -2.559731, -0.660263, -3.736244, 0.902608,
+    ],
+    [
+        5.778344, -1.586362, -1.503399, 0.552986, -1.979291, -0.547380, -1.148601, 2.253464, 0.635049, -2.195802, -0.227042, -0.457681,
+        8.119734, -2.797861, -0.238469, 2.477177, -2.239021, -2.011853, -2.285445, 5.143733, -1.808216, -3.655608, 0.244980, -1.130769,
+        6.335845, -2.743505, 0.317069, 1.864152, -3.645517, -0.935940, -2.169943, 5.174144, -1.665549, -3.778845, 0.801834, -1.138951,
+    ],
+];
 
 const CLEAN_FSL_TEMPLATES: [[f64; NB_FEAT]; 2] = [
     [
@@ -72,7 +118,7 @@ const CLEAN_FSL_TEMPLATES: [[f64; NB_FEAT]; 2] = [
 ];
 
 pub fn model_by_name(name: &str) -> Option<&'static KeyModel> {
-    [&CYANBOX, &CLEAN_FSL].into_iter().find(|m| m.name == name)
+    [&CYANBOX, &CLEAN_FSL, &CLEAN_FSL_FMA, &CLEAN_FSL_FMA_SEG].into_iter().find(|m| m.name == name)
 }
 
 const TEMPLATES: [[f64; NB_FEAT]; 2] = [
@@ -600,8 +646,10 @@ mod tests {
     }
 
     #[test]
-    fn shipped_model_is_clean_fsl_and_both_models_resolve() {
-        assert_eq!(SHIPPED.name, "clean-fsl");
+    fn shipped_model_is_clean_fsl_fma_and_all_models_resolve() {
+        assert_eq!(SHIPPED.name, "clean-fsl-fma-seg");
+        assert_eq!(model_by_name("clean-fsl-fma-seg").map(|m| m.name), Some("clean-fsl-fma-seg"));
+        assert_eq!(model_by_name("clean-fsl-fma").map(|m| m.name), Some("clean-fsl-fma"));
         assert_eq!(model_by_name("cyanbox").map(|m| m.name), Some("cyanbox"));
         assert_eq!(model_by_name("clean-fsl").map(|m| m.name), Some("clean-fsl"));
         assert!(model_by_name("other").is_none());
@@ -613,8 +661,10 @@ mod tests {
         let tone = |f: f64, i: usize| (2.0 * PI * f * i as f64 / rate as f64).sin() as f32;
         let mono: Vec<f32> = (0..rate as usize * 12).map(|i| 0.3 * (tone(220.0, i) + tone(261.63, i) + tone(329.63, i) + tone(110.0, i))).collect();
         let a = detect_with(&CYANBOX, &mono, rate, 2).unwrap();
+        let c = detect_with(&CLEAN_FSL, &mono, rate, 2).unwrap();
         let b = detect(&mono, rate, 2).unwrap();
         assert_eq!(a.class, 21);
+        assert_eq!(c.class, 21);
         assert_eq!(b.class, 21);
         assert!(b.confidence > 0.0 && b.confidence < 1.0);
     }

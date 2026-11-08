@@ -1,6 +1,6 @@
 import io, sys, os, json, zipfile, urllib.request
 
-URL = 'https://zenodo.org/records/3967852/files/FSL10K.zip?download=1'
+URL = os.environ.get('ZIP_URL', 'https://zenodo.org/records/3967852/files/FSL10K.zip?download=1')
 
 
 class HttpFile(io.RawIOBase):

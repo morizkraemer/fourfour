@@ -75,7 +75,7 @@ fn main() {
     let manifest = PathBuf::from(&args[0]);
     let audio_dir = PathBuf::from(&args[1]);
     let threads: usize = args.get(2).map(|s| s.parse().unwrap()).unwrap_or(4);
-    let model = args.get(4).map_or(cyankey::SHIPPED, |n| cyankey::model_by_name(n).expect("model: cyanbox or clean-fsl"));
+    let model = args.get(4).map_or(cyankey::SHIPPED, |n| cyankey::model_by_name(n).expect("model: cyanbox, clean-fsl, clean-fsl-fma or clean-fsl-fma-seg"));
     println!("model {}", model.name);
     let entries = load_manifest(&manifest);
     let next = AtomicUsize::new(0);
