@@ -283,6 +283,12 @@ fn enqueue_analysis(
     Ok(merge_into_analysis_queue(&coordinator, items, front))
 }
 
+/// The tracks on screen, most wanted first: queued ones among them are analysed next (see `AnalysisCoordinator::focus`).
+#[tauri::command]
+fn focus_analysis(ids: Vec<i64>, coordinator: State<'_, AnalysisCoordinator>) {
+    coordinator.focus(&ids);
+}
+
 #[derive(serde::Serialize, Clone)]
 struct PartialPayload {
     track_id: u32,
@@ -1516,6 +1522,7 @@ fn main() {
             get_analyze_after_import,
             set_analyze_after_import,
             enqueue_analysis,
+            focus_analysis,
             prioritize_analysis,
             analysis_ui_busy,
             write_usb,

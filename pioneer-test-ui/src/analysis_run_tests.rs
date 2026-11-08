@@ -1158,3 +1158,205 @@ async fn a_cancelled_analysis_is_not_a_file_failure() {
     assert_eq!(h.coordinator.failures().entry(1), None);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+fn coordinator_with_queue(ids: impl IntoIterator<Item = i64>) -> AnalysisCoordinator {
+    let coordinator = AnalysisCoordinator::default();
+    assert!(coordinator.try_begin());
+    let queue: VecDeque<AnalysisWorkItem> = ids.into_iter().map(|id| (id, PathBuf::from(name_of(id)))).collect();
+    let total = queue.len() as u32;
+    coordinator.register_run(Arc::new(Mutex::new(queue)), total);
+    coordinator
+}
+
+fn queued_ids(coordinator: &AnalysisCoordinator) -> Vec<i64> {
+    coordinator.with_queue(|queue| queue.iter().map(|(id, _)| *id).collect()).unwrap()
+}
+
+fn grid_queued_ids(coordinator: &AnalysisCoordinator) -> Vec<i64> {
+    coordinator.jobs.lock().unwrap().grid_queue.iter().map(|(id, _)| *id).collect()
+}
+
+const ROOMY: ModelJobs = ModelJobs { max: 3, whole: 1 };
+
+fn take(coordinator: &AnalysisCoordinator, stored: &[i64]) -> Option<(i64, Stage)> {
+    let stored: HashSet<i64> = stored.iter().copied().collect();
+    coordinator
+        .take_next(true, |id| if stored.contains(&id) { FAST_STAGES } else { 0 }, ROOMY, |_| 2)
+        .map(|task| (task.track_id, task.stage))
+}
+
+#[test]
+fn focused_tracks_move_to_the_front_in_focus_order_and_the_rest_keep_theirs() {
+    let coordinator = coordinator_with_queue(1..=10);
+    coordinator.focus(&[7, 3, 99, 9, 7]);
+    assert_eq!(queued_ids(&coordinator), vec![7, 3, 9, 1, 2, 4, 5, 6, 8, 10]);
+}
+
+#[test]
+fn a_new_focus_replaces_the_old_and_tracks_that_left_it_go_back_to_their_place() {
+    let coordinator = coordinator_with_queue(1..=8);
+    coordinator.focus(&[6, 7]);
+    coordinator.focus(&[2]);
+    assert_eq!(queued_ids(&coordinator), vec![2, 1, 3, 4, 5, 6, 7, 8]);
+    coordinator.focus(&[]);
+    assert_eq!(queued_ids(&coordinator), (1..=8).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_focus_set_before_the_run_starts_orders_its_queue() {
+    let coordinator = AnalysisCoordinator::default();
+    coordinator.focus(&[4, 2]);
+    assert!(coordinator.try_begin());
+    let queue: VecDeque<AnalysisWorkItem> = (1..=5).map(|id| (id, PathBuf::from(name_of(id)))).collect();
+    coordinator.register_run(Arc::new(Mutex::new(queue)), 5);
+    assert_eq!(queued_ids(&coordinator), vec![4, 2, 1, 3, 5]);
+}
+
+#[test]
+fn merged_tracks_take_their_focus_place_and_unfocused_ones_queue_at_the_back() {
+    let coordinator = coordinator_with_queue(1..=4);
+    coordinator.focus(&[6, 2]);
+    let work = |ids: &[i64]| ids.iter().map(|id| (*id, PathBuf::from(name_of(*id)))).collect::<Vec<_>>();
+    assert_eq!(coordinator.merge_work(&work(&[5, 6]), false), Some(2));
+    assert_eq!(queued_ids(&coordinator), vec![6, 2, 1, 3, 4, 5]);
+    assert_eq!(coordinator.merge_work(&work(&[7, 4]), true), Some(1));
+    assert_eq!(queued_ids(&coordinator), vec![6, 2, 4, 7, 1, 3, 5], "front merges lead the unfocused tracks");
+}
+
+#[test]
+fn without_a_focus_merges_behave_as_before() {
+    let coordinator = coordinator_with_queue(1..=3);
+    let work = |ids: &[i64]| ids.iter().map(|id| (*id, PathBuf::from(name_of(*id)))).collect::<Vec<_>>();
+    coordinator.merge_work(&work(&[4]), false);
+    coordinator.merge_work(&work(&[5, 3]), true);
+    assert_eq!(queued_ids(&coordinator), vec![3, 5, 1, 2, 4]);
+}
+
+#[test]
+fn a_focus_names_at_most_the_band_limit() {
+    let coordinator = coordinator_with_queue(1..=(MAX_FOCUS as i64 + 10));
+    let wanted: Vec<i64> = (1..=(MAX_FOCUS as i64 + 10)).rev().collect();
+    coordinator.focus(&wanted);
+    let ids = queued_ids(&coordinator);
+    assert_eq!(ids[..MAX_FOCUS], wanted[..MAX_FOCUS]);
+    assert_eq!(ids[MAX_FOCUS..], (1..=10).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_focused_track_gets_the_model_while_unfocused_new_tracks_take_fast_passes() {
+    let coordinator = coordinator_with_queue(1..=6);
+    assert_eq!(take(&coordinator, &[]), Some((1, Stage::Whole)), "the first new track starts the model as before");
+    assert_eq!(take(&coordinator, &[]), Some((2, Stage::Fast)));
+    coordinator.focus(&[5, 4]);
+    assert_eq!(take(&coordinator, &[]), Some((5, Stage::Whole)));
+    assert_eq!(take(&coordinator, &[]), Some((4, Stage::Whole)));
+    assert_eq!(take(&coordinator, &[]), Some((3, Stage::Fast)), "the model is full: three model jobs run");
+}
+
+#[test]
+fn a_focused_track_waiting_for_its_grid_pass_goes_ahead_of_new_tracks() {
+    let coordinator = coordinator_with_queue(1..=6);
+    let first = take(&coordinator, &[]).unwrap();
+    assert_eq!(first, (1, Stage::Whole));
+    assert_eq!(take(&coordinator, &[]), Some((2, Stage::Fast)));
+    assert_eq!(take(&coordinator, &[]), Some((3, Stage::Fast)));
+    coordinator.hand_to_grid((3, PathBuf::from(name_of(3))));
+    coordinator.hand_to_grid((2, PathBuf::from(name_of(2))));
+    assert_eq!(grid_queued_ids(&coordinator), vec![3, 2], "without a focus grid passes queue as they come");
+    coordinator.focus(&[2]);
+    assert_eq!(take(&coordinator, &[2, 3]), Some((2, Stage::Grid)));
+    assert_eq!(take(&coordinator, &[2, 3]), Some((4, Stage::Fast)), "unfocused grid passes still wait for the fast passes");
+}
+
+#[test]
+fn a_focused_new_track_ranked_above_a_focused_grid_pass_goes_first() {
+    let coordinator = coordinator_with_queue(1..=4);
+    assert_eq!(take(&coordinator, &[]), Some((1, Stage::Whole)));
+    assert_eq!(take(&coordinator, &[]), Some((2, Stage::Fast)));
+    coordinator.hand_to_grid((2, PathBuf::from(name_of(2))));
+    coordinator.focus(&[4, 2]);
+    assert_eq!(take(&coordinator, &[2]), Some((4, Stage::Whole)));
+    assert_eq!(take(&coordinator, &[2]), Some((2, Stage::Grid)));
+}
+
+#[tokio::test]
+async fn every_track_is_analysed_exactly_once_while_the_focus_keeps_moving() {
+    let h = harness(40, 3, 6);
+    let run = h.run_all(h.items.clone());
+    let scroll = async {
+        let bands: [&[i64]; 6] = [&[20, 21, 22, 23], &[35, 36, 1], &[], &[10, 11, 12, 13, 14, 15], &[40, 39, 38], &[2, 30]];
+        for band in bands {
+            h.wait_for(|e| (!e.is_empty()).then_some(())).await;
+            h.coordinator.focus(band);
+            tokio::time::sleep(Duration::from_millis(60)).await;
+        }
+    };
+    let (outcome, ()) = tokio::join!(run, scroll);
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 40 }));
+    assert!(h.unanalyzed().is_empty());
+    for id in 1..=40 {
+        let name = name_of(id);
+        let passes = (h.count(&ran(&name, Pass::Fast)), h.count(&ran(&name, Pass::Grid)), h.count(&ran(&name, Pass::All)));
+        assert!(passes == (1, 1, 0) || passes == (0, 0, 1), "{name}: {passes:?} in {:?}", h.events());
+        assert_eq!(h.count(&Event::Progress(id)), 1, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn rows_on_screen_finish_before_tracks_queued_ahead_of_them() {
+    let h = harness(30, 3, 6);
+    let visible: Vec<i64> = (16..=19).collect();
+    let run = h.run_all(h.items.clone());
+    let scroll = async {
+        h.wait_for(|e| (!e.is_empty()).then_some(())).await;
+        h.coordinator.focus(&visible);
+    };
+    let (outcome, ()) = tokio::join!(run, scroll);
+
+    assert!(matches!(outcome, RunOutcome::Finished { errors: 0, total: 30 }));
+    let events = h.events();
+    let done_at = |id: i64| events.iter().position(|e| *e == Event::Progress(id)).unwrap();
+    let last_visible = visible.iter().map(|id| done_at(*id)).max().unwrap();
+    let finished_ahead = (5..16).filter(|id| done_at(*id) < last_visible).count();
+    assert_eq!(finished_ahead, 0, "tracks 5-15 finished before the rows on screen: {events:?}");
+}
+
+/// Prints how long the rows in the middle of the list (and a played track) wait, with and without a focus.
+/// `cargo test -p pioneer-test-ui time_until_rows_on_screen -- --ignored --nocapture`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn time_until_rows_on_screen_are_analysed_with_and_without_a_focus() {
+    const TRACKS: usize = 120;
+    let visible: Vec<i64> = (55..=70).collect();
+    for focused in [false, true, false, true] {
+        let h = harness(TRACKS, 4, 8);
+        let started = Instant::now();
+        let run = h.run_all(h.items.clone());
+        let watch = async {
+            h.wait_for(|e| (!e.is_empty()).then_some(())).await;
+            if focused {
+                h.coordinator.focus(&visible);
+            }
+            h.wait_for(|e| visible.iter().all(|id| e.contains(&Event::Progress(*id))).then_some(())).await;
+            started.elapsed()
+        };
+        let play = async {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let played = h.items[95].clone();
+            let asked = Instant::now();
+            prioritize_with_runner(h.shared.clone(), h.coordinator.clone(), played, h.sink.clone(), BackendEnv::default(), h.runner())
+                .await
+                .unwrap();
+            asked.elapsed()
+        };
+        let (_, visible_done, played_done) = tokio::join!(run, watch, play);
+        println!(
+            "R171 focus={focused} tracks={TRACKS} visible_rows_done={:.2}s played_track_done={:.2}s full_run={:.2}s",
+            visible_done.as_secs_f64(),
+            played_done.as_secs_f64(),
+            started.elapsed().as_secs_f64()
+        );
+        assert!(h.unanalyzed().is_empty());
+    }
+}
