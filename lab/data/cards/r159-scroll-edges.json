@@ -1,20 +1,20 @@
 {
   "id": "r159-scroll-edges",
   "title": "Scroll edges and fling",
-  "question": "Scrolling: rows at the edges no longer blank, waveforms catch up after a fling. Good?",
+  "question": "Fast trackpad flick: rows stay filled and complete, the list now moves together with its rows. Keep? Rec: keep, after a check on the Mac.",
   "url": "/lab.html",
-  "check": "- Fast flick at 50k, half speed: old shows empty rows at the bottom edge for a few frames\n- New: the edge stays filled; row waveforms are empty while flinging and draw when it slows\n- Slow scrolling looks the same as before",
-  "media": "/data/cards/r159-scroll-edges/media/old.mp4",
+  "check": "- Same 10,000 px/s flick over 10k tracks, half speed, headless Chromium\n- Old: rows lose waveform, BPM and key while moving, edges go empty\n- New: every row complete in every frame\n- On the Mac the list ends no longer rubber-band",
+  "media": "/data/cards/r159-scroll-edges/media/r175-old.mp4",
   "gallery": [
     {
-      "url": "/data/cards/r159-scroll-edges/media/old.mp4",
+      "url": "/data/cards/r159-scroll-edges/media/r175-old.mp4",
       "label": "old",
-      "thumb": "/data/cards/r159-scroll-edges/media/old.mp4.thumb.webp"
+      "thumb": "/data/cards/r159-scroll-edges/media/r175-old.mp4.thumb.webp"
     },
     {
-      "url": "/data/cards/r159-scroll-edges/media/new.mp4",
+      "url": "/data/cards/r159-scroll-edges/media/r175-new.mp4",
       "label": "new",
-      "thumb": "/data/cards/r159-scroll-edges/media/new.mp4.thumb.webp"
+      "thumb": "/data/cards/r159-scroll-edges/media/r175-new.mp4.thumb.webp"
     }
   ],
   "options": [
@@ -29,6 +29,37 @@
   ],
   "rank": 100,
   "status": "backlog",
-  "round": 1,
-  "created": "2026-11-07T15:53:56.446Z"
+  "round": 2,
+  "created": "2026-11-07T15:53:56.446Z",
+  "history": [
+    {
+      "round": 1,
+      "question": "Scrolling: rows at the edges no longer blank, waveforms catch up after a fling. Good?",
+      "url": "/lab.html",
+      "check": "- Fast flick at 50k, half speed: old shows empty rows at the bottom edge for a few frames\n- New: the edge stays filled; row waveforms are empty while flinging and draw when it slows\n- Slow scrolling looks the same as before",
+      "media": "/data/cards/r159-scroll-edges/media/old.mp4",
+      "gallery": [
+        {
+          "url": "/data/cards/r159-scroll-edges/media/old.mp4",
+          "label": "old",
+          "thumb": "/data/cards/r159-scroll-edges/media/old.mp4.thumb.webp"
+        },
+        {
+          "url": "/data/cards/r159-scroll-edges/media/new.mp4",
+          "label": "new",
+          "thumb": "/data/cards/r159-scroll-edges/media/new.mp4.thumb.webp"
+        }
+      ],
+      "options": [
+        {
+          "key": "k",
+          "label": "Keep"
+        },
+        {
+          "key": "c",
+          "label": "Change (note)"
+        }
+      ]
+    }
+  ]
 }
