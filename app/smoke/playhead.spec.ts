@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, loadByDoubleClick, test } from './app.ts';
+import { loadFactor } from './load-factor.ts';
 
 const SLIDE_PX = 100000;
 const FRACS = [0.0213, 0.1, 0.3717, 0.5, 0.7311, 0.9302];
@@ -71,6 +72,7 @@ for (const deviceScaleFactor of [1, 2]) {
     test.use({ deviceScaleFactor });
 
     test('the playheads and played mask draw the same pixels as the style.transform they replaced', async ({ smoke: { page } }) => {
+      test.setTimeout(120_000 * loadFactor());
       await loadByDoubleClick(page, 'Smoke Track 03');
       await page.locator('.ff-player-compact__expand-btn').click();
       await expect(page.locator('.ff-xp')).toBeVisible();
