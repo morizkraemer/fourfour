@@ -3537,6 +3537,61 @@ Validation: `cargo test --workspace`: 26 `test result: ok` lines, 587 passed, 0 
 
 **Mac checks for Merlin** (not run here: no Mac access, no `aarch64-apple-darwin` target on dev). See the commands in the report: int8 file, `build-dmg.sh`, `check-dmg.sh`, a 49-track `bench_analysis` against night 3's int8 row, and a look at `beat_runtime` in the app's analysis status (should read `rten`).
 
+## R171 analysis order (2026-11-08, `r171-analysis-order`)
+
+Goal: after an import of thousands of tracks, the tracks the user looks at get BPM, key, grid and waveform first. Branch from `ov-1028`. Linux `dev` box, load 8-33 from other workers, at most 2 analysis threads. Base = `ov-1028` built in a separate tree with the same bench reporting patch (`--watch`), runs interleaved.
+
+### How the queue worked
+
+- One run holds a queue of `(track id, path)` in the order the caller gave it: import order for "analyse all" and imports (`get_unanalyzed_track_ids`), partial tracks first then new ones at launch (`resume_work`), with the last run's saved order first (`analysis_order`). Merges append (or prepend with `front`).
+- The run is staged: while fast passes are left, up to `whole` model jobs (1 with 2 workers) take the next new track whole and the other slots take fast passes (waveform and key). Grid passes wait in a second queue in the order the fast passes finished and start only when every new track had its fast pass. So a row in the middle of a 10k import got its waveform after about half the library's fast passes and its BPM and grid after the grid passes of every track ahead of it.
+- The player already had its own lane: `prioritize_analysis` moves the loaded track onto the now lane (all threads, background paused). Unchanged here.
+- The frontend never told the backend what is on screen. `enqueue_analysis(front)` existed but nothing in the app called it.
+
+### Change
+
+- `AnalysisCoordinator::focus(ids)` (Tauri `focus_analysis`, off the main thread): both queues are kept in `(focus rank, arrival)` order. Focused tracks go first, in the order given; every other track keeps the order it joined the run. A new focus replaces the old one, so tracks that leave it go back to their place. The focus outlives a run (the next run starts with it). At most 400 ids.
+- In `take_next`: a focused track that has room for the beat model is analysed whole (one decode, waveform stored first), and a focused track waiting for its grid pass goes ahead of new tracks. Unfocused tracks run exactly as before. Running jobs are never cancelled or restarted.
+- Without a focus every queue operation is the old one (same push front/back, same grid order), so a run nobody looks at is unchanged.
+- `TrackTable` (main list only, not the docked organize table or a USB view): 300 ms after the first change of scroll, sort, search, playlist or analysis state, it sends the unanalysed or pending tracks on screen top to bottom, then a 40-row band nearest first (below before above), at most 200 ids, and only when the ids differ from the last ones sent. Results arriving several times a second do not hold it back (a throttle, not a trailing debounce). `rowsOnScreen` counts rows under the sticky header. Nothing on screen changes; only the order in which tracks finish.
+
+### Before / after
+
+Real analysis, `bench_analysis --threads 2` (2 workers, 3 model jobs, rten fp32), 12 tracks from `benchmark/datasets/rekordbox-testdata-2025` (every 40th file of the sorted list: 5 MP3, 6 WAV, 1 FLAC), "visible rows" = list positions 7 and 8 (ids 7, 8), focused 5 s after the start in the new build. Runs in order base, new, new, base.
+
+| Run | load before / after | trk/min | wall | CPU | visible rows done | all waveforms | peak RSS |
+|---|---|---:|---:|---:|---:|---:|---:|
+| base 1 | 16.9 / 10.6 | 3.03 | 237.4 s | 619 s | 165.3 s | 23.7 s | 512 MB |
+| new 1 | 10.6 / 16.2 | 3.00 | 240.0 s | 636 s | **59.3 s** | 52.0 s | 507 MB |
+| new 2 | 16.2 / 13.3 | 2.95 | 244.0 s | 634 s | **60.6 s** | 52.9 s | 497 MB |
+| base 2 | 13.3 / 7.8 | 2.97 | 242.7 s | 648 s | 167.2 s | 23.5 s | 530 MB |
+
+- Visible rows done: 165-167 s to 59-61 s (2.8x sooner; 160 s to 55 s after the focus).
+- Throughput: 3.03 / 2.97 base, 3.00 / 2.95 new, within noise (wall 237-244 s either way).
+- Price: with a focus the model takes the focused tracks whole, so the fast passes of the other tracks finish later (all waveforms 24 s to 52 s on 12 tracks). The total is the same.
+
+Player track (`--limit 6 --play-after 5 --play-index 5`, no focus, the existing now lane): base 19.8 / 20.1 / 20.9 s to full result (waveform 1.1-1.6 s), new 53.1 / 21.3 / 21.3 s (waveform 6.4 / 1.3 / 1.3 s). The first new run ran into a load spike to 33 (1.07 trk/min, every stage slowed the same; the code path is the base one without a focus); the two reruns equal base. Not changed and not claimed faster.
+
+Backend latency test with the fake engine (`time_until_rows_on_screen_are_analysed_with_and_without_a_focus`, `--ignored`): 120 tracks, 4 workers, rows 55-70 focused at the start, a track at position 96 played after 300 ms: rows on screen done 8.58 / 8.26 s without focus, 2.01 / 2.17 s with; played track 0.29 / 0.38 s and 0.25 / 0.28 s; full run 12.5 / 12.3 s and 11.6 / 11.9 s.
+
+### Tests
+
+- Rust (`analysis_run_tests.rs`): focus order and the rest kept; a new focus replaces the old and left tracks return to their place; a focus set before the run orders its queue; merges take their focus place (front merges lead the unfocused tracks); merges without a focus behave as before; the 400-id limit; focused tracks get the model while unfocused new tracks take fast passes; a focused grid pass goes ahead of new tracks; a focused new track ranked above a focused grid pass goes first; every track analysed exactly once (one fast plus one grid pass, or one whole pass; one result each) while the focus moves six times during a 40-track run; rows on screen finish before the tracks queued ahead of them.
+- Vitest: `analysis-focus.test.ts` (order, band, filter, limit, throttle, dedupe, dispose), `rowWindow.test.ts` (`rowsOnScreen`).
+- Smoke `analysis-focus.spec.ts`: 400 unanalysed tracks, scroll to the middle, then sort: the ids sent start with the rows on screen, skip analysed tracks and include the band.
+
+### Validation
+
+`cargo test --workspace`: 26 `test result: ok` lines, 598 passed, 0 failed. `npx vitest run`: 114 files passed, 10 skipped; 989 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings. Chromium smoke (`FF_SMOKE_PORT=5761`): 115 passed, 43 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5762`): 115 passed, 43 skipped.
+
+### Not done
+
+- The docked organize table and USB views send no focus.
+- No Mac run; the order logic is platform-free.
+- The Tauri IPC cost of a focus call (at most a few per second, 200 ids) was not measured in a window.
+
+Scratch (`~/.cache/r171*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
