@@ -411,6 +411,7 @@ test.describe('scroll edges', () => {
           p50: round(percentile(f, 50)),
           p95: round(percentile(f, 95)),
           max: round(Math.max(...f)),
+          over16: f.filter((d) => d > 16.7).length,
           over25: f.filter((d) => d > 25).length,
           over50: f.filter((d) => d > 50).length,
           split,
