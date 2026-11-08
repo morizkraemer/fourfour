@@ -314,37 +314,36 @@ const pinning: Record<string, PinningScenario> = {
       await expect(page.locator('.ff-trow--selected')).toHaveCount(3);
     },
   },
-  'rating star clicked, then the row is filtered away': {
+  'rating star clicked and column handle double-clicked, then the table is replaced by a stick view': {
     prepare: async (page) => {
-      await page.evaluate(() =>
-        localStorage.setItem(
-          'fourfour.tableColumns.v3',
-          JSON.stringify({
-            layouts: {
-              library: {
-                columns: [
-                  { key: 'title', label: 'TITLE', width: 220 },
-                  { key: 'rating', label: 'RATING', width: 90 },
-                ],
-                sortKey: null,
-                sortDir: 'asc',
+      await page.evaluate(
+        ([columnsKey, sticksKey]) => {
+          localStorage.setItem(sticksKey, '1');
+          localStorage.setItem(
+            columnsKey,
+            JSON.stringify({
+              layouts: {
+                library: {
+                  columns: [
+                    { key: 'title', label: 'TITLE', width: 220 },
+                    { key: 'rating', label: 'RATING', width: 90 },
+                  ],
+                  sortKey: null,
+                  sortDir: 'asc',
+                },
               },
-            },
-          }),
-        ),
+            }),
+          );
+        },
+        ['fourfour.tableColumns.v3', 'smoke.sticks'],
       );
     },
     run: async ({ page }) => {
       await rowByTitle(page, TRACK).locator('.ff-trow__star').nth(2).click();
-      await page.keyboard.press('Control+f');
-      await page.keyboard.type('Smoke Track 07');
-      await expect(rowByTitle(page, TRACK)).toHaveCount(0);
-    },
-  },
-  'column resize handle double-clicked, then the table is replaced': {
-    run: async ({ page }) => {
-      await page.locator('.ff-colh__resize-handle').nth(1).dblclick({ force: true });
-      await page.locator('.ff-sbrow__label', { hasText: 'All Tracks' }).click();
+      await page.locator('.ff-colh__resize-handle').first().dblclick({ force: true });
+      await page.locator(`[data-drop-stick-path="${SANDISK}"][data-drop-surface="row"] .ff-sbrow__label`).click();
+      await expect(page.locator('[data-stick-view]')).toBeVisible();
+      await expect(page.locator('[data-track-row]')).toHaveCount(0);
     },
   },
   'settings dropdown option picked': {
