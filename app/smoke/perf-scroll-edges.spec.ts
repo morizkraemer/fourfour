@@ -15,9 +15,16 @@ const VIDEO_DIR = process.env.FF_PERF_EDGES_VIDEO;
 const LABEL = process.env.FF_PERF_LABEL ?? '';
 const CSS_VARIANTS: string[] = process.env.FF_PERF_EDGES_CSS_RUNS ? JSON.parse(process.env.FF_PERF_EDGES_CSS_RUNS) : [process.env.FF_PERF_EDGES_CSS ?? ''];
 let variant = 0;
+const QUERY_RUNS: string[] = process.env.FF_PERF_EDGES_QUERY_RUNS ? JSON.parse(process.env.FF_PERF_EDGES_QUERY_RUNS) : [''];
+let query = '';
+const GESTURE_SCALE_RUNS: number[] = process.env.FF_PERF_EDGES_GESTURE_SCALE_RUNS ? JSON.parse(process.env.FF_PERF_EDGES_GESTURE_SCALE_RUNS) : [1];
+let gestureScale = 1;
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 1);
 const PARTS = new Set((process.env.FF_PERF_EDGES_PARTS ?? 'wheel,raf,settle').split(','));
 const WEBKIT = process.env.FF_SMOKE_BROWSER === 'webkit';
+const LIMIT = Number(process.env.FF_PERF_EDGES_LIMIT ?? 0);
+const SPEEDS: number[] = process.env.FF_PERF_EDGES_SPEEDS ? JSON.parse(process.env.FF_PERF_EDGES_SPEEDS) : [2000, 4000, 6000, 15000];
+const CLIP_SPEED = Number(process.env.FF_PERF_EDGES_CLIP_SPEED ?? 5000);
 const ROW = 28;
 const VIEW = { width: 1600, height: 1000 };
 
@@ -39,12 +46,13 @@ function rowBands(i: number) {
 
 function state(): LoadedState {
   const dumped = JSON.parse(readFileSync(STATE!, 'utf8'));
-  const tracks = isTrackTable(dumped.tracks) ? decodeTrackTable(dumped.tracks) : dumped.tracks;
+  const decoded = isTrackTable(dumped.tracks) ? decodeTrackTable(dumped.tracks) : dumped.tracks;
+  const tracks = LIMIT ? decoded.slice(0, LIMIT) : decoded;
   return { ...dumped, tracks: tracks.map((t: LoadedState['tracks'][number], i: number) => (i % 3 === 2 ? t : { ...t, waveform_bands: rowBands(i) })) } as LoadedState;
 }
 
 function report(kind: string, run: number, data: unknown) {
-  const line = JSON.stringify({ label: CSS_VARIANTS.length > 1 ? `${LABEL}-css${variant}` : LABEL, kind, run, browser: WEBKIT ? 'webkit' : 'chromium', load: loadavg().map(round), data });
+  const line = JSON.stringify({ label: `${CSS_VARIANTS.length > 1 ? `${LABEL}-css${variant}` : LABEL}${query ? ` ${query}` : ''}`, kind, run, browser: WEBKIT ? 'webkit' : 'chromium', load: loadavg().map(round), data });
   if (REPORT) appendFileSync(REPORT, `${line}\n`);
   else console.log(line);
 }
@@ -54,6 +62,7 @@ interface FrameSample {
   top: number;
   pre: number;
   post: number;
+  inc: number;
   hidden: number;
 }
 
@@ -63,21 +72,24 @@ function installEdgeProbe() {
   const blankSlots = () => {
     const scroller = document.querySelector('.ff-table__scroll') as HTMLElement | null;
     const body = document.querySelector('.ff-table__body') as HTMLElement | null;
-    if (!scroller || !body) return { top: 0, blank: 0 };
+    if (!scroller || !body) return { top: 0, blank: 0, incomplete: 0 };
     const header = (scroller.querySelector('.ff-colh') as HTMLElement | null)?.offsetHeight ?? 0;
     const top = scroller.scrollTop;
     const count = Number(body.dataset.rowCount ?? 0);
     const first = Math.floor(top / 28);
     const last = Math.min(count, Math.ceil((top + scroller.clientHeight - header) / 28)) - 1;
     const shown = new Set<number>();
+    let incomplete = 0;
     for (const row of body.querySelectorAll<HTMLElement>('[data-track-row]')) {
       if (row.style.display === 'none') continue;
       if (!row.querySelector('.ff-trow__cell--title .ff-trow__text')?.textContent) continue;
-      shown.add(Number(row.dataset.rowIndex));
+      const index = Number(row.dataset.rowIndex);
+      shown.add(index);
+      if (index >= first && index <= last && !row.querySelector('.ff-trow__cell--bpm .ff-trow__text')?.textContent) incomplete++;
     }
     let blank = 0;
     for (let i = first; i <= last; i++) if (!shown.has(i)) blank++;
-    return { top, blank };
+    return { top, blank, incomplete };
   };
   let scrolled = false;
   let pre = 0;
@@ -91,7 +103,7 @@ function installEdgeProbe() {
     if (!w.__edges.on) return;
     const sample = blankSlots();
     pre = sample.blank;
-    w.__edges.frames.push({ t: performance.now(), top: sample.top, pre: sample.blank, post: sample.blank, hidden: document.querySelectorAll('[data-track-row] canvas[style*="hidden"]').length });
+    w.__edges.frames.push({ t: performance.now(), top: sample.top, pre: sample.blank, post: sample.blank, inc: sample.incomplete, hidden: document.querySelectorAll('[data-track-row] canvas[style*="hidden"]').length });
     scrolled = false;
   };
   requestAnimationFrame(frame);
@@ -114,7 +126,7 @@ async function open(browser: import('@playwright/test').Browser, payload: Loaded
   await page.exposeFunction('__smokeAnalysis', (trackId: number) => mockAnalysisData(trackId, 180 + ((trackId * 7) % 300), 12400, '8A'));
   await page.addInitScript(installTauriMock, payload);
   await page.addInitScript(installEdgeProbe);
-  await page.goto('/');
+  await page.goto(`/${query}`);
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
   await page.waitForTimeout(4000);
   if (CSS_VARIANTS[variant]) await page.addStyleTag({ content: CSS_VARIANTS[variant] });
@@ -166,12 +178,19 @@ function summarise(samples: FrameSample[]) {
   const moved = samples.slice(1).map((s, i) => Math.abs(s.top - samples[i].top));
   return {
     frames: samples.length,
+    gapMean: round(gaps.reduce((a, b) => a + b, 0) / Math.max(1, gaps.length)),
+    gapP95: round(percentile(gaps, 95)),
+    gapOver25: gaps.filter((g) => g > 25).length,
+    pxPerMsPeak: round(Math.max(0, ...moved.map((m, i) => m / Math.max(1, gaps[i])))),
     pxPerMs: round(moved.reduce((a, b) => a + b, 0) / Math.max(1, gaps.reduce((a, b) => a + b, 0))),
     preBlankFrames: samples.filter((s) => s.pre > 0).length,
     preBlankMax: Math.max(0, ...samples.map((s) => s.pre)),
     postBlankFrames: samples.filter((s) => s.post > 0).length,
     postBlankMax: Math.max(0, ...samples.map((s) => s.post)),
     postBlankSum: samples.reduce((a, s) => a + s.post, 0),
+    incFrames: samples.filter((s) => s.inc > 0).length,
+    incMax: Math.max(0, ...samples.map((s) => s.inc)),
+    incMean: round(samples.reduce((a, s) => a + s.inc, 0) / Math.max(1, samples.length)),
     heldFrames: samples.filter((s) => s.hidden > 0).length,
     heldMax: Math.max(0, ...samples.map((s) => s.hidden)),
   };
@@ -327,8 +346,16 @@ test.describe('scroll edges', () => {
     const payload = state();
     for (let run = 0; run < RUNS; run++) {
       variant = run % CSS_VARIANTS.length;
-      const { context, page, videoStart } = await open(browser, payload, run === 0);
+      query = QUERY_RUNS[run % QUERY_RUNS.length];
+      gestureScale = GESTURE_SCALE_RUNS[run % GESTURE_SCALE_RUNS.length];
+      const { context, page, videoStart } = await open(browser, payload, run < QUERY_RUNS.length);
       const box = await listBox(page);
+      report('rest', run, await page.evaluate(() => {
+        const scroller = document.querySelector('.ff-table__scroll') as HTMLElement;
+        const rows = [...document.querySelectorAll<HTMLElement>('[data-track-row]')].filter((r) => r.style.display !== 'none').map((r) => Number(r.dataset.rowIndex));
+        const incompleteAtRest = [...document.querySelectorAll<HTMLElement>('[data-track-row]')].filter((r) => r.style.display !== 'none' && Number(r.dataset.rowIndex) * 28 < scroller.clientHeight && !r.querySelector('.ff-trow__cell--bpm .ff-trow__text')?.textContent).length;
+        return { incompleteAtRest, viewport: scroller.clientHeight, rowsInDom: rows.length, lastRowInDom: Math.max(...rows), lastRowOnScreen: Math.ceil(scroller.clientHeight / 28) - 1 };
+      }));
       const scenarios: Record<string, { steps: number; delta: number; gap: number }> = {
         scroll: { steps: 60, delta: 100, gap: 16 },
         fast: { steps: 60, delta: 300, gap: 16 },
@@ -350,7 +377,7 @@ test.describe('scroll edges', () => {
       if (PARTS.has('gesture') && !WEBKIT) {
         const cdp = await context.newCDPSession(page);
         const scroller = await page.locator('.ff-table__scroll').boundingBox();
-        for (const speed of [2000, 4000, 6000, 15000]) {
+        for (const speed of SPEEDS) {
           await page.evaluate(() => ((document.querySelector('.ff-table__scroll') as HTMLElement).scrollTop = 0));
           await page.waitForTimeout(800);
           const from = Date.now() - t0;
@@ -358,8 +385,8 @@ test.describe('scroll edges', () => {
             await cdp.send('Input.synthesizeScrollGesture', {
               x: Math.round(scroller!.x + scroller!.width / 2),
               y: Math.round(scroller!.y + scroller!.height / 2),
-              yDistance: -Math.round(speed * 1.5),
-              speed,
+              yDistance: -Math.round(speed * 1.5 * gestureScale),
+              speed: speed * gestureScale,
               gestureSourceType: 'mouse',
               preventFling: true,
             });
@@ -377,8 +404,8 @@ test.describe('scroll edges', () => {
         await cdp.send('Input.synthesizeScrollGesture', {
           x: Math.round(scroller!.x + scroller!.width / 2),
           y: Math.round(scroller!.y + scroller!.height / 2),
-          yDistance: -7000,
-          speed: 5000,
+          yDistance: -Math.round(CLIP_SPEED * 1.4 * gestureScale),
+          speed: CLIP_SPEED * gestureScale,
           gestureSourceType: 'mouse',
           preventFling: true,
         });
@@ -461,7 +488,7 @@ test.describe('scroll edges', () => {
       await context.close();
       if (video && VIDEO_DIR) {
         const file = await video.path();
-        const named = join(VIDEO_DIR, `${LABEL || 'run'}-${WEBKIT ? 'webkit' : 'chromium'}.webm`);
+        const named = join(VIDEO_DIR, `${LABEL || 'run'}-${WEBKIT ? 'webkit' : 'chromium'}${QUERY_RUNS.length > 1 ? `-q${run % QUERY_RUNS.length}` : ''}.webm`);
         mkdirSync(VIDEO_DIR, { recursive: true });
         renameSync(file, named);
         const perFrame = blankFromVideo(named, box);
