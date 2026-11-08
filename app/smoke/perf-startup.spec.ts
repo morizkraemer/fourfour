@@ -21,6 +21,7 @@ const PROFILE_FIRST = !!process.env.FF_PERF_STARTUP_PROFILE_FIRST;
 const SORT_KEY = process.env.FF_PERF_SORT;
 const TRACE_OUT = process.env.FF_PERF_STARTUP_TRACE;
 const SNAPSHOT_OUT = process.env.FF_PERF_STARTUP_SNAPSHOT;
+const FIRST_CLICK = !!process.env.FF_PERF_FIRST_CLICK;
 
 interface Boot {
   firstInvoke: number;
@@ -41,6 +42,8 @@ interface Boot {
   longestFrame: number;
   heapMB: number;
   cpuMs: number;
+  cpuFirstRowMs: number;
+  clickMs: number;
 }
 
 interface Probe {
@@ -182,8 +185,37 @@ async function heapAfterGc(page: Page): Promise<number> {
   return usedSize / 1048576;
 }
 
+async function firstClickMs(page: Page): Promise<number> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __click: { at: number; done: number } };
+    w.__click = { at: 0, done: 0 };
+    const firstRowText = () => document.querySelector('[data-track-row]')?.textContent ?? '';
+    const before = firstRowText();
+    addEventListener(
+      'pointerdown',
+      (event) => {
+        w.__click.at = event.timeStamp;
+        const wait = () => {
+          if (firstRowText() === before) return void requestAnimationFrame(wait);
+          requestAnimationFrame(() => requestAnimationFrame(() => (w.__click.done = performance.now())));
+        };
+        requestAnimationFrame(wait);
+      },
+      { capture: true, once: true },
+    );
+  });
+  await page.locator('.ff-colh__cell[data-col-key="title"] .ff-colh__label').click();
+  await page.waitForFunction(() => (window as unknown as { __click: { done: number } }).__click.done > 0, null, { timeout: 60_000 });
+  return page.evaluate(() => {
+    const c = (window as unknown as { __click: { at: number; done: number } }).__click;
+    return c.done - c.at;
+  });
+}
+
 async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
+  const cpuFirstRowMs = (await mainThreadCpuMs(page)) - cpuBase;
+  const clickMs = FIRST_CLICK ? await firstClickMs(page) : 0;
   await page.waitForTimeout(2500);
   const cpuMs = (await mainThreadCpuMs(page)) - cpuBase;
   const metrics = await page.evaluate(() => {
@@ -211,9 +243,15 @@ async function bootMetrics(page: Page, cpuBase: number): Promise<Boot> {
       longestFrame: b.longestFrame,
       heapMB: 0,
       cpuMs: 0,
+      cpuFirstRowMs: 0,
+      clickMs: 0,
     };
   });
-  return { ...metrics, cpuMs, heapMB: await heapAfterGc(page) };
+  if (process.env.FF_PERF_LONGTASKS) {
+    const tasks = await page.evaluate(() => (window as unknown as { __boot: Probe }).__boot.longTasks.map((t) => `${Math.round(t.start)}+${Math.round(t.duration)}`));
+    console.log(`longtasks (first row ${Math.round(metrics.firstRealRow)}, answered ${Math.round(metrics.loadAnswered)}): ${tasks.join(' ')}`);
+  }
+  return { ...metrics, cpuMs, cpuFirstRowMs, clickMs, heapMB: await heapAfterGc(page) };
 }
 
 async function writeFirstScreen(page: Page, prefix: string) {

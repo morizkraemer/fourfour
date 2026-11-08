@@ -2,7 +2,7 @@
   Sidebar.svelte — Left navigation with playlist drop targets and row reorder.
 -->
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { SidebarSection, SidebarRow, ContextMenu, Dialog, Button, ResizeHandle } from '$ds';
   import { getIsTauri } from '../services/tauri.svelte.ts';
   import {
@@ -72,6 +72,18 @@
   });
 
   const sidebarData = $derived(library.sidebarData);
+
+  let playlistRowsRevealed = $state(false);
+  let playlistRowsScheduled = false;
+
+  $effect(() => {
+    if (playlistRowsScheduled) return;
+    if (!library.tracksLoaded && library.playlists.length === 0) return;
+    playlistRowsScheduled = true;
+    untrack(() => requestAnimationFrame(() => requestAnimationFrame(() => (playlistRowsRevealed = true))));
+  });
+
+  const shownPlaylistRows = $derived(playlistRowsRevealed ? sidebarData.playlists.rows : []);
   let playlistRowOrder = $derived(sidebarData.playlists.rows.map((row) => row.id));
 
   $effect(() => {
@@ -491,7 +503,7 @@
       onAdd={handleAddPlaylist}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
     >
-      {#each sidebarData.playlists.rows as row}
+      {#each shownPlaylistRows as row}
         {@const isFolder = row.kind === 'folder'}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
