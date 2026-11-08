@@ -3573,6 +3573,72 @@ Unchanged within the noise (the base's blanks at 2,000-6,000 px/s in pair 1 came
 
 `perf-scroll-edges.spec.ts` gains: part `trace` (a traced `scrollTop` fling, phase split per frame in thread time; `FF_PERF_EDGES_CPU=1` adds a CPU profile with the top self-time functions, best with `FF_PERF_PROFILE=1` for an unminified build), `cpu` (thread ms) and `over16` in the `raf` part, and `FF_PERF_EDGES_CSS_RUNS='["", "<css>", ...]'` to alternate injected CSS per run in one build. Scratch (`~/.cache/r164*`, base trees) is deleted after this item.
 
+## R166 fling text (2026-11-08, `r166-fling-text`)
+
+R164's recommended next lever (a): during a fling hold, update only the title and artist of rows that change track, and fill the other cells when the hold ends. Merlin approved smoother fast scrolling, skipping per-row work during fast flings, and edits in `prototyping/` for it (2026-11-07). Branch from `r164-row-cost`. Linux `dev` box with load 39-62 the whole time (other workers), headless Chromium and Playwright WebKit, r95 10k and 50k payloads with synthetic previews (as R159), 1600x1000. Base = `r164-row-cost` as a separate tree with the same spec, runs interleaved.
+
+### What changed
+
+- `prototyping/viewport/design-system/components/TrackRow.svelte`: the hold prop is now `hold` (was `holdWave`). While the table holds (R159's speed threshold), a row whose track differs from the one it last filled reads every cell except title and artist from one frozen empty object instead of the track. Svelte sees that value unchanged while the row keeps changing track, so only the title and artist effects run per replaced row. The other cells show what they already show for a track with no data: empty text, `—` for album, genre and year, the muted `—` for key, empty stars, no cover, no colour, no preview. When the hold ends, all held rows fill in the same flush (one frame, as R159's waveforms). A row that keeps its track keeps every cell. Slow scrolling never holds, so it is unchanged.
+- `app/src/modules/TrackTable.svelte`: `waveHeld` and its constants are renamed to `flingHeld` / `FLING_*` (same thresholds) and passed as `hold`.
+- `app/smoke/fling-hold.spec.ts` (new, runs in the normal smoke): a fling over 3,000 rows shows the right title and artist on every visible row in every fling frame, with BPM empty and key `—` on the held rows; after the hold every visible row has its BPM and the right key. A slow wheel scroll has every cell filled at every step. The spec reads every frame, not only the last: in headless WebKit (software, frames of 200-300 ms) the 120 ms idle release fires between two frames, so the hold switches on and off every frame there. That is R159's release rule meeting a slow renderer, the same for the waveforms before this change; at 60 fps it never fires mid-fling.
+
+### Before / after
+
+Chromium scale 2 (compositor scrolling), 600-frame `scrollTop` fling over the 10k list (about 17 rows replaced per frame), held in 604-608 of about 620 frames in both builds, 3 interleaved pairs (base first, new first, base first). Thread ms per frame is CDP `ThreadTime` over the fling / 600 (R164 method); load is the 1-minute load at the run:
+
+| Pair (load base / new) | thread ms per frame base / new | mean ms base / new | p95 base / new | over 16.7 ms base / new | over 25 ms base / new | over 50 ms base / new |
+|---|---|---|---|---|---|---|
+| 1 (58 / 61) | 23.9 / 18.1 | 55.2 / 44.5 | 84.1 / 72.2 | 599 / 599 | 597 / 574 | 319 / 165 |
+| 2 (42 / 59) | 22.8 / 18.0 | 35.5 / 38.8 | 50.5 / 60.9 | 599 / 599 | 574 / 551 | 31 / 87 |
+| 3 (41 / 40) | 22.2 / 16.4 | 38.9 / 25.2 | 56.7 / 36.2 | 599 / 591 | 574 / 268 | 64 / 2 |
+
+Thread time per frame is 4.7 to 5.8 ms lower in 3 of 3 pairs (about -24%). Wall time follows the load: in pair 2 the new run had load 59 against 42 and is slower; in pair 3, at the same load, the mean frame drops from 38.9 to 25.2 ms and frames over 25 ms from 574 to 268.
+
+Trace phases in thread ms per frame, same runs (base / new, pair 3; pairs 1 and 2 agree within 1 ms per phase):
+
+| Phase | base | new |
+|---|---|---|
+| rAF callbacks | 6.7 | 4.2 |
+| script | 6.4 | 4.3 |
+| layout | 4.1 | 2.5 |
+| style recalc | 1.8 | 1.3 |
+| paint phase (paint, layerize, prepaint) | 6.7 | 4.9 |
+| commit | 1.5 | 1.1 |
+| main-thread task total | 23.3 (25.1, 23.1, 23.3) | 16.1 (18.1, 16.7, 16.1) |
+
+Script, layout and paint all drop: fewer effects per replaced row and fewer text nodes changed per frame (2 of 8 text cells, no cover, no star or swatch changes).
+
+Blank row slots at frame start (`pre`, what a threaded scroller shows), frames with blanks / frames, same runs:
+
+| Gesture | base | new |
+|---|---|---|
+| 6,000 px/s | 7/41, 0/66, 0/54 | 4/52, 1/48, 0/73 |
+| 15,000 px/s | 16/45, 26/55, 21/47 | 12/35, 16/44, 18/65 |
+
+At 6,000 px/s both are near zero (the remaining base blanks came with load 59). At 15,000 px/s the share of blank frames goes from 36-47% to 28-36%: better, still not gone. `post` (blank after the page's own update) is 0 everywhere.
+
+The pixel count from the recorded clips (50k, 5,000 px/s gesture, empty rows in the title and artist columns) is load noise in both builds: base 0 and 14 of 80 frames, new 8, 0 and 15 of 80 frames in five recordings; the frames looked at are whole stretches where the compositor ran ahead during a load spike, in both builds.
+
+### Identity
+
+- After settle (slow wheel to three places, 1.5 s, then a fling and 1.5 s): text of the visible rows and their canvas pixels identical base and new at every place in every configuration: Chromium scale 1 and 2, WebKit, 10k and 50k. List screenshots identical everywhere at Chromium scale 2 and WebKit; at Chromium scale 1, three places differed by 2-12 pixels of at most 4/255, and a second base run differed from the first base run at the same places (R159's layering noise at scale 1).
+- The settled screen after a fling is identical in every configuration, so the filled-in cells match the base exactly.
+
+### Not done
+
+- The release frame fills every held row at once (up to the pool of 56 rows): one long frame when the fling slows down, like R159's waveforms. Not measured separately.
+- Not measured on the Mac (WebKit scrolling thread); the lab card shows the Chromium compositor case.
+- Wheel scrolls between 1.5 and 3 px/ms do not hold, as before.
+
+### Validation
+
+`npx vitest run`: 113 files passed, 10 skipped; 986 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings. Chromium smoke (`FF_SMOKE_PORT=5701`, load 29): 116 passed, 44 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5702`, load 13): 116 passed, 44 skipped.
+
+Lab card `r166-fling-text` (backlog): old and new clip of the 50k list at 5,000 px/s, Chromium compositor scrolling, scale 2, half speed. Question: "Fast fling: other cells fill in when the fling slows. OK?"
+
+Scratch (`~/.cache/r166*`, base tree) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
