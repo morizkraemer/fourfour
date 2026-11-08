@@ -4,6 +4,7 @@
   //   columns: [{ label, width?, flex?, align?, sort?:'asc'|'desc', key? }]
   import './column-header.css';
   import Icon from './Icon.svelte';
+  import { nativeListener } from './nativeListener.js';
   import { columnCellStyle, minWidthForColumn } from '../utils/column-layout.js';
 
   let {
@@ -221,8 +222,8 @@
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize {col.label || col.key} column"
-          onpointerdown={(e) => startResize(e, col)}
-          ondblclick={(e) => autoFitColumn(e, col)}
+          {@attach nativeListener('pointerdown', (e) => startResize(e, col))}
+          {@attach nativeListener('dblclick', (e) => autoFitColumn(e, col))}
         ></div>
       {/if}
     </div>

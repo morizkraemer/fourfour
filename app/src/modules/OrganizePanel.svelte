@@ -1,5 +1,6 @@
 <script>
   import { Button, ContextMenu, Icon } from '$ds';
+  import { nativeListener } from '$ds/components/nativeListener.js';
   import {
     ui,
     expandOrganize,
@@ -198,7 +199,7 @@
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize organize panel"
-      onpointerdown={onResizeHandlePointerDown}
+      {@attach nativeListener('pointerdown', onResizeHandlePointerDown)}
     ></div>
 
     <!-- svelte-ignore a11y_no_static_element_interactions -->

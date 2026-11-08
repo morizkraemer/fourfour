@@ -4,6 +4,7 @@
   // hard-codes its contents.
   import './sidebar-section.css';
   import Icon from './Icon.svelte';
+  import { nativeListener } from './nativeListener.js';
 
   let { label, showAdd = false, addDropActive = false, onAdd, onHeaderContextMenu, children } = $props();
 
@@ -30,7 +31,7 @@
         data-new-playlist-drop
         aria-label="New playlist"
         title="New playlist — drop tracks here to create one"
-        onclick={add}
+        {@attach nativeListener('click', add)}
       >
         <Icon name="plus" size={13} class="ff-sidebar-section__add-icon" />
       </button>

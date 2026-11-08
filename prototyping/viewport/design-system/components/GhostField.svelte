@@ -6,6 +6,7 @@
   //   state: 'rest' | 'hover' | 'edit' (showcase)
   import './ghost-field.css';
   import Icon from './Icon.svelte';
+  import { nativeListener } from './nativeListener.js';
 
   let {
     value = '',
@@ -55,7 +56,7 @@
       spellcheck="false"
       value={shown}
       oninput={(e) => (draft = e.currentTarget.value)}
-      onkeydown={onKeyDown}
+      {@attach nativeListener('keydown', onKeyDown)}
       onblur={commit}></textarea>
   {:else}
     <input
@@ -66,7 +67,7 @@
       spellcheck="false"
       value={shown}
       oninput={(e) => (draft = e.currentTarget.value)}
-      onkeydown={onKeyDown}
+      {@attach nativeListener('keydown', onKeyDown)}
       onblur={commit} />
   {/if}
   <span class="ff-ghost__pen"><Icon name="pencil" size={11} /></span>

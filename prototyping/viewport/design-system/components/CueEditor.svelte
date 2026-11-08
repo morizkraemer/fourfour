@@ -1,4 +1,5 @@
 <script>
+  import { nativeListener } from './nativeListener.js';
   // Edit one cue: name, colour (palette swatches) and delete.
   let {
     chip,
@@ -52,7 +53,7 @@
       aria-label="Cue name"
       bind:this={nameInput}
       bind:value={draft}
-      onkeydown={onKey}
+      {@attach nativeListener('keydown', onKey)}
       onblur={commitName} />
     <span class="ff-cue-editor__time">{chip.time}</span>
   </div>

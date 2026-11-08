@@ -2,6 +2,7 @@
   import './menu.css';
   import './checkbox.css';
   import { closeOnEscape } from './menuEscape.js';
+  import { nativeListener } from './nativeListener.js';
 
   const CHECK_SVG =
     '<svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg"><polyline points="2,5.5 4.2,7.5 8,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -125,10 +126,10 @@
         class:ff-menu__item--submenu-open={subOpen}
         onmouseenter={() => hasSub && depth === 0 && openSubmenu(i)}
         onmouseleave={() => hasSub && depth === 0 && closeSubmenu(i)}
-        onclick={() => {
+        {@attach nativeListener('click', () => {
           if (hasSub) return;
           runItem(item);
-        }}
+        })}
       >
         <span class="ff-menu__item-label">
           {#if item.checked !== undefined}
@@ -161,7 +162,7 @@
             class="ff-menu ff-menu--submenu"
             use:clampSubmenu
             onmouseenter={() => openSubmenu(i)}
-            onclick={(e) => e.stopPropagation()}
+            {@attach nativeListener('click', (e) => e.stopPropagation())}
           >
             {#each item.items as subItem}
               {#if subItem.isSeparator}
@@ -172,7 +173,7 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div
                   class="ff-menu__item ff-menu__item--{subVariant}"
-                  onclick={() => runSubItem(subItem)}
+                  {@attach nativeListener('click', () => runSubItem(subItem))}
                 >
                   <span class="ff-menu__item-label">
                     {#if subItem.checked !== undefined}
@@ -213,7 +214,7 @@
     bind:this={menuEl}
     use:clampMenu
     style="position: fixed; left: {x}px; top: {y}px; z-index: 10000;"
-    onclick={(e) => e.stopPropagation()}
+    {@attach nativeListener('click', (e) => e.stopPropagation())}
   >
     {@render menuItems(items)}
   </div>

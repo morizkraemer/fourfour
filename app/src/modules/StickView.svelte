@@ -1,5 +1,6 @@
 <script>
   import { Icon, Switch } from '$ds';
+  import { nativeListener } from '$ds/components/nativeListener.js';
   import { library, libraryTrackById } from '../stores/library.svelte.ts';
   import { ui } from '../stores/ui.svelte.ts';
   import { dnd, endDrag, stickTargetAt, updatePointer } from '../stores/dnd.svelte.ts';
@@ -228,10 +229,10 @@
             class="ff-stickview__x"
             aria-label="Take {pl.name} off this stick"
             title="Take off this stick"
-            onclick={(e) => {
+            {@attach nativeListener('click', (e) => {
               e.stopPropagation();
               void removePlaylistFromStick(volumePath, pl.id);
-            }}
+            })}
           >
             <Icon name="x" size={12} />
           </button>
