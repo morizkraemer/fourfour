@@ -16,7 +16,7 @@ Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a
 AGENTS.md ## Unattended (queue fields drafted 2026-10-23: autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
 
 ## Waiting on Merlin
-4. [accepted 2026-10-31] Key licence: clean FSL model ships, Beatport 56.3% (below 60% bar). Needs attribution. rec: ship clean-fsl for beta - branch: ov-1028 (switch in cyankey.rs)
+4. [accepted 2026-10-31] Key licence: clean FSL model ships, Beatport 56.3% (below 60% bar). Needs attribution. rec: ship clean-fsl for beta - branch: ov-1028 (switch in cyankey.rs) R177 (2026-11-08): on held-out GiantSteps+ (432 expert keys) shipped key = 78.9% exact, E+R+F 90.3%: clears the 60% bar there.
 5. Old stash@{0} (waveform tweaks, prototyping only). rec: build on a branch for review - branch: none
 6. `.claude/settings.local.json` allows `git push *`, bypassing the push ask. rec: remove that allow line (Merlin edits it) - branch: none
 7. Push master (30 commits ahead). rec: push - branch: master
