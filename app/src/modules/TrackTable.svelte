@@ -69,6 +69,7 @@
   import { artwork } from '../stores/artwork.svelte.ts';
   import { rowWindow, rowsOnScreen, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
+  import { wheelPixels, createWheelQueue } from '../lib/wheelScroll.ts';
   import { pendingRowsHtml, skeletonRowsHtml } from '../lib/skeletonRows.ts';
   import { importActivity } from '../stores/import-activity.svelte.ts';
   import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
@@ -104,8 +105,9 @@
   let scrollSettleTimer = null;
   let ownScrollTop = null;
 
-  const FLING_HOLD_PX_PER_MS = 3;
-  const FLING_RELEASE_PX_PER_MS = 1.5;
+  const threadedScroll = typeof location !== 'undefined' && new URLSearchParams(location.search).get('exp') === 'threaded-scroll';
+  const FLING_HOLD_PX_PER_MS = threadedScroll ? 3 : 16;
+  const FLING_RELEASE_PX_PER_MS = threadedScroll ? 1.5 : 10;
   const FLING_RELEASE_IDLE_MS = 120;
   const SPEED_SAMPLE_MAX_MS = 50;
   let scrollVelocity = $state(0);
@@ -132,9 +134,31 @@
     flingHeld = false;
   }
 
+  const wheelQueue = createWheelQueue();
+
+  function onTableWheel(e) {
+    if (e.ctrlKey || e.defaultPrevented || !tableScrollEl || (dragging && embedded)) return;
+    e.preventDefault();
+    wheelQueue.add(wheelPixels(e, tableScrollEl.clientHeight - headerHeight));
+    if (scrollRaf == null) scrollRaf = requestAnimationFrame(syncScrollWindow);
+  }
+
+  $effect(() => {
+    const el = tableScrollEl;
+    if (!el || threadedScroll) return;
+    el.addEventListener('wheel', onTableWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onTableWheel);
+      wheelQueue.clear();
+    };
+  });
+
   function syncScrollWindow() {
     scrollRaf = null;
     if (!tableScrollEl) return;
+    const wheel = wheelQueue.take();
+    if (wheel.y) tableScrollEl.scrollTop += wheel.y;
+    if (wheel.x) tableScrollEl.scrollLeft += wheel.x;
     const movedRows = (tableScrollEl.scrollTop - scrollTop) / ROW_HEIGHT;
     rowsPerFrame = movedRows === 0 ? rowsPerFrame / 2 : (rowsPerFrame + movedRows) / 2;
     if (tableScrollEl.scrollTop !== scrollTop) trackScrollSpeed(tableScrollEl.scrollTop);
