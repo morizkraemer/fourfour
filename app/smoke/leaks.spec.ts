@@ -124,6 +124,36 @@ test(title, async ({ smoke }) => {
   expect(violations, `growth after ${CYCLES} cycles, before ${JSON.stringify(before)} after ${JSON.stringify(after)}`).toEqual([]);
 });
 
+test('closing settings with Escape leaves no event getter pointing into the closed sheet', async ({ smoke }) => {
+  const { page } = smoke;
+  await page.addInitScript(() => {
+    const getters: (() => unknown)[] = [];
+    (window as unknown as { __currentTargetGetters: typeof getters }).__currentTargetGetters = getters;
+    const define = Object.defineProperty;
+    Object.defineProperty = function (target: object, key: PropertyKey, descriptor: PropertyDescriptor) {
+      if (target instanceof Event && key === 'currentTarget' && descriptor.get) getters.push(descriptor.get);
+      return define(target, key, descriptor);
+    } as typeof Object.defineProperty;
+  });
+  await page.reload();
+  await page.locator('[data-track-row]').first().waitFor();
+
+  await page.keyboard.press('Control+,');
+  const items = page.locator('.ff-settings-sheet__nav-item');
+  await expect(items.first()).toBeVisible();
+  await items.nth(1).click();
+  await page.keyboard.press('Escape');
+  await expect(items.first()).toHaveCount(0);
+
+  const detached = await page.evaluate(() =>
+    (window as unknown as { __currentTargetGetters: (() => unknown)[] }).__currentTargetGetters
+      .map((get) => get())
+      .filter((node): node is Element => node instanceof Element && !node.isConnected)
+      .map((node) => node.className),
+  );
+  expect(detached, 'currentTarget getters that close over a detached element').toEqual([]);
+});
+
 test('the growth check fails for a deliberate per-cycle leak', async ({ smoke }) => {
   test.setTimeout(180_000 * loadFactor());
   const { page } = smoke;
