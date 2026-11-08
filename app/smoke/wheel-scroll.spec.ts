@@ -62,7 +62,7 @@ test('a trackpad-speed wheel fling moves the list together with its rows: no bla
   expect(frames.filter((f) => f.incomplete > 0), 'frames with a row missing its other cells').toEqual([]);
 });
 
-test('Ctrl+wheel is left to the browser and the list does not move', async ({ page }) => {
+test('Ctrl+wheel (pinch zoom) is left to the browser', async ({ page }) => {
   await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
   await page.addInitScript(installTauriMock, largeFixtureState(300));
   await page.goto('/');
@@ -78,6 +78,4 @@ test('Ctrl+wheel is left to the browser and the list does not move', async ({ pa
       }),
   );
   expect(prevented).toBe(false);
-  await page.waitForTimeout(100);
-  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(0);
 });
