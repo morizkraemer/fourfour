@@ -25,8 +25,6 @@
     });
   }
 
-  // Every row of a table gets the same columns, and a sort hands them over as a new array with the same layout: one
-  // plan per layout keeps each row's cells untouched unless the layout itself changed.
   const PLANS_KEPT = 8;
   const plansByColumns = new WeakMap();
   const plansByLayout = new Map();
@@ -49,6 +47,8 @@
     return plan;
   }
 
+  const WAVE_WAITING = Object.freeze({ low: [], mid: [], high: [] });
+
   function favOn(v) {
     return v != null && v !== false && v !== '';
   }
@@ -69,13 +69,23 @@
 
   // onWaveSeek(frac): the mini waveform becomes a seek strip (hover shows where, a click passes the track fraction).
   // onRate(stars): the rating cell takes clicks (the current rating again clears it) and previews on hover.
-  // holdWave: the table is flinging; the mini waveform waits to draw new data until this turns false.
+  // holdWave: the table is flinging; a row whose track changes hands its waveform no data (so no preview is decoded)
+  // until this turns false, and the waveform hides its old picture meanwhile.
   let { track = {}, state: rowState = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined, onRate = undefined, holdWave = false } = $props();
 
   let previewStars = $state(0);
 
   let plan = $derived(cellPlan(columns));
   let waveWidth = $derived(columns.find((c) => c.key === 'wave')?.width ?? 120);
+
+  let waveTrack = null;
+  let waveWaiting = $derived.by(() => {
+    const waiting = holdWave && track !== waveTrack;
+    if (!waiting) waveTrack = track;
+    return waiting;
+  });
+  let waveBands = $derived(waveWaiting ? WAVE_WAITING : (track.bands ?? null));
+  let wavePeaks = $derived(waveWaiting ? null : (track.peaks ?? null));
 
   function waveRect(e) {
     return (e.currentTarget.querySelector('canvas') ?? e.currentTarget).getBoundingClientRect();
@@ -122,14 +132,13 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="{cell.cls}{onWaveSeek ? ' ff-trow__cell--seekable' : ''}"
-       
         data-col-key={col.key}
         data-wave-seek={onWaveSeek ? '' : undefined}
         onpointermove={onWaveSeek ? showWaveCursor : undefined}
         onclick={onWaveSeek ? (e) => onWaveSeek(waveFrac(e)) : undefined}>
         <Waveform
-          bands={track.bands ?? null}
-          peaks={track.peaks ?? null}
+          bands={waveBands}
+          peaks={wavePeaks}
           animating={analyzing && !track.bands && !track.peaks?.length}
           width={waveWidth}
           height={14}
@@ -151,7 +160,6 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="{cell.cls}{onRate ? ' ff-trow__cell--rateable' : ''}"
-       
         data-col-key={col.key}
         data-rate={onRate ? '' : undefined}
         onpointerleave={onRate ? () => (previewStars = 0) : undefined}
