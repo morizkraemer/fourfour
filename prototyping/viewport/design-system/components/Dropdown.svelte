@@ -6,6 +6,7 @@
   import './dropdown.css';
   import './menu.css';
   import Icon from './Icon.svelte';
+  import { nativeListener } from './nativeListener.js';
 
   /**
    * @typedef {{ value: string, label: string }} DropdownOption
@@ -125,10 +126,10 @@
           aria-selected={opt.value === value}
           class="ff-menu__item ff-menu__item--default"
           tabindex="-1"
-          onclick={(e) => {
+          {@attach nativeListener('click', (e) => {
             e.stopPropagation();
             pick(opt.value);
-          }}
+          })}
           onkeydown={(e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();

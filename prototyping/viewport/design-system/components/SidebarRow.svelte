@@ -1,5 +1,6 @@
 <script>
   import './sidebar-row.css';
+  import { nativeListener } from './nativeListener.js';
   import Icon from './Icon.svelte';
   import TagBadge from './TagBadge.svelte';
   import StatusDot from './StatusDot.svelte';
@@ -114,8 +115,8 @@
         bind:value={renameValue}
         onkeydown={handleRenameKeydown}
         onblur={handleRenameBlur}
-        onclick={(e) => e.stopPropagation()}
-        ondblclick={(e) => e.stopPropagation()}
+        {@attach nativeListener('click', (e) => e.stopPropagation())}
+        {@attach nativeListener('dblclick', (e) => e.stopPropagation())}
       />
     {:else}
       <span class="ff-sbrow__label">{label}</span>
@@ -123,7 +124,7 @@
 
     {#if count != null}<span class="ff-sbrow__count">{count}</span>{/if}
     {#if onOpenInPanel}
-      <button class="ff-sbrow__action" title="Open in side panel" onclick={openInPanel}>
+      <button class="ff-sbrow__action" title="Open in side panel" {@attach nativeListener('click', openInPanel)}>
         <Icon name="columns-2" size={13} />
       </button>
     {/if}

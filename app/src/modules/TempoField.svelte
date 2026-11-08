@@ -8,6 +8,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { Icon } from '$ds';
+  import { nativeListener } from '$ds/components/nativeListener.js';
   import { tierOf, type Tier } from '../lib/tempo.ts';
 
   const DRAG_THRESHOLD_PX = 3;
@@ -197,7 +198,7 @@
         autocomplete="off"
         aria-label={label}
         style:color={color}
-        onkeydown={onInputKeyDown}
+        {@attach nativeListener('keydown', onInputKeyDown)}
         oninput={() => (invalid = false)}
         onblur={onInputBlur} />
     {:else}

@@ -36,21 +36,25 @@
       onClose?.();
     }
   }
+
+  function closeOnEscapeOutsideSvelteDelegation(el) {
+    el.addEventListener('keydown', onKeydown);
+    return () => el.removeEventListener('keydown', onKeydown);
+  }
 </script>
 
 {#if open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="ff-settings-scrim ff-settings-screen" onclick={(e) => e.target === e.currentTarget && onClose?.()}>
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       bind:this={sheetEl}
+      {@attach closeOnEscapeOutsideSvelteDelegation}
       class="ff-settings-sheet"
       role="dialog"
       aria-modal="true"
       aria-label="Preferences"
       tabindex="-1"
-      onkeydown={onKeydown}
     >
       <div class="ff-settings-sheet__top">
         <span class="ff-settings-sheet__title">Preferences</span>

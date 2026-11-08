@@ -64,6 +64,7 @@
   //   state: 'rest' | 'hover' | 'selected' | 'analyzing' | 'drag'
   import './track-row.css';
   import TagBadge from './TagBadge.svelte';
+  import { nativeListener } from './nativeListener.js';
   import ColorSwatch from './ColorSwatch.svelte';
   import Waveform from './Waveform.svelte';
   import { keyColor } from '../utils/key-color.js';
@@ -164,14 +165,14 @@
         data-col-key={col.key}
         data-rate={onRate ? '' : undefined}
         onpointerleave={onRate ? () => (previewStars = 0) : undefined}
-        onclick={onRate ? (e) => e.stopPropagation() : undefined}
-        ondblclick={onRate ? (e) => e.stopPropagation() : undefined}>
+        {@attach onRate ? nativeListener('click', (e) => e.stopPropagation()) : undefined}
+        {@attach onRate ? nativeListener('dblclick', (e) => e.stopPropagation()) : undefined}>
         {#each [1, 2, 3, 4, 5] as n}
           <span
             class="ff-trow__star{n <= shown ? ' ff-trow__star--on' : ''}{previewStars && n <= previewStars ? ' ff-trow__star--preview' : ''}"
             data-star={n}
             onpointerenter={onRate ? () => (previewStars = n) : undefined}
-            onclick={onRate ? () => onRate(n === stars ? 0 : n) : undefined}>★</span>
+            {@attach onRate ? nativeListener('click', () => onRate(n === stars ? 0 : n)) : undefined}>★</span>
         {/each}
       </div>
     {:else if cell.kind === 'color'}

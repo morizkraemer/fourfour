@@ -7,6 +7,7 @@
   import { bpmScrub, keyScrub } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import WaveformView from './WaveformView.svelte';
+  import { nativeListener } from './nativeListener.js';
 
   let {
     cover = '',
@@ -69,9 +70,9 @@
     <button
       class="ff-player-compact__cue-btn"
       {disabled}
-      onclick={stop(onCue)}
-      onpointerdown={stop(onCueDown)}
-      onpointerup={stop(onCueUp)}
+      {@attach nativeListener('click', stop(onCue))}
+      {@attach nativeListener('pointerdown', stop(onCueDown))}
+      {@attach nativeListener('pointerup', stop(onCueUp))}
       onpointercancel={stop(onCueUp)}
       onpointerleave={stop(onCueUp)}
       onkeydown={cueKey(onCueDown)}
@@ -83,7 +84,7 @@
       title={playing ? 'Pause' : 'Play'}
       aria-label={playing ? 'Pause' : 'Play'}
       {disabled}
-      onclick={stop(onPlayToggle)}>
+      {@attach nativeListener('click', stop(onPlayToggle))}>
       {#if playing}
         <svg class="ff-player-compact__play-icon" viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
           <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
@@ -122,7 +123,7 @@
           title="Expand player"
           aria-label="Expand player"
           aria-expanded="false"
-          onclick={stop(onExpand)}>
+          {@attach nativeListener('click', stop(onExpand))}>
           <svg
             class="ff-player-compact__expand-chevron"
             viewBox="0 0 24 24"

@@ -8,6 +8,7 @@
 -->
 <script>
   import { WaveformView, CueEditor, Icon } from '$ds';
+  import { nativeListener } from '$ds/components/nativeListener.js';
   import PlayerTempo from './PlayerTempo.svelte';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
@@ -173,8 +174,8 @@
         title="Cue (hold to preview)"
         aria-label="Cue"
         disabled={!player.track}
-        onpointerdown={stop(cuePreviewStart)}
-        onpointerup={stop(cuePreviewStop)}
+        {@attach nativeListener('pointerdown', stop(cuePreviewStart))}
+        {@attach nativeListener('pointerup', stop(cuePreviewStop))}
         onpointercancel={stop(cuePreviewStop)}
         onpointerleave={stop(cuePreviewStop)}>
         <span class="ff-xp__cue-txt">CUE</span>
