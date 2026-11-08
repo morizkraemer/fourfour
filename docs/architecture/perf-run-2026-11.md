@@ -3537,6 +3537,81 @@ Validation: `cargo test --workspace`: 26 `test result: ok` lines, 587 passed, 0 
 
 **Mac checks for Merlin** (not run here: no Mac access, no `aarch64-apple-darwin` target on dev). See the commands in the report: int8 file, `build-dmg.sh`, `check-dmg.sh`, a 49-track `bench_analysis` against night 3's int8 row, and a look at `beat_runtime` in the app's analysis status (should read `rten`).
 
+## R163 cold open (2026-11-08, `r163-cold-open`)
+
+Branch from `ov-1028` (b31813d). Linux `dev` box, load 11-44 from other workers the whole time, headless Chromium and Playwright WebKit, r95 payloads (10k, 50k), `perf-startup.spec.ts` (payload by fetch, backend simulated at 50 / 210 ms). Base = `ov-1028` in a second worktree, same spec file, prebuilt dists served by `vite preview`, runs interleaved (base, new, new, base, base, new).
+
+### Profile (50k, unminified, CPU profile, answer to first real row)
+
+| Part | base (load 50) | new (load 21) |
+|---|---:|---:|
+| flush (Svelte) | 164 | 28 |
+| of which `SidebarRow` x 82 playlist rows (+ their `Icon`s and template effects) | about 100 | 0 |
+| decode (`decodeTrackTable`) | 27 | 20 |
+| map rows (`mapTracksInTaskSizedChunks`, `mapTrackInfoToLocal`) | 92 | 43 |
+| GC | 61 | 43 |
+| whole window | 479 | 194 |
+
+The two columns come from different box loads, so only the shape carries: the sidebar's playlist tree was half of the first flush at 10k (`SidebarRow` 63 ms against `TrackRow` 60) and more than half at 50k, and it is not on the screen the user waits for. `TrackRow`, `SidebarRow` and `Icon` live in `prototyping/` (fenced), so the lever is when they are mounted, not what they do. What is left on the path is the decode and row mapping (about 70 ms of CPU at 50k, two passes that build 50k objects each, plus the GC they cause) and the first flush of the table rows.
+
+### Changed (`app/src/modules/Sidebar.svelte`, no copy, layout or style change)
+
+- The rows of the PLAYLISTS section (`sidebarData.playlists.rows`) are mounted two animation frames after the answer (after the frame that paints the first rows), in one flush. Favorites, Library and USB rows are mounted as before. Before the answer there were no playlist rows either (the list comes with the answer), so the section shows its header alone for a moment longer.
+- `app/smoke/perf-startup.spec.ts`: new metrics `cpuFirstRowMs` (not reliable, the Node side reads it late), `clickMs` (`FF_PERF_FIRST_CLICK=1`: sort-by-title click right after the first real row, hardware timestamp of the pointerdown to the first row changing plus two frames) and `FF_PERF_LONGTASKS=1` (prints the long tasks).
+
+### What now appears later (listed on purpose)
+
+The playlist and folder rows of the sidebar appear 2 frames after the first table rows (about 35 ms at 60 Hz; the rows are one flush). Nothing else moves. The settled screen is the same. One longer frame lands right after the first rows (the 82 rows, which used to be inside the first frame): Chromium `longestFrame` after the first row 83-133 ms in base, 133-233 in new; WebKit software compositing about 150-390 against 60-85 (an earlier variant that spread the reveal over several frames was worse in WebKit: 100 ms frames for 10 or more frames, first click +50-90 ms, so it was dropped; a variant that kept the first 30 rows in the first flush gained too little to keep).
+
+### Before / after
+
+Chromium, 10k and 50k, `FF_PERF_FIRST_CLICK=1`, 2 pairs of 2 runs each (n = 4 per side, base and new each; the third pair was dropped because the box went from load 14 to 38 during `new`, outliers 1.5-8 s). `rowAfterAnswer` = first real row minus the moment the page got the answer (the part the frontend owns); `firstRealRow` includes the harness's fetch and the bundle and moves by +-100 ms between runs. `click` = first click answered (sort by title right after the first rows). ms, median (range), base / new.
+
+| Case | answer to first rows | first real row (wall) | first click answered |
+|---|---|---|---|
+| 10k first launch | 200 (137-529) / 126 (109-140), new lower 3/4 | 801 / 660, new lower 3/4 | 116 / 82, 3/4 |
+| 10k cold | 183 (166-186) / 157 (136-158), 4/4 | 729 / 681, 4/4 | 107 / 68, 3/4 |
+| 10k warm | 170 (152-230) / 152 (127-161), 4/4 | 589 / 600, 2/4 | 93 / 72, 4/4 |
+| 50k first launch | 258 (229-353) / 259 (209-302), 3/4 | 1,102 / 1,113, 1/4 | 220 / 255, 1/4 |
+| 50k cold | 445 (326-625) / 279 (262-299), 4/4 | 1,563 / 1,291, 4/4 | 71 / 70, 3/4 |
+| 50k warm | 415 (325-441) / 265 (258-314), 4/4 | 1,289 / 1,191, 4/4 | 90 / 81, 2/4 |
+
+Claimed: at 50k cold and warm the answer to first rows is down by 130-150 ms (about a third) with non-overlapping ranges, and the wall time to the first row by 100-270 ms in 4 of 4 pairs; at 10k cold and 10k warm it is down 15-25 ms (inside the noise except cold, 4 of 4). Not claimed: 50k first launch (a draw), 10k warm first row, first click (lower or equal in 5 of 6 cell medians, inside the noise; 50k first launch is slightly worse, 220 / 255, range overlap, the click lands while the reveal frame runs). An earlier set with the chunked reveal (the code before the variants), 3 pairs of 2 runs at load 14-20, gave answer to first rows 230 / 186, 193 / 158, 193 / 132 ms (10k) and 260 / 201, 327 / 252, 251 / 192 (50k), in 5-6 of 6 runs.
+
+WebKit (software compositing, headless), the final code (single reveal), `FF_PERF_FIRST_CLICK=1`, 3 interleaved pairs of 1 run, load 14-38 (base / new, median):
+
+| Case | answer to first rows | first click answered |
+|---|---|---|
+| 10k first launch | 286 / 225 | 294 / 260 |
+| 10k cold | 404 / 245 | 278 / 199 |
+| 10k warm | 282 / 200 | 260 / 232 |
+| 50k first launch | 524 / 366 | 377 / 335 |
+| 50k cold | 412 / 277 | 343 / 289 |
+| 50k warm | 383 / 313 | 236 / 253 |
+
+Answer to first rows is lower in 2-3 of 3 in every cell (80-160 ms), first click equal or lower in 5 of 6 cells (50k warm +17 ms, noise). That set carries a load spike in pair 2 (base 2 at 34 after a 14), so read the direction. Interactive in the long-task sense (`interactive`, `frameInteractive`, `tbt`) is a draw in Chromium (rows of the 3-pair set, medians within 20-100 ms either way, new lower in 2-5 of 6) and was not measured cleanly in WebKit (load spike); the `longestTask` of 220-330 ms is the bundle and mount before the answer in both builds (long-task listing: the mount task 225-320 ms, then 50-145 ms tasks for the JSON parse of the harness, the row mapping and the first flush).
+
+### Identity (settled screen)
+
+`perf-first-screen.spec.ts`, base and new built from separate trees, 10k and 50k (50k with boot rows), screenshot sha256 prefix and normalised `body.outerHTML`, states `skeleton`, `boot`, `row` (first rows, 1.5 s later) and `late` (4 s later):
+
+- Chromium 10k and 50k, WebKit 50k: every screenshot and every HTML hash equal, base against new (10k `07c24bd7da60` png, `1a4fc46fbaa3` html; 50k `c3b2b6a2637e` png, `4677e9992762` html; WebKit 50k `362fe17542fd` png, `e880d8254372` html).
+- WebKit 10k: screenshots equal in all states, HTML equal in `skeleton` and `late`; the `row` HTML differs by one whitespace-only text node after the app root (`          </div>` against `  </div>` in `body`), pixels the same, and the `late` capture of the same run equals base.
+- Store level (nothing in `app/src/stores` changed): `sorted-typing-real`, `search-path-real`, `sort-analysis-real` at 10k and 50k with `FF_FUZZ_FULL=1`: 3 of 3 files pass each; `import-index.test.ts`, `analysis-events.test.ts`, `bulk-bump-fuzz`, `search-sort-fuzz`, `playlist-sort-fuzz` with `FF_FUZZ_FULL=1`: 19 passed.
+
+### Looked at, not changed
+
+- Decode plus row mapping (about 70 ms of CPU and a third of the GC at 50k): two passes that each build 50k objects (`TrackInfo`, then the local row with `raw` pointing back). Fusing them saves the loop, not the allocation; making `raw` lazy touches every consumer of `row.raw`. Showing the first rows from the first chunk of a partial list would put a wrong count on screen for a moment and break the saved-sort case. Not done.
+- `initLibrary` waits for `getVersion` and `getLibraryPath` before `loadState`; on the Mac this is two IPC round trips on the busy page thread. Not measurable with the mock (instant), so not changed.
+- `loadEveryFontSubsetNow` (11 face loads at start): deferring it would paint non-Latin titles in a fallback font first. Not changed.
+- `library.sidebarData` builds all four sections on every read (favorites 3 ms and the playlist tree 1.5-4 ms in the first flush); a lazy `rows` getter would recompute per reader and break the dependency tracking of a memoised one. Not changed.
+
+### Validation
+
+`npx vitest run`: 113 files passed, 10 skipped; 980 tests passed, 9 skipped. `npm run check`: 0 errors, 0 warnings. Chromium smoke (`FF_SMOKE_PORT=5671`): 114 passed, 43 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5672`): 114 passed, 43 skipped.
+
+Scratch (`~/.cache/r163*`) and the second worktree are deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
