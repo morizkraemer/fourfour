@@ -725,3 +725,4 @@
 2026-11-08 16:37 orchestrator decided: own prio r170 first select (hidden Detail mount at idle or cheaper first mount), sonnet; r171 analyse visible/player tracks first (queue priority, re-prioritise on scroll/sort/search; branch, user-visible order), opus
 2026-11-08 17:17 orchestrator r170 handed back 01ff4b2 doc only (first select = table relayout/paint when the pane takes width + compositor floor; script only 20-25 ms; cutting it needs a visible layout change), merged doc on ov-1028
 2026-11-08 17:17 orchestrator decided: own prio r172 overlay leak pattern sweep (delegated handlers with stopPropagation in removable overlays) on r169, generic test, sonnet
+2026-11-08 17:55 orchestrator r172 handed back 7b563e5: Svelte delegated-getter leak pattern fixed in 16 components via native listener helper; generic leaks test 12/15 fail on base, 15/15 pass; smokes 0 failed. Broad prototyping edit -> Waiting 53, review build only
