@@ -16,12 +16,13 @@
   const SPECIAL_KEYS = new Set(['tag', 'fav', 'wave', 'cover', 'key', 'rating', 'color']);
   const DASH_KEYS = new Set(['album', 'genre', 'year']);
   const TEXT_KINDS = new Set(['text', 'dash', 'key']);
+  const LIVE_DURING_HOLD = new Set(['title', 'artist']);
 
   function buildPlan(columns) {
     return columns.map((col) => {
       const kind = SPECIAL_KEYS.has(col.key) ? col.key : DASH_KEYS.has(col.key) ? 'dash' : 'text';
       const base = `ff-trow__cell ff-trow__cell--${col.key}`;
-      return { col, kind, cls: (TEXT_KINDS.has(kind) ? `${base} ff-trow__cell--text` : base) + columnCellClass(col) };
+      return { col, kind, liveDuringHold: LIVE_DURING_HOLD.has(col.key), cls: (TEXT_KINDS.has(kind) ? `${base} ff-trow__cell--text` : base) + columnCellClass(col) };
     });
   }
 
@@ -48,6 +49,7 @@
   }
 
   const WAVE_WAITING = Object.freeze({ low: [], mid: [], high: [] });
+  const HELD_CELLS = Object.freeze({});
 
   function favOn(v) {
     return v != null && v !== false && v !== '';
@@ -69,23 +71,22 @@
 
   // onWaveSeek(frac): the mini waveform becomes a seek strip (hover shows where, a click passes the track fraction).
   // onRate(stars): the rating cell takes clicks (the current rating again clears it) and previews on hover.
-  // holdWave: the table is flinging; a row whose track changes hands its waveform no data (so no preview is decoded)
-  // until this turns false, and the waveform hides its old picture meanwhile.
-  let { track = {}, state: rowState = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined, onRate = undefined, holdWave = false } = $props();
+  let { track = {}, state: rowState = 'rest', columns = TRACK_COLUMNS, analyzing = false, onWaveSeek = undefined, onRate = undefined, hold = false } = $props();
 
   let previewStars = $state(0);
 
   let plan = $derived(cellPlan(columns));
   let waveWidth = $derived(columns.find((c) => c.key === 'wave')?.width ?? 120);
 
-  let waveTrack = null;
-  let waveWaiting = $derived.by(() => {
-    const waiting = holdWave && track !== waveTrack;
-    if (!waiting) waveTrack = track;
-    return waiting;
+  let lastFilledTrack = null;
+  let heldForFling = $derived.by(() => {
+    const held = hold && track !== lastFilledTrack;
+    if (!held) lastFilledTrack = track;
+    return held;
   });
-  let waveBands = $derived(waveWaiting ? WAVE_WAITING : (track.bands ?? null));
-  let wavePeaks = $derived(waveWaiting ? null : (track.peaks ?? null));
+  let cells = $derived(heldForFling ? HELD_CELLS : track);
+  let waveBands = $derived(heldForFling ? WAVE_WAITING : (track.bands ?? null));
+  let wavePeaks = $derived(heldForFling ? null : (track.peaks ?? null));
 
   function waveRect(e) {
     return (e.currentTarget.querySelector('canvas') ?? e.currentTarget).getBoundingClientRect();
@@ -113,17 +114,17 @@
     {@const col = cell.col}
     {#if cell.kind === 'tag'}
       <div class={cell.cls} data-col-key={col.key}>
-        {#if track.tag && track.tag.type === 'digit'}
-          <TagBadge value={track.tag.value} variant="color" color={track.tag.color} size="sm" />
-        {:else if track.tag}
-          <ColorSwatch color={track.tag.color} />
+        {#if cells.tag && cells.tag.type === 'digit'}
+          <TagBadge value={cells.tag.value} variant="color" color={cells.tag.color} size="sm" />
+        {:else if cells.tag}
+          <ColorSwatch color={cells.tag.color} />
         {/if}
       </div>
     {:else if cell.kind === 'fav'}
       <div class={cell.cls} data-col-key={col.key}>
-        <div class="ff-trow__fav{favOn(track.fav) ? ' ff-trow__fav--on' : ''}">
-          {#if favOn(track.fav) && track.fav !== true}
-            <span class="ff-trow__fav-digit">{track.fav}</span>
+        <div class="ff-trow__fav{favOn(cells.fav) ? ' ff-trow__fav--on' : ''}">
+          {#if favOn(cells.fav) && cells.fav !== true}
+            <span class="ff-trow__fav-digit">{cells.fav}</span>
           {/if}
         </div>
       </div>
@@ -143,18 +144,18 @@
           width={waveWidth}
           height={14}
           variant="mini"
-          hold={holdWave} />
+          hold={hold} />
         {#if onWaveSeek}<div class="ff-trow__wave-cursor"></div>{/if}
       </div>
     {:else if cell.kind === 'cover'}
       <div class={cell.cls} data-col-key={col.key}>
         <div
           class="ff-trow__cover"
-          style={cover(track) ? `background-image:url(${cover(track)})` : undefined}>
+          style={cover(cells) ? `background-image:url(${cover(cells)})` : undefined}>
         </div>
       </div>
     {:else if cell.kind === 'rating'}
-      {@const stars = Number(track.rating) || 0}
+      {@const stars = Number(cells.rating) || 0}
       {@const shown = previewStars || stars}
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -175,22 +176,22 @@
       </div>
     {:else if cell.kind === 'color'}
       <div class={cell.cls} data-col-key={col.key}>
-        {#if labelColor(track.color)}
-          <ColorSwatch color={labelColor(track.color)} />
+        {#if labelColor(cells.color)}
+          <ColorSwatch color={labelColor(cells.color)} />
         {/if}
       </div>
     {:else if cell.kind === 'key'}
-      {@const k = String(track.key ?? '—')}
+      {@const k = String(cells.key ?? '—')}
       <div class={cell.cls} data-col-key={col.key}>
         <span class="ff-trow__text" style="color:{k === '—' ? 'var(--ff-muted)' : keyColor(k)}">{k}</span>
       </div>
     {:else if cell.kind === 'dash'}
       <div class={cell.cls} data-col-key={col.key}>
-        <span class="ff-trow__text">{track[col.key] ?? '—'}</span>
+        <span class="ff-trow__text">{cells[col.key] ?? '—'}</span>
       </div>
     {:else}
       <div class={cell.cls} data-col-key={col.key}>
-        <span class="ff-trow__text">{track[col.key] ?? ''}</span>
+        <span class="ff-trow__text">{(cell.liveDuringHold ? track : cells)[col.key] ?? ''}</span>
       </div>
     {/if}
   {/each}
