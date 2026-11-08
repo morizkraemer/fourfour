@@ -225,6 +225,8 @@ fn main() {
     let mut probe_reads: Option<Duration> = None;
     let mut idle_s = 0u64;
     let mut ui_busy_file: Option<PathBuf> = None;
+    let mut watch: Option<(usize, usize)> = None;
+    let mut focus_after_s: Option<f64> = None;
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -247,6 +249,12 @@ fn main() {
             }
             "--ui-busy-file" => ui_busy_file = Some(PathBuf::from(it.next().unwrap())),
             "--idle-secs" => idle_s = it.next().unwrap().parse().unwrap(),
+            "--watch" => {
+                let spec = it.next().unwrap();
+                let (first, count) = spec.split_once(':').expect("--watch <first index>:<count>");
+                watch = Some((first.parse().unwrap(), count.parse().unwrap()));
+            }
+            "--focus-after" => focus_after_s = Some(it.next().unwrap().parse().unwrap()),
             "--probe-reads" => probe_reads = Some(Duration::from_millis(it.next().unwrap().parse().unwrap())),
             other => panic!("unknown argument {other}"),
         }
@@ -266,6 +274,7 @@ fn main() {
     let ids = library.add_tracks(&tracks).expect("add tracks");
     let pending: Vec<(i64, PathBuf)> = ids.iter().zip(&tracks).map(|(id, t)| (*id, t.source_path.clone())).collect();
     let played = play_after_s.map(|_| pending[play_index].clone());
+    let watched: Vec<i64> = watch.map_or_else(Vec::new, |(first, count)| pending[first..first + count].iter().map(|(id, _)| *id).collect());
     if profile > 0 {
         profile_stages(&library, &pending[..profile.min(pending.len())], threads, dump.as_ref());
         std::fs::remove_dir_all(&dir).ok();
@@ -322,7 +331,13 @@ fn main() {
                     analysis_run::prioritize_track(shared.clone(), coordinator.clone(), item, sink.clone(), env.clone()).await.expect("prioritize");
                 }
             };
-            let (outcome, ()) = tokio::join!(run, play);
+            let focus = async {
+                let Some(delay) = focus_after_s else { return };
+                tokio::time::sleep(Duration::from_secs_f64(delay)).await;
+                eprintln!("[bench] focus {watched:?} at {:.1}s", started.elapsed().as_secs_f64());
+                coordinator.focus(&watched);
+            };
+            let (outcome, (), ()) = tokio::join!(run, play, focus);
             outcome
         })
         .expect("run");
@@ -387,6 +402,12 @@ fn main() {
             status.chunk_idle_s,
             status.fallback.as_deref().unwrap_or("none")
         );
+    }
+    if !watched.is_empty() {
+        let done = sink.done_ms.lock().unwrap();
+        let all_done = watched.iter().map(|id| done.get(id).copied().unwrap_or(f64::NAN)).fold(0.0f64, f64::max) / 1000.0;
+        let at = focus_after_s.unwrap_or(0.0);
+        println!("WATCH ids={watched:?} focus_after={focus_after_s:?} all_done={all_done:.1}s after_focus_point={:.1}s", all_done - at);
     }
     if let (Some(delay), Some((id, _))) = (play_after_s, played) {
         let rel = |ms: f64| (ms / 1000.0 - delay).max(0.0);

@@ -51,6 +51,8 @@ pub(crate) struct ModelJobs {
     pub(crate) whole: usize,
 }
 
+/// Both queues are kept in `(focus rank, arrival)` order: tracks the user is looking at (see `focus`) first, by their
+/// place in the focus list, then every other track in the order it joined the run. Without a focus nothing moves.
 #[derive(Default)]
 struct Jobs {
     grid_queue: VecDeque<AnalysisWorkItem>,
@@ -58,6 +60,65 @@ struct Jobs {
     now: HashMap<i64, Arc<AtomicBool>>,
     preempted: HashSet<i64>,
     sealed: bool,
+    focus: HashMap<i64, usize>,
+    arrival: HashMap<i64, i64>,
+    last_back: i64,
+    last_front: i64,
+}
+
+/// The most tracks a focus may name: the rows on screen and a band around them, never the library.
+pub(crate) const MAX_FOCUS: usize = 400;
+
+type Rank = (usize, i64);
+
+impl Jobs {
+    fn rank(&self, track_id: i64) -> Rank {
+        (
+            self.focus.get(&track_id).copied().unwrap_or(usize::MAX),
+            self.arrival.get(&track_id).copied().unwrap_or(i64::MAX),
+        )
+    }
+
+    fn is_focused(&self, track_id: i64) -> bool {
+        self.focus.contains_key(&track_id)
+    }
+
+    fn arrive_back(&mut self, track_id: i64) {
+        if !self.arrival.contains_key(&track_id) {
+            self.last_back += 1;
+            self.arrival.insert(track_id, self.last_back);
+        }
+    }
+
+    fn arrive_front(&mut self, track_id: i64) {
+        self.last_front -= 1;
+        self.arrival.insert(track_id, self.last_front);
+    }
+
+    /// Puts `item` where its rank belongs; without a focus that is the back, as it always was.
+    fn insert_ranked(&self, queue: &mut VecDeque<AnalysisWorkItem>, item: AnalysisWorkItem) {
+        if self.focus.is_empty() {
+            queue.push_back(item);
+            return;
+        }
+        let rank = self.rank(item.0);
+        let at = queue.partition_point(|(id, _)| self.rank(*id) <= rank);
+        queue.insert(at, item);
+    }
+
+    fn sort_ranked(&self, queue: &mut VecDeque<AnalysisWorkItem>) {
+        queue.make_contiguous().sort_by_cached_key(|(id, _)| self.rank(*id));
+    }
+
+    fn focus_rank(&self, item: Option<&AnalysisWorkItem>) -> Option<usize> {
+        item.and_then(|(id, _)| self.focus.get(id).copied())
+    }
+
+    fn queue_grid(&mut self, item: AnalysisWorkItem) {
+        let mut grid_queue = std::mem::take(&mut self.grid_queue);
+        self.insert_ranked(&mut grid_queue, item);
+        self.grid_queue = grid_queue;
+    }
 }
 
 pub(crate) struct BackgroundTask {
@@ -162,6 +223,12 @@ impl AnalysisCoordinator {
         self.cancel.store(false, Ordering::Relaxed);
         self.completed.store(0, Ordering::Relaxed);
         self.errors.store(0, Ordering::Relaxed);
+        {
+            let mut jobs = self.jobs.lock().expect("analysis jobs lock");
+            let mut deque = queue.lock().expect("analysis queue lock");
+            deque.iter().for_each(|(id, _)| jobs.arrive_back(*id));
+            jobs.sort_ranked(&mut deque);
+        }
         *self.active_queue.lock().expect("analysis coordinator lock") = Some(queue);
         self.total.store(total, Ordering::Relaxed);
         let mut reasons = self.pause_reasons.lock().expect("analysis pause lock");
@@ -188,6 +255,7 @@ impl AnalysisCoordinator {
         let mut jobs = self.jobs.lock().expect("analysis jobs lock");
         jobs.sealed = false;
         jobs.grid_queue.clear();
+        jobs.arrival.clear();
         drop(jobs);
         self.running.store(false, Ordering::Release);
     }
@@ -298,7 +366,24 @@ impl AnalysisCoordinator {
         if jobs.preempted.remove(&item.0) || self.is_cancelled() {
             return;
         }
-        jobs.grid_queue.push_back(item);
+        jobs.queue_grid(item);
+    }
+
+    /// The tracks the user is looking at, most wanted first (the rows on screen, then a band around them). Queued
+    /// tracks among them move ahead of the rest in that order, and each one that has room for the beat model is
+    /// analysed whole; tracks already running carry on untouched. The focus outlives runs, so the next run starts
+    /// with it, and a new focus replaces the old one: tracks that leave it go back to their place in the run.
+    pub(crate) fn focus(&self, track_ids: &[i64]) {
+        let mut guard = self.jobs.lock().expect("analysis jobs lock");
+        let jobs = &mut *guard;
+        jobs.focus.clear();
+        for (rank, id) in track_ids.iter().take(MAX_FOCUS).enumerate() {
+            jobs.focus.entry(*id).or_insert(rank);
+        }
+        self.with_queue(|queue| jobs.sort_ranked(queue));
+        let mut grid_queue = std::mem::take(&mut jobs.grid_queue);
+        jobs.sort_ranked(&mut grid_queue);
+        jobs.grid_queue = grid_queue;
     }
 
     /// Pops the next track and registers it as a background job in one step, so a priority request can
@@ -319,6 +404,14 @@ impl AnalysisCoordinator {
         let jobs = &mut *guard;
         let model_running = jobs.background.values().filter(|job| job.stage != Stage::Fast).count();
         let model_room = model_running < limits.max;
+        if model_room {
+            let focused_grid = jobs.focus_rank(jobs.grid_queue.front());
+            let focused_fresh = self.with_queue(|queue| jobs.focus_rank(queue.front())).flatten();
+            if focused_grid.is_some_and(|grid| focused_fresh.is_none_or(|fresh| grid < fresh)) {
+                let (id, path) = jobs.grid_queue.pop_front()?;
+                return Some(self.register_background(jobs, id, path, Stage::Grid, threads_for));
+            }
+        }
         let fresh = loop {
             let Some((id, path)) = self.with_queue(|queue| queue.pop_front()).flatten() else {
                 break None;
@@ -327,10 +420,11 @@ impl AnalysisCoordinator {
                 () if !staged => Stage::Whole,
                 () if stages_of(id) & FAST_STAGES == FAST_STAGES => Stage::Grid,
                 () if model_running < limits.whole.min(limits.max) => Stage::Whole,
+                () if model_room && jobs.is_focused(id) => Stage::Whole,
                 () => Stage::Fast,
             };
             match stage {
-                Stage::Grid if !model_room => jobs.grid_queue.push_back((id, path)),
+                Stage::Grid if !model_room => jobs.queue_grid((id, path)),
                 Stage::Whole if !model_room => {
                     self.with_queue(|queue| queue.push_front((id, path)));
                     return None;
@@ -346,6 +440,17 @@ impl AnalysisCoordinator {
             }
             None => return None,
         };
+        Some(self.register_background(jobs, track_id, source_path, stage, threads_for))
+    }
+
+    fn register_background(
+        &self,
+        jobs: &mut Jobs,
+        track_id: i64,
+        source_path: PathBuf,
+        stage: Stage,
+        threads_for: impl FnOnce(usize) -> usize,
+    ) -> BackgroundTask {
         let waiting = self.with_queue(|queue| queue.len()).unwrap_or(0) + jobs.grid_queue.len();
         let threads = match stage {
             Stage::Fast => 1,
@@ -353,7 +458,7 @@ impl AnalysisCoordinator {
         };
         let cancel = Arc::new(AtomicBool::new(false));
         jobs.background.insert(track_id, BackgroundJob { cancel: cancel.clone(), threads, stage });
-        Some(BackgroundTask { track_id, source_path, stage, threads, cancel })
+        BackgroundTask { track_id, source_path, stage, threads, cancel }
     }
 
     /// Ends a background job. True when a priority request preempted it (its result is to be dropped).
@@ -423,7 +528,8 @@ impl AnalysisCoordinator {
     /// Adds tracks to the active run and returns how many were new, or `None` when no run can take them: it is
     /// closing (sealed) or has ended. Tracks that are queued, running or between two passes are left alone.
     pub(crate) fn merge_work(&self, items: &[AnalysisWorkItem], front: bool) -> Option<u32> {
-        let jobs = self.jobs.lock().expect("analysis jobs lock");
+        let mut guard = self.jobs.lock().expect("analysis jobs lock");
+        let jobs = &mut *guard;
         if jobs.sealed {
             return None;
         }
@@ -440,14 +546,17 @@ impl AnalysisCoordinator {
                 if let Some(pos) = queue.iter().position(|(id, _)| *id == track_id) {
                     if front && pos > 0 {
                         let existing = queue.remove(pos).unwrap();
-                        queue.push_front(existing);
+                        jobs.arrive_front(track_id);
+                        push_ranked_front(jobs, queue, existing);
                     }
                     continue;
                 }
                 if front {
-                    queue.push_front(item.clone());
+                    jobs.arrive_front(track_id);
+                    push_ranked_front(jobs, queue, item.clone());
                 } else {
-                    queue.push_back(item.clone());
+                    jobs.arrive_back(track_id);
+                    jobs.insert_ranked(queue, item.clone());
                 }
                 added += 1;
             }
@@ -455,6 +564,14 @@ impl AnalysisCoordinator {
         })?;
         self.bump_total(added);
         Some(added)
+    }
+}
+
+fn push_ranked_front(jobs: &Jobs, queue: &mut VecDeque<AnalysisWorkItem>, item: AnalysisWorkItem) {
+    if jobs.focus.is_empty() {
+        queue.push_front(item);
+    } else {
+        jobs.insert_ranked(queue, item);
     }
 }
 

@@ -35,7 +35,8 @@
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
   import LibraryRecoveryPanel from './LibraryRecoveryPanel.svelte';
-  import { pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
+  import { focusAnalysis, pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
+  import { createAnalysisFocus } from '../services/analysis-focus.ts';
   import { createDetailPrefetcher } from '../services/detail-prefetch.ts';
   import {
     getLayout,
@@ -66,7 +67,7 @@
   import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
   import { rowFocusOrder } from '../lib/rowFocus.ts';
   import { artwork } from '../stores/artwork.svelte.ts';
-  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
+  import { rowWindow, rowsOnScreen, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
   import { anchorShift, sameMembers } from '../lib/stableSort.ts';
   import { pendingRowsHtml, skeletonRowsHtml } from '../lib/skeletonRows.ts';
   import { importActivity } from '../stores/import-activity.svelte.ts';
@@ -343,6 +344,13 @@
   });
 
   onDestroy(() => artwork.focusRows(rowFocusOwner, []));
+  const analysisFocus = createAnalysisFocus(focusAnalysis);
+  let onScreen = $derived(rowsOnScreen({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length }));
+  $effect(() => {
+    if (embedded || isUsbView || viewportHeight === 0) return;
+    analysisFocus.request(currentTracks, onScreen.first, onScreen.end);
+  });
+  $effect(() => () => analysisFocus.dispose());
 
   const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
 
