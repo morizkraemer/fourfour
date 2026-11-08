@@ -47,8 +47,8 @@ async function emit(page: Page, event: string, payload: unknown) {
 }
 
 async function dismissAnalysisPrompt(page: Page) {
-  const notNow = page.getByRole('button', { name: 'Not now' });
-  await notNow.click({ timeout: 2000 }).catch(() => undefined);
+  await page.getByRole('button', { name: 'Not now' }).click();
+  await expect(page.locator('.ff-dialog').filter({ hasText: 'Analyze imported tracks?' })).toHaveCount(0);
 }
 
 async function importFolder(page: Page) {
