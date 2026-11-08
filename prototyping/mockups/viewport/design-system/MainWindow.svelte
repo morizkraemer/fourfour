@@ -1,7 +1,7 @@
 <script>
   import {
     SidebarSection, SidebarRow, FilterInput, Kbd, ColumnHeader, TrackRow,
-    DetailPane, PlayerCompact, StatusBar, LevelMeter, Icon,
+    DetailPane, PlayerCompact, StatusBar, LevelMeter, Icon, columnVars,
   } from '../../../viewport/design-system/svelte.js';
   import { MOCK_TRACKS, MOCK_SIDEBAR } from './mock-data.js';
 
@@ -55,7 +55,7 @@
         <Kbd key="⌘F" />
       </div>
       <div class="mw__content">
-        <div class="mw__table">
+        <div class="mw__table" style={columnVars(COLUMNS)}>
           <ColumnHeader columns={COLUMNS} />
           {#each tracks as track}
             <TrackRow {track} columns={COLUMNS} state={track.index === selectedIndex ? 'selected' : 'rest'} />

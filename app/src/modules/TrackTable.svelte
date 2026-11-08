@@ -12,6 +12,7 @@
     ContextMenu,
     DragGhost,
     DropLine,
+    columnVars,
   } from '$ds';
   import {
     library,
@@ -102,14 +103,14 @@
   let scrollSettleTimer = null;
   let ownScrollTop = null;
 
-  const WAVE_HOLD_PX_PER_MS = 3;
-  const WAVE_RELEASE_PX_PER_MS = 1.5;
-  const WAVE_RELEASE_IDLE_MS = 120;
+  const FLING_HOLD_PX_PER_MS = 3;
+  const FLING_RELEASE_PX_PER_MS = 1.5;
+  const FLING_RELEASE_IDLE_MS = 120;
   const SPEED_SAMPLE_MAX_MS = 50;
   let scrollVelocity = $state(0);
-  let waveHeld = $state(false);
+  let flingHeld = $state(false);
   let lastScrollSample = { t: 0, top: 0 };
-  let waveReleaseTimer = null;
+  let flingReleaseTimer = null;
 
   function trackScrollSpeed(top) {
     const now = performance.now();
@@ -119,15 +120,15 @@
     lastScrollSample = { t: now, top };
     scrollVelocity = fresh ? (scrollVelocity + instant) / 2 : instant;
     const speed = Math.abs(scrollVelocity);
-    if (!waveHeld && speed > WAVE_HOLD_PX_PER_MS) waveHeld = true;
-    else if (waveHeld && speed < WAVE_RELEASE_PX_PER_MS) waveHeld = false;
-    clearTimeout(waveReleaseTimer);
-    waveReleaseTimer = setTimeout(scrollStopped, WAVE_RELEASE_IDLE_MS);
+    if (!flingHeld && speed > FLING_HOLD_PX_PER_MS) flingHeld = true;
+    else if (flingHeld && speed < FLING_RELEASE_PX_PER_MS) flingHeld = false;
+    clearTimeout(flingReleaseTimer);
+    flingReleaseTimer = setTimeout(scrollStopped, FLING_RELEASE_IDLE_MS);
   }
 
   function scrollStopped() {
     scrollVelocity = 0;
-    waveHeld = false;
+    flingHeld = false;
   }
 
   function syncScrollWindow() {
@@ -840,6 +841,7 @@
   class="ff-table"
   class:ff-table--embedded={embedded}
   class:ff-table--drop-target={isDropTarget}
+  style={columnVars(columns)}
   data-source-id={effectiveSource}
   onmousedown={() => {}}
   oncontextmenu={openListMenu}
@@ -966,7 +968,7 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
-              holdWave={waveHeld}
+              hold={flingHeld}
               onWaveSeek={track && !isUsbView && !booting ? (progress) => loadTrackAt(track, progress) : undefined}
               onRate={track && !isUsbView && !booting ? (stars) => void commitTrackRating(track.id, stars) : undefined}
             />

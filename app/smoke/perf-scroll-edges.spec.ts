@@ -13,6 +13,8 @@ const STATE = process.env.FF_PERF_EDGES;
 const REPORT = process.env.FF_PERF_EDGES_OUT;
 const VIDEO_DIR = process.env.FF_PERF_EDGES_VIDEO;
 const LABEL = process.env.FF_PERF_LABEL ?? '';
+const CSS_VARIANTS: string[] = process.env.FF_PERF_EDGES_CSS_RUNS ? JSON.parse(process.env.FF_PERF_EDGES_CSS_RUNS) : [process.env.FF_PERF_EDGES_CSS ?? ''];
+let variant = 0;
 const RUNS = Number(process.env.FF_PERF_RUNS ?? 1);
 const PARTS = new Set((process.env.FF_PERF_EDGES_PARTS ?? 'wheel,raf,settle').split(','));
 const WEBKIT = process.env.FF_SMOKE_BROWSER === 'webkit';
@@ -42,7 +44,7 @@ function state(): LoadedState {
 }
 
 function report(kind: string, run: number, data: unknown) {
-  const line = JSON.stringify({ label: LABEL, kind, run, browser: WEBKIT ? 'webkit' : 'chromium', load: loadavg().map(round), data });
+  const line = JSON.stringify({ label: CSS_VARIANTS.length > 1 ? `${LABEL}-css${variant}` : LABEL, kind, run, browser: WEBKIT ? 'webkit' : 'chromium', load: loadavg().map(round), data });
   if (REPORT) appendFileSync(REPORT, `${line}\n`);
   else console.log(line);
 }
@@ -115,7 +117,7 @@ async function open(browser: import('@playwright/test').Browser, payload: Loaded
   await page.goto('/');
   await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
   await page.waitForTimeout(4000);
-  if (process.env.FF_PERF_EDGES_CSS) await page.addStyleTag({ content: process.env.FF_PERF_EDGES_CSS });
+  if (CSS_VARIANTS[variant]) await page.addStyleTag({ content: CSS_VARIANTS[variant] });
   return { context, page, videoStart };
 }
 
@@ -230,6 +232,62 @@ const canvasHash = (page: Page) =>
       .join('|'),
   );
 
+interface TraceEvent {
+  name: string;
+  ph: string;
+  ts: number;
+  dur?: number;
+  tdur?: number;
+  pid: number;
+  tid: number;
+  args?: { name?: string };
+}
+
+const TRACE_PHASES: Record<string, string> = {
+  UpdateLayoutTree: 'style',
+  Layout: 'layout',
+  PrePaint: 'prepaint',
+  Paint: 'paint',
+  Layerize: 'layerize',
+  'LocalFrameView::RunPaintLifecyclePhase': 'paintPhase',
+  Commit: 'commit',
+  FunctionCall: 'script',
+  FireAnimationFrame: 'raf',
+  EventDispatch: 'event',
+  MajorGC: 'gc',
+  MinorGC: 'gc',
+  'V8.GC_SCAVENGER': 'gc',
+  RunTask: 'task',
+};
+
+function traceSplit(events: TraceEvent[], frames: number) {
+  const main = events.find((e) => e.name === 'thread_name' && e.args?.name === 'CrRendererMain' && events.some((x) => x.pid === e.pid && x.name === 'FireAnimationFrame'));
+  const totals: Record<string, number> = {};
+  for (const e of events) {
+    if (!main || e.pid !== main.pid || e.tid !== main.tid || e.ph !== 'X' || e.dur === undefined) continue;
+    const phase = TRACE_PHASES[e.name];
+    if (phase) totals[phase] = (totals[phase] ?? 0) + (e.tdur ?? e.dur) / 1000;
+  }
+  return Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, round(v / frames)]));
+}
+
+interface CpuProfile {
+  nodes: { id: number; callFrame: { functionName: string; url: string; lineNumber: number }; children?: number[] }[];
+  samples: number[];
+  timeDeltas: number[];
+}
+
+function topSelf(profile: CpuProfile, frames: number) {
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const self = new Map<string, number>();
+  profile.samples.forEach((id, i) => {
+    const f = byId.get(id)!.callFrame;
+    const key = `${f.functionName || '(anon)'} ${f.url.split('/').pop()}:${f.lineNumber}`;
+    self.set(key, (self.get(key) ?? 0) + (profile.timeDeltas[i] ?? 0) / 1000);
+  });
+  return [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, v]) => `${round(v / frames)} ${k}`);
+}
+
 function blankFromVideo(file: string, box: { x: number; y: number; w: number; h: number }) {
   const raw = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', `crop=${box.w}:${box.h}:${box.x}:${box.y},format=gray`, '-f', 'rawvideo', '-'], { maxBuffer: 2 ** 31 });
   const size = box.w * box.h;
@@ -268,6 +326,7 @@ test.describe('scroll edges', () => {
   test('blank row slots and fling frames', async ({ browser }) => {
     const payload = state();
     for (let run = 0; run < RUNS; run++) {
+      variant = run % CSS_VARIANTS.length;
       const { context, page, videoStart } = await open(browser, payload, run === 0);
       const box = await listBox(page);
       const scenarios: Record<string, { steps: number; delta: number; gap: number }> = {
@@ -332,18 +391,18 @@ test.describe('scroll edges', () => {
         let deltas: number[] = [];
         const cdp = WEBKIT ? null : await context.newCDPSession(page);
         const metrics = async () => {
-          if (!cdp) return { script: 0, layout: 0, task: 0 };
+          if (!cdp) return { script: 0, layout: 0, task: 0, cpu: 0 };
           await cdp.send('Performance.enable');
           const { metrics: m } = (await cdp.send('Performance.getMetrics')) as { metrics: { name: string; value: number }[] };
           const get = (name: string) => (m.find((x) => x.name === name)?.value ?? 0) * 1000;
-          return { script: get('ScriptDuration'), layout: get('LayoutDuration') + get('RecalcStyleDuration'), task: get('TaskDuration') };
+          return { script: get('ScriptDuration'), layout: get('LayoutDuration') + get('RecalcStyleDuration'), task: get('TaskDuration'), cpu: get('ThreadTime') };
         };
         const before = await metrics();
         const samples = await frames(page, async () => {
           deltas = await rafFling(page, Number(process.env.FF_PERF_FLING_FRAMES ?? 90));
         });
         const after = await metrics();
-        const split = { script: round(after.script - before.script), layoutStyle: round(after.layout - before.layout), rest: round(after.task - before.task - (after.script - before.script) - (after.layout - before.layout)) };
+        const split = { cpu: round(after.cpu - before.cpu), script: round(after.script - before.script), layoutStyle: round(after.layout - before.layout), rest: round(after.task - before.task - (after.script - before.script) - (after.layout - before.layout)) };
         videoMarks.push({ name: 'raf', from, to: Date.now() - t0 });
         const f = deltas.slice(1);
         report('raf-fling', run, {
@@ -352,10 +411,32 @@ test.describe('scroll edges', () => {
           p50: round(percentile(f, 50)),
           p95: round(percentile(f, 95)),
           max: round(Math.max(...f)),
+          over16: f.filter((d) => d > 16.7).length,
           over25: f.filter((d) => d > 25).length,
           over50: f.filter((d) => d > 50).length,
           split,
         });
+      }
+      if (PARTS.has('trace') && !WEBKIT) {
+        await page.waitForTimeout(800);
+        const cdp = await context.newCDPSession(page);
+        const events: TraceEvent[] = [];
+        cdp.on('Tracing.dataCollected', (e: { value: TraceEvent[] }) => events.push(...e.value));
+        const done = new Promise<void>((resolve) => cdp.once('Tracing.tracingComplete', () => resolve()));
+        await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline,blink,cc', transferMode: 'ReportEvents' });
+        const count = Number(process.env.FF_PERF_FLING_FRAMES ?? 90);
+        const deltas = await rafFling(page, count);
+        await cdp.send('Tracing.end');
+        await done;
+        if (process.env.FF_PERF_EDGES_CPU) {
+          await cdp.send('Profiler.enable');
+          await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
+          await cdp.send('Profiler.start');
+          await rafFling(page, count);
+          const { profile } = (await cdp.send('Profiler.stop')) as { profile: CpuProfile };
+          report('cpu-fling', run, topSelf(profile, count));
+        }
+        report('trace-fling', run, { frames: count, mean: round(deltas.slice(1).reduce((a, b) => a + b, 0) / (count - 1)), perFrameMs: traceSplit(events, count), nodes: await page.evaluate(() => document.querySelectorAll('.ff-table__body *').length) });
       }
       if (PARTS.has('settle')) {
         const shots: string[] = [];
