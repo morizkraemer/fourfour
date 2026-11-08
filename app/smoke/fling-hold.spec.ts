@@ -24,16 +24,23 @@ function readVisibleRows(): RowCells[] {
 
 const visibleRows = (page: Page) => page.evaluate(`(${readVisibleRows.toString()})()`) as Promise<RowCells[]>;
 
-const flingAndReadHeld = (page: Page) =>
+const flingFrames = (page: Page) =>
   page.evaluate(
     (read) =>
-      new Promise<RowCells[]>((resolve) => {
+      new Promise<RowCells[][]>((resolve) => {
         const scroller = document.querySelector('.ff-table__scroll') as HTMLElement;
+        const frames: RowCells[][] = [];
+        const onScroll = () => requestAnimationFrame(() => frames.push((0, eval)(`(${read})()`)));
+        scroller.addEventListener('scroll', onScroll);
         let frame = 0;
         const step = () => {
           scroller.scrollTop += 600;
           if (++frame < 12) requestAnimationFrame(step);
-          else requestAnimationFrame(() => requestAnimationFrame(() => resolve((0, eval)(`(${read})()`))));
+          else
+            setTimeout(() => {
+              scroller.removeEventListener('scroll', onScroll);
+              resolve(frames);
+            }, 400);
         };
         requestAnimationFrame(step);
       }),
@@ -47,15 +54,19 @@ test('a fast fling shows title and artist at once and fills the other cells when
   await page.goto('/');
   await page.locator('[data-track-row]').first().waitFor();
 
-  const held = await flingAndReadHeld(page);
-  expect(held.length).toBeGreaterThan(10);
-  for (const row of held) {
-    const track = state.tracks[row.index];
-    expect(row.title).toBe(track.title);
-    expect(row.artist).toBe(track.artist);
+  const frames = await flingFrames(page);
+  expect(frames.length).toBeGreaterThan(3);
+  for (const rows of frames) {
+    expect(rows.length).toBeGreaterThan(10);
+    for (const row of rows) {
+      const track = state.tracks[row.index];
+      expect(row.title).toBe(track.title);
+      expect(row.artist).toBe(track.artist);
+    }
   }
-  expect(held.filter((row) => row.bpm === '').length, 'rows that changed track hold their other cells').toBeGreaterThan(5);
-  expect(held.filter((row) => row.bpm === '').every((row) => row.key === '—')).toBe(true);
+  const held = frames.flat().filter((row) => row.bpm === '');
+  expect(held.length, 'rows that changed track hold their other cells').toBeGreaterThan(5);
+  expect(held.every((row) => row.key === '—')).toBe(true);
 
   await expect
     .poll(async () => (await visibleRows(page)).every((row) => row.bpm !== '' && row.key !== '—'))
