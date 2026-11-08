@@ -4088,6 +4088,45 @@ Answer to first rows is lower in 2-3 of 3 in every cell (80-160 ms), first click
 
 Scratch (`~/.cache/r163*`) and the second worktree are deleted after this item.
 
+## R170 first select (2026-11-08, `r170-first-select`)
+
+Branch from `ov-1028`. Measurement only, no product change kept. Linux `dev` box, load 12-35 from other workers during every run, headless Chromium and Playwright WebKit, the r95 10k and 50k payloads, `perf-budget.spec.ts` parts `boot` (cold open to first rows, first sort click right after) and `early` (select row 5 at +3,000 ms, `FF_PERF_FRAMES=1`, `FF_PERF_ACTIONS=select`). Base = `ov-1028` in a second worktree, runs interleaved (base, new, base, new, ...), 3 pairs per cell.
+
+### Tried
+
+The hidden mount: after the first screen and after the `Detail` chunk is loaded (last step of the idle prefetch queue), App mounted `Detail` once in `<div hidden inert aria-hidden="true">` with a `warm` prop that renders the single-track `DetailPane` with placeholder data (no store reads, no focus), and removed it after two animation frames. The pane cannot stay mounted for reuse: `Detail.svelte` wraps the single-track pane in `{#key track.id}` and the slot only exists while a row is selected, so a kept instance would not be the one the first select shows. A throwaway mount can only warm code paths and CSS.
+
+### Where a first select goes (base, Chromium, ms)
+
+| Size | click to painted | script | layout+style | rest (paint, commit, compositor floor about 40) |
+|---|---|---|---|---|
+| 10k | 133-219 | 23-46 | 9-23 | 67-92 |
+| 50k | 117-148 | 24-30 | 10 | 61-85 |
+
+Script is only 20-25 percent of a first select. The rest is the table narrowing to make room (layout and paint of 40 rows) and the compositor floor. The mount itself cannot be more than about 25 ms of it.
+
+### Before / after (ms, 3 interleaved pairs, medians; range in brackets)
+
+| Metric | base | hidden mount | Verdict |
+|---|---|---|---|
+| Chromium 10k first select | 156 (133-219) | 146 (113-163) | within noise |
+| Chromium 50k first select | 141 (117-148) | 135 (130-143) | within noise |
+| WebKit 50k first select | 346 (283-1,209) | 347 (207-707) | within noise |
+| Chromium 10k cold open to first rows | 1,086 (886-2,195) | 1,031 (811-1,099) | same |
+| Chromium 50k cold open to first rows | 2,374 (2,035-2,479) | 2,311 (2,256-2,719) | same (harness payload inflates it, R157) |
+| WebKit 50k cold open to first rows | 5,218 (4,637-5,873) | 5,413 (5,216-13,260) | same (one outlier at load 31) |
+| Chromium 10k first sort click | 136 (125-287) | 149 (130-157) | same |
+| Chromium 50k first sort click | 241 (230-267) | 250 (230-264) | same |
+| WebKit 50k first sort click | 348 (306-408) | 434 (260-841) | noise, not claimed |
+
+Script time of the select fell by 7-10 ms at the median (10k 23 to 18, 50k 26 to 22), which is all the throwaway mount bought. Wall time did not move outside the run-to-run range, which at load 12-35 is 30-80 ms. Screen and DOM were not compared because nothing is kept. Memory of a persistent hidden pane was not measured: the design was dropped, and the throwaway mount is freed two frames after it appears.
+
+### Decision
+
+Not landed. The R157 finding stands: the chunk is prefetched, the cost is the mount, and the mount is a small part of the click. The larger parts (relayout of the table when the inspector takes its width, paint) need a visible-layout change (reserve the inspector column or overlay it), which changes what is on screen and needs Merlin. Cheaper first mount (lazy cue editor or waveform) would save at most a few ms of script and was not tried.
+
+Scratch (`~/.cache/r170*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
