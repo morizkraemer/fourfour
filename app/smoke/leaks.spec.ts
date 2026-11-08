@@ -193,7 +193,7 @@ const pinning: Record<string, PinningScenario> = {
   'command palette setting choice clicked, then closed': {
     run: async ({ page }) => {
       await page.keyboard.press('Control+k');
-      await page.keyboard.type('Analysis engine');
+      await page.keyboard.type('Sample rate');
       await page.locator('.ff-cp__choice').first().click();
       await page.mouse.click(4, 4);
       await expect(page.locator('.ff-cp')).toHaveCount(0);
