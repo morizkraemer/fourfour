@@ -4182,6 +4182,124 @@ Backend latency test with the fake engine (`time_until_rows_on_screen_are_analys
 
 Scratch (`~/.cache/r171*`) is deleted after this item.
 
+## R175 scroll (2026-11-08, `r175-scroll`)
+
+Merlin on build 1419 (`parked-all-v20`, 1e1e722), on his Mac: "scrolling is still bad", with a 1.7 s screen recording (3136x2008, 60 fps). Branch `r175-scroll` from `parked-all-v20`. Linux `dev` box, load 4-11, headless Chromium (device scale 2, compositor scrolling) and Playwright WebKit.
+
+### What the recording shows (ground truth)
+
+98 frames, All Tracks with 285 tracks, analysis running in the background ("Analyzing 2/10"). Row height 28 px, 26-27 rows on screen. Speeds are from row motion between frames.
+
+| Frames | What happens |
+|---|---|
+| 1-4 | At rest at the top. |
+| 5-17 | Trackpad flick down. Frame 6 jumps 213 px (7.6 rows), then about 115 px per frame (4 rows, about 7,000 px/s). The bottom 7-10 of 26 row slots are empty in every frame (a third of the list); frames 8, 10 and 12 also have a 3-7 row hole in the middle. The edge is always a whole row, never a cut row. |
+| 6-8 | The list stops at row 27 although rows 28-39 were built at rest (12 rows of overscan, checked: 42 rows in the DOM at rest, 29 on screen) and drawn with waveforms (they show their waveforms in frames 11-13). Rows that exist are not on screen. |
+| 9-17 | The filled part grows in steps of 6-10 rows every 1-2 frames (the page's own frames, about 30 fps) while the scroller moves 4 rows every frame. |
+| 13-38 | Rows that come in show only title and artist: no number, waveform, cover, BPM, key or time (R166 hold, R159 waveform hold). From frame 15 every row on screen is like that, for 24 frames (400 ms). |
+| 18-38 | Slowing from about 3,700 to 800 px/s. Still 1-8 empty slots at the bottom, 1-3 at the end. |
+| 39 / 43 | BPM and key come back; waveforms and covers 4 frames (67 ms) later. |
+| 44-62 | At rest. |
+| 63-73 | Flick up, about 78 rows in 12 frames (about 11,000 px/s). Top 1-11 slots empty in 63-66; frames 67-69 are almost entirely empty (3, 1 and 10 rows on screen); 70-73 have the top 8-15 slots empty and held rows below. |
+| 74-82 | Reaches the top and rubber-bands; rows still held until frame 82, BPM and waveforms back in frame 83. |
+
+No wrong or stale rows (every row shown is the right track in the right place), no jumps, no repeated frames: the scrolling thread moves the list every frame; the page content follows at about half that rate. The overlay scrollbar does not show in the recording.
+
+### Root cause
+
+- **Blank rows: the Mac shows only rows the page has painted, and the page paints only about the visible area.** WebKit moves the list on its scrolling thread and shows what the last page frame painted. Frames 6-8 show that rows already in the DOM (the rest overscan) do not reach the screen: the overscan and R159's lead only help a compositor that paints ahead of the viewport, which headless Chromium does and WKWebView here does not. With the page producing a frame every 2 display frames (the background analysis keeps the main thread busy), each page frame covers the rows visible at its own scroll offset, and by the time it is shown the scroller is 4-15 rows further. Why WebKit does not paint the overscan rows (row layers or tile coverage) cannot be proven without a Mac; the whole-row edges in every frame point at per-row layers (R118: each row has a composited canvas).
+- **Incomplete rows: the R159/R166 hold.** Above 3 px/ms rows that come in show only title and artist until the fling slows below 1.5 px/ms. At this flick that is 24-25 frames each way. It is the intended placeholder; Merlin reads it as "bad".
+- R159-R166 were measured on headless Chromium, which paints ahead of a threaded scroll, so their numbers did not carry over to the Mac.
+
+### Options tried
+
+| Option | Result |
+|---|---|
+| Bigger pool or overscan | Rows built ahead are not painted on the Mac (frames 6-8), and R159 measured 20 rows of overscan as +3 ms per fling frame. Not pursued. |
+| Static stand-in, `content-visibility` | Same problem: off-screen content is what WebKit does not paint ahead. `content-visibility` would skip exactly those rows. Not pursued. |
+| Cheaper rows so the window fits a frame | Already done in R164/R166 (-24% thread time); the hold is what makes rows incomplete. |
+| **Scroll on the page thread** | Chosen: offset and rows reach the screen in the same page frame, so there is nothing for a scrolling thread to run ahead of. |
+
+### What changed
+
+- `app/src/modules/TrackTable.svelte`: the table takes wheel and trackpad input itself (non-passive `wheel` listener on the scroller, `preventDefault`). The deltas are queued and applied to `scrollTop` at the start of the same animation frame that computes the row window, so the scroll offset and the rows for it are painted together. Ctrl+wheel (pinch zoom) is left to the browser; during an embedded drag the existing scroll pin wins.
+- The fling hold now starts at 16 px/ms (about 9.5 rows per frame) and ends below 10 px/ms; it was 3 / 1.5. At trackpad speeds rows stay complete.
+- `?exp=threaded-scroll` restores the old path (native threaded scrolling, old hold thresholds), for A/B in the harness.
+- `app/src/lib/wheelScroll.ts`: wheel delta to pixels (line and page modes, Shift for sideways) and a queue that keeps sub-pixel remainders; unit tests.
+- `app/smoke/wheel-scroll.spec.ts` (normal smoke): a 7 px/ms wheel fling over 3,000 rows has no empty and no half-filled row slot in any frame and lands on the exact offset; Ctrl+wheel is not taken.
+
+Trade-offs: the list no longer rubber-bands at its ends; a busy page thread now shows as a slower scroll step instead of empty rows; scrollbar drags and keys still scroll natively.
+
+### Before / after
+
+Base = `?exp=threaded-scroll` in the same build, runs interleaved (base, new, base, ...), 3 runs each. `pre` = frames where a row slot on screen is empty at the start of a frame (what a threaded scroller shows); `incomplete` = rows on screen without BPM (held). Note: headless Chromium at scale 2 hands the page half the wheel delta (a device-scale emulation artefact; WebKit and Chromium at scale 1 give the full delta), so new runs get the synthetic gesture at twice the nominal speed and distance, and the measured px/ms is what counts.
+
+Chromium scale 2, `Input.synthesizeScrollGesture`, 285 tracks (Merlin's list):
+
+| Gesture | Build | blank frames (`pre`) | frames with incomplete rows | incomplete rows per frame (mean / max) | frame gap mean / p95 ms | load |
+|---|---|---|---|---|---|---|
+| 6,000 px/s | base | 0, 0, 0 of 85-88 | 43, 44, 44 | 14.4 / 30 | 23.1-23.6 / 33.6-34.0 | 4.5-6.0 |
+| 6,000 px/s | new | 0, 0, 0 of 98-104 | 0, 0, 0 | 0 / 0 | 19.4-20.4 / 25.9-28.7 | 4.7-6.6 |
+| 12,000 px/s | base | 0, 0, 0 of 98-99 | 27, 26, 25 | 7.4 / 30 | 19.9 / 33.5-33.6 | 4.5-6.5 |
+| 12,000 px/s | new | 0, 0, 0 of 103-107 | 0, 0, 0 | 0 / 0 | 18.4-19.3 / 25.5-29.9 | 4.7-6.8 |
+
+Chromium scale 2, 10k tracks (longer list, the flick does not hit the end):
+
+| Gesture | Build | blank frames (`pre`, max slots) | frames with incomplete rows | incomplete rows per frame mean | measured px/ms (peak) | frame gap mean / p95 ms |
+|---|---|---|---|---|---|---|
+| 6,000 px/s | base | 0, 0, 0 | 42, 49, 48 | 19.2-19.6 | 4.4-4.5 (6.4-7.4) | 27.4-32.5 / 35-66 |
+| 6,000 px/s | new | 0, 0, 0 | 0, 0, 0 | 0 | 4.2-4.5 (8.2-10.4) | 21.9-32.1 / 30-55 |
+| 12,000 px/s | base | 12 (26), 6 (2), 1 (3) | 33, 48, 51 | 14.4-21.5 | 8.8-9.2 (13-18) | 28.5-37.3 / 42-85 |
+| 12,000 px/s | new | 0, 0, 0 | 6, 0, 0 | 0-2.6 | 8.7-9.1 (17-27) | 25.1-32.3 / 36-52 |
+
+Pixels (video of the first pair, empty rows in title and artist): 12,000 px/s base 25 of 53 frames, up to 28 slots; new 13 of 53, up to 6. The new frames were looked at: rows are all in the DOM (`pre` 0) and the gap is headless Chromium's software raster not keeping up with a main-thread scroll (checkerboard in the middle of the list); WebKit paints during its own frame, so this does not apply there.
+
+Fling frame cost, Chromium scale 2, `scrollTop` fling of 1,430 frames over 10k (7 rows per frame, about 11.7 px/ms, the speed of the recorded flick), 2 pairs:
+
+| Build | thread ms per frame | mean / p95 ms | over 16.7 / 25 / 50 ms | rows incomplete |
+|---|---|---|---|---|
+| base (held) | 15.1, 14.6 | 17.3-17.4 / 21.5-22.3 | 724-781 / 20-29 / 1-3 of 1,430 | 29.3 per frame in every frame |
+| new (full rows) | 24.1, 22.4 | 23.8-24.9 / 33.6-34.0 | 1,429 / 306-441 / 4-7 | 0 |
+
+Full rows cost about 8 ms more thread time per frame at 7 rows per frame on this box; that is the price of rows that are complete while they move. At Merlin's sustained 4 rows per frame it is about half of that.
+
+Headless WebKit (Playwright, scale 2, software compositing, the list scrolls on the main thread there; frames 115-150 ms), 10k, `page.mouse.wheel` every 16 ms, 3 runs each:
+
+| Wheel | Build | blank frames (`pre`, max slots) | frames with incomplete rows | measured px/ms |
+|---|---|---|---|---|
+| 100 px per event | base | 0, 0, 0 of 69-73 | 0, 0, 0 | 0.7 |
+| 100 px per event | new | 0, 0, 0 of 71-76 | 0, 0, 0 | 0.7 |
+| 300 px per event | base | 6, 15, 11 of 66 (max 3-4) | 3, 9, 9 | 1.9-2.1 |
+| 300 px per event | new | 0, 0, 0 of 65-69 | 0, 0, 0 | 2.0-2.4 |
+| 1,200 px per event | base | 40, 39, 39 of 46-47 (max 30) | 6, 7, 21 | 7.1-8.1 |
+| 1,200 px per event | new | 0, 0, 0 of 48 | 0, 3, 0 | 7.1-7.7 |
+
+In WebKit the old path already shows blank slots at frame start once wheel events move the offset before the page's frame; the new path has none. A `scrollTop` fling of 150 frames over 10k (67 rows per frame, far above the hold threshold) holds in both builds and costs the same (mean 156-168 ms base, 169-172 new).
+
+### Identity
+
+After settle (slow wheel to three places, 1.5 s, then a fling and 1.5 s), base against new: list screenshot, visible row text and canvas pixels identical at every place, Chromium scale 1 and WebKit scale 2, 10k. (At Chromium scale 2 the halved headless wheel delta puts the new build at other offsets, so that pair is not comparable; the post-fling place is identical there too.) No row markup or style changed.
+
+### Not done
+
+- Not measured on the Mac. Whether WKWebView keeps 60 fps with page-thread scrolling while analysis runs is the open question; the fallback is `?exp=threaded-scroll` (dev only) or reverting `f2ffd09`.
+- Rubber-band at the list ends is gone; if Merlin misses it, it can be drawn by the page.
+- Scrollbar drag still scrolls on WebKit's scrolling thread and can still show blank rows at speed.
+
+### Check on the Mac
+
+All Tracks, list at the top, analysis running if possible. Two fingers on the trackpad: a firm flick down and let it coast to a stop (the recording's flick, about 7,000 px/s), then a firm flick up back to the top. Repeat three times, then scroll slowly up and down. Expect: no empty rows at either edge in any moment, every row keeps its number, waveform, cover, BPM and key while moving, and the motion feels as smooth as before. Known change: no bounce at the top and bottom. If it stutters, note when (during analysis or not).
+
+### Validation
+
+`npx vitest run`: 124 files passed, 11 skipped; 1083 tests passed, 10 skipped. `npm run check`: 0 errors, 0 warnings. Chromium smoke (`FF_SMOKE_PORT=5801`, load 9): 183 passed, 47 skipped. WebKit smoke (`FF_SMOKE_BROWSER=webkit FF_SMOKE_PORT=5802`, load 12): 183 passed, 47 skipped (a first run failed the new Ctrl+wheel check: WebKit scrolls a synthetic Ctrl+wheel itself; the check now asserts only that the table leaves the event alone).
+
+Lab card `r159-scroll-edges` round 2 (backlog): old and new clip, 10k list, 10,000 px/s, Chromium scale 2, half speed.
+
+### Harness
+
+`perf-scroll-edges.spec.ts` gains `FF_PERF_EDGES_LIMIT` (list size), `FF_PERF_EDGES_SPEEDS`, `FF_PERF_EDGES_CLIP_SPEED`, `FF_PERF_EDGES_QUERY_RUNS` (URL query per run, for `?exp=` A/B in one build), `FF_PERF_EDGES_GESTURE_SCALE_RUNS` (gesture scale per run), a `rest` report (rows in the DOM at rest), incomplete rows per frame and frame gaps. Scratch (`~/.cache/r175*`) is deleted after this item.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
