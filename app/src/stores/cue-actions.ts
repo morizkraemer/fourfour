@@ -65,8 +65,9 @@ export function clearAllCues(): void {
   if (track) editCues(track.id, (cues) => (cues.length ? [] : cues));
 }
 
-export function jumpToCue(cue: Pick<Cue, 'timeMs'>): Promise<void> {
-  return seekToMs(cue.timeMs);
+/** A memory cue fires like a hot cue pad: jump to it (on the grid when Q is on) and play. */
+export function fireMemoryCue(cue: Pick<Cue, 'timeMs'>): Promise<void> {
+  return seekToMsAndPlay(quantizeMs(player.track?.beats ?? [], cue.timeMs));
 }
 
 export function deleteHotCue(slot: number): void {

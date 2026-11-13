@@ -8,7 +8,50 @@
   gap: 10px;
   box-sizing: border-box;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ff-border-hi) transparent;
   user-select: none;
+}
+
+.ff-inspector > * {
+  flex-shrink: 0;
+}
+
+.ff-inspector--closable {
+  position: relative;
+}
+
+.ff-inspector--closable .ff-inspector__id {
+  padding-right: 28px;
+}
+
+.ff-inspector__close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ff-radius-md);
+  background: none;
+  color: var(--ff-text-mid);
+  cursor: pointer;
+}
+
+.ff-inspector__close:hover {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.ff-inspector__close:focus-visible {
+  outline: 1px solid var(--ff-border-hi);
+  outline-offset: -2px;
 }
 
 .ff-inspector__id {

@@ -20,7 +20,7 @@
   import {
     addMemoryCueAtPlayhead,
     deleteCue,
-    jumpToCue,
+    fireMemoryCue,
     deleteHotCue,
     moveHotCue,
     recolorCue,
@@ -96,7 +96,7 @@
   function pressMemoryChip(cue, altHeld) {
     if (!player.track) return;
     if (altHeld) deleteCue(player.track.id, cueKey(cue));
-    else void jumpToCue(cue);
+    else void fireMemoryCue(cue);
   }
 
   function openEditor(e, pad) {

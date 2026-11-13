@@ -1,6 +1,6 @@
 import { player } from './player.svelte.ts';
 import { cuesOf } from './cues.svelte.ts';
-import { addHotCueAtPlayhead, deleteCue, triggerHotCue } from './cue-actions.ts';
+import { addHotCueAtPlayhead, deleteCue, fireMemoryCue, triggerHotCue } from './cue-actions.ts';
 import { seekTrackToMs } from './inspector-seek.ts';
 import { hotCueIn } from '../lib/cues.ts';
 import { padAction } from '../lib/padModifier.ts';
@@ -18,4 +18,10 @@ export async function pressInspectorPad(track: { id: number }, slot: number, alt
   } else if (cue) {
     await seekTrackToMs(track, cue.timeMs);
   }
+}
+
+/** A cue chip's "jump" in the inspector: a memory cue of the loaded track fires like a pad (jump and play); anything else only jumps (loading the track first). */
+export async function jumpToInspectorCue(track: { id: number }, chip: { timeMs: number; padded: boolean }): Promise<void> {
+  if (!chip.padded && player.track?.id === track.id) await fireMemoryCue(chip);
+  else await seekTrackToMs(track, chip.timeMs);
 }

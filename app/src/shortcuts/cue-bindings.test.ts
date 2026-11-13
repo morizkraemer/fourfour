@@ -59,15 +59,20 @@ describe('cue shortcuts', () => {
   });
 
   it('gives no two actions the same binding', () => {
-    const bindings = actions.map((a) => a.defaultBinding).filter((b): b is string => b !== null);
+    const bindings = actions
+      .filter((a) => !a.id.endsWith('.digit'))
+      .map((a) => a.defaultBinding)
+      .filter((b): b is string => b !== null);
     expect(new Set(bindings).size).toBe(bindings.length);
   });
 
-  it('keeps the plain 1 to 9 keys for favourites', () => {
-    for (const action of cueActions) expect(action.defaultBinding ?? '').not.toMatch(/^\d$/);
+  it('shares the plain 1 to 8 keys between hot cues and favourites, 9 stays a favourite', () => {
     for (let slot = 1; slot <= 9; slot++) {
       expect(actions.find((a) => a.id === `favorites.toggle${slot}`)?.defaultBinding).toBe(String(slot));
     }
+    const digitCues = cueActions.filter((a) => a.defaultBinding?.match(/^\d$/));
+    expect(digitCues.map((a) => a.id)).toEqual(Array.from({ length: 8 }, (_, i) => `cues.hot${i + 1}.digit`));
+    digitCues.forEach((a, i) => expect(a.defaultBinding).toBe(String(i + 1)));
   });
 
   it('matches a Shift+digit key press whatever character the layout types', () => {

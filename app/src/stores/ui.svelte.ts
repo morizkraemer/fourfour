@@ -282,6 +282,10 @@ export function clearListFilter() {
   setSearchText('');
 }
 
+export function closeDetailPane() {
+  ui.detailPaneOpen = false;
+}
+
 /** Toggle the detail pane. */
 export function toggleDetailPane() {
   ui.detailPaneOpen = !ui.detailPaneOpen;

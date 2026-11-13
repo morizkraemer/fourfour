@@ -7,6 +7,7 @@
   import LockMark from './LockMark.svelte';
   import CueEditor from './CueEditor.svelte';
   import ContextMenu from './ContextMenu.svelte';
+  import Icon from './Icon.svelte';
   import { bpmScrub, keyScrub, tierOf } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
@@ -54,6 +55,7 @@
     filePath = '',
     onRevealPath = undefined,
     onPathContextMenu = undefined,
+    onClose = undefined,
   } = $props();
 
   let tempoEditable = $derived(!!onBpmChange && !!onKeyChange);
@@ -181,7 +183,12 @@
   }
 </script>
 
-<div class="ff-detail-pane ff-inspector">
+<div class="ff-detail-pane ff-inspector{onClose ? ' ff-inspector--closable' : ''}">
+  {#if onClose && mode !== 'empty'}
+    <button type="button" class="ff-inspector__close" aria-label="Close inspector" title="Close inspector" onclick={() => onClose()}>
+      <Icon name="x" size={14} />
+    </button>
+  {/if}
   {#if mode === 'empty'}
     <div class="ff-detail-pane__empty-state">
       <svg

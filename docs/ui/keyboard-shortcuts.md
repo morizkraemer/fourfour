@@ -34,7 +34,9 @@ Rebinding: click the binding, press the keys. Esc cancels, Backspace clears. If 
 | Toggle big / small player | Tab |
 | Toggle organize drawer (right sidebar) | Shift+Tab |
 | Focus next / previous region | F6 / Shift+F6 |
-| Toggle favorite 1 to 9 on selection | 1 to 9 |
+| Toggle favorite 1 to 9 on selection | 1 to 9 (see "Plain digits" below) |
+| Hot cue A to H: set at the playhead if empty, else jump and play | 1 to 8 when a track is loaded (see "Plain digits" below), also Shift+1 to Shift+8 always |
+| Delete hot cue A to H | Alt+Shift+1 to Alt+Shift+8 |
 | Rate selection 1 to 5 stars, 0 clears (focus in the track list, not in a stick view) | Mod+1 to Mod+5, Mod+0 |
 | Analyze selection, Sync stick, Toggle inspector, Show keyboard shortcuts | unassigned |
 
@@ -47,7 +49,17 @@ These work only while that control itself has focus, so they never change the gl
 | Waveform (compact and expanded player, `role="slider"`, "Playback position") | Left / Right: one beat (one second without a beat grid). Shift+Left / Shift+Right: four bars (ten seconds without a grid). Home / End: track start / end. Value text is `m:ss of m:ss`. |
 | Track list in a playlist (no sort active, no search filter) | Alt+Up / Alt+Down: move the selected tracks one row, saved like a drag reorder. The move is announced in the live region ("Moved X down, position 2 of 3", "Already at the top"). |
 
-Rating uses Mod+digit because the plain digits are already the favorite toggles (1 to 9), and Shift+digit and Alt+Shift+digit are the hot cues. Mod+1 to 5 is also what Rekordbox and most players use for stars. The rating keys are the same registry actions as everything else, so they can be rebound in Preferences; they only fire when the track list has focus and not in an input.
+## Plain digits: hot cues or favorites
+
+The plain keys 1 to 8 have two meanings; the context picks one, so no binding is lost:
+
+- Hot cues A to H (same as clicking a pad): a track is loaded in the player and either the big player is open or focus is not in the track list. An empty pad is set at the playhead, a set pad jumps there and starts playback (1/16 quantize and the declick apply as for the pads).
+- Favorites 1 to 8 on the selection: no track is loaded, or the player is small and the track list has focus.
+- 9 is always a favorite toggle.
+
+Typing in a text field never fires either. In Preferences both actions show the same key; the cue action is "Hot cue A: set or jump (plain 1)". Shift+1 to Shift+8 stay hot cues in every context.
+
+Rating uses Mod+digit because the plain digits are already taken (favorites, hot cues), and Shift+digit and Alt+Shift+digit are the hot cues. Mod+1 to 5 is also what Rekordbox and most players use for stars. The rating keys are the same registry actions as everything else, so they can be rebound in Preferences; they only fire when the track list has focus and not in an input.
 
 The live region is one visually hidden `role="status"` element in `App.svelte`, driven by `announce()` in `stores/announce.svelte.ts`.
 

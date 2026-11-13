@@ -23,7 +23,7 @@ vi.mock('./player.svelte.ts', () => ({
 }));
 
 import { cuesOf, loadCuesFromPayload } from './cues.svelte.ts';
-import { pressInspectorPad } from './inspector-pads.ts';
+import { jumpToInspectorCue, pressInspectorPad } from './inspector-pads.ts';
 
 let track = 500;
 
@@ -73,5 +73,25 @@ describe('inspector cue pads', () => {
     hooks.loadedId = track;
     await pressInspectorPad({ id: track }, 1, true);
     expect(cuesOf(track).map((c) => c.slot)).toEqual([1]);
+  });
+});
+
+describe('inspector memory cue chips', () => {
+  it('fires a memory cue of the loaded track: jump and play', async () => {
+    hooks.loadedId = track;
+    await jumpToInspectorCue({ id: track }, { timeMs: 14000, padded: false });
+    expect(hooks.order).toEqual(['seek+play 14000']);
+  });
+
+  it('loads and only jumps for a memory cue of another track', async () => {
+    hooks.loadedId = track + 1000;
+    await jumpToInspectorCue({ id: track }, { timeMs: 14000, padded: false });
+    expect(hooks.order).toEqual(['seek 14000']);
+  });
+
+  it('only jumps for a hot cue chip', async () => {
+    hooks.loadedId = track;
+    await jumpToInspectorCue({ id: track }, { timeMs: 9000, padded: true });
+    expect(hooks.order).toEqual(['seek 9000']);
   });
 });
