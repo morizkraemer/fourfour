@@ -1,0 +1,8 @@
+{
+  "id": "scroll-edges-and-fling-fix-kept",
+  "kind": "decision",
+  "title": "Scroll edges and fling fix kept",
+  "summary": "r159/r175 page-thread wheel scrolling, rows full during flings: Keep (2026-11-13)",
+  "source": "orchestrator",
+  "date": "2026-11-13"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "cue-grid-and-declick-kept",
+  "kind": "decision",
+  "title": "Cue grid and declick kept",
+  "summary": "r160 4-level grid, hot cue declick, 1/16 quantize: grid good, no pops (2026-11-08)",
+  "source": "orchestrator",
+  "date": "2026-11-13"
+}
