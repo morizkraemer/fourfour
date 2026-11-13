@@ -1,5 +1,6 @@
 <script>
   import { SettingRow, Button, Switch } from '$ds';
+  import { ui, setOpenInspectorOnSelect } from '../../stores/ui.svelte.ts';
   import { appSettings, setAnalyzeAfterImport } from '../../stores/app-settings.svelte.ts';
   import { library, changeLocalLibraryPath } from '../../stores/library.svelte.ts';
   import { pickDirectory, getIsTauri } from '../../services/tauri.svelte.ts';
@@ -47,6 +48,22 @@
         <Button label="Show results" size="small" variant="ghost" onclick={openHealthDialog} />
       {/if}
       <Button label="Check now" size="small" disabled={fileStatus.running} onclick={() => void checkLibraryAgain()} />
+    {/snippet}
+  </SettingRow>
+</div>
+
+<div class="ff-settings-section">Inspector</div>
+<div class="ff-settings-card">
+  <SettingRow
+    title="Open inspector when selecting a track"
+    description="A closed inspector comes back when you pick a track. Off: it opens only from its toggle."
+  >
+    {#snippet control()}
+      <Switch
+        label="Open inspector when selecting a track"
+        on={ui.openInspectorOnSelect}
+        onChange={(on) => setOpenInspectorOnSelect(on)}
+      />
     {/snippet}
   </SettingRow>
 </div>

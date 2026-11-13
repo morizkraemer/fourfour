@@ -40,6 +40,8 @@ Rebinding: click the binding, press the keys. Esc cancels, Backspace clears. If 
 | Rate selection 1 to 5 stars, 0 clears (focus in the track list, not in a stick view) | Mod+1 to Mod+5, Mod+0 |
 | Analyze selection, Sync stick, Toggle inspector, Show keyboard shortcuts | unassigned |
 
+The inspector has a close button and the Toggle inspector command. A closed inspector reopens when the user selects a track (click, arrow keys, range, select all, marquee); loads, analysis updates and list refreshes never reopen it. Settings, Library, Inspector: "Open inspector when selecting a track" (on by default, stored in the browser's localStorage) turns this off.
+
 ## Keys inside a focused control
 
 These work only while that control itself has focus, so they never change the global keys.

@@ -26,6 +26,16 @@ export type OrganizeTarget = {
 };
 
 const ORGANIZE_WIDTH_KEY = 'fourfour.organize.width';
+const OPEN_INSPECTOR_ON_SELECT_KEY = 'fourfour.inspector.openOnSelect';
+
+function loadOpenInspectorOnSelect(): boolean {
+  try {
+    return localStorage.getItem(OPEN_INSPECTOR_ON_SELECT_KEY) !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 const ORGANIZE_EXPANDED_KEY = 'fourfour.organize.expanded';
 const ORGANIZE_RECENTS_KEY = 'fourfour.organize.recents';
 const ORGANIZE_TARGET_KEY = 'fourfour.organize.target';
@@ -47,6 +57,7 @@ export const ORGANIZE_SNAP_TO_FULL_PX = 120;   // if gap to viewport right < thi
 export const ui = $state({
   /** Whether the right detail pane is visible. */
   detailPaneOpen: true,
+  openInspectorOnSelect: loadOpenInspectorOnSelect(),
   /** Whether the left sidebar is collapsed (future). */
   sidebarCollapsed: false,
   /** Which sidebar row is currently active (drives library view). */
@@ -280,6 +291,20 @@ export function setSearchText(text: string) {
 /** Clear the search field and the inline list filter. */
 export function clearListFilter() {
   setSearchText('');
+}
+
+export function setOpenInspectorOnSelect(enabled: boolean) {
+  ui.openInspectorOnSelect = enabled;
+  try {
+    localStorage.setItem(OPEN_INSPECTOR_ON_SELECT_KEY, String(enabled));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Called when the user picks tracks; reopens a closed inspector unless the setting is off. */
+export function inspectorFollowsSelection(selectedCount: number) {
+  if (selectedCount > 0 && ui.openInspectorOnSelect) ui.detailPaneOpen = true;
 }
 
 export function closeDetailPane() {
