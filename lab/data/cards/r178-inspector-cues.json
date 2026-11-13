@@ -1,0 +1,36 @@
+{
+  "id": "r178-inspector-cues",
+  "title": "Inspector close, scroll, 1-8 cues, memory cue",
+  "question": "Inspector close button, scrolling, 1-8 cues, memory cue play: right?",
+  "url": "/app",
+  "check": "- X top right closes the inspector\n- Inspector scrolls to the file path with big player open\n- Keys 1-8 fire cues A-H when big player is open\n- Memory cue starts playback when paused",
+  "media": "/data/cards/r178-inspector-cues/media/inspector-close-button.png",
+  "gallery": [
+    {
+      "url": "/data/cards/r178-inspector-cues/media/inspector-close-button.png",
+      "label": "close"
+    },
+    {
+      "url": "/data/cards/r178-inspector-cues/media/inspector-scrolled-1280x800.png",
+      "label": "scrolled1280"
+    },
+    {
+      "url": "/data/cards/r178-inspector-cues/media/inspector-scrolled-1440x900.png",
+      "label": "scrolled1440"
+    }
+  ],
+  "options": [
+    {
+      "key": "k",
+      "label": "Keep"
+    },
+    {
+      "key": "c",
+      "label": "Change (note)"
+    }
+  ],
+  "rank": 100,
+  "status": "open",
+  "round": 1,
+  "created": "2026-11-13T12:57:29.795Z"
+}
