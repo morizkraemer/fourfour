@@ -746,3 +746,4 @@
 2026-11-13 21:04 Merlin: no reopen button; inspector should auto-open on track select when closed, with a Settings toggle to disable. Spawned r179 on r178 (sonnet)
 2026-11-13 21:34 orchestrator r179 handed back 496e3b6: selection reopens a closed inspector (click, keys, range, select all, marquee, jump); Settings > Library > Inspector switch "Open inspector when selecting a track" (localStorage); Chromium smoke 1 unrelated duplicates.spec:45 load flake (4/4 alone), WebKit 0 failed. parked-all-v23 = r179, Mac install running
 2026-11-13 22:48 orchestrator installed parked-all-v23 496e3b6 = build 1427 on the Mac (r179 inspector auto-open + setting)
+2026-11-15 03:00 orchestrator merged parked-all-v23 into master (d231066) and pushed per Merlin "push main and make a new release for mo"; draft pre-release v0.1.0-alpha.2 with DMG build 1974, check-dmg 0 failures
