@@ -12,6 +12,7 @@
  */
 import { STACK_GAIN, STACK_GAMMA, displayAmp } from '../../../prototyping/viewport/design-system/waveform-bands.js';
 import {
+  bandBytes,
   decodeColorWaveform,
   type ColorWaveSample,
   type EncodedColorWaveform,
@@ -83,13 +84,15 @@ export function bandsFromInterleavedBytes(
 ): BandColumns {
   const columns = Math.floor(bytes.length / 3);
   const out = emptyBands(columns);
+  const gains = new Float64Array(256);
+  for (let max = 1; max < 256; max++) gains[max] = Math.min((max / fullScale) * calibration, 1) / max;
   for (let i = 0; i < columns; i++) {
     const low = bytes[i * 3];
     const mid = bytes[i * 3 + 1];
     const high = bytes[i * 3 + 2];
     const max = Math.max(low, mid, high);
     if (max === 0) continue;
-    const gain = Math.min((max / fullScale) * calibration, 1) / max;
+    const gain = max < 256 ? gains[max] : Math.min((max / fullScale) * calibration, 1) / max;
     out.low[i] = low * gain;
     out.mid[i] = mid * gain;
     out.high[i] = high * gain;
@@ -215,14 +218,9 @@ export function balanceBands(bands: BandColumns): BandColumns {
 }
 
 function isEncoded(color: unknown): color is EncodedColorWaveform {
-  return !!color && typeof color === 'object' && !Array.isArray(color) && typeof (color as EncodedColorWaveform).bands === 'string';
-}
-
-function decodeBase64(text: string): Uint8Array {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+  if (!color || typeof color !== 'object' || Array.isArray(color)) return false;
+  const { bands } = color as EncodedColorWaveform;
+  return typeof bands === 'string' || bands instanceof Uint8Array;
 }
 
 const payloadBands = new WeakMap<object, BandColumns>();
@@ -234,13 +232,13 @@ export function colorBandsFromPayload(color: unknown): BandColumns | null {
   if (memo) return memo;
   let bands: BandColumns | null = null;
   if (isEncoded(color) && color.pwv7) {
-    bands = bandsFromStickBytes(decodeBase64(color.bands));
+    bands = bandsFromStickBytes(bandBytes(color.bands));
     if (bands.low.length === 0) return null;
     payloadBands.set(color, bands);
     return bands;
   }
   if (isEncoded(color)) {
-    bands = bandsFromInterleavedBytes(decodeBase64(color.bands), WIRE_FULL_SCALE, color.calibration * LEGACY_LEVEL);
+    bands = bandsFromInterleavedBytes(bandBytes(color.bands), WIRE_FULL_SCALE, color.calibration * LEGACY_LEVEL);
   } else {
     const samples = decodeColorWaveform(color);
     if (samples) bands = bandsFromColorSamples(samples, LEGACY_LEVEL);
@@ -339,21 +337,20 @@ function meanReduced(bands: BandColumns, columns: number): BandColumns {
 type BandName = 'low' | 'mid' | 'high';
 export type BandGains = Record<BandName, number>;
 
-function layerPercentile(values: ArrayLike<number>, name: BandName, gain: number): number {
-  const layers = new Float32Array(values.length);
-  for (let i = 0; i < layers.length; i++) layers[i] = STACK_GAIN[name] * Math.pow(displayAmp(values[i] * gain), STACK_GAMMA[name]);
-  layers.sort();
-  return layers[Math.min(layers.length - 1, Math.floor(layers.length * STRIP_LEVEL_PERCENTILE))];
+function layerAt(value: number, name: BandName, gain: number): number {
+  return Math.fround(STACK_GAIN[name] * Math.pow(displayAmp(value * gain), STACK_GAMMA[name]));
 }
 
 function bandGain(values: ArrayLike<number>, name: BandName): number {
+  const sorted = Float64Array.from(values).sort();
+  const loudEnd = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * STRIP_LEVEL_PERCENTILE))];
   const target = STRIP_LAYER_SHARE[name];
-  if (layerPercentile(values, name, STRIP_MAX_GAIN) <= target) return STRIP_MAX_GAIN;
+  if (layerAt(loudEnd, name, STRIP_MAX_GAIN) <= target) return STRIP_MAX_GAIN;
   let lo = STRIP_MIN_GAIN;
   let hi = STRIP_MAX_GAIN;
   for (let step = 0; step < STRIP_GAIN_STEPS; step++) {
     const mid = (lo + hi) / 2;
-    if (layerPercentile(values, name, mid) > target) hi = mid;
+    if (layerAt(loudEnd, name, mid) > target) hi = mid;
     else lo = mid;
   }
   return lo;
@@ -378,6 +375,8 @@ function withGains(bands: BandColumns, gains: BandGains): BandColumns {
   return { ...out, overview: true };
 }
 
+const stripBands = new WeakMap<BandColumns, BandColumns>();
+
 /**
  * The columns the player's overview strip draws for an analysis payload: the PWV6 overview series when the
  * payload has one, else the detail columns brought to overview resolution by their mean. Either way each band gets its
@@ -394,6 +393,10 @@ export function stripBandsFromAnalysis(
     colorBandsFromPayload(analysis.waveform_color_detail) ??
     colorBandsFromPayload(analysis.waveform_color);
   if (!source) return null;
+  const memo = stripBands.get(source);
+  if (memo) return memo;
   const columns = overview ? source : { ...meanReduced(source, STRIP_COLUMNS), overview: true };
-  return withGains(columns, stripGains(columns));
+  const strip = withGains(columns, stripGains(columns));
+  stripBands.set(source, strip);
+  return strip;
 }

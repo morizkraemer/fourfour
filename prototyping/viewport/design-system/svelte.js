@@ -15,6 +15,7 @@ import './components/dialog-native.css';
 // Helpers
 export { host } from './utils/mount.js';
 export { keyColor } from './utils/key-color.js';
+export { columnVars } from './utils/column-layout.js';
 export { bpmScrub, keyScrub } from './utils/scrub.js';
 export { ICON_NAMES } from './components/icon-glyphs.js';
 

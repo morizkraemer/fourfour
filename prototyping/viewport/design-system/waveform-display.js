@@ -10,7 +10,7 @@
  *                    full track; the zoom view and the compact strip draw this,
  *     bandsOverview: optional lower-resolution {low, mid, high} for the overview bar,
  *     beats:         Array<{time_ms: number, bar_position: number}>,
- *     cues:          Array<{position: number, color?: string}>,  // position 0-1
+ *     cues:          Array<{position: number, color?: string, key?: string, padded?: boolean, label?: string}>,  // position 0-1
  *     duration_ms:   number,
  *     bpm:           number,
  *   }
@@ -31,6 +31,7 @@ import { ZOOM_PEAK_WEIGHT, reduceBands } from './waveform-bands.js';
 const DRAG_THRESHOLD_PX = 4;
 const CUE_TAB_W = 12;
 const CUE_TAB_H = 12;
+const CUE_GRAB_PX = 4;
 
 const OVERVIEW_DECAY = 0.93;
 const COMPACT_DECAY = 0.88;
@@ -50,18 +51,36 @@ const WINDOW_MAX_MS = 30000;
 const ASSUMED_SAMPLE_RATE = 44100;
 const WHEEL_ZOOM_PER_PIXEL = 0.0025;
 const WHEEL_LINE_PX = 16;
+const SLIDE_PX = 100000;
+const GRID_FADE_FROM_PX = 12;
+const GRID_FADE_FULL_PX = 24;
+const GRID_THINNED_BAR = 0.45;
+const GRID_MIN_ALPHA = 0.01;
+
+function gridFade(spacingPx) {
+    return Math.max(0, Math.min(1, (spacingPx - GRID_FADE_FROM_PX) / (GRID_FADE_FULL_PX - GRID_FADE_FROM_PX)));
+}
 
 export default class WaveformDisplay {
     /**
      * @param {HTMLElement} container
-     * @param {{ mode?: 'compact' | 'expanded', onSeek?: (frac: number) => void }} [options]
+     * `paint: 'frame'` draws data changes (setData, setDetailBands, setCues, setBeats, a paused playhead) once in the
+     * next animation frame instead of on every call, so a mount that sets everything at once paints once, outside the
+     * caller's task. The default paints synchronously.
+     * @param {{ mode?: 'compact' | 'expanded', paint?: 'sync' | 'frame', onSeek?: (frac: number) => void, onCueMove?: (key: string, timeMs: number) => void }} [options]
      */
     constructor(container, options = {}) {
         this._container = container;
         this._mode = options.mode === 'compact' ? 'compact' : 'expanded';
+        this._paintOnFrame = options.paint === 'frame';
         // Expanded view locks the playhead at centre and scrolls the waveform.
         this._lockPlayhead = this._mode === 'expanded';
         if (options.onSeek) this.onSeek = options.onSeek;
+        if (options.onCueMove) this.onCueMove = options.onCueMove;
+        this._cueSnap = null;
+        this._selectedCue = null;
+        this._cueDrag = null;
+        this._detailPending = false;
 
         // Create wrapper div
         this._wrapper = document.createElement('div');
@@ -111,20 +130,25 @@ export default class WaveformDisplay {
 
         this._sizes = new WeakMap();
         this._sizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => {
+            let changed = false;
             for (const entry of entries) {
                 const box = entry.borderBoxSize && entry.borderBoxSize[0];
-                this._sizes.set(entry.target, {
+                const size = {
                     w: box ? box.inlineSize : entry.contentRect.width,
                     h: box ? box.blockSize : entry.contentRect.height,
-                });
+                };
+                const known = this._sizes.get(entry.target);
+                if (!known || known.w !== size.w || known.h !== size.h) changed = true;
+                this._sizes.set(entry.target, size);
             }
-            this._render();
+            if (changed) this._render();
         });
         if (this._sizeObserver) {
             this._sizeObserver.observe(this._overviewCanvas);
             this._sizeObserver.observe(this._zoomCanvas);
         }
         this._playheadX = new WeakMap();
+        this._slides = new WeakMap();
 
         // Offscreen cache of the overview waveform (bars + cues). The overview
         // image never changes during playback — only the viewport rectangle
@@ -193,6 +217,8 @@ export default class WaveformDisplay {
     /** Replace data and re-render. Resets zoom and scroll position. */
     setData(data, playheadFrac = undefined) {
         this._data = data;
+        this._selectedCue = null;
+        this._cueDrag = null;
         this._dropWindow();
         this._overviewDirty = true;
         this._clock.stop(0);
@@ -211,7 +237,7 @@ export default class WaveformDisplay {
         } else {
             this._offset = 0.0;
         }
-        this._paint();
+        this._invalidate();
     }
 
     /**
@@ -221,7 +247,7 @@ export default class WaveformDisplay {
     setDetailBands(bandsZoom) {
         if (!this._data || this._data.bandsZoom === bandsZoom) return;
         this._data = { ...this._data, bandsZoom };
-        this._paint();
+        this._invalidate();
     }
 
     /**
@@ -236,6 +262,16 @@ export default class WaveformDisplay {
         this._render();
     }
 
+    /**
+     * While the high-resolution series is on its way, zoom levels that would draw it show the bare ground instead of
+     * the 150 columns per second, so the zoom view never switches looks under the user.
+     */
+    setDetailPending(pending) {
+        if (this._detailPending === !!pending) return;
+        this._detailPending = !!pending;
+        if (this._data) this._invalidate();
+    }
+
     _dropWindow() {
         this._window = null;
         this._windowToken++;
@@ -248,15 +284,25 @@ export default class WaveformDisplay {
     setBeats(beats) {
         if (!this._data || this._data.beats === beats) return;
         this._data = { ...this._data, beats };
-        this._paint();
+        this._overviewDirty = true;
+        this._invalidate();
+    }
+
+    /**
+     * Where a dragged hot cue lands: `snap(timeMs)` returns the position to use (the nearest beat), or null for
+     * no snapping. Holding Alt while dragging bypasses it.
+     */
+    setCueSnap(snap) {
+        this._cueSnap = snap || null;
     }
 
     /** Replace the cue markers only (an edit): zoom, scroll position and the rest of the data stay. */
     setCues(cues) {
         if (!this._data || this._data.cues === cues) return;
+        if (this._selectedCue && !cues.some((c) => c.key === this._selectedCue)) this._selectedCue = null;
         this._data = { ...this._data, cues };
         this._overviewDirty = true;
-        this._paint();
+        this._invalidate();
     }
 
     // Initial zoom on load. Compact is always full-track. Expanded targets a
@@ -324,7 +370,7 @@ export default class WaveformDisplay {
             this._stopInterp();
             this._clock.stop(0);
             this._phClock = -1;
-            this._applyPlayhead(-1);
+            this._applyPlayhead(-1, false);
             return;
         }
 
@@ -337,7 +383,7 @@ export default class WaveformDisplay {
             this._stopInterp();
             this._phClock = frac;
             this._clock.stop(frac * durationMs);
-            this._applyPlayhead(this._phClock);
+            this._applyPlayhead(this._phClock, false);
             return;
         }
 
@@ -358,11 +404,13 @@ export default class WaveformDisplay {
 
     // Push a position to the canvas: in expanded the waveform scrolls under the
     // fixed centre playhead; in compact only the overlay element moves.
-    _applyPlayhead(frac) {
+    // `inFrame` (the interpolation loop) paints now; a transport report may wait for the next frame (paint: 'frame').
+    _applyPlayhead(frac, inFrame = true) {
         this._playheadFrac = frac;
         if (this._lockPlayhead && frac >= 0) {
             this._offset = this._centeredOffset();
-            this._paint();
+            if (inFrame) this._paint();
+            else this._invalidate();
         } else {
             this._updatePlayheadOverlay();
         }
@@ -370,9 +418,11 @@ export default class WaveformDisplay {
 
     _startInterp() {
         if (this._interpRaf || !this._playing) return;
-        const loop = () => {
+        const loop = (frameTs) => {
             if (!this._playing) { this._interpRaf = null; return; }
             this._interpRaf = requestAnimationFrame(loop);
+            if (frameTs === this._paintedFrame) return;
+            this._paintedFrame = frameTs;
             this._stepInterp();
         };
         this._interpRaf = requestAnimationFrame(loop);
@@ -403,7 +453,9 @@ export default class WaveformDisplay {
         const cached = this._sizes.get(canvas);
         if (cached) return cached;
         const rect = canvas.getBoundingClientRect();
-        return { w: rect.width, h: rect.height };
+        const size = { w: rect.width, h: rect.height };
+        if (this._sizeObserver) this._sizes.set(canvas, size);
+        return size;
     }
 
     _showPlayhead(el, frac, canvas) {
@@ -411,7 +463,7 @@ export default class WaveformDisplay {
         const x = Math.round(frac * this._canvasSize(canvas).w * 64) / 64 - 0.5;
         if (this._playheadX.get(el) === x) return;
         this._playheadX.set(el, x);
-        el.style.transform = `translateX(${x}px)`;
+        this._moveTo(el, x);
     }
 
     _showPlayedMask(frac) {
@@ -421,7 +473,17 @@ export default class WaveformDisplay {
         const x = Math.round(frac * w * 64) / 64 - w;
         if (this._playheadX.get(mask) === x) return;
         this._playheadX.set(mask, x);
-        mask.style.transform = `translateX(${x}px)`;
+        this._moveTo(mask, x);
+    }
+
+    _moveTo(el, x) {
+        let slide = this._slides.get(el);
+        if (!slide) {
+            slide = el.animate([{ transform: `translateX(${-SLIDE_PX}px)` }, { transform: `translateX(${SLIDE_PX}px)` }], { duration: 2 * SLIDE_PX, fill: 'both' });
+            slide.pause();
+            this._slides.set(el, slide);
+        }
+        slide.currentTime = x + SLIDE_PX;
     }
 
     _hidePlayhead(el) {
@@ -430,7 +492,7 @@ export default class WaveformDisplay {
 
     _updatePlayheadOverlay() {
         const frac = this._playheadFrac;
-        if (frac < 0 || frac > 1) {
+        if (frac < 0 || frac > 1 || !this._data) {
             this._hidePlayhead(this._overviewPlayhead);
             this._hidePlayhead(this._zoomPlayhead);
             this._hidePlayhead(this._playedMask);
@@ -502,6 +564,7 @@ export default class WaveformDisplay {
         if (this._sizeObserver) this._sizeObserver.disconnect();
         this._themeObserver.disconnect();
         this._unbindEvents();
+        for (const el of [this._overviewPlayhead, this._zoomPlayhead, this._playedMask]) this._slides.get(el)?.cancel();
         this._wrapper.remove();
     }
 
@@ -510,6 +573,10 @@ export default class WaveformDisplay {
     // Synchronous full repaint of both canvases + overlays. Called directly from
     // the interpolation loop (already inside a frame); use _render() elsewhere.
     _paint() {
+        if (this._zoomRafId) {
+            cancelAnimationFrame(this._zoomRafId);
+            this._zoomRafId = null;
+        }
         this._renderOverview();
         this._renderZoom();
         this._updatePlayheadOverlay();
@@ -517,11 +584,32 @@ export default class WaveformDisplay {
 
     _render() {
         // Coalesce rapid playhead/scroll/drag updates into one draw per frame.
-        if (this._zoomRafId) cancelAnimationFrame(this._zoomRafId);
-        this._zoomRafId = requestAnimationFrame(() => {
+        if (this._zoomRafId) return;
+        this._zoomRafId = requestAnimationFrame((frameTs) => {
             this._zoomRafId = null;
+            if (frameTs === this._paintedFrame) {
+                this._paint();
+                return;
+            }
+            this._paintedFrame = frameTs;
+            this._advanceClock();
             this._paint();
         });
+    }
+
+    // While playing, a frame's paint shows the interpolated position, so the interpolation loop can skip that frame.
+    _advanceClock() {
+        const durationMs = this._data?.duration_ms || 0;
+        if (!this._interpRaf || this._scrubbing || !durationMs || !this._clock.running) return;
+        const pos = Math.max(0, Math.min(1, this._clock.positionAt(this._now()) / durationMs));
+        this._phClock = pos;
+        this._playheadFrac = pos;
+        if (this._lockPlayhead) this._offset = this._centeredOffset();
+    }
+
+    _invalidate() {
+        if (this._paintOnFrame) this._render();
+        else this._paint();
     }
 
     // Resize a canvas only when its pixel dimensions actually change.
@@ -550,8 +638,17 @@ export default class WaveformDisplay {
 
         const w = size.w;
         const h = size.h;
-        const ctx = this._resizeCanvas(canvas, w, h);
         const palette = wavePalette();
+        const dpr = devicePixelRatio;
+        const playedPx = this._playheadFrac > 0 ? Math.round(Math.min(1, this._playheadFrac) * w * dpr) : 0;
+        const visibleFrac = 1.0 / this._zoom;
+        const viewFromPx = this._zoom > 1.0 ? Math.round(Math.max(0, this._offset * w) * dpr) : 0;
+        const viewToPx = this._zoom > 1.0 ? Math.round(Math.min(w, (this._offset + visibleFrac) * w) * dpr) : 0;
+        const shown = `${w}|${h}|${dpr}|${playedPx}|${viewFromPx}|${viewToPx}|${palette.version}`;
+        if (!this._overviewDirty && shown === this._overviewShown) return;
+        this._overviewShown = shown;
+
+        const ctx = this._resizeCanvas(canvas, w, h);
 
         if (this._overviewDirty || this._overviewCacheW !== w || this._overviewCacheH !== h || this._paletteVersion !== palette.version) {
             this._paletteVersion = palette.version;
@@ -563,14 +660,11 @@ export default class WaveformDisplay {
 
         ctx.drawImage(this._overviewCache, 0, 0, w, h);
 
-        if (this._playheadFrac > 0) {
-            dimPlayed(ctx, Math.min(1, this._playheadFrac) * w, h, palette);
-        }
+        if (playedPx > 0) dimPlayed(ctx, playedPx / dpr, h, palette);
 
-        const visibleFrac = 1.0 / this._zoom;
-        const x1 = Math.max(0, this._offset * w);
-        const x2 = Math.min(w, (this._offset + visibleFrac) * w);
-        if (this._zoom > 1.0 && x2 > x1) {
+        if (viewToPx > viewFromPx) {
+            const x1 = viewFromPx / dpr;
+            const x2 = viewToPx / dpr;
             ctx.fillStyle = ink(palette, 0.08);
             ctx.fillRect(x1, 0, x2 - x1, h);
             ctx.strokeStyle = ink(palette, 0.3);
@@ -601,6 +695,7 @@ export default class WaveformDisplay {
         }
 
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this._renderBeatGrid(ctx, w, h, 0, 1, palette, false);
         const cues = this._data?.cues;
         if (cues) {
             for (const cue of cues) {
@@ -623,10 +718,11 @@ export default class WaveformDisplay {
         const ctx = this._resizeCanvas(canvas, w, h);
         const palette = wavePalette();
 
-        ctx.fillStyle = palette.bg;
-        ctx.fillRect(0, 0, w, h);
-
-        if (!this._data) return;
+        if (!this._data) {
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, w, h);
+            return;
+        }
 
         const visibleFrac = 1.0 / this._zoom;
         const startFrac = this._offset;
@@ -658,19 +754,28 @@ export default class WaveformDisplay {
 
     // Hot-cue markers: a vertical line + a dot at the top, matching the
     // compact strip so the two views agree. Positions are 0–1 fractions.
+    // A cue being dragged follows the pointer; the selected one is outlined.
     _renderCues(ctx, w, h, startFrac, endFrac) {
         const cues = this._data?.cues;
         if (!cues || cues.length === 0 || endFrac <= startFrac) return;
         for (const cue of cues) {
-            const frac = Math.max(0, Math.min(1, cue.position ?? 0));
+            const dragged = this._cueDrag && this._cueDrag.moved && this._cueDrag.key === cue.key;
+            const position = dragged ? this._cueDragFrac() : (cue.position ?? 0);
+            const frac = Math.max(0, Math.min(1, position));
             if (frac < startFrac || frac > endFrac) continue;
             const x = ((frac - startFrac) / (endFrac - startFrac)) * w;
             const color = cue.color || '#4ade80';
+            const selected = this._mode === 'expanded' && cue.key !== undefined && cue.key === this._selectedCue;
             ctx.fillStyle = color;
-            ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, 1, h);
+            ctx.fillRect(this._lineAt(x, 1) - 0.5, 0, selected ? 2 : 1, h);
             if (cue.label && this._mode === 'expanded') {
                 const lineX = this._lineAt(x, 1);
                 ctx.fillRect(lineX - 0.5, 0, CUE_TAB_W, CUE_TAB_H);
+                if (selected) {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(lineX, 0.5, CUE_TAB_W - 1, CUE_TAB_H - 1);
+                }
                 ctx.fillStyle = '#0a0a0a';
                 ctx.font = '700 9px system-ui, sans-serif';
                 ctx.textAlign = 'center';
@@ -694,10 +799,18 @@ export default class WaveformDisplay {
     // The high-resolution series once the detail columns would be drawn wider than half a pixel.
     _zoomDetailBands(widthPx, startFrac, endFrac) {
         const fine = this._data.bandsZoom;
+        return fine && this._wantsDetail(widthPx, startFrac, endFrac) ? fine : null;
+    }
+
+    _wantsDetail(widthPx, startFrac, endFrac) {
         const coarse = this._data.bands;
-        if (!fine || !coarse?.low.length) return null;
-        const coarsePerPixel = ((endFrac - startFrac) * coarse.low.length) / widthPx;
-        return coarsePerPixel < DETAIL_BELOW_COLUMNS_PER_PIXEL ? fine : null;
+        if (!coarse?.low.length) return false;
+        return ((endFrac - startFrac) * coarse.low.length) / widthPx < DETAIL_BELOW_COLUMNS_PER_PIXEL;
+    }
+
+    /** Which series the zoom view drew last (`data-bands` on its canvas): window, detail, columns, pending or none. */
+    _markBandSource(source) {
+        if (this._zoomCanvas.dataset.bands !== source) this._zoomCanvas.dataset.bands = source;
     }
 
     // A fetched window once the high-resolution series is wider than a pixel (asked for from WINDOW_PREFETCH_ZOOM times
@@ -823,15 +936,24 @@ export default class WaveformDisplay {
         const widthPx = Math.round(w * devicePixelRatio);
         const win = compact ? null : this._zoomWindow(widthPx, startFrac, endFrac);
         if (win) {
+            this._markBandSource('window');
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, widthPx, Math.round(h * devicePixelRatio));
             this._paintWindow(ctx, win, widthPx, Math.round(h * devicePixelRatio), startFrac, endFrac, palette);
             ctx.restore();
             return;
         }
         const fine = compact ? null : this._zoomDetailBands(widthPx, startFrac, endFrac);
-        const bands = fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
-        if (!bands || bands.low.length === 0) return;
+        const awaitingFine = !compact && !fine && this._detailPending && this._wantsDetail(widthPx, startFrac, endFrac);
+        const bands = awaitingFine ? null : fine ?? (compact ? (this._data.bandsOverview || this._data.bands) : this._data.bands);
+        this._markBandSource(awaitingFine ? 'pending' : fine ? 'detail' : bands?.low.length ? 'columns' : 'none');
+        if (!bands || bands.low.length === 0) {
+            ctx.fillStyle = palette.bg;
+            ctx.fillRect(0, 0, w, h);
+            return;
+        }
         const dpr = devicePixelRatio;
         const widthDevicePx = Math.round(w * dpr);
         ctx.save();
@@ -842,6 +964,7 @@ export default class WaveformDisplay {
             widthPx: Math.round(w * dpr),
             heightPx: Math.round(h * dpr),
             palette,
+            ground: palette.bg,
             dpr,
             decay: compact ? COMPACT_DECAY : fine ? 0 : ZOOM_DECAY,
             peakWeights: fine ? ZOOM_PEAK_WEIGHT : undefined,
@@ -898,112 +1021,79 @@ export default class WaveformDisplay {
         return width;
     }
 
-    _drawBarLabel(ctx, x, w, h, barNumber, isPhrase, palette) {
+    _drawBarLabel(ctx, x, barNumber, isPhrase, palette) {
         const fontSize = 10;
         const label = String(barNumber);
         ctx.font = `${isPhrase ? 'bold ' : ''}${fontSize}px system-ui`;
         const labelW = this._labelWidth(ctx, label) + 2;
-        const nearCentre = Math.abs(x - w / 2) < 28;
         ctx.fillStyle = palette.bg;
-        if (nearCentre) {
-            ctx.textAlign = 'left';
-            ctx.fillRect(x + 2, 0, labelW + 2, fontSize + 4);
-            ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
-            ctx.fillText(label, x + 4, fontSize + 2);
-        } else {
-            ctx.textAlign = 'right';
-            ctx.fillRect(x - labelW - 2, 0, labelW + 2, fontSize + 4);
-            ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
-            ctx.fillText(label, x - 2, fontSize + 2);
-        }
+        ctx.textAlign = 'left';
+        ctx.fillRect(x + 2, 0, labelW + 2, fontSize + 4);
+        ctx.fillStyle = ink(palette, isPhrase ? 0.9 : 0.6);
+        ctx.fillText(label, x + 4, fontSize + 2);
     }
 
-    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette) {
+    _renderBeatGrid(ctx, w, h, startFrac, endFrac, palette, labels = this._mode === 'expanded') {
         const beats = this._data?.beats;
         const durationMs = this._data?.duration_ms;
         if (!beats || beats.length === 0 || !durationMs) return;
-
         const span = endFrac - startFrac;
         if (span <= 0) return;
 
-        // Compact shows the whole track — phrase ticks only.
-        if (this._mode === 'compact') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, false, palette);
-            return;
-        }
+        const pxPerBeat = this._pxPerBeat(w, startFrac, endFrac, beats, durationMs);
+        const detail = this._beatGridDetail(pxPerBeat);
+        const labelAll = labels && detail === 'full';
+        const labelPhrases = labels && detail !== 'sections';
+        const barFade = gridFade(pxPerBeat * 4);
+        const phraseFade = gridFade(pxPerBeat * 16);
+        const sectionFade = gridFade(pxPerBeat * 64);
+        const beatAlpha = palette.gridBeat * gridFade(pxPerBeat);
+        const eighthAlpha = palette.gridEighth * gridFade(pxPerBeat / 2);
+        const sixteenthAlpha = palette.gridSixteenth * gridFade(pxPerBeat / 4);
+        const fine = 1 / devicePixelRatio;
+        const xOf = (ms) => ((ms / durationMs - startFrac) / span) * w;
 
-        const detail = this._beatGridDetail(
-            this._pxPerBeat(w, startFrac, endFrac, beats, durationMs));
-
-        if (detail === 'sections') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 16, true, palette);
-            return;
-        }
-        if (detail === 'phrases') {
-            this._renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, 4, true, palette);
-            return;
-        }
-
-        let barNumber = 0;
-        const showBeats = detail === 'full' || detail === 'bars+beats';
-        const labelBars = detail === 'full' || detail === 'bars' || detail === 'bars+beats';
-        const labelPhrasesOnly = detail === 'bars' || detail === 'bars+beats';
-
-        for (const beat of beats) {
-            const frac = beat.time_ms / durationMs;
-            if (beat.bar_position === 1) barNumber++;
-            if (frac < startFrac || frac > endFrac) continue;
-
-            const x = this._beatX(frac, startFrac, endFrac, w);
-            const isBar = beat.bar_position === 1;
-            const isPhrase = isBar && barNumber % 4 === 1;
-
-            if (!isBar) {
-                if (!showBeats) continue;
-                ctx.strokeStyle = ink(palette, 0.3);
-                ctx.lineWidth = 0.5;
-                const beatX = this._lineAt(x, 0.5);
-                ctx.beginPath();
-                ctx.moveTo(beatX, 0);
-                ctx.lineTo(beatX, h);
-                ctx.stroke();
-            } else {
-                ctx.strokeStyle = ink(palette, detail === 'bars+beats' ? 0.55 : 0.7);
-                ctx.lineWidth = 1;
-                const barX = this._lineAt(x, 1);
-                ctx.beginPath();
-                ctx.moveTo(barX, 0);
-                ctx.lineTo(barX, h);
-                ctx.stroke();
-
-                if (labelBars && (!labelPhrasesOnly || isPhrase)) {
-                    this._drawBarLabel(ctx, x, w, h, barNumber, isPhrase, palette);
-                }
-            }
-        }
-    }
-
-    // Sparse bar grid — every `barStride` bars (4 = phrase, 16 = section).
-    _renderSparseBeatGrid(ctx, w, h, startFrac, endFrac, beats, durationMs, barStride, labelPhrases, palette) {
-        const span = endFrac - startFrac;
-        if (span <= 0) return;
-        let barNumber = 0;
-        ctx.strokeStyle = ink(palette, barStride >= 16 ? 0.22 : 0.28);
-        ctx.lineWidth = 1;
-        for (const beat of beats) {
-            if (beat.bar_position !== 1) continue;
-            barNumber++;
-            if (barNumber % barStride !== 1) continue;
-            const frac = beat.time_ms / durationMs;
-            if (frac < startFrac || frac > endFrac) continue;
-            const x = this._beatX(frac, startFrac, endFrac, w);
-            const lineX = this._lineAt(x, 1);
+        const line = (x, width, alpha) => {
+            if (alpha < GRID_MIN_ALPHA || x < -1 || x > w + 1) return;
+            const lineX = this._lineAt(x, width);
+            ctx.strokeStyle = ink(palette, alpha);
+            ctx.lineWidth = width;
             ctx.beginPath();
             ctx.moveTo(lineX, 0);
             ctx.lineTo(lineX, h);
             ctx.stroke();
-            if (labelPhrases && barStride === 4) {
-                this._drawBarLabel(ctx, x, w, h, barNumber, true, palette);
+        };
+
+        let barNumber = 0;
+        for (let i = 0; i < beats.length; i++) {
+            const beat = beats[i];
+            const isBar = beat.bar_position === 1;
+            if (isBar) barNumber++;
+            const x = xOf(beat.time_ms);
+            const next = beats[i + 1];
+            const nextX = next ? xOf(next.time_ms) : x;
+            if (nextX < -1) continue;
+            if (x > w + 1) break;
+
+            if (next && (eighthAlpha >= GRID_MIN_ALPHA || sixteenthAlpha >= GRID_MIN_ALPHA)) {
+                const step = (nextX - x) / 4;
+                line(x + step, fine, sixteenthAlpha);
+                line(x + 2 * step, fine, eighthAlpha);
+                line(x + 3 * step, fine, sixteenthAlpha);
+            }
+
+            if (!isBar) {
+                line(x, fine, beatAlpha);
+                continue;
+            }
+            const isPhrase = barNumber % 4 === 1;
+            const isSection = barNumber % 16 === 1;
+            const thinned = Math.max(isPhrase ? phraseFade : 0, isSection ? sectionFade : 0);
+            const strength = Math.max(barFade, GRID_THINNED_BAR * thinned);
+            if (strength <= 0) continue;
+            line(x, 1, palette.gridBar * strength);
+            if (x >= 0 && x <= w && (labelAll || (labelPhrases && isPhrase && strength >= 1))) {
+                this._drawBarLabel(ctx, this._lineAt(x, 1), barNumber, isPhrase, palette);
             }
         }
     }
@@ -1079,7 +1169,83 @@ export default class WaveformDisplay {
         this._updatePlayheadOverlay();
     }
 
+    // The hot cue whose flag is under a pointer position on the zoom view (expanded only), or null.
+    _cueAt(clientX, clientY) {
+        if (this._mode !== 'expanded' || !this._data?.cues) return null;
+        const rect = this._zoomCanvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        if (y < 0 || y > CUE_TAB_H + CUE_GRAB_PX || rect.width <= 0) return null;
+        const visibleFrac = 1.0 / this._zoom;
+        const cues = this._data.cues;
+        for (let i = cues.length - 1; i >= 0; i--) {
+            const cue = cues[i];
+            if (!cue.padded || cue.key === undefined) continue;
+            const cueX = (((cue.position ?? 0) - this._offset) / visibleFrac) * rect.width;
+            if (x >= cueX - CUE_GRAB_PX && x <= cueX + CUE_TAB_W + CUE_GRAB_PX) return cue;
+        }
+        return null;
+    }
+
+    // Track fraction a dragged cue sits at: under the pointer, on the nearest beat when snapping is on and Alt is not held.
+    _cueDragFrac() {
+        const drag = this._cueDrag;
+        const durationMs = this._data?.duration_ms || 0;
+        if (!drag || !durationMs) return 0;
+        let ms = this._zoomFracAtClientX(drag.clientX) * durationMs;
+        if (this._cueSnap && !drag.alt) ms = this._cueSnap(ms) ?? ms;
+        return Math.max(0, Math.min(1, ms / durationMs));
+    }
+
     _bindEvents() {
+        this._onCueMouseDown = (e) => {
+            if (e.button !== 0) return false;
+            const cue = this._cueAt(e.clientX, e.clientY);
+            if (!cue) {
+                if (this._selectedCue !== null) {
+                    this._selectedCue = null;
+                    this._render();
+                }
+                return false;
+            }
+            this._selectedCue = cue.key;
+            this._cueDrag = { key: cue.key, startX: e.clientX, clientX: e.clientX, alt: e.altKey, moved: false };
+            this._zoomCanvas.style.cursor = 'grabbing';
+            this._render();
+            return true;
+        };
+
+        this._onCueMouseMove = (e) => {
+            const drag = this._cueDrag;
+            drag.clientX = e.clientX;
+            drag.alt = e.altKey;
+            if (!drag.moved && Math.abs(e.clientX - drag.startX) < DRAG_THRESHOLD_PX) return;
+            drag.moved = true;
+            this._render();
+        };
+
+        this._onCueMouseUp = () => {
+            const drag = this._cueDrag;
+            const frac = drag.moved ? this._cueDragFrac() : null;
+            this._cueDrag = null;
+            this._zoomCanvas.style.cursor = this._defaultCursor();
+            const durationMs = this._data?.duration_ms || 0;
+            if (frac !== null && this.onCueMove && durationMs) this.onCueMove(drag.key, frac * durationMs);
+            this._render();
+        };
+
+        this._onCueAlt = (e) => {
+            if (!this._cueDrag || e.key !== 'Alt') return;
+            this._cueDrag.alt = e.type === 'keydown';
+            if (this._cueDrag.moved) this._render();
+        };
+
+        this._onZoomHover = (e) => {
+            if (this._dragging || this._cueDrag) return;
+            const cursor = this._cueAt(e.clientX, e.clientY) ? 'grab' : this._defaultCursor();
+            if (this._zoomCanvas.style.cursor !== cursor) this._zoomCanvas.style.cursor = cursor;
+        };
+
         this._onOverviewMouseDown = (e) => {
             if (e.button !== 0 || this._mode === 'compact') return;
             this._dragging = true;
@@ -1094,6 +1260,10 @@ export default class WaveformDisplay {
 
         this._onMouseDown = (e) => {
             if (e.button !== 0) return;
+            if (this._onCueMouseDown(e)) {
+                e.preventDefault();
+                return;
+            }
             this._dragging = true;
             this._dragSurface = 'zoom';
             this._dragMoved = false;
@@ -1108,6 +1278,10 @@ export default class WaveformDisplay {
         };
 
         this._onMouseMove = (e) => {
+            if (this._cueDrag) {
+                this._onCueMouseMove(e);
+                return;
+            }
             if (!this._dragging) return;
             const dx = e.clientX - this._dragStartX;
             const dy = this._dragStartY - e.clientY;
@@ -1140,6 +1314,10 @@ export default class WaveformDisplay {
         };
 
         this._onMouseUp = (e) => {
+            if (this._cueDrag) {
+                this._onCueMouseUp(e);
+                return;
+            }
             if (!this._dragging) return;
             const surface = this._dragSurface;
             this._dragging = false;
@@ -1186,6 +1364,9 @@ export default class WaveformDisplay {
         this._zoomCanvas.style.cursor = this._defaultCursor();
         this._overviewCanvas.addEventListener('mousedown', this._onOverviewMouseDown);
         this._zoomCanvas.addEventListener('mousedown', this._onMouseDown);
+        this._zoomCanvas.addEventListener('mousemove', this._onZoomHover);
+        window.addEventListener('keydown', this._onCueAlt);
+        window.addEventListener('keyup', this._onCueAlt);
         window.addEventListener('mousemove', this._onMouseMove);
         window.addEventListener('mouseup', this._onMouseUp);
         this._zoomCanvas.addEventListener('wheel', this._onWheel, { passive: false });
@@ -1194,6 +1375,9 @@ export default class WaveformDisplay {
     _unbindEvents() {
         this._overviewCanvas.removeEventListener('mousedown', this._onOverviewMouseDown);
         this._zoomCanvas.removeEventListener('mousedown', this._onMouseDown);
+        this._zoomCanvas.removeEventListener('mousemove', this._onZoomHover);
+        window.removeEventListener('keydown', this._onCueAlt);
+        window.removeEventListener('keyup', this._onCueAlt);
         window.removeEventListener('mousemove', this._onMouseMove);
         window.removeEventListener('mouseup', this._onMouseUp);
         this._zoomCanvas.removeEventListener('wheel', this._onWheel);

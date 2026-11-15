@@ -25,6 +25,10 @@ pub struct UserEdits {
     /// millisecond either way) after its stored time. The stored beats and the export stay whole ms.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_offset_ms: Option<f64>,
+    /// The downbeat a BPM change keeps in place, as the app shows it (whole-ms stored time plus `grid_offset_ms`). Set
+    /// by hand-setting the grid, so a downbeat added to fill the track start is never taken for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_anchor_ms: Option<f64>,
 }
 
 impl UserEdits {
@@ -73,6 +77,20 @@ pub fn normalize_cues(cues: &[ImportedCue]) -> Result<Vec<ImportedCue>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_written_before_the_grid_anchor_existed_still_load() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join(EDITS_FILE),
+            br#"{"grid_locked":true,"cues_locked":false,"cues":[],"grid_offset_ms":0.25}"#,
+        )
+        .unwrap();
+        let edits = UserEdits::read(dir.path()).unwrap();
+        assert!(edits.grid_locked);
+        assert_eq!(edits.grid_offset_ms, Some(0.25));
+        assert_eq!(edits.grid_anchor_ms, None);
+    }
 
     #[test]
     fn write_replaces_the_file_whole_and_leaves_no_temp_file() {

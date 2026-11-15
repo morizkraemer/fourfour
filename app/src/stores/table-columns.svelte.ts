@@ -14,7 +14,9 @@ import {
   measureColumnContentWidth,
 } from '../../../prototyping/viewport/design-system/utils/column-layout.js';
 import { labelColorRank } from '../../../prototyping/viewport/design-system/utils/label-color.js';
-import { library, playlistByName } from './library.svelte.ts';
+import { untrack } from 'svelte';
+import { library, libraryChangesSince, libraryMembersOf, libraryPlainRows, libraryPositionsOf, libraryRowsChangedSince, onTrackListLoaded, plainRowOf, playlistByName } from './library.svelte.ts';
+import { extendValueClasses, moveChangedValues, orderFromClasses, sortedOrder, sortedSubset, valueClasses, valueClassesSteps, withChangedValues, type SortedOrder, type SortValue, type ValueClasses } from '../lib/sortOrder.ts';
 
 const STORAGE_KEY = 'fourfour.tableColumns.v3';
 const LEGACY_STORAGE_KEYS = ['fourfour.tableColumns.v2', 'fourfour.tableColumns.v1'];
@@ -41,6 +43,7 @@ export type TableLayout = {
 };
 
 const DEFAULT_COLUMNS: TableColumn[] = [
+  { key: 'status', label: '', width: 20 },
   { key: 'fav', label: 'FAV', width: 20 },
   { key: 'index', label: '#', width: 28 },
   { key: 'wave', label: 'PREVIEW', width: 120 },
@@ -55,6 +58,7 @@ const DEFAULT_COLUMNS: TableColumn[] = [
 
 /** Full catalog of columns users can show/hide (includes defaults + extras). */
 export const ALL_COLUMN_KEYS: { key: string; label: string }[] = [
+  { key: 'status', label: 'File status' },
   { key: 'fav', label: 'Favorites' },
   { key: 'index', label: '#' },
   { key: 'wave', label: 'Preview' },
@@ -226,9 +230,12 @@ function mergeSavedColumns(
       }));
     }
   }
-  for (const def of fallbackColumns) {
-    if (!byKey.has(def.key)) ordered.push({ ...def });
-  }
+  fallbackColumns.forEach((def, i) => {
+    if (byKey.has(def.key)) return;
+    const nextKey = fallbackColumns.slice(i + 1).find(d => ordered.some(c => c.key === d.key))?.key;
+    const at = nextKey ? ordered.findIndex(c => c.key === nextKey) : ordered.length;
+    ordered.splice(at, 0, { ...def });
+  });
   for (const extra of ALL_COLUMN_KEYS) {
     if (!ordered.some(c => c.key === extra.key) && byKey.has(extra.key)) {
       ordered.push(normalizeColumn({ ...extraColumnDef(extra.key)!, ...byKey.get(extra.key)! }));
@@ -255,7 +262,27 @@ function extraColumnDef(key: string): TableColumn | null {
   };
 }
 
+let persistPending = false;
+let persistOnPageHide = false;
+
+function persistIfPending() {
+  if (persistPending) persist();
+}
+
+/** A sort click writes the layout once the browser is idle, so the click's frame does not wait for the JSON and storage write. */
+function persistSoon() {
+  if (persistPending) return;
+  persistPending = true;
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(persistIfPending, { timeout: 1000 });
+  else setTimeout(persistIfPending, 200);
+  if (!persistOnPageHide && typeof addEventListener === 'function') {
+    persistOnPageHide = true;
+    addEventListener('pagehide', persistIfPending);
+  }
+}
+
 function persist() {
+  persistPending = false;
   try {
     localStorage.setItem(
       STORAGE_KEY,
@@ -383,7 +410,7 @@ export function setSort(kind: LayoutKind, key: string) {
     layout.sortDir = 'asc';
   }
   syncSortIndicators(kind);
-  persist();
+  persistSoon();
 }
 
 export function clearSort(kind: LayoutKind) {
@@ -393,7 +420,7 @@ export function clearSort(kind: LayoutKind) {
     sortDir: 'asc',
   };
   syncSortIndicators(kind);
-  persist();
+  persistSoon();
 }
 
 /** Sort track rows for display (does not mutate library order). Tracks without a value stay last in both directions. */
@@ -404,37 +431,364 @@ export function sortTracks<T extends Record<string, unknown>>(
   const key = tableLayouts[kind].sortKey;
   if (!key) return tracks;
   const dir = tableLayouts[kind].sortDir === 'asc' ? 1 : -1;
-  return [...tracks].sort((a, b) => {
-    if (key === 'fav') return compareFav(a, b, dir);
-    const av = sortValue(a, key);
-    const bv = sortValue(b, key);
-    if (av === null && bv === null) return 0;
-    if (av === null) return 1;
-    if (bv === null) return -1;
-    if (av < bv) return -1 * dir;
-    if (av > bv) return 1 * dir;
+  const positions = key === 'fav' ? null : libraryPositionsOf(tracks);
+  if (positions) return sortLibraryRows(tracks, positions, key, dir);
+  const members = key === 'fav' ? null : libraryMembersOf(tracks);
+  const byRank = members && sortByColumnRank(tracks, members, key, dir);
+  if (byRank) return byRank;
+  const keyed =
+    key === 'fav'
+      ? tracks.map((track) => ({ track, value: favSlot(track) }))
+      : sortKeyed(tracks, sortValueReader(key));
+  keyed.sort((a, b) => {
+    if (a.value === null && b.value === null) return 0;
+    if (a.value === null) return 1;
+    if (b.value === null) return -1;
+    if (a.value < b.value) return -1 * dir;
+    if (a.value > b.value) return 1 * dir;
     return 0;
   });
+  return keyed.map((entry) => entry.track);
+}
+
+let sortValuesVersion: { tracks: unknown; usbTracks: unknown } | null = null;
+const sortValuesByKey = new Map<string, WeakMap<object, SortValue>>();
+
+/**
+ * Sort keys per track, read without tracking and kept until the track list is replaced: library tracks change their
+ * fields only together with `bumpLibraryTracks()` (and USB tracks are replaced whole), which swaps the list this
+ * cache is checked against; after a bump only the changed rows are read again. A tracked read of the key of every track made each sort depend on 10k track signals.
+ * `fav` stays a tracked read: favorite slots change in place (`syncTrackFavoriteFields`).
+ */
+function sortValueReader(key: string): (track: Record<string, unknown>) => SortValue {
+  const tracks = library.tracks;
+  const usbTracks = library.usbTracks;
+  if (!sortValuesVersion || sortValuesVersion.tracks !== tracks || sortValuesVersion.usbTracks !== usbTracks) {
+    const changed = sortValuesVersion?.usbTracks === usbTracks ? libraryRowsChangedSince(sortValuesVersion.tracks as object) : null;
+    if (changed) {
+      for (const values of sortValuesByKey.values()) for (const row of changed) values.delete(row);
+    } else {
+      sortValuesByKey.clear();
+    }
+    sortValuesVersion = { tracks, usbTracks };
+  }
+  let values = sortValuesByKey.get(key);
+  if (!values) {
+    values = new WeakMap();
+    sortValuesByKey.set(key, values);
+  }
+  const cache = values;
+  return (track) => {
+    let value = cache.get(track);
+    if (value === undefined) {
+      value = sortValue(track, key);
+      cache.set(track, value);
+    }
+    return value;
+  };
+}
+
+interface ColumnSort {
+  tracks: object;
+  values: SortValue[];
+  classes: ValueClasses | null | undefined;
+  orders: Map<1 | -1, HeldOrder>;
+}
+
+interface HeldOrder {
+  sorted: SortedOrder;
+  tracks: object;
+}
+
+const columnSorts = new Map<string, ColumnSort>();
+
+interface LibrarySortWarmup {
+  step(budgetMs: number, stop?: () => boolean): boolean;
+  finishColumn(key: string): void;
+}
+
+let latestWarmup: LibrarySortWarmup | null = null;
+
+const UNIQUE_VALUE_KEYS = new Set(['title', 'index']);
+
+function readLibraryValues(
+  rows: readonly Record<string, unknown>[],
+  plains: readonly Record<string, any>[],
+  key: string,
+  positions: readonly number[] | null,
+  into: SortValue[],
+  from = 0,
+  to = rows.length,
+  memo: Map<unknown, SortValue> | null = UNIQUE_VALUE_KEYS.has(key) ? null : new Map(),
+) {
+  const aligned = plains.length === rows.length;
+  const read = (p: number) => {
+    const plain = aligned ? plains[p] : plainRowOf(rows[p]);
+    const raw = Object.hasOwn(plain, key) ? plain[key] : rows[p][key];
+    if (!memo || (typeof raw !== 'string' && typeof raw !== 'number')) {
+      into[p] = sortValueOfRaw(raw, key);
+      return;
+    }
+    let value = memo.get(raw);
+    if (value === undefined) {
+      value = sortValueOfRaw(raw, key);
+      memo.set(raw, value);
+    }
+    into[p] = value;
+  };
+  untrack(() => {
+    if (positions) for (let i = 0; i < positions.length; i++) read(positions[i]);
+    else for (let p = from; p < to; p++) read(p);
+  });
+}
+
+function dropUnusableColumnSorts() {
+  for (const [key, entry] of columnSorts) if (libraryChangesSince(entry.tracks) === null) columnSorts.delete(key);
+}
+
+function columnSortOf(rows: readonly Record<string, unknown>[], key: string): ColumnSort {
+  if (!columnSorts.has(key)) latestWarmup?.finishColumn(key);
+  let entry = columnSorts.get(key);
+  if (entry && entry.tracks !== rows) {
+    const changes = libraryChangesSince(entry.tracks);
+    if (changes) {
+      const known = entry.values.length;
+      const plains = libraryPlainRows();
+      const changed = changes.grown ? changes.positions.filter((position) => position < known) : changes.positions;
+      if (changed.length > 0) readLibraryValues(rows, plains, key, changed, entry.values);
+      if (changes.grown) {
+        readLibraryValues(rows, plains, key, null, entry.values, known, rows.length);
+        if (changed.length > 0) entry.classes = undefined;
+        else if (entry.classes) entry.classes = extendValueClasses(entry.classes, entry.values, known);
+      } else if (changed.length > 0) {
+        entry.classes = undefined;
+      }
+      entry.tracks = rows;
+    } else {
+      dropUnusableColumnSorts();
+      entry = undefined;
+    }
+  }
+  if (!entry) {
+    const values = new Array<SortValue>(rows.length);
+    readLibraryValues(rows, libraryPlainRows(), key, null, values);
+    entry = { tracks: rows, values, classes: undefined, orders: new Map() };
+    columnSorts.set(key, entry);
+  }
+  return entry;
+}
+
+function orderOf(entry: ColumnSort, direction: 1 | -1): SortedOrder {
+  const held = entry.orders.get(direction);
+  if (held) {
+    if (held.tracks === entry.tracks) return held.sorted;
+    const changes = libraryChangesSince(held.tracks);
+    const grown = entry.values.length > held.sorted.order.length;
+    const inPlace = changes && !grown && (changes.positions.length === 0 || moveChangedValues(held.sorted, entry.values, changes.positions, direction));
+    const moved = changes && (inPlace ? held.sorted : withChangedValues(held.sorted, entry.values, changes.positions, direction));
+    if (moved) {
+      held.sorted = moved;
+      held.tracks = entry.tracks;
+      return moved;
+    }
+    entry.orders.delete(direction);
+  }
+  if (entry.classes === undefined) entry.classes = valueClasses(entry.values);
+  const sorted = entry.classes ? orderFromClasses(entry.classes, direction) : sortedOrder(entry.values, direction);
+  entry.orders.set(direction, { sorted, tracks: entry.tracks });
+  return sorted;
+}
+
+function sortLibraryRows<T extends Record<string, unknown>>(tracks: T[], positions: readonly number[] | 'all', key: string, dir: 1 | -1): T[] {
+  const rows = untrack(() => library.tracks) as T[];
+  const sorted = orderOf(columnSortOf(rows, key), dir);
+  const order = positions === 'all' ? sorted.order : sortedSubset(positions, sorted);
+  const out = new Array<T>(order.length);
+  for (let i = 0; i < order.length; i++) out[i] = rows[order[i]];
+  return out;
+}
+
+let slotOfRank = new Int32Array(0);
+
+function sortByColumnRank<T extends Record<string, unknown>>(tracks: T[], members: Int32Array, key: string, dir: 1 | -1): T[] | null {
+  const rows = untrack(() => library.tracks) as T[];
+  const known = columnSorts.get(key);
+  const reusable = known !== undefined && libraryChangesSince(known.tracks) !== null;
+  if (!reusable && members.length * 8 < rows.length) return null;
+  const entry = columnSortOf(rows, key);
+  const sorted = orderOf(entry, dir);
+  const count = members.length;
+  if (slotOfRank.length < rows.length) slotOfRank = new Int32Array(rows.length);
+  const ranks = new Int32Array(count);
+  for (let i = 0; i < count; i++) {
+    const rank = sorted.rank[members[i]];
+    ranks[i] = rank;
+    slotOfRank[rank] = i;
+  }
+  ranks.sort();
+  const slots = new Int32Array(count);
+  const values = entry.values;
+  let from = 0;
+  while (from < count) {
+    const value = values[sorted.order[ranks[from]]];
+    let to = from + 1;
+    while (to < count && values[sorted.order[ranks[to]]] === value) to++;
+    for (let k = from; k < to; k++) slots[k] = slotOfRank[ranks[k]];
+    if (to - from > 1) slots.subarray(from, to).sort();
+    from = to;
+  }
+  const out = new Array<T>(count);
+  for (let k = 0; k < count; k++) out[k] = tracks[slots[k]];
+  return out;
+}
+
+function* refreshColumn(key: string): Generator<void, ColumnSort> {
+  const rows = untrack(() => library.tracks) as Record<string, unknown>[];
+  const directions = [...(columnSorts.get(key)?.orders.keys() ?? [])];
+  const entry = columnSortOf(rows, key);
+  yield;
+  for (const direction of directions) {
+    orderOf(entry, direction);
+    yield;
+  }
+  return entry;
+}
+
+const WARMUP_DELAY_MS = 250;
+const WARMUP_INPUT_QUIET_MS = 400;
+const WARMUP_SLICE_MS = 6;
+const WARMUP_FALLBACK_GAP_MS = 12;
+const WARMUP_READ_CHUNK = 2048;
+const WARMUP_SORT_CHUNK = 4096;
+const NOT_WARMED_COLUMNS = new Set(['status', 'fav', 'wave', 'cover', 'index']);
+
+interface WarmupChunks {
+  read: number;
+  sort: number;
+}
+
+function* warmColumn(key: string, rows: readonly Record<string, unknown>[], plains: readonly Record<string, any>[], chunks: WarmupChunks): Generator<void, ColumnSort> {
+  const values = new Array<SortValue>(rows.length);
+  const memo = UNIQUE_VALUE_KEYS.has(key) ? null : new Map<unknown, SortValue>();
+  for (let from = 0; from < rows.length; from += chunks.read) {
+    readLibraryValues(rows, plains, key, null, values, from, Math.min(rows.length, from + chunks.read), memo);
+    yield;
+  }
+  const classes = yield* valueClassesSteps(values, chunks.sort);
+  const entry: ColumnSort = { tracks: rows, values, classes, orders: new Map() };
+  if (classes) {
+    entry.orders.set(1, { sorted: orderFromClasses(classes, 1), tracks: rows });
+    yield;
+    entry.orders.set(-1, { sorted: orderFromClasses(classes, -1), tracks: rows });
+  }
+  return entry;
+}
+
+/**
+ * Sort orders of the visible library columns, built a few milliseconds at a time (`step`) so the first click on a
+ * header finds them ready. Each result is kept only if nothing built that column meanwhile and the list was at most
+ * bumped since; `step` returns true when all columns are done.
+ */
+export function startLibrarySortWarmup(keys: readonly string[], chunks: WarmupChunks = { read: WARMUP_READ_CHUNK, sort: WARMUP_SORT_CHUNK }): LibrarySortWarmup {
+  const rows = untrack(() => library.tracks) as Record<string, unknown>[];
+  const plains = libraryPlainRows();
+  dropUnusableColumnSorts();
+  const aligned = rows.length === plains.length;
+  const queue = aligned ? keys.filter((key) => !columnSorts.has(key)) : [];
+  const stale = aligned ? keys.filter((key) => columnSorts.has(key) && columnSorts.get(key)!.tracks !== rows) : [];
+  let current: { key: string; job: Generator<void, ColumnSort> } | null = null;
+  let running = false;
+  const keepFinished = (finished: { key: string }, entry: ColumnSort) => {
+    if (!columnSorts.has(finished.key) && libraryChangesSince(entry.tracks) !== null) columnSorts.set(finished.key, entry);
+  };
+  const warmup: LibrarySortWarmup = {
+    step(budgetMs, stop) {
+      const end = performance.now() + budgetMs;
+      do {
+        if (!current) {
+          const staleKey = stale.shift();
+          if (staleKey !== undefined) {
+            current = { key: staleKey, job: refreshColumn(staleKey) };
+            continue;
+          }
+          const key = queue.shift();
+          if (key === undefined) return true;
+          current = { key, job: warmColumn(key, rows, plains, chunks) };
+        }
+        running = true;
+        let next: IteratorResult<void, ColumnSort>;
+        try {
+          next = current.job.next();
+        } finally {
+          running = false;
+        }
+        if (!next.done) continue;
+        keepFinished(current, next.value);
+        current = null;
+      } while (performance.now() < end && !stop?.());
+      return false;
+    },
+    finishColumn(key) {
+      if (running || !current || current.key !== key || columnSorts.has(key)) return;
+      let next = current.job.next();
+      while (!next.done) next = current.job.next();
+      keepFinished(current, next.value);
+      current = null;
+    },
+  };
+  latestWarmup = warmup;
+  return warmup;
+}
+
+let warmupTimer: ReturnType<typeof setTimeout> | undefined;
+let warmupRun = 0;
+let lastInputAt = -Infinity;
+
+if (typeof window !== 'undefined') {
+  for (const type of ['pointerdown', 'keydown', 'click']) window.addEventListener(type, () => (lastInputAt = performance.now()), { capture: true, passive: true });
+}
+
+function inputPending(): boolean {
+  const scheduling = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & { scheduling?: { isInputPending?: () => boolean } }).scheduling;
+  return scheduling?.isInputPending?.() === true;
+}
+
+function warmableLibraryColumns(): string[] {
+  return untrack(() => visibleColumns('library')).map((column) => column.key).filter((key) => !NOT_WARMED_COLUMNS.has(key));
+}
+
+function scheduleLibrarySortWarmup() {
+  clearTimeout(warmupTimer);
+  const run = ++warmupRun;
+  warmupTimer = setTimeout(() => {
+    const warmup = startLibrarySortWarmup(warmableLibraryColumns());
+    const next = () => {
+      if (run !== warmupRun) return;
+      const quietFor = WARMUP_INPUT_QUIET_MS - (performance.now() - lastInputAt);
+      if (quietFor > 0) {
+        setTimeout(next, quietFor);
+        return;
+      }
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(slice, { timeout: 4000 });
+      else setTimeout(slice, WARMUP_FALLBACK_GAP_MS);
+    };
+    const slice = () => {
+      if (run !== warmupRun) return;
+      if (!warmup.step(WARMUP_SLICE_MS, inputPending)) next();
+    };
+    next();
+  }, WARMUP_DELAY_MS);
+}
+
+onTrackListLoaded(scheduleLibrarySortWarmup);
+
+function sortKeyed<T extends Record<string, unknown>>(tracks: T[], valueOf: (track: T) => SortValue) {
+  return untrack(() => tracks.map((track) => ({ track, value: valueOf(track) })));
 }
 
 function favSlot(track: Record<string, unknown>): number | null {
   const n = track.fav;
   return typeof n === 'number' && n > 0 ? n : null;
-}
-
-function compareFav(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-  dir: number,
-): number {
-  const af = favSlot(a);
-  const bf = favSlot(b);
-  if (af === null && bf === null) return 0;
-  if (af === null) return 1;
-  if (bf === null) return -1;
-  if (af < bf) return -1 * dir;
-  if (af > bf) return 1 * dir;
-  return 0;
 }
 
 function isBlank(text: string): boolean {
@@ -456,7 +810,12 @@ export function durationSeconds(time: string): number | null {
 }
 
 function sortValue(track: Record<string, unknown>, key: string): string | number | null {
-  const text = String(track[key] ?? '').trim();
+  const plain = plainRowOf(track);
+  return sortValueOfRaw(Object.hasOwn(plain, key) ? plain[key] : track[key], key);
+}
+
+function sortValueOfRaw(raw: unknown, key: string): string | number | null {
+  const text = String(raw ?? '').trim();
   if (isBlank(text)) return null;
   if (key === 'bpm') {
     const n = parseFloat(text);

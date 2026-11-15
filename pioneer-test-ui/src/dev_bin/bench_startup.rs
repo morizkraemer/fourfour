@@ -1,0 +1,1369 @@
+#[allow(dead_code)]
+#[path = "../analysis_payload.rs"]
+mod analysis_payload;
+#[allow(dead_code)]
+#[path = "../dto.rs"]
+mod dto;
+#[allow(dead_code)]
+#[path = "../band_analysis.rs"]
+mod band_analysis;
+#[allow(dead_code)]
+#[path = "../track_infos.rs"]
+mod track_infos;
+#[allow(dead_code)]
+#[path = "../import_plan.rs"]
+mod import_plan;
+#[allow(dead_code)]
+#[path = "../app_log.rs"]
+mod app_log;
+
+#[allow(dead_code)]
+#[path = "../early_state.rs"]
+mod early_state;
+
+#[path = "../tag_scan.rs"]
+mod tag_scan;
+
+#[path = "../command_error.rs"]
+mod command_error;
+
+#[path = "../waveform_detail.rs"]
+mod waveform_detail;
+
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use pioneer_library::LocalLibrary;
+use pioneer_usb_writer::models::{
+    AnalysisResult, Beat, BeatGrid, ColorWaveform, Track, WaveformPreview,
+};
+
+use dto::{LoadedState, PlaylistInput};
+
+const TRACK_SECS: f64 = 240.0;
+
+fn fake_track(i: usize) -> Track {
+    Track {
+        id: 0,
+        source_path: PathBuf::from(format!("/music/bench/artist{}/track{:06}.mp3", i % 400, i)),
+        usb_path: format!("/Contents/Artist{}/track{:06}.mp3", i % 400, i),
+        title: format!("Benchmark Track {i}"),
+        artist: format!("Artist {}", i % 400),
+        album: format!("Album {}", i % 1500),
+        genre: ["House", "Techno", "Drum & Bass", "Disco", "Ambient"][i % 5].to_string(),
+        label: String::new(),
+        remixer: String::new(),
+        comment: String::new(),
+        year: 2000 + (i % 25) as u16,
+        disc_number: 1,
+        track_number: (i % 12) as u32 + 1,
+        tempo: 9000 + (i % 80) as u32 * 100,
+        key: format!("{}{}", i % 12 + 1, if i % 2 == 0 { "A" } else { "B" }),
+        duration_secs: TRACK_SECS,
+        sample_rate: 44100,
+        bitrate: 320,
+        file_size: 9_600_000,
+        artwork: if i % 3 == 0 { Some(vec![0xFF; 64]) } else { None },
+    }
+}
+
+fn fake_analysis(i: usize) -> AnalysisResult {
+    fake_analysis_of(i, TRACK_SECS)
+}
+
+fn fake_analysis_of(i: usize, track_secs: f64) -> AnalysisResult {
+    let bpm = 90.0 + (i % 80) as f64;
+    let beat_ms = (60_000.0 / bpm) as u32;
+    let beats = (0..(track_secs * bpm / 60.0) as u32)
+        .map(|b| Beat {
+            bar_position: (b % 4) as u8 + 1,
+            time_ms: b * beat_ms,
+            tempo: (bpm * 100.0) as u32,
+        })
+        .collect();
+    let mut data = [0u8; 400];
+    for (n, byte) in data.iter_mut().enumerate() {
+        *byte = (((n * 7 + i) % 31) as u8 + 1) | (((n + i) % 8) as u8) << 5;
+    }
+    let detail_len = (track_secs * 150.0) as usize;
+    let detail = (0..detail_len)
+        .map(|n| [((n + i) % 120) as u8, ((n * 3) % 100) as u8, ((n * 5 + i) % 90) as u8])
+        .collect();
+    let overview = (0..1200)
+        .map(|n| [(n % 120) as u8, (n % 100) as u8, (n % 90) as u8])
+        .collect();
+    AnalysisResult {
+        beat_grid: BeatGrid { beats },
+        waveform: WaveformPreview { data },
+        bpm,
+        key: format!("{}{}", i % 12 + 1, if i % 2 == 0 { "A" } else { "B" }),
+        energy: Some((i % 10) as u8),
+        cue_points: Vec::new(),
+        color_waveform: Some(ColorWaveform { detail, overview, exact: None }),
+    }
+}
+
+fn generate(dir: &Path, count: usize) {
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let tracks: Vec<Track> = (0..count).map(fake_track).collect();
+    let ids = lib.add_tracks(&tracks).unwrap();
+    for (n, id) in ids.iter().enumerate() {
+        lib.set_analysis(*id, &fake_analysis(n)).unwrap();
+        if n % 2000 == 0 {
+            eprintln!("analysed {n}/{count}");
+        }
+    }
+    for p in 0..20 {
+        let pid = lib.create_playlist(&format!("Playlist {p}")).unwrap();
+        let members: Vec<i64> = ids.iter().skip(p * 7).step_by(count / 100 + 1).copied().collect();
+        lib.set_playlist_tracks(pid, &members).unwrap();
+    }
+}
+
+fn ms(t: Instant) -> f64 {
+    t.elapsed().as_secs_f64() * 1000.0
+}
+
+fn perf(name: &str, value: serde_json::Value) {
+    println!("PERF {}", serde_json::json!({ "bench": name, "values": value }));
+}
+
+fn run(dir: &Path) {
+    let t = Instant::now();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let open_ms = ms(t);
+
+    let t = Instant::now();
+    let rows = lib.get_track_list_rows().unwrap();
+    let rows_ms = ms(t);
+    drop(rows);
+
+    let t = Instant::now();
+    let labels = lib.track_labels_reader().read_all();
+    let labels_ms = ms(t);
+    drop(labels);
+
+    let reader = lib.track_labels_reader();
+    let had_cache = dir.join(pioneer_library::LABELS_CACHE_FILE).exists();
+    let t = Instant::now();
+    drop(reader.read_cached());
+    let labels_cached_ms = ms(t);
+
+    let t = Instant::now();
+    let changed = track_infos::changed_track_labels(&reader).len();
+    let labels_refresh_ms = ms(t);
+
+    let t = Instant::now();
+    let with_previews = std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some();
+    let infos = if with_previews {
+        track_infos::build_track_infos(&lib).unwrap()
+    } else {
+        track_infos::list_track_infos(&lib).unwrap()
+    };
+    let build_ms = ms(t);
+
+    let t = Instant::now();
+    let playlists: Vec<PlaylistInput> = lib
+        .get_all_playlists()
+        .unwrap()
+        .into_iter()
+        .map(|pl| PlaylistInput { id: pl.id, name: pl.name, track_ids: pl.track_ids, parent_id: pl.parent_id, is_folder: pl.is_folder })
+        .collect();
+    let playlists_ms = ms(t);
+
+    let count = infos.len();
+    let t = Instant::now();
+    let table = (!with_previews).then(|| dto::TrackTable::new(&infos).unwrap());
+    let table_ms = ms(t);
+    let t = Instant::now();
+    let table_json_len = table.as_ref().map_or(0, |table| serde_json::to_string(table).unwrap().len());
+    let table_json_ms = ms(t);
+    drop(table);
+    let t = Instant::now();
+    let json = if with_previews {
+        serde_json::to_string(&serde_json::json!({ "tracks": infos, "playlists": playlists })).unwrap()
+    } else {
+        serde_json::to_string(&LoadedState { tracks: dto::TrackTable::new(&infos).unwrap(), playlists }).unwrap()
+    };
+    let json_ms = ms(t);
+
+    println!(
+        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} labels_cached_ms={labels_cached_ms:.1} (cache before: {had_cache}) labels_refresh_ms={labels_refresh_ms:.1} (changed {changed}) build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
+        json.len(),
+        build_ms + playlists_ms + json_ms,
+    );
+    perf(
+        "startup_backend",
+        serde_json::json!({
+            "tracks": count,
+            "open_ms": open_ms,
+            "track_rows_ms": rows_ms,
+            "track_labels_ms": labels_ms,
+            "track_labels_cached_ms": labels_cached_ms,
+            "track_labels_refresh_ms": labels_refresh_ms,
+            "build_track_infos_ms": build_ms,
+            "playlists_ms": playlists_ms,
+            "json_ms": json_ms,
+            "table_build_ms": table_ms,
+            "table_json_ms": table_json_ms,
+            "table_json_bytes": table_json_len,
+            "json_bytes": json.len(),
+            "load_state_ms": build_ms + playlists_ms + json_ms,
+        }),
+    );
+}
+
+fn dump(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let json = if std::env::var_os("FF_BENCH_WITH_PREVIEWS").is_some() {
+        serde_json::to_vec(&serde_json::json!({ "tracks": track_infos::build_track_infos(&lib).unwrap() }))
+    } else {
+        serde_json::to_vec(&track_infos::loaded_state(&lib).unwrap())
+    };
+    std::fs::write(out, json.unwrap()).unwrap();
+}
+
+fn dump_bytes(dir: &Path, out: &Path) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    std::fs::write(out, track_infos::loaded_state(&lib).unwrap().to_bytes().unwrap()).unwrap();
+}
+
+fn median_and_p95(mut v: Vec<f64>) -> (f64, f64) {
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    (v[v.len() / 2], v[(v.len() * 95 / 100).min(v.len() - 1)])
+}
+
+fn load(dir: &Path, samples: usize) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let unanalysed: std::collections::HashSet<i64> = lib.get_unanalyzed_track_ids().unwrap().into_iter().collect();
+    let total = lib.track_count().unwrap() as usize;
+    let analysed: Vec<i64> = (1..=total as i64).filter(|id| !unanalysed.contains(id)).collect();
+    let step = (analysed.len() / samples).max(1);
+    let picked: Vec<i64> = analysed.iter().step_by(step).take(samples).copied().collect();
+
+    let mut parse = Vec::new();
+    let mut build = Vec::new();
+    let mut json = Vec::new();
+    let mut bytes = Vec::new();
+    for pass in 0..2 {
+        for id in &picked {
+            let t = Instant::now();
+            let analysis = lib.get_analysis(*id).unwrap().unwrap();
+            let parse_ms = ms(t);
+            drop(analysis);
+
+            let t = Instant::now();
+            let text = analysis_payload::read_stored_analysis(&lib, *id).unwrap().into_wire();
+            let build_ms = ms(t);
+            let json_ms = 0.0;
+            if pass == 1 {
+                parse.push(parse_ms);
+                build.push(build_ms);
+                json.push(json_ms);
+                bytes.push(text.len() as f64);
+            }
+        }
+    }
+    let (parse_m, parse_p) = median_and_p95(parse);
+    let (build_m, build_p) = median_and_p95(build);
+    let (json_m, json_p) = median_and_p95(json);
+    let (bytes_m, _) = median_and_p95(bytes);
+    let artwork = vec![0xABu8; 200_000];
+    let t = Instant::now();
+    let artwork_json = serde_json::to_string(&artwork).unwrap();
+    let artwork_json_ms = ms(t);
+    println!(
+        "samples={samples} anlz_parse_ms={parse_m:.2}/{parse_p:.2} build_payload_ms={build_m:.2}/{build_p:.2} json_ms={json_m:.2}/{json_p:.2} payload_bytes={bytes_m:.0} artwork_200kb_json_bytes={} artwork_json_ms={artwork_json_ms:.2} (median/p95)",
+        artwork_json.len()
+    );
+    perf(
+        "track_load_backend",
+        serde_json::json!({
+            "samples": samples,
+            "anlz_parse_ms_median": parse_m, "anlz_parse_ms_p95": parse_p,
+            "get_analysis_data_ms_median": build_m, "get_analysis_data_ms_p95": build_p,
+            "json_ms_median": json_m, "json_ms_p95": json_p,
+            "payload_bytes_median": bytes_m,
+        }),
+    );
+}
+
+
+fn sha_hex(bytes: &[u8]) -> String {
+    use std::process::{Command, Stdio};
+    use std::io::Write;
+    let mut child = Command::new("sha256sum").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(bytes).unwrap();
+    let out = child.wait_with_output().unwrap();
+    String::from_utf8(out.stdout).unwrap().split_whitespace().next().unwrap().to_string()
+}
+
+fn early(dir: &Path, request_at_ms: &[u64], dump: Option<&Path>) {
+    for &at in request_at_ms {
+        let library = std::sync::Arc::new(std::sync::Mutex::new(LocalLibrary::open(&dir.join("library.db")).unwrap()));
+        let early = std::sync::Arc::new(early_state::EarlyState::default());
+        let started = Instant::now();
+        let worker = {
+            let (library, early) = (library.clone(), early.clone());
+            std::thread::spawn(move || {
+                let lib = library.lock().unwrap();
+                early.prepare(&lib).unwrap();
+                ms(started)
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(at));
+        let requested = Instant::now();
+        let lib = library.lock().unwrap();
+        let (bytes, was_early) = early_state::encoded_state(&lib, &early).unwrap();
+        let answered_ms = ms(requested);
+        let t = Instant::now();
+        let on_demand = track_infos::loaded_state(&lib).unwrap().to_bytes().unwrap();
+        let on_demand_ms = ms(t);
+        drop(lib);
+        let ready_ms = worker.join().unwrap();
+        println!(
+            "EARLY request_at={at}ms early_hit={was_early} prepare_done_at={ready_ms:.1}ms request_to_answer={answered_ms:.1}ms on_demand_build={on_demand_ms:.1}ms bytes={} sha256_early={} sha256_on_demand={} equal={}",
+            bytes.len(),
+            sha_hex(&bytes),
+            sha_hex(&on_demand),
+            bytes == on_demand,
+        );
+        if let Some(out) = dump {
+            std::fs::write(out, &bytes).unwrap();
+        }
+    }
+}
+
+/// One simulated launch: `setup_ms` after process start the setup hook runs (it needs the library), `request_ms`
+/// after process start the page asks for `load_state`. `base` opens the library in the setup and starts the early
+/// build there (R135); `new` starts the open and the build before the window exists (R154) and the setup only
+/// waits for the opened library. Prints the time from process start to the answer.
+fn boot(dir: &Path, mode: &str, setup_ms: u64, request_ms: u64, dump: Option<&Path>) {
+    let db = dir.join("library.db");
+    let early = std::sync::Arc::new(early_state::EarlyState::default());
+    let t0 = Instant::now();
+    let sleep_until = |at_ms: u64| {
+        let at = std::time::Duration::from_millis(at_ms);
+        if let Some(left) = at.checked_sub(t0.elapsed()) {
+            std::thread::sleep(left);
+        }
+    };
+    let (library, setup_wait_ms) = match mode {
+        "new" => {
+            let opened = early_state::open_and_prepare(
+                {
+                    let db = db.clone();
+                    move || LocalLibrary::open(&db).map(|lib| (db, lib))
+                },
+                early.clone(),
+                |built| built.unwrap(),
+            );
+            sleep_until(setup_ms);
+            let waited = Instant::now();
+            let (_, library) = opened.recv().unwrap().unwrap();
+            (library, ms(waited))
+        }
+        "base" => {
+            sleep_until(setup_ms);
+            let waited = Instant::now();
+            let library = std::sync::Arc::new(std::sync::Mutex::new(LocalLibrary::open(&db).unwrap()));
+            let setup_wait = ms(waited);
+            let (thread_library, thread_early) = (library.clone(), early.clone());
+            std::thread::spawn(move || {
+                let lib = thread_library.lock().unwrap();
+                thread_early.prepare(&lib).unwrap();
+            });
+            (library, setup_wait)
+        }
+        other => panic!("mode must be base or new, not {other}"),
+    };
+    sleep_until(request_ms);
+    let lib = library.lock().unwrap();
+    let (bytes, was_early) = early_state::encoded_state(&lib, &early).unwrap();
+    let answered_at = ms(t0);
+    println!(
+        "BOOT mode={mode} setup_at={setup_ms} request_at={request_ms} setup_blocked_ms={setup_wait_ms:.1} answered_at_ms={answered_at:.1} request_to_answer_ms={:.1} early_hit={was_early} bytes={} sha256={}",
+        (answered_at - request_ms as f64).max(0.0),
+        bytes.len(),
+        sha_hex(&bytes),
+    );
+    if let Some(out) = dump {
+        std::fs::write(out, &bytes).unwrap();
+    }
+}
+
+fn trackload(dir: &Path, work: &Path, samples: usize) {
+    use std::sync::{Arc, Mutex};
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let unanalysed: std::collections::HashSet<i64> = lib.get_unanalyzed_track_ids().unwrap().into_iter().collect();
+    let total = lib.track_count().unwrap() as usize;
+    let analysed: Vec<i64> = (1..=total as i64).filter(|id| !unanalysed.contains(id)).collect();
+    let analysed: Vec<i64> = analysed
+        .into_iter()
+        .filter(|id| lib.get_track(*id).unwrap().is_some_and(|t| t.source_path.exists()))
+        .collect();
+    let step = (analysed.len() / samples).max(1);
+    let picked: Vec<i64> = analysed.iter().step_by(step).take(samples).copied().collect();
+    let cache = work.join("waveform-detail");
+    let shared = Arc::new(Mutex::new(lib));
+    let mut cols: std::collections::BTreeMap<&str, Vec<f64>> = Default::default();
+    let mut payload_bytes = Vec::new();
+    let mut detail_bytes_len = Vec::new();
+    let mut hashes = Vec::new();
+    for pass in 0..3 {
+        for id in &picked {
+            let path = shared.lock().unwrap().get_track(*id).unwrap().unwrap().source_path;
+            waveform_detail::detail_bytes(&cache, &path).unwrap();
+
+            let parts = {
+                let lib = shared.lock().unwrap();
+                let t = Instant::now();
+                let _ = lib.get_analysis(*id).unwrap();
+                let a = ms(t);
+                let t = Instant::now();
+                let _ = lib.get_track(*id).unwrap();
+                let b = ms(t);
+                let t = Instant::now();
+                let _ = lib.get_cues(*id).unwrap();
+                let c = ms(t);
+                let t = Instant::now();
+                let _ = lib.user_edits(*id);
+                let d = ms(t);
+                let t = Instant::now();
+                let _ = lib.analysis_stages(*id).unwrap();
+                let e = ms(t);
+                let t = Instant::now();
+                let _ = fourfour_analysis::mp3::leading_silence_s(&path);
+                let f = ms(t);
+                [a, b, c, d, e, f]
+            };
+            let t = Instant::now();
+            let stored = {
+                let lib = shared.lock().unwrap();
+                analysis_payload::read_stored_analysis(&lib, *id).unwrap()
+            };
+            let read_ms = ms(t);
+            let t = Instant::now();
+            let text = stored.into_wire();
+            let shape_ms = ms(t);
+            let ser_ms = 0.0;
+
+            let t = Instant::now();
+            let detail = waveform_detail::detail_bytes(&cache, &path).unwrap();
+            let detail_ms = ms(t);
+
+            let (probe_ms, first_ms, _) = decode_start(&path);
+
+            let t = Instant::now();
+            std::thread::scope(|scope| {
+                let analysis = scope.spawn(|| {
+                    let stored = {
+                        let lib = shared.lock().unwrap();
+                        analysis_payload::read_stored_analysis(&lib, *id).unwrap()
+                    };
+                    stored.into_wire()
+                });
+                let detail = scope.spawn(|| {
+                    let _track = shared.lock().unwrap().get_track(*id).unwrap().unwrap();
+                    waveform_detail::detail_bytes(&cache, &path).unwrap()
+                });
+                analysis.join().unwrap();
+                detail.join().unwrap();
+            });
+            let both_ms = ms(t);
+
+            if pass == 2 {
+                for (name, v) in [
+                    ("analysis_read_ms", read_ms),
+                    ("part_get_analysis_ms", parts[0]),
+                    ("part_get_track_ms", parts[1]),
+                    ("part_get_cues_ms", parts[2]),
+                    ("part_user_edits_ms", parts[3]),
+                    ("part_stages_ms", parts[4]),
+                    ("part_leading_silence_ms", parts[5]),
+                    ("analysis_shape_ms", shape_ms),
+                    ("analysis_serialize_ms", ser_ms),
+                    ("analysis_total_ms", read_ms + shape_ms + ser_ms),
+                    ("detail_cached_ms", detail_ms),
+                    ("decode_probe_ms", probe_ms),
+                    ("decode_first_packet_ms", first_ms),
+                    ("analysis_and_detail_parallel_ms", both_ms),
+                ] {
+                    cols.entry(name).or_default().push(v);
+                }
+                payload_bytes.push(text.len() as f64);
+                detail_bytes_len.push(detail.len() as f64);
+                let logical = serde_json::to_vec(&analysis_payload::read_stored_analysis(&shared.lock().unwrap(), *id).unwrap().into_json()).unwrap();
+                let rebuilt = serde_json::to_vec(&analysis_payload::wire_to_json(&text).unwrap()).unwrap();
+                assert!(logical == rebuilt, "track {id}: the wire answer does not carry the logical payload");
+                hashes.push(format!("{id} {} {}", sha_hex(&logical), sha_hex(&detail)));
+            }
+        }
+    }
+    let mut out = serde_json::Map::new();
+    out.insert("tracks".into(), picked.len().into());
+    for (name, v) in cols {
+        let (m, p) = median_and_p95(v);
+        out.insert(format!("{name}_median"), m.into());
+        out.insert(format!("{name}_p95"), p.into());
+    }
+    out.insert("analysis_payload_bytes_median".into(), median_and_p95(payload_bytes).0.into());
+    out.insert("detail_bytes_median".into(), median_and_p95(detail_bytes_len).0.into());
+    perf("trackload_backend", serde_json::Value::Object(out));
+    if let Some(path) = std::env::var_os("FF_TRACKLOAD_HASHES") {
+        std::fs::write(path, hashes.join("\n") + "\n").unwrap();
+    }
+}
+
+fn dump_load(dir: &Path, work: &Path, out: &Path) {
+    std::fs::create_dir_all(out).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let unanalysed: std::collections::HashSet<i64> = lib.get_unanalyzed_track_ids().unwrap().into_iter().collect();
+    let total = lib.track_count().unwrap() as usize;
+    let cache = work.join("waveform-detail");
+    let mut k = 0;
+    for id in (1..=total as i64).filter(|id| !unanalysed.contains(id)) {
+        let path = lib.get_track(id).unwrap().unwrap().source_path;
+        let stored = analysis_payload::read_stored_analysis(&lib, id).unwrap();
+        std::fs::write(out.join(format!("{k}.analysis")), stored.into_wire()).unwrap();
+        std::fs::write(out.join(format!("{k}.detail")), waveform_detail::detail_bytes(&cache, &path).unwrap()).unwrap();
+        k += 1;
+    }
+    println!("dumped {k}");
+}
+
+fn long_lib(dir: &Path, audio: &[String]) {
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut scanned = import_plan::scan_paths(&import_plan::survey_files(audio), &Default::default(), &mut || {}).tracks;
+    scanned.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    let ids = lib.add_tracks_covers_later(&scanned).unwrap();
+    for (n, id) in ids.iter().enumerate() {
+        lib.set_analysis(*id, &fake_analysis_of(n, scanned[n].duration_secs)).unwrap();
+    }
+    println!("tracks={} secs={:?}", ids.len(), scanned.iter().map(|t| t.duration_secs as u64).collect::<Vec<_>>());
+}
+
+fn bands(paths: &[String]) {
+    let mut ratios = Vec::new();
+    for path in paths {
+        let t = Instant::now();
+        let waves = band_analysis::measure_waveforms(Path::new(path)).unwrap();
+        let elapsed_ms = ms(t);
+        let seconds = waves.pwv7.len() as f64 / 150.0;
+        ratios.push(elapsed_ms / 1000.0 / seconds);
+        println!(
+            "{path}: {seconds:.0} s of audio, {elapsed_ms:.0} ms, {:.1}x realtime",
+            seconds * 1000.0 / elapsed_ms
+        );
+    }
+    let (median, _) = median_and_p95(ratios);
+    println!("median {:.1} ms per second of audio", median * 1000.0);
+}
+
+fn save(dir: &Path, count: usize) {
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let tracks: Vec<Track> = (0..count).map(fake_track).collect();
+    let ids: Vec<u32> = lib.add_tracks(&tracks).unwrap().into_iter().map(|id| id as u32).collect();
+    let step = (count / 500).max(1);
+    let mut playlists: Vec<pioneer_usb_writer::models::Playlist> = (0..20)
+        .map(|p| pioneer_usb_writer::models::Playlist {
+            id: p as u32 + 1,
+            name: format!("Playlist {p}"),
+            track_ids: ids.iter().skip(p).step_by(step).copied().collect(),
+            parent_id: 0,
+            is_folder: false,
+        })
+        .collect();
+    playlists.push(pioneer_usb_writer::models::Playlist {
+        id: 21,
+        name: "Big".into(),
+        track_ids: ids.iter().step_by((count / 2000).max(1)).copied().collect(),
+        parent_id: 0,
+        is_folder: false,
+    });
+    let rows: usize = playlists.iter().map(|p| p.track_ids.len()).sum();
+
+    let t = Instant::now();
+    lib.replace_playlists(&playlists).unwrap();
+    let first_ms = ms(t);
+
+    let mut unchanged = Vec::new();
+    for _ in 0..5 {
+        let t = Instant::now();
+        lib.replace_playlists(&playlists).unwrap();
+        unchanged.push(ms(t));
+    }
+
+    let mut rename = Vec::new();
+    for n in 0..5 {
+        playlists[0].name = format!("Renamed {n}");
+        let t = Instant::now();
+        lib.replace_playlists(&playlists).unwrap();
+        rename.push(ms(t));
+    }
+
+    let mut append = Vec::new();
+    for n in 0..5 {
+        playlists[20].track_ids.push(ids[n * 5 + 1]);
+        let t = Instant::now();
+        lib.replace_playlists(&playlists).unwrap();
+        append.push(ms(t));
+    }
+
+    let t = Instant::now();
+    let loaded = lib.get_all_playlists().unwrap();
+    let read_ms = ms(t);
+    println!(
+        "tracks={count} playlist_rows={rows} first_save_ms={first_ms:.1} unchanged_save_ms={:.1} rename_one_save_ms={:.1} append_one_save_ms={:.1} read_playlists_ms={read_ms:.1} playlists={}",
+        median_and_p95(unchanged).0,
+        median_and_p95(rename).0,
+        median_and_p95(append).0,
+        loaded.len(),
+    );
+}
+
+fn tiny_mp3(n: usize) -> Vec<u8> {
+    let text_frame = |id: &str, text: &str| {
+        let mut body = vec![0u8];
+        body.extend_from_slice(text.as_bytes());
+        let mut frame = id.as_bytes().to_vec();
+        frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&[0, 0]);
+        frame.extend_from_slice(&body);
+        frame
+    };
+    let mut frames = text_frame("TIT2", &format!("Scan Track {n}"));
+    frames.extend(text_frame("TPE1", &format!("Scan Artist {}", n % 200)));
+    frames.extend(text_frame("TALB", &format!("Scan Album {}", n % 500)));
+    let size = frames.len() as u32;
+    let synchsafe = [(size >> 21) as u8 & 0x7f, (size >> 14) as u8 & 0x7f, (size >> 7) as u8 & 0x7f, size as u8 & 0x7f];
+    let mut bytes = b"ID3\x03\x00\x00".to_vec();
+    bytes.extend_from_slice(&synchsafe);
+    bytes.extend(frames);
+    for _ in 0..4 {
+        bytes.extend_from_slice(&[0xFF, 0xFB, 0x90, 0x00]);
+        bytes.extend(std::iter::repeat(0u8).take(413));
+    }
+    bytes
+}
+
+fn scan(dir: &Path, count: usize) {
+    let music = dir.join("music");
+    std::fs::create_dir_all(&music).unwrap();
+    for n in 0..count {
+        let sub = music.join(format!("dir{}", n % 50));
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join(format!("track{n:06}.mp3")), tiny_mp3(n)).unwrap();
+    }
+
+    let t = Instant::now();
+    let scanned = pioneer_usb_writer::scanner::scan_directory(&music).unwrap();
+    let scan_ms = ms(t);
+
+    let per_track = { let _ = std::fs::remove_file(dir.join("per_track.db")); LocalLibrary::open(&dir.join("per_track.db")).unwrap() };
+    let t = Instant::now();
+    for track in &scanned {
+        if !per_track.track_exists_by_path(&track.source_path).unwrap() {
+            per_track.add_track(track).unwrap();
+        }
+    }
+    let per_track_ms = ms(t);
+
+    let batched = { let _ = std::fs::remove_file(dir.join("batched.db")); LocalLibrary::open(&dir.join("batched.db")).unwrap() };
+    let t = Instant::now();
+    let fresh: Vec<Track> = scanned
+        .iter()
+        .filter(|track| !batched.track_exists_by_path(&track.source_path).unwrap())
+        .cloned()
+        .collect();
+    batched.add_tracks(&fresh).unwrap();
+    let batched_ms = ms(t);
+
+    println!(
+        "files={count} scanned={} scan_directory_ms={scan_ms:.1} insert_per_track_ms={per_track_ms:.1} insert_batched_ms={batched_ms:.1}",
+        scanned.len()
+    );
+}
+
+fn read_list(file: &Path) -> Vec<PathBuf> {
+    std::fs::read_to_string(file).unwrap().lines().filter(|l| !l.trim().is_empty()).map(PathBuf::from).collect()
+}
+
+fn add_scanned_tracks(lib: &LocalLibrary, scanned: Vec<Track>) -> (usize, f64, f64) {
+    if scanned.is_empty() {
+        return (0, 0.0, 0.0);
+    }
+    let t = Instant::now();
+    let mut seen = lib.track_paths().unwrap();
+    let fresh: Vec<Track> = scanned.into_iter().filter(|t| seen.insert(t.source_path.clone())).collect();
+    let exists_ms = ms(t);
+    let t = Instant::now();
+    let added = lib.add_tracks_covers_later(&fresh).unwrap().len();
+    (added, exists_ms, ms(t))
+}
+
+fn cpu_seconds() -> (f64, f64) {
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
+    let fields: Vec<&str> = stat[stat.rfind(')').unwrap() + 2..].split(' ').collect();
+    let ticks = |i: usize| fields[i].parse::<f64>().unwrap() / 100.0;
+    (ticks(11), ticks(12))
+}
+
+fn rescan(folder: &Path, db: &Path) {
+    let lib = LocalLibrary::open(db).unwrap();
+    let library_tracks = lib.track_count().unwrap();
+    let paths = vec![folder.to_string_lossy().into_owned()];
+    let (user0, sys0) = cpu_seconds();
+    let total = Instant::now();
+    let t = Instant::now();
+    let known = lib.track_paths().unwrap();
+    let known_ms = ms(t);
+    let t = Instant::now();
+    let survey = import_plan::survey_files(&paths);
+    let survey_ms = ms(t);
+    let t = Instant::now();
+    let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
+    let scan_ms = ms(t);
+    let read = scanned.tracks.len();
+    let plans = import_plan::ImportPlans::default();
+    let t = Instant::now();
+    let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+    let plan_ms = ms(t);
+    if let Ok(out) = std::env::var("FF_IMPORT_PLAN_OUT") {
+        let mut json = serde_json::to_value(&plan).unwrap();
+        json["token"] = serde_json::Value::Null;
+        std::fs::write(out, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    }
+    let t = Instant::now();
+    let (tracks, _) = plans.take(plan.token).unwrap().resolve(false);
+    let (added, _, _) = add_scanned_tracks(&lib, tracks);
+    let commit_ms = ms(t);
+    let rows_ms = ms(total);
+    let (user1, sys1) = cpu_seconds();
+    println!(
+        "files={} library_tracks={library_tracks} read={read} added={added} known_paths_ms={known_ms:.1} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} commit_ms={commit_ms:.1} rows_ms={rows_ms:.1} cpu_user_s={:.2} cpu_sys_s={:.2}",
+        survey.audio_count(),
+        user1 - user0,
+        sys1 - sys0
+    );
+}
+
+fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
+    std::fs::create_dir_all(work).unwrap();
+    let db = work.join("import.db");
+    let sidecars = |db: &Path| ["", "-wal", "-shm"].map(|ext| PathBuf::from(format!("{}{ext}", db.display())));
+    let clear = || sidecars(&db).iter().for_each(|f| drop(std::fs::remove_file(f)));
+    clear();
+    if let Some(base) = base_db {
+        for (from, to) in sidecars(base).iter().zip(sidecars(&db).iter()) {
+            if from.exists() {
+                std::fs::copy(from, to).unwrap();
+            }
+        }
+    }
+    let lib = LocalLibrary::open(&db).unwrap();
+    let library_tracks = lib.track_count().unwrap();
+    let paths = vec![folder.to_string_lossy().into_owned()];
+
+    let total = Instant::now();
+    let t = Instant::now();
+    let known = lib.track_paths().unwrap();
+    let known_ms = ms(t);
+    let t = Instant::now();
+    let survey = import_plan::survey_files(&paths);
+    let survey_ms = ms(t);
+    let t = Instant::now();
+    let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
+    let scan_ms = ms(t);
+    let files = scanned.tracks.len() + scanned.known.len();
+    let plans = import_plan::ImportPlans::default();
+    let t = Instant::now();
+    let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+    if let Ok(out) = std::env::var("FF_IMPORT_PLAN_OUT") {
+        std::fs::write(out, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
+    }
+    let plan_ms = ms(t);
+    let plan_import_ms = ms(total);
+    let t = Instant::now();
+    let (tracks, _) = plans.take(plan.token).unwrap().resolve(false);
+    let (added, exists_ms, insert_ms) = add_scanned_tracks(&lib, tracks);
+    let commit_ms = ms(t);
+    if let Ok(again) = std::env::var("FF_IMPORT_AGAIN") {
+        let t = Instant::now();
+        let known = lib.track_paths().unwrap();
+        let survey = import_plan::survey_files(&[again]);
+        let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
+        let second_scan_ms = ms(t);
+        let t = Instant::now();
+        let plan = import_plan::plan_for_library(&plans, &lib, scanned, &survey).unwrap();
+        let second_plan_ms = ms(t);
+        println!("second_import: scan_ms={second_scan_ms:.1} plan_ms={second_plan_ms:.1} duplicates={}", plan.duplicates.len());
+        perf(
+            "import_second",
+            serde_json::json!({ "scan_ms": second_scan_ms, "plan_ms": second_plan_ms, "duplicates": plan.duplicates.len() }),
+        );
+    }
+    let lib = std::sync::Mutex::new(lib);
+    let t = Instant::now();
+    let covers = import_plan::store_pending_covers(&lib, None, &mut |_| {}).unwrap();
+    let covers_ms = ms(t);
+    let lib = lib.into_inner().unwrap();
+    println!(
+        "files={files} library_tracks={library_tracks} known_ms={known_ms:.1} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} plan_import_ms={plan_import_ms:.1} commit_import_ms={commit_ms:.1} (exists_check_ms={exists_ms:.1} add_tracks_ms={insert_ms:.1}) rows_ms={:.1} covers_ms={covers_ms:.1} covers={covers} added={added} duplicates={}",
+        plan_import_ms + commit_ms,
+        plan.duplicates.len()
+    );
+    perf(
+        "import_backend",
+        serde_json::json!({
+            "files": files,
+            "library_tracks": library_tracks,
+            "survey_ms": survey_ms,
+            "scan_ms": scan_ms,
+            "plan_ms": plan_ms,
+            "plan_import_ms": plan_import_ms,
+            "commit_import_ms": commit_ms,
+            "commit_exists_check_ms": exists_ms,
+            "commit_add_tracks_ms": insert_ms,
+            "known_paths_ms": known_ms,
+            "covers_ms": covers_ms,
+            "covers": covers,
+            "added": added,
+            "duplicates": plan.duplicates.len(),
+        }),
+    );
+    drop(lib);
+    if let Ok(keep) = std::env::var("FF_IMPORT_KEEP_DB") {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let checkpointed = LocalLibrary::open(&db).unwrap();
+        drop(checkpointed);
+        std::fs::copy(&db, keep).unwrap();
+    }
+    clear();
+}
+
+fn decode_start(path: &Path) -> (f64, f64, f64) {
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+    use symphonia::core::units::Time;
+
+    let t = Instant::now();
+    let file = std::fs::File::open(path).unwrap();
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+    let mut format = symphonia::default::get_probe().format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default()).unwrap().format;
+    let track = format.default_track().unwrap().clone();
+    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).unwrap();
+    let probe_ms = ms(t);
+    let mut first_packet = || loop {
+        let packet = format.next_packet().unwrap();
+        if packet.track_id() == track.id && decoder.decode(&packet).is_ok() {
+            return;
+        }
+    };
+    first_packet();
+    let first_ms = ms(t);
+    let secs = track.codec_params.n_frames.zip(track.codec_params.sample_rate).map_or(60.0, |(n, r)| n as f64 / r as f64);
+    let t = Instant::now();
+    let mut decode_after_seek = || {
+        format.seek(SeekMode::Accurate, SeekTo::Time { time: Time::from(secs * 0.5), track_id: Some(track.id) }).unwrap();
+        decoder.reset();
+        loop {
+            let packet = format.next_packet().unwrap();
+            if packet.track_id() == track.id && decoder.decode(&packet).is_ok() {
+                return;
+            }
+        }
+    };
+    decode_after_seek();
+    (probe_ms, first_ms, ms(t))
+}
+
+fn track_audio(list: &Path, work: &Path) {
+    let files = read_list(list);
+    let mut probe = Vec::new();
+    let mut first = Vec::new();
+    let mut seek = Vec::new();
+    for _ in 0..2 {
+        for f in &files {
+            let (p, a, s) = decode_start(f);
+            probe.push(p);
+            first.push(a);
+            seek.push(s);
+        }
+    }
+    let half = files.len();
+    let (probe_m, probe_p) = median_and_p95(probe[half..].to_vec());
+    let (first_m, first_p) = median_and_p95(first[half..].to_vec());
+    let (seek_m, seek_p) = median_and_p95(seek[half..].to_vec());
+
+    let cache = work.join("waveform-detail");
+    let _ = std::fs::remove_dir_all(&cache);
+    let mut cold = Vec::new();
+    let mut warm = Vec::new();
+    let mut bytes = Vec::new();
+    for f in &files {
+        let t = Instant::now();
+        let b = waveform_detail::detail_bytes(&cache, f).unwrap();
+        cold.push(ms(t));
+        bytes.push(b.len() as f64);
+        let t = Instant::now();
+        waveform_detail::detail_bytes(&cache, f).unwrap();
+        warm.push(ms(t));
+    }
+    let _ = std::fs::remove_dir_all(&cache);
+    let (cold_m, cold_p) = median_and_p95(cold);
+    let (warm_m, warm_p) = median_and_p95(warm);
+    let (bytes_m, _) = median_and_p95(bytes);
+    println!(
+        "files={} decode_probe_ms={probe_m:.1}/{probe_p:.1} decode_first_packet_ms={first_m:.1}/{first_p:.1} seek_mid_decode_ms={seek_m:.1}/{seek_p:.1} detail_cold_ms={cold_m:.0}/{cold_p:.0} detail_cached_ms={warm_m:.1}/{warm_p:.1} detail_bytes={bytes_m:.0} (median/p95)",
+        files.len()
+    );
+    perf(
+        "track_audio_backend",
+        serde_json::json!({
+            "files": files.len(),
+            "decode_probe_ms_median": probe_m, "decode_probe_ms_p95": probe_p,
+            "decode_first_packet_ms_median": first_m, "decode_first_packet_ms_p95": first_p,
+            "seek_mid_decode_ms_median": seek_m, "seek_mid_decode_ms_p95": seek_p,
+            "waveform_detail_cold_ms_median": cold_m, "waveform_detail_cold_ms_p95": cold_p,
+            "waveform_detail_cached_ms_median": warm_m, "waveform_detail_cached_ms_p95": warm_p,
+            "waveform_detail_bytes_median": bytes_m,
+        }),
+    );
+}
+
+/// Per file, back to back: the single-threaded decode and the meter on their own, the one-thread detail measurement
+/// (decode then meter, as before Q50) against `measure_detail`, and whether the parallel decode and the detail bytes are
+/// bit-identical to the single-threaded ones.
+fn detail_profile(list: &Path) {
+    use pioneer_usb_writer::waveform::DetailMeter;
+    let serial_detail = |f: &Path| {
+        let mut meter: Option<DetailMeter> = None;
+        band_analysis::decode_blocks(f, |rate, channels, samples| {
+            meter.get_or_insert_with(|| DetailMeter::new(rate, channels)).push(samples);
+        })
+        .unwrap();
+        meter.unwrap().finish().to_bytes()
+    };
+    let files = read_list(list);
+    let (mut decode, mut meter, mut serial, mut parallel) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut mismatches = Vec::new();
+    for f in &files {
+        let t = Instant::now();
+        let mut audio: Vec<f32> = Vec::new();
+        let mut spec = (0u32, 0usize);
+        if let Err(e) = band_analysis::decode_blocks(f, |rate, channels, samples| {
+            spec = (rate, channels);
+            audio.extend_from_slice(samples);
+        }) {
+            eprintln!("skip {}: {e}", f.display());
+            continue;
+        }
+        decode.push(ms(t));
+        let t = Instant::now();
+        let mut m = DetailMeter::new(spec.0, spec.1);
+        m.push(&audio);
+        std::hint::black_box(m.finish());
+        meter.push(ms(t));
+
+        let mut threaded: Vec<f32> = Vec::with_capacity(audio.len());
+        band_analysis::decode_blocks_parallel(f, band_analysis::decode_threads(), |_, _, samples| {
+            threaded.extend_from_slice(samples)
+        })
+        .unwrap();
+        let same_audio = threaded.len() == audio.len() && threaded.iter().zip(&audio).all(|(a, b)| a.to_bits() == b.to_bits());
+
+        let t = Instant::now();
+        let old = serial_detail(f);
+        serial.push(ms(t));
+        let t = Instant::now();
+        let new = band_analysis::measure_detail(f).unwrap().to_bytes();
+        parallel.push(ms(t));
+        if !same_audio || old != new {
+            mismatches.push(format!("{} (audio {} vs {} samples, same {same_audio})", f.display(), threaded.len(), audio.len()));
+        }
+    }
+    let measured = decode.len();
+    let (d, _) = median_and_p95(decode);
+    let (m, _) = median_and_p95(meter);
+    let (s, sp) = median_and_p95(serial);
+    let (p, pp) = median_and_p95(parallel);
+    for m in &mismatches {
+        println!("MISMATCH {m}");
+    }
+    println!(
+        "files={} threads={} decode_ms={d:.0} meter_ms={m:.0} detail_one_thread_ms={s:.0}/{sp:.0} measure_detail_ms={p:.0}/{pp:.0} identical={}/{} (median/p95)",
+        measured,
+        band_analysis::decode_threads(),
+        measured - mismatches.len(),
+        measured
+    );
+    perf(
+        "waveform_detail_profile",
+        serde_json::json!({
+            "files": measured, "threads": band_analysis::decode_threads(),
+            "decode_ms_median": d, "meter_ms_median": m,
+            "detail_one_thread_ms_median": s, "detail_one_thread_ms_p95": sp,
+            "measure_detail_ms_median": p, "measure_detail_ms_p95": pp,
+            "identical": measured - mismatches.len(),
+        }),
+    );
+}
+
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn unit(&mut self) -> f64 {
+        (self.next() >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+}
+
+fn fixture_lib(music: &Path, dir: &Path, analysed: f64, seed: u64) {
+    use pioneer_library::rekordbox::{ImportedMeta, SourceKind};
+    std::fs::create_dir_all(dir).unwrap();
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut rng = Rng(seed.max(1));
+    let total = Instant::now();
+
+    let t = Instant::now();
+    let mut scanned = import_plan::scan_paths(&import_plan::survey_files(&[music.to_string_lossy().into_owned()]), &Default::default(), &mut || {}).tracks;
+    scanned.sort_by(|a, b| a.source_path.cmp(&b.source_path));
+    let scan_ms = ms(t);
+
+    let t = Instant::now();
+    let ids = lib.add_tracks_covers_later(&scanned).unwrap();
+    let lib = std::sync::Mutex::new(lib);
+    let with_art = import_plan::store_pending_covers(&lib, None, &mut |_| {}).unwrap();
+    let lib = lib.into_inner().unwrap();
+    let add_ms = ms(t);
+
+    let t = Instant::now();
+    let mut analysed_ids = Vec::new();
+    let mut batch: Vec<(i64, AnalysisResult)> = Vec::new();
+    let flush = |batch: &mut Vec<(i64, AnalysisResult)>| {
+        lib.set_analyses(&batch.iter().map(|(id, a)| (*id, a)).collect::<Vec<_>>()).unwrap();
+        batch.clear();
+    };
+    for (n, id) in ids.iter().enumerate() {
+        if rng.unit() >= analysed {
+            continue;
+        }
+        let nominal_secs = 180.0 + rng.below(300) as f64;
+        batch.push((*id, fake_analysis_of(n, nominal_secs)));
+        analysed_ids.push(*id);
+        if batch.len() == 500 {
+            flush(&mut batch);
+            eprintln!("[fixture] analysed {}/{}", analysed_ids.len(), ids.len());
+        }
+    }
+    flush(&mut batch);
+    let analysis_ms = ms(t);
+
+    let t = Instant::now();
+    let mut rated = 0;
+    let mut coloured = 0;
+    let colours = ["#ff0000", "#ff8c00", "#ffd700", "#00c853", "#00b0ff", "#2962ff", "#aa00ff", "#ff4081"];
+    for id in &ids {
+        if rng.unit() < 0.25 {
+            lib.set_user_rating(*id, 1 + rng.below(5) as u8).unwrap();
+            rated += 1;
+        }
+        if rng.unit() < 0.08 {
+            let meta = ImportedMeta {
+                source: SourceKind::Xml,
+                source_id: id.to_string(),
+                grid_locked: false,
+                cues_locked: false,
+                rating: None,
+                color: Some(colours[rng.below(colours.len())].to_string()),
+                cues: Vec::new(),
+                grid: Vec::new(),
+            };
+            meta.write(&dir.join("anlz").join(id.to_string())).unwrap();
+            coloured += 1;
+        }
+    }
+    let labels_ms = ms(t);
+
+    let t = Instant::now();
+    let mut playlists = 0;
+    let mut folders = 0;
+    let mut playlist_rows = 0;
+    let sizes = [12, 25, 40, 60, 80, 120, 150, 250, 400, 800];
+    let tops = ["Gigs", "Genres", "Crates", "2024", "2025", "Archive", "Radio Shows"];
+    for (f, top) in tops.iter().enumerate() {
+        let top_id = lib.create_folder(top, 0).unwrap() as u32;
+        folders += 1;
+        let subs: Vec<u32> = (0..rng.below(3))
+            .map(|s| {
+                folders += 1;
+                lib.create_folder(&format!("{top} {}", s + 1), top_id).unwrap() as u32
+            })
+            .collect();
+        for p in 0..(6 + rng.below(8)) {
+            let parent = if subs.is_empty() || rng.unit() < 0.5 { top_id } else { subs[rng.below(subs.len())] };
+            let pid = lib.create_playlist_in(&format!("{top} set {}", f * 20 + p + 1), parent).unwrap();
+            let len = sizes[rng.below(sizes.len())].min(ids.len());
+            let start = rng.below(ids.len());
+            let members: Vec<i64> = (0..len).map(|k| ids[(start + k * 7) % ids.len()]).collect();
+            playlist_rows += members.len();
+            lib.set_playlist_tracks(pid, &members).unwrap();
+            playlists += 1;
+        }
+    }
+    let big = lib.create_playlist("All Bangers").unwrap();
+    let members: Vec<i64> = ids.iter().step_by(5).copied().collect();
+    playlist_rows += members.len();
+    lib.set_playlist_tracks(big, &members).unwrap();
+    playlists += 1;
+    let playlists_ms = ms(t);
+
+    perf(
+        "fixture_library",
+        serde_json::json!({
+            "tracks": ids.len(), "with_artwork": with_art, "analysed": analysed_ids.len(),
+            "rated": rated, "coloured": coloured, "playlists": playlists, "folders": folders, "playlist_rows": playlist_rows,
+            "scan_ms": scan_ms, "add_tracks_ms": add_ms, "analysis_ms": analysis_ms, "labels_ms": labels_ms,
+            "playlists_ms": playlists_ms, "total_ms": ms(total),
+        }),
+    );
+}
+
+fn rss_mb() -> f64 {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let kb = status
+        .lines()
+        .find_map(|line| line.strip_prefix("VmRSS:"))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    kb / 1024.0
+}
+
+fn fake_detail_series(seed: usize) -> pioneer_usb_writer::waveform::DetailSeries {
+    let columns = 2400 * 60;
+    pioneer_usb_writer::waveform::DetailSeries {
+        columns_per_second: 2400,
+        gains: [1, 2, 3],
+        signal_gain: 1.0,
+        planes: [
+            (0..columns).map(|n| ((n + seed) % 120) as u8).collect(),
+            (0..columns).map(|n| ((n * 3 + seed) % 100) as u8).collect(),
+            (0..columns).map(|n| ((n * 5) % 90) as u8).collect(),
+        ],
+        signal: [vec![-20; columns], vec![20; columns]],
+    }
+}
+
+/// Library reads, analysis stores, playlist saves and detail-cache writes in a loop on a copy of the library, RSS sampled over time.
+fn soak(dir: &Path, seconds: u64) {
+    let work = dir.join(format!("soak-{}", std::process::id()));
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::copy(dir.join("library.db"), work.join("library.db")).unwrap();
+    let lib = LocalLibrary::open(&work.join("library.db")).unwrap();
+    let total = lib.track_count().unwrap() as usize;
+    let audio_files: Vec<PathBuf> = (0..40)
+        .map(|n| {
+            let path = work.join(format!("track{n}.wav"));
+            std::fs::write(&path, [n as u8]).unwrap();
+            path
+        })
+        .collect();
+    let cache = work.join("cache");
+    let reader = lib.track_labels_reader();
+    let mut playlists = lib.get_all_playlists().unwrap();
+    let parts = std::env::var("FF_SOAK_PARTS").unwrap_or_else(|_| "state,analysis,detail,playlists".to_string());
+    let part = |name: &str| parts.split(',').any(|p| p == name);
+    let started = Instant::now();
+    let mut rounds = 0usize;
+    let mut samples: Vec<(f64, usize, f64)> = Vec::new();
+    let mut next_sample = 0.0;
+    while started.elapsed().as_secs() < seconds {
+        if part("state") {
+            let infos = track_infos::list_track_infos(&lib).unwrap();
+            let state = LoadedState {
+                tracks: dto::TrackTable::new(&infos).unwrap(),
+                playlists: playlists
+                    .iter()
+                    .map(|pl| PlaylistInput { id: pl.id, name: pl.name.clone(), track_ids: pl.track_ids.clone(), parent_id: pl.parent_id, is_folder: pl.is_folder })
+                    .collect(),
+            };
+            drop(serde_json::to_string(&state).unwrap());
+            drop(state);
+            drop(track_infos::changed_track_labels(&reader));
+        }
+        if part("analysis") {
+            for n in 0..20 {
+                let id = ((rounds * 20 + n) * 7919 % total) as i64 + 1;
+                drop(analysis_payload::build_analysis_json(&lib, id).unwrap());
+                lib.set_analysis(id, &fake_analysis(rounds + n)).unwrap();
+            }
+        }
+        if part("detail") {
+            for (n, audio) in audio_files.iter().enumerate() {
+                waveform_detail::store_detail(&cache, audio, &fake_detail_series(rounds + n)).unwrap();
+                drop(waveform_detail::detail_bytes(&cache, audio).unwrap());
+            }
+        }
+        if part("playlists") {
+            playlists[0].name = format!("Soak {}", rounds % 7);
+            lib.replace_playlists(&playlists).unwrap();
+        }
+        rounds += 1;
+        if started.elapsed().as_secs_f64() >= next_sample {
+            let sample = (started.elapsed().as_secs_f64(), rounds, rss_mb());
+            println!("soak_backend t={:.0}s rounds={} rss_mb={:.1}", sample.0, sample.1, sample.2);
+            samples.push(sample);
+            next_sample += (seconds as f64 / 12.0).max(5.0);
+        }
+    }
+    let end = (started.elapsed().as_secs_f64(), rounds, rss_mb());
+    println!("soak_backend t={:.0}s rounds={} rss_mb={:.1} (end)", end.0, end.1, end.2);
+    std::fs::remove_dir_all(&work).ok();
+    perf(
+        "soak_backend",
+        serde_json::json!({
+            "tracks": total,
+            "rounds": end.1,
+            "rss_mb_first": samples.first().map_or(0.0, |s| s.2),
+            "rss_mb_last": end.2,
+            "samples": samples.iter().map(|s| serde_json::json!({ "t": s.0, "rounds": s.1, "rss_mb": s.2 })).collect::<Vec<_>>(),
+        }),
+    );
+}
+
+fn rep(dir: &Path, runs: usize) {
+    let lib = LocalLibrary::open(&dir.join("library.db")).unwrap();
+    let mut columns: [Vec<f64>; 6] = Default::default();
+    let mut bytes = 0;
+    let mut binary_bytes = 0;
+    for _ in 0..runs {
+        let t = Instant::now();
+        drop(lib.get_track_list_rows_without_previews().unwrap());
+        columns[0].push(ms(t));
+        let t = Instant::now();
+        let mut rows = 0;
+        lib.for_each_track_list_row(i64::MIN..=i64::MAX, |row| rows += usize::from(row.id != 0)).unwrap();
+        assert!(rows > 0);
+        columns[3].push(ms(t));
+        let t = Instant::now();
+        drop(lib.get_all_playlists().unwrap());
+        columns[4].push(ms(t));
+        let t = Instant::now();
+        let state = track_infos::loaded_state(&lib).unwrap();
+        columns[1].push(ms(t));
+        let t = Instant::now();
+        bytes = serde_json::to_vec(&state).unwrap().len();
+        columns[2].push(ms(t));
+        let t = Instant::now();
+        binary_bytes = state.to_bytes().unwrap().len();
+        columns[5].push(ms(t));
+    }
+    let total: Vec<f64> = columns[1].iter().zip(&columns[2]).map(|(a, b)| a + b).collect();
+    let summary = |name: &str, v: &[f64]| {
+        let mut sorted = v.to_vec();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        format!("{name}={:.1} ({:.1}-{:.1})", sorted[sorted.len() / 2], sorted[0], sorted[sorted.len() - 1])
+    };
+    println!(
+        "REP runs={runs} bytes={bytes} binary_bytes={binary_bytes} {} {} {} {} {} {} {}",
+        summary("rows_ms", &columns[0]),
+        summary("scan_ms", &columns[3]),
+        summary("playlists_ms", &columns[4]),
+        summary("loaded_state_ms", &columns[1]),
+        summary("serialize_ms", &columns[2]),
+        summary("binary_ms", &columns[5]),
+        summary("load_state_ms", &total),
+    );
+}
+
+/// Opens (and so migrates) the library at `db` and moves its v7 covers into the cover store, timing both.
+fn migrate(db: &Path) {
+    let size_before = std::fs::metadata(db).map_or(0, |m| m.len());
+    let t = Instant::now();
+    let lib = LocalLibrary::open(db).unwrap();
+    let open_ms = ms(t);
+    let legacy = lib.legacy_covers().unwrap();
+    let t = Instant::now();
+    lib.check_space_for_legacy_covers(&pioneer_library::statvfs_available_bytes).unwrap();
+    let mut moved = 0;
+    loop {
+        let step = lib.move_legacy_covers(32).unwrap();
+        moved += step.moved;
+        if step.remaining == 0 {
+            break;
+        }
+    }
+    let move_ms = ms(t);
+    let size_after = std::fs::metadata(db).map_or(0, |m| m.len());
+    let files = lib.covers_dir().map_or(0, |dir| {
+        std::fs::read_dir(dir).into_iter().flatten().flatten().map(|shard| std::fs::read_dir(shard.path()).map_or(0, |f| f.count())).sum::<usize>()
+    });
+    println!(
+        "migrate: open_ms={open_ms:.1} legacy={legacy:?} move_ms={move_ms:.1} moved={moved} cover_files={files} db_bytes {size_before} -> {size_after}"
+    );
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    match args.get(1).map(String::as_str) {
+        Some("migrate") => migrate(Path::new(&args[2])),
+        Some("gen") => generate(Path::new(&args[2]), args[3].parse().unwrap()),
+        Some("run") => run(Path::new(&args[2])),
+        Some("early") => early(
+            Path::new(&args[2]),
+            &args.get(3).map_or(vec![0, 100, 400], |list| list.split(',').map(|n| n.parse().unwrap()).collect::<Vec<u64>>()),
+            args.get(4).map(Path::new),
+        ),
+        Some("boot") => boot(
+            Path::new(&args[2]),
+            &args[3],
+            args[4].parse().unwrap(),
+            args[5].parse().unwrap(),
+            args.get(6).map(Path::new),
+        ),
+        Some("rep") => rep(Path::new(&args[2]), args.get(3).map_or(15, |n| n.parse().unwrap())),
+        Some("dump") => dump(Path::new(&args[2]), Path::new(&args[3])),
+        Some("dump-bytes") => dump_bytes(Path::new(&args[2]), Path::new(&args[3])),
+        Some("load") => load(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
+        Some("save") => save(Path::new(&args[2]), args[3].parse().unwrap()),
+        Some("scan") => scan(Path::new(&args[2]), args[3].parse().unwrap()),
+        Some("bands") => bands(&args[2..]),
+        Some("rescan") => rescan(Path::new(&args[2]), Path::new(&args[3])),
+        Some("import") => import(Path::new(&args[2]), args.get(4).map(Path::new), Path::new(&args[3])),
+        Some("soak") => soak(Path::new(&args[2]), args.get(3).map_or(60, |n| n.parse().unwrap())),
+        Some("trackload") => trackload(Path::new(&args[2]), Path::new(&args[3]), args[4].parse().unwrap()),
+        Some("dump-load") => dump_load(Path::new(&args[2]), Path::new(&args[3]), Path::new(&args[4])),
+        Some("long-lib") => long_lib(Path::new(&args[2]), &args[3..]),
+        Some("detail") => detail_profile(Path::new(&args[2])),
+        Some("audio") => track_audio(Path::new(&args[2]), Path::new(&args[3])),
+        Some("fixture-lib") => fixture_lib(
+            Path::new(&args[2]),
+            Path::new(&args[3]),
+            args.get(4).map_or(0.7, |a| a.parse().unwrap()),
+            args.get(5).map_or(4404, |s| s.parse().unwrap()),
+        ),
+        _ => eprintln!(
+            "usage: bench_startup gen <dir> <count> | run <dir> | migrate <library.db> | rep <dir> [runs] | early <dir> [request ms list] [out.bin] | boot <dir> base|new <setup ms> <request ms> [out.bin] | dump <dir> <out.json> | load <dir> [samples] | save <dir> <tracks> | scan <dir> <files> | bands <audio files> | import <folder> <workdir> [base library.db] | rescan <folder> <library.db> | audio <file list> <workdir> | soak <dir> [seconds] | fixture-lib <music dir> <library dir> [analysed share] [seed]"
+        ),
+    }
+}

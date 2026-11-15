@@ -99,6 +99,38 @@ pub(crate) fn decode_to_vec(path: &Path, start_sample: u64, rate: u32, channels:
     out
 }
 
+fn hash_of_first_seconds(path: &Path, start_sample: u64, rate: u32, channels: u16, seconds: u64) -> (usize, u64) {
+    let wanted = (seconds * rate as u64 * channels as u64) as usize;
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut taken = 0usize;
+    run_decode(path.to_str().unwrap(), start_sample, rate, channels, &|| true, &mut |samples| {
+        let room = wanted - taken;
+        for sample in &samples[..samples.len().min(room)] {
+            for byte in sample.to_le_bytes() {
+                hash = (hash ^ byte as u64).wrapping_mul(0x100000001b3);
+            }
+        }
+        taken += samples.len().min(room);
+        Ok(taken < wanted)
+    })
+    .unwrap();
+    (taken, hash)
+}
+
+#[test]
+#[ignore = "prints the hash of the first seconds a decode of FF_AUDIO_HASH_LIST files hands the output (run with --ignored --nocapture)"]
+fn print_audio_frame_hashes() {
+    let list = std::env::var("FF_AUDIO_HASH_LIST").expect("FF_AUDIO_HASH_LIST=<file with one audio path per line>");
+    let seconds: u64 = std::env::var("FF_AUDIO_HASH_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
+    for line in std::fs::read_to_string(list).unwrap().lines().filter(|l| !l.trim().is_empty()) {
+        for (label, start_s) in [("start", 0u64), ("seek30s", 30)] {
+            let start_sample = start_s * 48_000 * 2;
+            let (samples, hash) = hash_of_first_seconds(Path::new(line), start_sample, 48_000, 2, seconds);
+            println!("AUDIOHASH {label} {samples} {hash:016x} {}", Path::new(line).file_name().unwrap().to_string_lossy());
+        }
+    }
+}
+
 fn peak(samples: &[f32]) -> f32 {
     samples.iter().fold(0.0, |m, s| m.max(s.abs()))
 }
@@ -252,6 +284,7 @@ impl Rig {
     fn play(&self, path: &Path, position_ms: u64, duration_ms: Option<u64>) -> Result<(), String> {
         self.engine
             .play(self.events(), path.to_str().unwrap(), position_ms, duration_ms)
+            .map_err(|e| e.message)
     }
 
     fn seek(&self, position_ms: u64) {
@@ -361,7 +394,7 @@ fn sink_error_mid_stream_is_returned() {
             }
         },
     );
-    assert_eq!(result, Err("device gone".to_string()));
+    assert_eq!(result.map_err(|e| e.message), Err("device gone".to_string()));
 }
 
 #[test]
@@ -759,6 +792,7 @@ fn device_error_is_reported_and_next_play_reopens_the_output() {
     let errors = rig.events.errors.lock().unwrap().clone();
     assert_eq!(errors.len(), 1);
     assert!(errors[0].message.contains("device unplugged"));
+    assert_eq!(errors[0].kind, ErrorKind::AudioOutputUnavailable);
     assert!(wait_until(Duration::from_secs(1), || rig.events.last_playing() == Some(false)));
 
     rig.play(&path, 0, Some(5_000)).unwrap();
@@ -779,8 +813,9 @@ fn failed_output_open_returns_an_error_and_recovers() {
     let err = engine
         .play(events.clone(), path.to_str().unwrap(), 0, Some(1_000))
         .unwrap_err();
-    assert!(err.contains("fake device unavailable"), "{err}");
-    assert!(engine.configure(44_100, 128).is_err());
+    assert!(err.message.contains("fake device unavailable"), "{err}");
+    assert_eq!(err.kind, ErrorKind::AudioOutputUnavailable);
+    assert_eq!(engine.configure(44_100, 128).unwrap_err().kind, ErrorKind::AudioOutputUnavailable);
 
     backend.fail_open.store(false, Ordering::SeqCst);
     engine
@@ -796,6 +831,63 @@ fn missing_file_is_a_command_error() {
         .play(Path::new("/nonexistent/nope.mp3"), 0, Some(1_000))
         .unwrap_err();
     assert!(err.contains("nope.mp3"), "{err}");
+}
+
+#[test]
+fn a_missing_file_is_not_found_and_names_its_path() {
+    let rig = rig();
+    let err = rig
+        .engine
+        .play(rig.events(), "/nonexistent/nope.mp3", 0, Some(1_000))
+        .unwrap_err();
+    assert_eq!(err.kind, ErrorKind::NotFound);
+    assert_eq!(err.message, "Open /nonexistent/nope.mp3: No such file or directory (os error 2)");
+    assert_eq!(err.path.as_deref(), Some("/nonexistent/nope.mp3"));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_is_permission_denied() {
+    use std::os::unix::fs::PermissionsExt;
+    let rig = rig();
+    let path = scratch("no_permission.wav");
+    sine_wav(&path, 48_000, 2, 1, 330.0);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&path).is_ok() {
+        return;
+    }
+    let err = rig.engine.play(rig.events(), path.to_str().unwrap(), 0, None).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::PermissionDenied);
+    assert_eq!(err.path.as_deref(), path.to_str());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+#[test]
+fn a_file_that_cannot_be_decoded_is_decode_failed_from_the_command_and_from_the_event() {
+    let rig = rig();
+    let garbage = scratch("not_audio.mp3");
+    std::fs::write(&garbage, b"this is not audio at all, just text").unwrap();
+
+    let err = rig.engine.play(rig.events(), garbage.to_str().unwrap(), 0, None).unwrap_err();
+    assert_eq!(err.kind, ErrorKind::DecodeFailed);
+    assert_eq!(err.path.as_deref(), garbage.to_str());
+    assert!(err.message.starts_with("Unsupported or corrupt audio file "), "{err}");
+
+    rig.engine.play(rig.events(), garbage.to_str().unwrap(), 0, Some(1_000)).unwrap();
+    assert!(wait_until(Duration::from_secs(2), || {
+        rig.backend.pump(4, Duration::from_micros(200));
+        !rig.events.errors.lock().unwrap().is_empty()
+    }));
+    let event = rig.events.errors.lock().unwrap()[0].clone();
+    assert_eq!(event.kind, ErrorKind::DecodeFailed);
+    assert_eq!(event.path.as_deref(), garbage.to_str());
+    assert!(event.message.starts_with("Unsupported or corrupt audio file "), "{}", event.message);
+}
+
+#[test]
+fn the_error_event_serialises_with_its_kind() {
+    let event = PlaybackError { kind: ErrorKind::DecodeFailed, message: "x".into(), path: Some("/a.mp3".into()) };
+    assert_eq!(serde_json::to_value(event).unwrap(), serde_json::json!({ "kind": "decode_failed", "message": "x", "path": "/a.mp3" }));
 }
 
 #[test]
@@ -1278,4 +1370,172 @@ fn audio_arriving_after_a_slow_decode_fades_in_without_a_click() {
     assert!(peak(&heard[heard.len() - 512..]) > 0.69, "new audio never arrived");
     let step = max_step(&heard, 2);
     assert!(step < 0.02, "click at the seek: largest sample step {step}");
+}
+
+fn lag_frames(reference: &[f32], other: &[f32], max_lag: i64) -> i64 {
+    let from = (reference.len() as i64 / 3).max(max_lag);
+    let to = (from + 44_100 * 4).min(reference.len().min(other.len()) as i64 - max_lag);
+    let score = |lag: i64| -> f64 {
+        (from..to)
+            .map(|i| reference[i as usize] as f64 * other[(i + lag) as usize] as f64)
+            .sum()
+    };
+    (-max_lag..=max_lag)
+        .max_by(|&a, &b| score(a).total_cmp(&score(b)))
+        .unwrap()
+}
+
+fn mono(interleaved: &[f32], channels: usize) -> Vec<f32> {
+    interleaved
+        .chunks_exact(channels.max(1))
+        .map(|f| f.iter().sum::<f32>() / f.len() as f32)
+        .collect()
+}
+
+/// `FOURFOUR_TIMEBASE_LIST=files.txt cargo test --release playback_and_analysis_share_the_time_base -- --nocapture`
+/// (one audio path per line):
+/// the player, the zoomed-waveform decode and the analyzer must put every sample at the same time, or a grid
+/// measured by one is drawn off the audio of another.
+#[test]
+fn playback_and_analysis_share_the_time_base() {
+    let Ok(list) = std::env::var("FOURFOUR_TIMEBASE_LIST") else {
+        return;
+    };
+    let files = std::fs::read_to_string(list).unwrap();
+    for file in files.lines().filter(|l| !l.trim().is_empty()) {
+        let path = Path::new(file);
+        let analysis = fourfour_analysis::decode::decode_mono(path).unwrap();
+        let played = mono(&decode_to_vec(path, 0, analysis.rate, 2), 2);
+        let mut detail = Vec::new();
+        crate::band_analysis::decode_blocks(path, |_, channels, samples| {
+            detail.extend(mono(samples, channels))
+        })
+        .unwrap();
+        let seek_frames = 30 * analysis.rate as u64;
+        let seeked = mono(&decode_to_vec(path, seek_frames * 2, analysis.rate, 2), 2);
+        let player_lag = lag_frames(&analysis.samples, &played, 3000);
+        let detail_lag = lag_frames(&analysis.samples, &detail, 3000);
+        let seek_lag = lag_frames(&analysis.samples[seek_frames as usize..], &seeked, 3000);
+        println!("{file}: player {player_lag}, detail {detail_lag}, after seek {seek_lag} frames");
+        assert_eq!((player_lag, detail_lag, seek_lag), (0, 0, 0), "{file}");
+    }
+}
+
+const CUE_TONE_HZ: f32 = 55.0;
+const CUE_TONE_LEVEL: f32 = 0.9;
+
+fn cue_tone(frame: u64) -> f32 {
+    CUE_TONE_LEVEL * (2.0 * std::f64::consts::PI * CUE_TONE_HZ as f64 * frame as f64 / 48_000.0).sin() as f32
+}
+
+fn cue_tone_step() -> f32 {
+    CUE_TONE_LEVEL * 2.0 * std::f32::consts::PI * CUE_TONE_HZ / 48_000.0
+}
+
+fn cue_tone_bend() -> f32 {
+    cue_tone_step() * 2.0 * std::f32::consts::PI * CUE_TONE_HZ / 48_000.0
+}
+
+struct JumpWindow {
+    max_step: f32,
+    max_bend: f32,
+}
+
+fn render_cue_presses(presses: &[(usize, u64)], total_frames: usize, decode_delay_buffers: usize) -> (Vec<f32>, Vec<u64>) {
+    let (mut render, pipe) = render_pipeline(
+        Arc::new(AtomicU32::new(0)),
+        Arc::new(AtomicU32::new(0)),
+        Arc::new(TempoParams::new()),
+        48_000,
+        2,
+        STRETCH_PRESET,
+    );
+    let mut next_source_frame = 0u64;
+    let mut pushing = true;
+    let mut waiting: Option<(u64, u64, usize)> = None;
+    let mut out = vec![0.0f32; 128 * 2];
+    let mut heard = Vec::with_capacity(total_frames);
+    let mut started = Vec::new();
+    let mut presses = presses.iter().peekable();
+    let mut frame = 0usize;
+    while frame < total_frames {
+        while let Some(&&(at, cue)) = presses.peek() {
+            if at > frame {
+                break;
+            }
+            pipe.supersede();
+            waiting = Some((pipe.stream_generation.load(Ordering::SeqCst), cue, decode_delay_buffers));
+            pushing = false;
+            presses.next();
+        }
+        if let Some((target, cue, delay)) = waiting {
+            if pipe.ack_generation.load(Ordering::SeqCst) == target {
+                if delay == 0 {
+                    next_source_frame = cue;
+                    started.push(cue);
+                    pushing = true;
+                    waiting = None;
+                } else {
+                    waiting = Some((target, cue, delay - 1));
+                }
+            }
+        }
+        if pushing {
+            let mut producer = pipe.producer.lock().unwrap();
+            while producer.occupied_len() < 4_096 * 2 {
+                let v = cue_tone(next_source_frame);
+                producer.push_slice(&[v, v]);
+                next_source_frame += 1;
+            }
+        }
+        render.render(&mut out, 2);
+        heard.extend(out.chunks(2).map(|f| f[0]));
+        frame += 128;
+    }
+    (heard, started)
+}
+
+fn jump_window(heard: &[f32], from: usize, to: usize) -> JumpWindow {
+    let w = &heard[from.saturating_sub(2)..to.min(heard.len())];
+    let max_step = w.windows(2).map(|p| (p[1] - p[0]).abs()).fold(0.0, f32::max);
+    let max_bend = w.windows(3).map(|p| (p[2] - 2.0 * p[1] + p[0]).abs()).fold(0.0, f32::max);
+    JumpWindow { max_step, max_bend }
+}
+
+#[test]
+fn twenty_hot_cue_presses_in_a_second_do_not_click() {
+    let presses: Vec<(usize, u64)> = (0..20).map(|k| (4_800 + k * 2_400, 480_000 + k as u64 * 7_919)).collect();
+    for delay in [0usize, 1, 3] {
+        let (heard, started) = render_cue_presses(&presses, 4_800 + 20 * 2_400 + 4_800, delay);
+        assert_eq!(started.len(), 20, "every press was played");
+        let mut worst = JumpWindow { max_step: 0.0, max_bend: 0.0 };
+        for &(at, _) in &presses {
+            let window = jump_window(&heard, at, at + 2_400);
+            worst.max_step = worst.max_step.max(window.max_step);
+            worst.max_bend = worst.max_bend.max(window.max_bend);
+        }
+        let settled = &heard[heard.len() - 2_400..];
+        println!(
+            "HOTCUE decode delay {delay} buffers: worst step {:.5} ({:.2}x the tone's own), worst bend {:.6} ({:.1}x the tone's own)",
+            worst.max_step,
+            worst.max_step / cue_tone_step(),
+            worst.max_bend,
+            worst.max_bend / cue_tone_bend()
+        );
+        assert!(peak(settled) > 0.85, "audio did not come back after the last press");
+        assert!(worst.max_step < 1.5 * cue_tone_step(), "step {} at a jump, tone {}", worst.max_step, cue_tone_step());
+        assert!(worst.max_bend < 4.0 * cue_tone_bend(), "bend {} at a jump, tone {}", worst.max_bend, cue_tone_bend());
+    }
+}
+
+#[test]
+fn hot_cue_presses_inside_one_fade_are_coalesced() {
+    let presses: Vec<(usize, u64)> = (0..5).map(|k| (9_600 + k * 128, 480_000 + k as u64 * 7_919)).collect();
+    let (heard, started) = render_cue_presses(&presses, 24_000, 1);
+    assert_eq!(started, vec![presses[4].1], "a superseded press was played");
+    let window = jump_window(&heard, 9_600, 14_400);
+    println!("HOTCUE burst: step {:.5} ({:.2}x tone), bend {:.6} ({:.1}x tone)", window.max_step, window.max_step / cue_tone_step(), window.max_bend, window.max_bend / cue_tone_bend());
+    assert!(window.max_step < 1.5 * cue_tone_step(), "step {}", window.max_step);
+    assert!(window.max_bend < 4.0 * cue_tone_bend(), "bend {}", window.max_bend);
+    assert!(peak(&heard[heard.len() - 2_400..]) > 0.85, "audio did not come back");
 }

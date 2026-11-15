@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hooks = vi.hoisted(() => ({
-  events: {} as Record<string, (event: { payload: unknown }) => void>,
+  events: {} as Record<string, ((event: { payload: unknown }) => void)[]>,
   analysis: {} as Record<number, unknown>,
   loadState: { tracks: [] as unknown[], playlists: [] as unknown[] },
 }));
@@ -28,14 +28,14 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (name: string, callback: (event: { payload: unknown }) => void) => {
-    hooks.events[name] = callback;
+    (hooks.events[name] ??= []).push(callback);
     return () => {};
   }),
 }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { analyzeTrackIds, ensureTrackPeaksLoaded, initLibrary, isTrackAnalyzing, library } from './library.svelte.ts';
+import { analyzeTrackIds, ensureTrackPeaksLoaded, filterTracks, initLibrary, isTrackAnalyzing, library } from './library.svelte.ts';
 import { invalidateAnalysisCache } from '../services/tauri.svelte.ts';
 import { initPlayerAnalysisRefresh, loadPlayerTrack, player } from './player.svelte.ts';
 
@@ -89,8 +89,12 @@ function row(id: number) {
   return library.tracks.find((t) => t.id === id)!;
 }
 
+const ANALYSIS_BATCH_SETTLE_MS = 600;
+let eventsEmitted = false;
+
 function emit(name: string, body: unknown) {
-  hooks.events[name]({ payload: body });
+  eventsEmitted = true;
+  for (const callback of hooks.events[name] ?? []) callback({ payload: body });
 }
 
 beforeEach(async () => {
@@ -100,6 +104,12 @@ beforeEach(async () => {
   hooks.analysis[2] = payload(128, '8A', ALL_STAGES);
   await initLibrary();
   library.analyzingTrackIds = [];
+});
+
+afterEach(async () => {
+  if (!eventsEmitted) return;
+  eventsEmitted = false;
+  await new Promise((resolve) => setTimeout(resolve, ANALYSIS_BATCH_SETTLE_MS));
 });
 
 describe('re-analysis of analysed tracks', () => {
@@ -117,6 +127,12 @@ describe('re-analysis of analysed tracks', () => {
     expect(row(1).bands).toBeFalsy();
     expect(row(1).analysisPending).toBe(true);
     expect(row(2).bpm).toBe('128.0');
+  });
+
+  it('clears an embedded row preview that was never drawn', async () => {
+    await analyzeTrackIds([2]);
+    expect(row(2).bands).toBeFalsy();
+    expect(row(1).bands).toBeTruthy();
   });
 
   it('does not read the stored analysis back while the stages are still running', async () => {
@@ -193,5 +209,36 @@ describe('re-analysis of analysed tracks', () => {
     hooks.analysis[1] = payload(126, '9A', ALL_STAGES);
     emit('analysis-progress', { current: 1, total: 1, message: 'Analyzed t1.wav (1/1)', track_id: 1 });
     await vi.waitFor(() => expect(player.track?.bpm).toBe('126.00'));
+  });
+
+  it('takes a burst of analysis events in one batch, reading each track once even with the player listening', async () => {
+    initPlayerAnalysisRefresh();
+    await loadPlayerTrack(row(1));
+    await vi.waitFor(() => expect(player.loading).toBe(false));
+    await analyzeTrackIds([1, 2]);
+    hooks.analysis[1] = payload(126, '9A', ALL_STAGES);
+    hooks.analysis[2] = payload(124, '3B', ALL_STAGES);
+    vi.mocked(invoke).mockClear();
+    const reads = (id: number) => vi.mocked(invoke).mock.calls.filter(([cmd, args]) => cmd === 'get_analysis_data' && (args as { trackId: number }).trackId === id).length;
+
+    emit('analysis-progress', { current: 1, total: 2, message: 'Analyzed t1.wav (1/2)', track_id: 1 });
+    emit('analysis-partial', { track_id: 2 });
+    emit('analysis-progress', { current: 2, total: 2, message: 'Analyzed t2.wav (2/2)', track_id: 2 });
+
+    await vi.waitFor(() => expect([row(1).bpm, row(2).bpm]).toEqual(['126.0', '124.0']));
+    await vi.waitFor(() => expect(player.track?.bpm).toBe('126.00'));
+    expect([isTrackAnalyzing(1), isTrackAnalyzing(2)]).toEqual([false, false]);
+    expect(reads(1)).toBe(1);
+    expect(reads(2)).toBe(1);
+  });
+
+  it('finds a track by the values its analysis brought once the batch is in', async () => {
+    expect(filterTracks(library.tracks, '8a').map((t) => t.id)).toEqual([1, 2]);
+    hooks.analysis[1] = payload(126, '9A', ALL_STAGES);
+
+    emit('analysis-progress', { current: 1, total: 1, message: 'Analyzed t1.wav (1/1)', track_id: 1 });
+
+    await vi.waitFor(() => expect(row(1).key).toBe('9A'));
+    expect(filterTracks(library.tracks, '9a').map((t) => t.id)).toEqual([1]);
   });
 });

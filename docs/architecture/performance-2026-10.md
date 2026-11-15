@@ -8,7 +8,7 @@ Headline at 30k tracks: backend `load_state` 24.7 s → 0.5 s, browser first pai
 
 Two layers, measured separately because the box has no Tauri window.
 
-**Backend** (`pioneer-test-ui/src/bin/bench_startup.rs`, release build):
+**Backend** (`pioneer-test-ui/src/dev_bin/bench_startup.rs`, release build):
 - `gen` writes a temp library through `pioneer-library`: N tracks, one analysis each (240 s tracks, 90-169 BPM beat grid, 400-byte PWAV, 36k-sample color waveform), 20 playlists. 1k = 235 MB, 30k = 7.0 GB on disk.
 - `run` opens the library and times each `load_state` step: `open`, the track query, `build_track_infos` (includes the track query), playlists, JSON serialisation (`serde_json`, same as the Tauri IPC payload). It uses the real `track_infos.rs` and `dto.rs` from the app via `#[path]`.
 - Warm page cache, median of 3 runs. Cold-disk start is not measured (no root to drop caches).
@@ -411,3 +411,151 @@ export PW_DIR=/path/to/playwright-dir
 node perf/list-scroll-drag.mjs http://127.0.0.1:4412/ 30000 12 5   # tracks, mock artwork latency ms, runs
 node perf/drag-shots.mjs http://127.0.0.1:4412/ /tmp/after 1 && node perf/pixdiff.mjs /tmp/before /tmp/after 8
 ```
+
+# Bulk analysis (2026-10-29, fb-bulk): UI lag while a fresh library is analysed
+
+Report: "the UI lags a lot when analyzing a lot of stuff". Branch `fb-bulk` (from `ov-1028`).
+
+## What the backend sends
+
+`bench_analysis` (59 mp3s, Rust backend, dev box at load ~25): staged run with 15 workers. The fast pass (waveform + key, 1 thread per track) finished all 59 tracks in 27 s, about 2.2 tracks/s, and sends two `analysis-partial` events per track (waveform stored, then waveform + key): about 4–5 events/s here, more on an idle Mac. The grid pass runs at about 4 tracks/min and sends one `analysis-progress` per track. A 10k import spends over an hour in the fast pass, so the event storm is the fast pass.
+
+## Causes (measured)
+
+- Every event fetched the track's analysis with a forced read and swapped the whole track array (`bumpLibraryTracks`). At 10k each event was one long task of 90–140 ms. With a list filter active (the palette leaves its text as the filter) each swap also rebuilt the search text of all 10k tracks (~450 ms of `trackHaystack` per profile).
+- The player and the library each read the analysis of the loaded track per event.
+- `analyzingTrackIds` was a deep `$state` array of up to 10k ids: each visible row's `includes` read every element through the proxy, and every progress event filtered and re-proxied the array.
+- The rows' analysing placeholder redrew its canvas every animation frame (about 100 ms/s of script with no input at all).
+- Backend priority: every Rust lane (decode, waveform, key, both rten/ONNX pools, now lane, detail warm-up) already runs inside `run_below_ui`; rten pools are created per call inside those threads, and workers × threads per track ≤ cores − 1, so no oversubscription. The Python fallback did not: its analyzer process and the band pass after it ran at normal priority.
+
+## Fixes
+
+- Events invalidate the cache at once and queue the track; the library applies at most every 250 ms (at once when idle): one read per track, one array swap per batch, the analysing ids filtered once. The read is not forced, so the player's read of the same track is shared; reads invalidated while in flight are no longer cached.
+- A batch rebuilds only its tracks' search text.
+- `analyzingTrackIds` is raw state behind an accessor (replaced, never mutated).
+- The placeholder is drawn once and pulses with a CSS opacity animation (none with `prefers-reduced-motion`). `will-change: opacity` was tried and made headless software compositing much worse, so it is not set.
+- The Python analyzer starts at nice 10 (`lower_child`) and its band pass runs in `run_below_ui`.
+
+## Numbers
+
+`app/smoke/perf-bulk-analysis.spec.ts` (production build, smoke Tauri mock): a fresh import (no analysis), one track loaded in the player, "Analyze all unanalyzed" from the palette, then events replayed at 6/s (fast pass) and 0.2/s (grid pass) while the table scrolls 45 px per frame for 6 s, then typing in search and opening the palette during events. Two interleaved before/after runs per size, medians. The dev box was at load 20–46 on 16 cores during these runs: headless software rendering alone took ~900 ms/s of main thread while scrolling, so frame counts and long-task counts are dominated by the box; script time, reads per event and input latency are the readable signals.
+
+| 10k tracks | before | after |
+|---|---|---|
+| no input, rows analysing: script ms/s | 119 | 13 |
+| scroll during fast pass: script ms/s | 220 | 139 |
+| fast pass: analysis reads per 35 events | 38 | 22 |
+| typing during fast pass: palette open median / worst ms | 422 / 607 | 237 / 440 |
+| typing during fast pass: keystroke worst ms | 654 | 603 |
+| typing during fast pass: long-task ms in window | 6162 | 4370 |
+
+| 2k tracks | before | after |
+|---|---|---|
+| no input, rows analysing: script ms/s | 110 | 15 |
+| scroll during fast pass: script ms/s | 229 | 142 |
+| typing during fast pass: keystroke median / worst ms | 532 / 2176 | 314 / 813 |
+| typing during fast pass: palette open median / worst ms | 706 / 1511 | 290 / 691 |
+| typing during fast pass: long-task ms in window | 17355 | 8713 |
+
+An earlier pair at 10k with the palette text left as the list filter (load ~25): before, each of 37 fast-pass events was a long task (3275 ms in 6 s, 177 frames lost); after, 14 long tasks (1206 ms), 79 frames lost.
+
+Throughput: no Rust scheduling or thread change (only the Python fallback's priority), so Rust throughput is unchanged by construction. Before: 4.20 tracks/min (59 tracks, load ~25). The after run was stopped at 30 min because the box went to load 35–45; it says nothing either way.
+
+## Not done
+
+- A batch still swaps the whole array (~10 ms at 10k per batch in the profile, plus Svelte's re-derivation of the sorted/filtered list). Per-row versioning would remove that; not needed for the event rate measured here.
+- Analysis writes (three ANLZ files and the DB index) happen under the library mutex that `get_analysis_data` also takes, so a UI read can wait for one write. Not measured.
+- Check on the Mac: scrolling and typing while a few thousand tracks analyse; the pulsing placeholder look.
+
+## Reproduce
+
+```bash
+cd app && npm ci
+FF_SMOKE_PORT=5361 FF_PERF_BULK=1 FF_PERF_TRACKS=10000 npx playwright test perf-bulk-analysis
+# rates: FF_PERF_FAST_RATE / FF_PERF_GRID_RATE (events/s); profile a window: FF_PERF_PROFILE="scroll during fast pass"
+FOURFOUR_MODELS_DIR=~/.cache/fourfour-models ./target/release/bench_analysis --backend rust --list <paths.txt> --limit 60
+```
+
+# Player waveform scroll during bulk analysis (2026-10-29, fb-scroll)
+
+Report: "still very laggy (the big player waveform scroll)" while many tracks analyse. Branch `fb-scroll` (from `ov-1028`).
+
+## Method
+
+New scenario in `app/smoke/perf-bulk-analysis.spec.ts` (`FF_PERF_SCENARIO=player`): 10k fresh tracks, one analysed track loaded, the expanded player open with the high-resolution series, the mock transport playing (50 ms ticks, the zoom view scrolls every frame). Windows of 6 s: no analysis; analysing with no events; fast-pass events at 6/s (twice, interleaved with quiet windows); grid-pass events at 0.2/s. Per window: rAF frame deltas (p50/p95/p99, frames lost), the summed cost of all rAF callbacks per frame (the render path, measured by wrapping `requestAnimationFrame` before the app loads), long tasks, main-thread task and script ms/s. `FF_PERF_PROFILE=<window name>` adds a CPU profile (`FF_PERF_TOP` rows).
+
+## Causes (measured)
+
+- **The zoom canvas was repainted in full every frame.** At the default zoom (~5 s visible) the high-resolution series (2400 columns/s) gives ~7.5 columns per device pixel here (~3.75 on a 2x screen), so the column ring that Q28/Q36 added for 1 column per pixel or finer was never used: every frame reduced ~12000 columns and wrote and uploaded a full-canvas `ImageData`. That was 4.5-9 ms of script per frame in the rAF callback (p50; 260-316 ms/s of script with no analysis at all), the steady cost that leaves no room for anything else in the frame. On a Retina Mac the canvas has 4x the pixels.
+- **Each library batch is one 10-25 ms task** (here; every 250 ms while events arrive): `bumpLibraryTracks` copies the 10k-element deep `$state` array through the proxy (`get`/`proxy` ~10 ms) and Svelte re-runs the deriveds that read `library.tracks`. This is the hitch every quarter second. The player itself does nothing per event unless the event is for the loaded track (it then reads that track once); it does not refetch, redraw or re-derive beats or bands for other tracks.
+- **CPU contention dominates the headless numbers.** With the box at load 15-25 the idle player lost 2-10 frames in 6 s; at load 47-80 (other workers' nice-0 compiles) it lost 30-90 with identical code. Sixteen extra busy processes at nice 10 on top of that load changed nothing measurable (89 vs 95 frames lost, no analysis). A nice-0 run timed out on the box and is not reported. Analysis threads already run below UI priority (fb-wave: QoS utility / nice 10), so no worker throttling was added: there is no evidence here that lower-priority backend load starves the WebView, and it would cost throughput.
+
+## Fix
+
+- `drawBandRange` (`waveform-render.js`) takes the column-ring path whenever no envelope decay applies (`decayPerPixel === 0`), not only at 1 column per pixel or finer. The high-resolution series is drawn without decay, so each device-pixel column depends only on its absolute pixel index at any zoom; a scroll by d pixels now reduces and paints only d columns and blits the ring in two slices. The coarse analysis columns (zoom decay 0.86) still repaint in full. No visual change: `waveform-scroll-identity.test.ts` draws 90 scrolled frames (uneven steps, two zooms at 13 and 33 columns per pixel) through the ring and through a full repaint into a pixel-exact software canvas and requires 0 differing pixels per frame; it fails if the ring is not used.
+
+## Numbers (10k tracks, production build, headless software rendering)
+
+Interleaved before/after pairs. Render path = summed rAF callback time per frame (p50 / p95 ms).
+
+| window | before (load ~18) | after (load ~25) | before (load ~50-70) | after (load ~50) |
+|---|---|---|---|---|
+| no analysis: render path | 4.6 / 7.4 | 0.7 / 1.4 | 4.5 / 7.3 | 0.7 / 5.0 |
+| no analysis: script ms/s | 316 | 64 | 305 | 81 |
+| analysing, no events: script ms/s | 288 / 291 | 51 / 64 | 273 / 284 | 59 / 69 |
+| fast pass: render path | 5.1 / 8.6, 4.8 / 7.3 | 1.4 / 3.7, 1.0 / 3.2 | 7.7 / 13.5, 6.0 / 11.6 | 1.6 / 9.2, 1.1 / 6.2 |
+| fast pass: script ms/s | 266 / 259 | 74 / 64 | 250 / 247 | 75 / 74 |
+| grid pass: script ms/s | 296 | 57 | 283 | 59 |
+
+Frames lost and frame p95/p99 are not readable on this box: main-thread task time was 800-980 ms/s in every window (software paint and compositing of the whole page), and the same build lost 2 to 90 frames in the quiet window depending only on box load. Read the table as: the render path is 4-6x cheaper, script time per second down ~75%, batches unchanged.
+
+## Not done
+
+- **Batch cost** (10-25 ms per 250 ms here): removing it needs the library's track list out of the deep `$state` proxy (raw array plus per-row versions) so a batch does not copy 10k elements and re-run every derived; that is a store refactor, not done in this entry. A Mac measurement with the ring fix should show whether it is still felt.
+- **Mac check**: play a track in the expanded player while a few thousand tracks analyse; the waveform should scroll without hitches between batches. Retina should gain more than the 1x numbers above.
+- Contention with nice-0 backend load was not isolated cleanly (box too loaded).
+
+## Reproduce
+
+```bash
+cd app && npm ci
+FF_SMOKE_PORT=5371 FF_PERF_BULK=1 FF_PERF_SCENARIO=player FF_PERF_TRACKS=10000 FF_PERF_OUT=/path/out.json npx playwright test perf-bulk-analysis
+# profile a window: FF_PERF_PROFILE="player during fast pass (2)" FF_PERF_TOP=90
+# before: set the condition in drawBandRange back to `columnsPerPx <= 1`
+npx vitest run src/services/waveform-scroll-identity.test.ts
+```
+
+# Library batch cost during bulk analysis (2026-10-29, fb-scroll2)
+
+Follow-up to fb-scroll: each analysis batch (every 250 ms while events arrive) was one 10-25 ms task at 10k tracks, the hitch left in the player and list. Branch `fb-scroll2` (from `ov-1028`).
+
+## Cause
+
+`library.tracks` was a deep `$state` array. `bumpLibraryTracks` swapped it with `[...library.tracks]`, which reads all 10k elements through the array proxy's `get` trap, and the assignment wrapped the new array in a new proxy, so every derived that read the list (filter, sort, sidebar counts, the table rows' `currentTracks[index]`) re-read its elements through fresh index signals. Profile of a 6 s fast-pass window (player scenario, 10k): `bumpLibraryTracks` 212-232 ms, `applyQueuedAnalysis` 220-261 ms inclusive.
+
+## Fix
+
+`library.tracks` is now raw state (`$state.raw` behind a getter/setter on the store, like `analyzingTrackIds`) holding one reactive proxy per track (`$state(track)`; the proxies wrap the same plain objects as before, so `plainTracks` and the search index see the same objects). Assigning a list proxies its tracks; `bumpLibraryTracks` replaces the array with `trackList.slice()`, a copy of 10k pointers. A row still follows its track's fields through the track's own proxy, and every identity-keyed cache (filter, haystacks, index) still sees a new array per bump. Nothing writes into the array in place (checked: no `push`/`splice`/index writes on `library.tracks` in the app).
+
+## Numbers (10k tracks, production build, headless; box load 41-76, interleaved)
+
+Profile, 6 s fast-pass window, player scenario: `bumpLibraryTracks` 212 ms -> 14-16 ms; `applyQueuedAnalysis` 220 ms -> 23-31 ms; Svelte `flush` 74-110 ms both. About 12-15 ms per batch before, about 5 ms after (most of it the flush, which also carries the playhead ticks).
+
+List scenario, second pair (both at load ~43-46; the idle scroll control is equal):
+
+| window | before | after |
+|---|---|---|
+| idle scroll: frames lost / long-task ms | 187 / 111 | 178 / 113 |
+| scroll during fast pass: long tasks (ms) | 60 (5017) | 15 (992) |
+| scroll during fast pass: frame p50 ms | 80.5 | 43.7 |
+| scroll during grid pass: long tasks (ms) | 49 (3489) | 20 (1117) |
+| typing during fast pass: key median / worst ms | 221 / 802 | 174 / 567 |
+| typing during fast pass: palette median / worst ms | 420 / 1009 | 307 / 541 |
+
+The first pair (before at load 53-76, after at 48-76) pointed the same way (fast-pass scroll long tasks 62 -> 40, typing key worst 1404 -> 375 ms) but its idle control also differed 2x, so it is not used. Player scenario frame numbers stay box-bound (frames lost 100-160 in the fast-pass windows either way); its long-task total in the fast-pass windows went 924/938 ms -> 281/759 ms.
+
+## Not done
+
+- A batch still re-runs the list's sort when a sort column is active (`sortTracks`, ~4-12 ms at 10k by column) because the array identity changes. Re-sorting only when a sorted field of a changed track moved would remove it; not needed at the measured cost.
+- The Svelte flush after a batch (~3-4 ms here) is left as is.
+- Mac check together with fb-scroll: play in the expanded player while a few thousand tracks analyse; scroll and type in the list.

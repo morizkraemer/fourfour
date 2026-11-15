@@ -1,5 +1,6 @@
 <script>
   import { Button, ContextMenu, Icon } from '$ds';
+  import { nativeListener } from '$ds/components/nativeListener.js';
   import {
     ui,
     expandOrganize,
@@ -13,9 +14,12 @@
   import { dnd } from '../stores/dnd.svelte.ts';
   import { dropFlash, cardKey, boardDropTarget } from '../stores/organize-drop.svelte.ts';
   import { renamePlaylist, tracksForSidebarSource } from '../stores/library.svelte.ts';
+  import { artwork } from '../stores/artwork.svelte.ts';
+  import { trackIdsWithCover } from '../lib/coverTracks.ts';
   import { buildSourceContextMenuItems } from '../menus/context-menus.ts';
   import { summarizeBoard, formatBoardDuration } from '../lib/boardSummary.ts';
   import { fitRibbonCovers } from '../lib/ribbonFit.ts';
+  import { ORGANIZE_EMPTY_WIDTH, organizePanelWidth } from '../lib/panelWidth.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
   import StickBoard from './StickBoard.svelte';
@@ -96,13 +100,12 @@
 
   let railHeight = $state(0);
 
-  const allRailCovers = $derived.by(() => {
-    const target = ui.organize.target;
-    if (!target) return [];
-    return tracksForSidebarSource(target.id)
-      .map((t) => t.cover)
-      .filter(Boolean);
-  });
+  const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
+
+  const allRailCoverIds = $derived(trackIdsWithCover(boardTracks));
+
+  const showingBoard = $derived(ui.organize.target !== null);
+  const shownWidth = $derived(organizePanelWidth(ui.organize.width, showingBoard, ORGANIZE_EMPTY_WIDTH));
 
   const ribbonHover = $derived(dnd.kind === 'tracks' && dnd.dropRibbon);
   const boardDropKey = $derived.by(() => {
@@ -111,9 +114,10 @@
   });
   const landed = $derived(!!boardDropKey && dropFlash.key === boardDropKey && dropFlash.added > 0);
   const slotMode = $derived(landed ? 'landed' : ribbonHover && ui.organize.target ? 'hint' : null);
-  const railFit = $derived(fitRibbonCovers(allRailCovers, railHeight, slotMode ? 1 : 0));
+  const railFit = $derived(fitRibbonCovers(allRailCoverIds, railHeight, slotMode ? 1 : 0));
+  const railCovers = $derived(railFit.covers.map((id) => artwork.get(id, true)).filter(Boolean));
 
-  const boardTracks = $derived(ui.organize.target ? tracksForSidebarSource(ui.organize.target.id) : []);
+  $effect(() => artwork.keep('organize-rail', () => railFit.covers));
   const summary = $derived(summarizeBoard(boardTracks));
   const railTrackCount = $derived(summary.count);
   const subtitle = $derived(
@@ -191,15 +195,17 @@
 <svelte:window onpointerdowncapture={onWindowPointerDown} onkeydowncapture={onWindowKeydown} />
 
 {#if ui.organize.expanded}
-  <div class="ff-organize ff-organize--expanded" style:width="{ui.organize.width}px" bind:this={drawerEl}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="ff-organize__resize-handle"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize organize panel"
-      onpointerdown={onResizeHandlePointerDown}
-    ></div>
+  <div class="ff-organize ff-organize--expanded" style:width="{shownWidth}px" bind:this={drawerEl}>
+    {#if showingBoard}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="ff-organize__resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize organize panel"
+        {@attach nativeListener('pointerdown', onResizeHandlePointerDown)}
+      ></div>
+    {/if}
 
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ff-organize__header" oncontextmenu={openHeaderMenu}>
@@ -208,6 +214,7 @@
           bind:this={renameHeaderEl}
           class="ff-organize__header-rename"
           type="text"
+          aria-label="Name"
           bind:value={renameDraft}
           onkeydown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); void commitHeaderRename(); }
@@ -234,15 +241,17 @@
         <span class="ff-organize__header-title">Put tracks into</span>
       {/if}
       <div class="ff-organize__header-actions">
-        <Button
-          icon={widthBeforeWiden !== null ? 'minimize' : 'maximize'}
-          iconOnly
-          variant="ghost"
-          size="small"
-          ariaLabel={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
-          title={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
-          onclick={toggleWiden}
-        />
+        {#if showingBoard}
+          <Button
+            icon={widthBeforeWiden !== null ? 'minimize' : 'maximize'}
+            iconOnly
+            variant="ghost"
+            size="small"
+            ariaLabel={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
+            title={widthBeforeWiden !== null ? 'Narrow the board' : 'Widen to full window'}
+            onclick={toggleWiden}
+          />
+        {/if}
         <Button
           icon="chevron-right"
           iconOnly
@@ -304,7 +313,7 @@
           {/if}
         </div>
       {/if}
-      {#each railFit.covers as coverUrl}
+      {#each railCovers as coverUrl}
         <div class="ff-organize__rail-tile" style:background-image="url({coverUrl})" aria-hidden="true"></div>
       {/each}
       {#if railFit.more > 0}
@@ -314,13 +323,15 @@
   </button>
 {/if}
 
-<ContextMenu
-  open={headerMenu.open}
-  x={headerMenu.x}
-  y={headerMenu.y}
-  items={headerMenuItems()}
-  onClose={() => (headerMenu = { ...headerMenu, open: false })}
-/>
+{#if headerMenu.open}
+  <ContextMenu
+    open
+    x={headerMenu.x}
+    y={headerMenu.y}
+    items={headerMenuItems()}
+    onClose={() => (headerMenu = { ...headerMenu, open: false })}
+  />
+{/if}
 
 <style>
   .ff-organize {

@@ -8,14 +8,14 @@ export interface TopbarStatusInput {
   volumes: string[];
   activeVolume: string | null;
   stickTrackCount: (volume: string) => number;
-  trackCount: number;
-  unanalyzedCount: number;
   sync: TopbarSyncState;
 }
 
-export type TopbarStatus =
-  | { kind: 'stick'; volume: string; name: string; detail: string }
-  | { kind: 'library'; text: string };
+export interface TopbarStatus {
+  volume: string;
+  name: string;
+  detail: string;
+}
 
 export function stickLabel(volume: string): string {
   return volume.replace(/\\/g, '/').split('/').pop() || volume;
@@ -40,17 +40,10 @@ function stickDetail(input: TopbarStatusInput, volume: string): string {
   return plural(input.stickTrackCount(volume), 'track');
 }
 
-/** What the top bar shows while nothing is analyzing: a connected stick, else a library summary. */
-export function topbarIdleStatus(input: TopbarStatusInput): TopbarStatus {
+export function topbarStickStatus(input: TopbarStatusInput): TopbarStatus | null {
   const volume =
     input.activeVolume && input.volumes.includes(input.activeVolume) ? input.activeVolume : input.volumes[0];
-  if (volume) {
-    const extra = input.volumes.length > 1 ? ` +${input.volumes.length - 1}` : '';
-    return { kind: 'stick', volume, name: `${stickLabel(volume)}${extra}`, detail: stickDetail(input, volume) };
-  }
-  const tracks = plural(input.trackCount, 'track');
-  return {
-    kind: 'library',
-    text: input.unanalyzedCount > 0 ? `${tracks} · ${input.unanalyzedCount} unanalyzed` : tracks,
-  };
+  if (!volume) return null;
+  const extra = input.volumes.length > 1 ? ` +${input.volumes.length - 1}` : '';
+  return { volume, name: `${stickLabel(volume)}${extra}`, detail: stickDetail(input, volume) };
 }

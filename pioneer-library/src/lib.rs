@@ -8,10 +8,17 @@
 //! files on disk alongside the database. The SQLite `analyses` table keeps only
 //! a lightweight index (bpm + key) for fast queries.
 
+mod analysis_write;
+pub mod backup;
+mod cover_store;
+mod duplicates;
 mod edits;
+pub mod failure;
+mod file_health;
 mod multi_sync;
 mod queries;
 pub mod rekordbox;
+mod revision;
 mod row_preview;
 mod schema;
 pub mod sticks;
@@ -19,6 +26,7 @@ mod user_edits;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
@@ -29,7 +37,13 @@ use pioneer_usb_writer::models::{
 };
 use pioneer_usb_writer::{reader, writer};
 
+pub use analysis_write::{AnalysisWrite, StagedAnalysis, remove_stale_staging};
+pub use cover_store::{COVERS_DIR, covers_dir_of};
+pub use schema::{SCHEMA_VERSION, TAG_FOLD_VERSION};
+use cover_store::CoverStore;
+pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag, file_name_key, path_key};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
+pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 use rekordbox::ImportedCue;
 
 /// One beat of an edited grid: where it is and its place in the bar (1 to 4).
@@ -44,9 +58,98 @@ pub use multi_sync::{
     StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
     statvfs_available_bytes, volume_capacity,
 };
+pub use revision::LibraryRevision;
 pub use sticks::StickContents;
-pub use user_edits::{MAX_BPM, MIN_BPM, is_camelot};
+pub use user_edits::{LABELS_CACHE_FILE, MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsChange, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
+
+/// Runs `read` on the ANLZ directory of every track in `ids`, on as many threads as there are cores, and keeps the
+/// tracks it returns something for.
+fn read_track_dirs<T: Send>(anlz_dir: &Path, ids: &[i64], read: impl Fn(&Path) -> Option<T> + Sync) -> HashMap<i64, T> {
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
+    let chunk_len = ids.len().div_ceil(workers).max(1);
+
+    let mut out = HashMap::with_capacity(ids.len());
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = ids
+            .chunks(chunk_len)
+            .map(|chunk| {
+                let read = &read;
+                scope.spawn(move || {
+                    chunk
+                        .iter()
+                        .filter_map(|id| read(&anlz_dir.join(id.to_string())).map(|a| (*id, a)))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for handle in handles {
+            out.extend(handle.join().expect("track directory reader thread panicked"));
+        }
+    });
+    out
+}
+
+/// A track as the track list shows it: the tags it lists, its flags, and the stored row preview.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackListRow {
+    pub id: u32,
+    pub source_path: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub genre: String,
+    /// BPM * 100: the analysed BPM when there is one, else the tag's.
+    pub tempo: u32,
+    /// The analysed key when there is one, else the tag's.
+    pub key: String,
+    pub duration_secs: f64,
+    pub bitrate: u32,
+    pub file_size: u64,
+    pub has_artwork: bool,
+    /// Stage bits of the analysis row ([`analysis_stage`]); `None` when the track has none.
+    pub analysis_stages: Option<u8>,
+    pub row_preview: Option<RowPreview>,
+}
+
+/// A [`TrackListRow`] whose texts borrow from the query: valid inside the visit that receives it.
+pub struct TrackListRowRef<'a> {
+    pub id: u32,
+    pub source_path: &'a str,
+    pub title: &'a str,
+    pub artist: &'a str,
+    pub album: &'a str,
+    pub genre: &'a str,
+    pub tempo: u32,
+    pub key: &'a str,
+    pub duration_secs: f64,
+    pub bitrate: u32,
+    pub file_size: u64,
+    pub has_artwork: bool,
+    pub analysis_stages: Option<u8>,
+    pub row_preview: Option<&'a [u8]>,
+}
+
+/// See [`LocalLibrary::track_list_scanner`].
+pub struct TrackListScanner {
+    db_path: PathBuf,
+}
+
+impl TrackListScanner {
+    /// [`LocalLibrary::for_each_track_list_row`] on a new read-only connection.
+    pub fn for_each_track_list_row(
+        &self,
+        ids: std::ops::RangeInclusive<i64>,
+        visit: impl FnMut(TrackListRowRef<'_>),
+    ) -> Result<usize> {
+        let conn = Connection::open_with_flags(
+            &self.db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("Failed to open {} to read tracks", self.db_path.display()))?;
+        queries::for_each_track_list_row(&conn, ids, false, visit)
+    }
+}
 
 /// Bits of `analyses.stages`: which parts of a track's analysis are stored.
 pub mod analysis_stage {
@@ -55,6 +158,32 @@ pub mod analysis_stage {
     pub const GRID: u8 = 4;
     pub const ALL: u8 = WAVEFORM | KEY | GRID;
 }
+
+/// A track whose analysis failed, as the analysis run stores it so the next launch does not retry the same file
+/// with the same analyzer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnalysisFailure {
+    pub track_id: i64,
+    pub source_path: PathBuf,
+    pub file_size: Option<u64>,
+    pub modified_ms: Option<u64>,
+    pub kind: String,
+    pub attempts: u32,
+    pub analyzer_version: String,
+    pub failed_at_ms: u64,
+}
+
+/// Where the move of v7 cover blobs into the cover store stands after a call to
+/// [`LocalLibrary::move_legacy_covers`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CoverMove {
+    pub moved: u64,
+    pub remaining: u64,
+}
+
+/// Free space the cover move keeps on top of the bytes it is about to write (the `VACUUM` at the end writes a copy
+/// of what is left of the database).
+pub const COVER_MOVE_SPARE_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Summary report from importing a Pioneer USB into the local library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,8 +203,14 @@ pub struct ImportReport {
 /// or import from an existing USB.
 pub struct LocalLibrary {
     conn: Connection,
+    instance: u64,
     /// Path to the database file. `None` for in-memory databases (tests).
     db_path: Option<PathBuf>,
+    /// Folded keys of every track for duplicate lookups, built by the first
+    /// [`Self::with_duplicate_index`] and kept current by every write that changes a track's
+    /// path, size, artist, title or duration, or adds or removes a track.
+    duplicates: Mutex<Option<DuplicateIndex>>,
+    covers: CoverStore,
 }
 
 impl LocalLibrary {
@@ -88,7 +223,10 @@ impl LocalLibrary {
         schema::initialize(&conn, Some(db_path))?;
         Ok(Self {
             conn,
+            instance: revision::next_instance(),
             db_path: Some(db_path.to_path_buf()),
+            duplicates: Mutex::default(),
+            covers: CoverStore::for_library(Some(db_path)),
         })
     }
 
@@ -98,7 +236,10 @@ impl LocalLibrary {
         schema::initialize(&conn, None)?;
         Ok(Self {
             conn,
+            instance: revision::next_instance(),
             db_path: None,
+            duplicates: Mutex::default(),
+            covers: CoverStore::for_library(None),
         })
     }
 
@@ -135,46 +276,130 @@ impl LocalLibrary {
     /// The `track.id` field is ignored — the library assigns its own IDs.
     pub fn add_track(&self, track: &Track) -> Result<i64> {
         let id = queries::insert_track(&self.conn, track)?;
+        self.note_duplicates_added(&[DuplicateCandidate::stored(id, track)]);
         if let Some(ref art) = track.artwork {
-            queries::upsert_artwork(&self.conn, id, art)?;
+            self.store_cover(&self.conn, id, art)?;
         }
         Ok(id)
     }
 
     /// Add multiple tracks in a single transaction. Returns assigned IDs.
+    ///
+    /// Embedded covers make the write-ahead log large (~25 MB per 1,000 imported files), and
+    /// the commit would copy all of it into the database file and sync both. The commit only
+    /// writes the log (`synchronous=NORMAL`); the checkpoint, which syncs the log first and
+    /// then the database, runs right after on a thread of its own.
     pub fn add_tracks(&self, tracks: &[Track]) -> Result<Vec<i64>> {
+        self.add_tracks_then(tracks, |tx, id, track| match &track.artwork {
+            Some(art) => self.store_cover(tx, id, art).map(|_| ()),
+            None => Ok(()),
+        })
+    }
+
+    /// Adds tracks like [`Self::add_tracks`] but leaves their covers out (`track.artwork` is
+    /// ignored) and queues every new track for [`Self::pending_artwork`]: the rows are there
+    /// at once, the covers follow through [`Self::store_pending_artwork`].
+    pub fn add_tracks_covers_later(&self, tracks: &[Track]) -> Result<Vec<i64>> {
+        self.add_tracks_then(tracks, |tx, id, _| queries::queue_pending_artwork(tx, id))
+    }
+
+    fn add_tracks_then(&self, tracks: &[Track], then: impl Fn(&Connection, i64, &Track) -> Result<()>) -> Result<Vec<i64>> {
+        let ids = self.write_bulk(|| self.insert_tracks(tracks, then))?;
+        let added: Vec<DuplicateCandidate> = ids.iter().zip(tracks).map(|(id, track)| DuplicateCandidate::stored(*id, track)).collect();
+        self.note_duplicates_added(&added);
+        Ok(ids)
+    }
+
+    /// Runs a large write that only has to reach the log (`synchronous=NORMAL`), with no
+    /// checkpoint inside it; the checkpoint runs right after on a thread of its own.
+    fn write_bulk<T>(&self, write: impl FnOnce() -> Result<T>) -> Result<T> {
+        let Some(db_path) = &self.db_path else {
+            return write();
+        };
+        let pragma = |name: &str| self.conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get::<_, i64>(0));
+        let (autocheckpoint, synchronous, cache) = (pragma("wal_autocheckpoint")?, pragma("synchronous")?, pragma("cache_size")?);
+        self.conn.execute_batch(&format!(
+            "PRAGMA wal_autocheckpoint=0; PRAGMA synchronous=NORMAL; PRAGMA cache_size={}",
+            BULK_WRITE_CACHE_KIB.min(cache)
+        ))?;
+        let written = write();
+        self.conn.execute_batch(&format!(
+            "PRAGMA wal_autocheckpoint={autocheckpoint}; PRAGMA synchronous={synchronous}; PRAGMA cache_size={cache}"
+        ))?;
+        let value = written?;
+        checkpoint_in_background(db_path.clone());
+        Ok(value)
+    }
+
+    fn insert_tracks(&self, tracks: &[Track], then: impl Fn(&Connection, i64, &Track) -> Result<()>) -> Result<Vec<i64>> {
         let tx = self.conn.unchecked_transaction()?;
         let mut ids = Vec::with_capacity(tracks.len());
         for track in tracks {
             let id = queries::insert_track(&tx, track)?;
-            if let Some(ref art) = track.artwork {
-                queries::upsert_artwork(&tx, id, art)?;
-            }
+            then(&tx, id, track)?;
             ids.push(id);
         }
         tx.commit()?;
         Ok(ids)
     }
 
+    /// Up to `limit` tracks with an id above `after` whose covers are still to be read, in id
+    /// order, with their audio files.
+    pub fn pending_artwork(&self, after: i64, limit: usize) -> Result<Vec<(i64, PathBuf)>> {
+        queries::select_pending_artwork(&self.conn, after, limit)
+    }
+
+    /// Stores the covers read for queued tracks and takes them off the queue, in one
+    /// transaction; each cover comes with the track's id and the file it was read from, and
+    /// `None` = the file has no cover. A track removed or pointing at another file in the
+    /// meantime is skipped, and a cover set by hand in the meantime is kept.
+    pub fn store_pending_artwork(&self, covers: &[(i64, PathBuf, Option<Vec<u8>>)]) -> Result<()> {
+        let mut unused = Vec::new();
+        self.write_bulk(|| {
+            let tx = self.conn.unchecked_transaction()?;
+            for (id, path, cover) in covers {
+                if let Some(cover) = cover {
+                    let hash = self.covers.put(cover)?;
+                    if !queries::insert_pending_artwork(&tx, *id, path, &hash)? {
+                        unused.push(hash);
+                    }
+                }
+                queries::unqueue_pending_artwork(&tx, *id, path)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })?;
+        self.release_covers(&unused)
+    }
+
+    /// The audio paths of every library track.
+    pub fn track_paths(&self) -> Result<HashSet<PathBuf>> {
+        queries::select_track_paths(&self.conn)
+    }
+
     /// Update metadata for an existing track (identified by library ID).
     pub fn update_track(&self, id: i64, track: &Track) -> Result<()> {
-        queries::update_track(&self.conn, id, track)
+        let old = self.duplicates_before(&[id])?;
+        queries::update_track(&self.conn, id, track)?;
+        self.duplicates_after(old, |_| Some(DuplicateCandidate::stored(id, track)));
+        Ok(())
     }
 
     /// Remove a track (and its analysis + artwork via CASCADE), including ANLZ files.
     pub fn remove_track(&self, id: i64) -> Result<()> {
-        queries::delete_tracks(&self.conn, &[id])?;
-        self.remove_track_anlz(id);
-        Ok(())
+        self.remove_tracks(&[id])
     }
 
     /// Remove multiple tracks in a single transaction, including ANLZ files.
     pub fn remove_tracks(&self, ids: &[i64]) -> Result<()> {
+        let old = self.duplicates_before(ids)?;
+        let covers = queries::select_artwork_hashes_of(&self.conn, ids)?;
         queries::delete_tracks(&self.conn, ids)?;
+        self.duplicates_after(old, |_| None);
         for id in ids {
             self.remove_track_anlz(*id);
         }
-        Ok(())
+        self.release_covers(&covers)
     }
 
     /// Retrieve a single track by library ID. Artwork is not loaded (use `get_artwork`).
@@ -192,6 +417,126 @@ impl LocalLibrary {
         queries::track_exists_by_path(&self.conn, source_path)
     }
 
+    /// Every track's duplicate-detection fields, in id order: the slim form of `get_all_tracks`.
+    pub fn duplicate_candidates(&self) -> Result<Vec<DuplicateCandidate>> {
+        queries::select_duplicate_candidates(&self.conn)
+    }
+
+    /// A fresh index over the library, read from the database.
+    pub fn duplicate_index(&self) -> Result<DuplicateIndex> {
+        Ok(DuplicateIndex::new(&self.duplicate_candidates()?))
+    }
+
+    /// Runs `read` on the library's duplicate index. The index is built on first use and
+    /// kept current by the writes after that; it is rebuilt when its size no longer matches
+    /// the library's track count.
+    pub fn with_duplicate_index<T>(&self, read: impl FnOnce(&DuplicateIndex) -> T) -> Result<T> {
+        let mut cache = self.lock_duplicates();
+        let tracks = queries::track_count(&self.conn)? as usize;
+        if cache.as_ref().is_none_or(|index| index.len() != tracks) {
+            *cache = Some(self.duplicate_index()?);
+        }
+        Ok(read(cache.as_ref().expect("index built above")))
+    }
+
+    fn lock_duplicates(&self) -> MutexGuard<'_, Option<DuplicateIndex>> {
+        self.duplicates.lock().expect("duplicate index lock")
+    }
+
+    pub(crate) fn forget_duplicates(&self) {
+        *self.lock_duplicates() = None;
+    }
+
+    fn note_duplicates_added(&self, candidates: &[DuplicateCandidate]) {
+        if let Some(index) = self.lock_duplicates().as_mut() {
+            index.insert_all(candidates);
+        }
+    }
+
+    /// What the cached index holds for `ids`, read from the database before a write changes
+    /// them (`None` when no index is cached). Hand it to [`Self::duplicates_after`].
+    pub(crate) fn duplicates_before(&self, ids: &[i64]) -> Result<Option<Vec<DuplicateCandidate>>> {
+        if self.lock_duplicates().is_none() {
+            return Ok(None);
+        }
+        queries::select_duplicate_candidates_of(&self.conn, ids).map(Some)
+    }
+
+    /// After the write: takes the `old` tracks out of the cached index and puts back what
+    /// `rewrite` makes of each (`None` leaves it out).
+    pub(crate) fn duplicates_after(&self, old: Option<Vec<DuplicateCandidate>>, rewrite: impl Fn(&DuplicateCandidate) -> Option<DuplicateCandidate>) {
+        let Some(old) = old else { return };
+        let mut cache = self.lock_duplicates();
+        let Some(index) = cache.as_mut() else { return };
+        for candidate in &old {
+            index.remove(candidate);
+        }
+        index.insert_all(&old.iter().filter_map(rewrite).collect::<Vec<_>>());
+    }
+
+    fn duplicates_after_path_change(&self, old: Option<Vec<DuplicateCandidate>>, new_paths: &HashMap<i64, PathBuf>) {
+        self.duplicates_after(old, |candidate| {
+            let path = new_paths.get(&(candidate.id as i64))?;
+            Some(candidate.clone().with_source_path(PathBuf::from(path.to_string_lossy().into_owned())))
+        });
+    }
+
+    /// A track's duplicate-detection fields.
+    pub fn duplicate_candidate(&self, id: u32) -> Result<Option<DuplicateCandidate>> {
+        Ok(queries::select_duplicate_candidates_of(&self.conn, &[id as i64])?.pop())
+    }
+
+    /// Every track's audio path and stored size, for the file health check.
+    pub fn track_files(&self) -> Result<Vec<TrackFile>> {
+        Ok(queries::select_track_files(&self.conn)?
+            .into_iter()
+            .map(|(track_id, path, size)| TrackFile { track_id, path: PathBuf::from(path), file_size: size.max(0) as u64 })
+            .collect())
+    }
+
+    /// Point a track at its audio file's new location. Only the path changes: the track id,
+    /// and with it analysis, cues, grid, edits and playlist membership, stay as they are.
+    pub fn relink_track(&self, track_id: i64, new_path: &Path) -> Result<()> {
+        if file_status(new_path) != FileStatus::Ok {
+            anyhow::bail!("{} is not a readable file", new_path.display());
+        }
+        let old = self.duplicates_before(&[track_id])?;
+        if !queries::update_source_path(&self.conn, track_id, new_path)? {
+            anyhow::bail!("Track {track_id} is not in the library");
+        }
+        self.duplicates_after_path_change(old, &HashMap::from([(track_id, new_path.to_path_buf())]));
+        Ok(())
+    }
+
+    /// Searches `folder` for the files of `track_ids` that are missing and relinks every
+    /// unambiguous match in one transaction.
+    pub fn relocate_in_folder(&self, track_ids: &[i64], folder: &Path) -> Result<RelocateReport> {
+        let wanted: HashSet<i64> = track_ids.iter().copied().collect();
+        let files = self.track_files()?;
+        let taken: HashSet<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+        let missing: Vec<TrackFile> = files
+            .into_iter()
+            .filter(|f| wanted.contains(&f.track_id) && file_status(&f.path) != FileStatus::Ok)
+            .collect();
+        let (matched, ambiguous, not_found) = file_health::plan_relocation(&missing, folder, &taken);
+        let matched_ids: Vec<i64> = matched.iter().map(|(track_id, _)| *track_id).collect();
+        let old = self.duplicates_before(&matched_ids)?;
+        let tx = self.conn.unchecked_transaction()?;
+        for (track_id, path) in &matched {
+            queries::update_source_path(&tx, *track_id, path)?;
+        }
+        tx.commit()?;
+        self.duplicates_after_path_change(old, &matched.iter().cloned().collect());
+        Ok(RelocateReport {
+            matched: matched
+                .into_iter()
+                .map(|(track_id, path)| Relinked { track_id, source_path: path.to_string_lossy().into_owned() })
+                .collect(),
+            ambiguous,
+            not_found,
+        })
+    }
+
     /// Return the number of tracks in the library.
     pub fn track_count(&self) -> Result<u32> {
         queries::track_count(&self.conn)
@@ -203,17 +548,150 @@ impl LocalLibrary {
 
     /// Store (or replace) artwork for a track.
     pub fn set_artwork(&self, track_id: i64, image_data: &[u8]) -> Result<()> {
-        queries::upsert_artwork(&self.conn, track_id, image_data)
+        self.store_cover(&self.conn, track_id, image_data)?;
+        Ok(())
     }
 
     /// Retrieve artwork for a track. Returns `None` if no artwork stored.
     pub fn get_artwork(&self, track_id: i64) -> Result<Option<Vec<u8>>> {
-        queries::select_artwork(&self.conn, track_id)
+        match queries::select_artwork_hash(&self.conn, track_id)? {
+            None => Ok(None),
+            Some(Some(hash)) => self.covers.get(&hash),
+            Some(None) => queries::select_legacy_artwork(&self.conn, track_id),
+        }
     }
 
     /// Remove artwork for a track.
     pub fn remove_artwork(&self, track_id: i64) -> Result<()> {
-        queries::delete_artwork(&self.conn, track_id)
+        let old = queries::select_artwork_hashes_of(&self.conn, &[track_id])?;
+        queries::delete_artwork(&self.conn, track_id)?;
+        self.release_covers(&old)
+    }
+
+    /// Writes the image to the cover store and points the track at it, on `conn` (the library's connection, maybe
+    /// inside a transaction). The image the track had before is deleted once the write is committed and no other
+    /// track uses it: here when `conn` is not in a transaction, else by the next sweep.
+    fn store_cover(&self, conn: &Connection, track_id: i64, image_data: &[u8]) -> Result<String> {
+        let old = queries::select_artwork_hashes_of(conn, &[track_id])?;
+        let hash = self.covers.put(image_data)?;
+        queries::upsert_artwork(conn, track_id, &hash)?;
+        if conn.is_autocommit() {
+            self.release_covers(&old)?;
+        }
+        Ok(hash)
+    }
+
+    /// Deletes the stored images among `hashes` that no track references any more.
+    fn release_covers(&self, hashes: &[String]) -> Result<()> {
+        for hash in hashes {
+            if !queries::cover_is_referenced(&self.conn, hash)? {
+                self.covers.remove(hash);
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes stored images no track references (left by a write that did not commit) and temp files of killed
+    /// writes. Returns how many files went.
+    pub fn sweep_covers(&self) -> Result<usize> {
+        let referenced = queries::select_referenced_covers(&self.conn)?;
+        let (stored, temps) = self.covers.list();
+        let mut removed = 0;
+        for hash in stored.iter().filter(|hash| !referenced.contains(*hash)) {
+            self.covers.remove(hash);
+            removed += 1;
+        }
+        for temp in &temps {
+            if std::fs::remove_file(temp).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
+    }
+
+    /// The cover store folder (`None` for an in-memory library).
+    pub fn covers_dir(&self) -> Option<&Path> {
+        self.covers.dir()
+    }
+
+    /// Rows and bytes of v7 covers still in the database (`None` when all are moved).
+    pub fn legacy_covers(&self) -> Result<Option<(u64, u64)>> {
+        if !queries::legacy_artwork_exists(&self.conn)? {
+            return Ok(None);
+        }
+        queries::legacy_artwork_size(&self.conn).map(Some)
+    }
+
+    /// Checks that the cover move fits on the library's volume: the bytes still in the database plus
+    /// [`COVER_MOVE_SPARE_BYTES`]. `available` returns the free bytes of a folder (`statvfs_available_bytes`).
+    pub fn check_space_for_legacy_covers(&self, available: &dyn Fn(&Path) -> Result<u64>) -> Result<()> {
+        let (Some((_, bytes)), Some(dir)) = (self.legacy_covers()?, self.db_path.as_deref().and_then(Path::parent)) else {
+            return Ok(());
+        };
+        let free = available(dir)?;
+        let needed = bytes + COVER_MOVE_SPARE_BYTES;
+        if free < needed {
+            return Err(failure::Failure::error(
+                failure::LibraryFailure::DiskFull,
+                format!(
+                    "Not enough space to move the covers out of the library: {} MB needed, {} MB free; they stay in the database for now",
+                    needed / 1_000_000,
+                    free / 1_000_000
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Moves up to `batch` v7 cover blobs into the cover store, in one transaction: each image is written first,
+    /// then the track's artwork row points at it and the blob row goes. A cover set or removed since the migration
+    /// is kept as it is. When the last blob is moved the blob table is dropped, the database vacuumed and the store
+    /// swept. Safe to stop at any point: the next call continues with what is left.
+    pub fn move_legacy_covers(&self, batch: usize) -> Result<CoverMove> {
+        if !queries::legacy_artwork_exists(&self.conn)? {
+            return Ok(CoverMove { moved: 0, remaining: 0 });
+        }
+        let blobs = queries::select_legacy_artwork_batch(&self.conn, batch.max(1))?;
+        let tx = self.conn.unchecked_transaction()?;
+        for (track_id, image) in &blobs {
+            let hash = self.covers.put(image)?;
+            queries::finish_legacy_artwork(&tx, *track_id, &hash)?;
+        }
+        tx.commit().context("Failed to store moved covers")?;
+        let (remaining, _) = queries::legacy_artwork_size(&self.conn)?;
+        if remaining == 0 {
+            queries::drop_legacy_artwork(&self.conn)?;
+            if self.db_path.is_some() {
+                self.conn.execute_batch("VACUUM").context("Failed to compact the library after moving the covers")?;
+            }
+            self.sweep_covers()?;
+        }
+        Ok(CoverMove { moved: blobs.len() as u64, remaining })
+    }
+
+    // -----------------------------------------------------------------------
+    // Analysis failures
+    // -----------------------------------------------------------------------
+
+    pub fn analysis_failure(&self, track_id: i64) -> Result<Option<AnalysisFailure>> {
+        queries::select_analysis_failure(&self.conn, track_id)
+    }
+
+    pub fn analysis_failures(&self) -> Result<Vec<AnalysisFailure>> {
+        queries::select_analysis_failures(&self.conn)
+    }
+
+    /// Stores (or replaces) the track's failure record; nothing is stored for a track that is not in the library.
+    pub fn record_analysis_failure(&self, failure: &AnalysisFailure) -> Result<()> {
+        queries::upsert_analysis_failure(&self.conn, failure)
+    }
+
+    /// Forgets the failures of `track_ids`; returns how many there were.
+    pub fn clear_analysis_failures(&self, track_ids: &[i64]) -> Result<usize> {
+        let tx = self.conn.unchecked_transaction()?;
+        let removed = queries::delete_analysis_failures(&tx, track_ids)?;
+        tx.commit()?;
+        Ok(removed)
     }
 
     // -----------------------------------------------------------------------
@@ -239,8 +717,20 @@ impl LocalLibrary {
     /// The tempo of every beat stays the stored one. An edit is user data, so it is written as it is (not
     /// replaced by a locked imported grid) and the analysis stages stay as they were.
     /// Replace the beat grid by hand (locks it). `offset_ms` is the grid's place between whole milliseconds (see
-    /// [`UserEdits::grid_offset_ms`]); anything outside half a millisecond either way is refused.
-    pub fn set_beat_grid(&self, track_id: i64, positions: &[BeatPosition], offset_ms: Option<f64>) -> Result<()> {
+    /// [`UserEdits::grid_offset_ms`]); anything outside half a millisecond either way is refused. `anchor_ms` is the
+    /// downbeat a later BPM change keeps ([`UserEdits::grid_anchor_ms`]).
+    pub fn set_beat_grid(
+        &self,
+        track_id: i64,
+        positions: &[BeatPosition],
+        offset_ms: Option<f64>,
+        anchor_ms: Option<f64>,
+    ) -> Result<()> {
+        if let Some(anchor) = anchor_ms {
+            if !anchor.is_finite() {
+                anyhow::bail!("Beat grid anchor {anchor} ms is not a number");
+            }
+        }
         if let Some(offset) = offset_ms {
             if !(offset.is_finite() && offset.abs() <= 0.5) {
                 anyhow::bail!("Beat grid offset {offset} ms is not within half a millisecond");
@@ -267,6 +757,7 @@ impl LocalLibrary {
             let mut edits = UserEdits::read(&dir).unwrap_or_default();
             edits.grid_locked = true;
             edits.grid_offset_ms = offset_ms.filter(|o| *o != 0.0);
+            edits.grid_anchor_ms = anchor_ms;
             edits.write(&dir)?;
         }
         Ok(())
@@ -275,28 +766,24 @@ impl LocalLibrary {
     /// The cues of a track with their names and colours: the user's list if they edited it, else the
     /// imported one, else what the analysis stored (no names or colours).
     pub fn get_cues(&self, track_id: i64) -> Result<Vec<ImportedCue>> {
+        if let Some(cues) = self.chosen_cues(track_id) {
+            return Ok(cues);
+        }
+        Ok(self.get_analysis(track_id)?.map(|a| cues_of_analysis(&a)).unwrap_or_default())
+    }
+
+    /// [`Self::get_cues`] for a caller that has just read the track's analysis (`get_analysis`): the stored cues come
+    /// from it instead of a second parse of the same ANLZ files.
+    pub fn get_cues_with_analysis(&self, track_id: i64, analysis: &AnalysisResult) -> Vec<ImportedCue> {
+        self.chosen_cues(track_id).unwrap_or_else(|| cues_of_analysis(analysis))
+    }
+
+    fn chosen_cues(&self, track_id: i64) -> Option<Vec<ImportedCue>> {
         let dir = self.track_anlz_dir(track_id);
         if let Some(edits) = dir.as_deref().and_then(UserEdits::read).filter(|e| e.cues_locked) {
-            return Ok(edits.cues);
+            return Some(edits.cues);
         }
-        if let Some(meta) = self.imported_meta(track_id).filter(|m| m.cues_locked) {
-            return Ok(meta.cues);
-        }
-        Ok(self
-            .get_analysis(track_id)?
-            .map(|a| {
-                a.cue_points
-                    .iter()
-                    .map(|c| ImportedCue {
-                        hot_cue_number: c.hot_cue_number,
-                        time_ms: c.time_ms,
-                        loop_time_ms: c.loop_time_ms,
-                        color: c.color.clone(),
-                        name: c.name.clone(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        self.imported_meta(track_id).filter(|m| m.cues_locked).map(|meta| meta.cues)
     }
 
     /// Replace all cues of a track with an edited list (hot cue slots 1 to 8 are A to H, 0 is a memory
@@ -325,6 +812,7 @@ impl LocalLibrary {
         if let Some(mut user_edits) = UserEdits::read(&dir) {
             user_edits.grid_locked = false;
             user_edits.grid_offset_ms = None;
+            user_edits.grid_anchor_ms = None;
             user_edits.cues_locked = false;
             user_edits.bpm_locked = false;
             user_edits.key_locked = false;
@@ -334,34 +822,13 @@ impl LocalLibrary {
     }
 
     fn write_analysis(&self, track_id: i64, analysis: &AnalysisResult, stages: u8) -> Result<()> {
-        // Write ANLZ files if we have a disk path.
-        if let Some(dir) = self.track_anlz_dir(track_id) {
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("Failed to create ANLZ dir: {}", dir.display()))?;
-
-            let track = self
-                .get_track(track_id)?
-                .context("Track not found for analysis storage")?;
-
-            // For local library ANLZ files, use source_path in the PPTH section
-            // (CDJs never read these files — they're only for local round-tripping).
-            let mut track_for_anlz = track.clone();
-            track_for_anlz.usb_path = track.source_path.to_string_lossy().to_string();
-
-            let dat_path = dir.join("ANLZ0000.DAT");
-            let ext_path = dir.join("ANLZ0000.EXT");
-
-            writer::anlz::write_anlz_dat(&dat_path, &track_for_anlz, analysis)?;
-            writer::anlz::write_anlz_ext(&ext_path, &track_for_anlz, analysis)?;
-            writer::anlz::write_anlz_2ex(&dir.join("ANLZ0000.2EX"), &track_for_anlz, analysis)?;
-        }
+        self.write_anlz_files(track_id, analysis)?;
 
         let row_preview = match self.track_anlz_dir(track_id) {
             Some(dir) => read_waveform_analysis(&dir.join("ANLZ0000.DAT")).map_or(RowPreview::None, |a| RowPreview::from_analysis(&a)),
             None => RowPreview::from_analysis(analysis),
         };
 
-        // Update lightweight DB index.
         queries::upsert_analysis_index(&self.conn, track_id, analysis.bpm, &analysis.key, analysis.energy, &row_preview.to_blob(), stages)?;
 
         Ok(())
@@ -457,31 +924,7 @@ impl LocalLibrary {
         let Some(anlz_dir) = self.anlz_dir() else {
             return HashMap::new();
         };
-        let workers = std::thread::available_parallelism().map_or(4, |n| n.get());
-        let chunk_len = ids.len().div_ceil(workers).max(1);
-
-        let mut out = HashMap::with_capacity(ids.len());
-        std::thread::scope(|scope| {
-            let handles: Vec<_> = ids
-                .chunks(chunk_len)
-                .map(|chunk| {
-                    let anlz_dir = &anlz_dir;
-                    scope.spawn(move || {
-                        chunk
-                            .iter()
-                            .filter_map(|id| {
-                                let dat = anlz_dir.join(id.to_string()).join("ANLZ0000.DAT");
-                                read_waveform_analysis(&dat).map(|a| (*id, a))
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                })
-                .collect();
-            for handle in handles {
-                out.extend(handle.join().expect("waveform reader thread panicked"));
-            }
-        });
-        out
+        read_track_dirs(&anlz_dir, ids, |dir| read_waveform_analysis(&dir.join("ANLZ0000.DAT")))
     }
 
     /// The stored row preview of every analyzed track: one SQL query, no file reads.
@@ -512,6 +955,14 @@ impl LocalLibrary {
         Ok(missing.len())
     }
 
+    /// Stored row previews of the given tracks; tracks without one are left out.
+    pub fn get_row_previews_of(&self, track_ids: &[i64]) -> Result<Vec<(i64, RowPreview)>> {
+        Ok(queries::select_row_previews_of(&self.conn, track_ids)?
+            .into_iter()
+            .map(|(id, blob)| (id, RowPreview::from_blob(blob)))
+            .collect())
+    }
+
     /// Retrieve all tracks that have analysis data, with artwork included.
     /// Returns parallel vecs suitable for passing to the writer.
     pub fn get_analyzed_tracks(&self) -> Result<(Vec<Track>, Vec<AnalysisResult>)> {
@@ -523,13 +974,18 @@ impl LocalLibrary {
         for id in track_ids {
             if let (Some(mut track), Some(analysis)) = (self.get_track(id)?, self.get_analysis(id)?) {
                 // Load artwork for USB export.
-                track.artwork = queries::select_artwork(&self.conn, id)?;
+                track.artwork = self.get_artwork(id)?;
                 tracks.push(track);
                 analyses.push(analysis);
             }
         }
 
         Ok((tracks, analyses))
+    }
+
+    /// Ids of the tracks with every analysis stage stored: the ones an export can write.
+    pub fn complete_analysis_track_ids(&self) -> Result<Vec<i64>> {
+        queries::select_complete_analysis_track_ids(&self.conn, analysis_stage::ALL)
     }
 
     /// Return IDs of tracks that have no analysis data yet or only some of its stages.
@@ -552,6 +1008,41 @@ impl LocalLibrary {
     /// Tracks that have an analysis row with stages still missing.
     pub fn get_incomplete_analysis_ids(&self) -> Result<Vec<i64>> {
         queries::select_incomplete_analysis_ids(&self.conn, analysis_stage::ALL)
+    }
+
+    /// Every track with what the track list needs of it (see [`TrackListRow`]), in one query. Row previews of tracks
+    /// stored before that column existed are missing until [`backfill_row_previews`](Self::backfill_row_previews)
+    /// has run.
+    pub fn get_track_list_rows(&self) -> Result<Vec<TrackListRow>> {
+        queries::select_track_list_rows(&self.conn, true)
+    }
+
+    /// [`get_track_list_rows`](Self::get_track_list_rows) without the row previews, which the list fetches for the
+    /// rows on screen.
+    pub fn get_track_list_rows_without_previews(&self) -> Result<Vec<TrackListRow>> {
+        queries::select_track_list_rows(&self.conn, false)
+    }
+
+    /// The rows of [`get_track_list_rows_without_previews`](Self::get_track_list_rows_without_previews) of the tracks
+    /// with these ids, handed over one by one without copying their texts. Returns how many of them have an analysis
+    /// whose row preview is still to be filled by [`backfill_row_previews`](Self::backfill_row_previews).
+    pub fn for_each_track_list_row(
+        &self,
+        ids: std::ops::RangeInclusive<i64>,
+        visit: impl FnMut(TrackListRowRef<'_>),
+    ) -> Result<usize> {
+        queries::for_each_track_list_row(&self.conn, ids, false, visit)
+    }
+
+    /// The lowest and highest track id; `None` without tracks.
+    pub fn track_id_bounds(&self) -> Result<Option<(i64, i64)>> {
+        queries::track_id_bounds(&self.conn)
+    }
+
+    /// Reads track list rows on its own connection, so that several threads can scan id ranges at once; `None` for a
+    /// library without a file.
+    pub fn track_list_scanner(&self) -> Option<TrackListScanner> {
+        self.db_path.clone().map(|db_path| TrackListScanner { db_path })
     }
 
     /// Retrieve all tracks with flags indicating artwork/analysis/cue presence.
@@ -709,7 +1200,7 @@ impl LocalLibrary {
             if existing_track.has_artwork {
                 let art_path = artwork_dir.join(format!("a{}_m.jpg", existing_track.id));
                 if let Ok(art_data) = std::fs::read(&art_path) {
-                    let _ = queries::upsert_artwork(&tx, library_id, &art_data);
+                    let _ = self.store_cover(&tx, library_id, &art_data);
                 }
             }
 
@@ -751,6 +1242,7 @@ impl LocalLibrary {
         }
 
         tx.commit()?;
+        self.forget_duplicates();
 
         Ok(ImportReport {
             tracks_imported,
@@ -761,6 +1253,23 @@ impl LocalLibrary {
 }
 
 /// Remap sparse library IDs to dense 1-based USB IDs.
+/// Copies the write-ahead log into the database file from a second connection. Passive: it
+/// never waits for, or blocks, the library's own reads and writes.
+/// Page cache for a bulk write, as SQLite's negative KiB: the default 2 MB spills the track
+/// indexes of a 25k-file import to the log mid-transaction.
+const BULK_WRITE_CACHE_KIB: i64 = -65_536;
+
+fn checkpoint_in_background(db_path: PathBuf) {
+    std::thread::spawn(move || {
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let checkpointed = Connection::open_with_flags(&db_path, flags)
+            .and_then(|conn| conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |_| Ok(())));
+        if let Err(e) = checkpointed {
+            eprintln!("Warning: checkpoint of {} after adding tracks failed: {e}", db_path.display());
+        }
+    });
+}
+
 fn prepare_for_usb(
     mut tracks: Vec<Track>,
     analyses: Vec<AnalysisResult>,
@@ -864,6 +1373,20 @@ fn read_waveform_analysis(dat_path: &Path) -> Option<AnalysisResult> {
     reader::anlz::read_anlz(dat_path).ok()
 }
 
+fn cues_of_analysis(analysis: &AnalysisResult) -> Vec<ImportedCue> {
+    analysis
+        .cue_points
+        .iter()
+        .map(|c| ImportedCue {
+            hot_cue_number: c.hot_cue_number,
+            time_ms: c.time_ms,
+            loop_time_ms: c.loop_time_ms,
+            color: c.color.clone(),
+            name: c.name.clone(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -895,7 +1418,7 @@ mod tests {
         }
     }
 
-    fn make_analysis() -> AnalysisResult {
+    pub(crate) fn make_analysis() -> AnalysisResult {
         AnalysisResult {
             beat_grid: BeatGrid {
                 beats: vec![
@@ -939,6 +1462,38 @@ mod tests {
     }
 
     #[test]
+    fn covers_live_in_the_cover_store_and_the_database_keeps_only_their_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let a = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let b = lib.add_track(&make_track("B", "/music/b.mp3")).unwrap();
+        lib.set_artwork(a, &[1, 2, 3]).unwrap();
+        lib.set_artwork(b, &[1, 2, 3]).unwrap();
+        let columns: Vec<String> = lib
+            .conn
+            .prepare("SELECT name FROM pragma_table_info('artwork')")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(columns, ["track_id", "cover_hash"]);
+        let hash = cover_store::sha256_hex(&[1, 2, 3]);
+        let file = dir.path().join(COVERS_DIR).join(&hash[..2]).join(&hash);
+        assert_eq!(std::fs::read(&file).unwrap(), [1, 2, 3]);
+        assert!(lib.get_track_list_rows().unwrap().iter().all(|row| row.has_artwork));
+
+        lib.set_artwork(a, &[4]).unwrap();
+        assert!(file.is_file(), "still used by the other track");
+        lib.remove_track(b).unwrap();
+        assert!(!file.exists(), "no track uses it any more");
+        lib.remove_artwork(a).unwrap();
+        assert!(lib.covers.list().0.is_empty());
+        assert_eq!(lib.get_artwork(a).unwrap(), None);
+    }
+
+    #[test]
     fn add_and_get_track() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let track = make_track("Track 1", "/music/track1.mp3");
@@ -962,6 +1517,161 @@ mod tests {
         let ids = lib.add_tracks(&tracks).unwrap();
         assert_eq!(ids.len(), 3);
         assert_eq!(lib.track_count().unwrap(), 3);
+    }
+
+    #[test]
+    fn add_tracks_on_disk_stores_covers_and_restores_the_sync_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let pragmas = |lib: &LocalLibrary| -> (i64, i64) {
+            let get = |name: &str| lib.conn.query_row(&format!("PRAGMA {name}"), [], |row| row.get(0)).unwrap();
+            (get("wal_autocheckpoint"), get("synchronous"))
+        };
+        let before = pragmas(&lib);
+        let cover: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let tracks: Vec<Track> = (0..40)
+            .map(|i| Track {
+                artwork: (i % 2 == 0).then(|| cover.clone()),
+                ..make_track(&format!("T{i}"), &format!("/music/{i}.mp3"))
+            })
+            .collect();
+        let ids = lib.add_tracks(&tracks).unwrap();
+        assert_eq!(pragmas(&lib), before);
+        assert!(lib.add_tracks(&tracks[..1]).is_err());
+        assert_eq!(pragmas(&lib), before);
+        drop(lib);
+
+        let reopened = LocalLibrary::open(&db_path).unwrap();
+        assert_eq!(reopened.track_count().unwrap(), 40);
+        for (i, id) in ids.iter().enumerate() {
+            assert_eq!(reopened.get_artwork(*id).unwrap(), tracks[i].artwork);
+        }
+    }
+
+    #[test]
+    fn duplicate_candidates_are_the_library_tracks_in_id_order() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let tracks = vec![
+            Track { artist: "Hale".into(), duration_secs: 380.5, file_size: 42, ..make_track("B", "/music/b.mp3") },
+            make_track("A", "/music/a.mp3"),
+        ];
+        lib.add_tracks(&tracks).unwrap();
+        let expected: Vec<DuplicateCandidate> = lib.get_all_tracks().unwrap().iter().map(DuplicateCandidate::from).collect();
+        assert_eq!(lib.duplicate_candidates().unwrap(), expected);
+        assert_eq!(expected.len(), 2);
+    }
+
+    #[test]
+    fn the_duplicate_index_reads_the_stored_folded_keys_instead_of_folding_again() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { artist: "Hålé".into(), ..make_track("Cöpper Lines (Original Mix)", "/music/a.mp3") }).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT artist_key, title_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("hale".to_string(), "copper lines".to_string()));
+
+        lib.conn.execute("UPDATE tracks SET artist_key = 'stored', title_key = 'key' WHERE id = ?1", [id]).unwrap();
+        let probe = |artist: &str, title: &str| Track { artist: artist.into(), ..make_track(title, "/elsewhere/x.mp3") };
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&probe("Stored", "Key")).map(|hit| hit.existing_id), Some(id));
+        assert_eq!(index.find(&probe("Hale", "Copper Lines")), None);
+
+        let update = Track { artist: "Other".into(), ..lib.get_track(id).unwrap().unwrap() };
+        lib.update_track(id, &update).unwrap();
+        let stored: String = lib.conn.query_row("SELECT artist_key FROM tracks WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+        assert_eq!(stored, "other", "an edit writes the key again");
+    }
+
+    #[test]
+    fn the_duplicate_index_reads_the_stored_path_and_file_name_keys() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { file_size: 500, ..make_track("A", "/Music/Ä/Song.MP3") }).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("/music/\u{e4}/song.mp3".to_string(), "song.mp3".to_string()));
+
+        lib.conn.execute("UPDATE tracks SET path_key = '/stored/path.mp3', file_name_key = 'stored.mp3' WHERE id = ?1", [id]).unwrap();
+        let probe = |path: &str, size: u64| Track { artist: "Other".into(), file_size: size, ..make_track("Different", path) };
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&probe("/Stored/Path.mp3", 1)).map(|hit| (hit.existing_id, hit.reason)), Some((id, DuplicateReason::SamePath)));
+        assert_eq!(index.find(&probe("/elsewhere/STORED.mp3", 500)).map(|hit| hit.reason), Some(DuplicateReason::SameFile));
+        assert_eq!(index.find(&probe("/Music/Ä/Song.MP3", 500)), None);
+
+        let moved = Track { source_path: PathBuf::from("/new/Place.mp3"), ..lib.get_track(id).unwrap().unwrap() };
+        lib.update_track(id, &moved).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, ("/new/place.mp3".to_string(), "place.mp3".to_string()), "an edit writes the keys again");
+    }
+
+    #[test]
+    fn relinking_a_track_writes_its_path_keys_and_moves_it_in_the_cached_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let new_path = dir.path().join("New Home.wav");
+        std::fs::write(&new_path, b"audio").unwrap();
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&Track { file_size: 5, ..make_track("A", "/gone/Old.wav") }).unwrap();
+        assert!(lib.duplicate_index().unwrap().find(&make_track("Z", "/gone/old.wav")).is_some());
+        lib.relink_track(id, &new_path).unwrap();
+        let stored: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(stored, (crate::path_key(&new_path), "new home.wav".to_string()));
+        let index = lib.duplicate_index().unwrap();
+        assert_eq!(index.find(&make_track("Z", "/gone/old.wav")), None);
+        let hit = index.find(&Track { artist: "Other".into(), ..make_track("Z", &new_path.to_string_lossy()) });
+        assert_eq!(hit.map(|h| (h.existing_id, h.reason)), Some((id, DuplicateReason::SamePath)));
+        assert_eq!(lib.duplicate_candidate(id as u32).unwrap().unwrap().file_name_key, "new home.wav");
+    }
+
+    #[test]
+    fn stored_keys_are_refilled_when_the_fold_version_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let id = lib.add_track(&Track { artist: "Ärtist".into(), ..make_track("Títle", "/music/a.mp3") }).unwrap();
+        lib.conn
+            .execute_batch("UPDATE tracks SET artist_key = 'stale', title_key = 'stale', path_key = 'stale', file_name_key = 'stale'; UPDATE library_meta SET value = '0' WHERE name = 'tag_fold';")
+            .unwrap();
+        drop(lib);
+        let lib = LocalLibrary::open(&db_path).unwrap();
+        let path_keys: (String, String) =
+            lib.conn.query_row("SELECT path_key, file_name_key FROM tracks WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(path_keys, ("/music/a.mp3".to_string(), "a.mp3".to_string()));
+        let keys: (String, String, String) = lib
+            .conn
+            .query_row(
+                "SELECT artist_key, title_key, (SELECT value FROM library_meta WHERE name = 'tag_fold') FROM tracks WHERE id = ?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(keys, ("artist".to_string(), "title".to_string(), TAG_FOLD_VERSION.to_string()));
+    }
+
+    #[test]
+    fn analysis_failures_are_stored_replaced_cleared_and_go_with_their_track() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let id = lib.add_track(&make_track("A", "/music/a.mp3")).unwrap();
+        let failure = AnalysisFailure {
+            track_id: id,
+            source_path: PathBuf::from("/music/a.mp3"),
+            file_size: Some(10),
+            modified_ms: None,
+            kind: "decode_failed".into(),
+            attempts: 1,
+            analyzer_version: "analysis-1".into(),
+            failed_at_ms: 5,
+        };
+        lib.record_analysis_failure(&failure).unwrap();
+        lib.record_analysis_failure(&AnalysisFailure { attempts: 2, ..failure.clone() }).unwrap();
+        assert_eq!(lib.analysis_failure(id).unwrap().map(|f| f.attempts), Some(2));
+        lib.record_analysis_failure(&AnalysisFailure { track_id: 999, ..failure.clone() }).unwrap();
+        assert_eq!(lib.analysis_failures().unwrap().len(), 1, "no row for a track that is not there");
+        assert_eq!(lib.clear_analysis_failures(&[id, 999]).unwrap(), 1);
+        assert_eq!(lib.analysis_failure(id).unwrap(), None);
+        lib.record_analysis_failure(&failure).unwrap();
+        lib.remove_track(id).unwrap();
+        assert!(lib.analysis_failures().unwrap().is_empty());
     }
 
     #[test]
@@ -1116,7 +1826,7 @@ mod tests {
         }
     }
 
-    fn banded_analysis() -> AnalysisResult {
+    pub(crate) fn banded_analysis() -> AnalysisResult {
         use pioneer_usb_writer::models::ColorWaveform;
         let mut a = make_analysis();
         a.color_waveform = Some(ColorWaveform {
@@ -1134,19 +1844,19 @@ mod tests {
         let id = lib.add_track(&make_track("Exact", "/music/x.mp3")).unwrap();
         lib.set_analysis(id, &banded_analysis()).unwrap();
         let before = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&before, 3), Some(-0.37)).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 3), Some(-0.37), None).unwrap();
         let edits = lib.user_edits(id);
         assert!(edits.grid_locked);
         assert_eq!(edits.grid_offset_ms, Some(-0.37));
         let stored = lib.get_analysis(id).unwrap().unwrap();
         assert_eq!(stored.beat_grid.beats[0].time_ms, before.beat_grid.beats[0].time_ms + 3);
-        lib.set_beat_grid(id, &shifted(&before, 3), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 3), None, None).unwrap();
         assert_eq!(lib.user_edits(id).grid_offset_ms, None);
-        lib.set_beat_grid(id, &shifted(&before, 3), Some(0.25)).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 3), Some(0.25), None).unwrap();
         lib.release_user_edits(id).unwrap();
         assert_eq!(lib.user_edits(id).grid_offset_ms, None);
-        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(0.8)).is_err());
-        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(f64::NAN)).is_err());
+        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(0.8), None).is_err());
+        assert!(lib.set_beat_grid(id, &shifted(&before, 3), Some(f64::NAN), None).is_err());
     }
 
     fn shifted(analysis: &AnalysisResult, delta_ms: u32) -> Vec<BeatPosition> {
@@ -1166,7 +1876,7 @@ mod tests {
         lib.set_analysis(id, &banded_analysis()).unwrap();
         let before = lib.get_analysis(id).unwrap().unwrap();
 
-        lib.set_beat_grid(id, &shifted(&before, 37), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 37), None, None).unwrap();
 
         let after = lib.get_analysis(id).unwrap().unwrap();
         let times: Vec<u32> = after.beat_grid.beats.iter().map(|b| b.time_ms).collect();
@@ -1193,7 +1903,7 @@ mod tests {
             let id = lib.add_track(&make_track("Fine", "/music/f.mp3")).unwrap();
             lib.set_analysis(id, &banded_analysis()).unwrap();
             let before = lib.get_analysis(id).unwrap().unwrap();
-            lib.set_beat_grid(id, &shifted(&before, 1), None).unwrap();
+            lib.set_beat_grid(id, &shifted(&before, 1), None, None).unwrap();
             (id, before)
         };
         let lib = LocalLibrary::open(&db_path).unwrap();
@@ -1211,7 +1921,7 @@ mod tests {
             let lib = LocalLibrary::open(&db_path).unwrap();
             let id = lib.add_track(&make_track("Edit", "/music/e.mp3")).unwrap();
             lib.set_analysis_stages(id, &make_analysis(), analysis_stage::WAVEFORM | analysis_stage::KEY).unwrap();
-            lib.set_beat_grid(id, &[BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }], None).unwrap();
+            lib.set_beat_grid(id, &[BeatPosition { time_ms: 120, bar_position: 1 }, BeatPosition { time_ms: 589, bar_position: 2 }], None, None).unwrap();
             id
         };
         let lib = LocalLibrary::open(&db_path).unwrap();
@@ -1241,7 +1951,7 @@ mod tests {
         .unwrap();
 
         let current = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&current, 50), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50), None, None).unwrap();
         assert_eq!(lib.get_analysis(id).unwrap().unwrap().beat_grid.beats[0].time_ms, 50);
 
         let mut reanalysis = make_analysis();
@@ -1311,6 +2021,166 @@ mod tests {
     }
 
     #[test]
+    fn releasing_the_bpm_leaves_the_key_locked_and_the_other_way_round() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        lib.set_user_key(id, "5B").unwrap();
+        lib.rescale_beat_grid(id, 64.0).unwrap();
+        assert_eq!(locks(&lib, id), (true, true));
+
+        lib.release_user_bpm(id).unwrap();
+        assert_eq!(locks(&lib, id), (false, true));
+        let edits = lib.user_edits(id);
+        assert!(!edits.grid_locked && edits.grid_anchor_ms.is_none());
+
+        lib.rescale_beat_grid(id, 64.0).unwrap();
+        lib.release_user_key(id).unwrap();
+        assert_eq!(locks(&lib, id), (true, false));
+    }
+
+    #[test]
+    fn track_list_rows_and_labels_match_the_per_track_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let plain = lib.add_track(&make_track("Plain", "/music/p.mp3")).unwrap();
+        let rated = lib.add_track(&make_track("Rated", "/music/r.mp3")).unwrap();
+        let imported = lib.add_track(&make_track("Imported", "/music/i.mp3")).unwrap();
+        for id in [rated, imported] {
+            lib.set_analysis(id, &make_analysis()).unwrap();
+        }
+        lib.write_analysis(imported, &make_analysis(), analysis_stage::WAVEFORM).unwrap();
+        let meta = |rating, color: Option<&str>| rekordbox::ImportedMeta {
+            source: rekordbox::SourceKind::Xml,
+            source_id: "1".into(),
+            grid_locked: false,
+            cues_locked: false,
+            rating,
+            color: color.map(String::from),
+            cues: Vec::new(),
+            grid: Vec::new(),
+        };
+        meta(Some(2), None).write(&lib.track_anlz_dir(rated).unwrap()).unwrap();
+        lib.set_user_rating(rated, 4).unwrap();
+        meta(Some(3), Some("#ff0000")).write(&lib.track_anlz_dir(imported).unwrap()).unwrap();
+        lib.set_user_rating(imported, 0).unwrap();
+
+        let labels = lib.track_labels_reader().read_all();
+        assert_eq!(labels.len(), 2);
+        assert_eq!(labels[&rated], TrackLabels { rating: Some(4), color: None });
+        assert_eq!(labels[&imported], TrackLabels { rating: None, color: Some("#ff0000".into()) });
+
+        let rows = lib.get_track_list_rows().unwrap();
+        let bare = lib.get_track_list_rows_without_previews().unwrap();
+        assert!(bare.iter().all(|row| row.row_preview.is_none()));
+        assert_eq!(
+            rows.iter().map(|row| TrackListRow { row_preview: None, ..row.clone() }).collect::<Vec<_>>(),
+            bare
+        );
+        let flags = lib.get_all_tracks_with_flags().unwrap();
+        let previews = lib.get_row_previews().unwrap();
+        assert_eq!(rows.len(), flags.len());
+        for (row, (track, has_artwork, has_analysis, _)) in rows.iter().zip(&flags) {
+            let id = i64::from(row.id);
+            assert_eq!(row.id, track.id);
+            assert_eq!(row.source_path, track.source_path.to_string_lossy());
+            assert_eq!((&row.title, &row.artist, &row.album, &row.genre), (&track.title, &track.artist, &track.album, &track.genre));
+            assert_eq!((row.tempo, &row.key, row.bitrate, row.file_size), (track.tempo, &track.key, track.bitrate, track.file_size));
+            assert_eq!(row.duration_secs, track.duration_secs);
+            assert_eq!(row.has_artwork, *has_artwork);
+            assert_eq!(row.analysis_stages.is_some(), *has_analysis);
+            assert_eq!(row.analysis_stages, lib.analysis_stages(id).unwrap());
+            assert_eq!(row.row_preview.as_ref(), previews.get(&id));
+        }
+        assert_eq!(rows.iter().find(|r| i64::from(r.id) == plain).unwrap().analysis_stages, None);
+        assert_eq!(lib.get_incomplete_analysis_ids().unwrap(), vec![imported]);
+
+        let ids: Vec<i64> = rows.iter().map(|r| i64::from(r.id)).chain([999_999]).collect();
+        let some: Vec<(i64, RowPreview)> = lib.get_row_previews_of(&ids).unwrap();
+        assert!(!some.is_empty());
+        assert!(some.iter().all(|(id, preview)| previews.get(id) == Some(preview)));
+        assert_eq!(some.len(), previews.len());
+        assert!(lib.get_row_previews_of(&[plain, 999_999]).unwrap().is_empty());
+    }
+
+    fn rated_library(ratings: &[u8]) -> (tempfile::TempDir, LocalLibrary, Vec<i64>) {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let ids: Vec<i64> = ratings
+            .iter()
+            .enumerate()
+            .map(|(n, &rating)| {
+                let id = lib.add_track(&make_track(&format!("T{n}"), &format!("/music/{n}.mp3"))).unwrap();
+                lib.set_analysis(id, &make_analysis()).unwrap();
+                if rating > 0 {
+                    lib.set_user_rating(id, rating).unwrap();
+                }
+                id
+            })
+            .collect();
+        (dir, lib, ids)
+    }
+
+    fn write_rating_outside_the_app(lib: &LocalLibrary, id: i64, rating: u8) {
+        let dir = lib.track_anlz_dir(id).unwrap();
+        let mut edits = UserEdits::read(&dir).unwrap_or_default();
+        edits.rating = Some(rating);
+        edits.write(&dir).unwrap();
+    }
+
+    fn rating(labels: &HashMap<i64, TrackLabels>, id: i64) -> Option<u8> {
+        labels.get(&id).and_then(|l| l.rating)
+    }
+
+    #[test]
+    fn labels_cache_serves_the_last_scan_and_refresh_reports_outside_changes() {
+        let (dir, lib, ids) = rated_library(&[3, 0, 5]);
+        let reader = lib.track_labels_reader();
+        let scanned = reader.read_cached();
+        assert_eq!(scanned, reader.read_all());
+        assert!(dir.path().join(LABELS_CACHE_FILE).exists());
+
+        write_rating_outside_the_app(&lib, ids[1], 2);
+        write_rating_outside_the_app(&lib, ids[2], 0);
+        assert_eq!(reader.read_cached(), scanned, "a sidecar change alone does not touch the anlz folder");
+
+        let mut changes = reader.refresh();
+        changes.sort_by_key(|(id, _)| *id);
+        assert_eq!(changes, vec![(ids[1], Some(TrackLabels { rating: Some(2), color: None })), (ids[2], None)]);
+        let cached = reader.read_cached();
+        assert_eq!(cached, reader.read_all());
+        assert_eq!((rating(&cached, ids[0]), rating(&cached, ids[1]), rating(&cached, ids[2])), (Some(3), Some(2), None));
+        assert!(reader.refresh().is_empty());
+    }
+
+    #[test]
+    fn labels_cache_follows_ratings_set_in_the_app() {
+        let (_dir, lib, ids) = rated_library(&[3, 0]);
+        lib.track_labels_reader().read_cached();
+        lib.set_user_rating(ids[0], 0).unwrap();
+        lib.set_user_rating(ids[1], 4).unwrap();
+        let cached = lib.track_labels_reader().read_cached();
+        assert_eq!((rating(&cached, ids[0]), rating(&cached, ids[1])), (None, Some(4)));
+        assert!(lib.track_labels_reader().refresh().is_empty());
+    }
+
+    #[test]
+    fn labels_cache_is_rescanned_when_track_folders_come_or_go() {
+        let (_dir, lib, ids) = rated_library(&[3, 4]);
+        let reader = lib.track_labels_reader();
+        reader.read_cached();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_rating_outside_the_app(&lib, ids[0], 1);
+        lib.remove_tracks(&[ids[1]]).unwrap();
+        let cached = reader.read_cached();
+        assert_eq!(cached, reader.read_all());
+        assert_eq!((rating(&cached, ids[0]), rating(&cached, ids[1])), (Some(1), None));
+
+        reader.invalidate();
+        assert!(!lib.db_path.as_ref().unwrap().parent().unwrap().join(LABELS_CACHE_FILE).exists());
+        assert_eq!(reader.read_cached(), cached);
+    }
+
+    #[test]
     fn user_rating_shows_over_the_imported_one_and_survives_reanalysis() {
         let dir = tempfile::tempdir().unwrap();
         let (lib, id) = analyzed_file_library(dir.path());
@@ -1363,10 +2233,128 @@ mod tests {
         let scaled = lib.get_analysis(id).unwrap().unwrap();
         assert_eq!(scaled.bpm, 64.0);
         let times: Vec<u32> = scaled.beat_grid.beats.iter().map(|b| b.time_ms).collect();
-        assert_eq!(times, vec![0, 938, 1876, 2812]);
+        assert_eq!(&times[..4], &[0, 938, 1875, 2813]);
+        assert_eq!(times.len(), 321);
         assert!(scaled.beat_grid.beats.iter().all(|b| b.tempo == 6400));
         assert_eq!(scaled.cue_points.len(), 3);
         assert!(lib.user_edits(id).bpm_locked);
+    }
+
+    #[test]
+    fn rescaling_keeps_the_downbeat_and_its_sub_millisecond_place_and_survives_reanalysis_and_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let before = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), Some(-0.37), None).unwrap();
+
+        lib.rescale_beat_grid(id, 100.0).unwrap();
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        let scaled = reopened.get_analysis(id).unwrap().unwrap();
+        assert_eq!(reopened.user_edits(id).grid_offset_ms, Some(-0.37));
+        let anchor = scaled.beat_grid.beats.iter().find(|b| b.time_ms == 1000).unwrap();
+        assert_eq!(anchor.bar_position, 1);
+        assert_eq!(scaled.beat_grid.beats.first().unwrap().time_ms, 1000 % 600);
+        assert_eq!(scaled.beat_grid.beats.first().unwrap().bar_position, 1 + ((1000 / 600) as u8 * 3) % 4);
+        assert_eq!(scaled.bpm, 100.0);
+
+        reopened.set_analysis(id, &make_analysis()).unwrap();
+        let kept = reopened.get_analysis(id).unwrap().unwrap();
+        assert_eq!(kept.bpm, 100.0);
+        assert_eq!(kept.beat_grid.beats.iter().find(|b| b.time_ms == 1000).unwrap().tempo, 10000);
+    }
+
+    #[test]
+    fn halving_and_doubling_the_bpm_space_the_beats_twice_as_far_or_close() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        lib.rescale_beat_grid(id, 120.0).unwrap();
+        let spacing = |lib: &LocalLibrary| {
+            let beats = lib.get_analysis(id).unwrap().unwrap().beat_grid.beats;
+            beats[1].time_ms - beats[0].time_ms
+        };
+        assert_eq!(spacing(&lib), 500);
+        lib.rescale_beat_grid(id, 60.0).unwrap();
+        assert_eq!(spacing(&lib), 1000);
+        lib.rescale_beat_grid(id, 120.0).unwrap();
+        assert_eq!(spacing(&lib), 500);
+    }
+
+    fn stored_grid(lib: &LocalLibrary, id: i64) -> Vec<(u32, u8)> {
+        lib.get_analysis(id).unwrap().unwrap().beat_grid.beats.iter().map(|b| (b.time_ms, b.bar_position)).collect()
+    }
+
+    #[test]
+    fn doubling_then_halving_the_bpm_across_saves_returns_the_exact_grid() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let before = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), None, None).unwrap();
+        lib.rescale_beat_grid(id, 125.0).unwrap();
+        let original = stored_grid(&lib, id);
+        assert!(original.contains(&(1000, 1)));
+
+        lib.rescale_beat_grid(id, 250.0).unwrap();
+        assert!(stored_grid(&lib, id).contains(&(1000, 1)));
+        let reopened = LocalLibrary::open(&dir.path().join("library.db")).unwrap();
+        reopened.rescale_beat_grid(id, 125.0).unwrap();
+
+        assert_eq!(stored_grid(&reopened, id), original);
+        assert_eq!(reopened.user_edits(id).grid_anchor_ms, Some(1000.0));
+    }
+
+    #[test]
+    fn a_downbeat_set_mid_track_stays_fixed_under_rescale_and_release_forgets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lib, id) = analyzed_file_library(dir.path());
+        let before = lib.get_analysis(id).unwrap().unwrap();
+        lib.set_beat_grid(id, &shifted(&before, 1000), Some(0.25), Some(60_000.25)).unwrap();
+
+        for bpm in [128.0, 90.0, 174.0, 70.0] {
+            lib.rescale_beat_grid(id, bpm).unwrap();
+            let grid = lib.get_analysis(id).unwrap().unwrap().beat_grid.beats;
+            let at_anchor = grid.iter().find(|b| b.time_ms == 60_000).unwrap();
+            assert_eq!(at_anchor.bar_position, 1, "{bpm}");
+            assert_eq!(lib.user_edits(id).grid_anchor_ms, Some(60_000.25));
+        }
+
+        lib.release_user_edits(id).unwrap();
+        assert_eq!(lib.user_edits(id).grid_anchor_ms, None);
+    }
+
+    #[test]
+    fn rescale_matches_the_app_for_the_shared_cases() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/rescale-parity.json")).unwrap();
+        let duration_ms = fixture["durationSecs"].as_f64().unwrap() * 1000.0;
+        for case in fixture["cases"].as_array().unwrap() {
+            let dir = tempfile::tempdir().unwrap();
+            let (lib, id) = analyzed_file_library(dir.path());
+            assert_eq!(lib.get_track(id).unwrap().unwrap().duration_secs * 1000.0, duration_ms);
+            let beats: Vec<BeatPosition> = case["beats"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| BeatPosition { time_ms: b["time_ms"].as_u64().unwrap() as u32, bar_position: b["bar_position"].as_u64().unwrap() as u8 })
+                .collect();
+            let offset = case["offsetMs"].as_f64().unwrap();
+            lib.set_beat_grid(id, &beats, Some(offset), case["anchorMs"].as_f64()).unwrap();
+            let bpm = case["bpm"].as_f64().unwrap();
+            lib.rescale_beat_grid(id, bpm).unwrap();
+
+            let grid = lib.get_analysis(id).unwrap().unwrap().beat_grid.beats;
+            let label = format!("{bpm} BPM, anchor {:?}", case["anchorMs"]);
+            assert_eq!(grid.len(), case["count"].as_u64().unwrap() as usize, "{label}");
+            let expected = |key: &str| -> Vec<(f64, u8)> {
+                case[key].as_array().unwrap().iter().map(|b| (b[0].as_f64().unwrap(), b[1].as_u64().unwrap() as u8)).collect()
+            };
+            let actual = |range: std::ops::Range<usize>| -> Vec<(f64, u8)> {
+                grid[range].iter().map(|b| (b.time_ms as f64 + offset, b.bar_position)).collect()
+            };
+            for (key, got) in [("head", actual(0..8)), ("tail", actual(grid.len() - 8..grid.len()))] {
+                for (want, have) in expected(key).iter().zip(&got) {
+                    assert!((want.0 - have.0).abs() < 1e-9 && want.1 == have.1, "{label} {key}: {want:?} vs {have:?}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -1427,7 +2415,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (lib, id) = analyzed_file_library(dir.path());
         let current = lib.get_analysis(id).unwrap().unwrap();
-        lib.set_beat_grid(id, &shifted(&current, 50), None).unwrap();
+        lib.set_beat_grid(id, &shifted(&current, 50), None, None).unwrap();
         lib.set_cues(id, &[cue(2, 33_000, "Mine", Some("#123456"))]).unwrap();
 
         let mut reanalysis = make_analysis();
@@ -1502,7 +2490,7 @@ mod tests {
     fn beat_grid_of_an_unanalyzed_track_is_an_error() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         let id = lib.add_track(&make_track("None", "/music/n.mp3")).unwrap();
-        assert!(lib.set_beat_grid(id, &[BeatPosition { time_ms: 0, bar_position: 1 }], None).is_err());
+        assert!(lib.set_beat_grid(id, &[BeatPosition { time_ms: 0, bar_position: 1 }], None, None).is_err());
     }
 
     #[test]
@@ -1729,6 +2717,36 @@ mod tests {
     }
 
     #[test]
+    fn replace_playlists_applies_reorders_removals_and_repeat_saves() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let ids: Vec<u32> = (0..4)
+            .map(|n| lib.add_track(&make_track(&format!("T{n}"), &format!("/music/{n}.mp3"))).unwrap() as u32)
+            .collect();
+        let tracks_of = |lib: &LocalLibrary| lib.get_playlist(1).unwrap().unwrap().track_ids;
+
+        let initial = [tree_playlist(1, "Set", 0, false, &ids[..3])];
+        lib.replace_playlists(&initial).unwrap();
+        lib.replace_playlists(&initial).unwrap();
+        assert_eq!(tracks_of(&lib), ids[..3].to_vec());
+
+        let reordered = [tree_playlist(1, "Set", 0, false, &[ids[2], ids[0], ids[1]])];
+        lib.replace_playlists(&reordered).unwrap();
+        assert_eq!(tracks_of(&lib), vec![ids[2], ids[0], ids[1]]);
+
+        let appended = [tree_playlist(1, "Set", 0, false, &[ids[2], ids[0], ids[1], ids[3]])];
+        lib.replace_playlists(&appended).unwrap();
+        assert_eq!(tracks_of(&lib), vec![ids[2], ids[0], ids[1], ids[3]]);
+
+        let shrunk = [tree_playlist(1, "Set", 0, false, &[ids[2], ids[0]])];
+        lib.replace_playlists(&shrunk).unwrap();
+        assert_eq!(tracks_of(&lib), vec![ids[2], ids[0]]);
+
+        let emptied = [tree_playlist(1, "Set", 0, false, &[])];
+        lib.replace_playlists(&emptied).unwrap();
+        assert!(tracks_of(&lib).is_empty());
+    }
+
+    #[test]
     fn replace_playlists_rejects_cycles_and_bad_parents() {
         let lib = LocalLibrary::open_in_memory().unwrap();
         lib.replace_playlists(&[tree_playlist(1, "A", 0, true, &[])]).unwrap();
@@ -1894,5 +2912,146 @@ mod tests {
 
         let art = lib.get_artwork(id).unwrap().unwrap();
         assert_eq!(art, vec![0xFF, 0xD8, 0xFF, 0xE0]);
+    }
+
+    #[test]
+    fn covers_added_later_are_queued_then_stored_without_overwriting_or_reviving() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let mut tracks: Vec<Track> =
+            ["a", "b", "c", "d"].iter().map(|n| make_track(n, &format!("/music/{n}.mp3"))).collect();
+        tracks[0].artwork = Some(vec![9]);
+        let ids = lib.add_tracks_covers_later(&tracks).unwrap();
+        assert!(lib.get_artwork(ids[0]).unwrap().is_none());
+        assert!(lib.get_track_list_rows().unwrap().iter().all(|r| !r.has_artwork));
+        let queued: Vec<i64> = lib.pending_artwork(0, 10).unwrap().into_iter().map(|(id, _)| id).collect();
+        assert_eq!(queued, ids);
+        assert_eq!(lib.pending_artwork(ids[1], 1).unwrap(), vec![(ids[2], PathBuf::from("/music/c.mp3"))]);
+
+        lib.set_artwork(ids[1], &[7]).unwrap();
+        lib.remove_track(ids[2]).unwrap();
+        let path = |n: &str| PathBuf::from(format!("/music/{n}.mp3"));
+        lib.store_pending_artwork(&[
+            (ids[0], path("a"), Some(vec![1])),
+            (ids[1], path("b"), Some(vec![2])),
+            (ids[2], path("c"), Some(vec![3])),
+            (ids[3], path("other"), Some(vec![4])),
+        ])
+        .unwrap();
+        assert_eq!(lib.pending_artwork(0, 10).unwrap(), vec![(ids[3], path("d"))]);
+        assert!(lib.get_artwork(ids[3]).unwrap().is_none());
+        lib.store_pending_artwork(&[(ids[3], path("d"), None)]).unwrap();
+
+        assert_eq!(lib.get_artwork(ids[0]).unwrap(), Some(vec![1]));
+        assert_eq!(lib.get_artwork(ids[1]).unwrap(), Some(vec![7]));
+        assert!(lib.get_artwork(ids[2]).unwrap().is_none());
+        assert!(lib.get_artwork(ids[3]).unwrap().is_none());
+        assert!(lib.pending_artwork(0, 10).unwrap().is_empty());
+        assert_eq!(lib.track_paths().unwrap().len(), 3);
+    }
+
+    struct Xorshift(u64);
+
+    impl Xorshift {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    fn random_track(rng: &mut Xorshift) -> Track {
+        const ARTISTS: [&str; 6] = ["Hale", "HAL\u{c9}", "Ode & Ash", "ode ash", "Unknown Artist", ""];
+        const TITLES: [&str; 5] = ["Copper Lines", "copper lines (Original Mix)", "Glass Harbor", "Intro", ""];
+        const DURATIONS: [f64; 5] = [0.0, 100.0, 101.5, 103.0, 300.0];
+        const SIZES: [u64; 3] = [0, 1000, 2000];
+        const FOLDERS: [&str; 3] = ["/music", "/Music", "/other"];
+        let path = format!("{}/{}.mp3", FOLDERS[rng.below(3)], rng.below(25));
+        Track {
+            artist: ARTISTS[rng.below(ARTISTS.len())].into(),
+            duration_secs: DURATIONS[rng.below(DURATIONS.len())],
+            file_size: SIZES[rng.below(SIZES.len())],
+            ..make_track(TITLES[rng.below(TITLES.len())], &path)
+        }
+    }
+
+    fn assert_cached_duplicates_equal_a_fresh_scan(lib: &LocalLibrary, context: &str) {
+        let fresh = lib.duplicate_index().unwrap();
+        assert!(lib.lock_duplicates().as_ref() == Some(&fresh), "{context}");
+    }
+
+    #[test]
+    fn the_cached_duplicate_index_equals_a_fresh_scan_after_random_writes() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let mut rng = Xorshift(0x2545_F491_4F6C_DD1D);
+        for _ in 0..30 {
+            let _ = lib.add_track(&random_track(&mut rng));
+        }
+        lib.with_duplicate_index(|_| ()).unwrap();
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "built");
+        for step in 0..600 {
+            let ids: Vec<i64> = lib.get_all_tracks().unwrap().iter().map(|t| t.id as i64).collect();
+            let some_id = |rng: &mut Xorshift| (!ids.is_empty()).then(|| ids[rng.below(ids.len())]);
+            let op = rng.below(7);
+            match (op, some_id(&mut rng)) {
+                (0, _) => {
+                    let _ = lib.add_track(&random_track(&mut rng));
+                }
+                (1, _) => {
+                    let batch: Vec<Track> = (0..1 + rng.below(4)).map(|_| random_track(&mut rng)).collect();
+                    let _ = lib.add_tracks(&batch);
+                }
+                (2, Some(id)) | (3, Some(id)) => {
+                    let _ = lib.update_track(id, &random_track(&mut rng));
+                }
+                (4, Some(id)) => lib.remove_track(id).unwrap(),
+                (5, Some(id)) => {
+                    let other = some_id(&mut rng).unwrap();
+                    lib.remove_tracks(&[id, other]).unwrap();
+                }
+                (6, Some(id)) => {
+                    let staged = lib.begin_analysis(id, &make_analysis(), analysis_stage::ALL).unwrap().stage().unwrap();
+                    let _ = lib.commit_analysis(staged, Some(&random_track(&mut rng)));
+                }
+                _ => {}
+            }
+            assert_cached_duplicates_equal_a_fresh_scan(&lib, &format!("after step {step} (op {op})"));
+        }
+        assert!(lib.track_count().unwrap() > 0);
+    }
+
+    #[test]
+    fn the_cached_duplicate_index_follows_relinks_and_relocations() {
+        let dir = tempfile::tempdir().unwrap();
+        let (found, there) = (dir.path().join("found"), dir.path().join("there"));
+        std::fs::create_dir_all(&found).unwrap();
+        std::fs::create_dir_all(&there).unwrap();
+        for name in ["a.mp3", "b.mp3", "c.mp3"] {
+            std::fs::write(found.join(name), [0u8; 10]).unwrap();
+        }
+        std::fs::write(there.join("d.mp3"), [0u8; 10]).unwrap();
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let track = |name: &str, folder: &str| Track { file_size: 10, ..make_track(name, &format!("{folder}/{name}.mp3")) };
+        let ids = lib.add_tracks(&[track("a", "/gone"), track("b", "/gone"), track("c", "/gone"), track("d", "/gone")]).unwrap();
+        lib.with_duplicate_index(|_| ()).unwrap();
+
+        let report = lib.relocate_in_folder(&ids[..3], &found).unwrap();
+        assert_eq!(report.matched.len(), 3);
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "relocated");
+        lib.relink_track(ids[3], &there.join("d.mp3")).unwrap();
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "relinked");
+        let moved = lib.get_track(ids[3]).unwrap().unwrap();
+        let hit = lib.with_duplicate_index(|index| index.find(&moved)).unwrap();
+        assert_eq!(hit.map(|h| (h.existing_id, h.reason)), Some((ids[3], DuplicateReason::SamePath)));
+    }
+
+    #[test]
+    fn the_cached_duplicate_index_is_rebuilt_when_it_no_longer_matches_the_library() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let ids = lib.add_tracks(&[make_track("A", "/music/a.mp3"), make_track("B", "/music/b.mp3")]).unwrap();
+        lib.with_duplicate_index(|index| assert_eq!(index.len(), 2)).unwrap();
+        lib.conn.execute("DELETE FROM tracks WHERE id = ?1", [ids[0]]).unwrap();
+        lib.with_duplicate_index(|index| assert_eq!(index.len(), 1)).unwrap();
+        assert_cached_duplicates_equal_a_fresh_scan(&lib, "rebuilt");
     }
 }

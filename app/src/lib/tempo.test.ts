@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   bpmDiffers,
+  camelotStep,
+  keyCells,
+  keyWrittenLike,
   clampPercent,
   clampShift,
   formatPercent,
@@ -242,5 +245,35 @@ describe('BPM accent', () => {
 
   it('is off without a BPM', () => {
     expect(bpmDiffers(NaN, NaN)).toBe(false);
+  });
+});
+
+describe('camelotStep', () => {
+  it('moves around the wheel and wraps', () => {
+    expect(camelotStep('8A', 1)).toBe('9A');
+    expect(camelotStep('12B', 1)).toBe('1B');
+    expect(camelotStep('1A', -1)).toBe('12A');
+  });
+  it('keeps the notation the key is written in', () => {
+    expect(camelotStep('Am', 1)).toBe('Em');
+    expect(camelotStep('C', -1)).toBe('F');
+  });
+  it('rejects text that is not a key', () => {
+    expect(camelotStep('—', 1)).toBeNull();
+  });
+});
+
+describe('key popup helpers', () => {
+  it('lists the 12 keys of a mode with their names', () => {
+    const minor = keyCells(true);
+    expect(minor).toHaveLength(12);
+    expect(minor[7]).toEqual({ camelot: '8A', name: 'Am' });
+    expect(keyCells(false)[7]).toEqual({ camelot: '8B', name: 'C' });
+  });
+
+  it('writes a picked key the way the track writes its key', () => {
+    expect(keyWrittenLike('8A', '3B')).toBe('8A');
+    expect(keyWrittenLike('8A', 'Cm')).toBe('Am');
+    expect(keyWrittenLike('1A', 'Ebm')).toBe('Abm');
   });
 });

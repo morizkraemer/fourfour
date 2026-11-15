@@ -19,11 +19,107 @@ const PEAK_HI: f64 = 4000.0;
 const PEAK_FLOOR: f32 = 1e-2;
 const TUNE_STEP: usize = N_FFT / HOP;
 const SEG_SECONDS: f64 = 20.0;
+const BAND_COMPRESSION: f32 = 0.75;
 
 const SHAATH: [[f64; 12]; 2] = [
     [7.23900502618145, 3.50351166725159, 3.58445177536649, 2.84511816478676, 5.81898892118550, 4.55865057415321, 2.44778850545507, 6.99473192146830, 3.39106613673505, 4.55614256655143, 4.07392666663524, 4.45932757378887],
     [7.00255045060284, 3.14360279015997, 4.35904319714963, 5.40418120718934, 3.67234420879306, 4.08971184917798, 3.90791435991554, 6.19960288562316, 3.63424625625277, 2.87241191079876, 5.35467999794543, 3.83242038595048],
 ];
+
+pub struct KeyModel {
+    pub name: &'static str,
+    pub band_compression: f32,
+    pub templates: [[f64; NB_FEAT]; 2],
+    pub major_bias: f64,
+    pub temperature: f64,
+    pub cal: [f64; 3],
+    pub shaath_tiebreak: bool,
+}
+
+pub const CYANBOX: KeyModel = KeyModel {
+    name: "cyanbox",
+    band_compression: BAND_COMPRESSION,
+    templates: TEMPLATES,
+    major_bias: MAJOR_BIAS,
+    temperature: TEMPERATURE,
+    cal: [CAL_A, CAL_B, CAL_C],
+    shaath_tiebreak: true,
+};
+
+pub const CLEAN_FSL: KeyModel = KeyModel {
+    name: "clean-fsl",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [1.14489, 0.0, 0.75727],
+    shaath_tiebreak: false,
+};
+
+pub const CLEAN_FSL_FMA: KeyModel = KeyModel {
+    name: "clean-fsl-fma",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_FMA_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [1.06842, 0.0, 0.24273],
+    shaath_tiebreak: false,
+};
+
+pub const CLEAN_FSL_FMA_SEG: KeyModel = KeyModel {
+    name: "clean-fsl-fma-seg",
+    band_compression: 0.75,
+    templates: CLEAN_FSL_FMA_SEG_TEMPLATES,
+    major_bias: -1.062633,
+    temperature: 1.0,
+    cal: [0.98842, 0.0, 0.24367],
+    shaath_tiebreak: false,
+};
+
+pub const SHIPPED: &KeyModel = &CLEAN_FSL_FMA_SEG;
+
+const CLEAN_FSL_FMA_SEG_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        5.403224, -0.701404, -0.420334, -1.759262, 0.348578, -0.357027, -1.712305, 3.151240, -1.719116, -0.558927, -2.089633, 0.486698,
+        8.362542, -2.159355, -0.939946, -4.157830, 4.144632, -0.680573, -3.179370, 4.526097, -3.102159, -1.893362, -4.055714, -0.300687,
+        7.078479, -2.815611, 1.507245, -3.776138, 4.704119, -1.889591, -2.388789, 4.402141, -2.458541, -0.701399, -3.846111, 0.939193,
+    ],
+    [
+        5.758326, -1.518470, -1.517025, 0.335343, -2.128803, -0.254021, -1.311714, 2.131411, 0.566716, -1.996130, -0.172108, -0.564264,
+        8.413291, -2.641669, -0.064287, 2.670573, -2.599590, -2.427386, -2.381382, 5.242627, -1.866008, -3.795288, 0.279486, -0.973740,
+        6.448446, -2.601338, 0.238508, 1.861849, -3.619182, -1.173074, -2.147989, 5.212681, -1.644832, -3.914416, 0.981498, -1.120456,
+    ],
+];
+
+const CLEAN_FSL_FMA_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        5.247594, -0.539637, -0.194286, -1.441820, 0.012073, -0.451592, -1.599774, 2.866406, -1.670382, -0.609044, -1.946012, 0.286849,
+        8.229498, -2.246683, -1.001166, -4.080767, 4.099496, -0.373058, -3.213686, 4.383755, -3.166371, -1.626284, -3.747497, -0.271996,
+        6.899778, -2.617012, 1.567395, -3.551419, 4.550060, -1.773182, -2.476445, 4.417309, -2.559731, -0.660263, -3.736244, 0.902608,
+    ],
+    [
+        5.778344, -1.586362, -1.503399, 0.552986, -1.979291, -0.547380, -1.148601, 2.253464, 0.635049, -2.195802, -0.227042, -0.457681,
+        8.119734, -2.797861, -0.238469, 2.477177, -2.239021, -2.011853, -2.285445, 5.143733, -1.808216, -3.655608, 0.244980, -1.130769,
+        6.335845, -2.743505, 0.317069, 1.864152, -3.645517, -0.935940, -2.169943, 5.174144, -1.665549, -3.778845, 0.801834, -1.138951,
+    ],
+];
+
+const CLEAN_FSL_TEMPLATES: [[f64; NB_FEAT]; 2] = [
+    [
+        3.424011, -0.401199, -0.122028, -1.485625, 0.492735, -0.616705, -1.205425, 2.659577, -1.118791, -0.586604, -1.558231, 0.550910,
+        6.898859, -2.224699, -0.940528, -3.118036, 3.397692, -0.302960, -3.185555, 4.003387, -2.653293, -1.718021, -2.774679, 0.158493,
+        6.207247, -2.362999, 1.706926, -3.011427, 4.068735, -1.312722, -1.911932, 3.950975, -2.160347, -0.485531, -2.712247, 0.280132,
+    ],
+    [
+        3.816879, -1.157226, -0.708132, 0.363439, -1.630114, 0.120492, -0.892678, 1.900433, 0.488568, -1.810114, 0.002079, -0.488073,
+        7.169435, -2.861626, 0.334710, 1.910585, -1.534369, -1.272278, -2.321456, 4.762376, -1.755528, -3.339475, 0.298639, -0.953472,
+        5.540063, -3.300362, 0.284672, 1.254265, -2.744346, -0.386343, -2.303418, 4.236576, -1.297062, -3.596907, 0.489643, -0.713528,
+    ],
+];
+
+pub fn model_by_name(name: &str) -> Option<&'static KeyModel> {
+    [&CYANBOX, &CLEAN_FSL, &CLEAN_FSL_FMA, &CLEAN_FSL_FMA_SEG].into_iter().find(|m| m.name == name)
+}
 
 const TEMPLATES: [[f64; NB_FEAT]; 2] = [
     [
@@ -81,6 +177,9 @@ fn decimation_taps(d: usize) -> Vec<f32> {
     h
 }
 
+const DECIMATE_LANES: usize = 32;
+const DECIMATE_SEGMENT_BLOCKS: usize = 64;
+
 fn decimate(x: &[f32], d: usize, threads: usize) -> Vec<f32> {
     let h = decimation_taps(d);
     let half = 8 * d;
@@ -103,20 +202,82 @@ fn decimate(x: &[f32], d: usize, threads: usize) -> Vec<f32> {
         }
         acc
     };
+    let first_inner = half.div_ceil(d);
+    let end_inner = if x.len() > half { ((x.len() - half - 1) / d + 1).min(ny) } else { 0 };
     let mut out = vec![0f32; ny];
     let threads = threads.max(1);
     let per = ny.div_ceil(threads).max(1);
     std::thread::scope(|s| {
         for (ci, chunk) in out.chunks_mut(per).enumerate() {
-            let at = &at;
+            let (at, h) = (&at, &h);
             s.spawn(move || {
-                for (i, o) in chunk.iter_mut().enumerate() {
-                    *o = at(ci * per + i);
+                let base = ci * per;
+                let inner_from = base.max(first_inner).min(base + chunk.len());
+                let inner_to = (base + chunk.len()).min(end_inner).max(inner_from);
+                let inner_end = inner_from + (inner_to - inner_from) / DECIMATE_LANES * DECIMATE_LANES;
+                for (i, o) in chunk[..inner_from - base].iter_mut().enumerate() {
+                    *o = at(base + i);
+                }
+                decimate_inner(x, h, d, inner_from, &mut chunk[inner_from - base..inner_end - base]);
+                for (i, o) in chunk[inner_end - base..].iter_mut().enumerate() {
+                    *o = at(inner_end + i);
                 }
             });
         }
     });
     out
+}
+
+fn split_phases_of_four(span: &[f32], phases: &mut [f32], phase_len: usize) {
+    let (p0, rest) = phases.split_at_mut(phase_len);
+    let (p1, rest) = rest.split_at_mut(phase_len);
+    let (p2, p3) = rest.split_at_mut(phase_len);
+    let rows = span.chunks_exact(4);
+    let tail = rows.remainder();
+    let full = rows.len().min(phase_len);
+    for ((((row, a), b), c), e) in rows.zip(p0.iter_mut()).zip(p1.iter_mut()).zip(p2.iter_mut()).zip(p3.iter_mut()) {
+        *a = row[0];
+        *b = row[1];
+        *c = row[2];
+        *e = row[3];
+    }
+    for (phase, v) in [&mut *p0, &mut *p1, &mut *p2, &mut *p3].into_iter().zip(tail) {
+        if full < phase_len {
+            phase[full] = *v;
+        }
+    }
+}
+
+fn decimate_inner(x: &[f32], h: &[f32], d: usize, first: usize, out: &mut [f32]) {
+    let half = 8 * d;
+    let phase_len = DECIMATE_SEGMENT_BLOCKS * DECIMATE_LANES + (h.len() - 1) / d;
+    let mut phases = vec![0f32; d * phase_len];
+    let tap_offsets: Vec<usize> = (0..h.len()).map(|tap| (tap % d) * phase_len + tap / d).collect();
+    for (segment, out) in out.chunks_mut(DECIMATE_SEGMENT_BLOCKS * DECIMATE_LANES).enumerate() {
+        let k0 = first + segment * DECIMATE_SEGMENT_BLOCKS * DECIMATE_LANES;
+        let from = k0 * d - half;
+        let span = &x[from..(from + phase_len * d).min(x.len())];
+        if d == 4 {
+            split_phases_of_four(span, &mut phases, phase_len);
+        } else {
+            for (p, phase) in phases.chunks_exact_mut(phase_len).enumerate() {
+                for (dst, src) in phase.iter_mut().zip(span[p..].iter().step_by(d)) {
+                    *dst = *src;
+                }
+            }
+        }
+        for (block, out) in out.chunks_exact_mut(DECIMATE_LANES).enumerate() {
+            let mut acc = [0f32; DECIMATE_LANES];
+            for (&tap_offset, &hv) in tap_offsets.iter().zip(h) {
+                let at = tap_offset + block * DECIMATE_LANES;
+                let src: &[f32; DECIMATE_LANES] = phases[at..at + DECIMATE_LANES].try_into().unwrap();
+                for j in 0..DECIMATE_LANES {
+                    acc[j] += hv * src[j];
+                }
+            }
+            out.copy_from_slice(&acc);
+        }
+    }
 }
 
 struct Stft<'a> {
@@ -133,10 +294,13 @@ impl<'a> Stft<'a> {
 
     fn magnitudes(&self, f: usize, nb: usize, buf: &mut [Complex<f32>], mag: &mut [f32]) {
         let start = f as i64 * HOP as i64 - (N_FFT / 2) as i64;
-        for (i, c) in buf.iter_mut().enumerate() {
-            let j = start + i as i64;
-            let v = if j >= 0 && (j as usize) < self.x.len() { self.x[j as usize] * self.win[i] } else { 0.0 };
-            *c = Complex { re: v, im: 0.0 };
+        let from = (-start).clamp(0, N_FFT as i64) as usize;
+        let to = (self.x.len() as i64 - start).clamp(from as i64, N_FFT as i64) as usize;
+        buf[..from].fill(Complex { re: 0.0, im: 0.0 });
+        buf[to..].fill(Complex { re: 0.0, im: 0.0 });
+        let first = (start + from as i64) as usize;
+        for ((c, x), w) in buf[from..to].iter_mut().zip(&self.x[first..first + (to - from)]).zip(&self.win[from..to]) {
+            *c = Complex { re: x * w, im: 0.0 };
         }
         self.fft.process(buf);
         for b in 0..nb {
@@ -230,7 +394,7 @@ fn kernel(fs: f64, tuning: f64) -> Kernel {
     k
 }
 
-fn bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> {
+fn raw_bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> {
     let mut rows = vec![0f32; nb_frames * NB_BANDS];
     let per = nb_frames.div_ceil(threads.max(1)).max(1);
     std::thread::scope(|s| {
@@ -253,6 +417,10 @@ fn bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> 
             });
         }
     });
+    rows
+}
+
+fn whiten(mut rows: Vec<f32>) -> Vec<f32> {
     let top = rows.iter().cloned().fold(0f32, f32::max);
     let floor_mag = 1e-6 * top + 1e-12;
     for row in rows.chunks_mut(NB_BANDS) {
@@ -267,6 +435,13 @@ fn bands(stft: &Stft, nb_frames: usize, k: &Kernel, threads: usize) -> Vec<f32> 
         for m in 0..NB_BANDS {
             row[m] /= env[m] + floor_mag;
         }
+    }
+    rows
+}
+
+fn compress(mut rows: Vec<f32>, exponent: f32) -> Vec<f32> {
+    for v in rows.iter_mut() {
+        *v = v.powf(exponent);
     }
     rows
 }
@@ -291,14 +466,14 @@ fn chroma(rows: &[f32], f0: usize, f1: usize) -> [f64; NB_FEAT] {
     out
 }
 
-fn scores(x: &[f64; NB_FEAT]) -> [f64; 24] {
+fn scores(model: &KeyModel, x: &[f64; NB_FEAT]) -> [f64; 24] {
     let mut s = [0f64; 24];
     for mode in 0..2 {
         for k in 0..12 {
-            let mut acc = if mode == 0 { MAJOR_BIAS } else { 0.0 };
+            let mut acc = if mode == 0 { model.major_bias } else { 0.0 };
             for v in 0..3 {
                 for i in 0..12 {
-                    acc += TEMPLATES[mode][12 * v + i] * x[12 * v + (i + k) % 12];
+                    acc += model.templates[mode][12 * v + i] * x[12 * v + (i + k) % 12];
                 }
             }
             s[12 * mode + k] = acc;
@@ -323,13 +498,13 @@ fn shaath_cosine(x: &[f64; NB_FEAT], key: usize) -> f64 {
     if nc > 0.0 { dot / (nc * np).sqrt() } else { 0.0 }
 }
 
-fn best_key(x: &[f64; NB_FEAT], s: &[f64; 24]) -> usize {
+fn best_key(model: &KeyModel, x: &[f64; NB_FEAT], s: &[f64; 24]) -> usize {
     let mut best = 0;
     for k in 1..24 {
         let d = s[k] - s[best];
         if d > 1e-9 {
             best = k;
-        } else if d >= -1e-9 {
+        } else if model.shaath_tiebreak && d >= -1e-9 {
             let (sk, sb) = (shaath_cosine(x, k), shaath_cosine(x, best));
             if sk > sb + 1e-12 || ((sk - sb).abs() <= 1e-12 && k >= 12 && best < 12) {
                 best = k;
@@ -339,7 +514,14 @@ fn best_key(x: &[f64; NB_FEAT], s: &[f64; 24]) -> usize {
     best
 }
 
-pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
+pub struct Bands {
+    pub rows: Vec<f32>,
+    pub nb_frames: usize,
+    pub tuning: f64,
+    pub fs: f64,
+}
+
+pub fn semitone_bands(mono: &[f32], rate: u32, threads: usize) -> Option<Bands> {
     if rate == 0 || mono.is_empty() {
         return None;
     }
@@ -356,15 +538,25 @@ pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
     let stft = Stft::new(x);
     let tuning = estimate_tuning(&stft, nb_frames, fs);
     let k = kernel(fs, tuning);
-    let rows = bands(&stft, nb_frames, &k, threads);
+    let rows = raw_bands(&stft, nb_frames, &k, threads);
+    Some(Bands { rows, nb_frames, tuning, fs })
+}
+
+pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
+    detect_with(SHIPPED, mono, rate, threads)
+}
+
+pub fn detect_with(model: &KeyModel, mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
+    let Bands { rows, nb_frames, tuning, fs } = semitone_bands(mono, rate, threads)?;
+    let rows = compress(whiten(rows), model.band_compression);
 
     let xs = chroma(&rows, 0, nb_frames);
     if xs.iter().sum::<f64>() <= 0.0 {
         return None;
     }
-    let sc = scores(&xs);
-    let best = best_key(&xs, &sc);
-    let sum: f64 = sc.iter().map(|s| (TEMPERATURE * (s - sc[best])).exp()).sum();
+    let sc = scores(model, &xs);
+    let best = best_key(model, &xs, &sc);
+    let sum: f64 = sc.iter().map(|s| (model.temperature * (s - sc[best])).exp()).sum();
     let p = (1.0 / sum).clamp(1e-6, 1.0 - 1e-6);
 
     let seg = ((SEG_SECONDS * fs / HOP as f64).round() as usize).max(1);
@@ -380,13 +572,100 @@ pub fn detect(mono: &[f32], rate: u32, threads: usize) -> Option<CyanKey> {
         if xseg.iter().sum::<f64>() <= 0.0 {
             continue;
         }
-        let ss = scores(&xseg);
-        if best_key(&xseg, &ss) == best {
+        let ss = scores(model, &xseg);
+        if best_key(model, &xseg, &ss) == best {
             nb_agree += 1;
         }
         nb_seg += 1;
     }
     let agreement = if nb_seg > 0 { nb_agree as f64 / nb_seg as f64 } else { 0.0 };
-    let confidence = 1.0 / (1.0 + (-(CAL_A * (p / (1.0 - p)).ln() + CAL_B * agreement + CAL_C)).exp());
+    let confidence = 1.0 / (1.0 + (-(model.cal[0] * (p / (1.0 - p)).ln() + model.cal[1] * agreement + model.cal[2])).exp());
     Some(CyanKey { class: best, confidence, tuning_cents: 100.0 * tuning })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decimate_reference(x: &[f32], d: usize) -> Vec<f32> {
+        let h = decimation_taps(d);
+        let half = 8 * d;
+        (0..x.len().div_ceil(d))
+            .map(|k| {
+                let mut acc = 0f32;
+                for (i, hv) in h.iter().enumerate() {
+                    let j = (k * d + i) as i64 - half as i64;
+                    if j >= 0 && (j as usize) < x.len() {
+                        acc += hv * x[j as usize];
+                    }
+                }
+                acc
+            })
+            .collect()
+    }
+
+    #[test]
+    fn decimation_matches_the_scalar_filter_bit_for_bit() {
+        let mut seed = 0x9e3779b9u32;
+        let mut noise = move || {
+            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            (seed >> 8) as f32 / (1u32 << 23) as f32 - 1.0
+        };
+        for d in [2, 4, 7] {
+            for len in [0, 1, 5, 33, 64 * d, 400 * d + 3, 12_345, 40_000, 40_001, 40_002, 40_003] {
+                let x: Vec<f32> = (0..len).map(|_| noise()).collect();
+                for threads in [1, 3] {
+                    let fast = decimate(&x, d, threads);
+                    let slow = decimate_reference(&x, d);
+                    assert_eq!(fast.len(), slow.len());
+                    assert!(fast.iter().zip(&slow).all(|(a, b)| a.to_bits() == b.to_bits()), "d {d} len {len} threads {threads}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn stft_frames_match_the_bounds_checked_fill_at_both_ends() {
+        let x: Vec<f32> = (0..3 * HOP + 777).map(|i| ((i * 31 % 101) as f32 - 50.0) / 50.0).collect();
+        let stft = Stft::new(&x);
+        let mut buf = vec![Complex { re: 0f32, im: 0f32 }; N_FFT];
+        let mut mag = vec![0f32; N_FFT / 2 + 1];
+        for f in 0..x.len() / HOP + 1 {
+            stft.magnitudes(f, N_FFT / 2, &mut buf, &mut mag);
+            let start = f as i64 * HOP as i64 - (N_FFT / 2) as i64;
+            let mut expected: Vec<Complex<f32>> = (0..N_FFT)
+                .map(|i| {
+                    let j = start + i as i64;
+                    let v = if j >= 0 && (j as usize) < x.len() { x[j as usize] * stft.win[i] } else { 0.0 };
+                    Complex { re: v, im: 0.0 }
+                })
+                .collect();
+            stft.fft.process(&mut expected);
+            assert!((0..N_FFT / 2).all(|b| mag[b].to_bits() == expected[b].norm().to_bits()), "frame {f}");
+        }
+    }
+
+    #[test]
+    fn shipped_model_is_clean_fsl_fma_and_all_models_resolve() {
+        assert_eq!(SHIPPED.name, "clean-fsl-fma-seg");
+        assert_eq!(model_by_name("clean-fsl-fma-seg").map(|m| m.name), Some("clean-fsl-fma-seg"));
+        assert_eq!(model_by_name("clean-fsl-fma").map(|m| m.name), Some("clean-fsl-fma"));
+        assert_eq!(model_by_name("cyanbox").map(|m| m.name), Some("cyanbox"));
+        assert_eq!(model_by_name("clean-fsl").map(|m| m.name), Some("clean-fsl"));
+        assert!(model_by_name("other").is_none());
+    }
+
+    #[test]
+    fn models_agree_on_a_plain_a_minor_chord() {
+        let rate = 44100;
+        let tone = |f: f64, i: usize| (2.0 * PI * f * i as f64 / rate as f64).sin() as f32;
+        let mono: Vec<f32> = (0..rate as usize * 12).map(|i| 0.3 * (tone(220.0, i) + tone(261.63, i) + tone(329.63, i) + tone(110.0, i))).collect();
+        let a = detect_with(&CYANBOX, &mono, rate, 2).unwrap();
+        let c = detect_with(&CLEAN_FSL, &mono, rate, 2).unwrap();
+        let b = detect(&mono, rate, 2).unwrap();
+        assert_eq!(a.class, 21);
+        assert_eq!(c.class, 21);
+        assert_eq!(b.class, 21);
+        assert!(b.confidence > 0.0 && b.confidence < 1.0);
+    }
 }

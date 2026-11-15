@@ -1,6 +1,7 @@
 <script>
   import './scrub-value.css';
   import ContextMenu from './ContextMenu.svelte';
+  import { nativeListener } from './nativeListener.js';
 
   const DRAG_THRESHOLD_PX = 3;
   const WHEEL_NOTCH = 40;
@@ -213,7 +214,7 @@
     autocomplete="off"
     aria-label={label}
     aria-invalid={invalid}
-    onkeydown={onInputKeyDown}
+    {@attach nativeListener('keydown', onInputKeyDown)}
     oninput={() => (invalid = false)}
     onblur={onInputBlur}
   />

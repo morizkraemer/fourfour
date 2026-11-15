@@ -5,103 +5,42 @@ use fourfour_analysis::analyze::Control;
 use fourfour_analysis::service::{Analyzer, Pass, PoolOptions, PoolPlan, MODELS_ENV};
 use pioneer_usb_writer::models::AnalysisResult;
 
-pub const BACKEND_ENV: &str = "FOURFOUR_ANALYSIS_BACKEND";
 pub const THREADS_ENV: &str = "FOURFOUR_ANALYSIS_THREADS";
-const CONFIG_KEY: &str = "analysis_backend";
+const ANALYZE_AFTER_IMPORT_KEY: &str = "auto_analyze_after_import";
 const AUTO_ANALYZE_KEY: &str = "auto_analyze_new_tracks";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AnalysisBackend {
-    Rust,
-    Python,
-}
-
-impl AnalysisBackend {
-    pub fn parse(text: &str) -> Option<Self> {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "rust" => Some(Self::Rust),
-            "python" => Some(Self::Python),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Rust => "rust",
-            Self::Python => "python",
-        }
-    }
-}
-
-pub struct BackendChoice {
-    pub backend: AnalysisBackend,
-    pub note: String,
-}
-
-pub fn choose_backend(requested: Option<AnalysisBackend>, weights: Option<&Path>) -> BackendChoice {
-    match (requested, weights) {
-        (Some(AnalysisBackend::Python), _) => BackendChoice {
-            backend: AnalysisBackend::Python,
-            note: "analysis backend: python (set by setting)".to_string(),
-        },
-        (Some(AnalysisBackend::Rust), None) => BackendChoice {
-            backend: AnalysisBackend::Python,
-            note: format!(
-                "analysis backend: python — rust requested but model weights are missing \
-                 (looked in ${MODELS_ENV}, <app data>/models, dev models dir; run prototyping/analysis-packaging/fetch-models.sh)"
-            ),
-        },
-        (Some(AnalysisBackend::Rust), Some(dir)) => BackendChoice {
-            backend: AnalysisBackend::Rust,
-            note: format!("analysis backend: rust (weights {})", dir.display()),
-        },
-        (None, Some(dir)) => BackendChoice {
-            backend: AnalysisBackend::Rust,
-            note: format!("analysis backend: rust (default, weights {})", dir.display()),
-        },
-        (None, None) => BackendChoice {
-            backend: AnalysisBackend::Python,
-            note: "analysis backend: python (default, rust model weights not installed — see prototyping/analysis-packaging/fetch-models.sh)"
-                .to_string(),
-        },
-    }
-}
 
 #[derive(Clone, Default)]
 pub struct BackendEnv {
-    pub config_path: Option<PathBuf>,
     pub app_data_dir: Option<PathBuf>,
-    pub override_backend: Option<AnalysisBackend>,
+    pub resource_dir: Option<PathBuf>,
     pub max_threads: Option<usize>,
 }
 
 impl BackendEnv {
-    pub fn from_process(config_path: Option<PathBuf>, app_data_dir: Option<PathBuf>) -> Self {
+    pub fn from_process(app_data_dir: Option<PathBuf>, resource_dir: Option<PathBuf>) -> Self {
         BackendEnv {
-            config_path,
             app_data_dir,
-            override_backend: std::env::var(BACKEND_ENV).ok().and_then(|v| AnalysisBackend::parse(&v)),
+            resource_dir,
             max_threads: std::env::var(THREADS_ENV).ok().and_then(|v| v.parse().ok()),
         }
     }
 
-    pub fn requested(&self) -> Option<AnalysisBackend> {
-        self.override_backend.or_else(|| self.config_path.as_deref().and_then(read_setting))
+    pub fn locate_weights(&self) -> Option<PathBuf> {
+        fourfour_analysis::service::locate_models_in(self.app_data_dir.as_deref(), self.resource_dir.as_deref())
     }
 
     pub fn pool_options(&self) -> PoolOptions {
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-        PoolOptions { max_threads: self.max_threads.unwrap_or_else(|| cores.saturating_sub(1).max(1)), ..PoolOptions::default() }
+        PoolOptions { max_threads: self.max_threads.unwrap_or_else(|| analysis_threads_for(cores)), ..PoolOptions::default() }
     }
 }
 
-pub fn read_setting(config_path: &Path) -> Option<AnalysisBackend> {
-    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(config_path).ok()?).ok()?;
-    AnalysisBackend::parse(json.get(CONFIG_KEY)?.as_str()?)
-}
+/// Cores the analysis leaves to the web view, playback and the main thread. macOS schedules the UI's threads on
+/// performance cores ahead of the analysis' utility QoS, so two free cores are two free performance cores there.
+const UI_CORES: usize = 2;
 
-pub fn write_setting(config_path: &Path, backend: Option<AnalysisBackend>) -> Result<(), String> {
-    update_config(config_path, CONFIG_KEY, backend.map(|b| serde_json::Value::String(b.name().to_string())))
+pub fn analysis_threads_for(cores: usize) -> usize {
+    cores.saturating_sub(UI_CORES).max(1)
 }
 
 /// Whether never-analysed tracks are queued at launch (default on); partial analyses always resume.
@@ -115,6 +54,19 @@ pub fn read_auto_analyze_new(config_path: &Path) -> bool {
 
 pub fn write_auto_analyze_new(config_path: &Path, enabled: bool) -> Result<(), String> {
     update_config(config_path, AUTO_ANALYZE_KEY, Some(serde_json::Value::Bool(enabled)))
+}
+
+/// Whether an import starts analysis without asking (default off).
+pub fn read_analyze_after_import(config_path: &Path) -> bool {
+    std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|json| json.get(ANALYZE_AFTER_IMPORT_KEY)?.as_bool())
+        .unwrap_or(false)
+}
+
+pub fn write_analyze_after_import(config_path: &Path, enabled: bool) -> Result<(), String> {
+    update_config(config_path, ANALYZE_AFTER_IMPORT_KEY, Some(serde_json::Value::Bool(enabled)))
 }
 
 fn update_config(config_path: &Path, key: &str, value: Option<serde_json::Value>) -> Result<(), String> {
@@ -135,6 +87,11 @@ fn update_config(config_path: &Path, key: &str, value: Option<serde_json::Value>
 pub struct AnalyzerCache(Arc<std::sync::Mutex<Option<(PathBuf, Arc<Analyzer>)>>>);
 
 impl AnalyzerCache {
+    #[allow(dead_code)]
+    pub fn loaded(&self) -> Option<Arc<Analyzer>> {
+        self.0.lock().ok()?.as_ref().map(|(_, analyzer)| analyzer.clone())
+    }
+
     fn get_or_load(&self, dir: &Path, pool: PoolOptions) -> Result<Arc<Analyzer>, String> {
         let mut slot = self.0.lock().map_err(|e| e.to_string())?;
         if let Some((loaded_dir, analyzer)) = slot.as_ref() {
@@ -153,11 +110,22 @@ pub type PartialResultSink<'a> = Option<&'a (dyn Fn(AnalysisResult) + Sync)>;
 pub trait TrackEngine: Send + Sync + 'static {
     fn plan(&self, jobs: usize) -> PoolPlan;
     fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String>;
+    fn beat_runtime(&self) -> String {
+        "rten".to_string()
+    }
 }
 
 impl TrackEngine for Analyzer {
     fn plan(&self, jobs: usize) -> PoolPlan {
         Analyzer::plan(self, jobs)
+    }
+
+    fn beat_runtime(&self) -> String {
+        let status = self.beat_status();
+        match status.fallback {
+            Some(why) => format!("{} ({why})", status.runtime),
+            None => status.runtime.to_string(),
+        }
     }
 
     fn analyze(&self, path: &Path, control: &Control, threads: usize, pass: Pass, on_partial: PartialResultSink) -> Result<AnalysisResult, String> {
@@ -166,28 +134,18 @@ impl TrackEngine for Analyzer {
 }
 
 #[derive(Clone)]
-pub enum Runner {
-    Python { command: String },
-    Rust { engine: Arc<dyn TrackEngine> },
+pub struct Runner {
+    pub engine: Arc<dyn TrackEngine>,
 }
 
-pub fn resolve_runner(
-    env: &BackendEnv,
-    weights: Option<PathBuf>,
-    cache: &AnalyzerCache,
-    python_command: impl FnOnce() -> String,
-) -> (Runner, Vec<String>) {
-    let choice = choose_backend(env.requested(), weights.as_deref());
-    let mut notes = vec![choice.note];
-    if choice.backend == AnalysisBackend::Rust {
-        let dir = weights.expect("rust backend is only chosen with weights");
-        match cache.get_or_load(&dir, env.pool_options()) {
-            Ok(engine) => return (Runner::Rust { engine }, notes),
-            Err(e) => notes.push(format!("rust analyzer unavailable, falling back to python: {e}")),
-        }
-    }
-    (Runner::Python { command: python_command() }, notes)
+pub fn resolve_runner(env: &BackendEnv, weights: Option<PathBuf>, cache: &AnalyzerCache) -> Result<Runner, String> {
+    let dir = weights.ok_or_else(|| NO_BACKEND_ERROR.to_string())?;
+    let engine = cache.get_or_load(&dir, env.pool_options())?;
+    Ok(Runner { engine })
 }
+
+pub const NO_BACKEND_ERROR: &str = "No analysis backend available: the model weights (beat_this.onnx, mel_spectrogram.onnx) \
+    were not found. Reinstall the app or set FOURFOUR_MODELS_DIR.";
 
 #[cfg(test)]
 mod tests {
@@ -200,32 +158,35 @@ mod tests {
     }
 
     #[test]
-    fn default_is_rust_only_when_weights_exist() {
-        let dir = PathBuf::from("/models");
-        assert_eq!(choose_backend(None, Some(&dir)).backend, AnalysisBackend::Rust);
-        assert_eq!(choose_backend(None, None).backend, AnalysisBackend::Python);
+    fn the_analysis_leaves_two_cores_to_the_ui() {
+        assert_eq!(analysis_threads_for(16), 14);
+        assert_eq!(analysis_threads_for(8), 6);
+        assert_eq!(analysis_threads_for(4), 2);
+        assert_eq!(analysis_threads_for(2), 1);
+        assert_eq!(analysis_threads_for(1), 1);
     }
 
     #[test]
-    fn explicit_python_wins_and_explicit_rust_without_weights_falls_back_with_a_message() {
-        let dir = PathBuf::from("/models");
-        assert_eq!(choose_backend(Some(AnalysisBackend::Python), Some(&dir)).backend, AnalysisBackend::Python);
-        let fallback = choose_backend(Some(AnalysisBackend::Rust), None);
-        assert_eq!(fallback.backend, AnalysisBackend::Python);
-        assert!(fallback.note.contains("weights are missing"), "{}", fallback.note);
+    fn no_weights_is_a_models_missing_error_with_no_fallback() {
+        let err = resolve_runner(&BackendEnv::default(), None, &AnalyzerCache::default()).err().expect("error");
+        assert_eq!(err, NO_BACKEND_ERROR);
+        assert!(!err.to_lowercase().contains("python"));
     }
 
     #[test]
-    fn setting_round_trips_and_keeps_other_config_keys() {
-        let cfg = scratch("setting").join("config.json");
-        std::fs::write(&cfg, r#"{"library_path":"/lib"}"#).unwrap();
-        assert_eq!(read_setting(&cfg), None);
-        write_setting(&cfg, Some(AnalysisBackend::Python)).unwrap();
-        assert_eq!(read_setting(&cfg), Some(AnalysisBackend::Python));
-        let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&cfg).unwrap()).unwrap();
-        assert_eq!(json["library_path"], "/lib");
-        write_setting(&cfg, None).unwrap();
-        assert_eq!(read_setting(&cfg), None);
+    fn unloadable_weights_fail_loudly_with_no_fallback() {
+        let err = resolve_runner(&BackendEnv::default(), Some(scratch("unloadable")), &AnalyzerCache::default()).err().expect("error");
+        assert!(err.starts_with("loading model weights from"), "{err}");
+    }
+
+    #[test]
+    fn analyze_after_import_defaults_off_and_persists() {
+        let cfg = std::env::temp_dir().join(format!("ff-aai-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&cfg);
+        assert!(!read_analyze_after_import(&cfg));
+        write_analyze_after_import(&cfg, true).unwrap();
+        assert!(read_analyze_after_import(&cfg));
+        std::fs::remove_file(&cfg).unwrap();
     }
 
     #[test]
@@ -243,20 +204,26 @@ mod tests {
     }
 
     #[test]
-    fn runner_falls_back_to_python_when_the_weights_dir_is_unloadable() {
-        let env = BackendEnv::default();
-        let empty = scratch("empty");
-        let (runner, notes) = resolve_runner(&env, Some(empty), &AnalyzerCache::default(), || "python3".to_string());
-        assert!(matches!(runner, Runner::Python { .. }));
-        assert!(notes.iter().any(|n| n.contains("falling back to python")), "{notes:?}");
-    }
-
-    #[test]
-    fn runner_falls_back_to_python_without_weights() {
-        let env = BackendEnv { override_backend: Some(AnalysisBackend::Rust), ..BackendEnv::default() };
-        let (runner, notes) = resolve_runner(&env, None, &AnalyzerCache::default(), || "python3".to_string());
-        assert!(matches!(runner, Runner::Python { .. }));
-        assert!(notes.iter().any(|n| n.contains("weights are missing")), "{notes:?}");
+    fn weights_resolve_from_the_resource_dir_after_app_data() {
+        let root = scratch("resources");
+        let resources = root.join("res");
+        let app_data = root.join("data");
+        for dir in [&resources, &app_data] {
+            let models = dir.join("models");
+            std::fs::create_dir_all(&models).unwrap();
+        }
+        let env = BackendEnv { resource_dir: Some(resources.clone()), app_data_dir: Some(app_data.clone()), ..BackendEnv::default() };
+        let touch = |dir: &Path| {
+            for name in [fourfour_analysis::service::MEL_MODEL, fourfour_analysis::service::DEFAULT_BEAT_MODEL] {
+                std::fs::write(dir.join("models").join(name), b"x").unwrap();
+            }
+        };
+        if std::env::var_os(MODELS_ENV).is_none() {
+            touch(&resources);
+            assert_eq!(env.locate_weights(), Some(resources.join("models")));
+            touch(&app_data);
+            assert_eq!(env.locate_weights(), Some(app_data.join("models")));
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
-import { formatBpm, parseKey, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
+import { BPM_MAX, BPM_MIN, doubleBpm, formatBpm, halveBpm, parseKey, stepBpm, tierOf } from '../../../prototyping/viewport/design-system/utils/scrub.js';
 
-export { formatBpm, tierOf };
+export { BPM_MAX, BPM_MIN, doubleBpm, formatBpm, halveBpm, stepBpm, tierOf };
 
 export const MIN_RATIO = 0.25;
 export const MAX_RATIO = 4;
@@ -122,6 +122,52 @@ export function shiftedKey(analysedKey: string, semitones: number): string | nul
   if (isCamelotNotation(analysedKey)) return camelotOf(shifted);
   const names = /[b♭]/.test(analysedKey.trim().slice(1, 2)) ? FLAT_NAMES : SHARP_NAMES;
   return `${names[pitchClass]}${parts.minor ? 'm' : ''}`;
+}
+
+/** The key `units` steps around the Camelot wheel, written in the notation `key` is written in. */
+export function camelotStep(key: string, units: number): string | null {
+  const camelot = parseKey(key);
+  if (!camelot) return null;
+  const number = ((((Number(camelot.slice(0, -1)) - 1 + Math.round(units)) % 12) + 12) % 12) + 1;
+  const stepped = `${number}${camelot.slice(-1)}`;
+  if (isCamelotNotation(key)) return stepped;
+  const parts = keyParts(stepped);
+  if (!parts) return null;
+  const names = /[b♭]/.test(key.trim().slice(1, 2)) ? FLAT_NAMES : SHARP_NAMES;
+  return `${names[parts.pitchClass]}${parts.minor ? 'm' : ''}`;
+}
+
+const CAMELOT_KEY_NAMES: Record<string, string> = {
+  '1A': 'A♭m', '2A': 'E♭m', '3A': 'B♭m', '4A': 'Fm', '5A': 'Cm', '6A': 'Gm',
+  '7A': 'Dm', '8A': 'Am', '9A': 'Em', '10A': 'Bm', '11A': 'F♯m', '12A': 'D♭m',
+  '1B': 'B', '2B': 'F♯', '3B': 'D♭', '4B': 'A♭', '5B': 'E♭', '6B': 'B♭',
+  '7B': 'F', '8B': 'C', '9B': 'G', '10B': 'D', '11B': 'A', '12B': 'E',
+};
+
+export interface KeyCell {
+  camelot: string;
+  name: string;
+}
+
+export function camelotOfKey(key: string): string | null {
+  return parseKey(key);
+}
+
+/** The 12 keys of one mode in Camelot order, each with its musical name. */
+export function keyCells(minor: boolean): KeyCell[] {
+  return Array.from({ length: 12 }, (_, i) => {
+    const camelot = `${i + 1}${minor ? 'A' : 'B'}`;
+    return { camelot, name: CAMELOT_KEY_NAMES[camelot] };
+  });
+}
+
+/** `camelot` written the way `like` is written: as a Camelot code, or as a note name. */
+export function keyWrittenLike(camelot: string, like: string): string {
+  if (isCamelotNotation(like)) return camelot;
+  const parts = keyParts(camelot);
+  if (!parts) return camelot;
+  const names = /[b♭]/.test(like.trim().slice(1, 2)) ? FLAT_NAMES : SHARP_NAMES;
+  return `${names[parts.pitchClass]}${parts.minor ? 'm' : ''}`;
 }
 
 /** The semitones the pitch has moved: the key shift, plus the tempo change when key lock is off and the tempo changes the pitch. */

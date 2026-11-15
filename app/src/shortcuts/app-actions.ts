@@ -20,15 +20,51 @@ import {
   refreshVolumes,
   FAVORITE_SLOTS,
 } from '../stores/library.svelte.ts';
-import { createFolderAndRename, importIntoSource } from '../menus/context-menus.ts';
+import { createFolderAndRename, importIntoSource, revealLabel } from '../menus/context-menus.ts';
 import { selection, selectionCount } from '../stores/selection.svelte.ts';
 import { isStickSyncBusy } from '../stores/stick-sync.svelte.ts';
-import { player, togglePlay, toggleExpanded, cueTapPress } from '../stores/player.svelte.ts';
-import { addMemoryCueAtPlayhead, deleteHotCue, triggerHotCue } from '../stores/cue-actions.ts';
-import { HOT_CUE_SLOTS, slotLetter } from '../lib/cues.ts';
+import {
+  player,
+  togglePlay,
+  toggleExpanded,
+  cueTapPress,
+  seekToMs,
+  beatGridNudgeLeft,
+  beatGridNudgeRight,
+  beatGridSetCurrent,
+  beatGridShiftByBeat,
+  loadPlayerTrack,
+  endTrackModes,
+} from '../stores/player.svelte.ts';
+import { tempo, setKeyShift, setKeyLock, resetTempo } from '../stores/tempo.svelte.ts';
+import { zoomWaveIn, zoomWaveOut, zoomWaveToFit } from '../stores/wave-zoom.ts';
+import { selectedTrack } from '../stores/selection.svelte.ts';
+import { cuesOf } from '../stores/cues.svelte.ts';
+import { confirmAction } from '../lib/confirmAction.ts';
+import { hasUnanalyzedTracks, revealFile } from '../stores/library.svelte.ts';
+import {
+  addHotCueAtPlayhead,
+  addMemoryCueAtPlayhead,
+  clearAllCues,
+  deleteHotCue,
+  jumpToHotCue,
+  triggerHotCue,
+} from '../stores/cue-actions.ts';
+import { HOT_CUE_SLOTS, firstFreeSlot, hotCueIn, slotLetter } from '../lib/cues.ts';
 import { openRekordboxImport } from '../stores/rekordbox-import.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
 import { deleteSidebarSelection, sidebarDeleteReady } from '../stores/sidebar-delete.ts';
+import {
+  bpmTargetId,
+  commitTrackRating,
+  doubleTrackBpm,
+  halveTrackBpm,
+  loadedTrackHasBpm,
+  requestBpmEntry,
+  stepTrackBpm,
+  stepTrackKey,
+} from '../stores/track-edits.svelte.ts';
+import { announce } from '../stores/announce.svelte.ts';
 import { focusRegion } from './focus-regions.ts';
 import type { ShortcutAction } from './registry.svelte.ts';
 
@@ -51,8 +87,25 @@ function noOverlayOpen(): boolean {
 
 function dismissTopLayer() {
   if (ui.settingsOpen) closeSettings();
+  else if (player.trackBpmMode || player.trackKeyMode) endTrackModes();
   else if (ui.searchText.trim()) clearListFilter();
   else toggleExpanded();
+}
+
+async function rateSelection(stars: number) {
+  const ids = [...selection.ids];
+  const results = await Promise.all(ids.map((id) => commitTrackRating(id, stars)));
+  if (!results.every(Boolean)) return;
+  const what = stars === 0 ? 'Rating cleared' : `Rated ${stars} ${stars === 1 ? 'star' : 'stars'}`;
+  announce(ids.length === 1 ? what : `${what} on ${ids.length} tracks`);
+}
+
+function listHasFocus(): boolean {
+  return document.activeElement?.closest('[role="listbox"]') != null;
+}
+
+function plainDigitsFireCues(): boolean {
+  return player.track != null && (player.expanded || !listHasFocus());
 }
 
 const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS }, (_, i) => {
@@ -63,10 +116,37 @@ const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS },
     group: GROUP.favorites,
     defaultBinding: String(slot),
     palette: false,
-    when: () => selectionCount() > 0,
+    when: () => selectionCount() > 0 && !(slot <= HOT_CUE_SLOTS && plainDigitsFireCues()),
     run: () => void toggleFavoriteSlot(slot, [...selection.ids]),
   };
 });
+
+const hotCueDigitActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_, i) => {
+  const slot = i + 1;
+  return {
+    id: `cues.hot${slot}.digit`,
+    label: `Hot cue ${slotLetter(slot)}: set or jump (plain ${slot})`,
+    group: GROUP.cues,
+    defaultBinding: String(slot),
+    palette: false,
+    when: plainDigitsFireCues,
+    run: () => void triggerHotCue(slot),
+  };
+});
+
+const RATING_STEPS = [0, 1, 2, 3, 4, 5];
+
+const ratingActions: ShortcutAction[] = RATING_STEPS.map((stars) => ({
+  id: `library.rate${stars}`,
+  label: stars === 0 ? 'Clear rating on selection' : `Rate selection ${stars} ${stars === 1 ? 'star' : 'stars'}`,
+  group: GROUP.library,
+  defaultBinding: `Mod+${stars}`,
+  keywords: ['rating', 'stars', 'rate'],
+  palette: false,
+  inInput: false,
+  when: () => selectionCount() > 0 && listHasFocus() && !library.volumes.includes(ui.activeSidebarRow),
+  run: () => void rateSelection(stars),
+}));
 
 const hotCueActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_, i) => {
   const slot = i + 1;
@@ -86,12 +166,235 @@ const hotCueActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_
       label: `Delete hot cue ${letter}`,
       group: GROUP.cues,
       defaultBinding: `Alt+Shift+${slot}`,
-      palette: false,
-      when: () => player.track != null,
+      keywords: ['remove', 'clear', 'hot cue', 'cue'],
+      when: () => hotCueIn(cuesOf(player.track?.id), slot) !== undefined,
       run: () => deleteHotCue(slot),
+    },
+    {
+      id: `cues.hot${slot}.set`,
+      label: `Set hot cue ${letter} at playhead`,
+      keywords: ['add', 'new', 'hot cue', 'cue', 'pad'],
+      group: GROUP.cues,
+      defaultBinding: null,
+      when: () => player.track != null && hotCueIn(cuesOf(player.track.id), slot) === undefined,
+      run: () => void addHotCueAtPlayhead(slot),
+    },
+    {
+      id: `cues.hot${slot}.jump`,
+      label: `Jump to hot cue ${letter}`,
+      keywords: ['go', 'seek', 'hot cue', 'cue', 'pad'],
+      group: GROUP.cues,
+      defaultBinding: null,
+      when: () => hotCueIn(cuesOf(player.track?.id), slot) !== undefined,
+      run: () => void jumpToHotCue(slot),
     },
   ];
 }).flat();
+
+const playerActions: ShortcutAction[] = [
+  {
+    id: 'playback.start',
+    label: 'Jump to track start',
+    keywords: ['beginning', 'rewind', 'zero', 'top', 'seek'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null,
+    run: () => void seekToMs(0),
+  },
+  {
+    id: 'grid.nudgeLeft',
+    label: 'Nudge beat grid left',
+    keywords: ['shift', 'earlier', 'beatgrid', 'grid'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null,
+    run: () => beatGridNudgeLeft(),
+  },
+  {
+    id: 'grid.nudgeRight',
+    label: 'Nudge beat grid right',
+    keywords: ['shift', 'later', 'beatgrid', 'grid'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null,
+    run: () => beatGridNudgeRight(),
+  },
+  {
+    id: 'grid.setDownbeat',
+    label: 'Set downbeat to playhead',
+    keywords: ['grid', 'beatgrid', 'one', 'align', 'snap'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null,
+    run: () => beatGridSetCurrent(),
+  },
+  {
+    id: 'grid.beatLater',
+    label: 'Shift beat grid one beat later',
+    keywords: ['grid', 'beatgrid', 'beat', 'edit'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: () => beatGridShiftByBeat(1),
+  },
+  {
+    id: 'grid.beatEarlier',
+    label: 'Shift beat grid one beat earlier',
+    keywords: ['grid', 'beatgrid', 'beat', 'edit'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: () => beatGridShiftByBeat(-1),
+  },
+  {
+    id: 'track.key.up',
+    label: 'Track key +1 on the Camelot wheel',
+    keywords: ['camelot', 'key', 'edit', 'harmonic'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: () => void stepTrackKey(player.track!.id, 1),
+  },
+  {
+    id: 'track.key.down',
+    label: 'Track key −1 on the Camelot wheel',
+    keywords: ['camelot', 'key', 'edit', 'harmonic'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: () => void stepTrackKey(player.track!.id, -1),
+  },
+  {
+    id: 'tempo.masterTempo',
+    label: 'Toggle master tempo (key lock)',
+    keywords: ['mt', 'key lock', 'keylock', 'pitch', 'tempo'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    run: () => setKeyLock(!tempo.keyLock),
+  },
+  {
+    id: 'tempo.keyUp',
+    label: 'Shift key up one semitone',
+    keywords: ['pitch', 'transpose', 'higher', 'key shift'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null,
+    run: () => setKeyShift(tempo.keyShift + 1),
+  },
+  {
+    id: 'tempo.keyDown',
+    label: 'Shift key down one semitone',
+    keywords: ['pitch', 'transpose', 'lower', 'key shift'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null,
+    run: () => setKeyShift(tempo.keyShift - 1),
+  },
+  {
+    id: 'tempo.reset',
+    label: 'Reset tempo and key shift',
+    keywords: ['pitch', 'speed', 'original', 'zero', 'default'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => player.track != null && (tempo.percent !== 0 || tempo.keyShift !== 0),
+    run: resetTempo,
+  },
+  {
+    id: 'wave.zoomIn',
+    label: 'Zoom waveform in',
+    keywords: ['magnify', 'closer', 'detail'],
+    group: GROUP.view,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: zoomWaveIn,
+  },
+  {
+    id: 'wave.zoomOut',
+    label: 'Zoom waveform out',
+    keywords: ['wider', 'overview'],
+    group: GROUP.view,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: zoomWaveOut,
+  },
+  {
+    id: 'wave.zoomFit',
+    label: 'Reset waveform zoom to default',
+    keywords: ['fit', 'default', 'reset'],
+    group: GROUP.view,
+    defaultBinding: null,
+    when: () => player.expanded && player.track != null,
+    run: zoomWaveToFit,
+  },
+  {
+    id: 'library.loadSelected',
+    label: 'Load selected track into player',
+    keywords: ['open', 'deck', 'cue up'],
+    group: GROUP.playback,
+    defaultBinding: null,
+    when: () => selectedTrack() != null,
+    run: () => void loadPlayerTrack(selectedTrack()),
+  },
+  {
+    id: 'library.revealSelected',
+    label: revealLabel(),
+    keywords: ['finder', 'folder', 'explorer', 'file', 'show', 'reveal'],
+    group: GROUP.library,
+    defaultBinding: null,
+    when: () => !!selectedTrack()?.filePath,
+    run: () => void revealFile(selectedTrack()!.filePath),
+  },
+];
+
+const BPM_KEYWORDS = ['tempo', 'beat grid', 'grid', 'bpm'];
+
+const bpmActions: ShortcutAction[] = [
+  {
+    id: 'track.bpm.set',
+    label: 'Set track BPM…',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: BPM_KEYWORDS,
+    when: loadedTrackHasBpm,
+    run: () => void requestBpmEntry(),
+  },
+  {
+    id: 'track.bpm.up',
+    label: 'Track BPM +0.1',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: BPM_KEYWORDS,
+    when: () => bpmTargetId() != null,
+    run: () => stepTrackBpm(bpmTargetId()!, 1, 'normal'),
+  },
+  {
+    id: 'track.bpm.down',
+    label: 'Track BPM −0.1',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: BPM_KEYWORDS,
+    when: () => bpmTargetId() != null,
+    run: () => stepTrackBpm(bpmTargetId()!, -1, 'normal'),
+  },
+  {
+    id: 'track.bpm.double',
+    label: 'Double track BPM',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: [...BPM_KEYWORDS, '×2', 'x2'],
+    when: () => bpmTargetId() != null,
+    run: () => doubleTrackBpm(bpmTargetId()!),
+  },
+  {
+    id: 'track.bpm.halve',
+    label: 'Halve track BPM',
+    group: GROUP.playback,
+    defaultBinding: null,
+    keywords: [...BPM_KEYWORDS, '÷2', 'half'],
+    when: () => bpmTargetId() != null,
+    run: () => halveTrackBpm(bpmTargetId()!),
+  },
+];
 
 export function buildAppActions(): ShortcutAction[] {
   return [
@@ -170,14 +473,37 @@ export function buildAppActions(): ShortcutAction[] {
     },
     {
       id: 'cues.memory.add',
-      label: 'Add cue at playhead',
-      keywords: ['memory', 'marker', 'cue', 'locator'],
+      label: 'Add memory cue at playhead',
+      keywords: ['marker', 'cue', 'locator', 'add'],
       group: GROUP.cues,
       defaultBinding: 'M',
       when: () => player.track != null,
       run: addMemoryCueAtPlayhead,
     },
+    {
+      id: 'cues.hot.add',
+      label: 'Add hot cue at playhead (next free pad)',
+      keywords: ['new', 'hot cue', 'cue', 'pad', 'set'],
+      group: GROUP.cues,
+      defaultBinding: 'Shift+C',
+      when: () => player.track != null && firstFreeSlot(cuesOf(player.track.id)) !== null,
+      run: () => void addHotCueAtPlayhead(),
+    },
+    {
+      id: 'cues.clearAll',
+      label: 'Clear all cues',
+      keywords: ['delete', 'remove', 'hot cue', 'memory', 'reset'],
+      group: GROUP.cues,
+      defaultBinding: null,
+      when: () => player.track != null && cuesOf(player.track.id).length > 0,
+      run: () =>
+        void confirmAction('Delete every cue on the loaded track?').then((ok) => {
+          if (ok) clearAllCues();
+        }),
+    },
     ...hotCueActions,
+    ...hotCueDigitActions,
+    ...playerActions,
     {
       id: 'library.search',
       label: 'Search tracks',
@@ -237,7 +563,7 @@ export function buildAppActions(): ShortcutAction[] {
       group: GROUP.library,
       defaultBinding: null,
       keywords: ['bpm', 'key', 'waveform', 'detect', 'everything'],
-      when: () => !library.syncing && library.tracks.some((t) => !t.analyzed),
+      when: () => !library.syncing && hasUnanalyzedTracks(),
       run: () => void analyzeTracks(),
     },
     {
@@ -309,6 +635,8 @@ export function buildAppActions(): ShortcutAction[] {
       defaultBinding: null,
       run: toggleDetailPane,
     },
+    ...bpmActions,
     ...favoriteActions,
+    ...ratingActions,
   ];
 }

@@ -22,12 +22,17 @@ import {
   subscribePlaybackError,
   subscribePlaybackTick,
 } from '../services/playback.svelte.ts';
-import { library, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
+import { library, libraryTrackById, onAnalysisStart, requestBackgroundAnalysis } from './library.svelte.ts';
 import { artwork } from './artwork.svelte.ts';
 import { resetTempoForNewTrack, tempo } from './tempo.svelte.ts';
 import { PlayheadClock } from '../../../prototyping/viewport/design-system/playhead-clock.js';
 import { cuesOf, flushCueEdits, loadCuesFromPayload, onCueSaveError } from './cues.svelte.ts';
 import { initialCuePointMs } from '../lib/cues.ts';
+import { fileStateOf, noteBlockedLoad } from './file-status.svelte.ts';
+import { isUnplayable } from '../lib/fileHealth.ts';
+import { commandErrorKind, commandErrorPath, type ErrorKind } from '../services/command-error.ts';
+import { failureText, playbackFailureText } from '../lib/userErrors.ts';
+import { quantizeMs } from './quantize.svelte.ts';
 import {
   cuePress,
   cueRelease,
@@ -39,11 +44,15 @@ import {
 } from '../lib/cueButton.ts';
 import {
   BEAT_NUDGE_MS,
+  beatIntervalMs,
   createGridPersister,
   gridFromStorage,
   shiftBeats,
+  shiftBeatsByBeat,
   shiftToPlaceDownbeatAt,
+  shiftedAnchorMs,
   type BeatMarker,
+  type EditedGrid,
 } from '../lib/beatGrid.ts';
 
 export type { BeatMarker };
@@ -66,6 +75,8 @@ export interface PlayerTrack {
   totalSeconds: number;
   durationMs: number;
   beats: BeatMarker[];
+  /** The downbeat a BPM change keeps in place (`grid_anchor_ms`); null until the grid was set by hand or re-spaced. */
+  gridAnchorMs: number | null;
   bands: BandColumns | null;
   // Higher-res detail + fixed overview for the expanded dual-view player.
   // (compact strip uses bands; these stay null until analysis loads.)
@@ -76,6 +87,7 @@ export interface PlayerTrack {
 }
 
 let loadedTrack = $state.raw<PlayerTrack | null>(null);
+artwork.keep('player', () => (loadedTrack ? [loadedTrack.id] : []));
 
 export const player = $state({
   playing: false,
@@ -87,8 +99,11 @@ export const player = $state({
     loadedTrack = value;
   },
   loading: false,
+  zoomDetailLoadingId: null as number | null,
   error: null as string | null,
   expanded: false,
+  trackBpmMode: false,
+  trackKeyMode: false,
   levelLeft: 0,
   levelRight: 0,
   get tempo() {
@@ -103,10 +118,23 @@ export const player = $state({
 /** Toggle the full-screen expanded player (dual-view waveform). */
 export function toggleExpanded() {
   player.expanded = !player.expanded;
+  if (!player.expanded) endTrackModes();
+}
+
+export function endTrackModes() {
+  player.trackBpmMode = false;
+  player.trackKeyMode = false;
+}
+
+export function setTrackMode(field: 'bpm' | 'key', on: boolean) {
+  const allowed = on && player.expanded && player.track != null;
+  if (field === 'bpm') player.trackBpmMode = allowed;
+  else player.trackKeyMode = allowed;
 }
 
 export function setExpanded(value: boolean) {
   player.expanded = value;
+  if (!value) endTrackModes();
 }
 
 let loadGeneration = 0;
@@ -163,10 +191,18 @@ function previewFromAnalysis(analysis: any): number[] | null {
   return previewBytesFromPayload(analysis);
 }
 
+function beatsFromAnalysis(analysis: any): BeatMarker[] {
+  return gridFromStorage(
+    analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({ time_ms: b.time_ms, bar_position: b.bar_position })),
+    analysis.grid_offset_ms,
+  );
+}
+
 function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   const durationMs = analysis.duration_ms ?? base.durationMs;
   const next: PlayerTrack = {
     ...base,
+    bandsZoom: zoomDetailCache.get(base.id) ?? base.bandsZoom,
     durationMs,
     totalSeconds: Math.max(0, Math.round(durationMs / 1000)),
   };
@@ -180,10 +216,8 @@ function applyAnalysisToTrack(base: PlayerTrack, analysis: any): PlayerTrack {
   next.bands = next.bandsDetail;
   next.bandsOverview = stripBandsFromAnalysis(analysis) ?? next.bandsDetail;
   if (analysis.beats?.length) {
-    next.beats = gridFromStorage(
-      analysis.beats.map((b: { time_ms: number; bar_position: number }) => ({ time_ms: b.time_ms, bar_position: b.bar_position })),
-      analysis.grid_offset_ms,
-    );
+    next.beats = beatsFromAnalysis(analysis);
+    next.gridAnchorMs = analysis.grid_anchor_ms ?? null;
   } else {
     // No detected beats — synthesize a grid from BPM so one is always shown.
     const numBpm = Number(analysis.bpm) || Number(next.bpm) || 0;
@@ -224,9 +258,11 @@ export async function initPlayerTransport() {
   await ensureTickListener();
 }
 
-function reportPlaybackFailure(message: string) {
+function reportPlaybackFailure(message: string, path?: string | null, kind?: ErrorKind | null) {
   console.error('playback error:', message);
-  player.error = message;
+  const text = playbackFailureText(message, path ?? player.track?.sourcePath, kind);
+  player.error = text;
+  library.statusMessage = text;
   player.playing = false;
   pausePending = false;
   seekTargetMs = null;
@@ -235,7 +271,7 @@ function reportPlaybackFailure(message: string) {
 async function ensureTickListener() {
   if (!errorUnlisten) {
     errorUnlisten = await subscribePlaybackError((event) => {
-      reportPlaybackFailure(event.message);
+      reportPlaybackFailure(event.message, event.path, event.kind);
     });
   }
   if (tickUnlisten) return;
@@ -315,19 +351,56 @@ const zoomDetailLoading = new Set<number>();
 
 /** Fetch the high-resolution series of the loaded track (once, in the background) and hand it to the zoom view. */
 export async function loadZoomDetail(trackId: number) {
-  if (zoomDetailCache.has(trackId) || zoomDetailLoading.has(trackId)) return;
+  const cached = zoomDetailCache.get(trackId);
+  if (cached) {
+    giveLoadedTrackZoomDetail(trackId, cached);
+    return;
+  }
+  if (zoomDetailLoading.has(trackId)) return;
   zoomDetailLoading.add(trackId);
+  player.zoomDetailLoadingId = trackId;
   try {
     const buffer = await getWaveformDetail(trackId);
     const bands = buffer ? bandsFromDetailBytes(buffer) : null;
     if (!bands) return;
     zoomDetailCache.set(trackId, bands);
     if (zoomDetailCache.size > ZOOM_DETAIL_CACHE_TRACKS) zoomDetailCache.delete(zoomDetailCache.keys().next().value!);
-    const loaded = player.track;
-    if (loaded?.id === trackId) player.track = { ...loaded, bandsZoom: bands };
+    giveLoadedTrackZoomDetail(trackId, bands);
   } finally {
     zoomDetailLoading.delete(trackId);
+    if (player.zoomDetailLoadingId === trackId) player.zoomDetailLoadingId = null;
   }
+}
+
+const ZOOM_DETAIL_START_FALLBACK_MS = 120;
+
+function afterNextPaint(task: () => void) {
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    task();
+  };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(run));
+  setTimeout(run, ZOOM_DETAIL_START_FALLBACK_MS);
+}
+
+/** The loaded track's zoom series is requested once the overview has painted, so its (large) answer does not queue ahead of the strip. */
+function loadZoomDetailAfterPaint(trackId: number, generation: number) {
+  if (zoomDetailCache.has(trackId)) {
+    void loadZoomDetail(trackId);
+    return;
+  }
+  player.zoomDetailLoadingId = trackId;
+  afterNextPaint(() => {
+    if (generation === loadGeneration) void loadZoomDetail(trackId);
+    else if (player.zoomDetailLoadingId === trackId) player.zoomDetailLoadingId = null;
+  });
+}
+
+function giveLoadedTrackZoomDetail(trackId: number, bands: DetailBandColumns) {
+  const loaded = player.track;
+  if (loaded?.id === trackId && loaded.bandsZoom !== bands) player.track = { ...loaded, bandsZoom: bands };
 }
 
 function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
@@ -342,6 +415,7 @@ function buildBaseTrack(trackInfo: BackendTrackInfo): PlayerTrack {
     totalSeconds: Math.max(0, Math.round(trackInfo.duration_secs || 0)),
     durationMs: Math.max(0, Math.round((trackInfo.duration_secs || 0) * 1000)),
     beats: [],
+    gridAnchorMs: null,
     bands: null,
     bandsDetail: null,
     bandsOverview: null,
@@ -397,13 +471,19 @@ export function initPlayerAnalysisRefresh() {
 }
 
 function prioritizeIfUnanalyzed(trackId: number, completeFallback: boolean) {
-  const libTrack = library.tracks.find((t) => t.id === trackId);
+  const libTrack = libraryTrackById(trackId);
   const complete = libTrack ? libTrack.analyzed && !libTrack.analysisPending : completeFallback;
   if (!complete) requestBackgroundAnalysis(trackId);
 }
 
 /** Load track metadata + waveform from a library selection (UI row or backend track). */
 export async function loadPlayerTrack(input: any) {
+  const requestedId = input?.raw?.id ?? input?.id;
+  if (requestedId != null && isUnplayable(fileStateOf(requestedId))) {
+    playPending = false;
+    noteBlockedLoad(requestedId);
+    return;
+  }
   const gen = ++loadGeneration;
   void flushBeatGridEdits();
   void flushCueEdits();
@@ -418,6 +498,7 @@ export async function loadPlayerTrack(input: any) {
   const trackInfo = normalizeTrackInput(input);
   if (!trackInfo) {
     player.track = null;
+    endTrackModes();
     player.loading = false;
     return;
   }
@@ -425,6 +506,7 @@ export async function loadPlayerTrack(input: any) {
   const base = buildBaseTrack(trackInfo);
   const cached = peekAnalysisData(trackInfo.id);
   player.track = cached ? applyAnalysisToTrack(base, cached) : base;
+  loadZoomDetailAfterPaint(trackInfo.id, gen);
   player.loading = !cached;
   if (cached) performance.mark('ff:player-ready');
 
@@ -465,7 +547,7 @@ export async function playFromStart() {
     await playbackPlay(player.track.sourcePath, 0, player.track.durationMs);
     player.playing = true;
   } catch (err) {
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -477,6 +559,7 @@ export function clearPlayerTrack() {
   seekTargetMs = null;
   void playbackStop();
   player.track = null;
+  endTrackModes();
   player.playing = false;
   player.progress = 0;
   player.loading = false;
@@ -541,12 +624,16 @@ export async function togglePlay() {
       player.playing = true;
     }
   } catch (err) {
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
 function cueTransport(): CueTransport {
-  return { playing: player.playing, positionMs: currentPositionMs() };
+  const positionMs = currentPositionMs();
+  return {
+    playing: player.playing,
+    positionMs: player.playing ? positionMs : quantizeMs(player.track?.beats ?? [], positionMs),
+  };
 }
 
 async function runCueCommand(command: CueCommand) {
@@ -568,7 +655,7 @@ async function runCueCommand(command: CueCommand) {
     }
   } catch (err) {
     cueButton = { ...cueButton, previewing: false };
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -605,7 +692,7 @@ export async function play() {
     await playbackPlay(player.track.sourcePath, ms, player.track.durationMs);
     player.playing = true;
   } catch (err) {
-    reportPlaybackFailure(String(err));
+    reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
   }
 }
 
@@ -618,12 +705,26 @@ export async function pause() {
 // change only reaches the waveform as a new object) and schedules saving the grid.
 onCueSaveError((message) => {
   player.error = message;
+  library.statusMessage = message;
 });
 
-const gridPersister = createGridPersister(setBeatGrid, (err) => {
+const gridPersister = createGridPersister<EditedGrid>(setBeatGrid, (err) => {
   console.error('saving the beat grid failed:', err);
-  player.error = `Could not save the beat grid: ${err}`;
+  player.error = failureText("Couldn't save the beat grid.", err);
+  library.statusMessage = player.error;
 });
+
+/**
+ * Show the stored grid of the loaded track (after its grid was re-spaced in the library). With `unlessChangedFrom`, a
+ * grid edited since that one was shown is kept: it is newer than what was stored.
+ */
+export async function refreshLoadedBeatGrid(trackId: number, unlessChangedFrom?: BeatMarker[]): Promise<void> {
+  const fresh = await getAnalysisData(trackId, true);
+  const loaded = player.track;
+  if (!fresh?.beats?.length || !loaded || loaded.id !== trackId) return;
+  if (unlessChangedFrom && loaded.beats !== unlessChangedFrom) return;
+  player.track = { ...loaded, beats: beatsFromAnalysis(fresh), gridAnchorMs: fresh.grid_anchor_ms ?? null };
+}
 
 /** Write a pending grid edit now (before another track loads). */
 export function flushBeatGridEdits(): Promise<void> {
@@ -634,9 +735,12 @@ export function flushBeatGridEdits(): Promise<void> {
 export function beatGridShift(deltaMs: number) {
   const t = player.track;
   if (!t || !t.beats.length || !deltaMs) return;
-  const beats = shiftBeats(t.beats, deltaMs);
-  player.track = { ...t, beats };
-  gridPersister.schedule(t.id, beats);
+  applyGridEdit(t, shiftBeats(t.beats, deltaMs), shiftedAnchorMs(t.beats, t.gridAnchorMs, deltaMs));
+}
+
+function applyGridEdit(t: PlayerTrack, beats: BeatMarker[], anchorMs: number | null) {
+  player.track = { ...t, beats, gridAnchorMs: anchorMs };
+  gridPersister.schedule(t.id, { beats, anchorMs });
 }
 
 export function beatGridNudgeLeft(stepMs = BEAT_NUDGE_MS) {
@@ -645,6 +749,13 @@ export function beatGridNudgeLeft(stepMs = BEAT_NUDGE_MS) {
 
 export function beatGridNudgeRight(stepMs = BEAT_NUDGE_MS) {
   beatGridShift(stepMs);
+}
+
+export function beatGridShiftByBeat(direction: 1 | -1) {
+  const t = player.track;
+  if (!t || t.beats.length < 2) return;
+  const interval = beatIntervalMs(t.beats) ?? 0;
+  applyGridEdit(t, shiftBeatsByBeat(t.beats, direction), shiftedAnchorMs(t.beats, t.gridAnchorMs, direction * interval));
 }
 
 /** Where the playhead is right now: while playing, the transport clock (reports only arrive every 50 ms); else the stored position. */
@@ -658,8 +769,11 @@ export function currentPositionMs(): number {
 export function beatGridSetCurrent() {
   const t = player.track;
   if (!t || !t.durationMs) return;
-  const delta = shiftToPlaceDownbeatAt(t.beats, currentPositionMs());
-  if (delta !== null) beatGridShift(delta);
+  const position = currentPositionMs();
+  const delta = shiftToPlaceDownbeatAt(t.beats, position);
+  if (delta === null || !delta) return;
+  const placedDownbeat = t.beats.some((b) => b.bar_position === 1);
+  applyGridEdit(t, shiftBeats(t.beats, delta), placedDownbeat ? position : shiftedAnchorMs(t.beats, t.gridAnchorMs, delta));
 }
 
 /** Jump to `ms` and play: a seek while playing, one play command from `ms` while paused. */
@@ -692,7 +806,7 @@ export async function seekToProgress(progress: number) {
     try {
       await playbackSeek(ms);
     } catch (err) {
-      reportPlaybackFailure(String(err));
+      reportPlaybackFailure(String(err), commandErrorPath(err), commandErrorKind(err));
     }
   } else {
     // Paused/stopped: persist the position so play/resume starts from here.

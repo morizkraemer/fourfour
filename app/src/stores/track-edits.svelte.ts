@@ -1,16 +1,23 @@
 /**
- * track-edits.svelte.ts — hand-set BPM / key of a track.
+ * track-edits.svelte.ts — hand-set BPM / key of a track. A BPM change re-spaces the beat grid.
  * Persists through the library (re-analysis keeps these) and updates the table
  * row, the inspector and the loaded player track.
  */
 
-import { library, bumpLibraryTracks } from './library.svelte.ts';
-import { player } from './player.svelte.ts';
+import { analyzeTrackIds, library, bumpLibraryTracks, libraryTrackById } from './library.svelte.ts';
+import { flushBeatGridEdits, player, refreshLoadedBeatGrid, setTrackMode, toggleExpanded } from './player.svelte.ts';
+import { selectedTrack } from './selection.svelte.ts';
+import { tick } from 'svelte';
+import { gridAnchorMs, rescaleBeats, type BeatMarker } from '../lib/beatGrid.ts';
+import { createPersister } from '../lib/persister.ts';
+import { editFailureText } from '../lib/userErrors.ts';
+import { BPM_MAX, BPM_MIN, camelotStep, doubleBpm, halveBpm, stepBpm } from '../lib/tempo.ts';
+import type { Tier } from '../lib/tempo.ts';
 import {
   getAnalysisData,
   releaseUserEdits,
+  releaseUserField,
   rescaleBeatGrid,
-  setTrackBpm,
   setTrackKey,
   setTrackRating,
   updateTrackFields,
@@ -18,12 +25,12 @@ import {
 } from '../services/tauri.svelte.ts';
 
 function trackById(trackId: number) {
-  return library.tracks.find((t) => t.id === trackId);
+  return libraryTrackById(trackId);
 }
 
 function reportFailure(what: string, err: unknown) {
   console.error(`${what} failed:`, err);
-  library.statusMessage = `${what} failed: ${err}`;
+  library.statusMessage = editFailureText(what, err);
 }
 
 function showBpm(trackId: number, bpm: number) {
@@ -32,70 +39,141 @@ function showBpm(trackId: number, bpm: number) {
     track.bpm = bpm.toFixed(1);
     track.bpmExact = bpm;
     track.bpmLocked = true;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   if (player.track?.id === trackId) player.track = { ...player.track, bpm: bpm.toFixed(2) };
 }
 
-export async function commitTrackBpm(trackId: number, bpm: number): Promise<boolean> {
+let respacedGrid: { trackId: number; from: BeatMarker[]; fromAnchorMs: number | null; to: BeatMarker[] } | null = null;
+
+function respaceLoadedGrid(trackId: number, bpm: number) {
+  const loaded = player.track;
+  if (!loaded || loaded.id !== trackId || !loaded.beats.length) return;
+  const cached = respacedGrid?.trackId === trackId && respacedGrid.to === loaded.beats ? respacedGrid : null;
+  const from = cached ? cached.from : loaded.beats;
+  const fromAnchorMs = cached ? cached.fromAnchorMs : loaded.gridAnchorMs;
+  const durationSecs = trackById(trackId)?.raw?.duration_secs;
+  const durationMs = durationSecs ? durationSecs * 1000 : loaded.durationMs;
+  const to = rescaleBeats(from, bpm, durationMs, fromAnchorMs);
+  respacedGrid = { trackId, from, fromAnchorMs, to };
+  player.track = { ...loaded, beats: to, gridAnchorMs: gridAnchorMs(from, fromAnchorMs) };
+}
+
+const bpmPersister = createPersister<number>(saveBpmAndGrid, (err) => reportFailure('set the BPM', err));
+
+function currentBpm(trackId: number): number {
+  const row = trackById(trackId);
+  if (row?.bpmExact) return row.bpmExact;
+  return player.track?.id === trackId ? Number(player.track.bpm) : NaN;
+}
+
+async function saveBpmAndGrid(trackId: number, bpm: number): Promise<void> {
+  await flushBeatGridEdits();
+  const shown = player.track?.id === trackId ? player.track.beats : undefined;
   try {
-    await setTrackBpm(trackId, bpm);
+    await rescaleBeatGrid(trackId, bpm);
   } catch (err) {
-    reportFailure('Setting the BPM', err);
-    return false;
+    reportFailure('set the BPM', err);
+    const stored = await getAnalysisData(trackId, true);
+    if (stored?.bpm) showBpm(trackId, Number(stored.bpm));
+    await refreshLoadedBeatGrid(trackId);
+    return;
   }
+  await refreshLoadedBeatGrid(trackId, shown);
+}
+
+/** Set the track's own BPM: shown at once, the beat grid is re-spaced from its first downbeat and saved once the edits pause. */
+export function commitTrackBpm(trackId: number, bpm: number): boolean {
+  if (!Number.isFinite(bpm) || bpm < BPM_MIN || bpm > BPM_MAX) return false;
   showBpm(trackId, bpm);
+  respaceLoadedGrid(trackId, bpm);
+  bpmPersister.schedule(trackId, bpm);
   return true;
 }
 
-export async function commitTrackKey(trackId: number, key: string): Promise<boolean> {
+export function stepTrackBpm(trackId: number, units: number, tier: Tier): boolean {
+  const current = currentBpm(trackId);
+  return Number.isFinite(current) && commitTrackBpm(trackId, stepBpm(current, units, tier));
+}
+
+export function doubleTrackBpm(trackId: number): boolean {
+  const next = doubleBpm(currentBpm(trackId));
+  return next !== null && commitTrackBpm(trackId, next);
+}
+
+export function halveTrackBpm(trackId: number): boolean {
+  const next = halveBpm(currentBpm(trackId));
+  return next !== null && commitTrackBpm(trackId, next);
+}
+
+/** The track the BPM commands act on: the loaded one, else the selected analysed one. */
+export function bpmTargetId(): number | null {
+  const loaded = player.track;
+  if (loaded && Number(loaded.bpm) > 0) return loaded.id;
+  const selected = selectedTrack();
+  return selected?.analyzed && selected.bpmExact ? selected.id : null;
+}
+
+export function loadedTrackHasBpm(): boolean {
+  return Number(player.track?.bpm) > 0;
+}
+
+/** Open the big player and its track BPM popup. */
+export async function requestBpmEntry(): Promise<void> {
+  if (!player.expanded) {
+    toggleExpanded();
+    await tick();
+  }
+  setTrackMode('bpm', true);
+}
+
+const requestedKeys = new Map<number, string>();
+let keyWrites: Promise<unknown> = Promise.resolve();
+
+/** Set the track's key; writes run one after another, so the latest request is what stays stored. */
+export function commitTrackKey(trackId: number, key: string): Promise<boolean> {
+  requestedKeys.set(trackId, key);
+  const write = keyWrites.then(() => saveTrackKey(trackId, key));
+  keyWrites = write;
+  return write.finally(() => {
+    if (requestedKeys.get(trackId) === key) requestedKeys.delete(trackId);
+  });
+}
+
+async function saveTrackKey(trackId: number, key: string): Promise<boolean> {
   try {
     await setTrackKey(trackId, key);
   } catch (err) {
-    reportFailure('Setting the key', err);
+    reportFailure('set the key', err);
     return false;
   }
   const track = trackById(trackId);
   if (track) {
     track.key = key;
     track.keyLocked = true;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   if (player.track?.id === trackId) player.track = { ...player.track, key };
   return true;
+}
+
+export async function stepTrackKey(trackId: number, units: number): Promise<boolean> {
+  const current = requestedKeys.get(trackId) ?? trackById(trackId)?.key ?? (player.track?.id === trackId ? player.track.key : '');
+  const next = camelotStep(current ?? '', units);
+  return next !== null && (await commitTrackKey(trackId, next));
 }
 
 export async function commitTrackRating(trackId: number, rating: number): Promise<boolean> {
   try {
     await setTrackRating(trackId, rating);
   } catch (err) {
-    reportFailure('Setting the rating', err);
+    reportFailure('set the rating', err);
     return false;
   }
   const track = trackById(trackId);
   if (track) {
     track.rating = rating;
-    bumpLibraryTracks();
-  }
-  return true;
-}
-
-/** Explicit second step: fit the beat grid to the track's BPM. Never done by a BPM change. */
-export async function fitGridToBpm(trackId: number, bpm: number): Promise<boolean> {
-  try {
-    await rescaleBeatGrid(trackId, bpm);
-  } catch (err) {
-    reportFailure('Adjusting the beat grid', err);
-    return false;
-  }
-  showBpm(trackId, bpm);
-  if (player.track?.id === trackId) {
-    const fresh = await getAnalysisData(trackId, true);
-    const beats = fresh?.beats?.map((b: { time_ms: number; bar_position: number }) => ({
-      time_ms: b.time_ms,
-      bar_position: b.bar_position,
-    }));
-    if (beats?.length && player.track?.id === trackId) player.track = { ...player.track, beats };
+    bumpLibraryTracks([trackId]);
   }
   return true;
 }
@@ -104,15 +182,32 @@ export async function releaseTrackEdits(trackId: number): Promise<void> {
   try {
     await releaseUserEdits(trackId);
   } catch (err) {
-    reportFailure('Releasing the hand-set values', err);
+    reportFailure('give the hand-set values back to the analysis', err);
     return;
   }
   const track = trackById(trackId);
   if (track) {
     track.bpmLocked = false;
     track.keyLocked = false;
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
+}
+
+/** Give one hand-set value back to the analysis: release only it (the BPM with its grid, or the key) and analyse the track again. */
+export async function resetTrackFieldToAnalyzed(trackId: number, field: 'bpm' | 'key'): Promise<void> {
+  try {
+    await releaseUserField(trackId, field);
+  } catch (err) {
+    reportFailure('give the hand-set value back to the analysis', err);
+    return;
+  }
+  const track = trackById(trackId);
+  if (track) {
+    if (field === 'bpm') track.bpmLocked = false;
+    else track.keyLocked = false;
+    bumpLibraryTracks([trackId]);
+  }
+  await analyzeTrackIds([trackId]);
 }
 
 export async function commitTrackFields(trackId: number, edits: TrackFieldEdits): Promise<boolean> {
@@ -120,7 +215,7 @@ export async function commitTrackFields(trackId: number, edits: TrackFieldEdits)
   try {
     saved = await updateTrackFields(trackId, edits);
   } catch (err) {
-    reportFailure('Saving the tags', err);
+    reportFailure('save the tags', err);
     return false;
   }
   const track = trackById(trackId);
@@ -130,7 +225,7 @@ export async function commitTrackFields(trackId: number, edits: TrackFieldEdits)
     track.album = saved.album || '—';
     track.genre = saved.genre || '—';
     if (track.raw) track.raw = { ...track.raw, ...saved };
-    bumpLibraryTracks();
+    bumpLibraryTracks([trackId]);
   }
   if (player.track?.id === trackId) {
     player.track = { ...player.track, title: saved.title, artist: saved.artist || '—' };

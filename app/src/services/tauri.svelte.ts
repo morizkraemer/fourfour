@@ -1,16 +1,20 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, toCommandError, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
-import { open as dialogOpen } from '@tauri-apps/plugin-dialog';
+import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
+import { pathBaseName } from '../lib/pathName.ts';
+import { decodeArtworkBatch } from '../lib/artworkBatch.ts';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
   isValidAnalysisPayload,
+  decodeAnalysisBytes,
   sanitizeAnalysisPayload,
 } from './analysis-data.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
-import { gridForStorage, type BeatMarker } from '../lib/beatGrid.ts';
+import { gridForStorage, type BeatMarker, type EditedGrid } from '../lib/beatGrid.ts';
 import { mockAnalysisData } from '../mocks/analysis.ts';
 import { perfAnalysisData } from '../mocks/analysis-perf.ts';
 import { MOCK_PROFILE_ORDER, rowBandsBase64, syntheticBands } from '../mocks/synthetic-bands.ts';
+import { decodeStateBytes, decodeTrackTable, isTrackTable, type TrackTable } from './track-table.ts';
 
 export let lastTauriError = 'None';
 
@@ -101,9 +105,15 @@ export interface UsbPlaylistInfo {
   track_count: number;
 }
 
+export interface UsbLastSync {
+  at: string;
+  report: SyncReport;
+}
+
 export interface UsbStateResponse {
   tracks: UsbTrackInfo[];
   playlists: UsbPlaylistInfo[];
+  last_sync?: UsbLastSync | null;
 }
 
 // Fallback Mock Data for Browser Mode
@@ -235,6 +245,109 @@ export async function pickDirectory(): Promise<string | null> {
   }
 }
 
+export async function pickAudioFiles(): Promise<string[]> {
+  if (useBrowserMocks()) {
+    const path = prompt('Enter mock file path:');
+    return path ? [path] : [];
+  }
+  const result = await dialogOpen({
+    multiple: true,
+    filters: [{ name: 'Audio', extensions: ['mp3', 'flac', 'wav', 'aiff', 'aif', 'm4a', 'aac'] }],
+  });
+  return Array.isArray(result) ? result : typeof result === 'string' ? [result] : [];
+}
+
+export async function pickBackupFile(): Promise<string | null> {
+  const result = await dialogOpen({ multiple: false, filters: [{ name: 'Library backup', extensions: ['gz'] }] });
+  return typeof result === 'string' ? result : Array.isArray(result) ? (result[0] ?? null) : null;
+}
+
+export async function pickBackupDestination(defaultPath: string): Promise<string | null> {
+  return (await dialogSave({ defaultPath, filters: [{ name: 'Library backup', extensions: ['gz'] }] })) ?? null;
+}
+
+export interface BackupSizes {
+  library_bytes: number;
+  audio_bytes: number;
+  audio_files: number;
+}
+
+export interface LastBackup {
+  path: string;
+  at_ms: number;
+  bytes: number;
+  includes_audio: boolean;
+}
+
+export interface BackupStatus {
+  sizes: BackupSizes;
+  last: LastBackup | null;
+}
+
+export interface BackupPreview {
+  path: string;
+  created_at: string;
+  track_count: number;
+  playlist_count: number;
+  includes_audio: boolean;
+  audio_files: number;
+  current_tracks: number;
+}
+
+export interface RestoreOutcome {
+  ui_settings: string | null;
+  safety_path: string;
+  relinked: number;
+}
+
+export interface BackupProgress {
+  phase: 'export' | 'restore';
+  done: number;
+  total: number;
+}
+
+export function getBackupStatus(): Promise<BackupStatus> {
+  return invoke<BackupStatus>('get_backup_status');
+}
+
+export function exportBackup(path: string, includeAudio: boolean, uiSettings: string): Promise<LastBackup> {
+  return invoke<LastBackup>('export_backup', { path, includeAudio, uiSettings });
+}
+
+export function readBackup(path: string): Promise<BackupPreview> {
+  return invoke<BackupPreview>('read_backup', { path });
+}
+
+export function restoreBackup(path: string, audioFolder: string | null): Promise<RestoreOutcome> {
+  return invoke<RestoreOutcome>('restore_backup', { path, audioFolder });
+}
+
+export interface RecoveryOutcome {
+  library_path: string;
+  kept_path: string | null;
+  ui_settings: string | null;
+}
+
+export function recoverRetryLibrary(): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_retry_library');
+}
+
+export function recoverOpenLibrary(folderPath: string): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_open_library', { folderPath });
+}
+
+export function recoverNewLibrary(): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_new_library');
+}
+
+export function recoverRestoreBackup(path: string, audioFolder: string | null): Promise<RecoveryOutcome> {
+  return invoke<RecoveryOutcome>('recover_restore_backup', { path, audioFolder });
+}
+
+export function listenToBackupProgress(callback: (progress: BackupProgress) => void) {
+  return subscribe('backup-progress', callback);
+}
+
 export async function changeLibraryPath(folderPath: string): Promise<string> {
   try {
     return await invoke<string>('change_library_path', { folderPath });
@@ -316,11 +429,41 @@ export async function updateTrackFields(trackId: number, edits: TrackFieldEdits)
   }
 }
 
+type LoadedStateWire = ArrayBuffer | { tracks: TrackTable | TrackInfo[]; playlists: PlaylistInput[] };
+
+let earlyLoadState: Promise<LoadedStateWire> | null = null;
+
+/**
+ * Starts `load_state` before the UI mounts, so the backend reads the library while the bundle builds the first frame.
+ * `index.html` has already sent it when the page began (before the bundle was fetched and evaluated); this takes that
+ * call over instead of sending a second one.
+ */
+export function startLoadStateEarly() {
+  if (!getIsTauri() || earlyLoadState) return;
+  const w = window as unknown as { __ffLoadStateStarted?: Promise<LoadedStateWire> };
+  const sentByPage = w.__ffLoadStateStarted;
+  delete w.__ffLoadStateStarted;
+  earlyLoadState = sentByPage
+    ? sentByPage.catch((err) => {
+        throw toCommandError(err);
+      })
+    : invoke<LoadedStateWire>('load_state');
+  earlyLoadState.catch(() => {});
+}
+
 export async function loadState(): Promise<LoadedState> {
+  const early = earlyLoadState;
+  earlyLoadState = null;
   try {
-    const res = await invoke<LoadedState>('load_state');
+    const res = await (early ?? invoke<LoadedStateWire>('load_state'));
     lastTauriError = 'invoke(load_state) OK';
-    return res;
+    performance.mark('ff:state-answer');
+    const state: LoadedState =
+      res instanceof ArrayBuffer
+        ? decodeStateBytes(res)
+        : { tracks: isTrackTable(res.tracks) ? decodeTrackTable(res.tracks) : res.tracks, playlists: res.playlists };
+    performance.mark('ff:state-decoded');
+    return state;
   } catch (err) {
     lastTauriError = `load_state fail: ${String(err)}`;
     if (useBrowserMocks()) {
@@ -331,66 +474,152 @@ export async function loadState(): Promise<LoadedState> {
   }
 }
 
+export interface RowPreviewInfo {
+  id: number;
+  waveform_bands?: string;
+  waveform_preview?: string;
+}
+
+export async function getRowPreviews(trackIds: number[]): Promise<RowPreviewInfo[]> {
+  try {
+    return await invoke<RowPreviewInfo[]>('get_row_previews', { trackIds });
+  } catch (err) {
+    if (useBrowserMocks()) return [];
+    throw err;
+  }
+}
+
+export interface TrackLabelInfo {
+  id: number;
+  rating: number | null;
+  color: string | null;
+}
+
+export async function refreshTrackLabels(): Promise<TrackLabelInfo[]> {
+  if (!getIsTauri()) return [];
+  return (await invoke<TrackLabelInfo[] | undefined>('refresh_track_labels')) ?? [];
+}
+
 export async function saveState(playlists: PlaylistInput[]): Promise<void> {
   try {
     return await invoke<void>('save_state', { playlists });
   } catch (err) {
     lastTauriError = `save_state fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     mockPlaylists = playlists;
   }
 }
 
-export async function scanDirectory(path: string): Promise<TrackInfo[]> {
+export type DuplicateReason = 'same_file' | 'same_tags' | 'same_path';
+
+export interface DuplicateRow {
+  new_path: string;
+  file_name: string;
+  existing_id: number;
+  title: string;
+  artist: string;
+  duration_secs: number;
+  reason: DuplicateReason;
+}
+
+export interface SkippedFiles {
+  unsupported: number;
+  unsupported_exts: string[];
+  unreadable: number;
+}
+
+export interface ImportPlan {
+  token: number;
+  new_count: number;
+  already_in_library: number;
+  duplicates: DuplicateRow[];
+  skipped: SkippedFiles;
+}
+
+export interface ImportProgress {
+  done: number;
+  total: number;
+}
+
+export function listenToImportProgress(callback: (progress: ImportProgress) => void) {
+  return subscribe('import-progress', callback);
+}
+
+/** Ids of imported tracks whose covers were stored after their rows came back from `commit_import`. */
+export function listenToImportCovers(callback: (ids: number[]) => void) {
+  return subscribe('import-covers', callback);
+}
+
+export interface ImportCommit {
+  added: TrackInfo[];
+  skipped_ids: number[];
+}
+
+let mockPendingImport: TrackInfo[] = [];
+
+function mockScannedTrack(path: string, i: number): TrackInfo {
+  return {
+    id: Date.now() + i,
+    source_path: path,
+    title: pathBaseName(path) || 'Dropped Track',
+    artist: 'Dropped Artist',
+    album: 'Dropped Album',
+    genre: 'House',
+    tempo: 12000,
+    key: '8A',
+    duration_secs: 300,
+    bitrate: 320,
+    file_size: 12000000,
+    has_artwork: false,
+    has_cues: false,
+  };
+}
+
+export interface DroppedPath {
+  path: string;
+  folder: boolean;
+  files: string[];
+}
+
+export async function surveyImport(paths: string[]): Promise<DroppedPath[]> {
   try {
-    return await invoke<TrackInfo[]>('scan_directory', { path });
+    return await invoke<DroppedPath[]>('survey_import', { paths });
   } catch (err) {
-    lastTauriError = `scan_directory fail: ${String(err)}`;
+    lastTauriError = `survey_import fail: ${String(err)}`;
+    if (useBrowserMocks()) return paths.map((path) => ({ path, folder: false, files: [path] }));
+    throw err;
+  }
+}
+
+export async function planImport(paths: string[]): Promise<ImportPlan> {
+  try {
+    return await invoke<ImportPlan>('plan_import', { paths });
+  } catch (err) {
+    lastTauriError = `plan_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
-      const newTrack: TrackInfo = {
-        id: Date.now(),
-        source_path: path + '/NewTrack.mp3',
-        title: 'Scanned Track ' + (mockTracks.length + 1),
-        artist: 'Unknown Artist',
-        album: 'Scanned Album',
-        genre: 'Techno',
-        tempo: 12500,
-        key: '1A',
-        duration_secs: 360,
-        bitrate: 320,
-        file_size: 14400000,
-        has_artwork: false,
-        has_cues: false,
+      mockPendingImport = paths.map(mockScannedTrack);
+      return {
+        token: 0,
+        new_count: mockPendingImport.length,
+        already_in_library: 0,
+        duplicates: [],
+        skipped: { unsupported: 0, unsupported_exts: [], unreadable: 0 },
       };
-      mockTracks.push(newTrack);
-      return [newTrack];
     }
     throw err;
   }
 }
 
-export async function scanFiles(paths: string[]): Promise<TrackInfo[]> {
+export async function commitImport(token: number, skipDuplicates: boolean): Promise<ImportCommit> {
   try {
-    return await invoke<TrackInfo[]>('scan_files', { paths });
+    return await invoke<ImportCommit>('commit_import', { token, skipDuplicates });
   } catch (err) {
-    lastTauriError = `scan_files fail: ${String(err)}`;
+    lastTauriError = `commit_import fail: ${String(err)}`;
     if (useBrowserMocks()) {
-      const newTracks = paths.map((p, i) => ({
-        id: Date.now() + i,
-        source_path: p,
-        title: p.split('/').pop() || 'Dropped Track',
-        artist: 'Dropped Artist',
-        album: 'Dropped Album',
-        genre: 'House',
-        tempo: 12000,
-        key: '8A',
-        duration_secs: 300,
-        bitrate: 320,
-        file_size: 12000000,
-        has_artwork: false,
-        has_cues: false,
-      }));
-      mockTracks.push(...newTracks);
-      return newTracks;
+      const added = mockPendingImport;
+      mockPendingImport = [];
+      mockTracks.push(...added);
+      return { added, skipped_ids: [] };
     }
     throw err;
   }
@@ -405,6 +634,7 @@ export async function removeTracks(ids: number[]): Promise<void> {
     return await invoke<void>('remove_tracks', { ids });
   } catch (err) {
     lastTauriError = `remove_tracks fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     mockTracks = mockTracks.filter(t => !ids.includes(t.id));
     mockPlaylists.forEach(pl => {
       pl.track_ids = pl.track_ids.filter(tid => !ids.includes(tid));
@@ -432,6 +662,14 @@ export async function enqueueAnalysis(ids: number[], front = false): Promise<num
   } catch (err) {
     lastTauriError = `enqueue_analysis fail: ${String(err)}`;
     return 0;
+  }
+}
+
+export async function focusAnalysis(ids: number[]): Promise<void> {
+  try {
+    await invoke<void>('focus_analysis', { ids });
+  } catch (err) {
+    lastTauriError = `focus_analysis fail: ${String(err)}`;
   }
 }
 
@@ -495,6 +733,7 @@ export async function analyzeTrackIds(ids: number[]): Promise<TrackInfo[]> {
     return await invoke<TrackInfo[]>('analyze_track_ids', { ids });
   } catch (err) {
     lastTauriError = `analyze_track_ids fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return runMockAnalysis(ids);
   }
 }
@@ -543,28 +782,32 @@ export async function setAutoAnalyzeNew(enabled: boolean): Promise<void> {
   }
 }
 
-/** Stored analysis backend: 'rust', 'python', or null for automatic. */
-export async function getAnalysisBackend(): Promise<string | null> {
+/** Whether an import starts analysis without asking (default off). */
+export async function getAnalyzeAfterImport(): Promise<boolean> {
   try {
-    return await invoke<string | null>('get_analysis_backend');
+    return await invoke<boolean>('get_analyze_after_import');
   } catch (err) {
     if (!useBrowserMocks()) throw err;
-    return readMockSetting<string | null>('analysis_backend', null);
+    return readMockSetting('auto_analyze_after_import', false);
   }
 }
 
-export async function setAnalysisBackend(backend: string | null): Promise<void> {
+export async function setAnalyzeAfterImport(enabled: boolean): Promise<void> {
   try {
-    await invoke('set_analysis_backend', { backend });
+    await invoke('set_analyze_after_import', { enabled });
   } catch (err) {
     if (!useBrowserMocks()) throw err;
-    writeMockSetting('analysis_backend', backend);
+    writeMockSetting('auto_analyze_after_import', enabled);
   }
 }
 
 /** Stop the active analysis run: queued tracks are dropped, in-flight ones aborted. */
 export async function cancelAnalysis(): Promise<void> {
   await invokeOrMock('cancel_analysis', {});
+}
+
+export function signalAnalysisUiBusy(): void {
+  invoke('analysis_ui_busy').catch(() => {});
 }
 
 /** Queues stages left missing by an earlier session (and new tracks, per setting); returns how many. */
@@ -582,6 +825,7 @@ export async function analyzeTracks(): Promise<TrackInfo[]> {
     return await invoke<TrackInfo[]>('analyze_tracks');
   } catch (err) {
     lastTauriError = `analyze_tracks fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
     return new Promise((resolve) => {
       setTimeout(() => {
         mockTracks.forEach(t => {
@@ -623,10 +867,16 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
   }
 }
 
+export interface KeptAsIs {
+  playlist_id: number;
+  as_of: string;
+}
+
 export interface StickContents {
   stick_id: string | null;
   track_ids: number[];
   playlist_ids: number[];
+  kept_as_is?: KeptAsIs[];
 }
 
 export interface VolumeCapacity {
@@ -683,6 +933,7 @@ export interface StickReport {
   status: 'done' | 'failed';
   report: SyncReport | null;
   error: string | null;
+  error_kind?: ErrorKind | null;
   skipped_unanalyzed: number;
   elapsed_ms: number;
 }
@@ -701,15 +952,16 @@ const mockWritten = new Map<string, Set<number>>([['/Volumes/SanDisk 64GB', new 
 const mockSyncListeners = new Set<(progress: StickProgress) => void>();
 
 function mockStick(path: string): StickContents {
-  return mockSticks.get(path) ?? { stick_id: null, track_ids: [], playlist_ids: [] };
+  return mockSticks.get(path) ?? { stick_id: null, track_ids: [], playlist_ids: [], kept_as_is: [] };
 }
 
 function mockEditStick(path: string, edit: (stick: StickContents) => number): [number, StickContents] {
   const current = mockStick(path);
-  const stick = {
-    stick_id: current.stick_id ?? `mock-${path.split('/').pop()}`,
+  const stick: StickContents = {
+    stick_id: current.stick_id ?? `mock-${pathBaseName(path)}`,
     track_ids: [...current.track_ids],
     playlist_ids: [...current.playlist_ids],
+    kept_as_is: [...(current.kept_as_is ?? [])],
   };
   const changed = edit(stick);
   mockSticks.set(path, stick);
@@ -758,7 +1010,7 @@ function mockPlan(target: SyncTarget): UsbSyncPlan {
   const needed = bytesToAdd + MOCK_BASE_MARGIN + MOCK_TRACK_MARGIN * analyzed.length;
   const free = mockCapacities[target.volume]?.free_bytes ?? null;
   return {
-    volume: target.volume.split('/').pop() ?? target.volume,
+    volume: pathBaseName(target.volume) || target.volume,
     stick_id: mockStick(target.volume).stick_id,
     playlist_count: target.selection.kind === 'playlists' ? target.selection.playlist_ids.length : mockPlaylists.length,
     add,
@@ -863,6 +1115,16 @@ export function stickRemovePlaylists(path: string, playlistIds: number[]) {
   return editStick('stick_remove_playlists', { playlistIds }, path, (s) => dropIds(s.playlist_ids, playlistIds));
 }
 
+export function stickSetKeepUpdated(path: string, playlistId: number, keepUpdated: boolean) {
+  return editStick('stick_set_keep_updated', { playlistId, keepUpdated }, path, (s) => {
+    const kept = (s.kept_as_is ?? []).filter((k) => k.playlist_id !== playlistId);
+    if (!keepUpdated) kept.push({ playlist_id: playlistId, as_of: new Date().toISOString() });
+    const changed = kept.length !== (s.kept_as_is ?? []).length ? 1 : 0;
+    s.kept_as_is = kept;
+    return changed;
+  });
+}
+
 export async function getVolumeCapacity(path: string): Promise<VolumeCapacity | null> {
   try {
     return await invoke<VolumeCapacity>('get_volume_capacity', { path });
@@ -926,6 +1188,9 @@ export async function wipeUsb(path: string): Promise<void> {
 const ANALYSIS_CACHE_LIMIT = 48;
 const analysisCache = new Map<number, any>();
 const analysisInflight = new Map<number, Promise<any>>();
+let analysisCacheEpoch = 0;
+const trackAnalysisEpochs = new Map<number, number>();
+const analysisEpochOf = (trackId: number) => analysisCacheEpoch + (trackAnalysisEpochs.get(trackId) ?? 0);
 
 function cacheAnalysis(trackId: number, data: any) {
   analysisCache.delete(trackId);
@@ -947,29 +1212,33 @@ export function peekAnalysisData(trackId: number): any | undefined {
   return clean;
 }
 
+/** Drops cached and in-flight reads; a read already under way when this is called is not cached when it lands. */
 export function invalidateAnalysisCache(trackId?: number) {
   if (trackId == null) {
+    analysisCacheEpoch++;
     analysisCache.clear();
     analysisInflight.clear();
   } else {
+    trackAnalysisEpochs.set(trackId, (trackAnalysisEpochs.get(trackId) ?? 0) + 1);
     analysisCache.delete(trackId);
     analysisInflight.delete(trackId);
   }
 }
 
-const mockBeatGrids = new Map<number, { beats: BeatMarker[]; offsetMs: number }>();
+const mockBeatGrids = new Map<number, { beats: BeatMarker[]; offsetMs: number; anchorMs: number | null }>();
 
 /**
  * Store an edited beat grid (exact beat times); the next analysis read of the track carries it. The library keeps whole
  * ms beats and the grid's sub-millisecond offset (`gridForStorage`), so the grid comes back exactly where it was set.
  */
-export async function setBeatGrid(trackId: number, exactBeats: BeatMarker[]): Promise<void> {
-  const { beats, offsetMs } = gridForStorage(exactBeats);
+export async function setBeatGrid(trackId: number, grid: EditedGrid): Promise<void> {
+  const { beats, offsetMs } = gridForStorage(grid.beats);
+  const anchorMs = grid.anchorMs;
   try {
-    await invoke('set_beat_grid', { trackId, beats, offsetMs });
+    await invoke('set_beat_grid', { trackId, beats, offsetMs, anchorMs });
   } catch (err) {
     if (!useBrowserMocks()) throw err;
-    mockBeatGrids.set(trackId, { beats, offsetMs });
+    mockBeatGrids.set(trackId, { beats, offsetMs, anchorMs });
   }
   invalidateAnalysisCache(trackId);
 }
@@ -980,12 +1249,6 @@ async function invokeOrMock(command: string, args: Record<string, unknown>): Pro
   } catch (err) {
     if (!useBrowserMocks()) throw err;
   }
-}
-
-/** Set a track's BPM by hand; re-analysis keeps it and the beat grid is left as it is. */
-export async function setTrackBpm(trackId: number, bpm: number): Promise<void> {
-  await invokeOrMock('set_track_bpm', { trackId, bpm });
-  invalidateAnalysisCache(trackId);
 }
 
 /** Set a track's Camelot key by hand; re-analysis keeps it. */
@@ -1005,7 +1268,13 @@ export async function releaseUserEdits(trackId: number): Promise<void> {
   invalidateAnalysisCache(trackId);
 }
 
-/** Fit the beat grid to a BPM (explicit; setting the BPM never moves the grid). */
+/** Let re-analysis replace only the hand-set BPM and beat grid, or only the hand-set key. */
+export async function releaseUserField(trackId: number, field: 'bpm' | 'key'): Promise<void> {
+  await invokeOrMock('release_user_field', { trackId, field });
+  invalidateAnalysisCache(trackId);
+}
+
+/** Set a track's own BPM by hand: the beat grid is re-spaced from its first downbeat, re-analysis keeps both. */
 export async function rescaleBeatGrid(trackId: number, bpm: number): Promise<void> {
   await invokeOrMock('rescale_beat_grid', { trackId, bpm });
   invalidateAnalysisCache(trackId);
@@ -1052,19 +1321,28 @@ export async function getWaveformDetail(trackId: number): Promise<ArrayBuffer | 
   }
 }
 
+/** Measure a track's high-resolution series into the backend cache, below the UI's priority or, `urgent`, at the UI's (a row about to open); rejects where there is no backend or audio. */
+export function prefetchWaveformDetail(trackId: number, urgent = false): Promise<void> {
+  return invoke<void>('prefetch_waveform_detail', { trackId, urgent });
+}
+
 /** `columns` columns of the zoom view from `startMs` to `endMs` (`FFWW` bytes), decoded from the audio now. Rejects when a newer request superseded it. */
 export function getWaveformWindow(trackId: number, startMs: number, endMs: number, columns: number): Promise<ArrayBuffer> {
   return invoke<ArrayBuffer>('get_waveform_window', { trackId, startS: startMs / 1000, endS: endMs / 1000, columns });
 }
 
 async function fetchAnalysisData(trackId: number): Promise<any> {
+  const epoch = analysisEpochOf(trackId);
+  const keep = (clean: any) => {
+    if (analysisEpochOf(trackId) === epoch) cacheAnalysis(trackId, clean);
+  };
   try {
     const data = await invoke<any>('get_analysis_data', { trackId });
-    const clean = sanitizeAnalysisPayload(data);
+    const clean = sanitizeAnalysisPayload(data instanceof ArrayBuffer ? decodeAnalysisBytes(data) : data);
     if (!clean) {
       throw new Error('Invalid analysis payload from backend');
     }
-    cacheAnalysis(trackId, clean);
+    keep(clean);
     return clean;
   } catch (err) {
     lastTauriError = `get_analysis_data fail: ${String(err)}`;
@@ -1080,10 +1358,10 @@ async function fetchAnalysisData(trackId: number): Promise<any> {
       const clean = sanitizeAnalysisPayload({
         ...data,
         analysis_stages: mockStages.get(trackId) ?? MOCK_STAGES_ALL,
-        ...(edited ? { beats: edited.beats, grid_offset_ms: edited.offsetMs } : {}),
+        ...(edited ? { beats: edited.beats, grid_offset_ms: edited.offsetMs, grid_anchor_ms: edited.anchorMs } : {}),
         ...(editedCues ? { cue_points: editedCues } : {}),
       });
-      cacheAnalysis(trackId, clean);
+      keep(clean);
       return clean;
     }
     throw err;
@@ -1127,6 +1405,17 @@ export async function getTrackArtwork(trackId: number, maxPx = ARTWORK_DETAIL_PX
   } catch (err) {
     lastTauriError = `get_track_artwork fail: ${String(err)}`;
     return null;
+  }
+}
+
+/** Thumbnails of many tracks in one call, in the order asked; `null` for a track without a cover. */
+export async function getTrackArtworks(trackIds: number[], maxPx = ARTWORK_ROW_PX): Promise<(ArrayBuffer | null)[]> {
+  if (useBrowserMocks() && mockArtworkDelayMs > 0) return Promise.all(trackIds.map((id) => mockArtworkBytes(id, maxPx)));
+  try {
+    return decodeArtworkBatch(await invoke<ArrayBuffer>('get_track_artworks', { trackIds, maxPx }));
+  } catch (err) {
+    lastTauriError = `get_track_artworks fail: ${String(err)}`;
+    return trackIds.map(() => null);
   }
 }
 
@@ -1335,4 +1624,81 @@ export function listenToRekordboxImportProgress(
       lastTauriError = `listen(rekordbox-import-progress) fail: ${String(err)}`;
     });
   return () => unsubscribe();
+}
+
+export interface LibraryHealth {
+  running: boolean;
+  checked_at_ms: number | null;
+  duration_ms: number;
+  total: number;
+  missing: number[];
+  error: number[];
+  relocated: number[];
+}
+
+export interface Relinked {
+  track_id: number;
+  source_path: string;
+}
+
+export interface RelocateReport {
+  matched: Relinked[];
+  ambiguous: number[];
+  not_found: number[];
+}
+
+function mockMissingIds(): number[] {
+  if (typeof location === 'undefined') return [];
+  const raw = new URLSearchParams(location.search).get('missing') ?? '';
+  return raw.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+}
+
+let mockHealth: LibraryHealth = {
+  running: false,
+  checked_at_ms: null,
+  duration_ms: 0,
+  total: 0,
+  missing: mockMissingIds(),
+  error: [],
+  relocated: [],
+};
+
+function mockChecked(): LibraryHealth {
+  mockHealth = { ...mockHealth, checked_at_ms: Date.now(), duration_ms: 12, total: mockTracks.length };
+  return mockHealth;
+}
+
+export async function checkLibraryFiles(): Promise<LibraryHealth> {
+  if (useBrowserMocks()) return mockChecked();
+  return invoke<LibraryHealth>('check_library_files');
+}
+
+export async function getLibraryHealth(): Promise<LibraryHealth> {
+  if (useBrowserMocks()) return mockHealth.checked_at_ms ? mockHealth : mockChecked();
+  return invoke<LibraryHealth>('get_library_health');
+}
+
+export async function relocateMissingInFolder(folder: string): Promise<{ report: RelocateReport; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    const matched = mockHealth.missing.map((id) => ({ track_id: id, source_path: `${folder}/track-${id}.mp3` }));
+    mockHealth = { ...mockHealth, missing: [], relocated: [...mockHealth.relocated, ...matched.map((m) => m.track_id)] };
+    return { report: { matched, ambiguous: [], not_found: [] }, health: mockHealth };
+  }
+  return invoke('relocate_missing_in_folder', { folder });
+}
+
+export async function locateTrackFile(trackId: number, path: string): Promise<{ relinked: Relinked; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    mockHealth = {
+      ...mockHealth,
+      missing: mockHealth.missing.filter((id) => id !== trackId),
+      relocated: [...mockHealth.relocated, trackId],
+    };
+    return { relinked: { track_id: trackId, source_path: path }, health: mockHealth };
+  }
+  return invoke('locate_track_file', { trackId, path });
+}
+
+export function listenToLibraryHealth(callback: (health: LibraryHealth) => void) {
+  return subscribe('library-health', callback);
 }

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MIN_TRAILING_ROWS,
   OVERSCAN_ROWS,
   ROW_HEIGHT,
   dropLineTop,
   indexForSlot,
+  leadRows,
   rowTop,
   rowWindow,
+  rowsOnScreen,
   scrollTopToReveal,
   spacerHeight,
 } from './rowWindow.ts';
@@ -58,6 +61,45 @@ describe('rowWindow', () => {
     const top = rowWindow({ ...view, scrollTop: 0, rowCount: 30000 });
     rowWindow({ ...view, scrollTop: 28 + 30000 * 28 - 700, rowCount: 30000 });
     expect(rowWindow({ ...view, scrollTop: 0, rowCount: 30000 })).toEqual(top);
+  });
+});
+
+describe('rowWindow while scrolling', () => {
+  const at = { ...view, scrollTop: 28 * 1000 + 28, rowCount: 30000 };
+  const rest = rowWindow(at);
+
+  it('is the resting window at zero speed', () => {
+    expect(rowWindow({ ...at, velocity: 0 })).toEqual(rest);
+    expect(leadRows(0)).toBe(OVERSCAN_ROWS);
+  });
+  it('leans the overscan below when scrolling down and keeps the pool size', () => {
+    const w = rowWindow({ ...at, velocity: 3 });
+    const lead = leadRows(3);
+    expect(lead).toBeGreaterThan(OVERSCAN_ROWS);
+    expect(w.endRow).toBe(rest.endRow + lead - OVERSCAN_ROWS);
+    expect(w.firstRow).toBe(rest.firstRow + lead - OVERSCAN_ROWS);
+    expect(w.poolSize).toBe(rest.poolSize);
+    expect(w.endRow - w.firstRow).toBeLessThanOrEqual(w.poolSize);
+  });
+  it('leans the overscan above when scrolling up', () => {
+    const w = rowWindow({ ...at, velocity: -3 });
+    const lead = leadRows(3);
+    expect(w.firstRow).toBe(rest.firstRow - (lead - OVERSCAN_ROWS));
+    expect(w.endRow).toBe(rest.endRow - (lead - OVERSCAN_ROWS));
+  });
+  it('grows the lead with speed in steps and keeps trailing rows', () => {
+    const leads = [0.2, 1, 3, 6, 12, 50].map((v) => leadRows(v));
+    expect(leads).toEqual([...leads].sort((a, b) => a - b));
+    expect(leads[leads.length - 1]).toBe(2 * OVERSCAN_ROWS - MIN_TRAILING_ROWS);
+    for (const lead of leads) expect((lead - OVERSCAN_ROWS) % 4 === 0 || lead === 2 * OVERSCAN_ROWS - MIN_TRAILING_ROWS).toBe(true);
+  });
+  it('stays inside the list at both ends', () => {
+    expect(rowWindow({ ...view, scrollTop: 0, rowCount: 30000, velocity: -20 }).firstRow).toBe(0);
+    expect(rowWindow({ ...view, scrollTop: 28 * 30000, rowCount: 30000, velocity: 20 }).endRow).toBe(30000);
+  });
+  it('has no overscan before the off-screen rows are allowed', () => {
+    const w = rowWindow({ ...at, overscan: 0, velocity: 10 });
+    expect(w).toEqual(rowWindow({ ...at, overscan: 0 }));
   });
 });
 
@@ -119,5 +161,16 @@ describe('scrollTopToReveal', () => {
   it('returns 0 for an empty list and for a list shorter than the viewport', () => {
     expect(scrollTopToReveal(0, { ...view, scrollTop: 300, rowCount: 0 })).toBe(0);
     expect(scrollTopToReveal(3, { ...view, scrollTop: 300, rowCount: 5 })).toBe(0);
+  });
+});
+
+describe('rowsOnScreen', () => {
+  it('starts at the row under the sticky header and ends at the last row partly in view', () => {
+    expect(rowsOnScreen({ ...view, scrollTop: 0, rowCount: 1000 })).toEqual({ first: 0, end: Math.ceil(672 / ROW_HEIGHT) });
+    expect(rowsOnScreen({ ...view, scrollTop: ROW_HEIGHT * 100 + 5, rowCount: 1000 })).toEqual({ first: 100, end: 125 });
+  });
+  it('stays inside the list', () => {
+    expect(rowsOnScreen({ ...view, scrollTop: 0, rowCount: 5 })).toEqual({ first: 0, end: 5 });
+    expect(rowsOnScreen({ ...view, scrollTop: 0, rowCount: 0 })).toEqual({ first: 0, end: 0 });
   });
 });

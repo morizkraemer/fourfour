@@ -31,22 +31,49 @@ export function minWidthForColumn(key, fallback = DEFAULT_MIN) {
 }
 
 /**
+ * @param {{ key?: string, flex?: boolean, width?: number, minWidth?: number }} col
+ * @param {{ width?: number, minWidth?: number }} [override]
+ * @returns {number} the fixed width, or the minimum width of a flex column
+ */
+export function columnWidthPx(col, override = {}) {
+  if (col.flex) {
+    const floor = minWidthForColumn(col.key);
+    return Math.max(floor, override.minWidth ?? override.width ?? col.minWidth ?? floor);
+  }
+  const w = override.width ?? col.width ?? minWidthForColumn(col.key);
+  return Math.max(w, minWidthForColumn(col.key, DEFAULT_MIN));
+}
+
+/**
  * @param {{ key?: string, flex?: boolean, width?: number, minWidth?: number, align?: string }} col
  * @param {{ width?: number, minWidth?: number }} [override]
  * @returns {string}
  */
 export function columnCellStyle(col, override = {}) {
   const align = col.align === 'right' ? 'justify-content:flex-end;' : '';
-  if (col.flex) {
-    const floor = minWidthForColumn(col.key);
-    const min = override.minWidth ?? override.width ?? col.minWidth ?? floor;
-    const clamped = Math.max(floor, min);
-    return `flex:1 1 0;min-width:${clamped}px;max-width:none;${align}`;
-  }
-  const w = override.width ?? col.width ?? minWidthForColumn(col.key);
-  const min = minWidthForColumn(col.key, DEFAULT_MIN);
-  const width = Math.max(w, min);
+  const width = columnWidthPx(col, override);
+  if (col.flex) return `flex:1 1 0;min-width:${width}px;max-width:none;${align}`;
   return `flex:0 0 ${width}px;width:${width}px;max-width:${width}px;min-width:${width}px;${align}`;
+}
+
+/**
+ * Track-row cell geometry for a whole table: one `--ff-col-<key>` per column, set on an ancestor of the rows.
+ * `track-row.css` sizes each `.ff-trow__cell--<key>` from it, so a resize touches one element, not every cell.
+ * @param {Array<{ key?: string, flex?: boolean, width?: number, minWidth?: number }>} columns
+ * @returns {string}
+ */
+export function columnVars(columns) {
+  let vars = '';
+  for (const col of columns) if (col.key) vars += `--ff-col-${col.key}:${columnWidthPx(col)}px;`;
+  return vars;
+}
+
+/**
+ * @param {{ flex?: boolean, align?: string }} col
+ * @returns {string} classes a track-row cell needs besides its key class
+ */
+export function columnCellClass(col) {
+  return (col.flex ? ' ff-trow__cell--flex' : '') + (col.align === 'right' ? ' ff-trow__cell--end' : '');
 }
 
 /**

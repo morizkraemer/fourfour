@@ -4,6 +4,7 @@
   //   columns: [{ label, width?, flex?, align?, sort?:'asc'|'desc', key? }]
   import './column-header.css';
   import Icon from './Icon.svelte';
+  import { nativeListener } from './nativeListener.js';
   import { columnCellStyle, minWidthForColumn } from '../utils/column-layout.js';
 
   let {
@@ -26,6 +27,28 @@
   let resizeStartWidth = 0;
   let resizePreview = $state(null);
   let dropLineLeft = $state(null);
+  let stopKey = $state(null);
+
+  let tabStopKey = $derived(columns.some((c) => c.key && c.key === stopKey) ? stopKey : (columns.find((c) => c.key)?.key ?? null));
+
+  function ariaSortOf(col) {
+    return col.sort === 'asc' ? 'ascending' : col.sort === 'desc' ? 'descending' : undefined;
+  }
+
+  function onCellKeydown(e, col) {
+    if (!col.key || e.target !== e.currentTarget || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      onColumnClick?.(col, e);
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      const cells = [...headerEl.querySelectorAll('.ff-colh__cell[tabindex]')];
+      const next = cells[cells.indexOf(e.currentTarget) + (e.key === 'ArrowRight' ? 1 : -1)];
+      if (!next) return;
+      e.preventDefault();
+      next.focus();
+    }
+  }
 
   function cellStyle(col) {
     if (resizePreview?.key === col.key) {
@@ -193,11 +216,16 @@
   {#each columns as col}
     {@const dragKey = col.key}
     {@const isDragging = columnDragKey === dragKey}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="ff-colh__cell{col.sort ? ' ff-colh__cell--active' : ''}{isDragging ? ' ff-colh__cell--dragging' : ''}"
       style={cellStyle(col)}
       data-col-key={dragKey ?? ''}
+      role={col.key ? 'button' : undefined}
+      tabindex={col.key ? (col.key === tabStopKey ? 0 : -1) : undefined}
+      aria-label={col.key && col.label ? `Sort by ${col.label}${ariaSortOf(col) ? `, ${ariaSortOf(col)}` : ''}` : undefined}
+      onfocus={() => col.key && (stopKey = col.key)}
+      onkeydown={(e) => onCellKeydown(e, col)}
       onpointerdown={(e) => onLabelPointerDown(e, col)}
       oncontextmenu={(e) => {
         e.preventDefault();
@@ -221,8 +249,8 @@
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize {col.label || col.key} column"
-          onpointerdown={(e) => startResize(e, col)}
-          ondblclick={(e) => autoFitColumn(e, col)}
+          {@attach nativeListener('pointerdown', (e) => startResize(e, col))}
+          {@attach nativeListener('dblclick', (e) => autoFitColumn(e, col))}
         ></div>
       {/if}
     </div>

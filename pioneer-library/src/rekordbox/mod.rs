@@ -29,6 +29,7 @@ pub use anlz::{LoadedAnalysis, load_all as load_analyses};
 pub use model::*;
 pub use remap::{CaseInsensitiveResolver, PathRemap, RemapPlan, detect_common_root};
 pub use sidecar::ImportedMeta;
+pub(crate) use sidecar::SIDECAR_FILE;
 
 pub(crate) use anlz::to_cue_points;
 
@@ -364,6 +365,8 @@ impl LocalLibrary {
         let mut index = LibraryIndex::build(self)?;
         let mut report = RekordboxImportReport::default();
         let mut library_ids: HashMap<&str, i64> = HashMap::new();
+        let labels = self.track_labels_reader();
+        labels.invalidate();
 
         let tx = self.conn.unchecked_transaction()?;
         let total = source.tracks.len() as u32;
@@ -408,16 +411,18 @@ impl LocalLibrary {
             library_ids.insert(&src.source_id, id);
 
             if let Some(art) = src.artwork.as_ref()
-                && queries::select_artwork(&self.conn, id)?.is_none()
+                && queries::select_artwork_hash(&self.conn, id)?.is_none()
                 && let Ok(bytes) = std::fs::read(art)
             {
-                queries::upsert_artwork(&self.conn, id, &bytes)?;
+                self.store_cover(&self.conn, id, &bytes)?;
             }
 
             self.import_analysis_and_meta(id, source.kind, src, analyses.get(&src.source_id), &mut report)?;
         }
 
         tx.commit()?;
+        self.forget_duplicates();
+        labels.invalidate();
         self.import_playlists(source, &library_ids, progress, &mut report)?;
         Ok(report)
     }

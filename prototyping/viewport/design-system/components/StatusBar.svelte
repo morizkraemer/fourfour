@@ -24,7 +24,7 @@
     {#if showSpinner}
       <Spinner size="small" class="ff-status-bar__spinner" />
     {/if}
-    <span class="ff-status-bar__message">{message}</span>
+    <span class="ff-status-bar__message" role="status">{message}</span>
     {#if context}
       <span class="ff-status-bar__separator">·</span>
       <span class="ff-status-bar__context">{context}</span>

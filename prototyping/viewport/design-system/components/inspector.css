@@ -8,7 +8,50 @@
   gap: 10px;
   box-sizing: border-box;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ff-border-hi) transparent;
   user-select: none;
+}
+
+.ff-inspector > * {
+  flex-shrink: 0;
+}
+
+.ff-inspector--closable {
+  position: relative;
+}
+
+.ff-inspector--closable .ff-inspector__id {
+  padding-right: 28px;
+}
+
+.ff-inspector__close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ff-radius-md);
+  background: none;
+  color: var(--ff-text-mid);
+  cursor: pointer;
+}
+
+.ff-inspector__close:hover {
+  color: var(--ff-text);
+  background: var(--ff-hover);
+}
+
+.ff-inspector__close:focus-visible {
+  outline: 1px solid var(--ff-border-hi);
+  outline-offset: -2px;
 }
 
 .ff-inspector__id {
@@ -131,6 +174,46 @@
   min-width: 0;
 }
 
+.ff-inspector__fig:has(.ff-inspector__fig-steps) {
+  position: relative;
+}
+
+.ff-inspector__fig-steps {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: inline-flex;
+  border: 1px solid var(--ff-border-hi);
+  border-radius: var(--ff-radius-sm);
+  overflow: hidden;
+}
+
+.ff-inspector__fig-step {
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ff-muted);
+  font-family: var(--ff-font);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ff-inspector__fig-step + .ff-inspector__fig-step {
+  border-left: 1px solid var(--ff-border);
+}
+
+.ff-inspector__fig-step:hover {
+  background: var(--ff-hover);
+  color: var(--ff-text);
+}
+
+.ff-inspector__fig-step:active {
+  background: var(--ff-select);
+}
+
 .ff-inspector__fig-static {
   white-space: nowrap;
 }
@@ -232,23 +315,78 @@
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
+.ff-inspector__marker--remove .ff-inspector__marker-flag {
+  filter: saturate(0.6);
+  font-size: 10px;
+}
+
+.ff-inspector__marker--plain.ff-inspector__marker--remove {
+  width: 12px;
+}
+
+.ff-inspector__marker--plain.ff-inspector__marker--remove::after {
+  left: 5px;
+}
+
+.ff-inspector__marker--plain.ff-inspector__marker--remove .ff-inspector__marker-flag {
+  width: 12px;
+  height: 11px;
+  border-radius: 2px;
+  clip-path: none;
+}
+
 .ff-inspector__marker-tip {
   position: absolute;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% + 3px);
   transform: translateX(-50%);
   z-index: 2;
-  padding: 3px 7px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 7px 0 3px;
   border: 1px solid var(--ff-border-hi);
-  border-left: 2px solid var(--cue);
   border-radius: var(--ff-radius-md);
   background: var(--ff-elev);
-  box-shadow: var(--ff-shadow-palette);
-  font-family: var(--ff-font-mono);
+  box-shadow: var(--ff-shadow-menu);
+  font-family: var(--ff-font);
   font-size: 10.5px;
-  line-height: 1.2;
+  line-height: 1;
   color: var(--ff-text);
   white-space: nowrap;
   pointer-events: none;
+}
+
+.ff-inspector__marker-tip-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 14px;
+  border-radius: var(--ff-radius-sm);
+  background: var(--cue);
+  color: #0a0a0a;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.ff-inspector__marker-tip-chip--memory {
+  min-width: 8px;
+  height: 8px;
+  margin: 0 3px;
+  border-radius: 50%;
+}
+
+.ff-inspector__marker-tip-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ff-inspector__marker-tip-time {
+  font-family: var(--ff-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ff-text-mid);
 }
 
 .ff-inspector__marker--linked::after {
@@ -370,8 +508,24 @@
   box-shadow: 0 0 0 2px var(--ff-surface), 0 0 0 3px var(--cue);
 }
 
-.ff-inspector__pad--remove {
-  opacity: 0.7;
+.ff-inspector__pad--remove > * {
+  opacity: 0.3;
+}
+
+.ff-inspector__pad--remove::after {
+  content: '×';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 3px;
+  font-family: var(--ff-font);
+  font-size: 32px;
+  font-weight: 300;
+  line-height: 1;
+  color: #0a0a0a;
+  pointer-events: none;
 }
 
 .ff-inspector__pad-time {

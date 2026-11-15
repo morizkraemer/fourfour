@@ -64,6 +64,6 @@ describe('commitTrackFields', () => {
 
     expect(row(0).title).toBe('Old');
     expect((player.track as Record<string, any>).title).toBe('Old');
-    expect(library.statusMessage).toContain('Title cannot be empty');
+    expect(library.statusMessage).toBe("Couldn't save the tags. The title can't be empty.");
   });
 });

@@ -7,7 +7,8 @@
   import LockMark from './LockMark.svelte';
   import CueEditor from './CueEditor.svelte';
   import ContextMenu from './ContextMenu.svelte';
-  import { bpmScrub, keyScrub } from '../utils/scrub.js';
+  import Icon from './Icon.svelte';
+  import { bpmScrub, keyScrub, tierOf } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import { middleTruncate } from '../utils/middle-truncate.js';
   import { nearestCue, CUE_HIT_SLACK } from '../utils/nearest-cue.js';
@@ -25,6 +26,7 @@
     bpmLocked = false,
     keyLocked = false,
     onBpmChange = undefined,
+    onBpmStep = undefined,
     onKeyChange = undefined,
     onReleaseLocks = undefined,
     bpmMenuItems = [],
@@ -53,6 +55,7 @@
     filePath = '',
     onRevealPath = undefined,
     onPathContextMenu = undefined,
+    onClose = undefined,
   } = $props();
 
   let tempoEditable = $derived(!!onBpmChange && !!onKeyChange);
@@ -149,7 +152,13 @@
 
   let waveHoverKey = $state(null);
   let waveHoverMarker = $derived(markers.find((m) => m.key === waveHoverKey) ?? null);
-  let waveTip = $derived(waveHoverMarker ? cues.find((c) => c.key === waveHoverMarker.key)?.label || 'Cue' : '');
+  let waveTip = $derived(waveHoverMarker ? (cues.find((c) => c.key === waveHoverMarker.key) ?? null) : null);
+
+  function pressMarker(marker) {
+    const chip = cues.find((c) => c.key === marker.key);
+    if (altHeld && chip && onCueDelete) onCueDelete(chip);
+    else onMarkerClick?.(marker);
+  }
 
   function onWavePointerMove(event) {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -166,7 +175,7 @@
   function onWaveClickCapture(event) {
     if (!waveHoverMarker || event.target.closest('.ff-inspector__marker')) return;
     event.stopPropagation();
-    onMarkerClick?.(waveHoverMarker);
+    pressMarker(waveHoverMarker);
   }
 
   function flagFlipped(marker) {
@@ -174,7 +183,12 @@
   }
 </script>
 
-<div class="ff-detail-pane ff-inspector">
+<div class="ff-detail-pane ff-inspector{onClose ? ' ff-inspector--closable' : ''}">
+  {#if onClose && mode !== 'empty'}
+    <button type="button" class="ff-inspector__close" aria-label="Close inspector" title="Close inspector" onclick={() => onClose()}>
+      <Icon name="x" size={14} />
+    </button>
+  {/if}
   {#if mode === 'empty'}
     <div class="ff-detail-pane__empty-state">
       <svg
@@ -228,6 +242,12 @@
         <div class="ff-inspector__fig-val">
           {#if tempoEditable}
             <ScrubValue model={bpmScrub} value={bpm} label="BPM" onCommit={onBpmChange} extraItems={bpmMenuItems} />
+            {#if onBpmStep && bpm}
+              <span class="ff-inspector__fig-steps">
+                <button type="button" class="ff-inspector__fig-step" title="Lower BPM (Shift 1, Alt 0.01)" aria-label="Lower BPM" onclick={(e) => onBpmStep(-1, tierOf(e))}>−</button>
+                <button type="button" class="ff-inspector__fig-step" title="Raise BPM (Shift 1, Alt 0.01)" aria-label="Raise BPM" onclick={(e) => onBpmStep(1, tierOf(e))}>+</button>
+              </span>
+            {/if}
           {:else}
             <span class="ff-inspector__fig-static">{bpm ? Number(bpm).toFixed(1) : '—'}</span>
           {/if}
@@ -264,22 +284,25 @@
       onpointerleave={onWavePointerLeave}
       onclickcapture={onWaveClickCapture}>
       {#if waveHoverMarker}
-        <span class="ff-inspector__marker-tip" style:left={markerLeft(waveHoverMarker.position)} style:transform={waveHoverMarker.position < 0.2 ? 'translateX(-4px)' : waveHoverMarker.position > 0.8 ? 'translateX(calc(-100% + 4px))' : null} style:--cue={waveHoverMarker.color}>{waveTip}</span>
+        <span class="ff-inspector__marker-tip" style:left={markerLeft(waveHoverMarker.position)} style:transform={waveHoverMarker.position < 0.2 ? 'translateX(-4px)' : waveHoverMarker.position > 0.8 ? 'translateX(calc(-100% + 4px))' : null} style:--cue={waveHoverMarker.color}>
+          <span class="ff-inspector__marker-tip-chip{waveTip?.letter ? '' : ' ff-inspector__marker-tip-chip--memory'}">{waveTip?.letter ?? ''}</span>
+          {#if waveTip?.name}<span class="ff-inspector__marker-tip-name">{waveTip.name}</span>{/if}
+          <span class="ff-inspector__marker-tip-time">{altHeld ? 'Remove' : (waveTip?.time ?? '')}</span>
+        </span>
       {/if}
       <div class="ff-inspector__marker-lane">
         {#each markers as marker (marker.key)}
           <button
             type="button"
-            class="ff-inspector__marker{marker.padded ? '' : ' ff-inspector__marker--plain'}{flagFlipped(marker) ? ' ff-inspector__marker--flip' : ''}{linkedKey === marker.key ? ' ff-inspector__marker--linked' : ''}"
+            class="ff-inspector__marker{marker.padded ? '' : ' ff-inspector__marker--plain'}{flagFlipped(marker) ? ' ff-inspector__marker--flip' : ''}{linkedKey === marker.key ? ' ff-inspector__marker--linked' : ''}{altHeld ? ' ff-inspector__marker--remove' : ''}"
             style:left={markerLeft(marker.position)}
             style:--cue={marker.color}
             data-marker-key={marker.key}
-            title={marker.label ? `Cue ${marker.label}` : 'Cue'}
-            aria-label={marker.label ? `Jump to cue ${marker.label}` : 'Jump to cue'}
-            onclick={() => onMarkerClick?.(marker)}
+            aria-label={altHeld ? (marker.label ? `Delete cue ${marker.label}` : 'Delete cue') : (marker.label ? `Jump to cue ${marker.label}` : 'Jump to cue')}
+            onclick={() => pressMarker(marker)}
             onmouseenter={() => (linkedKey = marker.key)}
             onmouseleave={() => (linkedKey = null)}
-            oncontextmenu={(e) => openCueMenu(e, marker.key)}><span class="ff-inspector__marker-flag">{marker.label}</span></button>
+            oncontextmenu={(e) => openCueMenu(e, marker.key)}><span class="ff-inspector__marker-flag">{altHeld ? '×' : marker.label}</span></button>
         {/each}
       </div>
       <div class="ff-inspector__wave-body">
@@ -318,7 +341,7 @@
               onmouseenter={() => chip && (linkedKey = chip.key)}
               onmouseleave={() => (linkedKey = null)}
               oncontextmenu={(e) => chip && openCueMenu(e, chip.key)}>
-              <span class="ff-inspector__pad-letter">{chip && altHeld ? '×' : pad.letter}</span>
+              <span class="ff-inspector__pad-letter">{pad.letter}</span>
               {#if chip}
                 <span class="ff-inspector__pad-time">{chip.time}</span>
                 {#if chip.name}<span class="ff-inspector__pad-name">{chip.name}</span>{/if}

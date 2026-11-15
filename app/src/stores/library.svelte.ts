@@ -3,14 +3,19 @@
  * Interfaces with tauri.svelte.ts service layer and provides fallback mock data.
  */
 
+import { untrack } from 'svelte';
+import { parseOpenFailure, type OpenFailure } from '../lib/libraryOpenFailure.ts';
+import { appSettings, loadAppSettings, setAnalyzeAfterImport } from './app-settings.svelte.ts';
 import {
   getVersion,
   getLibraryPath,
   loadState as tauriLoadState,
+  getRowPreviews,
+  refreshTrackLabels,
   resumeAnalysis as tauriResumeAnalysis,
   saveState as tauriSaveState,
-  scanDirectory as tauriScanDirectory,
-  scanFiles as tauriScanFiles,
+  planImport,
+  commitImport,
   removeTracks as tauriRemoveTracks,
   setTestCues as tauriSetTestCues,
   analyzeTracks as tauriAnalyzeTracks,
@@ -25,16 +30,20 @@ import {
   listenToAnalysisPartial,
   listenToAnalysisComplete,
   listenToWriteComplete,
+  listenToImportCovers,
   lastTauriError,
   getIpcDiagnostic,
   getAnalysisData,
   invalidateAnalysisCache,
   changeLibraryPath,
   resetLibrary as tauriResetLibrary,
+  signalAnalysisUiBusy,
   type TrackInfo,
   type PlaylistInput,
-  type SyncReport
+  type SyncReport,
+  type UsbLastSync
 } from '../services/tauri.svelte.ts';
+import { watchUiBusy } from '../services/ui-busy.ts';
 import { loadSticks } from './sticks.svelte.ts';
 import { onStickSyncFinished, stickSync, syncStick } from './stick-sync.svelte.ts';
 import {
@@ -45,6 +54,7 @@ import {
   readyAnalysisFields,
 } from '../services/analysis-data.ts';
 import { rowBandsFor, rowBandsFromBandBytes } from '../services/waveform-bands.ts';
+import { readBootSnapshot, type BootSnapshot } from './boot-snapshot.ts';
 import { artwork } from './artwork.svelte.ts';
 import { loadCuesFromPayload } from './cues.svelte.ts';
 import type { CuePointPayload } from '../lib/cues.ts';
@@ -56,16 +66,112 @@ import {
   uniqueName,
 } from '../lib/playlistTree.ts';
 import { trackIdsUnderPaths } from '../lib/fileDrop.ts';
+import { importWithDuplicateCheck, type ImportOutcome } from '../lib/importDuplicates.ts';
+import { completeImportActivity, failImportActivity, rememberImportedFolder, startImportActivity } from './import-activity.svelte.ts';
+import type { PlannedPlaylist } from '../lib/importPlaylists.ts';
+import { nextAnalysisPace, type AnalysisPace } from '../lib/libraryActivity.ts';
+import {
+  analysisFailureText,
+  analysisFileFailureText,
+  analysisRunFailureText,
+  ejectFailureText,
+  failureText,
+  importFailureText,
+  libraryOpenFailureText,
+  revealFailureText,
+} from '../lib/userErrors.ts';
+import { askAboutDuplicates } from './import-duplicates.svelte.ts';
 import { outermostIds } from '../lib/playlistSelection.ts';
+import { isRawIds, rawIds } from '../lib/playlistIds.ts';
 import { expandFolder, folderState } from './sidebar-folders.svelte.ts';
+import { fileStateOf } from './file-status.svelte.ts';
+import { fileStateGlyph } from '../lib/fileHealth.ts';
 
 const peakLoadInflight = new Map<number, Promise<void>>();
 
-/** Shallow-bump so list rows re-render when nested track fields change. */
-export function bumpLibraryTracks() {
-  resetSearchIndex();
-  library.tracks = [...library.tracks];
+const trackListLoadedListeners: (() => void)[] = [];
+
+export function onTrackListLoaded(listener: () => void) {
+  trackListLoadedListeners.push(listener);
+}
+
+/**
+ * Call after changing fields of the tracks `changedIds` through their rows: copies them to the plain objects the search
+ * text, counts and lookups read, rebuilds their search text and swaps the list so sorts and filters run again.
+ */
+export function bumpLibraryTracks(changedIds: Iterable<number>, writtenToPlain: readonly number[] = []) {
+  const ids = [...changedIds];
+  const searchTextChanged = copyRowFieldsToPlainTracks(ids);
+  for (const id of writtenToPlain) searchTextChanged.push(id);
+  if (haystackList) refreshHaystacks(searchTextChanged);
+  const previous = trackList;
+  trackList = trackList.slice();
+  recordTrackListBump(previous, trackList, ids);
   scheduleSearchIndexWarmup();
+}
+
+const BUMP_LOG_LIMIT = 4096;
+const BUMP_LOG_ID_LIMIT = 16384;
+const listVersions = new WeakMap<object, number>();
+let bumpLog: { version: number; ids: number[]; appended: boolean }[] = [];
+let nextListVersion = 1;
+let bumpLogIds = 0;
+
+function recordTrackListBump(previous: object, next: object, ids: number[], appended = false) {
+  let from = listVersions.get(previous);
+  if (from === undefined) {
+    from = nextListVersion++;
+    listVersions.set(previous, from);
+    bumpLog = [];
+    bumpLogIds = 0;
+  }
+  const version = nextListVersion++;
+  listVersions.set(next, version);
+  bumpLog.push({ version, ids, appended });
+  bumpLogIds += ids.length;
+  while (bumpLog.length > 1 && (bumpLog.length > BUMP_LOG_LIMIT || bumpLogIds > BUMP_LOG_ID_LIMIT)) bumpLogIds -= bumpLog.shift()!.ids.length;
+}
+
+/**
+ * The rows whose fields changed between an earlier `library.tracks` array and the current one, when the list was only
+ * bumped in between (`bumpLibraryTracks`); `null` when it was replaced or the change is too old to tell.
+ */
+export function libraryRowsChangedSince(earlier: object): object[] | null {
+  const positions = libraryPositionsChangedSince(earlier);
+  if (!positions) return null;
+  const current = untrack(() => trackList);
+  return positions.map((position) => current[position]);
+}
+
+/** Like `libraryRowsChangedSince`, as positions in `library.tracks` (in the order the bumps touched them). */
+export function libraryPositionsChangedSince(earlier: object): number[] | null {
+  const changes = libraryChangesSince(earlier);
+  return changes && !changes.grown ? changes.positions : null;
+}
+
+/**
+ * What happened to `library.tracks` since an earlier array when it was only bumped and had rows appended in between
+ * (`landImportedTracks`): `grown` when rows were appended (they sit after the `earlier.length` rows that were there,
+ * and `positions` may name them too), `positions` of bumped rows; `null` when the list was replaced or the change is too
+ * old to tell.
+ */
+export function libraryChangesSince(earlier: object): { positions: number[]; grown: boolean } | null {
+  const current = untrack(() => trackList);
+  if (earlier === current) return { positions: [], grown: false };
+  const from = listVersions.get(earlier);
+  const to = listVersions.get(current);
+  if (from === undefined || to === undefined || bumpLog.length === 0 || bumpLog[0].version > from + 1) return null;
+  const positions: number[] = [];
+  let grown = false;
+  for (const entry of bumpLog) {
+    if (entry.version <= from || entry.version > to) continue;
+    grown ||= entry.appended;
+    for (const id of entry.ids) {
+      const position = trackIndexById(id);
+      if (current[position]?.id === id) positions.push(position);
+    }
+  }
+  return { positions, grown };
 }
 
 /** Numbered favorite slots (1–9), backed by `Favorites N` playlists. */
@@ -89,29 +195,37 @@ export function isFavoritePlaylistName(name: string) {
   return favoriteSlotFromName(name) != null;
 }
 
-/** Lowest favorite slot a track belongs to (for the FAV column). */
-export function syncTrackFavoriteFields() {
-  const slotsByTrack = new Map<number, number[]>();
-  for (const pl of library.playlists) {
+function lowestFavoriteSlots(playlists: PlaylistInput[]): Map<number, number> {
+  const lowest = new Map<number, number>();
+  for (const pl of playlists) {
     const slot = favoriteSlotFromName(pl.name);
     if (slot == null) continue;
     for (const tid of pl.track_ids) {
-      const list = slotsByTrack.get(tid) ?? [];
-      list.push(slot);
-      slotsByTrack.set(tid, list);
+      const current = lowest.get(tid);
+      if (current === undefined || slot < current) lowest.set(tid, slot);
     }
   }
-  for (const track of library.tracks) {
-    const slots = slotsByTrack.get(track.id);
-    track.fav = slots?.length ? Math.min(...slots) : undefined;
-  }
+  return lowest;
+}
+
+/** Lowest favorite slot a track belongs to (for the FAV column). */
+export function syncTrackFavoriteFields() {
+  const lowest = lowestFavoriteSlots(library.playlists);
+  library.tracks.forEach((track, i) => {
+    const fav = lowest.get(track.id);
+    const plain = plainTracks[i];
+    const hasPlain = plain?.id === track.id;
+    if (hasPlain ? plain.fav === fav : track.fav === fav) return;
+    track.fav = fav;
+    if (hasPlain) plain.fav = fav;
+  });
 }
 
 function pushFavoritePlaylist(slot: number) {
   const name = favoritePlaylistName(slot);
   const newId =
     library.playlists.length > 0 ? Math.max(...library.playlists.map((pl) => pl.id)) + 1 : 1;
-  library.playlists.push({ id: newId, name, track_ids: [], parent_id: 0, is_folder: false });
+  library.playlists.push({ id: newId, name, track_ids: rawIds([]), parent_id: 0, is_folder: false });
 }
 
 /** Map slot number → favorite playlist (only existing playlists). */
@@ -189,7 +303,6 @@ export async function ensureFavoriteSlots() {
     changed = true;
   }
   if (changed) await saveState();
-  syncTrackFavoriteFields();
 }
 
 /** Toggle membership in a favorite slot for each track (add / remove). */
@@ -198,20 +311,236 @@ export async function toggleFavoriteSlot(slot: number, trackIds: number[]) {
   const pl = playlistByName(favoritePlaylistName(slot));
   if (!pl) return;
   const unique = [...new Set(trackIds)];
+  const next = [...pl.track_ids];
   for (const tid of unique) {
-    const idx = pl.track_ids.indexOf(tid);
-    if (idx >= 0) pl.track_ids.splice(idx, 1);
-    else pl.track_ids.push(tid);
+    const idx = next.indexOf(tid);
+    if (idx >= 0) next.splice(idx, 1);
+    else next.push(tid);
   }
+  pl.track_ids = rawIds(next);
   await saveState();
   syncTrackFavoriteFields();
 }
 
 /* ── Main Library Store State ───────────────────────────────────────── */
 let recentlyAddedCount = 0;
+let analyzingIds = $state.raw<number[]>([]);
+
+type TrackRow = Record<string, any>;
+
+const TRACK_VIEW_FIELDS: Record<string, (row: TrackRow) => unknown> = Object.assign(Object.create(null), {
+  cover: (row: TrackRow) => artwork.get(row.id, row.raw?.has_artwork),
+  rowCover: (row: TrackRow) => artwork.getRow(row.id, row.raw?.has_artwork),
+  status: (row: TrackRow) => fileStateGlyph(fileStateOf(row.id)),
+  bands: (row: TrackRow) => {
+    rowPreviewVersion;
+    if (row.bandsPreview) return rowBandsFromBandBytes(row.bandsPreview);
+    return row.preview ? rowBandsFor(row.preview) : rowBandsFromWire(row.bandsWire);
+  },
+});
+
+interface RowEntry {
+  state: TrackRow;
+  touched: Set<string> | null;
+  exposed: Set<string> | null;
+}
+
+const rowEntries = new WeakMap<TrackRow, RowEntry>();
+
+function createRowState(track: TrackRow): TrackRow {
+  const created = $derived.by(() => {
+    const row = $state(track);
+    return row;
+  });
+  return untrack(() => created);
+}
+
+function rowEntryOf(track: TrackRow): RowEntry {
+  let entry = rowEntries.get(track);
+  if (!entry) {
+    entry = { state: createRowState(track), touched: null, exposed: null };
+    rowEntries.set(track, entry);
+  }
+  return entry;
+}
+
+function rowStateOf(track: TrackRow): TrackRow {
+  return rowEntryOf(track).state;
+}
+
+function exposeContainer(entry: RowEntry, key: string | symbol, value: unknown) {
+  if (typeof key === 'string' && value !== null && typeof value === 'object' && isPlainContainer(value)) (entry.exposed ??= new Set()).add(key);
+}
+
+function touchedEntryOf(track: TrackRow, key: string | symbol, value?: unknown): RowEntry {
+  const entry = rowEntryOf(track);
+  if (typeof key === 'string') {
+    (entry.touched ??= new Set()).add(key);
+    exposeContainer(entry, key, value);
+  }
+  return entry;
+}
+
+const rowPlainObject = Symbol('rowPlainObject');
+
+/** The plain object behind a library row (its own fields as of the last `bumpLibraryTracks`), or the row itself. */
+export function plainRowOf<T extends object>(row: T): T {
+  return (row as Record<symbol, T>)[rowPlainObject] ?? row;
+}
+
+const trackRowHandler: ProxyHandler<TrackRow> = {
+  get(track, key, receiver) {
+    if (key === 'id') return track.id;
+    if (key === rowPlainObject) return track;
+    const view = typeof key === 'string' ? TRACK_VIEW_FIELDS[key] : undefined;
+    if (view) return view(receiver);
+    const entry = rowEntryOf(track);
+    const value = Reflect.get(entry.state, key, receiver);
+    exposeContainer(entry, key, value);
+    return value;
+  },
+  has(track, key) {
+    return key in TRACK_VIEW_FIELDS || Reflect.has(rowStateOf(track), key);
+  },
+  set(track, key, value) {
+    return Reflect.set(touchedEntryOf(track, key, value).state, key, value);
+  },
+  defineProperty(track, key, descriptor) {
+    return Reflect.defineProperty(touchedEntryOf(track, key, descriptor.value).state, key, descriptor);
+  },
+  deleteProperty(track, key) {
+    return Reflect.deleteProperty(touchedEntryOf(track, key).state, key);
+  },
+  ownKeys(track) {
+    return Reflect.ownKeys(rowStateOf(track));
+  },
+  getOwnPropertyDescriptor(track, key) {
+    const entry = rowEntryOf(track);
+    const descriptor = Reflect.getOwnPropertyDescriptor(entry.state, key);
+    if (descriptor) exposeContainer(entry, key, descriptor.value);
+    return descriptor;
+  },
+};
+
+/**
+ * A row is its plain object behind a handler that creates the `$state` proxy on the first read or write of anything but
+ * `id`, so rows nobody has touched cost one `Proxy`. The proxy is created inside its own derived: a state created while
+ * an effect runs would not be tracked by that effect's first reads.
+ */
+function reactiveTrack<T extends object>(track: T): T {
+  return new Proxy(track, trackRowHandler as ProxyHandler<T>);
+}
+
+/**
+ * The track list itself is raw state: replacing it is one signal, and swapping it after a change copies an array of
+ * pointers instead of reading 10k elements through a reactive array proxy. Each track is its own reactive proxy, so a
+ * row still follows its fields.
+ */
+let trackList = $state.raw<any[]>([]);
+
+const trackListLength = $derived(trackList.length);
+
+/**
+ * The plain objects behind `library.tracks`, same order. Reading text through the row proxies costs ~1 s at 30k
+ * tracks; these are read instead. A write through a row does not reach its plain object (a `$state` proxy keeps its
+ * own copy), so `bumpLibraryTracks(ids)` copies the changed rows over.
+ */
+let plainTracks: Record<string, any>[] = [];
+
+/** The plain objects behind `library.tracks`, by position. */
+export function libraryPlainRows(): readonly Record<string, any>[] {
+  return plainTracks;
+}
+
+/** The plain objects behind `library.tracks` as far as paths go: no row state is created by reading them. */
+export function libraryPathRows(): readonly { id: number; filePath?: string }[] {
+  return plainTracks as { id: number; filePath?: string }[];
+}
+
+function setLibraryTracks(tracks: Record<string, any>[], rows = tracks.map(reactiveTrack)) {
+  plainTracks = tracks;
+  trackList = rows;
+}
+
+function appendLibraryTracks(tracks: Record<string, any>[], rows: Record<string, any>[]) {
+  const previous = trackList;
+  plainTracks = plainTracks.concat(tracks);
+  trackList = trackList.concat(rows);
+  recordTrackListBump(previous, trackList, [], true);
+}
+
+function isPlainContainer(value: object): boolean {
+  return Array.isArray(value) || Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function ownStringKeys(value: object): string[] {
+  const keys: string[] = [];
+  for (const key of Reflect.ownKeys(value)) if (typeof key === 'string') keys.push(key);
+  return keys;
+}
+
+function plainCopy(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    const copy: unknown[] = new Array(value.length);
+    for (let i = 0; i < value.length; i++) if (i in value) copy[i] = plainCopy(value[i]);
+    return copy;
+  }
+  if (Object.getPrototypeOf(value) === Object.prototype) {
+    const copy: Record<string, unknown> = {};
+    for (const key of ownStringKeys(value)) copy[key] = plainCopy((value as Record<string, unknown>)[key]);
+    return copy;
+  }
+  return $state.snapshot(value);
+}
+
+function plainValue(value: unknown): unknown {
+  return value !== null && typeof value === 'object' && isPlainContainer(value) ? plainCopy(value) : value;
+}
+
+const SEARCH_TEXT_FIELDS = new Set(['title', 'artist', 'album', 'label', 'genre', 'key', 'bpm', 'time', 'filePath', 'index', 'raw']);
+
+function copyRowFieldsToPlainTracks(ids: number[]): number[] {
+  const searchTextChanged: number[] = [];
+  untrack(() => {
+    for (const id of ids) {
+      const i = trackIndexById(id);
+      const row = trackList[i];
+      const plain = plainTracks[i];
+      if (!row || plain?.id !== id || row === plain) continue;
+      const entry = rowEntries.get(plain);
+      if (!entry) continue;
+      const { state, touched, exposed } = entry;
+      entry.touched = null;
+      let changed = false;
+      if (touched) {
+        for (const key of touched) {
+          if (!Reflect.has(state, key)) continue;
+          plain[key] = plainValue(key in TRACK_VIEW_FIELDS ? row[key] : state[key]);
+          changed ||= SEARCH_TEXT_FIELDS.has(key);
+        }
+      }
+      if (exposed) {
+        for (const key of exposed) {
+          if (touched?.has(key) || !Reflect.has(state, key)) continue;
+          plain[key] = plainValue(state[key]);
+          changed ||= SEARCH_TEXT_FIELDS.has(key);
+        }
+      }
+      if (changed) searchTextChanged.push(id);
+    }
+  });
+  return searchTextChanged;
+}
 
 export const library = $state({
-  tracks: [] as any[],
+  /** Replaced, never mutated in place; `bumpLibraryTracks(ids)` after changing a track's fields. */
+  get tracks(): any[] {
+    return trackList;
+  },
+  set tracks(tracks: any[]) {
+    setLibraryTracks(tracks);
+  },
   playlists: [] as PlaylistInput[],
   volumes: [] as string[],
   
@@ -219,16 +548,26 @@ export const library = $state({
   activeVolume: null as string | null,
   usbTracks: [] as any[],
   usbPlaylists: [] as any[],
+  usbLastSync: null as UsbLastSync | null,
 
   // App settings/status
   appVersion: '0.0.0',
   libraryPath: '',
+  tracksLoaded: false,
+  openFailure: null as OpenFailure | null,
+  bootSnapshot: null as BootSnapshot | null,
   analyzing: false,
-  /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). */
-  analyzingTrackIds: [] as number[],
+  /** Track ids currently in an analysis batch (drives row + waveform placeholder animation). Replaced, never mutated. */
+  get analyzingTrackIds(): number[] {
+    return analyzingIds;
+  },
+  set analyzingTrackIds(ids: number[]) {
+    analyzingIds = ids;
+  },
   syncing: false,
   statusMessage: 'Ready',
   analysisProgress: { current: 0, total: 0, message: '' },
+  analysisPace: null as AnalysisPace | null,
   showAnalysisPrompt: false,
   /** Track IDs from the last import; used by the post-import analyze dialog. */
   pendingAnalyzeTrackIds: [] as number[],
@@ -239,7 +578,7 @@ export const library = $state({
 
   // Getters
   get trackCount() {
-    return this.tracks.length;
+    return trackListLength;
   },
 
   get sidebarData() {
@@ -251,7 +590,7 @@ export const library = $state({
       library: {
         label: 'LIBRARY',
         rows: [
-          { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: this.tracks.length },
+          { kind: 'leaf', icon: 'list',     label: 'All Tracks',      count: trackListLength },
           { kind: 'leaf', icon: 'clock-3',  label: 'Recently Added',  count: recentlyAddedCount },
         ],
       },
@@ -286,41 +625,92 @@ export const library = $state({
 
 const haystackCache = new WeakMap<object, string[]>();
 
-/**
- * Library tracks as plain objects (`library.tracks` wraps these in reactive
- * proxies). Reading text through the proxies costs ~1 s at 30k tracks; the
- * plain objects see the same mutations without that cost.
- */
-let plainTracks: Record<string, unknown>[] = [];
-let haystackById: Map<number, string> | null = null;
+let haystackList: string[] | null = null;
+let haystackLetters = new Int32Array(0);
+let haystackDigits = new Int16Array(0);
 let haystackCursor = 0;
 let warmupTimer: ReturnType<typeof setTimeout> | undefined;
 let warmupGeneration = 0;
 
-const WARMUP_CHUNK = 2000;
+const WARMUP_CHUNK = 100;
+const WARMUP_SLICE_MS = 8;
+const WARMUP_IDLE_RESERVE_MS = 2;
 const WARMUP_DELAY_MS = 250;
 
 function resetSearchIndex() {
-  haystackById = null;
+  haystackList = null;
+  haystackLetters = new Int32Array(0);
+  haystackDigits = new Int16Array(0);
   haystackCursor = 0;
   warmupGeneration++;
 }
 
+/** After rows were appended: the search text built so far stays, the new rows are filled in behind it. */
+function extendSearchIndex() {
+  if (haystackList) haystackList = haystackList.slice();
+  warmupGeneration++;
+}
+
+const LETTER_BITS = new Int32Array(128);
+const DIGIT_BITS = new Int16Array(128);
+for (let code = 97; code <= 122; code++) LETTER_BITS[code] = 1 << (code - 97);
+for (let code = 48; code <= 57; code++) DIGIT_BITS[code] = 1 << (code - 48);
+
+function markCharacters(index: number, haystack: string) {
+  let letters = 0;
+  let digits = 0;
+  for (let k = 0; k < haystack.length; k++) {
+    const code = haystack.charCodeAt(k);
+    if (code < 128) {
+      letters |= LETTER_BITS[code];
+      digits |= DIGIT_BITS[code];
+    }
+  }
+  haystackLetters[index] = letters;
+  haystackDigits[index] = digits;
+}
+
 function fillSearchIndex(limit: number) {
-  if (!haystackById) haystackById = new Map();
+  haystackList ??= [];
+  if (haystackLetters.length < plainTracks.length) {
+    const letters = new Int32Array(plainTracks.length);
+    const digits = new Int16Array(plainTracks.length);
+    letters.set(haystackLetters);
+    digits.set(haystackDigits);
+    haystackLetters = letters;
+    haystackDigits = digits;
+  }
   const end = Math.min(plainTracks.length, haystackCursor + limit);
   for (; haystackCursor < end; haystackCursor++) {
-    const t = plainTracks[haystackCursor];
-    haystackById.set(t.id as number, trackHaystack(t));
+    const haystack = trackHaystack(plainTracks[haystackCursor]);
+    haystackList.push(haystack);
+    markCharacters(haystackCursor, haystack);
   }
 }
 
-function haystackByIdFor(): Map<number, string> {
-  fillSearchIndex(plainTracks.length);
-  return haystackById!;
+function refreshHaystacks(ids: number[]) {
+  for (const id of ids) {
+    const index = trackIndexById(id);
+    if (index < 0 || index >= haystackCursor) continue;
+    const plain = plainTracks[index];
+    if (plain?.id !== id) continue;
+    const haystack = trackHaystack(plain);
+    haystackList![index] = haystack;
+    markCharacters(index, haystack);
+  }
 }
 
-function whenIdle(run: () => void) {
+function haystackListFor(): string[] {
+  fillSearchIndex(plainTracks.length);
+  return haystackList!;
+}
+
+/** The search text of every library row, in order. */
+export function librarySearchTexts(): readonly string[] {
+  return haystackListFor();
+}
+
+function whenIdle(run: (deadline?: IdleDeadline) => void) {
   if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2000 });
   else setTimeout(run, 0);
 }
@@ -330,10 +720,18 @@ function scheduleSearchIndexWarmup() {
   clearTimeout(warmupTimer);
   warmupTimer = setTimeout(() => {
     const generation = warmupGeneration;
-    const step = () => {
+    const step = (deadline?: IdleDeadline) => {
       if (generation !== warmupGeneration) return;
       if (haystackCursor < plainTracks.length) {
-        fillSearchIndex(WARMUP_CHUNK);
+        const sliceEnd = performance.now() + WARMUP_SLICE_MS;
+        do fillSearchIndex(WARMUP_CHUNK);
+        while (
+          haystackCursor < plainTracks.length &&
+          deadline &&
+          !deadline.didTimeout &&
+          deadline.timeRemaining() > WARMUP_IDLE_RESERVE_MS &&
+          performance.now() < sliceEnd
+        );
         whenIdle(step);
       } else {
         haystacksFor(library.tracks);
@@ -343,28 +741,27 @@ function scheduleSearchIndexWarmup() {
   }, WARMUP_DELAY_MS);
 }
 
+const text = (value: unknown) => (value == null ? '' : String(value));
+
+const unlessSame = (value: unknown, shown: string) => {
+  const s = text(value);
+  return s === shown ? '' : ' ' + s;
+};
+
 function trackHaystack(track: Record<string, unknown>): string {
-  const raw = track.raw as Record<string, unknown> | undefined;
-  return [
-    track.title,
-    track.artist,
-    track.album,
-    track.label,
-    track.genre,
-    track.key,
-    track.bpm,
-    track.time,
-    track.filePath,
-    track.index,
-    raw?.title,
-    raw?.artist,
-    raw?.album,
-    raw?.genre,
-    raw?.key,
-    raw?.source_path,
-  ]
-    .map((v) => String(v ?? '').toLowerCase())
-    .join(' ');
+  const raw = (track.raw ?? {}) as Record<string, unknown>;
+  const title = text(track.title);
+  const artist = text(track.artist);
+  const album = text(track.album);
+  const genre = text(track.genre);
+  const key = text(track.key);
+  const filePath = text(track.filePath);
+  return (
+    title + ' ' + artist + ' ' + album + ' ' + text(track.label) + ' ' + genre + ' ' + key + ' ' +
+    text(track.bpm) + ' ' + text(track.time) + ' ' + filePath + ' ' + text(track.index) +
+    unlessSame(raw.title, title) + unlessSame(raw.artist, artist) + unlessSame(raw.album, album) +
+    unlessSame(raw.genre, genre) + unlessSame(raw.key, key) + unlessSame(raw.source_path, filePath)
+  ).toLowerCase();
 }
 
 /**
@@ -374,14 +771,138 @@ function trackHaystack(track: Record<string, unknown>): string {
 function haystacksFor<T extends Record<string, unknown>>(tracks: T[]): string[] {
   let haystacks = haystackCache.get(tracks);
   if (!haystacks) {
-    const byId = haystackByIdFor();
-    haystacks = tracks.map((t) => byId.get(t.id as number) ?? trackHaystack(t));
+    const list = haystackListFor();
+    const members = tracks === library.tracks ? null : membersOf(tracks)?.members;
+    haystacks =
+      tracks === library.tracks
+        ? list
+        : members
+          ? Array.from(members, (position) => list[position])
+          : tracks.map((t) => {
+              const index = trackIndexById(t.id as number);
+              return index >= 0 && plainTracks[index].id === t.id ? list[index] : trackHaystack(t);
+            });
     haystackCache.set(tracks, haystacks);
   }
   return haystacks;
 }
 
-let lastFilter: { tracks: object; query: string; result: unknown[] } | null = null;
+interface FilterEntry {
+  list: object;
+  terms: string[];
+  indices: number[];
+  result: unknown[];
+}
+
+const FILTER_HISTORY = 16;
+const filterHistory = new WeakMap<object, Map<string, FilterEntry>>();
+const filterSources = new WeakMap<object, { source: object; positions: number[] }>();
+let libraryFilters: { tracks: object; history: Map<string, FilterEntry> } | null = null;
+
+/**
+ * Where the rows of a `filterTracks` result of `library.tracks` sit in it (ascending), or `'all'` for `library.tracks`
+ * itself; `null` for any other list, and for a result of a list that was replaced since.
+ */
+export function libraryPositionsOf(rows: readonly unknown[]): readonly number[] | 'all' | null {
+  const current = untrack(() => trackList);
+  if (rows === current) return 'all';
+  const found = filterSources.get(rows);
+  return found && found.source === current ? found.positions : null;
+}
+
+function libraryMembership(rows: readonly unknown[]): { list: object; positions: ArrayLike<number> | 'all' } | null {
+  if (rows === untrack(() => trackList) || listVersions.has(rows)) return { list: rows, positions: 'all' };
+  const filtered = filterSources.get(rows);
+  if (filtered) return { list: filtered.source, positions: filtered.positions };
+  const playlist = memberRows.get(rows);
+  return playlist ? { list: playlist.list, positions: playlist.members } : null;
+}
+
+/**
+ * Whether two lists of library rows (`library.tracks`, a `filterTracks` result of it, or the rows of a playlist) hold the
+ * same rows in the same order, answered from where the rows sit in `library.tracks` when both were taken before and after
+ * only bumps; `false` when that cannot be told (the rows may still be the same).
+ */
+export function sameLibraryMembers(earlier: readonly unknown[], rows: readonly unknown[]): boolean {
+  if (earlier === rows) return true;
+  const a = libraryMembership(earlier);
+  const b = libraryMembership(rows);
+  if (!a || !b || libraryPositionsChangedSince(a.list) === null || libraryPositionsChangedSince(b.list) === null) return false;
+  if (a.positions === 'all' || b.positions === 'all') return a.positions === b.positions;
+  if (a.positions === b.positions) return true;
+  if (a.positions.length !== b.positions.length) return false;
+  for (let i = 0; i < a.positions.length; i++) if (a.positions[i] !== b.positions[i]) return false;
+  return true;
+}
+
+function narrows(older: string[], terms: string[]): boolean {
+  return older.every((old) => terms.some((term) => term.includes(old)));
+}
+
+function singleCharacterBits(terms: string[]): { letters: number; digits: number } | null {
+  let letters = 0;
+  let digits = 0;
+  for (const term of terms) {
+    if (term.length !== 1) return null;
+    const code = term.charCodeAt(0);
+    if (code >= 97 && code <= 122) letters |= 1 << (code - 97);
+    else if (code >= 48 && code <= 57) digits |= 1 << (code - 48);
+    else return null;
+  }
+  return { letters, digits };
+}
+
+/**
+ * `masked`: `haystacks` is the search text of `plainTracks` (`'all'`) or of the rows at these positions of it, whose letters and
+ * digits were noted in `haystackLetters` and `haystackDigits`.
+ */
+function matchingIndices(haystacks: string[], terms: string[], candidates: number[] | null, masked: Int32Array | 'all' | null): number[] {
+  const indices: number[] = [];
+  const first = terms[0];
+  const bits = masked ? singleCharacterBits(terms) : null;
+  if (bits) {
+    const letters = haystackLetters;
+    const digits = haystackDigits;
+    const wantLetters = bits.letters;
+    const wantDigits = bits.digits;
+    const positions = masked === 'all' ? null : (masked as Int32Array);
+    if (candidates) {
+      for (let c = 0; c < candidates.length; c++) {
+        const i = candidates[c];
+        const p = positions ? positions[i] : i;
+        if ((letters[p] & wantLetters) === wantLetters && (digits[p] & wantDigits) === wantDigits) indices.push(i);
+      }
+    } else {
+      for (let i = 0; i < haystacks.length; i++) {
+        const p = positions ? positions[i] : i;
+        if ((letters[p] & wantLetters) === wantLetters && (digits[p] & wantDigits) === wantDigits) indices.push(i);
+      }
+    }
+    return indices;
+  }
+  if (terms.length === 1) {
+    if (candidates) {
+      for (let c = 0; c < candidates.length; c++) {
+        const i = candidates[c];
+        if (haystacks[i].includes(first)) indices.push(i);
+      }
+    } else {
+      for (let i = 0; i < haystacks.length; i++) if (haystacks[i].includes(first)) indices.push(i);
+    }
+    return indices;
+  }
+  const matches = (i: number) => {
+    const haystack = haystacks[i];
+    for (let t = 0; t < terms.length; t++) if (!haystack.includes(terms[t])) return false;
+    return true;
+  };
+  if (candidates) {
+    for (let c = 0; c < candidates.length; c++) if (matches(candidates[c])) indices.push(candidates[c]);
+  } else {
+    for (let i = 0; i < haystacks.length; i++) if (matches(i)) indices.push(i);
+  }
+  return indices;
+}
 
 /** Match tracks against a whitespace-separated query (all terms must match). */
 export function filterTracks<T extends Record<string, unknown>>(
@@ -390,14 +911,173 @@ export function filterTracks<T extends Record<string, unknown>>(
 ): T[] {
   const trimmed = query.trim().toLowerCase();
   if (!trimmed) return tracks;
-  if (lastFilter && lastFilter.tracks === tracks && lastFilter.query === trimmed) {
-    return lastFilter.result as T[];
+  const isLibrary = tracks === untrack(() => trackList);
+  let history = filterHistory.get(tracks);
+  if (!history) {
+    history = isLibrary && libraryFilters && libraryPositionsChangedSince(libraryFilters.tracks) !== null ? new Map(libraryFilters.history) : new Map();
+    filterHistory.set(tracks, history);
   }
+  const known = history.get(trimmed);
+  if (known && known.list === tracks) return known.result as T[];
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const haystacks = haystacksFor(tracks);
-  const result = tracks.filter((_, i) => terms.every((term) => haystacks[i].includes(term)));
-  lastFilter = { tracks, query: trimmed, result };
+  const member = isLibrary ? null : membersOf(tracks);
+  if (isLibrary && known) {
+    const changed = libraryPositionsChangedSince(known.list);
+    if (changed) {
+      const indices = withChangedMatches(known.indices, changed, haystacks, terms);
+      if (indices === known.indices) return remember(history, trimmed, terms, indices, tracks, true, null, known.result);
+      return remember(history, trimmed, terms, indices, tracks, true);
+    }
+  }
+  let candidates: number[] | null = null;
+  let changedSinceCandidates: number[] = [];
+  for (const entry of history.values()) {
+    if (!narrows(entry.terms, terms) || (candidates && entry.indices.length >= candidates.length)) continue;
+    if (entry.list === tracks) {
+      candidates = entry.indices;
+      changedSinceCandidates = [];
+      continue;
+    }
+    const changed = isLibrary ? libraryPositionsChangedSince(entry.list) : null;
+    if (changed) {
+      candidates = entry.indices;
+      changedSinceCandidates = changed;
+    }
+  }
+  const masked = isLibrary ? 'all' : (member?.members ?? null);
+  let indices = matchingIndices(haystacks, terms, candidates, masked);
+  if (candidates && changedSinceCandidates.length > 0) {
+    const outside = [...new Set(changedSinceCandidates)].sort((x, y) => x - y).filter((i) => !isAmong(candidates, i));
+    if (outside.length > 0) indices = mergeAscending(indices, matchingIndices(haystacks, terms, outside, masked));
+  }
+  return remember(history, trimmed, terms, indices, tracks, isLibrary, member);
+}
+
+function mergeAscending(first: number[], second: number[]): number[] {
+  if (second.length === 0) return first;
+  const merged: number[] = [];
+  let a = 0;
+  let b = 0;
+  while (a < first.length && b < second.length) merged.push(first[a] < second[b] ? first[a++] : second[b++]);
+  while (a < first.length) merged.push(first[a++]);
+  while (b < second.length) merged.push(second[b++]);
+  return merged;
+}
+
+function remember<T>(history: Map<string, FilterEntry>, query: string, terms: string[], indices: number[], tracks: T[], isLibrary: boolean, member: MemberRows | null = null, sameRows: readonly unknown[] | null = null): T[] {
+  const result = indices.length === tracks.length ? tracks : sameRows ? (sameRows.slice() as T[]) : indices.map((i) => tracks[i]);
+  history.set(query, { list: tracks, terms, indices, result });
+  if (history.size > FILTER_HISTORY) history.delete(history.keys().next().value!);
+  if (isLibrary) {
+    libraryFilters = { tracks, history };
+    if (result !== tracks) filterSources.set(result, { source: tracks, positions: indices });
+  } else if (member && result !== tracks) {
+    memberRows.set(result, { ...member, members: Int32Array.from(indices, (i) => member.members[i]) });
+  }
   return result;
+}
+
+function withChangedMatches(earlier: number[], changed: number[], haystacks: string[], terms: string[]): number[] {
+  const moved = [...new Set(changed)].sort((a, b) => a - b);
+  const matching = moved.filter((i) => terms.every((term) => haystacks[i].includes(term)));
+  const nowMatching = new Set(matching);
+  if (moved.every((i) => isAmong(earlier, i) === nowMatching.has(i))) return earlier;
+  const dropped = new Set(moved);
+  const kept = earlier.filter((i) => !dropped.has(i));
+  if (matching.length === 0) return kept;
+  const merged: number[] = [];
+  let a = 0;
+  let b = 0;
+  while (a < kept.length && b < matching.length) merged.push(kept[a] < matching[b] ? kept[a++] : matching[b++]);
+  while (a < kept.length) merged.push(kept[a++]);
+  while (b < matching.length) merged.push(matching[b++]);
+  return merged;
+}
+
+function isAmong(ascending: readonly number[], value: number): boolean {
+  let low = 0;
+  let high = ascending.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (ascending[mid] < value) low = mid + 1;
+    else high = mid;
+  }
+  return ascending[low] === value;
+}
+
+let indexCache: { source: object; length: number; byId: Map<number, number> | null; slots: Int32Array | null } | null = null;
+
+/** Tracks never analysed. Changes with the track list (every field change bumps it); counted on the plain objects. */
+export function unanalyzedTrackCount(): number {
+  const tracks = library.tracks;
+  let count = 0;
+  for (let i = 0; i < tracks.length; i++) if (!plainTracks[i].analyzed) count++;
+  return count;
+}
+
+/** Whether any track was never analysed; read on the plain objects like `unanalyzedTrackCount`, stops at the first. */
+export function hasUnanalyzedTracks(): boolean {
+  const tracks = library.tracks;
+  for (let i = 0; i < tracks.length; i++) if (!plainTracks[i].analyzed) return true;
+  return false;
+}
+
+function positionsByIdTable(tracks: readonly Record<string, any>[]): Int32Array | null {
+  let highest = 0;
+  for (let i = 0; i < tracks.length; i++) {
+    const id = tracks[i].id;
+    if (!Number.isInteger(id) || id < 0) return null;
+    if (id > highest) highest = id;
+  }
+  if (highest > tracks.length * 8 + 4096) return null;
+  const slots = new Int32Array(highest + 1);
+  for (let i = 0; i < tracks.length; i++) slots[tracks[i].id] = i + 1;
+  return slots;
+}
+
+function trackIndexTables() {
+  if (!indexCache || indexCache.source !== plainTracks || indexCache.length !== plainTracks.length) {
+    const slots = positionsByIdTable(plainTracks);
+    indexCache = {
+      source: plainTracks,
+      length: plainTracks.length,
+      byId: slots ? null : new Map(plainTracks.map((t, i) => [t.id as number, i])),
+      slots,
+    };
+  }
+  return indexCache;
+}
+
+function trackIndexById(id: number): number {
+  const { slots, byId } = trackIndexTables();
+  if (slots) return (id >>> 0) === id && id < slots.length ? slots[id] - 1 : -1;
+  return byId!.get(id) ?? -1;
+}
+
+/** Covers stored for imported tracks whose rows have not landed yet (`landImportedTracks`). */
+const coversBeforeRows = new Set<number>();
+
+/** Imported tracks come back without artwork; their covers are stored afterwards. */
+export function markCoversStored(ids: number[]) {
+  const changed: number[] = [];
+  for (const id of ids) {
+    const track = libraryTrackById(id);
+    if (!track) {
+      coversBeforeRows.add(id);
+      continue;
+    }
+    if (!track.raw || track.raw.has_artwork) continue;
+    track.raw.has_artwork = true;
+    changed.push(id);
+  }
+  if (changed.length > 0) bumpLibraryTracks(changed);
+}
+
+export function libraryTrackById(id: number) {
+  const tracks = library.tracks;
+  const track = tracks[trackIndexById(id)];
+  return track?.id === id ? track : tracks.find((t) => t.id === id);
 }
 
 /** Tracks shown for a sidebar source (label, playlist name, or USB path). */
@@ -407,17 +1087,80 @@ export function tracksForSidebarSource(source: string | null | undefined) {
     return library.tracks;
   }
   if (active === 'Recently Added') {
-    return library.tracks.filter((t) => t.raw?.tempo > 0);
+    return library.tracks.filter((_, i) => plainTracks[i]?.raw?.tempo > 0);
   }
   if (library.volumes.includes(active)) {
     return library.usbTracks;
   }
   const playlist = library.playlists.find((p) => p.name === active && !p.is_folder);
   if (playlist) {
-    const byId = new Map(library.tracks.map((t) => [t.id, t]));
-    return playlist.track_ids.map((id) => byId.get(id)).filter(Boolean);
+    const ids = playlist.track_ids;
+    return isRawIds(ids) ? playlistRowsOf(ids) : ids.map(libraryTrackById).filter(Boolean);
   }
   return library.tracks;
+}
+
+interface MemberRows {
+  list: object;
+  members: Int32Array;
+  unique: boolean;
+}
+
+const memberRows = new WeakMap<object, MemberRows>();
+const playlistViews = new WeakMap<number[], { list: object; rows: any[] }>();
+
+function membersOf(rows: readonly unknown[]): MemberRows | null {
+  const found = memberRows.get(rows);
+  return found && libraryPositionsChangedSince(found.list) !== null ? found : null;
+}
+
+/**
+ * Where the rows of a playlist, or of a `filterTracks` result of one, sit in `library.tracks` (in the order of the rows,
+ * each position once); `null` for any other list and once the library list was replaced (bumps keep positions).
+ */
+export function libraryMembersOf(rows: readonly unknown[]): Int32Array | null {
+  const found = membersOf(rows);
+  return found?.unique ? found.members : null;
+}
+
+function buildPlaylistRows(ids: readonly number[], tracks: any[]): { rows: any[]; found: MemberRows | null } {
+  if (tracks.length !== plainTracks.length) return { rows: ids.map(libraryTrackById).filter(Boolean), found: null };
+  const rows: any[] = new Array(ids.length);
+  const members = new Int32Array(ids.length);
+  const seen = new Uint8Array(tracks.length);
+  let count = 0;
+  let unique = true;
+  const { slots, byId } = trackIndexTables();
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const position = slots ? ((id >>> 0) === id && id < slots.length ? slots[id] - 1 : -1) : (byId!.get(id) ?? -1);
+    if (position < 0) continue;
+    rows[count] = tracks[position];
+    members[count++] = position;
+    if (seen[position] === 1) unique = false;
+    seen[position] = 1;
+  }
+  rows.length = count;
+  return { rows, found: { list: tracks, members: members.subarray(0, count), unique } };
+}
+
+function playlistRowsOf(ids: number[]): any[] {
+  const tracks = library.tracks;
+  const view = playlistViews.get(ids);
+  if (view && view.list === tracks) return view.rows;
+  const stored = view ? memberRows.get(view.rows) : undefined;
+  const changed = view && stored ? libraryPositionsChangedSince(view.list) : null;
+  if (view && stored && changed) {
+    const moved = new Set(changed);
+    const rows = stored.members.some((position) => moved.has(position)) ? view.rows.slice() : view.rows;
+    memberRows.set(rows, { ...stored, list: tracks });
+    playlistViews.set(ids, { list: tracks, rows });
+    return rows;
+  }
+  const built = buildPlaylistRows(ids, tracks);
+  if (built.found) memberRows.set(built.rows, built.found);
+  playlistViews.set(ids, { list: tracks, rows: built.rows });
+  return built.rows;
 }
 
 /** Human-readable title for a sidebar source id. */
@@ -429,12 +1172,20 @@ export function sidebarSourceLabel(source: string) {
   return source;
 }
 
+let analyzingIdSet: { ids: number[]; set: Set<number> } | null = null;
+
 export function isTrackAnalyzing(trackId: number): boolean {
-  return library.analyzingTrackIds.includes(trackId);
+  const ids = library.analyzingTrackIds;
+  if (analyzingIdSet?.ids !== ids) analyzingIdSet = { ids, set: new Set(ids) };
+  return analyzingIdSet.set.has(trackId);
+}
+
+function isKnownTrackId(id: number): boolean {
+  return plainTracks[trackIndexById(id)]?.id === id || plainTracks.some((t) => t.id === id);
 }
 
 function knownTrackIds(ids: number[]): number[] {
-  return [...new Set(ids)].filter((id) => id > 0 && library.tracks.some((t) => t.id === id));
+  return [...new Set(ids)].filter((id) => id > 0 && isKnownTrackId(id));
 }
 
 const analysisStartListeners = new Set<(trackIds: number[]) => void>();
@@ -451,7 +1202,7 @@ export function onAnalysisStart(listener: (trackIds: number[]) => void): () => v
  * the waveform arrives first as `analysis-partial`, the full result as `analysis-progress`.
  */
 export function requestBackgroundAnalysis(trackId: number) {
-  const track = library.tracks.find((t) => t.id === trackId);
+  const track = libraryTrackById(trackId);
   if (!track || (track.analyzed && !track.analysisPending)) return;
 
   if (isTrackAnalyzing(trackId)) {
@@ -499,6 +1250,7 @@ function applyWaveformAndCuesFromAnalysis(
   if (!ready.waveform) {
     track.bandsPreview = undefined;
     track.preview = undefined;
+    track.bandsWire = undefined;
   } else if (bandPreview) {
     if (!sameBytes(track.bandsPreview, bandPreview)) track.bandsPreview = bandPreview;
     track.preview = undefined;
@@ -539,16 +1291,16 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
       if (!isValidAnalysisPayload(res)) {
         track.analyzed = false;
         track.analysisLoaded = false;
-        bumpLibraryTracks();
+        bumpLibraryTracks([id]);
         return;
       }
-      if (applyWaveformAndCuesFromAnalysis(track, res)) bumpLibraryTracks();
+      if (applyWaveformAndCuesFromAnalysis(track, res)) bumpLibraryTracks([id]);
       performance.mark('ff:detail-ready');
     } catch (err) {
       console.warn('ensureTrackPeaksLoaded failed:', err);
       track.analyzed = false;
       track.analysisLoaded = false;
-      bumpLibraryTracks();
+      bumpLibraryTracks([id]);
     } finally {
       peakLoadInflight.delete(id);
     }
@@ -557,57 +1309,123 @@ export async function ensureTrackPeaksLoaded(track: Record<string, unknown>): Pr
   return job;
 }
 
-async function refreshTrackAnalysisDisplay(track: Record<string, unknown>, attempt = 0) {
-  const id = track.id as number;
-  invalidateAnalysisCache(id);
+const ANALYSIS_APPLY_INTERVAL_MS = 250;
+const queuedAnalysisRefresh = new Set<number>();
+const queuedAnalysisFinish = new Set<number>();
+let analysisApplyTimer: ReturnType<typeof setTimeout> | undefined;
+let analysisApplying = false;
+let lastAnalysisApplyAt = -Infinity;
+
+async function fetchAnalysisForDisplay(id: number, attempt = 0): Promise<any> {
   try {
-    const res = await getAnalysisData(id, true);
-    if (!isValidAnalysisPayload(res)) {
-      track.analyzed = false;
-      track.analysisLoaded = false;
-      bumpLibraryTracks();
+    return await getAnalysisData(id, attempt > 0);
+  } catch (err) {
+    if (attempt >= 4) throw err;
+    await new Promise((r) => setTimeout(r, 120 * (attempt + 1)));
+    return fetchAnalysisForDisplay(id, attempt + 1);
+  }
+}
+
+async function refreshTrackAnalysis(id: number) {
+  const track = libraryTrackById(id);
+  if (!track) return;
+  try {
+    const res = await fetchAnalysisForDisplay(id);
+    if (isValidAnalysisPayload(res)) {
+      applyWaveformAndCuesFromAnalysis(track, res);
       return;
     }
-    applyWaveformAndCuesFromAnalysis(track, res);
-    bumpLibraryTracks();
   } catch (err) {
-    if (attempt < 4) {
-      await new Promise((r) => setTimeout(r, 120 * (attempt + 1)));
-      return refreshTrackAnalysisDisplay(track, attempt + 1);
-    }
     console.warn('Failed to refresh analysis display:', err);
-    track.analyzed = false;
-    track.analysisLoaded = false;
-    bumpLibraryTracks();
+  }
+  track.analyzed = false;
+  track.analysisLoaded = false;
+}
+
+/** Analysis events arrive per track; the rows take them in batches, at most one library update per interval. */
+function queueAnalysisRefresh(trackId: number, finished: boolean) {
+  invalidateAnalysisCache(trackId);
+  queuedAnalysisRefresh.add(trackId);
+  if (finished) queuedAnalysisFinish.add(trackId);
+  scheduleAnalysisApply();
+}
+
+function scheduleAnalysisApply() {
+  if (analysisApplyTimer !== undefined || analysisApplying) return;
+  const wait = Math.max(0, lastAnalysisApplyAt + ANALYSIS_APPLY_INTERVAL_MS - performance.now());
+  analysisApplyTimer = setTimeout(() => {
+    analysisApplyTimer = undefined;
+    void applyQueuedAnalysis();
+  }, wait);
+}
+
+async function applyQueuedAnalysis() {
+  analysisApplying = true;
+  const ids = [...queuedAnalysisRefresh];
+  const finished = new Set(queuedAnalysisFinish);
+  queuedAnalysisRefresh.clear();
+  queuedAnalysisFinish.clear();
+  try {
+    if (finished.size > 0) {
+      library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => !finished.has(id));
+    }
+    await Promise.all(ids.map(refreshTrackAnalysis));
+    if (ids.length > 0) bumpLibraryTracks(ids);
+  } finally {
+    lastAnalysisApplyAt = performance.now();
+    analysisApplying = false;
+    if (queuedAnalysisRefresh.size > 0 || queuedAnalysisFinish.size > 0) scheduleAnalysisApply();
   }
 }
 
 function finishAnalyzingTrack(trackId: number) {
-  library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => id !== trackId);
-  const track = library.tracks.find((t) => t.id === trackId);
-  if (track) void refreshTrackAnalysisDisplay(track);
+  queueAnalysisRefresh(trackId, true);
 }
 
 /** Puts tracks into the state a first analysis starts from: no waveform, and no BPM or key unless hand-set. */
 function markTracksPendingAnalysis(ids: number[]) {
   const restarted: number[] = [];
+  const searchTextWrittenToPlain: number[] = [];
   for (const id of ids) {
-    const track = library.tracks.find((t) => t.id === id);
-    if (!track || track.analysisPending) continue;
+    const row = libraryTrackById(id);
+    if (!row) continue;
+    const plain = plainRowOf(row);
+    const writtenToPlain = !rowEntries.has(plain);
+    const track = writtenToPlain ? plain : row;
+    if (track.analysisPending) continue;
     track.preview = undefined;
     track.bandsPreview = undefined;
+    track.bandsWire = undefined;
     track.analysisLoaded = false;
     track.analysisPending = true;
+    let searchTextWritten = false;
     if (!track.bpmLocked) {
       track.bpm = '—';
       track.bpmExact = 0;
+      searchTextWritten = true;
     }
-    if (!track.keyLocked) track.key = '—';
+    if (!track.keyLocked) {
+      track.key = '—';
+      searchTextWritten = true;
+    }
+    if (writtenToPlain && searchTextWritten) searchTextWrittenToPlain.push(id);
     restarted.push(id);
   }
   if (restarted.length === 0) return;
-  bumpLibraryTracks();
+  bumpLibraryTracks(restarted, searchTextWrittenToPlain);
   analysisStartListeners.forEach((listener) => listener(restarted));
+}
+
+const ANALYSIS_FAILED_MESSAGE = /^Failed (.+?) \(\d+\/\d+\)$/;
+let analysisFailures = 0;
+
+function analysisProgressText(progress: { current: number; total: number; message: string }): string {
+  const failed = progress.message.match(ANALYSIS_FAILED_MESSAGE);
+  if (failed) {
+    analysisFailures++;
+    return analysisFileFailureText(failed[1]);
+  }
+  return progress.message || `Analyzing (${progress.current}/${progress.total})`;
 }
 
 function handleAnalysisProgressEvent(progress: {
@@ -617,8 +1435,9 @@ function handleAnalysisProgressEvent(progress: {
   track_id?: number;
 }) {
   library.analyzing = true;
+  library.analysisPace = nextAnalysisPace(library.analysisPace, progress.current, Date.now());
   library.analysisProgress = progress;
-  library.statusMessage = progress.message || `Analyzing (${progress.current}/${progress.total})`;
+  library.statusMessage = analysisProgressText(progress);
 
   if (progress.track_id) {
     finishAnalyzingTrack(progress.track_id);
@@ -633,33 +1452,63 @@ function handleAnalysisProgressEvent(progress: {
 }
 
 function handleAnalysisPartialEvent(payload: { track_id: number }) {
-  const track = library.tracks.find((t) => t.id === payload.track_id);
-  if (track) void refreshTrackAnalysisDisplay(track);
+  queueAnalysisRefresh(payload.track_id, false);
 }
 
+let analysisRunsEnded = 0;
+
 function handleAnalysisCompleteEvent() {
+  analysisRunsEnded++;
   library.analyzing = false;
   library.analyzingTrackIds = [];
   library.analysisProgress = { current: 0, total: 0, message: '' };
+  library.analysisPace = null;
+  const failures = analysisFailures;
+  analysisFailures = 0;
   if (!library.syncing) {
-    library.statusMessage = 'Ready';
+    library.statusMessage = failures > 0 ? analysisRunFailureText(failures) : 'Ready';
   }
 }
 
-/* ── Mapper ─────────────────────────────────────────────────────────── */
-function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
-  const indexStr = String(idx + 1).padStart(2, '0');
-  const bpmStr = t.tempo > 0 ? (t.tempo / 100).toFixed(1) : '—';
-  const keyStr = t.key || '—';
-  
-  let timeStr = '—';
-  if (t.duration_secs > 0) {
-    const mins = Math.floor(t.duration_secs / 60);
-    const secs = Math.floor(t.duration_secs % 60);
-    timeStr = `${mins}:${String(secs).padStart(2, '0')}`;
-  }
+const WIRE_BANDS_CACHE_LIMIT = 512;
+const wireBandsCache = new Map<string | number[], ReturnType<typeof rowBandsFromBandBytes>>();
 
-  // Prefer the authoritative DB flag; fall back to tempo for browser mocks.
+function rowBandsFromWire(wire: string | number[] | undefined) {
+  if (!wire) return null;
+  const hit = wireBandsCache.get(wire);
+  if (hit !== undefined) return hit;
+  const bytes = decodeBandPreview(wire);
+  const bands = bytes ? rowBandsFromBandBytes(bytes) : null;
+  wireBandsCache.set(wire, bands);
+  if (wireBandsCache.size > WIRE_BANDS_CACHE_LIMIT) wireBandsCache.delete(wireBandsCache.keys().next().value!);
+  return bands;
+}
+
+/* ── Mapper ─────────────────────────────────────────────────────────── */
+const bpmTexts = new Map<number, string>();
+const timeTexts = new Map<number, string>();
+
+function bpmText(tempo: number): string {
+  let text = bpmTexts.get(tempo);
+  if (text === undefined) bpmTexts.set(tempo, (text = tempo > 0 ? (tempo / 100).toFixed(1) : '—'));
+  return text;
+}
+
+function timeText(durationSecs: number): string {
+  if (!(durationSecs > 0)) return '—';
+  const whole = Math.floor(durationSecs);
+  let text = timeTexts.get(whole);
+  if (text === undefined) timeTexts.set(whole, (text = `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`));
+  return text;
+}
+
+function mapTrackInfoToLocal(t: TrackInfo, idx: number, fav: number | undefined) {
+  const position = idx + 1;
+  const indexStr = position < 10 ? '0' + position : String(position);
+  const bpmStr = bpmText(t.tempo);
+  const keyStr = t.key || '—';
+  const timeStr = timeText(t.duration_secs);
+
   const analyzed = t.has_analysis ?? t.tempo > 0;
 
   const local: Record<string, any> = {
@@ -675,7 +1524,7 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     keyLocked: false,
     key: keyStr,
     time: timeStr,
-    fav: undefined,
+    fav,
     genre: t.genre || '—',
     year: '—',
     rating: t.rating ?? 0,
@@ -685,30 +1534,91 @@ function mapTrackInfoToLocal(t: TrackInfo, idx: number) {
     analyzed,
     analysisPending: t.analysis_pending ?? false,
     raw: t,
-    get cover() {
-      return artwork.get(this.id, this.raw?.has_artwork);
-    },
-    get rowCover() {
-      return artwork.getRow(this.id, this.raw?.has_artwork);
-    },
-    get bands() {
-      return this.bandsPreview ? rowBandsFromBandBytes(this.bandsPreview) : rowBandsFor(this.preview);
-    }
   };
 
-  // Embedded preview → paint the mini waveform immediately, no N+1 fetch: the 3-band row
-  // preview when the track has band data, else the mono PWAV.
-  const bandPreview = decodeBandPreview(t.waveform_bands);
-  if (bandPreview) {
-    local.bandsPreview = bandPreview;
-  } else {
-    const preview = decodeTrackPreview(t.waveform_preview);
-    if (preview && isValidWaveformPreview(preview)) {
-      local.preview = Uint8Array.from(preview);
+  applyWirePreview(local, t);
+  return local;
+}
+
+function applyWirePreview(local: Record<string, any>, wire: { waveform_bands?: string | number[] | null; waveform_preview?: string | number[] | null }) {
+  if (wire.waveform_bands) {
+    local.bandsWire = wire.waveform_bands;
+    return;
+  }
+  const preview = decodeTrackPreview(wire.waveform_preview);
+  if (preview && isValidWaveformPreview(preview)) local.preview = Uint8Array.from(preview);
+}
+
+let rowPreviewVersion = $state(0);
+const rowPreviewAsked = new WeakSet<object>();
+let rowPreviewQueue: Record<string, any>[] = [];
+
+function hasRowPreview(track: Record<string, any>) {
+  return !!(track.bandsWire || track.preview || track.bandsPreview);
+}
+
+/**
+ * The list answer carries no row previews; rows on screen ask for theirs here, batched into one
+ * `get_row_previews` call per task. Each track object asks once, so a reload (new objects) asks again.
+ */
+export function requestRowPreviews(tracks: readonly (Record<string, any> | undefined)[]) {
+  const queued = rowPreviewQueue.length;
+  for (const track of tracks) {
+    if (!track || !track.analyzed || hasRowPreview(track) || rowPreviewAsked.has(track)) continue;
+    rowPreviewAsked.add(track);
+    rowPreviewQueue.push(track);
+  }
+  if (queued === 0 && rowPreviewQueue.length > 0) queueMicrotask(flushRowPreviews);
+}
+
+async function flushRowPreviews() {
+  const batch = rowPreviewQueue;
+  rowPreviewQueue = [];
+  if (batch.length === 0) return;
+  let answers;
+  try {
+    answers = await getRowPreviews(batch.map((t) => t.id));
+  } catch (err) {
+    for (const track of batch) rowPreviewAsked.delete(track);
+    console.warn('row previews unavailable:', err);
+    return;
+  }
+  const byId = new Map(answers.map((a) => [a.id, a]));
+  let changed = false;
+  for (const track of batch) {
+    const answer = byId.get(track.id);
+    if (!answer || hasRowPreview(track)) continue;
+    applyWirePreview(track, answer);
+    changed ||= hasRowPreview(track);
+  }
+  if (changed) rowPreviewVersion++;
+}
+
+const TRACK_MAP_CHUNK = 2500;
+
+function nextTask(): Promise<void> {
+  const channel = new MessageChannel();
+  return new Promise((resolve) => {
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
+  });
+}
+
+async function mapTracksInTaskSizedChunks(tracks: TrackInfo[], favorites: Map<number, number>, firstIndex = 0) {
+  const plain: Record<string, any>[] = new Array(tracks.length);
+  const rows: Record<string, any>[] = new Array(tracks.length);
+  for (let start = 0; start < tracks.length; start += TRACK_MAP_CHUNK) {
+    if (start > 0) await nextTask();
+    const end = Math.min(tracks.length, start + TRACK_MAP_CHUNK);
+    for (let i = start; i < end; i++) {
+      plain[i] = mapTrackInfoToLocal(tracks[i], firstIndex + i, favorites.get(tracks[i].id));
+      rows[i] = reactiveTrack(plain[i]);
     }
   }
-
-  return local;
+  return { plain, rows };
 }
 
 /* ── Actions ────────────────────────────────────────────────────────── */
@@ -720,11 +1630,14 @@ export async function loadState() {
     invalidateAnalysisCache();
     const state = await tauriLoadState();
     recentlyAddedCount = state.tracks.filter((t) => t.tempo > 0).length;
-    plainTracks = state.tracks.map((t, idx) => mapTrackInfoToLocal(t, idx));
+    const { plain, rows } = await mapTracksInTaskSizedChunks(state.tracks, lowestFavoriteSlots(state.playlists));
     resetSearchIndex();
-    library.tracks = plainTracks;
+    setLibraryTracks(plain, rows);
+    performance.mark('ff:state-rows');
+    for (const playlist of state.playlists) rawIds(playlist.track_ids);
     library.playlists = state.playlists;
     scheduleSearchIndexWarmup();
+    for (const listener of trackListLoadedListeners) listener();
 
     await ensureFavoriteSlots();
     library.tauriError = lastTauriError;
@@ -732,17 +1645,90 @@ export async function loadState() {
     console.error('loadState failed:', err);
     library.tauriError = lastTauriError;
     throw err;
+  } finally {
+    library.tracksLoaded = true;
+    library.bootSnapshot = null;
   }
 }
 
-/** Saves playlists to backend. Tracks are already auto-persisted. */
-export async function saveState() {
+async function applyChangedTrackLabels() {
+  let changes;
+  try {
+    changes = await refreshTrackLabels();
+  } catch (err) {
+    console.warn('track labels not refreshed:', err);
+    return;
+  }
+  const ids: number[] = [];
+  for (const change of changes) {
+    const track = libraryTrackById(change.id);
+    if (!track) continue;
+    track.rating = change.rating ?? 0;
+    track.color = change.color ?? null;
+    ids.push(change.id);
+  }
+  if (ids.length > 0) bumpLibraryTracks(ids);
+}
+
+/**
+ * Appends freshly imported tracks: the backend gives them the next ids, so `load_state` would
+ * list them last with the same fields, and nothing else in the state changes on import.
+ */
+async function landImportedTracks(added: TrackInfo[]) {
+  if (added.length === 0) return;
+  const offset = plainTracks.length;
+  const favorites = lowestFavoriteSlots(library.playlists);
+  const { plain, rows } = await mapTracksInTaskSizedChunks(added, favorites, offset);
+  recentlyAddedCount += added.filter((t) => t.tempo > 0).length;
+  appendLibraryTracks(plain, rows);
+  const coveredEarly = added.filter((t) => coversBeforeRows.delete(t.id)).map((t) => t.id);
+  if (coveredEarly.length > 0) markCoversStored(coveredEarly);
+  extendSearchIndex();
+  scheduleSearchIndexWarmup();
+  for (const listener of trackListLoadedListeners) listener();
+}
+
+let saveInFlight: Promise<void> | null = null;
+let savePending: Promise<void> | null = null;
+
+async function writePlaylists() {
   try {
     await tauriSaveState(library.playlists);
   } catch (err) {
     console.error('saveState failed:', err);
+    library.statusMessage = failureText("Couldn't save your playlists. Recent changes may be lost.", err, { next: 'Try again.' });
   }
 }
+
+function startSave(): Promise<void> {
+  const run: Promise<void> = writePlaylists().finally(() => {
+    if (saveInFlight === run) saveInFlight = null;
+  });
+  saveInFlight = run;
+  return run;
+}
+
+/**
+ * Saves playlists to backend. Tracks are already auto-persisted.
+ * One save runs at a time; calls made meanwhile share one follow-up save that sends the newest playlists.
+ */
+export function saveState(): Promise<void> {
+  if (!saveInFlight) return startSave();
+  if (!savePending) {
+    savePending = saveInFlight.then(() => {
+      savePending = null;
+      return startSave();
+    });
+  }
+  return savePending;
+}
+
+export function flushPendingSave() {
+  if (!savePending) return;
+  void writePlaylists();
+}
+
+if (typeof addEventListener === 'function') addEventListener('pagehide', flushPendingSave);
 
 let libraryListenersInstalled = false;
 
@@ -755,14 +1741,16 @@ let launchAnalysisTimer: ReturnType<typeof setTimeout> | undefined;
 export function scheduleLaunchAnalysis() {
   if (launchAnalysisTimer !== undefined) return;
   launchAnalysisTimer = setTimeout(async () => {
+    const runsEndedBefore = analysisRunsEnded;
     const queued = await tauriResumeAnalysis();
-    if (queued === 0) return;
+    if (queued === 0 || analysisRunsEnded !== runsEndedBefore) return;
     library.analyzing = true;
     if (!library.syncing) library.statusMessage = 'Resuming analysis…';
   }, LAUNCH_ANALYSIS_DELAY_MS);
 }
 
 export async function initLibrary() {
+  let loadFailed = false;
   library.ipcDiagnostic = getIpcDiagnostic();
   library.statusMessage = 'Loading library…';
 
@@ -770,8 +1758,11 @@ export async function initLibrary() {
     const [version, path] = await Promise.all([getVersion(), getLibraryPath()]);
     library.appVersion = version;
     library.libraryPath = path;
+    if (!library.tracksLoaded) library.bootSnapshot = readBootSnapshot(path);
 
     await loadState();
+    library.openFailure = null;
+    whenIdle(() => void applyChangedTrackLabels());
     await refreshVolumes();
 
     if (!libraryListenersInstalled) {
@@ -779,6 +1770,8 @@ export async function initLibrary() {
       listenToAnalysisProgress(handleAnalysisProgressEvent);
       listenToAnalysisPartial(handleAnalysisPartialEvent);
       listenToAnalysisComplete(handleAnalysisCompleteEvent);
+      listenToImportCovers(markCoversStored);
+      watchUiBusy(window, () => library.analyzing, signalAnalysisUiBusy);
       listenToWriteComplete(() => {
         library.syncing = false;
         library.statusMessage = 'Ready';
@@ -787,14 +1780,12 @@ export async function initLibrary() {
     }
     scheduleLaunchAnalysis();
   } catch (err) {
-    library.statusMessage = 'Failed to load library';
+    loadFailed = true;
+    library.statusMessage = failureText("Couldn't load your library.", err, { next: 'Restart fourfour. If it keeps happening, check the library file in Settings.' });
+    library.openFailure = parseOpenFailure(err);
     console.error('initLibrary failed:', err);
   } finally {
-    if (!library.analyzing && !library.syncing) {
-      library.statusMessage = library.statusMessage.startsWith('Failed')
-        ? library.statusMessage
-        : 'Ready';
-    }
+    if (!library.analyzing && !library.syncing && !loadFailed) library.statusMessage = 'Ready';
   }
 }
 
@@ -819,16 +1810,8 @@ export function playlistForSidebarSource(source: string | null | undefined) {
   return library.playlists.find((p) => p.name === active && !p.is_folder) ?? null;
 }
 
-function importErrorMessage(err: unknown): string {
-  const detail = err instanceof Error ? err.message : String(err);
-  return detail ? `Import failed: ${detail}` : 'Import failed';
-}
-
 async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
-  if (newTracks.length === 0) {
-    library.statusMessage = 'No new audio files found (already in library or unsupported format).';
-    return;
-  }
+  if (newTracks.length === 0) return;
 
   const playlist = playlistForSidebarSource(options?.targetSource);
   if (playlist) {
@@ -836,15 +1819,23 @@ async function finishImport(newTracks: TrackInfo[], options?: ImportOptions) {
     await addTracksToPlaylist(playlist.id, ids);
   }
 
-  await loadState();
+  await landImportedTracks(newTracks);
+}
 
-  if (options?.analyze) {
-    const ids = newTracks.map((t) => t.id);
-    if (ids.length > 0) await analyzeTrackIds(ids);
-  } else {
-    library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
-    library.showAnalysisPrompt = true;
+/** Starts analysis (or the analysis prompt) for imported tracks without waiting for the run to end. */
+export function analyzeImported(ids: number[], analyzeNow = false) {
+  offerAnalysis(ids, analyzeNow).catch((err) => console.error('offerAnalysis failed:', err));
+}
+
+async function offerAnalysis(ids: number[], analyzeNow = false) {
+  if (ids.length === 0) return;
+  await loadAppSettings();
+  if (analyzeNow || appSettings.analyzeAfterImport) {
+    await analyzeTrackIds(ids);
+    return;
   }
+  library.pendingAnalyzeTrackIds = ids;
+  library.showAnalysisPrompt = true;
 }
 
 /** Close the post-import analyze prompt without running analysis. */
@@ -854,66 +1845,65 @@ export function dismissAnalysisPrompt() {
 }
 
 /** Run analysis for tracks pending from the last import, then close the prompt. */
-export async function confirmAnalysisPrompt() {
+export async function confirmAnalysisPrompt(always = false) {
   const ids = [...library.pendingAnalyzeTrackIds];
   dismissAnalysisPrompt();
+  if (always) await setAnalyzeAfterImport(true).catch((err) => console.error('setAnalyzeAfterImport failed:', err));
   if (ids.length > 0) await analyzeTrackIds(ids);
+}
+
+function scanAndAdd(paths: string[]) {
+  return importWithDuplicateCheck(paths, { plan: planImport, ask: askAboutDuplicates, commit: commitImport });
 }
 
 /** Scan directory for new tracks */
 export async function importDirectory(path: string, options?: ImportOptions) {
-  try {
-    library.statusMessage = 'Importing…';
-    const newTracks = await tauriScanDirectory(path);
-    await finishImport(newTracks, options);
-    library.tauriError = lastTauriError;
-    if (newTracks.length > 0) {
-      library.statusMessage = `Imported ${newTracks.length} track${newTracks.length === 1 ? '' : 's'}`;
-    }
-  } catch (err) {
-    library.statusMessage = importErrorMessage(err);
-    library.tauriError = lastTauriError;
-    console.error('importDirectory failed:', err);
-  }
+  const outcome = await importFiles([path], options);
+  if (outcome) rememberImportedFolder(path, importedTrackIds(outcome, [path]), duplicateMatches(outcome));
+  return outcome;
+}
+
+function importedTrackIds(outcome: ImportOutcome, paths: string[]): number[] {
+  return [...new Set([...trackIdsUnderPaths(libraryPathRows(), paths), ...outcome.skipped_ids])];
+}
+
+/** Files skipped as likely duplicates, each with the library track it duplicates. */
+export function duplicateMatches(outcome: ImportOutcome) {
+  const skipped = new Set(outcome.skipped_ids);
+  return outcome.plan.duplicates.filter((d) => skipped.has(d.existing_id)).map((d) => ({ path: d.new_path, id: d.existing_id }));
 }
 
 /** Scan dropped files/folders */
-export async function importFiles(paths: string[], options?: ImportOptions) {
+export async function importFiles(paths: string[], options?: ImportOptions): Promise<ImportOutcome | null> {
   try {
-    library.statusMessage = 'Importing…';
-    const newTracks = await tauriScanFiles(paths);
-    await finishImport(newTracks, options);
+    startImportActivity();
+    const outcome = await scanAndAdd(paths);
+    await finishImport(outcome.added, options);
     library.tauriError = lastTauriError;
-    if (newTracks.length > 0) {
-      library.statusMessage = `Imported ${newTracks.length} track${newTracks.length === 1 ? '' : 's'}`;
-    }
+    completeImportActivity(outcome);
+    analyzeImported(outcome.added.map((t) => t.id), options?.analyze);
+    return outcome;
   } catch (err) {
-    library.statusMessage = importErrorMessage(err);
+    failImportActivity(importFailureText(err));
     library.tauriError = lastTauriError;
     console.error('importFiles failed:', err);
+    return null;
   }
 }
 
-/** Scans dropped files/folders and returns the ids of every library track they hold, including ones imported earlier. */
-export async function importFilesForPlaylist(paths: string[]): Promise<number[]> {
+/** Imports dropped files and lands their rows; the caller places them, then starts analysis with `analyzeImported`. */
+export async function importDroppedTracks(paths: string[]): Promise<{ outcome: ImportOutcome; ids: number[] } | null> {
   try {
-    library.statusMessage = 'Importing…';
-    const newTracks = await tauriScanFiles(paths);
-    await loadState();
+    startImportActivity();
+    const outcome = await scanAndAdd(paths);
+    await landImportedTracks(outcome.added);
     library.tauriError = lastTauriError;
-    if (newTracks.length > 0) {
-      library.pendingAnalyzeTrackIds = newTracks.map((t) => t.id);
-      library.showAnalysisPrompt = true;
-    }
-    const ids = trackIdsUnderPaths(library.tracks, paths);
-    library.statusMessage =
-      ids.length === 0 ? 'No audio files found in the dropped items.' : `Found ${ids.length} track${ids.length === 1 ? '' : 's'}`;
-    return ids;
+    return { outcome, ids: importedTrackIds(outcome, paths) };
   } catch (err) {
-    library.statusMessage = importErrorMessage(err);
+    failImportActivity(importFailureText(err));
     library.tauriError = lastTauriError;
-    console.error('importFilesForPlaylist failed:', err);
-    return [];
+    console.error('importDroppedTracks failed:', err);
+    return null;
   }
 }
 
@@ -921,13 +1911,22 @@ export async function importFilesForPlaylist(paths: string[]): Promise<number[]>
 export async function removeTracks(ids: number[]) {
   try {
     await tauriRemoveTracks(ids);
+    const gone = new Set(ids);
     library.playlists.forEach(pl => {
-      pl.track_ids = pl.track_ids.filter(tid => !ids.includes(tid));
+      pl.track_ids = rawIds(pl.track_ids.filter(tid => !gone.has(tid)));
     });
     await loadState();
   } catch (err) {
     console.error('removeTracks failed:', err);
+    library.statusMessage = failureText("Couldn't remove the tracks.", err);
   }
+}
+
+function stopAnalysisAfterFailure(ids: number[], err: unknown) {
+  const stopped = new Set(ids);
+  library.analyzingTrackIds = library.analyzingTrackIds.filter((id) => !stopped.has(id));
+  if (library.analyzingTrackIds.length === 0) library.analyzing = false;
+  if (!library.syncing) library.statusMessage = analysisFailureText(err);
 }
 
 /** Trigger analysis on all pending tracks */
@@ -943,7 +1942,7 @@ export async function analyzeTracks() {
     await tauriAnalyzeTracks();
   } catch (err) {
     console.error('analyzeTracks failed:', err);
-    if (!library.syncing) library.statusMessage = 'Analysis failed';
+    stopAnalysisAfterFailure(pendingIds, err);
   }
 }
 
@@ -961,7 +1960,7 @@ export async function analyzeTrackIds(ids: number[]) {
     await tauriAnalyzeTrackIds(unique);
   } catch (err) {
     console.error('analyzeTrackIds failed:', err);
-    if (!library.syncing) library.statusMessage = 'Analysis failed';
+    stopAnalysisAfterFailure(unique, err);
   }
 }
 
@@ -970,7 +1969,7 @@ export async function removeTracksFromPlaylist(playlistId: number, trackIds: num
   const pl = library.playlists.find((p) => p.id === playlistId);
   if (!pl || trackIds.length === 0) return;
   const drop = new Set(trackIds);
-  pl.track_ids = pl.track_ids.filter((id) => !drop.has(id));
+  pl.track_ids = rawIds(pl.track_ids.filter((id) => !drop.has(id)));
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
@@ -979,7 +1978,7 @@ export async function removeTracksFromPlaylist(playlistId: number, trackIds: num
 export async function clearPlaylistTracks(playlistId: number) {
   const pl = library.playlists.find((p) => p.id === playlistId);
   if (!pl || pl.track_ids.length === 0) return;
-  pl.track_ids = [];
+  pl.track_ids = rawIds([]);
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
@@ -989,7 +1988,7 @@ export async function clearAllFavorites() {
   let changed = false;
   for (const pl of library.playlists) {
     if (isFavoritePlaylistName(pl.name) && pl.track_ids.length > 0) {
-      pl.track_ids = [];
+      pl.track_ids = rawIds([]);
       changed = true;
     }
   }
@@ -1021,6 +2020,7 @@ export async function refreshVolumes() {
       library.activeVolume = null;
       library.usbTracks = [];
       library.usbPlaylists = [];
+      library.usbLastSync = null;
     }
   } catch (err) {
     console.error('refreshVolumes failed:', err);
@@ -1040,6 +2040,7 @@ export async function refreshUsbState() {
   if (!library.activeVolume) {
     library.usbTracks = [];
     library.usbPlaylists = [];
+    library.usbLastSync = null;
     return;
   }
   const volume = library.activeVolume;
@@ -1061,16 +2062,19 @@ export async function refreshUsbState() {
         filePath: t.usb_path
       }));
       library.usbPlaylists = res.playlists;
+      library.usbLastSync = res.last_sync ?? null;
     } else {
       library.usbTracks = [];
       library.usbPlaylists = [];
+      library.usbLastSync = null;
     }
   } catch (err) {
     console.error('refreshUsbState failed:', err);
     if (library.activeVolume !== volume) return;
-    library.statusMessage = 'Failed to read USB';
+    library.statusMessage = failureText("Couldn't read the stick.", err, { next: 'Check that it is plugged in, then reselect it.' });
     library.usbTracks = [];
     library.usbPlaylists = [];
+    library.usbLastSync = null;
   }
 }
 
@@ -1080,6 +2084,7 @@ export async function wipeVolume(path: string) {
     await refreshUsbState();
   } catch (err) {
     console.error('wipeVolume failed:', err);
+    library.statusMessage = failureText("Couldn't clear the stick.", err);
   }
 }
 
@@ -1087,7 +2092,7 @@ export async function revealFile(path: string) {
   try {
     await revealInFileManager(path);
   } catch (err) {
-    library.statusMessage = String(err);
+    library.statusMessage = revealFailureText(err);
   }
 }
 
@@ -1097,6 +2102,7 @@ export async function ejectVolume(path: string) {
     await refreshVolumes();
   } catch (err) {
     console.error('ejectVolume failed:', err);
+    library.statusMessage = ejectFailureText(err);
   }
 }
 
@@ -1143,7 +2149,7 @@ export async function addPlaylist(name: string, trackIds: number[] = [], parentI
   library.playlists.push({
     id: newId,
     name,
-    track_ids: [...new Set(trackIds)],
+    track_ids: rawIds([...new Set(trackIds)]),
     parent_id: parentId,
     is_folder: false,
   });
@@ -1156,9 +2162,48 @@ export function defaultFolderName(): string {
   return uniqueName(library.playlists.map((p) => p.name), 'New folder');
 }
 
+/** Creates planned playlists and folders in one save (playlist names unique among playlists, folder names among folders); returns the playlists with their files (and which plan they belong to) and the folder ids. */
+export async function addPlannedPlaylists(plans: PlannedPlaylist[], parentId = 0) {
+  const taken = {
+    folder: library.playlists.filter((p) => p.is_folder).map((p) => p.name),
+    playlist: library.playlists.filter((p) => !p.is_folder).map((p) => p.name),
+  };
+  const leaves: { id: number; name: string; files: string[]; top: number }[] = [];
+  const folderIds: number[] = [];
+  const add = (plan: PlannedPlaylist, parent: number, top: number) => {
+    const id = nextPlaylistId();
+    const name = uniqueName(taken[plan.kind], plan.name);
+    taken[plan.kind].push(name);
+    library.playlists.push({ id, name, track_ids: rawIds([]), parent_id: parent, is_folder: plan.kind === 'folder' });
+    if (plan.kind === 'folder') {
+      folderIds.push(id);
+      plan.children.forEach((child) => add(child, id, top));
+    } else leaves.push({ id, name, files: plan.files, top });
+  };
+  plans.forEach((plan, top) => add(plan, parentId, top));
+  if (parentId !== 0) expandFolder(parentId);
+  await saveState();
+  return { leaves, folderIds };
+}
+
+/** Fills playlists in one save; returns how many tracks were new to them. */
+export async function fillPlaylists(fills: { id: number; trackIds: number[] }[]): Promise<number> {
+  let added = 0;
+  for (const fill of fills) {
+    const pl = library.playlists.find((p) => p.id === fill.id);
+    if (!pl) continue;
+    const members = new Set(pl.track_ids);
+    const fresh = [...new Set(fill.trackIds)].filter((id) => !members.has(id));
+    added += fresh.length;
+    if (fresh.length > 0) pl.track_ids = rawIds([...pl.track_ids, ...fresh]);
+  }
+  await saveState();
+  return added;
+}
+
 export async function addFolder(parentId = 0, name = defaultFolderName()): Promise<number> {
   const newId = nextPlaylistId();
-  library.playlists.push({ id: newId, name, track_ids: [], parent_id: parentId, is_folder: true });
+  library.playlists.push({ id: newId, name, track_ids: rawIds([]), parent_id: parentId, is_folder: true });
   if (parentId !== 0) expandFolder(parentId);
   await saveState();
   return newId;
@@ -1171,7 +2216,7 @@ export async function duplicatePlaylist(id: number): Promise<number | null> {
     ...source,
     id: nextPlaylistId(),
     name: uniqueName(library.playlists.map((p) => p.name), `${source.name} copy`),
-    track_ids: [...source.track_ids],
+    track_ids: rawIds([...source.track_ids]),
   };
   const at = library.playlists.findIndex((p) => p.id === id) + 1;
   library.playlists = [...library.playlists.slice(0, at), copy, ...library.playlists.slice(at)];
@@ -1265,9 +2310,10 @@ export async function removeFavoriteSlot(playlistId: number): Promise<string | n
 export async function addTracksToPlaylist(playlistId: number, trackIds: number[]): Promise<number> {
   const pl = library.playlists.find(p => p.id === playlistId);
   if (!pl) return 0;
-  const fresh = [...new Set(trackIds)].filter(tid => !pl.track_ids.includes(tid));
+  const members = new Set(pl.track_ids);
+  const fresh = [...new Set(trackIds)].filter(tid => !members.has(tid));
   if (fresh.length === 0) return 0;
-  pl.track_ids.push(...fresh);
+  pl.track_ids = rawIds([...pl.track_ids, ...fresh]);
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
   return fresh.length;
@@ -1276,7 +2322,7 @@ export async function addTracksToPlaylist(playlistId: number, trackIds: number[]
 export async function removeTrackFromPlaylist(playlistId: number, trackId: number) {
   const pl = library.playlists.find(p => p.id === playlistId);
   if (!pl) return;
-  pl.track_ids = pl.track_ids.filter(tid => tid !== trackId);
+  pl.track_ids = rawIds(pl.track_ids.filter(tid => tid !== trackId));
   await saveState();
   if (isFavoritePlaylistName(pl.name)) syncTrackFavoriteFields();
 }
@@ -1284,7 +2330,7 @@ export async function removeTrackFromPlaylist(playlistId: number, trackId: numbe
 export async function reorderPlaylistTracks(playlistId: number, orderedIds: number[]) {
   const pl = library.playlists.find(p => p.id === playlistId);
   if (!pl) return;
-  pl.track_ids = orderedIds;
+  pl.track_ids = rawIds([...orderedIds]);
   await saveState();
 }
 
@@ -1310,23 +2356,24 @@ export async function moveTracksToPlaylist(opts: {
   if (!target || trackIds.length === 0) return;
 
   const unique = [...new Set(trackIds)];
+  const moving = new Set(unique);
   if (removeFromSource && sourcePlaylistId != null && sourcePlaylistId !== toPlaylistId) {
     const source = library.playlists.find(p => p.id === sourcePlaylistId);
     if (source) {
-      source.track_ids = source.track_ids.filter(id => !unique.includes(id));
+      source.track_ids = rawIds(source.track_ids.filter(id => !moving.has(id)));
     }
   }
 
-  const withoutDupes = target.track_ids.filter(id => !unique.includes(id));
+  const withoutDupes = target.track_ids.filter(id => !moving.has(id));
   const idx =
     insertIndex != null && insertIndex >= 0
       ? Math.min(insertIndex, withoutDupes.length)
       : withoutDupes.length;
-  target.track_ids = [
+  target.track_ids = rawIds([
     ...withoutDupes.slice(0, idx),
     ...unique,
     ...withoutDupes.slice(idx),
-  ];
+  ]);
   await saveState();
   if (
     isFavoritePlaylistName(target.name) ||
@@ -1353,7 +2400,7 @@ export async function changeLocalLibraryPath(folderPath: string) {
     await loadState();
     library.statusMessage = 'Ready';
   } catch (err) {
-    library.statusMessage = 'Failed to open library';
+    library.statusMessage = libraryOpenFailureText(err);
     console.error('changeLocalLibraryPath failed:', err);
     throw err;
   }
@@ -1379,12 +2426,13 @@ export async function resetLibraryDatabase() {
     library.libraryPath = dbPath;
     library.usbTracks = [];
     library.usbPlaylists = [];
+    library.usbLastSync = null;
     library.activeVolume = null;
 
     await loadState();
     library.statusMessage = 'Library reset — empty';
   } catch (err) {
-    library.statusMessage = 'Library reset failed';
+    library.statusMessage = failureText("Couldn't reset the library.", err);
     console.error('resetLibraryDatabase failed:', err);
     throw err;
   }

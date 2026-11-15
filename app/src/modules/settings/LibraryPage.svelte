@@ -1,14 +1,22 @@
 <script>
-  import { SettingRow, Button } from '$ds';
+  import { SettingRow, Button, Switch } from '$ds';
+  import { ui, setOpenInspectorOnSelect } from '../../stores/ui.svelte.ts';
+  import { appSettings, setAnalyzeAfterImport } from '../../stores/app-settings.svelte.ts';
   import { library, changeLocalLibraryPath } from '../../stores/library.svelte.ts';
   import { pickDirectory, getIsTauri } from '../../services/tauri.svelte.ts';
   import { openRekordboxImport } from '../../stores/rekordbox-import.svelte.ts';
+  import { fileStatus } from '../../stores/file-status.svelte.ts';
+  import { checkLibraryAgain, openHealthDialog } from '../../stores/file-health.svelte.ts';
+  import { lastCheckText } from '../../lib/fileHealth.ts';
 
   let busy = $derived(library.analyzing || library.syncing);
 
   async function changeLibrary() {
     const dir = await pickDirectory();
-    if (dir) await changeLocalLibraryPath(dir);
+    if (dir) {
+      await changeLocalLibraryPath(dir);
+      void checkLibraryAgain();
+    }
   }
 </script>
 
@@ -29,6 +37,37 @@
   </SettingRow>
 </div>
 
+<div class="ff-settings-section">Files</div>
+<div class="ff-settings-card" data-settings-file-check>
+  <SettingRow
+    title="Check files"
+    description={fileStatus.running ? 'Checking every track’s file…' : lastCheckText(fileStatus.checkedAt, fileStatus)}
+  >
+    {#snippet control()}
+      {#if fileStatus.missing + fileStatus.error > 0}
+        <Button label="Show results" size="small" variant="ghost" onclick={openHealthDialog} />
+      {/if}
+      <Button label="Check now" size="small" disabled={fileStatus.running} onclick={() => void checkLibraryAgain()} />
+    {/snippet}
+  </SettingRow>
+</div>
+
+<div class="ff-settings-section">Inspector</div>
+<div class="ff-settings-card">
+  <SettingRow
+    title="Open inspector when selecting a track"
+    description="A closed inspector comes back when you pick a track. Off: it opens only from its toggle."
+  >
+    {#snippet control()}
+      <Switch
+        label="Open inspector when selecting a track"
+        on={ui.openInspectorOnSelect}
+        onChange={(on) => setOpenInspectorOnSelect(on)}
+      />
+    {/snippet}
+  </SettingRow>
+</div>
+
 <div class="ff-settings-section">Import</div>
 <div class="ff-settings-card">
   <SettingRow
@@ -37,6 +76,18 @@
   >
     {#snippet control()}
       <Button label="Import…" size="small" disabled={busy || !getIsTauri()} onclick={openRekordboxImport} />
+    {/snippet}
+  </SettingRow>
+  <SettingRow
+    title="Always analyze new tracks automatically"
+    description="Analysis starts right after an import, without asking. Off: you are asked each time."
+  >
+    {#snippet control()}
+      <Switch
+        label="Always analyze new tracks automatically"
+        on={appSettings.analyzeAfterImport}
+        onChange={(on) => void setAnalyzeAfterImport(on)}
+      />
     {/snippet}
   </SettingRow>
 </div>

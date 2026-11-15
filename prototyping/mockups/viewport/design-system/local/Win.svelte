@@ -1,6 +1,6 @@
 <script>
   import {
-    SidebarSection, SidebarRow, ColumnHeader, TrackRow, PlayerCompact, StatusBar, LevelMeter, Icon, FilterInput, Kbd,
+    SidebarSection, SidebarRow, ColumnHeader, TrackRow, PlayerCompact, StatusBar, LevelMeter, Icon, FilterInput, Kbd, columnVars,
   } from '../../../../viewport/design-system/svelte.js';
   import { TRACKS, SIDEBAR, PLAYER_BANDS, SELECTED, CUES } from './data.js';
 
@@ -80,7 +80,7 @@
       {/if}
       <div class="win__content">
         <div class="win__center">
-          <div class="win__table">
+          <div class="win__table" style={columnVars(columns)}>
             {#if tableHeader}<ColumnHeader columns={columns} />{/if}
             <div class="win__rows">
               {#each rows as track (track.id)}

@@ -5,10 +5,12 @@
 
 import { player, currentPositionMs, seekToMs, seekToMsAndPlay } from './player.svelte.ts';
 import { cuesOf, editCues } from './cues.svelte.ts';
+import { quantizeMs } from './quantize.svelte.ts';
 import {
   hotCueIn,
   withCueColor,
   withCuePad,
+  withCueMoved,
   withCueName,
   withHotCue,
   withMemoryCue,
@@ -22,17 +24,22 @@ export function addHotCueAtPlayhead(slot: number | null = null): boolean {
   if (!track) return false;
   let added = false;
   editCues(track.id, (cues) => {
-    const result = withHotCue(cues, currentPositionMs(), slot);
+    const result = withHotCue(cues, quantizeMs(track.beats ?? [], currentPositionMs()), slot);
     added = result !== null;
     return result ? result.cues : cues;
   });
   return added;
 }
 
+/** Moves a hot cue to `timeMs` (the caller snaps it to the grid when it should). */
+export function moveHotCue(trackId: number, key: string, timeMs: number): void {
+  editCues(trackId, (cues) => withCueMoved(cues, key, timeMs));
+}
+
 export function addMemoryCueAtPlayhead(): void {
   const track = player.track;
   if (!track) return;
-  editCues(track.id, (cues) => withMemoryCue(cues, currentPositionMs()).cues);
+  editCues(track.id, (cues) => withMemoryCue(cues, quantizeMs(track.beats ?? [], currentPositionMs())).cues);
 }
 
 /** A hot cue pad: an empty slot is set at the playhead, a set one jumps there and plays. */
@@ -44,11 +51,23 @@ export async function triggerHotCue(slot: number): Promise<void> {
     addHotCueAtPlayhead(slot);
     return;
   }
-  await seekToMsAndPlay(cue.timeMs);
+  await seekToMsAndPlay(quantizeMs(track.beats ?? [], cue.timeMs));
 }
 
-export function jumpToCue(cue: Pick<Cue, 'timeMs'>): Promise<void> {
-  return seekToMs(cue.timeMs);
+export async function jumpToHotCue(slot: number): Promise<void> {
+  const track = player.track;
+  const cue = track && hotCueIn(cuesOf(track.id), slot);
+  if (cue) await seekToMs(quantizeMs(track.beats ?? [], cue.timeMs));
+}
+
+export function clearAllCues(): void {
+  const track = player.track;
+  if (track) editCues(track.id, (cues) => (cues.length ? [] : cues));
+}
+
+/** A memory cue fires like a hot cue pad: jump to it (on the grid when Q is on) and play. */
+export function fireMemoryCue(cue: Pick<Cue, 'timeMs'>): Promise<void> {
+  return seekToMsAndPlay(quantizeMs(player.track?.beats ?? [], cue.timeMs));
 }
 
 export function deleteHotCue(slot: number): void {

@@ -33,6 +33,7 @@ struct Tally {
     relative: usize,
     parallel: usize,
     fifth: usize,
+    other: usize,
 }
 
 impl Tally {
@@ -48,19 +49,22 @@ impl Tally {
             self.relative += 1;
         } else if pm == tm && ((pt + 12 - tt) % 12 == 7 || (tt + 12 - pt) % 12 == 7) {
             self.fifth += 1;
+        } else {
+            self.other += 1;
         }
     }
 
     fn report(&self, label: &str) {
         let p = |x: usize| 100.0 * x as f64 / self.n.max(1) as f64;
         println!(
-            "{label} n={} exact={} ({:.1}%) relative={:.1}% parallel={:.1}% fifth={:.1}% exact+rel+fifth={:.1}%",
+            "{label} n={} exact={} ({:.1}%) fifth={} relative={} parallel={} other={} exact+rel+fifth={:.1}%",
             self.n,
             self.exact,
             p(self.exact),
-            p(self.relative),
-            p(self.parallel),
-            p(self.fifth),
+            self.fifth,
+            self.relative,
+            self.parallel,
+            self.other,
             p(self.exact + self.relative + self.fifth)
         );
     }
@@ -71,6 +75,8 @@ fn main() {
     let manifest = PathBuf::from(&args[0]);
     let audio_dir = PathBuf::from(&args[1]);
     let threads: usize = args.get(2).map(|s| s.parse().unwrap()).unwrap_or(4);
+    let model = args.get(4).map_or(cyankey::SHIPPED, |n| cyankey::model_by_name(n).expect("model: cyanbox, clean-fsl, clean-fsl-fma or clean-fsl-fma-seg"));
+    println!("model {}", model.name);
     let entries = load_manifest(&manifest);
     let next = AtomicUsize::new(0);
     let results: Vec<Mutex<Option<(usize, f64, f64, f64)>>> = entries.iter().map(|_| Mutex::new(None)).collect();
@@ -83,7 +89,7 @@ fn main() {
                 }
                 let audio = beat_this::load_audio(&audio_dir.join(&entries[i].file), 44100).expect("decode");
                 let t = Instant::now();
-                let r = cyankey::detect(&audio.samples, 44100, 1);
+                let r = cyankey::detect_with(model, &audio.samples, 44100, 1);
                 let ms = t.elapsed().as_secs_f64() * 1000.0;
                 if let Some(r) = r {
                     *results[i].lock().unwrap() = Some((r.class, r.confidence, r.tuning_cents, ms));
@@ -106,7 +112,7 @@ fn main() {
     train.report("dev (id % 3 != 0)");
     test.report("test (id % 3 == 0)");
     println!("detect ms median {:.0} (decode excluded, single thread)", times[times.len() / 2]);
-    if let Some(out) = args.get(3) {
+    if let Some(out) = args.get(3).filter(|o| o.as_str() != "-") {
         std::fs::write(out, lines.join("\n")).unwrap();
     }
 }

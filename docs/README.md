@@ -14,6 +14,8 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`repo-overview.md`](architecture/repo-overview.md) | reference | Crate-by-crate map, what works on hardware, data flow, line counts. *(Predates the Svelte `app/`; for current UI see `ui/`.)* |
 | [`ui-architecture.md`](architecture/ui-architecture.md) | current | UI architecture for the desktop app — stores, modules, IPC. |
 | [`cues.md`](architecture/cues.md) | current | Hot and memory cues, CUE button, edit lock for cues and beat grid, shortcuts, what export does with cues, writer issues. |
+| [`robustness-2026-11.md`](architecture/robustness-2026-11.md) | current | Import, analysis and library store against messy folders: fixture cases, before and after, fixes, what is left (incl. a USB path collision for the writer owner). |
+| [`analysis-resume-2026-11.md`](architecture/analysis-resume-2026-11.md) | current | Analysis run across quit, kill -9 and restart: how resume works, cases before and after, fixes, what needs a schema or product call. |
 | [`performance-2026-10.md`](architecture/performance-2026-10.md) | reference | Startup and UI performance: before/after numbers at 1k/10k/30k tracks, method, what is left. |
 | [`rekordbox-import.md`](architecture/rekordbox-import.md) | current | Importing Rekordbox libraries (master.db, USB, XML): sources, field mapping, path remap, merge policy, test results, gaps. |
 | [`tempo-key-engine-plan.md`](architecture/tempo-key-engine-plan.md) | plan | Player BPM/KEY as real tempo and pitch controls: stretch engine choice, engine placement, UI, slices. |
@@ -35,6 +37,7 @@ knowledge · **[historical]** captures a past phase, still useful context ·
 | [`design-round-wm-2.md`](ui/design-round-wm-2.md) | current | Mockup round 2: inspector (all fields editable, lock state) and settings overhaul; options and open questions. |
 | [`design-round-wm-3.md`](ui/design-round-wm-3.md) | current | Mockup round 3: calmer inspector (hierarchy first, edit on click, one lock marker); three options and open questions. |
 | [`waveform-dynamics.md`](ui/waveform-dynamics.md) | current | Waveform display dynamics — playhead, scroll, band rendering. |
+| [`error-messages-2026-11.md`](ui/error-messages-2026-11.md) | current | Every failure message a user can see: rules for new ones, inventory with before and after, silent failures, what is left. Branch `r18-errors`, copy awaits review. |
 
 ## analysis/ — analysis pipeline (research & plans)
 
@@ -49,6 +52,10 @@ the research, plans, and reverse-engineering notes.
 | [`packaging-decision.md`](analysis/packaging-decision.md) | current | How to ship analysis without a Python venv; measured Rust prototype (`prototyping/analysis-packaging`). |
 | [`benchmark-2026-10.md`](analysis/benchmark-2026-10.md) | current | October 2026 accuracy benchmark. |
 | [`bpm-grid-2026-10.md`](analysis/bpm-grid-2026-10.md) | current | BPM and beat-grid results. |
+| [`rust-status-2026-10-28.md`](analysis/rust-status-2026-10-28.md) | current | Rust analyzer status, gaps, accuracy vs bars, bar-1 question (O3). |
+| [`key-bar-2026-10-31.md`](analysis/key-bar-2026-10-31.md) | current | Key stage reaches the 60% bar: compressed semitone bands, before/after, mode trade-off, licence. |
+| [`key-licence-2026-10-31.md`](analysis/key-licence-2026-10-31.md) | current | Licence-clean key model: permissive label sources (FSL10K loops), theory-only and FSL refit vs shipped, switch in `cyankey.rs`. |
+| [`grid-offset-2026-10-29.md`](analysis/grid-offset-2026-10-29.md) | current | Why the grid looked a little off: mp3 time bases (gapless trim, Info frame), one shared time base, offsets by codec. |
 | [`key-detector-2026-10.md`](analysis/key-detector-2026-10.md) | current | Key detector results. |
 | [`analyzer-backend-review.md`](analysis/analyzer-backend-review.md) | historical | Analyzer backend review (June 2026). |
 | [`experimentation-path.md`](analysis/experimentation-path.md) | reference | 6-phase experimentation plan (BPM/key accuracy → waveforms → scale → phrases/embeddings/stems). |
@@ -67,6 +74,12 @@ the research, plans, and reverse-engineering notes.
 | [`landscape-2026-10-15.md`](research/landscape-2026-10-15.md) | reference | Landscape of similar tools. |
 | [`synthesis-2026-10-15.md`](research/synthesis-2026-10-15.md) | reference | Synthesis of landscape and review. |
 | [`fourfour-map.html`](research/fourfour-map.html) | reference | Feature map (HTML). |
+
+## release/ - public beta
+
+| Doc | | Purpose |
+|---|---|---|
+| [`beta-checklist-2026-11.md`](release/beta-checklist-2026-11.md) | current | Public macOS beta readiness: identity, signing, licences, privacy, USB safety, bars, CI, docs, support; status, next step and owner per area. |
 
 ## process/ — working state
 

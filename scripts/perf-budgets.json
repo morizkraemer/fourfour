@@ -1,0 +1,365 @@
+{
+  "about": "Budgets for scripts/perf.sh --size. now = measured on the dev box (see docs/architecture/perf-run-2026-11.md); a run passes a metric when it is within tolerance of now. target = where the speed work should get to; why = one line on what makes the target reachable.",
+  "tolerance": 0.25,
+  "metrics": [
+    {
+      "id": "startup_cold_first_row",
+      "label": "cold startup to first row",
+      "unit": "ms",
+      "path": "derived.all.startup cold first row ms",
+      "now": {
+        "10k": 1085,
+        "25k": 2212,
+        "50k": null
+      },
+      "target": {
+        "10k": 500,
+        "25k": 900,
+        "50k": 1500
+      },
+      "why": "backend load_state plus headless boot; half of the cold first row is bundle parse and the 10k payload, a slim first-page payload plus streaming the rest gets under 500 ms"
+    },
+    {
+      "id": "startup_cold_interactive",
+      "label": "cold startup to interactive",
+      "unit": "ms",
+      "path": "derived.all.startup cold interactive ms",
+      "now": {
+        "10k": 1319,
+        "25k": 2815,
+        "50k": null
+      },
+      "target": {
+        "10k": 550,
+        "25k": 1000,
+        "50k": 1600
+      },
+      "why": "interactive should follow first row within one or two frames once boot work after the first paint is idle-scheduled"
+    },
+    {
+      "id": "startup_warm_first_row",
+      "label": "warm startup to first row",
+      "unit": "ms",
+      "path": "derived.all.startup warm first row ms",
+      "now": {
+        "10k": 694,
+        "25k": 1660,
+        "50k": null
+      },
+      "target": {
+        "10k": 300,
+        "25k": 600,
+        "50k": 1000
+      },
+      "why": "warm backend load_state is about 110 ms at 10k and the warm headless boot about 590 ms; a cached first page and lazy overlays leave room for 300 ms"
+    },
+    {
+      "id": "startup_warm_interactive",
+      "label": "warm startup to interactive",
+      "unit": "ms",
+      "path": "derived.all.startup warm interactive ms",
+      "now": {
+        "10k": 748,
+        "25k": 1748,
+        "50k": null
+      },
+      "target": {
+        "10k": 330,
+        "25k": 650,
+        "50k": 1100
+      },
+      "why": "same as warm first row plus one frame"
+    },
+    {
+      "id": "startup_backend_warm",
+      "label": "backend load_state, warm",
+      "unit": "ms",
+      "path": "startup.startup_backend_warm.load_state_ms",
+      "now": {
+        "10k": 108,
+        "25k": 248,
+        "50k": null
+      },
+      "target": {
+        "10k": 60,
+        "25k": 150,
+        "50k": 300
+      },
+      "why": "build_track_infos plus JSON is linear in tracks; a binary or pre-serialised payload halves it"
+    },
+    {
+      "id": "startup_payload",
+      "label": "load_state payload",
+      "unit": "MB",
+      "path": "derived.all.load_state payload MB",
+      "now": {
+        "10k": 1.7,
+        "25k": 19.8,
+        "50k": null
+      },
+      "target": {
+        "10k": 4,
+        "25k": 10,
+        "50k": 20
+      },
+      "why": "the payload is JSON with base64 row previews; short keys and binary previews cut it in half"
+    },
+    {
+      "id": "track_load_first_audio",
+      "label": "track load to first audio (backend)",
+      "unit": "ms",
+      "path": "derived.all.track load to first audio ms",
+      "now": {
+        "10k": 2.6,
+        "25k": 8.1,
+        "50k": null
+      },
+      "target": {
+        "10k": 10,
+        "25k": 10,
+        "50k": 10
+      },
+      "why": "get_analysis_data plus engine load is a few ms already; keep it under one frame"
+    },
+    {
+      "id": "waveform_detail_cold",
+      "label": "full waveform detail, first time",
+      "unit": "ms",
+      "path": "track_load.track_audio_backend.waveform_detail_cold_ms_median",
+      "now": {
+        "10k": 800,
+        "25k": 1000,
+        "50k": null
+      },
+      "target": {
+        "10k": 120,
+        "25k": 120,
+        "50k": 120
+      },
+      "why": "the decode and the band filters now both run on the decode threads (R4); the rest is CPU per second of audio, so the target needs the analysis to store the series (then every open is a cached read) or fewer columns to measure"
+    },
+    {
+      "id": "waveform_detail_cached",
+      "label": "full waveform detail, cached",
+      "unit": "ms",
+      "path": "track_load.track_audio_backend.waveform_detail_cached_ms_median",
+      "now": {
+        "10k": 2.5,
+        "25k": 2.6,
+        "50k": null
+      },
+      "target": {
+        "10k": 2,
+        "25k": 2,
+        "50k": 2
+      },
+      "why": "a file read of 1.4 MB; keep it there"
+    },
+    {
+      "id": "expand_to_detail",
+      "label": "expand to detail drawn (frontend)",
+      "unit": "ms",
+      "path": "track_load.frontend.expand to detail drawn ms",
+      "now": {
+        "10k": 102,
+        "25k": 241,
+        "50k": null
+      },
+      "target": {
+        "10k": 50,
+        "25k": 50,
+        "50k": 50
+      },
+      "why": "click, the paint, and three more frames: the harness sees the paint one frame late and then waits two frames, each 17-27 ms headless; the work itself is the painted row below (R112)"
+    },
+    {
+      "id": "expand_detail_painted",
+      "label": "expand to detail painted (frontend, data-bands set)",
+      "unit": "ms",
+      "path": "track_load.frontend.expand to detail painted ms (data-bands set)",
+      "now": {
+        "10k": 33,
+        "25k": null,
+        "50k": null
+      },
+      "target": {
+        "10k": 50,
+        "25k": 50,
+        "50k": 50
+      },
+      "why": "Svelte mount 7-10 ms, layout 5 ms and the first full paint of both canvases 20 ms; already under the target, so a regression here is real work added to the expand (R112)"
+    },
+    {
+      "id": "analysis_tpm",
+      "label": "analysis throughput (5-7 min tracks)",
+      "unit": "trk/min",
+      "better": "higher",
+      "path": "analysis.analysis_throughput.tracks_per_min",
+      "now": {
+        "10k": 9.0,
+        "25k": 9.0,
+        "50k": null
+      },
+      "target": {
+        "10k": 30,
+        "25k": 30,
+        "50k": 30
+      },
+      "why": "predict (ONNX beat model) is about 80% of each track at 12 threads; fewer or shorter model chunks and an int8 model are each worth about 1.5x, so about 3x is in reach"
+    },
+    {
+      "id": "analysis_10k_hours",
+      "label": "time to analyse 10k tracks (extrapolated)",
+      "unit": "h",
+      "path": "derived.all.analysis hours for 10k tracks (extrapolated)",
+      "now": {
+        "10k": 18.5,
+        "25k": 18.5,
+        "50k": null
+      },
+      "target": {
+        "10k": 5.6,
+        "25k": 5.6,
+        "50k": 5.6
+      },
+      "why": "10,000 divided by the throughput target; extrapolated from the 12-track timed sample, not a full 10k run"
+    },
+    {
+      "id": "analysis_first_result",
+      "label": "analysis first result",
+      "unit": "s",
+      "path": "analysis.analysis_throughput.first_result_s",
+      "now": {
+        "10k": 16.8,
+        "25k": 16.8,
+        "50k": null
+      },
+      "target": {
+        "10k": 5,
+        "25k": 5,
+        "50k": 5
+      },
+      "why": "one 6-minute track on all cores is about 12 s; a fast first pass (BPM and key before the grid) on the first track shows a result in about 5 s"
+    },
+    {
+      "id": "import_end_to_end",
+      "label": "import of the fixture, end to end (backend)",
+      "unit": "ms",
+      "path": "derived.all.import end to end ms",
+      "now": {
+        "10k": 1911,
+        "25k": 12000,
+        "50k": null
+      },
+      "target": {
+        "10k": 2500,
+        "25k": 6000,
+        "50k": 12000
+      },
+      "why": "R6: covers are stored after the rows, so this is the cold tag scan (32 threads) plus a cover-less commit; the scan still reads every embedded cover through lofty, an ID3 reader that seeks past pictures is the next step"
+    },
+    {
+      "id": "import_rescan",
+      "label": "re-import the same folder (all in library)",
+      "unit": "ms",
+      "path": "derived.all.import rescan into library ms",
+      "now": {
+        "10k": 150,
+        "25k": 430,
+        "50k": null
+      },
+      "target": {
+        "10k": 600,
+        "25k": 1500,
+        "50k": 3000
+      },
+      "why": "R6: known paths are not read again, so this is one parallel folder walk; met"
+    },
+    {
+      "id": "import_ui_click_to_rows",
+      "label": "import UI click to rows (frontend)",
+      "unit": "ms",
+      "path": "import.frontend.import ui click to rows ms",
+      "now": {
+        "10k": 38.7,
+        "25k": 806,
+        "50k": null
+      },
+      "target": {
+        "10k": 100,
+        "25k": 150,
+        "50k": 200
+      },
+      "why": "rows are appended without a reload already; the remaining cost is the row model for the new tracks"
+    },
+    {
+      "id": "scroll_analysis_frame_p95",
+      "label": "scroll during analysis: frame p95",
+      "unit": "ms",
+      "path": "ui.during_bulk_analysis.scroll during fast pass frameP95",
+      "now": {
+        "10k": 32.8,
+        "25k": null,
+        "50k": null
+      },
+      "target": {
+        "10k": 28,
+        "25k": 28,
+        "50k": 28
+      },
+      "why": "idle scroll p95 on the headless box is about 27 ms (software paint floor); analysis should not add to it"
+    },
+    {
+      "id": "scroll_analysis_frames_dropped",
+      "label": "scroll during analysis: frames dropped",
+      "unit": "frames",
+      "path": "ui.during_bulk_analysis.scroll during fast pass framesLost",
+      "now": {
+        "10k": 66,
+        "25k": null,
+        "50k": null
+      },
+      "target": {
+        "10k": 40,
+        "25k": 40,
+        "50k": 40
+      },
+      "why": "idle scroll drops about 30 on the headless floor; analysis events batched per frame should keep it close"
+    },
+    {
+      "id": "scroll_analysis_long_tasks",
+      "label": "scroll during analysis: long-task total",
+      "unit": "ms",
+      "path": "ui.during_bulk_analysis.scroll during fast pass longTaskMsTotal",
+      "now": {
+        "10k": 57,
+        "25k": null,
+        "50k": null
+      },
+      "target": {
+        "10k": 0,
+        "25k": 0,
+        "50k": 0
+      },
+      "why": "no task over 50 ms while scrolling; idle scroll already has none"
+    },
+    {
+      "id": "typing_analysis_key_worst",
+      "label": "typing during analysis: worst keystroke",
+      "unit": "ms",
+      "path": "ui.during_bulk_analysis.typing + palette during fast pass keyWorst",
+      "now": {
+        "10k": 150,
+        "25k": null,
+        "50k": null
+      },
+      "target": {
+        "10k": 100,
+        "25k": 100,
+        "50k": 100
+      },
+      "why": "idle search keystrokes are about 60-90 ms; analysis should not push the worst one past 100"
+    }
+  ],
+  "measured": "dev box, 16 cores, 2026-10-31, analysis at 12 threads; 25k analysis rows copy the 10k sample (same 12 files, size-independent); 25k startup frontend from a rerun at load 36-50; 25k bulk-analysis UI not measured (timed out at load 60); 50k not measured"
+}

@@ -81,6 +81,10 @@
   --ff-wave-dim: rgba(13, 13, 13, 0.58);
   --ff-wave-ink: 255, 255, 255;
   --ff-wave-playhead: #ffffff;
+  --ff-wave-grid-bar-alpha: 0.7;
+  --ff-wave-grid-beat-alpha: 0.34;
+  --ff-wave-grid-eighth-alpha: 0.18;
+  --ff-wave-grid-sixteenth-alpha: 0.1;
 
   /* 1.2 Typography */
   --ff-font: 'Geist', system-ui, sans-serif;

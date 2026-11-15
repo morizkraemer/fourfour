@@ -1,0 +1,573 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { expect, test, type Browser, type Page } from '@playwright/test';
+import type { LoadedState, TrackInfo } from '../src/services/tauri.svelte.ts';
+import { decodeTrackTable, isTrackTable } from '../src/services/track-table.ts';
+import { fixtureAnalysis, fixtureState } from './fixture.ts';
+import { installTauriMock, type SmokeWindow } from './tauri-mock.ts';
+
+const ENABLED = !!process.env.FF_PERF_Q50;
+const TRACKS = Number(process.env.FF_PERF_TRACKS ?? 0);
+const RUNS = Number(process.env.FF_PERF_RUNS ?? 3);
+const IMPORT_FILES = Number(process.env.FF_PERF_IMPORT ?? 1000);
+const REPORT = process.env.FF_PERF_Q50_OUT;
+const STARTUP_ONLY = process.env.FF_PERF_Q50_ONLY === 'startup';
+const MOCK_IPC_ANSWERS_IN_OWN_TASK = process.env.FF_PERF_IPC_TASK !== '0';
+
+const results: Record<string, number> = {};
+const record = (name: string, value: number) => (results[name] = Math.round(value * 10) / 10);
+const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+
+function rowBands(i: number) {
+  const bytes = new Uint8Array(128 * 3);
+  for (let c = 0; c < 128; c++) {
+    bytes[c] = 40 + ((c * 7 + i) % 80);
+    bytes[128 + c] = 20 + ((c * 3 + i) % 60);
+    bytes[256 + c] = 10 + ((c * 5 + i) % 40);
+  }
+  return Buffer.from(bytes).toString('base64');
+}
+
+const REAL_STATE = process.env.FF_PERF_STATE;
+
+function state(): LoadedState {
+  if (REAL_STATE) {
+    const dumped = JSON.parse(readFileSync(REAL_STATE, 'utf8'));
+    return { ...dumped, tracks: isTrackTable(dumped.tracks) ? decodeTrackTable(dumped.tracks) : dumped.tracks } as LoadedState;
+  }
+  const base = fixtureState();
+  return { ...base, tracks: base.tracks.map((t, i) => ({ ...t, waveform_bands: rowBands(i) })) };
+}
+
+function importedTrack(n: number): TrackInfo {
+  return {
+    id: 100_000 + n,
+    source_path: `/Downloads/Perf Import/track${String(n).padStart(4, '0')}.mp3`,
+    title: `Imported ${n}`,
+    artist: `Import Artist ${n % 50}`,
+    album: `Import Album ${n % 120}`,
+    genre: 'House',
+    tempo: 0,
+    key: '',
+    duration_secs: 240,
+    bitrate: 320,
+    file_size: 9_600_000,
+    has_artwork: false,
+    has_cues: false,
+    has_analysis: false,
+    analysis_pending: false,
+  };
+}
+
+interface Q50 {
+  firstRow: number;
+  longTasks: { start: number; duration: number }[];
+  detailResolved: Record<number, number>;
+  mockMs: Record<string, number[]>;
+  answeredAt: Record<string, number>;
+}
+
+function installProbes(ipcTask: boolean) {
+  const w = window as unknown as { __q50: Q50; __TAURI_INTERNALS__: { invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown> } };
+  w.__q50 = { firstRow: 0, longTasks: [], detailResolved: {}, mockMs: {}, answeredAt: {} };
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries()) w.__q50.longTasks.push({ start: e.startTime, duration: e.duration });
+  }).observe({ type: 'longtask', buffered: true });
+  const watchFirstRow = () => {
+    if (document.querySelector('[data-track-row]')) w.__q50.firstRow = performance.now();
+    else requestAnimationFrame(watchFirstRow);
+  };
+  requestAnimationFrame(watchFirstRow);
+  const invoke = w.__TAURI_INTERNALS__.invoke;
+  w.__TAURI_INTERNALS__.invoke = async (cmd, args = {}) => {
+    const started = performance.now();
+    const answer = await invoke(cmd, args);
+    if (ipcTask) await new Promise((resolve) => setTimeout(resolve, 0));
+    (w.__q50.mockMs[cmd] ??= []).push(performance.now() - started);
+    w.__q50.answeredAt[cmd] = performance.now();
+    if (cmd === 'get_waveform_detail') w.__q50.detailResolved[args.trackId as number] = performance.now();
+    return answer;
+  };
+}
+
+async function openApp(browser: Browser, payload: LoadedState) {
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  const page = await context.newPage();
+  await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
+  await page.addInitScript(installTauriMock, payload);
+  await page.addInitScript(installProbes, MOCK_IPC_ANSWERS_IN_OWN_TASK);
+  return { context, page };
+}
+
+async function bootMetrics(page: Page) {
+  await page.locator('[data-track-row]').first().waitFor({ timeout: 120_000 });
+  await page.waitForTimeout(2500);
+  return page.evaluate(() => {
+    const q = (window as unknown as { __q50: Q50 }).__q50;
+    const fcp = performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? 0;
+    const tasks = q.longTasks;
+    const lastEnd = tasks.reduce((end, t) => Math.max(end, t.start + t.duration), 0);
+    return {
+      fcp,
+      firstRow: q.firstRow,
+      interactive: Math.max(q.firstRow, lastEnd),
+      tbt: tasks.reduce((sum, t) => sum + Math.max(0, t.duration - 50), 0),
+      longestTask: tasks.reduce((m, t) => Math.max(m, t.duration), 0),
+      heapMb: ((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1048576,
+    };
+  });
+}
+
+type Boot = Awaited<ReturnType<typeof bootMetrics>>;
+
+function recordBoot(prefix: string, runs: Boot[]) {
+  record(`${prefix} fcp ms`, median(runs.map((r) => r.fcp)));
+  record(`${prefix} first row ms`, median(runs.map((r) => r.firstRow)));
+  record(`${prefix} interactive ms`, median(runs.map((r) => r.interactive)));
+  record(`${prefix} total blocking ms`, median(runs.map((r) => r.tbt)));
+  record(`${prefix} longest task ms`, median(runs.map((r) => r.longestTask)));
+  record(`${prefix} js heap mb`, median(runs.map((r) => r.heapMb)));
+}
+
+function loadTrack(page: Page, rowIndex: number) {
+  return page.evaluate(
+    (rowIndex) =>
+      new Promise<{ ready: number; painted: number; detail: number; longTask: number; afterAnswer: number }>((resolve, reject) => {
+        const q = (window as unknown as { __q50: Q50 }).__q50;
+        const row = document.querySelectorAll('[data-track-row]')[rowIndex] as HTMLElement;
+        const id = Number(row.dataset.trackId ?? NaN);
+        performance.clearMarks('ff:player-ready');
+        const tasksBefore = q.longTasks.length;
+        const t0 = performance.now();
+        row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+        let ready = 0;
+        let painted = 0;
+        const poll = () => {
+          const now = performance.now();
+          if (now - t0 > 15_000) return reject(new Error(`track load timed out (ready ${ready}, painted ${painted})`));
+          const mark = performance.getEntriesByName('ff:player-ready').at(-1);
+          if (mark && !ready) {
+            ready = mark.startTime - t0;
+            requestAnimationFrame(() => requestAnimationFrame(() => (painted = performance.now() - t0)));
+          }
+          const detailAt = Number.isNaN(id) ? Math.max(0, ...Object.values(q.detailResolved).filter((v) => v > t0)) : q.detailResolved[id] ?? 0;
+          if (painted && detailAt > t0) {
+            const longTask = q.longTasks.slice(tasksBefore).reduce((s, t) => s + t.duration, 0);
+            const answered = q.answeredAt.get_analysis_data ?? 0;
+            return resolve({ ready, painted, detail: detailAt - t0, longTask, afterAnswer: answered > t0 ? painted - (answered - t0) : painted });
+          }
+          setTimeout(poll, 0);
+        };
+        poll();
+      }),
+    rowIndex,
+  );
+}
+
+function expandToDetail(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<{ drawn: number; painted: number; longest: number; frame: number }>((resolve, reject) => {
+        const q = (window as unknown as { __q50: Q50 }).__q50;
+        let painted = 0;
+        const paintWatch = new MutationObserver(() => {
+          if (painted || document.querySelector('.ff-xp .waveform-display__zoom')?.getAttribute('data-bands') !== 'detail') return;
+          painted = performance.now() - t0;
+          performance.mark('ex-detail');
+        });
+        paintWatch.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-bands'] });
+        const gaps: number[] = [];
+        let last = performance.now();
+        let framesLeft = Infinity;
+        const tick = (now: number) => {
+          gaps.push(now - last);
+          last = now;
+          if (--framesLeft > 0) requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+        const t0 = performance.now();
+        performance.mark('ex-click');
+        (document.querySelector('.ff-player-compact__expand-btn') as HTMLElement).click();
+        const done = () => {
+          const drawn = performance.now() - t0;
+          performance.mark('ex-drawn');
+          paintWatch.disconnect();
+          framesLeft = 10;
+          setTimeout(() => resolve({ drawn, painted, longest: q.longTasks.filter((t) => t.start >= t0 - 1).reduce((m, t) => Math.max(m, t.duration), 0), frame: Math.max(...gaps) }), 250);
+        };
+        const poll = () => {
+          if (performance.now() - t0 > 15_000) return reject(new Error('expanded detail timed out'));
+          const zoom = document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement | null;
+          if (zoom?.dataset.bands === 'detail') return requestAnimationFrame(() => requestAnimationFrame(done));
+          requestAnimationFrame(poll);
+        };
+        poll();
+      }),
+  );
+}
+
+function frameRecorder(page: Page) {
+  return page.evaluate(() => {
+    const w = window as unknown as { __frames: number[]; __framesStop: boolean };
+    w.__frames = [];
+    w.__framesStop = false;
+    let last = performance.now();
+    const tick = () => {
+      const t = performance.now();
+      w.__frames.push(t - last);
+      last = t;
+      if (!w.__framesStop) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+
+const stopFrames = (page: Page) =>
+  page.evaluate(() => {
+    const w = window as unknown as { __frames: number[]; __framesStop: boolean };
+    w.__framesStop = true;
+    return w.__frames;
+  });
+
+/** Imports IMPORT_FILES tracks through the activity menu; times from the click until the header counts them. */
+async function importRows(page: Page) {
+  await page.evaluate(
+    (patch) => Object.assign(window, patch),
+    { __smokePickPath: '/Downloads/Perf Import', __smokeImport: { tracks: Array.from({ length: IMPORT_FILES }, (_, n) => importedTrack(n)), already: 0 } },
+  );
+  await page.waitForTimeout(450);
+  await page.locator('[data-library-status]').click();
+  const tasksBefore = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.longTasks.length);
+  await frameRecorder(page);
+  const total = (TRACKS + IMPORT_FILES).toLocaleString('en-US');
+  const { t0, t1 } = await page.evaluate(
+    (total) =>
+      new Promise<{ t0: number; t1: number }>((resolve, reject) => {
+        const item = [...document.querySelectorAll('[data-library-activity-menu] .ff-menu__item')].find((e) => e.textContent?.includes('Import folder…')) as HTMLElement;
+        const t0 = performance.now();
+        item.click();
+        const poll = () => {
+          if (performance.now() - t0 > 60_000) return reject(new Error('import never showed the rows'));
+          if (document.querySelector('.ff-gheader__count')?.textContent?.trim() === total) return resolve({ t0, t1: performance.now() });
+          requestAnimationFrame(poll);
+        };
+        requestAnimationFrame(poll);
+      }),
+    total,
+  );
+  await page.waitForTimeout(500);
+  const frames = await stopFrames(page);
+  const tasks = await page.evaluate((n) => (window as unknown as { __q50: Q50 }).__q50.longTasks.slice(n), tasksBefore);
+  const commitAnswered = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.answeredAt.commit_import ?? 0);
+  return { t0, t1, frames, tasks, commitAnswered };
+}
+
+test.describe('q50 perf paths', () => {
+  test.skip(!ENABLED || TRACKS === 0, 'set FF_PERF_Q50=1 FF_PERF_TRACKS=10000 (scripts/perf.sh does)');
+  test.setTimeout(600_000);
+
+  test('startup, track load, import', async ({ browser }) => {
+    const payload = state();
+    record('tracks', TRACKS);
+    record('payload is the fixture library', REAL_STATE ? 1 : 0);
+
+    const cold: Boot[] = [];
+    const warm: Boot[] = [];
+    for (let run = 0; run < RUNS; run++) {
+      const { context, page } = await openApp(browser, payload);
+      await page.goto('/');
+      cold.push(await bootMetrics(page));
+      await page.reload();
+      warm.push(await bootMetrics(page));
+      await context.close();
+    }
+    recordBoot('startup cold', cold);
+    recordBoot('startup warm', warm);
+    if (STARTUP_ONLY) {
+      console.log(JSON.stringify(results, null, 2));
+      if (REPORT) writeFileSync(REPORT, JSON.stringify(results, null, 2));
+      return;
+    }
+
+    const { context, page } = await openApp(browser, payload);
+    await page.goto('/');
+    await bootMetrics(page);
+    await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+
+    const loads = [];
+    const expands = [];
+    for (const index of [3, 5, 7, 9, 11]) {
+      loads.push(await loadTrack(page, index));
+      expands.push(await expandToDetail(page));
+      await page.locator('.ff-xp__collapse').click();
+      await expect(page.locator('.ff-xp')).toHaveCount(0);
+      await page.waitForTimeout(300);
+    }
+    record('track load to overview data ms', median(loads.map((l) => l.ready)));
+    record('track load to overview painted ms', median(loads.map((l) => l.painted)));
+    record('track load to detail series ms', median(loads.map((l) => l.detail)));
+    record('track load long-task ms', median(loads.map((l) => l.longTask)));
+    record('track load overview painted after backend answer ms', median(loads.map((l) => l.afterAnswer)));
+    record('expand to detail drawn ms', median(expands.map((e) => e.drawn)));
+    record('expand to detail painted ms (data-bands set)', median(expands.map((e) => e.painted)));
+    record('expand longest task ms', median(expands.map((e) => e.longest)));
+    const mockMs = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.mockMs);
+    record('mock get_analysis_data ms (not app time)', median(mockMs.get_analysis_data ?? [0]));
+    record('mock get_waveform_detail ms (not app time)', median(mockMs.get_waveform_detail ?? [0]));
+
+    const { t0, t1, frames, tasks, commitAnswered } = await importRows(page);
+    record('import ui click to rows ms', t1 - t0);
+    record('import ui rows after commit answer ms', t1 - commitAnswered);
+    record('import ui long-task ms', tasks.reduce((s, t) => s + t.duration, 0));
+    record('import ui longest task ms', tasks.reduce((m, t) => Math.max(m, t.duration), 0));
+    record('import ui worst frame ms', Math.max(...frames));
+    await context.close();
+
+    console.log(JSON.stringify(results, null, 2));
+    if (REPORT) writeFileSync(REPORT, JSON.stringify(results, null, 2));
+  });
+});
+
+type Profile = { nodes: { id: number; children?: number[]; callFrame: { functionName: string; url: string; lineNumber: number } }[]; samples: number[]; timeDeltas: number[] };
+
+function printProfile(name: string, profile: Profile) {
+  const selfMs = new Map<number, number>();
+  profile.samples.forEach((id, i) => selfMs.set(id, (selfMs.get(id) ?? 0) + profile.timeDeltas[i] / 1000));
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const totalMs = new Map<number, number>();
+  const total = (id: number): number => {
+    const cached = totalMs.get(id);
+    if (cached !== undefined) return cached;
+    const sum = (selfMs.get(id) ?? 0) + (byId.get(id)!.children ?? []).reduce((a, child) => a + total(child), 0);
+    totalMs.set(id, sum);
+    return sum;
+  };
+  const label = (n: Profile['nodes'][number]) => `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').pop()}:${n.callFrame.lineNumber}`;
+  const rank = (ms: (id: number) => number) =>
+    profile.nodes
+      .map((n) => ({ ms: ms(n.id), text: label(n) }))
+      .sort((x, y) => y.ms - x.ms)
+      .slice(0, 18)
+      .map((r) => `${r.ms.toFixed(1).padStart(8)} ms  ${r.text}`)
+      .join('\n');
+  console.log(`profile ${name} self\n${rank((id) => selfMs.get(id) ?? 0)}\nprofile ${name} inclusive\n${rank(total)}`);
+}
+
+test('q50 expand-to-detail profile', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'expand', 'set FF_PERF_PROFILE=expand');
+  test.setTimeout(300_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  const expands = [];
+  const traceOut = process.env.FF_PERF_TRACE_OUT;
+  for (const index of [3, 5, 7, 9]) {
+    await loadTrack(page, index);
+    if (traceOut && index === 3) await browser.startTracing(page, { path: traceOut, categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'blink.user_timing'] });
+    const cdp = !traceOut && index === Number(process.env.FF_PERF_PROFILE_INDEX ?? 9) ? await page.context().newCDPSession(page) : null;
+    if (cdp) {
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+      await cdp.send('Profiler.start');
+    }
+    expands.push(await expandToDetail(page));
+    if (traceOut && index === 3) await browser.stopTracing();
+    if (cdp) {
+      const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+      printProfile('expand', profile);
+      if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(process.env.FF_PERF_PROFILE_OUT, JSON.stringify(profile));
+      await cdp.detach();
+    }
+    await page.locator('.ff-xp__collapse').click();
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+    await page.waitForTimeout(300);
+  }
+  console.log(`expand to detail drawn ms: ${expands.map((e) => e.drawn.toFixed(0)).join(', ')}`);
+  console.log(`expand longest task ms: ${expands.map((e) => e.longest.toFixed(0)).join(', ')}`);
+  await context.close();
+});
+
+test('q50 expand phases', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'expand-phases', 'set FF_PERF_PROFILE=expand-phases FF_PERF_TRACE_OUT=trace.json [FF_PERF_RUNS=5]');
+  test.setTimeout(600_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  if (process.env.FF_PERF_CSS) await page.addStyleTag({ content: process.env.FF_PERF_CSS });
+  const traceOut = process.env.FF_PERF_TRACE_OUT ?? 'smoke/.results/expand-phases.json';
+  const rows = [];
+  const traced = !process.env.FF_PERF_NOTRACE;
+  if (traced) await browser.startTracing(page, { path: traceOut, categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute', 'blink.user_timing', 'cc', 'viz'] });
+  for (const index of [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25].slice(0, Math.max(RUNS, 5))) {
+    await loadTrack(page, index);
+    await page.waitForTimeout(600);
+    rows.push(await expandToDetail(page));
+    await page.locator('.ff-xp__collapse').click();
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+    await page.waitForTimeout(300);
+  }
+  if (traced) await browser.stopTracing();
+  console.log(`expand to detail drawn ms: ${rows.map((e) => e.drawn.toFixed(0)).join(', ')}`);
+  console.log(`expand to detail painted ms: ${rows.map((e) => e.painted.toFixed(0)).join(', ')}`);
+  await context.close();
+});
+
+test('q50 expand identity', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'expand-identity', 'set FF_PERF_PROFILE=expand-identity FF_PERF_IDENT_OUT=hashes.json');
+  test.setTimeout(600_000);
+  const { createHash } = await import('node:crypto');
+  const sha = (data: string | Buffer) => createHash('sha1').update(data).digest('hex').slice(0, 12);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  const hashes: Record<string, string> = {};
+  for (const index of [3, 7, 11]) {
+    await loadTrack(page, index);
+    await expandToDetail(page);
+    if ((await page.locator('.ff-xp__play').getAttribute('aria-label')) === 'Pause') await page.locator('.ff-xp__play').click();
+    await page.waitForTimeout(300);
+    const overview = page.locator('.ff-xp .waveform-display__overview');
+    const zoom = page.locator('.ff-xp .waveform-display__zoom');
+    const box = (await overview.boundingBox())!;
+    const zbox = (await zoom.boundingBox())!;
+    for (const frac of [0.02, 0.1, 0.37, 0.5, 0.731, 0.93]) {
+      await page.mouse.click(box.x + box.width * frac, box.y + box.height / 2);
+      await page.waitForTimeout(250);
+      for (const wheel of [0, -250, -400, 300]) {
+        if (wheel) {
+          await page.mouse.move(zbox.x + zbox.width / 2, zbox.y + zbox.height / 2);
+          await page.mouse.wheel(0, wheel);
+          await page.waitForTimeout(250);
+        }
+        const key = `track${index} seek${frac} wheel${wheel}`;
+        const canvases = await page.evaluate(() => ({
+          overview: (document.querySelector('.ff-xp .waveform-display__overview') as HTMLCanvasElement).toDataURL(),
+          zoom: (document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement).toDataURL(),
+          bands: (document.querySelector('.ff-xp .waveform-display__zoom') as HTMLCanvasElement).dataset.bands ?? '',
+        }));
+        const shot = await page.screenshot({ clip: { x: box.x, y: box.y, width: box.width, height: box.height + zbox.height } });
+        hashes[key] = `${sha(canvases.overview)} ${sha(canvases.zoom)} ${canvases.bands} ${sha(shot)}`;
+      }
+    }
+    await page.locator('.ff-xp__collapse').click();
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+  }
+  writeFileSync(process.env.FF_PERF_IDENT_OUT ?? 'smoke/.results/expand-identity.json', JSON.stringify(hashes, null, 1));
+  console.log(`identity: ${Object.keys(hashes).length} snapshots`);
+  await context.close();
+});
+
+test('q50 expanded frame cost', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'frame-cost', 'set FF_PERF_PROFILE=frame-cost FF_PERF_TRACE_OUT=prefix');
+  test.setTimeout(600_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+  await loadTrack(page, 3);
+  await expandToDetail(page);
+  const prefix = process.env.FF_PERF_TRACE_OUT ?? 'smoke/.results/frame-cost';
+  const variants: Record<string, string> = {
+    base: '',
+    'no-ov-playhead': '.ff-xp .waveform-display > div:first-child > div { display: none !important }',
+    'no-row-canvas': '[data-track-row] canvas { display: none !important }',
+    'few-rows': '[data-track-row]:nth-child(n+8) { display: none !important }',
+    'ov-willchange': '.ff-xp .waveform-display > div:first-child > div { will-change: transform }',
+  };
+  let n = 0;
+  for (const name of (process.env.FF_PERF_VARIANTS ?? 'base').split(',')) {
+    const css = variants[name];
+    await loadTrack(page, 5 + 2 * n++);
+    const handle = css ? await page.addStyleTag({ content: css }) : null;
+    await page.waitForTimeout(600);
+    await browser.startTracing(page, { path: `${prefix}-${name}.json`, categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'v8.execute', 'blink.user_timing', ...(process.env.FF_PERF_TRACE_CATS?.split(',') ?? [])] });
+    await page.waitForTimeout(1500);
+    await browser.stopTracing();
+    await handle?.evaluate((el) => el.remove());
+  }
+  await context.close();
+});
+
+test('q50 boot trace', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'boot-trace', 'set FF_PERF_PROFILE=boot-trace FF_PERF_PROFILE_OUT=trace.json');
+  test.setTimeout(300_000);
+  const { context, page } = await openApp(browser, state());
+  await browser.startTracing(page, {
+    path: process.env.FF_PERF_PROFILE_OUT ?? 'smoke/.results/boot-trace.json',
+    categories: ['devtools.timeline', 'v8.execute', 'disabled-by-default-devtools.timeline', 'blink.user_timing'],
+  });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 200 });
+  await cdp.send('Profiler.start');
+  await page.goto('/');
+  console.log(JSON.stringify(await bootMetrics(page)));
+  const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  if (process.env.FF_PERF_PROFILE_OUT) writeFileSync(`${process.env.FF_PERF_PROFILE_OUT}.cpuprofile`, JSON.stringify(profile));
+  printProfile('boot', profile);
+  await browser.stopTracing();
+  await context.close();
+});
+
+test('q50 import profile', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'import', 'set FF_PERF_PROFILE=import');
+  test.setTimeout(300_000);
+  const { context, page } = await openApp(browser, state());
+  await page.goto('/');
+  await bootMetrics(page);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+  await cdp.send('Profiler.start');
+  const { t0, t1, frames, tasks } = await importRows(page);
+  const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+  printProfile('import', profile);
+  console.log(`import click to rows ${(t1 - t0).toFixed(0)} ms; frames over 50 ms: ${frames.filter((f) => f > 50).map((f) => f.toFixed(0)).join(', ')}; long tasks: ${tasks.map((t) => `${(t.start - t0).toFixed(0)}+${t.duration.toFixed(0)}`).join(', ')}`);
+  await cdp.detach();
+  await context.close();
+});
+
+test('q50 first expand, cold', async ({ browser }) => {
+  test.skip(process.env.FF_PERF_PROFILE !== 'first-expand', 'set FF_PERF_PROFILE=first-expand [FF_PERF_RUNS=7] [FF_PERF_TRACE_OUT=trace.json]');
+  test.setTimeout(600_000);
+  const payload = state();
+  const traceOut = process.env.FF_PERF_TRACE_OUT;
+  const runs: { drawn: number; longest: number; frame: number; tasks: string }[] = [];
+  for (let run = 0; run < Math.max(RUNS, 5); run++) {
+    const { context, page } = await openApp(browser, payload);
+    await page.goto('/');
+    await bootMetrics(page);
+    await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'serve'));
+    await loadTrack(page, 3);
+    await page.waitForTimeout(1500);
+    const tasksBefore = await page.evaluate(() => (window as unknown as { __q50: Q50 }).__q50.longTasks.length);
+    if (traceOut && run < 3) {
+      await browser.startTracing(page, {
+        path: traceOut.replace(/\.json$/, `-${run}.json`),
+        categories: ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-v8.cpu_profiler', 'v8.execute', 'blink.user_timing'],
+      });
+    }
+    const cdp = !traceOut && run === 0 && process.env.FF_PERF_PROFILE_OUT ? await page.context().newCDPSession(page) : null;
+    if (cdp) {
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.setSamplingInterval', { interval: 100 });
+      await cdp.send('Profiler.start');
+    }
+    const t0 = await page.evaluate(() => performance.now());
+    const expand = await expandToDetail(page);
+    if (traceOut && run < 3) await browser.stopTracing();
+    if (cdp) {
+      const { profile } = (await cdp.send('Profiler.stop')) as { profile: Profile };
+      printProfile('first expand', profile);
+      writeFileSync(process.env.FF_PERF_PROFILE_OUT!, JSON.stringify(profile));
+      await cdp.detach();
+    }
+    const tasks = await page.evaluate((n) => (window as unknown as { __q50: Q50 }).__q50.longTasks.slice(n), tasksBefore);
+    runs.push({ ...expand, tasks: tasks.map((t) => `${(t.start - t0).toFixed(0)}+${t.duration.toFixed(0)}`).join(' ') });
+    await context.close();
+  }
+  for (const r of runs) console.log(`first expand: drawn ${r.drawn.toFixed(0)} ms, longest frame ${r.frame.toFixed(0)} ms, longest task ${r.longest.toFixed(0)} ms, tasks [${r.tasks}]`);
+  console.log(`first expand median: drawn ${median(runs.map((r) => r.drawn)).toFixed(0)} ms, longest frame ${median(runs.map((r) => r.frame)).toFixed(0)} ms, longest task ${median(runs.map((r) => r.longest)).toFixed(0)} ms`);
+});

@@ -3,7 +3,7 @@
   column visibility menu, and playlist-aware row moves.
 -->
 <script>
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import {
     ColumnHeader,
     TrackRow,
@@ -12,6 +12,7 @@
     ContextMenu,
     DragGhost,
     DropLine,
+    columnVars,
   } from '$ds';
   import {
     library,
@@ -23,13 +24,20 @@
     filterTracks,
     sidebarSourceLabel,
     isTrackAnalyzing,
+    requestRowPreviews,
+    sameLibraryMembers,
   } from '../stores/library.svelte.ts';
+  import { announce } from '../stores/announce.svelte.ts';
+  import { moveSelectedByOne } from '../lib/playlistReorder.ts';
   import { commitTrackRating } from '../stores/track-edits.svelte.ts';
   import { selection, select, toggle, selectRange, setSelection, clear } from '../stores/selection.svelte.ts';
   import { player, play, queuePlayAfterLoad, playFromStart, loadPlayerTrack, loadTrackAt } from '../stores/player.svelte.ts';
   import { firstDroppedTrack } from '../lib/playerDrop.ts';
   import { ui } from '../stores/ui.svelte.ts';
-  import { pickDirectory, prefetchAnalysisData } from '../services/tauri.svelte.ts';
+  import LibraryRecoveryPanel from './LibraryRecoveryPanel.svelte';
+  import { focusAnalysis, pickDirectory, prefetchAnalysisData, prefetchWaveformDetail } from '../services/tauri.svelte.ts';
+  import { createAnalysisFocus } from '../services/analysis-focus.ts';
+  import { createDetailPrefetcher } from '../services/detail-prefetch.ts';
   import {
     getLayout,
     resolveLayoutKind,
@@ -54,13 +62,25 @@
     buildSourceContextMenuItems,
   } from '../menus/context-menus.ts';
   import { clear as clearSelection } from '../stores/selection.svelte.ts';
-  import { rowWindow, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor } from '../lib/rowWindow.ts';
+  import { fileStatus, fileStateOf } from '../stores/file-status.svelte.ts';
+  import { locateTrack } from '../stores/file-health.svelte.ts';
+  import { fileStateTooltip, isUnplayable } from '../lib/fileHealth.ts';
+  import { rowFocusOrder } from '../lib/rowFocus.ts';
+  import { artwork } from '../stores/artwork.svelte.ts';
+  import { rowWindow, rowsOnScreen, scrollTopToReveal, indexForSlot, rowTop, spacerHeight, dropLineTop as dropLineTopFor, OVERSCAN_ROWS, ROW_HEIGHT } from '../lib/rowWindow.ts';
+  import { anchorShift, sameMembers } from '../lib/stableSort.ts';
+  import { wheelPixels, createWheelQueue } from '../lib/wheelScroll.ts';
+  import { pendingRowsHtml, skeletonRowsHtml } from '../lib/skeletonRows.ts';
+  import { importActivity } from '../stores/import-activity.svelte.ts';
+  import { bootRowTrack, bootSnapshotOf, writeBootSnapshot } from '../stores/boot-snapshot.ts';
 
   /** When set, show this sidebar source instead of the active row. */
   /** organize=true marks this table as the docked organize-panel destination. */
   let { sourceId = undefined, embedded = false, layoutKindOverride = undefined, organize = false } = $props();
 
+  const uid = $props.id();
   let lastSelectedId = null;
+  let cursorIndex = $state(-1);
   let tableBodyEl = $state(null);
   let columnMenu = $state({ open: false, x: 0, y: 0 });
   let rowMenu = $state({ open: false, x: 0, y: 0, trackId: null });
@@ -78,10 +98,70 @@
   let viewportHeight = $state(0);
   let headerHeight = $state(0);
   let scrollRaf = null;
+  let rowsPerFrame = 0;
+  const rowFocusOwner = `rows-${Math.random().toString(36).slice(2)}`;
+  const SCROLL_SETTLE_MS = 250;
+  let scrolling = $state(false);
+  let scrollSettleTimer = null;
+  let ownScrollTop = null;
+
+  const threadedScroll = typeof location !== 'undefined' && new URLSearchParams(location.search).get('exp') === 'threaded-scroll';
+  const FLING_HOLD_PX_PER_MS = threadedScroll ? 3 : 16;
+  const FLING_RELEASE_PX_PER_MS = threadedScroll ? 1.5 : 10;
+  const FLING_RELEASE_IDLE_MS = 120;
+  const SPEED_SAMPLE_MAX_MS = 50;
+  let scrollVelocity = $state(0);
+  let flingHeld = $state(false);
+  let lastScrollSample = { t: 0, top: 0 };
+  let flingReleaseTimer = null;
+
+  function trackScrollSpeed(top) {
+    const now = performance.now();
+    const elapsed = Math.min(now - lastScrollSample.t, SPEED_SAMPLE_MAX_MS);
+    const instant = elapsed > 0 ? (top - lastScrollSample.top) / elapsed : 0;
+    const fresh = now - lastScrollSample.t < SPEED_SAMPLE_MAX_MS * 4;
+    lastScrollSample = { t: now, top };
+    scrollVelocity = fresh ? (scrollVelocity + instant) / 2 : instant;
+    const speed = Math.abs(scrollVelocity);
+    if (!flingHeld && speed > FLING_HOLD_PX_PER_MS) flingHeld = true;
+    else if (flingHeld && speed < FLING_RELEASE_PX_PER_MS) flingHeld = false;
+    clearTimeout(flingReleaseTimer);
+    flingReleaseTimer = setTimeout(scrollStopped, FLING_RELEASE_IDLE_MS);
+  }
+
+  function scrollStopped() {
+    scrollVelocity = 0;
+    flingHeld = false;
+  }
+
+  const wheelQueue = createWheelQueue();
+
+  function onTableWheel(e) {
+    if (e.ctrlKey || e.defaultPrevented || !tableScrollEl || (dragging && embedded)) return;
+    e.preventDefault();
+    wheelQueue.add(wheelPixels(e, tableScrollEl.clientHeight - headerHeight));
+    if (scrollRaf == null) scrollRaf = requestAnimationFrame(syncScrollWindow);
+  }
+
+  $effect(() => {
+    const el = tableScrollEl;
+    if (!el || threadedScroll) return;
+    el.addEventListener('wheel', onTableWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onTableWheel);
+      wheelQueue.clear();
+    };
+  });
 
   function syncScrollWindow() {
     scrollRaf = null;
     if (!tableScrollEl) return;
+    const wheel = wheelQueue.take();
+    if (wheel.y) tableScrollEl.scrollTop += wheel.y;
+    if (wheel.x) tableScrollEl.scrollLeft += wheel.x;
+    const movedRows = (tableScrollEl.scrollTop - scrollTop) / ROW_HEIGHT;
+    rowsPerFrame = movedRows === 0 ? rowsPerFrame / 2 : (rowsPerFrame + movedRows) / 2;
+    if (tableScrollEl.scrollTop !== scrollTop) trackScrollSpeed(tableScrollEl.scrollTop);
     scrollTop = tableScrollEl.scrollTop;
     if (headerHeight === 0) {
       headerHeight = tableScrollEl.querySelector('.ff-colh')?.offsetHeight ?? 0;
@@ -90,6 +170,22 @@
 
   function onTableScroll() {
     if (scrollRaf == null) scrollRaf = requestAnimationFrame(syncScrollWindow);
+    if (ownScrollTop !== null && tableScrollEl?.scrollTop === ownScrollTop) {
+      ownScrollTop = null;
+      return;
+    }
+    ownScrollTop = null;
+    if (!scrolling) scrolling = true;
+    clearTimeout(scrollSettleTimer);
+    scrollSettleTimer = setTimeout(settleScroll, SCROLL_SETTLE_MS);
+  }
+
+  function settleScroll() {
+    scrolling = false;
+    if (resortWaiting) {
+      resortWaiting = false;
+      resortNonce++;
+    }
   }
 
   onMount(() => {
@@ -120,7 +216,10 @@
   }
 
   let effectiveSource = $derived(sourceId ?? ui.activeSidebarRow);
-  let showLibraryEmpty = $derived(!embedded && library.trackCount === 0);
+  let showOpenFailure = $derived(!embedded && library.tracksLoaded && library.openFailure !== null);
+  let showLibraryEmpty = $derived(!embedded && library.tracksLoaded && library.trackCount === 0);
+  const SKELETON_ROWS = 24;
+  const PENDING_ROWS_SHOWN = 300;
 
   let activePlaylist = $derived.by(() => {
     const active = effectiveSource;
@@ -129,6 +228,7 @@
   });
 
   let isUsbView = $derived(library.volumes.includes(effectiveSource ?? ''));
+  let pendingRows = $derived(activePlaylist ? (importActivity.pendingRows[activePlaylist.id] ?? []) : []);
 
   let canReorderRows = $derived(!!activePlaylist && !isUsbView && !layout.sortKey);
 
@@ -153,29 +253,135 @@
     )
   );
 
-  let baseTracks = $derived(tracksForSidebarSource(effectiveSource));
+  let showOnlyProblems = $derived(fileStatus.onlyProblems && !embedded && (effectiveSource ?? 'All Tracks') === 'All Tracks');
+  let baseTracks = $derived.by(() => {
+    const tracks = tracksForSidebarSource(effectiveSource);
+    return showOnlyProblems ? tracks.filter((t) => isUnplayable(fileStateOf(t.id))) : tracks;
+  });
   let filteredTracks = $derived(filterTracks(baseTracks, ui.listFilter));
 
   let layoutKind = $derived(layoutKindOverride ?? resolveLayoutKind(effectiveSource));
   let layout = $derived(getLayout(layoutKind));
 
+  let sorted = null;
+  let resortWaiting = false;
+  let resortNonce = $state(0);
+  let pendingAnchorPx = 0;
+
   let currentTracks = $derived.by(() => {
-    return layout.sortKey ? sortTracks(filteredTracks, layoutKind) : filteredTracks;
+    resortNonce;
+    if (!layout.sortKey) {
+      sorted = null;
+      return filteredTracks;
+    }
+    const spec = `${layoutKind}|${layout.sortKey}|${layout.sortDir}`;
+    const previous = sorted;
+    const sameRows =
+      previous !== null &&
+      previous.spec === spec &&
+      previous.rows.length === filteredTracks.length &&
+      (sameLibraryMembers(previous.rows, filteredTracks) || sameMembers((previous.members ??= new Set(previous.rows)), filteredTracks));
+    if (sameRows && untrack(() => scrolling)) {
+      resortWaiting = true;
+      return previous.result;
+    }
+    const result = sortTracks(filteredTracks, layoutKind);
+    sorted = { spec, rows: filteredTracks, members: sameRows ? previous.members : null, result };
+    if (sameRows && previous.result !== result) {
+      pendingAnchorPx = untrack(() => anchorShift(previous.result, result, visibleRowRange())) * ROW_HEIGHT;
+    }
+    return result;
+  });
+
+  function visibleRowRange() {
+    if (!tableScrollEl || tableScrollEl.scrollTop <= 0) return null;
+    const top = tableScrollEl.scrollTop;
+    return { first: Math.ceil(top / ROW_HEIGHT), end: Math.floor((top + tableScrollEl.clientHeight - headerHeight) / ROW_HEIGHT) };
+  }
+
+  $effect.pre(() => {
+    currentTracks;
+    if (pendingAnchorPx === 0 || !tableScrollEl) return;
+    const shift = pendingAnchorPx;
+    pendingAnchorPx = 0;
+    tableScrollEl.scrollTop += shift;
+    ownScrollTop = tableScrollEl.scrollTop;
+    scrollTop = tableScrollEl.scrollTop;
+    lastScrollSample = { ...lastScrollSample, top: scrollTop };
   });
 
   let columns = $derived(visibleColumns(layoutKind));
 
+  let bootView = $derived(`${layoutKind}|${layout.sortKey ?? ''}|${layout.sortDir ?? ''}`);
+  let showsBootView = $derived(!embedded && (effectiveSource ?? 'All Tracks') === 'All Tracks' && !ui.listFilter.trim() && !showOnlyProblems);
+  let bootRows = $derived.by(() => {
+    const snapshot = library.bootSnapshot;
+    if (!snapshot || library.tracksLoaded || !showsBootView || snapshot.view !== bootView) return null;
+    return snapshot.rows.map(bootRowTrack);
+  });
+  let booting = $derived(currentTracks.length === 0 && bootRows !== null);
+  let shownTracks = $derived(booting ? bootRows : currentTracks);
+
+  const BOOT_SNAPSHOT_IDLE_MS = 1500;
+  let bootSnapshotTimer;
+  $effect(() => {
+    if (!library.tracksLoaded || !showsBootView || viewportHeight === 0) return;
+    const tracks = currentTracks;
+    const path = library.libraryPath;
+    const view = bootView;
+    const rows = Math.ceil(viewportHeight / ROW_HEIGHT) + 2;
+    clearTimeout(bootSnapshotTimer);
+    bootSnapshotTimer = setTimeout(() => writeBootSnapshot(bootSnapshotOf(path, view, tracks, rows)), BOOT_SNAPSHOT_IDLE_MS);
+    return () => clearTimeout(bootSnapshotTimer);
+  });
+
+  let overscan = $state(0);
+  let offscreenRowsScheduled = false;
+  $effect(() => {
+    if (offscreenRowsScheduled || currentTracks.length === 0 || viewportHeight === 0) return;
+    offscreenRowsScheduled = true;
+    requestAnimationFrame(() => setTimeout(() => (overscan = OVERSCAN_ROWS)));
+  });
+
   let rowWin = $derived(
-    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length })
+    rowWindow({ scrollTop, viewportHeight, headerHeight, rowCount: shownTracks.length, overscan, velocity: scrollVelocity })
   );
   let firstRow = $derived(rowWin.firstRow);
   let endRow = $derived(rowWin.endRow);
   let poolSize = $derived(rowWin.poolSize);
   let poolSlots = $derived(Array.from({ length: poolSize }, (_, slot) => slot));
 
+  $effect(() => {
+    const tracks = currentTracks;
+    const top = scrollTop - headerHeight;
+    const order = rowFocusOrder({
+      firstRow,
+      endRow,
+      visibleFirst: Math.max(0, Math.floor(top / ROW_HEIGHT)),
+      visibleLast: Math.ceil((top + viewportHeight) / ROW_HEIGHT) - 1,
+      rowCount: tracks.length,
+      rowsPerFrame,
+    });
+    const wanted = order.map((i) => tracks[i]).filter(Boolean);
+    requestRowPreviews(wanted);
+    untrack(() => artwork.focusRows(rowFocusOwner, wanted.map((t) => ({ id: t.id, hasArtwork: t.raw?.has_artwork }))));
+  });
+
+  onDestroy(() => artwork.focusRows(rowFocusOwner, []));
+  const analysisFocus = createAnalysisFocus(focusAnalysis);
+  let onScreen = $derived(rowsOnScreen({ scrollTop, viewportHeight, headerHeight, rowCount: currentTracks.length }));
+  $effect(() => {
+    if (embedded || isUsbView || viewportHeight === 0) return;
+    analysisFocus.request(currentTracks, onScreen.first, onScreen.end);
+  });
+  $effect(() => () => analysisFocus.dispose());
+
+  const detailPrefetcher = createDetailPrefetcher(prefetchWaveformDetail);
+
   function prefetchNeighbours(rowIndex) {
     const neighbours = [currentTracks[rowIndex + 1], currentTracks[rowIndex - 1]];
     prefetchAnalysisData(neighbours.filter((t) => t?.analyzed).map((t) => t.id));
+    detailPrefetcher.request([currentTracks[rowIndex], currentTracks[rowIndex + 1], currentTracks[rowIndex + 2]].filter(Boolean).map((t) => t.id));
   }
 
   function handleRowClick(track, event, rowIndex) {
@@ -184,6 +390,7 @@
       return;
     }
     if (dragging || marqueeActive) return;
+    cursorIndex = rowIndex;
     if (event.shiftKey && lastSelectedId !== null) {
       selectRange(lastSelectedId, track.id, currentTracks);
     } else if (event.metaKey || event.ctrlKey) {
@@ -198,16 +405,110 @@
 
   function handleRowDblClick(track, event) {
     event.preventDefault();
+    openTrack(track, !!event.target.closest?.('[data-wave-seek]'));
+  }
+
+  function openTrack(track, fromWave) {
     if (dragging || isUsbView) return;
     select(track.id);
     lastSelectedId = track.id;
-    if (player.track?.id === track.id && !player.loading && event.target.closest?.('[data-wave-seek]')) {
+    if (player.track?.id === track.id && !player.loading && fromWave) {
       if (!player.playing) void play();
     } else if (player.track?.id === track.id && !player.loading) {
       void playFromStart();
     } else {
       queuePlayAfterLoad();
       void loadPlayerTrack(track);
+    }
+  }
+
+  function rowId(index) {
+    return `${uid}-row-${index}`;
+  }
+
+  function revealRow(index) {
+    if (!tableScrollEl) return;
+    const header = headerHeight || tableScrollEl.querySelector('.ff-colh')?.offsetHeight || 0;
+    const top = scrollTopToReveal(index, {
+      scrollTop: tableScrollEl.scrollTop,
+      viewportHeight: tableScrollEl.clientHeight,
+      headerHeight: header,
+      rowCount: currentTracks.length,
+    });
+    if (top !== tableScrollEl.scrollTop) tableScrollEl.scrollTop = top;
+  }
+
+  function moveCursor(from, to, event) {
+    const index = Math.min(Math.max(to, 0), currentTracks.length - 1);
+    const track = currentTracks[index];
+    cursorIndex = index;
+    if (event.shiftKey) {
+      if (lastSelectedId === null) lastSelectedId = currentTracks[Math.max(from, 0)]?.id ?? track.id;
+      const anchor = Math.max(0, currentTracks.findIndex((t) => t.id === lastSelectedId));
+      setSelection(currentTracks.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map((t) => t.id));
+    } else {
+      select(track.id);
+      lastSelectedId = track.id;
+      prefetchNeighbours(index);
+    }
+    revealRow(index);
+  }
+
+  function openRowMenuAtCursor(index) {
+    const track = currentTracks[index];
+    if (!track) return;
+    const rect = (tableBodyEl.querySelector(`[data-row-index="${index}"]`) ?? tableBodyEl).getBoundingClientRect();
+    closeTableMenus();
+    rowMenu = { open: true, x: rect.left + 24, y: rect.bottom, trackId: track.id };
+  }
+
+  async function moveSelectionByKey(direction) {
+    const playlist = activePlaylist;
+    if (!canReorderRows || !playlist || currentTracks.length !== playlist.track_ids.length) return;
+    const order = currentTracks.map((t) => t.id);
+    const next = moveSelectedByOne(order, selection.ids, direction);
+    if (!next) {
+      announce(direction === 'up' ? 'Already at the top' : 'Already at the bottom');
+      return;
+    }
+    const cursorId = currentTracks[cursorIndex]?.id;
+    await reorderPlaylistTracks(playlist.id, next);
+    const newCursor = next.indexOf(cursorId);
+    if (newCursor >= 0) cursorIndex = newCursor;
+    revealRow(cursorIndex);
+    const count = selection.ids.size;
+    const where = `position ${cursorIndex + 1} of ${next.length}`;
+    announce(count === 1 ? `Moved ${currentTracks[cursorIndex]?.title ?? 'track'} ${direction}, ${where}` : `Moved ${count} tracks ${direction}, cursor at ${where}`);
+  }
+
+  function onListKeydown(e) {
+    if (e.target !== e.currentTarget || currentTracks.length === 0) return;
+    if (e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      void moveSelectionByKey(e.key === 'ArrowUp' ? 'up' : 'down');
+      return;
+    }
+    if (e.altKey) return;
+    const last = currentTracks.length - 1;
+    const stored = cursorIndex >= 0 && cursorIndex <= last ? cursorIndex : currentTracks.findIndex((t) => selection.ids.has(t.id));
+    const page = Math.max(1, Math.floor(((tableScrollEl?.clientHeight ?? 0) - headerHeight) / ROW_HEIGHT) - 1);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault();
+      setSelection(currentTracks.map((t) => t.id));
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) return;
+    const targets = { ArrowDown: stored + 1, ArrowUp: stored - 1, PageDown: stored + page, PageUp: stored - page, Home: 0, End: last };
+    if (e.key in targets) {
+      e.preventDefault();
+      moveCursor(stored, targets[e.key], e);
+    } else if (e.key === 'Enter' && stored >= 0) {
+      e.preventDefault();
+      openTrack(currentTracks[stored], false);
+    } else if ((e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) && stored >= 0) {
+      e.preventDefault();
+      if (!selection.ids.has(currentTracks[stored].id)) select(currentTracks[stored].id);
+      openRowMenuAtCursor(stored);
     }
   }
 
@@ -309,6 +610,7 @@
 
   function onRowPointerDown(e, track, index) {
     if (isUsbView || e.button !== 0) return;
+    detailPrefetcher.now(track.id);
     const target = e.target;
     if (target.closest?.('.ff-colh__resize-handle') || target.closest?.('[data-wave-seek]') || target.closest?.('[data-rate]')) return;
     e.preventDefault();
@@ -554,12 +856,14 @@
     const trackId = rowMenu.trackId;
     if (trackId == null) return [];
     const ids = selection.ids.has(trackId) ? [...selection.ids] : [trackId];
-    return buildTrackContextMenuItems({
+    const items = buildTrackContextMenuItems({
       trackIds: ids,
       activePlaylist,
       isUsbView,
       onTracksRemoved: () => clearSelection(),
     });
+    if (ids.length !== 1 || isUsbView || !isUnplayable(fileStateOf(trackId))) return items;
+    return [{ label: 'Locate file…', onClick: () => void locateTrack(trackId) }, { isSeparator: true }, ...items];
   }
 
 </script>
@@ -569,11 +873,14 @@
   class="ff-table"
   class:ff-table--embedded={embedded}
   class:ff-table--drop-target={isDropTarget}
+  style={columnVars(columns)}
   data-source-id={effectiveSource}
   onmousedown={() => {}}
   oncontextmenu={openListMenu}
 >
-  {#if showLibraryEmpty}
+  {#if showOpenFailure}
+    <LibraryRecoveryPanel />
+  {:else if showLibraryEmpty}
     <div class="ff-table__empty-container">
       <EmptyState
         title="No tracks loaded"
@@ -593,6 +900,7 @@
     <div
       class="ff-table__scroll"
       class:ff-table__scroll--dragging={dragging && embedded}
+      class:ff-table__scroll--scrolling={scrolling}
       bind:this={tableScrollEl}
       bind:clientHeight={viewportHeight}
       onscroll={onTableScroll}
@@ -623,8 +931,17 @@
         data-row-count={currentTracks.length}
         data-organize-drop={organize ? 'true' : undefined}
         bind:this={tableBodyEl}
-        style:height={spacerHeight(currentTracks.length) !== undefined ? `${spacerHeight(currentTracks.length)}px` : undefined}
-        role="list"
+        style:height={spacerHeight(shownTracks.length) !== undefined ? `${spacerHeight(shownTracks.length)}px` : undefined}
+        data-table-boot={booting ? '' : undefined}
+        aria-busy={booting ? 'true' : undefined}
+        inert={booting}
+        role="listbox"
+        tabindex="0"
+        data-focus-first
+        aria-label="Tracks"
+        aria-multiselectable="true"
+        aria-activedescendant={cursorIndex >= firstRow && cursorIndex < endRow && !booting ? rowId(cursorIndex) : undefined}
+        onkeydown={onListKeydown}
         ondragover={(e) => e.preventDefault()}
         onpointerdown={onBodyPointerDown}
         onselectstart={(e) => e.preventDefault()}
@@ -634,7 +951,15 @@
           <DropLine />
         </div>
       {/if}
-      {#if currentTracks.length === 0}
+      {#if shownTracks.length === 0 && !library.tracksLoaded}
+        <div class="ff-table__skeleton" data-table-skeleton aria-busy="true">
+          {@html skeletonRowsHtml(columns, SKELETON_ROWS)}
+        </div>
+      {:else if shownTracks.length === 0 && pendingRows.length > 0}
+        <div class="ff-table__pending" data-table-pending aria-busy="true" title="Importing — these tracks are not analysed yet">
+          {@html pendingRowsHtml(columns, pendingRows.slice(0, PENDING_ROWS_SHOWN))}
+        </div>
+      {:else if shownTracks.length === 0}
         <div class="ff-table__empty-container ff-table__empty-drop">
           <EmptyState
             title="No tracks in this view"
@@ -646,13 +971,23 @@
       {:else}
         {#each poolSlots as slot (slot)}
           {@const index = indexForSlot(slot, firstRow, poolSize)}
-          {@const track = index < endRow ? currentTracks[index] : undefined}
+          {@const track = index < endRow ? shownTracks[index] : undefined}
+          {@const fileState = track && !isUsbView ? fileStateOf(track.id) : undefined}
           <!-- svelte-ignore a11y_click_events_have_key_events -->
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div
             class="ff-table__row"
-            data-track-row={track ? '' : undefined}
+            data-track-row={track && !booting ? '' : undefined}
+            data-boot-row={track && booting ? '' : undefined}
             data-row-index={index}
+            data-cursor={index === cursorIndex ? '' : undefined}
+            id={rowId(index)}
+            role={track ? 'option' : undefined}
+            aria-selected={track ? selection.ids.has(track.id) : undefined}
+            aria-posinset={track ? index + 1 : undefined}
+            aria-setsize={track ? shownTracks.length : undefined}
+            data-file-status={fileState}
+            title={fileState ? fileStateTooltip(fileState, track.filePath) : undefined}
             style:top="{rowTop(index)}px"
             style:display={track ? undefined : 'none'}
             onclick={(e) => track && handleRowClick(track, e, index)}
@@ -665,8 +1000,9 @@
               state={track ? rowState(track) : 'rest'}
               analyzing={track ? isTrackAnalyzing(track.id) : false}
               {columns}
-              onWaveSeek={track && !isUsbView ? (progress) => loadTrackAt(track, progress) : undefined}
-              onRate={track && !isUsbView ? (stars) => void commitTrackRating(track.id, stars) : undefined}
+              hold={flingHeld}
+              onWaveSeek={track && !isUsbView && !booting ? (progress) => loadTrackAt(track, progress) : undefined}
+              onRate={track && !isUsbView && !booting ? (stars) => void commitTrackRating(track.id, stars) : undefined}
             />
           </div>
         {/each}
@@ -676,29 +1012,35 @@
   {/if}
 </div>
 
-<ContextMenu
-  open={columnMenu.open}
-  x={columnMenu.x}
-  y={columnMenu.y}
-  items={columnMenuItems()}
-  onClose={() => (columnMenu = { ...columnMenu, open: false })}
-/>
+{#if columnMenu.open}
+  <ContextMenu
+    open
+    x={columnMenu.x}
+    y={columnMenu.y}
+    items={columnMenuItems()}
+    onClose={() => (columnMenu = { ...columnMenu, open: false })}
+  />
+{/if}
 
-<ContextMenu
-  open={rowMenu.open}
-  x={rowMenu.x}
-  y={rowMenu.y}
-  items={rowMenuItems()}
-  onClose={() => (rowMenu = { ...rowMenu, open: false, trackId: null })}
-/>
+{#if rowMenu.open}
+  <ContextMenu
+    open
+    x={rowMenu.x}
+    y={rowMenu.y}
+    items={rowMenuItems()}
+    onClose={() => (rowMenu = { ...rowMenu, open: false, trackId: null })}
+  />
+{/if}
 
-<ContextMenu
-  open={listMenu.open}
-  x={listMenu.x}
-  y={listMenu.y}
-  items={listMenuItems()}
-  onClose={() => (listMenu = { ...listMenu, open: false })}
-/>
+{#if listMenu.open}
+  <ContextMenu
+    open
+    x={listMenu.x}
+    y={listMenu.y}
+    items={listMenuItems()}
+    onClose={() => (listMenu = { ...listMenu, open: false })}
+  />
+{/if}
 
 <DragGhost
   visible={dnd.kind === 'tracks'}
@@ -723,6 +1065,9 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
+  }
+  .ff-table__scroll--scrolling :global(.ff-waveform--analysing) {
+    animation: none;
   }
   .ff-table__scroll--dragging {
     overflow: hidden;
@@ -754,6 +1099,13 @@
   .ff-table__body--marquee {
     cursor: default;
   }
+  .ff-table__body:focus {
+    outline: none;
+  }
+  .ff-table__body:focus-visible .ff-table__row[data-cursor] {
+    outline: 1px solid var(--ff-accent);
+    outline-offset: -1px;
+  }
   .ff-table {
     -webkit-user-select: none;
     user-select: none;
@@ -765,6 +1117,36 @@
     height: 28px;
     contain: layout paint style;
     cursor: default;
+  }
+  .ff-table__row :global(.ff-trow__cell--status) {
+    justify-content: center;
+    padding: 0;
+  }
+  .ff-table__row[data-file-status] :global(.ff-trow__cell--status .ff-trow__text) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    font: 700 10px / 1 var(--ff-font-mono);
+  }
+  .ff-table__row[data-file-status='missing'] :global(.ff-trow__cell--status .ff-trow__text) {
+    background: color-mix(in srgb, var(--ff-status-warn) 16%, transparent);
+    color: var(--ff-status-warn);
+  }
+  .ff-table__row[data-file-status='error'] :global(.ff-trow__cell--status .ff-trow__text) {
+    background: var(--ff-danger-bg);
+    color: var(--ff-danger);
+  }
+  .ff-table__row[data-file-status='relocated'] :global(.ff-trow__cell--status .ff-trow__text) {
+    background: color-mix(in srgb, var(--ff-status-online) 14%, transparent);
+    color: var(--ff-status-online);
+  }
+  .ff-table__row[data-file-status='missing'] :global(.ff-trow__cell:not(.ff-trow__cell--status)),
+  .ff-table__row[data-file-status='error'] :global(.ff-trow__cell:not(.ff-trow__cell--status)) {
+    opacity: 0.45;
   }
   .ff-table__empty-container {
     display: flex;
@@ -778,6 +1160,65 @@
   .ff-table__empty-container :global(.ff-empty-state) {
     width: 100%;
     max-width: 480px;
+  }
+  .ff-table__skeleton {
+    animation: ff-table-skeleton-pulse 1.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row) {
+    height: 28px;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow:hover) {
+    background: none;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--text::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--wave::before) {
+    content: '';
+    display: block;
+    flex: none;
+    height: 8px;
+    border-radius: 3px;
+    background: var(--ff-elev);
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--text::before) {
+    width: var(--skeleton-text);
+    max-width: 100%;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--index::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--bpm::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--time::before),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--key::before) {
+    width: 70%;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--text .ff-trow__text),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--wave > *),
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__star) {
+    display: none;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cell--wave::before) {
+    width: 100%;
+    height: 14px;
+  }
+  .ff-table__skeleton :global(.ff-table__skeleton-row .ff-trow__cover) {
+    border-color: transparent;
+  }
+  .ff-table__pending {
+    animation: ff-table-skeleton-pulse 1.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .ff-table__pending :global(.ff-table__pending-row) {
+    height: 28px;
+  }
+  .ff-table__pending :global(.ff-table__pending-row .ff-trow__text) {
+    color: var(--ff-text-mid);
+  }
+  .ff-table__pending :global(.ff-table__pending-row .ff-trow__cover) {
+    border-color: transparent;
+    background: var(--ff-elev);
+  }
+  @keyframes ff-table-skeleton-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
   }
   .ff-table__empty-drop:global(.ff-table__empty-drop) {
     min-height: 120px;

@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::command_error::CommandError;
+
 pub fn list_removable_volumes() -> Result<Vec<String>, String> {
     let mut volumes: Vec<String> = candidate_volumes()?
         .into_iter()
@@ -10,10 +12,10 @@ pub fn list_removable_volumes() -> Result<Vec<String>, String> {
     Ok(volumes)
 }
 
-pub fn require_removable_volume(path: &Path) -> Result<(), String> {
+pub fn require_removable_volume(path: &Path) -> Result<(), CommandError> {
     let canonical = path
         .canonicalize()
-        .map_err(|e| format!("Cannot resolve {}: {e}", path.display()))?;
+        .map_err(|e| CommandError::from_io(&e, format!("Cannot resolve {}: {e}", path.display())).with_path(path).for_stick())?;
     #[cfg(test)]
     if fake_volumes::contains(&canonical) {
         return Ok(());
@@ -26,7 +28,7 @@ pub fn require_removable_volume(path: &Path) -> Result<(), String> {
     if is_listed {
         Ok(())
     } else {
-        Err(format!("{} is not a removable volume.", path.display()))
+        Err(CommandError::other(format!("{} is not a removable volume.", path.display())).with_path(path))
     }
 }
 
@@ -115,8 +117,17 @@ fn candidate_volumes() -> Result<Vec<PathBuf>, String> {
 }
 
 #[cfg(target_os = "windows")]
-fn is_removable(_path: &Path) -> bool {
-    true
+fn is_removable(path: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDriveTypeW(root_path_name: *const u16) -> u32;
+    }
+    const DRIVE_REMOVABLE: u32 = 2;
+
+    let root: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    unsafe { GetDriveTypeW(root.as_ptr()) == DRIVE_REMOVABLE }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -150,11 +161,39 @@ fn sysfs_removable_flag(device: &str) -> Option<bool> {
         .map(|flag| flag.trim() == "1")
 }
 
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn mount_device(mount_point: &Path) -> Option<String> {
+    let mounts = std::fs::read_to_string("/proc/mounts").ok()?;
+    device_for_mount_point(&mounts, mount_point)
+}
+
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+fn device_for_mount_point(proc_mounts: &str, mount_point: &Path) -> Option<String> {
+    parse_mounts(proc_mounts)
+        .into_iter()
+        .find(|entry| Path::new(&entry.mount_point) == mount_point)
+        .map(|entry| entry.device)
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn plist_says_removable(xml: &str) -> bool {
-    ["Ejectable", "RemovableMediaOrExternalDevice", "RemovableMedia"]
-        .iter()
-        .any(|key| plist_bool(xml, key) == Some(true))
+    !plist_is_disk_image(xml)
+        && ["Ejectable", "RemovableMediaOrExternalDevice", "RemovableMedia"]
+            .iter()
+            .any(|key| plist_bool(xml, key) == Some(true))
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn plist_is_disk_image(xml: &str) -> bool {
+    plist_string(xml, "BusProtocol").as_deref() == Some("Disk Image")
+        || plist_string(xml, "VirtualOrPhysical").as_deref() == Some("Virtual")
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn plist_string(xml: &str, key: &str) -> Option<String> {
+    let after_key = xml.split(&format!("<key>{key}</key>")).nth(1)?;
+    let value = after_key.trim_start().strip_prefix("<string>")?;
+    Some(value.split("</string>").next()?.to_string())
 }
 
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -236,6 +275,16 @@ fn unescape_mount_point(raw: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn finds_the_device_behind_a_mount_point() {
+        let mounts = "/dev/sda1 /media/dj/MY\\040STICK vfat rw 0 0\n/dev/nvme0n1p2 / ext4 rw 0 0\n";
+        assert_eq!(
+            device_for_mount_point(mounts, Path::new("/media/dj/MY STICK")).as_deref(),
+            Some("/dev/sda1")
+        );
+        assert_eq!(device_for_mount_point(mounts, Path::new("/media/dj/other")), None);
+    }
+
     const BOOT_PLIST: &str = "<dict><key>Ejectable</key><false/><key>RemovableMedia</key><false/>\
         <key>RemovableMediaOrExternalDevice</key><false/></dict>";
     const STICK_PLIST: &str = "<dict><key>Ejectable</key>\n<true/>\n<key>RemovableMedia</key>\n<true/></dict>";
@@ -248,6 +297,20 @@ mod tests {
     #[test]
     fn ejectable_stick_plist_is_removable() {
         assert!(plist_says_removable(STICK_PLIST));
+    }
+
+    #[test]
+    fn mounted_disk_image_is_not_removable() {
+        let installer = "<dict><key>BusProtocol</key>\n<string>Disk Image</string>\n<key>Ejectable</key>\n<true/>\n\
+            <key>RemovableMedia</key>\n<true/>\n<key>RemovableMediaOrExternalDevice</key>\n<true/></dict>";
+        assert!(!plist_says_removable(installer));
+    }
+
+    #[test]
+    fn usb_stick_with_bus_protocol_is_removable() {
+        let stick = "<dict><key>BusProtocol</key>\n<string>USB</string>\n<key>Ejectable</key>\n<true/>\n\
+            <key>VirtualOrPhysical</key>\n<string>Physical</string></dict>";
+        assert!(plist_says_removable(stick));
     }
 
     #[test]

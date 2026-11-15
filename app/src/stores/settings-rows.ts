@@ -1,12 +1,9 @@
 import { getIsTauri } from '../services/tauri.svelte.ts';
 import {
-  ANALYSIS_ENGINE_CHOICES,
   appSettings,
   changeBufferFrames,
   changeSampleRate,
-  setAnalysisEngine,
   setAutoAnalyzeNew,
-  type AnalysisEngineChoice,
 } from './app-settings.svelte.ts';
 import { BUFFER_FRAME_OPTIONS, SAMPLE_RATE_OPTIONS, playbackSettings } from './playback-settings.svelte.ts';
 import { openSettings } from './ui.svelte.ts';
@@ -14,10 +11,12 @@ import type { PaletteSettingSource } from '../shortcuts/palette-model.ts';
 
 export const SETTINGS_PAGES = [
   { key: 'library', label: 'Library', keywords: ['rekordbox', 'import', 'folder', 'path', 'database'] },
+  { key: 'backup', label: 'Backup', keywords: ['export', 'restore', 'save', 'archive'] },
   { key: 'analysis', label: 'Analysis', keywords: ['bpm', 'key', 'engine', 'auto', 'detect'] },
   { key: 'audio', label: 'Audio', keywords: ['output', 'device', 'sample', 'buffer', 'latency', 'sound'] },
   { key: 'keyboard', label: 'Keyboard', keywords: ['shortcuts', 'keys', 'bindings', 'hotkeys'] },
   { key: 'advanced', label: 'Advanced', keywords: ['reset', 'debug', 'developer'] },
+  { key: 'about', label: 'About', keywords: ['version', 'icon', 'credits', 'licence', 'license'] },
 ] as const;
 
 export type SettingsPageKey = (typeof SETTINGS_PAGES)[number]['key'];
@@ -32,7 +31,6 @@ function cycle(options: ReadonlyArray<{ value: string }>, current: string): stri
 }
 
 export function buildSettingSources(audioAvailable: boolean = getIsTauri()): PaletteSettingSource[] {
-  const engineOptions = [...ANALYSIS_ENGINE_CHOICES];
   const sampleRateOptions = numberChoices(SAMPLE_RATE_OPTIONS);
   const bufferOptions = numberChoices(BUFFER_FRAME_OPTIONS);
 
@@ -43,13 +41,6 @@ export function buildSettingSources(audioAvailable: boolean = getIsTauri()): Pal
       keywords: ['auto', 'import', 'automatic'],
       control: { kind: 'switch', on: appSettings.autoAnalyzeNew },
       change: () => void setAutoAnalyzeNew(!appSettings.autoAnalyzeNew),
-    },
-    {
-      id: 'analysis.engine',
-      label: 'Settings: Analysis engine',
-      control: { kind: 'choice', value: appSettings.analysisEngine, options: engineOptions },
-      change: (value) =>
-        void setAnalysisEngine((value ?? cycle(engineOptions, appSettings.analysisEngine)) as AnalysisEngineChoice),
     },
   ];
 

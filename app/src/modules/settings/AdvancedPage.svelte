@@ -1,6 +1,7 @@
 <script>
   import { SettingRow, Button } from '$ds';
   import { library, resetLibraryDatabase } from '../../stores/library.svelte.ts';
+  import { checkLibraryAgain } from '../../stores/file-health.svelte.ts';
 
   let busy = $derived(library.analyzing || library.syncing);
   let confirmOpen = $state(false);
@@ -10,6 +11,7 @@
     resetting = true;
     try {
       await resetLibraryDatabase();
+      void checkLibraryAgain();
       confirmOpen = false;
     } catch {
       confirmOpen = false;

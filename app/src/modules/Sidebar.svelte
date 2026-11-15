@@ -2,7 +2,7 @@
   Sidebar.svelte — Left navigation with playlist drop targets and row reorder.
 -->
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, untrack } from 'svelte';
   import { SidebarSection, SidebarRow, ContextMenu, Dialog, Button, ResizeHandle } from '$ds';
   import { getIsTauri } from '../services/tauri.svelte.ts';
   import {
@@ -30,7 +30,7 @@
   import { PANEL_WIDTH } from '../lib/panelWidth.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
-  import { dnd, endDrag } from '../stores/dnd.svelte.ts';
+  import { dnd, endDrag, stickTargetAt, updatePointer } from '../stores/dnd.svelte.ts';
   import { dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
   import {
     sidebarSelection,
@@ -42,6 +42,7 @@
   import { outermostIds, playlistIdsInSelection } from '../lib/playlistSelection.ts';
   import { toggleFolder } from '../stores/sidebar-folders.svelte.ts';
   import { resetActiveRowIfDeleted } from '../stores/sidebar-delete.ts';
+  import SearchIconButton from './SearchIconButton.svelte';
 
   let intervalId;
   let renamingPlaylistId = $state(null);
@@ -70,7 +71,20 @@
     if (intervalId) clearInterval(intervalId);
   });
 
-  let playlistRowOrder = $derived(library.sidebarData.playlists.rows.map((row) => row.id));
+  const sidebarData = $derived(library.sidebarData);
+
+  let playlistRowsRevealed = $state(false);
+  let playlistRowsScheduled = false;
+
+  $effect(() => {
+    if (playlistRowsScheduled) return;
+    if (!library.tracksLoaded && library.playlists.length === 0) return;
+    playlistRowsScheduled = true;
+    untrack(() => requestAnimationFrame(() => requestAnimationFrame(() => (playlistRowsRevealed = true))));
+  });
+
+  const shownPlaylistRows = $derived(playlistRowsRevealed ? sidebarData.playlists.rows : []);
+  let playlistRowOrder = $derived(sidebarData.playlists.rows.map((row) => row.id));
 
   $effect(() => {
     pruneSidebarSelection(new Set(library.playlists.map((p) => p.id)));
@@ -178,15 +192,19 @@
   );
 
   function sidebarRowState(label, playlistId = null, isFolder = false) {
-    if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'selected';
+    if (playlistId != null && isDropTarget(playlistId)) return 'selected';
     if (playlistId != null && isMultiSelected(playlistId)) return 'selected';
     if (!isFolder && ui.activeSidebarRow === label) return 'active';
     if (playlistId != null && playlistDragIds.includes(playlistId)) return 'hover';
     return 'rest';
   }
 
+  function isDropTarget(playlistId) {
+    return dnd.dropPlaylistId === playlistId || dnd.dropFolderId === playlistId;
+  }
+
   function rowClassExtra(playlistId) {
-    if (playlistId != null && dnd.dropPlaylistId === playlistId) return 'drag-over';
+    if (playlistId != null && isDropTarget(playlistId)) return 'drag-over';
     if (playlistId != null && playlistDragIds.includes(playlistId)) return 'drag-source';
     if (playlistId != null && playlistDrop?.id === playlistId) return `drop-${playlistDrop.placement}`;
     return '';
@@ -318,6 +336,38 @@
     };
   }
 
+  function openMenuFromKeyboard(e) {
+    const row = e.target instanceof Element ? e.target.closest('.ff-sbrow') : null;
+    if (!row || e.target !== row) return;
+    e.preventDefault();
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 16,
+        clientY: rect.bottom - 4,
+      }),
+    );
+  }
+
+  function onSidebarKeydown(e) {
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      openMenuFromKeyboard(e);
+      return;
+    }
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const row = e.target instanceof Element ? e.target.closest('.ff-sbrow') : null;
+    if (!row || e.target !== row) return;
+    const rows = [...e.currentTarget.querySelectorAll('.ff-sbrow[tabindex="0"]')];
+    const at = rows.indexOf(row);
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    const next = e.key === 'Home' ? rows[0] : e.key === 'End' ? rows[rows.length - 1] : rows[at + step];
+    e.preventDefault();
+    next?.focus();
+  }
+
   function onPlaylistRowPointerDown(e, playlistId, isFolder = false) {
     if (e.button !== 0 || renamingPlaylistId === playlistId) return;
     let moved = false;
@@ -330,12 +380,14 @@
         moved = true;
         playlistDragIds = dragIds;
         dnd.kind = 'playlist';
+        dnd.playlistDragIds = dragIds;
+        dnd.playlistDragFromStick = null;
       }
       if (moved) {
-        const stick = !stickDroppable
-          ? null
-          : document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-drop-stick-path]');
-        dnd.dropStickPath = stick ? stick.getAttribute('data-drop-stick-path') : null;
+        updatePointer(ev.clientX, ev.clientY);
+        const stick = stickDroppable ? stickTargetAt(ev.clientX, ev.clientY) : { path: null, surface: null };
+        dnd.dropStickPath = stick.path;
+        dnd.dropStickSurface = stick.surface;
         playlistDrop = playlistDropAt(ev.clientX, ev.clientY);
       }
     }
@@ -356,7 +408,8 @@
   }
 </script>
 
-<div class="ff-sidebar" style:width="{ui.sidebarWidth}px">
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+<div class="ff-sidebar" role="navigation" aria-label="Library and playlists" style:width="{ui.sidebarWidth}px" onkeydown={onSidebarKeydown}>
   <ResizeHandle
     edge="right"
     label="Resize sidebar"
@@ -379,13 +432,16 @@
         <span class="ff-sidebar__dot ff-sidebar__dot--max"></span>
       </div>
     {/if}
+    {#if ui.searchMode === 'sidebar'}
+      <span class="ff-sidebar__search"><SearchIconButton /></span>
+    {/if}
   </div>
   <div class="ff-sidebar__top">
     <SidebarSection
-      label={library.sidebarData.favorites.label}
+      label={sidebarData.favorites.label}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'favorites')}
     >
-      {#each library.sidebarData.favorites.rows as row}
+      {#each sidebarData.favorites.rows as row}
         {@const pl = library.playlists.find(p => p.name === row.label && !p.is_folder)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -420,10 +476,10 @@
     </SidebarSection>
 
     <SidebarSection
-      label={library.sidebarData.library.label}
+      label={sidebarData.library.label}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'library')}
     >
-      {#each library.sidebarData.library.rows as row}
+      {#each sidebarData.library.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           oncontextmenu={(e) => openSourceMenu(e, row.label, row.label)}
@@ -441,13 +497,13 @@
     </SidebarSection>
 
     <SidebarSection
-      label={library.sidebarData.playlists.label}
+      label={sidebarData.playlists.label}
       showAdd
       addDropActive={dnd.dropNewPlaylist}
       onAdd={handleAddPlaylist}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'playlists')}
     >
-      {#each library.sidebarData.playlists.rows as row}
+      {#each shownPlaylistRows as row}
         {@const isFolder = row.kind === 'folder'}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
@@ -490,15 +546,16 @@
 
   <div class="ff-sidebar__bottom">
     <SidebarSection
-      label={library.sidebarData.usb.label}
+      label={sidebarData.usb.label}
       onHeaderContextMenu={(e) => openSectionMenu(e, 'usb')}
     >
-      {#each library.sidebarData.usb.rows as row}
+      {#each sidebarData.usb.rows as row}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap"
-          class:drag-over={(dnd.kind === 'playlist' || dnd.kind === 'tracks') && dnd.dropStickPath === row.path}
+          class:drag-over={(dnd.kind === 'playlist' || dnd.kind === 'tracks') && dnd.dropStickPath === row.path && dnd.dropStickSurface === 'row'}
           data-drop-stick-path={row.path}
+          data-drop-surface="row"
           oncontextmenu={(e) => openSourceMenu(e, row.path, row.label, true, row.path)}
         >
           <SidebarRow
@@ -515,33 +572,37 @@
   </div>
 </div>
 
-<ContextMenu
-  open={contextMenu.open}
-  x={contextMenu.x}
-  y={contextMenu.y}
-  items={contextMenuItems()}
-  onClose={closeContextMenu}
-/>
+{#if contextMenu.open}
+  <ContextMenu
+    open
+    x={contextMenu.x}
+    y={contextMenu.y}
+    items={contextMenuItems()}
+    onClose={closeContextMenu}
+  />
+{/if}
 
-<Dialog
-  open={removeFavoriteDialog != null}
-  title="Remove favorite?"
-  bodyText={removeFavoriteDialogBody}
-  onClose={() => (removeFavoriteDialog = null)}
->
-  {#snippet actions()}
-    <Button
-      label="Cancel"
-      variant="ghost"
-      onclick={() => (removeFavoriteDialog = null)}
-    />
-    <Button
-      label="Remove"
-      variant="destructive"
-      onclick={() => removeFavoriteDialog && commitRemoveFavorite(removeFavoriteDialog.id)}
-    />
-  {/snippet}
-</Dialog>
+{#if removeFavoriteDialog != null}
+  <Dialog
+    open
+    title="Remove favorite?"
+    bodyText={removeFavoriteDialogBody}
+    onClose={() => (removeFavoriteDialog = null)}
+  >
+    {#snippet actions()}
+      <Button
+        label="Cancel"
+        variant="ghost"
+        onclick={() => (removeFavoriteDialog = null)}
+      />
+      <Button
+        label="Remove"
+        variant="destructive"
+        onclick={() => removeFavoriteDialog && commitRemoveFavorite(removeFavoriteDialog.id)}
+      />
+    {/snippet}
+  </Dialog>
+{/if}
 
 <style>
   .ff-sidebar {
@@ -554,12 +615,21 @@
     border-right: 1px solid var(--ff-border);
   }
   .ff-sidebar__chrome {
+    position: relative;
     display: flex;
     align-items: center;
     /* Room for native traffic lights (trafficLightPosition.x ≈ 14px) */
     padding-left: var(--ff-traffic-light-x);
     padding-right: var(--ff-space-6);
     background: var(--ff-bg);
+  }
+  .ff-sidebar__search {
+    position: absolute;
+    top: 0;
+    right: var(--ff-space-4);
+    display: flex;
+    align-items: center;
+    height: calc(var(--ff-titlebar-search-band-height) - 1px);
   }
   .ff-sidebar__traffic {
     display: flex;

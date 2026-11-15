@@ -7,6 +7,7 @@
   import './settings-sheet.css';
   import Icon from './Icon.svelte';
   import Kbd from './Kbd.svelte';
+  import { trapTab } from '../utils/focus.js';
 
   /** @typedef {{ key: string, label: string, status?: string }} SheetPage */
 
@@ -28,11 +29,17 @@
   });
 
   function onKeydown(e) {
+    if (sheetEl) trapTab(e, sheetEl);
     if (e.key === 'Escape' && !e.defaultPrevented) {
       e.preventDefault();
       e.stopPropagation();
       onClose?.();
     }
+  }
+
+  function closeOnEscapeOutsideSvelteDelegation(el) {
+    el.addEventListener('keydown', onKeydown);
+    return () => el.removeEventListener('keydown', onKeydown);
   }
 </script>
 
@@ -40,15 +47,14 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="ff-settings-scrim ff-settings-screen" onclick={(e) => e.target === e.currentTarget && onClose?.()}>
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       bind:this={sheetEl}
+      {@attach closeOnEscapeOutsideSvelteDelegation}
       class="ff-settings-sheet"
       role="dialog"
       aria-modal="true"
       aria-label="Preferences"
       tabindex="-1"
-      onkeydown={onKeydown}
     >
       <div class="ff-settings-sheet__top">
         <span class="ff-settings-sheet__title">Preferences</span>
@@ -65,6 +71,7 @@
               class="ff-settings-sheet__nav-item"
               class:ff-settings-sheet__nav-item--on={page.key === activeKey}
               data-page={page.key}
+              aria-current={page.key === activeKey ? 'page' : undefined}
               onclick={() => onSelect?.(page.key)}
             >
               <span class="ff-settings-sheet__nav-label">{page.label}</span>

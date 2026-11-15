@@ -70,6 +70,7 @@
 </script>
 
 <script>
+  import { untrack } from 'svelte';
   /*
     Static preview for list rows (variant "mini") and the detail pane (variant "strip").
     `look` "envelope" (default, rows) is one loudness envelope; "bands" is the 3-band picture of the
@@ -85,13 +86,16 @@
     look = 'envelope',
     cues = [],
     cueStyle = null,
-    /** Subtle sine wave on placeholder bars while analysis is in progress. */
+    /** Placeholder bars pulse (CSS only) while analysis is in progress. */
     animating = false,
     /** Given: a click seeks, with the track fraction under the pointer. */
     onSeek = undefined,
+    /** While true, new data is not drawn: the canvas hides its old picture and draws once this turns false. */
+    hold = false,
   } = $props();
 
   let canvas;
+  let stale = false;
 
   function seekAt(event) {
     const rect = canvas.getBoundingClientRect();
@@ -146,8 +150,10 @@
     return bitmap;
   }
 
-  function draw(phase = 0) {
+  function draw(phase) {
     if (!canvas) return;
+    stale = false;
+    if (canvas.style.visibility) canvas.style.visibility = '';
     const dpr = window.devicePixelRatio || 1;
     const pixelW = Math.round(width * dpr);
     const pixelH = Math.round(height * dpr);
@@ -205,23 +211,22 @@
     cueStyle;
     animating;
 
-    const data = source();
-    if (animating && !data) {
-      let phase = 0;
-      let live = true;
-      const tick = () => {
-        if (!live) return;
-        phase += 0.11;
-        draw(phase);
-        scheduleDraw(tick);
-      };
-      scheduleDraw(tick);
-      return () => {
-        live = false;
-        cancelDraw(tick);
-      };
+    if (untrack(() => hold)) {
+      stale = true;
+      if (canvas) canvas.style.visibility = 'hidden';
+      return;
     }
+    stale = false;
+    return drawSoon();
+  });
 
+  $effect(() => {
+    if (hold || !stale) return;
+    return drawSoon();
+  });
+
+  function drawSoon() {
+    const data = source();
     const run = () => draw(0);
     if (data && recallBitmap(bitmapKey(window.devicePixelRatio || 1, data))) {
       run();
@@ -229,11 +234,33 @@
     }
     scheduleDraw(run);
     return () => cancelDraw(run);
-  });
+  }
 </script>
 
 <canvas
   bind:this={canvas}
   class="ff-waveform ff-waveform--{variant}"
+  class:ff-waveform--analysing={animating && !source()}
   style:cursor={onSeek ? 'pointer' : null}
   onclick={onSeek ? seekAt : undefined}></canvas>
+
+<style>
+  .ff-waveform--analysing {
+    animation: ff-waveform-analysing 1.1s ease-in-out infinite alternate;
+  }
+
+  @keyframes ff-waveform-analysing {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.35;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ff-waveform--analysing {
+      animation: none;
+    }
+  }
+</style>

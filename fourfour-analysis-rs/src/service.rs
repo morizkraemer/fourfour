@@ -7,52 +7,151 @@ use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, WaveformPreview
 use pioneer_usb_writer::waveform::Waveforms;
 
 use crate::analyze::{analyze_controlled, Analysis, Config, Control};
-use crate::bt::BeatEngine;
+use crate::bt::{chunk_frames, BeatEngine, BeatStatus};
 use crate::keymap::camelot;
 
 pub const MODELS_ENV: &str = "FOURFOUR_MODELS_DIR";
 pub const MEL_MODEL: &str = "mel_spectrogram.onnx";
 pub const BEAT_MODEL: &str = "beat_this.onnx";
+/// `BEAT_MODEL` with its MatMul weights quantized to int8 by `scripts/quantize_beat_int8.py --per-channel` (R97).
+pub const BEAT_MODEL_INT8: &str = "beat_this_q8sc.onnx";
+/// The Mac runs the int8 model on rten (R98, Mac night 3: faster than CoreML at the same CPU, a third of the RAM);
+/// x86 has no int8 dot-product units and keeps fp32 (R97).
+pub const DEFAULT_BEAT_MODEL: &str = if cfg!(target_os = "macos") { BEAT_MODEL_INT8 } else { BEAT_MODEL };
+pub const BEAT_MODEL_ENV: &str = "FOURFOUR_BEAT_MODEL";
+
+pub fn beat_model() -> String {
+    std::env::var(BEAT_MODEL_ENV).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| DEFAULT_BEAT_MODEL.to_string())
+}
+
+/// Packs the GEMM weights once at load instead of on every chunk. It pays for the int8 beat model (R150: -4% CPU,
+/// +25 MB, same output) and not for the fp32 default (no gain, +90-130 MB), so only a non-default model file gets it.
+pub fn prepacks_weights(beat_file: &str) -> bool {
+    beat_file != BEAT_MODEL
+}
 
 pub fn models_present(dir: &Path) -> bool {
-    dir.join(MEL_MODEL).is_file() && dir.join(BEAT_MODEL).is_file()
+    dir.join(MEL_MODEL).is_file() && dir.join(beat_model()).is_file()
+}
+
+pub const ANALYSIS_VERSION: u32 = 2;
+
+pub fn analysis_key(models_dir: Option<&Path>) -> String {
+    let len = |name: &str| models_dir.and_then(|dir| std::fs::metadata(dir.join(name)).ok()).map_or(0, |m| m.len());
+    format!("analysis-{ANALYSIS_VERSION}-{}-{}", len(MEL_MODEL), len(&beat_model()))
 }
 
 pub fn dev_models_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../prototyping/analysis-packaging/models")
 }
 
-pub fn locate_models(app_data_dir: Option<&Path>) -> Option<PathBuf> {
+pub fn model_search_dirs(env_dir: Option<PathBuf>, app_data_dir: Option<&Path>, resource_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = std::env::var_os(MODELS_ENV) {
-        candidates.push(PathBuf::from(dir));
-    }
+    candidates.extend(env_dir);
     if let Some(dir) = app_data_dir {
         candidates.push(dir.join("models"));
     }
+    if let Some(dir) = resource_dir {
+        candidates.push(dir.join("models"));
+    }
     candidates.push(dev_models_dir());
-    candidates.into_iter().find(|d| models_present(d))
+    candidates
+}
+
+pub fn locate_models_in(app_data_dir: Option<&Path>, resource_dir: Option<&Path>) -> Option<PathBuf> {
+    model_search_dirs(std::env::var_os(MODELS_ENV).map(PathBuf::from), app_data_dir, resource_dir)
+        .into_iter()
+        .find(|d| models_present(d))
+}
+
+pub fn locate_models(app_data_dir: Option<&Path>) -> Option<PathBuf> {
+    locate_models_in(app_data_dir, None)
+}
+
+/// Overrides the machine's memory (MB) the analysis plans with, to simulate a smaller machine; available memory is
+/// then half of it at most, as on macOS.
+pub const MEMORY_ENV: &str = "FOURFOUR_ANALYSIS_MEMORY_MB";
+
+fn simulated_memory_mb() -> Option<f64> {
+    std::env::var(MEMORY_ENV).ok().and_then(|v| v.parse::<f64>().ok()).filter(|mb| *mb > 0.0)
+}
+
+fn meminfo_mb(field: &str) -> Option<f64> {
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let kb = text.lines().find(|l| l.starts_with(field))?.split_whitespace().nth(1)?.parse::<f64>().ok()?;
+    Some(kb / 1024.0)
+}
+
+fn sysctl_memory_mb() -> Option<f64> {
+    let out = std::process::Command::new("sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+    let bytes = String::from_utf8(out.stdout).ok()?.trim().parse::<f64>().ok()?;
+    Some(bytes / 1024.0 / 1024.0)
+}
+
+pub fn total_memory_mb() -> f64 {
+    simulated_memory_mb().or_else(|| meminfo_mb("MemTotal:")).or_else(sysctl_memory_mb).unwrap_or(8192.0)
 }
 
 pub fn available_memory_mb() -> f64 {
-    if let Ok(text) = std::fs::read_to_string("/proc/meminfo") {
-        if let Some(kb) = text
-            .lines()
-            .find(|l| l.starts_with("MemAvailable:"))
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|v| v.parse::<f64>().ok())
-        {
-            return kb / 1024.0;
-        }
+    if let Some(mb) = simulated_memory_mb() {
+        return (mb * 0.5).min(meminfo_mb("MemAvailable:").unwrap_or(f64::INFINITY));
     }
-    let total_bytes = std::process::Command::new("sysctl")
-        .args(["-n", "hw.memsize"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .and_then(|s| s.trim().parse::<f64>().ok());
-    total_bytes.map_or(4096.0, |b| b / 1024.0 / 1024.0 * 0.5)
+    meminfo_mb("MemAvailable:").or_else(|| sysctl_memory_mb().map(|mb| mb * 0.5)).unwrap_or(4096.0)
 }
+
+/// Share of the machine's memory the analysis plans to hold: 2 GB on an 8 GB Mac.
+const ANALYSIS_MEMORY_FRACTION: f64 = 0.25;
+/// Model weights and the decoded audio of the tracks in flight, before any beat-model chunk runs.
+const ANALYSIS_BASE_MB: f64 = 600.0;
+/// Activations of one beat-model chunk while it runs (rten builds a fresh buffer pool for every run): about 400 MB
+/// for the 1500 frames CoreML takes (R57), about 120 MB for the 500 frames rten takes (R108, peak RSS against the chunk
+/// threads of a batch). The attention matrices grow with the square of the length, so between the two sizes the
+/// estimate is a straight line through both.
+const CHUNK_ACTIVATION_MB_AT_1500: f64 = 400.0;
+const CHUNK_ACTIVATION_MB_AT_500: f64 = 120.0;
+
+fn chunk_activation_mb(frames: usize) -> f64 {
+    let share = ((frames as f64 - 500.0) / 1000.0).max(0.0);
+    CHUNK_ACTIVATION_MB_AT_500 + (CHUNK_ACTIVATION_MB_AT_1500 - CHUNK_ACTIVATION_MB_AT_500) * share
+}
+
+const CHUNK_BUDGET_CEILING_COREML_MB: u64 = 2048;
+const CHUNK_BUDGET_CEILING_CPU_MB: u64 = 4096;
+
+fn default_chunk_budget_ceiling_mb(runtime: &str) -> u64 {
+    if runtime == "coreml" {
+        CHUNK_BUDGET_CEILING_COREML_MB
+    } else {
+        CHUNK_BUDGET_CEILING_CPU_MB
+    }
+}
+
+fn chunk_budget_ceiling_mb() -> Option<u64> {
+    static CEILING: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    *CEILING.get_or_init(|| match std::env::var("FOURFOUR_CHUNK_BUDGET_MB") {
+        Ok(v) => Some(v.trim().parse().unwrap_or_else(|_| panic!("FOURFOUR_CHUNK_BUDGET_MB must be a whole number of MB, got {v:?}"))),
+        Err(_) => Some(default_chunk_budget_ceiling_mb(crate::bt::beat_runtime())),
+    })
+}
+
+/// Beat-model chunks that may run at once: what fits into a quarter of the machine's memory, and into `mem_fraction`
+/// of what is available now, and under the chunk budget ceiling (2048 MB with CoreML, 4096 MB otherwise, `FOURFOUR_CHUNK_BUDGET_MB` overrides). At least one,
+/// at most `max_threads`.
+pub fn chunk_slots(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64) -> usize {
+    chunk_slots_with_ceiling(max_threads, mem_fraction, total_mb, available_mb, chunk_budget_ceiling_mb(), chunk_activation_mb(chunk_frames()))
+}
+
+fn chunk_slots_with_ceiling(max_threads: usize, mem_fraction: f64, total_mb: f64, available_mb: f64, ceiling_mb: Option<u64>, activation_mb: f64) -> usize {
+    let budget = (total_mb * ANALYSIS_MEMORY_FRACTION).min(available_mb * mem_fraction);
+    let mut slots = ((budget - ANALYSIS_BASE_MB) / activation_mb).floor().max(1.0) as usize;
+    if let Some(ceiling) = ceiling_mb {
+        slots = slots.min((ceiling as f64 / activation_mb).floor().max(1.0) as usize);
+    }
+    slots.min(max_threads.max(1))
+}
+
+/// Caps how many tracks the analysis works on at once (default: as many as it has threads).
+pub const WORKERS_ENV: &str = "FOURFOUR_ANALYSIS_WORKERS";
 
 #[derive(Clone, Debug)]
 pub struct PoolOptions {
@@ -66,7 +165,7 @@ impl Default for PoolOptions {
     fn default() -> Self {
         PoolOptions {
             max_threads: std::thread::available_parallelism().map_or(1, |n| n.get()),
-            max_workers: None,
+            max_workers: std::env::var(WORKERS_ENV).ok().and_then(|v| v.trim().parse().ok()),
             mem_fraction: 0.5,
             rss_mb_per_worker: 900.0,
         }
@@ -104,7 +203,9 @@ pub struct Analyzer {
 
 impl Analyzer {
     pub fn load(models_dir: &Path, pool: PoolOptions) -> Result<Self> {
-        let engine = BeatEngine::load(models_dir, BEAT_MODEL, false)?;
+        let beat_file = beat_model();
+        let engine = BeatEngine::load(models_dir, &beat_file, prepacks_weights(&beat_file))?;
+        engine.share_chunk_threads(chunk_slots(pool.max_threads, pool.mem_fraction, total_memory_mb(), available_memory_mb()));
         Ok(Analyzer { engine: Arc::new(engine), cfg: Config::default(), pool })
     }
 
@@ -115,6 +216,10 @@ impl Analyzer {
 
     pub fn plan(&self, jobs: usize) -> PoolPlan {
         plan_pool(&self.pool, available_memory_mb(), jobs)
+    }
+
+    pub fn beat_status(&self) -> BeatStatus {
+        self.engine.beat_status()
     }
 
     pub fn analyze(&self, path: &Path) -> Result<AnalysisResult> {
@@ -133,11 +238,17 @@ impl Analyzer {
         pass: Pass,
         on_partial: Option<&(dyn Fn(AnalysisResult) + Sync)>,
     ) -> Result<AnalysisResult> {
-        let partial = on_partial.map(|emit| move |w: &Waveforms| emit(waveform_only_result(w)));
+        let partial = on_partial.map(|emit| {
+            move |w: &Waveforms, key: Option<usize>| {
+                let mut result = waveform_only_result(w);
+                result.key = key.map(camelot).unwrap_or_default().to_string();
+                emit(result)
+            }
+        });
         let control = Control {
             cancel: control.cancel,
             pause: control.pause,
-            on_waveform: partial.as_ref().map(|f| f as &(dyn Fn(&Waveforms) + Sync)),
+            on_waveform: partial.as_ref().map(|f| f as &(dyn Fn(&Waveforms, Option<usize>) + Sync)),
         };
         let mut cfg = self.cfg.clone();
         cfg.threads = threads.max(1);
@@ -213,8 +324,22 @@ pub fn analyze_batch(
     results.into_inner().unwrap()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarOneRule {
+    ModelVote,
+    FirstBeat,
+    FirstBeatUnlessModelStrong,
+}
+
+pub const BAR_ONE_RULE: BarOneRule = BarOneRule::FirstBeatUnlessModelStrong;
+pub const MODEL_STRONG_SHARE: f64 = 0.8;
+
 pub fn bar_phase(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
-    if beats_s.len() < 2 {
+    bar_phase_by(BAR_ONE_RULE, beats_s, downbeats_s, delay_s)
+}
+
+pub fn bar_phase_by(rule: BarOneRule, beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
+    if rule == BarOneRule::FirstBeat || beats_s.len() < 2 {
         return 0;
     }
     let period = (beats_s[beats_s.len() - 1] - beats_s[0]) / (beats_s.len() - 1) as f64;
@@ -231,7 +356,12 @@ pub fn bar_phase(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
             votes[nearest % 4] += 1;
         }
     }
-    (0..4).max_by_key(|&p| (votes[p], std::cmp::Reverse(p))).unwrap()
+    let top = (0..4).max_by_key(|&p| (votes[p], std::cmp::Reverse(p))).unwrap();
+    let total: usize = votes.iter().sum();
+    match rule {
+        BarOneRule::FirstBeatUnlessModelStrong if (votes[top] as f64) < MODEL_STRONG_SHARE * total.max(1) as f64 => 0,
+        _ => top,
+    }
 }
 
 pub fn beats_from_grid(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64, bpm: f64) -> Vec<Beat> {
@@ -271,7 +401,7 @@ pub fn to_app_result(a: &Analysis) -> AnalysisResult {
         waveform,
         bpm,
         key: a.key_class.map(camelot).unwrap_or_default().to_string(),
-        energy: None,
+        energy: a.energy.as_ref().map(|e| e.rating),
         cue_points: Vec::new(),
         color_waveform,
     }
@@ -288,6 +418,7 @@ mod tests {
 
     fn analysis(beats: Vec<f64>, downbeats: Vec<f32>) -> Analysis {
         Analysis {
+            truncated: false,
             duration_s: 10.0,
             bpm: Some(128.0),
             first_beat_s: beats.first().copied(),
@@ -300,7 +431,9 @@ mod tests {
             waveform_checksum: None,
             detail_entries: 10,
             mp3_delay_s: 0.0,
+            energy: None,
             logits: None,
+            loudness: None,
             ms: serde_json::Value::Null,
         }
     }
@@ -312,6 +445,19 @@ mod tests {
         let mapped = beats_from_grid(&beats, &downbeats, 0.0, 120.0);
         let positions: Vec<u8> = mapped.iter().map(|b| b.bar_position).collect();
         assert_eq!(positions, vec![3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2]);
+    }
+
+    #[test]
+    fn rules_pick_the_expected_phase_for_a_split_and_a_unanimous_vote() {
+        let beats = grid(0.1, 0.5, 40);
+        let at = |idx: &[usize]| -> Vec<f32> { idx.iter().map(|&i| beats[i] as f32).collect() };
+        let split = at(&[2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 1, 5, 9, 13]);
+        let unanimous = at(&[2, 6, 10, 14, 18, 22, 26, 30, 34, 38]);
+        assert_eq!(bar_phase_by(BarOneRule::ModelVote, &beats, &split, 0.0), 2);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeat, &beats, &split, 0.0), 0);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeatUnlessModelStrong, &beats, &split, 0.0), 0);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeatUnlessModelStrong, &beats, &unanimous, 0.0), 2);
+        assert_eq!(bar_phase_by(BarOneRule::FirstBeat, &beats, &unanimous, 0.0), 0);
     }
 
     #[test]
@@ -361,13 +507,98 @@ mod tests {
     }
 
     #[test]
+    fn only_a_non_default_beat_model_prepacks_its_weights() {
+        assert!(!prepacks_weights(BEAT_MODEL));
+        assert!(prepacks_weights(BEAT_MODEL_INT8));
+    }
+
+    #[test]
+    fn the_mac_defaults_to_the_int8_beat_model_and_the_rest_to_fp32() {
+        let expected = if cfg!(target_os = "macos") { BEAT_MODEL_INT8 } else { BEAT_MODEL };
+        assert_eq!(DEFAULT_BEAT_MODEL, expected);
+        if std::env::var_os(BEAT_MODEL_ENV).is_none() {
+            assert_eq!(beat_model(), expected);
+        }
+    }
+
+    #[test]
+    fn chunk_slots_fit_the_memory_budget_and_the_threads() {
+        let slots = |threads, total, available| chunk_slots_with_ceiling(threads, 0.5, total, available, None, 400.0);
+        assert_eq!(slots(7, 8192.0, 4096.0), 3);
+        assert_eq!(slots(9, 16384.0, 8192.0), 8);
+        assert_eq!(slots(15, 65536.0, 32000.0), 15);
+        assert_eq!(slots(15, 65536.0, 1500.0), 1);
+        assert_eq!(slots(1, 65536.0, 32000.0), 1);
+    }
+
+    #[test]
+    fn chunk_activation_follows_the_chunk_length() {
+        assert_eq!(chunk_activation_mb(1500), 400.0);
+        assert_eq!(chunk_activation_mb(500), 120.0);
+        assert_eq!(chunk_activation_mb(100), 120.0);
+        assert_eq!(chunk_activation_mb(1000), 260.0);
+    }
+
+    #[test]
+    fn short_chunks_leave_room_for_every_thread_on_a_small_machine() {
+        let slots = |activation| chunk_slots_with_ceiling(6, 0.5, 8192.0, 4096.0, None, activation);
+        assert_eq!(slots(chunk_activation_mb(1500)), 3);
+        assert_eq!(slots(chunk_activation_mb(500)), 6);
+    }
+
+    #[test]
+    fn chunk_budget_ceiling_caps_the_slots_and_never_raises_them() {
+        let slots = |ceiling| chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, ceiling, 400.0);
+        assert_eq!(slots(None), 15);
+        assert_eq!(slots(Some(2048)), 5);
+        assert_eq!(slots(Some(1024)), 2);
+        assert_eq!(slots(Some(100)), 1);
+        assert_eq!(slots(Some(0)), 1);
+        assert_eq!(slots(Some(1_000_000)), 15);
+        assert_eq!(chunk_slots_with_ceiling(7, 0.5, 8192.0, 4096.0, Some(4096), 400.0), 3);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 1500.0, Some(4096), 400.0), 1);
+    }
+
+    #[test]
+    fn default_ceiling_is_2048_with_coreml_and_4096_elsewhere() {
+        assert_eq!(default_chunk_budget_ceiling_mb("coreml"), 2048);
+        assert_eq!(default_chunk_budget_ceiling_mb("rten"), 4096);
+        assert_eq!(default_chunk_budget_ceiling_mb("ort-cpu"), 4096);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("rten")), 400.0), 10);
+        assert_eq!(chunk_slots_with_ceiling(15, 0.5, 65536.0, 32000.0, Some(default_chunk_budget_ceiling_mb("coreml")), 400.0), 5);
+    }
+
+    #[test]
+    fn model_search_order_is_env_then_app_data_then_resources_then_dev() {
+        let dirs = model_search_dirs(Some(PathBuf::from("/env")), Some(Path::new("/data")), Some(Path::new("/res")));
+        assert_eq!(dirs[..3], [PathBuf::from("/env"), PathBuf::from("/data/models"), PathBuf::from("/res/models")]);
+        assert_eq!(dirs[3], dev_models_dir());
+        assert_eq!(dirs.len(), 4);
+        assert_eq!(model_search_dirs(None, None, None), vec![dev_models_dir()]);
+    }
+
+    #[test]
     fn locate_models_requires_both_files() {
         let dir = std::env::temp_dir().join(format!("ff-models-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("models")).unwrap();
         assert!(!models_present(&dir.join("models")));
         std::fs::write(dir.join("models").join(MEL_MODEL), b"x").unwrap();
-        std::fs::write(dir.join("models").join(BEAT_MODEL), b"x").unwrap();
+        std::fs::write(dir.join("models").join(DEFAULT_BEAT_MODEL), b"x").unwrap();
         assert!(models_present(&dir.join("models")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn analysis_key_follows_the_model_files() {
+        let dir = std::env::temp_dir().join(format!("ff-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(analysis_key(None), format!("analysis-{ANALYSIS_VERSION}-0-0"));
+        std::fs::write(dir.join(MEL_MODEL), b"xx").unwrap();
+        std::fs::write(dir.join(DEFAULT_BEAT_MODEL), b"yyy").unwrap();
+        let first = analysis_key(Some(&dir));
+        assert_eq!(first, format!("analysis-{ANALYSIS_VERSION}-2-3"));
+        std::fs::write(dir.join(DEFAULT_BEAT_MODEL), b"yyyy").unwrap();
+        assert_ne!(analysis_key(Some(&dir)), first);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

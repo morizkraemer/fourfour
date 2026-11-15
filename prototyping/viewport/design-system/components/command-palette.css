@@ -60,8 +60,11 @@
   padding: 4px 6px 6px;
   box-sizing: border-box;
   scroll-padding: 28px 0 6px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--ff-border-hi) transparent;
+  scrollbar-width: none;
+}
+
+.ff-cp__content::-webkit-scrollbar {
+  display: none;
 }
 
 .ff-cp__section-head {

@@ -9,6 +9,7 @@
    */
   import './command-palette.css';
   import { tick } from 'svelte';
+  import { nativeListener } from './nativeListener.js';
   import Icon from './Icon.svelte';
   import Switch from './Switch.svelte';
 
@@ -173,10 +174,10 @@
                     class="ff-cp__choice"
                     class:ff-cp__choice--on={option.value === item.control.value}
                     tabindex="-1"
-                    onclick={(e) => {
+                    {@attach nativeListener('click', (e) => {
                       e.stopPropagation();
                       onChoose?.(item, option.value);
-                    }}
+                    })}
                   >{option.label}</button>
                 {/each}
               </span>
@@ -217,7 +218,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="ff-cp-overlay" onclick={(e) => e.target === e.currentTarget && onClose?.()}>
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div class="ff-cp" role="dialog" aria-modal="true" aria-label="Command palette" tabindex="-1" onkeydown={onKeydown}>
+    <div class="ff-cp" role="dialog" aria-modal="true" aria-label="Command palette" tabindex="-1" {@attach nativeListener('keydown', onKeydown)}>
       <div class="ff-cp__input-row">
         <Icon name="search" size={14} class="ff-cp__search-icon" />
         <input

@@ -6,7 +6,9 @@
   double-click resets it. Alt makes − / + and drags fine, Shift makes drags coarse.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { Icon } from '$ds';
+  import { nativeListener } from '$ds/components/nativeListener.js';
   import { tierOf, type Tier } from '../lib/tempo.ts';
 
   const DRAG_THRESHOLD_PX = 3;
@@ -19,7 +21,9 @@
     color = undefined,
     disabled = false,
     stepper = true,
+    tall = false,
     editText = text,
+    editSignal = 0,
     onStep,
     onSet,
     onReset,
@@ -31,10 +35,12 @@
     color?: string;
     disabled?: boolean;
     stepper?: boolean;
+    tall?: boolean;
     editText?: string;
+    editSignal?: number;
     onStep: (units: number, tier: Tier, fromButton: boolean) => void;
     onSet: (typed: string) => boolean;
-    onReset: () => void;
+    onReset?: () => void;
   } = $props();
 
   let editing = $state(false);
@@ -49,6 +55,13 @@
       inputEl.focus();
       inputEl.select();
     }
+  });
+
+  let seenEditSignal = untrack(() => editSignal);
+  $effect(() => {
+    if (editSignal === seenEditSignal) return;
+    seenEditSignal = editSignal;
+    if (!disabled) startEditing();
   });
 
   function startEditing() {
@@ -87,7 +100,7 @@
     if (event.button !== 0 || disabled || editing) return;
     event.preventDefault();
     if (event.altKey) {
-      onReset();
+      onReset?.();
       return;
     }
     let lastY = event.clientY;
@@ -147,11 +160,11 @@
   function onDoubleClick() {
     if (disabled) return;
     editing = false;
-    onReset();
+    onReset?.();
   }
 </script>
 
-<div class="ff-tfield" class:ff-tfield--bare={!stepper} class:ff-tfield--disabled={disabled} class:ff-tfield--editing={editing} role="group" aria-label={label}>
+<div class="ff-tfield" class:ff-tfield--bare={!stepper} class:ff-tfield--tall={tall} class:ff-tfield--disabled={disabled} class:ff-tfield--editing={editing} role="group" aria-label={label}>
   {#if stepper}
     <button
       type="button"
@@ -159,7 +172,7 @@
       title={`Lower ${label}`}
       aria-label={`Lower ${label}`}
       {disabled}
-      onclick={(event) => onStep(-1, event.altKey ? 'fine' : 'normal', true)}><Icon name="minus" size={11} /></button>
+      onclick={(event) => onStep(-1, tierOf(event), true)}><Icon name="minus" size={11} /></button>
   {/if}
   <div
     class="ff-tfield__value"
@@ -170,7 +183,7 @@
     tabindex={disabled ? -1 : 0}
     aria-label={label}
     aria-valuetext={text}
-    title={disabled ? undefined : 'Click to type, drag to change, double-click or Alt-click to reset'}
+    title={disabled ? undefined : onReset ? 'Click to type, drag to change, double-click or Alt-click to reset' : 'Click to type, drag to change'}
     onpointerdown={onPointerDown}
     onkeydown={onKeyDown}
     ondblclick={onDoubleClick}>
@@ -185,7 +198,7 @@
         autocomplete="off"
         aria-label={label}
         style:color={color}
-        onkeydown={onInputKeyDown}
+        {@attach nativeListener('keydown', onInputKeyDown)}
         oninput={() => (invalid = false)}
         onblur={onInputBlur} />
     {:else}
@@ -199,7 +212,7 @@
       title={`Raise ${label}`}
       aria-label={`Raise ${label}`}
       {disabled}
-      onclick={(event) => onStep(1, event.altKey ? 'fine' : 'normal', true)}><Icon name="plus" size={11} /></button>
+      onclick={(event) => onStep(1, tierOf(event), true)}><Icon name="plus" size={11} /></button>
   {/if}
 </div>
 
@@ -215,6 +228,15 @@
     background: var(--ff-bg);
     overflow: hidden;
     user-select: none;
+  }
+  .ff-tfield--tall {
+    height: 28px;
+  }
+  .ff-tfield--tall .ff-tfield__btn {
+    width: 26px;
+  }
+  .ff-tfield--tall .ff-tfield__value {
+    font-size: var(--ff-type-compact);
   }
   .ff-tfield--editing {
     border-color: var(--ff-accent);

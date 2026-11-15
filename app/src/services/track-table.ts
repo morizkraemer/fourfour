@@ -1,0 +1,184 @@
+import type { PlaylistInput, TrackInfo } from './tauri.svelte.ts';
+
+/**
+ * The track list as `load_state` sends it: one array per field instead of one object per track. Each path is
+ * split into its folder (`dir`, an index into the folder list) and its file name; a folder is its parent's path
+ * plus its `folder_name`, and `folder_parent` is the parent's index plus one, 0 for none. Artists, albums,
+ * genres, keys and colours are indexes into `strings`. Ratings and colours are `[row, value, ...]` pairs for
+ * the tracks that have one.
+ */
+export interface TrackTable {
+  strings: string[];
+  folder_parent: number[];
+  folder_name: string[];
+  id: number[];
+  dir: number[];
+  file: string[];
+  title: string[];
+  artist: number[];
+  album: number[];
+  genre: number[];
+  key: number[];
+  tempo: number[];
+  duration_secs: number[];
+  bitrate: number[];
+  file_size: number[];
+  flags: number[];
+  ratings: number[];
+  colors: number[];
+}
+
+export const TRACK_FLAG = { artwork: 1, cues: 2, analysis: 4, pending: 8 } as const;
+
+export function isTrackTable(tracks: TrackInfo[] | TrackTable): tracks is TrackTable {
+  return !Array.isArray(tracks);
+}
+
+function folderPaths({ folder_parent, folder_name }: TrackTable): string[] {
+  const paths: string[] = new Array(folder_name.length);
+  for (let i = 0; i < folder_name.length; i++) {
+    const parent = folder_parent[i];
+    paths[i] = parent === 0 ? folder_name[i] : paths[parent - 1] + folder_name[i];
+  }
+  return paths;
+}
+
+export function decodeTrackTable(table: TrackTable): TrackInfo[] {
+  const { strings, id, dir, file, title, artist, album, genre, key, tempo, duration_secs, bitrate, file_size, flags } = table;
+  const folders = folderPaths(table);
+  const tracks: TrackInfo[] = new Array(id.length);
+  for (let i = 0; i < id.length; i++) {
+    const f = flags[i];
+    tracks[i] = {
+      id: id[i],
+      source_path: folders[dir[i]] + file[i],
+      title: title[i],
+      artist: strings[artist[i]],
+      album: strings[album[i]],
+      genre: strings[genre[i]],
+      tempo: tempo[i],
+      key: strings[key[i]],
+      duration_secs: duration_secs[i],
+      bitrate: bitrate[i],
+      file_size: file_size[i],
+      has_artwork: (f & TRACK_FLAG.artwork) !== 0,
+      has_cues: (f & TRACK_FLAG.cues) !== 0,
+      has_analysis: (f & TRACK_FLAG.analysis) !== 0,
+      analysis_pending: (f & TRACK_FLAG.pending) !== 0,
+    };
+  }
+  const { ratings, colors } = table;
+  for (let i = 0; i < ratings.length; i += 2) tracks[ratings[i]].rating = ratings[i + 1];
+  for (let i = 0; i < colors.length; i += 2) tracks[colors[i]].color = strings[colors[i + 1]];
+  return tracks;
+}
+
+const BYTES_MAGIC = 0x31544646;
+const BYTES_VERSION = 2;
+const BYTES_HEADER_WORDS = 10;
+const WIDE_TEXT = 0x80000000;
+
+/**
+ * The `load_state` answer as the backend sends it in one buffer (`LoadedState::to_bytes` in `dto.rs` describes the
+ * layout): the columns are read in place as typed arrays, and the texts are cut out of two decoded arenas (plain
+ * ASCII texts, and the rest).
+ */
+export function decodeStateBytes(buffer: ArrayBuffer): { tracks: TrackInfo[]; playlists: PlaylistInput[] } {
+  const header = new Uint32Array(buffer, 0, BYTES_HEADER_WORDS);
+  if (header[0] !== BYTES_MAGIC || header[1] !== BYTES_VERSION) throw new Error('load_state answered with an unknown buffer');
+  const [, , count, stringCount, folderCount, ratingsLength, colorsLength, asciiLength, wideLength, playlistsLength] = header;
+  const eight = (bytes: number) => (bytes + 7) & ~7;
+  let at = BYTES_HEADER_WORDS * 4;
+  const playlists: PlaylistInput[] = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, at, playlistsLength)));
+  at += eight(playlistsLength);
+  const ascii = new TextDecoder().decode(new Uint8Array(buffer, at, asciiLength));
+  at += eight(asciiLength);
+  const wide = new TextDecoder('utf-8', { ignoreBOM: true }).decode(new Uint8Array(buffer, at, wideLength));
+  at += eight(wideLength);
+  const textCount = stringCount + folderCount + count * 2;
+  const ends = new Uint32Array(buffer, at, textCount);
+  at += eight(textCount * 4);
+  const duration_secs = new Float64Array(buffer, at, count);
+  at += count * 8;
+  const file_size = new Float64Array(buffer, at, count);
+  at += count * 8;
+  const u32s = (length: number) => {
+    const column = new Uint32Array(buffer, at, length);
+    at += length * 4;
+    return column;
+  };
+  const folder_parent = u32s(folderCount);
+  const id = u32s(count);
+  const dir = u32s(count);
+  const artist = u32s(count);
+  const album = u32s(count);
+  const genre = u32s(count);
+  const key = u32s(count);
+  const tempo = u32s(count);
+  const bitrate = u32s(count);
+  const ratings = u32s(ratingsLength);
+  const colors = u32s(colorsLength);
+  const flags = new Uint8Array(buffer, eight(at), count);
+
+  let nextText = 0;
+  let asciiAt = 0;
+  let wideAt = 0;
+  const readTexts = (n: number): string[] => {
+    const texts: string[] = new Array(n);
+    let a = asciiAt;
+    let w = wideAt;
+    for (let i = 0; i < n; i++) {
+      const end = ends[nextText + i];
+      if (end >= WIDE_TEXT) {
+        const wideEnd = end - WIDE_TEXT;
+        texts[i] = wide.slice(w, wideEnd);
+        w = wideEnd;
+      } else {
+        texts[i] = ascii.slice(a, end);
+        a = end;
+      }
+    }
+    nextText += n;
+    asciiAt = a;
+    wideAt = w;
+    return texts;
+  };
+  const strings = readTexts(stringCount);
+  const folder_name = readTexts(folderCount);
+  const file = readTexts(count);
+  const title = readTexts(count);
+
+  const paths: string[] = new Array(folderCount);
+  for (let i = 0; i < folderCount; i++) {
+    const parent = folder_parent[i];
+    paths[i] = parent === 0 ? folder_name[i] : paths[parent - 1] + folder_name[i];
+  }
+  const hasArtwork = TRACK_FLAG.artwork;
+  const hasCues = TRACK_FLAG.cues;
+  const hasAnalysis = TRACK_FLAG.analysis;
+  const isPending = TRACK_FLAG.pending;
+  const tracks: TrackInfo[] = new Array(count);
+  for (let i = 0; i < count; i++) {
+    const f = flags[i];
+    tracks[i] = {
+      id: id[i],
+      source_path: paths[dir[i]] + file[i],
+      title: title[i],
+      artist: strings[artist[i]],
+      album: strings[album[i]],
+      genre: strings[genre[i]],
+      tempo: tempo[i],
+      key: strings[key[i]],
+      duration_secs: duration_secs[i],
+      bitrate: bitrate[i],
+      file_size: file_size[i],
+      has_artwork: (f & hasArtwork) !== 0,
+      has_cues: (f & hasCues) !== 0,
+      has_analysis: (f & hasAnalysis) !== 0,
+      analysis_pending: (f & isPending) !== 0,
+    };
+  }
+  for (let i = 0; i < ratings.length; i += 2) tracks[ratings[i]].rating = ratings[i + 1];
+  for (let i = 0; i < colors.length; i += 2) tracks[colors[i]].color = strings[colors[i + 1]];
+  return { tracks, playlists };
+}

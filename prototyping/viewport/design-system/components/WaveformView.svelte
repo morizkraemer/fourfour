@@ -19,6 +19,7 @@
     bandsDetail = null,
     bandsOverview = null,
     bandsZoom = null,
+    detailPending = false,
     windowSource = null,
     beats = [],
     cues = [],
@@ -28,7 +29,10 @@
     durationMs = 0,
     trackKey = null,
     analyzing = false,
+    emptyLabel = null,
     onSeek = undefined,
+    onCueMove = undefined,
+    cueSnap = null,
   } = $props();
 
   let placeholderWidth = $state(0);
@@ -36,11 +40,10 @@
 
   let container;
   let display = null;
-  let ro;
   let lastDataKey = null;
 
   function markerData() {
-    return (cues ?? []).map((c) => ({ position: c.position, color: c.color, label: c.label }));
+    return (cues ?? []).map((c) => ({ position: c.position, color: c.color, label: c.label, key: c.key, padded: c.padded }));
   }
 
   function buildData() {
@@ -55,7 +58,6 @@
     };
   }
 
-  // Public zoom controls for the expanded toolbar.
   export function zoomIn() { display?.zoomIn(); }
   export function zoomOut() { display?.zoomOut(); }
   export function resetZoom() { display?.resetZoom(); }
@@ -64,63 +66,72 @@
 
   $effect(() => {
     if (!container) return;
-    display = new WaveformDisplay(container, { mode, onSeek });
-    ro = new ResizeObserver(() => display?.redraw());
-    ro.observe(container);
+    display = new WaveformDisplay(container, { mode, onSeek, onCueMove, paint: 'frame' });
     lastDataKey = null;
     return () => {
-      ro?.disconnect();
       display?.destroy();
       display = null;
     };
   });
 
-  // Keep the seek callback live without recreating the engine.
   $effect(() => {
     if (display) display.onSeek = onSeek;
   });
 
-  // Push data only when the track or its waveform changes — NOT on every tick.
+  $effect(() => {
+    if (display) display.onCueMove = onCueMove;
+  });
+
+  $effect(() => {
+    display?.setCueSnap(cueSnap);
+  });
+
   $effect(() => {
     const detailLen = (mode === 'expanded' ? (bandsDetail ?? bands) : bands)?.low.length ?? 0;
-    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${beats?.length ? 1 : 0}:${durationMs}`;
+    const key = `${trackKey}:${mode}:${detailLen}:${bandsOverview?.low.length ?? 0}:${durationMs}`;
     if (!display) return;
     if (key === lastDataKey) return;
     lastDataKey = key;
-    // Pass playhead with data so zoom offset centres atomically on load (progress
-    // often stays 0 across track changes, so a separate effect would not re-run).
     display.setData(buildData(), progress);
   });
 
-  // The high-resolution series arrives after the track: no data reset, so zoom and scroll stay.
   $effect(() => {
     if (mode === 'expanded') display?.setDetailBands(bandsZoom ?? undefined);
   });
 
-  // Fine windows for the deepest zoom levels (see WaveformDisplay.setWindowSource).
+  $effect(() => {
+    if (mode === 'expanded') display?.setDetailPending(detailPending);
+  });
+
   $effect(() => {
     if (mode === 'expanded') display?.setWindowSource(windowSource);
   });
 
-  // A cue edit redraws the markers only: no data reset, so zoom and scroll stay.
   $effect(() => {
     display?.setCues(markerData());
   });
 
-  // A beat-grid edit moves the grid only: no data reset, so zoom and scroll stay.
   $effect(() => {
     display?.setBeats(beats ?? []);
   });
 
-  // Atomic transport update — avoids play/pause ordering jitter between separate
-  // playing and progress effects (the transport only reports position at ~20Hz).
   $effect(() => {
     display?.setTransport(playing, progress);
   });
 </script>
 
 <div class="ff-waveform-view" bind:this={container}>
-  {#if analyzing && !bands}
+  {#if mode === 'expanded' && !bands && emptyLabel}
+    <div class="ff-waveform-view__empty" class:ff-waveform-view__empty--analyzing={analyzing}>
+      <div class="ff-waveform-view__empty-strip" bind:clientWidth={placeholderWidth} bind:clientHeight={placeholderHeight}>
+        <Waveform width={placeholderWidth || 300} height={placeholderHeight || 48} variant="strip" look="bands" animating={analyzing} />
+      </div>
+      <div class="ff-waveform-view__empty-body">
+        <span class="ff-waveform-view__empty-line"></span>
+        <span class="ff-waveform-view__empty-label">{emptyLabel}</span>
+      </div>
+    </div>
+  {:else if analyzing && !bands}
     <div class="ff-waveform-view__analyzing" bind:clientWidth={placeholderWidth} bind:clientHeight={placeholderHeight}>
       <Waveform width={placeholderWidth || 300} height={placeholderHeight || 48} variant="strip" look="bands" animating />
     </div>
@@ -145,7 +156,67 @@
     pointer-events: none;
   }
 
-  /* WaveformDisplay builds its own DOM (unscoped) — style globally. */
+  .ff-waveform-view__empty {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--ff-wave-bg, #0d0d0d);
+    pointer-events: none;
+  }
+
+  .ff-waveform-view__empty-strip {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    flex-shrink: 0;
+    border-bottom: 1px solid rgba(var(--ff-wave-ink, 255, 255, 255), 0.08);
+  }
+
+  .ff-waveform-view__empty-body {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ff-waveform-view__empty-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: rgba(var(--ff-wave-ink, 255, 255, 255), 0.08);
+  }
+
+  .ff-waveform-view__empty-label {
+    position: relative;
+    padding: 4px 12px;
+    background: var(--ff-wave-bg, #0d0d0d);
+    font-family: var(--ff-font-mono);
+    font-size: var(--ff-type-label-sm);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ff-muted);
+  }
+
+  .ff-waveform-view__empty--analyzing .ff-waveform-view__empty-label {
+    animation: ff-waveform-view-empty-pulse 1.1s ease-in-out infinite alternate;
+  }
+
+  @keyframes ff-waveform-view-empty-pulse {
+    from { opacity: 1; }
+    to { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ff-waveform-view__empty--analyzing .ff-waveform-view__empty-label {
+      animation: none;
+    }
+  }
+
   :global(.ff-waveform-view .waveform-display) {
     display: flex;
     flex-direction: column;

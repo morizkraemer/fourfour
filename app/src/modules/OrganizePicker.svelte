@@ -5,6 +5,8 @@
     isFavoritePlaylistName,
     tracksForSidebarSource,
   } from '../stores/library.svelte.ts';
+  import { artwork } from '../stores/artwork.svelte.ts';
+  import { trackIdsWithCover } from '../lib/coverTracks.ts';
   import { dnd } from '../stores/dnd.svelte.ts';
   import { ui, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
@@ -45,12 +47,19 @@
     return path.replace(/\\/g, '/').split('/').pop() || path;
   }
 
-  function coversFor(playlist) {
-    return tracksForSidebarSource(playlist.name)
-      .map((t) => t.cover)
-      .filter(Boolean)
-      .slice(0, 4);
+  const COVERS_PER_CARD = 4;
+
+  function coverIdsFor(playlist) {
+    return trackIdsWithCover(tracksForSidebarSource(playlist.name), COVERS_PER_CARD);
   }
+
+  function coversFor(playlist) {
+    return coverIdsFor(playlist)
+      .map((id) => artwork.get(id, true))
+      .filter(Boolean);
+  }
+
+  $effect(() => artwork.keep('organize-picker', () => visiblePlaylists.flatMap(coverIdsFor)));
 
   function stickMeta(path) {
     const playlistCount = stickPlaylistIds(path).length;
@@ -247,7 +256,12 @@
 
   .ff-picker__sticks > :global([data-empty-sticks]) {
     grid-column: 1 / -1;
-    max-width: 400px;
+    max-width: 520px;
+    min-height: 120px;
+  }
+
+  .ff-picker__sticks > :global([data-empty-sticks] .ff-dcard__meta) {
+    max-width: 44ch;
   }
 
   .ff-picker__none {

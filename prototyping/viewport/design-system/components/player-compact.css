@@ -101,6 +101,13 @@
   background-color: rgba(34, 197, 94, 0.08);
 }
 
+.ff-player-compact__cue-btn:disabled,
+.ff-player-compact__play-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+  background-color: transparent;
+}
+
 .ff-player-compact__play-icon {
   color: #d4d4d4;
   display: block;
@@ -220,6 +227,20 @@
 }
 
 /* 3. Waveform (canvas drawn in WaveformView, mode="compact") */
+.ff-player-compact__waveform:focus-visible {
+  outline: none;
+}
+
+.ff-player-compact__waveform:focus-visible::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  border: 2px solid var(--ff-accent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .ff-player-compact__waveform {
   height: 46px;
   background-color: var(--ff-wave-bg);

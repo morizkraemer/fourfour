@@ -5,8 +5,10 @@
 <script>
   import { PlayerCompact, ResizeHandle } from '$ds';
   import { isTrackAnalyzing } from '../stores/library.svelte.ts';
-  import ExpandedPlayer from './ExpandedPlayer.svelte';
+  import { waveSliderProps } from '../stores/wave-seek.ts';
   import PlayerTempo from './PlayerTempo.svelte';
+  import LazyMount from '../lib/LazyMount.svelte';
+  import { expandedPlayer } from '../lib/lazy-views.ts';
   import { cuesOf } from '../stores/cues.svelte.ts';
   import { cueMarkers } from '../lib/cues.ts';
   import { dnd } from '../stores/dnd.svelte.ts';
@@ -39,10 +41,10 @@
   class="ff-player-module"
   class:ff-player-module--drop={dnd.kind === 'tracks' && dnd.dropPlayer}
   data-drop-player
-  class:ff-player-module--expanded={player.expanded && player.track}
-  style:height={player.expanded && player.track ? `${expandedHeight}px` : undefined}
+  class:ff-player-module--expanded={player.expanded}
+  style:height={player.expanded ? `${expandedHeight}px` : undefined}
   bind:this={playerRoot}>
-  {#if player.expanded && player.track}
+  {#if player.expanded}
     <ResizeHandle
       edge="top"
       label="Resize player"
@@ -53,7 +55,7 @@
       onCommit={commitPlayerHeight}
       onReset={resetPlayerHeight}
     />
-    <ExpandedPlayer />
+    <LazyMount view={expandedPlayer} />
   {:else}
   <PlayerCompact
     cover={player.cover}
@@ -71,11 +73,13 @@
     durationMs={player.track?.durationMs ?? 0}
     trackKey={player.track?.id ?? null}
     analyzing={player.track ? isTrackAnalyzing(player.track.id) : false}
+    disabled={!player.track}
     onScrub={player.track ? seekToProgress : undefined}
+    waveformProps={waveSliderProps()}
     onPlayToggle={player.track ? togglePlay : undefined}
     onCueDown={player.track ? cuePreviewStart : undefined}
     onCueUp={player.track ? cuePreviewStop : undefined}
-    onExpand={player.track ? toggleExpanded : undefined}>
+    onExpand={toggleExpanded}>
     {#snippet controls()}<PlayerTempo />{/snippet}
   </PlayerCompact>
   {/if}

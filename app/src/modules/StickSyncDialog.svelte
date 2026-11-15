@@ -51,7 +51,7 @@
         {/if}
         {#if plan.foreign_kept_count > 0}
           <section data-plan-foreign>
-            <h3>{countText(plan.foreign_kept_count, 'track', 'tracks')} fourfour didn't write</h3>
+            <h3>{countText(plan.foreign_kept_count, 'track', 'tracks')} put there by other apps</h3>
             <p>They drop out of the stick's library. Their files stay on the stick.</p>
           </section>
         {/if}

@@ -7,6 +7,7 @@
   import { bpmScrub, keyScrub } from '../utils/scrub.js';
   import { keyColor } from '../utils/key-color.js';
   import WaveformView from './WaveformView.svelte';
+  import { nativeListener } from './nativeListener.js';
 
   let {
     cover = '',
@@ -39,11 +40,20 @@
     onKeyCommit = undefined,
     onExpand,
     controls = undefined,
+    disabled = false,
+    waveformProps = {},
   } = $props();
 
   const stop = (fn) => (e) => {
     e.stopPropagation();
     fn?.(e);
+  };
+
+  const cueKey = (fn) => (e) => {
+    if (e.key !== ' ' && e.key !== 'Enter') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.repeat) fn?.(e);
   };
 </script>
 
@@ -59,18 +69,22 @@
   <div class="ff-player-compact__left-controls">
     <button
       class="ff-player-compact__cue-btn"
-      onclick={stop(onCue)}
-      onpointerdown={stop(onCueDown)}
-      onpointerup={stop(onCueUp)}
+      {disabled}
+      {@attach nativeListener('click', stop(onCue))}
+      {@attach nativeListener('pointerdown', stop(onCueDown))}
+      {@attach nativeListener('pointerup', stop(onCueUp))}
       onpointercancel={stop(onCueUp)}
-      onpointerleave={stop(onCueUp)}>
+      onpointerleave={stop(onCueUp)}
+      onkeydown={cueKey(onCueDown)}
+      onkeyup={cueKey(onCueUp)}>
       <span class="ff-player-compact__cue-txt">CUE</span>
     </button>
     <button
       class="ff-player-compact__play-btn"
       title={playing ? 'Pause' : 'Play'}
       aria-label={playing ? 'Pause' : 'Play'}
-      onclick={stop(onPlayToggle)}>
+      {disabled}
+      {@attach nativeListener('click', stop(onPlayToggle))}>
       {#if playing}
         <svg class="ff-player-compact__play-icon" viewBox="0 0 24 24" width="11" height="11" fill="currentColor">
           <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
@@ -108,7 +122,8 @@
           class="ff-player-compact__expand-btn"
           title="Expand player"
           aria-label="Expand player"
-          onclick={stop(onExpand)}>
+          aria-expanded="false"
+          {@attach nativeListener('click', stop(onExpand))}>
           <svg
             class="ff-player-compact__expand-chevron"
             viewBox="0 0 24 24"
@@ -125,7 +140,7 @@
       </div>
     </div>
 
-    <div class="ff-player-compact__waveform">
+    <div class="ff-player-compact__waveform" {...waveformProps}>
       <WaveformView
         mode="compact"
         {bands}

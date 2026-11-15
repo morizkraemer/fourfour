@@ -2,17 +2,32 @@ use std::time::Instant;
 
 pub const FPS: f64 = 50.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TempoSearch {
+    NearLine,
+    LineAndGlobalPeak,
+}
+
+pub const TEMPO_SEARCH: TempoSearch = TempoSearch::LineAndGlobalPeak;
+pub const GLOBAL_SEARCH_PCT: f64 = 4.0;
+pub const HALF_TIME_BAND: (f64, f64) = (0.0, 0.0);
+
 #[derive(Clone, Debug)]
 pub struct FitParams {
     pub lo: f64,
     pub shift_ms: f64,
     pub comb_refine: bool,
     pub snap_tol: f64,
+    pub snap_tol_unchecked: bool,
     pub snap_phase_ms: f64,
+    pub tempo_search: TempoSearch,
+    pub global_pct: f64,
     pub snap_wide: f64,
     pub scan_pct: f64,
+    pub far_skip_pct: f64,
     pub snap_ratio: f64,
     pub keep_native: (f64, f64),
+    pub half_time_band: (f64, f64),
     pub threads: usize,
 }
 
@@ -23,11 +38,16 @@ impl Default for FitParams {
             shift_ms: 0.0,
             comb_refine: true,
             snap_tol: 0.05,
+            snap_tol_unchecked: false,
             snap_phase_ms: 15.0,
+            tempo_search: TEMPO_SEARCH,
+            global_pct: GLOBAL_SEARCH_PCT,
             snap_wide: 1.5,
             scan_pct: 0.3,
+            far_skip_pct: 0.05,
             snap_ratio: 0.97,
             keep_native: (150.0, 185.0),
+            half_time_band: HALF_TIME_BAND,
             threads: 1,
         }
     }
@@ -167,6 +187,48 @@ fn refine_comb(act: &[f64], w: &Window, t0: f64, p: f64) -> (f64, f64) {
     (bt0, bp)
 }
 
+const FOLD_STEP_REL: f64 = 1e-4;
+const FOLD_BIN_S: f64 = 0.004;
+const FOLD_WINDOW_BINS: usize = 5;
+
+fn fold_score(act: &[f64], p: f64, hist: &mut Vec<f64>) -> f64 {
+    let bins = ((p / FOLD_BIN_S).round() as usize).max(FOLD_WINDOW_BINS);
+    hist.clear();
+    hist.resize(bins, 0.0);
+    let per_bin = bins as f64 / p;
+    let frame = 1.0 / FPS;
+    let mut phase = 0.0;
+    for &a in act {
+        hist[((phase * per_bin) as usize).min(bins - 1)] += a;
+        phase += frame;
+        if phase >= p {
+            phase -= p;
+        }
+    }
+    let mut run: f64 = hist[bins - FOLD_WINDOW_BINS..].iter().sum();
+    let mut best = run;
+    for i in 0..bins {
+        run += hist[i] - hist[(i + bins - FOLD_WINDOW_BINS) % bins];
+        best = best.max(run);
+    }
+    best
+}
+
+fn global_fold_peak(act: &[f64], w: &Window, p: f64, pct: f64) -> f64 {
+    let span = &act[..act.len().min((w.len * FPS) as usize)];
+    let steps = (pct / 100.0 / FOLD_STEP_REL) as i64;
+    let mut hist = Vec::new();
+    let mut best = (f64::MIN, p);
+    for i in -steps..=steps {
+        let pi = p * (1.0 + i as f64 * FOLD_STEP_REL);
+        let s = fold_score(span, pi, &mut hist);
+        if s > best.0 {
+            best = (s, pi);
+        }
+    }
+    best.1
+}
+
 const COARSE_STRIDE: i64 = 6;
 const COARSE_KEEP: usize = 5;
 const FINE_PHASE_STEPS: i64 = 3;
@@ -249,15 +311,27 @@ pub fn fit_track(
     let (mut t0, mut p) = fit_line(&refined, p0);
     let act: Vec<f64> = beat_logits.iter().map(|&x| sigmoid(x)).collect();
     if params.comb_refine {
-        if params.scan_pct > 0.0 {
-            let steps = (params.scan_pct / 100.0 / 1e-5) as i64;
-            let r = scan_tempo(&act, w, t0, p, steps, params.threads);
-            t0 = r.0;
-            p = r.1;
+        let scan_from = |t0: f64, p: f64| {
+            let (t0, p) = if params.scan_pct > 0.0 {
+                let steps = (params.scan_pct / 100.0 / 1e-5) as i64;
+                scan_tempo(&act, w, t0, p, steps, params.threads)
+            } else {
+                (t0, p)
+            };
+            refine_comb(&act, w, t0, p)
+        };
+        let near = scan_from(t0, p);
+        (t0, p) = near;
+        if params.tempo_search == TempoSearch::LineAndGlobalPeak {
+            let peak = global_fold_peak(&act, w, p, params.global_pct);
+            if (peak / p - 1.0).abs() > params.far_skip_pct / 100.0 {
+                let mid = w.offset + w.len / 2.0;
+                let far = scan_from(t0 + (p - peak) * ((mid - t0) / p), peak);
+                if comb_score(&act, w, far.0, far.1) > comb_score(&act, w, near.0, near.1) {
+                    (t0, p) = far;
+                }
+            }
         }
-        let r = refine_comb(&act, w, t0, p);
-        t0 = r.0;
-        p = r.1;
     }
 
     if params.snap_tol > 0.0 {
@@ -280,7 +354,8 @@ pub fn fit_track(
                 }
                 dt += 0.0005;
             }
-            if delta < params.snap_tol || best.0 >= params.snap_ratio * current {
+            let unchecked = params.snap_tol_unchecked && delta < params.snap_tol;
+            if unchecked || best.0 >= params.snap_ratio * current {
                 p = p_new;
                 t0 = best.1;
                 break;
@@ -309,6 +384,11 @@ pub fn fit_track(
         p_out = p * n as f64;
     }
 
+    let out_bpm = 60.0 / p_out;
+    if out_bpm >= params.half_time_band.0 && out_bpm <= params.half_time_band.1 {
+        p_out /= 2.0;
+    }
+
     let shift = params.shift_ms / 1000.0;
     let mut first = (t0_out + shift) % p_out;
     if first < 0.0 {
@@ -332,4 +412,95 @@ pub fn fit_track(
 
 pub fn finalize_beats(beats_s: &[f64], delay_s: f64) -> Vec<f64> {
     beats_s.iter().map(|t| t + delay_s).filter(|t| *t > -0.04).map(|t| t.max(0.0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DURATION: f64 = 420.0;
+
+    fn synthetic(bpm: f64) -> (Vec<f64>, Vec<f32>) {
+        let period = 60.0 / bpm;
+        let first = 0.137;
+        let frames = (DURATION * FPS) as usize;
+        let beats: Vec<f64> = (0..).map(|k| first + k as f64 * period).take_while(|&t| t < DURATION).collect();
+        let logits: Vec<f32> = (0..frames)
+            .map(|f| {
+                let t = f as f64 / FPS;
+                let k = ((t - first) / period).round();
+                let dt = t - (first + k * period);
+                let p = 0.001 + 0.998 * (-(dt / 0.012).powi(2) / 2.0).exp();
+                (p / (1.0 - p)).ln() as f32
+            })
+            .collect();
+        let peaks = beats.iter().map(|t| (t * FPS).round() / FPS).collect();
+        (peaks, logits)
+    }
+
+    fn fitted_bpm(bpm: f64, params: &FitParams) -> f64 {
+        let (peaks, logits) = synthetic(bpm);
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        fit_track(&peaks, &logits, &logits, DURATION, &w, params).unwrap().bpm
+    }
+
+    #[test]
+    fn integer_tempo_snaps_to_the_integer() {
+        assert_eq!(fitted_bpm(128.0, &FitParams::default()), 128.0);
+    }
+
+    #[test]
+    fn tempo_just_off_an_integer_is_not_snapped_when_the_comb_disagrees() {
+        let bpm = fitted_bpm(128.02, &FitParams::default());
+        assert!((bpm - 128.02).abs() < 0.003, "fitted {bpm}");
+    }
+
+    fn fit_from_peaks_off_the_true_tempo(tempo_search: TempoSearch) -> f64 {
+        let (_, logits) = synthetic(114.0);
+        let (peaks, _) = synthetic(116.4);
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        let params = FitParams { tempo_search, ..FitParams::default() };
+        fit_track(&peaks, &logits, &logits, DURATION, &w, &params).unwrap().bpm
+    }
+
+    #[test]
+    fn global_peak_finds_the_tempo_outside_the_near_scan() {
+        let near = fit_from_peaks_off_the_true_tempo(TempoSearch::NearLine);
+        let global = fit_from_peaks_off_the_true_tempo(TempoSearch::LineAndGlobalPeak);
+        assert!((near - 114.0).abs() > 0.1, "near-only fitted {near}");
+        assert_eq!(global, 114.0);
+    }
+
+    fn fit_from_peaks_just_outside_the_near_scan(far_skip_pct: f64) -> f64 {
+        let (_, strong) = synthetic(128.0);
+        let (_, weak) = synthetic(128.3);
+        let logits: Vec<f32> = strong.iter().zip(&weak).map(|(&s, &w)| s.max(w - 1.0)).collect();
+        let (peaks, _) = synthetic(128.6);
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        let params = FitParams { far_skip_pct, snap_tol: 0.0, ..FitParams::default() };
+        fit_track(&peaks, &logits, &logits, DURATION, &w, &params).unwrap().bpm
+    }
+
+    #[test]
+    fn global_peak_is_searched_even_when_it_is_close_to_the_near_result() {
+        let skipped = fit_from_peaks_just_outside_the_near_scan(0.3);
+        let searched = fit_from_peaks_just_outside_the_near_scan(FitParams::default().far_skip_pct);
+        assert!((skipped - 128.0).abs() > 0.05, "skipped fitted {skipped}");
+        assert!((searched - 128.0).abs() < 0.003, "searched fitted {searched}");
+    }
+
+    #[test]
+    fn half_time_tempo_in_the_band_is_doubled() {
+        let on = FitParams { half_time_band: (84.0, 92.5), ..FitParams::default() };
+        assert_eq!(fitted_bpm(88.0, &on), 176.0);
+        assert_eq!(fitted_bpm(88.0, &FitParams::default()), 88.0);
+        assert_eq!(fitted_bpm(80.0, &on), 80.0);
+        assert_eq!(fitted_bpm(94.0, &on), 94.0);
+    }
+
+    #[test]
+    fn unchecked_snap_keeps_the_old_rule() {
+        let params = FitParams { snap_tol_unchecked: true, ..FitParams::default() };
+        assert_eq!(fitted_bpm(128.02, &params), 128.0);
+    }
 }

@@ -4,8 +4,8 @@
   under it (CommandPalette.svelte). Plain text still narrows the active track list live;
   a leading `>` switches the dropdown to commands only and leaves the list alone.
   Layout follows main-window option A: context title, search, status chips.
-  While the organize sidebar is open the chips are dropped (the status bar
-  already carries analysis and sync progress) so the narrower bar stays calm.
+  The centre column width picks the search form: field (>= 720 px), an icon in this bar (>= 440 px),
+  or an icon in the left sidebar's top-right corner. Either icon opens the palette as a centred modal over the window.
 -->
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
@@ -13,25 +13,49 @@
   import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
   import { stickSync } from '../stores/stick-sync.svelte.ts';
   import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
-  import { goToSource } from '../shortcuts/navigation.ts';
-  import { stickLabel, topbarIdleStatus } from '../lib/topbarStatus.ts';
+  import { searchModeForColumn } from '../lib/searchLayout.ts';
+  import SearchIconButton from './SearchIconButton.svelte';
+  import LazyMount from '../lib/LazyMount.svelte';
+  import { libraryActivityMenu } from '../lib/lazy-views.ts';
+  import { stickLabel, topbarStickStatus } from '../lib/topbarStatus.ts';
+  import { fileStatus } from '../stores/file-status.svelte.ts';
+  import { problemLabel } from '../lib/fileHealth.ts';
+  import { libraryActivity } from '../lib/libraryActivity.ts';
+  import { importActivity } from '../stores/import-activity.svelte.ts';
 
   let filterInputEl = $state(null);
+  let statusMenu = $state({ open: false, x: 0, y: 0 });
+  let problems = $derived(problemLabel(fileStatus));
+  let activity = $derived(
+    libraryActivity({
+      importing: importActivity.running,
+      importDone: importActivity.done,
+      importTotal: importActivity.total,
+      syncing: library.syncing,
+      analyzing,
+      analysisCurrent: library.analysisProgress.current,
+      analysisTotal: library.analysisProgress.total,
+      resultHeadline: importActivity.resultVisible ? (importActivity.summary?.chip ?? null) : null,
+      resultFailed: importActivity.failed,
+      problems,
+      trackCount: library.tracks.length,
+    }),
+  );
   let searchEl = $state(null);
+  let headerEl = $state(null);
   let returnFocusEl = null;
 
   let activeTracks = $derived(tracksForSidebarSource(ui.activeSidebarRow));
   let filteredCount = $derived(filterTracks(activeTracks, ui.listFilter).length);
-  let contextLabel = $derived(sidebarSourceLabel(ui.activeSidebarRow));
-  let showChips = $derived(!ui.organize.expanded);
+  let showingProblems = $derived(fileStatus.onlyProblems && ui.activeSidebarRow === 'All Tracks');
+  let contextLabel = $derived(showingProblems ? 'Missing tracks' : sidebarSourceLabel(ui.activeSidebarRow));
+  let searchCollapsed = $derived(ui.searchMode !== 'field');
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
-  let idleStatus = $derived(
-    topbarIdleStatus({
+  let stick = $derived(
+    topbarStickStatus({
       volumes: library.volumes,
       activeVolume: library.activeVolume,
       stickTrackCount: (volume) => stickAllTrackIds(volume).length,
-      trackCount: library.tracks.length,
-      unanalyzedCount: library.tracks.filter((t) => !t.analyzed).length,
       sync: stickSync,
     }),
   );
@@ -42,6 +66,18 @@
   );
 
   $effect(() => {
+    if (!headerEl) return;
+    const observer = new ResizeObserver(([entry]) => {
+      ui.searchMode = searchModeForColumn(entry.borderBoxSize[0].inlineSize);
+    });
+    observer.observe(headerEl);
+    return () => {
+      observer.disconnect();
+      ui.searchMode = 'field';
+    };
+  });
+
+  $effect(() => {
     ui.searchAnchor = searchEl;
     return () => {
       ui.searchAnchor = null;
@@ -50,7 +86,7 @@
 
   $effect(() => {
     if (!filterInputEl) return;
-    if (ui.paletteOpen) {
+    if (ui.paletteOpen && !searchCollapsed) {
       if (document.activeElement !== filterInputEl) {
         returnFocusEl = document.activeElement;
         filterInputEl.focus();
@@ -63,12 +99,26 @@
     }
   });
 
-  function openIdleStatus() {
-    if (idleStatus.kind === 'stick') {
-      dockOrganizeTarget({ kind: 'usb', id: idleStatus.volume, label: stickLabel(idleStatus.volume) });
-    } else {
-      void goToSource('All Tracks');
+  let statusButtonEl = $state(null);
+  let closedUnderPointerAt = -Infinity;
+
+  function closeStatusMenu() {
+    statusMenu = { ...statusMenu, open: false };
+    if (statusButtonEl?.matches(':hover')) closedUnderPointerAt = performance.now();
+  }
+
+  function toggleStatusMenu(e) {
+    if (statusMenu.open || performance.now() - closedUnderPointerAt < 400) {
+      closedUnderPointerAt = -Infinity;
+      statusMenu = { ...statusMenu, open: false };
+      return;
     }
+    const rect = e.currentTarget.getBoundingClientRect();
+    statusMenu = { open: true, x: rect.left, y: rect.bottom + 4 };
+  }
+
+  function openIdleStick(volume) {
+    dockOrganizeTarget({ kind: 'usb', id: volume, label: stickLabel(volume) });
   }
 
   function onSearchFocusIn(e) {
@@ -94,44 +144,68 @@
   }
 </script>
 
-<div class="ff-gheader ff-titlebar-band ff-titlebar-band--ruled" data-tauri-drag-region>
+<div class="ff-gheader ff-titlebar-band ff-titlebar-band--ruled" class:ff-gheader--icon={ui.searchMode === 'icon'} data-tauri-drag-region bind:this={headerEl}>
   <div class="ff-gheader__ctx" data-tauri-drag-region>
     <b class="ff-gheader__title">{contextLabel}</b>
-    <span class="ff-gheader__count">{activeTracks.length.toLocaleString()}</span>
+    <span class="ff-gheader__count">{(showingProblems ? fileStatus.missing + fileStatus.error : activeTracks.length).toLocaleString()}</span>
   </div>
-  <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-  <div class="ff-gheader__search" class:ff-gheader__search--open={ui.paletteOpen} bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
-    <FilterInput
-      bind:value={() => ui.searchText, setSearchText}
-      bind:inputRef={filterInputEl}
-      placeholder="Search tracks and commands"
-      count={filterCountLabel}
-      onClose={clearListFilter}
-      onkeydown={onFilterKeydown}
-    />
+  <div class="ff-gheader__searchslot" class:ff-gheader__searchslot--cover={searchCollapsed}>
+    <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+    <div class="ff-gheader__search" class:ff-gheader__search--open={ui.paletteOpen} bind:this={searchEl} onfocusin={onSearchFocusIn} oninput={onSearchInput} onclick={onSearchClick}>
+      <FilterInput
+        bind:value={() => ui.searchText, setSearchText}
+        bind:inputRef={filterInputEl}
+        placeholder="Search tracks and commands"
+        count={filterCountLabel}
+        onClose={clearListFilter}
+        onkeydown={onFilterKeydown}
+      />
+    </div>
   </div>
   <div class="ff-gheader__right" data-tauri-drag-region>
-    {#if showChips}
-      {#if analyzing}
-        <span class="ff-gheader__chip">
-          <Spinner size="small" /> Analyzing
-          <b>{library.analysisProgress.current} / {library.analysisProgress.total}</b>
-        </span>
+    <button
+      type="button"
+      class="ff-gheader__chip ff-gheader__chip--idle ff-gheader__activity"
+      class:ff-gheader__chip--warn={activity.kind === 'problems' || (activity.kind === 'result' && activity.failed)}
+      data-library-status
+      data-activity={activity.kind}
+      title="Library activity"
+      bind:this={statusButtonEl}
+      aria-haspopup="menu"
+      aria-expanded={statusMenu.open}
+      onclick={toggleStatusMenu}
+    >
+      {#if activity.kind === 'importing'}
+        <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
+        <span class="ff-gheader__progress" data-activity-progress class:ff-gheader__progress--indeterminate={activity.fraction === null} style:width={activity.fraction === null ? undefined : `${activity.fraction * 100}%`}></span>
+      {:else if activity.kind === 'syncing'}
+        <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span>
+      {:else if activity.kind === 'analyzing'}
+        <Spinner size="small" /> <span class="ff-gheader__activity-label">{activity.label}</span> <b>{activity.detail}</b>
+        <span class="ff-gheader__progress" data-activity-progress style:width={`${activity.fraction * 100}%`}></span>
+      {:else if activity.kind === 'rest'}
+        <span class="ff-gheader__activity-label">{activity.label}</span>
+      {:else}
+        <StatusDot status={activity.kind === 'result' && !activity.failed ? 'online' : 'warn'} />
+        <span class="ff-gheader__activity-label">{activity.label}</span>
       {/if}
-      {#if library.syncing}
-        <span class="ff-gheader__chip"><Spinner size="small" /> Syncing</span>
-      {:else if !analyzing}
-        <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" onclick={openIdleStatus}>
-          {#if idleStatus.kind === 'stick'}
-            <StatusDot status="online" /> {idleStatus.name} <b>{idleStatus.detail}</b>
-          {:else}
-            {idleStatus.text}
-          {/if}
-        </button>
-      {/if}
+    </button>
+    {#if stick}
+      <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" data-stick-chip onclick={() => openIdleStick(stick.volume)}>
+        <StatusDot status="online" /> {stick.name} <b>{stick.detail}</b>
+      </button>
     {/if}
   </div>
+  {#if ui.searchMode === 'icon'}
+    <SearchIconButton />
+  {/if}
 </div>
+
+<LazyMount
+  view={libraryActivityMenu}
+  needed={statusMenu.open}
+  props={{ open: statusMenu.open, x: statusMenu.x, y: statusMenu.y, hasProblems: !!problems, onClose: closeStatusMenu }}
+/>
 
 <style>
   .ff-gheader {
@@ -144,6 +218,9 @@
     padding-right: var(--ff-space-7);
     overflow: hidden;
     background: var(--ff-bg);
+  }
+  .ff-gheader--icon {
+    padding-right: var(--ff-space-4);
   }
   .ff-gheader__ctx {
     display: flex;
@@ -163,6 +240,25 @@
     font-family: var(--ff-font-mono);
     font-size: 11px;
     color: var(--ff-muted);
+  }
+  .ff-gheader__searchslot {
+    display: flex;
+    align-items: center;
+    flex: 1 1 0;
+    min-width: 240px;
+    max-width: 560px;
+  }
+  .ff-gheader__searchslot--cover {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    flex: none;
+    max-width: none;
+    min-width: 0;
+    padding: 0 var(--ff-space-7);
+    background: var(--ff-bg);
+    visibility: hidden;
+    pointer-events: none;
   }
   .ff-gheader__search {
     display: flex;
@@ -190,7 +286,8 @@
     align-items: center;
     justify-content: flex-end;
     gap: var(--ff-space-4);
-    flex: 1 1 0;
+    flex: 0 1 auto;
+    margin-left: auto;
     min-width: 0;
     overflow: hidden;
   }
@@ -219,6 +316,38 @@
   .ff-gheader__chip--idle:hover {
     background: var(--ff-hover);
     color: var(--ff-text);
+  }
+  .ff-gheader__activity {
+    position: relative;
+    overflow: hidden;
+    max-width: 280px;
+  }
+  .ff-gheader__activity-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ff-gheader__progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--ff-text-mid);
+    transition: width var(--ff-motion-fast) var(--ff-easing);
+  }
+  .ff-gheader__progress--indeterminate {
+    width: 30%;
+    animation: ff-gheader-indeterminate 1.1s linear infinite;
+  }
+  @keyframes ff-gheader-indeterminate {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(340%);
+    }
+  }
+  .ff-gheader__chip--warn {
+    color: var(--ff-status-warn);
   }
   .ff-gheader__chip b {
     font-weight: 500;

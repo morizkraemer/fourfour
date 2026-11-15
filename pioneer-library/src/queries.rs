@@ -1,26 +1,30 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pioneer_usb_writer::models::{Playlist, Track};
+
+use crate::schema::LEGACY_ARTWORK_TABLE;
+use crate::{AnalysisFailure, DuplicateCandidate, file_name_key, normalise_tag, path_key};
 
 // ---------------------------------------------------------------------------
 // Track queries
 // ---------------------------------------------------------------------------
 
 pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO tracks (
             source_path, usb_path, title, artist, album, genre, label, remixer,
             comment, year, disc_number, track_number, tempo, key, duration_secs,
-            sample_rate, bitrate, file_size, date_added
+            sample_rate, bitrate, file_size, date_added, artist_key, title_key, path_key, file_name_key
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
             ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-            ?16, ?17, ?18, ?19
+            ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23
         )",
-        params![
+    )?
+    .execute(params![
             track.source_path.to_string_lossy().as_ref(),
             track.usb_path,
             track.title,
@@ -40,8 +44,11 @@ pub fn insert_track(conn: &Connection, track: &Track) -> Result<i64> {
             track.bitrate,
             track.file_size as i64,
             chrono::Utc::now().format("%Y-%m-%d").to_string(),
-        ],
-    )
+            normalise_tag(&track.artist),
+            normalise_tag(&track.title),
+            path_key(&track.source_path),
+            file_name_key(&track.source_path),
+        ])
     .context("Failed to insert track")?;
 
     Ok(conn.last_insert_rowid())
@@ -76,7 +83,7 @@ fn row_to_track(row: &rusqlite::Row) -> rusqlite::Result<Track> {
 }
 
 pub fn select_track(conn: &Connection, id: i64) -> Result<Option<Track>> {
-    let mut stmt = conn.prepare("SELECT * FROM tracks WHERE id = ?1")?;
+    let mut stmt = conn.prepare_cached("SELECT * FROM tracks WHERE id = ?1")?;
     let mut rows = stmt.query_map([id], row_to_track)?;
     match rows.next() {
         Some(Ok(track)) => Ok(Some(track)),
@@ -97,7 +104,8 @@ pub fn update_track(conn: &Connection, id: i64, track: &Track) -> Result<()> {
             source_path = ?1, usb_path = ?2, title = ?3, artist = ?4, album = ?5,
             genre = ?6, label = ?7, remixer = ?8, comment = ?9, year = ?10,
             disc_number = ?11, track_number = ?12, tempo = ?13, key = ?14,
-            duration_secs = ?15, sample_rate = ?16, bitrate = ?17, file_size = ?18
+            duration_secs = ?15, sample_rate = ?16, bitrate = ?17, file_size = ?18,
+            artist_key = ?20, title_key = ?21, path_key = ?22, file_name_key = ?23
         WHERE id = ?19",
         params![
             track.source_path.to_string_lossy().as_ref(),
@@ -119,6 +127,10 @@ pub fn update_track(conn: &Connection, id: i64, track: &Track) -> Result<()> {
             track.bitrate,
             track.file_size as i64,
             id,
+            normalise_tag(&track.artist),
+            normalise_tag(&track.title),
+            path_key(&track.source_path),
+            file_name_key(&track.source_path),
         ],
     )?;
     Ok(())
@@ -142,6 +154,59 @@ pub fn track_exists_by_path(conn: &Connection, source_path: &Path) -> Result<boo
     Ok(count > 0)
 }
 
+fn row_to_duplicate_candidate(row: &rusqlite::Row) -> rusqlite::Result<DuplicateCandidate> {
+    let id: i64 = row.get(0)?;
+    let source_path: String = row.get(1)?;
+    let file_size: i64 = row.get(2)?;
+    Ok(DuplicateCandidate {
+        id: id as u32,
+        source_path: std::path::PathBuf::from(source_path),
+        file_size: file_size as u64,
+        artist: row.get(3)?,
+        title: row.get(4)?,
+        duration_secs: row.get(5)?,
+        artist_key: row.get(6)?,
+        title_key: row.get(7)?,
+        path_key: row.get(8)?,
+        file_name_key: row.get(9)?,
+    })
+}
+
+const DUPLICATE_CANDIDATE_COLUMNS: &str = "id, source_path, file_size, artist, title, duration_secs, artist_key, title_key, path_key, file_name_key";
+
+pub fn select_duplicate_candidates(conn: &Connection) -> Result<Vec<DuplicateCandidate>> {
+    let mut stmt = conn.prepare(&format!("SELECT {DUPLICATE_CANDIDATE_COLUMNS} FROM tracks ORDER BY id"))?;
+    let rows = stmt.query_map([], row_to_duplicate_candidate)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn select_duplicate_candidates_of(conn: &Connection, ids: &[i64]) -> Result<Vec<DuplicateCandidate>> {
+    let mut stmt = conn.prepare_cached(&format!("SELECT {DUPLICATE_CANDIDATE_COLUMNS} FROM tracks WHERE id = ?1"))?;
+    let mut found = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(candidate) = stmt.query_row([id], row_to_duplicate_candidate).optional()? {
+            found.push(candidate);
+        }
+    }
+    Ok(found)
+}
+
+pub fn select_track_files(conn: &Connection) -> Result<Vec<(i64, String, i64)>> {
+    let mut stmt = conn.prepare("SELECT id, source_path, file_size FROM tracks ORDER BY id")?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn update_source_path(conn: &Connection, id: i64, source_path: &Path) -> Result<bool> {
+    let changed = conn
+        .execute(
+            "UPDATE tracks SET source_path = ?2, path_key = ?3, file_name_key = ?4 WHERE id = ?1",
+            params![id, source_path.to_string_lossy().as_ref(), path_key(source_path), file_name_key(source_path)],
+        )
+        .with_context(|| format!("Failed to relink track {id} to {}", source_path.display()))?;
+    Ok(changed > 0)
+}
+
 pub fn track_count(conn: &Connection) -> Result<u32> {
     let count: u32 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
     Ok(count)
@@ -151,28 +216,206 @@ pub fn track_count(conn: &Connection) -> Result<u32> {
 // Artwork queries
 // ---------------------------------------------------------------------------
 
-pub fn upsert_artwork(conn: &Connection, track_id: i64, image_data: &[u8]) -> Result<()> {
-    conn.execute(
-        "INSERT INTO artwork (track_id, image_data) VALUES (?1, ?2)
-         ON CONFLICT(track_id) DO UPDATE SET image_data = excluded.image_data",
-        params![track_id, image_data],
-    )?;
+pub fn upsert_artwork(conn: &Connection, track_id: i64, cover_hash: &str) -> Result<()> {
+    conn.prepare_cached(
+        "INSERT INTO artwork (track_id, cover_hash) VALUES (?1, ?2)
+         ON CONFLICT(track_id) DO UPDATE SET cover_hash = excluded.cover_hash",
+    )?
+    .execute(params![track_id, cover_hash])?;
     Ok(())
 }
 
-pub fn select_artwork(conn: &Connection, track_id: i64) -> Result<Option<Vec<u8>>> {
-    let mut stmt = conn.prepare("SELECT image_data FROM artwork WHERE track_id = ?1")?;
-    let mut rows = stmt.query_map([track_id], |row| row.get(0))?;
-    match rows.next() {
-        Some(Ok(data)) => Ok(Some(data)),
-        Some(Err(e)) => Err(e.into()),
-        None => Ok(None),
+pub fn queue_pending_artwork(conn: &Connection, track_id: i64) -> Result<()> {
+    conn.prepare_cached("INSERT OR IGNORE INTO pending_artwork (track_id) VALUES (?1)")?.execute([track_id])?;
+    Ok(())
+}
+
+pub fn select_pending_artwork(conn: &Connection, after: i64, limit: usize) -> Result<Vec<(i64, PathBuf)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT p.track_id, t.source_path FROM pending_artwork p JOIN tracks t ON t.id = p.track_id
+         WHERE p.track_id > ?1 ORDER BY p.track_id LIMIT ?2",
+    )?;
+    let rows = stmt.query_map([after, limit as i64], |row| Ok((row.get(0)?, PathBuf::from(row.get::<_, String>(1)?))))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn insert_pending_artwork(conn: &Connection, track_id: i64, source_path: &Path, cover_hash: &str) -> Result<bool> {
+    let inserted = conn
+        .prepare_cached(
+            "INSERT INTO artwork (track_id, cover_hash)
+             SELECT ?1, ?3 WHERE EXISTS (
+                 SELECT 1 FROM pending_artwork p JOIN tracks t ON t.id = p.track_id WHERE p.track_id = ?1 AND t.source_path = ?2
+             )
+             ON CONFLICT(track_id) DO NOTHING",
+        )?
+        .execute(params![track_id, source_path.to_string_lossy().as_ref(), cover_hash])?;
+    Ok(inserted > 0)
+}
+
+pub fn unqueue_pending_artwork(conn: &Connection, track_id: i64, source_path: &Path) -> Result<()> {
+    conn.prepare_cached(
+        "DELETE FROM pending_artwork WHERE track_id = ?1
+         AND EXISTS (SELECT 1 FROM tracks WHERE id = ?1 AND source_path = ?2)",
+    )?
+    .execute(params![track_id, source_path.to_string_lossy().as_ref()])?;
+    Ok(())
+}
+
+pub fn select_track_paths(conn: &Connection) -> Result<std::collections::HashSet<PathBuf>> {
+    let mut paths = std::collections::HashSet::with_capacity(track_count(conn)? as usize);
+    let mut stmt = conn.prepare("SELECT source_path FROM tracks")?;
+    let rows = stmt.query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?;
+    for path in rows {
+        paths.insert(path?);
     }
+    Ok(paths)
+}
+
+/// The track's cover reference: `None` = no cover, `Some(None)` = the cover is still a v7 blob.
+pub fn select_artwork_hash(conn: &Connection, track_id: i64) -> Result<Option<Option<String>>> {
+    Ok(conn
+        .prepare_cached("SELECT cover_hash FROM artwork WHERE track_id = ?1")?
+        .query_row([track_id], |row| row.get(0))
+        .optional()?)
+}
+
+pub fn select_artwork_hashes_of(conn: &Connection, track_ids: &[i64]) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare_cached("SELECT cover_hash FROM artwork WHERE track_id = ?1 AND cover_hash IS NOT NULL")?;
+    let mut hashes = Vec::new();
+    for id in track_ids {
+        if let Some(hash) = stmt.query_row([id], |row| row.get(0)).optional()? {
+            hashes.push(hash);
+        }
+    }
+    Ok(hashes)
+}
+
+pub fn cover_is_referenced(conn: &Connection, cover_hash: &str) -> Result<bool> {
+    Ok(conn
+        .prepare_cached("SELECT EXISTS (SELECT 1 FROM artwork WHERE cover_hash = ?1)")?
+        .query_row([cover_hash], |row| row.get(0))?)
+}
+
+pub fn select_referenced_covers(conn: &Connection) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare("SELECT DISTINCT cover_hash FROM artwork WHERE cover_hash IS NOT NULL")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
 pub fn delete_artwork(conn: &Connection, track_id: i64) -> Result<()> {
     conn.execute("DELETE FROM artwork WHERE track_id = ?1", [track_id])?;
     Ok(())
+}
+
+pub fn legacy_artwork_exists(conn: &Connection) -> Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [LEGACY_ARTWORK_TABLE],
+        |row| row.get(0),
+    )?)
+}
+
+pub fn select_legacy_artwork(conn: &Connection, track_id: i64) -> Result<Option<Vec<u8>>> {
+    if !legacy_artwork_exists(conn)? {
+        return Ok(None);
+    }
+    Ok(conn
+        .prepare_cached(&format!("SELECT image_data FROM {LEGACY_ARTWORK_TABLE} WHERE track_id = ?1"))?
+        .query_row([track_id], |row| row.get(0))
+        .optional()?)
+}
+
+/// Rows and bytes still in the v7 blob table.
+pub fn legacy_artwork_size(conn: &Connection) -> Result<(u64, u64)> {
+    Ok(conn.query_row(
+        &format!("SELECT COUNT(*), COALESCE(SUM(length(image_data)), 0) FROM {LEGACY_ARTWORK_TABLE}"),
+        [],
+        |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+    )?)
+}
+
+pub fn select_legacy_artwork_batch(conn: &Connection, limit: usize) -> Result<Vec<(i64, Vec<u8>)>> {
+    let mut stmt =
+        conn.prepare_cached(&format!("SELECT track_id, image_data FROM {LEGACY_ARTWORK_TABLE} ORDER BY track_id LIMIT ?1"))?;
+    let rows = stmt.query_map([limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Points the track's artwork row at the moved cover (unless a cover was set or removed since) and drops the blob.
+pub fn finish_legacy_artwork(conn: &Connection, track_id: i64, cover_hash: &str) -> Result<()> {
+    conn.prepare_cached("UPDATE artwork SET cover_hash = ?2 WHERE track_id = ?1 AND cover_hash IS NULL")?
+        .execute(params![track_id, cover_hash])?;
+    conn.prepare_cached(&format!("DELETE FROM {LEGACY_ARTWORK_TABLE} WHERE track_id = ?1"))?.execute([track_id])?;
+    Ok(())
+}
+
+pub fn drop_legacy_artwork(conn: &Connection) -> Result<()> {
+    conn.execute_batch(&format!("DROP TABLE IF EXISTS {LEGACY_ARTWORK_TABLE}"))?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Analysis failures
+// ---------------------------------------------------------------------------
+
+fn row_to_analysis_failure(row: &rusqlite::Row) -> rusqlite::Result<AnalysisFailure> {
+    Ok(AnalysisFailure {
+        track_id: row.get(0)?,
+        source_path: PathBuf::from(row.get::<_, String>(1)?),
+        file_size: row.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+        modified_ms: row.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+        kind: row.get(4)?,
+        attempts: row.get(5)?,
+        analyzer_version: row.get(6)?,
+        failed_at_ms: row.get::<_, i64>(7)? as u64,
+    })
+}
+
+const ANALYSIS_FAILURE_COLUMNS: &str =
+    "track_id, source_path, file_size, modified_ms, kind, attempts, analyzer_version, failed_at_ms";
+
+pub fn select_analysis_failure(conn: &Connection, track_id: i64) -> Result<Option<AnalysisFailure>> {
+    Ok(conn
+        .prepare_cached(&format!("SELECT {ANALYSIS_FAILURE_COLUMNS} FROM analysis_failures WHERE track_id = ?1"))?
+        .query_row([track_id], row_to_analysis_failure)
+        .optional()?)
+}
+
+pub fn select_analysis_failures(conn: &Connection) -> Result<Vec<AnalysisFailure>> {
+    let mut stmt = conn.prepare(&format!("SELECT {ANALYSIS_FAILURE_COLUMNS} FROM analysis_failures ORDER BY track_id"))?;
+    let rows = stmt.query_map([], row_to_analysis_failure)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Stores the failure; a track that is gone is left out.
+pub fn upsert_analysis_failure(conn: &Connection, failure: &AnalysisFailure) -> Result<()> {
+    conn.prepare_cached(&format!(
+        "INSERT INTO analysis_failures ({ANALYSIS_FAILURE_COLUMNS})
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8 WHERE EXISTS (SELECT 1 FROM tracks WHERE id = ?1)
+         ON CONFLICT(track_id) DO UPDATE SET source_path = excluded.source_path, file_size = excluded.file_size,
+             modified_ms = excluded.modified_ms, kind = excluded.kind, attempts = excluded.attempts,
+             analyzer_version = excluded.analyzer_version, failed_at_ms = excluded.failed_at_ms"
+    ))?
+    .execute(params![
+        failure.track_id,
+        failure.source_path.to_string_lossy().as_ref(),
+        failure.file_size.map(|v| v as i64),
+        failure.modified_ms.map(|v| v as i64),
+        failure.kind,
+        failure.attempts,
+        failure.analyzer_version,
+        failure.failed_at_ms as i64,
+    ])?;
+    Ok(())
+}
+
+pub fn delete_analysis_failures(conn: &Connection, track_ids: &[i64]) -> Result<usize> {
+    let mut stmt = conn.prepare_cached("DELETE FROM analysis_failures WHERE track_id = ?1")?;
+    let mut removed = 0;
+    for id in track_ids {
+        removed += stmt.execute([id])?;
+    }
+    Ok(removed)
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +483,19 @@ pub fn select_missing_row_preview_ids(conn: &Connection) -> Result<Vec<i64>> {
     let mut stmt = conn.prepare("SELECT track_id FROM analyses WHERE row_preview IS NULL ORDER BY track_id")?;
     let rows = stmt.query_map([], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn select_row_previews_of(conn: &Connection, track_ids: &[i64]) -> Result<Vec<(i64, Vec<u8>)>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT track_id, row_preview FROM analyses WHERE track_id = ?1 AND row_preview IS NOT NULL",
+    )?;
+    let mut out = Vec::with_capacity(track_ids.len());
+    for id in track_ids {
+        if let Some(row) = stmt.query_row([id], |row| Ok((row.get(0)?, row.get(1)?))).optional()? {
+            out.push(row);
+        }
+    }
+    Ok(out)
 }
 
 pub fn update_row_preview(conn: &Connection, track_id: i64, row_preview: &[u8]) -> Result<()> {
@@ -344,6 +600,183 @@ pub fn select_all_tracks_with_flags(
     Ok(result)
 }
 
+/// Every track as the track list shows it, with its artwork and analysis flags, stored analysis stages and row
+/// preview.
+pub fn select_track_list_rows(conn: &Connection, with_previews: bool) -> Result<Vec<crate::TrackListRow>> {
+    let mut rows = Vec::new();
+    for_each_track_list_row(conn, i64::MIN..=i64::MAX, with_previews, |row| {
+        rows.push(crate::TrackListRow {
+            id: row.id,
+            source_path: row.source_path.to_owned(),
+            title: row.title.to_owned(),
+            artist: row.artist.to_owned(),
+            album: row.album.to_owned(),
+            genre: row.genre.to_owned(),
+            tempo: row.tempo,
+            key: row.key.to_owned(),
+            duration_secs: row.duration_secs,
+            bitrate: row.bitrate,
+            file_size: row.file_size,
+            has_artwork: row.has_artwork,
+            analysis_stages: row.analysis_stages,
+            row_preview: row.row_preview.map(|blob| crate::RowPreview::from_blob(blob.to_vec())),
+        });
+    })?;
+    Ok(rows)
+}
+
+/// [`select_track_list_rows`] without collecting the rows; returns how many tracks have an analysis without a row
+/// preview. The tracks, the analyses and the artwork ids are three scans in track id order, merged here: that costs
+/// a third less than joining them in SQL, where each analysis and artwork row is a separate lookup.
+pub fn for_each_track_list_row(
+    conn: &Connection,
+    ids: std::ops::RangeInclusive<i64>,
+    with_previews: bool,
+    mut visit: impl FnMut(crate::TrackListRowRef<'_>),
+) -> Result<usize> {
+    let snapshot = conn.unchecked_transaction()?;
+    let mut tracks = snapshot.prepare_cached(
+        "SELECT id, source_path, title, artist, album, genre, tempo, key, duration_secs, bitrate, file_size
+         FROM tracks WHERE id BETWEEN ?1 AND ?2 ORDER BY id",
+    )?;
+    let mut analyses = snapshot.prepare_cached(if with_previews {
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL, row_preview
+         FROM analyses WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id"
+    } else {
+        "SELECT track_id, bpm, key, stages, row_preview IS NULL
+         FROM analyses WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id"
+    })?;
+    let mut artwork =
+        snapshot.prepare_cached("SELECT track_id FROM artwork WHERE track_id BETWEEN ?1 AND ?2 ORDER BY track_id")?;
+    let bounds = [*ids.start(), *ids.end()];
+    let mut analyses = AnalysisCursor::start(analyses.query(bounds)?, with_previews)?;
+    let mut artwork = ArtworkCursor::start(artwork.query(bounds)?)?;
+    let mut tracks = tracks.query(bounds)?;
+    let mut missing_previews = 0;
+    while let Some(row) = tracks.next()? {
+        let id: i64 = row.get(0)?;
+        let analysed = analyses.reach(id)?;
+        missing_previews += usize::from(analysed && analyses.preview_missing);
+        let tempo = if analysed && analyses.bpm > 0.0 {
+            sqlite_round(analyses.bpm * 100.0)
+        } else {
+            row.get(6)?
+        };
+        let key = if analysed && !analyses.key.is_empty() { analyses.key.as_str() } else { text(row, 7)? };
+        visit(crate::TrackListRowRef {
+            id: id as u32,
+            source_path: text(row, 1)?,
+            title: text(row, 2)?,
+            artist: text(row, 3)?,
+            album: text(row, 4)?,
+            genre: text(row, 5)?,
+            tempo: u32::try_from(tempo)?,
+            key,
+            duration_secs: row.get(8)?,
+            bitrate: row.get(9)?,
+            file_size: row.get::<_, i64>(10)? as u64,
+            has_artwork: artwork.reach(id)?,
+            analysis_stages: analysed.then_some(analyses.stages),
+            row_preview: analysed.then_some(analyses.preview.as_deref()).flatten(),
+        });
+    }
+    Ok(missing_previews)
+}
+
+pub fn track_id_bounds(conn: &Connection) -> Result<Option<(i64, i64)>> {
+    let (first, last): (Option<i64>, Option<i64>) =
+        conn.query_row("SELECT MIN(id), MAX(id) FROM tracks", [], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    Ok(first.zip(last))
+}
+
+fn text<'r>(row: &'r rusqlite::Row<'_>, column: usize) -> Result<&'r str> {
+    Ok(row.get_ref(column)?.as_str()?)
+}
+
+fn sqlite_round(x: f64) -> i64 {
+    (x + 0.5) as i64
+}
+
+struct AnalysisCursor<'s> {
+    rows: rusqlite::Rows<'s>,
+    with_previews: bool,
+    track_id: i64,
+    bpm: f64,
+    key: String,
+    stages: u8,
+    preview_missing: bool,
+    preview: Option<Vec<u8>>,
+}
+
+impl<'s> AnalysisCursor<'s> {
+    fn start(rows: rusqlite::Rows<'s>, with_previews: bool) -> Result<Self> {
+        let mut cursor = AnalysisCursor {
+            rows,
+            with_previews,
+            track_id: i64::MIN,
+            bpm: 0.0,
+            key: String::new(),
+            stages: 0,
+            preview_missing: false,
+            preview: None,
+        };
+        cursor.step()?;
+        Ok(cursor)
+    }
+
+    fn step(&mut self) -> Result<()> {
+        let Some(row) = self.rows.next()? else {
+            self.track_id = i64::MAX;
+            return Ok(());
+        };
+        self.track_id = row.get(0)?;
+        self.bpm = row.get(1)?;
+        self.key.clear();
+        self.key.push_str(text(row, 2)?);
+        self.stages = row.get(3)?;
+        self.preview_missing = row.get(4)?;
+        if self.with_previews {
+            self.preview = row.get(5)?;
+        }
+        Ok(())
+    }
+
+    fn reach(&mut self, track_id: i64) -> Result<bool> {
+        while self.track_id < track_id {
+            self.step()?;
+        }
+        Ok(self.track_id == track_id)
+    }
+}
+
+struct ArtworkCursor<'s> {
+    rows: rusqlite::Rows<'s>,
+    track_id: i64,
+}
+
+impl<'s> ArtworkCursor<'s> {
+    fn start(rows: rusqlite::Rows<'s>) -> Result<Self> {
+        let mut cursor = ArtworkCursor { rows, track_id: i64::MIN };
+        cursor.step()?;
+        Ok(cursor)
+    }
+
+    fn step(&mut self) -> Result<()> {
+        self.track_id = match self.rows.next()? {
+            Some(row) => row.get(0)?,
+            None => i64::MAX,
+        };
+        Ok(())
+    }
+
+    fn reach(&mut self, track_id: i64) -> Result<bool> {
+        while self.track_id < track_id {
+            self.step()?;
+        }
+        Ok(self.track_id == track_id)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Playlist queries
 // ---------------------------------------------------------------------------
@@ -390,11 +823,11 @@ fn write_playlist_tracks(conn: &Connection, playlist_id: i64, track_ids: impl It
         "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
         [playlist_id],
     )?;
+    let mut insert = conn.prepare_cached(
+        "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
+    )?;
     for (pos, track_id) in track_ids.enumerate() {
-        conn.execute(
-            "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?1, ?2, ?3)",
-            params![playlist_id, track_id, pos as i64],
-        )?;
+        insert.execute(params![playlist_id, track_id, pos as i64])?;
     }
     Ok(())
 }
@@ -443,7 +876,12 @@ pub fn replace_playlists(conn: &Connection, playlists: &[Playlist]) -> Result<()
              ON CONFLICT(id) DO UPDATE SET name = ?2, sort_order = ?3, is_folder = ?4",
             params![playlist.id as i64, playlist.name, sort_order as i64, playlist.is_folder],
         )?;
-        write_playlist_tracks(&tx, playlist.id as i64, playlist.track_ids.iter().map(|&t| t as i64))?;
+        let stored = select_playlist_track_ids(&tx, playlist.id as i64)?;
+        let unchanged = stored.len() == playlist.track_ids.len()
+            && stored.iter().zip(&playlist.track_ids).all(|(&a, &b)| a == b as i64);
+        if !unchanged {
+            write_playlist_tracks(&tx, playlist.id as i64, playlist.track_ids.iter().map(|&t| t as i64))?;
+        }
     }
     for playlist in playlists {
         tx.execute(
@@ -463,13 +901,20 @@ pub fn select_all_playlists(conn: &Connection) -> Result<Vec<Playlist>> {
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
         .collect::<Result<Vec<_>, _>>()?;
 
+    let mut members = conn
+        .prepare_cached("SELECT playlist_id, position, track_id FROM playlist_tracks")?
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    members.sort_unstable();
+
     let mut playlists = Vec::with_capacity(playlist_rows.len());
     for (id, name, parent_id, is_folder) in playlist_rows {
-        let track_ids = select_playlist_track_ids(conn, id)?;
+        let start = members.partition_point(|&(playlist_id, ..)| playlist_id < id);
+        let end = members.partition_point(|&(playlist_id, ..)| playlist_id <= id);
         playlists.push(Playlist {
             id: id as u32,
             name,
-            track_ids: track_ids.into_iter().map(|id| id as u32).collect(),
+            track_ids: members[start..end].iter().map(|&(.., track_id)| track_id as u32).collect(),
             parent_id: parent_id as u32,
             is_folder,
         });
@@ -505,4 +950,9 @@ fn select_playlist_track_ids(conn: &Connection, playlist_id: i64) -> Result<Vec<
     )?;
     let rows = stmt.query_map([playlist_id], |row| row.get(0))?;
     rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+pub fn count_tracks(conn: &Connection) -> Result<usize> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |row| row.get(0))?;
+    Ok(count as usize)
 }

@@ -22,7 +22,7 @@ CLI, and prototyping/design assets.
 |---|---|---|
 | `pioneer-usb-writer/` | Rust | **Format library.** Scans tags, writes the Pioneer USB structure (PDB, OneLibrary, ANLZ, artwork, audio). No audio analysis — consumers supply `AnalysisResult`. |
 | `pioneer-library/` | Rust | **Persistent library.** SQLite-backed CRUD for tracks/analyses/playlists + USB export & incremental sync. |
-| `pioneer-test-ui/` | Rust | **Tauri v2 shell.** Hosts the Svelte UI (`frontendDist: ../app/dist`), exposes Tauri commands, and shells out to the Python CLI for analysis (`python -m fourfour_analysis analyze --backend deeprhythm_essentia`; `resolve_python()` in `src/main.rs`). Analysis is moving to the Rust prototype in `prototyping/analysis-packaging` (`docs/analysis/packaging-decision.md`). The old vanilla `frontend/` is legacy. |
+| `pioneer-test-ui/` | Rust | **Tauri v2 shell.** Hosts the Svelte UI (`frontendDist: ../app/dist`), exposes Tauri commands, and analyses with the Rust analyzer (`fourfour-analysis-rs`) only; there is no Python path in the app (a failed track is recorded in `analysis-failures.json`). The `dev-bins` feature tools still call the Python CLI. The old vanilla `frontend/` is legacy. |
 | `fourfour-stretch/` | Rust + C++ | **Time-stretch / pitch engine.** Safe wrapper over vendored Signalsmith Stretch (MIT, `vendor/`, built by `build.rs` at `-O2` in every profile). Used by the playback callback for tempo and key changes (`pioneer-test-ui/src/tempo.rs`, `docs/architecture/tempo-key-engine-plan.md`). Feature `count-allocs` counts C++ allocations for the callback test. |
 | `app/` | Svelte 5 + TS | **The real UI** (`fourfour-app`). Browse, player strip, organize sidebar. Dev server on `:5200`. |
 | `prototyping/` | Svelte | **Design-system playground** (`viewport`). Primitives → modules → screens. See `prototyping/README.md` and its `SKILL.md`. |
@@ -40,6 +40,10 @@ cargo build
 
 # Desktop app — fast dev loop (rebuilds bundle, kills old instance, relaunches)
 cd pioneer-test-ui && ./dev.sh
+
+# Dev binaries (bench_startup, bench_analysis, waveform_*) are gated and not bundled
+cargo build --release --features pioneer-test-ui/dev-bins --bin bench_startup
+# Dev bins must keep compiling: cargo check -p pioneer-test-ui --features dev-bins --bins (they #[path]-include main.rs modules, so add new crate:: dependencies there too)
 
 # Frontend alone (Vite dev server on :5200)
 cd app && npm run dev          # npm run check  → svelte-check
@@ -66,7 +70,7 @@ overrides, and stratum-dsp is not a dependency.
 
 ## Versioning
 
-`pub const VERSION` in `pioneer-usb-writer/src/lib.rs`, shown in the UI toolbar.
+The app version is `pioneer-test-ui/Cargo.toml` `version` (tauri.conf.json has no `version`, so the bundle and dmg name use it); `app_version` and `--self-check` read it. `pioneer_usb_writer::VERSION` is the writer crate's own number. The analysis failure memo keys on `fourfour_analysis::service::analysis_key` (bump `ANALYSIS_VERSION` when analysis output can change).
 
 ## Architecture: the format pipeline
 
@@ -173,7 +177,7 @@ ui reviews: judge on intuitive, efficient workflows on their own terms, never on
 polish vs rebuild: when a task improves something that already works, polish the existing code in place; replacing it (new renderer, new pipeline) is a BLOCKED question to the orchestrator
 autonomy: tight (draft; no queue run yet) — everything stays on branches; only state, docs and benchmark/analysis reports land
 own priorities: finish paused work → bugs → tests → perf → cleanup, inside Merlin's lane (app UX code on branches, analysis prototype, tests); experiments: max 1 per run, analysis prototype only (prototyping/analysis-packaging), never landed
-targets: analysis in Rust: beat-grid phase/drift (grid within ±20 ms of Rekordbox: 47% now) and key ≥60% exact on Beatport (57% now); sync UI per docs/ui/usb-sync-decisions.md, built only after Merlin settles its open questions
+targets: analysis in Rust: beat-grid phase/drift (grid within ±20 ms of Rekordbox: 80.5% on test, 2026-10-28) and key ≥60% exact on Beatport (58.3% now); sync UI per docs/ui/usb-sync-decisions.md, built only after Merlin settles its open questions
 ask before queue: anything in the brother's lane (usb-writer src, sync engine, format, hardware); building or changing sync UI while its open questions stand; copying more of Merlin's music or library data to dev; the 2026-10-30 → 2026-11-16 holiday (nothing user-visible lands); any push
 run limits: ≤2 workers; ≤4 analysis processes; one `cargo build --release` at a time; spawn nothing while `free -m` available < 1500 MB (earlyoom killed previews on 2026-10-15); datasets under benchmark/datasets are read-only; results/scratch in benchmark/results (gitignored); never put cargo targets, venvs or big caches under /tmp (RAM-backed tmpfs, filled up 2026-10-26) — use the worktree or ~/.cache
 

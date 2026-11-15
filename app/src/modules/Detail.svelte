@@ -19,9 +19,10 @@
   import { CUE_PALETTE, cueChip, cueMarkers } from '../lib/cues.ts';
   import { buildRevealItem } from '../menus/context-menus.ts';
   import { seekTrackToMs, seekTrackToProgress } from '../stores/inspector-seek.ts';
-  import { pressInspectorPad } from '../stores/inspector-pads.ts';
+  import { jumpToInspectorCue, pressInspectorPad } from '../stores/inspector-pads.ts';
   import { altKey } from '../stores/alt-key.svelte.ts';
-  import { commitTrackBpm, commitTrackFields, commitTrackKey, fitGridToBpm, releaseTrackEdits } from '../stores/track-edits.svelte.ts';
+  import { closeDetailPane } from '../stores/ui.svelte.ts';
+  import { commitTrackBpm, commitTrackFields, commitTrackKey, releaseTrackEdits, stepTrackBpm } from '../stores/track-edits.svelte.ts';
 
   let mode = $derived(
     selectionCount() === 0 ? 'empty' :
@@ -69,10 +70,6 @@
   let hasEdits = $derived(!!track && (track.bpmLocked || track.keyLocked));
 
   let bpmMenuItems = $derived(track ? [
-    {
-      label: `Adjust beat grid to ${Number(track.bpmExact).toFixed(2)} BPM`,
-      onClick: () => fitGridToBpm(track.id, track.bpmExact),
-    },
     ...(hasEdits ? [{ label: 'Let re-analysis replace BPM and key', onClick: () => releaseTrackEdits(track.id) }] : []),
   ] : []);
   let keyMenuItems = $derived(hasEdits && track ? [
@@ -109,16 +106,17 @@
       keyLocked={track.keyLocked}
       onReleaseLocks={() => releaseTrackEdits(track.id)}
       {markers}
-      onMarkerClick={(marker) => seekTrackToMs(track, marker.timeMs)}
+      onMarkerClick={(marker) => jumpToInspectorCue(track, marker)}
       cues={cueChips}
       cuePalette={CUE_PALETTE}
       showCues={track.analyzed}
       canSetCues={trackIsLoaded}
       canJumpToCues
+      onClose={closeDetailPane}
       onCueAdd={addMemoryCueAtPlayhead}
       onPadPress={(slot, _chip, altHeld) => pressInspectorPad(track, slot, altHeld)}
       altHeld={altKey.held}
-      onCueJump={(chip) => seekTrackToMs(track, chip.timeMs)}
+      onCueJump={(chip) => jumpToInspectorCue(track, chip)}
       onCueRename={(chip, name) => renameCue(track.id, chip.key, name)}
       onCueRecolor={(chip, color) => recolorCue(track.id, chip.key, color)}
       onCueDelete={(chip) => deleteCue(track.id, chip.key)}
@@ -133,6 +131,7 @@
       bpm={track.bpmExact ?? 0}
       musicalKey={track.key ?? ''}
       onBpmChange={tempoEditable ? (next) => commitTrackBpm(track.id, next) : undefined}
+      onBpmStep={tempoEditable ? (units, tier) => stepTrackBpm(track.id, units, tier) : undefined}
       onKeyChange={tempoEditable ? (next) => commitTrackKey(track.id, next) : undefined}
       {bpmMenuItems}
       {keyMenuItems}
@@ -143,6 +142,7 @@
       {mode}
       multiCount={selectionCount()}
       multiMeta={multiMetaObj}
+      onClose={closeDetailPane}
     />
   {:else}
     <DetailPane mode="empty" />
@@ -163,12 +163,12 @@
     height: 100%;
     background: var(--ff-surface);
     border-left: 1px solid var(--ff-border);
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;
   }
   .ff-detail-module > :global(.ff-detail-pane) {
     width: 100%;
     height: 100%;
+    min-height: 0;
     border-left: none;
   }
 </style>

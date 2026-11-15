@@ -19,6 +19,22 @@ rten-tensor = "=0.24.0"
 anyhow = "1"
 pioneer-usb-writer = { path = "../pioneer-usb-writer" }
 
+[features]
+ort = ["dep:ort"]
+coreml = ["ort"]
+
+[dependencies.ort]
+version = "=2.0.0-rc.14"
+optional = true
+default-features = false
+features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-24"]
+
+[target.'cfg(target_os = "macos")'.dependencies.ort]
+version = "=2.0.0-rc.14"
+optional = true
+default-features = false
+features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-24", "coreml"]
+
 [[bin]]
 name = "analyze-json"
 path = "src/bin/analyze_json.rs"

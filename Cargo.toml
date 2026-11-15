@@ -58,3 +58,6 @@ opt-level = 3
 
 [profile.dev.package.fourfour-analysis-rs]
 opt-level = 3
+
+[profile.dev.package.pioneer-usb-writer]
+opt-level = 3
