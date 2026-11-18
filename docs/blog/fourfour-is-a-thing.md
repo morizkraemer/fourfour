@@ -31,16 +31,16 @@ Checked 2026-11-18: no fourfour post exists yet (20 entries; latest: prunr overh
 - Optional tie-in to the Ableton post: lots of Claude, lots of iteration, "no thats wrong, it actually behaves like this".
 
 ### 4. Fun facts (fourfour vs rekordbox)
-fourfour numbers are measured (Mac M5 Pro, 24 GB). The rekordbox column is empty: nothing in our docs measures it. Merlin times rekordbox once on the same Mac and library (see the ask below), then keep only the rows where the gap is fun.
+Same Mac (M5 Pro, 24 GB). rekordbox 7.2.14 timed by Merlin with a stopwatch on 2026-11-18 (two scripted launches agree: 28 s and 33 s to the main window). Test folder: his 2025 DJ folder, 512 tracks, 16 GB.
 
-| | fourfour (measured) | rekordbox (to time) |
+| | fourfour | rekordbox 7.2.14 |
 |---|---|---|
-| Cold start, 10k tracks, to first row | about 0.6 s (0.66 s until usable) | ? |
-| Start with 50k tracks | about 1.35 s | ? |
-| Import a 10k-track folder | about 0.5 s (re-import 0.1 s) | ? |
-| Analysis (BPM, beat grid, key) | about 177 tracks a minute, first result in under 5 s | ? |
-| Library file at 50k tracks | 59 MB | ? (its master.db + analysis files) |
-| App download | about 97 MB DMG | ? (installer size) |
+| Start to a usable library | about 0.6 s (10k tracks) | 29 s (8 s until the splash screen, 24 s first paint) |
+| Quit | ? | 14 s |
+| Import the 512-track folder | ? (Merlin running it) | 4 s |
+| Analyse the 512 tracks | ? (Merlin running it) | 34:19 min (about 4 s a track) |
+| App size | 84 MB | 2.4 GB |
+| Library file at 50k tracks | 59 MB | ? |
 
 Fun-fact lines that need no rekordbox number:
 - "analysis runs fully local in rust with a small open beat model (Beat This!). no python, no cloud".
@@ -74,9 +74,6 @@ Numbers I left out on purpose:
 4. "Open source forever" implies a licence: the repo needs one (check LICENSE) and Mo agrees on which.
 5. Repo link and download: the repo is public, releases are private drafts. Rec: link the repo once the licence is in; testers sign up instead of a download link.
 
-## Ask for Merlin (rekordbox baseline)
-On the Mac, with a stopwatch, against a copy of the same 10k folder (don't touch the real rekordbox library, use a fresh test one if possible):
-1. Cold start to a usable library.
-2. Import the folder.
-3. Analysis time for 100 tracks.
-Plus the rekordbox installer size and its library folder size. Then the table fills in.
+## Open
+- fourfour import + analysis of the same 512-track folder (Merlin, 2026-11-18). Same power state as the rekordbox run.
+- Which rekordbox analysis options were on (phrase, vocal, key) when it took 34 min: say so in the post.
