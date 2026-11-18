@@ -1,6 +1,6 @@
 # Review Lab
 
-Phone-first review inbox for fourfour UI states, built on the shared labkit package. Rules, card format and the full workflow: `.claude/skills/labkit/SKILL.md` (repo root). Read it before adding a card, reading notes or locking a decision.
+Phone-first review inbox for fourfour UI states, built on the shared labkit package. Rules, card format and the full workflow: the global `lab-review` skill. Read it before adding a card, reading notes or locking a decision.
 
 ## Layout
 

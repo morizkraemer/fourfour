@@ -8,7 +8,7 @@ audio_tools/konsole UI work.
 
 - `viewport` is a devDependency (`github:merlinkraemer/viewport`); `npm run viewport` starts it.
   Project layout: `viewport/artboards/<page>/<name>.artboard.js`, `viewport/design-system/`,
-  `viewport.config.js`, skill at `.claude/skills/viewport/SKILL.md`.
+  `viewport.config.js`, review rules in the global `lab-review` skill.
 - One page per focus area (top-level artboard folder); the artboard id is its path
   (`device-view/dv8-slots`). Merlin pastes ids as feedback; comments land in `viewport/comments.json`.
 - A design round = one "now" board (current state) + 3 option boards + a Decisions board.

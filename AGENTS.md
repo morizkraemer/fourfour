@@ -150,6 +150,7 @@ Hard-won from hardware testing. Full notes: `pioneer-usb-writer/reference-code/P
 
 - **Branching**: `master` is the trunk. Both devs work close to it, split by area — Rust lib vs `app/`/`prototyping/` UI. Short throwaway branches only; push daily. Never push `master` without the owner's say-so.
 - **UI work**: follow the specs in `docs/ui/` and `prototyping/` rather than inventing new layouts. Use the `ui-prototyping` skill for prototyping changes.
+- **Review with Merlin**: use the global `lab-review` skill (lab Inbox cards, the canvas, `hub:notes` + `viewport comments` every turn). FourFour facts: lab dir `lab/` (labkit.config.json, hub dir `lab/data`), review https://dev.tail87069a.ts.net:4220/lab.html, mockups canvas :5230 (`cd prototyping && npm run mockups`), prototyping canvas :5180, headless capture with `npm run hub:shot` in `lab/`. Merlin reviews mostly on the Mac desktop, on the phone when mobile layouts matter.
 - **Conventional commits** (`feat:`, `fix:`, `docs:`, …), atomic, one concern each.
 
 ## Documentation Map
