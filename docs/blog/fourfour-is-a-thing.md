@@ -37,8 +37,8 @@ Same Mac (M5 Pro, 24 GB). rekordbox 7.2.14 timed by Merlin with a stopwatch on 2
 |---|---|---|
 | Start to a usable library | about 0.6 s (10k tracks) | 29 s (8 s until the splash screen, 24 s first paint) |
 | Quit | ? | 14 s |
-| Import the 512-track folder | ? (Merlin running it) | 4 s |
-| Analyse the 512 tracks | ? (Merlin running it) | 34:19 min (about 4 s a track) |
+| Import the 512-track folder | not logged (app start to analysis start 27 s, incl. clicks) | 4 s |
+| Analyse the 512 tracks | 25:59 min for 510 (about 3 s a track; log, mostly on battery) | 34:19 min (about 4 s a track) |
 | App size | 84 MB | 2.4 GB |
 | Library file at 50k tracks | 59 MB | ? |
 
