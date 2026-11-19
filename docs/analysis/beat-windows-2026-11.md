@@ -2,7 +2,7 @@
 
 Question: can the beat model run on a few short windows instead of the whole track, with the grid fitted from them and extended, without losing grid, BPM or bar-1 quality?
 
-Answer: **yes for about 4 in 5 tracks. Analysis CPU per track drops 2.1x on the test split (beat model ~2.9x on the tracks that stay windowed); BPM, grid within 20 ms and bar-1 vs Rekordbox stay within one track of the full model.** About 1 in 5 tracks falls back to the full model.
+Answer after the optimize loop below (kept version, `FOURFOUR_BEAT_WINDOWS=30`): **2.4x less CPU per track on the test split (46.8 -> 19.2 s), 3.1x on a back-to-back timing pair, with BPM, grid and bar-1 vs Rekordbox within the gate.** First answer (step 0): **yes for about 4 in 5 tracks. Analysis CPU per track drops 2.1x on the test split (beat model ~2.9x on the tracks that stay windowed); BPM, grid within 20 ms and bar-1 vs Rekordbox stay within one track of the full model.** About 1 in 5 tracks falls back to the full model.
 
 ## Switch (default off)
 
@@ -70,6 +70,8 @@ How the kept version works (`FOURFOUR_BEAT_WINDOWS=30`), compared with step 0 ab
 | 0: 3 windows of 30 s | 602596b | 3624 | 22.3 | 194 | 171 | 141 | 205/205 | 39 (19%) | pass |
 | 1: whole-chunk windows, +2 windows, mel only where read | d2dc9a1 | 3156 | 21.0 | 194 | 172 | 140 | 205/205 | 41 (20%) | fail (bar -2) |
 | 2: + resample only where read, windowed bar-1 share 0.85 | 2870ef6 | 3202 | 19.2 | 194 | 172 | 141 | 205/205 | 41 (20%) | **pass, kept** |
+
+Back-to-back timing pair, 41 test tracks (every 5th), 4 workers x 1 thread: beat-only CPU 7504 -> 2428 ms per audio minute (3.1x), 42.8 -> 13.8 s per track, wall 420 -> 125 s; all stages on (key + waveform) 7577 -> 2684 ms per audio minute (2.8x). This subset has fewer fallbacks (4/41) than the whole test split (41/205), so the test-split 2.4x is the more representative number.
 
 Dev CPU is noisy (±5%, shared box); use the beat-model work share for decisions (step 0 0.444, step 2 0.385 of the full-mode chunks). Per stage, dev median ms per audio minute, step 0 vs step 2: resample 176 -> 79, mel 157 -> 66.
 
