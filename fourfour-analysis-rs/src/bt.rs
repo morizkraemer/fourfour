@@ -20,6 +20,10 @@ const DEFAULT_CHUNK_SIZE: usize = 500;
 const DEFAULT_BORDER_SIZE: usize = 6;
 const RTEN_OVERLAP: usize = 0;
 const MEL_STRIDE: usize = 1536;
+const MEL_HOP: usize = 441;
+const MEL_ALIGN: usize = 64;
+const MEL_MARGIN: usize = 128;
+const RESAMPLE_MARGIN_S: f64 = 1.0;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
 pub const MODEL_RATE: u32 = 22050;
@@ -148,7 +152,7 @@ struct ChunkQueue {
 }
 
 struct TrackChunks {
-    mel: Tensor,
+    mel: Arc<Tensor>,
     starts: Vec<i32>,
     next: AtomicUsize,
     paused: AtomicBool,
@@ -305,6 +309,64 @@ pub struct BeatResult {
     pub resample_ms: f64,
     pub mel_ms: f64,
     pub predict_ms: f64,
+    pub modeled: Vec<(usize, usize)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BeatMode {
+    Full,
+    Windows,
+    Extended,
+    Fallback,
+}
+
+impl BeatMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            BeatMode::Full => "full",
+            BeatMode::Windows => "windows",
+            BeatMode::Extended => "extended",
+            BeatMode::Fallback => "fallback",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BeatWindows {
+    pub stages: Vec<Vec<f64>>,
+    pub spread_ms: Vec<f64>,
+    pub len_s: f64,
+    pub max_share: f64,
+}
+
+pub const BEAT_WINDOWS_ENV: &str = "FOURFOUR_BEAT_WINDOWS";
+pub const BEAT_WINDOW_CENTRES_ENV: &str = "FOURFOUR_BEAT_WINDOW_CENTRES";
+pub const BEAT_WINDOW_EXTRA_ENV: &str = "FOURFOUR_BEAT_WINDOW_EXTRA";
+pub const BEAT_WINDOW_SPREAD_ENV: &str = "FOURFOUR_BEAT_WINDOW_SPREAD";
+pub const DEFAULT_WINDOW_LEN_S: f64 = 30.0;
+pub const DEFAULT_WINDOW_CENTRES: [f64; 3] = [0.25, 0.5, 0.75];
+pub const DEFAULT_EXTRA_CENTRES: [f64; 2] = [0.125, 0.875];
+
+impl BeatWindows {
+    pub fn max_spread_ms(&self, stage: usize) -> f64 {
+        self.spread_ms.get(stage).or(self.spread_ms.last()).copied().unwrap_or(crate::fit::WINDOW_MAX_SPREAD_MS)
+    }
+
+    pub fn from_env() -> Option<Self> {
+        let len_s = match std::env::var(BEAT_WINDOWS_ENV) {
+            Ok(v) => v.parse::<f64>().ok().filter(|&s| s > 0.0)?,
+            Err(_) => DEFAULT_WINDOW_LEN_S,
+        };
+        let centres = |name: &str, default: &[f64]| {
+            std::env::var(name)
+                .ok()
+                .map(|v| v.split(',').filter_map(|c| c.trim().parse::<f64>().ok()).filter(|c| (0.0..=1.0).contains(c)).collect::<Vec<_>>())
+                .unwrap_or_else(|| default.to_vec())
+        };
+        let stages = [centres(BEAT_WINDOW_CENTRES_ENV, &DEFAULT_WINDOW_CENTRES), centres(BEAT_WINDOW_EXTRA_ENV, &DEFAULT_EXTRA_CENTRES)];
+        let spread_ms = std::env::var(BEAT_WINDOW_SPREAD_ENV).ok().map(|v| v.split(',').filter_map(|c| c.trim().parse::<f64>().ok()).collect::<Vec<_>>()).filter(|v| !v.is_empty()).unwrap_or_else(|| vec![crate::fit::WINDOW_MAX_SPREAD_MS]);
+        Some(BeatWindows { stages: stages.into_iter().filter(|c| !c.is_empty()).collect(), spread_ms, len_s, max_share: 0.7 })
+    }
 }
 
 struct MelRunner<'a> {
@@ -427,34 +489,86 @@ impl BeatEngine {
     /// `resample` returns the track at `MODEL_RATE`; the caller's source audio can be freed inside it, before the mel
     /// spectrogram and the beat-model chunks run.
     pub fn analyze_resampled(&self, resample: impl FnOnce() -> Result<Vec<f32>>, threads: usize, control: &Control) -> Result<BeatResult> {
+        let (mel, resample_ms, mel_ms) = self.mel(resample, threads)?;
+        let full_time = mel.shape[1];
+        let starts = generate_starts(full_time, chunking());
+        let t = Instant::now();
+        let chunks = self.run_chunks(&mel, starts, threads, control)?;
+        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
+        Ok(beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms))
+    }
+
+    /// Runs the beat model only on the chunks that cover `windows` and hands that result to `accept`. When `accept`
+    /// returns nothing, the remaining chunks run too and the whole-track result comes back. A track the windows would
+    /// cover mostly anyway runs whole from the start.
+    pub fn analyze_windowed<T>(
+        &self,
+        native: &[f32],
+        rate: u32,
+        threads: usize,
+        control: &Control,
+        windows: &BeatWindows,
+        mut accept: impl FnMut(&BeatResult, usize) -> Option<T>,
+    ) -> Result<(BeatResult, BeatMode, Option<T>)> {
+        let mut audio = PartialAudio::new(native, rate);
+        let mut mel = PartialMel::new(audio.data.len());
+        let full_time = mel.frames;
+        let plan = chunking();
+        let starts = generate_starts(full_time, plan);
+        let window_frames = (windows.len_s * FPS as f64).round() as usize;
+        let t = Instant::now();
+        let mut done: Vec<usize> = Vec::new();
+        let mut chunks = Vec::new();
+        let mut centres: Vec<f64> = Vec::new();
+        for (stage, extra) in windows.stages.iter().enumerate() {
+            centres.extend(extra);
+            let picked = window_chunks(&starts, plan, &centres, window_frames);
+            if picked.len() as f64 >= windows.max_share * starts.len() as f64 {
+                break;
+            }
+            let new: Vec<i32> = picked.iter().filter(|i| !done.contains(i)).map(|&i| starts[i]).collect();
+            let tensor = mel.cover_aligned_with_margin(self, &mut audio, &new, plan, threads)?;
+            chunks.extend(self.run_chunks(&tensor, new, threads, control)?);
+            chunks.sort_by_key(|c| c.0);
+            done.extend(picked.into_iter().filter(|i| !done.contains(i)).collect::<Vec<_>>());
+            let windowed = beat_result(&chunks, full_time, audio.ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms - audio.ms);
+            if let Some(accepted) = accept(&windowed, stage) {
+                let mode = if stage == 0 { BeatMode::Windows } else { BeatMode::Extended };
+                return Ok((windowed, mode, Some(accepted)));
+            }
+        }
+        let rest: Vec<i32> = (0..starts.len()).filter(|i| !done.contains(i)).map(|i| starts[i]).collect();
+        let tensor = mel.cover_aligned_with_margin(self, &mut audio, &rest, plan, threads)?;
+        chunks.extend(self.run_chunks(&tensor, rest, threads, control)?);
+        chunks.sort_by_key(|c| c.0);
+        let mode = if done.is_empty() { BeatMode::Full } else { BeatMode::Fallback };
+        Ok((beat_result(&chunks, full_time, audio.ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms - audio.ms), mode, None))
+    }
+
+    fn mel_stream(&self, samples: &[f32], threads: usize) -> Result<Tensor> {
+        let pool = Arc::new(ThreadPool::with_num_threads(threads.max(1)));
+        let mut runner = MelRunner { engine: self, options: RunOptions::default().with_thread_pool(Some(pool)) };
+        let mut stream = MelStream::new(MEL_STRIDE);
+        stream.push(&mut runner, samples)?;
+        stream.finish(&mut runner)
+    }
+
+    fn mel(&self, resample: impl FnOnce() -> Result<Vec<f32>>, threads: usize) -> Result<(Arc<Tensor>, f64, f64)> {
         let t = Instant::now();
         let samples = resample()?;
         let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let pool = Arc::new(ThreadPool::with_num_threads(threads.max(1)));
-        let mut runner = MelRunner { engine: self, options: RunOptions::default().with_thread_pool(Some(pool)) };
-        let mut stream = MelStream::new(MEL_STRIDE);
-        stream.push(&mut runner, &samples)?;
-        drop(samples);
-        let mel = stream.finish(&mut runner)?;
-        let mel_ms = t.elapsed().as_secs_f64() * 1000.0;
-
-        let t = Instant::now();
-        let (beat_logits, down_logits) = self.predict(mel, threads, control)?;
-        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
-        let (beats, downbeats) = pick_peaks(&beat_logits, &down_logits);
-        Ok(BeatResult { beat_logits, down_logits, beats, downbeats, resample_ms, mel_ms, predict_ms })
+        let mel = self.mel_stream(&samples, threads)?;
+        Ok((Arc::new(mel), resample_ms, t.elapsed().as_secs_f64() * 1000.0))
     }
 
-    fn predict(&self, mel: Tensor, threads: usize, control: &Control) -> Result<ChunkLogits> {
-        let full_time = mel.shape[1];
-        let starts = generate_starts(full_time, chunking());
+    fn run_chunks(&self, mel: &Arc<Tensor>, starts: Vec<i32>, threads: usize, control: &Control) -> Result<Vec<(i32, ChunkLogits)>> {
         let shared = self.shared_chunk_threads.load(Ordering::Relaxed);
         self.ensure_chunk_threads(if shared > 0 { shared } else { threads.max(1) })?;
         let track = Arc::new(TrackChunks {
             results: Mutex::new(starts.iter().map(|_| None).collect()),
-            mel,
+            mel: mel.clone(),
             starts,
             next: AtomicUsize::new(0),
             paused: AtomicBool::new(control.pause.load(Ordering::Relaxed)),
@@ -484,8 +598,156 @@ impl BeatEngine {
         for (i, &start) in track.starts.iter().enumerate() {
             chunks.push((start, results[i].take().unwrap()?));
         }
-        Ok(stitch(&chunks, full_time, chunking()))
+        Ok(chunks)
     }
+}
+
+struct PartialAudio<'a> {
+    native: &'a [f32],
+    rate: u32,
+    data: Vec<f32>,
+    computed: Vec<(usize, usize)>,
+    ms: f64,
+}
+
+impl<'a> PartialAudio<'a> {
+    fn new(native: &'a [f32], rate: u32) -> Self {
+        let len = if rate == MODEL_RATE { native.len() } else { ((native.len() as f64 - 2.0) * MODEL_RATE as f64 / rate as f64).floor().max(0.0) as usize };
+        PartialAudio { native, rate, data: vec![0.0; len], computed: Vec::new(), ms: 0.0 }
+    }
+
+    fn cover_aligned_with_margin(&mut self, from: usize, to: usize) -> Result<()> {
+        let t = Instant::now();
+        let ratio = MODEL_RATE as f64 / self.rate as f64;
+        let step = (self.rate / gcd(self.rate, MODEL_RATE)) as usize;
+        let per_step = (MODEL_RATE / gcd(self.rate, MODEL_RATE)) as usize;
+        let margin = (RESAMPLE_MARGIN_S * MODEL_RATE as f64) as usize;
+        for (a, b) in subtract(&[(from, to)], &self.computed) {
+            let n0 = ((a.saturating_sub(margin) as f64 / ratio) as usize) / step * step;
+            let wanted_end = ((b + margin) as f64 / ratio).ceil() as usize;
+            let n1 = if wanted_end + step >= self.native.len() { self.native.len() } else { wanted_end };
+            let part = resample_to(&self.native[n0..n1], self.rate, MODEL_RATE)?;
+            let o0 = n0 / step * per_step;
+            let end = b.min(o0 + part.len());
+            self.data[a..end].copy_from_slice(&part[a - o0..end - o0]);
+            self.computed.push((a, b));
+        }
+        self.ms += t.elapsed().as_secs_f64() * 1000.0;
+        Ok(())
+    }
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+struct PartialMel {
+    frames: usize,
+    data: Vec<f32>,
+    computed: Vec<(usize, usize)>,
+    ms: f64,
+}
+
+impl PartialMel {
+    fn new(samples: usize) -> Self {
+        let frames = 1 + samples / MEL_HOP;
+        PartialMel { frames, data: vec![0.0; frames * N_MELS], computed: Vec::new(), ms: 0.0 }
+    }
+
+    fn cover_aligned_with_margin(&mut self, engine: &BeatEngine, audio: &mut PartialAudio, starts: &[i32], plan: &Chunking, threads: usize) -> Result<Arc<Tensor>> {
+        let mut needed: Vec<(usize, usize)> = starts
+            .iter()
+            .map(|&s| (s.max(0) as usize, ((s + plan.size as i32).max(0) as usize).min(self.frames)))
+            .filter(|(a, b)| a < b)
+            .collect();
+        needed.sort();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in needed {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 2 * MEL_MARGIN => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        for (from, to) in merged {
+            let missing: Vec<(usize, usize)> = subtract(&[(from, to)], &self.computed);
+            for (from, to) in missing {
+                let g0 = from.saturating_sub(MEL_MARGIN) / MEL_ALIGN * MEL_ALIGN;
+                let end_sample = if to + MEL_MARGIN >= self.frames { audio.data.len() } else { MEL_HOP * (to + MEL_MARGIN) };
+                audio.cover_aligned_with_margin(MEL_HOP * g0, end_sample)?;
+                let t = Instant::now();
+                let part = engine.mel_stream(&audio.data[MEL_HOP * g0..end_sample], threads)?;
+                self.ms += t.elapsed().as_secs_f64() * 1000.0;
+                for f in from..to {
+                    let src = (f - g0) * N_MELS;
+                    self.data[f * N_MELS..(f + 1) * N_MELS].copy_from_slice(&part.data[src..src + N_MELS]);
+                }
+                self.computed.push((from, to));
+            }
+        }
+        Ok(Arc::new(Tensor { shape: vec![1, self.frames, N_MELS], data: self.data.clone() }))
+    }
+}
+
+fn subtract(spans: &[(usize, usize)], minus: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut out = spans.to_vec();
+    for &(a, b) in minus {
+        out = out
+            .into_iter()
+            .flat_map(|(x, y)| {
+                let mut parts = Vec::new();
+                if x < a.min(y) {
+                    parts.push((x, a.min(y)));
+                }
+                if b.max(x) < y {
+                    parts.push((b.max(x), y));
+                }
+                parts
+            })
+            .collect();
+    }
+    out
+}
+
+fn beat_result(chunks: &[(i32, ChunkLogits)], full_time: usize, resample_ms: f64, mel_ms: f64, predict_ms: f64) -> BeatResult {
+    let plan = chunking();
+    let (beat_logits, down_logits) = stitch(chunks, full_time, plan);
+    let (beats, downbeats) = pick_peaks(&beat_logits, &down_logits);
+    let mut modeled: Vec<(usize, usize)> = Vec::new();
+    for &(start, _) in chunks {
+        let (from, to) = valid_frames(start, full_time, plan);
+        match modeled.last_mut() {
+            Some(last) if from <= last.1 => last.1 = last.1.max(to),
+            _ => modeled.push((from, to)),
+        }
+    }
+    BeatResult { beat_logits, down_logits, beats, downbeats, resample_ms, mel_ms, predict_ms, modeled }
+}
+
+fn valid_frames(start: i32, full_time: usize, plan: &Chunking) -> (usize, usize) {
+    let from = (start + plan.border as i32).max(0) as usize;
+    let to = ((start + plan.size as i32 - plan.border as i32).max(0) as usize).min(full_time);
+    (from.min(to), to)
+}
+
+fn window_chunks(starts: &[i32], plan: &Chunking, centres: &[f64], window_frames: usize) -> Vec<usize> {
+    let n = starts.len();
+    let per_window = ((window_frames as f64 / plan.stride() as f64).round() as usize).clamp(1, n.max(1));
+    let full_time = starts.last().map_or(0, |&s| s + plan.size as i32) as f64;
+    let mut picked: Vec<usize> = centres
+        .iter()
+        .flat_map(|&c| {
+            let mid = c * full_time;
+            let nearest = (0..n).min_by(|&a, &b| {
+                let d = |i: usize| (starts[i] as f64 + plan.size as f64 / 2.0 - mid).abs();
+                d(a).total_cmp(&d(b))
+            });
+            let lo = nearest.map_or(0, |i| i.saturating_sub((per_window - 1) / 2).min(n - per_window));
+            lo..lo + per_window
+        })
+        .collect();
+    picked.sort();
+    picked.dedup();
+    picked
 }
 
 fn stitch(chunks: &[(i32, ChunkLogits)], full_time: usize, plan: &Chunking) -> ChunkLogits {
@@ -626,6 +888,22 @@ fn pick_peaks(beat_logits: &[f32], down_logits: &[f32]) -> (Vec<f32>, Vec<f32>) 
 #[cfg(test)]
 mod chunk_default_tests {
     use super::*;
+
+    #[test]
+    fn subtract_leaves_the_frames_not_yet_computed() {
+        assert_eq!(subtract(&[(0, 100)], &[(10, 20), (50, 120)]), vec![(0, 10), (20, 50)]);
+        assert_eq!(subtract(&[(30, 40)], &[(0, 100)]), vec![]);
+    }
+
+    #[test]
+    fn a_window_takes_whole_chunks_around_its_centre() {
+        let plan = Chunking { size: 500, border: 6, overlap: 0, blend: false };
+        let starts = generate_starts(18000, &plan);
+        let picked = window_chunks(&starts, &plan, &[0.25, 0.5, 0.75], 1500);
+        assert_eq!(picked.len(), 9);
+        let picked = window_chunks(&starts, &plan, &[0.5], 1000);
+        assert_eq!(picked.len(), 2);
+    }
 
     #[test]
     fn every_build_uses_the_500_frame_chunk() {

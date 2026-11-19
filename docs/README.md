@@ -57,6 +57,7 @@ the research, plans, and reverse-engineering notes.
 | [`key-licence-2026-10-31.md`](analysis/key-licence-2026-10-31.md) | current | Licence-clean key model: permissive label sources (FSL10K loops), theory-only and FSL refit vs shipped, switch in `cyankey.rs`. |
 | [`grid-offset-2026-10-29.md`](analysis/grid-offset-2026-10-29.md) | current | Why the grid looked a little off: mp3 time bases (gapless trim, Info frame), one shared time base, offsets by codec. |
 | [`key-detector-2026-10.md`](analysis/key-detector-2026-10.md) | current | Key detector results. |
+| [`beat-windows-2026-11.md`](analysis/beat-windows-2026-11.md) | current | Beat model on 3 windows instead of the whole track (`FOURFOUR_BEAT_WINDOWS`, off by default): 2.1x less CPU, same grid/BPM, 19% fallback. |
 | [`analyzer-backend-review.md`](analysis/analyzer-backend-review.md) | historical | Analyzer backend review (June 2026). |
 | [`experimentation-path.md`](analysis/experimentation-path.md) | reference | 6-phase experimentation plan (BPM/key accuracy → waveforms → scale → phrases/embeddings/stems). |
 | [`cli-build-plan.md`](analysis/cli-build-plan.md) | historical | Plan for the Python analysis CLI. |

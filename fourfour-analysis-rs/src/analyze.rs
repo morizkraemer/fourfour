@@ -8,11 +8,11 @@ use std::time::Instant;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 
-use crate::bt::{BeatEngine, BeatResult, MODEL_RATE};
+use crate::bt::{BeatEngine, BeatMode, BeatResult, BeatWindows, MODEL_RATE};
 use crate::cyankey;
 use crate::decode::{decode_mono_measured, resample_to};
 use crate::energy::{self, Energy};
-use crate::fit::{self, FitParams, Window, FPS};
+use crate::fit::{self, FitParams, Window, WindowCheck, FPS};
 use crate::keymap::camelot;
 use crate::loudness::Loudness;
 use crate::mp3::{self, DelayRule};
@@ -30,11 +30,12 @@ pub struct Config {
     pub energy: bool,
     pub keep_logits: bool,
     pub loudness: bool,
+    pub beat_windows: Option<BeatWindows>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::ModelLead, beats: true, key: true, waveform: true, energy: false, keep_logits: false, loudness: false }
+        Config { threads: 1, fit: FitParams::default(), mp3_rule: DelayRule::ModelLead, beats: true, key: true, waveform: true, energy: false, keep_logits: false, loudness: false, beat_windows: BeatWindows::from_env() }
     }
 }
 
@@ -55,6 +56,8 @@ pub struct Analysis {
     pub energy: Option<Energy>,
     pub logits: Option<(Vec<f32>, Vec<f32>)>,
     pub loudness: Option<Loudness>,
+    pub beat_mode: BeatMode,
+    pub window_checks: Vec<WindowCheck>,
     pub ms: Value,
 }
 
@@ -164,7 +167,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
             }
             (key, wf)
         });
-        let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64)> {
+        let beat = (|| -> Result<(BeatResult, Option<fit::Fit>, f64, f64, f64, BeatMode, Vec<WindowCheck>)> {
             if !cfg.beats {
                 let none = BeatResult {
                     beat_logits: Vec::new(),
@@ -174,25 +177,43 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
                     resample_ms: 0.0,
                     mel_ms: 0.0,
                     predict_ms: 0.0,
+                    modeled: Vec::new(),
                 };
-                return Ok((none, None, 0.0, 0.0, 0.0));
+                return Ok((none, None, 0.0, 0.0, 0.0, BeatMode::Full, Vec::new()));
             }
-            let bt = engine.analyze_resampled(move || resample_to(native.gapless_samples(), rate, MODEL_RATE), cfg.threads, control)?;
+            let mut fp = cfg.fit.clone();
+            fp.threads = cfg.threads;
+            let fit_of = |bt: &BeatResult| {
+                let w = Window { offset: 0.0, len: bt.beat_logits.len() as f64 / FPS };
+                let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
+                fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless_s, &w, &fp)
+            };
+            let mut checks = Vec::new();
+            let mut window_fit_ms = 0.0;
+            let (bt, mode, accepted) = match &cfg.beat_windows {
+                None => (engine.analyze_resampled(move || resample_to(native.gapless_samples(), rate, MODEL_RATE), cfg.threads, control)?, BeatMode::Full, None),
+                Some(windows) => engine.analyze_windowed(native.gapless_samples(), rate, cfg.threads, control, windows, |bt, stage| {
+                    let t = Instant::now();
+                    let fit = fit_of(bt);
+                    if let Some(f) = &fit {
+                        let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
+                        checks = fit::check_windows(f, &peaks, &bt.beat_logits, &bt.modeled);
+                    }
+                    window_fit_ms += ms(t);
+                    fit.filter(|_| fit::windows_agree(&checks, stage, windows.max_spread_ms(stage)))
+                })?,
+            };
             let t = Instant::now();
             let delay = mp3::timeline_shift_s(path, cfg.mp3_rule) + if cfg.mp3_rule == DelayRule::ModelLead { gapless_start_s } else { 0.0 };
             let mp3_ms = ms(t);
             let t = Instant::now();
-            let w = Window { offset: 0.0, len: bt.beat_logits.len() as f64 / FPS };
-            let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
-            let mut fp = cfg.fit.clone();
-            fp.threads = cfg.threads;
-            let fit = fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless_s, &w, &fp);
-            Ok((bt, fit, delay, ms(t), mp3_ms))
+            let fit = accepted.or_else(|| fit_of(&bt));
+            Ok((bt, fit, delay, window_fit_ms + ms(t), mp3_ms, mode, checks))
         })();
         let (key, wf) = fast.join().unwrap();
         (beat, key, wf, energy_thread.map(|h| h.join().unwrap()))
     });
-    let (bt, fit, delay, fit_ms, mp3_ms) = beat_part?;
+    let (bt, fit, delay, fit_ms, mp3_ms, beat_mode, window_checks) = beat_part?;
     if cancel.load(Ordering::Relaxed) {
         return Err(Cancelled.into());
     }
@@ -257,11 +278,21 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
         energy,
         logits: cfg.keep_logits.then(|| (bt.beat_logits, bt.down_logits)),
         loudness,
+        beat_mode,
+        window_checks,
         ms: ms_doc,
     })
 }
 
 impl Analysis {
+    pub fn bar_phase(&self) -> usize {
+        let share = match self.beat_mode {
+            BeatMode::Windows | BeatMode::Extended => service::WINDOWED_MODEL_STRONG_SHARE,
+            BeatMode::Full | BeatMode::Fallback => service::MODEL_STRONG_SHARE,
+        };
+        service::bar_phase_with_share(service::BAR_ONE_RULE, share, &self.beats_s, &self.downbeats_s, self.mp3_delay_s)
+    }
+
     pub fn to_json(&self, path: &Path, id: Option<u64>) -> Value {
         let mut doc = json!({
             "id": id,
@@ -273,7 +304,7 @@ impl Analysis {
             "n_beats": self.beats_s.len(),
             "final_beats_s": self.beats_s,
             "downbeats_s": self.downbeats_s,
-            "bar_phase": service::bar_phase(&self.beats_s, &self.downbeats_s, self.mp3_delay_s),
+            "bar_phase": self.bar_phase(),
             "bar_phase_model_vote": service::bar_phase_by(service::BarOneRule::ModelVote, &self.beats_s, &self.downbeats_s, self.mp3_delay_s),
             "key": self.key_class.map(camelot),
             "key_confidence": self.key_confidence,
@@ -282,6 +313,14 @@ impl Analysis {
             "detail_entries": self.detail_entries,
             "ms": self.ms,
         });
+        if self.beat_mode != BeatMode::Full || !self.window_checks.is_empty() {
+            doc["beat_mode"] = json!(self.beat_mode.name());
+            doc["window_checks"] = json!(self
+                .window_checks
+                .iter()
+                .map(|c| json!({ "from_s": c.from_s, "to_s": c.to_s, "expected": c.expected, "peaks": c.peaks, "inliers": c.inliers, "median_ms": c.median_ms }))
+                .collect::<Vec<_>>());
+        }
         if let Some(l) = &self.loudness {
             doc["loudness"] = json!({ "lufs": l.lufs, "peak_db": l.peak_db, "gain_db": l.gain_db });
         }
@@ -314,6 +353,8 @@ mod tests {
             energy: None,
             logits: None,
             loudness,
+            beat_mode: BeatMode::Full,
+            window_checks: Vec::new(),
             ms: Value::Null,
         }
     }

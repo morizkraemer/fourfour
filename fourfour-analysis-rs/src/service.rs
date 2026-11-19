@@ -333,12 +333,19 @@ pub enum BarOneRule {
 
 pub const BAR_ONE_RULE: BarOneRule = BarOneRule::FirstBeatUnlessModelStrong;
 pub const MODEL_STRONG_SHARE: f64 = 0.8;
+/// The windowed beat model only sees downbeats inside its windows, mostly the steady body of the track, so its
+/// vote needs a larger share to stand for the same evidence as a whole-track vote.
+pub const WINDOWED_MODEL_STRONG_SHARE: f64 = 0.85;
 
 pub fn bar_phase(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
     bar_phase_by(BAR_ONE_RULE, beats_s, downbeats_s, delay_s)
 }
 
 pub fn bar_phase_by(rule: BarOneRule, beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
+    bar_phase_with_share(rule, MODEL_STRONG_SHARE, beats_s, downbeats_s, delay_s)
+}
+
+pub fn bar_phase_with_share(rule: BarOneRule, strong_share: f64, beats_s: &[f64], downbeats_s: &[f32], delay_s: f64) -> usize {
     if rule == BarOneRule::FirstBeat || beats_s.len() < 2 {
         return 0;
     }
@@ -359,13 +366,16 @@ pub fn bar_phase_by(rule: BarOneRule, beats_s: &[f64], downbeats_s: &[f32], dela
     let top = (0..4).max_by_key(|&p| (votes[p], std::cmp::Reverse(p))).unwrap();
     let total: usize = votes.iter().sum();
     match rule {
-        BarOneRule::FirstBeatUnlessModelStrong if (votes[top] as f64) < MODEL_STRONG_SHARE * total.max(1) as f64 => 0,
+        BarOneRule::FirstBeatUnlessModelStrong if (votes[top] as f64) < strong_share * total.max(1) as f64 => 0,
         _ => top,
     }
 }
 
 pub fn beats_from_grid(beats_s: &[f64], downbeats_s: &[f32], delay_s: f64, bpm: f64) -> Vec<Beat> {
-    let phase = bar_phase(beats_s, downbeats_s, delay_s);
+    beats_with_phase(beats_s, bar_phase(beats_s, downbeats_s, delay_s), bpm)
+}
+
+pub fn beats_with_phase(beats_s: &[f64], phase: usize, bpm: f64) -> Vec<Beat> {
     let tempo = (bpm * 100.0).round() as u32;
     beats_s
         .iter()
@@ -397,7 +407,7 @@ pub fn to_app_result(a: &Analysis) -> AnalysisResult {
         None => (WaveformPreview { data: [0; 400] }, None),
     };
     AnalysisResult {
-        beat_grid: BeatGrid { beats: beats_from_grid(&a.beats_s, &a.downbeats_s, a.mp3_delay_s, bpm) },
+        beat_grid: BeatGrid { beats: beats_with_phase(&a.beats_s, a.bar_phase(), bpm) },
         waveform,
         bpm,
         key: a.key_class.map(camelot).unwrap_or_default().to_string(),
@@ -434,6 +444,8 @@ mod tests {
             energy: None,
             logits: None,
             loudness: None,
+            beat_mode: crate::bt::BeatMode::Full,
+            window_checks: Vec::new(),
             ms: serde_json::Value::Null,
         }
     }
