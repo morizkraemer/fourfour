@@ -6,7 +6,7 @@ Answer after the optimize loop below (kept version, `FOURFOUR_BEAT_WINDOWS=30`):
 
 ## Switch (default off)
 
-`FOURFOUR_BEAT_WINDOWS=<seconds>` (e.g. `30`) turns it on (`BeatWindows::from_env`, `fourfour-analysis-rs/src/bt.rs`). Unset, every path is the old one.
+On by default since 2026-11-19 (30 s windows, `BeatWindows::from_env`, `fourfour-analysis-rs/src/bt.rs`). `FOURFOUR_BEAT_WINDOWS=<seconds>` changes the window length; `FOURFOUR_BEAT_WINDOWS=0` runs the full model on every track.
 
 How it works:
 

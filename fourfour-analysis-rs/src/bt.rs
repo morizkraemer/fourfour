@@ -343,6 +343,7 @@ pub const BEAT_WINDOWS_ENV: &str = "FOURFOUR_BEAT_WINDOWS";
 pub const BEAT_WINDOW_CENTRES_ENV: &str = "FOURFOUR_BEAT_WINDOW_CENTRES";
 pub const BEAT_WINDOW_EXTRA_ENV: &str = "FOURFOUR_BEAT_WINDOW_EXTRA";
 pub const BEAT_WINDOW_SPREAD_ENV: &str = "FOURFOUR_BEAT_WINDOW_SPREAD";
+pub const DEFAULT_WINDOW_LEN_S: f64 = 30.0;
 pub const DEFAULT_WINDOW_CENTRES: [f64; 3] = [0.25, 0.5, 0.75];
 pub const DEFAULT_EXTRA_CENTRES: [f64; 2] = [0.125, 0.875];
 
@@ -352,7 +353,10 @@ impl BeatWindows {
     }
 
     pub fn from_env() -> Option<Self> {
-        let len_s = std::env::var(BEAT_WINDOWS_ENV).ok()?.parse::<f64>().ok().filter(|&s| s > 0.0)?;
+        let len_s = match std::env::var(BEAT_WINDOWS_ENV) {
+            Ok(v) => v.parse::<f64>().ok().filter(|&s| s > 0.0)?,
+            Err(_) => DEFAULT_WINDOW_LEN_S,
+        };
         let centres = |name: &str, default: &[f64]| {
             std::env::var(name)
                 .ok()
