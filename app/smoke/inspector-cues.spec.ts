@@ -59,21 +59,21 @@ for (const size of [
   });
 }
 
-test('keys 1 to 8 set an empty hot cue and fire a set one, like the pads', async ({ smoke }) => {
+test('Shift+1 to Shift+8 set an empty hot cue and fire a set one, like the pads', async ({ smoke }) => {
   const { page } = smoke;
   await loadAndExpand(page);
   await pause(page);
   const saves = async () => (await smoke.invokes('set_cues')).length;
   const before = await saves();
 
-  await page.keyboard.press('2');
+  await page.keyboard.press('Shift+2');
   await expect.poll(saves).toBeGreaterThan(before);
   const saved = (await smoke.invokes('set_cues')).at(-1)!.cues as { hot_cue_number: number }[];
   expect(saved.map((c) => c.hot_cue_number)).toContain(2);
   await expect(page.locator('.ff-xp__pad[data-pad="B"]')).toHaveClass(/ff-xp__pad--set/);
 
   await expect(playButton(page)).toHaveAttribute('aria-label', 'Play');
-  await page.keyboard.press('1');
+  await page.keyboard.press('Shift+1');
   await expect(playButton(page)).toHaveAttribute('aria-label', 'Pause');
   expect(await saves()).toBe(before + 1);
 });

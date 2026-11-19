@@ -104,10 +104,6 @@ function listHasFocus(): boolean {
   return document.activeElement?.closest('[role="listbox"]') != null;
 }
 
-function plainDigitsFireCues(): boolean {
-  return player.track != null && (player.expanded || !listHasFocus());
-}
-
 const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS }, (_, i) => {
   const slot = i + 1;
   return {
@@ -116,21 +112,8 @@ const favoriteActions: ShortcutAction[] = Array.from({ length: FAVORITE_SLOTS },
     group: GROUP.favorites,
     defaultBinding: String(slot),
     palette: false,
-    when: () => selectionCount() > 0 && !(slot <= HOT_CUE_SLOTS && plainDigitsFireCues()),
+    when: () => selectionCount() > 0,
     run: () => void toggleFavoriteSlot(slot, [...selection.ids]),
-  };
-});
-
-const hotCueDigitActions: ShortcutAction[] = Array.from({ length: HOT_CUE_SLOTS }, (_, i) => {
-  const slot = i + 1;
-  return {
-    id: `cues.hot${slot}.digit`,
-    label: `Hot cue ${slotLetter(slot)}: set or jump (plain ${slot})`,
-    group: GROUP.cues,
-    defaultBinding: String(slot),
-    palette: false,
-    when: plainDigitsFireCues,
-    run: () => void triggerHotCue(slot),
   };
 });
 
@@ -502,7 +485,6 @@ export function buildAppActions(): ShortcutAction[] {
         }),
     },
     ...hotCueActions,
-    ...hotCueDigitActions,
     ...playerActions,
     {
       id: 'library.search',
