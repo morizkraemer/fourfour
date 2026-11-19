@@ -148,7 +148,7 @@ struct ChunkQueue {
 }
 
 struct TrackChunks {
-    mel: Tensor,
+    mel: Arc<Tensor>,
     starts: Vec<i32>,
     next: AtomicUsize,
     paused: AtomicBool,
@@ -305,6 +305,40 @@ pub struct BeatResult {
     pub resample_ms: f64,
     pub mel_ms: f64,
     pub predict_ms: f64,
+    pub modeled: Vec<(usize, usize)>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BeatMode {
+    Full,
+    Windows,
+    Fallback,
+}
+
+impl BeatMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            BeatMode::Full => "full",
+            BeatMode::Windows => "windows",
+            BeatMode::Fallback => "fallback",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BeatWindows {
+    pub centres: Vec<f64>,
+    pub len_s: f64,
+    pub max_share: f64,
+}
+
+pub const BEAT_WINDOWS_ENV: &str = "FOURFOUR_BEAT_WINDOWS";
+
+impl BeatWindows {
+    pub fn from_env() -> Option<Self> {
+        let len_s = std::env::var(BEAT_WINDOWS_ENV).ok()?.parse::<f64>().ok().filter(|&s| s > 0.0)?;
+        Some(BeatWindows { centres: vec![0.25, 0.5, 0.75], len_s, max_share: 0.7 })
+    }
 }
 
 struct MelRunner<'a> {
@@ -427,6 +461,51 @@ impl BeatEngine {
     /// `resample` returns the track at `MODEL_RATE`; the caller's source audio can be freed inside it, before the mel
     /// spectrogram and the beat-model chunks run.
     pub fn analyze_resampled(&self, resample: impl FnOnce() -> Result<Vec<f32>>, threads: usize, control: &Control) -> Result<BeatResult> {
+        let (mel, resample_ms, mel_ms) = self.mel(resample, threads)?;
+        let full_time = mel.shape[1];
+        let starts = generate_starts(full_time, chunking());
+        let t = Instant::now();
+        let chunks = self.run_chunks(&mel, starts, threads, control)?;
+        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
+        Ok(beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms))
+    }
+
+    /// Runs the beat model only on the chunks that cover `windows` and hands that result to `accept`. When `accept`
+    /// returns nothing, the remaining chunks run too and the whole-track result comes back. A track the windows would
+    /// cover mostly anyway runs whole from the start.
+    pub fn analyze_windowed<T>(
+        &self,
+        resample: impl FnOnce() -> Result<Vec<f32>>,
+        threads: usize,
+        control: &Control,
+        windows: &BeatWindows,
+        accept: impl FnOnce(&BeatResult) -> Option<T>,
+    ) -> Result<(BeatResult, BeatMode, Option<T>)> {
+        let (mel, resample_ms, mel_ms) = self.mel(resample, threads)?;
+        let full_time = mel.shape[1];
+        let plan = chunking();
+        let starts = generate_starts(full_time, plan);
+        let picked = window_chunks(&starts, full_time, plan, &windows.centres, (windows.len_s * FPS as f64) as usize);
+        let t = Instant::now();
+        if picked.len() as f64 >= windows.max_share * starts.len() as f64 {
+            let chunks = self.run_chunks(&mel, starts, threads, control)?;
+            let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
+            return Ok((beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms), BeatMode::Full, None));
+        }
+        let (inside, outside): (Vec<_>, Vec<_>) = starts.iter().enumerate().partition(|(i, _)| picked.contains(i));
+        let mut chunks = self.run_chunks(&mel, inside.into_iter().map(|(_, &s)| s).collect(), threads, control)?;
+        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let windowed = beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms);
+        if let Some(accepted) = accept(&windowed) {
+            return Ok((windowed, BeatMode::Windows, Some(accepted)));
+        }
+        chunks.extend(self.run_chunks(&mel, outside.into_iter().map(|(_, &s)| s).collect(), threads, control)?);
+        chunks.sort_by_key(|c| c.0);
+        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
+        Ok((beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms), BeatMode::Fallback, None))
+    }
+
+    fn mel(&self, resample: impl FnOnce() -> Result<Vec<f32>>, threads: usize) -> Result<(Arc<Tensor>, f64, f64)> {
         let t = Instant::now();
         let samples = resample()?;
         let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -438,23 +517,15 @@ impl BeatEngine {
         stream.push(&mut runner, &samples)?;
         drop(samples);
         let mel = stream.finish(&mut runner)?;
-        let mel_ms = t.elapsed().as_secs_f64() * 1000.0;
-
-        let t = Instant::now();
-        let (beat_logits, down_logits) = self.predict(mel, threads, control)?;
-        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
-        let (beats, downbeats) = pick_peaks(&beat_logits, &down_logits);
-        Ok(BeatResult { beat_logits, down_logits, beats, downbeats, resample_ms, mel_ms, predict_ms })
+        Ok((Arc::new(mel), resample_ms, t.elapsed().as_secs_f64() * 1000.0))
     }
 
-    fn predict(&self, mel: Tensor, threads: usize, control: &Control) -> Result<ChunkLogits> {
-        let full_time = mel.shape[1];
-        let starts = generate_starts(full_time, chunking());
+    fn run_chunks(&self, mel: &Arc<Tensor>, starts: Vec<i32>, threads: usize, control: &Control) -> Result<Vec<(i32, ChunkLogits)>> {
         let shared = self.shared_chunk_threads.load(Ordering::Relaxed);
         self.ensure_chunk_threads(if shared > 0 { shared } else { threads.max(1) })?;
         let track = Arc::new(TrackChunks {
             results: Mutex::new(starts.iter().map(|_| None).collect()),
-            mel,
+            mel: mel.clone(),
             starts,
             next: AtomicUsize::new(0),
             paused: AtomicBool::new(control.pause.load(Ordering::Relaxed)),
@@ -484,8 +555,46 @@ impl BeatEngine {
         for (i, &start) in track.starts.iter().enumerate() {
             chunks.push((start, results[i].take().unwrap()?));
         }
-        Ok(stitch(&chunks, full_time, chunking()))
+        Ok(chunks)
     }
+}
+
+fn beat_result(chunks: &[(i32, ChunkLogits)], full_time: usize, resample_ms: f64, mel_ms: f64, predict_ms: f64) -> BeatResult {
+    let plan = chunking();
+    let (beat_logits, down_logits) = stitch(chunks, full_time, plan);
+    let (beats, downbeats) = pick_peaks(&beat_logits, &down_logits);
+    let mut modeled: Vec<(usize, usize)> = Vec::new();
+    for &(start, _) in chunks {
+        let (from, to) = valid_frames(start, full_time, plan);
+        match modeled.last_mut() {
+            Some(last) if from <= last.1 => last.1 = last.1.max(to),
+            _ => modeled.push((from, to)),
+        }
+    }
+    BeatResult { beat_logits, down_logits, beats, downbeats, resample_ms, mel_ms, predict_ms, modeled }
+}
+
+fn valid_frames(start: i32, full_time: usize, plan: &Chunking) -> (usize, usize) {
+    let from = (start + plan.border as i32).max(0) as usize;
+    let to = ((start + plan.size as i32 - plan.border as i32).max(0) as usize).min(full_time);
+    (from.min(to), to)
+}
+
+fn window_chunks(starts: &[i32], full_time: usize, plan: &Chunking, centres: &[f64], window: usize) -> Vec<usize> {
+    let spans: Vec<(usize, usize)> = centres
+        .iter()
+        .map(|&c| {
+            let mid = (c * full_time as f64) as usize;
+            let from = mid.saturating_sub(window / 2).min(full_time.saturating_sub(window));
+            (from, (from + window).min(full_time))
+        })
+        .collect();
+    (0..starts.len())
+        .filter(|&i| {
+            let (from, to) = valid_frames(starts[i], full_time, plan);
+            spans.iter().any(|&(a, b)| from < b && a < to)
+        })
+        .collect()
 }
 
 fn stitch(chunks: &[(i32, ChunkLogits)], full_time: usize, plan: &Chunking) -> ChunkLogits {

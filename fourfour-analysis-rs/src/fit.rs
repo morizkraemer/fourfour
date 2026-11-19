@@ -410,6 +410,51 @@ pub fn fit_track(
     })
 }
 
+#[derive(Clone, Debug)]
+pub struct WindowCheck {
+    pub from_s: f64,
+    pub to_s: f64,
+    pub expected: f64,
+    pub peaks: usize,
+    pub inliers: usize,
+    pub median_ms: f64,
+}
+
+pub const WINDOW_INLIER_S: f64 = 0.035;
+pub const WINDOW_BEATLESS_SHARE: f64 = 0.25;
+pub const WINDOW_MIN_SHARE: f64 = 0.5;
+pub const WINDOW_MAX_MEDIAN_MS: f64 = 15.0;
+pub const WINDOW_MAX_SPREAD_MS: f64 = 10.0;
+
+pub fn check_windows(fit: &Fit, peaks_s: &[f64], beat_logits: &[f32], spans: &[(usize, usize)]) -> Vec<WindowCheck> {
+    let period = 60.0 / fit.bpm;
+    let refined = refine_peaks(peaks_s, beat_logits, 0.0);
+    spans
+        .iter()
+        .map(|&(from, to)| {
+            let (from_s, to_s) = (from as f64 / FPS, to as f64 / FPS);
+            let inside: Vec<f64> = refined.iter().copied().filter(|&t| t >= from_s && t < to_s).collect();
+            let mut offsets: Vec<f64> = inside
+                .iter()
+                .map(|&t| t - (fit.first_s + ((t - fit.first_s) / period).round() * period))
+                .filter(|d| d.abs() < WINDOW_INLIER_S)
+                .collect();
+            offsets.sort_by(f64::total_cmp);
+            let median_ms = offsets.get(offsets.len() / 2).map_or(f64::INFINITY, |d| d * 1000.0);
+            WindowCheck { from_s, to_s, expected: (to_s - from_s) / period, peaks: inside.len(), inliers: offsets.len(), median_ms }
+        })
+        .collect()
+}
+
+pub fn windows_agree(checks: &[WindowCheck]) -> bool {
+    let with_beats: Vec<&WindowCheck> = checks.iter().filter(|c| c.peaks as f64 >= WINDOW_BEATLESS_SHARE * c.expected).collect();
+    let medians = with_beats.iter().map(|c| c.median_ms);
+    let spread = medians.clone().fold(f64::MIN, f64::max) - medians.fold(f64::MAX, f64::min);
+    with_beats.len() >= 2
+        && spread <= WINDOW_MAX_SPREAD_MS
+        && with_beats.iter().all(|c| c.inliers as f64 >= WINDOW_MIN_SHARE * c.expected && c.median_ms.abs() <= WINDOW_MAX_MEDIAN_MS)
+}
+
 pub fn finalize_beats(beats_s: &[f64], delay_s: f64) -> Vec<f64> {
     beats_s.iter().map(|t| t + delay_s).filter(|t| *t > -0.04).map(|t| t.max(0.0)).collect()
 }
@@ -496,6 +541,37 @@ mod tests {
         assert_eq!(fitted_bpm(88.0, &FitParams::default()), 88.0);
         assert_eq!(fitted_bpm(80.0, &on), 80.0);
         assert_eq!(fitted_bpm(94.0, &on), 94.0);
+    }
+
+    const SPANS: [(usize, usize); 3] = [(4000, 5500), (10000, 11500), (16000, 17500)];
+
+    fn windowed(shift_middle_frames: usize) -> (Fit, Vec<f64>, Vec<f32>) {
+        let (_, full) = synthetic(128.0);
+        let mut logits = vec![-1000.0f32; full.len()];
+        for (n, &(from, to)) in SPANS.iter().enumerate() {
+            let shift = if n == 1 { shift_middle_frames } else { 0 };
+            logits[from..to].copy_from_slice(&full[from - shift..to - shift]);
+        }
+        let peaks: Vec<f64> = (1..logits.len() - 1)
+            .filter(|&f| logits[f] > 0.0 && logits[f] >= logits[f - 1] && logits[f] > logits[f + 1])
+            .map(|f| f as f64 / FPS)
+            .collect();
+        let w = Window { offset: 0.0, len: logits.len() as f64 / FPS };
+        let fit = fit_track(&peaks, &logits, &logits, DURATION, &w, &FitParams::default()).unwrap();
+        (fit, peaks, logits)
+    }
+
+    #[test]
+    fn windows_of_a_steady_track_agree_on_its_tempo() {
+        let (fit, peaks, logits) = windowed(0);
+        assert!((fit.bpm - 128.0).abs() < 1e-9, "fitted {}", fit.bpm);
+        assert!(windows_agree(&check_windows(&fit, &peaks, &logits, &SPANS)));
+    }
+
+    #[test]
+    fn a_window_off_the_grid_of_the_others_disagrees() {
+        let (fit, peaks, logits) = windowed(1);
+        assert!(!windows_agree(&check_windows(&fit, &peaks, &logits, &SPANS)));
     }
 
     #[test]

@@ -434,6 +434,8 @@ mod tests {
             energy: None,
             logits: None,
             loudness: None,
+            beat_mode: crate::bt::BeatMode::Full,
+            window_checks: Vec::new(),
             ms: serde_json::Value::Null,
         }
     }
