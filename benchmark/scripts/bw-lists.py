@@ -1,6 +1,7 @@
-import json, statistics
-B = '/home/merlin/dev/projects/fourfour/benchmark/results'
-O = '/home/merlin/dev/projects/fourfour/.claude/worktrees/agent-aa3b2485cb3ea9d8f/benchmark/results/bw'
+import json, os, statistics
+B = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'results')
+O = os.path.join(B, 'bw')
+os.makedirs(O, exist_ok=True)
 ref = json.load(open(B + '/o3/ref.json'))
 by_path = {r['path']: k for k, r in ref.items()}
 for split in ('dev', 'test'):
