@@ -14,3 +14,8 @@ for name in sys.argv[1:]:
     print(f'{name}: n {len(rows)} audio {audio_min:.0f} min (median {statistics.median(r["duration_s"] for r in rows) / 60:.1f} min); '
           f'CPU {cpu_ms / len(rows):.0f} ms/track, {cpu_ms / audio_min:.0f} ms/audio-min; wall {wall:.0f} s; '
           f'median per-track model {statistics.median(model):.0f} ms/audio-min, total {statistics.median(total):.0f} ms/audio-min; modes {modes}')
+    work = 0.0
+    for r in rows:
+        m = r.get('beat_mode', 'full')
+        work += sum(c['to_s'] - c['from_s'] for c in r['window_checks']) if m in ('windows', 'extended') else r['duration_s']
+    print(f'    beat-model work share {work / sum(r["duration_s"] for r in rows):.3f}')
