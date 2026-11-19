@@ -17,7 +17,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 
 ## Branches and builds
 - master d231066 (+ docs) = review build 1427 code (parked-all-v23 merged), pushed 2026-11-15 per Merlin. Build 1974 from master.
-- Draft GitHub pre-releases (repo is public; drafts visible to collaborators only): v0.1.0-alpha.3 = build 1996 (windowed analysis, for Mo), alpha.2 = build 1974, alpha.1 = build 1425.
+- Draft GitHub pre-releases (repo is public; drafts visible to collaborators only): v0.1.0-alpha.4 = build 1999 (for Mo), alpha.3 = build 1996, alpha.2 = build 1974, alpha.1 = build 1425.
 - Mac: build 1427 in /Applications. ov-1028 is superseded by master (its 7 extra commits: merge records + r177 truth-set scripts, no app change).
 
 ## Waiting on Merlin

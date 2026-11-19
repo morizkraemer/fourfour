@@ -756,3 +756,4 @@
 2026-11-19 08:00 orchestrator r181 loop done (ff92bc3): kept steps 0+2, 2.4x less CPU/track on test 205 (46.8 -> 19.2 s), accuracy within gate (grid 171->172, bar 142->141), fallback 20%; 20 s windows failed test; Mac not measured (stopped per Merlin)
 2026-11-19 13:06 orchestrator windowed analysis on by default, merged (59e9f38) and pushed to master per Merlin; draft pre-release v0.1.0-alpha.3 = build 1996 for Mo, check-dmg PASS, sha256 afbb2270...0dc1. Mac speed of windowed mode not measured
 2026-11-19 13:20 orchestrator Merlin: plain 1-8 should add to favorites, not fire hot cues -> plain-digit cue actions removed (hot cues on Shift+1-8); vitest 61 pass, svelte-check 0 errors, smoke inspector-cues 7 pass
+2026-11-19 13:34 orchestrator draft pre-release v0.1.0-alpha.4 = build 1999 (digit keys fix) for Mo, check-dmg PASS, sha256 74bf8705
