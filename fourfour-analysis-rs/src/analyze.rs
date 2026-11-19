@@ -188,12 +188,11 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
                 let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
                 fit::fit_track(&peaks, &bt.beat_logits, &bt.down_logits, gapless_s, &w, &fp)
             };
-            let resample = move || resample_to(native.gapless_samples(), rate, MODEL_RATE);
             let mut checks = Vec::new();
             let mut window_fit_ms = 0.0;
             let (bt, mode, accepted) = match &cfg.beat_windows {
-                None => (engine.analyze_resampled(resample, cfg.threads, control)?, BeatMode::Full, None),
-                Some(windows) => engine.analyze_windowed(resample, cfg.threads, control, windows, |bt, stage| {
+                None => (engine.analyze_resampled(move || resample_to(native.gapless_samples(), rate, MODEL_RATE), cfg.threads, control)?, BeatMode::Full, None),
+                Some(windows) => engine.analyze_windowed(native.gapless_samples(), rate, cfg.threads, control, windows, |bt, stage| {
                     let t = Instant::now();
                     let fit = fit_of(bt);
                     if let Some(f) = &fit {
@@ -201,7 +200,7 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
                         checks = fit::check_windows(f, &peaks, &bt.beat_logits, &bt.modeled);
                     }
                     window_fit_ms += ms(t);
-                    fit.filter(|_| fit::windows_agree(&checks, stage))
+                    fit.filter(|_| fit::windows_agree(&checks, stage, windows.max_spread_ms(stage)))
                 })?,
             };
             let t = Instant::now();
@@ -286,6 +285,14 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
 }
 
 impl Analysis {
+    pub fn bar_phase(&self) -> usize {
+        let share = match self.beat_mode {
+            BeatMode::Windows | BeatMode::Extended => service::WINDOWED_MODEL_STRONG_SHARE,
+            BeatMode::Full | BeatMode::Fallback => service::MODEL_STRONG_SHARE,
+        };
+        service::bar_phase_with_share(service::BAR_ONE_RULE, share, &self.beats_s, &self.downbeats_s, self.mp3_delay_s)
+    }
+
     pub fn to_json(&self, path: &Path, id: Option<u64>) -> Value {
         let mut doc = json!({
             "id": id,
@@ -297,7 +304,7 @@ impl Analysis {
             "n_beats": self.beats_s.len(),
             "final_beats_s": self.beats_s,
             "downbeats_s": self.downbeats_s,
-            "bar_phase": service::bar_phase(&self.beats_s, &self.downbeats_s, self.mp3_delay_s),
+            "bar_phase": self.bar_phase(),
             "bar_phase_model_vote": service::bar_phase_by(service::BarOneRule::ModelVote, &self.beats_s, &self.downbeats_s, self.mp3_delay_s),
             "key": self.key_class.map(camelot),
             "key_confidence": self.key_confidence,

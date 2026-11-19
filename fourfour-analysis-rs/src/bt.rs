@@ -23,6 +23,7 @@ const MEL_STRIDE: usize = 1536;
 const MEL_HOP: usize = 441;
 const MEL_ALIGN: usize = 64;
 const MEL_MARGIN: usize = 128;
+const RESAMPLE_MARGIN_S: f64 = 1.0;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
 pub const MODEL_RATE: u32 = 22050;
@@ -333,6 +334,7 @@ impl BeatMode {
 #[derive(Clone, Debug)]
 pub struct BeatWindows {
     pub stages: Vec<Vec<f64>>,
+    pub spread_ms: Vec<f64>,
     pub len_s: f64,
     pub max_share: f64,
 }
@@ -340,10 +342,15 @@ pub struct BeatWindows {
 pub const BEAT_WINDOWS_ENV: &str = "FOURFOUR_BEAT_WINDOWS";
 pub const BEAT_WINDOW_CENTRES_ENV: &str = "FOURFOUR_BEAT_WINDOW_CENTRES";
 pub const BEAT_WINDOW_EXTRA_ENV: &str = "FOURFOUR_BEAT_WINDOW_EXTRA";
+pub const BEAT_WINDOW_SPREAD_ENV: &str = "FOURFOUR_BEAT_WINDOW_SPREAD";
 pub const DEFAULT_WINDOW_CENTRES: [f64; 3] = [0.25, 0.5, 0.75];
 pub const DEFAULT_EXTRA_CENTRES: [f64; 2] = [0.125, 0.875];
 
 impl BeatWindows {
+    pub fn max_spread_ms(&self, stage: usize) -> f64 {
+        self.spread_ms.get(stage).or(self.spread_ms.last()).copied().unwrap_or(crate::fit::WINDOW_MAX_SPREAD_MS)
+    }
+
     pub fn from_env() -> Option<Self> {
         let len_s = std::env::var(BEAT_WINDOWS_ENV).ok()?.parse::<f64>().ok().filter(|&s| s > 0.0)?;
         let centres = |name: &str, default: &[f64]| {
@@ -353,7 +360,8 @@ impl BeatWindows {
                 .unwrap_or_else(|| default.to_vec())
         };
         let stages = [centres(BEAT_WINDOW_CENTRES_ENV, &DEFAULT_WINDOW_CENTRES), centres(BEAT_WINDOW_EXTRA_ENV, &DEFAULT_EXTRA_CENTRES)];
-        Some(BeatWindows { stages: stages.into_iter().filter(|c| !c.is_empty()).collect(), len_s, max_share: 0.7 })
+        let spread_ms = std::env::var(BEAT_WINDOW_SPREAD_ENV).ok().map(|v| v.split(',').filter_map(|c| c.trim().parse::<f64>().ok()).collect::<Vec<_>>()).filter(|v| !v.is_empty()).unwrap_or_else(|| vec![crate::fit::WINDOW_MAX_SPREAD_MS]);
+        Some(BeatWindows { stages: stages.into_iter().filter(|c| !c.is_empty()).collect(), spread_ms, len_s, max_share: 0.7 })
     }
 }
 
@@ -491,16 +499,15 @@ impl BeatEngine {
     /// cover mostly anyway runs whole from the start.
     pub fn analyze_windowed<T>(
         &self,
-        resample: impl FnOnce() -> Result<Vec<f32>>,
+        native: &[f32],
+        rate: u32,
         threads: usize,
         control: &Control,
         windows: &BeatWindows,
         mut accept: impl FnMut(&BeatResult, usize) -> Option<T>,
     ) -> Result<(BeatResult, BeatMode, Option<T>)> {
-        let t = Instant::now();
-        let samples = resample()?;
-        let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
-        let mut mel = PartialMel::new(samples.len());
+        let mut audio = PartialAudio::new(native, rate);
+        let mut mel = PartialMel::new(audio.data.len());
         let full_time = mel.frames;
         let plan = chunking();
         let starts = generate_starts(full_time, plan);
@@ -516,23 +523,22 @@ impl BeatEngine {
                 break;
             }
             let new: Vec<i32> = picked.iter().filter(|i| !done.contains(i)).map(|&i| starts[i]).collect();
-            let tensor = mel.cover_aligned_with_margin(self, &samples, &new, plan, threads)?;
+            let tensor = mel.cover_aligned_with_margin(self, &mut audio, &new, plan, threads)?;
             chunks.extend(self.run_chunks(&tensor, new, threads, control)?);
             chunks.sort_by_key(|c| c.0);
             done.extend(picked.into_iter().filter(|i| !done.contains(i)).collect::<Vec<_>>());
-            let windowed = beat_result(&chunks, full_time, resample_ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms);
+            let windowed = beat_result(&chunks, full_time, audio.ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms - audio.ms);
             if let Some(accepted) = accept(&windowed, stage) {
                 let mode = if stage == 0 { BeatMode::Windows } else { BeatMode::Extended };
                 return Ok((windowed, mode, Some(accepted)));
             }
         }
         let rest: Vec<i32> = (0..starts.len()).filter(|i| !done.contains(i)).map(|i| starts[i]).collect();
-        let tensor = mel.cover_aligned_with_margin(self, &samples, &rest, plan, threads)?;
-        drop(samples);
+        let tensor = mel.cover_aligned_with_margin(self, &mut audio, &rest, plan, threads)?;
         chunks.extend(self.run_chunks(&tensor, rest, threads, control)?);
         chunks.sort_by_key(|c| c.0);
         let mode = if done.is_empty() { BeatMode::Full } else { BeatMode::Fallback };
-        Ok((beat_result(&chunks, full_time, resample_ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms), mode, None))
+        Ok((beat_result(&chunks, full_time, audio.ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms - audio.ms), mode, None))
     }
 
     fn mel_stream(&self, samples: &[f32], threads: usize) -> Result<Tensor> {
@@ -592,6 +598,45 @@ impl BeatEngine {
     }
 }
 
+struct PartialAudio<'a> {
+    native: &'a [f32],
+    rate: u32,
+    data: Vec<f32>,
+    computed: Vec<(usize, usize)>,
+    ms: f64,
+}
+
+impl<'a> PartialAudio<'a> {
+    fn new(native: &'a [f32], rate: u32) -> Self {
+        let len = if rate == MODEL_RATE { native.len() } else { ((native.len() as f64 - 2.0) * MODEL_RATE as f64 / rate as f64).floor().max(0.0) as usize };
+        PartialAudio { native, rate, data: vec![0.0; len], computed: Vec::new(), ms: 0.0 }
+    }
+
+    fn cover_aligned_with_margin(&mut self, from: usize, to: usize) -> Result<()> {
+        let t = Instant::now();
+        let ratio = MODEL_RATE as f64 / self.rate as f64;
+        let step = (self.rate / gcd(self.rate, MODEL_RATE)) as usize;
+        let per_step = (MODEL_RATE / gcd(self.rate, MODEL_RATE)) as usize;
+        let margin = (RESAMPLE_MARGIN_S * MODEL_RATE as f64) as usize;
+        for (a, b) in subtract(&[(from, to)], &self.computed) {
+            let n0 = ((a.saturating_sub(margin) as f64 / ratio) as usize) / step * step;
+            let wanted_end = ((b + margin) as f64 / ratio).ceil() as usize;
+            let n1 = if wanted_end + step >= self.native.len() { self.native.len() } else { wanted_end };
+            let part = resample_to(&self.native[n0..n1], self.rate, MODEL_RATE)?;
+            let o0 = n0 / step * per_step;
+            let end = b.min(o0 + part.len());
+            self.data[a..end].copy_from_slice(&part[a - o0..end - o0]);
+            self.computed.push((a, b));
+        }
+        self.ms += t.elapsed().as_secs_f64() * 1000.0;
+        Ok(())
+    }
+}
+
+fn gcd(a: u32, b: u32) -> u32 {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
 struct PartialMel {
     frames: usize,
     data: Vec<f32>,
@@ -605,8 +650,7 @@ impl PartialMel {
         PartialMel { frames, data: vec![0.0; frames * N_MELS], computed: Vec::new(), ms: 0.0 }
     }
 
-    fn cover_aligned_with_margin(&mut self, engine: &BeatEngine, samples: &[f32], starts: &[i32], plan: &Chunking, threads: usize) -> Result<Arc<Tensor>> {
-        let t = Instant::now();
+    fn cover_aligned_with_margin(&mut self, engine: &BeatEngine, audio: &mut PartialAudio, starts: &[i32], plan: &Chunking, threads: usize) -> Result<Arc<Tensor>> {
         let mut needed: Vec<(usize, usize)> = starts
             .iter()
             .map(|&s| (s.max(0) as usize, ((s + plan.size as i32).max(0) as usize).min(self.frames)))
@@ -624,8 +668,11 @@ impl PartialMel {
             let missing: Vec<(usize, usize)> = subtract(&[(from, to)], &self.computed);
             for (from, to) in missing {
                 let g0 = from.saturating_sub(MEL_MARGIN) / MEL_ALIGN * MEL_ALIGN;
-                let end_sample = if to + MEL_MARGIN >= self.frames { samples.len() } else { MEL_HOP * (to + MEL_MARGIN) };
-                let part = engine.mel_stream(&samples[MEL_HOP * g0..end_sample], threads)?;
+                let end_sample = if to + MEL_MARGIN >= self.frames { audio.data.len() } else { MEL_HOP * (to + MEL_MARGIN) };
+                audio.cover_aligned_with_margin(MEL_HOP * g0, end_sample)?;
+                let t = Instant::now();
+                let part = engine.mel_stream(&audio.data[MEL_HOP * g0..end_sample], threads)?;
+                self.ms += t.elapsed().as_secs_f64() * 1000.0;
                 for f in from..to {
                     let src = (f - g0) * N_MELS;
                     self.data[f * N_MELS..(f + 1) * N_MELS].copy_from_slice(&part.data[src..src + N_MELS]);
@@ -633,7 +680,6 @@ impl PartialMel {
                 self.computed.push((from, to));
             }
         }
-        self.ms += t.elapsed().as_secs_f64() * 1000.0;
         Ok(Arc::new(Tensor { shape: vec![1, self.frames, N_MELS], data: self.data.clone() }))
     }
 }

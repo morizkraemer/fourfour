@@ -446,14 +446,14 @@ pub fn check_windows(fit: &Fit, peaks_s: &[f64], beat_logits: &[f32], spans: &[(
         .collect()
 }
 
-pub fn windows_agree(checks: &[WindowCheck], tolerated_weak: usize) -> bool {
+pub fn windows_agree(checks: &[WindowCheck], tolerated_weak: usize, max_spread_ms: f64) -> bool {
     let with_beats = checks.iter().filter(|c| c.peaks as f64 >= WINDOW_BEATLESS_SHARE * c.expected);
     let (good, weak): (Vec<&WindowCheck>, Vec<&WindowCheck>) = with_beats.partition(|c| c.inliers as f64 >= WINDOW_MIN_SHARE * c.expected);
     let medians = good.iter().map(|c| c.median_ms);
     let spread = medians.clone().fold(f64::MIN, f64::max) - medians.fold(f64::MAX, f64::min);
     good.len() >= 2 + tolerated_weak
         && weak.len() <= tolerated_weak
-        && spread <= WINDOW_MAX_SPREAD_MS
+        && spread <= max_spread_ms
         && good.iter().all(|c| c.median_ms.abs() <= WINDOW_MAX_MEDIAN_MS)
 }
 
@@ -567,13 +567,13 @@ mod tests {
     fn windows_of_a_steady_track_agree_on_its_tempo() {
         let (fit, peaks, logits) = windowed(0);
         assert!((fit.bpm - 128.0).abs() < 1e-9, "fitted {}", fit.bpm);
-        assert!(windows_agree(&check_windows(&fit, &peaks, &logits, &SPANS), 0));
+        assert!(windows_agree(&check_windows(&fit, &peaks, &logits, &SPANS), 0, WINDOW_MAX_SPREAD_MS));
     }
 
     #[test]
     fn a_window_off_the_grid_of_the_others_disagrees() {
         let (fit, peaks, logits) = windowed(1);
-        assert!(!windows_agree(&check_windows(&fit, &peaks, &logits, &SPANS), 0));
+        assert!(!windows_agree(&check_windows(&fit, &peaks, &logits, &SPANS), 0, WINDOW_MAX_SPREAD_MS));
     }
 
     #[test]
