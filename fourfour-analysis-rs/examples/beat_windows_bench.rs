@@ -21,7 +21,8 @@ fn main() -> anyhow::Result<()> {
     let beat_file = beat_model();
     let engine = BeatEngine::load(&models, &beat_file, prepacks_weights(&beat_file))?;
     engine.share_chunk_threads(workers * threads);
-    let cfg = Config { threads, key: false, waveform: false, ..Config::default() };
+    let all = std::env::var("BENCH_ALL_STAGES").is_ok_and(|v| v == "1");
+    let cfg = Config { threads, key: all, waveform: all, ..Config::default() };
     eprintln!("beat model {beat_file}, windows {:?}, workers {workers}, threads {threads}", cfg.beat_windows);
     let next = AtomicUsize::new(0);
     let out = Mutex::new(std::io::stdout());

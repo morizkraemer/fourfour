@@ -20,6 +20,9 @@ const DEFAULT_CHUNK_SIZE: usize = 500;
 const DEFAULT_BORDER_SIZE: usize = 6;
 const RTEN_OVERLAP: usize = 0;
 const MEL_STRIDE: usize = 1536;
+const MEL_HOP: usize = 441;
+const MEL_ALIGN: usize = 64;
+const MEL_MARGIN: usize = 128;
 const N_MELS: usize = 128;
 const FPS: f32 = 50.0;
 pub const MODEL_RATE: u32 = 22050;
@@ -312,6 +315,7 @@ pub struct BeatResult {
 pub enum BeatMode {
     Full,
     Windows,
+    Extended,
     Fallback,
 }
 
@@ -320,6 +324,7 @@ impl BeatMode {
         match self {
             BeatMode::Full => "full",
             BeatMode::Windows => "windows",
+            BeatMode::Extended => "extended",
             BeatMode::Fallback => "fallback",
         }
     }
@@ -327,17 +332,28 @@ impl BeatMode {
 
 #[derive(Clone, Debug)]
 pub struct BeatWindows {
-    pub centres: Vec<f64>,
+    pub stages: Vec<Vec<f64>>,
     pub len_s: f64,
     pub max_share: f64,
 }
 
 pub const BEAT_WINDOWS_ENV: &str = "FOURFOUR_BEAT_WINDOWS";
+pub const BEAT_WINDOW_CENTRES_ENV: &str = "FOURFOUR_BEAT_WINDOW_CENTRES";
+pub const BEAT_WINDOW_EXTRA_ENV: &str = "FOURFOUR_BEAT_WINDOW_EXTRA";
+pub const DEFAULT_WINDOW_CENTRES: [f64; 3] = [0.25, 0.5, 0.75];
+pub const DEFAULT_EXTRA_CENTRES: [f64; 2] = [0.125, 0.875];
 
 impl BeatWindows {
     pub fn from_env() -> Option<Self> {
         let len_s = std::env::var(BEAT_WINDOWS_ENV).ok()?.parse::<f64>().ok().filter(|&s| s > 0.0)?;
-        Some(BeatWindows { centres: vec![0.25, 0.5, 0.75], len_s, max_share: 0.7 })
+        let centres = |name: &str, default: &[f64]| {
+            std::env::var(name)
+                .ok()
+                .map(|v| v.split(',').filter_map(|c| c.trim().parse::<f64>().ok()).filter(|c| (0.0..=1.0).contains(c)).collect::<Vec<_>>())
+                .unwrap_or_else(|| default.to_vec())
+        };
+        let stages = [centres(BEAT_WINDOW_CENTRES_ENV, &DEFAULT_WINDOW_CENTRES), centres(BEAT_WINDOW_EXTRA_ENV, &DEFAULT_EXTRA_CENTRES)];
+        Some(BeatWindows { stages: stages.into_iter().filter(|c| !c.is_empty()).collect(), len_s, max_share: 0.7 })
     }
 }
 
@@ -479,30 +495,52 @@ impl BeatEngine {
         threads: usize,
         control: &Control,
         windows: &BeatWindows,
-        accept: impl FnOnce(&BeatResult) -> Option<T>,
+        mut accept: impl FnMut(&BeatResult, usize) -> Option<T>,
     ) -> Result<(BeatResult, BeatMode, Option<T>)> {
-        let (mel, resample_ms, mel_ms) = self.mel(resample, threads)?;
-        let full_time = mel.shape[1];
+        let t = Instant::now();
+        let samples = resample()?;
+        let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
+        let mut mel = PartialMel::new(samples.len());
+        let full_time = mel.frames;
         let plan = chunking();
         let starts = generate_starts(full_time, plan);
-        let picked = window_chunks(&starts, full_time, plan, &windows.centres, (windows.len_s * FPS as f64) as usize);
+        let window_frames = (windows.len_s * FPS as f64).round() as usize;
         let t = Instant::now();
-        if picked.len() as f64 >= windows.max_share * starts.len() as f64 {
-            let chunks = self.run_chunks(&mel, starts, threads, control)?;
-            let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
-            return Ok((beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms), BeatMode::Full, None));
+        let mut done: Vec<usize> = Vec::new();
+        let mut chunks = Vec::new();
+        let mut centres: Vec<f64> = Vec::new();
+        for (stage, extra) in windows.stages.iter().enumerate() {
+            centres.extend(extra);
+            let picked = window_chunks(&starts, plan, &centres, window_frames);
+            if picked.len() as f64 >= windows.max_share * starts.len() as f64 {
+                break;
+            }
+            let new: Vec<i32> = picked.iter().filter(|i| !done.contains(i)).map(|&i| starts[i]).collect();
+            let tensor = mel.cover_aligned_with_margin(self, &samples, &new, plan, threads)?;
+            chunks.extend(self.run_chunks(&tensor, new, threads, control)?);
+            chunks.sort_by_key(|c| c.0);
+            done.extend(picked.into_iter().filter(|i| !done.contains(i)).collect::<Vec<_>>());
+            let windowed = beat_result(&chunks, full_time, resample_ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms);
+            if let Some(accepted) = accept(&windowed, stage) {
+                let mode = if stage == 0 { BeatMode::Windows } else { BeatMode::Extended };
+                return Ok((windowed, mode, Some(accepted)));
+            }
         }
-        let (inside, outside): (Vec<_>, Vec<_>) = starts.iter().enumerate().partition(|(i, _)| picked.contains(i));
-        let mut chunks = self.run_chunks(&mel, inside.into_iter().map(|(_, &s)| s).collect(), threads, control)?;
-        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
-        let windowed = beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms);
-        if let Some(accepted) = accept(&windowed) {
-            return Ok((windowed, BeatMode::Windows, Some(accepted)));
-        }
-        chunks.extend(self.run_chunks(&mel, outside.into_iter().map(|(_, &s)| s).collect(), threads, control)?);
+        let rest: Vec<i32> = (0..starts.len()).filter(|i| !done.contains(i)).map(|i| starts[i]).collect();
+        let tensor = mel.cover_aligned_with_margin(self, &samples, &rest, plan, threads)?;
+        drop(samples);
+        chunks.extend(self.run_chunks(&tensor, rest, threads, control)?);
         chunks.sort_by_key(|c| c.0);
-        let predict_ms = t.elapsed().as_secs_f64() * 1000.0;
-        Ok((beat_result(&chunks, full_time, resample_ms, mel_ms, predict_ms), BeatMode::Fallback, None))
+        let mode = if done.is_empty() { BeatMode::Full } else { BeatMode::Fallback };
+        Ok((beat_result(&chunks, full_time, resample_ms, mel.ms, t.elapsed().as_secs_f64() * 1000.0 - mel.ms), mode, None))
+    }
+
+    fn mel_stream(&self, samples: &[f32], threads: usize) -> Result<Tensor> {
+        let pool = Arc::new(ThreadPool::with_num_threads(threads.max(1)));
+        let mut runner = MelRunner { engine: self, options: RunOptions::default().with_thread_pool(Some(pool)) };
+        let mut stream = MelStream::new(MEL_STRIDE);
+        stream.push(&mut runner, samples)?;
+        stream.finish(&mut runner)
     }
 
     fn mel(&self, resample: impl FnOnce() -> Result<Vec<f32>>, threads: usize) -> Result<(Arc<Tensor>, f64, f64)> {
@@ -511,12 +549,7 @@ impl BeatEngine {
         let resample_ms = t.elapsed().as_secs_f64() * 1000.0;
 
         let t = Instant::now();
-        let pool = Arc::new(ThreadPool::with_num_threads(threads.max(1)));
-        let mut runner = MelRunner { engine: self, options: RunOptions::default().with_thread_pool(Some(pool)) };
-        let mut stream = MelStream::new(MEL_STRIDE);
-        stream.push(&mut runner, &samples)?;
-        drop(samples);
-        let mel = stream.finish(&mut runner)?;
+        let mel = self.mel_stream(&samples, threads)?;
         Ok((Arc::new(mel), resample_ms, t.elapsed().as_secs_f64() * 1000.0))
     }
 
@@ -559,6 +592,72 @@ impl BeatEngine {
     }
 }
 
+struct PartialMel {
+    frames: usize,
+    data: Vec<f32>,
+    computed: Vec<(usize, usize)>,
+    ms: f64,
+}
+
+impl PartialMel {
+    fn new(samples: usize) -> Self {
+        let frames = 1 + samples / MEL_HOP;
+        PartialMel { frames, data: vec![0.0; frames * N_MELS], computed: Vec::new(), ms: 0.0 }
+    }
+
+    fn cover_aligned_with_margin(&mut self, engine: &BeatEngine, samples: &[f32], starts: &[i32], plan: &Chunking, threads: usize) -> Result<Arc<Tensor>> {
+        let t = Instant::now();
+        let mut needed: Vec<(usize, usize)> = starts
+            .iter()
+            .map(|&s| (s.max(0) as usize, ((s + plan.size as i32).max(0) as usize).min(self.frames)))
+            .filter(|(a, b)| a < b)
+            .collect();
+        needed.sort();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (a, b) in needed {
+            match merged.last_mut() {
+                Some(last) if a <= last.1 + 2 * MEL_MARGIN => last.1 = last.1.max(b),
+                _ => merged.push((a, b)),
+            }
+        }
+        for (from, to) in merged {
+            let missing: Vec<(usize, usize)> = subtract(&[(from, to)], &self.computed);
+            for (from, to) in missing {
+                let g0 = from.saturating_sub(MEL_MARGIN) / MEL_ALIGN * MEL_ALIGN;
+                let end_sample = if to + MEL_MARGIN >= self.frames { samples.len() } else { MEL_HOP * (to + MEL_MARGIN) };
+                let part = engine.mel_stream(&samples[MEL_HOP * g0..end_sample], threads)?;
+                for f in from..to {
+                    let src = (f - g0) * N_MELS;
+                    self.data[f * N_MELS..(f + 1) * N_MELS].copy_from_slice(&part.data[src..src + N_MELS]);
+                }
+                self.computed.push((from, to));
+            }
+        }
+        self.ms += t.elapsed().as_secs_f64() * 1000.0;
+        Ok(Arc::new(Tensor { shape: vec![1, self.frames, N_MELS], data: self.data.clone() }))
+    }
+}
+
+fn subtract(spans: &[(usize, usize)], minus: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut out = spans.to_vec();
+    for &(a, b) in minus {
+        out = out
+            .into_iter()
+            .flat_map(|(x, y)| {
+                let mut parts = Vec::new();
+                if x < a.min(y) {
+                    parts.push((x, a.min(y)));
+                }
+                if b.max(x) < y {
+                    parts.push((b.max(x), y));
+                }
+                parts
+            })
+            .collect();
+    }
+    out
+}
+
 fn beat_result(chunks: &[(i32, ChunkLogits)], full_time: usize, resample_ms: f64, mel_ms: f64, predict_ms: f64) -> BeatResult {
     let plan = chunking();
     let (beat_logits, down_logits) = stitch(chunks, full_time, plan);
@@ -580,21 +679,25 @@ fn valid_frames(start: i32, full_time: usize, plan: &Chunking) -> (usize, usize)
     (from.min(to), to)
 }
 
-fn window_chunks(starts: &[i32], full_time: usize, plan: &Chunking, centres: &[f64], window: usize) -> Vec<usize> {
-    let spans: Vec<(usize, usize)> = centres
+fn window_chunks(starts: &[i32], plan: &Chunking, centres: &[f64], window_frames: usize) -> Vec<usize> {
+    let n = starts.len();
+    let per_window = ((window_frames as f64 / plan.stride() as f64).round() as usize).clamp(1, n.max(1));
+    let full_time = starts.last().map_or(0, |&s| s + plan.size as i32) as f64;
+    let mut picked: Vec<usize> = centres
         .iter()
-        .map(|&c| {
-            let mid = (c * full_time as f64) as usize;
-            let from = mid.saturating_sub(window / 2).min(full_time.saturating_sub(window));
-            (from, (from + window).min(full_time))
+        .flat_map(|&c| {
+            let mid = c * full_time;
+            let nearest = (0..n).min_by(|&a, &b| {
+                let d = |i: usize| (starts[i] as f64 + plan.size as f64 / 2.0 - mid).abs();
+                d(a).total_cmp(&d(b))
+            });
+            let lo = nearest.map_or(0, |i| i.saturating_sub((per_window - 1) / 2).min(n - per_window));
+            lo..lo + per_window
         })
         .collect();
-    (0..starts.len())
-        .filter(|&i| {
-            let (from, to) = valid_frames(starts[i], full_time, plan);
-            spans.iter().any(|&(a, b)| from < b && a < to)
-        })
-        .collect()
+    picked.sort();
+    picked.dedup();
+    picked
 }
 
 fn stitch(chunks: &[(i32, ChunkLogits)], full_time: usize, plan: &Chunking) -> ChunkLogits {
@@ -735,6 +838,22 @@ fn pick_peaks(beat_logits: &[f32], down_logits: &[f32]) -> (Vec<f32>, Vec<f32>) 
 #[cfg(test)]
 mod chunk_default_tests {
     use super::*;
+
+    #[test]
+    fn subtract_leaves_the_frames_not_yet_computed() {
+        assert_eq!(subtract(&[(0, 100)], &[(10, 20), (50, 120)]), vec![(0, 10), (20, 50)]);
+        assert_eq!(subtract(&[(30, 40)], &[(0, 100)]), vec![]);
+    }
+
+    #[test]
+    fn a_window_takes_whole_chunks_around_its_centre() {
+        let plan = Chunking { size: 500, border: 6, overlap: 0, blend: false };
+        let starts = generate_starts(18000, &plan);
+        let picked = window_chunks(&starts, &plan, &[0.25, 0.5, 0.75], 1500);
+        assert_eq!(picked.len(), 9);
+        let picked = window_chunks(&starts, &plan, &[0.5], 1000);
+        assert_eq!(picked.len(), 2);
+    }
 
     #[test]
     fn every_build_uses_the_500_frame_chunk() {

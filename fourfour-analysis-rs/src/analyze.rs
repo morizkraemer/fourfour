@@ -193,15 +193,15 @@ pub fn analyze_controlled(engine: &BeatEngine, path: &Path, cfg: &Config, contro
             let mut window_fit_ms = 0.0;
             let (bt, mode, accepted) = match &cfg.beat_windows {
                 None => (engine.analyze_resampled(resample, cfg.threads, control)?, BeatMode::Full, None),
-                Some(windows) => engine.analyze_windowed(resample, cfg.threads, control, windows, |bt| {
+                Some(windows) => engine.analyze_windowed(resample, cfg.threads, control, windows, |bt, stage| {
                     let t = Instant::now();
                     let fit = fit_of(bt);
                     if let Some(f) = &fit {
                         let peaks: Vec<f64> = bt.beats.iter().map(|&b| b as f64).collect();
                         checks = fit::check_windows(f, &peaks, &bt.beat_logits, &bt.modeled);
                     }
-                    window_fit_ms = ms(t);
-                    fit.filter(|_| fit::windows_agree(&checks))
+                    window_fit_ms += ms(t);
+                    fit.filter(|_| fit::windows_agree(&checks, stage))
                 })?,
             };
             let t = Instant::now();
