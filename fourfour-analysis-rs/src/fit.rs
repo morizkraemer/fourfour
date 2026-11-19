@@ -422,7 +422,7 @@ pub struct WindowCheck {
 
 pub const WINDOW_INLIER_S: f64 = 0.035;
 pub const WINDOW_BEATLESS_SHARE: f64 = 0.25;
-pub const WINDOW_MIN_SHARE: f64 = 0.5;
+pub const WINDOW_MIN_SHARE: f64 = 0.6;
 pub const WINDOW_MAX_MEDIAN_MS: f64 = 15.0;
 pub const WINDOW_MAX_SPREAD_MS: f64 = 10.0;
 
