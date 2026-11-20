@@ -782,3 +782,5 @@
 2026-11-20 orchestrator hc-L1 closed (rest of $55 saved). hc-L2 spawn: credit run sonnet high $12, branch hc-bar1 off hc-grid
 2026-11-20 08:56 orch-worker hc-L2 cost: $0.6955 (sonnet) — ✅ **Done** - Bar-1 probe finished, nothing kept (head `6a9f215`). - Baseline reproduced: TUNE bar 176, GATE bar 141. Grid and BPM never changed. - `cargo test - [branch hc-bar1]
 2026-11-20 orch-worker hc-L2 cost: $0.70 (sonnet) - nothing kept; downbeat vote at its limit (33/209 TUNE tracks ambiguous); share 0.80 TUNE 177 but GATE 140. Closed; next gain needs downbeat logits in the rule (bt.rs/analyze.rs scope) [branch hc-bar1 6a9f215]
+2026-11-20 09:37 orch-worker hc-L4 cost: $0.5783 (sonnet) — ✅ **Done** - RESULT: head `d3fcc65` on `drain/hc-L4-20261120`. Nothing pushed or merged. - Reuse share is 22-24% of all 612 audio candidates, which clears the 2 [branch drain/hc-L4-20261120]
+2026-11-20 orch-worker hc-L4 cost: $0.58 (sonnet) - dup reuse share 17-19% deduped (22-24% raw), grid agrees 93% with mp3 delay shift, BPM/bar 100%; needs a schema change -> Merlin's call [branch drain/hc-L4-20261120 d3fcc65]
