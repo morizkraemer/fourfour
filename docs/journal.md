@@ -760,3 +760,4 @@
 2026-11-20 03:56 orchestrator Merlin: raise the credit day cap, ~$450 left for 10 days -> fourfour credit runs use ORCH_WORKER_DAY_CAP=60 until 2026-11-30 (month cap 480 unchanged)
 2026-11-20 04:07 orchestrator Merlin approved the hill-climb plan (draft 2) with: credits capped at $150 for fourfour (L1 $75, L3 $45, L5 $30), seat subagents for the rest; brother's lane narrowed to USB sync + CDJ (AGENTS.md); up to 3 workers when faster; Mac night run OK; callgrind not sysctl. Spawning L0, L9, L7 (seat)
 2026-11-20 04:18 orchestrator L9 key gap: no mapping bug; full-track already; gap = noisy Rekordbox ref (47% vs Beatport) + harder genre mix; low-confidence (<0.3) tracks agree <30%. Follow-up idea: flag unsure keys (UI, Merlin's call)
+2026-11-20 04:37 orchestrator Merlin: use credits, not the seat -> all remaining loops as credit runs within $150 (L1 55, L5 20, L2 12, L4 5, L10 5, reviews 8; L3 45 running), max 2 at once; L0/L7 finish on the seat

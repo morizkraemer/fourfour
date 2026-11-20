@@ -128,3 +128,15 @@ Rules: max 2 workers at once unless Merlin raises it; splits and scorer read-onl
 - Credit runs ($150): L1 grid + BPM $75 (opus high), L3 stages incl. waveform meter $45 (sonnet high), L5 fuzz $30 (sonnet medium).
 - Seat subagents: L0 setup, L9 key gap, L7 release profile, L4 dup measure, L2 bar-1 probe, L10 Mac run, final Fable reviews.
 - Release builds: serialize with `flock ~/.cache/hc-release.lock`.
+
+## Rebalance (Merlin 2026-11-20: "use more credits and less claude plan ... or just spread out the work more")
+All new workers run as credit runs within the $150 cap; no new seat workers. L0 and L7 (already on the seat) finish as they are. At most 2 credit workers at once.
+| loop | model | $ |
+|---|---|---|
+| L3 stages (running) | sonnet high | 45 |
+| L1 grid + BPM | opus high | 55 |
+| L5 fuzz | sonnet medium | 20 |
+| L2 bar-1 probe | sonnet high | 12 |
+| L4 dup measure | sonnet medium | 5 |
+| L10 Mac night run | sonnet medium | 5 |
+| final reviews | sonnet medium | 8 |
