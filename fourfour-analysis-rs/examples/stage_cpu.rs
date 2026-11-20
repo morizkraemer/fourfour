@@ -7,7 +7,9 @@ use fourfour_analysis::decode::{decode_mono, resample_to};
 use fourfour_analysis::cyankey;
 use pioneer_usb_writer::waveform::{analyze, Meter};
 
-const REPS: usize = 3;
+fn reps() -> usize {
+    std::env::var("STAGE_REPS").ok().and_then(|v| v.parse().ok()).unwrap_or(3)
+}
 
 fn process_cpu_ms() -> f64 {
     let text = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
@@ -24,10 +26,10 @@ fn fnv(bits: impl Iterator<Item = u64>) -> u64 {
 fn timed<T>(name: &str, line: &mut Vec<String>, mut f: impl FnMut() -> T) -> T {
     let (c, t) = (process_cpu_ms(), Instant::now());
     let mut out = f();
-    for _ in 1..REPS {
+    for _ in 1..reps() {
         out = f();
     }
-    let n = REPS as f64;
+    let n = reps() as f64;
     line.push(format!("{name}={:.0}/{:.0}", (process_cpu_ms() - c) / n, t.elapsed().as_secs_f64() * 1000.0 / n));
     out
 }
@@ -44,7 +46,9 @@ fn main() -> anyhow::Result<()> {
             meter.push(&native.samples);
             meter.finish()
         });
-        let _wf = timed("wf_columns", &mut line, || analyze(&measured));
+        let wf = timed("wf_columns", &mut line, || analyze(&measured));
+        let wf_hash = fourfour_analysis::waveform::checksum(&wf);
+        let wf_cols_hash = fnv(measured.band_columns().iter().flatten().map(|v| v.to_bits()));
         let mono44: Cow<[f32]> = match rate {
             44100 => Cow::Borrowed(gapless),
             rate => Cow::Owned(timed("resample44", &mut line, || resample_to(gapless, rate, 44100))?),
@@ -57,7 +61,7 @@ fn main() -> anyhow::Result<()> {
         let _r22 = timed("resample22", &mut line, || resample_to(gapless, rate, MODEL_RATE))?;
         let r22_hash = fnv(_r22.iter().map(|s| s.to_bits() as u64));
         println!("{}\t{}\t{:.0}\t{}", path.file_name().unwrap().to_string_lossy(), rate, native.samples.len() as f64 / rate as f64, line.join(" "));
-        eprintln!("HASH\t{}\tsamples={samples_hash:016x} key={key_hash:016x} r22={r22_hash:016x} m44={mono44_hash:016x}", path.file_name().unwrap().to_string_lossy());
+        eprintln!("HASH\t{}\tsamples={samples_hash:016x} key={key_hash:016x} r22={r22_hash:016x} m44={mono44_hash:016x} wf={wf_hash:016x} wfcols={wf_cols_hash:016x}", path.file_name().unwrap().to_string_lossy());
     }
     Ok(())
 }
