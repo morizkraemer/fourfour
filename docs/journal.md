@@ -775,3 +775,5 @@
 2026-11-20 08:40 orch-worker hc-L3 cost: $10.58 (sonnet) - fused meter+detail filter pass 4c2b2c4, -7.65% instructions, bit-identical, cargo test 653 pass; fused fn still unused by the app [branch drain/hc-L3-20261120]
 2026-11-20 08:41 orchestrator hc-L1 spawn: credit run opus high, $25 today of $55, branch hc-grid (merges hc-setup first)
 2026-11-20 08:41 orchestrator hc-L3 followup: resume sonnet medium $5 to wire the analysis to the fused meter pass
+2026-11-20 07:50 orch-worker hc-L3 cost: $11.5488 (sonnet) — BLOCKED: nothing changed, branch still at `4629253`, and `~/.cache/hc-L3-target` is already gone. The app analysis never runs the two meters over the same audio [branch drain/hc-L3-20261120]
+2026-11-20 08:55 orchestrator hc-L3 followup BLOCKED ($1): app never runs both meters on the same audio (waveform from mono downmix, detail from a 2nd parallel stereo decode); fusing would change PWV detail bytes. Decided: keep the split; fused commit 4c2b2c4 is unused, drop it when merging. One-decode redesign parked (changes USB bytes, needs Mac timing). L3 closed at ~$19.6 of $45
