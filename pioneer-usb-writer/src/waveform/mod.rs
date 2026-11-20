@@ -195,6 +195,123 @@ impl Biquad {
     }
 }
 
+/// Two f64 lanes; the elementwise operations compile to one vector instruction each.
+#[derive(Clone, Copy)]
+struct Pair([f64; 2]);
+
+impl std::ops::Mul for Pair {
+    type Output = Pair;
+
+    #[inline(always)]
+    fn mul(self, o: Pair) -> Pair {
+        Pair([self.0[0] * o.0[0], self.0[1] * o.0[1]])
+    }
+}
+
+impl std::ops::Add for Pair {
+    type Output = Pair;
+
+    #[inline(always)]
+    fn add(self, o: Pair) -> Pair {
+        Pair([self.0[0] + o.0[0], self.0[1] + o.0[1]])
+    }
+}
+
+impl std::ops::Sub for Pair {
+    type Output = Pair;
+
+    #[inline(always)]
+    fn sub(self, o: Pair) -> Pair {
+        Pair([self.0[0] - o.0[0], self.0[1] - o.0[1]])
+    }
+}
+
+impl Pair {
+    #[inline(always)]
+    fn splat(x: f64) -> Pair {
+        Pair([x, x])
+    }
+
+    #[inline(always)]
+    fn abs(self) -> Pair {
+        Pair([self.0[0].abs(), self.0[1].abs()])
+    }
+
+    #[inline(always)]
+    fn larger(self, v: Pair) -> Pair {
+        Pair([larger(self.0[0], v.0[0]), larger(self.0[1], v.0[1])])
+    }
+}
+
+/// Four direct form I biquads side by side as two [`Pair`]s, evaluated with the same operations in the same order
+/// as [`Biquad::step`]. They all see the same input, so they share the input history.
+struct Bank {
+    b: [[Pair; 2]; 3],
+    a: [[Pair; 2]; 2],
+    x: [f64; 2],
+    y: [[Pair; 2]; 2],
+}
+
+impl Bank {
+    fn new(filters: [Biquad; 4]) -> Self {
+        debug_assert!(filters.iter().all(|f| f.x == filters[0].x));
+        let lanes = |value: &dyn Fn(&Biquad) -> f64| {
+            [Pair([value(&filters[0]), value(&filters[1])]), Pair([value(&filters[2]), value(&filters[3])])]
+        };
+        Bank {
+            b: std::array::from_fn(|k| lanes(&|f| f.b[k])),
+            a: std::array::from_fn(|k| lanes(&|f| f.a[k])),
+            x: filters[0].x,
+            y: std::array::from_fn(|k| lanes(&|f| f.y[k])),
+        }
+    }
+
+    fn into_biquads(self) -> [Biquad; 4] {
+        std::array::from_fn(|i| {
+            let (h, l) = (i / 2, i % 2);
+            Biquad {
+                b: std::array::from_fn(|k| self.b[k][h].0[l]),
+                a: std::array::from_fn(|k| self.a[k][h].0[l]),
+                x: self.x,
+                y: std::array::from_fn(|k| self.y[k][h].0[l]),
+            }
+        })
+    }
+}
+
+#[inline(always)]
+fn larger(held: f64, v: f64) -> f64 {
+    if v > held { v } else { held }
+}
+
+/// Folds mono samples into the column: `white`, `low`, `high` and `mid_hp` are a [`Bank`] in that order.
+#[inline(always)]
+fn measure(bank: &mut Bank, mid_lp: &mut Biquad, c: &mut Column, mono: impl Iterator<Item = f64>) {
+    let [b0, b1, b2] = bank.b;
+    let [a0, a1] = bank.a;
+    let [mut x1, mut x2] = bank.x;
+    let [mut y1, mut y2] = bank.y;
+    let mut held = [Pair([c.white, c.band[0]]), Pair([c.band[2], 0.0])];
+    let (mut peak, mut mid, mut sumsq, mut samples) = (c.peak, c.band[1], c.sumsq, c.samples);
+    let mut lowpass = *mid_lp;
+    for x in mono {
+        let (xv, x1v, x2v) = (Pair::splat(x), Pair::splat(x1), Pair::splat(x2));
+        let next = |h: usize| b0[h] * xv + b1[h] * x1v + b2[h] * x2v - a0[h] * y1[h] - a1[h] * y2[h];
+        let y = [next(0), next(1)];
+        (x2, x1, y2, y1) = (x1, x, y1, y);
+        held = [held[0].larger(y[0].abs()), held[1].larger(y[1].abs())];
+        mid = larger(mid, lowpass.step(y[1].0[1]).abs());
+        peak = larger(peak, x.abs());
+        sumsq += x * x;
+        samples += 1;
+    }
+    *mid_lp = lowpass;
+    (bank.x, bank.y) = ([x1, x2], [y1, y2]);
+    c.white = held[0].0[0];
+    c.band = [held[0].0[1], mid, held[1].0[0]];
+    (c.peak, c.sumsq, c.samples) = (peak, sumsq, samples);
+}
+
 /// Per-column measurements at 150 columns per second.
 #[derive(Debug, Default, Clone)]
 pub struct Column {
@@ -273,26 +390,41 @@ impl Meter {
 
     pub fn push(&mut self, interleaved: &[f32]) {
         let channels = self.channels.max(1);
-        let [mut white, mut low, mut mid_hp, mut mid_lp, mut high] = self.filters;
+        let total = interleaved.len() / channels;
+        let [white, low, mid_hp, mid_lp, high] = self.filters;
+        let mut bank = Bank::new([white, low, high, mid_hp]);
+        let mut mid_lp = mid_lp;
         let (mut frames, mut next_edge) = (self.frames, self.next_edge);
         let mut c = std::mem::take(&mut self.current);
-        for frame in interleaved.chunks_exact(channels) {
+        let mut done = 0;
+        while done < total {
             while frames >= next_edge {
                 self.columns.push(std::mem::take(&mut c));
                 next_edge = ((self.columns.len() + 1) as f64 * self.rate / COLUMNS_PER_SECOND)
                     .round() as u64;
             }
-            let x = frame.iter().map(|&s| s as f64).sum::<f64>() / channels as f64;
-            c.peak = c.peak.max(x.abs());
-            c.white = c.white.max(white.step(x).abs());
-            c.band[0] = c.band[0].max(low.step(x).abs());
-            c.band[1] = c.band[1].max(mid_lp.step(mid_hp.step(x)).abs());
-            c.band[2] = c.band[2].max(high.step(x).abs());
-            c.sumsq += x * x;
-            c.samples += 1;
-            frames += 1;
+            let run = ((next_edge - frames) as usize).min(total - done);
+            let block = &interleaved[done * channels..(done + run) * channels];
+            match channels {
+                1 => measure(&mut bank, &mut mid_lp, &mut c, block.iter().map(|&s| s as f64)),
+                2 => measure(
+                    &mut bank,
+                    &mut mid_lp,
+                    &mut c,
+                    block.chunks_exact(2).map(|f| (f[0] as f64 + f[1] as f64) / 2.0),
+                ),
+                _ => measure(
+                    &mut bank,
+                    &mut mid_lp,
+                    &mut c,
+                    block.chunks_exact(channels).map(|f| f.iter().map(|&s| s as f64).sum::<f64>() / channels as f64),
+                ),
+            }
+            done += run;
+            frames += run as u64;
         }
         self.current = c;
+        let [white, low, high, mid_hp] = bank.into_biquads();
         self.filters = [white, low, mid_hp, mid_lp, high];
         (self.frames, self.next_edge) = (frames, next_edge);
     }
@@ -805,6 +937,79 @@ mod tests {
             let chunked = metered(rate, 2, &pieces);
             assert_eq!(chunked.frames as usize, s.len() / 2);
             assert_eq!(analyze(&chunked), whole);
+        }
+    }
+
+    fn scalar_columns(rate: u32, channels: usize, chunks: &[&[f32]]) -> Vec<Column> {
+        let tuning = Tuning::default();
+        let rate_f = rate.max(1) as f64;
+        let mut filters = [
+            Biquad::lowpass(tuning.whiteness_lowpass_hz, rate_f),
+            Biquad::lowpass(tuning.low_hz, rate_f),
+            Biquad::highpass(tuning.mid_low_hz, rate_f),
+            Biquad::lowpass(tuning.mid_high_hz, rate_f),
+            Biquad::highpass(tuning.high_hz, rate_f),
+        ];
+        let mut columns = Vec::new();
+        let mut c = Column::default();
+        let mut frames = 0u64;
+        let mut next_edge = (rate_f / COLUMNS_PER_SECOND).round() as u64;
+        for chunk in chunks {
+            for frame in chunk.chunks_exact(channels) {
+                while frames >= next_edge {
+                    columns.push(std::mem::take(&mut c));
+                    next_edge = ((columns.len() + 1) as f64 * rate_f / COLUMNS_PER_SECOND).round() as u64;
+                }
+                let x = frame.iter().map(|&s| s as f64).sum::<f64>() / channels as f64;
+                c.peak = c.peak.max(x.abs());
+                c.white = c.white.max(filters[0].step(x).abs());
+                c.band[0] = c.band[0].max(filters[1].step(x).abs());
+                let mid_high_passed = filters[2].step(x);
+                c.band[1] = c.band[1].max(filters[3].step(mid_high_passed).abs());
+                c.band[2] = c.band[2].max(filters[4].step(x).abs());
+                c.sumsq += x * x;
+                c.samples += 1;
+                frames += 1;
+            }
+        }
+        let n = ((frames as f64 * COLUMNS_PER_SECOND / rate_f).ceil() as usize).max(1);
+        columns.push(c);
+        columns.resize(n, Column::default());
+        columns
+    }
+
+    fn noisy(len: usize, seed: u64) -> Vec<f32> {
+        let mut state = seed;
+        (0..len)
+            .map(|i| {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let noise = ((state >> 40) as f32 / (1u64 << 24) as f32) * 2.0 - 1.0;
+                match (i / 5000) % 5 {
+                    0 => noise,
+                    1 => 0.0,
+                    2 => noise * 0.01,
+                    3 => (i as f32 * 0.03).sin(),
+                    _ => if i % 997 == 0 { 1.0 } else { 0.0 },
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_meter_matches_a_sample_by_sample_reference_bit_for_bit() {
+        for (rate, channels) in [(44100, 1), (44100, 2), (48000, 2), (22050, 1), (96000, 3), (8000, 6), (100, 1), (1, 2)] {
+            let audio = noisy(channels * rate.min(40_000) as usize, rate as u64 + channels as u64);
+            let sizes = [channels * 777, channels * 1, channels * 4096 + channels];
+            let mut pieces: Vec<&[f32]> = Vec::new();
+            let (mut at, mut k) = (0, 0);
+            while at < audio.len() {
+                let end = (at + sizes[k % 3]).min(audio.len());
+                pieces.push(&audio[at..end]);
+                (at, k) = (end, k + 1);
+            }
+            let metered = metered(rate, channels, &pieces);
+            let reference = scalar_columns(rate, channels, &pieces);
+            assert_eq!(format!("{:?}", metered.columns), format!("{:?}", reference), "{rate} Hz, {channels} ch");
         }
     }
 
