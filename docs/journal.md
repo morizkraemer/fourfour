@@ -780,3 +780,5 @@
 2026-11-20 08:42 orch-worker hc-L1 cost: $5.3744 (opus) — ✅ **Done** - RESULT: head `bdbdd6b` on `hc-grid`. No change kept; the fit code is the same as the L0 baseline. - Stopped after 8 rejected steps in a row: 6 run  [branch hc-grid]
 2026-11-20 orch-worker hc-L1 cost: $5.37 (opus) - 8 rejected, nothing kept; fit at its limit on these logits; best reject "intro anchor" (TUNE grid 199->203, GATE 172->171), patch docs/analysis/hc-L1-intro-anchor.patch; product question for Merlin [branch hc-grid bdbdd6b]
 2026-11-20 orchestrator hc-L1 closed (rest of $55 saved). hc-L2 spawn: credit run sonnet high $12, branch hc-bar1 off hc-grid
+2026-11-20 08:56 orch-worker hc-L2 cost: $0.6955 (sonnet) — ✅ **Done** - Bar-1 probe finished, nothing kept (head `6a9f215`). - Baseline reproduced: TUNE bar 176, GATE bar 141. Grid and BPM never changed. - `cargo test - [branch hc-bar1]
+2026-11-20 orch-worker hc-L2 cost: $0.70 (sonnet) - nothing kept; downbeat vote at its limit (33/209 TUNE tracks ambiguous); share 0.80 TUNE 177 but GATE 140. Closed; next gain needs downbeat logits in the rule (bt.rs/analyze.rs scope) [branch hc-bar1 6a9f215]
