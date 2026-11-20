@@ -285,7 +285,7 @@ fn larger(held: f64, v: f64) -> f64 {
 }
 
 /// Folds mono samples into the column: `white`, `low`, `high` and `mid_hp` are a [`Bank`] in that order.
-#[inline(always)]
+#[inline(never)]
 fn measure(bank: &mut Bank, mid_lp: &mut Biquad, c: &mut Column, mono: impl Iterator<Item = f64>) {
     let [b0, b1, b2] = bank.b;
     let [a0, a1] = bank.a;
@@ -978,7 +978,7 @@ mod tests {
         columns
     }
 
-    fn noisy(len: usize, seed: u64) -> Vec<f32> {
+    pub(super) fn noisy(len: usize, seed: u64) -> Vec<f32> {
         let mut state = seed;
         (0..len)
             .map(|i| {
