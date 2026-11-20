@@ -54,6 +54,10 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 ### Q6 Key source PDB vs OneLibrary [handed to brother]
 ### Q8 Cross-platform CI [waiting on Merlin, 15] [box] - build, test, check on 3 OSes; branch only. 45 min
 ### Q14 USB sync UI [waiting on Merlin, 55] - branch ui-sync-flow b510e70
+### Q60 Duplicate cleanup [queued] [box] - keeper + archive + restore, proposals you accept (Ora-style), reuse dup data and the 2 s duration rule; UI on a branch, lands only after Merlin's review. Research: docs/research/ora-docs-2026-11.md
+### Q61 Moved-file reconnect + folder relocate [queued] [box] - reconnect by audio fingerprint with copy-vs-move and two-candidates guards; relocate a folder. Branch only
+### Q62 Playlist export [queued] [box] - M3U8, CSV, Traktor NML, Rekordbox XML (lists only). Branch only
+### Mo's issues (2026-11-20): #35 compatible copies, #36 staged sync + verify + recover, #37 import back from stick, #38 writer audit vs rbxport gotchas
 ### Q5 Unsigned macOS build [landed] - DMG pipeline works (scripts/mac/build-dmg.sh, check-dmg.sh); signing still open.
 
 ## Run
