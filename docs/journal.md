@@ -758,3 +758,4 @@
 2026-11-19 13:20 orchestrator Merlin: plain 1-8 should add to favorites, not fire hot cues -> plain-digit cue actions removed (hot cues on Shift+1-8); vitest 61 pass, svelte-check 0 errors, smoke inspector-cues 7 pass
 2026-11-19 13:34 orchestrator draft pre-release v0.1.0-alpha.4 = build 1999 (digit keys fix) for Mo, check-dmg PASS, sha256 74bf8705
 2026-11-20 03:56 orchestrator Merlin: raise the credit day cap, ~$450 left for 10 days -> fourfour credit runs use ORCH_WORKER_DAY_CAP=60 until 2026-11-30 (month cap 480 unchanged)
+2026-11-20 04:07 orchestrator Merlin approved the hill-climb plan (draft 2) with: credits capped at $150 for fourfour (L1 $75, L3 $45, L5 $30), seat subagents for the rest; brother's lane narrowed to USB sync + CDJ (AGENTS.md); up to 3 workers when faster; Mac night run OK; callgrind not sysctl. Spawning L0, L9, L7 (seat)

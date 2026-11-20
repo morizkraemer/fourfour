@@ -121,3 +121,10 @@ Rules: max 2 workers at once unless Merlin raises it; splits and scorer read-onl
 5. Will you listen to a bar-1 list this month? rec: if not, drop L2.
 6. Allow `sudo sysctl kernel.perf_event_paranoid=1` on dev? rec: no, use callgrind.
 7. Under-spend OK? rec: yes.
+
+## Merlin's answers (2026-11-20) and the final split
+- Credits: cap this project at $150 (other projects use the API too). Seat subagents may be used as well.
+- 1 yes (300 more held-out tracks). 2 yes: only USB sync and CDJ behaviour are Mo's; the waveform meter and the rest may change (AGENTS.md lanes updated). 3 three workers when it is faster. 4 Mac night run OK. 5 bar-1 listen list OK if quick. 6 orchestrator's call: callgrind, no sysctl change. 7 see credits.
+- Credit runs ($150): L1 grid + BPM $75 (opus high), L3 stages incl. waveform meter $45 (sonnet high), L5 fuzz $30 (sonnet medium).
+- Seat subagents: L0 setup, L9 key gap, L7 release profile, L4 dup measure, L2 bar-1 probe, L10 Mac run, final Fable reviews.
+- Release builds: serialize with `flock ~/.cache/hc-release.lock`.
