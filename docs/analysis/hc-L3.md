@@ -29,3 +29,8 @@ Instructions undervalue the Meter: it is a serial float recurrence (low IPC), th
 
 | # | change | instructions before | after | saved | kept |
 |---|---|---|---|---|---|
+| 1 | `Meter::push`: four independent band filters as two SSE-width pairs, run between column edges | 6,164,851,821 | 5,595,172,157 | -9.24% | yes |
+| 2 | `Meter` fold (`measure`) kept out of line so LLVM vectorizes the band pairs | 5,595,172,157 | 5,289,281,713 | -5.47% | yes |
+| 2b | harness: `stage_cpu` also runs and hashes `DetailMeter` (total grows, new baseline) | 5,289,281,713 | 6,725,130,115 | - | harness |
+| 3 | `DetailMeter::push`: same pair bank, `measure_detail` out of line | 6,725,130,115 | 6,284,165,853 | -6.56% | yes |
+| 4 | `to_byte` / PWV7 curve: skip `powf` when the curve is exactly 1.0 (two of three bands) | 6,284,165,853 | 6,175,095,122 | -1.74% | yes |

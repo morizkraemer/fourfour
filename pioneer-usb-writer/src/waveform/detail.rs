@@ -11,7 +11,7 @@
 //! [`measure_window`] measures any short stretch of the track at any resolution with the same filters, release and the
 //! gains stored in the series, for zoom levels where even 2400 columns per second are wider than a pixel.
 
-use super::{band_gain, larger, Bank, Biquad, Pair, Tuning, COLUMNS_PER_SECOND, PWV7_MAX};
+use super::{band_gain, curved, larger, Bank, Biquad, Pair, Tuning, COLUMNS_PER_SECOND, PWV7_MAX};
 
 pub const DETAIL_COLUMNS_PER_SECOND: f64 = 2400.0;
 const COLUMNS_PER_PWV7_COLUMN: usize = (DETAIL_COLUMNS_PER_SECOND / COLUMNS_PER_SECOND) as usize;
@@ -326,7 +326,7 @@ fn band_filters(t: &Tuning, rate: f64) -> [Biquad; 4] {
 
 fn to_byte(t: &Tuning, band: usize, gain: u16, env: f64) -> u8 {
     let linear = (t.band_scale[band] * gain as f64 * env).min(PWV7_MAX as f64);
-    (PWV7_MAX as f64 * (linear / PWV7_MAX as f64).powf(t.curve[band])).round() as u8
+    (PWV7_MAX as f64 * curved(linear / PWV7_MAX as f64, t.curve[band])).round() as u8
 }
 
 /// The `PWV7` gains (from the `PWV7` envelope rebuilt out of the raw peaks), then the fast envelope and the byte scale.

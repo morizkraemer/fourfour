@@ -279,6 +279,10 @@ impl Bank {
     }
 }
 
+fn curved(unit: f64, curve: f64) -> f64 {
+    if curve == 1.0 { unit } else { unit.powf(curve) }
+}
+
 #[inline(always)]
 fn larger(held: f64, v: f64) -> f64 {
     if v > held { v } else { held }
@@ -508,7 +512,7 @@ pub fn analyze(audio: &Measured) -> Waveforms {
             let mut out = [0u8; 3];
             for j in 0..3 {
                 let linear = (t.band_scale[j] * gains[j] as f64 * e[j]).min(PWV7_MAX as f64);
-                out[j] = (PWV7_MAX as f64 * (linear / PWV7_MAX as f64).powf(t.curve[j])).round() as u8;
+                out[j] = (PWV7_MAX as f64 * curved(linear / PWV7_MAX as f64, t.curve[j])).round() as u8;
             }
             out
         })
@@ -1010,6 +1014,24 @@ mod tests {
             let metered = metered(rate, channels, &pieces);
             let reference = scalar_columns(rate, channels, &pieces);
             assert_eq!(format!("{:?}", metered.columns), format!("{:?}", reference), "{rate} Hz, {channels} ch");
+        }
+    }
+
+    #[test]
+    fn a_linear_curve_is_the_identity_powf_would_give() {
+        let mut state = 0x9e3779b97f4a7c15u64;
+        let units = (0..2_000_000).map(|i| {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            match i % 4 {
+                0 => (state >> 11) as f64 / (1u64 << 53) as f64,
+                1 => f64::from_bits(0x3f00000000000000 + (state >> 12)),
+                2 => (i as f64 / 2_000_000.0).min(1.0),
+                _ => (state >> 57) as f64 / 127.0,
+            }
+        });
+        for unit in units {
+            let one = std::hint::black_box(1.0);
+            assert_eq!(curved(unit, one).to_bits(), unit.powf(one).to_bits(), "{unit:e}");
         }
     }
 
