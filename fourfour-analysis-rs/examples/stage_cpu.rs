@@ -5,7 +5,7 @@ use std::time::Instant;
 use fourfour_analysis::bt::MODEL_RATE;
 use fourfour_analysis::decode::{decode_mono, resample_to};
 use fourfour_analysis::cyankey;
-use pioneer_usb_writer::waveform::{analyze, Meter};
+use pioneer_usb_writer::waveform::{analyze, DetailMeter, Meter};
 
 fn reps() -> usize {
     std::env::var("STAGE_REPS").ok().and_then(|v| v.parse().ok()).unwrap_or(3)
@@ -46,6 +46,12 @@ fn main() -> anyhow::Result<()> {
             meter.push(&native.samples);
             meter.finish()
         });
+        let detail = timed("wf_detail", &mut line, || {
+            let mut meter = DetailMeter::new(rate, 1);
+            meter.push(&native.samples);
+            meter.finish()
+        });
+        let detail_hash = fnv(detail.to_bytes().iter().map(|b| *b as u64));
         let wf = timed("wf_columns", &mut line, || analyze(&measured));
         let wf_hash = fourfour_analysis::waveform::checksum(&wf);
         let wf_cols_hash = fnv(measured.band_columns().iter().flatten().map(|v| v.to_bits()));
@@ -61,7 +67,7 @@ fn main() -> anyhow::Result<()> {
         let _r22 = timed("resample22", &mut line, || resample_to(gapless, rate, MODEL_RATE))?;
         let r22_hash = fnv(_r22.iter().map(|s| s.to_bits() as u64));
         println!("{}\t{}\t{:.0}\t{}", path.file_name().unwrap().to_string_lossy(), rate, native.samples.len() as f64 / rate as f64, line.join(" "));
-        eprintln!("HASH\t{}\tsamples={samples_hash:016x} key={key_hash:016x} r22={r22_hash:016x} m44={mono44_hash:016x} wf={wf_hash:016x} wfcols={wf_cols_hash:016x}", path.file_name().unwrap().to_string_lossy());
+        eprintln!("HASH\t{}\tsamples={samples_hash:016x} key={key_hash:016x} r22={r22_hash:016x} m44={mono44_hash:016x} wf={wf_hash:016x} wfcols={wf_cols_hash:016x} detail={detail_hash:016x}", path.file_name().unwrap().to_string_lossy());
     }
     Ok(())
 }
