@@ -1,0 +1,9 @@
+COMMON RULES (fourfour seat worker, 2026-11-21):
+- Read AGENTS.md first ("## Unattended", lanes, run limits) and docs/architecture/perf-run-2026-11.md for how perf is measured on dev.
+- You run in your own git worktree on your own branch. Commit each kept step with before/after numbers (conventional commits ending with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"). No push, no merge to master.
+- Loop: one change, measure (interleaved A/B, >= 3 rounds, medians), keep only real gains with all tests green, else revert. No dead commits. Behaviour and output must stay the same unless the task says otherwise.
+- Gates for every kept step: `cargo test --workspace`; `cargo check -p pioneer-test-ui --features dev-bins --bins`; in app/: `npx vitest run`, `npx svelte-check` 0 errors, Playwright smoke when you touch app/.
+- Lanes: USB sync and CDJ behaviour (sync engine, export format, PDB/ANLZ writer, eject/removable detection) are Mo's: read-only, repro tests only. Everything else may change on your branch.
+- Machine: CARGO_TARGET_DIR=~/.cache/<your-task>-target (never /tmp), delete it at the end; nice 10; at most 4 heavy processes; spawn nothing when `free -m` available < 1500; wrap every `cargo build --release` in `flock ~/.cache/hc-release.lock`; no Tauri window, audio output, USB writes or Mac access; never `pkill -f` (kill by PID); datasets read-only; prototyping/ off limits; no new dependencies without a strong reason in the report. No code comments (repo rule).
+- Stop at 6 rejected steps in a row, when the target is reached, or after about 4 hours. Write a result file docs/analysis/<your-task>.md (one row per step, kept and rejected).
+- REPORT (final message): RESULT: branch, head SHA, table of kept steps with before/after, gates' last lines, risks, what still needs the Mac, one recommended action. Or BLOCKED: decision, 2-3 options, recommendation. Keep it short.

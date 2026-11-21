@@ -804,3 +804,5 @@
 2026-11-21 04:27 orch-worker hc-L5 cost: $5.4410 (sonnet) — ✅ **Done** - RESULT: head `e784342` on `hc-fuzz`. - 0 panics, 0 hangs over 30 s, 0 allocations over 2 GB in all profiles, before and after. The only problem was [branch hc-fuzz]
 2026-11-21 06:38 orch-worker review-q60-62 cost: $1.25 (sonnet) - Q62+Q61+Q60 merged, all checks pass (cargo 701, vitest 1131, smoke), 3 lab cards live on :4220 [branch review-q60-62 1e58e83]; followup: drop 67 comment lines, $3
 2026-11-21 06:38 orch-worker hc-L5 cost: $5.44 cumulative (sonnet) - hostile tags: flac/mp4 tag floods took 26 s in lofty; pre-scan guard (4096 flac blocks, 100k mp4 atoms) -> 1.1 s; 0 panics/hangs/>2GB in 29k cases [branch hc-fuzz e784342]. Note: resumed runs report cumulative cost, so the ledger double-counts resumes
+2026-11-21 06:43 orchestrator lab: 3 new cards were status backlog (hidden), set open; Merlin kept r178 inspector card -> locked
+2026-11-21 06:43 orchestrator Merlin: more bg work on dev on the seat (speed, cross-platform, anything without the Mac). Spawn seat workers: perf-startup (opus), perf-detail (sonnet), xplat (sonnet); next in line: scroll/typing jank during analysis
