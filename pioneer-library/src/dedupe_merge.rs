@@ -1,8 +1,3 @@
-//! Merging duplicate entries into a keeper, and the archive that holds what was merged away.
-//!
-//! A merge never touches an audio file. The removed entries leave the library as a snapshot of their rows (and their
-//! `anlz` folder, moved to `anlz/_archive`), so [`LocalLibrary::restore_merge`] brings them back with the same ids,
-//! playlist places and cues.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::hash::Hasher;

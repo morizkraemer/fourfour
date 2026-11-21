@@ -1,6 +1,3 @@
-//! Groups of the same song already in the library, with a proposed keeper per group.
-//! Reading the rows needs the library; grouping them reads the audio files, so it runs
-//! without it ([`find_duplicate_groups`]).
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -239,7 +236,6 @@ fn keeper_rank(member: &DuplicateMember) -> impl Ord + use<> {
     )
 }
 
-/// One short line on why `keeper` ranks above `runner_up`, the best of the others.
 fn keeper_reason(keeper: &DuplicateMember, runner_up: &DuplicateMember) -> String {
     if keeper.file_present && !runner_up.file_present {
         "Its file is there; the other copy's file is missing".into()

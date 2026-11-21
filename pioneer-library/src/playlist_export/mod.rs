@@ -1,5 +1,3 @@
-//! Playlist export to files other tools read: M3U8, CSV, plain text, Traktor NML and Rekordbox XML.
-//! Lists only, no audio is copied.
 
 mod lists;
 mod rekordbox_xml;

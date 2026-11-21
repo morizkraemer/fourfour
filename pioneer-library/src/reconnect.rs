@@ -1,9 +1,3 @@
-//! Moved files: recognise a missing track's audio file somewhere else and point the track at it, and
-//! re-point a whole folder root. The track id stays, so analysis, cues, edits and playlists stay.
-//!
-//! A track is recognised by size and duration (within [`DURATION_TOLERANCE_SECS`]), then confirmed by a
-//! sampled content hash taken while its file was still there (`track_fingerprints`). The hash covers the
-//! size and three 32 KiB samples, so a file whose tags were rewritten and changed in size is not found.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
