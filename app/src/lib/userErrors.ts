@@ -179,6 +179,14 @@ export function backupRestoreFailureText(err: unknown): string {
   return `Couldn't restore the backup. ${cause ? `${cause} ` : ''}${SAFETY_COPY_SENTENCE} ${safetyPath}`;
 }
 
+export function playlistExportFailureText(err: unknown): string {
+  return failureText("Couldn't export the playlist.", err, { next: 'Try again, or save it somewhere else.' });
+}
+
+export function copyTracklistFailureText(err: unknown): string {
+  return failureText("Couldn't copy the tracklist.", err, { next: 'Try again.' });
+}
+
 export function rekordboxFailureText(err: unknown, what = "Couldn't read the Rekordbox library."): string {
   return failureText(what, err, { rules: REKORDBOX_RULES, next: 'Check the file or folder, then try again.' });
 }

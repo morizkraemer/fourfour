@@ -40,6 +40,8 @@ import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
 import { pickAudioFiles, pickDirectory } from '../services/tauri.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { copyPlaylistTracklist, exportPlaylistToFile } from '../stores/playlist-export.svelte.ts';
+import { EXPORT_FORMATS } from '../lib/playlistExport.ts';
 import { dropPlaylistOnStick, dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
 import { ui } from '../stores/ui.svelte.ts';
 import { favouriteTrackIds } from '../lib/newPlaylist.ts';
@@ -107,6 +109,16 @@ function putOnStickItem(playlist: PlaylistInput): MenuItem {
     items: library.volumes.map((volume) => ({
       label: volumeLabel(volume),
       onClick: () => void dropPlaylistOnStick(volume, playlist.id),
+    })),
+  };
+}
+
+function exportItem(label: string, playlistId: number, foldersOnly = false): MenuItem {
+  return {
+    label,
+    items: EXPORT_FORMATS.filter((f) => !foldersOnly || f.foldersToo).map((f) => ({
+      label: f.label,
+      onClick: () => void exportPlaylistToFile(playlistId, f.format),
     })),
   };
 }
@@ -215,6 +227,11 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
       onClick: () => importIntoSource(sourceId),
     });
     if (!isFavorite) items.push(putOnStickItem(playlist));
+    items.push(
+      { isSeparator: true },
+      exportItem('Export playlist…', playlist.id),
+      { label: 'Copy tracklist', onClick: () => void copyPlaylistTracklist(playlist.id) }
+    );
 
     if (isFavorite) {
       items.push(moveFavouritesToNewPlaylistItem(favoriteSlotFromName(playlist.name) ?? undefined));
@@ -277,6 +294,8 @@ export function buildFolderContextMenuItems(opts: FolderMenuOptions): MenuItem[]
     ...newPlaylistAndFolderItems(folder.id),
     { isSeparator: true },
     { label: 'Rename', onClick: () => onRename?.(folder) },
+    { isSeparator: true },
+    exportItem('Export folder…', folder.id, true),
     { isSeparator: true },
     {
       label: 'Delete folder',

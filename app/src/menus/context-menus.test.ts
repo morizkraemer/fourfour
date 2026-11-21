@@ -71,6 +71,32 @@ describe('buildTrackContextMenuItems', () => {
   });
 });
 
+describe('playlist export entries', () => {
+  const peak = { id: 1, name: 'Peak Time', track_ids: [1, 2], parent_id: 0, is_folder: false };
+  const sets = { id: 9, name: 'Sets', track_ids: [], parent_id: 0, is_folder: true };
+
+  it('lists Export playlist with all five formats, and Copy tracklist, on a playlist', () => {
+    library.playlists = [peak];
+    const items = buildSourceContextMenuItems({ sourceId: 'Peak Time' });
+    const exportEntry = items.find((i) => i.label === 'Export playlist…')!;
+    expect(exportEntry.items!.map((i) => i.label)).toEqual([
+      'M3U8 playlist',
+      'CSV spreadsheet',
+      'Text tracklist',
+      'Traktor (NML)',
+      'Rekordbox XML',
+    ]);
+    expect(items.map((i) => i.label)).toContain('Copy tracklist');
+    library.playlists = [];
+  });
+
+  it('exports a whole folder only as Traktor or Rekordbox', () => {
+    const items = buildFolderContextMenuItems({ folder: sets });
+    const exportEntry = items.find((i) => i.label === 'Export folder…')!;
+    expect(exportEntry.items!.map((i) => i.label)).toEqual(['Traktor (NML)', 'Rekordbox XML']);
+  });
+});
+
 describe('revealLabel', () => {
   it('uses platform wording', () => {
     const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
@@ -192,7 +218,7 @@ describe('playlist folder menus', () => {
     ]);
   });
 
-  it('gives a playlist rename, duplicate, creation, import, stick and delete entries', () => {
+  it('gives a playlist rename, duplicate, creation, import, stick, export and delete entries', () => {
     library.playlists = tree();
     const labels = buildSourceContextMenuItems({ sourceId: 'Friday', onRenamePlaylist: () => {} }).map((i) => i.label);
     expect(labels).toEqual([
@@ -204,6 +230,9 @@ describe('playlist folder menus', () => {
       undefined,
       'Import folder',
       'Put on stick',
+      undefined,
+      'Export playlist…',
+      'Copy tracklist',
       undefined,
       'Delete playlist',
     ]);
@@ -229,6 +258,8 @@ describe('playlist folder menus', () => {
       'New folder',
       undefined,
       'Rename',
+      undefined,
+      'Export folder…',
       undefined,
       'Delete folder',
     ]);

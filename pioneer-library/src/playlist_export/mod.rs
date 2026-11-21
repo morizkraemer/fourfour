@@ -114,6 +114,13 @@ impl ExportDocument {
         })
     }
 
+    /// Renders the document and writes it to `dest`.
+    pub fn write(&self, format: ExportFormat, dest: &Path) -> Result<ExportReport> {
+        let text = self.render(format)?;
+        std::fs::write(dest, text).with_context(|| format!("Failed to write {}", dest.display()))?;
+        Ok(self.report())
+    }
+
     pub fn report(&self) -> ExportReport {
         let missing: Vec<&ExportTrack> = self.tracks.iter().filter(|t| t.missing).collect();
         ExportReport {
@@ -215,10 +222,7 @@ impl LocalLibrary {
 
     /// Writes the playlist (or, for Rekordbox XML and Traktor NML, the folder) to `dest`.
     pub fn export_playlist(&self, playlist_id: i64, format: ExportFormat, dest: &Path) -> Result<ExportReport> {
-        let document = self.export_document(playlist_id)?;
-        let text = document.render(format)?;
-        std::fs::write(dest, text).with_context(|| format!("Failed to write {}", dest.display()))?;
-        Ok(document.report())
+        self.export_document(playlist_id)?.write(format, dest)
     }
 
     /// The default name offered in the save dialog, dated today.

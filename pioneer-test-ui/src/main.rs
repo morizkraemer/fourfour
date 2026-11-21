@@ -18,6 +18,7 @@ mod heap;
 mod import_plan;
 mod perf_probe;
 mod playback;
+mod playlist_export_commands;
 mod recovery_commands;
 #[cfg(test)]
 #[allow(dead_code)]
@@ -1504,6 +1505,9 @@ fn main() {
             backup_commands::export_backup,
             backup_commands::read_backup,
             backup_commands::restore_backup,
+            playlist_export_commands::export_playlist,
+            playlist_export_commands::playlist_export_file_name,
+            playlist_export_commands::playlist_tracklist,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
@@ -1661,6 +1665,10 @@ mod tests {
             ],
         );
         assert_off_main_thread(include_str!("backup_commands.rs"), &["read_backup"]);
+        assert_off_main_thread(
+            include_str!("playlist_export_commands.rs"),
+            &["export_playlist", "playlist_export_file_name", "playlist_tracklist"],
+        );
         assert_off_main_thread(include_str!("file_health.rs"), &["locate_track_file"]);
         assert_off_main_thread(
             include_str!("stick_commands.rs"),
