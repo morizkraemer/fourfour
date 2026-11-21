@@ -163,6 +163,7 @@ test('the missing state still works and comes back after an import result', asyn
     'Show missing tracks',
     'Check again',
     'Library check results…',
+    'Find duplicates…',
     'Import folder…',
     'Import files…',
   ]);
