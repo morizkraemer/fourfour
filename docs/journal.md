@@ -787,3 +787,6 @@
 2026-11-21 orchestrator hc-L5 spawn: credit run sonnet medium $20, branch hc-fuzz
 2026-11-21 orchestrator Merlin chose the ship-focused path: merge L3/L7 after the Mac check, credits go to beta blockers. Spawn Q24 bundle id migration (sonnet high $8, placeholder id app.ffdj.library, final id waits on the name) and Q62 playlist export (sonnet high $12); 3 workers with L5 (RAM 23 GB free)
 2026-11-21 02:26 orchestrator pushed master 07f6e00..eb236d3 (21 docs commits) per Merlin
+2026-11-21 02:46 orch-worker Q24 cost: $1.8242 (sonnet) — ✅ **Done** - Q24 is unchanged: head `2e3479f` on `drain/Q24-20261121`, nothing pushed. - This was the last stale monitor timeout. Nothing is pending. [branch drain/Q24-20261121]
+2026-11-21 02:47 orch-worker Q24 cost: $1.82 (sonnet) - placeholder id app.ffdj.library + one-time move of old app dirs (rename, else copy+verify, marker), library.db is plain SQLite so no key to move; scripts read the id from tauri.conf.json; Mac check open [branch drain/Q24-20261121 2e3479f]
+2026-11-21 02:47 orchestrator Q61 spawn: moved-file reconnect + relocate, sonnet high $15
