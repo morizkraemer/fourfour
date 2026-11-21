@@ -795,3 +795,6 @@
 2026-11-21 02:55 orchestrator Q60 spawn: duplicate cleanup (keeper, merge, archive + restore, no file deletes), sonnet high $20
 2026-11-21 03:11 orch-worker Q61 cost: $2.0045 (sonnet) — ✅ **Done** - RESULT: head `edd1e38` on `drain/Q61-20261121`, 2 commits, nothing pushed or merged. - Reconnect by size, duration (2 s) and a stored content hash. [branch drain/Q61-20261121]
 2026-11-21 03:11 orch-worker Q61 cost: $2.00 (sonnet) - reconnect by size+duration+sampled hash (3x32 KiB), relocate folder with preview + undo, in Library check dialog; additive schema (3 tables, no version bump) -> Merlin to confirm; first launch hashes the whole library once (~96 KB read per file) [branch drain/Q61-20261121 edd1e38]
+2026-11-21 03:19 orch-worker Q60 cost: $2.2345 (sonnet) — ✅ **Done** - Nothing new to report. The expired monitor was only a leftover wait watcher; the tests it watched already finished. - The Q60 result stands: head ` [branch drain/Q60-20261121]
+2026-11-21 03:20 orch-worker Q60 cost: $2.23 (sonnet) - duplicate groups (exact file hash or artist+title+2 s), keeper proposal + reason, merge playlists/cues/rating into keeper, archive + restore, no file deletes; additive schema (2 tables) [branch drain/Q60-20261121 b37db02]
+2026-11-21 03:20 orchestrator review-q60-62 spawn: merge Q62+Q61+Q60, validate, headless shots, 3 lab cards, sonnet medium $8
