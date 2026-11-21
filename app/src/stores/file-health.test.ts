@@ -8,6 +8,12 @@ const hooks = vi.hoisted(() => ({
   pickDirectory: vi.fn(),
   pickFile: vi.fn(),
   relocateMissingInFolder: vi.fn(),
+  findReconnectCandidates: vi.fn(),
+  applyReconnects: vi.fn(),
+  previewRelocateFolder: vi.fn(),
+  applyRelocateFolder: vi.fn(),
+  undoRelocateFolder: vi.fn(),
+  lastFolderRelocation: vi.fn(),
 }));
 
 vi.mock('../services/tauri.svelte.ts', async (importOriginal) => ({
@@ -32,8 +38,16 @@ import { fileStatus } from './file-status.svelte.ts';
 import { library } from './library.svelte.ts';
 import { ui } from './ui.svelte.ts';
 import {
+  applyFolderRelocation,
   applyHealth,
   checkLibraryAgain,
+  chooseNewRoot,
+  chooseReconnect,
+  findMovedFiles,
+  folderRelocation,
+  openFolderRelocation,
+  reconnectState,
+  undoFolderRelocation,
   initFileHealth,
   locateTrack,
   problemTrackIds,
@@ -69,6 +83,9 @@ beforeEach(() => {
   fileStatus.relocating = false;
   relocateResult.report = null;
   relocateResult.error = '';
+  reconnectState.plan = null;
+  reconnectState.error = '';
+  Object.assign(folderRelocation, { open: false, oldRoot: '', newRoot: '', preview: null, last: null, busy: false, error: '' });
   library.statusMessage = '';
   library.tracks = [
     { id: 1, filePath: '/old/a.mp3', raw: { source_path: '/old/a.mp3' } },
@@ -197,5 +214,141 @@ describe('showProblemTracks', () => {
     ui.activeSidebarRow = 'Something else';
     showProblemTracks();
     expect([fileStatus.onlyProblems, ui.activeSidebarRow]).toEqual([true, 'All Tracks']);
+  });
+});
+
+
+describe('finding moved files', () => {
+  it('reconnects the sure matches, keeps the ones that need a choice, and opens the result', async () => {
+    hooks.pickDirectory.mockResolvedValue('/new');
+    hooks.findReconnectCandidates.mockResolvedValue({
+      reconnect: [{ track_id: 1, source_path: '/new/a.mp3' }],
+      needs_choice: [{ track_id: 2, reason: 'multiple_candidates', candidates: ['/new/b1.mp3', '/new/b2.mp3'] }],
+      still_missing: [],
+    });
+    hooks.applyReconnects.mockResolvedValue({
+      relinked: [{ track_id: 1, source_path: '/new/a.mp3' }],
+      health: health({ missing: [2], checked_at_ms: 5000 }),
+    });
+
+    await findMovedFiles();
+
+    expect(hooks.findReconnectCandidates).toHaveBeenCalledWith(['/new']);
+    expect(hooks.applyReconnects).toHaveBeenCalledWith([{ track_id: 1, path: '/new/a.mp3' }]);
+    expect(row(0).filePath).toBe('/new/a.mp3');
+    expect(row(1).filePath).toBe('/old/b.mp3');
+    expect(reconnectState.plan?.reconnect).toHaveLength(1);
+    expect(reconnectState.plan?.needs_choice).toHaveLength(1);
+    expect([fileStatus.dialogOpen, reconnectState.busy]).toEqual([true, false]);
+  });
+
+  it('applies nothing when there is no sure match', async () => {
+    hooks.pickDirectory.mockResolvedValue('/new');
+    hooks.findReconnectCandidates.mockResolvedValue({ reconnect: [], needs_choice: [], still_missing: [1, 2] });
+    await findMovedFiles();
+    expect(hooks.applyReconnects).not.toHaveBeenCalled();
+    expect(reconnectState.plan?.still_missing).toEqual([1, 2]);
+  });
+
+  it('does nothing when the folder picker is cancelled', async () => {
+    hooks.pickDirectory.mockResolvedValue(null);
+    await findMovedFiles();
+    expect(hooks.findReconnectCandidates).not.toHaveBeenCalled();
+    expect(fileStatus.dialogOpen).toBe(false);
+  });
+
+  it('shows a readable message when the search fails', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    hooks.pickDirectory.mockResolvedValue('/nope');
+    hooks.findReconnectCandidates.mockRejectedValue('/nope is not a folder');
+    await findMovedFiles();
+    expect(reconnectState.error).toContain("That isn't a folder");
+    expect(reconnectState.busy).toBe(false);
+    info.mockRestore();
+  });
+
+  it('applies one chosen file and takes the track off the list', async () => {
+    reconnectState.plan = {
+      reconnect: [],
+      needs_choice: [
+        { track_id: 1, reason: 'multiple_candidates', candidates: ['/new/a1.mp3', '/new/a2.mp3'] },
+        { track_id: 2, reason: 'copy', candidates: ['/new/b.mp3'] },
+      ],
+      still_missing: [],
+    };
+    hooks.applyReconnects.mockResolvedValue({
+      relinked: [{ track_id: 1, source_path: '/new/a2.mp3' }],
+      health: health({ missing: [2], checked_at_ms: 5000 }),
+    });
+
+    await chooseReconnect(1, '/new/a2.mp3');
+
+    expect(hooks.applyReconnects).toHaveBeenCalledWith([{ track_id: 1, path: '/new/a2.mp3' }]);
+    expect(reconnectState.plan?.needs_choice.map((c) => c.track_id)).toEqual([2]);
+    expect(reconnectState.plan?.reconnect.map((r) => r.track_id)).toEqual([1]);
+    expect(row(0).filePath).toBe('/new/a2.mp3');
+  });
+});
+
+describe('relocating a folder', () => {
+  it('suggests the folder the missing tracks share and loads the last undoable relocation', async () => {
+    fileStatus.byId = { 1: 'missing', 2: 'missing' };
+    hooks.lastFolderRelocation.mockResolvedValue({ id: 3, old_root: '/x', new_root: '/y', tracks: 4, created_at: 't' });
+
+    await openFolderRelocation();
+
+    expect([folderRelocation.open, folderRelocation.oldRoot]).toEqual([true, '/old']);
+    expect(folderRelocation.last?.id).toBe(3);
+  });
+
+  it('previews after the new folder is chosen, then applies and keeps the undo step', async () => {
+    fileStatus.byId = { 1: 'missing', 2: 'missing' };
+    hooks.lastFolderRelocation.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: 7, old_root: '/old', new_root: '/new', tracks: 2, created_at: 't' });
+    await openFolderRelocation();
+    hooks.pickDirectory.mockResolvedValue('/new');
+    hooks.previewRelocateFolder.mockResolvedValue({ total: 2, found: 2, still_missing: 0 });
+    await chooseNewRoot();
+    expect(hooks.previewRelocateFolder).toHaveBeenCalledWith('/old', '/new');
+    expect(folderRelocation.preview).toEqual({ total: 2, found: 2, still_missing: 0 });
+
+    hooks.applyRelocateFolder.mockResolvedValue({
+      applied: {
+        relocation_id: 7,
+        remapped: [
+          { track_id: 1, source_path: '/new/a.mp3' },
+          { track_id: 2, source_path: '/new/b.mp3' },
+        ],
+        still_missing: 0,
+      },
+      health: health({ checked_at_ms: 5000 }),
+    });
+    await applyFolderRelocation();
+
+    expect([row(0).filePath, row(1).filePath]).toEqual(['/new/a.mp3', '/new/b.mp3']);
+    expect(folderRelocation.last?.id).toBe(7);
+    expect([folderRelocation.preview, folderRelocation.newRoot]).toEqual([null, '']);
+  });
+
+  it('does not apply without a preview that found something', async () => {
+    folderRelocation.preview = { total: 2, found: 0, still_missing: 2 };
+    await applyFolderRelocation();
+    expect(hooks.applyRelocateFolder).not.toHaveBeenCalled();
+  });
+
+  it('undoes the last relocation, puts the paths back and refreshes the health', async () => {
+    folderRelocation.last = { id: 7, old_root: '/old', new_root: '/new', tracks: 1, created_at: 't' };
+    row(0).filePath = '/new/a.mp3';
+    hooks.undoRelocateFolder.mockResolvedValue({
+      undone: { reverted: [{ track_id: 1, source_path: '/old/a.mp3' }], skipped: 0 },
+      health: health({ missing: [1, 2], checked_at_ms: 6000 }),
+    });
+    hooks.lastFolderRelocation.mockResolvedValue(null);
+
+    await undoFolderRelocation();
+
+    expect(hooks.undoRelocateFolder).toHaveBeenCalledWith(7);
+    expect(row(0).filePath).toBe('/old/a.mp3');
+    expect(fileStatus.byId).toEqual({ 1: 'missing', 2: 'missing' });
+    expect([folderRelocation.last, folderRelocation.oldRoot]).toEqual([null, '/old']);
   });
 });

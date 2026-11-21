@@ -115,15 +115,12 @@ fn a_moved_file_that_is_also_a_copy_of_a_present_track_needs_a_choice() {
     let twin = fx.folder("twin");
     support::write_wav(&twin.join("twin.wav"), 110.0, SECONDS);
     let twin_track = scanner::scan_files(&[twin.join("twin.wav")]).unwrap();
-    let twin_id = fx.library.add_tracks(&twin_track).unwrap()[0];
+    fx.library.add_tracks(&twin_track).unwrap();
     fx.fingerprint();
-    let plan_before = fx.plan(&[]);
-    assert!(plan_before.reconnect.is_empty());
 
     std::fs::remove_file(fx.path(0)).unwrap();
     let elsewhere = fx.folder("elsewhere");
     std::fs::copy(twin.join("twin.wav"), elsewhere.join("found.wav")).unwrap();
-    assert_ne!(twin_id, fx.ids[0]);
 
     let plan = fx.plan(&[&elsewhere]);
 

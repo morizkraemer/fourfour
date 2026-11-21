@@ -139,8 +139,6 @@ fn same_length(missing: &MissingTrack, file: &FileFacts) -> bool {
     file.size == missing.size && (missing.duration_secs <= 0.0 || (file.duration_secs - missing.duration_secs).abs() <= DURATION_TOLERANCE_SECS)
 }
 
-/// A missing track and a file agree on tags unless both have real ones and they differ: an untagged file
-/// gets its title from its name, which a rename changes.
 fn tags_agree(missing: &MissingTrack, file: &FileFacts) -> bool {
     missing.artist_key == PLACEHOLDER_ARTIST
         || file.artist_key == PLACEHOLDER_ARTIST
