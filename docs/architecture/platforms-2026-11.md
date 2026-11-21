@@ -80,6 +80,14 @@ Re-checked against the current tree: five jobs (linux, notices, webkit-smoke, ma
 
 Windows job risk added by this audit: the test module compile error above (fixed here). The remaining Windows risks are the ones `ci.md` already lists (MSVC link of sqlcipher/stretch, libcrypto location, NSIS paths).
 
+## First CI run (draft PR 40)
+
+Runs 44882486110, 44885111038, 44885693770 (xplat 5b8bdd5 to 8adf2de). Fixed and pushed: notices regenerated with the repo script; Windows weights test accepted only the Unix error text; vendored OpenSSL on Windows (Strawberry Perl via `OPENSSL_SRC_PERL`, NASM on PATH, choco OpenSSL step removed); `macos-14` is not offered to the repo (job cancelled in 1 s), now `macos-15`; chromium smoke races (`player-empty` readback warning, palette typing, menu arrows). Webkit smoke passes.
+
+Committed after 8adf2de, not pushed (push budget used): `ffmpeg` install on all three OS (the robustness fixtures encode mp3 and flac with it; `wrong_extension_and_unsupported_files` failed on Linux and macOS without it); `CaseInsensitiveResolver` now returns the on-disk spelling (on case-insensitive filesystems `exists()` is true for any spelling, so a Rekordbox import could add a second track next to one stored with other casing, the Windows failure of `existing_tracks_keep_user_edits...`); test fixes for path separators, deep path length on macOS (PATH_MAX 1024) and the OS-specific missing-file message.
+
+Open, not fixed: `tempo_tests::extreme_ratios_stay_finite_bounded_and_on_pitch` is 0.25 to 0.56 cents over the 5 cent limit on the macOS (arm64) and Windows runners and passes on Linux; Windows `volumes::tests::root_is_refused` and `stick_sync::capacity_of_a_fake_volume` (Mo's lane); Windows `playback::tests::channels_stay_paired_through_underruns` checked 0 frames; the Linux deb steps and the Windows NSIS bundle were never reached.
+
 ## Windows libcrypto (r65)
 
 SQLCipher links `libcrypto` dynamically on Windows, so an installed app needs `libcrypto-3-x64.dll`. Option, not applied because it adds a Cargo.lock entry and cannot be verified without Windows:

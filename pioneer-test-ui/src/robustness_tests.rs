@@ -303,6 +303,11 @@ fn is_root() -> bool {
     unsafe { geteuid() == 0 }
 }
 
+#[cfg(target_os = "macos")]
+const DEEP_PATH_BYTES: usize = 800;
+#[cfg(not(target_os = "macos"))]
+const DEEP_PATH_BYTES: usize = 3500;
+
 #[test]
 fn zero_byte_files_of_every_format_are_skipped_and_neighbours_import() {
     let f = fixture("zero");
@@ -443,7 +448,7 @@ fn unicode_long_and_odd_paths_import_and_analyse() {
     std::fs::write(unicode_dir.join("inside.wav"), wav).unwrap();
     names.push("inside.wav".into());
     let mut deep = root.clone();
-    while deep.as_os_str().len() < 3500 {
+    while deep.as_os_str().len() < DEEP_PATH_BYTES {
         deep = deep.join("d".repeat(100));
     }
     std::fs::create_dir_all(&deep).unwrap();

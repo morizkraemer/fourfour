@@ -841,7 +841,7 @@ fn a_missing_file_is_not_found_and_names_its_path() {
         .play(rig.events(), "/nonexistent/nope.mp3", 0, Some(1_000))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
-    assert_eq!(err.message, "Open /nonexistent/nope.mp3: No such file or directory (os error 2)");
+    assert!(err.message.starts_with("Open /nonexistent/nope.mp3: "), "{}", err.message);
     assert_eq!(err.path.as_deref(), Some("/nonexistent/nope.mp3"));
 }
 

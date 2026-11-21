@@ -33,7 +33,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config file curl wget \
             libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev libxdo-dev \
-            libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+            libayatana-appindicator3-dev librsvg2-dev libasound2-dev ffmpeg
 
       - uses: actions/setup-node@v4
         with:
@@ -250,6 +250,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: ffmpeg for the test fixtures
+        run: brew install ffmpeg
+
       - name: App install
         working-directory: app
         run: npm ci
@@ -333,6 +336,10 @@ jobs:
           echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
           [ -x /c/Strawberry/perl/bin/perl.exe ] || choco install strawberryperl --no-progress -y
           echo "OPENSSL_SRC_PERL=C:/Strawberry/perl/bin/perl.exe" >> "$GITHUB_ENV"
+
+      - name: ffmpeg for the test fixtures
+        run: |
+          command -v ffmpeg >/dev/null || choco install ffmpeg --no-progress -y
 
       - name: App install
         working-directory: app

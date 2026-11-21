@@ -848,7 +848,7 @@ mod tests {
         for name in ["Set/a.mp3", "Set/Openers/b.flac", "Set/notes.txt", "loose.wav", "readme.txt"] {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
-        let s = |p: &str| dir.join(p).to_string_lossy().into_owned();
+        let s = |p: &str| dir.join(p.split('/').collect::<PathBuf>()).to_string_lossy().into_owned();
         let dropped = dropped_audio(&[s("Set"), s("loose.wav"), s("readme.txt")]);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(dropped.len(), 2);
