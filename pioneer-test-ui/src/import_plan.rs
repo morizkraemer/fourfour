@@ -327,8 +327,13 @@ fn file_kind(ext: Option<&std::ffi::OsStr>) -> FileKind {
     }
 }
 
+const WINDOWS_SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+
 fn is_hidden(path: &Path) -> bool {
-    path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))
+    path.file_name().is_some_and(|n| {
+        let name = n.to_string_lossy();
+        name.starts_with('.') || WINDOWS_SYSTEM_FOLDERS.iter().any(|system| system.eq_ignore_ascii_case(&name))
+    })
 }
 
 enum EntryKind {
@@ -881,6 +886,16 @@ mod tests {
         expected.sort();
         assert_eq!(found, expected);
         assert_eq!(survey.groups[2].files.len(), 10);
+    }
+
+    #[test]
+    fn dot_files_and_windows_system_folders_are_hidden() {
+        for hidden in [".DS_Store", "._track.mp3", "$RECYCLE.BIN", "$Recycle.Bin", "System Volume Information", "system volume information"] {
+            assert!(is_hidden(Path::new("/Volumes/X").join(hidden).as_path()), "{hidden}");
+        }
+        for shown in ["Music", "System", "$Money.mp3", "Recycle Bin"] {
+            assert!(!is_hidden(Path::new("/Volumes/X").join(shown).as_path()), "{shown}");
+        }
     }
 
     #[test]

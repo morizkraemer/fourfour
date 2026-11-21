@@ -211,6 +211,14 @@ mod tests {
     }
 
     #[test]
+    fn remap_maps_windows_drive_paths_with_either_separator() {
+        let remap = PathRemap { from_prefix: "C:\\Music".into(), to_prefix: "/mnt/music".into() };
+        assert_eq!(remap.apply("C:/Music/House/a.mp3"), PathBuf::from("/mnt/music/House/a.mp3"));
+        assert_eq!(remap.apply("c:\\music\\House\\a.mp3"), PathBuf::from("/mnt/music/House/a.mp3"));
+        assert!(!remap.matches("D:/Music/a.mp3"));
+    }
+
+    #[test]
     fn remap_matches_across_unicode_normalisation() {
         let remap = PathRemap { from_prefix: "/Users/me/Mu\u{308}sik".into(), to_prefix: "/mnt".into() };
         assert!(remap.matches("/Users/me/M\u{fc}sik/a.mp3"));

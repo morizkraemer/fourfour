@@ -247,6 +247,13 @@ impl DetailWindows {
 mod tests {
     use super::*;
 
+    #[test]
+    fn free_space_of_an_existing_folder_is_known_and_a_missing_one_is_not() {
+        let dir = std::env::temp_dir();
+        assert!(free_space_of(&dir).is_some_and(|free| free > 0));
+        assert_eq!(free_space_of(&dir.join("ff-no-such-folder-xplat")), None);
+    }
+
     fn write_wav(path: &Path) {
         let rate = 44_100u32;
         let mut data = Vec::new();

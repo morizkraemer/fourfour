@@ -1,8 +1,8 @@
 # CI
 
-Workflow: `.github/workflows/ci.yml` (branch `r63-ci-v2`, rebuilt from `r63-ci` on current `ov-1028`, supersedes `r35-ci`, not yet pushed or run). Triggers: push to `master`, every pull request, manual run (`workflow_dispatch`, use it for a feature branch without a PR). Same-ref runs cancel older ones. No secrets, no signing, no publishing.
+Workflow: `.github/workflows/ci.yml` (ported from `r63-ci-v3` onto branch `xplat`, supersedes `r35-ci`, not yet pushed or run). Triggers: push to `master`, every pull request, manual run (`workflow_dispatch`, use it for a feature branch without a PR). Same-ref runs cancel older ones. No secrets, no signing, no publishing.
 
-Five jobs, no `fail-fast` coupling between them. Node 22, stable Rust, `tauri-cli ~2.10` (matches `tauri 2.10` in `Cargo.lock`).
+Five jobs, no `fail-fast` coupling between them. Node 22 (the node on dev is 22.23, vite 6 and vitest 5 accept it), stable Rust, cargo steps use `--locked`, `tauri-cli ~2.10` (matches `tauri 2.10` in `Cargo.lock`).
 
 ## Jobs
 
