@@ -4,6 +4,7 @@
   import StickSyncDialog from './StickSyncDialog.svelte';
   import StickDropTip from './StickDropTip.svelte';
   import LibraryHealthDialog from './LibraryHealthDialog.svelte';
+  import DuplicatesDialog from './DuplicatesDialog.svelte';
   import ImportDuplicatesDialog from './ImportDuplicatesDialog.svelte';
   import FileBlockedTip from './FileBlockedTip.svelte';
 </script>
@@ -13,5 +14,6 @@
 <StickSyncDialog />
 <StickDropTip />
 <LibraryHealthDialog />
+<DuplicatesDialog />
 <ImportDuplicatesDialog />
 <FileBlockedTip />

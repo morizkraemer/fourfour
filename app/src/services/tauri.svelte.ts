@@ -1687,6 +1687,89 @@ export async function relocateMissingInFolder(folder: string): Promise<{ report:
   return invoke('relocate_missing_in_folder', { folder });
 }
 
+export type DuplicateConfidence = 'exact_audio' | 'metadata_only';
+
+export interface DuplicateMember {
+  id: number;
+  artist: string;
+  title: string;
+  path: string;
+  format: string;
+  lossless: boolean;
+  bitrate: number;
+  sample_rate: number;
+  duration_secs: number;
+  file_size: number;
+  playlists: number;
+  cues: number;
+  date_added: string;
+  file_present: boolean;
+}
+
+export interface DuplicateGroup {
+  key: number;
+  confidence: DuplicateConfidence;
+  keeper_id: number;
+  reason: string;
+  members: DuplicateMember[];
+}
+
+export interface MergeRequest {
+  keeper_id: number;
+  remove_ids: number[];
+  require_identical: boolean;
+}
+
+export interface MergeReport {
+  merged: { merge_id: number; keeper_id: number; removed_ids: number[] }[];
+  failed: { keeper_id: number; message: string }[];
+}
+
+export interface ArchivedTrack {
+  id: number;
+  artist: string;
+  title: string;
+  path: string;
+  format: string;
+  lossless: boolean;
+  bitrate: number;
+  file_present: boolean;
+}
+
+export interface ArchivedMerge {
+  merge_id: number;
+  merged_at: string;
+  confidence: string;
+  keeper_id: number;
+  keeper_label: string | null;
+  tracks: ArchivedTrack[];
+}
+
+export interface RestoreOutcome {
+  merge_id: number;
+  restored_ids: number[];
+  keeper_reverted: boolean;
+}
+
+export async function listDuplicateGroups(): Promise<DuplicateGroup[]> {
+  if (useBrowserMocks()) return [];
+  return invoke<DuplicateGroup[]>('list_duplicate_groups');
+}
+
+export async function applyDuplicateMerges(requests: MergeRequest[]): Promise<MergeReport> {
+  if (useBrowserMocks()) return { merged: [], failed: [] };
+  return invoke<MergeReport>('apply_duplicate_merges', { requests });
+}
+
+export async function listDuplicateArchive(): Promise<ArchivedMerge[]> {
+  if (useBrowserMocks()) return [];
+  return invoke<ArchivedMerge[]>('list_duplicate_archive');
+}
+
+export async function restoreDuplicateMerge(mergeId: number): Promise<RestoreOutcome> {
+  return invoke<RestoreOutcome>('restore_duplicate_merge', { mergeId });
+}
+
 export async function locateTrackFile(trackId: number, path: string): Promise<{ relinked: Relinked; health: LibraryHealth }> {
   if (useBrowserMocks()) {
     mockHealth = {
