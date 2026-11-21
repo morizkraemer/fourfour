@@ -1,0 +1,39 @@
+{
+  "id": "q62-playlist-export",
+  "title": "Export a playlist or folder",
+  "question": "Right-click a playlist: Export playlist… (M3U8, CSV, text, Traktor NML, Rekordbox XML) or Copy tracklist. Folders get Export folder…. Lists only, no audio copied. Menu wording and placement after 'Put on stick' - OK? Rec: keep, one 'Export playlist…' entry with a format submenu.",
+  "url": "/lab.html",
+  "media": "/data/cards/q62-playlist-export/media/export-1-playlist-menu.png",
+  "gallery": [
+    {
+      "url": "/data/cards/q62-playlist-export/media/export-1-playlist-menu.png",
+      "label": "menu"
+    },
+    {
+      "url": "/data/cards/q62-playlist-export/media/export-2-format-submenu.png",
+      "label": "formats"
+    },
+    {
+      "url": "/data/cards/q62-playlist-export/media/export-3-folder-menu.png",
+      "label": "folder"
+    }
+  ],
+  "options": [
+    {
+      "key": "menu",
+      "label": "Playlist menu"
+    },
+    {
+      "key": "formats",
+      "label": "Formats"
+    },
+    {
+      "key": "folder",
+      "label": "Folder menu"
+    }
+  ],
+  "rank": 100,
+  "status": "backlog",
+  "round": 1,
+  "created": "2026-11-21T03:44:13.721Z"
+}
