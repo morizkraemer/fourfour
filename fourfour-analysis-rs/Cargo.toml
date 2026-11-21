@@ -38,3 +38,6 @@ features = ["std", "download-binaries", "copy-dylibs", "tls-native", "api-24", "
 [[bin]]
 name = "analyze-json"
 path = "src/bin/analyze_json.rs"
+
+[dev-dependencies]
+pioneer-library = { path = "../pioneer-library" }
