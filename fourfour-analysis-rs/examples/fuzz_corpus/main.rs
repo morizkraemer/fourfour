@@ -9,13 +9,15 @@ use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+mod craft;
+
 use fourfour_analysis::decode::decode_mono;
 use fourfour_analysis::service::{locate_models, Analyzer, PoolOptions};
 
 const BIG_ALLOC: usize = 2 << 30;
 const HANG_SECONDS: u64 = 30;
 const VM_LIMIT_KB: u64 = 16 << 20;
-const MUTATION_KINDS: [&str; 10] = ["truncate", "bitflips", "zero", "garbage", "header-len", "swap-ext", "cut-flip", "dup-chunk", "header-only", "delete"];
+const MUTATION_KINDS: [&str; 11] = ["intact", "truncate", "bitflips", "zero", "garbage", "header-len", "swap-ext", "cut-flip", "dup-chunk", "header-only", "delete"];
 const FORMATS: [(&str, &str); 6] = [("mp3", "mp3"), ("flac", "flac"), ("wav", "wav"), ("m4a", "m4a"), ("aiff", "aiff"), ("ogg", "ogg")];
 
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -90,6 +92,7 @@ impl Rng {
 
 struct Base {
     format: &'static str,
+    label: String,
     bytes: Vec<u8>,
 }
 
@@ -99,6 +102,7 @@ struct Case {
     mutation: usize,
     kind: &'static str,
     base_format: &'static str,
+    label: String,
     ext: &'static str,
     bytes: Vec<u8>,
 }
@@ -110,6 +114,7 @@ struct Settings {
     work: PathBuf,
     out: PathBuf,
     shards: usize,
+    profile: String,
 }
 
 fn mutate(bases: &[Base], settings_muts: usize, id: usize) -> Case {
@@ -122,6 +127,7 @@ fn mutate(bases: &[Base], settings_muts: usize, id: usize) -> Case {
     let mut ext = FORMATS.iter().find(|(f, _)| *f == base.format).unwrap().1;
     let len = bytes.len();
     match kind {
+        "intact" => {}
         "truncate" => bytes.truncate(rng.below(len)),
         "bitflips" => {
             for _ in 0..1 + rng.below(64) {
@@ -179,15 +185,15 @@ fn mutate(bases: &[Base], settings_muts: usize, id: usize) -> Case {
             bytes.drain(start..end);
         }
     }
-    Case { id, seed, mutation, kind, base_format: base.format, ext, bytes }
+    Case { id, seed, mutation, kind, base_format: base.format, label: base.label.clone(), ext, bytes }
 }
 
-fn ffmpeg(args: &[&str]) {
-    let status = Command::new("ffmpeg").args(["-y", "-loglevel", "error"]).args(args).status().expect("ffmpeg");
-    assert!(status.success(), "ffmpeg {args:?}");
+fn ffmpeg(args: &[&str]) -> bool {
+    Command::new("ffmpeg").args(["-y", "-loglevel", "error"]).args(args).status().map(|s| s.success()).unwrap_or(false)
 }
 
-fn first_file(dir: &Path, ext: &str) -> PathBuf {
+fn files(dir: &Path, ext: &str, count: usize) -> Vec<PathBuf> {
+    let mut found = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let mut entries: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().map(|e| e.path()).collect();
@@ -199,35 +205,119 @@ fn first_file(dir: &Path, ext: &str) -> PathBuf {
             if p.is_dir() {
                 stack.push(p);
             } else if p.extension().is_some_and(|e| e == ext) {
-                return p;
+                found.push(p);
             }
+        }
+        if found.len() >= count {
+            break;
         }
     }
-    panic!("no .{ext} under {}", dir.display());
+    found.truncate(count);
+    assert!(!found.is_empty(), "no .{ext} under {}", dir.display());
+    found
 }
 
-fn build_bases(work: &Path) -> Vec<Base> {
-    let dir = work.join("bases");
-    std::fs::create_dir_all(&dir).unwrap();
-    let datasets = Path::new(&std::env::var("HOME").unwrap()).join(".cache/ff-datasets");
-    let sources = [first_file(&datasets.join("giantsteps-plus-key/audio"), "mp3"), first_file(&datasets.join("fsl10k/audio"), "wav")];
-    let mut bases = Vec::new();
-    for (s, source) in sources.iter().enumerate() {
-        for (format, ext) in FORMATS {
-            let out = dir.join(format!("s{s}.{ext}"));
-            if !out.exists() {
-                let mut args = vec!["-ss", "20", "-t", "6", "-i", source.to_str().unwrap(), "-ac", "2", "-ar", "44100", "-metadata", "title=Fuzz Base", "-metadata", "artist=Fuzz Artist"];
-                match format {
-                    "mp3" => args.extend(["-c:a", "libmp3lame", "-b:a", "128k"]),
-                    "m4a" => args.extend(["-c:a", "aac", "-b:a", "128k"]),
-                    "ogg" => args.extend(["-c:a", "libvorbis"]),
-                    _ => {}
-                }
-                args.push(out.to_str().unwrap());
-                ffmpeg(&args);
-            }
-            bases.push(Base { format, bytes: std::fs::read(&out).unwrap() });
+fn codec_args(format: &str) -> Vec<&'static str> {
+    match format {
+        "mp3" => vec!["-c:a", "libmp3lame", "-b:a", "128k"],
+        "m4a" => vec!["-c:a", "aac", "-b:a", "128k"],
+        "ogg" => vec!["-c:a", "libvorbis"],
+        _ => vec![],
+    }
+}
+
+fn encode(work_dir: &Path, name: &str, format: &str, ext: &str, input: &[&str], shape: &[&str]) -> Option<Vec<u8>> {
+    let out = work_dir.join(format!("{name}.{ext}"));
+    if !out.exists() {
+        let mut args: Vec<&str> = input.to_vec();
+        args.extend_from_slice(shape);
+        args.extend(["-metadata", "title=Fuzz Base", "-metadata", "artist=Fuzz Artist"]);
+        args.extend(codec_args(format));
+        args.push(out.to_str().unwrap());
+        if !ffmpeg(&args) {
+            let _ = std::fs::remove_file(&out);
+            return None;
         }
+    }
+    std::fs::read(&out).ok()
+}
+
+fn datasets() -> PathBuf {
+    Path::new(&std::env::var("HOME").unwrap()).join(".cache/ff-datasets")
+}
+
+fn build_bases(work: &Path, profile: &str) -> Vec<Base> {
+    let dir = work.join(format!("bases-{profile}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mp3s = files(&datasets().join("giantsteps-plus-key/audio"), "mp3", 8);
+    let wavs = files(&datasets().join("fsl10k/audio"), "wav", 2);
+    let mut bases = Vec::new();
+    let mut push = |format: &'static str, label: String, bytes: Vec<u8>| bases.push(Base { format, label, bytes });
+    match profile {
+        "base" => {
+            for (s, source) in [&mp3s[0], &wavs[0]].into_iter().enumerate() {
+                for (format, ext) in FORMATS {
+                    let input = ["-ss", "20", "-t", "6", "-i", source.to_str().unwrap()];
+                    let bytes = encode(&dir, &format!("s{s}"), format, ext, &input, &["-ac", "2", "-ar", "44100"]).unwrap();
+                    push(format, format!("{format}-s{s}"), bytes);
+                }
+            }
+        }
+        "hostile" => {
+            let source = mp3s[0].to_str().unwrap();
+            let input = ["-ss", "20", "-t", "6", "-i", source];
+            let shape = ["-ac", "2", "-ar", "44100"];
+            let get = |format: &str, ext: &str| encode(&dir, &format!("h-{format}"), format, ext, &input, &shape).unwrap();
+            let hostile: [(&'static str, Vec<craft::Variant>); 6] = [
+                ("mp3", craft::mp3_variants(&get("mp3", "mp3"))),
+                ("flac", craft::flac_variants(&get("flac", "flac"))),
+                ("wav", craft::wav_variants(&get("wav", "wav"))),
+                ("aiff", craft::aiff_variants(&get("aiff", "aiff"))),
+                ("m4a", craft::m4a_variants(&get("m4a", "m4a"))),
+                ("ogg", craft::ogg_variants(&get("ogg", "ogg"))),
+            ];
+            for (format, variants) in hostile {
+                for v in variants {
+                    push(format, v.label, v.bytes);
+                }
+            }
+        }
+        "odd" => {
+            let source = mp3s[1].to_str().unwrap();
+            let input = ["-ss", "20", "-t", "30", "-i", source];
+            for (format, ext) in FORMATS {
+                for (rate, channels) in [("8000", "1"), ("192000", "2"), ("48000", "6"), ("44100", "1"), ("11025", "2"), ("96000", "1")] {
+                    if let Some(bytes) = encode(&dir, &format!("odd-{rate}-{channels}"), format, ext, &input, &["-ac", channels, "-ar", rate]) {
+                        push(format, format!("{format}-{rate}hz-{channels}ch"), bytes);
+                    }
+                }
+            }
+        }
+        "long" => {
+            let excerpt = dir.join("excerpt.wav");
+            if !excerpt.exists() {
+                assert!(ffmpeg(&["-ss", "20", "-t", "30", "-i", mp3s[2].to_str().unwrap(), "-ac", "2", "-ar", "44100", excerpt.to_str().unwrap()]));
+            }
+            let input = ["-stream_loop", "-1", "-i", excerpt.to_str().unwrap(), "-t", "900"];
+            for (format, ext) in FORMATS {
+                let shape: &[&str] = if format == "wav" || format == "aiff" { &["-ac", "1", "-ar", "16000"] } else { &["-ac", "2", "-ar", "44100"] };
+                if let Some(bytes) = encode(&dir, "long", format, ext, &input, shape) {
+                    push(format, format!("{format}-15min"), bytes);
+                }
+            }
+        }
+        "real" => {
+            let sources: Vec<&PathBuf> = mp3s.iter().take(6).chain(wavs.iter()).collect();
+            for (s, source) in sources.into_iter().enumerate() {
+                for (format, ext) in FORMATS {
+                    let input = ["-i", source.to_str().unwrap()];
+                    if let Some(bytes) = encode(&dir, &format!("r{s}"), format, ext, &input, &["-ac", "2", "-ar", "44100"]) {
+                        push(format, format!("{format}-real{s}"), bytes);
+                    }
+                }
+            }
+        }
+        other => panic!("unknown profile {other}"),
     }
     bases
 }
@@ -248,19 +338,32 @@ fn guard<T>(stage: &str, problems: &mut Vec<String>, work: impl FnOnce() -> T) -
     }
 }
 
+fn run_stage(stages: &mut Vec<(u128, f64)>, name: &str, problems: &mut Vec<String>, work: &mut dyn FnMut(&mut Vec<String>)) {
+    let base = LIVE.load(Ordering::Relaxed);
+    PEAK.store(base, Ordering::Relaxed);
+    let t = Instant::now();
+    work(problems);
+    let mb = PEAK.load(Ordering::Relaxed).saturating_sub(base) as f64 / 1048576.0;
+    if mb >= (BIG_ALLOC >> 20) as f64 {
+        problems.push(format!("ALLOC {name} peak {mb:.0} MB"));
+    }
+    stages.push((t.elapsed().as_millis(), mb));
+}
+
 fn child(settings: &Settings, start: usize, end: usize) {
     std::panic::set_hook(Box::new(|info| {
+        eprintln!("PANIC {info}");
         if let Ok(mut last) = LAST_PANIC.lock() {
             *last = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
         }
     }));
-    let bases = build_bases(&settings.work);
+    let bases = build_bases(&settings.work, &settings.profile);
     let analyzer = (settings.analyze_every > 0).then(|| {
         let models = locate_models(None).expect("model weights");
         Analyzer::load(&models, PoolOptions::default()).unwrap()
     });
     let library = pioneer_library::LocalLibrary::open_in_memory().unwrap();
-    let dir = settings.work.join(format!("case-{start}"));
+    let dir = settings.work.join(format!("case-{}-{start}", settings.profile));
     std::fs::create_dir_all(&dir).unwrap();
     let out = std::io::stdout();
     for id in start..end {
@@ -269,12 +372,12 @@ fn child(settings: &Settings, start: usize, end: usize) {
         std::fs::write(&path, &case.bytes).unwrap();
         writeln!(out.lock(), "BEGIN {id}").unwrap();
         out.lock().flush().unwrap();
-        let baseline = LIVE.load(Ordering::Relaxed);
-        PEAK.store(baseline, Ordering::Relaxed);
         let started = Instant::now();
         let mut problems = Vec::new();
         let mut clean_errors = 0;
-        let decoded = guard("decode", &mut problems, || decode_mono(&path));
+        let mut stages = Vec::new();
+        let mut decoded = None;
+        run_stage(&mut stages, "decode", &mut problems, &mut |problems| decoded = guard("decode", problems, || decode_mono(&path)));
         match &decoded {
             Some(Err(_)) => clean_errors += 1,
             Some(Ok(m)) if m.samples.is_empty() || m.rate == 0 || m.gapless.end > m.samples.len() || m.gapless.start > m.gapless.end => {
@@ -282,27 +385,36 @@ fn child(settings: &Settings, start: usize, end: usize) {
             }
             _ => {}
         }
-        match guard("tags", &mut problems, || pioneer_usb_writer::scanner::read_track_metadata(&path, 1)) {
-            Some(Ok(track)) => {
-                guard("import", &mut problems, || library.add_track(&track));
+        let mut tags = None;
+        run_stage(&mut stages, "tags", &mut problems, &mut |problems| tags = guard("tags", problems, || pioneer_usb_writer::scanner::read_track_metadata(&path, 1)));
+        match tags {
+            Some(Ok(track)) => run_stage(&mut stages, "import", &mut problems, &mut |problems| {
+                guard("import", problems, || library.add_track(&track));
+            }),
+            Some(Err(_)) => {
+                clean_errors += 1;
+                stages.push((0, 0.0));
             }
-            Some(Err(_)) => clean_errors += 1,
-            None => {}
+            None => stages.push((0, 0.0)),
         }
         guard("status", &mut problems, || pioneer_library::file_status(&path));
+        let mut analysis_mb = 0.0;
         if let (Some(analyzer), true, Some(Ok(_))) = (&analyzer, id % settings.analyze_every.max(1) == 0, &decoded) {
-            if let Some(Err(_)) = guard("analyze", &mut problems, || analyzer.analyze(&path)) {
-                clean_errors += 1;
-            }
+            let before = stages.len();
+            run_stage(&mut stages, "analyze", &mut problems, &mut |problems| {
+                if let Some(Err(_)) = guard("analyze", problems, || analyzer.analyze(&path)) {
+                    clean_errors += 1;
+                }
+            });
+            analysis_mb = stages[before].1;
         }
         drop(decoded);
-        let peak_mb = PEAK.load(Ordering::Relaxed).saturating_sub(baseline) as f64 / 1048576.0;
-        if peak_mb >= (BIG_ALLOC >> 20) as f64 {
-            problems.push(format!("ALLOC peak {peak_mb:.0} MB"));
-        }
+        let peak_mb = stages.iter().map(|s| s.1).fold(analysis_mb, f64::max);
+        let rss_mb = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find(|l| l.starts_with("VmHWM")).and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())).unwrap_or(0.0) / 1024.0;
+        let stage_text: Vec<String> = stages.iter().take(3).map(|(ms, mb)| format!("{ms} {mb:.0}")).collect();
         let outcome = if problems.is_empty() { if clean_errors > 0 { "err" } else { "ok" } } else { "FAIL" };
         let detail = problems.join(" | ").replace(['\t', '\n'], " ");
-        writeln!(out.lock(), "END {id} {outcome} {} {peak_mb:.0} {detail}", started.elapsed().as_millis()).unwrap();
+        writeln!(out.lock(), "END {id} {outcome} {} {peak_mb:.0} {} {rss_mb:.0} {detail}", started.elapsed().as_millis(), stage_text.join(" ")).unwrap();
         out.lock().flush().unwrap();
         let _ = std::fs::remove_file(&path);
     }
@@ -313,6 +425,7 @@ struct Row {
     outcome: String,
     ms: u128,
     peak_mb: String,
+    stages: Vec<f64>,
     detail: String,
 }
 
@@ -320,10 +433,10 @@ fn run_shard(settings: &Settings, start: usize, end: usize) -> Vec<Row> {
     let exe = std::env::current_exe().unwrap();
     let mut rows = Vec::new();
     let mut next = start;
-    let log = settings.work.join(format!("child-{start}.log"));
+    let log = settings.work.join(format!("child-{}-{start}.log", settings.profile));
     while next < end {
         let stderr = std::fs::OpenOptions::new().create(true).append(true).open(&log).unwrap();
-        let script = format!("ulimit -v {VM_LIMIT_KB}; exec nice -n 10 \"$0\" child --seeds {} --muts {} --analyze-every {} --work {} --range {next} {end}", settings.seeds, settings.muts, settings.analyze_every, settings.work.display());
+        let script = format!("ulimit -v {VM_LIMIT_KB}; exec nice -n 10 \"$0\" child --seeds {} --muts {} --analyze-every {} --profile {} --work {} --range {next} {end}", settings.seeds, settings.muts, settings.analyze_every, settings.profile, settings.work.display());
         let mut proc = Command::new("sh").arg("-c").arg(script).arg(&exe).stdout(Stdio::piped()).stderr(stderr).spawn().unwrap();
         let (tx, rx) = mpsc::channel();
         let stdout = proc.stdout.take().unwrap();
@@ -339,15 +452,16 @@ fn run_shard(settings: &Settings, start: usize, end: usize) -> Vec<Row> {
         loop {
             match rx.recv_timeout(Duration::from_secs(HANG_SECONDS)) {
                 Ok(line) => {
-                    let mut parts = line.splitn(6, ' ');
+                    let mut parts = line.splitn(13, ' ');
                     match (parts.next(), parts.next().and_then(|v| v.parse::<usize>().ok())) {
                         (Some("BEGIN"), Some(id)) => current = Some(id),
                         (Some("END"), Some(id)) => {
                             let outcome = parts.next().unwrap_or("").to_string();
                             let ms = parts.next().and_then(|v| v.parse().ok()).unwrap_or(0);
                             let peak_mb = parts.next().unwrap_or("").to_string();
+                            let numbers: Vec<f64> = (0..7).map(|_| parts.next().and_then(|v| v.parse().ok()).unwrap_or(0.0)).collect();
                             let detail = parts.next().unwrap_or("").to_string();
-                            rows.push(Row { id, outcome, ms, peak_mb, detail });
+                            rows.push(Row { id, outcome, ms, peak_mb, stages: numbers, detail });
                             current = None;
                             next = id + 1;
                         }
@@ -370,7 +484,7 @@ fn run_shard(settings: &Settings, start: usize, end: usize) -> Vec<Row> {
             Some((id, kind)) => {
                 let tail = std::fs::read_to_string(&log).unwrap_or_default().lines().rev().take(3).collect::<Vec<_>>().join(" / ");
                 let detail = format!("{kind} {:?} {tail}", status).replace(['\t', '\n'], " ");
-                rows.push(Row { id, outcome: kind.into(), ms: if kind == "HANG" { HANG_SECONDS as u128 * 1000 } else { 0 }, peak_mb: String::new(), detail });
+                rows.push(Row { id, outcome: kind.into(), ms: if kind == "HANG" { HANG_SECONDS as u128 * 1000 } else { 0 }, peak_mb: String::new(), stages: vec![0.0; 7], detail });
                 next = id + 1;
             }
             None if next < end && current.is_none() => {
@@ -392,7 +506,7 @@ fn signature(detail: &str) -> String {
 
 fn driver(settings: Settings) {
     std::fs::create_dir_all(&settings.work).unwrap();
-    let bases = build_bases(&settings.work);
+    let bases = build_bases(&settings.work, &settings.profile);
     let total = settings.seeds * settings.muts;
     let per = total.div_ceil(settings.shards);
     let settings = std::sync::Arc::new(settings);
@@ -405,14 +519,14 @@ fn driver(settings: Settings) {
         .collect();
     let mut rows: Vec<Row> = handles.into_iter().flat_map(|h| h.join().unwrap()).collect();
     rows.sort_by_key(|r| r.id);
-    let fails_dir = settings.work.join("fails");
+    let fails_dir = settings.work.join(format!("fails-{}", settings.profile));
     std::fs::create_dir_all(&fails_dir).unwrap();
-    let mut tsv = String::from("id\tseed\tmut\tkind\tbase\text\toutcome\tms\tpeak_mb\tdetail\n");
+    let mut tsv = String::from("id\tseed\tmut\tkind\tbase\text\toutcome\tms\tpeak_mb\tdecode_ms\tdecode_mb\ttags_ms\ttags_mb\timport_ms\timport_mb\trss_mb\tdetail\n");
     let mut by_kind: BTreeMap<(String, &str), usize> = BTreeMap::new();
     let mut by_signature: BTreeMap<String, (usize, usize)> = BTreeMap::new();
     for row in &rows {
         let case = mutate(&bases, settings.muts, row.id);
-        tsv.push_str(&format!("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", row.id, case.seed, case.mutation, case.kind, case.base_format, case.ext, row.outcome, row.ms, row.peak_mb, row.detail));
+        tsv.push_str(&format!("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n", row.id, case.seed, case.mutation, case.kind, case.label, case.ext, row.outcome, row.ms, row.peak_mb, row.stages.iter().map(|v| format!("{v:.0}")).collect::<Vec<_>>().join("\t"), row.detail));
         let kind = if row.outcome == "FAIL" {
             if row.detail.contains("PANIC") { "panic" } else if row.detail.contains("ALLOC") { "alloc" } else { "bad" }
         } else if row.outcome == "HANG" || row.outcome == "CRASH" {
@@ -429,6 +543,9 @@ fn driver(settings: Settings) {
     for ((_, kind), n) in &by_kind {
         *totals.entry(kind).or_default() += n;
     }
+    let max_of = |i: usize| rows.iter().map(|r| r.stages[i]).fold(0.0, f64::max);
+    println!("max decode {:.0} ms {:.0} MB | tags {:.0} ms {:.0} MB | import {:.0} ms {:.0} MB | process peak RSS {:.0} MB | slowest case {} ms", max_of(0), max_of(1), max_of(2), max_of(3), max_of(4), max_of(5), max_of(6), rows.iter().map(|r| r.ms).max().unwrap_or(0));
+    println!("tags >= 256 MB: {} | tags or import >= 5 s: {} | case >= 10 s: {}", rows.iter().filter(|r| r.stages[3] >= 256.0).count(), rows.iter().filter(|r| r.stages[2] >= 5000.0 || r.stages[4] >= 5000.0).count(), rows.iter().filter(|r| r.ms >= 10_000).count());
     println!("cases run: {} of {} in {:.0}s", rows.len(), total, started.elapsed().as_secs_f64());
     println!("failures by kind: {totals:?}");
     println!("failures by format and kind: {by_kind:?}");
@@ -450,8 +567,15 @@ fn main() {
         work: PathBuf::from(flag("--work", &format!("{home}/.cache/hc-L5-work"))),
         out: PathBuf::from(flag("--out", &format!("{home}/.cache/hc-L5-work/results.tsv"))),
         shards: flag("--shards", "3").parse().unwrap(),
+        profile: flag("--profile", "base"),
     };
-    if args.first().map(String::as_str) == Some("child") {
+    if args.first().map(String::as_str) == Some("dump") {
+        let bases = build_bases(&settings.work, &settings.profile);
+        let case = mutate(&bases, settings.muts, args[1].parse().unwrap());
+        let out = Path::new(&args[2]).join(format!("case.{}", case.ext));
+        std::fs::write(&out, &case.bytes).unwrap();
+        println!("{} {} {}", out.display(), case.label, case.kind);
+    } else if args.first().map(String::as_str) == Some("child") {
         let at = args.iter().position(|a| a == "--range").unwrap();
         child(&settings, args[at + 1].parse().unwrap(), args[at + 2].parse().unwrap());
     } else {
