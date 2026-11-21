@@ -823,3 +823,4 @@
 2026-11-21 09:27 orchestrator ui-dupes round 3: copies table like the import-duplicates dialog, keeper = app radio + selected-row tint, Skip/Merge full-strength; reconnect = 3 setting rows (1 primary, 2 outlined); smoke 198 pass; cards open [branch ui-dupes-r2 0f70ed3]
 2026-11-21 09:46 orchestrator Merlin round 3: reconnect three options kept (locked); duplicates still unclear which buttons belong to which group -> round 4 with 2 variants to pick
 2026-11-21 09:55 orchestrator ui-dupes round 4 posted: A panel per song (ui-dupes-r2 fce313d, rec), B header band (ui-dupes-r4-b); pick on card q60-duplicates
+2026-11-21 10:00 orchestrator Merlin rejected duplicates round 4 (unchecked shots, misaligned headers). Redesign handed to a Fable seat agent (branch ui-dupes-r5) with full feedback history; lesson saved to memory
