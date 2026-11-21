@@ -35,6 +35,10 @@ async function tabTo(page: Page, matches: () => ReturnType<Page['locator']>) {
   await expect(matches()).toBeFocused();
 }
 
+function framesPassed(page: Page) {
+  return page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
 test.describe('library list', () => {
   test('F6 skips the collapsed search field in a narrow window and still reaches the list', async ({ smoke: { page } }) => {
     await page.setViewportSize({ width: 900, height: 700 });
@@ -100,7 +104,7 @@ test.describe('library list', () => {
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu).toBeFocused();
-    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await framesPassed(page);
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('ArrowUp');
@@ -185,6 +189,7 @@ test.describe('sidebar', () => {
     await page.keyboard.press('Shift+F10');
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
+    await framesPassed(page);
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('Escape');

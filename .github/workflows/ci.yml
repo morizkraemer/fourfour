@@ -230,7 +230,7 @@ jobs:
 
   macos:
     name: macos (arm64 dmg, coreml)
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -326,11 +326,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: NASM for the vendored OpenSSL build
+      - name: NASM and Strawberry Perl for the vendored OpenSSL build
         run: |
           nasm="/c/Program Files/NASM"
           [ -x "$nasm/nasm.exe" ] || choco install nasm --no-progress -y
           echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
+          [ -x /c/Strawberry/perl/bin/perl.exe ] || choco install strawberryperl --no-progress -y
+          echo "OPENSSL_SRC_PERL=C:/Strawberry/perl/bin/perl.exe" >> "$GITHUB_ENV"
 
       - name: App install
         working-directory: app
