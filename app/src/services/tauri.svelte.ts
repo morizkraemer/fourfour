@@ -2,6 +2,7 @@ import { invoke, toCommandError, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { pathBaseName } from '../lib/pathName.ts';
+import { exportFormatInfo, type ExportFormat, type ExportReport } from '../lib/playlistExport.ts';
 import { decodeArtworkBatch } from '../lib/artworkBatch.ts';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
@@ -264,6 +265,29 @@ export async function pickBackupFile(): Promise<string | null> {
 
 export async function pickBackupDestination(defaultPath: string): Promise<string | null> {
   return (await dialogSave({ defaultPath, filters: [{ name: 'Library backup', extensions: ['gz'] }] })) ?? null;
+}
+
+export async function pickExportDestination(defaultName: string, extension: string, filterName: string): Promise<string | null> {
+  if (useBrowserMocks()) {
+    const path = prompt('Enter mock export path:', defaultName);
+    return path || null;
+  }
+  return (await dialogSave({ defaultPath: defaultName, filters: [{ name: filterName, extensions: [extension] }] })) ?? null;
+}
+
+export async function playlistExportFileName(playlistId: number, format: ExportFormat): Promise<string> {
+  if (useBrowserMocks()) return `Playlist ${new Date().toISOString().slice(0, 10)}.${exportFormatInfo(format).extension}`;
+  return await invoke<string>('playlist_export_file_name', { playlistId, format });
+}
+
+export async function exportPlaylist(playlistId: number, format: ExportFormat, destPath: string): Promise<ExportReport> {
+  if (useBrowserMocks()) return { written: 0, missing: 0, missing_examples: [] };
+  return await invoke<ExportReport>('export_playlist', { playlistId, format, destPath });
+}
+
+export async function playlistTracklist(playlistId: number): Promise<string> {
+  if (useBrowserMocks()) return '';
+  return await invoke<string>('playlist_tracklist', { playlistId });
 }
 
 export interface BackupSizes {
