@@ -1,5 +1,5 @@
 {
-  "about": "Budgets for scripts/perf.sh --size. now = measured on the dev box (see docs/architecture/perf-run-2026-11.md); a run passes a metric when it is within tolerance of now. target = where the speed work should get to; why = one line on what makes the target reachable.",
+  "about": "Budgets for scripts/perf.sh --size. now = measured on the dev box (see docs/architecture/perf-run-2026-11.md; startup rows, backend load_state warm and import UI click to rows at 10k and 25k rebaselined 2026-11-21 after the q50 mock stopped carrying the payload in its init script, see docs/analysis/perf-startup.md); a run passes a metric when it is within tolerance of now. target = where the speed work should get to; why = one line on what makes the target reachable.",
   "tolerance": 0.25,
   "metrics": [
     {
@@ -8,8 +8,8 @@
       "unit": "ms",
       "path": "derived.all.startup cold first row ms",
       "now": {
-        "10k": 1085,
-        "25k": 2212,
+        "10k": 616,
+        "25k": 843,
         "50k": null
       },
       "target": {
@@ -25,8 +25,8 @@
       "unit": "ms",
       "path": "derived.all.startup cold interactive ms",
       "now": {
-        "10k": 1319,
-        "25k": 2815,
+        "10k": 794,
+        "25k": 1037,
         "50k": null
       },
       "target": {
@@ -42,8 +42,8 @@
       "unit": "ms",
       "path": "derived.all.startup warm first row ms",
       "now": {
-        "10k": 694,
-        "25k": 1660,
+        "10k": 379,
+        "25k": 475,
         "50k": null
       },
       "target": {
@@ -59,8 +59,8 @@
       "unit": "ms",
       "path": "derived.all.startup warm interactive ms",
       "now": {
-        "10k": 748,
-        "25k": 1748,
+        "10k": 550,
+        "25k": 640,
         "50k": null
       },
       "target": {
@@ -76,8 +76,8 @@
       "unit": "ms",
       "path": "startup.startup_backend_warm.load_state_ms",
       "now": {
-        "10k": 108,
-        "25k": 248,
+        "10k": 65,
+        "25k": 107,
         "50k": null
       },
       "target": {
@@ -281,8 +281,8 @@
       "unit": "ms",
       "path": "import.frontend.import ui click to rows ms",
       "now": {
-        "10k": 38.7,
-        "25k": 806,
+        "10k": 73.6,
+        "25k": 113.6,
         "50k": null
       },
       "target": {
