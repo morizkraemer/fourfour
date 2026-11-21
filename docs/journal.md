@@ -824,3 +824,4 @@
 2026-11-21 09:46 orchestrator Merlin round 3: reconnect three options kept (locked); duplicates still unclear which buttons belong to which group -> round 4 with 2 variants to pick
 2026-11-21 09:55 orchestrator ui-dupes round 4 posted: A panel per song (ui-dupes-r2 fce313d, rec), B header band (ui-dupes-r4-b); pick on card q60-duplicates
 2026-11-21 10:00 orchestrator Merlin rejected duplicates round 4 (unchecked shots, misaligned headers). Redesign handed to a Fable seat agent (branch ui-dupes-r5) with full feedback history; lesson saved to memory
+2026-11-21 10:19 orchestrator Fable duplicates r5: one inset list like Library check, tick per song + keeper radio with plain-language copy lines, one footer 'Merge N songs', short distinguishing paths, 620 px dialog; per-song Skip/Merge removed; smoke 198 pass [branch ui-dupes-r5 0aa6f3a]
