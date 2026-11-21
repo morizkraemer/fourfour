@@ -412,6 +412,12 @@ export function installTauriMock(initial: LoadedState) {
         lastBackup = { path: args.path, at_ms: Date.now(), bytes: 38_000_000, includes_audio: args.includeAudio };
         return lastBackup;
       }
+      case 'playlist_export_file_name':
+        return `Peak Time 2026-11-21.${({ m3u8: 'm3u8', csv: 'csv', text: 'txt', traktor_nml: 'nml', rekordbox_xml: 'xml' } as Record<string, string>)[args.format]}`;
+      case 'export_playlist':
+        return { written: 3, missing: 1, missing_examples: ['/Music/gone.mp3'] };
+      case 'playlist_tracklist':
+        return 'Artist One - Track One\nArtist Two - Track Two\n';
       case 'read_backup':
         if (!String(args.path).endsWith('.tar.gz')) throw 'This file is not a library backup';
         return {
