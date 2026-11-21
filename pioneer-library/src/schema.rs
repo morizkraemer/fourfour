@@ -135,6 +135,30 @@ const PENDING_ARTWORK_DDL: &str = "CREATE TABLE IF NOT EXISTS pending_artwork (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE
 );";
 
+/// Additive, no version bump: merges of duplicate entries into a keeper, and the rows, as a snapshot, of the entries
+/// merged away, so a merge can be undone with the same ids.
+const DUPLICATE_ARCHIVE_DDL: &str = "
+CREATE TABLE IF NOT EXISTS duplicate_merges (
+    id             INTEGER PRIMARY KEY,
+    keeper_id      INTEGER NOT NULL,
+    confidence     TEXT    NOT NULL,
+    merged_at      TEXT    NOT NULL,
+    comment_before TEXT,
+    comment_after  TEXT,
+    keeper_digest  TEXT,
+    playlist_adds  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS archived_tracks (
+    track_id   INTEGER PRIMARY KEY,
+    merge_id   INTEGER NOT NULL REFERENCES duplicate_merges(id) ON DELETE CASCADE,
+    snapshot   TEXT    NOT NULL,
+    cover_hash TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_archived_tracks_merge ON archived_tracks(merge_id);
+CREATE INDEX IF NOT EXISTS idx_archived_tracks_cover ON archived_tracks(cover_hash);
+";
+
 pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .context("Failed to set WAL journal mode")?;
@@ -194,6 +218,7 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
         }
     }
     conn.execute_batch(PENDING_ARTWORK_DDL).context("Failed to create the pending artwork queue")?;
+    conn.execute_batch(DUPLICATE_ARCHIVE_DDL).context("Failed to create the duplicate archive")?;
 
     Ok(())
 }

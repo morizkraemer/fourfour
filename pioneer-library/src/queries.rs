@@ -292,12 +292,12 @@ pub fn select_artwork_hashes_of(conn: &Connection, track_ids: &[i64]) -> Result<
 
 pub fn cover_is_referenced(conn: &Connection, cover_hash: &str) -> Result<bool> {
     Ok(conn
-        .prepare_cached("SELECT EXISTS (SELECT 1 FROM artwork WHERE cover_hash = ?1)")?
+        .prepare_cached("SELECT EXISTS (SELECT 1 FROM artwork WHERE cover_hash = ?1) OR EXISTS (SELECT 1 FROM archived_tracks WHERE cover_hash = ?1)")?
         .query_row([cover_hash], |row| row.get(0))?)
 }
 
 pub fn select_referenced_covers(conn: &Connection) -> Result<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare("SELECT DISTINCT cover_hash FROM artwork WHERE cover_hash IS NOT NULL")?;
+    let mut stmt = conn.prepare("SELECT cover_hash FROM artwork WHERE cover_hash IS NOT NULL UNION SELECT cover_hash FROM archived_tracks WHERE cover_hash IS NOT NULL")?;
     let rows = stmt.query_map([], |row| row.get(0))?;
     rows.collect::<Result<_, _>>().map_err(Into::into)
 }
