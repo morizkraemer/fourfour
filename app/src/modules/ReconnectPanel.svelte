@@ -1,10 +1,11 @@
 <script>
-  import { Button, Icon, StatusDot } from '$ds';
+  import { Button, ContextMenu, Icon, StatusDot } from '$ds';
   import { library } from '../stores/library.svelte.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import {
     reconnectState,
     folderRelocation,
+    relocateMissing,
     findMovedFiles,
     chooseReconnect,
     openFolderRelocation,
@@ -22,6 +23,19 @@
   let choices = $derived(plan ? plan.needs_choice.filter((c) => fileStatus.byId[c.track_id] === 'missing') : []);
   let shownChoices = $derived(choices.slice(0, MAX_CHOICES));
   let busy = $derived(reconnectState.busy || folderRelocation.busy);
+  let moreMenu = $state({ open: false, x: 0, y: 0 });
+
+  function openMoreMenu(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    moreMenu = { open: true, x: rect.left, y: rect.bottom + 2 };
+  }
+
+  function moreItems() {
+    return [
+      { label: 'Relocate missing…', disabled: busy || fileStatus.relocating, onClick: () => void relocateMissing() },
+      { label: 'Relocate folder…', disabled: busy, onClick: () => void openFolderRelocation() },
+    ];
+  }
 
   function trackName(id) {
     const t = library.tracks.find((track) => track.id === id);
@@ -39,8 +53,11 @@
   {#if fileStatus.missing > 0}
     <div class="ff-reconnect__buttons">
       <Button label="Find moved files…" size="small" disabled={busy} onclick={() => void findMovedFiles()} />
-      <Button label="Relocate folder…" size="small" variant="ghost" disabled={busy} onclick={() => void openFolderRelocation()} />
+      <Button label="More" icon="chevron-down" size="small" variant="ghost" disabled={busy} onclick={openMoreMenu} />
     </div>
+  {/if}
+  {#if moreMenu.open}
+    <ContextMenu open x={moreMenu.x} y={moreMenu.y} items={moreItems()} onClose={() => (moreMenu = { ...moreMenu, open: false })} />
   {/if}
 
   {#if plan}

@@ -5,7 +5,6 @@
   import {
     relocateResult,
     closeHealthDialog,
-    relocateMissing,
     locateTrack,
     checkLibraryAgain,
     showProblemTracks,
@@ -53,7 +52,6 @@
             <span class="ff-health__text">
               {fileStatus.missing} {fileStatus.missing === 1 ? 'file is' : 'files are'} missing (moved, or on a drive that is off)
             </span>
-            <Button label="Relocate…" size="small" disabled={fileStatus.relocating} onclick={() => void relocateMissing()} />
           </div>
         {/if}
         {#if fileStatus.error > 0}
