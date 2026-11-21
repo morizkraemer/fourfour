@@ -14,6 +14,10 @@ export interface SmokeWindow {
   __smokeNotFound: number[];
   __smokePickPath: string | null;
   __smokeDuplicates: unknown[];
+  __smokeReconnectPlan: unknown;
+  __smokeRemapPreview: unknown;
+  __smokeDupGroups: { key: number; keeper_id: number; members: { id: number }[] }[];
+  __smokeDupArchive: unknown[];
   __smokeHoldExport: boolean;
   __smokeReleaseExport: (() => void) | null;
   __smokeImport: SmokeImport | null;
@@ -61,6 +65,10 @@ export function installTauriMock(initial: LoadedState) {
   w.__smokeNotFound = [];
   w.__smokePickPath = '/Music/moved';
   w.__smokeDuplicates = [];
+  w.__smokeReconnectPlan = null;
+  w.__smokeRemapPreview = { total: 0, found: 0, still_missing: 0 };
+  w.__smokeDupGroups = [];
+  w.__smokeDupArchive = [];
   w.__smokeHoldExport = false;
   w.__smokeReleaseExport = null;
   w.__smokeImport = null;
@@ -135,6 +143,7 @@ export function installTauriMock(initial: LoadedState) {
       : {};
   let lastBackup: unknown = null;
   const relocated = new Set<number>();
+  let lastRelocation: unknown = null;
 
   let nextCallbackId = 1;
   const listeners = new Map<number, { event: string; handler: number }>();
@@ -146,6 +155,13 @@ export function installTauriMock(initial: LoadedState) {
     tempo: new Map<number, number>(),
   };
   let playlists = initial.playlists;
+  if (localStorage.getItem('smoke.reviewFolder')) {
+    playlists = [
+      ...playlists,
+      { id: 10, name: 'Festival sets', track_ids: [], parent_id: 0, is_folder: true },
+      { id: 11, name: 'Sunday main stage', track_ids: [5, 6], parent_id: 10, is_folder: false },
+    ];
+  }
   const tracks = [...initial.tracks];
   let pendingImport: TrackInfo[] = [];
   const playback = { path: '', position: 0, duration: 0, playing: false, timer: 0 };
@@ -412,6 +428,30 @@ export function installTauriMock(initial: LoadedState) {
         lastBackup = { path: args.path, at_ms: Date.now(), bytes: 38_000_000, includes_audio: args.includeAudio };
         return lastBackup;
       }
+      case 'find_reconnect_candidates':
+        return w.__smokeReconnectPlan ?? { reconnect: [], needs_choice: [], still_missing: [...w.__smokeMissing] };
+      case 'apply_reconnects': {
+        const picks = args.picks as { track_id: number; path: string }[];
+        relink(picks.map((p) => p.track_id), '');
+        return { relinked: picks.map((p) => ({ track_id: p.track_id, source_path: p.path })), health: health() };
+      }
+      case 'preview_relocate_folder':
+        return w.__smokeRemapPreview;
+      case 'apply_relocate_folder': {
+        const ids = [...w.__smokeMissing];
+        const remapped = relink(ids, args.newRoot);
+        lastRelocation = { id: 1, old_root: args.oldRoot, new_root: args.newRoot, tracks: ids.length, created_at: new Date().toISOString() };
+        return { applied: { relocation_id: 1, remapped, still_missing: w.__smokeMissing.length }, health: health() };
+      }
+      case 'undo_relocate_folder':
+        lastRelocation = null;
+        return { undone: { reverted: [], skipped: 0 }, health: health() };
+      case 'last_folder_relocation':
+        return lastRelocation;
+      case 'list_duplicate_groups':
+        return w.__smokeDupGroups;
+      case 'list_duplicate_archive':
+        return w.__smokeDupArchive;
       case 'playlist_export_file_name':
         return `Peak Time 2026-11-21.${({ m3u8: 'm3u8', csv: 'csv', text: 'txt', traktor_nml: 'nml', rekordbox_xml: 'xml' } as Record<string, string>)[args.format]}`;
       case 'export_playlist':
