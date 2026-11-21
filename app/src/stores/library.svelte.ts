@@ -1594,7 +1594,7 @@ async function flushRowPreviews() {
   if (changed) rowPreviewVersion++;
 }
 
-const TRACK_MAP_CHUNK = 10_000;
+const TRACK_MAP_CHUNK = 25_000;
 
 function nextTask(): Promise<void> {
   const channel = new MessageChannel();
