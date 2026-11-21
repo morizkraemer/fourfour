@@ -100,6 +100,7 @@ test.describe('library list', () => {
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu).toBeFocused();
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('ArrowUp');

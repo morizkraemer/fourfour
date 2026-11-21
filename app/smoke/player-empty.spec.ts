@@ -10,7 +10,12 @@ async function expand(page: Page) {
 function gridPixelsAtTop(page: Page, selector: string) {
   return page.evaluate((sel) => {
     const canvas = document.querySelector(sel) as HTMLCanvasElement;
-    const row = canvas.getContext('2d')!.getImageData(0, 1, canvas.width, 1).data;
+    const copy = document.createElement('canvas');
+    copy.width = canvas.width;
+    copy.height = 2;
+    const reader = copy.getContext('2d', { willReadFrequently: true })!;
+    reader.drawImage(canvas, 0, 0);
+    const row = reader.getImageData(0, 1, canvas.width, 1).data;
     const sums = Array.from({ length: canvas.width }, (_, x) => row[x * 4] + row[x * 4 + 1] + row[x * 4 + 2]);
     const base = Math.min(...sums);
     return sums.filter((sum) => sum > base + 24).length;

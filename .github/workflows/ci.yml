@@ -326,26 +326,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: OpenSSL for sqlcipher
+      - name: NASM for the vendored OpenSSL build
         run: |
-          find_openssl() {
-            for d in "/c/Program Files/OpenSSL" "/c/Program Files/OpenSSL-Win64"; do
-              [ -d "$d/include/openssl" ] && { echo "$d"; return 0; }
-            done
-            return 1
-          }
-          if ! root="$(find_openssl)"; then
-            choco install openssl --no-progress -y
-            root="$(find_openssl)" || { echo "OpenSSL not found after install"; exit 1; }
-          fi
-          lib="$(find "$root" -name libcrypto.lib | grep -i 'MD' | head -1 || true)"
-          [ -n "$lib" ] || lib="$(find "$root" -name libcrypto.lib | head -1)"
-          [ -n "$lib" ] || { echo "libcrypto.lib not found under $root"; exit 1; }
-          echo "OPENSSL_DIR=$(cygpath -w "$root")" >> "$GITHUB_ENV"
-          echo "OPENSSL_INCLUDE_DIR=$(cygpath -w "$root/include")" >> "$GITHUB_ENV"
-          echo "OPENSSL_LIB_DIR=$(cygpath -w "$(dirname "$lib")")" >> "$GITHUB_ENV"
-          echo "$(cygpath -w "$root/bin")" >> "$GITHUB_PATH"
-          echo "openssl root=$root lib=$lib"
+          nasm="/c/Program Files/NASM"
+          [ -x "$nasm/nasm.exe" ] || choco install nasm --no-progress -y
+          echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
 
       - name: App install
         working-directory: app

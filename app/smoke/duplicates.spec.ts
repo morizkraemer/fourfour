@@ -36,6 +36,7 @@ function duplicates(count: number) {
 async function importFolderWithDuplicates(page: Page, count: number) {
   await page.evaluate((rows) => ((window as unknown as { __smokeDuplicates: unknown[] }).__smokeDuplicates = rows), duplicates(count));
   await page.keyboard.press('Control+k');
+  await expect(page.locator('.ff-cp')).toBeVisible();
   await page.keyboard.type('>import folder');
   await page.keyboard.press('Enter');
 }
@@ -83,6 +84,7 @@ test('the list grows to 60% of the window before it scrolls, keeping the fade', 
   const many = Array.from({ length: 40 }, (_, i) => ({ ...duplicates(1)[0], new_path: `/Downloads/copy-${i}.mp3`, file_name: `copy-${i}.mp3`, existing_id: i + 1 }));
   await page.evaluate((rows) => ((window as unknown as { __smokeDuplicates: unknown[] }).__smokeDuplicates = rows), many);
   await page.keyboard.press('Control+k');
+  await expect(page.locator('.ff-cp')).toBeVisible();
   await page.keyboard.type('>import folder');
   await page.keyboard.press('Enter');
   const scroll = page.locator('.ff-dupes__scroll');
