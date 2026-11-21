@@ -4,6 +4,8 @@ set -euo pipefail
 MINUTES="${1:-45}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TARGET="${CARGO_TARGET_DIR:-$ROOT/target}"
+APP_ID="$(sed -n 's/.*"identifier": *"\([^"]*\)".*/\1/p' "$ROOT/pioneer-test-ui/tauri.conf.json" | head -n 1)"
+[ -n "$APP_ID" ] || { echo "no identifier in $ROOT/pioneer-test-ui/tauri.conf.json" >&2; exit 1; }
 APP="${FF_SOAK_APP:-$TARGET/release/pioneer-test-ui}"
 FIXTURE_LIBRARY="${FF_SOAK_LIBRARY:-$HOME/.cache/ff-fixture/10k/library}"
 MODELS="${FF_SOAK_MODELS:-$HOME/.cache/fourfour-models}"
@@ -17,7 +19,7 @@ say() { echo "[soak-real] $*" >&2; }
 command -v xvfb-run >/dev/null || { say "xvfb-run not found"; exit 1; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ff-soak-real.XXXXXX")"
-mkdir -p "$OUT" "$WORK/data/com.pioneer.test-ui" "$WORK/config" "$WORK/cache"
+mkdir -p "$OUT" "$WORK/data/$APP_ID" "$WORK/config" "$WORK/cache"
 LOG="$OUT/probe.jsonl"
 CSV="$OUT/rss.csv"
 : >"$LOG"
@@ -31,10 +33,10 @@ cleanup() {
 trap cleanup EXIT
 
 say "copying the library to $WORK"
-cp -r "$FIXTURE_LIBRARY"/. "$WORK/data/com.pioneer.test-ui/"
+cp -r "$FIXTURE_LIBRARY"/. "$WORK/data/$APP_ID/"
 
 if [ "${FF_SOAK_AUTO_ANALYZE:-on}" = "off" ]; then
-  echo '{"auto_analyze_new_tracks": false}' >"$WORK/data/com.pioneer.test-ui/config.json"
+  echo '{"auto_analyze_new_tracks": false}' >"$WORK/data/$APP_ID/config.json"
 fi
 
 IDS="$(seq -s, 7 250 10000)"
@@ -69,7 +71,7 @@ sum_pids() {
 children_named() { local pid; for pid in $(pgrep -P "$APP_PID" 2>/dev/null); do [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = "$1" ] && echo "$pid"; done; true; }
 
 analysed_tracks() {
-  python3 -I -c 'import sqlite3,sys; print(sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True, timeout=5).execute("select count(*) from analyses where stages >= 7").fetchone()[0])' "$WORK/data/com.pioneer.test-ui/library.db" 2>/dev/null || echo -1
+  python3 -I -c 'import sqlite3,sys; print(sqlite3.connect("file:"+sys.argv[1]+"?mode=ro", uri=True, timeout=5).execute("select count(*) from analyses where stages >= 7").fetchone()[0])' "$WORK/data/$APP_ID/library.db" 2>/dev/null || echo -1
 }
 dump_spike() {
   { echo "== $1 s"; grep -E "^(Rss|Pss|Anonymous|Private_Dirty|Swap):" "/proc/$APP_PID/smaps_rollup"
