@@ -93,7 +93,7 @@
   {/snippet}
   {#snippet actions()}
     <Button label="Check again" variant="ghost" disabled={fileStatus.running} onclick={() => void checkLibraryAgain()} />
-    <Button label="Done" variant="primary" onclick={closeHealthDialog} />
+    <Button label="Done" variant={fileStatus.missing > 0 ? 'default' : 'primary'} onclick={closeHealthDialog} />
   {/snippet}
 </Dialog>
 

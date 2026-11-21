@@ -87,19 +87,14 @@ test('review: moved-file reconnect', async ({ smoke }) => {
   await expect(page.locator('[data-reconnect-panel]')).toBeVisible();
   await shot(page, 'reconnect-1-check-dialog');
 
-  await page.getByRole('button', { name: 'More' }).click();
-  await expect(menuItems(page)).toHaveText(['Relocate missing…', 'Relocate folder…']);
-  await shot(page, 'reconnect-1b-more-menu');
-  await page.keyboard.press('Escape');
-  await expect(menuItems(page)).toHaveCount(0);
-  await expect(page.locator('[data-health-dialog]')).toBeVisible();
+  await expect(page.locator('[data-reconnect-options] .ff-btn')).toHaveText(['Find moved files…', 'Relocate folder…', 'Relocate missing…']);
+  await expect(page.locator('[data-reconnect-options] .ff-btn--primary')).toHaveText('Find moved files…');
 
   await page.getByRole('button', { name: 'Find moved files…' }).click();
   await expect(page.locator('[data-reconnect-result]')).toContainText('2 tracks reconnected, 2 need your choice, 1 still missing.');
   await shot(page, 'reconnect-2-find-moved-result');
 
-  await page.getByRole('button', { name: 'More' }).click();
-  await menuItems(page).filter({ hasText: 'Relocate folder…' }).click();
+  await page.getByRole('button', { name: 'Relocate folder…' }).click();
   await expect(page.locator('[data-relocate-folder]')).toBeVisible();
   await page.getByRole('button', { name: 'Choose…' }).click();
   await expect(page.locator('[data-relocate-preview]')).toContainText('4 found');
@@ -174,7 +169,7 @@ test('review: duplicate cleanup', async ({ smoke }) => {
   await expect(page.locator('[data-duplicate-member="2"]')).toHaveAttribute('aria-checked', 'true');
   await expect(page.locator('[data-duplicate-group="1"] [data-duplicate-reason]')).toHaveText('Keeper: your pick');
   await page.mouse.move(0, 0);
-  await page.locator('[data-duplicate-group="2"]').getByRole('button', { name: 'Skip' }).focus();
+  await page.locator('[data-duplicate-member="4"]').focus();
   await page.keyboard.press('Tab');
   await page.keyboard.press('Shift+Tab');
   await shot(page, 'duplicates-2c-group-focus');
