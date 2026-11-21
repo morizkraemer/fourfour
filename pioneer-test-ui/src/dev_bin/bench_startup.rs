@@ -188,10 +188,15 @@ fn run(dir: &Path) {
     };
     let json_ms = ms(t);
 
+    let t = Instant::now();
+    let answer = track_infos::loaded_state(&lib).unwrap().to_bytes().unwrap();
+    let load_state_ms = ms(t);
+
     println!(
-        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} labels_cached_ms={labels_cached_ms:.1} (cache before: {had_cache}) labels_refresh_ms={labels_refresh_ms:.1} (changed {changed}) build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} load_state_total_ms={:.1}",
+        "tracks={count} open_ms={open_ms:.1} rows_ms={rows_ms:.1} labels_ms={labels_ms:.1} labels_cached_ms={labels_cached_ms:.1} (cache before: {had_cache}) labels_refresh_ms={labels_refresh_ms:.1} (changed {changed}) build_track_infos_ms={build_ms:.1} playlists_ms={playlists_ms:.1} json_ms={json_ms:.1} json_bytes={} json_path_ms={:.1} load_state_ms={load_state_ms:.1} load_state_bytes={}",
         json.len(),
         build_ms + playlists_ms + json_ms,
+        answer.len(),
     );
     perf(
         "startup_backend",
@@ -209,7 +214,9 @@ fn run(dir: &Path) {
             "table_json_ms": table_json_ms,
             "table_json_bytes": table_json_len,
             "json_bytes": json.len(),
-            "load_state_ms": build_ms + playlists_ms + json_ms,
+            "json_path_ms": build_ms + playlists_ms + json_ms,
+            "load_state_bytes": answer.len(),
+            "load_state_ms": load_state_ms,
         }),
     );
 }
