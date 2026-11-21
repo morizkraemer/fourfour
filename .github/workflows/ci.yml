@@ -98,7 +98,7 @@ jobs:
         run: cargo build --workspace --locked
 
       - name: Cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Dev binaries check
         run: cargo check -p pioneer-test-ui --features dev-bins --bins --locked
@@ -259,7 +259,7 @@ jobs:
         run: npm run build
 
       - name: Cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: tauri-cli cache
         id: tauri-cli-cache
@@ -343,7 +343,7 @@ jobs:
         run: npm run build
 
       - name: Cargo test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: tauri-cli cache
         id: tauri-cli-cache

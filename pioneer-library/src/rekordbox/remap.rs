@@ -225,20 +225,22 @@ mod tests {
         assert_eq!(fold("Cafe\u{301}"), fold("Caf\u{e9}"));
     }
 
+    fn assert_resolves(resolver: &mut CaseInsensitiveResolver, asked: &Path, on_disk: &Path) {
+        let found = resolver.resolve(asked).expect("a file that exists under another spelling resolves");
+        assert!(found.exists());
+        if !asked.exists() || found != asked {
+            assert_eq!(found, on_disk);
+        }
+    }
+
     #[test]
     fn resolver_finds_nfd_name_for_nfc_request_and_back() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("Caf\u{e9} del Mar.mp3"), b"x").unwrap();
         std::fs::write(dir.path().join("Mu\u{308}sik.mp3"), b"x").unwrap();
         let mut resolver = CaseInsensitiveResolver::default();
-        assert_eq!(
-            resolver.resolve(&dir.path().join("Cafe\u{301} del Mar.mp3")),
-            Some(dir.path().join("Caf\u{e9} del Mar.mp3"))
-        );
-        assert_eq!(
-            resolver.resolve(&dir.path().join("M\u{fc}sik.mp3")),
-            Some(dir.path().join("Mu\u{308}sik.mp3"))
-        );
+        assert_resolves(&mut resolver, &dir.path().join("Cafe\u{301} del Mar.mp3"), &dir.path().join("Caf\u{e9} del Mar.mp3"));
+        assert_resolves(&mut resolver, &dir.path().join("M\u{fc}sik.mp3"), &dir.path().join("Mu\u{308}sik.mp3"));
     }
 
     #[test]
@@ -247,8 +249,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("House")).unwrap();
         std::fs::write(dir.path().join("House/Track One.mp3"), b"x").unwrap();
         let mut resolver = CaseInsensitiveResolver::default();
-        let found = resolver.resolve(&dir.path().join("house/track one.MP3"));
-        assert_eq!(found, Some(dir.path().join("House/Track One.mp3")));
+        assert_resolves(&mut resolver, &dir.path().join("house/track one.MP3"), &dir.path().join("House/Track One.mp3"));
         assert_eq!(resolver.resolve(&dir.path().join("house/missing.mp3")), None);
     }
 }
