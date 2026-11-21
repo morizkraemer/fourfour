@@ -1,6 +1,6 @@
 {
   "productName": "fourfour",
-  "identifier": "com.pioneer.test-ui",
+  "identifier": "app.ffdj.library",
   "build": {
     "frontendDist": "../app/dist",
     "devUrl": "http://localhost:5200",

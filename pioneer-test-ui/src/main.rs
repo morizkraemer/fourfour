@@ -11,6 +11,7 @@ mod app_log;
 mod backup_commands;
 mod band_analysis;
 mod command_error;
+mod data_migration;
 mod dto;
 mod early_state;
 mod file_health;
@@ -1468,7 +1469,10 @@ fn main() {
         self_check::run_and_exit();
     }
     let context = tauri::generate_context!();
-    app_log::start_early(&context.config().identifier);
+    let identifier = context.config().identifier.clone();
+    let migration = data_migration::migrate_legacy_data(&identifier, data_migration::Os::current(), &|name| std::env::var_os(name));
+    app_log::start_early(&identifier);
+    data_migration::log_migration(&migration);
     perf_probe::start();
     let app = perf_probe::install(tauri::Builder::default()) // v0.1
         .plugin(tauri_plugin_dialog::init())
