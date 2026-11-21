@@ -1292,6 +1292,7 @@ dependencies = [
  "anyhow",
  "beat-this",
  "ort",
+ "pioneer-library",
  "pioneer-usb-writer",
  "rten",
  "rten-tensor",
