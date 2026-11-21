@@ -3,8 +3,8 @@ import { trackTime } from './importDuplicates.ts';
 
 export type KeeperChoices = Record<number, number>;
 
-function count(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`;
+function count(n: number, word: string, plural = `${word}s`): string {
+  return `${n} ${n === 1 ? word : plural}`;
 }
 
 export function confidenceLabel(group: DuplicateGroup): string {
@@ -37,7 +37,7 @@ export function keeperOf(group: DuplicateGroup, choices: KeeperChoices): number 
 }
 
 export function reasonOf(group: DuplicateGroup, choices: KeeperChoices): string {
-  return keeperOf(group, choices) === group.keeper_id ? group.reason : 'Your pick';
+  return keeperOf(group, choices) === group.keeper_id ? group.reason : 'your pick';
 }
 
 export function requestFor(group: DuplicateGroup, choices: KeeperChoices): MergeRequest {
@@ -67,13 +67,17 @@ export function mergeSummary(report: MergeReport): string {
   const songs = report.merged.length;
   const entries = report.merged.reduce((sum, m) => sum + m.removed_ids.length, 0);
   const parts: string[] = [];
-  if (songs > 0) parts.push(`Merged ${count(entries, 'copy')} into ${count(songs, 'keeper')}. No file was deleted.`);
+  if (songs > 0) parts.push(`Merged ${count(entries, 'copy', 'copies')} into ${count(songs, 'keeper')}. No file was deleted.`);
   if (report.failed.length > 0) parts.push(`${count(report.failed.length, 'merge')} not done: ${report.failed[0].message}`);
   return parts.join(' ');
 }
 
 export function archiveHeading(merge: ArchivedMerge): string {
   return merge.keeper_label ?? 'Merged song';
+}
+
+export function archiveCopies(merge: ArchivedMerge): string {
+  return count(merge.tracks.length, 'copy', 'copies');
 }
 
 export function archiveDate(merge: ArchivedMerge): string {

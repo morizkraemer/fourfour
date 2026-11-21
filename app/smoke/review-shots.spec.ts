@@ -7,7 +7,7 @@ const SHOTS = resolve(import.meta.dirname, '../../.agent/review');
 mkdirSync(SHOTS, { recursive: true });
 
 const WINDOW = { width: 1440, height: 900 };
-const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${name}.png` });
+const shot = (page: Page, name: string) => page.screenshot({ path: `${SHOTS}/${name}.png`, animations: 'disabled' });
 const menuItems = (page: Page) => page.locator('.ff-context-menu .ff-menu__item');
 const statusButton = (page: Page) => page.locator('[data-library-status]');
 
@@ -87,11 +87,19 @@ test('review: moved-file reconnect', async ({ smoke }) => {
   await expect(page.locator('[data-reconnect-panel]')).toBeVisible();
   await shot(page, 'reconnect-1-check-dialog');
 
+  await page.getByRole('button', { name: 'More' }).click();
+  await expect(menuItems(page)).toHaveText(['Relocate missing…', 'Relocate folder…']);
+  await shot(page, 'reconnect-1b-more-menu');
+  await page.keyboard.press('Escape');
+  await expect(menuItems(page)).toHaveCount(0);
+  await expect(page.locator('[data-health-dialog]')).toBeVisible();
+
   await page.getByRole('button', { name: 'Find moved files…' }).click();
   await expect(page.locator('[data-reconnect-result]')).toContainText('2 tracks reconnected, 2 need your choice, 1 still missing.');
   await shot(page, 'reconnect-2-find-moved-result');
 
-  await page.getByRole('button', { name: 'Relocate folder…' }).click();
+  await page.getByRole('button', { name: 'More' }).click();
+  await menuItems(page).filter({ hasText: 'Relocate folder…' }).click();
   await expect(page.locator('[data-relocate-folder]')).toBeVisible();
   await page.getByRole('button', { name: 'Choose…' }).click();
   await expect(page.locator('[data-relocate-preview]')).toContainText('4 found');
@@ -155,7 +163,21 @@ test('review: duplicate cleanup', async ({ smoke }) => {
   await menuItems(page).filter({ hasText: 'Find duplicates…' }).click();
   await expect(page.locator('[data-duplicates-view]')).toBeVisible();
   await expect(page.locator('[data-duplicate-group]')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Merge 2 exact matches' })).toBeVisible();
+  await page.mouse.move(0, 0);
   await shot(page, 'duplicates-2-groups');
+
+  await page.locator('[data-duplicate-member="2"]').hover();
+  await shot(page, 'duplicates-2b-group-hover');
+
+  await page.locator('[data-duplicate-member="2"]').click();
+  await expect(page.locator('[data-duplicate-member="2"]')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('[data-duplicate-group="1"] [data-duplicate-reason]')).toHaveText('Keeper: your pick');
+  await page.mouse.move(0, 0);
+  await page.locator('[data-duplicate-group="2"]').getByRole('button', { name: 'Skip' }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await shot(page, 'duplicates-2c-group-focus');
 
   await page.getByText('Archive (1)', { exact: true }).click();
   await expect(page.locator('[data-archived-merge]')).toHaveCount(1);

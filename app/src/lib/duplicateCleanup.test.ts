@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { DuplicateGroup, DuplicateMember, MergeReport } from '../services/tauri.svelte.ts';
+import type { ArchivedMerge, DuplicateGroup, DuplicateMember, MergeReport } from '../services/tauri.svelte.ts';
 import {
+  archiveCopies,
   exactCount,
   exactRequests,
   groupHeading,
@@ -43,7 +44,7 @@ describe('keeper choice', () => {
     expect(keeperOf(g, {})).toBe(5);
     expect(keeperOf(g, { 1: 9 })).toBe(9);
     expect(reasonOf(g, {})).toBe(g.reason);
-    expect(reasonOf(g, { 1: 9 })).toBe('Your pick');
+    expect(reasonOf(g, { 1: 9 })).toBe('your pick');
   });
 
   it('ignores a pick that is not a member of the group', () => {
@@ -94,5 +95,12 @@ describe('text', () => {
 
   it('names a group after its keeper with a plain hyphen', () => {
     expect(groupHeading(group(1, 'exact_audio', [1, 2]))).toBe('Hale - Copper Lines');
+  });
+
+  it('counts copies with the right plural', () => {
+    const merge = (n: number) => ({ tracks: Array.from({ length: n }, (_, i) => ({ id: i })) }) as unknown as ArchivedMerge;
+    expect(archiveCopies(merge(1))).toBe('1 copy');
+    expect(archiveCopies(merge(3))).toBe('3 copies');
+    expect(mergeSummary({ merged: [{ merge_id: 1, keeper_id: 1, removed_ids: [2, 3] }], failed: [] })).toBe('Merged 2 copies into 1 keeper. No file was deleted.');
   });
 });
