@@ -25,3 +25,25 @@ Serial split after step 1 (`bench_startup detail`, 12 files): decode 965 ms, `De
 - `analysis_first_result` 16.8 -> 5 s: model-bound; the detail warm only starts after the first partial result, so it is not on that path.
 - `waveform_detail_cached` 2.5 -> 2 ms: measured 1.5 to 2.3 ms on the same runs for both binaries; a 4.5 MB file read, nothing to change.
 - Fused meter 4c2b2c4: excluded by the brief; it would cut the analysis path, not the cold open (which runs only `DetailMeter`).
+
+## Progressive cold open (Merlin approved, flag OFF by default)
+
+With the flag on, the zoom view draws the stored 150/s columns (already scaled with the track's gains by the analysis) as soon as the track is loaded, instead of bare ground until the full 2400/s series arrives, then swaps the series in on the same canvas. Implementation: `ExpandedPlayer.svelte` passes `detailPending` as false while the flag is on; the display (`waveform-display.js` under prototyping/, untouched) already falls back to its 150/s columns when `detailPending` is false. With the flag off nothing changes: same props, same bytes, no backend change.
+
+Flag: localStorage `ff.progressiveDetail` = `1` (same pattern as panel width and player height; the app has no dev-setting UI to join). Hidden toggle: click the build line in Settings > About 5 times; it then reads "... · progressive detail" and carries `data-progressive-detail="on"`. Off by default.
+
+Time to first painted zoom waveform (Playwright, fixture backend with the series held for 450 ms, the measured cold median of the 10k long files; 3 runs):
+
+| flag | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| off | 853 ms | 866 ms | 936 ms |
+| on | 28 ms | 22 ms | 38 ms |
+
+Off is the 450 ms hold plus the harness's polling steps, on is the overview paint only. The real backend is not in this number (mock), so on a real open expect off = cold detail time + paint, on = paint.
+
+Headless screenshots of the expanded wave (top strip is the overview, bottom the zoom view; same geometry, the zoom look changes when the series lands, which is the visible change that makes this a flag):
+
+![preview](perf-detail-preview.png)
+![final](perf-detail-final.png)
+
+Gates: vitest all green (new `progressiveDetail.test.ts`), svelte-check 0 errors, Playwright smoke 195 passed / 47 skipped (two new tests: in-place swap with identical canvas box, and the timing above), `cargo test --workspace` unchanged and green.
