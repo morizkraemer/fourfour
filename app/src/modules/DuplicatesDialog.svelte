@@ -49,11 +49,11 @@
           <p class="ff-dedupe__note">
             {groupsTitle(duplicates.groups.length)}. Pick the copy to keep. Merging moves playlists, cues and ratings to it; no file is deleted.
           </p>
-          <div class="ff-dedupe__table">
+          <div class="ff-dedupe__groups">
             <div class="ff-dedupe__cols ff-dedupe__cols--head" aria-hidden="true">
               <span>Keep</span><span>Format</span><span class="ff-dedupe__num">Bitrate</span><span class="ff-dedupe__num">Time</span><span class="ff-dedupe__num">Playlists</span><span class="ff-dedupe__num">Cues</span><span>Location</span>
             </div>
-            <div class="ff-dedupe__scroll">
+            <div class="ff-dedupe__scroll ff-dedupe__panels">
               {#each duplicates.groups as group (group.key)}
                 {@const keeperId = keeperOf(group, duplicates.choices)}
                 {@const skipped = duplicates.skipped.has(group.key)}
@@ -65,8 +65,6 @@
                         {skipped ? 'Skipped' : confidenceLabel(group)} · <span data-duplicate-reason>Keeper: {reasonOf(group, duplicates.choices)}</span>
                       </span>
                     </div>
-                    <Button label={skipped ? 'Undo skip' : 'Skip'} size="small" variant="ghost" disabled={duplicates.busy} onclick={() => toggleSkip(group)} />
-                    <Button label="Merge" size="small" disabled={skipped || duplicates.busy} onclick={() => void mergeGroup(group)} />
                   </header>
                   <div role="radiogroup" aria-label={`Copy of ${groupHeading(group)} to keep`}>
                     {#each group.members as member (member.id)}
@@ -94,6 +92,10 @@
                       </button>
                     {/each}
                   </div>
+                  <footer class="ff-dedupe__bar">
+                    <Button label={skipped ? 'Undo skip' : 'Skip'} size="small" variant="ghost" disabled={duplicates.busy} onclick={() => toggleSkip(group)} />
+                    <Button label="Merge" size="small" disabled={skipped || duplicates.busy} onclick={() => void mergeGroup(group)} />
+                  </footer>
                 </section>
               {/each}
             </div>
@@ -176,14 +178,34 @@
     color: var(--ff-muted);
     border-bottom: 1px solid var(--ff-border);
   }
-  .ff-dedupe__group + .ff-dedupe__group {
-    border-top: 1px solid var(--ff-border-hi);
+  .ff-dedupe__groups .ff-dedupe__cols--head {
+    border-bottom: none;
+    padding: 0 calc(var(--ff-space-4) + 1px);
+  }
+  .ff-dedupe__panels {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ff-space-5);
+  }
+  .ff-dedupe__group {
+    border: 1px solid var(--ff-border-hi);
+    border-radius: var(--ff-radius-md);
+    background: var(--ff-bg);
+    overflow: hidden;
   }
   .ff-dedupe__head {
     display: flex;
     align-items: center;
     gap: var(--ff-space-2);
-    padding: var(--ff-space-4) var(--ff-space-4) var(--ff-space-3);
+    padding: var(--ff-space-4);
+  }
+  .ff-dedupe__bar {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--ff-space-2);
+    padding: var(--ff-space-3) var(--ff-space-4);
+    border-top: 1px solid var(--ff-border);
+    background: var(--ff-surface);
   }
   .ff-dedupe__texts {
     flex: 1 1 0;
