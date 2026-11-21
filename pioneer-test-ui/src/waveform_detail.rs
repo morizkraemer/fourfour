@@ -33,11 +33,27 @@ fn cache_limit_for_free_space(free_bytes: u64) -> u64 {
     (free_bytes / CACHE_SHARE_OF_FREE_DISK).clamp(CACHE_LIMIT_FLOOR_BYTES, CACHE_LIMIT_CEILING_BYTES)
 }
 
+#[cfg(unix)]
 fn free_space_of(dir: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
     let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
     (unsafe { libc::statvfs(path.as_ptr(), &mut stats) } == 0).then(|| stats.f_bavail as u64 * stats.f_frsize as u64)
+}
+
+#[cfg(windows)]
+fn free_space_of(dir: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(directory: *const u16, free_to_caller: *mut u64, total: *mut u64, total_free: *mut u64) -> i32;
+    }
+
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_to_caller = 0u64;
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free_to_caller, std::ptr::null_mut(), std::ptr::null_mut()) };
+    (ok != 0).then_some(free_to_caller)
 }
 
 fn cache_limit(dir: &Path) -> u64 {

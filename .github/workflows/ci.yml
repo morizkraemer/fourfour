@@ -1,0 +1,407 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  TAURI_CLI_VERSION: "~2.10"
+  MODELS_DIR: prototyping/analysis-packaging/models
+
+jobs:
+  linux:
+    name: linux (tests, chromium smoke, deb)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config file curl wget \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev libxdo-dev \
+            libayatana-appindicator3-dev librsvg2-dev libasound2-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: App install
+        working-directory: app
+        run: npm ci
+
+      - name: App unit tests
+        working-directory: app
+        run: npm test
+
+      - name: App typecheck
+        working-directory: app
+        run: npm run check
+
+      - name: App build
+        working-directory: app
+        run: npm run build
+
+      - name: Playwright browser cache
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('app/package-lock.json') }}
+
+      - name: Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: app
+        run: npx playwright install-deps chromium
+
+      - name: Playwright browser and dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: app
+        run: npx playwright install --with-deps chromium
+
+      - name: Chromium smoke
+        working-directory: app
+        env:
+          FF_SMOKE_SLOWMO_FACTOR: "2"
+          FF_SMOKE_RETRIES: "0"
+        run: npm run smoke
+
+      - name: Upload smoke results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results-chromium
+          path: app/smoke/.results
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Cargo build
+        run: cargo build --workspace --locked
+
+      - name: Cargo test
+        run: cargo test --workspace --locked
+
+      - name: Dev binaries check
+        run: cargo check -p pioneer-test-ui --features dev-bins --bins --locked
+
+      - name: tauri-cli cache
+        id: tauri-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-${{ runner.os }}-${{ runner.arch }}-${{ env.TAURI_CLI_VERSION }}-v1
+
+      - name: Install tauri-cli
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+
+      - name: Beat This weights cache
+        id: weights-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MODELS_DIR }}
+          key: weights-${{ hashFiles('fourfour-analysis-rs/scripts/fetch-models.sh') }}
+
+      - name: Fetch Beat This weights
+        if: steps.weights-cache.outputs.cache-hit != 'true'
+        run: fourfour-analysis-rs/scripts/fetch-models.sh "$MODELS_DIR"
+
+      - name: Bundle deb (unsigned)
+        run: fourfour-analysis-rs/scripts/bundle-app.sh --ci --bundles deb
+
+      - name: Check deb contents
+        run: |
+          deb="$(ls target/release/bundle/deb/*.deb | head -1)"
+          dpkg-deb -I "$deb"
+          dpkg-deb -I "$deb" > deb-info.txt
+          dpkg-deb -c "$deb" > deb-contents.txt
+          cat deb-contents.txt
+          grep -q 'lib/fourfour/models/beat_this.onnx' deb-contents.txt
+          grep -q 'lib/fourfour/models/mel_spectrogram.onnx' deb-contents.txt
+          grep -q 'lib/fourfour/models/LICENSE-beat-this.txt' deb-contents.txt
+          grep -q 'lib/fourfour/models/LICENSE-key-model.txt' deb-contents.txt
+          if grep -Eq 'bin/(bench_|waveform_)' deb-contents.txt; then
+            echo "dev binaries leaked into the deb"
+            exit 1
+          fi
+          grep -q 'libasound2t64 | libasound2' deb-info.txt
+          grep -q 'libssl3t64 | libssl3' deb-info.txt
+
+      - name: Deb self-check
+        run: |
+          deb="$(ls target/release/bundle/deb/*.deb | head -1)"
+          root="$(mktemp -d)"
+          dpkg-deb -x "$deb" "$root"
+          "$root/usr/bin/pioneer-test-ui" --self-check
+
+      - name: Upload Linux bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourfour-linux-unsigned
+          path: target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  notices:
+    name: notices (third-party drift)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: App install
+        working-directory: app
+        run: npm ci --ignore-scripts
+
+      - name: Fetch crate sources
+        run: cargo fetch --locked
+
+      - name: Regenerate notices
+        run: python3 -I scripts/release/third-party-notices.py "$RUNNER_TEMP/THIRD-PARTY-NOTICES.txt"
+
+      - name: Fail on drift
+        run: diff -u pioneer-test-ui/resources/THIRD-PARTY-NOTICES.txt "$RUNNER_TEMP/THIRD-PARTY-NOTICES.txt"
+
+  webkit-smoke:
+    name: linux (webkit smoke, may fail)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: App install
+        working-directory: app
+        run: npm ci
+
+      - name: Playwright WebKit and dependencies
+        working-directory: app
+        run: npx playwright install --with-deps webkit
+
+      - name: WebKit smoke
+        working-directory: app
+        env:
+          FF_SMOKE_BROWSER: webkit
+          FF_SMOKE_SLOWMO_FACTOR: "2"
+          FF_SMOKE_RETRIES: "0"
+        run: npm run smoke
+
+      - name: Upload smoke results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results-webkit
+          path: app/smoke/.results
+          if-no-files-found: ignore
+          retention-days: 3
+
+  macos:
+    name: macos (arm64 dmg, coreml)
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require Apple Silicon
+        run: |
+          [ "$(uname -m)" = "arm64" ] || { echo "coreml bundle needs an arm64 runner, got $(uname -m)"; exit 1; }
+          sw_vers
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: App install
+        working-directory: app
+        run: npm ci
+
+      - name: App build
+        working-directory: app
+        run: npm run build
+
+      - name: Cargo test
+        run: cargo test --workspace --locked
+
+      - name: tauri-cli cache
+        id: tauri-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri
+          key: tauri-cli-${{ runner.os }}-${{ runner.arch }}-${{ env.TAURI_CLI_VERSION }}-v1
+
+      - name: Install tauri-cli
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+
+      - name: ONNX Runtime download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ort.pyke.io
+          key: ort-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Beat This weights cache
+        id: weights-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MODELS_DIR }}
+          key: weights-${{ hashFiles('fourfour-analysis-rs/scripts/fetch-models.sh') }}
+
+      - name: Fetch Beat This weights
+        if: steps.weights-cache.outputs.cache-hit != 'true'
+        run: fourfour-analysis-rs/scripts/fetch-models.sh "$MODELS_DIR"
+
+      - name: Bundle macOS dmg (unsigned, coreml)
+        run: scripts/mac/build-dmg.sh
+
+      - name: Check macOS dmg
+        run: scripts/mac/check-dmg.sh "$(ls -t build/mac/dmg-*/dmg-path.txt | head -1 | xargs cat)"
+
+      - name: Upload macOS bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourfour-macos-unsigned
+          path: |
+            build/mac/dmg-*/*.dmg
+            build/mac/dmg-*/*.sha256
+            build/mac/dmg-*/build.log
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: windows (nsis)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: OpenSSL for sqlcipher
+        run: |
+          find_openssl() {
+            for d in "/c/Program Files/OpenSSL" "/c/Program Files/OpenSSL-Win64"; do
+              [ -d "$d/include/openssl" ] && { echo "$d"; return 0; }
+            done
+            return 1
+          }
+          if ! root="$(find_openssl)"; then
+            choco install openssl --no-progress -y
+            root="$(find_openssl)" || { echo "OpenSSL not found after install"; exit 1; }
+          fi
+          lib="$(find "$root" -name libcrypto.lib | grep -i 'MD' | head -1 || true)"
+          [ -n "$lib" ] || lib="$(find "$root" -name libcrypto.lib | head -1)"
+          [ -n "$lib" ] || { echo "libcrypto.lib not found under $root"; exit 1; }
+          echo "OPENSSL_DIR=$(cygpath -w "$root")" >> "$GITHUB_ENV"
+          echo "OPENSSL_INCLUDE_DIR=$(cygpath -w "$root/include")" >> "$GITHUB_ENV"
+          echo "OPENSSL_LIB_DIR=$(cygpath -w "$(dirname "$lib")")" >> "$GITHUB_ENV"
+          echo "$(cygpath -w "$root/bin")" >> "$GITHUB_PATH"
+          echo "openssl root=$root lib=$lib"
+
+      - name: App install
+        working-directory: app
+        run: npm ci
+
+      - name: App build
+        working-directory: app
+        run: npm run build
+
+      - name: Cargo test
+        run: cargo test --workspace --locked
+
+      - name: tauri-cli cache
+        id: tauri-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-tauri.exe
+          key: tauri-cli-${{ runner.os }}-${{ runner.arch }}-${{ env.TAURI_CLI_VERSION }}-v1
+
+      - name: Install tauri-cli
+        if: steps.tauri-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install tauri-cli --version "$TAURI_CLI_VERSION" --locked
+
+      - name: Beat This weights cache
+        id: weights-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.MODELS_DIR }}
+          key: weights-${{ hashFiles('fourfour-analysis-rs/scripts/fetch-models.sh') }}
+
+      - name: Fetch Beat This weights
+        if: steps.weights-cache.outputs.cache-hit != 'true'
+        run: fourfour-analysis-rs/scripts/fetch-models.sh "$MODELS_DIR"
+
+      - name: Bundle Windows installer (unsigned)
+        run: fourfour-analysis-rs/scripts/bundle-app.sh --ci --bundles nsis
+
+      - name: Windows installer self-check (informational)
+        continue-on-error: true
+        run: |
+          setup="$(ls target/release/bundle/nsis/*-setup.exe | head -1)"
+          dest="$RUNNER_TEMP/fourfour-install"
+          "$setup" /S "/D=$(cygpath -w "$dest")"
+          for i in $(seq 1 30); do
+            exe="$(ls "$dest"/*.exe 2>/dev/null | grep -vi uninstall | head -1 || true)"
+            [ -n "$exe" ] && break
+            sleep 2
+          done
+          [ -n "$exe" ] || { echo "installer produced no exe in $dest"; exit 1; }
+          ls -l "$dest" "$dest/models"
+          "$exe" --self-check
+
+      - name: Upload Windows bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fourfour-windows-unsigned
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 7
