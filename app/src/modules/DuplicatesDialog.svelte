@@ -1,313 +1,297 @@
 <script>
-  import { Dialog, Button, SegmentedControl } from '$ds';
+  import { Dialog, Button, SegmentedControl, SettingRow, StatusDot } from '$ds';
   import '$ds/components/checkbox.css';
+  import { duplicates, closeDuplicates, showTab, chooseKeeper, togglePick, mergePicked, restoreMerge } from '../stores/duplicate-cleanup.svelte.ts';
   import {
-    duplicates,
-    closeDuplicates,
-    showTab,
-    chooseKeeper,
-    toggleSkip,
-    mergeGroup,
-    mergeAllExact,
-    restoreMerge,
-  } from '../stores/duplicate-cleanup.svelte.ts';
-  import {
-    archiveCopies,
-    archiveDate,
     archiveHeading,
-    confidenceLabel,
-    exactCount,
+    archiveNote,
+    copyFacts,
+    copyPlaces,
     groupHeading,
+    groupNote,
     groupsTitle,
     keeperOf,
-    reasonOf,
+    mergeLabel,
+    pickedCount,
   } from '../lib/duplicateCleanup.ts';
-  import { trackTime } from '../lib/importDuplicates.ts';
 
-  let exactLeft = $derived(exactCount(duplicates.groups, duplicates.skipped));
-  let canMergeAll = $derived(duplicates.tab === 'groups' && exactLeft > 0);
-  let tabs = $derived(['Duplicates', duplicates.archive.length > 0 ? `Archive (${duplicates.archive.length})` : 'Archive']);
+  let onGroups = $derived(duplicates.tab === 'groups');
+  let toMerge = $derived(pickedCount(duplicates.groups, duplicates.picked));
+  let canMerge = $derived(onGroups && duplicates.groups.length > 0);
+  let tabs = $derived([
+    duplicates.groups.length > 0 ? `Found (${duplicates.groups.length})` : 'Found',
+    duplicates.archive.length > 0 ? `Archive (${duplicates.archive.length})` : 'Archive',
+  ]);
 </script>
 
 <Dialog open={duplicates.open} variant="wide" title="Duplicates" onClose={closeDuplicates}>
   {#snippet body()}
     <div class="ff-dedupe" data-duplicates-view>
-      <SegmentedControl items={tabs} activeIndex={duplicates.tab === 'groups' ? 0 : 1} onChange={(i) => showTab(i === 0 ? 'groups' : 'archive')} />
+      <div class="ff-dedupe__tabs">
+        <SegmentedControl items={tabs} activeIndex={onGroups ? 0 : 1} onChange={(i) => showTab(i === 0 ? 'groups' : 'archive')} />
+      </div>
+
+      {#if onGroups}
+        {#if duplicates.loading}
+          <p class="ff-dedupe__lead">Looking for copies…</p>
+        {:else if duplicates.groups.length === 0}
+          {#if !duplicates.message}
+            <div class="ff-dedupe__line" data-duplicates-empty>
+              <StatusDot status="online" />
+              <span>No duplicates. Every song is in your library once.</span>
+            </div>
+          {/if}
+        {:else}
+          <p class="ff-dedupe__lead">{groupsTitle(duplicates.groups.length)}</p>
+        {/if}
+      {:else if duplicates.archive.length === 0}
+        <p class="ff-dedupe__lead" data-archive-empty>Nothing merged yet. Merged copies show up here and can be restored.</p>
+      {:else}
+        <p class="ff-dedupe__lead">Merged copies are out of your library. Their files are still on disk.</p>
+      {/if}
+
+      {#if duplicates.message}
+        <div class="ff-dedupe__line" data-duplicates-message>
+          <StatusDot status="online" />
+          <span>{duplicates.message}</span>
+        </div>
+      {/if}
       {#if duplicates.error}
         <p class="ff-dedupe__error" data-duplicates-error>{duplicates.error}</p>
       {/if}
-      {#if duplicates.message}
-        <p class="ff-dedupe__message" data-duplicates-message>{duplicates.message}</p>
-      {/if}
 
-      {#if duplicates.tab === 'groups'}
-        {#if duplicates.loading}
-          <p class="ff-dedupe__note">Looking for copies…</p>
-        {:else if duplicates.groups.length === 0}
-          <p class="ff-dedupe__note" data-duplicates-empty>No copies found. Nothing to clean up.</p>
-        {:else}
-          <p class="ff-dedupe__note">
-            {groupsTitle(duplicates.groups.length)}. Pick the copy to keep. Merging moves playlists, cues and ratings to it; no file is deleted.
-          </p>
-          <div class="ff-dedupe__groups">
-            <div class="ff-dedupe__cols ff-dedupe__cols--head" aria-hidden="true">
-              <span>Keep</span><span>Format</span><span class="ff-dedupe__num">Bitrate</span><span class="ff-dedupe__num">Time</span><span class="ff-dedupe__num">Playlists</span><span class="ff-dedupe__num">Cues</span><span>Location</span>
-            </div>
-            <div class="ff-dedupe__scroll ff-dedupe__panels">
-              {#each duplicates.groups as group (group.key)}
-                {@const keeperId = keeperOf(group, duplicates.choices)}
-                {@const skipped = duplicates.skipped.has(group.key)}
-                <section class="ff-dedupe__group" class:ff-dedupe__group--skipped={skipped} data-duplicate-group={group.key} data-confidence={group.confidence}>
-                  <header class="ff-dedupe__head">
-                    <div class="ff-dedupe__texts">
-                      <span class="ff-dedupe__title">{groupHeading(group)}</span>
-                      <span class="ff-dedupe__sub">
-                        {skipped ? 'Skipped' : confidenceLabel(group)} · <span data-duplicate-reason>Keeper: {reasonOf(group, duplicates.choices)}</span>
-                      </span>
-                    </div>
-                  </header>
-                  <div role="radiogroup" aria-label={`Copy of ${groupHeading(group)} to keep`}>
-                    {#each group.members as member (member.id)}
-                      {@const keeper = member.id === keeperId}
-                      <button
-                        type="button"
-                        class="ff-dedupe__cols ff-dedupe__member"
-                        class:ff-dedupe__member--keeper={keeper}
-                        role="radio"
-                        aria-checked={keeper}
-                        disabled={skipped || duplicates.busy}
-                        data-duplicate-member={member.id}
-                        title={member.path}
-                        onclick={() => chooseKeeper(group, member.id)}
-                      >
-                        <span class="ff-radio" class:ff-radio--on={keeper} aria-hidden="true">
-                          <span class="ff-radio__circle"><span class="ff-radio__dot"></span></span>
-                        </span>
-                        <span class="ff-dedupe__format">{member.format || 'file'}</span>
-                        <span class="ff-dedupe__num">{member.bitrate > 0 ? `${member.bitrate} kbps` : '—'}</span>
-                        <span class="ff-dedupe__num">{trackTime(member.duration_secs)}</span>
-                        <span class="ff-dedupe__num">{member.playlists}</span>
-                        <span class="ff-dedupe__num">{member.cues}</span>
-                        <span class="ff-dedupe__path">{member.file_present ? member.path : `File missing: ${member.path}`}</span>
-                      </button>
-                    {/each}
-                  </div>
-                  <footer class="ff-dedupe__bar">
-                    <Button label={skipped ? 'Undo skip' : 'Skip'} size="small" variant="ghost" disabled={duplicates.busy} onclick={() => toggleSkip(group)} />
-                    <Button label="Merge" size="small" disabled={skipped || duplicates.busy} onclick={() => void mergeGroup(group)} />
-                  </footer>
-                </section>
-              {/each}
-            </div>
-          </div>
-        {/if}
-      {:else if duplicates.archive.length === 0}
-        <p class="ff-dedupe__note" data-archive-empty>Nothing merged yet.</p>
-      {:else}
-        <p class="ff-dedupe__note">Merged copies are out of your library, but their files are still on disk. Restore puts them back with their playlists and cues.</p>
-        <div class="ff-dedupe__table">
-          <div class="ff-dedupe__archived ff-dedupe__archived--head" aria-hidden="true">
-            <span>Song</span><span>Merged</span><span>Copies</span><span></span>
-          </div>
-          <div class="ff-dedupe__scroll">
-            {#each duplicates.archive as merge (merge.merge_id)}
-              <div class="ff-dedupe__archived" data-archived-merge={merge.merge_id} title={merge.tracks.map((t) => t.path).join('\n')}>
-                <span class="ff-dedupe__title">{archiveHeading(merge)}</span>
-                <span class="ff-dedupe__num-text">{archiveDate(merge)}</span>
-                <span class="ff-dedupe__num-text">{archiveCopies(merge)}</span>
-                <Button label="Restore" size="small" disabled={duplicates.busy} onclick={() => void restoreMerge(merge.merge_id)} />
+      {#if onGroups && !duplicates.loading && duplicates.groups.length > 0}
+        <div class="ff-dedupe__list">
+          {#each duplicates.groups as group (group.key)}
+            {@const keeperId = keeperOf(group, duplicates.choices)}
+            {@const picked = duplicates.picked.has(group.key)}
+            {@const places = copyPlaces(group.members.map((m) => m.path))}
+            <section class="ff-dedupe__song" class:ff-dedupe__song--off={!picked} data-duplicate-group={group.key} data-confidence={group.confidence}>
+              <label class="ff-checkbox ff-dedupe__pick" class:ff-checkbox--on={picked}>
+                <input
+                  class="ff-dedupe__input"
+                  type="checkbox"
+                  checked={picked}
+                  disabled={duplicates.busy}
+                  data-duplicate-pick={group.key}
+                  onchange={() => togglePick(group)}
+                />
+                <span class="ff-checkbox__box">
+                  <span class="ff-checkbox__icon">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                      <polyline points="2,5.5 4.2,7.5 8,2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </span>
+                </span>
+                <span class="ff-dedupe__texts">
+                  <span class="ff-dedupe__title">{groupHeading(group)}</span>
+                  <span class="ff-dedupe__note" data-duplicate-reason>{groupNote(group, duplicates.choices)}</span>
+                </span>
+              </label>
+              <div class="ff-dedupe__copies" role="radiogroup" aria-label={`Copy of ${groupHeading(group)} to keep`}>
+                {#each group.members as member, i (member.id)}
+                  {@const keeper = member.id === keeperId}
+                  <label class="ff-dedupe__copy" class:ff-dedupe__copy--keep={keeper} data-duplicate-member={member.id} title={member.path}>
+                    <input
+                      class="ff-dedupe__input"
+                      type="radio"
+                      name={`ff-dedupe-keeper-${group.key}`}
+                      checked={keeper}
+                      disabled={duplicates.busy}
+                      onchange={() => chooseKeeper(group, member.id)}
+                    />
+                    <span class="ff-radio" class:ff-radio--on={keeper}>
+                      <span class="ff-radio__circle"><span class="ff-radio__dot"></span></span>
+                    </span>
+                    <span class="ff-dedupe__fate">{picked ? (keeper ? 'Keep' : 'Merge') : ''}</span>
+                    <span class="ff-dedupe__facts">
+                      {copyFacts(member, group)}
+                      {#if !member.file_present}<span class="ff-dedupe__missing"> · file missing</span>{/if}
+                    </span>
+                    <span class="ff-dedupe__place">{places[i]}</span>
+                  </label>
+                {/each}
               </div>
-            {/each}
-          </div>
+            </section>
+          {/each}
         </div>
+        <p class="ff-dedupe__foot">Playlists, cues and ratings move to the copy you keep. No file is deleted.</p>
+      {:else if !onGroups && duplicates.archive.length > 0}
+        <div class="ff-dedupe__list">
+          {#each duplicates.archive as merge (merge.merge_id)}
+            <div data-archived-merge={merge.merge_id} title={merge.tracks.map((t) => t.path).join('\n')}>
+              <SettingRow title={archiveHeading(merge)} description={archiveNote(merge)}>
+                {#snippet control()}
+                  <Button label="Restore" size="small" disabled={duplicates.busy} onclick={() => void restoreMerge(merge.merge_id)} />
+                {/snippet}
+              </SettingRow>
+            </div>
+          {/each}
+        </div>
+        <p class="ff-dedupe__foot">Restore puts a copy back in your library with its playlists and cues.</p>
       {/if}
     </div>
   {/snippet}
   {#snippet actions()}
-    <Button label="Done" variant={canMergeAll ? 'ghost' : 'primary'} onclick={closeDuplicates} />
-    {#if canMergeAll}
-      <Button label={exactLeft === 1 ? 'Merge 1 exact match' : `Merge ${exactLeft} exact matches`} variant="primary" disabled={duplicates.busy} onclick={() => void mergeAllExact()} />
+    <Button label="Done" variant={canMerge ? 'default' : 'primary'} onclick={closeDuplicates} />
+    {#if canMerge}
+      <Button label={mergeLabel(toMerge)} variant="primary" disabled={duplicates.busy || toMerge === 0} onclick={() => void mergePicked()} />
     {/if}
   {/snippet}
 </Dialog>
 
 <style>
+  :global(.ff-dialog--wide:has(.ff-dedupe)) {
+    min-width: 0;
+    max-width: 620px;
+    width: min(620px, calc(100vw - 48px));
+    padding: 20px 22px;
+  }
   .ff-dedupe {
     display: flex;
     flex-direction: column;
     gap: var(--ff-space-5);
+    font-size: var(--ff-type-caption);
+    line-height: 1.5;
+    color: var(--ff-text-mid);
   }
   .ff-dedupe p {
     margin: 0;
   }
-  .ff-dedupe__note {
-    font-size: var(--ff-type-compact);
-    line-height: 1.45;
-    color: var(--ff-text-mid);
+  .ff-dedupe__tabs {
+    position: absolute;
+    top: 17px;
+    right: 22px;
   }
-  .ff-dedupe__message {
+  .ff-dedupe__lead {
     color: var(--ff-text);
   }
-  .ff-dedupe__error {
-    color: var(--ff-danger, var(--ff-text));
+  .ff-dedupe__foot {
+    color: var(--ff-muted);
   }
-  .ff-dedupe__table {
+  .ff-dedupe__error {
+    color: var(--ff-danger);
+  }
+  .ff-dedupe__line {
+    display: flex;
+    align-items: center;
+    gap: var(--ff-space-4);
+    min-height: 28px;
+    color: var(--ff-text);
+  }
+  .ff-dedupe__list {
+    max-height: 56vh;
+    overflow-y: auto;
     border: 1px solid var(--ff-border);
     border-radius: var(--ff-radius-md);
     background: var(--ff-bg);
-    overflow: hidden;
   }
-  .ff-dedupe__scroll {
-    max-height: 52vh;
-    overflow-y: auto;
-  }
-  .ff-dedupe__cols {
-    display: grid;
-    grid-template-columns: 32px 56px 76px 44px 64px 40px minmax(0, 1fr);
-    align-items: center;
-    gap: var(--ff-space-4);
-    padding: 0 var(--ff-space-4);
-  }
-  .ff-dedupe__cols--head,
-  .ff-dedupe__archived--head {
-    height: 28px;
-    font-family: var(--ff-font-mono);
-    font-size: var(--ff-type-label);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ff-muted);
-    border-bottom: 1px solid var(--ff-border);
-  }
-  .ff-dedupe__groups .ff-dedupe__cols--head {
-    border-bottom: none;
-    padding: 0 calc(var(--ff-space-4) + 1px);
-  }
-  .ff-dedupe__panels {
-    display: flex;
-    flex-direction: column;
-    gap: var(--ff-space-5);
-  }
-  .ff-dedupe__group {
-    border: 1px solid var(--ff-border-hi);
-    border-radius: var(--ff-radius-md);
-    background: var(--ff-bg);
-    overflow: hidden;
-  }
-  .ff-dedupe__head {
-    display: flex;
-    align-items: center;
-    gap: var(--ff-space-2);
-    padding: var(--ff-space-4);
-  }
-  .ff-dedupe__bar {
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--ff-space-2);
-    padding: var(--ff-space-3) var(--ff-space-4);
+  .ff-dedupe__list > * + * {
     border-top: 1px solid var(--ff-border);
-    background: var(--ff-surface);
+  }
+  .ff-dedupe__list :global(.ff-setting-row) {
+    padding: var(--ff-space-4) var(--ff-space-5);
+  }
+  .ff-dedupe__song {
+    padding: var(--ff-space-4) var(--ff-space-3) var(--ff-space-3);
+  }
+  .ff-dedupe__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .ff-dedupe__pick {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--ff-space-4);
+    padding: var(--ff-space-1) var(--ff-space-3);
+    user-select: none;
+  }
+  .ff-dedupe__pick .ff-checkbox__box {
+    margin-top: 3px;
+  }
+  .ff-dedupe__input:focus-visible + .ff-checkbox__box {
+    box-shadow: 0 0 0 2px var(--ff-bg), 0 0 0 3px rgba(255, 255, 255, 0.6);
   }
   .ff-dedupe__texts {
-    flex: 1 1 0;
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: var(--ff-space-1);
   }
   .ff-dedupe__title {
-    min-width: 0;
     font-size: var(--ff-type-body);
     font-weight: 500;
+    line-height: 1.4;
     color: var(--ff-text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .ff-dedupe__sub {
+  .ff-dedupe__song--off .ff-dedupe__title {
+    font-weight: 400;
+    color: var(--ff-text-mid);
+  }
+  .ff-dedupe__note {
     font-size: var(--ff-type-caption);
-    color: var(--ff-text-mid);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.4;
+    color: var(--ff-muted);
   }
-  .ff-dedupe__member {
-    width: 100%;
-    height: 30px;
-    border: none;
-    border-top: 1px solid var(--ff-border);
-    background: none;
-    font: inherit;
-    font-size: var(--ff-type-compact);
-    color: var(--ff-text-mid);
-    text-align: left;
-    cursor: pointer;
+  .ff-dedupe__copies {
+    display: flex;
+    flex-direction: column;
+    margin-top: var(--ff-space-3);
+    padding-left: 22px;
   }
-  .ff-dedupe__member:not(:disabled):hover {
-    background: var(--ff-hover);
-    color: var(--ff-text);
-  }
-  .ff-dedupe__member:focus-visible {
-    outline: 1px solid var(--ff-border-hover);
-    outline-offset: -1px;
-  }
-  .ff-dedupe__member--keeper,
-  .ff-dedupe__member--keeper:not(:disabled):hover {
-    background: var(--ff-select);
-    color: var(--ff-text);
-    cursor: default;
-  }
-  .ff-dedupe__member:disabled {
-    cursor: default;
-  }
-  .ff-dedupe__group--skipped .ff-dedupe__member {
-    opacity: 0.45;
-  }
-  .ff-dedupe__member .ff-radio {
-    justify-self: center;
-  }
-  .ff-dedupe__format {
-    text-transform: uppercase;
-  }
-  .ff-dedupe__num {
-    text-align: right;
-    font-family: var(--ff-font-mono);
-    font-size: var(--ff-type-num);
-  }
-  .ff-dedupe__cols--head .ff-dedupe__num {
-    font-size: var(--ff-type-label);
-  }
-  .ff-dedupe__path {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--ff-text-mid);
-  }
-  .ff-dedupe__member--keeper .ff-dedupe__path {
-    color: var(--ff-text);
-  }
-  .ff-dedupe__archived {
+  .ff-dedupe__copy {
+    position: relative;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 88px 64px 72px;
+    grid-template-columns: 14px 38px minmax(0, 1fr) minmax(0, auto);
     align-items: center;
     gap: var(--ff-space-4);
-    min-height: 40px;
-    padding: 0 var(--ff-space-4);
+    min-height: 26px;
+    padding: 0 var(--ff-space-3);
+    border-radius: var(--ff-radius-sm);
     font-size: var(--ff-type-compact);
-  }
-  .ff-dedupe__archived--head {
-    min-height: 28px;
-    font-size: var(--ff-type-label);
-  }
-  .ff-dedupe__archived :global(.ff-btn) {
-    justify-self: end;
-  }
-  .ff-dedupe__scroll .ff-dedupe__archived + .ff-dedupe__archived {
-    border-top: 1px solid var(--ff-border);
-  }
-  .ff-dedupe__num-text {
-    font-family: var(--ff-font-mono);
-    font-size: var(--ff-type-num);
     color: var(--ff-text-mid);
+    cursor: pointer;
+    user-select: none;
+  }
+  .ff-dedupe__copy:hover {
+    background: var(--ff-hover);
+  }
+  .ff-dedupe__copy:has(.ff-dedupe__input:focus-visible) {
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+  }
+  .ff-dedupe__copy--keep {
+    color: var(--ff-text);
+  }
+  .ff-dedupe__facts,
+  .ff-dedupe__place {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ff-dedupe__fate {
+    color: var(--ff-text-mid);
+  }
+  .ff-dedupe__copy--keep .ff-dedupe__fate {
+    font-weight: 600;
+    color: var(--ff-text);
+  }
+  .ff-dedupe__place {
+    max-width: 240px;
+    font-size: var(--ff-type-caption);
+    color: var(--ff-text-mid);
+  }
+  .ff-dedupe__copy--keep .ff-dedupe__place {
+    color: var(--ff-text);
+  }
+  .ff-dedupe__missing {
+    color: var(--ff-danger);
   }
 </style>
