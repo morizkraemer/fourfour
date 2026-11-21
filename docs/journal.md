@@ -825,3 +825,4 @@
 2026-11-21 09:55 orchestrator ui-dupes round 4 posted: A panel per song (ui-dupes-r2 fce313d, rec), B header band (ui-dupes-r4-b); pick on card q60-duplicates
 2026-11-21 10:00 orchestrator Merlin rejected duplicates round 4 (unchecked shots, misaligned headers). Redesign handed to a Fable seat agent (branch ui-dupes-r5) with full feedback history; lesson saved to memory
 2026-11-21 10:19 orchestrator Fable duplicates r5: one inset list like Library check, tick per song + keeper radio with plain-language copy lines, one footer 'Merge N songs', short distinguishing paths, 620 px dialog; per-song Skip/Merge removed; smoke 198 pass [branch ui-dupes-r5 0aa6f3a]
+2026-11-21 11:30 orchestrator xplat: CI run 44896526770 green on linux, windows (nsis + self-check), macos (dmg + check-dmg), notices; webkit smoke flaky (allowed to fail); tempo limit set to 8 cents (Windows measured 6.57), needs Merlin's OK [branch xplat 0602d6c, PR 40]
