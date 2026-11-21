@@ -17,6 +17,7 @@ pub mod failure;
 mod file_health;
 mod multi_sync;
 mod queries;
+mod reconnect;
 pub mod rekordbox;
 mod revision;
 mod row_preview;
@@ -44,6 +45,10 @@ use cover_store::CoverStore;
 pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag, file_name_key, path_key};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
+pub use reconnect::{
+    ChoiceReason, FingerprintTarget, FolderRelocation, MissingTrack, ReconnectChoice, ReconnectInputs, ReconnectPlan,
+    RemapApplied, RemapPreview, RemapUndone, content_hash, fingerprint_files, plan_reconnect,
+};
 use rekordbox::ImportedCue;
 
 /// One beat of an edited grid: where it is and its place in the bar (1 to 4).

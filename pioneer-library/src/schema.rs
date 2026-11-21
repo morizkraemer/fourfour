@@ -135,6 +135,31 @@ const PENDING_ARTWORK_DDL: &str = "CREATE TABLE IF NOT EXISTS pending_artwork (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE
 );";
 
+/// Additive, no version bump: a sampled content hash per track, taken while its file is there, so a moved
+/// file can be recognised later; and the folder relocations that can still be undone.
+const RECONNECT_DDL: &str = "
+CREATE TABLE IF NOT EXISTS track_fingerprints (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    size     INTEGER NOT NULL,
+    hash     TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS folder_relocations (
+    id         INTEGER PRIMARY KEY,
+    old_root   TEXT NOT NULL,
+    new_root   TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS folder_relocation_tracks (
+    relocation_id INTEGER NOT NULL REFERENCES folder_relocations(id) ON DELETE CASCADE,
+    track_id      INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    old_path      TEXT NOT NULL,
+    new_path      TEXT NOT NULL,
+    PRIMARY KEY (relocation_id, track_id)
+);
+";
+
 pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .context("Failed to set WAL journal mode")?;
@@ -194,6 +219,7 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
         }
     }
     conn.execute_batch(PENDING_ARTWORK_DDL).context("Failed to create the pending artwork queue")?;
+    conn.execute_batch(RECONNECT_DDL).context("Failed to create the reconnect tables")?;
 
     Ok(())
 }
