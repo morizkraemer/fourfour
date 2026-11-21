@@ -11,6 +11,8 @@
 mod analysis_write;
 pub mod backup;
 mod cover_store;
+mod dedupe;
+mod dedupe_merge;
 mod duplicates;
 mod edits;
 pub mod failure;
@@ -44,6 +46,8 @@ pub use cover_store::{COVERS_DIR, covers_dir_of};
 pub use schema::{SCHEMA_VERSION, TAG_FOLD_VERSION};
 use cover_store::CoverStore;
 pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag, file_name_key, path_key};
+pub use dedupe::{DuplicateConfidence, DuplicateGroup, DuplicateMember, DuplicateRow, files_identical, find_duplicate_groups, is_lossless};
+pub use dedupe_merge::{ARCHIVE_DIR, ArchivedMerge, ArchivedTrack, MergeFailure, MergeOutcome, MergeReport, MergeRequest, RestoreOutcome};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
 pub use reconnect::{

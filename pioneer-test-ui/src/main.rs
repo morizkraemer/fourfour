@@ -9,6 +9,7 @@ mod analysis_run;
 mod artwork_thumbs;
 mod app_log;
 mod backup_commands;
+mod duplicate_commands;
 mod band_analysis;
 mod command_error;
 mod dto;
@@ -1498,6 +1499,10 @@ fn main() {
             stick_commands::stick_remove_playlists,
             stick_commands::get_volume_capacity,
             stick_commands::plan_usb_sync,
+            duplicate_commands::list_duplicate_groups,
+            duplicate_commands::apply_duplicate_merges,
+            duplicate_commands::list_duplicate_archive,
+            duplicate_commands::restore_duplicate_merge,
             file_health::check_library_files,
             file_health::get_library_health,
             file_health::relocate_missing_in_folder,

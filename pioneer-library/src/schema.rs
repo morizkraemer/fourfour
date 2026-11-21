@@ -135,8 +135,6 @@ const PENDING_ARTWORK_DDL: &str = "CREATE TABLE IF NOT EXISTS pending_artwork (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE
 );";
 
-/// Additive, no version bump: a sampled content hash per track, taken while its file is there, so a moved
-/// file can be recognised later; and the folder relocations that can still be undone.
 const RECONNECT_DDL: &str = "
 CREATE TABLE IF NOT EXISTS track_fingerprints (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
@@ -158,6 +156,28 @@ CREATE TABLE IF NOT EXISTS folder_relocation_tracks (
     new_path      TEXT NOT NULL,
     PRIMARY KEY (relocation_id, track_id)
 );
+";
+
+const DUPLICATE_ARCHIVE_DDL: &str = "
+CREATE TABLE IF NOT EXISTS duplicate_merges (
+    id             INTEGER PRIMARY KEY,
+    keeper_id      INTEGER NOT NULL,
+    confidence     TEXT    NOT NULL,
+    merged_at      TEXT    NOT NULL,
+    comment_before TEXT,
+    comment_after  TEXT,
+    keeper_digest  TEXT,
+    playlist_adds  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS archived_tracks (
+    track_id   INTEGER PRIMARY KEY,
+    merge_id   INTEGER NOT NULL REFERENCES duplicate_merges(id) ON DELETE CASCADE,
+    snapshot   TEXT    NOT NULL,
+    cover_hash TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_archived_tracks_merge ON archived_tracks(merge_id);
+CREATE INDEX IF NOT EXISTS idx_archived_tracks_cover ON archived_tracks(cover_hash);
 ";
 
 pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
@@ -220,6 +240,7 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     }
     conn.execute_batch(PENDING_ARTWORK_DDL).context("Failed to create the pending artwork queue")?;
     conn.execute_batch(RECONNECT_DDL).context("Failed to create the reconnect tables")?;
+    conn.execute_batch(DUPLICATE_ARCHIVE_DDL).context("Failed to create the duplicate archive")?;
 
     Ok(())
 }
