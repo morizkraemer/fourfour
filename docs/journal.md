@@ -790,3 +790,6 @@
 2026-11-21 02:46 orch-worker Q24 cost: $1.8242 (sonnet) — ✅ **Done** - Q24 is unchanged: head `2e3479f` on `drain/Q24-20261121`, nothing pushed. - This was the last stale monitor timeout. Nothing is pending. [branch drain/Q24-20261121]
 2026-11-21 02:47 orch-worker Q24 cost: $1.82 (sonnet) - placeholder id app.ffdj.library + one-time move of old app dirs (rename, else copy+verify, marker), library.db is plain SQLite so no key to move; scripts read the id from tauri.conf.json; Mac check open [branch drain/Q24-20261121 2e3479f]
 2026-11-21 02:47 orchestrator Q61 spawn: moved-file reconnect + relocate, sonnet high $15
+2026-11-21 02:54 orch-worker Q62 cost: $2.7086 (sonnet) — RESULT: head `c49585d` on `drain/Q62-20261121`. Nothing pushed or merged. Cargo target dir deleted. ✅ **Done** - All 5 formats are built: M3U8, CSV, text, Trakt [branch drain/Q62-20261121]
+2026-11-21 02:55 orch-worker Q62 cost: $2.71 (sonnet) - playlist export M3U8/CSV/text/NML/Rekordbox XML, XML round-trips through our importer, menu entries + copy tracklist; NML/XML untested in Traktor/Rekordbox [branch drain/Q62-20261121 c49585d]
+2026-11-21 02:55 orchestrator Q60 spawn: duplicate cleanup (keeper, merge, archive + restore, no file deletes), sonnet high $20
