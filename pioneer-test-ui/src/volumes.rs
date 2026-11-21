@@ -375,6 +375,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(windows, ignore = "issue #39: '/' is not a Windows volume root")]
     fn root_is_refused() {
         assert!(refuse_system_volume(Path::new("/")).is_err());
     }

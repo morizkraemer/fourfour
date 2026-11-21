@@ -665,6 +665,9 @@ fn channels_stay_paired_through_underruns() {
     let mut checked = 0usize;
     for _ in 0..3_000 {
         let buf = rig.backend.render_frames(32);
+        if buf.iter().all(|sample| *sample == 0.0) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         for f in buf.chunks(2) {
             if f[0] > 0.05 && f[1] > 0.05 {
                 if f[1] > f[0] {
