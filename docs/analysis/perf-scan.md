@@ -43,7 +43,7 @@ Only the first cold read per file counts (the fadvise did not drop pages of thes
 
 ## Not done / needs the Mac
 
-- `fadvise` is Linux only. macOS readahead (`fcntl(F_RDAHEAD, 0)`) is not set; the Mac saving is unmeasured and the tag pass there behaves as before.
+- macOS uses `fcntl(F_RDAHEAD, 0)` on the same fds. Checked: the helper compiles for `aarch64-apple-darwin` in isolation (`cargo check` of a one-file crate with `libc`); a full `cargo check -p pioneer-test-ui` for macOS is blocked on dev by C deps (sqlcipher, objc2 need Apple `cc -arch`). Not measured: the actual Mac byte saving.
 - Reading the cover only (no other tag) would need a lofty change; floor for the cover pass is about 1.5 GB of pictures.
 
 Gates at the last commit: `cargo test --workspace` 655 passed, 0 failed; `cargo check -p pioneer-test-ui --features dev-bins --bins` clean. No `app/` change, so vitest, svelte-check and Playwright were not run. Rejected 2 of 5 steps (rows 4, 5), no streak.

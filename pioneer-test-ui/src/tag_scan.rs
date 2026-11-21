@@ -214,7 +214,13 @@ fn advise_random_access(file: &File) {
     unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) };
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "macos")]
+fn advise_random_access(file: &File) {
+    use std::os::fd::AsRawFd;
+    unsafe { libc::fcntl(file.as_raw_fd(), libc::F_RDAHEAD, 0) };
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn advise_random_access(_file: &File) {}
 
 pub fn read_track_tags(path: &Path, id: u32) -> Result<Track> {
@@ -598,6 +604,21 @@ mod tests {
         assert_tags_equal_and_cover_kept("c.flac", &flac_with_cover(&cover), &cover);
         assert_tags_equal_and_cover_kept("c.aiff", &aiff_with_cover(&cover), &cover);
         assert_tags_equal_and_cover_kept("c.wav", &wav_with_cover(&cover), &cover);
+    }
+
+    #[test]
+    fn advising_random_access_is_harmless_on_any_file() {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-advise-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.bin");
+        std::fs::write(&path, b"abc").unwrap();
+        let mut file = File::open(&path).unwrap();
+        advise_random_access(&file);
+        advise_random_access(&file);
+        let mut text = String::new();
+        file.read_to_string(&mut text).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(text, "abc");
     }
 
     #[test]
