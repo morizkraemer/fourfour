@@ -17,6 +17,7 @@ pub mod failure;
 mod file_health;
 mod multi_sync;
 mod queries;
+pub mod playlist_export;
 pub mod rekordbox;
 mod revision;
 mod row_preview;
