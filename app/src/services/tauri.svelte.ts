@@ -1723,6 +1723,85 @@ export async function locateTrackFile(trackId: number, path: string): Promise<{ 
   return invoke('locate_track_file', { trackId, path });
 }
 
+export type ChoiceReason = 'multiple_candidates' | 'unconfirmed' | 'copy' | 'shared_file';
+
+export interface ReconnectChoice {
+  track_id: number;
+  reason: ChoiceReason;
+  candidates: string[];
+}
+
+export interface ReconnectPlan {
+  reconnect: Relinked[];
+  needs_choice: ReconnectChoice[];
+  still_missing: number[];
+}
+
+export interface RemapPreview {
+  total: number;
+  found: number;
+  still_missing: number;
+}
+
+export interface RemapApplied {
+  relocation_id: number;
+  remapped: Relinked[];
+  still_missing: number;
+}
+
+export interface RemapUndone {
+  reverted: Relinked[];
+  skipped: number;
+}
+
+export interface FolderRelocation {
+  id: number;
+  old_root: string;
+  new_root: string;
+  tracks: number;
+  created_at: string;
+}
+
+export async function findReconnectCandidates(folders: string[]): Promise<ReconnectPlan> {
+  if (useBrowserMocks()) {
+    return { reconnect: mockHealth.missing.map((id) => ({ track_id: id, source_path: `${folders[0]}/track-${id}.mp3` })), needs_choice: [], still_missing: [] };
+  }
+  return invoke('find_reconnect_candidates', { folders });
+}
+
+export async function applyReconnects(picks: { track_id: number; path: string }[]): Promise<{ relinked: Relinked[]; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    const ids = picks.map((p) => p.track_id);
+    mockHealth = { ...mockHealth, missing: mockHealth.missing.filter((id) => !ids.includes(id)), relocated: [...mockHealth.relocated, ...ids] };
+    return { relinked: picks.map((p) => ({ track_id: p.track_id, source_path: p.path })), health: mockHealth };
+  }
+  return invoke('apply_reconnects', { picks });
+}
+
+export async function previewRelocateFolder(oldRoot: string, newRoot: string): Promise<RemapPreview> {
+  if (useBrowserMocks()) return { total: mockHealth.missing.length, found: mockHealth.missing.length, still_missing: 0 };
+  return invoke('preview_relocate_folder', { oldRoot, newRoot });
+}
+
+export async function applyRelocateFolder(oldRoot: string, newRoot: string): Promise<{ applied: RemapApplied; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    const remapped = mockHealth.missing.map((id) => ({ track_id: id, source_path: `${newRoot}/track-${id}.mp3` }));
+    mockHealth = { ...mockHealth, missing: [], relocated: [...mockHealth.relocated, ...remapped.map((r) => r.track_id)] };
+    return { applied: { relocation_id: 1, remapped, still_missing: 0 }, health: mockHealth };
+  }
+  return invoke('apply_relocate_folder', { oldRoot, newRoot });
+}
+
+export async function undoRelocateFolder(relocationId: number): Promise<{ undone: RemapUndone; health: LibraryHealth }> {
+  if (useBrowserMocks()) return { undone: { reverted: [], skipped: 0 }, health: mockHealth };
+  return invoke('undo_relocate_folder', { relocationId });
+}
+
+export async function lastFolderRelocation(): Promise<FolderRelocation | null> {
+  if (useBrowserMocks()) return null;
+  return invoke('last_folder_relocation');
+}
+
 export function listenToLibraryHealth(callback: (health: LibraryHealth) => void) {
   return subscribe('library-health', callback);
 }

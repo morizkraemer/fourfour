@@ -214,6 +214,20 @@ export function relocateFailureText(err: unknown): string {
   });
 }
 
+export function reconnectFailureText(err: unknown): string {
+  return failureText("Couldn't reconnect the files.", err, {
+    rules: [
+      { test: /is not a folder/i, reply: "That isn't a folder. Choose a folder." },
+      { test: /copy, not a move/i, reply: 'The original file is still where it was, so the other file is a copy.' },
+      { test: /already belongs to another track/i, reply: 'Another track already uses that file.' },
+      { test: /is not a readable file/i, reply: "fourfour can't read that file. Choose a different one." },
+      { test: /No file of .* was found/i, reply: 'None of the files are in that folder under the same names.' },
+      { test: /same folder/i, reply: 'The old and the new folder are the same.' },
+    ],
+    next: 'Choose the folder again.',
+  });
+}
+
 export function libraryOpenFailureText(err: unknown): string {
   return failureText("Couldn't open a library in that folder.", err, { next: 'Choose another folder.' });
 }

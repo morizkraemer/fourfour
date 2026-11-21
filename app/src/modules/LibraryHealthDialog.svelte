@@ -11,6 +11,7 @@
     showProblemTracks,
   } from '../stores/file-health.svelte.ts';
   import { checkSummary, relocateSummary } from '../lib/fileHealth.ts';
+  import ReconnectPanel from './ReconnectPanel.svelte';
 
   const MAX_NAMES = 5;
 
@@ -69,6 +70,7 @@
           </div>
         {/if}
       </div>
+      <ReconnectPanel />
       {#if report}
         <section class="ff-health__report" data-relocate-report>
           <h3>Relocate</h3>

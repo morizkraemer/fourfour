@@ -17,6 +17,7 @@ mod file_health;
 mod heap;
 mod import_plan;
 mod perf_probe;
+mod reconnect_commands;
 mod playback;
 mod playlist_export_commands;
 mod recovery_commands;
@@ -1501,6 +1502,12 @@ fn main() {
             file_health::get_library_health,
             file_health::relocate_missing_in_folder,
             file_health::locate_track_file,
+            reconnect_commands::find_reconnect_candidates,
+            reconnect_commands::apply_reconnects,
+            reconnect_commands::preview_relocate_folder,
+            reconnect_commands::apply_relocate_folder,
+            reconnect_commands::undo_relocate_folder,
+            reconnect_commands::last_folder_relocation,
             backup_commands::get_backup_status,
             backup_commands::export_backup,
             backup_commands::read_backup,
@@ -1670,6 +1677,17 @@ mod tests {
             &["export_playlist", "playlist_export_file_name", "playlist_tracklist"],
         );
         assert_off_main_thread(include_str!("file_health.rs"), &["locate_track_file"]);
+        assert_off_main_thread(
+            include_str!("reconnect_commands.rs"),
+            &[
+                "find_reconnect_candidates",
+                "apply_reconnects",
+                "preview_relocate_folder",
+                "apply_relocate_folder",
+                "undo_relocate_folder",
+                "last_folder_relocation",
+            ],
+        );
         assert_off_main_thread(
             include_str!("stick_commands.rs"),
             &["get_stick", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],

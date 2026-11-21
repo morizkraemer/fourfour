@@ -41,7 +41,7 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-fn lock<T>(m: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, String> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, String> {
     m.lock().map_err(|e| e.to_string())
 }
 
@@ -89,7 +89,7 @@ pub fn run_check(library: &SharedLibrary, health: &SharedHealth) -> Result<Libra
     Ok(state.clone())
 }
 
-fn mark_relinked(health: &SharedHealth, ids: impl IntoIterator<Item = i64>) -> Result<LibraryHealth, String> {
+pub(crate) fn mark_relinked(health: &SharedHealth, ids: impl IntoIterator<Item = i64>) -> Result<LibraryHealth, String> {
     let mut state = lock(health)?;
     for id in ids {
         state.missing.remove(&id);
@@ -126,6 +126,9 @@ pub fn spawn_check(app: AppHandle, library: SharedLibrary, health: SharedHealth)
     tauri::async_runtime::spawn_blocking(move || match run_check(&library, &health) {
         Ok(result) => {
             let _ = app.emit(HEALTH_EVENT, result);
+            if let Err(e) = crate::reconnect_commands::backfill_fingerprints(&library) {
+                crate::app_log::warn(&format!("content hashing failed: {e}"));
+            }
         }
         Err(e) => crate::app_log::warn(&format!("library file check failed: {e}")),
     });

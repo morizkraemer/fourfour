@@ -1,17 +1,27 @@
 import {
+  applyRelocateFolder,
+  applyReconnects,
   checkLibraryFiles,
+  findReconnectCandidates,
   getLibraryHealth,
+  lastFolderRelocation,
   listenToLibraryHealth,
   locateTrackFile,
   pickDirectory,
   pickFile,
+  previewRelocateFolder,
   relocateMissingInFolder,
+  undoRelocateFolder,
+  type FolderRelocation,
   type LibraryHealth,
+  type ReconnectPlan,
   type Relinked,
   type RelocateReport,
+  type RemapPreview,
 } from '../services/tauri.svelte.ts';
 import { RELOCATED_MARK_MS, type FileState } from '../lib/fileHealth.ts';
-import { failureText, relocateFailureText } from '../lib/userErrors.ts';
+import { commonFolder } from '../lib/reconnect.ts';
+import { failureText, reconnectFailureText, relocateFailureText } from '../lib/userErrors.ts';
 import { fileStatus } from './file-status.svelte.ts';
 import { library, bumpLibraryTracks } from './library.svelte.ts';
 import { ui } from './ui.svelte.ts';
@@ -19,6 +29,18 @@ import { ui } from './ui.svelte.ts';
 const AUDIO_FILTER = { name: 'Audio', extensions: ['mp3', 'wav', 'aif', 'aiff', 'flac', 'm4a', 'aac', 'ogg', 'alac'] };
 
 export const relocateResult = $state({ report: null as RelocateReport | null, error: '' });
+
+export const reconnectState = $state({ busy: false, plan: null as ReconnectPlan | null, error: '' });
+
+export const folderRelocation = $state({
+  open: false,
+  oldRoot: '',
+  newRoot: '',
+  preview: null as RemapPreview | null,
+  last: null as FolderRelocation | null,
+  busy: false,
+  error: '',
+});
 
 const relocatedTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
@@ -136,6 +158,138 @@ export async function locateTrack(trackId: number) {
   } catch (err) {
     console.info('relocate failed:', err);
     relocateResult.error = relocateFailureText(err);
+  }
+}
+
+export async function findMovedFiles() {
+  const folder = await pickDirectory();
+  if (!folder) return;
+  reconnectState.busy = true;
+  reconnectState.error = '';
+  try {
+    const plan = await findReconnectCandidates([folder]);
+    let reconnected: Relinked[] = [];
+    if (plan.reconnect.length > 0) {
+      const { relinked, health } = await applyReconnects(plan.reconnect.map((r) => ({ track_id: r.track_id, path: r.source_path })));
+      patchTrackPaths(relinked);
+      applyHealth(health, relinked.map((r) => r.track_id));
+      reconnected = relinked;
+    }
+    reconnectState.plan = { ...plan, reconnect: reconnected };
+  } catch (err) {
+    console.info('reconnect failed:', err);
+    reconnectState.error = reconnectFailureText(err);
+  } finally {
+    reconnectState.busy = false;
+    fileStatus.dialogOpen = true;
+  }
+}
+
+export async function chooseReconnect(trackId: number, path: string) {
+  reconnectState.error = '';
+  try {
+    const { relinked, health } = await applyReconnects([{ track_id: trackId, path }]);
+    patchTrackPaths(relinked);
+    applyHealth(health, [trackId]);
+    const plan = reconnectState.plan;
+    if (plan) {
+      reconnectState.plan = {
+        reconnect: [...plan.reconnect, ...relinked],
+        needs_choice: plan.needs_choice.filter((c) => c.track_id !== trackId),
+        still_missing: plan.still_missing,
+      };
+    }
+  } catch (err) {
+    console.info('reconnect failed:', err);
+    reconnectState.error = reconnectFailureText(err);
+  }
+}
+
+function missingTrackPaths(): string[] {
+  return library.tracks.filter((t) => fileStatus.byId[t.id] === 'missing').map((t) => t.filePath);
+}
+
+async function refreshLastRelocation() {
+  try {
+    folderRelocation.last = await lastFolderRelocation();
+  } catch (err) {
+    console.info('lastFolderRelocation failed:', err);
+  }
+}
+
+export async function openFolderRelocation() {
+  folderRelocation.open = true;
+  folderRelocation.error = '';
+  folderRelocation.preview = null;
+  folderRelocation.newRoot = '';
+  folderRelocation.oldRoot = commonFolder(missingTrackPaths());
+  await refreshLastRelocation();
+}
+
+export function closeFolderRelocation() {
+  folderRelocation.open = false;
+}
+
+export async function previewFolderRelocation() {
+  folderRelocation.preview = null;
+  folderRelocation.error = '';
+  const { oldRoot, newRoot } = folderRelocation;
+  if (!oldRoot.trim() || !newRoot) return;
+  folderRelocation.busy = true;
+  try {
+    const preview = await previewRelocateFolder(oldRoot.trim(), newRoot);
+    if (oldRoot === folderRelocation.oldRoot && newRoot === folderRelocation.newRoot) folderRelocation.preview = preview;
+  } catch (err) {
+    console.info('relocate preview failed:', err);
+    folderRelocation.error = reconnectFailureText(err);
+  } finally {
+    folderRelocation.busy = false;
+  }
+}
+
+export async function chooseNewRoot() {
+  const folder = await pickDirectory();
+  if (!folder) return;
+  folderRelocation.newRoot = folder;
+  await previewFolderRelocation();
+}
+
+export async function applyFolderRelocation() {
+  const { oldRoot, newRoot, preview } = folderRelocation;
+  if (!preview || preview.found === 0) return;
+  folderRelocation.busy = true;
+  folderRelocation.error = '';
+  try {
+    const { applied, health } = await applyRelocateFolder(oldRoot.trim(), newRoot);
+    patchTrackPaths(applied.remapped);
+    applyHealth(health, applied.remapped.map((r) => r.track_id));
+    folderRelocation.preview = null;
+    folderRelocation.newRoot = '';
+    await refreshLastRelocation();
+  } catch (err) {
+    console.info('relocate folder failed:', err);
+    folderRelocation.error = reconnectFailureText(err);
+  } finally {
+    folderRelocation.busy = false;
+  }
+}
+
+export async function undoFolderRelocation() {
+  const last = folderRelocation.last;
+  if (!last) return;
+  folderRelocation.busy = true;
+  folderRelocation.error = '';
+  try {
+    const { undone, health } = await undoRelocateFolder(last.id);
+    patchTrackPaths(undone.reverted);
+    applyHealth(health);
+    folderRelocation.oldRoot = last.old_root;
+    await refreshLastRelocation();
+  } catch (err) {
+    console.info('undo relocate failed:', err);
+    folderRelocation.error = reconnectFailureText(err);
+  } finally {
+    folderRelocation.busy = false;
   }
 }
 
