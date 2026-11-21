@@ -798,3 +798,5 @@
 2026-11-21 03:19 orch-worker Q60 cost: $2.2345 (sonnet) — ✅ **Done** - Nothing new to report. The expired monitor was only a leftover wait watcher; the tests it watched already finished. - The Q60 result stands: head ` [branch drain/Q60-20261121]
 2026-11-21 03:20 orch-worker Q60 cost: $2.23 (sonnet) - duplicate groups (exact file hash or artist+title+2 s), keeper proposal + reason, merge playlists/cues/rating into keeper, archive + restore, no file deletes; additive schema (2 tables) [branch drain/Q60-20261121 b37db02]
 2026-11-21 03:20 orchestrator review-q60-62 spawn: merge Q62+Q61+Q60, validate, headless shots, 3 lab cards, sonnet medium $8
+2026-11-21 03:24 orch-worker hc-L5 cost: $2.2528 (sonnet) — ✅ **Done** - RESULT: head `5a77fdb` on `hc-fuzz`. The corpus is clean, so there were no fixes to make. - Corpus: 200 seeds × 50 mutations = 10,000 cases (12 bas [branch hc-fuzz]
+2026-11-21 03:24 orch-worker hc-L5 cost: $2.25 (sonnet) - 10k fuzz cases, 0 panics/hangs/>2GB; harness example only [branch hc-fuzz 5a77fdb]. Followup: hostile tags + long files, $8
