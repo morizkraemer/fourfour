@@ -7,7 +7,6 @@ import {
   groupHeading,
   groupsAfterMerge,
   keeperOf,
-  memberDetail,
   mergeSummary,
   reasonOf,
   requestFor,
@@ -88,11 +87,6 @@ describe('after a merge', () => {
 });
 
 describe('text', () => {
-  it('shows format, bitrate, length, playlists, cues and a missing file', () => {
-    expect(memberDetail(member(1, { cues: 3, playlists: 1 }))).toBe('FLAC · 900 kbps · 6:20 · 1 playlist · 3 cues');
-    expect(memberDetail(member(1, { bitrate: 0, file_present: false }))).toBe('FLAC · 6:20 · 2 playlists · file missing');
-  });
-
   it('names a group after its keeper with a plain hyphen', () => {
     expect(groupHeading(group(1, 'exact_audio', [1, 2]))).toBe('Hale - Copper Lines');
   });

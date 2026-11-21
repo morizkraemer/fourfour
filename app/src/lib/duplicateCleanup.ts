@@ -1,5 +1,4 @@
-import type { ArchivedMerge, DuplicateGroup, DuplicateMember, MergeReport, MergeRequest } from '../services/tauri.svelte.ts';
-import { trackTime } from './importDuplicates.ts';
+import type { ArchivedMerge, DuplicateGroup, MergeReport, MergeRequest } from '../services/tauri.svelte.ts';
 
 export type KeeperChoices = Record<number, number>;
 
@@ -19,16 +18,6 @@ export function groupHeading(group: DuplicateGroup): string {
   const first = group.members.find((m) => m.id === group.keeper_id) ?? group.members[0];
   if (!first) return '';
   return first.artist ? `${first.artist} - ${first.title}` : first.title;
-}
-
-export function memberDetail(member: DuplicateMember): string {
-  const parts = [member.format || 'file'];
-  if (member.bitrate > 0) parts.push(`${member.bitrate} kbps`);
-  parts.push(trackTime(member.duration_secs));
-  parts.push(count(member.playlists, 'playlist'));
-  if (member.cues > 0) parts.push(count(member.cues, 'cue'));
-  if (!member.file_present) parts.push('file missing');
-  return parts.join(' · ');
 }
 
 export function keeperOf(group: DuplicateGroup, choices: KeeperChoices): number {
