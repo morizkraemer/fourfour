@@ -297,6 +297,8 @@ jobs:
         run: fourfour-analysis-rs/scripts/fetch-models.sh "$MODELS_DIR"
 
       - name: Bundle macOS dmg (unsigned, coreml)
+        env:
+          FOURFOUR_PYTHON: ${{ env.pythonLocation }}/bin/python3
         run: scripts/mac/build-dmg.sh
 
       - name: Check macOS dmg
@@ -383,6 +385,9 @@ jobs:
 
       - name: Windows installer self-check (informational)
         continue-on-error: true
+        timeout-minutes: 10
+        env:
+          MSYS2_ARG_CONV_EXCL: "*"
         run: |
           setup="$(ls target/release/bundle/nsis/*-setup.exe | head -1)"
           dest="$RUNNER_TEMP/fourfour-install"

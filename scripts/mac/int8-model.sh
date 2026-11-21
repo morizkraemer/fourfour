@@ -23,7 +23,7 @@ else
   got="$(sha "$MODELS/beat_this.onnx")"
   [ "$got" = "$FP32_SHA" ] || { echo "int8-model: beat_this.onnx sha256 $got, expected $FP32_SHA" >&2; exit 1; }
   if [ ! -x "$VENV/bin/python" ]; then
-    python3 -m venv "$VENV"
+    "${FOURFOUR_PYTHON:-python3}" -m venv "$VENV"
     "$VENV/bin/pip" install --quiet "${PINS[@]}"
   fi
   "$VENV/bin/python" -I "$ROOT/fourfour-analysis-rs/scripts/quantize_beat_int8.py" "$MODELS/beat_this.onnx" "$OUT.tmp" --per-channel
