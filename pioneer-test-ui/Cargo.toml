@@ -85,3 +85,8 @@ tauri-build = { version = "2", features = [] }
 
 [dev-dependencies]
 fourfour-stretch = { path = "../fourfour-stretch", features = ["count-allocs"] }
+
+[[bin]]
+name = "bench_tags"
+path = "src/dev_bin/bench_tags.rs"
+required-features = ["dev-bins"]

@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use lofty::config::ParseOptions;
+use lofty::file::FileType;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
@@ -14,7 +16,7 @@ const MAX_MP4_ATOMS: usize = 100_000;
 const MAX_MP4_DEPTH: usize = 12;
 const MP4_CONTAINERS: [&[u8; 4]; 7] = [b"moov", b"trak", b"mdia", b"minf", b"udta", b"meta", b"ilst"];
 
-fn check_flac_blocks(file: &mut BufReader<File>) -> Result<()> {
+fn check_flac_blocks<R: Read + Seek>(file: &mut R) -> Result<()> {
     let mut head = [0u8; 10];
     if file.read_exact(&mut head).is_err() {
         return Ok(());
@@ -38,7 +40,7 @@ fn check_flac_blocks(file: &mut BufReader<File>) -> Result<()> {
     anyhow::bail!("FLAC has more than {MAX_FLAC_METADATA_BLOCKS} metadata blocks")
 }
 
-fn walk_mp4_atoms(file: &mut BufReader<File>, mut at: u64, end: u64, depth: usize, count: &mut usize) -> Result<()> {
+fn walk_mp4_atoms<R: Read + Seek>(file: &mut R, mut at: u64, end: u64, depth: usize, count: &mut usize) -> Result<()> {
     while at + 8 <= end {
         *count += 1;
         if *count > MAX_MP4_ATOMS {
@@ -71,8 +73,14 @@ fn walk_mp4_atoms(file: &mut BufReader<File>, mut at: u64, end: u64, depth: usiz
     Ok(())
 }
 
-fn check_tag_structure(path: &Path) -> Result<()> {
-    let mut file = BufReader::new(File::open(path)?);
+pub fn check_tag_structure(file: &mut File) -> Result<()> {
+    let end = file.metadata()?.len();
+    let checked = check_tag_structure_in(&mut BufReader::new(&mut *file), end);
+    file.seek(SeekFrom::Start(0))?;
+    checked
+}
+
+fn check_tag_structure_in<R: Read + Seek>(file: &mut R, end: u64) -> Result<()> {
     let mut magic = [0u8; 8];
     let got = file.read(&mut magic)?;
     file.seek(SeekFrom::Start(0))?;
@@ -80,10 +88,9 @@ fn check_tag_structure(path: &Path) -> Result<()> {
         return Ok(());
     }
     if &magic[4..8] == b"ftyp" {
-        let end = std::fs::metadata(path)?.len();
-        walk_mp4_atoms(&mut file, 0, end, 0, &mut 0)
+        walk_mp4_atoms(file, 0, end, 0, &mut 0)
     } else if &magic[..3] == b"ID3" || &magic[..4] == b"fLaC" {
-        check_flac_blocks(&mut file)
+        check_flac_blocks(file)
     } else {
         Ok(())
     }
@@ -211,11 +218,25 @@ pub fn scan_files_with_progress(paths: &[std::path::PathBuf], on_file: &mut dyn 
 /// The USB-relative audio path is derived as `/Contents/<artist>/<filename>`,
 /// with path-unsafe characters in the artist and filename replaced by `_`.
 pub fn read_track_metadata(path: &Path, id: u32) -> Result<Track> {
-    check_tag_structure(path).with_context(|| format!("Refusing to read tags from {}", path.display()))?;
-    let tagged_file = Probe::open(path)
-        .with_context(|| format!("Failed to open {}", path.display()))?
-        .read()
-        .with_context(|| format!("Failed to read tags from {}", path.display()))?;
+    let mut file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    check_tag_structure(&mut file).with_context(|| format!("Refusing to read tags from {}", path.display()))?;
+    track_from_reader(&mut BufReader::new(file), ParseOptions::new(), path, id)
+}
+
+pub trait ReadSeek: Read + Seek {}
+
+impl<R: Read + Seek> ReadSeek for R {}
+
+/// Builds a [`Track`] from `reader`, which holds the file at `path`: the file type comes from
+/// the extension, as for [`read_track_metadata`]. `options` decide what lofty reads (for
+/// example `read_cover_art(false)` leaves `artwork` empty). Not generic, so lofty is compiled
+/// once in this crate (optimised even in dev builds).
+pub fn track_from_reader(reader: &mut dyn ReadSeek, options: ParseOptions, path: &Path, id: u32) -> Result<Track> {
+    let mut probe = Probe::new(reader).options(options);
+    if let Some(file_type) = FileType::from_path(path) {
+        probe = probe.set_file_type(file_type);
+    }
+    let tagged_file = probe.read().with_context(|| format!("Failed to read tags from {}", path.display()))?;
 
     let properties = tagged_file.properties();
     let duration = properties.duration();
@@ -347,7 +368,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(name);
         std::fs::write(&path, bytes).unwrap();
-        check_tag_structure(&path)
+        check_tag_structure(&mut File::open(&path).unwrap())
     }
 
     #[test]

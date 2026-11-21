@@ -125,6 +125,13 @@ fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
 
+fn disk_read_bytes() -> u64 {
+    std::fs::read_to_string("/proc/self/io")
+        .ok()
+        .and_then(|io| io.lines().find_map(|l| l.strip_prefix("read_bytes: ").and_then(|v| v.trim().parse().ok())))
+        .unwrap_or(0)
+}
+
 fn perf(name: &str, value: serde_json::Value) {
     println!("PERF {}", serde_json::json!({ "bench": name, "values": value }));
 }
@@ -769,6 +776,7 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let paths = vec![folder.to_string_lossy().into_owned()];
 
     let total = Instant::now();
+    let disk_start = disk_read_bytes();
     let t = Instant::now();
     let known = lib.track_paths().unwrap();
     let known_ms = ms(t);
@@ -778,6 +786,7 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let t = Instant::now();
     let scanned = import_plan::scan_paths(&survey, &known, &mut || {});
     let scan_ms = ms(t);
+    let scan_disk_bytes = disk_read_bytes() - disk_start;
     let files = scanned.tracks.len() + scanned.known.len();
     let plans = import_plan::ImportPlans::default();
     let t = Instant::now();
@@ -810,7 +819,9 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
     let t = Instant::now();
     let covers = import_plan::store_pending_covers(&lib, None, &mut |_| {}).unwrap();
     let covers_ms = ms(t);
+    let covers_disk_bytes = disk_read_bytes() - disk_start - scan_disk_bytes;
     let lib = lib.into_inner().unwrap();
+    println!("disk_read_bytes: scan={scan_disk_bytes} covers={covers_disk_bytes}");
     println!(
         "files={files} library_tracks={library_tracks} known_ms={known_ms:.1} survey_ms={survey_ms:.1} scan_ms={scan_ms:.1} plan_ms={plan_ms:.1} plan_import_ms={plan_import_ms:.1} commit_import_ms={commit_ms:.1} (exists_check_ms={exists_ms:.1} add_tracks_ms={insert_ms:.1}) rows_ms={:.1} covers_ms={covers_ms:.1} covers={covers} added={added} duplicates={}",
         plan_import_ms + commit_ms,
@@ -823,6 +834,8 @@ fn import(folder: &Path, base_db: Option<&Path>, work: &Path) {
             "library_tracks": library_tracks,
             "survey_ms": survey_ms,
             "scan_ms": scan_ms,
+            "scan_disk_bytes": scan_disk_bytes,
+            "covers_disk_bytes": covers_disk_bytes,
             "plan_ms": plan_ms,
             "plan_import_ms": plan_import_ms,
             "commit_import_ms": commit_ms,

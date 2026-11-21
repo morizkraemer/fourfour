@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use pioneer_library::{DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, LocalLibrary, PreparedMultiSync, SyncTarget};
 use pioneer_usb_writer::models::Track;
-use pioneer_usb_writer::scanner::{read_track_metadata, AUDIO_EXTENSIONS};
+use pioneer_usb_writer::scanner::AUDIO_EXTENSIONS;
 use serde::Serialize;
 
 use crate::command_error::CommandError;
@@ -430,7 +430,7 @@ pub(crate) fn guarded_read(path: &Path, read: impl FnOnce() -> anyhow::Result<Tr
 }
 
 fn read_metadata_guarded(path: &Path) -> Option<Track> {
-    guarded_read(path, || read_track_metadata(path, 0))
+    guarded_read(path, || crate::tag_scan::read_track_with_cover(path, 0))
 }
 
 /// The tags of one file without its cover: covers are read again and stored after the rows
