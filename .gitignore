@@ -33,3 +33,5 @@ pioneer-test-ui/gen/schemas/linux-schema.json
 benchmark/manifests/*.dev.corpus.json
 .agent/
 build/mac/
+.claude/orch-briefs/
+.claude/orch-logs/
