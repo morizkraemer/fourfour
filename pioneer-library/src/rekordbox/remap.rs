@@ -103,28 +103,32 @@ pub fn detect_common_root(paths: &[&str]) -> String {
 /// directory listings so thousands of lookups stay cheap.
 #[derive(Default)]
 pub struct CaseInsensitiveResolver {
-    listings: HashMap<PathBuf, HashMap<String, String>>,
+    listings: HashMap<PathBuf, HashMap<String, Vec<String>>>,
 }
 
 impl CaseInsensitiveResolver {
+    /// The path as it is spelled on disk. On a case-insensitive filesystem `exists()` is true for any
+    /// spelling, so every component is looked up in its folder listing to get the stored spelling.
     pub fn resolve(&mut self, path: &Path) -> Option<PathBuf> {
-        if path.exists() {
-            return Some(path.to_path_buf());
-        }
         let mut current = PathBuf::new();
         for component in path.components() {
             use std::path::Component;
             match component {
                 Component::Normal(name) => {
                     let name = name.to_string_lossy();
-                    let next = current.join(name.as_ref());
-                    if next.exists() {
-                        current = next;
-                        continue;
+                    let actual = self.listing(&current).get(&fold(&name)).map(|actuals| {
+                        actuals.iter().find(|actual| actual.as_str() == name).unwrap_or(&actuals[0]).clone()
+                    });
+                    match actual {
+                        Some(actual) => current.push(actual),
+                        None => {
+                            let next = current.join(name.as_ref());
+                            if !next.exists() {
+                                return None;
+                            }
+                            current = next;
+                        }
                     }
-                    let listing = self.listing(&current);
-                    let actual = listing.get(&fold(&name))?;
-                    current.push(actual);
                 }
                 other => current.push(other.as_os_str()),
             }
@@ -132,20 +136,15 @@ impl CaseInsensitiveResolver {
         Some(current)
     }
 
-    fn listing(&mut self, dir: &Path) -> &HashMap<String, String> {
+    fn listing(&mut self, dir: &Path) -> &HashMap<String, Vec<String>> {
         self.listings.entry(dir.to_path_buf()).or_insert_with(|| {
             let target = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
-            std::fs::read_dir(target)
-                .map(|entries| {
-                    entries
-                        .flatten()
-                        .map(|e| {
-                            let name = e.file_name().to_string_lossy().to_string();
-                            (fold(&name), name)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
+            let mut listing: HashMap<String, Vec<String>> = HashMap::new();
+            for entry in std::fs::read_dir(target).into_iter().flatten().flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                listing.entry(fold(&name)).or_default().push(name);
+            }
+            listing
         })
     }
 }
@@ -211,6 +210,14 @@ mod tests {
     }
 
     #[test]
+    fn remap_maps_windows_drive_paths_with_either_separator() {
+        let remap = PathRemap { from_prefix: "C:\\Music".into(), to_prefix: "/mnt/music".into() };
+        assert_eq!(remap.apply("C:/Music/House/a.mp3"), PathBuf::from("/mnt/music/House/a.mp3"));
+        assert_eq!(remap.apply("c:\\music\\House\\a.mp3"), PathBuf::from("/mnt/music/House/a.mp3"));
+        assert!(!remap.matches("D:/Music/a.mp3"));
+    }
+
+    #[test]
     fn remap_matches_across_unicode_normalisation() {
         let remap = PathRemap { from_prefix: "/Users/me/Mu\u{308}sik".into(), to_prefix: "/mnt".into() };
         assert!(remap.matches("/Users/me/M\u{fc}sik/a.mp3"));
@@ -241,6 +248,8 @@ mod tests {
         let mut resolver = CaseInsensitiveResolver::default();
         let found = resolver.resolve(&dir.path().join("house/track one.MP3"));
         assert_eq!(found, Some(dir.path().join("House/Track One.mp3")));
+        let exact = resolver.resolve(&dir.path().join("House/Track One.mp3"));
+        assert_eq!(exact, Some(dir.path().join("House/Track One.mp3")));
         assert_eq!(resolver.resolve(&dir.path().join("house/missing.mp3")), None);
     }
 }

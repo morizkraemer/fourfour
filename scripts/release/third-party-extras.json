@@ -85,6 +85,14 @@
       "license": "BSD-style (Zetetic LLC, 3-clause)",
       "url": "https://www.zetetic.net/sqlcipher/",
       "texts": [{"cargo_crate_file": ["libsqlite3-sys", "sqlcipher/LICENSE"]}]
+    },
+    {
+      "name": "OpenSSL",
+      "version": "3.x, vendored via openssl-src on Windows builds",
+      "license": "Apache-2.0",
+      "url": "https://www.openssl.org/",
+      "note": "Statically linked into the Windows build for SQLCipher; macOS and Linux builds use the system or bundled libcrypto of the platform.",
+      "texts": [{"cargo_crate_file": ["openssl-src", "openssl/LICENSE.txt"]}]
     }
   ]
 }

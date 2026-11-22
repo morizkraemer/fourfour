@@ -1638,7 +1638,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::artwork_thumbs::artwork_thumbnail;
-    use super::{analysis_start_error, eject_failure, validated_reveal_path};
+    #[cfg(not(target_os = "windows"))]
+    use super::eject_failure;
+    use super::{analysis_start_error, validated_reveal_path};
     use crate::analysis_backend;
     use crate::command_error::{CommandError, ErrorKind};
     use std::path::PathBuf;
@@ -1837,6 +1839,7 @@ mod tests {
         assert_eq!(error.message, "Analysis failed for all 4 tracks — see debug log");
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn eject_output_that_says_busy_is_stick_busy() {
         for stderr in ["Error unmounting: target is busy", "umount: /media/x: device is in use", "Volume failed to eject: dissented by PID 12"] {

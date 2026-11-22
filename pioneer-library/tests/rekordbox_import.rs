@@ -327,7 +327,7 @@ fn existing_tracks_keep_user_edits_get_empty_fields_filled_and_nothing_is_delete
     let source = rekordbox::load_masterdb(&fx.db, Some(&fx.share)).unwrap();
     let (_dir, library) = file_library();
 
-    let mut mine = writer_track(&fx.audio.join("house/alpha.WAV"), "/Contents/Mine/alpha.wav");
+    let mut mine = writer_track(&fx.audio.join("house").join("alpha.WAV"), "/Contents/Mine/alpha.wav");
     mine.title = "My Edit".into();
     mine.id = 0;
     mine.tempo = 0;

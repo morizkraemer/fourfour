@@ -124,6 +124,7 @@ fn plan_says_wont_fit_and_the_write_is_refused() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "issue #39: volume_capacity has no Windows implementation")]
 fn capacity_of_a_fake_volume() {
     let dir = TempDir::new().unwrap();
     let capacity = volume_capacity(dir.path()).unwrap();
