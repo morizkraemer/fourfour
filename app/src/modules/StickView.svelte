@@ -14,6 +14,7 @@
     keptAsIsSince,
     setKeepUpdated,
   } from '../stores/sticks.svelte.ts';
+  import { playStickTrack } from '../stores/player.svelte.ts';
   import { formatBytes } from '../stores/stick-sync.svelte.ts';
   import { shortDate, syncAge } from '../lib/stickDrop.ts';
   import StickHeader from './StickHeader.svelte';
@@ -156,7 +157,14 @@
           <span>#</span><span>Title</span><span>Artist</span><span>BPM</span><span>Key</span>
         </div>
         {#each tracksOf(opened.trackIds) as track, i (track.id)}
-          <div class="ff-stickview__trow">
+          <div
+            class="ff-stickview__trow"
+            role="button"
+            tabindex="0"
+            data-stick-track={track.id}
+            ondblclick={() => void playStickTrack(volumePath, track)}
+            onkeydown={(e) => e.key === 'Enter' && void playStickTrack(volumePath, track)}
+          >
             <span class="ff-stickview__num">{String(i + 1).padStart(2, '0')}</span>
             <span class="ff-stickview__t">{track.title}</span>
             <span class="ff-stickview__mid">{track.artist}</span>

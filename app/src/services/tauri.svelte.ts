@@ -1084,6 +1084,16 @@ export async function getStick(path: string): Promise<StickContents> {
   }
 }
 
+export async function stickTrackPath(path: string, trackId: number): Promise<string | null> {
+  try {
+    return await invoke<string | null>('stick_track_path', { path, trackId });
+  } catch (err) {
+    lastTauriError = `stick_track_path fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return null;
+  }
+}
+
 async function editStick(
   command: string,
   args: Record<string, unknown>,
