@@ -1,4 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import type { LoadedState, TrackInfo } from '../src/services/tauri.svelte.ts';
 import { decodeTrackTable, isTrackTable } from '../src/services/track-table.ts';
@@ -89,11 +91,38 @@ function installProbes(ipcTask: boolean) {
   };
 }
 
+const payloadUrls = new WeakMap<LoadedState, Promise<string>>();
+
+function servePayload(payload: LoadedState): Promise<string> {
+  let url = payloadUrls.get(payload);
+  if (!url) {
+    const answer = REAL_STATE ? readFileSync(REAL_STATE) : Buffer.from(JSON.stringify(payload));
+    const listed = Buffer.from(JSON.stringify(payload.tracks));
+    const previews = new Map(
+      payload.tracks
+        .filter((t) => t.waveform_bands || t.waveform_preview)
+        .map((t) => [t.id, { id: t.id, waveform_bands: t.waveform_bands ?? undefined, waveform_preview: t.waveform_preview ?? undefined }]),
+    );
+    const server = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' });
+      const url = new URL(req.url ?? '/', 'http://x');
+      if (url.pathname.endsWith('/previews')) {
+        const ids = (url.searchParams.get('ids') ?? '').split(',').map(Number);
+        res.end(JSON.stringify(ids.flatMap((id) => previews.get(id) ?? [])));
+      } else res.end(url.pathname.endsWith('/tracks') ? listed : answer);
+    });
+    server.unref();
+    url = new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${(server.address() as AddressInfo).port}/state`)));
+    payloadUrls.set(payload, url);
+  }
+  return url;
+}
+
 async function openApp(browser: Browser, payload: LoadedState) {
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
   const page = await context.newPage();
   await page.exposeFunction('__smokeAnalysis', (trackId: number) => fixtureAnalysis(trackId));
-  await page.addInitScript(installTauriMock, payload);
+  await page.addInitScript(installTauriMock, { tracks: [], playlists: [], payloadUrl: await servePayload(payload) });
   await page.addInitScript(installProbes, MOCK_IPC_ANSWERS_IN_OWN_TASK);
   return { context, page };
 }

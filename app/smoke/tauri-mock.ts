@@ -50,7 +50,7 @@ export interface SmokeImport {
   skipped?: Partial<SkippedFiles>;
 }
 
-export function installTauriMock(initial: LoadedState) {
+export function installTauriMock(initial: LoadedState & { payloadUrl?: string }) {
   const w = window as unknown as Window & SmokeWindow & Record<string, unknown>;
   w.__smokeInvokes = [];
   w.__smokeUnhandled = [];
@@ -147,6 +147,32 @@ export function installTauriMock(initial: LoadedState) {
   };
   let playlists = initial.playlists;
   const tracks = [...initial.tracks];
+  let libraryTrackCount = initial.tracks.length;
+  const served = initial.payloadUrl ? servedPayload(initial.payloadUrl) : null;
+
+  const SERVED_LIST_COMMANDS = new Set(['read_usb_state', 'plan_usb_sync', 'sync_usb_many']);
+
+  function servedPayload(url: string) {
+    const answer = fetch(`${url}/answer`)
+      .then((response) => response.json())
+      .then((state: { tracks: TrackInfo[] | { id: number[] }; playlists: LoadedState['playlists'] }) => {
+        libraryTrackCount = Array.isArray(state.tracks) ? state.tracks.length : state.tracks.id.length;
+        return state;
+      });
+    let listed: Promise<void> | null = null;
+    return {
+      answer,
+      previews: (ids: number[]) => fetch(`${url}/previews?ids=${ids.join(',')}`).then((response) => response.json()),
+      tracks: () =>
+        (listed ??= fetch(`${url}/tracks`)
+          .then((response) => response.json())
+          .then((list: TrackInfo[]) => {
+            const addedSince = tracks.splice(0);
+            for (const track of list) tracks.push(track);
+            for (const track of addedSince) tracks.push(track);
+          })),
+    };
+  }
   let pendingImport: TrackInfo[] = [];
   const playback = { path: '', position: 0, duration: 0, playing: false, timer: 0 };
 
@@ -216,7 +242,7 @@ export function installTauriMock(initial: LoadedState) {
       running: false,
       checked_at_ms: Date.now(),
       duration_ms: 40,
-      total: initial.tracks.length,
+      total: libraryTrackCount,
       missing: [...w.__smokeMissing],
       error: [...w.__smokeUnreadable],
       relocated: [...relocated],
@@ -405,7 +431,7 @@ export function installTauriMock(initial: LoadedState) {
           skipped_ids: args.skipDuplicates ? (w.__smokeDuplicates as { existing_id: number }[]).map((d) => d.existing_id) : [],
         };
       case 'get_backup_status':
-        return { sizes: { library_bytes: 38_000_000, audio_bytes: 61_000_000_000, audio_files: initial.tracks.length }, last: lastBackup };
+        return { sizes: { library_bytes: 38_000_000, audio_bytes: 61_000_000_000, audio_files: libraryTrackCount }, last: lastBackup };
       case 'export_backup': {
         emit('backup-progress', { phase: 'export', done: 27_450_000_000, total: 61_038_000_000 });
         if (w.__smokeHoldExport) await new Promise<void>((done) => (w.__smokeReleaseExport = done));
@@ -421,7 +447,7 @@ export function installTauriMock(initial: LoadedState) {
           playlist_count: 4,
           includes_audio: false,
           audio_files: 0,
-          current_tracks: initial.tracks.length,
+          current_tracks: libraryTrackCount,
         };
       case 'restore_backup':
         sessionStorage.setItem('smoke.restore', JSON.stringify(args));
@@ -610,6 +636,13 @@ export function installTauriMock(initial: LoadedState) {
     convertFileSrc: (path: string) => path,
     async invoke(cmd: string, args: Record<string, unknown> = {}) {
       w.__smokeInvokes.push({ cmd, args });
+      if (served && cmd === 'load_state') {
+        const answer = await served.answer;
+        playlists = answer.playlists;
+        return answer;
+      }
+      if (served && cmd === 'get_row_previews') return served.previews(args.trackIds as number[]);
+      if (served && SERVED_LIST_COMMANDS.has(cmd)) await served.tracks();
       return handle(cmd, args);
     },
   };
