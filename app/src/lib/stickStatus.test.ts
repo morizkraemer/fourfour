@@ -24,6 +24,11 @@ describe('stick status', () => {
     expect(stickStatus(STICK, syncing('confirm'), { changes: 2, fits: true }).kind).toBe('pending');
   });
 
+  it('waits after an edit even when the dry run counts no track changes', () => {
+    expect(stickStatus(STICK, idle, { changes: 0, fits: true, edited: true })).toEqual({ kind: 'pending', tone: 'waiting', label: 'Changes waiting' });
+    expect(stickStatus(STICK, idle, { changes: 2, fits: true, edited: true }).label).toBe('2 changes waiting');
+  });
+
   it('is busy while checking and writing, with the progress when known', () => {
     expect(stickStatus(STICK, syncing('planning'), null)).toEqual({ kind: 'syncing', tone: 'busy', label: 'Checking' });
     expect(stickStatus(STICK, syncing('writing'), null).label).toBe('Syncing');

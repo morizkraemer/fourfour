@@ -10,6 +10,7 @@ export interface StickSyncSnapshot {
 export interface StickPending {
   changes: number;
   fits: boolean | null;
+  edited?: boolean;
 }
 
 export interface StickStatus {
@@ -49,6 +50,7 @@ export function stickStatus(volumePath: string, sync: StickSyncSnapshot, pending
   }
   if (pending?.fits === false) return status('wont-fit', "Won't fit");
   if (pending && pending.changes > 0) return status('pending', changesLabel(pending.changes));
+  if (pending?.edited) return status('pending', 'Changes waiting');
   return status('idle', 'In sync');
 }
 

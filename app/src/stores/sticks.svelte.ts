@@ -17,6 +17,7 @@ const LEGACY_ALL_TRACKS_KEY = 'fourfour.sticks.allTracks';
 export const sticks = $state({
   byPath: {} as Record<string, StickContents>,
   capacity: {} as Record<string, VolumeCapacity | null>,
+  editedSinceSync: {} as Record<string, boolean>,
   error: '' as string,
 });
 
@@ -111,6 +112,7 @@ export async function loadSticks(volumePaths: string[]): Promise<void> {
     unmounted.add(path);
     delete sticks.byPath[path];
     delete sticks.capacity[path];
+    delete sticks.editedSinceSync[path];
   }
   await Promise.all(volumePaths.flatMap((path) => [loadStick(path), loadCapacity(path)]));
 }
@@ -119,6 +121,7 @@ async function edit(volumePath: string, run: () => Promise<[number, StickContent
   try {
     const [changed, contents] = await run();
     sticks.byPath[volumePath] = contents;
+    if (changed > 0) sticks.editedSinceSync[volumePath] = true;
     sticks.error = '';
     return changed;
   } catch (err) {

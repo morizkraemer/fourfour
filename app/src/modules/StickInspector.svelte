@@ -53,6 +53,7 @@
     if (status.kind === 'wont-fit' && pending) {
       return `Needs ${formatBytes(pending.bytesNeeded)}, ${formatBytes(pending.freeBytes ?? 0)} free. Take a playlist off the stick or free up space.`;
     }
+    if (status.kind === 'pending' && !(pending?.changes > 0)) return 'Playlist changes. Written on the next sync.';
     if (status.kind === 'pending' && pending) {
       const parts = [];
       if (pending.adds > 0) parts.push(`${pending.adds} to add`);

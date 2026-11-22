@@ -213,9 +213,11 @@ test('playlist on a stick: removing a track keeps the stick list apart from the 
   await page.getByRole('button', { name: 'Sync', exact: true }).last().click();
   const [call] = await smoke.invokes('sync_usb_many');
   expect(call.targets[0].selection.kept).toEqual([{ playlist_id: 1, track_ids: [1, 3] }]);
+  await expect(stickStatus(page, SANDISK)).toHaveAttribute('data-stick-status', 'idle');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   expect(await trackTitles(page)).toEqual(['Smoke Track 01', 'Smoke Track 02', 'Smoke Track 03']);
+  await expect(stickStatus(page, SANDISK)).toHaveAttribute('data-stick-status', 'pending');
 });
 
 test('playlist on a stick: drag a track to reorder it on the stick only', async ({ smoke }) => {

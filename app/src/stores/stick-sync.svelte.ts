@@ -85,7 +85,9 @@ export function unwatchSticksExcept(volumePaths: string[]) {
 }
 
 export function statusOfStick(volumePath: string): StickStatus {
-  return stickStatus(volumePath, stickSync, stickPending.byPath[volumePath]);
+  const plan = stickPending.byPath[volumePath];
+  const edited = sticks.editedSinceSync[volumePath] === true;
+  return stickStatus(volumePath, stickSync, plan ? { ...plan, edited } : edited ? { changes: 0, fits: null, edited } : null);
 }
 
 export function planNeedsConfirm(plan: UsbSyncPlan): boolean {
@@ -177,6 +179,7 @@ async function writeStick(volumePath: string) {
       stickSync.error = syncFailureText(report?.error ?? 'The sync did not report a result.', report?.error_kind ?? null);
     } else {
       stickSync.stage = 'done';
+      delete sticks.editedSinceSync[volumePath];
     }
   } catch (err) {
     console.info('sync_usb_many failed:', err);
