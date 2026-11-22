@@ -17,18 +17,26 @@ Checked 2026-11-18: no fourfour post exists yet (20 entries; latest: prunr overh
 ## Outline
 
 ### 1. The hook (2-3 lines)
-- "i did a thing. well, we did": fourfour is co-authored with Mo, his brother ([github.com/morizkraemer](https://github.com/morizkraemer)).
-- One-line pitch: a lightweight alternative to rekordbox. faster, a more modern ui, and free and open source forever.
+- "i did a thing. well, we did": fourfour is co-authored with Mo, his brother ([github.com/morizkraemer](https://github.com/morizkraemer)). both djs, both in software.
+- One-line pitch: a lightweight, free, open source app for the boring half of rekordbox: library and usb sync. quick, modern, just works.
 
-### 2. First why? (the problem)
-- Getting tracks onto a USB for the CDJs means rekordbox: heavy, slow, a whole pro suite (plus subscription upsell) when all you need is a library, analysis and syncing to your drives.
-- There have been a couple of other projects like this. Most of them strip down rekordbox's existing ui, or rebuild all of it, just faster.
-- Ours goes the other way: take the minimal feature set you actually need (library, analysing, syncing with your drives) and do those really well. Everything else stays out.
+### 2. First why? (Merlin's angle, 2026-11-22)
+- we couldn't believe how bad rekordbox is, and how many djs rely on it every day for quite simple things: library management and usb sync.
+- most djs use rekordbox for exactly that, not for performance.
+- the ui is stuck in the last decade, slow and clunky. going from "make a setlist" to "it's on the stick" takes way too long.
+- the performance side is great and works well with pioneer's own controllers and cdjs. we're not trying to replace that (yet).
+- so this is only the management and sync side. to actually replace rekordbox there, we have to crack two things: track analysis (bpm, grid, key) and the format the cdjs read off the usb.
 
-### 3. So we built it (the brothers part)
-- Mo and Merlin co-wrote it. Rough split: Mo on the USB / CDJ side (the database and files the players read, syncing, testing on real hardware), Merlin on the app (library, player, analysis, ui).
-- Fun angle: two brothers, one repo, Merlin travelling while Mo has the hardware.
-- Optional tie-in to the Ableton post: lots of Claude, lots of iteration, "no thats wrong, it actually behaves like this".
+### 3. Others doing the same thing
+- several people are building something similar. we didn't find a nice open source one yet.
+- closest match: ora dj. does all the same things (even in the free tier) and more, and is more polished. but it's closed source, so we keep going.
+- CHECK: rbxport (GitHub, GPL-2.0+, Tauri, same "fewer features than rekordbox" pitch, own analysis, OneLibrary export, ~400 stars) is open source and very close; see docs/research/competitors-2026-11.md. Merlin decides whether and how to mention it.
+
+### 3b. Two brothers, one repo, lots of agents
+- also just a great project for the two of us to build something together.
+- learning collaboration, ci, tests, code review in the age of ai agents doing most of the typing.
+- rough split: Mo on the usb / cdj side (the database and files the players read, syncing, testing on real hardware), Merlin on the app (library, player, analysis, ui).
+- optional tie-in to the Ableton post: lots of Claude, lots of iteration, "no thats wrong, it actually behaves like this".
 
 ### 4. Fun facts (fourfour vs rekordbox)
 Same Mac (M5 Pro, 24 GB). rekordbox 7.2.14 timed by Merlin with a stopwatch on 2026-11-18 (two scripted launches agree: 28 s and 33 s to the main window). Test folder: his 2025 DJ folder, 512 tracks, 16 GB.
