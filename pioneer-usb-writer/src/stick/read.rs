@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use rbl_anlz::Anlz;
 
 use super::model::{LibraryKind, StickModel, StickTrack};
-use super::{device_library, one_library};
+use super::{device_library, ext_library, one_library};
 
 pub const PIONEER_DIR_NAMES: [&str; 2] = ["PIONEER", ".PIONEER"];
 
@@ -37,7 +37,16 @@ impl Stick {
         let pdb_path = rekordbox.join(LibraryKind::DeviceLibrary.file_name());
         let device_library = if pdb_path.is_file() {
             let bytes = std::fs::read(&pdb_path).with_context(|| format!("Cannot read {}", pdb_path.display()))?;
-            Some(device_library::read(&bytes).with_context(|| format!("Cannot read {}", pdb_path.display()))?)
+            let mut model =
+                device_library::read(&bytes).with_context(|| format!("Cannot read {}", pdb_path.display()))?;
+            let ext_path = rekordbox.join(ext_library::FILE_NAME);
+            if ext_path.is_file() {
+                let bytes = std::fs::read(&ext_path).with_context(|| format!("Cannot read {}", ext_path.display()))?;
+                ext_library::read(&bytes)
+                    .with_context(|| format!("Cannot read {}", ext_path.display()))?
+                    .put_into(&mut model);
+            }
+            Some(model)
         } else {
             None
         };

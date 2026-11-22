@@ -354,6 +354,9 @@ pub fn model_from_tables(tables: &[TableRows]) -> StickModel {
             categories: rows(table::CATEGORIES).to_vec(),
             sorts: rows(table::SORTS).to_vec(),
         },
+        my_tags: Vec::new(),
+        track_tags: Vec::new(),
+        my_tag_master_db_id: 0,
     }
 }
 

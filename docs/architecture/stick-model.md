@@ -88,7 +88,7 @@ emit::write_fresh(root, &FreshExport { model: &model, files })?;     // the gene
 - `convert::model_from_tracks` is the one place that turns the old writer inputs (`Track`, `AnalysisResult`, `Playlist`) into a model. It keeps the header values the old writer proved on a CDJ-3000.
 - The creation date comes from the caller (`StickDevice.created_date`), so the same input gives the same `export.pdb` bytes.
 
-Not done yet: staged publish and recovery, `exportExt.pdb`. See the plan.
+Not done yet: staged publish and recovery. See the plan.
 
 ## Incremental sync (`plan.rs`)
 
@@ -124,6 +124,14 @@ Rules for our own tracks:
 Decision taken here, for Merlin to confirm: on a stick whose OneLibrary Rekordbox left empty, v2 fills OneLibrary with all tracks rather than only ours, so both databases always show the same stick.
 
 Tests: `pioneer-usb-writer/tests/stick_plan.rs` (12), `pioneer-library/tests/stick_sync_v2.rs` (3: fresh, takeover of an old-sync stick, Rekordbox-like stick), unit tests in `paths.rs`. Local with the real stick copy: adding 3 tracks gives 1267 in both databases, all 1264 foreign rows byte-identical, a second plan is a no-op.
+
+## Ratings, colours and My Tags
+
+- `Wanted.labels` carries a rating (0 to 5) and a colour id (1 to 8, 0 = none) per wanted track. They go into the track row of both databases; a change is an `Update`. An empty `labels` slice leaves what is on the stick. `sync_usb_v2` fills it from the library's ratings and colour labels (`convert::color_id_of` maps the Rekordbox colour names and their hex values; the hex values are from memory, unverified).
+- My Tags live in `model.my_tags` (categories and tags, `parent_id`, 0-based `sort_order`), `model.track_tags` (track id, tag id) and `model.my_tag_master_db_id`. They are read from `exportExt.pdb` (attached to the `export.pdb` model) and from OneLibrary's `myTag` tables, and written to both (`ext_library.rs`, row layouts after rbxport). `model.tags_of(track_id)` lists a track's tags.
+- Foreign tags are carried through a sync; tags of removed tracks are dropped. A stick without tags gets no `exportExt.pdb`.
+- The library has no My Tags of its own yet, so nothing of ours is written there. The API is ready for it.
+- Real stick check: all 28 tag rows and the master row are byte-identical after decode and encode (stray bytes after the name are cleared before comparing; Rekordbox leaves them).
 
 ## Dump and diff
 

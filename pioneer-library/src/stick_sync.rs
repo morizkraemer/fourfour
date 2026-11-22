@@ -2,7 +2,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use pioneer_usb_writer::models::SyncReport;
-use pioneer_usb_writer::stick::plan::{self, Ownership, StickPlan, Wanted};
+use pioneer_usb_writer::stick::convert::color_id_of;
+use pioneer_usb_writer::stick::plan::{self, Ownership, StickPlan, TrackLabel, Wanted};
 use pioneer_usb_writer::stick::{Stick, StickDevice};
 
 use crate::sticks::{self, LastSync, OwnedFile, StickManifest};
@@ -46,7 +47,17 @@ impl LocalLibrary {
         let library_ids: Vec<i64> = tracks.iter().map(|track| i64::from(track.id)).collect();
         let playlists = self.get_all_playlists()?;
         let (tracks, analyses, playlists) = prepare_for_usb(tracks, analyses, playlists);
-        let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists };
+        let known = self.track_labels_reader().read_all();
+        let labels: Vec<TrackLabel> = library_ids
+            .iter()
+            .map(|id| {
+                known.get(id).map_or_else(TrackLabel::default, |label| TrackLabel {
+                    rating: label.rating.unwrap_or(0),
+                    color_id: label.color.as_deref().map_or(0, color_id_of),
+                })
+            })
+            .collect();
+        let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists, labels: &labels };
 
         let stick = Stick::read(output_dir).with_context(|| format!("Cannot read the library on {}", output_dir.display()))?;
         let manifest = sticks::read_manifest(output_dir)?;

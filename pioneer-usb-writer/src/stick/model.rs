@@ -108,6 +108,15 @@ pub struct StickHistory {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StickMyTag {
+    pub id: u32,
+    pub name: String,
+    pub parent_id: u32,
+    pub sort_order: u32,
+    pub is_category: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StickMenu {
     pub columns: Vec<Vec<u8>>,
     pub categories: Vec<Vec<u8>>,
@@ -128,6 +137,9 @@ pub struct StickModel {
     pub playlists: Vec<StickPlaylist>,
     pub histories: Vec<StickHistory>,
     pub menu: StickMenu,
+    pub my_tags: Vec<StickMyTag>,
+    pub track_tags: Vec<(u32, u32)>,
+    pub my_tag_master_db_id: u32,
 }
 
 fn name_of(rows: &[StickName], id: u32) -> &str {
@@ -205,6 +217,14 @@ impl StickModel {
         self.playlist(id)
             .map(|playlist| playlist.track_ids.iter().filter_map(|&track_id| self.track(track_id)).collect())
             .unwrap_or_default()
+    }
+
+    pub fn tags_of(&self, track_id: u32) -> Vec<&StickMyTag> {
+        self.track_tags
+            .iter()
+            .filter(|(track, _)| *track == track_id)
+            .filter_map(|(_, tag_id)| self.my_tags.iter().find(|tag| tag.id == *tag_id))
+            .collect()
     }
 
     pub fn intern_artist(&mut self, name: &str) -> u32 {

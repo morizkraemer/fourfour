@@ -27,7 +27,17 @@ pub struct Wanted<'a> {
     pub tracks: &'a [Track],
     pub analyses: &'a [AnalysisResult],
     pub playlists: &'a [Playlist],
+    pub labels: &'a [TrackLabel],
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrackLabel {
+    pub rating: u8,
+    pub color_id: u8,
+}
+
+pub const MAX_RATING: u8 = 5;
+pub const COLOR_COUNT: u8 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrackAction {
@@ -304,6 +314,10 @@ pub fn plan(existing: &Stick, wanted: Wanted, owned: &Ownership, device: StickDe
             None => convert::new_stick_track(&final_track, analysis, &date),
         };
         convert::link_names(&mut model, &mut row, &final_track, analysis);
+        if let Some(label) = wanted.labels.get(wanted_index) {
+            row.rating = label.rating.min(MAX_RATING);
+            row.color_id = if label.color_id <= COLOR_COUNT { label.color_id } else { 0 };
+        }
         row.artwork_id = match (&final_track.artwork, old.map_or(0, |old| old.artwork_id)) {
             (None, _) => 0,
             (Some(_), kept) if kept != 0 && model.artworks.iter().any(|artwork| artwork.id == kept) => kept,
@@ -358,6 +372,7 @@ pub fn plan(existing: &Stick, wanted: Wanted, owned: &Ownership, device: StickDe
     for history in &mut model.histories {
         history.track_ids.retain(|id| present.contains(id));
     }
+    model.track_tags.retain(|(track_id, _)| present.contains(track_id));
     ownership.playlist_ids = place_playlists(&mut model, old_owned_playlists, wanted.playlists, &stick_track_ids);
 
     let obsolete_artwork = drop_rows_only_our_old_tracks_used(&mut model, &our_old_rows);

@@ -168,6 +168,25 @@ pub fn model_lines(prefix: &str, model: &StickModel, options: DumpOptions) -> Ve
         )
     }));
 
+    let mut tags: Vec<_> = model.my_tags.iter().collect();
+    tags.sort_by_key(|tag| tag.id);
+    lines.extend(tags.into_iter().map(|tag| {
+        format!(
+            "{prefix} mytag id={} parent={} order={} category={} name={}",
+            tag.id,
+            tag.parent_id,
+            tag.sort_order,
+            tag.is_category,
+            quoted(&tag.name)
+        )
+    }));
+    let mut tagged = model.track_tags.clone();
+    tagged.sort();
+    lines.extend(tagged.into_iter().map(|(track, tag)| format!("{prefix} tagged track={track} tag={tag}")));
+    if model.my_tag_master_db_id != 0 {
+        lines.push(format!("{prefix} mytag-master {}", model.my_tag_master_db_id));
+    }
+
     let mut histories: Vec<_> = model.histories.iter().collect();
     histories.sort_by_key(|history| history.id);
     lines.extend(histories.into_iter().map(|history| {
@@ -429,9 +448,27 @@ pub fn dump_stick(root: &Path, options: DumpOptions) -> Result<String> {
     }
     if let Some(path) = rest.remove("rekordbox/exportExt.pdb") {
         let bytes = std::fs::read(&path)?;
-        let pdb = rbl_pdb::Pdb::parse(&bytes).context("exportExt.pdb is not a DeviceSQL database")?;
-        for (index, table_ref) in pdb.tables.iter().enumerate() {
-            lines.push(format!("ext table {index} rows={}", pdb.rows(table_ref).len()));
+        let tables = super::ext_library::table_rows(&bytes)?;
+        for rows in &tables {
+            lines.push(format!("ext table {} rows={}", rows.table, rows.rows.len()));
+        }
+        if options.raw {
+            for rows in &tables {
+                let mut encoded: Vec<String> = rows
+                    .rows
+                    .iter()
+                    .map(|row| {
+                        let row = if options.normalise {
+                            super::ext_library::normalised_row(rows.table, row)
+                        } else {
+                            row.clone()
+                        };
+                        format!("ext raw {} {}", rows.table, hex(&row))
+                    })
+                    .collect();
+                encoded.sort();
+                lines.extend(encoded);
+            }
         }
         if options.pages {
             lines.extend(page_lines("ext", &bytes, options.normalise));

@@ -231,7 +231,7 @@ fn real_rekordbox_stick_keeps_every_track_when_ours_are_added() {
         .collect();
     let playlists =
         vec![Playlist { id: 1, name: "fourfour test".into(), track_ids: vec![1, 2, 3], ..Default::default() }];
-    let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists };
+    let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists, labels: &[] };
     let device = StickDevice { name: "X".into(), created_date: "2026-11-22".into(), ..StickDevice::default() };
 
     let planned = plan(&theirs, wanted, &Ownership::default(), device.clone()).unwrap();
@@ -254,5 +254,53 @@ fn real_rekordbox_stick_keeps_every_track_when_ours_are_added() {
     assert!(changed <= UNALIGNED_TRACK_ROWS_ON_THE_2026_11_22_STICK);
     assert_eq!(pdb.playlists.len(), theirs.device_library.as_ref().unwrap().playlists.len() + 1);
     assert_eq!(pdb.histories, theirs.device_library.as_ref().unwrap().histories);
+    assert_eq!(pdb.my_tags, source.device_library.as_ref().unwrap().my_tags);
+    assert_eq!(one.my_tags.len(), pdb.my_tags.len());
+    assert!(!pdb.my_tags.is_empty());
     assert!(plan(&after, wanted, &planned.ownership, device).unwrap().is_noop());
+}
+
+#[test]
+fn real_rekordbox_my_tag_rows_survive_the_model() {
+    use pioneer_usb_writer::stick::ext_library;
+
+    let Some(root) = real_stick() else { return };
+    let path = root.join("PIONEER/rekordbox/exportExt.pdb");
+    if !path.is_file() {
+        return;
+    }
+    let bytes = std::fs::read(path).unwrap();
+    let original = ext_library::table_rows(&bytes).unwrap();
+    let ext = ext_library::from_tables(&original);
+    let encoded = ext_library::encode_tables(&ext);
+    let without_slot = |table: u32, rows: &[Vec<u8>]| -> Vec<Vec<u8>> {
+        let mut rows: Vec<Vec<u8>> = rows.iter().map(|row| ext_library::normalised_row(table, row)).collect();
+        rows.sort();
+        rows
+    };
+    let mut differing = BTreeMap::new();
+    for rows in &original {
+        let expected = without_slot(rows.table, &rows.rows);
+        let actual = without_slot(rows.table, &encoded[rows.table as usize].rows);
+        let missing = expected.iter().filter(|row| actual.binary_search(row).is_err()).count();
+        if std::env::var_os("FOURFOUR_REAL_STICK_DEBUG").is_some() {
+            for row in expected.iter().filter(|row| actual.binary_search(row).is_err()) {
+                println!("DEBUG ext table={} len={} head={:02x?}", rows.table, row.len(), &row[..0x24.min(row.len())]);
+            }
+            for row in actual.iter().filter(|row| expected.binary_search(row).is_err()) {
+                println!("DEBUG ours table={} len={} head={:02x?}", rows.table, row.len(), &row[..0x24.min(row.len())]);
+            }
+        }
+        if missing > 0 || expected.len() != actual.len() {
+            differing.insert(rows.table, (missing, expected.len(), actual.len()));
+        }
+    }
+    println!(
+        "my tags={} tagged tracks={} master={} rows that differ (table: missing, theirs, ours)={differing:?}",
+        ext.my_tags.len(),
+        ext.track_tags.len(),
+        ext.master_db_id != 0
+    );
+    assert!(differing.is_empty(), "{differing:?}");
+    assert_eq!(ext_library::read(&ext_library::build(&ext)).unwrap(), ext);
 }

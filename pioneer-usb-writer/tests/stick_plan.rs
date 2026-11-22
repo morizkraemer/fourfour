@@ -6,7 +6,7 @@ use pioneer_usb_writer::models::{AnalysisResult, Beat, BeatGrid, CuePoint, Playl
 use pioneer_usb_writer::stick::device_library::{self, table};
 use pioneer_usb_writer::stick::dump::normalised_row;
 use pioneer_usb_writer::stick::emit::write_usb_v2;
-use pioneer_usb_writer::stick::plan::{apply, plan, Ownership, StickPlan, TrackAction, Wanted};
+use pioneer_usb_writer::stick::plan::{apply, plan, Ownership, StickPlan, TrackAction, TrackLabel, Wanted};
 use pioneer_usb_writer::stick::{one_library, Stick, StickDevice, StickModel};
 use tempfile::TempDir;
 
@@ -86,6 +86,7 @@ struct Library {
     tracks: Vec<Track>,
     analyses: Vec<AnalysisResult>,
     playlists: Vec<Playlist>,
+    labels: Vec<TrackLabel>,
 }
 
 impl Library {
@@ -94,7 +95,7 @@ impl Library {
         let tracks: Vec<Track> =
             tracks.iter().map(|&(id, file, title, artist)| track(source.path(), id, file, title, artist)).collect();
         let analyses = tracks.iter().map(|_| analysis(Vec::new())).collect();
-        Self { _source: source, tracks, analyses, playlists: Vec::new() }
+        Self { _source: source, tracks, analyses, playlists: Vec::new(), labels: Vec::new() }
     }
 
     fn with_playlist(mut self, id: u32, name: &str, track_ids: &[u32]) -> Self {
@@ -103,7 +104,7 @@ impl Library {
     }
 
     fn wanted(&self) -> Wanted<'_> {
-        Wanted { tracks: &self.tracks, analyses: &self.analyses, playlists: &self.playlists }
+        Wanted { tracks: &self.tracks, analyses: &self.analyses, playlists: &self.playlists, labels: &self.labels }
     }
 }
 
@@ -253,7 +254,7 @@ fn removing_our_tracks_leaves_foreign_files_and_rows() {
     let library = ours();
     let (_, owned) = synced(usb.path(), &library, &Ownership::default());
 
-    let fewer = Library { tracks: vec![library.tracks[1].clone()], analyses: vec![library.analyses[1].clone()], playlists: vec![Playlist { id: 5, name: "Warmup".into(), track_ids: vec![20], ..Default::default() }], _source: TempDir::new().unwrap() };
+    let fewer = Library { tracks: vec![library.tracks[1].clone()], analyses: vec![library.analyses[1].clone()], playlists: vec![Playlist { id: 5, name: "Warmup".into(), track_ids: vec![20], ..Default::default() }], labels: Vec::new(), _source: TempDir::new().unwrap() };
     let warmup_before = Stick::read(usb.path()).unwrap().library().unwrap().playlists.iter().find(|p| p.name == "Warmup").unwrap().id;
     let (report, owned) = synced(usb.path(), &fewer, &owned);
     assert_eq!(counts(&report), (0, 0, 0, 1, 1));
@@ -464,4 +465,70 @@ fn artwork_ids_survive_and_obsolete_covers_are_removed() {
     let model = Stick::read(usb.path()).unwrap().library().unwrap().clone();
     assert_eq!(model.artworks.len(), 1);
     assert_eq!((model.track(1).unwrap().artwork_id, model.track(2).unwrap().artwork_id), (1, 0));
+}
+
+#[test]
+fn ratings_and_colours_reach_both_databases_and_a_change_is_an_update() {
+    let usb = TempDir::new().unwrap();
+    let mut library = ours();
+    library.labels = vec![TrackLabel { rating: 4, color_id: 1 }, TrackLabel { rating: 0, color_id: 0 }];
+    let (_, owned) = synced(usb.path(), &library, &Ownership::default());
+
+    let stick = Stick::read(usb.path()).unwrap();
+    for model in [stick.device_library.as_ref().unwrap(), stick.one_library.as_ref().unwrap()] {
+        let first = model.track(1).unwrap();
+        assert_eq!((first.rating, model.color_name(first.color_id)), (4, "Pink"));
+        assert_eq!((model.track(2).unwrap().rating, model.track(2).unwrap().color_id), (0, 0));
+    }
+    let row = &raw_rows_by_id(usb.path(), table::TRACKS, 0x48)[&1];
+    assert_eq!((row[0x58], row[0x59]), (1, 4));
+    assert!(planned(usb.path(), &library, &owned).is_noop());
+
+    library.labels[1] = TrackLabel { rating: 9, color_id: 200 };
+    let (report, owned) = synced(usb.path(), &library, &owned);
+    assert_eq!(counts(&report), (0, 1, 0, 0, 1));
+    let second = Stick::read(usb.path()).unwrap().library().unwrap().track(2).unwrap().clone();
+    assert_eq!((second.rating, second.color_id), (5, 0));
+
+    library.labels.clear();
+    assert!(planned(usb.path(), &library, &owned).is_noop());
+    assert_eq!(Stick::read(usb.path()).unwrap().library().unwrap().track(1).unwrap().rating, 4);
+}
+
+#[test]
+fn my_tags_on_a_foreign_stick_are_kept_in_every_database() {
+    use pioneer_usb_writer::stick::emit::write_databases;
+    use pioneer_usb_writer::stick::StickMyTag;
+
+    let (_theirs, usb, mut model) = rekordbox_like_stick();
+    model.my_tags = vec![
+        StickMyTag { id: 5, name: "Genre".into(), parent_id: 0, sort_order: 0, is_category: true },
+        StickMyTag { id: 101, name: "Deep \u{25b6} Dub".into(), parent_id: 5, sort_order: 0, is_category: false },
+        StickMyTag { id: 100, name: "Peak".into(), parent_id: 5, sort_order: 1, is_category: false },
+    ];
+    model.track_tags = vec![(1, 101), (1, 100), (3, 100)];
+    model.my_tag_master_db_id = 123_456;
+    write_databases(usb.path(), &model).unwrap();
+    let ext_before = std::fs::read(usb.path().join("PIONEER/rekordbox/exportExt.pdb")).unwrap();
+
+    let library = ours();
+    let (_, owned) = synced(usb.path(), &library, &Ownership::default());
+    let stick = Stick::read(usb.path()).unwrap();
+    for kept in [stick.device_library.as_ref().unwrap(), stick.one_library.as_ref().unwrap()] {
+        assert_eq!(kept.my_tags.len(), 3);
+        assert_eq!(kept.my_tag_master_db_id, 123_456);
+        assert_eq!(kept.tags_of(1).iter().map(|tag| tag.name.as_str()).collect::<Vec<_>>().len(), 2);
+        assert!(kept.tags_of(3).iter().any(|tag| tag.name == "Peak"));
+        assert!(kept.my_tags.iter().any(|tag| tag.name == "Deep \u{25b6} Dub" && tag.parent_id == 5));
+    }
+    assert_eq!(stick.device_library.as_ref().unwrap().my_tags, model.my_tags);
+    assert_eq!(std::fs::read(usb.path().join("PIONEER/rekordbox/exportExt.pdb")).unwrap(), ext_before);
+    assert!(planned(usb.path(), &library, &owned).is_noop());
+}
+
+#[test]
+fn a_stick_without_tags_gets_no_export_ext() {
+    let usb = TempDir::new().unwrap();
+    synced(usb.path(), &ours(), &Ownership::default());
+    assert!(!usb.path().join("PIONEER/rekordbox/exportExt.pdb").exists());
 }

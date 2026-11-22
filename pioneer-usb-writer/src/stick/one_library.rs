@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags, Row};
 
 use super::model::{
-    StickAlbum, StickCue, StickDevice, StickHistory, StickModel, StickName, StickPlaylist, StickTrack,
+    StickAlbum, StickCue, StickDevice, StickHistory, StickModel, StickMyTag, StickName, StickPlaylist, StickTrack,
 };
 
 pub const KEY: &str = "r8gddnr4k847830ar6cqzbkk0el6qytmb3trbbx805jm74vez64i5o8fnrqryqls";
@@ -245,7 +245,42 @@ pub fn read_connection(conn: &Connection) -> Result<StickModel> {
         StickDevice::default()
     };
 
+    let my_tags = if has_table(conn, "myTag") {
+        let mut stmt = conn.prepare("SELECT * FROM myTag ORDER BY myTag_id")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StickMyTag {
+                    id: int(row, "myTag_id") as u32,
+                    name: text(row, "name"),
+                    parent_id: int(row, "myTag_id_parent") as u32,
+                    sort_order: id(row, "sequenceNo").saturating_sub(1),
+                    is_category: int(row, "attribute") == 1,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
+    let track_tags = if has_table(conn, "myTag_content") {
+        let mut stmt = conn.prepare("SELECT * FROM myTag_content ORDER BY content_id, myTag_id")?;
+        let rows = stmt
+            .query_map([], |row| Ok((id(row, "content_id"), int(row, "myTag_id") as u32)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    } else {
+        Vec::new()
+    };
+    let my_tag_master_db_id = if has_table(conn, "property") {
+        conn.query_row("SELECT * FROM property LIMIT 1", [], |row| Ok(int(row, "myTagMasterDBID") as u32)).unwrap_or(0)
+    } else {
+        0
+    };
+
     Ok(StickModel {
+        my_tags,
+        track_tags,
+        my_tag_master_db_id,
         device,
         tracks,
         artists: names(conn, "artist", "artist_id")?,
@@ -431,15 +466,27 @@ fn insert_rows(conn: &Connection, model: &StickModel) -> Result<()> {
         }
     }
 
+    let mut tag_stmt = conn.prepare(
+        "INSERT INTO myTag (myTag_id, sequenceNo, name, attribute, myTag_id_parent) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for tag in &model.my_tags {
+        tag_stmt.execute(params![tag.id, tag.sort_order + 1, tag.name, tag.is_category, tag.parent_id])?;
+    }
+    let mut tagged_stmt = conn.prepare("INSERT INTO myTag_content (myTag_id, content_id) VALUES (?1, ?2)")?;
+    for (track_id, tag_id) in &model.track_tags {
+        tagged_stmt.execute(params![tag_id, track_id])?;
+    }
+
     conn.execute(
         "INSERT INTO property (deviceName, dbVersion, numberOfContents, createdDate, backGroundColorType, myTagMasterDBID)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             model.device.name,
             filled(&model.device.db_version).unwrap_or("1000"),
             model.tracks.len() as u32,
             model.device.created_date,
-            model.device.background_color
+            model.device.background_color,
+            model.my_tag_master_db_id
         ],
     )?;
     Ok(())

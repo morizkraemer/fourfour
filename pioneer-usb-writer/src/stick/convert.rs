@@ -16,6 +16,25 @@ pub fn artwork_path(artwork_id: u32) -> String {
     format!("/PIONEER/Artwork/00001/a{artwork_id}.jpg")
 }
 
+pub const TRACK_COLORS: [(&str, &str); 8] = [
+    ("Pink", "#ff007f"),
+    ("Red", "#ff0000"),
+    ("Orange", "#ffa500"),
+    ("Yellow", "#ffff00"),
+    ("Green", "#00ff00"),
+    ("Aqua", "#25fde9"),
+    ("Blue", "#0000ff"),
+    ("Purple", "#660099"),
+];
+
+pub fn color_id_of(label: &str) -> u8 {
+    let label = label.trim();
+    TRACK_COLORS
+        .iter()
+        .position(|(name, hex)| name.eq_ignore_ascii_case(label) || hex.eq_ignore_ascii_case(label))
+        .map_or(0, |index| index as u8 + 1)
+}
+
 pub fn filename_of(usb_path: &str) -> String {
     usb_path.rsplit('/').next().unwrap_or(usb_path).to_owned()
 }

@@ -7,7 +7,7 @@ use crate::writer::{anlz, filesystem};
 
 use super::model::{LibraryKind, StickDevice, StickModel, StickTrack};
 use super::read::Stick;
-use super::{convert, device_library, one_library};
+use super::{convert, device_library, ext_library, one_library};
 
 pub const ANALYSIS_EXTENSIONS: [&str; 3] = ["DAT", "EXT", "2EX"];
 const ARTWORK_VARIANTS: [(&str, &str); 4] = [("a", ""), ("a", "_m"), ("b", ""), ("b", "_m")];
@@ -140,6 +140,10 @@ pub fn write_databases(root: &Path, model: &StickModel) -> Result<()> {
     std::fs::create_dir_all(&rekordbox).with_context(|| format!("Cannot create {}", rekordbox.display()))?;
     let pdb = device_library::build(model)?;
     write_file(&rekordbox.join(LibraryKind::DeviceLibrary.file_name()), &pdb)?;
+    let ext = ext_library::ExtLibrary::of(model);
+    if !ext.is_empty() {
+        write_file(&rekordbox.join(ext_library::FILE_NAME), &ext_library::build(&ext))?;
+    }
     one_library::write(&rekordbox.join(LibraryKind::OneLibrary.file_name()), model)
 }
 

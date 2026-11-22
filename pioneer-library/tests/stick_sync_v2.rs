@@ -71,6 +71,15 @@ fn v2_sync_records_ownership_and_a_second_sync_touches_nothing() {
     assert_eq!(counts(&fx.library.sync_usb_v2(&usb, "STICK").unwrap()), (0, 0, 0, 0, 4));
     assert_eq!(listing(&usb), before);
 
+    fx.library.set_user_rating(fx.ids[0], 4).unwrap();
+    assert_eq!(counts(&fx.library.sync_usb_v2(&usb, "STICK").unwrap()), (0, 1, 0, 0, 3));
+    let rated_path = sticks::read_manifest(&usb).unwrap().unwrap().files.iter().find(|file| file.track_id == fx.ids[0]).unwrap().usb_path.clone();
+    let stick = Stick::read(&usb).unwrap();
+    for model in [stick.device_library.as_ref().unwrap(), stick.one_library.as_ref().unwrap()] {
+        assert_eq!(model.track_by_path(&rated_path).unwrap().rating, 4);
+        assert_eq!(model.tracks.iter().filter(|track| track.rating != 0).count(), 1);
+    }
+
     fx.library.remove_track(fx.ids[3]).unwrap();
     assert_eq!(counts(&fx.library.sync_usb_v2(&usb, "STICK").unwrap()), (0, 0, 0, 1, 3));
     assert_eq!(Stick::read(&usb).unwrap().track_count(), 3);
