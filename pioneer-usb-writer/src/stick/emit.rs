@@ -214,5 +214,12 @@ pub fn copy_stick(source: &Stick, kind: LibraryKind, root: &Path, copy_audio: bo
             artwork: ArtworkSource::CopyFromStick(source.root.clone()),
         })
         .collect();
-    write_fresh(root, &FreshExport { model, files })
+    write_fresh(root, &FreshExport { model, files })?;
+    for settings in source.settings_files() {
+        if let Some(name) = settings.file_name() {
+            let bytes = std::fs::read(&settings).with_context(|| format!("Cannot read {}", settings.display()))?;
+            write_file(&root.join("PIONEER").join(name), &bytes)?;
+        }
+    }
+    Ok(())
 }

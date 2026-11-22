@@ -171,6 +171,17 @@ What differs with v2 on:
 
 Tests: `pioneer-library/tests/multi_sync_v2.rs` (6): default engine, dry run writes nothing and counts staging space, not enough space, run + progress + no-op, playlist selection removes tracks, foreign library kept, two sticks at once with one repaired first.
 
+## Settings and player files
+
+A v2 sync writes only the three databases, our audio, our analysis files and our covers. Everything else on the stick stays byte for byte and with its old timestamp: `DEVSETTING.DAT`, `MYSETTING.DAT`, `MYSETTING2.DAT`, `DJMMYSETTING.DAT`, `djprofile.nxs`, `USBANLZ/USBMNG.DAT`, `rekordbox/RBFLTR.DAT`, `rekordbox/playlists3.sync`, `PIONEER REC/`, and empty folders such as `PIONEER/CDJ`, `MPJ`, `log`, `TrashBox`.
+
+- `stick.settings_files()` lists the five settings files that exist (`read::SETTINGS_FILES`).
+- `emit::copy_stick` copies them to the new stick. The dump shows each as a `file` line with size and hash, so `stick_diff` compares them.
+- fourfour writes no settings files of its own; a stick without them gets none.
+- Unknown: `USBMNG.DAT` (magic `PMNG`) is Rekordbox's own bookkeeping next to the analysis folders. We leave it as it is; whether a player minds that it does not list our tracks is untested.
+
+Tests: `pioneer-usb-writer/tests/stick_settings.rs` (3): add, update and remove our tracks on a Rekordbox-like stick with all these files present, nothing of theirs changes; copy carries the settings; none are invented.
+
 ## Ratings, colours and My Tags
 
 - `Wanted.labels` carries a rating (0 to 5) and a colour id (1 to 8, 0 = none) per wanted track. They go into the track row of both databases; a change is an `Update`. An empty `labels` slice leaves what is on the stick. `sync_usb_v2` fills it from the library's ratings and colour labels (`convert::color_id_of` maps the Rekordbox colour names and their hex values; the hex values are from memory, unverified).

@@ -7,6 +7,8 @@ use super::model::{LibraryKind, StickModel, StickTrack};
 use super::{device_library, ext_library, one_library};
 
 pub const PIONEER_DIR_NAMES: [&str; 2] = ["PIONEER", ".PIONEER"];
+pub const SETTINGS_FILES: [&str; 5] =
+    ["DEVSETTING.DAT", "MYSETTING.DAT", "MYSETTING2.DAT", "DJMMYSETTING.DAT", "djprofile.nxs"];
 
 #[derive(Debug, Clone, Default)]
 pub struct Stick {
@@ -55,6 +57,11 @@ impl Stick {
         let one_library = if db_path.is_file() { Some(one_library::read(&db_path)?) } else { None };
 
         Ok(Self { root: root.to_path_buf(), pioneer_dir: Some(pioneer_dir), device_library, one_library })
+    }
+
+    pub fn settings_files(&self) -> Vec<PathBuf> {
+        let Some(pioneer_dir) = &self.pioneer_dir else { return Vec::new() };
+        SETTINGS_FILES.iter().map(|name| pioneer_dir.join(name)).filter(|path| path.is_file()).collect()
     }
 
     pub fn has_library(&self) -> bool {
