@@ -164,7 +164,7 @@ fn v2_playlist_selection_removes_what_is_no_longer_chosen() {
 
     let only_warmup = SyncTarget {
         volume: usb.clone(),
-        selection: SyncSelection::Playlists { playlist_ids: vec![fx.warmup], track_ids: vec![fx.ids[4]] },
+        selection: SyncSelection::Playlists { playlist_ids: vec![fx.warmup], track_ids: vec![fx.ids[4]], kept: vec![] },
     };
     let prepared = v2(&fx, &[only_warmup]);
     let plan = prepared.plan_with(&plenty).remove(0).unwrap();
