@@ -3396,6 +3396,8 @@ dependencies = [
  "chrono",
  "image",
  "lofty",
+ "rbl-anlz",
+ "rbl-pdb",
  "rusqlite",
  "serde",
  "serde_json",
