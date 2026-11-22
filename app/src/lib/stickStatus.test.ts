@@ -37,7 +37,13 @@ describe('stick status', () => {
 
   it('is a problem when the sync failed or the changes will not fit', () => {
     expect(stickStatus(STICK, syncing('failed'), { changes: 3, fits: true })).toEqual({ kind: 'error', tone: 'problem', label: 'Sync failed' });
-    expect(stickStatus(STICK, idle, { changes: 9, fits: false })).toEqual({ kind: 'wont-fit', tone: 'problem', label: "Won't fit" });
+    expect(stickStatus(STICK, idle, { changes: 9, fits: false })).toEqual({ kind: 'wont-fit', tone: 'problem', label: 'Too much' });
+  });
+
+  it('warns when tracks are left off because they are not analyzed', () => {
+    expect(stickStatus(STICK, idle, { changes: 2, fits: true, unanalysed: 3 })).toEqual({ kind: 'unanalysed', tone: 'problem', label: '3 not analyzed' });
+    expect(stickStatus(STICK, idle, { changes: 2, fits: false, unanalysed: 3 }).kind).toBe('wont-fit');
+    expect(stickStatus(STICK, syncing('writing'), { changes: 2, fits: true, unanalysed: 3 }).kind).toBe('syncing');
   });
 
   it('ignores a sync that runs on another stick', () => {

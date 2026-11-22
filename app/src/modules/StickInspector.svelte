@@ -11,8 +11,7 @@
     statusOfStick,
     syncStick,
     isStickSyncBusy,
-    dismissStickSync,
-    formatBytes,
+    toggleStickProblem,
   } from '../stores/stick-sync.svelte.ts';
   import { syncAge } from '../lib/stickDrop.ts';
   import StickDot from './StickDot.svelte';
@@ -41,18 +40,14 @@
 
   const headline = $derived.by(() => {
     if (status.kind === 'syncing') return progress && progress.total > 0 ? `Syncing ${progress.done} of ${progress.total}` : 'Syncing';
-    if (status.kind === 'error') return 'Sync failed';
-    if (status.kind === 'wont-fit') return "Won't fit";
+    if (status.tone === 'problem') return status.kind === 'error' ? 'Sync failed' : status.kind === 'wont-fit' ? 'Too much for this stick' : status.label;
     if (status.kind === 'pending') return status.label;
     return finished ? 'Synced. Safe to eject.' : 'In sync';
   });
 
   const detail = $derived.by(() => {
     if (status.kind === 'syncing') return progress?.message ?? 'Checking what changes';
-    if (status.kind === 'error') return stickSync.error || 'The sync stopped. Check the stick, then sync again.';
-    if (status.kind === 'wont-fit' && pending) {
-      return `Needs ${formatBytes(pending.bytesNeeded)}, ${formatBytes(pending.freeBytes ?? 0)} free. Take a playlist off the stick or free up space.`;
-    }
+    if (status.tone === 'problem') return '';
     if (status.kind === 'pending' && !(pending?.changes > 0)) return 'Playlist changes. Written on the next sync.';
     if (status.kind === 'pending' && pending) {
       const parts = [];
@@ -115,21 +110,30 @@
     <section class="ff-stickinspector__sync" data-stick-status={status.kind}>
       <div class="ff-inspector__cues-head"><span>Sync</span></div>
       <div class="ff-stickinspector__state" role="status">
-        <p class="ff-stickinspector__headline">
-          <StickDot tone={status.tone} label={status.label} />
-          <span class="ff-stickinspector__headline-text">{headline}</span>
-          {#if mine && !busy && (stickSync.stage === 'done' || stickSync.stage === 'failed')}
-            <button type="button" class="ff-stickinspector__dismiss" aria-label="Dismiss" title="Dismiss" onclick={dismissStickSync}>
-              <Icon name="x" size={11} />
-            </button>
-          {/if}
-        </p>
+        {#if status.tone === 'problem'}
+          <button
+            type="button"
+            class="ff-stickinspector__headline ff-stickinspector__problem"
+            data-stick-problem-open
+            title="See what is going on"
+            onclick={(e) => toggleStickProblem(volumePath, e.currentTarget)}
+          >
+            <StickDot tone="problem" label="" />
+            <span class="ff-stickinspector__headline-text">{headline}</span>
+            <Icon name="chevron-right" size={12} />
+          </button>
+        {:else}
+          <p class="ff-stickinspector__headline">
+            <StickDot tone={status.tone} label={status.label} />
+            <span class="ff-stickinspector__headline-text">{headline}</span>
+          </p>
+        {/if}
         {#if status.kind === 'syncing'}
           <span class="ff-stickinspector__bar ff-stickinspector__bar--progress" data-stick-progress aria-hidden="true">
             <i class:ff-stickinspector__bar-wait={progressPct === null} style:width={progressPct === null ? null : `${progressPct}%`}></i>
           </span>
         {/if}
-        <p class="ff-stickinspector__detail" class:ff-stickinspector__detail--problem={status.tone === 'problem'} data-stick-detail>{detail}</p>
+        {#if detail}<p class="ff-stickinspector__detail" data-stick-detail>{detail}</p>{/if}
       </div>
       <div class="ff-stickinspector__actions">
         <Button
@@ -236,25 +240,23 @@
     color: var(--ff-text-mid);
     overflow-wrap: anywhere;
   }
-  .ff-stickinspector__detail--problem {
-    color: var(--ff-danger);
-  }
-  .ff-stickinspector__dismiss {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    padding: 0;
+  .ff-stickinspector__problem {
+    width: calc(100% + 16px);
+    min-height: 30px;
+    margin: -5px -8px;
+    padding: 0 8px;
     border: none;
     border-radius: var(--ff-radius-md);
     background: transparent;
-    color: var(--ff-muted);
+    font-family: var(--ff-font);
+    text-align: left;
     cursor: pointer;
   }
-  .ff-stickinspector__dismiss:hover {
+  .ff-stickinspector__problem:hover {
     background: var(--ff-hover);
-    color: var(--ff-text);
+  }
+  .ff-stickinspector__problem :global(.ff-icon) {
+    color: var(--ff-muted);
   }
   .ff-stickinspector__actions {
     display: flex;

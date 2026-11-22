@@ -1,4 +1,4 @@
-export type StickStatusKind = 'idle' | 'syncing' | 'pending' | 'wont-fit' | 'error';
+export type StickStatusKind = 'idle' | 'syncing' | 'pending' | 'unanalysed' | 'wont-fit' | 'error';
 export type StickTone = 'none' | 'busy' | 'waiting' | 'problem';
 
 export interface StickSyncSnapshot {
@@ -11,6 +11,7 @@ export interface StickPending {
   changes: number;
   fits: boolean | null;
   edited?: boolean;
+  unanalysed?: number;
 }
 
 export interface StickStatus {
@@ -23,6 +24,7 @@ const TONE: Record<StickStatusKind, StickTone> = {
   idle: 'none',
   syncing: 'busy',
   pending: 'waiting',
+  unanalysed: 'problem',
   'wont-fit': 'problem',
   error: 'problem',
 };
@@ -48,13 +50,14 @@ export function stickStatus(volumePath: string, sync: StickSyncSnapshot, pending
     }
     if (sync.stage === 'failed') return status('error', 'Sync failed');
   }
-  if (pending?.fits === false) return status('wont-fit', "Won't fit");
+  if (pending?.fits === false) return status('wont-fit', 'Too much');
+  if (pending?.unanalysed) return status('unanalysed', `${pending.unanalysed} not analyzed`);
   if (pending && pending.changes > 0) return status('pending', changesLabel(pending.changes));
   if (pending?.edited) return status('pending', 'Changes waiting');
   return status('idle', 'In sync');
 }
 
-const URGENCY: StickStatusKind[] = ['error', 'wont-fit', 'syncing', 'pending'];
+const URGENCY: StickStatusKind[] = ['error', 'wont-fit', 'syncing', 'unanalysed', 'pending'];
 
 export interface TopbarStick {
   volume: string;

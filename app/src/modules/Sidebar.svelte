@@ -32,7 +32,7 @@
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag, stickTargetAt, updatePointer } from '../stores/dnd.svelte.ts';
   import { dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
-  import { statusOfStick } from '../stores/stick-sync.svelte.ts';
+  import { statusOfStick, toggleStickProblem } from '../stores/stick-sync.svelte.ts';
   import StickDot from './StickDot.svelte';
   import {
     sidebarSelection,
@@ -570,9 +570,22 @@
             onclick={() => handleRowClick(row.path, true, row.path)}
             onOpenInPanel={() => dockOrganizeTarget({ kind: 'usb', id: row.path, label: row.label })}
           />
-          <span class="ff-sidebar__stick-status" data-stick-status={stickStatus.kind}>
-            <StickDot tone={stickStatus.tone} label={stickStatus.label} />
-          </span>
+          {#if stickStatus.tone === 'problem'}
+            <button
+              type="button"
+              class="ff-sidebar__stick-status ff-sidebar__stick-status--problem"
+              data-stick-status={stickStatus.kind}
+              aria-label="{row.label}: {stickStatus.label}. Show what is going on"
+              title="{stickStatus.label}. Click to see what is going on"
+              onclick={(e) => toggleStickProblem(row.path, e.currentTarget)}
+            >
+              <StickDot tone="problem" label="" />
+            </button>
+          {:else}
+            <span class="ff-sidebar__stick-status" data-stick-status={stickStatus.kind}>
+              <StickDot tone={stickStatus.tone} label={stickStatus.label} />
+            </span>
+          {/if}
         </div>
       {/each}
     </SidebarSection>
@@ -701,9 +714,32 @@
     align-items: center;
     pointer-events: none;
   }
-  .ff-sidebar__drop-wrap:hover .ff-sidebar__stick-status,
-  .ff-sidebar__drop-wrap:focus-within .ff-sidebar__stick-status {
+  .ff-sidebar__drop-wrap:hover .ff-sidebar__stick-status:not(.ff-sidebar__stick-status--problem),
+  .ff-sidebar__drop-wrap:focus-within .ff-sidebar__stick-status:not(.ff-sidebar__stick-status--problem) {
     display: none;
+  }
+  .ff-sidebar__stick-status--problem {
+    top: 3px;
+    bottom: 3px;
+    right: calc(var(--ff-space-6) + 2px);
+    justify-content: center;
+    width: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--ff-radius-md);
+    background: transparent;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .ff-sidebar__stick-status--problem:hover {
+    background: var(--ff-elev-hi);
+  }
+  .ff-sidebar__stick-status--problem:focus-visible {
+    outline: 1px solid var(--ff-accent);
+  }
+  .ff-sidebar__drop-wrap:hover .ff-sidebar__stick-status--problem,
+  .ff-sidebar__drop-wrap:has(:global(.ff-sbrow:focus-within)) .ff-sidebar__stick-status--problem {
+    right: calc(var(--ff-space-6) + 22px);
   }
   .ff-sidebar__fill {
     flex: 1 0 24px;

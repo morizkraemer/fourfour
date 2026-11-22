@@ -12,7 +12,7 @@
   import StickDot from './StickDot.svelte';
   import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
   import { ui, clearListFilter, setSearchText, openPalette } from '../stores/ui.svelte.ts';
-  import { statusOfStick } from '../stores/stick-sync.svelte.ts';
+  import { statusOfStick, toggleStickProblem } from '../stores/stick-sync.svelte.ts';
   import { showStickInfo } from '../shortcuts/navigation.ts';
   import { searchModeForColumn } from '../lib/searchLayout.ts';
   import SearchIconButton from './SearchIconButton.svelte';
@@ -185,8 +185,8 @@
         type="button"
         class="ff-gheader__chip ff-gheader__chip--idle"
         data-stick-chip={stick.status.kind}
-        title="Show {stick.name}"
-        onclick={() => void showStickInfo(stick.volume)}
+        title={stick.status.tone === 'problem' ? 'See what is going on' : `Show ${stick.name}`}
+        onclick={(e) => (stick.status.tone === 'problem' ? toggleStickProblem(stick.volume, e.currentTarget) : void showStickInfo(stick.volume))}
       >
         <StickDot tone={stick.status.tone} label={stick.status.label} />
         {stick.name} <b>{stick.status.label}</b>{#if stick.others > 0}<span class="ff-gheader__chip-more">+{stick.others}</span>{/if}

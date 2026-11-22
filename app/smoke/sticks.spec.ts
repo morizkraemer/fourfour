@@ -16,6 +16,7 @@ const stickRow = (page: Page, path: string) => page.locator(`[data-drop-stick-pa
 const view = (page: Page) => page.locator('.ff-browse__slot--table [data-stick-view]');
 const inspector = (page: Page) => page.locator('[data-stick-inspector]');
 const stickStatus = (page: Page, path: string) => stickRow(page, path).locator('[data-stick-status]');
+const problem = (page: Page) => page.locator('[data-stick-problem]');
 const trackRows = (page: Page) => view(page).locator('[data-stick-track]');
 const trackTitles = (page: Page) => trackRows(page).locator('.ff-stickview__t').allTextContents();
 const strip = (page: Page) => page.locator('[data-put-strip]');
@@ -163,9 +164,16 @@ test('top bar pill shows only a stick that needs attention and opens its inspect
   await withSticks(page);
   const chip = page.locator('[data-stick-chip]');
   await expect(chip).toHaveAttribute('data-stick-chip', 'wont-fit');
-  await expect(chip).toContainText("PANORAMA 8GB Won't fit");
+  await expect(chip).toContainText('PANORAMA 8GB Too much');
   await chip.click();
+  await expect(problem(page)).toHaveAttribute('data-stick-problem', 'wont-fit');
+  await page.getByRole('button', { name: 'Show stick' }).click();
+  await expect(problem(page)).toHaveCount(0);
   await expect(inspector(page)).toHaveAttribute('data-stick-inspector', PANORAMA);
+  await inspector(page).locator('[data-stick-problem-open]').click();
+  await expect(problem(page)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show stick' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await stickRow(page, PANORAMA).click({ button: 'right' });
   await smoke.answerDialogs(true);
   await page.getByRole('menuitem', { name: 'Eject' }).click();
@@ -176,6 +184,42 @@ test('top bar pill shows only a stick that needs attention and opens its inspect
   await page.getByRole('button', { name: 'Sync', exact: true }).last().click();
   await expect(inspector(page).locator('[data-stick-status]')).toHaveAttribute('data-stick-status', 'idle');
   await expect(chip).toHaveCount(0);
+});
+
+test('a stick problem is one warning symbol; clicking it says what is wrong and what to do', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  const warning = stickStatus(page, PANORAMA);
+  await expect(warning).toHaveAttribute('data-stick-status', 'wont-fit');
+  expect(await warning.evaluate((el) => el.tagName)).toBe('BUTTON');
+  await warning.click();
+  await expect(page.locator('[data-stick-view]')).toHaveCount(0);
+  await expect(page.locator('[data-stick-problem-title]')).toHaveText('Too much for PANORAMA 8GB');
+  await expect(problem(page)).toContainText('too much: the new tracks need');
+  await expect(problem(page)).toContainText('Take a playlist off, or free up space.');
+  await shot(page, '11-stick-problem-popover');
+  await problem(page).locator('[data-stick-problem-playlist="1"]').getByRole('button', { name: 'Take off' }).click();
+  expect(await smoke.invokes('stick_remove_playlists')).toEqual([{ path: PANORAMA, playlistIds: [1] }]);
+  await expect(problem(page)).toHaveCount(0);
+  await expect(stickStatus(page, PANORAMA)).toHaveAttribute('data-stick-status', 'pending');
+});
+
+test('a failed sync shows the warning with the error and a retry', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  await openStick(page, BACKUP);
+  await drag(page, sidebarPlaylist(page, 'Warmup'), () => strip(page));
+  await page.evaluate(() => ((window as unknown as { __smokeFailSync: string | null }).__smokeFailSync = 'Cannot open /Volumes/BACKUP 32GB: gone'));
+  await inspector(page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(stickStatus(page, BACKUP)).toHaveAttribute('data-stick-status', 'error');
+  await inspector(page).locator('[data-stick-problem-open]').click();
+  await expect(problem(page)).toHaveAttribute('data-stick-problem', 'error');
+  await expect(page.locator('[data-stick-problem-title]')).toHaveText('Sync to BACKUP 32GB failed');
+  await page.evaluate(() => ((window as unknown as { __smokeFailSync: string | null }).__smokeFailSync = null));
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(problem(page)).toHaveCount(0);
+  await expect(stickStatus(page, BACKUP)).toHaveAttribute('data-stick-status', 'idle');
+  expect(await smoke.invokes('sync_usb_many')).toHaveLength(2);
 });
 
 test('All tracks on a stick: remove from stick and show in library from the row menu', async ({ smoke }) => {
@@ -258,7 +302,7 @@ test("sync stops when it won't fit", async ({ smoke }) => {
   const { page } = smoke;
   await withSticks(page);
   await openStick(page, PANORAMA);
-  await expect(inspector(page).locator('[data-stick-detail]')).toContainText('Needs');
+  await expect(inspector(page).locator('[data-stick-problem-open]')).toContainText('Too much for this stick');
   await inspector(page).getByRole('button', { name: 'Sync now' }).click();
   await expect(page.locator('[data-plan-wontfit]')).toContainText('Nothing was written');
   await expect(page.getByText("Won't fit on PANORAMA 8GB")).toBeVisible();

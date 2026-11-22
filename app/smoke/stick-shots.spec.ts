@@ -32,7 +32,12 @@ const TRACKS: [string, string, string, string, number, string][] = [
   ['Xtal', 'Aphex Twin', 'Selected Ambient Works 85-92', 'Ambient Techno', 115, '3B'],
   ['Silhouettes', 'Floating Points', 'Elaenia', 'Electronica', 121, '7A'],
   ['LesAlpx', 'Floating Points', 'Crush', 'Breakbeat', 131, '12B'],
+  ['Atlas', 'Bicep', 'Isles', 'Breakbeat', 132, '4A'],
+  ['Sundown', 'Overmono', 'Good Lies', 'UK Bass', 134, '9A'],
+  ['Is U', 'Overmono', 'Good Lies', 'UK Bass', 133, '2B'],
 ];
+
+const NOT_ANALYSED_FROM = 24;
 
 function track(i: number): TrackInfo {
   const [title, artist, album, genre, bpm, key] = TRACKS[i];
@@ -50,7 +55,7 @@ function track(i: number): TrackInfo {
     file_size: 11_400_000 + ((i * 2_713_000) % 9_000_000),
     has_artwork: false,
     has_cues: true,
-    has_analysis: true,
+    has_analysis: i < NOT_ANALYSED_FROM,
     analysis_pending: false,
   };
 }
@@ -62,6 +67,7 @@ const STATE: LoadedState = {
     { id: 2, name: 'Peak Time', track_ids: [1, 2, 11, 12, 17, 18, 19, 24], parent_id: 0, is_folder: false },
     { id: 3, name: 'Closing', track_ids: [10, 15, 16, 22], parent_id: 0, is_folder: false },
     { id: 4, name: 'Pudel, Friday', track_ids: [7, 8, 9, 20, 21], parent_id: 0, is_folder: false },
+    { id: 5, name: 'New this week', track_ids: [6, 25, 26, 27], parent_id: 0, is_folder: false },
   ],
 };
 
@@ -69,6 +75,7 @@ const GB = 1_000_000_000;
 const INTENSO = '/Volumes/INTENSO';
 const MK_BLACK = '/Volumes/MK_BLACK';
 const SANDISK = '/Volumes/SANDISK 8GB';
+const KINGSTON = '/Volumes/KINGSTON';
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
 function intenso(): SmokeStick {
@@ -108,6 +115,18 @@ function sandisk(): SmokeStick {
     foreign: 0,
     playlists: [{ id: 3, name: 'Closing', track_count: 4 }],
     last_sync: minutesAgo(60 * 24 * 12),
+  };
+}
+
+function kingston(): SmokeStick {
+  return {
+    total: 15.6 * GB,
+    free: 9.4 * GB,
+    contents: { stick_id: 'stick-kg', track_ids: [], playlist_ids: [5], kept_as_is: [] },
+    written: [6],
+    foreign: 0,
+    playlists: [{ id: 5, name: 'New this week', track_count: 1 }],
+    last_sync: minutesAgo(60 * 5),
   };
 }
 
@@ -216,23 +235,42 @@ test.describe('calm: one stick, in sync', () => {
   });
 });
 
+const problem = (page: Page) => page.locator('[data-stick-problem]');
+
+async function popoverShot(page: Page, name: string) {
+  await expect(problem(page)).toBeVisible();
+  await page.mouse.move(700, 500);
+  await page.waitForTimeout(150);
+  await shot(page, `full-${name}`);
+  await shot(page.locator('.ff-popover'), `popover-${name}`);
+}
+
 test.describe('mixed: three sticks', () => {
   test.use({ sticks: { [INTENSO]: intenso(), [MK_BLACK]: mkBlack(), [SANDISK]: sandisk() } });
 
-  test('changes waiting, will not fit, syncing, error', async ({ page }) => {
+  test('changes waiting, too much, syncing, error', async ({ page }) => {
     await settled(page, INTENSO, 'idle');
     await settled(page, MK_BLACK, 'pending');
     await settled(page, SANDISK, 'wont-fit');
-    await shot(sidebarSticks(page), 'sidebar-waiting-and-wont-fit');
+    await shot(sidebarSticks(page), 'sidebar-waiting-and-warning');
     await shot(topRight(page), 'topbar-problem');
     await shot(page, 'full-library-with-attention');
 
+    await stickRow(page, SANDISK).locator('[data-stick-status]').click();
+    await popoverShot(page, 'too-much-from-sidebar');
+    await page.keyboard.press('Escape');
+    await page.locator('[data-stick-chip]').click();
+    await popoverShot(page, 'too-much-from-topbar');
+    await page.keyboard.press('Escape');
+
     await openStick(page, SANDISK);
-    await shot(inspector(page), 'inspector-wont-fit');
+    await shot(inspector(page), 'inspector-too-much');
+    await inspector(page).locator('[data-stick-problem-open]').click();
+    await popoverShot(page, 'too-much-from-inspector');
+    await page.keyboard.press('Escape');
 
     await openStick(page, MK_BLACK);
     await shot(inspector(page), 'inspector-changes-waiting');
-    await shot(page, 'full-stick-changes-waiting');
 
     await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeHoldSync = true));
     await inspector(page).getByRole('button', { name: 'Sync now' }).click();
@@ -250,7 +288,6 @@ test.describe('mixed: three sticks', () => {
     await page.mouse.move(700, 600);
     await shot(inspector(page), 'inspector-syncing');
     await shot(sidebarSticks(page), 'sidebar-syncing');
-    await shot(topRight(page), 'topbar-syncing');
 
     await page.evaluate(() => {
       const w = window as unknown as SmokeWindow;
@@ -259,8 +296,23 @@ test.describe('mixed: three sticks', () => {
       w.__smokeReleaseSync?.();
     });
     await settled(page, MK_BLACK, 'error');
+    await page.mouse.move(700, 600);
     await shot(inspector(page), 'inspector-error');
     await shot(sidebarSticks(page), 'sidebar-error');
     await shot(topRight(page), 'topbar-error');
+    await inspector(page).locator('[data-stick-problem-open]').click();
+    await popoverShot(page, 'sync-failed');
+  });
+});
+
+test.describe('tracks not analysed', () => {
+  test.use({ sticks: { [INTENSO]: intenso(), [KINGSTON]: kingston() } });
+
+  test('warning with the tracks and Analyze', async ({ page }) => {
+    await settled(page, KINGSTON, 'unanalysed');
+    await shot(sidebarSticks(page), 'sidebar-not-analysed');
+    await shot(topRight(page), 'topbar-not-analysed');
+    await page.locator('[data-stick-chip]').click();
+    await popoverShot(page, 'not-analysed');
   });
 });
