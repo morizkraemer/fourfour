@@ -855,3 +855,4 @@
 2026-11-22 04:35 orchestrator writer-v2 done for now [c39f064]: v2 engine in multi_sync behind FOURFOUR_SYNC_ENGINE=v2 (default old writer), staging counted in free space, settings/player files kept untouched; 863 tests pass; next: Mo CDJ-3000 test with the switch, slice 4 after FF-GOLDEN
 2026-11-22 04:35 orch-worker Q68 cost: $9.1215 (sonnet) — ✅ **Done** - "Chance" by Bolivar is now the loaded track in every shot that shows a player. - Card `blog-shots` is round 3, open, 5 images; the `curl` on `:4220 [branch drain/Q68-20261122]
 2026-11-22 04:36 orchestrator blog shots r3 done ($1.03) [fca4498]: Chance by Bolivar in every player view; card round 3. Credits: today $23.71, month $121.42 (fourfour cap $150 close)
+2026-11-22 04:40 orchestrator blog: draft 'fourfour is a thing' created on merlins-internet.com (id 86183d5f, draft:true) with 6 images; placeholders: analysis time [re-measure], tester link
