@@ -827,3 +827,4 @@
 2026-11-21 10:19 orchestrator Fable duplicates r5: one inset list like Library check, tick per song + keeper radio with plain-language copy lines, one footer 'Merge N songs', short distinguishing paths, 620 px dialog; per-song Skip/Merge removed; smoke 198 pass [branch ui-dupes-r5 0aa6f3a]
 2026-11-21 11:30 orchestrator xplat: CI run 44896526770 green on linux, windows (nsis + self-check), macos (dmg + check-dmg), notices; webkit smoke flaky (allowed to fail); tempo limit set to 8 cents (Windows measured 6.57), needs Merlin's OK [branch xplat 0602d6c, PR 40]
 2026-11-22 01:25 orchestrator xplat: Merlin OK'd 8 cent tempo limit; Merlin has a USB stick + SD card on the Mac for tests
+2026-11-22 01:29 orchestrator usb-hw: backup of DJ stick MK_BLACK + SD card INTENSO started on the Mac (~/Backups/usb-2026-11-22, low priority); seat worker (opus) spawned for headless export check: stick read-only, SD card writable next to DCIM, cleanup after
