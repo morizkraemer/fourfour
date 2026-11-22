@@ -3843,6 +3843,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rbl-anlz"
+version = "1.10.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "rbl-pdb"
+version = "1.10.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "realfft"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
