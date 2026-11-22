@@ -15,14 +15,42 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use pioneer_usb_writer::models::{AnalysisResult, Playlist, SyncAction, SyncReport, Track};
+use pioneer_usb_writer::stick::plan::{self as stick_plan_v2, StickPlan, TrackAction, TrackLabel, Wanted};
+use pioneer_usb_writer::stick::{convert, publish, Stick, StickDevice};
 use pioneer_usb_writer::{reader, writer};
 
+use crate::stick_sync;
 use crate::sticks::{self, LastSync, OwnedFile, StickManifest};
 use crate::{LocalLibrary, prepare_for_usb, selected_playlist_tree};
 
 const SPACE_MARGIN_BASE_BYTES: u64 = 16 * 1024 * 1024;
 const SPACE_MARGIN_PER_TRACK_BYTES: u64 = 128 * 1024;
 const PROGRESS_POLL: Duration = Duration::from_millis(250);
+const STAGED_DATABASE_BYTES_PER_TRACK: u64 = 8 * 1024;
+const STICK_DATABASE_FILES: [&str; 3] = ["export.pdb", "exportExt.pdb", "exportLibrary.db"];
+
+pub const SYNC_ENGINE_ENV: &str = "FOURFOUR_SYNC_ENGINE";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncEngine {
+    #[default]
+    Legacy,
+    V2,
+}
+
+impl SyncEngine {
+    pub fn from_setting(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some(value) if value.eq_ignore_ascii_case("v2") => Self::V2,
+            _ => Self::Legacy,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        Self::from_setting(std::env::var(SYNC_ENGINE_ENV).ok().as_deref())
+    }
+}
 
 /// What one stick should hold.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -158,6 +186,7 @@ struct PreparedSelection {
     playlists: Vec<Playlist>,
     library_ids: Vec<i64>,
     skipped: Vec<PlanTrack>,
+    labels: Vec<TrackLabel>,
 }
 
 impl PreparedSelection {
@@ -175,6 +204,7 @@ struct PreparedStick {
 
 pub struct PreparedMultiSync {
     sticks: Vec<PreparedStick>,
+    engine: SyncEngine,
 }
 
 impl LocalLibrary {
@@ -209,6 +239,10 @@ impl LocalLibrary {
     /// contains the other. A target that is not a directory fails on its own
     /// when run.
     pub fn prepare_multi_sync(&self, targets: &[SyncTarget]) -> Result<PreparedMultiSync> {
+        self.prepare_multi_sync_with(targets, SyncEngine::from_env())
+    }
+
+    pub fn prepare_multi_sync_with(&self, targets: &[SyncTarget], engine: SyncEngine) -> Result<PreparedMultiSync> {
         if targets.is_empty() {
             bail!("No USB sticks selected.");
         }
@@ -217,6 +251,18 @@ impl LocalLibrary {
         let (tracks, analyses) = self.get_analyzed_tracks()?;
         let playlists = self.get_all_playlists()?;
         let analyzed_ids: HashSet<u32> = tracks.iter().map(|t| t.id).collect();
+        let labels: std::collections::HashMap<i64, TrackLabel> = match engine {
+            SyncEngine::Legacy => Default::default(),
+            SyncEngine::V2 => self
+                .track_labels_reader()
+                .read_all()
+                .into_iter()
+                .map(|(id, label)| {
+                    let color_id = label.color.as_deref().map_or(0, convert::color_id_of);
+                    (id, TrackLabel { rating: label.rating.unwrap_or(0), color_id })
+                })
+                .collect(),
+        };
 
         let mut cache: Vec<(SyncSelection, Arc<PreparedSelection>)> = Vec::new();
         let mut sticks = Vec::with_capacity(targets.len());
@@ -231,6 +277,7 @@ impl LocalLibrary {
                         &analyses,
                         &playlists,
                         &analyzed_ids,
+                        &labels,
                     )?);
                     cache.push((target.selection.clone(), prepared.clone()));
                     prepared
@@ -243,11 +290,15 @@ impl LocalLibrary {
                 setup_error,
             });
         }
-        Ok(PreparedMultiSync { sticks })
+        Ok(PreparedMultiSync { sticks, engine })
     }
 }
 
 impl PreparedMultiSync {
+    pub fn engine(&self) -> SyncEngine {
+        self.engine
+    }
+
     pub fn run(&self, sink: &dyn ProgressSink) -> Vec<StickReport> {
         self.run_with(sink, &statvfs_available_bytes, writer::filesystem::sync_usb_keeping)
     }
@@ -258,7 +309,13 @@ impl PreparedMultiSync {
     }
 
     pub fn plan_with(&self, free_space: &FreeSpaceProbe) -> Vec<Result<UsbSyncPlan>> {
-        self.sticks.iter().map(|stick| stick_plan(stick, free_space).map(|(plan, _)| plan)).collect()
+        self.sticks
+            .iter()
+            .map(|stick| match self.engine {
+                SyncEngine::Legacy => stick_plan(stick, free_space).map(|(plan, _)| plan),
+                SyncEngine::V2 => planned_v2(stick).map(|planned| planned.summary(stick, free_space)),
+            })
+            .collect()
     }
 
     pub fn run_with(
@@ -271,7 +328,13 @@ impl PreparedMultiSync {
             let handles: Vec<_> = self
                 .sticks
                 .iter()
-                .map(|stick| scope.spawn(move || run_stick(stick, sink, free_space, write)))
+                .map(|stick| {
+                    let engine = self.engine;
+                    scope.spawn(move || match engine {
+                        SyncEngine::Legacy => run_stick(stick, sink, free_space, write),
+                        SyncEngine::V2 => run_stick_v2(stick, sink, free_space),
+                    })
+                })
                 .collect();
             handles
                 .into_iter()
@@ -328,13 +391,18 @@ fn prepare_selection(
     analyses: &[AnalysisResult],
     playlists: &[Playlist],
     analyzed_ids: &HashSet<u32>,
+    labels: &std::collections::HashMap<i64, TrackLabel>,
 ) -> Result<PreparedSelection> {
+    let labels_of = |library_ids: &[i64]| -> Vec<TrackLabel> {
+        library_ids.iter().map(|id| labels.get(id).copied().unwrap_or_default()).collect()
+    };
     match selection {
         SyncSelection::WholeLibrary => {
-            let library_ids = tracks.iter().map(|t| t.id as i64).collect();
+            let library_ids: Vec<i64> = tracks.iter().map(|t| t.id as i64).collect();
             let (tracks, analyses, playlists) =
                 prepare_for_usb(tracks.to_vec(), analyses.to_vec(), playlists.to_vec());
-            Ok(PreparedSelection { tracks, analyses, playlists, library_ids, skipped: Vec::new() })
+            let labels = labels_of(&library_ids);
+            Ok(PreparedSelection { tracks, analyses, playlists, library_ids, skipped: Vec::new(), labels })
         }
         SyncSelection::Playlists { playlist_ids, track_ids, kept } => {
             let chosen = chosen_playlists(playlists, playlist_ids, kept);
@@ -357,9 +425,10 @@ fn prepare_selection(
                 .filter(|(t, _)| wanted.contains(&t.id))
                 .map(|(t, a)| (t.clone(), a.clone()))
                 .unzip();
-            let library_ids = kept_tracks.iter().map(|t| t.id as i64).collect();
+            let library_ids: Vec<i64> = kept_tracks.iter().map(|t| t.id as i64).collect();
             let (tracks, analyses, playlists) = prepare_for_usb(kept_tracks, kept_analyses, chosen);
-            Ok(PreparedSelection { tracks, analyses, playlists, library_ids, skipped })
+            let labels = labels_of(&library_ids);
+            Ok(PreparedSelection { tracks, analyses, playlists, library_ids, skipped, labels })
         }
     }
 }
@@ -436,6 +505,201 @@ fn run_stick(
             emit_failed(sink, stick, &report);
             report
         }
+    }
+}
+
+struct PlannedV2 {
+    plan: StickPlan,
+    manifest: Option<StickManifest>,
+    staged_database_bytes: u64,
+}
+
+fn wanted_of(stick: &PreparedStick) -> Wanted<'_> {
+    let selection = &stick.selection;
+    Wanted {
+        tracks: &selection.tracks,
+        analyses: &selection.analyses,
+        playlists: &selection.playlists,
+        labels: &selection.labels,
+    }
+}
+
+fn planned_v2(stick: &PreparedStick) -> Result<PlannedV2> {
+    if let Some(message) = &stick.setup_error {
+        bail!("{message}");
+    }
+    let on_stick = Stick::read(&stick.root).with_context(|| format!("Cannot read the library on {}", stick.name))?;
+    let manifest = sticks::read_manifest(&stick.root)?;
+    let owned = stick_sync::ownership_on(&on_stick, manifest.as_ref());
+    let device = StickDevice {
+        name: stick.name.clone(),
+        created_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+        ..StickDevice::default()
+    };
+    let plan = stick_plan_v2::plan(&on_stick, wanted_of(stick), &owned, device)?;
+    let existing_databases: u64 = STICK_DATABASE_FILES
+        .iter()
+        .filter_map(|name| on_stick.pioneer_dir.as_ref().map(|dir| dir.join("rekordbox").join(name)))
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .map(|meta| meta.len())
+        .sum();
+    let staged_database_bytes =
+        existing_databases + STAGED_DATABASE_BYTES_PER_TRACK * plan.model.tracks.len() as u64;
+    Ok(PlannedV2 { plan, manifest, staged_database_bytes })
+}
+
+impl PlannedV2 {
+    fn written(&self) -> impl Iterator<Item = &stick_plan_v2::PlannedTrack> {
+        self.plan.tracks.iter().filter(|track| !matches!(track.action, TrackAction::Unchanged | TrackAction::AdoptedForeign))
+    }
+
+    fn bytes_to_add(&self) -> u64 {
+        self.plan
+            .tracks
+            .iter()
+            .filter(|track| matches!(track.action, TrackAction::Add | TrackAction::Replace))
+            .map(|track| track.track.file_size)
+            .sum()
+    }
+
+    fn bytes_needed(&self) -> u64 {
+        if self.plan.is_noop() {
+            return 0;
+        }
+        self.bytes_to_add()
+            + SPACE_MARGIN_BASE_BYTES
+            + SPACE_MARGIN_PER_TRACK_BYTES * self.written().count() as u64
+            + self.staged_database_bytes
+    }
+
+    fn summary(&self, stick: &PreparedStick, free_space: &FreeSpaceProbe) -> UsbSyncPlan {
+        let selection = &stick.selection;
+        let library_id_of_path = |path: &str| -> Option<i64> {
+            self.manifest.as_ref().and_then(|m| m.files.iter().find(|file| file.usb_path == path)).map(|file| file.track_id)
+        };
+        let count = |action: TrackAction| self.plan.tracks.iter().filter(|track| track.action == action).count() as u32;
+        let add: Vec<PlanTrack> = self
+            .plan
+            .tracks
+            .iter()
+            .filter(|track| matches!(track.action, TrackAction::Add | TrackAction::Replace))
+            .map(|track| {
+                plan_track(
+                    Some(selection.library_ids[track.wanted_index]),
+                    &track.track.title,
+                    &track.track.artist,
+                    Some(track.track.file_size),
+                )
+            })
+            .collect();
+        let remove: Vec<PlanTrack> = self
+            .plan
+            .removed
+            .iter()
+            .map(|row| {
+                plan_track(library_id_of_path(&row.path), &row.title, self_artist(&self.plan, row), Some(row.file_size))
+            })
+            .collect();
+        let needed = self.bytes_needed();
+        let free_bytes = free_space(&stick.root).ok();
+        UsbSyncPlan {
+            volume: stick.name.clone(),
+            stick_id: self.manifest.as_ref().map(|m| m.stick_id.clone()),
+            playlist_count: selection.playlists.len() as u32,
+            bytes_to_add: self.bytes_to_add(),
+            bytes_to_free: self.plan.removed.iter().map(|row| row.file_size).sum(),
+            add,
+            remove,
+            update_count: count(TrackAction::Update),
+            unchanged_count: count(TrackAction::Unchanged) + count(TrackAction::AdoptedForeign),
+            skipped_unanalyzed: selection.skipped.clone(),
+            foreign_kept_count: self.plan.foreign_track_count as u32,
+            bytes_needed: needed,
+            free_bytes,
+            fits: free_bytes.map(|free| needed <= free),
+        }
+    }
+}
+
+fn self_artist<'a>(plan: &'a StickPlan, row: &pioneer_usb_writer::stick::StickTrack) -> &'a str {
+    plan.model.artist_name(row.artist_id)
+}
+
+fn run_stick_v2(stick: &PreparedStick, sink: &dyn ProgressSink, free_space: &FreeSpaceProbe) -> StickReport {
+    let started = Instant::now();
+    let fail = |message: String| {
+        let report = failed_report(stick, message, started.elapsed().as_millis() as u64);
+        emit_failed(sink, stick, &report);
+        report
+    };
+    if let Some(message) = &stick.setup_error {
+        return fail(message.clone());
+    }
+    let Some(_claim) = RootClaim::acquire(&stick.root) else {
+        return fail(format!("{} is already being synced.", stick.name));
+    };
+
+    let result = (|| -> Result<SyncReport> {
+        publish::recover(&stick.root)
+            .with_context(|| format!("Cannot repair the interrupted sync on {}", stick.name))?;
+        let planned = planned_v2(stick)?;
+        let copies = planned
+            .plan
+            .tracks
+            .iter()
+            .filter(|track| matches!(track.action, TrackAction::Add | TrackAction::Replace))
+            .count() as u32;
+        sink.progress(&progress(stick, SyncPhase::CheckingSpace, 0, copies, "Checking free space"));
+        let needed = planned.bytes_needed();
+        let free = free_space(&stick.root).with_context(|| format!("Cannot read free space on {}", stick.name))?;
+        if needed > free {
+            bail!(
+                "Not enough space on {}: needs {}, {} free. Nothing was written.",
+                stick.name,
+                human_bytes(needed),
+                human_bytes(free)
+            );
+        }
+        sink.progress(&progress(stick, SyncPhase::Copying, 0, copies, "Copying tracks"));
+        let mut placed = 0;
+        let report = stick_plan_v2::apply_with(&stick.root, &planned.plan, wanted_of(stick), &mut |step| {
+            match step {
+                publish::Step::WriteJournal => {
+                    sink.progress(&progress(stick, SyncPhase::WritingDatabase, 0, copies, "Writing database"));
+                }
+                publish::Step::Move(path) if path.starts_with("Contents/") => {
+                    placed += 1;
+                    sink.progress(&progress(stick, SyncPhase::WritingDatabase, placed.min(copies), copies, "Writing database"));
+                }
+                _ => {}
+            }
+            Ok(())
+        })?;
+        let first_v2_sync = planned.manifest.as_ref().is_none_or(|manifest| manifest.v2.is_none());
+        if !planned.plan.is_noop() || first_v2_sync {
+            stick_sync::record(&stick.root, &planned.plan, &stick.selection.library_ids, &report)?;
+        }
+        Ok(report)
+    })();
+
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    match result {
+        Ok(report) => {
+            let total = stick.selection.tracks.len() as u32;
+            let report = StickReport {
+                volume: stick.name.clone(),
+                path: stick.root.clone(),
+                status: StickStatus::Done,
+                report: Some(report),
+                error: None,
+                skipped_unanalyzed: stick.selection.skipped_unanalyzed(),
+                elapsed_ms,
+            };
+            sink.progress(&progress(stick, SyncPhase::Done, total, total, "Safe to eject"));
+            sink.finished(&report);
+            report
+        }
+        Err(error) => fail(format!("{error:#}")),
     }
 }
 

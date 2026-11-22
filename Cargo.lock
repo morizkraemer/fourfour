@@ -3408,6 +3408,8 @@ dependencies = [
  "chrono",
  "image",
  "lofty",
+ "rbl-anlz",
+ "rbl-pdb",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3852,6 +3854,24 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rbl-anlz"
+version = "1.10.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "rbl-pdb"
+version = "1.10.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

@@ -1,5 +1,15 @@
 fourfour third-party notices
 
+rbxport (rbl-pdb, rbl-anlz)
+  Used in: vendor/rbl-pdb, vendor/rbl-anlz (and the code in pioneer-usb-writer/src/stick built on them)
+  Source: https://github.com/chrisle/rbxport, tag v1.10.0, crates/rbl-pdb and crates/rbl-anlz
+  Reader and builder for export.pdb, and reader and writer for ANLZ files.
+  What was changed is listed in vendor/rbl-pdb/UPSTREAM and vendor/rbl-anlz/UPSTREAM.
+
+  Copyright (c) 2026 Chris Le
+  Licensed under the GNU General Public License, version 2 or (at your option)
+  any later version. fourfour uses it under version 3 or later; see LICENSE.
+
 baken (waveform rules)
   Used in: pioneer-usb-writer/src/waveform/mod.rs
   Source: crates/baken-export/src/anlz/generate/waveform.rs

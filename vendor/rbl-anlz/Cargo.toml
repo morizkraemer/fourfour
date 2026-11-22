@@ -1,0 +1,20 @@
+[package]
+name = "rbl-anlz"
+version = "1.10.0"
+edition = "2021"
+rust-version = "1.89"
+license = "GPL-2.0-or-later"
+authors = ["Chris Le"]
+description = "Reader and writer for rekordbox ANLZ analysis files (.DAT/.EXT/.2EX). Vendored from rbxport."
+publish = false
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tempfile = "3"

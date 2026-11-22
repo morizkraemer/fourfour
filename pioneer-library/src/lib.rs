@@ -25,6 +25,7 @@ pub mod rekordbox;
 mod revision;
 mod row_preview;
 mod schema;
+pub mod stick_sync;
 pub mod sticks;
 mod user_edits;
 
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use pioneer_usb_writer::models::{
     AnalysisResult, Beat, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
 };
+use pioneer_usb_writer::stick::{StickDevice, StickModel};
 use pioneer_usb_writer::{reader, writer};
 
 pub use analysis_write::{AnalysisWrite, StagedAnalysis, remove_stale_staging};
@@ -65,7 +67,8 @@ pub struct BeatPosition {
 
 pub use multi_sync::{
     KeptSelection, NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
-    StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    StickStatus, SyncEngine, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    SYNC_ENGINE_ENV,
     statvfs_available_bytes, volume_capacity,
 };
 pub use revision::LibraryRevision;
@@ -1141,6 +1144,18 @@ impl LocalLibrary {
         let (usb_tracks, usb_analyses, usb_playlists) =
             prepare_for_usb(tracks, analyses, playlists);
         writer::filesystem::sync_usb(output_dir, &usb_tracks, &usb_analyses, &usb_playlists)
+    }
+
+    pub fn write_usb_v2(&self, output_dir: &Path, device_name: &str) -> Result<StickModel> {
+        let (tracks, analyses) = self.get_analyzed_tracks()?;
+        let playlists = self.get_all_playlists()?;
+        let (usb_tracks, usb_analyses, usb_playlists) = prepare_for_usb(tracks, analyses, playlists);
+        let device = StickDevice {
+            name: device_name.to_owned(),
+            created_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            ..StickDevice::default()
+        };
+        pioneer_usb_writer::stick::emit::write_usb_v2(output_dir, &usb_tracks, &usb_analyses, &usb_playlists, device)
     }
 
     // -----------------------------------------------------------------------

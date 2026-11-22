@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["pioneer-usb-writer", "pioneer-test-ui", "pioneer-library", "fourfour-analysis-rs", "fourfour-stretch"]
+members = ["pioneer-usb-writer", "pioneer-test-ui", "pioneer-library", "fourfour-analysis-rs", "fourfour-stretch", "vendor/rbl-pdb", "vendor/rbl-anlz"]
 
 [profile.release]
 lto = "fat"
