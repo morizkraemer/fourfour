@@ -124,3 +124,36 @@ fn real_rekordbox_analysis_files_are_carried_byte_for_byte() {
     println!("analysis files={} changed={changed} unreadable={unreadable}", files.len());
     assert_eq!((changed, unreadable), (0, 0));
 }
+
+#[test]
+fn real_rekordbox_stick_copies_through_the_v2_writer() {
+    use pioneer_usb_writer::stick::dump::{diff_dumps, dump_stick, DumpOptions};
+    use pioneer_usb_writer::stick::emit::copy_stick;
+
+    let Some(root) = real_stick() else { return };
+    let source = Stick::read(&root).unwrap();
+    let copy = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    copy_stick(&source, LibraryKind::DeviceLibrary, copy.path(), false).unwrap();
+
+    let options = DumpOptions { raw: true, normalise: true, pages: false };
+    let compared = |root: &Path| -> String {
+        dump_stick(root, options)
+            .unwrap()
+            .lines()
+            .filter(|line| line.starts_with("pdb ") || line.starts_with("anlz "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let differing = diff_dumps(&compared(&root), &compared(copy.path()));
+    let kinds: BTreeMap<String, usize> = differing.iter().fold(BTreeMap::new(), |mut kinds, line| {
+        let kind = line.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+        *kinds.entry(kind).or_default() += 1;
+        kinds
+    });
+    println!("lines that differ after the copy, by kind: {kinds:?}");
+    assert!(differing.iter().all(|line| line.contains("pdb raw tracks ")), "{kinds:?}");
+    assert!(differing.len() <= 2 * UNALIGNED_TRACK_ROWS_ON_THE_2026_11_22_STICK, "{kinds:?}");
+
+    let reread = Stick::read(copy.path()).unwrap();
+    assert_eq!(reread.device_library, source.device_library);
+}

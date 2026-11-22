@@ -99,7 +99,7 @@ pub fn write_usb(
 }
 
 /// Write artwork files for a track: a{id}.jpg (80x80), a{id}_m.jpg (240x240), and b copies.
-fn write_artwork(artwork_dir: &Path, artwork_id: u32, image_data: &[u8]) -> Result<()> {
+pub(crate) fn write_artwork(artwork_dir: &Path, artwork_id: u32, image_data: &[u8]) -> Result<()> {
     let img = image::load_from_memory(image_data)
         .context("Failed to decode cover art")?;
 

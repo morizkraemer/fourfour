@@ -1,5 +1,7 @@
+pub mod convert;
 pub mod device_library;
 pub mod dump;
+pub mod emit;
 pub mod model;
 pub mod one_library;
 pub mod read;
