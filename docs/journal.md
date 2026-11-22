@@ -858,3 +858,4 @@
 2026-11-22 04:40 orchestrator blog: draft 'fourfour is a thing' created on merlins-internet.com (id 86183d5f, draft:true) with 6 images; placeholders: analysis time [re-measure], tester link
 2026-11-22 04:52 orchestrator stick-ui round 2 done [271f02f]: amber warning triangle + popover (too much / sync failed / not analyzed) everywhere, 'Too much for <stick>' wording; 205 smoke pass; card round 2 open; rc must re-merge stick-ui-r1
 2026-11-22 05:02 orchestrator Merlin kept stick-ui round 2 (locked); goes into the rc build
+2026-11-22 05:06 orchestrator h2h: Rekordbox results for the 698 Beatport previews already exist (rekordbox-results.json) + Beatport key labels + integer BPM -> spawned seat worker (sonnet) to run shipping fourfour on all 698 and score both on the same tracks, with a leakage check; Merlin need not re-analyse in Rekordbox
