@@ -328,7 +328,9 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
 
   function stickPlan(target: { volume: string; selection: SmokeSelection }) {
     const stick = stickAt(target.volume);
-    const wanted = wantedIds(target.selection);
+    const chosen = wantedIds(target.selection);
+    const analysed = (id: number) => tracks.find((t) => t.id === id)?.has_analysis !== false;
+    const wanted = chosen.filter(analysed);
     const add = wanted.filter((id) => !stick.written.includes(id)).map(planTrack);
     const remove = stick.written.filter((id) => !wanted.includes(id)).map(planTrack);
     const bytesToAdd = add.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0);
@@ -341,7 +343,7 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
       remove,
       update_count: 0,
       unchanged_count: wanted.length - add.length,
-      skipped_unanalyzed: [],
+      skipped_unanalyzed: chosen.filter((id) => !analysed(id)).map(planTrack),
       foreign_kept_count: stick.foreign,
       bytes_to_add: bytesToAdd,
       bytes_to_free: remove.reduce((sum, t) => sum + (t.size_bytes ?? 0), 0),

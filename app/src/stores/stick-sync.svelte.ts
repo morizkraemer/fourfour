@@ -1,5 +1,6 @@
 import {
   listenToUsbSyncProgress,
+  type PlanTrack,
   planUsbSync,
   syncUsbMany,
   type StickProgress,
@@ -34,6 +35,24 @@ export interface StickPendingPlan {
   fits: boolean | null;
   bytesNeeded: number;
   freeBytes: number | null;
+  skipped: PlanTrack[];
+  unanalysed: number;
+}
+
+export const stickProblemView = $state({ volumePath: null as string | null, anchor: null as HTMLElement | null });
+
+export function toggleStickProblem(volumePath: string, anchor: HTMLElement) {
+  if (stickProblemView.volumePath === volumePath && stickProblemView.anchor === anchor) {
+    closeStickProblem();
+    return;
+  }
+  stickProblemView.volumePath = volumePath;
+  stickProblemView.anchor = anchor;
+}
+
+export function closeStickProblem() {
+  stickProblemView.volumePath = null;
+  stickProblemView.anchor = null;
 }
 
 export const stickPending = $state({ byPath: {} as Record<string, StickPendingPlan> });
@@ -51,6 +70,8 @@ function rememberPlan(volumePath: string, plan: UsbSyncPlan) {
     fits: plan.fits,
     bytesNeeded: plan.bytes_needed,
     freeBytes: plan.free_bytes,
+    skipped: plan.skipped_unanalyzed,
+    unanalysed: plan.skipped_unanalyzed.length,
   };
 }
 

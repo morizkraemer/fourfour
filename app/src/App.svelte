@@ -19,7 +19,7 @@
   import AppStatusBar   from './modules/AppStatusBar.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import LazyMount from './lib/LazyMount.svelte';
-  import { appDialogs, inspector, stickInspector, stickView } from './lib/lazy-views.ts';
+  import { appDialogs, inspector, stickInspector, stickProblemPopover, stickView } from './lib/lazy-views.ts';
   import { firstScreenShown, releaseAfterFallback } from './lib/afterFirstScreen.ts';
   import { announcer } from './stores/announce.svelte.ts';
   import { initFileHealth } from './stores/file-health.svelte.ts';
@@ -45,7 +45,7 @@
     dismissAnalysisPrompt,
   } from './stores/library.svelte.ts';
   import { sticks } from './stores/sticks.svelte.ts';
-  import { watchStick, unwatchSticksExcept } from './stores/stick-sync.svelte.ts';
+  import { watchStick, unwatchSticksExcept, stickProblemView } from './stores/stick-sync.svelte.ts';
   import { stickSelection } from './lib/stickEdits.ts';
   import { fileDrop, hoverFileDrop, clearFileDropHover, importDroppedPaths } from './stores/file-drop.svelte.ts';
   import { selectionCount } from './stores/selection.svelte.ts';
@@ -188,6 +188,7 @@
 <div class="ff-sr-only" role="status" aria-live="polite" aria-atomic="true" data-live-region>{#key announcer.nonce}{announcer.message}{/key}</div>
 
 <LazyMount view={appDialogs} needed={ui.settingsOpen || ui.paletteOpen} />
+<LazyMount view={stickProblemPopover} needed={stickProblemView.volumePath !== null} />
 
 {#if library.showAnalysisPrompt}
   <Dialog

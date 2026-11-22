@@ -2,11 +2,26 @@
   let { tone = 'none', label = '' } = $props();
 </script>
 
-{#if tone !== 'none'}
+{#if tone === 'problem'}
+  <svg class="ff-stickwarn" data-stick-dot="problem" viewBox="0 0 16 16" role="img" aria-label={label}>
+    <path d="M8 2.2 14.3 13.2H1.7z" />
+    <path d="M8 6.6v3.1M8 11.4v.1" />
+  </svg>
+{:else if tone !== 'none'}
   <span class="ff-stickdot ff-stickdot--{tone}" data-stick-dot={tone} role="img" aria-label={label} title={label}></span>
 {/if}
 
 <style>
+  .ff-stickwarn {
+    flex: none;
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: var(--ff-status-warn);
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
   .ff-stickdot {
     position: relative;
     display: inline-block;
@@ -15,9 +30,6 @@
     height: 6px;
     border-radius: 50%;
     background: var(--ff-status-warn);
-  }
-  .ff-stickdot--problem {
-    background: var(--ff-danger);
   }
   .ff-stickdot--busy::after {
     content: '';
