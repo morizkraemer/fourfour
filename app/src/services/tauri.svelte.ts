@@ -870,6 +870,7 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
 export interface KeptAsIs {
   playlist_id: number;
   as_of: string;
+  track_ids?: number[];
 }
 
 export interface StickContents {
@@ -886,7 +887,7 @@ export interface VolumeCapacity {
 
 export type SyncSelection =
   | { kind: 'whole_library' }
-  | { kind: 'playlists'; playlist_ids: number[]; track_ids: number[] };
+  | { kind: 'playlists'; playlist_ids: number[]; track_ids: number[]; kept?: { playlist_id: number; track_ids: number[] }[] };
 
 export interface SyncTarget {
   volume: string;
@@ -985,7 +986,9 @@ function mockWantedTrackIds(selection: SyncSelection): number[] {
   if (selection.kind === 'whole_library') return mockTracks.map((t) => t.id);
   const wanted = new Set(selection.track_ids);
   for (const playlist of mockPlaylists) {
-    if (selection.playlist_ids.includes(playlist.id)) playlist.track_ids.forEach((id) => wanted.add(id));
+    if (!selection.playlist_ids.includes(playlist.id)) continue;
+    const own = selection.kept?.find((k) => k.playlist_id === playlist.id)?.track_ids;
+    (own ?? playlist.track_ids).forEach((id) => wanted.add(id));
   }
   return [...wanted];
 }
@@ -1112,16 +1115,41 @@ export function stickAddPlaylists(path: string, playlistIds: number[]) {
 }
 
 export function stickRemovePlaylists(path: string, playlistIds: number[]) {
-  return editStick('stick_remove_playlists', { playlistIds }, path, (s) => dropIds(s.playlist_ids, playlistIds));
+  return editStick('stick_remove_playlists', { playlistIds }, path, (s) => {
+    s.kept_as_is = (s.kept_as_is ?? []).filter((k) => !playlistIds.includes(k.playlist_id));
+    return dropIds(s.playlist_ids, playlistIds);
+  });
 }
 
 export function stickSetKeepUpdated(path: string, playlistId: number, keepUpdated: boolean) {
   return editStick('stick_set_keep_updated', { playlistId, keepUpdated }, path, (s) => {
-    const kept = (s.kept_as_is ?? []).filter((k) => k.playlist_id !== playlistId);
-    if (!keepUpdated) kept.push({ playlist_id: playlistId, as_of: new Date().toISOString() });
-    const changed = kept.length !== (s.kept_as_is ?? []).length ? 1 : 0;
-    s.kept_as_is = kept;
-    return changed;
+    const before = s.kept_as_is ?? [];
+    const already = before.some((k) => k.playlist_id === playlistId);
+    if (keepUpdated === !already) return 0;
+    s.kept_as_is = keepUpdated
+      ? before.filter((k) => k.playlist_id !== playlistId)
+      : [
+          ...before,
+          {
+            playlist_id: playlistId,
+            as_of: new Date().toISOString(),
+            track_ids: [...(mockPlaylists.find((p) => p.id === playlistId)?.track_ids ?? [])],
+          },
+        ];
+    return 1;
+  });
+}
+
+export function stickSetPlaylistTracks(path: string, playlistId: number, trackIds: number[]) {
+  return editStick('stick_set_playlist_tracks', { playlistId, trackIds }, path, (s) => {
+    if (!s.playlist_ids.includes(playlistId)) return 0;
+    const before = s.kept_as_is ?? [];
+    const existing = before.find((k) => k.playlist_id === playlistId);
+    s.kept_as_is = [
+      ...before.filter((k) => k.playlist_id !== playlistId),
+      { playlist_id: playlistId, as_of: existing?.as_of ?? new Date().toISOString(), track_ids: [...trackIds] },
+    ];
+    return 1;
   });
 }
 

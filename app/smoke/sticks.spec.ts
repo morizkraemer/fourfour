@@ -13,7 +13,11 @@ const BACKUP = '/Volumes/BACKUP 32GB';
 const PANORAMA = '/Volumes/PANORAMA 8GB';
 
 const stickRow = (page: Page, path: string) => page.locator(`[data-drop-stick-path="${path}"][data-drop-surface="row"]`);
-const view = (page: Page) => page.locator('[data-stick-view]');
+const view = (page: Page) => page.locator('.ff-browse__slot--table [data-stick-view]');
+const inspector = (page: Page) => page.locator('[data-stick-inspector]');
+const stickStatus = (page: Page, path: string) => stickRow(page, path).locator('[data-stick-status]');
+const trackRows = (page: Page) => view(page).locator('[data-stick-track]');
+const trackTitles = (page: Page) => trackRows(page).locator('.ff-stickview__t').allTextContents();
 const strip = (page: Page) => page.locator('[data-put-strip]');
 const listRow = (page: Page, name: string) => view(page).locator('.ff-stickview__row').filter({ hasText: name });
 
@@ -48,13 +52,16 @@ async function shot(page: Page, name: string, target?: Locator) {
   await (target ?? page).screenshot({ path: `${SHOTS}/${name}.png` });
 }
 
-test('stick on the left: adaptive header, playlists with Synced mark, stick-only group', async ({ smoke: { page } }) => {
+test('stick on the left: info in the inspector, playlists with Synced mark, stick-only group', async ({ smoke: { page } }) => {
   await withSticks(page);
   await openStick(page, SANDISK);
-  const header = page.locator(`[data-stick-header="${SANDISK}"]`);
-  await expect(header).toContainText('SanDisk 32GB');
-  await expect(header).toContainText('22.2 GB free');
-  await expect(header).toContainText('Synced 2 min ago');
+  await expect(page.locator('[data-stick-header]')).toHaveCount(0);
+  await expect(inspector(page)).toHaveCount(1);
+  await expect(inspector(page)).toContainText('SanDisk 32GB');
+  await expect(inspector(page).locator('[data-fig="free"]')).toContainText('22.2 GB');
+  await expect(inspector(page).locator('[data-stick-capacity]')).toContainText('7.6 GB used of 29.8 GB');
+  await expect(inspector(page).locator('[data-stick-status]')).toHaveAttribute('data-stick-status', 'pending');
+  await expect(inspector(page).locator('[data-stick-detail]')).toHaveText('2 to remove. Written on the next sync.');
   await expect(listRow(page, 'Peak Time').locator('[data-synced-mark]')).toBeVisible();
   await expect(page.locator('[data-only-on-stick]')).toBeVisible();
   await expect(view(page).locator('[data-stick-row="foreign"]')).toHaveCount(2);
@@ -125,31 +132,123 @@ test('stick playlist: Keep updated switch, off shows the date', async ({ smoke }
   await expect(listRow(page, 'Peak Time')).toContainText('as of');
 });
 
-test('engine without Keep updated: the switch stays on and is disabled', async ({ smoke }) => {
+test('engine without Keep updated: plain text instead of a switch that cannot move', async ({ smoke }) => {
   const { page } = smoke;
   await page.evaluate(() => localStorage.setItem('smoke.sticks.oldEngine', '1'));
   await withSticks(page);
   await openStick(page, SANDISK);
   await listRow(page, 'Peak Time').click();
+  const head = page.locator('[data-stick-playlist-header]');
+  await expect(head.getByRole('switch')).toHaveCount(0);
+  await expect(head.locator('[data-keep-updated-fixed]')).toHaveText('Follows your library');
+  await trackRows(page).first().click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Remove from this playlist on the stick' })).toBeDisabled();
+});
+
+test('status dots: none when in sync, amber when changes wait, red when it will not fit', async ({ smoke: { page } }) => {
+  await withSticks(page);
+  await expect(stickStatus(page, SANDISK)).toHaveAttribute('data-stick-status', 'pending');
+  await expect(stickStatus(page, PANORAMA)).toHaveAttribute('data-stick-status', 'wont-fit');
+  await expect(stickStatus(page, BACKUP)).toHaveAttribute('data-stick-status', 'idle');
+  await expect(stickStatus(page, BACKUP).locator('[data-stick-dot]')).toHaveCount(0);
+  await expect(stickStatus(page, SANDISK).locator('[data-stick-dot]')).toHaveAttribute('data-stick-dot', 'waiting');
+  await expect(stickStatus(page, PANORAMA).locator('[data-stick-dot]')).toHaveAttribute('data-stick-dot', 'problem');
+  await openStick(page, BACKUP);
+  await expect(stickStatus(page, BACKUP).locator('[data-stick-dot]')).toHaveCount(0);
+  await shot(page, '10-sidebar-status-dots', page.locator('.ff-sidebar__bottom'));
+});
+
+test('top bar pill shows only a stick that needs attention and opens its inspector', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  const chip = page.locator('[data-stick-chip]');
+  await expect(chip).toHaveAttribute('data-stick-chip', 'wont-fit');
+  await expect(chip).toContainText("PANORAMA 8GB Won't fit");
+  await chip.click();
+  await expect(inspector(page)).toHaveAttribute('data-stick-inspector', PANORAMA);
+  await stickRow(page, PANORAMA).click({ button: 'right' });
+  await smoke.answerDialogs(true);
+  await page.getByRole('menuitem', { name: 'Eject' }).click();
+  await expect(chip).toHaveAttribute('data-stick-chip', 'pending');
+  await expect(chip).toContainText('SanDisk 32GB 2 changes waiting');
+  await openStick(page, SANDISK);
+  await inspector(page).getByRole('button', { name: 'Sync now' }).click();
+  await page.getByRole('button', { name: 'Sync', exact: true }).last().click();
+  await expect(inspector(page).locator('[data-stick-status]')).toHaveAttribute('data-stick-status', 'idle');
+  await expect(chip).toHaveCount(0);
+});
+
+test('All tracks on a stick: remove from stick and show in library from the row menu', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  await openStick(page, SANDISK);
+  await view(page).locator('[data-stick-row="all"]').click();
+  await expect(trackRows(page)).toHaveCount(2);
+  await expect(view(page).locator('[data-stick-edit-hint]')).toContainText('It stays in your library');
+  await trackRows(page).first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Remove from stick' }).click();
+  expect(await smoke.invokes('stick_remove_tracks')).toEqual([{ path: SANDISK, trackIds: [7] }]);
+  await expect(trackRows(page)).toHaveCount(1);
+  await trackRows(page).first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Show in library' }).click();
+  await expect(page.locator('[data-track-row]').first()).toBeVisible();
+  await expect(page.locator('.ff-gheader__title')).toHaveText('All Tracks');
+});
+
+test('playlist on a stick: removing a track keeps the stick list apart from the library', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  await openStick(page, SANDISK);
+  await listRow(page, 'Peak Time').click();
+  expect(await trackTitles(page)).toEqual(['Smoke Track 01', 'Smoke Track 02', 'Smoke Track 03']);
+  await trackRows(page).nth(1).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Remove from this playlist on the stick' }).click();
+  expect(await smoke.invokes('stick_set_playlist_tracks')).toEqual([{ path: SANDISK, playlistId: 1, trackIds: [1, 3] }]);
+  expect(await trackTitles(page)).toEqual(['Smoke Track 01', 'Smoke Track 03']);
+  await expect(page.locator('[data-stick-notice]')).toContainText('Your library did not change');
   const toggle = page.locator('[data-stick-playlist-header]').getByRole('switch', { name: 'Keep updated' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await expect(sidebarPlaylist(page, 'Peak Time').locator('.ff-sbrow__count')).toHaveText('3');
+  await inspector(page).getByRole('button', { name: 'Sync now' }).click();
+  await page.getByRole('button', { name: 'Sync', exact: true }).last().click();
+  const [call] = await smoke.invokes('sync_usb_many');
+  expect(call.targets[0].selection.kept).toEqual([{ playlist_id: 1, track_ids: [1, 3] }]);
+  await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
-  await expect(toggle).toHaveAttribute('aria-disabled', 'true');
-  await toggle.click({ force: true });
-  expect(await smoke.invokes('stick_set_keep_updated')).toEqual([]);
+  expect(await trackTitles(page)).toEqual(['Smoke Track 01', 'Smoke Track 02', 'Smoke Track 03']);
+});
+
+test('playlist on a stick: drag a track to reorder it on the stick only', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  await openStick(page, SANDISK);
+  await listRow(page, 'Peak Time').click();
+  const from = (await trackRows(page).nth(2).boundingBox())!;
+  const to = (await trackRows(page).nth(0).boundingBox())!;
+  await page.mouse.move(from.x + 120, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 126, from.y, { steps: 4 });
+  await page.mouse.move(to.x + 126, to.y + 3, { steps: 8 });
+  await expect(page.locator('[data-stick-dropline]')).toBeVisible();
+  await expect(page.locator('[data-stick-reorder-ghost]')).toHaveText('Move 1 track');
+  await page.mouse.up();
+  expect(await smoke.invokes('stick_set_playlist_tracks')).toEqual([{ path: SANDISK, playlistId: 1, trackIds: [3, 1, 2] }]);
+  expect(await trackTitles(page)).toEqual(['Smoke Track 03', 'Smoke Track 01', 'Smoke Track 02']);
+  await expect(page.locator('[data-stick-dropline]')).toHaveCount(0);
 });
 
 test('sync asks when tracks come off the stick', async ({ smoke }) => {
   const { page } = smoke;
   await withSticks(page);
   await openStick(page, SANDISK);
-  await page.locator(`[data-stick-header="${SANDISK}"]`).getByRole('button', { name: 'Sync' }).click();
+  await inspector(page).getByRole('button', { name: 'Sync now' }).click();
   const plan = page.locator('[data-stick-plan]');
   await expect(plan.locator('[data-plan-remove]')).toContainText('2 tracks come off the stick');
   await expect(plan.locator('[data-plan-foreign]')).toContainText('2 tracks put there by other apps');
   await shot(page, '06-removal-ask');
   expect(await smoke.invokes('sync_usb_many')).toEqual([]);
   await page.getByRole('button', { name: 'Sync', exact: true }).last().click();
-  await expect(page.locator(`[data-stick-header="${SANDISK}"] [data-stick-status]`)).toContainText('Safe to eject');
+  await expect(inspector(page).locator('[data-stick-status]')).toContainText('Safe to eject');
   expect(await smoke.invokes('sync_usb_many')).toHaveLength(1);
 });
 
@@ -157,7 +256,8 @@ test("sync stops when it won't fit", async ({ smoke }) => {
   const { page } = smoke;
   await withSticks(page);
   await openStick(page, PANORAMA);
-  await page.locator(`[data-stick-header="${PANORAMA}"]`).getByRole('button', { name: 'Sync' }).click();
+  await expect(inspector(page).locator('[data-stick-detail]')).toContainText('Needs');
+  await inspector(page).getByRole('button', { name: 'Sync now' }).click();
   await expect(page.locator('[data-plan-wontfit]')).toContainText('Nothing was written');
   await expect(page.getByText("Won't fit on PANORAMA 8GB")).toBeVisible();
   await shot(page, '07-wont-fit');
@@ -165,13 +265,16 @@ test("sync stops when it won't fit", async ({ smoke }) => {
   expect(await smoke.invokes('sync_usb_many')).toEqual([]);
 });
 
-test('stick in the side panel: compact header, drop label on the board', async ({ smoke }) => {
+test('stick in the side panel: a plain list with no info header, drop label on the board', async ({ smoke }) => {
   const { page } = smoke;
   await withSticks(page, 1280, 800);
   await stickRow(page, BACKUP).hover();
   await stickRow(page, BACKUP).locator('.ff-sbrow__action').click();
   const board = page.locator('[data-stick-board]');
-  await expect(board.locator(`[data-stick-header="${BACKUP}"]`)).toContainText('30.1 GB free');
+  await expect(board.locator('[data-stick-list]')).toBeVisible();
+  await expect(board.locator('[data-stick-row="all"]')).toContainText('All tracks');
+  await expect(board.getByRole('button', { name: /Sync|Eject/ })).toHaveCount(0);
+  await expect(board).not.toContainText('GB');
   await shot(page, '08-panel-stick-1280', page.locator('.ff-organize--expanded'));
   await drag(page, sidebarPlaylist(page, 'Peak Time'), () => board, async () => {
     await expect(board.locator('[data-drop-label]')).toHaveText('Put on BACKUP 32GB · Keep updated');

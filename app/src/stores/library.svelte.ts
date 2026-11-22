@@ -615,7 +615,6 @@ export const library = $state({
         rows: this.volumes.map(v => ({
           kind: 'usb',
           label: v.replace(/\\/g, '/').split('/').pop() || v,
-          status: this.activeVolume === v ? 'online' : 'offline',
           path: v
         })),
       },

@@ -6,13 +6,14 @@ import {
   stickRemovePlaylists,
   stickRemoveTracks,
   stickSetKeepUpdated,
+  stickSetPlaylistTracks,
   type StickContents,
   type VolumeCapacity,
 } from '../services/tauri.svelte.ts';
+import { playlistTracksOnStick } from '../lib/stickEdits.ts';
 
 const LEGACY_ALL_TRACKS_KEY = 'fourfour.sticks.allTracks';
 
-/** Per mounted stick (keyed by volume path): what the library remembers for it, by stick id. */
 export const sticks = $state({
   byPath: {} as Record<string, StickContents>,
   capacity: {} as Record<string, VolumeCapacity | null>,
@@ -59,12 +60,10 @@ export function stickName(volumePath: string): string {
   return volumePath.replace(/\\/g, '/').split('/').pop() || volumePath;
 }
 
-/** False when the engine does not report per-playlist "Keep updated" yet; the switch then stays on. */
 export function keepUpdatedSupported(volumePath: string): boolean {
   return Array.isArray(sticks.byPath[volumePath]?.kept_as_is);
 }
 
-/** The date a playlist was kept as it is on the stick, or null when it follows the library. */
 export function keptAsIsSince(volumePath: string, playlistId: number): string | null {
   return sticks.byPath[volumePath]?.kept_as_is?.find((k) => k.playlist_id === playlistId)?.as_of ?? null;
 }
@@ -73,7 +72,14 @@ export function setKeepUpdated(volumePath: string, playlistId: number, keepUpdat
   return edit(volumePath, () => stickSetKeepUpdated(volumePath, playlistId, keepUpdated));
 }
 
-/** Reads the stick's lists from the library; moves a list left in localStorage by an older build into it. */
+export function stickPlaylistTrackIds(volumePath: string, playlistId: number, libraryTrackIds: number[]): number[] {
+  return playlistTracksOnStick(playlistId, libraryTrackIds, sticks.byPath[volumePath]?.kept_as_is);
+}
+
+export function setStickPlaylistTracks(volumePath: string, playlistId: number, trackIds: number[]): Promise<number> {
+  return edit(volumePath, () => stickSetPlaylistTracks(volumePath, playlistId, trackIds));
+}
+
 export async function loadStick(volumePath: string): Promise<void> {
   startLoading(volumePath);
   try {
@@ -121,7 +127,6 @@ async function edit(volumePath: string, run: () => Promise<[number, StickContent
   }
 }
 
-/** Adds the tracks the stick does not hold yet; returns how many were added. */
 export function addTracksToStickAll(volumePath: string, trackIds: number[]): Promise<number> {
   return edit(volumePath, () => stickAddTracks(volumePath, trackIds));
 }
@@ -130,7 +135,6 @@ export function removeTracksFromStickAll(volumePath: string, trackIds: number[])
   return edit(volumePath, () => stickRemoveTracks(volumePath, trackIds));
 }
 
-/** Puts playlists on the stick; returns how many were new. */
 export function addPlaylistsToStick(volumePath: string, playlistIds: number[]): Promise<number> {
   return edit(volumePath, () => stickAddPlaylists(volumePath, playlistIds));
 }
@@ -154,7 +158,6 @@ export interface StickSpace {
   usedPct: number;
 }
 
-/** Sizes as shown in the stick header ("29.8 GB", "7.6 GB used", "22.2 GB free"), or null when unknown. */
 export function stickSpace(capacity: VolumeCapacity | null | undefined): StickSpace | null {
   if (!capacity || capacity.total_bytes <= 0) return null;
   const used = Math.max(0, capacity.total_bytes - capacity.free_bytes);
@@ -166,7 +169,6 @@ export function stickSpace(capacity: VolumeCapacity | null | undefined): StickSp
   };
 }
 
-/** "41.2 of 64 GB" (used of total), or null when the capacity is unknown. */
 export function capacityLabel(capacity: VolumeCapacity | null | undefined): string | null {
   if (!capacity || capacity.total_bytes <= 0) return null;
   const used = Math.max(0, capacity.total_bytes - capacity.free_bytes);
