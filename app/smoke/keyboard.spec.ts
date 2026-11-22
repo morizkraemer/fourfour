@@ -132,6 +132,18 @@ test.describe('library list', () => {
     await page.keyboard.press('Tab');
     await expect(page.locator('.ff-xp')).toBeVisible();
   });
+
+  test('Tab opens and closes the empty player when no track is loaded', async ({ smoke: { page } }) => {
+    await expect(page.locator('.ff-player-compact__meta-title')).toHaveText('No Track Loaded');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toBeVisible();
+    await expect(page.locator('.ff-xp__title')).toHaveText('No Track Loaded');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+    await rows(page).first().click();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toBeVisible();
+  });
 });
 
 test.describe('sidebar', () => {
