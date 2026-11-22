@@ -1,11 +1,12 @@
 # fourfour - state
 
-_Updated: 2026-11-17 by orchestrator on `dev`. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
+_Updated: 2026-11-22 by orchestrator on `dev`. Live state only, max ~80 lines. History → docs/journal.md, facts → memory._
 _Archived detail (trimmed 2026-10-27, 2026-11-03 twice): docs/state-archive-2026-10-28.md_
 
 ## Direction
 Not in Compass (baseline 2026-09-24: creative block to 30 Oct, then Pad, then Bounce). Quiet engineering only; never takes Merlin's focus hours. Holiday ended 2026-11-13.
-Roles: Merlin owns app UX (interface, player, library, analysis quality) and cross-platform testing; his brother (GitHub morizkraemer, "Mo") owns the USB format, sync engine and hardware tests. Merlin travels: no hardware.
+Roles (2026-11-22): this thread now also owns the USB writer and sync engine; Mo (GitHub morizkraemer) does real CDJ/hardware testing only.
+Licence (2026-11-22, Merlin + Mo): GPL-3.0-or-later (LICENSE in master 7becfea); rbxport (GPL) code may be reused. Not for sale, fully open source. Merlin travels: no hardware.
 Analysis: Rust-native (Rust DSP + Beat This! ONNX), permissive licences only, no Python/AGPL. Key: shipped clean FSL model, 78.9% exact on held-out GiantSteps+ (R177); key model work stopped.
 USB sync: only chosen playlists go on a stick; plug in = sync; ask only on removals / won't fit / unanalyzed; never delete files fourfour didn't write. Design log: docs/ui/usb-sync-decisions.md; engine spec for the brother: docs/ui/usb-sync-spec.md.
 
@@ -51,7 +52,10 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 - Sync engine per docs/ui/usb-sync-spec.md. Open: Q6 key source PDB vs OneLibrary; .2EX / PWV6-7 for CDJ-3000X; CDJ-3000 round-trip.
 
 ## Queue
-### Q6 Key source PDB vs OneLibrary [handed to brother]
+### Q63 Writer v2 [running] [box] - plan docs/plans/writer-v2-2026-11-22.md (Fable): vendor rbxport rbl-pdb + rbl-anlz behind a stick model, keep our OneLibrary writer/meter/multi_sync; byte diff vs a small Rekordbox export (FF-GOLDEN, Merlin exports A/A2/B); old writer stays default until diff + Mo's CDJ-3000 check. Slices 1-3 running on branch writer-v2. Fixes #41 (Rekordbox stick library wiped on first sync), #42
+### Q64 Stick UI round 1 [running] [box] - Merlin's Mac feedback 2026-11-22: status dot (not selection), Keep updated toggle bug, stick info into the inspector, side panel = plain dual-window list, no "in sync" pill when fine, stick track row actions. Fable, branch stick-ui-r1, lab card
+### Q65 Play from stick + Tab [running] [box] - play tracks from a stick, Tab with no track loaded, plan for opening Rekordbox sticks + importing playlists (on Q63's stick model). Branch stick-play-tab
+### Q6 Key source PDB vs OneLibrary [folded into Q63]
 ### Q8 Cross-platform CI [waiting on Merlin, 15] [box] - build, test, check on 3 OSes; branch only. 45 min
 ### Q14 USB sync UI [waiting on Merlin, 55] - branch ui-sync-flow b510e70
 ### Q60 Duplicate cleanup [queued] [box] - keeper + archive + restore, proposals you accept (Ora-style), reuse dup data and the 2 s duration rule; UI on a branch, lands only after Merlin's review. Research: docs/research/ora-docs-2026-11.md
