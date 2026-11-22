@@ -83,8 +83,61 @@ describe('sync target', () => {
     const { stickSyncTarget } = await fresh();
     expect(stickSyncTarget(STICK)).toEqual({
       volume: STICK,
-      selection: { kind: 'playlists', playlist_ids: [2], track_ids: [7, 8] },
+      selection: { kind: 'playlists', playlist_ids: [2], track_ids: [7, 8], kept: [] },
     });
+  });
+
+  it("writes a kept playlist from the stick's own list after an edit on the stick", async () => {
+    const { stickSyncTarget, setStickPlaylistTracks, stickPlaylistTrackIds, keptAsIsSince } = await fresh();
+    invokeMock.mockImplementationOnce(async () => [
+      1,
+      { stick_id: 'abc', track_ids: [7, 8], playlist_ids: [2], kept_as_is: [{ playlist_id: 2, as_of: '2026-11-22T10:00:00Z', track_ids: [5, 3] }] },
+    ]);
+    expect(stickPlaylistTrackIds(STICK, 2, [3, 4, 5])).toEqual([3, 4, 5]);
+    await setStickPlaylistTracks(STICK, 2, [5, 3]);
+    expect(invokeMock).toHaveBeenLastCalledWith('stick_set_playlist_tracks', { path: STICK, playlistId: 2, trackIds: [5, 3] });
+    expect(stickPlaylistTrackIds(STICK, 2, [3, 4, 5])).toEqual([5, 3]);
+    expect(keptAsIsSince(STICK, 2)).toBe('2026-11-22T10:00:00Z');
+    expect(stickSyncTarget(STICK).selection).toEqual({
+      kind: 'playlists',
+      playlist_ids: [2],
+      track_ids: [7, 8],
+      kept: [{ playlist_id: 2, track_ids: [5, 3] }],
+    });
+  });
+});
+
+describe('changes waiting', () => {
+  it('counts what a dry run would change and clears after the write', async () => {
+    const { watchStick, checkStickPending, statusOfStick, syncStick, unwatchSticksExcept, stickPending } = await fresh();
+    vi.useFakeTimers();
+    watchStick(STICK, 'a');
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    expect(statusOfStick(STICK)).toEqual({ kind: 'pending', tone: 'waiting', label: '1 change waiting' });
+
+    nextPlan = plan({ fits: false });
+    await checkStickPending(STICK);
+    expect(statusOfStick(STICK).kind).toBe('wont-fit');
+
+    nextPlan = plan({ add: [], unchanged_count: 1 });
+    await syncStick(STICK);
+    expect(statusOfStick(STICK)).toEqual({ kind: 'idle', tone: 'none', label: 'In sync' });
+
+    unwatchSticksExcept([]);
+    expect(stickPending.byPath[STICK]).toBeUndefined();
+  });
+
+  it('does not plan again for an unchanged stick', async () => {
+    const { watchStick } = await fresh();
+    vi.useFakeTimers();
+    watchStick(STICK, 'a');
+    watchStick(STICK, 'a');
+    await vi.runAllTimersAsync();
+    watchStick(STICK, 'a');
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+    expect(calls.filter((c) => c.command === 'plan_usb_sync')).toHaveLength(1);
   });
 });
 
@@ -106,7 +159,7 @@ describe('sync flow', () => {
     const { syncStick, stickSync, syncStatusLine } = await fresh();
     await syncStick(STICK);
     const syncCall = calls.find((c) => c.command === 'sync_usb_many');
-    expect(syncCall?.args.targets[0].selection).toEqual({ kind: 'playlists', playlist_ids: [2], track_ids: [7, 8] });
+    expect(syncCall?.args.targets[0].selection).toEqual({ kind: 'playlists', playlist_ids: [2], track_ids: [7, 8], kept: [] });
     expect(stickSync.stage).toBe('done');
     expect(syncStatusLine()).toBe('Synced · 1 added · Safe to eject');
   });

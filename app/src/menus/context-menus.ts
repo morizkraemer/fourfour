@@ -568,3 +568,46 @@ export function buildColumnContextMenuItems(opts: ColumnMenuOptions): MenuItem[]
     },
   ];
 }
+
+interface StickTrackMenuOptions {
+  scope: 'all' | 'playlist';
+  count: number;
+  canEditPlaylist: boolean;
+  onRemove: () => void;
+  onShowInLibrary: () => void;
+}
+
+export function stickTrackRemoveLabel(scope: 'all' | 'playlist', count: number): string {
+  const what = count === 1 ? '' : `${count} `;
+  return scope === 'all' ? `Remove ${what}from stick` : `Remove ${what}from this playlist on the stick`;
+}
+
+export function buildStickTrackMenuItems(opts: StickTrackMenuOptions): MenuItem[] {
+  const { scope, count, canEditPlaylist, onRemove, onShowInLibrary } = opts;
+  if (count === 0) return [];
+  return [
+    { label: 'Show in library', disabled: count !== 1, onClick: onShowInLibrary },
+    { isSeparator: true },
+    {
+      label: stickTrackRemoveLabel(scope, count),
+      variant: 'danger',
+      disabled: scope === 'playlist' && !canEditPlaylist,
+      onClick: onRemove,
+    },
+  ];
+}
+
+interface StickPlaylistMenuOptions {
+  onOpen: () => void;
+  onShowInLibrary: () => void;
+  onTakeOff: () => void;
+}
+
+export function buildStickPlaylistMenuItems(opts: StickPlaylistMenuOptions): MenuItem[] {
+  return [
+    { label: 'Open', onClick: opts.onOpen },
+    { label: 'Show in library', onClick: opts.onShowInLibrary },
+    { isSeparator: true },
+    { label: 'Take off this stick', variant: 'danger', onClick: opts.onTakeOff },
+  ];
+}

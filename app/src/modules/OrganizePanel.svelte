@@ -22,7 +22,8 @@
   import { ORGANIZE_EMPTY_WIDTH, organizePanelWidth } from '../lib/panelWidth.ts';
   import OrganizePicker from './OrganizePicker.svelte';
   import TrackTable from './TrackTable.svelte';
-  import StickBoard from './StickBoard.svelte';
+  import LazyMount from '../lib/LazyMount.svelte';
+  import { stickBoard } from '../lib/lazy-views.ts';
 
   let { containerEl = null } = $props();
 
@@ -234,7 +235,7 @@
         />
         <button type="button" class="ff-organize__target" aria-label="Board menu" onclick={openTargetMenu}>
           <span class="ff-organize__target-name">{ui.organize.target.label}</span>
-          <span class="ff-organize__target-sub">{subtitle}</span>
+          {#if ui.organize.target.kind !== 'usb'}<span class="ff-organize__target-sub">{subtitle}</span>{/if}
           <Icon name="chevron-down" size={12} />
         </button>
       {:else}
@@ -264,19 +265,17 @@
       </div>
     </div>
 
-    {#if ui.organize.target?.kind === 'usb'}
-      <StickBoard volumePath={ui.organize.target.id} />
-    {/if}
-
     <div class="ff-organize__body" class:ff-organize__body--table={ui.organize.target !== null}>
       {#if ui.organize.target === null}
         <OrganizePicker />
+      {:else if ui.organize.target.kind === 'usb'}
+        <LazyMount view={stickBoard} props={{ volumePath: ui.organize.target.id }} />
       {:else}
         <TrackTable sourceId={ui.organize.target.id} embedded layoutKindOverride="organize" organize={true} />
       {/if}
     </div>
 
-    {#if ui.organize.target && (summary.avgBpm !== null || summary.keyRange !== null)}
+    {#if ui.organize.target && ui.organize.target.kind !== 'usb' && (summary.avgBpm !== null || summary.keyRange !== null)}
       <div class="ff-organize__foot">
         {#if summary.avgBpm !== null}<span>avg {Math.round(summary.avgBpm)} BPM</span>{/if}
         {#if summary.keyRange !== null}<span>{summary.keyRange}</span>{/if}

@@ -141,6 +141,46 @@ pub fn stick_remove_playlists(
     edit_stick(&path, &state, &busy, |lib, id| lib.remove_stick_playlists(id, &playlist_ids))
 }
 
+/// "Keep updated" for one playlist on the stick. Off gives the stick its own copy of the
+/// playlist's current tracks; on drops that copy so the playlist follows the library again.
+#[tauri::command(async)]
+pub fn stick_set_keep_updated(
+    path: String,
+    playlist_id: i64,
+    keep_updated: bool,
+    state: State<'_, SharedLibrary>,
+    busy: State<'_, BusySticks>,
+) -> Result<(usize, StickContents), CommandError> {
+    edit_stick(&path, &state, &busy, |lib, id| set_keep_updated(lib, id, playlist_id, keep_updated))
+}
+
+fn set_keep_updated(lib: &LocalLibrary, stick_id: &str, playlist_id: i64, keep_updated: bool) -> anyhow::Result<usize> {
+    if keep_updated {
+        return lib.follow_stick_playlist(stick_id, playlist_id);
+    }
+    if lib.stick_contents(stick_id)?.kept_as_is.iter().any(|k| k.playlist_id == playlist_id) {
+        return Ok(0);
+    }
+    let track_ids: Vec<i64> = lib
+        .get_playlist(playlist_id)?
+        .map(|p| p.track_ids.iter().map(|&id| id as i64).collect())
+        .unwrap_or_default();
+    lib.keep_stick_playlist(stick_id, playlist_id, &track_ids)
+}
+
+/// Sets the stick's own track list for a playlist on it (remove or reorder on the stick).
+/// The playlist stops following the library; the library playlist is not changed.
+#[tauri::command(async)]
+pub fn stick_set_playlist_tracks(
+    path: String,
+    playlist_id: i64,
+    track_ids: Vec<i64>,
+    state: State<'_, SharedLibrary>,
+    busy: State<'_, BusySticks>,
+) -> Result<(usize, StickContents), CommandError> {
+    edit_stick(&path, &state, &busy, |lib, id| lib.keep_stick_playlist(id, playlist_id, &track_ids))
+}
+
 #[tauri::command(async)]
 pub fn get_volume_capacity(path: String) -> Result<VolumeCapacity, CommandError> {
     pioneer_library::volume_capacity(Path::new(&path))
@@ -181,6 +221,21 @@ mod tests {
     use pioneer_usb_writer::writer::filesystem::sync_usb_keeping;
 
     use super::*;
+
+    #[test]
+    fn keep_updated_off_copies_the_playlist_once_and_on_follows_again() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let playlist = lib.create_playlist("Warmup").unwrap();
+        lib.add_stick_playlists("s1", &[playlist]).unwrap();
+
+        assert_eq!(set_keep_updated(&lib, "s1", playlist, false).unwrap(), 1);
+        lib.keep_stick_playlist("s1", playlist, &[7, 5]).unwrap();
+        assert_eq!(set_keep_updated(&lib, "s1", playlist, false).unwrap(), 0, "off twice keeps the stick's edited list");
+        assert_eq!(lib.stick_contents("s1").unwrap().kept_as_is[0].track_ids, vec![7, 5]);
+
+        assert_eq!(set_keep_updated(&lib, "s1", playlist, true).unwrap(), 1);
+        assert!(lib.stick_contents("s1").unwrap().kept_as_is.is_empty());
+    }
 
     struct Stick(PathBuf);
 

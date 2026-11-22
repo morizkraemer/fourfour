@@ -1502,6 +1502,8 @@ fn main() {
             stick_commands::stick_remove_tracks,
             stick_commands::stick_add_playlists,
             stick_commands::stick_remove_playlists,
+            stick_commands::stick_set_keep_updated,
+            stick_commands::stick_set_playlist_tracks,
             stick_commands::get_volume_capacity,
             stick_commands::plan_usb_sync,
             duplicate_commands::list_duplicate_groups,
@@ -1702,7 +1704,7 @@ mod tests {
         );
         assert_off_main_thread(
             include_str!("stick_commands.rs"),
-            &["get_stick", "stick_track_path", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],
+            &["get_stick", "stick_track_path", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "stick_set_keep_updated", "stick_set_playlist_tracks", "get_volume_capacity"],
         );
     }
 

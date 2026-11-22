@@ -33,13 +33,16 @@ export interface SmokeWindow {
   __smokeReleaseDetail: (() => void) | null;
   __smokeLabelChanges: { id: number; rating: number | null; color: string | null }[];
   __smokeSticks: Record<string, SmokeStick>;
+  __smokeHoldSync: boolean;
+  __smokeReleaseSync: (() => void) | null;
+  __smokeFailSync: string | null;
   __smokeArtwork: boolean;
 }
 
 export interface SmokeStick {
   total: number;
   free: number;
-  contents: { stick_id: string; track_ids: number[]; playlist_ids: number[]; kept_as_is?: { playlist_id: number; as_of: string }[] };
+  contents: { stick_id: string; track_ids: number[]; playlist_ids: number[]; kept_as_is?: { playlist_id: number; as_of: string; track_ids: number[] }[] };
   written: number[];
   foreign: number;
   playlists: { id: number; name: string; track_count: number }[];
@@ -105,6 +108,9 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
   w.__smokeLabelChanges ??= [];
   const GB = 1_000_000_000;
   const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  w.__smokeHoldSync = false;
+  w.__smokeReleaseSync = null;
+  w.__smokeFailSync = null;
   w.__smokeSticks =
     localStorage.getItem('smoke.sticks') === '1'
       ? {
@@ -303,9 +309,15 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
     return before - kept.length;
   }
 
-  function wantedIds(selection: { playlist_ids: number[]; track_ids: number[] }) {
+  type SmokeSelection = { playlist_ids: number[]; track_ids: number[]; kept?: { playlist_id: number; track_ids: number[] }[] };
+
+  function wantedIds(selection: SmokeSelection) {
     const wanted = new Set<number>(selection.track_ids);
-    for (const p of playlists) if (selection.playlist_ids.includes(p.id)) p.track_ids.forEach((id) => wanted.add(id));
+    for (const p of playlists) {
+      if (!selection.playlist_ids.includes(p.id)) continue;
+      const own = selection.kept?.find((k) => k.playlist_id === p.id)?.track_ids;
+      (own ?? p.track_ids).forEach((id) => wanted.add(id));
+    }
     return [...wanted].filter((id) => tracks.some((t) => t.id === id));
   }
 
@@ -314,7 +326,7 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
     return { track_id: id, title: t?.title ?? `Track ${id}`, artist: t?.artist ?? '', size_bytes: t?.file_size ?? null };
   }
 
-  function stickPlan(target: { volume: string; selection: { playlist_ids: number[]; track_ids: number[] } }) {
+  function stickPlan(target: { volume: string; selection: SmokeSelection }) {
     const stick = stickAt(target.volume);
     const wanted = wantedIds(target.selection);
     const add = wanted.filter((id) => !stick.written.includes(id)).map(planTrack);
@@ -356,14 +368,37 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
       case 'stick_add_playlists':
         return editStick(args.path, (s) => addIds(s.contents.playlist_ids, args.playlistIds));
       case 'stick_remove_playlists':
-        return editStick(args.path, (s) => removeIds(s.contents.playlist_ids, args.playlistIds));
+        return editStick(args.path, (s) => {
+          s.contents.kept_as_is = (s.contents.kept_as_is ?? []).filter((k) => !args.playlistIds.includes(k.playlist_id));
+          return removeIds(s.contents.playlist_ids, args.playlistIds);
+        });
       case 'stick_set_keep_updated':
         return editStick(args.path, (s) => {
-          const before = (s.contents.kept_as_is ?? []).length;
-          const kept = (s.contents.kept_as_is ?? []).filter((k) => k.playlist_id !== args.playlistId);
-          if (!args.keepUpdated) kept.push({ playlist_id: args.playlistId, as_of: new Date().toISOString() });
-          s.contents.kept_as_is = kept;
-          return kept.length === before ? 0 : 1;
+          const before = s.contents.kept_as_is ?? [];
+          const already = before.some((k) => k.playlist_id === args.playlistId);
+          if (args.keepUpdated === !already) return 0;
+          s.contents.kept_as_is = args.keepUpdated
+            ? before.filter((k) => k.playlist_id !== args.playlistId)
+            : [
+                ...before,
+                {
+                  playlist_id: args.playlistId,
+                  as_of: new Date().toISOString(),
+                  track_ids: [...(playlists.find((p) => p.id === args.playlistId)?.track_ids ?? [])],
+                },
+              ];
+          return 1;
+        });
+      case 'stick_set_playlist_tracks':
+        return editStick(args.path, (s) => {
+          if (!s.contents.playlist_ids.includes(args.playlistId)) return 0;
+          const before = s.contents.kept_as_is ?? [];
+          const existing = before.find((k) => k.playlist_id === args.playlistId);
+          s.contents.kept_as_is = [
+            ...before.filter((k) => k.playlist_id !== args.playlistId),
+            { playlist_id: args.playlistId, as_of: existing?.as_of ?? new Date().toISOString(), track_ids: [...args.trackIds] },
+          ];
+          return 1;
         });
       case 'get_volume_capacity': {
         const stick = stickAt(args.path);
@@ -397,9 +432,13 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
       case 'plan_usb_sync':
         return stickPlan(args.target);
       case 'sync_usb_many':
-        return args.targets.map((target: { volume: string; selection: { playlist_ids: number[]; track_ids: number[] } }) => {
+        if (w.__smokeHoldSync) await new Promise<void>((done) => (w.__smokeReleaseSync = done));
+        return args.targets.map((target: { volume: string; selection: SmokeSelection }) => {
           const plan = stickPlan(target);
           const stick = stickAt(target.volume);
+          if (w.__smokeFailSync) {
+            return { volume: plan.volume, path: target.volume, status: 'failed', report: null, error: w.__smokeFailSync, skipped_unanalyzed: 0, elapsed_ms: 10 };
+          }
           stick.written = wantedIds(target.selection);
           stick.last_sync = new Date().toISOString();
           return {

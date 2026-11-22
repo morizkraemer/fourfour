@@ -7,12 +7,13 @@ import {
   type SyncTarget,
   type UsbSyncPlan,
 } from '../services/tauri.svelte.ts';
-import { loadCapacity, stickAllTrackIds, stickPlaylistIds } from './sticks.svelte.ts';
+import { loadCapacity, sticks } from './sticks.svelte.ts';
 import { syncFailureText } from '../lib/userErrors.ts';
+import { stickSelection } from '../lib/stickEdits.ts';
+import { planChanges, stickStatus, type StickStatus } from '../lib/stickStatus.ts';
 
 export type StickSyncStage = 'idle' | 'planning' | 'confirm' | 'writing' | 'done' | 'failed';
 
-/** One sync at a time: the plan being confirmed, or the write in progress. */
 export const stickSync = $state({
   stage: 'idle' as StickSyncStage,
   volumePath: null as string | null,
@@ -23,17 +24,72 @@ export const stickSync = $state({
 });
 
 export function stickSyncTarget(volumePath: string): SyncTarget {
-  return {
-    volume: volumePath,
-    selection: {
-      kind: 'playlists',
-      playlist_ids: stickPlaylistIds(volumePath),
-      track_ids: stickAllTrackIds(volumePath),
-    },
+  return { volume: volumePath, selection: stickSelection(sticks.byPath[volumePath]) };
+}
+
+export interface StickPendingPlan {
+  changes: number;
+  adds: number;
+  removes: number;
+  fits: boolean | null;
+  bytesNeeded: number;
+  freeBytes: number | null;
+}
+
+export const stickPending = $state({ byPath: {} as Record<string, StickPendingPlan> });
+
+const PENDING_CHECK_DELAY_MS = 700;
+const watchedSignatures = new Map<string, string>();
+const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const pendingRuns = new Map<string, number>();
+
+function rememberPlan(volumePath: string, plan: UsbSyncPlan) {
+  stickPending.byPath[volumePath] = {
+    changes: planChanges(plan),
+    adds: plan.add.length,
+    removes: plan.remove.length,
+    fits: plan.fits,
+    bytesNeeded: plan.bytes_needed,
+    freeBytes: plan.free_bytes,
   };
 }
 
-/** Ask only when it matters: files would go, it won't fit, or tracks are not analyzed. */
+export async function checkStickPending(volumePath: string): Promise<void> {
+  if (isStickSyncBusy() || stickSync.stage === 'confirm') return;
+  const run = (pendingRuns.get(volumePath) ?? 0) + 1;
+  pendingRuns.set(volumePath, run);
+  try {
+    const plan = await planUsbSync(stickSyncTarget(volumePath));
+    if (pendingRuns.get(volumePath) === run && watchedSignatures.has(volumePath)) rememberPlan(volumePath, plan);
+  } catch (err) {
+    console.info('pending check failed:', err);
+    if (pendingRuns.get(volumePath) === run) delete stickPending.byPath[volumePath];
+  }
+}
+
+export function watchStick(volumePath: string, signature: string) {
+  if (watchedSignatures.get(volumePath) === signature) return;
+  watchedSignatures.set(volumePath, signature);
+  clearTimeout(pendingTimers.get(volumePath));
+  pendingTimers.set(volumePath, setTimeout(() => void checkStickPending(volumePath), PENDING_CHECK_DELAY_MS));
+}
+
+export function unwatchSticksExcept(volumePaths: string[]) {
+  for (const path of [...watchedSignatures.keys()]) {
+    if (volumePaths.includes(path)) continue;
+    watchedSignatures.delete(path);
+    clearTimeout(pendingTimers.get(path));
+    pendingTimers.delete(path);
+    delete stickPending.byPath[path];
+  }
+}
+
+export function statusOfStick(volumePath: string): StickStatus {
+  const plan = stickPending.byPath[volumePath];
+  const edited = sticks.editedSinceSync[volumePath] === true;
+  return stickStatus(volumePath, stickSync, plan ? { ...plan, edited } : edited ? { changes: 0, fits: null, edited } : null);
+}
+
 export function planNeedsConfirm(plan: UsbSyncPlan): boolean {
   return (
     plan.remove.length > 0 ||
@@ -49,7 +105,6 @@ export function isStickSyncBusy(): boolean {
 
 let onFinished: ((volumePath: string) => Promise<void> | void) | null = null;
 
-/** Called after every finished write, e.g. to re-read the stick. */
 export function onStickSyncFinished(callback: (volumePath: string) => Promise<void> | void) {
   onFinished = callback;
 }
@@ -64,7 +119,6 @@ function listenOnce() {
   });
 }
 
-/** Plans the sync for a stick; writes straight away unless the plan needs the DJ's answer. */
 export async function syncStick(volumePath: string): Promise<void> {
   if (isStickSyncBusy() || stickSync.stage === 'confirm') return;
   listenOnce();
@@ -77,6 +131,7 @@ export async function syncStick(volumePath: string): Promise<void> {
   try {
     const plan = await planUsbSync(stickSyncTarget(volumePath));
     stickSync.plan = plan;
+    if (watchedSignatures.has(volumePath)) rememberPlan(volumePath, plan);
     if (planNeedsConfirm(plan)) {
       stickSync.stage = 'confirm';
       return;
@@ -124,6 +179,7 @@ async function writeStick(volumePath: string) {
       stickSync.error = syncFailureText(report?.error ?? 'The sync did not report a result.', report?.error_kind ?? null);
     } else {
       stickSync.stage = 'done';
+      delete sticks.editedSinceSync[volumePath];
     }
   } catch (err) {
     console.info('sync_usb_many failed:', err);
@@ -132,6 +188,7 @@ async function writeStick(volumePath: string) {
   }
   await loadCapacity(volumePath);
   await onFinished?.(volumePath);
+  if (watchedSignatures.has(volumePath)) await checkStickPending(volumePath);
 }
 
 const MB = 1_000_000;
@@ -142,7 +199,6 @@ export function formatBytes(bytes: number): string {
   return `${Math.max(0, Math.round(bytes / 1000))} KB`;
 }
 
-/** Short line for the stick board while or after writing. */
 export function syncStatusLine(): string {
   const { stage, progress, report, error } = stickSync;
   if (stage === 'planning') return 'Checking what changes…';
