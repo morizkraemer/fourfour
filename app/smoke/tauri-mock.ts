@@ -369,6 +369,10 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
         const stick = stickAt(args.path);
         return { total_bytes: stick.total, free_bytes: stick.free };
       }
+      case 'stick_track_path': {
+        const t = tracks.find((x) => x.id === args.trackId);
+        return t && stickAt(args.path).written.includes(t.id) ? `${args.path}/Contents/${t.artist}/${t.title}.mp3` : null;
+      }
       case 'read_usb_state': {
         const stick = stickAt(args.path);
         const onStick = tracks.filter((t) => stick.written.includes(t.id));

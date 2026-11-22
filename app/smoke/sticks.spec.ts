@@ -179,3 +179,20 @@ test('stick in the side panel: compact header, drop label on the board', async (
   });
   expect(await smoke.invokes('stick_add_playlists')).toEqual([{ path: BACKUP, playlistIds: [1] }]);
 });
+
+test('a track in the stick view plays from its file on the stick, or from the library when the stick has no copy', async ({ smoke }) => {
+  const { page } = smoke;
+  await withSticks(page);
+  await openStick(page, SANDISK);
+  await view(page).locator('[data-stick-row="all"]').click();
+  const track = (id: number) => view(page).locator(`[data-stick-track="${id}"]`);
+  await track(7).dblclick();
+  await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await expect(page.locator('.ff-player-compact__meta-title')).toHaveText('Smoke Track 07');
+  await expect.poll(async () => (await smoke.invokes('playback_play')).at(-1)?.path).toBe(`${SANDISK}/Contents/Four Tet/Smoke Track 07.mp3`);
+  await page.evaluate((path) => (window as any).__smokeSticks[path].written.splice(0), SANDISK);
+  await track(8).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.ff-player-compact__meta-title')).toHaveText('Smoke Track 08');
+  await expect.poll(async () => (await smoke.invokes('playback_play')).at(-1)?.path).toBe('/Music/smoke/Smoke Track 08.mp3');
+});

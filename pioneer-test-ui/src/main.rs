@@ -1497,6 +1497,7 @@ fn main() {
             write_usb,
             sync_usb_many,
             stick_commands::get_stick,
+            stick_commands::stick_track_path,
             stick_commands::stick_add_tracks,
             stick_commands::stick_remove_tracks,
             stick_commands::stick_add_playlists,
@@ -1701,7 +1702,7 @@ mod tests {
         );
         assert_off_main_thread(
             include_str!("stick_commands.rs"),
-            &["get_stick", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],
+            &["get_stick", "stick_track_path", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],
         );
     }
 

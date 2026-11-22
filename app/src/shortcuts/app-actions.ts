@@ -597,7 +597,7 @@ export function buildAppActions(): ShortcutAction[] {
       keywords: ['expand', 'collapse', 'waveform', 'big', 'small'],
       group: GROUP.view,
       defaultBinding: 'Tab',
-      when: () => noOverlayOpen() && player.track != null,
+      when: noOverlayOpen,
       run: toggleExpanded,
     },
     {

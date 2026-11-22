@@ -10,6 +10,7 @@ import {
   listenToAnalysisPartial,
   listenToAnalysisProgress,
   peekAnalysisData,
+  stickTrackPath,
 } from '../services/tauri.svelte.ts';
 import { previewBytesFromPayload, readyAnalysisFields } from '../services/analysis-data.ts';
 import { bandsFromDetailBytes, colorBandsFromPayload, stripBandsFromAnalysis, rowBandsFor, type BandColumns, type DetailBandColumns } from '../services/waveform-bands.ts';
@@ -528,6 +529,21 @@ export async function loadTrackAt(input: any, progress: number) {
   if (id == null) return;
   if (player.track?.id !== id) await loadPlayerTrack(input);
   if (player.track?.id === id) await seekToProgress(progress);
+}
+
+/** Plays a library track from its copy on the stick; the library file when the stick has none. */
+export async function playStickTrack(volumePath: string, track: any): Promise<void> {
+  let stickPath: string | null = null;
+  try {
+    stickPath = await stickTrackPath(volumePath, track.id);
+  } catch (err) {
+    console.warn(`stick copy of track ${track.id} unavailable:`, err);
+  }
+  const input = stickPath
+    ? { ...track, filePath: stickPath, raw: track.raw ? { ...track.raw, source_path: stickPath } : undefined }
+    : track;
+  queuePlayAfterLoad();
+  await loadPlayerTrack(input);
 }
 
 /** Start playback after the current selection finishes loading in the player. */

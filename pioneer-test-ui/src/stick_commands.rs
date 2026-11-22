@@ -81,6 +81,25 @@ pub fn get_stick(path: String, state: State<'_, SharedLibrary>) -> Result<StickC
     known_stick(Path::new(&path), &lib)
 }
 
+fn stick_copy_of(root: &Path, track_id: i64, lib: &LocalLibrary) -> Result<Option<String>, CommandError> {
+    let Some(track) = lib.get_track(track_id).map_err(CommandError::from_anyhow)? else {
+        return Ok(None);
+    };
+    let relative = track.usb_path.trim_start_matches('/');
+    if relative.is_empty() {
+        return Ok(None);
+    }
+    let file = root.join(relative);
+    Ok(file.is_file().then(|| file.to_string_lossy().into_owned()))
+}
+
+/// The library track's audio file on the stick at `path`, or None when the stick has no copy of it.
+#[tauri::command(async)]
+pub fn stick_track_path(path: String, track_id: i64, state: State<'_, SharedLibrary>) -> Result<Option<String>, CommandError> {
+    let lib = state.lock().map_err(|e| e.to_string())?;
+    stick_copy_of(Path::new(&path), track_id, &lib)
+}
+
 /// Adds tracks to the stick's "All tracks". Gives the stick an id on first use.
 #[tauri::command(async)]
 pub fn stick_add_tracks(
@@ -189,6 +208,51 @@ mod tests {
         let mut reports = prepared.run_with(&NoProgress, &free, sync_usb_keeping);
         assert_eq!(reports.len(), 1);
         reports.remove(0)
+    }
+
+    fn track_at(usb_path: &str) -> pioneer_usb_writer::models::Track {
+        pioneer_usb_writer::models::Track {
+            id: 0,
+            source_path: PathBuf::from("/music/local.mp3"),
+            usb_path: usb_path.to_string(),
+            title: "On stick".to_string(),
+            artist: "Test".to_string(),
+            album: String::new(),
+            genre: String::new(),
+            label: String::new(),
+            remixer: String::new(),
+            comment: String::new(),
+            year: 2026,
+            disc_number: 1,
+            track_number: 1,
+            tempo: 12_400,
+            key: "8A".to_string(),
+            duration_secs: 60.0,
+            sample_rate: 44_100,
+            bitrate: 320,
+            file_size: 1,
+            artwork: None,
+        }
+    }
+
+    #[test]
+    fn a_track_copied_to_the_stick_plays_from_the_stick_file() {
+        let stick = Stick::new("copy");
+        let library = LocalLibrary::open_in_memory().unwrap();
+        let id = library.add_track(&track_at("/Contents/Test/On stick.mp3")).unwrap();
+        let file = stick.0.join("Contents/Test/On stick.mp3");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, b"audio").unwrap();
+        assert_eq!(stick_copy_of(&stick.0, id, &library).unwrap(), Some(file.to_string_lossy().into_owned()));
+    }
+
+    #[test]
+    fn a_track_missing_from_the_stick_or_the_library_has_no_stick_file() {
+        let stick = Stick::new("missing");
+        let library = LocalLibrary::open_in_memory().unwrap();
+        let id = library.add_track(&track_at("/Contents/Test/Gone.mp3")).unwrap();
+        assert_eq!(stick_copy_of(&stick.0, id, &library).unwrap(), None);
+        assert_eq!(stick_copy_of(&stick.0, id + 999, &library).unwrap(), None);
     }
 
     #[test]
