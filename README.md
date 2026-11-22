@@ -1,56 +1,71 @@
 # fourfour
 
-## Agent entry
+A lightweight, free and open source DJ library app for the management side of
+rekordbox: scan your music folders, analyze the tracks, organize playlists and
+sync them to a USB stick that plays on Pioneer CDJs. No decks, no performance
+features, no rekordbox needed.
 
-- Format library: `pioneer-usb-writer/`. Library database and USB sync: `pioneer-library/`. Tauri shell: `pioneer-test-ui/`.
-- Desktop UI: `app/` (Svelte, `:5200`). Analysis CLI: `analysis/` (`fourfour-analyze`, `fourfour-benchmark`).
-- In-repo benchmark scripts: `benchmark/scripts/`. Waveform harness: `ui/waveform/` and `./waveform-dev`.
-- Agent rules: [AGENTS.md](AGENTS.md). Doc index: [docs/README.md](docs/README.md).
-- Static mockups in `mockup/` and Pencil files in `designs/` are not the app.
+"fourfour" is a working title. Built by two brothers,
+[@merlinkraemer](https://github.com/merlinkraemer) and
+[@morizkraemer](https://github.com/morizkraemer).
 
-Write Pioneer CDJ-compatible USB drives without Rekordbox. Scan your music,
-analyze it, export a drive that plays on real CDJ hardware.
+## Status
 
-> Status: the format library is proven on a CDJ-3000. The desktop UI (`app/`)
-> and the analysis pipeline (`analysis/`) are under active development.
+Early alpha, macOS first. Builds are unsigned and only shared as drafts.
+
+- **Library and player:** folder scan, playlists and folders, waveform player with
+  beat grid and hot cues, inspector, duplicate cleanup, moved-file reconnect,
+  playlist export (M3U8, CSV, Traktor NML, rekordbox XML).
+- **Analysis:** fully local, in Rust (Beat This! ONNX model for beats and
+  downbeats, own key model). On 698 Beatport previews, scored on the same tracks
+  against Beatport's labels: key 58% exact vs rekordbox 51% on the held-out
+  split, BPM on par (details: `docs/analysis/h2h-rekordbox-2026-11-22.md`, on
+  branch `h2h-rekordbox`). About 3x faster than rekordbox on a 512-track folder
+  on an M5 Pro. Energy exists but is off by default; phrase detection is in progress on a branch.
+- **USB sync:** writes export.pdb, exportLibrary.db (OneLibrary) and ANLZ
+  analysis files. Early exports were checked on a CDJ-3000. A new writer (v2:
+  keeps rekordbox's own content on a stick, staged sync with recovery) is on a
+  branch and not yet tested on hardware.
+- **Platforms:** macOS (Apple Silicon) is the target. Windows and Linux build in
+  CI, untested by hand.
 
 ## Run
 
 ```bash
 cargo build                      # Rust workspace
-cd pioneer-test-ui && ./dev.sh   # desktop app (Tauri) — fast rebuild + relaunch
+cd pioneer-test-ui && ./dev.sh   # desktop app (Tauri), fast rebuild + relaunch
 cd app && npm run dev            # frontend alone (Vite, :5200)
+scripts/mac/build-dmg.sh         # unsigned macOS dmg (on a Mac)
 ```
 
-> `cargo tauri dev` runs as a raw binary (no `.app` bundle), so AeroSpace can't
-> match it by `bundle-id` — target `if.app-name-regex-substring = 'pioneer-test-ui'`.
-
-## CLI Tools
-
-| Command | Crate | Use |
-|---------|-------|-----|
-| `fourfour-analyze` | `analysis/` | Analyze audio (BPM, key, waveform, energy, cues). Default backend is `deeprhythm_essentia`. `lexicon_port` is one of the backends. |
-| `fourfour-benchmark` | `analysis/` | Run analysis against ground-truth datasets. |
-
-## Project Structure
+## Project structure
 
 ```
 fourfour/
-├── pioneer-usb-writer/   Rust  — format library (PDB / OneLibrary / ANLZ / artwork)
-├── pioneer-library/      Rust  — persistent SQLite library + USB export & sync
-├── pioneer-test-ui/      Rust  — Tauri v2 shell (hosts app/, bundles reference analyzer)
-├── app/                  Svelte — the desktop UI (fourfour-app)
-├── prototyping/          Svelte — design-system playground (viewport)
-├── analysis/             Python — analysis CLI (fourfour-analyze / -benchmark)
-├── benchmark/                   — scripts, manifests, baselines (datasets and results are local)
-├── ui/waveform/                 — waveform dev harness (opened by ./waveform-dev)
-├── mockup/                      — static HTML brand mockups
-├── designs/                     — Pencil design file
-└── docs/                        — architecture, UI specs, analysis research (see docs/README.md)
+├── app/                  Svelte 5: the desktop UI
+├── pioneer-test-ui/      Rust: Tauri v2 shell and app commands
+├── pioneer-library/      Rust: SQLite library, import, USB sync engine
+├── pioneer-usb-writer/   Rust: Pioneer formats (PDB, OneLibrary, ANLZ, artwork), scanner, waveforms
+├── fourfour-analysis-rs/ Rust: analysis (BPM, beat grid, key, energy)
+├── fourfour-stretch/     Rust: time stretching for the player
+├── analysis/             Python: older analysis prototype and benchmarks (not shipped)
+├── benchmark/            scripts, manifests, baselines (datasets are local)
+├── scripts/              build, perf and Mac scripts
+├── lab/                  review cards for UI decisions
+├── prototyping/          design-system playground
+└── docs/                 architecture, UI decisions, analysis research
 ```
 
 ## Docs
 
-- **[AGENTS.md](AGENTS.md)** — agent/contributor entrypoint (architecture, build, gotchas)
-- **[docs/README.md](docs/README.md)** — full documentation index
-- **`pioneer-usb-writer/reference-code/PIONEER.md`** — reverse-engineered Pioneer format notes
+- [AGENTS.md](AGENTS.md): contributor and agent entry point (architecture, build, format gotchas)
+- [docs/README.md](docs/README.md): full documentation index
+- `pioneer-usb-writer/reference-code/PIONEER.md`: Pioneer format notes
+
+## Licence
+
+GPL-3.0-or-later, see [LICENSE](LICENSE). The analysis and stretch crates are
+MIT / Apache-2.0. Model weights carry their own licences (see the bundled
+licence files). Pioneer, rekordbox and CDJ are trademarks of AlphaTheta
+Corporation; fourfour is not affiliated with them and names them only to
+describe compatibility.
