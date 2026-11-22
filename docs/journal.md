@@ -862,3 +862,4 @@
 2026-11-22 05:09 orchestrator Merlin: rerun the 2025 folder (512) on the Mac with the new pipeline -> seat worker (sonnet) on rc 35978db, 2 timed runs + agreement vs Rekordbox refs; Mac on AC 50%
 2026-11-22 05:21 orch-worker Q70 cost: $1.7820 (sonnet) — ✅ **Done** - `rc` now at **649b80f** (stick-play-tab + stick-ui-r1 merged) - Validated: 733 Rust tests, dev-bins check, 1162 vitest, svelte-check 0 errors, buil [branch drain/Q70-20261122]
 2026-11-22 05:22 orchestrator Q70 done ($1.78): rc 649b80f with stick-play-tab + stick-ui-r1, all green; quiet-ish perf: rc equal or faster than master everywhere, import fails were load noise and fail on master too (budgets too tight); spawned rc-final (sonnet seat): merge stick-ui r2 + writer-v2 into rc; dmg build after the Mac 2025 timing run
+2026-11-22 05:39 orchestrator rc final 932dcc3 (build 2148): stick-ui r2 + writer-v2 merged, all green (209 smoke); dmg build waits for the Mac 2025 timing run
