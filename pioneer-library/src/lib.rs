@@ -54,12 +54,12 @@ pub struct BeatPosition {
 }
 
 pub use multi_sync::{
-    NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
+    KeptSelection, NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
     StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
     statvfs_available_bytes, volume_capacity,
 };
 pub use revision::LibraryRevision;
-pub use sticks::StickContents;
+pub use sticks::{KeptPlaylist, StickContents};
 pub use user_edits::{LABELS_CACHE_FILE, MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsChange, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 

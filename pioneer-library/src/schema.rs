@@ -135,6 +135,16 @@ const PENDING_ARTWORK_DDL: &str = "CREATE TABLE IF NOT EXISTS pending_artwork (
     track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE
 );";
 
+/// Additive, no version bump: playlists on a stick that stopped following the library
+/// ("Keep updated" off). Each row holds the stick's own track list for that playlist.
+const STICK_KEPT_PLAYLISTS_DDL: &str = "CREATE TABLE IF NOT EXISTS stick_kept_playlists (
+    stick_id    TEXT NOT NULL REFERENCES sticks(id) ON DELETE CASCADE,
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    as_of       TEXT NOT NULL,
+    track_ids   TEXT NOT NULL,
+    PRIMARY KEY (stick_id, playlist_id)
+);";
+
 pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .context("Failed to set WAL journal mode")?;
@@ -194,6 +204,7 @@ pub fn initialize(conn: &Connection, db_path: Option<&Path>) -> Result<()> {
         }
     }
     conn.execute_batch(PENDING_ARTWORK_DDL).context("Failed to create the pending artwork queue")?;
+    conn.execute_batch(STICK_KEPT_PLAYLISTS_DDL).context("Failed to create the kept stick playlists table")?;
 
     Ok(())
 }

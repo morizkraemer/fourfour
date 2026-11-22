@@ -33,7 +33,26 @@ pub enum SyncSelection {
         playlist_ids: Vec<i64>,
         #[serde(default)]
         track_ids: Vec<i64>,
+        #[serde(default)]
+        kept: Vec<KeptSelection>,
     },
+}
+
+/// A chosen playlist written with the stick's own track list instead of the library's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptSelection {
+    pub playlist_id: i64,
+    pub track_ids: Vec<i64>,
+}
+
+fn chosen_playlists(playlists: &[Playlist], playlist_ids: &[i64], kept: &[KeptSelection]) -> Vec<Playlist> {
+    let mut chosen = selected_playlist_tree(playlists, playlist_ids);
+    for playlist in &mut chosen {
+        if let Some(own) = kept.iter().find(|k| k.playlist_id == playlist.id as i64) {
+            playlist.track_ids = own.track_ids.iter().map(|&id| id as u32).collect();
+        }
+    }
+    chosen
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,13 +188,13 @@ impl LocalLibrary {
                 SyncSelection::WholeLibrary => {
                     ids.extend(self.complete_analysis_track_ids()?);
                 }
-                SyncSelection::Playlists { playlist_ids, track_ids } => {
+                SyncSelection::Playlists { playlist_ids, track_ids, kept } => {
                     let all = match &playlists {
                         Some(all) => all,
                         None => playlists.insert(self.get_all_playlists()?),
                     };
                     ids.extend(track_ids.iter().copied());
-                    for playlist in selected_playlist_tree(all, playlist_ids) {
+                    for playlist in chosen_playlists(all, playlist_ids, kept) {
                         ids.extend(playlist.track_ids.iter().map(|&id| id as i64));
                     }
                 }
@@ -317,8 +336,8 @@ fn prepare_selection(
                 prepare_for_usb(tracks.to_vec(), analyses.to_vec(), playlists.to_vec());
             Ok(PreparedSelection { tracks, analyses, playlists, library_ids, skipped: Vec::new() })
         }
-        SyncSelection::Playlists { playlist_ids, track_ids } => {
-            let chosen = selected_playlist_tree(playlists, playlist_ids);
+        SyncSelection::Playlists { playlist_ids, track_ids, kept } => {
+            let chosen = chosen_playlists(playlists, playlist_ids, kept);
             let mut wanted: HashSet<u32> = track_ids.iter().map(|&id| id as u32).collect();
             for playlist in &chosen {
                 wanted.extend(playlist.track_ids.iter().copied());

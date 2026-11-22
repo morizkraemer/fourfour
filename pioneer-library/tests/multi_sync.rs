@@ -316,6 +316,7 @@ fn playlist_selection_writes_only_chosen_tracks_and_playlists() {
             selection: SyncSelection::Playlists {
                 playlist_ids: vec![warmup],
                 track_ids: vec![loose_track],
+                kept: Vec::new(),
             },
         },
         whole(&everything),
