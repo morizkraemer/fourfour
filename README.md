@@ -21,7 +21,7 @@ Early alpha, macOS first. Builds are unsigned and only shared as drafts.
   downbeats, own key model). On 698 Beatport previews, scored on the same tracks
   against Beatport's labels: key 58% exact vs rekordbox 51% on the held-out
   split, BPM on par (details: `docs/analysis/h2h-rekordbox-2026-11-22.md`, on
-  branch `h2h-rekordbox`). About 3x faster than rekordbox on a 512-track folder
+  branch `h2h-rekordbox`). About 5x faster than rekordbox analysing a 512-track folder (6:44 vs 34:19)
   on an M5 Pro. Energy exists but is off by default; phrase detection is in progress on a branch.
 - **USB sync:** writes export.pdb, exportLibrary.db (OneLibrary) and ANLZ
   analysis files. Early exports were checked on a CDJ-3000. A new writer (v2:
