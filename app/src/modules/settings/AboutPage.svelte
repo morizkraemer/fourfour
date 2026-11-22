@@ -1,7 +1,18 @@
 <script>
   import { SettingRow } from '$ds';
   import { library } from '../../stores/library.svelte.ts';
+  import { progressiveDetail, toggleProgressiveDetail } from '../../stores/progressive-detail.svelte.ts';
   import appIcon from '../../assets/app-icon.png';
+
+  const TOGGLE_CLICKS = 5;
+  let buildClicks = 0;
+
+  function buildClicked() {
+    buildClicks += 1;
+    if (buildClicks < TOGGLE_CLICKS) return;
+    buildClicks = 0;
+    toggleProgressiveDetail();
+  }
 
   let version = $derived(library.appVersion ? `Version ${library.appVersion}` : 'Version unknown');
 </script>
@@ -10,7 +21,13 @@
   <img class="ff-about__icon" src={appIcon} alt="" width="96" height="96" />
   <div class="ff-about__name">fourfour</div>
   <div class="ff-about__version" data-about-version>{version}</div>
-  <div class="ff-about__version" data-about-build>Build {__FF_BUILD__.number}{__FF_BUILD__.commit ? ` (${__FF_BUILD__.commit})` : ''}</div>
+  <div
+    class="ff-about__version"
+    role="presentation"
+    data-about-build
+    data-progressive-detail={progressiveDetail.on ? 'on' : 'off'}
+    onclick={buildClicked}
+  >Build {__FF_BUILD__.number}{__FF_BUILD__.commit ? ` (${__FF_BUILD__.commit})` : ''}{progressiveDetail.on ? ' · progressive detail' : ''}</div>
   <div class="ff-about__tagline">Sync, play and organize your DJ library.</div>
 </div>
 

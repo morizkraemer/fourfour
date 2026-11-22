@@ -11,7 +11,7 @@
 //! [`measure_window`] measures any short stretch of the track at any resolution with the same filters, release and the
 //! gains stored in the series, for zoom levels where even 2400 columns per second are wider than a pixel.
 
-use super::{band_gain, Biquad, Tuning, COLUMNS_PER_SECOND, PWV7_MAX};
+use super::{band_gain, curved, larger, Bank, Biquad, Pair, Tuning, COLUMNS_PER_SECOND, PWV7_MAX};
 
 pub const DETAIL_COLUMNS_PER_SECOND: f64 = 2400.0;
 const COLUMNS_PER_PWV7_COLUMN: usize = (DETAIL_COLUMNS_PER_SECOND / COLUMNS_PER_SECOND) as usize;
@@ -213,11 +213,15 @@ impl DetailMeter {
 
     pub fn push(&mut self, interleaved: &[f32]) {
         let channels = self.channels.max(1);
-        let [mut low, mut mid_hp, mut mid_lp, mut high] = self.filters;
+        let total = interleaved.len() / channels;
+        let [low, mid_hp, mid_lp, high] = self.filters;
+        let mut bank = Bank::new([low, high, mid_hp, mid_hp]);
+        let mut mid_lp = mid_lp;
         let (mut frames, mut next_edge) = (self.frames, self.next_edge);
         let mut c = self.current;
         let mut e = self.current_extremes;
-        for frame in interleaved.chunks_exact(channels) {
+        let mut done = 0;
+        while done < total {
             while frames >= next_edge {
                 self.peaks.push([c[0] as f32, c[1] as f32, c[2] as f32]);
                 self.extremes.push([e[0] as f32, e[1] as f32]);
@@ -226,15 +230,31 @@ impl DetailMeter {
                 next_edge = ((self.first_column + self.peaks.len() + 1) as f64 * self.rate / DETAIL_COLUMNS_PER_SECOND)
                     .round() as u64;
             }
-            let x = frame.iter().map(|&s| s as f64).sum::<f64>() / channels as f64;
-            e = [e[0].min(x), e[1].max(x)];
-            c[0] = c[0].max(low.step(x).abs());
-            c[1] = c[1].max(mid_lp.step(mid_hp.step(x)).abs());
-            c[2] = c[2].max(high.step(x).abs());
-            frames += 1;
+            let run = ((next_edge - frames) as usize).min(total - done);
+            let block = &interleaved[done * channels..(done + run) * channels];
+            match channels {
+                1 => measure_detail(&mut bank, &mut mid_lp, &mut c, &mut e, block.iter().map(|&s| s as f64)),
+                2 => measure_detail(
+                    &mut bank,
+                    &mut mid_lp,
+                    &mut c,
+                    &mut e,
+                    block.chunks_exact(2).map(|f| (f[0] as f64 + f[1] as f64) / 2.0),
+                ),
+                _ => measure_detail(
+                    &mut bank,
+                    &mut mid_lp,
+                    &mut c,
+                    &mut e,
+                    block.chunks_exact(channels).map(|f| f.iter().map(|&s| s as f64).sum::<f64>() / channels as f64),
+                ),
+            }
+            done += run;
+            frames += run as u64;
         }
         self.current = c;
         self.current_extremes = e;
+        let [low, high, mid_hp, _] = bank.into_biquads();
         self.filters = [low, mid_hp, mid_lp, high];
         (self.frames, self.next_edge) = (frames, next_edge);
     }
@@ -268,6 +288,32 @@ impl DetailMeter {
     }
 }
 
+/// Folds mono samples into the column peaks and extremes: `low` and `high`, then `mid_hp` twice, are the [`Bank`].
+#[inline(never)]
+fn measure_detail(bank: &mut Bank, mid_lp: &mut Biquad, c: &mut [f64; 3], e: &mut [f64; 2], mono: impl Iterator<Item = f64>) {
+    let [b0, b1, b2] = bank.b;
+    let [a0, a1] = bank.a;
+    let [mut x1, mut x2] = bank.x;
+    let [mut y1, mut y2] = bank.y;
+    let mut held = Pair([c[0], c[2]]);
+    let (mut mid, mut lowest, mut highest) = (c[1], e[0], e[1]);
+    let mut lowpass = *mid_lp;
+    for x in mono {
+        let (xv, x1v, x2v) = (Pair::splat(x), Pair::splat(x1), Pair::splat(x2));
+        let next = |h: usize| b0[h] * xv + b1[h] * x1v + b2[h] * x2v - a0[h] * y1[h] - a1[h] * y2[h];
+        let y = [next(0), next(1)];
+        (x2, x1, y2, y1) = (x1, x, y1, y);
+        lowest = if x < lowest { x } else { lowest };
+        highest = larger(highest, x);
+        held = held.larger(y[0].abs());
+        mid = larger(mid, lowpass.step(y[1].0[0]).abs());
+    }
+    *mid_lp = lowpass;
+    (bank.x, bank.y) = ([x1, x2], [y1, y2]);
+    *c = [held.0[0], mid, held.0[1]];
+    *e = [lowest, highest];
+}
+
 /// Low, mid high-pass, mid low-pass, high.
 fn band_filters(t: &Tuning, rate: f64) -> [Biquad; 4] {
     [
@@ -280,7 +326,7 @@ fn band_filters(t: &Tuning, rate: f64) -> [Biquad; 4] {
 
 fn to_byte(t: &Tuning, band: usize, gain: u16, env: f64) -> u8 {
     let linear = (t.band_scale[band] * gain as f64 * env).min(PWV7_MAX as f64);
-    (PWV7_MAX as f64 * (linear / PWV7_MAX as f64).powf(t.curve[band])).round() as u8
+    (PWV7_MAX as f64 * curved(linear / PWV7_MAX as f64, t.curve[band])).round() as u8
 }
 
 /// The `PWV7` gains (from the `PWV7` envelope rebuilt out of the raw peaks), then the fast envelope and the byte scale.
@@ -470,6 +516,61 @@ mod tests {
             reference.push(block);
         }
         (detail, reference)
+    }
+
+    fn scalar_columns(rate: u32, channels: usize, chunks: &[&[f32]]) -> (Vec<[f32; 3]>, Vec<[f32; 2]>) {
+        let rate_f = rate.max(1) as f64;
+        let [mut low, mut mid_hp, mut mid_lp, mut high] = band_filters(&Tuning::default(), rate_f);
+        let (mut peaks, mut extremes) = (Vec::new(), Vec::new());
+        let (mut c, mut e) = ([0.0f64; 3], NO_EXTREMES);
+        let mut frames = 0u64;
+        let mut next_edge = (rate_f / DETAIL_COLUMNS_PER_SECOND).round() as u64;
+        for chunk in chunks {
+            for frame in chunk.chunks_exact(channels) {
+                while frames >= next_edge {
+                    peaks.push([c[0] as f32, c[1] as f32, c[2] as f32]);
+                    extremes.push([e[0] as f32, e[1] as f32]);
+                    c = [0.0; 3];
+                    e = NO_EXTREMES;
+                    next_edge = ((peaks.len() + 1) as f64 * rate_f / DETAIL_COLUMNS_PER_SECOND).round() as u64;
+                }
+                let x = frame.iter().map(|&s| s as f64).sum::<f64>() / channels as f64;
+                e = [e[0].min(x), e[1].max(x)];
+                c[0] = c[0].max(low.step(x).abs());
+                let mid_high_passed = mid_hp.step(x);
+                c[1] = c[1].max(mid_lp.step(mid_high_passed).abs());
+                c[2] = c[2].max(high.step(x).abs());
+                frames += 1;
+            }
+        }
+        peaks.push([c[0] as f32, c[1] as f32, c[2] as f32]);
+        extremes.push([e[0] as f32, e[1] as f32]);
+        let n = ((frames as f64 * DETAIL_COLUMNS_PER_SECOND / rate_f).ceil() as usize).max(1);
+        peaks.resize(n, [0.0; 3]);
+        extremes.resize(n, [0.0; 2]);
+        (peaks, extremes)
+    }
+
+    #[test]
+    fn the_detail_meter_matches_a_sample_by_sample_reference_bit_for_bit() {
+        for (rate, channels) in [(44100, 1), (44100, 2), (48000, 2), (22050, 1), (96000, 3), (8000, 6), (1000, 1), (1, 2)] {
+            let audio = crate::waveform::tests::noisy(channels * rate.min(40_000) as usize, rate as u64 + channels as u64);
+            let sizes = [channels * 777, channels, channels * 4096 + channels];
+            let mut pieces: Vec<&[f32]> = Vec::new();
+            let (mut at, mut k) = (0, 0);
+            while at < audio.len() {
+                let end = (at + sizes[k % 3]).min(audio.len());
+                pieces.push(&audio[at..end]);
+                (at, k) = (end, k + 1);
+            }
+            let mut meter = DetailMeter::new(rate, channels);
+            for piece in &pieces {
+                meter.push(piece);
+            }
+            meter.close_columns();
+            let (peaks, extremes) = scalar_columns(rate, channels, &pieces);
+            assert_eq!(format!("{:?}", (&meter.peaks, &meter.extremes)), format!("{:?}", (&peaks, &extremes)), "{rate} Hz, {channels} ch");
+        }
     }
 
     #[test]
