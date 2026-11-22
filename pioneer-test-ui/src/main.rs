@@ -9,6 +9,7 @@ mod analysis_run;
 mod artwork_thumbs;
 mod app_log;
 mod backup_commands;
+mod duplicate_commands;
 mod band_analysis;
 mod command_error;
 mod data_migration;
@@ -18,7 +19,9 @@ mod file_health;
 mod heap;
 mod import_plan;
 mod perf_probe;
+mod reconnect_commands;
 mod playback;
+mod playlist_export_commands;
 mod recovery_commands;
 #[cfg(test)]
 #[allow(dead_code)]
@@ -1500,14 +1503,27 @@ fn main() {
             stick_commands::stick_remove_playlists,
             stick_commands::get_volume_capacity,
             stick_commands::plan_usb_sync,
+            duplicate_commands::list_duplicate_groups,
+            duplicate_commands::apply_duplicate_merges,
+            duplicate_commands::list_duplicate_archive,
+            duplicate_commands::restore_duplicate_merge,
             file_health::check_library_files,
             file_health::get_library_health,
             file_health::relocate_missing_in_folder,
             file_health::locate_track_file,
+            reconnect_commands::find_reconnect_candidates,
+            reconnect_commands::apply_reconnects,
+            reconnect_commands::preview_relocate_folder,
+            reconnect_commands::apply_relocate_folder,
+            reconnect_commands::undo_relocate_folder,
+            reconnect_commands::last_folder_relocation,
             backup_commands::get_backup_status,
             backup_commands::export_backup,
             backup_commands::read_backup,
             backup_commands::restore_backup,
+            playlist_export_commands::export_playlist,
+            playlist_export_commands::playlist_export_file_name,
+            playlist_export_commands::playlist_tracklist,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
@@ -1665,7 +1681,22 @@ mod tests {
             ],
         );
         assert_off_main_thread(include_str!("backup_commands.rs"), &["read_backup"]);
+        assert_off_main_thread(
+            include_str!("playlist_export_commands.rs"),
+            &["export_playlist", "playlist_export_file_name", "playlist_tracklist"],
+        );
         assert_off_main_thread(include_str!("file_health.rs"), &["locate_track_file"]);
+        assert_off_main_thread(
+            include_str!("reconnect_commands.rs"),
+            &[
+                "find_reconnect_candidates",
+                "apply_reconnects",
+                "preview_relocate_folder",
+                "apply_relocate_folder",
+                "undo_relocate_folder",
+                "last_folder_relocation",
+            ],
+        );
         assert_off_main_thread(
             include_str!("stick_commands.rs"),
             &["get_stick", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],

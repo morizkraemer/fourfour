@@ -63,7 +63,7 @@ test('the status button popover lists one action per line and filters to missing
   await withProblems(page, [3, 5]);
 
   await statusButton(page).click();
-  await expect(menuItems(page)).toHaveText(['Relocate missing…', 'Show missing tracks', 'Check again', 'Library check results…', 'Import folder…', 'Import files…']);
+  await expect(menuItems(page)).toHaveText(['Relocate missing…', 'Show missing tracks', 'Check again', 'Library check results…', 'Find duplicates…', 'Import folder…', 'Import files…']);
   await page.screenshot({ path: `${SHOTS}/topbar-popover.png`, clip: { x: 800, y: 0, width: 800, height: 260 } });
 
   await menuItems(page).filter({ hasText: 'Show missing tracks' }).click();

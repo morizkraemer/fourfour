@@ -93,7 +93,7 @@ fn tags_key(artist: &str, title: &str) -> Option<(String, String)> {
     folded_tags_key(normalise_tag(artist), normalise_tag(title))
 }
 
-fn folded_tags_key(artist: String, title: String) -> Option<(String, String)> {
+pub(crate) fn folded_tags_key(artist: String, title: String) -> Option<(String, String)> {
     (!artist.is_empty() && artist != PLACEHOLDER_ARTIST && !title.is_empty()).then_some((artist, title))
 }
 

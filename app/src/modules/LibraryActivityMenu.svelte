@@ -13,6 +13,7 @@
   import { importActivity } from '../stores/import-activity.svelte.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import { checkLibraryAgain, openHealthDialog, relocateMissing, showProblemTracks } from '../stores/file-health.svelte.ts';
+  import { openDuplicates } from '../stores/duplicate-cleanup.svelte.ts';
   import { importDropTarget } from '../stores/ui.svelte.ts';
   import { importIntoSource, importFilesIntoSource } from '../menus/context-menus.ts';
   import { playlistsFromImportedFolder } from '../stores/file-drop.svelte.ts';
@@ -212,6 +213,8 @@
       {@render entry('Library check results…', openHealthDialog)}
       <div class="ff-menu__separator"></div>
     {/if}
+    {@render entry('Find duplicates…', openDuplicates)}
+    <div class="ff-menu__separator"></div>
     {@render entry('Import folder…', () => importIntoSource(importDropTarget()), importing)}
     {@render entry('Import files…', () => importFilesIntoSource(importDropTarget()), importing)}
   </div>
