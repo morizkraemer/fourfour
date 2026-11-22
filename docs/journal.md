@@ -856,3 +856,4 @@
 2026-11-22 04:35 orch-worker Q68 cost: $9.1215 (sonnet) — ✅ **Done** - "Chance" by Bolivar is now the loaded track in every shot that shows a player. - Card `blog-shots` is round 3, open, 5 images; the `curl` on `:4220 [branch drain/Q68-20261122]
 2026-11-22 04:36 orchestrator blog shots r3 done ($1.03) [fca4498]: Chance by Bolivar in every player view; card round 3. Credits: today $23.71, month $121.42 (fourfour cap $150 close)
 2026-11-22 04:40 orchestrator blog: draft 'fourfour is a thing' created on merlins-internet.com (id 86183d5f, draft:true) with 6 images; placeholders: analysis time [re-measure], tester link
+2026-11-22 04:52 orchestrator stick-ui round 2 done [271f02f]: amber warning triangle + popover (too much / sync failed / not analyzed) everywhere, 'Too much for <stick>' wording; 205 smoke pass; card round 2 open; rc must re-merge stick-ui-r1
