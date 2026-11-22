@@ -16,8 +16,8 @@ export interface SmokeWindow {
   __smokeDuplicates: unknown[];
   __smokeReconnectPlan: unknown;
   __smokeRemapPreview: unknown;
-  __smokeDupGroups: { key: number; keeper_id: number; members: { id: number }[] }[];
-  __smokeDupArchive: unknown[];
+  __smokeDupGroups: { key: number; confidence: string; keeper_id: number; members: { id: number; artist: string; title: string }[] }[];
+  __smokeDupArchive: { merge_id: number; tracks: { id: number }[] }[];
   __smokeHoldExport: boolean;
   __smokeReleaseExport: (() => void) | null;
   __smokeImport: SmokeImport | null;
@@ -478,6 +478,33 @@ export function installTauriMock(initial: LoadedState & { payloadUrl?: string })
         return w.__smokeDupGroups;
       case 'list_duplicate_archive':
         return w.__smokeDupArchive;
+      case 'apply_duplicate_merges': {
+        const requests = args.requests as { keeper_id: number; remove_ids: number[] }[];
+        const merged = requests.map((request) => {
+          const group = w.__smokeDupGroups.find((g) => g.members.some((m) => m.id === request.keeper_id))!;
+          const keeper = group.members.find((m) => m.id === request.keeper_id)!;
+          const merge_id = w.__smokeDupArchive.length + 1;
+          w.__smokeDupArchive = [
+            {
+              merge_id,
+              merged_at: '2026-11-21T09:00:00Z',
+              confidence: group.confidence,
+              keeper_id: keeper.id,
+              keeper_label: `${keeper.artist} - ${keeper.title}`,
+              tracks: group.members.filter((m) => request.remove_ids.includes(m.id)),
+            },
+            ...w.__smokeDupArchive,
+          ];
+          w.__smokeDupGroups = w.__smokeDupGroups.filter((g) => g !== group);
+          return { merge_id, keeper_id: keeper.id, removed_ids: request.remove_ids };
+        });
+        return { merged, failed: [] };
+      }
+      case 'restore_duplicate_merge': {
+        const restored = w.__smokeDupArchive.find((m) => m.merge_id === args.mergeId)!;
+        w.__smokeDupArchive = w.__smokeDupArchive.filter((m) => m !== restored);
+        return { merge_id: restored.merge_id, restored_ids: restored.tracks.map((t) => t.id), keeper_reverted: true };
+      }
       case 'playlist_export_file_name':
         return `Peak Time 2026-11-21.${({ m3u8: 'm3u8', csv: 'csv', text: 'txt', traktor_nml: 'nml', rekordbox_xml: 'xml' } as Record<string, string>)[args.format]}`;
       case 'export_playlist':

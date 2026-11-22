@@ -7,7 +7,7 @@ import {
   type DuplicateGroup,
   type MergeRequest,
 } from '../services/tauri.svelte.ts';
-import { exactRequests, groupsAfterMerge, mergeSummary, requestFor, type KeeperChoices } from '../lib/duplicateCleanup.ts';
+import { defaultPicks, groupsAfterMerge, mergeSummary, pickedRequests, type KeeperChoices } from '../lib/duplicateCleanup.ts';
 import { failureText, rawText } from '../lib/userErrors.ts';
 import { loadState } from './library.svelte.ts';
 
@@ -18,7 +18,7 @@ export const duplicates = $state({
   busy: false,
   groups: [] as DuplicateGroup[],
   choices: {} as KeeperChoices,
-  skipped: new Set<number>(),
+  picked: new Set<number>(),
   archive: [] as ArchivedMerge[],
   message: '',
   error: '',
@@ -35,10 +35,11 @@ export async function openDuplicates() {
   duplicates.error = '';
   duplicates.loading = true;
   duplicates.choices = {};
-  duplicates.skipped = new Set();
+  duplicates.picked = new Set();
   try {
     const [groups] = await Promise.all([listDuplicateGroups(), refreshArchive()]);
     duplicates.groups = groups;
+    duplicates.picked = defaultPicks(groups);
   } catch (err) {
     duplicates.error = failureText("Couldn't look for duplicates.", err);
   } finally {
@@ -52,17 +53,19 @@ export function closeDuplicates() {
 
 export function showTab(tab: 'groups' | 'archive') {
   duplicates.tab = tab;
+  duplicates.message = '';
+  duplicates.error = '';
 }
 
 export function chooseKeeper(group: DuplicateGroup, trackId: number) {
   duplicates.choices = { ...duplicates.choices, [group.key]: trackId };
 }
 
-export function toggleSkip(group: DuplicateGroup) {
-  const next = new Set(duplicates.skipped);
+export function togglePick(group: DuplicateGroup) {
+  const next = new Set(duplicates.picked);
   if (next.has(group.key)) next.delete(group.key);
   else next.add(group.key);
-  duplicates.skipped = next;
+  duplicates.picked = next;
 }
 
 async function merge(requests: MergeRequest[]) {
@@ -81,12 +84,8 @@ async function merge(requests: MergeRequest[]) {
   }
 }
 
-export function mergeGroup(group: DuplicateGroup) {
-  return merge([requestFor(group, duplicates.choices)]);
-}
-
-export function mergeAllExact() {
-  return merge(exactRequests(duplicates.groups, duplicates.choices, duplicates.skipped));
+export function mergePicked() {
+  return merge(pickedRequests(duplicates.groups, duplicates.choices, duplicates.picked));
 }
 
 export async function restoreMerge(mergeId: number) {
@@ -99,6 +98,7 @@ export async function restoreMerge(mergeId: number) {
     await loadState();
     const [groups] = await Promise.all([listDuplicateGroups(), refreshArchive()]);
     duplicates.groups = groups;
+    duplicates.picked = defaultPicks(groups);
   } catch (err) {
     duplicates.error = `Couldn't restore the copies. ${rawText(err)}`;
   } finally {

@@ -1,10 +1,11 @@
 <script>
-  import { Button, Icon, StatusDot } from '$ds';
+  import { Button, Icon, SettingRow, StatusDot } from '$ds';
   import { library } from '../stores/library.svelte.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import {
     reconnectState,
     folderRelocation,
+    relocateMissing,
     findMovedFiles,
     chooseReconnect,
     openFolderRelocation,
@@ -37,9 +38,22 @@
 
 <div class="ff-reconnect" data-reconnect-panel>
   {#if fileStatus.missing > 0}
-    <div class="ff-reconnect__buttons">
-      <Button label="Find moved files…" size="small" disabled={busy} onclick={() => void findMovedFiles()} />
-      <Button label="Relocate folder…" size="small" variant="ghost" disabled={busy} onclick={() => void openFolderRelocation()} />
+    <div class="ff-reconnect__options" data-reconnect-options>
+      <SettingRow title="Files were moved or renamed" description="Matched by their audio, even if renamed.">
+        {#snippet control()}
+          <Button label="Find moved files…" size="small" variant="primary" disabled={busy} onclick={() => void findMovedFiles()} />
+        {/snippet}
+      </SettingRow>
+      <SettingRow title="A whole folder moved" description="Points its tracks to the new place.">
+        {#snippet control()}
+          <Button label="Relocate folder…" size="small" disabled={busy} onclick={() => void openFolderRelocation()} />
+        {/snippet}
+      </SettingRow>
+      <SettingRow title="Files kept their names" description="Searches one folder by file name.">
+        {#snippet control()}
+          <Button label="Relocate missing…" size="small" disabled={busy || fileStatus.relocating} onclick={() => void relocateMissing()} />
+        {/snippet}
+      </SettingRow>
     </div>
   {/if}
 
@@ -133,6 +147,14 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--ff-space-2);
+  }
+  .ff-reconnect__options {
+    border: 1px solid var(--ff-border);
+    border-radius: var(--ff-radius-md);
+    background: var(--ff-bg);
+  }
+  .ff-reconnect__options :global(.ff-setting-row) {
+    padding: var(--ff-space-4) var(--ff-space-5);
   }
   .ff-reconnect__section {
     display: flex;
