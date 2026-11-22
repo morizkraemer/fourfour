@@ -1,0 +1,11 @@
+You are a writer for fourfour, a DJ library app built by Merlin and his brother Mo. Read docs/blog/fourfour-is-a-thing.md (outline, voice notes, angle, fun facts) fully, then docs/research/competitors-2026-11.md, docs/research/rbxport-ora-2026-11.md and docs/architecture/perf-run-2026-11.md. Read 2-3 of Merlin's published posts for voice through the merlins-internet API only if a read-only public URL works (https://merlins-internet.com/blog); otherwise rely on the voice notes. You run in your own git worktree on a drain branch.
+
+TASK: write the full blog post draft (not published) as docs/blog/fourfour-is-a-thing-draft.md.
+- Follow the outline sections 1-7 and Merlin's angle in his words (two brothers, djs and in software; rekordbox is used mostly for library + usb sync and that part is slow, clunky, stuck in the last decade; performance side is great, not replacing it (yet); we have to crack track analysis and the usb format; lightweight, free, open source (GPL-3.0-or-later), quick, modern, just works; others exist: ora dj closest and more polished but closed source, rbxport open source and fast but copies rekordbox's clunky ui; honest aside that we might not have started had we known, but it's for fun and personal use and software you can fully change yourself; learning collaboration, ci, tests with ai agents doing the typing).
+- Voice: all lowercase, casual, honest asides, short, a few emoji, 🍃 sign-off. No marketing claims, no feature tables. Plain hyphens only, never en/em dashes.
+- Numbers: only ones the outline marks as safe, with the caveats it lists (e.g. analysis time comparison needs a re-measure: write it as a placeholder "[re-measure on the Mac]"). Never invent numbers.
+- Mark spots for screenshots as [shot: library], [shot: player], [shot: inspector], [shot: analysis], [shot: library check], [shot: duplicates], [shot: speed chart], [gif: setlist to stick].
+- Length: 600-900 words. Also give 3 title options at the top and a 1-line summary.
+- End with the "before it goes public" checklist from the outline, updated: licence now GPL-3.0-or-later (done), Mo agreed.
+MAY WRITE: docs/blog/fourfour-is-a-thing-draft.md only. No push. Commit "docs(blog): full draft" ending with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>".
+REPORT: RESULT: head SHA, word count, the 3 titles, any numbers you were unsure about.
