@@ -870,3 +870,4 @@
 2026-11-22 05:53 orchestrator Merlin: free truth sets yes -> truth-eval (sonnet seat): energy vs DEAM (eval only), Beatport genre harness + baseline, FMA metadata; dmg build 2148 started on Mac (plugged in)
 2026-11-22 05:58 orchestrator h2h done [h2h-rekordbox d591713]: same 698 Beatport previews; key exact test split 58.3% vs Rekordbox 51.3% (MIREX 66.8 vs 60.2), clean 598 60.9 vs 52.0; BPM tie (Acc1 89.1 vs 90.5, Acc2 98.1 vs 97.6, n=368 with labels); Beatport used for key model selection (test split reused), not training
 2026-11-22 06:09 orchestrator build 2148 (rc 932dcc3) dmg built + check-dmg 0 failures; installed to /Applications/fourfour.app (bundle id app.ffdj.library); old app moved to ~/Backups/fourfour-app-old on the Mac
+2026-11-22 06:29 orchestrator README rewritten for current status (309d49c, unpushed, master 72+ ahead); clean Mac timing rerun started on AC (rc 932dcc3, 2 runs)
