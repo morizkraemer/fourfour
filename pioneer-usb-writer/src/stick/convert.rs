@@ -8,6 +8,7 @@ use super::model::{StickAlbum, StickCue, StickDevice, StickModel, StickName, Sti
 const LEGACY_CONTENT_LINK: u32 = 0x0700;
 const LEGACY_MASTER_DB_ID: u32 = 0x6a76_e5b6;
 const LEGACY_SAMPLE_DEPTH: u16 = 16;
+const LEGACY_ANALYSED_BITS: i64 = 105;
 const LEGACY_STRING_2: [u8; 2] = [0x05, b'3'];
 const LEGACY_STRING_3: [u8; 2] = [0x05, 0x01];
 
@@ -15,11 +16,76 @@ pub fn artwork_path(artwork_id: u32) -> String {
     format!("/PIONEER/Artwork/00001/a{artwork_id}.jpg")
 }
 
-fn filename_of(usb_path: &str) -> String {
+pub fn filename_of(usb_path: &str) -> String {
     usb_path.rsplit('/').next().unwrap_or(usb_path).to_owned()
 }
 
-fn album_id(model: &mut StickModel, name: &str, artist_id: u32) -> u32 {
+pub fn key_name(track: &Track, analysis: &AnalysisResult) -> &'static str {
+    let key = if analysis.key.is_empty() { &track.key } else { &analysis.key };
+    match onelibrary::key_name_to_id(key) {
+        0 => "",
+        id => onelibrary::KEY_NAMES[id as usize - 1],
+    }
+}
+
+pub fn cues_of(analysis: &AnalysisResult) -> Vec<StickCue> {
+    analysis
+        .cue_points
+        .iter()
+        .map(|cue| StickCue {
+            hot_cue: cue.hot_cue_number,
+            time_ms: cue.time_ms,
+            loop_end_ms: cue.loop_time_ms,
+            comment: cue.name.clone(),
+            color_index: cue.color.as_deref().and_then(crate::cue_color::table_index),
+        })
+        .collect()
+}
+
+pub fn tempo_x100(track: &Track, analysis: &AnalysisResult) -> u32 {
+    if analysis.bpm > 0.0 { (analysis.bpm * 100.0).round() as u32 } else { track.tempo }
+}
+
+pub fn new_stick_track(track: &Track, analysis: &AnalysisResult, date: &str) -> StickTrack {
+    let filename = filename_of(&track.usb_path);
+    let mut row = StickTrack {
+        id: track.id,
+        file_type: rbl_pdb::rows::audio_file_type(&filename),
+        sample_depth: LEGACY_SAMPLE_DEPTH,
+        date_added: date.to_owned(),
+        date_created: date.to_owned(),
+        hot_cue_auto_load: true,
+        master_db_id: LEGACY_MASTER_DB_ID,
+        master_content_id: (track.id + 5) | 0x100,
+        content_link: LEGACY_CONTENT_LINK,
+        analysed_bits: Some(LEGACY_ANALYSED_BITS),
+        device_library_strings: BTreeMap::from([(2, LEGACY_STRING_2.to_vec()), (3, LEGACY_STRING_3.to_vec())]),
+        ..StickTrack::default()
+    };
+    refresh_stick_track(&mut row, track, analysis);
+    row
+}
+
+pub fn refresh_stick_track(row: &mut StickTrack, track: &Track, analysis: &AnalysisResult) {
+    row.title = track.title.clone();
+    row.path = track.usb_path.clone();
+    row.filename = filename_of(&track.usb_path);
+    row.file_type = rbl_pdb::rows::audio_file_type(&row.filename);
+    row.tempo_x100 = tempo_x100(track, analysis);
+    row.duration_secs = track.duration_secs.round() as u32;
+    row.year = track.year;
+    row.track_number = track.track_number;
+    row.disc_number = track.disc_number;
+    row.bitrate = track.bitrate;
+    row.sample_rate = track.sample_rate;
+    row.file_size = track.file_size;
+    row.comment = track.comment.clone();
+    row.release_date = if track.year > 0 { format!("{}-01-01", track.year) } else { String::new() };
+    row.analyze_path = anlz::anlz_path_for_pdb(track);
+    row.cues = cues_of(analysis);
+}
+
+pub fn album_id(model: &mut StickModel, name: &str, artist_id: u32) -> u32 {
     if name.is_empty() {
         return 0;
     }
@@ -31,90 +97,44 @@ fn album_id(model: &mut StickModel, name: &str, artist_id: u32) -> u32 {
     id
 }
 
+pub fn link_names(model: &mut StickModel, row: &mut StickTrack, track: &Track, analysis: &AnalysisResult) {
+    row.artist_id = model.intern_artist(&track.artist);
+    row.remixer_id = model.intern_artist(&track.remixer);
+    row.album_id = album_id(model, &track.album, row.artist_id);
+    row.genre_id = model.intern_genre(&track.genre);
+    row.label_id = model.intern_label(&track.label);
+    row.key_id = model.intern_key(key_name(track, analysis));
+}
+
+pub fn seed_fixed_tables(model: &mut StickModel) {
+    let numbered = |names: &[&str]| -> Vec<StickName> {
+        names.iter().enumerate().map(|(index, name)| StickName { id: index as u32 + 1, name: (*name).to_owned() }).collect()
+    };
+    if model.keys.is_empty() {
+        model.keys = numbered(&onelibrary::KEY_NAMES);
+    }
+    if model.colors.is_empty() {
+        model.colors = numbered(&onelibrary::COLOR_NAMES);
+    }
+}
+
 pub fn model_from_tracks(
     tracks: &[Track],
     analyses: &[AnalysisResult],
     playlists: &[Playlist],
     device: StickDevice,
 ) -> StickModel {
-    let mut model = StickModel {
-        keys: onelibrary::KEY_NAMES
-            .iter()
-            .enumerate()
-            .map(|(index, name)| StickName { id: index as u32 + 1, name: (*name).to_owned() })
-            .collect(),
-        colors: onelibrary::COLOR_NAMES
-            .iter()
-            .enumerate()
-            .map(|(index, name)| StickName { id: index as u32 + 1, name: (*name).to_owned() })
-            .collect(),
-        ..StickModel::default()
-    };
+    let mut model = StickModel::default();
+    seed_fixed_tables(&mut model);
 
     for (track, analysis) in tracks.iter().zip(analyses) {
-        let artist_id = model.intern_artist(&track.artist);
-        let remixer_id = model.intern_artist(&track.remixer);
-        let album_id = album_id(&mut model, &track.album, artist_id);
-        let genre_id = model.intern_genre(&track.genre);
-        let label_id = model.intern_label(&track.label);
-        let artwork_id = if track.artwork.is_some() {
+        let mut row = new_stick_track(track, analysis, &device.created_date);
+        link_names(&mut model, &mut row, track, analysis);
+        if track.artwork.is_some() {
             model.artworks.push(StickName { id: track.id, name: artwork_path(track.id) });
-            track.id
-        } else {
-            0
-        };
-        let filename = filename_of(&track.usb_path);
-        let key = if analysis.key.is_empty() { &track.key } else { &analysis.key };
-        let tempo_x100 = if analysis.bpm > 0.0 { (analysis.bpm * 100.0).round() as u32 } else { track.tempo };
-        model.tracks.push(StickTrack {
-            id: track.id,
-            title: track.title.clone(),
-            path: track.usb_path.clone(),
-            file_type: rbl_pdb::rows::audio_file_type(&filename),
-            filename,
-            artist_id,
-            album_id,
-            genre_id,
-            label_id,
-            key_id: onelibrary::key_name_to_id(key),
-            remixer_id,
-            artwork_id,
-            tempo_x100,
-            duration_secs: track.duration_secs.round() as u32,
-            year: track.year,
-            track_number: track.track_number,
-            disc_number: track.disc_number,
-            bitrate: track.bitrate,
-            sample_rate: track.sample_rate,
-            sample_depth: LEGACY_SAMPLE_DEPTH,
-            file_size: track.file_size,
-            comment: track.comment.clone(),
-            date_added: device.created_date.clone(),
-            date_created: device.created_date.clone(),
-            release_date: if track.year > 0 { format!("{}-01-01", track.year) } else { String::new() },
-            analyze_path: anlz::anlz_path_for_pdb(track),
-            hot_cue_auto_load: true,
-            master_db_id: LEGACY_MASTER_DB_ID,
-            master_content_id: (track.id + 5) | 0x100,
-            content_link: LEGACY_CONTENT_LINK,
-            analysed_bits: Some(105),
-            cues: analysis
-                .cue_points
-                .iter()
-                .map(|cue| StickCue {
-                    hot_cue: cue.hot_cue_number,
-                    time_ms: cue.time_ms,
-                    loop_end_ms: cue.loop_time_ms,
-                    comment: cue.name.clone(),
-                    color_index: cue.color.as_deref().and_then(crate::cue_color::table_index).map(|index| index as u8),
-                })
-                .collect(),
-            device_library_strings: BTreeMap::from([
-                (2, LEGACY_STRING_2.to_vec()),
-                (3, LEGACY_STRING_3.to_vec()),
-            ]),
-            ..StickTrack::default()
-        });
+            row.artwork_id = track.id;
+        }
+        model.tracks.push(row);
     }
 
     let mut sibling_count: BTreeMap<u32, u32> = BTreeMap::new();

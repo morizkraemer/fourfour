@@ -157,3 +157,102 @@ fn real_rekordbox_stick_copies_through_the_v2_writer() {
     let reread = Stick::read(copy.path()).unwrap();
     assert_eq!(reread.device_library, source.device_library);
 }
+
+#[test]
+fn real_rekordbox_stick_keeps_every_track_when_ours_are_added() {
+    use pioneer_usb_writer::models::{AnalysisResult, BeatGrid, Playlist, Track, WaveformPreview};
+    use pioneer_usb_writer::stick::emit::copy_stick;
+    use pioneer_usb_writer::stick::plan::{apply, plan, Ownership, Wanted};
+    use pioneer_usb_writer::stick::StickDevice;
+
+    let Some(root) = real_stick() else { return };
+    let source = Stick::read(&root).unwrap();
+    let work = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let usb = work.path().join("usb");
+    copy_stick(&source, LibraryKind::DeviceLibrary, &usb, false).unwrap();
+    std::fs::copy(root.join("PIONEER/rekordbox/exportLibrary.db"), usb.join("PIONEER/rekordbox/exportLibrary.db"))
+        .unwrap();
+    let theirs = Stick::read(&usb).unwrap();
+    let their_tracks = theirs.device_library.as_ref().unwrap().tracks.len();
+    assert_eq!(theirs.one_library.as_ref().unwrap().tracks.len(), 0);
+    let their_rows = |usb: &Path| -> BTreeMap<u32, Vec<u8>> {
+        let bytes = std::fs::read(usb.join("PIONEER/rekordbox/export.pdb")).unwrap();
+        device_library::table_rows(&bytes)
+            .unwrap()
+            .into_iter()
+            .find(|rows| rows.table == 0)
+            .unwrap()
+            .rows
+            .iter()
+            .map(|row| (u32::from_le_bytes(row[0x48..0x4c].try_into().unwrap()), normalised_row(0, row)))
+            .collect()
+    };
+    let before = their_rows(&usb);
+
+    let tracks: Vec<Track> = (1..=3u32)
+        .map(|id| {
+            let source_path = work.path().join(format!("fourfour-test-{id}.wav"));
+            std::fs::write(&source_path, vec![0u8; 4096]).unwrap();
+            Track {
+                usb_path: format!("/Contents/fourfour test artist/fourfour-test-{id}.wav"),
+                source_path,
+                title: format!("fourfour test {id}"),
+                artist: "fourfour test artist".into(),
+                key: "8A".into(),
+                tempo: 12800,
+                duration_secs: 1.0,
+                sample_rate: 44100,
+                bitrate: 1411,
+                file_size: 4096,
+                id,
+                album: String::new(),
+                genre: String::new(),
+                label: String::new(),
+                remixer: String::new(),
+                comment: String::new(),
+                year: 0,
+                disc_number: 0,
+                track_number: 0,
+                artwork: None,
+            }
+        })
+        .collect();
+    let analyses: Vec<AnalysisResult> = tracks
+        .iter()
+        .map(|_| AnalysisResult {
+            beat_grid: BeatGrid { beats: Vec::new() },
+            waveform: WaveformPreview { data: [0; 400] },
+            bpm: 128.0,
+            key: "8A".into(),
+            energy: None,
+            cue_points: Vec::new(),
+            color_waveform: None,
+        })
+        .collect();
+    let playlists =
+        vec![Playlist { id: 1, name: "fourfour test".into(), track_ids: vec![1, 2, 3], ..Default::default() }];
+    let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists };
+    let device = StickDevice { name: "X".into(), created_date: "2026-11-22".into(), ..StickDevice::default() };
+
+    let planned = plan(&theirs, wanted, &Ownership::default(), device.clone()).unwrap();
+    assert_eq!(planned.foreign_track_count, their_tracks);
+    apply(&usb, &planned, wanted).unwrap();
+
+    let after = Stick::read(&usb).unwrap();
+    let pdb = after.device_library.as_ref().unwrap();
+    let one = after.one_library.as_ref().unwrap();
+    let after_rows = their_rows(&usb);
+    let changed = before.iter().filter(|(id, row)| after_rows.get(id) != Some(row)).count();
+    let with_cues = one.tracks.iter().filter(|track| !track.cues.is_empty()).count();
+    println!(
+        "before={their_tracks} after_pdb={} after_one={} foreign_rows_changed={changed} playlists={} one_library_tracks_with_cues={with_cues}",
+        pdb.tracks.len(),
+        one.tracks.len(),
+        pdb.playlists.len()
+    );
+    assert_eq!((pdb.tracks.len(), one.tracks.len()), (their_tracks + 3, their_tracks + 3));
+    assert!(changed <= UNALIGNED_TRACK_ROWS_ON_THE_2026_11_22_STICK);
+    assert_eq!(pdb.playlists.len(), theirs.device_library.as_ref().unwrap().playlists.len() + 1);
+    assert_eq!(pdb.histories, theirs.device_library.as_ref().unwrap().histories);
+    assert!(plan(&after, wanted, &planned.ownership, device).unwrap().is_noop());
+}

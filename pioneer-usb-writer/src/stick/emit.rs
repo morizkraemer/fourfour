@@ -103,6 +103,10 @@ fn artwork_variant(small_path: &str, prefix: &str, suffix: &str) -> Option<Strin
     Some(format!("{dir}/{prefix}{number}{suffix}.jpg"))
 }
 
+pub fn artwork_variants(small_path: &str) -> Vec<String> {
+    ARTWORK_VARIANTS.iter().filter_map(|(prefix, suffix)| artwork_variant(small_path, prefix, suffix)).collect()
+}
+
 fn write_artwork(root: &Path, model: &StickModel, track: &StickTrack, source: &ArtworkSource) -> Result<()> {
     let small_path = model.artwork_path(track.artwork_id);
     if track.artwork_id == 0 || small_path.is_empty() {

@@ -21,6 +21,7 @@ pub mod rekordbox;
 mod revision;
 mod row_preview;
 mod schema;
+pub mod stick_sync;
 pub mod sticks;
 mod user_edits;
 

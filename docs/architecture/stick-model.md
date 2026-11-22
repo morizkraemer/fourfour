@@ -88,7 +88,42 @@ emit::write_fresh(root, &FreshExport { model: &model, files })?;     // the gene
 - `convert::model_from_tracks` is the one place that turns the old writer inputs (`Track`, `AnalysisResult`, `Playlist`) into a model. It keeps the header values the old writer proved on a CDJ-3000.
 - The creation date comes from the caller (`StickDevice.created_date`), so the same input gives the same `export.pdb` bytes.
 
-Not done yet: incremental sync on the model, keeping foreign rows when adding ours, staged publish, `exportExt.pdb`. See the plan.
+Not done yet: staged publish and recovery, `exportExt.pdb`. See the plan.
+
+## Incremental sync (`plan.rs`)
+
+```rust
+use pioneer_usb_writer::stick::plan::{plan, apply, Ownership, Wanted};
+
+let stick = Stick::read(root)?;
+let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists };
+let planned = plan(&stick, wanted, &owned, device)?;     // reads only; planned.report(), planned.is_noop()
+let report = apply(root, &planned, wanted)?;             // writes; then store planned.ownership
+```
+
+`pioneer_library::LocalLibrary::sync_usb_v2(root, name)` does this for the whole library and keeps the ownership in `PIONEER/fourfour-manifest.json` (new optional `v2` field). `multi_sync` still calls the old writer.
+
+`Ownership` is what fourfour wrote on this stick: track paths, playlist ids, and a fingerprint per track (analysis + cover). Everything else on the stick is **foreign** and is kept:
+
+- Foreign tracks stay in **both** databases with their ids and rows; their audio, analysis and cover files are never written or deleted. A Rekordbox stick with a full `export.pdb` and an empty OneLibrary gets a OneLibrary holding all tracks, theirs and ours (issue #41, write side). Cues of foreign tracks are filled into OneLibrary from the analysis files.
+- Foreign playlists and play histories stay, in their order; ours are placed after them.
+- If both databases have tracks and one has tracks the other lacks, `plan` refuses with a clear error and nothing is written.
+- Syncing nothing onto a stick we own nothing on writes nothing.
+- A wanted track whose path is already there as a foreign file is linked into our playlists and otherwise left alone (`AdoptedForeign`): not copied, not owned, never deleted.
+
+Rules for our own tracks:
+
+- Identity is the stick path. A matched track keeps its id, dates, rating and every field we do not set; a new track gets `highest id + 1` (ids of removed tracks are not reused). Our playlists keep their id by name and parent.
+- `Replace` when the file size differs, `Update` when the fingerprint or any row field differs (analysis and cover are rewritten, audio is not copied), else `Unchanged`. A changed cue or grid is therefore an `Update`. A stick taken over from the old sync has no fingerprints, so every track is updated once.
+- Names are compared exactly, in the databases and in the diff, so two spellings of an artist are two artists and nothing "updates" forever (issue #42).
+- Paths are made safe in one place (`paths.rs`): trailing dots and spaces are cut from every folder and file name, `? : * " < > | \` and control characters become `_`, Windows device names get a `_` in front, names are cut to 255 UTF-16 units keeping the extension, and two paths that differ only in letter case get ` (2)`, ` (3)` on the file name. The artist tag itself is not changed.
+- Removing: only our audio file, our `ANLZ0000.DAT/.EXT/.2EX` and our cover files; folders only when empty. Artist, album, genre and label rows go only when our removed tracks were their last users.
+- Order of writes: new files, then both databases, then deletions. There is no staging yet: a pulled stick can still leave a half-written database (slice 6).
+- The creation date of a stick is kept once set, and a track keeps its added date, so the databases do not change from day to day.
+
+Decision taken here, for Merlin to confirm: on a stick whose OneLibrary Rekordbox left empty, v2 fills OneLibrary with all tracks rather than only ours, so both databases always show the same stick.
+
+Tests: `pioneer-usb-writer/tests/stick_plan.rs` (12), `pioneer-library/tests/stick_sync_v2.rs` (3: fresh, takeover of an old-sync stick, Rekordbox-like stick), unit tests in `paths.rs`. Local with the real stick copy: adding 3 tracks gives 1267 in both databases, all 1264 foreign rows byte-identical, a second plan is a no-op.
 
 ## Dump and diff
 

@@ -40,11 +40,13 @@ pub struct StickManifest {
     pub files: Vec<OwnedFile>,
     #[serde(default)]
     pub last_sync: Option<LastSync>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v2: Option<pioneer_usb_writer::stick::plan::Ownership>,
 }
 
 impl StickManifest {
     fn fresh() -> Self {
-        Self { version: MANIFEST_VERSION, stick_id: new_stick_id(), files: Vec::new(), last_sync: None }
+        Self { version: MANIFEST_VERSION, stick_id: new_stick_id(), files: Vec::new(), last_sync: None, v2: None }
     }
 
     pub fn owns(&self, usb_path: &str) -> bool {

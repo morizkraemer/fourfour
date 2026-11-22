@@ -4,6 +4,8 @@ pub mod dump;
 pub mod emit;
 pub mod model;
 pub mod one_library;
+pub mod paths;
+pub mod plan;
 pub mod read;
 
 pub use model::{
